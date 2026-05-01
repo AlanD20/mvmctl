@@ -38,7 +38,7 @@ mvmctl/
 │   ├── services/        # Runtime subprocess services
 │   └── db/              # SQLite schema, migrations, and ORM models
 ├── docs/                # Project documentation
-├── tests/               # 69 test files
+├── tests/               # 121 test files (69 archived unit + 10 integration + 15 system + 6 layer_compliance + 1 core + 20 more)
 └── pyproject.toml       
 ```
 

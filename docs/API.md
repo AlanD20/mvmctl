@@ -49,6 +49,9 @@ from mvmctl.api import (
     CacheOperation,
     SSHOperation,
     InitOperation,
+    ConsoleOperation,
+    ConfigOperation,
+    LogOperation,
     # Input classes
     VMCreateInput,
     VMInput,
@@ -64,10 +67,14 @@ from mvmctl.api import (
     BinaryFetchInput,
     BinaryInput,
     SSHInput,
+    ConsoleInput,
+    LogInput,
     # Result types
     BinaryFetchResult,
     InitResult,
     InitStepResult,
+    ConsoleAttachInfo,
+    PruneAllResult,
 )
 ```
 
@@ -84,16 +91,19 @@ from mvmctl.api.vm_operations import VMOperation  # ❌ WRONG — internal modul
 
 | Operation Class | Responsibility |
 |---|---|
-| `VMOperation` | VM lifecycle: create, remove, list, inspect, start/stop, pause/resume, reboot, snapshot, export |
-| `NetworkOperation` | Network management: create, remove, list, inspect, IP allocation/release, reconcile, restore |
-| `ImageOperation` | Image operations: fetch, import, list, set default, remove, inspect, warm |
-| `KernelOperation` | Kernel operations: fetch, list, get, set default, remove, ensure default |
-| `KeyOperation` | SSH key registry: add, create, list, get, remove, set defaults, export |
-| `BinaryOperation` | Binary management: fetch, list local/remote, set active, remove, ensure default |
-| `HostOperation` | Host init/reset/clean/prune, privilege checks, KVM access |
-| `CacheOperation` | Cache lifecycle: init, prune per-asset-type, prune all |
-| `SSHOperation` | SSH connection |
-| `InitOperation` | Onboarding/init wizard API |
+| `VMOperation` | VM lifecycle: create, remove, import, export, list, inspect, get, start/stop, pause/resume, reboot, snapshot, load snapshot |
+| `NetworkOperation` | Network management: create, remove, list, get, inspect, set default, reconcile, restore, sync, create default |
+| `ImageOperation` | Image operations: fetch, import, list, get, set default, remove, inspect, warm |
+| `KernelOperation` | Kernel operations: fetch, list, get, inspect, set default, remove, ensure default |
+| `KeyOperation` | SSH key registry: add, create, list, get, remove, inspect, set defaults, get defaults, clear defaults, export |
+| `BinaryOperation` | Binary management: fetch, get, list local/remote, set default, remove (by id/version), ensure default |
+| `HostOperation` | Host init/reset/clean/prune, state retrieval, privilege checks, KVM access, running VMs |
+| `CacheOperation` | Cache lifecycle: init, prune per-asset-type, prune misc, prune all, clean |
+| `SSHOperation` | SSH connection to VMs |
+| `InitOperation` | Onboarding wizard: database, host, cache, binary setup |
+| `ConsoleOperation` | Console relay: attach, get state, kill |
+| `ConfigOperation` | User settings: get, set, reset, list all config overrides |
+| `LogOperation` | VM log streaming and retrieval |
 
 ---
 
@@ -115,16 +125,6 @@ class VMStatus(StrEnum):
     STOPPED = "stopped"
     CRASHED = "crashed"
     ERROR = "error"
-```
-
-#### `CloudInitMode`
-
-```python
-class CloudInitMode(StrEnum):
-    INJECT = "inject"   # Inject via libguestfs (filesystem-agnostic, default)
-    NET    = "net"      # Serve via HTTP (nocloud-net datasource)
-    OFF    = "off"      # No cloud-init
-    ISO    = "iso"      # Attach via nocloud-net ISO
 ```
 
 #### `VMInstanceItem`
@@ -221,6 +221,28 @@ Full inspection data for a VM.
 | `features` | `dict[str, bool]` | Flags: api_socket, console, nocloud_net |
 | `nocloud_net` | `dict[str, Any] \| None` | nocloud-net details |
 | `console` | `dict[str, Any] \| None` | Console details |
+
+### `mvmctl.models.cloudinit`
+
+#### `CloudInitMode`
+
+```python
+class CloudInitMode(StrEnum):
+    INJECT = "inject"   # Inject cloud-init files into rootfs via libguestfs (filesystem-agnostic)
+    NET    = "net"      # Serve cloud-init files via HTTP (nocloud-net datasource)
+    OFF    = "off"      # Skip cloud-init entirely (no ISO mounted)
+    ISO    = "iso"      # Generate cloud-init ISO from config files
+```
+
+#### `CloudInitStatus`
+
+```python
+class CloudInitStatus(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    DONE = "done"
+    ERROR = "error"
+```
 
 ### `mvmctl.models.network`
 
@@ -498,8 +520,12 @@ MVMError
 │   ├── KeyDependencyError
 │   └── KeyFileError
 ├── CloudInitError            — Cloud-init ISO creation failure
-├── CloudInitProvisionError   — Cloud-init provisioning failure
-├── CloudInitModeError        — Cloud-init mode failure
+│   ├── CloudInitProvisionError   — Cloud-init provisioning failure
+│   ├── CloudInitModeError        — Cloud-init mode failure
+│   ├── CloudInitOffModeError     — OFF mode guestfs provisioning failure
+│   ├── CloudInitIsoModeError     — ISO creation failure
+│   ├── CloudInitNetModeError     — Nocloud-net server or iptables rule failure
+│   └── CloudInitInjectModeError  — Rootfs cloud-init injection failure
 ├── VMCreateError             — VM creation failure (partial cleanup)
 ├── VMRequestError            — Error during VM request resolution
 ├── VMBuilderError            — VM builder failure (partial cleanup)
@@ -616,9 +642,13 @@ still running. Tears down TAP device, iptables rules, deregisters the VM.
 
 ---
 
-#### `VMOperation.list_all() -> list[VMInstanceItem]`
+#### `VMOperation.list_all(status: VMStatus | list[VMStatus] | None = None) -> list[VMInstanceItem]`
 
-Return all registered VMs.
+Return all registered VMs, optionally filtered by status.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `status` | `VMStatus \| list[VMStatus] \| None` | `None` | Filter by status(es); `None` returns all |
 
 ---
 
@@ -630,9 +660,16 @@ Look up a single VM by name, ID, IP, or MAC.
 
 ---
 
-#### `VMOperation.inspect(inputs: VMInput) -> VMInstanceItem`
+#### `VMOperation.inspect(inputs: VMInput, tree: bool = False) -> dict[str, Any]`
 
-Return full details for a VM. Currently delegates to `get()`.
+Return full details for a VM as a dictionary. When `tree=True`, returns nested
+groupings (vm, resources, networking, assets, filesystem, console). When `tree=False`
+(default), returns a flat dictionary with all fields.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `inputs` | `VMInput` | — | Must resolve to exactly one VM |
+| `tree` | `bool` | `False` | Use nested grouping for display |
 
 ---
 
@@ -695,26 +732,28 @@ Restore a VM from a snapshot.
 
 ---
 
-#### `VMOperation.cleanup(all_vms: bool = False, dry_run: bool = False) -> list[VMInstanceItem]`
+#### `VMOperation.export(inputs: VMInput) -> VMExportConfig`
 
-Clean up stale or all VMs.
+Export a VM's runtime configuration as a portable config object. Resolves the VM
+by any identifier (name, ID, IP, MAC) and queries the database for related asset metadata.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `all_vms` | `bool` | `False` | Clean up all VMs (not just stale) |
-| `dry_run` | `bool` | `False` | Show what would be done |
+| `inputs` | `VMInput` | — | Must resolve to exactly one VM |
+
+**Returns:** `VMExportConfig` with sub-configs for binary, boot, cloud-init, compute, firecracker, image, kernel, and network.
 
 ---
 
-#### `VMOperation.export(name: str) -> VMExportConfig`
+#### `VMOperation.import_(inputs: VMImportInput) -> None`
 
-Export a VM's runtime configuration as a portable config object.
+Create a VM from a portable export config file. Resolves all asset references
+against the database and creates a VM matching the exported configuration.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | `str` | VM name to export |
-
-**Returns:** `VMExportConfig` with sub-configs for binary, boot, cloud-init, compute, firecracker, image, kernel, and network.
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `inputs.config_path` | `Path` | — | Path to the export config YAML/JSON file |
+| `inputs.name_override` | `str \| None` | `None` | Override the VM name from the export file |
 
 ---
 
@@ -811,6 +850,19 @@ Restore all networks from DB after reboot (re-create bridges and NAT rules).
 
 ---
 
+#### `NetworkOperation.sync(network_id: str | None = None) -> dict[str, dict[str, int]]`
+
+Sync iptables rules for one or all networks. Ensures all active DB rules exist
+in host iptables and detects orphaned host rules.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `network_id` | `str \| None` | `None` | Specific network ID, or `None` for all networks |
+
+**Returns:** Dict mapping `network_id` → `{"added": int, "verified": int, "orphaned": int}`.
+
+---
+
 ### `ImageOperation`
 
 All methods are `@staticmethod`. Images are identified using `ImageInput` objects.
@@ -851,6 +903,7 @@ Import an existing local image file and register it in the database.
 | `inputs.set_default` | `bool` | `False` | Set this image as the default |
 | `inputs.partition` | `int \| None` | `None` | Partition number to extract |
 | `inputs.skip_optimization` | `bool` | `False` | Skip filesystem optimization |
+| `inputs.disabled_detectors` | `list[str]` | `[]` | Disabled partition detectors |
 
 ---
 
@@ -1228,18 +1281,29 @@ Prune unused binaries. Skips default version by default.
 
 #### `CacheOperation.prune_misc(dry_run: bool = False) -> dict[str, bool]`
 
-Prune miscellaneous cache: libguestfs appliance and warm images.
+Prune miscellaneous cache: libguestfs appliance, warm images, and stale guestfs state.
 
-**Returns:** Dict with `"appliance"` and `"warm_images"` booleans.
+**Returns:** Dict with `"appliance"`, `"warm_images"`, and `"guestfs_state"` booleans.
 
 ---
 
-#### `CacheOperation.prune_all(dry_run: bool = False, include_all: bool = False) -> dict[str, list[str] | bool]`
+#### `CacheOperation.prune_all(dry_run: bool = False, include_all: bool = False) -> PruneAllResult`
 
-Prune all cache resources in one call.
+Prune all cache resources in one call: VMs, networks, images, kernels, binaries, and misc.
 
-**Returns:** Dict with keys `vms`, `networks`, `images`, `kernels`, `binaries`,
-`appliance`, `warm_images`.
+**Returns:** `PruneAllResult` with `pruned_ids`, `failed_ids`, and `had_running_vms` fields.
+
+---
+
+#### `CacheOperation.clean(dry_run: bool = False) -> CleanResult`
+
+Completely clean all cache: host networking, prune everything, remove the cache directory.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `dry_run` | `bool` | `False` | Only report what would be removed |
+
+**Returns:** `CleanResult` with `prune_result` (PruneAllResult), `cache_dir_removed` (bool), and `cache_dir` (str path).
 
 ---
 
@@ -1257,6 +1321,7 @@ Open an interactive SSH session into a VM, or execute a command.
 | `inputs.cmd` | `str \| None` | `None` | Command to execute |
 | `inputs.ip` | `str \| None` | `None` | Direct IP address |
 | `inputs.name` | `str \| None` | `None` | VM name |
+| `inputs.mac` | `str \| None` | `None` | VM MAC address |
 
 **Returns:** Exit code from the SSH session.
 
@@ -1276,10 +1341,131 @@ Set up host configuration. Delegates to `HostOperation.init()`.
 
 ---
 
-#### `InitOperation.run_wizard() -> InitResult`
+#### `InitOperation.run(skip_host: bool = False, non_interactive: bool = False, *, sudo_completed: bool = False, download_version: str | None = None) -> InitResult`
 
 Run the full init wizard: local state → host setup → cache init → binary fetch.
-Returns `InitResult` with individual step results.
+Returns `InitResult` with per-step status. If a step needs user interaction,
+the corresponding `InitStepResult` has `needs_interaction=True`.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `skip_host` | `bool` | `False` | Skip the host privilege-setup step |
+| `non_interactive` | `bool` | `False` | Use defaults, skip all user prompts |
+| `sudo_completed` | `bool` | `False` | Host init was already done via `sudo mvm host init` |
+| `download_version` | `str \| None` | `None` | Specific binary version to download |
+
+---
+
+### `ConsoleOperation`
+
+All methods are `@staticmethod`.
+
+#### `ConsoleOperation.attach(identifier: str) -> ConsoleAttachInfo`
+
+Attach to a VM's console relay.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `identifier` | `str` | — | VM name, ID, MAC, or IP address |
+
+**Returns:** `ConsoleAttachInfo` with `socket_path`, `vm_name`, and `vm_id`.
+
+**Raises:** `MVMError` if the console relay is not running.
+
+---
+
+#### `ConsoleOperation.get_state(identifier: str) -> dict[str, Any]`
+
+Get the console relay state for a VM.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `identifier` | `str` | — | VM name, ID, MAC, or IP address |
+
+**Returns:** Dict with `running` (bool), `pid` (int|None), `socket_path` (str).
+
+---
+
+#### `ConsoleOperation.kill(identifier: str) -> bool`
+
+Kill the console relay process for a VM.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `identifier` | `str` | — | VM name, ID, MAC, or IP address |
+
+**Returns:** `True` if relay was stopped, `False` if it was not running.
+
+---
+
+### `ConfigOperation`
+
+All methods are `@staticmethod`.
+
+#### `ConfigOperation.get(category: str, key: str | None = None) -> Any | dict[str, Any] | None`
+
+Get a config override value.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `category` | `str` | — | Setting category (e.g. `"defaults.vm"`) |
+| `key` | `str \| None` | `None` | Setting key (e.g. `"vcpu_count"`). If `None`, returns all keys in the category. |
+
+**Returns:** The current override value, a dict of category keys when `key` is `None`, or `None` if not set.
+
+---
+
+#### `ConfigOperation.set(category: str, key: str, value: Any) -> None`
+
+Set a config override value.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `category` | `str` | — | Setting category |
+| `key` | `str` | — | Setting key |
+| `value` | `Any` | — | Value to set |
+
+---
+
+#### `ConfigOperation.reset(category: str | None = None, key: str | None = None, all_overrides: bool = False) -> int`
+
+Reset config override(s) back to defaults.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `category` | `str \| None` | `None` | Setting category. Optional when `all_overrides` is `True`. |
+| `key` | `str \| None` | `None` | Setting key. Optional for category-level reset. |
+| `all_overrides` | `bool` | `False` | Delete ALL overrides globally. |
+
+**Returns:** Number of overrides removed.
+
+---
+
+#### `ConfigOperation.list_all() -> dict[str, dict[str, Any]]`
+
+List all config categories and their current override values.
+
+**Returns:** Dict mapping category names to dicts of key-value overrides.
+
+---
+
+### `LogOperation`
+
+All methods are `@staticmethod`.
+
+#### `LogOperation.stream(inputs: LogInput) -> Generator[str]`
+
+Stream log lines for a VM. If `follow=True`, yields lines indefinitely.
+If `follow=False`, yields the last N lines then stops.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `inputs.identifier` | `str` | — | VM name, ID, MAC, or IP address |
+| `inputs.log_type` | `str \| None` | `None` | Log type (`"serial"`, `"firecracker"`, or `None` for both) |
+| `inputs.follow` | `bool` | `False` | Follow (tail -f) mode |
+| `inputs.lines` | `int \| None` | `None` | Number of lines to show |
+
+**Yields:** Log line strings.
 
 ---
 

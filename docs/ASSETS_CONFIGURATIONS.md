@@ -4,9 +4,12 @@ This document describes the three bundled YAML files that drive asset management
 `mvm`, how each field is interpreted at runtime, and how to extend them.
 
 All three files live under `src/mvmctl/assets/` and are packaged into the installed
-wheel. They are read-only at runtime — user overrides/default selections are resolved
-from runtime state (`~/.cache/mvmctl/metadata.json`) and `MVM_*` environment variables,
-not by editing these files directly.
+wheel. They are read-only at runtime — user overrides are resolved from runtime state
+(`~/.cache/mvmctl/metadata.json`) and `MVM_*` environment variables, not by editing
+these files directly. Images and
+kernels remain as `images.yaml` and `kernels.yaml` respectively. User overrides/default
+selections are resolved from runtime state (`~/.cache/mvmctl/metadata.json`) and
+`MVM_*` environment variables, not by editing these files directly.
 
 ---
 
@@ -14,7 +17,7 @@ not by editing these files directly.
 
 - [images.yaml](#imagesyaml)
 - [kernels.yaml](#kernelsyaml)
-- [defaults.yaml](#defaultsyaml)
+- [Runtime defaults (constants.py)](#runtime-defaults-constantspy)
 - [Configuration priority](#configuration-priority)
 - [Adding a new image](#adding-a-new-image)
 - [Constants reference](#constants-reference)
@@ -24,7 +27,7 @@ not by editing these files directly.
 ## images.yaml
 
 **Path:** `src/mvmctl/assets/images.yaml`
-**Consumed by:** `mvm image fetch`, `mvm image ls --remote`, `api.assets.pull_image()`
+**Consumed by:** `mvm image fetch`, `mvm image ls --remote`, `core.image._service.ImageService`
 
 Defines the catalogue of rootfs images available via `mvm image fetch <id>`.
 
@@ -33,13 +36,14 @@ Defines the catalogue of rootfs images available via `mvm image fetch <id>`.
 ```yaml
 images:
   - id: <string>            # unique identifier used on the CLI
+    type: <string>          # OS family (ubuntu, debian, alpine, etc.)
+    version: <string>       # OS version string
     name: <string>          # human-readable display name
     source: <url>           # download URL; may be a template (see below)
     format: <string>        # source file format (see Format types)
-    convert_to: <string>    # target filesystem type written to disk
-    minimum_rootfs_size: <int>  # image size in MiB allocated during conversion
     sha256: <hex|null>      # expected SHA-256 of the downloaded file, or null
     sha256_url: <url|null>  # (informational) upstream checksum URL
+    list_url_template: <url|null>  # S3 listing template (for template sources only)
 ```
 
 ### Field reference
@@ -50,23 +54,21 @@ images:
 | `name` | ✅ | Human-readable label shown in `mvm image ls`. |
 | `source` | ✅ | Download URL. Either a concrete URL or a **template URL** (see [Template sources](#template-sources)). |
 | `format` | ✅ | Format of the downloaded file. See [Format types](#format-types). |
-| `convert_to` | ✅ | Filesystem type produced after conversion (`ext4`, `btrfs`). Becomes the file extension of the stored image. |
-| `minimum_rootfs_size` | ✅ | Allocated image size in MiB. Used as the `truncate` / `mkfs` size during conversion. Falls back to `image.defaults.import_size_mib` in `defaults.yaml` when omitted. |
-| `sha256` | — | Exact SHA-256 hex digest of the downloaded file. When `null`, checksum verification is **skipped** and the file is downloaded without integrity checking. When set, the download is rejected if the digest does not match. |
-| `sha256_url` | — | Informational field pointing to the upstream checksum page. Not used by the fetch logic — present solely as a reference for maintainers. |
+| `type` | — | OS family / distribution type (`ubuntu`, `debian`, `alpine`, `archlinux`, `firecracker`). |
+| `version` | — | OS version string (`24.04`, `12`, `3.21`, `latest`). |
+| `sha256` | — | Exact SHA-256 hex digest of the downloaded file. When `null`, the checksum is fetched from `sha256_url`. When set, the download is rejected if the digest does not match. |
+| `sha256_url` | — | Upstream checksum URL. When `sha256` is `null`, the fetch logic downloads this file to extract the matching digest. |
+| `list_url_template` | — | S3 listing URL template for template-based sources (see [Template sources](#template-sources)). |
 
 ### SHA-256 semantics
 
 ```
 sha256: <hex>    → download verified against this exact digest
-sha256: null     → no checksum check; file is downloaded as-is
+sha256: null     → checksum fetched from `sha256_url` (sidecar file)
 ```
 
-Setting `sha256: null` is appropriate when:
-
-- The source is a rolling release URL whose content changes over time (e.g. `latest/` paths).
-- The upstream does not provide a stable per-file digest.
-- A template source is used whose resolved URL changes between Firecracker releases.
+Setting `sha256: null` requires a valid `sha256_url` field. The fetch logic will
+download the checksum file and extract the matching digest for the downloaded asset.
 
 ### Format types
 
@@ -76,6 +78,7 @@ Setting `sha256: null` is appropriate when:
 | `tar-rootfs` | Tar archive of a root filesystem | `mkfs.ext4` + `tar -xf` into a fresh image |
 | `raw` | Raw disk image | Root partition extracted directly |
 | `squashfs` | SquashFS filesystem image | `unsquashfs` → `mkfs.ext4 -d` |
+| `vhd` | Microsoft VHD image | `qemu-img convert` → raw → root partition extracted |
 
 ### Template sources
 
@@ -91,26 +94,29 @@ Resolution works as follows:
 
 1. The active Firecracker CI version is read from the default binary entry in
    `~/.cache/mvmctl/metadata.json` (`binaries.*.ci_version` where `is_default=1`),
-   falling back to `FALLBACK_FC_CI_VERSION` from `defaults.yaml`.
+   falling back to `DEFAULT_FIRECRACKER_CI_VERSION` (resolved from the
+   `OVERRIDABLE_DEFAULTS` dict in `constants.py`).
 2. The host architecture is detected via `platform.machine()`, falling back to
-   `kernel.defaults.arch`.
-3. The S3 bucket defined by `urls.firecracker_ci_image.list_url_template` is queried
-   to list all matching objects for that version and architecture.
+   `defaults.kernel.arch` in `OVERRIDABLE_DEFAULTS`.
+3. The `list_url_template` field in the image's YAML entry is queried to list all
+   matching S3 objects for that version and architecture.
 4. The latest matching entry (lexicographic sort) is selected as the concrete download
-   URL, rooted at `urls.firecracker_ci_kernel.s3_base`.
+   URL, combining the S3 base with the key from the listing.
 
 Any image entry whose `source` contains `{` triggers this path automatically — no
 special `id` value or `format` is required.
 
 ### Current images
 
-| ID | Name | Format | Filesystem | Size |
-|----|------|--------|------------|------|
-| `ubuntu-24.04` | Ubuntu 24.04 LTS (Noble) | `tar-rootfs` | ext4 | 2048 MiB |
-| `ubuntu-22.04` | Ubuntu 22.04 LTS (Jammy) | `tar-rootfs` | ext4 | 2048 MiB |
-| `archlinux` | Arch Linux | `qcow2` | btrfs | 4096 MiB |
-| `debian-bookworm` | Debian 12 (Bookworm) | `qcow2` | ext4 | 2048 MiB |
-| `ubuntu-fc` | Ubuntu (Firecracker CI) | `squashfs` | ext4 | 1024 MiB |
+| ID | Name | Format | Type |
+|----|------|--------|------|
+| `ubuntu-24.04` | Ubuntu 24.04 LTS (Noble) | `tar-rootfs` | ubuntu |
+| `ubuntu-24.04-minimal` | Ubuntu 24.04 Minimal | `tar-rootfs` | ubuntu |
+| `ubuntu-22.04` | Ubuntu 22.04 LTS (Jammy) | `tar-rootfs` | ubuntu |
+| `archlinux` | Arch Linux | `qcow2` | archlinux |
+| `debian-bookworm` | Debian 12 (Bookworm) | `qcow2` | debian |
+| `ubuntu-fc` | Ubuntu (Firecracker CI) | `squashfs` | firecracker |
+| `alpine-3.21` | Alpine Linux 3.21 | `vhd` | alpine |
 
 ---
 
@@ -177,7 +183,7 @@ kernel-firecracker:
 | `config_fragments` | Paths or URLs to additional kernel config files merged on top of the base config. |
 | `output_name` | Base filename for the compiled or downloaded `vmlinux` binary in the kernels cache. |
 | `build_dir` | Working directory for the kernel compilation. Cleaned up automatically unless `--keep-build-dir` is passed. |
-| `parallel_jobs` | `make -j` value. `null` defers to `FALLBACK_KERNEL_BUILD_JOBS` (defaults to 1). |
+| `parallel_jobs` | `make -j` value. `null` defers to `defaults.kernel.build_jobs` (default: 4). |
 | `enabled_configs` | List of kernel `CONFIG_*` options passed to `scripts/config --enable`. |
 | `disabled_configs` | List of kernel `CONFIG_*` options passed to `scripts/config --disable`. |
 | `set_val_configs` | List of `{option, value}` pairs passed to `scripts/config --set-val`. |
@@ -185,71 +191,42 @@ kernel-firecracker:
 
 ---
 
-## defaults.yaml
+## Runtime defaults (constants.py)
 
-**Path:** `src/mvmctl/assets/defaults.yaml`
-**Consumed by:** `constants.py` at import time — every value is read once, validated,
-and exposed as a typed module-level constant.
+**Location:** `src/mvmctl/constants.py` — `OVERRIDABLE_DEFAULTS` dict
 
-This file is the **single authoritative source** for all built-in defaults. Hardcoded
+This dict is the **single authoritative source** for all built-in defaults. Hardcoded
 values anywhere else in the codebase are a bug.
 
 ### Structure overview
 
 ```
-firecracker:            Firecracker binary paths and version strings
-vm_defaults:            Default vCPU count, RAM, SSH user, boot args, etc.
-network.defaults:       Default bridge name, CIDR, gateway
-vm.files:               Kernel and rootfs filenames inside a VM bundle
-vm.logging:             Default log type/lines/follow behaviour
-vm.snapshot:            Default snapshot resume behaviour
-vm.limits:              Hard cap on simultaneous VMs
-image.defaults:         Default convert_to, import format, supported extensions
-image.remote:           Parallel download limits
-host:                   Privileged binaries and system file paths
-kernel.defaults:        Default kernel version and architecture
-fallbacks:              Last-resort values when config lookup fails
-urls:                   All external URL templates used by mvm
+defaults.vm:            Default vCPU count, RAM, SSH user, boot args, LSM flags, etc.
+defaults.network:       Default bridge name, CIDR, NAT enabled
+defaults.image:         Default architecture
+defaults.kernel:        Default kernel version, architecture, build_jobs
+defaults.firecracker:   Log filenames, socket filenames, log level
+defaults.cloudinit:     ISO name, nocloud-net port range
+defaults.binary:        Remote version limit for bin ls
+settings.vm:            Log lines, log follow, max_vms
 ```
 
-### `image.defaults`
+Additional (non-dict) constants are defined inline for HTTP timeouts, URLs, file permissions,
+and other fixed values.
+
+### `defaults.kernel`
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `convert_to` | `ext4` | Filesystem type used when converting a downloaded image |
-| `import_format` | `auto` | Source format assumed during `mvm image import` |
-| `import_size_mib` | `2048` | Allocated size in MiB for images whose YAML entry omits `minimum_rootfs_size` |
-| `supported_extensions` | `.ext4 .btrfs .img .raw` | File extensions scanned when looking up a locally cached image |
-| `import_format_map` | (extension → format) | Auto-detection table used when `import_format: auto` is set |
+| `version` | `6.19.9` | Default kernel version |
+| `arch` | `x86_64` | Default architecture |
+| `build_jobs` | `4` | Parallel compilation jobs (`make -j`) |
 
-### `urls`
+### Related constants
 
-All outbound URLs are centralised here. No URL strings appear anywhere else in the
-source code.
-
-| Key path | Description |
-|----------|-------------|
-| `urls.firecracker.github_releases_api` | GitHub API endpoint for Firecracker release metadata |
-| `urls.firecracker.github_download_base` | Base URL for Firecracker release asset downloads |
-| `urls.firecracker.github_raw_base` | Base URL for raw file access in the Firecracker repository |
-| `urls.firecracker_ci_kernel.s3_base` | S3 base URL for all Firecracker CI artifacts (`https://s3.amazonaws.com/spec.ccfc.min`) |
-| `urls.firecracker_ci_kernel.list_url_template` | S3 listing URL template for Firecracker CI **kernels**; placeholders: `{ci_version}`, `{arch}` |
-| `urls.firecracker_ci_image.list_url_template` | S3 listing URL template for Firecracker CI **images**; placeholders: `{ci_version}`, `{arch}` |
-| `urls.firecracker_kernel.config_url_template` | URL template for the recommended Firecracker kernel `.config`; placeholder: `{major_minor}` |
-| `urls.kernel.tarball_template` | kernel.org tarball URL; placeholder: `{version}` |
-| `urls.kernel.sha256_template` | kernel.org SHA-256 file URL; placeholder: `{version}` |
-
-### `fallbacks`
-
-Last-resort runtime values used when the user config file is absent or incomplete.
-Unlike `vm_defaults`, these are never surfaced to the user directly.
-
-| Key | Value | Used when |
-|-----|-------|-----------|
-| `fc_ci_version` | `1.15` | Active Firecracker CI version cannot be read from config |
-| `firecracker_bin` | `firecracker` | Firecracker binary path is not configured |
-| `kernel_build_jobs` | `1` | Parallel jobs not set in kernels.yaml |
-| `max_parallel_downloads` | `4` | Worker limit for `fetch_images_parallel` |
+| Constant | Source | Description |
+|----------|--------|-------------|
+| `DEFAULT_FIRECRACKER_CI_VERSION` | `fallbacks.fc_ci_version` (from old `_defaults.py`) | CI version used when config lookup fails — resolves to `v1.15` at runtime |
 
 ---
 
@@ -258,7 +235,7 @@ Unlike `vm_defaults`, these are never surfaced to the user directly.
 Values are resolved in this order, from lowest to highest precedence:
 
 ```
-1. defaults.yaml (fallback defaults — these are the floor)
+1. `OVERRIDABLE_DEFAULTS` dict in `constants.py` (fallback defaults — these are the floor)
 2. Runtime state files:
    - `~/.config/mvmctl/config.json` for general config and assets paths
    - `~/.cache/mvmctl/metadata.json` for image/kernel/binary defaults (`is_default`)
@@ -280,12 +257,12 @@ To register a new rootfs image that can be fetched via `mvm image fetch`:
 
 ```yaml
 - id: fedora-40                              # must be unique, no spaces
+  type: fedora                               # OS family
+  version: "40"                              # OS version
   name: "Fedora 40 (Cloud)"
   source: https://example.com/fedora-40-cloudimg.qcow2
   format: qcow2
-  convert_to: ext4
-  minimum_rootfs_size: 4096
-  sha256: null                               # null = no checksum check
+  sha256: null                               # null = checksum fetched from sha256_url
   sha256_url: https://example.com/fedora-40-CHECKSUM
 ```
 
@@ -303,16 +280,15 @@ use `{placeholder}` tokens in `source`:
 - id: my-dynamic-image
   name: "My Dynamic Image"
   source: "https://s3.example.com/{ci_version}/{arch}/my-image.squashfs"
+  list_url_template: "http://s3.example.com/?prefix={ci_version}/{arch}/my-image&list-type=2"
   format: squashfs
-  convert_to: ext4
-  minimum_rootfs_size: 1024
   sha256: null
   sha256_url: null
 ```
 
 Any `source` value containing `{` is automatically treated as a template and passed to
-the dynamic resolver at fetch time. Make sure `urls.firecracker_ci_image.list_url_template`
-in `defaults.yaml` points to the correct S3 listing endpoint for the chosen prefix.
+the dynamic resolver at fetch time. Make sure `list_url_template` is provided for
+template-based entries so the dynamic resolver can find the correct S3 listing endpoint.
 
 **3. Verify the new entry is visible:**
 
@@ -330,34 +306,28 @@ uv run mvm image fetch <your-new-id>
 
 ## Constants reference
 
-`constants.py` reads `defaults.yaml` at import time and exposes every value as a typed
-`Final` constant. The table below lists the constants relevant to asset management.
+`constants.py` stores runtime defaults in the `OVERRIDABLE_DEFAULTS` dict and
+exposes both inline constants and lazily-resolved values. The table below lists
+the constants relevant to asset management.
 
 | Constant | Source key | Description |
 |----------|------------|-------------|
-| `DEFAULT_IMAGE_CONVERT_TO` | `image.defaults.convert_to` | Default filesystem type for image conversion |
-| `DEFAULT_IMAGE_IMPORT_FORMAT` | `image.defaults.import_format` | Default source format for `mvm image import` |
-| `DEFAULT_IMAGE_IMPORT_SIZE_MIB` | `image.defaults.import_size_mib` | Fallback image size when `minimum_rootfs_size` is absent in YAML |
-| `SUPPORTED_IMAGE_EXTENSIONS` | `image.defaults.supported_extensions` | File extensions scanned for cached images |
-| `IMAGE_IMPORT_FORMAT_MAP` | `image.defaults.import_format_map` | Extension → format auto-detection table |
-| `DEFAULT_REMOTE_VERSION_LIMIT` | `image.remote.version_limit` | Max remote versions shown by `mvm bin ls --remote` |
-| `FALLBACK_MAX_PARALLEL_DOWNLOADS` | `fallbacks.max_parallel_downloads` | Default worker count for parallel image fetches |
-| `DEFAULT_KERNEL_VERSION` | `kernel.defaults.version` | Default version for `mvm kernel fetch --type official` |
-| `DEFAULT_KERNEL_ARCH` | `kernel.defaults.arch` | Default architecture for kernel operations |
-| `FALLBACK_KERNEL_BUILD_JOBS` | `fallbacks.kernel_build_jobs` | Default `make -j` value when not specified |
-| `KERNEL_TARBALL_URL_TEMPLATE` | `urls.kernel.tarball_template` | kernel.org tarball URL; fill `{version}` |
-| `KERNEL_SHA256_URL_TEMPLATE` | `urls.kernel.sha256_template` | kernel.org SHA-256 URL; fill `{version}` |
+| `DEFAULT_KERNEL_VERSION` | `defaults.kernel.version` | Default version for `mvm kernel fetch --type official` |
+| `DEFAULT_KERNEL_ARCH` | `defaults.kernel.arch` | Default architecture for kernel operations |
+| `DEFAULT_IMAGE_ARCH` | `defaults.image.arch` | Default architecture for image operations |
+| `DEFAULT_FIRECRACKER_CI_VERSION` | runtime-resolved | CI version used when config lookup fails |
+| `SUPPORTED_IMAGE_EXTENSIONS` | inline constant | File extensions scanned for cached images |
+| `IMAGE_IMPORT_FORMAT_MAP` | inline constant | Extension → format auto-detection table |
+| `HTTP_TIMEOUT_KERNEL_DOWNLOAD_S` | inline constant | Timeout (seconds) for kernel tarball download |
+| `HTTP_TIMEOUT_KERNEL_CONFIG_S` | inline constant | Timeout for kernel config download |
+| `HTTP_TIMEOUT_SHA256_FETCH_S` | inline constant | Timeout for SHA-256 checksum fetch |
+| `FIRECRACKER_GITHUB_RELEASES_API_URL` | inline constant | GitHub API endpoint for Firecracker releases |
+| `FIRECRACKER_GITHUB_DOWNLOAD_URL` | inline constant | Base URL for Firecracker release assets |
 
 > **Note:** The kernel config lists (`enabled_configs`, `disabled_configs`, `set_val_configs`,
 > `required_settings`) are defined per-kernel in `kernels.yaml`, not as module-level constants.
-> Load them at runtime via `core.kernel.load_kernel_spec("kernel-official")`, which returns a
-> fully typed `KernelSpec` dataclass.
-| `FIRECRACKER_CI_KERNEL_S3_BASE` | `urls.firecracker_ci_kernel.s3_base` | S3 base URL for all Firecracker CI artifacts |
-| `FIRECRACKER_CI_KERNEL_LIST_URL` | `urls.firecracker_ci_kernel.list_url_template` | S3 listing template for CI kernels; fill `{ci_version}`, `{arch}` |
-| `FIRECRACKER_CI_IMAGE_LIST_URL` | `urls.firecracker_ci_image.list_url_template` | S3 listing template for CI images; fill `{ci_version}`, `{arch}` |
-| `FALLBACK_FC_CI_VERSION` | `fallbacks.fc_ci_version` | CI version used when config lookup fails |
-| `DEFAULT_FIRECRACKER_VERSION` | `firecracker.versions.full` | Default Firecracker binary version |
-| `DEFAULT_FIRECRACKER_CI_VERSION` | `firecracker.versions.ci` | Default Firecracker CI version for kernel/image downloads |
+> Load them at runtime via `ImageService.load_available_images()` or by reading `kernels.yaml`
+> through `AssetManager`.
 
 ---
 

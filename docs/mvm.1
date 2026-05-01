@@ -37,9 +37,6 @@ List running and stopped VMs.
 .BR vm\ ps
 List running VMs (alias for ls).
 .TP
-.BR vm\ prune
-Remove stopped VMs and stale directories.
-.TP
 .BR vm\ snapshot
 Snapshot VM memory and disk state.
 .TP
@@ -48,12 +45,6 @@ Load VM from snapshot.
 .TP
 .BR vm\ inspect
 Show detailed information about a VM.
-.TP
-.BR vm\ ssh
-SSH into a VM.
-.TP
-.BR vm\ logs
-View VM logs (boot or Firecracker process logs).
 .SS Host Configuration
 .TP
 .BR host\ init
@@ -104,7 +95,7 @@ List local Firecracker versions.
 .BR bin\ fetch
 Download a specific Firecracker release.
 .TP
-.BR bin\ set-default
+.BR bin\ default
 Set the active Firecracker version.
 .TP
 .BR bin\ rm
@@ -122,6 +113,12 @@ List all networks.
 .TP
 .BR network\ inspect
 Show network details and IP leases.
+.TP
+.BR network\ set-default
+Set a network as the default for VM creation.
+.TP
+.BR network\ sync
+Sync iptables rules between database and host.
 .SS SSH Key Management
 .TP
 .BR key\ ls
@@ -139,6 +136,9 @@ Remove a key from the cache.
 .BR key\ set-default
 Set one or more keys as defaults for new VMs.
 .TP
+.BR key\ inspect
+Show detailed information about a key.
+.TP
 .BR key\ export
 Export a key to ~/.ssh or a custom directory.
 .SS Cache Management
@@ -148,13 +148,16 @@ Initialize cache directories.
 .TP
 .BR cache\ prune
 Prune stale cache entries (VMs, networks, images, kernels).
+.TP
+.BR cache\ clean
+Completely clean all cache — prune everything, host clean, remove cache dir.
 .SS Other Commands
 .TP
 .BR console
 VM console access (PTY-over-vsock relay).
 .TP
 .BR config
-Configuration management (get, set, show, validate).
+Configuration management (get, set, list, reset).
 .TP
 .BR init
 Initialize mvm (guided setup wizard).
@@ -164,9 +167,6 @@ VM SSH access.
 .TP
 .BR logs
 VM log management.
-.TP
-.BR clear
-Clear cached assets.
 .TP
 .BR version
 Show version and exit.
@@ -221,8 +221,8 @@ Create and start a VM:
 .RS
 .nf
 $ mvm vm create --name myvm --image ubuntu-24.04
-$ mvm vm logs --name myvm --type boot --follow
-$ mvm vm ssh --name myvm
+$ mvm logs myvm --follow
+$ mvm ssh --name myvm
 .fi
 .RE
 .PP

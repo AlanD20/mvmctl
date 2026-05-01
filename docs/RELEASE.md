@@ -241,7 +241,7 @@ git checkout -b hotfix/v1.2.4 v1.2.3
 # Make the fix
 # ...
 
-# Bump the patch version in pyproject.toml and src/mvm/__init__.py
+# Bump the patch version in pyproject.toml and src/mvmctl/__init__.py
 # e.g., 1.2.3 -> 1.2.4
 
 # Commit, tag, and push

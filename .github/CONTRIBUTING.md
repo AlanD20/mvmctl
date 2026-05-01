@@ -32,21 +32,45 @@ This creates a `.venv/` directory and installs everything there. You don't need 
 ```
 mvmctl/
 ├── src/mvmctl/
-│   ├── api/          # Public Python API (vms.py, host.py, assets.py, network.py, keys.py)
-│   ├── cli/          # Typer command groups (vm.py, network.py, key.py, asset.py, host.py)
-│   ├── core/         # Business logic (vm_lifecycle.py, network_manager.py, etc.)
-│   ├── models/       # Dataclass models (VMInstance, VMConfig, ImageSpec)
-│   ├── utils/        # Shared helpers (fs.py, console.py, process.py)
-│   ├── assets/       # Bundled YAML configs (images.yaml, kernels.yaml, defaults.yaml)
+│   ├── api/          # Public Python API — orchestration entry points
+│   │   ├── vm_operations.py, network_operations.py, host_operations.py
+│   │   ├── image_operations.py, kernel_operations.py, binary_operations.py
+│   │   ├── key_operations.py, console_operations.py, logs_operations.py
+│   │   ├── cache_operations.py, config_operations.py, ssh_operations.py
+│   │   ├── init_operations.py
+│   │   └── inputs/   # Request schema factory
+│   ├── cli/          # Typer command groups (thin — no business logic)
+│   │   ├── vm.py, network.py, host.py, image.py, kernel.py, bin.py
+│   │   ├── key.py, console.py, logs.py, cache.py, config.py
+│   │   ├── ssh.py, init.py
+│   ├── core/         # Isolated domain logic (no cross-domain imports)
+│   │   ├── vm/       # _controller.py, _service.py, _repository.py, _resolver.py, _firecracker.py
+│   │   ├── network/  # _controller.py, _service.py, _repository.py, _resolver.py, _lease_service.py, _lease_resolver.py
+│   │   ├── host/     # _controller.py, _service.py, _repository.py, _helper.py
+│   │   ├── image/    # _controller.py, _service.py, _repository.py, _resolver.py
+│   │   ├── kernel/   # _controller.py, _service.py, _repository.py, _resolver.py
+│   │   ├── key/      # _controller.py, _service.py, _repository.py, _resolver.py
+│   │   ├── binary/   # _controller.py, _service.py, _repository.py, _resolver.py
+│   │   ├── config/   # _service.py, _repository.py, _constraints.py
+│   │   ├── console/  # _controller.py
+│   │   ├── ssh/      # _service.py
+│   │   ├── cloudinit/ # _provisioner.py, _manager.py
+│   │   ├── logs/     # _controller.py, _service.py
+│   │   └── _shared/  # Shared infra: _db.py (Database), _asset_manager.py, _iptables_tracker/, _guestfs/, etc.
+│   ├── models/       # Pure @dataclass models (VMInstanceItem, NetworkItem, ImageSpec, FirecrackerConfig, etc.)
+│   ├── utils/        # Shared helpers (fs.py, _system.py, http.py, network.py, crypto.py, template.py, yaml.py, etc.)
+│   ├── assets/       # Bundled YAML configs (images.yaml, kernels.yaml) + JSON templates (firecracker.template.json, cloud-init.template.yaml)
 │   └── services/     # Runtime subprocess services (console_relay, nocloud_server)
 ├── tests/
-│   ├── unit/         # Pure unit tests (no root, no KVM) — 54 files
-│   └── integration/  # Workflow tests — 7 files
+│   ├── integration/      # Workflow tests — 8 files
+│   ├── system/           # Full-stack tests (KVM/root not required) — 13 files
+│   ├── layer_compliance/  # Architecture constraint verification — 5 files
+│   └── core/_shared/     # Core infra tests — 1 file
 ├── pyproject.toml
 └── README.md
 ```
 
-Three tiers: `cli/` stays thin (arg parsing + output). `api/` is the stable public interface. `core/` holds business logic. CLI modules call into `api/`, not `core/` directly.
+Three-tier architecture: **CLI → API → Core**. `cli/` stays thin (arg parsing + output). `api/` is the stable public interface and sole orchestrator of core modules. `core/` holds isolated domain logic in subdirectories. CLI modules call into `api/`, never `core/` directly.
 
 ## Running Tests
 
@@ -55,16 +79,16 @@ Three tiers: `cli/` stays thin (arg parsing + output). `api/` is the stable publ
 uv run pytest tests/ -v
 
 # Run a specific file
-uv run pytest tests/unit/test_vm_manager.py -v
+uv run pytest tests/integration/test_vm_lifecycle.py -v
 
 # Run tests matching a name pattern
 uv run pytest tests/ -v -k "test_create"
 
 # Run with coverage
-uv run pytest tests/ --cov=src/mvm --cov-report=term-missing
+uv run pytest tests/ -v --cov-report=term-missing
 ```
 
-Unit tests don't need root or KVM. Integration tests might — check their docstrings.
+Tests don't need root or KVM. Integration and system tests mock all subprocess calls — check their docstrings.
 
 ## Code Style
 
@@ -96,14 +120,16 @@ All code should pass ruff with no errors. mypy is configured with `--strict`; ne
        name: str = typer.Option(..., "--name", help="VM name"),
    ) -> None:
        """Short description shown in --help."""
-       manager = get_vm_manager()
-       result = manager.do_thing(name)
+       from mvmctl.api import VMOperation, VMCreateInput
+
+       result = VMOperation.create(VMCreateInput(name=name, ...))
        console.print(result)
    ```
-3. Put the actual logic in the corresponding `core/` module.
-4. Add a test in `tests/unit/`.
+3. Put the actual business logic in a `core/{domain}/` module and orchestrate it through the corresponding `api/{domain}_operations.py`.
+4. Add a test in `tests/integration/` or `tests/system/`.
 
-For entirely new command groups, create both `src/mvmctl/cli/mygroup.py` and register the Typer app in `src/mvmctl/cli/__init__.py` or `main.py`.
+For entirely new command groups, create a `src/mvmctl/cli/mygroup.py` Typer app and register it in
+`src/mvmctl/main.py` in the `_COMMAND_SPECS` dict (following the `"vm": _LazyCommandSpec(...)` pattern).
 
 ## Adding a New Image Type
 
@@ -111,7 +137,7 @@ Image specifications are defined in YAML config files and loaded using the `Imag
 (`src/mvmctl/models/image.py`). Each entry describes where to download an image, its source
 format, and how to convert it for use with Firecracker.
 
-**Supported source formats** (handled by `_FORMAT_HANDLERS` in `src/mvmctl/core/image.py`):
+**Supported source formats** (handled by `ImageService._process_format()` in `src/mvmctl/core/image/_service.py`):
 
 - `qcow2` — QEMU copy-on-write image; converted to raw with `qemu-img`, then the root
   partition is extracted.
@@ -134,31 +160,29 @@ format, and how to convert it for use with Firecracker.
        sha256: "abc123..."   # optional but recommended
    ```
 
-3. Confirm the `format` value has a corresponding handler in `_FORMAT_HANDLERS` in
-   `src/mvmctl/core/image.py`. If you need a new format, add a handler function and register
-   it in that dict.
-4. Add tests in `tests/unit/` covering the new handler or any conversion logic.
+3. Confirm the `format` value is handled in `ImageService._process_format()` in
+   `src/mvmctl/core/image/_service.py`. If you need a new format, add a handler method
+   following the `_handle_<format>` pattern.
+4. Add tests in `tests/integration/` or `tests/system/` covering the new handler or any conversion logic.
 
 ## Adding a Test
 
-Tests live in `tests/unit/` for pure logic and `tests/integration/` for anything touching the filesystem or system calls.
+Tests live in `tests/integration/` for workflow coverage and `tests/system/` for full-stack testing.
 
 ```python
-# tests/unit/test_my_feature.py
+# tests/integration/test_my_feature.py
 import pytest
-from mvmctl.core.my_module import MyClass
+from mvmctl.api import VMOperation, VMCreateInput
 
 
 def test_something_works() -> None:
-    obj = MyClass(config={"key": "value"})
-    result = obj.do_thing()
-    assert result == expected_value
+    result = VMOperation.create(VMCreateInput(name="test-vm", ...))
+    assert result.success
 
 
 def test_something_fails_gracefully() -> None:
-    obj = MyClass(config={})
-    with pytest.raises(ValueError, match="config key missing"):
-        obj.do_thing()
+    with pytest.raises(ValueError, match="invalid input"):
+        VMOperation.create(VMCreateInput(name="", ...))
 ```
 
 Use `pytest.fixture` for shared setup. Keep unit tests fast; avoid `sleep()` or network calls.
@@ -167,7 +191,7 @@ Use `pytest.fixture` for shared setup. Keep unit tests fast; avoid `sleep()` or 
 
 - **Tests must not require root, KVM, or a real network.** Mock all subprocess calls.
 - **Coverage gate:** 80% branch coverage minimum. Dropping coverage will fail CI.
-- **Architecture layers:** `cli/` → `api/` → `core/` — no skipping layers. See [`AGENTS.md`](AGENTS.md) for the full architecture reference.
+- **Architecture layers:** `cli/` → `api/` → `core/` — three-tier, no skipping layers. `api/` is the only layer that imports multiple core domains. Core domains are isolated — never import one domain from another. See [`AGENTS.md`](AGENTS.md) for the full architecture reference.
 - **No hardcoded defaults** — use `FALLBACK_*` constants in `constants.py`.
 - **Strict mypy** — no `type: ignore` suppressions.
 - One feature or fix per PR; write a clear description of *why*, not just *what*.
@@ -228,7 +252,7 @@ The project name is defined once in `pyproject.toml` under `[project] name`. Cha
 - The cache directory name (`~/.cache/mvmctl/`)
 - The network device prefixes (`mvm-br0`, `fc-<name>-0`)
 
-To rename the project, update `pyproject.toml` and re-run the PyInstaller command with `--name <new-name>`. No grep-and-replace needed.
+To rename the project, update `pyproject.toml` and rebuild with Nuitka/PyInstaller using `--output-filename <new-name>` or `--name <new-name>`. No grep-and-replace needed.
 
 ### Working with libguestfs (direct cloud-init mode)
 
@@ -303,14 +327,15 @@ Rather than requiring `sudo` for every command, mvm uses a privilege delegation 
    - `/usr/sbin/iptables`, `/usr/sbin/iptables-restore`, `/usr/sbin/iptables-save`
    - `/usr/sbin/sysctl` (procps)
 
-3. **`check_privileges(binary)`** (in `mvmctl.api.host`) verifies that the current user
-   can invoke a given binary with elevated privileges. It checks:
+3. **`HostPrivilegeHelper.check_privileges(binary, description)`** (in `src/mvmctl/core/host/_helper.py`)
+   verifies that the current user can invoke a given binary with elevated privileges. It checks:
    - The binary exists on the host.
    - The user is either root or a member of the `mvm` group.
-   Raises `PrivilegeError` (a subclass of `HostError`) on failure.
+   Raises `PrivilegeError` (a subclass of `HostError`) on failure. Called from `api/host_operations.py`.
 
-4. **Sudoers generation** is handled by `_generate_sudoers_content()` and
-   `_write_sudoers()` in `core/host.py`. The generated file is validated with
+4. **Sudoers generation** is handled by `HostService.validate_sudoers_binaries()`,
+   `HostService._generate_sudoers_content()`, and `HostService.write_sudoers()` in
+   `src/mvmctl/core/host/_service.py`. The generated file is validated with
    `visudo -c` before being written to the final location.
 
 5. **Cleanup**: `mvm host reset` removes the sudoers drop-in and the `mvm` group,
@@ -318,8 +343,8 @@ Rather than requiring `sudo` for every command, mvm uses a privilege delegation 
    without touching the privilege model.
 
 When adding a new binary that needs elevated privileges, add it to
-`PRIVILEGED_BINARIES` in `constants.py` and update `_validate_sudoers_binaries()`
-in `core/host.py` if the binary belongs to a specific package.
+`PRIVILEGED_BINARIES` in `constants.py` and update `HostService.validate_sudoers_binaries()`
+in `src/mvmctl/core/host/_service.py` if the binary belongs to a specific package.
 
 ## Bumping the Version
 

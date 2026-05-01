@@ -17,9 +17,10 @@ ssh_app = typer.Typer(
 )
 
 
-@ssh_app.command(name="ssh")
+@ssh_app.callback(invoke_without_command=True)
 @handle_errors
 def ssh_connect(
+    ctx: typer.Context,
     identifier: str = typer.Argument(
         None, help="VM name, ID prefix, IP, or MAC address"
     ),
@@ -40,7 +41,15 @@ def ssh_connect(
         None, "--name", "-n", help="VM name (validates as entity name)"
     ),
 ) -> None:
-    """Open an SSH session into a VM."""
+    """
+    Open an SSH session into a VM.
+
+    Provide a VM identifier as a positional argument, or use
+    --name, --ip, or --mac to specify the VM explicitly.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+
     inputs = SSHInput(
         vm_id=identifier,
         user=user,

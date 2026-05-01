@@ -64,7 +64,7 @@ Run `sudo mvm host init` once; the bridge is auto-created when you create a VM.
 
 **Solution:**
 ```bash
-mvm kernel fetch
+mvm kernel fetch --type firecracker
 ```
 
 ---
@@ -77,12 +77,12 @@ mvm kernel fetch
 
 Cloud-init runs on first boot and takes 30–60 seconds. Follow the console log:
 ```bash
-mvm vm logs --name myvm --type boot --follow
+mvm logs myvm --follow
 ```
 
 If it never reaches a `login:` prompt, check the Firecracker process log:
 ```bash
-mvm vm logs --name myvm --type os
+mvm logs myvm --os
 ```
 
 ---
@@ -106,7 +106,7 @@ mvm image ls   # ✓ should appear
 **Solution:**
 ```bash
 mvm bin fetch 1.15.0
-mvm bin set-default
+mvm bin default <id>
 ```
 
 ---
@@ -167,7 +167,7 @@ curl -v http://10.0.0.1:8080/
 
 This is normal. Cloud-init takes 30-60 seconds on first boot regardless of the delivery method. To monitor progress:
 ```bash
-mvm vm logs --name myvm --type boot --follow
+mvm logs myvm --follow
 ```
 
 Look for cloud-init status messages like `Cloud-init v. X.X.X running modules...`
@@ -182,13 +182,13 @@ Look for cloud-init status messages like `Cloud-init v. X.X.X running modules...
 
 Check if the console relay is running:
 ```bash
-mvm console --name myvm --state
+mvm console myvm --state
 ```
 
 If not running, try restarting it:
 ```bash
-mvm console --name myvm --kill
-mvm console --name myvm
+mvm console myvm --kill
+mvm console myvm
 ```
 
 ---
@@ -219,8 +219,8 @@ sudo usermod -aG mvm $USER
 
 Prune stale cache entries:
 ```bash
-mvm cache prune --dry-run  # Preview what would be removed
-mvm cache prune            # Actually remove stale entries
+mvm cache prune vm --dry-run  # Preview what would be removed
+mvm cache prune vm            # Actually remove stale entries
 ```
 
 For a complete reset (⚠️ removes all VMs):
@@ -237,7 +237,7 @@ For more detailed error output, set debug mode:
 
 ```bash
 # Set in config
-mvm config set debug.enabled true
+mvm config set debug enabled true
 
 # Or use environment variable
 MVM_LOG_LEVEL=DEBUG mvm vm create --name myvm --image ubuntu-24.04

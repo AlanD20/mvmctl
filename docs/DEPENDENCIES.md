@@ -124,7 +124,9 @@ sg mvm -c 'sudo -n /usr/bin/supermin --version'
 
 ## 4. Kernel Build Dependencies (Optional)
 
-These are only required if you intend to build custom kernels from source using `mvm kernel build`.
+These are only required if you intend to build custom kernels from source.
+Kernel building is integrated into `mvm kernel fetch --type official --clean-build`,
+not a separate subcommand.
 
 | Binary | Category | Package (Debian/Ubuntu) | Package (Arch) |
 | :--- | :--- | :--- | :--- |
@@ -152,21 +154,22 @@ This section maps specific `mvm` commands to the external binaries they invoke.
 | :--- | :--- | :--- |
 | **`mvm host`** | `init` | `sudo`, `groupadd`, `usermod`, `visudo`, `sysctl`, `ip`, `iptables`, `iptables-save`, `lsmod`, `modprobe` |
 | | `reset` | `sudo`, `groupdel`, `sysctl`, `iptables-restore` |
-| **`mvm network`** | `init`, `create` | `ip`, `iptables`, `iptables-restore`, `sysctl` |
-| | `ls`, `show`, `rm` | `ip`, `iptables` |
-| **`mvm bin`** | `fetch`, `ls`, `rm`, `use` | (Internal Python logic) |
+| **`mvm network`** | `create` | `ip`, `iptables`, `iptables-restore`, `sysctl` |
+| | `ls`, `inspect`, `rm`, `sync`, `set-default` | `ip`, `iptables` |
+| **`mvm bin`** | `fetch`, `ls`, `rm`, `default` | (Internal Python logic) |
 | **`mvm image`** | `import` | `qemu-img`, `sfdisk`, `parted`, `blkid`, `mount`, `umount`, `tar`, `truncate`, `mkfs.ext4`, `unsquashfs` |
 | | `ls`, `rm` | (Internal Python logic) |
-| **`mvm kernel`** | `download` | (Internal Python logic) |
-| | `build` | `make`, `gcc`, `ld`, `flex`, `bison`, `bc`, `pahole`, `git`, `curl`, `pkg-config` |
-| | `ls`, `rm`, `use` | (Internal Python logic) |
+| **`mvm kernel`** | `fetch` | (Internal Python logic; add `--type official --clean-build` to trigger kernel compilation) |
+| | `fetch --type official --clean-build` | `make`, `gcc`, `ld`, `flex`, `bison`, `bc`, `pahole`, `git`, `curl`, `pkg-config` |
+| | `ls`, `rm`, `set-default` | (Internal Python logic) |
 | **`mvm key`** | `create` | `ssh-keygen` |
 | | `add`, `ls`, `rm` | (Internal Python logic) |
 | **`mvm vm`** | `create` | `firecracker`, `jailer`, `ip`, `iptables`, `mkisofs` (if cloud-init) |
-| | `ls`, `show` | (Internal Python logic) |
-| | `stop`, `rm` | `firecracker`, `ip`, `iptables`, `ssh-keygen` (cleanup) |
-| | `ssh` | `ssh` |
-| | `logs` | (Internal Python logic) |
+| | `ls`, `ps`, `inspect` | (Internal Python logic) |
+| | `start`, `stop`, `reboot` | `firecracker`, `ip`, `iptables`, `ssh-keygen` (cleanup) |
+| | `rm` | `firecracker`, `ip`, `iptables`, `ssh-keygen` (cleanup) |
+| **`mvm ssh`** | `ssh` | `ssh` |
+| **`mvm logs`** | _(invoked directly)_ | (Internal Python logic) |
 
 ## 6. Host System Requirements
 

@@ -146,7 +146,7 @@ mvm kernel fetch --type official --keep-build-dir
 | 3. Extract | Extracts the tarball to a temporary build directory |
 | 4. Download config | Fetches Firecracker's recommended `.config` for the kernel version |
 | 5. `make olddefconfig` | Resolves any missing config options to defaults |
-| 6. Apply overrides | Enables/disables specific configs from `mvm/constants.py` |
+| 6. Apply overrides | Enables/disables specific configs from `kernels.yaml` |
 | 7. Build | Compiles `vmlinux` using `make vmlinux -jN` |
 | 8. Copy & metadata | Copies `vmlinux` to kernels cache and saves metadata JSON |
 | 9. Cleanup | Removes the build directory (unless `--keep-build-dir`) |
@@ -220,10 +220,10 @@ The `Def` column (✓) in `mvm kernel ls` shows the active default kernel.
 
 ```bash
 # Use the default kernel (set via set-default)
-mvm vm create --name myvm --image ubuntu-24.04
+mvm vm create -n myvm --image ubuntu-24.04
 
 # Use a specific kernel path
-mvm vm create --name myvm \
+mvm vm create -n myvm \
   --image ubuntu-24.04 \
   --kernel ~/.cache/mvmctl/kernels/vmlinux-custom
 ```
@@ -247,7 +247,7 @@ mvm kernel fetch --type official --version 6.1.102
 
 Check the boot log:
 ```bash
-mvm vm logs --name myvm --type boot --follow
+mvm logs myvm --follow
 ```
 
 Common causes:
@@ -267,12 +267,17 @@ Consider using the Firecracker CI kernel as your base config.
 
 ### "Required kernel settings missing" during build
 
-The Firecracker config URL may have changed. Check constants:
+The Firecracker config URL may have changed. Check kernels.yaml:
 ```bash
-python3 -c "from mvmctl.constants import FIRECRACKER_KERNEL_CONFIG_URL; print(FIRECRACKER_KERNEL_CONFIG_URL)"
+python3 -c "
+import yaml, importlib.resources
+with importlib.resources.files('mvmctl.assets').joinpath('kernels.yaml').open() as f:
+    k = yaml.safe_load(f)
+    print(k.get('kernel-official',{}).get('config_url_template','Not found'))
+"
 ```
 
-Then update the `FIRECRACKER_KERNEL_CONFIG_URL` constant in `src/mvm/constants.py` if needed.
+Then update `config_url_template` in `src/mvmctl/assets/kernels.yaml` if needed.
 
 ---
 
@@ -292,14 +297,22 @@ Then update the `FIRECRACKER_KERNEL_CONFIG_URL` constant in `src/mvm/constants.p
 
 | Constant | Description |
 |----------|-------------|
-| `DEFAULT_KERNEL_VERSION` | Default kernel version for `mvm kernel fetch --type official` |
-| `KERNEL_TARBALL_URL_TEMPLATE` | URL template for downloading kernel source from kernel.org |
-| `FIRECRACKER_KERNEL_CONFIG_URL` | URL for Firecracker's recommended `.config` file |
+| `DEFAULT_KERNEL_VERSION` | Default kernel version for `mvm kernel fetch --type official` (in `OVERRIDABLE_DEFAULTS`) |
+| `KERNEL_TYPE_OFFICIAL` | The string `"official"` for kernel type references |
+| `KERNEL_TYPE_FIRECRACKER` | The string `"firecracker"` for kernel type references |
+
+### Kernel config URLs (src/mvmctl/assets/kernels.yaml)
+
+The Firecracker config URLs are per-kernel in `kernels.yaml`, not in `constants.py`:
+
+| YAML field | Description |
+|------------|-------------|
+| `config_url_template` | URL template for Firecracker's recommended `.config` file |
 
 ### Per-kernel config lists (src/mvmctl/assets/kernels.yaml — `kernel-official`)
 
-The kernel config lists are defined per-kernel in `kernels.yaml` and loaded at runtime via
-`core.kernel.load_kernel_spec("kernel-official")`. They are no longer module-level constants.
+The kernel config lists are defined per-kernel in `kernels.yaml`. Load them at runtime
+by reading the YAML file through the `AssetManager` or via `core.kernel._service.KernelService`.
 
 | YAML field | Description |
 |------------|-------------|

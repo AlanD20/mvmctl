@@ -4,7 +4,7 @@
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Coverage Gate:** 80% branch coverage (`pyproject.toml --cov-fail-under=80`)
 **Rule:** Tests must NEVER require root, KVM, or real network stack (except system tests)
-**Files:** 113 test files — 94 archived + 19 active (1 core + 8 integration + 5 system + 5 layer_compliance)
+**Files:** 121 test files — 94 archived + 27 active (1 core + 10 integration + 15 system + 6 layer_compliance)
 
 ## STRUCTURE
 
@@ -13,14 +13,13 @@ tests/
 ├── conftest.py              # Root: _mock_sudo_cache, isolate_config_and_cache, _isolate_iptables_rules, _setup_database (autouse)
 ├── helpers/
 │   └── paths.py             # make_test_paths(tmp_path) — single source of truth for canonical test paths
-├── core/                    # Core layer tests
-│   └── _internal/           # _internal infrastructure tests (enrichment, etc.)
+├── core/                    # Core layer tests (1 file in _shared/)
 ├── integration/
 │   ├── conftest.py          # Integration-specific fixtures
-│   └── test_*.py            # Multi-module workflow tests (8 files)
+│   └── test_*.py            # Multi-module workflow tests (10 files)
 ├── system/
 │   ├── conftest.py          # Real hardware fixtures; _restore_real_dirs override
-│   └── test_*.py            # Black-box CLI tests via subprocess (5 files)
+│   └── test_*.py            # Black-box CLI tests via subprocess (15 files)
 ├── layer_compliance/
 │   ├── test_imports.py      # Enforces import boundaries (cli→api→core only)
 │   ├── test_constants.py    # Ensures constants.py is single source of truth
@@ -228,7 +227,7 @@ uv run pytest tests/ -n auto
 
 ## NOTES
 
-- **113 total test files**: 94 archived + 19 active (1 core + 8 integration + 5 system + 5 layer_compliance)
+- **121 total test files**: 94 archived + 27 active (1 core + 10 integration + 15 system + 6 layer_compliance)
 - mypy strict exempted for tests (`pyproject.toml` overrides: no `disallow_untyped_defs`)
 - All tests run as non-root; no KVM access required (except system tests)
 - Fixtures in `unit/conftest.py` auto-used for all unit tests

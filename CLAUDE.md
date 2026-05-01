@@ -2,7 +2,7 @@
 
 **Project:** Production-grade Python CLI for managing microVMs  
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.  
-**Stack:** Python 3.13, Typer, Rich, uv  
+**Stack:** Python 3.13, Click (LazyMVMGroup root), Typer (sub-apps), Rich, uv  
 **CLI Entry:** `mvm` console script (defined in `pyproject.toml`)
 
 > **Legacy bash scripts** are preserved in `legacy/` for reference.
@@ -34,9 +34,9 @@ uv sync --group dev            # Install all deps
 uv run pytest tests/ -x -q    # Run tests (stop at first failure)
 uv run ruff check src/ && uv run mypy src/  # Lint + type check
 
-# Build standalone binary
-pip install -e ".[dev]" pyinstaller
-pyinstaller --onefile --name mvm src/mvmctl/main.py
+# Build standalone binary (Nuitka — recommended)
+uv sync --group dev --group build
+uv run --group build python -m nuitka --onefile --output-dir=dist --output-filename=mvm --include-package=mvmctl --include-data-dir=src/mvmctl/assets=mvmctl/assets --lto=yes --enable-plugin=anti-bloat src/mvmctl/main.py
 # Output: dist/mvm
 ```
 
@@ -50,11 +50,11 @@ src/mvmctl/
 ├── cli/             # Thin Typer command definitions (no business logic)
 ├── api/             # Stable public Python API; adds privilege checks before core
 ├── core/            # All business logic, subprocess, Firecracker interaction
-├── models/          # Pure dataclasses (VMInstance, VMConfig, ImageSpec, etc.)
-├── utils/           # Shared helpers: console, process, fs, http, audit, validation
-├── assets/          # Bundled YAML configs (images.yaml, kernels.yaml) + _defaults.py
+├── models/          # Pure dataclasses (VMInstanceItem, FirecrackerConfig, ImageSpec, NetworkItem, etc.)
+├── utils/           # Shared helpers: fs, _system, http, network, crypto, template, yaml, _validators, etc.
+├── assets/          # Bundled YAML configs (images.yaml, kernels.yaml) + JSON templates (firecracker.template.json, cloud-init.template.yaml)
 └── services/        # Runtime subprocess services (console_relay, nocloud_server)
-tests/               # Unit + integration test files (64 total)
+tests/               # integration, system, layer_compliance tests (27 files across 3 subdirectories)
 docs/                # API and release docs
 legacy/              # Archived bash scripts (single-vm, multi-vm, assets)
 pyproject.toml       # Build, ruff, mypy strict, pytest (80% branch coverage gate)
@@ -70,14 +70,14 @@ User → mvm → main.py → cli/*.py → api/*.py → core/*.py → models/ + u
 
 | Task | Location |
 |------|----------|
-| VM lifecycle | `src/mvmctl/core/vm_lifecycle.py` |
-| Network setup | `src/mvmctl/core/network.py`, `core/network_manager.py` |
-| Host init | `src/mvmctl/core/host_setup.py` |
-| Privilege checks | `src/mvmctl/core/host_privilege.py` |
-| Asset metadata | `src/mvmctl/core/metadata.py` |
-| Firecracker HTTP API | `src/mvmctl/core/firecracker.py` |
-| CLI commands | `src/mvmctl/cli/` |
-| Tests | `tests/unit/` |
+| VM lifecycle | `src/mvmctl/core/vm/` (domain logic) + `src/mvmctl/api/vm_operations.py` (orchestration) |
+| VM Firecracker API | `src/mvmctl/core/vm/_firecracker.py` |
+| Network setup | `src/mvmctl/core/network/` (domain logic) + `src/mvmctl/api/network_operations.py` (orchestration) |
+| Host init / privilege | `src/mvmctl/core/host/` (domain logic) + `src/mvmctl/api/host_operations.py` (orchestration) |
+| Privilege checks | `src/mvmctl/core/host/_helper.py` (HostPrivilegeHelper) |
+| Asset management | `src/mvmctl/core/_shared/_asset_manager.py` |
+| CLI commands | `src/mvmctl/cli/` (thin Typer commands, registered in `main.py:_COMMAND_SPECS`) |
+| Tests | `tests/integration/`, `tests/system/`, `tests/layer_compliance/` |
 | CI/CD | `.github/workflows/ci.yml`, `.github/workflows/release.yml` |
 
 ## Configuration
@@ -90,9 +90,9 @@ User → mvm → main.py → cli/*.py → api/*.py → core/*.py → models/ + u
 
 ## Architecture Constraints
 
-- **cli/** — arg parsing + output formatting ONLY; call `api/`
-- **api/** — privilege checks + delegation to `core/`; stable public API with `__all__`
-- **core/** — subprocess, filesystem, business logic; raises typed exceptions
+- **cli/** — arg parsing + output formatting ONLY; call `api/`; resolve defaults from `constants.py`; NO DB queries
+- **api/** — privilege checks + DB resolution + sole orchestrator of core domains; stable public API with `__all__`; the ONLY layer that imports across core domains
+- **core/** — isolated domain logic in subdirectories (vm/, network/, host/, etc.); no cross-domain imports; no defaults; raises typed exceptions
 - **models/** — `@dataclass` only; no methods with side effects
 - **utils/** — pure helpers with no domain knowledge
 

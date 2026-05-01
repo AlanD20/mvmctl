@@ -9,7 +9,7 @@ It handles everything from downloading official kernels and root filesystem imag
 
 **Tech Stack:**
 - **Language:** Python 3.13+
-- **CLI Framework:** Typer (with a custom lazy-loaded `click.Group` in `main.py`), Rich
+- **CLI Framework:** Click (LazyMVMGroup root group) with Typer for sub-commands, Rich
 - **Package Management:** `uv`
 - **Testing & Linting:** `pytest`, `ruff`, `mypy`
 
@@ -34,13 +34,13 @@ This applies to all edits, fixes, features, and refactoring. No exceptions.
 ---
 
 ## Architecture
-The project strictly adheres to a layered architecture to separate concerns. Data flows sequentially: `User -> mvm -> main.py -> cli/*.py -> api/*.py -> core/*.py -> models/ + utils/`. Runtime services in `services/` are spawned as subprocesses for console relay and cloud-init HTTP serving.
+The project strictly adheres to a three-layer architecture: **CLI → API → Core**. Data flows sequentially: `User → mvm → main.py → cli/*.py → api/*.py → core/*.py → models/ + utils/`. Runtime services in `services/` are spawned as subprocesses for console relay and cloud-init HTTP serving.
 
-- **`cli/`**: Command definitions, argument parsing, and formatting output. No business logic.
-- **`api/`**: Stable public Python API boundary. Performs privilege checks before delegating to `core/`.
-- **`core/`**: All business logic, filesystem operations, subprocesses, and VM interactions. Returns data or raises typed exceptions (`MVMError`).
-- **`models/`**: Pure `@dataclass` objects containing domain data (e.g., `VMInstance`, `VMConfig`). No side effects.
-- **`utils/`**: Shared helpers (console, process, fs, http, audit, validation) with no domain knowledge.
+- **`cli/`**: Command definitions, argument parsing, and formatting output. No business logic. No database queries. Resolves defaults from `constants.py`.
+- **`api/`**: Stable public Python API boundary. Performs privilege checks, resolves DB-backed defaults when CLI passes `None`, and orchestrates multiple core domains (the ONLY layer that imports across domains).
+- **`core/`**: Isolated domain logic in subdirectories (e.g., `vm/`, `network/`, `host/`). Each domain has Controller, Service, Repository, and Resolver modules. No cross-domain imports. No defaults. Returns data or raises typed exceptions (`MVMError`).
+- **`models/`**: Pure `@dataclass` objects containing domain data (e.g., `VMInstanceItem`, `FirecrackerConfig`, `ImageSpec`). No side effects.
+- **`utils/`**: Shared helpers (fs, _system, http, network, crypto, template, yaml, _validators) with no domain knowledge.
 - **`services/`**: Runtime subprocess services — `console_relay/` (PTY-to-vsock bridge) and `nocloud_server/` (HTTP cloud-init datasource).
 
 ## Building and Running
@@ -57,14 +57,15 @@ uv run mvm --help
 ```
 
 **Building a Standalone Binary:**
-PyInstaller (Fast build, decompression overhead):
-```bash
-uv run --group build pyinstaller --onefile --name mvm --collect-all mvmctl src/mvmctl/main.py
-```
 
-Nuitka (Slow build, compiled C++ performance - Recommended):
+Nuitka (Compiled C++ performance — Recommended for releases):
 ```bash
 uv run --group build python -m nuitka --onefile --output-dir=dist --output-filename=mvm --include-package=mvmctl --include-data-dir=src/mvmctl/assets=mvmctl/assets --lto=yes --enable-plugin=anti-bloat src/mvmctl/main.py
+```
+
+PyInstaller (Faster build, useful during development):
+```bash
+uv run --group build pyinstaller --onefile --name mvm --collect-all mvmctl src/mvmctl/main.py
 ```
 *Note: Binaries are located in the `dist/` directory.*
 

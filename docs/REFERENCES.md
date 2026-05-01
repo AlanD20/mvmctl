@@ -20,7 +20,6 @@ This document provides detailed reference for all `mvm` commands, configuration 
   - [mvm cache](#mvm-cache) — Cache management
   - [mvm logs](#mvm-logs) — VM logs
   - [mvm ssh](#mvm-ssh) — VM SSH access
-  - [mvm clear](#mvm-clear) — Clear asset cache
 - [Configuration](#configuration)
 - [Cloud-Init](#cloud-init)
 - [Environment Variables](#environment-variables)
@@ -37,6 +36,7 @@ First-time setup wizard. Walks through host init, binary/kernel/image download, 
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--non-interactive` | Use defaults, skip all prompts | false |
+| `--skip-host` | Skip host init step | false |
 
 ---
 
@@ -68,9 +68,14 @@ Kernel management.
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--type` | `firecracker` or `official` | `firecracker` |
+| `--type` | `firecracker` or `official` **(required)** | — |
 | `--version VERSION` | Kernel version | (latest) |
-| `--clean-build` | Bypass cache and force a clean kernel build | false |
+| `--arch` | Architecture (`x86_64`, `arm64`) | auto-detect |
+| `--set-default` | Set as default after fetch | false |
+| `--jobs N` | Parallel build jobs (official only) | auto |
+| `--keep-build-dir` | Keep build directory (official only) | false |
+| `--clean-build` | Bypass cache and force clean build (official only) | false |
+| `--config PATH` | Custom kernel config fragment file | — |
 
 ---
 
@@ -82,9 +87,10 @@ Image management.
 |---------|-------------|
 | `mvm image ls` | List available and cached images |
 | `mvm image fetch ID` | Download an image by its ID |
-| `mvm image import PATH` | Import a local image file |
+| `mvm image import NAME PATH` | Import a local image file with a display name |
 | `mvm image set-default` | Set the default image for VM creation |
 | `mvm image rm ID` | Remove a cached image |
+| `mvm image warm IMAGE` | Pre-decompress image for fast VM creation |
 
 **Supported image IDs:**
 
@@ -112,7 +118,7 @@ Firecracker binary management.
 |---------|-------------|
 | `mvm bin ls` | List local Firecracker versions |
 | `mvm bin fetch VERSION` | Download a specific Firecracker release |
-| `mvm bin set-default` | Set the active Firecracker version |
+| `mvm bin default` | Set the active Firecracker version |
 | `mvm bin rm VERSION` | Remove a cached version |
 
 ---
@@ -124,29 +130,47 @@ VM lifecycle management.
 | Command | Description |
 |---------|-------------|
 | `mvm vm create` | Create and start a new VM |
+| `mvm vm start` | Start a stopped VM |
+| `mvm vm stop` | Stop a running VM |
+| `mvm vm reboot` | Reboot a VM |
+| `mvm vm pause` | Pause a running VM |
+| `mvm vm resume` | Resume a paused VM |
 | `mvm vm rm` | Stop and remove a VM |
-| `mvm vm ls` | List VMs |
+| `mvm vm ls` | List all VMs |
+| `mvm vm ps` | List running/starting VMs |
 | `mvm vm inspect` | Show detailed VM information |
-| `mvm vm prune` | Remove all stopped VMs |
 | `mvm vm snapshot` | Snapshot a running VM |
 | `mvm vm load` | Load a VM from a snapshot |
+| `mvm vm export` | Export a VM config to portable JSON |
+| `mvm vm import` | Create a VM from a portable config file |
 
 **`vm create` flags:**
 
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--name, -n NAME` | VM name **(required)** | — |
-| `--image IMAGE` | Image ID or path **(required)** | — |
-| `--kernel PATH` | Path to vmlinux | auto-detected |
-| `--vcpus N` | vCPU count | 2 |
-| `--mem N` | Memory in MiB | 2048 |
-| `--disk-size SIZE` | Disk size (e.g., `10G`, `512M`) | auto |
+| `--image IMAGE` | Image name, short ID, or path to .ext4 file | auto-detected |
+| `--image-path PATH` | Direct path to rootfs image file (overrides `--image`) | — |
+| `--kernel KERNEL` | Kernel short ID or path to vmlinux | auto-detected |
+| `--kernel-path PATH` | Direct path to vmlinux file (overrides `--kernel`) | — |
+| `--vcpus, --cpus N` | vCPU count | from config |
+| `--mem, --memory N` | Memory in MiB | from config |
+| `--disk-size, -s SIZE` | Disk size (e.g., `512M`, `1G`) | from config |
 | `--ip ADDRESS` | Guest IP | auto-assigned |
-| `--network, --net NAME` | Named network | `default` |
-| `--ssh-key NAME_OR_PATH` | SSH public key | default keys |
-| `--user USER` | Default SSH user | `root` |
-| `--cloud-init-mode MODE` | `auto`, `nocloud-net`, `iso`, `direct`, `disabled` | auto |
-| `--no-cloud-init` | Disable cloud-init | false |
+| `--mac ADDRESS` | Custom MAC address | auto-generated |
+| `--network, --net NAME` | Named network | from config |
+| `--ssh-key NAME_OR_PATH` | SSH public key (name from cache or file path) | default keys |
+| `--user USER` | Default SSH user | from config |
+| `--cloud-init-mode MODE` | `inject`, `iso`, `net`, `off` | `inject` |
+| `--nocloud-net-port N` | Port for nocloud-net HTTP server (0=auto) | auto-assign |
+| `--user-data PATH` | Path to custom cloud-init user-data file | — |
+| `--enable-pci/--no-enable-pci` | Enable PCI device support | from config |
+| `--enable-logging/--no-enable-logging` | Enable Firecracker logging | from config |
+| `--enable-metrics/--no-enable-metrics` | Enable Firecracker metrics | from config |
+| `--lsm-flags FLAGS` | Linux Security Module kernel cmdline flags | from config |
+| `--no-console` | Disable serial console | false |
+| `--firecracker-bin PATH` | Path to firecracker binary | active version |
+| `--skip-cleanup` | Keep resources on failure for debugging | false |
 
 ---
 
@@ -156,9 +180,18 @@ VM console access without SSH. Uses a PTY-over-vsock relay.
 
 | Command | Description |
 |---------|-------------|
-| `mvm console` | Attach to a VM console interactively |
-| `mvm console --state` | Show console state without attaching |
-| `mvm console --kill` | Kill the console relay for a VM |
+| `mvm console [IDENTIFIER]` | Attach to a VM console interactively |
+| `mvm console [IDENTIFIER] --state` | Show console state without attaching |
+| `mvm console [IDENTIFIER] --kill` | Kill the console relay for a VM |
+
+| Flag | Description |
+|------|-------------|
+| `[IDENTIFIER]` | VM name, ID prefix, IP, or MAC address (positional) |
+| `--name, -n NAME` | VM name |
+| `--ip IP` | VM guest IP address |
+| `--mac MAC` | VM guest MAC address |
+| `--state` | Show console relay state without attaching |
+| `--kill` | Kill the console relay process |
 
 ---
 
@@ -172,6 +205,8 @@ Named network management.
 | `mvm network rm NAME` | Remove a named network |
 | `mvm network ls` | List all networks |
 | `mvm network inspect NAME` | Show network details and IP leases |
+| `mvm network set-default NAME` | Set a network as the default for VM creation |
+| `mvm network sync [IDENTIFIER]` | Sync iptables rules between database and host |
 
 ---
 
@@ -197,11 +232,10 @@ Configuration management.
 
 | Command | Description |
 |---------|-------------|
-| `mvm config show` | Show resolved configuration |
-| `mvm config validate` | Validate config file |
-| `mvm config get KEY` | Get a configuration value |
-| `mvm config set KEY VALUE` | Set a configuration value |
-| `mvm config dump-vm NAME` | Print the Firecracker JSON boot config |
+| `mvm config get CATEGORY [KEY]` | Get a configuration value |
+| `mvm config set CATEGORY KEY VALUE` | Set a configuration value |
+| `mvm config list` | List all overridable settings and current values |
+| `mvm config reset [CATEGORY] [KEY] [--all]` | Reset overrides to defaults |
 
 ---
 
@@ -212,19 +246,21 @@ Cache management.
 | Command | Description |
 |---------|-------------|
 | `mvm cache init` | Initialize cache directories |
-| `mvm cache prune` | Prune stale cache entries |
-| `mvm cache prune vm` | Prune only VMs |
-| `mvm cache prune network` | Prune unused networks |
-| `mvm cache prune image` | Prune unused images |
-| `mvm cache prune kernel` | Prune unused kernels |
+| `mvm cache prune [RESOURCE]` | Prune cache entries (vm, network, image, kernel, binary, misc) |
+| `mvm cache clean` | Complete cache teardown: prune all, host clean, remove cache dir |
 
 **`cache prune` flags:**
 
 | Flag | Description |
 |------|-------------|
-| `--include-stopped` | Include stopped VMs in pruning |
-| `--include-running` | Include running VMs (use with caution) |
-| `--all, -a` | Prune everything with confirmation |
+| `--all, -a` | Remove ALL items including running VMs, default network, protected assets |
+| `--dry-run` | Show what would be removed without actually removing |
+| `--force, -f` | Skip confirmation |
+
+**`cache clean` flags:**
+
+| Flag | Description |
+|------|-------------|
 | `--dry-run` | Show what would be removed |
 | `--force, -f` | Skip confirmation |
 
@@ -236,10 +272,17 @@ VM log management.
 
 | Command | Description |
 |---------|-------------|
-| `mvm logs --name NAME` | View logs for a VM |
-| `mvm logs --name NAME --type boot` | View boot/serial console logs |
-| `mvm logs --name NAME --type os` | View Firecracker process logs |
-| `mvm logs --name NAME --follow` | Stream logs in real-time |
+| `mvm logs IDENTIFIER` | View boot/serial console logs (default) |
+| `mvm logs IDENTIFIER --os` | View Firecracker process logs |
+| `mvm logs IDENTIFIER --lines N` | View last N lines |
+| `mvm logs IDENTIFIER --follow` | Stream logs in real-time |
+
+| Flag | Description |
+|------|-------------|
+| `IDENTIFIER` | VM name, ID prefix, IP, or MAC address (positional) |
+| `--os` | Show Firecracker OS log instead of boot log |
+| `--lines, -n N` | Number of log lines to show |
+| `--follow, -f` | Follow log output in real-time |
 
 ---
 
@@ -249,18 +292,20 @@ VM SSH access.
 
 | Command | Description |
 |---------|-------------|
-| `mvm ssh --name NAME` | SSH into a VM by name |
-| `mvm ssh --name NAME --user USER` | SSH with specific user |
-
----
-
-### `mvm clear`
-
-Clear asset cache. Remove all cached assets (binaries, kernels, images). Does **not** touch VMs.
+| `mvm ssh IDENTIFIER` | Open an SSH session into a VM |
+| `mvm ssh IDENTIFIER --user USER` | SSH with specific user |
+| `mvm ssh IDENTIFIER --cmd CMD` | Execute a command via SSH |
+| `mvm ssh IDENTIFIER --key PATH` | Use specific private key file |
 
 | Flag | Description |
 |------|-------------|
-| `--force, -f` | Skip confirmation |
+| `IDENTIFIER` | VM name, ID prefix, IP, or MAC address (positional) |
+| `--user, -u USER` | SSH user |
+| `--key PATH` | SSH private key file or directory of keys |
+| `--cmd, -c CMD` | Command to execute |
+| `--ip IP` | IP address to connect to (skips validation) |
+| `--mac MAC` | VM MAC address |
+| `--name, -n NAME` | VM name |
 
 ---
 
@@ -331,11 +376,10 @@ Clear asset cache. Remove all cached assets (binaries, kernels, images). Does **
 
 | Mode | Flag | Description |
 |------|------|-------------|
-| **auto (default)** | `--cloud-init-mode auto` | Automatically selects best mode |
-| **nocloud-net** | `--cloud-init-mode nocloud-net` | Serves cloud-init files via HTTP |
-| **ISO** | `--cloud-init-mode iso` | Uses a pre-existing ISO file |
-| **Direct Injection** | `--cloud-init-mode direct` | Injects into rootfs using libguestfs |
-| **Disabled** | `--cloud-init-mode disabled` | Skips cloud-init entirely |
+| **inject (default)** | `--cloud-init-mode inject` | Direct injection into rootfs using libguestfs |
+| **net** | `--cloud-init-mode net` | Serves cloud-init files via HTTP (nocloud-net) |
+| **iso** | `--cloud-init-mode iso` | Uses a pre-existing ISO file |
+| **off** | `--cloud-init-mode off` | Skips cloud-init entirely |
 
 ### Security Architecture
 

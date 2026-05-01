@@ -21,7 +21,7 @@ mvmctl/
 |-------|---------|--------------|
 | **CLI** | Argument parsing, output formatting | `mvmctl.api` only |
 | **API** | Public contract curation, DB resolution, **ORCHESTRATION** | `core/*` only. **ONLY layer that imports multiple domains.** |
-| **Core** | Business logic, domain isolation | `core/_internal/` for infrastructure. **NO cross-domain imports.** |
+| **Core** | Business logic, domain isolation | `core/_shared/` for infrastructure. **NO cross-domain imports.** |
 
 ## File Structure
 
@@ -109,7 +109,7 @@ src/mvmctl/
 │   │   └── _provisioner.py                  # CloudInitProvisioner
 │   ├── ssh/                                 # SSH operations
 │   │   └── _service.py
-│   └── _internal/                           # Shared infrastructure
+│   └── _shared/                           # Shared infrastructure
 │       ├── _db.py                           # Database (connection manager)
 │       ├── _enrichment.py                   # RelationEnricher (batch relation loading)
 │       ├── _resolver_registry.py            # Lazy resolver registry (prevents circular imports)
@@ -473,7 +473,7 @@ Does it manage a specific entity instance? (bound to self._entity)
 │       Example: VMResolver resolves name, ID, IP, MAC to VMInstanceItem
 │
 └── Is it infrastructure with no domain knowledge? (DB, iptables, validation)
-    └── YES → core/_internal/
+    └── YES → core/_shared/
         Example: _db.py (connection manager), _iptables_tracker/, _enrichment.py
 ```
 
@@ -499,14 +499,14 @@ Does it import from multiple domains?
 Infrastructure tool placement:
 │
 ├── Is it generic and could be used by any domain? (DB, process management, enrichment)
-│   └── YES → core/_internal/
+│   └── YES → core/_shared/
 │
 ├── Is it specific to one domain's concerns? (IP lease for networks)
 │   └── YES → core/{domain}/ (e.g., core/network/_lease_service.py)
 │
 └── Is it shared by multiple domains but has domain logic? (iptables rules)
     └── DECISION:
-        - Generic iptables → core/_internal/_iptables_tracker/
+        - Generic iptables → core/_shared/_iptables_tracker/
         - Network-specific rule generation → core/network/
 ```
 
@@ -519,11 +519,11 @@ from mvmctl.api import VMOperation, VMCreateInput, VMInput
 # ✅ API — orchestrates multiple core domains
 from mvmctl.core.vm import VMController, VMRepository
 from mvmctl.core.network import NetworkService, NetworkRepository
-from mvmctl.core._internal._db import Database
+from mvmctl.core._shared._db import Database
 
-# ✅ Domain — ONLY imports _internal (never other domains)
-from mvmctl.core._internal._db import Database
-from mvmctl.core._internal._iptables_tracker import IPTablesTracker
+# ✅ Domain — ONLY imports _shared (never other domains)
+from mvmctl.core._shared._db import Database
+from mvmctl.core._shared._iptables_tracker import IPTablesTracker
 
 # ✅ Domain resolvers — located in each domain
 from mvmctl.core.vm._resolver import VMResolver
@@ -543,13 +543,13 @@ from mvmctl.core.image import ImageController            # NEVER
     /    \
    vm    network    image    kernel    binary    key    host ...
     \    /
-   core/_internal/
+   core/_shared/
 ```
 
 **Rules:**
 1. `api/` sits at the top — orchestrates domains
-2. Domains sit in the middle — they only use `_internal/`
-3. `_internal/` sits at the bottom — pure infrastructure, no domain knowledge
+2. Domains sit in the middle — they only use `_shared/`
+3. `_shared/` sits at the bottom — pure infrastructure, no domain knowledge
 4. **No cycles:** Domains never import orchestration or other domains
 
 ## Naming Conventions
@@ -564,7 +564,7 @@ from mvmctl.core.image import ImageController            # NEVER
 | Raw CLI input | `*Input` | `api/inputs/_*_input.py` | `VMCreateInput` |
 | DB-backed resolver | `*Request` | `api/inputs/_*_input.py` | `VMCreateRequest` |
 | Resolved frozen output | `Resolved*Input` | `api/inputs/_*_input.py` | `ResolvedVMCreateInput` |
-| Shared infrastructure | None | `core/_internal/` | `Database`, `IPTablesTracker` |
+| Shared infrastructure | None | `core/_shared/` | `Database`, `IPTablesTracker` |
 | Domain-specific helpers | Descriptive | `core/{domain}/` | `GuestfsProvisioner` |
 
 ### Model Naming — `*Item` Suffix
@@ -619,7 +619,7 @@ Resolvers can optionally enrich resolved entities with related entities (e.g., V
 4. **Declarative registry** — Each resolver declares its relations via a `RELATIONS` class attribute dict using `RelationSpec` objects.
 5. **Lazy registration** — Resolvers are registered in `_resolver_registry.py` via `register()` to prevent circular imports. The `RelationEnricher` uses string names to look up resolvers.
 6. **Nested support** — Dot notation (`network.leases`) resolves parents before children automatically.
-7. **Centralized engine** — `RelationEnricher` in `core/_internal/_enrichment.py` handles all enrichment logic.
+7. **Centralized engine** — `RelationEnricher` in `core/_shared/_enrichment.py` handles all enrichment logic.
 
 ### How It Works
 
@@ -759,18 +759,18 @@ When a nested path like `network.leases` is requested, the enricher:
 
 ### Lazy Resolver Registry
 
-To prevent circular imports, resolvers are registered by string name in `core/_internal/_resolver_registry.py`:
+To prevent circular imports, resolvers are registered by string name in `core/_shared/_resolver_registry.py`:
 
 ```python
 # Registration (in each resolver's module auto-run at module level)
-from mvmctl.core._internal._resolver_registry import register
+from mvmctl.core._shared._resolver_registry import register
 
 register("vm", lambda: VMResolver)
 ```
 
 ```python
 # Lookup (in RelationEnricher)
-from mvmctl.core._internal._resolver_registry import get
+from mvmctl.core._shared._resolver_registry import get
 
 resolver_class = get("kernel")   # Returns KernelResolver class
 ```
@@ -878,7 +878,7 @@ Create a new domain folder when:
 - **Domains ≠ CLI commands** — Domains are business capabilities (vm, network, image, etc.)
 - **3-layer architecture** — CLI → API → Core, strict import boundaries
 - **Orchestration lives in `api/`** — `api/*_operations.py` is the ONLY place that imports multiple domain modules
-- **Domain isolation** — Domains only import `core/_internal/`, never other domains
+- **Domain isolation** — Domains only import `core/_shared/`, never other domains
 - **Input → Request → Resolved pattern** — `*Input` (raw) → `*Request(input, db).resolve()` → `Resolved*Input` (frozen)
 - **`resolve()` validates internally** — calls `ensure_validate()` after constructing the resolved result
 - **Defaults only at CLI layer** — `None` in Input means "use DB default" (resolved by Request)
@@ -889,5 +889,5 @@ Create a new domain folder when:
 - **SQL-level computation** — Use `COUNT(*)`, `WHERE IN` instead of fetch-all + Python filtering
 - **Flexible queries** — Accept `single_value | list[single_value]` for filtering parameters
 - **Relation enrichment** — `include` on resolver constructor, `RELATIONS` dict with `RelationSpec`, `RelationEnricher` batch-loads with deduplication
-- **Infrastructure placement** — Generic → `_internal/`, domain-specific → `{domain}/`
+- **Infrastructure placement** — Generic → `_shared/`, domain-specific → `{domain}/`
 - **File naming** — `_controller.py`, `_service.py`, `_repository.py`, `_resolver.py`

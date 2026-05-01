@@ -16,6 +16,8 @@ When making these changes, ensure there will be **NO DEPRECATION messages/codes 
 ## Core
 
 - create a repl-like filesystem access to direct rootfs file via guestfs? this would be nice
+- reconcile VM from stopped state using the same rootfs and kernel
+- add is_present checks for vm
 
 
 ## Networking

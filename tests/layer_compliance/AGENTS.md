@@ -11,10 +11,10 @@
 tests/layer_compliance/
 ├── test_imports.py       # CLI→API→Core import boundary enforcement
 ├── test_constants.py     # constants.py single-source-of-truth validation
+├── test_constants_new.py # Additional constants validation
 ├── test_privilege.py     # API privilege check presence verification
 ├── test_startup_time.py  # <200ms cold-start enforcement
-├── test_cleanup.py       # Pytest temp directory cleanup behavior
-└── test_constants_new.py # Additional constants validation
+└── test_cleanup.py       # Pytest temp directory cleanup behavior
 ```
 
 ## TEST FILES
@@ -53,7 +53,11 @@ Uses `ast.parse()` to enforce no hardcoded paths, large numbers (≥100), or lis
 
 ---
 
-- **5 test files**: Covering imports, constants, privileges, startup time, and cleanup behavior
+### `test_constants_new.py` — Additional Constants Validation
+
+Extends `test_constants.py` with additional validation checks for the constants module.
+
+---
 
 ### `test_privilege.py` — API Privilege Check Presence
 
@@ -115,6 +119,6 @@ uv run pytest tests/layer_compliance/test_startup_time.py -v  # slow — spawns 
 
 ## NOTES
 
-- **5 test files** (updated count)
+- **6 test files**: Covering imports, constants (2 files), privileges, startup time, and cleanup behavior
 - All tests are **AST-based or subprocess-isolated** — they do NOT import `mvmctl.*` at collection time (except `test_constants.py` which imports `mvmctl.constants` for functional validation)
 - Layer compliance failures in CI indicate real architectural regressions — never skip or xfail without documented justification

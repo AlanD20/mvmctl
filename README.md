@@ -21,7 +21,7 @@
 ```bash
 # Create and SSH into a VM in under 60 seconds
 mvm vm create --name myvm --image ubuntu-24.04
-mvm vm ssh --name myvm
+mvm ssh --name myvm
 ```
 
 ---
@@ -117,7 +117,7 @@ mvm key set-default test
 mvm vm create --name myvm --image ubuntu-24.04
 
 # Follow the boot log until SSH is ready (~30-60 s)
-mvm logs --name myvm --type boot --follow
+mvm logs myvm --follow
 
 # SSH in
 mvm ssh --name myvm
@@ -138,8 +138,8 @@ mvm vm rm --name myvm
 ```bash
 mvm vm create --name myvm --image ubuntu-24.04   # Create and start a VM
 mvm vm ls                                         # List all VMs
-mvm vm ssh --name myvm                           # SSH into a VM
-mvm console --name myvm                          # Console access (no SSH)
+mvm ssh --name myvm                           # SSH into a VM
+mvm console myvm                                 # Console access (no SSH)
 mvm vm rm --name myvm --force                    # Remove a VM
 ```
 
@@ -210,7 +210,7 @@ See [docs/RELEASE.md](docs/RELEASE.md) for detailed build instructions.
 ├── keys/              # Cached SSH public keys
 ├── networks/          # Per-network config + IP leases
 ├── vms/               # Per-VM state
-│   └── <vm-name>/
+│   └── <vm-sha>/           # VM directories named by SHA256 hash
 │       ├── rootfs.ext4
 │       ├── firecracker.json
 │       ├── firecracker.log       # Firecracker process log (--type os)
@@ -232,7 +232,7 @@ Common issues and quick fixes:
 |-------|----------|
 | **Permission denied: /dev/kvm** | `sudo usermod -aG kvm $USER` then log out/back in |
 | **Bridge not found** | Run `sudo mvm host init` once |
-| **VM won't boot / SSH times out** | Cloud-init takes 30-60s on first boot. Watch with `mvm logs --name myvm --type boot --follow` |
+| **VM won't boot / SSH times out** | Cloud-init takes 30-60s on first boot. Watch with `mvm logs myvm --follow` |
 | **Kernel not found** | `mvm kernel fetch` |
 | **Image not found** | `mvm image fetch ubuntu-24.04` |
 | **NoCloud server failed** | Port range exhausted. Check: `sudo ss -tlnp \| grep -E ':(8[0-9]{3}\|9[0-9]{3})'` |
