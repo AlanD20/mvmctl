@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mvmctl.core._shared import Database
+from mvmctl.core.config._service import SettingsService
 from mvmctl.core.key._repository import KeyRepository
 from mvmctl.core.key._resolver import KeyResolver
 from mvmctl.core.key._service import KeyService
@@ -93,16 +94,9 @@ class SSHRequest:
         return vm.ipv4
 
     def _resolve_user(self) -> str:
-        """
-        Resolve SSH user.
-
-        If user is provided, use it. Otherwise fall back to DEFAULT_VM_SSH_USER.
-        """
-        from mvmctl.constants import DEFAULT_VM_SSH_USER
-
         if self._inputs.user is not None:
             return self._inputs.user
-        return DEFAULT_VM_SSH_USER
+        return str(SettingsService.resolve(self._db, "defaults.vm", "ssh_user"))
 
     def _resolve_key(self) -> Path | None:
         """

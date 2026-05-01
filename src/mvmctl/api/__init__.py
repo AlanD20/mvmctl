@@ -17,6 +17,7 @@ from mvmctl.api.binary_operations import (  # noqa: F401
     BinaryOperation,
 )
 from mvmctl.api.cache_operations import CacheOperation  # noqa: F401
+from mvmctl.api.config_operations import ConfigOperation  # noqa: F401
 from mvmctl.api.console_operations import (  # noqa: F401
     ConsoleAttachInfo,
     ConsoleOperation,
@@ -61,6 +62,7 @@ __all__ = [
     "BinaryOperation",
     "BinaryFetchResult",
     "CacheOperation",
+    "ConfigOperation",
     "ConsoleAttachInfo",
     "ConsoleOperation",
     "HostOperation",

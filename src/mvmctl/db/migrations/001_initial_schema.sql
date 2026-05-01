@@ -250,5 +250,14 @@ CREATE INDEX idx_ssh_keys_name ON ssh_keys(name);
 CREATE INDEX idx_ssh_keys_fingerprint ON ssh_keys(fingerprint);
 CREATE INDEX idx_ssh_keys_is_default ON ssh_keys(is_default) WHERE is_default = 1;
 
+-- USER_SETTINGS: Config overrides keyed by category
+CREATE TABLE user_settings (
+    category TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (category, key)
+);
+
 -- Set schema version
 PRAGMA user_version = 1;

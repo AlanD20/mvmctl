@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from mvmctl.constants import DEFAULT_NETWORK_NAME, DEFAULT_NETWORK_SUBNET
 from mvmctl.core._shared import Database
+from mvmctl.core.config._service import SettingsService
 from mvmctl.core.host._repository import HostRepository
 from mvmctl.core.network._controller import NetworkController
 from mvmctl.core.network._repository import NetworkRepository
@@ -351,15 +351,20 @@ class NetworkOperation:
         db = Database()
         repo = NetworkRepository(db)
 
+        default_name = SettingsService.resolve(db, "defaults.network", "name")
+        default_subnet = SettingsService.resolve(
+            db, "defaults.network", "subnet"
+        )
+
         # 1. Ensure internal default network exists
-        internal_network = repo.get_by_name(DEFAULT_NETWORK_NAME)
+        internal_network = repo.get_by_name(default_name)
         if internal_network is None:
             outbound_iface = NetworkUtils.detect_outbound_interface()
             nat_gateways = [outbound_iface] if outbound_iface else []
 
             create_input = NetworkCreateInput(
-                name=DEFAULT_NETWORK_NAME,
-                subnet=DEFAULT_NETWORK_SUBNET,
+                name=default_name,
+                subnet=default_subnet,
                 nat_enabled=len(nat_gateways) > 0,
                 nat_gateways=nat_gateways,
             )

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from mvmctl.api.inputs._vm_input import VMInput, VMRequest
 from mvmctl.core._shared import Database
+from mvmctl.core.config._service import SettingsService
 from mvmctl.models.vm import VMInstanceItem
 
 
@@ -71,13 +72,13 @@ class LogRequest:
     def _resolve_lines(self) -> int:
         if self._inputs.lines is not None:
             return self._inputs.lines
-        from mvmctl.constants import DEFAULT_VM_LOG_LINES
-
-        return DEFAULT_VM_LOG_LINES
+        return int(
+            SettingsService.resolve(self._db, "defaults.vm", "log_lines")
+        )
 
     def _resolve_follow(self) -> bool:
         if self._inputs.follow is not None:
             return self._inputs.follow
-        from mvmctl.constants import DEFAULT_VM_LOG_FOLLOW
-
-        return DEFAULT_VM_LOG_FOLLOW
+        return bool(
+            SettingsService.resolve(self._db, "defaults.vm", "log_follow")
+        )

@@ -6,12 +6,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from mvmctl.constants import (
-    DEFAULT_IMAGE_ARCH,
-    DEFAULT_KERNEL_BUILD_JOBS,
-    DEFAULT_KERNEL_VERSION,
-)
 from mvmctl.core._shared import Database
+from mvmctl.core.config._service import SettingsService
 from mvmctl.exceptions import KernelError
 from mvmctl.utils.common import CacheUtils
 
@@ -93,21 +89,41 @@ class KernelFetchRequest:
         (arch, output_path, jobs). It does NOT validate —
         validation happens in ensure_validate().
         """
-        version = self._inputs.version or DEFAULT_KERNEL_VERSION
+        version: str | None
+        if self._inputs.version is not None:
+            version = self._inputs.version
+        else:
+            version = SettingsService.resolve(
+                self._db, "defaults.kernel", "version"
+            )
 
         if self._inputs.kernel_type == "firecracker":
             version = None
-        elif version:
+        elif version is not None:
             version = version.removeprefix("v")
+
+        if self._inputs.arch is not None:
+            arch = self._inputs.arch
+        else:
+            arch = SettingsService.resolve(self._db, "defaults.image", "arch")
+
+        if self._inputs.jobs is not None:
+            jobs = self._inputs.jobs
+        else:
+            jobs = SettingsService.resolve(
+                self._db, "defaults.kernel", "build_jobs"
+            )
+        if jobs is None:
+            jobs = os.cpu_count() or SettingsService.resolve(
+                self._db, "defaults.kernel", "build_jobs"
+            )
 
         self._result = ResolvedKernelFetchRequest(
             kernel_type=self._inputs.kernel_type,
             version=version,
-            arch=self._inputs.arch or DEFAULT_IMAGE_ARCH,
+            arch=arch,
             output_dir=self._inputs.output_dir or CacheUtils.get_kernels_dir(),
-            jobs=self._inputs.jobs
-            or os.cpu_count()
-            or DEFAULT_KERNEL_BUILD_JOBS,
+            jobs=jobs,
             keep_build_dir=self._inputs.keep_build_dir,
             clean_build=self._inputs.clean_build,
             kernel_config=self._inputs.kernel_config,

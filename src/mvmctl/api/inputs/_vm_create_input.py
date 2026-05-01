@@ -7,6 +7,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from mvmctl.constants import (
     CONST_MEBIBYTE_BYTES,
@@ -14,20 +15,12 @@ from mvmctl.constants import (
     CONST_VM_MEM_MIN_MIB,
     CONST_VM_VCPU_MAX,
     CONST_VM_VCPU_MIN,
-    DEFAULT_VM_BOOT_ARGS,
-    DEFAULT_VM_ENABLE_CONSOLE,
-    DEFAULT_VM_ENABLE_LOGGING,
-    DEFAULT_VM_ENABLE_METRICS,
-    DEFAULT_VM_ENABLE_PCI,
-    DEFAULT_VM_LSM_FLAGS,
-    DEFAULT_VM_MEM_MIB,
-    DEFAULT_VM_SSH_USER,
-    DEFAULT_VM_VCPU_COUNT,
 )
 from mvmctl.core._shared import Database
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.binary._resolver import BinaryResolver
 from mvmctl.core.binary._service import BinaryService
+from mvmctl.core.config._service import SettingsService
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.core.image._resolver import ImageResolver
 from mvmctl.core.kernel._repository import KernelRepository
@@ -173,6 +166,9 @@ class VMCreateRequest:
     def result(self) -> ResolvedVMCreateInput | None:
         return self._result
 
+    def _resolve_setting(self, category: str, key: str) -> Any:
+        return SettingsService.resolve(self._db, category, key)
+
     def resolve(self) -> ResolvedVMCreateInput:
         """Resolve all inputs to explicit values."""
 
@@ -206,13 +202,13 @@ class VMCreateRequest:
             vm_dir=self._vm_dir,
             vcpu_count=self._inputs.vcpu_count
             if self._inputs.vcpu_count is not None
-            else DEFAULT_VM_VCPU_COUNT,
+            else self._resolve_setting("defaults.vm", "vcpu_count"),
             mem_size_mib=self._inputs.mem_size_mib
             if self._inputs.mem_size_mib is not None
-            else DEFAULT_VM_MEM_MIB,
+            else self._resolve_setting("defaults.vm", "mem_size_mib"),
             user=self._inputs.user
             if self._inputs.user is not None
-            else DEFAULT_VM_SSH_USER,
+            else self._resolve_setting("defaults.vm", "ssh_user"),
             network=network,
             image=image,
             kernel=kernel,
@@ -220,16 +216,16 @@ class VMCreateRequest:
             cloud_init_mode=ci_mode_result.mode,
             enable_pci=self._inputs.enable_pci
             if self._inputs.enable_pci is not None
-            else DEFAULT_VM_ENABLE_PCI,
+            else self._resolve_setting("defaults.vm", "enable_pci"),
             enable_console=self._inputs.enable_console
             if self._inputs.enable_console is not None
-            else DEFAULT_VM_ENABLE_CONSOLE,
+            else self._resolve_setting("defaults.vm", "enable_console"),
             enable_logging=self._inputs.enable_logging
             if self._inputs.enable_logging is not None
-            else DEFAULT_VM_ENABLE_LOGGING,
+            else self._resolve_setting("defaults.vm", "enable_logging"),
             enable_metrics=self._inputs.enable_metrics
             if self._inputs.enable_metrics is not None
-            else DEFAULT_VM_ENABLE_METRICS,
+            else self._resolve_setting("defaults.vm", "enable_metrics"),
             skip_cleanup=self._inputs.skip_cleanup,
             requested_guest_mac=self._inputs.requested_guest_mac,
             requested_guest_ip=self._inputs.requested_guest_ip,
@@ -251,10 +247,10 @@ class VMCreateRequest:
             else None,
             boot_args=self._inputs.boot_args
             if self._inputs.boot_args is not None
-            else f"{DEFAULT_VM_BOOT_ARGS} root=UUID={image.fs_uuid}",
+            else f"{self._resolve_setting('defaults.vm', 'boot_args')} root=UUID={image.fs_uuid}",
             lsm_flags=self._inputs.lsm_flags
             if self._inputs.lsm_flags is not None
-            else DEFAULT_VM_LSM_FLAGS,
+            else self._resolve_setting("defaults.vm", "lsm_flags"),
             extra_drives=[],
         )
 

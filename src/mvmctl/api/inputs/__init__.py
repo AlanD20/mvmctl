@@ -18,6 +18,11 @@ from mvmctl.api.inputs._binary_input import (
     BinaryRequest,
     ResolvedBinaryInput,
 )
+from mvmctl.api.inputs._config_input import (
+    ConfigInput,
+    ConfigRequest,
+    ResolvedConfigInput,
+)
 from mvmctl.api.inputs._console_input import (
     ConsoleInput,
     ConsoleRequest,
@@ -111,6 +116,9 @@ __all__ = [
     "BinaryInput",
     "BinaryRequest",
     "CloudInitModeResolved",
+    "ConfigInput",
+    "ConfigRequest",
+    "ResolvedConfigInput",
     "ImageFetchInput",
     "ImageImportInput",
     "ImageInput",

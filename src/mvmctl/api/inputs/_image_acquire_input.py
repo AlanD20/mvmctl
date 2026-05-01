@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mvmctl.constants import DEFAULT_IMAGE_ARCH
 from mvmctl.core._shared import Database
+from mvmctl.core.config._service import SettingsService
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.core.image._resolver import ImageResolver
 from mvmctl.exceptions import ImageAcquireError
@@ -100,11 +100,10 @@ class ImageAcquireRequest:
             raise ImageAcquireError("Expected ImageFetchInput")
 
         # Default arch
-        arch = (
-            self._inputs.arch
-            if self._inputs.arch is not None
-            else DEFAULT_IMAGE_ARCH
-        )
+        if self._inputs.arch is not None:
+            arch = self._inputs.arch
+        else:
+            arch = SettingsService.resolve(self._db, "defaults.image", "arch")
 
         # Resolve disabled detectors
         disabled = self._resolve_disabled_detectors(
@@ -132,11 +131,10 @@ class ImageAcquireRequest:
             raise ImageAcquireError("Expected ImageImportInput")
 
         # Default arch
-        arch = (
-            self._inputs.arch
-            if self._inputs.arch is not None
-            else DEFAULT_IMAGE_ARCH
-        )
+        if self._inputs.arch is not None:
+            arch = self._inputs.arch
+        else:
+            arch = SettingsService.resolve(self._db, "defaults.image", "arch")
 
         # Resolve disabled detectors
         disabled = self._resolve_disabled_detectors(

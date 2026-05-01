@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from mvmctl.constants import DEBUG_MODE
 from mvmctl.exceptions import MVMError
@@ -464,26 +466,59 @@ class CommonUtils:
         else:
             return "   "
 
+    @staticmethod
+    def coerce(value: Any, expected_type: type) -> Any:
+        """
+        Coerce a value to the expected type.
 
-def safe_int(value: object, default: int = 0) -> int:
-    """
-    Safely extract an integer from a value.
+        Handles string→bool, string→int, string→float, string→dict via json.loads.
+        Raises TypeError if coercion fails.
 
-    Args:
-        value: The value to convert (int, float, str, or other).
-        default: Default to return if conversion fails.
+        Args:
+            value: Value to coerce.
+            expected_type: Target Python type.
 
-    Returns:
-        The integer value, or default if conversion fails.
+        Returns:
+            Coerced value.
 
-    """
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value)
-    if isinstance(value, str):
-        try:
+        Raises:
+            TypeError: If value cannot be coerced to expected_type.
+
+        """
+        if expected_type is bool and isinstance(value, str):
+            return value.lower() in ("true", "1", "yes", "on")
+        if expected_type is int and isinstance(value, str):
             return int(value)
-        except ValueError:
-            return default
-    return default
+        if expected_type is float and isinstance(value, str):
+            return float(value)
+        if expected_type is dict and isinstance(value, str):
+            return json.loads(value)
+        if not isinstance(value, expected_type):
+            raise TypeError(
+                f"Expected {expected_type.__name__}, got {type(value).__name__}"
+            )
+        return value
+
+    @staticmethod
+    def safe_int(value: object, default: int = 0) -> int:
+        """
+        Safely extract an integer from a value.
+
+        Args:
+            value: The value to convert (int, float, str, or other).
+            default: Default to return if conversion fails.
+
+        Returns:
+            The integer value, or default if conversion fails.
+
+        """
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            try:
+                return int(value)
+            except ValueError:
+                return default
+        return default

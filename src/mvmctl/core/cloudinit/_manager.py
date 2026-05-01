@@ -14,7 +14,7 @@ from typing import Any
 
 from passlib.hash import bcrypt, sha512_crypt
 
-from mvmctl.constants import DEFAULT_VM_USER_PASSWORD, REQUIRED_ISO_TOOL
+from mvmctl.constants import REQUIRED_ISO_TOOL, get_default
 from mvmctl.core._shared import AssetManager
 from mvmctl.core.cloudinit._provisioner import CloudInitProvisionConfig
 from mvmctl.exceptions import (
@@ -284,7 +284,9 @@ class CloudInitManager:
             ipv4_gateway=self._config.network.ipv4_gateway,
             prefix_len=self._config.network_prefix_len,
             ssh_pubkeys=self._config.ssh_pubkeys,
-            password_hash=self.generate_password_hash(DEFAULT_VM_USER_PASSWORD),
+            password_hash=self.generate_password_hash(
+                str(get_default("defaults.vm", "user_password"))
+            ),
         )
 
         # Parse the rendered YAML sections
