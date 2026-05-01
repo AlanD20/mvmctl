@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mvmctl.core._internal._enrichment import RelationEnricher, RelationSpec
+from mvmctl.core._shared import RelationEnricher, RelationSpec
 from mvmctl.core.key._repository import KeyRepository
 from mvmctl.exceptions import KeyNotFoundError, MVMKeyError
 from mvmctl.models.key import SSHKeyItem
@@ -141,6 +141,6 @@ class KeyResolver:
         return KeyResolveResult(items=items, errors=errors, exit_code=exit_code)
 
 
-from mvmctl.core._internal._resolver_registry import register  # noqa: E402
+from mvmctl.core._shared import register  # noqa: E402
 
 register("key", lambda: KeyResolver)

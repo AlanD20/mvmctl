@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from mvmctl.api.inputs._ssh_input import SSHInput, SSHRequest
-from mvmctl.core._internal._db import Database
+from mvmctl.core._shared import Database
 from mvmctl.core.ssh._service import SSHService
 from mvmctl.utils.auditlog import AuditLog
 

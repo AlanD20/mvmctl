@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mvmctl.core._internal._enrichment import RelationEnricher, RelationSpec
+from mvmctl.core._shared import RelationEnricher, RelationSpec
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.exceptions import VMNotFoundError
 from mvmctl.models.vm import VMInstanceItem
@@ -165,6 +165,6 @@ class VMResolver:
         return VMResolveResult(items=items, errors=errors, exit_code=exit_code)
 
 
-from mvmctl.core._internal._resolver_registry import register  # noqa: E402
+from mvmctl.core._shared import register  # noqa: E402
 
 register("vm", lambda: VMResolver)

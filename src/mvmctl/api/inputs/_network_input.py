@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from mvmctl.core._internal._db import Database
+from mvmctl.core._shared import Database
 from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.core.network._resolver import NetworkResolver
 from mvmctl.exceptions import NetworkNotFoundError

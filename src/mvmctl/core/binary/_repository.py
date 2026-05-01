@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mvmctl.core._internal._db import Database
+from mvmctl.core._shared import Database
 from mvmctl.models.binary import BinaryItem
 from mvmctl.models.vm import VMInstanceItem
 

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from mvmctl.constants import DEFAULT_NETWORK_NAME, DEFAULT_NETWORK_SUBNET
-from mvmctl.core._internal._db import Database
+from mvmctl.core._shared import Database
 from mvmctl.core.host._repository import HostRepository
 from mvmctl.core.network._controller import NetworkController
 from mvmctl.core.network._repository import NetworkRepository

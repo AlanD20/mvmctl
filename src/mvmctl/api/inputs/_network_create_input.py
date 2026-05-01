@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from mvmctl.core._internal._db import Database
+from mvmctl.core._shared import Database
 from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.exceptions import NetworkError
 from mvmctl.utils._network_validator import NetworkValidator

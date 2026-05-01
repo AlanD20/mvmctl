@@ -9,7 +9,7 @@ from typing import Any
 
 from mvmctl.api.cache_operations import CacheOperation
 from mvmctl.api.host_operations import HostOperation
-from mvmctl.core._internal._db import Database
+from mvmctl.core._shared import Database
 from mvmctl.exceptions import BinaryError, HostError
 from mvmctl.models.host import HostStateChangeItem
 from mvmctl.utils.common import CacheUtils

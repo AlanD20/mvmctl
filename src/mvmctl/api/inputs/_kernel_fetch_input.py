@@ -11,7 +11,7 @@ from mvmctl.constants import (
     DEFAULT_KERNEL_BUILD_JOBS,
     DEFAULT_KERNEL_VERSION,
 )
-from mvmctl.core._internal._db import Database
+from mvmctl.core._shared import Database
 from mvmctl.exceptions import KernelError
 from mvmctl.utils.common import CacheUtils
 

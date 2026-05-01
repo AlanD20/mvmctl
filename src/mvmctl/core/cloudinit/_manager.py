@@ -14,7 +14,7 @@ from typing import Any
 from passlib.hash import bcrypt, sha512_crypt
 
 from mvmctl.constants import DEFAULT_VM_USER_PASSWORD, REQUIRED_ISO_TOOL
-from mvmctl.core._internal._asset_manager import AssetManager
+from mvmctl.core._shared import AssetManager
 from mvmctl.core.cloudinit._provisioner import CloudInitProvisionConfig
 from mvmctl.exceptions import (
     CloudInitError,

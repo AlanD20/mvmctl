@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mvmctl.core._internal._iptables_tracker import (
+from mvmctl.core._shared import (
     IPTablesRuleRepository,
     IPTablesTracker,
 )

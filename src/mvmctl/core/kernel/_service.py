@@ -25,7 +25,7 @@ from mvmctl.constants import (
     KERNEL_TYPE_FIRECRACKER,
     KERNEL_TYPE_OFFICIAL,
 )
-from mvmctl.core._internal._asset_manager import AssetManager
+from mvmctl.core._shared import AssetManager
 from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.exceptions import (
     ChecksumMismatchError,

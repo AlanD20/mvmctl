@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mvmctl.core._internal._enrichment import RelationEnricher, RelationSpec
+from mvmctl.core._shared import RelationEnricher, RelationSpec
 from mvmctl.core.network._repository import LeaseRepository
 from mvmctl.models.network import NetworkLeaseItem
 
@@ -60,6 +60,6 @@ class NetworkLeaseResolver:
         return self._enrich(leases)
 
 
-from mvmctl.core._internal._resolver_registry import register  # noqa: E402
+from mvmctl.core._shared import register  # noqa: E402
 
 register("network_lease", lambda: NetworkLeaseResolver)

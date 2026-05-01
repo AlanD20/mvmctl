@@ -28,8 +28,8 @@ from mvmctl.constants import (
     DEFAULT_BRIDGE_NAME,
     MAX_VMS,
 )
-from mvmctl.core._internal._db import Database
-from mvmctl.core._internal._guestfs import GuestfsProvisioner
+from mvmctl.core._shared import Database
+from mvmctl.core._shared._guestfs import GuestfsProvisioner
 from mvmctl.core.cloudinit._provisioner import (
     CloudInitProvisionConfig,
     CloudInitProvisioner,
@@ -169,10 +169,8 @@ class VMCreateContext:
 
                 # Remove all rules created by cloud-init, currently only nocloud-net
                 # creates rule.
-                from mvmctl.core._internal._iptables_tracker import (
-                    IPTablesTracker,
-                )
-                from mvmctl.core._internal._iptables_tracker._repository import (
+                from mvmctl.core._shared import IPTablesTracker
+                from mvmctl.core._shared._iptables_tracker._repository import (
                     IPTablesRuleRepository,
                 )
 

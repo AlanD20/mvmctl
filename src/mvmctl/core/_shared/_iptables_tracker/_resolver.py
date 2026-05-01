@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from mvmctl.core._internal._enrichment import RelationEnricher, RelationSpec
-from mvmctl.core._internal._iptables_tracker import IPTablesRuleRepository
+from mvmctl.core._shared._enrichment import RelationEnricher, RelationSpec
+from mvmctl.core._shared._iptables_tracker import IPTablesRuleRepository
 from mvmctl.models.network import IPTablesRuleItem
 
 __all__ = ["IPTablesRuleResolver"]
@@ -60,6 +60,6 @@ class IPTablesRuleResolver:
         return self._enrich(rules)
 
 
-from mvmctl.core._internal._resolver_registry import register  # noqa: E402
+from mvmctl.core._shared._resolver_registry import register  # noqa: E402
 
 register("iptables_rule", lambda: IPTablesRuleResolver)

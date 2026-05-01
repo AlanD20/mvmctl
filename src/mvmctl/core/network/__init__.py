@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mvmctl.core._internal._iptables_tracker import IPTablesRuleResolver
+from mvmctl.core._shared import IPTablesRuleResolver
 from mvmctl.core.network._controller import NetworkController
 from mvmctl.core.network._lease_resolver import NetworkLeaseResolver
 from mvmctl.core.network._lease_service import LeaseService

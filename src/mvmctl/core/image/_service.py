@@ -25,8 +25,8 @@ from mvmctl.constants import (
     HTTP_TIMEOUT_SHA256_FETCH_S,
     SUPPORTED_IMAGE_EXTENSIONS,
 )
-from mvmctl.core._internal._asset_manager import AssetManager
-from mvmctl.core._internal._guestfs import OptimizedGuestfs
+from mvmctl.core._shared import AssetManager
+from mvmctl.core._shared._guestfs import OptimizedGuestfs
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.exceptions import (
     GuestfsNotAvailableError,

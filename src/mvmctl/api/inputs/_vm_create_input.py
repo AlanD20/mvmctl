@@ -24,7 +24,7 @@ from mvmctl.constants import (
     DEFAULT_VM_SSH_USER,
     DEFAULT_VM_VCPU_COUNT,
 )
-from mvmctl.core._internal._db import Database
+from mvmctl.core._shared import Database
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.binary._resolver import BinaryResolver
 from mvmctl.core.binary._service import BinaryService

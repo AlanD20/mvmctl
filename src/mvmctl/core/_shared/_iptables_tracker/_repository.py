@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from mvmctl.core._internal._db import Database
+from mvmctl.core._shared._db import Database
 from mvmctl.models.network import (
     IPTablesChain,
     IPTablesProtocol,

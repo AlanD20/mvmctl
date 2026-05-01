@@ -14,7 +14,7 @@ from mvmctl.api.inputs._key_input import (
     KeyInput,
     KeyRequest,
 )
-from mvmctl.core._internal._db import Database
+from mvmctl.core._shared import Database
 from mvmctl.core.key._controller import KeyController
 from mvmctl.core.key._repository import KeyRepository
 from mvmctl.core.key._service import KeyService

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mvmctl.core._internal._enrichment import RelationEnricher, RelationSpec
+from mvmctl.core._shared import RelationEnricher, RelationSpec
 from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.exceptions import KernelNotFoundError
 from mvmctl.models.kernel import KernelItem
@@ -115,6 +115,6 @@ class KernelResolver:
         )
 
 
-from mvmctl.core._internal._resolver_registry import register  # noqa: E402
+from mvmctl.core._shared import register  # noqa: E402
 
 register("kernel", lambda: KernelResolver)

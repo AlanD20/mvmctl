@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 
 from mvmctl.constants import DEFAULT_NETWORK_NAME
-from mvmctl.core._internal._db import Database
+from mvmctl.core._shared import Database
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.host._helper import HostPrivilegeHelper
 from mvmctl.core.image._repository import ImageRepository

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mvmctl.core._internal._enrichment import RelationEnricher, RelationSpec
+from mvmctl.core._shared import RelationEnricher, RelationSpec
 from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.exceptions import NetworkNotFoundError
 from mvmctl.models.network import NetworkItem
@@ -121,6 +121,6 @@ class NetworkResolver:
         )
 
 
-from mvmctl.core._internal._resolver_registry import register  # noqa: E402
+from mvmctl.core._shared import register  # noqa: E402
 
 register("network", lambda: NetworkResolver)

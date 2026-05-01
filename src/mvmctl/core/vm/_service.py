@@ -6,8 +6,7 @@ Bulk operations delegate to VMController per VM via ParallelExecutor.
 
 from __future__ import annotations
 
-from mvmctl.core._internal._db import Database
-from mvmctl.core._internal._parallel import ParallelExecutor
+from mvmctl.core._shared import Database, ParallelExecutor
 from mvmctl.core.vm._controller import VMController
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.models.bulk import BulkResult, BulkResultItem

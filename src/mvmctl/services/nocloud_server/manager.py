@@ -11,13 +11,11 @@ providing better isolation and reliability compared to thread-based servers.
 import logging
 import os
 import signal
-import socket
 import subprocess
 import sys
 import threading
 import warnings
 from pathlib import Path
-from typing import Any
 
 from mvmctl.services.nocloud_server._defaults import (
     DEFAULT_NOCLOUD_LOG_FILENAME,

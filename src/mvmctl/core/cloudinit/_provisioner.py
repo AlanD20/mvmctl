@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mvmctl.constants import CONST_DIR_PERMS_CACHE, DEFAULT_CLOUD_INIT_ISO_NAME
-from mvmctl.core._internal._iptables_tracker import IPTablesTracker
+from mvmctl.core._shared import IPTablesTracker
 from mvmctl.exceptions import (
     CloudInitIsoModeError,
     CloudInitNetModeError,
@@ -133,8 +133,8 @@ class CloudInitProvisioner:
             )
             url, port, pid = net_manager.start()
 
-            from mvmctl.core._internal._db import Database
-            from mvmctl.core._internal._iptables_tracker._repository import (
+            from mvmctl.core._shared import Database
+            from mvmctl.core._shared._iptables_tracker._repository import (
                 IPTablesRuleRepository,
             )
 

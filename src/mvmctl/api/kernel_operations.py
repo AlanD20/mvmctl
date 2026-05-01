@@ -13,7 +13,7 @@ from mvmctl.api.inputs._kernel_fetch_input import (
 )
 from mvmctl.api.inputs._kernel_input import KernelInput
 from mvmctl.constants import DEFAULT_FIRECRACKER_CI_VERSION
-from mvmctl.core._internal._db import Database
+from mvmctl.core._shared import Database
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.binary._service import BinaryService
 from mvmctl.core.kernel._controller import KernelController

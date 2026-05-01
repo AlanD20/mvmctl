@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
-from mvmctl.core._internal._resolver_registry import get as get_resolver
+from mvmctl.core._shared._resolver_registry import get as get_resolver
 
 T = TypeVar("T")
 

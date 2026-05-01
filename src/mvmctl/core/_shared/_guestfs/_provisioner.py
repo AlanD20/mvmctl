@@ -21,7 +21,7 @@ from mvmctl.constants import (
     CONST_SHADOW_MIN_DAYS,
     CONST_SHADOW_WARN_DAYS,
 )
-from mvmctl.core._internal._guestfs import OptimizedGuestfs
+from mvmctl.core._shared._guestfs import OptimizedGuestfs
 from mvmctl.exceptions import (
     GuestfsWriteError,
     VMBuilderError,

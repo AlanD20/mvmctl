@@ -16,7 +16,7 @@ from mvmctl.constants import (
     TAP_PREFIX,
     device_prefix,
 )
-from mvmctl.core._internal._db import Database
+from mvmctl.core._shared import Database
 from mvmctl.core.host._controller import HostController
 from mvmctl.core.host._helper import HostPrivilegeHelper
 from mvmctl.core.host._repository import HostRepository

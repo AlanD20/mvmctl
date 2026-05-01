@@ -16,7 +16,7 @@ from mvmctl.api.inputs._image_acquire_input import (
 )
 from mvmctl.api.inputs._image_input import ImageInput
 from mvmctl.constants import DEFAULT_FIRECRACKER_CI_VERSION
-from mvmctl.core._internal._db import Database
+from mvmctl.core._shared import Database
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.core.image._resolver import ImageResolver
@@ -289,7 +289,7 @@ class ImageOperation:
         Returns:
             List of ImageItem (local) or ImageSpec (remote).
         """
-        from mvmctl.core._internal._db import Database
+        from mvmctl.core._shared import Database
         from mvmctl.core.binary._service import BinaryService
         from mvmctl.core.image._repository import ImageRepository
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mvmctl.core._internal._enrichment import RelationEnricher, RelationSpec
+from mvmctl.core._shared import RelationEnricher, RelationSpec
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.exceptions import ImageNotFoundError
 from mvmctl.models.image import ImageItem
@@ -113,6 +113,6 @@ class ImageResolver:
         )
 
 
-from mvmctl.core._internal._resolver_registry import register  # noqa: E402
+from mvmctl.core._shared import register  # noqa: E402
 
 register("image", lambda: ImageResolver)

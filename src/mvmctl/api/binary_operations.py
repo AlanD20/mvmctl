@@ -18,7 +18,7 @@ from mvmctl.api.inputs._binary_input import (
     BinaryInput,
     BinaryRequest,
 )
-from mvmctl.core._internal._db import Database
+from mvmctl.core._shared import Database
 from mvmctl.core.binary._controller import BinaryController
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.binary._resolver import BinaryResolver

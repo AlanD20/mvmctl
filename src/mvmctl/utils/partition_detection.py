@@ -4,7 +4,10 @@ import logging
 from typing import Protocol
 
 from mvmctl import constants
-from mvmctl.exceptions import RootPartitionDetectionError, TieDetectedError  # noqa: F401
+from mvmctl.exceptions import (  # noqa: F401
+    RootPartitionDetectionError,
+    TieDetectedError,
+)
 
 logger = logging.getLogger(__name__)
 
