@@ -39,11 +39,13 @@ from mvmctl.exceptions import (
     NetworkNotFoundError,
     VMCreateError,
 )
-from mvmctl.models.binary import BinaryItem
-from mvmctl.models.cloudinit import CloudInitMode
-from mvmctl.models.image import ImageItem
-from mvmctl.models.kernel import KernelItem
-from mvmctl.models.network import NetworkItem
+from mvmctl.models import (
+    BinaryItem,
+    CloudInitMode,
+    ImageItem,
+    KernelItem,
+    NetworkItem,
+)
 from mvmctl.utils._disk import parse_disk_size
 from mvmctl.utils._validators import NetworkValidator, VMValidator
 from mvmctl.utils.common import CacheUtils

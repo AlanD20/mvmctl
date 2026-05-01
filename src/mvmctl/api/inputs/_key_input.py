@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from mvmctl.core._shared import Database
 from mvmctl.core.key._resolver import KeyResolver
 from mvmctl.exceptions import KeyNotFoundError
-from mvmctl.models.key import SSHKeyItem
+from mvmctl.models import SSHKeyItem
 
 __all__ = [
     "KeyInput",

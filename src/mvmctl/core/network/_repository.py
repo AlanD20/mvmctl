@@ -5,8 +5,7 @@ from __future__ import annotations
 from datetime import UTC
 
 from mvmctl.core._shared import Database
-from mvmctl.models.network import NetworkItem, NetworkLeaseItem
-from mvmctl.models.vm import VMInstanceItem
+from mvmctl.models import NetworkItem, NetworkLeaseItem, VMInstanceItem
 
 
 class NetworkRepository:

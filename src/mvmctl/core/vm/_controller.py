@@ -14,8 +14,7 @@ from mvmctl.constants import DEFAULT_SNAPSHOT_RESUME
 from mvmctl.core.vm._firecracker import FirecrackerClient
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.exceptions import MVMError
-from mvmctl.models import VMStatus
-from mvmctl.models.vm import VMInstanceItem
+from mvmctl.models import VMInstanceItem, VMStatus
 from mvmctl.utils._system import ProcessSignalHandler
 
 logger = logging.getLogger(__name__)

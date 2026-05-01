@@ -15,7 +15,7 @@ from enum import Enum
 
 from mvmctl.constants import CONST_IPTABLES_MAX_COMMENT_LEN
 from mvmctl.exceptions import IPTablesTrackerError
-from mvmctl.models.network import (
+from mvmctl.models import (
     IPTablesChain,
     IPTablesPort,
     IPTablesProtocol,

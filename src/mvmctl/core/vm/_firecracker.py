@@ -23,8 +23,7 @@ from mvmctl.exceptions import (
     FirecrackerSpawnError,
     SocketNotFoundError,
 )
-from mvmctl.models.cloudinit import CloudInitMode
-from mvmctl.models.firecracker import FirecrackerConfig
+from mvmctl.models import CloudInitMode, FirecrackerConfig
 from mvmctl.utils.fs import FsUtils
 
 logger = logging.getLogger(__name__)

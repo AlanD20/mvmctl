@@ -12,7 +12,7 @@ from pathlib import Path
 
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.core.image._resolver import ImageResolver
-from mvmctl.models.image import ImageItem
+from mvmctl.models import ImageItem
 from mvmctl.utils.common import CacheUtils
 
 logger = logging.getLogger(__name__)

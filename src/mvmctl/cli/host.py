@@ -25,7 +25,7 @@ from mvmctl.utils.common import CacheUtils, CommonUtils
 from mvmctl.utils.fs import FsUtils
 
 if TYPE_CHECKING:
-    from mvmctl.models.host import HostStateChangeItem
+    from mvmctl.models import HostStateChangeItem
 
 _CHAIN_EXISTS_MARKER = "MVM chains already exist"
 

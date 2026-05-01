@@ -8,7 +8,7 @@ from mvmctl.core._shared import Database
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.core.vm._resolver import VMResolver
 from mvmctl.exceptions import VMNotFoundError, VMRequestError
-from mvmctl.models.vm import VMInstanceItem
+from mvmctl.models import VMInstanceItem
 from mvmctl.utils._validators import NetworkValidator
 from mvmctl.utils.common import CommonUtils
 

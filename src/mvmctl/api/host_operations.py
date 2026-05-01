@@ -25,8 +25,12 @@ from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.core.network._service import NetworkService
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.exceptions import HostError, NetworkError
-from mvmctl.models.host import HostStateChangeItem, HostStateItem
-from mvmctl.models.vm import VMInstanceItem, VMStatus
+from mvmctl.models import (
+    HostStateChangeItem,
+    HostStateItem,
+    VMInstanceItem,
+    VMStatus,
+)
 from mvmctl.utils.auditlog import AuditLog
 from mvmctl.utils.fs import FsUtils
 from mvmctl.utils.network import NetworkUtils

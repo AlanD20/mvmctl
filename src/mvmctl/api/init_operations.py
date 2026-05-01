@@ -11,7 +11,7 @@ from mvmctl.api.cache_operations import CacheOperation
 from mvmctl.api.host_operations import HostOperation
 from mvmctl.core._shared import Database
 from mvmctl.exceptions import BinaryError, HostError
-from mvmctl.models.host import HostStateChangeItem
+from mvmctl.models import HostStateChangeItem
 from mvmctl.utils.common import CacheUtils
 
 logger = logging.getLogger(__name__)

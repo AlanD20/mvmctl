@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from mvmctl.core._shared._enrichment import RelationEnricher, RelationSpec
 from mvmctl.core._shared._iptables_tracker import IPTablesRuleRepository
-from mvmctl.models.network import IPTablesRuleItem
+from mvmctl.models import IPTablesRuleItem
 
 __all__ = ["IPTablesRuleResolver"]
 

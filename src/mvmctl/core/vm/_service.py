@@ -10,8 +10,7 @@ from __future__ import annotations
 from mvmctl.core._shared import ParallelExecutor
 from mvmctl.core.vm._controller import VMController
 from mvmctl.core.vm._repository import VMRepository
-from mvmctl.models.bulk import BulkResult, BulkResultItem
-from mvmctl.models.vm import VMInstanceItem
+from mvmctl.models import BulkResult, BulkResultItem, VMInstanceItem
 
 
 class VMService:

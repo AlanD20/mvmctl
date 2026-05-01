@@ -7,7 +7,7 @@ import logging
 from mvmctl.core.network._lease_service import LeaseService
 from mvmctl.core.network._repository import LeaseRepository, NetworkRepository
 from mvmctl.core.network._resolver import NetworkResolver
-from mvmctl.models.network import NetworkItem, NetworkLeaseItem
+from mvmctl.models import NetworkItem, NetworkLeaseItem
 
 logger = logging.getLogger(__name__)
 

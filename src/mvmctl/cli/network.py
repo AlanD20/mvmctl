@@ -24,7 +24,7 @@ from mvmctl.utils.crypto import HashGenerator
 from mvmctl.utils.network import NetworkUtils
 
 if TYPE_CHECKING:
-    from mvmctl.models.network import NetworkItem, NetworkLeaseItem
+    from mvmctl.models import NetworkItem, NetworkLeaseItem
 
 network_app = typer.Typer(
     help="Network management",

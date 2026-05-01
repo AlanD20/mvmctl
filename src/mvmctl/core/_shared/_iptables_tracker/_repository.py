@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from mvmctl.core._shared._db import Database
-from mvmctl.models.network import (
+from mvmctl.models import (
     IPTablesChain,
     IPTablesProtocol,
     IPTablesRuleItem,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from mvmctl.core._shared import Database
-from mvmctl.models.key import SSHKeyItem
+from mvmctl.models import SSHKeyItem
 
 
 class KeyRepository:

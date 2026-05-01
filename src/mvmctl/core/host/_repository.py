@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from mvmctl.core._shared import Database
-from mvmctl.models.host import HostStateChangeItem, HostStateItem
+from mvmctl.models import HostStateChangeItem, HostStateItem
 
 
 class HostRepository:

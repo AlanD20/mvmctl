@@ -29,7 +29,7 @@ from mvmctl.exceptions import (
     BinaryError,
     BinaryNotFoundError,
 )
-from mvmctl.models.binary import BinaryItem
+from mvmctl.models import BinaryItem
 from mvmctl.utils.auditlog import AuditLog
 
 logger = logging.getLogger(__name__)

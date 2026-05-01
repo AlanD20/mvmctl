@@ -20,7 +20,7 @@ from mvmctl.utils.common import CommonUtils
 from mvmctl.utils.crypto import HashGenerator
 
 if TYPE_CHECKING:
-    from mvmctl.models.kernel import KernelItem
+    from mvmctl.models import KernelItem
 
 kernel_app = typer.Typer(
     help="Kernel management",

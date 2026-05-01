@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 import typer
 
 from mvmctl.api import VMCreateInput, VMInput, VMOperation
-from mvmctl.models.vm import VMStatus
+from mvmctl.models import VMStatus
 from mvmctl.utils._io import (
     print_inspect_header,
     print_key_value,
@@ -21,7 +21,7 @@ from mvmctl.utils.cli import handle_errors
 from mvmctl.utils.crypto import HashGenerator
 
 if TYPE_CHECKING:
-    from mvmctl.models.vm import VMInstanceItem
+    from mvmctl.models import VMInstanceItem
 
 
 vm_app = typer.Typer(

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from mvmctl.core._shared import RelationEnricher, RelationSpec
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.exceptions import VMNotFoundError
-from mvmctl.models.vm import VMInstanceItem
+from mvmctl.models import VMInstanceItem
 
 __all__ = [
     "VMResolver",

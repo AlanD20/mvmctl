@@ -20,7 +20,7 @@ from mvmctl.core.kernel._controller import KernelController
 from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.core.kernel._service import KernelService
 from mvmctl.exceptions import KernelError
-from mvmctl.models.kernel import KernelFetchResult, KernelItem
+from mvmctl.models import KernelFetchResult, KernelItem
 from mvmctl.utils.auditlog import AuditLog
 from mvmctl.utils.crypto import HashGenerator
 

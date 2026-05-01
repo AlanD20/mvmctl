@@ -9,7 +9,7 @@ from mvmctl.core._shared import Database
 from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.core.network._resolver import NetworkResolver
 from mvmctl.exceptions import NetworkNotFoundError
-from mvmctl.models.network import NetworkItem
+from mvmctl.models import NetworkItem
 
 if TYPE_CHECKING:
     pass

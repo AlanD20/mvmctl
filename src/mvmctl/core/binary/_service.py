@@ -25,7 +25,7 @@ from mvmctl.constants import (
 )
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.exceptions import BinaryError
-from mvmctl.models.binary import BinaryItem
+from mvmctl.models import BinaryItem
 from mvmctl.utils.common import CacheUtils
 from mvmctl.utils.crypto import HashGenerator
 from mvmctl.utils.http import HttpDownload

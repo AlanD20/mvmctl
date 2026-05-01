@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from mvmctl.core._shared import RelationEnricher, RelationSpec
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.exceptions import BinaryNotFoundError
-from mvmctl.models.binary import BinaryItem
+from mvmctl.models import BinaryItem
 
 __all__ = [
     "BinaryResolver",

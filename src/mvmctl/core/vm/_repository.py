@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from mvmctl.core._shared import Database
-from mvmctl.models import VMStatus
-from mvmctl.models.vm import VMInstanceItem
+from mvmctl.models import VMInstanceItem, VMStatus
 
 
 class VMRepository:

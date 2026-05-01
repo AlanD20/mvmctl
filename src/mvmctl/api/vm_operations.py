@@ -61,9 +61,12 @@ from mvmctl.exceptions import (
     VMCreateError,
     VMNotFoundError,
 )
-from mvmctl.models.cloudinit import CloudInitMode
-from mvmctl.models.firecracker import FirecrackerConfig
-from mvmctl.models.vm import VMInstanceItem, VMStatus
+from mvmctl.models import (
+    CloudInitMode,
+    FirecrackerConfig,
+    VMInstanceItem,
+    VMStatus,
+)
 from mvmctl.utils._system import SigtermContext
 from mvmctl.utils.auditlog import AuditLog
 from mvmctl.utils.common import CacheUtils

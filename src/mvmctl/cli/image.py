@@ -18,7 +18,7 @@ from mvmctl.constants import (
     DEFAULT_IMAGE_IMPORT_FORMAT,
     IMAGE_IMPORT_FORMAT_MAP,
 )
-from mvmctl.models.image import ImageItem, ImageSpec
+from mvmctl.models import ImageItem, ImageSpec
 from mvmctl.utils._io import (
     print_error,
     print_info,

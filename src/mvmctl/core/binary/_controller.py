@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.binary._resolver import BinaryResolver
-from mvmctl.models.binary import BinaryItem
+from mvmctl.models import BinaryItem
 
 
 class BinaryController:

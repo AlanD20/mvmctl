@@ -12,7 +12,7 @@ import ipaddress
 from mvmctl.core.network._repository import LeaseRepository
 from mvmctl.core.network._resolver import NetworkResolver
 from mvmctl.exceptions import NetworkError
-from mvmctl.models.network import NetworkItem, NetworkLeaseItem
+from mvmctl.models import NetworkItem, NetworkLeaseItem
 from mvmctl.utils.network import NetworkUtils
 
 

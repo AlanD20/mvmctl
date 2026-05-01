@@ -7,7 +7,7 @@ from collections.abc import Generator
 from mvmctl.core.logs._service import LogService
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.core.vm._resolver import VMResolver
-from mvmctl.models.vm import VMInstanceItem
+from mvmctl.models import VMInstanceItem
 
 
 class LogController:

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from mvmctl.constants import CONST_FILE_PERMS_PRIVATE_KEY
 from mvmctl.core.key._repository import KeyRepository
 from mvmctl.core.key._resolver import KeyResolver
-from mvmctl.models.key import SSHKeyItem
+from mvmctl.models import SSHKeyItem
 
 if TYPE_CHECKING:
     pass

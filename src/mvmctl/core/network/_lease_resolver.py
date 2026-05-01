@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from mvmctl.core._shared import RelationEnricher, RelationSpec
 from mvmctl.core.network._repository import LeaseRepository
-from mvmctl.models.network import NetworkLeaseItem
+from mvmctl.models import NetworkLeaseItem
 
 __all__ = ["NetworkLeaseResolver"]
 

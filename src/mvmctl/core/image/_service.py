@@ -37,7 +37,7 @@ from mvmctl.exceptions import (
     ImageError,
     ImageValidationError,
 )
-from mvmctl.models.image import ImageItem, ImageSpec
+from mvmctl.models import ImageItem, ImageSpec
 from mvmctl.utils.common import CacheUtils, CommonUtils
 from mvmctl.utils.http import HttpDownload
 from mvmctl.utils.template import render_optional_template, render_template

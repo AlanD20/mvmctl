@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from mvmctl.core._shared import RelationEnricher, RelationSpec
 from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.exceptions import NetworkNotFoundError
-from mvmctl.models.network import NetworkItem
+from mvmctl.models import NetworkItem
 
 __all__ = [
     "NetworkResolver",

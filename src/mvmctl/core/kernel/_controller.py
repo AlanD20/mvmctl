@@ -5,7 +5,7 @@ from __future__ import annotations
 from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.core.kernel._resolver import KernelResolver
 from mvmctl.exceptions import KernelError
-from mvmctl.models.kernel import KernelItem
+from mvmctl.models import KernelItem
 
 
 class KernelController:

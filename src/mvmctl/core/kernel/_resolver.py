@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from mvmctl.core._shared import RelationEnricher, RelationSpec
 from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.exceptions import KernelNotFoundError
-from mvmctl.models.kernel import KernelItem
+from mvmctl.models import KernelItem
 
 __all__ = [
     "KernelResolver",

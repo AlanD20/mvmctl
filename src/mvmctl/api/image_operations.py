@@ -26,7 +26,7 @@ from mvmctl.exceptions import (
     RootPartitionDetectionError,
     TieDetectedError,
 )
-from mvmctl.models.image import ImageItem, ImageSpec
+from mvmctl.models import ImageItem, ImageSpec
 from mvmctl.utils.auditlog import AuditLog
 from mvmctl.utils.common import CacheUtils
 from mvmctl.utils.crypto import HashGenerator

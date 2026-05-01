@@ -27,7 +27,7 @@ from mvmctl.constants import (
 )
 from mvmctl.core.host._repository import HostRepository
 from mvmctl.exceptions import HostError
-from mvmctl.models.host import HostStateChangeItem
+from mvmctl.models import HostStateChangeItem
 
 logger = logging.getLogger(__name__)
 

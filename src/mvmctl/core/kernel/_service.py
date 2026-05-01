@@ -33,7 +33,7 @@ from mvmctl.exceptions import (
     KernelError,
     MVMError,
 )
-from mvmctl.models.kernel import KernelFetchResult, KernelItem, KernelSpec
+from mvmctl.models import KernelFetchResult, KernelItem, KernelSpec
 from mvmctl.utils.http import HttpDownload
 from mvmctl.utils.template import render_optional_template, render_template
 from mvmctl.utils.yaml import (

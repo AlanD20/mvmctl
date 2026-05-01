@@ -19,7 +19,7 @@ from mvmctl.core.key._controller import KeyController
 from mvmctl.core.key._repository import KeyRepository
 from mvmctl.core.key._service import KeyService
 from mvmctl.exceptions import MVMKeyError
-from mvmctl.models.key import SSHKeyItem
+from mvmctl.models import SSHKeyItem
 from mvmctl.utils.auditlog import AuditLog
 from mvmctl.utils.common import CacheUtils
 

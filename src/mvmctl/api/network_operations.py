@@ -14,7 +14,7 @@ from mvmctl.core.network._controller import NetworkController
 from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.core.network._service import NetworkService
 from mvmctl.exceptions import NetworkError
-from mvmctl.models.network import NetworkItem
+from mvmctl.models import NetworkItem
 from mvmctl.utils.auditlog import AuditLog
 from mvmctl.utils.crypto import HashGenerator
 from mvmctl.utils.network import NetworkUtils

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from mvmctl.api.inputs._vm_input import VMInput, VMRequest
 from mvmctl.core._shared import Database
 from mvmctl.core.config._service import SettingsService
-from mvmctl.models.vm import VMInstanceItem
+from mvmctl.models import VMInstanceItem
 
 
 @dataclass

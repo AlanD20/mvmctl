@@ -12,7 +12,7 @@ from mvmctl.exceptions import (
     CloudInitIsoModeError,
     CloudInitNetModeError,
 )
-from mvmctl.models.network import (
+from mvmctl.models import (
     IPTablesChain,
     IPTablesPort,
     IPTablesProtocol,
@@ -26,7 +26,7 @@ from mvmctl.models.network import (
 from mvmctl.services.nocloud_server.manager import NoCloudNetServerManager
 
 if TYPE_CHECKING:
-    from mvmctl.models.cloudinit import CloudInitMode
+    from mvmctl.models import CloudInitMode
 
 
 @dataclass

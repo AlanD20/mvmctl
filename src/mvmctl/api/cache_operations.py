@@ -15,8 +15,7 @@ from mvmctl.core.image._repository import ImageRepository
 from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.core.network._repository import LeaseRepository, NetworkRepository
 from mvmctl.core.vm._repository import VMRepository
-from mvmctl.models import CleanResult, PruneAllResult
-from mvmctl.models.vm import VMStatus
+from mvmctl.models import CleanResult, PruneAllResult, VMStatus
 from mvmctl.utils.common import CacheUtils
 
 logger = logging.getLogger(__name__)

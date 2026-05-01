@@ -8,7 +8,7 @@ from mvmctl.core._shared import Database
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.binary._resolver import BinaryResolver
 from mvmctl.exceptions import BinaryError, BinaryNotFoundError
-from mvmctl.models.binary import BinaryItem
+from mvmctl.models import BinaryItem
 
 __all__ = ["BinaryInput", "BinaryRequest", "ResolvedBinaryInput"]
 

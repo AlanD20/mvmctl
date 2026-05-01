@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from mvmctl.core._shared import RelationEnricher, RelationSpec
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.exceptions import ImageNotFoundError
-from mvmctl.models.image import ImageItem
+from mvmctl.models import ImageItem
 
 __all__ = [
     "ImageResolver",

@@ -12,7 +12,7 @@ from mvmctl.core._shared import (
 )
 from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.exceptions import NetworkError
-from mvmctl.models.network import (
+from mvmctl.models import (
     IPTablesChain,
     IPTablesPort,
     IPTablesProtocol,

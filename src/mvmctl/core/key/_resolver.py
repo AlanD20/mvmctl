@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from mvmctl.core._shared import RelationEnricher, RelationSpec
 from mvmctl.core.key._repository import KeyRepository
 from mvmctl.exceptions import KeyNotFoundError, MVMKeyError
-from mvmctl.models.key import SSHKeyItem
+from mvmctl.models import SSHKeyItem
 
 if TYPE_CHECKING:
     pass

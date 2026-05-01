@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from mvmctl.api.inputs._vm_input import VMInput, VMRequest
 from mvmctl.core._shared import Database
-from mvmctl.models.vm import VMInstanceItem
+from mvmctl.models import VMInstanceItem
 from mvmctl.services.console_relay import ConsoleRelayManager
 from mvmctl.utils.common import CacheUtils
 

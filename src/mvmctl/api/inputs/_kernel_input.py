@@ -8,7 +8,7 @@ from mvmctl.core._shared import Database
 from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.core.kernel._resolver import KernelResolver
 from mvmctl.exceptions import KernelNotFoundError
-from mvmctl.models.kernel import KernelItem
+from mvmctl.models import KernelItem
 
 __all__ = ["KernelInput", "KernelRequest", "ResolvedKernelInput"]
 

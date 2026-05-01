@@ -18,7 +18,7 @@ from pathlib import Path
 
 from mvmctl.core.key._repository import KeyRepository
 from mvmctl.exceptions import MVMKeyError
-from mvmctl.models.key import SSHKeyItem
+from mvmctl.models import SSHKeyItem
 
 logger = logging.getLogger(__name__)
 

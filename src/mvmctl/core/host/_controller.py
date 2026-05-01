@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime
 
 from mvmctl.core.host._repository import HostRepository
-from mvmctl.models.host import HostStateChangeItem
+from mvmctl.models import HostStateChangeItem
 
 
 class HostController:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from mvmctl.core._shared import Database
-from mvmctl.models.image import ImageItem
+from mvmctl.models import ImageItem
 
 
 class ImageRepository:
