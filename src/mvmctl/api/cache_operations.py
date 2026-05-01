@@ -9,6 +9,7 @@ from pathlib import Path
 
 from mvmctl.core._shared import Database
 from mvmctl.core.binary._repository import BinaryRepository
+from mvmctl.core.cache import CacheService
 from mvmctl.core.config._service import SettingsService
 from mvmctl.core.host._helper import HostPrivilegeHelper
 from mvmctl.core.image._repository import ImageRepository
@@ -89,7 +90,7 @@ class CacheOperation:
         # Libguestfs leaves daemon state in system temp dirs that can cause
         # subsequent builds to hang if a previous run was interrupted. Clean
         # stale locks and sockets before every build.
-        CacheOperation._clean_stale_guestfs_state()
+        CacheService.clean_stale_guestfs_state()
 
         try:
             # Discard stdout to avoid pipe-buffer deadlock — this tool is
@@ -113,57 +114,6 @@ class CacheOperation:
         else:
             logger.info("libguestfs fixed appliance built at %s", appliance_dir)
             return appliance_dir
-
-    @staticmethod
-    def _clean_stale_guestfs_state() -> bool:
-        """Remove stale libguestfs locks and sockets that cause hangs.
-
-        Returns:
-            True if any stale state was removed.
-        """
-        import os
-
-        uid = os.getuid()
-        cleaned = False
-
-        # 1. Remove the global lock file — if a previous run died, this
-        #    prevents new libguestfs instances from waiting indefinitely.
-        lock_file = Path(f"/var/tmp/.guestfs-{uid}/lock")
-        if lock_file.exists():
-            try:
-                lock_file.unlink()
-                cleaned = True
-                logger.debug("Removed stale libguestfs lock: %s", lock_file)
-            except OSError:
-                pass
-
-        # 2. Remove stale daemon sockets — libguestfs may try to connect to
-        #    a dead daemon and hang.
-        for sock_dir in Path(f"/run/user/{uid}").glob("libguestfs*"):
-            for sock in sock_dir.glob("guestfsd.sock"):
-                try:
-                    sock.unlink()
-                    cleaned = True
-                    logger.debug("Removed stale libguestfs socket: %s", sock)
-                except OSError:
-                    pass
-
-        # 3. Remove cached appliance directories in /var/tmp — these are
-        #    rebuildable and can confuse libguestfs about appliance freshness.
-        guestfs_tmp = Path(f"/var/tmp/.guestfs-{uid}")
-        if guestfs_tmp.exists():
-            for entry in guestfs_tmp.glob("appliance.d*"):
-                if entry.is_dir():
-                    try:
-                        shutil.rmtree(entry)
-                        cleaned = True
-                        logger.debug(
-                            "Removed stale libguestfs cache: %s", entry
-                        )
-                    except OSError:
-                        pass
-
-        return cleaned
 
     @staticmethod
     def prune_vms(
@@ -438,13 +388,10 @@ class CacheOperation:
             Dictionary with keys "appliance", "warm_images", and
             "guestfs_state" indicating whether each was removed.
         """
-        appliance_pruned = CacheOperation._prune_appliance(dry_run)
-        warm_images_pruned = CacheOperation._prune_warm_images(dry_run)
-        guestfs_state_pruned = CacheOperation._clean_stale_guestfs_state()
         return {
-            "appliance": appliance_pruned,
-            "warm_images": warm_images_pruned,
-            "guestfs_state": guestfs_state_pruned,
+            "appliance": CacheService.prune_appliance(dry_run),
+            "warm_images": CacheService.prune_warm_images(dry_run),
+            "guestfs_state": CacheService.clean_stale_guestfs_state(),
         }
 
     @staticmethod
@@ -555,63 +502,6 @@ class CacheOperation:
             cache_dir_removed=cache_dir_removed,
             cache_dir=str(cache_dir),
         )
-
-    @staticmethod
-    def _prune_appliance(dry_run: bool = False) -> bool:
-        """Remove the libguestfs appliance folder and stale system state.
-
-        Also cleans up stale locks and sockets in /var/tmp and /run/user
-        that can cause subsequent appliance builds to hang.
-
-        Args:
-            dry_run: If True, only report what would be removed.
-
-        Returns:
-            True if appliance folder or stale state was removed.
-        """
-        appliance_dir = CacheUtils.get_cache_dir() / "appliance"
-        removed = False
-        if appliance_dir.exists():
-            if not dry_run:
-                shutil.rmtree(appliance_dir, ignore_errors=True)
-            removed = True
-
-        if not dry_run:
-            state_cleaned = CacheOperation._clean_stale_guestfs_state()
-            removed = removed or state_cleaned
-
-        return removed
-
-    @staticmethod
-    def _prune_warm_images(dry_run: bool = False) -> bool:
-        """Remove warm images from the tmpfs ready pool.
-
-        Warm images are decompressed VM images cached in RAM for fast cloning.
-
-        Args:
-            dry_run: If True, only report what would be removed.
-
-        Returns:
-            True if warm images were removed or would be removed.
-        """
-        warm_dir = CacheUtils.get_warm_image_dir()
-        if not warm_dir.exists():
-            return False
-
-        has_content = any(warm_dir.iterdir())
-        if not has_content:
-            return False
-
-        if not dry_run:
-            for item in warm_dir.iterdir():
-                try:
-                    if item.is_dir():
-                        shutil.rmtree(item)
-                    else:
-                        item.unlink()
-                except OSError:
-                    pass
-        return True
 
 
 __all__ = ["CacheOperation"]

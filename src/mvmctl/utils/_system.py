@@ -27,6 +27,7 @@ __all__ = [
     "privileged_cmd",
     "require_mvm_group_membership",
     "is_process_running",
+    "has_python_ancestor",
     "SigtermContext",
     "sigterm_context",
     "ProcessSignalHandler",
@@ -593,3 +594,41 @@ def is_process_running(pid: int | None) -> bool:
         return True
     except (ProcessLookupError, OSError):
         return False
+
+
+def has_python_ancestor(pid: int) -> bool:
+    """Walk the PPID chain for *pid* upward through /proc.
+
+    Returns True if any ancestor process has ``"python"`` or ``"mvm"`` in
+    its command line (case-insensitive), indicating the process tree is
+    managed by a Python / mvmctl process.  Returns False if the parent
+    chain reaches PID 1 without finding a Python ancestor.
+    """
+    visited: set[int] = set()
+    current = pid
+
+    while current > 1 and current not in visited:
+        visited.add(current)
+        try:
+            # Read /proc/<pid>/cmdline
+            cmdline_path = f"/proc/{current}/cmdline"
+            with open(cmdline_path, "rb") as f:
+                raw = f.read()
+            # cmdline uses null bytes as separators; decode with 'replace'
+            cmdline = raw.decode("utf-8", errors="replace").lower()
+            if "python" in cmdline or "mvm" in cmdline:
+                return True
+
+            # Read PPid from /proc/<pid>/status
+            status_path = f"/proc/{current}/status"
+            with open(status_path) as f:
+                for line in f:
+                    if line.startswith("PPid:"):
+                        current = int(line.split(":")[1].strip())
+                        break
+                else:
+                    break  # PPid not found — stop walking
+        except (FileNotFoundError, PermissionError, OSError, ValueError):
+            break
+
+    return False
