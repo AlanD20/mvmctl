@@ -286,7 +286,7 @@ class LazyMVMGroup(click.Group):
 )
 @click.pass_context
 def app(ctx: click.Context, verbose: bool, debug: bool) -> None:
-    from mvmctl.utils.debug_state import set_debug_mode
+    from mvmctl.utils.common import set_debug_mode
 
     ctx.obj = {"debug": debug}
     set_debug_mode(debug)

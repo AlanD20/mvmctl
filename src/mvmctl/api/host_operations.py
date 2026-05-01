@@ -28,7 +28,7 @@ from mvmctl.exceptions import HostError, NetworkError
 from mvmctl.models.host import HostStateChangeItem, HostStateItem
 from mvmctl.models.vm import VMInstanceItem, VMStatus
 from mvmctl.utils.auditlog import AuditLog
-from mvmctl.utils.fs import chown_to_real_user
+from mvmctl.utils.fs import FsUtils
 from mvmctl.utils.network import NetworkUtils
 
 logger = logging.getLogger(__name__)
@@ -50,7 +50,7 @@ class HostOperation:
 
         # Chown the cache directory to the real user immediately so that
         # anything we create during init is accessible after sudo exits.
-        chown_to_real_user(cache_dir)
+        FsUtils.chown_to_real_user(cache_dir)
 
         # --- System health checks ---
         if not HostService.check_kvm_access():
@@ -244,7 +244,7 @@ class HostOperation:
         except Exception as e:
             logger.warning("Could not mark host as initialized: %s", e)
 
-        chown_to_real_user(cache_dir)
+        FsUtils.chown_to_real_user(cache_dir)
 
         AuditLog.log("host.init", {"changes": len(changes)})
 

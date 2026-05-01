@@ -22,7 +22,7 @@ from mvmctl.utils._io import (
 )
 from mvmctl.utils.cli import handle_errors
 from mvmctl.utils.common import CacheUtils
-from mvmctl.utils.fs import chown_to_real_user
+from mvmctl.utils.fs import FsUtils
 
 if TYPE_CHECKING:
     from mvmctl.models.host import HostStateChangeItem
@@ -165,7 +165,7 @@ def host_init() -> None:
             )
             print_info(f"Or run immediately: newgrp {MVM_UNIX_GROUP}")
 
-    chown_to_real_user(CacheUtils.get_cache_dir())
+    FsUtils.chown_to_real_user(CacheUtils.get_cache_dir())
 
 
 @host_app.command(name="ls")

@@ -9,7 +9,7 @@ from mvmctl.models.cloudinit import (
 from mvmctl.models.firecracker import FirecrackerConfig
 from mvmctl.models.host import HostStateChangeItem, HostStateItem
 from mvmctl.models.image import ImageItem, ImageSpec
-from mvmctl.models.kernel import KernelItem, KernelSpec
+from mvmctl.models.kernel import KernelFetchResult, KernelItem, KernelSpec
 from mvmctl.models.key import SSHKeyItem
 from mvmctl.models.network import (
     IPTablesChain,
@@ -52,9 +52,9 @@ __all__ = [
     "IPTablesWildcard",
     "ImageItem",
     "ImageSpec",
+    "KernelFetchResult",
     "KernelItem",
     "KernelSpec",
-    "LeaseEntry",
     "NetworkItem",
     "NetworkLeaseItem",
     "SSHKeyItem",

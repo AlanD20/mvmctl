@@ -7,6 +7,7 @@ import re
 import tempfile
 from pathlib import Path
 
+from mvmctl.constants import DEBUG_MODE
 from mvmctl.exceptions import MVMError
 
 # Shell metacharacters that must be rejected from user input
@@ -57,6 +58,23 @@ _MAX_NAME_LENGTH = 63
 # alphanumeric, dot, hyphen, underscore. After first char, allows 62 more
 # (for max total length of 63).
 _NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
+
+# ---------------------------------------------------------------------------
+# Debug state
+# ---------------------------------------------------------------------------
+
+_debug_mode: bool = DEBUG_MODE
+
+
+def set_debug_mode(value: bool) -> None:
+    """Set the debug mode state. Called once from main.py CLI callback."""
+    global _debug_mode
+    _debug_mode = value
+
+
+def is_debug_mode() -> bool:
+    """Return whether debug mode is currently enabled."""
+    return _debug_mode
 
 
 def _get_real_home() -> Path:

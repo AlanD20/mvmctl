@@ -1,5 +1,1 @@
-"""Migration system for mvmctl database."""
-
-from .runner import MigrationRunner
-
-__all__ = ["MigrationRunner"]
+"""Database migration SQL files."""

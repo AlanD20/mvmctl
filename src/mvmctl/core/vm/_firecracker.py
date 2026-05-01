@@ -31,7 +31,7 @@ from mvmctl.exceptions import (
 )
 from mvmctl.models.cloudinit import CloudInitMode
 from mvmctl.models.firecracker import FirecrackerConfig
-from mvmctl.utils.fs import write_pid_file
+from mvmctl.utils.fs import FsUtils
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +206,7 @@ class FirecrackerSpawner:
         self.process_start_time = ProcessSignalHandler._get_process_start_time(
             fc_proc.pid
         )
-        write_pid_file(self._pid_path, fc_proc.pid)
+        FsUtils.write_pid_file(self._pid_path, fc_proc.pid)
 
     def cleanup(self) -> None:
         """Perform cleanup of all created resources."""
