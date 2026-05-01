@@ -11,6 +11,7 @@ import typer
 
 from mvmctl.api import InitOperation, InitResult
 from mvmctl.utils._io import print_info, print_success, print_warning
+from mvmctl.utils.cli import handle_errors
 
 init_app = typer.Typer(
     name="init",
@@ -22,6 +23,7 @@ init_app = typer.Typer(
 
 
 @init_app.command(name="help", hidden=True)
+@handle_errors
 def help_cmd(ctx: typer.Context) -> None:
     """Show help for the init command."""
     typer.echo(ctx.parent.get_help() if ctx.parent else "")
@@ -123,6 +125,7 @@ def _handle_interactive_flow(
 
 
 @init_app.callback(invoke_without_command=True)
+@handle_errors
 def init_run(
     non_interactive: bool = typer.Option(
         False, "--non-interactive", help="Use defaults, skip prompts"

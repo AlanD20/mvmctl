@@ -14,7 +14,8 @@ import typer
 from mvmctl.api.console_operations import ConsoleOperation
 from mvmctl.constants import CONST_CONSOLE_SOCKET_TIMEOUT_S
 from mvmctl.exceptions import MVMError
-from mvmctl.utils.console import print_error, print_info, print_success
+from mvmctl.utils._io import print_error, print_info, print_success
+from mvmctl.utils.cli import handle_errors
 
 console_app = typer.Typer(
     help="VM console access",
@@ -25,6 +26,7 @@ console_app = typer.Typer(
 
 
 @console_app.callback(invoke_without_command=True)
+@handle_errors
 def console(
     ctx: typer.Context,
     identifier: Optional[str] = typer.Argument(
@@ -69,11 +71,7 @@ def console(
 
 def _show_console_state(vm_id: str) -> None:
     """Display console relay state for a VM."""
-    try:
-        state_dict = ConsoleOperation.get_state(vm_id)
-    except MVMError as e:
-        print_error(str(e))
-        raise typer.Exit(1)
+    state_dict = ConsoleOperation.get_state(vm_id)
 
     status = "running" if state_dict["running"] else "stopped"
     print_info(f"Console for '{vm_id}': {status}")
@@ -85,11 +83,7 @@ def _show_console_state(vm_id: str) -> None:
 
 def _kill_console_relay(vm_id: str) -> None:
     """Kill the console relay for a VM."""
-    try:
-        killed = ConsoleOperation.kill(vm_id)
-    except MVMError as e:
-        print_error(str(e))
-        raise typer.Exit(1)
+    killed = ConsoleOperation.kill(vm_id)
 
     if killed:
         print_success(f"Console relay stopped for '{vm_id}'")
@@ -100,11 +94,7 @@ def _kill_console_relay(vm_id: str) -> None:
 
 def _attach_to_console(vm_id: str) -> None:
     """Attach to VM console interactively."""
-    try:
-        attach_info = ConsoleOperation.attach(vm_id)
-    except MVMError as e:
-        print_error(str(e))
-        raise typer.Exit(1)
+    attach_info = ConsoleOperation.attach(vm_id)
 
     print_info(f"Attaching to console of '{attach_info.vm_name}'...")
     print_info("Press Ctrl+X then D to detach")
