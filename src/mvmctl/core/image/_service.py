@@ -21,7 +21,6 @@ from mvmctl.constants import (
     CONST_RUNTIME_BUFFER_MB,
     CONST_SECTOR_SIZE_BYTES,
     CONST_SHRINK_SAFETY_MARGIN,
-    DEFAULT_IMAGE_ARCH,
     HTTP_TIMEOUT_SHA256_FETCH_S,
     SUPPORTED_IMAGE_EXTENSIONS,
 )
@@ -591,7 +590,7 @@ class ImageService:
 
     @classmethod
     def get_specs_for(
-        cls, os_slugs: list[str], version: str | None
+        cls, os_slugs: list[str], version: str | None, arch: str
     ) -> list[ImageSpec]:
         """
         Resolve ImageSpecs from the bundled images.yaml by os_slugs.
@@ -606,7 +605,7 @@ class ImageService:
             ImageError: If any image is not found in the catalog.
 
         """
-        all_specs = cls.load_available_images()
+        all_specs = cls.load_available_images(arch)
 
         spec_map = {spec.id: spec for spec in all_specs}
         results: list[ImageSpec] = []
@@ -1317,7 +1316,7 @@ class ImageService:
         return specs
 
     @staticmethod
-    def load_available_images() -> list[ImageSpec]:
+    def load_available_images(arch: str) -> list[ImageSpec]:
         """Load image specifications from YAML config file."""
         import yaml
 
@@ -1326,7 +1325,6 @@ class ImageService:
         with open(str(remote_images_path)) as f:
             data = yaml.safe_load(f)
 
-        arch = DEFAULT_IMAGE_ARCH
         images = []
         for img in data.get("images", []):
             image_id = img["id"]

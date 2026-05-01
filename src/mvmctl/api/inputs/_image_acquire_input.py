@@ -34,9 +34,9 @@ class ImageImportInput:
     """Specification for importing a local image file."""
 
     name: str
-    format: str  # noqa: N816
     source_path: Path
     force: bool = False
+    format: str | None = None
     arch: str | None = None
     set_default: bool = False
     partition: int | None = None
@@ -65,14 +65,14 @@ class ResolvedImageAcquireInput:
 
     os_slug: str
     type: str
+    arch: str
     output_dir: Path
+    source_path: Path | None = None
+    version: str | None = None
     force: bool = False
-    arch: str | None = None
     format: str | None = None
     set_default: bool = False
-    version: str | None = None
     partition: int | None = None
-    source_path: Path | None = None
     skip_optimization: bool = False
     disabled_detectors: list[str] = field(default_factory=list)
 
@@ -141,12 +141,22 @@ class ImageAcquireRequest:
             self._inputs.disabled_detectors
         )
 
+        # Default format
+        if self._inputs.format is not None:
+            format_val = self._inputs.format
+        else:
+            format_val = str(
+                SettingsService.resolve(
+                    self._db, "defaults.image", "import_format"
+                )
+            )
+
         self._result = ResolvedImageAcquireInput(
             os_slug=self._inputs.name,
             arch=arch,
             type="custom",
             source_path=self._inputs.source_path,
-            format=self._inputs.format,
+            format=format_val,
             output_dir=CacheUtils.get_images_dir(),
             disabled_detectors=disabled,
             force=self._inputs.force,
@@ -166,14 +176,13 @@ class ImageAcquireRequest:
                 "Failed to resolve necessary dependencies to validate"
             )
 
-        arch: str | None = None
         partition: int | None = None
 
         if isinstance(self._result, ResolvedImageAcquireInput):
             arch = self._result.arch
             partition = self._result.partition
 
-        if arch is not None and arch not in FIRECRACKER_SUPPORTED_ARCH:
+        if arch not in FIRECRACKER_SUPPORTED_ARCH:
             raise ImageAcquireError(
                 f"Unknown arch: {arch}. Valid: {', '.join(FIRECRACKER_SUPPORTED_ARCH)}"
             )

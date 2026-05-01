@@ -14,10 +14,7 @@ from mvmctl.api import (
     ImageInput,
     ImageOperation,
 )
-from mvmctl.constants import (
-    DEFAULT_IMAGE_IMPORT_FORMAT,
-    IMAGE_IMPORT_FORMAT_MAP,
-)
+from mvmctl.constants import IMAGE_IMPORT_FORMAT_MAP
 from mvmctl.models import ImageItem, ImageSpec
 from mvmctl.utils._io import (
     print_error,
@@ -430,7 +427,7 @@ def image_import(
         help="Root Partition: 1, 2, 3",
     ),
     format: str | None = typer.Option(
-        DEFAULT_IMAGE_IMPORT_FORMAT,
+        None,
         "--format",
         help="Image format: qcow2, raw, tar-rootfs, or auto",
     ),
@@ -463,7 +460,7 @@ def image_import(
         else []
     )
 
-    if format == DEFAULT_IMAGE_IMPORT_FORMAT:
+    if format is None or format == "auto":
         fname = source_path.name.lower()
         format = next(
             (

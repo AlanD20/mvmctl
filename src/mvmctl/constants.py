@@ -50,6 +50,7 @@ OVERRIDABLE_DEFAULTS: Final[dict[str, dict[str, Any]]] = {
     },
     "defaults.image": {
         "arch": "x86_64",
+        "import_format": "auto",
     },
     "defaults.kernel": {
         "version": "6.19.9",
@@ -97,6 +98,7 @@ CONST_SIGNAL_EXIT_CODE_BASE: Final[int] = 128
 
 # --- Defaults ---
 DEFAULT_SNAPSHOT_RESUME: Final[bool] = True
+DEFAULT_FIRECRACKER_CI_VERSION: Final[str] = "v1.15"
 
 # --- Lifecycle timings ---
 LOG_FOLLOW_POLL_INTERVAL_S: Final[float] = 0.3

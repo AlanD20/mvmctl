@@ -18,6 +18,7 @@ from mvmctl.api.inputs._image_input import ImageInput
 from mvmctl.constants import DEFAULT_FIRECRACKER_CI_VERSION
 from mvmctl.core._shared import Database
 from mvmctl.core.binary._repository import BinaryRepository
+from mvmctl.core.config._service import SettingsService
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.core.image._resolver import ImageResolver
 from mvmctl.exceptions import (
@@ -83,7 +84,9 @@ class ImageOperation:
             raise ImageError("Failed to resolve output_dir")
 
         # Resolve spec
-        spec = ImageService.get_specs_for([inputs.os_slug], inputs.version)[0]
+        spec = ImageService.get_specs_for(
+            [inputs.os_slug], inputs.version, resolved.arch
+        )[0]
 
         # Single query for both early-return check and cleanup
         existing_image = repo.get_by_os_slug(spec.id)
@@ -309,7 +312,8 @@ class ImageOperation:
             # Load remote images from YAML
             from mvmctl.core.image._service import ImageService
 
-            specs = ImageService.load_available_images()
+            arch = str(SettingsService.resolve(db, "defaults.image", "arch"))
+            specs = ImageService.load_available_images(arch)
             binary_service = BinaryService(BinaryRepository(db))
             default_firecracker = binary_service.get_default_firecracker()
 

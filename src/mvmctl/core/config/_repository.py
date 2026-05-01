@@ -30,22 +30,22 @@ class SettingsRepository:
         """
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT value_json FROM user_settings WHERE category = ? AND key = ?",
+                "SELECT value FROM user_settings WHERE category = ? AND key = ?",
                 (category, key),
             ).fetchone()
         if row is None:
             return None
-        return json.loads(row["value_json"])
+        return json.loads(row["value"])
 
     def set(self, category: str, key: str, value: Any) -> None:
         """Set a setting value."""
         with self._db.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO user_settings (category, key, value_json, updated_at)
+                INSERT INTO user_settings (category, key, value, updated_at)
                 VALUES (?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(category, key) DO UPDATE SET
-                    value_json = excluded.value_json,
+                    value = excluded.value,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (category, key, json.dumps(value)),
@@ -85,7 +85,7 @@ class SettingsRepository:
             Nested dict: {category: {key: value}}
 
         """
-        query = "SELECT category, key, value_json FROM user_settings"
+        query = "SELECT category, key, value FROM user_settings"
         params: tuple[Any, ...] = ()
         if category is not None:
             query += " WHERE category = ?"
@@ -100,5 +100,5 @@ class SettingsRepository:
             cat = row["category"]
             if cat not in result:
                 result[cat] = {}
-            result[cat][row["key"]] = json.loads(row["value_json"])
+            result[cat][row["key"]] = json.loads(row["value"])
         return result

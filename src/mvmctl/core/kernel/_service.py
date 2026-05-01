@@ -17,7 +17,6 @@ from typing import Any
 from mvmctl.constants import (
     CONST_FILE_PERMS_EXECUTABLE,
     CONST_MEBIBYTE_BYTES,
-    DEFAULT_KERNEL_BUILD_JOBS,
     HTTP_TIMEOUT_KERNEL_CONFIG_S,
     HTTP_TIMEOUT_KERNEL_DOWNLOAD_S,
     HTTP_TIMEOUT_SHA256_FETCH_S,
@@ -396,7 +395,7 @@ class KernelService:
     def _run_make(
         kernel_dir: Path,
         target: str,
-        jobs: int = DEFAULT_KERNEL_BUILD_JOBS,
+        jobs: int,
         capture_output: bool = False,
     ) -> tuple[int, str, str]:
         """Run make command in kernel directory."""
