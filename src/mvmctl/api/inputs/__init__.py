@@ -7,11 +7,6 @@ and portable export configurations.
 
 from __future__ import annotations
 
-from mvmctl.api.inputs._console_input import (
-    ConsoleInput,
-    ConsoleRequest,
-    ResolvedConsoleInput,
-)
 from mvmctl.api.inputs._binary_fetch_input import (
     BinaryFetchInput,
     BinaryFetchRequest,
@@ -21,6 +16,11 @@ from mvmctl.api.inputs._binary_input import (
     BinaryInput,
     BinaryRequest,
     ResolvedBinaryInput,
+)
+from mvmctl.api.inputs._console_input import (
+    ConsoleInput,
+    ConsoleRequest,
+    ResolvedConsoleInput,
 )
 from mvmctl.api.inputs._image_acquire_input import (
     ImageFetchInput,
@@ -50,6 +50,11 @@ from mvmctl.api.inputs._key_input import (
     KeyInput,
     KeyRequest,
     ResolvedKeyInput,
+)
+from mvmctl.api.inputs._logs_input import (
+    LogInput,
+    LogRequest,
+    ResolvedLogInput,
 )
 from mvmctl.api.inputs._network_create_input import (
     NetworkCreateInput,
@@ -93,6 +98,9 @@ __all__ = [
     "ConsoleInput",
     "ConsoleRequest",
     "ResolvedConsoleInput",
+    "LogInput",
+    "LogRequest",
+    "ResolvedLogInput",
     "BinaryFetchInput",
     "BinaryFetchRequest",
     "BinaryInput",

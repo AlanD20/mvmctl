@@ -41,6 +41,7 @@ from mvmctl.api.inputs import (  # noqa: F401
     KernelInput,
     KeyCreateInput,
     KeyInput,
+    LogInput,
     NetworkCreateInput,
     NetworkInput,
     SSHInput,
@@ -49,6 +50,7 @@ from mvmctl.api.inputs import (  # noqa: F401
 )
 from mvmctl.api.kernel_operations import KernelOperation  # noqa: F401
 from mvmctl.api.key_operations import KeyOperation  # noqa: F401
+from mvmctl.api.logs_operations import LogOperation  # noqa: F401
 from mvmctl.api.network_operations import NetworkOperation  # noqa: F401
 from mvmctl.api.ssh_operations import SSHOperation  # noqa: F401
 from mvmctl.api.vm_operations import VMOperation  # noqa: F401
@@ -67,6 +69,7 @@ __all__ = [
     "InitStepResult",
     "KernelOperation",
     "KeyOperation",
+    "LogOperation",
     "NetworkOperation",
     "SSHOperation",
     "VMOperation",
@@ -82,6 +85,7 @@ __all__ = [
     "KeyInput",
     "NetworkCreateInput",
     "NetworkInput",
+    "LogInput",
     "SSHInput",
     "VMCreateInput",
     "VMInput",
