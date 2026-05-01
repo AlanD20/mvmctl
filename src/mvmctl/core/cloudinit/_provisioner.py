@@ -8,7 +8,10 @@ from typing import TYPE_CHECKING
 
 from mvmctl.constants import CONST_DIR_PERMS_CACHE, DEFAULT_CLOUD_INIT_ISO_NAME
 from mvmctl.core._internal._iptables_tracker import IPTablesTracker
-from mvmctl.exceptions import CloudInitError, MVMError
+from mvmctl.exceptions import (
+    CloudInitIsoModeError,
+    CloudInitNetModeError,
+)
 from mvmctl.models.network import (
     IPTablesChain,
     IPTablesPort,
@@ -118,56 +121,68 @@ class CloudInitProvisioner:
             NoCloudNetServerManager,
         )
 
-        net_manager = NoCloudNetServerManager(
-            id=self._config.vm_id,
-            path=self._config.vm_dir,
-            name=self._config.vm_name,
-            ipv4_gateway=self._config.network.ipv4_gateway,
-            port=self._config.nocloud_net_port
-            if self._config.nocloud_net_port is not None
-            else 0,  # Zero is used to allocate next available port in the pool
-        )
-        url, port, pid = net_manager.start()
+        try:
+            net_manager = NoCloudNetServerManager(
+                id=self._config.vm_id,
+                path=self._config.vm_dir,
+                name=self._config.vm_name,
+                ipv4_gateway=self._config.network.ipv4_gateway,
+                port=self._config.nocloud_net_port
+                if self._config.nocloud_net_port is not None
+                else 0,  # Zero is used to allocate next available port in the pool
+            )
+            url, port, pid = net_manager.start()
 
-        iptables_tracker = IPTablesTracker()
-        iptables_tracker.ensure_chain(
-            IPTablesChain.MVM_NOCLOUDNET_INPUT, auto_jump_from="INPUT"
-        )
+            from mvmctl.core._internal._db import Database
+            from mvmctl.core._internal._iptables_tracker._repository import (
+                IPTablesRuleRepository,
+            )
 
-        nocloud_net_in_rule = IPTablesRuleItem(
-            table_name=IPTablesTable.FILTER,
-            chain_name=IPTablesChain.MVM_NOCLOUDNET_INPUT,
-            rule_type=IPTablesRuleType.NOCLOUDNET_INPUT,
-            target=IPTablesTarget.ACCEPT,
-            network_id=self._config.network.id,
-            network_name=self._config.network.name,
-            protocol=IPTablesProtocol.TCP,
-            source=self._config.guest_ip,
-            destination=self._config.network.ipv4_gateway,
-            in_interface=self._config.tap_name,
-            out_interface=IPTablesWildcard.ANY_INTERFACE,
-            sport=IPTablesPort.ANY,
-            dport=port,
-            comment_tag=f"# nocloudnet:{self._config.vm_name}:{port}",
-            is_active=True,
-        )
-        iptables_tracker.ensure_rule(nocloud_net_in_rule)
+            iptables_tracker = IPTablesTracker(
+                IPTablesRuleRepository(Database())
+            )
+            iptables_tracker.ensure_chain(
+                IPTablesChain.MVM_NOCLOUDNET_INPUT, auto_jump_from="INPUT"
+            )
 
-        return CloudInitProvisionResult(
-            mode=CloudInitMode.NET,
-            nocloud_url=url,
-            nocloud_port=port,
-            nocloud_pid=pid,
-            nocloud_net_manager=net_manager,
-            nocloud_net_rules=[nocloud_net_in_rule],
-        )
+            nocloud_net_in_rule = IPTablesRuleItem(
+                table_name=IPTablesTable.FILTER,
+                chain_name=IPTablesChain.MVM_NOCLOUDNET_INPUT,
+                rule_type=IPTablesRuleType.NOCLOUDNET_INPUT,
+                target=IPTablesTarget.ACCEPT,
+                network_id=self._config.network.id,
+                network_name=self._config.network.name,
+                protocol=IPTablesProtocol.TCP,
+                source=self._config.guest_ip,
+                destination=self._config.network.ipv4_gateway,
+                in_interface=self._config.tap_name,
+                out_interface=IPTablesWildcard.ANY_INTERFACE,
+                sport=IPTablesPort.ANY,
+                dport=port,
+                comment_tag=f"# nocloudnet:{self._config.vm_name}:{port}",
+                is_active=True,
+            )
+            iptables_tracker.ensure_rule(nocloud_net_in_rule)
+
+            return CloudInitProvisionResult(
+                mode=CloudInitMode.NET,
+                nocloud_url=url,
+                nocloud_port=port,
+                nocloud_pid=pid,
+                nocloud_net_manager=net_manager,
+                nocloud_net_rules=[nocloud_net_in_rule],
+            )
+        except Exception as exc:
+            raise CloudInitNetModeError(
+                f"Nocloud-net provisioning failed: {exc}"
+            ) from exc
 
     def _provision_iso(self) -> CloudInitProvisionResult:
         """Provision using ISO mode with cloud-init ISO image."""
 
         if self._config.cloud_init_iso_path is not None:
             if not self._config.cloud_init_iso_path.exists():
-                raise MVMError(
+                raise CloudInitIsoModeError(
                     f"Custom cloud-init ISO not found: {self._config.cloud_init_iso_path}"
                 )
             return CloudInitProvisionResult(
@@ -179,7 +194,7 @@ class CloudInitProvisioner:
         try:
             self._manager.create_seed_iso(self._config.cloud_init_dir, iso_path)
         except Exception as exc:
-            raise CloudInitError(
+            raise CloudInitIsoModeError(
                 f"Failed to create cloud-init ISO: {exc}"
             ) from exc
 
@@ -188,22 +203,5 @@ class CloudInitProvisioner:
         )
 
     def _provision_inject(self) -> CloudInitProvisionResult:
-        """Provision using inject mode with direct rootfs injection."""
-
-        from mvmctl.core.rootfs_injector import inject_cloud_init
-
-        rootfs_path = self._config.vm_dir / "rootfs.ext4"
-        if not rootfs_path.exists():
-            for ext in [".ext4", ".btrfs"]:
-                rootfs_path = self._config.vm_dir / f"rootfs{ext}"
-                if rootfs_path.exists():
-                    break
-
-        try:
-            inject_cloud_init(
-                str(rootfs_path), str(self._config.cloud_init_dir)
-            )
-        except Exception as exc:
-            raise CloudInitError(f"Direct injection failed: {exc}") from exc
-
+        """Provision using inject mode — config files already written by provision()."""
         return CloudInitProvisionResult(mode=CloudInitMode.INJECT)

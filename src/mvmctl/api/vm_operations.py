@@ -298,21 +298,22 @@ class VMCreateContext:
         self.clone_image()
         self.mark_created("rootfs")
 
-        # Cloud-init
-        if self.resolved.cloud_init_mode == CloudInitMode.OFF:
-            provisioner = GuestfsProvisioner(
-                rootfs_path=self.rootfs_path,
-                hostname=self.resolved.name,
-                user=self.resolved.user,
-                target_size_bytes=self.resolved.disk_size_bytes,
-                ssh_pubkeys=self.resolved.ssh_keys,
-            )
-            provisioner.provision()
+        # Cloud-init provisioning
+        mode = self.resolved.cloud_init_mode
+
+        gp = GuestfsProvisioner(self.rootfs_path, readonly=False)
+        gp.resize(self.resolved.disk_size_bytes)
+
+        if mode == CloudInitMode.OFF:
+            gp.set_hostname(self.resolved.name)
+            gp.inject_dns()
+            gp.setup_ssh(self.resolved.user, self.resolved.ssh_keys)
+            gp.disable_cloud_init()
             self.mark_created("cloud-init-off")
 
-        if self.resolved.cloud_init_mode != CloudInitMode.OFF:
+        elif mode == CloudInitMode.INJECT:
             ci_config = CloudInitProvisionConfig(
-                mode=self.resolved.cloud_init_mode,
+                mode=mode,
                 vm_name=self.resolved.name,
                 vm_id=self.vm_id,
                 vm_dir=self.vm_dir,
@@ -329,16 +330,40 @@ class VMCreateContext:
                 cloud_init_iso_path=self.resolved.cloud_init_iso_path,
                 keep_cloud_init_iso=self.resolved.keep_cloud_init_iso,
             )
-
             ci_provisioner = CloudInitProvisioner(ci_config)
             self.cloud_init_result = ci_provisioner.provision()
 
-            if self.cloud_init_result.mode == CloudInitMode.NET:
-                self.mark_created("cloud-init-net")
-            elif self.cloud_init_result.mode == CloudInitMode.ISO:
+            gp.inject_cloud_init(ci_config.cloud_init_dir)
+            self.mark_created("cloud-init-inject")
+
+        else:  # ISO or NET
+            ci_config = CloudInitProvisionConfig(
+                mode=mode,
+                vm_name=self.resolved.name,
+                vm_id=self.vm_id,
+                vm_dir=self.vm_dir,
+                cloud_init_dir=(self.vm_dir / "cloud-init"),
+                guest_ip=self.guest_ip,
+                tap_name=self.tap_name,
+                user=self.resolved.user,
+                network=self.resolved.network,
+                network_prefix_len=self.resolved.network_prefix_len,
+                skip_network_config=self.resolved.skip_ci_network_config,
+                ssh_pubkeys=self.resolved.ssh_keys,
+                custom_user_data_path=self.resolved.custom_user_data_path,
+                nocloud_net_port=self.resolved.nocloud_net_port,
+                cloud_init_iso_path=self.resolved.cloud_init_iso_path,
+                keep_cloud_init_iso=self.resolved.keep_cloud_init_iso,
+            )
+            ci_provisioner = CloudInitProvisioner(ci_config)
+            self.cloud_init_result = ci_provisioner.provision()
+
+            if mode == CloudInitMode.ISO:
                 self.mark_created("cloud-init-iso")
-            elif self.cloud_init_result.mode == CloudInitMode.INJECT:
-                self.mark_created("cloud-init-inject")
+            else:
+                self.mark_created("cloud-init-net")
+
+        gp.run()
 
         # Firecracker
         fc_config = self.build_firecracker_config()

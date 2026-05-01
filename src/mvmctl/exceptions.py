@@ -230,7 +230,7 @@ class CloudInitError(MVMError):
     """
 
 
-class CloudInitProvisionError(MVMError):
+class CloudInitProvisionError(CloudInitError):
     """Cloud-init provisioning failure.
 
     Common messages:
@@ -238,13 +238,29 @@ class CloudInitProvisionError(MVMError):
     """
 
 
-class CloudInitModeError(MVMError):
+class CloudInitModeError(CloudInitError):
     """Cloud-init mode failure.
 
     Common messages:
     - Failed to resolve cloud-init mode
     - Custom ISO file not found
     """
+
+
+class CloudInitOffModeError(CloudInitError):
+    """OFF mode guestfs provisioning failure."""
+
+
+class CloudInitIsoModeError(CloudInitError):
+    """ISO creation failure."""
+
+
+class CloudInitNetModeError(CloudInitError):
+    """Nocloud-net server or iptables rule failure."""
+
+
+class CloudInitInjectModeError(CloudInitError):
+    """Rootfs cloud-init injection failure."""
 
 
 class VMCreateError(MVMError):

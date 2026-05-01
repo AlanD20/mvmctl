@@ -162,9 +162,6 @@ class OptimizedGuestfs:
         finally:
             self._handle.umount(device)
 
-    # =====================================================================
-    # COPIED FROM: src/mvmctl/core/image/_service.py — ImageService._deblob_image() (lines 273-298)
-    # =====================================================================
     def deblob(self) -> None:
         """Run OS-specific and common cleanup commands inside a mounted guestfs image."""
         logger = logging.getLogger(__name__)

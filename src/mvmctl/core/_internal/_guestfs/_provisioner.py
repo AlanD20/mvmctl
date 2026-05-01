@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 from mvmctl.constants import (
     CONST_DEFAULT_NAMESERVER,
@@ -22,270 +22,362 @@ from mvmctl.constants import (
     CONST_SHADOW_WARN_DAYS,
 )
 from mvmctl.core._internal._guestfs import OptimizedGuestfs
-from mvmctl.exceptions import GuestfsNotAvailableError, VMBuilderError
+from mvmctl.exceptions import (
+    GuestfsWriteError,
+    VMBuilderError,
+)
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["GuestfsProvisioner"]
 
 
-# =====================================================================
-# COPIED FROM: src/mvmctl/core/vm/_guestfs.py — GuestfsProvisioner (lines 29-464)
-# =====================================================================
 class GuestfsProvisioner:
-    """All SSH/guestfs setup operations. Stateful - holds guestfs handle."""
+    """All guestfs setup operations. Stateful - holds guestfs handle."""
 
-    def __init__(
-        self,
-        rootfs_path: Path,
-        hostname: str,
-        user: str,
-        target_size_bytes: int,
-        ssh_pubkeys: list[str],
-    ):
+    def __init__(self, rootfs_path: Path, *, readonly: bool = False) -> None:
         """Initialize the GuestfsProvisioner.
 
         Args:
             rootfs_path: Path to the root filesystem image.
-            hostname: Hostname to set for the VM.
-            user: Username to create/configure in the VM.
-            ssh_pub_key: SSH public key(s) to configure for the user.
+            readonly: Whether to open guestfs in read-only mode.
         """
         self._rootfs_path = rootfs_path
+        self._readonly = readonly
+        self._target_size: int | None = None
+        self._hostname: str | None = None
+        self._user: str | None = None
+        self._ssh_pubkeys: list[str] = []
+        self._cloud_init_dir: Path | None = None
+        self._ops: list[str] = []
+
+    # =====================================================================
+    # Builder methods — queue operations for a single guestfs session
+    # =====================================================================
+
+    def resize(self, target_size_bytes: int) -> Self:
+        """Queue a resize operation."""
+        self._target_size = target_size_bytes
+        return self
+
+    def set_hostname(self, hostname: str) -> Self:
+        """Queue hostname setup."""
         self._hostname = hostname
+        self._ops.append("set_hostname")
+        return self
+
+    def inject_dns(self) -> Self:
+        """Queue DNS injection."""
+        self._ops.append("inject_dns")
+        return self
+
+    def setup_ssh(self, user: str, ssh_pubkeys: list[str]) -> Self:
+        """Queue SSH setup."""
         self._user = user
         self._ssh_pubkeys = ssh_pubkeys
-        self._target_size_bytes = target_size_bytes
-        self._guestfs_handle: Any = None
+        self._ops.append("setup_ssh")
+        return self
 
-    def provision(self) -> None:
-        """Main entry point - unified guestfs session for resize + SSH/DNS."""
-        try:
-            og = OptimizedGuestfs(self._rootfs_path, readonly=False)
-        except GuestfsNotAvailableError:
-            raise VMBuilderError("libguestfs required for rootfs setup")
+    def inject_cloud_init(self, cloud_init_dir: Path) -> Self:
+        """Queue cloud-init seed file injection."""
+        self._cloud_init_dir = cloud_init_dir
+        self._ops.append("inject_cloud_init")
+        return self
 
-        has_keys = bool(self._ssh_pubkeys)
+    def disable_cloud_init(self) -> Self:
+        """Queue cloud-init disable (datasource block + service masking)."""
+        self._ops.append("disable_cloud_init")
+        return self
 
-        if self._target_size_bytes is not None:
+    # =====================================================================
+    # Execution — single guestfs session for all queued operations
+    # =====================================================================
+
+    def run(self) -> None:
+        """Execute all queued operations in a single guestfs session."""
+        target_size: int | None = self._target_size
+        needs_resize = target_size is not None
+        if needs_resize:
+            # Check if file already large enough — skip guestfs if so
             try:
                 current_size = self._rootfs_path.stat().st_size
                 if (
                     isinstance(current_size, int)
-                    and current_size < self._target_size_bytes
+                    and target_size is not None
+                    and current_size >= target_size
                 ):
-                    with open(self._rootfs_path, "r+b") as f:
-                        f.truncate(self._target_size_bytes)
+                    needs_resize = False
             except (OSError, AttributeError):
                 pass
 
-        with og:
-            self._guestfs_handle = og
-            handle: Any = og._handle
-            filesystems: dict[str, str] = handle.list_filesystems()
-            root_device: str | None = None
-            for candidate in ["/dev/sda", "/dev/vda", "/dev/sda1", "/dev/vda1"]:
-                if candidate in filesystems:
-                    root_device = candidate
-                    break
-            if root_device is None and filesystems:
-                root_device = str(list(filesystems.keys())[0])
-            if root_device is None:
-                raise VMBuilderError(
-                    f"No filesystem found in {self._rootfs_path}"
-                )
+        if not self._ops and not needs_resize:
+            return  # nothing to do
 
-            if self._target_size_bytes is not None:
-                fs_type = handle.vfs_type(root_device)
-                if fs_type in ("ext2", "ext3", "ext4"):
-                    handle.resize2fs(root_device)
-                elif fs_type == "btrfs":
-                    handle.mount(root_device, "/")
-                    handle.btrfs_filesystem_resize("/", self._target_size_bytes)
-                    handle.umount(root_device)
+        assert target_size is not None  # guarded by needs_resize above
 
-            handle.mount(root_device, "/")
+        # Phase 0: file truncation (before guestfs mount)
+        if needs_resize:
+            self._do_truncate_file(self._rootfs_path, target_size)
+
+        # Phase 1: guestfs session
+        with OptimizedGuestfs(self._rootfs_path, readonly=self._readonly) as og:
+            og.mount_rootfs()
             try:
-                if has_keys:
-                    ssh_home_dir = (
-                        "/root"
-                        if self._user == "root"
-                        else f"/home/{self._user}"
-                    )
-                    self.ensure_user(handle)
-                    self.configure_ssh_keys(handle)
-                    self.generate_host_keys(handle)
+                handle: Any = og._handle
 
-                    if not handle.exists("/root"):
-                        handle.mkdir_p("/root")
-                        handle.chmod(CONST_DIR_PERMS_CACHE, "/root")
-                        handle.chown(CONST_ROOT_UID, CONST_ROOT_GID, "/root")
-
-                    handle.mkdir_p(f"{ssh_home_dir}/.ssh")
-                    handle.chmod(CONST_DIR_PERMS_CACHE, f"{ssh_home_dir}/.ssh")
-                    handle.chown(
-                        CONST_ROOT_UID, CONST_ROOT_GID, f"{ssh_home_dir}/.ssh"
-                    )
-                    handle.sync()
-
-                    existing_keys = ""
-                    auth_keys_path = f"{ssh_home_dir}/.ssh/authorized_keys"
-                    if handle.exists(auth_keys_path):
-                        existing_keys = handle.read_file(auth_keys_path)
-                        if isinstance(existing_keys, bytes):
-                            existing_keys = existing_keys.decode(
-                                "utf-8", errors="replace"
-                            )
-
-                    existing_set = (
-                        set(existing_keys.strip().split("\n"))
-                        if existing_keys.strip()
-                        else set()
-                    )
-                    new_keys = [
-                        key
-                        for key in self._ssh_pubkeys
-                        if key.strip() and key.strip() not in existing_set
-                    ]
-                    if new_keys:
-                        combined = existing_keys
-                        if combined and not combined.endswith("\n"):
-                            combined += "\n"
-                        combined += "\n".join(new_keys) + "\n"
-                        handle.write(auth_keys_path, combined)
-                        handle.chmod(
-                            CONST_FILE_PERMS_PRIVATE_KEY, auth_keys_path
-                        )
-                        handle.sync()
-
-                    handle.mkdir_p("/etc/cloud/cloud.cfg.d")
-                    handle.write(
-                        "/etc/cloud/cloud.cfg.d/99-disable-datasources.cfg",
-                        "datasource_list: [None]\n",
-                    )
-                    handle.write(
-                        "/etc/cloud/cloud-init.disabled", "disabled by mvmctl\n"
-                    )
-                    handle.mkdir_p("/etc/systemd/system/snapd.seeded.service.d")
-                    handle.write(
-                        "/etc/systemd/system/snapd.seeded.service.d/override.conf",
-                        "[Service]\nExecStart=\nExecStart=/bin/true\n",
-                    )
-                    handle.mkdir_p(
-                        "/etc/systemd/system/systemd-networkd-wait-online.service.d"
-                    )
-                    handle.write(
-                        "/etc/systemd/system/systemd-networkd-wait-online.service.d/override.conf",
-                        "[Unit]\nConditionPathExists=/nonexistent-disabled-by-mvm\n",
+                # Phase 1a: filesystem resize
+                if needs_resize:
+                    self._do_filesystem_resize(
+                        handle, self._rootfs_path, target_size
                     )
 
-                    for service_name in [
-                        "cloud-init.service",
-                        "cloud-init-local.service",
-                        "cloud-config.service",
-                        "cloud-final.service",
-                    ]:
-                        handle.ln_sf(
-                            "/dev/null", f"/etc/systemd/system/{service_name}"
-                        )
-
-                    self.enable_ssh(og._handle)
-                    handle.mkdir_p("/etc/systemd/system")
-                    handle.write(
-                        "/etc/systemd/system/first-boot-ssh-installer.service",
-                        "[Unit]\nDescription=First-boot SSH installer\nAfter=network.target\n"
-                        "ConditionFirstBoot=yes\n\n[Service]\nType=oneshot\n"
-                        "ExecStart=/bin/bash -c '\n"
-                        "if ! command -v sshd >/dev/null 2>&1 && ! command -v ssh >/dev/null 2>&1; then\n"
-                        "  if command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm openssh 2>/dev/null || true;\n"
-                        "  elif command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y openssh-server 2>/dev/null || true;\n"
-                        "  elif command -v apk >/dev/null 2>&1; then apk add --no-cache openssh 2>/dev/null || true; fi;\n"
-                        "fi\n"
-                        "if command -v systemctl >/dev/null 2>&1; then\n"
-                        "  systemctl enable --now sshd 2>/dev/null || systemctl enable --now ssh 2>/dev/null || true;\n"
-                        "elif [ -f /sbin/openrc ]; then\n"
-                        "  rc-update add sshd default 2>/dev/null || rc-update add ssh default 2>/dev/null || true;\n"
-                        "  rc-service sshd start 2>/dev/null || rc-service ssh start 2>/dev/null || true;\n"
-                        "fi\n"
-                        "systemctl disable first-boot-ssh-installer.service 2>/dev/null || true\n'\n"
-                        "RemainAfterExit=yes\n\n[Install]\nWantedBy=multi-user.target\n",
-                    )
-                    handle.chmod(
-                        CONST_FILE_PERMS_PUBLIC_KEY,
-                        "/etc/systemd/system/first-boot-ssh-installer.service",
-                    )
-                    handle.mkdir_p(
-                        "/etc/systemd/system/multi-user.target.wants"
-                    )
-                    handle.ln_s(
-                        "/etc/systemd/system/first-boot-ssh-installer.service",
-                        "/etc/systemd/system/multi-user.target.wants/first-boot-ssh-installer.service",
-                    )
-                    logger.info(
-                        "Created first-boot SSH installer for %s",
-                        self._rootfs_path.name,
-                    )
-
-                resolv_path = "/etc/resolv.conf"
-                needs_dns = True
-
-                if handle.exists(resolv_path):
-                    try:
-                        existing_content = handle.read_file(resolv_path)
-                        if isinstance(existing_content, bytes):
-                            existing_content = existing_content.decode(
-                                "utf-8", errors="replace"
-                            )
-                        stripped = existing_content.strip()
-                        if stripped and "nameserver" in stripped.lower():
-                            needs_dns = False
-                    except RuntimeError:
-                        needs_dns = True
-
-                if needs_dns:
-                    dns_content = f"nameserver {CONST_DEFAULT_NAMESERVER}\n"
-                    try:
-                        handle.write(resolv_path, dns_content)
-                    except RuntimeError:
-                        handle.rm(resolv_path)
-                        handle.write(resolv_path, dns_content)
-                    logger.debug(
-                        "Injected default DNS into %s", self._rootfs_path.name
-                    )
-
-                handle.write("/etc/hostname", self._hostname)
-
-                hosts_content = ""
-                if handle.exists("/etc/hosts"):
-                    hosts_content = handle.read_file("/etc/hosts")
-                    if isinstance(hosts_content, bytes):
-                        hosts_content = hosts_content.decode(
-                            "utf-8", errors="replace"
-                        )
-
-                lines = hosts_content.splitlines() if hosts_content else []
-                new_lines = []
-                found_host_entry = False
-                for line in lines:
-                    stripped = line.strip()
-                    if stripped.startswith("#") or not stripped:
-                        new_lines.append(line)
-                    elif stripped.startswith("127.0.1.1"):
-                        new_lines.append(f"127.0.1.1\t{self._hostname}")
-                        found_host_entry = True
-                    else:
-                        new_lines.append(line)
-
-                if not found_host_entry:
-                    new_lines.append(f"127.0.1.1\t{self._hostname}")
-
-                handle.write("/etc/hosts", "\n".join(new_lines) + "\n")
-                handle.sync()
+                # Phase 1b: queued operations
+                for op_name in self._ops:
+                    getattr(self, f"_do_{op_name}")(handle)
             finally:
                 try:
                     handle.umount("/")
                 except Exception:
                     pass
+
+    @staticmethod
+    def _do_truncate_file(path: Path, target_size: int) -> None:
+        try:
+            current_size = path.stat().st_size
+            if isinstance(current_size, int) and current_size < target_size:
+                with open(path, "r+b") as f:
+                    f.truncate(target_size)
+        except (OSError, AttributeError):
+            pass
+
+    @staticmethod
+    def _do_filesystem_resize(
+        handle: Any, rootfs_path: Path, target_size: int
+    ) -> None:
+        filesystems: dict[str, str] = handle.list_filesystems()
+        root_device: str | None = None
+        for candidate in ["/dev/sda", "/dev/vda", "/dev/sda1", "/dev/vda1"]:
+            if candidate in filesystems:
+                root_device = candidate
+                break
+        if root_device is None and filesystems:
+            root_device = str(list(filesystems.keys())[0])
+        if root_device is None:
+            raise VMBuilderError(f"No filesystem found in {rootfs_path}")
+
+        fs_type = handle.vfs_type(root_device)
+        if fs_type in ("ext2", "ext3", "ext4"):
+            handle.resize2fs(root_device)
+        elif fs_type == "btrfs":
+            handle.mount(root_device, "/")
+            handle.btrfs_filesystem_resize("/", target_size)
+            handle.umount(root_device)
+
+    def _do_setup_ssh(self, handle: Any) -> None:
+        """Configure SSH, user, host keys, and first-boot services."""
+        if not self._ssh_pubkeys:
+            return
+
+        ssh_home_dir = (
+            "/root" if self._user == "root" else f"/home/{self._user}"
+        )
+        self.ensure_user(handle)
+        self.configure_ssh_keys(handle)
+        self.generate_host_keys(handle)
+
+        if not handle.exists("/root"):
+            handle.mkdir_p("/root")
+            handle.chmod(CONST_DIR_PERMS_CACHE, "/root")
+            handle.chown(CONST_ROOT_UID, CONST_ROOT_GID, "/root")
+
+        handle.mkdir_p(f"{ssh_home_dir}/.ssh")
+        handle.chmod(CONST_DIR_PERMS_CACHE, f"{ssh_home_dir}/.ssh")
+        handle.chown(CONST_ROOT_UID, CONST_ROOT_GID, f"{ssh_home_dir}/.ssh")
+        handle.sync()
+
+        existing_keys = ""
+        auth_keys_path = f"{ssh_home_dir}/.ssh/authorized_keys"
+        if handle.exists(auth_keys_path):
+            existing_keys = handle.read_file(auth_keys_path)
+            if isinstance(existing_keys, bytes):
+                existing_keys = existing_keys.decode("utf-8", errors="replace")
+
+        existing_set = (
+            set(existing_keys.strip().split("\n"))
+            if existing_keys.strip()
+            else set()
+        )
+        new_keys = [
+            key
+            for key in self._ssh_pubkeys
+            if key.strip() and key.strip() not in existing_set
+        ]
+        if new_keys:
+            combined = existing_keys
+            if combined and not combined.endswith("\n"):
+                combined += "\n"
+            combined += "\n".join(new_keys) + "\n"
+            handle.write(auth_keys_path, combined)
+            handle.chmod(CONST_FILE_PERMS_PRIVATE_KEY, auth_keys_path)
+            handle.sync()
+
+        self.enable_ssh(handle)
+        handle.mkdir_p("/etc/systemd/system")
+        handle.write(
+            "/etc/systemd/system/first-boot-ssh-installer.service",
+            "[Unit]\nDescription=First-boot SSH installer\nAfter=network.target\n"
+            "ConditionFirstBoot=yes\n\n[Service]\nType=oneshot\n"
+            "ExecStart=/bin/bash -c '\n"
+            "if ! command -v sshd >/dev/null 2>&1 && ! command -v ssh >/dev/null 2>&1; then\n"
+            "  if command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm openssh 2>/dev/null || true;\n"
+            "  elif command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y openssh-server 2>/dev/null || true;\n"
+            "  elif command -v apk >/dev/null 2>&1; then apk add --no-cache openssh 2>/dev/null || true; fi;\n"
+            "fi\n"
+            "if command -v systemctl >/dev/null 2>&1; then\n"
+            "  systemctl enable --now sshd 2>/dev/null || systemctl enable --now ssh 2>/dev/null || true;\n"
+            "elif [ -f /sbin/openrc ]; then\n"
+            "  rc-update add sshd default 2>/dev/null || rc-update add ssh default 2>/dev/null || true;\n"
+            "  rc-service sshd start 2>/dev/null || rc-service ssh start 2>/dev/null || true;\n"
+            "fi\n"
+            "systemctl disable first-boot-ssh-installer.service 2>/dev/null || true\n'\n"
+            "RemainAfterExit=yes\n\n[Install]\nWantedBy=multi-user.target\n",
+        )
+        handle.chmod(
+            CONST_FILE_PERMS_PUBLIC_KEY,
+            "/etc/systemd/system/first-boot-ssh-installer.service",
+        )
+        handle.mkdir_p("/etc/systemd/system/multi-user.target.wants")
+        handle.ln_s(
+            "/etc/systemd/system/first-boot-ssh-installer.service",
+            "/etc/systemd/system/multi-user.target.wants/first-boot-ssh-installer.service",
+        )
+        logger.info(
+            "Created first-boot SSH installer for %s",
+            self._rootfs_path.name,
+        )
+
+    @staticmethod
+    def _do_disable_cloud_init(handle: Any) -> None:
+        """Block cloud-init datasources and mask cloud-init services."""
+        handle.mkdir_p("/etc/cloud/cloud.cfg.d")
+        handle.write(
+            "/etc/cloud/cloud.cfg.d/99-disable-datasources.cfg",
+            "datasource_list: [None]\n",
+        )
+        handle.write("/etc/cloud/cloud-init.disabled", "disabled by mvmctl\n")
+        handle.mkdir_p("/etc/systemd/system/snapd.seeded.service.d")
+        handle.write(
+            "/etc/systemd/system/snapd.seeded.service.d/override.conf",
+            "[Service]\nExecStart=\nExecStart=/bin/true\n",
+        )
+        handle.mkdir_p(
+            "/etc/systemd/system/systemd-networkd-wait-online.service.d"
+        )
+        handle.write(
+            "/etc/systemd/system/systemd-networkd-wait-online.service.d/override.conf",
+            "[Unit]\nConditionPathExists=/nonexistent-disabled-by-mvm\n",
+        )
+
+        for service_name in [
+            "cloud-init.service",
+            "cloud-init-local.service",
+            "cloud-config.service",
+            "cloud-final.service",
+        ]:
+            handle.ln_sf("/dev/null", f"/etc/systemd/system/{service_name}")
+
+    @staticmethod
+    def _do_inject_dns(handle: Any) -> None:
+        resolv_path = "/etc/resolv.conf"
+        needs_dns = True
+
+        if handle.exists(resolv_path):
+            try:
+                existing_content = handle.read_file(resolv_path)
+                if isinstance(existing_content, bytes):
+                    existing_content = existing_content.decode(
+                        "utf-8", errors="replace"
+                    )
+                stripped = existing_content.strip()
+                if stripped and "nameserver" in stripped.lower():
+                    needs_dns = False
+            except RuntimeError:
+                needs_dns = True
+
+        if needs_dns:
+            dns_content = f"nameserver {CONST_DEFAULT_NAMESERVER}\n"
+            try:
+                handle.write(resolv_path, dns_content)
+            except RuntimeError:
+                handle.rm(resolv_path)
+                handle.write(resolv_path, dns_content)
+            logger.debug("Injected default DNS into %s", resolv_path)
+
+    def _do_set_hostname(self, handle: Any) -> None:
+        hostname = self._hostname
+        if not hostname:
+            return
+
+        handle.write("/etc/hostname", hostname)
+
+        hosts_content = ""
+        if handle.exists("/etc/hosts"):
+            hosts_content = handle.read_file("/etc/hosts")
+            if isinstance(hosts_content, bytes):
+                hosts_content = hosts_content.decode("utf-8", errors="replace")
+
+        lines = hosts_content.splitlines() if hosts_content else []
+        new_lines = []
+        found_host_entry = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("#") or not stripped:
+                new_lines.append(line)
+            elif stripped.startswith("127.0.1.1"):
+                new_lines.append(f"127.0.1.1\t{hostname}")
+                found_host_entry = True
+            else:
+                new_lines.append(line)
+
+        if not found_host_entry:
+            new_lines.append(f"127.0.1.1\t{hostname}")
+
+        handle.write("/etc/hosts", "\n".join(new_lines) + "\n")
+        handle.sync()
+
+    def _do_inject_cloud_init(self, handle: Any) -> None:
+        """Inject cloud-init seed files into the mounted rootfs."""
+        from mvmctl.constants import DEFAULT_LIBGUESTFS_SEED_DIR
+
+        if self._cloud_init_dir is None:
+            return
+
+        seed_dir = DEFAULT_LIBGUESTFS_SEED_DIR
+        handle.mkdir_p(seed_dir)
+
+        required_files = ["meta-data", "user-data"]
+        optional_files = ["network-config"]
+
+        for filename in required_files:
+            src = self._cloud_init_dir / filename
+            if not src.exists():
+                raise GuestfsWriteError(
+                    f"Required cloud-init file not found: {src}"
+                )
+            dest = f"{seed_dir}/{filename}"
+            try:
+                handle.write(dest, src.read_bytes())
+            except Exception as e:
+                raise GuestfsWriteError(f"Failed to write {filename}: {e}")
+
+        for filename in optional_files:
+            src = self._cloud_init_dir / filename
+            if src.exists():
+                dest = f"{seed_dir}/{filename}"
+                try:
+                    handle.write(dest, src.read_bytes())
+                except Exception as e:
+                    raise GuestfsWriteError(f"Failed to write {filename}: {e}")
 
     def enable_ssh(self, guestfs_handle: Any) -> bool:
         """Detect init system and enable SSH service."""

@@ -442,8 +442,8 @@ class VMCreateRequest:
 
     def _resolve_cloud_init_mode(self) -> CloudInitModeResolved:
 
-        # Inject is default cloud-init mode!
-        mode = CloudInitModeResolved(mode=CloudInitMode.INJECT, iso_path=None)
+        # Off is default cloud-init mode — most stable across all image types
+        mode = CloudInitModeResolved(mode=CloudInitMode.OFF, iso_path=None)
 
         if self._inputs.cloud_init_mode is None:
             return mode
@@ -456,22 +456,27 @@ class VMCreateRequest:
             )
 
         if mode_lower == "iso":
-            iso_path = self._vm_dir / "cloud-init.iso"
-
             if self._inputs.cloud_init_iso_path is not None:
                 iso_path = Path(self._inputs.cloud_init_iso_path)
-
-            if not iso_path.exists():
-                raise CloudInitModeError(
-                    f"Cloud-init ISO not found: {iso_path}"
+                if not iso_path.exists():
+                    raise CloudInitModeError(
+                        f"Cloud-init ISO not found: {iso_path}"
+                    )
+                mode = CloudInitModeResolved(
+                    mode=CloudInitMode.ISO, iso_path=iso_path
                 )
-
-            mode = CloudInitModeResolved(
-                mode=CloudInitMode.ISO, iso_path=iso_path
-            )
+            else:
+                # Default: ISO will be created during provisioning
+                mode = CloudInitModeResolved(
+                    mode=CloudInitMode.ISO, iso_path=None
+                )
         elif mode_lower == "net":
             mode = CloudInitModeResolved(mode=CloudInitMode.NET, iso_path=None)
-        else:
+        elif mode_lower == "inject":
+            mode = CloudInitModeResolved(
+                mode=CloudInitMode.INJECT, iso_path=None
+            )
+        else:  # "off"
             mode = CloudInitModeResolved(mode=CloudInitMode.OFF, iso_path=None)
 
         return mode
