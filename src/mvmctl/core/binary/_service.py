@@ -16,9 +16,12 @@ from mvmctl.constants import (
     CONST_BUFFER_SIZE_BYTES,
     CONST_HTTP_TIMEOUT_SECONDS,
     CONST_MIN_BINARY_SIZE_BYTES,
-    DEFAULT_REMOTE_VERSION_LIMIT,
-    FIRECRACKER_GITHUB_DOWNLOAD_URL,
-    FIRECRACKER_GITHUB_RELEASES_API_URL,
+)
+from mvmctl.constants import (
+    FIRECRACKER_GITHUB_DOWNLOAD_URL as _GITHUB_DOWNLOAD_URL,
+)
+from mvmctl.constants import (
+    FIRECRACKER_GITHUB_RELEASES_API_URL as _GITHUB_RELEASES_URL,
 )
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.exceptions import BinaryError
@@ -30,8 +33,6 @@ from mvmctl.utils.http import HttpDownload
 logger = logging.getLogger(__name__)
 
 _CHUNK_SIZE = CONST_MIN_BINARY_SIZE_BYTES * CONST_BUFFER_SIZE_BYTES
-_GITHUB_RELEASES_URL = FIRECRACKER_GITHUB_RELEASES_API_URL
-_GITHUB_DOWNLOAD_URL = FIRECRACKER_GITHUB_DOWNLOAD_URL
 
 
 class BinaryService:
@@ -69,21 +70,18 @@ class BinaryService:
         return self._repo.get_default("firecracker")
 
     @staticmethod
-    def list_remote(limit: int | None = None) -> list[str]:
+    def list_remote(limit: int) -> list[str]:
         """
         Fetch Firecracker release versions from GitHub.
 
         Args:
-            limit: Maximum number of versions to return. Uses default if None.
+            limit: Maximum number of versions to return.
 
         Returns:
             List of version strings sorted by semver (newest first).
 
         """
-        effective_limit = (
-            limit if limit is not None else DEFAULT_REMOTE_VERSION_LIMIT
-        )
-        url = f"{_GITHUB_RELEASES_URL}?per_page={effective_limit}"
+        url = f"{_GITHUB_RELEASES_URL}?per_page={limit}"
 
         try:
             json_data = HttpDownload.read_json_content(url, use_cache=True)

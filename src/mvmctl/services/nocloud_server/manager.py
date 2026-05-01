@@ -64,6 +64,9 @@ class NoCloudNetServerManager:
         name: str | None = None,
         pid_filename: str = DEFAULT_NOCLOUD_PID_FILENAME,
         log_filename: str = DEFAULT_NOCLOUD_LOG_FILENAME,
+        port_range_start: int = 8000,
+        port_range_end: int = 9000,
+        max_port_retries: int = 100,
     ) -> None:
         """
         Initialize the server manager for a specific VM.
@@ -72,12 +75,19 @@ class NoCloudNetServerManager:
             id: Unique identifier for this server (VM hash)
             path: Directory path where PID file and cloud-init files are located
             ipv4_gateway: IP address to bind the server to
-            port: Port number to use for the server
+            port: Port number to use for the server (0 for auto-allocation)
             name: Human-readable name for logging (uses id if None)
             pid_filename: Name of the PID file (default: nocloud-server.pid)
             log_filename: Name of the log file (default: cloud-init.log)
+            port_range_start: Start of port range for auto-allocation (default: 8000)
+            port_range_end: End of port range for auto-allocation (default: 9000)
+            max_port_retries: Max ports to try before giving up (default: 100)
 
         """
+        if port_range_end <= port_range_start:
+            raise ValueError(
+                f"Port range end ({port_range_end}) must be greater than start ({port_range_start})"
+            )
         self._id = id
         self._path = path
         self._ipv4_gateway = ipv4_gateway
@@ -85,6 +95,9 @@ class NoCloudNetServerManager:
         self._name = name or id
         self._pid_path = path / pid_filename
         self._log_path = path / log_filename
+        self._port_range_start = port_range_start
+        self._port_range_end = port_range_end
+        self._max_port_retries = max_port_retries
         self._lock: threading.Lock | None = None
 
     @property
@@ -154,7 +167,7 @@ class NoCloudNetServerManager:
 
         Raises:
             NoCloudServerAlreadyRunningError: If server is already running
-            NoCloudServerError: If subprocess fails to start
+            NoCloudServerError: If subprocess fails to start or no port available
 
         """
         with self._thread_lock:
@@ -162,6 +175,33 @@ class NoCloudNetServerManager:
                 raise NoCloudServerAlreadyRunningError(
                     f"NoCloud-net server already running for ID: {self._id}"
                 )
+
+            # Auto-allocate port from range if requested
+            if self._port == 0:
+                import socket
+
+                allocated = False
+                for port in range(
+                    self._port_range_start, self._port_range_end + 1
+                ):
+                    try:
+                        with socket.socket(
+                            socket.AF_INET, socket.SOCK_STREAM
+                        ) as s:
+                            s.setsockopt(
+                                socket.SOL_SOCKET, socket.SO_REUSEADDR, 1
+                            )
+                            s.bind((self._ipv4_gateway, port))
+                            self._port = port
+                            allocated = True
+                            break
+                    except OSError:
+                        continue
+                if not allocated:
+                    raise NoCloudServerError(
+                        f"No available port in range "
+                        f"{self._port_range_start}-{self._port_range_end}"
+                    )
 
             server_cmd = [
                 sys.executable,

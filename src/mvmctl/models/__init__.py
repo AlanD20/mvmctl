@@ -1,8 +1,19 @@
-"""Data models for MicroVM Manager."""
+"""
+mvmctl data models — stable, curated interface for typed domain data.
+
+All public model types are re-exported here. Import from this module
+for stability guarantees::
+
+    from mvmctl.models import VMInstanceItem, NetworkItem
+
+    vm: VMInstanceItem = ...
+"""
+
+from __future__ import annotations
 
 from mvmctl.models.binary import BinaryItem
 from mvmctl.models.bulk import BulkResult, BulkResultItem
-from mvmctl.models.cache import PruneAllResult
+from mvmctl.models.cache import CleanResult, PruneAllResult
 from mvmctl.models.cloudinit import (
     CloudInitMode,
     CloudInitStatus,
@@ -58,6 +69,7 @@ __all__ = [
     "KernelSpec",
     "NetworkItem",
     "NetworkLeaseItem",
+    "CleanResult",
     "PruneAllResult",
     "SSHKeyItem",
     "VMInspectInfo",

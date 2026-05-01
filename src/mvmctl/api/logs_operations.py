@@ -31,6 +31,15 @@ class LogOperation:
         resolved = LogRequest(inputs=inputs, db=Database()).resolve()
         controller = LogController(resolved.vm, VMRepository(Database()))
         if resolved.follow:
-            yield from controller.follow(resolved.log_type)
+            yield from controller.follow(
+                resolved.log_type,
+                log_filename=resolved.log_filename,
+                serial_output_filename=resolved.serial_output_filename,
+            )
         else:
-            yield from controller.show(resolved.log_type, resolved.lines)
+            yield from controller.show(
+                resolved.log_type,
+                resolved.lines,
+                log_filename=resolved.log_filename,
+                serial_output_filename=resolved.serial_output_filename,
+            )

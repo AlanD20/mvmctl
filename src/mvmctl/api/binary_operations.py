@@ -24,6 +24,7 @@ from mvmctl.core.binary._controller import BinaryController
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.binary._resolver import BinaryResolver
 from mvmctl.core.binary._service import BinaryService
+from mvmctl.core.config._service import SettingsService
 from mvmctl.exceptions import (
     BinaryError,
     BinaryNotFoundError,
@@ -224,6 +225,12 @@ class BinaryOperation:
             list[str] of version strings.
 
         """
+        if limit is None:
+            limit = int(
+                SettingsService.resolve(
+                    Database(), "defaults.binary", "remote_version_limit"
+                )
+            )
         return BinaryService.list_remote(limit=limit)
 
     @staticmethod

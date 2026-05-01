@@ -33,9 +33,7 @@ def console(
     ),
     name: str | None = typer.Option(None, "--name", "-n", help="VM name"),
     ip: str | None = typer.Option(None, "--ip", help="VM guest IP address"),
-    mac: str | None = typer.Option(
-        None, "--mac", help="VM guest MAC address"
-    ),
+    mac: str | None = typer.Option(None, "--mac", help="VM guest MAC address"),
     state: bool = typer.Option(
         False, "--state", help="Show console state without attaching"
     ),

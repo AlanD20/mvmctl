@@ -5,21 +5,17 @@ from pathlib import Path
 from typing import Any, Self
 
 from mvmctl.constants import (
-    CONST_DEFAULT_NAMESERVER,
-    CONST_DEFAULT_USER_GID,
-    CONST_DEFAULT_USER_UID,
     CONST_DIR_PERMS_CACHE,
     CONST_FILE_PERMS_EXECUTABLE,
     CONST_FILE_PERMS_PRIVATE_KEY,
     CONST_FILE_PERMS_PUBLIC_KEY,
     CONST_FILE_PERMS_SHADOW,
     CONST_FILE_PERMS_SUDOERS,
-    CONST_ROOT_GID,
-    CONST_ROOT_UID,
     CONST_SHADOW_DAYS_SINCE_EPOCH,
     CONST_SHADOW_MAX_DAYS,
     CONST_SHADOW_MIN_DAYS,
     CONST_SHADOW_WARN_DAYS,
+    DEFAULT_LIBGUESTFS_SEED_DIR,
 )
 from mvmctl.core._shared._guestfs import OptimizedGuestfs
 from mvmctl.exceptions import (
@@ -35,17 +31,34 @@ __all__ = ["GuestfsProvisioner"]
 class GuestfsProvisioner:
     """All guestfs setup operations. Stateful - holds guestfs handle."""
 
-    def __init__(self, rootfs_path: Path, *, readonly: bool = False) -> None:
+    def __init__(
+        self,
+        rootfs_path: Path,
+        *,
+        readonly: bool = False,
+        root_uid: int = 0,
+        root_gid: int = 0,
+        user_uid: int = 1000,
+        user_gid: int = 1000,
+    ) -> None:
         """
         Initialize the GuestfsProvisioner.
 
         Args:
             rootfs_path: Path to the root filesystem image.
             readonly: Whether to open guestfs in read-only mode.
+            root_uid: Root user UID in guest (default: 0).
+            root_gid: Root group GID in guest (default: 0).
+            user_uid: Default non-root user UID in guest (default: 1000).
+            user_gid: Default non-root user GID in guest (default: 1000).
 
         """
         self._rootfs_path = rootfs_path
         self._readonly = readonly
+        self._root_uid = root_uid
+        self._root_gid = root_gid
+        self._user_uid = user_uid
+        self._user_gid = user_gid
         self._target_size: int | None = None
         self._hostname: str | None = None
         self._user: str | None = None
@@ -68,8 +81,9 @@ class GuestfsProvisioner:
         self._ops.append("set_hostname")
         return self
 
-    def inject_dns(self) -> Self:
+    def inject_dns(self, *, dns_server: str) -> Self:
         """Queue DNS injection."""
+        self._dns_server = dns_server
         self._ops.append("inject_dns")
         return self
 
@@ -190,11 +204,11 @@ class GuestfsProvisioner:
         if not handle.exists("/root"):
             handle.mkdir_p("/root")
             handle.chmod(CONST_DIR_PERMS_CACHE, "/root")
-            handle.chown(CONST_ROOT_UID, CONST_ROOT_GID, "/root")
+            handle.chown(self._root_uid, self._root_gid, "/root")
 
         handle.mkdir_p(f"{ssh_home_dir}/.ssh")
         handle.chmod(CONST_DIR_PERMS_CACHE, f"{ssh_home_dir}/.ssh")
-        handle.chown(CONST_ROOT_UID, CONST_ROOT_GID, f"{ssh_home_dir}/.ssh")
+        handle.chown(self._root_uid, self._root_gid, f"{ssh_home_dir}/.ssh")
         handle.sync()
 
         existing_keys = ""
@@ -288,8 +302,7 @@ class GuestfsProvisioner:
         ]:
             handle.ln_sf("/dev/null", f"/etc/systemd/system/{service_name}")
 
-    @staticmethod
-    def _do_inject_dns(handle: Any) -> None:
+    def _do_inject_dns(self, handle: Any) -> None:
         resolv_path = "/etc/resolv.conf"
         needs_dns = True
 
@@ -307,7 +320,7 @@ class GuestfsProvisioner:
                 needs_dns = True
 
         if needs_dns:
-            dns_content = f"nameserver {CONST_DEFAULT_NAMESERVER}\n"
+            dns_content = f"nameserver {self._dns_server}\n"
             try:
                 handle.write(resolv_path, dns_content)
             except RuntimeError:
@@ -349,7 +362,6 @@ class GuestfsProvisioner:
 
     def _do_inject_cloud_init(self, handle: Any) -> None:
         """Inject cloud-init seed files into the mounted rootfs."""
-        from mvmctl.constants import DEFAULT_LIBGUESTFS_SEED_DIR
 
         if self._cloud_init_dir is None:
             return
@@ -551,7 +563,7 @@ class GuestfsProvisioner:
             guestfs_handle.mkdir_p(f"{home_dir}/.ssh")
             guestfs_handle.write(
                 "/etc/passwd",
-                f"{self._user}:!:{CONST_DEFAULT_USER_UID}:{CONST_DEFAULT_USER_GID}::{home_dir}:/bin/bash\n",
+                f"{self._user}:!:{self._user_uid}:{self._user_gid}::{home_dir}:/bin/bash\n",
                 mode="a",
             )
             guestfs_handle.chmod(CONST_FILE_PERMS_PUBLIC_KEY, "/etc/passwd")
@@ -563,7 +575,7 @@ class GuestfsProvisioner:
             guestfs_handle.chmod(CONST_FILE_PERMS_SHADOW, "/etc/shadow")
             guestfs_handle.write(
                 "/etc/group",
-                f"{self._user}:x:{CONST_DEFAULT_USER_GID}:\n",
+                f"{self._user}:x:{self._user_gid}:\n",
                 mode="a",
             )
             guestfs_handle.chmod(CONST_FILE_PERMS_PUBLIC_KEY, "/etc/group")
@@ -575,12 +587,10 @@ class GuestfsProvisioner:
             guestfs_handle.chmod(
                 CONST_FILE_PERMS_SUDOERS, f"/etc/sudoers.d/{self._user}"
             )
+            guestfs_handle.chown(self._user_uid, self._user_gid, home_dir)
             guestfs_handle.chown(
-                CONST_DEFAULT_USER_UID, CONST_DEFAULT_USER_GID, home_dir
-            )
-            guestfs_handle.chown(
-                CONST_DEFAULT_USER_UID,
-                CONST_DEFAULT_USER_GID,
+                self._user_uid,
+                self._user_gid,
                 f"{home_dir}/.ssh",
             )
             logger.info(

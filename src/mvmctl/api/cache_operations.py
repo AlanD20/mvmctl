@@ -7,15 +7,15 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from mvmctl.constants import DEFAULT_NETWORK_NAME
 from mvmctl.core._shared import Database
 from mvmctl.core.binary._repository import BinaryRepository
+from mvmctl.core.config._service import SettingsService
 from mvmctl.core.host._helper import HostPrivilegeHelper
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.core.network._repository import LeaseRepository, NetworkRepository
 from mvmctl.core.vm._repository import VMRepository
-from mvmctl.models.cache import CleanResult, PruneAllResult
+from mvmctl.models import CleanResult, PruneAllResult
 from mvmctl.models.vm import VMStatus
 from mvmctl.utils.common import CacheUtils
 
@@ -238,7 +238,9 @@ class CacheOperation:
 
         for network in all_networks:
             if not include_all:
-                if network.name == DEFAULT_NETWORK_NAME:
+                if network.name == str(
+                    SettingsService.resolve(db, "defaults.network", "name")
+                ):
                     continue
                 if network.id in referenced_network_ids:
                     continue

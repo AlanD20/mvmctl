@@ -100,6 +100,12 @@ class ResolvedVMCreateInput:
     vcpu_count: int
     mem_size_mib: int
     user: str
+    dns_server: str
+    root_uid: int
+    root_gid: int
+    user_uid: int
+    user_gid: int
+    guest_mac_prefix: str
     network: NetworkItem
     image: ImageItem
     kernel: KernelItem
@@ -120,6 +126,22 @@ class ResolvedVMCreateInput:
     ssh_keys: list[str]
 
     lsm_flags: str
+
+    # Firecracker
+    log_level: str
+    log_filename: str
+    serial_output_filename: str
+    metrics_filename: str
+    api_socket_filename: str
+    pid_filename: str
+    config_filename: str
+    console_socket_filename: str
+    console_pid_filename: str
+    # Cloud-init
+    cloud_init_iso_name: str
+    nocloud_port_range_start: int
+    nocloud_port_range_end: int
+    nocloud_max_port_retries: int
 
     requested_guest_ip: str | None
     requested_guest_mac: str | None
@@ -196,6 +218,60 @@ class VMCreateRequest:
 
         ci_mode_result = self._resolve_cloud_init_mode()
 
+        # Resolve firecracker defaults
+        log_level = str(
+            self._resolve_setting("defaults.firecracker", "log_level")
+        )
+        log_filename = str(
+            self._resolve_setting("defaults.firecracker", "log_filename")
+        )
+        serial_output_filename = str(
+            self._resolve_setting(
+                "defaults.firecracker", "serial_output_filename"
+            )
+        )
+        metrics_filename = str(
+            self._resolve_setting("defaults.firecracker", "metrics_filename")
+        )
+        api_socket_filename = str(
+            self._resolve_setting("defaults.firecracker", "api_socket_filename")
+        )
+        pid_filename = str(
+            self._resolve_setting("defaults.firecracker", "pid_filename")
+        )
+        config_filename = str(
+            self._resolve_setting("defaults.firecracker", "config_filename")
+        )
+        console_socket_filename = str(
+            self._resolve_setting(
+                "defaults.firecracker", "console_socket_filename"
+            )
+        )
+        console_pid_filename = str(
+            self._resolve_setting(
+                "defaults.firecracker", "console_pid_filename"
+            )
+        )
+        # Resolve cloud-init defaults
+        cloud_init_iso_name = str(
+            self._resolve_setting("defaults.cloudinit", "iso_name")
+        )
+        nocloud_port_range_start = int(
+            self._resolve_setting(
+                "defaults.cloudinit", "nocloud_port_range_start"
+            )
+        )
+        nocloud_port_range_end = int(
+            self._resolve_setting(
+                "defaults.cloudinit", "nocloud_port_range_end"
+            )
+        )
+        nocloud_max_port_retries = int(
+            self._resolve_setting(
+                "defaults.cloudinit", "nocloud_max_port_retries"
+            )
+        )
+
         self._result = ResolvedVMCreateInput(
             name=self._inputs.name,
             vm_id=self._vm_id,
@@ -209,6 +285,14 @@ class VMCreateRequest:
             user=self._inputs.user
             if self._inputs.user is not None
             else self._resolve_setting("defaults.vm", "ssh_user"),
+            dns_server=str(self._resolve_setting("defaults.vm", "dns_server")),
+            root_uid=int(self._resolve_setting("defaults.vm", "root_uid")),
+            root_gid=int(self._resolve_setting("defaults.vm", "root_gid")),
+            user_uid=int(self._resolve_setting("defaults.vm", "user_uid")),
+            user_gid=int(self._resolve_setting("defaults.vm", "user_gid")),
+            guest_mac_prefix=str(
+                self._resolve_setting("defaults.vm", "guest_mac_prefix")
+            ),
             network=network,
             image=image,
             kernel=kernel,
@@ -252,6 +336,21 @@ class VMCreateRequest:
             if self._inputs.lsm_flags is not None
             else self._resolve_setting("defaults.vm", "lsm_flags"),
             extra_drives=[],
+            # Firecracker file/path defaults
+            log_level=log_level,
+            log_filename=log_filename,
+            serial_output_filename=serial_output_filename,
+            metrics_filename=metrics_filename,
+            api_socket_filename=api_socket_filename,
+            pid_filename=pid_filename,
+            config_filename=config_filename,
+            console_socket_filename=console_socket_filename,
+            console_pid_filename=console_pid_filename,
+            # Cloud-init defaults
+            cloud_init_iso_name=cloud_init_iso_name,
+            nocloud_port_range_start=nocloud_port_range_start,
+            nocloud_port_range_end=nocloud_port_range_end,
+            nocloud_max_port_retries=nocloud_max_port_retries,
         )
 
         # Validate

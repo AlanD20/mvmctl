@@ -11,13 +11,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from mvmctl.constants import (
-    DEFAULT_NETWORK_NAME,
+    CLI_NAME,
     MVM_UNIX_GROUP,
     SUDOERS_DROP_IN_PATH,
-    TAP_PREFIX,
-    device_prefix,
 )
 from mvmctl.core._shared import Database
+from mvmctl.core.config._service import SettingsService
 from mvmctl.core.host._controller import HostController
 from mvmctl.core.host._helper import HostPrivilegeHelper
 from mvmctl.core.host._repository import HostRepository
@@ -214,7 +213,13 @@ class HostOperation:
                     init_timestamp="",
                     setting="default_network",
                     original_value=None,
-                    applied_value=DEFAULT_NETWORK_NAME,
+                    applied_value=str(
+                        SettingsService.resolve(
+                            Database(),
+                            "defaults.network",
+                            "name",
+                        )
+                    ),
                     mechanism="network_create",
                     reverted=False,
                     change_order=0,
@@ -293,11 +298,7 @@ class HostOperation:
         # Remove TAP devices
         tap_names = NetworkUtils.get_tuntap_devices()
         fallback_tap_candidates = sorted(
-            {
-                tap
-                for tap in tap_names
-                if tap.startswith(TAP_PREFIX) or tap.startswith("mvm-")
-            }
+            {tap for tap in tap_names if tap.startswith(f"{CLI_NAME}-")}
         )
         for tap_name in fallback_tap_candidates:
             try:
@@ -346,7 +347,10 @@ class HostOperation:
                 )
 
         # Remove default bridge if it exists
-        default_bridge = f"{device_prefix()}-{DEFAULT_NETWORK_NAME[:10]}"
+        default_net_name = str(
+            SettingsService.resolve(Database(), "defaults.network", "name")
+        )
+        default_bridge = f"{CLI_NAME}-{default_net_name[:10]}"
         if NetworkUtils.bridge_exists(default_bridge):
             try:
                 NetworkUtils._run_batch(
@@ -364,7 +368,7 @@ class HostOperation:
 
         # Remove orphan bridges
         for bridge in NetworkUtils.get_bridges():
-            if not bridge.startswith(f"{device_prefix()}-"):
+            if not bridge.startswith(f"{CLI_NAME}-"):
                 continue
             if bridge == default_bridge:
                 continue
@@ -387,7 +391,7 @@ class HostOperation:
 
         # Remove default network from database
         default_net = next(
-            (n for n in networks if n.name == DEFAULT_NETWORK_NAME), None
+            (n for n in networks if n.name == default_net_name), None
         )
         if default_net:
             try:
@@ -395,11 +399,9 @@ class HostOperation:
                 from mvmctl.api.network_operations import NetworkOperation
 
                 NetworkOperation.remove(
-                    NetworkInput(name=[DEFAULT_NETWORK_NAME]), force=True
+                    NetworkInput(name=[default_net_name]), force=True
                 )
-                summary.append(
-                    f"Removed default network '{DEFAULT_NETWORK_NAME}'"
-                )
+                summary.append(f"Removed default network '{default_net_name}'")
             except NetworkError as e:
                 summary.append(
                     f"Warning: failed to remove default network: {e}"

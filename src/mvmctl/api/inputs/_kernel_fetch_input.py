@@ -105,7 +105,7 @@ class KernelFetchRequest:
         if self._inputs.arch is not None:
             arch = self._inputs.arch
         else:
-            arch = SettingsService.resolve(self._db, "defaults.image", "arch")
+            arch = SettingsService.resolve(self._db, "defaults.kernel", "arch")
 
         if self._inputs.jobs is not None:
             jobs = self._inputs.jobs

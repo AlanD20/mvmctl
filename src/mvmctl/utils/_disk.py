@@ -311,7 +311,7 @@ class TypeCodeDetector:
         """
         partition_type = partition.get("type", "")
         if not isinstance(partition_type, str):
-            return constants.DETECTOR_SCORES.get("NEUTRAL_SCORE", 0.0)
+            return constants.DETECTOR_SCORES.get("neutral_score", 0.0)
 
         type_lower = partition_type.lower()
 
@@ -320,11 +320,11 @@ class TypeCodeDetector:
             self.GPT_ROOT_X86_64.lower(),
             self.GPT_ROOT_AARCH64.lower(),
         ):
-            return constants.DETECTOR_SCORES.get("ROOT_SCORE", 1.0)
+            return constants.DETECTOR_SCORES.get("root_score", 1.0)
 
         # Linux MBR type gets medium score
         if type_lower == self.MBR_LINUX.lower():
-            return constants.DETECTOR_SCORES.get("MBR_LINUX_SCORE", 0.5)
+            return constants.DETECTOR_SCORES.get("mbr_linux_score", 0.5)
 
         # Exclude partitions (ESP, swap, LVM, extended) get negative score
         if type_lower in (
@@ -335,10 +335,10 @@ class TypeCodeDetector:
             self.MBR_EXTENDED.lower(),
             self.MBR_LVM.lower(),
         ):
-            return constants.DETECTOR_SCORES.get("EXCLUDE_SCORE", -1.0)
+            return constants.DETECTOR_SCORES.get("exclude_score", -1.0)
 
         # Unknown types get neutral score
-        return constants.DETECTOR_SCORES.get("NEUTRAL_SCORE", 0.0)
+        return constants.DETECTOR_SCORES.get("neutral_score", 0.0)
 
 
 class LabelDetector:
@@ -378,7 +378,7 @@ class LabelDetector:
         # Get label from partition["name"] or partition["label"], default to empty string
         label = partition.get("name", "") or partition.get("label", "")
         if not isinstance(label, str):
-            return constants.DETECTOR_SCORES.get("NEUTRAL_SCORE", 0.0)
+            return constants.DETECTOR_SCORES.get("neutral_score", 0.0)
 
         label_lower = label.lower()
 
@@ -386,18 +386,18 @@ class LabelDetector:
         root_indicators = ("root", "cloudimg", "rootfs")
         for indicator in root_indicators:
             if indicator in label_lower:
-                return constants.DETECTOR_SCORES.get("LABEL_ROOT_SCORE", 1.0)
+                return constants.DETECTOR_SCORES.get("label_root_score", 1.0)
 
         # Exclude indicators - negative score
         exclude_indicators = ("esp", "efi", "boot", "swap")
         for indicator in exclude_indicators:
             if indicator in label_lower:
                 return constants.DETECTOR_SCORES.get(
-                    "LABEL_EXCLUDE_SCORE", -0.5
+                    "label_exclude_score", -0.5
                 )
 
         # No indicators - neutral score
-        return constants.DETECTOR_SCORES.get("NEUTRAL_SCORE", 0.0)
+        return constants.DETECTOR_SCORES.get("neutral_score", 0.0)
 
 
 class SizeDetector:
@@ -435,7 +435,7 @@ class SizeDetector:
         # Get partition size from partition["size"] (in sectors)
         size_value = partition.get("size", 0)
         if not isinstance(size_value, (int, float)):
-            return constants.DETECTOR_SCORES.get("NEUTRAL_SCORE", 0.0)
+            return constants.DETECTOR_SCORES.get("neutral_score", 0.0)
 
         # Convert sectors to MB: size_mb = size_sectors * SECTOR_SIZE / MEBIBYTE
         sector_bytes = constants.CONST_SECTOR_SIZE_BYTES
@@ -456,18 +456,18 @@ class SizeDetector:
 
         # Too small for root filesystem (< too_small_mb)
         if size_mb < too_small_mb:
-            return constants.DETECTOR_SCORES.get("SIZE_TOO_SMALL_SCORE", -0.5)
+            return constants.DETECTOR_SCORES.get("size_too_small_score", -0.5)
 
         # At least MIN_ROOT_SIZE_MB (500MB)
         if size_mb >= min_root_size_mb:
             # Check if this is the largest partition
             if size_mb >= max_size_mb:
-                return constants.DETECTOR_SCORES.get("SIZE_LARGEST_SCORE", 0.5)
+                return constants.DETECTOR_SCORES.get("size_largest_score", 0.5)
             else:
-                return constants.DETECTOR_SCORES.get("SIZE_ROOT_SCORE", 0.3)
+                return constants.DETECTOR_SCORES.get("size_root_score", 0.3)
 
         # Medium-sized partition (too_small_mb - min_root_size_mb, not largest)
-        return constants.DETECTOR_SCORES.get("NEUTRAL_SCORE", 0.0)
+        return constants.DETECTOR_SCORES.get("neutral_score", 0.0)
 
 
 class FilesystemDetector:
@@ -506,16 +506,16 @@ class FilesystemDetector:
         """
         fstype = partition.get("fstype", "")
         if not isinstance(fstype, str):
-            return constants.DETECTOR_SCORES.get("NEUTRAL_SCORE", 0.0)
+            return constants.DETECTOR_SCORES.get("neutral_score", 0.0)
 
         fstype_lower = fstype.lower()
         root_filesystems = ("ext4", "btrfs", "xfs", "f2fs")
 
         if fstype_lower in root_filesystems:
-            return constants.DETECTOR_SCORES.get("FILESYSTEM_ROOT_SCORE", 0.5)
+            return constants.DETECTOR_SCORES.get("filesystem_root_score", 0.5)
         if fstype_lower == "vfat":
-            return constants.DETECTOR_SCORES.get("FILESYSTEM_VFAT_SCORE", -0.8)
+            return constants.DETECTOR_SCORES.get("filesystem_vfat_score", -0.8)
         if fstype_lower in ("crypto_luks", ""):
-            return constants.DETECTOR_SCORES.get("NEUTRAL_SCORE", 0.0)
+            return constants.DETECTOR_SCORES.get("neutral_score", 0.0)
 
-        return constants.DETECTOR_SCORES.get("NEUTRAL_SCORE", 0.0)
+        return constants.DETECTOR_SCORES.get("neutral_score", 0.0)

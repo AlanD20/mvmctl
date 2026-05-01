@@ -131,8 +131,7 @@ class IPTablesRuleRepository:
                     rule.network_id,
                     rule.comment_tag,
                     rule.command_string,
-                    rule.created_at
-                    or datetime.now(tz=UTC).isoformat(),
+                    rule.created_at or datetime.now(tz=UTC).isoformat(),
                     int(rule.is_active),
                 ),
             )

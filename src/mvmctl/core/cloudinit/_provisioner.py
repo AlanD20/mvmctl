@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mvmctl.constants import CONST_DIR_PERMS_CACHE, DEFAULT_CLOUD_INIT_ISO_NAME
+from mvmctl.constants import CONST_DIR_PERMS_CACHE
 from mvmctl.core._shared import IPTablesTracker
 from mvmctl.exceptions import (
     CloudInitIsoModeError,
@@ -48,6 +48,13 @@ class CloudInitProvisionConfig:
     skip_network_config: bool
 
     ssh_pubkeys: list[str]
+
+    # Resolved from defaults.cloudinit
+    cloud_init_iso_name: str
+    nocloud_port_range_start: int
+    nocloud_port_range_end: int
+    nocloud_max_port_retries: int
+
     custom_user_data_path: Path | None = None
 
     nocloud_net_port: int | None = None
@@ -131,7 +138,10 @@ class CloudInitProvisioner:
                 ipv4_gateway=self._config.network.ipv4_gateway,
                 port=self._config.nocloud_net_port
                 if self._config.nocloud_net_port is not None
-                else 0,  # Zero is used to allocate next available port in the pool
+                else 0,  # Zero triggers auto-allocation from port range
+                port_range_start=self._config.nocloud_port_range_start,
+                port_range_end=self._config.nocloud_port_range_end,
+                max_port_retries=self._config.nocloud_max_port_retries,
             )
             url, port, pid = net_manager.start()
 
@@ -192,7 +202,7 @@ class CloudInitProvisioner:
                 iso_path=self._config.cloud_init_iso_path,
             )
 
-        iso_path = self._config.vm_dir / DEFAULT_CLOUD_INIT_ISO_NAME
+        iso_path = self._config.vm_dir / self._config.cloud_init_iso_name
         try:
             self._manager.create_seed_iso(self._config.cloud_init_dir, iso_path)
         except Exception as exc:

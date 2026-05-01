@@ -28,6 +28,8 @@ class ResolvedLogInput:
     log_type: str
     lines: int
     follow: bool
+    log_filename: str
+    serial_output_filename: str
 
 
 class LogRequest:
@@ -48,12 +50,24 @@ class LogRequest:
         log_type = self._resolve_log_type()
         lines = self._resolve_lines()
         follow = self._resolve_follow()
+        log_filename = str(
+            SettingsService.resolve(
+                self._db, "defaults.firecracker", "log_filename"
+            )
+        )
+        serial_output_filename = str(
+            SettingsService.resolve(
+                self._db, "defaults.firecracker", "serial_output_filename"
+            )
+        )
 
         self._result = ResolvedLogInput(
             vm=vm,
             log_type=log_type,
             lines=lines,
             follow=follow,
+            log_filename=log_filename,
+            serial_output_filename=serial_output_filename,
         )
         return self._result
 
@@ -73,12 +87,12 @@ class LogRequest:
         if self._inputs.lines is not None:
             return self._inputs.lines
         return int(
-            SettingsService.resolve(self._db, "defaults.vm", "log_lines")
+            SettingsService.resolve(self._db, "settings.vm", "log_lines")
         )
 
     def _resolve_follow(self) -> bool:
         if self._inputs.follow is not None:
             return self._inputs.follow
         return bool(
-            SettingsService.resolve(self._db, "defaults.vm", "log_follow")
+            SettingsService.resolve(self._db, "settings.vm", "log_follow")
         )

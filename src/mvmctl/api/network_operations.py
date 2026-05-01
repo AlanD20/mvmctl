@@ -355,6 +355,9 @@ class NetworkOperation:
         default_subnet = SettingsService.resolve(
             db, "defaults.network", "subnet"
         )
+        default_nat_enabled = SettingsService.resolve(
+            db, "defaults.network", "nat_enabled"
+        )
 
         # 1. Ensure internal default network exists
         internal_network = repo.get_by_name(default_name)
@@ -365,7 +368,7 @@ class NetworkOperation:
             create_input = NetworkCreateInput(
                 name=default_name,
                 subnet=default_subnet,
-                nat_enabled=len(nat_gateways) > 0,
+                nat_enabled=default_nat_enabled and len(nat_gateways) > 0,
                 nat_gateways=nat_gateways,
             )
             result = NetworkOperation.create(create_input).result

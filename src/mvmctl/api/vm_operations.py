@@ -34,7 +34,6 @@ from mvmctl.api.inputs import (
 from mvmctl.api.inputs._vm_create_input import VMCreateInput
 from mvmctl.api.inputs._vm_import_input import VMImportInput, VMImportRequest
 from mvmctl.api.inputs._vm_input import VMInput, VMRequest
-from mvmctl.constants import MAX_VMS
 from mvmctl.core._shared import Database
 from mvmctl.core._shared._guestfs import GuestfsProvisioner
 from mvmctl.core.binary._repository import BinaryRepository
@@ -43,6 +42,7 @@ from mvmctl.core.cloudinit._provisioner import (
     CloudInitProvisioner,
     CloudInitProvisionResult,
 )
+from mvmctl.core.config._service import SettingsService
 from mvmctl.core.console._controller import ConsoleController
 from mvmctl.core.host._helper import HostPrivilegeHelper
 from mvmctl.core.image._repository import ImageRepository
@@ -266,7 +266,9 @@ class VMCreateContext:
         self.guest_mac = (
             self.resolved.requested_guest_mac
             if self.resolved.requested_guest_mac
-            else NetworkUtils.generate_mac()
+            else NetworkUtils.generate_mac(
+                mac_prefix=self.resolved.guest_mac_prefix
+            )
         )
         self.tap_name = NetworkUtils.generate_tap_name(
             self.resolved.network.name, self.name
@@ -322,12 +324,19 @@ class VMCreateContext:
         # Cloud-init provisioning
         mode = self.resolved.cloud_init_mode
 
-        gp = GuestfsProvisioner(self.rootfs_path, readonly=False)
+        gp = GuestfsProvisioner(
+            self.rootfs_path,
+            readonly=False,
+            root_uid=self.resolved.root_uid,
+            root_gid=self.resolved.root_gid,
+            user_uid=self.resolved.user_uid,
+            user_gid=self.resolved.user_gid,
+        )
         gp.resize(self.resolved.disk_size_bytes)
 
         if mode == CloudInitMode.OFF:
             gp.set_hostname(self.resolved.name)
-            gp.inject_dns()
+            gp.inject_dns(dns_server=self.resolved.dns_server)
             gp.setup_ssh(self.resolved.user, self.resolved.ssh_keys)
             gp.disable_cloud_init()
             self.mark_created("cloud-init-off")
@@ -350,6 +359,10 @@ class VMCreateContext:
                 nocloud_net_port=self.resolved.nocloud_net_port,
                 cloud_init_iso_path=self.resolved.cloud_init_iso_path,
                 keep_cloud_init_iso=self.resolved.keep_cloud_init_iso,
+                cloud_init_iso_name=self.resolved.cloud_init_iso_name,
+                nocloud_port_range_start=self.resolved.nocloud_port_range_start,
+                nocloud_port_range_end=self.resolved.nocloud_port_range_end,
+                nocloud_max_port_retries=self.resolved.nocloud_max_port_retries,
             )
             ci_provisioner = CloudInitProvisioner(ci_config)
             self.cloud_init_result = ci_provisioner.provision()
@@ -375,6 +388,10 @@ class VMCreateContext:
                 nocloud_net_port=self.resolved.nocloud_net_port,
                 cloud_init_iso_path=self.resolved.cloud_init_iso_path,
                 keep_cloud_init_iso=self.resolved.keep_cloud_init_iso,
+                cloud_init_iso_name=self.resolved.cloud_init_iso_name,
+                nocloud_port_range_start=self.resolved.nocloud_port_range_start,
+                nocloud_port_range_end=self.resolved.nocloud_port_range_end,
+                nocloud_max_port_retries=self.resolved.nocloud_max_port_retries,
             )
             ci_provisioner = CloudInitProvisioner(ci_config)
             self.cloud_init_result = ci_provisioner.provision()
@@ -417,6 +434,8 @@ class VMCreateContext:
                 vm_id=self.vm_id,
                 vm_dir=self.vm_dir,
                 vm_name=self.resolved.name,
+                socket_filename=self.resolved.console_socket_filename,
+                pid_filename=self.resolved.console_pid_filename,
             )
             self.relay.create_pty()
 
@@ -461,6 +480,13 @@ class VMCreateContext:
             enable_console=self.resolved.enable_console,
             enable_logging=self.resolved.enable_logging,
             enable_metrics=self.resolved.enable_metrics,
+            log_level=self.resolved.log_level,
+            log_filename=self.resolved.log_filename,
+            serial_output_filename=self.resolved.serial_output_filename,
+            metrics_filename=self.resolved.metrics_filename,
+            api_socket_filename=self.resolved.api_socket_filename,
+            pid_filename=self.resolved.pid_filename,
+            config_filename=self.resolved.config_filename,
             cloud_init_mode=(
                 self.cloud_init_result.mode if self.cloud_init_result else None
             ),
@@ -545,9 +571,10 @@ class VMOperation:
         )
         db = Database()
         vm_repo = VMRepository(db)
-        if vm_repo.count() >= MAX_VMS:
+        max_vms_val = int(SettingsService.resolve(db, "settings.vm", "max_vms"))
+        if vm_repo.count() >= max_vms_val:
             raise MVMError(
-                f"VM limit reached ({MAX_VMS}). "
+                f"VM limit reached ({max_vms_val}). "
                 f"Remove existing VMs before creating new ones."
             )
 

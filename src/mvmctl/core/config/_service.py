@@ -6,6 +6,7 @@ from typing import Any
 
 from mvmctl.constants import OVERRIDABLE_DEFAULTS
 from mvmctl.core._shared import Database
+from mvmctl.core.config._constraints import constraints as _constraints
 from mvmctl.core.config._repository import SettingsRepository
 from mvmctl.exceptions import ConfigError
 from mvmctl.utils.common import CommonUtils
@@ -48,7 +49,38 @@ class SettingsService:
                 f"Use 'mvm config list' to see valid keys."
             )
         coerced = CommonUtils.coerce(value, expected_type)
+
+        # Cross-key constraint validation
+        self._check_constraints(category, key, coerced)
+
         self._repo.set(category, key, coerced)
+
+    def _check_constraints(
+        self, category: str, key: str, new_value: Any
+    ) -> None:
+        """Validate cross-key constraints before writing."""
+        constraints = _constraints.get(category, key)
+        if not constraints:
+            return
+
+        def resolve(other_key: str, other_category: str | None = None) -> Any:
+            cat = other_category if other_category is not None else category
+            if other_key == key and cat == category:
+                return new_value
+            return self._get_active_value(cat, other_key)
+
+        for constraint in constraints:
+            constraint(key, resolve)
+
+    def _get_active_value(self, category: str, key: str) -> Any:
+        """Get the effective value for a key: DB override or hardcoded default."""
+        override = self._repo.get(category, key)
+        if override is not None:
+            expected_type = self._get_expected_type(category, key)
+            if expected_type is not None:
+                return CommonUtils.coerce(override, expected_type)
+            return override
+        return OVERRIDABLE_DEFAULTS[category][key]
 
     def delete(self, category: str, key: str) -> bool:
         """Delete a setting after validating the key exists."""

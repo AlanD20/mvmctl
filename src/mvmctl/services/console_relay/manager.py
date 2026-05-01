@@ -304,7 +304,7 @@ class ConsoleRelayManager:
                 continue
 
             id = entry.name
-            pid_file = entry / DEFAULT_CONSOLE_PID_FILENAME
+            pid_file = entry / self.pid_path
             if not pid_file.exists():
                 continue
 
@@ -332,7 +332,7 @@ class ConsoleRelayManager:
                         )
                     except OSError:
                         pass
-                    socket_path = entry / DEFAULT_CONSOLE_SOCKET_FILENAME
+                    socket_path = entry / self.socket_path
                     if socket_path.exists():
                         try:
                             socket_path.unlink()

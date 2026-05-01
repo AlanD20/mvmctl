@@ -1,7 +1,6 @@
 """Project identity constants derived from pyproject.toml metadata."""
 
 import functools
-import ipaddress
 from typing import Any, Final
 
 _BOOTSTRAP_NAME: Final[str] = "mvmctl"
@@ -13,7 +12,6 @@ _BOOTSTRAP_NAME: Final[str] = "mvmctl"
 
 KERNEL_TYPE_FIRECRACKER: Final[str] = "firecracker"
 KERNEL_TYPE_OFFICIAL: Final[str] = "official"
-
 MVM_DB_FILENAME: Final[str] = "mvmdb.db"
 
 
@@ -22,75 +20,61 @@ MVM_DB_FILENAME: Final[str] = "mvmdb.db"
 # ===========================================================================
 
 OVERRIDABLE_DEFAULTS: Final[dict[str, dict[str, Any]]] = {
+    "settings.vm": {
+        "max_vms": 1000,
+        "log_lines": 50,
+        "log_follow": False,
+    },
     "defaults.vm": {
         "vcpu_count": 1,
         "mem_size_mib": 512,
         "ssh_user": "root",
         "user_password": "password",
-        "network_interface": "eth0",
-        "boot_args": (
-            "console=ttyS0 reboot=k panic=1 net.ifnames=0 rw rootwait"
-        ),
-        "disk_size": "2G",
-        "enable_api_socket": True,
+        "dns_server": "1.1.1.1",
+        "root_uid": 0,
+        "root_gid": 0,
+        "user_uid": 1000,
+        "user_gid": 1000,
         "enable_pci": False,
         "enable_logging": True,
         "enable_metrics": False,
         "enable_console": True,
         "lsm_flags": "landlock,lockdown,yama,integrity,selinux,bpf",
-        "log_lines": 50,
-        "log_follow": False,
+        "boot_args": "console=ttyS0 reboot=k panic=1 net.ifnames=0 rw rootwait",
+        "guest_mac_prefix": "02:FC",
     },
     "defaults.network": {
         "name": "net",
         "subnet": "172.27.0.0/24",
-        "ipv4_gateway": "172.27.0.1",
+        "nat_enabled": True,
     },
     "defaults.image": {
         "arch": "x86_64",
-        "convert_to": "ext4",
-        "import_format": "auto",
-        "import_size_mib": 2048,
     },
     "defaults.kernel": {
         "version": "6.19.9",
         "arch": "x86_64",
-        "build_jobs": 1,
+        "build_jobs": 4,
     },
-    "defaults.http": {
-        "download_chunk_size": 1048576,
-        "download_max_retries": 3,
-        "download_retry_delay": 1.0,
-        "download_retry_backoff": 2.0,
+    "defaults.firecracker": {
+        "log_level": "Debug",
+        "log_filename": "firecracker.log",
+        "serial_output_filename": "firecracker.console.log",
+        "metrics_filename": "firecracker.metrics",
+        "api_socket_filename": "firecracker.api.socket",
+        "pid_filename": "firecracker.pid",
+        "config_filename": "firecracker.json",
+        "console_socket_filename": "console.sock",
+        "console_pid_filename": "console.pid",
     },
-    "defaults.libguestfs": {
-        "launch_timeout": 4,
-        "fallback_root_device": "/dev/sda1",
-        "seed_dir": "/var/lib/cloud/seed/nocloud",
+    "defaults.cloudinit": {
+        "iso_name": "cloud-init.iso",
+        "nocloud_port_range_start": 8000,
+        "nocloud_port_range_end": 9000,
+        "nocloud_max_port_retries": 100,
     },
-    "defaults.detectors": {
-        "weights": {
-            "type_code": 1.0,
-            "label": 0.8,
-            "size": 0.5,
-            "filesystem": 0.7,
-        },
-        "scores": {
-            "ROOT_SCORE": 1.0,
-            "EXCLUDE_SCORE": -1.0,
-            "NEUTRAL_SCORE": 0.0,
-            "MBR_LINUX_SCORE": 0.5,
-            "LABEL_ROOT_SCORE": 1.0,
-            "LABEL_EXCLUDE_SCORE": -0.5,
-            "SIZE_LARGEST_SCORE": 0.5,
-            "SIZE_ROOT_SCORE": 0.3,
-            "SIZE_TOO_SMALL_SCORE": -0.5,
-        },
-    },
-    "defaults.debug": {
-        "enabled": False,
-        "verbose_errors": True,
-        "show_tracebacks": False,
+    "defaults.binary": {
+        "remote_version_limit": 5,
     },
 }
 
@@ -101,53 +85,38 @@ def get_default(category: str, key: str) -> Any:
 
 
 # ===========================================================================
-# 3. Non-overridable defaults & internal constants
+# 3. VM constants
 # ===========================================================================
 
-# --- VM internal constants ---
-DEFAULT_SNAPSHOT_RESUME: Final[bool] = True
-DEFAULT_GUEST_MAC_PREFIX: Final[str] = "02:FC"
-
-# --- VM resource limits ---
+# --- Limits ---
 CONST_VM_MEM_MIN_MIB: Final[int] = 128
 CONST_VM_MEM_MAX_MIB: Final[int] = 65536
 CONST_VM_VCPU_MIN: Final[int] = 1
 CONST_VM_VCPU_MAX: Final[int] = 32
 CONST_SIGNAL_EXIT_CODE_BASE: Final[int] = 128
-MAX_VMS: Final[int] = 1000
 
-# --- Firecracker driver settings ---
-DEFAULT_FC_LOG_LEVEL: Final[str] = "Debug"
+# --- Defaults ---
+DEFAULT_SNAPSHOT_RESUME: Final[bool] = True
 
-# --- Firecracker file names ---
-DEFAULT_FC_LOG_FILENAME: Final[str] = "firecracker.log"
-DEFAULT_FC_SERIAL_OUTPUT_FILENAME: Final[str] = "firecracker.console.log"
-DEFAULT_FC_METRICS_FILENAME: Final[str] = "firecracker.metrics"
-DEFAULT_FC_API_SOCKET_FILENAME: Final[str] = "firecracker.api.socket"
-DEFAULT_FC_PID_FILENAME: Final[str] = "firecracker.pid"
-DEFAULT_FC_CONFIG_FILENAME: Final[str] = "firecracker.json"
-DEFAULT_CONSOLE_SOCKET_FILENAME: Final[str] = "console.sock"
-DEFAULT_CONSOLE_PID_FILENAME: Final[str] = "console.pid"
+# --- Lifecycle timings ---
+LOG_FOLLOW_POLL_INTERVAL_S: Final[float] = 0.3
+
+
+# ===========================================================================
+# 4. Cloud-init & console
+# ===========================================================================
 
 # --- Cloud-init ---
-DEFAULT_CLOUD_INIT_ISO_NAME: Final[str] = "cloud-init.iso"
 REQUIRED_ISO_TOOL: Final[str] = "cloud-localds"
+CONST_NO_CLOUD_NET_BIND_TIMEOUT_S: Final[float] = 5.0
 
 # --- Console ---
 CONST_CONSOLE_SOCKET_TIMEOUT_S: Final[float] = 2.0
 CONST_CONSOLE_KILL_TIMEOUT_S: Final[float] = 5.0
 
-# --- Cloud-init / nocloud-net timeouts ---
-CONST_NO_CLOUD_NET_PORT_RANGE: Final[tuple[int, int]] = (8000, 9000)
-CONST_NO_CLOUD_NET_BIND_TIMEOUT_S: Final[float] = 5.0
-CONST_NO_CLOUD_NET_MAX_PORT_RETRIES: Final[int] = 100
-
-# --- VM lifecycle timings ---
-LOG_FOLLOW_POLL_INTERVAL_S: Final[float] = 0.3
-
 
 # ===========================================================================
-# 4. Image & rootfs processing
+# 5. Image & rootfs processing
 # ===========================================================================
 
 SUPPORTED_IMAGE_EXTENSIONS: Final[list[str]] = [
@@ -175,7 +144,10 @@ CONST_RATIO_MIN: Final[float] = 1.0
 CONST_MIN_ROOTFS_SIZE_MIB: Final[int] = 128
 CONST_ROOTFS_HEADROOM_FACTOR: Final[float] = 1.25
 CONST_PERCENT: Final[int] = 100
+MIN_ROOT_SIZE_MB: Final[int] = 500
+SIZE_TOO_SMALL_MB: Final[int] = 100
 
+# --- Partition detection ---
 DETECTOR_WEIGHTS: Final[dict[str, float]] = {
     "type_code": 1.0,
     "label": 0.8,
@@ -183,33 +155,36 @@ DETECTOR_WEIGHTS: Final[dict[str, float]] = {
     "filesystem": 0.7,
 }
 DETECTOR_SCORES: Final[dict[str, float]] = {
-    "ROOT_SCORE": 1.0,
-    "EXCLUDE_SCORE": -1.0,
-    "NEUTRAL_SCORE": 0.0,
-    "MBR_LINUX_SCORE": 0.5,
-    "LABEL_ROOT_SCORE": 1.0,
-    "LABEL_EXCLUDE_SCORE": -0.5,
-    "SIZE_LARGEST_SCORE": 0.5,
-    "SIZE_ROOT_SCORE": 0.3,
-    "SIZE_TOO_SMALL_SCORE": -0.5,
+    "root_score": 1.0,
+    "exclude_score": -1.0,
+    "neutral_score": 0.0,
+    "mbr_linux_score": 0.5,
+    "label_root_score": 1.0,
+    "label_exclude_score": -0.5,
+    "size_largest_score": 0.5,
+    "size_root_score": 0.3,
+    "size_too_small_score": -0.5,
 }
-MIN_ROOT_SIZE_MB: Final[int] = 500
-SIZE_TOO_SMALL_MB: Final[int] = 100
 
 
 # ===========================================================================
-# 5. Network & iptables
+# 6. Network & iptables
 # ===========================================================================
 
 IPTABLES_RULES_V4: Final[str] = "/etc/iptables/rules.v4"
 CONST_IPTABLES_MAX_COMMENT_LEN: Final[int] = 240
-CONST_DEFAULT_NAMESERVER: Final[str] = "1.1.1.1"
 
 
 # ===========================================================================
-# 6. Binary requirements
+# 7. Host system
 # ===========================================================================
 
+# --- Paths ---
+DEFAULT_SYSCTL_CONF_DIR: Final[str] = "/etc/sysctl.d"
+DEFAULT_SUDOERS_DIR: Final[str] = "/etc/sudoers"
+DEFAULT_SYSCTL_CONF_PATH: Final[str] = "/etc/sysctl.d/mvmctl.conf"
+
+# --- Privileged binaries ---
 PRIVILEGED_BINARIES: Final[dict[str, str]] = {
     "/usr/sbin/ip": "iproute2",
     "/usr/sbin/iptables": "iptables",
@@ -236,30 +211,15 @@ REQUIRED_BINARIES: Final[list[str]] = [
     "visudo",
 ]
 ISO_BINARIES: Final[list[str]] = ["cloud-localds"]
-
 CONST_MIN_BINARY_SIZE_BYTES: Final[int] = 512
-DEFAULT_REMOTE_VERSION_LIMIT: Final[int] = 5
 
-
-# ===========================================================================
-# 7. Host system paths
-# ===========================================================================
-
-DEFAULT_SYSCTL_CONF_DIR: Final[str] = "/etc/sysctl.d"
-DEFAULT_SUDOERS_DIR: Final[str] = "/etc/sudoers"
-DEFAULT_SYSCTL_CONF_PATH: Final[str] = "/etc/sysctl.d/mvmctl.conf"
-
-
-# ===========================================================================
-# 8. Libguestfs
-# ===========================================================================
-
+# --- Libguestfs ---
 DEFAULT_LIBGUESTFS_SEED_DIR: Final[str] = "/var/lib/cloud/seed/nocloud"
 CONST_GUESTFS_OS_RELEASE_PATH: Final[str] = "/etc/os-release"
 
 
 # ===========================================================================
-# 9. File permissions (octal)
+# 8. File permissions & user IDs
 # ===========================================================================
 
 CONST_FILE_PERMS_PRIVATE_KEY: Final[int] = 0o600
@@ -270,11 +230,7 @@ CONST_FILE_PERMS_SUDOERS: Final[int] = 0o440
 CONST_FILE_PERMS_CONFIG: Final[int] = 0o600
 CONST_FILE_PERMS_EXECUTABLE: Final[int] = 0o755
 
-CONST_DEFAULT_USER_UID: Final[int] = 1000
-CONST_DEFAULT_USER_GID: Final[int] = 1000
-CONST_ROOT_UID: Final[int] = 0
-CONST_ROOT_GID: Final[int] = 0
-
+# --- /etc/shadow fields ---
 CONST_SHADOW_DAYS_SINCE_EPOCH: Final[int] = 19700
 CONST_SHADOW_MIN_DAYS: Final[int] = 0
 CONST_SHADOW_MAX_DAYS: Final[int] = 99999
@@ -282,7 +238,7 @@ CONST_SHADOW_WARN_DAYS: Final[int] = 7
 
 
 # ===========================================================================
-# 10. Buffer & byte constants
+# 9. Buffer & byte constants
 # ===========================================================================
 
 CONST_BUFFER_SIZE_BYTES: Final[int] = 1024
@@ -293,24 +249,28 @@ CONST_DOWNLOAD_CHUNK_SIZE: Final[int] = 1048576
 
 
 # ===========================================================================
-# 11. HTTP / download
+# 10. HTTP / download
 # ===========================================================================
 
+# --- Timeouts ---
 HTTP_TIMEOUT_KERNEL_DOWNLOAD_S: Final[int] = 600
 HTTP_TIMEOUT_KERNEL_CONFIG_S: Final[int] = 60
 HTTP_TIMEOUT_SHA256_FETCH_S: Final[int] = 30
 HTTP_TIMEOUT_SHA256_SIDECAR_S: Final[int] = 15
 CONST_HTTP_TIMEOUT_SECONDS: Final[int] = 300
 
+# --- Retry ---
 CONST_DOWNLOAD_MAX_RETRIES: Final[int] = 3
 CONST_DOWNLOAD_RETRY_DELAY: Final[float] = 1.0
 CONST_DOWNLOAD_RETRY_BACKOFF: Final[float] = 2.0
 CONST_SOCKET_TIMEOUT_SECONDS: Final[float] = 5.0
 CONST_POLL_STEP_SECONDS: Final[float] = 0.1
 
+# --- HTTP status codes ---
 CONST_HTTP_STATUS_NO_CONTENT: Final[int] = 204
 CONST_HTTP_STATUS_SUCCESS: Final[int] = 200
 
+# --- Firecracker GitHub ---
 FIRECRACKER_GITHUB_RELEASES_API_URL: Final[str] = (
     "https://api.github.com/repos/firecracker-microvm/firecracker/releases"
 )
@@ -320,21 +280,15 @@ FIRECRACKER_GITHUB_DOWNLOAD_URL: Final[str] = (
 
 
 # ===========================================================================
-# 12. Time constants
+# 11. Debug
 # ===========================================================================
 
+DEBUG_MODE: Final[bool] = False
 CONST_TIMESTAMP_INITIAL: Final[float] = 0.0
 
 
 # ===========================================================================
-# 13. Debug flags
-# ===========================================================================
-
-DEBUG_MODE: Final[bool] = False
-
-
-# ===========================================================================
-# 14. Archive — helper functions (called lazily or not at all)
+# 12. Lazy constants & helper functions
 # ===========================================================================
 
 _LAZY_CONSTANTS: dict[str, Any] = {}
@@ -375,26 +329,6 @@ def _resolve_version() -> str:
         return "0.0.0"
 
 
-def _format_path(path: tuple[str, ...]) -> str:
-    return ".".join(path)
-
-
-def _default_bridge_name(network_name: str) -> str:
-    """Generate bridge name using the same logic as network manager."""
-    return f"{__getattr__('CLI_NAME')}-{network_name[:10]}"
-
-
-def _ipv4_gateway_subnet(ipv4_gateway: str, subnet: str) -> str:
-    """Build ipv4_gateway SUBNET from ipv4_gateway IP + network prefix length."""
-    try:
-        prefix = ipaddress.ip_network(subnet, strict=False).prefixlen
-    except ValueError as exc:
-        raise RuntimeError(
-            f"Invalid network.defaults.subnet value: {subnet}"
-        ) from exc
-    return f"{ipv4_gateway}/{prefix}"
-
-
 def env_var(suffix: str) -> str:
     """
     Return the environment variable name for the given suffix.
@@ -409,23 +343,9 @@ def env_var(suffix: str) -> str:
     return f"{__getattr__('CLI_NAME').upper()}_{suffix}"
 
 
-def cache_dir_name() -> str:
-    """Return the project cache directory name derived from the project name."""
-    return str(__getattr__("PROJECT_NAME"))
-
-
 def device_prefix() -> str:
     """Return the network device name prefix derived from the CLI name."""
     return str(__getattr__("CLI_NAME"))
-
-
-def bridge_name() -> str:
-    return f"{device_prefix()}-br0"
-
-
-def config_filename() -> str:
-    """Return the config file name for the CLI."""
-    return f"{__getattr__('CLI_NAME')}.yaml"
 
 
 def __getattr__(name: str) -> Any:
@@ -436,24 +356,12 @@ def __getattr__(name: str) -> Any:
         val = _resolve_project_name()
         _LAZY_CONSTANTS[name] = val
         return val
-    if name == "PROJECT_NAME_UPPER":
-        val = __getattr__("PROJECT_NAME").replace("-", "_").upper()
-        _LAZY_CONSTANTS[name] = val
-        return val
     if name == "CLI_NAME":
         val = _resolve_cli_name()
         _LAZY_CONSTANTS[name] = val
         return val
     if name == "HTTP_USER_AGENT":
         val = f"{__getattr__('CLI_NAME')}/{_resolve_version()}"
-        _LAZY_CONSTANTS[name] = val
-        return val
-    if name == "BRIDGE_NAME":
-        val = f"{__getattr__('CLI_NAME')}-br0"
-        _LAZY_CONSTANTS[name] = val
-        return val
-    if name == "TAP_PREFIX":
-        val = f"{__getattr__('CLI_NAME')}-tap"
         _LAZY_CONSTANTS[name] = val
         return val
     if name == "MVM_FORWARD_CHAIN":
@@ -478,161 +386,4 @@ def __getattr__(name: str) -> Any:
         )
         _LAZY_CONSTANTS[name] = val
         return val
-    if name == "DEFAULT_BRIDGE_NAME":
-        val = f"{__getattr__('CLI_NAME')}-{DEFAULT_NETWORK_NAME[:10]}"
-        _LAZY_CONSTANTS[name] = val
-        return val
-
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
-# ===========================================================================
-# 15. Archive — unused / legacy constants (kept for reference)
-# ===========================================================================
-
-# These constants are not currently referenced in non-archive source code.
-# Kept here rather than deleted to preserve audit trail.
-
-# --- Removed from section 1 (project identity) ---
-DEFAULT_FIRECRACKER_VERSION: Final[str] = "v1.15.0"
-DEFAULT_FC_CI_VERSION: Final[str] = "1.15"
-KERNEL_TYPE_UNKNOWN: Final[str] = "unknown"
-
-# --- Removed from section 2 (consolidated into OVERRIDABLE_DEFAULTS) ---
-DEFAULT_VM_VCPU_COUNT: Final[int] = 1
-DEFAULT_VM_MEM_MIB: Final[int] = 512
-DEFAULT_VM_SSH_USER: Final[str] = "root"
-DEFAULT_VM_ENABLE_PCI: Final[bool] = False
-DEFAULT_VM_ENABLE_LOGGING: Final[bool] = True
-DEFAULT_VM_ENABLE_METRICS: Final[bool] = False
-DEFAULT_VM_ENABLE_CONSOLE: Final[bool] = True
-DEFAULT_VM_BOOT_ARGS: Final[str] = (
-    "console=ttyS0 reboot=k panic=1 net.ifnames=0 rw rootwait"
-)
-DEFAULT_VM_LSM_FLAGS: Final[str] = (
-    "landlock,lockdown,yama,integrity,selinux,bpf"
-)
-DEFAULT_NETWORK_NAME: Final[str] = "net"
-DEFAULT_NETWORK_SUBNET: Final[str] = "172.27.0.0/24"
-DEFAULT_NETWORK_IPV4_GATEWAY: Final[str] = "172.27.0.1"
-DEFAULT_IMAGE_ARCH: Final[str] = "x86_64"
-DEFAULT_IMAGE_IMPORT_FORMAT: Final[str] = "auto"
-DEFAULT_KERNEL_VERSION: Final[str] = "6.19.9"
-DEFAULT_KERNEL_BUILD_JOBS: Final[int] = 1
-DEFAULT_VM_LOG_TYPE: Final[str] = "os"
-DEFAULT_VM_LOG_LINES: Final[int] = 50
-DEFAULT_VM_LOG_FOLLOW: Final[bool] = False
-DEFAULT_VM_USER_PASSWORD: Final[str] = "password"
-
-# --- Removed from section 2 (user-overridable defaults) ---
-DEFAULT_NETWORK_BRIDGE_IP: Final[str] = (
-    f"{DEFAULT_NETWORK_IPV4_GATEWAY}/"
-    f"{ipaddress.ip_network(DEFAULT_NETWORK_SUBNET, strict=False).prefixlen}"
-)
-DEFAULT_IMAGE_CONVERT_TO: Final[str] = "ext4"
-DEFAULT_IMAGE_IMPORT_SIZE_MIB: Final[int] = 2048
-
-# --- Removed from section 3 (non-overridable defaults) ---
-DEFAULT_FIRECRACKER_CI_VERSION: Final[str] = "v1.15"
-DEFAULT_KERNEL_ARCH: Final[str] = "x86_64"
-DEFAULT_FIRECRACKER_BIN_NAME: Final[str] = "firecracker"
-DEFAULT_VM_ENABLE_API_SOCKET: Final[bool] = True
-DEFAULT_VM_NETWORK_INTERFACE: Final[str] = "eth0"
-DEFAULT_VM_DISK_SIZE: Final[str] = "2G"
-DEFAULT_VM_KERNEL_FILENAME: Final[str] = "vmlinux"
-DEFAULT_VM_ROOTFS_FILENAME: Final[str] = "rootfs.ext4"
-DEFAULT_VM_ROOTFS_BASENAME: Final[str] = "rootfs"
-DEFAULT_FIRECRACKER_BINARY_PATH: Final[str] = "/usr/local/bin/firecracker"
-CONST_IP_RANGE_SIZE: Final[int] = 256
-CONST_VM_NAME_MAX_LENGTH: Final[int] = 255
-DEFAULT_BOOT_CONSOLE: Final[str] = "console=ttyS0"
-DEFAULT_BOOT_REBOOT: Final[str] = "reboot=k"
-DEFAULT_BOOT_PANIC: Final[str] = "panic=1"
-DEFAULT_BOOT_PCI_OFF: Final[str] = "pci=off"
-DEFAULT_FC_DRIVE_CACHE_TYPE: Final[str] = "Unsafe"
-DEFAULT_FC_DRIVE_IO_ENGINE: Final[str] = "Sync"
-FIRECRACKER_SIGTERM_WAIT_S: Final[int] = 1
-FIRECRACKER_SHUTDOWN_POLL_INTERVAL_S: Final[float] = 0.1
-FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S: Final[float] = 2
-DEFAULT_FC_EXITCODE_FILENAME: Final[str] = "firecracker.exitcode"
-DEFAULT_CLOUD_INIT_SEED_PATH: Final[str] = "/var/lib/cloud/seed/nocloud"
-DEFAULT_CLOUD_INIT_FINAL_MESSAGE: Final[str] = "mvm cloud-init done"
-DEFAULT_CLOUD_INIT_DIRNAME: Final[str] = "cloud-init"
-DEFAULT_CLOUD_INIT_DISABLE_SNAPD_CMD: Final[str] = (
-    "systemctl disable --now snapd.socket 2>/dev/null || true"
-)
-DEFAULT_CLOUD_INIT_ISO_VOLUME_LABEL: Final[str] = "cidata"
-CONST_CONSOLE_BUFFER_SIZE: Final[int] = 4096
-CONST_CONSOLE_RECONNECT_DELAY_S: Final[float] = 0.5
-CONST_CLOUD_INIT_TIMEOUT_S: Final[int] = 300
-CONST_CLOUD_INIT_POLL_INTERVAL_S: Final[float] = 2.0
-CONST_NO_CLOUD_NET_SHUTDOWN_TIMEOUT_S: Final[float] = 5.0
-CONST_VM_START_WAIT_S: Final[float] = 0.5
-DEFAULT_GUEST_NETWORK_IFACE: Final[str] = "eth0"
-DEFAULT_GUEST_NETWORK_BOOT_MODE: Final[str] = "off"
-
-# --- Removed from section 4 (image processing) ---
-COMPRESSION_EXTENSION_MAP: Final[dict[str, str]] = {
-    ".ext4": ".ext4.zst",
-    ".btrfs": ".btrfs.zst",
-    ".img": ".img.zst",
-    ".raw": ".raw.zst",
-}
-
-# --- Removed from section 5 (network & iptables) ---
-IPTABLES_CHAINS: Final[list[tuple[str, str, str]]] = [
-    ("MVM-FORWARD", "filter", "FORWARD"),
-    ("MVM-POSTROUTING", "nat", "POSTROUTING"),
-    ("MVM-NOCLOUDNET-INPUT", "filter", "INPUT"),
-]
-
-# --- Removed from section 7 (host system paths) ---
-DEFAULT_USR_SBIN_IP: Final[str] = "/usr/sbin/ip"
-DEFAULT_USR_SBIN_IPTABLES: Final[str] = "/usr/sbin/iptables"
-DEFAULT_USR_SBIN_IPTABLES_RESTORE: Final[str] = "/usr/sbin/iptables-restore"
-DEFAULT_USR_SBIN_IPTABLES_SAVE: Final[str] = "/usr/sbin/iptables-save"
-DEFAULT_USR_SBIN_SYSCTL: Final[str] = "/usr/sbin/sysctl"
-
-# --- Removed from section 8 (libguestfs) ---
-DEFAULT_LIBGUESTFS_LAUNCH_TIMEOUT: Final[int] = 4
-DEFAULT_LIBGUESTFS_ROOT_DEVICE: Final[str] = "/dev/sda1"
-DEFAULT_LIBGUESTFS_ROOT_INDICATORS: Final[tuple[str, ...]] = (
-    "/etc/os-release",
-    "/etc/fstab",
-)
-
-# --- Removed from section 9 (file permissions) ---
-CONST_FILE_PERMS_METADATA: Final[int] = 0o600
-CONST_FILE_PERMS_STATE_FILE: Final[int] = 0o640
-CONST_FILE_PERMS_NETWORK_CONFIG: Final[int] = 0o600
-CONST_FILE_PERMS_DHCP_LEASES: Final[int] = 0o600
-CONST_FILE_PERMS_VM_STATE: Final[int] = 0o600
-
-# --- Removed from section 10 (buffer & byte constants) ---
-CONST_BYTE_MAX: Final[int] = 255
-CONST_KIBIBYTE_BYTES: Final[int] = 1024
-CONST_GIBIBYTE_BYTES: Final[int] = 1024 * 1024 * 1024
-CONST_KILOBYTE_BYTES: Final[int] = 1_000
-CONST_GIGABYTE_BYTES: Final[int] = 1_000_000_000
-
-# --- Removed from section 11 (HTTP / download) ---
-HTTP_TIMEOUT_FIRECRACKER_DOWNLOAD_S: Final[int] = 300
-HTTP_TIMEOUT_FC_KERNEL_DOWNLOAD_S: Final[int] = 300
-FIRECRACKER_GITHUB_RAW_URL: Final[str] = (
-    "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main"
-)
-DEFAULT_MAX_PARALLEL_DOWNLOADS: Final[int] = 4
-CONST_BINARY_FETCH_TIMEOUT: Final[int] = 300
-CONST_HTTP_STATUS_CREATED: Final[int] = 201
-CONST_HTTP_RANGE_START: Final[int] = 200
-
-# --- Removed from section 12 (time constants) ---
-CONST_SECONDS_PER_HOUR: Final[int] = 3600
-CONST_SECONDS_PER_DAY: Final[int] = 86400
-CONST_SECONDS_PER_WEEK: Final[int] = 604800
-CONST_SECONDS_PER_MONTH: Final[int] = 2592000
-CONST_SECONDS_PER_YEAR: Final[int] = 31536000
-
-# --- Removed from section 13 (debug flags) ---
-DEBUG_VERBOSE_ERRORS: Final[bool] = True
-DEBUG_SHOW_TRACEBACKS: Final[bool] = False

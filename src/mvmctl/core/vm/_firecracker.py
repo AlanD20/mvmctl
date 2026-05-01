@@ -15,13 +15,6 @@ from mvmctl.constants import (
     CONST_HTTP_STATUS_SUCCESS,
     CONST_POLL_STEP_SECONDS,
     CONST_SOCKET_TIMEOUT_SECONDS,
-    DEFAULT_FC_API_SOCKET_FILENAME,
-    DEFAULT_FC_CONFIG_FILENAME,
-    DEFAULT_FC_LOG_FILENAME,
-    DEFAULT_FC_LOG_LEVEL,
-    DEFAULT_FC_METRICS_FILENAME,
-    DEFAULT_FC_PID_FILENAME,
-    DEFAULT_FC_SERIAL_OUTPUT_FILENAME,
     DEFAULT_LIBGUESTFS_SEED_DIR,
 )
 from mvmctl.exceptions import (
@@ -113,15 +106,13 @@ class FirecrackerSpawner:
         self._config_path = (
             config_path
             if config_path
-            else config.vm_dir / DEFAULT_FC_CONFIG_FILENAME
+            else config.vm_dir / config.config_filename
         )
-        self._log_path = config.vm_dir / DEFAULT_FC_LOG_FILENAME
-        self._metrics_path = config.vm_dir / DEFAULT_FC_METRICS_FILENAME
-        self._serial_output_path = (
-            config.vm_dir / DEFAULT_FC_SERIAL_OUTPUT_FILENAME
-        )
-        self._pid_path = config.vm_dir / DEFAULT_FC_PID_FILENAME
-        self._api_socket_path = config.vm_dir / DEFAULT_FC_API_SOCKET_FILENAME
+        self._log_path = config.vm_dir / config.log_filename
+        self._metrics_path = config.vm_dir / config.metrics_filename
+        self._serial_output_path = config.vm_dir / config.serial_output_filename
+        self._pid_path = config.vm_dir / config.pid_filename
+        self._api_socket_path = config.vm_dir / config.api_socket_filename
 
     @property
     def log_path(self) -> Path:
@@ -275,7 +266,7 @@ class FirecrackerSpawner:
     def _build_logger_config(self) -> LoggerConfig:
         logger: LoggerConfig = {
             "log_path": str(self._log_path),
-            "level": DEFAULT_FC_LOG_LEVEL,
+            "level": self._config.log_level,
             "show_level": True,
             "show_log_origin": True,
         }

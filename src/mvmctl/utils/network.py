@@ -10,7 +10,7 @@ import string
 import subprocess
 from pathlib import Path
 
-from mvmctl.constants import CLI_NAME, DEFAULT_GUEST_MAC_PREFIX
+from mvmctl.constants import CLI_NAME
 from mvmctl.exceptions import NetworkError
 
 logger = logging.getLogger(__name__)
@@ -79,11 +79,11 @@ class NetworkUtils:
     # --- Naming & Generation ---
 
     @staticmethod
-    def generate_mac() -> str:
-        """Generate a MAC address with the project prefix."""
+    def generate_mac(mac_prefix: str) -> str:
+        """Generate a MAC address with the given prefix."""
         rand_bytes = secrets.token_bytes(4)
         suffix = ":".join(f"{b:02x}" for b in rand_bytes)
-        return f"{DEFAULT_GUEST_MAC_PREFIX}:{suffix}".upper()
+        return f"{mac_prefix}:{suffix}".upper()
 
     @staticmethod
     def generate_tap_name(network_name: str, vm_name: str) -> str:

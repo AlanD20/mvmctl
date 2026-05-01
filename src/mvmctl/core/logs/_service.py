@@ -7,31 +7,30 @@ from collections import deque
 from collections.abc import Generator
 from pathlib import Path
 
-from mvmctl.constants import (
-    DEFAULT_FC_LOG_FILENAME,
-    DEFAULT_FC_SERIAL_OUTPUT_FILENAME,
-    LOG_FOLLOW_POLL_INTERVAL_S,
-)
+from mvmctl.constants import LOG_FOLLOW_POLL_INTERVAL_S
 from mvmctl.exceptions import ConfigError, MVMError, VMNotFoundError
 from mvmctl.utils.common import CacheUtils
-
-_LOG_TYPE_FILES: dict[str, str] = {
-    "boot": DEFAULT_FC_SERIAL_OUTPUT_FILENAME,
-    "os": DEFAULT_FC_LOG_FILENAME,
-}
 
 
 class LogService:
     """Stateless log file operations."""
 
     @staticmethod
-    def get_log_path(vm_hash: str, log_type: str) -> Path:
+    def get_log_path(
+        vm_hash: str,
+        log_type: str,
+        *,
+        log_filename: str,
+        serial_output_filename: str,
+    ) -> Path:
         """
         Get log file path for a VM by its hash.
 
         Args:
             vm_hash: VM hash (64-char SHA256)
             log_type: 'boot' for console log, 'os' for firecracker log
+            log_filename: Firecracker log filename (default: firecracker.log)
+            serial_output_filename: Serial output filename (default: firecracker.console.log)
 
         Returns:
             Path to log file
@@ -46,11 +45,12 @@ class LogService:
         if not vm_dir.exists():
             raise VMNotFoundError(f"VM directory not found at {vm_dir}")
 
-        log_filename = _LOG_TYPE_FILES.get(log_type)
-        if log_filename is None:
-            valid = ", ".join(_LOG_TYPE_FILES)
-            raise ConfigError(f"Unknown log type '{log_type}'. Valid: {valid}")
-        log_file = vm_dir / log_filename
+        if log_type == "boot":
+            log_file = vm_dir / serial_output_filename
+        elif log_type == "os":
+            log_file = vm_dir / log_filename
+        else:
+            raise ConfigError(f"Unknown log type '{log_type}'. Valid: boot, os")
 
         if not log_file.exists():
             raise VMNotFoundError(f"Log file not found for VM: {log_file}")

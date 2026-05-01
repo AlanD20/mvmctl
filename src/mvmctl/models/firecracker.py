@@ -50,6 +50,15 @@ class FirecrackerConfig:
     enable_logging: bool
     enable_metrics: bool
 
+    # File/path overrides (resolved from defaults.firecracker)
+    log_level: str
+    log_filename: str
+    serial_output_filename: str
+    metrics_filename: str
+    api_socket_filename: str
+    pid_filename: str
+    config_filename: str
+
     # Cloud-init
     cloud_init_mode: CloudInitMode | None
     cloud_init_iso_path: Path | None
