@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mvmctl.exceptions import MVMKeyError
+from mvmctl.utils._key_validator import KeyValidator
 from mvmctl.utils.common import CacheUtils
 
 __all__ = [
@@ -56,6 +57,9 @@ class KeyCreateRequest:
 
     def resolve(self) -> ResolvedKeyCreateInput:
         """Resolve defaults and validate."""
+        # Validate key name early — before any work
+        KeyValidator.validate_name(self._inputs.name)
+
         # Default algorithm
         algorithm = self._inputs.algorithm or "ed25519"
 

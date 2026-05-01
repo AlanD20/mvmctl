@@ -12,21 +12,6 @@ class KeyRepository:
     def __init__(self, db: Database | None = None) -> None:
         self._db = db or Database()
 
-    @property
-    def db(self) -> Database:
-        """Return the database instance."""
-        return self._db
-
-    def get(self, key_id: str) -> SSHKeyItem | None:
-        """Return an SSH key by its ID (fingerprint), or None if not found."""
-        with self._db.connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM ssh_keys WHERE id = ?", (key_id,)
-            ).fetchone()
-        if row is None:
-            return None
-        return SSHKeyItem(**dict(row))
-
     def get_by_name(self, name: str) -> SSHKeyItem | None:
         """Return an SSH key by name, or None if not found."""
         with self._db.connect() as conn:
@@ -42,15 +27,6 @@ class KeyRepository:
         with self._db.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM ssh_keys WHERE id LIKE ?", (f"{prefix}%",)
-            ).fetchall()
-        return [SSHKeyItem(**dict(row)) for row in rows]
-
-    def find_by_fingerprint_prefix(self, prefix: str) -> list[SSHKeyItem]:
-        """Return all SSH keys whose fingerprint starts with prefix."""
-        with self._db.connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM ssh_keys WHERE fingerprint LIKE ?",
-                (f"{prefix}%",),
             ).fetchall()
         return [SSHKeyItem(**dict(row)) for row in rows]
 
@@ -116,30 +92,12 @@ class KeyRepository:
         with self._db.connect() as conn:
             conn.execute("DELETE FROM ssh_keys WHERE id = ?", (key_id,))
 
-    def delete_by_name(self, name: str) -> None:
-        """Delete an SSH key by name. No-op if not found."""
-        with self._db.connect() as conn:
-            conn.execute("DELETE FROM ssh_keys WHERE name = ?", (name,))
-
     def set_default(self, key_id: str) -> None:
-        """Set one SSH key as default, clearing all others atomically."""
+        """Set an SSH key as default (does not clear other defaults)."""
         with self._db.connect() as conn:
-            conn.execute("BEGIN")
-            conn.execute("UPDATE ssh_keys SET is_default = 0")
             conn.execute(
                 "UPDATE ssh_keys SET is_default = 1 WHERE id = ?", (key_id,)
             )
-            conn.execute("COMMIT")
-
-    def get_default(self) -> SSHKeyItem | None:
-        """Return the default SSH key entry, or None if not set."""
-        with self._db.connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM ssh_keys WHERE is_default = 1 LIMIT 1"
-            ).fetchone()
-        if row is None:
-            return None
-        return SSHKeyItem(**dict(row))
 
     def get_defaults(self) -> list[SSHKeyItem]:
         """Return all SSH keys marked as default."""
