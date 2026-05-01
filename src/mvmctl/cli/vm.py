@@ -11,7 +11,6 @@ import typer
 from mvmctl.api import VMCreateInput, VMInput, VMOperation
 from mvmctl.utils.cli import handle_errors
 from mvmctl.utils.console import (
-    print_info,
     print_inspect_header,
     print_key_value,
     print_section_header,
@@ -250,7 +249,7 @@ def vm_rm(
     force: bool = typer.Option(False, "--force", "-f", help="Force removal"),
 ) -> None:
     """Remove a VM."""
-    VMOperation.remove(VMInput(name=[name], force=force))
+    VMOperation.remove(VMInput(identifiers=[name], force=force))
     print_success(f"VM '{name}' removed")
 
 
@@ -260,7 +259,7 @@ def vm_start(
     name: str = typer.Argument(..., help="VM name or ID prefix"),
 ) -> None:
     """Start a stopped VM."""
-    VMOperation.start(VMInput(name=[name]))
+    VMOperation.start(VMInput(identifiers=[name]))
     print_success(f"VM '{name}' started")
 
 
@@ -271,7 +270,7 @@ def vm_stop(
     force: bool = typer.Option(False, "--force", "-f", help="Force stop"),
 ) -> None:
     """Stop a running VM."""
-    VMOperation.stop(VMInput(name=[name], force=force))
+    VMOperation.stop(VMInput(identifiers=[name], force=force))
     print_success(f"VM '{name}' stopped")
 
 
@@ -282,7 +281,7 @@ def vm_reboot(
     force: bool = typer.Option(False, "--force", "-f", help="Force reboot"),
 ) -> None:
     """Reboot a VM."""
-    VMOperation.reboot(VMInput(name=[name], force=force))
+    VMOperation.reboot(VMInput(identifiers=[name], force=force))
     print_success(f"VM '{name}' rebooted")
 
 
@@ -292,7 +291,7 @@ def vm_pause(
     name: str = typer.Argument(..., help="VM name or ID prefix"),
 ) -> None:
     """Pause a running VM."""
-    VMOperation.pause(VMInput(name=[name]))
+    VMOperation.pause(VMInput(identifiers=[name]))
     print_success(f"VM '{name}' paused")
 
 
@@ -302,7 +301,7 @@ def vm_resume(
     name: str = typer.Argument(..., help="VM name or ID prefix"),
 ) -> None:
     """Resume a paused VM."""
-    VMOperation.resume(VMInput(name=[name]))
+    VMOperation.resume(VMInput(identifiers=[name]))
     print_success(f"VM '{name}' resumed")
 
 
@@ -314,7 +313,7 @@ def vm_snapshot(
     state_file: Path = typer.Argument(..., help="State snapshot output path"),
 ) -> None:
     """Snapshot VM memory and disk state."""
-    VMOperation.snapshot(VMInput(name=[name]), mem_file, state_file)
+    VMOperation.snapshot(VMInput(identifiers=[name]), mem_file, state_file)
     print_success(f"VM '{name}' snapshot saved")
 
 
@@ -330,7 +329,7 @@ def vm_load(
 ) -> None:
     """Load VM from snapshot."""
     VMOperation.load_snapshot(
-        VMInput(name=[name]), mem_file, state_file, resume_after=resume
+        VMInput(identifiers=[name]), mem_file, state_file, resume_after=resume
     )
     print_success(f"VM '{name}' snapshot loaded")
 
@@ -342,7 +341,7 @@ def vm_inspect(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """Show detailed information about a VM."""
-    info = VMOperation.inspect(VMInput(name=[name]))
+    info = VMOperation.inspect(VMInput(identifiers=[name]))
 
     if json_output:
         data = {
@@ -410,21 +409,3 @@ def vm_export(
     """Export a VM's configuration as JSON."""
     config = VMOperation.export(name)
     typer.echo(json.dumps(config.to_dict(), indent=2))
-
-
-@vm_app.command(name="cleanup")
-@handle_errors
-def vm_cleanup(
-    all_vms: bool = typer.Option(False, "--all", help="Cleanup all VMs"),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Show what would be cleaned"
-    ),
-) -> None:
-    """Cleanup stale or all VMs."""
-    cleaned = VMOperation.cleanup(all_vms, dry_run)
-    if dry_run:
-        print_info(f"Would clean up {len(cleaned)} VM(s)")
-    else:
-        print_success(f"Cleaned up {len(cleaned)} VM(s)")
-    for vm in cleaned:
-        print_info(f"  - {vm.name}")

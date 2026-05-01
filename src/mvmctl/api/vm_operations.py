@@ -221,14 +221,13 @@ class VMCreateContext:
                     exc,
                 )
 
-        # NOTE: vm_dir removal disabled for debugging
-        # if self.was_created("vm_dir") and self.vm_dir.exists():
-        #     try:
-        #         shutil.rmtree(self.vm_dir, ignore_errors=True)
-        #     except OSError as exc:
-        #         logger.warning(
-        #             "Failed to remove VM directory during cleanup: %s", exc
-        #         )
+        if self.was_created("vm_dir") and self.vm_dir.exists():
+            try:
+                shutil.rmtree(self.vm_dir, ignore_errors=True)
+            except OSError as exc:
+                logger.warning(
+                    "Failed to remove VM directory during cleanup: %s", exc
+                )
 
     def execute(self) -> None:
 

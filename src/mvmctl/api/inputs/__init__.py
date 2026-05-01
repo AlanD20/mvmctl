@@ -7,6 +7,11 @@ and portable export configurations.
 
 from __future__ import annotations
 
+from mvmctl.api.inputs._console_input import (
+    ConsoleInput,
+    ConsoleRequest,
+    ResolvedConsoleInput,
+)
 from mvmctl.api.inputs._binary_fetch_input import (
     BinaryFetchInput,
     BinaryFetchRequest,
@@ -85,6 +90,9 @@ from mvmctl.api.inputs._vm_input import (
 )
 
 __all__ = [
+    "ConsoleInput",
+    "ConsoleRequest",
+    "ResolvedConsoleInput",
     "BinaryFetchInput",
     "BinaryFetchRequest",
     "BinaryInput",

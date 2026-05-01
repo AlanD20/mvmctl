@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
 from mvmctl.core._shared import Database
 from mvmctl.core.vm._repository import VMRepository
@@ -11,19 +10,20 @@ from mvmctl.core.vm._resolver import VMResolver
 from mvmctl.exceptions import VMNotFoundError, VMRequestError
 from mvmctl.models.vm import VMInstanceItem
 from mvmctl.utils._network_validator import NetworkValidator
-
-if TYPE_CHECKING:
-    pass
+from mvmctl.utils.common import CommonUtils
 
 __all__ = ["VMInput", "VMRequest", "ResolvedVMInput"]
 
 
 @dataclass
 class VMInput:
-    id: list[str] = field(default_factory=list)
-    name: list[str] = field(default_factory=list)
-    guest_mac: list[str] = field(default_factory=list)
-    guest_ip: list[str] = field(default_factory=list)
+    """Input for operations on existing VMs.
+
+    Identifiers can be any of: VM ID, VM name, guest MAC address,
+    or guest IP address. The resolver auto-detects the type.
+    """
+
+    identifiers: list[str] = field(default_factory=list)
 
     force: bool | None = None
 
@@ -73,14 +73,8 @@ class VMRequest:
             VMNotFoundError: If VM cannot be found
         """
 
-        identifiers = (
-            self._inputs.id
-            + self._inputs.name
-            + self._inputs.guest_mac
-            + self._inputs.guest_ip
-        )
-
-        result = self._vm_resolver.resolve_many(identifiers)
+        self._validate_identifiers()
+        result = self._vm_resolver.resolve_many(self._inputs.identifiers)
 
         if result.errors and not result.items:
             raise VMNotFoundError(
@@ -92,27 +86,51 @@ class VMRequest:
             force=self._inputs.force if self._inputs.force else False,
         )
 
-        # Validate
-        self.ensure_validate()
-
         return self._result
 
-    def ensure_validate(self) -> None:
-        """Validate resolved VM inputs.
+    @staticmethod
+    def _is_mac(identifier: str) -> bool:
+        """Check if identifier looks like a MAC address."""
+        parts = identifier.split(":")
+        return len(parts) == 6 and all(
+            len(p) == 2 and all(c in "0123456789abcdefABCDEF" for c in p)
+            for p in parts
+        )
 
-        Validates:
-        - MAC addresses: must be valid format
-        - IP addresses: must be valid IPv4 and internal/private
+    def _validate_identifiers(self) -> None:
+        """Validate each identifier based on detected type.
+
+        Raises:
+            VMRequestError: If any identifier fails validation.
         """
-        for mac in self._inputs.guest_mac:
-            try:
-                NetworkValidator.validate_mac(mac)
-            except ValueError as exc:
-                raise VMRequestError(
-                    f"Invalid guest MAC address: {mac}"
-                ) from exc
+        for identifier in self._inputs.identifiers:
+            if self._is_mac(identifier):
+                try:
+                    NetworkValidator.validate_mac(identifier)
+                except ValueError as exc:
+                    raise VMRequestError(
+                        f"Invalid MAC address: {identifier}"
+                    ) from exc
 
-        for ip in self._inputs.guest_ip:
-            NetworkValidator.validate_ipv4_address(
-                ip, field_name="guest IP", require_private=True
-            )
+            elif NetworkValidator.is_ip_address(identifier):
+                try:
+                    NetworkValidator.validate_ipv4_address(
+                        identifier,
+                        field_name="guest IP",
+                        require_private=True,
+                    )
+                except ValueError as exc:
+                    raise VMRequestError(
+                        f"Invalid guest IP: {identifier}"
+                    ) from exc
+
+            else:
+                # Name or ID — validate as entity name
+                try:
+                    CommonUtils.validate_entity_name(
+                        identifier, entity_type="VM"
+                    )
+                except ValueError as exc:
+                    raise VMRequestError(
+                        f"Invalid VM identifier: {identifier}"
+                    ) from exc
