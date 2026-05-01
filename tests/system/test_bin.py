@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
@@ -43,9 +44,11 @@ class TestBinaryFetchAndLifecycle:
     @pytest.mark.slow
     def test_bin_fetch_and_set_default(self, mvm_binary):
         """Fetch a specific binary version and set as default."""
-        result = _run_mvm(mvm_binary, "bin", "ls", "--remote")
-        import re
+        from tests.system.conftest import _skip_if_parallel
 
+        _skip_if_parallel()
+
+        result = _run_mvm(mvm_binary, "bin", "ls", "--remote")
         versions = re.findall(r"\d+\.\d+\.\d+", result.stdout)
         if not versions:
             pytest.skip("No remote versions available")
@@ -66,9 +69,11 @@ class TestBinaryFetchAndLifecycle:
     @pytest.mark.slow
     def test_bin_remove_by_version(self, mvm_binary):
         """Fetch a specific version and remove by version."""
-        result = _run_mvm(mvm_binary, "bin", "ls", "--remote")
-        import re
+        from tests.system.conftest import _skip_if_parallel
 
+        _skip_if_parallel()
+
+        result = _run_mvm(mvm_binary, "bin", "ls", "--remote")
         versions = re.findall(r"\d+\.\d+\.\d+", result.stdout)
         if not versions:
             pytest.skip("No remote versions available")
@@ -77,7 +82,10 @@ class TestBinaryFetchAndLifecycle:
         target = versions[0] if len(versions) > 1 else versions[-1]
 
         # Fetch it
-        _run_mvm(mvm_binary, "bin", "fetch", target, check=False)
+        fetch_result = _run_mvm(mvm_binary, "bin", "fetch", target, check=False)
+        assert fetch_result.returncode == 0, (
+            f"Failed to fetch binary {target}: {fetch_result.stderr}"
+        )
 
         # Remove by version
         result = _run_mvm(
@@ -95,9 +103,11 @@ class TestBinaryFetchAndLifecycle:
 
     def test_bin_default(self, mvm_binary):
         """Set a cached binary as default using bin default <id>."""
-        result = _run_mvm(mvm_binary, "bin", "ls", "--json")
-        import json
+        from tests.system.conftest import _skip_if_parallel
 
+        _skip_if_parallel()
+
+        result = _run_mvm(mvm_binary, "bin", "ls", "--json")
         binaries = json.loads(result.stdout)
         if not binaries:
             pytest.skip("No cached binaries to set as default")

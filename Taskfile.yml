@@ -123,3 +123,40 @@ tasks:
     desc: Verify the link works within uv/pyenv
     cmds:
       - uv run python -c "import guestfs; print('✅ libguestfs is active in .venv')"
+  sys-test:
+    desc: Run system tests serially (auto-fetches missing assets, overrides global -n auto and coverage)
+    cmds:
+      - uv run pytest tests/system/ -v -n 0 --no-cov -rx
+  sys-test-prefetch:
+    desc: Pre-fetch system test assets (kernels, images, binaries) via serial pytest run
+    cmds:
+      - uv run pytest tests/system/test_host.py -n 0 --no-cov -q -k "test_host_ls_basic"
+  sys-test-parallel:
+    desc: Run system tests in parallel (auto-prefetches assets first if needed)
+    deps: [sys-test-prefetch]
+    cmds:
+      - uv run pytest tests/system/ -v -n auto --no-cov -rx
+  sys-test-fast:
+    desc: Run fast system tests only (no slow, no KVM)
+    cmds:
+      - uv run pytest tests/system/ -v -n 0 --no-cov -m "system and not slow and not requires_kvm"
+  sys-test-concurrent:
+    desc: Run only the concurrency stress test (10 VMs in parallel)
+    cmds:
+      - uv run pytest tests/system/test_full_journeys.py::TestConcurrentVMCreation -v -n 0 --no-cov -rx
+  sys-test-journeys:
+    desc: Run only end-to-end journey tests
+    cmds:
+      - uv run pytest tests/system/test_full_journeys.py -v -n 0 --no-cov -rx
+  sys-test-lifecycle:
+    desc: Run only VM lifecycle tests
+    cmds:
+      - uv run pytest tests/system/test_vm_lifecycle.py -v -n 0 --no-cov -rx
+  sys-test-network:
+    desc: Run only network tests
+    cmds:
+      - uv run pytest tests/system/test_network.py -v -n 0 --no-cov -rx
+  sys-test-snapshot:
+    desc: Run only snapshot/load roundtrip test
+    cmds:
+      - uv run pytest tests/system/test_vm_lifecycle.py::TestVMSnapshotAndLoad -v -n 0 --no-cov -rx

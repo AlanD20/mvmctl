@@ -23,15 +23,15 @@ uv run mvm init --non-interactive
 ### Auto-fetch on test run
 
 The `prepare_system_env` fixture (session-scoped, autouse) automatically fetches
-any missing assets when you run the tests:
+any missing assets when you run the tests **serially**:
 
 - **Official kernel** — fetched if not cached
 - **Alpine 3.21 image** — fetched if not cached
 - **Ubuntu 24.04 minimal image** — fetched if not cached
 - **Firecracker binary** — latest version fetched if none cached
 
-This means you only need steps 1–3 above. Steps 4 (pre-fetching assets) is
-handled automatically. Progress messages are printed to stderr:
+This means you only need steps 1–3 above. Asset fetches are handled
+automatically on the first serial run. Progress messages are printed to stderr:
 
 ```
 [prepare] Checking system environment...
@@ -42,6 +42,16 @@ handled automatically. Progress messages are printed to stderr:
 
 > **Note:** Asset fetches download over the network and may take several minutes
 > on the first run. Subsequent runs are fast (cache-hit).
+>
+> **Parallel runs (`-n auto`) skip auto-fetch** to avoid race conditions where
+> multiple workers download the same asset simultaneously. Pre-fetch assets
+> manually before running in parallel:
+> ```bash
+> uv run mvm kernel fetch --type official --set-default
+> uv run mvm image fetch alpine-3.21
+> uv run mvm image fetch ubuntu-24.04-minimal
+> uv run mvm bin fetch <version> --set-default
+> ```
 
 ## Run
 
@@ -57,8 +67,14 @@ handled automatically. Progress messages are printed to stderr:
 | Full Journeys | `pytest tests/system/test_full_journeys.py -v` | Create+SSH, network→VM, network→VM+explicit IP, key→VM, full state chain, explicit IP, 2 VMs same net, reboot chain, SSH CLI cmd, multiple SSH keys (10 tests) |
 
 ```bash
-# All system tests
+# All system tests (serial — safest, auto-fetches missing assets)
 pytest tests/system/ -v
+
+# All system tests (parallel — requires pre-fetched assets)
+pytest tests/system/ -v -n auto
+
+# Fast subset (no slow tests, no KVM-required tests)
+pytest tests/system/ -v -m "system and not slow and not requires_kvm"
 ```
 
 ## What is NOT tested (known gaps)

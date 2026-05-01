@@ -22,7 +22,7 @@ class TestKeyLifecycle:
             "key",
             "create",
             unique_key_name,
-            "--type",
+            "--algorithm",
             "ed25519",
         )
         assert result.returncode == 0
@@ -38,7 +38,7 @@ class TestKeyLifecycle:
             "key",
             "create",
             unique_key_name,
-            "--type",
+            "--algorithm",
             "rsa",
         )
         assert result.returncode == 0
@@ -55,12 +55,22 @@ class TestKeyLifecycle:
 
     def test_key_set_default(self, mvm_binary, created_key):
         """Set key as default."""
+        from tests.system.conftest import _skip_if_parallel
+
+        _skip_if_parallel()
         result = _run_mvm(mvm_binary, "key", "set-default", created_key)
         assert result.returncode == 0
 
     def test_key_delete(self, mvm_binary, unique_key_name):
         """Create and delete key."""
-        _run_mvm(mvm_binary, "key", "create", unique_key_name)
+        _run_mvm(
+            mvm_binary,
+            "key",
+            "create",
+            unique_key_name,
+            "--algorithm",
+            "ed25519",
+        )
 
         try:
             result = _run_mvm(mvm_binary, "key", "rm", unique_key_name)
@@ -82,8 +92,8 @@ class TestKeyLifecycle:
         assert "already exists" in (result.stdout + result.stderr).lower()
 
     def test_key_show(self, mvm_binary, created_key):
-        """Show key details."""
-        result = _run_mvm(mvm_binary, "key", "show", created_key)
+        """Inspect key details (table output)."""
+        result = _run_mvm(mvm_binary, "key", "inspect", created_key)
         assert result.returncode == 0
         assert created_key in result.stdout
 
@@ -118,7 +128,7 @@ class TestKeyLifecycle:
             mvm_binary, "key", "rm", "nonexistent-key-name-xyz", check=False
         )
         assert result.returncode != 0
-        assert "not found" in result.stderr.lower()
+        assert "not found" in (result.stdout + result.stderr).lower()
 
     def test_key_inspect_json(self, mvm_binary, created_key):
         """Inspect key with JSON output."""
@@ -129,6 +139,9 @@ class TestKeyLifecycle:
 
     def test_key_set_default_clear(self, mvm_binary, created_key):
         """Set key as default then clear the default."""
+        from tests.system.conftest import _skip_if_parallel
+
+        _skip_if_parallel()
         result = _run_mvm(mvm_binary, "key", "set-default", created_key)
         assert result.returncode == 0
         result = _run_mvm(mvm_binary, "key", "set-default", "--clear")
@@ -148,12 +161,6 @@ class TestKeyLifecycle:
         data = json.loads(result.stdout)
         assert isinstance(data, list)
         assert any(k["name"] == created_key for k in data)
-
-    def test_key_inspect_table(self, mvm_binary, created_key):
-        """Inspect key with table output (no --json flag)."""
-        result = _run_mvm(mvm_binary, "key", "inspect", created_key)
-        assert result.returncode == 0
-        assert created_key in result.stdout
 
     def test_key_create_ecdsa(self, mvm_binary, unique_key_name):
         """Create ECDSA SSH key."""

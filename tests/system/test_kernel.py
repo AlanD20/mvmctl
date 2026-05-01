@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from tests.system.conftest import _run_mvm
@@ -19,6 +21,10 @@ class TestKernelLifecycle:
 
     def test_kernel_fetch(self, mvm_binary):
         """Fetch official kernel."""
+        from tests.system.conftest import _skip_if_parallel
+
+        _skip_if_parallel()
+
         result = _run_mvm(mvm_binary, "kernel", "fetch", "--type", "official")
         assert result.returncode == 0
 
@@ -26,17 +32,17 @@ class TestKernelLifecycle:
         """List kernels in JSON format."""
         result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
         assert result.returncode == 0
-        import json
-
         data = json.loads(result.stdout)
         assert isinstance(data, list)
 
     def test_kernel_set_default(self, mvm_binary):
         """Set kernel as default (uses the one fetched in test_kernel_fetch)."""
+        from tests.system.conftest import _skip_if_parallel
+
+        _skip_if_parallel()
+
         # Get kernel ID
         result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
-        import json
-
         kernels = json.loads(result.stdout)
         if not kernels:
             pytest.skip("No kernel to set as default")
@@ -50,6 +56,10 @@ class TestKernelRemoveAndFetch:
 
     def test_kernel_fetch_with_set_default(self, mvm_binary):
         """Fetch official kernel and set as default in one command."""
+        from tests.system.conftest import _skip_if_parallel
+
+        _skip_if_parallel()
+
         result = _run_mvm(
             mvm_binary,
             "kernel",
@@ -62,10 +72,12 @@ class TestKernelRemoveAndFetch:
 
     def test_kernel_remove(self, mvm_binary):
         """Fetch a kernel then remove it."""
+        from tests.system.conftest import _skip_if_parallel
+
+        _skip_if_parallel()
+
         # Get existing kernels
         result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
-        import json
-
         existing = json.loads(result.stdout)
 
         if not existing:
@@ -96,5 +108,11 @@ class TestKernelRemoveAndFetch:
 
         # Re-fetch so other tests aren't broken
         _run_mvm(
-            mvm_binary, "kernel", "fetch", "--type", "official", check=False
+            mvm_binary,
+            "kernel",
+            "fetch",
+            "--type",
+            "official",
+            "--set-default",
+            check=False,
         )

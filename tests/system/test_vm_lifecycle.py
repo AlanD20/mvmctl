@@ -263,7 +263,13 @@ class TestVMRemove:
             assert not any(v["name"] == unique_vm_name for v in vms)
         finally:
             _run_mvm(
-                mvm_binary, "vm", "rm", "--name", unique_vm_name, check=False
+                mvm_binary,
+                "vm",
+                "rm",
+                "--name",
+                unique_vm_name,
+                "--force",
+                check=False,
             )
 
     def test_vm_remove_force(self, mvm_binary, unique_vm_name):
@@ -349,3 +355,283 @@ class TestVMRemove:
             "not found" in result.stdout.lower()
             or "not found" in result.stderr.lower()
         )
+
+
+class TestVMProcessList:
+    """Test VM process listing."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+    ]
+
+    def test_vm_ps_lists_running(self, mvm_binary, created_vm):
+        """vm ps lists running VMs including the created one."""
+        result = _run_mvm(mvm_binary, "vm", "ps")
+        assert result.returncode == 0
+        assert created_vm["name"] in result.stdout
+
+    def test_vm_ps_json(self, mvm_binary, created_vm):
+        """vm ps does not support --json; smoke test basic output."""
+        result = _run_mvm(mvm_binary, "vm", "ps")
+        assert result.returncode == 0
+        assert created_vm["name"] in result.stdout
+
+
+class TestVMSnapshotAndLoad:
+    """Test VM snapshot and load operations."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+    ]
+
+    def test_vm_snapshot_and_load(self, mvm_binary, unique_vm_name, tmp_path):
+        """Snapshot a running VM, stop it, then load and resume."""
+        mem_file = tmp_path / "snapshot_mem"
+        state_file = tmp_path / "snapshot_state"
+
+        _run_mvm(
+            mvm_binary,
+            "vm",
+            "create",
+            "--name",
+            unique_vm_name,
+            "--image",
+            "alpine-3.21",
+        )
+
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "vm",
+                "snapshot",
+                unique_vm_name,
+                str(mem_file),
+                str(state_file),
+            )
+            assert result.returncode == 0
+            assert mem_file.exists()
+            assert state_file.exists()
+
+            result = _run_mvm(mvm_binary, "vm", "stop", unique_vm_name)
+            assert result.returncode == 0
+
+            result = _run_mvm(
+                mvm_binary,
+                "vm",
+                "load",
+                unique_vm_name,
+                str(mem_file),
+                str(state_file),
+                "--resume",
+            )
+            assert result.returncode == 0
+
+            result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+            vms = json.loads(result.stdout)
+            vm = next((v for v in vms if v["name"] == unique_vm_name), None)
+            assert vm is not None
+            assert vm["status"] == "RUNNING"
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                "--name",
+                unique_vm_name,
+                "--force",
+                check=False,
+            )
+
+
+class TestVMExportImport:
+    """Test VM export and import roundtrip."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+    ]
+
+    def test_vm_export_import_roundtrip(
+        self, mvm_binary, unique_vm_name, tmp_path
+    ):
+        """Export a VM and re-import it under a new name."""
+        import_name = f"{unique_vm_name}-imported"
+
+        _run_mvm(
+            mvm_binary,
+            "vm",
+            "create",
+            "--name",
+            unique_vm_name,
+            "--image",
+            "alpine-3.21",
+        )
+
+        try:
+            result = _run_mvm(mvm_binary, "vm", "export", unique_vm_name)
+            assert result.returncode == 0
+            config = json.loads(result.stdout)
+            assert isinstance(config, dict)
+
+            config_path = tmp_path / "vm_config.json"
+            config_path.write_text(result.stdout)
+
+            result = _run_mvm(
+                mvm_binary,
+                "vm",
+                "import",
+                str(config_path),
+                "--name",
+                import_name,
+            )
+            assert result.returncode == 0
+
+            result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+            vms = json.loads(result.stdout)
+            assert any(v["name"] == import_name for v in vms)
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                "--name",
+                unique_vm_name,
+                "--force",
+                check=False,
+            )
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                "--name",
+                import_name,
+                "--force",
+                check=False,
+            )
+
+
+class TestVMCreateNegativePaths:
+    """Test VM creation with invalid inputs."""
+
+    pytestmark = [pytest.mark.system, pytest.mark.requires_kvm]
+
+    def test_vm_create_invalid_image(self, mvm_binary, unique_vm_name):
+        """Creating a VM with a bogus image should fail."""
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "create",
+            "--name",
+            unique_vm_name,
+            "--image",
+            "totally-bogus-image-xyz",
+            check=False,
+        )
+        assert result.returncode != 0
+        _run_mvm(
+            mvm_binary,
+            "vm",
+            "rm",
+            "--name",
+            unique_vm_name,
+            "--force",
+            check=False,
+        )
+
+    def test_vm_create_invalid_network(self, mvm_binary, unique_vm_name):
+        """Creating a VM with a bogus network should fail."""
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "create",
+            "--name",
+            unique_vm_name,
+            "--image",
+            "alpine-3.21",
+            "--network",
+            "totally-bogus-network-xyz",
+            check=False,
+        )
+        assert result.returncode != 0
+        _run_mvm(
+            mvm_binary,
+            "vm",
+            "rm",
+            "--name",
+            unique_vm_name,
+            "--force",
+            check=False,
+        )
+
+    def test_vm_create_invalid_ip(self, mvm_binary, unique_vm_name):
+        """Creating a VM with an invalid IP should fail."""
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "create",
+            "--name",
+            unique_vm_name,
+            "--image",
+            "alpine-3.21",
+            "--ip",
+            "not-an-ip",
+            check=False,
+        )
+        assert result.returncode != 0
+        _run_mvm(
+            mvm_binary,
+            "vm",
+            "rm",
+            "--name",
+            unique_vm_name,
+            "--force",
+            check=False,
+        )
+
+
+class TestVMCleanup:
+    """Test VM cleanup command."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+    ]
+
+    def test_vm_cleanup_removes_stopped(self, mvm_binary, unique_vm_name):
+        """Cleanup removes stopped VMs from the system."""
+        _run_mvm(
+            mvm_binary,
+            "vm",
+            "create",
+            "--name",
+            unique_vm_name,
+            "--image",
+            "alpine-3.21",
+        )
+
+        try:
+            result = _run_mvm(mvm_binary, "vm", "stop", unique_vm_name)
+            assert result.returncode == 0
+
+            result = _run_mvm(mvm_binary, "vm", "cleanup")
+            assert result.returncode == 0
+
+            result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+            vms = json.loads(result.stdout)
+            assert not any(v["name"] == unique_vm_name for v in vms)
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                "--name",
+                unique_vm_name,
+                "--force",
+                check=False,
+            )

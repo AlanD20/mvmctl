@@ -9,11 +9,13 @@
 ```
 tests/system/
 ├── conftest.py              # Fixtures: mvm_binary, created_vm, created_network, created_key
+├── test_bin.py              # Firecracker binary tests
 ├── test_network.py          # Network CRUD tests
 ├── test_keys.py             # SSH key tests
 ├── test_images.py           # Image management tests
 ├── test_vm_lifecycle.py     # VM lifecycle tests
-└── test_full_journeys.py    # End-to-end journey tests
+├── test_full_journeys.py    # End-to-end journey tests
+└── test_host.py             # Host configuration tests
 ```
 
 ## MARKERS
@@ -58,6 +60,6 @@ uv run pytest tests/
 
 ## NOTES
 
-- **5 test files**: Covering full_journeys, images, keys, network, and VM lifecycle
+- **7 test files**: Covering bin, full_journeys, host, images, keys, network, and VM lifecycle
 - Requires real system environment (KVM, mvm group, network privileges)
 - Completely black-box testing via CLI binary calls
