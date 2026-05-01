@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Optional
 import typer
 
 from mvmctl.api import VMCreateInput, VMInput, VMOperation
+from mvmctl.models.vm import VMStatus
 from mvmctl.utils._io import (
     print_inspect_header,
     print_key_value,
@@ -69,6 +70,49 @@ def vm_ls(
 
     rows = []
     for vm in vms:
+        rows.append(
+            [
+                vm.name,
+                vm.status,
+                vm.ipv4 or "-",
+                str(vm.vcpu_count),
+                str(vm.mem_size_mib),
+                str(vm.disk_size_mib),
+                HashGenerator.shorten(vm.image_id),
+                HashGenerator.shorten(vm.kernel_id),
+                vm.created_at,
+            ]
+        )
+    print_table(
+        columns=[
+            "NAME",
+            "STATUS",
+            "IPV4",
+            "VCPUS",
+            "MEM(MiB)",
+            "DISK(MiB)",
+            "IMAGE",
+            "KERNEL",
+            "CREATED",
+        ],
+        rows=rows,
+    )
+
+
+@vm_app.command(name="ps")
+@handle_errors
+def vm_ps() -> None:
+    """List running VMs (active processes)."""
+    active_vms = VMOperation.list_all(
+        status=[VMStatus.STARTING, VMStatus.RUNNING]
+    )
+
+    if not active_vms:
+        print_success("No active VMs")
+        return
+
+    rows = []
+    for vm in active_vms:
         rows.append(
             [
                 vm.name,
@@ -404,8 +448,40 @@ def vm_inspect(
 @vm_app.command(name="export")
 @handle_errors
 def vm_export(
-    name: str = typer.Argument(..., help="VM name or ID prefix"),
+    identifier: str = typer.Argument(
+        ..., help="VM name, ID, IP, or MAC address"
+    ),
+    output: Optional[Path] = typer.Argument(
+        None, help="Output file path (prints to stdout if omitted)"
+    ),
 ) -> None:
-    """Export a VM's configuration as JSON."""
-    config = VMOperation.export(name)
-    typer.echo(json.dumps(config.to_dict(), indent=2))
+    """Export a VM's configuration to a portable JSON file.
+
+    The exported config uses semantic references (os_slug, version, name)
+    instead of internal IDs, making it portable across machines.
+    """
+    config = VMOperation.export(VMInput(identifiers=[identifier]))
+    json_output = json.dumps(config.to_dict(), indent=2)
+
+    if output is not None:
+        output.write_text(json_output)
+        print_success(f"Exported VM config to {output}")
+    else:
+        typer.echo(json_output)
+
+
+@vm_app.command(name="import")
+@handle_errors
+def vm_import(
+    config_path: Path = typer.Argument(..., help="Path to VM config JSON file"),
+    name: Optional[str] = typer.Option(
+        None, "--name", "-n", help="Override VM name from config"
+    ),
+) -> None:
+    """Create a VM from a portable config file."""
+    from mvmctl.api.inputs import VMImportInput
+
+    VMOperation.import_(
+        VMImportInput(config_path=config_path, name_override=name)
+    )
+    print_success(f"VM imported from {config_path}")

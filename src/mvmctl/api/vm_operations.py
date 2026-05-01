@@ -19,13 +19,23 @@ from pathlib import Path
 from mvmctl.api.inputs import (
     ResolvedVMCreateInput,
     VMCreateRequest,
+    VMExportBinaryConfig,
+    VMExportBootConfig,
+    VMExportCloudInitConfig,
+    VMExportComputeConfig,
     VMExportConfig,
+    VMExportFirecrackerConfig,
+    VMExportImageConfig,
+    VMExportKernelConfig,
+    VMExportNetworkConfig,
 )
 from mvmctl.api.inputs._vm_create_input import VMCreateInput
+from mvmctl.api.inputs._vm_import_input import VMImportInput, VMImportRequest
 from mvmctl.api.inputs._vm_input import VMInput, VMRequest
 from mvmctl.constants import MAX_VMS
 from mvmctl.core._shared import Database
 from mvmctl.core._shared._guestfs import GuestfsProvisioner
+from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.cloudinit._provisioner import (
     CloudInitProvisionConfig,
     CloudInitProvisioner,
@@ -35,6 +45,7 @@ from mvmctl.core.console._controller import ConsoleController
 from mvmctl.core.host._helper import HostPrivilegeHelper
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.core.image._service import ImageService
+from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.core.network._lease_service import LeaseService
 from mvmctl.core.network._repository import LeaseRepository, NetworkRepository
 from mvmctl.core.network._service import NetworkService
@@ -85,14 +96,28 @@ class VMCreateContext:
 
     resources_created: dict[str, bool] = field(default_factory=dict)
 
-    def __init__(self, name: str, db: Database | None = None) -> None:
+    def __init__(
+        self,
+        name: str,
+        db: Database | None = None,
+        vm_id: str | None = None,
+        vm_dir: Path | None = None,
+    ) -> None:
         """Initialize the resolver with database and sub-resolvers."""
         from mvmctl.utils.crypto import HashGenerator
 
         self.name = name
-        created_at = datetime.now()
-        self.vm_id = HashGenerator.vm(name, created_at.isoformat())
-        self.vm_dir = Path(CacheUtils.get_vm_dir(self.vm_id))
+        if vm_id is not None:
+            self.vm_id = vm_id
+            self.vm_dir = (
+                Path(vm_dir)
+                if vm_dir is not None
+                else Path(CacheUtils.get_vm_dir(self.vm_id))
+            )
+        else:
+            created_at = datetime.now()
+            self.vm_id = HashGenerator.vm(name, created_at.isoformat())
+            self.vm_dir = Path(CacheUtils.get_vm_dir(self.vm_id))
         self._db = db if db is not None else Database()
         self.guest_ip = ""
         self.guest_mac = ""
@@ -508,44 +533,50 @@ class VMCreateContext:
 
 class VMOperation:
     @staticmethod
-    def create(inputs: VMCreateInput) -> None:
-
-        # Pre-checks before wasting resources
+    def _execute_create(
+        resolved: ResolvedVMCreateInput, *, audit_action: str
+    ) -> None:
+        """Execute VM creation from already-resolved inputs."""
         HostPrivilegeHelper.check_privileges(
-            "/usr/sbin/ip", f"create VM '{inputs.name}'"
+            "/usr/sbin/ip", f"create VM '{resolved.name}'"
         )
-
         db = Database()
-
         vm_repo = VMRepository(db)
         if vm_repo.count() >= MAX_VMS:
             raise MVMError(
-                f"VM limit reached ({MAX_VMS}). Remove existing VMs before creating new ones."
+                f"VM limit reached ({MAX_VMS}). "
+                f"Remove existing VMs before creating new ones."
             )
 
-        # New VM context
-        ctx = VMCreateContext(name=inputs.name)
-
-        # Sanitized - use resolved inputs
-        request = VMCreateRequest(
-            vm_id=ctx.vm_id, vm_dir=ctx.vm_dir, inputs=inputs, db=db
+        ctx = VMCreateContext(
+            name=resolved.name,
+            vm_id=resolved.vm_id,
+            vm_dir=resolved.vm_dir,
+            db=db,
         )
-        resolved = request.resolve()
         ctx.set_resolved(resolved)
 
         with SigtermContext(lambda: ctx.cleanup()):
             try:
                 ctx.execute()
-
                 vm_instance = ctx.to_model()
                 if vm_instance is None:
                     raise VMCreateError("Failed to create VM instance model")
-
                 vm_repo.upsert(vm_instance)
-                AuditLog.log("vm.create", context=f"name={inputs.name}")
+                AuditLog.log(audit_action, context=f"name={resolved.name}")
             except Exception:
                 ctx.cleanup()
                 raise
+
+    @staticmethod
+    def create(inputs: VMCreateInput) -> None:
+        db = Database()
+        ctx = VMCreateContext(name=inputs.name)
+        request = VMCreateRequest(
+            vm_id=ctx.vm_id, vm_dir=ctx.vm_dir, inputs=inputs, db=db
+        )
+        resolved = request.resolve()
+        VMOperation._execute_create(resolved, audit_action="vm.create")
 
     @staticmethod
     def remove(inputs: VMInput) -> None:
@@ -574,9 +605,22 @@ class VMOperation:
             AuditLog.log("vm.remove", changes={"name": vm.name})
 
     @staticmethod
-    def list_all() -> list[VMInstanceItem]:
-        """List all VMs."""
-        return VMRepository(Database()).list_all()
+    def list_all(
+        status: VMStatus | list[VMStatus] | None = None,
+    ) -> list[VMInstanceItem]:
+        """List all VMs, optionally filtered by status.
+
+        Args:
+            status: Optional status filter. Single status or list of statuses.
+                    If None (default), all VMs are returned.
+
+        Returns:
+            List of VMInstanceItem records.
+        """
+        repo = VMRepository(Database())
+        if status is not None:
+            return repo.list_by_status(status)
+        return repo.list_all()
 
     @staticmethod
     def get(inputs: VMInput) -> VMInstanceItem:
@@ -659,9 +703,79 @@ class VMOperation:
         AuditLog.log("vm.load_snapshot", context=f"name={vm.name}")
 
     @staticmethod
-    def export(name: str) -> VMExportConfig:
-        """Export a VM's configuration."""
-        return export_vm_config(name)
+    def export(inputs: VMInput) -> VMExportConfig:
+        """Export a VM's configuration as a portable VMExportConfig.
+
+        Resolves the VM by any identifier (name, ID, IP, MAC) and queries
+        the database for related asset metadata.
+        """
+        db = Database()
+        resolved = VMRequest(inputs=inputs, db=db).resolve()
+        if len(resolved.vms) != 1:
+            raise VMNotFoundError("Expected exactly one VM identifier")
+        vm = resolved.vms[0]
+
+        image = ImageRepository(db).get(vm.image_id) if vm.image_id else None
+        kernel = (
+            KernelRepository(db).get(vm.kernel_id) if vm.kernel_id else None
+        )
+        binary = (
+            BinaryRepository(db).get(vm.binary_id) if vm.binary_id else None
+        )
+        network = (
+            NetworkRepository(db).get(vm.network_id) if vm.network_id else None
+        )
+
+        return VMExportConfig(
+            name=vm.name,
+            compute=VMExportComputeConfig(
+                vcpus=vm.vcpu_count,
+                mem=vm.mem_size_mib,
+            ),
+            image=VMExportImageConfig(
+                os_slug=image.os_slug if image else None,
+                arch=image.arch if image else None,
+                disk_size=f"{vm.disk_size_mib}M" if vm.disk_size_mib else None,
+            ),
+            kernel=VMExportKernelConfig(
+                version=kernel.version if kernel else None,
+                arch=kernel.arch if kernel else None,
+                type=kernel.type if kernel else None,
+            ),
+            binary=VMExportBinaryConfig(
+                name=binary.name if binary else "firecracker",
+                version=binary.version if binary else None,
+            ),
+            network=VMExportNetworkConfig(
+                name=network.name if network else None,
+                subnet=network.subnet if network else None,
+                ipv4_gateway=network.ipv4_gateway if network else None,
+                nat_enabled=network.nat_enabled if network else None,
+                nat_gateways=network.nat_gateways if network else None,
+                ip=vm.ipv4,
+                mac=vm.mac,
+            ),
+            boot=VMExportBootConfig(
+                args=vm.boot_args,
+                enable_console=vm.enable_console,
+            ),
+            firecracker=VMExportFirecrackerConfig(
+                enable_pci=vm.enable_pci,
+                lsm_flags=vm.lsm_flags,
+            ),
+            cloud_init=VMExportCloudInitConfig(
+                mode=vm.cloud_init_mode or "inject",
+                user="root",
+                nocloud_net_port=vm.nocloud_net_port,
+            ),
+        )
+
+    @staticmethod
+    def import_(inputs: VMImportInput) -> None:
+        """Create a VM from a portable export config file."""
+        db = Database()
+        resolved = VMImportRequest(inputs=inputs, db=db).resolve()
+        VMOperation._execute_create(resolved, audit_action="vm.import")
 
     @staticmethod
     def _perform_removal_cleanup(
@@ -732,50 +846,3 @@ __all__ = [
     "VMCreateContext",
     "VMOperation",
 ]
-
-
-def export_vm_config(name: str) -> VMExportConfig:
-    """Export a VM's configuration as a portable VMExportConfig."""
-    db = Database()
-    repo = VMRepository(db)
-    vm = repo.get_by_name(name)
-    if not vm:
-        raise VMNotFoundError(f"VM '{name}' not found")
-
-    from mvmctl.api.inputs import (
-        VMExportBinaryConfig,
-        VMExportBootConfig,
-        VMExportCloudInitConfig,
-        VMExportComputeConfig,
-        VMExportConfig,
-        VMExportFirecrackerConfig,
-        VMExportImageConfig,
-        VMExportKernelConfig,
-        VMExportNetworkConfig,
-    )
-
-    return VMExportConfig(
-        name=vm.name,
-        compute=VMExportComputeConfig(
-            vcpus=vm.vcpu_count,
-            mem=vm.mem_size_mib,
-        ),
-        image=VMExportImageConfig(),
-        kernel=VMExportKernelConfig(),
-        binary=VMExportBinaryConfig(),
-        network=VMExportNetworkConfig(
-            ip=vm.ipv4,
-            mac=vm.mac,
-        ),
-        boot=VMExportBootConfig(
-            enable_console=vm.enable_console,
-        ),
-        firecracker=VMExportFirecrackerConfig(
-            enable_pci=vm.enable_pci,
-            lsm_flags=vm.lsm_flags,
-        ),
-        cloud_init=VMExportCloudInitConfig(
-            mode=vm.cloud_init_mode or "inject",
-            user=vm.name,
-        ),
-    )

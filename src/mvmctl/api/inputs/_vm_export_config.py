@@ -48,8 +48,8 @@ class VMExportImageConfig:
     image_id is FORBIDDEN — use os_slug + arch instead.
     """
 
-    os_slug: str = ""  # e.g. "ubuntu-24.04" — required for import
-    arch: str = ""  # e.g. "x86_64" — required for import
+    os_slug: str | None = None  # e.g. "ubuntu-24.04" — required for import
+    arch: str | None = None  # e.g. "x86_64" — required for import
     disk_size: str | None = None  # e.g. "2G"
 
 

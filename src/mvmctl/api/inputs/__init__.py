@@ -88,6 +88,10 @@ from mvmctl.api.inputs._vm_export_config import (
     VMExportKernelConfig,
     VMExportNetworkConfig,
 )
+from mvmctl.api.inputs._vm_import_input import (
+    VMImportInput,
+    VMImportRequest,
+)
 from mvmctl.api.inputs._vm_input import (
     ResolvedVMInput,
     VMInput,
@@ -147,6 +151,8 @@ __all__ = [
     "VMExportImageConfig",
     "VMExportKernelConfig",
     "VMExportNetworkConfig",
+    "VMImportInput",
+    "VMImportRequest",
     "VMInput",
     "VMRequest",
 ]
