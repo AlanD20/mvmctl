@@ -402,36 +402,3 @@ def format_exception_debug(exc: Exception, debug: bool = False) -> str:
 
         return f"{exc.__class__.__name__}: {exc}\n{traceback.format_exc()}"
     return str(exc)
-
-
-def handle_creation_error(
-    exc: Exception,
-    vm_instance: VMInstanceItem | None,
-    skip_cleanup: bool,
-    cleanup_fn: Callable[[], None],
-    persist_fn: Callable[[VMInstanceItem, object | None], None] | None = None,
-    manager: object | None = None,
-) -> None:
-    """
-    Unified exception handler for VM creation.
-
-    Handles the common pattern across all exception types in create_vm:
-    - If skip_cleanup is True and vm_instance exists, persist the failed VM
-    - Otherwise, call cleanup_fn to release all resources
-    - Always re-raise the original exception (caller must use 'raise' after this)
-
-    Args:
-        exc: The exception that occurred
-        vm_instance: The VM instance (may be None if error occurred before creation)
-        skip_cleanup: If True and vm_instance exists, persist the failed VM instead of cleaning up
-        cleanup_fn: Cleanup function to call (releases network, files, etc.)
-        persist_fn: Optional function to persist a failed VM to DB
-        manager: Optional VM manager for persist_fn
-
-    """
-    if skip_cleanup and vm_instance is not None:
-        if persist_fn is not None:
-            persist_fn(vm_instance, manager)
-    elif not skip_cleanup:
-        cleanup_fn()
-    # Caller is responsible for re-raising the exception
