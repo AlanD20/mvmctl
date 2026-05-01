@@ -287,3 +287,51 @@ def network_inspect(
                 print_key_value(
                     label, lease.ipv4 or "-", indent=2, key_width=28
                 )
+
+
+@network_app.command(
+    name="sync",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+@handle_errors
+def network_sync(
+    ctx: typer.Context,
+    identifier: str | None = typer.Argument(
+        None, help="Network name or ID (omit for all)"
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """Sync iptables rules between database and host."""
+    network_id: str | None = None
+    if identifier is not None:
+        network = NetworkOperation.get(NetworkInput(name=[identifier]))
+        network_id = network.id
+
+    results = NetworkOperation.sync(network_id)
+
+    if json_output:
+        typer.echo(json.dumps(results, indent=2))
+        return
+
+    # Build a name map for all networks to avoid N+1 lookups
+    all_networks = NetworkOperation.list_all()
+    name_map = {n.id: n.name for n in all_networks}
+
+    rows = []
+    for nid, counts in results.items():
+        short_id = HashGenerator.shorten(nid)
+        name = name_map.get(nid, nid[:8])
+        rows.append(
+            [
+                short_id,
+                name,
+                str(counts["verified"]),
+                str(counts["added"]),
+                str(counts["orphaned"]),
+            ]
+        )
+
+    print_table(
+        columns=["ID", "Name", "Verified", "Added", "Orphaned"],
+        rows=rows,
+    )

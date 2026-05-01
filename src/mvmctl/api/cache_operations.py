@@ -15,6 +15,7 @@ from mvmctl.core.image._repository import ImageRepository
 from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.core.network._repository import LeaseRepository, NetworkRepository
 from mvmctl.core.vm._repository import VMRepository
+from mvmctl.models.cache import CleanResult, PruneAllResult
 from mvmctl.models.vm import VMStatus
 from mvmctl.utils.common import CacheUtils
 
@@ -78,16 +79,30 @@ class CacheOperation:
         appliance_dir = cache_dir / "appliance"
         appliance_dir.mkdir(parents=True, exist_ok=True)
 
+        # If a complete appliance already exists, skip the (slow) rebuild.
+        required_files = {"kernel", "initrd", "root"}
+        if required_files.issubset({p.name for p in appliance_dir.iterdir()}):
+            logger.debug(
+                "libguestfs appliance already present at %s", appliance_dir
+            )
+            return appliance_dir
+
+        # Libguestfs leaves daemon state in system temp dirs that can cause
+        # subsequent builds to hang if a previous run was interrupted. Clean
+        # stale locks and sockets before every build.
+        CacheOperation._clean_stale_guestfs_state()
+
         try:
+            # Discard stdout to avoid pipe-buffer deadlock — this tool is
+            # extremely verbose.  Keep stderr so we can report errors.
             subprocess.run(
                 [make_tool, str(appliance_dir)],
-                capture_output=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
                 text=True,
                 check=True,
                 timeout=150,
             )
-            logger.info("libguestfs fixed appliance built at %s", appliance_dir)
-            return appliance_dir
         except subprocess.TimeoutExpired:
             logger.warning("libguestfs appliance build timed out after 150s")
             return None
@@ -96,6 +111,60 @@ class CacheOperation:
             return None
         except FileNotFoundError:
             return None
+        else:
+            logger.info("libguestfs fixed appliance built at %s", appliance_dir)
+            return appliance_dir
+
+    @staticmethod
+    def _clean_stale_guestfs_state() -> bool:
+        """Remove stale libguestfs locks and sockets that cause hangs.
+
+        Returns:
+            True if any stale state was removed.
+        """
+        import os
+
+        uid = os.getuid()
+        cleaned = False
+
+        # 1. Remove the global lock file — if a previous run died, this
+        #    prevents new libguestfs instances from waiting indefinitely.
+        lock_file = Path(f"/var/tmp/.guestfs-{uid}/lock")
+        if lock_file.exists():
+            try:
+                lock_file.unlink()
+                cleaned = True
+                logger.debug("Removed stale libguestfs lock: %s", lock_file)
+            except OSError:
+                pass
+
+        # 2. Remove stale daemon sockets — libguestfs may try to connect to
+        #    a dead daemon and hang.
+        for sock_dir in Path(f"/run/user/{uid}").glob("libguestfs*"):
+            for sock in sock_dir.glob("guestfsd.sock"):
+                try:
+                    sock.unlink()
+                    cleaned = True
+                    logger.debug("Removed stale libguestfs socket: %s", sock)
+                except OSError:
+                    pass
+
+        # 3. Remove cached appliance directories in /var/tmp — these are
+        #    rebuildable and can confuse libguestfs about appliance freshness.
+        guestfs_tmp = Path(f"/var/tmp/.guestfs-{uid}")
+        if guestfs_tmp.exists():
+            for entry in guestfs_tmp.glob("appliance.d*"):
+                if entry.is_dir():
+                    try:
+                        shutil.rmtree(entry)
+                        cleaned = True
+                        logger.debug(
+                            "Removed stale libguestfs cache: %s", entry
+                        )
+                    except OSError:
+                        pass
+
+        return cleaned
 
     @staticmethod
     def prune_vms(
@@ -356,29 +425,32 @@ class CacheOperation:
 
     @staticmethod
     def prune_misc(dry_run: bool = False) -> dict[str, bool]:
-        """Prune miscellaneous cache: appliance and warm images.
+        """Prune miscellaneous cache: appliance, warm images, and stale guestfs state.
 
-        Always removes both appliance and warm images — no protection flags.
+        Always removes appliance, warm images, and stale libguestfs locks/sockets
+        — no protection flags.
 
         Args:
             dry_run: If True, only report what would be removed.
 
         Returns:
-            Dictionary with keys "appliance" and "warm_images" indicating
-            whether each was removed.
+            Dictionary with keys "appliance", "warm_images", and
+            "guestfs_state" indicating whether each was removed.
         """
         appliance_pruned = CacheOperation._prune_appliance(dry_run)
         warm_images_pruned = CacheOperation._prune_warm_images(dry_run)
+        guestfs_state_pruned = CacheOperation._clean_stale_guestfs_state()
         return {
             "appliance": appliance_pruned,
             "warm_images": warm_images_pruned,
+            "guestfs_state": guestfs_state_pruned,
         }
 
     @staticmethod
     def prune_all(
         dry_run: bool = False,
         include_all: bool = False,
-    ) -> dict[str, list[str] | bool]:
+    ) -> PruneAllResult:
         """Prune all cache resources.
 
         Performs a complete prune operation across all resource types:
@@ -389,57 +461,125 @@ class CacheOperation:
             include_all: If True, remove ALL resources including protected items.
 
         Returns:
-            Dictionary with results per resource type:
-            - "vms": list of removed VM names
-            - "networks": list of removed network names
-            - "images": list of removed image IDs
-            - "kernels": list of kernel IDs that were removed.
-            - "binaries": list of binary identifiers
-            - "appliance": bool indicating if appliance was pruned
-            - "warm_images": bool indicating if warm images were pruned
+            PruneAllResult with aggregated pruned IDs, failed IDs, and
+            whether running VMs were present during the operation.
         """
         HostPrivilegeHelper.check_privileges(
             "/usr/sbin/ip", "prune all cache resources"
         )
 
-        misc = CacheOperation.prune_misc(dry_run=dry_run)
+        db = Database()
+        vms = VMRepository(db).list_all()
+        had_running_vms = any(
+            vm.status in (VMStatus.RUNNING, VMStatus.STARTING) for vm in vms
+        )
 
-        return {
-            "vms": CacheOperation.prune_vms(
+        pruned_ids: list[str] = []
+        failed_ids: list[str] = []
+
+        pruned_ids.extend(
+            CacheOperation.prune_vms(dry_run=dry_run, include_all=include_all)
+        )
+        pruned_ids.extend(
+            CacheOperation.prune_networks(
                 dry_run=dry_run, include_all=include_all
-            ),
-            "networks": CacheOperation.prune_networks(
+            )
+        )
+        pruned_ids.extend(
+            CacheOperation.prune_images(
                 dry_run=dry_run, include_all=include_all
-            ),
-            "images": CacheOperation.prune_images(
+            )
+        )
+        pruned_ids.extend(
+            CacheOperation.prune_kernels(
                 dry_run=dry_run, include_all=include_all
-            ),
-            "kernels": CacheOperation.prune_kernels(
+            )
+        )
+        pruned_ids.extend(
+            CacheOperation.prune_binaries(
                 dry_run=dry_run, include_all=include_all
-            ),
-            "binaries": CacheOperation.prune_binaries(
-                dry_run=dry_run, include_all=include_all
-            ),
-            "appliance": misc["appliance"],
-            "warm_images": misc["warm_images"],
-        }
+            )
+        )
+
+        misc = CacheOperation.prune_misc(dry_run=dry_run)
+        if misc.get("appliance"):
+            pruned_ids.append("appliance")
+        if misc.get("warm_images"):
+            pruned_ids.append("warm_images")
+        if misc.get("guestfs_state"):
+            pruned_ids.append("guestfs_state")
+
+        return PruneAllResult(
+            pruned_ids=pruned_ids,
+            failed_ids=failed_ids,
+            had_running_vms=had_running_vms,
+        )
 
     @staticmethod
-    def _prune_appliance(dry_run: bool = False) -> bool:
-        """Remove the libguestfs appliance folder.
+    def clean(dry_run: bool = False) -> CleanResult:
+        """Completely clean all cache — host, prune everything, remove cache dir.
+
+        This is the "nuclear option" for cache cleanup. It:
+        1. Cleans host networking (TAPs, bridges, iptables chains)
+        2. Prunes all resources (VMs, networks, images, kernels, binaries, misc)
+        3. Removes the entire cache directory at ~/.cache/mvmctl
 
         Args:
             dry_run: If True, only report what would be removed.
 
         Returns:
-            True if appliance folder was removed or would be removed.
+            CleanResult with prune details and cache dir removal status.
+        """
+        from mvmctl.api.host_operations import HostOperation
+
+        # Step 1: Prune all cached resources
+        prune_result = CacheOperation.prune_all(
+            dry_run=dry_run, include_all=True
+        )
+
+        # Step 2: Clean host networking (while DB still exists in cache dir)
+        if not dry_run:
+            HostOperation.clean(CacheUtils.get_cache_dir())
+
+        # Step 3: Remove the cache directory itself
+        cache_dir = CacheUtils.get_cache_dir()
+        cache_dir_removed = False
+        if cache_dir.exists():
+            if not dry_run:
+                shutil.rmtree(cache_dir, ignore_errors=True)
+            cache_dir_removed = True
+
+        return CleanResult(
+            prune_result=prune_result,
+            cache_dir_removed=cache_dir_removed,
+            cache_dir=str(cache_dir),
+        )
+
+    @staticmethod
+    def _prune_appliance(dry_run: bool = False) -> bool:
+        """Remove the libguestfs appliance folder and stale system state.
+
+        Also cleans up stale locks and sockets in /var/tmp and /run/user
+        that can cause subsequent appliance builds to hang.
+
+        Args:
+            dry_run: If True, only report what would be removed.
+
+        Returns:
+            True if appliance folder or stale state was removed.
         """
         appliance_dir = CacheUtils.get_cache_dir() / "appliance"
+        removed = False
         if appliance_dir.exists():
             if not dry_run:
                 shutil.rmtree(appliance_dir, ignore_errors=True)
-            return True
-        return False
+            removed = True
+
+        if not dry_run:
+            state_cleaned = CacheOperation._clean_stale_guestfs_state()
+            removed = removed or state_cleaned
+
+        return removed
 
     @staticmethod
     def _prune_warm_images(dry_run: bool = False) -> bool:

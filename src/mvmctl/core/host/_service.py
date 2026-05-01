@@ -334,60 +334,101 @@ class HostService:
             return False
 
     @staticmethod
-    def _load_module(module: str) -> None:
-        """Load a kernel module."""
+    def _load_module(
+        module: str,
+        *,
+        repo: HostRepository | None = None,
+        session_id: str = "",
+        change_order: int = 0,
+        init_timestamp: str = "",
+        created_at: str = "",
+    ) -> HostStateChangeItem:
+        """Load a kernel module and optionally record the change."""
         HostService._run(
             ["modprobe", module],
             failure_msg=f"Failed to load kernel module {module}",
             missing_msg="modprobe command not found",
         )
+        change = HostStateChangeItem(
+            session_id=session_id,
+            init_timestamp=init_timestamp,
+            setting="kernel_module_load",
+            mechanism="modprobe",
+            applied_value=module,
+            reverted=False,
+            change_order=change_order,
+            created_at=created_at,
+            original_value=None,
+        )
+        if repo is not None:
+            repo.add_change(change)
+        return change
 
     @staticmethod
-    def ensure_kvm_modules() -> list[HostStateChangeItem]:
+    def ensure_kvm_modules(
+        repo: HostRepository | None = None,
+        session_id: str = "",
+        change_order_start: int = 0,
+    ) -> tuple[list[HostStateChangeItem], int]:
         """Ensure KVM modules are loaded and return list of changes."""
         changes: list[HostStateChangeItem] = []
+        now = datetime.now(UTC).isoformat() if session_id else ""
+        next_order = change_order_start
+
+        # Detect available vendor modules via dry-run
+        vendor_modules: list[str] = []
+        for mod in ("kvm_intel", "kvm_amd"):
+            result = subprocess.run(
+                ["modprobe", "--dry-run", mod],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode == 0:
+                vendor_modules.append(mod)
+
+        if not vendor_modules:
+            raise HostError(
+                "No KVM vendor modules available. Ensure virtualization is "
+                "enabled in BIOS and KVM kernel modules are installed."
+            )
+
         kvm_modules = ["kvm"]
-        vendor_modules = ["kvm_intel", "kvm_amd"]
         for module in kvm_modules:
             if HostService._is_module_loaded(module):
                 logger.debug("Module %s already loaded", module)
                 continue
-            HostService._load_module(module)
-            changes.append(
-                HostStateChangeItem(
-                    session_id="",
-                    init_timestamp="",
-                    setting=f"module:{module}",
-                    mechanism="modprobe",
-                    applied_value=module,
-                    reverted=False,
-                    change_order=0,
-                    created_at="",
-                )
+            change = HostService._load_module(
+                module,
+                repo=repo,
+                session_id=session_id,
+                change_order=next_order,
+                init_timestamp=now,
+                created_at=now,
             )
+            changes.append(change)
+            next_order += 1
+
         vendor_loaded = any(
             HostService._is_module_loaded(m) for m in vendor_modules
         )
         if not vendor_loaded:
             for module in vendor_modules:
                 try:
-                    HostService._load_module(module)
-                    changes.append(
-                        HostStateChangeItem(
-                            session_id="",
-                            init_timestamp="",
-                            setting=f"module:{module}",
-                            mechanism="modprobe",
-                            applied_value=module,
-                            reverted=False,
-                            change_order=0,
-                            created_at="",
-                        )
+                    change = HostService._load_module(
+                        module,
+                        repo=repo,
+                        session_id=session_id,
+                        change_order=next_order,
+                        init_timestamp=now,
+                        created_at=now,
                     )
+                    changes.append(change)
+                    next_order += 1
                     break
                 except HostError:
                     continue
-        return changes
+        return changes, next_order
 
     @staticmethod
     def save_iptables_rules() -> HostStateChangeItem | None:
@@ -461,6 +502,7 @@ class HostService:
         )
 
         for change in reversed(changes):
+            was_reverted = False
             if (
                 change.mechanism == "sysctl"
                 and change.original_value is not None
@@ -493,6 +535,7 @@ class HostService:
                         original_value=change.applied_value,
                     )
                 )
+                was_reverted = True
 
             elif change.mechanism == "iptables_save":
                 rules_path = Path(IPTABLES_RULES_V4)
@@ -522,6 +565,7 @@ class HostService:
                             original_value=change.applied_value,
                         )
                     )
+                    was_reverted = True
                 except OSError as e:
                     raise HostError(
                         f"Failed to restore iptables rules: {e}"
@@ -568,12 +612,13 @@ class HostService:
                                 original_value=change.applied_value,
                             )
                         )
+                        was_reverted = True
                     except OSError as e:
                         raise HostError(
                             f"Failed to revert file {target}: {e}"
                         ) from e
 
-            if change.id is not None:
+            if was_reverted and change.id is not None:
                 self._repo.mark_change_reverted(change.id, reverted_at)
 
         return reverted

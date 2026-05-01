@@ -214,60 +214,112 @@ def cache_prune(
 
         result = CacheOperation.prune_all(dry_run=dry_run, include_all=True)
 
-        vms_result: list[str] | bool = result.get("vms", [])
-        if isinstance(vms_result, list) and vms_result:
-            if dry_run:
-                print_info(f"[DRY RUN] Would prune {len(vms_result)} VM(s)")
-            else:
-                print_success(f"Pruned {len(vms_result)} VM(s)")
-        networks_result: list[str] | bool = result.get("networks", [])
-        if isinstance(networks_result, list) and networks_result:
+        if result.pruned_ids:
             if dry_run:
                 print_info(
-                    f"[DRY RUN] Would prune {len(networks_result)} network(s)"
+                    f"[DRY RUN] Would prune {len(result.pruned_ids)} item(s)"
                 )
             else:
-                print_success(f"Pruned {len(networks_result)} network(s)")
-        images_result: list[str] | bool = result.get("images", [])
-        if isinstance(images_result, list) and images_result:
-            if dry_run:
-                print_info(
-                    f"[DRY RUN] Would prune {len(images_result)} image(s)"
-                )
-            else:
-                print_success(f"Pruned {len(images_result)} image(s)")
-        kernels_result: list[str] | bool = result.get("kernels", [])
-        if isinstance(kernels_result, list) and kernels_result:
-            if dry_run:
-                print_info(
-                    f"[DRY RUN] Would prune {len(kernels_result)} kernel(s)"
-                )
-            else:
-                print_success(f"Pruned {len(kernels_result)} kernel(s)")
-        binaries_result: list[str] | bool = result.get("binaries", [])
-        if isinstance(binaries_result, list) and binaries_result:
-            if dry_run:
-                print_info(
-                    f"[DRY RUN] Would prune {len(binaries_result)} binary(s)"
-                )
-            else:
-                print_success(f"Pruned {len(binaries_result)} binary(s)")
-        appliance_pruned = result.get("appliance", False)
-        if appliance_pruned:
-            if dry_run:
-                print_info("[DRY RUN] Would remove appliance folder")
-            else:
-                print_success("Removed appliance folder")
-        warm_images_pruned = result.get("warm_images", False)
-        if warm_images_pruned:
-            if dry_run:
-                print_info("[DRY RUN] Would remove warm images (ready pool)")
-            else:
-                print_success("Removed warm images (ready pool)")
+                print_success(f"Pruned {len(result.pruned_ids)} item(s)")
 
-    print_error(f"Unknown resource: {resource}")
-    print_info("Valid resources: vm, network, image, kernel, binary")
-    print_info(
-        "Or use: mvm cache prune --all  # Prune all types including protected"
-    )
-    raise typer.Exit(code=1)
+        if result.failed_ids:
+            print_warning(
+                f"Failed to prune {len(result.failed_ids)} item(s): "
+                f"{', '.join(result.failed_ids)}"
+            )
+
+        if result.had_running_vms:
+            print_info(
+                "Note: running or starting VMs were present during prune"
+            )
+
+    else:
+        print_error(f"Unknown resource: {resource}")
+        print_info("Valid resources: vm, network, image, kernel, binary")
+        print_info(
+            "Or use: mvm cache prune --all  # Prune all types including protected"
+        )
+        raise typer.Exit(code=1)
+
+
+@cache_app.command(name="clean")
+@handle_errors
+def cache_clean(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Show what would be removed without actually removing",
+    ),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Skip confirmation prompts"
+    ),
+) -> None:
+    """Completely clean all cache — prune everything, host clean, remove cache dir.
+
+    This is the "nuclear option" for cache cleanup. It:
+    1. Prunes ALL resources (VMs, networks, images, kernels, binaries, misc)
+    2. Cleans host networking (TAPs, bridges, iptables chains)
+    3. Removes the entire cache directory at ~/.cache/mvmctl
+
+    Examples:
+        mvm cache clean                # Clean all cache (with confirmation)
+        mvm cache clean --dry-run      # Preview what would be removed
+        mvm cache clean --force        # Clean without confirmation
+    """
+    if dry_run:
+        print_info("[DRY RUN] The following would be removed:")
+        print_info("  - ALL VMs (including RUNNING and STARTING)")
+        print_info("  - ALL networks (including default)")
+        print_info("  - ALL images (including default)")
+        print_info("  - ALL kernels (including default)")
+        print_info("  - ALL binaries (including default)")
+        print_info("  - Appliance folder (libguestfs cache)")
+        print_info("  - Warm images (tmpfs ready pool)")
+        print_info("  - Host networking (TAPs, bridges, iptables chains)")
+        print_info("  - Entire cache directory (~/.cache/mvmctl)")
+    elif not force:
+        print_warning("This will COMPLETELY remove ALL cache data INCLUDING:")
+        print_info("  - ALL VMs (including RUNNING and STARTING)")
+        print_info("  - ALL networks (including default)")
+        print_info("  - ALL images (including default)")
+        print_info("  - ALL kernels (including default)")
+        print_info("  - ALL binaries (including default)")
+        print_info("  - Appliance folder (libguestfs cache)")
+        print_info("  - Warm images (tmpfs ready pool)")
+        print_info("  - Host networking (TAPs, bridges, iptables chains)")
+        print_info("  - Entire cache directory (~/.cache/mvmctl)")
+        print_info("")
+        if not typer.confirm("Continue?"):
+            print_info("Aborted")
+            raise typer.Exit()
+
+    result = CacheOperation.clean(dry_run=dry_run)
+
+    prune = result.prune_result
+    if prune.pruned_ids:
+        if dry_run:
+            print_info(f"[DRY RUN] Would prune {len(prune.pruned_ids)} item(s)")
+        else:
+            print_success(f"Pruned {len(prune.pruned_ids)} item(s)")
+
+    if prune.failed_ids:
+        print_warning(
+            f"Failed to prune {len(prune.failed_ids)} item(s): "
+            f"{', '.join(prune.failed_ids)}"
+        )
+
+    if prune.had_running_vms:
+        print_info("Note: running or starting VMs were present during clean")
+
+    if result.cache_dir_removed:
+        if dry_run:
+            print_info(
+                f"[DRY RUN] Would remove cache directory: {result.cache_dir}"
+            )
+        else:
+            print_success(f"Removed cache directory: {result.cache_dir}")
+    else:
+        print_info("Cache directory was already empty")
+
+
+__all__ = ["cache_app"]

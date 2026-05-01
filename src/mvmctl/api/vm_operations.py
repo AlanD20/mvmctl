@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from mvmctl.api.inputs import (
     ResolvedVMCreateInput,
@@ -567,7 +568,15 @@ class VMOperation:
                 vm_repo.upsert(vm_instance)
                 AuditLog.log(audit_action, context=f"name={resolved.name}")
             except Exception:
-                ctx.cleanup()
+                if resolved.skip_cleanup:
+                    logger.warning(
+                        "VM creation failed but --skip-cleanup is active. Resources left at %s. "
+                        "Manually clean with: mvm vm rm %s",
+                        ctx.vm_dir,
+                        resolved.name,
+                    )
+                else:
+                    ctx.cleanup()
                 raise
 
     @staticmethod
@@ -635,9 +644,131 @@ class VMOperation:
         return resolved.vms[0]
 
     @staticmethod
-    def inspect(inputs: VMInput) -> VMInstanceItem:
-        """Inspect a VM (returns the VM instance; enrichment can be added later)."""
-        return VMOperation.get(inputs)
+    def inspect(inputs: VMInput, tree: bool = False) -> dict[str, Any]:
+        """Inspect a VM with enriched data and optional tree output."""
+        db = Database()
+        resolved = VMRequest(inputs=inputs, db=db).resolve()
+        if len(resolved.vms) != 1:
+            raise VMNotFoundError("Expected exactly one VM identifier")
+        vm = resolved.vms[0]
+
+        # Resolve asset names
+        image = ImageRepository(db).get(vm.image_id) if vm.image_id else None
+        kernel = (
+            KernelRepository(db).get(vm.kernel_id) if vm.kernel_id else None
+        )
+        network = (
+            NetworkRepository(db).get(vm.network_id) if vm.network_id else None
+        )
+        binary = (
+            BinaryRepository(db).get(vm.binary_id) if vm.binary_id else None
+        )
+
+        # Console relay status
+        relay_running = False
+        relay_pid = vm.relay_pid
+        relay_socket_path = vm.relay_socket_path
+        if vm.id and vm.relay_pid:
+            from mvmctl.services.console_relay.manager import (
+                ConsoleRelayManager,
+            )
+
+            relay_mgr = ConsoleRelayManager(
+                id=vm.id,
+                path=CacheUtils.get_vm_dir(vm.id),
+                name=vm.name,
+            )
+            relay_running = relay_mgr.is_running()
+
+        # Filesystem paths
+        vm_dir = CacheUtils.get_vm_dir(vm.id)
+        rootfs_path = vm_dir / f"rootfs.{vm.rootfs_suffix}"
+        config_path = vm_dir / vm.config_path if vm.config_path else None
+        log_path = vm_dir / vm.log_path if vm.log_path else None
+        serial_output_path = (
+            vm_dir / vm.serial_output_path if vm.serial_output_path else None
+        )
+
+        if tree:
+            return {
+                "vm": {
+                    "name": vm.name,
+                    "id": vm.id,
+                    "status": vm.status,
+                    "pid": vm.pid,
+                    "exit_code": vm.exit_code,
+                },
+                "resources": {
+                    "vcpus": vm.vcpu_count,
+                    "mem": vm.mem_size_mib,
+                    "disk": vm.disk_size_mib,
+                },
+                "networking": {
+                    "ipv4": vm.ipv4,
+                    "mac": vm.mac,
+                    "network_name": network.name if network else None,
+                    "tap_device": vm.tap_device,
+                },
+                "assets": {
+                    "image_name": image.os_name if image else None,
+                    "kernel_version": kernel.version if kernel else None,
+                    "binary_name": binary.name if binary else None,
+                },
+                "filesystem": {
+                    "vm_dir": str(vm_dir),
+                    "rootfs_path": str(rootfs_path),
+                    "config_path": str(config_path) if config_path else None,
+                    "log_path": str(log_path) if log_path else None,
+                    "serial_output_path": str(serial_output_path)
+                    if serial_output_path
+                    else None,
+                },
+                "console": {
+                    "relay_running": relay_running,
+                    "relay_pid": relay_pid,
+                    "relay_socket_path": relay_socket_path,
+                },
+            }
+
+        # Flat mode — enriched dict
+        return {
+            "id": vm.id,
+            "name": vm.name,
+            "status": vm.status,
+            "ipv4": vm.ipv4,
+            "mac": vm.mac,
+            "vcpus": vm.vcpu_count,
+            "mem_mib": vm.mem_size_mib,
+            "disk_mib": vm.disk_size_mib,
+            "image_id": vm.image_id,
+            "image_name": image.os_name if image else None,
+            "kernel_id": vm.kernel_id,
+            "kernel_version": kernel.version if kernel else None,
+            "network_id": vm.network_id,
+            "network_name": network.name if network else None,
+            "binary_id": vm.binary_id,
+            "binary_name": binary.name if binary else None,
+            "tap_device": vm.tap_device,
+            "pid": vm.pid,
+            "exit_code": vm.exit_code,
+            "created_at": vm.created_at,
+            "updated_at": vm.updated_at,
+            "cloud_init_mode": vm.cloud_init_mode,
+            "enable_pci": vm.enable_pci,
+            "enable_console": vm.enable_console,
+            "enable_logging": vm.enable_logging,
+            "enable_metrics": vm.enable_metrics,
+            "vm_dir": str(vm_dir),
+            "rootfs_path": str(rootfs_path),
+            "config_path": str(config_path) if config_path else None,
+            "log_path": str(log_path) if log_path else None,
+            "serial_output_path": str(serial_output_path)
+            if serial_output_path
+            else None,
+            "relay_running": relay_running,
+            "relay_pid": relay_pid,
+            "relay_socket_path": relay_socket_path,
+        }
 
     @staticmethod
     def start(inputs: VMInput) -> None:

@@ -20,7 +20,9 @@ ssh_app = typer.Typer(
 @ssh_app.command(name="ssh")
 @handle_errors
 def ssh_connect(
-    vm_id: str = typer.Argument(None, help="VM name, ID prefix, or IP address"),
+    identifier: str = typer.Argument(
+        None, help="VM name, ID prefix, IP, or MAC address"
+    ),
     user: str | None = typer.Option(
         None, "--user", "-u", help="SSH user (default: from user config)"
     ),
@@ -33,17 +35,19 @@ def ssh_connect(
     ip: str | None = typer.Option(
         None, "--ip", help="IP address to connect to (skips all validation)"
     ),
+    mac: str | None = typer.Option(None, "--mac", help="VM MAC address"),
     name: str | None = typer.Option(
         None, "--name", "-n", help="VM name (validates as entity name)"
     ),
 ) -> None:
     """Open an SSH session into a VM."""
     inputs = SSHInput(
-        vm_id=vm_id,
+        vm_id=identifier,
         user=user,
         key=key,
         cmd=cmd,
         ip=ip,
+        mac=mac,
         name=name,
     )
     exit_code = SSHOperation.connect(inputs)

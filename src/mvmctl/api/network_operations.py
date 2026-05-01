@@ -404,6 +404,40 @@ class NetworkOperation:
         return repo.get_default() or default_network
 
     @staticmethod
+    def sync(network_id: str | None = None) -> dict[str, dict[str, int]]:
+        """
+        Sync iptables rules for one or all networks.
+
+        Ensures all active DB rules exist in host iptables and detects
+        orphaned host rules.
+
+        Args:
+            network_id: Specific network ID to sync, or None for all networks.
+
+        Returns:
+            Dict mapping network_id -> {"added": int, "verified": int, "orphaned": int}
+
+        """
+        db = Database()
+        repo = NetworkRepository(db)
+        service = NetworkService(repo)
+
+        if network_id is not None:
+            network = repo.get(network_id)
+            if network is None:
+                raise NetworkError(f"Network '{network_id}' not found")
+            networks = [network]
+        else:
+            networks = repo.list_all()
+
+        results: dict[str, dict[str, int]] = {}
+        for network in networks:
+            result = service.sync_iptables_rules(network)
+            results[network.id] = result
+
+        return results
+
+    @staticmethod
     def reconcile() -> list[NetworkItem]:
         """
         Reconcile all networks — compare DB state vs actual bridge state.

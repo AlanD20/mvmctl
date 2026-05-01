@@ -10,8 +10,14 @@ import click
 import typer
 from rich.console import Console
 
-from mvmctl.exceptions import MVMError
-from mvmctl.utils._io import get_logger, log_exception
+from mvmctl.exceptions import MVMError, PrivilegeError
+from mvmctl.utils._io import (
+    get_logger,
+    log_exception,
+    print_error,
+    print_info,
+    print_warning,
+)
 
 _err_console = Console(stderr=True)
 
@@ -55,6 +61,16 @@ def handle_errors(func: F) -> F:
             except BrokenPipeError:
                 pass
             raise typer.Exit(code=0)
+        except PrivilegeError as e:
+            print_error(str(e))
+            if e.details:
+                detail_msg = e.details.get("message", "")
+                if detail_msg:
+                    print_warning(f"Details: {detail_msg}")
+                print_info("Options:")
+                for suggestion in e.details.get("suggestions", []):
+                    print_info(f"  - {suggestion}")
+            raise typer.Exit(code=1) from e
         except MVMError as e:
             _print_error(str(e))
             raise typer.Exit(code=1) from e

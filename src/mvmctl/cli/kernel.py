@@ -10,6 +10,7 @@ import typer
 
 from mvmctl.api import KernelFetchInput, KernelInput, KernelOperation
 from mvmctl.utils._io import (
+    print_error,
     print_info,
     print_success,
     print_table,
@@ -158,18 +159,23 @@ def kernel_set_default(
 @handle_errors
 def kernel_rm(
     ctx: typer.Context,
-    kernel_id: str = typer.Argument(
-        None, help="Kernel ID prefix or name to remove"
+    identifiers: list[str] = typer.Argument(
+        None, help="Kernel ID prefixes or names to remove"
     ),
     force: bool = typer.Option(
         False, "--force", help="Remove even if referenced by VMs"
     ),
 ) -> None:
-    """Remove a kernel."""
-    kernel_id = CliUtils.check_name_arg(ctx, kernel_id)
-    inputs = KernelInput(id=[kernel_id], force=force)
+    """Remove one or more kernels."""
+    effective_ids: list[str] = list(identifiers) if identifiers else []
+    if not effective_ids:
+        print_error("Provide at least one kernel ID or name")
+        raise typer.Exit(code=1)
+
+    inputs = KernelInput(id=effective_ids, force=force)
     KernelOperation.remove(inputs)
-    print_success(f"Kernel {kernel_id} removed")
+    for kernel_id in effective_ids:
+        print_success(f"Kernel {kernel_id} removed")
 
 
 __all__ = ["kernel_app"]

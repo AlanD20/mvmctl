@@ -29,6 +29,7 @@ class SSHInput:
     cmd: str | None = None
     ip: str | None = None
     name: str | None = None
+    mac: str | None = None
 
 
 @dataclass(frozen=True)
@@ -66,7 +67,7 @@ class SSHRequest:
 
         Resolution order:
         1. If --ip provided, use directly
-        2. If --name or vm_id provided:
+        2. If --name, --mac, or vm_id provided:
            - If it's an IP address, use directly
            - Otherwise resolve as VM entity and return its IPv4
         3. Error if none provided
@@ -77,11 +78,17 @@ class SSHRequest:
         target = (
             self._inputs.name
             if self._inputs.name is not None
-            else self._inputs.vm_id
+            else (
+                self._inputs.mac
+                if self._inputs.mac is not None
+                else self._inputs.vm_id
+            )
         )
 
         if target is None:
-            raise SSHError("Provide either a VM identifier, --name, or --ip")
+            raise SSHError(
+                "Provide either a VM identifier, --name, --mac, or --ip"
+            )
 
         if NetworkValidator.is_ip_address(target):
             return target

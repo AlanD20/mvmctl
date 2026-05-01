@@ -2,6 +2,7 @@
 
 from mvmctl.models.binary import BinaryItem
 from mvmctl.models.bulk import BulkResult, BulkResultItem
+from mvmctl.models.cache import PruneAllResult
 from mvmctl.models.cloudinit import (
     CloudInitMode,
     CloudInitStatus,
@@ -57,6 +58,7 @@ __all__ = [
     "KernelSpec",
     "NetworkItem",
     "NetworkLeaseItem",
+    "PruneAllResult",
     "SSHKeyItem",
     "VMInspectInfo",
     "VMInstanceItem",

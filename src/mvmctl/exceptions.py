@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from mvmctl.models.vm import VMInstanceItem
@@ -184,6 +184,18 @@ class ConsoleError(MVMError):
 
 class PrivilegeError(HostError):
     """Insufficient privileges for an operation."""
+
+    def __init__(
+        self,
+        message: str = "Insufficient privileges",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        self.message = message
+        self.details = details
+        super().__init__(message)
+
+    def __str__(self) -> str:
+        return self.message
 
 
 class ProcessError(MVMError):

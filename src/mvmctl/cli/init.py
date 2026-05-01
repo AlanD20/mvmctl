@@ -139,6 +139,10 @@ def init_run(
     print_info("")
     print_info("mvm — Setup Wizard")
     print_info("=" * 40)
+    print_info("")
+    print_info(
+        "Note: On first run, building the libguestfs appliance can take a few minutes."
+    )
 
     result = _handle_interactive_flow(
         skip_host=skip_host,

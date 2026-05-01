@@ -15,22 +15,37 @@ class HostController:
     def __init__(self, repo: HostRepository) -> None:
         self._repo = repo
 
-    def record_changes(self, changes: list[HostStateChangeItem]) -> None:
+    def record_changes(
+        self,
+        changes: list[HostStateChangeItem],
+        session_id: str | None = None,
+        change_order_offset: int = 0,
+    ) -> str:
         """
         Persist host state changes to the database.
 
         Uses an atomic bulk insert, then deletes all prior sessions so only
         the latest backup remains.
+
+        Args:
+            changes: List of changes to persist.
+            session_id: Optional session ID to use; generated if not provided.
+            change_order_offset: Starting value for change_order enumeration.
+
+        Returns:
+            The session ID used.
+
         """
-        session_id = str(uuid.uuid4())
+        sid = session_id or str(uuid.uuid4())
         now = datetime.now(UTC).isoformat()
-        for order, change in enumerate(changes):
-            change.session_id = session_id
+        for order, change in enumerate(changes, start=change_order_offset):
+            change.session_id = sid
             change.init_timestamp = now
             change.change_order = order
             change.created_at = now
         self._repo.add_changes(changes)
-        self._repo.delete_changes_except_session(session_id)
+        self._repo.delete_changes_except_session(sid)
+        return sid
 
     def mark_initialized(self, timestamp: str) -> None:
         """Mark host as fully initialized."""

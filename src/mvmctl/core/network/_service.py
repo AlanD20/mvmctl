@@ -1,6 +1,7 @@
 """Network management for VM networking."""
 
 import logging
+import shlex
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -393,6 +394,7 @@ class NetworkService:
         *,
         subnet: str | None = None,
         network_id: str,
+        force: bool = False,
     ) -> None:
         """
         Remove NAT (MASQUERADE + FORWARD) rules for the bridge.
@@ -405,6 +407,7 @@ class NetworkService:
             subnet: Subnet CIDR (e.g., "10.0.0.0/24"). If None, queries from database.
             nat_gateways: List of gateway interfaces. If None, queries from database.
             network_id: Network UUID for iptables rule tracking.
+            force: If True, remove NAT even if TAPs are still attached.
 
         """
         from mvmctl.core.network._resolver import NetworkResolver
@@ -434,9 +437,13 @@ class NetworkService:
                 f"Provide subnet explicitly or ensure network exists in database."
             )
 
-        # Check for attached TAPs — log warning but continue with removal
+        # Check for attached TAPs — raise unless force=True
         attached_taps = NetworkUtils.get_bridge_taps(bridge)
         if attached_taps:
+            if not force:
+                raise NetworkError(
+                    f"Cannot remove NAT: {len(attached_taps)} TAP(s) still attached on bridge {bridge}. Use --force to override."
+                )
             logger.warning(
                 "Removing NAT for bridge %s but %d TAP(s) still attached: %s",
                 bridge,
@@ -766,6 +773,7 @@ class NetworkService:
                     network.nat_gateways_list,
                     subnet=network.subnet,
                     network_id=network.id,
+                    force=force,
                 )
             except NetworkError as e:
                 logger.debug("NAT teardown for %s: %s", network.bridge, e)
@@ -793,6 +801,97 @@ class NetworkService:
         """
         for network in networks:
             self.remove(network, force=force)
+
+    def sync_iptables_rules(self, network: NetworkItem) -> dict[str, int]:
+        """
+        Sync iptables rules for a network between DB and host.
+
+        Ensures all active DB rules exist in host iptables, and detects
+        orphaned host rules that are not tracked in the DB.
+
+        Args:
+            network: The NetworkItem to sync rules for.
+
+        Returns:
+            Dict with counts: {"added": int, "verified": int, "orphaned": int}
+
+        """
+        db_rules = self._iptables_repo.get_by_network_id(
+            network.id, active_only=True
+        )
+
+        added = 0
+        verified = 0
+
+        for rule in db_rules:
+            result = self._tracker.ensure_rule(rule)
+            if result.success:
+                if result.command_executed is None:
+                    verified += 1
+                else:
+                    added += 1
+
+        orphaned = self._count_orphaned_rules(network, db_rules)
+
+        return {"added": added, "verified": verified, "orphaned": orphaned}
+
+    def _count_orphaned_rules(
+        self,
+        network: NetworkItem,
+        db_rules: list[IPTablesRuleItem],
+    ) -> int:
+        """
+        Count host iptables rules that don't match any active DB rule.
+
+        Scans iptables-save output for MVM chain rules that reference
+        this network but have no corresponding active DB record.
+
+        Args:
+            network: The NetworkItem to check orphaned rules for.
+            db_rules: List of active DB rules for this network.
+
+        Returns:
+            Number of orphaned rules detected.
+
+        """
+        try:
+            result = subprocess.run(
+                ["iptables-save"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return 0
+
+        db_comments = {r.comment_tag for r in db_rules if r.comment_tag}
+
+        orphaned = 0
+
+        for line in result.stdout.splitlines():
+            if not line.startswith("-A MVM-"):
+                continue
+
+            parts = shlex.split(line)
+            comment = None
+            for i, part in enumerate(parts):
+                if part == "--comment" and i + 1 < len(parts):
+                    comment = parts[i + 1]
+                    break
+
+            if (
+                comment
+                and network.name in comment
+                and comment not in db_comments
+            ):
+                orphaned += 1
+                logger.warning(
+                    "Orphaned iptables rule on host for network %s: %s",
+                    network.name,
+                    line,
+                )
+
+        return orphaned
 
 
 __all__ = ["NetworkService"]

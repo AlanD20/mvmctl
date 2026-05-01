@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import textwrap
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,16 @@ _DANGEROUS_CLOUD_INIT_DIRECTIVES = {
     "yum": "Can install packages (use with caution)",
     "packages": "Can install packages (use with caution)",
 }
+
+
+@lru_cache(maxsize=1)
+def _load_cloud_init_template() -> str:
+    """Load the cloud-init template from assets with LRU caching.
+
+    The template file does not change at runtime, so a cache size of 1
+    eliminates repeated disk reads.
+    """
+    return AssetManager().read_file("cloud-init.template.yaml")
 
 
 class CloudInitManager:
@@ -274,7 +285,7 @@ class CloudInitManager:
         from jinja2.sandbox import SandboxedEnvironment
 
         env = SandboxedEnvironment(undefined=StrictUndefined)
-        template_str = AssetManager().read_file("cloud-init.template.yaml")
+        template_str = _load_cloud_init_template()
         template = env.from_string(template_str)
 
         rendered = template.render(

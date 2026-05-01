@@ -12,7 +12,7 @@ import typer
 
 from mvmctl.api import HostOperation
 from mvmctl.constants import MVM_UNIX_GROUP
-from mvmctl.exceptions import HostError
+from mvmctl.exceptions import HostError, PrivilegeError
 from mvmctl.utils._io import (
     print_error,
     print_info,
@@ -21,7 +21,7 @@ from mvmctl.utils._io import (
     print_warning,
 )
 from mvmctl.utils.cli import handle_errors
-from mvmctl.utils.common import CacheUtils
+from mvmctl.utils.common import CacheUtils, CommonUtils
 from mvmctl.utils.fs import FsUtils
 
 if TYPE_CHECKING:
@@ -51,6 +51,8 @@ def _format_change(change: HostStateChangeItem) -> str:
         return f"{s}: {orig} → {v}"
     if m == "noop" and s == "iptables_chains" and v == _CHAIN_EXISTS_MARKER:
         return "iptables chains already exist — keeping existing chain state"
+    if m == "modprobe" and s == "kernel_module_load":
+        return f"loaded kernel module '{v}'"
     if m == "network_create":
         return f"Default network '{v}' ready"
     # Fallback: truncate long values
@@ -121,6 +123,16 @@ def host_init() -> None:
     cache_dir = CacheUtils.get_cache_dir()
     try:
         changes = HostOperation.init(cache_dir)
+    except PrivilegeError as exc:
+        print_error(str(exc))
+        if exc.details:
+            detail_msg = exc.details.get("message", "")
+            if detail_msg:
+                print_warning(f"Details: {detail_msg}")
+            print_info("Options:")
+            for suggestion in exc.details.get("suggestions", []):
+                print_info(f"  - {suggestion}")
+        raise typer.Exit(code=1) from exc
     except HostError as e:
         if "Root privileges" in str(e):
             print_warning("Root privileges required for: mvm host init")
@@ -198,7 +210,11 @@ def host_ls(
             "ip_forward": {"value": ip_fwd, "ok": fwd_ok},
             "state_snapshot": {
                 "exists": state is not None,
-                "timestamp": state.initialized_at if state else None,
+                "timestamp": CommonUtils.human_readable_datetime(
+                    state.initialized_at
+                )
+                if state
+                else None,
             },
         }
         typer.echo(json.dumps(data, indent=2))
@@ -219,7 +235,9 @@ def host_ls(
         [
             "state snapshot",
             "saved" if state else "none",
-            state.initialized_at if state else "no snapshot",
+            CommonUtils.human_readable_datetime(state.initialized_at)
+            if state
+            else "no snapshot",
         ],
     ]
     print_table(columns=["Check", "Status", "Detail"], rows=rows)

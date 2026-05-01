@@ -38,7 +38,7 @@ from mvmctl.exceptions import (
     ImageValidationError,
 )
 from mvmctl.models.image import ImageItem, ImageSpec
-from mvmctl.utils.common import CacheUtils, safe_int
+from mvmctl.utils.common import CacheUtils, CommonUtils
 from mvmctl.utils.http import HttpDownload
 from mvmctl.utils.template import render_optional_template, render_template
 
@@ -305,10 +305,10 @@ class ImageService:
                 chosen = partitions[0]
                 partition_num = 1
 
-            start_sector = safe_int(chosen.get("start"), 0)
+            start_sector = CommonUtils.safe_int(chosen.get("start"), 0)
             size_val = chosen.get("size")
             sector_count: int | None = (
-                safe_int(size_val, 0) if size_val else None
+                CommonUtils.safe_int(size_val, 0) if size_val else None
             )
 
             skip_bytes = start_sector * _SECTOR_SIZE

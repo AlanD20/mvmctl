@@ -6,6 +6,7 @@ import logging
 import os
 import pwd
 import subprocess
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -100,42 +101,43 @@ class HostOperation:
             )
 
         # --- Privilege setup (group, user, sudoers) ---
-        changes: list[HostStateChangeItem] = []
+        db_changes: list[HostStateChangeItem] = []
+        all_changes: list[HostStateChangeItem] = []
 
         group_created = HostService.create_group(MVM_UNIX_GROUP)
         if group_created:
-            changes.append(
-                HostStateChangeItem(
-                    session_id="",
-                    init_timestamp="",
-                    setting=f"group:{MVM_UNIX_GROUP}",
-                    original_value=None,
-                    applied_value=MVM_UNIX_GROUP,
-                    mechanism="groupadd",
-                    reverted=False,
-                    change_order=0,
-                    created_at="",
-                )
+            change_item = HostStateChangeItem(
+                session_id="",
+                init_timestamp="",
+                setting=f"group:{MVM_UNIX_GROUP}",
+                original_value=None,
+                applied_value=MVM_UNIX_GROUP,
+                mechanism="groupadd",
+                reverted=False,
+                change_order=0,
+                created_at="",
             )
+            db_changes.append(change_item)
+            all_changes.append(change_item)
 
         username = (
             os.environ.get("SUDO_USER") or pwd.getpwuid(os.getuid()).pw_name
         )
         user_added = HostService.add_user_to_group(username, MVM_UNIX_GROUP)
         if user_added:
-            changes.append(
-                HostStateChangeItem(
-                    session_id="",
-                    init_timestamp="",
-                    setting=f"group_member:{username}",
-                    original_value=None,
-                    applied_value=f"{username}:{MVM_UNIX_GROUP}",
-                    mechanism="usermod",
-                    reverted=False,
-                    change_order=0,
-                    created_at="",
-                )
+            change_item = HostStateChangeItem(
+                session_id="",
+                init_timestamp="",
+                setting=f"group_member:{username}",
+                original_value=None,
+                applied_value=f"{username}:{MVM_UNIX_GROUP}",
+                mechanism="usermod",
+                reverted=False,
+                change_order=0,
+                created_at="",
             )
+            db_changes.append(change_item)
+            all_changes.append(change_item)
 
         sudoers_path = Path(SUDOERS_DROP_IN_PATH)
         sudoers_stale = True
@@ -148,83 +150,94 @@ class HostOperation:
             pass
         if sudoers_stale:
             HostService.write_sudoers(sudoers_path, MVM_UNIX_GROUP)
-            changes.append(
-                HostStateChangeItem(
-                    session_id="",
-                    init_timestamp="",
-                    setting="sudoers_dropin",
-                    original_value=None,
-                    applied_value=str(sudoers_path),
-                    mechanism="file_create",
-                    reverted=False,
-                    change_order=0,
-                    created_at="",
-                )
-            )
-
-        # --- Network & kernel setup ---
-        change = HostService.enable_ip_forward()
-        if change:
-            changes.append(change)
-
-        change = HostService.persist_sysctl()
-        if change:
-            changes.append(change)
-
-        module_changes = HostService.ensure_kvm_modules()
-        changes.extend(module_changes)
-
-        net_repo = NetworkRepository()
-        net_service = NetworkService(net_repo)
-        net_service.ensure_mvm_chains()
-        changes.append(
-            HostStateChangeItem(
+            change_item = HostStateChangeItem(
                 session_id="",
                 init_timestamp="",
-                setting="iptables_chains",
+                setting="sudoers_dropin",
                 original_value=None,
-                applied_value="MVM chains ensured",
-                mechanism="iptables",
+                applied_value=str(sudoers_path),
+                mechanism="file_create",
                 reverted=False,
                 change_order=0,
                 created_at="",
             )
-        )
+            db_changes.append(change_item)
+            all_changes.append(change_item)
 
-        # --- Default network (first-time init or post-reboot restore) ---
+        # --- Network & kernel setup ---
+        change = HostService.enable_ip_forward()
+        if change:
+            db_changes.append(change)
+            all_changes.append(change)
+
+        change = HostService.persist_sysctl()
+        if change:
+            db_changes.append(change)
+            all_changes.append(change)
+
+        # Create repo early so module loads can be recorded with a session ID.
         repo = HostRepository()
         repo.initialize_state()
+        session_id = str(uuid.uuid4())
 
+        module_changes, next_order = HostService.ensure_kvm_modules(
+            repo=repo, session_id=session_id, change_order_start=0
+        )
+        all_changes.extend(module_changes)
+
+        net_repo = NetworkRepository()
+        net_service = NetworkService(net_repo)
+        net_service.ensure_mvm_chains()
+        chain_change = HostStateChangeItem(
+            session_id="",
+            init_timestamp="",
+            setting="iptables_chains",
+            original_value=None,
+            applied_value="MVM chains ensured",
+            mechanism="iptables",
+            reverted=False,
+            change_order=0,
+            created_at="",
+        )
+        db_changes.append(chain_change)
+        all_changes.append(chain_change)
+
+        # --- Default network (first-time init or post-reboot restore) ---
         from mvmctl.api.network_operations import NetworkOperation
 
         try:
             restored = NetworkOperation.restore()
             if not restored:
                 NetworkOperation.create_default_network()
-                changes.append(
-                    HostStateChangeItem(
-                        session_id="",
-                        init_timestamp="",
-                        setting="default_network",
-                        original_value=None,
-                        applied_value=DEFAULT_NETWORK_NAME,
-                        mechanism="network_create",
-                        reverted=False,
-                        change_order=0,
-                        created_at="",
-                    )
+                net_change = HostStateChangeItem(
+                    session_id="",
+                    init_timestamp="",
+                    setting="default_network",
+                    original_value=None,
+                    applied_value=DEFAULT_NETWORK_NAME,
+                    mechanism="network_create",
+                    reverted=False,
+                    change_order=0,
+                    created_at="",
                 )
+                db_changes.append(net_change)
+                all_changes.append(net_change)
         except Exception:
             logger.warning("Could not set up default network during host init")
 
         iptables_change = HostService.save_iptables_rules()
         if iptables_change:
-            changes.append(iptables_change)
+            db_changes.append(iptables_change)
+            all_changes.append(iptables_change)
 
         # --- Persist state & finalize ---
         controller = HostController(repo)
         try:
-            controller.record_changes(changes)
+            controller.record_changes(
+                db_changes,
+                session_id=session_id,
+                change_order_offset=next_order,
+            )
         except Exception as e:
             logger.warning("Could not record host changes to DB: %s", e)
         if group_created:
@@ -246,9 +259,9 @@ class HostOperation:
 
         FsUtils.chown_to_real_user(cache_dir)
 
-        AuditLog.log("host.init", {"changes": len(changes)})
+        AuditLog.log("host.init", {"changes": len(all_changes)})
 
-        return changes
+        return all_changes
 
     @staticmethod
     def get_state() -> HostStateItem | None:
@@ -425,6 +438,19 @@ class HostOperation:
                 summary.append(f"Reverted {change.setting}")
         except HostError as e:
             logger.warning("No saved host state to restore: %s", e)
+
+        # Notify about kernel modules that were loaded but not reverted
+        module_changes = [
+            c
+            for c in repo.list_changes(include_reverted=False)
+            if c.setting == "kernel_module_load"
+        ]
+        if module_changes:
+            modules = [c.applied_value for c in module_changes]
+            summary.append(
+                f"Modules loaded by mvm: {modules}. These were left loaded. "
+                f"Unload manually with 'modprobe -r <module>' if desired."
+            )
 
         sudoers_path = Path(SUDOERS_DROP_IN_PATH)
         try:

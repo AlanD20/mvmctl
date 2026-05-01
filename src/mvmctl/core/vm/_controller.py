@@ -14,9 +14,8 @@ from mvmctl.constants import DEFAULT_SNAPSHOT_RESUME
 from mvmctl.core.vm._firecracker import FirecrackerClient
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.exceptions import MVMError
-from mvmctl.models import ConsoleInfo, VMStatus
+from mvmctl.models import VMStatus
 from mvmctl.models.vm import VMInstanceItem
-from mvmctl.services.console_relay import ConsoleRelayManager
 from mvmctl.utils._system import ProcessSignalHandler
 
 logger = logging.getLogger(__name__)
@@ -235,39 +234,6 @@ class VMController:
             client.load_snapshot(mem_in, state_in, effective_resume)
         finally:
             client.close()
-
-    # FIXME: fix
-    def attach_console(self) -> ConsoleInfo:
-        """
-        Attach to the VM's console relay.
-
-        Returns:
-            ConsoleInfo containing the socket path and VM name.
-
-        Raises:
-            MVMError: If no console relay is running for the VM.
-
-        """
-        mgr = ConsoleRelayManager()
-        name = self._vm.name
-        vm_hash = self._vm.id if self._vm.id else None
-        if not mgr.is_relay_running(name, vm_hash):
-            raise MVMError(f"No console relay running for VM '{name}'")
-
-        socket_path_str = mgr.socket_path(vm_hash if vm_hash else name)
-        return ConsoleInfo(socket_path=Path(socket_path_str), vm_name=name)
-
-    def kill_console(self) -> bool:
-        """
-        Kill the console relay for the VM.
-
-        Returns:
-            True if relay was killed, False otherwise
-
-        """
-        mgr = ConsoleRelayManager()
-        vm_hash = self._vm.id if self._vm.id else None
-        return mgr.kill_relay(self._vm.name, vm_hash)
 
 
 __all__ = ["VMController"]

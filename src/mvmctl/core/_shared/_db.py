@@ -249,7 +249,9 @@ class Database:
                 sql = migration_file.read_text()
 
                 # Take online snapshot before applying migration
-                snapshot_path = self._take_snapshot(version)
+                snapshot_path = None
+                if version > 1:
+                    snapshot_path = self._take_snapshot(version)
 
                 try:
                     conn.executescript(sql)
