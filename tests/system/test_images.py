@@ -74,6 +74,19 @@ class TestImageList:
         result = _run_mvm(mvm_binary, "image", "inspect", prefix)
         assert result.returncode == 0
 
+    def test_image_inspect_json(self, mvm_binary):
+        """Inspect an image with --json output."""
+        result = _run_mvm(mvm_binary, "image", "ls", "--json")
+        images = json.loads(result.stdout)
+        if not images:
+            pytest.skip("No cached images to inspect")
+        prefix = images[0]["id"][:6]
+        result = _run_mvm(mvm_binary, "image", "inspect", prefix, "--json")
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert "id" in data
+        assert "name" in data
+
 
 class TestImageDefaults:
     """Test image default operations."""

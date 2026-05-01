@@ -195,3 +195,26 @@ class TestNetworkLifecycle:
         )
         assert result.returncode == 0
         assert "default" in result.stdout.lower()
+
+    def test_network_list_json(self, mvm_binary, created_network):
+        """List networks in JSON format."""
+        result = _run_mvm(mvm_binary, "network", "ls", "--json")
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert isinstance(data, list)
+        assert any(n["name"] == created_network for n in data)
+
+    def test_network_remove_multiple(self, mvm_binary, unique_network_name):
+        """Remove multiple networks at once."""
+        name_a = f"{unique_network_name}-a"
+        name_b = f"{unique_network_name}-b"
+
+        _run_mvm(mvm_binary, "network", "create", name_a)
+        _run_mvm(mvm_binary, "network", "create", name_b)
+
+        try:
+            result = _run_mvm(mvm_binary, "network", "rm", name_a, name_b)
+            assert result.returncode == 0
+        finally:
+            _run_mvm(mvm_binary, "network", "rm", name_a, check=False)
+            _run_mvm(mvm_binary, "network", "rm", name_b, check=False)

@@ -2,6 +2,8 @@
 
 ## Prepare
 
+### One-time system setup
+
 ```bash
 # 1. System packages
 # Ubuntu/Debian:
@@ -13,28 +15,46 @@ sudo pacman -S --needed iproute2 iptables procps-ng kmod sudo libisoburn qemu-im
 egrep -c '(vmx|svm)' /proc/cpuinfo   # must be > 0
 sudo usermod -aG kvm $USER
 
-# 3. Init mvm
+# 3. Initialize mvm (requires sudo for first-time host setup)
 uv run mvm init --non-interactive
-# Or manually: uv run mvm host init && uv run mvm bin fetch
-
-# 4. Pre-fetch test assets
-uv run mvm kernel fetch --type official --set-default
-uv run mvm image fetch alpine-3.21
-uv run mvm image fetch ubuntu-24.04-minimal
+# Or manually: sudo mvm host init && uv run mvm bin fetch
 ```
+
+### Auto-fetch on test run
+
+The `prepare_system_env` fixture (session-scoped, autouse) automatically fetches
+any missing assets when you run the tests:
+
+- **Official kernel** — fetched if not cached
+- **Alpine 3.21 image** — fetched if not cached
+- **Ubuntu 24.04 minimal image** — fetched if not cached
+- **Firecracker binary** — latest version fetched if none cached
+
+This means you only need steps 1–3 above. Steps 4 (pre-fetching assets) is
+handled automatically. Progress messages are printed to stderr:
+
+```
+[prepare] Checking system environment...
+[prepare] No kernel cached. Fetching official kernel...
+[prepare] Image 'ubuntu-24.04-minimal' not cached. Fetching (this may take a while)...
+[prepare] System environment ready.
+```
+
+> **Note:** Asset fetches download over the network and may take several minutes
+> on the first run. Subsequent runs are fast (cache-hit).
 
 ## Run
 
 | Suite | Command | What it tests |
 |-------|---------|---------------|
-| Network | `pytest tests/system/test_network.py -v` | CRUD, inspect, iptables, bridge, --no-nat, set-default, error paths (13 tests) |
+| Network | `pytest tests/system/test_network.py -v` | CRUD, inspect (table+JSON), iptables, bridge, --no-nat, set-default, ls --json, rm multiple, error paths (15 tests) |
 | Keys | `pytest tests/system/test_keys.py -v` | CRUD (ed25519, rsa, ecdsa), add existing, export, inspect (table+JSON), set-default/clear, ls --json, error paths (15 tests) |
-| Images | `pytest tests/system/test_images.py -v` | Fetch (alpine+ubuntu), list (table/JSON/remote), inspect, set/get-default, warm, remove, fetch error (10 tests) |
+| Images | `pytest tests/system/test_images.py -v` | Fetch (alpine+ubuntu), list (table/JSON/remote), inspect (table+JSON), set/get-default, warm, remove, fetch error (11 tests) |
 | Kernel | `pytest tests/system/test_kernel.py -v` | Fetch official + set-default, list (empty/JSON), set-default, remove (6 tests) |
-| Binary | `pytest tests/system/test_bin.py -v` | List local/JSON/remote, fetch+set-default, remove by version (5 tests) |
+| Binary | `pytest tests/system/test_bin.py -v` | List local/JSON/remote (with limit), fetch+set-default, set-default by ID, remove by version (7 tests) |
 | VM Lifecycle | `pytest tests/system/test_vm_lifecycle.py -v` | Create per image, state transitions (pause/resume/stop/start/reboot), stop/reboot --force, remove running w/o force, SSH, list, remove/force-remove, duplicate reject, nonexistent error, inspect, export, cleanup --dry-run (21 tests) |
 | Host | `pytest tests/system/test_host.py -v` | Host status check (table+JSON), graceful skip if uninitialized (2 tests) |
-| Full Journeys | `pytest tests/system/test_full_journeys.py -v` | Create+SSH, network→VM, key→VM, full state chain, explicit IP, 2 VMs same net, reboot chain, SSH CLI cmd, multiple SSH keys (9 tests) |
+| Full Journeys | `pytest tests/system/test_full_journeys.py -v` | Create+SSH, network→VM, network→VM+explicit IP, key→VM, full state chain, explicit IP, 2 VMs same net, reboot chain, SSH CLI cmd, multiple SSH keys (10 tests) |
 
 ```bash
 # All system tests
@@ -61,7 +81,6 @@ System tests are black-box CLI tests via subprocess that require real hardware (
 | State transition negatives (pause paused VM, resume running VM, start running VM, stop stopped VM) | Each requires the VM to be in a specific state that's hard to guarantee in a shared, sequential test environment. These state machine violations raise exceptions in the Firecracker API — better covered by unit tests on the VMController. |
 | `vm cleanup` (actual, not `--dry-run`) | `cleanup` without `--dry-run` removes stale VMs and resources. Destructive in a shared test environment where other tests may have VMs. |
 | `vm create` with flags: `--kernel`, `--image-path`, `--kernel-path`, `--vcpus`, `--mem`, `--disk-size`, `--mac`, `--user-data`, `--cloud-init-mode`, `--nocloud-net-port`, `--user`, `--enable-pci`, `--no-console`, `--lsm-flags`, `--enable-logging`, `--enable-metrics`, `--firecracker-bin`, `--skip-cleanup` | Each flag combination would require a dedicated VM (3-30s boot time). Combinatorial explosion makes this impractical at the system level. These are better validated at the integration level (CliRunner with mocked subprocess) where flag-to-API-call mapping can be verified cheaply. |
-| `vm inspect --json` | Only table format inspect is tested. JSON format is equivalent — covered by other `--json` tests in the suite. |
 
 **Closed gaps:** `vm stop --force` ✅, `vm reboot --force` ✅, `vm rm running without --force` ✅ — all now tested in `TestVMStateOperationsIndependent`.
 
@@ -89,7 +108,7 @@ System tests are black-box CLI tests via subprocess that require real hardware (
 |-----|-----------|
 | `bin rm` by ID prefix | Requires a fetched binary with known ID. Chained dependency on `bin fetch`. |
 
-**Closed gaps:** `bin fetch --set-default` ✅, `bin rm --version` ✅ — now tested in `TestBinaryFetchAndLifecycle` (marked `@pytest.mark.slow`).
+**Closed gaps:** `bin fetch --set-default` ✅, `bin rm --version` ✅, `bin default <id>` ✅ — now tested in `TestBinaryFetchAndLifecycle` (marked `@pytest.mark.slow`).
 
 ### Image Operations
 

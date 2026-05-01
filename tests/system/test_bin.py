@@ -31,6 +31,11 @@ class TestBinLifecycle:
         result = _run_mvm(mvm_binary, "bin", "ls", "--remote")
         assert result.returncode == 0
 
+    def test_bin_list_remote_with_limit(self, mvm_binary):
+        """List remote versions with a limit."""
+        result = _run_mvm(mvm_binary, "bin", "ls", "--remote", "--limit", "5")
+        assert result.returncode == 0
+
 
 class TestBinaryFetchAndLifecycle:
     """Test Firecracker binary fetch, set-default, and remove operations."""
@@ -87,3 +92,15 @@ class TestBinaryFetchAndLifecycle:
         assert result.returncode == 0, (
             f"bin rm --version {target} failed: {result.stderr}"
         )
+
+    def test_bin_default(self, mvm_binary):
+        """Set a cached binary as default using bin default <id>."""
+        result = _run_mvm(mvm_binary, "bin", "ls", "--json")
+        import json
+
+        binaries = json.loads(result.stdout)
+        if not binaries:
+            pytest.skip("No cached binaries to set as default")
+        target_id = binaries[0]["id"][:6]
+        result = _run_mvm(mvm_binary, "bin", "default", target_id, check=False)
+        assert result.returncode == 0

@@ -8,6 +8,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -109,6 +110,138 @@ def timing_targets() -> dict[str, float]:
         "archlinux": 10.0,
         "debian-bookworm": 10.0,
     }
+
+
+@pytest.fixture(scope="session", autouse=True)
+def prepare_system_env(mvm_binary, check_system_prerequisites) -> None:
+    """Ensure required assets are cached before tests run.
+
+    Automatically fetches missing kernel, images, and Firecracker binary
+    so users don't need to run manual preparation steps.
+
+    Skips gracefully if prerequisites are not met (KVM, group, etc.)
+    or if network-dependent operations fail.
+    """
+    binary = mvm_binary
+    _print_prep("Checking system environment...")
+
+    # ── 1. Verify DB exists (mvmctl initialized) ────────────────────────
+    cache_dir = Path.home() / ".cache" / "mvmctl"
+    db_path = cache_dir / "mvmdb.db"
+    if not db_path.exists():
+        _print_prep(
+            "mvmctl not initialized. Run 'mvm init --non-interactive' first."
+        )
+        pytest.skip("mvmctl not initialized (run 'mvm init --non-interactive')")
+
+    # ── 2. Fetch official kernel if not cached ─────────────────────────
+    _print_prep("Checking kernel cache...")
+    result = subprocess.run(
+        [*binary.split(), "kernel", "ls", "--json"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={**os.environ, "NO_COLOR": "1"},
+    )
+    if result.returncode == 0:
+        kernels = json.loads(result.stdout)
+        if not kernels:
+            _print_prep("No kernel cached. Fetching official kernel...")
+            subprocess.run(
+                [
+                    *binary.split(),
+                    "kernel",
+                    "fetch",
+                    "--type",
+                    "official",
+                    "--set-default",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=300,
+                env={**os.environ, "NO_COLOR": "1"},
+                check=False,
+            )
+            _print_prep("Kernel fetch complete.")
+
+    # ── 3. Fetch required images if not cached ─────────────────────────
+    _print_prep("Checking image cache...")
+    result = subprocess.run(
+        [*binary.split(), "image", "ls", "--json"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={**os.environ, "NO_COLOR": "1"},
+    )
+    cached_images: list[str] = []
+    if result.returncode == 0:
+        cached_images = [i.get("name", "") for i in json.loads(result.stdout)]
+
+    required_images = ["alpine-3.21", "ubuntu-24.04-minimal"]
+    for img in required_images:
+        if img not in cached_images:
+            _print_prep(
+                f"Image '{img}' not cached. Fetching (this may take a while)..."
+            )
+            subprocess.run(
+                [*binary.split(), "image", "fetch", img],
+                capture_output=True,
+                text=True,
+                timeout=600,
+                env={**os.environ, "NO_COLOR": "1"},
+                check=False,
+            )
+            _print_prep(f"Image '{img}' fetch complete.")
+
+    # ── 4. Fetch Firecracker binary if none cached ────────────────────
+    _print_prep("Checking Firecracker binary cache...")
+    result = subprocess.run(
+        [*binary.split(), "bin", "ls", "--json"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={**os.environ, "NO_COLOR": "1"},
+    )
+    if result.returncode == 0:
+        binaries = json.loads(result.stdout)
+        if not binaries:
+            _print_prep("No Firecracker binary cached. Fetching latest...")
+            remote_result = subprocess.run(
+                [*binary.split(), "bin", "ls", "--remote"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env={**os.environ, "NO_COLOR": "1"},
+            )
+            if remote_result.returncode == 0:
+                versions = re.findall(r"\d+\.\d+\.\d+", remote_result.stdout)
+                if versions:
+                    target = versions[-1]
+                    _print_prep(
+                        f"Fetching Firecracker v{target} (this may take a while)..."
+                    )
+                    subprocess.run(
+                        [
+                            *binary.split(),
+                            "bin",
+                            "fetch",
+                            target,
+                            "--set-default",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=300,
+                        env={**os.environ, "NO_COLOR": "1"},
+                        check=False,
+                    )
+                    _print_prep(f"Firecracker v{target} fetch complete.")
+
+    _print_prep("System environment ready.")
+
+
+def _print_prep(msg: str) -> None:
+    """Print a prepare-step message that is visible even with pytest output capture."""
+    print(f"[prepare] {msg}", file=sys.stderr, flush=True)
 
 
 # ============================================================================
@@ -340,9 +473,3 @@ def wait_for_ssh(
         time.sleep(0.5)
 
     return False
-
-
-def strip_ansi(text: str) -> str:
-    """Remove ANSI escape codes from text."""
-    ansi_escape = re.compile(r"\x1b\[[0-9;]*m")
-    return ansi_escape.sub("", text)
