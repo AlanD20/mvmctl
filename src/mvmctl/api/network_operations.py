@@ -16,7 +16,7 @@ from mvmctl.core.network._service import NetworkService
 from mvmctl.exceptions import NetworkError
 from mvmctl.models.network import NetworkItem
 from mvmctl.utils.auditlog import AuditLog
-from mvmctl.utils.full_hash import HashGenerator
+from mvmctl.utils.crypto import HashGenerator
 from mvmctl.utils.network import NetworkUtils
 
 if TYPE_CHECKING:

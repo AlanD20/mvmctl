@@ -24,8 +24,8 @@ from mvmctl.models.network import (
     IPTablesTable,
     IPTablesWildcard,
 )
+from mvmctl.utils._system import privileged_cmd
 from mvmctl.utils.network import NetworkUtils
-from mvmctl.utils.process import privileged_cmd
 
 from ._repository import IPTablesRuleRepository
 

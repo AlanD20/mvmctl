@@ -201,7 +201,7 @@ class FirecrackerSpawner:
         self._close_filepointers()
 
         self.pid = fc_proc.pid
-        from mvmctl.utils.process_signals import ProcessSignalHandler
+        from mvmctl.utils._system import ProcessSignalHandler
 
         self.process_start_time = ProcessSignalHandler._get_process_start_time(
             fc_proc.pid

@@ -22,7 +22,7 @@ from mvmctl.core.kernel._service import KernelService
 from mvmctl.exceptions import KernelError
 from mvmctl.models.kernel import KernelFetchResult, KernelItem
 from mvmctl.utils.auditlog import AuditLog
-from mvmctl.utils.full_hash import HashGenerator
+from mvmctl.utils.crypto import HashGenerator
 
 logger = logging.getLogger(__name__)
 

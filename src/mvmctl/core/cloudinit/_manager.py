@@ -191,7 +191,7 @@ class CloudInitManager:
             ]
         )
 
-        from mvmctl.utils.process import run_cmd
+        from mvmctl.utils._system import run_cmd
 
         try:
             run_cmd(cmd, check=True)

@@ -16,6 +16,10 @@ from mvmctl.api.binary_operations import (  # noqa: F401
     BinaryOperation,
 )
 from mvmctl.api.cache_operations import CacheOperation  # noqa: F401
+from mvmctl.api.console_operations import (  # noqa: F401
+    ConsoleAttachInfo,
+    ConsoleOperation,
+)
 from mvmctl.api.host_operations import HostOperation  # noqa: F401
 from mvmctl.api.image_operations import ImageOperation  # noqa: F401
 from mvmctl.api.init_operations import (  # noqa: F401
@@ -28,6 +32,8 @@ from mvmctl.api.init_operations import (  # noqa: F401
 from mvmctl.api.inputs import (  # noqa: F401
     BinaryFetchInput,
     BinaryInput,
+    ConsoleInput,
+    ConsoleRequest,
     ImageFetchInput,
     ImageImportInput,
     ImageInput,
@@ -52,6 +58,8 @@ __all__ = [
     "BinaryOperation",
     "BinaryFetchResult",
     "CacheOperation",
+    "ConsoleAttachInfo",
+    "ConsoleOperation",
     "HostOperation",
     "ImageOperation",
     "InitOperation",

@@ -9,7 +9,7 @@ from mvmctl.core.vm._repository import VMRepository
 from mvmctl.core.vm._resolver import VMResolver
 from mvmctl.exceptions import VMNotFoundError, VMRequestError
 from mvmctl.models.vm import VMInstanceItem
-from mvmctl.utils._network_validator import NetworkValidator
+from mvmctl.utils._validators import NetworkValidator
 from mvmctl.utils.common import CommonUtils
 
 __all__ = ["VMInput", "VMRequest", "ResolvedVMInput"]

@@ -51,10 +51,9 @@ from mvmctl.models.cloudinit import CloudInitMode
 from mvmctl.models.image import ImageItem
 from mvmctl.models.kernel import KernelItem
 from mvmctl.models.network import NetworkItem
-from mvmctl.utils._network_validator import NetworkValidator
-from mvmctl.utils._vm_validator import VMValidator
+from mvmctl.utils._disk import parse_disk_size
+from mvmctl.utils._validators import NetworkValidator, VMValidator
 from mvmctl.utils.common import CacheUtils
-from mvmctl.utils.disk_size import parse_disk_size
 
 logger = logging.getLogger(__name__)
 

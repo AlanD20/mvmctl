@@ -215,7 +215,7 @@ def _warn_if_running_as_root() -> None:
     if os.environ.get("MVM_ESCALATED"):
         return
 
-    from mvmctl.utils.console import print_warning
+    from mvmctl.utils._io import print_warning
 
     print_warning(
         "Warning: running as root. Consider using the 'mvm' group instead "
@@ -299,7 +299,7 @@ def app(ctx: click.Context, verbose: bool, debug: bool) -> None:
         return
 
     _warn_if_running_as_root()
-    from mvmctl.utils.logging import setup_logging
+    from mvmctl.utils._io import setup_logging
 
     setup_logging(verbose=verbose, debug=debug)
 

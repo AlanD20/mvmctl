@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from mvmctl.core._shared import Database
 from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.exceptions import NetworkError
-from mvmctl.utils._network_validator import NetworkValidator
+from mvmctl.utils._validators import NetworkValidator
 from mvmctl.utils.network import NetworkUtils
 
 __all__ = [

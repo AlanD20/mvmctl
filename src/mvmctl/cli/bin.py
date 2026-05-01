@@ -8,15 +8,15 @@ from typing import TYPE_CHECKING, Optional
 import typer
 
 from mvmctl.api import BinaryFetchInput, BinaryInput, BinaryOperation
-from mvmctl.utils.cli import handle_errors
-from mvmctl.utils.console import (
+from mvmctl.utils._io import (
     print_error,
     print_info,
     print_success,
     print_table,
     print_warning,
 )
-from mvmctl.utils.full_hash import HashGenerator
+from mvmctl.utils.cli import handle_errors
+from mvmctl.utils.crypto import HashGenerator
 
 if TYPE_CHECKING:
     pass

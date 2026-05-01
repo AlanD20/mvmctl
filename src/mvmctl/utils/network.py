@@ -8,10 +8,9 @@ import random
 import secrets
 import string
 import subprocess
-import warnings
 from pathlib import Path
 
-from mvmctl.constants import CLI_NAME, DEFAULT_GUEST_MAC_PREFIX, bridge_name
+from mvmctl.constants import CLI_NAME, DEFAULT_GUEST_MAC_PREFIX
 from mvmctl.exceptions import NetworkError
 
 logger = logging.getLogger(__name__)
@@ -334,7 +333,7 @@ class NetworkUtils:
         Returns:
             Tuple of (has_conflict, diagnosis_string).
         """
-        from mvmctl.utils.process import privileged_cmd as _privileged_cmd
+        from mvmctl.utils._system import privileged_cmd as _privileged_cmd
 
         result = subprocess.run(
             ["iptables", "--version"],
@@ -424,7 +423,7 @@ class NetworkUtils:
     @staticmethod
     def _run_batch(commands: list[str]) -> None:
         """Execute a batch of ip commands using ip -batch mode."""
-        from mvmctl.utils.process import privileged_cmd as _privileged_cmd
+        from mvmctl.utils._system import privileged_cmd as _privileged_cmd
 
         batch = "\n".join(commands) + "\n"
         subprocess.run(
@@ -474,182 +473,3 @@ class NetworkUtils:
                 continue
             filtered.append(line)
         return "".join(filtered)
-
-
-# =====================================================================
-# DEPRECATED — Use NetworkUtils instead
-# =====================================================================
-
-
-def subnet_mask_from_subnet(subnet: str) -> str:
-    """Deprecated: Use NetworkUtils.compute_subnet_mask()."""
-    warnings.warn(
-        "subnet_mask_from_subnet is deprecated, use NetworkUtils.compute_subnet_mask()",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return NetworkUtils.compute_subnet_mask(subnet)
-
-
-def prefix_len_from_subnet(subnet: str) -> int:
-    """Deprecated: Use NetworkUtils.compute_prefix_length()."""
-    warnings.warn(
-        "prefix_len_from_subnet is deprecated, use NetworkUtils.compute_prefix_length()",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return NetworkUtils.compute_prefix_length(subnet)
-
-
-def ipv4_gateway_for_subnet(subnet: str) -> str:
-    """Deprecated: Use NetworkUtils.compute_ipv4_gateway()."""
-    warnings.warn(
-        "ipv4_gateway_for_subnet is deprecated, use NetworkUtils.compute_ipv4_gateway()",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return NetworkUtils.compute_ipv4_gateway(subnet)
-
-
-def bridge_name_for(network_name: str) -> str:
-    """Deprecated: Use NetworkUtils.compute_bridge_name()."""
-    warnings.warn(
-        "bridge_name_for is deprecated, use NetworkUtils.compute_bridge_name()",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return NetworkUtils.compute_bridge_name(network_name)
-
-
-def generate_mac() -> str:
-    """Deprecated: Use NetworkUtils.generate_mac()."""
-    warnings.warn(
-        "generate_mac is deprecated, use NetworkUtils.generate_mac()",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return NetworkUtils.generate_mac()
-
-
-def generate_tap_name(network_name: str, vm_name: str) -> str:
-    """Deprecated: Use NetworkUtils.generate_tap_name()."""
-    warnings.warn(
-        "generate_tap_name is deprecated, use NetworkUtils.generate_tap_name()",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return NetworkUtils.generate_tap_name(network_name, vm_name)
-
-
-def allocate_ip(
-    existing_ips: list[str], subnet: str, ipv4_gateway: str | None = None
-) -> str:
-    """Deprecated: Use NetworkUtils.allocate_next_ip()."""
-    warnings.warn(
-        "allocate_ip is deprecated, use NetworkUtils.allocate_next_ip()",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return NetworkUtils.allocate_next_ip(existing_ips, subnet, ipv4_gateway)
-
-
-def list_network_interfaces() -> list[str]:
-    """Deprecated: Use NetworkUtils.get_physical_interfaces()."""
-    warnings.warn(
-        "list_network_interfaces is deprecated, use NetworkUtils.get_physical_interfaces()",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return NetworkUtils.get_physical_interfaces()
-
-
-def get_default_interface() -> str | None:
-    """Deprecated: Use NetworkUtils.detect_outbound_interface()."""
-    warnings.warn(
-        "get_default_interface is deprecated, use NetworkUtils.detect_outbound_interface()",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return NetworkUtils.detect_outbound_interface()
-
-
-def bridge_exists(bridge: str | None = None) -> bool:
-    """Deprecated: Use NetworkUtils.bridge_exists()."""
-    warnings.warn(
-        "bridge_exists is deprecated, use NetworkUtils.bridge_exists()",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    effective_bridge = bridge if bridge is not None else bridge_name()
-    return NetworkUtils.bridge_exists(effective_bridge)
-
-
-def tap_exists(tap_name: str) -> bool:
-    """Deprecated: Use NetworkUtils.tap_exists()."""
-    warnings.warn(
-        "tap_exists is deprecated, use NetworkUtils.tap_exists()",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return NetworkUtils.tap_exists(tap_name)
-
-
-def chain_exists(chain: str, table: str = "filter") -> bool:
-    """Deprecated: Use NetworkUtils.chain_exists()."""
-    warnings.warn(
-        "chain_exists is deprecated, use NetworkUtils.chain_exists()",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return NetworkUtils.chain_exists(chain, table)
-
-
-def list_tuntap_devices() -> list[str]:
-    """Deprecated: Use NetworkUtils.get_tuntap_devices()."""
-    warnings.warn(
-        "list_tuntap_devices is deprecated, use NetworkUtils.get_tuntap_devices()",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return NetworkUtils.get_tuntap_devices()
-
-
-def list_bridges() -> list[str]:
-    """Deprecated: Use NetworkUtils.get_bridges()."""
-    warnings.warn(
-        "list_bridges is deprecated, use NetworkUtils.get_bridges()",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return NetworkUtils.get_bridges()
-
-
-def get_tap_devices(bridge: str | None = None) -> list[str]:
-    """Deprecated: Use NetworkUtils.get_bridge_taps()."""
-    warnings.warn(
-        "get_tap_devices is deprecated, use NetworkUtils.get_bridge_taps()",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    effective_bridge = bridge if bridge is not None else bridge_name()
-    return NetworkUtils.get_bridge_taps(effective_bridge)
-
-
-def validate_network_interface(interface: str) -> bool:
-    """Deprecated: Use NetworkUtils.ensure_interface_ready()."""
-    warnings.warn(
-        "validate_network_interface is deprecated, use NetworkUtils.ensure_interface_ready()",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return NetworkUtils.ensure_interface_ready(interface)
-
-
-def is_bridge_alive(bridge_name: str) -> bool:
-    """Deprecated: Use NetworkUtils.bridge_exists()."""
-    warnings.warn(
-        "is_bridge_alive is deprecated, use NetworkUtils.bridge_exists()",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return NetworkUtils.bridge_exists(bridge_name)

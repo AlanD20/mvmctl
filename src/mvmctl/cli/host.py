@@ -13,15 +13,15 @@ import typer
 from mvmctl.api import HostOperation
 from mvmctl.constants import MVM_UNIX_GROUP
 from mvmctl.exceptions import HostError
-from mvmctl.utils.cli import handle_errors
-from mvmctl.utils.common import CacheUtils
-from mvmctl.utils.console import (
+from mvmctl.utils._io import (
     print_error,
     print_info,
     print_success,
     print_table,
     print_warning,
 )
+from mvmctl.utils.cli import handle_errors
+from mvmctl.utils.common import CacheUtils
 from mvmctl.utils.fs import chown_to_real_user
 
 if TYPE_CHECKING:

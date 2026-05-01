@@ -9,15 +9,15 @@ from typing import TYPE_CHECKING, Optional
 import typer
 
 from mvmctl.api import VMCreateInput, VMInput, VMOperation
-from mvmctl.utils.cli import handle_errors
-from mvmctl.utils.console import (
+from mvmctl.utils._io import (
     print_inspect_header,
     print_key_value,
     print_section_header,
     print_success,
     print_table,
 )
-from mvmctl.utils.full_hash import HashGenerator
+from mvmctl.utils.cli import handle_errors
+from mvmctl.utils.crypto import HashGenerator
 
 if TYPE_CHECKING:
     from mvmctl.models.vm import VMInstanceItem

@@ -201,7 +201,7 @@ class ImageService:
         disabled_detectors: list[str] | None = None,
     ) -> Path:
         """Extract root partition from raw disk image."""
-        from mvmctl.utils.partition_detection import RootPartitionDetector
+        from mvmctl.utils._disk import RootPartitionDetector
 
         try:
             # Check if the image is a direct filesystem (superfloppy) using blkid

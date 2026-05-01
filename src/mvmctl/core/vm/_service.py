@@ -6,7 +6,7 @@ Bulk operations delegate to VMController per VM via ParallelExecutor.
 
 from __future__ import annotations
 
-from mvmctl.core._shared import Database, ParallelExecutor
+from mvmctl.core._shared import ParallelExecutor
 from mvmctl.core.vm._controller import VMController
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.models.bulk import BulkResult, BulkResultItem
@@ -19,10 +19,8 @@ class VMService:
     Handles bulk operations and delegates single-VM operations to Controller.
     """
 
-    def __init__(self, db: Database) -> None:
-        # FIXME: take vm repo instead of db
-        self._db = db
-        self._repo = VMRepository(self._db)
+    def __init__(self, repo: VMRepository) -> None:
+        self._repo = repo
         self._executor = ParallelExecutor()
 
     def stop(self, vm: VMInstanceItem, force: bool = False) -> None:

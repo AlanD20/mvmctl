@@ -10,7 +10,7 @@ from pathlib import Path
 
 from mvmctl.constants import CONST_FILE_PERMS_PRIVATE_KEY
 from mvmctl.exceptions import MVMKeyError, SSHError
-from mvmctl.utils._network_validator import NetworkValidator
+from mvmctl.utils._validators import NetworkValidator
 
 logger = logging.getLogger(__name__)
 

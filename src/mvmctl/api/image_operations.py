@@ -29,7 +29,7 @@ from mvmctl.exceptions import (
 from mvmctl.models.image import ImageItem, ImageSpec
 from mvmctl.utils.auditlog import AuditLog
 from mvmctl.utils.common import CacheUtils
-from mvmctl.utils.full_hash import HashGenerator
+from mvmctl.utils.crypto import HashGenerator
 
 logger = logging.getLogger(__name__)
 

@@ -462,7 +462,7 @@ class HttpDownload:
             else:
                 import sys
 
-                from mvmctl.utils.console import print_warning
+                from mvmctl.utils._io import print_warning
 
                 print_warning(f"Warning: No checksum available for {url}")
                 print_warning(

@@ -19,9 +19,7 @@ from mvmctl.constants import (
     IMAGE_IMPORT_FORMAT_MAP,
 )
 from mvmctl.models.image import ImageItem, ImageSpec
-from mvmctl.utils.cli import handle_errors
-from mvmctl.utils.common import CommonUtils
-from mvmctl.utils.console import (
+from mvmctl.utils._io import (
     print_error,
     print_info,
     print_inspect_header,
@@ -30,7 +28,9 @@ from mvmctl.utils.console import (
     print_success,
     print_table,
 )
-from mvmctl.utils.full_hash import HashGenerator
+from mvmctl.utils.cli import handle_errors
+from mvmctl.utils.common import CommonUtils
+from mvmctl.utils.crypto import HashGenerator
 from mvmctl.utils.progress import Spinner
 
 if TYPE_CHECKING:

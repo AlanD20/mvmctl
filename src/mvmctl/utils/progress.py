@@ -10,8 +10,6 @@ import shutil
 import sys
 import threading
 import time
-from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -154,31 +152,3 @@ class Spinner:
         self, exc_type: object, exc_val: object, exc_tb: object
     ) -> None:
         self.stop()
-
-
-def download_with_progress(
-    url: str,
-    dest: Path,
-    title: str = "Downloading",
-    expected_sha256: Optional[str] = None,
-    timeout: int = 300,
-    allow_missing_checksum: bool = False,
-    silent_missing_checksum: bool = False,
-) -> bool:
-    """Download a file with an ASCII progress bar.
-
-    .. deprecated::
-        Use :meth:`mvmctl.utils.http.HttpDownload.download_file` instead.
-    """
-    from mvmctl.utils.http import HttpDownload
-
-    return HttpDownload.download_file(
-        url=url,
-        dest=dest,
-        expected_sha256=expected_sha256,
-        timeout=timeout,
-        progress_bar=True,
-        allow_missing_checksum=allow_missing_checksum,
-        silent_missing_checksum=silent_missing_checksum,
-        title=title,
-    )

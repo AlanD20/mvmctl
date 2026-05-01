@@ -348,7 +348,7 @@ class CommonUtils:
             )
 
         # Import here to avoid circular dependency at module level
-        from mvmctl.utils._network_validator import NetworkValidator
+        from mvmctl.utils._validators import NetworkValidator
 
         if NetworkValidator.is_ip_address(name):
             raise MVMError(

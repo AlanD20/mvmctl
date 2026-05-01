@@ -1,33 +1,38 @@
-"""Plain-text console utilities — no Rich markup or ANSI codes."""
+"""Console output and logging utilities."""
 
 from __future__ import annotations
 
+import logging
+import os
 import re
 from typing import Any
+
+__all__ = [
+    "console",
+    "_PlainConsole",
+    "_strip_markup",
+    "print_table",
+    "print_error",
+    "print_success",
+    "print_warning",
+    "print_info",
+    "print_section_header",
+    "print_key_value",
+    "print_inspect_header",
+    "get_state_marker",
+    "get_combined_marker",
+    "setup_logging",
+    "get_logger",
+    "log_exception",
+]
+
+
+# ==================== Console utilities ====================
 
 
 def _strip_markup(text: str) -> str:
     """Remove Rich markup tags such as [green], [/green], [bold], [dim], etc."""
     return re.sub(r"\[/?[a-zA-Z][^\[\]]*\]", "", text)
-
-
-def format_timestamp(iso_timestamp: str | None) -> str:
-    """Format ISO timestamp to 'YYYY/MM/DD HH:MM:SS'.
-
-    .. deprecated::
-        Use :func:`mvmctl.utils.common.CommonUtils.human_readable_datetime` instead.
-    """
-    import warnings
-
-    warnings.warn(
-        "format_timestamp is deprecated — use "
-        "CommonUtils.human_readable_datetime instead",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    from mvmctl.utils.common import CommonUtils
-
-    return CommonUtils.human_readable_datetime(iso_timestamp)
 
 
 class _PlainConsole:
@@ -156,3 +161,53 @@ def get_combined_marker(is_default: bool, is_missing: bool) -> str:
         return "*  "  # Trailing space for alignment
     else:
         return "   "  # Three spaces for alignment
+
+
+# ==================== Logging utilities ====================
+
+
+def setup_logging(*, verbose: bool = False, debug: bool = False) -> None:
+    """Configure root logger level and format.
+
+    Priority (highest first):
+    1. ``debug=True``  → DEBUG
+    2. ``verbose=True`` → INFO
+    3. ``MVM_LOG_LEVEL`` env var → parsed level (default WARNING)
+
+    Args:
+        verbose: Force INFO level.
+        debug: Force DEBUG level.
+    """
+    if debug:
+        level = logging.DEBUG
+    elif verbose:
+        level = logging.INFO
+    else:
+        env_level = os.environ.get("MVM_LOG_LEVEL", "WARNING").upper()
+        level = getattr(logging, env_level, logging.WARNING)
+
+    logging.basicConfig(
+        level=level,
+        format="%(levelname)s: %(name)s: %(message)s",
+    )
+
+
+def get_logger(name: str) -> logging.Logger:
+    """Return a logger instance with the given name.
+
+    Thin wrapper around :func:`logging.getLogger` for consistency.
+    """
+    return logging.getLogger(name)
+
+
+def log_exception(logger: logging.Logger, msg: str, exc: Exception) -> None:
+    """Log an exception respecting the configured log level.
+
+    When DEBUG is enabled, logs the full traceback via
+    :meth:`logging.Logger.exception`. Otherwise logs a single-line
+    ERROR message without traceback.
+    """
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.exception("%s: %s", msg, exc)
+    else:
+        logger.error("%s: %s", msg, exc)

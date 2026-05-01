@@ -10,7 +10,7 @@ import sys
 import typer
 
 from mvmctl.api import InitOperation, InitResult
-from mvmctl.utils.console import print_info, print_success, print_warning
+from mvmctl.utils._io import print_info, print_success, print_warning
 
 init_app = typer.Typer(
     name="init",

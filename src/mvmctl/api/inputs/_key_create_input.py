@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mvmctl.exceptions import MVMKeyError
-from mvmctl.utils._key_validator import KeyValidator
+from mvmctl.utils._validators import KeyValidator
 from mvmctl.utils.common import CacheUtils
 
 __all__ = [

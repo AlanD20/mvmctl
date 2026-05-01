@@ -22,8 +22,8 @@ from mvmctl.models.network import (
     IPTablesWildcard,
     NetworkItem,
 )
+from mvmctl.utils._system import privileged_cmd as _privileged_cmd
 from mvmctl.utils.network import NetworkUtils
-from mvmctl.utils.process import privileged_cmd as _privileged_cmd
 
 if TYPE_CHECKING:
     pass

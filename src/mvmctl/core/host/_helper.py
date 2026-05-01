@@ -68,7 +68,7 @@ class HostPrivilegeHelper:
                     f"or run: newgrp {MVM_UNIX_GROUP}"
                 )
         except PrivilegeError as exc:
-            from mvmctl.utils.console import (
+            from mvmctl.utils._io import (
                 print_error,
                 print_info,
                 print_warning,

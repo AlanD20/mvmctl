@@ -10,7 +10,7 @@ import typer
 from rich.console import Console
 
 from mvmctl.exceptions import MVMError
-from mvmctl.utils.logging import get_logger, log_exception
+from mvmctl.utils._io import get_logger, log_exception
 
 _err_console = Console(stderr=True)
 

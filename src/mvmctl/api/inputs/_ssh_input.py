@@ -13,7 +13,7 @@ from mvmctl.core.key._service import KeyService
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.core.vm._resolver import VMResolver
 from mvmctl.exceptions import SSHError
-from mvmctl.utils._network_validator import NetworkValidator
+from mvmctl.utils._validators import NetworkValidator
 
 logger = logging.getLogger(__name__)
 

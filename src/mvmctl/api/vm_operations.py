@@ -10,7 +10,6 @@ It combines:
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -24,10 +23,7 @@ from mvmctl.api.inputs import (
 )
 from mvmctl.api.inputs._vm_create_input import VMCreateInput
 from mvmctl.api.inputs._vm_input import VMInput, VMRequest
-from mvmctl.constants import (
-    DEFAULT_BRIDGE_NAME,
-    MAX_VMS,
-)
+from mvmctl.constants import MAX_VMS
 from mvmctl.core._shared import Database
 from mvmctl.core._shared._guestfs import GuestfsProvisioner
 from mvmctl.core.cloudinit._provisioner import (
@@ -55,10 +51,10 @@ from mvmctl.exceptions import (
 from mvmctl.models.cloudinit import CloudInitMode
 from mvmctl.models.firecracker import FirecrackerConfig
 from mvmctl.models.vm import VMInstanceItem, VMStatus
-from mvmctl.utils.audit import log_audit
+from mvmctl.utils._system import SigtermContext
+from mvmctl.utils.auditlog import AuditLog
 from mvmctl.utils.common import CacheUtils
 from mvmctl.utils.network import NetworkUtils
-from mvmctl.utils.signals import SigtermContext
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +87,7 @@ class VMCreateContext:
 
     def __init__(self, name: str, db: Database | None = None) -> None:
         """Initialize the resolver with database and sub-resolvers."""
-        from mvmctl.utils.full_hash import HashGenerator
+        from mvmctl.utils.crypto import HashGenerator
 
         self.name = name
         created_at = datetime.now()
@@ -546,7 +542,7 @@ class VMOperation:
                     raise VMCreateError("Failed to create VM instance model")
 
                 vm_repo.upsert(vm_instance)
-                log_audit("vm.create", f"name={inputs.name}")
+                AuditLog.log("vm.create", context=f"name={inputs.name}")
             except Exception:
                 ctx.cleanup()
                 raise
@@ -554,12 +550,28 @@ class VMOperation:
     @staticmethod
     def remove(inputs: VMInput) -> None:
         """Remove one or more VMs."""
+        HostPrivilegeHelper.check_privileges("/usr/sbin/ip", "Remove VM")
+
         db = Database()
         resolver = VMRequest(inputs=inputs, db=db)
         resolved = resolver.resolve()
 
+        repo = VMRepository(db)
+
         for vm in resolved.vms:
-            remove_vm(vm.name, force=resolved.force)
+            vm_dir = CacheUtils.get_vm_dir(vm.id)
+
+            controller = VMController(vm, repo)
+            controller.stop(force=resolved.force)
+
+            VMOperation._perform_removal_cleanup(vm, vm.network_id)
+
+            # Deregister from DB and remove directory
+            repo.delete(vm.id)
+            if vm_dir.exists():
+                shutil.rmtree(vm_dir)
+
+            AuditLog.log("vm.remove", changes={"name": vm.name})
 
     @staticmethod
     def list_all() -> list[VMInstanceItem]:
@@ -583,41 +595,41 @@ class VMOperation:
     def start(inputs: VMInput) -> None:
         """Start one or more VMs."""
         resolved = VMRequest(inputs=inputs, db=Database()).resolve()
-        service = VMService(Database())
+        service = VMService(VMRepository(Database()))
         service.start_many(resolved.vms)
-        log_audit("vm.start", f"count={len(resolved.vms)}")
+        AuditLog.log("vm.start", context=f"count={len(resolved.vms)}")
 
     @staticmethod
     def stop(inputs: VMInput) -> None:
         """Stop one or more VMs."""
         resolved = VMRequest(inputs=inputs, db=Database()).resolve()
-        service = VMService(Database())
+        service = VMService(VMRepository(Database()))
         service.stop_many(resolved.vms, force=resolved.force)
-        log_audit("vm.stop", f"count={len(resolved.vms)}")
+        AuditLog.log("vm.stop", context=f"count={len(resolved.vms)}")
 
     @staticmethod
     def reboot(inputs: VMInput) -> None:
         """Reboot one or more VMs."""
         resolved = VMRequest(inputs=inputs, db=Database()).resolve()
-        service = VMService(Database())
+        service = VMService(VMRepository(Database()))
         service.reboot_many(resolved.vms, force=resolved.force)
-        log_audit("vm.reboot", f"count={len(resolved.vms)}")
+        AuditLog.log("vm.reboot", context=f"count={len(resolved.vms)}")
 
     @staticmethod
     def pause(inputs: VMInput) -> None:
         """Pause one or more VMs."""
         resolved = VMRequest(inputs=inputs, db=Database()).resolve()
-        service = VMService(Database())
+        service = VMService(VMRepository(Database()))
         service.pause_many(resolved.vms)
-        log_audit("vm.pause", f"count={len(resolved.vms)}")
+        AuditLog.log("vm.pause", context=f"count={len(resolved.vms)}")
 
     @staticmethod
     def resume(inputs: VMInput) -> None:
         """Resume one or more VMs."""
         resolved = VMRequest(inputs=inputs, db=Database()).resolve()
-        service = VMService(Database())
+        service = VMService(VMRepository(Database()))
         service.resume_many(resolved.vms)
-        log_audit("vm.resume", f"count={len(resolved.vms)}")
+        AuditLog.log("vm.resume", context=f"count={len(resolved.vms)}")
 
     @staticmethod
     def snapshot(inputs: VMInput, mem_out: Path, state_out: Path) -> None:
@@ -628,7 +640,7 @@ class VMOperation:
         vm = resolved.vms[0]
         controller = VMController(vm, VMRepository(Database()))
         controller.snapshot(mem_out, state_out)
-        log_audit("vm.snapshot", f"name={vm.name}")
+        AuditLog.log("vm.snapshot", context=f"name={vm.name}")
 
     @staticmethod
     def load_snapshot(
@@ -644,246 +656,82 @@ class VMOperation:
         vm = resolved.vms[0]
         controller = VMController(vm, VMRepository(Database()))
         controller.load_snapshot(mem_in, state_in, resume_after)
-        log_audit("vm.load_snapshot", f"name={vm.name}")
-
-    @staticmethod
-    def cleanup(
-        all_vms: bool = False, dry_run: bool = False
-    ) -> list[VMInstanceItem]:
-        """Cleanup stale or all VMs."""
-        return cleanup_vms(all_vms, dry_run)
+        AuditLog.log("vm.load_snapshot", context=f"name={vm.name}")
 
     @staticmethod
     def export(name: str) -> VMExportConfig:
         """Export a VM's configuration."""
         return export_vm_config(name)
 
+    @staticmethod
+    def _perform_removal_cleanup(
+        vm: VMInstanceItem,
+        network_id: str | None,
+    ) -> None:
+        """Clean up all VM resources: console relay, TAP device, IP lease, SSH known hosts."""
+        from mvmctl.core.network._repository import LeaseRepository
+        from mvmctl.core.network._service import NetworkService
+        from mvmctl.services.console_relay.manager import ConsoleRelayManager
+
+        def _cleanup_console() -> None:
+            if vm.relay_pid is not None and vm.id:
+                try:
+                    relay = ConsoleRelayManager(
+                        id=vm.id, path=CacheUtils.get_vm_dir(vm.id)
+                    )
+                    relay.stop()
+                except (OSError, RuntimeError) as exc:
+                    logger.warning("Failed to cleanup console relay: %s", exc)
+
+        def _cleanup_network() -> None:
+            tap_name = vm.tap_device
+            if tap_name and network_id is not None:
+                try:
+                    net_repo = NetworkRepository(Database())
+                    net_service = NetworkService(net_repo)
+                    net_service.remove_tap(tap_name, network_id=network_id)
+                except NetworkError:
+                    pass
+
+        def _cleanup_ip() -> None:
+            try:
+                if vm.id:
+                    lease_repo = LeaseRepository(Database())
+                    lease_repo.release_by_vm(vm.id)
+            except NetworkError as exc:
+                logger.warning("Failed to release network IP: %s", exc)
+
+        cleanup_tasks = [
+            _cleanup_console,
+            _cleanup_network,
+            _cleanup_ip,
+        ]
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [executor.submit(task) for task in cleanup_tasks]
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as exc:
+                    logger.debug("Cleanup task failed: %s", exc)
+
+        if vm.ipv4:
+            try:
+                import subprocess
+
+                subprocess.run(
+                    ["ssh-keygen", "-R", vm.ipv4],
+                    capture_output=True,
+                    check=False,
+                )
+            except FileNotFoundError:
+                pass
+
 
 __all__ = [
     "VMCreateContext",
     "VMOperation",
 ]
-
-
-## TO BE MIGRATED
-def _persist_failed_vm(
-    instance: VMInstanceItem, repo: VMRepository | None
-) -> None:
-    """Persist failed VM to DB. Called when skip_cleanup=True."""
-    if repo is None:
-        logger.warning("Failed to persist failed VM: repo is None")
-        return
-
-    instance.status = VMStatus.ERROR
-    try:
-        repo.upsert(instance)
-        logger.info(
-            "Persisted failed VM '%s' to database for later cleanup",
-            instance.name,
-        )
-    except Exception as exc:
-        logger.warning(
-            "Failed to persist failed VM '%s': %s", instance.name, exc
-        )
-
-
-def _vm_shutdown(
-    pid: int | None, force: bool, api_socket_path: Path | None
-) -> None:
-    """Shutdown a VM process."""
-    from mvmctl.utils.process_signals import ProcessSignalHandler
-
-    if pid is None:
-        return
-
-    handler = ProcessSignalHandler(pid)
-
-    if force:
-        handler.kill()
-        return
-
-    if api_socket_path:
-        try:
-            from mvmctl.core.vm._firecracker import FirecrackerClient
-
-            client = FirecrackerClient(Path(api_socket_path))
-            client.send_ctrl_alt_del()
-            client.close()
-            if handler.graceful_shutdown(pre_signal_hook=lambda: False):
-                return
-        except Exception:
-            pass
-
-    handler.graceful_shutdown()
-
-
-def _vm_wait_and_record_exit(pid: int | None, vm_dir: Path) -> None:
-    """Wait for VM process to exit and record exit code."""
-    from mvmctl.constants import (
-        CONST_SIGNAL_EXIT_CODE_BASE,
-        DEFAULT_FC_EXITCODE_FILENAME,
-    )
-
-    if pid is None:
-        return
-
-    try:
-        _, status = os.waitpid(pid, os.WNOHANG)
-        exit_code_file = vm_dir / DEFAULT_FC_EXITCODE_FILENAME
-        if os.WIFEXITED(status):
-            exit_code = os.WEXITSTATUS(status)
-        elif os.WIFSIGNALED(status):
-            exit_code = CONST_SIGNAL_EXIT_CODE_BASE + os.WTERMSIG(status)
-        else:
-            return
-        try:
-            exit_code_file.write_text(str(exit_code))
-        except OSError as exc:
-            logger.debug("Failed to write exit code: %s", exc)
-    except (ChildProcessError, OSError):
-        pass
-
-
-def _cleanup_ssh_known_hosts(ipv4: str) -> None:
-    """Remove VM from SSH known_hosts file."""
-    try:
-        import subprocess
-
-        subprocess.run(
-            ["ssh-keygen", "-R", ipv4], capture_output=True, check=False
-        )
-    except FileNotFoundError:
-        pass
-
-
-def _perform_removal_cleanup(
-    vm: VMInstanceItem,
-    bridge: str,
-    network_id: str,
-    fast: bool = False,
-) -> None:
-    """Perform all cleanup steps for VM removal."""
-    from mvmctl.core.network._repository import LeaseRepository
-    from mvmctl.core.network._service import NetworkService
-    from mvmctl.services.console_relay.manager import ConsoleRelayManager
-
-    def _cleanup_console() -> None:
-        if vm.relay_pid is not None and vm.id:
-            try:
-                relay = ConsoleRelayManager(
-                    id=vm.id, path=CacheUtils.get_vm_dir(vm.id)
-                )
-                relay.stop()
-            except (OSError, RuntimeError) as exc:
-                logger.warning("Failed to cleanup console relay: %s", exc)
-
-    def _cleanup_network() -> None:
-        tap_name = vm.tap_device
-        if tap_name:
-            try:
-                net_repo = NetworkRepository(Database())
-                net_service = NetworkService(net_repo)
-                net_service.remove_tap(tap_name, network_id=network_id)
-            except NetworkError:
-                pass
-
-    def _cleanup_ip() -> None:
-        try:
-            if vm.id:
-                lease_repo = LeaseRepository(Database())
-                lease_repo.release_by_vm(vm.id)
-        except NetworkError as exc:
-            logger.warning("Failed to release network IP: %s", exc)
-
-    cleanup_tasks = [
-        _cleanup_console,
-        _cleanup_network,
-        _cleanup_ip,
-    ]
-
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = [executor.submit(task) for task in cleanup_tasks]
-        for future in as_completed(futures):
-            try:
-                future.result()
-            except Exception as exc:
-                logger.debug("Cleanup task failed: %s", exc)
-
-    if not fast and vm.ipv4:
-        _cleanup_ssh_known_hosts(vm.ipv4)
-
-
-def _perform_removal_deregister(
-    vm: VMInstanceItem,
-    vm_dir: Path,
-    fast: bool = False,
-) -> None:
-    """Deregister VM from DB and remove directory."""
-    db = Database()
-    repo = VMRepository(db)
-    repo.delete(vm.id)
-
-    if vm_dir.exists():
-        shutil.rmtree(vm_dir)
-
-
-def remove_vm(
-    name: str,
-    force: bool = False,
-    fast: bool = False,
-) -> None:
-    """Remove a VM and clean up all associated resources."""
-    HostPrivilegeHelper.check_privileges("/usr/sbin/ip", f"remove VM '{name}'")
-
-    db = Database()
-    repo = VMRepository(db)
-    vm = repo.get_by_name(name)
-    if not vm:
-        raise VMNotFoundError(f"VM '{name}' not found")
-
-    vm_dir = CacheUtils.get_vm_dir(vm.id)
-
-    # Get network info
-    net_repo = NetworkRepository(db)
-    db_net = net_repo.get(vm.network_id) if vm.network_id else None
-    bridge = db_net.bridge if db_net else DEFAULT_BRIDGE_NAME
-
-    # Stop VM
-    controller = VMController(vm, repo)
-    controller.stop(force=force)
-
-    # Cleanup
-    _perform_removal_cleanup(vm, bridge, vm.network_id, fast=fast)
-    _perform_removal_deregister(vm, vm_dir, fast=fast)
-
-    log_audit("vm.remove", f"name={name}")
-
-
-def cleanup_vms(
-    all_vms: bool = False,
-    dry_run: bool = False,
-) -> list[VMInstanceItem]:
-    """Stop and remove stale or all VMs."""
-    HostPrivilegeHelper.check_privileges("/usr/sbin/ip", "cleanup VMs")
-
-    db = Database()
-    repo = VMRepository(db)
-    vms = repo.list_all()
-
-    targets = (
-        vms if all_vms else [v for v in vms if v.status != VMStatus.RUNNING]
-    )
-
-    if dry_run or not targets:
-        return targets
-
-    for vm in targets:
-        try:
-            remove_vm(vm.name, force=True, fast=True)
-        except Exception as exc:
-            logger.warning("Failed to cleanup VM %s: %s", vm.name, exc)
-
-    return targets
 
 
 def export_vm_config(name: str) -> VMExportConfig:
