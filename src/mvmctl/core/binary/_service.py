@@ -1,4 +1,5 @@
-"""Binary service — stateless operations coordinator.
+"""
+Binary service — stateless operations coordinator.
 
 Handles download, list, remove, and path resolution for Firecracker binaries.
 """
@@ -8,7 +9,7 @@ from __future__ import annotations
 import logging
 import stat
 import tarfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from mvmctl.constants import (
@@ -40,11 +41,13 @@ class BinaryService:
         self._repo = repo
 
     def list_local(self, verify: bool = True) -> list[BinaryItem]:
-        """List all binaries, syncing is_present flag with filesystem.
+        """
+        List all binaries, syncing is_present flag with filesystem.
 
         Args:
             verify: If True (default), check filesystem and update DB.
                    If False, return DB records as-is.
+
         """
         binaries = self._repo.list_all()
         if not verify:
@@ -67,13 +70,15 @@ class BinaryService:
 
     @staticmethod
     def list_remote(limit: int | None = None) -> list[str]:
-        """Fetch Firecracker release versions from GitHub.
+        """
+        Fetch Firecracker release versions from GitHub.
 
         Args:
             limit: Maximum number of versions to return. Uses default if None.
 
         Returns:
             List of version strings sorted by semver (newest first).
+
         """
         effective_limit = (
             limit if limit is not None else DEFAULT_REMOTE_VERSION_LIMIT
@@ -104,13 +109,15 @@ class BinaryService:
 
     @staticmethod
     def _semver_key(v: str) -> tuple[int, ...]:
-        """Convert a semver string to a sortable tuple of integers.
+        """
+        Convert a semver string to a sortable tuple of integers.
 
         Args:
             v: Version string like "1.15.0".
 
         Returns:
             Tuple of integers for sorting. Falls back to (0,) on parse failure.
+
         """
         try:
             return tuple(int(x) for x in v.split("."))
@@ -119,7 +126,8 @@ class BinaryService:
 
     @staticmethod
     def download_firecracker(version: str, bin_dir: Path) -> list[BinaryItem]:
-        """Download firecracker + jailer for version, return as BinaryItem list.
+        """
+        Download firecracker + jailer for version, return as BinaryItem list.
 
         1. Normalize version (strip 'v' prefix)
         2. Resolve bin_dir
@@ -140,6 +148,7 @@ class BinaryService:
 
         Raises:
             BinaryError: If download or extraction fails.
+
         """
         normalized_version = BinaryService._normalize_version(version)
         d = CacheUtils.resolve_dir(bin_dir)
@@ -228,7 +237,8 @@ class BinaryService:
         ]
 
     def remove(self, binary: BinaryItem, *, force: bool = False) -> BinaryItem:
-        """Remove a specific binary by item.
+        """
+        Remove a specific binary by item.
 
         Delegates to BinaryController for VM reference checks and
         soft/hard delete logic.
@@ -239,6 +249,7 @@ class BinaryService:
 
         Returns:
             The removed BinaryItem.
+
         """
         from mvmctl.core.binary._controller import BinaryController
 
@@ -249,7 +260,8 @@ class BinaryService:
     def remove_many(
         self, binaries: list[BinaryItem], *, force: bool = False
     ) -> list[BinaryItem]:
-        """Remove multiple binaries.
+        """
+        Remove multiple binaries.
 
         Args:
             binaries: List of BinaryItem to remove.
@@ -257,6 +269,7 @@ class BinaryService:
 
         Returns:
             The removed BinaryItem list.
+
         """
         deleted: list[BinaryItem] = []
         for binary in binaries:
@@ -271,7 +284,8 @@ class BinaryService:
 
     @staticmethod
     def _parse_version_string(name: str, prefix: str) -> str | None:
-        """Extract the version string from a binary filename.
+        """
+        Extract the version string from a binary filename.
 
         Given a filename like ``firecracker-v1.2.3`` and the prefix
         ``firecracker-v``, returns ``"1.2.3"``.  Returns *None* when
@@ -313,7 +327,8 @@ class BinaryService:
         *,
         resolve_ci_version: bool = True,
     ) -> BinaryItem:
-        """Create a single BinaryItem instance.
+        """
+        Create a single BinaryItem instance.
 
         Args:
             name: Binary name, e.g. "firecracker" or "jailer".
@@ -324,11 +339,12 @@ class BinaryService:
 
         Returns:
             A BinaryItem with generated ID and metadata.
+
         """
         ci_ver = (
             BinaryService._ci_version(version) if resolve_ci_version else None
         )
-        now = datetime.now(tz=timezone.utc).isoformat()
+        now = datetime.now(tz=UTC).isoformat()
 
         binary_id = HashGenerator.binary(path, name, version)
 

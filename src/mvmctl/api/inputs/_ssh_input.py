@@ -60,7 +60,8 @@ class SSHRequest:
         )
 
     def _resolve_target(self) -> str:
-        """Resolve target to an IP address.
+        """
+        Resolve target to an IP address.
 
         Resolution order:
         1. If --ip provided, use directly
@@ -92,7 +93,8 @@ class SSHRequest:
         return vm.ipv4
 
     def _resolve_user(self) -> str:
-        """Resolve SSH user.
+        """
+        Resolve SSH user.
 
         If user is provided, use it. Otherwise fall back to DEFAULT_VM_SSH_USER.
         """
@@ -103,7 +105,8 @@ class SSHRequest:
         return DEFAULT_VM_SSH_USER
 
     def _resolve_key(self) -> Path | None:
-        """Resolve SSH private key path via the key domain.
+        """
+        Resolve SSH private key path via the key domain.
 
         Resolution order:
         1. If --key provided:

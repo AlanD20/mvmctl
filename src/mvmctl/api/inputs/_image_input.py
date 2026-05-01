@@ -50,13 +50,15 @@ class ImageRequest:
         return self._result
 
     def resolve(self) -> ResolvedImageInput:
-        """Resolve identifiers to ImageItem records from DB.
+        """
+        Resolve identifiers to ImageItem records from DB.
 
         Returns:
             ResolvedImageInput with resolved image records.
 
         Raises:
             ImageNotFoundError: If any identifier cannot be resolved.
+
         """
         identifiers = self._inputs.id + self._inputs.os_slug
 

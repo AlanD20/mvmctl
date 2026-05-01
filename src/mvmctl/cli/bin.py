@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import typer
 
@@ -156,7 +156,7 @@ def bin_fetch(
 )
 @handle_errors
 def bin_rm(
-    identifiers: Optional[list[str]] = typer.Argument(
+    identifiers: list[str] | None = typer.Argument(
         None, help="Binary ID(s) to remove (6-char prefix accepted)"
     ),
     version: str = typer.Option(

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -45,7 +45,8 @@ class ImageAcquireResult:
 
 
 class ImageOperation:
-    """Orchestration layer for image operations.
+    """
+    Orchestration layer for image operations.
 
     All methods are @staticmethod — they take Input classes as arguments,
     create Request/Resolved internally, and orchestrate across core modules.
@@ -57,7 +58,8 @@ class ImageOperation:
         *,
         phase_callback: Callable[[str], None] | None = None,
     ) -> ImageAcquireResult:
-        """Fetch image from remote URL, handle partition detection/retry, persist to DB.
+        """
+        Fetch image from remote URL, handle partition detection/retry, persist to DB.
 
         Args:
             inputs: ImageFetchInput containing spec, output_dir, force, partition,
@@ -68,6 +70,7 @@ class ImageOperation:
 
         Raises:
             ImageError: If fetch fails or partition detection fails (when no_prompt).
+
         """
         from mvmctl.core.binary._service import BinaryService
         from mvmctl.core.image._service import ImageService
@@ -103,7 +106,7 @@ class ImageOperation:
             ci_version = default_firecracker.ci_version
 
         # Generate image ID
-        timestamp = datetime.now(tz=timezone.utc).isoformat()
+        timestamp = datetime.now(tz=UTC).isoformat()
         image_id = HashGenerator.image(spec.id, spec.source, timestamp)
         image_service = ImageService(repo)
 
@@ -155,7 +158,8 @@ class ImageOperation:
 
     @staticmethod
     def import_(inputs: ImageImportInput) -> ImageAcquireResult:
-        """Import local image file, convert, persist to DB.
+        """
+        Import local image file, convert, persist to DB.
 
         Args:
             inputs: ImageImportInput containing name, source_path, format,
@@ -166,6 +170,7 @@ class ImageOperation:
 
         Raises:
             ImageError: If import fails or partition detection fails.
+
         """
         from mvmctl.core.image._service import ImageService
 
@@ -213,7 +218,7 @@ class ImageOperation:
                 return ImageAcquireResult(result=existing_image)
 
         # Generate image ID
-        timestamp = datetime.now(tz=timezone.utc).isoformat()
+        timestamp = datetime.now(tz=UTC).isoformat()
         image_id = HashGenerator.image(
             spec.id, str(resolved.source_path), timestamp
         )
@@ -256,7 +261,8 @@ class ImageOperation:
 
     @staticmethod
     def remove(inputs: ImageInput, force: bool = False) -> None:
-        """Remove image by ID prefix.
+        """
+        Remove image by ID prefix.
 
         Args:
             inputs: ImageInput with id_prefix identifiers.
@@ -264,6 +270,7 @@ class ImageOperation:
 
         Raises:
             ImageError: If image not found or referenced by VMs.
+
         """
         from mvmctl.api.inputs._image_input import ImageRequest
         from mvmctl.core.image._service import ImageService
@@ -279,7 +286,8 @@ class ImageOperation:
     def list_(
         inputs: ImageInput | None = None, *, remote: bool = False
     ) -> list[ImageItem] | list[ImageSpec]:
-        """List images.
+        """
+        List images.
 
         Args:
             inputs: Optional ImageInput with identifiers to filter.
@@ -288,6 +296,7 @@ class ImageOperation:
 
         Returns:
             List of ImageItem (local) or ImageSpec (remote).
+
         """
         from mvmctl.core._shared import Database
         from mvmctl.core.binary._service import BinaryService
@@ -326,7 +335,8 @@ class ImageOperation:
 
     @staticmethod
     def get(inputs: ImageInput) -> ImageItem:
-        """Get a single image by ID prefix or OS slug.
+        """
+        Get a single image by ID prefix or OS slug.
 
         Args:
             inputs: ImageInput with id_prefix or os_slug identifiers.
@@ -336,6 +346,7 @@ class ImageOperation:
 
         Raises:
             ImageError: If image not found or ambiguous.
+
         """
         from mvmctl.api.inputs._image_input import ImageRequest
 
@@ -351,7 +362,8 @@ class ImageOperation:
 
     @staticmethod
     def _image_to_dict(img: ImageItem) -> dict[str, Any]:
-        """Convert ImageItem to dictionary for JSON output.
+        """
+        Convert ImageItem to dictionary for JSON output.
 
         Includes every field from the model (except deleted_at).
         """
@@ -379,7 +391,8 @@ class ImageOperation:
     def inspect(
         inputs: ImageInput, is_json: bool = False
     ) -> ImageItem | dict[str, Any]:
-        """Inspect an image with enriched data.
+        """
+        Inspect an image with enriched data.
 
         Args:
             inputs: ImageInput with id_prefix or os_slug identifiers.
@@ -387,6 +400,7 @@ class ImageOperation:
 
         Returns:
             ImageItem or dict representation depending on is_json.
+
         """
         image_item = ImageOperation.get(inputs)
         if is_json:
@@ -395,10 +409,12 @@ class ImageOperation:
 
     @staticmethod
     def set_default(inputs: ImageInput) -> None:
-        """Set an image as the default.
+        """
+        Set an image as the default.
 
         Args:
             inputs: ImageInput with id_prefix or os_slug identifiers.
+
         """
         from mvmctl.api.inputs._image_input import ImageRequest
 
@@ -418,7 +434,8 @@ class ImageOperation:
 
     @staticmethod
     def warm(inputs: ImageInput) -> list[Path]:
-        """Pre-decompress images to ready pool for fast VM creation.
+        """
+        Pre-decompress images to ready pool for fast VM creation.
 
         This ensures images are decompressed in tmpfs/RAM ahead of time,
         so VM creation can use fast copy instead of waiting for decompression.
@@ -431,6 +448,7 @@ class ImageOperation:
 
         Raises:
             ImageError: If any image is not found or warming fails.
+
         """
         from mvmctl.api.inputs._image_input import ImageRequest
         from mvmctl.core.image._service import ImageService
@@ -452,7 +470,8 @@ class ImageOperation:
         images_dir: Path,
         repo: ImageRepository,
     ) -> ImageItem | None:
-        """Check database for an existing image for this spec.
+        """
+        Check database for an existing image for this spec.
 
         Args:
             spec: ImageSpec with id attribute.
@@ -461,6 +480,7 @@ class ImageOperation:
 
         Returns:
             The existing ImageItem if found on disk, otherwise None.
+
         """
         item = repo.get_by_os_slug(spec.id)
         if item is None:

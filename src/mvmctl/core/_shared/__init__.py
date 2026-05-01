@@ -1,4 +1,5 @@
-"""Shared infrastructure for core domains.
+"""
+Shared infrastructure for core domains.
 
 All public infrastructure classes are re-exported here so consumers can
 import from the package level rather than relying on internal file layout::

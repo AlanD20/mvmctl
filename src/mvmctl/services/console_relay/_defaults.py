@@ -1,4 +1,5 @@
-"""Console relay service defaults.
+"""
+Console relay service defaults.
 
 These constants are specific to the console relay service and are used
 by both the manager (manager.py) and the standalone process (process.py).

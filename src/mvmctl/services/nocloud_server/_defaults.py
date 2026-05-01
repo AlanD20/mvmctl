@@ -1,4 +1,5 @@
-"""NoCloud server service defaults.
+"""
+NoCloud server service defaults.
 
 These constants are specific to the NoCloud server service and are used
 by both the manager (manager.py) and the standalone process (process.py).

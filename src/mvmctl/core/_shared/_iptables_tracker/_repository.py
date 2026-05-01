@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from mvmctl.core._shared._db import Database
 from mvmctl.models.network import (
@@ -102,7 +102,8 @@ class IPTablesRuleRepository:
         return [self._row_to_item(row) for row in rows]
 
     def insert(self, rule: IPTablesRuleItem) -> IPTablesRuleItem:
-        """Insert a new iptables rule record.
+        """
+        Insert a new iptables rule record.
 
         Returns the rule with the generated id populated.
         """
@@ -131,7 +132,7 @@ class IPTablesRuleRepository:
                     rule.comment_tag,
                     rule.command_string,
                     rule.created_at
-                    or datetime.now(tz=timezone.utc).isoformat(),
+                    or datetime.now(tz=UTC).isoformat(),
                     int(rule.is_active),
                 ),
             )
@@ -157,7 +158,8 @@ class IPTablesRuleRepository:
             )
 
     def delete_by_network_id(self, network_id: str) -> int:
-        """Delete all iptables rules for a network (hard delete).
+        """
+        Delete all iptables rules for a network (hard delete).
 
         Note: CASCADE delete on networks table also handles this.
         Returns number of rows deleted.
@@ -170,13 +172,15 @@ class IPTablesRuleRepository:
         return cursor.rowcount
 
     def delete_inactive(self) -> int:
-        """Hard delete all inactive iptables rules (is_active=0).
+        """
+        Hard delete all inactive iptables rules (is_active=0).
 
         This is a maintenance operation to remove soft-deleted records
         that are no longer needed for audit purposes.
 
         Returns:
             Number of records permanently deleted.
+
         """
         with self._db.connect() as conn:
             cursor = conn.execute(
@@ -187,7 +191,8 @@ class IPTablesRuleRepository:
     def mark_deleted_by_table_chain_name(
         self, table_name: IPTablesTable, chain_name: IPTablesChain
     ) -> int:
-        """Soft delete all active rules for a specific chain.
+        """
+        Soft delete all active rules for a specific chain.
 
         Marks all rules with is_active=1 for the given table/chain as is_active=0.
         Returns the number of rules marked as deleted.
@@ -215,7 +220,8 @@ class IPTablesRuleRepository:
         sport: int,
         dport: int,
     ) -> IPTablesRuleItem | None:
-        """Find an iptables rule by its unique attributes.
+        """
+        Find an iptables rule by its unique attributes.
 
         Returns the rule if found, None otherwise.
         """

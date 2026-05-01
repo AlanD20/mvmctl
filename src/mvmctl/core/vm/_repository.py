@@ -252,13 +252,15 @@ class VMRepository:
             conn.execute("DELETE FROM vm_instances WHERE id = ?", (vm_id,))
 
     def get_by_image_ids(self, image_ids: list[str]) -> list[VMInstanceItem]:
-        """Return all VMs referencing any of the given image IDs.
+        """
+        Return all VMs referencing any of the given image IDs.
 
         Args:
             image_ids: List of full image IDs to query.
 
         Returns:
             List of VMInstanceItem records.
+
         """
         if not image_ids:
             return []
@@ -269,7 +271,8 @@ class VMRepository:
         return [VMInstanceItem(**dict(row)) for row in rows]
 
     def delete_many(self, vm_ids: list[str]) -> int:
-        """Delete multiple VMs by ID.
+        """
+        Delete multiple VMs by ID.
 
         Uses SQL-level DELETE WHERE id IN (...) for efficiency.
 
@@ -278,6 +281,7 @@ class VMRepository:
 
         Returns:
             Number of rows deleted.
+
         """
         if not vm_ids:
             return 0

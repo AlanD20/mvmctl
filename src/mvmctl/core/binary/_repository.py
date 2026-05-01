@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC
+
 from mvmctl.core._shared import Database
 from mvmctl.models.binary import BinaryItem
 from mvmctl.models.vm import VMInstanceItem
@@ -148,9 +150,9 @@ class BinaryRepository:
 
     def soft_delete(self, binary_id: str) -> None:
         """Soft-delete a binary by setting deleted_at and is_present=0."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        now = datetime.now(tz=timezone.utc).isoformat()
+        now = datetime.now(tz=UTC).isoformat()
         with self._db.connect() as conn:
             conn.execute(
                 "UPDATE binaries SET deleted_at = ?, is_present = 0 WHERE id = ?",
@@ -158,13 +160,15 @@ class BinaryRepository:
             )
 
     def query_vms_by_binary(self, binary_id: str) -> list[VMInstanceItem]:
-        """Return all VMs that reference the given binary ID.
+        """
+        Return all VMs that reference the given binary ID.
 
         Args:
             binary_id: Full binary ID to query.
 
         Returns:
             List of VMInstanceItem records referencing this binary.
+
         """
         with self._db.connect() as conn:
             rows = conn.execute(

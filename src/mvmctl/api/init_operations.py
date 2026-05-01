@@ -38,7 +38,8 @@ class InitResult:
 
 
 class InitOperation:
-    """Orchestration layer for the mvm init wizard.
+    """
+    Orchestration layer for the mvm init wizard.
 
     Sequences local-state → host → cache → binary setup in order.
     """
@@ -220,7 +221,8 @@ class InitOperation:
         sudo_completed: bool = False,
         download_version: str | None = None,
     ) -> InitResult:
-        """Run the init wizard steps in sequence.
+        """
+        Run the init wizard steps in sequence.
 
         Args:
             skip_host: Skip the host privilege-setup step.
@@ -235,6 +237,7 @@ class InitOperation:
             interaction, the corresponding InitStepResult has
             ``needs_interaction=True`` and the caller should act on it
             before calling ``run()`` again.
+
         """
         steps: list[InitStepResult] = []
 

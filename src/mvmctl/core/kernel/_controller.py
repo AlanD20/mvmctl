@@ -9,11 +9,13 @@ from mvmctl.models.kernel import KernelItem
 
 
 class KernelController:
-    """Stateful kernel controller — bound to a single kernel instance.
+    """
+    Stateful kernel controller — bound to a single kernel instance.
 
     Args:
         entity: KernelItem or string identifier (ID prefix) to resolve.
         repo: KernelRepository for DB operations.
+
     """
 
     def __init__(
@@ -35,7 +37,8 @@ class KernelController:
         self._repo.set_default(self._kernel.id)
 
     def remove(self, *, force: bool = False) -> None:
-        """Remove this kernel from disk and database.
+        """
+        Remove this kernel from disk and database.
 
         Hard-deletes when no VMs reference the kernel.
         Soft-deletes only when VMs still reference it (to preserve history).
@@ -45,6 +48,7 @@ class KernelController:
 
         Raises:
             KernelError: If kernel is referenced by VMs and force is False.
+
         """
 
         vms = self._repo.query_vms_by_kernel(self._kernel.id)

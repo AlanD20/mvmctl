@@ -1,4 +1,5 @@
-"""SSH key management using database storage.
+"""
+SSH key management using database storage.
 
 This module handles SSH key lifecycle operations for a specific key instance.
 For stateless key operations, use KeyService.
@@ -20,7 +21,8 @@ if TYPE_CHECKING:
 
 
 class KeyController:
-    """Manages SSH key lifecycle operations for a specific key.
+    """
+    Manages SSH key lifecycle operations for a specific key.
 
     This class handles SSH key operations bound to a specific key instance.
     For stateless operations (creating new keys, listing all keys, etc.),
@@ -32,6 +34,7 @@ class KeyController:
 
     Raises:
         KeyNotFoundError: If the key cannot be resolved.
+
     """
 
     def __init__(self, entity: str | SSHKeyItem, repo: KeyRepository) -> None:
@@ -58,7 +61,8 @@ class KeyController:
         return self._key
 
     def remove(self) -> None:
-        """Remove the resolved key from database only.
+        """
+        Remove the resolved key from database only.
 
         File cleanup is handled by the orchestration layer.
         """
@@ -67,7 +71,8 @@ class KeyController:
     def export(
         self, destination: Path, *, keys_dir: Path, overwrite: bool = False
     ) -> tuple[Path, Path]:
-        """Export the keypair to a destination directory.
+        """
+        Export the keypair to a destination directory.
 
         Args:
             destination: Destination directory (required, must be explicit).
@@ -76,6 +81,7 @@ class KeyController:
 
         Raises:
             KeyExportError: If source key files not found or destination files exist.
+
         """
         from mvmctl.exceptions import KeyExportError
 

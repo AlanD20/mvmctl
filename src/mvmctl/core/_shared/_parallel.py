@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Callable, TypeVar
+from typing import TypeVar
 
 T = TypeVar("T")
 R = TypeVar("R")
 
 
 class ParallelExecutor:
-    """Reusable parallel execution with batching.
+    """
+    Reusable parallel execution with batching.
 
     Sequential mode: fail-fast on first error.
     Parallel mode: process all items, collect errors, continue on failure.
@@ -24,7 +26,8 @@ class ParallelExecutor:
         max_workers: int | None = None,
         batch_size: int | None = None,
     ) -> list[tuple[T, R | Exception]]:
-        """Execute func on each item.
+        """
+        Execute func on each item.
 
         Args:
             items: Items to process.
@@ -38,6 +41,7 @@ class ParallelExecutor:
             List of (item, result_or_error) tuples.
             - Sequential: stops on first error (fail-fast).
             - Parallel: processes all items, collects all errors.
+
         """
         if parallel:
             import os

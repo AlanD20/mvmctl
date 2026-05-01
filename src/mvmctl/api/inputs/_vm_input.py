@@ -17,7 +17,8 @@ __all__ = ["VMInput", "VMRequest", "ResolvedVMInput"]
 
 @dataclass
 class VMInput:
-    """Input for operations on existing VMs.
+    """
+    Input for operations on existing VMs.
 
     Identifiers can be any of: VM ID, VM name, guest MAC address,
     or guest IP address. The resolver auto-detects the type.
@@ -38,7 +39,8 @@ class ResolvedVMInput:
 
 @dataclass
 class VMRequest:
-    """Request to resolve a VM by name, ID, IP, or MAC.
+    """
+    Request to resolve a VM by name, ID, IP, or MAC.
 
     This is a generic request class for operations on existing VMs
     (start, stop, remove, etc.) that require resolving the VM first.
@@ -61,7 +63,8 @@ class VMRequest:
         return self._result
 
     def resolve(self) -> ResolvedVMInput:
-        """Resolve the VM identifier to a VMInstanceItem.
+        """
+        Resolve the VM identifier to a VMInstanceItem.
 
         Args:
             db: Optional Database instance
@@ -71,6 +74,7 @@ class VMRequest:
 
         Raises:
             VMNotFoundError: If VM cannot be found
+
         """
 
         self._validate_identifiers()
@@ -98,10 +102,12 @@ class VMRequest:
         )
 
     def _validate_identifiers(self) -> None:
-        """Validate each identifier based on detected type.
+        """
+        Validate each identifier based on detected type.
 
         Raises:
             VMRequestError: If any identifier fails validation.
+
         """
         for identifier in self._inputs.identifiers:
             if self._is_mac(identifier):

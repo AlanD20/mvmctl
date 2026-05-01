@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 _factories: dict[str, Callable[[], type]] = {}
 
 
 def register(name: str, factory: Callable[[], type]) -> None:
-    """Register a resolver by name.
+    """
+    Register a resolver by name.
 
     factory is a zero-argument callable that returns the resolver CLASS.
     Using a lambda delays the actual import until call time.

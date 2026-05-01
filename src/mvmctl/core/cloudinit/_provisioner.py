@@ -81,13 +81,15 @@ class CloudInitProvisioner:
         self._manager = CloudInitManager(config)
 
     def provision(self) -> CloudInitProvisionResult:
-        """Provision cloud-init based on configuration.
+        """
+        Provision cloud-init based on configuration.
 
         Args:
             config: CloudInitProvisionConfig containing all provisioning parameters.
 
         Returns:
             CloudInitProvisionResult with what was created (iso path, nocloud url, etc.).
+
         """
         if self._config.mode == CloudInitMode.OFF:
             return self._provision_off()

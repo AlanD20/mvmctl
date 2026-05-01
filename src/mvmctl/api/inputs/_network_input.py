@@ -19,7 +19,8 @@ __all__ = ["NetworkInput", "NetworkRequest", "ResolvedNetworkInput"]
 
 @dataclass
 class NetworkInput:
-    """Input model for identifying existing networks.
+    """
+    Input model for identifying existing networks.
 
     Used for operations on existing networks (remove, get, inspect, set-default).
     Provides identifiers (name or id) to resolve the network from DB.
@@ -33,7 +34,8 @@ class NetworkInput:
 
 @dataclass(frozen=True)
 class ResolvedNetworkInput:
-    """Immutable resolved network request — contains resolved NetworkItem records.
+    """
+    Immutable resolved network request — contains resolved NetworkItem records.
 
     These records are guaranteed to exist in the DB, making them safe to operate on.
     """
@@ -44,7 +46,8 @@ class ResolvedNetworkInput:
 
 
 class NetworkRequest:
-    """Resolve network identifiers to DB records and validate.
+    """
+    Resolve network identifiers to DB records and validate.
 
     Takes NetworkInput (names/ids) and resolves them to NetworkItem records
     using NetworkResolver. Calls ensure_validate() after resolution.
@@ -68,13 +71,15 @@ class NetworkRequest:
         return self._result
 
     def resolve(self) -> ResolvedNetworkInput:
-        """Resolve network identifiers to NetworkItem records.
+        """
+        Resolve network identifiers to NetworkItem records.
 
         Returns:
             ResolvedNetworkInput with resolved network records.
 
         Raises:
             NetworkNotFoundError: If any identifier cannot be resolved.
+
         """
         identifiers = self._inputs.name + self._inputs.id
 

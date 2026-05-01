@@ -98,7 +98,8 @@ def help_cmd(ctx: typer.Context) -> None:
 
 @host_app.command(name="init")
 def host_init() -> None:
-    """Apply host configuration changes. Idempotent.
+    """
+    Apply host configuration changes. Idempotent.
 
     This command must be run with sudo the first time. It performs the
     following steps:
@@ -115,6 +116,7 @@ def host_init() -> None:
 
     Examples:
         sudo mvm host init
+
     """
     cache_dir = CacheUtils.get_cache_dir()
     try:
@@ -260,7 +262,8 @@ def host_clean(
 def host_reset(
     force: bool = typer.Option(False, "--force", help="Skip confirmation"),
 ) -> None:
-    """Full rollback: remove networking, revert sysctl, remove sudoers and group.
+    """
+    Full rollback: remove networking, revert sysctl, remove sudoers and group.
 
     Reverts every change made by 'mvm host init':
 
@@ -273,6 +276,7 @@ def host_reset(
 
     Examples:
         sudo mvm host reset --force
+
     """
     _abort_if_vms_running("reset")
 

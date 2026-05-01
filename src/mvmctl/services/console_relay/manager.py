@@ -1,4 +1,5 @@
-"""Console relay manager for VM serial console sessions.
+"""
+Console relay manager for VM serial console sessions.
 
 Manages the lifecycle of console relay processes, including starting,
 stopping, and cleanup of relay instances.
@@ -27,7 +28,8 @@ logger = logging.getLogger(__name__)
 
 
 class ConsoleRelayManager:
-    """Manager for a single console relay subprocess instance.
+    """
+    Manager for a single console relay subprocess instance.
 
     Coordinates one console relay process, ensuring proper
     lifecycle management and cleanup.
@@ -38,6 +40,7 @@ class ConsoleRelayManager:
         _name: Human-readable name for logging
         _info: Relay info dict or None if not running
         _lock: Lock for thread-safe access
+
     """
 
     _pid: int | None = None
@@ -51,7 +54,8 @@ class ConsoleRelayManager:
         socket_filename: str = DEFAULT_CONSOLE_SOCKET_FILENAME,
         log_filename: str = DEFAULT_CONSOLE_LOG_FILENAME,
     ) -> None:
-        """Initialize the relay manager for a specific resource.
+        """
+        Initialize the relay manager for a specific resource.
 
         Args:
             id: Unique identifier for registry and file paths
@@ -60,6 +64,7 @@ class ConsoleRelayManager:
             pid_filename: Name of the PID file (default: console.pid)
             socket_filename: Name of the socket file (default: console.sock)
             log_filename: Name of the log file (default: firecracker.console.log)
+
         """
         self._id = id
         self._path = path
@@ -111,7 +116,8 @@ class ConsoleRelayManager:
         return self._log_path
 
     def start(self, pty_controller_fd: int) -> tuple[Path, int]:
-        """Start the console relay subprocess.
+        """
+        Start the console relay subprocess.
 
         Spawns a relay subprocess that reads from the PTY controller and
         writes to both the console.log file and a Unix socket.
@@ -124,6 +130,7 @@ class ConsoleRelayManager:
 
         Raises:
             ConsoleRelayAlreadyRunningError: If relay is already running
+
         """
         with self._thread_lock:
             if self._pid is not None:
@@ -237,10 +244,12 @@ class ConsoleRelayManager:
             return True
 
     def get_pid(self) -> int | None:
-        """Get the PID of the running relay.
+        """
+        Get the PID of the running relay.
 
         Returns:
             The subprocess PID if running, None otherwise
+
         """
         with self._thread_lock:
             if self._pid is not None:
@@ -264,16 +273,19 @@ class ConsoleRelayManager:
             return None
 
     def is_running(self) -> bool:
-        """Check if the relay is currently running.
+        """
+        Check if the relay is currently running.
 
         Returns:
             True if relay is running, False otherwise
+
         """
         return self.get_pid() is not None
 
     # FIXME: this needs review because orphan cleanup requires looping through all vm dirs
     def cleanup_orphans(self) -> None:
-        """Clean up any orphaned relays from previous crashed sessions.
+        """
+        Clean up any orphaned relays from previous crashed sessions.
 
         This method is called during initialization to ensure no stale
         relays remain. It scans for console.pid files where the

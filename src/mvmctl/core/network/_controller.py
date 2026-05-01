@@ -15,7 +15,8 @@ __all__ = ["NetworkController"]
 
 
 class NetworkController:
-    """Stateful network entity lifecycle manager.
+    """
+    Stateful network entity lifecycle manager.
 
     Resolves network entity in __init__ and operates on cached network instance.
     """
@@ -49,7 +50,8 @@ class NetworkController:
         return lease_service.get_leases()
 
     def remove(self, *, force: bool = False) -> None:
-        """Remove this network from database.
+        """
+        Remove this network from database.
 
         Hard-deletes when no VMs reference the network.
         Soft-deletes only when VMs still reference it (to preserve history).
@@ -62,6 +64,7 @@ class NetworkController:
 
         Raises:
             NetworkError: If network is referenced by VMs and force is False.
+
         """
         from mvmctl.exceptions import NetworkError
 

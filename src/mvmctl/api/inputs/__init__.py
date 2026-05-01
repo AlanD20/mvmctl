@@ -1,4 +1,5 @@
-"""Input resolution layer for API boundary.
+"""
+Input resolution layer for API boundary.
 
 This module provides Input/Request/Config classes that represent
 API boundary contracts — raw CLI arguments, resolved requests,

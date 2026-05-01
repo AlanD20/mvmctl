@@ -1,4 +1,5 @@
-"""Binary operations orchestration.
+"""
+Binary operations orchestration.
 
 This module provides the orchestration layer for binary management operations.
 It combines download, removal, listing, and default setting into a single
@@ -45,7 +46,8 @@ class BinaryOperation:
 
     @staticmethod
     def fetch(inputs: BinaryFetchInput) -> BinaryFetchResult:
-        """Download a binary version.
+        """
+        Download a binary version.
 
         Flow:
         1. Resolve inputs via BinaryFetchRequest
@@ -61,6 +63,7 @@ class BinaryOperation:
 
         Returns:
             BinaryFetchResult with firecracker and jailer entries.
+
         """
         db = Database()
         repo = BinaryRepository(db)
@@ -101,7 +104,8 @@ class BinaryOperation:
 
     @staticmethod
     def remove(inputs: BinaryInput, force: bool = False) -> None:
-        """Remove binaries by ID (canonical method).
+        """
+        Remove binaries by ID (canonical method).
 
         Flow:
         1. Resolve inputs via BinaryRequest
@@ -111,6 +115,7 @@ class BinaryOperation:
         Args:
             inputs: BinaryInput with identifiers to remove.
             force: If True, remove even if referenced by VMs.
+
         """
         db = Database()
         repo = BinaryRepository(db)
@@ -134,7 +139,8 @@ class BinaryOperation:
 
     @staticmethod
     def remove_by_version(version: str, force: bool = False) -> None:
-        """Remove both firecracker and jailer for a version (convenience).
+        """
+        Remove both firecracker and jailer for a version (convenience).
 
         Flow:
         1. Resolve to firecracker and jailer BinaryItems for version
@@ -143,6 +149,7 @@ class BinaryOperation:
         Args:
             version: Version string to remove (e.g., "1.15.0").
             force: If True, remove even if referenced by VMs.
+
         """
         db = Database()
         repo = BinaryRepository(db)
@@ -176,13 +183,15 @@ class BinaryOperation:
 
     @staticmethod
     def get(inputs: BinaryInput) -> list[BinaryItem]:
-        """Get binaries by identifier.
+        """
+        Get binaries by identifier.
 
         Args:
             inputs: BinaryInput with identifiers to resolve.
 
         Returns:
             list[BinaryItem] matching the identifiers.
+
         """
         db = Database()
         request = BinaryRequest(inputs=inputs, db=db)
@@ -191,10 +200,12 @@ class BinaryOperation:
 
     @staticmethod
     def list_local() -> list[BinaryItem]:
-        """List all locally installed binaries.
+        """
+        List all locally installed binaries.
 
         Returns:
             list[BinaryItem] from database query with filesystem sync.
+
         """
         db = Database()
         repo = BinaryRepository(db)
@@ -203,22 +214,26 @@ class BinaryOperation:
 
     @staticmethod
     def list_remote(limit: int | None = None) -> list[str]:
-        """List available remote versions.
+        """
+        List available remote versions.
 
         Args:
             limit: Maximum number of versions to return.
 
         Returns:
             list[str] of version strings.
+
         """
         return BinaryService.list_remote(limit=limit)
 
     @staticmethod
     def set_default(inputs: BinaryInput) -> None:
-        """Set binary as default.
+        """
+        Set binary as default.
 
         Args:
             inputs: BinaryInput with identifier of binary to set as default.
+
         """
         db = Database()
         repo = BinaryRepository(db)
@@ -243,13 +258,15 @@ class BinaryOperation:
 
     @staticmethod
     def ensure_default() -> BinaryItem | None:
-        """Ensure a default Firecracker binary exists.
+        """
+        Ensure a default Firecracker binary exists.
 
         If local Firecracker binaries exist but none is marked default, sets
         the latest Firecracker binary as default and returns it.
 
         Returns:
             The default BinaryItem, or None if no local binaries exist.
+
         """
         from packaging.version import Version
 

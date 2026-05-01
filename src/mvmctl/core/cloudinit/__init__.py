@@ -1,4 +1,5 @@
-"""Cloud-init internal API module.
+"""
+Cloud-init internal API module.
 
 This module provides OOP-based cloud-init configuration management
 and provisioning for VM creation.

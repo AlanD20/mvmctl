@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from mvmctl.core._shared import Database
 from mvmctl.models.image import ImageItem
@@ -107,7 +107,7 @@ class ImageRepository:
 
     def soft_delete(self, image_id: str) -> None:
         """Soft-delete an image by setting deleted_at and is_present=0."""
-        now = datetime.now(tz=timezone.utc).isoformat()
+        now = datetime.now(tz=UTC).isoformat()
         with self._db.connect() as conn:
             conn.execute(
                 "UPDATE images SET deleted_at = ?, is_present = 0 WHERE id = ?",

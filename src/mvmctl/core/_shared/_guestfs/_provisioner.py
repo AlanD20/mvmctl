@@ -36,11 +36,13 @@ class GuestfsProvisioner:
     """All guestfs setup operations. Stateful - holds guestfs handle."""
 
     def __init__(self, rootfs_path: Path, *, readonly: bool = False) -> None:
-        """Initialize the GuestfsProvisioner.
+        """
+        Initialize the GuestfsProvisioner.
 
         Args:
             rootfs_path: Path to the root filesystem image.
             readonly: Whether to open guestfs in read-only mode.
+
         """
         self._rootfs_path = rootfs_path
         self._readonly = readonly

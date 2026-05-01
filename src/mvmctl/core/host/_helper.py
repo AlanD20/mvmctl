@@ -13,7 +13,8 @@ from mvmctl.exceptions import PrivilegeError
 class HostPrivilegeHelper:
     @staticmethod
     def check_privileges(binary: str, operation_description: str = "") -> None:
-        """Check privileges; if lacking, show interactive guidance with actionable options.
+        """
+        Check privileges; if lacking, show interactive guidance with actionable options.
 
         This wrapper is intended for CLI command handlers. It catches ``PrivilegeError``
         from :func:`check_privileges` and prints structured guidance so the user knows
@@ -26,6 +27,7 @@ class HostPrivilegeHelper:
 
         Raises:
             PrivilegeError: Re-raised after printing guidance (caller decides exit strategy).
+
         """
         try:
             if not shutil.which(binary) and not Path(binary).exists():

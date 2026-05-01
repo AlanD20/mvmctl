@@ -37,7 +37,8 @@ __all__ = [
 
 
 class SigtermContext:
-    """Context manager for SIGTERM signal handling.
+    """
+    Context manager for SIGTERM signal handling.
 
     Sets up a signal handler on entry, restores original handler on exit.
     The signal handler calls the provided cleanup function.
@@ -50,7 +51,7 @@ class SigtermContext:
     def _handle_signal(self, signum: int, frame: Any) -> None:
         self._cleanup_fn()
 
-    def __enter__(self) -> "SigtermContext":
+    def __enter__(self) -> SigtermContext:
         self._old_handler = signal.signal(signal.SIGTERM, self._handle_signal)
         return self
 
@@ -62,7 +63,8 @@ class SigtermContext:
 
 @contextmanager
 def sigterm_context(cleanup_fn: Callable[[], None]) -> Any:
-    """Create a SigtermContext as a context manager.
+    """
+    Create a SigtermContext as a context manager.
 
     Usage:
         with sigterm_context(my_cleanup):
@@ -80,7 +82,8 @@ def sigterm_context(cleanup_fn: Callable[[], None]) -> Any:
 
 
 class ProcessSignalHandler:
-    """Robust Linux process lifecycle manager.
+    """
+    Robust Linux process lifecycle manager.
 
     Handles: zombie detection, graceful shutdown, exit code capture,
     PID reuse mitigation, D-state awareness.
@@ -93,6 +96,7 @@ class ProcessSignalHandler:
         graceful_timeout: Seconds to wait after SIGTERM before SIGKILL.
         kill_timeout: Seconds to wait after SIGKILL before giving up.
         poll_interval: Seconds between poll checks.
+
     """
 
     def __init__(
@@ -116,10 +120,12 @@ class ProcessSignalHandler:
 
     @staticmethod
     def _decode_exit_status(status: int) -> int:
-        """Decode os.waitpid() status into conventional exit code.
+        """
+        Decode os.waitpid() status into conventional exit code.
 
         Returns:
             Normal exit code (0-255) or 128+signal for signal death.
+
         """
         if os.WIFEXITED(status):
             return os.WEXITSTATUS(status)
@@ -129,7 +135,8 @@ class ProcessSignalHandler:
 
     @staticmethod
     def _get_process_start_time(pid: int) -> int | None:
-        """Get process start time from /proc/<pid>/stat (field 22, clock ticks).
+        """
+        Get process start time from /proc/<pid>/stat (field 22, clock ticks).
 
         Returns None if process doesn't exist or is unreadable.
         """
@@ -150,7 +157,8 @@ class ProcessSignalHandler:
 
     @staticmethod
     def _is_pid_reused(pid: int, expected_start_time: int) -> bool:
-        """Check if PID has been reused by comparing start times.
+        """
+        Check if PID has been reused by comparing start times.
 
         Returns True if the current process with this PID has a different
         start time than expected (meaning the original process is gone).
@@ -161,7 +169,8 @@ class ProcessSignalHandler:
         return current_start_time != expected_start_time
 
     def is_alive(self) -> bool:
-        """Check if process is genuinely running (not zombie, not dead, not reused).
+        """
+        Check if process is genuinely running (not zombie, not dead, not reused).
 
         Returns False for: dead, zombie, already reaped, PID reused.
         Returns True for: running, sleeping, D-state.
@@ -208,7 +217,8 @@ class ProcessSignalHandler:
         *,
         pre_signal_hook: Callable[[], bool] | None = None,
     ) -> int | None:
-        """Full graceful shutdown: optional hook -> SIGTERM -> wait -> SIGKILL -> wait.
+        """
+        Full graceful shutdown: optional hook -> SIGTERM -> wait -> SIGKILL -> wait.
 
         Args:
             pre_signal_hook: Called before SIGTERM. Return False to skip SIGTERM
@@ -217,6 +227,7 @@ class ProcessSignalHandler:
 
         Returns:
             Exit code if captured, None if process survived SIGKILL or is not a child.
+
         """
         if not self.is_alive():
             return self._exit_code
@@ -336,7 +347,8 @@ def run_cmd(
     capture: bool = True,
     cwd: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a subprocess command and return the completed-process result.
+    """
+    Run a subprocess command and return the completed-process result.
 
     Args:
         args: Command and arguments to execute.
@@ -349,6 +361,7 @@ def run_cmd(
 
     Raises:
         ProcessError: If the command is not found or exits with a non-zero code.
+
     """
     logger.debug("$ %s", shlex.join(args))
     try:
@@ -383,7 +396,8 @@ def stream_cmd(
     *,
     cwd: str | None = None,
 ) -> Iterator[str]:
-    """Stream stdout lines from a subprocess command as they are produced.
+    """
+    Stream stdout lines from a subprocess command as they are produced.
 
     Args:
         args: Command and arguments to execute.
@@ -394,6 +408,7 @@ def stream_cmd(
 
     Raises:
         ProcessError: If the command is not found or exits with a non-zero code.
+
     """
     logger.debug("$ %s", shlex.join(args))
     try:
@@ -429,7 +444,8 @@ _SUDO_VALIDATION_IN_PROGRESS = False
 
 
 def _is_sudo_cached() -> bool:
-    """Check if sudo credentials are currently cached and valid.
+    """
+    Check if sudo credentials are currently cached and valid.
 
     Returns True if credentials are cached and haven't expired.
     """
@@ -448,7 +464,8 @@ def _is_sudo_cached() -> bool:
 
 
 def _validate_sudo_credentials() -> bool:
-    """Validate sudo credentials are cached and refresh if needed.
+    """
+    Validate sudo credentials are cached and refresh if needed.
 
     Uses sudo -n (non-interactive) to check if credentials are cached.
     If not cached, uses sudo -v to validate (which may prompt for password).
@@ -457,6 +474,7 @@ def _validate_sudo_credentials() -> bool:
 
     Returns:
         True if sudo credentials are valid and cached.
+
     """
     global _SUDO_CREDENTIALS_VALID, _SUDO_CACHE_TIMESTAMP, _SUDO_VALIDATION_IN_PROGRESS  # noqa: PLW0603
 
@@ -509,7 +527,8 @@ def _validate_sudo_credentials() -> bool:
 
 
 def privileged_cmd(cmd: list[str]) -> list[str]:
-    """Prepend sudo if not running as root.
+    """
+    Prepend sudo if not running as root.
 
     Requires the user to be in the mvm group (configured by 'mvm host init').
     Raises PrivilegeError if the user lacks group membership.
@@ -557,13 +576,15 @@ def require_mvm_group_membership() -> None:
 
 
 def is_process_running(pid: int | None) -> bool:
-    """Check if a process is still running by PID.
+    """
+    Check if a process is still running by PID.
 
     Args:
         pid: Process ID to check
 
     Returns:
         True if process is running, False if not running or PID is None
+
     """
     if pid is None:
         return False

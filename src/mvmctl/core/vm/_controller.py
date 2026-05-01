@@ -1,4 +1,5 @@
-"""VM lifecycle operations.
+"""
+VM lifecycle operations.
 
 This module contains the VMController class for managing VM lifecycle operations
 like start, stop, pause, resume, ssh, logs, etc.
@@ -22,7 +23,8 @@ logger = logging.getLogger(__name__)
 
 
 class VMController:
-    """Stateful VM lifecycle manager.
+    """
+    Stateful VM lifecycle manager.
 
     Resolves VM entity in __init__ and operates on cached VM instance.
     """
@@ -43,13 +45,15 @@ class VMController:
             self._vm = self._resolver.resolve(entity)
 
     def stop(self, force: bool = False) -> None:
-        """Stop the VM.
+        """
+        Stop the VM.
 
         Args:
             force: If True, force immediate shutdown without graceful shutdown
 
         Raises:
             MVMError: If VM is not running or stop fails
+
         """
         name = self._vm.name
         if self._vm.status not in (VMStatus.RUNNING.value,):
@@ -100,10 +104,12 @@ class VMController:
             raise MVMError(f"Failed to stop VM '{name}': {exc}") from exc
 
     def pause(self) -> None:
-        """Pause the VM.
+        """
+        Pause the VM.
 
         Raises:
             MVMError: If VM is not running
+
         """
         name = self._vm.name
         if self._vm.status != VMStatus.RUNNING.value:
@@ -120,10 +126,12 @@ class VMController:
             client.close()
 
     def resume(self) -> None:
-        """Resume the VM.
+        """
+        Resume the VM.
 
         Raises:
             MVMError: If VM is not paused
+
         """
         name = self._vm.name
         if self._vm.status != VMStatus.PAUSED.value:
@@ -140,10 +148,12 @@ class VMController:
             client.close()
 
     def start(self) -> None:
-        """Start an already configured VM via Firecracker API.
+        """
+        Start an already configured VM via Firecracker API.
 
         Raises:
             MVMError: If VM is not stopped or start fails
+
         """
         name = self._vm.name
         if self._vm.status != VMStatus.STOPPED.value:
@@ -161,19 +171,22 @@ class VMController:
             client.close()
 
     def reboot(self, force: bool = False) -> None:
-        """Reboot the VM (stop then boot).
+        """
+        Reboot the VM (stop then boot).
 
         Args:
             force: If True, force immediate shutdown
 
         Raises:
             MVMError: If reboot fails
+
         """
         self.stop(force=force)
         self.start()
 
     def snapshot(self, mem_out: Path, state_out: Path) -> None:
-        """Snapshot VM memory and disk state.
+        """
+        Snapshot VM memory and disk state.
 
         Args:
             mem_out: Memory snapshot output path
@@ -181,6 +194,7 @@ class VMController:
 
         Raises:
             MVMError: If socket not found or snapshot fails
+
         """
         if not self._vm.api_socket_path:
             raise MVMError(
@@ -195,7 +209,8 @@ class VMController:
     def load_snapshot(
         self, mem_in: Path, state_in: Path, resume_after: bool | None = None
     ) -> None:
-        """Load VM from snapshot.
+        """
+        Load VM from snapshot.
 
         Args:
             mem_in: Memory snapshot input path
@@ -204,6 +219,7 @@ class VMController:
 
         Raises:
             MVMError: If socket not found or load fails
+
         """
         effective_resume = (
             resume_after
@@ -222,13 +238,15 @@ class VMController:
 
     # FIXME: fix
     def attach_console(self) -> ConsoleInfo:
-        """Attach to the VM's console relay.
+        """
+        Attach to the VM's console relay.
 
         Returns:
             ConsoleInfo containing the socket path and VM name.
 
         Raises:
             MVMError: If no console relay is running for the VM.
+
         """
         mgr = ConsoleRelayManager()
         name = self._vm.name
@@ -240,10 +258,12 @@ class VMController:
         return ConsoleInfo(socket_path=Path(socket_path_str), vm_name=name)
 
     def kill_console(self) -> bool:
-        """Kill the console relay for the VM.
+        """
+        Kill the console relay for the VM.
 
         Returns:
             True if relay was killed, False otherwise
+
         """
         mgr = ConsoleRelayManager()
         vm_hash = self._vm.id if self._vm.id else None

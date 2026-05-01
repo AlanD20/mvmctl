@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from mvmctl.core.host._repository import HostRepository
 from mvmctl.models.host import HostStateChangeItem
@@ -16,13 +16,14 @@ class HostController:
         self._repo = repo
 
     def record_changes(self, changes: list[HostStateChangeItem]) -> None:
-        """Persist host state changes to the database.
+        """
+        Persist host state changes to the database.
 
         Uses an atomic bulk insert, then deletes all prior sessions so only
         the latest backup remains.
         """
         session_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         for order, change in enumerate(changes):
             change.session_id = session_id
             change.init_timestamp = now

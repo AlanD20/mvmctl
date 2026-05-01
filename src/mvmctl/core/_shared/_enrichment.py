@@ -1,4 +1,5 @@
-"""Batch relation enrichment for resolvers.
+"""
+Batch relation enrichment for resolvers.
 
 Provides a centralized engine that enriches entity lists with related
 entities using batch queries. Prevents N+1 query problems by collecting
@@ -17,7 +18,8 @@ T = TypeVar("T")
 
 @dataclass
 class RelationSpec:
-    """Specification for a single relation enrichment.
+    """
+    Specification for a single relation enrichment.
 
     Attributes:
         fk_field: Field name on the source entity. For forward relations this
@@ -32,6 +34,7 @@ class RelationSpec:
         is_reverse: True for reverse relations (source.id -> list[targets]).
         batch_method: Optional batch method name. If set, called with a list
             of IDs instead of looping over single-value method calls.
+
     """
 
     fk_field: str
@@ -43,7 +46,8 @@ class RelationSpec:
 
 
 class RelationEnricher:
-    """Batch-enrich entities with relations using declared registries.
+    """
+    Batch-enrich entities with relations using declared registries.
 
     Processes includes in dependency order (parents before children).
     Uses batch queries for resolve_many scenarios.
@@ -55,7 +59,8 @@ class RelationEnricher:
         include: list[str],
         registry: dict[str, RelationSpec],
     ) -> None:
-        """Enrich entities in-place with resolved relations.
+        """
+        Enrich entities in-place with resolved relations.
 
         Args:
             entities: List of entity instances to enrich (modified in-place).
@@ -64,6 +69,7 @@ class RelationEnricher:
 
         Raises:
             ValueError: If an include path is not in the registry.
+
         """
         if not include:
             return

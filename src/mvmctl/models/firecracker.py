@@ -10,7 +10,8 @@ from mvmctl.models.cloudinit import CloudInitMode
 
 @dataclass
 class FirecrackerConfig:
-    """Explicit configuration for spawning a Firecracker VM.
+    """
+    Explicit configuration for spawning a Firecracker VM.
 
     All values are resolved by the API layer before passing to the spawner.
     No defaults, no None for required fields.

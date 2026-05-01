@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import typer
 
@@ -146,77 +146,77 @@ def vm_ps() -> None:
 @handle_errors
 def vm_create(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
-    image: Optional[str] = typer.Option(
+    image: str | None = typer.Option(
         None,
         "--image",
         help="Image name (e.g., ubuntu-24.04), short ID, or path to .ext4 file",
     ),
-    kernel: Optional[str] = typer.Option(
+    kernel: str | None = typer.Option(
         None,
         "--kernel",
         help="Kernel short ID or path to vmlinux file",
     ),
-    image_path: Optional[Path] = typer.Option(
+    image_path: Path | None = typer.Option(
         None,
         "--image-path",
         help="Direct path to rootfs image file (overrides --image)",
     ),
-    kernel_path: Optional[Path] = typer.Option(
+    kernel_path: Path | None = typer.Option(
         None,
         "--kernel-path",
         help="Direct path to vmlinux kernel file (overrides --kernel)",
     ),
-    vcpus: Optional[int] = typer.Option(
+    vcpus: int | None = typer.Option(
         None,
         "--vcpus",
         "--cpus",
         help="Number of vCPUs (default: from user config)",
     ),
-    mem: Optional[int] = typer.Option(
+    mem: int | None = typer.Option(
         None,
         "--mem",
         "--memory",
         help="Memory in MiB (default: from user config)",
     ),
-    disk_size: Optional[str] = typer.Option(
+    disk_size: str | None = typer.Option(
         None,
         "--disk-size",
         "-s",
         help="Rootfs disk size in MiB/GiB (e.g., 512M=512MiB, 1G=1GiB). Default from config.",
     ),
-    ip: Optional[str] = typer.Option(
+    ip: str | None = typer.Option(
         None, "--ip", help="Guest IP (auto-assigned if omitted)"
     ),
-    network_name: Optional[str] = typer.Option(
+    network_name: str | None = typer.Option(
         None, "--network", "--net", help="Named network to use"
     ),
-    mac: Optional[str] = typer.Option(
+    mac: str | None = typer.Option(
         None, "--mac", help="Custom MAC address (auto-generated if omitted)"
     ),
-    ssh_key: Optional[str] = typer.Option(
+    ssh_key: str | None = typer.Option(
         None,
         "--ssh-key",
         help="SSH public key name (from key cache) or file path",
     ),
-    user_data: Optional[Path] = typer.Option(
+    user_data: Path | None = typer.Option(
         None, "--user-data", help="Path to custom cloud-init user-data file"
     ),
-    cloud_init_mode: Optional[str] = typer.Option(
+    cloud_init_mode: str | None = typer.Option(
         None,
         "--cloud-init-mode",
         help="Cloud-init mode: 'inject' (default, direct injection), 'iso' (ISO mode), 'net' (HTTP), 'off' (no cloud-init)",
     ),
-    nocloud_net_port: Optional[int] = typer.Option(
+    nocloud_net_port: int | None = typer.Option(
         None,
         "--nocloud-net-port",
         help="Port for nocloud-net HTTP server (0 for auto-assign, default: auto-assign)",
     ),
-    user: Optional[str] = typer.Option(
+    user: str | None = typer.Option(
         None,
         "--user",
         help="Default SSH user for cloud-init (default: from user config)",
     ),
-    enable_pci: Optional[bool] = typer.Option(
+    enable_pci: bool | None = typer.Option(
         None,
         "--enable-pci/--no-enable-pci",
         help="Enable PCI device support (default: from user config)",
@@ -226,22 +226,22 @@ def vm_create(
         "--no-console",
         help="Disable serial console",
     ),
-    lsm_flags: Optional[str] = typer.Option(
+    lsm_flags: str | None = typer.Option(
         None,
         "--lsm-flags",
         help="Linux Security Module flags for kernel cmdline (default: from user config)",
     ),
-    enable_logging: Optional[bool] = typer.Option(
+    enable_logging: bool | None = typer.Option(
         None,
         "--enable-logging/--no-enable-logging",
         help="Enable Firecracker logging (default: from user config)",
     ),
-    enable_metrics: Optional[bool] = typer.Option(
+    enable_metrics: bool | None = typer.Option(
         None,
         "--enable-metrics/--no-enable-metrics",
         help="Enable Firecracker metrics (default: from user config)",
     ),
-    firecracker_bin: Optional[str] = typer.Option(
+    firecracker_bin: str | None = typer.Option(
         None,
         "--firecracker-bin",
         envvar="MVM_FIRECRACKER_BIN",
@@ -451,11 +451,12 @@ def vm_export(
     identifier: str = typer.Argument(
         ..., help="VM name, ID, IP, or MAC address"
     ),
-    output: Optional[Path] = typer.Argument(
+    output: Path | None = typer.Argument(
         None, help="Output file path (prints to stdout if omitted)"
     ),
 ) -> None:
-    """Export a VM's configuration to a portable JSON file.
+    """
+    Export a VM's configuration to a portable JSON file.
 
     The exported config uses semantic references (os_slug, version, name)
     instead of internal IDs, making it portable across machines.
@@ -474,7 +475,7 @@ def vm_export(
 @handle_errors
 def vm_import(
     config_path: Path = typer.Argument(..., help="Path to VM config JSON file"),
-    name: Optional[str] = typer.Option(
+    name: str | None = typer.Option(
         None, "--name", "-n", help="Override VM name from config"
     ),
 ) -> None:

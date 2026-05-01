@@ -1,4 +1,5 @@
-"""Console relay standalone process.
+"""
+Console relay standalone process.
 
 Reads from PTY master file descriptor, writes to console.log file,
 and forwards to a Unix socket for CLI attachment.

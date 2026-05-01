@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 import typer
 
 from mvmctl.api import CacheOperation
@@ -44,7 +42,7 @@ def cache_init() -> None:
 @cache_app.command(name="prune")
 @handle_errors
 def cache_prune(
-    resource: Optional[str] = typer.Argument(
+    resource: str | None = typer.Argument(
         None,
         help=(
             "Resource to prune: vm, network, image, kernel, binary, misc. "
@@ -66,7 +64,8 @@ def cache_prune(
         False, "--force", "-f", help="Skip confirmation prompts"
     ),
 ) -> None:
-    """Prune cache resources.
+    """
+    Prune cache resources.
 
     Default behavior prunes all items EXCEPT:
     - RUNNING or STARTING VMs
@@ -85,6 +84,7 @@ def cache_prune(
         mvm cache prune misc                   # Remove appliance + warm images
         mvm cache prune --all                  # Prune ALL resources including protected
         mvm cache prune --all --force          # Prune all without confirmation
+
     """
     if resource == "vm":
         removed = CacheOperation.prune_vms(

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import typer
 
@@ -22,19 +21,19 @@ ssh_app = typer.Typer(
 @handle_errors
 def ssh_connect(
     vm_id: str = typer.Argument(None, help="VM name, ID prefix, or IP address"),
-    user: Optional[str] = typer.Option(
+    user: str | None = typer.Option(
         None, "--user", "-u", help="SSH user (default: from user config)"
     ),
-    key: Optional[Path] = typer.Option(
+    key: Path | None = typer.Option(
         None, "--key", help="SSH private key file or directory of keys"
     ),
-    cmd: Optional[str] = typer.Option(
+    cmd: str | None = typer.Option(
         None, "--cmd", "-c", help="Command to execute"
     ),
-    ip: Optional[str] = typer.Option(
+    ip: str | None = typer.Option(
         None, "--ip", help="IP address to connect to (skips all validation)"
     ),
-    name: Optional[str] = typer.Option(
+    name: str | None = typer.Option(
         None, "--name", "-n", help="VM name (validates as entity name)"
     ),
 ) -> None:

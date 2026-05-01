@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from mvmctl.constants import DEFAULT_NETWORK_NAME, DEFAULT_NETWORK_SUBNET
@@ -36,7 +36,8 @@ class NetworkCreateResult:
 
 
 class NetworkOperation:
-    """Orchestration layer for network operations.
+    """
+    Orchestration layer for network operations.
 
     All methods are @staticmethod — they take Input classes as arguments,
     create Request/Resolved internally, and orchestrate across core modules.
@@ -44,13 +45,15 @@ class NetworkOperation:
 
     @staticmethod
     def create(inputs: NetworkCreateInput) -> NetworkCreateResult:
-        """Create a new network.
+        """
+        Create a new network.
 
         Args:
             inputs: NetworkCreateInput with name, subnet, etc.
 
         Returns:
             NetworkCreateResult with the created NetworkItem.
+
         """
         from mvmctl.api.inputs._network_create_input import NetworkCreateRequest
 
@@ -62,7 +65,7 @@ class NetworkOperation:
         resolved = request.resolve()
 
         # Compute network ID and timestamp right before creation
-        created_at = datetime.now(tz=timezone.utc).isoformat()
+        created_at = datetime.now(tz=UTC).isoformat()
         network_id = HashGenerator.network(
             resolved.name, resolved.subnet, created_at
         )
@@ -124,11 +127,13 @@ class NetworkOperation:
 
     @staticmethod
     def remove(inputs: NetworkInput, force: bool = False) -> None:
-        """Remove a network.
+        """
+        Remove a network.
 
         Args:
             inputs: NetworkInput with name/id identifiers.
             force: If True, remove even if referenced by VMs.
+
         """
         from mvmctl.api.inputs._network_input import NetworkRequest
 
@@ -150,10 +155,12 @@ class NetworkOperation:
 
     @staticmethod
     def list_all() -> list[NetworkItem]:
-        """List all networks.
+        """
+        List all networks.
 
         Returns:
             List of all NetworkItem records with lease enrichment.
+
         """
         db = Database()
         repo = NetworkRepository(db)
@@ -171,13 +178,15 @@ class NetworkOperation:
 
     @staticmethod
     def get(inputs: NetworkInput) -> NetworkItem:
-        """Get a single network.
+        """
+        Get a single network.
 
         Args:
             inputs: NetworkInput with name/id identifiers.
 
         Returns:
             The resolved NetworkItem.
+
         """
         from mvmctl.api.inputs._network_input import NetworkRequest
 
@@ -195,7 +204,8 @@ class NetworkOperation:
 
     @staticmethod
     def _network_to_dict(network: NetworkItem) -> dict[str, Any]:
-        """Convert NetworkItem to dictionary for JSON output.
+        """
+        Convert NetworkItem to dictionary for JSON output.
 
         Includes every field from the model.
         """
@@ -253,7 +263,8 @@ class NetworkOperation:
     def inspect(
         inputs: NetworkInput, is_json: bool = False
     ) -> NetworkItem | dict[str, Any]:
-        """Inspect a network with enriched data (leases, bridge state).
+        """
+        Inspect a network with enriched data (leases, bridge state).
 
         Args:
             inputs: NetworkInput with name/id identifiers.
@@ -261,6 +272,7 @@ class NetworkOperation:
 
         Returns:
             NetworkItem or dict representation depending on is_json.
+
         """
         from mvmctl.api.inputs._network_input import NetworkRequest
 
@@ -296,10 +308,12 @@ class NetworkOperation:
 
     @staticmethod
     def set_default(inputs: NetworkInput) -> None:
-        """Set a network as the default.
+        """
+        Set a network as the default.
 
         Args:
             inputs: NetworkInput with name/id identifiers.
+
         """
         from mvmctl.api.inputs._network_input import NetworkRequest
 
@@ -323,12 +337,14 @@ class NetworkOperation:
 
     @staticmethod
     def create_default_network() -> NetworkItem:
-        """Create the default network if it doesn't exist, ensure one network is default, and materialize its bridge/NAT.
+        """
+        Create the default network if it doesn't exist, ensure one network is default, and materialize its bridge/NAT.
 
         Idempotent — safe to call multiple times.
 
         Returns:
             The default NetworkItem.
+
         """
         from mvmctl.api.inputs._network_create_input import NetworkCreateInput
 
@@ -384,10 +400,12 @@ class NetworkOperation:
 
     @staticmethod
     def reconcile() -> list[NetworkItem]:
-        """Reconcile all networks — compare DB state vs actual bridge state.
+        """
+        Reconcile all networks — compare DB state vs actual bridge state.
 
         Returns:
             List of all NetworkItem records with updated bridge_active status.
+
         """
         db = Database()
         repo = NetworkRepository(db)
@@ -402,10 +420,12 @@ class NetworkOperation:
 
     @staticmethod
     def restore() -> list[str]:
-        """Restore all networks from DB after reboot.
+        """
+        Restore all networks from DB after reboot.
 
         Returns:
             List of status messages for each restored network.
+
         """
         db = Database()
         repo = NetworkRepository(db)

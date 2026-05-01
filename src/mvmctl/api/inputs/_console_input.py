@@ -1,4 +1,5 @@
-"""Console request resolver — resolves VM + creates console relay manager.
+"""
+Console request resolver — resolves VM + creates console relay manager.
 
 Follows the Input → Request → Resolved pipeline pattern.
 """
@@ -16,7 +17,8 @@ from mvmctl.utils.common import CacheUtils
 
 @dataclass
 class ConsoleInput:
-    """Input for console operations on a VM.
+    """
+    Input for console operations on a VM.
 
     Uses a single VM identifier (name, ID, MAC, or IP) which is resolved
     through the standard VMRequest pipeline.
@@ -34,7 +36,8 @@ class ResolvedConsoleInput:
 
 
 class ConsoleRequest:
-    """Request to resolve a VM and prepare its console relay manager.
+    """
+    Request to resolve a VM and prepare its console relay manager.
 
     Follows the Input → Request → Resolved pipeline pattern.
     """
@@ -51,13 +54,15 @@ class ConsoleRequest:
         return self._result
 
     def resolve(self) -> ResolvedConsoleInput:
-        """Resolve the VM and create a console relay manager.
+        """
+        Resolve the VM and create a console relay manager.
 
         Returns:
             ResolvedConsoleInput with resolved VM and relay manager.
 
         Raises:
             VMNotFoundError: If VM cannot be found.
+
         """
         resolved = VMRequest(
             inputs=VMInput(identifiers=[self._inputs.identifier]),

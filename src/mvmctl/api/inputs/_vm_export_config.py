@@ -1,4 +1,5 @@
-"""Portable VM configuration for export/import.
+"""
+Portable VM configuration for export/import.
 
 Uses semantic references (os_slug, version, name) — NEVER internal SHA256 IDs.
 Nested sub-key structure for clean JSON export.
@@ -43,7 +44,8 @@ class VMExportComputeConfig:
 
 @dataclass
 class VMExportImageConfig:
-    """Image specification using portable semantic refs.
+    """
+    Image specification using portable semantic refs.
 
     image_id is FORBIDDEN — use os_slug + arch instead.
     """
@@ -55,7 +57,8 @@ class VMExportImageConfig:
 
 @dataclass
 class VMExportKernelConfig:
-    """Kernel specification using portable semantic refs.
+    """
+    Kernel specification using portable semantic refs.
 
     kernel_id is FORBIDDEN — use version + arch + type instead.
     """
@@ -67,7 +70,8 @@ class VMExportKernelConfig:
 
 @dataclass
 class VMExportBinaryConfig:
-    """Firecracker binary specification using portable semantic refs.
+    """
+    Firecracker binary specification using portable semantic refs.
 
     binary_id is FORBIDDEN — use name + version instead.
     """
@@ -78,7 +82,8 @@ class VMExportBinaryConfig:
 
 @dataclass
 class VMExportNetworkConfig:
-    """Network configuration with portable semantic refs.
+    """
+    Network configuration with portable semantic refs.
 
     network_id is FORBIDDEN — use name for identification.
     subnet/gateway/nat are hints for auto-recreation on import.
@@ -123,7 +128,8 @@ class VMExportCloudInitConfig:
 
 @dataclass
 class VMExportConfig:
-    """Portable VM configuration for export/import across hosts.
+    """
+    Portable VM configuration for export/import across hosts.
 
     Uses semantic field references (os_slug, version, name) — NEVER internal IDs.
     On import, API layer resolves semantic refs → actual paths via DB queries.
@@ -169,8 +175,9 @@ class VMExportConfig:
         path.write_text(json.dumps(self.to_dict(), indent=2, default=str))
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "VMExportConfig":
-        """Deserialize from dictionary, ignoring unknown fields.
+    def from_dict(cls, data: dict[str, Any]) -> VMExportConfig:
+        """
+        Deserialize from dictionary, ignoring unknown fields.
 
         Handles the nested sub-key structure by delegating to sub-config classes.
         """
@@ -207,7 +214,7 @@ class VMExportConfig:
         return cls(**filtered)
 
     @classmethod
-    def from_json_file(cls, path: Path) -> "VMExportConfig":
+    def from_json_file(cls, path: Path) -> VMExportConfig:
         """Import from JSON file."""
         if not path.exists():
             raise FileNotFoundError(f"VM config file not found: {path}")

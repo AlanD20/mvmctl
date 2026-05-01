@@ -88,21 +88,25 @@ class ParsedKernelFilename:
 
 
 class KernelService:
-    """Stateless kernel service — handles downloading and building kernels.
+    """
+    Stateless kernel service — handles downloading and building kernels.
 
     Args:
         repo: KernelRepository for DB operations. Must be provided.
+
     """
 
     def __init__(self, repo: KernelRepository) -> None:
         self._repo = repo
 
     def list_all(self, verify: bool = True) -> list[KernelItem]:
-        """List all kernels, syncing is_present flag with filesystem.
+        """
+        List all kernels, syncing is_present flag with filesystem.
 
         Args:
             verify: If True (default), check filesystem and update DB.
                    If False, return DB records as-is.
+
         """
         kernels = self._repo.list_all()
         if not verify:
@@ -120,7 +124,8 @@ class KernelService:
         return kernels
 
     def remove(self, kernel: KernelItem, *, force: bool = False) -> KernelItem:
-        """Remove a single kernel.
+        """
+        Remove a single kernel.
 
         Delegates to KernelController for VM reference checks and
         soft/hard delete logic.
@@ -131,6 +136,7 @@ class KernelService:
 
         Returns:
             The removed KernelItem.
+
         """
         from mvmctl.core.kernel._controller import KernelController
 
@@ -141,7 +147,8 @@ class KernelService:
     def remove_many(
         self, kernels: list[KernelItem], *, force: bool = False
     ) -> list[KernelItem]:
-        """Remove multiple kernels.
+        """
+        Remove multiple kernels.
 
         Args:
             kernels: List of KernelItem to remove.
@@ -149,6 +156,7 @@ class KernelService:
 
         Returns:
             The removed KernelItem list.
+
         """
         deleted: list[KernelItem] = []
         for kernel in kernels:
@@ -216,7 +224,8 @@ class KernelService:
         kernel_type: str | None = None,
         version: str | None = None,
     ) -> list[KernelSpec]:
-        """Return kernel specs filtered by criteria.
+        """
+        Return kernel specs filtered by criteria.
 
         Args:
             names: Filter by spec name(s) (YAML keys like 'firecracker-5.10').
@@ -228,6 +237,7 @@ class KernelService:
 
         Raises:
             KernelError: If any requested name is not found in the catalog.
+
         """
         all_specs = cls._load_specs()
 
@@ -259,12 +269,15 @@ class KernelService:
 
     @staticmethod
     def parse_filename(filename: str) -> ParsedKernelFilename:
-        """Parse a kernel filename to extract base name, version, and arch.
+        """
+        Parse a kernel filename to extract base name, version, and arch.
 
         Format: {base_name}-{version}[-{arch}]
+
         Examples:
           - vmlinux-firecracker-6.1.155-x86_64
           - vmlinux-5.10.0
+
         """
         name = filename
         arches = ["x86_64", "amd64", "arm64", "aarch64"]
@@ -437,7 +450,8 @@ class KernelService:
 
     @classmethod
     def _merge_config_lines(cls, content: str, config_path: Path) -> None:
-        """Merge config fragment content into an existing .config file.
+        """
+        Merge config fragment content into an existing .config file.
 
         Uses line-by-line key replacement logic: existing keys are updated,
         new keys are appended.
@@ -528,7 +542,8 @@ class KernelService:
         jobs: int,
         user_config_path: Path | None = None,
     ) -> KernelConfigResult:
-        """Configure kernel with Firecracker settings.
+        """
+        Configure kernel with Firecracker settings.
 
         Args:
             kernel_dir: Kernel source directory.
@@ -539,6 +554,7 @@ class KernelService:
 
         Returns:
             KernelConfigResult with status, warnings, and info messages.
+
         """
 
         warnings: list[str] = []
@@ -661,7 +677,8 @@ class KernelService:
         *,
         jobs: int,
     ) -> KernelBuildResult:
-        """Build the kernel.
+        """
+        Build the kernel.
 
         Args:
             kernel_dir: Kernel source directory.
@@ -673,6 +690,7 @@ class KernelService:
 
         Raises:
             KernelError: If build fails.
+
         """
         logger.info("Building vmlinux with %d parallel jobs...", jobs)
         logger.info("This may take 10-30 minutes...")
@@ -802,7 +820,8 @@ class KernelService:
         cached_kernel_path: Path,
         use_cache: bool,
     ) -> bool:
-        """Attempt to satisfy the build from cache.
+        """
+        Attempt to satisfy the build from cache.
 
         Returns True if a cache hit occurs and the kernel is available
         at ``output_path``.
@@ -840,13 +859,15 @@ class KernelService:
         arch: str,
         sha256: str | None,
     ) -> tuple[str, str | None]:
-        """Resolve source URL template vars and fetch SHA256 if needed.
+        """
+        Resolve source URL template vars and fetch SHA256 if needed.
 
         Returns:
             Tuple of (resolved_source_url, resolved_sha256).
 
         Raises:
             KernelError: If a checksum is required but cannot be resolved.
+
         """
         template_vars = {
             "version": version,
@@ -1000,7 +1021,8 @@ class KernelService:
         arch: str,
         output_dir: Path,
     ) -> KernelFetchResult:
-        """Download a Firecracker CI kernel from GitHub.
+        """
+        Download a Firecracker CI kernel from GitHub.
 
         Args:
             ci_version: Firecracker CI version string.
@@ -1009,6 +1031,7 @@ class KernelService:
 
         Returns:
             KernelFetchResult with path, version, arch, type, warnings, info.
+
         """
 
         if not spec.list_url_template:
@@ -1119,13 +1142,15 @@ class KernelService:
 
     @staticmethod
     def check_build_dependencies() -> list[str]:
-        """Check for required kernel build dependencies.
+        """
+        Check for required kernel build dependencies.
 
         Returns:
             Empty list if all dependencies are present.
 
         Raises:
             KernelError: If any required dependency is missing.
+
         """
         required_commands = [
             "git",
@@ -1191,7 +1216,8 @@ class KernelService:
         clean_build: bool = False,
         kernel_config: Path | None = None,
     ) -> KernelFetchResult:
-        """Build an official kernel from source.
+        """
+        Build an official kernel from source.
 
         Args:
             spec: Resolved kernel specification.
@@ -1204,6 +1230,7 @@ class KernelService:
 
         Returns:
             KernelFetchResult with build results.
+
         """
         cls.check_build_dependencies()
         output_path = output_dir / f"{spec.output_name}-{spec.version}-{arch}"

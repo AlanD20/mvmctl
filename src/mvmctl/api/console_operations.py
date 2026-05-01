@@ -12,12 +12,14 @@ from mvmctl.utils.auditlog import AuditLog
 
 @dataclass(frozen=True)
 class ConsoleAttachInfo:
-    """Result of a console attach operation — connection info for the relay socket.
+    """
+    Result of a console attach operation — connection info for the relay socket.
 
     Attributes:
         socket_path: Path to the console relay Unix domain socket.
         vm_name: Resolved VM name.
         vm_id: Resolved VM ID.
+
     """
 
     socket_path: str
@@ -30,13 +32,15 @@ class ConsoleOperation:
 
     @staticmethod
     def get_state(identifier: str) -> dict[str, Any]:
-        """Get console relay state for a VM.
+        """
+        Get console relay state for a VM.
 
         Args:
             identifier: VM name, ID, MAC, or IP address.
 
         Returns:
             Dict with: running (bool), pid (int|None), socket_path (str).
+
         """
         resolved = ConsoleRequest(
             inputs=ConsoleInput(identifier=identifier)
@@ -49,7 +53,8 @@ class ConsoleOperation:
 
     @staticmethod
     def attach(identifier: str) -> ConsoleAttachInfo:
-        """Attach to VM console.
+        """
+        Attach to VM console.
 
         Args:
             identifier: VM name, ID, MAC, or IP address.
@@ -59,6 +64,7 @@ class ConsoleOperation:
 
         Raises:
             MVMError: If console relay is not running.
+
         """
         resolved = ConsoleRequest(
             inputs=ConsoleInput(identifier=identifier)
@@ -74,13 +80,15 @@ class ConsoleOperation:
 
     @staticmethod
     def kill(identifier: str) -> bool:
-        """Kill the console relay for a VM.
+        """
+        Kill the console relay for a VM.
 
         Args:
             identifier: VM name, ID, MAC, or IP address.
 
         Returns:
             True if relay was stopped, False if not running.
+
         """
         resolved = ConsoleRequest(
             inputs=ConsoleInput(identifier=identifier)

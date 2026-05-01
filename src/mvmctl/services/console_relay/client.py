@@ -1,4 +1,5 @@
-"""Console relay client for connecting to the relay Unix socket.
+"""
+Console relay client for connecting to the relay Unix socket.
 
 Provides a high-level client for bidirectional console communication
 with detach keybind support.
@@ -18,15 +19,17 @@ from mvmctl.services.console_relay.exceptions import ConsoleRelayConnectionError
 
 
 class ConsoleRelayClient:
-    """Client for connecting to a console relay Unix socket.
+    """
+    Client for connecting to a console relay Unix socket.
 
         Handles connection management, bidirectional I/O, and graceful
     disconnection with optional detach keybind support.
 
-        Attributes:
+    Attributes:
             _socket_path: Path to the Unix socket
             _detach_sequence: Byte sequence to trigger detach
             _sock: Connected socket or None
+
     """
 
     def __init__(
@@ -34,24 +37,28 @@ class ConsoleRelayClient:
         socket_path: Path,
         detach_sequence: bytes = CONST_CONSOLE_DETACH_SEQUENCE,
     ) -> None:
-        """Initialize the console relay client.
+        """
+        Initialize the console relay client.
 
         Args:
             socket_path: Path to the console relay Unix socket
             detach_sequence: Byte sequence to trigger detach (default: Ctrl+X then 'd')
+
         """
         self._socket_path = socket_path
         self._detach_sequence = detach_sequence
         self._sock: socket.socket | None = None
 
     def connect(self, timeout: float = CONST_CONSOLE_SOCKET_TIMEOUT_S) -> None:
-        """Connect to the console relay socket.
+        """
+        Connect to the console relay socket.
 
         Args:
             timeout: Connection timeout in seconds
 
         Raises:
             ConsoleRelayConnectionError: If connection fails
+
         """
         try:
             self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -77,13 +84,15 @@ class ConsoleRelayClient:
         return self._sock is not None
 
     def send(self, data: bytes) -> bool:
-        """Send data to the console.
+        """
+        Send data to the console.
 
         Args:
             data: Bytes to send
 
         Returns:
             True if successful, False if connection broken
+
         """
         if self._sock is None or not data:
             return False
@@ -93,8 +102,9 @@ class ConsoleRelayClient:
         except (OSError, BrokenPipeError, ConnectionResetError):
             return False
 
-    def receive(self, buffer_size: int = 4096) -> Generator[bytes, None, None]:
-        """Receive data from the console.
+    def receive(self, buffer_size: int = 4096) -> Generator[bytes]:
+        """
+        Receive data from the console.
 
         Yields bytes as they become available. Check for detach sequence
         in your handler.
@@ -104,6 +114,7 @@ class ConsoleRelayClient:
 
         Yields:
             Bytes received from the console
+
         """
         if self._sock is None:
             return
@@ -125,13 +136,15 @@ class ConsoleRelayClient:
                     return
 
     def check_detach(self, buffer: bytearray) -> bool:
-        """Check if buffer ends with detach sequence.
+        """
+        Check if buffer ends with detach sequence.
 
         Args:
             buffer: Accumulated input buffer
 
         Returns:
             True if detach sequence detected
+
         """
         if len(buffer) >= len(self._detach_sequence):
             return (
@@ -151,13 +164,15 @@ class ConsoleRelayClient:
         return self._detach_sequence
 
     def get_socket(self) -> socket.socket:
-        """Return the underlying connected socket for advanced use.
+        """
+        Return the underlying connected socket for advanced use.
 
         Returns:
             Connected socket (set to non-blocking mode)
 
         Raises:
             RuntimeError: If not connected
+
         """
         if self._sock is None:
             raise RuntimeError("Not connected - call connect() first")

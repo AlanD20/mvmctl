@@ -1,4 +1,5 @@
-"""VM service — stateless operations coordinator.
+"""
+VM service — stateless operations coordinator.
 
 Handles both single-VM and bulk VM operations.
 Bulk operations delegate to VMController per VM via ParallelExecutor.
@@ -14,7 +15,8 @@ from mvmctl.models.vm import VMInstanceItem
 
 
 class VMService:
-    """Stateless VM operations coordinator.
+    """
+    Stateless VM operations coordinator.
 
     Handles bulk operations and delegates single-VM operations to Controller.
     """

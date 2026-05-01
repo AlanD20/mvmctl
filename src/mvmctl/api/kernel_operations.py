@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +30,8 @@ __all__ = ["KernelOperation"]
 
 
 class KernelOperation:
-    """Orchestration layer for kernel operations.
+    """
+    Orchestration layer for kernel operations.
 
     All methods are @staticmethod — they take Input classes as arguments,
     create Request/Resolved internally, and orchestrate across core modules.
@@ -38,7 +39,8 @@ class KernelOperation:
 
     @staticmethod
     def fetch(inputs: KernelFetchInput) -> KernelItem:
-        """Fetch or build a kernel based on type.
+        """
+        Fetch or build a kernel based on type.
 
         Args:
             inputs: KernelFetchInput with kernel_type, version, arch, etc.
@@ -48,6 +50,7 @@ class KernelOperation:
 
         Raises:
             KernelError: If fetch/build fails.
+
         """
         db = Database()
         repo = KernelRepository(db)
@@ -115,7 +118,7 @@ class KernelOperation:
             )
 
         # Generate hash from the fetched/built kernel file
-        timestamp = datetime.now(tz=timezone.utc).isoformat()
+        timestamp = datetime.now(tz=UTC).isoformat()
         kernel_id = HashGenerator.kernel(
             fetch_result.path, fetch_result.version, resolved.arch, timestamp
         )
@@ -164,7 +167,8 @@ class KernelOperation:
 
     @staticmethod
     def remove(inputs: KernelInput, force: bool = False) -> None:
-        """Remove kernel by ID prefix or name.
+        """
+        Remove kernel by ID prefix or name.
 
         Args:
             inputs: KernelInput with id/name identifiers.
@@ -172,6 +176,7 @@ class KernelOperation:
 
         Raises:
             KernelError: If kernel not found or referenced by VMs.
+
         """
         from mvmctl.api.inputs._kernel_input import KernelRequest
 
@@ -197,10 +202,12 @@ class KernelOperation:
 
     @staticmethod
     def list_all() -> list[KernelItem]:
-        """List all kernels, syncing is_present with filesystem.
+        """
+        List all kernels, syncing is_present with filesystem.
 
         Returns:
             List of all KernelItem records.
+
         """
         db = Database()
         repo = KernelRepository(db)
@@ -208,7 +215,8 @@ class KernelOperation:
 
     @staticmethod
     def get(inputs: KernelInput) -> KernelItem:
-        """Get a single kernel by ID prefix or name.
+        """
+        Get a single kernel by ID prefix or name.
 
         Args:
             inputs: KernelInput with id/name identifiers.
@@ -218,6 +226,7 @@ class KernelOperation:
 
         Raises:
             KernelError: If kernel not found or ambiguous.
+
         """
         from mvmctl.api.inputs._kernel_input import KernelRequest
 
@@ -235,7 +244,8 @@ class KernelOperation:
 
     @staticmethod
     def _kernel_to_dict(kernel: KernelItem) -> dict[str, Any]:
-        """Convert KernelItem to dictionary for JSON output.
+        """
+        Convert KernelItem to dictionary for JSON output.
 
         Includes every field from the model.
         """
@@ -256,7 +266,8 @@ class KernelOperation:
     def inspect(
         inputs: KernelInput, is_json: bool = False
     ) -> KernelItem | dict[str, Any]:
-        """Inspect a kernel with full details.
+        """
+        Inspect a kernel with full details.
 
         Args:
             inputs: KernelInput with id/name identifiers.
@@ -264,6 +275,7 @@ class KernelOperation:
 
         Returns:
             KernelItem or dict representation depending on is_json.
+
         """
         kernel_item = KernelOperation.get(inputs)
         if is_json:
@@ -272,10 +284,12 @@ class KernelOperation:
 
     @staticmethod
     def set_default(inputs: KernelInput) -> None:
-        """Set a kernel as the default.
+        """
+        Set a kernel as the default.
 
         Args:
             inputs: KernelInput with id/name identifiers.
+
         """
         from mvmctl.api.inputs._kernel_input import KernelRequest
 
@@ -299,13 +313,15 @@ class KernelOperation:
 
     @staticmethod
     def ensure_default() -> KernelItem:
-        """Ensure the default kernel exists and is available.
+        """
+        Ensure the default kernel exists and is available.
 
         Returns:
             The default KernelItem.
 
         Raises:
             KernelError: If no default kernel exists.
+
         """
         db = Database()
         repo = KernelRepository(db)

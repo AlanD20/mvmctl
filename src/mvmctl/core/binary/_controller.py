@@ -1,4 +1,5 @@
-"""Binary lifecycle operations.
+"""
+Binary lifecycle operations.
 
 This module contains the BinaryController class for managing binary lifecycle
 operations like set_default, get, etc.
@@ -12,7 +13,8 @@ from mvmctl.models.binary import BinaryItem
 
 
 class BinaryController:
-    """Stateful binary manager.
+    """
+    Stateful binary manager.
 
     Resolves binary entity in __init__ and operates on cached BinaryItem.
     """
@@ -43,7 +45,8 @@ class BinaryController:
         )
 
     def remove(self, *, force: bool = False) -> None:
-        """Remove this binary from disk and database.
+        """
+        Remove this binary from disk and database.
 
         Hard-deletes when no VMs reference the binary.
         Soft-deletes only when VMs still reference it (to preserve history).
@@ -53,6 +56,7 @@ class BinaryController:
 
         Raises:
             BinaryError: If binary is referenced by VMs and force is False.
+
         """
         from mvmctl.exceptions import BinaryError
 

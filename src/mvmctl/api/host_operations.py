@@ -6,7 +6,7 @@ import logging
 import os
 import pwd
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from mvmctl.constants import (
@@ -238,7 +238,7 @@ class HostOperation:
             except Exception as e:
                 logger.warning("Could not update host state: %s", e)
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         try:
             controller.mark_initialized(now)
         except Exception as e:

@@ -1,4 +1,5 @@
-"""VM import resolution — Input → Request → ResolvedVMCreateInput.
+"""
+VM import resolution — Input → Request → ResolvedVMCreateInput.
 
 Reads a portable VMExportConfig JSON file, resolves semantic references
 (os_slug, version, name) to actual DB records, and produces a
@@ -51,7 +52,8 @@ class VMImportInput:
 
 
 class VMImportRequest:
-    """Resolve VMImportInput to ResolvedVMCreateInput.
+    """
+    Resolve VMImportInput to ResolvedVMCreateInput.
 
     1. Read VMExportConfig from JSON file
     2. Resolve semantic references to DB records

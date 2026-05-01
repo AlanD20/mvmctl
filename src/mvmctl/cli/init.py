@@ -31,7 +31,8 @@ def help_cmd(ctx: typer.Context) -> None:
 
 
 def _run_with_sudo() -> subprocess.CompletedProcess[str]:
-    """Spawn ``sudo mvm host init`` and return the completed process.
+    """
+    Spawn ``sudo mvm host init`` and return the completed process.
 
     Stderr is left attached to the terminal so the sudo password prompt is
     visible.  Stdout is captured to avoid interleaving with the wizard UI.

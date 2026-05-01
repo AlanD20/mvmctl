@@ -55,17 +55,21 @@ _NO_PARTITION_TABLE = _NoPartitionTable()
 
 
 class ImageService:
-    """Handles image processing: compression, decompression, shrinking, format conversion, and pool management.
+    """
+    Handles image processing: compression, decompression, shrinking, format conversion, and pool management.
 
     Args:
         repo: ImageRepository for DB operations. Must be provided.
+
     """
 
     def __init__(self, repo: ImageRepository) -> None:
-        """Initialize ImageService.
+        """
+        Initialize ImageService.
 
         Args:
             repo: ImageRepository for DB operations.
+
         """
         self._repo = repo
 
@@ -78,7 +82,8 @@ class ImageService:
         partition: int | None = None,
         disabled_detectors: list[str] | None = None,
     ) -> Path:
-        """Route to the appropriate format handler.
+        """
+        Route to the appropriate format handler.
 
         Each handler receives only the parameters it needs.
         """
@@ -112,7 +117,8 @@ class ImageService:
             raise ImageError(f"Unknown format: {fmt}")
 
     def remove_many(self, images: list[ImageItem], force: bool = False) -> None:
-        """Remove multiple images, enriching with VM references first.
+        """
+        Remove multiple images, enriching with VM references first.
 
         Uses a single batch query to enrich all images with their VMs,
         then creates a controller per image to handle removal.
@@ -129,7 +135,8 @@ class ImageService:
             controller.remove(force=force)
 
     def remove_many_paths(self, images: list[ImageItem]) -> list[str]:
-        """Remove files for multiple images from disk. No DB changes.
+        """
+        Remove files for multiple images from disk. No DB changes.
 
         Creates a controller per image to handle file removal.
 
@@ -138,6 +145,7 @@ class ImageService:
 
         Returns:
             Flat list of all removed filenames.
+
         """
         from mvmctl.core.image._controller import ImageController
 
@@ -148,7 +156,8 @@ class ImageService:
         return removed
 
     def list_local(self, verify: bool = True) -> list[ImageItem]:
-        """List all images, syncing is_present flag with filesystem.
+        """
+        List all images, syncing is_present flag with filesystem.
 
         Checks each image's path on disk and bulk-updates is_present
         for any that are missing. Returns the full list with updated state.
@@ -156,6 +165,7 @@ class ImageService:
         Args:
             verify: If True (default), check filesystem and update DB.
                    If False, return DB records as-is.
+
         """
         images = self._repo.list_all()
         if not verify:
@@ -177,7 +187,8 @@ class ImageService:
     def _resolve_image_path(
         self, images_dir: Path, image: ImageItem
     ) -> Path | None:
-        """Resolve the actual filesystem path for an image.
+        """
+        Resolve the actual filesystem path for an image.
 
         Tries the stored path first, then known extensions.
         Returns None if no file found.
@@ -534,7 +545,8 @@ class ImageService:
     def materialize_to(
         self, image_id: str, fs_type: str, output_path: Path
     ) -> None:
-        """Fast durable copy from tmpfs cache to destination.
+        """
+        Fast durable copy from tmpfs cache to destination.
 
         Uses reflink (CoW) + sparse detection for maximum speed on btrfs/xfs.
         Falls back to dd conv=sparse,fsync on non-CoW filesystems.
@@ -548,6 +560,7 @@ class ImageService:
 
         Raises:
             ImageError: If the image is not in the cache or copy fails.
+
         """
         cached_path = CacheUtils.get_warm_image_dir() / f"{image_id}.{fs_type}"
 
@@ -580,7 +593,8 @@ class ImageService:
     def get_specs_for(
         cls, os_slugs: list[str], version: str | None
     ) -> list[ImageSpec]:
-        """Resolve ImageSpecs from the bundled images.yaml by os_slugs.
+        """
+        Resolve ImageSpecs from the bundled images.yaml by os_slugs.
 
         Args:
             os_slugs: List of image IDs from images.yaml (e.g., ['ubuntu-24.04']).
@@ -590,6 +604,7 @@ class ImageService:
 
         Raises:
             ImageError: If any image is not found in the catalog.
+
         """
         all_specs = cls.load_available_images()
 
@@ -622,7 +637,8 @@ class ImageService:
     def compress(
         self, image_path: Path, level: int = 3, keep_source: bool = False
     ) -> Path:
-        """Compress the image using zstd.
+        """
+        Compress the image using zstd.
 
         Args:
             image_path: Path to the image file to compress.
@@ -637,6 +653,7 @@ class ImageService:
             ImageCompressionError: If compression fails
             ImageEmptyError: If source file is empty
             ImageCorruptError: If source file appears to be all zeros
+
         """
         import zstandard as zstd
 
@@ -699,7 +716,8 @@ class ImageService:
         output_path: Path,
         compressed_format: str | None = None,
     ) -> None:
-        """Decompress the image to the specified output path.
+        """
+        Decompress the image to the specified output path.
 
         Args:
             compressed_path: Path to the compressed image file.
@@ -708,6 +726,7 @@ class ImageService:
 
         Raises:
             ImageDecompressionError: If decompression fails or source not found
+
         """
         import zstandard as zstd
 
@@ -749,7 +768,8 @@ class ImageService:
             ) from e
 
     def ensure_cached(self, images: list[ImageItem]) -> list[Path]:
-        """Ensure images are decompressed to tmpfs cache, creating if needed.
+        """
+        Ensure images are decompressed to tmpfs cache, creating if needed.
 
         This maintains a tmpfs-based cache of decompressed images
         for fast cloning. First call decompresses to RAM, subsequent calls
@@ -763,6 +783,7 @@ class ImageService:
 
         Raises:
             ImageDecompressionError: If decompression fails.
+
         """
         from mvmctl.utils.common import CacheUtils
 
@@ -791,7 +812,8 @@ class ImageService:
     def _has_significant_free_space(
         self, image_path: Path, threshold: float = 0.02
     ) -> bool:
-        """Check if ext4 image has >threshold free space using dumpe2fs.
+        """
+        Check if ext4 image has >threshold free space using dumpe2fs.
 
         Uses dumpe2fs to check block usage without mounting or booting
         a guestfs appliance. Returns True if there's significant free
@@ -806,6 +828,7 @@ class ImageService:
         Returns:
             True if free space > threshold, False otherwise.
             Returns True on any error (safe fallback: shrink anyway).
+
         """
         try:
             result = subprocess.run(
@@ -909,7 +932,8 @@ class ImageService:
     def grow_rootfs_with_guestfs(
         self, image_path: Path, target_size_bytes: int
     ) -> None:
-        """Grow the root filesystem to target size using libguestfs.
+        """
+        Grow the root filesystem to target size using libguestfs.
 
         Args:
             image_path: Path to the disk image.
@@ -918,6 +942,7 @@ class ImageService:
         Raises:
             ImageError: If libguestfs is unavailable, target size is smaller than
                 current size, or resize operation fails.
+
         """
         try:
             og = OptimizedGuestfs(image_path, readonly=False)
@@ -1206,7 +1231,8 @@ class ImageService:
 
     @classmethod
     def detect_image_format(cls, path: Path) -> str | None:
-        """Detect container format from magic bytes. Returns None if unknown.
+        """
+        Detect container format from magic bytes. Returns None if unknown.
 
         This is a pure probe: it never modifies or deletes the file.
         """
@@ -1235,7 +1261,8 @@ class ImageService:
     def resolve_remote_sizes(
         cls, specs: list[ImageSpec], ci_version
     ) -> list[ImageSpec]:
-        """Resolve remote image sizes via HEAD requests with HTTP caching.
+        """
+        Resolve remote image sizes via HEAD requests with HTTP caching.
 
         Uses the same template resolution and S3 listing logic as fetch
         so ls -r shows sizes for the same version that would be downloaded.
@@ -1245,6 +1272,7 @@ class ImageService:
 
         Returns:
             The same list with size fields populated where available.
+
         """
         from concurrent.futures import ThreadPoolExecutor
 
@@ -1481,7 +1509,8 @@ class ImageService:
         downloaded_path: Path,
         image_format: str,
     ) -> None:
-        """Validate downloaded file is valid for its format.
+        """
+        Validate downloaded file is valid for its format.
 
         Uses Python-only header checks — no external tools.
         Unlinks the file on validation failure.
@@ -1551,7 +1580,8 @@ class ImageService:
         return output_path
 
     def _validate_image_path(self, image_path: Path) -> Path:
-        """Validate that an image path exists.
+        """
+        Validate that an image path exists.
 
         Args:
             image_path: Path to validate
@@ -1561,6 +1591,7 @@ class ImageService:
 
         Raises:
             ImageError: If path does not exist
+
         """
         if not image_path.exists():
             raise ImageError(f"Image file not found: {image_path}")
@@ -1576,7 +1607,8 @@ class ImageService:
         return image_path
 
     def _calculate_minimum_image_size_mb(self, content_bytes: int) -> int:
-        """Calculate minimum image size in MiB based on actual content bytes.
+        """
+        Calculate minimum image size in MiB based on actual content bytes.
 
         Uses binary MiB (1,048,576 bytes) for calculation with headroom factor.
         """
@@ -1730,7 +1762,8 @@ class ImageService:
         partition: int | None = None,
         disabled_detectors: list[str] | None = None,
     ) -> Path:
-        """Handle VHD format.
+        """
+        Handle VHD format.
 
         Tries guestfs-based extraction first for reliability with non-standard
         VHD images (e.g., Alpine), falls back to sfdisk/fdisk parsing.
@@ -1769,7 +1802,8 @@ class ImageService:
         partition: int | None = None,
         disabled_detectors: list[str] | None = None,
     ) -> Path:
-        """Handle VHDX format.
+        """
+        Handle VHDX format.
 
         Tries guestfs-based extraction first for reliability with VHDX images,
         falls back to sfdisk/fdisk parsing.
@@ -1949,7 +1983,8 @@ class ImageService:
 
     @staticmethod
     def _is_raw(path: Path, file_size: int) -> bool:
-        """Check if file looks like a raw disk image.
+        """
+        Check if file looks like a raw disk image.
 
         Requires sector alignment and evidence of a partition table
         (MBR signature at offset 510, or GPT at offset 512) or

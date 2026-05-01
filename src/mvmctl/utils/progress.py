@@ -1,4 +1,5 @@
-"""ASCII text-based progress bar utilities for downloads.
+"""
+ASCII text-based progress bar utilities for downloads.
 
 This module provides a simple ASCII progress bar implementation for TTY and
 non-TTY environments. It avoids Rich Progress API for lightweight operation
@@ -15,7 +16,8 @@ logger = logging.getLogger(__name__)
 
 
 class ASCIIProgressBar:
-    """ASCII progress bar that works in both TTY and non-TTY environments.
+    """
+    ASCII progress bar that works in both TTY and non-TTY environments.
 
     Displays progress as: [####      ] 45% (4.2MB/10MB)
 
@@ -26,12 +28,14 @@ class ASCIIProgressBar:
     def __init__(
         self, total: int, width: int = 40, title: str = "Downloading"
     ) -> None:
-        """Initialize the progress bar.
+        """
+        Initialize the progress bar.
 
         Args:
             total: Total bytes to download (0 if unknown)
             width: Width of the progress bar in characters
             title: Title to display before the progress bar
+
         """
         self.total = total
         self.width = width
@@ -42,22 +46,26 @@ class ASCIIProgressBar:
         self._is_tty = sys.stdout.isatty()
 
     def update(self, n: int) -> None:
-        """Update progress by n bytes.
+        """
+        Update progress by n bytes.
 
         Args:
             n: Number of bytes downloaded since last update
+
         """
         self.current += n
         self._display()
 
     def _format_size(self, size_bytes: int) -> str:
-        """Format bytes to human readable (B, KB, MB, GB).
+        """
+        Format bytes to human readable (B, KB, MB, GB).
 
         Args:
             size_bytes: Size in bytes
 
         Returns:
             Human-readable size string (e.g., "4.2MB")
+
         """
         if size_bytes < 1024:
             return f"{size_bytes}B"
@@ -104,7 +112,8 @@ class ASCIIProgressBar:
 
 
 class Spinner:
-    """Threaded ASCII spinner for indeterminate progress.
+    """
+    Threaded ASCII spinner for indeterminate progress.
 
     Displays a rotating character with a message on a single line.
     Runs in a background thread so the main thread can do the actual work.

@@ -7,7 +7,8 @@ from pathlib import Path
 
 
 class HashGenerator:
-    """Generate content-addressed SHA256 hashes for domain resources.
+    """
+    Generate content-addressed SHA256 hashes for domain resources.
 
     All methods return 64-character lowercase hexadecimal hashes.
     """
@@ -34,7 +35,8 @@ class HashGenerator:
 
     @staticmethod
     def vm(name: str, created_at: str) -> str:
-        """Generate 32-char SHA256 hash for a VM.
+        """
+        Generate 32-char SHA256 hash for a VM.
 
         VM IDs are truncated to 32 characters (instead of the usual 64) so
         that filesystem paths derived from the ID stay well under the Unix

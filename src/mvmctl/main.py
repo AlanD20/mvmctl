@@ -16,7 +16,8 @@ import click
 
 
 def _setup_signal_handlers() -> None:
-    """Install graceful signal handlers for programmatic CLI use.
+    """
+    Install graceful signal handlers for programmatic CLI use.
 
     SIGTERM is sent by process managers (systemd, docker stop, etc.).
     We convert it to a clean sys.exit(143) (128 + 15).
@@ -62,12 +63,14 @@ def _get_env_var(suffix: str) -> str:
 
 
 def _get_git_version_info() -> str | None:
-    """Get git version info if running from source.
+    """
+    Get git version info if running from source.
 
     Returns:
         - Tag name if current commit is tagged
         - Short commit hash prefixed with 'git+' if not tagged
         - None if not in a git repo or git not available
+
     """
     try:
         # Get the directory containing this file (src/mvmctl/)

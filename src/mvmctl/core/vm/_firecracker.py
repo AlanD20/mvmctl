@@ -6,8 +6,9 @@ import logging
 import socket
 import subprocess
 import time
+from collections.abc import Collection
 from pathlib import Path
-from typing import Any, Collection, NotRequired, TextIO, TypedDict, override
+from typing import Any, NotRequired, TextIO, TypedDict, override
 
 from mvmctl.constants import (
     CONST_HTTP_STATUS_NO_CONTENT,
@@ -364,7 +365,8 @@ class FirecrackerSpawner:
     def _parse_boot_args_to_dict(
         self, boot_args: str
     ) -> dict[str, list[str] | None]:
-        """Parse boot arguments string into a dictionary with list values.
+        """
+        Parse boot arguments string into a dictionary with list values.
 
         Handles kernel-style boot arguments in format 'key=value' or flags.
         Multiple occurrences of the same key are stored as a list of values.
@@ -385,6 +387,7 @@ class FirecrackerSpawner:
             {"pci": ["off"], "quiet": None, "splash": None}
             >>> self._parse_boot_args_to_dict("systemd.mask=s1 systemd.mask=s2")
             {"systemd.mask": ["s1", "s2"]}
+
         """
         result: dict[str, list[str] | None] = {}
         if not boot_args or not boot_args.strip():
@@ -408,7 +411,8 @@ class FirecrackerSpawner:
     def _join_boot_args_dict(
         self, boot_args_dict: dict[str, list[str] | None]
     ) -> str:
-        """Join boot arguments dictionary back into a space-separated string.
+        """
+        Join boot arguments dictionary back into a space-separated string.
 
         Reverses _parse_boot_args_to_dict(). Handles both key=value pairs and
         flags (keys with None values). For list values, duplicates the key
@@ -425,6 +429,7 @@ class FirecrackerSpawner:
             "pci=off quiet root=/dev/vda"
             >>> self._join_boot_args_dict({"systemd.mask": ["s1", "s2"]})
             "systemd.mask=s1 systemd.mask=s2"
+
         """
         parts: list[str] = []
         for key, values in boot_args_dict.items():
@@ -438,7 +443,8 @@ class FirecrackerSpawner:
     def _set_boot_arg(
         self, boot_args_dict: dict[str, list[str] | None], key: str, value: str
     ) -> None:
-        """Set (overwrite) a boot argument value in the dictionary.
+        """
+        Set (overwrite) a boot argument value in the dictionary.
 
         If the key exists, its value is replaced.  This ensures that
         arguments such as ``root=`` or ``pci=`` only appear once in the
@@ -448,6 +454,7 @@ class FirecrackerSpawner:
             boot_args_dict: The boot arguments dictionary to modify.
             key: The boot argument key (e.g., "pci", "systemd.mask").
             value: The value to set.
+
         """
         boot_args_dict[key] = [value]
 
@@ -548,11 +555,13 @@ class FirecrackerClient:
         self.close()
 
     def _connect(self) -> None:
-        """Connect to Firecracker socket.
+        """
+        Connect to Firecracker socket.
 
         Raises:
             SocketNotFoundError: If the socket file does not exist.
             FirecrackerError: If connection to the socket fails.
+
         """
         if not self._socket_path.exists():
             raise SocketNotFoundError(f"Socket not found: {self._socket_path}")
@@ -570,11 +579,13 @@ class FirecrackerClient:
         path: str,
         body: dict[str, object] | None = None,
     ) -> tuple[int, dict[str, object] | None]:
-        """Make HTTP request to Firecracker API.
+        """
+        Make HTTP request to Firecracker API.
 
         Raises:
             SocketNotFoundError: If the socket file does not exist.
             FirecrackerError: If the API request fails.
+
         """
         if not self._conn:
             self._connect()
@@ -610,7 +621,8 @@ class FirecrackerClient:
         mem_path: Path,
         snapshot_path: Path,
     ) -> bool:
-        """Create VM snapshot.
+        """
+        Create VM snapshot.
 
         Args:
             mem_path: Path to save memory state
@@ -621,6 +633,7 @@ class FirecrackerClient:
 
         Raises:
             FirecrackerError: If snapshot creation fails.
+
         """
         logger.info("Creating snapshot...")
 
@@ -648,7 +661,8 @@ class FirecrackerClient:
         snapshot_path: Path,
         resume: bool = True,
     ) -> bool:
-        """Load VM from snapshot.
+        """
+        Load VM from snapshot.
 
         Args:
             mem_path: Path to memory state file
@@ -660,6 +674,7 @@ class FirecrackerClient:
 
         Raises:
             FirecrackerError: If snapshot loading fails.
+
         """
         logger.info("Loading snapshot...")
 
@@ -681,10 +696,12 @@ class FirecrackerClient:
             raise FirecrackerClientError(msg)
 
     def get_instance_info(self) -> InstanceInfo | None:
-        """Get VM instance information.
+        """
+        Get VM instance information.
 
         Returns:
             InstanceInfo TypedDict or None
+
         """
         status, data = self._request("GET", "/")
 
@@ -693,10 +710,12 @@ class FirecrackerClient:
         return None
 
     def describe_instance(self) -> InstanceDescription | None:
-        """Describe the VM instance.
+        """
+        Describe the VM instance.
 
         Returns:
             InstanceDescription TypedDict or None
+
         """
         status, data = self._request("GET", "/vm")
 
@@ -705,13 +724,15 @@ class FirecrackerClient:
         return None
 
     def start_instance(self) -> bool:
-        """Start the VM instance.
+        """
+        Start the VM instance.
 
         Returns:
             True if successful.
 
         Raises:
             FirecrackerError: If the start operation fails.
+
         """
         logger.info("Starting VM...")
         status, _ = self._request(
@@ -725,10 +746,12 @@ class FirecrackerClient:
             raise FirecrackerClientError(f"Failed to start VM: {status}")
 
     def send_ctrl_alt_del(self) -> bool:
-        """Send Ctrl+Alt+Del to VM.
+        """
+        Send Ctrl+Alt+Del to VM.
 
         Returns:
             True if successful, False otherwise
+
         """
         try:
             status, _ = self._request(
@@ -746,10 +769,12 @@ class FirecrackerClient:
             return False
 
     def pause_vm(self) -> None:
-        """Pause the microVM via PATCH /vm.
+        """
+        Pause the microVM via PATCH /vm.
 
         Raises:
             FirecrackerError: If the pause operation fails.
+
         """
         logger.info("Pausing VM...")
         status, _ = self._request("PATCH", "/vm", {"state": "Paused"})
@@ -760,10 +785,12 @@ class FirecrackerClient:
             raise FirecrackerClientError(f"Failed to pause VM: {status}")
 
     def resume_vm(self) -> None:
-        """Resume a paused microVM via PATCH /vm.
+        """
+        Resume a paused microVM via PATCH /vm.
 
         Raises:
             FirecrackerError: If the resume operation fails.
+
         """
         logger.info("Resuming VM...")
         status, _ = self._request("PATCH", "/vm", {"state": "Resumed"})

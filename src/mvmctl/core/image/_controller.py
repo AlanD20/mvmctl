@@ -1,4 +1,5 @@
-"""Image management.
+"""
+Image management.
 
 This module handles image operations including tmpfs caching,
 compression, and decompression for fast VM cloning.
@@ -18,7 +19,8 @@ logger = logging.getLogger(__name__)
 
 
 class ImageController:
-    """Manages image operations for a specific image.
+    """
+    Manages image operations for a specific image.
 
     This class handles compression, decompression, and tmpfs caching
     for fast VM rootfs cloning.
@@ -29,6 +31,7 @@ class ImageController:
 
     Raises:
         ImageNotFoundError: If the image cannot be resolved.
+
     """
 
     def __init__(self, entity: str | ImageItem, repo: ImageRepository) -> None:
@@ -51,7 +54,8 @@ class ImageController:
 
     @property
     def compressed_path(self) -> Path:
-        """Get the compressed path for this image.
+        """
+        Get the compressed path for this image.
 
         Uses compressed_format from ImageItem if set, otherwise defaults to .zst.
         """
@@ -60,7 +64,8 @@ class ImageController:
         return Path(self.image_path).with_suffix(suffix)
 
     def remove_path(self) -> list[str]:
-        """Remove all files for this controller's image from disk. No DB changes.
+        """
+        Remove all files for this controller's image from disk. No DB changes.
 
         Removes files matching self._image.id from:
         - images directory (.zst, .img, .download, etc.)
@@ -68,6 +73,7 @@ class ImageController:
 
         Returns:
             List of removed filenames for logging.
+
         """
         images_dir = CacheUtils.get_images_dir()
         warm_dir = CacheUtils.get_warm_image_dir()
@@ -86,7 +92,8 @@ class ImageController:
         return removed
 
     def remove(self, force: bool = False) -> None:
-        """Remove image files and delete the DB record.
+        """
+        Remove image files and delete the DB record.
 
         Hard-deletes when no VMs reference the image.
         Soft-deletes only when VMs still reference it (to preserve history).
@@ -96,6 +103,7 @@ class ImageController:
 
         Raises:
             ImageError: If image is referenced by VMs and force is False.
+
         """
         from mvmctl.exceptions import ImageError
         from mvmctl.utils.auditlog import AuditLog
@@ -123,10 +131,12 @@ class ImageController:
 
     @staticmethod
     def prune_cached() -> int:
-        """Remove all images from the tmpfs cache.
+        """
+        Remove all images from the tmpfs cache.
 
         Returns:
             Number of files removed
+
         """
         cache_dir = CacheUtils.get_warm_image_dir()
         removed_count = 0

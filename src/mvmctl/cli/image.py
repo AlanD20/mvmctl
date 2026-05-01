@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, cast
 
 import typer
 
@@ -164,17 +164,17 @@ def image_fetch(
         ...,
         help="Image ID or image type from 'mvm image ls --remote' (e.g. ubuntu-24.04 or ubuntu)",
     ),
-    image_type: Optional[str] = typer.Option(
+    image_type: str | None = typer.Option(
         None,
         "--type",
         help="Image type from images.yaml (e.g. ubuntu, debian, firecracker)",
     ),
-    version: Optional[str] = typer.Option(
+    version: str | None = typer.Option(
         None,
         "--version",
         help="Image spec version from images.yaml (required if multiple images share the same type)",
     ),
-    arch: Optional[str] = typer.Option(
+    arch: str | None = typer.Option(
         None,
         "--arch",
         help="Image architecture (e.g. x86_64, arm64)",
@@ -190,7 +190,7 @@ def image_fetch(
         "--skip-optimization",
         help="Skip shrink and compression, keep plain ext4",
     ),
-    disable_detector: Optional[str] = typer.Option(
+    disable_detector: str | None = typer.Option(
         None,
         "--disable-detector",
         help="Comma-separated detectors to disable: type,label,size,filesystem,all",
@@ -252,18 +252,20 @@ def image_set_default(
 )
 @handle_errors
 def image_rm(
-    prefixes: Optional[list[str]] = typer.Argument(
+    prefixes: list[str] | None = typer.Argument(
         None, help="Image ID prefixes to remove"
     ),
     force: bool = typer.Option(
         False, "--force", "-f", help="Remove even if referenced by VMs"
     ),
 ) -> None:
-    """Remove cached images by ID prefix.
+    """
+    Remove cached images by ID prefix.
 
     Examples:
         mvm image rm abc123
         mvm image rm abc123 def456
+
     """
     effective_ids: list[str] = list(prefixes) if prefixes else []
     if not effective_ids:
@@ -282,12 +284,14 @@ def image_inspect(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     tree: bool = typer.Option(False, "--tree", help="Output in tree format"),
 ) -> None:
-    """Show detailed information about an image.
+    """
+    Show detailed information about an image.
 
     Examples:
         mvm image inspect abc123
         mvm image inspect abc123 --json
         mvm image inspect abc123 --tree
+
     """
     info = ImageOperation.inspect(ImageInput(id=[prefix]), is_json=json_output)
 
@@ -415,17 +419,17 @@ def _print_image_details_tree(info: ImageItem) -> None:
 def image_import(
     name: str = typer.Argument(..., help="Display name for the imported image"),
     source_path: Path = typer.Argument(..., help="Path to local image file"),
-    arch: Optional[str] = typer.Option(
+    arch: str | None = typer.Option(
         None,
         "--arch",
         help="Image arch: x86_64, arm64",
     ),
-    root_partition: Optional[int] = typer.Option(
+    root_partition: int | None = typer.Option(
         None,
         "--root-partition",
         help="Root Partition: 1, 2, 3",
     ),
-    format: Optional[str] = typer.Option(
+    format: str | None = typer.Option(
         DEFAULT_IMAGE_IMPORT_FORMAT,
         "--format",
         help="Image format: qcow2, raw, tar-rootfs, or auto",
@@ -441,7 +445,7 @@ def image_import(
         "--skip-optimization",
         help="Skip shrink and compression, keep plain ext4",
     ),
-    disable_detector: Optional[str] = typer.Option(
+    disable_detector: str | None = typer.Option(
         None,
         "--disable-detector",
         help="Comma-separated detectors to disable: type,label,size,filesystem,all",
@@ -510,7 +514,8 @@ def image_warm(
         help="Image ID, hash prefix, or OS slug to warm (e.g., 'ubuntu-24.04', 'abc123')",
     ),
 ) -> None:
-    """Pre-decompress image to ready pool for fast VM creation.
+    """
+    Pre-decompress image to ready pool for fast VM creation.
 
     This command decompresses the image to tmpfs/RAM ahead of time,
     so subsequent VM creations can use fast copy instead of waiting
@@ -522,6 +527,7 @@ def image_warm(
 
         # Warm by image ID prefix:
         mvm image warm abc123
+
     """
     warmed_paths = ImageOperation.warm(ImageInput(id=[image_id]))
     for path in warmed_paths:

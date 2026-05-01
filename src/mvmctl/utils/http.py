@@ -8,9 +8,10 @@ import logging
 import os
 import tempfile
 import time
+from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 from urllib.error import HTTPError, URLError
 from urllib.request import (
     HTTPHandler,
@@ -170,7 +171,8 @@ class HttpDownload:
         use_cache: bool = False,
         cache_ttl_seconds: int = DEFAULT_CACHE_TTL_SECONDS,
     ) -> bytes:
-        """Fetch a URL and return the raw response bytes.
+        """
+        Fetch a URL and return the raw response bytes.
 
         Args:
             url: The URL to fetch.
@@ -184,6 +186,7 @@ class HttpDownload:
 
         Raises:
             HttpDownloadError: If the download fails.
+
         """
         if use_cache:
             cache_file = HttpCache._cache_path(url)
@@ -212,7 +215,8 @@ class HttpDownload:
         use_cache: bool = True,
         cache_ttl_seconds: int = DEFAULT_CACHE_TTL_SECONDS,
     ) -> int | None:
-        """Get remote file size via HEAD request with optional caching.
+        """
+        Get remote file size via HEAD request with optional caching.
 
         Args:
             url: The URL to probe.
@@ -222,6 +226,7 @@ class HttpDownload:
 
         Returns:
             Content-Length in bytes, or None if unavailable.
+
         """
         if use_cache:
             cache_file = HttpCache._cache_path(url)
@@ -256,7 +261,8 @@ class HttpDownload:
         use_cache: bool = False,
         cache_ttl_seconds: int = DEFAULT_CACHE_TTL_SECONDS,
     ) -> str:
-        """Download a URL and return its raw content as a string.
+        """
+        Download a URL and return its raw content as a string.
 
         This is a lightweight helper for fetching small text resources
         (like SHA256 sidecar files) where writing to disk is unnecessary.
@@ -273,6 +279,7 @@ class HttpDownload:
 
         Raises:
             HttpDownloadError: If the download fails.
+
         """
         default_headers = {"Accept": "text/plain"}
         if headers:
@@ -295,7 +302,8 @@ class HttpDownload:
         use_cache: bool = False,
         cache_ttl_seconds: int = DEFAULT_CACHE_TTL_SECONDS,
     ) -> dict[str, Any] | list[Any]:
-        """Download a URL and return its JSON content as a parsed object.
+        """
+        Download a URL and return its JSON content as a parsed object.
 
         Args:
             url: The URL to fetch.
@@ -309,6 +317,7 @@ class HttpDownload:
 
         Raises:
             HttpDownloadError: If the download or JSON parsing fails.
+
         """
         default_headers = {"Accept": "application/json"}
         if headers:
@@ -342,7 +351,8 @@ class HttpDownload:
         progress_callback: Callable[[bytes], None] | None = None,
         on_start: Callable[[int | None], None] | None = None,
     ) -> int | None:
-        """Download a remote file to *dest* with an optional progress callback.
+        """
+        Download a remote file to *dest* with an optional progress callback.
 
         This is the **pure transport** entry point: it handles only HTTP
         mechanics, retries, and atomic placement.  No checksum logic or
@@ -366,6 +376,7 @@ class HttpDownload:
 
         Raises:
             HttpDownloadError: On network or I/O failure.
+
         """
         dest.parent.mkdir(parents=True, exist_ok=True)
 
@@ -425,7 +436,8 @@ class HttpDownload:
         silent_missing_checksum: bool = False,
         title: str = "Downloading",
     ) -> bool:
-        """Download a file with optional SHA256 verification and progress bar.
+        """
+        Download a file with optional SHA256 verification and progress bar.
 
         This is the **orchestration** entry point: it delegates the actual
         HTTP transfer to :meth:`with_download` and then handles checksum
@@ -447,6 +459,7 @@ class HttpDownload:
         Raises:
             HttpDownloadError: On download or checksum failure.
             ChecksumMismatchError: If SHA256 verification fails.
+
         """
         dest.parent.mkdir(parents=True, exist_ok=True)
 

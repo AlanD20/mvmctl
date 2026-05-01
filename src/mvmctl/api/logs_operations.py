@@ -14,8 +14,9 @@ class LogOperation:
     """Log viewing orchestration."""
 
     @staticmethod
-    def stream(inputs: LogInput) -> Generator[str, None, None]:
-        """Stream log lines for a VM.
+    def stream(inputs: LogInput) -> Generator[str]:
+        """
+        Stream log lines for a VM.
 
         If follow is True, yields lines indefinitely (use Ctrl+C to stop).
         If follow is False, yields the last N lines then stops.
@@ -25,6 +26,7 @@ class LogOperation:
 
         Yields:
             Log line strings
+
         """
         resolved = LogRequest(inputs=inputs, db=Database()).resolve()
         controller = LogController(resolved.vm, VMRepository(Database()))

@@ -8,7 +8,8 @@ from pathlib import Path
 
 @dataclass
 class KernelItem:
-    """Kernel record — maps to kernels table.
+    """
+    Kernel record — maps to kernels table.
 
     The ``path`` field stores a *relative* filename (e.g.
     ``"vmlinux-firecracker-6.1.155-x86_64"``).  Use :attr:`resolved_path`
@@ -38,7 +39,8 @@ class KernelItem:
 
 @dataclass
 class KernelFetchResult:
-    """Unified result from kernel fetch/build operations.
+    """
+    Unified result from kernel fetch/build operations.
 
     This dataclass provides a consistent return type for both Firecracker
     download and official kernel build paths, eliminating the need for

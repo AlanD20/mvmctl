@@ -1,4 +1,5 @@
-"""Typed field extraction helpers for YAML-parsed dictionaries.
+"""
+Typed field extraction helpers for YAML-parsed dictionaries.
 
 These helpers validate and extract typed values from ``dict[str, Any]`` objects
 produced by ``yaml.safe_load``.  They raise :class:`ValueError` on type or
@@ -10,7 +11,8 @@ from typing import Any
 
 
 def require_str(data: dict[str, Any], key: str) -> str:
-    """Return the value of *key* as a string, raising ``ValueError`` if absent or wrong-typed.
+    """
+    Return the value of *key* as a string, raising ``ValueError`` if absent or wrong-typed.
 
     Args:
         data: Mapping to read from.
@@ -21,6 +23,7 @@ def require_str(data: dict[str, Any], key: str) -> str:
 
     Raises:
         ValueError: If the key is missing or its value is not a :class:`str`.
+
     """
     value = data.get(key)
     if isinstance(value, str):
@@ -31,7 +34,8 @@ def require_str(data: dict[str, Any], key: str) -> str:
 
 
 def optional_str(data: dict[str, Any], key: str) -> str | None:
-    """Return the string value of *key*, or ``None`` if absent or non-string.
+    """
+    Return the string value of *key*, or ``None`` if absent or non-string.
 
     Args:
         data: Mapping to read from.
@@ -39,13 +43,15 @@ def optional_str(data: dict[str, Any], key: str) -> str | None:
 
     Returns:
         The string value, or ``None``.
+
     """
     value = data.get(key)
     return value if isinstance(value, str) else None
 
 
 def optional_int(data: dict[str, Any], key: str) -> int | None:
-    """Return the integer value of *key*, or ``None`` if absent or non-integer.
+    """
+    Return the integer value of *key*, or ``None`` if absent or non-integer.
 
     Args:
         data: Mapping to read from.
@@ -53,13 +59,15 @@ def optional_int(data: dict[str, Any], key: str) -> int | None:
 
     Returns:
         The integer value, or ``None``.
+
     """
     value = data.get(key)
     return value if isinstance(value, int) else None
 
 
 def require_str_list(data: dict[str, Any], key: str) -> list[str]:
-    """Return the value of *key* as a list of strings.
+    """
+    Return the value of *key* as a list of strings.
 
     An absent key is treated as an empty list.  A value that is a list but
     contains non-string items, or a value that is not a list at all, raises
@@ -74,6 +82,7 @@ def require_str_list(data: dict[str, Any], key: str) -> list[str]:
 
     Raises:
         ValueError: If the value is present but is not a list of strings.
+
     """
     value = data.get(key, [])
     if isinstance(value, list) and all(isinstance(item, str) for item in value):
@@ -82,7 +91,8 @@ def require_str_list(data: dict[str, Any], key: str) -> list[str]:
 
 
 def parse_set_val_list(data: dict[str, Any], key: str) -> list[tuple[str, str]]:
-    """Return option/value pairs from *key* as a list of ``(option, value)`` tuples.
+    """
+    Return option/value pairs from *key* as a list of ``(option, value)`` tuples.
 
     Each entry in the YAML list may be either a ``{option: ..., value: ...}``
     mapping or a two-element sequence.  Any other shape raises ``ValueError``.
@@ -98,6 +108,7 @@ def parse_set_val_list(data: dict[str, Any], key: str) -> list[tuple[str, str]]:
 
     Raises:
         ValueError: If the value is not a list, or any entry has an unexpected shape.
+
     """
     items = data.get(key, [])
     if not isinstance(items, list):

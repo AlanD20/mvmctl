@@ -1,4 +1,5 @@
-"""SSH key service - stateless key operations.
+"""
+SSH key service - stateless key operations.
 
 This module provides stateless SSH key operations that don't require
 a specific key entity to be bound.
@@ -12,7 +13,7 @@ import logging
 import shutil
 import socket
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from mvmctl.core.key._repository import KeyRepository
@@ -30,10 +31,12 @@ class KeyService:
 
     @classmethod
     def check_dependencies(cls) -> None:
-        """Check that ssh-keygen is available.
+        """
+        Check that ssh-keygen is available.
 
         Raises:
             KeyDependencyError: If ssh-keygen is not found in PATH.
+
         """
         from mvmctl.exceptions import KeyDependencyError
 
@@ -177,12 +180,14 @@ class KeyService:
     def list_keys(
         self, keys_dir: Path, *, verify: bool = True
     ) -> list[SSHKeyItem]:
-        """List all keys in the cache, syncing is_present with filesystem.
+        """
+        List all keys in the cache, syncing is_present with filesystem.
 
         Args:
             keys_dir: Directory where key files are stored.
             verify: If True (default), check filesystem and update DB.
                    If False, return DB records as-is.
+
         """
         keys = self._repo.list_all()
         if not verify:
@@ -211,7 +216,8 @@ class KeyService:
         is_default: bool = False,
         overwrite: bool = False,
     ) -> tuple[SSHKeyItem, Path]:
-        """Generate a new SSH keypair.
+        """
+        Generate a new SSH keypair.
 
         Args:
             name: Key name.
@@ -224,6 +230,7 @@ class KeyService:
 
         Returns:
             Tuple of (SSHKeyItem, private_key_path).
+
         """
         self.check_dependencies()
 
@@ -267,7 +274,7 @@ class KeyService:
         self._persist_public_key(name, content, output_dir)
 
         fingerprint = self._compute_fingerprint(content)
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         ssh_key = SSHKeyItem(
             id=fingerprint,
             name=name,
@@ -293,13 +300,15 @@ class KeyService:
         *,
         overwrite: bool = False,
     ) -> SSHKeyItem:
-        """Add a public key to the cache.
+        """
+        Add a public key to the cache.
 
         Args:
             name: Key name.
             pub_key_path: Path to public key file.
             keys_dir: Directory to copy the public key into.
             overwrite: Whether to overwrite existing.
+
         """
         pub_key_path = Path(pub_key_path)
         if not pub_key_path.exists():
@@ -343,7 +352,7 @@ class KeyService:
         )
 
         fingerprint = self._compute_fingerprint(content)
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         ssh_key = SSHKeyItem(
             id=fingerprint,
             name=name,

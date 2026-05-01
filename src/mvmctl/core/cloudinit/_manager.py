@@ -1,4 +1,5 @@
-"""Cloud-init configuration management - OOP implementation.
+"""
+Cloud-init configuration management - OOP implementation.
 
 This module provides class-based cloud-init file generation and ISO creation.
 The logic mirrors src/mvmctl/core/cloud_init.py but uses OOP patterns.
@@ -37,7 +38,8 @@ _DANGEROUS_CLOUD_INIT_DIRECTIVES = {
 
 
 class CloudInitManager:
-    """Manages cloud-init configuration file generation and ISO creation.
+    """
+    Manages cloud-init configuration file generation and ISO creation.
 
     This class encapsulates the logic for generating cloud-init seed files
     (meta-data, user-data, network-config) and creating ISO images from them.
@@ -48,13 +50,15 @@ class CloudInitManager:
         self._config = config
 
     def write_config_files(self) -> None:
-        """Write cloud-init configuration files to the specified directory.
+        """
+        Write cloud-init configuration files to the specified directory.
 
         Args:
             config: CloudInitWriteConfig containing all parameters for cloud-init file generation.
 
         Raises:
             ConfigError: If custom user-data is invalid or contains dangerous directives.
+
         """
 
         rendered = self._render_cloud_init_template()
@@ -154,7 +158,8 @@ class CloudInitManager:
         )
 
     def create_seed_iso(self, cloud_init_dir: Path, output_iso: Path) -> None:
-        """Create a cloud-init ISO from the seed directory.
+        """
+        Create a cloud-init ISO from the seed directory.
 
         Args:
             cloud_init_dir: Directory containing meta-data, user-data, and optionally network-config
@@ -162,6 +167,7 @@ class CloudInitManager:
 
         Raises:
             CloudInitError: If ISO creation fails
+
         """
         # Validate required files exist (network-config is optional for NO_CLOUD_NET mode)
         required_files = ["meta-data", "user-data"]
@@ -199,13 +205,15 @@ class CloudInitManager:
             raise CloudInitError(f"Failed to create cloud-init ISO: {e}") from e
 
     def _validate_user_data(self, user_data: dict[str, Any]) -> None:
-        """Validate user-data for dangerous cloud-init directives.
+        """
+        Validate user-data for dangerous cloud-init directives.
 
         Args:
             user_data: The parsed user-data dictionary.
 
         Raises:
             ConfigError: If dangerous directives are found without proper safeguards.
+
         """
         dangerous_directives = [
             directive
@@ -227,7 +235,8 @@ class CloudInitManager:
     def generate_password_hash(
         self, password: str, algorithm: str = "sha512"
     ) -> str:
-        """Generate Unix password hash for cloud-init.
+        """
+        Generate Unix password hash for cloud-init.
 
         Args:
             password: Plain text password to hash.
@@ -238,6 +247,7 @@ class CloudInitManager:
 
         Raises:
             ValueError: If unsupported algorithm specified.
+
         """
         algorithms = {
             "sha512": sha512_crypt,
@@ -253,10 +263,12 @@ class CloudInitManager:
         return hasher.hash(password)
 
     def _render_cloud_init_template(self) -> dict[str, str]:
-        """Render the cloud-init template with provided values.
+        """
+        Render the cloud-init template with provided values.
 
         Returns:
             Dictionary with rendered template sections (user_data, meta_data, network_config, nocloud_cfg)
+
         """
         from jinja2 import StrictUndefined
         from jinja2.sandbox import SandboxedEnvironment

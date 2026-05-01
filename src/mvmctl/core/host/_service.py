@@ -9,7 +9,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from mvmctl.constants import (
@@ -50,7 +50,8 @@ class HostService:
         capture: bool = True,
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
-        """Run a subprocess with consistent error handling.
+        """
+        Run a subprocess with consistent error handling.
 
         Args:
             cmd: Command and arguments as a list.
@@ -64,6 +65,7 @@ class HostService:
 
         Raises:
             HostError: On CalledProcessError or FileNotFoundError.
+
         """
         try:
             result = subprocess.run(
@@ -146,10 +148,12 @@ class HostService:
 
     @staticmethod
     def remove_user_from_group(username: str, group_name: str) -> bool:
-        """Remove a user from a system group.
+        """
+        Remove a user from a system group.
 
         Returns:
             True if the user was removed from the group, False if not a member.
+
         """
         try:
             grp_info = grp.getgrnam(group_name)
@@ -447,7 +451,7 @@ class HostService:
         if not changes:
             raise HostError("No saved host state to restore")
         reverted: list[HostStateChangeItem] = []
-        reverted_at = datetime.now(timezone.utc).isoformat()
+        reverted_at = datetime.now(UTC).isoformat()
         restorable_sysctl: frozenset[str] = frozenset({SYSCTL_KEY})
         restorable_files: frozenset[Path] = frozenset(
             {

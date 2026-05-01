@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC
+
 from mvmctl.core._shared import Database
 from mvmctl.models.kernel import KernelItem
 from mvmctl.models.vm import VMInstanceItem
@@ -84,9 +86,9 @@ class KernelRepository:
 
     def soft_delete(self, kernel_id: str) -> None:
         """Soft-delete a kernel by setting deleted_at and is_present=0."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        now = datetime.now(tz=timezone.utc).isoformat()
+        now = datetime.now(tz=UTC).isoformat()
         with self._db.connect() as conn:
             conn.execute(
                 "UPDATE kernels SET deleted_at = ?, is_present = 0 WHERE id = ?",
@@ -170,13 +172,15 @@ class KernelRepository:
         return KernelItem(**dict(row))
 
     def query_vms_by_kernel(self, kernel_id: str) -> list[VMInstanceItem]:
-        """Return all VMs that reference the given kernel ID.
+        """
+        Return all VMs that reference the given kernel ID.
 
         Args:
             kernel_id: Full kernel ID to query.
 
         Returns:
             List of VMInstanceItem records referencing this kernel.
+
         """
         with self._db.connect() as conn:
             rows = conn.execute(

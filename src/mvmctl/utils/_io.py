@@ -106,23 +106,27 @@ def print_section_header(title: str) -> None:
 def print_key_value(
     key: str, value: str, indent: int = 2, key_width: int = 12
 ) -> None:
-    """Print a key-value pair with consistent padding.
+    """
+    Print a key-value pair with consistent padding.
 
     Args:
         key: The key name (e.g., "Name")
         value: The value to display
         indent: Number of spaces to indent (default 2)
         key_width: Width for key column, left-aligned (default 12)
+
     """
     print(f"{' ' * indent}{key + ':':<{key_width}} {value}")
 
 
 def print_inspect_header(title: str, subtitle: str = "") -> None:
-    """Print inspect header with underline.
+    """
+    Print inspect header with underline.
 
     Example:
         VM: myvm (running)
         ==================
+
     """
     if subtitle:
         header = f"{title} ({subtitle})"
@@ -133,16 +137,19 @@ def print_inspect_header(title: str, subtitle: str = "") -> None:
 
 
 def get_state_marker(is_missing: bool) -> str:
-    """Get the state marker prefix.
+    """
+    Get the state marker prefix.
 
     Returns:
         "X " if resource is missing, "  " (two spaces) if present
+
     """
     return "X " if is_missing else "  "
 
 
 def get_combined_marker(is_default: bool, is_missing: bool) -> str:
-    """Get combined default and existence marker.
+    """
+    Get combined default and existence marker.
 
     Combines default marker (* ) with existence marker (X ) into a single
     3-character prefix for display in listing tables.
@@ -152,6 +159,7 @@ def get_combined_marker(is_default: bool, is_missing: bool) -> str:
         "X "  - File missing + not default (with leading space for alignment)
         "* "  - File exists + default (with trailing space for alignment)
         "  "  - File exists + not default
+
     """
     if is_default and is_missing:
         return "*X "
@@ -167,7 +175,8 @@ def get_combined_marker(is_default: bool, is_missing: bool) -> str:
 
 
 def setup_logging(*, verbose: bool = False, debug: bool = False) -> None:
-    """Configure root logger level and format.
+    """
+    Configure root logger level and format.
 
     Priority (highest first):
     1. ``debug=True``  → DEBUG
@@ -177,6 +186,7 @@ def setup_logging(*, verbose: bool = False, debug: bool = False) -> None:
     Args:
         verbose: Force INFO level.
         debug: Force DEBUG level.
+
     """
     if debug:
         level = logging.DEBUG
@@ -193,7 +203,8 @@ def setup_logging(*, verbose: bool = False, debug: bool = False) -> None:
 
 
 def get_logger(name: str) -> logging.Logger:
-    """Return a logger instance with the given name.
+    """
+    Return a logger instance with the given name.
 
     Thin wrapper around :func:`logging.getLogger` for consistency.
     """
@@ -201,7 +212,8 @@ def get_logger(name: str) -> logging.Logger:
 
 
 def log_exception(logger: logging.Logger, msg: str, exc: Exception) -> None:
-    """Log an exception respecting the configured log level.
+    """
+    Log an exception respecting the configured log level.
 
     When DEBUG is enabled, logs the full traceback via
     :meth:`logging.Logger.exception`. Otherwise logs a single-line

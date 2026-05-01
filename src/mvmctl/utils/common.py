@@ -78,7 +78,8 @@ def is_debug_mode() -> bool:
 
 
 def _get_real_home() -> Path:
-    """Return the real user's home directory.
+    """
+    Return the real user's home directory.
 
     When running under ``sudo``, ``SUDO_USER`` is set to the invoking user.
     Use that user's home so that state files are written to the invoking
@@ -97,27 +98,31 @@ def _get_real_home() -> Path:
 
 
 class CacheUtils:
-    """Shared cache/temp directory utilities for VM images and ready pools.
+    """
+    Shared cache/temp directory utilities for VM images and ready pools.
 
     All methods are static — no instance state needed.
     """
 
     @staticmethod
     def resolve_dir(path: Path) -> Path:
-        """Ensure a directory exists, creating parents if necessary.
+        """
+        Ensure a directory exists, creating parents if necessary.
 
         Args:
             path: Directory path to resolve.
 
         Returns:
             The resolved directory path.
+
         """
         path.mkdir(parents=True, exist_ok=True)
         return path
 
     @staticmethod
     def get_warm_image_dir(tmp_path: Path | None = None) -> Path:
-        """Get the tmpfs ready pool directory for fast clones.
+        """
+        Get the tmpfs ready pool directory for fast clones.
 
         This is the directory where decompressed images are cached for
         fast reflink copies during VM creation.
@@ -128,6 +133,7 @@ class CacheUtils:
 
         Returns:
             Path to the warm image directory (e.g. /dev/shm/mvmctl/ready).
+
         """
         from mvmctl.constants import PROJECT_NAME
 
@@ -138,7 +144,8 @@ class CacheUtils:
 
     @staticmethod
     def get_cache_dir() -> Path:
-        """Return the MVM cache root directory.
+        """
+        Return the MVM cache root directory.
 
         Checks MVM_CACHE_DIR env var first, then falls back to
         ~/.cache/<project-name>.  When running under sudo, uses the invoking
@@ -168,7 +175,8 @@ class CacheUtils:
 
     @staticmethod
     def get_config_dir() -> Path:
-        """Return the MVM config directory.
+        """
+        Return the MVM config directory.
 
         Checks MVM_CONFIG_DIR env var first, then falls back to
         ~/.config/<project-name>.
@@ -207,7 +215,8 @@ class CacheUtils:
 
     @staticmethod
     def get_mvm_db_path() -> Path:
-        """Return the path to the SQLite database file.
+        """
+        Return the path to the SQLite database file.
 
         The database lives in the MVM cache directory as ``mvmdb.db``.
         """
@@ -234,7 +243,8 @@ class CacheUtils:
 
     @staticmethod
     def get_vm_dir(id: str) -> Path:
-        """Return the directory path for a specific VM by its hash.
+        """
+        Return the directory path for a specific VM by its hash.
 
         Does NOT create the directory — callers must create it explicitly
         via FsUtils.secure_mkdir() when appropriate.
@@ -283,14 +293,16 @@ class CacheUtils:
 
 
 class CommonUtils:
-    """Domain-agnostic utilities reused across VM, network, image, kernel, key, etc.
+    """
+    Domain-agnostic utilities reused across VM, network, image, kernel, key, etc.
 
     All methods are static — no instance state needed.
     """
 
     @staticmethod
     def contains_dangerous_chars(value: str) -> bool:
-        """Check if value contains shell metacharacters, path traversal, control chars,
+        """
+        Check if value contains shell metacharacters, path traversal, control chars,
         or zero-width characters.
 
         Args:
@@ -298,18 +310,21 @@ class CommonUtils:
 
         Returns:
             True if any dangerous character is found.
+
         """
         return any(c in _DANGEROUS_CHARS for c in value)
 
     @staticmethod
     def is_reserved_name(name: str) -> bool:
-        """Check if name is a reserved keyword.
+        """
+        Check if name is a reserved keyword.
 
         Args:
             name: Name to check.
 
         Returns:
             True if name is reserved.
+
         """
         return name.lower() in _RESERVED_NAMES
 
@@ -319,7 +334,8 @@ class CommonUtils:
         entity_type: str = "entity",
         max_length: int = _MAX_NAME_LENGTH,
     ) -> str:
-        """Validate any entity name (VM, network, image, kernel, key, binary).
+        """
+        Validate any entity name (VM, network, image, kernel, key, binary).
 
         Applies defense-in-depth validation:
         1. Rejects empty names
@@ -339,6 +355,7 @@ class CommonUtils:
 
         Raises:
             MVMError: If name is invalid.
+
         """
         if not name:
             raise MVMError(f"Invalid {entity_type} name: cannot be empty")
@@ -383,13 +400,15 @@ class CommonUtils:
 
     @staticmethod
     def sanitize_for_log(value: str) -> str:
-        """Strip CRLF and control characters for safe embedding in audit logs.
+        """
+        Strip CRLF and control characters for safe embedding in audit logs.
 
         Args:
             value: String to sanitize.
 
         Returns:
             Sanitized string safe for audit log detail field.
+
         """
         return "".join(
             c
@@ -399,13 +418,15 @@ class CommonUtils:
 
     @staticmethod
     def human_readable_datetime(iso_timestamp: str | None) -> str:
-        """Format ISO timestamp to 'YYYY/MM/DD HH:MM:SS'.
+        """
+        Format ISO timestamp to 'YYYY/MM/DD HH:MM:SS'.
 
         Args:
             iso_timestamp: ISO format timestamp string (e.g. from datetime.now().isoformat()).
 
         Returns:
             Formatted string 'YYYY/MM/DD HH:MM:SS', or "-" if input is empty/None.
+
         """
         from datetime import datetime
 
@@ -445,7 +466,8 @@ class CommonUtils:
 
 
 def safe_int(value: object, default: int = 0) -> int:
-    """Safely extract an integer from a value.
+    """
+    Safely extract an integer from a value.
 
     Args:
         value: The value to convert (int, float, str, or other).
@@ -453,6 +475,7 @@ def safe_int(value: object, default: int = 0) -> int:
 
     Returns:
         The integer value, or default if conversion fails.
+
     """
     if isinstance(value, int):
         return value

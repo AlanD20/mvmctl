@@ -47,7 +47,8 @@ class BinaryRequest:
         return self._result
 
     def resolve(self) -> ResolvedBinaryInput:
-        """Resolve identifiers to BinaryItem list.
+        """
+        Resolve identifiers to BinaryItem list.
 
         - If id provided: use BinaryResolver.by_id() for each
         - If name+version provided: use BinaryResolver.by_name_version() for each pair
@@ -58,6 +59,7 @@ class BinaryRequest:
 
         Raises:
             BinaryNotFoundError: If binary cannot be found.
+
         """
         identifiers: list[str | list[str]] = self._inputs.id + [[]]
 

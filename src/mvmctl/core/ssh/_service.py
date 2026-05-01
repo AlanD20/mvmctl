@@ -87,7 +87,8 @@ class SSHService:
         *,
         exec_mode: bool = True,
     ) -> int:
-        """Connect to host via SSH.
+        """
+        Connect to host via SSH.
 
         Args:
             ip: IP address of the host
@@ -102,6 +103,7 @@ class SSHService:
         Raises:
             SSHError: If IP is not a valid IP address
             MVMKeyError: If key_path is provided but does not exist
+
         """
         if not NetworkValidator.is_ip_address(ip):
             raise SSHError(f"Invalid IP address: {ip}")

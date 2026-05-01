@@ -215,7 +215,8 @@ class OptimizedGuestfs:
         self._handle.umount(device)
 
     def grow_fs(self, device: str, target_size_bytes: int) -> None:
-        """Grow a filesystem to fill the allocated space.
+        """
+        Grow a filesystem to fill the allocated space.
 
         This is the inverse of shrink_ext4/shrink_btrfs. It resizes a filesystem
         to occupy the full allocated space after the backing file has been
@@ -227,6 +228,7 @@ class OptimizedGuestfs:
 
         Raises:
             MVMError: If the filesystem type is not supported for growing
+
         """
         fs_type = self._handle.vfs_type(device)
         if fs_type in ("ext2", "ext3", "ext4"):
@@ -263,7 +265,8 @@ class OptimizedGuestfs:
         output_path: Path,
         partition: int | None = None,
     ) -> Path | None:
-        """Extract root partition using libguestfs for reliable VHD handling.
+        """
+        Extract root partition using libguestfs for reliable VHD handling.
 
         Uses guestfs to reliably extract partitions from VHD-converted images
         that may have non-standard partition tables.
@@ -275,6 +278,7 @@ class OptimizedGuestfs:
 
         Returns:
             Path to the extracted filesystem image, or None if guestfs unavailable/fails
+
         """
         logger = logging.getLogger(__name__)
 

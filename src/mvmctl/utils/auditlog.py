@@ -5,13 +5,14 @@ from __future__ import annotations
 import getpass
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from mvmctl.utils.common import CacheUtils
 
 
 class AuditLog:
-    """Centralized audit logger.
+    """
+    Centralized audit logger.
 
     Provides a single structured log method with operation, changes dict,
     and context string. All audit entries append to the audit log file.
@@ -59,14 +60,16 @@ class AuditLog:
         changes: dict[str, str | int | bool] | None = None,
         context: str = "",
     ) -> None:
-        """Write a structured audit log entry.
+        """
+        Write a structured audit log entry.
 
         Args:
             operation: Short identifier for the operation (e.g. ``binary.fetch``).
             changes: Key-value pairs describing what changed.
             context: Additional free-form context string.
+
         """
-        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         msg = f"[{ts}] user={cls._user()} op={operation}"
         if changes:
             changes_str = ",".join(f"{k}={v}" for k, v in changes.items())

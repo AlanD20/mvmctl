@@ -48,7 +48,8 @@ class KeyResolver:
         return keys
 
     def by_id(self, key_id: str) -> SSHKeyItem:
-        """Resolve by ID (fingerprint) prefix.
+        """
+        Resolve by ID (fingerprint) prefix.
 
         Accepts both full ID with prefix (``SHA256:abc...``) and bare
         fingerprint (``abc...``) by automatically prepending ``SHA256:``

@@ -1,4 +1,5 @@
-"""VM operations orchestration - merged from builder, orchestration, and removal.
+"""
+VM operations orchestration - merged from builder, orchestration, and removal.
 
 This module provides the orchestration layer for VM lifecycle operations.
 It combines:
@@ -13,7 +14,7 @@ import logging
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from mvmctl.api.inputs import (
@@ -72,7 +73,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass(init=False)
 class VMCreateContext:
-    """Builder for VM creation - tracks state and spawns processes.
+    """
+    Builder for VM creation - tracks state and spawns processes.
 
     Generates VM ID automatically on instantiation based on name.
     NOTE: PURE STATE TRACKER for creation. Does NOT call core modules directly
@@ -482,7 +484,7 @@ class VMCreateContext:
         ):
             return None
 
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         vm_instance = VMInstanceItem(
             name=self.resolved.name,
             id=self.resolved.vm_id,
@@ -608,7 +610,8 @@ class VMOperation:
     def list_all(
         status: VMStatus | list[VMStatus] | None = None,
     ) -> list[VMInstanceItem]:
-        """List all VMs, optionally filtered by status.
+        """
+        List all VMs, optionally filtered by status.
 
         Args:
             status: Optional status filter. Single status or list of statuses.
@@ -616,6 +619,7 @@ class VMOperation:
 
         Returns:
             List of VMInstanceItem records.
+
         """
         repo = VMRepository(Database())
         if status is not None:
@@ -704,7 +708,8 @@ class VMOperation:
 
     @staticmethod
     def export(inputs: VMInput) -> VMExportConfig:
-        """Export a VM's configuration as a portable VMExportConfig.
+        """
+        Export a VM's configuration as a portable VMExportConfig.
 
         Resolves the VM by any identifier (name, ID, IP, MAC) and queries
         the database for related asset metadata.

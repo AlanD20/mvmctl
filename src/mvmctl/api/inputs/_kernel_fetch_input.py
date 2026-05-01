@@ -24,7 +24,8 @@ __all__ = [
 
 @dataclass
 class KernelFetchInput:
-    """Input model for kernel fetch and build operations.
+    """
+    Input model for kernel fetch and build operations.
 
     Optional fields are None when not provided by the user.
     DB-backed defaults are resolved by KernelFetchRequest.
@@ -45,7 +46,8 @@ class KernelFetchInput:
 
 @dataclass(frozen=True)
 class ResolvedKernelFetchRequest:
-    """Immutable resolved inputs for kernel fetch/build — all values explicit.
+    """
+    Immutable resolved inputs for kernel fetch/build — all values explicit.
 
     Output of KernelFetchRequest.resolve(). No None values for required fields.
     """
@@ -62,7 +64,8 @@ class ResolvedKernelFetchRequest:
 
 
 class KernelFetchRequest:
-    """Resolve and validate kernel fetch/build inputs.
+    """
+    Resolve and validate kernel fetch/build inputs.
 
     Takes KernelFetchInput and resolves DB-backed defaults,
     computes output paths, and produces a ResolvedKernelFetchRequest
@@ -83,7 +86,8 @@ class KernelFetchRequest:
         return self._result
 
     def resolve(self) -> ResolvedKernelFetchRequest:
-        """Resolve all inputs to explicit values.
+        """
+        Resolve all inputs to explicit values.
 
         This method resolves DB-backed defaults and computes derived values
         (arch, output_path, jobs). It does NOT validate —

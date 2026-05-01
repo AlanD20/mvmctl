@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from mvmctl.models.vm import VMInstanceItem
@@ -53,7 +54,8 @@ class ImageError(MVMError):
 
 
 class ImageCompressionError(ImageError):
-    """Image compression failure.
+    """
+    Image compression failure.
 
     Common messages:
     - Cannot compress: source file does not exist: {path}
@@ -64,7 +66,8 @@ class ImageCompressionError(ImageError):
 
 
 class ImageDecompressionError(ImageError):
-    """Image decompression failure.
+    """
+    Image decompression failure.
 
     Common messages:
     - Compressed file not found: {path}
@@ -73,7 +76,8 @@ class ImageDecompressionError(ImageError):
 
 
 class ImageCorruptError(ImageError):
-    """Image file appears corrupted.
+    """
+    Image file appears corrupted.
 
     Common messages:
     - Source file appears to be all zeros: {path}. File may be corrupted.
@@ -81,7 +85,8 @@ class ImageCorruptError(ImageError):
 
 
 class ImageEmptyError(ImageError):
-    """Image file is empty.
+    """
+    Image file is empty.
 
     Common messages:
     - Cannot compress: source file is empty: {path}
@@ -90,7 +95,8 @@ class ImageEmptyError(ImageError):
 
 
 class ImageValidationError(ImageError):
-    """Downloaded image file failed format validation.
+    """
+    Downloaded image file failed format validation.
 
     Common messages:
     - Invalid {format} file: {reason}
@@ -123,7 +129,8 @@ class ConfigError(MVMError):
 
 
 class DatabaseError(MVMError):
-    """Database operation failure.
+    """
+    Database operation failure.
 
     Common messages:
     - Database not migrated. Run 'mvm init' first.
@@ -139,7 +146,8 @@ class DatabaseError(MVMError):
 
 
 class MigrationError(DatabaseError):
-    """Database migration failure.
+    """
+    Database migration failure.
 
     Common messages:
     - Migration {version} failed: {details}
@@ -164,7 +172,8 @@ class HostError(MVMError):
 
 
 class ConsoleError(MVMError):
-    """Console or PTY operation failure.
+    """
+    Console or PTY operation failure.
 
     Common messages:
     - PTY allocation failed: {details}
@@ -222,7 +231,8 @@ class KeyFileError(MVMKeyError):
 
 
 class CloudInitError(MVMError):
-    """Cloud-init ISO creation failure.
+    """
+    Cloud-init ISO creation failure.
 
     Common messages:
     - cloud-localds not found. Install cloud-image-utils or cloud-utils package
@@ -231,7 +241,8 @@ class CloudInitError(MVMError):
 
 
 class CloudInitProvisionError(CloudInitError):
-    """Cloud-init provisioning failure.
+    """
+    Cloud-init provisioning failure.
 
     Common messages:
     - Invalid custom user data
@@ -239,7 +250,8 @@ class CloudInitProvisionError(CloudInitError):
 
 
 class CloudInitModeError(CloudInitError):
-    """Cloud-init mode failure.
+    """
+    Cloud-init mode failure.
 
     Common messages:
     - Failed to resolve cloud-init mode
@@ -264,7 +276,8 @@ class CloudInitInjectModeError(CloudInitError):
 
 
 class VMCreateError(MVMError):
-    """VM creation failed - resources may have been partially created.
+    """
+    VM creation failed - resources may have been partially created.
 
     This error is raised when VM creation fails mid-way. The exception
     handler performs best-effort cleanup of any resources that were
@@ -280,7 +293,8 @@ class VMRequestError(MVMError):
 
 
 class VMBuilderError(MVMError):
-    """VM builder failed - resources may have been partially created.
+    """
+    VM builder failed - resources may have been partially created.
 
     This error is raised when VM creation fails mid-way. The exception
     handler performs best-effort cleanup of any resources that were
@@ -360,7 +374,8 @@ class HttpDownloadError(MVMError):
 
 
 def format_exception_debug(exc: Exception, debug: bool = False) -> str:
-    """Format an exception for display, with optional debug details.
+    """
+    Format an exception for display, with optional debug details.
 
     Args:
         exc: The exception to format.
@@ -368,6 +383,7 @@ def format_exception_debug(exc: Exception, debug: bool = False) -> str:
 
     Returns:
         Formatted exception string suitable for user display.
+
     """
     if debug:
         import traceback
@@ -384,7 +400,8 @@ def handle_creation_error(
     persist_fn: Callable[[VMInstanceItem, object | None], None] | None = None,
     manager: object | None = None,
 ) -> None:
-    """Unified exception handler for VM creation.
+    """
+    Unified exception handler for VM creation.
 
     Handles the common pattern across all exception types in create_vm:
     - If skip_cleanup is True and vm_instance exists, persist the failed VM
@@ -398,6 +415,7 @@ def handle_creation_error(
         cleanup_fn: Cleanup function to call (releases network, files, etc.)
         persist_fn: Optional function to persist a failed VM to DB
         manager: Optional VM manager for persist_fn
+
     """
     if skip_cleanup and vm_instance is not None:
         if persist_fn is not None:

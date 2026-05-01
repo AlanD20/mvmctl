@@ -1,4 +1,5 @@
-"""Console controller for VM serial console access.
+"""
+Console controller for VM serial console access.
 
 Provides high-level console relay management.
 """
@@ -14,7 +15,8 @@ from mvmctl.services.console_relay import (
 
 
 class ConsoleController:
-    """High-level console relay interface for a specific VM.
+    """
+    High-level console relay interface for a specific VM.
 
     Combines relay manager (lifecycle) and client (connection) for
     easy console operations. Manages PTY lifecycle internally.
@@ -29,7 +31,8 @@ class ConsoleController:
         socket_filename: str = "console.sock",
         log_filename: str = "firecracker.console.log",
     ) -> None:
-        """Initialize console relay for a VM.
+        """
+        Initialize console relay for a VM.
 
         Args:
             vm_id: VM unique identifier
@@ -38,6 +41,7 @@ class ConsoleController:
             pid_filename: Name of the PID file
             socket_filename: Name of the socket file
             log_filename: Name of the log file
+
         """
         self._manager = ConsoleRelayManager(
             id=vm_id,
@@ -77,7 +81,8 @@ class ConsoleController:
         return self._pid
 
     def create_pty(self) -> int:
-        """Lazy PTY creation - returns client FD for Firecracker.
+        """
+        Lazy PTY creation - returns client FD for Firecracker.
 
         Creates PTY only when first called. Subsequent calls return
         the already-created client FD.
@@ -88,6 +93,7 @@ class ConsoleController:
         Raises:
             OSError: If PTY creation fails
             ConsoleError: If PTY client FD is None after creation
+
         """
         if self._controller_fd is None:
             self._controller_fd, self._client_fd = os.openpty()
@@ -100,7 +106,8 @@ class ConsoleController:
         return self._client_fd
 
     def close_client_fd(self) -> None:
-        """Close client FD after Firecracker has taken ownership.
+        """
+        Close client FD after Firecracker has taken ownership.
 
         Safe to call multiple times. Called by orchestrator after
         Firecracker process is spawned.
@@ -124,7 +131,8 @@ class ConsoleController:
             self._controller_fd = None
 
     def start(self) -> tuple[Path, int]:
-        """Start the console relay for this VM.
+        """
+        Start the console relay for this VM.
 
         Must call create_pty() before this method.
 
@@ -133,6 +141,7 @@ class ConsoleController:
 
         Raises:
             RuntimeError: If create_pty() was not called first
+
         """
         if self._controller_fd is None:
             raise RuntimeError("Must call create_pty() before start()")
@@ -151,10 +160,12 @@ class ConsoleController:
         self._manager.stop()
 
     def terminate(self) -> bool:
-        """Forcefully terminate the relay.
+        """
+        Forcefully terminate the relay.
 
         Returns:
             True if terminated, False if not running
+
         """
         return self._manager.terminate()
 
@@ -167,10 +178,12 @@ class ConsoleController:
         return self._manager.get_pid()
 
     def connect(self) -> ConsoleRelayClient:
-        """Connect to the console.
+        """
+        Connect to the console.
 
         Returns:
             Connected ConsoleRelayClient
+
         """
         self._client = ConsoleRelayClient(self._manager.socket_path)
         self._client.connect()

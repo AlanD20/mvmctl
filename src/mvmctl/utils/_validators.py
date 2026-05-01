@@ -27,7 +27,8 @@ class KeyValidator:
 
     @staticmethod
     def validate_name(name: str) -> str:
-        """Validate key name.
+        """
+        Validate key name.
 
         Args:
             name: Key name to validate.
@@ -37,12 +38,14 @@ class KeyValidator:
 
         Raises:
             MVMError: If name is invalid.
+
         """
         return CommonUtils.validate_entity_name(name, entity_type="key")
 
 
 class NetworkValidator:
-    """Validate all network-related inputs.
+    """
+    Validate all network-related inputs.
 
     All methods are static — no instance state needed.
     """
@@ -53,7 +56,8 @@ class NetworkValidator:
 
     @staticmethod
     def validate_name(name: str) -> str:
-        """Validate network name.
+        """
+        Validate network name.
 
         Rules: lowercase alphanumeric, hyphen, underscore, starts with
         alphanumeric, 1-31 chars, no dots, no reserved names.
@@ -66,6 +70,7 @@ class NetworkValidator:
 
         Raises:
             MVMError: If name is invalid.
+
         """
         # Apply common entity name validation first (uses max_length=31 for networks)
         CommonUtils.validate_entity_name(
@@ -88,7 +93,8 @@ class NetworkValidator:
 
     @staticmethod
     def validate_subnet(subnet: str) -> str:
-        """Validate CIDR subnet notation.
+        """
+        Validate CIDR subnet notation.
 
         Args:
             subnet: CIDR string (e.g., "192.168.1.0/24").
@@ -98,6 +104,7 @@ class NetworkValidator:
 
         Raises:
             MVMError: If subnet is invalid.
+
         """
         if not subnet:
             raise MVMError("Invalid subnet: cannot be empty")
@@ -115,7 +122,8 @@ class NetworkValidator:
 
     @staticmethod
     def validate_ipv4_gateway(gateway: str, *, subnet: str) -> str:
-        """Validate IPv4 gateway address.
+        """
+        Validate IPv4 gateway address.
 
         Args:
             gateway: IPv4 address string.
@@ -126,6 +134,7 @@ class NetworkValidator:
 
         Raises:
             MVMError: If gateway is invalid or not in subnet.
+
         """
         if not gateway:
             raise MVMError("Invalid gateway: cannot be empty")
@@ -171,7 +180,8 @@ class NetworkValidator:
         subnet: str | None = None,
         gateway: str | None = None,
     ) -> str:
-        """Validate IPv4 address.
+        """
+        Validate IPv4 address.
 
         Args:
             ip: IPv4 address string.
@@ -185,6 +195,7 @@ class NetworkValidator:
 
         Raises:
             MVMError: If IP is invalid.
+
         """
         if not ip:
             raise MVMError(f"Invalid {field_name}: cannot be empty")
@@ -228,7 +239,8 @@ class NetworkValidator:
 
     @staticmethod
     def validate_bridge_name(bridge: str) -> str:
-        """Validate bridge interface name.
+        """
+        Validate bridge interface name.
 
         Must be lowercase alphanumeric with hyphens/underscores, max 15 chars
         (Linux IFNAMSIZ limit).
@@ -241,6 +253,7 @@ class NetworkValidator:
 
         Raises:
             MVMError: If name is invalid.
+
         """
         if not bridge:
             raise MVMError("Invalid bridge name: cannot be empty")
@@ -275,7 +288,8 @@ class NetworkValidator:
 
     @staticmethod
     def validate_nat_gateways(gateways: list[str]) -> list[str]:
-        """Validate list of NAT gateway interface names.
+        """
+        Validate list of NAT gateway interface names.
 
         Args:
             gateways: List of interface names.
@@ -285,6 +299,7 @@ class NetworkValidator:
 
         Raises:
             MVMError: If any interface name is invalid or does not exist.
+
         """
         if not gateways:
             raise MVMError("NAT gateways cannot be empty")
@@ -324,13 +339,15 @@ class NetworkValidator:
 
     @staticmethod
     def is_ip_address(value: str) -> bool:
-        """Validate that the given string is a valid IPv4 or IPv6 address.
+        """
+        Validate that the given string is a valid IPv4 or IPv6 address.
 
         Args:
             value: The string to validate as an IP address.
 
         Returns:
             True if the value is a valid IP address, False otherwise.
+
         """
         try:
             ipaddress.ip_address(value)
@@ -340,13 +357,15 @@ class NetworkValidator:
 
     @staticmethod
     def validate_mac(mac: str) -> None:
-        """Validate MAC address format.
+        """
+        Validate MAC address format.
 
         Args:
             mac: MAC address to validate.
 
         Raises:
             MVMError: If MAC address format is invalid.
+
         """
         MAC_REGEX = re.compile(r"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$")
         if not MAC_REGEX.match(mac):
@@ -358,7 +377,8 @@ class NetworkValidator:
         existing: list[Any],
         exclude_name: str = "",
     ) -> None:
-        """Check that subnet doesn't overlap with existing networks.
+        """
+        Check that subnet doesn't overlap with existing networks.
 
         Args:
             subnet: CIDR subnet to check.
@@ -367,6 +387,7 @@ class NetworkValidator:
 
         Raises:
             MVMError: If subnet overlaps with an existing network.
+
         """
         new_net = ipaddress.IPv4Network(subnet, strict=True)
         for item in existing:
@@ -384,7 +405,8 @@ class VMValidator:
 
     @staticmethod
     def validate_name(name: str) -> str:
-        """Validate VM name.
+        """
+        Validate VM name.
 
         Args:
             name: VM name to validate.
@@ -394,6 +416,7 @@ class VMValidator:
 
         Raises:
             MVMError: If name is invalid.
+
         """
         return CommonUtils.validate_entity_name(name, entity_type="VM")
 
@@ -401,7 +424,8 @@ class VMValidator:
     def validate_boot_arg_component(
         value: str, component_name: str = "boot arg"
     ) -> str:
-        """Validate a kernel boot argument component has no injection characters.
+        """
+        Validate a kernel boot argument component has no injection characters.
 
         Args:
             value: The value to validate.
@@ -412,6 +436,7 @@ class VMValidator:
 
         Raises:
             MVMError: If the value contains spaces or shell metacharacters.
+
         """
         if not value:
             return value
@@ -423,7 +448,8 @@ class VMValidator:
 
     @staticmethod
     def validate_ssh_username(user: str) -> str:
-        """Validate SSH username against POSIX conventions.
+        """
+        Validate SSH username against POSIX conventions.
 
         Args:
             user: SSH username to validate.
@@ -433,6 +459,7 @@ class VMValidator:
 
         Raises:
             MVMError: If username is invalid.
+
         """
         if not _VALID_SSH_USERNAME.match(user):
             raise MVMError(
@@ -444,7 +471,8 @@ class VMValidator:
     def validate_boot_args(
         boot_args: str, root_uuid: str, guest_ip: str
     ) -> list[str]:
-        """Validate boot arguments.
+        """
+        Validate boot arguments.
 
         Args:
             boot_args: Kernel boot arguments
@@ -453,6 +481,7 @@ class VMValidator:
 
         Returns:
             List of validation error messages (empty if valid)
+
         """
         errors: list[str] = []
 

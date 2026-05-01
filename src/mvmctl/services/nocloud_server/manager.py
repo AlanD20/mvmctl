@@ -1,4 +1,5 @@
-"""NoCloud-net server manager for coordinating VM cloud-init servers.
+"""
+NoCloud-net server manager for coordinating VM cloud-init servers.
 
 This module provides a manager for NoCloudNetServer subprocess instances,
 ensuring proper port allocation, server lifecycle management, and cleanup
@@ -30,7 +31,8 @@ logger = logging.getLogger(__name__)
 
 
 class NoCloudNetServerManager:
-    """Manager for a single NoCloud-net server subprocess instance.
+    """
+    Manager for a single NoCloud-net server subprocess instance.
 
     Coordinates one NoCloud-net HTTP server, ensuring proper
     lifecycle management and cleanup.
@@ -46,6 +48,7 @@ class NoCloudNetServerManager:
         _pid_path: Full path to the PID file
         _log_path: Full path to the log file
         _lock: Lock for thread-safe access
+
     """
 
     _pid: int | None = None
@@ -62,7 +65,8 @@ class NoCloudNetServerManager:
         pid_filename: str = DEFAULT_NOCLOUD_PID_FILENAME,
         log_filename: str = DEFAULT_NOCLOUD_LOG_FILENAME,
     ) -> None:
-        """Initialize the server manager for a specific VM.
+        """
+        Initialize the server manager for a specific VM.
 
         Args:
             id: Unique identifier for this server (VM hash)
@@ -72,6 +76,7 @@ class NoCloudNetServerManager:
             name: Human-readable name for logging (uses id if None)
             pid_filename: Name of the PID file (default: nocloud-server.pid)
             log_filename: Name of the log file (default: cloud-init.log)
+
         """
         self._id = id
         self._path = path
@@ -141,7 +146,8 @@ class NoCloudNetServerManager:
                 pass
 
     def start(self) -> tuple[str, int, int]:
-        """Start the NoCloud-net server subprocess.
+        """
+        Start the NoCloud-net server subprocess.
 
         Returns:
             Tuple of (url, port, pid)
@@ -149,6 +155,7 @@ class NoCloudNetServerManager:
         Raises:
             NoCloudServerAlreadyRunningError: If server is already running
             NoCloudServerError: If subprocess fails to start
+
         """
         with self._thread_lock:
             if self._pid is not None:
@@ -199,10 +206,12 @@ class NoCloudNetServerManager:
             return self._url, self._port, proc.pid
 
     def stop(self) -> bool:
-        """Stop the NoCloud-net server gracefully.
+        """
+        Stop the NoCloud-net server gracefully.
 
         Returns:
             True if a server was stopped, False otherwise
+
         """
         with self._thread_lock:
             if self._pid is None:
@@ -215,10 +224,12 @@ class NoCloudNetServerManager:
             return True
 
     def terminate(self) -> bool:
-        """Forcefully terminate the NoCloud-net server.
+        """
+        Forcefully terminate the NoCloud-net server.
 
         Returns:
             True if server was terminated, False if no server was running
+
         """
         with self._thread_lock:
             if self._pid is None:
@@ -231,10 +242,12 @@ class NoCloudNetServerManager:
             return True
 
     def is_running(self) -> bool:
-        """Check if the server is currently running.
+        """
+        Check if the server is currently running.
 
         Returns:
             True if server is running, False otherwise
+
         """
         with self._thread_lock:
             if self._pid is not None:
@@ -242,13 +255,15 @@ class NoCloudNetServerManager:
             return False
 
     def cleanup_orphans(self) -> list[str]:
-        """Clean up any orphaned servers from previous crashed sessions.
+        """
+        Clean up any orphaned servers from previous crashed sessions.
 
         .. deprecated::
             This method is deprecated and will be removed in a future version.
 
         Returns:
             List of VM hashes that were cleaned up (always empty now)
+
         """
         warnings.warn(
             "cleanup_orphans is deprecated and no longer functional",

@@ -4,17 +4,18 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from collections.abc import Generator
 from contextlib import closing, contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Generator
 
 from mvmctl.exceptions import MigrationError
 from mvmctl.utils.common import CacheUtils
 
 
 class Database:
-    """Database connection manager with migration support.
+    """
+    Database connection manager with migration support.
 
     Provides connection management and schema migrations for domain repositories.
     Each Database instance is tied to a specific database file path.
@@ -26,13 +27,16 @@ class Database:
 
         # Run migrations
         db.migrate()
+
     """
 
     def __init__(self, db_path: Path | str | None = None) -> None:
-        """Initialize Database with optional custom path.
+        """
+        Initialize Database with optional custom path.
 
         Args:
             db_path: Custom database path. Uses default if not provided.
+
         """
         self._db_path = (
             Path(db_path) if db_path else CacheUtils.get_mvm_db_path()
@@ -45,8 +49,9 @@ class Database:
         return self._db_path
 
     @contextmanager
-    def connect(self) -> Generator[sqlite3.Connection, None, None]:
-        """Context manager for database connections.
+    def connect(self) -> Generator[sqlite3.Connection]:
+        """
+        Context manager for database connections.
 
         Sets required PRAGMAs:
         - foreign_keys = ON
@@ -56,6 +61,7 @@ class Database:
 
         Yields:
             sqlite3.Connection with row_factory set to sqlite3.Row
+
         """
         conn = sqlite3.connect(
             self._db_path,
@@ -92,23 +98,27 @@ class Database:
         return int(match.group(1))
 
     def get_current_version(self) -> int:
-        """Get current schema version from PRAGMA user_version.
+        """
+        Get current schema version from PRAGMA user_version.
 
         Returns:
             Current schema version (0 if database is new/empty).
+
         """
         with closing(sqlite3.connect(self._db_path)) as conn:
             result = conn.execute("PRAGMA user_version").fetchone()
             return result[0] if result else 0
 
     def get_pending_migrations(self) -> list[Path]:
-        """Get list of migration files not yet applied.
+        """
+        Get list of migration files not yet applied.
 
         Returns:
             Sorted list of Path objects for pending migrations.
 
         Raises:
             MigrationError: If version sequence has gaps.
+
         """
         current_version = self.get_current_version()
         migrations_dir = self._get_migrations_dir()
@@ -155,7 +165,8 @@ class Database:
             pass  # Column already exists
 
     def _take_snapshot(self, version: int) -> Path:
-        """Create an online snapshot of the database before a migration.
+        """
+        Create an online snapshot of the database before a migration.
 
         Snapshot is saved as a ``.snap`` file next to the database:
         ``{db_path}.v{version}.snap``.  Uses SQLite's backup API to create a
@@ -168,6 +179,7 @@ class Database:
 
         Returns:
             Path to the snapshot file.
+
         """
         snap_path = self._db_path.with_name(
             f"{self._db_path.name}.v{version}.snap",
@@ -181,7 +193,8 @@ class Database:
         return snap_path
 
     def _restore_from_snapshot(self, snapshot_path: Path) -> None:
-        """Restore the database from a snapshot.
+        """
+        Restore the database from a snapshot.
 
         Uses SQLite's backup API to restore from a snapshot file.
         The backup API is safe even with concurrent connections.
@@ -191,6 +204,7 @@ class Database:
 
         Raises:
             MigrationError: If the snapshot file does not exist or restore fails.
+
         """
         if not snapshot_path.exists():
             raise MigrationError(f"Snapshot not found: {snapshot_path}")
@@ -205,7 +219,8 @@ class Database:
             ) from exc
 
     def migrate(self) -> int:
-        """Run all pending migrations.
+        """
+        Run all pending migrations.
 
         Each migration SQL file is executed via conn.executescript().
         Migration history is recorded in db_migrations table.
@@ -215,6 +230,7 @@ class Database:
 
         Raises:
             MigrationError: If a migration fails or version sequence has gaps.
+
         """
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         pending = self.get_pending_migrations()
@@ -257,10 +273,12 @@ class Database:
         return applied_count
 
     def validate_migrations(self) -> list[str]:
-        """Validate all migration files without applying them.
+        """
+        Validate all migration files without applying them.
 
         Returns:
             List of validation error messages (empty if all valid).
+
         """
         errors: list[str] = []
         migrations_dir = self._get_migrations_dir()
@@ -286,7 +304,8 @@ class Database:
         return errors
 
     def rollback(self, steps: int = 1) -> None:
-        """Rollback the last N migrations by restoring from snapshots.
+        """
+        Rollback the last N migrations by restoring from snapshots.
 
         Finds the snapshot taken before the first rolled-back migration,
         restores the database to that state, and removes the rolled-back
@@ -298,6 +317,7 @@ class Database:
         Raises:
             MigrationError: If no snapshot is available or rollback fails.
             ValueError: If steps is less than 1.
+
         """
         if steps < 1:
             raise ValueError("steps must be >= 1")

@@ -1,4 +1,5 @@
-"""NoCloud-net standalone HTTP server process.
+"""
+NoCloud-net standalone HTTP server process.
 
 This module runs as a standalone subprocess to serve cloud-init files
 (meta-data, user-data, network-config) to VMs via the nocloud-net
@@ -17,7 +18,8 @@ from pathlib import Path
 
 
 class _CloudInitRequestHandler(SimpleHTTPRequestHandler):
-    """Custom request handler for cloud-init files.
+    """
+    Custom request handler for cloud-init files.
 
     Serves files from the specified cloud-init directory with
     proper content types for cloud-init consumption.

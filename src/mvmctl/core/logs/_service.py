@@ -26,7 +26,8 @@ class LogService:
 
     @staticmethod
     def get_log_path(vm_hash: str, log_type: str) -> Path:
-        """Get log file path for a VM by its hash.
+        """
+        Get log file path for a VM by its hash.
 
         Args:
             vm_hash: VM hash (64-char SHA256)
@@ -38,6 +39,7 @@ class LogService:
         Raises:
             VMNotFoundError: If VM directory does not exist
             MVMError: If log type is unknown or log file not found
+
         """
         vm_dir = CacheUtils.get_vm_dir(vm_hash)
 
@@ -57,7 +59,8 @@ class LogService:
 
     @staticmethod
     def read_log_lines(log_file: Path, lines: int) -> list[str]:
-        """Read last *lines* lines from a log file.
+        """
+        Read last *lines* lines from a log file.
 
         Args:
             log_file: Path to the log file.
@@ -68,22 +71,25 @@ class LogService:
 
         Raises:
             MVMError: If the log file cannot be read.
+
         """
         try:
             with open(log_file) as f:
                 last_lines = deque(f, maxlen=lines)
                 return [line.rstrip("\n") for line in last_lines]
-        except IOError as e:
+        except OSError as e:
             raise MVMError(f"Error reading log file: {e}") from e
 
     @staticmethod
-    def follow_log(log_file: Path) -> Generator[str, None, None]:
-        """Follow log file in real-time (like tail -f).
+    def follow_log(log_file: Path) -> Generator[str]:
+        """
+        Follow log file in real-time (like tail -f).
 
         Yields new lines as they are written.
 
         Raises:
             MVMError: If the log file cannot be read
+
         """
         try:
             with open(log_file) as f:
@@ -95,5 +101,5 @@ class LogService:
                         time.sleep(LOG_FOLLOW_POLL_INTERVAL_S)
                         continue
                     yield line.rstrip("\n")
-        except IOError as e:
+        except OSError as e:
             raise MVMError(f"Error following log: {e}") from e

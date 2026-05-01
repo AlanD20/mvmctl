@@ -1,4 +1,5 @@
-"""Idempotent iptables rule management with database synchronization.
+"""
+Idempotent iptables rule management with database synchronization.
 
 This module provides IPTablesTracker for creating/removing iptables rules
 and synchronizing them with the database.
@@ -11,7 +12,6 @@ import shlex
 import subprocess
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 from mvmctl.constants import CONST_IPTABLES_MAX_COMMENT_LEN
 from mvmctl.exceptions import IPTablesTrackerError
@@ -37,13 +37,14 @@ class IPTablesRuleResult:
     """Result of a rule operation."""
 
     success: bool
-    rule: Optional[IPTablesRuleItem] = None
-    error_message: Optional[str] = None
-    command_executed: Optional[list[str]] = None
+    rule: IPTablesRuleItem | None = None
+    error_message: str | None = None
+    command_executed: list[str] | None = None
 
 
 class IPTablesTracker:
-    """Idempotent iptables rule manager with database synchronization.
+    """
+    Idempotent iptables rule manager with database synchronization.
 
     This class handles iptables subprocess calls and synchronizes rules
     with the database. Rules are stored in the iptables_rules table.
@@ -79,7 +80,8 @@ class IPTablesTracker:
     def ensure_rule(
         self, rule: IPTablesRuleItem, *, context: str = ""
     ) -> IPTablesRuleResult:
-        """Idempotently ensure a rule exists in iptables and database.
+        """
+        Idempotently ensure a rule exists in iptables and database.
 
         1. Check if rule exists in database by unique attributes
         2. Check if rule exists in iptables (iptables -C)
@@ -93,6 +95,7 @@ class IPTablesTracker:
 
         Returns:
             IPTablesRuleResult with success status and rule metadata.
+
         """
         # Build comment if not already set
         if not rule.comment_tag:
@@ -174,13 +177,15 @@ class IPTablesTracker:
         )
 
     def remove_rule(self, rule: IPTablesRuleItem) -> IPTablesRuleResult:
-        """Remove a specific rule from iptables and mark as deleted in database.
+        """
+        Remove a specific rule from iptables and mark as deleted in database.
 
         Best-effort removal - if rule doesn't exist in iptables, still returns success.
         Also marks the rule as inactive in the database if found.
 
         Returns:
             RuleOperationResult with success status
+
         """
         # Find the rule in database first to get its comment_tag
         db_rule_id = rule.id
@@ -248,13 +253,15 @@ class IPTablesTracker:
         self,
         rule: IPTablesRuleItem,
     ) -> bool:
-        """Remove a rule by scanning iptables output and deleting by line number.
+        """
+        Remove a rule by scanning iptables output and deleting by line number.
 
         Fallback when iptables -D fails (e.g. comment mismatch).
         Matches rules by in_interface and out_interface.
 
         Returns:
             True if a matching rule was found and removed.
+
         """
         list_cmd = [
             "iptables",
@@ -314,7 +321,8 @@ class IPTablesTracker:
         self,
         rule: IPTablesRuleItem,
     ) -> bool:
-        """Check if a rule with the given interfaces exists in the chain.
+        """
+        Check if a rule with the given interfaces exists in the chain.
 
         Uses iptables -L output, matching only by in/out interfaces.
         """
@@ -418,10 +426,11 @@ class IPTablesTracker:
         self,
         chain_name: IPTablesChain,
         table: IPTablesTable = IPTablesTable.FILTER,
-        auto_jump_from: Optional[str] = None,
+        auto_jump_from: str | None = None,
         position: int = 1,
     ) -> bool:
-        """Create an iptables chain if it doesn't exist.
+        """
+        Create an iptables chain if it doesn't exist.
 
         Args:
             chain_name: Name of the chain to create (enum value).
@@ -433,6 +442,7 @@ class IPTablesTracker:
 
         Raises:
             NetworkError: If chain creation fails.
+
         """
         chain_name_str = chain_name.value
 
@@ -488,7 +498,8 @@ class IPTablesTracker:
         table: IPTablesTable = IPTablesTable.FILTER,
         position: int = 1,
     ) -> IPTablesRuleResult:
-        """Idempotently ensure a jump rule exists from a standard chain to a custom chain.
+        """
+        Idempotently ensure a jump rule exists from a standard chain to a custom chain.
 
         This creates the jump rule that directs traffic from a standard iptables chain
         (e.g., INPUT) to a custom chain (e.g., MVM-NOCLOUDNET-INPUT).
@@ -501,6 +512,7 @@ class IPTablesTracker:
 
         Returns:
             IPTablesRuleResult with success status.
+
         """
         # Check if jump rule exists
         cmd_check = ["iptables", "-t", table, "-C", from_chain, "-j", to_chain]
@@ -555,7 +567,8 @@ class IPTablesTracker:
         chain_name: IPTablesChain,
         table: IPTablesTable = IPTablesTable.FILTER,
     ) -> bool:
-        """Flush all rules from an iptables chain and mark them deleted in DB.
+        """
+        Flush all rules from an iptables chain and mark them deleted in DB.
 
         Args:
             chain_name: Name of the chain to flush.
@@ -566,6 +579,7 @@ class IPTablesTracker:
 
         Raises:
             IPTablesTrackerError: If flush operation fails unexpectedly.
+
         """
 
         chain_name_str = chain_name.value
@@ -612,7 +626,8 @@ class IPTablesTracker:
         chain_name: IPTablesChain,
         table: IPTablesTable = IPTablesTable.FILTER,
     ) -> bool:
-        """Delete an iptables chain and mark its rules as deleted in DB.
+        """
+        Delete an iptables chain and mark its rules as deleted in DB.
 
         Args:
             chain_name: Name of the chain to delete.
@@ -623,6 +638,7 @@ class IPTablesTracker:
 
         Raises:
             IPTablesTrackerError: If delete operation fails unexpectedly.
+
         """
         chain_name_str = chain_name.value
 

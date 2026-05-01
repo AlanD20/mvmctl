@@ -22,7 +22,8 @@ class FsUtils:
 
     @staticmethod
     def read_json(path: Path) -> dict[str, Any] | list[Any]:
-        """Read and parse a JSON file with O_NOFOLLOW protection.
+        """
+        Read and parse a JSON file with O_NOFOLLOW protection.
 
         Args:
             path: Path to the JSON file.
@@ -32,6 +33,7 @@ class FsUtils:
 
         Raises:
             MVMError: If the file cannot be read or the JSON is invalid.
+
         """
         try:
             fd = FsUtils._open_nofollow(path)
@@ -46,7 +48,8 @@ class FsUtils:
 
     @staticmethod
     def read_yaml(path: Path) -> dict[str, Any] | list[Any]:
-        """Read and parse a YAML file with O_NOFOLLOW protection.
+        """
+        Read and parse a YAML file with O_NOFOLLOW protection.
 
         Args:
             path: Path to the YAML file.
@@ -56,6 +59,7 @@ class FsUtils:
 
         Raises:
             MVMError: If the file cannot be read or the YAML is invalid.
+
         """
         try:
             fd = FsUtils._open_nofollow(path)
@@ -72,7 +76,8 @@ class FsUtils:
 
     @staticmethod
     def read_raw(path: Path) -> str:
-        """Read the raw text content of a file with O_NOFOLLOW protection.
+        """
+        Read the raw text content of a file with O_NOFOLLOW protection.
 
         Args:
             path: Path to the file.
@@ -82,6 +87,7 @@ class FsUtils:
 
         Raises:
             MVMError: If the file cannot be read.
+
         """
         try:
             fd = FsUtils._open_nofollow(path)
@@ -95,7 +101,8 @@ class FsUtils:
 
     @staticmethod
     def secure_mkdir(directory: Path, name: str) -> None:
-        """Create a directory, refusing if it or any ancestor is a symlink.
+        """
+        Create a directory, refusing if it or any ancestor is a symlink.
 
         Args:
             directory: The directory path to create.
@@ -103,6 +110,7 @@ class FsUtils:
 
         Raises:
             MVMError: If the directory already exists or is a symlink.
+
         """
         try:
             os.lstat(directory)
@@ -138,7 +146,8 @@ class FsUtils:
 
     @staticmethod
     def get_real_user_ids() -> tuple[int, int] | None:
-        """Return (uid, gid) of the real invoking user when running under sudo.
+        """
+        Return (uid, gid) of the real invoking user when running under sudo.
 
         Returns None if not running as root, or if SUDO_USER is not set / cannot
         be resolved — in which case no chown is needed.

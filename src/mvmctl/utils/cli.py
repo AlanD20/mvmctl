@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import wraps
-from typing import Callable, TypeVar
+from typing import TypeVar
 
 import click
 import typer
@@ -18,7 +19,8 @@ F = TypeVar("F", bound=Callable[..., object])
 
 
 def handle_errors(func: F) -> F:
-    """Decorator for CLI commands — catches all exceptions cleanly.
+    """
+    Decorator for CLI commands — catches all exceptions cleanly.
 
     Catches MVMError (and all subclasses) and unexpected exceptions,
     prints a clean user-friendly message, and exits with code 1.
@@ -73,14 +75,16 @@ def _print_error(message: str, *, is_unexpected: bool = False) -> None:
 
 
 class CliUtils:
-    """Domain-agnostic CLI helpers.
+    """
+    Domain-agnostic CLI helpers.
 
     All methods are static — no instance state needed.
     """
 
     @staticmethod
     def check_name_arg(ctx: typer.Context, name: str | None) -> str:
-        """Guard for positional name arg: show help on ``"help"`` or ``None``, else return name.
+        """
+        Guard for positional name arg: show help on ``"help"`` or ``None``, else return name.
 
         Args:
             ctx: Typer context for help output.
@@ -91,6 +95,7 @@ class CliUtils:
 
         Raises:
             typer.Exit: If name is "help" (shows help) or None (shows help with error code).
+
         """
         if name == "help":
             typer.echo(ctx.get_help())

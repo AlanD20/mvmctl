@@ -53,13 +53,15 @@ class BinaryFetchRequest:
         return self._result
 
     def resolve(self) -> ResolvedBinaryFetchInput:
-        """Resolve and validate fetch inputs.
+        """
+        Resolve and validate fetch inputs.
 
         Returns:
             ResolvedBinaryFetchInput with resolved values.
 
         Raises:
             BinaryError: If version format is invalid.
+
         """
         # Normalize version (strip 'v' prefix)
         version = self._inputs.version.removeprefix("v")

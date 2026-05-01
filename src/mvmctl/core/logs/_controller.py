@@ -11,11 +11,13 @@ from mvmctl.models.vm import VMInstanceItem
 
 
 class LogController:
-    """Stateful log controller bound to a single VM.
+    """
+    Stateful log controller bound to a single VM.
 
     Args:
         entity: VM identifier (name, ID, IP, MAC) or VMInstanceItem
         repo: VMRepository instance
+
     """
 
     def __init__(
@@ -34,7 +36,8 @@ class LogController:
         return self._vm
 
     def show(self, log_type: str, lines: int) -> list[str]:
-        """Read the last N lines from the VM's log file.
+        """
+        Read the last N lines from the VM's log file.
 
         Args:
             log_type: 'boot' or 'os'
@@ -42,18 +45,21 @@ class LogController:
 
         Returns:
             List of log line strings.
+
         """
         log_file = LogService.get_log_path(self._hash, log_type)
         return LogService.read_log_lines(log_file, lines)
 
-    def follow(self, log_type: str) -> Generator[str, None, None]:
-        """Stream log file lines in real-time.
+    def follow(self, log_type: str) -> Generator[str]:
+        """
+        Stream log file lines in real-time.
 
         Args:
             log_type: 'boot' or 'os'
 
         Yields:
             New log lines as they are written.
+
         """
         log_file = LogService.get_log_path(self._hash, log_type)
         return LogService.follow_log(log_file)

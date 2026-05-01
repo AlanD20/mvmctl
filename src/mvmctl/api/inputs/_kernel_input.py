@@ -15,7 +15,8 @@ __all__ = ["KernelInput", "KernelRequest", "ResolvedKernelInput"]
 
 @dataclass
 class KernelInput:
-    """Input model for identifying existing kernels.
+    """
+    Input model for identifying existing kernels.
 
     Used for operations on existing kernels (remove, get, inspect, set-default).
     Provides identifiers (name or id) to resolve the kernel from DB.
@@ -28,7 +29,8 @@ class KernelInput:
 
 @dataclass(frozen=True)
 class ResolvedKernelInput:
-    """Immutable resolved kernel request — contains resolved KernelItem records.
+    """
+    Immutable resolved kernel request — contains resolved KernelItem records.
 
     These records are guaranteed to exist in the DB, making them safe to operate on.
     """
@@ -38,7 +40,8 @@ class ResolvedKernelInput:
 
 
 class KernelRequest:
-    """Resolve kernel identifiers to DB records and validate.
+    """
+    Resolve kernel identifiers to DB records and validate.
 
     Takes KernelInput (names/ids) and resolves them to KernelItem records
     using KernelResolver. Calls ensure_validate() after resolution.
@@ -59,13 +62,15 @@ class KernelRequest:
         return self._result
 
     def resolve(self) -> ResolvedKernelInput:
-        """Resolve kernel identifiers to KernelItem records.
+        """
+        Resolve kernel identifiers to KernelItem records.
 
         Returns:
             ResolvedKernelInput with resolved kernel records.
 
         Raises:
             KernelNotFoundError: If any identifier cannot be resolved.
+
         """
         identifiers = self._inputs.id + self._inputs.name
 

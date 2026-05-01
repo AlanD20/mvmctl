@@ -2,13 +2,15 @@ from enum import StrEnum, auto
 
 
 class CloudInitMode(StrEnum):
-    """Cloud-init configuration mode.
+    """
+    Cloud-init configuration mode.
 
     Attributes:
         INJECT: Inject cloud-init files directly into rootfs using libguestfs (filesystem-agnostic).
         NET: Serve cloud-init files via HTTP (nocloud-net datasource).
         OFF: Skip cloud-init entirely (no ISO mounted).
         ISO: Generate cloud-init ISO from config files.
+
     """
 
     INJECT = "inject"

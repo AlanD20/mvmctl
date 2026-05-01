@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC
+
 from mvmctl.core._shared import Database
 from mvmctl.models.network import NetworkItem, NetworkLeaseItem
 from mvmctl.models.vm import VMInstanceItem
@@ -142,9 +144,9 @@ class NetworkRepository:
 
     def soft_delete(self, network_id: str) -> None:
         """Soft-delete a network by setting deleted_at and is_present=0."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        now = datetime.now(tz=timezone.utc).isoformat()
+        now = datetime.now(tz=UTC).isoformat()
         with self._db.connect() as conn:
             conn.execute(
                 "UPDATE networks SET deleted_at = ?, is_present = 0 WHERE id = ?",
@@ -152,13 +154,15 @@ class NetworkRepository:
             )
 
     def query_vms_by_network(self, network_id: str) -> list[VMInstanceItem]:
-        """Return all VMs that reference the given network ID.
+        """
+        Return all VMs that reference the given network ID.
 
         Args:
             network_id: Full network ID to query.
 
         Returns:
             List of VMInstanceItem records referencing this network.
+
         """
         with self._db.connect() as conn:
             rows = conn.execute(

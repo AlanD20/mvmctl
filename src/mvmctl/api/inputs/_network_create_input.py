@@ -19,7 +19,8 @@ __all__ = [
 
 @dataclass
 class NetworkCreateInput:
-    """Input model for network creation — raw CLI parameters.
+    """
+    Input model for network creation — raw CLI parameters.
 
     Optional fields are None when not provided by the user.
     DB-backed defaults are resolved by NetworkCreateRequest.
@@ -34,7 +35,8 @@ class NetworkCreateInput:
 
 @dataclass(frozen=True)
 class ResolvedNetworkCreateRequest:
-    """Immutable resolved inputs for network creation — all values explicit.
+    """
+    Immutable resolved inputs for network creation — all values explicit.
 
     Output of NetworkCreateRequest.resolve(). No None values for required fields.
     """
@@ -48,7 +50,8 @@ class ResolvedNetworkCreateRequest:
 
 
 class NetworkCreateRequest:
-    """Resolve and validate network creation inputs.
+    """
+    Resolve and validate network creation inputs.
 
     Takes NetworkCreateInput and resolves DB-backed defaults,
     validates subnet overlap and bridge conflicts, and produces
@@ -70,7 +73,8 @@ class NetworkCreateRequest:
         return self._result
 
     def resolve(self) -> ResolvedNetworkCreateRequest:
-        """Resolve all inputs to explicit values.
+        """
+        Resolve all inputs to explicit values.
 
         This method resolves DB-backed defaults and computes derived values
         (gateway, bridge name). It does NOT validate —
@@ -103,7 +107,8 @@ class NetworkCreateRequest:
         return self._result
 
     def ensure_validate(self) -> None:
-        """Validate resolved network creation inputs.
+        """
+        Validate resolved network creation inputs.
 
         Validates:
         - Network name format

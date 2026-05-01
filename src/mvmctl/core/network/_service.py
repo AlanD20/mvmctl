@@ -40,17 +40,20 @@ _MVM_CHAINS_CONFIG: list[tuple[IPTablesChain, IPTablesTable, str]] = [
 
 
 class NetworkService:
-    """Manages network interfaces, bridges, TAP devices, and NAT rules.
+    """
+    Manages network interfaces, bridges, TAP devices, and NAT rules.
 
     Stateless class - all methods require explicit parameters.
     Shares database connection with IPTablesTracker for rule synchronization.
     """
 
     def __init__(self, repo: NetworkRepository) -> None:
-        """Initialize NetworkService.
+        """
+        Initialize NetworkService.
 
         Args:
             repo: NetworkRepository instance for network DB operations.
+
         """
         self._repo = repo
         self._iptables_repo = IPTablesRuleRepository(repo.db)
@@ -62,7 +65,8 @@ class NetworkService:
         return self._tracker
 
     def list_all(self, verify: bool = True) -> list[NetworkItem]:
-        """List all networks, syncing is_present flag with bridge state.
+        """
+        List all networks, syncing is_present flag with bridge state.
 
         Checks each network's bridge on the host and bulk-updates is_present
         for any that are missing. Returns the full list with updated state.
@@ -70,6 +74,7 @@ class NetworkService:
         Args:
             verify: If True (default), check bridge existence and update DB.
                    If False, return DB records as-is.
+
         """
         networks = self._repo.list_all()
         if not verify:
@@ -87,7 +92,8 @@ class NetworkService:
         return networks
 
     def ensure_mvm_chains(self) -> None:
-        """Ensure MVM iptables chains exist with proper jump rules.
+        """
+        Ensure MVM iptables chains exist with proper jump rules.
 
         Idempotent operation - safe to call multiple times.
         Creates MVM chains and sets up jump rules from standard chains.
@@ -107,7 +113,8 @@ class NetworkService:
             )
 
     def remove_mvm_chains(self) -> None:
-        """Remove all MVM iptables chains and their rules.
+        """
+        Remove all MVM iptables chains and their rules.
 
         Deletes jump rules from standard chains, flushes custom chains,
         then removes the chains themselves.  Uses direct iptables calls
@@ -176,7 +183,8 @@ class NetworkService:
                 )
 
     def initialize(self) -> None:
-        """Initialize MVM iptables chains with proper jump rules.
+        """
+        Initialize MVM iptables chains with proper jump rules.
 
         Idempotent operation - safe to call multiple times.
         Creates MVM chains and sets up jump rules from standard chains.
@@ -195,11 +203,13 @@ class NetworkService:
         bridge: str,
         bridge_address: str,
     ) -> None:
-        """Create and configure the bridge interface.
+        """
+        Create and configure the bridge interface.
 
         Args:
             bridge: Bridge interface name.
             bridge_address: Bridge IP address with prefix (e.g. '172.29.0.1/28').
+
         """
         if NetworkUtils.bridge_exists(bridge):
             logger.debug("Bridge %s already exists, reconciling state", bridge)
@@ -229,7 +239,8 @@ class NetworkService:
         logger.info("Bridge %s created with address %s", bridge, bridge_address)
 
     def ensure_ip_forwarding(self) -> None:
-        """Enable IP forwarding for NAT.
+        """
+        Enable IP forwarding for NAT.
 
         Idempotent operation - safe to call multiple times.
         Tries /proc/sys first, falls back to sysctl command.
@@ -248,7 +259,8 @@ class NetworkService:
                 raise NetworkError("Failed to enable IP forwarding") from e
 
     def remove_bridge(self, bridge: str, *, network_id: str) -> None:
-        """Remove the bridge interface and clean up attached TAPs.
+        """
+        Remove the bridge interface and clean up attached TAPs.
 
         Idempotent operation - safe to call multiple times.
         Removes all TAP devices attached to the bridge before removing the bridge.
@@ -257,6 +269,7 @@ class NetworkService:
         Args:
             bridge: Bridge interface name to remove.
             network_id: Network UUID for iptables rule tracking.
+
         """
         attached_taps = NetworkUtils.get_bridge_taps(bridge)
         for tap in attached_taps:
@@ -280,7 +293,8 @@ class NetworkService:
         subnet: str,
         network_id: str,
     ) -> None:
-        """Ensure NAT rules exist for the bridge subnet.
+        """
+        Ensure NAT rules exist for the bridge subnet.
 
         Idempotent operation - safe to call multiple times.
         Creates MASQUERADE and FORWARD rules via IPTablesTracker.
@@ -380,7 +394,8 @@ class NetworkService:
         subnet: str | None = None,
         network_id: str,
     ) -> None:
-        """Remove NAT (MASQUERADE + FORWARD) rules for the bridge.
+        """
+        Remove NAT (MASQUERADE + FORWARD) rules for the bridge.
 
         Idempotent operation - safe to call multiple times.
         Uses IPTablesTracker to remove rules from iptables and mark as deleted in DB.
@@ -390,6 +405,7 @@ class NetworkService:
             subnet: Subnet CIDR (e.g., "10.0.0.0/24"). If None, queries from database.
             nat_gateways: List of gateway interfaces. If None, queries from database.
             network_id: Network UUID for iptables rule tracking.
+
         """
         from mvmctl.core.network._resolver import NetworkResolver
 
@@ -512,7 +528,8 @@ class NetworkService:
         )
 
     def ensure_tap(self, tap: str, bridge: str, *, network_id: str) -> None:
-        """Ensure a TAP device exists and is attached to the bridge with iptables rules.
+        """
+        Ensure a TAP device exists and is attached to the bridge with iptables rules.
 
         Idempotent operation - safe to call multiple times.
         If TAP already exists and is attached to the correct bridge, reconciles iptables rules.
@@ -529,6 +546,7 @@ class NetworkService:
             tap: TAP device name.
             bridge: Bridge interface name.
             network_id: Network UUID for iptables rule tracking.
+
         """
         if NetworkUtils.tap_exists(tap):
             current_bridge = NetworkUtils.get_tap_bridge(tap)
@@ -640,7 +658,8 @@ class NetworkService:
     def remove_tap(
         self, tap: str, bridge: str | None = None, *, network_id: str
     ) -> None:
-        """Remove a TAP device and its iptables forwarding rules.
+        """
+        Remove a TAP device and its iptables forwarding rules.
 
         Idempotent operation - safe to call multiple times.
         If TAP doesn't exist, does nothing.
@@ -649,6 +668,7 @@ class NetworkService:
             tap: TAP device name to remove.
             bridge: Bridge name the TAP is attached to. If None, attempts to detect.
             network_id: Network UUID for iptables rule tracking.
+
         """
         if not NetworkUtils.tap_exists(tap):
             logger.debug("TAP device %s does not exist, skipping removal", tap)
@@ -721,7 +741,8 @@ class NetworkService:
         logger.info("TAP device %s removed", tap)
 
     def remove(self, network: NetworkItem, *, force: bool = False) -> None:
-        """Remove a network's infrastructure and database record.
+        """
+        Remove a network's infrastructure and database record.
 
         1. Tear down NAT rules if enabled
         2. Remove bridge
@@ -733,6 +754,7 @@ class NetworkService:
 
         Raises:
             NetworkError: If infrastructure teardown fails.
+
         """
         from mvmctl.core.network._controller import NetworkController
 
@@ -761,11 +783,13 @@ class NetworkService:
     def remove_many(
         self, networks: list[NetworkItem], *, force: bool = False
     ) -> None:
-        """Remove multiple networks.
+        """
+        Remove multiple networks.
 
         Args:
             networks: List of NetworkItem to remove.
             force: If True, remove even if referenced by VMs.
+
         """
         for network in networks:
             self.remove(network, force=force)

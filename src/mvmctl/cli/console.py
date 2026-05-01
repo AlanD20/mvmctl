@@ -7,7 +7,6 @@ import socket
 import sys
 import termios
 import tty
-from typing import Optional
 
 import typer
 
@@ -29,12 +28,12 @@ console_app = typer.Typer(
 @handle_errors
 def console(
     ctx: typer.Context,
-    identifier: Optional[str] = typer.Argument(
+    identifier: str | None = typer.Argument(
         None, help="VM name, ID, IP, or MAC address"
     ),
-    name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name"),
-    ip: Optional[str] = typer.Option(None, "--ip", help="VM guest IP address"),
-    mac: Optional[str] = typer.Option(
+    name: str | None = typer.Option(None, "--name", "-n", help="VM name"),
+    ip: str | None = typer.Option(None, "--ip", help="VM guest IP address"),
+    mac: str | None = typer.Option(
         None, "--mac", help="VM guest MAC address"
     ),
     state: bool = typer.Option(
@@ -42,7 +41,8 @@ def console(
     ),
     kill: bool = typer.Option(False, "--kill", help="Kill the console relay"),
 ) -> None:
-    """Attach to a VM console.
+    """
+    Attach to a VM console.
 
     Provide a VM identifier as a positional argument, or use
     --name, --ip, or --mac to specify the VM explicitly.

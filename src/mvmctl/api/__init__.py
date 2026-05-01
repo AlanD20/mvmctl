@@ -1,4 +1,5 @@
-"""mvmctl public API — stable, curated interface for automation.
+"""
+mvmctl public API — stable, curated interface for automation.
 
 All public types and operations are re-exported here. Import from this
 module for stability guarantees::

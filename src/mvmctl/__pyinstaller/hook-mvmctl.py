@@ -1,4 +1,5 @@
-"""PyInstaller hook for mvmctl.
+"""
+PyInstaller hook for mvmctl.
 
 This hook ensures PyInstaller collects all CLI submodules that are lazy-loaded
 by LazyMVMGroup. The imports are declared as hiddenimports so PyInstaller

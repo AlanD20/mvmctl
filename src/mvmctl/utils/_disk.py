@@ -49,7 +49,8 @@ _SIZE_PATTERN: Final[re.Pattern[str]] = re.compile(
 
 
 def parse_disk_size(size_str: str) -> int:
-    """Parse disk size string to bytes.
+    """
+    Parse disk size string to bytes.
 
     Supports: 512M, 1G, 2.5GB, 1024K, etc.
     Case-insensitive. Whitespace allowed between number and unit.
@@ -62,6 +63,7 @@ def parse_disk_size(size_str: str) -> int:
 
     Raises:
         MVMError: If format is invalid
+
     """
     size_str = size_str.strip().upper()
     match = _SIZE_PATTERN.match(size_str)
@@ -97,7 +99,8 @@ def parse_disk_size(size_str: str) -> int:
 def format_sectors_human_readable(
     size_sectors: int, sector_size: int = 512
 ) -> str:
-    """Convert size in sectors to human-readable format (MiB/GiB).
+    """
+    Convert size in sectors to human-readable format (MiB/GiB).
 
     Args:
         size_sectors: Size in sectors
@@ -105,6 +108,7 @@ def format_sectors_human_readable(
 
     Returns:
         Human-readable string like "512.0 MiB", "2.5 GiB"
+
     """
     size_bytes = size_sectors * sector_size
     size_mib = size_bytes / (1024 * 1024)
@@ -114,13 +118,15 @@ def format_sectors_human_readable(
 
 
 def format_disk_size(bytes_count: int) -> str:
-    """Format bytes to human-readable string.
+    """
+    Format bytes to human-readable string.
 
     Args:
         bytes_count: Size in bytes
 
     Returns:
         Human-readable string like "1.5G", "512M"
+
     """
     for unit, multiplier in sorted(
         _SIZE_MULTIPLIERS.items(), key=lambda x: x[1], reverse=True
@@ -139,7 +145,8 @@ def format_disk_size(bytes_count: int) -> str:
 
 
 class PartitionDetector(Protocol):
-    """Protocol defining the interface for partition detectors.
+    """
+    Protocol defining the interface for partition detectors.
 
     Each detector evaluates partition characteristics and returns a score
     indicating how likely a partition is to be the root filesystem.
@@ -160,7 +167,8 @@ class PartitionDetector(Protocol):
         partition: dict[str, object],
         all_partitions: list[dict[str, object]],
     ) -> float:
-        """Evaluate a partition and return a score.
+        """
+        Evaluate a partition and return a score.
 
         Args:
             partition: Dictionary containing partition information (e.g., type code,
@@ -169,22 +177,26 @@ class PartitionDetector(Protocol):
 
         Returns:
             Score between 0.0 and 1.0 indicating partition suitability as root.
+
         """
         ...
 
 
 class RootPartitionDetector:
-    """Detects the most likely root partition using weighted detector heuristics.
+    """
+    Detects the most likely root partition using weighted detector heuristics.
 
     Combines multiple detector strategies (type code, label, size, filesystem)
     to identify the most suitable candidate for use as the root filesystem.
     """
 
     def __init__(self, disabled_detectors: list[str] | None = None) -> None:
-        """Initialize the detector with all built-in detectors registered.
+        """
+        Initialize the detector with all built-in detectors registered.
 
         Args:
             disabled_detectors: List of detector names to skip during detection.
+
         """
         self._detectors: list[PartitionDetector] = [
             TypeCodeDetector(),
@@ -195,15 +207,18 @@ class RootPartitionDetector:
         self._disabled = set(disabled_detectors or [])
 
     def register(self, detector: PartitionDetector) -> None:
-        """Register a detector for use in root partition detection.
+        """
+        Register a detector for use in root partition detection.
 
         Args:
             detector: A PartitionDetector implementation to add to the registry.
+
         """
         self._detectors.append(detector)
 
     def detect(self, partitions: list[dict[str, object]]) -> int:
-        """Detect the most likely root partition from a list of candidates.
+        """
+        Detect the most likely root partition from a list of candidates.
 
         Args:
             partitions: List of partition dictionaries to evaluate.
@@ -214,6 +229,7 @@ class RootPartitionDetector:
         Raises:
             RootPartitionDetectionError: If no suitable root partition is found.
             TieDetectedError: If multiple partitions score equally and highest.
+
         """
         if len(partitions) == 1:
             return 1
@@ -247,7 +263,8 @@ class RootPartitionDetector:
 
 
 class TypeCodeDetector:
-    """Detector for identifying root partitions based on partition type codes.
+    """
+    Detector for identifying root partitions based on partition type codes.
 
     Linux root partitions typically have specific type codes that indicate
     their purpose in the system.
@@ -279,7 +296,8 @@ class TypeCodeDetector:
         partition: dict[str, object],
         all_partitions: list[dict[str, object]],
     ) -> float:
-        """Score a partition based on its type code.
+        """
+        Score a partition based on its type code.
 
         Args:
             partition: Partition information dictionary.
@@ -289,6 +307,7 @@ class TypeCodeDetector:
 
         Returns:
             Score based on type code matching root filesystem patterns.
+
         """
         partition_type = partition.get("type", "")
         if not isinstance(partition_type, str):
@@ -323,7 +342,8 @@ class TypeCodeDetector:
 
 
 class LabelDetector:
-    """Detector for identifying root partitions based on filesystem labels.
+    """
+    Detector for identifying root partitions based on filesystem labels.
 
     Root partitions often have specific labels like 'ROOT', 'root', or
     variations that indicate their purpose.
@@ -342,7 +362,8 @@ class LabelDetector:
         partition: dict[str, object],
         all_partitions: list[dict[str, object]],
     ) -> float:
-        """Score a partition based on its filesystem label.
+        """
+        Score a partition based on its filesystem label.
 
         Args:
             partition: Partition information dictionary.
@@ -352,6 +373,7 @@ class LabelDetector:
 
         Returns:
             Score based on label matching root filesystem patterns.
+
         """
         # Get label from partition["name"] or partition["label"], default to empty string
         label = partition.get("name", "") or partition.get("label", "")
@@ -379,7 +401,8 @@ class LabelDetector:
 
 
 class SizeDetector:
-    """Detector for identifying root partitions based on partition size.
+    """
+    Detector for identifying root partitions based on partition size.
 
     Root filesystems typically have size characteristics that distinguish
     them from small boot/EFI partitions.
@@ -398,7 +421,8 @@ class SizeDetector:
         partition: dict[str, object],
         all_partitions: list[dict[str, object]],
     ) -> float:
-        """Score a partition based on its size relative to minimum root size.
+        """
+        Score a partition based on its size relative to minimum root size.
 
         Args:
             partition: Partition information dictionary.
@@ -406,6 +430,7 @@ class SizeDetector:
 
         Returns:
             Score based on size being >= MIN_ROOT_SIZE_MB threshold.
+
         """
         # Get partition size from partition["size"] (in sectors)
         size_value = partition.get("size", 0)
@@ -446,7 +471,8 @@ class SizeDetector:
 
 
 class FilesystemDetector:
-    """Detector for identifying root partitions based on filesystem type.
+    """
+    Detector for identifying root partitions based on filesystem type.
 
     Root filesystems typically use common Linux filesystems like ext4,
     btrfs, or xfs.
@@ -465,7 +491,8 @@ class FilesystemDetector:
         partition: dict[str, object],
         all_partitions: list[dict[str, object]],
     ) -> float:
-        """Score a partition based on its filesystem type.
+        """
+        Score a partition based on its filesystem type.
 
         Args:
             partition: Partition information dictionary.
@@ -475,6 +502,7 @@ class FilesystemDetector:
 
         Returns:
             Score based on filesystem type matching common root types.
+
         """
         fstype = partition.get("fstype", "")
         if not isinstance(fstype, str):

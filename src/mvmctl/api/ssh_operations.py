@@ -13,20 +13,23 @@ logger = logging.getLogger(__name__)
 
 
 class SSHOperation:
-    """SSH orchestration operations.
+    """
+    SSH orchestration operations.
 
     All methods are static and take Input classes as arguments.
     """
 
     @staticmethod
     def connect(inputs: SSHInput) -> int:
-        """Open SSH session or execute command on a VM.
+        """
+        Open SSH session or execute command on a VM.
 
         Args:
             inputs: Raw SSH input from CLI
 
         Returns:
             Exit code from SSH session
+
         """
         db = Database()
         request = SSHRequest(inputs, db)

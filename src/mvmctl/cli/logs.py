@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 import typer
 
 from mvmctl.api.inputs._logs_input import LogInput
@@ -28,14 +26,15 @@ def logs(
     os_log: bool = typer.Option(
         False, "--os", help="Show Firecracker OS log instead of boot log"
     ),
-    lines: Optional[int] = typer.Option(
+    lines: int | None = typer.Option(
         None, "--lines", "-n", help="Number of log lines to show"
     ),
-    follow: Optional[bool] = typer.Option(
+    follow: bool | None = typer.Option(
         None, "--follow", "-f", help="Follow log output in real-time"
     ),
 ) -> None:
-    """View VM logs.
+    """
+    View VM logs.
 
     Provide a VM identifier as a positional argument.
 

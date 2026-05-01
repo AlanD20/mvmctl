@@ -1,4 +1,5 @@
-"""Asset management - OOP implementation for bundled package assets.
+"""
+Asset management - OOP implementation for bundled package assets.
 
 This module provides a class-based interface for accessing bundled assets
 (templates, YAML configs, defaults) using importlib.resources for reliable
@@ -17,7 +18,8 @@ if TYPE_CHECKING:
 
 
 class AssetManager:
-    """Manages access to bundled package assets.
+    """
+    Manages access to bundled package assets.
 
     Uses importlib.resources for reliable access to package resources,
     which works regardless of how the package is installed (regular install,
@@ -57,7 +59,8 @@ class AssetManager:
             ) from exc
 
     def get_file(self, *path_parts: str) -> Traversable:
-        """Return a traversable path to a bundled asset file.
+        """
+        Return a traversable path to a bundled asset file.
 
         Supports nested paths by passing multiple path components.
 
@@ -83,6 +86,7 @@ class AssetManager:
 
             # Nested file using path separator
             config = manager.get_file("configs/defaults.yaml")
+
         """
         if not path_parts:
             raise BundledAssetError("At least one path part is required")
@@ -93,7 +97,8 @@ class AssetManager:
         return result
 
     def read_file(self, *path_parts: str) -> str:
-        """Read and return the contents of a bundled asset file as text.
+        """
+        Read and return the contents of a bundled asset file as text.
 
         Args:
             *path_parts: Path components to the asset file.
@@ -109,6 +114,7 @@ class AssetManager:
 
             content = manager.read_file("cloud-init.template.yaml")
             nested = manager.read_file("templates", "config.yaml")
+
         """
         if not path_parts:
             raise BundledAssetError("At least one path part is required")
@@ -127,7 +133,8 @@ class AssetManager:
             ) from exc
 
     def read_bytes(self, *path_parts: str) -> bytes:
-        """Read and return the contents of a bundled asset file as bytes.
+        """
+        Read and return the contents of a bundled asset file as bytes.
 
         Args:
             *path_parts: Path components to the asset file.
@@ -142,6 +149,7 @@ class AssetManager:
         Example::
 
             data = manager.read_bytes("images.yaml")
+
         """
         if not path_parts:
             raise BundledAssetError("At least one path part is required")
@@ -160,7 +168,8 @@ class AssetManager:
             ) from exc
 
     def file_exists(self, *path_parts: str) -> bool:
-        """Check if a bundled asset file exists.
+        """
+        Check if a bundled asset file exists.
 
         Args:
             *path_parts: Path components to the asset file.
@@ -172,6 +181,7 @@ class AssetManager:
 
             if manager.file_exists("custom.template.yaml"):
                 content = manager.read_file("custom.template.yaml")
+
         """
         if not path_parts:
             return False
@@ -183,7 +193,8 @@ class AssetManager:
             return False
 
     def list_files(self) -> list[str]:
-        """List all files in the assets root directory.
+        """
+        List all files in the assets root directory.
 
         Returns:
             List of filenames in the assets directory.
@@ -192,6 +203,7 @@ class AssetManager:
 
             files = manager.list_files()
             # Returns: ['cloud-init.template.yaml', 'firecracker.template.json', ...]
+
         """
         try:
             return [

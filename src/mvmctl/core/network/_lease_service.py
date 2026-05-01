@@ -1,4 +1,5 @@
-"""Network IP lease management.
+"""
+Network IP lease management.
 
 This module handles IP address allocation, release, and lease tracking
 for network management using a class-based design with network resolution.
@@ -16,7 +17,8 @@ from mvmctl.utils.network import NetworkUtils
 
 
 class LeaseService:
-    """Manages IP leases for a specific network.
+    """
+    Manages IP leases for a specific network.
 
     This class handles IP address allocation, release, and lease tracking
     for a single network identified by name or ID.
@@ -27,6 +29,7 @@ class LeaseService:
 
     Raises:
         NetworkNotFoundError: If the network cannot be resolved.
+
     """
 
     def __init__(
@@ -51,10 +54,12 @@ class LeaseService:
         return self._network.name
 
     def get_leases(self) -> list[NetworkLeaseItem]:
-        """Get all IP leases for this network.
+        """
+        Get all IP leases for this network.
 
         Returns:
             List of NetworkLeaseItem objects for the network.
+
         """
         db_leases = self._lease_repo.list_all(self._network.id)
         return [
@@ -70,13 +75,15 @@ class LeaseService:
         ]
 
     def get(self, ip: str) -> NetworkLeaseItem | None:
-        """Get lease for a specific IP address.
+        """
+        Get lease for a specific IP address.
 
         Args:
             ip: IP address to look up.
 
         Returns:
             NetworkLeaseItem if found, None otherwise.
+
         """
         lease = self._lease_repo.get(self._network.id, ip)
         if lease is None:
@@ -91,13 +98,15 @@ class LeaseService:
         )
 
     def get_by_vm_id(self, vm_id: str) -> list[NetworkLeaseItem]:
-        """Get all leases for a specific VM on this network.
+        """
+        Get all leases for a specific VM on this network.
 
         Args:
             vm_id: VM ID to look up.
 
         Returns:
             List of NetworkLeaseItem objects for the VM.
+
         """
         db_leases = self._lease_repo.list_by_vm(self._network.id, vm_id)
         return [
@@ -113,7 +122,8 @@ class LeaseService:
         ]
 
     def is_available(self, ip: str) -> bool:
-        """Check if an IP address is available (not leased).
+        """
+        Check if an IP address is available (not leased).
 
         Queries the database directly to check availability.
 
@@ -122,11 +132,13 @@ class LeaseService:
 
         Returns:
             True if the IP is not currently leased, False otherwise.
+
         """
         return self._lease_repo.get(self._network.id, ip) is None
 
     def lease(self, vm_id: str) -> str:
-        """Allocate the next available IP from this network's subnet.
+        """
+        Allocate the next available IP from this network's subnet.
 
         Registers the lease in database.
 
@@ -139,6 +151,7 @@ class LeaseService:
 
         Raises:
             NetworkError: If no IPs available.
+
         """
         leases = self.get_leases()
         used_ips = {lease.ipv4 for lease in leases}
@@ -151,7 +164,8 @@ class LeaseService:
         return allocated_ip
 
     def lease_specific(self, ip: str, vm_id: str) -> str:
-        """Allocate a specific IP address from this network's subnet.
+        """
+        Allocate a specific IP address from this network's subnet.
 
         Validates that the IP is in the subnet, not already leased, and not the gateway.
 
@@ -164,6 +178,7 @@ class LeaseService:
 
         Raises:
             NetworkError: If IP is not in subnet, is the gateway, or is already leased.
+
         """
         network = ipaddress.IPv4Network(self._network.subnet, strict=False)
         try:
@@ -187,10 +202,12 @@ class LeaseService:
         return ip
 
     def release(self, vm_id: str) -> None:
-        """Release all leases for a VM from this network.
+        """
+        Release all leases for a VM from this network.
 
         Args:
             vm_id: ID of the VM whose leases should be released.
+
         """
         self._lease_repo.release_by_vm(vm_id)
 

@@ -20,7 +20,8 @@ _EXCLUDED_INTERFACES = ("lo",)
 
 
 class NetworkUtils:
-    """Network computation and system query utilities.
+    """
+    Network computation and system query utilities.
 
     All methods are static — no instance state needed.
     """
@@ -39,7 +40,8 @@ class NetworkUtils:
 
     @staticmethod
     def compute_ipv4_gateway(subnet: str) -> str:
-        """Compute default gateway IP from subnet (first usable host).
+        """
+        Compute default gateway IP from subnet (first usable host).
 
         For /31 subnets (RFC 3021), both addresses are usable hosts, so we
         return the second address to avoid colliding with the network address
@@ -55,7 +57,8 @@ class NetworkUtils:
 
     @staticmethod
     def compute_bridge_address(ipv4_gateway: str, subnet: str) -> str:
-        """Return gateway IP with subnet prefix (e.g. '172.29.0.1/28').
+        """
+        Return gateway IP with subnet prefix (e.g. '172.29.0.1/28').
 
         Args:
             ipv4_gateway: Gateway IP address (e.g. '172.29.0.1').
@@ -63,6 +66,7 @@ class NetworkUtils:
 
         Returns:
             Gateway IP with prefix (e.g. '172.29.0.1/28').
+
         """
         prefix = ipaddress.IPv4Network(subnet, strict=False).prefixlen
         return f"{ipv4_gateway}/{prefix}"
@@ -95,7 +99,8 @@ class NetworkUtils:
         subnet: str,
         gateway: str | None = None,
     ) -> str:
-        """Allocate the next available IP in a subnet.
+        """
+        Allocate the next available IP in a subnet.
 
         Args:
             existing_ips: List of already allocated IP strings.
@@ -107,6 +112,7 @@ class NetworkUtils:
 
         Raises:
             NetworkError: If no IPs are available.
+
         """
         network = ipaddress.IPv4Network(subnet, strict=False)
         existing_set = set(existing_ips)
@@ -149,10 +155,12 @@ class NetworkUtils:
 
     @staticmethod
     def detect_outbound_interface() -> str | None:
-        """Get the outbound (default route) network interface.
+        """
+        Get the outbound (default route) network interface.
 
         Returns:
             The interface name (e.g., "eth0") or None if not found.
+
         """
         try:
             result = subprocess.run(
@@ -269,7 +277,8 @@ class NetworkUtils:
 
     @staticmethod
     def ensure_interface_ready(interface: str) -> bool:
-        """Ensure a network interface exists and is usable for NAT.
+        """
+        Ensure a network interface exists and is usable for NAT.
 
         Checks:
         - Not loopback
@@ -285,6 +294,7 @@ class NetworkUtils:
 
         Raises:
             NetworkError: If interface is not ready for use.
+
         """
         if interface == "lo":
             raise NetworkError("Loopback interface 'lo' cannot be used for NAT")
@@ -326,12 +336,14 @@ class NetworkUtils:
 
     @staticmethod
     def detect_iptables_backend_conflict() -> tuple[bool, str]:
-        """Detect mixed iptables backend conflict.
+        """
+        Detect mixed iptables backend conflict.
 
         Checks if both iptables-legacy and iptables-nft have active rules.
 
         Returns:
             Tuple of (has_conflict, diagnosis_string).
+
         """
         from mvmctl.utils._system import privileged_cmd as _privileged_cmd
 
@@ -396,10 +408,12 @@ class NetworkUtils:
 
     @staticmethod
     def get_tap_bridge(tap: str) -> str | None:
-        """Get the bridge that a TAP device is attached to.
+        """
+        Get the bridge that a TAP device is attached to.
 
         Returns:
             Bridge name or None if tap doesn't exist or isn't attached.
+
         """
         try:
             result = subprocess.run(
@@ -449,7 +463,8 @@ class NetworkUtils:
 
     @staticmethod
     def strip_tap_rules(rules_text: str) -> str:
-        """Strip TAP-related rules from iptables rules text.
+        """
+        Strip TAP-related rules from iptables rules text.
 
         Excludes any rules that reference currently active TAP devices.
         This prevents transient TAP rules from being persisted to disk.
@@ -459,6 +474,7 @@ class NetworkUtils:
 
         Returns:
             Filtered rules text with TAP rules removed.
+
         """
         tap_names = set(NetworkUtils.get_tuntap_devices())
         if not tap_names:
