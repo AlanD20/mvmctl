@@ -142,9 +142,67 @@ class Database:
                 version INTEGER NOT NULL UNIQUE,
                 name TEXT NOT NULL,
                 applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                checksum TEXT
+                checksum TEXT,
+                snapshot_path TEXT
             )
         """)
+        # Migrate existing tables that don't have snapshot_path
+        try:
+            conn.execute(
+                "ALTER TABLE db_migrations ADD COLUMN snapshot_path TEXT"
+            )
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+    def _take_snapshot(self, version: int) -> Path:
+        """Create an online snapshot of the database before a migration.
+
+        Snapshot is saved as a ``.snap`` file next to the database:
+        ``{db_path}.v{version}.snap``.  Uses SQLite's backup API to create a
+        transactionally consistent snapshot while other connections may be
+        active.  Only one snapshot is kept per version — a re-migration
+        overwrites the previous snapshot for that version.
+
+        Args:
+            version: The migration version this snapshot is for.
+
+        Returns:
+            Path to the snapshot file.
+        """
+        snap_path = self._db_path.with_name(
+            f"{self._db_path.name}.v{version}.snap",
+        )
+
+        # SQLite online backup — safe even with concurrent connections
+        with closing(sqlite3.connect(self._db_path)) as src:
+            with closing(sqlite3.connect(snap_path)) as dst:
+                src.backup(dst)
+
+        return snap_path
+
+    def _restore_from_snapshot(self, snapshot_path: Path) -> None:
+        """Restore the database from a snapshot.
+
+        Uses SQLite's backup API to restore from a snapshot file.
+        The backup API is safe even with concurrent connections.
+
+        Args:
+            snapshot_path: Path to the snapshot file.
+
+        Raises:
+            MigrationError: If the snapshot file does not exist or restore fails.
+        """
+        if not snapshot_path.exists():
+            raise MigrationError(f"Snapshot not found: {snapshot_path}")
+
+        try:
+            with closing(sqlite3.connect(snapshot_path)) as src:
+                with closing(sqlite3.connect(self._db_path)) as dst:
+                    src.backup(dst)
+        except sqlite3.Error as exc:
+            raise MigrationError(
+                f"Failed to restore from snapshot: {exc}"
+            ) from exc
 
     def migrate(self) -> int:
         """Run all pending migrations.
@@ -174,6 +232,9 @@ class Database:
                 version = self._extract_version(migration_file)
                 sql = migration_file.read_text()
 
+                # Take online snapshot before applying migration
+                snapshot_path = self._take_snapshot(version)
+
                 try:
                     conn.executescript(sql)
                 except sqlite3.Error as exc:
@@ -182,8 +243,13 @@ class Database:
                     ) from exc
 
                 conn.execute(
-                    "INSERT INTO db_migrations (version, name, applied_at) VALUES (?, ?, ?)",
-                    (version, migration_file.name, datetime.now().isoformat()),
+                    "INSERT INTO db_migrations (version, name, applied_at, snapshot_path) VALUES (?, ?, ?, ?)",
+                    (
+                        version,
+                        migration_file.name,
+                        datetime.now().isoformat(),
+                        str(snapshot_path),
+                    ),
                 )
                 conn.commit()
                 applied_count += 1
@@ -220,15 +286,74 @@ class Database:
         return errors
 
     def rollback(self, steps: int = 1) -> None:
-        """Rollback last N migrations.
+        """Rollback the last N migrations by restoring from snapshots.
 
-        Not implemented in v1. Restore from backup or create a new migration
-        to reverse changes.
+        Finds the snapshot taken before the first rolled-back migration,
+        restores the database to that state, and removes the rolled-back
+        migration records.
+
+        Args:
+            steps: Number of migrations to roll back (default: 1).
 
         Raises:
-            NotImplementedError: Always raised in v1.
+            MigrationError: If no snapshot is available or rollback fails.
+            ValueError: If steps is less than 1.
         """
-        raise NotImplementedError(
-            "Rollback not implemented in v1. "
-            "Restore from backup or create a new migration to reverse changes."
-        )
+        if steps < 1:
+            raise ValueError("steps must be >= 1")
+
+        with closing(sqlite3.connect(self._db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys = ON")
+
+            # Get the last N applied migrations
+            rows = conn.execute(
+                "SELECT version, snapshot_path FROM db_migrations ORDER BY version DESC LIMIT ?",
+                (steps,),
+            ).fetchall()
+
+            if not rows:
+                raise MigrationError("No migrations to roll back")
+
+            if len(rows) < steps:
+                raise MigrationError(
+                    f"Cannot roll back {steps} migrations: only {len(rows)} applied"
+                )
+
+            # Find the snapshot from the oldest rolled-back migration
+            # We need to restore to the state BEFORE this migration
+            oldest_rollback = rows[-1]
+            target_version = oldest_rollback["version"] - 1
+
+            # Find the snapshot to restore from
+            # If target_version is 0, we restore from the snapshot of version 1
+            # (which was taken before migration 1 was applied)
+            snapshot_row = conn.execute(
+                "SELECT snapshot_path FROM db_migrations WHERE version = ?",
+                (oldest_rollback["version"],),
+            ).fetchone()
+
+            if not snapshot_row or not snapshot_row["snapshot_path"]:
+                raise MigrationError(
+                    f"No snapshot available for rollback to version {target_version}. "
+                    "Snapshots were not taken for these migrations."
+                )
+
+            snapshot_path = Path(snapshot_row["snapshot_path"])
+
+        # Restore from snapshot (outside the read transaction)
+        self._restore_from_snapshot(snapshot_path)
+
+        # Update migration tracking
+        with closing(sqlite3.connect(self._db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys = ON")
+
+            # Remove rolled-back migration records
+            min_version = rows[-1]["version"]
+            conn.execute(
+                "DELETE FROM db_migrations WHERE version >= ?",
+                (min_version,),
+            )
+
+            # Update user_version
+            conn.execute(f"PRAGMA user_version = {target_version}")
+            conn.commit()
