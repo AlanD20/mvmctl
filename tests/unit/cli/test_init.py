@@ -1,0 +1,82 @@
+"""Tests for CLI init command."""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
+from click.testing import CliRunner
+
+from mvmctl.api import InitResult, InitStepResult
+from mvmctl.main import app
+
+runner = CliRunner()
+
+
+def _make_init_result(
+    host_ready: bool = True,
+) -> InitResult:
+    steps = [
+        InitStepResult(
+            step="local_state", success=True, message="State loaded"
+        ),
+        InitStepResult(
+            step="host",
+            success=host_ready,
+            message="Host ready" if host_ready else "Not ready",
+        ),
+        InitStepResult(step="cache", success=True, message="Cache initialized"),
+        InitStepResult(step="binary", success=True, message="Binary found"),
+    ]
+    return InitResult(steps=steps, host_ready=host_ready)
+
+
+class TestInit:
+    """Tests for 'init' command."""
+
+    @patch("mvmctl.cli.init.InitOperation")
+    def test_init_success(self, mock_init_op):
+        mock_init_op.run.return_value = _make_init_result(host_ready=True)
+        result = runner.invoke(app, ["init", "--non-interactive"])
+        assert result.exit_code == 0
+        assert "Host ready" in result.output
+
+    @patch("mvmctl.cli.init.InitOperation")
+    def test_init_host_not_ready(self, mock_init_op):
+        mock_init_op.run.return_value = _make_init_result(host_ready=False)
+        result = runner.invoke(app, ["init", "--non-interactive"])
+        assert result.exit_code == 0
+        assert "incomplete" in result.output.lower()
+
+    @patch("mvmctl.cli.init.InitOperation")
+    def test_init_with_skip_host(self, mock_init_op):
+        mock_init_op.run.return_value = _make_init_result(host_ready=True)
+        result = runner.invoke(
+            app, ["init", "--skip-host", "--non-interactive"]
+        )
+        assert result.exit_code == 0
+
+    @patch("mvmctl.cli.init.InitOperation")
+    def test_init_with_sudo_interaction(self, mock_init_op):
+        """Test init path with sudo prompt interaction (non-interactive skips)."""
+        needs_interaction = MagicMock()
+        needs_interaction.code = "privilege.sudo_required"
+        needs_interaction.context = {}
+
+        result_with_needs = InitResult(
+            steps=[],
+            host_ready=False,
+            needs_interaction=needs_interaction,
+        )
+
+        mock_init_op.run.side_effect = [
+            result_with_needs,
+            _make_init_result(host_ready=True),
+        ]
+
+        result = runner.invoke(app, ["init", "--non-interactive"])
+        assert result.exit_code == 0
+
+    def test_init_help(self):
+        result = runner.invoke(app, ["init", "--help"])
+        assert result.exit_code == 0
+        assert "init" in result.output.lower()

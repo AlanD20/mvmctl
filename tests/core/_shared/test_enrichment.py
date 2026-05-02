@@ -7,8 +7,7 @@ from typing import Any
 
 import pytest
 
-from mvmctl.core._shared import Database
-from mvmctl.core._shared import RelationEnricher
+from mvmctl.core._shared import Database, RelationEnricher
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.core.kernel._repository import KernelRepository

@@ -9,7 +9,6 @@ import pytest
 
 from mvmctl.core._shared._guestfs._kernel_detector import KernelDetector
 
-
 # =========================================================================
 # Helpers
 # =========================================================================
