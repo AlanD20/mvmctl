@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import logging
 import shutil
-import subprocess
 from pathlib import Path
 
 from mvmctl.core._shared import Database
+from mvmctl.core._shared._guestfs import GuestfsService
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.cache import CacheService
 from mvmctl.core.config._service import SettingsService
@@ -54,12 +54,18 @@ class CacheOperation:
         # libguestfs fixed appliance
         appliance_path = CacheOperation._build_guestfs_appliance(cache_dir)
 
+        # Detected guestfs kernel
+        from mvmctl.core._shared._guestfs import KernelDetector
+
+        kernel_info = KernelDetector.find_best_kernel()
+
         return {
             "cache_dir": str(cache_dir),
             "directories": created,
             "guestfs_appliance": str(appliance_path)
             if appliance_path
             else None,
+            "guestfs_kernel": str(kernel_info[0]) if kernel_info else None,
         }
 
     @staticmethod
@@ -69,51 +75,7 @@ class CacheOperation:
         Returns:
             Path to appliance directory if built, None if skipped or failed.
         """
-        make_tool = shutil.which("libguestfs-make-fixed-appliance")
-        if not make_tool:
-            logger.debug(
-                "libguestfs-make-fixed-appliance not found — skipping appliance build"
-            )
-            return None
-
-        appliance_dir = cache_dir / "appliance"
-        appliance_dir.mkdir(parents=True, exist_ok=True)
-
-        # If a complete appliance already exists, skip the (slow) rebuild.
-        required_files = {"kernel", "initrd", "root"}
-        if required_files.issubset({p.name for p in appliance_dir.iterdir()}):
-            logger.debug(
-                "libguestfs appliance already present at %s", appliance_dir
-            )
-            return appliance_dir
-
-        # Libguestfs leaves daemon state in system temp dirs that can cause
-        # subsequent builds to hang if a previous run was interrupted. Clean
-        # stale locks and sockets before every build.
-        CacheService.clean_stale_guestfs_state()
-
-        try:
-            # Discard stdout to avoid pipe-buffer deadlock — this tool is
-            # extremely verbose.  Keep stderr so we can report errors.
-            subprocess.run(
-                [make_tool, str(appliance_dir)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                text=True,
-                check=True,
-                timeout=150,
-            )
-        except subprocess.TimeoutExpired:
-            logger.warning("libguestfs appliance build timed out after 150s")
-            return None
-        except subprocess.CalledProcessError as e:
-            logger.warning("libguestfs appliance build failed: %s", e.stderr)
-            return None
-        except FileNotFoundError:
-            return None
-        else:
-            logger.info("libguestfs fixed appliance built at %s", appliance_dir)
-            return appliance_dir
+        return GuestfsService.build_appliance(cache_dir)
 
     @staticmethod
     def prune_vms(
@@ -389,9 +351,9 @@ class CacheOperation:
             "guestfs_state" indicating whether each was removed.
         """
         return {
-            "appliance": CacheService.prune_appliance(dry_run),
+            "appliance": GuestfsService.prune_appliance(dry_run),
             "warm_images": CacheService.prune_warm_images(dry_run),
-            "guestfs_state": CacheService.clean_stale_guestfs_state(),
+            "guestfs_state": GuestfsService.clean_stale_guestfs_state(),
         }
 
     @staticmethod

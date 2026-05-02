@@ -27,13 +27,6 @@ def isolate_config_and_cache(request, tmp_path: Path, monkeypatch: pytest.Monkey
     monkeypatch.setenv("MVM_CACHE_DIR", str(paths.cache))
     monkeypatch.setenv("MVM_TEMP_DIR", str(paths.temp))
 
-    try:
-        from mvmctl.constants import _load_user_config_json
-
-        _load_user_config_json.cache_clear()
-    except AttributeError:
-        pass
-
     yield
 
     shutil.rmtree(tmp_path, ignore_errors=True)
@@ -60,8 +53,10 @@ def _isolate_iptables_rules(request, tmp_path: Path, monkeypatch: pytest.MonkeyP
     subprocess.run(["iptables", "-F", "MVM-NOCLOUD-INPUT"], capture_output=True, check=False)
 
     fake_rules = str(tmp_path / "iptables" / "rules.v4")
-    monkeypatch.setattr("mvmctl.core.host_setup.IPTABLES_RULES_V4", fake_rules, raising=False)
-    monkeypatch.setattr("mvmctl.core.host_state.IPTABLES_RULES_V4", fake_rules, raising=False)
+    try:
+        monkeypatch.setattr("mvmctl.constants.IPTABLES_RULES_V4", fake_rules, raising=False)
+    except ImportError:
+        pass
 
 
 @pytest.fixture(autouse=True)
@@ -74,11 +69,11 @@ def _mock_sudo_cache(request, monkeypatch: pytest.MonkeyPatch) -> None:
     if request.node.get_closest_marker("system"):
         return
 
-    import mvmctl.utils.process as _proc
+    import mvmctl.utils._system as _sys
 
-    monkeypatch.setattr(_proc, "_SUDO_CREDENTIALS_VALID", True)
-    monkeypatch.setattr(_proc, "_SUDO_CACHE_TIMESTAMP", time.monotonic())
-    monkeypatch.setattr(_proc, "_SUDO_VALIDATION_IN_PROGRESS", False)
+    monkeypatch.setattr(_sys, "_SUDO_CREDENTIALS_VALID", True)
+    monkeypatch.setattr(_sys, "_SUDO_CACHE_TIMESTAMP", time.monotonic())
+    monkeypatch.setattr(_sys, "_SUDO_VALIDATION_IN_PROGRESS", False)
 
 
 def _is_sudo_command(command: object) -> bool:
@@ -132,10 +127,19 @@ def _mock_privilege_checks(request, monkeypatch: pytest.MonkeyPatch) -> None:
     from unittest.mock import MagicMock
 
     # Mock check_privileges and check_privileges_interactive
-    monkeypatch.setattr("mvmctl.core.host_privilege.check_privileges", MagicMock(return_value=None))
     monkeypatch.setattr(
-        "mvmctl.api.host.check_privileges_interactive", MagicMock(return_value=None)
+        "mvmctl.core.host._helper.HostPrivilegeHelper.check_privileges",
+        MagicMock(return_value=None),
     )
+    # check_privileges_interactive was removed during refactoring;
+    # attempt to mock it in case old code still references it
+    try:
+        monkeypatch.setattr(
+            "mvmctl.api.host.check_privileges_interactive",
+            MagicMock(return_value=None),
+        )
+    except ImportError:
+        pass
 
 
 @pytest.fixture(autouse=True)
@@ -148,9 +152,9 @@ def _setup_database(request, isolate_config_and_cache) -> None:  # type: ignore[
     if request.node.get_closest_marker("system"):
         return
 
-    from mvmctl.core.mvm_db import MVMDatabase
+    from mvmctl.core._shared._db import Database
 
-    MVMDatabase().migrate()
+    Database().migrate()
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:

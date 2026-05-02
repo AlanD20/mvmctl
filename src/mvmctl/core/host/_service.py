@@ -375,16 +375,20 @@ class HostService:
         now = datetime.now(UTC).isoformat() if session_id else ""
         next_order = change_order_start
 
-        # Detect available vendor modules via dry-run
+        # Detect available vendor modules: check lsmod first (modules may be
+        # loaded even if the module file is absent under custom kernels),
+        # then fall back to modprobe --dry-run for modules not yet loaded.
         vendor_modules: list[str] = []
         for mod in ("kvm_intel", "kvm_amd"):
-            result = subprocess.run(
-                ["modprobe", "--dry-run", mod],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if result.returncode == 0:
+            if HostService._is_module_loaded(mod) or (
+                subprocess.run(
+                    ["modprobe", "--dry-run", mod],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                ).returncode
+                == 0
+            ):
                 vendor_modules.append(mod)
 
         if not vendor_modules:

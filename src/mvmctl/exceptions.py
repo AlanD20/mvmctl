@@ -314,26 +314,38 @@ class VMBuilderError(MVMError):
     """
 
 
-class GuestfsNotAvailableError(MVMError):
+class GuestfsError(MVMError):
+    """Base exception for libguestfs-related errors."""
+
+    pass
+
+
+class GuestfsNotAvailableError(GuestfsError):
     """Raised when libguestfs Python bindings are not available."""
 
     pass
 
 
-class GuestfsLaunchError(MVMError):
+class GuestfsLaunchError(GuestfsError):
     """Raised when guestfs appliance fails to launch."""
 
     pass
 
 
-class GuestfsMountError(MVMError):
+class GuestfsMountError(GuestfsError):
     """Raised when unable to mount rootfs in guestfs."""
 
     pass
 
 
-class GuestfsWriteError(MVMError):
+class GuestfsWriteError(GuestfsError):
     """Raised when writing files to guestfs fails."""
+
+    pass
+
+
+class GuestfsApplianceError(GuestfsError):
+    """Raised when the libguestfs fixed appliance build fails."""
 
     pass
 

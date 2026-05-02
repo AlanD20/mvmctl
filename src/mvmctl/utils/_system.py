@@ -205,6 +205,50 @@ class ProcessSignalHandler:
         """Send SIGKILL. Returns True if signal was sent."""
         return self.send_signal(signal.SIGKILL)
 
+    @classmethod
+    def terminate_batch(
+        cls,
+        pids: list[int],
+        *,
+        graceful_timeout: float = 0.5,
+    ) -> list[int]:
+        """Batch-terminate orphaned PIDs: SIGTERM all → wait → SIGKILL survivors.
+
+        Designed for abandoned/orphaned processes where we cannot waitpid
+        (is_child=False). Each PID gets a lightweight ProcessSignalHandler
+        so reuse detection can be layered on.
+
+        Args:
+            pids: List of PIDs to terminate.
+            graceful_timeout: Seconds to wait after SIGTERM before SIGKILL.
+
+        Returns:
+            List of PIDs that were confirmed dead (either from SIGTERM or SIGKILL).
+        """
+        terminated: list[int] = []
+
+        # Phase 1: SIGTERM all
+        for pid in pids:
+            handler = cls(pid, is_child=False)
+            if handler.send_signal(signal.SIGTERM):
+                terminated.append(pid)
+
+        # Phase 2: Wait, then SIGKILL survivors
+        if terminated:
+            time.sleep(graceful_timeout)
+            for pid in terminated:
+                handler = cls(pid, is_child=False)
+                if handler.is_alive():
+                    if handler.kill():
+                        logger.debug(
+                            "Sent SIGKILL to abandoned process %d", pid
+                        )
+                    else:
+                        # Process already exited since our check
+                        pass
+
+        return terminated
+
     def send_signal(self, sig: int) -> bool:
         """Send signal. Returns True if signal was delivered."""
         try:

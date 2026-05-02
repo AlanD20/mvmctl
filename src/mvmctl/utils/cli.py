@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable
 from functools import wraps
 from typing import TypeVar
@@ -73,6 +74,16 @@ def handle_errors(func: F) -> F:
             raise typer.Exit(code=1) from e
         except MVMError as e:
             _print_error(str(e))
+            raise typer.Exit(code=1) from e
+        except sqlite3.OperationalError as e:
+            msg = str(e)
+            if "no such table" in msg:
+                print_error(
+                    "Database schema not initialized. "
+                    "Run 'mvm init' first to create the database."
+                )
+            else:
+                _print_error(f"Database error: {e}")
             raise typer.Exit(code=1) from e
         except Exception as e:
             log_exception(logger, "Unexpected error in CLI command", e)

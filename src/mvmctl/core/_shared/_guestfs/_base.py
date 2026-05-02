@@ -68,6 +68,8 @@ class OptimizedGuestfs:
             g.set_smp(1)
         if hasattr(g, "set_memsize"):
             g.set_memsize(256)
+        if hasattr(g, "set_backend"):
+            g.set_backend("direct")
 
         g.add_drive_opts(
             str(self.disk_path),
