@@ -8,7 +8,26 @@ Common issues and solutions when using `mvm`.
 
 **Problem:** You get permission errors when trying to access KVM.
 
-**Solution:**
+**Diagnosis:**
+
+First check if `/dev/kvm` exists:
+```bash
+ls -l /dev/kvm
+```
+
+**Case 1 — `/dev/kvm` does not exist.** KVM kernel modules are not loaded:
+
+```bash
+sudo modprobe kvm
+sudo modprobe kvm_intel    # or kvm_amd on AMD systems
+# Verify it appeared
+ls -l /dev/kvm
+```
+
+If `modprobe` fails, install the appropriate package (e.g. `linux-modules-extra-*` on Ubuntu/Debian, or ensure your kernel has `CONFIG_KVM` enabled).
+
+**Case 2 — `/dev/kvm` exists but is not readable/writable by your user:**
+
 ```bash
 sudo usermod -aG kvm $USER
 # Log out and back in, then verify:
@@ -48,13 +67,62 @@ Then re-run: `mvm host init`
 
 ---
 
-## Bridge mvm-default not found / No such device
+## iptables rules lost after reboot
+
+**Problem:** After a reboot, VMs can't reach the network, or `mvm host init` shows iptables chains missing.
+
+**Cause:** `mvm host init` saves iptables rules to `/etc/iptables/rules.v4`, but **does not install** an auto-restore service. The rules are only restored at boot if a system package like `iptables-persistent` (Debian/Ubuntu) or `iptables-services` (RHEL/Fedora/Arch) is installed and reading that file.
+
+**Solution:**
+
+Check if rules survive a reboot:
+```bash
+# After reboot: check if MVM chains exist
+sudo iptables -L MVM-FORWARD -n
+# If this shows an error, the rules were not restored
+```
+
+Install the appropriate persistence package for your distro:
+
+```bash
+# Debian / Ubuntu
+sudo apt install iptables-persistent
+# This auto-loads /etc/iptables/rules.v4 on boot
+
+# Arch Linux
+sudo pacman -S iptables-nft
+sudo systemctl enable iptables.service
+
+# Fedora / RHEL
+sudo dnf install iptables-services
+sudo systemctl enable iptables.service
+```
+
+Then re-run to save a fresh snapshot:
+```bash
+sudo mvm host init
+```
+
+If rules are partially corrupted, you can clean and re-init:
+```bash
+sudo mvm host clean
+sudo mvm host init
+```
+
+---
+
+## Bridge `<prefix>-net` not found / No such device
 
 **Problem:** Network bridge doesn't exist when creating a VM.
 
 **Solution:**
 
-Run `sudo mvm host init` once; the bridge is auto-created when you create a VM.
+Run `sudo mvm host init` once; the bridge is auto-created with the name `<cli_name>-<network_name>` (default is `mvm-net`).
+
+To see the default bridge name:
+```bash
+mvm config get defaults.network
+```
 
 ---
 
@@ -83,6 +151,47 @@ mvm logs myvm --follow
 If it never reaches a `login:` prompt, check the Firecracker process log:
 ```bash
 mvm logs myvm --os
+```
+
+---
+
+## VM won't start / Firecracker exits immediately
+
+**Symptom:** The VM is created but Firecracker exits right away — `mvm logs myvm --os` shows an error or empty log, and the VM never reaches the boot stage.
+
+**Diagnosis:**
+
+Start by checking the Firecracker log:
+```bash
+# Show Firecracker's internal log (not the VM serial console)
+mvm logs myvm --os
+```
+
+**Common causes:**
+
+**1. Missing or broken jailer.** Firecracker requires the `jailer` binary alongside it. If the binary was fetched with `mvm bin fetch`, it should be bundled, but manual installs may miss it.
+
+**2. Kernel file is not readable by Firecracker.** Verify the kernel exists and is accessible:
+```bash
+ls -l $(mvm kernel ls --json | grep path)
+```
+
+**3. Invalid boot arguments.** Custom boot args (set via `mvm config`) may contain typos or flags the kernel doesn't understand. Reset to defaults:
+```bash
+mvm config reset vm.boot_args
+```
+
+**4. Socket path too long.** Firecracker uses Unix domain sockets which have a 108-character path limit. Long VM names or deep cache directories can exceed this. Check:
+```bash
+# See the VM's socket path
+ls -la ~/.cache/mvmctl/vms/<myvm>/run/
+# If it looks very long, try a shorter VM name
+```
+
+**5. Binary / kernel architecture mismatch.** A kernel built for `x86_64` won't boot under an `aarch64` Firecracker binary. Verify both match:
+```bash
+file $(mvm kernel ls --json | grep path)
+mvm bin ls
 ```
 
 ---
@@ -121,6 +230,53 @@ Run `sudo mvm host init` first to set up the `mvm` group and sudoers configurati
 
 ---
 
+## Undoing host init — `host clean` vs `host reset`
+
+**Problem:** You want to roll back the changes made by `sudo mvm host init`.
+
+There are two levels of undo depending on how much you want to remove:
+
+### `mvm host clean` — Remove networking only
+
+Stop all running VMs first, then:
+
+```bash
+sudo mvm host clean
+```
+
+This removes:
+- All `mvm-*` bridges and TAP devices
+- All iptables chains (`MVM-FORWARD`, `MVM-POSTROUTING`, `MVM-NOCLOUDNET-INPUT`)
+- The default network from the database
+- Any orphaned bridges and rules
+
+It does **NOT** touch:
+- ❌ The `mvm` system group or your user membership
+- ❌ The sudoers drop-in file
+- ❌ Sysctl `ip_forward` setting
+- ❌ The iptables rules file
+
+Run `sudo mvm host init` afterwards to recreate the default network.
+
+### `mvm host reset` — Full factory reset
+
+```bash
+sudo mvm host reset --force
+```
+
+Does everything `clean` does, **plus**:
+- Removes the sudoers drop-in (`/etc/sudoers.d/mvmctl`)
+- Removes your user from the `mvm` group
+- Deletes the `mvm` system group
+- Restores `net.ipv4.ip_forward` to its original value
+- Removes the iptables rules file
+
+After reset, run `sudo mvm host init` from scratch to set everything up again.
+
+> ⚠️ Both commands refuse to run if any VMs are still running. Stop them first with `mvm vm rm --name <name>`.
+
+---
+
 ## NoCloud-net server failed to start
 
 **Problem:** The HTTP server for cloud-init can't start.
@@ -149,12 +305,17 @@ sudo iptables -L MVM-NOCLOUDNET-INPUT -n -v
 # Should show rules allowing source IP to destination ports
 ```
 
-Check that the VM's network is correctly set up:
+Check that the VM's network is correctly set up. First find the nocloud server port and correct gateway from the VM logs:
 ```bash
-# From within the VM, test connectivity to the gateway
-ping -c 1 10.0.0.1
-# Test HTTP access to nocloud server
-curl -v http://10.0.0.1:8080/
+mvm logs myvm --os | grep -i nocloud
+```
+
+Then test from within the VM (adjust subnet and port to what your config uses):
+```bash
+# Test connectivity to the default gateway (default subnet: 172.27.0.0/24)
+ping -c 1 172.27.0.1
+# Test HTTP access to nocloud server (port is dynamically allocated, check logs)
+curl -v http://172.27.0.1:<port>/
 ```
 
 ---
@@ -211,6 +372,36 @@ sudo usermod -aG mvm $USER
 
 ---
 
+## IP address exhaustion (no available IPs)
+
+**Symptom:** A VM creation fails with: `No available IPs in subnet`, or a new VM boots but can't get network connectivity.
+
+**Cause:** The default network uses a `/24` subnet (`172.27.0.0/24`), which provides 253 usable IPs. Each VM consumes one IP on the bridge network via first-fit allocation. If you create enough VMs to exhaust the pool, new VMs cannot get an IP.
+
+**Solution:**
+
+Check how many IPs are in use:
+```bash
+mvm network leases <network_name>
+```
+
+If the subnet is full, you have two options:
+
+**Option 1 — Remove unused VMs** to free their IP leases:
+```bash
+mvm vm ls                    # List all VMs
+mvm vm rm --name <old-vm>    # Remove unneeded VMs
+```
+IPs are released automatically when VMs are removed.
+
+**Option 2 — Create a second network** with a larger or different subnet:
+```bash
+mvm network create --name secondary --subnet 10.0.0.0/16
+```
+Then create VMs on it with `--network secondary`.
+
+---
+
 ## Cache corruption or stale state
 
 **Problem:** Weird behavior, metadata out of sync with actual files.
@@ -228,6 +419,156 @@ For a complete reset (⚠️ removes all VMs):
 mvm vm ls                  # Check what VMs exist
 mvm cache prune --all      # Prune everything
 ```
+
+---
+
+## Out of disk space for images or VMs
+
+**Symptom:** Image downloads fail mid-way, VM creation fails with disk errors, or `df` shows the cache partition is full.
+
+**Cause:** VM images are typically 1–3 GB each, and each VM clones its root filesystem for isolation. A few VMs can easily consume 10–20 GB.
+
+**Diagnosis:**
+
+Check the cache directory size:
+```bash
+du -sh ~/.cache/mvmctl/
+du -sh ~/.cache/mvmctl/images/
+du -sh ~/.cache/mvmctl/vms/
+```
+
+Check overall disk usage:
+```bash
+df -h ~/.cache/mvmctl/
+```
+
+**Solution:**
+
+**1. Remove unused images** — Images you're not actively using can be re-fetched later:
+```bash
+mvm image ls                         # List cached images
+mvm image rm <image-id>              # Remove unused one
+```
+
+**2. Remove unused kernels** — Unneeded kernel builds consume space:
+```bash
+mvm kernel ls
+mvm kernel rm <kernel-id>
+```
+
+**3. Remove stopped VMs** — Each stopped VM still holds its cloned rootfs:
+```bash
+mvm vm ls                            # List VMs
+mvm vm rm --name <vm-name>           # Remove VM and its disk
+```
+
+**4. Purge the cache (nuclear option):**
+```bash
+mvm cache prune --all                # Remove all cached artifacts
+```
+
+**5. Change the cache directory** to a partition with more space:
+```bash
+mvm config set paths.cache_dir /mnt/bigdisk/mvmctl-cache
+```
+
+> ⚠️ The cache directory defaults to `~/.cache/mvmctl/`. If your home partition is small, consider symlinking it or configuring a different path.
+
+---
+
+## libguestfs / `mvm cache init` hangs forever
+
+**Symptom:** Commands that build the libguestfs appliance freeze indefinitely:
+```bash
+libguestfs-make-fixed-appliance ~/.cache/mvmctl/appliance   # hangs
+mvm cache init                                               # hangs
+guestfish -a /dev/null run                                   # hangs
+```
+
+The serial log (if captured) shows:
+```
+supermin: waiting another 1024000000 ns for root UUID to appear
+```
+repeating forever with **no block devices** under `/sys/block/`.
+
+**Root cause:** The libguestfs appliance builder (`supermin` / `libguestfs-make-fixed-appliance`) automatically scans all installed kernels and selects the one with the **highest version string**. It does not ask — it simply picks the newest kernel it finds and uses it to boot the appliance QEMU microVM. If that kernel was built with `CONFIG_VIRTIO_PCI` disabled, the appliance cannot see its block device and hangs forever.
+
+Here is the chain of failure:
+
+1. `libguestfs-make-fixed-appliance` iterates `/lib/modules/*`, picks the kernel with the latest version.
+2. It boots that kernel inside a QEMU microVM using `virtio-scsi-pci` to expose the appliance disk.
+3. If the selected kernel lacks `CONFIG_VIRTIO_PCI`, the virtio PCI device never materializes.
+4. No SCSI host appears → no block devices under `/sys/block/` → supermin's initrd spins forever waiting for the root disk UUID.
+
+**Why a stock kernel is installed but still not used:**
+
+This is the trap. You may have both a stock `linux` kernel and a custom kernel (e.g. `linux-g14`, `linux-zen`, `linux-custom`) installed. Because the custom kernel often shares the same base version (e.g. both are `6.12.x-arch1`), the appliance builder may sort it first — or simply pick whichever appears latest in the module directory. If the custom kernel disables VirtIO (common in bare-metal-optimized builds that strip virtualization drivers), the appliance **silently picks the broken kernel** and hangs. The stock kernel is on disk but never tried.
+
+**This is a general caution:** any kernel variant that strips VirtIO or PCI pass-through support will break libguestfs — not just `linux-g14`. If you use a custom kernel, always verify it has `CONFIG_VIRTIO_PCI` before assuming libguestfs will work.
+
+> **Note on `mvm cache init` kernel detection:** `mvm cache init` attempts to find a suitable kernel for the appliance by scanning `/boot/` for kernels, extracting their versions, and scoring them based on virtio module availability. It sets `SUPERMIN_KERNEL` and `SUPERMIN_MODULES` environment variables to guide `libguestfs-make-fixed-appliance`. However, this detection is heuristic — it relies on virtio modules being present on disk and may still select an unsuitable kernel in complex multi-kernel environments (e.g. chroots, container builds, or unusual boot layouts). If the appliance build hangs despite having a stock kernel installed, the detection may have picked the wrong one.
+
+**Diagnosis:** Check if your currently running kernel supports VirtIO:
+
+```bash
+# Check running kernel config
+zcat /proc/config.gz 2>/dev/null | grep CONFIG_VIRTIO_PCI || \
+  grep CONFIG_VIRTIO_PCI /boot/config-$(uname -r) 2>/dev/null
+
+# Expected (working):
+# CONFIG_VIRTIO_PCI=y
+# or
+# CONFIG_VIRTIO_PCI=m
+
+# Problematic:
+# # CONFIG_VIRTIO_PCI is not set
+
+# Also verify the module exists on disk
+find /lib/modules/$(uname -r) -name "virtio_pci*" 2>/dev/null
+# Should return: /lib/modules/.../virtio_pci.ko.zst
+```
+
+**But the running kernel may not be the one the appliance uses.** To see which kernel the appliance builder will actually select:
+
+```bash
+# Show all installed kernels, sorted by version (the appliance picks the last one)
+ls -1v /lib/modules/
+```
+
+If the kernel listed last lacks VirtIO support, that is the one causing the hang — even if `uname -r` shows a working kernel.
+
+**Fix:** Ensure a kernel **with** VirtIO support is the highest-versioned installed kernel (or remove the broken one).
+
+```bash
+# 1. Install a kernel with VirtIO support (keep your current kernel until verified)
+sudo pacman -S linux linux-headers
+
+# 2. Update bootloader
+# For GRUB:
+sudo grub-mkconfig -o /boot/grub/grub.cfg
+# For systemd-boot:
+sudo reinstall-kernels
+
+# 3. Reboot and select the stock kernel entry
+sudo reboot
+
+# 4. Verify you're on the new kernel
+uname -r
+
+# 5. Verify the appliance will pick the right kernel
+ls -1v /lib/modules/
+# The last entry should come from the stock linux package, not your custom one
+
+# 6. Re-run the diagnosis commands above to confirm virtio is available on that kernel
+
+# 7. Test libguestfs
+libguestfs-make-fixed-appliance ~/.cache/mvmctl/appliance
+
+# 8. Only after confirming everything works, remove the custom kernel
+# sudo pacman -R linux-g14 linux-g14-headers   # example for ASUS G14 custom kernel
+```
+
+**Alternative workaround (without removing your custom kernel):** If you want to keep your custom kernel as the boot default but need libguestfs to use the stock kernel, you can temporarily make the stock kernel the highest version by giving it a higher `INSTALLED` file value — but this is fragile and distribution-specific. The safest approach is to remove (or not install) custom kernels that strip VirtIO support.
 
 ---
 

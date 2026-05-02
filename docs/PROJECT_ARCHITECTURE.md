@@ -482,7 +482,7 @@ vcpus: Optional[int] = typer.Option(None, "--vcpus", help="Number of vCPUs")
 Does it manage a specific entity instance? (bound to self._entity)
 │
 ├── YES → core/{domain}/_controller.py
-│   Example: VMController with stop(), pause(), ssh() methods operating on self._vm
+│       Example: VMController with stop(), pause(), start() methods operating on self._vm
 │
 ├── Is it stateless operations on a resource? (create, setup, teardown, bulk)
 │   └── YES → core/{domain}/_service.py

@@ -176,7 +176,7 @@ Pushing a tag that matches `v*` triggers the `release.yml` GitHub Actions workfl
 Once the tag is pushed, `release.yml` runs without any manual intervention:
 
 1. **Binary builds** — Nuitka builds a standalone `mvm` binary on the runner:
-   - `ubuntu-24.04` (glibc 2.39) — produces artifact named `mvm-linux-ubuntu-24.04`
+   - `ubuntu-24.04` (glibc 2.39) — uploaded as artifact `mvm-linux-ubuntu-24.04`, attached to release as `mvm`
 
 2. **GitHub release creation** — a GitHub release is created for the tag with auto-generated release notes. The binary is attached as a release asset.
 
@@ -228,7 +228,7 @@ uvx mvmctl==1.2.3 mvm --version
 
 Visit the releases page and confirm:
 - The release notes are present and accurate.
-- Both binary assets (`mvm-linux-ubuntu-22.04`, `mvm-linux-ubuntu-24.04`) are attached.
+- The `mvm` binary asset and `mvm.sha256` checksum file are attached.
 
 ## Issuing a Hotfix
 
@@ -393,7 +393,7 @@ mvmctl uses dynamic imports for optional dependencies to keep the core runtime l
 
 ### Why Explicit Inclusion Is Required
 
-Nuitka and PyInstaller perform static analysis to detect dependencies. Because mvmctl imports `guestfs` dynamically only when `--cloud-init-mode direct` is used, static analysis cannot detect this dependency. Without explicit flags:
+Nuitka and PyInstaller perform static analysis to detect dependencies. Because mvmctl imports `guestfs` dynamically only when `--cloud-init-mode inject` is used, static analysis cannot detect this dependency. Without explicit flags:
 
 - Nuitka: Module not included → `GuestfsNotAvailableError` at runtime
 - PyInstaller: Module not included → `ModuleNotFoundError` at runtime

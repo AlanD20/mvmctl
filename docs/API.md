@@ -1548,7 +1548,7 @@ def main() -> None:
             vcpu_count=2,
             mem_size_mib=2048,
             image="ubuntu-24.04",       # resolved from DB at API layer
-            network_name="default",
+            network_name="net",          # default network name
         )
     )
     print("VM created.")

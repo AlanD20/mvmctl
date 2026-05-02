@@ -125,9 +125,6 @@ mvm kernel fetch --type official --version 6.1.102
 # Build with parallel jobs (faster)
 mvm kernel fetch --type official --jobs 8
 
-# Provide a custom base name for the output kernel
-mvm kernel fetch --type official --name my-custom-kernel
-
 # Bypass cache and force a clean build
 mvm kernel fetch --type official --clean-build
 

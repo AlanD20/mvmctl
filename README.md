@@ -230,7 +230,7 @@ Common issues and quick fixes:
 
 | Issue | Solution |
 |-------|----------|
-| **Permission denied: /dev/kvm** | `sudo usermod -aG kvm $USER` then log out/back in |
+| **Permission denied: /dev/kvm** | If missing: `sudo modprobe kvm kvm_intel`. If unreadable: `sudo usermod -aG kvm $USER` then log out/back in |
 | **Bridge not found** | Run `sudo mvm host init` once |
 | **VM won't boot / SSH times out** | Cloud-init takes 30-60s on first boot. Watch with `mvm logs myvm --follow` |
 | **Kernel not found** | `mvm kernel fetch` |
