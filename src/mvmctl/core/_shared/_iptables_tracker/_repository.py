@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from mvmctl.core._shared._db import Database
 from mvmctl.models import (
@@ -249,7 +250,7 @@ class IPTablesRuleRepository:
             return None
         return self._row_to_item(row)
 
-    def _row_to_item(self, row: dict) -> IPTablesRuleItem:
+    def _row_to_item(self, row: dict[str, Any]) -> IPTablesRuleItem:
         """Convert DB row dict to IPTablesRuleItem dataclass."""
         row_dict = dict(row)
         row_dict["table_name"] = IPTablesTable(row_dict["table_name"])

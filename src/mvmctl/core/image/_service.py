@@ -1258,7 +1258,7 @@ class ImageService:
 
     @classmethod
     def resolve_remote_sizes(
-        cls, specs: list[ImageSpec], ci_version
+        cls, specs: list[ImageSpec], ci_version: str
     ) -> list[ImageSpec]:
         """
         Resolve remote image sizes via HEAD requests with HTTP caching.

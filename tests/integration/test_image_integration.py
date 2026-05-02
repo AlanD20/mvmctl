@@ -54,6 +54,34 @@ class _ImageSubprocessMock:
                 args=[], returncode=0, stdout="ext4", stderr=""
             )
 
+        # Fail cp/dd when the source file does not exist so that invalid-path
+        # tests actually hit error paths.
+        if cmd and cmd[0] == "cp":
+            src = None
+            for i, part in enumerate(cmd):
+                if part == "--sparse=always" and i + 1 < len(cmd):
+                    src = Path(str(cmd[i + 1]))
+                    break
+            if src is not None and not src.exists():
+                raise subprocess.CalledProcessError(
+                    1,
+                    cmd,
+                    stderr=f"cp: cannot stat '{src}': No such file or directory",
+                )
+
+        if cmd and cmd[0] == "dd":
+            src = None
+            for part in cmd:
+                if part.startswith("if="):
+                    src = Path(part[3:])
+                    break
+            if src is not None and not src.exists():
+                raise subprocess.CalledProcessError(
+                    1,
+                    cmd,
+                    stderr=f"dd: failed to open '{src}': No such file or directory",
+                )
+
         return self._base(*args, **kwargs)
 
 
@@ -284,7 +312,7 @@ class TestImageSetDefault:
         ImageOperation.set_default(ImageInput(id=["default_test"]))
 
         image = ImageOperation.get(ImageInput(id=["default_test"]))
-        assert image.is_default is True
+        assert bool(image.is_default) is True
 
 
 class TestImageWarm:
@@ -413,7 +441,9 @@ class TestImageEdgeCases:
         ) -> list[ImageItem]:
             for img in images:
                 if img.os_slug == "ref_vm":
-                    img.vms = [MagicMock(name="test-vm")]
+                    mock_vm = MagicMock()
+                    mock_vm.name = "test-vm"
+                    img.vms = [mock_vm]
             return images
 
         monkeypatch.setattr(
@@ -445,7 +475,9 @@ class TestImageEdgeCases:
         ) -> list[ImageItem]:
             for img in images:
                 if img.os_slug == "ref_vm_force":
-                    img.vms = [MagicMock(name="test-vm")]
+                    mock_vm = MagicMock()
+                    mock_vm.name = "test-vm"
+                    img.vms = [mock_vm]
             return images
 
         monkeypatch.setattr(

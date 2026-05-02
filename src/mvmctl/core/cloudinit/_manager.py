@@ -13,7 +13,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from passlib.hash import bcrypt, sha512_crypt
+from passlib.hash import bcrypt, sha512_crypt  # type: ignore[import-untyped]
 
 from mvmctl.constants import REQUIRED_ISO_TOOL, get_default
 from mvmctl.core._shared import AssetManager
@@ -271,7 +271,7 @@ class CloudInitManager:
                 f"Unsupported algorithm: {algorithm}. Use: {list(algorithms.keys())}"
             )
 
-        return hasher.hash(password)
+        return str(hasher.hash(password))
 
     def _render_cloud_init_template(self) -> dict[str, str]:
         """

@@ -17,7 +17,6 @@ CONST_CONSOLE_SELECT_TIMEOUT_S: float = 0.1  # Socket select timeout in seconds
 
 # Socket settings
 CONST_CONSOLE_SOCKET_BACKLOG: int = 1  # Max pending connections
-CONST_CONSOLE_SELECT_TIMEOUT_S: float = 0.1  # Select loop timeout
 
 # Client settings
 CONST_CONSOLE_DETACH_SEQUENCE: bytes = b"\x18d"  # Ctrl+X followed by 'd'

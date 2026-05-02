@@ -188,7 +188,7 @@ class AssetManager:
 
         try:
             asset = self.get_file(*path_parts)
-            return asset.is_file()  # type: ignore[union-attr]
+            return asset.is_file()
         except (OSError, ValueError, AttributeError):
             return False
 

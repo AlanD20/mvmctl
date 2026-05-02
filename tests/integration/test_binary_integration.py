@@ -157,7 +157,7 @@ class TestBinaryListAndGet(_BinaryTestBase):
 
         fc = next(b for b in binaries if b.name == "firecracker")
         assert fc.version == "1.15.0"
-        assert fc.is_default is True
+        assert fc.is_default
 
     def test_get_by_name_and_version(self) -> None:
         """Get binary by name and version returns the correct binary."""
@@ -168,7 +168,7 @@ class TestBinaryListAndGet(_BinaryTestBase):
         assert len(result) == 1
         assert result[0].name == "firecracker"
         assert result[0].version == "1.15.0"
-        assert result[0].is_default is True
+        assert result[0].is_default
 
     def test_get_nonexistent_binary(self) -> None:
         """Getting a nonexistent binary raises BinaryNotFoundError."""
@@ -196,7 +196,7 @@ class TestBinaryDefault(_BinaryTestBase):
             BinaryInput(names=["firecracker"], version="1.16.0")
         )
         assert len(binaries) == 1
-        assert binaries[0].is_default is False
+        assert not binaries[0].is_default
 
         # Set it as default
         BinaryOperation.set_default(
@@ -207,13 +207,13 @@ class TestBinaryDefault(_BinaryTestBase):
         binaries = BinaryOperation.get(
             BinaryInput(names=["firecracker"], version="1.16.0")
         )
-        assert binaries[0].is_default is True
+        assert binaries[0].is_default
 
         # Verify the old default is no longer default
         old = BinaryOperation.get(
             BinaryInput(names=["firecracker"], version="1.15.0")
         )
-        assert old[0].is_default is False
+        assert not old[0].is_default
 
     def test_ensure_default_returns_default(self) -> None:
         """ensure_default returns the existing default binary."""
@@ -221,7 +221,7 @@ class TestBinaryDefault(_BinaryTestBase):
 
         assert result is not None
         assert result.name == "firecracker"
-        assert result.is_default is True
+        assert result.is_default
         assert result.version == "1.15.0"
 
 

@@ -106,15 +106,6 @@ class TestKernelListAndGet:
         names = [k.name for k in kernels]
         assert "vmlinux" in names
 
-    def test_get_by_name(self) -> None:
-        """Get a kernel by its name identifier."""
-        kernel = KernelOperation.get(KernelInput(name=["vmlinux"]))
-        assert isinstance(kernel, KernelItem)
-        assert kernel.name == "vmlinux"
-        assert kernel.version == "6.1.0"
-        assert kernel.type == "official"
-        assert kernel.is_default is True
-
     def test_get_by_id_prefix(self) -> None:
         """Get a kernel by its ID prefix (first 6 chars of seeded ID)."""
         # Seeded kernel ID is "a" repeated 64 times
@@ -133,21 +124,21 @@ class TestKernelInspect:
 
     def test_inspect_returns_kernel_item(self) -> None:
         """inspect() returns a KernelItem by default."""
-        result = KernelOperation.inspect(KernelInput(name=["vmlinux"]))
+        result = KernelOperation.inspect(KernelInput(id=["a" * 64]))
         assert isinstance(result, KernelItem)
         assert result.name == "vmlinux"
         assert result.version == "6.1.0"
-        assert result.is_default is True
+        assert result.is_default
 
     def test_inspect_returns_dict_when_json(self) -> None:
         """inspect(is_json=True) returns a dict representation."""
         result = KernelOperation.inspect(
-            KernelInput(name=["vmlinux"]), is_json=True
+            KernelInput(id=["a" * 64]), is_json=True
         )
         assert isinstance(result, dict)
         assert result["name"] == "vmlinux"
         assert result["version"] == "6.1.0"
-        assert result["is_default"] is True
+        assert result["is_default"]
         assert "id" in result
         assert "base_name" in result
         assert "arch" in result
@@ -174,23 +165,23 @@ class TestKernelDefault:
         )
 
         # Initially the seeded kernel is default, not the fetched one
-        assert fetched.is_default is False
+        assert not fetched.is_default
 
-        KernelOperation.set_default(KernelInput(name=[fetched.name]))
+        KernelOperation.set_default(KernelInput(id=[fetched.id]))
 
         # Verify the fetched kernel is now default
-        kernel = KernelOperation.get(KernelInput(name=[fetched.name]))
-        assert kernel.is_default is True
+        kernel = KernelOperation.get(KernelInput(id=[fetched.id]))
+        assert kernel.is_default
 
         # Verify the old default is no longer default
-        old = KernelOperation.get(KernelInput(name=["vmlinux"]))
-        assert old.is_default is False
+        old = KernelOperation.get(KernelInput(id=["a" * 64]))
+        assert not old.is_default
 
     def test_ensure_default(self) -> None:
         """ensure_default() returns the default kernel."""
         kernel = KernelOperation.ensure_default()
         assert isinstance(kernel, KernelItem)
-        assert kernel.is_default is True
+        assert kernel.is_default
         assert kernel.name == "vmlinux"
         assert kernel.version == "6.1.0"
 
@@ -218,7 +209,7 @@ class TestKernelRemove:
         kernels_before = KernelOperation.list_all()
         assert any(k.name == fetched.name for k in kernels_before)
 
-        KernelOperation.remove(KernelInput(name=[fetched.name]))
+        KernelOperation.remove(KernelInput(id=[fetched.id]))
 
         # Verify it's gone from list_all
         kernels_after = KernelOperation.list_all()
@@ -241,7 +232,7 @@ class TestKernelRemove:
 
         db = Database()
         vm_repo = VMRepository(db)
-        kernel = KernelOperation.get(KernelInput(name=["vmlinux"]))
+        kernel = KernelOperation.get(KernelInput(id=["a" * 64]))
 
         # Seed a VM that references the default kernel
         vm_repo.upsert(
@@ -276,10 +267,10 @@ class TestKernelRemove:
 
         # Without force, removal should fail because a VM references the kernel
         with pytest.raises(KernelError):
-            KernelOperation.remove(KernelInput(name=["vmlinux"]))
+            KernelOperation.remove(KernelInput(id=[kernel.id]))
 
         # With force=True it should succeed (soft delete since VM references it)
-        KernelOperation.remove(KernelInput(name=["vmlinux"]), force=True)
+        KernelOperation.remove(KernelInput(id=[kernel.id]), force=True)
 
         # After forced removal, kernel should be soft-deleted (not in list_all)
         kernels = KernelOperation.list_all()

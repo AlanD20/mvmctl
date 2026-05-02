@@ -40,7 +40,7 @@ class LeaseService:
         if isinstance(entity, NetworkItem):
             self._network = entity
         else:
-            self._resolver = NetworkResolver(self._lease_repo)
+            self._resolver = NetworkResolver()
             self._network = self._resolver.resolve(entity)
 
     @property

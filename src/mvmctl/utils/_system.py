@@ -243,7 +243,7 @@ class ProcessSignalHandler:
         try:
             os.kill(self.pid, signal.SIGTERM)
         except OSError as e:
-            if e.errno == errno.ESRCH:
+            if e.errno in (errno.ESRCH, errno.EPERM):
                 self._try_reap()
                 return self._exit_code
             raise
@@ -257,7 +257,7 @@ class ProcessSignalHandler:
         try:
             os.kill(self.pid, signal.SIGKILL)
         except OSError as e:
-            if e.errno == errno.ESRCH:
+            if e.errno in (errno.ESRCH, errno.EPERM):
                 self._try_reap()
                 return self._exit_code
             raise

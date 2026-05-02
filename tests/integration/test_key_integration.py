@@ -28,7 +28,6 @@ from mvmctl.utils.common import CacheUtils
 _SSH_PUB_ED25519 = (
     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHtestkeycontent testuser@testhost"
 )
-_SSH_PUB_RSA = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC testuser@testhost"
 
 
 def _compute_expected_fingerprint(pub_content: str) -> str:
@@ -56,11 +55,14 @@ def _setup_ssh_keygen_mock(monkeypatch: pytest.MonkeyPatch) -> None:
         if cmd and cmd[0] == "ssh-keygen":
             key_path: Path | None = None
             algorithm = "ed25519"
+            comment = "testuser@testhost"
             for i, arg in enumerate(cmd):
                 if arg == "-f" and i + 1 < len(cmd):
                     key_path = Path(str(cmd[i + 1]))
                 if arg == "-t" and i + 1 < len(cmd):
                     algorithm = str(cmd[i + 1])
+                if arg == "-C" and i + 1 < len(cmd):
+                    comment = str(cmd[i + 1])
 
             if key_path is not None:
                 key_path.parent.mkdir(parents=True, exist_ok=True)
@@ -70,10 +72,12 @@ def _setup_ssh_keygen_mock(monkeypatch: pytest.MonkeyPatch) -> None:
                     "-----END OPENSSH PRIVATE KEY-----\n"
                 )
                 pub_path = key_path.with_suffix(".pub")
-                pub_content = (
-                    _SSH_PUB_RSA if algorithm == "rsa" else _SSH_PUB_ED25519
-                )
-                pub_path.write_text(pub_content + "\n")
+                algo_pub = "ssh-rsa" if algorithm == "rsa" else "ssh-ed25519"
+                # Unique base64 per key name so fingerprints don't collide
+                unique_b64 = base64.b64encode(
+                    f"{algo_pub}_{key_path.stem}".encode()
+                ).decode()
+                pub_path.write_text(f"{algo_pub} {unique_b64} {comment}\n")
 
             return subprocess.CompletedProcess(
                 args=[], returncode=0, stdout="", stderr=""
@@ -103,12 +107,13 @@ class TestKeyCreate:
         assert key.algorithm == "ssh-ed25519"
         assert key.is_present is True
         assert key.is_default is False
-        assert key.comment == "test-key@testhost"
-        assert key.fingerprint == _compute_expected_fingerprint(
-            _SSH_PUB_ED25519
-        )
+        import socket
 
+        assert key.comment == f"test-key@{socket.gethostname()}"
         keys_dir = CacheUtils.get_keys_dir()
+        pub_content = (keys_dir / "test-key.pub").read_text().strip()
+        assert key.fingerprint == _compute_expected_fingerprint(pub_content)
+
         assert (keys_dir / "test-key").exists()
         assert (keys_dir / "test-key.pub").exists()
         assert key.public_key_path == str(keys_dir / "test-key.pub")
@@ -124,7 +129,9 @@ class TestKeyCreate:
 
         assert key.algorithm == "ssh-rsa"
         assert key.name == "test-rsa"
-        assert key.fingerprint == _compute_expected_fingerprint(_SSH_PUB_RSA)
+        keys_dir = CacheUtils.get_keys_dir()
+        pub_content = (keys_dir / "test-rsa.pub").read_text().strip()
+        assert key.fingerprint == _compute_expected_fingerprint(pub_content)
 
     def test_create_keypair_default_status(
         self, monkeypatch: pytest.MonkeyPatch
@@ -217,7 +224,7 @@ class TestKeyDefault:
         KeyOperation.set_default(KeyInput(name=["set-def-key"]))
 
         key = KeyOperation.get(KeyInput(name=["set-def-key"]))
-        assert key.is_default is True
+        assert key.is_default
 
     def test_get_defaults_returns_default_key(
         self, monkeypatch: pytest.MonkeyPatch
@@ -232,7 +239,7 @@ class TestKeyDefault:
         defaults = KeyOperation.get_defaults()
         assert len(defaults) == 1
         assert defaults[0].name == "def-key-a"
-        assert defaults[0].is_default is True
+        assert defaults[0].is_default
 
     def test_clear_defaults_empties_defaults(
         self, monkeypatch: pytest.MonkeyPatch
@@ -336,7 +343,7 @@ class TestKeyEdgeCases:
         assert result["id"] == created.id
         assert result["algorithm"] == "ssh-ed25519"
         assert result["fingerprint"] == created.fingerprint
-        assert result["is_default"] is False
+        assert not result["is_default"]
         assert "public_key_path" in result
         assert "private_key_path" in result
         assert "created_at" in result

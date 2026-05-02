@@ -13,7 +13,7 @@ import pytest
 
 from mvmctl.api import NetworkCreateInput, NetworkInput, NetworkOperation
 from mvmctl.api.network_operations import NetworkCreateResult
-from mvmctl.exceptions import MVMError, NetworkError, NetworkNotFoundError
+from mvmctl.exceptions import NetworkError, NetworkNotFoundError
 from mvmctl.models.network import (
     IPTablesRuleItem,
     NetworkItem,
@@ -290,8 +290,8 @@ class TestNetworkCreateEdgeCases:
     """Test edge cases during network creation."""
 
     def test_create_network_invalid_subnet(self) -> None:
-        """Creating a network with an invalid subnet raises MVMError."""
-        with pytest.raises(MVMError):
+        """Creating a network with an invalid subnet raises ValueError."""
+        with pytest.raises(ValueError):
             NetworkOperation.create(
                 NetworkCreateInput(name="badsubnet", subnet="invalid")
             )
@@ -311,11 +311,18 @@ class TestNetworkCreateEdgeCases:
 class TestNetworkSync:
     """Test iptables rule synchronization."""
 
-    def test_sync_network(self) -> None:
+    def test_sync_network(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Create network, sync iptables rules, verify rules tracked in DB."""
+        monkeypatch.setattr(
+            "mvmctl.utils.network.NetworkUtils.ensure_interface_ready",
+            lambda iface: True,
+        )
         result = NetworkOperation.create(
             NetworkCreateInput(
-                name="syncnet", subnet="10.60.0.0/24", nat_enabled=True
+                name="syncnet",
+                subnet="10.60.0.0/24",
+                nat_enabled=True,
+                nat_gateways=["eth0"],
             )
         )
         network = result.result

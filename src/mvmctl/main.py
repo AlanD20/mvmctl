@@ -316,7 +316,7 @@ def version_cmd() -> None:
 
     if git_info:
         if git_info.startswith("git+"):
-            click.echo(f"  built from: {git_info[5:]}")
+            click.echo(f"  built from: {git_info[4:]}")
         else:
             click.echo(f"  tagged: {git_info}")
 

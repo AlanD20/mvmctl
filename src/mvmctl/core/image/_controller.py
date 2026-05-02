@@ -108,11 +108,12 @@ class ImageController:
         from mvmctl.exceptions import ImageError
         from mvmctl.utils.auditlog import AuditLog
 
-        has_vms = bool(self._image.vms)
+        vms = self._image.vms or []
+        has_vms = bool(vms)
 
         # 1. VM reference check
         if has_vms and not force:
-            names = ", ".join(vm.name for vm in self._image.vms)
+            names = ", ".join(vm.name for vm in vms)
             raise ImageError(f"Image is referenced by VMs: {names}")
 
         # 2. Delete ALL related files from disk

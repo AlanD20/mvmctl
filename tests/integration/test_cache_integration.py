@@ -370,13 +370,15 @@ class TestCachePruneAll:
         assert result.failed_ids == []
 
     def test_prune_all_empty_returns_empty_result(self) -> None:
-        """prune_all with no resources returns empty pruned_ids."""
+        """prune_all with no VMs returns empty pruned_ids for VMs but still
+        reports miscellaneous cache items like warm images."""
         result = CacheOperation.prune_all(dry_run=True)
 
         assert isinstance(result, PruneAllResult)
-        assert result.pruned_ids == []
         assert result.failed_ids == []
         assert result.had_running_vms is False
+        # Integration conftest seeds a warm image, so prune_misc reports it
+        assert "warm_images" in result.pruned_ids
 
 
 # ======================================================================
@@ -398,12 +400,18 @@ class TestCacheClean:
         assert CacheUtils.get_cache_dir().exists()
 
     def test_clean_empty_cache_handles_gracefully(self) -> None:
-        """clean(dry_run=True) handles empty cache gracefully."""
+        """clean(dry_run=True) handles empty cache gracefully.
+
+        clean() calls prune_all with include_all=True, so default assets
+        seeded by the integration conftest are reported for removal.
+        """
         result = CacheOperation.clean(dry_run=True)
 
         assert isinstance(result, CleanResult)
         assert isinstance(result.prune_result, PruneAllResult)
-        assert result.prune_result.pruned_ids == []
         assert result.prune_result.failed_ids == []
         assert result.prune_result.had_running_vms is False
         assert result.cache_dir_removed is True
+        # clean() uses include_all=True — default assets are reported
+        assert "net" in result.prune_result.pruned_ids
+        assert "warm_images" in result.prune_result.pruned_ids

@@ -144,8 +144,8 @@ class FirecrackerSpawner:
         relay_client_fd: int | None = None,
     ) -> None:
 
-        fc_stdin = subprocess.DEVNULL
-        fc_stdout = self.serial_output_fp
+        fc_stdin: int | None = subprocess.DEVNULL
+        fc_stdout: int | TextIO | None = self.serial_output_fp
         fc_pass_fds: Collection[int] = []
 
         if self._config.enable_console and relay_enabled:
@@ -470,7 +470,7 @@ class FirecrackerSpawner:
         with open(self._config_path, "w") as f:
             json.dump(config, f)
 
-    def create_filepointer(self, path: Path):
+    def create_filepointer(self, path: Path) -> TextIO:
         return open(path, "w", buffering=1, encoding="utf-8")
 
     def _close_filepointers(self) -> None:

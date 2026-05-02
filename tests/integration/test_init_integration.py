@@ -193,7 +193,7 @@ class TestInitHost:
 
         assert state is not None
         assert isinstance(state, HostStateItem)
-        assert state.initialized is True
+        assert state.initialized == True  # noqa: E712
         assert state.id == 1
         assert isinstance(state.initialized_at, str)
         assert len(state.initialized_at) > 0
@@ -211,7 +211,7 @@ class TestInitHost:
         repo = HostRepository()
         state = repo.get_state()
         assert state is not None
-        assert state.initialized is True
+        assert state.initialized == True  # noqa: E712
 
 
 # ======================================================================
@@ -286,7 +286,7 @@ class TestInitWizard:
         fc = [b for b in binaries if b.name == "firecracker"]
         assert len(fc) == 1
         assert fc[0].version == "1.16.0"
-        assert fc[0].is_default is True
+        assert fc[0].is_default == True  # noqa: E712
 
 
 # ======================================================================
@@ -321,7 +321,7 @@ class TestInitEdgeCases:
         repo = HostRepository()
         state_before = repo.get_state()
         assert state_before is not None
-        assert state_before.initialized is True
+        assert state_before.initialized == True  # noqa: E712
 
         # Verify changes were recorded in the DB
         recorded = repo.list_changes(include_reverted=False)
@@ -332,9 +332,9 @@ class TestInitEdgeCases:
         repo.reset_state()
         state_after = repo.get_state()
         assert state_after is not None
-        assert state_after.initialized is False
-        assert state_after.mvm_group_created is False
-        assert state_after.sudoers_configured is False
+        assert state_after.initialized == False  # noqa: E712
+        assert state_after.mvm_group_created == False  # noqa: E712
+        assert state_after.sudoers_configured == False  # noqa: E712
 
         # The detailed changes remain in the DB for full rollback
         all_changes = repo.list_changes(include_reverted=True)

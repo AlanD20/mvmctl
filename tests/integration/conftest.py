@@ -375,10 +375,17 @@ def _mock_root_uid(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def _mock_shutil_which(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make shutil.which return a valid path for any binary."""
-    monkeypatch.setattr(
-        "shutil.which",
-        lambda cmd: f"/usr/bin/{cmd}" if cmd else None,
-    )
+
+    def _patched_which(cmd: str | None) -> str | None:
+        # Prevent accidentally invoking the slow libguestfs appliance builder
+        # in integration tests (it has a 150s timeout and hangs the suite).
+        if cmd == "libguestfs-make-fixed-appliance":
+            return None
+        if cmd:
+            return f"/usr/bin/{cmd}"
+        return None
+
+    monkeypatch.setattr("shutil.which", _patched_which)
 
 
 @pytest.fixture(autouse=True)
