@@ -7,9 +7,9 @@
 ```bash
 # 1. System packages
 # Ubuntu/Debian:
-sudo apt-get install -y iproute2 iptables procps kmod sudo genisoimage qemu-utils cloud-image-utils e2fsprogs squashfs-tools util-linux tar openssh-client libguestfs0 libguestfs-tools supermin
+sudo apt-get install -y iproute2 iptables procps kmod sudo cloud-image-utils qemu-utils e2fsprogs squashfs-tools util-linux tar openssh-client libguestfs0 libguestfs-tools supermin
 # Arch Linux:
-sudo pacman -S --needed iproute2 iptables procps-ng kmod sudo libisoburn qemu-img cloud-utils e2fsprogs squashfs-tools util-linux tar coreutils openssh libguestfs supermin
+sudo pacman -S --needed iproute2 iptables procps-ng kmod sudo cloud-utils qemu-img e2fsprogs squashfs-tools util-linux tar coreutils openssh libguestfs supermin
 
 # 2. KVM
 egrep -c '(vmx|svm)' /proc/cpuinfo   # must be > 0

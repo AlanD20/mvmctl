@@ -1,8 +1,8 @@
 # mvmctl/db/ — SQLite Schema & Migrations
 
-**Scope:** SQLite database schema, migration runner, and ORM dataclasses
-**Status:** Canonical source of truth for all binary/kernel/image defaults and state
-**Rule:** Schema lives in SQL files; runner applies migrations; models define row dataclasses
+**Scope:** SQLite database schema, migration SQL, and canonical state persistence
+**Status:** Schema definitions and migration SQL live here; row models live in `src/mvmctl/models/`
+**Rule:** Schema lives in SQL files; migrations are managed by `Database` class in `core/_shared/_db.py`; canonical row dataclasses are in `src/mvmctl/models/`
 
 ## RESOLUTION LAYER MANDATE (MANDATORY — NO EXCEPTIONS)
 
@@ -12,7 +12,7 @@
 |-------|-----------|
 | **CLI** | **FORBIDDEN** — never queries SQLite |
 | **API** | **REQUIRED** — resolves DB-backed defaults; orchestrates Core Repository calls |
-| **Core** | **VIA REPOSITORY** — `core/{domain}/_repository.py` classes own DB access for their domain using `core/_internal/_db.Database`. Core domains NEVER access DB directly outside their Repository. |
+| **Core** | **VIA REPOSITORY** — `core/{domain}/_repository.py` classes own DB access for their domain using `core/_shared/_db.Database`. Core domains NEVER access DB directly outside their Repository. |
 | **Models** | **FORBIDDEN** — pure data containers |
 
 **SQLite (`mvmdb.db`) is the canonical source of truth for:**
@@ -36,20 +36,20 @@
 ```
 src/mvmctl/db/
 ├── __init__.py              # Package marker
-├── models.py                # ORM dataclasses: IPTablesRule, Image, Kernel, Binary, Network, NetworkLease, VMInstance, HostState, HostStateChange
 └── migrations/
-    ├── __init__.py          # Package marker
-    ├── 001_initial_schema.sql  # Full schema: 9 tables + db_migrations tracking
-    └── runner.py            # Migration runner: applies migrations, tracks via PRAGMA user_version
+    ├── __init__.py           # Package marker
+    └── 001_initial_schema.sql  # Full schema: 9 tables + db_migrations tracking
 ```
+
+The canonical row models (`VMInstanceItem`, `NetworkItem`, `ImageItem`, `KernelItem`, `BinaryItem`, `HostStateItem`, `IPTablesRuleItem`, etc.) live in `src/mvmctl/models/`.
 
 ## WHERE TO LOOK
 
 | Task | Module | Key entry point |
 |------|--------|-----------------|
 | Schema definitions | `migrations/001_initial_schema.sql` | 10 CREATE TABLE statements |
-| Run migrations | `migrations/runner.py` | `MigrationRunner(db_path).migrate()` |
-| ORM dataclasses | `models.py` | `IPTablesRule`, `Image`, `Kernel`, `Binary`, `Network`, `NetworkLease`, `VMInstance`, `HostState`, `HostStateChange` |
+| Run migrations | `core/_shared/_db.py` | `Database.migrate()` or `Database._run_migrations()` |
+| Domain row dataclasses | `src/mvmctl/models/` | `*Item` dataclass per domain |
 
 ## SCHEMA OVERVIEW
 
@@ -84,27 +84,33 @@ These are intentional deviations from the layer architecture:
 
 | File | Deviation | Reason |
 |------|-----------|--------|
-| `cli/bin.py` | Imports `core/metadata` directly | Asset management needs direct metadata access for bulk operations |
-| `models/*.py` | Import ORM dataclasses from `mvmctl.db.models` | Domain models extend/reuse DB dataclasses for consistency |
+| *(No current exceptions)* | | All known deviations have been resolved. |
 
 ## CONVENTIONS
 
-### Migration Runner
+### Migration Management
+
+Migrations are managed by the `Database` class in `core/_shared/_db.py`:
+
 ```python
-from mvmctl.db.migrations.runner import MigrationRunner
-runner = MigrationRunner(db_path)
-runner.migrate()  # Applies all pending migrations in order
+from mvmctl.core._shared._db import Database
+
+db = Database()
+db.migrate()  # Applies all pending migrations in order
 ```
+
 - Migrations are numbered SQL files in `migrations/` directory
-- Runner reads `db_migrations` table to track applied versions
+- `Database.migrate()` reads the `db_migrations` table to track applied versions
 - Uses `executescript()` for schema changes (auto-commits)
 - Records each applied migration in `db_migrations` table
 
-### ORM Dataclasses
-All dataclasses in `models.py` are pure containers — no methods with side effects:
+### Domain Models
+
+The canonical row dataclasses live in `src/mvmctl/models/`, not in `db/`. Each domain model maps to a DB table and follows the `*Item` naming convention:
+
 ```python
 @dataclass
-class Binary:
+class BinaryItem:
     id: int | None
     name: str
     version: str
@@ -113,6 +119,8 @@ class Binary:
     created_at: str | None
     updated_at: str | None
 ```
+
+These are pure containers — no methods with side effects.
 
 ## STATE QUERY PREFERENCE
 
@@ -126,8 +134,8 @@ class Binary:
 |-------|----------------------|-----------|
 | **CLI** | **FORBIDDEN** — CLI passes `None` or explicit values to API | CLI is a client layer; DB access is an implementation detail |
 | **API** | **ORCHESTRATES** — API creates `Database()` instances and passes them to Core Resolvers/Repositories | API owns the orchestration boundary; resolves DB-backed defaults before calling Core Controllers |
-| **Core** | **VIA REPOSITORY** — Each domain's `_repository.py` accesses DB using `core/_internal/_db.Database` | Core domains own their data persistence; Repository is the single entry point for all queries |
-| **DB** | **DEFINITION ONLY** — Schema and ORM models; no business logic | Database layer provides schema and models only |
+| **Core** | **VIA REPOSITORY** — Each domain's `_repository.py` accesses DB using `core/_shared/_db.Database` | Core domains own their data persistence; Repository is the single entry point for all queries |
+| **DB** | **DEFINITION ONLY** — Schema and migration SQL; no business logic | Database layer provides schema only |
 
 ### Correct Query Pattern
 
@@ -135,7 +143,7 @@ Domain-specific repositories (e.g., `VMRepository` in `core/vm/_repository.py`) 
 
 ```python
 # CORRECT — Repository in core/{domain}/_repository.py
-from mvmctl.core._internal._db import Database
+from mvmctl.core._shared._db import Database
 from mvmctl.models.vm import VMInstanceItem
 
 class VMRepository:
@@ -155,7 +163,7 @@ class VMRepository:
 API layer orchestrates:
 ```python
 # CORRECT — API layer orchestrates
-from mvmctl.core._internal._db import Database
+from mvmctl.core._shared._db import Database
 from mvmctl.core.vm._repository import VMRepository
 
 db = Database()
@@ -170,7 +178,7 @@ vm = repo.get(vm_id)
 | CLI calling any DB method directly | CLI is a client; DB is implementation detail | CLI imports from `mvmctl.api` only |
 | Core accessing DB outside its Repository | Bypasses domain encapsulation | Use the domain's `_repository.py` |
 | CLI resolving defaults before calling API | Duplicates logic, bypasses API boundary | API resolves all DB-backed defaults |
-| Raw `sqlite3.connect()` without using `Database` | Bypasses connection management | Use `Database` from `core/_internal/_db.py` |
+| Raw `sqlite3.connect()` without using `Database` | Bypasses connection management | Use `Database` from `core/_shared/_db.py` |
 | Hardcoded SQL outside Repository classes | Scatters query logic | All SQL in `_repository.py` per domain |
 | `from __future__ import annotations` absent | Breaks PEP 563 postponed evaluation | Include in every Python file |
 
@@ -188,10 +196,10 @@ The `firecracker` symlink in `bin/` is a **side-effect** of `set_active_version(
 Before submitting changes:
 - [ ] **NO CLI code imports from `mvmctl.db` or `mvmctl.core.*`** — CLI only imports from `mvmctl.api`
 - [ ] **Core code accesses DB through domain `_repository.py` files** — never directly
-- [ ] **Repository classes use `Database` from `core/_internal/_db.py`** — not raw `sqlite3`
+- [ ] **Repository classes use `Database` from `core/_shared/_db.py`** — not raw `sqlite3`
 - [ ] **API orchestrates but does not duplicate Repository logic** — calls Core Repositories
 - [ ] **API never passes `None` to Core Controller for required DB-backed parameters**
-- [ ] **Models layer may import DB dataclasses for consistency but should not query DB**
+- [ ] **Models layer provides canonical row dataclasses (`*Item`) but should not query DB**
 
 ### Enforcement
 

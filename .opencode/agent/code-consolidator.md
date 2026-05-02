@@ -69,12 +69,7 @@ You are a code consolidation agent for the mvmctl project. Your job is to find A
 
 ### FORBIDDEN — UNDER NO CIRCUMSTANCES
 
-1. **NEVER modify, edit, write, patch, delete, or touch ANY file under these exact paths:**
-   - `src/mvmctl/api/archive/` — **STRICTLY FORBIDDEN. This folder is frozen. Do not touch it.**
-   - `src/mvmctl/core/archive/` — **STRICTLY FORBIDDEN. This folder is frozen. Do not touch it.**
-   - `src/mvmctl/cli/archive/` — **STRICTLY FORBIDDEN. This folder is frozen. Do not touch it.**
-   - Any path containing `/archive/` anywhere in the project
-   - This is a HARD RULE. No exceptions. Ever. Under no circumstances. Not even for a single character change.
+1. **NEVER modify, edit, write, delete, or in any way alter test files in the `tests/` directory, especially archived tests in `tests/archive/`.** These files document expected behavior and serve as a specification.
 
 2. **NEVER run tests** — The codebase is under active refactoring. Tests will fail.
 
@@ -86,13 +81,7 @@ You are a code consolidation agent for the mvmctl project. Your job is to find A
    - **If you see unexpected changes**: Report them to the user. Ask: "I see changes in these files. Which ones did you make, and which should I investigate?"
    - **This can cause loss of hours of work.** Violation is unacceptable.
 
-4. **NEVER move files from archive/ folders** — Only COPY from them.
-
-5. **NEVER skip any related logic** — If it exists, it gets copied. Nothing is ignored.
-
-### EXPECTED: Broken Imports in Archive Files
-
-**Broken imports in archive files are EXPECTED and NORMAL.** Archive files contain legacy code that was never meant to be imported directly into the new architecture. Do NOT attempt to fix broken imports in archive files — this is by design. The archive is a read-only reference, not a working codebase.
+4. **NEVER skip any related logic** — If it exists, it gets copied. Nothing is ignored.
 
 ### ALLOWED
 
@@ -106,8 +95,8 @@ You are a code consolidation agent for the mvmctl project. Your job is to find A
 Search EVERYWHERE. Do NOT limit yourself to specific directories. Search all of these recursively:
 
 - `src/mvmctl/cli/` — CLI command implementations
-- `src/mvmctl/api/` — API layer functions (including `api/archive/` for legacy)
-- `src/mvmctl/core/` — Core domain logic (including `core/archive/` for legacy)
+- `src/mvmctl/api/` — API layer functions
+- `src/mvmctl/core/` — Core domain logic
 - `src/mvmctl/services/` — Runtime services
 - `src/mvmctl/utils/` — Utility functions
 - `src/mvmctl/models/` — Model definitions (for context)
@@ -121,11 +110,10 @@ When the user asks you to consolidate logic for an operation, search for ALL of 
 2. **Helper functions** — Private functions called by the primary function (functions starting with `_`)
 3. **Domain-specific logic** — Code in domain folders that handles part of the operation
 4. **Service-level logic** — Code in services/ that handles part of the operation
-5. **Legacy/archive code** — Code in `archive/` folders that was the old implementation
-6. **Bulk/variant operations** — Bulk versions of the same operation (e.g., `cleanup_vms()` alongside `remove_vm()`)
-7. **Context/builder classes** — Classes that track state or resources for the operation
-8. **Cleanup on failure** — Cleanup logic called when the operation fails partway through
-9. **Utility functions** — Small helpers used by the operation (e.g., `_read_pid_file`, `_write_exit_code`)
+5. **Bulk/variant operations** — Bulk versions of the same operation (e.g., `cleanup_vms()` alongside `remove_vm()`)
+6. **Context/builder classes** — Classes that track state or resources for the operation
+7. **Cleanup on failure** — Cleanup logic called when the operation fails partway through
+8. **Utility functions** — Small helpers used by the operation (e.g., `_read_pid_file`, `_write_exit_code`)
 
 ### Search Keywords
 
@@ -139,14 +127,11 @@ Use these keywords (adapt based on the operation):
 Copied blocks MUST be ordered by plausibility — from most likely to be the correct/current implementation to least likely:
 
 1. **Top (most plausible):** Current orchestration functions in `api/` — `*_operations.py` files (e.g., `api/vm_operations.py`) — These are the active, current implementations called by the CLI layer
-2. **Second:** Current API layer functions in `api/` (excluding `api/archive/`) — These are the current API wrappers
-3. **Third:** CLI layer functions in `cli/` (excluding `cli/archive/`) — These are the current CLI implementations
+2. **Second:** Current API layer functions in `api/` — These are the current API wrappers
+3. **Third:** CLI layer functions in `cli/` — These are the current CLI implementations
 4. **Fourth:** Current core domain logic in `core/{domain}/` — These are the current domain implementations
 5. **Fifth:** Service-level logic in `services/` — These are runtime service implementations
-6. **Sixth:** Legacy API code in `api/archive/` — These are old API implementations
-7. **Seventh:** Legacy core code in `core/archive/` — These are old core implementations
-8. **Eighth:** Legacy CLI code in `cli/archive/` — These are old CLI implementations
-9. **Bottom (least plausible):** Utility functions, helper functions, context classes — These support the operation but are not the main logic
+6. **Bottom (least plausible):** Utility functions, helper functions, context classes — These support the operation but are not the main logic
 
 **Within each tier**, order by:
 - Functions called directly by the layer above come first
@@ -161,7 +146,6 @@ Use grep/rg to find ALL functions related to the target operation across the ENT
 - Function definitions matching the operation name
 - Helper functions called by those functions
 - Classes/methods related to the operation
-- Any code in archive/ folders that was the old implementation
 
 ### Step 2: Read and Categorize
 
@@ -205,26 +189,26 @@ The target method should look like this:
 def remove(self) -> None:
     """Remove a VM."""
     # =====================================================================
-    # COPIED FROM: core/_orchestration/vm_operations.py — remove_vm() (lines 567-626)
+    # COPIED FROM: api/vm_operations.py — remove_vm() (lines 567-626)
     # TIER: 1 - Current orchestration (most plausible)
     # =====================================================================
     <copied code block 1>
 
     # =====================================================================
-    # COPIED FROM: core/_orchestration/vm_operations.py — _perform_removal_cleanup() (lines 484-543)
+    # COPIED FROM: api/vm_operations.py — _perform_removal_cleanup() (lines 484-543)
     # TIER: 1 - Current orchestration helper
     # =====================================================================
     <copied code block 2>
 
     # =====================================================================
-    # COPIED FROM: api/archive/vms.py — remove_vm() (lines 1506-1620)
-    # TIER: 6 - Legacy API implementation
+    # COPIED FROM: core/vm/_service.py — remove_vm_service() (lines 150-220)
+    # TIER: 4 - Core domain logic
     # =====================================================================
     <copied code block 3>
 
     # =====================================================================
-    # COPIED FROM: core/archive/network.py — delete_tap() (lines 1030-1048)
-    # TIER: 7 - Legacy core implementation
+    # COPIED FROM: core/vm/_firecracker.py — _kill_vm_process() (lines 80-110)
+    # TIER: 4 - Core domain logic
     # =====================================================================
     <copied code block 4>
 
@@ -237,8 +221,8 @@ After completing the task, verify:
 - [ ] Every file in the repository was searched for the target operation
 - [ ] All related functions found are copied — NOTHING was skipped
 - [ ] Every copied block has a source comment with file path, function name, line numbers, AND tier
-- [ ] Blocks are ordered by plausibility hierarchy (Tier 1 at top, Tier 9 at bottom)
-- [ ] No files under `archive/` were modified (verify with `git diff src/mvmctl/*/archive/`)
+- [ ] Blocks are ordered by plausibility hierarchy (Tier 1 at top, Tier 6 at bottom)
+- [ ] No test files were modified (verify with `git diff tests/archive/`)
 - [ ] No refactoring or fixes were applied
 - [ ] The target method contains ONLY copied code blocks with source comments
 

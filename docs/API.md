@@ -608,7 +608,7 @@ process, and registers the VM in the database.
 - Binary — from `BinaryResolver` (default firecracker binary if not specified)
 - SSH keys — from `KeyResolver` (default keys if not specified)
 
-**Raises:** `VMCreateError`, `VMAlreadyExistsError`, `NetworkError`, `FirecrackerSpawnError`, `PrivilegeError`.
+**Raises:** `VMCreateError`, `NetworkError`, `FirecrackerSpawnError`, `PrivilegeError`.
 
 **Example:**
 ```python
@@ -1199,7 +1199,7 @@ Return `True` if `/dev/kvm` exists and is accessible by the current user.
 #### `HostOperation.check_required_binaries() -> list[str]`
 
 Return a list of missing required binary names (`ip`, `iptables`, `qemu-img`,
-`genisoimage`, etc.). Empty list means all present.
+`cloud-localds`, etc.). Empty list means all present.
 
 ---
 
@@ -1478,7 +1478,7 @@ End-to-end example: orchestrate microVM lifecycle using the mvmctl Python API.
 
 Prerequisites:
     - Linux x86_64 with KVM (/dev/kvm accessible)
-    - System packages: ip, iptables, genisoimage, qemu-img
+    - System packages: ip, iptables, cloud-localds, qemu-img
     - Root privileges for host operations
     - pip install mvmctl
 """

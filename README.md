@@ -51,13 +51,13 @@ mvm ssh --name myvm
 
   Ubuntu/Debian:
   ```bash
-  sudo apt-get install -y iproute2 iptables genisoimage qemu-utils
+  sudo apt-get install -y iproute2 iptables cloud-image-utils qemu-utils
   ```
   Arch Linux:
   ```bash
-  sudo pacman -S --needed iproute2 iptables libisoburn qemu-base
+  sudo pacman -S --needed iproute2 iptables cloud-utils qemu-img
   ```
-- **Root access (one-time):** run `mvm init` once to create the `mvm` group and a sudoers drop-in; normal `mvm` commands require no `sudo` after that. Check `privileged_binaries` in the [src/mvmctl/assets/defaults.yaml](src/mvmctl/assets/defaults.yaml) for allowed binaries
+- **Root access (one-time):** run `mvm init` once to create the `mvm` group and a sudoers drop-in; normal `mvm` commands require no `sudo` after that. Review the `PRIVILEGED_BINARIES` dict in `src/mvmctl/constants.py` for allowed binaries
 
 ---
 

@@ -7,9 +7,7 @@ All three files live under `src/mvmctl/assets/` and are packaged into the instal
 wheel. They are read-only at runtime — user overrides are resolved from runtime state
 (`~/.cache/mvmctl/metadata.json`) and `MVM_*` environment variables, not by editing
 these files directly. Images and
-kernels remain as `images.yaml` and `kernels.yaml` respectively. User overrides/default
-selections are resolved from runtime state (`~/.cache/mvmctl/metadata.json`) and
-`MVM_*` environment variables, not by editing these files directly.
+kernels remain as `images.yaml` and `kernels.yaml` respectively.
 
 ---
 
@@ -94,8 +92,7 @@ Resolution works as follows:
 
 1. The active Firecracker CI version is read from the default binary entry in
    `~/.cache/mvmctl/metadata.json` (`binaries.*.ci_version` where `is_default=1`),
-   falling back to `DEFAULT_FIRECRACKER_CI_VERSION` (resolved from the
-   `OVERRIDABLE_DEFAULTS` dict in `constants.py`).
+falling back to `DEFAULT_FIRECRACKER_CI_VERSION` (standalone constant in `constants.py`).
 2. The host architecture is detected via `platform.machine()`, falling back to
    `defaults.kernel.arch` in `OVERRIDABLE_DEFAULTS`.
 3. The `list_url_template` field in the image's YAML entry is queried to list all
@@ -226,7 +223,7 @@ and other fixed values.
 
 | Constant | Source | Description |
 |----------|--------|-------------|
-| `DEFAULT_FIRECRACKER_CI_VERSION` | `fallbacks.fc_ci_version` (from old `_defaults.py`) | CI version used when config lookup fails — resolves to `v1.15` at runtime |
+| `DEFAULT_FIRECRACKER_CI_VERSION` | `constants.py` (standalone constant) | CI version used when config lookup fails — resolves to `v1.15` at runtime |
 
 ---
 

@@ -89,7 +89,7 @@ Every downloaded/imported asset gets a **full 64-char SHA256 hash**. CLI display
 |-----------|---------|
 | Hardcode paths/names | `constants.py` or `MVM_*` env vars |
 | Business logic in `cli/` | Move to `core/`, expose via `api/` |
-| `print()` in `core/` | `from mvmctl.utils.console import print_info` — only in CLI |
+| `print()` in `core/` | `from mvmctl.utils._io import print_info` — only in CLI |
 | Bare `except:` | Catch specific types from `exceptions.py` |
 | Skip failing tests | Fix the test; coverage drop = CI failure |
 | `as any` / `type: ignore` | Strict mypy — no suppressions allowed |

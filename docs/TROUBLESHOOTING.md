@@ -145,7 +145,7 @@ pkill -f nocloud-net-server
 
 Verify firewall rules are configured:
 ```bash
-sudo iptables -L MVM-NOCLOUD-INPUT -n -v
+sudo iptables -L MVM-NOCLOUDNET-INPUT -n -v
 # Should show rules allowing source IP to destination ports
 ```
 

@@ -91,6 +91,7 @@ Image management.
 | `mvm image set-default` | Set the default image for VM creation |
 | `mvm image rm ID` | Remove a cached image |
 | `mvm image warm IMAGE` | Pre-decompress image for fast VM creation |
+| `mvm image inspect NAME` | Show detailed image information |
 
 **Supported image IDs:**
 
@@ -100,13 +101,21 @@ Image management.
 | `ubuntu-22.04` | Ubuntu 22.04 LTS (Jammy) |
 | `archlinux` | Arch Linux cloud image |
 | `debian-bookworm` | Debian 12 (Bookworm) |
-| `alpine-3.20` | Alpine Linux 3.20 |
+| `alpine-3.21` | Alpine Linux 3.21 |
+| `ubuntu-24.04-minimal` | Ubuntu 24.04 LTS Minimal (Noble) |
+| `ubuntu-fc` | Ubuntu 24.04 with Firecracker-optimized kernel |
 
 **`fetch` flags:**
 
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--force, -f` | Re-download even if cached | false |
+| `--set-default` | Set as default after fetch | false |
+| `--arch ARCH` | Architecture (e.g., `x86_64`) | host arch |
+| `--version VERSION` | Version override | (latest) |
+| `--partition N` | Partition number to extract | (auto) |
+| `--skip-optimization` | Skip filesystem optimization | false |
+| `--disable-detector NAME` | Disable a partition detector | — |
 
 ---
 
@@ -207,6 +216,7 @@ Named network management.
 | `mvm network inspect NAME` | Show network details and IP leases |
 | `mvm network set-default NAME` | Set a network as the default for VM creation |
 | `mvm network sync [IDENTIFIER]` | Sync iptables rules between database and host |
+| `mvm network restore` | Restore all networks from DB after reboot |
 
 ---
 
@@ -317,8 +327,9 @@ VM SSH access.
 
 1. Built-in fallbacks (`constants.py`)
 2. Runtime state files (`~/.config/mvmctl/config.json`)
-3. `MVM_*` environment variables
-4. CLI flags
+3. Asset registry (`~/.cache/mvmctl/metadata.json`)
+4. `MVM_*` environment variables
+5. CLI flags
 
 ### Example config.json
 
@@ -332,7 +343,11 @@ VM SSH access.
 }
 ```
 
-### Asset Defaults in metadata.json
+### Asset Registry (metadata.json)
+
+> **Note:** `metadata.json` is a **legacy compatibility shim** for asset defaults. The **canonical source of truth** is the SQLite database (`mvmdb.db`) which stores images, kernels, binaries, networks, keys, and VM state. `metadata.json` is preserved for backward compatibility but may be removed in a future release.
+
+Legacy format example:
 
 ```json
 {
@@ -362,7 +377,7 @@ VM SSH access.
 
 ## Cloud-Init
 
-`mvm` uses **nocloud-net** as the default method for delivering cloud-init configuration to VMs.
+`mvm` uses **inject** as the default method for delivering cloud-init configuration to VMs (with **nocloud-net** available as an alternative via `--cloud-init-mode net`).
 
 ### How It Works
 
@@ -392,7 +407,7 @@ VM SSH access.
 
 | Feature | nocloud-net | ISO Mode |
 |---------|-------------|----------|
-| Boot speed | Faster (no ISO generation) | Slower (genisoimage) |
+| Boot speed | Faster (no ISO generation) | Slower (cloud-localds) |
 | Portability | Works with any image | Requires CD-ROM drive |
 | Cleanup | Automatic | Manual |
 

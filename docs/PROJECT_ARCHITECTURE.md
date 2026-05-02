@@ -8,7 +8,12 @@ Three-layer architecture with strict import boundaries: **CLI → API → Core**
 mvmctl/
 ├── api/              # Public interface + ORCHESTRATION (imports multiple domains)
 ├── core/             # All business logic (isolated domains + shared infrastructure)
-└── cli/              # Frontend (Typer commands)
+├── cli/              # Frontend (Typer commands)
+├── services/         # Long-running subprocess services
+├── db/               # SQLite schema, migrations, ORM models
+├── assets/           # Bundled YAML configs
+├── models/           # Pure @dataclass objects
+└── utils/            # Shared helpers
 ```
 
 **Key Principle:** Domains are **business capabilities**, not CLI commands. A single CLI command (like `mvm vm create`) often orchestrates multiple domains.
@@ -43,6 +48,8 @@ src/mvmctl/
 │       ├── __init__.py
 │       ├── _vm_create_input.py             # VMCreateInput → VMCreateRequest → ResolvedVMCreateInput
 │       ├── _vm_input.py                    # VMInput → VMRequest → ResolvedVMInput
+│       ├── _vm_import_input.py
+│       ├── _vm_export_config.py
 │       ├── _network_create_input.py
 │       ├── _network_input.py
 │       ├── _image_input.py
@@ -54,7 +61,9 @@ src/mvmctl/
 │       ├── _binary_input.py
 │       ├── _binary_fetch_input.py
 │       ├── _ssh_input.py
-│       └── _vm_export_config.py
+│       ├── _config_input.py
+│       ├── _console_input.py
+│       └── _logs_input.py
 │
 ├── core/                                    # Isolated domain logic
 │   ├── vm/                                  # VM lifecycle
@@ -96,13 +105,17 @@ src/mvmctl/
 │   │   ├── _repository.py                   # HostRepository
 │   │   └── _helper.py                       # HostPrivilegeHelper
 │   ├── cache/                               # Cache management
-│   │   ├── _controller.py
 │   │   └── _service.py
 │   ├── config/                              # Configuration management
-│   │   ├── _controller.py
+│   │   ├── _constraints.py
+│   │   ├── _repository.py
 │   │   └── _service.py
 │   ├── console/                             # Console relay
-│   │   ├── _controller.py                   # ConsoleController
+│   │   ├── __init__.py
+│   │   └── _controller.py                   # ConsoleController
+│   ├── logs/                                # Log management
+│   │   ├── __init__.py
+│   │   ├── _controller.py
 │   │   └── _service.py
 │   ├── cloudinit/                           # Cloud-init provisioning
 │   │   ├── _manager.py                      # CloudInitManager
@@ -125,8 +138,12 @@ src/mvmctl/
 │   ├── kernel.py
 │   ├── key.py
 │   ├── host.py
-│   ├── binary.py
+│   ├── bin.py
 │   ├── cache.py
+│   ├── config.py
+│   ├── console.py
+│   ├── init.py
+│   ├── logs.py
 │   ├── ssh.py
 │   └── ...
 │
@@ -143,14 +160,28 @@ src/mvmctl/
 │   ├── cloudinit.py                         # CloudInitMode, CloudInitStatus
 │   └── bulk.py                              # BulkResult, BulkResultItem
 │
+├── services/                                # Long-running subprocess services
+│
+├── db/                                      # SQLite schema, migrations, ORM models
+│
+├── assets/                                  # Bundled YAML configs
+│
 └── utils/                                   # Shared helpers (pure, no domain knowledge)
-    ├── console.py
+    ├── __init__.py
+    ├── _disk.py
+    ├── _io.py
+    ├── _system.py
+    ├── _validators.py
+    ├── auditlog.py
     ├── cli.py
     ├── common.py
+    ├── crypto.py
+    ├── fs.py
+    ├── http.py
     ├── network.py
-    ├── process_signals.py
-    ├── full_hash.py
-    └── ...
+    ├── progress.py
+    ├── template.py
+    └── yaml.py
 ```
 
 ## Core Structure — Domain Files
@@ -346,7 +377,7 @@ class VMCreateInput:
 
 # 2. VMOperation.create() creates VMCreateRequest, which resolves
 class VMCreateRequest:
-    def __init__(self, *, vm_id: str, vm_dir: Path, inputs: VMCreateInput, db: Database | None = None):
+    def __init__(self, *, inputs: VMCreateInput, db: Database | None = None):
         self._inputs = inputs
         self._db = db or Database()
         # Sub-resolvers created from DB
@@ -383,10 +414,7 @@ class ResolvedVMCreateInput:
 # 1. CLI creates VMInput (filter criteria)
 @dataclass
 class VMInput:
-    id: list[str] = field(default_factory=list)
-    name: list[str] = field(default_factory=list)
-    guest_mac: list[str] = field(default_factory=list)
-    guest_ip: list[str] = field(default_factory=list)
+    identifiers: list[str] = field(default_factory=list)
     force: bool | None = None
 
 # 2. VMRequest resolves against DB
@@ -396,8 +424,7 @@ class VMRequest:
         self._vm_resolver = VMResolver(VMRepository(db), include=["image", "kernel", "network.leases"])
 
     def resolve(self) -> ResolvedVMInput:
-        identifiers = self._inputs.id + self._inputs.name + ...
-        result = self._vm_resolver.resolve_many(identifiers)
+        result = self._vm_resolver.resolve_many(self._inputs.identifiers)
         self._result = ResolvedVMInput(vms=result.items, force=...)
         self.ensure_validate()
         return self._result
@@ -875,7 +902,7 @@ Create a new domain folder when:
 
 ## Summary
 
-- **Domains ≠ CLI commands** — Domains are business capabilities (vm, network, image, etc.)
+- **Domains ≠ CLI commands** — Domains are business capabilities (vm, network, image, kernel, key, binary, host, config, console, logs, cache, cloudinit, ssh)
 - **3-layer architecture** — CLI → API → Core, strict import boundaries
 - **Orchestration lives in `api/`** — `api/*_operations.py` is the ONLY place that imports multiple domain modules
 - **Domain isolation** — Domains only import `core/_shared/`, never other domains

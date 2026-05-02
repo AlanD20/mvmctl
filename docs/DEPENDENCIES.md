@@ -36,16 +36,13 @@ These binaries are required for importing images, converting formats, and genera
 | `mkfs.ext4` | Image | Formatting extracted rootfs images | `e2fsprogs` | `e2fsprogs` |
 | `unsquashfs` | Image | Extracting rootfs from SquashFS images | `squashfs-tools` | `squashfs-tools` |
 | `tar` | Archive | Extracting rootfs from tarballs | `tar` | `tar` |
-| `mkisofs` | Cloud-Init | Creating `nocloud` seed ISOs | `genisoimage` | `cdrtools` |
-| `cloud-localds` | Cloud-Init | Helper for Cloud-Init seed generation | `cloud-image-utils` | `cloud-utils` |
+| `cloud-localds` | Cloud-Init | Creating `nocloud` seed ISOs | `cloud-image-utils` | `cloud-utils` |
 | `ssh` | Remote | Connecting to microVMs via SSH | `openssh-client` | `openssh` |
 | `ssh-keygen` | Remote | Generating SSH keypairs for microVMs | `openssh-client` | `openssh` |
 
-*Note: `mkisofs` and `genisoimage` are interchangeable; `mvmctl` will use whichever is available.*
-
 ## 3. libguestfs Dependencies (Optional)
 
-For cloud-init injection into disk images via direct injection mode (`--cloud-init-mode direct`), mvmctl uses libguestfs. This requires both system libraries and Python bindings.
+For cloud-init injection into disk images via injection mode (`--cloud-init-mode inject`), mvmctl uses libguestfs. This requires both system libraries and Python bindings.
 
 ### System Packages (Required for Runtime)
 
@@ -154,7 +151,7 @@ This section maps specific `mvm` commands to the external binaries they invoke.
 | :--- | :--- | :--- |
 | **`mvm host`** | `init` | `sudo`, `groupadd`, `usermod`, `visudo`, `sysctl`, `ip`, `iptables`, `iptables-save`, `lsmod`, `modprobe` |
 | | `reset` | `sudo`, `groupdel`, `sysctl`, `iptables-restore` |
-| **`mvm network`** | `create` | `ip`, `iptables`, `iptables-restore`, `sysctl` |
+| **`mvm network`** | `create` | `ip`, `iptables`, `sysctl` |
 | | `ls`, `inspect`, `rm`, `sync`, `set-default` | `ip`, `iptables` |
 | **`mvm bin`** | `fetch`, `ls`, `rm`, `default` | (Internal Python logic) |
 | **`mvm image`** | `import` | `qemu-img`, `sfdisk`, `parted`, `blkid`, `mount`, `umount`, `tar`, `truncate`, `mkfs.ext4`, `unsquashfs` |
@@ -164,10 +161,10 @@ This section maps specific `mvm` commands to the external binaries they invoke.
 | | `ls`, `rm`, `set-default` | (Internal Python logic) |
 | **`mvm key`** | `create` | `ssh-keygen` |
 | | `add`, `ls`, `rm` | (Internal Python logic) |
-| **`mvm vm`** | `create` | `firecracker`, `jailer`, `ip`, `iptables`, `mkisofs` (if cloud-init) |
+| **`mvm vm`** | `create` | `firecracker`, `jailer`, `ip`, `iptables`, `cloud-localds` (if cloud-init) |
 | | `ls`, `ps`, `inspect` | (Internal Python logic) |
-| | `start`, `stop`, `reboot` | `firecracker`, `ip`, `iptables`, `ssh-keygen` (cleanup) |
-| | `rm` | `firecracker`, `ip`, `iptables`, `ssh-keygen` (cleanup) |
+| | `start`, `stop`, `reboot` | `firecracker`, `ip`, `iptables` |
+| | `rm` | `firecracker`, `ip`, `iptables` |
 | **`mvm ssh`** | `ssh` | `ssh` |
 | **`mvm logs`** | _(invoked directly)_ | (Internal Python logic) |
 

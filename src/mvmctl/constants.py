@@ -345,11 +345,6 @@ def env_var(suffix: str) -> str:
     return f"{__getattr__('CLI_NAME').upper()}_{suffix}"
 
 
-def device_prefix() -> str:
-    """Return the network device name prefix derived from the CLI name."""
-    return str(__getattr__("CLI_NAME"))
-
-
 def __getattr__(name: str) -> Any:
     if name in _LAZY_CONSTANTS:
         return _LAZY_CONSTANTS[name]

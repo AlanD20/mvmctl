@@ -163,7 +163,7 @@ check_privileges("/usr/sbin/ip")  # Validates mvm group membership
 
 ## Network Security
 
-- **iptables chain**: `MVM-NOCLOUD-INPUT` for cloud-init HTTP server
+- **iptables chain**: `MVM-NOCLOUDNET-INPUT` for cloud-init HTTP server
 - **Rule comments**: `# mvm-nocloud:<vm_name>:<port>` for auditability
 - **Source-based**: Only VM's IP can reach its nocloud server
 - **Bridge naming**: `mvm-{network_name}` (e.g., `mvm-default`)
@@ -180,8 +180,8 @@ check_privileges("/usr/sbin/ip")  # Validates mvm group membership
 
 **Usage**:
 ```python
-from mvmctl.utils.audit import log_audit
-log_audit("vm_create", {"name": vm_name, "image": image_id})
+from mvmctl.utils.auditlog import AuditLog
+AuditLog.log("vm_create", {"name": vm_name}, {"image": image_id})
 ```
 
 ## Security Checklist
@@ -190,7 +190,7 @@ log_audit("vm_create", {"name": vm_name, "image": image_id})
 - [ ] Subprocess calls only in core/ (never cli/ or models/)
 - [ ] Privilege checks via `check_privileges()` in api/ layer
 - [ ] File paths use `get_cache_dir()` / `get_config_dir()` helpers
-- [ ] Network rules in `MVM-NOCLOUD-INPUT` chain only
+- [ ] Network rules in `MVM-NOCLOUDNET-INPUT` chain only
 - [ ] Per-VM firewall rules with source IP restriction
 - [ ] HTTP servers bind to bridge gateway (not 0.0.0.0)
 - [ ] Audit logging for sensitive operations
@@ -204,7 +204,7 @@ log_audit("vm_create", {"name": vm_name, "image": image_id})
 | Subprocess | List form, NO shell=True | core/ only |
 | Privilege checks | `check_privileges(binary_path)` | api/ layer |
 | File paths | `get_cache_dir()` / `get_config_dir()` | utils/fs.py |
-| Network rules | `MVM-NOCLOUD-INPUT` chain | core/network.py |
+| Network rules | `MVM-NOCLOUDNET-INPUT` chain | core/network/_service.py |
 | Audit logging | `log_audit(action, details)` | cli/ layer |
 | SUDO_USER | Resolve to invoking user | utils/fs.py |
 

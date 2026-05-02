@@ -70,7 +70,7 @@ Top-level sections map to `MVMConfig` dataclass fields:
 | `host.sbin_paths` | `ip`, `iptables`, `iptables_restore`, `iptables_save`, `sysctl` |
 | `host.privileged_binaries` | List of 6 paths requiring privileges |
 | `host.required_binaries` | `ip`, `iptables`, `qemu-img` — checked at host init |
-| `host.iso_binaries` | `mkisofs`, `genisoimage` — ISO creation tools |
+| `host.iso_binaries` | `cloud-localds` — ISO creation tools |
 | `host.system_files` | `sudoers_drop_in_template`, `iptables_rules_v4`, `iptables_chains` |
 | `http` | `download_chunk_size` (1MB), `max_retries` (3), `retry_delay` (1.0), `backoff` (2.0) |
 | `kernel.defaults` | `version` (6.19.9), `arch` (x86_64) |
