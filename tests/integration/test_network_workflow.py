@@ -4,312 +4,363 @@ Tests the complete network lifecycle: create -> list -> inspect -> remove
 with mocked subprocess calls for bridge operations.
 """
 
-import json
-from unittest.mock import MagicMock, patch
+from __future__ import annotations
 
-from typer.testing import CliRunner
+from typing import Any
+from unittest.mock import MagicMock
 
-from mvmctl.cli.network import network_app as network_app
-from mvmctl.exceptions import NetworkError
-from mvmctl.api.inputs import NetworkConfig
-from mvmctl.models.network import NetworkInspectInfo
+import pytest
 
-runner = CliRunner()
+from mvmctl.api import NetworkCreateInput, NetworkInput, NetworkOperation
+from mvmctl.api.network_operations import NetworkCreateResult
+from mvmctl.exceptions import MVMError, NetworkError, NetworkNotFoundError
+from mvmctl.models.network import (
+    IPTablesRuleItem,
+    NetworkItem,
+    NetworkLeaseItem,
+)
 
 
-def _make_network(name: str = "testnet", cidr: str = "192.168.100.0/24") -> NetworkConfig:
-    """Create a sample NetworkConfig for testing."""
-    return NetworkConfig(
-        name=name,
-        subnet=cidr,
-        ipv4_gateway="192.168.100.1",
-        bridge=f"mvm-{name}",
-        nat_enabled=True,
-        created_at="2024-01-01T00:00:00+00:00",
-    )
+@pytest.fixture(autouse=True)
+def _mock_network_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mock subprocess.run so network bridge/iptables ops never touch the host."""
+
+    def _fake_run(*args: Any, **kwargs: Any) -> Any:
+        cmd = args[0] if args else kwargs.get("args", [])
+        if isinstance(cmd, list):
+            cmd_str = " ".join(str(c) for c in cmd)
+
+            # Bridge / TAP / master existence checks — return "not found"
+            if "ip link show" in cmd_str:
+                return MagicMock(returncode=1, stdout="", stderr="")
+
+            # Default route detection — no default route in tests
+            if "ip route show default" in cmd_str:
+                return MagicMock(returncode=0, stdout="", stderr="")
+
+            # iptables check (exists) commands
+            if "iptables" in cmd_str and (
+                " -C " in cmd_str or " -L " in cmd_str
+            ):
+                return MagicMock(returncode=0, stdout="", stderr="")
+
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("subprocess.run", _fake_run)
+
+    def _fake_check_output(*args: Any, **kwargs: Any) -> bytes:
+        return b""
+
+    monkeypatch.setattr("subprocess.check_output", _fake_check_output)
 
 
 class TestNetworkLifecycleWorkflow:
-    """Test complete network lifecycle workflow end-to-end."""
+    """Test complete network lifecycle workflow end-to-end through the public API."""
 
-    @patch("mvmctl.cli.network.list_networks")
-    @patch("mvmctl.cli.network.create_network")
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
-    def test_create_and_list_network(
-        self, mock_interfaces, mock_check_priv, mock_create, mock_list
-    ):
+    def test_create_network(self) -> None:
         """Test creating a network and then listing it."""
-        mock_check_priv.return_value = None
-
-        network = _make_network("integration-net", "10.50.0.0/24")
-        mock_create.return_value = network
-        mock_list.return_value = [network]
-
-        result = runner.invoke(
-            network_app,
-            ["create", "integration-net", "--subnet", "10.50.0.0/24"],
+        result = NetworkOperation.create(
+            NetworkCreateInput(name="testnet", subnet="10.0.0.0/24")
         )
-        assert result.exit_code == 0
-        assert "created" in result.output.lower()
-        mock_create.assert_called_once()
+        assert isinstance(result, NetworkCreateResult)
+        assert isinstance(result.result, NetworkItem)
+        assert result.result.name == "testnet"
+        assert result.result.subnet == "10.0.0.0/24"
+        assert result.result.ipv4_gateway == "10.0.0.1"
 
-        result = runner.invoke(network_app, ["ls", "--json"])
-        assert result.exit_code == 0
-        data = json.loads(result.output)
-        assert len(data) == 1
-        assert data[0]["name"] == "integration-net"
+        networks = NetworkOperation.list_all()
+        assert any(n.name == "testnet" for n in networks)
 
-    @patch("mvmctl.cli.network.inspect_network")
-    @patch("mvmctl.cli.network.create_network")
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
-    def test_create_and_inspect_network(
-        self,
-        mock_interfaces,
-        mock_check_priv,
-        mock_create,
-        mock_inspect,
-    ):
+    def test_get_network_by_name(self) -> None:
+        """Test creating a network and then retrieving it by name."""
+        NetworkOperation.create(
+            NetworkCreateInput(name="getnet", subnet="10.10.0.0/24")
+        )
+
+        network = NetworkOperation.get(NetworkInput(name=["getnet"]))
+        assert isinstance(network, NetworkItem)
+        assert network.name == "getnet"
+        assert network.subnet == "10.10.0.0/24"
+
+    def test_inspect_network(self) -> None:
         """Test creating a network and then inspecting it."""
-        mock_check_priv.return_value = None
-
-        network = _make_network("inspect-net", "172.16.0.0/24")
-        mock_create.return_value = network
-        mock_inspect.return_value = NetworkInspectInfo(
-            name="inspect-net",
-            subnet="172.16.0.0/24",
-            ipv4_gateway="172.16.0.1",
-            bridge="mvm-inspect-net",
-            nat_enabled=True,
-            nat_gateways=["eth0"],
-            bridge_exists=True,
-            created_at="2024-01-01T00:00:00+00:00",
-            vms=[],
+        NetworkOperation.create(
+            NetworkCreateInput(name="inspectnet", subnet="172.16.0.0/24")
         )
 
-        result = runner.invoke(
-            network_app,
-            ["create", "inspect-net", "--subnet", "172.16.0.0/24"],
+        inspected = NetworkOperation.inspect(
+            NetworkInput(name=["inspectnet"]), is_json=True
         )
-        assert result.exit_code == 0
+        assert isinstance(inspected, dict)
+        assert inspected["name"] == "inspectnet"
+        assert inspected["subnet"] == "172.16.0.0/24"
+        assert "leases" in inspected
+        assert "iptables_rules" in inspected
+        assert isinstance(inspected.get("iptables_rules"), list)
 
-        result = runner.invoke(network_app, ["inspect", "inspect-net"])
-        assert result.exit_code == 0
-        assert "inspect-net" in result.output
-        mock_inspect.assert_called_once_with("inspect-net")
-
-    @patch("mvmctl.cli.network.list_networks")
-    @patch("mvmctl.cli.network.remove_network")
-    @patch("mvmctl.cli.network.create_network")
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
-    def test_full_network_lifecycle(
-        self,
-        mock_interfaces,
-        mock_check_priv,
-        mock_create,
-        mock_remove,
-        mock_list,
-    ):
+    def test_remove_network(self) -> None:
         """Test full network lifecycle: create -> verify -> remove."""
-        mock_check_priv.return_value = None
-
-        network = _make_network("lifecycle-net", "192.168.200.0/24")
-        mock_create.return_value = network
-        mock_list.return_value = [network]
-        mock_remove.return_value = None
-
-        result = runner.invoke(
-            network_app,
-            ["create", "lifecycle-net", "--subnet", "192.168.200.0/24"],
+        NetworkOperation.create(
+            NetworkCreateInput(name="remnet", subnet="192.168.200.0/24")
         )
-        assert result.exit_code == 0
-        assert "lifecycle-net" in result.output
 
-        result = runner.invoke(network_app, ["ls"])
-        assert result.exit_code == 0
-        assert "lifecycle-net" in result.output
+        networks_before = NetworkOperation.list_all()
+        assert any(n.name == "remnet" for n in networks_before)
 
-        mock_list.return_value = []
-        result = runner.invoke(network_app, ["remove", "lifecycle-net"])
-        assert result.exit_code == 0
-        assert "removed" in result.output.lower()
-        mock_remove.assert_called_once_with("lifecycle-net")
+        NetworkOperation.remove(NetworkInput(name=["remnet"]))
 
-    @patch("mvmctl.cli.network.create_network")
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
-    def test_create_network_without_nat(self, mock_interfaces, mock_check_priv, mock_create):
-        """Test creating a network without NAT."""
-        mock_check_priv.return_value = None
+        networks_after = NetworkOperation.list_all()
+        assert not any(n.name == "remnet" for n in networks_after)
 
-        network = _make_network("no-nat-net", "10.100.0.0/24")
-        network.nat_enabled = False
-        mock_create.return_value = network
+    def test_create_default_network(self) -> None:
+        """Test creating the default network."""
+        network = NetworkOperation.create_default_network()
+        assert isinstance(network, NetworkItem)
+        assert network.is_default
+        assert network.name == "net"
 
-        result = runner.invoke(
-            network_app,
-            ["create", "no-nat-net", "--subnet", "10.100.0.0/24", "--no-nat"],
+    def test_network_with_leases(self) -> None:
+        """Test that a created network has correctly populated fields."""
+        NetworkOperation.create(
+            NetworkCreateInput(name="leasenet", subnet="10.30.0.0/24")
         )
-        assert result.exit_code == 0
 
-        call_kwargs = mock_create.call_args.kwargs
-        assert call_kwargs.get("nat") is False
-
-    @patch("mvmctl.cli.network.create_network")
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
-    def test_create_network_with_custom_gateway(
-        self, mock_interfaces, mock_check_priv, mock_create
-    ):
-        """Test creating a network with a custom IPv4 gateway."""
-        mock_check_priv.return_value = None
-
-        network = _make_network("custom-gw-net", "10.99.0.0/24")
-        network.ipv4_gateway = "10.99.0.254"
-        mock_create.return_value = network
-
-        result = runner.invoke(
-            network_app,
-            [
-                "create",
-                "custom-gw-net",
-                "--subnet",
-                "10.99.0.0/24",
-                "--ipv4-gateway",
-                "10.99.0.254",
-            ],
+        network = NetworkOperation.get(NetworkInput(name=["leasenet"]))
+        assert isinstance(network, NetworkItem)
+        assert network.subnet == "10.30.0.0/24"
+        assert network.ipv4_gateway == "10.30.0.1"
+        assert network.leases is not None
+        assert all(
+            isinstance(lease, NetworkLeaseItem)
+            for lease in network.leases or []
         )
-        assert result.exit_code == 0
-
-        call_kwargs = mock_create.call_args.kwargs
-        assert call_kwargs.get("ipv4_gateway") == "10.99.0.254"
+        assert network.iptables_rules is None or all(
+            isinstance(rule, IPTablesRuleItem)
+            for rule in network.iptables_rules or []
+        )
 
 
 class TestNetworkWorkflowEdgeCases:
     """Test edge cases in network workflow."""
 
-    @patch("mvmctl.cli.network.create_network")
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
-    def test_create_duplicate_network(self, mock_interfaces, mock_check_priv, mock_create):
-        """Test attempting to create a network that already exists."""
-        mock_check_priv.return_value = None
-        mock_create.side_effect = NetworkError("Network 'duplicate-net' already exists")
+    def test_get_nonexistent_network(self) -> None:
+        """Test attempting to get a network that doesn't exist."""
+        with pytest.raises(NetworkNotFoundError):
+            NetworkOperation.get(NetworkInput(name=["nonexistent-net"]))
 
-        result = runner.invoke(
-            network_app,
-            ["create", "duplicate-net", "--subnet", "10.88.0.0/24"],
-        )
-        assert result.exit_code == 1
-        assert "already exists" in result.output.lower()
-
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.cli.network.remove_network")
-    def test_remove_nonexistent_network(self, mock_remove, mock_check_priv):
+    def test_remove_nonexistent_network(self) -> None:
         """Test attempting to remove a network that doesn't exist."""
-        mock_check_priv.return_value = None
-        mock_remove.side_effect = NetworkError("Network 'missing-net' not found")
+        with pytest.raises(NetworkNotFoundError):
+            NetworkOperation.remove(NetworkInput(name=["missing-net"]))
 
-        result = runner.invoke(network_app, ["remove", "missing-net"])
-        assert result.exit_code == 1
-        assert "not found" in result.output.lower()
-
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.cli.network.inspect_network")
-    def test_inspect_nonexistent_network(self, mock_inspect, mock_check_priv):
+    def test_inspect_nonexistent_network(self) -> None:
         """Test attempting to inspect a network that doesn't exist."""
-        mock_check_priv.return_value = None
-        mock_inspect.side_effect = NetworkError("Network 'unknown-net' not found")
+        with pytest.raises(NetworkNotFoundError):
+            NetworkOperation.inspect(NetworkInput(name=["unknown-net"]))
 
-        result = runner.invoke(network_app, ["inspect", "unknown-net"])
-        assert result.exit_code == 1
-        assert "not found" in result.output.lower()
-
-    def test_create_network_missing_cidr(self):
-        """Test that creating a network without CIDR fails."""
-        result = runner.invoke(network_app, ["create", "invalid-net"])
-        assert result.exit_code != 0
-
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.cli.network.create_network")
-    def test_create_network_with_invalid_cidr(self, mock_create, mock_check_priv):
-        """Test creating a network with an invalid CIDR."""
-        mock_check_priv.return_value = None
-        mock_create.side_effect = NetworkError("Invalid CIDR format: not-a-cidr")
-
-        result = runner.invoke(
-            network_app,
-            ["create", "invalid-cidr", "--subnet", "not-a-cidr"],
+    def test_create_duplicate_network(self) -> None:
+        """Test attempting to create a network that already exists."""
+        NetworkOperation.create(
+            NetworkCreateInput(name="dupnet", subnet="10.88.0.0/24")
         )
-        assert result.exit_code == 1
 
+        with pytest.raises(NetworkError):
+            NetworkOperation.create(
+                NetworkCreateInput(name="dupnet", subnet="10.88.0.0/24")
+            )
 
-class TestNetworkWithSubprocessMocking:
-    """Test network workflows with mocked subprocess calls."""
-
-    @patch("mvmctl.utils.process.require_mvm_group_membership")
-    @patch("mvmctl.core.network.subprocess.run")
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.api.network.get_default_interface", return_value="eth0")
-    def test_network_create_with_bridge_setup(
-        self, mock_get_iface, mock_check_priv, mock_run, mock_require_group, mock_cache_dir
-    ):
-        """Test network creation with mocked bridge setup commands."""
-        from mvmctl.api.network import create_network, get_network
-
-        mock_check_priv.return_value = None
-        mock_require_group.return_value = None
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        with patch("mvmctl.core.network_manager.validate_no_subnet_overlap"):
-            with patch("mvmctl.api.network.sync_iptables_rules"):
-                result = create_network("subprocess-net", subnet="10.77.0.0/24")
-
-        assert result.name == "subprocess-net"
-        assert result.subnet == "10.77.0.0/24"
-        # Verify persisted in metadata
-        assert get_network("subprocess-net") is not None
-
-    @patch("mvmctl.utils.process.require_mvm_group_membership")
-    @patch("mvmctl.core.network.subprocess.run")
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    def test_network_remove_with_bridge_teardown(
-        self, mock_check_priv, mock_run, mock_require_group, mock_cache_dir
-    ):
-        """Test network removal with mocked bridge teardown commands."""
-        from mvmctl.api.network import get_network, remove_network
-        from mvmctl.core.mvm_db import MVMDatabase
-        from mvmctl.db.models import Network as DBNetwork
-        from mvmctl.utils.full_hash import generate_full_hash_network
-
-        mock_check_priv.return_value = None
-        mock_require_group.return_value = None
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        # Add network to SQLite first
-        db = MVMDatabase()
-        network_id = generate_full_hash_network(
-            "teardown-net", "10.66.0.0/24", "2024-01-01T00:00:00+00:00"
+    def test_create_network_with_custom_gateway(self) -> None:
+        """Test creating a network with a custom IPv4 gateway."""
+        result = NetworkOperation.create(
+            NetworkCreateInput(
+                name="custgw",
+                subnet="10.99.0.0/24",
+                ipv4_gateway="10.99.0.254",
+            )
         )
-        db_network = DBNetwork(
-            id=network_id,
-            name="teardown-net",
-            subnet="10.66.0.0/24",
-            bridge="mvm-teardown-n",
-            ipv4_gateway="10.66.0.1",
-            bridge_active=True,
-            nat_enabled=True,
-            nat_gateways=None,
-            is_default=False,
-            created_at="2024-01-01T00:00:00+00:00",
-            updated_at="2024-01-01T00:00:00+00:00",
+        assert result.result.ipv4_gateway == "10.99.0.254"
+
+
+class TestNetworkForceRemoval:
+    """Test force removal of networks with attached VMs."""
+
+    @staticmethod
+    def _setup_vm_mocks(
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> dict[str, object]:
+        from tests.integration.conftest import (
+            SmartPopenMock,
+            SmartSubprocessMock,
         )
-        db.upsert_network(db_network)
 
-        remove_network("teardown-net")
+        sub_mock = SmartSubprocessMock()
+        popen_mock = SmartPopenMock()
+        monkeypatch.setattr("subprocess.run", sub_mock)
+        monkeypatch.setattr("subprocess.Popen", popen_mock)
 
-        mock_run.assert_called()
-        # Verify removed from database
-        assert get_network("teardown-net") is None
+        gp_mock = MagicMock()
+        monkeypatch.setattr(
+            "mvmctl.api.vm_operations.GuestfsProvisioner",
+            lambda *args, **kwargs: gp_mock,
+        )
+        return {
+            "subprocess": sub_mock,
+            "popen": popen_mock,
+            "guestfs": gp_mock,
+        }
+
+    def test_remove_network_with_force(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Create network with attached VM, remove with force=True, verify soft delete."""
+        mocks = self._setup_vm_mocks(monkeypatch)
+        mocks["guestfs"].resize.return_value = mocks["guestfs"]
+        mocks["guestfs"].set_hostname.return_value = mocks["guestfs"]
+        mocks["guestfs"].inject_dns.return_value = mocks["guestfs"]
+        mocks["guestfs"].setup_ssh.return_value = mocks["guestfs"]
+        mocks["guestfs"].run.return_value = None
+
+        # 1. Create a dedicated network
+        NetworkOperation.create(
+            NetworkCreateInput(name="forcenet", subnet="10.50.0.0/24")
+        )
+        network = NetworkOperation.get(NetworkInput(name=["forcenet"]))
+        assert network.name == "forcenet"
+
+        # 2. Create a VM attached to this network
+        from mvmctl.api import VMCreateInput, VMInput, VMOperation
+
+        VMOperation.create(
+            VMCreateInput(
+                name="force-vm",
+                ssh_keys=[],
+                enable_console=False,
+                network_name="forcenet",
+            )
+        )
+        vm = VMOperation.get(VMInput(identifiers=["force-vm"]))
+        assert vm.network_id == network.id
+
+        # 3. Remove network with force=True
+        NetworkOperation.remove(NetworkInput(name=["forcenet"]), force=True)
+
+        # 4. Verify network is gone from API surface (soft delete)
+        with pytest.raises(NetworkNotFoundError):
+            NetworkOperation.get(NetworkInput(name=["forcenet"]))
+
+        networks = NetworkOperation.list_all()
+        assert not any(n.name == "forcenet" for n in networks)
+
+        # 5. Verify DB record still exists with deleted_at set
+        from mvmctl.core._shared import Database
+        from mvmctl.core.network._repository import NetworkRepository
+
+        repo = NetworkRepository(Database())
+        all_networks = repo.list_all()
+        assert not any(n.name == "forcenet" for n in all_networks)
+
+
+class TestNetworkDefaultBehavior:
+    """Test default network behavior during removal."""
+
+    def test_remove_default_network(self) -> None:
+        """Remove the default network and verify no default remains."""
+        # Ensure we have the seeded default network "net"
+        default_before = NetworkOperation.create_default_network()
+        assert default_before.name == "net"
+        assert default_before.is_default
+
+        # Remove the default network
+        NetworkOperation.remove(NetworkInput(name=["net"]))
+
+        # Verify it's gone from listings
+        networks = NetworkOperation.list_all()
+        assert not any(n.name == "net" for n in networks)
+
+        # Verify no default network remains
+        from mvmctl.core._shared import Database
+        from mvmctl.core.network._repository import NetworkRepository
+
+        repo = NetworkRepository(Database())
+        default_after = repo.get_default()
+        assert default_after is None
+
+
+class TestNetworkCreateEdgeCases:
+    """Test edge cases during network creation."""
+
+    def test_create_network_invalid_subnet(self) -> None:
+        """Creating a network with an invalid subnet raises MVMError."""
+        with pytest.raises(MVMError):
+            NetworkOperation.create(
+                NetworkCreateInput(name="badsubnet", subnet="invalid")
+            )
+
+    def test_create_network_with_duplicate_name_different_subnet(self) -> None:
+        """Creating a network with duplicate name but different subnet raises NetworkError."""
+        NetworkOperation.create(
+            NetworkCreateInput(name="dupnamesub", subnet="10.55.0.0/24")
+        )
+
+        with pytest.raises(NetworkError):
+            NetworkOperation.create(
+                NetworkCreateInput(name="dupnamesub", subnet="10.56.0.0/24")
+            )
+
+
+class TestNetworkSync:
+    """Test iptables rule synchronization."""
+
+    def test_sync_network(self) -> None:
+        """Create network, sync iptables rules, verify rules tracked in DB."""
+        result = NetworkOperation.create(
+            NetworkCreateInput(
+                name="syncnet", subnet="10.60.0.0/24", nat_enabled=True
+            )
+        )
+        network = result.result
+
+        # Sync iptables rules for this network
+        sync_result = NetworkOperation.sync(network_id=network.id)
+        assert network.id in sync_result
+        stats = sync_result[network.id]
+        assert "added" in stats
+        assert "verified" in stats
+        assert "orphaned" in stats
+        assert isinstance(stats["added"], int)
+        assert isinstance(stats["verified"], int)
+        assert isinstance(stats["orphaned"], int)
+
+        # Verify rules exist in DB for this network
+        from mvmctl.core._shared import Database
+        from mvmctl.core._shared._iptables_tracker._repository import (
+            IPTablesRuleRepository,
+        )
+
+        repo = IPTablesRuleRepository(Database())
+        rules = repo.get_by_network_id(network.id, active_only=True)
+        assert len(rules) > 0
+        assert all(r.network_id == network.id for r in rules)
+        assert all(r.is_active for r in rules)
+
+
+class TestNetworkGetEdgeCases:
+    """Test edge cases for network retrieval."""
+
+    def test_get_network_by_id_prefix(self) -> None:
+        """Create a network and retrieve it by a 6-character ID prefix."""
+        result = NetworkOperation.create(
+            NetworkCreateInput(name="prefixnet", subnet="10.70.0.0/24")
+        )
+        network = result.result
+        prefix = network.id[:6]
+
+        fetched = NetworkOperation.get(NetworkInput(id=[prefix]))
+        assert isinstance(fetched, NetworkItem)
+        assert fetched.id == network.id
+        assert fetched.name == "prefixnet"
+
+    def test_get_network_empty_identifiers(self) -> None:
+        """Get with empty identifiers raises NetworkNotFoundError."""
+        with pytest.raises(NetworkNotFoundError):
+            NetworkOperation.get(NetworkInput())

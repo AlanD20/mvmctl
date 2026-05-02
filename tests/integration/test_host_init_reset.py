@@ -1,322 +1,290 @@
 """Integration tests for host init/reset roundtrip workflow.
 
 Tests host initialization, state management, and reset with mocked system calls.
+All tests exercise the real public API (HostOperation) and mock only external
+system dependencies (subprocess, os, pathlib, grp, pwd, shutil).
 """
 
-import json
+from __future__ import annotations
+
+import os
+import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
-from typer.testing import CliRunner
 
-from mvmctl.cli.host import host_app as host_app
-from mvmctl.models.host import HostState, HostStateChange
-from mvmctl.exceptions import HostError
+from mvmctl.api import HostOperation
+from mvmctl.models.host import HostStateChangeItem, HostStateItem
 
-runner = CliRunner()
+
+class _MockPwd:
+    pw_name = "testuser"
+    pw_gid = 1000
+
+
+class _MockGrp:
+    def __init__(self) -> None:
+        self._groups: dict[str, Any] = {}
+
+    def getgrnam(self, name: str) -> Any:
+        if name not in self._groups:
+            raise KeyError(name)
+        return self._groups[name]
+
+    def create(self, name: str) -> None:
+        self._groups[name] = MagicMock(gr_mem=[], gr_gid=1001)
+
+    def add_user(self, name: str, username: str) -> None:
+        if name in self._groups:
+            self._groups[name].gr_mem.append(username)
+
+    def delete(self, name: str) -> None:
+        self._groups.pop(name, None)
+
+
+class _MockSubprocessRun:
+    """Stateful subprocess.run mock that returns realistic responses."""
+
+    def __call__(
+        self, cmd: list[str] | str, **kwargs: Any
+    ) -> subprocess.CompletedProcess[str]:
+        if not isinstance(cmd, list):
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr=""
+            )
+
+        cmd_str = " ".join(str(c) for c in cmd)
+
+        # sysctl read ip_forward status
+        if "sysctl" in cmd and "-n" in cmd:
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="0", stderr=""
+            )
+
+        # lsmod — no modules loaded
+        if "lsmod" in cmd:
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr=""
+            )
+
+        # modprobe --dry-run kvm_intel succeeds, kvm_amd fails
+        if "modprobe" in cmd and "--dry-run" in cmd:
+            if "kvm_intel" in cmd_str:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="", stderr=""
+                )
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=1, stdout="", stderr=""
+            )
+
+        # iptables-save returns empty ruleset
+        if "iptables-save" in cmd:
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr=""
+            )
+
+        # ip -o link show type tuntap / bridge -> empty lists
+        if "ip" in cmd and "-o" in cmd:
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr=""
+            )
+
+        # ip link show <specific iface> -> not found (for bridge_exists / tap_exists)
+        if "ip" in cmd and "link" in cmd and "show" in cmd and len(cmd) >= 4:
+            last = str(cmd[-1])
+            if last not in ("type", "tuntap", "bridge", "master"):
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=1, stdout="", stderr=""
+                )
+
+        # ip route show default
+        if "ip" in cmd and "route" in cmd and "default" in cmd:
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout="default via 192.168.1.1 dev eth0",
+                stderr="",
+            )
+
+        # iptables check chain / rule -> not found so creation proceeds
+        if "iptables" in cmd and ("-C" in cmd or ("-L" in cmd and "-n" in cmd)):
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=1, stdout="", stderr=""
+            )
+
+        # iptables --version (nf_tables backend)
+        if "iptables" in cmd and "--version" in cmd:
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout="",
+                stderr="iptables v1.8.7 (nf_tables)",
+            )
+
+        # visudo validation
+        if "visudo" in cmd:
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr=""
+            )
+
+        # Default: success for groupadd, usermod, sysctl -w, modprobe, ip -batch, etc.
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=0, stdout="", stderr=""
+        )
+
+
+def _mock_path_exists(self: Path) -> bool:
+    """Return True for KVM device and privileged binaries; delegate otherwise."""
+    privileged = {
+        "/dev/kvm",
+        "/usr/sbin/ip",
+        "/usr/sbin/iptables",
+        "/usr/sbin/iptables-save",
+        "/usr/sbin/sysctl",
+        "/usr/sbin/modprobe",
+    }
+    if str(self) in privileged:
+        return True
+    return os.path.exists(str(self))
 
 
 @pytest.fixture(autouse=True)
-def _mock_default_network_setup(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep host integration tests isolated from privileged network setup."""
-    monkeypatch.setattr("mvmctl.cli.host.restore_networks", lambda: [])
-    monkeypatch.setattr("mvmctl.cli.host.ensure_default_network", lambda: None)
+def _mock_host_system_deps(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Mock all external system dependencies so the real API can run unmocked."""
+    # --- Identity mocks ---
+    monkeypatch.setattr("os.getuid", lambda: 0)
+    monkeypatch.setattr("os.getgid", lambda: 0)
+    monkeypatch.setattr("os.getegid", lambda: 0)
+    monkeypatch.setattr("os.getgroups", lambda: [0, 1000])
+    monkeypatch.setattr("os.access", lambda _path, _mode: True)
 
+    # --- User / group mocks ---
+    mock_pwd = _MockPwd()
+    monkeypatch.setattr("pwd.getpwuid", lambda _uid: mock_pwd)
 
-def _make_host_state(changes: list | None = None) -> HostState:
-    return HostState(init_timestamp="2024-01-01T00:00:00+00:00", changes=changes or [])
+    mock_grp_state = _MockGrp()
+    monkeypatch.setattr("grp.getgrnam", mock_grp_state.getgrnam)
 
-
-def _host_change(
-    setting: str, original: str | None, applied: str, mechanism: str
-) -> HostStateChange:
-    return HostStateChange(
-        setting=setting,
-        original_value=original,
-        applied_value=applied,
-        mechanism=mechanism,
+    # --- Binary lookup mock ---
+    monkeypatch.setattr(
+        "shutil.which",
+        lambda cmd: f"/usr/bin/{cmd}" if cmd else None,
     )
+
+    # --- Path.exists mock ---
+    monkeypatch.setattr(Path, "exists", _mock_path_exists)
+
+    # --- Subprocess mocks ---
+    mock_run = _MockSubprocessRun()
+    monkeypatch.setattr("subprocess.run", mock_run)
+    monkeypatch.setattr(
+        "subprocess.check_output",
+        lambda cmd, **kwargs: b"",
+    )
+
+    # --- Redirect host-state file paths into tmp_path ---
+    # NOTE: These override the actual constants used by the host service.
+    # The root conftest patches non-existent modules (host_setup, host_state)
+    # which silently no-op. We patch the real modules here.
+    monkeypatch.setattr(
+        "mvmctl.api.host_operations.SUDOERS_DROP_IN_PATH",
+        str(tmp_path / "sudoers.d" / "mvmctl"),
+    )
+    monkeypatch.setattr(
+        "mvmctl.core.host._service.SYSCTL_CONF",
+        tmp_path / "sysctl.d" / "mvmctl.conf",
+    )
+    monkeypatch.setattr(
+        "mvmctl.core.host._service.IPTABLES_RULES_V4",
+        str(tmp_path / "iptables" / "rules.v4"),
+    )
+
+    # Ensure directories exist so file writes succeed
+    (tmp_path / "sudoers.d").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "sysctl.d").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "iptables").mkdir(parents=True, exist_ok=True)
+
+    # Ensure DB schema is present
+    from mvmctl.core._shared import Database
+
+    Database().migrate()
 
 
 class TestHostInitResetWorkflow:
-    """Test host init/reset roundtrip workflow."""
+    """Test host init/reset roundtrip workflow through the public API."""
 
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.cli.host.init_host")
-    @patch("mvmctl.cli.host.get_host_state")
-    def test_init_and_check_state(self, mock_get_state, mock_init, mock_check_priv):
-        """Test host init and verifying state afterwards."""
-        mock_check_priv.return_value = None
+    def test_host_init(self, tmp_path: Path) -> None:
+        """HostOperation.init returns HostStateChangeItem list and marks initialized."""
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
 
-        changes = [
-            _host_change("group:mvm", None, "mvm", "groupadd"),
-            _host_change("net.ipv4.ip_forward", "0", "1", "sysctl"),
-        ]
-        mock_init.return_value = changes
-        mock_get_state.return_value = _make_host_state(changes)
+        changes = HostOperation.init(cache_dir=cache_dir)
 
-        result = runner.invoke(host_app, ["init"])
-        assert result.exit_code == 0
-        assert "initialized" in result.output.lower() or len(changes) > 0
-        mock_init.assert_called_once()
+        assert isinstance(changes, list)
+        assert all(isinstance(c, HostStateChangeItem) for c in changes)
+        # At minimum we expect group, user, sysctl, iptables changes
+        assert len(changes) > 0
 
-        result = runner.invoke(host_app, ["ls"])
-        assert result.exit_code == 0
+        state = HostOperation.get_state()
+        assert state is not None
+        assert isinstance(state, HostStateItem)
+        assert state.initialized
 
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.cli.host.init_host")
-    @patch("mvmctl.cli.host.reset_host")
-    @patch("mvmctl.cli.host.get_host_state")
-    def test_init_reset_roundtrip(self, mock_get_state, mock_reset, mock_init, mock_check_priv):
-        """Test full init -> reset roundtrip."""
-        mock_check_priv.return_value = None
+    def test_host_get_state(self, tmp_path: Path) -> None:
+        """After init, get_state returns HostStateItem with correct fields."""
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
 
-        init_changes = [
-            _host_change("group:mvm", None, "mvm", "groupadd"),
-            _host_change("net.ipv4.ip_forward", "0", "1", "sysctl"),
-        ]
-        mock_init.return_value = init_changes
-        mock_reset.return_value = []
+        HostOperation.init(cache_dir=cache_dir)
 
-        mock_get_state.side_effect = [
-            _make_host_state(init_changes),
-            _make_host_state([]),
-        ]
+        state = HostOperation.get_state()
+        assert state is not None
+        assert isinstance(state, HostStateItem)
+        assert state.initialized
+        assert state.id == 1
+        assert isinstance(state.mvm_group_created, int)
+        assert isinstance(state.sudoers_configured, int)
+        assert isinstance(state.default_network_created, int)
+        assert isinstance(state.initialized_at, str)
+        assert isinstance(state.updated_at, str)
 
-        result = runner.invoke(host_app, ["init"])
-        assert result.exit_code == 0
-        mock_init.assert_called_once()
+    def test_host_check_kvm_access(self) -> None:
+        """HostOperation.check_kvm_access returns a boolean."""
+        result = HostOperation.check_kvm_access()
+        assert isinstance(result, bool)
 
-        result = runner.invoke(host_app, ["reset"], input="y\n")
-        assert result.exit_code == 0
-        mock_reset.assert_called_once()
+    def test_host_check_required_binaries(self) -> None:
+        """HostOperation.check_required_binaries returns a list of strings."""
+        missing = HostOperation.check_required_binaries()
+        assert isinstance(missing, list)
+        assert all(isinstance(b, str) for b in missing)
 
-    @patch("mvmctl.cli.host.clean_host")
-    def test_clean_host(self, mock_clean):
-        """Test host clean operation."""
-        mock_clean.return_value = []
+    def test_host_clean(self, tmp_path: Path) -> None:
+        """After init, clean returns a list of summary strings."""
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
 
-        result = runner.invoke(host_app, ["clean"], input="y\n")
-        assert result.exit_code == 0
-        mock_clean.assert_called_once()
+        HostOperation.init(cache_dir=cache_dir)
+        summary = HostOperation.clean(cache_dir=cache_dir)
 
-    @patch("mvmctl.cli.host.init_host")
-    @patch("mvmctl.cli.host.clean_host")
-    def test_init_clean_workflow(self, mock_clean, mock_init):
-        """Test init followed by clean."""
-        changes = [_host_change("group:mvm", None, "mvm", "groupadd")]
-        mock_init.return_value = changes
-        mock_clean.return_value = []
+        assert isinstance(summary, list)
+        assert all(isinstance(s, str) for s in summary)
 
-        result = runner.invoke(host_app, ["init"])
-        assert result.exit_code == 0
+    def test_host_reset(self, tmp_path: Path) -> None:
+        """After init, reset returns a list of summary strings and clears state."""
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
 
-        result = runner.invoke(host_app, ["clean"], input="y\n")
-        assert result.exit_code == 0
-        mock_clean.assert_called_once()
+        HostOperation.init(cache_dir=cache_dir)
+        summary = HostOperation.reset(cache_dir=cache_dir)
 
+        assert isinstance(summary, list)
+        assert all(isinstance(s, str) for s in summary)
 
-class TestHostWithSubprocessMocking:
-    """Test host workflows with mocked subprocess calls."""
-
-    @patch("mvmctl.core.host_setup.subprocess.run")
-    @patch("mvmctl.core.host_setup.Path.exists")
-    @patch("mvmctl.core.host_setup.os.access")
-    @patch("mvmctl.core.host_privilege._get_current_user")
-    @patch("mvmctl.core.host_privilege._group_exists")
-    @patch("mvmctl.core.host_privilege._user_in_group")
-    @patch("mvmctl.core.host_state._state_dir")
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    def test_init_with_subprocess_mocking(
-        self,
-        mock_check_priv,
-        mock_state_dir,
-        mock_user_in_group,
-        mock_group_exists,
-        mock_get_user,
-        mock_access,
-        mock_exists,
-        mock_run,
-    ):
-        """Test host init with all system calls mocked."""
-        from mvmctl.api.host import init_host
-
-        mock_check_priv.return_value = None
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-        mock_exists.return_value = True
-        mock_access.return_value = True
-        mock_get_user.return_value = "testuser"
-        mock_group_exists.return_value = False
-        mock_user_in_group.return_value = False
-
-        state_dir = MagicMock()
-        state_dir.exists.return_value = True
-        mock_state_dir.return_value = state_dir
-
-        with patch("mvmctl.api.host.check_privileges"):
-            with patch("mvmctl.core.host_privilege._validate_sudoers_binaries"):
-                with patch("mvmctl.api.host.check_cloud_localds", return_value=True):
-                    with patch("mvmctl.core.host_setup.os.getuid", return_value=0):
-                        with patch("mvmctl.core.host_setup.check_kvm_access", return_value=True):
-                            with patch("mvmctl.api.host.check_required_binaries", return_value=[]):
-                                with patch(
-                                    "mvmctl.core.host_setup._enable_ip_forward"
-                                ) as mock_ip_forward:
-                                    with patch(
-                                        "mvmctl.core.host_setup._ensure_kvm_modules"
-                                    ) as mock_kvm:
-                                        with patch(
-                                            "mvmctl.core.host_privilege._create_group"
-                                        ) as mock_create_group:
-                                            with patch(
-                                                "mvmctl.core.host_privilege._add_user_to_group"
-                                            ) as mock_add_user:
-                                                mock_ip_forward.return_value = _host_change(
-                                                    "net.ipv4.ip_forward", "0", "1", "sysctl"
-                                                )
-                                                mock_kvm.return_value = []
-                                                mock_create_group.return_value = True
-                                                mock_add_user.return_value = True
-                                                with patch(
-                                                    "mvmctl.api.host._persist_sysctl",
-                                                    return_value=None,
-                                                ):
-                                                    with patch(
-                                                        "mvmctl.core.network.setup_mvm_chains"
-                                                    ):
-                                                        with patch(
-                                                            "mvmctl.core.host_state._save_state"
-                                                        ):
-                                                            with patch(
-                                                                "mvmctl.core.host_privilege._write_sudoers"
-                                                            ):
-                                                                result = init_host(
-                                                                    Path("/tmp/cache")
-                                                                )
-
-                            assert len(result) > 0
-
-    @patch("mvmctl.api.host.check_privileges")
-    @patch("mvmctl.api.host._restore_host")
-    def test_reset_with_subprocess_mocking(self, mock_restore, mock_check_priv):
-        from mvmctl.api.host import reset_host
-
-        mock_restore.return_value = []
-        mock_check_priv.return_value = None
-
-        with patch("mvmctl.api.host.clean_host", return_value=[]):
-            with patch("mvmctl.api.host._remove_sudoers", return_value=False):
-                with patch("mvmctl.api.host._remove_group", return_value=False):
-                    reset_host(Path("/tmp/cache"))
-
-        mock_restore.assert_called_once()
-
-
-class TestHostEdgeCases:
-    """Test edge cases in host workflows."""
-
-    @patch("mvmctl.cli.host.reset_host")
-    @patch("mvmctl.cli.host.get_host_state")
-    def test_reset_without_prior_init(self, mock_get_state, mock_reset):
-        """Test reset when init has never been run."""
-        mock_get_state.return_value = None
-        mock_reset.side_effect = HostError("No host state found — init first")
-
-        result = runner.invoke(host_app, ["reset"])
-        assert result.exit_code == 1
-        assert "init" in result.output.lower()
-
-    @patch("mvmctl.cli.host.init_host")
-    def test_init_idempotent(self, mock_init):
-        """Test that init is idempotent."""
-        mock_init.return_value = []
-
-        result = runner.invoke(host_app, ["init"])
-        assert result.exit_code == 0
-        assert "No changes" in result.output or result.exit_code == 0
-
-    @patch("mvmctl.cli.host.init_host")
-    def test_init_partial_failure(self, mock_init):
-        """Test init when some operations fail."""
-        mock_init.side_effect = HostError("Failed to create group: permission denied")
-
-        result = runner.invoke(host_app, ["init"])
-        assert result.exit_code == 1
-        assert "permission" in result.output.lower() or "failed" in result.output.lower()
-
-    @patch("mvmctl.cli.host.clean_host")
-    @patch("mvmctl.api.host.get_running_vms")
-    def test_clean_with_no_networks(self, mock_get_running_vms, mock_clean):
-        """Test clean when no networks exist."""
-        mock_get_running_vms.return_value = []
-        mock_clean.return_value = []
-
-        result = runner.invoke(host_app, ["clean"], input="y\n")
-        assert result.exit_code == 0
-
-
-class TestHostStateManagement:
-    """Test host state snapshot and restoration."""
-
-    def test_host_change_serialization(self):
-        """Test HostChange can be serialized and deserialized."""
-        change = _host_change("test:key", "old_value", "new_value", "manual")
-
-        data = {
-            "setting": change.setting,
-            "original_value": change.original_value,
-            "applied_value": change.applied_value,
-            "mechanism": change.mechanism,
-        }
-        serialized = json.dumps(data)
-        deserialized = json.loads(serialized)
-
-        assert deserialized["setting"] == "test:key"
-        assert deserialized["original_value"] == "old_value"
-        assert deserialized["applied_value"] == "new_value"
-
-    def test_host_state_serialization(self):
-        """Test HostState can be serialized and deserialized."""
-        changes = [
-            _host_change("group:mvm", None, "mvm", "groupadd"),
-            _host_change("net.ipv4.ip_forward", "0", "1", "sysctl"),
-        ]
-        state = _make_host_state(changes)
-
-        data = {
-            "changes": [
-                {
-                    "setting": c.setting,
-                    "original_value": c.original_value,
-                    "applied_value": c.applied_value,
-                    "mechanism": c.mechanism,
-                }
-                for c in state.changes
-            ],
-            "init_timestamp": state.init_timestamp,
-        }
-        serialized = json.dumps(data)
-        deserialized = json.loads(serialized)
-
-        assert len(deserialized["changes"]) == 2
-        assert deserialized["init_timestamp"] == "2024-01-01T00:00:00+00:00"
-
-    def test_save_and_load_state(self, tmp_path):
-        """Test saving and loading host state via SQLite."""
-        from mvmctl.api.host import get_host_state
-        from mvmctl.core.host_state import _save_state
-        from mvmctl.core.mvm_db import MVMDatabase
-
-        changes = [_host_change("test", "a", "b", "manual")]
-
-        db = MVMDatabase()
-        _save_state(db, changes)
-
-        loaded = get_host_state(tmp_path)
-        assert loaded is not None
-        assert len(loaded.changes) == 1
-        assert loaded.changes[0].setting == "test"
-        assert loaded.changes[0].original_value == "a"
-        assert loaded.changes[0].applied_value == "b"
-        assert loaded.changes[0].mechanism == "manual"
+        state = HostOperation.get_state()
+        assert state is not None
+        assert not state.initialized

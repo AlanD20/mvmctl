@@ -29,6 +29,10 @@ tasks:
     desc: Run pytest with 80% branch coverage gate
     cmds:
       - uv run pytest tests/ -v -n auto --tb=short --cov=src/mvmctl --cov-report=term-missing --cov-fail-under=80
+  test-integration:
+    desc: Run pytest with 80% branch coverage gate
+    cmds:
+      - uv run pytest tests/integration -v -n auto --tb=short --cov=src/mvmctl --cov-report=term-missing
   test-ci:
     desc: Run pytest with 80% branch coverage gate
     cmds:

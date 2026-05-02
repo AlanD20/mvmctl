@@ -1,5 +1,7 @@
 """Smoke tests — verify the CLI app assembles and responds to basic commands."""
 
+from __future__ import annotations
+
 from click.testing import CliRunner
 
 from mvmctl.main import app
@@ -67,7 +69,7 @@ def test_subcommand_help_key() -> None:
 def test_subcommand_help_config() -> None:
     result = invoke_cli(["config", "--help"])
     assert result.exit_code == 0
-    assert "show" in result.output
+    assert "get" in result.output
 
 
 def test_subcommand_help_host() -> None:
@@ -79,9 +81,4 @@ def test_subcommand_help_host() -> None:
 def test_subcommand_help_init() -> None:
     result = invoke_cli(["init", "--help"])
     assert result.exit_code == 0
-    assert (
-        "onboarding" in result.output.lower()
-        or "setup" in result.output.lower()
-        or "wizard" in result.output.lower()
-        or "initialize" in result.output.lower()
-    )
+    assert "Initialize mvm" in result.output

@@ -1,0 +1,310 @@
+"""Integration tests for Kernel API operations.
+
+Tests exercise the complete kernel orchestration flow:
+  fetch → list → get → inspect → set_default → ensure_default → remove
+
+Only subprocess and HTTP download operations are mocked. ALL orchestration
+logic in api/ and core/ runs unmocked.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from mvmctl.api import KernelFetchInput, KernelInput, KernelOperation
+from mvmctl.exceptions import KernelError, KernelNotFoundError
+from mvmctl.models import (
+    KernelFetchResult,
+    KernelItem,
+    VMInstanceItem,
+    VMStatus,
+)
+from mvmctl.utils.common import CacheUtils
+
+# ======================================================================
+# Helpers
+# ======================================================================
+
+
+def _mock_fetch_firecracker_kernel(
+    cls: type,  # noqa: ARG001
+    spec: object,  # noqa: ARG001
+    ci_version: str,  # noqa: ARG001
+    arch: str,
+    output_dir: object,  # noqa: ARG001
+) -> KernelFetchResult:
+    """Return a fake firecracker kernel result pointing to a real file."""
+    kernels_dir = CacheUtils.get_kernels_dir()
+    fake_path = kernels_dir / "vmlinux-firecracker-6.1.0-x86_64"
+    fake_path.write_text("fake firecracker kernel")
+    return KernelFetchResult(
+        path=fake_path,
+        version="6.1.0",
+        arch=arch,
+        kernel_type="firecracker",
+    )
+
+
+# ======================================================================
+# Kernel fetch tests
+# ======================================================================
+
+
+class TestKernelFetch:
+    """Test kernel fetch through the real API."""
+
+    def test_fetch_firecracker_kernel(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fetch a firecracker kernel and verify the DB record."""
+        monkeypatch.setattr(
+            "mvmctl.core.kernel._service.KernelService.fetch_firecracker_kernel",
+            classmethod(_mock_fetch_firecracker_kernel),
+        )
+
+        result = KernelOperation.fetch(
+            KernelFetchInput(kernel_type="firecracker", version="6.1.0")
+        )
+
+        assert isinstance(result, KernelItem)
+        assert result.type == "firecracker"
+        assert result.version == "6.1.0"
+        assert result.arch == "x86_64"
+        assert result.name == "vmlinux-firecracker-6.1.0-x86_64"
+        assert result.base_name == "vmlinux"
+        assert result.is_present is True
+        assert result.resolved_path.exists()
+
+    def test_fetch_invalid_kernel_type(self) -> None:
+        """Fetching with an unsupported kernel type raises KernelError."""
+        with pytest.raises(KernelError):
+            KernelOperation.fetch(
+                KernelFetchInput(kernel_type="invalid", version="6.1.0")
+            )
+
+    def test_fetch_invalid_version_format(self) -> None:
+        """Fetching with an invalid version format raises KernelError."""
+        with pytest.raises(KernelError):
+            KernelOperation.fetch(
+                KernelFetchInput(
+                    kernel_type="official", version="not-a-version"
+                )
+            )
+
+
+# ======================================================================
+# Kernel list and get tests
+# ======================================================================
+
+
+class TestKernelListAndGet:
+    """Test kernel listing and retrieval through the real API."""
+
+    def test_list_all_contains_seeded_kernel(self) -> None:
+        """list_all() returns the seeded test kernel."""
+        kernels = KernelOperation.list_all()
+        names = [k.name for k in kernels]
+        assert "vmlinux" in names
+
+    def test_get_by_name(self) -> None:
+        """Get a kernel by its name identifier."""
+        kernel = KernelOperation.get(KernelInput(name=["vmlinux"]))
+        assert isinstance(kernel, KernelItem)
+        assert kernel.name == "vmlinux"
+        assert kernel.version == "6.1.0"
+        assert kernel.type == "official"
+        assert kernel.is_default is True
+
+    def test_get_by_id_prefix(self) -> None:
+        """Get a kernel by its ID prefix (first 6 chars of seeded ID)."""
+        # Seeded kernel ID is "a" repeated 64 times
+        kernel = KernelOperation.get(KernelInput(name=["aaaaaa"]))
+        assert kernel.name == "vmlinux"
+        assert kernel.version == "6.1.0"
+
+
+# ======================================================================
+# Kernel inspect tests
+# ======================================================================
+
+
+class TestKernelInspect:
+    """Test kernel inspection through the real API."""
+
+    def test_inspect_returns_kernel_item(self) -> None:
+        """inspect() returns a KernelItem by default."""
+        result = KernelOperation.inspect(KernelInput(name=["vmlinux"]))
+        assert isinstance(result, KernelItem)
+        assert result.name == "vmlinux"
+        assert result.version == "6.1.0"
+        assert result.is_default is True
+
+    def test_inspect_returns_dict_when_json(self) -> None:
+        """inspect(is_json=True) returns a dict representation."""
+        result = KernelOperation.inspect(
+            KernelInput(name=["vmlinux"]), is_json=True
+        )
+        assert isinstance(result, dict)
+        assert result["name"] == "vmlinux"
+        assert result["version"] == "6.1.0"
+        assert result["is_default"] is True
+        assert "id" in result
+        assert "base_name" in result
+        assert "arch" in result
+        assert "type" in result
+
+
+# ======================================================================
+# Kernel default tests
+# ======================================================================
+
+
+class TestKernelDefault:
+    """Test kernel default management through the real API."""
+
+    def test_set_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Set a fetched kernel as default and verify is_default=True."""
+        monkeypatch.setattr(
+            "mvmctl.core.kernel._service.KernelService.fetch_firecracker_kernel",
+            classmethod(_mock_fetch_firecracker_kernel),
+        )
+
+        fetched = KernelOperation.fetch(
+            KernelFetchInput(kernel_type="firecracker", version="6.1.0")
+        )
+
+        # Initially the seeded kernel is default, not the fetched one
+        assert fetched.is_default is False
+
+        KernelOperation.set_default(KernelInput(name=[fetched.name]))
+
+        # Verify the fetched kernel is now default
+        kernel = KernelOperation.get(KernelInput(name=[fetched.name]))
+        assert kernel.is_default is True
+
+        # Verify the old default is no longer default
+        old = KernelOperation.get(KernelInput(name=["vmlinux"]))
+        assert old.is_default is False
+
+    def test_ensure_default(self) -> None:
+        """ensure_default() returns the default kernel."""
+        kernel = KernelOperation.ensure_default()
+        assert isinstance(kernel, KernelItem)
+        assert kernel.is_default is True
+        assert kernel.name == "vmlinux"
+        assert kernel.version == "6.1.0"
+
+
+# ======================================================================
+# Kernel remove tests
+# ======================================================================
+
+
+class TestKernelRemove:
+    """Test kernel removal through the real API."""
+
+    def test_remove_kernel(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Fetch a kernel, verify it exists, then remove it."""
+        monkeypatch.setattr(
+            "mvmctl.core.kernel._service.KernelService.fetch_firecracker_kernel",
+            classmethod(_mock_fetch_firecracker_kernel),
+        )
+
+        fetched = KernelOperation.fetch(
+            KernelFetchInput(kernel_type="firecracker", version="6.1.0")
+        )
+
+        # Verify it exists in list
+        kernels_before = KernelOperation.list_all()
+        assert any(k.name == fetched.name for k in kernels_before)
+
+        KernelOperation.remove(KernelInput(name=[fetched.name]))
+
+        # Verify it's gone from list_all
+        kernels_after = KernelOperation.list_all()
+        assert not any(k.name == fetched.name for k in kernels_after)
+
+        # Verify file is removed from disk
+        assert not fetched.resolved_path.exists()
+
+    def test_remove_nonexistent_kernel(self) -> None:
+        """Removing a non-existent kernel raises KernelNotFoundError."""
+        with pytest.raises(KernelNotFoundError):
+            KernelOperation.remove(KernelInput(name=["nonexistent-kernel"]))
+
+    def test_remove_kernel_referenced_by_vm(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Removing a kernel referenced by a VM raises KernelError without force."""
+        from mvmctl.core._shared import Database
+        from mvmctl.core.vm._repository import VMRepository
+
+        db = Database()
+        vm_repo = VMRepository(db)
+        kernel = KernelOperation.get(KernelInput(name=["vmlinux"]))
+
+        # Seed a VM that references the default kernel
+        vm_repo.upsert(
+            VMInstanceItem(
+                id="x" * 64,
+                name="test-vm-kernel-ref",
+                status=VMStatus.STOPPED,
+                pid=0,
+                ipv4="10.20.0.10",
+                mac="02:FC:00:00:00:01",
+                network_id="c" * 64,
+                tap_device="tap0",
+                image_id="b" * 64,
+                kernel_id=kernel.id,
+                binary_id="d" * 64,
+                api_socket_path="/tmp/test.sock",
+                config_path="/tmp/test.json",
+                cloud_init_mode="off",
+                vcpu_count=2,
+                mem_size_mib=256,
+                disk_size_mib=1024,
+                rootfs_path="/tmp/test.ext4",
+                rootfs_suffix="ext4",
+                enable_pci=False,
+                enable_logging=False,
+                enable_metrics=False,
+                enable_console=False,
+                created_at="2026-01-01T00:00:00+00:00",
+                updated_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+
+        # Without force, removal should fail because a VM references the kernel
+        with pytest.raises(KernelError):
+            KernelOperation.remove(KernelInput(name=["vmlinux"]))
+
+        # With force=True it should succeed (soft delete since VM references it)
+        KernelOperation.remove(KernelInput(name=["vmlinux"]), force=True)
+
+        # After forced removal, kernel should be soft-deleted (not in list_all)
+        kernels = KernelOperation.list_all()
+        assert not any(k.name == "vmlinux" for k in kernels)
+
+        # File should still be removed from disk even for soft-delete
+        assert not kernel.resolved_path.exists()
+
+
+# ======================================================================
+# Edge cases
+# ======================================================================
+
+
+class TestKernelEdgeCases:
+    """Test edge cases and error handling in kernel operations."""
+
+    def test_get_nonexistent_kernel(self) -> None:
+        """Getting a non-existent kernel raises KernelNotFoundError."""
+        with pytest.raises(KernelNotFoundError):
+            KernelOperation.get(KernelInput(name=["no-such-kernel"]))
+
+    def test_list_all_returns_list(self) -> None:
+        """list_all() always returns a list containing the seeded kernel."""
+        kernels = KernelOperation.list_all()
+        assert isinstance(kernels, list)
+        assert len(kernels) >= 1
+        assert any(k.name == "vmlinux" for k in kernels)

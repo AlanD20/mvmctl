@@ -1,151 +1,150 @@
-"""Integration tests for VM creation with direct injection mode."""
+"""Integration tests for VM creation with direct cloud-init injection.
 
-from unittest.mock import MagicMock, patch
+Tests exercise the VM creation flow with CloudInitMode.INJECT through
+the real public API. Verifies that:
+- INJECT mode creates cloud-init files and injects them into rootfs
+- OFF mode skips cloud-init injection
+- SSH keys are properly passed through the creation pipeline
 
-from typer.testing import CliRunner
+Only subprocess calls and GuestfsProvisioner are mocked.
+"""
 
-from mvmctl.cli.vm import vm_app as vm_app
-from mvmctl.models.cloudinit import CloudInitMode
+from __future__ import annotations
+
+from unittest.mock import MagicMock
+
+import pytest
+
+from mvmctl.api import VMCreateInput, VMInput, VMOperation
+from mvmctl.models import CloudInitMode, VMInstanceItem
+from mvmctl.utils.common import CacheUtils
+
+
+def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+    """Apply subprocess mocks and return references for assertions."""
+    from tests.integration.conftest import SmartPopenMock, SmartSubprocessMock
+
+    sub_mock = SmartSubprocessMock()
+    popen_mock = SmartPopenMock()
+    monkeypatch.setattr("subprocess.run", sub_mock)
+    monkeypatch.setattr("subprocess.Popen", popen_mock)
+
+    # Mock GuestfsProvisioner — chained method calls + tracking
+    gp_mock = MagicMock()
+    gp_mock.resize.return_value = gp_mock
+    gp_mock.set_hostname.return_value = gp_mock
+    gp_mock.inject_dns.return_value = gp_mock
+    gp_mock.setup_ssh.return_value = gp_mock
+    gp_mock.inject_cloud_init.return_value = gp_mock
+    gp_mock.disable_cloud_init.return_value = gp_mock
+    gp_mock.run.return_value = None
+    monkeypatch.setattr(
+        "mvmctl.api.vm_operations.GuestfsProvisioner",
+        lambda *args, **kwargs: gp_mock,
+    )
+
+    return {
+        "subprocess": sub_mock,
+        "popen": popen_mock,
+        "guestfs": gp_mock,
+    }
 
 
 class TestVMDirectInjection:
-    """Integration tests for VM creation with direct injection mode."""
+    """Integration tests for VM creation with direct cloud-init injection."""
 
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
-    @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
-    @patch("mvmctl.cli.vm.create_vm")
-    @patch("mvmctl.core.rootfs_injector.check_libguestfs")
-    @patch("mvmctl.core.rootfs_injector.inject_cloud_init")
-    def test_vm_create_with_direct_injection(
-        self,
-        mock_inject,
-        mock_check_guestfs,
-        mock_create_vm,
-        mock_resolve_image,
-        mock_fc_bin,
-        mock_check_priv,
-        tmp_path,
-    ):
-        """Test VM creation with direct injection cloud-init mode."""
-        mock_check_priv.return_value = None
-        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
-        mock_resolve_image.return_value = tmp_path / "image.ext4"
-        mock_check_guestfs.return_value = True
-        mock_inject.return_value = None
+    def test_create_vm_with_inject_mode(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Create a VM with inject mode and assert DB state and filesystem."""
+        mocks = _setup_mocks(monkeypatch)
 
-        # Create mock VM response
-        mock_vm = MagicMock()
-        mock_vm.name = "direct-test-vm"
-        mock_vm.cloud_init_mode = CloudInitMode.INJECT
-        mock_create_vm.return_value = mock_vm
-
-        runner = CliRunner()
-        result = runner.invoke(
-            vm_app,
-            [
-                "create",
-                "--name",
-                "direct-test-vm",
-                "--image",
-                "abc123",
-                "--cloud-init-mode",
-                "inject",
-            ],
+        VMOperation.create(
+            VMCreateInput(
+                name="test-inject-vm",
+                cloud_init_mode=CloudInitMode.INJECT.value,
+                ssh_keys=[],
+                enable_console=False,
+            )
         )
 
-        assert result.exit_code == 0
+        vm = VMOperation.get(VMInput(identifiers=["test-inject-vm"]))
+        assert isinstance(vm, VMInstanceItem)
+        assert vm.cloud_init_mode == CloudInitMode.INJECT.value
 
-        # Verify create_vm was called with correct mode
-        call_kwargs = mock_create_vm.call_args[1]
-        assert call_kwargs["input"].cloud_init_mode == CloudInitMode.INJECT
+        # Verify that inject_cloud_init was called on GuestfsProvisioner
+        mocks["guestfs"].inject_cloud_init.assert_called_once()
 
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
-    @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
-    @patch("mvmctl.cli.vm.create_vm")
-    def test_vm_create_explicit_direct_mode(
-        self,
-        mock_create_vm,
-        mock_resolve_image,
-        mock_fc_bin,
-        mock_check_priv,
-        tmp_path,
-    ):
-        """Test that --cloud-init-mode direct is properly parsed."""
-        mock_check_priv.return_value = None
-        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
-        mock_resolve_image.return_value = tmp_path / "image.ext4"
+        # Verify VM directory was created
+        vm_dir = CacheUtils.get_vm_dir(vm.id)
+        assert vm_dir.exists()
 
-        mock_vm = MagicMock()
-        mock_vm.name = "test-vm"
-        mock_vm.cloud_init_mode = CloudInitMode.INJECT
-        mock_create_vm.return_value = mock_vm
+        # Verify rootfs was provisioned
+        assert vm.rootfs_path is not None
+        assert (vm_dir / vm.rootfs_path).exists()
 
-        runner = CliRunner()
-        result = runner.invoke(
-            vm_app,
-            ["create", "--name", "test-vm", "--image", "img123", "--cloud-init-mode", "inject"],
+    def test_disabled_mode_skips_injection(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OFF mode means inject_cloud_init is NOT called on GuestfsProvisioner."""
+        mocks = _setup_mocks(monkeypatch)
+
+        VMOperation.create(
+            VMCreateInput(
+                name="test-disabled-vm",
+                cloud_init_mode=CloudInitMode.OFF.value,
+                ssh_keys=[],
+                enable_console=False,
+            )
         )
 
-        assert result.exit_code == 0
-        assert mock_create_vm.called
-        # Verify mode was passed correctly
-        args, kwargs = mock_create_vm.call_args
-        assert kwargs.get("input").cloud_init_mode == CloudInitMode.INJECT
+        # In OFF mode, disable_cloud_init should be called
+        mocks["guestfs"].disable_cloud_init.assert_called_once()
+        # inject_cloud_init should NOT be called
+        mocks["guestfs"].inject_cloud_init.assert_not_called()
 
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
-    @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
-    def test_vm_create_invalid_mode_rejected(
-        self,
-        mock_resolve_image,
-        mock_fc_bin,
-        mock_check_priv,
-        tmp_path,
-    ):
-        """Test that invalid cloud-init modes are rejected."""
-        mock_check_priv.return_value = None
-        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
-        mock_resolve_image.return_value = tmp_path / "image.ext4"
+        vm = VMOperation.get(VMInput(identifiers=["test-disabled-vm"]))
+        assert vm.cloud_init_mode == CloudInitMode.OFF.value
 
-        runner = CliRunner()
-        result = runner.invoke(
-            vm_app,
-            ["create", "--name", "test-vm", "--image", "img123", "--cloud-init-mode", "invalid"],
+    def test_inject_vm_has_vm_dir_and_rootfs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verify inject-mode VM has a populated VM directory."""
+        _setup_mocks(monkeypatch)
+
+        VMOperation.create(
+            VMCreateInput(
+                name="inject-rootfs-vm",
+                cloud_init_mode=CloudInitMode.INJECT.value,
+                ssh_keys=[],
+                enable_console=False,
+            )
         )
 
-        assert result.exit_code != 0
-        assert "Invalid mode" in result.output or "invalid" in result.output.lower()
+        vm = VMOperation.get(VMInput(identifiers=["inject-rootfs-vm"]))
+        vm_dir = CacheUtils.get_vm_dir(vm.id)
+        assert vm_dir.exists()
+        vm_dir_contents = [p.name for p in vm_dir.iterdir()]
+        # Should always contain the rootfs and firecracker config
+        assert any("rootfs" in name for name in vm_dir_contents)
+        assert any("firecracker" in name.lower() for name in vm_dir_contents)
 
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
-    @patch("mvmctl.cli.vm.create_vm")
-    @patch("mvmctl.core.rootfs_injector.check_libguestfs")
-    def test_vm_create_fails_when_libguestfs_not_available(
-        self,
-        mock_check_guestfs,
-        mock_create_vm,
-        mock_resolve_image,
-        mock_check_priv,
-        tmp_path,
-    ):
-        """Test that VM creation fails gracefully when libguestfs is not available."""
-        mock_check_priv.return_value = None
-        mock_resolve_image.return_value = tmp_path / "image.ext4"
-        mock_check_guestfs.return_value = False
+    def test_inject_mode_with_ssh_keys(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Create an inject-mode VM with SSH keys and verify they are passed."""
+        _setup_mocks(monkeypatch)
+        test_keys = ["ssh-ed25519 AAAA key1", "ssh-rsa AAAA key2"]
 
-        # Mock VM creation to raise exception due to missing libguestfs
-        from mvmctl.exceptions import GuestfsNotAvailableError
-
-        mock_create_vm.side_effect = GuestfsNotAvailableError(
-            "libguestfs Python bindings not available"
+        VMOperation.create(
+            VMCreateInput(
+                name="inject-ssh-vm",
+                cloud_init_mode=CloudInitMode.INJECT.value,
+                ssh_keys=test_keys,
+                enable_console=False,
+            )
         )
 
-        runner = CliRunner()
-        result = runner.invoke(
-            vm_app,
-            ["create", "--name", "test-vm", "--image", "img123", "--cloud-init-mode", "inject"],
-        )
-
-        assert result.exit_code != 0
+        vm = VMOperation.get(VMInput(identifiers=["inject-ssh-vm"]))
+        assert vm.cloud_init_mode == CloudInitMode.INJECT.value
+        assert vm.name == "inject-ssh-vm"

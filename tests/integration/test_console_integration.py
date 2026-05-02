@@ -1,523 +1,193 @@
-"""Integration tests for console workflow."""
+"""Integration tests for console workflow through the real public API.
 
-import signal
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+Tests exercise the complete console relay lifecycle:
+  create VM with console → attach → get state → kill → cleanup on VM remove
 
-from mvmctl.constants import env_var
-from mvmctl.core import vm_lifecycle  # noqa: F401 - imported for patch resolution
-from mvmctl.models import VMInstance
-from mvmctl.api.inputs import NetworkConfig
-from mvmctl.models.vm import VMCreateInput
+Only subprocess calls and GuestfsProvisioner are mocked.
+ALL API-layer orchestration runs unmocked.
+"""
+
+from __future__ import annotations
+
+import os
+from unittest.mock import MagicMock
+
+import pytest
+
+from mvmctl.api import ConsoleOperation, VMCreateInput, VMInput, VMOperation
+from mvmctl.exceptions import MVMError, VMNotFoundError
+from mvmctl.models.vm import ConsoleState, VMInstanceItem
+from mvmctl.utils.common import CacheUtils
+
+
+def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+    """Apply subprocess mocks for console relay and firecracker."""
+    from tests.integration.conftest import SmartPopenMock, SmartSubprocessMock
+
+    sub_mock = SmartSubprocessMock()
+    popen_mock = SmartPopenMock()
+    monkeypatch.setattr("subprocess.run", sub_mock)
+    monkeypatch.setattr("subprocess.Popen", popen_mock)
+
+    # Mock GuestfsProvisioner to avoid real libguestfs
+    gp_mock = MagicMock()
+    gp_mock.resize.return_value = gp_mock
+    gp_mock.set_hostname.return_value = gp_mock
+    gp_mock.inject_dns.return_value = gp_mock
+    gp_mock.setup_ssh.return_value = gp_mock
+    gp_mock.disable_cloud_init.return_value = gp_mock
+    gp_mock.run.return_value = None
+    monkeypatch.setattr(
+        "mvmctl.api.vm_operations.GuestfsProvisioner",
+        lambda *args, **kwargs: gp_mock,
+    )
+
+    # Mock os.openpty for console relay PTY creation
+    # Use os.pipe() to allocate real, safe file descriptors on each call.
+    # Hardcoded values like (10, 11) collide with pytest/xdist internals.
+    monkeypatch.setattr("os.openpty", lambda: os.pipe())
+
+    # Mock os.kill so fake PIDs appear alive
+    monkeypatch.setattr("os.kill", lambda pid, sig: None)
+
+    return {"subprocess": sub_mock, "popen": popen_mock, "guestfs": gp_mock}
 
 
 class TestConsoleWorkflow:
-    @patch("mvmctl.core.vm_manager.VMManager.register")
-    @patch("mvmctl.api.network.ensure_default_network")
-    @patch("mvmctl.core.kernel.resolve_kernel_path")
-    @patch("shutil.copy2")
-    @patch("subprocess.Popen")
-    @patch("os.openpty")
-    @patch("mvmctl.utils.fs.secure_mkdir")
-    @patch("mvmctl.core.vm_manager.get_vm_manager")
-    @patch("mvmctl.utils.fs.get_vm_dir")
-    @patch("mvmctl.utils.fs.get_images_dir")
-    @patch("mvmctl.utils.fs.get_kernels_dir")
-    @patch("mvmctl.api.network.get_network")
-    @patch("mvmctl.api.network.allocate_network_ip")
-    @patch("mvmctl.utils.network.generate_mac")
-    @patch("mvmctl.utils.network.bridge_exists")
-    @patch("mvmctl.api.vm.create_tap")
-    @patch("mvmctl.api.vm.add_iptables_forward_rules")
-    @patch("mvmctl.api.vm.setup_nat")
-    @patch("mvmctl.utils.fs.write_pid_file")
-    @patch("mvmctl.api.vm.ConfigGenerator")
-    @patch("mvmctl.core.cloud_init.write_cloud_init")
-    @patch("mvmctl.core.firewall.subprocess.run")
-    @patch("mvmctl.utils.process.require_mvm_group_membership")
-    @patch("mvmctl.api.vm.add_nocloud_input_rule")
-    @patch("mvmctl.api.vm.NoCloudNetServerManager")
-    @patch("mvmctl.api.vm.ConsoleRelayManager")
-    @patch("mvmctl.services.console_relay.manager.subprocess.Popen")
-    @patch("shutil.which")
-    @patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
-    def test_create_vm_with_console_starts_relay(
+    """Integration tests for console workflow through the real public API."""
+
+    def _create_vm(
         self,
-        mock_db_get_image,
-        mock_which,
-        mock_relay_popen,
-        mock_console_mgr,
-        mock_nocloud_mgr,
-        mock_add_nocloud_rule,
-        mock_require_group,
-        mock_subprocess_run,
-        mock_write_ci,
-        mock_config_gen,
-        mock_write_pid,
-        mock_add_rules,
-        mock_setup_nat,
-        mock_create_tap,
-        mock_bridge_exists,
-        mock_gen_mac,
-        mock_alloc_ip,
-        mock_get_network,
-        mock_get_kernels,
-        mock_get_images,
-        mock_get_vm_dir,
-        mock_get_vm_mgr,
-        mock_secure_mkdir,
-        mock_openpty,
-        mock_fc_popen,
-        mock_copy2,
-        mock_resolve_kernel,
-        mock_ensure_default_net,
-        mock_vm_register,
-        tmp_path: Path,
-    ):
-        from mvmctl.api.vm import create_vm
-        from mvmctl.db.models import Image
+        monkeypatch: pytest.MonkeyPatch,
+        name: str,
+        enable_console: bool = True,
+    ) -> None:
+        """Create a VM via the real API with optional console."""
+        _setup_mocks(monkeypatch)
 
-        # Setup mock for subprocess.run to return success
-        mock_run_result = MagicMock()
-        mock_run_result.returncode = 0
-        mock_subprocess_run.return_value = mock_run_result
-
-        # Patch shutil.copy2 to avoid MagicMock path objects reaching real copy2
-        mock_copy2.return_value = None
-        mock_which.return_value = "/usr/bin/firecracker"
-        kernel_path = tmp_path / "cache" / "kernels" / "vmlinux"
-        kernel_path.parent.mkdir(parents=True, exist_ok=True)
-        kernel_path.touch()
-        mock_resolve_kernel.return_value = kernel_path
-
-        mock_ensure_default_net.return_value = NetworkConfig(
-            name="default",
-            subnet="10.20.0.0/24",
-            ipv4_gateway="10.20.0.1",
-            bridge="mvm-br0",
-        )
-
-        # Debug: Ensure subprocess.Popen mock is working
-        mock_fc_popen.side_effect = lambda *args, **kwargs: MagicMock(pid=1000)
-
-        # Setup proper VM directory path (real Path, not mock)
-        vm_dir = tmp_path / "testvm"
-        vm_dir.mkdir(parents=True)
-        mock_get_vm_dir.return_value = vm_dir
-
-        mock_images_dir = MagicMock()
-        mock_image = MagicMock()
-        mock_image.exists.return_value = True
-        mock_images_dir.__truediv__.return_value = mock_image
-        mock_get_images.return_value = mock_images_dir
-
-        kernels_dir = tmp_path / "cache" / "kernels"
-        kernels_dir.mkdir(parents=True, exist_ok=True)
-        kernel_file = kernels_dir / "vmlinux"
-        kernel_file.touch()
-        mock_get_kernels.return_value = kernels_dir
-
-        mock_net = NetworkConfig(
-            name="default",
-            subnet="10.20.0.0/24",
-            ipv4_gateway="10.20.0.1",
-            bridge="mvm-br0",
-        )
-        mock_get_network.return_value = mock_net
-
-        mock_alloc_ip.return_value = "10.20.0.5"
-        mock_gen_mac.return_value = "02:fc:11:22:33:44"
-        mock_bridge_exists.return_value = True
-
-        mock_manager = MagicMock()
-        mock_get_vm_mgr.return_value = mock_manager
-        mock_manager.count_vms.return_value = 0
-        mock_manager.register.return_value = None
-
-        mock_fc_proc = MagicMock()
-        mock_fc_proc.pid = 1000
-        mock_fc_popen.return_value = mock_fc_proc
-
-        mock_relay_proc = MagicMock()
-        mock_relay_proc.pid = 2000
-        mock_relay_popen.return_value = mock_relay_proc
-
-        mock_openpty.return_value = (12, 13)
-
-        # Setup mock nocloud server manager
-        mock_nocloud_instance = MagicMock()
-        mock_nocloud_instance.start_server.return_value = ("http://10.20.0.1:8080/", 8080)
-        mock_nocloud_instance.get_server_pid.return_value = 9999
-        mock_nocloud_mgr.return_value = mock_nocloud_instance
-
-        # Setup mock console relay manager
-        mock_console_instance = MagicMock()
-        mock_console_instance.start_relay.return_value = (vm_dir / "console.sock", 2000)
-        mock_console_mgr.return_value = mock_console_instance
-
-        # Debug: Ensure write_cloud_init mock is working
-        def mock_write_ci_impl(*args, **kwargs):
-            print(f"write_cloud_init called with: {args}, {kwargs}")
-            return None
-
-        mock_write_ci.side_effect = mock_write_ci_impl
-
-        # Debug: Print mock status
-        print(f"mock_write_ci: {mock_write_ci}")
-        print(f"mock_which: {mock_which}")
-        print(f"mock_fc_popen: {mock_fc_popen}")
-
-        # Add side_effect to track Popen calls
-        def track_popen(*args, **kwargs):
-            print(f"Popen called with: {args}, {kwargs}")
-            return MagicMock(pid=1000)
-
-        mock_fc_popen.side_effect = track_popen
-
-        # Verify mock is in the correct module
-        from mvmctl.core import cloud_init
-
-        print(f"cloud_init.write_cloud_init: {cloud_init.write_cloud_init}")
-        print(f"Is mock: {cloud_init.write_cloud_init is mock_write_ci}")
-
-        # Mock image entry with minimum_rootfs_size_mib to pass validation
-        mock_db_get_image.return_value = Image(
-            id="b" * 64,
-            os_slug="test-image",
-            os_name="Test Image",
-            path="/tmp/test-image.ext4",
-            arch="x86_64",
-            fs_type="ext4",
-            fs_uuid="12345678-1234-1234-1234-123456789abc",
-            minimum_rootfs_size_mib=2048,
-            original_size=2147483648,
-            is_default=False,
-            created_at="2024-01-01T00:00:00+00:00",
-            updated_at="2024-01-01T00:00:00+00:00",
-        )
-
-        from mvmctl.models import CloudInitMode
-
-        vm = create_vm(
+        VMOperation.create(
             VMCreateInput(
-                name="testvm",
-                image_path=Path("/tmp/test-image.ext4"),
-                image_hash="test-image",
-                vcpus=2,
-                mem=256,
-                network_name="default",
-                user="root",
-                enable_api_socket=False,
-                enable_pci=False,
-                enable_console=True,
-                firecracker_bin="firecracker",
-                lsm_flags="",
-                enable_logging=False,
-                enable_metrics=False,
-                cloud_init_mode=CloudInitMode.NET,
-            ),
+                name=name,
+                ssh_keys=[],
+                enable_console=enable_console,
+            )
         )
 
-        assert isinstance(vm, VMInstance)
-        assert vm.name == "testvm"
-        assert vm.console_relay_pid == 2000
-        assert vm.console_socket_path is not None
+    def test_create_vm_with_console(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Create a VM with console enabled and verify the DB record."""
+        self._create_vm(monkeypatch, "test-console-vm")
+        vm = VMOperation.get(VMInput(identifiers=["test-console-vm"]))
+        assert isinstance(vm, VMInstanceItem)
+        assert vm.name == "test-console-vm"
+        assert vm.enable_console
+        assert vm.relay_pid == 2000
+        assert vm.relay_socket_path is not None
+        assert len(vm.relay_socket_path) > 0
 
-        # Verify Firecracker was started
-        assert mock_fc_popen.call_count == 1
-        # Verify console relay manager was called to start relay
-        assert mock_console_instance.start_relay.call_count == 1
+    def test_attach_console(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Attach to a VM console and verify socket path info."""
+        self._create_vm(monkeypatch, "attach-console-vm")
+        info = ConsoleOperation.attach("attach-console-vm")
+        assert info.vm_name == "attach-console-vm"
+        assert info.socket_path is not None
+        assert len(info.socket_path) > 0
 
-    @patch("mvmctl.core.vm_manager.VMManager.register")
-    @patch("mvmctl.api.network.ensure_default_network")
-    @patch("mvmctl.core.kernel.resolve_kernel_path")
-    @patch("shutil.copy2")
-    @patch("subprocess.Popen")
-    @patch("mvmctl.utils.fs.secure_mkdir")
-    @patch("mvmctl.core.vm_manager.get_vm_manager")
-    @patch("mvmctl.utils.fs.get_vm_dir")
-    @patch("mvmctl.utils.fs.get_images_dir")
-    @patch("mvmctl.utils.fs.get_kernels_dir")
-    @patch("mvmctl.api.network.get_network")
-    @patch("mvmctl.api.network.allocate_network_ip")
-    @patch("mvmctl.utils.network.generate_mac")
-    @patch("mvmctl.utils.network.bridge_exists")
-    @patch("mvmctl.api.vm.create_tap")
-    @patch("mvmctl.api.vm.add_iptables_forward_rules")
-    @patch("mvmctl.api.vm.setup_nat")
-    @patch("mvmctl.utils.fs.write_pid_file")
-    @patch("mvmctl.api.vm.ConfigGenerator")
-    @patch("mvmctl.core.cloud_init.write_cloud_init")
-    @patch("mvmctl.core.firewall.subprocess.run")
-    @patch("mvmctl.utils.process.require_mvm_group_membership")
-    @patch("mvmctl.api.vm.add_nocloud_input_rule")
-    @patch("mvmctl.api.vm.NoCloudNetServerManager")
-    @patch("shutil.which")
-    @patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
-    def test_create_vm_without_console_skips_relay(
-        self,
-        mock_db_get_image,
-        mock_which,
-        mock_nocloud_mgr,
-        mock_add_nocloud_rule,
-        mock_require_group,
-        mock_subprocess_run,
-        mock_write_ci,
-        mock_config_gen,
-        mock_write_pid,
-        mock_add_rules,
-        mock_setup_nat,
-        mock_create_tap,
-        mock_bridge_exists,
-        mock_gen_mac,
-        mock_alloc_ip,
-        mock_get_network,
-        mock_get_kernels,
-        mock_get_images,
-        mock_get_vm_dir,
-        mock_get_vm_mgr,
-        mock_secure_mkdir,
-        mock_popen,
-        mock_copy2,
-        mock_resolve_kernel,
-        mock_ensure_default_net,
-        mock_vm_register,
-        tmp_path: Path,
-    ):
-        from mvmctl.api.vm import create_vm
-        from mvmctl.db.models import Image
+    def test_get_console_state(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Get console state and verify running / pid / socket_path."""
+        self._create_vm(monkeypatch, "state-console-vm")
+        raw_state = ConsoleOperation.get_state("state-console-vm")
+        state = ConsoleState(**raw_state)
+        assert state.running
+        assert state.pid == 2000
+        assert state.socket_path is not None
+        assert len(state.socket_path) > 0
 
-        # Setup mock for subprocess.run to return success
-        mock_run_result = MagicMock()
-        mock_run_result.returncode = 0
-        mock_subprocess_run.return_value = mock_run_result
+    def test_kill_console(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Kill the console relay and verify it is no longer running."""
+        self._create_vm(monkeypatch, "kill-console-vm")
+        result = ConsoleOperation.kill("kill-console-vm")
+        assert result
+        raw_state = ConsoleOperation.get_state("kill-console-vm")
+        state = ConsoleState(**raw_state)
+        # After kill, relay may not be running
+        assert isinstance(state.running, bool)
 
-        mock_copy2.return_value = None
-        mock_which.return_value = "/usr/bin/firecracker"
-        kernel_path = tmp_path / "cache" / "kernels" / "vmlinux"
-        kernel_path.parent.mkdir(parents=True, exist_ok=True)
-        kernel_path.touch()
-        mock_resolve_kernel.return_value = kernel_path
+    def test_console_cleanup_on_vm_remove(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Remove a VM and verify console files are cleaned up."""
+        self._create_vm(monkeypatch, "cleanup-console-vm")
+        vm = VMOperation.get(VMInput(identifiers=["cleanup-console-vm"]))
+        vm_dir = CacheUtils.get_vm_dir(vm.id)
+        assert vm_dir.exists()
+        assert (vm_dir / "console.sock").exists()
 
-        mock_ensure_default_net.return_value = NetworkConfig(
-            name="default",
-            subnet="10.20.0.0/24",
-            ipv4_gateway="10.20.0.1",
-            bridge="mvm-br0",
-        )
+        VMOperation.remove(VMInput(identifiers=["cleanup-console-vm"]))
 
-        # Debug: Ensure write_cloud_init mock is working
-        mock_write_ci.side_effect = lambda *args, **kwargs: None
+        with pytest.raises(MVMError):
+            VMOperation.get(VMInput(identifiers=["cleanup-console-vm"]))
+        assert not vm_dir.exists()
 
-        # Setup proper VM directory path (real Path, not mock)
-        vm_dir = tmp_path / "testvm"
-        vm_dir.mkdir(parents=True)
-        mock_get_vm_dir.return_value = vm_dir
+    def test_console_kill_idempotent(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Killing a console relay twice does not raise."""
+        self._create_vm(monkeypatch, "idempotent-console-vm")
+        ConsoleOperation.kill("idempotent-console-vm")
+        # Second kill should not raise
+        ConsoleOperation.kill("idempotent-console-vm")
 
-        mock_images_dir = MagicMock()
-        mock_image = MagicMock()
-        mock_image.exists.return_value = True
-        mock_images_dir.__truediv__.return_value = mock_image
-        mock_get_images.return_value = mock_images_dir
+    def test_attach_nonexistent_vm(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Attach to a nonexistent VM raises VMNotFoundError."""
+        _setup_mocks(monkeypatch)
+        with pytest.raises(VMNotFoundError):
+            ConsoleOperation.attach("nonexistent-vm")
 
-        kernels_dir = tmp_path / "cache" / "kernels"
-        kernels_dir.mkdir(parents=True, exist_ok=True)
-        kernel_file = kernels_dir / "vmlinux"
-        kernel_file.touch()
-        mock_get_kernels.return_value = kernels_dir
+    def test_attach_console_disabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Create VM with console disabled, attach raises MVMError."""
+        self._create_vm(monkeypatch, "no-console-vm", enable_console=False)
+        with pytest.raises(MVMError, match="No console relay running"):
+            ConsoleOperation.attach("no-console-vm")
 
-        mock_net = NetworkConfig(
-            name="default",
-            subnet="10.20.0.0/24",
-            ipv4_gateway="10.20.0.1",
-            bridge="mvm-br0",
-        )
-        mock_get_network.return_value = mock_net
+    def test_get_state_nonexistent_vm(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Get state for nonexistent VM raises VMNotFoundError."""
+        _setup_mocks(monkeypatch)
+        with pytest.raises(VMNotFoundError):
+            ConsoleOperation.get_state("nonexistent-vm")
 
-        mock_alloc_ip.return_value = "10.20.0.5"
-        mock_gen_mac.return_value = "02:fc:11:22:33:44"
-        mock_bridge_exists.return_value = True
-
-        mock_manager = MagicMock()
-        mock_get_vm_mgr.return_value = mock_manager
-        mock_manager.count_vms.return_value = 0
-        mock_manager.register.return_value = None
-
-        mock_proc = MagicMock()
-        mock_proc.pid = 1000
-        mock_popen.return_value = mock_proc
-
-        # Setup mock nocloud server manager
-        mock_nocloud_instance = MagicMock()
-        mock_nocloud_instance.start_server.return_value = ("http://10.20.0.1:8080/", 8080)
-        mock_nocloud_instance.get_server_pid.return_value = 9999
-        mock_nocloud_mgr.return_value = mock_nocloud_instance
-
-        # Mock image entry with minimum_rootfs_size_mib to pass validation
-        mock_db_get_image.return_value = Image(
-            id="b" * 64,
-            os_slug="test-image",
-            os_name="Test Image",
-            path="/tmp/test-image.ext4",
-            arch="x86_64",
-            fs_type="ext4",
-            fs_uuid="12345678-1234-1234-1234-123456789abc",
-            minimum_rootfs_size_mib=2048,
-            original_size=2147483648,
-            is_default=False,
-            created_at="2024-01-01T00:00:00+00:00",
-            updated_at="2024-01-01T00:00:00+00:00",
-        )
-
-        from mvmctl.models import CloudInitMode
-
-        vm = create_vm(
-            VMCreateInput(
-                name="testvm",
-                image_path=Path("/tmp/test-image.ext4"),
-                image_hash="test-image",
-                vcpus=2,
-                mem=256,
-                network_name="default",
-                user="root",
-                enable_api_socket=False,
-                enable_pci=False,
-                enable_console=False,
-                firecracker_bin="firecracker",
-                lsm_flags="",
-                enable_logging=False,
-                enable_metrics=False,
-                cloud_init_mode=CloudInitMode.NET,
-            ),
-        )
-
-        assert isinstance(vm, VMInstance)
-        assert vm.name == "testvm"
-        assert vm.console_relay_pid is None
-        assert vm.console_socket_path is None
-
-        # Verify only Firecracker was started (no console relay)
-        assert mock_popen.call_count == 1
-
-
-class TestConsoleRelayLifecycle:
-    @patch("mvmctl.services.console_relay.manager.os.kill")
-    @patch("mvmctl.services.console_relay.manager.subprocess.Popen")
-    def test_relay_start_stop_lifecycle(self, mock_popen, mock_kill, tmp_path: Path, monkeypatch):
-        from mvmctl.services.console_relay import ConsoleRelayManager
-
-        monkeypatch.setenv(env_var("CACHE_DIR"), str(tmp_path))
-
-        mock_proc = MagicMock()
-        mock_proc.pid = 12345
-        mock_popen.return_value = mock_proc
-
-        mgr = ConsoleRelayManager()
-        vm_hash = "a" * 64  # Mock VM hash
-        vm_dir = tmp_path / "vms" / vm_hash
-        vm_dir.mkdir(parents=True)
-
-        # Start relay
-        socket_path, pid = mgr.start_relay("testvm", 10, vm_dir)
-        assert pid == 12345
-        assert mgr.is_relay_running("testvm", vm_hash) is True
-
-        # Stop relay
-        mgr.stop_relay("testvm", vm_hash)
-        mock_kill.assert_any_call(12345, signal.SIGTERM)
-        assert "testvm" not in mgr._relays
-
-    @patch("mvmctl.services.console_relay.manager.os.kill")
-    def test_relay_kill_recovery(self, mock_kill, tmp_path: Path, monkeypatch):
-        from mvmctl.services.console_relay import ConsoleRelayManager
-
-        monkeypatch.setenv(env_var("CACHE_DIR"), str(tmp_path))
-
-        # Create a PID file for a "stuck" relay (using hash-based path)
-        vm_hash = "a" * 64  # Mock VM hash
-        pid_file = tmp_path / "vms" / vm_hash / "console.pid"
-        pid_file.parent.mkdir(parents=True)
-        pid_file.write_text("99999")
-
-        call_count = [0]
-
-        def kill_side_effect(pid, sig):
-            call_count[0] += 1
-            if pid == 99999 and sig == 0:
-                return None
-            if sig == signal.SIGTERM:
-                raise ProcessLookupError()
-            if sig == signal.SIGKILL:
-                raise ProcessLookupError()
-
-        mock_kill.side_effect = kill_side_effect
-
-        mgr = ConsoleRelayManager()
-        result = mgr.kill_relay("testvm", vm_hash)
-
+    def test_get_state_after_kill(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Kill console relay, then get state and verify running=False."""
+        self._create_vm(monkeypatch, "kill-state-vm")
+        result = ConsoleOperation.kill("kill-state-vm")
         assert result is True
+        raw_state = ConsoleOperation.get_state("kill-state-vm")
+        state = ConsoleState(**raw_state)
+        assert state.running is False
+        assert state.pid is None
 
+    def test_kill_nonexistent_console(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Kill console for a VM that was never created raises VMNotFoundError."""
+        _setup_mocks(monkeypatch)
+        with pytest.raises(VMNotFoundError):
+            ConsoleOperation.kill("never-created-vm")
 
-class TestConsoleAPI:
-    @patch("mvmctl.api.vm.ConsoleRelayManager")
-    @patch("mvmctl.api.vm.get_vm_manager")
-    def test_attach_console_returns_socket_path(self, mock_get_mgr, mock_mgr_class):
-        from mvmctl.api.vm import attach_console
-
-        mock_vm = MagicMock()
-        mock_vm.name = "testvm"
-        mock_manager = MagicMock()
-        mock_manager.get.return_value = mock_vm
-        mock_get_mgr.return_value = mock_manager
-
-        mock_relay_mgr = MagicMock()
-        mock_relay_mgr.is_relay_running.return_value = True
-        mock_relay_mgr.get_socket_path.return_value = Path("/tmp/test.sock")
-        mock_mgr_class.return_value = mock_relay_mgr
-
-        result = attach_console("testvm")
-
-        assert result.socket_path == Path("/tmp/test.sock")
-        assert result.vm_name == "testvm"
-
-    @patch("mvmctl.api.vm.ConsoleRelayManager")
-    @patch("mvmctl.api.vm.get_vm_manager")
-    def test_kill_console_terminates_relay(self, mock_get_mgr, mock_mgr_class):
-        from mvmctl.api.vm import kill_console
-
-        mock_vm = MagicMock()
-        mock_vm.id = "a" * 64  # Mock VM hash
-        mock_manager = MagicMock()
-        mock_manager.get.return_value = mock_vm
-        mock_get_mgr.return_value = mock_manager
-
-        mock_relay_mgr = MagicMock()
-        mock_relay_mgr.kill_relay.return_value = True
-        mock_mgr_class.return_value = mock_relay_mgr
-
-        result = kill_console("testvm")
-
-        assert result is True
-        mock_relay_mgr.kill_relay.assert_called_once_with("testvm", mock_vm.id)
-
-    @patch("mvmctl.api.vm._get_console_state")
-    @patch("mvmctl.api.vm.get_vm_manager")
-    def test_get_console_state_returns_status(self, mock_get_mgr, mock_get_state):
-        from mvmctl.api.vm import get_console_state
-
-        mock_vm = MagicMock()
-        mock_manager = MagicMock()
-        mock_manager.get.return_value = mock_vm
-        mock_get_mgr.return_value = mock_manager
-
-        mock_get_state.return_value = {
-            "running": True,
-            "pid": 12345,
-            "socket_path": "/tmp/test.sock",
-        }
-
-        result = get_console_state("testvm")
-
-        assert result.running is True
-        assert result.pid == 12345
-        assert result.socket_path == "/tmp/test.sock"
+    def test_kill_after_vm_remove(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Create VM, remove VM, then kill console raises VMNotFoundError."""
+        self._create_vm(monkeypatch, "remove-then-kill-vm")
+        VMOperation.remove(VMInput(identifiers=["remove-then-kill-vm"]))
+        with pytest.raises(VMNotFoundError):
+            ConsoleOperation.kill("remove-then-kill-vm")

@@ -1,316 +1,799 @@
-"""Integration tests for full VM lifecycle workflow.
+"""Integration tests for the full VM lifecycle through the real public API.
 
-Tests the complete VM lifecycle: create -> list -> ssh (mocked) -> snapshot -> remove
+Tests exercise the complete VM orchestration flow:
+  create → list → get → snapshot → start/stop → remove
+
+Only subprocess (system-level operations like cp, dd, ip, iptables, firecracker)
+are mocked. ALL orchestration logic in api/ and core/ runs unmocked.
 """
 
-import json
-from datetime import datetime
+from __future__ import annotations
+
+import sqlite3
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock
 
-from typer.testing import CliRunner
+import pytest
 
-from mvmctl.cli.logs import logs_app as logs_app
-from mvmctl.cli.ssh import ssh_app as ssh_app
-from mvmctl.cli.vm import vm_app as vm_app
-from mvmctl.models.vm import VMInstance, VMStatus
+from mvmctl.api import VMCreateInput, VMInput, VMOperation
+from mvmctl.exceptions import VMNotFoundError
+from mvmctl.models import VMInstanceItem, VMStatus
 
-runner = CliRunner()
-
-
-def _make_vm(
-    name: str,
-    status: VMStatus = VMStatus.RUNNING,
-    ip: str = "10.20.0.2",
-    pid: int = 1234,
-    network: str = "default",
-    id: str = "vm-test-001",
-) -> VMInstance:
-    """Create a sample VMInstance for testing."""
-    created_at = datetime(2026, 1, 1, 12, 0, 0)
-    return VMInstance(
-        id=id,
-        name=name,
-        ipv4=ip,
-        mac="02:FC:aa:bb:cc:dd",
-        pid=pid,
-        status=status,
-        created_at=created_at,
-        updated_at=created_at,
-        network_id=network,
-        api_socket_path=Path(f"/tmp/mvm/{name}.sock"),
-        tap_device="mvm-tap0",
-        rootfs_suffix=".ext4",
-        kernel_id="kern-test-001",
-        image_id="img-test-001",
-        binary_id="bin-test-001",
-        disk_size_mib=1024,
-    )
+# ======================================================================
+# VM lifecycle tests
+# ======================================================================
 
 
-class TestVMLifecycleWorkflow:
-    """Test complete VM lifecycle workflow end-to-end."""
+class TestVMCreateAndList:
+    """Test VM creation and listing through the real API."""
 
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
-    @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
-    @patch("mvmctl.cli.vm.create_vm")
-    @patch("mvmctl.cli.vm.list_vms")
-    def test_create_and_list_vm(
-        self,
-        mock_list_vms,
-        mock_create_vm,
-        mock_resolve_image,
-        mock_fc_bin,
-        mock_check_priv,
-        tmp_path,
-    ):
-        """Test creating a VM and then listing it."""
-        mock_check_priv.return_value = None
-        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
-        mock_resolve_image.return_value = Path("/tmp/image.ext4")
-
-        vm = _make_vm("lifecycle-vm")
-        mock_create_vm.return_value = vm
-        mock_list_vms.return_value = [vm]
-
-        result = runner.invoke(vm_app, ["create", "--name", "lifecycle-vm", "--image", "abc123"])
-        assert result.exit_code == 0
-        assert "lifecycle-vm" in result.output
-        mock_create_vm.assert_called_once()
-
-        result = runner.invoke(vm_app, ["ls", "--json"])
-        assert result.exit_code == 0
-        data = json.loads(result.output)
-        assert len(data) == 1
-        assert data[0]["name"] == "lifecycle-vm"
-
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
-    @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
-    @patch("mvmctl.cli.vm.create_vm")
-    @patch("mvmctl.cli.ssh.ssh_vm")
-    def test_create_and_ssh_vm(
-        self, mock_ssh, mock_create_vm, mock_resolve_image, mock_fc_bin, mock_check_priv
-    ):
-        """Test creating a VM and then SSHing into it."""
-        mock_check_priv.return_value = None
-        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
-        mock_resolve_image.return_value = Path("/tmp/image.ext4")
-
-        vm = _make_vm("ssh-test-vm", ip="10.20.0.5")
-        mock_create_vm.return_value = vm
-        mock_ssh.return_value = 0
-
-        result = runner.invoke(vm_app, ["create", "--name", "ssh-test-vm", "--image", "abc123"])
-        assert result.exit_code == 0
-
-        result = runner.invoke(ssh_app, ["--name", "ssh-test-vm"])
-        assert result.exit_code == 0
-        mock_ssh.assert_called_once()
-
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
-    @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
-    @patch("mvmctl.cli.vm.create_vm")
-    @patch("mvmctl.cli.vm.snapshot_vm")
-    def test_create_snapshot_and_remove(
-        self,
-        mock_snapshot,
-        mock_create_vm,
-        mock_resolve_image,
-        mock_fc_bin,
-        mock_check_priv,
-        tmp_path,
-    ):
-        """Test creating a VM, taking a snapshot, then removing it."""
-        mock_check_priv.return_value = None
-        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
-        mock_resolve_image.return_value = Path("/tmp/image.ext4")
-
-        vm = _make_vm("snapshot-vm")
-        mock_create_vm.return_value = vm
-        mock_snapshot.return_value = None
-
-        result = runner.invoke(vm_app, ["create", "--name", "snapshot-vm", "--image", "abc123"])
-        assert result.exit_code == 0
-
-        mem_path = tmp_path / "snapshot.mem"
-        state_path = tmp_path / "snapshot.state"
-        result = runner.invoke(
-            vm_app,
-            [
-                "snapshot",
-                "--name",
-                "snapshot-vm",
-                "--mem-out",
-                str(mem_path),
-                "--state-out",
-                str(state_path),
-            ],
-        )
-        assert result.exit_code == 0
-        mock_snapshot.assert_called_once_with(
-            name="snapshot-vm", mem_out=mem_path, state_out=state_path
+    @staticmethod
+    def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+        """Apply subprocess mocks and return references for assertions."""
+        from tests.integration.conftest import (
+            SmartPopenMock,
+            SmartSubprocessMock,
         )
 
-    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
-    @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
-    @patch("mvmctl.cli.vm.create_vm")
-    @patch("mvmctl.api.vm.get_vm_manager")
-    @patch("mvmctl.cli.vm.remove_vm")
-    @patch("mvmctl.cli.vm.list_vms")
-    def test_full_lifecycle_create_remove(
-        self, mock_list, mock_remove, mock_manager, mock_create, mock_resolve_image, mock_fc_bin
-    ):
-        """Test full lifecycle: create VM, verify it exists, then remove it."""
-        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
-        mock_resolve_image.return_value = Path("/tmp/image.ext4")
-        vm = _make_vm("full-lifecycle-vm")
-        mock_create.return_value = vm
-        mock_list.return_value = [vm]
-        mock_manager.return_value.get_by_name.return_value = [vm]
-        mock_manager.return_value.find_by_id_prefix.return_value = []
+        sub_mock = SmartSubprocessMock()
+        popen_mock = SmartPopenMock()
+        monkeypatch.setattr("subprocess.run", sub_mock)
+        monkeypatch.setattr("subprocess.Popen", popen_mock)
 
-        result = runner.invoke(
-            vm_app,
-            ["create", "--name", "full-lifecycle-vm", "--image", "abc123"],
+        # Mock GuestfsProvisioner.run to avoid real libguestfs
+        gp_mock = MagicMock()
+        monkeypatch.setattr(
+            "mvmctl.api.vm_operations.GuestfsProvisioner",
+            lambda *args, **kwargs: gp_mock,
         )
-        assert result.exit_code == 0
-        assert "full-lifecycle-vm" in result.output
+        return {"subprocess": sub_mock, "popen": popen_mock, "guestfs": gp_mock}
 
-        result = runner.invoke(vm_app, ["ls", "--json"])
-        assert result.exit_code == 0
-        data = json.loads(result.output)
-        assert any(v["name"] == "full-lifecycle-vm" for v in data)
+    def test_create_vm(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Create a VM via the real API and verify the DB record."""
+        mocks = self._setup_mocks(monkeypatch)
+        # GuestfsProvisioner needs resize, run etc as chainable methods
+        mocks["guestfs"].resize.return_value = mocks["guestfs"]
+        mocks["guestfs"].set_hostname.return_value = mocks["guestfs"]
+        mocks["guestfs"].inject_dns.return_value = mocks["guestfs"]
+        mocks["guestfs"].setup_ssh.return_value = mocks["guestfs"]
+        mocks["guestfs"].run.return_value = None
 
-        result = runner.invoke(vm_app, ["rm", "--name", "full-lifecycle-vm"])
-        assert result.exit_code == 0
-        mock_remove.assert_called_once_with("full-lifecycle-vm", force=False, fast=False)
-
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
-    @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
-    @patch("mvmctl.cli.vm.create_vm")
-    @patch("mvmctl.cli.logs.get_logs")
-    def test_create_and_check_logs(
-        self, mock_logs, mock_create, mock_resolve_image, mock_fc_bin, mock_check_priv
-    ):
-        """Test creating a VM and checking its logs."""
-        mock_check_priv.return_value = None
-        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
-        mock_resolve_image.return_value = Path("/tmp/image.ext4")
-
-        vm = _make_vm("logs-vm")
-        mock_create.return_value = vm
-        mock_logs.return_value = ["Boot log line 1\n", "Boot log line 2\n"]
-
-        result = runner.invoke(vm_app, ["create", "--name", "logs-vm", "--image", "abc123"])
-        assert result.exit_code == 0
-
-        result = runner.invoke(logs_app, ["--name", "logs-vm", "--type", "boot"])
-        assert result.exit_code == 0
-        assert "Boot log line 1" in result.output
-        mock_logs.assert_called_once()
-
-    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
-    @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
-    @patch("mvmctl.cli.vm.create_vm")
-    @patch("mvmctl.cli.vm.snapshot_vm")
-    @patch("mvmctl.cli.vm.load_snapshot")
-    @patch("mvmctl.api.vm.get_vm_manager")
-    @patch("mvmctl.cli.vm.remove_vm")
-    def test_snapshot_restore_workflow(
-        self,
-        mock_remove,
-        mock_manager,
-        mock_load,
-        mock_snapshot,
-        mock_create,
-        mock_resolve_image,
-        mock_fc_bin,
-        tmp_path,
-    ):
-        """Test full snapshot workflow: create -> snapshot -> load -> remove."""
-        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
-        mock_resolve_image.return_value = Path("/tmp/image.ext4")
-        vm = _make_vm("restore-vm")
-        mock_create.return_value = vm
-        mock_snapshot.return_value = None
-        mock_load.return_value = None
-        mock_remove.return_value = None
-        mock_manager.return_value.get_by_name.return_value = [vm]
-        mock_manager.return_value.find_by_id_prefix.return_value = []
-
-        result = runner.invoke(vm_app, ["create", "--name", "restore-vm", "--image", "abc123"])
-        assert result.exit_code == 0
-
-        mem_path = tmp_path / "vm.mem"
-        state_path = tmp_path / "vm.state"
-        result = runner.invoke(
-            vm_app,
-            [
-                "snapshot",
-                "--name",
-                "restore-vm",
-                "--mem-out",
-                str(mem_path),
-                "--state-out",
-                str(state_path),
-            ],
+        VMOperation.create(
+            VMCreateInput(
+                name="test-create-vm",
+                ssh_keys=[],
+                enable_console=False,
+            )
         )
-        assert result.exit_code == 0
 
-        result = runner.invoke(
-            vm_app,
-            [
-                "load",
-                "--name",
-                "restore-vm",
-                "--mem-in",
-                str(mem_path),
-                "--state-in",
-                str(state_path),
-            ],
+        # Verify the VM exists in the DB with the correct state
+        vm = VMOperation.get(VMInput(identifiers=["test-create-vm"]))
+        assert isinstance(vm, VMInstanceItem)
+        assert vm.name == "test-create-vm"
+        assert vm.status == VMStatus.RUNNING
+        assert vm.pid > 0
+        assert vm.network_id is not None
+
+    def test_list_vms(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Create two VMs and verify list_all returns both."""
+        mocks = self._setup_mocks(monkeypatch)
+        mocks["guestfs"].resize.return_value = mocks["guestfs"]
+        mocks["guestfs"].set_hostname.return_value = mocks["guestfs"]
+        mocks["guestfs"].inject_dns.return_value = mocks["guestfs"]
+        mocks["guestfs"].setup_ssh.return_value = mocks["guestfs"]
+        mocks["guestfs"].run.return_value = None
+
+        VMOperation.create(
+            VMCreateInput(name="list-vm-1", ssh_keys=[], enable_console=False)
         )
-        assert result.exit_code == 0
-        mock_load.assert_called_once()
+        VMOperation.create(
+            VMCreateInput(name="list-vm-2", ssh_keys=[], enable_console=False)
+        )
 
-        result = runner.invoke(vm_app, ["rm", "--name", "restore-vm"])
-        assert result.exit_code == 0
+        vms = VMOperation.list_all()
+        names = [v.name for v in vms]
+        assert "list-vm-1" in names
+        assert "list-vm-2" in names
+
+    def test_get_vm_by_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Get a VM by its name identifier."""
+        mocks = self._setup_mocks(monkeypatch)
+        mocks["guestfs"].resize.return_value = mocks["guestfs"]
+        mocks["guestfs"].set_hostname.return_value = mocks["guestfs"]
+        mocks["guestfs"].inject_dns.return_value = mocks["guestfs"]
+        mocks["guestfs"].setup_ssh.return_value = mocks["guestfs"]
+        mocks["guestfs"].run.return_value = None
+
+        VMOperation.create(
+            VMCreateInput(name="get-by-name", ssh_keys=[], enable_console=False)
+        )
+        vm = VMOperation.get(VMInput(identifiers=["get-by-name"]))
+        assert vm.name == "get-by-name"
+
+    def test_get_vm_by_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Get a VM by its ID (SHA256 hash prefix)."""
+        mocks = self._setup_mocks(monkeypatch)
+        mocks["guestfs"].resize.return_value = mocks["guestfs"]
+        mocks["guestfs"].set_hostname.return_value = mocks["guestfs"]
+        mocks["guestfs"].inject_dns.return_value = mocks["guestfs"]
+        mocks["guestfs"].setup_ssh.return_value = mocks["guestfs"]
+        mocks["guestfs"].run.return_value = None
+
+        VMOperation.create(
+            VMCreateInput(name="get-by-id", ssh_keys=[], enable_console=False)
+        )
+        vm = VMOperation.get(VMInput(identifiers=["get-by-id"]))
+        # Get by ID prefix (first 6 chars)
+        vm2 = VMOperation.get(VMInput(identifiers=[vm.id[:12]]))
+        assert vm2.name == "get-by-id"
+        assert vm2.id == vm.id
+
+    def test_create_vm_default_network(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Create a VM using the default network (no explicit network_name)."""
+        mocks = self._setup_mocks(monkeypatch)
+        mocks["guestfs"].resize.return_value = mocks["guestfs"]
+        mocks["guestfs"].set_hostname.return_value = mocks["guestfs"]
+        mocks["guestfs"].inject_dns.return_value = mocks["guestfs"]
+        mocks["guestfs"].setup_ssh.return_value = mocks["guestfs"]
+        mocks["guestfs"].run.return_value = None
+
+        VMOperation.create(
+            VMCreateInput(
+                name="default-net-vm", ssh_keys=[], enable_console=False
+            )
+        )
+        vm = VMOperation.get(VMInput(identifiers=["default-net-vm"]))
+        assert vm.network_id is not None
+        assert len(vm.network_id) > 0
 
 
-class TestVMLifecycleEdgeCases:
-    """Test edge cases in VM lifecycle workflows."""
+class TestVMRemove:
+    """Test VM removal through the real API."""
 
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.api.vm.get_vm_manager")
-    @patch("mvmctl.cli.vm.remove_vm")
-    def test_remove_nonexistent_vm(self, mock_remove, mock_manager, mock_check_priv):
-        """Test attempting to remove a VM that doesn't exist."""
-        mock_check_priv.return_value = None
-        mock_manager.return_value.get_by_name.return_value = []
-        mock_manager.return_value.find_by_id_prefix.return_value = []
+    @staticmethod
+    def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+        from tests.integration.conftest import (
+            SmartPopenMock,
+            SmartSubprocessMock,
+        )
 
-        result = runner.invoke(vm_app, ["rm", "--name", "missing-vm"])
-        assert result.exit_code == 1
-        assert "no vm found" in result.output.lower()
+        sub_mock = SmartSubprocessMock()
+        popen_mock = SmartPopenMock()
+        monkeypatch.setattr("subprocess.run", sub_mock)
+        monkeypatch.setattr("subprocess.Popen", popen_mock)
 
-    @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
-    @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
-    @patch("mvmctl.cli.vm.create_vm")
+        gp_mock = MagicMock()
+        monkeypatch.setattr(
+            "mvmctl.api.vm_operations.GuestfsProvisioner",
+            lambda *args, **kwargs: gp_mock,
+        )
+        return {"subprocess": sub_mock, "popen": popen_mock, "guestfs": gp_mock}
+
+    def _create_vm(
+        self, monkeypatch: pytest.MonkeyPatch, name: str
+    ) -> VMInstanceItem:
+        mocks = self._setup_mocks(monkeypatch)
+        mocks["guestfs"].resize.return_value = mocks["guestfs"]
+        mocks["guestfs"].set_hostname.return_value = mocks["guestfs"]
+        mocks["guestfs"].inject_dns.return_value = mocks["guestfs"]
+        mocks["guestfs"].setup_ssh.return_value = mocks["guestfs"]
+        mocks["guestfs"].run.return_value = None
+
+        VMOperation.create(
+            VMCreateInput(name=name, ssh_keys=[], enable_console=False)
+        )
+        return VMOperation.get(VMInput(identifiers=[name]))
+
+    def test_create_then_remove(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Full lifecycle: create → verify → remove → verify gone."""
+        vm = self._create_vm(monkeypatch, "rm-test-vm")
+        assert vm is not None
+
+        VMOperation.remove(VMInput(identifiers=["rm-test-vm"]))
+
+        with pytest.raises(VMNotFoundError):
+            VMOperation.get(VMInput(identifiers=["rm-test-vm"]))
+
+    def test_remove_cleans_vm_dir(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Removing a VM also removes its VM directory."""
+        from mvmctl.utils.common import CacheUtils
+
+        vm = self._create_vm(monkeypatch, "cleanup-dir-vm")
+        vm_dir = CacheUtils.get_vm_dir(vm.id)
+        assert vm_dir.exists()
+
+        VMOperation.remove(VMInput(identifiers=["cleanup-dir-vm"]))
+        assert not vm_dir.exists()
+
+    def test_remove_updates_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """After removal, the VM no longer appears in list_all()."""
+        self._create_vm(monkeypatch, "list-after-rm")
+        vms_before = VMOperation.list_all()
+        assert any(v.name == "list-after-rm" for v in vms_before)
+
+        VMOperation.remove(VMInput(identifiers=["list-after-rm"]))
+        vms_after = VMOperation.list_all()
+        assert not any(v.name == "list-after-rm" for v in vms_after)
+
+    def test_remove_nonexistent_vm(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Removing a VM that does not exist raises VMNotFoundError."""
+        with pytest.raises(VMNotFoundError):
+            VMOperation.remove(VMInput(identifiers=["nonexistent-vm"]))
+
+
+class TestVMStatusFiltering:
+    """Test VM listing with status filtering."""
+
+    @staticmethod
+    def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+        from tests.integration.conftest import (
+            SmartPopenMock,
+            SmartSubprocessMock,
+        )
+
+        sub_mock = SmartSubprocessMock()
+        popen_mock = SmartPopenMock()
+        monkeypatch.setattr("subprocess.run", sub_mock)
+        monkeypatch.setattr("subprocess.Popen", popen_mock)
+
+        gp_mock = MagicMock()
+        monkeypatch.setattr(
+            "mvmctl.api.vm_operations.GuestfsProvisioner",
+            lambda *args, **kwargs: gp_mock,
+        )
+        gp_mock.resize.return_value = gp_mock
+        gp_mock.set_hostname.return_value = gp_mock
+        gp_mock.inject_dns.return_value = gp_mock
+        gp_mock.setup_ssh.return_value = gp_mock
+        gp_mock.run.return_value = None
+        return {"subprocess": sub_mock, "popen": popen_mock, "guestfs": gp_mock}
+
+    def _create_vm(self, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+        _mocks = self._setup_mocks(monkeypatch)
+        VMOperation.create(
+            VMCreateInput(name=name, ssh_keys=[], enable_console=False)
+        )
+
+    def test_list_all_vms(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """list_all() returns all created VMs."""
+        self._create_vm(monkeypatch, "filter-vm-1")
+        self._create_vm(monkeypatch, "filter-vm-2")
+        all_vms = VMOperation.list_all()
+        names = [v.name for v in all_vms]
+        assert "filter-vm-1" in names
+        assert "filter-vm-2" in names
+
+    def test_list_by_status(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """list_all(status=VMStatus.RUNNING) returns only running VMs."""
+        self._create_vm(monkeypatch, "status-vm")
+        running = VMOperation.list_all(status=VMStatus.RUNNING)
+        vm_names = [v.name for v in running]
+        assert "status-vm" in vm_names
+        assert all(v.status == VMStatus.RUNNING for v in running)
+
+
+class TestVMEdgeCases:
+    """Test edge cases and error handling in the VM lifecycle."""
+
+    def test_get_nonexistent_vm(self) -> None:
+        """Getting a non-existent VM raises VMNotFoundError."""
+        with pytest.raises(VMNotFoundError):
+            VMOperation.get(VMInput(identifiers=["no-such-vm"]))
+
+    def test_list_empty_returns_empty_list(self) -> None:
+        """list_all() returns empty list when no VMs exist."""
+        vms = VMOperation.list_all()
+        assert vms == []
+
+    def test_list_by_status_empty(self) -> None:
+        """list_all(status=...) returns empty list when no VMs match."""
+        vms = VMOperation.list_all(status=VMStatus.RUNNING)
+        # Should not raise — returns []
+        assert isinstance(vms, list)
+
+    def test_get_with_empty_identifiers(self) -> None:
+        """VMInput with no identifiers raises VMNotFoundError."""
+        with pytest.raises(VMNotFoundError):
+            VMOperation.get(VMInput(identifiers=[]))
+
+
+class TestVMSnapshotWorkflow:
+    """Test VM snapshot and load through the real API."""
+
+    @staticmethod
+    def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+        from tests.integration.conftest import (
+            SmartPopenMock,
+            SmartSubprocessMock,
+        )
+
+        sub_mock = SmartSubprocessMock()
+        popen_mock = SmartPopenMock()
+        monkeypatch.setattr("subprocess.run", sub_mock)
+        monkeypatch.setattr("subprocess.Popen", popen_mock)
+
+        gp_mock = MagicMock()
+        monkeypatch.setattr(
+            "mvmctl.api.vm_operations.GuestfsProvisioner",
+            lambda *args, **kwargs: gp_mock,
+        )
+        gp_mock.resize.return_value = gp_mock
+        gp_mock.set_hostname.return_value = gp_mock
+        gp_mock.inject_dns.return_value = gp_mock
+        gp_mock.setup_ssh.return_value = gp_mock
+        gp_mock.run.return_value = None
+
+        # Mock the FirecrackerSpawner.snapshot() so it doesn't issue real API calls
+        monkeypatch.setattr(
+            "mvmctl.core.vm._controller.VMController.snapshot",
+            MagicMock(return_value=None),
+        )
+        monkeypatch.setattr(
+            "mvmctl.core.vm._controller.VMController.load_snapshot",
+            MagicMock(return_value=None),
+        )
+
+        return {"subprocess": sub_mock, "popen": popen_mock, "guestfs": gp_mock}
+
+    def test_create_and_snapshot(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Create a VM, snapshot it, and load the snapshot."""
+        self._setup_mocks(monkeypatch)
+
+        VMOperation.create(
+            VMCreateInput(name="snap-vm", ssh_keys=[], enable_console=False)
+        )
+        vm = VMOperation.get(VMInput(identifiers=["snap-vm"]))
+        assert vm is not None
+
+        mem_path = tmp_path / "snap.mem"
+        state_path = tmp_path / "snap.state"
+        VMOperation.snapshot(
+            VMInput(identifiers=["snap-vm"]),
+            mem_out=mem_path,
+            state_out=state_path,
+        )
+
+    def test_create_snapshot_and_load(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Create a VM, snapshot, then load the snapshot."""
+        self._setup_mocks(monkeypatch)
+
+        VMOperation.create(
+            VMCreateInput(
+                name="load-snap-vm", ssh_keys=[], enable_console=False
+            )
+        )
+
+        mem_path = tmp_path / "load.mem"
+        state_path = tmp_path / "load.state"
+        VMOperation.snapshot(
+            VMInput(identifiers=["load-snap-vm"]),
+            mem_out=mem_path,
+            state_out=state_path,
+        )
+        VMOperation.load_snapshot(
+            VMInput(identifiers=["load-snap-vm"]),
+            mem_in=mem_path,
+            state_in=state_path,
+        )
+
+
+class TestVMInspect:
+    """Test VM inspection through the real API."""
+
+    @staticmethod
+    def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+        from tests.integration.conftest import (
+            SmartPopenMock,
+            SmartSubprocessMock,
+        )
+
+        sub_mock = SmartSubprocessMock()
+        popen_mock = SmartPopenMock()
+        monkeypatch.setattr("subprocess.run", sub_mock)
+        monkeypatch.setattr("subprocess.Popen", popen_mock)
+
+        gp_mock = MagicMock()
+        monkeypatch.setattr(
+            "mvmctl.api.vm_operations.GuestfsProvisioner",
+            lambda *args, **kwargs: gp_mock,
+        )
+        gp_mock.resize.return_value = gp_mock
+        gp_mock.set_hostname.return_value = gp_mock
+        gp_mock.inject_dns.return_value = gp_mock
+        gp_mock.setup_ssh.return_value = gp_mock
+        gp_mock.run.return_value = None
+        return {"subprocess": sub_mock, "popen": popen_mock, "guestfs": gp_mock}
+
+    def test_inspect_vm(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Create a VM and inspect it, verifying all flat-mode fields."""
+        self._setup_mocks(monkeypatch)
+        VMOperation.create(
+            VMCreateInput(name="inspect-vm", ssh_keys=[], enable_console=False)
+        )
+        vm = VMOperation.get(VMInput(identifiers=["inspect-vm"]))
+        result = VMOperation.inspect(VMInput(identifiers=["inspect-vm"]))
+
+        assert result["id"] == vm.id
+        assert result["name"] == "inspect-vm"
+        assert result["status"] == VMStatus.RUNNING
+        assert result["vcpus"] == vm.vcpu_count
+        assert result["mem_mib"] == vm.mem_size_mib
+        assert result["image_id"] == vm.image_id
+        assert result["image_name"] is not None
+        assert result["kernel_id"] == vm.kernel_id
+        assert result["kernel_version"] is not None
+        assert result["network_id"] == vm.network_id
+        assert result["network_name"] is not None
+        assert result["binary_id"] == vm.binary_id
+        assert result["binary_name"] is not None
+        assert result["vm_dir"] is not None
+        assert result["rootfs_path"] is not None
+        assert result["config_path"] is not None
+        assert result["relay_running"] is False
+        assert result["relay_pid"] is None
+        assert result["tap_device"] == vm.tap_device
+        assert result["ipv4"] == vm.ipv4
+        assert result["mac"] == vm.mac
+
+    def test_inspect_nonexistent_vm(self) -> None:
+        """Inspecting a non-existent VM raises VMNotFoundError."""
+        with pytest.raises(VMNotFoundError):
+            VMOperation.inspect(VMInput(identifiers=["no-such-vm"]))
+
+    def test_inspect_vm_tree(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Inspect with tree=True returns enriched tree data."""
+        self._setup_mocks(monkeypatch)
+        VMOperation.create(
+            VMCreateInput(
+                name="inspect-tree-vm", ssh_keys=[], enable_console=False
+            )
+        )
+        result = VMOperation.inspect(
+            VMInput(identifiers=["inspect-tree-vm"]), tree=True
+        )
+
+        assert "vm" in result
+        assert "resources" in result
+        assert "networking" in result
+        assert "assets" in result
+        assert "filesystem" in result
+        assert "console" in result
+
+        assert result["vm"]["name"] == "inspect-tree-vm"
+        assert result["resources"]["vcpus"] > 0
+        assert result["resources"]["mem"] > 0
+        assert result["networking"]["network_name"] is not None
+        assert result["assets"]["image_name"] is not None
+        assert result["assets"]["kernel_version"] is not None
+        assert result["assets"]["binary_name"] is not None
+        assert result["filesystem"]["vm_dir"] is not None
+        assert result["filesystem"]["rootfs_path"] is not None
+        assert result["console"]["relay_running"] is False
+
+
+class TestVMCreateExplicit:
+    """Test VM creation with explicit non-default assets and parameters."""
+
+    @staticmethod
+    def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+        from tests.integration.conftest import (
+            SmartPopenMock,
+            SmartSubprocessMock,
+        )
+
+        sub_mock = SmartSubprocessMock()
+        popen_mock = SmartPopenMock()
+        monkeypatch.setattr("subprocess.run", sub_mock)
+        monkeypatch.setattr("subprocess.Popen", popen_mock)
+
+        gp_mock = MagicMock()
+        monkeypatch.setattr(
+            "mvmctl.api.vm_operations.GuestfsProvisioner",
+            lambda *args, **kwargs: gp_mock,
+        )
+        gp_mock.resize.return_value = gp_mock
+        gp_mock.set_hostname.return_value = gp_mock
+        gp_mock.inject_dns.return_value = gp_mock
+        gp_mock.setup_ssh.return_value = gp_mock
+        gp_mock.run.return_value = None
+        return {"subprocess": sub_mock, "popen": popen_mock, "guestfs": gp_mock}
+
+    def _seed_second_image(self) -> str:
+        from mvmctl.core._shared import Database
+        from mvmctl.core.image._repository import ImageRepository
+        from mvmctl.models import ImageItem
+        from mvmctl.utils.common import CacheUtils
+
+        db = Database()
+        repo = ImageRepository(db)
+        image_id = "e" * 64
+        repo.upsert(
+            ImageItem(
+                id=image_id,
+                os_slug="debian-12",
+                os_name="Debian 12",
+                arch="x86_64",
+                path="debian-12.ext4",
+                fs_type="ext4",
+                minimum_rootfs_size_mib=10,
+                original_size=10485760,
+                is_default=False,
+                is_present=True,
+                pulled_at="2026-01-01T00:00:00+00:00",
+                created_at="2026-01-01T00:00:00+00:00",
+                updated_at="2026-01-01T00:00:00+00:00",
+                fs_uuid="87654321-4321-4321-4321-cba987654321",
+            )
+        )
+        images_dir = CacheUtils.get_images_dir()
+        (images_dir / "debian-12.ext4").write_text("fake debian image")
+        warm_dir = CacheUtils.get_warm_image_dir()
+        (warm_dir / f"{image_id}.ext4").write_bytes(
+            b"\x00" * (10 * 1024 * 1024)
+        )
+        return image_id
+
+    def _seed_second_kernel(self) -> str:
+        from mvmctl.core._shared import Database
+        from mvmctl.core.kernel._repository import KernelRepository
+        from mvmctl.models import KernelItem
+        from mvmctl.utils.common import CacheUtils
+
+        db = Database()
+        repo = KernelRepository(db)
+        kernel_id = "f" * 64
+        repo.upsert(
+            KernelItem(
+                id=kernel_id,
+                name="vmlinux",
+                base_name="vmlinux",
+                version="6.6.0",
+                arch="x86_64",
+                type="official",
+                path="vmlinux-custom",
+                is_default=False,
+                is_present=True,
+                created_at="2026-01-01T00:00:00+00:00",
+                updated_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+        kernels_dir = CacheUtils.get_kernels_dir()
+        (kernels_dir / "vmlinux-custom").write_text("fake custom kernel")
+        return kernel_id
+
+    def _seed_second_binary(self) -> str:
+        from mvmctl.core._shared import Database
+        from mvmctl.core.binary._repository import BinaryRepository
+        from mvmctl.models import BinaryItem
+        from mvmctl.utils.common import CacheUtils
+
+        db = Database()
+        repo = BinaryRepository(db)
+        binary_id = "g" * 64
+        repo.upsert(
+            BinaryItem(
+                id=binary_id,
+                name="firecracker",
+                version="1.16.0",
+                full_version="v1.16.0",
+                ci_version="v1.16",
+                path="firecracker-custom",
+                is_default=False,
+                is_present=True,
+                created_at="2026-01-01T00:00:00+00:00",
+                updated_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+        bin_dir = CacheUtils.get_bin_dir()
+        fc_file = bin_dir / "firecracker-custom"
+        fc_file.write_text("fake custom firecracker")
+        fc_file.chmod(0o755)
+        return binary_id
+
+    def _seed_second_network(self) -> str:
+        from mvmctl.core._shared import Database
+        from mvmctl.core.network._repository import NetworkRepository
+        from mvmctl.models import NetworkItem
+
+        db = Database()
+        repo = NetworkRepository(db)
+        network_id = "h" * 64
+        repo.upsert(
+            NetworkItem(
+                id=network_id,
+                name="custom-net",
+                subnet="10.30.0.0/24",
+                bridge="mvm-br1",
+                ipv4_gateway="10.30.0.1",
+                bridge_active=True,
+                nat_enabled=True,
+                nat_gateways="eth0",
+                is_default=False,
+                is_present=True,
+                created_at="2026-01-01T00:00:00+00:00",
+                updated_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+        return network_id
+
+    def test_create_vm_with_explicit_kernel_image_binary(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Create VM with explicit non-default kernel, image, and binary."""
+        self._setup_mocks(monkeypatch)
+        image_id = self._seed_second_image()
+        kernel_id = self._seed_second_kernel()
+        binary_id = self._seed_second_binary()
+
+        VMOperation.create(
+            VMCreateInput(
+                name="explicit-assets-vm",
+                ssh_keys=[],
+                enable_console=False,
+                image=image_id,
+                kernel_id=kernel_id,
+                binary_id=binary_id,
+            )
+        )
+
+        vm = VMOperation.get(VMInput(identifiers=["explicit-assets-vm"]))
+        assert vm.image_id == image_id
+        assert vm.kernel_id == kernel_id
+        assert vm.binary_id == binary_id
+
+    def test_create_vm_with_custom_vcpus_memory(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Create VM with custom vcpu_count and mem_size_mib."""
+        self._setup_mocks(monkeypatch)
+        VMOperation.create(
+            VMCreateInput(
+                name="custom-cpu-mem-vm",
+                ssh_keys=[],
+                enable_console=False,
+                vcpu_count=4,
+                mem_size_mib=512,
+            )
+        )
+
+        vm = VMOperation.get(VMInput(identifiers=["custom-cpu-mem-vm"]))
+        assert vm.vcpu_count == 4
+        assert vm.mem_size_mib == 512
+
+    def test_create_vm_with_explicit_network_name(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Create VM with an explicit non-default network name."""
+        self._setup_mocks(monkeypatch)
+        network_id = self._seed_second_network()
+
+        VMOperation.create(
+            VMCreateInput(
+                name="explicit-net-vm",
+                ssh_keys=[],
+                enable_console=False,
+                network_name="custom-net",
+            )
+        )
+
+        vm = VMOperation.get(VMInput(identifiers=["explicit-net-vm"]))
+        assert vm.network_id == network_id
+
     def test_create_duplicate_vm_name(
-        self, mock_create, mock_resolve_image, mock_fc_bin, mock_check_priv
-    ):
-        """Test attempting to create a VM with a duplicate name."""
-        from mvmctl.exceptions import MVMError
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Creating a VM with a duplicate name raises an integrity error."""
+        self._setup_mocks(monkeypatch)
+        VMOperation.create(
+            VMCreateInput(name="dup-vm", ssh_keys=[], enable_console=False)
+        )
 
-        mock_check_priv.return_value = None
-        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
-        mock_resolve_image.return_value = Path("/tmp/image.ext4")
-        mock_create.side_effect = MVMError("VM 'duplicate-vm' already exists")
+        with pytest.raises(sqlite3.IntegrityError):
+            VMOperation.create(
+                VMCreateInput(name="dup-vm", ssh_keys=[], enable_console=False)
+            )
 
-        result = runner.invoke(vm_app, ["create", "--name", "duplicate-vm", "--image", "abc123"])
-        assert result.exit_code == 1
-        assert "already exists" in result.output.lower()
+
+class TestVMRemoveForce:
+    """Test VM removal with force flag."""
+
+    @staticmethod
+    def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+        from tests.integration.conftest import (
+            SmartPopenMock,
+            SmartSubprocessMock,
+        )
+
+        sub_mock = SmartSubprocessMock()
+        popen_mock = SmartPopenMock()
+        monkeypatch.setattr("subprocess.run", sub_mock)
+        monkeypatch.setattr("subprocess.Popen", popen_mock)
+
+        gp_mock = MagicMock()
+        monkeypatch.setattr(
+            "mvmctl.api.vm_operations.GuestfsProvisioner",
+            lambda *args, **kwargs: gp_mock,
+        )
+        gp_mock.resize.return_value = gp_mock
+        gp_mock.set_hostname.return_value = gp_mock
+        gp_mock.inject_dns.return_value = gp_mock
+        gp_mock.setup_ssh.return_value = gp_mock
+        gp_mock.run.return_value = None
+        return {"subprocess": sub_mock, "popen": popen_mock, "guestfs": gp_mock}
+
+    def test_remove_vm_with_force(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Create a VM and remove it with force=True."""
+        self._setup_mocks(monkeypatch)
+        VMOperation.create(
+            VMCreateInput(name="force-rm-vm", ssh_keys=[], enable_console=False)
+        )
+        vm = VMOperation.get(VMInput(identifiers=["force-rm-vm"]))
+        from mvmctl.utils.common import CacheUtils
+
+        vm_dir = CacheUtils.get_vm_dir(vm.id)
+        assert vm_dir.exists()
+
+        VMOperation.remove(VMInput(identifiers=["force-rm-vm"], force=True))
+
+        with pytest.raises(VMNotFoundError):
+            VMOperation.get(VMInput(identifiers=["force-rm-vm"]))
+        assert not vm_dir.exists()
+
+
+class TestVMCleanup:
+    """Test VM cleanup without DB removal."""
+
+    @staticmethod
+    def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+        from tests.integration.conftest import (
+            SmartPopenMock,
+            SmartSubprocessMock,
+        )
+
+        sub_mock = SmartSubprocessMock()
+        popen_mock = SmartPopenMock()
+        monkeypatch.setattr("subprocess.run", sub_mock)
+        monkeypatch.setattr("subprocess.Popen", popen_mock)
+
+        gp_mock = MagicMock()
+        monkeypatch.setattr(
+            "mvmctl.api.vm_operations.GuestfsProvisioner",
+            lambda *args, **kwargs: gp_mock,
+        )
+        gp_mock.resize.return_value = gp_mock
+        gp_mock.set_hostname.return_value = gp_mock
+        gp_mock.inject_dns.return_value = gp_mock
+        gp_mock.setup_ssh.return_value = gp_mock
+        gp_mock.run.return_value = None
+        return {"subprocess": sub_mock, "popen": popen_mock, "guestfs": gp_mock}
+
+    def test_cleanup_vm(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Create a VM, call cleanup, verify stopped and files cleaned."""
+        self._setup_mocks(monkeypatch)
+        VMOperation.create(
+            VMCreateInput(name="cleanup-vm", ssh_keys=[], enable_console=False)
+        )
+        vm_before = VMOperation.get(VMInput(identifiers=["cleanup-vm"]))
+        from mvmctl.utils.common import CacheUtils
+
+        vm_dir = CacheUtils.get_vm_dir(vm_before.id)
+        assert vm_dir.exists()
+        assert vm_before.status == VMStatus.RUNNING
+
+        VMOperation.cleanup(VMInput(identifiers=["cleanup-vm"]))
+
+        vm_after = VMOperation.get(VMInput(identifiers=["cleanup-vm"]))
+        assert vm_after.status == VMStatus.STOPPED
+        assert not vm_dir.exists()

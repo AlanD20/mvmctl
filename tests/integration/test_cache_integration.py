@@ -1,0 +1,409 @@
+"""Integration tests for Cache API operations through the real public API.
+
+Tests exercise cache management workflows:
+  init → prune VMs/images/kernels/binaries/networks/misc → prune_all → clean
+
+Only subprocess (system-level operations like cp, dd, ip, iptables, firecracker)
+are mocked. ALL orchestration logic in api/ and core/ runs unmocked.
+"""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock
+
+import pytest
+
+from mvmctl.api import CacheOperation, VMCreateInput, VMInput, VMOperation
+from mvmctl.core._shared import Database
+from mvmctl.core.binary._repository import BinaryRepository
+from mvmctl.core.image._repository import ImageRepository
+from mvmctl.core.kernel._repository import KernelRepository
+from mvmctl.exceptions import VMNotFoundError
+from mvmctl.models import (
+    BinaryItem,
+    CleanResult,
+    ImageItem,
+    KernelItem,
+    PruneAllResult,
+    VMStatus,
+)
+from mvmctl.utils.common import CacheUtils
+
+# ======================================================================
+# Cache init tests
+# ======================================================================
+
+
+class TestCacheInit:
+    """Test CacheOperation.init_all directory creation."""
+
+    def test_init_all_creates_directories(self) -> None:
+        """init_all creates all expected cache subdirectories."""
+        result = CacheOperation.init_all()
+
+        assert "cache_dir" in result
+        assert "directories" in result
+        assert result["cache_dir"] == str(CacheUtils.get_cache_dir())
+
+        dirs = result["directories"]
+        assert isinstance(dirs, list)
+        assert str(CacheUtils.get_vms_dir()) in dirs
+        assert str(CacheUtils.get_images_dir()) in dirs
+        assert str(CacheUtils.get_kernels_dir()) in dirs
+        assert str(CacheUtils.get_bin_dir()) in dirs
+        assert str(CacheUtils.get_logs_dir()) in dirs
+        assert str(CacheUtils.get_keys_dir()) in dirs
+
+        assert CacheUtils.get_vms_dir().exists()
+        assert CacheUtils.get_images_dir().exists()
+        assert CacheUtils.get_kernels_dir().exists()
+        assert CacheUtils.get_bin_dir().exists()
+        assert CacheUtils.get_logs_dir().exists()
+        assert CacheUtils.get_keys_dir().exists()
+
+
+# ======================================================================
+# VM prune tests
+# ======================================================================
+
+
+class TestCachePruneVMs:
+    """Test CacheOperation.prune_vms with real VM lifecycle."""
+
+    @staticmethod
+    def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+        """Apply subprocess mocks and return references for assertions."""
+        from tests.integration.conftest import (
+            SmartPopenMock,
+            SmartSubprocessMock,
+        )
+
+        sub_mock = SmartSubprocessMock()
+        popen_mock = SmartPopenMock()
+        monkeypatch.setattr("subprocess.run", sub_mock)
+        monkeypatch.setattr("subprocess.Popen", popen_mock)
+
+        gp_mock = MagicMock()
+        monkeypatch.setattr(
+            "mvmctl.api.vm_operations.GuestfsProvisioner",
+            lambda *args, **kwargs: gp_mock,
+        )
+        return {"subprocess": sub_mock, "popen": popen_mock, "guestfs": gp_mock}
+
+    def _create_vm(self, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+        """Create a VM with all mocks applied."""
+        mocks = self._setup_mocks(monkeypatch)
+        mocks["guestfs"].resize.return_value = mocks["guestfs"]
+        mocks["guestfs"].set_hostname.return_value = mocks["guestfs"]
+        mocks["guestfs"].inject_dns.return_value = mocks["guestfs"]
+        mocks["guestfs"].setup_ssh.return_value = mocks["guestfs"]
+        mocks["guestfs"].run.return_value = None
+        VMOperation.create(
+            VMCreateInput(name=name, ssh_keys=[], enable_console=False)
+        )
+
+    def test_prune_vms_dry_run_skips_running(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """dry_run=True with default include_all=False skips running VMs."""
+        self._create_vm(monkeypatch, "prune-dry-vm")
+
+        result = CacheOperation.prune_vms(dry_run=True)
+        assert result == []
+
+        vm = VMOperation.get(VMInput(identifiers=["prune-dry-vm"]))
+        assert vm.name == "prune-dry-vm"
+        assert vm.status == VMStatus.RUNNING.value
+
+    def test_prune_vms_dry_run_include_all_reports_running(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """dry_run=True with include_all=True reports running VMs for removal."""
+        self._create_vm(monkeypatch, "prune-include-vm")
+
+        result = CacheOperation.prune_vms(dry_run=True, include_all=True)
+        assert result == ["prune-include-vm"]
+
+        vm = VMOperation.get(VMInput(identifiers=["prune-include-vm"]))
+        assert vm.name == "prune-include-vm"
+
+    def test_prune_vms_actual_removes_stopped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """prune_vms(dry_run=False) removes stopped VMs."""
+        self._create_vm(monkeypatch, "prune-real-vm")
+
+        # Patch VMController.stop to avoid real OS signals in tests
+        # and to allow VMOperation.remove() to succeed on stopped VMs.
+        def _patched_stop(self, force: bool = False) -> None:
+            self._repo.update_status(self._vm.id, VMStatus.STOPPED.value)
+
+        monkeypatch.setattr(
+            "mvmctl.core.vm._controller.VMController.stop",
+            _patched_stop,
+        )
+
+        VMOperation.stop(VMInput(identifiers=["prune-real-vm"]))
+
+        vm = VMOperation.get(VMInput(identifiers=["prune-real-vm"]))
+        assert vm.status == VMStatus.STOPPED.value
+
+        result = CacheOperation.prune_vms(dry_run=False)
+        assert result == ["prune-real-vm"]
+
+        with pytest.raises(VMNotFoundError):
+            VMOperation.get(VMInput(identifiers=["prune-real-vm"]))
+
+    def test_prune_vms_empty_returns_empty(self) -> None:
+        """prune_vms with no VMs returns an empty list."""
+        result = CacheOperation.prune_vms(dry_run=True)
+        assert result == []
+
+
+# ======================================================================
+# Asset prune tests
+# ======================================================================
+
+
+class TestCachePruneAssets:
+    """Test pruning of images, kernels, binaries, and networks."""
+
+    @staticmethod
+    def _seed_extra_image(image_id: str = "e" * 64) -> str:
+        """Seed an image that is not default and not referenced by VMs."""
+        db = Database()
+        repo = ImageRepository(db)
+        repo.upsert(
+            ImageItem(
+                id=image_id,
+                os_slug="alpine-3.19",
+                os_name="Alpine 3.19",
+                arch="x86_64",
+                path="alpine-3.19.ext4",
+                fs_type="ext4",
+                minimum_rootfs_size_mib=5,
+                original_size=5242880,
+                is_default=False,
+                is_present=True,
+                pulled_at="2026-01-01T00:00:00+00:00",
+                created_at="2026-01-01T00:00:00+00:00",
+                updated_at="2026-01-01T00:00:00+00:00",
+                fs_uuid="87654321-4321-4321-4321-210987654321",
+            )
+        )
+        return image_id
+
+    @staticmethod
+    def _seed_extra_kernel(kernel_id: str = "f" * 64) -> str:
+        """Seed a kernel that is not default and not referenced by VMs."""
+        db = Database()
+        repo = KernelRepository(db)
+        repo.upsert(
+            KernelItem(
+                id=kernel_id,
+                name="vmlinux-custom",
+                base_name="vmlinux-custom",
+                version="6.6.0",
+                arch="x86_64",
+                type="custom",
+                path="vmlinux-custom",
+                is_default=False,
+                is_present=True,
+                created_at="2026-01-01T00:00:00+00:00",
+                updated_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+        return kernel_id
+
+    @staticmethod
+    def _seed_extra_binary(binary_id: str = "0" * 64) -> str:
+        """Seed a binary that is not the default version."""
+        db = Database()
+        repo = BinaryRepository(db)
+        repo.upsert(
+            BinaryItem(
+                id=binary_id,
+                name="firecracker",
+                version="1.14.0",
+                full_version="v1.14.0",
+                ci_version="v1.14",
+                path="firecracker-1.14.0",
+                is_default=False,
+                is_present=True,
+                created_at="2026-01-01T00:00:00+00:00",
+                updated_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+        return binary_id
+
+    def test_prune_images_removes_unreferenced(self) -> None:
+        """prune_images removes images that are not default and not referenced."""
+        image_id = self._seed_extra_image()
+
+        result = CacheOperation.prune_images(dry_run=False)
+        assert image_id in result
+
+        db = Database()
+        repo = ImageRepository(db)
+        assert repo.get(image_id) is None
+
+    def test_prune_images_dry_run_reports_only(self) -> None:
+        """prune_images(dry_run=True) reports but does not remove."""
+        image_id = self._seed_extra_image()
+
+        result = CacheOperation.prune_images(dry_run=True)
+        assert image_id in result
+
+        db = Database()
+        repo = ImageRepository(db)
+        assert repo.get(image_id) is not None
+
+    def test_prune_kernels_removes_unreferenced(self) -> None:
+        """prune_kernels removes kernels that are not default and not referenced."""
+        kernel_id = self._seed_extra_kernel()
+
+        result = CacheOperation.prune_kernels(dry_run=False)
+        assert kernel_id in result
+
+        db = Database()
+        repo = KernelRepository(db)
+        assert repo.get(kernel_id) is None
+
+    def test_prune_kernels_dry_run_reports_only(self) -> None:
+        """prune_kernels(dry_run=True) reports but does not remove."""
+        kernel_id = self._seed_extra_kernel()
+
+        result = CacheOperation.prune_kernels(dry_run=True)
+        assert kernel_id in result
+
+        db = Database()
+        repo = KernelRepository(db)
+        assert repo.get(kernel_id) is not None
+
+    def test_prune_binaries_removes_unreferenced(self) -> None:
+        """prune_binaries removes binaries that are not the default version."""
+        binary_id = self._seed_extra_binary()
+
+        result = CacheOperation.prune_binaries(dry_run=False)
+        assert "firecracker:1.14.0" in result
+
+        db = Database()
+        repo = BinaryRepository(db)
+        assert repo.get(binary_id) is None
+
+    def test_prune_binaries_dry_run_reports_only(self) -> None:
+        """prune_binaries(dry_run=True) reports but does not remove."""
+        binary_id = self._seed_extra_binary()
+
+        result = CacheOperation.prune_binaries(dry_run=True)
+        assert "firecracker:1.14.0" in result
+
+        db = Database()
+        repo = BinaryRepository(db)
+        assert repo.get(binary_id) is not None
+
+    def test_prune_networks_dry_run_respects_defaults(self) -> None:
+        """prune_networks(dry_run=True) skips default and referenced networks."""
+        result = CacheOperation.prune_networks(dry_run=True)
+        assert isinstance(result, list)
+        assert len(result) == 0
+
+    def test_prune_misc_returns_dict(self) -> None:
+        """prune_misc returns a dictionary with expected keys."""
+        result = CacheOperation.prune_misc(dry_run=True)
+        assert isinstance(result, dict)
+        assert "appliance" in result
+        assert "warm_images" in result
+        assert "guestfs_state" in result
+
+
+# ======================================================================
+# prune_all tests
+# ======================================================================
+
+
+class TestCachePruneAll:
+    """Test CacheOperation.prune_all aggregated pruning."""
+
+    @staticmethod
+    def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+        from tests.integration.conftest import (
+            SmartPopenMock,
+            SmartSubprocessMock,
+        )
+
+        sub_mock = SmartSubprocessMock()
+        popen_mock = SmartPopenMock()
+        monkeypatch.setattr("subprocess.run", sub_mock)
+        monkeypatch.setattr("subprocess.Popen", popen_mock)
+
+        gp_mock = MagicMock()
+        monkeypatch.setattr(
+            "mvmctl.api.vm_operations.GuestfsProvisioner",
+            lambda *args, **kwargs: gp_mock,
+        )
+        return {"subprocess": sub_mock, "popen": popen_mock, "guestfs": gp_mock}
+
+    def _create_vm(self, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+        """Create a VM with all mocks applied."""
+        mocks = self._setup_mocks(monkeypatch)
+        mocks["guestfs"].resize.return_value = mocks["guestfs"]
+        mocks["guestfs"].set_hostname.return_value = mocks["guestfs"]
+        mocks["guestfs"].inject_dns.return_value = mocks["guestfs"]
+        mocks["guestfs"].setup_ssh.return_value = mocks["guestfs"]
+        mocks["guestfs"].run.return_value = None
+        VMOperation.create(
+            VMCreateInput(name=name, ssh_keys=[], enable_console=False)
+        )
+
+    def test_prune_all_dry_run_returns_aggregated_result(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """prune_all(dry_run=True) returns PruneAllResult with aggregated IDs."""
+        self._create_vm(monkeypatch, "prune-all-vm")
+
+        result = CacheOperation.prune_all(dry_run=True, include_all=True)
+
+        assert isinstance(result, PruneAllResult)
+        assert "prune-all-vm" in result.pruned_ids
+        assert result.had_running_vms is True
+        assert result.failed_ids == []
+
+    def test_prune_all_empty_returns_empty_result(self) -> None:
+        """prune_all with no resources returns empty pruned_ids."""
+        result = CacheOperation.prune_all(dry_run=True)
+
+        assert isinstance(result, PruneAllResult)
+        assert result.pruned_ids == []
+        assert result.failed_ids == []
+        assert result.had_running_vms is False
+
+
+# ======================================================================
+# clean tests
+# ======================================================================
+
+
+class TestCacheClean:
+    """Test CacheOperation.clean."""
+
+    def test_clean_dry_run_returns_clean_result(self) -> None:
+        """clean(dry_run=True) returns CleanResult without removing anything."""
+        result = CacheOperation.clean(dry_run=True)
+
+        assert isinstance(result, CleanResult)
+        assert isinstance(result.prune_result, PruneAllResult)
+        assert result.cache_dir_removed is True
+        assert result.cache_dir == str(CacheUtils.get_cache_dir())
+        assert CacheUtils.get_cache_dir().exists()
+
+    def test_clean_empty_cache_handles_gracefully(self) -> None:
+        """clean(dry_run=True) handles empty cache gracefully."""
+        result = CacheOperation.clean(dry_run=True)
+
+        assert isinstance(result, CleanResult)
+        assert isinstance(result.prune_result, PruneAllResult)
+        assert result.prune_result.pruned_ids == []
+        assert result.prune_result.failed_ids == []
+        assert result.prune_result.had_running_vms is False
+        assert result.cache_dir_removed is True
