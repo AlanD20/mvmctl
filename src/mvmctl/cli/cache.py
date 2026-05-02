@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import typer
+from rich.console import Console
 
 from mvmctl.api import CacheOperation
+from mvmctl.models.result import ProgressEvent
 from mvmctl.utils._io import (
     print_error,
     print_info,
@@ -32,9 +34,20 @@ def help_cmd(ctx: typer.Context) -> None:
 @handle_errors
 def cache_init() -> None:
     """Initialize all cache resources."""
-    result = CacheOperation.init_all()
-    print_success("Cache initialized successfully")
-    for resource, path in result.items():
+    console = Console()
+    with console.status("", spinner="dots") as status:
+
+        def _on_progress(event: ProgressEvent) -> None:
+            if event.message:
+                status.update(f"[dim]{event.message}[/dim]")
+
+        operation_result = CacheOperation.init_all(on_progress=_on_progress)
+    if operation_result.is_error:
+        print_error(operation_result.message)
+        raise typer.Exit(code=1)
+    print_success(operation_result.message)
+    item = operation_result.item or {}
+    for resource, path in item.items():
         if path:
             print_info(f"  {resource}: {path}")
 
@@ -87,18 +100,26 @@ def cache_prune(
 
     """
     if resource == "vm":
-        removed = CacheOperation.prune_vms(
+        result = CacheOperation.prune_vms(
             dry_run=dry_run, include_all=all_resources
         )
+        if result.is_error:
+            print_error(result.message)
+            raise typer.Exit(code=1)
+        removed = result.item or []
         if removed:
             print_success(f"Pruned {len(removed)} VM(s): {', '.join(removed)}")
         else:
             print_info("No VMs to prune")
 
     elif resource == "network":
-        removed = CacheOperation.prune_networks(
+        result = CacheOperation.prune_networks(
             dry_run=dry_run, include_all=all_resources
         )
+        if result.is_error:
+            print_error(result.message)
+            raise typer.Exit(code=1)
+        removed = result.item or []
         if removed:
             if dry_run:
                 print_info(
@@ -112,9 +133,13 @@ def cache_prune(
             print_info("No networks to prune")
 
     elif resource == "image":
-        removed = CacheOperation.prune_images(
+        result = CacheOperation.prune_images(
             dry_run=dry_run, include_all=all_resources
         )
+        if result.is_error:
+            print_error(result.message)
+            raise typer.Exit(code=1)
+        removed = result.item or []
         if removed:
             if dry_run:
                 print_info(
@@ -128,9 +153,13 @@ def cache_prune(
             print_info("No images to prune")
 
     elif resource == "kernel":
-        removed = CacheOperation.prune_kernels(
+        result = CacheOperation.prune_kernels(
             dry_run=dry_run, include_all=all_resources
         )
+        if result.is_error:
+            print_error(result.message)
+            raise typer.Exit(code=1)
+        removed = result.item or []
         if removed:
             if dry_run:
                 print_info(
@@ -144,9 +173,13 @@ def cache_prune(
             print_info("No kernels to prune")
 
     elif resource == "binary":
-        removed = CacheOperation.prune_binaries(
+        result = CacheOperation.prune_binaries(
             dry_run=dry_run, include_all=all_resources
         )
+        if result.is_error:
+            print_error(result.message)
+            raise typer.Exit(code=1)
+        removed = result.item or []
         if removed:
             if dry_run:
                 print_info(
@@ -160,7 +193,11 @@ def cache_prune(
             print_info("No binaries to prune")
 
     elif resource == "misc":
-        misc_result = CacheOperation.prune_misc(dry_run=dry_run)
+        misc_op_result = CacheOperation.prune_misc(dry_run=dry_run)
+        if misc_op_result.is_error:
+            print_error(misc_op_result.message)
+            raise typer.Exit(code=1)
+        misc_result = misc_op_result.item or {}
         if misc_result.get("appliance"):
             if dry_run:
                 print_info("[DRY RUN] Would remove appliance folder")
@@ -212,23 +249,29 @@ def cache_prune(
                 print_info("Aborted")
                 raise typer.Exit()
 
-        result = CacheOperation.prune_all(dry_run=dry_run, include_all=True)
+        prune_op_result = CacheOperation.prune_all(
+            dry_run=dry_run, include_all=True
+        )
+        if prune_op_result.is_error:
+            print_error(prune_op_result.message)
+            raise typer.Exit(code=1)
 
-        if result.pruned_ids:
+        prune_item = prune_op_result.item
+        if prune_item and prune_item.pruned_ids:
             if dry_run:
                 print_info(
-                    f"[DRY RUN] Would prune {len(result.pruned_ids)} item(s)"
+                    f"[DRY RUN] Would prune {len(prune_item.pruned_ids)} item(s)"
                 )
             else:
-                print_success(f"Pruned {len(result.pruned_ids)} item(s)")
+                print_success(f"Pruned {len(prune_item.pruned_ids)} item(s)")
 
-        if result.failed_ids:
+        if prune_item and prune_item.failed_ids:
             print_warning(
-                f"Failed to prune {len(result.failed_ids)} item(s): "
-                f"{', '.join(result.failed_ids)}"
+                f"Failed to prune {len(prune_item.failed_ids)} item(s): "
+                f"{', '.join(prune_item.failed_ids)}"
             )
 
-        if result.had_running_vms:
+        if prune_item and prune_item.had_running_vms:
             print_info(
                 "Note: running or starting VMs were present during prune"
             )
@@ -293,33 +336,42 @@ def cache_clean(
             print_info("Aborted")
             raise typer.Exit()
 
-    result = CacheOperation.clean(dry_run=dry_run)
+    op_result = CacheOperation.clean(dry_run=dry_run)
+    if op_result.is_error:
+        print_error(op_result.message)
+        raise typer.Exit(code=1)
 
-    prune = result.prune_result
-    if prune.pruned_ids:
-        if dry_run:
-            print_info(f"[DRY RUN] Would prune {len(prune.pruned_ids)} item(s)")
-        else:
-            print_success(f"Pruned {len(prune.pruned_ids)} item(s)")
+    result = op_result.item
+    if result:
+        prune = result.prune_result
+        if prune.pruned_ids:
+            if dry_run:
+                print_info(
+                    f"[DRY RUN] Would prune {len(prune.pruned_ids)} item(s)"
+                )
+            else:
+                print_success(f"Pruned {len(prune.pruned_ids)} item(s)")
 
-    if prune.failed_ids:
-        print_warning(
-            f"Failed to prune {len(prune.failed_ids)} item(s): "
-            f"{', '.join(prune.failed_ids)}"
-        )
-
-    if prune.had_running_vms:
-        print_info("Note: running or starting VMs were present during clean")
-
-    if result.cache_dir_removed:
-        if dry_run:
-            print_info(
-                f"[DRY RUN] Would remove cache directory: {result.cache_dir}"
+        if prune.failed_ids:
+            print_warning(
+                f"Failed to prune {len(prune.failed_ids)} item(s): "
+                f"{', '.join(prune.failed_ids)}"
             )
+
+        if prune.had_running_vms:
+            print_info(
+                "Note: running or starting VMs were present during clean"
+            )
+
+        if result.cache_dir_removed:
+            if dry_run:
+                print_info(
+                    f"[DRY RUN] Would remove cache directory: {result.cache_dir}"
+                )
+            else:
+                print_success(f"Removed cache directory: {result.cache_dir}")
         else:
-            print_success(f"Removed cache directory: {result.cache_dir}")
-    else:
-        print_info("Cache directory was already empty")
+            print_info("Cache directory was already empty")
 
 
 __all__ = ["cache_app"]

@@ -73,7 +73,7 @@ from mvmctl.api import (
     BinaryFetchResult,
     InitResult,
     InitStepResult,
-    ConsoleAttachInfo,
+    ConsoleConnectionInfo,
     PruneAllResult,
 )
 ```
@@ -92,16 +92,16 @@ from mvmctl.api.vm_operations import VMOperation  # ❌ WRONG — internal modul
 | Operation Class | Responsibility |
 |---|---|
 | `VMOperation` | VM lifecycle: create, remove, import, export, list, inspect, get, start/stop, pause/resume, reboot, snapshot, load snapshot |
-| `NetworkOperation` | Network management: create, remove, list, get, inspect, set default, reconcile, restore, sync, create default |
+| `NetworkOperation` | Network management: create, remove, list, get, inspect, set default, restore, sync, create default |
 | `ImageOperation` | Image operations: fetch, import, list, get, set default, remove, inspect, warm |
-| `KernelOperation` | Kernel operations: fetch, list, get, inspect, set default, remove, ensure default |
+| `KernelOperation` | Kernel operations: fetch, list, get, inspect, set default, remove |
 | `KeyOperation` | SSH key registry: add, create, list, get, remove, inspect, set defaults, get defaults, clear defaults, export |
 | `BinaryOperation` | Binary management: fetch, get, list local/remote, set default, remove (by id/version), ensure default |
-| `HostOperation` | Host init/reset/clean/prune, state retrieval, privilege checks, KVM access, running VMs |
+| `HostOperation` | Host init/reset/clean, state retrieval, privilege checks, KVM access, running VMs |
 | `CacheOperation` | Cache lifecycle: init, prune per-asset-type, prune misc, prune all, clean |
 | `SSHOperation` | SSH connection to VMs |
 | `InitOperation` | Onboarding wizard: database, host, cache, binary setup |
-| `ConsoleOperation` | Console relay: attach, get state, kill |
+| `ConsoleOperation` | Console relay: get connection info, get state, kill |
 | `ConfigOperation` | User settings: get, set, reset, list all config overrides |
 | `LogOperation` | VM log streaming and retrieval |
 
@@ -833,15 +833,6 @@ Ensure the default network exists, creating it if needed. Called automatically b
 
 ---
 
-#### `NetworkOperation.reconcile() -> list[NetworkItem]`
-
-Compare DB state vs actual bridge state for all networks. Updates `bridge_active`
-status on any mismatch.
-
-**Returns:** List of all `NetworkItem` records with updated `bridge_active` status.
-
----
-
 #### `NetworkOperation.restore() -> list[str]`
 
 Restore all networks from DB after reboot (re-create bridges and NAT rules).
@@ -852,14 +843,15 @@ Restore all networks from DB after reboot (re-create bridges and NAT rules).
 
 #### `NetworkOperation.sync(network_id: str | None = None) -> dict[str, dict[str, int]]`
 
-Sync iptables rules for one or all networks. Ensures all active DB rules exist
-in host iptables and detects orphaned host rules.
+Sync networks: first reconciles bridge state (DB vs kernel), then ensures all
+active DB iptables rules exist in host iptables and detects orphaned host rules.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `network_id` | `str \| None` | `None` | Specific network ID, or `None` for all networks |
 
 **Returns:** Dict mapping `network_id` → `{"added": int, "verified": int, "orphaned": int}`.
+Metadata includes `network_count` and `bridges_reconciled`.
 
 ---
 
@@ -1006,12 +998,6 @@ Inspect a kernel with full details.
 #### `KernelOperation.set_default(inputs: KernelInput) -> None`
 
 Set a kernel as the default.
-
----
-
-#### `KernelOperation.ensure_default() -> KernelItem`
-
-Ensure the default kernel exists and is available on disk.
 
 ---
 
@@ -1223,12 +1209,6 @@ and project group removal.
 
 ---
 
-#### `HostOperation.prune(cache_dir: Path) -> list[str]`
-
-Tear down all bridges, TAPs, iptables rules and revert host sysctl changes.
-
----
-
 #### `HostOperation.get_running_vms() -> list[VMInstanceItem]`
 
 Return all currently running VMs.
@@ -1360,15 +1340,15 @@ the corresponding `InitStepResult` has `needs_interaction=True`.
 
 All methods are `@staticmethod`.
 
-#### `ConsoleOperation.attach(identifier: str) -> ConsoleAttachInfo`
+#### `ConsoleOperation.get_connection_info(identifier: str) -> ConsoleConnectionInfo`
 
-Attach to a VM's console relay.
+Get connection info for a VM's console relay.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `identifier` | `str` | — | VM name, ID, MAC, or IP address |
 
-**Returns:** `ConsoleAttachInfo` with `socket_path`, `vm_name`, and `vm_id`.
+**Returns:** `ConsoleConnectionInfo` with `socket_path`, `vm_name`, and `vm_id`.
 
 **Raises:** `MVMError` if the console relay is not running.
 

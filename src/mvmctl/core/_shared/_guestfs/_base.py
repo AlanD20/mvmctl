@@ -14,6 +14,8 @@ from mvmctl.constants import (
 )
 from mvmctl.exceptions import GuestfsNotAvailableError, MVMError
 
+from ._kernel_detector import KernelDetector
+
 
 class OptimizedGuestfs:
     def __init__(self, disk_path: Path, readonly: bool = False) -> None:
@@ -37,6 +39,8 @@ class OptimizedGuestfs:
             "LIBGUESTFS_BACKEND": os.environ.get("LIBGUESTFS_BACKEND"),
             "LIBGUESTFS_CACHEDIR": os.environ.get("LIBGUESTFS_CACHEDIR"),
             "QEMU_LOCKING": os.environ.get("QEMU_LOCKING"),
+            "SUPERMIN_KERNEL": os.environ.get("SUPERMIN_KERNEL"),
+            "SUPERMIN_MODULES": os.environ.get("SUPERMIN_MODULES"),
         }
         os.environ["LIBGUESTFS_BACKEND"] = "direct"
         if Path("/dev/shm").exists():
@@ -44,6 +48,15 @@ class OptimizedGuestfs:
         # Disable QEMU file locking — prevents stale lock issues from crashed
         # guestfs sessions on shared images (ready pool, etc.)
         os.environ["QEMU_LOCKING"] = "off"
+
+        # Force a known-good kernel with virtio drivers instead of relying on
+        # libguestfs auto-detection, which may pick a kernel without virtio
+        # and cause QEMU to hang on launch.
+        kernel_info = KernelDetector.find_best_kernel()
+        if kernel_info is not None:
+            kernel_path, modules_dir = kernel_info
+            os.environ["SUPERMIN_KERNEL"] = str(kernel_path)
+            os.environ["SUPERMIN_MODULES"] = str(modules_dir)
 
     def _restore_environment(self) -> None:
         for key, value in self._orig_env.items():

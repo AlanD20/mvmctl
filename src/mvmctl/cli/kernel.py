@@ -7,8 +7,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import typer
+from rich.console import Console
 
 from mvmctl.api import KernelFetchInput, KernelInput, KernelOperation
+from mvmctl.models.result import OperationResult, ProgressEvent
 from mvmctl.utils._io import (
     print_error,
     print_info,
@@ -129,11 +131,31 @@ def kernel_fetch(
         kernel_config=kernel_config,
         set_default=set_default,
     )
-    kernel = KernelOperation.fetch(inputs)
-    print_success(
-        f"Kernel '{kernel.name}' fetched successfully "
-        f"(ID: {HashGenerator.shorten(kernel.id)})"
-    )
+    console = Console()
+    with console.status("", spinner="dots") as status:
+
+        def _on_progress(event: ProgressEvent) -> None:
+            if event.message:
+                status.update(event.message)
+
+        result = KernelOperation.fetch(inputs, on_progress=_on_progress)
+    if isinstance(result, OperationResult):
+        if result.is_error:
+            print_error(result.message)
+            raise typer.Exit(code=1)
+        if result.status == "skipped":
+            print_info(result.message)
+            if result.item:
+                print_info(f"  ID: {HashGenerator.shorten(result.item.id)}")
+            raise typer.Exit(code=0)
+        if result.item:
+            print_success(
+                f"Kernel '{result.item.name}' fetched successfully "
+                f"(ID: {HashGenerator.shorten(result.item.id)})"
+            )
+    else:
+        # Fallback for unexpected non-OperationResult returns
+        print_success("Kernel fetch completed")
 
 
 @kernel_app.command(
@@ -148,8 +170,13 @@ def kernel_set_default(
     """Set a kernel as the default."""
     kernel_id = CliUtils.check_name_arg(ctx, kernel_id)
     inputs = KernelInput(id=[kernel_id])
-    KernelOperation.set_default(inputs)
-    print_success(f"Default kernel set to {kernel_id}")
+    result = KernelOperation.set_default(inputs)
+
+    if result.is_error:
+        print_error(result.message)
+        raise typer.Exit(code=1)
+
+    print_success(result.message or f"Default kernel set to {kernel_id}")
 
 
 @kernel_app.command(
@@ -173,9 +200,16 @@ def kernel_rm(
         raise typer.Exit(code=1)
 
     inputs = KernelInput(id=effective_ids, force=force)
-    KernelOperation.remove(inputs)
-    for kernel_id in effective_ids:
-        print_success(f"Kernel {kernel_id} removed")
+    batch_result = KernelOperation.remove(inputs)
+
+    for item_result in batch_result.items:
+        if item_result.is_ok:
+            print_success(item_result.message or "Kernel removed")
+        else:
+            print_error(item_result.message or "Failed to remove kernel")
+
+    if batch_result.has_any_error:
+        raise typer.Exit(code=1)
 
 
 __all__ = ["kernel_app"]

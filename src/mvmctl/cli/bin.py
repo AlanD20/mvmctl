@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import typer
 
 from mvmctl.api import BinaryFetchInput, BinaryInput, BinaryOperation
+from mvmctl.models.result import OperationResult
 from mvmctl.utils._io import (
     print_error,
     print_info,
@@ -19,7 +20,7 @@ from mvmctl.utils.cli import handle_errors
 from mvmctl.utils.crypto import HashGenerator
 
 if TYPE_CHECKING:
-    pass
+    from mvmctl.models import BinaryItem
 
 bin_app = typer.Typer(
     help="Binary management",
@@ -134,9 +135,21 @@ def bin_fetch(
         set_as_default=set_default,
         download_override=download_override,
     )
-    result = BinaryOperation.fetch(inputs)
-    binaries = result.result
+    result: OperationResult[list[BinaryItem]] = BinaryOperation.fetch(inputs)  # type: ignore[assignment]
 
+    if result.is_error:
+        print_error(result.message)
+        raise typer.Exit(code=1)
+
+    if result.status == "skipped":
+        print_info(result.message)
+        binaries = result.item or []
+        for binary in binaries:
+            short_id = HashGenerator.shorten(binary.id)
+            print_info(f"  {binary.name} v{binary.version}: {short_id}")
+        raise typer.Exit(code=0)
+
+    binaries = result.item or []
     for binary in binaries:
         short_id = HashGenerator.shorten(binary.id)
         print_success(
@@ -170,9 +183,12 @@ def bin_rm(
 ) -> None:
     """Remove one or more binaries. Use --version to remove by version pair."""
     if version is not None:
-        # Remove by version
-        BinaryOperation.remove_by_version(version, force=force)
+        result = BinaryOperation.remove_by_version(version, force=force)
+        if result.is_error:
+            print_error(result.message)
+            raise typer.Exit(code=1)
         print_success(f"Removed binaries for v{version}")
+        raise typer.Exit(code=0)
 
     effective_ids: list[str] = list(identifiers) if identifiers else []
     if not effective_ids:
@@ -180,8 +196,16 @@ def bin_rm(
         raise typer.Exit(code=1)
 
     inputs = BinaryInput(id=effective_ids)
-    BinaryOperation.remove(inputs, force=force)
-    print_success(f"Removed binary(s): {' '.join(effective_ids)}")
+    batch_result = BinaryOperation.remove(inputs, force=force)
+
+    for item_result in batch_result.items:
+        if item_result.is_ok:
+            print_success(item_result.message or "Removed binary")
+        else:
+            print_error(item_result.message or "Failed to remove binary")
+
+    if batch_result.has_any_error:
+        raise typer.Exit(code=1)
 
 
 @bin_app.command(name="default")
@@ -193,9 +217,13 @@ def bin_default(
 ) -> None:
     """Set a binary as the active default."""
     inputs = BinaryInput(id=[identifier])
-    BinaryOperation.set_default(inputs)
+    result = BinaryOperation.set_default(inputs)
 
-    print_success(f"Default binary set to: {identifier}")
+    if result.is_error:
+        print_error(result.message)
+        raise typer.Exit(code=1)
+
+    print_success(result.message or f"Default binary set to: {identifier}")
     raise typer.Exit(code=0)
 
 

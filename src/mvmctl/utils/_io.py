@@ -176,7 +176,11 @@ def get_combined_marker(is_default: bool, is_missing: bool) -> str:
 
 def setup_logging(*, verbose: bool = False, debug: bool = False) -> None:
     """
-    Configure root logger level and format.
+    Configure root logger with console and file handlers.
+
+    Console handler respects the configured level (DEBUG/INFO/WARNING).
+    File handler always logs at DEBUG level to {cache_dir}/mvmctl.log
+    for persistent debugging without requiring --debug flags.
 
     Priority (highest first):
     1. ``debug=True``  → DEBUG
@@ -184,8 +188,8 @@ def setup_logging(*, verbose: bool = False, debug: bool = False) -> None:
     3. ``MVM_LOG_LEVEL`` env var → parsed level (default WARNING)
 
     Args:
-        verbose: Force INFO level.
-        debug: Force DEBUG level.
+        verbose: Force INFO level on console.
+        debug: Force DEBUG level on console.
 
     """
     if debug:
@@ -196,10 +200,35 @@ def setup_logging(*, verbose: bool = False, debug: bool = False) -> None:
         env_level = os.environ.get("MVM_LOG_LEVEL", "WARNING").upper()
         level = getattr(logging, env_level, logging.WARNING)
 
-    logging.basicConfig(
-        level=level,
-        format="%(levelname)s: %(name)s: %(message)s",
+    root = logging.getLogger()
+
+    # Prevent duplicate handler setup on repeated calls
+    if root.handlers:
+        return
+
+    formatter = logging.Formatter("%(levelname)s: %(name)s: %(message)s")
+
+    # Console handler at configured level
+    console = logging.StreamHandler()
+    console.setLevel(level)
+    console.setFormatter(formatter)
+    root.addHandler(console)
+
+    # File handler always at DEBUG — captures everything without --debug flags
+    from logging.handlers import RotatingFileHandler
+
+    from mvmctl.utils.common import CacheUtils
+
+    log_path = CacheUtils.get_log_path()
+    file_handler = RotatingFileHandler(
+        str(log_path), maxBytes=10_485_760, backupCount=3
     )
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(formatter)
+    root.addHandler(file_handler)
+
+    # Root must be at lowest level so individual handlers can filter up
+    root.setLevel(logging.DEBUG)
 
 
 def get_logger(name: str) -> logging.Logger:

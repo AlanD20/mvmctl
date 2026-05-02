@@ -1,4 +1,4 @@
-"""VM console access commands - attach, state, kill."""
+"""VM console access commands - connect, state, kill."""
 
 from __future__ import annotations
 
@@ -81,18 +81,23 @@ def _show_console_state(vm_id: str) -> None:
 
 def _kill_console_relay(vm_id: str) -> None:
     """Kill the console relay for a VM."""
-    killed = ConsoleOperation.kill(vm_id)
+    result = ConsoleOperation.kill(vm_id)
 
-    if killed:
+    if result.status == "success":
         print_success(f"Console relay stopped for '{vm_id}'")
-    else:
+    elif result.status == "skipped":
         print_error(f"No console relay running for '{vm_id}'")
+        raise typer.Exit(1)
+    else:
+        print_error(
+            result.message or f"Failed to stop console relay for '{vm_id}'"
+        )
         raise typer.Exit(1)
 
 
 def _attach_to_console(vm_id: str) -> None:
     """Attach to VM console interactively."""
-    attach_info = ConsoleOperation.attach(vm_id)
+    attach_info = ConsoleOperation.get_connection_info(vm_id)
 
     print_info(f"Attaching to console of '{attach_info.vm_name}'...")
     print_info("Press Ctrl+X then D to detach")

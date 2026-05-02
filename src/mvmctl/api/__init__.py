@@ -12,14 +12,11 @@ module for stability guarantees::
 from __future__ import annotations
 
 # Operation classes — primary actions (create, remove, list, start, stop, etc.)
-from mvmctl.api.binary_operations import (  # noqa: F401
-    BinaryFetchResult,
-    BinaryOperation,
-)
+from mvmctl.api.binary_operations import BinaryOperation  # noqa: F401
 from mvmctl.api.cache_operations import CacheOperation  # noqa: F401
 from mvmctl.api.config_operations import ConfigOperation  # noqa: F401
 from mvmctl.api.console_operations import (  # noqa: F401
-    ConsoleAttachInfo,
+    ConsoleConnectionInfo,
     ConsoleOperation,
 )
 from mvmctl.api.host_operations import HostOperation  # noqa: F401
@@ -60,10 +57,9 @@ from mvmctl.api.vm_operations import VMOperation  # noqa: F401
 __all__ = [
     # Operation classes
     "BinaryOperation",
-    "BinaryFetchResult",
     "CacheOperation",
     "ConfigOperation",
-    "ConsoleAttachInfo",
+    "ConsoleConnectionInfo",
     "ConsoleOperation",
     "HostOperation",
     "ImageOperation",

@@ -6,6 +6,7 @@ from typing import Any
 
 from mvmctl.api.inputs._config_input import ConfigInput, ConfigRequest
 from mvmctl.core._shared import Database
+from mvmctl.models.result import OperationResult
 from mvmctl.utils.auditlog import AuditLog
 
 
@@ -38,8 +39,12 @@ class ConfigOperation:
         return value
 
     @staticmethod
-    def set(category: str, key: str, value: Any) -> None:
-        """Set a config value."""
+    def set(category: str, key: str, value: Any) -> OperationResult[None]:
+        """Set a config value.
+
+        Returns:
+            OperationResult with code "config.set" on success.
+        """
         inputs = ConfigInput(
             action="set", category=category, key=key, value=value
         )
@@ -51,13 +56,18 @@ class ConfigOperation:
             "config.set",
             context=f"{resolved.category}.{resolved.key}={resolved.value}",
         )
+        return OperationResult(
+            status="success",
+            code="config.set",
+            message=f"Set {resolved.category}.{resolved.key} = {resolved.value}",
+        )
 
     @staticmethod
     def reset(
         category: str | None = None,
         key: str | None = None,
         all_overrides: bool = False,
-    ) -> int:
+    ) -> OperationResult[int]:
         """
         Reset a config value to its default (remove override).
 
@@ -67,7 +77,7 @@ class ConfigOperation:
             all_overrides: If True, delete ALL overrides globally.
 
         Returns:
-            Number of overrides removed.
+            OperationResult with item int = number of overrides removed.
 
         """
         inputs = ConfigInput(
@@ -84,7 +94,12 @@ class ConfigOperation:
                     "config.reset",
                     context=f"all overrides ({deleted} removed)",
                 )
-            return deleted
+            return OperationResult(
+                status="success",
+                code="config.reset",
+                message=f"Reset {deleted} override(s) globally",
+                item=deleted,
+            )
         assert resolved.category is not None
         if resolved.key is None:
             deleted = resolved.service.delete_by_category(resolved.category)
@@ -93,14 +108,25 @@ class ConfigOperation:
                     "config.reset",
                     context=f"{resolved.category}.* ({deleted} removed)",
                 )
-            return deleted
+            return OperationResult(
+                status="success",
+                code="config.reset",
+                message=f"Reset {deleted} override(s) in {resolved.category}",
+                item=deleted,
+            )
         deleted = resolved.service.delete(resolved.category, resolved.key)
         if deleted:
             AuditLog.log(
                 "config.reset",
                 context=f"{resolved.category}.{resolved.key}",
             )
-        return 1 if deleted else 0
+        result_count = 1 if deleted else 0
+        return OperationResult(
+            status="success",
+            code="config.reset",
+            message=f"Reset {resolved.category}.{resolved.key} ({result_count} override(s))",
+            item=result_count,
+        )
 
     @staticmethod
     def list_all() -> dict[str, dict[str, Any]]:

@@ -9,6 +9,7 @@ import typer
 from rich.prompt import Prompt
 
 from mvmctl.api import NetworkCreateInput, NetworkInput, NetworkOperation
+from mvmctl.models.result import OperationResult
 from mvmctl.utils._io import (
     print_error,
     print_info,
@@ -117,7 +118,10 @@ def network_set_default(
 ) -> None:
     """Set a network as the default for VM creation."""
     name = CliUtils.check_name_arg(ctx, name)
-    NetworkOperation.set_default(NetworkInput(name=[name]))
+    result = NetworkOperation.set_default(NetworkInput(name=[name]))
+    if result.status in ("error", "failure"):
+        print_error(result.message)
+        raise typer.Exit(code=1)
     print_success(f"Default network set to '{name}'")
 
 
@@ -199,7 +203,21 @@ def network_create(
         nat_gateways=nat_gateways_list,
     )
     result = NetworkOperation.create(create_input)
-    config = result.result
+    if isinstance(result, OperationResult):
+        if result.status in ("error", "failure"):
+            print_error(result.message)
+            raise typer.Exit(code=1)
+        if result.status == "skipped":
+            print_info(result.message)
+            raise typer.Exit(code=0)
+        config = result.item
+        if config is None:
+            print_error("Network created but no item returned")
+            raise typer.Exit(code=1)
+    else:
+        # NeedsInteraction — not expected for network creation
+        print_error(result.message)
+        raise typer.Exit(code=1)
 
     print_success(f"Network '{config.name}' created")
     print_info(f"  SUBNET:    {config.subnet}")
@@ -227,7 +245,12 @@ def network_rm(
         print_error("Provide at least one network name")
         raise typer.Exit(code=1)
 
-    NetworkOperation.remove(NetworkInput(name=effective_names), force=force)
+    result = NetworkOperation.remove(
+        NetworkInput(name=effective_names), force=force
+    )
+    if result.status in ("error", "failure"):
+        print_error(result.message)
+        raise typer.Exit(code=1)
     for name in effective_names:
         print_success(f"Network '{name}' removed")
 
@@ -307,7 +330,14 @@ def network_sync(
         network = NetworkOperation.get(NetworkInput(name=[identifier]))
         network_id = network.id
 
-    results = NetworkOperation.sync(network_id)
+    sync_result = NetworkOperation.sync(network_id)
+    if sync_result.status in ("error", "failure"):
+        print_error(sync_result.message)
+        raise typer.Exit(code=1)
+    results = sync_result.item
+    if results is None:
+        print_error("Sync returned no results")
+        raise typer.Exit(code=1)
 
     if json_output:
         typer.echo(json.dumps(results, indent=2))

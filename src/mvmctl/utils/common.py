@@ -293,6 +293,11 @@ class CacheUtils:
         """Return the path to the audit log file."""
         return CacheUtils.get_cache_dir() / "audit.log"
 
+    @staticmethod
+    def get_log_path() -> Path:
+        """Return the path to the log file."""
+        return CacheUtils.get_cache_dir() / "mvmctl.log"
+
 
 class CommonUtils:
     """

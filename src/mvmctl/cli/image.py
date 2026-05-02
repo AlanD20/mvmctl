@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import typer
+from rich.console import Console
 
 from mvmctl.api import (
     ImageFetchInput,
@@ -16,6 +17,10 @@ from mvmctl.api import (
 )
 from mvmctl.constants import IMAGE_IMPORT_FORMAT_MAP
 from mvmctl.models import ImageItem, ImageSpec
+from mvmctl.models.result import (
+    NeedsInteraction,
+    ProgressEvent,
+)
 from mvmctl.utils._io import (
     print_error,
     print_info,
@@ -28,7 +33,6 @@ from mvmctl.utils._io import (
 from mvmctl.utils.cli import handle_errors
 from mvmctl.utils.common import CommonUtils
 from mvmctl.utils.crypto import HashGenerator
-from mvmctl.utils.progress import Spinner
 
 if TYPE_CHECKING:
     pass
@@ -210,22 +214,28 @@ def image_fetch(
         disabled_detectors=disabled_detectors,
         set_default=set_default,
     )
-    spinner = Spinner("Processing")
+    console = Console()
+    with console.status("", spinner="dots") as status:
 
-    def _phase_callback(phase: str) -> None:
-        if phase == "extracting":
-            spinner.start()
-        elif phase in ("complete", "optimizing"):
-            spinner.stop()
+        def _on_progress(event: ProgressEvent) -> None:
+            if event.message:
+                status.update(event.message)
 
-    result = ImageOperation.fetch(fetch_input, phase_callback=_phase_callback)
+        result = ImageOperation.fetch(fetch_input, on_progress=_on_progress)
 
-    if result is None:
-        print_error(f"Failed to download image '{image_selector}'")
+    if isinstance(result, NeedsInteraction):
+        print_info(result.message)
+        raise typer.Exit(code=0)
+
+    if result.is_error:
+        print_error(
+            result.message or f"Failed to download image '{image_selector}'"
+        )
         raise typer.Exit(code=1)
 
-    short_id = HashGenerator.shorten(result.result.id)
-    print_success(f"Image ready: {result.result.path}")
+    assert result.item is not None
+    short_id = HashGenerator.shorten(result.item.id)
+    print_success(f"Image ready: {result.item.path}")
     print_info(f"  ID: {short_id}")
     if set_default:
         print_success(f"Default image set to: {image_selector}")
@@ -239,7 +249,10 @@ def image_set_default(
     prefix: str = typer.Argument(..., help="Image ID prefix to set as default"),
 ) -> None:
     """Set the default image for VM creation."""
-    ImageOperation.set_default(ImageInput(id=[prefix]))
+    result = ImageOperation.set_default(ImageInput(id=[prefix]))
+    if result.is_error:
+        print_error(result.message or f"Failed to set default image: {prefix}")
+        raise typer.Exit(code=1)
     print_success(f"Default image set to: {prefix}")
 
 
@@ -269,9 +282,13 @@ def image_rm(
         print_error("Provide at least one image ID prefix")
         raise typer.Exit(code=1)
 
-    for prefix in effective_ids:
-        ImageOperation.remove(ImageInput(id=[prefix]), force)
-        print_success(f"Removed image: {prefix}")
+    result = ImageOperation.remove(ImageInput(id=effective_ids), force)
+    for r in result.items:
+        item_id = HashGenerator.shorten(r.item.id) if r.item else "unknown"
+        if r.is_ok:
+            print_success(f"Removed image: {item_id}")
+        else:
+            print_error(r.message or f"Failed to remove image: {item_id}")
 
 
 @image_app.command(name="inspect")
@@ -490,10 +507,22 @@ def image_import(
         force=force,
     )
 
-    result = ImageOperation.import_(spec)
+    console = Console()
+    with console.status("", spinner="dots") as status:
 
-    short_id = HashGenerator.shorten(result.result.id)
-    print_success(f"Image imported: {result.result.path}")
+        def _on_progress(event: ProgressEvent) -> None:
+            if event.message:
+                status.update(event.message)
+
+        result = ImageOperation.import_(spec, on_progress=_on_progress)
+
+    if result.is_error:
+        print_error(result.message or f"Failed to import image '{name}'")
+        raise typer.Exit(code=1)
+
+    assert result.item is not None
+    short_id = HashGenerator.shorten(result.item.id)
+    print_success(f"Image imported: {result.item.path}")
     print_info(f"  Name: {name}")
     print_info(f"  ID:   {short_id}")
 
@@ -526,8 +555,21 @@ def image_warm(
         mvm image warm abc123
 
     """
-    warmed_paths = ImageOperation.warm(ImageInput(id=[image_id]))
-    for path in warmed_paths:
+    console = Console()
+    with console.status("", spinner="dots") as status:
+
+        def _on_progress(event: ProgressEvent) -> None:
+            if event.message:
+                status.update(event.message)
+
+        result = ImageOperation.warm(
+            ImageInput(id=[image_id]), on_progress=_on_progress
+        )
+    if result.is_error:
+        print_error(result.message or f"Failed to warm image '{image_id}'")
+        raise typer.Exit(code=1)
+
+    for path in result.item or []:
         size_str = CommonUtils.format_bytes_human_readable(path.stat().st_size)
         print_success(f"Image warmed successfully: {image_id}")
         print_info(f"  Path: {path}")

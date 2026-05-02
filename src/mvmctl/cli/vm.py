@@ -7,10 +7,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import typer
+from rich.console import Console
 
 from mvmctl.api import VMCreateInput, VMInput, VMOperation
 from mvmctl.models import VMStatus
+from mvmctl.models.result import NeedsInteraction, ProgressEvent
 from mvmctl.utils._io import (
+    print_error,
     print_inspect_header,
     print_key_value,
     print_section_header,
@@ -266,33 +269,42 @@ def vm_create(
 
     effective_ssh_keys = ssh_key.split(",") if ssh_key is not None else []
 
-    VMOperation.create(
-        VMCreateInput(
-            name=name,
-            vcpu_count=vcpus,
-            mem_size_mib=mem,
-            ssh_keys=effective_ssh_keys,
-            user=user,
-            enable_pci=enable_pci,
-            enable_console=not no_console if no_console else None,
-            enable_logging=enable_logging,
-            enable_metrics=enable_metrics,
-            firecracker_bin=firecracker_bin,
-            lsm_flags=lsm_flags,
-            image=image,
-            kernel_id=kernel,
-            image_path=image_path,
-            kernel_path=kernel_path,
-            disk_size=disk_size,
-            requested_guest_ip=ip,
-            network_name=network_name,
-            requested_guest_mac=mac,
-            custom_user_data=user_data,
-            cloud_init_mode=cloud_init_mode,
-            nocloud_net_port=nocloud_net_port,
-            skip_cleanup=skip_cleanup,
+    console = Console()
+
+    with console.status("", spinner="dots") as status:
+
+        def _on_progress(event: ProgressEvent) -> None:
+            if event.message:
+                status.update(event.message)
+
+        VMOperation.create(
+            VMCreateInput(
+                name=name,
+                vcpu_count=vcpus,
+                mem_size_mib=mem,
+                ssh_keys=effective_ssh_keys,
+                user=user,
+                enable_pci=enable_pci,
+                enable_console=not no_console if no_console else None,
+                enable_logging=enable_logging,
+                enable_metrics=enable_metrics,
+                firecracker_bin=firecracker_bin,
+                lsm_flags=lsm_flags,
+                image=image,
+                kernel_id=kernel,
+                image_path=image_path,
+                kernel_path=kernel_path,
+                disk_size=disk_size,
+                requested_guest_ip=ip,
+                network_name=network_name,
+                requested_guest_mac=mac,
+                custom_user_data=user_data,
+                cloud_init_mode=cloud_init_mode,
+                nocloud_net_port=nocloud_net_port,
+                skip_cleanup=skip_cleanup,
+            ),
+            on_progress=_on_progress,
         )
-    )
     print_success(f"VM '{name}' created")
 
 
@@ -686,7 +698,14 @@ def vm_import(
     """Create a VM from a portable config file."""
     from mvmctl.api.inputs import VMImportInput
 
-    VMOperation.import_(
+    result = VMOperation.import_(
         VMImportInput(config_path=config_path, name_override=name)
     )
-    print_success(f"VM imported from {config_path}")
+    if isinstance(result, NeedsInteraction):
+        print_error("Cannot import VM: privileges required")
+        raise typer.Exit(code=1)
+    if result.status == "success":
+        print_success(result.message)
+    elif result.status in ("error", "failure"):
+        print_error(result.message)
+        raise typer.Exit(code=1)

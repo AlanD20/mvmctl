@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -15,6 +14,7 @@ from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.core.network._service import NetworkService
 from mvmctl.exceptions import NetworkError
 from mvmctl.models import NetworkItem
+from mvmctl.models.result import NeedsInteraction, OperationResult
 from mvmctl.utils.auditlog import AuditLog
 from mvmctl.utils.crypto import HashGenerator
 from mvmctl.utils.network import NetworkUtils
@@ -28,13 +28,6 @@ logger = logging.getLogger(__name__)
 __all__ = ["NetworkOperation"]
 
 
-@dataclass
-class NetworkCreateResult:
-    """Result of network create operation."""
-
-    result: NetworkItem
-
-
 class NetworkOperation:
     """
     Orchestration layer for network operations.
@@ -44,7 +37,9 @@ class NetworkOperation:
     """
 
     @staticmethod
-    def create(inputs: NetworkCreateInput) -> NetworkCreateResult:
+    def create(
+        inputs: NetworkCreateInput,
+    ) -> OperationResult[NetworkItem] | NeedsInteraction:
         """
         Create a new network.
 
@@ -52,7 +47,7 @@ class NetworkOperation:
             inputs: NetworkCreateInput with name, subnet, etc.
 
         Returns:
-            NetworkCreateResult with the created NetworkItem.
+            OperationResult wrapping the created NetworkItem.
 
         """
         from mvmctl.api.inputs._network_create_input import NetworkCreateRequest
@@ -109,7 +104,11 @@ class NetworkOperation:
         except NetworkError:
             # If infrastructure setup fails, clean up DB record
             repo.delete(network_id)
-            raise
+            return OperationResult(
+                status="error",
+                code="network.create_failed",
+                message=f"Failed to create network '{resolved.name}': infrastructure setup failed",
+            )
 
         # Update bridge_active status
         bridge_active = NetworkUtils.bridge_exists(resolved.bridge)
@@ -118,21 +117,33 @@ class NetworkOperation:
         # Re-fetch the item to get updated state
         updated_item = repo.get_by_name(resolved.name)
         if updated_item is None:
-            raise NetworkError(
-                f"Failed to fetch created network '{resolved.name}'"
+            return OperationResult(
+                status="error",
+                code="network.create_failed",
+                message=f"Failed to fetch created network '{resolved.name}'",
             )
 
         AuditLog.log("network.create", changes={"name": resolved.name})
-        return NetworkCreateResult(result=updated_item)
+        return OperationResult(
+            status="success",
+            code="network.created",
+            item=updated_item,
+            message=f"Network '{resolved.name}' created",
+        )
 
     @staticmethod
-    def remove(inputs: NetworkInput, force: bool = False) -> None:
+    def remove(
+        inputs: NetworkInput, force: bool = False
+    ) -> OperationResult[NetworkItem]:
         """
         Remove a network.
 
         Args:
             inputs: NetworkInput with name/id identifiers.
             force: If True, remove even if referenced by VMs.
+
+        Returns:
+            OperationResult indicating removal outcome.
 
         """
         from mvmctl.api.inputs._network_input import NetworkRequest
@@ -143,15 +154,44 @@ class NetworkOperation:
 
         # Resolve identifiers
         request = NetworkRequest(inputs=inputs, db=db)
-        resolved = request.resolve()
+        try:
+            resolved = request.resolve()
+        except NetworkError as e:
+            return OperationResult(
+                status="error",
+                code="network.remove_failed",
+                message=str(e),
+                exception=e,
+            )
 
-        service.remove_many(resolved.networks, force=force)
+        try:
+            service.remove_many(resolved.networks, force=force)
+        except NetworkError as e:
+            error_msg = str(e)
+            code = (
+                "network.in_use"
+                if "in use" in error_msg.lower()
+                else "network.remove_failed"
+            )
+            return OperationResult(
+                status="error",
+                code=code,
+                message=error_msg,
+                exception=e,
+            )
 
+        names = ", ".join(n.name for n in resolved.networks)
         for network in resolved.networks:
             AuditLog.log(
                 "network.remove",
                 changes={"id": network.id, "name": network.name},
             )
+
+        return OperationResult(
+            status="success",
+            code="network.removed",
+            message=f"Network(s) '{names}' removed",
+        )
 
     @staticmethod
     def list_all() -> list[NetworkItem]:
@@ -307,12 +347,15 @@ class NetworkOperation:
         return updated
 
     @staticmethod
-    def set_default(inputs: NetworkInput) -> None:
+    def set_default(inputs: NetworkInput) -> OperationResult[NetworkItem]:
         """
         Set a network as the default.
 
         Args:
             inputs: NetworkInput with name/id identifiers.
+
+        Returns:
+            OperationResult with the network that was set as default.
 
         """
         from mvmctl.api.inputs._network_input import NetworkRequest
@@ -321,29 +364,53 @@ class NetworkOperation:
         repo = NetworkRepository(db)
 
         request = NetworkRequest(inputs=inputs, db=db)
-        resolved = request.resolve()
-
-        if len(resolved.networks) != 1:
-            raise NetworkError(
-                f"Expected exactly one network, got {len(resolved.networks)}"
+        try:
+            resolved = request.resolve()
+        except NetworkError as e:
+            return OperationResult(
+                status="error",
+                code="network.default_set_failed",
+                message=str(e),
+                exception=e,
             )
 
-        controller = NetworkController(resolved.networks[0], repo)
-        controller.set_default()
+        if len(resolved.networks) != 1:
+            return OperationResult(
+                status="error",
+                code="network.default_set_failed",
+                message=f"Expected exactly one network, got {len(resolved.networks)}",
+            )
 
-        AuditLog.log(
-            "network.set_default", changes={"name": resolved.networks[0].name}
+        network = resolved.networks[0]
+        try:
+            controller = NetworkController(network, repo)
+            controller.set_default()
+        except NetworkError as e:
+            return OperationResult(
+                status="error",
+                code="network.default_set_failed",
+                message=str(e),
+                exception=e,
+            )
+
+        AuditLog.log("network.set_default", changes={"name": network.name})
+
+        return OperationResult(
+            status="success",
+            code="network.default_set",
+            item=network,
+            message=f"Network '{network.name}' set as default",
         )
 
     @staticmethod
-    def create_default_network() -> NetworkItem:
+    def create_default_network() -> OperationResult[NetworkItem]:
         """
         Create the default network if it doesn't exist, ensure one network is default, and materialize its bridge/NAT.
 
         Idempotent — safe to call multiple times.
 
         Returns:
-            The default NetworkItem.
+            OperationResult with the default NetworkItem.
 
         """
         from mvmctl.api.inputs._network_create_input import NetworkCreateInput
@@ -359,32 +426,49 @@ class NetworkOperation:
             db, "defaults.network", "nat_enabled"
         )
 
-        # 1. Ensure internal default network exists
-        internal_network = repo.get_by_name(default_name)
-        if internal_network is None:
-            outbound_iface = NetworkUtils.detect_outbound_interface()
-            nat_gateways = [outbound_iface] if outbound_iface else []
-
-            create_input = NetworkCreateInput(
-                name=default_name,
-                subnet=default_subnet,
-                nat_enabled=default_nat_enabled and len(nat_gateways) > 0,
-                nat_gateways=nat_gateways,
-            )
-            result = NetworkOperation.create(create_input).result
-            internal_network = result
-            HostRepository(db).update_component("default_network_created", True)
-
-        # 2. Ensure there is a default network
-        default_network = repo.get_default()
-        if default_network is None:
-            controller = NetworkController(internal_network, repo)
-            controller.set_default()
-            default_network = repo.get_default() or internal_network
-
-        # 3. Materialize bridge and NAT
-        service = NetworkService(repo)
         try:
+            # 1. Ensure internal default network exists
+            internal_network = repo.get_by_name(default_name)
+            if internal_network is None:
+                outbound_iface = NetworkUtils.detect_outbound_interface()
+                nat_gateways = [outbound_iface] if outbound_iface else []
+
+                create_input = NetworkCreateInput(
+                    name=default_name,
+                    subnet=default_subnet,
+                    nat_enabled=default_nat_enabled and len(nat_gateways) > 0,
+                    nat_gateways=nat_gateways,
+                )
+                create_result = NetworkOperation.create(create_input)
+                # NeedsInteraction is not expected during default network creation
+                if isinstance(create_result, NeedsInteraction):
+                    return OperationResult(
+                        status="error",
+                        code="network.default_created_failed",
+                        message=create_result.message,
+                    )
+                if create_result.status in ("error", "failure"):
+                    return create_result
+                internal_network = create_result.item
+                if internal_network is None:
+                    return OperationResult(
+                        status="error",
+                        code="network.default_created_failed",
+                        message=f"Failed to create default network '{default_name}'",
+                    )
+                HostRepository(db).update_component(
+                    "default_network_created", True
+                )
+
+            # 2. Ensure there is a default network
+            default_network = repo.get_default()
+            if default_network is None:
+                controller = NetworkController(internal_network, repo)
+                controller.set_default()
+                default_network = repo.get_default() or internal_network
+
+            # 3. Materialize bridge and NAT
+            service = NetworkService(repo)
             bridge_addr = NetworkUtils.compute_bridge_address(
                 default_network.ipv4_gateway, default_network.subnet
             )
@@ -396,85 +480,119 @@ class NetworkOperation:
                     subnet=default_network.subnet,
                     network_id=default_network.id,
                 )
-        except NetworkError:
-            logger.debug("Failed to materialize default network bridge/NAT")
+        except NetworkError as e:
+            return OperationResult(
+                status="error",
+                code="network.default_created_failed",
+                message=str(e),
+                exception=e,
+            )
 
         # Update bridge_active
         bridge_active = NetworkUtils.bridge_exists(default_network.bridge)
         if bridge_active != default_network.bridge_active:
             repo.update_bridge_active(default_network.id, bridge_active)
 
-        return repo.get_default() or default_network
+        final_network = repo.get_default() or default_network
+        return OperationResult(
+            status="success",
+            code="network.default_created",
+            item=final_network,
+            message=f"Default network '{final_network.name}' ready",
+        )
 
     @staticmethod
-    def sync(network_id: str | None = None) -> dict[str, dict[str, int]]:
+    def sync(
+        network_id: str | None = None,
+    ) -> OperationResult[dict[str, dict[str, int]]]:
         """
         Sync iptables rules for one or all networks.
 
-        Ensures all active DB rules exist in host iptables and detects
-        orphaned host rules.
+        First reconciles bridge state (DB vs kernel), then ensures all active
+        DB rules exist in host iptables and detects orphaned host rules.
 
         Args:
             network_id: Specific network ID to sync, or None for all networks.
 
         Returns:
-            Dict mapping network_id -> {"added": int, "verified": int, "orphaned": int}
+            OperationResult wrapping a dict mapping
+            network_id -> {"added": int, "verified": int, "orphaned": int}.
+            Metadata includes "network_count" and "bridges_reconciled".
 
         """
         db = Database()
         repo = NetworkRepository(db)
         service = NetworkService(repo)
 
-        if network_id is not None:
-            network = repo.get(network_id)
-            if network is None:
-                raise NetworkError(f"Network '{network_id}' not found")
-            networks = [network]
-        else:
-            networks = repo.list_all()
+        try:
+            if network_id is not None:
+                network = repo.get(network_id)
+                if network is None:
+                    return OperationResult(
+                        status="error",
+                        code="network.sync_failed",
+                        message=f"Network '{network_id}' not found",
+                    )
+                networks = [network]
+            else:
+                networks = repo.list_all()
 
-        results: dict[str, dict[str, int]] = {}
-        for network in networks:
-            result = service.sync_iptables_rules(network)
-            results[network.id] = result
+            # Step 1: Reconcile bridge state (DB vs kernel)
+            bridges_reconciled = 0
+            for network in networks:
+                bridge_active = NetworkUtils.bridge_exists(network.bridge)
+                if bridge_active != network.bridge_active:
+                    repo.update_bridge_active(network.id, bridge_active)
+                    bridges_reconciled += 1
 
-        return results
+            # Step 2: Sync iptables rules
+            results: dict[str, dict[str, int]] = {}
+            for network in networks:
+                result = service.sync_iptables_rules(network)
+                results[network.id] = result
+        except NetworkError as e:
+            return OperationResult(
+                status="error",
+                code="network.sync_failed",
+                message=str(e),
+                exception=e,
+            )
+
+        return OperationResult(
+            status="success",
+            code="network.synced",
+            item=results,
+            message="Network synced",
+            metadata={
+                "network_count": len(results),
+                "bridges_reconciled": bridges_reconciled,
+            },
+        )
 
     @staticmethod
-    def reconcile() -> list[NetworkItem]:
-        """
-        Reconcile all networks — compare DB state vs actual bridge state.
-
-        Returns:
-            List of all NetworkItem records with updated bridge_active status.
-
-        """
-        db = Database()
-        repo = NetworkRepository(db)
-
-        networks = repo.list_all()
-        for network in networks:
-            bridge_active = NetworkUtils.bridge_exists(network.bridge)
-            if bridge_active != network.bridge_active:
-                repo.update_bridge_active(network.id, bridge_active)
-
-        return networks
-
-    @staticmethod
-    def restore() -> list[str]:
+    def restore() -> OperationResult[list[str]]:
         """
         Restore all networks from DB after reboot.
 
         Returns:
-            List of status messages for each restored network.
+            OperationResult wrapping a list of status messages for each restored network.
 
         """
         db = Database()
         repo = NetworkRepository(db)
         service = NetworkService(repo)
 
-        networks = repo.list_all()
-        restored = []
+        try:
+            networks = repo.list_all()
+        except NetworkError as e:
+            return OperationResult(
+                status="error",
+                code="network.restore_failed",
+                message=str(e),
+                exception=e,
+            )
+
+        restored: list[str] = []
 
         for network in networks:
             try:
@@ -499,4 +617,10 @@ class NetworkOperation:
                     f"Failed to restore network '{network.name}': {e}"
                 )
 
-        return restored
+        return OperationResult(
+            status="success",
+            code="network.restored",
+            item=restored,
+            message=f"Restored {len([m for m in restored if m.startswith('Restored')])} network(s)",
+            metadata={"total": len(restored)},
+        )

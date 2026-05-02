@@ -316,6 +316,7 @@ class KernelService:
         url: str,
         dest: Path,
         sha256: str | None = None,
+        show_progress: bool = True,
     ) -> Path:
         """Download kernel source tarball."""
         logger.info("Downloading kernel from %s", url)
@@ -325,6 +326,7 @@ class KernelService:
                 dest,
                 expected_sha256=sha256,
                 timeout=HTTP_TIMEOUT_KERNEL_DOWNLOAD_S,
+                progress_bar=show_progress,
                 allow_missing_checksum=sha256 is None,
                 silent_missing_checksum=sha256 is None,
             )
@@ -916,6 +918,7 @@ class KernelService:
         keep_build_dir: bool = False,
         user_config_path: Path | None = None,
         use_cache: bool = True,
+        show_progress: bool = True,
     ) -> KernelPipelineResult:
         """Orchestrate download → extract → configure → build."""
 
@@ -958,6 +961,7 @@ class KernelService:
                     title="Downloading kernel source",
                     expected_sha256=resolved_sha256,
                     timeout=HTTP_TIMEOUT_KERNEL_DOWNLOAD_S,
+                    progress_bar=show_progress,
                     allow_missing_checksum=resolved_sha256 is None,
                     silent_missing_checksum=resolved_sha256 is None,
                 )
@@ -1019,6 +1023,7 @@ class KernelService:
         ci_version: str,
         arch: str,
         output_dir: Path,
+        show_progress: bool = True,
     ) -> KernelFetchResult:
         """
         Download a Firecracker CI kernel from GitHub.
@@ -1119,6 +1124,7 @@ class KernelService:
                 title=f"Downloading kernel {kernel_version}",
                 expected_sha256=expected_sha256,
                 timeout=HTTP_TIMEOUT_SHA256_FETCH_S,
+                progress_bar=show_progress,
                 allow_missing_checksum=True,
                 silent_missing_checksum=True,
             )
@@ -1214,6 +1220,7 @@ class KernelService:
         keep_build_dir: bool = False,
         clean_build: bool = False,
         kernel_config: Path | None = None,
+        show_progress: bool = True,
     ) -> KernelFetchResult:
         """
         Build an official kernel from source.
@@ -1245,6 +1252,7 @@ class KernelService:
             arch=arch,
             spec=spec,
             use_cache=not clean_build,
+            show_progress=show_progress,
         )
 
         warnings: list[str] = []

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,12 @@ from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.core.kernel._service import KernelService
 from mvmctl.exceptions import KernelError
 from mvmctl.models import KernelFetchResult, KernelItem
+from mvmctl.models.result import (
+    BatchResult,
+    NeedsInteraction,
+    OperationResult,
+    ProgressEvent,
+)
 from mvmctl.utils.auditlog import AuditLog
 from mvmctl.utils.crypto import HashGenerator
 
@@ -38,135 +45,195 @@ class KernelOperation:
     """
 
     @staticmethod
-    def fetch(inputs: KernelFetchInput) -> KernelItem:
+    def fetch(
+        inputs: KernelFetchInput,
+        *,
+        on_progress: Callable[[ProgressEvent], None] | None = None,
+    ) -> OperationResult[KernelItem] | NeedsInteraction:
         """
         Fetch or build a kernel based on type.
 
         Args:
             inputs: KernelFetchInput with kernel_type, version, arch, etc.
+            on_progress: Optional callback for progress events.
 
         Returns:
-            The created KernelItem.
-
-        Raises:
-            KernelError: If fetch/build fails.
+            OperationResult with the created KernelItem.
 
         """
-        db = Database()
-        repo = KernelRepository(db)
+        try:
+            db = Database()
+            repo = KernelRepository(db)
 
-        # Resolve and validate inputs
-        request = KernelFetchRequest(inputs=inputs, db=db)
-        resolved = request.resolve()
+            # Resolve and validate inputs
+            request = KernelFetchRequest(inputs=inputs, db=db)
+            resolved = request.resolve()
 
-        # Check for existing kernel
-        if resolved.kernel_type == "firecracker":
-            existing = repo.get_by_type(resolved.kernel_type)
-        elif resolved.kernel_type == "official" and resolved.version:
-            existing = repo.get_by_version_and_type(
-                resolved.version, resolved.kernel_type
-            )
-
-        if existing is not None:
-            existing_path = Path(existing.path)
-            if existing_path.exists():
-                logger.info("Kernel already exists: %s", existing.path)
-                return existing
-
-        # Resolve spec via KernelService
-        specs = KernelService.get_specs_for(
-            kernel_type=resolved.kernel_type, version=resolved.version
-        )
-        if len(specs) != 1:
-            raise KernelError(
-                f"Expected exactly one kernel spec for type='{resolved.kernel_type}' "
-                f"version='{resolved.version}', got {len(specs)}"
-            )
-        spec = specs[0]
-
-        kernel_service = KernelService(repo)
-        fetch_result: KernelFetchResult
-
-        if resolved.kernel_type == "firecracker":
-            binary_service = BinaryService(BinaryRepository(db))
-            default_firecracker = binary_service.get_default_firecracker()
-
-            # Get CI version for template resolution
-            ci_version = DEFAULT_FIRECRACKER_CI_VERSION
-            if default_firecracker and default_firecracker.ci_version:
-                ci_version = default_firecracker.ci_version
-
-            fetch_result = kernel_service.fetch_firecracker_kernel(
-                spec=spec,
-                ci_version=ci_version,
-                arch=resolved.arch,
-                output_dir=resolved.output_dir,
-            )
-        elif resolved.kernel_type == "official":
-            fetch_result = kernel_service.build_official_kernel(
-                spec=spec,
-                arch=resolved.arch,
-                output_dir=resolved.output_dir,
-                jobs=resolved.jobs,
-                keep_build_dir=resolved.keep_build_dir,
-                clean_build=resolved.clean_build,
-                kernel_config=resolved.kernel_config,
-            )
-        else:
-            raise KernelError(
-                f"Unsupported kernel type: {resolved.kernel_type}"
-            )
-
-        # Generate hash from the fetched/built kernel file
-        timestamp = datetime.now(tz=UTC).isoformat()
-        kernel_id = HashGenerator.kernel(
-            fetch_result.path, fetch_result.version, resolved.arch, timestamp
-        )
-
-        # Parse filename for base_name
-        parsed = KernelService.parse_filename(fetch_result.path.name)
-
-        # Build KernelItem (path is relative — filename only)
-        kernel_item = KernelItem(
-            id=kernel_id,
-            name=fetch_result.path.name,
-            base_name=parsed.base_name,
-            version=fetch_result.version,
-            arch=resolved.arch,
-            type=resolved.kernel_type,
-            path=fetch_result.path.name,
-            is_default=resolved.set_default,
-            is_present=True,
-            created_at=timestamp,
-            updated_at=timestamp,
-        )
-
-        repo.upsert(kernel_item)
-
-        # Clean up old kernel file if ID changed
-        if existing is not None and existing.id != kernel_item.id:
-            old_path = existing.resolved_path
-            if old_path.exists():
-                old_path.unlink()
-                logger.info(
-                    "Cleaned up old kernel file for %s-%s",
-                    resolved.kernel_type,
-                    resolved.version,
+            # Check for existing kernel
+            existing = None
+            if resolved.kernel_type == "firecracker":
+                existing = repo.get_by_type(resolved.kernel_type)
+            elif resolved.kernel_type == "official" and resolved.version:
+                existing = repo.get_by_version_and_type(
+                    resolved.version, resolved.kernel_type
                 )
 
-        AuditLog.log(
-            "kernel.fetch",
-            changes={
-                "id": kernel_item.id,
-                "type": kernel_item.type,
-                "version": kernel_item.version,
-                "arch": kernel_item.arch,
-            },
-        )
-        return kernel_item
+            if existing is not None:
+                existing_path = Path(existing.path)
+                if existing_path.exists():
+                    logger.info("Kernel already exists: %s", existing.path)
+                    return OperationResult(
+                        status="skipped",
+                        code="kernel.already_present",
+                        message=f"Kernel already exists: {existing.path}",
+                        item=existing,
+                    )
+
+            # Resolve spec via KernelService
+            specs = KernelService.get_specs_for(
+                kernel_type=resolved.kernel_type, version=resolved.version
+            )
+            if len(specs) != 1:
+                raise KernelError(
+                    f"Expected exactly one kernel spec for type='{resolved.kernel_type}' "
+                    f"version='{resolved.version}', got {len(specs)}"
+                )
+            spec = specs[0]
+
+            kernel_service = KernelService(repo)
+            fetch_result: KernelFetchResult
+
+            if resolved.kernel_type == "firecracker":
+                binary_service = BinaryService(BinaryRepository(db))
+                default_firecracker = binary_service.get_default_firecracker()
+
+                # Get CI version for template resolution
+                ci_version = DEFAULT_FIRECRACKER_CI_VERSION
+                if default_firecracker and default_firecracker.ci_version:
+                    ci_version = default_firecracker.ci_version
+
+                if on_progress is not None:
+                    on_progress(
+                        ProgressEvent(
+                            phase="download",
+                            status="running",
+                            message="Downloading Firecracker kernel...",
+                        )
+                    )
+                fetch_result = kernel_service.fetch_firecracker_kernel(
+                    spec=spec,
+                    ci_version=ci_version,
+                    arch=resolved.arch,
+                    output_dir=resolved.output_dir,
+                    show_progress=(on_progress is None),
+                )
+                if on_progress is not None:
+                    on_progress(
+                        ProgressEvent(
+                            phase="download",
+                            status="complete",
+                            message="Firecracker kernel download complete.",
+                        )
+                    )
+            elif resolved.kernel_type == "official":
+                if on_progress is not None:
+                    on_progress(
+                        ProgressEvent(
+                            phase="build",
+                            status="running",
+                            message="Building kernel (this may take a while)...",
+                        )
+                    )
+                fetch_result = kernel_service.build_official_kernel(
+                    spec=spec,
+                    arch=resolved.arch,
+                    output_dir=resolved.output_dir,
+                    jobs=resolved.jobs,
+                    keep_build_dir=resolved.keep_build_dir,
+                    clean_build=resolved.clean_build,
+                    kernel_config=resolved.kernel_config,
+                    show_progress=(on_progress is None),
+                )
+                if on_progress is not None:
+                    on_progress(
+                        ProgressEvent(
+                            phase="build",
+                            status="complete",
+                            message="Kernel build complete.",
+                        )
+                    )
+            else:
+                raise KernelError(
+                    f"Unsupported kernel type: {resolved.kernel_type}"
+                )
+
+            # Generate hash from the fetched/built kernel file
+            timestamp = datetime.now(tz=UTC).isoformat()
+            kernel_id = HashGenerator.kernel(
+                fetch_result.path,
+                fetch_result.version,
+                resolved.arch,
+                timestamp,
+            )
+
+            # Parse filename for base_name
+            parsed = KernelService.parse_filename(fetch_result.path.name)
+
+            # Build KernelItem (path is relative — filename only)
+            kernel_item = KernelItem(
+                id=kernel_id,
+                name=fetch_result.path.name,
+                base_name=parsed.base_name,
+                version=fetch_result.version,
+                arch=resolved.arch,
+                type=resolved.kernel_type,
+                path=fetch_result.path.name,
+                is_default=resolved.set_default,
+                is_present=True,
+                created_at=timestamp,
+                updated_at=timestamp,
+            )
+
+            repo.upsert(kernel_item)
+
+            # Clean up old kernel file if ID changed
+            if existing is not None and existing.id != kernel_item.id:
+                old_path = existing.resolved_path
+                if old_path.exists():
+                    old_path.unlink()
+                    logger.info(
+                        "Cleaned up old kernel file for %s-%s",
+                        resolved.kernel_type,
+                        resolved.version,
+                    )
+
+            AuditLog.log(
+                "kernel.fetch",
+                changes={
+                    "id": kernel_item.id,
+                    "type": kernel_item.type,
+                    "version": kernel_item.version,
+                    "arch": kernel_item.arch,
+                },
+            )
+            return OperationResult(
+                status="success",
+                code="kernel.fetched",
+                message=f"Kernel '{kernel_item.name}' fetched successfully",
+                item=kernel_item,
+            )
+        except KernelError as e:
+            return OperationResult(
+                status="error",
+                code="kernel.fetch_failed",
+                message=str(e),
+                exception=e,
+            )
 
     @staticmethod
-    def remove(inputs: KernelInput, force: bool = False) -> None:
+    def remove(
+        inputs: KernelInput, force: bool = False
+    ) -> BatchResult[KernelItem]:
         """
         Remove kernel by ID prefix or name.
 
@@ -174,8 +241,8 @@ class KernelOperation:
             inputs: KernelInput with id/name identifiers.
             force: If True, remove even if referenced by VMs.
 
-        Raises:
-            KernelError: If kernel not found or referenced by VMs.
+        Returns:
+            BatchResult with per-kernel results.
 
         """
         from mvmctl.api.inputs._kernel_input import KernelRequest
@@ -188,17 +255,39 @@ class KernelOperation:
         resolved = request.resolve()
 
         service = KernelService(repo)
-        service.remove_many(resolved.kernels, force=force or resolved.force)
+        items: list[OperationResult[KernelItem]] = []
 
         for kernel in resolved.kernels:
-            AuditLog.log(
-                "kernel.remove",
-                changes={
-                    "id": kernel.id,
-                    "name": kernel.name,
-                    "type": kernel.type,
-                },
-            )
+            try:
+                service.remove(kernel, force=force or resolved.force)
+                items.append(
+                    OperationResult(
+                        status="success",
+                        code="kernel.removed",
+                        message=f"Removed kernel {kernel.name}",
+                        item=kernel,
+                    )
+                )
+                AuditLog.log(
+                    "kernel.remove",
+                    changes={
+                        "id": kernel.id,
+                        "name": kernel.name,
+                        "type": kernel.type,
+                    },
+                )
+            except KernelError as e:
+                items.append(
+                    OperationResult(
+                        status="error",
+                        code="kernel.remove_failed",
+                        message=str(e),
+                        item=kernel,
+                        exception=e,
+                    )
+                )
+
+        return BatchResult(items=items)
 
     @staticmethod
     def list_all() -> list[KernelItem]:
@@ -283,56 +372,46 @@ class KernelOperation:
         return kernel_item
 
     @staticmethod
-    def set_default(inputs: KernelInput) -> None:
+    def set_default(inputs: KernelInput) -> OperationResult[KernelItem]:
         """
         Set a kernel as the default.
 
         Args:
             inputs: KernelInput with id/name identifiers.
 
+        Returns:
+            OperationResult with the kernel that was set as default.
+
         """
         from mvmctl.api.inputs._kernel_input import KernelRequest
 
-        db = Database()
-        repo = KernelRepository(db)
+        try:
+            db = Database()
+            repo = KernelRepository(db)
 
-        request = KernelRequest(inputs=inputs, db=db)
-        resolved = request.resolve()
+            request = KernelRequest(inputs=inputs, db=db)
+            resolved = request.resolve()
 
-        if len(resolved.kernels) != 1:
-            raise KernelError(
-                f"Expected exactly one kernel, got {len(resolved.kernels)}"
+            if len(resolved.kernels) != 1:
+                raise KernelError(
+                    f"Expected exactly one kernel, got {len(resolved.kernels)}"
+                )
+
+            controller = KernelController(resolved.kernels[0], repo)
+            controller.set_default()
+
+            kernel = resolved.kernels[0]
+            AuditLog.log("kernel.set_default", changes={"name": kernel.name})
+            return OperationResult(
+                status="success",
+                code="kernel.default_set",
+                message=f"Default kernel set to {kernel.name}",
+                item=kernel,
             )
-
-        controller = KernelController(resolved.kernels[0], repo)
-        controller.set_default()
-
-        AuditLog.log(
-            "kernel.set_default", changes={"name": resolved.kernels[0].name}
-        )
-
-    @staticmethod
-    def ensure_default() -> KernelItem:
-        """
-        Ensure the default kernel exists and is available.
-
-        Returns:
-            The default KernelItem.
-
-        Raises:
-            KernelError: If no default kernel exists.
-
-        """
-        db = Database()
-        repo = KernelRepository(db)
-
-        default_kernel = repo.get_default()
-        if default_kernel is None:
-            raise KernelError("No default kernel found in database")
-
-        # Verify file exists on disk
-        kernel_path = default_kernel.resolved_path
-        if not kernel_path.exists():
-            raise KernelError(f"Default kernel file not found: {kernel_path}")
-
-        return default_kernel
+        except KernelError as e:
+            return OperationResult(
+                status="error",
+                code="kernel.default_set_failed",
+                message=str(e),
+                exception=e,
+            )

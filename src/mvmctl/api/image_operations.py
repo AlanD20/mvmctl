@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mvmctl.api.inputs._image_acquire_input import (
     ImageAcquireRequest,
@@ -28,21 +27,18 @@ from mvmctl.exceptions import (
     TieDetectedError,
 )
 from mvmctl.models import ImageItem, ImageSpec
+from mvmctl.models.result import BatchResult, OperationResult, ProgressEvent
 from mvmctl.utils.auditlog import AuditLog
 from mvmctl.utils.common import CacheUtils
 from mvmctl.utils.crypto import HashGenerator
+
+if TYPE_CHECKING:
+    from mvmctl.models.result import NeedsInteraction
 
 logger = logging.getLogger(__name__)
 
 
 __all__ = ["ImageOperation"]
-
-
-@dataclass
-class ImageAcquireResult:
-    """Result of image acquire operation — the full ImageItem with generated hash as id."""
-
-    result: ImageItem
 
 
 class ImageOperation:
@@ -57,20 +53,19 @@ class ImageOperation:
     def fetch(
         inputs: ImageFetchInput,
         *,
-        phase_callback: Callable[[str], None] | None = None,
-    ) -> ImageAcquireResult:
+        on_progress: Callable[[ProgressEvent], None] | None = None,
+    ) -> OperationResult[ImageItem] | NeedsInteraction:
         """
         Fetch image from remote URL, handle partition detection/retry, persist to DB.
 
         Args:
             inputs: ImageFetchInput containing spec, output_dir, force, partition,
                    and skip_optimization.
+            on_progress: Optional callback for progress events.
 
         Returns:
-            ImageAcquireResult with image metadata and full hash.
-
-        Raises:
-            ImageError: If fetch fails or partition detection fails (when no_prompt).
+            OperationResult with image metadata on success,
+            or NeedsInteraction if user interaction is required.
 
         """
         from mvmctl.core.binary._service import BinaryService
@@ -98,7 +93,11 @@ class ImageOperation:
             resolved_path = images_dir / existing_image.path
             if resolved_path.exists():
                 logger.info("Image already exists: %s", existing_image.path)
-                return ImageAcquireResult(result=existing_image)
+                return OperationResult(
+                    status="skipped",
+                    code="image.already_present",
+                    item=existing_image,
+                )
 
         binary_service = BinaryService(BinaryRepository(db))
         default_firecracker = binary_service.get_default_firecracker()
@@ -116,10 +115,21 @@ class ImageOperation:
         # ORCHESTRATION: download → extract → optimize
         try:
             download_path = image_service.download_image(
-                spec, image_id, resolved.output_dir, resolved.force, ci_version
+                spec,
+                image_id,
+                resolved.output_dir,
+                resolved.force,
+                ci_version,
+                show_progress=(on_progress is None),
             )
-            if phase_callback:
-                phase_callback("extracting")
+            if on_progress is not None:
+                on_progress(
+                    ProgressEvent(
+                        phase="extract",
+                        status="running",
+                        message="Extracting image...",
+                    )
+                )
             extracted_path = image_service.extract_downloaded_image(
                 download_path,
                 spec,
@@ -128,8 +138,14 @@ class ImageOperation:
                 resolved.partition,
                 resolved.disabled_detectors,
             )
-            if phase_callback:
-                phase_callback("optimizing")
+            if on_progress is not None:
+                on_progress(
+                    ProgressEvent(
+                        phase="optimize",
+                        status="running",
+                        message="Optimizing image...",
+                    )
+                )
             image_item = image_service.optimize_image(
                 extracted_path,
                 image_id,
@@ -137,12 +153,23 @@ class ImageOperation:
                 timestamp,
                 resolved.skip_optimization,
             )
-            if phase_callback:
-                phase_callback("complete")
+            if on_progress is not None:
+                on_progress(
+                    ProgressEvent(
+                        phase="complete",
+                        status="complete",
+                        message="Image fetch complete.",
+                    )
+                )
 
             download_path.unlink(missing_ok=True)
-        except (RootPartitionDetectionError, TieDetectedError):
-            raise
+        except (RootPartitionDetectionError, TieDetectedError) as e:
+            return OperationResult(
+                status="error",
+                code="image.acquire_failed",
+                message=str(e),
+                exception=e,
+            )
 
         image_item.is_default = resolved.set_default
         repo.upsert(image_item)
@@ -157,22 +184,28 @@ class ImageOperation:
                     spec.id,
                 )
 
-        return ImageAcquireResult(result=image_item)
+        return OperationResult(
+            status="success",
+            code="image.acquired",
+            item=image_item,
+        )
 
     @staticmethod
-    def import_(inputs: ImageImportInput) -> ImageAcquireResult:
+    def import_(
+        inputs: ImageImportInput,
+        *,
+        on_progress: Callable[[ProgressEvent], None] | None = None,
+    ) -> OperationResult[ImageItem]:
         """
         Import local image file, convert, persist to DB.
 
         Args:
             inputs: ImageImportInput containing name, source_path, format,
                    output_dir, force, and partition.
+            on_progress: Optional callback for progress events.
 
         Returns:
-            ImageAcquireResult with image metadata and full hash.
-
-        Raises:
-            ImageError: If import fails or partition detection fails.
+            OperationResult with image metadata on success.
 
         """
         from mvmctl.core.image._service import ImageService
@@ -218,7 +251,11 @@ class ImageOperation:
             resolved_path = images_dir / existing_image.path
             if resolved_path.exists():
                 logger.info("Image already exists: %s", existing_image.path)
-                return ImageAcquireResult(result=existing_image)
+                return OperationResult(
+                    status="skipped",
+                    code="image.already_present",
+                    item=existing_image,
+                )
 
         # Generate image ID
         timestamp = datetime.now(tz=UTC).isoformat()
@@ -229,6 +266,14 @@ class ImageOperation:
 
         # ORCHESTRATION: extract → optimize
         try:
+            if on_progress is not None:
+                on_progress(
+                    ProgressEvent(
+                        phase="extract",
+                        status="running",
+                        message="Extracting image...",
+                    )
+                )
             extracted_path = image_service.extract_import_image(
                 resolved.source_path,
                 image_id,
@@ -237,6 +282,14 @@ class ImageOperation:
                 resolved.partition,
                 resolved.disabled_detectors,
             )
+            if on_progress is not None:
+                on_progress(
+                    ProgressEvent(
+                        phase="optimize",
+                        status="running",
+                        message="Optimizing image...",
+                    )
+                )
             image_item = image_service.optimize_image(
                 extracted_path,
                 image_id,
@@ -244,8 +297,21 @@ class ImageOperation:
                 timestamp,
                 resolved.skip_optimization,
             )
-        except (RootPartitionDetectionError, TieDetectedError):
-            raise
+            if on_progress is not None:
+                on_progress(
+                    ProgressEvent(
+                        phase="complete",
+                        status="complete",
+                        message="Image import complete.",
+                    )
+                )
+        except (RootPartitionDetectionError, TieDetectedError) as e:
+            return OperationResult(
+                status="error",
+                code="image.import_failed",
+                message=str(e),
+                exception=e,
+            )
 
         image_item.is_default = resolved.set_default
         repo.upsert(image_item)
@@ -260,10 +326,16 @@ class ImageOperation:
                     derived_id,
                 )
 
-        return ImageAcquireResult(result=image_item)
+        return OperationResult(
+            status="success",
+            code="image.imported",
+            item=image_item,
+        )
 
     @staticmethod
-    def remove(inputs: ImageInput, force: bool = False) -> None:
+    def remove(
+        inputs: ImageInput, force: bool = False
+    ) -> BatchResult[ImageItem]:
         """
         Remove image by ID prefix.
 
@@ -271,19 +343,44 @@ class ImageOperation:
             inputs: ImageInput with id_prefix identifiers.
             force: If True, remove even if referenced by VMs.
 
-        Raises:
-            ImageError: If image not found or referenced by VMs.
+        Returns:
+            BatchResult with per-item results.
 
         """
         from mvmctl.api.inputs._image_input import ImageRequest
-        from mvmctl.core.image._service import ImageService
+        from mvmctl.core.image._controller import ImageController
+        from mvmctl.core.image._resolver import ImageResolver
 
         db = Database()
         repo = ImageRepository(db)
 
         resolved = ImageRequest(inputs=inputs, db=db).resolve()
-        image_service = ImageService(repo)
-        image_service.remove_many(resolved.items, force=force)
+        resolver = ImageResolver(repo, include=["vm"])
+        enriched = resolver._enrich(resolved.items)
+
+        results: list[OperationResult[ImageItem]] = []
+        for image in enriched:
+            try:
+                controller = ImageController(image, repo)
+                controller.remove(force=force)
+                results.append(
+                    OperationResult(
+                        status="success",
+                        code="image.removed",
+                        item=image,
+                    )
+                )
+            except Exception as e:
+                results.append(
+                    OperationResult(
+                        status="error",
+                        code="image.remove_failed",
+                        message=str(e),
+                        item=image,
+                        exception=e,
+                    )
+                )
+        return BatchResult(items=results)
 
     @staticmethod
     def list_(
@@ -412,12 +509,17 @@ class ImageOperation:
         return image_item
 
     @staticmethod
-    def set_default(inputs: ImageInput) -> None:
+    def set_default(
+        inputs: ImageInput,
+    ) -> OperationResult[ImageItem]:
         """
         Set an image as the default.
 
         Args:
             inputs: ImageInput with id_prefix or os_slug identifiers.
+
+        Returns:
+            OperationResult with the image that was set as default.
 
         """
         from mvmctl.api.inputs._image_input import ImageRequest
@@ -435,9 +537,18 @@ class ImageOperation:
         repo.set_default(image_item.id)
 
         AuditLog.log("image.set_default", changes={"id": image_item.id[:6]})
+        return OperationResult(
+            status="success",
+            code="image.default_set",
+            item=image_item,
+        )
 
     @staticmethod
-    def warm(inputs: ImageInput) -> list[Path]:
+    def warm(
+        inputs: ImageInput,
+        *,
+        on_progress: Callable[[ProgressEvent], None] | None = None,
+    ) -> OperationResult[list[Path]]:
         """
         Pre-decompress images to ready pool for fast VM creation.
 
@@ -446,12 +557,10 @@ class ImageOperation:
 
         Args:
             inputs: ImageInput with id_prefix or os_slug identifiers.
+            on_progress: Optional callback for progress events.
 
         Returns:
-            List of paths to the warmed images in the ready pool.
-
-        Raises:
-            ImageError: If any image is not found or warming fails.
+            OperationResult with list of paths to the warmed images.
 
         """
         from mvmctl.api.inputs._image_input import ImageRequest
@@ -461,12 +570,41 @@ class ImageOperation:
         repo = ImageRepository(db)
         images = ImageRequest(inputs=inputs, db=db).resolve().items
 
+        if on_progress is not None:
+            on_progress(
+                ProgressEvent(
+                    phase="warm",
+                    status="running",
+                    message="Warming images...",
+                )
+            )
         svc = ImageService(repo)
-        warmed_paths = svc.ensure_cached(images)
+        try:
+            warmed_paths = svc.ensure_cached(images)
+        except Exception as e:
+            return OperationResult(
+                status="error",
+                code="image.warm_failed",
+                message=str(e),
+                exception=e,
+            )
+
+        if on_progress is not None:
+            on_progress(
+                ProgressEvent(
+                    phase="warm",
+                    status="complete",
+                    message="Warming complete.",
+                )
+            )
 
         for path in warmed_paths:
             logger.info("Image warmed successfully: %s", path)
-        return warmed_paths
+        return OperationResult(
+            status="success",
+            code="image.warmed",
+            item=warmed_paths,
+        )
 
     @staticmethod
     def find_existing_image(

@@ -5,7 +5,7 @@ from __future__ import annotations
 import typer
 
 from mvmctl.api import ConfigOperation
-from mvmctl.utils._io import print_info, print_success
+from mvmctl.utils._io import print_error, print_info, print_success
 from mvmctl.utils.cli import handle_errors
 
 config_app = typer.Typer(
@@ -55,8 +55,11 @@ def config_set(
     value: str = typer.Argument(..., help="New value"),
 ) -> None:
     """Set a config value."""
-    ConfigOperation.set(category, key, value)
-    print_success(f"Set {category}.{key} = {value}")
+    result = ConfigOperation.set(category, key, value)
+    if result.is_error:
+        print_error(result.message)
+        raise typer.Exit(code=1)
+    print_success(result.message)
 
 
 @config_app.command(name="reset")
@@ -74,17 +77,26 @@ def config_reset(
 ) -> None:
     """Reset a config value to its default."""
     if all_overrides:
-        deleted = ConfigOperation.reset(all_overrides=True)
-        print_success(f"Reset {deleted} override(s) globally")
+        result = ConfigOperation.reset(all_overrides=True)
+        if result.is_error:
+            print_error(result.message)
+            raise typer.Exit(code=1)
+        print_success(f"Reset {result.item} override(s) globally")
     elif category is not None and key is not None:
-        deleted = ConfigOperation.reset(category, key)
-        if deleted:
+        result = ConfigOperation.reset(category, key)
+        if result.is_error:
+            print_error(result.message)
+            raise typer.Exit(code=1)
+        if result.item and result.item > 0:
             print_success(f"Reset {category}.{key} to default")
         else:
             print_info(f"{category}.{key} was already at default")
     elif category is not None:
-        deleted = ConfigOperation.reset(category, key=None)
-        print_success(f"Reset {deleted} override(s) in {category}")
+        result = ConfigOperation.reset(category, key=None)
+        if result.is_error:
+            print_error(result.message)
+            raise typer.Exit(code=1)
+        print_success(f"Reset {result.item} override(s) in {category}")
     else:
         print_info("Provide a category, category and key, or use --all")
 

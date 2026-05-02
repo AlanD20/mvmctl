@@ -9,7 +9,6 @@ operation class.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 
 from mvmctl.api.inputs._binary_fetch_input import (
     BinaryFetchInput,
@@ -30,23 +29,23 @@ from mvmctl.exceptions import (
     BinaryNotFoundError,
 )
 from mvmctl.models import BinaryItem
+from mvmctl.models.result import (
+    BatchResult,
+    NeedsInteraction,
+    OperationResult,
+)
 from mvmctl.utils.auditlog import AuditLog
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class BinaryFetchResult:
-    """Result of binary fetch operation — contains firecracker and jailer binaries."""
-
-    result: list[BinaryItem]
 
 
 class BinaryOperation:
     """Binary management orchestration."""
 
     @staticmethod
-    def fetch(inputs: BinaryFetchInput) -> BinaryFetchResult:
+    def fetch(
+        inputs: BinaryFetchInput,
+    ) -> OperationResult[list[BinaryItem]] | NeedsInteraction:
         """
         Download a binary version.
 
@@ -57,65 +56,92 @@ class BinaryOperation:
         4. Download via BinaryService.download()
         5. Upsert to DB via BinaryRepository
         6. If set_as_default, mark as default
-        7. Return BinaryFetchResult
+        7. Return OperationResult
 
         Args:
             inputs: BinaryFetchInput with version and set_as_default flag.
 
         Returns:
-            BinaryFetchResult with firecracker and jailer entries.
+            OperationResult with firecracker and jailer entries.
+
+        Raises:
+            BinaryError: If download or resolution fails.
 
         """
-        db = Database()
-        repo = BinaryRepository(db)
+        try:
+            db = Database()
+            repo = BinaryRepository(db)
 
-        # Resolve inputs
-        request = BinaryFetchRequest(inputs=inputs, db=db)
-        resolved = request.resolve()
+            # Resolve inputs
+            request = BinaryFetchRequest(inputs=inputs, db=db)
+            resolved = request.resolve()
 
-        # Check if version already exists
-        normalized = resolved.version.removeprefix("v")
-        fc_exists = repo.get_by_name_and_version("firecracker", normalized)
-        jl_exists = repo.get_by_name_and_version("jailer", normalized)
-        version_exists = fc_exists is not None and jl_exists is not None
+            # Check if version already exists
+            normalized = resolved.version.removeprefix("v")
+            fc_exists = repo.get_by_name_and_version("firecracker", normalized)
+            jl_exists = repo.get_by_name_and_version("jailer", normalized)
+            version_exists = fc_exists is not None and jl_exists is not None
 
-        if version_exists and not resolved.download_override:
-            # Early exit: return existing binaries without downloading
-            assert fc_exists is not None
-            assert jl_exists is not None
-            return BinaryFetchResult(result=[fc_exists, jl_exists])
+            if version_exists and not resolved.download_override:
+                # Early exit: return existing binaries without downloading
+                assert fc_exists is not None
+                assert jl_exists is not None
+                return OperationResult(
+                    status="skipped",
+                    code="binary.already_present",
+                    message=f"Binary v{normalized} already present",
+                    item=[fc_exists, jl_exists],
+                )
 
-        # Download (override or first-time)
-        no_default = repo.get_default("firecracker") is None
-        should_set_default = resolved.set_as_default or no_default
+            # Download (override or first-time)
+            no_default = repo.get_default("firecracker") is None
+            should_set_default = resolved.set_as_default or no_default
 
-        binaries = BinaryService.download_firecracker(
-            version=resolved.version,
-            bin_dir=resolved.bin_dir,
-        )
+            binaries = BinaryService.download_firecracker(
+                version=resolved.version,
+                bin_dir=resolved.bin_dir,
+            )
 
-        # Persist to DB
-        for binary in binaries:
-            binary.is_default = should_set_default
-            repo.upsert(binary)
+            # Persist to DB
+            for binary in binaries:
+                binary.is_default = should_set_default
+                repo.upsert(binary)
 
-        AuditLog.log("binary.fetch", changes={"version": resolved.version})
+            AuditLog.log("binary.fetch", changes={"version": resolved.version})
 
-        return BinaryFetchResult(result=binaries)
+            return OperationResult(
+                status="success",
+                code="binary.downloaded",
+                message=f"Downloaded Firecracker v{normalized}",
+                item=binaries,
+            )
+        except BinaryError as e:
+            return OperationResult(
+                status="error",
+                code="binary.fetch_failed",
+                message=str(e),
+                exception=e,
+            )
 
     @staticmethod
-    def remove(inputs: BinaryInput, force: bool = False) -> None:
+    def remove(
+        inputs: BinaryInput, force: bool = False
+    ) -> BatchResult[BinaryItem]:
         """
         Remove binaries by ID (canonical method).
 
         Flow:
         1. Resolve inputs via BinaryRequest
-        2. Delegate to BinaryService.remove_many() which handles
-           VM reference checks and soft/hard delete per binary.
+        2. For each binary, delegate to BinaryService.remove() which handles
+           VM reference checks and soft/hard delete.
+        3. Return BatchResult with per-binary OperationResult items.
 
         Args:
             inputs: BinaryInput with identifiers to remove.
             force: If True, remove even if referenced by VMs.
+
+        Returns:
+            BatchResult with per-binary results.
 
         """
         db = Database()
@@ -126,61 +152,105 @@ class BinaryOperation:
         resolved = request.resolve()
 
         service = BinaryService(repo=repo)
-        service.remove_many(resolved.binaries, force=force)
+        items: list[OperationResult[BinaryItem]] = []
 
         for binary in resolved.binaries:
-            AuditLog.log(
-                "binary.remove",
-                changes={
-                    "id": binary.id,
-                    "name": binary.name,
-                    "version": binary.full_version,
-                },
-            )
+            try:
+                service.remove(binary, force=force)
+                items.append(
+                    OperationResult(
+                        status="success",
+                        code="binary.removed",
+                        message=f"Removed {binary.name} v{binary.full_version}",
+                        item=binary,
+                    )
+                )
+                AuditLog.log(
+                    "binary.remove",
+                    changes={
+                        "id": binary.id,
+                        "name": binary.name,
+                        "version": binary.full_version,
+                    },
+                )
+            except (BinaryError, BinaryNotFoundError) as e:
+                items.append(
+                    OperationResult(
+                        status="error",
+                        code="binary.remove_failed",
+                        message=str(e),
+                        item=binary,
+                        exception=e,
+                    )
+                )
+
+        return BatchResult(items=items)
 
     @staticmethod
-    def remove_by_version(version: str, force: bool = False) -> None:
+    def remove_by_version(
+        version: str, force: bool = False
+    ) -> OperationResult[None]:
         """
         Remove both firecracker and jailer for a version (convenience).
 
         Flow:
         1. Resolve to firecracker and jailer BinaryItems for version
         2. Delegate to BinaryService.remove_many()
+        3. Return OperationResult
 
         Args:
             version: Version string to remove (e.g., "1.15.0").
             force: If True, remove even if referenced by VMs.
 
+        Returns:
+            OperationResult with operation status.
+
         """
-        db = Database()
-        repo = BinaryRepository(db)
-        resolver = BinaryResolver(repo)
+        try:
+            db = Database()
+            repo = BinaryRepository(db)
+            resolver = BinaryResolver(repo)
 
-        normalized = version.removeprefix("v")
+            normalized = version.removeprefix("v")
 
-        binaries_to_remove: list[BinaryItem] = []
-        for name in ("firecracker", "jailer"):
-            try:
-                binary = resolver.by_name_version(name, normalized)
-                binaries_to_remove.append(binary)
-            except BinaryNotFoundError:
-                logger.debug(
-                    "Binary %s v%s not found in DB, skipping", name, normalized
-                )
+            binaries_to_remove: list[BinaryItem] = []
+            for name in ("firecracker", "jailer"):
+                try:
+                    binary = resolver.by_name_version(name, normalized)
+                    binaries_to_remove.append(binary)
+                except BinaryNotFoundError:
+                    logger.debug(
+                        "Binary %s v%s not found in DB, skipping",
+                        name,
+                        normalized,
+                    )
 
-        if binaries_to_remove:
-            service = BinaryService(repo=repo)
-            service.remove_many(binaries_to_remove, force=force)
+            if binaries_to_remove:
+                service = BinaryService(repo=repo)
+                service.remove_many(binaries_to_remove, force=force)
 
-            for binary in binaries_to_remove:
-                AuditLog.log(
-                    "binary.remove",
-                    changes={
-                        "id": binary.id,
-                        "name": binary.name,
-                        "version": normalized,
-                    },
-                )
+                for binary in binaries_to_remove:
+                    AuditLog.log(
+                        "binary.remove",
+                        changes={
+                            "id": binary.id,
+                            "name": binary.name,
+                            "version": normalized,
+                        },
+                    )
+
+            return OperationResult(
+                status="success",
+                code="binary.removed",
+                message=f"Removed binaries for v{normalized}",
+            )
+        except (BinaryError, BinaryNotFoundError) as e:
+            return OperationResult(
+                status="error",
+                code="binary.remove_failed",
+                message=str(e),
+                exception=e,
+            )
 
     @staticmethod
     def get(inputs: BinaryInput) -> list[BinaryItem]:
@@ -234,81 +304,124 @@ class BinaryOperation:
         return BinaryService.list_remote(limit=limit)
 
     @staticmethod
-    def set_default(inputs: BinaryInput) -> None:
+    def set_default(inputs: BinaryInput) -> OperationResult[BinaryItem]:
         """
         Set binary as default.
 
         Args:
             inputs: BinaryInput with identifier of binary to set as default.
 
+        Returns:
+            OperationResult with the binary that was set as default.
+
         """
-        db = Database()
-        repo = BinaryRepository(db)
+        try:
+            db = Database()
+            repo = BinaryRepository(db)
 
-        request = BinaryRequest(inputs=inputs, db=db)
-        resolved = request.resolve()
+            request = BinaryRequest(inputs=inputs, db=db)
+            resolved = request.resolve()
 
-        if len(resolved.binaries) > 1:
-            raise BinaryError("Ambiguous ID to set to default")
+            if len(resolved.binaries) > 1:
+                raise BinaryError("Ambiguous ID to set to default")
 
-        binary = resolved.binaries[0]
-        controller = BinaryController(entity=binary, repo=repo)
-        controller.set_default()
-        AuditLog.log(
-            "binary.set_default",
-            changes={
-                "id": binary.id,
-                "name": binary.name,
-                "version": binary.version,
-            },
-        )
+            binary = resolved.binaries[0]
+            controller = BinaryController(entity=binary, repo=repo)
+            controller.set_default()
+            AuditLog.log(
+                "binary.set_default",
+                changes={
+                    "id": binary.id,
+                    "name": binary.name,
+                    "version": binary.version,
+                },
+            )
+            return OperationResult(
+                status="success",
+                code="binary.default_set",
+                message=f"Default binary set to {binary.name} v{binary.version}",
+                item=binary,
+            )
+        except BinaryError as e:
+            return OperationResult(
+                status="error",
+                code="binary.default_set_failed",
+                message=str(e),
+                exception=e,
+            )
 
     @staticmethod
-    def ensure_default() -> BinaryItem | None:
+    def ensure_default() -> OperationResult[BinaryItem]:
         """
         Ensure a default Firecracker binary exists.
 
         If local Firecracker binaries exist but none is marked default, sets
-        the latest Firecracker binary as default and returns it.
+        the latest Firecracker binary as default.
 
         Returns:
-            The default BinaryItem, or None if no local binaries exist.
+            OperationResult with the default binary (or None if no binaries exist).
 
         """
-        from packaging.version import Version
+        try:
+            from packaging.version import Version
 
-        db = Database()
-        repo = BinaryRepository(db)
-        service = BinaryService(repo)
+            db = Database()
+            repo = BinaryRepository(db)
+            service = BinaryService(repo)
 
-        local = service.list_local()
-        if not local:
-            return None
+            local = service.list_local()
+            if not local:
+                return OperationResult(
+                    status="success",
+                    code="binary.default_unchanged",
+                    message="No local binaries found",
+                )
 
-        default = service.get_default_firecracker()
-        if default is not None:
-            return default
+            default = service.get_default_firecracker()
+            if default is not None:
+                return OperationResult(
+                    status="skipped",
+                    code="binary.default_unchanged",
+                    message="Default already set",
+                    item=default,
+                )
 
-        firecracker_bins = [b for b in local if b.name == "firecracker"]
-        if not firecracker_bins:
-            return None
+            firecracker_bins = [b for b in local if b.name == "firecracker"]
+            if not firecracker_bins:
+                return OperationResult(
+                    status="success",
+                    code="binary.default_unchanged",
+                    message="No firecracker binaries found",
+                )
 
-        latest_fc = sorted(
-            firecracker_bins,
-            key=lambda b: Version(b.version),
-            reverse=True,
-        )[0]
-        controller = BinaryController(entity=latest_fc, repo=repo)
-        controller.set_default()
-        AuditLog.log(
-            "binary.ensure_default",
-            changes={
-                "id": latest_fc.id,
-                "name": latest_fc.name,
-                "version": latest_fc.version,
-            },
-        )
-        return latest_fc
+            latest_fc = sorted(
+                firecracker_bins,
+                key=lambda b: Version(b.version),
+                reverse=True,
+            )[0]
+            controller = BinaryController(entity=latest_fc, repo=repo)
+            controller.set_default()
+            AuditLog.log(
+                "binary.ensure_default",
+                changes={
+                    "id": latest_fc.id,
+                    "name": latest_fc.name,
+                    "version": latest_fc.version,
+                },
+            )
+            return OperationResult(
+                status="success",
+                code="binary.default_repaired",
+                message=f"Default set to {latest_fc.name} v{latest_fc.version}",
+                item=latest_fc,
+            )
+        except BinaryError as e:
+            return OperationResult(
+                status="error",
+                code="binary.ensure_default_failed",
+                message=str(e),
+                exception=e,
+            )
 
 
-__all__ = ["BinaryOperation", "BinaryFetchResult"]
+__all__ = ["BinaryOperation"]

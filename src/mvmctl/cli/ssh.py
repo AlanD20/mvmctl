@@ -7,6 +7,7 @@ from pathlib import Path
 import typer
 
 from mvmctl.api import SSHInput, SSHOperation
+from mvmctl.utils._io import print_error
 from mvmctl.utils.cli import handle_errors
 
 ssh_app = typer.Typer(
@@ -59,5 +60,8 @@ def ssh_connect(
         mac=mac,
         name=name,
     )
-    exit_code = SSHOperation.connect(inputs)
-    raise typer.Exit(code=exit_code)
+    result = SSHOperation.connect(inputs)
+    if result.is_error:
+        print_error(result.message)
+        raise typer.Exit(code=1)
+    raise typer.Exit(code=0)

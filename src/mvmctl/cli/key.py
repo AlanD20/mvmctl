@@ -95,11 +95,13 @@ def key_add(
     ),
 ) -> None:
     """Add an existing public key to the cache."""
-    key_item = KeyOperation.add(
-        name=name, pub_key_path=path, overwrite=overwrite
-    )
+    result = KeyOperation.add(name=name, pub_key_path=path, overwrite=overwrite)
+    if result.is_error:
+        print_error(result.message or f"Failed to add key '{name}'")
+        raise typer.Exit(code=1)
+    assert result.item is not None
     print_success(
-        f"Key '{key_item.name}' added (ID: {HashGenerator.shorten(key_item.id)})"
+        f"Key '{result.item.name}' added (ID: {HashGenerator.shorten(result.item.id)})"
     )
 
 
@@ -141,8 +143,14 @@ def key_create(
         overwrite=force,
         set_default=set_default,
     )
-    key_item = KeyOperation.create(inputs)
-    print_success(f"Key '{key_item.name}' created (ID: {key_item.fingerprint})")
+    result = KeyOperation.create(inputs)
+    if result.is_error:
+        print_error(result.message or f"Failed to create key '{name}'")
+        raise typer.Exit(code=1)
+    assert result.item is not None
+    print_success(
+        f"Key '{result.item.name}' created (ID: {result.item.fingerprint})"
+    )
 
 
 @key_app.command(
@@ -161,8 +169,13 @@ def key_rm(
         raise typer.Exit(code=1)
 
     inputs = KeyInput(name=effective_names)
-    KeyOperation.remove(inputs)
-    print_success(f"Removed key(s): {' '.join(effective_names)}")
+    result = KeyOperation.remove(inputs)
+    for r in result.items:
+        item_name = r.item.name if r.item else "unknown"
+        if r.is_ok:
+            print_success(f"Removed key: {item_name}")
+        else:
+            print_error(r.message or f"Failed to remove key: {item_name}")
 
 
 @key_app.command(
@@ -212,9 +225,12 @@ def key_export(
     """Export a keypair to a directory."""
     name = CliUtils.check_name_arg(ctx, name)
     inputs = KeyInput(name=[name])
-    private_path, public_path = KeyOperation.export(
-        inputs, destination=out, overwrite=force
-    )
+    result = KeyOperation.export(inputs, destination=out, overwrite=force)
+    if result.is_error:
+        print_error(result.message or f"Failed to export key '{name}'")
+        raise typer.Exit(code=1)
+    assert result.item is not None
+    private_path, public_path = result.item
     print_success(f"Exported private key to {private_path}")
     print_info(f"Exported public key to {public_path}")
 
@@ -229,7 +245,10 @@ def key_set_default(
 ) -> None:
     """Set default SSH keys, or clear with --clear."""
     if clear:
-        KeyOperation.clear_defaults()
+        clear_result = KeyOperation.clear_defaults()
+        if clear_result.is_error:
+            print_error(clear_result.message or "Failed to clear default keys")
+            raise typer.Exit(code=1)
         print_success("Cleared all default keys")
         return
 
@@ -239,7 +258,10 @@ def key_set_default(
         raise typer.Exit(code=1)
 
     inputs = KeyInput(name=effective_names)
-    KeyOperation.set_default(inputs)
+    set_result = KeyOperation.set_default(inputs)
+    if set_result.is_error:
+        print_error(set_result.message or "Failed to set default key(s)")
+        raise typer.Exit(code=1)
     print_success(f"Default key(s) set: {', '.join(effective_names)}")
 
 

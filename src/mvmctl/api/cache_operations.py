@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 
 from mvmctl.core._shared import Database
@@ -17,6 +18,7 @@ from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.core.network._repository import LeaseRepository, NetworkRepository
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.models import CleanResult, PruneAllResult, VMStatus
+from mvmctl.models.result import OperationResult, ProgressEvent
 from mvmctl.utils.common import CacheUtils
 
 logger = logging.getLogger(__name__)
@@ -26,15 +28,22 @@ class CacheOperation:
     """Cache management orchestration."""
 
     @staticmethod
-    def init_all() -> dict[str, str | list[str] | None]:
+    def init_all(
+        *,
+        on_progress: Callable[[ProgressEvent], None] | None = None,
+    ) -> OperationResult[dict[str, str | list[str] | None]]:
         """Initialize all cache directories.
 
         Creates all necessary cache directories and optionally builds the
         libguestfs fixed appliance for faster image operations.
 
+        Args:
+            on_progress: Optional callback for progress events during
+                long-running operations (e.g., appliance build).
+
         Returns:
-            Dictionary with cache_dir path, list of created directory paths,
-            and guestfs_appliance path if built.
+            OperationResult with item dict containing cache_dir path,
+            list of created directory paths, and guestfs_appliance path if built.
         """
         cache_dir = CacheUtils.get_cache_dir()
         created: list[str] = []
@@ -51,7 +60,15 @@ class CacheOperation:
         for path in dirs:
             created.append(str(path))
 
-        # libguestfs fixed appliance
+        # libguestfs fixed appliance (heavy operation)
+        if on_progress is not None:
+            on_progress(
+                ProgressEvent(
+                    phase="appliance",
+                    status="running",
+                    message="Building libguestfs appliance...",
+                )
+            )
         appliance_path = CacheOperation._build_guestfs_appliance(cache_dir)
 
         # Detected guestfs kernel
@@ -59,14 +76,19 @@ class CacheOperation:
 
         kernel_info = KernelDetector.find_best_kernel()
 
-        return {
-            "cache_dir": str(cache_dir),
-            "directories": created,
-            "guestfs_appliance": str(appliance_path)
-            if appliance_path
-            else None,
-            "guestfs_kernel": str(kernel_info[0]) if kernel_info else None,
-        }
+        return OperationResult(
+            status="success",
+            code="cache.initialized",
+            message="Cache initialized successfully",
+            item={
+                "cache_dir": str(cache_dir),
+                "directories": created,
+                "guestfs_appliance": str(appliance_path)
+                if appliance_path
+                else None,
+                "guestfs_kernel": str(kernel_info[0]) if kernel_info else None,
+            },
+        )
 
     @staticmethod
     def _build_guestfs_appliance(cache_dir: Path) -> Path | None:
@@ -81,7 +103,7 @@ class CacheOperation:
     def prune_vms(
         dry_run: bool = False,
         include_all: bool = False,
-    ) -> list[str]:
+    ) -> OperationResult[list[str]]:
         """Prune VMs based on their status.
 
         By default, prunes all VMs EXCEPT those in RUNNING or STARTING state.
@@ -92,7 +114,7 @@ class CacheOperation:
             include_all: Prune ALL VMs including RUNNING and STARTING.
 
         Returns:
-            List of VM names that were removed.
+            OperationResult with item list of VM names that were removed.
         """
         HostPrivilegeHelper.check_privileges("/usr/sbin/ip", "prune VMs")
         db = Database()
@@ -116,12 +138,17 @@ class CacheOperation:
             else:
                 removed.append(vm.name)
 
-        return removed
+        return OperationResult(
+            status="success",
+            code="cache.pruned",
+            message=f"Pruned {len(removed)} VM(s)",
+            item=removed,
+        )
 
     @staticmethod
     def prune_networks(
         dry_run: bool = False, include_all: bool = False
-    ) -> list[str]:
+    ) -> OperationResult[list[str]]:
         """Prune unused networks.
 
         Args:
@@ -129,7 +156,7 @@ class CacheOperation:
             include_all: If True, remove ALL networks including default and referenced.
 
         Returns:
-            List of network names that were removed.
+            OperationResult with item list of network names that were removed.
         """
         HostPrivilegeHelper.check_privileges("/usr/sbin/ip", "prune networks")
         db = Database()
@@ -164,11 +191,18 @@ class CacheOperation:
                     from mvmctl.api.inputs._network_input import NetworkInput
                     from mvmctl.api.network_operations import NetworkOperation
 
-                    NetworkOperation.remove(
+                    remove_result = NetworkOperation.remove(
                         NetworkInput(name=[network.name]),
                         force=include_all,
                     )
-                    removed.append(network.name)
+                    if remove_result.is_error:
+                        logger.warning(
+                            "Failed to remove network %s: %s",
+                            network.name,
+                            remove_result.message,
+                        )
+                    else:
+                        removed.append(network.name)
                 except Exception as e:
                     logger.warning(
                         "Failed to remove network %s: %s", network.name, e
@@ -176,12 +210,17 @@ class CacheOperation:
             else:
                 removed.append(network.name)
 
-        return removed
+        return OperationResult(
+            status="success",
+            code="cache.pruned",
+            message=f"Pruned {len(removed)} network(s)",
+            item=removed,
+        )
 
     @staticmethod
     def prune_images(
         dry_run: bool = False, include_all: bool = False
-    ) -> list[str]:
+    ) -> OperationResult[list[str]]:
         """Prune unused images.
 
         Args:
@@ -189,7 +228,7 @@ class CacheOperation:
             include_all: If True, remove ALL images including default and referenced.
 
         Returns:
-            List of image IDs that were removed.
+            OperationResult with item list of image IDs that were removed.
         """
         db = Database()
         repo = ImageRepository(db)
@@ -230,12 +269,17 @@ class CacheOperation:
             else:
                 removed.append(image.id)
 
-        return removed
+        return OperationResult(
+            status="success",
+            code="cache.pruned",
+            message=f"Pruned {len(removed)} image(s)",
+            item=removed,
+        )
 
     @staticmethod
     def prune_kernels(
         dry_run: bool = False, include_all: bool = False
-    ) -> list[str]:
+    ) -> OperationResult[list[str]]:
         """Prune unused kernels.
 
         Args:
@@ -243,7 +287,7 @@ class CacheOperation:
             include_all: If True, remove ALL kernels including default and referenced.
 
         Returns:
-            List of kernel IDs that were removed.
+            OperationResult with item list of kernel IDs that were removed.
         """
         db = Database()
         repo = KernelRepository(db)
@@ -286,12 +330,17 @@ class CacheOperation:
             else:
                 removed.append(kernel.id)
 
-        return removed
+        return OperationResult(
+            status="success",
+            code="cache.pruned",
+            message=f"Pruned {len(removed)} kernel(s)",
+            item=removed,
+        )
 
     @staticmethod
     def prune_binaries(
         dry_run: bool = False, include_all: bool = False
-    ) -> list[str]:
+    ) -> OperationResult[list[str]]:
         """Prune unused binaries.
 
         Args:
@@ -299,7 +348,8 @@ class CacheOperation:
             include_all: If True, remove ALL binaries including default version.
 
         Returns:
-            List of binary identifiers (name:version) that were removed.
+            OperationResult with item list of binary identifiers (name:version)
+            that were removed.
         """
         db = Database()
         repo = BinaryRepository(db)
@@ -334,10 +384,17 @@ class CacheOperation:
             else:
                 removed.append(f"{binary.name}:{binary.version}")
 
-        return removed
+        return OperationResult(
+            status="success",
+            code="cache.pruned",
+            message=f"Pruned {len(removed)} binary(ies)",
+            item=removed,
+        )
 
     @staticmethod
-    def prune_misc(dry_run: bool = False) -> dict[str, bool]:
+    def prune_misc(
+        dry_run: bool = False,
+    ) -> OperationResult[dict[str, bool]]:
         """Prune miscellaneous cache: appliance, warm images, and stale guestfs state.
 
         Always removes appliance, warm images, and stale libguestfs locks/sockets
@@ -347,20 +404,26 @@ class CacheOperation:
             dry_run: If True, only report what would be removed.
 
         Returns:
-            Dictionary with keys "appliance", "warm_images", and
-            "guestfs_state" indicating whether each was removed.
+            OperationResult with item dict with keys "appliance",
+            "warm_images", and "guestfs_state" indicating whether each was removed.
         """
-        return {
+        result = {
             "appliance": GuestfsService.prune_appliance(dry_run),
             "warm_images": CacheService.prune_warm_images(dry_run),
             "guestfs_state": GuestfsService.clean_stale_guestfs_state(),
         }
+        return OperationResult(
+            status="success",
+            code="cache.pruned",
+            message="Misc cache pruned",
+            item=result,
+        )
 
     @staticmethod
     def prune_all(
         dry_run: bool = False,
         include_all: bool = False,
-    ) -> PruneAllResult:
+    ) -> OperationResult[PruneAllResult]:
         """Prune all cache resources.
 
         Performs a complete prune operation across all resource types:
@@ -371,8 +434,8 @@ class CacheOperation:
             include_all: If True, remove ALL resources including protected items.
 
         Returns:
-            PruneAllResult with aggregated pruned IDs, failed IDs, and
-            whether running VMs were present during the operation.
+            OperationResult with item PruneAllResult containing aggregated
+            pruned IDs, failed IDs, and whether running VMs were present.
         """
         HostPrivilegeHelper.check_privileges(
             "/usr/sbin/ip", "prune all cache resources"
@@ -387,31 +450,26 @@ class CacheOperation:
         pruned_ids: list[str] = []
         failed_ids: list[str] = []
 
-        pruned_ids.extend(
-            CacheOperation.prune_vms(dry_run=dry_run, include_all=include_all)
-        )
-        pruned_ids.extend(
+        for op_result in [
+            CacheOperation.prune_vms(dry_run=dry_run, include_all=include_all),
             CacheOperation.prune_networks(
                 dry_run=dry_run, include_all=include_all
-            )
-        )
-        pruned_ids.extend(
+            ),
             CacheOperation.prune_images(
                 dry_run=dry_run, include_all=include_all
-            )
-        )
-        pruned_ids.extend(
+            ),
             CacheOperation.prune_kernels(
                 dry_run=dry_run, include_all=include_all
-            )
-        )
-        pruned_ids.extend(
+            ),
             CacheOperation.prune_binaries(
                 dry_run=dry_run, include_all=include_all
-            )
-        )
+            ),
+        ]:
+            if op_result.is_ok and op_result.item:
+                pruned_ids.extend(op_result.item)
 
-        misc = CacheOperation.prune_misc(dry_run=dry_run)
+        misc_result = CacheOperation.prune_misc(dry_run=dry_run)
+        misc = misc_result.item or {}
         if misc.get("appliance"):
             pruned_ids.append("appliance")
         if misc.get("warm_images"):
@@ -419,14 +477,20 @@ class CacheOperation:
         if misc.get("guestfs_state"):
             pruned_ids.append("guestfs_state")
 
-        return PruneAllResult(
+        result = PruneAllResult(
             pruned_ids=pruned_ids,
             failed_ids=failed_ids,
             had_running_vms=had_running_vms,
         )
+        return OperationResult(
+            status="success",
+            code="cache.pruned",
+            message=f"Pruned {len(pruned_ids)} item(s)",
+            item=result,
+        )
 
     @staticmethod
-    def clean(dry_run: bool = False) -> CleanResult:
+    def clean(dry_run: bool = False) -> OperationResult[CleanResult]:
         """Completely clean all cache — host, prune everything, remove cache dir.
 
         This is the "nuclear option" for cache cleanup. It:
@@ -438,14 +502,16 @@ class CacheOperation:
             dry_run: If True, only report what would be removed.
 
         Returns:
-            CleanResult with prune details and cache dir removal status.
+            OperationResult with item CleanResult containing prune details
+            and cache dir removal status.
         """
         from mvmctl.api.host_operations import HostOperation
 
         # Step 1: Prune all cached resources
-        prune_result = CacheOperation.prune_all(
+        prune_op_result = CacheOperation.prune_all(
             dry_run=dry_run, include_all=True
         )
+        prune_result = prune_op_result.item
 
         # Step 2: Clean host networking (while DB still exists in cache dir)
         if not dry_run:
@@ -459,10 +525,20 @@ class CacheOperation:
                 shutil.rmtree(cache_dir, ignore_errors=True)
             cache_dir_removed = True
 
-        return CleanResult(
-            prune_result=prune_result,
+        result = CleanResult(
+            prune_result=prune_result
+            if prune_result
+            else PruneAllResult(
+                pruned_ids=[], failed_ids=[], had_running_vms=False
+            ),
             cache_dir_removed=cache_dir_removed,
             cache_dir=str(cache_dir),
+        )
+        return OperationResult(
+            status="success",
+            code="cache.cleaned",
+            message="Cache cleaned successfully",
+            item=result,
         )
 
 

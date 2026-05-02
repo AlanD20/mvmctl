@@ -451,6 +451,7 @@ class ImageService:
         output_dir: Path,
         force: bool,
         ci_version: str,
+        show_progress: bool = True,
     ) -> Path:
         """Download image from remote source. Returns path to downloaded file."""
         download_path = output_dir / f"{image_id}.download"
@@ -478,7 +479,7 @@ class ImageService:
             download_path,
             expected_sha256=resolved_sha256,
             timeout=HTTP_TIMEOUT_SHA256_FETCH_S,
-            progress_bar=True,
+            progress_bar=show_progress,
             allow_missing_checksum=resolved_sha256 is None,
             silent_missing_checksum=resolved_sha256 is None,
             title=f"Downloading image: '{spec.id}'",

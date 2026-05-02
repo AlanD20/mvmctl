@@ -1,4 +1,4 @@
-"""Console operations - attach, state, kill for VM console relays."""
+"""Console operations - connection info, state, kill for VM console relays."""
 
 from __future__ import annotations
 
@@ -7,13 +7,14 @@ from typing import Any
 
 from mvmctl.api.inputs import ConsoleInput, ConsoleRequest
 from mvmctl.exceptions import MVMError
+from mvmctl.models.result import OperationResult
 from mvmctl.utils.auditlog import AuditLog
 
 
 @dataclass(frozen=True)
-class ConsoleAttachInfo:
+class ConsoleConnectionInfo:
     """
-    Result of a console attach operation — connection info for the relay socket.
+    Console connection info for a running VM relay socket.
 
     Attributes:
         socket_path: Path to the console relay Unix domain socket.
@@ -52,15 +53,15 @@ class ConsoleOperation:
         }
 
     @staticmethod
-    def attach(identifier: str) -> ConsoleAttachInfo:
+    def get_connection_info(identifier: str) -> ConsoleConnectionInfo:
         """
-        Attach to VM console.
+        Get connection info for a VM console relay.
 
         Args:
             identifier: VM name, ID, MAC, or IP address.
 
         Returns:
-            ConsoleAttachInfo with socket path, VM name, and VM ID.
+            ConsoleConnectionInfo with socket path, VM name, and VM ID.
 
         Raises:
             MVMError: If console relay is not running.
@@ -72,14 +73,14 @@ class ConsoleOperation:
         if not resolved.relay.is_running():
             raise MVMError(f"No console relay running for VM '{identifier}'")
 
-        return ConsoleAttachInfo(
+        return ConsoleConnectionInfo(
             socket_path=str(resolved.relay.socket_path),
             vm_name=resolved.vm.name,
             vm_id=resolved.vm.id,
         )
 
     @staticmethod
-    def kill(identifier: str) -> bool:
+    def kill(identifier: str) -> OperationResult[bool]:
         """
         Kill the console relay for a VM.
 
@@ -87,16 +88,34 @@ class ConsoleOperation:
             identifier: VM name, ID, MAC, or IP address.
 
         Returns:
-            True if relay was stopped, False if not running.
+            OperationResult with item bool: True if relay was stopped,
+            False if not running or failed.
 
         """
         resolved = ConsoleRequest(
             inputs=ConsoleInput(identifier=identifier)
         ).resolve()
         if not resolved.relay.is_running():
-            return False
+            return OperationResult(
+                status="skipped",
+                code="console.not_running",
+                message=f"No console relay running for '{identifier}'",
+                item=False,
+            )
 
-        result = resolved.relay.terminate()
+        killed = resolved.relay.terminate()
         AuditLog.log("console.kill", changes={"name": identifier})
 
-        return result
+        if killed:
+            return OperationResult(
+                status="success",
+                code="console.killed",
+                message=f"Console relay stopped for '{identifier}'",
+                item=True,
+            )
+        return OperationResult(
+            status="error",
+            code="console.kill_failed",
+            message=f"Failed to stop console relay for '{identifier}'",
+            item=False,
+        )

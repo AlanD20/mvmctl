@@ -13,6 +13,7 @@ import typer
 from mvmctl.api import HostOperation
 from mvmctl.constants import MVM_UNIX_GROUP
 from mvmctl.exceptions import HostError, PrivilegeError
+from mvmctl.models.result import NeedsInteraction, OperationResult
 from mvmctl.utils._io import (
     print_error,
     print_info,
@@ -122,7 +123,7 @@ def host_init() -> None:
     """
     cache_dir = CacheUtils.get_cache_dir()
     try:
-        changes = HostOperation.init(cache_dir)
+        result = HostOperation.init(cache_dir)
     except PrivilegeError as exc:
         print_error(str(exc))
         if exc.details:
@@ -134,7 +135,13 @@ def host_init() -> None:
                 print_info(f"  - {suggestion}")
         raise typer.Exit(code=1) from exc
     except HostError as e:
-        if "Root privileges" in str(e):
+        # Keep HostError handling for errors from sub-calls within init
+        # (e.g., NetworkOperation called internally)
+        print_error(f"Host initialization error: {e}")
+        raise typer.Exit(code=1) from e
+
+    if isinstance(result, NeedsInteraction):
+        if result.code == "privilege.sudo_required":
             print_warning("Root privileges required for: mvm host init")
             print_info("Run with sudo: sudo mvm host init")
             if typer.confirm("Run 'sudo mvm host init' now?", default=False):
@@ -153,11 +160,16 @@ def host_init() -> None:
                 except FileNotFoundError:
                     print_error("sudo command not found")
             raise typer.Exit(code=1)
-        raise
+        # Unknown interaction code
+        print_error(result.message)
+        raise typer.Exit(code=1)
 
-    if not changes:
-        print_info("Host already configured — nothing to do.")
-    else:
+    if not isinstance(result, OperationResult):
+        print_error(f"Unexpected result type: {type(result).__name__}")
+        raise typer.Exit(code=1)
+
+    if result.status == "success":
+        changes = result.metadata.get("changes", [])
         applied_changes = 0
         for change in changes:
             if (
@@ -174,10 +186,18 @@ def host_init() -> None:
             print_success(
                 f"Host initialized ({applied_changes} change(s) applied)."
             )
+
+        was_user_added = result.metadata.get("user_added_to_group", False)
+        if was_user_added:
             print_warning(
                 "ACTION REQUIRED: Log out and back in for group membership to take effect."
             )
             print_info(f"Or run immediately: newgrp {MVM_UNIX_GROUP}")
+    elif result.status == "skipped":
+        print_info(result.message)
+    elif result.status in ("error", "failure"):
+        print_error(result.message)
+        raise typer.Exit(code=1)
 
     FsUtils.chown_to_real_user(CacheUtils.get_cache_dir())
 
@@ -263,8 +283,13 @@ def host_clean(
         typer.confirm("Proceed with host clean?", abort=True)
 
     cache_dir = CacheUtils.get_cache_dir()
-    summary = HostOperation.clean(cache_dir)
+    result = HostOperation.clean(cache_dir)
 
+    if result.is_error:
+        print_error(result.message)
+        raise typer.Exit(code=1)
+
+    summary = result.item or []
     if summary:
         for item in summary:
             if item.startswith("Warning:"):
@@ -272,7 +297,7 @@ def host_clean(
             else:
                 print_info(f"  {item}")
 
-    print_success("Host cleaned successfully.")
+    print_success(result.message)
 
 
 @host_app.command(name="reset")
@@ -308,8 +333,13 @@ def host_reset(
         typer.confirm("Proceed with host reset?", abort=True)
 
     cache_dir = CacheUtils.get_cache_dir()
-    summary = HostOperation.reset(cache_dir)
+    result = HostOperation.reset(cache_dir)
 
+    if result.is_error:
+        print_error(result.message)
+        raise typer.Exit(code=1)
+
+    summary = result.item or []
     if summary:
         for item in summary:
             if item.startswith("Warning:"):
@@ -317,7 +347,7 @@ def host_reset(
             else:
                 print_info(f"  {item}")
 
-    print_success("Host reset successfully.")
+    print_success(result.message)
 
 
 __all__ = ["host_app"]

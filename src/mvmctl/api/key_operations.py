@@ -20,6 +20,7 @@ from mvmctl.core.key._repository import KeyRepository
 from mvmctl.core.key._service import KeyService
 from mvmctl.exceptions import MVMKeyError
 from mvmctl.models import SSHKeyItem
+from mvmctl.models.result import BatchResult, OperationResult
 from mvmctl.utils.auditlog import AuditLog
 from mvmctl.utils.common import CacheUtils
 
@@ -53,13 +54,23 @@ class KeyOperation:
         return resolved.keys[0]
 
     @staticmethod
-    def create(inputs: KeyCreateInput) -> SSHKeyItem:
-        """Create a new SSH keypair. Returns SSHKeyItem."""
+    def create(
+        inputs: KeyCreateInput,
+    ) -> OperationResult[SSHKeyItem]:
+        """Create a new SSH keypair."""
         db = Database()
         repo = KeyRepository(db)
         service = KeyService(repo)
 
-        service.check_dependencies()
+        try:
+            service.check_dependencies()
+        except Exception as e:
+            return OperationResult(
+                status="error",
+                code="key.create_failed",
+                message=str(e),
+                exception=e,
+            )
 
         request = KeyCreateRequest(inputs=inputs)
         resolved = request.resolve()
@@ -78,25 +89,41 @@ class KeyOperation:
             "key.create",
             changes={"name": key_item.name, "algorithm": key_item.algorithm},
         )
-        return key_item
+        return OperationResult(
+            status="success",
+            code="key.created",
+            item=key_item,
+        )
 
     @staticmethod
     def add(
         name: str, pub_key_path: Path, overwrite: bool = False
-    ) -> SSHKeyItem:
+    ) -> OperationResult[SSHKeyItem]:
         """Add an existing public key to the cache."""
         db = Database()
         repo = KeyRepository(db)
         service = KeyService(repo)
         keys_dir = CacheUtils.get_keys_dir()
-        key_item = service.add_key(
-            name, pub_key_path, keys_dir, overwrite=overwrite
-        )
+        try:
+            key_item = service.add_key(
+                name, pub_key_path, keys_dir, overwrite=overwrite
+            )
+        except Exception as e:
+            return OperationResult(
+                status="error",
+                code="key.add_failed",
+                message=str(e),
+                exception=e,
+            )
         AuditLog.log("key.add", changes={"name": key_item.name})
-        return key_item
+        return OperationResult(
+            status="success",
+            code="key.added",
+            item=key_item,
+        )
 
     @staticmethod
-    def remove(inputs: KeyInput) -> None:
+    def remove(inputs: KeyInput) -> BatchResult[SSHKeyItem]:
         """Remove keys by name or ID."""
         db = Database()
         repo = KeyRepository(db)
@@ -105,18 +132,38 @@ class KeyOperation:
         resolved = request.resolve()
         keys_dir = CacheUtils.get_keys_dir()
 
+        results: list[OperationResult[SSHKeyItem]] = []
         for key in resolved.keys:
-            # File cleanup is done at the API layer before DB deletion
-            pub_file = keys_dir / f"{key.name}.pub"
-            priv_file = keys_dir / key.name
-            if pub_file.exists():
-                pub_file.unlink()
-            if priv_file.exists():
-                priv_file.unlink()
+            try:
+                # File cleanup is done at the API layer before DB deletion
+                pub_file = keys_dir / f"{key.name}.pub"
+                priv_file = keys_dir / key.name
+                if pub_file.exists():
+                    pub_file.unlink()
+                if priv_file.exists():
+                    priv_file.unlink()
 
-            controller = KeyController(key, repo)
-            controller.remove()
-            AuditLog.log("key.remove", changes={"name": key.name})
+                controller = KeyController(key, repo)
+                controller.remove()
+                AuditLog.log("key.remove", changes={"name": key.name})
+                results.append(
+                    OperationResult(
+                        status="success",
+                        code="key.removed",
+                        item=key,
+                    )
+                )
+            except Exception as e:
+                results.append(
+                    OperationResult(
+                        status="error",
+                        code="key.remove_failed",
+                        message=str(e),
+                        item=key,
+                        exception=e,
+                    )
+                )
+        return BatchResult(items=results)
 
     @staticmethod
     def inspect(
@@ -143,7 +190,7 @@ class KeyOperation:
         inputs: KeyInput,
         destination: Path,
         overwrite: bool = False,
-    ) -> tuple[Path, Path]:
+    ) -> OperationResult[tuple[Path, Path]]:
         """Export keypair to destination directory."""
         db = Database()
         repo = KeyRepository(db)
@@ -152,18 +199,37 @@ class KeyOperation:
         resolved = request.resolve()
 
         if len(resolved.keys) != 1:
-            raise MVMKeyError(
-                f"Expected exactly one key, got {len(resolved.keys)}"
+            return OperationResult(
+                status="error",
+                code="key.export_failed",
+                message=f"Expected exactly one key, got {len(resolved.keys)}",
             )
 
         keys_dir = CacheUtils.get_keys_dir()
         controller = KeyController(resolved.keys[0], repo)
-        return controller.export(
-            destination=destination, keys_dir=keys_dir, overwrite=overwrite
+        try:
+            paths = controller.export(
+                destination=destination,
+                keys_dir=keys_dir,
+                overwrite=overwrite,
+            )
+        except Exception as e:
+            return OperationResult(
+                status="error",
+                code="key.export_failed",
+                message=str(e),
+                exception=e,
+            )
+        return OperationResult(
+            status="success",
+            code="key.exported",
+            item=paths,
         )
 
     @staticmethod
-    def set_default(inputs: KeyInput) -> None:
+    def set_default(
+        inputs: KeyInput,
+    ) -> OperationResult[SSHKeyItem]:
         """Set keys as default."""
         db = Database()
         repo = KeyRepository(db)
@@ -173,10 +239,24 @@ class KeyOperation:
         resolved = request.resolve()
 
         names = [k.name for k in resolved.keys]
-        service.set_default_keys(names)
+        try:
+            service.set_default_keys(names)
+        except Exception as e:
+            return OperationResult(
+                status="error",
+                code="key.default_set_failed",
+                message=str(e),
+                exception=e,
+            )
 
         for name in names:
             AuditLog.log("key.set_default", changes={"name": name})
+
+        return OperationResult(
+            status="success",
+            code="key.default_set",
+            item=resolved.keys[0] if resolved.keys else None,
+        )
 
     @staticmethod
     def get_defaults() -> list[SSHKeyItem]:
@@ -185,10 +265,22 @@ class KeyOperation:
         return KeyRepository(db).get_defaults()
 
     @staticmethod
-    def clear_defaults() -> None:
+    def clear_defaults() -> OperationResult[None]:
         """Clear all default keys."""
         db = Database()
         repo = KeyRepository(db)
         service = KeyService(repo)
-        service.clear_default_keys()
+        try:
+            service.clear_default_keys()
+        except Exception as e:
+            return OperationResult(
+                status="error",
+                code="key.defaults_clear_failed",
+                message=str(e),
+                exception=e,
+            )
         AuditLog.log("key.clear_defaults")
+        return OperationResult(
+            status="success",
+            code="key.defaults_cleared",
+        )

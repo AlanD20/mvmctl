@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -67,6 +68,12 @@ from mvmctl.models import (
     VMInstanceItem,
     VMStatus,
 )
+from mvmctl.models.result import (
+    BatchResult,
+    NeedsInteraction,
+    OperationResult,
+    ProgressEvent,
+)
 from mvmctl.utils._system import SigtermContext
 from mvmctl.utils.auditlog import AuditLog
 from mvmctl.utils.common import CacheUtils
@@ -108,10 +115,13 @@ class VMCreateContext:
         db: Database | None = None,
         vm_id: str | None = None,
         vm_dir: Path | None = None,
+        *,
+        on_progress: Callable[[ProgressEvent], None] | None = None,
     ) -> None:
         """Initialize the resolver with database and sub-resolvers."""
         from mvmctl.utils.crypto import HashGenerator
 
+        self._on_progress = on_progress
         self.name = name
         if vm_id is not None:
             self.vm_id = vm_id
@@ -280,6 +290,15 @@ class VMCreateContext:
         FsUtils.secure_mkdir(self.vm_dir, self.resolved.name)
         self.mark_created("vm_dir")
 
+        if self._on_progress is not None:
+            self._on_progress(
+                ProgressEvent(
+                    phase="network",
+                    status="running",
+                    message="Configuring network...",
+                )
+            )
+
         # IP Lease
         lease_repo = LeaseRepository(self._db)
         lease_manager = LeaseService(self.resolved.network, lease_repo)
@@ -319,6 +338,15 @@ class VMCreateContext:
             network_id=self.resolved.network.id,
         )
         self.mark_created("network_tap")
+
+        if self._on_progress is not None:
+            self._on_progress(
+                ProgressEvent(
+                    phase="rootfs",
+                    status="running",
+                    message="Copying root filesystem...",
+                )
+            )
 
         # Rootfs
         self.clone_image()
@@ -406,6 +434,15 @@ class VMCreateContext:
 
         gp.run()
 
+        if self._on_progress is not None:
+            self._on_progress(
+                ProgressEvent(
+                    phase="firecracker",
+                    status="running",
+                    message="Starting Firecracker microVM...",
+                )
+            )
+
         # Firecracker
         fc_config = self.build_firecracker_config()
         if fc_config is None:
@@ -456,6 +493,15 @@ class VMCreateContext:
             self.relay.close_client_fd()
             self.relay.start()
             self.mark_created("console_relay")
+
+        if self._on_progress is not None:
+            self._on_progress(
+                ProgressEvent(
+                    phase="complete",
+                    status="complete",
+                    message="VM created successfully",
+                )
+            )
 
     def build_firecracker_config(self) -> FirecrackerConfig | None:
         """Build Firecracker spawn configuration from resolved state."""
@@ -566,8 +612,11 @@ class VMCreateContext:
 class VMOperation:
     @staticmethod
     def _execute_create(
-        resolved: ResolvedVMCreateInput, *, audit_action: str
-    ) -> None:
+        resolved: ResolvedVMCreateInput,
+        *,
+        audit_action: str,
+        on_progress: Callable[[ProgressEvent], None] | None = None,
+    ) -> VMInstanceItem:
         """Execute VM creation from already-resolved inputs."""
         HostPrivilegeHelper.check_privileges(
             "/usr/sbin/ip", f"create VM '{resolved.name}'"
@@ -586,6 +635,7 @@ class VMOperation:
             vm_id=resolved.vm_id,
             vm_dir=resolved.vm_dir,
             db=db,
+            on_progress=on_progress,
         )
         ctx.set_resolved(resolved)
 
@@ -609,18 +659,55 @@ class VMOperation:
                     ctx.cleanup()
                 raise
 
-    @staticmethod
-    def create(inputs: VMCreateInput) -> None:
-        db = Database()
-        ctx = VMCreateContext(name=inputs.name)
-        request = VMCreateRequest(
-            vm_id=ctx.vm_id, vm_dir=ctx.vm_dir, inputs=inputs, db=db
-        )
-        resolved = request.resolve()
-        VMOperation._execute_create(resolved, audit_action="vm.create")
+        return vm_instance
 
     @staticmethod
-    def remove(inputs: VMInput) -> None:
+    def create(
+        inputs: VMCreateInput,
+        *,
+        on_progress: Callable[[ProgressEvent], None] | None = None,
+    ) -> OperationResult[VMInstanceItem] | NeedsInteraction:
+        try:
+            db = Database()
+            ctx = VMCreateContext(name=inputs.name)
+            request = VMCreateRequest(
+                vm_id=ctx.vm_id, vm_dir=ctx.vm_dir, inputs=inputs, db=db
+            )
+            resolved = request.resolve()
+            vm_instance = VMOperation._execute_create(
+                resolved,
+                audit_action="vm.create",
+                on_progress=on_progress,
+            )
+            return OperationResult(
+                status="success",
+                code="vm.created",
+                item=vm_instance,
+                message=f"VM '{inputs.name}' created",
+            )
+        except MVMError as e:
+            if "limit" in str(e).lower():
+                return OperationResult(
+                    status="error",
+                    code="vm.limit_reached",
+                    message=str(e),
+                )
+            return OperationResult(
+                status="error",
+                code="vm.create_failure",
+                message=str(e),
+                exception=e,
+            )
+        except Exception as e:
+            return OperationResult(
+                status="failure",
+                code="vm.create_failure",
+                message=str(e),
+                exception=e,
+            )
+
+    @staticmethod
+    def remove(inputs: VMInput) -> BatchResult[VMInstanceItem]:
         """Remove one or more VMs."""
         HostPrivilegeHelper.check_privileges("/usr/sbin/ip", "Remove VM")
 
@@ -629,21 +716,44 @@ class VMOperation:
         resolved = resolver.resolve()
 
         repo = VMRepository(db)
+        results: list[OperationResult[VMInstanceItem]] = []
 
         for vm in resolved.vms:
-            vm_dir = CacheUtils.get_vm_dir(vm.id)
+            try:
+                vm_dir = CacheUtils.get_vm_dir(vm.id)
 
-            controller = VMController(vm, repo)
-            controller.stop(force=resolved.force)
+                controller = VMController(vm, repo)
+                controller.stop(force=resolved.force)
 
-            VMOperation._perform_removal_cleanup(vm, vm.network_id)
+                VMOperation._perform_removal_cleanup(vm, vm.network_id)
 
-            # Deregister from DB and remove directory
-            repo.delete(vm.id)
-            if vm_dir.exists():
-                shutil.rmtree(vm_dir)
+                # Deregister from DB and remove directory
+                repo.delete(vm.id)
+                if vm_dir.exists():
+                    shutil.rmtree(vm_dir)
 
-            AuditLog.log("vm.remove", changes={"name": vm.name})
+                AuditLog.log("vm.remove", changes={"name": vm.name})
+
+                results.append(
+                    OperationResult(
+                        status="success",
+                        code="vm.removed",
+                        item=vm,
+                        message=f"VM '{vm.name}' removed",
+                    )
+                )
+            except Exception as e:
+                results.append(
+                    OperationResult(
+                        status="error",
+                        code="vm.remove_failed",
+                        item=vm,
+                        message=f"Failed to remove VM '{vm.name}': {e}",
+                        exception=e,
+                    )
+                )
+
+        return BatchResult(items=results)
 
     @staticmethod
     def list_all(
@@ -801,55 +911,200 @@ class VMOperation:
         }
 
     @staticmethod
-    def start(inputs: VMInput) -> None:
+    def start(inputs: VMInput) -> BatchResult[VMInstanceItem]:
         """Start one or more VMs."""
         resolved = VMRequest(inputs=inputs, db=Database()).resolve()
         service = VMService(VMRepository(Database()))
-        service.start_many(resolved.vms)
-        AuditLog.log("vm.start", context=f"count={len(resolved.vms)}")
+        results: list[OperationResult[VMInstanceItem]] = []
+
+        for vm in resolved.vms:
+            try:
+                service.start(vm)
+                AuditLog.log("vm.start", context=f"name={vm.name}")
+                results.append(
+                    OperationResult(
+                        status="success",
+                        code="vm.started",
+                        item=vm,
+                        message=f"VM '{vm.name}' started",
+                    )
+                )
+            except MVMError as e:
+                results.append(
+                    OperationResult(
+                        status="error",
+                        code="vm.start_failed",
+                        item=vm,
+                        message=f"Failed to start VM '{vm.name}': {e}",
+                        exception=e,
+                    )
+                )
+
+        return BatchResult(items=results)
 
     @staticmethod
-    def stop(inputs: VMInput) -> None:
+    def stop(inputs: VMInput) -> BatchResult[VMInstanceItem]:
         """Stop one or more VMs."""
         resolved = VMRequest(inputs=inputs, db=Database()).resolve()
         service = VMService(VMRepository(Database()))
-        service.stop_many(resolved.vms, force=resolved.force)
-        AuditLog.log("vm.stop", context=f"count={len(resolved.vms)}")
+        results: list[OperationResult[VMInstanceItem]] = []
+
+        for vm in resolved.vms:
+            try:
+                service.stop(vm, force=resolved.force)
+                AuditLog.log("vm.stop", context=f"name={vm.name}")
+                results.append(
+                    OperationResult(
+                        status="success",
+                        code="vm.stopped",
+                        item=vm,
+                        message=f"VM '{vm.name}' stopped",
+                    )
+                )
+            except (MVMError, NetworkError) as e:
+                results.append(
+                    OperationResult(
+                        status="error",
+                        code="vm.stop_failed",
+                        item=vm,
+                        message=f"Failed to stop VM '{vm.name}': {e}",
+                        exception=e,
+                    )
+                )
+
+        return BatchResult(items=results)
 
     @staticmethod
-    def reboot(inputs: VMInput) -> None:
+    def reboot(inputs: VMInput) -> BatchResult[VMInstanceItem]:
         """Reboot one or more VMs."""
         resolved = VMRequest(inputs=inputs, db=Database()).resolve()
         service = VMService(VMRepository(Database()))
-        service.reboot_many(resolved.vms, force=resolved.force)
-        AuditLog.log("vm.reboot", context=f"count={len(resolved.vms)}")
+        results: list[OperationResult[VMInstanceItem]] = []
+
+        for vm in resolved.vms:
+            try:
+                service.reboot(vm, force=resolved.force)
+                AuditLog.log("vm.reboot", context=f"name={vm.name}")
+                results.append(
+                    OperationResult(
+                        status="success",
+                        code="vm.rebooted",
+                        item=vm,
+                        message=f"VM '{vm.name}' rebooted",
+                    )
+                )
+            except MVMError as e:
+                results.append(
+                    OperationResult(
+                        status="error",
+                        code="vm.reboot_failed",
+                        item=vm,
+                        message=f"Failed to reboot VM '{vm.name}': {e}",
+                        exception=e,
+                    )
+                )
+
+        return BatchResult(items=results)
 
     @staticmethod
-    def pause(inputs: VMInput) -> None:
+    def pause(inputs: VMInput) -> BatchResult[VMInstanceItem]:
         """Pause one or more VMs."""
         resolved = VMRequest(inputs=inputs, db=Database()).resolve()
         service = VMService(VMRepository(Database()))
-        service.pause_many(resolved.vms)
-        AuditLog.log("vm.pause", context=f"count={len(resolved.vms)}")
+        results: list[OperationResult[VMInstanceItem]] = []
+
+        for vm in resolved.vms:
+            try:
+                service.pause(vm)
+                AuditLog.log("vm.pause", context=f"name={vm.name}")
+                results.append(
+                    OperationResult(
+                        status="success",
+                        code="vm.paused",
+                        item=vm,
+                        message=f"VM '{vm.name}' paused",
+                    )
+                )
+            except MVMError as e:
+                results.append(
+                    OperationResult(
+                        status="error",
+                        code="vm.pause_failed",
+                        item=vm,
+                        message=f"Failed to pause VM '{vm.name}': {e}",
+                        exception=e,
+                    )
+                )
+
+        return BatchResult(items=results)
 
     @staticmethod
-    def resume(inputs: VMInput) -> None:
+    def resume(inputs: VMInput) -> BatchResult[VMInstanceItem]:
         """Resume one or more VMs."""
         resolved = VMRequest(inputs=inputs, db=Database()).resolve()
         service = VMService(VMRepository(Database()))
-        service.resume_many(resolved.vms)
-        AuditLog.log("vm.resume", context=f"count={len(resolved.vms)}")
+        results: list[OperationResult[VMInstanceItem]] = []
+
+        for vm in resolved.vms:
+            try:
+                service.resume(vm)
+                AuditLog.log("vm.resume", context=f"name={vm.name}")
+                results.append(
+                    OperationResult(
+                        status="success",
+                        code="vm.resumed",
+                        item=vm,
+                        message=f"VM '{vm.name}' resumed",
+                    )
+                )
+            except MVMError as e:
+                results.append(
+                    OperationResult(
+                        status="error",
+                        code="vm.resume_failed",
+                        item=vm,
+                        message=f"Failed to resume VM '{vm.name}': {e}",
+                        exception=e,
+                    )
+                )
+
+        return BatchResult(items=results)
 
     @staticmethod
-    def snapshot(inputs: VMInput, mem_out: Path, state_out: Path) -> None:
+    def snapshot(
+        inputs: VMInput, mem_out: Path, state_out: Path
+    ) -> OperationResult[VMInstanceItem]:
         """Snapshot a single VM's memory and state."""
         resolved = VMRequest(inputs=inputs, db=Database()).resolve()
         if len(resolved.vms) != 1:
             raise VMNotFoundError("Expected exactly one VM identifier")
         vm = resolved.vms[0]
-        controller = VMController(vm, VMRepository(Database()))
-        controller.snapshot(mem_out, state_out)
-        AuditLog.log("vm.snapshot", context=f"name={vm.name}")
+        try:
+            controller = VMController(vm, VMRepository(Database()))
+            controller.snapshot(mem_out, state_out)
+            AuditLog.log("vm.snapshot", context=f"name={vm.name}")
+            return OperationResult(
+                status="success",
+                code="vm.snapshot_created",
+                item=vm,
+                message=f"VM '{vm.name}' snapshot saved",
+            )
+        except MVMError as e:
+            return OperationResult(
+                status="error",
+                code="vm.snapshot_failed",
+                item=vm,
+                message=f"Failed to snapshot VM '{vm.name}': {e}",
+                exception=e,
+            )
+        except Exception as e:
+            return OperationResult(
+                status="failure",
+                code="vm.snapshot_failed",
+                item=vm,
+                message=f"Failed to snapshot VM '{vm.name}': {e}",
+                exception=e,
+            )
 
     @staticmethod
     def load_snapshot(
@@ -857,15 +1112,38 @@ class VMOperation:
         mem_in: Path,
         state_in: Path,
         resume_after: bool | None = None,
-    ) -> None:
+    ) -> OperationResult[VMInstanceItem]:
         """Load a snapshot into a single VM."""
         resolved = VMRequest(inputs=inputs, db=Database()).resolve()
         if len(resolved.vms) != 1:
             raise VMNotFoundError("Expected exactly one VM identifier")
         vm = resolved.vms[0]
-        controller = VMController(vm, VMRepository(Database()))
-        controller.load_snapshot(mem_in, state_in, resume_after)
-        AuditLog.log("vm.load_snapshot", context=f"name={vm.name}")
+        try:
+            controller = VMController(vm, VMRepository(Database()))
+            controller.load_snapshot(mem_in, state_in, resume_after)
+            AuditLog.log("vm.load_snapshot", context=f"name={vm.name}")
+            return OperationResult(
+                status="success",
+                code="vm.snapshot_loaded",
+                item=vm,
+                message=f"Snapshot loaded for VM '{vm.name}'",
+            )
+        except MVMError as e:
+            return OperationResult(
+                status="error",
+                code="vm.load_snapshot_failed",
+                item=vm,
+                message=f"Failed to load snapshot for VM '{vm.name}': {e}",
+                exception=e,
+            )
+        except Exception as e:
+            return OperationResult(
+                status="failure",
+                code="vm.load_snapshot_failed",
+                item=vm,
+                message=f"Failed to load snapshot for VM '{vm.name}': {e}",
+                exception=e,
+            )
 
     @staticmethod
     def export(inputs: VMInput) -> VMExportConfig:
@@ -937,11 +1215,40 @@ class VMOperation:
         )
 
     @staticmethod
-    def import_(inputs: VMImportInput) -> None:
+    def import_(
+        inputs: VMImportInput,
+        *,
+        on_progress: Callable[[ProgressEvent], None] | None = None,
+    ) -> OperationResult[VMInstanceItem] | NeedsInteraction:
         """Create a VM from a portable export config file."""
-        db = Database()
-        resolved = VMImportRequest(inputs=inputs, db=db).resolve()
-        VMOperation._execute_create(resolved, audit_action="vm.import")
+        try:
+            db = Database()
+            resolved = VMImportRequest(inputs=inputs, db=db).resolve()
+            vm_instance = VMOperation._execute_create(
+                resolved,
+                audit_action="vm.import",
+                on_progress=on_progress,
+            )
+            return OperationResult(
+                status="success",
+                code="vm.imported",
+                item=vm_instance,
+                message=f"VM imported from {inputs.config_path}",
+            )
+        except MVMError as e:
+            return OperationResult(
+                status="error",
+                code="vm.import_failed",
+                message=str(e),
+                exception=e,
+            )
+        except Exception as e:
+            return OperationResult(
+                status="failure",
+                code="vm.import_failed",
+                message=str(e),
+                exception=e,
+            )
 
     @staticmethod
     def _perform_removal_cleanup(
