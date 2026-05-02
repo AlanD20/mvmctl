@@ -17,6 +17,7 @@ import pytest
 
 from mvmctl.api import HostOperation
 from mvmctl.models.host import HostStateChangeItem, HostStateItem
+from mvmctl.models.result import OperationResult
 
 
 class _MockPwd:
@@ -222,8 +223,11 @@ class TestHostInitResetWorkflow:
         cache_dir = tmp_path / "cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
 
-        changes = HostOperation.init(cache_dir=cache_dir)
+        result = HostOperation.init(cache_dir=cache_dir)
 
+        assert isinstance(result, OperationResult)
+        assert result.status == "success"
+        changes = result.metadata.get("changes", [])
         assert isinstance(changes, list)
         assert all(isinstance(c, HostStateChangeItem) for c in changes)
         # At minimum we expect group, user, sysctl, iptables changes
@@ -269,8 +273,11 @@ class TestHostInitResetWorkflow:
         cache_dir.mkdir(parents=True, exist_ok=True)
 
         HostOperation.init(cache_dir=cache_dir)
-        summary = HostOperation.clean(cache_dir=cache_dir)
+        result = HostOperation.clean(cache_dir=cache_dir)
 
+        assert isinstance(result, OperationResult)
+        assert result.status == "success"
+        summary = result.item
         assert isinstance(summary, list)
         assert all(isinstance(s, str) for s in summary)
 
@@ -280,8 +287,11 @@ class TestHostInitResetWorkflow:
         cache_dir.mkdir(parents=True, exist_ok=True)
 
         HostOperation.init(cache_dir=cache_dir)
-        summary = HostOperation.reset(cache_dir=cache_dir)
+        result = HostOperation.reset(cache_dir=cache_dir)
 
+        assert isinstance(result, OperationResult)
+        assert result.status == "success"
+        summary = result.item
         assert isinstance(summary, list)
         assert all(isinstance(s, str) for s in summary)
 

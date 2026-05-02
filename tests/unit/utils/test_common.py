@@ -258,3 +258,199 @@ class TestCacheUtilsSubdirs:
         result = CacheUtils.get_temp_dir()
         assert result == tmp_path / "mytemp"
         assert result.exists()
+
+
+class TestCacheUtilsExtended:
+    """Extended tests for CacheUtils uncovered paths."""
+
+    def test_get_cache_dir_fallback(self, monkeypatch):
+        monkeypatch.delenv("MVM_CACHE_DIR", raising=False)
+        result = CacheUtils.get_cache_dir()
+        assert "mvmctl" in str(result)
+        assert ".cache" in str(result)
+
+    def test_get_config_dir_fallback(self, monkeypatch):
+        monkeypatch.delenv("MVM_CONFIG_DIR", raising=False)
+        result = CacheUtils.get_config_dir()
+        assert "mvmctl" in str(result)
+        assert ".config" in str(result)
+
+    def test_get_config_path(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
+        result = CacheUtils.get_config_path()
+        assert result == tmp_path / "config.json"
+
+    def test_get_log_path(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+        result = CacheUtils.get_log_path()
+        assert result == tmp_path / "mvmctl.log"
+
+    def test_get_warm_image_dir_default(self, monkeypatch):
+        monkeypatch.delenv("MVM_TEMP_DIR", raising=False)
+        result = CacheUtils.get_warm_image_dir()
+        assert result.name == "ready"
+        assert result.parent.name == "mvmctl"
+
+    def test_get_warm_image_dir_custom(self, tmp_path):
+        result = CacheUtils.get_warm_image_dir(tmp_path=tmp_path)
+        assert result.parent.parent == tmp_path
+        assert result.parent.name == "mvmctl"
+        assert result.name == "ready"
+
+    def test_get_real_home_with_sudo_user(self, mocker, monkeypatch):
+        monkeypatch.delenv("MVM_CACHE_DIR", raising=False)
+        monkeypatch.setenv("SUDO_USER", "testuser")
+        mock_getpwnam = mocker.patch("pwd.getpwnam")
+        mock_getpwnam.return_value = mocker.MagicMock(pw_dir="/home/testuser")
+        result = CacheUtils.get_cache_dir()
+        assert "/home/testuser" in str(result)
+
+    def test_get_real_home_sudo_user_not_found(self, mocker, monkeypatch):
+        monkeypatch.setenv("SUDO_USER", "nonexistent")
+        monkeypatch.delenv("MVM_CACHE_DIR", raising=False)
+        mock_getpwnam = mocker.patch("pwd.getpwnam")
+        mock_getpwnam.side_effect = KeyError("not found")
+        result = CacheUtils.get_cache_dir()
+        assert result is not None
+
+    def test_accepts_var_tmp_path(self, monkeypatch):
+        monkeypatch.setenv("MVM_CACHE_DIR", "/var/tmp/mvm-test-cache")
+        result = CacheUtils.get_cache_dir()
+        assert str(result) == "/var/tmp/mvm-test-cache"
+
+    def test_resolve_dir_existing(self, tmp_path):
+        existing = tmp_path / "already_exists"
+        existing.mkdir()
+        result = CacheUtils.resolve_dir(existing)
+        assert result == existing
+        assert result.exists()
+
+    def test_get_auditlog_path(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+        result = CacheUtils.get_audit_log_path()
+        assert result == tmp_path / "audit.log"
+
+    def test_get_mvm_db_path(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+        result = CacheUtils.get_mvm_db_path()
+        assert result == tmp_path / "mvmdb.db"
+
+    def test_get_images_dir_creates(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+        result = CacheUtils.get_images_dir()
+        assert result == tmp_path / "images"
+        assert result.exists()
+
+
+class TestCommonUtilsExtended:
+    """Extended tests for CommonUtils uncovered paths."""
+
+    def test_sanitize_for_log_none(self):
+        with pytest.raises(TypeError):
+            CommonUtils.sanitize_for_log(None)
+
+    def test_sanitize_for_log_zero_width(self):
+        result = CommonUtils.sanitize_for_log("test\u200b\u200cstring")
+        assert result == "teststring"
+
+    def test_sanitize_for_log_full_control_set(self):
+        result = CommonUtils.sanitize_for_log("a\x00b\x01c\x7fd")
+        assert result == "abcd"
+
+    def test_human_readable_datetime_with_timezone(self):
+        result = CommonUtils.human_readable_datetime("2026-04-01T12:30:00+05:30")
+        assert result == "2026/04/01 12:30:00"
+
+    def test_human_readable_datetime_utc_zulu(self):
+        result = CommonUtils.human_readable_datetime("2026-04-01T12:30:00Z")
+        assert result == "2026/04/01 12:30:00"
+
+    def test_human_readable_datetime_attribute_error(self):
+        result = CommonUtils.human_readable_datetime(12345)
+        assert result == "12345"
+
+    def test_format_bytes_zero(self):
+        assert CommonUtils.format_bytes_human_readable(0) == "0 B"
+
+    def test_format_bytes_exact_kib(self):
+        assert CommonUtils.format_bytes_human_readable(1024) == "1.0 KiB"
+
+    def test_format_bytes_exact_mib(self):
+        assert CommonUtils.format_bytes_human_readable(1048576) == "1.0 MiB"
+
+    def test_format_bytes_exact_gib(self):
+        assert CommonUtils.format_bytes_human_readable(1073741824) == "1.0 GiB"
+
+    def test_format_bytes_exact_tib(self):
+        assert CommonUtils.format_bytes_human_readable(1099511627776) == "1024.0 TiB"
+
+    def test_safe_int_exact(self):
+        assert CommonUtils.safe_int(42) == 42
+
+    def test_safe_int_float(self):
+        assert CommonUtils.safe_int(3.14) == 3
+
+    def test_safe_int_float_negative(self):
+        assert CommonUtils.safe_int(-3.9) == -3
+
+    def test_safe_int_str_valid(self):
+        assert CommonUtils.safe_int("123") == 123
+
+    def test_safe_int_str_invalid(self):
+        assert CommonUtils.safe_int("not-a-number") == 0
+
+    def test_safe_int_none(self):
+        assert CommonUtils.safe_int(None) == 0
+
+    def test_safe_int_list(self):
+        assert CommonUtils.safe_int([1, 2, 3]) == 0
+
+    def test_safe_int_custom_default(self):
+        assert CommonUtils.safe_int(None, default=-1) == -1
+
+    def test_validate_entity_name_exceeds_max_length(self):
+        long_name = "a" * 64
+        with pytest.raises(MVMError, match="exceeds maximum length"):
+            CommonUtils.validate_entity_name(long_name, "VM")
+
+    def test_validate_entity_name_invalid_pattern(self):
+        with pytest.raises(MVMError, match="must match"):
+            CommonUtils.validate_entity_name("UPPERCASE", "VM")
+
+    def test_get_combined_marker_default_missing(self):
+        assert CommonUtils._get_combined_marker(True, True) == "*X "
+
+    def test_get_combined_marker_missing_only(self):
+        assert CommonUtils._get_combined_marker(False, True) == " X "
+
+    def test_get_combined_marker_default_only(self):
+        assert CommonUtils._get_combined_marker(True, False) == "*  "
+
+    def test_get_combined_marker_normal(self):
+        assert CommonUtils._get_combined_marker(False, False) == "   "
+
+    def test_coerce_bool_true(self):
+        assert CommonUtils.coerce("true", bool) is True
+
+    def test_coerce_bool_false(self):
+        assert CommonUtils.coerce("false", bool) is False
+
+    def test_coerce_bool_on(self):
+        assert CommonUtils.coerce("on", bool) is True
+
+    def test_coerce_int(self):
+        assert CommonUtils.coerce("42", int) == 42
+
+    def test_coerce_float(self):
+        assert CommonUtils.coerce("3.14", float) == 3.14
+
+    def test_coerce_dict(self):
+        result = CommonUtils.coerce('{"a": 1}', dict)
+        assert result == {"a": 1}
+
+    def test_coerce_type_error(self):
+        with pytest.raises(TypeError):
+            CommonUtils.coerce(42, dict)
+
+    def test_coerce_same_type_passthrough(self):
+        assert CommonUtils.coerce("hello", str) == "hello"

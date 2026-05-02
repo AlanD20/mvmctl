@@ -1,7 +1,7 @@
 """Integration tests for console workflow through the real public API.
 
 Tests exercise the complete console relay lifecycle:
-  create VM with console → attach → get state → kill → cleanup on VM remove
+  create VM with console → get connection info → get state → kill → cleanup on VM remove
 
 Only subprocess calls and GuestfsProvisioner are mocked.
 ALL API-layer orchestration runs unmocked.
@@ -16,6 +16,7 @@ import pytest
 
 from mvmctl.api import ConsoleOperation, VMCreateInput, VMInput, VMOperation
 from mvmctl.exceptions import MVMError, VMNotFoundError
+from mvmctl.models.result import OperationResult
 from mvmctl.models.vm import ConsoleState, VMInstanceItem
 from mvmctl.utils.common import CacheUtils
 
@@ -86,10 +87,10 @@ class TestConsoleWorkflow:
         assert vm.relay_socket_path is not None
         assert len(vm.relay_socket_path) > 0
 
-    def test_attach_console(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Attach to a VM console and verify socket path info."""
+    def test_get_connection_info(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Get console connection info and verify socket path info."""
         self._create_vm(monkeypatch, "attach-console-vm")
-        info = ConsoleOperation.attach("attach-console-vm")
+        info = ConsoleOperation.get_connection_info("attach-console-vm")
         assert info.vm_name == "attach-console-vm"
         assert info.socket_path is not None
         assert len(info.socket_path) > 0
@@ -108,7 +109,7 @@ class TestConsoleWorkflow:
         """Kill the console relay and verify it is no longer running."""
         self._create_vm(monkeypatch, "kill-console-vm")
         result = ConsoleOperation.kill("kill-console-vm")
-        assert result
+        assert result.item is True
         raw_state = ConsoleOperation.get_state("kill-console-vm")
         state = ConsoleState(**raw_state)
         # After kill, relay may not be running
@@ -139,21 +140,21 @@ class TestConsoleWorkflow:
         # Second kill should not raise
         ConsoleOperation.kill("idempotent-console-vm")
 
-    def test_attach_nonexistent_vm(
+    def test_get_connection_info_nonexistent_vm(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Attach to a nonexistent VM raises VMNotFoundError."""
+        """Get connection info for a nonexistent VM raises VMNotFoundError."""
         _setup_mocks(monkeypatch)
         with pytest.raises(VMNotFoundError):
-            ConsoleOperation.attach("nonexistent-vm")
+            ConsoleOperation.get_connection_info("nonexistent-vm")
 
-    def test_attach_console_disabled(
+    def test_get_connection_info_console_disabled(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Create VM with console disabled, attach raises MVMError."""
+        """Create VM with console disabled, get_connection_info raises MVMError."""
         self._create_vm(monkeypatch, "no-console-vm", enable_console=False)
         with pytest.raises(MVMError, match="No console relay running"):
-            ConsoleOperation.attach("no-console-vm")
+            ConsoleOperation.get_connection_info("no-console-vm")
 
     def test_get_state_nonexistent_vm(
         self, monkeypatch: pytest.MonkeyPatch
@@ -169,7 +170,7 @@ class TestConsoleWorkflow:
         """Kill console relay, then get state and verify running=False."""
         self._create_vm(monkeypatch, "kill-state-vm")
         result = ConsoleOperation.kill("kill-state-vm")
-        assert result is True
+        assert result.item is True
         raw_state = ConsoleOperation.get_state("kill-state-vm")
         state = ConsoleState(**raw_state)
         assert state.running is False

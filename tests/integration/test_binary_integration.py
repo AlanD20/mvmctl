@@ -78,18 +78,18 @@ class TestBinaryFetch(_BinaryTestBase):
 
         result = BinaryOperation.fetch(BinaryFetchInput(version="1.16.0"))
 
-        assert len(result.result) == 2
-        names = [b.name for b in result.result]
+        assert len(result.item) == 2
+        names = [b.name for b in result.item]
         assert "firecracker" in names
         assert "jailer" in names
 
-        fc = next(b for b in result.result if b.name == "firecracker")
+        fc = next(b for b in result.item if b.name == "firecracker")
         assert fc.version == "1.16.0"
         assert fc.full_version == "v1.16.0"
         assert fc.resolved_path.exists()
         assert fc.resolved_path.name == "firecracker-v1.16.0"
 
-        jl = next(b for b in result.result if b.name == "jailer")
+        jl = next(b for b in result.item if b.name == "jailer")
         assert jl.version == "1.16.0"
         assert jl.resolved_path.exists()
         assert jl.resolved_path.name == "jailer-v1.16.0"
@@ -99,6 +99,7 @@ class TestBinaryFetch(_BinaryTestBase):
         # Seed jailer so both firecracker and jailer exist for v1.15.0
         from mvmctl.core._shared import Database
         from mvmctl.core.binary._repository import BinaryRepository
+        from mvmctl.models.result import OperationResult
         from mvmctl.models.binary import BinaryItem
 
         db = Database()
@@ -123,20 +124,20 @@ class TestBinaryFetch(_BinaryTestBase):
             BinaryFetchInput(version="1.15.0", download_override=False)
         )
 
-        assert len(result.result) == 2
-        fc = next(b for b in result.result if b.name == "firecracker")
+        assert len(result.item) == 2
+        fc = next(b for b in result.item if b.name == "firecracker")
         assert fc.version == "1.15.0"
         assert fc.name == "firecracker"
         assert fc.path == "firecracker"
 
-        jl = next(b for b in result.result if b.name == "jailer")
+        jl = next(b for b in result.item if b.name == "jailer")
         assert jl.version == "1.15.0"
         assert jl.path == "jailer"
 
     def test_fetch_invalid_version(self) -> None:
-        """Fetching with an invalid version format raises BinaryError."""
-        with pytest.raises(BinaryError):
-            BinaryOperation.fetch(BinaryFetchInput(version="not-a-version"))
+        """Fetching with an invalid version format returns error status."""
+        result = BinaryOperation.fetch(BinaryFetchInput(version="not-a-version"))
+        assert result.status == "error"
 
 
 # ======================================================================
@@ -219,10 +220,10 @@ class TestBinaryDefault(_BinaryTestBase):
         """ensure_default returns the existing default binary."""
         result = BinaryOperation.ensure_default()
 
-        assert result is not None
-        assert result.name == "firecracker"
-        assert result.is_default
-        assert result.version == "1.15.0"
+        assert result.item is not None
+        assert result.item.name == "firecracker"
+        assert result.item.is_default
+        assert result.item.version == "1.15.0"
 
 
 # ======================================================================

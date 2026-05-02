@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from mvmctl.api.console_operations import ConsoleAttachInfo, ConsoleOperation
+from mvmctl.api.console_operations import ConsoleConnectionInfo, ConsoleOperation
+from mvmctl.models.result import OperationResult
 from mvmctl.exceptions import MVMError
 
 
@@ -53,11 +54,11 @@ class TestConsoleGetState:
         assert result["pid"] is None
 
 
-class TestConsoleAttach:
-    """Tests for ConsoleOperation.attach()."""
+class TestConsoleGetConnectionInfo:
+    """Tests for ConsoleOperation.get_connection_info()."""
 
-    def test_attach_success(self, mocker):
-        """attach() returns ConsoleAttachInfo when relay is running."""
+    def test_get_connection_info_success(self, mocker):
+        """get_connection_info() returns ConsoleConnectionInfo when relay is running."""
         mock_resolved = mocker.MagicMock()
         mock_resolved.relay.is_running.return_value = True
         mock_resolved.relay.socket_path = "/tmp/console.sock"
@@ -71,15 +72,15 @@ class TestConsoleAttach:
             return_value=mock_request,
         )
 
-        result = ConsoleOperation.attach("test-vm")
+        result = ConsoleOperation.get_connection_info("test-vm")
 
-        assert isinstance(result, ConsoleAttachInfo)
+        assert isinstance(result, ConsoleConnectionInfo)
         assert result.socket_path == "/tmp/console.sock"
         assert result.vm_name == "test-vm"
         assert result.vm_id == "test-vm-id"
 
-    def test_attach_raises_when_relay_not_running(self, mocker):
-        """attach() raises MVMError when relay is not running."""
+    def test_get_connection_info_raises_when_relay_not_running(self, mocker):
+        """get_connection_info() raises MVMError when relay is not running."""
         mock_resolved = mocker.MagicMock()
         mock_resolved.relay.is_running.return_value = False
         mock_resolved.vm.name = "test-vm"
@@ -93,7 +94,7 @@ class TestConsoleAttach:
         )
 
         with pytest.raises(MVMError, match="No console relay running"):
-            ConsoleOperation.attach("test-vm")
+            ConsoleOperation.get_connection_info("test-vm")
 
 
 class TestConsoleKill:
@@ -114,7 +115,7 @@ class TestConsoleKill:
 
         result = ConsoleOperation.kill("test-vm")
 
-        assert result is True
+        assert result.status == "success"
         mock_resolved.relay.terminate.assert_called_once()
 
     def test_kill_returns_false_when_not_running(self, mocker):
@@ -131,5 +132,5 @@ class TestConsoleKill:
 
         result = ConsoleOperation.kill("test-vm")
 
-        assert result is False
+        assert result.status == "skipped"
         mock_resolved.relay.terminate.assert_not_called()

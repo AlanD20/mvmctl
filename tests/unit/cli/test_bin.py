@@ -1,6 +1,7 @@
 """Tests for CLI binary commands."""
 
 from __future__ import annotations
+from mvmctl.models.result import BatchResult, OperationResult
 
 import json
 from unittest.mock import MagicMock, patch
@@ -99,8 +100,10 @@ class TestBinFetch:
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_fetch_success(self, mock_bin_op):
         mock_bin_op.get.return_value = None  # Not already downloaded
-        mock_bin_op.fetch.return_value = MagicMock(
-            result=[_make_binary("firecracker", "1.15.0")],
+        mock_bin_op.fetch.return_value = OperationResult(
+            status="success",
+            code="binary.downloaded",
+            item=[_make_binary("firecracker", "1.15.0")],
         )
         result = runner.invoke(app, ["bin", "fetch", "1.15.0"])
         assert result.exit_code == 0
@@ -109,8 +112,10 @@ class TestBinFetch:
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_fetch_with_set_default(self, mock_bin_op):
         mock_bin_op.get.return_value = None
-        mock_bin_op.fetch.return_value = MagicMock(
-            result=[_make_binary("firecracker", "1.15.0")],
+        mock_bin_op.fetch.return_value = OperationResult(
+            status="success",
+            code="binary.downloaded",
+            item=[_make_binary("firecracker", "1.15.0")],
         )
         result = runner.invoke(app, ["bin", "fetch", "1.15.0", "--set-default"])
         assert result.exit_code == 0
@@ -133,15 +138,15 @@ class TestBinRemove:
 
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_rm_by_version(self, mock_bin_op):
-        mock_bin_op.remove_by_version.return_value = None
-        mock_bin_op.remove.return_value = None
+        mock_bin_op.remove_by_version.return_value = OperationResult(status='success', code='binary.removed', message='Binary removed')
+        mock_bin_op.remove.return_value = BatchResult(items=[OperationResult(status="success", code="binary.removed", message="Binary removed")])
         result = runner.invoke(app, ["bin", "rm", "--version", "1.5.0", "dummyid"])
         assert result.exit_code == 0
         assert "Removed" in result.output
 
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_rm_by_id(self, mock_bin_op):
-        mock_bin_op.remove.return_value = None
+        mock_bin_op.remove.return_value = BatchResult(items=[OperationResult(status="success", code="binary.removed", message="Binary removed")])
         result = runner.invoke(app, ["bin", "rm", "abc123"])
         assert result.exit_code == 0
 
@@ -163,7 +168,7 @@ class TestBinDefault:
 
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_set_default_success(self, mock_bin_op):
-        mock_bin_op.set_default.return_value = None
+        mock_bin_op.set_default.return_value = OperationResult(status='success', code='binary.default_set', message='Default binary set')
         result = runner.invoke(app, ["bin", "default", "abc123"])
         assert result.exit_code == 0
         assert "Default binary set" in result.output
@@ -186,3 +191,189 @@ class TestBinHelp:
         result = runner.invoke(app, ["bin", "--help"])
         assert result.exit_code == 0
         assert "Binary management" in result.output
+
+
+class TestBinLsExtras:
+    """Extended tests for bin ls."""
+
+    @patch("mvmctl.cli.bin.BinaryOperation")
+    def test_ls_local_with_default_marker(self, mock_bin_op):
+        mock_bin_op.list_local.return_value = [
+            _make_binary("firecracker", "1.15.0", is_default=True),
+            _make_binary("jailer", "1.14.0"),
+        ]
+        result = runner.invoke(app, ["bin", "ls"])
+        assert result.exit_code == 0
+        assert "*" in result.output
+        assert "firecracker" in result.output
+        assert "jailer" in result.output
+
+    @patch("mvmctl.cli.bin.BinaryOperation")
+    def test_ls_json_empty(self, mock_bin_op):
+        mock_bin_op.list_local.return_value = []
+        result = runner.invoke(app, ["bin", "ls", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data == []
+
+    @patch("mvmctl.cli.bin.BinaryOperation")
+    def test_ls_remote_no_locals(self, mock_bin_op):
+        mock_bin_op.list_local.return_value = []
+        mock_bin_op.list_remote.return_value = ["1.16.0", "1.15.0"]
+        result = runner.invoke(app, ["bin", "ls", "--remote"])
+        assert result.exit_code == 0
+        assert "1.16.0" in result.output
+        assert "1.15.0" in result.output
+
+    @patch("mvmctl.cli.bin.BinaryOperation")
+    def test_ls_remote_with_cached_marker(self, mock_bin_op):
+        mock_bin_op.list_local.return_value = [
+            _make_binary("firecracker", "1.15.0"),
+        ]
+        mock_bin_op.list_remote.return_value = ["1.16.0", "1.15.0"]
+        result = runner.invoke(app, ["bin", "ls", "--remote"])
+        assert result.exit_code == 0
+        assert "✓" in result.output
+
+
+class TestBinFetchExtras:
+    """Extended tests for bin fetch."""
+
+    @patch("mvmctl.cli.bin.BinaryOperation")
+    def test_fetch_already_exists_decline(self, mock_bin_op):
+        mock_bin_op.get.return_value = [_make_binary("firecracker", "1.15.0")]
+        result = runner.invoke(app, ["bin", "fetch", "1.15.0"], input="n\n")
+        assert result.exit_code == 0
+        assert "Aborted" in result.output
+
+    @patch("mvmctl.cli.bin.BinaryOperation")
+    def test_fetch_already_exists_accept(self, mock_bin_op):
+        mock_bin_op.get.return_value = [_make_binary("firecracker", "1.15.0")]
+        mock_bin_op.fetch.return_value = OperationResult(
+            status="success", code="binary.downloaded",
+            item=[_make_binary("firecracker", "1.15.0")],
+        )
+        result = runner.invoke(app, ["bin", "fetch", "1.15.0"], input="y\n")
+        assert result.exit_code == 0
+        assert "Downloaded" in result.output
+
+    @patch("mvmctl.cli.bin.BinaryOperation")
+    def test_fetch_force_skip_confirm(self, mock_bin_op):
+        mock_bin_op.get.return_value = [_make_binary("firecracker", "1.15.0")]
+        mock_bin_op.fetch.return_value = OperationResult(
+            status="success", code="binary.downloaded",
+            item=[_make_binary("firecracker", "1.15.0")],
+        )
+        result = runner.invoke(app, ["bin", "fetch", "1.15.0", "--force"])
+        assert result.exit_code == 0
+        assert "Downloaded" in result.output
+
+    @patch("mvmctl.cli.bin.BinaryOperation")
+    def test_fetch_skipped_status(self, mock_bin_op):
+        mock_bin_op.get.return_value = None
+        mock_bin_op.fetch.return_value = OperationResult(
+            status="skipped", code="binary.already_present",
+            message="Already present",
+            item=[_make_binary("firecracker", "1.15.0")],
+        )
+        result = runner.invoke(app, ["bin", "fetch", "1.15.0"])
+        assert result.exit_code == 0
+        assert "Already present" in result.output
+
+    @patch("mvmctl.cli.bin.BinaryOperation")
+    def test_fetch_error_status(self, mock_bin_op):
+        mock_bin_op.get.return_value = None
+        mock_bin_op.fetch.return_value = OperationResult(
+            status="error", code="binary.fetch_failed",
+            message="Network error",
+        )
+        result = runner.invoke(app, ["bin", "fetch", "1.5.0"])
+        assert result.exit_code == 1
+        assert "Network error" in result.output
+
+    @patch("mvmctl.cli.bin.BinaryOperation")
+    def test_fetch_with_v_prefix(self, mock_bin_op):
+        mock_bin_op.get.return_value = None
+        mock_bin_op.fetch.return_value = OperationResult(
+            status="success", code="binary.downloaded",
+            item=[_make_binary("firecracker", "1.15.0")],
+        )
+        result = runner.invoke(app, ["bin", "fetch", "v1.15.0"])
+        assert result.exit_code == 0
+        assert "Downloaded" in result.output
+
+
+class TestBinRemoveExtras:
+    """Extended tests for bin rm."""
+
+    @patch("mvmctl.cli.bin.BinaryOperation")
+    def test_rm_batch_mixed(self, mock_bin_op):
+        mock_bin_op.remove.return_value = BatchResult(items=[
+            OperationResult(status="success", code="binary.removed", message="Removed firecracker"),
+            OperationResult(status="error", code="binary.remove_failed", message="Failed to remove jailer"),
+        ])
+        result = runner.invoke(app, ["bin", "rm", "abc123", "def456"])
+        assert result.exit_code == 1
+        assert "Removed firecracker" in result.output
+        assert "Failed to remove jailer" in result.output
+
+    @patch("mvmctl.cli.bin.BinaryOperation")
+    def test_rm_force_flag_passed(self, mock_bin_op):
+        mock_bin_op.remove.return_value = BatchResult(items=[
+            OperationResult(status="success", code="binary.removed"),
+        ])
+        result = runner.invoke(app, ["bin", "rm", "--force", "abc123"])
+        assert result.exit_code == 0
+        _, kwargs = mock_bin_op.remove.call_args
+        assert kwargs.get("force") is True
+
+    @patch("mvmctl.cli.bin.BinaryOperation")
+    def test_rm_version_error(self, mock_bin_op):
+        mock_bin_op.remove_by_version.return_value = OperationResult(
+            status="error", code="binary.remove_failed",
+            message="Version 9.9.9 not found",
+        )
+        result = runner.invoke(app, ["bin", "rm", "--version", "9.9.9"])
+        assert result.exit_code == 1
+        assert "not found" in result.output.lower()
+
+    @patch("mvmctl.cli.bin.BinaryOperation")
+    def test_rm_version_success(self, mock_bin_op):
+        mock_bin_op.remove_by_version.return_value = OperationResult(
+            status="success", code="binary.removed",
+            message="Removed binaries for v1.5.0",
+        )
+        result = runner.invoke(app, ["bin", "rm", "--version", "1.5.0"])
+        assert result.exit_code == 0
+        assert "Removed" in result.output
+
+    @patch("mvmctl.cli.bin.BinaryOperation")
+    def test_rm_by_id_success(self, mock_bin_op):
+        mock_bin_op.remove.return_value = BatchResult(items=[
+            OperationResult(status="success", code="binary.removed", message="Removed"),
+        ])
+        result = runner.invoke(app, ["bin", "rm", "abc123def"])
+        assert result.exit_code == 0
+
+
+class TestBinDefaultExtras:
+    """Extended tests for bin default."""
+
+    @patch("mvmctl.cli.bin.BinaryOperation")
+    def test_set_default_error_status(self, mock_bin_op):
+        mock_bin_op.set_default.return_value = OperationResult(
+            status="error", code="binary.default_set_failed",
+            message="Binary not found",
+        )
+        result = runner.invoke(app, ["bin", "default", "badid"])
+        assert result.exit_code == 1
+        assert "Binary not found" in result.output
+
+    @patch("mvmctl.cli.bin.BinaryOperation")
+    def test_set_default_empty_message(self, mock_bin_op):
+        mock_bin_op.set_default.return_value = OperationResult(
+            status="success", code="binary.default_set", message="",
+        )
+        result = runner.invoke(app, ["bin", "default", "abc123"])
+        assert result.exit_code == 0
+        assert "Default binary set to" in result.output

@@ -10,6 +10,7 @@ import pytest
 from mvmctl.api.host_operations import HostOperation
 from mvmctl.exceptions import HostError
 from mvmctl.models import VMStatus
+from mvmctl.models.result import OperationResult
 
 
 class TestHostOperationDelegations:
@@ -196,7 +197,7 @@ class TestHostOperationClean:
         mocker.patch("mvmctl.api.host_operations.AuditLog")
 
         result = HostOperation.clean(Path("/tmp"))
-        assert isinstance(result, list)
+        assert result.status == "success"
 
     def test_clean_handles_no_networks(self, mocker):
         """clean() works when no networks exist."""
@@ -229,7 +230,7 @@ class TestHostOperationClean:
         mock_audit = mocker.patch("mvmctl.api.host_operations.AuditLog")
 
         result = HostOperation.clean(Path("/tmp"))
-        assert isinstance(result, list)
+        assert result.status == "success"
         mock_audit.log.assert_called_once()
 
     def test_clean_handles_network_exception(self, mocker):
@@ -260,10 +261,14 @@ class TestHostOperationClean:
             return_value=[],
         )
         mocker.patch("mvmctl.api.host_operations.AuditLog")
+        mocker.patch(
+            "mvmctl.core.network._service.subprocess.run",
+            return_value=MagicMock(returncode=0, stdout="", stderr=""),
+        )
 
         # NetworkRepository.list_all() exception should not crash clean()
         result = HostOperation.clean(Path("/tmp"))
-        assert isinstance(result, list)
+        assert result.status == "success"
 
 
 class TestHostOperationReset:
@@ -276,7 +281,7 @@ class TestHostOperationReset:
         )
         mocker.patch(
             "mvmctl.api.host_operations.HostOperation.clean",
-            return_value=["Cleaned TAPs"],
+            return_value=OperationResult(status="success", code="ok", item=["Cleaned TAPs"]),
         )
         mock_repo = MagicMock()
         mock_repo.list_changes.return_value = []
@@ -305,60 +310,6 @@ class TestHostOperationReset:
         )
 
         result = HostOperation.reset(Path("/tmp"))
-        assert "Cleaned TAPs" in result
+        assert "Cleaned TAPs" in result.item
         mock_service.restore_state.assert_called_once()
 
-
-class TestHostOperationPrune:
-    """Tests for HostOperation.prune() — teardown-only."""
-
-    def test_prune_calls_clean_then_restore(self, mocker):
-        """prune() calls clean() then restores state (no group/sudoers)."""
-        mocker.patch(
-            "mvmctl.api.host_operations.HostPrivilegeHelper.check_privileges"
-        )
-        mocker.patch(
-            "mvmctl.api.host_operations.HostOperation.clean",
-            return_value=["Cleaned"],
-        )
-        mock_repo = MagicMock()
-        mocker.patch(
-            "mvmctl.api.host_operations.HostRepository",
-            return_value=mock_repo,
-        )
-        mock_service = MagicMock()
-        mock_service.restore_state.return_value = [MagicMock(setting="ip_forward")]
-        mocker.patch(
-            "mvmctl.api.host_operations.HostService",
-            return_value=mock_service,
-        )
-        mocker.patch("mvmctl.api.host_operations.AuditLog")
-
-        result = HostOperation.prune(Path("/tmp"))
-        assert "Cleaned" in result
-        assert "ip_forward" in str(result)
-        mock_service.restore_state.assert_called_once()
-
-    def test_prune_logs_when_no_state(self, mocker):
-        """prune() logs warning when restore_state fails."""
-        mocker.patch(
-            "mvmctl.api.host_operations.HostPrivilegeHelper.check_privileges"
-        )
-        mocker.patch(
-            "mvmctl.api.host_operations.HostOperation.clean",
-            return_value=[],
-        )
-        mocker.patch(
-            "mvmctl.api.host_operations.HostRepository",
-        )
-        mock_service = MagicMock()
-        mock_service.restore_state.side_effect = HostError("No state saved")
-        mocker.patch(
-            "mvmctl.api.host_operations.HostService",
-            return_value=mock_service,
-        )
-        mock_logger = mocker.patch("mvmctl.api.host_operations.logger")
-        mocker.patch("mvmctl.api.host_operations.AuditLog")
-
-        HostOperation.prune(Path("/tmp"))
-        mock_logger.warning.assert_called_once()

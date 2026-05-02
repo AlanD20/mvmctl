@@ -19,6 +19,7 @@ from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.exceptions import VMNotFoundError
+from mvmctl.models.result import OperationResult
 from mvmctl.models import (
     BinaryItem,
     CleanResult,
@@ -41,11 +42,13 @@ class TestCacheInit:
         """init_all creates all expected cache subdirectories."""
         result = CacheOperation.init_all()
 
-        assert "cache_dir" in result
-        assert "directories" in result
-        assert result["cache_dir"] == str(CacheUtils.get_cache_dir())
+        assert isinstance(result, OperationResult)
+        assert result.status == "success"
+        assert "cache_dir" in result.item
+        assert "directories" in result.item
+        assert result.item["cache_dir"] == str(CacheUtils.get_cache_dir())
 
-        dirs = result["directories"]
+        dirs = result.item["directories"]
         assert isinstance(dirs, list)
         assert str(CacheUtils.get_vms_dir()) in dirs
         assert str(CacheUtils.get_images_dir()) in dirs
@@ -109,7 +112,7 @@ class TestCachePruneVMs:
         self._create_vm(monkeypatch, "prune-dry-vm")
 
         result = CacheOperation.prune_vms(dry_run=True)
-        assert result == []
+        assert result.item == []
 
         vm = VMOperation.get(VMInput(identifiers=["prune-dry-vm"]))
         assert vm.name == "prune-dry-vm"
@@ -122,7 +125,7 @@ class TestCachePruneVMs:
         self._create_vm(monkeypatch, "prune-include-vm")
 
         result = CacheOperation.prune_vms(dry_run=True, include_all=True)
-        assert result == ["prune-include-vm"]
+        assert result.item == ["prune-include-vm"]
 
         vm = VMOperation.get(VMInput(identifiers=["prune-include-vm"]))
         assert vm.name == "prune-include-vm"
@@ -149,7 +152,7 @@ class TestCachePruneVMs:
         assert vm.status == VMStatus.STOPPED.value
 
         result = CacheOperation.prune_vms(dry_run=False)
-        assert result == ["prune-real-vm"]
+        assert result.item == ["prune-real-vm"]
 
         with pytest.raises(VMNotFoundError):
             VMOperation.get(VMInput(identifiers=["prune-real-vm"]))
@@ -157,7 +160,7 @@ class TestCachePruneVMs:
     def test_prune_vms_empty_returns_empty(self) -> None:
         """prune_vms with no VMs returns an empty list."""
         result = CacheOperation.prune_vms(dry_run=True)
-        assert result == []
+        assert result.item == []
 
 
 # ======================================================================
@@ -241,7 +244,8 @@ class TestCachePruneAssets:
         image_id = self._seed_extra_image()
 
         result = CacheOperation.prune_images(dry_run=False)
-        assert image_id in result
+        assert isinstance(result, OperationResult)
+        assert image_id in result.item
 
         db = Database()
         repo = ImageRepository(db)
@@ -252,7 +256,8 @@ class TestCachePruneAssets:
         image_id = self._seed_extra_image()
 
         result = CacheOperation.prune_images(dry_run=True)
-        assert image_id in result
+        assert isinstance(result, OperationResult)
+        assert image_id in result.item
 
         db = Database()
         repo = ImageRepository(db)
@@ -263,7 +268,8 @@ class TestCachePruneAssets:
         kernel_id = self._seed_extra_kernel()
 
         result = CacheOperation.prune_kernels(dry_run=False)
-        assert kernel_id in result
+        assert isinstance(result, OperationResult)
+        assert kernel_id in result.item
 
         db = Database()
         repo = KernelRepository(db)
@@ -274,7 +280,8 @@ class TestCachePruneAssets:
         kernel_id = self._seed_extra_kernel()
 
         result = CacheOperation.prune_kernels(dry_run=True)
-        assert kernel_id in result
+        assert isinstance(result, OperationResult)
+        assert kernel_id in result.item
 
         db = Database()
         repo = KernelRepository(db)
@@ -285,7 +292,8 @@ class TestCachePruneAssets:
         binary_id = self._seed_extra_binary()
 
         result = CacheOperation.prune_binaries(dry_run=False)
-        assert "firecracker:1.14.0" in result
+        assert isinstance(result, OperationResult)
+        assert "firecracker:1.14.0" in result.item
 
         db = Database()
         repo = BinaryRepository(db)
@@ -296,7 +304,8 @@ class TestCachePruneAssets:
         binary_id = self._seed_extra_binary()
 
         result = CacheOperation.prune_binaries(dry_run=True)
-        assert "firecracker:1.14.0" in result
+        assert isinstance(result, OperationResult)
+        assert "firecracker:1.14.0" in result.item
 
         db = Database()
         repo = BinaryRepository(db)
@@ -305,16 +314,17 @@ class TestCachePruneAssets:
     def test_prune_networks_dry_run_respects_defaults(self) -> None:
         """prune_networks(dry_run=True) skips default and referenced networks."""
         result = CacheOperation.prune_networks(dry_run=True)
-        assert isinstance(result, list)
-        assert len(result) == 0
+        assert isinstance(result, OperationResult)
+        assert len(result.item) == 0
 
     def test_prune_misc_returns_dict(self) -> None:
         """prune_misc returns a dictionary with expected keys."""
         result = CacheOperation.prune_misc(dry_run=True)
-        assert isinstance(result, dict)
-        assert "appliance" in result
-        assert "warm_images" in result
-        assert "guestfs_state" in result
+        assert isinstance(result, OperationResult)
+        assert isinstance(result.item, dict)
+        assert "appliance" in result.item
+        assert "warm_images" in result.item
+        assert "guestfs_state" in result.item
 
 
 # ======================================================================
@@ -364,21 +374,23 @@ class TestCachePruneAll:
 
         result = CacheOperation.prune_all(dry_run=True, include_all=True)
 
-        assert isinstance(result, PruneAllResult)
-        assert "prune-all-vm" in result.pruned_ids
-        assert result.had_running_vms is True
-        assert result.failed_ids == []
+        assert isinstance(result, OperationResult)
+        assert isinstance(result.item, PruneAllResult)
+        assert "prune-all-vm" in result.item.pruned_ids
+        assert result.item.had_running_vms is True
+        assert result.item.failed_ids == []
 
     def test_prune_all_empty_returns_empty_result(self) -> None:
         """prune_all with no VMs returns empty pruned_ids for VMs but still
         reports miscellaneous cache items like warm images."""
         result = CacheOperation.prune_all(dry_run=True)
 
-        assert isinstance(result, PruneAllResult)
-        assert result.failed_ids == []
-        assert result.had_running_vms is False
+        assert isinstance(result, OperationResult)
+        assert isinstance(result.item, PruneAllResult)
+        assert result.item.failed_ids == []
+        assert result.item.had_running_vms is False
         # Integration conftest seeds a warm image, so prune_misc reports it
-        assert "warm_images" in result.pruned_ids
+        assert "warm_images" in result.item.pruned_ids
 
 
 # ======================================================================
@@ -393,10 +405,11 @@ class TestCacheClean:
         """clean(dry_run=True) returns CleanResult without removing anything."""
         result = CacheOperation.clean(dry_run=True)
 
-        assert isinstance(result, CleanResult)
-        assert isinstance(result.prune_result, PruneAllResult)
-        assert result.cache_dir_removed is True
-        assert result.cache_dir == str(CacheUtils.get_cache_dir())
+        assert isinstance(result, OperationResult)
+        assert isinstance(result.item, CleanResult)
+        assert isinstance(result.item.prune_result, PruneAllResult)
+        assert result.item.cache_dir_removed is True
+        assert result.item.cache_dir == str(CacheUtils.get_cache_dir())
         assert CacheUtils.get_cache_dir().exists()
 
     def test_clean_empty_cache_handles_gracefully(self) -> None:
@@ -407,11 +420,12 @@ class TestCacheClean:
         """
         result = CacheOperation.clean(dry_run=True)
 
-        assert isinstance(result, CleanResult)
-        assert isinstance(result.prune_result, PruneAllResult)
-        assert result.prune_result.failed_ids == []
-        assert result.prune_result.had_running_vms is False
-        assert result.cache_dir_removed is True
+        assert isinstance(result, OperationResult)
+        assert isinstance(result.item, CleanResult)
+        assert isinstance(result.item.prune_result, PruneAllResult)
+        assert result.item.prune_result.failed_ids == []
+        assert result.item.prune_result.had_running_vms is False
+        assert result.item.cache_dir_removed is True
         # clean() uses include_all=True — default assets are reported
-        assert "net" in result.prune_result.pruned_ids
-        assert "warm_images" in result.prune_result.pruned_ids
+        assert "net" in result.item.prune_result.pruned_ids
+        assert "warm_images" in result.item.prune_result.pruned_ids

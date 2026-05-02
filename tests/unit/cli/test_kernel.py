@@ -1,6 +1,7 @@
 """Tests for CLI kernel commands."""
 
 from __future__ import annotations
+from mvmctl.models.result import BatchResult, OperationResult
 
 import json
 from unittest.mock import patch
@@ -74,7 +75,7 @@ class TestKernelFetch:
 
     @patch("mvmctl.cli.kernel.KernelOperation")
     def test_fetch_success(self, mock_krn_op):
-        mock_krn_op.fetch.return_value = _make_kernel("vmlinux-6.1.0")
+        mock_krn_op.fetch.return_value = OperationResult(status="success", code="kernel.fetched", item=_make_kernel("vmlinux-6.1.0"))
         result = runner.invoke(
             app,
             [
@@ -89,7 +90,7 @@ class TestKernelFetch:
 
     @patch("mvmctl.cli.kernel.KernelOperation")
     def test_fetch_with_version_and_arch(self, mock_krn_op):
-        mock_krn_op.fetch.return_value = _make_kernel("vmlinux-6.1.0")
+        mock_krn_op.fetch.return_value = OperationResult(status="success", code="kernel.fetched", item=_make_kernel("vmlinux-6.1.0"))
         result = runner.invoke(
             app,
             [
@@ -140,14 +141,14 @@ class TestKernelRemove:
 
     @patch("mvmctl.cli.kernel.KernelOperation")
     def test_rm_success(self, mock_krn_op):
-        mock_krn_op.remove.return_value = None
+        mock_krn_op.remove.return_value = BatchResult(items=[OperationResult(status="success", code="kernel.removed", message="Kernel removed")])
         result = runner.invoke(app, ["kernel", "rm", "abc123"])
         assert result.exit_code == 0
         assert "removed" in result.output.lower()
 
     @patch("mvmctl.cli.kernel.KernelOperation")
     def test_rm_multiple(self, mock_krn_op):
-        mock_krn_op.remove.return_value = None
+        mock_krn_op.remove.return_value = BatchResult(items=[OperationResult(status="success", code="kernel.removed", message="Kernel removed")])
         result = runner.invoke(app, ["kernel", "rm", "abc123", "def456"])
         assert result.exit_code == 0
 
@@ -172,7 +173,7 @@ class TestKernelSetDefault:
 
     @patch("mvmctl.cli.kernel.KernelOperation")
     def test_set_default_success(self, mock_krn_op):
-        mock_krn_op.set_default.return_value = None
+        mock_krn_op.set_default.return_value = OperationResult(status='success', code='kernel.default_set', message='Default kernel set')
         result = runner.invoke(app, ["kernel", "set-default", "abc123"])
         assert result.exit_code == 0
         assert "Default kernel set" in result.output

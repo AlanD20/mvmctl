@@ -79,3 +79,13 @@ class TestCacheCommands:
         result = _run_mvm(mvm_binary, "vm", "ls", "--json")
         vms = json.loads(result.stdout)
         assert any(v["name"] == vm_name for v in vms)
+
+
+class TestCacheClean:
+    """Test mvm cache clean command."""
+
+    def test_cache_clean_dry_run(self, mvm_binary):
+        """cache clean --dry-run --force should preview what would be removed."""
+        result = _run_mvm(mvm_binary, "cache", "clean", "--dry-run", "--force")
+        assert result.returncode == 0
+        assert "DRY RUN" in result.stdout

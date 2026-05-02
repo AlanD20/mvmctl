@@ -9,6 +9,7 @@ import pytest
 from mvmctl.api.inputs._key_create_input import KeyCreateInput
 from mvmctl.api.inputs._key_input import KeyInput
 from mvmctl.api.key_operations import KeyOperation
+from mvmctl.models.result import OperationResult
 from mvmctl.exceptions import MVMKeyError
 from mvmctl.models import SSHKeyItem
 
@@ -144,8 +145,8 @@ class TestKeyOperationCreate:
             KeyCreateInput(name="new-key", set_default=True)
         )
 
-        assert result.name == "new-key"
-        assert result.is_default is True
+        assert result.item.name == "new-key"
+        assert result.item.is_default is True
         mock_service.check_dependencies.assert_called_once()
         mock_service.create_keypair.assert_called_once_with(
             name="new-key",
@@ -180,7 +181,7 @@ class TestKeyOperationAdd:
 
         result = KeyOperation.add("imported-key", Path("/tmp/key.pub"))
 
-        assert result.name == "imported-key"
+        assert result.item.name == "imported-key"
         mock_service.add_key.assert_called_once_with(
             "imported-key", Path("/tmp/key.pub"), Path("/keys"), overwrite=False
         )
@@ -369,7 +370,7 @@ class TestKeyOperationExport:
             Path("/dst"),
         )
 
-        assert len(result) == 2
+        assert len(result.item) == 2
         mock_controller.export.assert_called_once_with(
             destination=Path("/dst"), keys_dir=Path("/keys"), overwrite=False
         )
@@ -386,5 +387,6 @@ class TestKeyOperationExport:
         )
         mocker.patch("mvmctl.api.key_operations.KeyRepository")
 
-        with pytest.raises(MVMKeyError, match="Expected exactly one"):
-            KeyOperation.export(KeyInput(name=["amb"]), Path("/dst"))
+        result = KeyOperation.export(KeyInput(name=["amb"]), Path("/dst"))
+        assert result.status == "error"
+        assert "Expected exactly one" in result.message

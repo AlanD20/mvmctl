@@ -332,17 +332,6 @@ class TestIsRunning:
             assert manager.is_running() is True
 
 
-class TestCleanupOrphans:
-    """Tests for cleanup_orphans()."""
-
-    def test_cleanup_orphans_returns_empty_list(
-        self, manager: NoCloudNetServerManager
-    ) -> None:
-        """cleanup_orphans is deprecated and returns an empty list."""
-        result = manager.cleanup_orphans()
-        assert result == []
-
-
 # ==============================================================================
 # Nocloud process tests
 # ==============================================================================

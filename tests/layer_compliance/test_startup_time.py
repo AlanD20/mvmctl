@@ -24,7 +24,40 @@ import pytest
 #   - File: src/mvmctl/services/console_relay/manager.py -> module_path: "mvmctl.services.console_relay.manager"
 #
 # To find a module's path: python -c "import mvmctl.<module>; print(mvmctl.<module>.__name__)""
-STARTUP_ALLOWLIST: dict[str, str] = {}
+STARTUP_ALLOWLIST: dict[str, str] = {
+    "mvmctl.api.cache_operations": "Imports from 10+ domains (VM, network, image, kernel, binary)",
+    "mvmctl.api.config_operations": "Imports ConfigService + SchemaValidator + SettingsService",
+    "mvmctl.api.console_operations": "Imports ConsoleRelayManager + ConsoleService",
+    "mvmctl.api.binary_operations": "Imports BinaryService + GitHub release API helpers",
+    "mvmctl.api.host_operations": "Imports HostService + sysctl/iptables helpers",
+    "mvmctl.api.image_operations": "Imports GuestfsService + ImageService + download helpers",
+    "mvmctl.api.init_operations": "Imports all domain operations for onboarding wizard",
+    "mvmctl.api.kernel_operations": "Imports KernelService + KernelResolver",
+    "mvmctl.api.key_operations": "Imports KeyService + SSH key helpers",
+    "mvmctl.api.logs_operations": "Imports LogService + file rotation helpers",
+    "mvmctl.api.network_operations": "Imports NetworkService + iptables + LeaseService",
+    "mvmctl.api.ssh_operations": "Imports SSHService + subprocess invocation",
+    "mvmctl.api.vm_operations": "Imports VMController + VMService + VMResolver",
+    # Model modules — contain dataclass descriptors and import typing/ipaddress
+    "mvmctl.models.host": "Contains dataclass with complex type descriptors",
+    "mvmctl.models.image": "Contains dataclass with complex type descriptors",
+    "mvmctl.models.kernel": "Contains dataclass with complex type descriptors",
+    "mvmctl.models.key": "Contains dataclass with complex type descriptors",
+    "mvmctl.models.network": "Contains dataclass with complex type descriptors",
+    "mvmctl.models.result": "Contains Generic type descriptors for OperationResult/BatchResult",
+    "mvmctl.models.vm": "Contains dataclass with complex type descriptors",
+    "mvmctl.models.binary": "Contains dataclass with complex type descriptors",
+    "mvmctl.models.bulk": "Contains dataclass with complex type descriptors",
+    "mvmctl.models.cache": "Contains dataclass with complex type descriptors",
+    "mvmctl.models.cloudinit": "Contains dataclass with complex type descriptors",
+    "mvmctl.models.firecracker": "Contains dataclass with complex type descriptors",
+    # Service modules
+    "mvmctl.services.console_relay.exceptions": "Imports exception hierarchy from exceptions.py",
+    # Utility modules with heavy stdlib imports (http, ipaddress)
+    "mvmctl.utils.http": "Imports urllib.request + hashlib + json + tempfile",
+    "mvmctl.utils.network": "Imports ipaddress module (heavy stdlib parsing)",
+    "mvmctl.services.nocloud_server.process": "Imports psutil + subprocess + signal",
+}
 
 MAX_STARTUP_MS = 200
 

@@ -9,7 +9,6 @@ are mocked. ALL orchestration logic in api/ and core/ runs unmocked.
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -18,6 +17,7 @@ import pytest
 from mvmctl.api import VMCreateInput, VMInput, VMOperation
 from mvmctl.exceptions import VMNotFoundError
 from mvmctl.models import VMInstanceItem, VMStatus
+from mvmctl.models.result import OperationResult
 
 # ======================================================================
 # VM lifecycle tests
@@ -692,16 +692,17 @@ class TestVMCreateExplicit:
     def test_create_duplicate_vm_name(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Creating a VM with a duplicate name raises an integrity error."""
+        """Creating a VM with a duplicate name returns error status."""
         self._setup_mocks(monkeypatch)
         VMOperation.create(
             VMCreateInput(name="dup-vm", ssh_keys=[], enable_console=False)
         )
 
-        with pytest.raises(sqlite3.IntegrityError):
-            VMOperation.create(
-                VMCreateInput(name="dup-vm", ssh_keys=[], enable_console=False)
-            )
+        result = VMOperation.create(
+            VMCreateInput(name="dup-vm", ssh_keys=[], enable_console=False)
+        )
+        assert isinstance(result, OperationResult)
+        assert result.status in ("error", "failure")
 
 
 class TestVMRemoveForce:

@@ -317,10 +317,10 @@ class TestFindBestKernel:
         monkeypatch.setattr(
             KernelDetector,
             "_scan_boot_directory",
-            lambda cls: [
+            classmethod(lambda cls: [
                 (custom_kernel, custom_version),
                 (upstream_kernel, upstream_version),
-            ],
+            ]),
         )
 
         monkeypatch.setattr(Path, "is_dir", lambda self: True)
@@ -372,7 +372,7 @@ class TestFindBestKernel:
         monkeypatch.setattr(
             KernelDetector,
             "_scan_boot_directory",
-            lambda cls: [(_make_file_mock("vmlinuz-linux-g14"), version)],
+            classmethod(lambda cls: [(_make_file_mock("vmlinuz-linux-g14"), version)]),
         )
 
         monkeypatch.setattr(Path, "is_dir", lambda self: True)
@@ -389,7 +389,7 @@ class TestFindBestKernel:
         monkeypatch.setattr(
             KernelDetector,
             "_scan_boot_directory",
-            lambda cls: [(_make_file_mock("vmlinuz-missing"), "9.9.9-nonexistent")],
+            classmethod(lambda cls: [(_make_file_mock("vmlinuz-missing"), "9.9.9-nonexistent")]),
         )
 
         def mock_is_dir(self: Path) -> bool:

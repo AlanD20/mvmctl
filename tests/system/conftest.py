@@ -6,7 +6,6 @@ NO imports from mvmctl.* — tests must work against the actual CLI.
 
 import json
 import os
-import re
 import shlex
 import subprocess
 import sys
@@ -109,36 +108,30 @@ def timing_targets() -> dict[str, float]:
 
 @pytest.fixture(scope="session", autouse=True)
 def prepare_system_env(mvm_binary, check_system_prerequisites) -> None:
-    """Ensure required assets are cached before tests run.
+    """Verify required assets are cached before tests run.
 
-    Automatically fetches missing kernel, images, and Firecracker binary
-    so users don't need to run manual preparation steps.
-
-    Skips gracefully if prerequisites are not met (KVM, group, etc.)
-    or if network-dependent operations fail.
+    Does NOT auto-fetch — run ``task sys-setup`` first to pre-fetch
+    kernels, images, and binaries with visible progress.
     """
     binary = mvm_binary
 
-    # Skip auto-fetches when running under pytest-xdist to avoid races
-    # on cold cache (multiple workers downloading the same asset).
-    # Users should pre-fetch assets before running in parallel.
+    # xdist workers skip verification — assets must be pre-fetched before
+    # running in parallel (avoids race conditions).
     if os.environ.get("PYTEST_XDIST_WORKER"):
-        _print_prep(
-            "Parallel mode (xdist) — skipping auto-fetch. Pre-fetch assets before running parallel."
-        )
         return
 
-    _print_prep("Checking system environment...")
+    _print_prep("Verifying system test assets...")
 
-    # ── 1. Verify DB exists (mvmctl initialized) ────────────────────────
+    missing: list[str] = []
+
+    # ── 1. Verify DB exists ──────────────────────────────────────────
     cache_dir = Path.home() / ".cache" / "mvmctl"
     db_path = cache_dir / "mvmdb.db"
     if not db_path.exists():
-        _print_prep("mvmctl not initialized. Run 'mvm host init' first.")
-        pytest.skip("mvmctl not initialized (run 'mvm host init')")
+        _print_prep("mvmctl not initialized. Run: sudo mvm host init")
+        pytest.skip("mvmctl not initialized (run 'sudo mvm host init')")
 
-    # ── 2. Kernel: fetch if missing, set default if none set ──────────
-    _print_prep("Checking kernel cache...")
+    # ── 2. Verify kernel cache ───────────────────────────────────────
     result = subprocess.run(
         [*shlex.split(binary), "kernel", "ls", "--json"],
         capture_output=True,
@@ -146,41 +139,14 @@ def prepare_system_env(mvm_binary, check_system_prerequisites) -> None:
         timeout=30,
         env={**os.environ, "NO_COLOR": "1"},
     )
-    if result.returncode == 0:
+    if result.returncode != 0:
+        missing.append("kernel (command failed)")
+    else:
         kernels = json.loads(result.stdout)
         if not kernels:
-            _print_prep("No kernel cached. Fetching official kernel...")
-            subprocess.run(
-                [
-                    *shlex.split(binary),
-                    "kernel",
-                    "fetch",
-                    "--type",
-                    "official",
-                    "--set-default",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=300,
-                env={**os.environ, "NO_COLOR": "1"},
-                check=False,
-            )
-            _print_prep("Kernel fetch complete.")
-        elif not any(k.get("is_default") for k in kernels):
-            _print_prep("No default kernel set. Setting first cached kernel...")
-            subprocess.run(
-                [
-                    *shlex.split(binary),
-                    "kernel",
-                    "set-default",
-                    kernels[0]["id"][:6],
-                ],
-                capture_output=True,
-                check=False,
-            )
+            missing.append("kernel")
 
-    # ── 3. Images: fetch if missing, set default if none set ──────────
-    _print_prep("Checking image cache...")
+    # ── 3. Verify image cache ────────────────────────────────────────
     result = subprocess.run(
         [*shlex.split(binary), "image", "ls", "--json"],
         capture_output=True,
@@ -189,37 +155,15 @@ def prepare_system_env(mvm_binary, check_system_prerequisites) -> None:
         env={**os.environ, "NO_COLOR": "1"},
     )
     cached_images: list[str] = []
-    image_entries: list[dict[str, Any]] = []
     if result.returncode == 0:
-        image_entries = json.loads(result.stdout)
-        cached_images = [i.get("name", "") for i in image_entries]
+        cached_images = [i.get("name", "") for i in json.loads(result.stdout)]
 
     required_images = ["alpine-3.21", "ubuntu-24.04-minimal"]
     for img in required_images:
         if img not in cached_images:
-            _print_prep(
-                f"Image '{img}' not cached. Fetching (this may take a while)..."
-            )
-            subprocess.run(
-                [*shlex.split(binary), "image", "fetch", img],
-                capture_output=True,
-                text=True,
-                timeout=600,
-                env={**os.environ, "NO_COLOR": "1"},
-                check=False,
-            )
-            _print_prep(f"Image '{img}' fetch complete.")
+            missing.append(f"image '{img}'")
 
-    if image_entries and not any(i.get("is_default") for i in image_entries):
-        _print_prep("No default image set. Setting alpine-3.21 as default...")
-        subprocess.run(
-            [*shlex.split(binary), "image", "set-default", "alpine-3.21"],
-            capture_output=True,
-            check=False,
-        )
-
-    # ── 4. Binary: fetch if missing, set default if none set ──────────
-    _print_prep("Checking Firecracker binary cache...")
+    # ── 4. Verify binary cache ───────────────────────────────────────
     result = subprocess.run(
         [*shlex.split(binary), "bin", "ls", "--json"],
         capture_output=True,
@@ -227,56 +171,21 @@ def prepare_system_env(mvm_binary, check_system_prerequisites) -> None:
         timeout=30,
         env={**os.environ, "NO_COLOR": "1"},
     )
-    if result.returncode == 0:
+    if result.returncode != 0:
+        missing.append("Firecracker binary (command failed)")
+    else:
         binaries = json.loads(result.stdout)
         if not binaries:
-            _print_prep("No Firecracker binary cached. Fetching latest...")
-            remote_result = subprocess.run(
-                [*shlex.split(binary), "bin", "ls", "--remote"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                env={**os.environ, "NO_COLOR": "1"},
-            )
-            if remote_result.returncode == 0:
-                versions = re.findall(r"\d+\.\d+\.\d+", remote_result.stdout)
-                if versions:
-                    target = max(
-                        versions,
-                        key=lambda v: tuple(int(x) for x in v.split(".")),
-                    )
-                    _print_prep(
-                        f"Fetching Firecracker v{target} (this may take a while)..."
-                    )
-                    subprocess.run(
-                        [
-                            *shlex.split(binary),
-                            "bin",
-                            "fetch",
-                            target,
-                            "--set-default",
-                        ],
-                        capture_output=True,
-                        text=True,
-                        timeout=300,
-                        env={**os.environ, "NO_COLOR": "1"},
-                        check=False,
-                    )
-                    _print_prep(f"Firecracker v{target} fetch complete.")
-        elif not any(b.get("is_default") for b in binaries):
-            _print_prep("No default binary set. Setting first cached binary...")
-            subprocess.run(
-                [
-                    *shlex.split(binary),
-                    "bin",
-                    "default",
-                    binaries[0]["id"][:6],
-                ],
-                capture_output=True,
-                check=False,
-            )
+            missing.append("Firecracker binary")
 
-    _print_prep("System environment ready.")
+    # ── 5. Skip with instructions if anything is missing ─────────────
+    if missing:
+        missing_str = ", ".join(missing)
+        _print_prep(f"Missing assets: {missing_str}")
+        _print_prep("Run: task sys-setup")
+        pytest.skip(f"Missing assets: {missing_str}. Run 'task sys-setup'.")
+
+    _print_prep("All required assets present.")
 
 
 def _print_prep(msg: str) -> None:

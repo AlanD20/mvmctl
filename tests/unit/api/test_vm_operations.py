@@ -185,7 +185,7 @@ class TestVMOperationCreate:
             VMCreateInput(name="test-vm", ssh_keys=["key1"])
         )
 
-        assert result is None
+        assert result.status == "success"
         mock_execute.assert_called_once_with(
             mock_resolved,
             audit_action="vm.create",
@@ -337,34 +337,34 @@ class TestVMOperationStateTransitions:
         return mock_service, mock_audit
 
     def test_start(self, mocker, mock_resolved):
-        """start() calls VMService.start_many()."""
+        """start() calls VMService.start()."""
         mock_service, _ = self._setup_mocks(mocker, mock_resolved)
         VMOperation.start(VMInput(identifiers=["test-vm"]))
-        mock_service.start_many.assert_called_once()
+        mock_service.start.assert_called_once()
 
     def test_stop(self, mocker, mock_resolved):
-        """stop() calls VMService.stop_many()."""
+        """stop() calls VMService.stop()."""
         mock_service, _ = self._setup_mocks(mocker, mock_resolved)
         VMOperation.stop(VMInput(identifiers=["test-vm"]))
-        assert mock_service.stop_many.call_count == 1
+        assert mock_service.stop.call_count == 1
 
     def test_pause(self, mocker, mock_resolved):
-        """pause() calls VMService.pause_many()."""
+        """pause() calls VMService.pause()."""
         mock_service, _ = self._setup_mocks(mocker, mock_resolved)
         VMOperation.pause(VMInput(identifiers=["test-vm"]))
-        mock_service.pause_many.assert_called_once()
+        mock_service.pause.assert_called_once()
 
     def test_resume(self, mocker, mock_resolved):
-        """resume() calls VMService.resume_many()."""
+        """resume() calls VMService.resume()."""
         mock_service, _ = self._setup_mocks(mocker, mock_resolved)
         VMOperation.resume(VMInput(identifiers=["test-vm"]))
-        mock_service.resume_many.assert_called_once()
+        mock_service.resume.assert_called_once()
 
     def test_reboot(self, mocker, mock_resolved):
-        """reboot() calls VMService.reboot_many()."""
+        """reboot() calls VMService.reboot()."""
         mock_service, _ = self._setup_mocks(mocker, mock_resolved)
         VMOperation.reboot(VMInput(identifiers=["test-vm"]))
-        mock_service.reboot_many.assert_called_once()
+        mock_service.reboot.assert_called_once()
 
 
 class TestVMOperationSnapshot:
@@ -618,7 +618,7 @@ class TestVMOperationExecuteCreate:
             mock_resolved, audit_action="vm.create"
         )
 
-        assert result is None
+        assert result.status == VMStatus.RUNNING
         mock_ctx.set_resolved.assert_called_once_with(mock_resolved)
         mock_ctx.execute.assert_called_once()
         mock_repo.upsert.assert_called_once()

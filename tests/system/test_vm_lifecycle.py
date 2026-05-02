@@ -196,13 +196,6 @@ class TestVMInspectExport:
         config = json.loads(result.stdout)
         assert isinstance(config, dict)
 
-    def test_vm_cleanup_dry_run(self, mvm_binary, created_vm):
-        """Cleanup --dry-run shows running VMs without removing them."""
-        result = _run_mvm(mvm_binary, "vm", "cleanup", "--dry-run")
-        assert result.returncode == 0
-        # VM should appear in output (it's running)
-        assert created_vm["name"] in result.stdout
-
 
 class TestVMSSH:
     """Test VM SSH operations."""
@@ -592,46 +585,3 @@ class TestVMCreateNegativePaths:
             "--force",
             check=False,
         )
-
-
-class TestVMCleanup:
-    """Test VM cleanup command."""
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.requires_kvm,
-        pytest.mark.slow,
-    ]
-
-    def test_vm_cleanup_removes_stopped(self, mvm_binary, unique_vm_name):
-        """Cleanup removes stopped VMs from the system."""
-        _run_mvm(
-            mvm_binary,
-            "vm",
-            "create",
-            "--name",
-            unique_vm_name,
-            "--image",
-            "alpine-3.21",
-        )
-
-        try:
-            result = _run_mvm(mvm_binary, "vm", "stop", unique_vm_name)
-            assert result.returncode == 0
-
-            result = _run_mvm(mvm_binary, "vm", "cleanup")
-            assert result.returncode == 0
-
-            result = _run_mvm(mvm_binary, "vm", "ls", "--json")
-            vms = json.loads(result.stdout)
-            assert not any(v["name"] == unique_vm_name for v in vms)
-        finally:
-            _run_mvm(
-                mvm_binary,
-                "vm",
-                "rm",
-                "--name",
-                unique_vm_name,
-                "--force",
-                check=False,
-            )

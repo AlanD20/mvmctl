@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from mvmctl.api.init_operations import InitOperation, InitResult, InitStepResult
+from mvmctl.models.result import OperationResult
 from mvmctl.models.result import NeedsInteraction, OperationResult
 
 
@@ -163,7 +164,7 @@ class TestStepCache:
         mock_cache = mocker.patch(
             "mvmctl.api.cache_operations.CacheOperation.init_all"
         )
-        mock_cache.return_value = {}
+        mock_cache.return_value = OperationResult(status="success", code="cache.initialized", item={})
 
         result = InitOperation._step_cache()
 
@@ -176,7 +177,7 @@ class TestStepCache:
         mock_cache = mocker.patch(
             "mvmctl.api.cache_operations.CacheOperation.init_all"
         )
-        mock_cache.return_value = {"guestfs_appliance": "/tmp/appliance"}
+        mock_cache.return_value = OperationResult(status="success", code="cache.initialized", item={"guestfs_appliance": "/tmp/appliance"})
 
         result = InitOperation._step_cache()
 
@@ -234,6 +235,8 @@ class TestStepBinary:
 
         mock_repaired = mocker.MagicMock()
         mock_repaired.version = "1.15.0"
+        mock_repaired.is_error = False
+        mock_repaired.item = mock_repaired
         mock_ensure = mocker.patch(
             "mvmctl.api.binary_operations.BinaryOperation.ensure_default",
             return_value=mock_repaired,

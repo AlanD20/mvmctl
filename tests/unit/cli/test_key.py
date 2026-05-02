@@ -1,6 +1,7 @@
 """Tests for CLI key commands."""
 
 from __future__ import annotations
+from mvmctl.models.result import BatchResult, OperationResult
 
 import json
 from unittest.mock import patch
@@ -59,6 +60,23 @@ class TestKeyLs:
     @patch("mvmctl.cli.key.KeyOperation")
     def test_ls_json(self, mock_key_op):
         mock_key_op.list_all.return_value = [_make_key("testkey")]
+
+        def _mock_to_dict(k: SSHKeyItem) -> dict[str, object]:
+            return {
+                "id": k.id,
+                "name": k.name,
+                "fingerprint": k.fingerprint,
+                "algorithm": k.algorithm,
+                "comment": k.comment,
+                "public_key_path": k.public_key_path,
+                "private_key_path": k.private_key_path,
+                "is_default": k.is_default,
+                "is_present": k.is_present,
+                "created_at": k.created_at,
+                "updated_at": k.updated_at,
+            }
+
+        mock_key_op._key_to_dict.side_effect = _mock_to_dict
         result = runner.invoke(app, ["key", "ls", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -75,7 +93,7 @@ class TestKeyAdd:
 
     @patch("mvmctl.cli.key.KeyOperation")
     def test_add_success(self, mock_key_op, tmp_path):
-        mock_key_op.add.return_value = _make_key("testkey")
+        mock_key_op.add.return_value = OperationResult(status="success", code="key.added", item=_make_key("testkey"))
         key_file = tmp_path / "id.pub"
         key_file.write_text("ssh-ed25519 AAAA test@host")
         result = runner.invoke(app, ["key", "add", "testkey", str(key_file)])
@@ -84,7 +102,7 @@ class TestKeyAdd:
 
     @patch("mvmctl.cli.key.KeyOperation")
     def test_add_overwrite_flag(self, mock_key_op, tmp_path):
-        mock_key_op.add.return_value = _make_key("testkey")
+        mock_key_op.add.return_value = OperationResult(status="success", code="key.added", item=_make_key("testkey"))
         key_file = tmp_path / "id.pub"
         key_file.write_text("ssh-ed25519 AAAA test@host")
         result = runner.invoke(
@@ -130,14 +148,14 @@ class TestKeyCreate:
 
     @patch("mvmctl.cli.key.KeyOperation")
     def test_create_success(self, mock_key_op):
-        mock_key_op.create.return_value = _make_key("newkey")
+        mock_key_op.create.return_value = OperationResult(status="success", code="key.created", item=_make_key("newkey"))
         result = runner.invoke(app, ["key", "create", "newkey"], input="1\n")
         assert result.exit_code == 0
         assert "created" in result.output.lower()
 
     @patch("mvmctl.cli.key.KeyOperation")
     def test_create_with_options(self, mock_key_op):
-        mock_key_op.create.return_value = _make_key("newkey")
+        mock_key_op.create.return_value = OperationResult(status="success", code="key.created", item=_make_key("newkey"))
         result = runner.invoke(
             app,
             [
@@ -169,14 +187,14 @@ class TestKeyRemove:
 
     @patch("mvmctl.cli.key.KeyOperation")
     def test_rm_success(self, mock_key_op):
-        mock_key_op.remove.return_value = None
+        mock_key_op.remove.return_value = BatchResult(items=[OperationResult(status="success", code="key.removed", message="Key removed")])
         result = runner.invoke(app, ["key", "rm", "testkey"])
         assert result.exit_code == 0
         assert "Removed" in result.output
 
     @patch("mvmctl.cli.key.KeyOperation")
     def test_rm_multiple(self, mock_key_op):
-        mock_key_op.remove.return_value = None
+        mock_key_op.remove.return_value = BatchResult(items=[OperationResult(status="success", code="key.removed", message="Key removed")])
         result = runner.invoke(app, ["key", "rm", "key1", "key2"])
         assert result.exit_code == 0
 
@@ -234,9 +252,10 @@ class TestKeyExport:
 
     @patch("mvmctl.cli.key.KeyOperation")
     def test_export_success(self, mock_key_op, tmp_path):
-        mock_key_op.export.return_value = (
-            tmp_path / "testkey",
-            tmp_path / "testkey.pub",
+        mock_key_op.export.return_value = OperationResult(
+            status="success",
+            code="key.exported",
+            item=(tmp_path / "testkey", tmp_path / "testkey.pub"),
         )
         result = runner.invoke(
             app, ["key", "export", "testkey", "--out", str(tmp_path)]
@@ -262,14 +281,14 @@ class TestKeySetDefault:
 
     @patch("mvmctl.cli.key.KeyOperation")
     def test_set_default_success(self, mock_key_op):
-        mock_key_op.set_default.return_value = None
+        mock_key_op.set_default.return_value = OperationResult(status='success', code='key.default_set', message='Default key(s) set')
         result = runner.invoke(app, ["key", "set-default", "mykey"])
         assert result.exit_code == 0
         assert "mykey" in result.output
 
     @patch("mvmctl.cli.key.KeyOperation")
     def test_set_default_clear(self, mock_key_op):
-        mock_key_op.clear_defaults.return_value = None
+        mock_key_op.clear_defaults.return_value = OperationResult(status='success', code='key.defaults_cleared', message='Defaults cleared')
         result = runner.invoke(app, ["key", "set-default", "--clear"])
         assert result.exit_code == 0
         assert "Cleared" in result.output

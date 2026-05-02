@@ -18,6 +18,7 @@ import pytest
 from mvmctl.api import SSHOperation, VMCreateInput, VMInput, VMOperation
 from mvmctl.api.inputs import SSHInput
 from mvmctl.exceptions import SSHError, VMNotFoundError
+from mvmctl.models.result import OperationResult
 from mvmctl.models import VMInstanceItem
 
 
@@ -76,7 +77,7 @@ class TestSSHConnect:
         assert vm.ipv4
 
         result = SSHOperation.connect(SSHInput(name="ssh-default-vm"))
-        assert result == 0
+        assert result.item == 0
         assert len(mocks["execvp_calls"]) == 1
         file, args = mocks["execvp_calls"][0]
         assert file == "ssh"
@@ -100,7 +101,7 @@ class TestSSHConnect:
         result = SSHOperation.connect(
             SSHInput(name="ssh-user-vm", user="ubuntu")
         )
-        assert result == 0
+        assert result.item == 0
         assert len(mocks["execvp_calls"]) == 1
         _file, args = mocks["execvp_calls"][0]
         assert f"ubuntu@{vm.ipv4}" in args
@@ -123,7 +124,7 @@ class TestSSHConnect:
         )
 
         result = SSHOperation.connect(SSHInput(name="ssh-key-vm", key=key_path))
-        assert result == 0
+        assert result.item == 0
         assert len(mocks["execvp_calls"]) == 1
         _file, args = mocks["execvp_calls"][0]
         assert "-i" in args
@@ -145,7 +146,7 @@ class TestSSHResolution:
         assert isinstance(vm, VMInstanceItem)
 
         result = SSHOperation.connect(SSHInput(name="ssh-name-vm"))
-        assert result == 0
+        assert result.item == 0
         assert len(mocks["execvp_calls"]) == 1
         _file, args = mocks["execvp_calls"][0]
         assert f"root@{vm.ipv4}" in args
@@ -164,15 +165,16 @@ class TestSSHResolution:
         assert len(vm.id) >= 6
 
         result = SSHOperation.connect(SSHInput(vm_id=vm.id[:6]))
-        assert result == 0
+        assert result.item == 0
         assert len(mocks["execvp_calls"]) == 1
         _file, args = mocks["execvp_calls"][0]
         assert f"root@{vm.ipv4}" in args
 
     def test_connect_nonexistent_vm(self) -> None:
-        """Connecting to a nonexistent VM raises VMNotFoundError."""
-        with pytest.raises(VMNotFoundError):
-            SSHOperation.connect(SSHInput(name="no-such-vm"))
+        """Connecting to a nonexistent VM returns error status."""
+        result = SSHOperation.connect(SSHInput(name="no-such-vm"))
+        assert isinstance(result, OperationResult)
+        assert result.status == "error"
 
 
 class TestSSHEdgeCases:
@@ -192,18 +194,18 @@ class TestSSHEdgeCases:
         vm = VMOperation.get(VMInput(identifiers=["ssh-bad-user-vm"]))
         assert isinstance(vm, VMInstanceItem)
 
-        with pytest.raises(SSHError):
-            SSHOperation.connect(
-                SSHInput(name="ssh-bad-user-vm", user="123invalid")
-            )
+        result = SSHOperation.connect(
+            SSHInput(name="ssh-bad-user-vm", user="123invalid")
+        )
+        assert isinstance(result, OperationResult)
+        assert result.status == "error"
 
         # os.execvp should never be called because validation fails before exec
         assert len(mocks["execvp_calls"]) == 0
 
     def test_connect_empty_identifiers(self) -> None:
-        """Connect with no VM identifiers raises SSHError."""
-        with pytest.raises(SSHError) as exc_info:
-            SSHOperation.connect(SSHInput())
-        assert "identifier" in str(exc_info.value).lower() or "--name" in str(
-            exc_info.value
-        )
+        """Connect with no VM identifiers returns error status."""
+        result = SSHOperation.connect(SSHInput())
+        assert isinstance(result, OperationResult)
+        assert result.status == "error"
+        assert "identifier" in result.message.lower() or "--name" in result.message

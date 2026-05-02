@@ -1,6 +1,7 @@
 """Tests for CLI config commands."""
 
 from __future__ import annotations
+from mvmctl.models.result import OperationResult
 
 from unittest.mock import patch
 
@@ -54,12 +55,12 @@ class TestConfigSet:
 
     @patch("mvmctl.cli.config.ConfigOperation")
     def test_set_value(self, mock_cfg_op):
-        mock_cfg_op.set.return_value = None
+        mock_cfg_op.set.return_value = OperationResult(status='success', code='config.set', message='Configuration updated')
         result = runner.invoke(
             app, ["config", "set", "defaults.vm", "network_interface", "eth0"]
         )
         assert result.exit_code == 0
-        assert "eth0" in result.output
+        assert "Configuration updated" in result.output
 
     @patch("mvmctl.cli.config.ConfigOperation")
     def test_set_invalid_key(self, mock_cfg_op):
@@ -107,7 +108,7 @@ class TestConfigReset:
 
     @patch("mvmctl.cli.config.ConfigOperation")
     def test_reset_key(self, mock_cfg_op):
-        mock_cfg_op.reset.return_value = 1
+        mock_cfg_op.reset.return_value = OperationResult(status="success", code="config.reset", item=1)
         result = runner.invoke(
             app, ["config", "reset", "defaults.vm", "network_interface"]
         )
@@ -116,13 +117,13 @@ class TestConfigReset:
 
     @patch("mvmctl.cli.config.ConfigOperation")
     def test_reset_category(self, mock_cfg_op):
-        mock_cfg_op.reset.return_value = 3
+        mock_cfg_op.reset.return_value = OperationResult(status="success", code="config.reset", item=3)
         result = runner.invoke(app, ["config", "reset", "defaults.vm"])
         assert result.exit_code == 0
 
     @patch("mvmctl.cli.config.ConfigOperation")
     def test_reset_all(self, mock_cfg_op):
-        mock_cfg_op.reset.return_value = 5
+        mock_cfg_op.reset.return_value = OperationResult(status="success", code="config.reset", item=5)
         result = runner.invoke(app, ["config", "reset", "--all"])
         assert result.exit_code == 0
 

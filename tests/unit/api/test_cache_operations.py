@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 from mvmctl.api.cache_operations import CacheOperation
 from mvmctl.models import CleanResult, PruneAllResult, VMStatus
+from mvmctl.models.result import OperationResult
 
 
 class TestCacheInitAll:
@@ -42,11 +43,11 @@ class TestCacheInitAll:
 
         result = CacheOperation.init_all()
 
-        assert "cache_dir" in result
-        assert "directories" in result
-        assert "guestfs_appliance" in result
-        assert "guestfs_kernel" in result
-        assert len(result["directories"]) == 6
+        assert "cache_dir" in result.item
+        assert "directories" in result.item
+        assert "guestfs_appliance" in result.item
+        assert "guestfs_kernel" in result.item
+        assert len(result.item["directories"]) == 6
         mock_guestfs.build_appliance.assert_called_once()
 
     def test_calls_on_progress(self, mocker):
@@ -79,7 +80,7 @@ class TestCacheInitAll:
         mock_kd.find_best_kernel.return_value = (Path("/vmlinuz"),)
 
         result = CacheOperation.init_all()
-        assert result["guestfs_appliance"] is None
+        assert result.item["guestfs_appliance"] is None
 
 
 class TestCachePruneVMs:
@@ -106,8 +107,7 @@ class TestCachePruneVMs:
         mock_vm_op = mocker.patch("mvmctl.api.vm_operations.VMOperation.remove")
 
         result = CacheOperation.prune_vms()
-
-        assert result == ["stopped-vm"]
+        assert result.item == ["stopped-vm"]
         mock_vm_op.assert_called_once()
 
     def test_prune_dry_run(self, mocker):
@@ -126,8 +126,7 @@ class TestCachePruneVMs:
         mock_vm_op = mocker.patch("mvmctl.api.vm_operations.VMOperation.remove")
 
         result = CacheOperation.prune_vms(dry_run=True)
-
-        assert result == ["stopped-vm"]
+        assert result.item == ["stopped-vm"]
         mock_vm_op.assert_not_called()
 
     def test_prune_include_all(self, mocker):
@@ -146,8 +145,7 @@ class TestCachePruneVMs:
         mock_vm_op = mocker.patch("mvmctl.api.vm_operations.VMOperation.remove")
 
         result = CacheOperation.prune_vms(include_all=True)
-
-        assert result == ["running-vm"]
+        assert result.item == ["running-vm"]
         mock_vm_op.assert_called_once()
 
     def test_prune_handles_remove_failure(self, mocker):
@@ -170,8 +168,7 @@ class TestCachePruneVMs:
         mock_logger = mocker.patch("mvmctl.api.cache_operations.logger")
 
         result = CacheOperation.prune_vms()
-
-        assert result == []
+        assert result.item == []
         mock_logger.warning.assert_called()
 
 
@@ -220,10 +217,10 @@ class TestCachePruneNetworks:
         mock_net_op = mocker.patch(
             "mvmctl.api.network_operations.NetworkOperation.remove"
         )
+        mock_net_op.return_value = OperationResult(status="success", code="network.removed")
 
         result = CacheOperation.prune_networks()
-
-        assert result == ["unused-net"]
+        assert result.item == ["unused-net"]
         mock_net_op.assert_called_once()
 
     def test_prune_networks_dry_run(self, mocker):
@@ -258,9 +255,10 @@ class TestCachePruneNetworks:
         mock_net_op = mocker.patch(
             "mvmctl.api.network_operations.NetworkOperation.remove"
         )
+        mock_net_op.return_value = OperationResult(status="success", code="network.removed")
 
         result = CacheOperation.prune_networks(dry_run=True)
-        assert result == ["unused-net"]
+        assert result.item == ["unused-net"]
         mock_net_op.assert_not_called()
 
 
@@ -302,8 +300,7 @@ class TestCachePruneImages:
         )
 
         result = CacheOperation.prune_images()
-
-        assert result == ["img-unused"]
+        assert result.item == ["img-unused"]
         mock_image_op.assert_called_once()
 
     def test_prune_images_dry_run(self, mocker):
@@ -330,7 +327,7 @@ class TestCachePruneImages:
         )
 
         result = CacheOperation.prune_images(dry_run=True)
-        assert result == ["img-unused"]
+        assert result.item == ["img-unused"]
         mock_image_op.assert_not_called()
 
 
@@ -364,7 +361,7 @@ class TestCachePruneKernels:
         )
 
         result = CacheOperation.prune_kernels()
-        assert result == ["kern-unused"]
+        assert result.item == ["kern-unused"]
         mock_kernel_op.assert_called_once()
 
 
@@ -393,7 +390,7 @@ class TestCachePruneBinaries:
         )
 
         result = CacheOperation.prune_binaries()
-        assert result == ["firecracker:1.14.0"]
+        assert result.item == ["firecracker:1.14.0"]
         mock_bin_op.assert_called_once()
 
 
@@ -416,7 +413,7 @@ class TestCachePruneMisc:
         )
 
         result = CacheOperation.prune_misc()
-        assert result == {
+        assert result.item == {
             "appliance": True,
             "warm_images": True,
             "guestfs_state": True,
@@ -429,28 +426,28 @@ class TestCachePruneAll:
     def test_prune_all_aggregates_results(self, mocker):
         """prune_all() aggregates results from all sub-prunes."""
         mocker.patch.object(
-            CacheOperation, "prune_vms", return_value=["vm1", "vm2"]
+            CacheOperation, "prune_vms", return_value=OperationResult(status="success", code="cache.pruned", item=["vm1", "vm2"])
         )
         mocker.patch.object(
-            CacheOperation, "prune_networks", return_value=["net1"]
+            CacheOperation, "prune_networks", return_value=OperationResult(status="success", code="cache.pruned", item=["net1"])
         )
         mocker.patch.object(
-            CacheOperation, "prune_images", return_value=["img1"]
+            CacheOperation, "prune_images", return_value=OperationResult(status="success", code="cache.pruned", item=["img1"])
         )
         mocker.patch.object(
-            CacheOperation, "prune_kernels", return_value=["kern1"]
+            CacheOperation, "prune_kernels", return_value=OperationResult(status="success", code="cache.pruned", item=["kern1"])
         )
         mocker.patch.object(
-            CacheOperation, "prune_binaries", return_value=["bin1"]
+            CacheOperation, "prune_binaries", return_value=OperationResult(status="success", code="cache.pruned", item=["bin1"])
         )
         mocker.patch.object(
             CacheOperation,
             "prune_misc",
-            return_value={
+            return_value=OperationResult(status="success", code="cache.pruned", item={
                 "appliance": True,
                 "warm_images": False,
                 "guestfs_state": True,
-            },
+            }),
         )
 
         mock_vm_repo = mocker.MagicMock()
@@ -462,16 +459,16 @@ class TestCachePruneAll:
 
         result = CacheOperation.prune_all()
 
-        assert isinstance(result, PruneAllResult)
-        assert result.had_running_vms is False
-        assert "vm1" in result.pruned_ids
-        assert "vm2" in result.pruned_ids
-        assert "net1" in result.pruned_ids
-        assert "img1" in result.pruned_ids
-        assert "kern1" in result.pruned_ids
-        assert "bin1" in result.pruned_ids
-        assert "appliance" in result.pruned_ids
-        assert "guestfs_state" in result.pruned_ids
+        assert isinstance(result, OperationResult)
+        assert result.item.had_running_vms is False
+        assert "vm1" in result.item.pruned_ids
+        assert "vm2" in result.item.pruned_ids
+        assert "net1" in result.item.pruned_ids
+        assert "img1" in result.item.pruned_ids
+        assert "kern1" in result.item.pruned_ids
+        assert "bin1" in result.item.pruned_ids
+        assert "appliance" in result.item.pruned_ids
+        assert "guestfs_state" in result.item.pruned_ids
 
     def test_prune_all_detects_running_vms(self, mocker):
         """prune_all() detects running VMs during the operation."""
@@ -485,23 +482,23 @@ class TestCachePruneAll:
             return_value=mock_vm_repo,
         )
 
-        mocker.patch.object(CacheOperation, "prune_vms", return_value=[])
-        mocker.patch.object(CacheOperation, "prune_networks", return_value=[])
-        mocker.patch.object(CacheOperation, "prune_images", return_value=[])
-        mocker.patch.object(CacheOperation, "prune_kernels", return_value=[])
-        mocker.patch.object(CacheOperation, "prune_binaries", return_value=[])
+        mocker.patch.object(CacheOperation, "prune_vms", return_value=OperationResult(status="success", code="cache.pruned", item=[]))
+        mocker.patch.object(CacheOperation, "prune_networks", return_value=OperationResult(status="success", code="cache.pruned", item=[]))
+        mocker.patch.object(CacheOperation, "prune_images", return_value=OperationResult(status="success", code="cache.pruned", item=[]))
+        mocker.patch.object(CacheOperation, "prune_kernels", return_value=OperationResult(status="success", code="cache.pruned", item=[]))
+        mocker.patch.object(CacheOperation, "prune_binaries", return_value=OperationResult(status="success", code="cache.pruned", item=[]))
         mocker.patch.object(
             CacheOperation,
             "prune_misc",
-            return_value={
+            return_value=OperationResult(status="success", code="cache.pruned", item={
                 "appliance": False,
                 "warm_images": False,
                 "guestfs_state": False,
-            },
+            }),
         )
 
         result = CacheOperation.prune_all()
-        assert result.had_running_vms is True
+        assert result.item.had_running_vms is True
 
 
 class TestCacheClean:
@@ -512,8 +509,12 @@ class TestCacheClean:
         mocker.patch.object(
             CacheOperation,
             "prune_all",
-            return_value=PruneAllResult(
-                pruned_ids=[], failed_ids=[], had_running_vms=False
+            return_value=OperationResult(
+                status="success",
+                code="cache.pruned",
+                item=PruneAllResult(
+                    pruned_ids=[], failed_ids=[], had_running_vms=False
+                ),
             ),
         )
         mock_host_op = mocker.patch(
@@ -530,7 +531,8 @@ class TestCacheClean:
 
         result = CacheOperation.clean()
 
-        assert isinstance(result, CleanResult)
-        assert result.cache_dir_removed is True
+        assert isinstance(result, OperationResult)
+        assert isinstance(result.item, CleanResult)
+        assert result.item.cache_dir_removed is True
         mock_host_op.assert_called_once()
         mock_rmtree.assert_called_once()

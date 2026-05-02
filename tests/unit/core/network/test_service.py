@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from unittest.mock import MagicMock
 
 import pytest
@@ -611,3 +612,794 @@ class TestEnsureInterfaceReady:
 
         with pytest.raises(NetworkError, match="no IPv4 address"):
             NetworkUtils.ensure_interface_ready("eth0")
+
+
+class TestNetworkServiceRemoveMvmChains:
+    """Tests for remove_mvm_chains()."""
+
+    def test_removes_all_chains_successfully(
+        self, repo: NetworkRepository, mocker
+    ) -> None:
+        """remove_mvm_chains() removes jump rules, flushes, deletes chains."""
+        mock_run = mocker.patch(
+            "subprocess.run", return_value=MagicMock(returncode=0)
+        )
+
+        service = NetworkService(repo)
+        service.remove_mvm_chains()
+
+        # 3 chains * 3 operations each (jump, flush, delete) = 9 calls
+        assert mock_run.call_count == 9
+
+    def test_tolerates_missing_jump_rules(
+        self, repo: NetworkRepository, mocker
+    ) -> None:
+        """remove_mvm_chains() tolerates -D failures for jump rules."""
+        call_count: list[int] = [0]
+
+        def _mock_run(cmd: list[str], **kwargs: object) -> MagicMock:
+            call_count[0] += 1
+            if call_count[0] in (1, 4, 7):
+                # -D jump rule fails
+                raise subprocess.CalledProcessError(1, cmd)
+            return MagicMock(returncode=0)
+
+        mocker.patch("subprocess.run", side_effect=_mock_run)
+
+        service = NetworkService(repo)
+        service.remove_mvm_chains()
+
+    def test_tolerates_flush_failures(
+        self, repo: NetworkRepository, mocker
+    ) -> None:
+        """remove_mvm_chains() tolerates -F failures."""
+        call_count: list[int] = [0]
+
+        def _mock_run(cmd: list[str], **kwargs: object) -> MagicMock:
+            call_count[0] += 1
+            if call_count[0] in (2, 5, 8):
+                # -F flush fails
+                raise subprocess.CalledProcessError(1, cmd)
+            return MagicMock(returncode=0)
+
+        mocker.patch("subprocess.run", side_effect=_mock_run)
+
+        service = NetworkService(repo)
+        service.remove_mvm_chains()
+
+    def test_tolerates_delete_failures(
+        self, repo: NetworkRepository, mocker
+    ) -> None:
+        """remove_mvm_chains() tolerates -X failures."""
+        call_count: list[int] = [0]
+
+        def _mock_run(cmd: list[str], **kwargs: object) -> MagicMock:
+            call_count[0] += 1
+            if call_count[0] in (3, 6, 9):
+                # -X delete fails
+                raise subprocess.CalledProcessError(1, cmd, stderr=b"error")
+            return MagicMock(returncode=0)
+
+        mocker.patch("subprocess.run", side_effect=_mock_run)
+
+        service = NetworkService(repo)
+        service.remove_mvm_chains()
+
+
+class TestNetworkServiceEnsureIpForwardingFallback:
+    """Tests for ensure_ip_forwarding() sysctl fallback."""
+
+    def test_falls_back_to_sysctl_when_proc_fails(
+        self, repo: NetworkRepository, mocker
+    ) -> None:
+        """ensure_ip_forwarding() falls back to sysctl when /proc write fails."""
+        mocker.patch(
+            "mvmctl.core.network._service.Path.write_text",
+            side_effect=OSError("Read-only filesystem"),
+        )
+        mock_run = mocker.patch(
+            "subprocess.run", return_value=MagicMock(returncode=0)
+        )
+
+        service = NetworkService(repo)
+        service.ensure_ip_forwarding()
+
+        mock_run.assert_called_once()
+        args = mock_run.call_args[0][0]
+        assert "sysctl" in args
+
+    def test_raises_when_sysctl_also_fails(
+        self, repo: NetworkRepository, mocker
+    ) -> None:
+        """ensure_ip_forwarding() raises NetworkError when both methods fail."""
+        mocker.patch(
+            "mvmctl.core.network._service.Path.write_text",
+            side_effect=OSError("Read-only filesystem"),
+        )
+        mocker.patch(
+            "subprocess.run",
+            side_effect=subprocess.CalledProcessError(
+                1, ["sysctl", "-w", "net.ipv4.ip_forward=1"]
+            ),
+        )
+
+        service = NetworkService(repo)
+        with pytest.raises(
+            NetworkError, match="Failed to enable IP forwarding"
+        ):
+            service.ensure_ip_forwarding()
+
+
+class TestNetworkServiceTapEdgeCases:
+    """Edge cases for ensure_tap() and remove_tap()."""
+
+    def test_ensure_tap_reattaches_without_previous_bridge(
+        self, repo: NetworkRepository, default_network, mocker
+    ) -> None:
+        """ensure_tap() attaches TAP when it exists but has no bridge."""
+        mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
+        mocker.patch.object(NetworkUtils, "tap_exists", return_value=True)
+        mocker.patch.object(NetworkUtils, "get_tap_bridge", return_value=None)
+        mock_batch = mocker.patch.object(NetworkUtils, "_run_batch")
+
+        service = NetworkService(repo)
+        service.ensure_tap(
+            "tap-vm1", "mvm-test-net", network_id=default_network.id
+        )
+
+        mock_batch.assert_called_once()
+        batch_input = mock_batch.call_args[0][0]
+        assert "link set tap-vm1 master mvm-test-net" in batch_input
+
+    def test_ensure_tap_rolls_back_on_second_rule_failure(
+        self, repo: NetworkRepository, default_network, mocker
+    ) -> None:
+        """ensure_tap() removes first rule when second ensure_rule fails."""
+        mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
+        mocker.patch.object(NetworkUtils, "tap_exists", return_value=False)
+        mocker.patch.object(NetworkUtils, "_run_batch")
+
+        call_count: list[int] = [0]
+        mock_remove = mocker.patch(
+            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.remove_rule",
+        )
+
+        def _ensure_rule_side(*args: object, **kwargs: object) -> MagicMock:
+            call_count[0] += 1
+            result = MagicMock()
+            if call_count[0] == 1:
+                result.success = True
+            else:
+                result.success = False
+                result.error_message = "iptables failed"
+            return result
+
+        mocker.patch(
+            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.ensure_rule",
+            side_effect=_ensure_rule_side,
+        )
+
+        service = NetworkService(repo)
+        with pytest.raises(
+            NetworkError, match="Failed to add FORWARD rule for TAP"
+        ):
+            service.ensure_tap(
+                "tap-vm1", "mvm-test-net", network_id=default_network.id
+            )
+
+        # Should have called remove_rule to roll back the first rule
+        mock_remove.assert_called_once()
+
+    def test_remove_tap_no_bridge_detected(
+        self, repo: NetworkRepository, default_network, mocker
+    ) -> None:
+        """remove_tap() skips rule cleanup when bridge can't be detected."""
+        mocker.patch.object(NetworkUtils, "tap_exists", return_value=True)
+        mocker.patch.object(NetworkUtils, "get_tap_bridge", return_value=None)
+        mock_batch = mocker.patch.object(NetworkUtils, "_run_batch")
+        mock_remove = mocker.patch(
+            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.remove_rule",
+        )
+
+        service = NetworkService(repo)
+        service.remove_tap("tap-vm1", network_id=default_network.id)
+
+        mock_remove.assert_not_called()
+        mock_batch.assert_called_once()
+
+    def test_remove_tap_logs_warning_on_rule_failure(
+        self, repo: NetworkRepository, default_network, mocker
+    ) -> None:
+        """remove_tap() logs warning when remove_rule fails but still deletes TAP."""
+        mocker.patch.object(NetworkUtils, "tap_exists", return_value=True)
+        mocker.patch.object(
+            NetworkUtils, "get_tap_bridge", return_value="mvm-test-net"
+        )
+        mock_batch = mocker.patch.object(NetworkUtils, "_run_batch")
+        mocker.patch(
+            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.remove_rule",
+            return_value=MagicMock(success=False, error_message="not found"),
+        )
+
+        service = NetworkService(repo)
+        service.remove_tap(
+            "tap-vm1", "mvm-test-net", network_id=default_network.id
+        )
+
+        mock_batch.assert_called_once()
+
+    def test_remove_tap_raises_on_batch_failure(
+        self, repo: NetworkRepository, default_network, mocker
+    ) -> None:
+        """remove_tap() raises NetworkError when link delete fails."""
+        mocker.patch.object(NetworkUtils, "tap_exists", return_value=True)
+        mocker.patch.object(
+            NetworkUtils, "get_tap_bridge", return_value="mvm-test-net"
+        )
+        mocker.patch(
+            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.remove_rule",
+            return_value=MagicMock(success=True),
+        )
+        mocker.patch.object(
+            NetworkUtils,
+            "_run_batch",
+            side_effect=subprocess.CalledProcessError(1, ["ip", "-batch", "-"]),
+        )
+
+        service = NetworkService(repo)
+        with pytest.raises(NetworkError, match="Failed to remove TAP"):
+            service.remove_tap(
+                "tap-vm1", "mvm-test-net", network_id=default_network.id
+            )
+
+
+class TestNetworkServiceNatEdgeCases:
+    """Edge cases for remove_nat()."""
+
+    def test_remove_nat_raises_when_db_lookup_fails(
+        self, repo: NetworkRepository, mocker
+    ) -> None:
+        """remove_nat() raises NetworkError when subnet and gateways can't be resolved."""
+        mocker.patch.object(NetworkUtils, "get_bridge_taps", return_value=[])
+        mocker.patch.object(NetworkUtils, "bridge_exists", return_value=False)
+
+        service = NetworkService(repo)
+        with pytest.raises(
+            NetworkError, match="Could not determine NAT gateways"
+        ):
+            service.remove_nat(
+                "nonexistent-bridge",
+                network_id="net-001",
+                force=True,
+            )
+
+    def test_remove_nat_raises_when_gateways_missing(
+        self, repo: NetworkRepository, mocker
+    ) -> None:
+        """remove_nat() raises NetworkError when gateways not resolved."""
+
+        class _FakeFailingResolver:
+            def by_name(self, _name: str) -> NetworkItem:
+                raise ValueError("Network not found in database")
+
+        mocker.patch.object(NetworkUtils, "get_bridge_taps", return_value=[])
+        mocker.patch(
+            "mvmctl.core.network._resolver.NetworkResolver",
+            return_value=_FakeFailingResolver(),
+        )
+
+        service = NetworkService(repo)
+        with pytest.raises(
+            NetworkError, match="Could not determine NAT gateways"
+        ):
+            service.remove_nat(
+                "no-gw-bridge",
+                network_id="net-001",
+                force=True,
+            )
+
+    def test_remove_nat_logs_warning_on_failed_rule_removal(
+        self, repo: NetworkRepository, default_network, mocker
+    ) -> None:
+        """remove_nat() logs warning when individual remove_rule fails."""
+        mocker.patch.object(NetworkUtils, "get_bridge_taps", return_value=[])
+        mocker.patch(
+            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.remove_rule",
+            return_value=MagicMock(success=False, error_message="not found"),
+        )
+
+        service = NetworkService(repo)
+        # Should not raise, just log warning
+        service.remove_nat(
+            "mvm-test-net",
+            ["eth0"],
+            subnet="10.0.0.0/24",
+            network_id=default_network.id,
+            force=True,
+        )
+
+    def test_remove_nat_with_subnet_none_gateways_none(
+        self, repo: NetworkRepository, default_network, mocker
+    ) -> None:
+        """remove_nat() resolves from DB when both subnet and gateways are None."""
+        from mvmctl.core.network._resolver import NetworkResolver
+
+        mocker.patch.object(NetworkUtils, "get_bridge_taps", return_value=[])
+        mock_resolver = mocker.patch.object(
+            NetworkResolver, "by_name", return_value=default_network
+        )
+        mock_remove = mocker.patch(
+            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.remove_rule",
+            return_value=MagicMock(success=True),
+        )
+
+        service = NetworkService(repo)
+        service.remove_nat(
+            "test-net",
+            network_id=default_network.id,
+            force=True,
+        )
+
+        mock_resolver.assert_called_once_with("test-net")
+        assert mock_remove.call_count == 3  # 3 rules per gateway
+
+    def test_remove_nat_force_with_taps_present(
+        self, repo: NetworkRepository, default_network, mocker
+    ) -> None:
+        """remove_nat() with force=True removes NAT even with attached TAPs."""
+        mocker.patch.object(
+            NetworkUtils, "get_bridge_taps", return_value=["tap-vm1"]
+        )
+        mocker.patch(
+            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.remove_rule",
+            return_value=MagicMock(success=True),
+        )
+
+        service = NetworkService(repo)
+        service.remove_nat(
+            "mvm-test-net",
+            ["eth0"],
+            subnet="10.0.0.0/24",
+            network_id=default_network.id,
+            force=True,
+        )
+
+
+class TestNetworkServiceRemove:
+    """Tests for remove() and remove_many()."""
+
+    def test_remove_calls_remove_nat_and_bridge(
+        self, repo: NetworkRepository, default_network, mocker
+    ) -> None:
+        """remove() calls remove_nat, remove_bridge, and controller.remove."""
+        mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
+        mocker.patch.object(NetworkUtils, "get_bridge_taps", return_value=[])
+        mock_remove_nat = mocker.patch.object(
+            NetworkService, "remove_nat", autospec=True
+        )
+        mock_remove_bridge = mocker.patch.object(
+            NetworkService, "remove_bridge", autospec=True
+        )
+        mock_controller = mocker.patch(
+            "mvmctl.core.network._controller.NetworkController"
+        )
+
+        service = NetworkService(repo)
+        service.remove(default_network)
+
+        mock_remove_nat.assert_called_once()
+        mock_remove_bridge.assert_called_once()
+        mock_controller.return_value.remove.assert_called_once_with(force=False)
+
+    def test_remove_tolerates_nat_failure(
+        self, repo: NetworkRepository, default_network, mocker
+    ) -> None:
+        """remove() continues with bridge removal even if NAT fails."""
+        mocker.patch.object(
+            NetworkService,
+            "remove_nat",
+            side_effect=NetworkError("NAT failed"),
+            autospec=True,
+        )
+        mocker.patch.object(NetworkService, "remove_bridge", autospec=True)
+        mocker.patch("mvmctl.core.network._controller.NetworkController")
+
+        service = NetworkService(repo)
+        service.remove(default_network)
+
+    def test_remove_tolerates_bridge_failure(
+        self, repo: NetworkRepository, default_network, mocker
+    ) -> None:
+        """remove() continues with controller.remove even if bridge removal fails."""
+        mocker.patch.object(
+            NetworkService,
+            "remove_nat",
+            autospec=True,
+        )
+        mocker.patch.object(
+            NetworkService,
+            "remove_bridge",
+            side_effect=NetworkError("Bridge failed"),
+            autospec=True,
+        )
+        mock_controller = mocker.patch(
+            "mvmctl.core.network._controller.NetworkController"
+        )
+
+        service = NetworkService(repo)
+        service.remove(default_network)
+
+        mock_controller.return_value.remove.assert_called_once_with(force=False)
+
+    def test_remove_with_nat_disabled(
+        self, repo: NetworkRepository, mocker
+    ) -> None:
+        """remove() skips NAT when nat_enabled is False."""
+        network_no_nat = NetworkItem(
+            id="net-no-nat",
+            name="test-no-nat",
+            subnet="10.1.0.0/24",
+            bridge="mvm-no-nat",
+            ipv4_gateway="10.1.0.1",
+            bridge_active=True,
+            nat_enabled=False,
+            is_default=False,
+            is_present=True,
+            created_at="2026-01-01T00:00:00Z",
+            updated_at="2026-01-01T00:00:00Z",
+        )
+        mocker.patch.object(NetworkUtils, "get_bridge_taps", return_value=[])
+        mock_remove_nat = mocker.patch.object(
+            NetworkService, "remove_nat", autospec=True
+        )
+        mocker.patch.object(NetworkService, "remove_bridge", autospec=True)
+        mocker.patch("mvmctl.core.network._controller.NetworkController")
+
+        service = NetworkService(repo)
+        service.remove(network_no_nat)
+
+        mock_remove_nat.assert_not_called()
+
+    def test_remove_many_removes_all(
+        self, repo: NetworkRepository, default_network, mocker
+    ) -> None:
+        """remove_many() removes all provided networks."""
+        mocker.patch.object(NetworkService, "remove", autospec=True)
+
+        net2 = NetworkItem(
+            id="net-002",
+            name="test-net-2",
+            subnet="10.2.0.0/24",
+            bridge="mvm-test-net-2",
+            ipv4_gateway="10.2.0.1",
+            bridge_active=True,
+            nat_enabled=False,
+            is_default=False,
+            is_present=True,
+            created_at="2026-01-01T00:00:00Z",
+            updated_at="2026-01-01T00:00:00Z",
+        )
+
+        service = NetworkService(repo)
+        service.remove_many([default_network, net2], force=True)
+
+        assert service.remove.call_count == 2  # type: ignore[attr-defined]
+
+
+class TestNetworkServiceDetectIptablesBackend:
+    """Tests for detect_iptables_backend_conflict()."""
+
+    def test_detect_no_conflict(self, repo: NetworkRepository, mocker) -> None:
+        """detect_iptables_backend_conflict() returns (False, msg) when no conflict."""
+        mocker.patch.object(
+            NetworkUtils,
+            "detect_iptables_backend_conflict",
+            return_value=(
+                False,
+                "All iptables rules use the same backend (nft).",
+            ),
+        )
+
+        service = NetworkService(repo)
+        has_conflict, msg = service.detect_iptables_backend_conflict()
+
+        assert has_conflict is False
+        assert "same backend" in msg
+
+    def test_detect_conflict(self, repo: NetworkRepository, mocker) -> None:
+        """detect_iptables_backend_conflict() returns (True, msg) when conflict exists."""
+        mocker.patch.object(
+            NetworkUtils,
+            "detect_iptables_backend_conflict",
+            return_value=(True, "Mixed iptables backends detected"),
+        )
+
+        service = NetworkService(repo)
+        has_conflict, msg = service.detect_iptables_backend_conflict()
+
+        assert has_conflict is True
+        assert "Mixed" in msg
+
+
+class TestNetworkServiceSyncIptables:
+    """Tests for sync_iptables_rules() and _count_orphaned_rules()."""
+
+    def test_sync_iptables_verifies_existing_rules(
+        self, repo: NetworkRepository, default_network, mocker
+    ) -> None:
+        """sync_iptables_rules() verifies existing DB rules."""
+        mocker.patch(
+            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.ensure_rule",
+            return_value=MagicMock(success=True, command_executed=None),
+        )
+        mocker.patch.object(
+            NetworkService, "_count_orphaned_rules", return_value=0
+        )
+
+        # Insert a DB rule
+        from mvmctl.models import (
+            IPTablesChain,
+            IPTablesPort,
+            IPTablesProtocol,
+            IPTablesRuleItem,
+            IPTablesRuleType,
+            IPTablesTable,
+            IPTablesTarget,
+            IPTablesWildcard,
+        )
+
+        db_rule = IPTablesRuleItem(
+            table_name=IPTablesTable.FILTER,
+            chain_name=IPTablesChain.MVM_FORWARD,
+            rule_type=IPTablesRuleType.FORWARD_IN,
+            protocol=IPTablesProtocol.ALL,
+            source=IPTablesWildcard.ANY_CIDR,
+            destination=IPTablesWildcard.ANY_CIDR,
+            in_interface=IPTablesWildcard.ANY_INTERFACE,
+            out_interface=IPTablesWildcard.ANY_INTERFACE,
+            target=IPTablesTarget.ACCEPT,
+            sport=IPTablesPort.ANY,
+            dport=IPTablesPort.ANY,
+            network_id=default_network.id,
+            is_active=True,
+            network_name=default_network.name,
+            comment_tag="mvm:test:sync",
+        )
+        service = NetworkService(repo)
+        service._iptables_repo.insert(db_rule)
+
+        result = service.sync_iptables_rules(default_network)
+
+        assert result["verified"] >= 1
+        assert result["added"] == 0
+        assert result["orphaned"] == 0
+
+    def test_sync_iptables_adds_missing_rules(
+        self, repo: NetworkRepository, default_network, mocker
+    ) -> None:
+        """sync_iptables_rules() adds rules that need to be created."""
+        mocker.patch(
+            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.ensure_rule",
+            return_value=MagicMock(
+                success=True, command_executed=["iptables", "-A"]
+            ),
+        )
+        mocker.patch.object(
+            NetworkService, "_count_orphaned_rules", return_value=0
+        )
+
+        from mvmctl.models import (
+            IPTablesChain,
+            IPTablesPort,
+            IPTablesProtocol,
+            IPTablesRuleItem,
+            IPTablesRuleType,
+            IPTablesTable,
+            IPTablesTarget,
+            IPTablesWildcard,
+        )
+
+        db_rule = IPTablesRuleItem(
+            table_name=IPTablesTable.FILTER,
+            chain_name=IPTablesChain.MVM_FORWARD,
+            rule_type=IPTablesRuleType.FORWARD_IN,
+            protocol=IPTablesProtocol.ALL,
+            source=IPTablesWildcard.ANY_CIDR,
+            destination=IPTablesWildcard.ANY_CIDR,
+            in_interface=IPTablesWildcard.ANY_INTERFACE,
+            out_interface=IPTablesWildcard.ANY_INTERFACE,
+            target=IPTablesTarget.ACCEPT,
+            sport=IPTablesPort.ANY,
+            dport=IPTablesPort.ANY,
+            network_id=default_network.id,
+            is_active=True,
+            network_name=default_network.name,
+            comment_tag="mvm:test:add",
+        )
+        service = NetworkService(repo)
+        service._iptables_repo.insert(db_rule)
+
+        result = service.sync_iptables_rules(default_network)
+
+        assert result["added"] >= 1
+        assert result["verified"] == 0
+
+    def test_count_orphaned_rules_no_iptables_save(
+        self, repo: NetworkRepository, default_network, mocker
+    ) -> None:
+        """_count_orphaned_rules() returns 0 when iptables-save fails."""
+        mocker.patch(
+            "subprocess.run",
+            side_effect=subprocess.CalledProcessError(1, ["iptables-save"]),
+        )
+
+        service = NetworkService(repo)
+        count = service._count_orphaned_rules(default_network, [])
+
+        assert count == 0
+
+    def test_count_orphaned_rules_no_iptables_save_binary(
+        self, repo: NetworkRepository, default_network, mocker
+    ) -> None:
+        """_count_orphaned_rules() returns 0 when iptables-save not found."""
+        mocker.patch(
+            "subprocess.run",
+            side_effect=FileNotFoundError("iptables-save not found"),
+        )
+
+        service = NetworkService(repo)
+        count = service._count_orphaned_rules(default_network, [])
+
+        assert count == 0
+
+    def test_count_orphaned_rules_detects_orphans(
+        self, repo: NetworkRepository, default_network, mocker
+    ) -> None:
+        """_count_orphaned_rules() counts rules in iptables-save without DB match."""
+        iptables_save_output = (
+            "*filter\n"
+            "-A MVM-FORWARD -s 10.0.0.0/24 -j ACCEPT -m comment --comment mvm:forward_in:test-net:orphaned\n"
+            "-A MVM-FORWARD -s 10.0.0.0/24 -j ACCEPT -m comment --comment mvm:forward_in:test-net:existing\n"
+            "COMMIT\n"
+        )
+        mocker.patch(
+            "subprocess.run",
+            return_value=MagicMock(
+                returncode=0, stdout=iptables_save_output, stderr=""
+            ),
+        )
+
+        from mvmctl.models import IPTablesRuleItem
+
+        existing_rule = IPTablesRuleItem(
+            table_name=None,  # type: ignore[arg-type]
+            chain_name=None,  # type: ignore[arg-type]
+            rule_type=None,  # type: ignore[arg-type]
+            protocol=None,  # type: ignore[arg-type]
+            source="",
+            destination="",
+            in_interface="",
+            out_interface="",
+            target=None,  # type: ignore[arg-type]
+            sport=0,
+            dport=0,
+            network_id="",
+            is_active=True,
+            comment_tag="mvm:forward_in:test-net:existing",
+        )
+
+        service = NetworkService(repo)
+        count = service._count_orphaned_rules(default_network, [existing_rule])
+
+        assert count == 1
+
+    def test_count_orphaned_rules_skips_non_mvm_lines(
+        self, repo: NetworkRepository, default_network, mocker
+    ) -> None:
+        """_count_orphaned_rules() ignores non-MVM prefix lines."""
+        iptables_save_output = (
+            "*filter\n"
+            "-A INPUT -s 10.0.0.0/24 -j ACCEPT\n"
+            "-A FORWARD -s 10.0.0.0/24 -j ACCEPT\n"
+            "COMMIT\n"
+        )
+        mocker.patch(
+            "subprocess.run",
+            return_value=MagicMock(
+                returncode=0, stdout=iptables_save_output, stderr=""
+            ),
+        )
+
+        service = NetworkService(repo)
+        count = service._count_orphaned_rules(default_network, [])
+
+        assert count == 0
+
+
+class TestNetworkServiceReconcileEdgeCases:
+    """Edge cases for ensure_bridge reconcile path."""
+
+    def test_ensure_bridge_reconcile_failure(
+        self, repo: NetworkRepository, mocker
+    ) -> None:
+        """ensure_bridge() raises NetworkError when reconcile batch fails."""
+        mocker.patch.object(NetworkUtils, "bridge_exists", return_value=True)
+        mocker.patch.object(
+            NetworkUtils, "bridge_has_subnet", return_value=False
+        )
+        mocker.patch.object(
+            NetworkUtils,
+            "_run_batch",
+            side_effect=subprocess.CalledProcessError(1, ["ip", "-batch", "-"]),
+        )
+
+        service = NetworkService(repo)
+        with pytest.raises(NetworkError, match="Failed to setup bridge"):
+            service.ensure_bridge("mvm-test-net", "10.0.0.1/24")
+
+    def test_ensure_nat_forward_out_failure(
+        self, repo: NetworkRepository, default_network, mocker
+    ) -> None:
+        """ensure_nat() raises NetworkError when FORWARD_OUT rule fails."""
+        mocker.patch(
+            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.ensure_chain"
+        )
+        call_count: list[int] = [0]
+
+        def _ensure_rule_side(*args: object, **kwargs: object) -> MagicMock:
+            call_count[0] += 1
+            result = MagicMock()
+            if call_count[0] in (1,):
+                result.success = True
+                result.error_message = None
+            else:
+                result.success = False
+                result.error_message = "iptables forward out failed"
+            return result
+
+        mocker.patch(
+            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.ensure_rule",
+            side_effect=_ensure_rule_side,
+        )
+
+        service = NetworkService(repo)
+        with pytest.raises(NetworkError, match="Failed to add FORWARD out"):
+            service.ensure_nat(
+                "mvm-test-net",
+                ["eth0"],
+                subnet="10.0.0.0/24",
+                network_id=default_network.id,
+            )
+
+    def test_ensure_nat_forward_in_failure(
+        self, repo: NetworkRepository, default_network, mocker
+    ) -> None:
+        """ensure_nat() raises NetworkError when FORWARD_IN rule fails."""
+        mocker.patch(
+            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.ensure_chain"
+        )
+        call_count: list[int] = [0]
+
+        def _ensure_rule_side(*args: object, **kwargs: object) -> MagicMock:
+            call_count[0] += 1
+            result = MagicMock()
+            if call_count[0] in (1, 2):
+                result.success = True
+            else:
+                result.success = False
+                result.error_message = "iptables forward in failed"
+            return result
+
+        mocker.patch(
+            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.ensure_rule",
+            side_effect=_ensure_rule_side,
+        )
+
+        service = NetworkService(repo)
+        with pytest.raises(NetworkError, match="Failed to add FORWARD in"):
+            service.ensure_nat(
+                "mvm-test-net",
+                ["eth0"],
+                subnet="10.0.0.0/24",
+                network_id=default_network.id,
+            )

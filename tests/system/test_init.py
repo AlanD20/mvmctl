@@ -32,3 +32,53 @@ class TestInitWizard:
             phrase in output
             for phrase in ("Host ready", "Setup Wizard", "success")
         )
+
+    def test_init_idempotent(self, mvm_binary):
+        """Run init twice — both invocations should succeed.
+
+        Verifies that init is safe to run when everything is already
+        set up (idempotent).
+        """
+        args = ("init", "--non-interactive", "--skip-host")
+
+        first = _run_mvm(mvm_binary, *args, check=False)
+        assert first.returncode == 0, (
+            f"First init failed (rc={first.returncode})\n"
+            f"stdout: {first.stdout}\n"
+            f"stderr: {first.stderr}"
+        )
+
+        second = _run_mvm(mvm_binary, *args, check=False)
+        assert second.returncode == 0, (
+            f"Second init failed (rc={second.returncode})\n"
+            f"stdout: {second.stdout}\n"
+            f"stderr: {second.stderr}"
+        )
+
+    def test_init_abort_on_sudo_needed(self, mvm_binary):
+        """Run init without --skip-host non-interactively.
+
+        Host setup requires sudo which cannot be obtained in
+        non-interactive mode.  The CLI should exit cleanly
+        with a useful error message rather than hanging.
+        """
+        result = _run_mvm(
+            mvm_binary,
+            "init",
+            "--non-interactive",
+            check=False,
+        )
+
+        # Must exit non-zero — host init cannot proceed without sudo.
+        assert result.returncode != 0, (
+            f"Expected non-zero exit, got rc={result.returncode}\n"
+            f"stdout: {result.stdout}\n"
+            f"stderr: {result.stderr}"
+        )
+
+        output = result.stdout + result.stderr
+        lower = output.lower()
+        assert any(
+            keyword in lower
+            for keyword in ("sudo", "root", "host init", "privilege")
+        ), f"Missing error guidance in output:\n{output}"

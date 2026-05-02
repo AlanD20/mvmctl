@@ -54,6 +54,7 @@ class TestRelationEnricher:
             type="elf",
             path="/k",
             is_default=False,
+            is_present=True,
             created_at=_ts(),
             updated_at=_ts(),
         )
@@ -84,6 +85,7 @@ class TestRelationEnricher:
             ipv4_gateway="10.0.0.1",
             bridge_active=False,
             nat_enabled=False,
+            is_present=True,
             is_default=False,
             created_at=_ts(),
             updated_at=_ts(),
@@ -136,7 +138,7 @@ class TestRelationEnricher:
         vms = [vm]
         from mvmctl.core.vm._resolver import VMResolver
 
-        enricher.enrich(vms, ["image"], VMResolver.RELATIONS, db)
+        enricher.enrich(vms, ["image"], VMResolver.RELATIONS)
 
         assert vms[0].image is not None
         assert vms[0].image.id == image.id
@@ -160,6 +162,7 @@ class TestRelationEnricher:
             type="elf",
             path="/k",
             is_default=False,
+            is_present=True,
             created_at=_ts(),
             updated_at=_ts(),
         )
@@ -206,6 +209,7 @@ class TestRelationEnricher:
             ipv4_gateway="10.0.0.1",
             bridge_active=False,
             nat_enabled=False,
+            is_present=True,
             is_default=False,
             created_at=_ts(),
             updated_at=_ts(),
@@ -286,7 +290,7 @@ class TestRelationEnricher:
         vms = [vm1, vm2]
         from mvmctl.core.vm._resolver import VMResolver
 
-        enricher.enrich(vms, ["image"], VMResolver.RELATIONS, db)
+        enricher.enrich(vms, ["image"], VMResolver.RELATIONS)
 
         assert vms[0].image is not None
         assert vms[0].image.id == img1.id
@@ -312,6 +316,7 @@ class TestRelationEnricher:
             type="elf",
             path="/k",
             is_default=False,
+            is_present=True,
             created_at=_ts(),
             updated_at=_ts(),
         )
@@ -342,6 +347,7 @@ class TestRelationEnricher:
             ipv4_gateway="10.0.0.1",
             bridge_active=False,
             nat_enabled=False,
+            is_present=True,
             is_default=False,
             created_at=_ts(),
             updated_at=_ts(),
@@ -394,7 +400,7 @@ class TestRelationEnricher:
         images = [image]
         from mvmctl.core.image._resolver import ImageResolver
 
-        enricher.enrich(images, ["vm"], ImageResolver.RELATIONS, db)
+        enricher.enrich(images, ["vm"], ImageResolver.RELATIONS)
 
         assert images[0].vms is not None
         assert isinstance(images[0].vms, list)
@@ -423,6 +429,7 @@ class TestRelationEnricher:
             type="elf",
             path="/k",
             is_default=False,
+            is_present=True,
             created_at=_ts(),
             updated_at=_ts(),
         )
@@ -469,6 +476,7 @@ class TestRelationEnricher:
             ipv4_gateway="10.0.0.1",
             bridge_active=False,
             nat_enabled=False,
+            is_present=True,
             is_default=False,
             created_at=_ts(),
             updated_at=_ts(),
@@ -562,7 +570,7 @@ class TestRelationEnricher:
         images = [img1, img2]
         from mvmctl.core.image._resolver import ImageResolver
 
-        enricher.enrich(images, ["vm"], ImageResolver.RELATIONS, db)
+        enricher.enrich(images, ["vm"], ImageResolver.RELATIONS)
 
         assert len(batch_calls) == 1
         assert sorted(batch_calls[0]) == sorted([img1.id, img2.id])
@@ -593,6 +601,7 @@ class TestRelationEnricher:
             type="elf",
             path="/k",
             is_default=False,
+            is_present=True,
             created_at=_ts(),
             updated_at=_ts(),
         )
@@ -623,6 +632,7 @@ class TestRelationEnricher:
             ipv4_gateway="10.0.0.1",
             bridge_active=False,
             nat_enabled=False,
+            is_present=True,
             is_default=False,
             created_at=_ts(),
             updated_at=_ts(),
@@ -681,7 +691,7 @@ class TestRelationEnricher:
         from mvmctl.core.vm._resolver import VMResolver
 
         enricher.enrich(
-            vms, ["network", "network.leases"], VMResolver.RELATIONS, db
+            vms, ["network", "network.leases"], VMResolver.RELATIONS
         )
 
         assert vms[0].network is not None
@@ -696,7 +706,7 @@ class TestRelationEnricher:
         from mvmctl.core.vm._resolver import VMResolver
 
         with pytest.raises(ValueError, match="Unknown relation 'foo'"):
-            enricher.enrich([], ["foo"], VMResolver.RELATIONS, None)
+            enricher.enrich([], ["foo"], VMResolver.RELATIONS)
 
     def test_enrich_empty_fk_values(
         self, db: Database, enricher: RelationEnricher
@@ -732,7 +742,7 @@ class TestRelationEnricher:
         vms = [vm]
         from mvmctl.core.vm._resolver import VMResolver
 
-        enricher.enrich(vms, ["image"], VMResolver.RELATIONS, db)
+        enricher.enrich(vms, ["image"], VMResolver.RELATIONS)
         assert vms[0].image is None
 
     def test_enrich_no_include(
@@ -769,5 +779,5 @@ class TestRelationEnricher:
         vms = [vm]
         from mvmctl.core.vm._resolver import VMResolver
 
-        enricher.enrich(vms, [], VMResolver.RELATIONS, db)
+        enricher.enrich(vms, [], VMResolver.RELATIONS)
         assert vms[0].image is None

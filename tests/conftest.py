@@ -2,9 +2,19 @@ import os
 import shutil
 import subprocess
 import time
+import warnings
 from pathlib import Path
 
 import pytest
+
+# Suppress harmless ResourceWarning from mock objects holding sqlite3.Connection
+# references at GC time. The connections are properly closed by Database.connect()
+# context manager — this is a CPython GC ordering artifact, not a real leak.
+warnings.filterwarnings(
+    "ignore",
+    message="unclosed database",
+    category=ResourceWarning,
+)
 
 from tests.helpers.paths import make_test_paths
 
@@ -15,8 +25,10 @@ def isolate_config_and_cache(request, tmp_path: Path, monkeypatch: pytest.Monkey
 
     Skipped for system tests (marked with @pytest.mark.system).
     """
-    # Skip isolation for system tests
+    # Skip isolation for system tests — must yield even when skipping
+    # because pytest requires generator fixtures to yield at least once.
     if request.node.get_closest_marker("system"):
+        yield
         return
 
     paths = make_test_paths(tmp_path)

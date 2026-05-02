@@ -12,8 +12,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from mvmctl.api import NetworkCreateInput, NetworkInput, NetworkOperation
-from mvmctl.api.network_operations import NetworkCreateResult
 from mvmctl.exceptions import NetworkError, NetworkNotFoundError
+from mvmctl.models.result import OperationResult
 from mvmctl.models.network import (
     IPTablesRuleItem,
     NetworkItem,
@@ -62,11 +62,12 @@ class TestNetworkLifecycleWorkflow:
         result = NetworkOperation.create(
             NetworkCreateInput(name="testnet", subnet="10.0.0.0/24")
         )
-        assert isinstance(result, NetworkCreateResult)
-        assert isinstance(result.result, NetworkItem)
-        assert result.result.name == "testnet"
-        assert result.result.subnet == "10.0.0.0/24"
-        assert result.result.ipv4_gateway == "10.0.0.1"
+        assert isinstance(result, OperationResult)
+        assert result.status == "success"
+        assert isinstance(result.item, NetworkItem)
+        assert result.item.name == "testnet"
+        assert result.item.subnet == "10.0.0.0/24"
+        assert result.item.ipv4_gateway == "10.0.0.1"
 
         networks = NetworkOperation.list_all()
         assert any(n.name == "testnet" for n in networks)
@@ -115,9 +116,10 @@ class TestNetworkLifecycleWorkflow:
     def test_create_default_network(self) -> None:
         """Test creating the default network."""
         network = NetworkOperation.create_default_network()
-        assert isinstance(network, NetworkItem)
-        assert network.is_default
-        assert network.name == "net"
+        assert isinstance(network, OperationResult)
+        assert network.status == "success"
+        assert network.item.is_default
+        assert network.item.name == "net"
 
     def test_network_with_leases(self) -> None:
         """Test that a created network has correctly populated fields."""
@@ -178,7 +180,7 @@ class TestNetworkWorkflowEdgeCases:
                 ipv4_gateway="10.99.0.254",
             )
         )
-        assert result.result.ipv4_gateway == "10.99.0.254"
+        assert result.item.ipv4_gateway == "10.99.0.254"
 
 
 class TestNetworkForceRemoval:
@@ -267,8 +269,9 @@ class TestNetworkDefaultBehavior:
         """Remove the default network and verify no default remains."""
         # Ensure we have the seeded default network "net"
         default_before = NetworkOperation.create_default_network()
-        assert default_before.name == "net"
-        assert default_before.is_default
+        assert default_before.status == "success"
+        assert default_before.item.name == "net"
+        assert default_before.item.is_default
 
         # Remove the default network
         NetworkOperation.remove(NetworkInput(name=["net"]))
@@ -325,12 +328,14 @@ class TestNetworkSync:
                 nat_gateways=["eth0"],
             )
         )
-        network = result.result
+        network = result.item
 
         # Sync iptables rules for this network
         sync_result = NetworkOperation.sync(network_id=network.id)
-        assert network.id in sync_result
-        stats = sync_result[network.id]
+        assert isinstance(sync_result, OperationResult)
+        assert sync_result.status == "success"
+        assert network.id in sync_result.item
+        stats = sync_result.item[network.id]
         assert "added" in stats
         assert "verified" in stats
         assert "orphaned" in stats
@@ -359,7 +364,7 @@ class TestNetworkGetEdgeCases:
         result = NetworkOperation.create(
             NetworkCreateInput(name="prefixnet", subnet="10.70.0.0/24")
         )
-        network = result.result
+        network = result.item
         prefix = network.id[:6]
 
         fetched = NetworkOperation.get(NetworkInput(id=[prefix]))

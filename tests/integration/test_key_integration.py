@@ -19,6 +19,7 @@ import pytest
 from mvmctl.api import KeyCreateInput, KeyInput, KeyOperation
 from mvmctl.exceptions import KeyNotFoundError
 from mvmctl.models import SSHKeyItem
+from mvmctl.models.result import OperationResult
 from mvmctl.utils.common import CacheUtils
 
 # ======================================================================
@@ -102,22 +103,24 @@ class TestKeyCreate:
 
         key = KeyOperation.create(KeyCreateInput(name="test-key"))
 
-        assert isinstance(key, SSHKeyItem)
-        assert key.name == "test-key"
-        assert key.algorithm == "ssh-ed25519"
-        assert key.is_present is True
-        assert key.is_default is False
+        assert isinstance(key, OperationResult)
+        assert key.status == "success"
+        assert isinstance(key.item, SSHKeyItem)
+        assert key.item.name == "test-key"
+        assert key.item.algorithm == "ssh-ed25519"
+        assert key.item.is_present is True
+        assert key.item.is_default is False
         import socket
 
-        assert key.comment == f"test-key@{socket.gethostname()}"
+        assert key.item.comment == f"test-key@{socket.gethostname()}"
         keys_dir = CacheUtils.get_keys_dir()
         pub_content = (keys_dir / "test-key.pub").read_text().strip()
-        assert key.fingerprint == _compute_expected_fingerprint(pub_content)
+        assert key.item.fingerprint == _compute_expected_fingerprint(pub_content)
 
         assert (keys_dir / "test-key").exists()
         assert (keys_dir / "test-key.pub").exists()
-        assert key.public_key_path == str(keys_dir / "test-key.pub")
-        assert key.private_key_path == str(keys_dir / "test-key")
+        assert key.item.public_key_path == str(keys_dir / "test-key.pub")
+        assert key.item.private_key_path == str(keys_dir / "test-key")
 
     def test_create_keypair_rsa(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Create an RSA key and verify the algorithm is parsed correctly."""
@@ -127,11 +130,11 @@ class TestKeyCreate:
             KeyCreateInput(name="test-rsa", algorithm="rsa", bits=2048)
         )
 
-        assert key.algorithm == "ssh-rsa"
-        assert key.name == "test-rsa"
+        assert key.item.algorithm == "ssh-rsa"
+        assert key.item.name == "test-rsa"
         keys_dir = CacheUtils.get_keys_dir()
         pub_content = (keys_dir / "test-rsa.pub").read_text().strip()
-        assert key.fingerprint == _compute_expected_fingerprint(pub_content)
+        assert key.item.fingerprint == _compute_expected_fingerprint(pub_content)
 
     def test_create_keypair_default_status(
         self, monkeypatch: pytest.MonkeyPatch
@@ -143,7 +146,7 @@ class TestKeyCreate:
             KeyCreateInput(name="test-default", set_default=True)
         )
 
-        assert key.is_default is True
+        assert key.item.is_default is True
         defaults = KeyOperation.get_defaults()
         assert len(defaults) == 1
         assert defaults[0].name == "test-default"
@@ -158,7 +161,7 @@ class TestKeyCreate:
             KeyCreateInput(name="test-comment", comment="my-custom-comment")
         )
 
-        assert key.comment == "my-custom-comment"
+        assert key.item.comment == "my-custom-comment"
 
 
 # ======================================================================
@@ -187,7 +190,7 @@ class TestKeyListAndGet:
         created = KeyOperation.create(KeyCreateInput(name="get-by-name"))
         fetched = KeyOperation.get(KeyInput(name=["get-by-name"]))
 
-        assert fetched.id == created.id
+        assert fetched.id == created.item.id
         assert fetched.name == "get-by-name"
         assert fetched.algorithm == "ssh-ed25519"
 
@@ -196,10 +199,10 @@ class TestKeyListAndGet:
         _setup_ssh_keygen_mock(monkeypatch)
 
         created = KeyOperation.create(KeyCreateInput(name="get-by-id"))
-        prefix = created.id[:6]
+        prefix = created.item.id[:6]
 
         fetched = KeyOperation.get(KeyInput(id=[prefix]))
-        assert fetched.id == created.id
+        assert fetched.id == created.item.id
         assert fetched.name == "get-by-id"
 
     def test_get_nonexistent_raises_key_not_found(self) -> None:
@@ -316,14 +319,16 @@ class TestKeyEdgeCases:
 
         key = KeyOperation.add(name="added-key", pub_key_path=pub_file)
 
-        assert isinstance(key, SSHKeyItem)
-        assert key.name == "added-key"
-        assert key.algorithm == "ssh-ed25519"
-        assert key.fingerprint == _compute_expected_fingerprint(
+        assert isinstance(key, OperationResult)
+        assert key.status == "success"
+        assert isinstance(key.item, SSHKeyItem)
+        assert key.item.name == "added-key"
+        assert key.item.algorithm == "ssh-ed25519"
+        assert key.item.fingerprint == _compute_expected_fingerprint(
             _SSH_PUB_ED25519
         )
-        assert key.private_key_path is None
-        assert key.is_default is False
+        assert key.item.private_key_path is None
+        assert key.item.is_default is False
 
         keys = KeyOperation.list_all()
         names = [k.name for k in keys]
@@ -340,9 +345,9 @@ class TestKeyEdgeCases:
 
         assert isinstance(result, dict)
         assert result["name"] == "inspect-json"
-        assert result["id"] == created.id
+        assert result["id"] == created.item.id
         assert result["algorithm"] == "ssh-ed25519"
-        assert result["fingerprint"] == created.fingerprint
+        assert result["fingerprint"] == created.item.fingerprint
         assert not result["is_default"]
         assert "public_key_path" in result
         assert "private_key_path" in result

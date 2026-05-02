@@ -120,7 +120,7 @@ class TestConfigEdgeCases:
     def test_reset_unset_valid_key_does_not_raise(self) -> None:
         """Resetting a valid key that was never set returns 0 and does not raise."""
         result = ConfigOperation.reset(category="settings.vm", key="max_vms")
-        assert result == 0
+        assert result.item == 0
 
     def test_reset_nonexistent_key_raises_config_error(self) -> None:
         """Resetting a key that does not exist in the schema raises ConfigError."""
@@ -134,7 +134,7 @@ class TestConfigEdgeCases:
         ConfigOperation.set(category="defaults.vm", key="vcpu_count", value=4)
 
         deleted = ConfigOperation.reset(all_overrides=True)
-        assert deleted == 3
+        assert deleted.item == 3
 
         assert (
             ConfigOperation.get(category="settings.vm", key="max_vms") is None
@@ -154,7 +154,7 @@ class TestConfigEdgeCases:
         ConfigOperation.set(category="defaults.vm", key="vcpu_count", value=4)
 
         deleted = ConfigOperation.reset(category="settings.vm")
-        assert deleted == 2
+        assert deleted.item == 2
 
         assert (
             ConfigOperation.get(category="settings.vm", key="max_vms") is None

@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from mvmctl.api.config_operations import ConfigOperation
+from mvmctl.models.result import OperationResult
 from mvmctl.exceptions import ConfigError
 
 
@@ -110,16 +111,16 @@ class TestConfigOperationReset:
     def test_reset_single_key(self) -> None:
         """reset() with key removes the override for that key."""
         ConfigOperation.set("defaults.vm", "vcpu_count", 8)
-        count = ConfigOperation.reset("defaults.vm", "vcpu_count")
-        assert count == 1
+        result = ConfigOperation.reset("defaults.vm", "vcpu_count")
+        assert result.item == 1
         assert ConfigOperation.get("defaults.vm", "vcpu_count") is None
 
     def test_reset_category(self) -> None:
         """reset() with category removes all overrides in that category."""
         ConfigOperation.set("defaults.vm", "vcpu_count", 8)
         ConfigOperation.set("defaults.vm", "mem_size_mib", 1024)
-        count = ConfigOperation.reset("defaults.vm")
-        assert count == 2
+        result = ConfigOperation.reset("defaults.vm")
+        assert result.item == 2
         assert ConfigOperation.get("defaults.vm", "vcpu_count") is None
         assert ConfigOperation.get("defaults.vm", "mem_size_mib") is None
 
@@ -127,15 +128,15 @@ class TestConfigOperationReset:
         """reset() with all_overrides removes every override."""
         ConfigOperation.set("defaults.vm", "vcpu_count", 8)
         ConfigOperation.set("defaults.network", "name", "test")
-        count = ConfigOperation.reset(all_overrides=True)
-        assert count == 2
+        result = ConfigOperation.reset(all_overrides=True)
+        assert result.item == 2
         assert ConfigOperation.get("defaults.vm", "vcpu_count") is None
         assert ConfigOperation.get("defaults.network", "name") is None
 
     def test_reset_missing_key_returns_zero(self) -> None:
         """reset() returns 0 when no override exists for the key."""
-        count = ConfigOperation.reset("defaults.vm", "vcpu_count")
-        assert count == 0
+        result = ConfigOperation.reset("defaults.vm", "vcpu_count")
+        assert result.item == 0
 
     def test_reset_preserves_other_categories(self) -> None:
         """reset() for one category does not affect other categories."""

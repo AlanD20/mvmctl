@@ -24,6 +24,7 @@ from mvmctl.exceptions import (
     ImageNotFoundError,
 )
 from mvmctl.models import ImageItem
+from mvmctl.models.result import BatchResult, OperationResult
 from mvmctl.utils.common import CacheUtils
 
 # ======================================================================
@@ -135,7 +136,9 @@ class TestImageImport:
             )
         )
 
-        image = result.result
+        assert isinstance(result, OperationResult)
+        assert result.status == "success"
+        image = result.item
         assert isinstance(image, ImageItem)
         assert image.os_name == "test-image"
         assert image.os_slug == "test_image"
@@ -234,7 +237,7 @@ class TestImageGet:
                 format="raw",
             )
         )
-        full_id = result.result.id
+        full_id = result.item.id
 
         image = ImageOperation.get(ImageInput(id=[full_id[:6]]))
         assert image.id == full_id
@@ -333,12 +336,12 @@ class TestImageWarm:
                 format="raw",
             )
         )
-        image = result.result
+        image = result.item
 
         warmed_paths = ImageOperation.warm(ImageInput(id=[image.os_slug]))
-
-        assert len(warmed_paths) == 1
-        warmed_path = warmed_paths[0]
+        assert isinstance(warmed_paths, OperationResult)
+        assert len(warmed_paths.item) == 1
+        warmed_path = warmed_paths.item[0]
         assert warmed_path.exists()
         assert warmed_path.name == f"{image.id}.ext4"
 
@@ -382,7 +385,7 @@ class TestImageRemove:
                 format="raw",
             )
         )
-        image = result.result
+        image = result.item
 
         images_dir = CacheUtils.get_images_dir()
         image_file = images_dir / image.path
@@ -451,8 +454,9 @@ class TestImageEdgeCases:
             _mock_enrich,
         )
 
-        with pytest.raises(ImageError, match="referenced by VMs"):
-            ImageOperation.remove(ImageInput(id=["ref_vm"]), force=False)
+        result = ImageOperation.remove(ImageInput(id=["ref_vm"]), force=False)
+        assert isinstance(result, BatchResult)
+        assert result.has_any_error
 
     def test_remove_image_referenced_by_vms_with_force(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

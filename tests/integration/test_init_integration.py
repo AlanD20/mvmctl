@@ -23,6 +23,7 @@ from mvmctl.core._shared import Database
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.host._repository import HostRepository
 from mvmctl.models import HostStateChangeItem, HostStateItem
+from mvmctl.models.result import OperationResult
 from mvmctl.utils.common import CacheUtils
 
 # ======================================================================
@@ -177,8 +178,11 @@ class TestInitHost:
     def test_setup_host_returns_changes(self) -> None:
         """setup_host returns a non-empty list of HostStateChangeItem."""
         cache_dir = CacheUtils.get_cache_dir()
-        changes = InitOperation.setup_host(cache_dir)
+        result = InitOperation.setup_host(cache_dir)
 
+        assert isinstance(result, OperationResult)
+        assert result.status == "success"
+        changes = result.metadata.get("changes", [])
         assert isinstance(changes, list)
         assert len(changes) > 0
         assert all(isinstance(c, HostStateChangeItem) for c in changes)
@@ -202,11 +206,13 @@ class TestInitHost:
         """Calling setup_host twice does not error and state remains initialized."""
         cache_dir = CacheUtils.get_cache_dir()
 
-        changes1 = InitOperation.setup_host(cache_dir)
-        changes2 = InitOperation.setup_host(cache_dir)
+        result1 = InitOperation.setup_host(cache_dir)
+        result2 = InitOperation.setup_host(cache_dir)
 
-        assert isinstance(changes1, list)
-        assert isinstance(changes2, list)
+        assert isinstance(result1, OperationResult)
+        assert isinstance(result2, OperationResult)
+        assert result1.status == "success"
+        assert result2.status in ("success", "skipped")
 
         repo = HostRepository()
         state = repo.get_state()
@@ -314,8 +320,10 @@ class TestInitEdgeCases:
     def test_setup_host_records_changes_for_rollback(self) -> None:
         """setup_host persists changes; reset_state clears flags but leaves audit."""
         cache_dir = CacheUtils.get_cache_dir()
-        changes = InitOperation.setup_host(cache_dir)
+        result = InitOperation.setup_host(cache_dir)
 
+        assert result.status == "success"
+        changes = result.metadata.get("changes", [])
         assert len(changes) > 0
 
         repo = HostRepository()

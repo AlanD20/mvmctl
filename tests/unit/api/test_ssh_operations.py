@@ -6,6 +6,7 @@ from pathlib import Path
 
 from mvmctl.api.inputs._ssh_input import SSHInput
 from mvmctl.api.ssh_operations import SSHOperation
+from mvmctl.models.result import OperationResult
 
 
 class TestSSHOperationConnect:
@@ -33,11 +34,12 @@ class TestSSHOperationConnect:
         )
         mock_ssh_service.connect.return_value = 0
 
-        result = SSHOperation.connect(
+        # OperationResult check
+        _connect = SSHOperation.connect(
             SSHInput(name="test-vm", user="ubuntu", cmd="uptime")
         )
 
-        assert result == 0
+        assert _connect.item == 0
         mock_ssh_service.connect.assert_called_once_with(
             ip="10.0.0.2",
             user="ubuntu",
@@ -66,9 +68,10 @@ class TestSSHOperationConnect:
         )
         mock_ssh_service.connect.return_value = 0
 
-        result = SSHOperation.connect(SSHInput(name="test-vm", user="ubuntu"))
+        # OperationResult check
+        _connect = SSHOperation.connect(SSHInput(name="test-vm", user="ubuntu"))
 
-        assert result == 0
+        assert _connect.item == 0
         mock_ssh_service.connect.assert_called_once_with(
             ip="10.0.0.2",
             user="ubuntu",
@@ -97,9 +100,10 @@ class TestSSHOperationConnect:
         )
         mock_ssh_service.connect.return_value = 1
 
-        result = SSHOperation.connect(SSHInput(name="test-vm", cmd="false"))
+        # OperationResult check
+        _connect = SSHOperation.connect(SSHInput(name="test-vm", cmd="false"))
 
-        assert result == 1
+        assert _connect.item == 1
 
     def test_connect_logs_audit(self, mocker):
         """connect() logs an audit event."""

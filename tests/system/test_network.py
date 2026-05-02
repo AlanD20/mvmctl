@@ -263,3 +263,26 @@ class TestNetworkLifecycle:
         finally:
             _run_mvm(mvm_binary, "network", "rm", name_a, check=False)
             _run_mvm(mvm_binary, "network", "rm", name_b, check=False)
+
+
+class TestNetworkSync:
+    """Test mvm network sync command."""
+
+    def test_network_sync_all(self, mvm_binary, created_network):
+        """Sync all networks."""
+        result = _run_mvm(mvm_binary, "network", "sync", check=False)
+        assert result.returncode == 0
+
+    def test_network_sync_specific(self, mvm_binary, created_network):
+        """Sync a specific network by name."""
+        result = _run_mvm(
+            mvm_binary, "network", "sync", created_network, check=False
+        )
+        assert result.returncode == 0
+
+    def test_network_sync_json(self, mvm_binary, created_network):
+        """Sync with JSON output."""
+        result = _run_mvm(mvm_binary, "network", "sync", "--json", check=False)
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert isinstance(data, dict)

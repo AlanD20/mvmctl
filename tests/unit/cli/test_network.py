@@ -62,6 +62,26 @@ class TestNetworkLs:
     @patch("mvmctl.cli.network.NetworkOperation")
     def test_ls_json(self, mock_net_op):
         mock_net_op.list_all.return_value = [_make_network("testnet")]
+
+        def _mock_to_dict(n: NetworkItem) -> dict[str, object]:
+            return {
+                "id": n.id,
+                "name": n.name,
+                "subnet": n.subnet,
+                "bridge": n.bridge,
+                "ipv4_gateway": n.ipv4_gateway,
+                "bridge_active": n.bridge_active,
+                "nat_enabled": n.nat_enabled,
+                "is_default": n.is_default,
+                "is_present": n.is_present,
+                "created_at": n.created_at,
+                "updated_at": n.updated_at,
+                "nat_gateways": n.nat_gateways_list if hasattr(n, "nat_gateways_list") else [],
+                "leases": [],
+                "iptables_rules": [],
+            }
+
+        mock_net_op._network_to_dict.side_effect = _mock_to_dict
         result = runner.invoke(app, ["network", "ls", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -94,8 +114,11 @@ class TestNetworkCreate:
     @patch("mvmctl.cli.network.NetworkUtils.get_physical_interfaces")
     def test_create_success(self, mock_ifaces, mock_net_op):
         mock_ifaces.return_value = ["eth0"]
+        from mvmctl.models.result import OperationResult
         mock_net_op.create.return_value = MagicMock(
-            result=_make_network("testnet"),
+            spec=OperationResult,
+            status="success",
+            item=_make_network("testnet"),
         )
         result = runner.invoke(
             app,
@@ -132,14 +155,14 @@ class TestNetworkRemove:
 
     @patch("mvmctl.cli.network.NetworkOperation")
     def test_rm_success(self, mock_net_op):
-        mock_net_op.remove.return_value = None
+        mock_net_op.remove.return_value = MagicMock(status="success")
         result = runner.invoke(app, ["network", "rm", "testnet"])
         assert result.exit_code == 0
         assert "removed" in result.output.lower()
 
     @patch("mvmctl.cli.network.NetworkOperation")
     def test_rm_multiple(self, mock_net_op):
-        mock_net_op.remove.return_value = None
+        mock_net_op.remove.return_value = MagicMock(status="success")
         result = runner.invoke(app, ["network", "rm", "net1", "net2"])
         assert result.exit_code == 0
 
@@ -198,7 +221,7 @@ class TestNetworkSetDefault:
 
     @patch("mvmctl.cli.network.NetworkOperation")
     def test_set_default_success(self, mock_net_op):
-        mock_net_op.set_default.return_value = None
+        mock_net_op.set_default.return_value = MagicMock(status="success")
         result = runner.invoke(app, ["network", "set-default", "mynet"])
         assert result.exit_code == 0
         assert "mynet" in result.output
@@ -235,9 +258,10 @@ class TestNetworkSync:
             updated_at="2026-01-01T12:00:00+00:00",
             leases=[],
         )]
-        mock_net_op.sync.return_value = {
-            test_id: {"verified": 5, "added": 2, "orphaned": 1},
-        }
+        mock_net_op.sync.return_value = MagicMock(
+            status="success",
+            item={test_id: {"verified": 5, "added": 2, "orphaned": 1}},
+        )
         result = runner.invoke(app, ["network", "sync"])
         assert result.exit_code == 0
 
@@ -258,9 +282,10 @@ class TestNetworkSync:
             updated_at="2026-01-01T12:00:00+00:00",
             leases=[],
         )]
-        mock_net_op.sync.return_value = {
-            test_id: {"verified": 5, "added": 2, "orphaned": 1},
-        }
+        mock_net_op.sync.return_value = MagicMock(
+            status="success",
+            item={test_id: {"verified": 5, "added": 2, "orphaned": 1}},
+        )
         result = runner.invoke(app, ["network", "sync", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
