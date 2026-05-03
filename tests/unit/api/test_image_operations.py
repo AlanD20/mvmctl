@@ -502,7 +502,7 @@ class TestImageOperationHelpers:
         img = _make_image("ubuntu-24.04", fs_uuid="abc-123")
         d = ImageOperation._image_to_dict(img)
         assert d["os_slug"] == "ubuntu-24.04"
-        assert d["os_name"] == "Ubuntu 24.04 LTS"
+        assert d["name"] == "Ubuntu 24.04 LTS"
         assert d["arch"] == "x86_64"
         assert d["fs_type"] == "ext4"
         assert d["fs_uuid"] == "abc-123"

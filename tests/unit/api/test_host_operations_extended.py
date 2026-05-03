@@ -116,7 +116,6 @@ def _patch_init_common(mocker) -> dict[str, MagicMock]:
     deps["controller"] = mock_controller
 
     mocker.patch("mvmctl.api.host_operations.AuditLog.log")
-    mocker.patch("mvmctl.api.host_operations.subprocess")
 
     # NetworkOperation is imported locally in init() — patch at source
     mock_net_op_restore = MagicMock()
@@ -367,7 +366,6 @@ class TestHostOperationCleanExtended:
         )
         mocker.patch("mvmctl.api.host_operations.AuditLog.log")
         mocker.patch("mvmctl.api.host_operations.NetworkService")
-        mocker.patch("mvmctl.api.host_operations.NetworkUtils._run_batch")
 
     def test_clean_removes_tap_devices(self, mocker):
         self._setup_clean_mocks(mocker)
@@ -375,12 +373,12 @@ class TestHostOperationCleanExtended:
             "mvmctl.api.host_operations.NetworkUtils.get_tuntap_devices",
             return_value=["mvm-tap0", "mvm-tap1", "other-tap"],
         )
-        mock_run_batch = mocker.patch(
-            "mvmctl.api.host_operations.NetworkUtils._run_batch"
+        mock_remove_raw_tap = mocker.patch(
+            "mvmctl.api.host_operations.NetworkService.remove_raw_tap"
         )
         result = HostOperation.clean(Path("/tmp"))
         assert result.status == "success"
-        assert mock_run_batch.call_count == 2
+        assert mock_remove_raw_tap.call_count == 2
 
     def test_clean_tap_removal_error_handled(self, mocker):
         self._setup_clean_mocks(mocker)
@@ -389,7 +387,7 @@ class TestHostOperationCleanExtended:
             return_value=["mvm-tap0"],
         )
         mocker.patch(
-            "mvmctl.api.host_operations.NetworkUtils._run_batch",
+            "mvmctl.api.host_operations.NetworkService.remove_raw_tap",
             side_effect=NetworkError("ip error"),
         )
         result = HostOperation.clean(Path("/tmp"))
@@ -434,7 +432,6 @@ class TestHostOperationCleanExtended:
             return_value=[],
         )
         mocker.patch("mvmctl.api.host_operations.AuditLog.log")
-        mocker.patch("mvmctl.api.host_operations.NetworkUtils._run_batch")
         result = HostOperation.clean(Path("/tmp"))
         assert result.status == "success"
         mock_net_svc.remove_nat.assert_called_once()
@@ -473,12 +470,12 @@ class TestHostOperationCleanExtended:
             "mvmctl.api.host_operations.NetworkUtils.bridge_exists",
             return_value=True,
         )
-        mock_run_batch = mocker.patch(
-            "mvmctl.api.host_operations.NetworkUtils._run_batch"
+        mock_remove_raw_bridge = mocker.patch(
+            "mvmctl.api.host_operations.NetworkService.remove_raw_bridge"
         )
         result = HostOperation.clean(Path("/tmp"))
         assert result.status == "success"
-        assert mock_run_batch.call_count >= 1
+        assert mock_remove_raw_bridge.call_count >= 1
 
     def test_clean_default_bridge_error_handled(self, mocker):
         self._setup_clean_mocks(mocker)
@@ -487,7 +484,7 @@ class TestHostOperationCleanExtended:
             return_value=True,
         )
         mocker.patch(
-            "mvmctl.api.host_operations.NetworkUtils._run_batch",
+            "mvmctl.api.host_operations.NetworkService.remove_raw_bridge",
             side_effect=NetworkError("ip error"),
         )
         result = HostOperation.clean(Path("/tmp"))
@@ -499,12 +496,12 @@ class TestHostOperationCleanExtended:
             "mvmctl.api.host_operations.NetworkUtils.get_bridges",
             return_value=["mvm-orphan1", "mvm-orphan2"],
         )
-        mock_run_batch = mocker.patch(
-            "mvmctl.api.host_operations.NetworkUtils._run_batch"
+        mock_remove_raw_bridge = mocker.patch(
+            "mvmctl.api.host_operations.NetworkService.remove_raw_bridge"
         )
         result = HostOperation.clean(Path("/tmp"))
         assert result.status == "success"
-        assert mock_run_batch.call_count == 2
+        assert mock_remove_raw_bridge.call_count == 2
 
     def test_clean_removes_default_network(self, mocker):
         mock_net = MagicMock()

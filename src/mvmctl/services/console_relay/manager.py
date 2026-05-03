@@ -210,10 +210,11 @@ class ConsoleRelayManager:
 
     def stop(self) -> bool:
         with self._thread_lock:
-            if self.pid is None:
+            pid = self.pid
+            if pid is None:
                 return False
 
-            self._send_signal(self.pid, signal.SIGTERM)
+            self._send_signal(pid, signal.SIGTERM)
             self._cleanup_files()
             self._pid = None
             logger.info("Stopped console relay for %s", self._name)
@@ -221,10 +222,11 @@ class ConsoleRelayManager:
 
     def terminate(self) -> bool:
         with self._thread_lock:
-            if self.pid is None:
+            pid = self.pid
+            if pid is None:
                 return False
 
-            if not self._send_signal(self.pid, signal.SIGTERM):
+            if not self._send_signal(pid, signal.SIGTERM):
                 self._cleanup_files()
                 self._pid = None
                 return True
@@ -233,10 +235,10 @@ class ConsoleRelayManager:
 
             for _ in range(int(CONST_CONSOLE_KILL_TIMEOUT_S * 10)):
                 time.sleep(0.1)
-                if not self._send_signal(self.pid, 0):
+                if not self._send_signal(pid, 0):
                     break
             else:
-                self._send_signal(self.pid, signal.SIGKILL)
+                self._send_signal(pid, signal.SIGKILL)
 
             self._cleanup_files()
             self._pid = None

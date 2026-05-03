@@ -315,6 +315,7 @@ def init_run(
         print_success("Host ready!")
     else:
         print_warning("Host setup incomplete. Run 'mvm init' again.")
+        raise typer.Exit(code=1)
 
 
 __all__ = ["init_app"]

@@ -17,7 +17,7 @@ def _make_vm(
     name: str = "test-vm",
     status: VMStatus = VMStatus.RUNNING,
     vm_id: str | None = None,
-    network_id: str = "net-default",
+    network_id: str | None = None,
     **kwargs,
 ) -> VMInstanceItem:
     return VMInstanceItem(
@@ -236,7 +236,7 @@ class TestVMOperationRemove:
         VMOperation.remove(VMInput(identifiers=["test-vm"]))
 
         mock_controller.stop.assert_called_once_with(force=False)
-        mock_cleanup.assert_called_once_with(mock_vm, "net-default")
+        mock_cleanup.assert_called_once_with(mock_vm, None)
         mock_repo.delete.assert_called_once_with(mock_vm.id)
         mock_rmtree.assert_called_once()
 

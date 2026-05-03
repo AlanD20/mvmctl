@@ -288,7 +288,7 @@ class TestImageInspect:
         )
         assert isinstance(result, dict)
         assert result["os_slug"] == "inspect_json"
-        assert result["os_name"] == "inspect-json"
+        assert result["name"] == "inspect-json"
         assert "id" in result
         assert "fs_type" in result
 

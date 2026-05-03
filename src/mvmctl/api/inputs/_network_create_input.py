@@ -91,14 +91,22 @@ class NetworkCreateRequest:
         # Compute bridge name
         bridge = NetworkUtils.compute_bridge_name(self._inputs.name)
 
+        # Auto-detect NAT gateways when enabled but none specified
+        nat_gateways = self._inputs.nat_gateways
+        nat_enabled = self._inputs.nat_enabled
+        if not nat_gateways and nat_enabled:
+            outbound = NetworkUtils.detect_outbound_interface()
+            nat_gateways = [outbound] if outbound else []
+            nat_enabled = outbound is not None
+
         # Build result
         self._result = ResolvedNetworkCreateRequest(
             name=self._inputs.name,
             subnet=self._inputs.subnet,
             ipv4_gateway=ipv4_gateway,
             bridge=bridge,
-            nat_enabled=self._inputs.nat_enabled,
-            nat_gateways=self._inputs.nat_gateways,
+            nat_enabled=nat_enabled,
+            nat_gateways=nat_gateways,
         )
 
         # Validate

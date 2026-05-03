@@ -86,6 +86,8 @@ class TestKeyLifecycle:
             "key",
             "create",
             created_key,
+            "--algorithm",
+            "ed25519",
             check=False,
         )
         assert result.returncode != 0

@@ -5,7 +5,6 @@ from __future__ import annotations  # ruff: isort: skip
 import logging
 import os
 import pwd
-import subprocess
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -381,14 +380,9 @@ class HostOperation:
             )
             for tap_name in fallback_tap_candidates:
                 try:
-                    NetworkUtils._run_batch(
-                        [
-                            f"link set {tap_name} down",
-                            f"link delete {tap_name}",
-                        ]
-                    )
+                    NetworkService.remove_raw_tap(tap_name)
                     summary.append(f"Removed TAP device '{tap_name}'")
-                except (NetworkError, subprocess.CalledProcessError) as e:
+                except NetworkError as e:
                     summary.append(
                         f"Warning: failed to remove TAP '{tap_name}': {e}"
                     )
@@ -398,6 +392,7 @@ class HostOperation:
             repo = NetworkRepository(db)
             networks = repo.list_all()
             net_service = NetworkService(repo)
+            summary.extend(net_service.remove_stale_interfaces(f"{CLI_NAME}-"))
             metadata_bridges: set[str] = {net.bridge for net in networks}
 
             # Teardown NAT and bridges for each network
@@ -430,17 +425,11 @@ class HostOperation:
             default_bridge = f"{CLI_NAME}-{default_net_name[:10]}"
             if NetworkUtils.bridge_exists(default_bridge):
                 try:
-                    NetworkUtils._run_batch(
-                        [
-                            f"link set {default_bridge} down",
-                            f"link delete {default_bridge} type bridge",
-                        ]
-                    )
+                    NetworkService.remove_raw_bridge(default_bridge)
                     summary.append(f"Removed orphan bridge '{default_bridge}'")
-                except (NetworkError, subprocess.CalledProcessError) as e:
+                except NetworkError as e:
                     summary.append(
-                        f"Warning: failed to remove orphan bridge '{default_bridge}' "
-                        f"(already clean or insufficient privileges): {e}"
+                        f"Warning: failed to remove orphan bridge '{default_bridge}': {e}"
                     )
 
             # Remove orphan bridges
@@ -453,17 +442,11 @@ class HostOperation:
                     continue
 
                 try:
-                    NetworkUtils._run_batch(
-                        [
-                            f"link set {bridge} down",
-                            f"link delete {bridge} type bridge",
-                        ]
-                    )
+                    NetworkService.remove_raw_bridge(bridge)
                     summary.append(f"Removed orphan bridge '{bridge}'")
-                except (NetworkError, subprocess.CalledProcessError) as e:
+                except NetworkError as e:
                     summary.append(
-                        f"Warning: failed to remove orphan bridge '{bridge}' "
-                        f"(already clean or insufficient privileges): {e}"
+                        f"Warning: failed to remove orphan bridge '{bridge}': {e}"
                     )
 
             # Remove default network from database

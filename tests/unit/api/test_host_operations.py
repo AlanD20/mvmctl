@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import sqlite3
+
 import pytest
 
 from mvmctl.api.host_operations import HostOperation
@@ -138,7 +140,6 @@ class TestHostOperationInit:
             return_value="default",
         )
         mocker.patch("mvmctl.api.host_operations.FsUtils")
-        mocker.patch("mvmctl.api.host_operations.subprocess")
         mocker.patch("mvmctl.api.host_operations.os.getuid", return_value=0)
         mocker.patch("mvmctl.api.host_operations.AuditLog")
         mocker.patch("mvmctl.api.host_operations.HostService")
@@ -162,7 +163,6 @@ class TestHostOperationClean:
         mocker.patch("mvmctl.api.host_operations.NetworkService")
         mocker.patch("mvmctl.api.host_operations.SettingsService.resolve")
         mocker.patch("mvmctl.api.host_operations.AuditLog")
-        mocker.patch("mvmctl.api.host_operations.subprocess")
 
         HostOperation.clean(Path("/tmp"))
         mock_check.assert_called_once_with("/usr/sbin/ip", "clean host")
@@ -233,8 +233,8 @@ class TestHostOperationClean:
         assert result.status == "success"
         mock_audit.log.assert_called_once()
 
-    def test_clean_handles_network_exception(self, mocker):
-        """clean() handles NetworkRepository.list_all() exception gracefully."""
+    def test_clean_handles_missing_database_table(self, mocker):
+        """clean() handles missing database table gracefully via decorator."""
         mocker.patch(
             "mvmctl.api.host_operations.HostPrivilegeHelper.check_privileges"
         )
@@ -243,10 +243,14 @@ class TestHostOperationClean:
             return_value=[],
         )
         mock_repo = MagicMock()
-        mock_repo.list_all.side_effect = Exception("DB error")
+        # Simulate missing table — decorator returns []
+        mock_repo.list_all.return_value = []
         mocker.patch(
             "mvmctl.api.host_operations.NetworkRepository",
             return_value=mock_repo,
+        )
+        mocker.patch(
+            "mvmctl.api.host_operations.NetworkService",
         )
         mocker.patch(
             "mvmctl.api.host_operations.SettingsService.resolve",
@@ -261,14 +265,10 @@ class TestHostOperationClean:
             return_value=[],
         )
         mocker.patch("mvmctl.api.host_operations.AuditLog")
-        mocker.patch(
-            "mvmctl.core.network._service.subprocess.run",
-            return_value=MagicMock(returncode=0, stdout="", stderr=""),
-        )
 
-        # NetworkRepository.list_all() exception should not crash clean()
         result = HostOperation.clean(Path("/tmp"))
         assert result.status == "success"
+        mock_repo.list_all.assert_called_once()
 
 
 class TestHostOperationReset:

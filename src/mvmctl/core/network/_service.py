@@ -1,5 +1,7 @@
 """Network management for VM networking."""
 
+from __future__ import annotations
+
 import logging
 import shlex
 import subprocess
@@ -23,7 +25,7 @@ from mvmctl.models import (
     IPTablesWildcard,
     NetworkItem,
 )
-from mvmctl.utils._system import privileged_cmd as _privileged_cmd
+from mvmctl.utils._system import privileged_cmd
 from mvmctl.utils.network import NetworkUtils
 
 if TYPE_CHECKING:
@@ -129,7 +131,7 @@ class NetworkService:
             # 1. Delete the jump rule from the standard chain first.
             try:
                 subprocess.run(
-                    _privileged_cmd(
+                    privileged_cmd(
                         [
                             "iptables",
                             "-t",
@@ -156,9 +158,7 @@ class NetworkService:
             # 2. Flush the custom chain (remove all rules inside it).
             try:
                 subprocess.run(
-                    _privileged_cmd(
-                        ["iptables", "-t", table, "-F", chain_name]
-                    ),
+                    privileged_cmd(["iptables", "-t", table, "-F", chain_name]),
                     check=True,
                     capture_output=True,
                 )
@@ -169,9 +169,7 @@ class NetworkService:
             # 3. Delete the custom chain.
             try:
                 subprocess.run(
-                    _privileged_cmd(
-                        ["iptables", "-t", table, "-X", chain_name]
-                    ),
+                    privileged_cmd(["iptables", "-t", table, "-X", chain_name]),
                     check=True,
                     capture_output=True,
                 )
@@ -251,7 +249,7 @@ class NetworkService:
         except OSError:
             try:
                 subprocess.run(
-                    _privileged_cmd(["sysctl", "-w", "net.ipv4.ip_forward=1"]),
+                    privileged_cmd(["sysctl", "-w", "net.ipv4.ip_forward=1"]),
                     capture_output=True,
                     check=True,
                 )
@@ -278,13 +276,176 @@ class NetworkService:
             self.remove_tap(tap, bridge, network_id=network_id)
 
         try:
-            NetworkUtils._run_batch(
-                [f"link set {bridge} down", f"link delete {bridge} type bridge"]
-            )
-        except subprocess.CalledProcessError as e:
+            NetworkService.remove_raw_bridge(bridge)
+        except NetworkError as e:
             raise NetworkError(f"Failed to teardown bridge {bridge}") from e
 
         logger.info("Bridge %s removed", bridge)
+
+    @staticmethod
+    def remove_raw_tap(tap: str) -> None:
+        """Remove a TAP device robustly without iptables cleanup.
+
+        First tries ``ip link delete <tap>``. If that fails (e.g. for
+        certain tuntap implementations), falls back to
+        ``ip tuntap del dev <tap> mode tap``.
+
+        If the TAP does not exist, this is a silent no-op.
+
+        Args:
+            tap: TAP device name.
+
+        Raises:
+            NetworkError: If the device exists but cannot be removed.
+
+        """
+        if not NetworkUtils.tap_exists(tap):
+            return
+
+        # Bring down (best effort — may already be down)
+        subprocess.run(
+            privileged_cmd(["ip", "link", "set", tap, "down"]),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        # Try standard link delete first
+        result = subprocess.run(
+            privileged_cmd(["ip", "link", "delete", tap]),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            return
+
+        stderr_first = result.stderr.strip()
+
+        # Fallback for tuntap-type interfaces
+        result = subprocess.run(
+            privileged_cmd(["ip", "tuntap", "del", "dev", tap, "mode", "tap"]),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            return
+
+        details = f" ({stderr_first})" if stderr_first else ""
+        raise NetworkError(
+            f"Failed to remove TAP device '{tap}'. "
+            f"Tried 'ip link delete'{details} and 'ip tuntap del'."
+        )
+
+    @staticmethod
+    def remove_raw_bridge(bridge: str) -> None:
+        """Remove a bridge interface robustly, including all attached slaves.
+
+        Iterates over all interfaces attached to the bridge, removes each
+        one, then brings the bridge down and deletes it.
+
+        If the bridge does not exist, this is a silent no-op.
+
+        Args:
+            bridge: Bridge interface name.
+
+        Raises:
+            NetworkError: If the bridge exists but cannot be removed.
+
+        """
+        if not NetworkUtils.bridge_exists(bridge):
+            return
+
+        # Remove all attached slaves first
+        for slave in NetworkUtils.get_bridge_slaves(bridge):
+            if slave == bridge:
+                continue
+            subprocess.run(
+                privileged_cmd(["ip", "link", "set", slave, "down"]),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            result = subprocess.run(
+                privileged_cmd(["ip", "link", "delete", slave]),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                # Try tuntap fallback for TAP slaves
+                subprocess.run(
+                    privileged_cmd(
+                        ["ip", "tuntap", "del", "dev", slave, "mode", "tap"]
+                    ),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+
+        # Bring bridge down and delete
+        subprocess.run(
+            privileged_cmd(["ip", "link", "set", bridge, "down"]),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        result = subprocess.run(
+            privileged_cmd(["ip", "link", "delete", bridge, "type", "bridge"]),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            return
+
+        stderr_first = result.stderr.strip()
+
+        # Fallback: try without type specifier
+        result = subprocess.run(
+            privileged_cmd(["ip", "link", "delete", bridge]),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            return
+
+        details = f" ({stderr_first})" if stderr_first else ""
+        raise NetworkError(
+            f"Failed to remove bridge '{bridge}'. "
+            f"Tried 'ip link delete' with type{details} and without."
+        )
+
+    @staticmethod
+    def remove_stale_interfaces(prefix: str) -> list[str]:
+        """Remove all slave interfaces attached to bridges matching a prefix.
+
+        Iterates over all system bridges, finds those starting with ``prefix``,
+        enumerates their slave interfaces, and deletes each one. This prevents
+        bridge deletion failures when interfaces are still attached.
+
+        Args:
+            prefix: Bridge name prefix to match (e.g., ``"mvm-"``).
+
+        Returns:
+            List of summary strings describing actions taken.
+
+        """
+        summary: list[str] = []
+        for bridge in NetworkUtils.get_bridges():
+            if not bridge.startswith(prefix):
+                continue
+            for slave in NetworkUtils.get_bridge_slaves(bridge):
+                try:
+                    NetworkService.remove_raw_tap(slave)
+                    summary.append(f"Removed interface '{slave}'")
+                except NetworkError as e:
+                    summary.append(
+                        f"Warning: failed to remove interface '{slave}': {e}"
+                    )
+        return summary
 
     def ensure_nat(
         self,
@@ -738,12 +899,7 @@ class NetworkService:
                     result.error_message,
                 )
 
-        try:
-            NetworkUtils._run_batch(
-                [f"link set {tap} down", f"link delete {tap}"]
-            )
-        except subprocess.CalledProcessError as e:
-            raise NetworkError(f"Failed to remove TAP {tap}") from e
+        NetworkService.remove_raw_tap(tap)
 
         logger.info("TAP device %s removed", tap)
 
@@ -856,7 +1012,7 @@ class NetworkService:
         """
         try:
             result = subprocess.run(
-                ["iptables-save"],
+                privileged_cmd(["iptables-save"]),
                 capture_output=True,
                 text=True,
                 check=True,

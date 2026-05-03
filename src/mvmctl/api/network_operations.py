@@ -262,6 +262,7 @@ class NetworkOperation:
             "created_at": network.created_at,
             "updated_at": network.updated_at,
             "nat_gateways": network.nat_gateways_list or [],
+            "vm_count": len(network.leases) if network.leases else 0,
             "leases": [
                 {
                     "id": lease.id,
@@ -298,6 +299,20 @@ class NetworkOperation:
                 for rule in (network.iptables_rules or [])
             ],
         }
+
+    @staticmethod
+    def to_json(networks: list[NetworkItem]) -> list[dict[str, Any]]:
+        """
+        Convert network model list to JSON-serializable dicts.
+
+        Args:
+            networks: List of NetworkItem records.
+
+        Returns:
+            List of network dicts suitable for JSON serialization.
+
+        """
+        return [NetworkOperation._network_to_dict(n) for n in networks]
 
     @staticmethod
     def inspect(

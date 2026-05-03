@@ -474,7 +474,7 @@ class ImageOperation:
         return {
             "id": img.id,
             "os_slug": img.os_slug,
-            "os_name": img.os_name,
+            "name": img.os_name,
             "arch": img.arch,
             "path": img.path,
             "fs_type": img.fs_type,

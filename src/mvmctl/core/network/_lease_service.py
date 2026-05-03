@@ -8,6 +8,7 @@ for network management using a class-based design with network resolution.
 from __future__ import annotations
 
 import ipaddress
+import sqlite3
 
 from mvmctl.core.network._repository import LeaseRepository
 from mvmctl.core.network._resolver import NetworkResolver
@@ -153,15 +154,27 @@ class LeaseService:
             NetworkError: If no IPs available.
 
         """
-        leases = self.get_leases()
-        used_ips = {lease.ipv4 for lease in leases}
-        allocated_ip = NetworkUtils.allocate_next_ip(
-            list(used_ips),
-            self._network.subnet,
-            self._network.ipv4_gateway,
-        )
-        self._lease_repo.acquire(self._network.id, allocated_ip, vm_id)
-        return allocated_ip
+        max_retries = 10
+        last_error: Exception | None = None
+
+        for attempt in range(max_retries):
+            leases = self.get_leases()
+            used_ips = {lease.ipv4 for lease in leases}
+            allocated_ip = NetworkUtils.allocate_next_ip(
+                list(used_ips),
+                self._network.subnet,
+                self._network.ipv4_gateway,
+            )
+            try:
+                self._lease_repo.acquire(self._network.id, allocated_ip, vm_id)
+                return allocated_ip
+            except sqlite3.IntegrityError as e:
+                last_error = e
+                continue
+
+        raise NetworkError(
+            f"Failed to allocate IP after {max_retries} attempts"
+        ) from last_error
 
     def lease_specific(self, ip: str, vm_id: str) -> str:
         """

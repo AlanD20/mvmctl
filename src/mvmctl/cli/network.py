@@ -67,11 +67,7 @@ def network_ls(
     networks: list[NetworkItem] = NetworkOperation.list_all()
 
     if json_output:
-        data = []
-        for n in networks:
-            d = NetworkOperation._network_to_dict(n)
-            d["vm_count"] = len(n.leases) if n.leases else 0
-            data.append(d)
+        data = NetworkOperation.to_json(networks)
         typer.echo(json.dumps(data, indent=2, default=str))
         return
 
@@ -129,12 +125,14 @@ def network_set_default(
 
 
 def _resolve_user_nat_gateways() -> str:
+    """Interactive prompt for NAT gateway selection — CLI-only, no business logic."""
     interfaces = NetworkUtils.get_physical_interfaces()
     if not interfaces:
         print_error("No network interfaces found")
         raise typer.Exit(code=1)
     if len(interfaces) == 1:
         return interfaces[0]
+
     print_info("Select interface(s) for NAT (internet access):")
     for i, iface in enumerate(interfaces, 1):
         print_info(f"  [{i}] {iface}")
@@ -181,6 +179,11 @@ def network_create(
         "--nat-gateways",
         help="Physical interfaces for NAT (comma-separated, auto-detected if not provided)",
     ),
+    non_interactive: bool = typer.Option(
+        False,
+        "--non-interactive",
+        help="Skip interactive prompts (auto-detect NAT interfaces)",
+    ),
 ) -> None:
     """Create a named network."""
     name = CliUtils.check_name_arg(ctx, name)
@@ -189,7 +192,7 @@ def network_create(
         print_error("Missing required option '--subnet'")
         raise typer.Exit(code=1)
 
-    if nat_gateways is None and not no_nat:
+    if nat_gateways is None and not no_nat and not non_interactive:
         nat_gateways = _resolve_user_nat_gateways()
 
     nat_gateways_list = (

@@ -50,7 +50,6 @@ class TestQuickStartJourney:
                 mvm_binary,
                 "vm",
                 "rm",
-                "--name",
                 unique_vm_name,
                 "--force",
                 check=False,
@@ -73,6 +72,7 @@ class TestNetworkVMJourney:
             unique_network_name,
             "--subnet",
             subnet,
+            "--non-interactive",
         )
         assert result.returncode == 0
 
@@ -104,7 +104,6 @@ class TestNetworkVMJourney:
                 mvm_binary,
                 "vm",
                 "rm",
-                "--name",
                 unique_vm_name,
                 "--force",
                 check=False,
@@ -127,6 +126,7 @@ class TestNetworkVMJourney:
             unique_network_name,
             "--subnet",
             subnet,
+            "--non-interactive",
         )
 
         try:
@@ -156,7 +156,6 @@ class TestNetworkVMJourney:
                 mvm_binary,
                 "vm",
                 "rm",
-                "--name",
                 unique_vm_name,
                 "--force",
                 check=False,
@@ -205,7 +204,6 @@ class TestKeyVMJourney:
                 mvm_binary,
                 "vm",
                 "rm",
-                "--name",
                 unique_vm_name,
                 "--force",
                 check=False,
@@ -236,8 +234,8 @@ class TestVMStateJourney:
             vms = json.loads(result.stdout)
             vm = next((v for v in vms if v["name"] == unique_vm_name), None)
             assert vm is not None
-            assert vm["status"] == "PAUSED", (
-                f"Expected PAUSED, got {vm['status']}"
+            assert vm["status"] == "paused", (
+                f"Expected paused, got {vm['status']}"
             )
 
             # Resume (paused → running)
@@ -247,8 +245,8 @@ class TestVMStateJourney:
             vms = json.loads(result.stdout)
             vm = next((v for v in vms if v["name"] == unique_vm_name), None)
             assert vm is not None
-            assert vm["status"] == "RUNNING", (
-                f"Expected RUNNING, got {vm['status']}"
+            assert vm["status"] == "running", (
+                f"Expected running, got {vm['status']}"
             )
 
             # Stop (running → stopped)
@@ -258,8 +256,8 @@ class TestVMStateJourney:
             vms = json.loads(result.stdout)
             vm = next((v for v in vms if v["name"] == unique_vm_name), None)
             assert vm is not None
-            assert vm["status"] == "STOPPED", (
-                f"Expected STOPPED, got {vm['status']}"
+            assert vm["status"] == "stopped", (
+                f"Expected stopped, got {vm['status']}"
             )
 
             # Start (stopped → running)
@@ -269,15 +267,14 @@ class TestVMStateJourney:
             vms = json.loads(result.stdout)
             vm = next((v for v in vms if v["name"] == unique_vm_name), None)
             assert vm is not None
-            assert vm["status"] == "RUNNING", (
-                f"Expected RUNNING, got {vm['status']}"
+            assert vm["status"] == "running", (
+                f"Expected running, got {vm['status']}"
             )
         finally:
             _run_mvm(
                 mvm_binary,
                 "vm",
                 "rm",
-                "--name",
                 unique_vm_name,
                 "--force",
                 check=False,
@@ -301,6 +298,7 @@ class TestIPJourney:
             unique_network_name,
             "--subnet",
             subnet,
+            "--non-interactive",
         )
 
         try:
@@ -332,7 +330,6 @@ class TestIPJourney:
                 mvm_binary,
                 "vm",
                 "rm",
-                "--name",
                 unique_vm_name,
                 "--force",
                 check=False,
@@ -389,12 +386,8 @@ class TestIPJourney:
                 f"SSH not available for '{name_b}' within {ssh_timeout}s"
             )
         finally:
-            _run_mvm(
-                mvm_binary, "vm", "rm", "--name", name_a, "--force", check=False
-            )
-            _run_mvm(
-                mvm_binary, "vm", "rm", "--name", name_b, "--force", check=False
-            )
+            _run_mvm(mvm_binary, "vm", "rm", name_a, "--force", check=False)
+            _run_mvm(mvm_binary, "vm", "rm", name_b, "--force", check=False)
 
 
 class TestSSHJourney:
@@ -471,7 +464,6 @@ class TestSSHJourney:
                 mvm_binary,
                 "vm",
                 "rm",
-                "--name",
                 unique_vm_name,
                 "--force",
                 check=False,
@@ -511,7 +503,6 @@ class TestMultiKeyJourney:
                 mvm_binary,
                 "vm",
                 "rm",
-                "--name",
                 unique_vm_name,
                 "--force",
                 check=False,
@@ -542,6 +533,7 @@ class TestInterVMCommunication:
             unique_network_name,
             "--subnet",
             subnet,
+            "--non-interactive",
         )
         assert result.returncode == 0
 
@@ -599,12 +591,8 @@ class TestInterVMCommunication:
                 f"Ping failed: {ping_result.stdout}\n{ping_result.stderr}"
             )
         finally:
-            _run_mvm(
-                mvm_binary, "vm", "rm", "--name", name_a, "--force", check=False
-            )
-            _run_mvm(
-                mvm_binary, "vm", "rm", "--name", name_b, "--force", check=False
-            )
+            _run_mvm(mvm_binary, "vm", "rm", name_a, "--force", check=False)
+            _run_mvm(mvm_binary, "vm", "rm", name_b, "--force", check=False)
             _run_mvm(
                 mvm_binary, "network", "rm", unique_network_name, check=False
             )
@@ -637,6 +625,9 @@ class TestVMExportImportJourney:
             assert result.returncode == 0
             export_data = json.loads(result.stdout)
 
+            # Remove original VM to release IP lease before import
+            _run_mvm(mvm_binary, "vm", "rm", unique_vm_name)
+
             export_path = tmp_path / "vm_export.json"
             export_path.write_text(json.dumps(export_data))
 
@@ -661,16 +652,6 @@ class TestVMExportImportJourney:
                 mvm_binary,
                 "vm",
                 "rm",
-                "--name",
-                unique_vm_name,
-                "--force",
-                check=False,
-            )
-            _run_mvm(
-                mvm_binary,
-                "vm",
-                "rm",
-                "--name",
                 new_name,
                 "--force",
                 check=False,
@@ -719,7 +700,7 @@ class TestConcurrentVMCreation:
                 f"Expected {vm_count} VMs, found {len(created_vms)}"
             )
             for vm in created_vms:
-                assert vm["status"] == "RUNNING", (
+                assert vm["status"] == "running", (
                     f"VM '{vm['name']}' not RUNNING: {vm['status']}"
                 )
 
@@ -736,7 +717,6 @@ class TestConcurrentVMCreation:
                     mvm_binary,
                     "vm",
                     "rm",
-                    "--name",
                     name,
                     "--force",
                     check=False,

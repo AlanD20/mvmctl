@@ -116,7 +116,14 @@ def cache_prune(
             raise typer.Exit(code=1)
         removed = result.item or []
         if removed:
-            print_success(f"Pruned {len(removed)} VM(s): {', '.join(removed)}")
+            if dry_run:
+                print_info(
+                    f"[DRY RUN] Would prune {len(removed)} VM(s): {', '.join(removed)}"
+                )
+            else:
+                print_success(
+                    f"Pruned {len(removed)} VM(s): {', '.join(removed)}"
+                )
         else:
             print_info("No VMs to prune")
 

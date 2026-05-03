@@ -830,18 +830,13 @@ class TestRunBatch:
     """Tests for _run_batch."""
 
     def test_runs_batch_successfully(self, mocker):
-        mock_privileged = mocker.patch(
-            "mvmctl.utils._system.privileged_cmd",
-            side_effect=lambda cmd: cmd,
-        )
         mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         NetworkUtils._run_batch(["cmd1", "cmd2"])
 
-        mock_privileged.assert_called_once_with(["ip", "-batch", "-"])
         mock_run.assert_called_once_with(
-            ["ip", "-batch", "-"],
+            ["sudo", "ip", "-batch", "-"],
             input="cmd1\ncmd2\n",
             text=True,
             check=True,
@@ -849,10 +844,6 @@ class TestRunBatch:
         )
 
     def test_raises_on_failure(self, mocker):
-        mocker.patch(
-            "mvmctl.utils._system.privileged_cmd",
-            side_effect=lambda cmd: cmd,
-        )
         mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
         mock_run.side_effect = subprocess.CalledProcessError(
             1, ["ip", "-batch", "-"]

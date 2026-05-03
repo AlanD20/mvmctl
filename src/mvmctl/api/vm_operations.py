@@ -762,18 +762,92 @@ class VMOperation:
         """
         List all VMs, optionally filtered by status.
 
+        Enriches each VM with the ``network`` relation via ``VMResolver``
+        (batch-resolved, no N+1).
+
         Args:
             status: Optional status filter. Single status or list of statuses.
                     If None (default), all VMs are returned.
 
         Returns:
-            List of VMInstanceItem records.
+            List of VMInstanceItem records with resolved relations.
 
         """
-        repo = VMRepository(Database())
+        from mvmctl.core.vm._resolver import VMResolver
+
+        db = Database()
+        repo = VMRepository(db)
         if status is not None:
-            return repo.list_by_status(status)
-        return repo.list_all()
+            vms = repo.list_by_status(status)
+        else:
+            vms = repo.list_all()
+
+        if vms:
+            VMResolver(repo, include=["network"])._enrich(vms)
+
+        return vms
+
+    @staticmethod
+    def to_json(vms: list[VMInstanceItem]) -> list[dict[str, Any]]:
+        """
+        Convert enriched VM model list to JSON-serializable dicts.
+
+        Relies on ``list_all()`` having already populated ``vm.network``
+        with the resolved ``NetworkItem`` — no additional DB queries.
+
+        Args:
+            vms: List of VMInstanceItem records (must have network enriched).
+
+        Returns:
+            List of VM dicts suitable for JSON serialization.
+
+        """
+        return [
+            {
+                "id": vm.id,
+                "name": vm.name,
+                "status": vm.status,
+                "pid": vm.pid,
+                "exit_code": vm.exit_code,
+                "ipv4": vm.ipv4,
+                "mac": vm.mac,
+                "network_id": vm.network_id,
+                "network_name": vm.network.name if vm.network else None,
+                "network_subnet": vm.network.subnet if vm.network else None,
+                "network_bridge": vm.network.bridge if vm.network else None,
+                "network_gateway": vm.network.ipv4_gateway
+                if vm.network
+                else None,
+                "tap_device": vm.tap_device,
+                "image_id": vm.image_id,
+                "kernel_id": vm.kernel_id,
+                "binary_id": vm.binary_id,
+                "vcpu_count": vm.vcpu_count,
+                "mem_size_mib": vm.mem_size_mib,
+                "disk_size_mib": vm.disk_size_mib,
+                "api_socket_path": vm.api_socket_path,
+                "config_path": vm.config_path,
+                "cloud_init_mode": vm.cloud_init_mode,
+                "rootfs_path": vm.rootfs_path,
+                "rootfs_suffix": vm.rootfs_suffix,
+                "enable_pci": vm.enable_pci,
+                "enable_logging": vm.enable_logging,
+                "enable_metrics": vm.enable_metrics,
+                "enable_console": vm.enable_console,
+                "created_at": vm.created_at,
+                "updated_at": vm.updated_at,
+                "relay_socket_path": vm.relay_socket_path,
+                "process_start_time": vm.process_start_time,
+                "nocloud_net_port": vm.nocloud_net_port,
+                "nocloud_net_pid": vm.nocloud_net_pid,
+                "relay_pid": vm.relay_pid,
+                "log_path": vm.log_path,
+                "serial_output_path": vm.serial_output_path,
+                "lsm_flags": vm.lsm_flags,
+                "boot_args": vm.boot_args,
+            }
+            for vm in vms
+        ]
 
     @staticmethod
     def get(inputs: VMInput) -> VMInstanceItem:
@@ -1120,7 +1194,11 @@ class VMOperation:
         vm = resolved.vms[0]
         try:
             controller = VMController(vm, VMRepository(Database()))
-            controller.load_snapshot(mem_in, state_in, resume_after)
+            controller.load_snapshot(
+                mem_in,
+                state_in,
+                resume_after if resume_after is not None else False,
+            )
             AuditLog.log("vm.load_snapshot", context=f"name={vm.name}")
             return OperationResult(
                 status="success",

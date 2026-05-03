@@ -204,6 +204,17 @@ class SmartSubprocessMock:
         ):
             return self._ok("inet 10.20.0.1/24 scope global mvm-br0\n")
 
+        # --- ip -o -4 addr show <iface>: interface IPv4 address query ---
+        if (
+            len(cmd) >= 6
+            and cmd[0] == "ip"
+            and cmd[1] == "-o"
+            and cmd[2] == "-4"
+            and cmd[3] == "addr"
+            and cmd[4] == "show"
+        ):
+            return self._ok("inet 10.0.0.2/24 scope global eth0\n")
+
         # --- ip route show default ---
         if "ip" in cmd_str and "route" in cmd_str and "default" in cmd_str:
             return self._ok("default via 192.168.1.1 dev eth0")
@@ -402,6 +413,7 @@ def _mock_path_exists(monkeypatch: pytest.MonkeyPatch) -> None:
             "/usr/sbin/iptables-save",
             "/usr/sbin/sysctl",
             "/usr/sbin/modprobe",
+            "/sys/class/net/eth0",
         }
         if str(self) in privileged:
             return True

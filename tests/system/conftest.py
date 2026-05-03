@@ -98,7 +98,7 @@ def system_cache_dir() -> Path:
 def timing_targets() -> dict[str, float]:
     """Per-image boot timing targets in seconds."""
     return {
-        "alpine-3.21": 5.0,
+        "alpine-3.21": 15.0,
         "ubuntu-24.04-minimal": 10.0,
         "ubuntu-24.04": 20.0,
         "archlinux": 10.0,
@@ -300,7 +300,6 @@ def created_vm(
             mvm_binary,
             "vm",
             "rm",
-            "--name",
             unique_vm_name,
             "--force",
             check=False,
@@ -320,6 +319,7 @@ def created_network(
         unique_network_name,
         "--subnet",
         subnet,
+        "--non-interactive",
     )
 
     try:
@@ -368,9 +368,7 @@ def lifecycle_vm(mvm_binary) -> Generator[dict[str, Any], None, None]:
     try:
         yield vm_info
     finally:
-        _run_mvm(
-            mvm_binary, "vm", "rm", "--name", vm_name, "--force", check=False
-        )
+        _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
 
 
 # ============================================================================

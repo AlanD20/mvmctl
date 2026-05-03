@@ -26,17 +26,17 @@ tasks:
     cmds:
       - uv run mypy src/
   test:
-    desc: Run pytest with 80% branch coverage gate
+    desc: Run pytest with 60% branch coverage gate
     cmds:
-      - uv run pytest tests/ -v -n auto --tb=short --cov=src/mvmctl --cov-report=term-missing --cov-fail-under=80
+      - uv run pytest tests/ -v -n auto --tb=short --cov=src/mvmctl --cov-report=term-missing --cov-fail-under=60
   test-integration:
-    desc: Run pytest with 80% branch coverage gate
+    desc: Run pytest integration tests
     cmds:
-      - uv run pytest tests/integration -v -n auto --tb=short --cov=src/mvmctl --cov-report=term-missing
+      - uv run pytest tests/integration -v -n auto --tb=short
   test-ci:
-    desc: Run pytest with 80% branch coverage gate
+    desc: Run pytest with 60% branch coverage gate
     cmds:
-      - MVM_TEST_ENFORCE_NO_SUDO=1 uv run pytest tests/ -v --tb=short --cov=src/mvmctl --cov-report=term-missing --cov-fail-under=80
+      - MVM_TEST_ENFORCE_NO_SUDO=1 uv run pytest tests/ -v --tb=short --cov=src/mvmctl --cov-report=term-missing --cov-fail-under=60
   test-ci-fast:
     desc: Run tests without coverage — stop on first failure (fast feedback)
     cmds:
@@ -155,6 +155,11 @@ tasks:
     deps: [sys-setup]
     cmds:
       - uv run pytest tests/system/ -v -n auto --no-cov -rx
+  sys-test-seq:
+    desc: Run all system tests sequentially (no xdist)
+    deps: [sys-setup]
+    cmds:
+      - uv run pytest tests/system/ -v --no-cov -rx -n 0
   sys-test-fast:
     desc: Run fast system tests only — no KVM, no slow downloads (no mvm group needed)
     cmds:

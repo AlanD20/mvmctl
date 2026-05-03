@@ -12,6 +12,26 @@ from tests.system.conftest import _run_mvm, _unique_subnet
 pytestmark = [pytest.mark.system, pytest.mark.requires_network]
 
 
+def _compute_bridge_name(name: str) -> str:
+    """Replicate NetworkUtils.compute_bridge_name for test assertions.
+
+    Bridge names are limited to 15 chars (IFNAMSIZ). If the full
+    mvm-{name} exceeds 15, the name portion is truncated and a hash
+    suffix is appended to preserve uniqueness.
+    """
+    import hashlib
+
+    raw = f"mvm-{name}"
+    if len(raw) <= 15:
+        return raw
+    hash_len = 8
+    prefix = "mvm-"
+    max_name = 15 - len(prefix) - hash_len - 1  # -1 for '-' separator
+    name_truncated = name[:max_name]
+    short_hash = hashlib.sha256(name.encode()).hexdigest()[:hash_len]
+    return f"{prefix}{name_truncated}-{short_hash}"
+
+
 class TestNetworkLifecycle:
     """Test network CRUD operations."""
 
@@ -30,6 +50,7 @@ class TestNetworkLifecycle:
                 unique_network_name,
                 "--subnet",
                 subnet,
+                "--non-interactive",
             )
             assert result.returncode == 0
             assert unique_network_name in result.stdout
@@ -53,6 +74,7 @@ class TestNetworkLifecycle:
                 unique_network_name,
                 "--subnet",
                 subnet,
+                "--non-interactive",
             )
             assert result.returncode == 0
         finally:
@@ -70,6 +92,7 @@ class TestNetworkLifecycle:
 
     def test_ip_rule_verification_iptables(self, created_network):
         """Verify iptables rules were created for network."""
+        bridge = _compute_bridge_name(created_network)
         result = subprocess.run(
             ["sudo", "iptables", "-t", "nat", "-L"],
             capture_output=True,
@@ -77,17 +100,18 @@ class TestNetworkLifecycle:
         )
         assert result.returncode == 0
         # Bridge name for this network should appear in iptables rules
-        assert f"mvm-{created_network}" in result.stdout
+        assert bridge in result.stdout
 
     def test_nat_gateway_configuration(self, created_network):
         """Verify bridge interface exists for created network."""
+        bridge = _compute_bridge_name(created_network)
         result = subprocess.run(
             ["ip", "addr", "show"],
             capture_output=True,
             text=True,
         )
         assert result.returncode == 0
-        assert f"mvm-{created_network}" in result.stdout
+        assert bridge in result.stdout
 
     def test_network_deletion_and_cleanup(
         self, mvm_binary, unique_network_name
@@ -101,6 +125,7 @@ class TestNetworkLifecycle:
             unique_network_name,
             "--subnet",
             _unique_subnet(unique_network_name),
+            "--non-interactive",
         )
 
         try:
@@ -124,11 +149,15 @@ class TestNetworkLifecycle:
 
     def test_duplicate_network_handling(self, mvm_binary, created_network):
         """Attempt to create duplicate network name is rejected."""
+        subnet = _unique_subnet(created_network)
         result = _run_mvm(
             mvm_binary,
             "network",
             "create",
             created_network,
+            "--subnet",
+            subnet,
+            "--non-interactive",
             check=False,
         )
         assert result.returncode != 0
@@ -146,6 +175,7 @@ class TestNetworkLifecycle:
             unique_network_name,
             "--subnet",
             "invalid-cidr",
+            "--non-interactive",
             check=False,
         )
         assert result.returncode != 0
@@ -247,6 +277,7 @@ class TestNetworkLifecycle:
             name_a,
             "--subnet",
             _unique_subnet(name_a),
+            "--non-interactive",
         )
         _run_mvm(
             mvm_binary,
@@ -255,6 +286,7 @@ class TestNetworkLifecycle:
             name_b,
             "--subnet",
             _unique_subnet(name_b),
+            "--non-interactive",
         )
 
         try:

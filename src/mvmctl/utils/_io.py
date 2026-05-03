@@ -220,12 +220,16 @@ def setup_logging(*, verbose: bool = False, debug: bool = False) -> None:
     from mvmctl.utils.common import CacheUtils
 
     log_path = CacheUtils.get_log_path()
-    file_handler = RotatingFileHandler(
-        str(log_path), maxBytes=10_485_760, backupCount=3
-    )
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(formatter)
-    root.addHandler(file_handler)
+    try:
+        file_handler = RotatingFileHandler(
+            str(log_path), maxBytes=10_485_760, backupCount=3
+        )
+    except Exception:
+        pass
+    else:
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(formatter)
+        root.addHandler(file_handler)
 
     # Root must be at lowest level so individual handlers can filter up
     root.setLevel(logging.DEBUG)

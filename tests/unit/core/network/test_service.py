@@ -168,15 +168,12 @@ class TestNetworkServiceBridge:
         """remove_bridge() removes bridge and its attached TAPs."""
         mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
         mocker.patch.object(NetworkUtils, "get_bridge_taps", return_value=[])
-        mock_batch = mocker.patch.object(NetworkUtils, "_run_batch")
+        mock_raw = mocker.patch.object(NetworkService, "remove_raw_bridge")
 
         service = NetworkService(repo)
         service.remove_bridge("mvm-test-net", network_id="test-net-001")
 
-        mock_batch.assert_called_once()
-        batch_input = mock_batch.call_args[0][0]
-        assert "link set mvm-test-net down" in batch_input
-        assert "link delete mvm-test-net type bridge" in batch_input
+        mock_raw.assert_called_once_with("mvm-test-net")
 
     def test_remove_bridge_removes_attached_taps(
         self, repo: NetworkRepository, mocker
@@ -187,10 +184,8 @@ class TestNetworkServiceBridge:
             NetworkUtils, "get_bridge_taps", return_value=["tap-vm1", "tap-vm2"]
         )
         mocker.patch.object(NetworkUtils, "tap_exists", return_value=True)
-        mocker.patch.object(
-            NetworkUtils, "get_tap_bridge", return_value="mvm-test-net"
-        )
-        mocker.patch.object(NetworkUtils, "_run_batch")
+        mocker.patch.object(NetworkUtils, "get_tap_bridge", return_value="mvm-test-net")
+        mocker.patch.object(NetworkService, "remove_raw_tap")
         mock_remove_tap = mocker.patch.object(
             NetworkService, "remove_tap", autospec=True
         )
@@ -205,13 +200,11 @@ class TestNetworkServiceBridge:
         self, repo: NetworkRepository, mocker
     ) -> None:
         """remove_bridge() raises NetworkError when bridge removal fails."""
-        import subprocess
-
         mocker.patch.object(NetworkUtils, "get_bridge_taps", return_value=[])
         mocker.patch.object(
-            NetworkUtils,
-            "_run_batch",
-            side_effect=subprocess.CalledProcessError(1, ["ip", "-batch", "-"]),
+            NetworkService,
+            "remove_raw_bridge",
+            side_effect=NetworkError("Failed to remove bridge"),
         )
 
         service = NetworkService(repo)
@@ -322,31 +315,28 @@ class TestNetworkServiceTap:
         mocker.patch.object(
             NetworkUtils, "get_tap_bridge", return_value="mvm-test-net"
         )
-        mock_batch = mocker.patch.object(NetworkUtils, "_run_batch")
+        mock_raw = mocker.patch.object(NetworkService, "remove_raw_tap")
 
         service = NetworkService(repo)
         service.remove_tap(
             "tap-vm1", "mvm-test-net", network_id=default_network.id
         )
 
-        mock_batch.assert_called_once()
-        batch_input = mock_batch.call_args[0][0]
-        assert "link set tap-vm1 down" in batch_input
-        assert "link delete tap-vm1" in batch_input
+        mock_raw.assert_called_once_with("tap-vm1")
 
     def test_remove_tap_noop_when_missing(
         self, repo: NetworkRepository, default_network, mocker
     ) -> None:
         """remove_tap() is a no-op when TAP doesn't exist."""
         mocker.patch.object(NetworkUtils, "tap_exists", return_value=False)
-        mock_batch = mocker.patch.object(NetworkUtils, "_run_batch")
+        mock_raw = mocker.patch.object(NetworkService, "remove_raw_tap")
 
         service = NetworkService(repo)
         service.remove_tap(
             "tap-gone", "mvm-test-net", network_id=default_network.id
         )
 
-        mock_batch.assert_not_called()
+        mock_raw.assert_not_called()
 
     def test_remove_tap_without_bridge_detects(
         self, repo: NetworkRepository, default_network, mocker
@@ -357,12 +347,12 @@ class TestNetworkServiceTap:
         mocker.patch.object(
             NetworkUtils, "get_tap_bridge", return_value="mvm-test-net"
         )
-        mock_batch = mocker.patch.object(NetworkUtils, "_run_batch")
+        mock_raw = mocker.patch.object(NetworkService, "remove_raw_tap")
 
         service = NetworkService(repo)
         service.remove_tap("tap-vm1", network_id=default_network.id)
 
-        mock_batch.assert_called_once()
+        mock_raw.assert_called_once_with("tap-vm1")
 
 
 class TestNetworkServiceNat:
@@ -796,7 +786,7 @@ class TestNetworkServiceTapEdgeCases:
         """remove_tap() skips rule cleanup when bridge can't be detected."""
         mocker.patch.object(NetworkUtils, "tap_exists", return_value=True)
         mocker.patch.object(NetworkUtils, "get_tap_bridge", return_value=None)
-        mock_batch = mocker.patch.object(NetworkUtils, "_run_batch")
+        mock_raw = mocker.patch.object(NetworkService, "remove_raw_tap")
         mock_remove = mocker.patch(
             "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.remove_rule",
         )
@@ -805,7 +795,7 @@ class TestNetworkServiceTapEdgeCases:
         service.remove_tap("tap-vm1", network_id=default_network.id)
 
         mock_remove.assert_not_called()
-        mock_batch.assert_called_once()
+        mock_raw.assert_called_once_with("tap-vm1")
 
     def test_remove_tap_logs_warning_on_rule_failure(
         self, repo: NetworkRepository, default_network, mocker
@@ -815,7 +805,7 @@ class TestNetworkServiceTapEdgeCases:
         mocker.patch.object(
             NetworkUtils, "get_tap_bridge", return_value="mvm-test-net"
         )
-        mock_batch = mocker.patch.object(NetworkUtils, "_run_batch")
+        mock_raw = mocker.patch.object(NetworkService, "remove_raw_tap")
         mocker.patch(
             "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.remove_rule",
             return_value=MagicMock(success=False, error_message="not found"),
@@ -826,7 +816,7 @@ class TestNetworkServiceTapEdgeCases:
             "tap-vm1", "mvm-test-net", network_id=default_network.id
         )
 
-        mock_batch.assert_called_once()
+        mock_raw.assert_called_once_with("tap-vm1")
 
     def test_remove_tap_raises_on_batch_failure(
         self, repo: NetworkRepository, default_network, mocker
@@ -841,9 +831,9 @@ class TestNetworkServiceTapEdgeCases:
             return_value=MagicMock(success=True),
         )
         mocker.patch.object(
-            NetworkUtils,
-            "_run_batch",
-            side_effect=subprocess.CalledProcessError(1, ["ip", "-batch", "-"]),
+            NetworkService,
+            "remove_raw_tap",
+            side_effect=NetworkError("Failed to remove TAP device"),
         )
 
         service = NetworkService(repo)
@@ -1403,3 +1393,123 @@ class TestNetworkServiceReconcileEdgeCases:
                 subnet="10.0.0.0/24",
                 network_id=default_network.id,
             )
+
+
+class TestNetworkServiceRemoveStaleInterfaces:
+    """Tests for NetworkService.remove_stale_interfaces()."""
+
+    def test_no_bridges_returns_empty(self, repo: NetworkRepository, mocker) -> None:
+        """Should return empty list when no bridges exist."""
+        mocker.patch.object(NetworkUtils, "get_bridges", return_value=[])
+
+        service = NetworkService(repo)
+        result = service.remove_stale_interfaces("mvm-")
+
+        assert result == []
+
+    def test_no_matching_bridges_returns_empty(
+        self, repo: NetworkRepository, mocker
+    ) -> None:
+        """Should return empty list when bridges exist but none match prefix."""
+        mocker.patch.object(
+            NetworkUtils, "get_bridges", return_value=["docker0", "br-foo"]
+        )
+
+        service = NetworkService(repo)
+        result = service.remove_stale_interfaces("mvm-")
+
+        assert result == []
+
+    def test_removes_slaves_from_matching_bridges(
+        self, repo: NetworkRepository, mocker
+    ) -> None:
+        """Should remove all slave interfaces from bridges matching prefix."""
+        mocker.patch.object(
+            NetworkUtils, "get_bridges", return_value=["mvm-net", "docker0"]
+        )
+        mocker.patch.object(
+            NetworkUtils,
+            "get_bridge_slaves",
+            side_effect=lambda bridge: (
+                ["mvm-net-tap1", "mvm-net-tap2"] if bridge == "mvm-net" else []
+            ),
+        )
+        mock_raw = mocker.patch.object(NetworkService, "remove_raw_tap")
+
+        service = NetworkService(repo)
+        result = service.remove_stale_interfaces("mvm-")
+
+        assert mock_raw.call_count == 2
+        assert "Removed interface 'mvm-net-tap1'" in result
+        assert "Removed interface 'mvm-net-tap2'" in result
+
+    def test_handles_slave_removal_failure(
+        self, repo: NetworkRepository, mocker
+    ) -> None:
+        """Should record warning when slave removal fails."""
+        mocker.patch.object(NetworkUtils, "get_bridges", return_value=["mvm-net"])
+        mocker.patch.object(
+            NetworkUtils, "get_bridge_slaves", return_value=["mvm-net-tap1"]
+        )
+        mocker.patch.object(
+            NetworkService,
+            "remove_raw_tap",
+            side_effect=NetworkError("ip link delete failed"),
+        )
+
+        service = NetworkService(repo)
+        result = service.remove_stale_interfaces("mvm-")
+
+        assert len(result) == 1
+        assert "Warning: failed to remove interface 'mvm-net-tap1'" in result[0]
+
+    def test_multiple_bridges_with_slaves(
+        self, repo: NetworkRepository, mocker
+    ) -> None:
+        """Should process all matching bridges and their slaves."""
+        mocker.patch.object(
+            NetworkUtils,
+            "get_bridges",
+            return_value=["mvm-net", "mvm-testnet", "docker0"],
+        )
+
+        def _slaves(bridge: str) -> list[str]:
+            if bridge == "mvm-net":
+                return ["mvm-net-tap1"]
+            if bridge == "mvm-testnet":
+                return ["mvm-testnet-tap1", "mvm-testnet-tap2"]
+            return []
+
+        mocker.patch.object(NetworkUtils, "get_bridge_slaves", side_effect=_slaves)
+        mock_raw = mocker.patch.object(NetworkService, "remove_raw_tap")
+
+        service = NetworkService(repo)
+        result = service.remove_stale_interfaces("mvm-")
+
+        assert mock_raw.call_count == 3
+        assert "Removed interface 'mvm-net-tap1'" in result
+        assert "Removed interface 'mvm-testnet-tap1'" in result
+        assert "Removed interface 'mvm-testnet-tap2'" in result
+
+    def test_different_prefix(self, repo: NetworkRepository, mocker) -> None:
+        """Should only match bridges with the given prefix."""
+        mocker.patch.object(
+            NetworkUtils,
+            "get_bridges",
+            return_value=["foo-bridge", "foo-tap-br", "mvm-net"],
+        )
+        mocker.patch.object(
+            NetworkUtils,
+            "get_bridge_slaves",
+            side_effect=lambda bridge: (
+                ["foo-slave"] if bridge == "foo-bridge" else []
+            ),
+        )
+        mock_raw = mocker.patch.object(NetworkService, "remove_raw_tap")
+
+        service = NetworkService(repo)
+        result = service.remove_stale_interfaces("foo-")
+
+        assert mock_raw.call_count == 1
+        assert "Removed interface 'foo-slave'" in result
+        assert "mvm-net" not in str(result)

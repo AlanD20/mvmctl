@@ -66,46 +66,7 @@ def vm_ls(
     vms: list[VMInstanceItem] = VMOperation.list_all()
 
     if json_output:
-        data = [
-            {
-                "id": vm.id,
-                "name": vm.name,
-                "status": vm.status,
-                "pid": vm.pid,
-                "exit_code": vm.exit_code,
-                "ipv4": vm.ipv4,
-                "mac": vm.mac,
-                "network_id": vm.network_id,
-                "tap_device": vm.tap_device,
-                "image_id": vm.image_id,
-                "kernel_id": vm.kernel_id,
-                "binary_id": vm.binary_id,
-                "vcpu_count": vm.vcpu_count,
-                "mem_size_mib": vm.mem_size_mib,
-                "disk_size_mib": vm.disk_size_mib,
-                "api_socket_path": vm.api_socket_path,
-                "config_path": vm.config_path,
-                "cloud_init_mode": vm.cloud_init_mode,
-                "rootfs_path": vm.rootfs_path,
-                "rootfs_suffix": vm.rootfs_suffix,
-                "enable_pci": vm.enable_pci,
-                "enable_logging": vm.enable_logging,
-                "enable_metrics": vm.enable_metrics,
-                "enable_console": vm.enable_console,
-                "created_at": vm.created_at,
-                "updated_at": vm.updated_at,
-                "relay_socket_path": vm.relay_socket_path,
-                "process_start_time": vm.process_start_time,
-                "nocloud_net_port": vm.nocloud_net_port,
-                "nocloud_net_pid": vm.nocloud_net_pid,
-                "relay_pid": vm.relay_pid,
-                "log_path": vm.log_path,
-                "serial_output_path": vm.serial_output_path,
-                "lsm_flags": vm.lsm_flags,
-                "boot_args": vm.boot_args,
-            }
-            for vm in vms
-        ]
+        data = VMOperation.to_json(VMOperation.list_all())
         typer.echo(json.dumps(data, indent=2))
         return
 
@@ -247,7 +208,7 @@ def vm_create(
     cloud_init_mode: str | None = typer.Option(
         None,
         "--cloud-init-mode",
-        help="Cloud-init mode: 'inject' (default, direct injection), 'iso' (ISO mode), 'net' (HTTP), 'off' (no cloud-init)",
+        help="Cloud-init mode: 'inject' (direct injection), 'iso' (ISO mode), 'net' (HTTP), 'off' (default, no cloud-init)",
     ),
     nocloud_net_port: int | None = typer.Option(
         None,
@@ -313,7 +274,7 @@ def vm_create(
             if event.message:
                 status.update(event.message)
 
-        VMOperation.create(
+        result = VMOperation.create(
             VMCreateInput(
                 name=name,
                 vcpu_count=vcpus,
@@ -341,6 +302,12 @@ def vm_create(
             ),
             on_progress=_on_progress,
         )
+    if isinstance(result, NeedsInteraction):
+        print_error(result.message)
+        raise typer.Exit(code=1)
+    if result.is_error:
+        print_error(result.message)
+        raise typer.Exit(code=1)
     print_success(f"VM '{name}' created")
 
 

@@ -51,22 +51,31 @@ class VMController:
         that removal cleanup can still proceed.
         """
 
-        # Idempotent — nothing to do if the VM isn't running.
-        if self._vm.status not in (
-            VMStatus.RUNNING.value,
-            VMStatus.STARTING.value,
-        ):
-            return
-
         handler = ProcessSignalHandler(
             self._vm.pid,
             expected_start_time=self._vm.process_start_time,
         )
 
+        # ── Non-running VMs: idempotent + orphan cleanup ──
+        # The DB status might be STOPPED/PAUSED/ERROR but the actual
+        # firecracker process could still be running (e.g., after a
+        # failed cleanup or orphaned process from a previous run).
+        if self._vm.status not in (
+            VMStatus.RUNNING.value,
+            VMStatus.STARTING.value,
+        ):
+            if self._vm.pid and handler.is_alive():
+                handler.kill()
+                self._repo.update_status(self._vm.id, VMStatus.STOPPED.value)
+                self._vm.status = VMStatus.STOPPED.value
+            return
+
+        # ── RUNNING/STARTING but process is already gone ──
         if not self._vm.pid or not handler.is_alive():
             self._repo.update_status(self._vm.id, VMStatus.STOPPED.value)
             return
 
+        # ── Normal stop: process is alive, VM is running ──
         self._repo.update_status(self._vm.id, VMStatus.STOPPING.value)
         try:
             if not force and self._vm.api_socket_path:

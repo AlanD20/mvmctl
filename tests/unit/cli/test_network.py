@@ -61,27 +61,9 @@ class TestNetworkLs:
 
     @patch("mvmctl.cli.network.NetworkOperation")
     def test_ls_json(self, mock_net_op):
-        mock_net_op.list_all.return_value = [_make_network("testnet")]
-
-        def _mock_to_dict(n: NetworkItem) -> dict[str, object]:
-            return {
-                "id": n.id,
-                "name": n.name,
-                "subnet": n.subnet,
-                "bridge": n.bridge,
-                "ipv4_gateway": n.ipv4_gateway,
-                "bridge_active": n.bridge_active,
-                "nat_enabled": n.nat_enabled,
-                "is_default": n.is_default,
-                "is_present": n.is_present,
-                "created_at": n.created_at,
-                "updated_at": n.updated_at,
-                "nat_gateways": n.nat_gateways_list if hasattr(n, "nat_gateways_list") else [],
-                "leases": [],
-                "iptables_rules": [],
-            }
-
-        mock_net_op._network_to_dict.side_effect = _mock_to_dict
+        mock_net_op.to_json.return_value = [
+            {"name": "testnet", "vm_count": 0, "leases": [], "iptables_rules": []}
+        ]
         result = runner.invoke(app, ["network", "ls", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)

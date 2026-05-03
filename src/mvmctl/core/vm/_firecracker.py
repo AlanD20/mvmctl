@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import http.client
 import json
 import logging
@@ -559,6 +560,9 @@ class FirecrackerClient:
         try:
             self._conn = UnixSocketHTTPConnection(self._socket_path)
         except OSError as e:
+            # Let ECONNREFUSED propagate so _request() can retry
+            if e.errno == errno.ECONNREFUSED:
+                raise
             raise FirecrackerClientError(
                 f"Failed to connect to socket: {e}"
             ) from e
@@ -570,7 +574,10 @@ class FirecrackerClient:
         body: dict[str, object] | None = None,
     ) -> tuple[int, dict[str, object] | None]:
         """
-        Make HTTP request to Firecracker API.
+        Make HTTP request to Firecracker API with retry on connection refused.
+
+        Retries up to 5 times with exponential backoff (0.1s, 0.2s, 0.4s, 0.8s, 1.6s)
+        when the Firecracker API server is not yet ready (ECONNREFUSED).
 
         Raises:
             SocketNotFoundError: If the socket file does not exist.
@@ -584,21 +591,42 @@ class FirecrackerClient:
         headers = {"Content-Type": "application/json"} if body else {}
         body_json = json.dumps(body) if body else None
 
-        try:
-            self._conn.request(method, path, body=body_json, headers=headers)
-            response = self._conn.getresponse()
-            status = response.status
+        max_retries = 5
+        delay = 0.1
+        last_exception: Exception | None = None
 
-            # Read response body
-            response_body = response.read().decode("utf-8")
-            data = json.loads(response_body) if response_body else None
+        for attempt in range(max_retries):
+            try:
+                self._conn.request(
+                    method, path, body=body_json, headers=headers
+                )
+                response = self._conn.getresponse()
+                status = response.status
 
-            return status, data
+                # Read response body
+                response_body = response.read().decode("utf-8")
+                data = json.loads(response_body) if response_body else None
 
-        except (SocketNotFoundError, FirecrackerClientError):
-            raise
-        except OSError as e:
-            raise FirecrackerClientError(f"API request failed: {e}") from e
+                return status, data
+
+            except (SocketNotFoundError, FirecrackerClientError):
+                raise
+            except OSError as e:
+                # Only retry on connection refused (ECONNREFUSED)
+                if e.errno == errno.ECONNREFUSED and attempt < max_retries - 1:
+                    last_exception = e
+                    time.sleep(delay)
+                    delay *= 2
+                    # Reconnect for next attempt
+                    self.close()
+                    self._connect()
+                    continue
+                raise FirecrackerClientError(f"API request failed: {e}") from e
+
+        # All retries exhausted
+        raise FirecrackerClientError(
+            f"API request failed after {max_retries} retries: {last_exception}"
+        ) from last_exception
 
     def close(self) -> None:
         """Close connection."""

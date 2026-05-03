@@ -75,7 +75,9 @@ class TestVMLs:
 
     @patch("mvmctl.cli.vm.VMOperation")
     def test_ls_json(self, mock_vm_op):
-        mock_vm_op.list_all.return_value = [_make_vm("myvm", "running")]
+        mock_vm_op.to_json.return_value = [
+            {"name": "myvm", "network_name": None}
+        ]
         result = runner.invoke(app, ["vm", "ls", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -546,7 +548,7 @@ class TestVMLsEdgeCases:
 
     @patch("mvmctl.cli.vm.VMOperation")
     def test_ls_json_empty(self, mock_vm_op):
-        mock_vm_op.list_all.return_value = []
+        mock_vm_op.to_json.return_value = []
         result = runner.invoke(app, ["vm", "ls", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -563,8 +565,19 @@ class TestVMLsEdgeCases:
 
     @patch("mvmctl.cli.vm.VMOperation")
     def test_ls_json_includes_all_fields(self, mock_vm_op):
-        mock_vm_op.list_all.return_value = [
-            _make_vm("full-vm", "running", exit_code=None),
+        mock_vm_op.to_json.return_value = [
+            {
+                "id": "full-vm-id-xxxxxxxxx",
+                "name": "full-vm",
+                "status": "running",
+                "pid": 1234,
+                "exit_code": None,
+                "ipv4": "10.0.0.2",
+                "mac": "02:FC:00:00:00:01",
+                "network_id": "default",
+                "network_name": None,
+                "tap_device": "mvm-default-tap0",
+            }
         ]
         result = runner.invoke(app, ["vm", "ls", "--json"])
         assert result.exit_code == 0

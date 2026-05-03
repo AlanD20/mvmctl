@@ -12,6 +12,7 @@ from pathlib import Path
 
 from mvmctl.constants import CLI_NAME
 from mvmctl.exceptions import NetworkError
+from mvmctl.utils._system import privileged_cmd
 
 logger = logging.getLogger(__name__)
 
@@ -272,6 +273,39 @@ class NetworkUtils:
         return bridges
 
     @staticmethod
+    def get_bridge_slaves(bridge: str) -> list[str]:
+        """Return all interface names attached to a bridge.
+
+        Uses ``ip -o link show master <bridge>`` to list slave interfaces.
+        Returns an empty list if the bridge does not exist or has no slaves.
+
+        Args:
+            bridge: Bridge interface name.
+
+        Returns:
+            List of slave interface names.
+
+        """
+        result = subprocess.run(
+            ["ip", "-o", "link", "show", "master", bridge],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+
+        slaves: list[str] = []
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 2:
+                # Format: "1624: mvm-net-orp-taa@NONE: <NO-CARRIER...>"
+                slave = parts[1].rstrip(":").split("@")[0]
+                if slave != bridge:
+                    slaves.append(slave)
+        return slaves
+
+    @staticmethod
     def get_bridge_taps(bridge: str) -> list[str]:
         """List all TAP devices currently attached to the bridge."""
         result = subprocess.run(
@@ -456,7 +490,7 @@ class NetworkUtils:
         """Execute a batch of ip commands using ip -batch mode."""
         batch = "\n".join(commands) + "\n"
         subprocess.run(
-            ["ip", "-batch", "-"],
+            privileged_cmd(["ip", "-batch", "-"]),
             input=batch,
             text=True,
             check=True,
