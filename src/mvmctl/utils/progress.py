@@ -7,6 +7,7 @@ in CI/script environments.
 """
 
 import logging
+import os
 import shutil
 import sys
 import threading
@@ -43,7 +44,13 @@ class ASCIIProgressBar:
         self.current = 0
         self._last_line_length = 0
         self._last_percent = -1
-        self._is_tty = sys.stdout.isatty()
+        # Use os.isatty(fd) instead of sys.stdout.isatty() — Rich's Console
+        # proxy overrides the Python-level isatty() even when the underlying
+        # file descriptor IS a TTY, which breaks \r carriage-return updates.
+        try:
+            self._is_tty = os.isatty(sys.stdout.fileno())
+        except (OSError, ValueError):
+            self._is_tty = False
 
     def update(self, n: int) -> None:
         """
@@ -98,16 +105,25 @@ class ASCIIProgressBar:
             line = line[: term_width - 1]
 
         terminator = "\r\033[K" if self._is_tty else "\n"
-        sys.stdout.write(f"{terminator}{line}")
-        sys.stdout.flush()
+        output = f"{terminator}{line}"
+
+        if self._is_tty:
+            # Bypass Python-level stdout wrappers (e.g. Rich's Console which
+            # intercepts ANSI escapes and \r). os.write(fd, …) goes directly
+            # to the kernel and cannot be intercepted.
+            os.write(1, output.encode())
+        else:
+            # Respect sys.stdout redirection (tests, CI, pipes)
+            sys.stdout.write(output)
+            sys.stdout.flush()
+
         self._last_line_length = len(line)
         self._last_percent = percent
 
     def finish(self) -> None:
         """Finish progress display."""
         if self._is_tty:
-            sys.stdout.write("\r\033[K")
-            sys.stdout.flush()
+            os.write(1, b"\r\033[K")
         print(f"{self.title} complete.")
 
 

@@ -30,6 +30,7 @@ from mvmctl.models.result import (
 )
 from mvmctl.utils.auditlog import AuditLog
 from mvmctl.utils.crypto import HashGenerator
+from mvmctl.utils.operation_utils import OperationUtils
 
 logger = logging.getLogger(__name__)
 
@@ -120,12 +121,15 @@ class KernelOperation:
                             message="Downloading Firecracker kernel...",
                         )
                     )
+
                 fetch_result = kernel_service.fetch_firecracker_kernel(
                     spec=spec,
                     ci_version=ci_version,
                     arch=resolved.arch,
                     output_dir=resolved.output_dir,
-                    show_progress=(on_progress is None),
+                    progress_callback=OperationUtils.download_progress_bridge(
+                        on_progress
+                    ),
                 )
                 if on_progress is not None:
                     on_progress(
@@ -152,7 +156,9 @@ class KernelOperation:
                     keep_build_dir=resolved.keep_build_dir,
                     clean_build=resolved.clean_build,
                     kernel_config=resolved.kernel_config,
-                    show_progress=(on_progress is None),
+                    progress_callback=OperationUtils.download_progress_bridge(
+                        on_progress
+                    ),
                 )
                 if on_progress is not None:
                     on_progress(

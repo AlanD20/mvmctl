@@ -188,8 +188,6 @@ class BinaryService:
                 tgz_path,
                 expected_sha256=expected_sha256,
                 timeout=CONST_HTTP_TIMEOUT_SECONDS,
-                progress_bar=True,
-                title=f"Downloading Firecracker v{normalized_version}",
             )
         except Exception as exc:
             tgz_path.unlink(missing_ok=True)

@@ -188,6 +188,7 @@ class HttpDownload:
             HttpDownloadError: If the download fails.
 
         """
+        cache_file: Path | None = None
         if use_cache:
             cache_file = HttpCache._cache_path(url)
             if HttpCache.is_valid(cache_file, cache_ttl_seconds):
@@ -202,7 +203,7 @@ class HttpDownload:
         try:
             with HttpDownload._urlopen(req, timeout=timeout) as response:
                 data: bytes = response.read()
-                if use_cache:
+                if use_cache and cache_file is not None:
                     HttpCache.write(cache_file, data)
                 return data
         except (URLError, HTTPError, OSError) as exc:
@@ -431,13 +432,12 @@ class HttpDownload:
         dest: Path,
         expected_sha256: str | None = None,
         timeout: int = 300,
-        progress_bar: bool = True,
         allow_missing_checksum: bool = False,
         silent_missing_checksum: bool = False,
-        title: str = "Downloading",
+        progress_callback: Callable[[int, int | None], None] | None = None,
     ) -> bool:
         """
-        Download a file with optional SHA256 verification and progress bar.
+        Download a file with optional SHA256 verification.
 
         This is the **orchestration** entry point: it delegates the actual
         HTTP transfer to :meth:`with_download` and then handles checksum
@@ -448,10 +448,11 @@ class HttpDownload:
             dest: Destination path on disk.
             expected_sha256: Optional SHA256 hex string for verification.
             timeout: Request timeout in seconds.
-            progress_bar: If True, display an ASCII progress bar during download.
             allow_missing_checksum: If True, allow download without checksum.
             silent_missing_checksum: If True, skip warnings for missing checksum.
-            title: Title shown in the progress bar.
+            progress_callback: Optional callback invoked with (current_bytes,
+                total_bytes) for each chunk received. Caller decides how to
+                render progress — e.g. update a Rich spinner, print text, etc.
 
         Returns:
             True on success.
@@ -497,20 +498,16 @@ class HttpDownload:
                     )
 
         sha256_hash = hashlib.sha256() if expected_sha256 else None
-        progress: Any | None = None
-
-        if progress_bar:
-            from mvmctl.utils.progress import ASCIIProgressBar
-
-            progress = ASCIIProgressBar(total=0, title=title)
+        downloaded: list[int] = [0]
+        total_size_cell: list[int | None] = [None]
 
         def _on_start(total_size: int | None) -> None:
-            if progress is not None:
-                progress.total = total_size or 0
+            total_size_cell[0] = total_size
 
-        def _progress_callback(chunk: bytes) -> None:
-            if progress is not None:
-                progress.update(len(chunk))
+        def _chunk_callback(chunk: bytes) -> None:
+            downloaded[0] += len(chunk)
+            if progress_callback is not None:
+                progress_callback(downloaded[0], total_size_cell[0])
             if sha256_hash is not None:
                 sha256_hash.update(chunk)
 
@@ -518,14 +515,11 @@ class HttpDownload:
             url,
             dest,
             timeout=timeout,
-            progress_callback=_progress_callback
-            if progress_bar or sha256_hash
+            progress_callback=_chunk_callback
+            if progress_callback or sha256_hash
             else None,
             on_start=_on_start,
         )
-
-        if progress is not None:
-            progress.finish()
 
         if expected_sha256 and sha256_hash:
             actual_sha256 = sha256_hash.hexdigest()
