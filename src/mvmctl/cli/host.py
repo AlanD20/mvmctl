@@ -10,7 +10,12 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from mvmctl.api import HostOperation
+from mvmctl.api import HostOperation as _HostOperation
+
+if TYPE_CHECKING:
+    from mvmctl.api.host_operations import HostOperation
+else:
+    HostOperation = _HostOperation
 from mvmctl.constants import MVM_UNIX_GROUP
 from mvmctl.exceptions import HostError, PrivilegeError
 from mvmctl.models.result import NeedsInteraction, OperationResult

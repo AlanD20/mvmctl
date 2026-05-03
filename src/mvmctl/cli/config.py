@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import typer
 
-from mvmctl.api import ConfigOperation
+from mvmctl.api import ConfigOperation as _ConfigOperation
+
+if TYPE_CHECKING:
+    from mvmctl.api.config_operations import ConfigOperation
+else:
+    ConfigOperation = _ConfigOperation
 from mvmctl.utils._io import print_error, print_info, print_success
 from mvmctl.utils.cli import handle_errors
 

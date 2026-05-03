@@ -8,12 +8,21 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 from rich.console import Console
 from rich.markup import escape as rich_escape
 
-from mvmctl.api import InitOperation, InitResult
+from mvmctl.api import InitOperation as _InitOperation
+from mvmctl.api import InitResult as _InitResult
+
+if TYPE_CHECKING:
+    from mvmctl.api.init_operations import InitOperation, InitResult
+else:
+    InitOperation = _InitOperation
+    InitResult = _InitResult
+
 from mvmctl.constants import MVM_UNIX_GROUP, SUDOERS_DROP_IN_PATH
 from mvmctl.models.result import ProgressEvent
 from mvmctl.utils._io import print_info, print_success, print_warning

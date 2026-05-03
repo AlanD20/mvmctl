@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import typer
 from rich.console import Console
 
-from mvmctl.api import CacheOperation
+from mvmctl.api import CacheOperation as _CacheOperation
+
+if TYPE_CHECKING:
+    from mvmctl.api.cache_operations import CacheOperation
+else:
+    CacheOperation = _CacheOperation
+
 from mvmctl.models.result import ProgressEvent
 from mvmctl.utils._io import (
     print_error,

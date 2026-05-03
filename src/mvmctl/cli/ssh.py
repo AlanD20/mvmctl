@@ -3,10 +3,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 
-from mvmctl.api import SSHInput, SSHOperation
+from mvmctl.api import SSHInput as _SSHInput
+from mvmctl.api import SSHOperation as _SSHOperation
+
+if TYPE_CHECKING:
+    from mvmctl.api.inputs._ssh_input import SSHInput
+    from mvmctl.api.ssh_operations import SSHOperation
+else:
+    SSHOperation = _SSHOperation
+    SSHInput = _SSHInput
 from mvmctl.utils._io import print_error
 from mvmctl.utils.cli import handle_errors
 

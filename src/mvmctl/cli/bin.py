@@ -7,7 +7,18 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from mvmctl.api import BinaryFetchInput, BinaryInput, BinaryOperation
+from mvmctl.api import BinaryFetchInput as _BinaryFetchInput
+from mvmctl.api import BinaryInput as _BinaryInput
+from mvmctl.api import BinaryOperation as _BinaryOperation
+
+if TYPE_CHECKING:
+    from mvmctl.api.binary_operations import BinaryOperation
+    from mvmctl.api.inputs._binary_fetch_input import BinaryFetchInput
+    from mvmctl.api.inputs._binary_input import BinaryInput
+else:
+    BinaryOperation = _BinaryOperation
+    BinaryFetchInput = _BinaryFetchInput
+    BinaryInput = _BinaryInput
 from mvmctl.models.result import OperationResult
 from mvmctl.utils._io import (
     print_error,

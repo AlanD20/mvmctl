@@ -9,9 +9,20 @@ from typing import TYPE_CHECKING, Any
 import typer
 from rich.console import Console
 
-from mvmctl.api import VMCreateInput, VMInput, VMOperation
+from mvmctl.api import VMCreateInput as _VMCreateInput
+from mvmctl.api import VMInput as _VMInput
+from mvmctl.api import VMOperation as _VMOperation
 from mvmctl.models import VMStatus
 from mvmctl.models.result import NeedsInteraction, ProgressEvent
+
+if TYPE_CHECKING:
+    from mvmctl.api.inputs._vm_create_input import VMCreateInput
+    from mvmctl.api.inputs._vm_input import VMInput
+    from mvmctl.api.vm_operations import VMOperation
+else:
+    VMOperation = _VMOperation
+    VMInput = _VMInput
+    VMCreateInput = _VMCreateInput
 from mvmctl.utils._io import (
     print_error,
     print_inspect_header,

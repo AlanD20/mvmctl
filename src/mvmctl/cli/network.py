@@ -8,7 +8,18 @@ from typing import TYPE_CHECKING
 import typer
 from rich.prompt import Prompt
 
-from mvmctl.api import NetworkCreateInput, NetworkInput, NetworkOperation
+from mvmctl.api import NetworkCreateInput as _NetworkCreateInput
+from mvmctl.api import NetworkInput as _NetworkInput
+from mvmctl.api import NetworkOperation as _NetworkOperation
+
+if TYPE_CHECKING:
+    from mvmctl.api.inputs._network_create_input import NetworkCreateInput
+    from mvmctl.api.inputs._network_input import NetworkInput
+    from mvmctl.api.network_operations import NetworkOperation
+else:
+    NetworkOperation = _NetworkOperation
+    NetworkInput = _NetworkInput
+    NetworkCreateInput = _NetworkCreateInput
 from mvmctl.models.result import OperationResult
 from mvmctl.utils._io import (
     print_error,

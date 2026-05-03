@@ -9,7 +9,18 @@ from typing import TYPE_CHECKING
 import typer
 from rich.console import Console
 
-from mvmctl.api import KernelFetchInput, KernelInput, KernelOperation
+from mvmctl.api import KernelFetchInput as _KernelFetchInput
+from mvmctl.api import KernelInput as _KernelInput
+from mvmctl.api import KernelOperation as _KernelOperation
+
+if TYPE_CHECKING:
+    from mvmctl.api.inputs._kernel_fetch_input import KernelFetchInput
+    from mvmctl.api.inputs._kernel_input import KernelInput
+    from mvmctl.api.kernel_operations import KernelOperation
+else:
+    KernelOperation = _KernelOperation
+    KernelFetchInput = _KernelFetchInput
+    KernelInput = _KernelInput
 from mvmctl.models.result import OperationResult, ProgressEvent
 from mvmctl.utils._io import (
     print_error,

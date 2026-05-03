@@ -8,7 +8,18 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from mvmctl.api import KeyCreateInput, KeyInput, KeyOperation
+from mvmctl.api import KeyCreateInput as _KeyCreateInput
+from mvmctl.api import KeyInput as _KeyInput
+from mvmctl.api import KeyOperation as _KeyOperation
+
+if TYPE_CHECKING:
+    from mvmctl.api.inputs._key_create_input import KeyCreateInput
+    from mvmctl.api.inputs._key_input import KeyInput
+    from mvmctl.api.key_operations import KeyOperation
+else:
+    KeyOperation = _KeyOperation
+    KeyInput = _KeyInput
+    KeyCreateInput = _KeyCreateInput
 from mvmctl.utils._io import (
     print_error,
     print_info,

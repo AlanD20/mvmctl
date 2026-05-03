@@ -9,18 +9,29 @@ from typing import TYPE_CHECKING, Any, cast
 import typer
 from rich.console import Console
 
-from mvmctl.api import (
-    ImageFetchInput,
-    ImageImportInput,
-    ImageInput,
-    ImageOperation,
-)
+from mvmctl.api import ImageFetchInput as _ImageFetchInput
+from mvmctl.api import ImageImportInput as _ImageImportInput
+from mvmctl.api import ImageInput as _ImageInput
+from mvmctl.api import ImageOperation as _ImageOperation
 from mvmctl.constants import IMAGE_IMPORT_FORMAT_MAP
 from mvmctl.models import ImageItem, ImageSpec
 from mvmctl.models.result import (
     NeedsInteraction,
     ProgressEvent,
 )
+
+if TYPE_CHECKING:
+    from mvmctl.api.image_operations import ImageOperation
+    from mvmctl.api.inputs._image_acquire_input import (
+        ImageFetchInput,
+        ImageImportInput,
+    )
+    from mvmctl.api.inputs._image_input import ImageInput
+else:
+    ImageOperation = _ImageOperation
+    ImageFetchInput = _ImageFetchInput
+    ImageImportInput = _ImageImportInput
+    ImageInput = _ImageInput
 from mvmctl.utils._io import (
     print_error,
     print_info,
