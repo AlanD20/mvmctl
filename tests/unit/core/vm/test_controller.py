@@ -108,11 +108,11 @@ class TestInit:
 
 
 class TestStop:
-    def test_raises_when_not_running(self, mock_repo: MagicMock) -> None:
+    def test_stop_is_idempotent_when_not_running(self, mock_repo: MagicMock) -> None:
         vm = _make_vm(status=VMStatus.STOPPED.value)
         controller = VMController(entity=vm, repo=mock_repo)
-        with pytest.raises(MVMError, match="is not running"):
-            controller.stop()
+        controller.stop()
+        mock_repo.update_status.assert_not_called()
 
     @patch("mvmctl.core.vm._controller.ProcessSignalHandler")
     @patch("mvmctl.core.vm._controller.FirecrackerClient")
@@ -179,8 +179,7 @@ class TestStop:
         mock_handler_cls.return_value = mock_handler
 
         controller = VMController(entity=vm, repo=mock_repo)
-        with pytest.raises(MVMError, match="Failed to stop"):
-            controller.stop()
+        controller.stop()
 
         # Error status should be set
         mock_repo.update_status.assert_any_call(vm.id, VMStatus.ERROR.value)
@@ -192,11 +191,11 @@ class TestStop:
 
 
 class TestPause:
-    def test_raises_when_not_running(self, mock_repo: MagicMock) -> None:
+    def test_pause_is_idempotent_when_already_paused(self, mock_repo: MagicMock) -> None:
         vm = _make_vm(status=VMStatus.PAUSED.value)
         controller = VMController(entity=vm, repo=mock_repo)
-        with pytest.raises(MVMError, match="is not running"):
-            controller.pause()
+        controller.pause()
+        mock_repo.update_status.assert_not_called()
 
     def test_raises_when_no_api_socket(self, mock_repo: MagicMock) -> None:
         vm = _make_vm(api_socket_path="")
@@ -228,11 +227,11 @@ class TestPause:
 
 
 class TestResume:
-    def test_raises_when_not_paused(self, mock_repo: MagicMock) -> None:
+    def test_resume_is_idempotent_when_running(self, mock_repo: MagicMock) -> None:
         vm = _make_vm(status=VMStatus.RUNNING.value)
         controller = VMController(entity=vm, repo=mock_repo)
-        with pytest.raises(MVMError, match="is not paused"):
-            controller.resume()
+        controller.resume()
+        mock_repo.update_status.assert_not_called()
 
     def test_raises_when_no_api_socket(self, mock_repo: MagicMock) -> None:
         vm = _make_vm(status=VMStatus.PAUSED.value, api_socket_path="")
@@ -264,11 +263,11 @@ class TestResume:
 
 
 class TestStart:
-    def test_raises_when_not_stopped(self, mock_repo: MagicMock) -> None:
+    def test_start_is_idempotent_when_running(self, mock_repo: MagicMock) -> None:
         vm = _make_vm(status=VMStatus.RUNNING.value)
         controller = VMController(entity=vm, repo=mock_repo)
-        with pytest.raises(MVMError, match="is not stopped"):
-            controller.start()
+        controller.start()
+        mock_repo.update_status.assert_not_called()
 
     def test_raises_when_no_api_socket(self, mock_repo: MagicMock) -> None:
         vm = _make_vm(status=VMStatus.STOPPED.value, api_socket_path="")

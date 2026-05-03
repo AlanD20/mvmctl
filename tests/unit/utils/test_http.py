@@ -138,8 +138,8 @@ class TestDownloadFile:
         assert dest.read_bytes() == full_data
 
     @patch("mvmctl.utils.http.HttpDownload.with_download")
-    def test_without_ascii_bar(self, mock_with_download, tmp_path: Path):
-        """Should work with progress bar enabled."""
+    def test_download_file_without_progress(self, mock_with_download, tmp_path: Path):
+        """Should work without progress bar parameter."""
         dest = tmp_path / "target.bin"
         full_data = b"Complete file content for progress test"
         expected_sha256 = hashlib.sha256(full_data).hexdigest()
