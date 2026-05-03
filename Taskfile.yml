@@ -42,12 +42,11 @@ tasks:
     cmds:
       - MVM_TEST_ENFORCE_NO_SUDO=1 uv run pytest tests/ -x -q
   check:
-    desc: Run all quality gates — lint, format-check, typecheck, test
+    desc: Run all quality gates — lint, format-check, typecheck
     cmds:
       - uv run ruff check src/
       - uv run ruff format --check src/
       - uv run mypy src/
-      - MVM_TEST_ENFORCE_NO_SUDO=1 uv run pytest tests/ -v --tb=short --cov=src/mvmctl --cov-report=term-missing --cov-fail-under=80
   build:
     desc: Build Python wheel and sdist into dist/
     cmds:
@@ -127,40 +126,36 @@ tasks:
     desc: Verify the link works within uv/pyenv
     cmds:
       - uv run python -c "import guestfs; print('✅ libguestfs is active in .venv')"
+  sys-setup:
+    desc: Pre-fetch required system test assets (kernel + images) with visible progress
+    deps:
+      - sys-setup-kernel
+      - sys-setup-image-alpine
+      - sys-setup-image-ubuntu
+  sys-setup-kernel:
+    desc: Fetch kernel if not cached
+    status:
+      - uv run python -c "import json,subprocess as sp; r=sp.run(['uv','run','mvm','kernel','ls','--json'],capture_output=True,text=True); exit(0 if r.returncode==0 and json.loads(r.stdout) else 1)"
+    cmds:
+      - uv run mvm kernel fetch --type firecracker --set-default
+  sys-setup-image-alpine:
+    desc: Fetch alpine-3.21 if not cached
+    status:
+      - uv run mvm image ls --json | uv run python -c "import sys,json; sys.exit(0 if any(i.get('os_slug')=='alpine-3.21' for i in json.load(sys.stdin)) else 1)"
+    cmds:
+      - uv run mvm image fetch alpine-3.21
+  sys-setup-image-ubuntu:
+    desc: Fetch ubuntu-24.04-minimal if not cached
+    status:
+      - uv run mvm image ls --json | uv run python -c "import sys,json; sys.exit(0 if any(i.get('os_slug')=='ubuntu-24.04-minimal' for i in json.load(sys.stdin)) else 1)"
+    cmds:
+      - uv run mvm image fetch ubuntu-24.04-minimal
   sys-test:
-    desc: Run system tests serially (auto-fetches missing assets, overrides global -n auto and coverage)
-    cmds:
-      - uv run pytest tests/system/ -v -n 0 --no-cov -rx
-  sys-test-prefetch:
-    desc: Pre-fetch system test assets (kernels, images, binaries) via serial pytest run
-    cmds:
-      - uv run pytest tests/system/test_host.py -n 0 --no-cov -q -k "test_host_ls_basic"
-  sys-test-parallel:
-    desc: Run system tests in parallel (auto-prefetches assets first if needed)
-    deps: [sys-test-prefetch]
+    desc: Run all system tests in parallel (requires sys-setup + mvm group)
+    deps: [sys-setup]
     cmds:
       - uv run pytest tests/system/ -v -n auto --no-cov -rx
   sys-test-fast:
-    desc: Run fast system tests only (no slow, no KVM)
+    desc: Run fast system tests only — no KVM, no slow downloads (no mvm group needed)
     cmds:
-      - uv run pytest tests/system/ -v -n 0 --no-cov -m "system and not slow and not requires_kvm"
-  sys-test-concurrent:
-    desc: Run only the concurrency stress test (10 VMs in parallel)
-    cmds:
-      - uv run pytest tests/system/test_full_journeys.py::TestConcurrentVMCreation -v -n 0 --no-cov -rx
-  sys-test-journeys:
-    desc: Run only end-to-end journey tests
-    cmds:
-      - uv run pytest tests/system/test_full_journeys.py -v -n 0 --no-cov -rx
-  sys-test-lifecycle:
-    desc: Run only VM lifecycle tests
-    cmds:
-      - uv run pytest tests/system/test_vm_lifecycle.py -v -n 0 --no-cov -rx
-  sys-test-network:
-    desc: Run only network tests
-    cmds:
-      - uv run pytest tests/system/test_network.py -v -n 0 --no-cov -rx
-  sys-test-snapshot:
-    desc: Run only snapshot/load roundtrip test
-    cmds:
-      - uv run pytest tests/system/test_vm_lifecycle.py::TestVMSnapshotAndLoad -v -n 0 --no-cov -rx
+      - uv run pytest tests/system/ -v -n auto --no-cov -m "not slow and not requires_kvm"

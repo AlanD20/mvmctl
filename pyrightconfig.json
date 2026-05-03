@@ -1,0 +1,11 @@
+{
+  "include": ["src"],
+  "exclude": ["**/__pycache__", "**/node_modules"],
+  "typeCheckingMode": "standard",
+  "reportMissingImports": false,
+  "reportMissingTypeStubs": false,
+  "reportUnnecessaryTypeIgnoreComment": false,
+  "reportUnsupportedDunderAll": false,
+  "pythonVersion": "3.13",
+  "pythonPlatform": "Linux"
+}
