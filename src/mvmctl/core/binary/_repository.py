@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC
 
-from mvmctl.core._shared import Database
+from mvmctl.core._shared._db import Database, _graceful_read
 from mvmctl.models import BinaryItem, VMInstanceItem
 
 
@@ -19,6 +19,7 @@ class BinaryRepository:
         """Return the database instance."""
         return self._db
 
+    @_graceful_read(default=None)
     def get(self, binary_id: str) -> BinaryItem | None:
         """Return a binary by its full 64-char ID, or None if not found."""
         with self._db.connect() as conn:
@@ -30,6 +31,7 @@ class BinaryRepository:
             return None
         return BinaryItem(**dict(row))
 
+    @_graceful_read(factory=list)
     def find_by_prefix(self, prefix: str) -> list[BinaryItem]:
         """Return all binaries whose ID starts with prefix."""
         with self._db.connect() as conn:
@@ -39,6 +41,7 @@ class BinaryRepository:
             ).fetchall()
         return [BinaryItem(**dict(row)) for row in rows]
 
+    @_graceful_read(factory=list)
     def list_all(self) -> list[BinaryItem]:
         """Return all non-deleted binaries."""
         with self._db.connect() as conn:
@@ -47,6 +50,7 @@ class BinaryRepository:
             ).fetchall()
         return [BinaryItem(**dict(row)) for row in rows]
 
+    @_graceful_read(factory=list)
     def list_by_name(self, name: str) -> list[BinaryItem]:
         """Return all binaries with a given name."""
         with self._db.connect() as conn:
@@ -56,6 +60,7 @@ class BinaryRepository:
             ).fetchall()
         return [BinaryItem(**dict(row)) for row in rows]
 
+    @_graceful_read(default=None)
     def get_by_name_and_version(
         self, name: str, version: str
     ) -> BinaryItem | None:
@@ -136,6 +141,7 @@ class BinaryRepository:
             )
             conn.execute("COMMIT")
 
+    @_graceful_read(default=None)
     def get_default(self, name: str) -> BinaryItem | None:
         """Return the default binary entry for a given name, or None."""
         with self._db.connect() as conn:
@@ -158,6 +164,7 @@ class BinaryRepository:
                 (now, binary_id),
             )
 
+    @_graceful_read(factory=list)
     def query_vms_by_binary(self, binary_id: str) -> list[VMInstanceItem]:
         """
         Return all VMs that reference the given binary ID.

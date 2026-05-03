@@ -2,15 +2,62 @@
 
 from __future__ import annotations
 
+import functools
+import logging
 import re
 import sqlite3
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import closing, contextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import Any, TypeVar, cast
 
 from mvmctl.exceptions import MigrationError
 from mvmctl.utils.common import CacheUtils
+
+logger = logging.getLogger(__name__)
+
+F = TypeVar("F", bound=Callable[..., object])
+
+
+def _graceful_read(
+    default: Any = None,
+    *,
+    factory: Callable[[], Any] | None = None,
+) -> Callable[[F], F]:
+    """Decorator for repository read methods: log debug and return default on missing table.
+
+    Args:
+        default: Immutable default value (e.g., None, 0, "").
+        factory: Callable that returns a mutable default (e.g., list, dict).
+
+    Only catches ``sqlite3.OperationalError`` with "no such table".
+    Other operational errors (locked, disk I/O, etc.) are re-raised.
+
+    """
+
+    def decorator(func: F) -> F:
+        @functools.wraps(func)
+        def wrapper(self: object, *args: Any, **kwargs: Any) -> Any:
+            try:
+                return func(self, *args, **kwargs)
+            except sqlite3.OperationalError as e:
+                msg = str(e)
+                if "no such table" in msg:
+                    return_val = factory() if factory is not None else default
+                    logger.debug(
+                        "Database table not initialized (%s), returning %r for %s.%s",
+                        msg,
+                        return_val,
+                        self.__class__.__name__,
+                        func.__name__,
+                    )
+                    return return_val
+                raise
+
+        return cast(F, wrapper)
+
+    return decorator
 
 
 class Database:

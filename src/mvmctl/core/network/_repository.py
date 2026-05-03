@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC
 
-from mvmctl.core._shared import Database
+from mvmctl.core._shared._db import Database, _graceful_read
 from mvmctl.models import NetworkItem, NetworkLeaseItem, VMInstanceItem
 
 
@@ -19,6 +19,7 @@ class NetworkRepository:
         """Return the database instance."""
         return self._db
 
+    @_graceful_read(default=None)
     def get(self, network_id: str) -> NetworkItem | None:
         """Return a network by its full 64-char ID, or None if not found."""
         with self._db.connect() as conn:
@@ -30,6 +31,7 @@ class NetworkRepository:
             return None
         return NetworkItem(**dict(row))
 
+    @_graceful_read(default=None)
     def get_by_name(self, name: str) -> NetworkItem | None:
         """Return a network by name, or None if not found."""
         with self._db.connect() as conn:
@@ -41,6 +43,7 @@ class NetworkRepository:
             return None
         return NetworkItem(**dict(row))
 
+    @_graceful_read(factory=list)
     def find_by_prefix(self, prefix: str) -> list[NetworkItem]:
         """Return all networks whose ID starts with prefix."""
         with self._db.connect() as conn:
@@ -50,6 +53,7 @@ class NetworkRepository:
             ).fetchall()
         return [NetworkItem(**dict(row)) for row in rows]
 
+    @_graceful_read(factory=list)
     def list_all(self) -> list[NetworkItem]:
         """Return all non-deleted networks."""
         with self._db.connect() as conn:
@@ -118,6 +122,7 @@ class NetworkRepository:
             )
             conn.execute("COMMIT")
 
+    @_graceful_read(default=None)
     def get_default(self) -> NetworkItem | None:
         """Return the default network entry, or None if not set."""
         with self._db.connect() as conn:
@@ -152,6 +157,7 @@ class NetworkRepository:
                 (now, network_id),
             )
 
+    @_graceful_read(factory=list)
     def query_vms_by_network(self, network_id: str) -> list[VMInstanceItem]:
         """
         Return all VMs that reference the given network ID.
@@ -187,6 +193,7 @@ class LeaseRepository:
         """Return the database instance."""
         return self._db
 
+    @_graceful_read(default=None)
     def get(self, network_id: str, ipv4: str) -> NetworkLeaseItem | None:
         """Return a lease by network_id + ipv4, or None if not found."""
         with self._db.connect() as conn:
@@ -198,6 +205,7 @@ class LeaseRepository:
             return None
         return NetworkLeaseItem(**dict(row))
 
+    @_graceful_read(factory=list)
     def list_all(self, network_id: str) -> list[NetworkLeaseItem]:
         """Return all leases for a network."""
         with self._db.connect() as conn:
@@ -207,6 +215,7 @@ class LeaseRepository:
             ).fetchall()
         return [NetworkLeaseItem(**dict(row)) for row in rows]
 
+    @_graceful_read(factory=list)
     def list_by_vm(self, network_id: str, vm_id: str) -> list[NetworkLeaseItem]:
         """Return all leases for a VM on a specific network."""
         with self._db.connect() as conn:
@@ -216,6 +225,7 @@ class LeaseRepository:
             ).fetchall()
         return [NetworkLeaseItem(**dict(row)) for row in rows]
 
+    @_graceful_read(factory=list)
     def list_all_batch(self, network_ids: list[str]) -> list[NetworkLeaseItem]:
         """Return all leases for multiple networks."""
         if not network_ids:

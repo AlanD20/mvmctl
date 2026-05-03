@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mvmctl.core._shared import Database
+from mvmctl.core._shared._db import Database, _graceful_read
 from mvmctl.models import VMInstanceItem, VMStatus
 
 
@@ -17,6 +17,7 @@ class VMRepository:
         """Return the database instance."""
         return self._db
 
+    @_graceful_read(default=None)
     def get(self, vm_id: str) -> VMInstanceItem | None:
         """Return a VM by its full 64-char ID, or None if not found."""
         with self._db.connect() as conn:
@@ -27,6 +28,7 @@ class VMRepository:
             return None
         return VMInstanceItem(**dict(row))
 
+    @_graceful_read(default=None)
     def get_by_name(self, name: str) -> VMInstanceItem | None:
         """Return a VM by name, or None if not found."""
         with self._db.connect() as conn:
@@ -37,6 +39,7 @@ class VMRepository:
             return None
         return VMInstanceItem(**dict(row))
 
+    @_graceful_read(default=None)
     def find_by_ip(self, ipv4: str) -> VMInstanceItem | None:
         """Return a VM by IP address, or None if not found."""
         with self._db.connect() as conn:
@@ -47,6 +50,7 @@ class VMRepository:
             return None
         return VMInstanceItem(**dict(row))
 
+    @_graceful_read(default=None)
     def find_by_mac(self, mac: str) -> VMInstanceItem | None:
         """Return a VM by MAC address, or None if not found."""
         with self._db.connect() as conn:
@@ -57,6 +61,7 @@ class VMRepository:
             return None
         return VMInstanceItem(**dict(row))
 
+    @_graceful_read(factory=list)
     def find_by_prefix(self, prefix: str) -> list[VMInstanceItem]:
         """Return all VMs whose ID starts with prefix."""
         with self._db.connect() as conn:
@@ -66,6 +71,7 @@ class VMRepository:
             ).fetchall()
         return [VMInstanceItem(**dict(row)) for row in rows]
 
+    @_graceful_read(default=0)
     def count(self) -> int:
         """Return total count of all VMs."""
         with self._db.connect() as conn:
@@ -74,6 +80,7 @@ class VMRepository:
             ).fetchone()
         return result[0] if result else 0
 
+    @_graceful_read(default=0)
     def count_by_status(self, status: VMStatus | list[VMStatus]) -> int:
         """Count VMs by status(es). Accepts single status or list of statuses."""
         statuses = [status] if isinstance(status, VMStatus) else status
@@ -88,6 +95,7 @@ class VMRepository:
             result = conn.execute(query, status_values).fetchone()
         return result[0] if result else 0
 
+    @_graceful_read(factory=list)
     def list_all(self) -> list[VMInstanceItem]:
         """Return all VM records."""
         with self._db.connect() as conn:
@@ -96,6 +104,7 @@ class VMRepository:
             ).fetchall()
         return [VMInstanceItem(**dict(row)) for row in rows]
 
+    @_graceful_read(factory=list)
     def list_by_status(
         self, status: VMStatus | list[VMStatus]
     ) -> list[VMInstanceItem]:
@@ -112,6 +121,7 @@ class VMRepository:
             rows = conn.execute(query, status_values).fetchall()
         return [VMInstanceItem(**dict(row)) for row in rows]
 
+    @_graceful_read(factory=list)
     def list_excluding_statuses(
         self, excluded_statuses: VMStatus | list[VMStatus]
     ) -> list[VMInstanceItem]:
@@ -250,6 +260,7 @@ class VMRepository:
         with self._db.connect() as conn:
             conn.execute("DELETE FROM vm_instances WHERE id = ?", (vm_id,))
 
+    @_graceful_read(factory=list)
     def get_by_image_ids(self, image_ids: list[str]) -> list[VMInstanceItem]:
         """
         Return all VMs referencing any of the given image IDs.

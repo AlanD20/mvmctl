@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from mvmctl.core._shared import Database
+from mvmctl.core._shared._db import Database, _graceful_read
 from mvmctl.models import ImageItem
 
 
@@ -19,6 +19,7 @@ class ImageRepository:
         """Return the database instance."""
         return self._db
 
+    @_graceful_read(default=None)
     def get(self, image_id: str) -> ImageItem | None:
         """Return an image by its full 64-char ID, or None if not found."""
         with self._db.connect() as conn:
@@ -29,6 +30,7 @@ class ImageRepository:
             return None
         return ImageItem(**dict(row))
 
+    @_graceful_read(factory=list)
     def find_by_prefix(self, prefix: str) -> list[ImageItem]:
         """Return all images whose ID starts with prefix."""
         with self._db.connect() as conn:
@@ -38,6 +40,7 @@ class ImageRepository:
             ).fetchall()
         return [ImageItem(**dict(row)) for row in rows]
 
+    @_graceful_read(default=None)
     def get_by_os_slug(self, os_slug: str) -> ImageItem | None:
         """Return an image by its os_slug, or None if not found."""
         with self._db.connect() as conn:
@@ -49,6 +52,7 @@ class ImageRepository:
             return None
         return ImageItem(**dict(row))
 
+    @_graceful_read(factory=list)
     def list_all(self) -> list[ImageItem]:
         """Return all images."""
         with self._db.connect() as conn:
@@ -129,6 +133,7 @@ class ImageRepository:
             )
             conn.execute("COMMIT")
 
+    @_graceful_read(default=None)
     def get_default(self) -> ImageItem | None:
         """Return the default image entry, or None if not set."""
         with self._db.connect() as conn:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC
 
-from mvmctl.core._shared import Database
+from mvmctl.core._shared._db import Database, _graceful_read
 from mvmctl.models import KernelItem, VMInstanceItem
 
 
@@ -19,6 +19,7 @@ class KernelRepository:
         """Return the database instance."""
         return self._db
 
+    @_graceful_read(default=None)
     def get(self, kernel_id: str) -> KernelItem | None:
         """Return a kernel by its full 64-char ID, or None if not found."""
         with self._db.connect() as conn:
@@ -30,6 +31,7 @@ class KernelRepository:
             return None
         return KernelItem(**dict(row))
 
+    @_graceful_read(factory=list)
     def find_by_prefix(self, prefix: str) -> list[KernelItem]:
         """Return all kernels whose ID starts with prefix."""
         with self._db.connect() as conn:
@@ -39,6 +41,7 @@ class KernelRepository:
             ).fetchall()
         return [KernelItem(**dict(row)) for row in rows]
 
+    @_graceful_read(factory=list)
     def list_all(self) -> list[KernelItem]:
         """Return all non-deleted kernels."""
         with self._db.connect() as conn:
@@ -125,6 +128,7 @@ class KernelRepository:
             )
             conn.execute("COMMIT")
 
+    @_graceful_read(default=None)
     def get_default(self) -> KernelItem | None:
         """Return the default kernel entry, or None if not set."""
         with self._db.connect() as conn:
@@ -135,6 +139,7 @@ class KernelRepository:
             return None
         return KernelItem(**dict(row))
 
+    @_graceful_read(default=None)
     def get_by_name(self, name: str) -> KernelItem | None:
         """Return a kernel by its name, or None if not found."""
         with self._db.connect() as conn:
@@ -146,6 +151,7 @@ class KernelRepository:
             return None
         return KernelItem(**dict(row))
 
+    @_graceful_read(default=None)
     def get_by_type(self, type: str) -> KernelItem | None:
         """Return a kernel by its version and type, or None if not found."""
         with self._db.connect() as conn:
@@ -157,6 +163,7 @@ class KernelRepository:
             return None
         return KernelItem(**dict(row))
 
+    @_graceful_read(default=None)
     def get_by_version_and_type(
         self, version: str, type: str
     ) -> KernelItem | None:
@@ -170,6 +177,7 @@ class KernelRepository:
             return None
         return KernelItem(**dict(row))
 
+    @_graceful_read(factory=list)
     def query_vms_by_kernel(self, kernel_id: str) -> list[VMInstanceItem]:
         """
         Return all VMs that reference the given kernel ID.

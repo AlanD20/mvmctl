@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mvmctl.core._shared import Database
+from mvmctl.core._shared._db import Database, _graceful_read
 from mvmctl.models import HostStateChangeItem, HostStateItem
 
 
@@ -17,6 +17,7 @@ class HostRepository:
         """Return the database instance."""
         return self._db
 
+    @_graceful_read(default=None)
     def get_state(self) -> HostStateItem | None:
         """Return the singleton host state row, or None if not yet initialized."""
         with self._db.connect() as conn:
@@ -149,6 +150,7 @@ class HostRepository:
                 (session_id,),
             )
 
+    @_graceful_read(factory=list)
     def list_changes(
         self, session_id: str | None = None, include_reverted: bool = True
     ) -> list[HostStateChangeItem]:

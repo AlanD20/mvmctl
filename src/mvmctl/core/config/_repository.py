@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from mvmctl.core._shared import Database
+from mvmctl.core._shared._db import Database, _graceful_read
 
 
 class SettingsRepository:
@@ -20,6 +20,7 @@ class SettingsRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
 
+    @_graceful_read(default=None)
     def get(self, category: str, key: str) -> Any | None:
         """
         Get a setting value by category and key.
@@ -75,6 +76,7 @@ class SettingsRepository:
             cursor = conn.execute("DELETE FROM user_settings")
             return cursor.rowcount
 
+    @_graceful_read(factory=dict)
     def list_by_category(
         self, category: str | None = None
     ) -> dict[str, dict[str, Any]]:

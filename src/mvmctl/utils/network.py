@@ -73,8 +73,25 @@ class NetworkUtils:
 
     @staticmethod
     def compute_bridge_name(network_name: str) -> str:
-        """Compute bridge name from network name."""
-        return f"{CLI_NAME}-{network_name}"
+        """Compute bridge name from network name.
+
+        Ensures the bridge name never exceeds the Linux IFNAMSIZ limit (15 chars).
+        If the full {CLI_NAME}-{network_name} would exceed 15 chars, a hash suffix
+        is used to preserve uniqueness within the limit.
+        """
+        from hashlib import sha256
+
+        raw = f"{CLI_NAME}-{network_name}"
+        if len(raw) <= 15:
+            return raw
+
+        # Truncate while preserving uniqueness via hash
+        hash_len = 8
+        prefix = f"{CLI_NAME}-"
+        max_name = 15 - len(prefix) - hash_len - 1  # -1 for '-' separator
+        name_truncated = network_name[:max_name]
+        short_hash = sha256(network_name.encode()).hexdigest()[:hash_len]
+        return f"{prefix}{name_truncated}-{short_hash}"
 
     # --- Naming & Generation ---
 
@@ -437,11 +454,9 @@ class NetworkUtils:
     @staticmethod
     def _run_batch(commands: list[str]) -> None:
         """Execute a batch of ip commands using ip -batch mode."""
-        from mvmctl.utils._system import privileged_cmd as _privileged_cmd
-
         batch = "\n".join(commands) + "\n"
         subprocess.run(
-            _privileged_cmd(["ip", "-batch", "-"]),
+            ["ip", "-batch", "-"],
             input=batch,
             text=True,
             check=True,

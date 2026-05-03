@@ -395,8 +395,9 @@ class HostOperation:
 
             db = Database()
             # Get networks from repository
-            net_service = NetworkService(NetworkRepository(db))
-            networks = net_service.list_all(verify=False)
+            repo = NetworkRepository(db)
+            networks = repo.list_all()
+            net_service = NetworkService(repo)
             metadata_bridges: set[str] = {net.bridge for net in networks}
 
             # Teardown NAT and bridges for each network

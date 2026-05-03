@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mvmctl.core._shared import Database
+from mvmctl.core._shared._db import Database, _graceful_read
 from mvmctl.models import SSHKeyItem
 
 
@@ -12,6 +12,7 @@ class KeyRepository:
     def __init__(self, db: Database | None = None) -> None:
         self._db = db or Database()
 
+    @_graceful_read(default=None)
     def get_by_name(self, name: str) -> SSHKeyItem | None:
         """Return an SSH key by name, or None if not found."""
         with self._db.connect() as conn:
@@ -22,6 +23,7 @@ class KeyRepository:
             return None
         return SSHKeyItem(**dict(row))
 
+    @_graceful_read(factory=list)
     def find_by_prefix(self, prefix: str) -> list[SSHKeyItem]:
         """Return all SSH keys whose ID starts with prefix."""
         with self._db.connect() as conn:
@@ -30,6 +32,7 @@ class KeyRepository:
             ).fetchall()
         return [SSHKeyItem(**dict(row)) for row in rows]
 
+    @_graceful_read(factory=list)
     def list_all(self) -> list[SSHKeyItem]:
         """Return all SSH keys."""
         with self._db.connect() as conn:
@@ -99,6 +102,7 @@ class KeyRepository:
                 "UPDATE ssh_keys SET is_default = 1 WHERE id = ?", (key_id,)
             )
 
+    @_graceful_read(factory=list)
     def get_defaults(self) -> list[SSHKeyItem]:
         """Return all SSH keys marked as default."""
         with self._db.connect() as conn:
