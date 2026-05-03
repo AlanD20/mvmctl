@@ -11,7 +11,7 @@ from mvmctl.utils.progress import ASCIIProgressBar, Spinner
 class TestASCIIProgressBar:
     """Tests for ASCIIProgressBar class."""
 
-    def test_progress_bar_tty_display(self, mocker):
+    def test_ascii_bar_tty_display(self, mocker):
         """Verify carriage return animation in TTY mode."""
         mocker.patch("sys.stdout.isatty", return_value=True)
 
@@ -30,7 +30,7 @@ class TestASCIIProgressBar:
         finally:
             sys.stdout = old_stdout
 
-    def test_progress_bar_non_tty_display(self, mocker):
+    def test_ascii_bar_non_tty_display(self, mocker):
         """Verify line-by-line output in non-TTY mode."""
         mocker.patch("sys.stdout.isatty", return_value=False)
 
@@ -53,7 +53,7 @@ class TestASCIIProgressBar:
         finally:
             sys.stdout = old_stdout
 
-    def test_progress_bar_completion(self, mocker):
+    def test_ascii_bar_completion(self, mocker):
         """Verify finish() outputs completion message."""
         mocker.patch("sys.stdout.isatty", return_value=True)
 
@@ -70,7 +70,7 @@ class TestASCIIProgressBar:
         finally:
             sys.stdout = old_stdout
 
-    def test_progress_bar_zero_total(self, mocker):
+    def test_ascii_bar_zero_total(self, mocker):
         """Handle unknown content-length (total=0)."""
         mocker.patch("sys.stdout.isatty", return_value=True)
 

@@ -286,7 +286,7 @@ class TestReceive:
         client._sock = mock_sock
 
         results: list[bytes] = []
-        with patch("select.select", return_value=([], [], [])):
+        with patch("select.select", side_effect=[([], [], [])]):
             for chunk in client.receive():
                 results.append(chunk)
 

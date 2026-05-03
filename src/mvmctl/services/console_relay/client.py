@@ -123,17 +123,18 @@ class ConsoleRelayClient:
             ready, _, _ = select.select(
                 [self._sock.fileno()], [], [], CONST_CONSOLE_SELECT_TIMEOUT_S
             )
-            if self._sock.fileno() in ready:
-                try:
-                    data = self._sock.recv(buffer_size)
-                    if data:
-                        yield data
-                    else:
-                        return
-                except (BlockingIOError, InterruptedError):
-                    continue
-                except (OSError, ConnectionResetError):
+            if self._sock.fileno() not in ready:
+                return
+            try:
+                data = self._sock.recv(buffer_size)
+                if data:
+                    yield data
+                else:
                     return
+            except (BlockingIOError, InterruptedError):
+                continue
+            except (OSError, ConnectionResetError):
+                return
 
     def check_detach(self, buffer: bytearray) -> bool:
         """

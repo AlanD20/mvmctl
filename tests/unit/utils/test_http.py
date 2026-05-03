@@ -71,7 +71,6 @@ class TestDownloadFile:
             "https://example.com/file.bin",
             dest,
             expected_sha256=expected_sha256,
-            progress_bar=False,
         )
 
         assert result is True
@@ -94,7 +93,6 @@ class TestDownloadFile:
                 "https://example.com/file.bin",
                 dest,
                 expected_sha256=wrong_sha256,
-                progress_bar=False,
             )
 
         assert not dest.exists()
@@ -111,7 +109,6 @@ class TestDownloadFile:
                 "https://example.com/file.bin",
                 dest,
                 expected_sha256=None,
-                progress_bar=False,
                 allow_missing_checksum=False,
             )
 
@@ -135,14 +132,13 @@ class TestDownloadFile:
             "https://example.com/file.bin",
             dest,
             expected_sha256=expected_sha256,
-            progress_bar=False,
         )
 
         assert result is True
         assert dest.read_bytes() == full_data
 
     @patch("mvmctl.utils.http.HttpDownload.with_download")
-    def test_with_progress_bar(self, mock_with_download, tmp_path: Path):
+    def test_without_ascii_bar(self, mock_with_download, tmp_path: Path):
         """Should work with progress bar enabled."""
         dest = tmp_path / "target.bin"
         full_data = b"Complete file content for progress test"
@@ -154,7 +150,6 @@ class TestDownloadFile:
             "https://example.com/file.bin",
             dest,
             expected_sha256=expected_sha256,
-            progress_bar=True,
         )
 
         assert result is True
@@ -170,7 +165,9 @@ class TestWithDownload:
     """Tests for HttpDownload.with_download()."""
 
     @staticmethod
-    def _setup_mock_urlopen(mock_urlopen, data, status=200, content_length=None):
+    def _setup_mock_urlopen(
+        mock_urlopen, data, status=200, content_length=None
+    ):
         """Configure mock for HttpDownload._urlopen context manager pattern."""
         mock_response = _mock_urlopen_response(
             data, status=status, content_length=content_length
@@ -421,17 +418,13 @@ class TestHttpCache:
     def test_cache_key_generates_sha256(self):
         key = HttpCache._cache_key("https://example.com/file")
         assert len(key) == 64
-        expected = hashlib.sha256(
-            b"https://example.com/file"
-        ).hexdigest()
+        expected = hashlib.sha256(b"https://example.com/file").hexdigest()
         assert key == expected
 
     def test_cache_path_builds_path(self, mocker, tmp_path):
         from mvmctl.utils.common import CacheUtils
 
-        mocker.patch.object(
-            CacheUtils, "get_temp_dir", return_value=tmp_path
-        )
+        mocker.patch.object(CacheUtils, "get_temp_dir", return_value=tmp_path)
         url = "https://example.com/file"
         expected_hash = hashlib.sha256(url.encode()).hexdigest()
 
@@ -571,9 +564,7 @@ class TestWithRetry:
         """Should increase delay with backoff factor."""
         mock_sleep = mocker.patch("time.sleep")
 
-        @_with_retry(
-            max_retries=3, retry_delay=1.0, backoff=2.0
-        )
+        @_with_retry(max_retries=3, retry_delay=1.0, backoff=2.0)
         def func():
             raise URLError("fail")
 
@@ -599,9 +590,7 @@ class TestReadJsonContent:
     def test_success_returns_dict(self, mock_download):
         mock_download.return_value = b'{"key": "value", "num": 42}'
 
-        result = HttpDownload.read_json_content(
-            "https://example.com/data.json"
-        )
+        result = HttpDownload.read_json_content("https://example.com/data.json")
 
         assert result == {"key": "value", "num": 42}
 
@@ -609,9 +598,7 @@ class TestReadJsonContent:
     def test_success_returns_list(self, mock_download):
         mock_download.return_value = b'["a", "b", "c"]'
 
-        result = HttpDownload.read_json_content(
-            "https://example.com/list.json"
-        )
+        result = HttpDownload.read_json_content("https://example.com/list.json")
 
         assert result == ["a", "b", "c"]
 
@@ -619,12 +606,8 @@ class TestReadJsonContent:
     def test_json_decode_error_raises(self, mock_download):
         mock_download.return_value = b"not valid json"
 
-        with pytest.raises(
-            HttpDownloadError, match="Failed to parse JSON"
-        ):
-            HttpDownload.read_json_content(
-                "https://example.com/bad.json"
-            )
+        with pytest.raises(HttpDownloadError, match="Failed to parse JSON"):
+            HttpDownload.read_json_content("https://example.com/bad.json")
 
     @patch("mvmctl.utils.http.HttpDownload._download")
     def test_passes_accept_header(self, mock_download):
@@ -667,7 +650,6 @@ class TestDownloadFileExtended:
             "https://example.com/file.bin",
             dest,
             expected_sha256=None,
-            progress_bar=False,
             allow_missing_checksum=True,
             silent_missing_checksum=True,
         )
@@ -687,7 +669,6 @@ class TestDownloadFileExtended:
                 "https://example.com/file.bin",
                 dest,
                 expected_sha256=None,
-                progress_bar=False,
                 allow_missing_checksum=False,
             )
 
@@ -708,7 +689,6 @@ class TestDownloadFileExtended:
             "https://example.com/file.bin",
             dest,
             expected_sha256=None,
-            progress_bar=False,
             allow_missing_checksum=True,
         )
 
@@ -724,14 +704,11 @@ class TestDownloadFileExtended:
         mocker.patch("sys.stdin.isatty", return_value=True)
         mocker.patch("typer.confirm", return_value=False)
 
-        with pytest.raises(
-            HttpDownloadError, match="Download cancelled"
-        ):
+        with pytest.raises(HttpDownloadError, match="Download cancelled"):
             HttpDownload.download_file(
                 "https://example.com/file.bin",
                 dest,
                 expected_sha256=None,
-                progress_bar=False,
                 allow_missing_checksum=True,
             )
 
@@ -745,23 +722,18 @@ class TestDownloadFileExtended:
         dest = tmp_path / "target.bin"
         mocker.patch("sys.stdin.isatty", return_value=False)
 
-        with pytest.raises(
-            HttpDownloadError, match="non-interactive"
-        ):
+        with pytest.raises(HttpDownloadError, match="non-interactive"):
             HttpDownload.download_file(
                 "https://example.com/file.bin",
                 dest,
                 expected_sha256=None,
-                progress_bar=False,
                 allow_missing_checksum=True,
             )
 
         mock_with_download.assert_not_called()
 
     @patch("mvmctl.utils.http.HttpDownload.with_download")
-    def test_with_expected_sha256_matching(
-        self, mock_with_download, tmp_path
-    ):
+    def test_with_expected_sha256_matching(self, mock_with_download, tmp_path):
         """Should verify checksum and return True on match."""
         dest = tmp_path / "target.bin"
         full_data = b"verify me"
@@ -772,16 +744,13 @@ class TestDownloadFileExtended:
             "https://example.com/file.bin",
             dest,
             expected_sha256=expected_sha256,
-            progress_bar=False,
         )
 
         assert result is True
         assert dest.read_bytes() == full_data
 
     @patch("mvmctl.utils.http.HttpDownload.with_download")
-    def test_with_expected_sha256_mismatch(
-        self, mock_with_download, tmp_path
-    ):
+    def test_with_expected_sha256_mismatch(self, mock_with_download, tmp_path):
         """Should raise ChecksumMismatchError and clean up on mismatch."""
         dest = tmp_path / "target.bin"
         full_data = b"mismatch data"
@@ -793,7 +762,6 @@ class TestDownloadFileExtended:
                 "https://example.com/file.bin",
                 dest,
                 expected_sha256=wrong_hash,
-                progress_bar=False,
             )
 
         assert not dest.exists()
@@ -809,7 +777,9 @@ class TestHttpCacheExtended:
 
     def test_write_raises_cleans_up_temp(self, mocker, tmp_path):
         """Should clean up temp file when os.write fails."""
-        mocker.patch("mvmctl.utils.http.os.write", side_effect=OSError("disk full"))
+        mocker.patch(
+            "mvmctl.utils.http.os.write", side_effect=OSError("disk full")
+        )
         cache_path = tmp_path / "cache_entry"
         with pytest.raises(OSError, match="disk full"):
             HttpCache.write(cache_path, b"some data")
@@ -829,7 +799,12 @@ class TestWithRetryExtended:
         """Should raise HttpDownloadError when last_exception is None."""
         mocker.patch("time.sleep")
 
-        @_with_retry(max_retries=2, retry_delay=0.01, backoff=1.0, retryable_exceptions=())
+        @_with_retry(
+            max_retries=2,
+            retry_delay=0.01,
+            backoff=1.0,
+            retryable_exceptions=(),
+        )
         def func():
             raise HttpDownloadError("Generic download failure")
 
@@ -863,17 +838,23 @@ class TestDownloadCache:
 
     def test_download_cache_hit(self, mocker):
         """Should return cached response when cache is valid."""
-        mocker.patch.object(HttpCache, "_cache_path", return_value=Path("/tmp/cached"))
+        mocker.patch.object(
+            HttpCache, "_cache_path", return_value=Path("/tmp/cached")
+        )
         mocker.patch.object(HttpCache, "is_valid", return_value=True)
         mocker.patch.object(HttpCache, "read", return_value=b"cached response")
 
-        result = HttpDownload._download("https://example.com/data", use_cache=True)
+        result = HttpDownload._download(
+            "https://example.com/data", use_cache=True
+        )
         assert result == b"cached response"
 
     def test_download_cache_miss_writes(self, mocker):
         """Should fetch and write to cache on cache miss."""
         mock_cache_path = Path("/tmp/cached")
-        mocker.patch.object(HttpCache, "_cache_path", return_value=mock_cache_path)
+        mocker.patch.object(
+            HttpCache, "_cache_path", return_value=mock_cache_path
+        )
         mocker.patch.object(HttpCache, "is_valid", return_value=False)
         mock_write = mocker.patch.object(HttpCache, "write")
         mock_urlopen = mocker.patch("mvmctl.utils.http.HttpDownload._urlopen")
@@ -883,7 +864,9 @@ class TestDownloadCache:
         mock_response.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = mock_response
 
-        result = HttpDownload._download("https://example.com/data", use_cache=True)
+        result = HttpDownload._download(
+            "https://example.com/data", use_cache=True
+        )
         assert result == b"fresh data"
         mock_write.assert_called_once_with(mock_cache_path, b"fresh data")
 
@@ -905,7 +888,9 @@ class TestHeadSizeExtended:
         mock_response.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = mock_response
 
-        size = HttpDownload.head_size("https://example.com/file", use_cache=False)
+        size = HttpDownload.head_size(
+            "https://example.com/file", use_cache=False
+        )
         assert size == 3000
 
 
@@ -942,7 +927,9 @@ class TestReadRawContent:
         """Should pass use_cache and cache_ttl."""
         mock_download.return_value = b"cached text"
         HttpDownload.read_raw_content(
-            "https://example.com/data.txt", use_cache=True, cache_ttl_seconds=600
+            "https://example.com/data.txt",
+            use_cache=True,
+            cache_ttl_seconds=600,
         )
         _, kwargs = mock_download.call_args
         assert kwargs["use_cache"] is True
@@ -983,7 +970,7 @@ class TestDownloadFileProgressBar:
     """Extended tests for HttpDownload.download_file() progress bar path."""
 
     @patch("mvmctl.utils.http.HttpDownload.with_download")
-    def test_progress_bar_calls_on_start(self, mock_with_download, tmp_path):
+    def test_download_calls_on_start(self, mock_with_download, tmp_path: Path):
         """Should invoke _on_start and _progress_callback with progress bar."""
         dest = tmp_path / "target.bin"
         full_data = b"progress bar test data"
@@ -1005,7 +992,6 @@ class TestDownloadFileProgressBar:
             "https://example.com/file.bin",
             dest,
             expected_sha256=expected_sha256,
-            progress_bar=True,
         )
         assert result is True
         assert dest.read_bytes() == full_data

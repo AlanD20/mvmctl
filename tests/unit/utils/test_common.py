@@ -358,7 +358,9 @@ class TestCommonUtilsExtended:
         assert result == "abcd"
 
     def test_human_readable_datetime_with_timezone(self):
-        result = CommonUtils.human_readable_datetime("2026-04-01T12:30:00+05:30")
+        result = CommonUtils.human_readable_datetime(
+            "2026-04-01T12:30:00+05:30"
+        )
         assert result == "2026/04/01 12:30:00"
 
     def test_human_readable_datetime_utc_zulu(self):
@@ -382,7 +384,10 @@ class TestCommonUtilsExtended:
         assert CommonUtils.format_bytes_human_readable(1073741824) == "1.0 GiB"
 
     def test_format_bytes_exact_tib(self):
-        assert CommonUtils.format_bytes_human_readable(1099511627776) == "1024.0 TiB"
+        assert (
+            CommonUtils.format_bytes_human_readable(1099511627776)
+            == "1024.0 TiB"
+        )
 
     def test_safe_int_exact(self):
         assert CommonUtils.safe_int(42) == 42
