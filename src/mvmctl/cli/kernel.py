@@ -14,6 +14,9 @@ from mvmctl.models.result import OperationResult, ProgressEvent
 from mvmctl.utils._io import (
     print_error,
     print_info,
+    print_inspect_header,
+    print_key_value,
+    print_section_header,
     print_success,
     print_table,
 )
@@ -46,19 +49,8 @@ def kernel_ls(
     kernels: list[KernelItem] = KernelOperation.list_all()
 
     if json_output:
-        data = [
-            {
-                "id": HashGenerator.shorten(k.id),
-                "name": k.name,
-                "version": k.version,
-                "arch": k.arch,
-                "type": k.type,
-                "is_default": k.is_default,
-                "created_at": k.created_at,
-            }
-            for k in kernels
-        ]
-        typer.echo(json.dumps(data, indent=2))
+        data = [KernelOperation._kernel_to_dict(k) for k in kernels]
+        typer.echo(json.dumps(data, indent=2, default=str))
         return
 
     if not kernels:
@@ -88,6 +80,73 @@ def kernel_ls(
         columns=["ID", "Name", "Version", "Arch", "Type", "Added"],
         rows=rows,
     )
+
+
+@kernel_app.command(name="inspect")
+@handle_errors
+def kernel_inspect(
+    prefix: str = typer.Argument(..., help="Kernel ID prefix to inspect"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    tree: bool = typer.Option(False, "--tree", help="Output in tree format"),
+) -> None:
+    """Show detailed information about a kernel."""
+    info = KernelOperation.inspect(
+        KernelInput(id=[prefix]), is_json=json_output
+    )
+
+    if isinstance(info, dict):
+        typer.echo(json.dumps(info, indent=2, default=str))
+        return
+
+    if tree:
+        _print_kernel_details_tree(info)
+    else:
+        _print_kernel_details(info)
+
+
+def _print_kernel_details(info: KernelItem) -> None:
+    """Print kernel details in human-readable format."""
+    missing_marker = " (missing)" if not info.is_present else ""
+    print_inspect_header(f"Kernel: {info.name}{missing_marker}")
+
+    print_section_header("BASIC INFO")
+    print_key_value("ID", info.id)
+    print_key_value("Name", info.name)
+    print_key_value("Base Name", info.base_name)
+    print_key_value("Version", info.version)
+    print_key_value("Arch", info.arch)
+    print_key_value("Type", info.type)
+    print_key_value("Default", "Yes" if info.is_default else "No")
+    print_key_value("Present", "Yes" if info.is_present else "No")
+    print_key_value("Path", info.path)
+    print_key_value(
+        "Created", CommonUtils.human_readable_datetime(info.created_at)
+    )
+    print_key_value(
+        "Updated", CommonUtils.human_readable_datetime(info.updated_at)
+    )
+
+
+def _print_kernel_details_tree(info: KernelItem) -> None:
+    """Print kernel details in tree format."""
+    missing_marker = " (missing)" if not info.is_present else ""
+    print(f"{info.name}{missing_marker}")
+
+    tree_lines = [
+        f"├── ID:          {info.id}",
+        f"├── Name:        {info.name}",
+        f"├── Base Name:   {info.base_name}",
+        f"├── Version:     {info.version}",
+        f"├── Arch:        {info.arch}",
+        f"├── Type:        {info.type}",
+        f"├── Default:     {'Yes' if info.is_default else 'No'}",
+        f"├── Present:     {'Yes' if info.is_present else 'No'}",
+        f"├── Path:        {info.path}",
+        f"├── Created:     {CommonUtils.human_readable_datetime(info.created_at)}",
+        f"└── Updated:     {CommonUtils.human_readable_datetime(info.updated_at)}",
+    ]
+    for line in tree_lines:
+        print(line)
 
 
 @kernel_app.command(name="fetch")

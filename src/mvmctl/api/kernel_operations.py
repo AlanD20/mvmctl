@@ -353,6 +353,7 @@ class KernelOperation:
             "type": kernel.type,
             "path": kernel.path,
             "is_default": kernel.is_default,
+            "is_present": kernel.is_present,
             "created_at": kernel.created_at,
             "updated_at": kernel.updated_at,
         }

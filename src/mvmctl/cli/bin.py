@@ -56,8 +56,13 @@ def bin_ls(
                 "id": b.id,
                 "name": b.name,
                 "version": b.version,
+                "full_version": b.full_version,
+                "ci_version": b.ci_version,
                 "path": b.path,
                 "is_default": b.is_default,
+                "is_present": b.is_present,
+                "created_at": b.created_at,
+                "updated_at": b.updated_at,
             }
             for b in local
         ]

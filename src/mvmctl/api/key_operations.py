@@ -166,23 +166,33 @@ class KeyOperation:
         return BatchResult(items=results)
 
     @staticmethod
+    def _key_to_dict(key: SSHKeyItem) -> dict[str, Any]:
+        """Convert SSHKeyItem to dictionary for JSON output.
+
+        Includes every field from the model.
+        """
+        return {
+            "id": key.id,
+            "name": key.name,
+            "fingerprint": key.fingerprint,
+            "algorithm": key.algorithm,
+            "comment": key.comment,
+            "public_key_path": key.public_key_path,
+            "private_key_path": key.private_key_path,
+            "is_default": key.is_default,
+            "is_present": key.is_present,
+            "created_at": key.created_at,
+            "updated_at": key.updated_at,
+        }
+
+    @staticmethod
     def inspect(
         inputs: KeyInput, is_json: bool = False
     ) -> SSHKeyItem | dict[str, Any]:
         """Inspect a key with full details."""
         key_item = KeyOperation.get(inputs)
         if is_json:
-            return {
-                "id": key_item.id,
-                "name": key_item.name,
-                "fingerprint": key_item.fingerprint,
-                "algorithm": key_item.algorithm,
-                "comment": key_item.comment,
-                "public_key_path": key_item.public_key_path,
-                "private_key_path": key_item.private_key_path,
-                "is_default": key_item.is_default,
-                "created_at": key_item.created_at,
-            }
+            return KeyOperation._key_to_dict(key_item)
         return key_item
 
     @staticmethod

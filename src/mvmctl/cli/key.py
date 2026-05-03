@@ -12,7 +12,9 @@ from mvmctl.api import KeyCreateInput, KeyInput, KeyOperation
 from mvmctl.utils._io import (
     print_error,
     print_info,
+    print_inspect_header,
     print_key_value,
+    print_section_header,
     print_success,
     print_table,
 )
@@ -21,7 +23,7 @@ from mvmctl.utils.common import CommonUtils
 from mvmctl.utils.crypto import HashGenerator
 
 if TYPE_CHECKING:
-    pass
+    from mvmctl.models import SSHKeyItem
 
 key_app = typer.Typer(
     help="SSH key management",
@@ -45,18 +47,8 @@ def key_ls(
     keys = KeyOperation.list_all()
 
     if json_output:
-        data = [
-            {
-                "id": k.fingerprint,
-                "name": k.name,
-                "algorithm": k.algorithm,
-                "comment": k.comment,
-                "is_default": k.is_default,
-                "created_at": k.created_at,
-            }
-            for k in keys
-        ]
-        typer.echo(json.dumps(data, indent=2))
+        data = [KeyOperation._key_to_dict(k) for k in keys]
+        typer.echo(json.dumps(data, indent=2, default=str))
         return
 
     if not keys:
@@ -187,6 +179,7 @@ def key_inspect(
     ctx: typer.Context,
     name: str = typer.Argument(None, help="Key name or ID"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    tree: bool = typer.Option(False, "--tree", help="Output in tree format"),
 ) -> None:
     """Inspect an SSH key."""
     name = CliUtils.check_name_arg(ctx, name)
@@ -194,21 +187,34 @@ def key_inspect(
 
     if json_output:
         result = KeyOperation.inspect(inputs, is_json=True)
-        typer.echo(json.dumps(result, indent=2))
+        typer.echo(json.dumps(result, indent=2, default=str))
         return
 
     key_item = KeyOperation.get(inputs)
+
+    if tree:
+        _print_key_details_tree(key_item)
+        return
+
+    print_inspect_header(f"Key: {key_item.name}")
+    print_section_header("BASIC INFO")
     print_key_value("ID", HashGenerator.shorten(key_item.id))
     print_key_value("Name", key_item.name)
     print_key_value("Fingerprint", key_item.fingerprint)
     print_key_value("Algorithm", key_item.algorithm)
     print_key_value("Comment", key_item.comment)
+    print_section_header("FILES")
     print_key_value("Public Key", key_item.public_key_path)
     if key_item.private_key_path:
         print_key_value("Private Key", key_item.private_key_path)
+    print_section_header("STATUS")
     print_key_value("Default", "yes" if key_item.is_default else "no")
+    print_key_value("Present", "yes" if key_item.is_present else "no")
     print_key_value(
         "Created", CommonUtils.human_readable_datetime(key_item.created_at)
+    )
+    print_key_value(
+        "Updated", CommonUtils.human_readable_datetime(key_item.updated_at)
     )
 
 
@@ -263,6 +269,33 @@ def key_set_default(
         print_error(set_result.message or "Failed to set default key(s)")
         raise typer.Exit(code=1)
     print_success(f"Default key(s) set: {', '.join(effective_names)}")
+
+
+def _print_key_details_tree(info: SSHKeyItem) -> None:
+    """Print key details in tree format."""
+    print(f"{info.name}")
+
+    tree_lines = [
+        f"├── ID:           {HashGenerator.shorten(info.id)}",
+        f"├── Name:         {info.name}",
+        f"├── Fingerprint:  {info.fingerprint}",
+        f"├── Algorithm:    {info.algorithm}",
+        f"├── Comment:      {info.comment}",
+        f"├── Public Key:   {info.public_key_path}",
+    ]
+    if info.private_key_path:
+        tree_lines.append(f"├── Private Key:  {info.private_key_path}")
+    tree_lines.append(f"├── Default:      {'yes' if info.is_default else 'no'}")
+    tree_lines.append(f"├── Present:      {'yes' if info.is_present else 'no'}")
+    tree_lines.append(
+        f"├── Created:      {CommonUtils.human_readable_datetime(info.created_at)}"
+    )
+    tree_lines.append(
+        f"└── Updated:      {CommonUtils.human_readable_datetime(info.updated_at)}"
+    )
+
+    for line in tree_lines:
+        print(line)
 
 
 __all__ = ["key_app"]

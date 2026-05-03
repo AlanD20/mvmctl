@@ -56,20 +56,12 @@ def network_ls(
     networks: list[NetworkItem] = NetworkOperation.list_all()
 
     if json_output:
-        data = [
-            {
-                "id": n.id,
-                "name": n.name,
-                "subnet": n.subnet,
-                "bridge": n.bridge,
-                "nat_enabled": n.nat_enabled,
-                "created_at": n.created_at,
-                "is_default": n.is_default,
-                "vm_count": len(n.leases) if n.leases else 0,
-            }
-            for n in networks
-        ]
-        typer.echo(json.dumps(data, indent=2))
+        data = []
+        for n in networks:
+            d = NetworkOperation._network_to_dict(n)
+            d["vm_count"] = len(n.leases) if n.leases else 0
+            data.append(d)
+        typer.echo(json.dumps(data, indent=2, default=str))
         return
 
     rows = []
@@ -264,6 +256,7 @@ def network_inspect(
     ctx: typer.Context,
     name: str | None = typer.Argument(None, help="Network name"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    tree: bool = typer.Option(False, "--tree", help="Output in tree format"),
 ) -> None:
     """Show detailed information about a network."""
     name = CliUtils.check_name_arg(ctx, name)
@@ -273,6 +266,10 @@ def network_inspect(
 
     if isinstance(info, dict):
         typer.echo(json.dumps(info, indent=2, default=str))
+        return
+
+    if tree:
+        _print_network_details_tree(info)
         return
 
     status = "active" if info.bridge_active else "inactive"
@@ -365,3 +362,35 @@ def network_sync(
         columns=["ID", "Name", "Verified", "Added", "Orphaned"],
         rows=rows,
     )
+
+
+def _print_network_details_tree(info: NetworkItem) -> None:
+    """Print network details in tree format."""
+    status = "active" if info.bridge_active else "inactive"
+    print(f"{info.name} ({status})")
+
+    tree_lines: list[str] = [
+        f"├── ID:           {info.id}",
+        f"├── Name:         {info.name}",
+        f"├── Subnet:       {info.subnet or '-'}",
+        f"├── IPv4 Gateway: {info.ipv4_gateway or '-'}",
+        f"├── Bridge:       {info.bridge}",
+        f"├── NAT:          {'enabled' if info.nat_enabled else 'disabled'}",
+        f"├── Default:      {'Yes' if info.is_default else 'No'}",
+        f"├── Present:      {'Yes' if info.is_present else 'No'}",
+        f"├── Bridge Active: {'yes' if info.bridge_active else 'no'}",
+        f"├── Created:      {CommonUtils.human_readable_datetime(info.created_at)}",
+    ]
+
+    leases = info.leases or []
+    if leases:
+        tree_lines.append("├── Leases")
+        for i, lease in enumerate(leases):
+            prefix = "│" if i < len(leases) - 1 else " "
+            tree_lines.append(f"{prefix}   ├── VM:    {lease.vm_id or '-'}")
+            tree_lines.append(f"{prefix}   └── IPv4:  {lease.ipv4 or '-'}")
+    else:
+        tree_lines.append("└── Leases:     0 assigned")
+
+    for line in tree_lines:
+        print(line)

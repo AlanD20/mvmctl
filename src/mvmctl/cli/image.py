@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import typer
 from rich.console import Console
@@ -76,8 +76,15 @@ def _list_remote_images(images: list[ImageSpec], *, json_output: bool) -> None:
         data = [
             {
                 "id": img.id,
+                "image_type": img.image_type,
+                "version": img.version,
                 "name": img.name,
+                "source": img.source,
                 "format": img.format,
+                "arch": img.arch,
+                "sha256": img.sha256,
+                "sha256_url": img.sha256_url,
+                "list_url_template": img.list_url_template,
                 "size": img.size,
             }
             for img in images
@@ -111,20 +118,27 @@ def _list_remote_images(images: list[ImageSpec], *, json_output: bool) -> None:
 def _list_local_images(images: list[ImageItem], *, json_output: bool) -> None:
     """Render locally cached images."""
     if json_output:
-        data: list[dict[str, str]] = []
+        data: list[dict[str, Any]] = []
         for img in images:
-            added = (
-                CommonUtils.human_readable_datetime(img.pulled_at)
-                if img.pulled_at
-                else "-"
-            )
             data.append(
                 {
                     "id": img.id,
-                    "name": img.os_name,
-                    "format": img.fs_type,
+                    "os_slug": img.os_slug,
+                    "os_name": img.os_name,
+                    "arch": img.arch,
+                    "path": img.path,
                     "fs_type": img.fs_type,
-                    "added": added,
+                    "fs_uuid": img.fs_uuid,
+                    "compressed_size": img.compressed_size,
+                    "original_size": img.original_size,
+                    "compression_ratio": img.compression_ratio,
+                    "compressed_format": img.compressed_format,
+                    "minimum_rootfs_size_mib": img.minimum_rootfs_size_mib,
+                    "pulled_at": img.pulled_at,
+                    "is_default": img.is_default,
+                    "is_present": img.is_present,
+                    "created_at": img.created_at,
+                    "updated_at": img.updated_at,
                 }
             )
         typer.echo(json.dumps(data, indent=2))
