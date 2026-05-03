@@ -12,6 +12,10 @@ class MVMError(Exception):
     """Base exception for all MVM errors."""
 
 
+class MVMRuntimeError(MVMError):
+    """Runtime assertion failure — invariant violated in production."""
+
+
 class VMNotFoundError(MVMError):
     """VM does not exist in state."""
 

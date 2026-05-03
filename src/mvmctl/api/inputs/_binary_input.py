@@ -61,7 +61,7 @@ class BinaryRequest:
             BinaryNotFoundError: If binary cannot be found.
 
         """
-        identifiers: list[str | list[str]] = self._inputs.id + [[]]
+        identifiers: list[str | list[str]] = list(self._inputs.id)
 
         # Resolve by name+version
         if self._inputs.names and self._inputs.version:

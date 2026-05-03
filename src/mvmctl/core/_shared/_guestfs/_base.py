@@ -12,7 +12,11 @@ from mvmctl.constants import (
     CONST_GUESTFS_OS_RELEASE_PATH,
     CONST_SHRINK_SAFETY_MARGIN,
 )
-from mvmctl.exceptions import GuestfsNotAvailableError, MVMError
+from mvmctl.exceptions import (
+    GuestfsNotAvailableError,
+    MVMError,
+    MVMRuntimeError,
+)
 
 from ._kernel_detector import KernelDetector
 
@@ -101,6 +105,8 @@ class OptimizedGuestfs:
         for attempt in range(3):
             try:
                 self._g = self._create_handle()
+                if self._g is None:
+                    raise MVMRuntimeError("guestfs handle not initialized")
                 self._g.launch()
                 return self
             except Exception as e:

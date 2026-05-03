@@ -176,6 +176,7 @@ class ImageAcquireRequest:
                 "Failed to resolve necessary dependencies to validate"
             )
 
+        arch: str = ""
         partition: int | None = None
 
         if isinstance(self._result, ResolvedImageAcquireInput):

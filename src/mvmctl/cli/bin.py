@@ -116,10 +116,15 @@ def bin_fetch(
     """Download a specific Firecracker version."""
     normalized = version.removeprefix("v")
 
-    # Check if version already exists
-    already_exists = BinaryOperation.get(
-        BinaryInput(names=["firecracker", "jailer"], version=normalized)
-    )
+    # Check if version already exists (may not exist yet — that's OK)
+    from mvmctl.exceptions import BinaryNotFoundError
+
+    try:
+        already_exists = BinaryOperation.get(
+            BinaryInput(names=["firecracker", "jailer"], version=normalized)
+        )
+    except BinaryNotFoundError:
+        already_exists = []
 
     download_override = force
 

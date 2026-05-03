@@ -393,16 +393,13 @@ class HostOperation:
                         f"Warning: failed to remove TAP '{tap_name}': {e}"
                     )
 
+            db = Database()
             # Get networks from repository
-            try:
-                net_repo = NetworkRepository()
-                networks = net_repo.list_all()
-            except Exception:
-                networks = []
+            net_service = NetworkService(NetworkRepository(db))
+            networks = net_service.list_all(verify=False)
             metadata_bridges: set[str] = {net.bridge for net in networks}
 
             # Teardown NAT and bridges for each network
-            net_service = NetworkService(net_repo)
             for net in networks:
                 if net.nat_enabled:
                     try:
@@ -427,7 +424,7 @@ class HostOperation:
 
             # Remove default bridge if it exists
             default_net_name = str(
-                SettingsService.resolve(Database(), "defaults.network", "name")
+                SettingsService.resolve(db, "defaults.network", "name")
             )
             default_bridge = f"{CLI_NAME}-{default_net_name[:10]}"
             if NetworkUtils.bridge_exists(default_bridge):

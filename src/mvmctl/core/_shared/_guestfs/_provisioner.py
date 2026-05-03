@@ -138,8 +138,9 @@ class GuestfsProvisioner:
         # Phase 1: guestfs session
         with OptimizedGuestfs(self._rootfs_path, readonly=self._readonly) as og:
             og.mount_rootfs()
+            handle: Any = None
             try:
-                handle: Any = og._handle
+                handle = og._handle
 
                 # Phase 1a: filesystem resize
                 if needs_resize:
@@ -151,10 +152,11 @@ class GuestfsProvisioner:
                 for op_name in self._ops:
                     getattr(self, f"_do_{op_name}")(handle)
             finally:
-                try:
-                    handle.umount("/")
-                except Exception:
-                    pass
+                if handle is not None:
+                    try:
+                        handle.umount("/")
+                    except Exception:
+                        pass
 
     @staticmethod
     def _do_truncate_file(path: Path, target_size: int) -> None:

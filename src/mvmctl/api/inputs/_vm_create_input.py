@@ -417,7 +417,8 @@ class VMCreateRequest:
             or self._result.image.minimum_rootfs_size_mib is None
         ):
             raise VMCreateError(
-                f"Image {input.image} is missing minimum_rootfs_size_mib. "
+                f"Image {self._inputs.image} is missing"
+                f" minimum_rootfs_size_mib. "
                 f"This image was created with an older version. "
                 f"Re-import the image: mvm image fetch <slug> --force"
             )

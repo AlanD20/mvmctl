@@ -97,7 +97,6 @@ CONST_VM_VCPU_MAX: Final[int] = 32
 CONST_SIGNAL_EXIT_CODE_BASE: Final[int] = 128
 
 # --- Defaults ---
-DEFAULT_SNAPSHOT_RESUME: Final[bool] = True
 DEFAULT_FIRECRACKER_CI_VERSION: Final[str] = "v1.15"
 
 # --- Lifecycle timings ---
