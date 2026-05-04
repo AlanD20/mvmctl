@@ -161,9 +161,7 @@ class OptimizedGuestfs:
                     self._handle.mount(dev, "/")
                     try:
                         stat = self._handle.statvfs("/")
-                        size = stat.get("fs_blocks", 0) * stat.get(
-                            "fs_bsize", 4096
-                        )
+                        size = stat.get("blocks", 0) * stat.get("bsize", 4096)
                         if size > max_size:
                             max_size = size
                             root_device = dev
@@ -178,31 +176,62 @@ class OptimizedGuestfs:
         self._handle.mount(device, "/")
         try:
             stat = self._handle.statvfs("/")
-            size = stat.get("fs_blocks", 0) * stat.get("fs_bsize", 4096)
+            size = stat.get("blocks", 0) * stat.get("bsize", 4096)
             return int(size)
         finally:
             self._handle.umount(device)
 
     def deblob(self) -> None:
-        """Run OS-specific and common cleanup commands inside a mounted guestfs image."""
+        """Run OS-specific and common cleanup commands inside a mounted guestfs image.
+
+        Detects the guest OS via ``/etc/os-release`` and dispatches to the
+        appropriate private ``_deblob_<os>()`` method for OS-specific tasks
+        (package cache scrub, network configuration deblobbing, etc.).
+
+        Common cross-distro cleanup (doc/man files, logs, tmp) always runs
+        regardless of OS.
+        """
         logger = logging.getLogger(__name__)
         try:
-            os_release = self._handle.cat(CONST_GUESTFS_OS_RELEASE_PATH) or ""
-            os_id = os_release.lower()
+            os_id, os_id_like = self._parse_os_release()
+            logger.debug(
+                "Deblo bing guest OS: id=%s id_like=%s", os_id, os_id_like
+            )
 
-            if "ubuntu" in os_id or "debian" in os_id:
-                self._handle.sh("apt-get clean")
-                self._handle.sh("rm -rf /var/lib/apt/lists/*")
-                self._handle.sh("rm -rf /var/cache/debconf/*")
-            elif "arch" in os_id or "manjaro" in os_id:
-                self._handle.sh("pacman -Sc --noconfirm || true")
-                self._handle.sh("rm -rf /var/cache/pacman/pkg/*")
-            elif "fedora" in os_id or "rhel" in os_id or "centos" in os_id:
-                self._handle.sh("dnf clean all || yum clean all || true")
-                self._handle.sh("rm -rf /var/cache/dnf/* /var/cache/yum/*")
-            elif "alpine" in os_id:
-                self._handle.sh("rm -rf /var/cache/apk/*")
+            if "alpine" in (os_id, os_id_like):
+                self._deblob_alpine()
+            elif "ubuntu" in (os_id, os_id_like) or "debian" in (
+                os_id,
+                os_id_like,
+            ):
+                self._deblob_debian()
+            elif "arch" in (os_id, os_id_like) or "manjaro" in (
+                os_id,
+                os_id_like,
+            ):
+                self._deblob_arch()
+            elif (
+                "fedora" in (os_id, os_id_like)
+                or "rhel" in (os_id, os_id_like)
+                or "centos" in (os_id, os_id_like)
+            ):
+                self._deblob_fedora()
+            else:
+                logger.debug(
+                    "No OS-specific deblob for id=%s id_like=%s",
+                    os_id,
+                    os_id_like,
+                )
 
+            # Fix fstab: partition table is always stripped during image
+            # conversion (qcow2 → raw ext4), so any PARTUUID= references in
+            # fstab refer to non-existent partitions.  The root entry is
+            # replaced with /dev/vda (the single Firecracker virtio block
+            # device).  Non-root PARTUUID entries (e.g. /boot/efi) are
+            # commented out — they have no counterpart in Firecracker.
+            self._fix_fstab()
+
+            # Common cleanup — every distro
             self._handle.sh(
                 "rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*"
             )
@@ -215,10 +244,131 @@ class OptimizedGuestfs:
         except Exception as e:
             logger.debug("Cleanup phase encountered issue (non-fatal): %s", e)
 
+    def _parse_os_release(self) -> tuple[str, str]:
+        """Parse ``/etc/os-release`` and return ``(ID, ID_LIKE)``.
+
+        Returns ``("", "")`` if the file cannot be read or parsed.
+        """
+        try:
+            raw = self._handle.cat(CONST_GUESTFS_OS_RELEASE_PATH) or ""
+            id_val = ""
+            id_like_val = ""
+            for line in raw.splitlines():
+                line = line.strip()
+                if line.startswith("ID="):
+                    id_val = line.split("=", 1)[1].strip("\"'").lower()
+                elif line.startswith("ID_LIKE="):
+                    id_like_val = line.split("=", 1)[1].strip("\"'").lower()
+            return id_val, id_like_val
+        except Exception:
+            return "", ""
+
+    def _deblob_alpine(self) -> None:
+        """Alpine-specific deblob: APK cache scrub + prevent dhcpcd on eth0.
+
+        The kernel already assigns the static IP via the ``ip=`` boot parameter,
+        but Alpine's OpenRC still starts ``dhcpcd`` on ``eth0``, which waits
+        ~10s for a DHCP lease, times out, falls back to IPv4LL, and only then
+        starts sshd.  Adding ``denyinterfaces eth0`` to ``/etc/dhcpcd.conf``
+        tells dhcpcd to skip eth0 entirely, saving ~10s per boot.
+        """
+        self._handle.sh("rm -rf /var/cache/apk/*")
+        # Prevent dhcpcd from touching the statically-configured eth0
+        self._handle.sh(
+            "grep -qxF 'denyinterfaces eth0' /etc/dhcpcd.conf "
+            "2>/dev/null || echo 'denyinterfaces eth0' >> /etc/dhcpcd.conf"
+        )
+        logging.getLogger(__name__).debug(
+            "Alpine deblob: APK cache cleared, denyinterfaces eth0 applied"
+        )
+
+    def _deblob_debian(self) -> None:
+        """Debian/Ubuntu-specific deblob: APT cache scrub."""
+        self._handle.sh("apt-get clean")
+        self._handle.sh("rm -rf /var/lib/apt/lists/*")
+        self._handle.sh("rm -rf /var/cache/debconf/*")
+
+    def _deblob_arch(self) -> None:
+        """Arch-specific deblob: pacman cache scrub."""
+        self._handle.sh("pacman -Sc --noconfirm || true")
+        self._handle.sh("rm -rf /var/cache/pacman/pkg/*")
+
+    def _deblob_fedora(self) -> None:
+        """Fedora/RHEL/CentOS-specific deblob: DNF/YUM cache scrub."""
+        self._handle.sh("dnf clean all || yum clean all || true")
+        self._handle.sh("rm -rf /var/cache/dnf/* /var/cache/yum/*")
+
+    def _fix_fstab(self) -> None:
+        """Fix fstab entries that reference non-existent partitions.
+
+        Image conversion (qcow2 → raw ext4) strips the partition table, so
+        any ``PARTUUID=...`` refer to partitions that no longer exist.
+        systemd waits up to 90s for them, then drops to emergency mode.
+
+        Fixes applied:
+        - Root mount: ``PARTUUID=<uuid> / ...`` → ``/dev/vda / ...``
+        - Non-root mounts with ``PARTUUID=`` (e.g. ``/boot/efi``):
+          commented out — they have no Firecracker counterpart.
+        - ``UUID=`` and other references are left untouched (filesystem UUIDs
+          are preserved through conversion).
+        """
+        fstab_path = "/etc/fstab"
+        logger = logging.getLogger(__name__)
+        try:
+            raw = self._handle.read_file(fstab_path)
+        except Exception:
+            logger.debug("No /etc/fstab found — skipping fstab fix")
+            return
+
+        new_lines: list[str] = []
+        modified = False
+        for line in raw.decode().splitlines(keepends=True):
+            stripped = line.strip()
+
+            # Skip comments and blank lines
+            if not stripped or stripped.startswith("#"):
+                new_lines.append(line)
+                continue
+
+            fields = stripped.split()
+            if len(fields) < 2:
+                new_lines.append(line)
+                continue
+
+            spec = fields[0]  # First field: device/identifier
+            mount_point = fields[1]  # Second field: mount point
+
+            if not spec.startswith("PARTUUID="):
+                new_lines.append(line)
+                continue
+
+            if mount_point == "/":
+                # Root mount: replace PARTUUID with /dev/vda
+                new_lines.append(line.replace(spec, "/dev/vda", 1))
+                logger.debug(
+                    "fstab: replaced %s with /dev/vda for root mount", spec
+                )
+                modified = True
+            else:
+                # Non-root PARTUUID mount → comment out
+                new_lines.append(f"# {line}")
+                logger.debug(
+                    "fstab: commented out %s mount at %s", spec, mount_point
+                )
+                modified = True
+
+        if modified:
+            self._handle.write(fstab_path, "".join(new_lines).encode())
+            logger.info("Fixed PARTUUID references in /etc/fstab")
+        else:
+            logger.debug("fstab already clean — no changes")
+
     def shrink_ext4(self, device: str) -> None:
-        """Shrink an ext4 filesystem to minimum size."""
-        self._handle.mount(device, "/")
-        self.deblob()
+        """Shrink an ext4 filesystem to minimum size.
+
+        Note: ``deblob()`` is expected to have been called *before* this
+        method — it is NOT called here to avoid duplicate work.
+        """
         self._handle.mount(device, "/")
         self._handle.zero_free_space(device)
         self._handle.umount(device)
@@ -227,9 +377,12 @@ class OptimizedGuestfs:
         self._handle.resize2fs_size(device, 0)
 
     def shrink_btrfs(self, device: str) -> None:
-        """Shrink a btrfs filesystem to minimum size."""
+        """Shrink a btrfs filesystem to minimum size.
+
+        Note: ``deblob()`` is expected to have been called *before* this
+        method — it is NOT called here to avoid duplicate work.
+        """
         self._handle.mount(device, "/")
-        self.deblob()
         self._handle.sh("fstrim -av / 2>/dev/null || true")
         self._handle.btrfs_filesystem_sync("/")
         self._handle.btrfs_filesystem_resize("/", 0)

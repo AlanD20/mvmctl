@@ -357,7 +357,7 @@ class ImageService:
         fs_type = self._resolve_fs_type(image_path)
         fs_uuid = self.get_filesystem_uuid(image_path)
         t1 = time.monotonic()
-        logger.info("  fs detect: %.2fs", t1 - t0)
+        logger.debug("  fs detect: %.2fs", t1 - t0)
 
         if skip_optimization:
             logger.info("Skipping optimization (shrink and compression)")
@@ -809,55 +809,14 @@ class ImageService:
 
         return results
 
-    def _has_significant_free_space(
-        self, image_path: Path, threshold: float = 0.02
-    ) -> bool:
-        """
-        Check if ext4 image has >threshold free space using dumpe2fs.
-
-        Uses dumpe2fs to check block usage without mounting or booting
-        a guestfs appliance. Returns True if there's significant free
-        space that would benefit from shrinking.
-
-        Args:
-            image_path: Path to the ext4 image.
-            threshold: Minimum free ratio to consider "significant".
-                       Default 0.02 (2%). Ext4 reserves ~5% for root by
-                       default, so threshold must account for that.
-
-        Returns:
-            True if free space > threshold, False otherwise.
-            Returns True on any error (safe fallback: shrink anyway).
-
-        """
-        try:
-            result = subprocess.run(
-                ["dumpe2fs", "-h", str(image_path)],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if result.returncode != 0:
-                return True  # Can't determine → safe to shrink
-
-            block_count = 0
-            free_blocks = 0
-            for line in result.stdout.splitlines():
-                if line.startswith("Block count:"):
-                    block_count = int(line.split(":", 1)[1].strip())
-                elif line.startswith("Free blocks:"):
-                    free_blocks = int(line.split(":", 1)[1].strip())
-
-            if block_count > 0:
-                free_ratio = free_blocks / block_count
-                return free_ratio > threshold
-        except (FileNotFoundError, ValueError, IndexError):
-            pass
-
-        return True  # Safe fallback: shrink if we can't determine
-
     def shrink_with_guestfs(self, image_path: Path) -> tuple[Path, int, int]:
-        """Shrink an image to its minimum size using libguestfs."""
+        """Shrink an image to its minimum size using libguestfs.
+
+        Deblob (cache scrub + network config) runs *always* — this frees
+        space inside the guest and applies OS-specific fixes (e.g.
+        Alpine's ``denyinterfaces eth0``).  Filesystem shrinking only
+        runs when there is significant free space to reclaim.
+        """
         try:
             og = OptimizedGuestfs(image_path, readonly=False)
         except GuestfsNotAvailableError:
@@ -872,39 +831,53 @@ class ImageService:
 
         original_size = image_path.stat().st_size
 
-        # Skip shrink if filesystem already has minimal free space
-        if (
-            image_path.suffix == ".ext4"
-            and not self._has_significant_free_space(image_path)
-        ):
-            logger.debug(
-                "Filesystem has <2%% free space, skipping shrink for %s",
-                image_path.name,
-            )
-            return image_path, original_size, original_size
-
         try:
             with og:
                 partitions = og.list_partitions()
                 root_device = partitions[0] if partitions else "/dev/sda"
 
-                fs_type = og.vfs_type(root_device)
+                # ── Phase 1: deblob — runs on EVERY image fetch/import ──
+                og.mount_rootfs()
+                og.deblob()
 
-                if fs_type in ("ext2", "ext3", "ext4"):
-                    og.shrink_ext4(root_device)
-                elif fs_type == "btrfs":
-                    og.shrink_btrfs(root_device)
-                else:
+                # ── Phase 2: shrink — only if there is space to reclaim ──
+                # Use guestfs statvfs for accurate reading (dumpe2fs on the
+                # external file would miss QEMU page-cache writes).
+                fs_type = og.vfs_type(root_device)
+                if fs_type not in ("ext2", "ext3", "ext4", "btrfs"):
+                    og._handle.umount("/")
                     if fs_type:
                         logger.debug(
-                            "Skipping shrink: %s filesystem not supported for shrinking",
+                            "Skipping shrink: %s filesystem not supported",
                             fs_type,
                         )
                     else:
                         logger.debug(
-                            "Skipping shrink: filesystem type could not be detected (may already be minimal or raw image)"
+                            "Skipping shrink: filesystem type could not be "
+                            "detected (may already be minimal or raw image)"
                         )
                     return image_path, original_size, original_size
+
+                stat = og._handle.statvfs("/")
+                free_ratio = stat.get("bfree", 0) / max(
+                    stat.get("blocks", 1), 1
+                )
+                if free_ratio <= 0.02:
+                    og._handle.umount("/")
+                    logger.debug(
+                        "Filesystem has %.1f%% free space after deblob, "
+                        "skipping shrink for %s",
+                        free_ratio * 100,
+                        image_path.name,
+                    )
+                    return image_path, original_size, original_size
+
+                og._handle.umount("/")
+
+                if fs_type in ("ext2", "ext3", "ext4"):
+                    og.shrink_ext4(root_device)
+                else:  # btrfs
+                    og.shrink_btrfs(root_device)
 
                 new_size = og.blockdev_getsize64(root_device)
 

@@ -131,7 +131,9 @@ class CacheOperation:
                     from mvmctl.api.inputs._vm_input import VMInput
                     from mvmctl.api.vm_operations import VMOperation
 
-                    VMOperation.remove(VMInput(identifiers=[vm.name]))
+                    VMOperation.remove(
+                        VMInput(identifiers=[vm.name], force=True)
+                    )
                     removed.append(vm.name)
                 except Exception as e:
                     logger.warning("Failed to remove VM %s: %s", vm.name, e)

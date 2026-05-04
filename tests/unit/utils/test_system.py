@@ -1183,6 +1183,7 @@ class TestStreamCmdNew:
 # ==============================================================================
 
 
+@pytest.mark.real_mvm_group_check
 class TestRequireMvmGroupMembershipNew:
     """Additional tests for require_mvm_group_membership()."""
 

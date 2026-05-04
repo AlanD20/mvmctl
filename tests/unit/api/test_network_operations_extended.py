@@ -191,6 +191,15 @@ class TestNetworkOperationCreate:
             "mvmctl.api.network_operations.NetworkUtils.bridge_exists",
             return_value=False,
         )
+        # _run_batch would try real sudo via privileged_cmd; mock it as a no-op
+        # since this test only cares about the post-creation DB fetch failing.
+        mocker.patch(
+            "mvmctl.core.network._service.NetworkUtils._run_batch",
+        )
+        # ensure_ip_forwarding also calls privileged_cmd → sudo subprocess.
+        mocker.patch(
+            "mvmctl.core.network._service.NetworkService.ensure_ip_forwarding",
+        )
 
         result = NetworkOperation.create(
             NetworkCreateInput(name="testnet", subnet="10.0.0.0/24")

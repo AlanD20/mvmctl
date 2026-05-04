@@ -103,7 +103,13 @@ def _block_real_sudo_invocations(request, monkeypatch: pytest.MonkeyPatch) -> No
 
     Enabled in CI with MVM_TEST_ENFORCE_NO_SUDO=1.
 
-    Skipped for system tests (marked with @pytest.mark.system).
+    Also patches ``require_mvm_group_membership`` to a no-op — the ``mvm``
+    unix group does not exist on CI runners, so ``grp.getgrnam('mvm')``
+    raises before any subprocess call can be checked.
+
+    Skipped for system tests (marked with @pytest.mark.system) and for
+    tests that specifically exercise ``require_mvm_group_membership``
+    itself (marked with ``@pytest.mark.real_mvm_group_check``).
     """
     # Skip for system tests
     if request.node.get_closest_marker("system"):
@@ -111,6 +117,13 @@ def _block_real_sudo_invocations(request, monkeypatch: pytest.MonkeyPatch) -> No
 
     if os.environ.get("MVM_TEST_ENFORCE_NO_SUDO") != "1":
         return
+
+    import mvmctl.utils._system as _sys
+
+    # Patch require_mvm_group_membership — grp.getgrnam('mvm') fails in CI
+    # where the mvm group does not exist.
+    if not request.node.get_closest_marker("real_mvm_group_check"):
+        monkeypatch.setattr(_sys, "require_mvm_group_membership", lambda: None)
 
     real_run = subprocess.run
 

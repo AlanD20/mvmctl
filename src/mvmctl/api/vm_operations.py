@@ -11,7 +11,9 @@ It combines:
 from __future__ import annotations
 
 import logging
+import os
 import shutil
+import signal
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -74,7 +76,7 @@ from mvmctl.models.result import (
     OperationResult,
     ProgressEvent,
 )
-from mvmctl.utils._system import SigtermContext
+from mvmctl.utils._system import SigtermContext, is_process_running
 from mvmctl.utils.auditlog import AuditLog
 from mvmctl.utils.common import CacheUtils
 from mvmctl.utils.network import NetworkUtils
@@ -739,6 +741,15 @@ class VMOperation:
 
                 controller = VMController(vm, repo)
                 controller.stop(force=resolved.force)
+
+                # Defense-in-depth: force-kill if stop() silently left the
+                # Firecracker process alive (e.g., stale socket prevented
+                # ACPI shutdown, or PermissionError on SIGTERM).
+                if vm.pid and is_process_running(vm.pid):
+                    try:
+                        os.kill(vm.pid, signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError, OSError):
+                        pass
 
                 VMOperation._perform_removal_cleanup(vm, vm.network_id)
 

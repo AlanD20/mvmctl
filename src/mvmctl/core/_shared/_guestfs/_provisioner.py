@@ -194,6 +194,10 @@ class GuestfsProvisioner:
     def _do_setup_ssh(self, handle: Any) -> None:
         """Configure SSH, user, host keys, and first-boot services."""
         if not self._ssh_pubkeys:
+            logger.debug(
+                "Skipping SSH setup for %s — no SSH pubkeys provided",
+                self._rootfs_path.name,
+            )
             return
 
         ssh_home_dir = (
@@ -240,12 +244,10 @@ class GuestfsProvisioner:
             handle.sync()
 
         self.enable_ssh(handle)
-        handle.mkdir_p("/etc/systemd/system")
+        handle.mkdir_p("/usr/local/bin")
         handle.write(
-            "/etc/systemd/system/first-boot-ssh-installer.service",
-            "[Unit]\nDescription=First-boot SSH installer\nAfter=network.target\n"
-            "ConditionFirstBoot=yes\n\n[Service]\nType=oneshot\n"
-            "ExecStart=/bin/bash -c '\n"
+            "/usr/local/bin/first-boot-ssh-installer.sh",
+            "#!/bin/bash\n"
             "if ! command -v sshd >/dev/null 2>&1 && ! command -v ssh >/dev/null 2>&1; then\n"
             "  if command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm openssh 2>/dev/null || true;\n"
             "  elif command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y openssh-server 2>/dev/null || true;\n"
@@ -257,7 +259,18 @@ class GuestfsProvisioner:
             "  rc-update add sshd default 2>/dev/null || rc-update add ssh default 2>/dev/null || true;\n"
             "  rc-service sshd start 2>/dev/null || rc-service ssh start 2>/dev/null || true;\n"
             "fi\n"
-            "systemctl disable first-boot-ssh-installer.service 2>/dev/null || true\n'\n"
+            "systemctl disable first-boot-ssh-installer.service 2>/dev/null || true\n",
+        )
+        handle.chmod(
+            CONST_FILE_PERMS_EXECUTABLE,
+            "/usr/local/bin/first-boot-ssh-installer.sh",
+        )
+        handle.mkdir_p("/etc/systemd/system")
+        handle.write(
+            "/etc/systemd/system/first-boot-ssh-installer.service",
+            "[Unit]\nDescription=First-boot SSH installer\nAfter=network.target\n"
+            "ConditionFirstBoot=yes\n\n[Service]\nType=oneshot\n"
+            "ExecStart=/usr/local/bin/first-boot-ssh-installer.sh\n"
             "RemainAfterExit=yes\n\n[Install]\nWantedBy=multi-user.target\n",
         )
         handle.chmod(
@@ -516,7 +529,6 @@ class GuestfsProvisioner:
                 "PasswordAuthentication no",
                 "PermitEmptyPasswords no",
                 "UsePAM yes",
-                "Protocol 2",
             ]
             if self._user != "root":
                 config_lines.append(f"AllowUsers {self._user}")
@@ -658,7 +670,8 @@ class GuestfsProvisioner:
             guestfs_handle.mkdir_p("/etc/systemd/system")
             guestfs_handle.write(
                 "/etc/systemd/system/ssh-hostkeygen.service",
-                "[Unit]\nDescription=SSH Host Key Generation\nAfter=local-fs.target\n\n"
+                "[Unit]\nDescription=SSH Host Key Generation\n"
+                "Before=ssh.service\nAfter=local-fs.target\n\n"
                 "[Service]\nType=oneshot\nExecStart=/bin/bash /etc/local.d/ssh-keygen.start\nRemainAfterExit=yes\n\n"
                 "[Install]\nWantedBy=multi-user.target\n",
             )
