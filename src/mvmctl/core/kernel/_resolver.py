@@ -68,9 +68,11 @@ class KernelResolver:
         return self._enrich([kernel])[0]
 
     def resolve(self, value: str) -> KernelItem:
-        """Resolve kernel by ID prefix."""
-        kernel = self.by_id(value)
-        return kernel
+        """Resolve kernel by ID prefix or ``type:version`` (e.g. ``official:6.19.9``)."""
+        if ":" in value:
+            parts = value.split(":", maxsplit=1)
+            return self.by_version_type(parts[1], parts[0])
+        return self.by_id(value)
 
     def resolve_many(
         self,
