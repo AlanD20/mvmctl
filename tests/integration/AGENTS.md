@@ -17,7 +17,16 @@ tests/integration/
 ├── test_nocloud_net_lifecycle.py  # Nocloud-net HTTP server lifecycle
 ├── test_cloud_init_iso.py         # Cloud-init ISO generation
 ├── test_console_integration.py    # Console/pty-over-vsock integration
-└── test_vm_direct_injection.py    # Direct cloud-init injection workflow
+├── test_vm_direct_injection.py    # Direct cloud-init injection workflow
+├── test_binary_integration.py     # Binary CRUD workflow
+├── test_cache_integration.py      # Cache management workflow
+├── test_config_integration.py     # Config set/get workflow
+├── test_image_integration.py      # Image fetch/remove workflow
+├── test_init_integration.py       # Init workflow
+├── test_kernel_integration.py     # Kernel fetch/remove workflow
+├── test_key_integration.py        # Key CRUD workflow
+├── test_log_integration.py        # Log tailing workflow
+└── test_ssh_integration.py        # SSH config generation workflow
 ```
 
 ## TEST SCOPE
@@ -75,6 +84,33 @@ Integration tests differ from unit tests:
 - Tests seeding metadata and user-data directly into rootfs
 - Bypasses NoCloud network server or ISO mounting
 
+### test_binary_integration.py
+- Binary fetch/list/set-default/remove workflow
+
+### test_cache_integration.py
+- Cache prune/cleanup workflow
+
+### test_config_integration.py
+- Config get/set/list workflow
+
+### test_image_integration.py
+- Image fetch/list/remove workflow
+
+### test_init_integration.py
+- Init workflow integration
+
+### test_kernel_integration.py
+- Kernel fetch/list/remove workflow
+
+### test_key_integration.py
+- Key create/list/remove workflow
+
+### test_log_integration.py
+- Log tail workflow
+
+### test_ssh_integration.py
+- SSH config generation workflow
+
 ## CONVENTIONS
 
 ### subprocess Handling
@@ -126,7 +162,7 @@ uv run pytest tests/integration/ -x -v
 
 ## NOTES
 
-- **8 test files**: Covering host, VM, network, nocloud-net, cloud-init, console, smoke, and direct injection tests
+- **17 test files**: Covering host, VM, network, nocloud-net, cloud-init, console, smoke, binary, cache, config, image, init, kernel, key, logs, ssh, and direct injection tests
 - Tests are more coarse-grained than unit tests
 - Some tests may require root for network operations (marked accordingly)
 - Uses same mocking infrastructure as unit tests (see parent `tests/conftest.py`)

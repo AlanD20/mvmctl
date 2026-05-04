@@ -121,7 +121,7 @@ Run `sudo mvm host init` once; the bridge is auto-created with the name `<cli_na
 
 To see the default bridge name:
 ```bash
-mvm config get defaults.network
+mvm network ls
 ```
 
 ---
@@ -382,7 +382,7 @@ sudo usermod -aG mvm $USER
 
 Check how many IPs are in use:
 ```bash
-mvm network leases <network_name>
+mvm network inspect <network_name>
 ```
 
 If the subnet is full, you have two options:

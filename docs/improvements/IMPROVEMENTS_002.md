@@ -19,6 +19,7 @@ When making these changes, ensure there will be **NO DEPRECATION messages/codes 
 - reconcile VM from stopped state using the same rootfs and kernel
 - add is_present checks for vm
 - add key_id to vm table
+- use proper exceptions for each domain
 
 
 ## Networking

@@ -19,6 +19,8 @@ These binaries are required for basic operations like managing VMs, networking, 
 | `visudo` | Privilege | Validating sudoers drop-in files | `sudo` | `sudo` |
 | `lsmod` | Kernel | Checking for KVM module status | `kmod` | `kmod` |
 | `modprobe` | Kernel | Loading required KVM modules | `kmod` | `kmod` |
+| `dumpe2fs` | Filesystem | Filesystem inspection (image import) | `e2fsprogs` | `e2fsprogs` |
+| `gpasswd` | Privilege | Managing group membership | `passwd` | `shadow` |
 
 ## 2. Image & Cloud-Init Dependencies
 
@@ -37,7 +39,6 @@ These binaries are required for importing images, converting formats, and genera
 | `unsquashfs` | Image | Extracting rootfs from SquashFS images | `squashfs-tools` | `squashfs-tools` |
 | `tar` | Archive | Extracting rootfs from tarballs | `tar` | `tar` |
 | `cloud-localds` | Cloud-Init | Creating `nocloud` seed ISOs | `cloud-image-utils` | `cloud-utils` |
-| `ssh` | Remote | Connecting to microVMs via SSH | `openssh-client` | `openssh` |
 | `ssh-keygen` | Remote | Generating SSH keypairs for microVMs | `openssh-client` | `openssh` |
 
 ## 3. libguestfs Dependencies (Optional)
@@ -150,7 +151,7 @@ This section maps specific `mvm` commands to the external binaries they invoke.
 | Command Group | Command(s) | Required Binaries |
 | :--- | :--- | :--- |
 | **`mvm host`** | `init` | `sudo`, `groupadd`, `usermod`, `visudo`, `sysctl`, `ip`, `iptables`, `iptables-save`, `lsmod`, `modprobe` |
-| | `reset` | `sudo`, `groupdel`, `sysctl`, `iptables-restore` |
+| | `reset` | `sudo`, `groupdel`, `sysctl` |
 | **`mvm network`** | `create` | `ip`, `iptables`, `sysctl` |
 | | `ls`, `inspect`, `rm`, `sync`, `set-default` | `ip`, `iptables` |
 | **`mvm bin`** | `fetch`, `ls`, `rm`, `default` | (Internal Python logic) |
@@ -165,7 +166,7 @@ This section maps specific `mvm` commands to the external binaries they invoke.
 | | `ls`, `ps`, `inspect` | (Internal Python logic) |
 | | `start`, `stop`, `reboot` | `firecracker`, `ip`, `iptables` |
 | | `rm` | `firecracker`, `ip`, `iptables` |
-| **`mvm ssh`** | `ssh` | `ssh` |
+| **`mvm ssh`** | `ssh` | (User's SSH client — not invoked by mvmctl) |
 | **`mvm logs`** | _(invoked directly)_ | (Internal Python logic) |
 
 ## 6. Host System Requirements

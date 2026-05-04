@@ -15,87 +15,14 @@ Before releasing, ensure the following are available on your workstation:
 
 The version is defined in one place: the `version` field under `[project]` in `pyproject.toml`. Update it there, and also update the `__version__` fallback in `src/mvmctl/__init__.py` to match.
 
-**Recommended**: Use the `bump-version.py` script to update all version references atomically:
+### Manual Version Bump
 
-```bash
-# Simple version bump (no changelog)
-./bump-version.py 0.2.0
-
-# With inline changelog
-./bump-version.py 0.2.0 --changelog "- Added feature X\n- Fixed bug Y"
-
-# With changelog from file (recommended for releases)
-./bump-version.py 0.2.0 --changelog-file release-notes.md
-
-# Preview changes without modifying files
-./bump-version.py 0.2.0 --dry-run
-
-# Bump and auto-commit
-./bump-version.py 0.2.0 --changelog-file notes.md --commit
-
-# With custom author (for package changelogs)
-./bump-version.py 0.2.0 \
-  --author-name "Jane Doe" \
-  --author-email "jane@example.com" \
-  --changelog-file notes.md
-```
-
-### What bump-version.py Updates
-
-The script automatically updates version numbers in:
-
-| File | Field Updated |
-|------|--------------|
-| `pyproject.toml` | `version = "X.Y.Z"` |
-| `src/mvmctl/__init__.py` | `__version__ = "X.Y.Z"` |
-| `packaging/PKGBUILD` | `pkgver=X.Y.Z` and `# Maintainer:` comment |
-| `packaging/mvmctl.spec` | `Version: X.Y.Z` and `%changelog` entries |
-| `packaging/debian/changelog` | New version entry with Debian format |
-| `docs/mvm.1` | Version in `.TH` header line |
-| `CHANGELOG.md` | New version section with formatted changelog |
-
-### Changelog Format
-
-When providing a changelog via `--changelog` or `--changelog-file`, the script **parses and reformats** the content for each package format:
-
-**Input format** (Markdown):
-```markdown
-### Added
-- Feature X description
-- Feature Y description
-
-### Fixed
-- Bug Z description
-```
-
-**Output formats**:
-
-| Package | Format |
-|---------|--------|
-| `CHANGELOG.md` | Full Markdown with `### Added/Fixed/Changed` sections |
-| `debian/changelog` | Debian format: `  * entry text` (2-space indented bullets) |
-| `RPM spec` | `%changelog` with dash-prefixed entries |
-| `Arch PKGBUILD` | References root `CHANGELOG.md` (no embedded changelog) |
-
-### Default Changelogs
-
-If no changelog is provided, the script uses placeholder text:
-
-- **CHANGELOG.md**: `- (Add changes here)` template
-- **debian/changelog**: `* New upstream release {version}`
-- **RPM spec**: `- New upstream release {version}`
-
-### Manual Version Bump (Alternative)
-
-If not using the script, manually update these files:
+Manually update these files:
 
 1. `pyproject.toml` — update `version`
 2. `src/mvmctl/__init__.py` — update `__version__`
-3. `packaging/PKGBUILD` — update `pkgver`
-4. `packaging/mvmctl.spec` — update `Version` and add `%changelog` entry
-5. `packaging/debian/changelog` — add new version entry
-6. `docs/mvm.1` — update version in `.TH` line
-7. `CHANGELOG.md` — add new version section
+3. `docs/mvm.1` — update version in `.TH` line
+4. `CHANGELOG.md` — add new version section
 
 This project uses **semantic versioning** (MAJOR.MINOR.PATCH):
 
@@ -311,30 +238,7 @@ For distro packages (deb, rpm, etc.), install to:
 
 ## Distribution Package Builds
 
-The CI automatically builds distribution packages for popular Linux distributions:
-
-| Format | Target | CI Job | Install Command |
-|--------|--------|--------|-----------------|
-| .deb | Debian, Ubuntu | `build-deb` | `sudo dpkg -i mvmctl_*.deb` |
-| .rpm | RHEL, CentOS, Fedora | `build-rpm` | `sudo dnf install mvmctl-*.rpm` |
-| PKGBUILD | Arch Linux | `build-arch` | `makepkg -si` |
-
-### Package Files
-
-- **Debian/Ubuntu**: `packaging/debian/` directory contains control files
-  - `control` — package metadata and dependencies
-  - `rules` — build rules (binary is pre-built, just installs)
-  - `changelog` — version history
-  - `compat` — debhelper compatibility level
-
-- **RPM**: `packaging/mvmctl.spec` — RPM spec file
-  - Uses Fedora container for building
-  - Includes man page installation
-
-- **Arch**: `packaging/PKGBUILD` — Arch package build file
-  - Downloads binary from GitHub releases
-  - Installs binary and man page
-  - Can be submitted to AUR
+The CI builds distribution packages using GitHub Actions workflows. Refer to `.github/workflows/release.yml` for the exact build matrix.
 
 ### Local Package Building
 
@@ -346,12 +250,13 @@ To build packages locally (for testing):
 sudo apt-get install debhelper build-essential
 
 # Build the binary first
-uv run python -m nuitka --onefile --output-dir=dist --output-filename=mvm \
+uv run --group build python -m nuitka --onefile --output-dir=dist --output-filename=mvm \
   --include-package=mvmctl --include-data-dir=src/mvmctl/assets=mvmctl/assets \
   --lto=yes src/mvmctl/main.py
 
-# Build the .deb
-cp -r packaging/debian debian
+# Build the .deb (using dh-compatible rules)
+mkdir -p debian
+cp -r .github/workflows/release/debian/* debian/ 2>/dev/null || true
 dpkg-buildpackage -us -uc -b
 # Package will be at ../mvmctl_*.deb
 ```
@@ -365,22 +270,13 @@ sudo dnf install rpm-build rpmdevtools
 rpmdev-setuptree
 
 # Copy files
-cp packaging/mvmctl.spec ~/rpmbuild/SPECS/
+cp .github/workflows/release/mvmctl.spec ~/rpmbuild/SPECS/
 cp dist/mvm ~/rpmbuild/SOURCES/
 cp docs/mvm.1 ~/rpmbuild/SOURCES/
 
 # Build
 rpmbuild -bb ~/rpmbuild/SPECS/mvmctl.spec
 # Package will be at ~/rpmbuild/RPMS/x86_64/*.rpm
-```
-
-#### Arch (on Arch Linux)
-```bash
-# Copy PKGBUILD
-cp packaging/PKGBUILD .
-
-# Build and install
-makepkg -si
 ```
 
 ## Appendix: Dynamic Import Handling in Compiled Binaries

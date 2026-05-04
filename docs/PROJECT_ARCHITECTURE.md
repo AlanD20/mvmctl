@@ -123,13 +123,23 @@ src/mvmctl/
 │   ├── ssh/                                 # SSH operations
 │   │   └── _service.py
 │   └── _shared/                           # Shared infrastructure
+│       ├── __init__.py
 │       ├── _db.py                           # Database (connection manager)
 │       ├── _enrichment.py                   # RelationEnricher (batch relation loading)
 │       ├── _resolver_registry.py            # Lazy resolver registry (prevents circular imports)
 │       ├── _asset_manager.py                # Generic asset management
 │       ├── _parallel.py                     # ParallelExecutor
 │       ├── _guestfs/                        # Guestfs provisioning utilities
+│       │   ├── __init__.py
+│       │   ├── _base.py
+│       │   ├── _kernel_detector.py
+│       │   ├── _provisioner.py
+│       │   └── _service.py
 │       └── _iptables_tracker/               # Generic iptables rule tracking
+│           ├── __init__.py
+│           ├── _repository.py
+│           ├── _resolver.py
+│           └── _tracker.py
 │
 ├── cli/                                     # Thin Typer command definitions
 │   ├── vm.py
@@ -161,15 +171,37 @@ src/mvmctl/
 │   └── bulk.py                              # BulkResult, BulkResultItem
 │
 ├── services/                                # Long-running subprocess services
+│   ├── console_relay/                       # Console relay service
+│   │   ├── __init__.py
+│   │   ├── _defaults.py
+│   │   ├── exceptions.py
+│   │   ├── client.py
+│   │   ├── manager.py
+│   │   └── process.py
+│   └── nocloud_server/                      # NoCloud server service
+│       ├── __init__.py
+│       ├── _defaults.py
+│       ├── exceptions.py
+│       ├── manager.py
+│       └── process.py
 │
 ├── db/                                      # SQLite schema, migrations, ORM models
+│   ├── __init__.py
+│   └── migrations/
+│       └── __init__.py
 │
 ├── assets/                                  # Bundled YAML configs
+│   ├── __init__.py
+│   ├── cloud-init.template.yaml
+│   ├── firecracker.template.json
+│   ├── images.yaml
+│   └── kernels.yaml
 │
 └── utils/                                   # Shared helpers (pure, no domain knowledge)
     ├── __init__.py
     ├── _disk.py
     ├── _io.py
+    ├── _lazy_import.py
     ├── _system.py
     ├── _validators.py
     ├── auditlog.py
@@ -179,6 +211,7 @@ src/mvmctl/
     ├── fs.py
     ├── http.py
     ├── network.py
+    ├── operation_utils.py
     ├── progress.py
     ├── template.py
     └── yaml.py

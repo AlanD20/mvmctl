@@ -21,6 +21,7 @@ tests/system/
 ├── test_keys.py             # SSH key tests
 ├── test_logs.py            # Log tests
 ├── test_network.py          # Network CRUD tests
+├── test_ssh.py             # SSH config tests
 ├── test_vm_lifecycle.py     # VM lifecycle tests
 └── __init__.py
 ```
@@ -67,6 +68,6 @@ uv run pytest tests/
 
 ## NOTES
 
-- **13 test files**: Covering bin, cache, config, console, full_journeys, host, images, init, kernel, keys, logs, network, and VM lifecycle
+- **14 test files**: Covering bin, cache, config, console, full_journeys, host, images, init, kernel, keys, logs, network, ssh, and VM lifecycle
 - Requires real system environment (KVM, mvm group, network privileges)
 - Completely black-box testing via CLI binary calls

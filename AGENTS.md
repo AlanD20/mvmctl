@@ -37,8 +37,12 @@ mvmctl/
 │   ├── assets/          # Bundled YAML configs
 │   ├── services/        # Runtime subprocess services
 │   └── db/              # SQLite schema, migrations, and ORM models
+├── legacy/              # Pre-refactor phase documentation & assets
+├── scripts/             # Build & release helper scripts
+├── stubs/               # Type stubs for external dependencies
+├── packaging/           # Distribution packaging configs
 ├── docs/                # Project documentation
-├── tests/               # 121 test files (69 archived unit + 10 integration + 15 system + 6 layer_compliance + 1 core + 20 more)
+├── tests/               # 138 test files (100 unit + 17 integration + 14 system + 7 layer_compliance)
 └── pyproject.toml       
 ```
 

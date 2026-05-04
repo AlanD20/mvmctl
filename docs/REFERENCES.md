@@ -50,6 +50,8 @@ Host configuration. One-time, machine-global setup.
 | `mvm host ls` | Show current host configuration state |
 | `mvm host clean` | Remove networking config (bridges, TAPs, iptables). Does not touch sysctl/group. |
 | `mvm host reset` | Full rollback: networking + sysctl + sudoers + group removal. |
+| | `mvm host clean --force` | Skip confirmation |
+| | `mvm host reset --force` | Skip confirmation |
 
 ---
 
@@ -170,7 +172,7 @@ VM lifecycle management.
 | `--network, --net NAME` | Named network | from config |
 | `--ssh-key NAME_OR_PATH` | SSH public key (name from cache or file path) | default keys |
 | `--user USER` | Default SSH user | from config |
-| `--cloud-init-mode MODE` | `inject`, `iso`, `net`, `off` | `inject` |
+| `--cloud-init-mode MODE` | `inject`, `iso`, `net`, `off` | `off` (no cloud-init) |
 | `--nocloud-net-port N` | Port for nocloud-net HTTP server (0=auto) | auto-assign |
 | `--user-data PATH` | Path to custom cloud-init user-data file | — |
 | `--enable-pci/--no-enable-pci` | Enable PCI device support | from config |
@@ -216,7 +218,7 @@ Named network management.
 | `mvm network inspect NAME` | Show network details and IP leases |
 | `mvm network set-default NAME` | Set a network as the default for VM creation |
 | `mvm network sync [IDENTIFIER]` | Sync iptables rules between database and host |
-| `mvm network restore` | Restore all networks from DB after reboot |
+| `mvm network restore` | (Called automatically by `mvm host init` — restores all networks from DB) |
 
 ---
 
@@ -377,7 +379,7 @@ Legacy format example:
 
 ## Cloud-Init
 
-`mvm` uses **inject** as the default method for delivering cloud-init configuration to VMs (with **nocloud-net** available as an alternative via `--cloud-init-mode net`).
+`mvm` uses **off** (no cloud-init) as the default mode. When you want cloud-init provisioning, use `--cloud-init-mode inject` (default when enabled, uses libguestfs), `iso` (generates a cloud-init ISO), or `net` (nocloud-net HTTP server).
 
 ### How It Works
 
@@ -391,10 +393,10 @@ Legacy format example:
 
 | Mode | Flag | Description |
 |------|------|-------------|
-| **inject (default)** | `--cloud-init-mode inject` | Direct injection into rootfs using libguestfs |
+| **inject** | `--cloud-init-mode inject` | Direct injection into rootfs using libguestfs |
 | **net** | `--cloud-init-mode net` | Serves cloud-init files via HTTP (nocloud-net) |
 | **iso** | `--cloud-init-mode iso` | Uses a pre-existing ISO file |
-| **off** | `--cloud-init-mode off` | Skips cloud-init entirely |
+| **off** | `--cloud-init-mode off` | Skips cloud-init entirely (default) |
 
 ### Security Architecture
 

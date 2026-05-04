@@ -1,6 +1,6 @@
 # tests/layer_compliance/ — Architectural Compliance Tests
 
-**Scope:** AST-based enforcement of architecture rules; all 6 tests run in CI
+**Scope:** AST-based enforcement of architecture rules; all 7 tests run in CI
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Rule:** Tests here use AST parsing or subprocess isolation — NOT runtime imports — to avoid side effects
 **Parent:** See `tests/AGENTS.md` for fixtures and mocking patterns
@@ -9,12 +9,13 @@
 
 ```
 tests/layer_compliance/
-├── test_imports.py       # CLI→API→Core import boundary enforcement
-├── test_constants.py     # constants.py single-source-of-truth validation
-├── test_constants_new.py # Additional constants validation
-├── test_privilege.py     # API privilege check presence verification
-├── test_startup_time.py  # <200ms cold-start enforcement
-└── test_cleanup.py       # Pytest temp directory cleanup behavior
+├── test_imports.py              # CLI→API→Core import boundary enforcement
+├── test_constants.py            # constants.py single-source-of-truth validation
+├── test_privilege.py            # API privilege check presence verification
+├── test_startup_time.py         # <200ms cold-start enforcement
+├── test_cleanup.py              # Pytest temp directory cleanup behavior
+├── test_memory_leak_patterns.py # Detects potential memory leak patterns
+└── test_blocking_loops.py       # Detects blocking calls in async paths
 ```
 
 ## TEST FILES
@@ -50,12 +51,6 @@ Uses `ast.parse()` to enforce no hardcoded paths, large numbers (≥100), or lis
 **File exceptions:** `constants.py` itself, `core/rootfs_injector.py` (constant holder)
 
 **Line exceptions:** `vm_lifecycle.py` chmod/chown lines; `rootfs_injector.py` set_memsize lines
-
----
-
-### `test_constants_new.py` — Additional Constants Validation
-
-Extends `test_constants.py` with additional validation checks for the constants module.
 
 ---
 
@@ -119,6 +114,6 @@ uv run pytest tests/layer_compliance/test_startup_time.py -v  # slow — spawns 
 
 ## NOTES
 
-- **6 test files**: Covering imports, constants (2 files), privileges, startup time, and cleanup behavior
+- **7 test files**: Covering imports, constants, privileges, startup time, cleanup, memory leak patterns, and blocking loop detection
 - All tests are **AST-based or subprocess-isolated** — they do NOT import `mvmctl.*` at collection time (except `test_constants.py` which imports `mvmctl.constants` for functional validation)
 - Layer compliance failures in CI indicate real architectural regressions — never skip or xfail without documented justification

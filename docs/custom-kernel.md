@@ -196,12 +196,6 @@ correctly with Firecracker.
 # List all cached kernels
 mvm kernel ls
 
-# List only Firecracker CI kernels
-mvm kernel ls --firecracker
-
-# List only official/upstream kernels
-mvm kernel ls --official
-
 # Set a kernel as default for vm create
 mvm kernel set-default vmlinux-fc-1.12-x86_64
 

@@ -68,13 +68,12 @@ from mvmctl.api import (
     BinaryInput,
     SSHInput,
     ConsoleInput,
+    ConsoleRequest,
     LogInput,
     # Result types
-    BinaryFetchResult,
     InitResult,
     InitStepResult,
     ConsoleConnectionInfo,
-    PruneAllResult,
 )
 ```
 
@@ -118,13 +117,13 @@ logic. Every domain record uses the `*Item` suffix.
 
 ```python
 class VMStatus(StrEnum):
-    STARTING = "starting"
-    RUNNING = "running"
-    PAUSED = "paused"
-    STOPPING = "stopping"
-    STOPPED = "stopped"
-    CRASHED = "crashed"
-    ERROR = "error"
+    STARTING = auto()   # value = "STARTING"
+    RUNNING = auto()    # value = "RUNNING"
+    PAUSED = auto()      # value = "PAUSED"
+    STOPPING = auto()    # value = "STOPPING"
+    STOPPED = auto()     # value = "STOPPED"
+    CRASHED = auto()    # value = "CRASHED"
+    ERROR = auto()      # value = "ERROR"
 ```
 
 #### `VMInstanceItem`
@@ -563,7 +562,7 @@ except MVMError as e:
 
 All methods are `@staticmethod`. VM instances are identified using `VMInput` objects.
 
-#### `VMOperation.create(inputs: VMCreateInput) -> None`
+#### `VMOperation.create(inputs: VMCreateInput) -> OperationResult[VMInstanceItem] | NeedsInteraction`
 
 Create and start a new Firecracker microVM. Copies the rootfs image, generates cloud-init
 data, sets up bridge networking, writes the Firecracker JSON config, starts the Firecracker
@@ -627,7 +626,7 @@ VMOperation.create(
 
 ---
 
-#### `VMOperation.remove(inputs: VMInput) -> None`
+#### `VMOperation.remove(inputs: VMInput) -> BatchResult[VMInstanceItem]`
 
 Stop and remove one or more VMs. Sends SIGTERM (graceful shutdown), then SIGKILL if
 still running. Tears down TAP device, iptables rules, deregisters the VM.
@@ -673,13 +672,13 @@ groupings (vm, resources, networking, assets, filesystem, console). When `tree=F
 
 ---
 
-#### `VMOperation.start(inputs: VMInput) -> None`
+#### `VMOperation.start(inputs: VMInput) -> BatchResult[VMInstanceItem]`
 
 Start one or more stopped VMs.
 
 ---
 
-#### `VMOperation.stop(inputs: VMInput) -> None`
+#### `VMOperation.stop(inputs: VMInput) -> BatchResult[VMInstanceItem]`
 
 Stop one or more running VMs gracefully.
 
@@ -689,25 +688,25 @@ Stop one or more running VMs gracefully.
 
 ---
 
-#### `VMOperation.reboot(inputs: VMInput) -> None`
+#### `VMOperation.reboot(inputs: VMInput) -> BatchResult[VMInstanceItem]`
 
 Reboot one or more VMs (stop then start).
 
 ---
 
-#### `VMOperation.pause(inputs: VMInput) -> None`
+#### `VMOperation.pause(inputs: VMInput) -> BatchResult[VMInstanceItem]`
 
 Pause one or more running VMs.
 
 ---
 
-#### `VMOperation.resume(inputs: VMInput) -> None`
+#### `VMOperation.resume(inputs: VMInput) -> BatchResult[VMInstanceItem]`
 
 Resume one or more paused VMs.
 
 ---
 
-#### `VMOperation.snapshot(inputs: VMInput, mem_out: Path, state_out: Path) -> None`
+#### `VMOperation.snapshot(inputs: VMInput, mem_out: Path, state_out: Path) -> OperationResult[VMInstanceItem]`
 
 Create a snapshot of a single VM's memory and state.
 
@@ -719,7 +718,7 @@ Create a snapshot of a single VM's memory and state.
 
 ---
 
-#### `VMOperation.load_snapshot(inputs: VMInput, mem_in: Path, state_in: Path, resume_after: bool | None = None) -> None`
+#### `VMOperation.load_snapshot(inputs: VMInput, mem_in: Path, state_in: Path, resume_after: bool | None = None) -> OperationResult[VMInstanceItem]`
 
 Restore a VM from a snapshot.
 
@@ -761,7 +760,7 @@ against the database and creates a VM matching the exported configuration.
 
 All methods are `@staticmethod`. Networks are identified using `NetworkInput` objects.
 
-#### `NetworkOperation.create(inputs: NetworkCreateInput) -> NetworkCreateResult`
+#### `NetworkOperation.create(inputs: NetworkCreateInput) -> OperationResult[NetworkItem] | NeedsInteraction`
 
 Create a named bridge network: sets up the bridge device, assigns the gateway IP,
 optionally configures NAT rules.
@@ -774,11 +773,11 @@ optionally configures NAT rules.
 | `inputs.nat_enabled` | `bool` | `True` | Configure NAT/masquerade for outbound access |
 | `inputs.nat_gateways` | `list[str]` | `[]` | Additional NAT gateway addresses |
 
-**Returns:** `NetworkCreateResult` wrapping the created `NetworkItem`.
+**Returns:** `OperationResult[NetworkItem]` wrapping the created `NetworkItem`, or `NeedsInteraction` if sudo is required.
 
 ---
 
-#### `NetworkOperation.remove(inputs: NetworkInput, force: bool = False) -> None`
+#### `NetworkOperation.remove(inputs: NetworkInput, force: bool = False) -> OperationResult[NetworkItem]`
 
 Remove a named network: tears down the bridge device and NAT rules, removes persisted state.
 
@@ -824,7 +823,7 @@ Set a network as the default.
 
 ---
 
-#### `NetworkOperation.create_default_network() -> NetworkItem`
+#### `NetworkOperation.create_default_network() -> OperationResult[NetworkItem]`
 
 Ensure the default network exists, creating it if needed. Called automatically by
 `HostOperation.init()`. Idempotent.
@@ -833,7 +832,7 @@ Ensure the default network exists, creating it if needed. Called automatically b
 
 ---
 
-#### `NetworkOperation.restore() -> list[str]`
+#### `NetworkOperation.restore() -> OperationResult[list[str]]`
 
 Restore all networks from DB after reboot (re-create bridges and NAT rules).
 
@@ -859,7 +858,7 @@ Metadata includes `network_count` and `bridges_reconciled`.
 
 All methods are `@staticmethod`. Images are identified using `ImageInput` objects.
 
-#### `ImageOperation.fetch(inputs: ImageFetchInput, phase_callback: Callable[[str], None] | None = None) -> ImageAcquireResult`
+#### `ImageOperation.fetch(inputs: ImageFetchInput, phase_callback: Callable[[str], None] | None = None) -> OperationResult[ImageItem] | NeedsInteraction`
 
 Download and convert a VM rootfs image (qcow2, tar, or raw) to an ext4 file, then
 register it in the database.
@@ -881,7 +880,7 @@ register it in the database.
 
 ---
 
-#### `ImageOperation.import_(inputs: ImageImportInput) -> ImageAcquireResult`
+#### `ImageOperation.import_(inputs: ImageImportInput) -> OperationResult[ImageItem]`
 
 Import an existing local image file and register it in the database.
 
@@ -939,7 +938,7 @@ Inspect an image with full details.
 
 ---
 
-#### `ImageOperation.warm(inputs: ImageInput) -> list[Path]`
+#### `ImageOperation.warm(inputs: ImageInput) -> OperationResult[list[Path]]`
 
 Pre-decompress images to the ready pool for fast VM creation.
 
@@ -949,7 +948,7 @@ Pre-decompress images to the ready pool for fast VM creation.
 
 All methods are `@staticmethod`. Kernels are identified using `KernelInput` objects.
 
-#### `KernelOperation.fetch(inputs: KernelFetchInput) -> KernelItem`
+#### `KernelOperation.fetch(inputs: KernelFetchInput) -> OperationResult[KernelItem] | NeedsInteraction`
 
 Fetch or build a Firecracker kernel.
 
@@ -995,7 +994,7 @@ Inspect a kernel with full details.
 
 ---
 
-#### `KernelOperation.set_default(inputs: KernelInput) -> None`
+#### `KernelOperation.set_default(inputs: KernelInput) -> OperationResult[KernelItem]`
 
 Set a kernel as the default.
 
@@ -1005,7 +1004,7 @@ Set a kernel as the default.
 
 All methods are `@staticmethod`. Keys are identified using `KeyInput` objects.
 
-#### `KeyOperation.add(name: str, pub_key_path: Path, overwrite: bool = False) -> SSHKeyItem`
+#### `KeyOperation.add(name: str, pub_key_path: Path, overwrite: bool = False) -> OperationResult[SSHKeyItem]`
 
 Import an existing `.pub` file into the cache.
 
@@ -1019,7 +1018,7 @@ Import an existing `.pub` file into the cache.
 
 ---
 
-#### `KeyOperation.create(inputs: KeyCreateInput) -> SSHKeyItem`
+#### `KeyOperation.create(inputs: KeyCreateInput) -> OperationResult[SSHKeyItem]`
 
 Generate a new SSH keypair via `ssh-keygen` and register it.
 
@@ -1049,7 +1048,7 @@ Get a single key by name or ID.
 
 ---
 
-#### `KeyOperation.remove(inputs: KeyInput) -> None`
+#### `KeyOperation.remove(inputs: KeyInput) -> BatchResult[SSHKeyItem]`
 
 Remove keys from the cache registry and delete their key files.
 
@@ -1061,7 +1060,7 @@ Inspect a key with full details.
 
 ---
 
-#### `KeyOperation.set_default(inputs: KeyInput) -> None`
+#### `KeyOperation.set_default(inputs: KeyInput) -> OperationResult[SSHKeyItem]`
 
 Set one or more keys as defaults for new VMs.
 
@@ -1073,7 +1072,7 @@ Get all default keys.
 
 ---
 
-#### `KeyOperation.clear_defaults() -> None`
+#### `KeyOperation.clear_defaults() -> OperationResult[None]`
 
 Clear all default keys.
 
@@ -1091,9 +1090,9 @@ Export a keypair to a destination directory.
 
 All methods are `@staticmethod`. Binaries are identified using `BinaryInput` objects.
 
-#### `BinaryOperation.fetch(inputs: BinaryFetchInput) -> BinaryFetchResult`
+#### `BinaryOperation.fetch(inputs: BinaryFetchInput) -> OperationResult[list[BinaryItem]] | NeedsInteraction`
 
-Download a specific Firecracker binary version from GitHub releases.
+Download a specific Firecracker/jailer binary version from GitHub releases.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -1101,7 +1100,7 @@ Download a specific Firecracker binary version from GitHub releases.
 | `inputs.set_as_default` | `bool` | `False` | Set as default after download |
 | `inputs.download_override` | `bool` | `True` | Re-download even if cached |
 
-**Returns:** `BinaryFetchResult` with `result: list[BinaryItem]`.
+**Returns:** `OperationResult[list[BinaryItem]]` wrapping the downloaded binaries, or `NeedsInteraction` if sudo is required.
 
 ---
 
@@ -1141,7 +1140,7 @@ Set a binary as the default.
 
 ---
 
-#### `BinaryOperation.ensure_default() -> BinaryItem | None`
+#### `BinaryOperation.ensure_default() -> OperationResult[BinaryItem]`
 
 Ensure a default Firecracker binary exists. If local binaries exist but none is
 marked default, sets the latest Firecracker binary as default.
@@ -1154,7 +1153,7 @@ marked default, sets the latest Firecracker binary as default.
 
 All methods are `@staticmethod`.
 
-#### `HostOperation.init(cache_dir: Path) -> list[HostStateChangeItem]`
+#### `HostOperation.init(cache_dir: Path) -> OperationResult[Any] | NeedsInteraction`
 
 Apply host configuration: enable IP forwarding, persist sysctl, load KVM modules,
 create the `mvm` unix group, configure sudoers, set up iptables chains, and ensure
@@ -1219,7 +1218,7 @@ Return all currently running VMs.
 
 All methods are `@staticmethod`.
 
-#### `CacheOperation.init_all() -> dict[str, str | list[str] | None]`
+#### `CacheOperation.init_all() -> OperationResult[dict[str, str | list[str] | None]]`
 
 Initialize all cache directories and optionally build the libguestfs fixed appliance.
 
@@ -1228,38 +1227,38 @@ Initialize all cache directories and optionally build the libguestfs fixed appli
 
 ---
 
-#### `CacheOperation.prune_vms(dry_run: bool = False, include_all: bool = False) -> list[str]`
+#### `CacheOperation.prune_vms(dry_run: bool = False, include_all: bool = False) -> OperationResult[list[str]]`
 
 Prune VMs. By default, prunes all VMs EXCEPT those in RUNNING or STARTING state.
 Use `include_all=True` to prune ALL VMs regardless of state.
 
 ---
 
-#### `CacheOperation.prune_networks(dry_run: bool = False, include_all: bool = False) -> list[str]`
+#### `CacheOperation.prune_networks(dry_run: bool = False, include_all: bool = False) -> OperationResult[list[str]]`
 
 Prune unused networks. Skips default and referenced networks by default.
 
 ---
 
-#### `CacheOperation.prune_images(dry_run: bool = False, include_all: bool = False) -> list[str]`
+#### `CacheOperation.prune_images(dry_run: bool = False, include_all: bool = False) -> OperationResult[list[str]]`
 
 Prune unused images. Skips default and referenced images by default.
 
 ---
 
-#### `CacheOperation.prune_kernels(dry_run: bool = False, include_all: bool = False) -> list[str]`
+#### `CacheOperation.prune_kernels(dry_run: bool = False, include_all: bool = False) -> OperationResult[list[str]]`
 
 Prune unused kernels. Skips default and referenced kernels by default.
 
 ---
 
-#### `CacheOperation.prune_binaries(dry_run: bool = False, include_all: bool = False) -> list[str]`
+#### `CacheOperation.prune_binaries(dry_run: bool = False, include_all: bool = False) -> OperationResult[list[str]]`
 
 Prune unused binaries. Skips default version by default.
 
 ---
 
-#### `CacheOperation.prune_misc(dry_run: bool = False) -> dict[str, bool]`
+#### `CacheOperation.prune_misc(dry_run: bool = False) -> OperationResult[dict[str, bool]]`
 
 Prune miscellaneous cache: libguestfs appliance, warm images, and stale guestfs state.
 
@@ -1267,7 +1266,7 @@ Prune miscellaneous cache: libguestfs appliance, warm images, and stale guestfs 
 
 ---
 
-#### `CacheOperation.prune_all(dry_run: bool = False, include_all: bool = False) -> PruneAllResult`
+#### `CacheOperation.prune_all(dry_run: bool = False, include_all: bool = False) -> OperationResult[PruneAllResult]`
 
 Prune all cache resources in one call: VMs, networks, images, kernels, binaries, and misc.
 
@@ -1275,7 +1274,7 @@ Prune all cache resources in one call: VMs, networks, images, kernels, binaries,
 
 ---
 
-#### `CacheOperation.clean(dry_run: bool = False) -> CleanResult`
+#### `CacheOperation.clean(dry_run: bool = False) -> OperationResult[CleanResult]`
 
 Completely clean all cache: host networking, prune everything, remove the cache directory.
 
@@ -1289,7 +1288,7 @@ Completely clean all cache: host networking, prune everything, remove the cache 
 
 ### `SSHOperation`
 
-#### `SSHOperation.connect(inputs: SSHInput) -> int`
+#### `SSHOperation.connect(inputs: SSHInput) -> OperationResult[int]`
 
 Open an interactive SSH session into a VM, or execute a command.
 
@@ -1321,7 +1320,7 @@ Set up host configuration. Delegates to `HostOperation.init()`.
 
 ---
 
-#### `InitOperation.run(skip_host: bool = False, non_interactive: bool = False, *, sudo_completed: bool = False, download_version: str | None = None) -> InitResult`
+#### `InitOperation.run(skip_host: bool = False, non_interactive: bool = False, *, sudo_completed: bool = False, host_setup_message: str | None = None, download_version: str | None = None) -> InitResult`
 
 Run the full init wizard: local state → host setup → cache init → binary fetch.
 Returns `InitResult` with per-step status. If a step needs user interaction,
@@ -1366,7 +1365,7 @@ Get the console relay state for a VM.
 
 ---
 
-#### `ConsoleOperation.kill(identifier: str) -> bool`
+#### `ConsoleOperation.kill(identifier: str) -> OperationResult[bool]`
 
 Kill the console relay process for a VM.
 
@@ -1407,7 +1406,7 @@ Set a config override value.
 
 ---
 
-#### `ConfigOperation.reset(category: str | None = None, key: str | None = None, all_overrides: bool = False) -> int`
+#### `ConfigOperation.reset(category: str | None = None, key: str | None = None, all_overrides: bool = False) -> OperationResult[int]`
 
 Reset config override(s) back to defaults.
 

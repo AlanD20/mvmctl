@@ -1,4 +1,4 @@
-.TH MVM 1 "March 2026" "mvmctl 0.1.0" "User Commands"
+.TH MVM 1 "May 2026" "mvmctl 0.1.0" "User Commands"
 .SH NAME
 mvm \- MicroVM Manager - Container speed, VM isolation
 .SH SYNOPSIS
@@ -45,6 +45,27 @@ Load VM from snapshot.
 .TP
 .BR vm\ inspect
 Show detailed information about a VM.
+.TP
+.BR vm\ start
+Start the specified stopped VM.
+.TP
+.BR vm\ stop
+Stop the specified running VM.
+.TP
+.BR vm\ pause
+Pause the specified running VM.
+.TP
+.BR vm\ resume
+Resume the specified paused VM.
+.TP
+.BR vm\ reboot
+Reboot the specified VM.
+.TP
+.BR vm\ import
+Create a VM from a portable config file.
+.TP
+.BR vm\ export
+Export a VM's configuration to portable JSON.
 .SS Host Configuration
 .TP
 .BR host\ init
@@ -87,6 +108,12 @@ Set the default image for VM creation.
 .TP
 .BR image\ rm
 Remove a cached image.
+.TP
+.BR image\ inspect
+Show detailed image information.
+.TP
+.BR image\ warm
+Pre-decompress image to ready pool.
 .SS Binary Management
 .TP
 .BR bin\ ls
@@ -155,6 +182,14 @@ Completely clean all cache — prune everything, host clean, remove cache dir.
 .TP
 .BR console
 VM console access (PTY-over-vsock relay).
+.RS
+.PP
+.B \-\-state
+Show console connection state and exit.
+.PP
+.B \-\-kill
+Kill any existing console connection to the VM.
+.RE
 .TP
 .BR config
 Configuration management (get, set, list, reset).
@@ -167,6 +202,14 @@ VM SSH access.
 .TP
 .BR logs
 VM log management.
+.RS
+.PP
+.B \-\-os
+Show logs from the guest OS (serial console) instead of Firecracker.
+.PP
+.B \-\-follow
+Follow log output in real-time (tail -f style).
+.RE
 .TP
 .BR version
 Show version and exit.
@@ -180,9 +223,6 @@ Override cache directory (default: ~/.cache/mvmctl).
 .TP
 .BR MVM_CONFIG_DIR
 Override config directory (default: ~/.config/mvmctl).
-.TP
-.BR MVM_KERNEL
-Override default kernel path.
 .TP
 .BR MVM_FIRECRACKER_BIN
 Override Firecracker binary path.
@@ -256,7 +296,7 @@ KVM access (/dev/kvm) - add user to kvm group
 .IP \(bu 2
 Python 3.13+
 .IP \(bu 2
-System packages: iproute2, iptables, genisoimage (or xorriso), qemu-utils
+System packages: iproute2, iptables, cloud-localds (cloud-image-utils on Debian/Ubuntu, cloud-utils on Arch), qemu-utils
 .SH NOTES
 .IP \(bu 2
 After \fBsudo mvm host init\fR, normal mvm commands require no sudo.
