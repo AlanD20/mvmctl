@@ -21,18 +21,16 @@ class TestImageFetch:
             "ubuntu-24.04-minimal",
         ],
     )
+    @pytest.mark.serial
     def test_image_fetch(self, mvm_binary, image_id):
         """Fetch each supported image.
 
         Tests a lightweight image (alpine) and a common one (ubuntu-minimal).
         Full list of 5 images is tested in CI on a schedule, not per-PR.
         """
-        from tests.system.conftest import _skip_if_parallel
-
-        _skip_if_parallel()
         result = _run_mvm(mvm_binary, "image", "fetch", image_id, timeout=300)
         assert result.returncode == 0
-        assert image_id in result.stdout.lower()
+        assert "ready" in result.stdout.lower()
 
 
 class TestImageList:
@@ -86,11 +84,9 @@ class TestImageList:
 class TestImageDefaults:
     """Test image default operations."""
 
+    @pytest.mark.serial
     def test_image_set_default(self, mvm_binary):
         """Set image as default."""
-        from tests.system.conftest import _skip_if_parallel
-
-        _skip_if_parallel()
 
         # Ensure image exists before setting default
         _run_mvm(mvm_binary, "image", "fetch", "alpine-3.21", check=False)
@@ -99,11 +95,9 @@ class TestImageDefaults:
         assert result.returncode == 0
         assert "default" in result.stdout.lower()
 
+    @pytest.mark.serial
     def test_image_warm(self, mvm_binary):
         """Pre-decompress image to ready pool for fast VM creation."""
-        from tests.system.conftest import _skip_if_parallel
-
-        _skip_if_parallel()
 
         result = _run_mvm(
             mvm_binary,
@@ -122,16 +116,14 @@ class TestImageDefaults:
 class TestImageRemove:
     """Test image removal operations."""
 
+    @pytest.mark.serial
     def test_image_remove_with_fixture(self, mvm_binary):
         """Remove a cached image by ID prefix and verify it's gone."""
-        from tests.system.conftest import _skip_if_parallel
-
-        _skip_if_parallel()
 
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         before = json.loads(result.stdout)
         alpine_images = [
-            i for i in before if "alpine" in i.get("name", "").lower()
+            i for i in before if "alpine" in i.get("os_slug", "").lower()
         ]
         if not alpine_images:
             pytest.skip("No alpine image available to test removal")
@@ -148,9 +140,11 @@ class TestImageRemove:
         )
         assert result.returncode == 0
 
-        # Verify gone
+        # Verify gone (filter by is_present to account for soft-delete)
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
-        after = json.loads(result.stdout)
+        after = [
+            i for i in json.loads(result.stdout) if i.get("is_present", True)
+        ]
         assert not any(i["id"] == target_id for i in after)
 
         # Re-fetch so other tests aren't broken
@@ -176,13 +170,10 @@ class TestImageImport:
 
     pytestmark = [pytest.mark.system, pytest.mark.slow]
 
+    @pytest.mark.serial
     def test_image_import_local_file(self, mvm_binary, tmp_path):
         """Import a local image file."""
         import shutil
-
-        from tests.system.conftest import _skip_if_parallel
-
-        _skip_if_parallel()
 
         # Ensure alpine is cached
         _run_mvm(mvm_binary, "image", "fetch", "alpine-3.21", check=False)
@@ -191,7 +182,7 @@ class TestImageImport:
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         images = json.loads(result.stdout)
         alpine_images = [
-            i for i in images if "alpine" in i.get("name", "").lower()
+            i for i in images if "alpine" in i.get("os_slug", "").lower()
         ]
         if not alpine_images:
             pytest.skip("No alpine image available to import")
@@ -227,7 +218,9 @@ class TestImageImport:
             # Verify imported image appears
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
-            imported = [i for i in images if i.get("name") == "imported-alpine"]
+            imported = [
+                i for i in images if i.get("os_slug") == "imported-alpine"
+            ]
             assert imported, "Imported image not found in listing"
             imported_prefix = imported[0]["id"][:6]
         finally:

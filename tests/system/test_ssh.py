@@ -20,7 +20,9 @@ class TestSSHConnect:
         """Execute a command via SSH on a running VM using --name."""
         vm_info = created_vm
         ssh_timeout = timing_targets["alpine-3.21"]
-        ssh_available = wait_for_ssh(vm_info["ipv4"], "root", ssh_timeout)
+        ssh_available = wait_for_ssh(
+            mvm_binary, vm_info["name"], "root", ssh_timeout
+        )
         assert ssh_available, f"SSH not available within {ssh_timeout}s"
 
         result = _run_mvm(
@@ -58,7 +60,9 @@ class TestSSHConnect:
         """Connect via --ip flag instead of VM name."""
         vm_info = created_vm
         ssh_timeout = timing_targets["alpine-3.21"]
-        ssh_available = wait_for_ssh(vm_info["ipv4"], "root", ssh_timeout)
+        ssh_available = wait_for_ssh(
+            mvm_binary, vm_info["name"], "root", ssh_timeout
+        )
         assert ssh_available, f"SSH not available within {ssh_timeout}s"
 
         result = _run_mvm(

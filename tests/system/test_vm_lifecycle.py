@@ -200,12 +200,15 @@ class TestVMSSH:
 
     def test_vm_ssh_available(self, mvm_binary, created_vm, timing_targets):
         """SSH is available after VM boots."""
-        vm_ip = created_vm.get("ipv4", "")
-
-        if not vm_ip:
+        if not created_vm.get("ipv4", ""):
             pytest.skip("VM has no IP address")
 
-        available = wait_for_ssh(vm_ip, "root", timing_targets["alpine-3.21"])
+        available = wait_for_ssh(
+            mvm_binary,
+            created_vm["name"],
+            "root",
+            timing_targets["alpine-3.21"],
+        )
         assert available, (
             f"SSH not available after {timing_targets['alpine-3.21']}s"
         )

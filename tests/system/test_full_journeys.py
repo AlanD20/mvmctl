@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-import subprocess
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -20,8 +20,14 @@ class TestQuickStartJourney:
     def test_journey_create_and_ssh(
         self, mvm_binary, unique_vm_name, timing_targets
     ):
-        """Full journey: create VM and SSH into it."""
-        # Create VM
+        """Full journey: create VM with SSH key and SSH into it."""
+        # Create a throwaway SSH key
+        key_name = f"sys-journey-key-{uuid.uuid4().hex[:6]}"
+        _run_mvm(
+            mvm_binary, "key", "create", key_name, "--algorithm", "ed25519"
+        )
+
+        # Create VM with SSH key injected
         result = _run_mvm(
             mvm_binary,
             "vm",
@@ -30,22 +36,20 @@ class TestQuickStartJourney:
             unique_vm_name,
             "--image",
             "alpine-3.21",
+            "--ssh-key",
+            key_name,
         )
         assert result.returncode == 0
 
         try:
-            # Get VM info
-            result = _run_mvm(mvm_binary, "vm", "ls", "--json")
-            vms = json.loads(result.stdout)
-            vm = next((v for v in vms if v["name"] == unique_vm_name), None)
-            assert vm is not None, f"VM '{unique_vm_name}' not found in listing"
-
             # Wait for SSH
             ssh_timeout = timing_targets["alpine-3.21"]
-            ssh_available = wait_for_ssh(vm["ipv4"], "root", ssh_timeout)
+            ssh_available = wait_for_ssh(
+                mvm_binary, unique_vm_name, "root", ssh_timeout
+            )
             assert ssh_available, f"SSH not available within {ssh_timeout}s"
         finally:
-            # Guaranteed cleanup
+            # Guaranteed cleanup — VM first, key second
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -54,6 +58,7 @@ class TestQuickStartJourney:
                 "--force",
                 check=False,
             )
+            _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
 
 
 @pytest.mark.requires_network
@@ -301,6 +306,10 @@ class TestIPJourney:
             "--non-interactive",
         )
 
+        key_name = f"sys-journey-key-{uuid.uuid4().hex[:6]}"
+        _run_mvm(
+            mvm_binary, "key", "create", key_name, "--algorithm", "ed25519"
+        )
         try:
             _run_mvm(
                 mvm_binary,
@@ -314,6 +323,8 @@ class TestIPJourney:
                 unique_network_name,
                 "--ip",
                 ip,
+                "--ssh-key",
+                key_name,
             )
 
             result = _run_mvm(mvm_binary, "vm", "ls", "--json")
@@ -323,7 +334,9 @@ class TestIPJourney:
             assert vm["ipv4"] == ip, f"Expected {ip}, got {vm['ipv4']}"
 
             ssh_timeout = timing_targets["alpine-3.21"]
-            ssh_available = wait_for_ssh(vm["ipv4"], "root", ssh_timeout)
+            ssh_available = wait_for_ssh(
+                mvm_binary, unique_vm_name, "root", ssh_timeout
+            )
             assert ssh_available, f"SSH not available within {ssh_timeout}s"
         finally:
             _run_mvm(
@@ -341,6 +354,7 @@ class TestIPJourney:
                 unique_network_name,
                 check=False,
             )
+            _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
 
     def test_journey_multiple_vms_same_network(
         self, mvm_binary, unique_vm_name, timing_targets
@@ -348,6 +362,15 @@ class TestIPJourney:
         """Create two VMs on same default network and verify both are reachable."""
         name_a = f"{unique_vm_name}-a"
         name_b = f"{unique_vm_name}-b"
+
+        key_a_name = f"sys-multi-key-a-{uuid.uuid4().hex[:6]}"
+        key_b_name = f"sys-multi-key-b-{uuid.uuid4().hex[:6]}"
+        _run_mvm(
+            mvm_binary, "key", "create", key_a_name, "--algorithm", "ed25519"
+        )
+        _run_mvm(
+            mvm_binary, "key", "create", key_b_name, "--algorithm", "ed25519"
+        )
 
         _run_mvm(
             mvm_binary,
@@ -357,6 +380,8 @@ class TestIPJourney:
             name_a,
             "--image",
             "alpine-3.21",
+            "--ssh-key",
+            key_a_name,
         )
         _run_mvm(
             mvm_binary,
@@ -366,6 +391,8 @@ class TestIPJourney:
             name_b,
             "--image",
             "alpine-3.21",
+            "--ssh-key",
+            key_b_name,
         )
 
         try:
@@ -377,17 +404,19 @@ class TestIPJourney:
             assert vm_b is not None, f"VM '{name_b}' not found in listing"
 
             ssh_timeout = timing_targets["alpine-3.21"]
-            ssh_a = wait_for_ssh(vm_a["ipv4"], "root", ssh_timeout)
+            ssh_a = wait_for_ssh(mvm_binary, name_a, "root", ssh_timeout)
             assert ssh_a, (
                 f"SSH not available for '{name_a}' within {ssh_timeout}s"
             )
-            ssh_b = wait_for_ssh(vm_b["ipv4"], "root", ssh_timeout)
+            ssh_b = wait_for_ssh(mvm_binary, name_b, "root", ssh_timeout)
             assert ssh_b, (
                 f"SSH not available for '{name_b}' within {ssh_timeout}s"
             )
         finally:
             _run_mvm(mvm_binary, "vm", "rm", name_a, "--force", check=False)
             _run_mvm(mvm_binary, "vm", "rm", name_b, "--force", check=False)
+            _run_mvm(mvm_binary, "key", "rm", key_a_name, check=False)
+            _run_mvm(mvm_binary, "key", "rm", key_b_name, check=False)
 
 
 class TestSSHJourney:
@@ -399,7 +428,9 @@ class TestSSHJourney:
         """Create VM and verify SSH CLI command execution."""
         vm_info = created_vm
         ssh_timeout = timing_targets["alpine-3.21"]
-        ssh_available = wait_for_ssh(vm_info["ipv4"], "root", ssh_timeout)
+        ssh_available = wait_for_ssh(
+            mvm_binary, vm_info["name"], "root", ssh_timeout
+        )
         assert ssh_available, f"SSH not available within {ssh_timeout}s"
 
         result = _run_mvm(
@@ -420,6 +451,10 @@ class TestSSHJourney:
         self, mvm_binary, unique_vm_name, timing_targets
     ):
         """Create VM, reboot, and verify SSH availability after reboot."""
+        key_name = f"sys-reboot-key-{uuid.uuid4().hex[:6]}"
+        _run_mvm(
+            mvm_binary, "key", "create", key_name, "--algorithm", "ed25519"
+        )
         _run_mvm(
             mvm_binary,
             "vm",
@@ -428,6 +463,8 @@ class TestSSHJourney:
             unique_vm_name,
             "--image",
             "alpine-3.21",
+            "--ssh-key",
+            key_name,
         )
 
         try:
@@ -439,7 +476,9 @@ class TestSSHJourney:
 
             # Wait for SSH
             ssh_timeout = timing_targets["alpine-3.21"]
-            ssh_available = wait_for_ssh(vm["ipv4"], "root", ssh_timeout)
+            ssh_available = wait_for_ssh(
+                mvm_binary, unique_vm_name, "root", ssh_timeout
+            )
             assert ssh_available, f"SSH not available within {ssh_timeout}s"
 
             # Reboot VM
@@ -455,7 +494,9 @@ class TestSSHJourney:
             )
 
             # Wait for SSH again after reboot
-            ssh_after_reboot = wait_for_ssh(vm["ipv4"], "root", ssh_timeout)
+            ssh_after_reboot = wait_for_ssh(
+                mvm_binary, unique_vm_name, "root", ssh_timeout
+            )
             assert ssh_after_reboot, (
                 f"SSH not available after reboot within {ssh_timeout}s"
             )
@@ -468,6 +509,7 @@ class TestSSHJourney:
                 "--force",
                 check=False,
             )
+            _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
 
 
 class TestMultiKeyJourney:
@@ -537,6 +579,14 @@ class TestInterVMCommunication:
         )
         assert result.returncode == 0
 
+        key_a_name = f"sys-ping-key-a-{uuid.uuid4().hex[:6]}"
+        key_b_name = f"sys-ping-key-b-{uuid.uuid4().hex[:6]}"
+        _run_mvm(
+            mvm_binary, "key", "create", key_a_name, "--algorithm", "ed25519"
+        )
+        _run_mvm(
+            mvm_binary, "key", "create", key_b_name, "--algorithm", "ed25519"
+        )
         try:
             _run_mvm(
                 mvm_binary,
@@ -548,6 +598,8 @@ class TestInterVMCommunication:
                 "alpine-3.21",
                 "--network",
                 unique_network_name,
+                "--ssh-key",
+                key_a_name,
             )
             _run_mvm(
                 mvm_binary,
@@ -559,6 +611,8 @@ class TestInterVMCommunication:
                 "alpine-3.21",
                 "--network",
                 unique_network_name,
+                "--ssh-key",
+                key_b_name,
             )
 
             result = _run_mvm(mvm_binary, "vm", "ls", "--json")
@@ -569,22 +623,22 @@ class TestInterVMCommunication:
             assert vm_b is not None, f"VM '{name_b}' not found in listing"
 
             ssh_timeout = timing_targets["alpine-3.21"]
-            ssh_available = wait_for_ssh(vm_a["ipv4"], "root", ssh_timeout)
+            ssh_available = wait_for_ssh(
+                mvm_binary, name_a, "root", ssh_timeout
+            )
             assert ssh_available, (
                 f"SSH not available for '{name_a}' within {ssh_timeout}s"
             )
 
-            ping_result = subprocess.run(
-                [
-                    "ssh",
-                    "-o",
-                    "StrictHostKeyChecking=no",
-                    "-o",
-                    "ConnectTimeout=5",
-                    f"root@{vm_a['ipv4']}",
-                    f"ping -c 3 {vm_b['ipv4']}",
-                ],
-                capture_output=True,
+            ping_result = _run_mvm(
+                mvm_binary,
+                "ssh",
+                name_a,
+                "-u",
+                "root",
+                "-c",
+                f"ping -c 3 {vm_b['ipv4']}",
+                check=False,
                 timeout=30,
             )
             assert ping_result.returncode == 0, (
@@ -596,6 +650,8 @@ class TestInterVMCommunication:
             _run_mvm(
                 mvm_binary, "network", "rm", unique_network_name, check=False
             )
+            _run_mvm(mvm_binary, "key", "rm", key_a_name, check=False)
+            _run_mvm(mvm_binary, "key", "rm", key_b_name, check=False)
 
 
 class TestVMExportImportJourney:
@@ -670,8 +726,14 @@ class TestConcurrentVMCreation:
     ):
         vm_count = 10
         vm_names = [f"{unique_vm_name}-{i}" for i in range(vm_count)]
+        key_names = [f"{unique_vm_name}-key-{i}" for i in range(vm_count)]
 
-        def create_vm(name: str) -> Any:
+        for key_name in key_names:
+            _run_mvm(
+                mvm_binary, "key", "create", key_name, "--algorithm", "ed25519"
+            )
+
+        def create_vm(name: str, key_name: str) -> Any:
             return _run_mvm(
                 mvm_binary,
                 "vm",
@@ -680,11 +742,16 @@ class TestConcurrentVMCreation:
                 name,
                 "--image",
                 "alpine-3.21",
+                "--ssh-key",
+                key_name,
             )
 
         try:
             with ThreadPoolExecutor(max_workers=vm_count) as executor:
-                futures = [executor.submit(create_vm, n) for n in vm_names]
+                futures = [
+                    executor.submit(create_vm, n, k)
+                    for n, k in zip(vm_names, key_names)
+                ]
                 results = [f.result() for f in futures]
 
             assert all(r.returncode == 0 for r in results), (
@@ -706,7 +773,9 @@ class TestConcurrentVMCreation:
 
             ssh_timeout = timing_targets["alpine-3.21"]
             for vm in created_vms:
-                ssh_available = wait_for_ssh(vm["ipv4"], "root", ssh_timeout)
+                ssh_available = wait_for_ssh(
+                    mvm_binary, vm["name"], "root", ssh_timeout
+                )
                 assert ssh_available, (
                     f"SSH not available for '{vm['name']}' "
                     f"within {ssh_timeout}s"
@@ -721,3 +790,5 @@ class TestConcurrentVMCreation:
                     "--force",
                     check=False,
                 )
+            for key_name in key_names:
+                _run_mvm(mvm_binary, "key", "rm", key_name, check=False)

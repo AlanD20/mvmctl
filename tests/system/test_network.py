@@ -243,11 +243,9 @@ class TestNetworkLifecycle:
                 mvm_binary, "network", "rm", unique_network_name, check=False
             )
 
+    @pytest.mark.serial
     def test_network_set_default(self, mvm_binary, created_network):
         """Set a network as the default."""
-        from tests.system.conftest import _skip_if_parallel
-
-        _skip_if_parallel()
         result = _run_mvm(
             mvm_binary,
             "network",

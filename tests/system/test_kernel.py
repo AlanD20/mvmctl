@@ -19,11 +19,9 @@ class TestKernelLifecycle:
         result = _run_mvm(mvm_binary, "kernel", "ls")
         assert result.returncode == 0
 
+    @pytest.mark.serial
     def test_kernel_fetch(self, mvm_binary):
         """Fetch official kernel."""
-        from tests.system.conftest import _skip_if_parallel
-
-        _skip_if_parallel()
 
         result = _run_mvm(mvm_binary, "kernel", "fetch", "--type", "official")
         assert result.returncode == 0
@@ -35,11 +33,9 @@ class TestKernelLifecycle:
         data = json.loads(result.stdout)
         assert isinstance(data, list)
 
+    @pytest.mark.serial
     def test_kernel_set_default(self, mvm_binary):
         """Set kernel as default (uses the one fetched in test_kernel_fetch)."""
-        from tests.system.conftest import _skip_if_parallel
-
-        _skip_if_parallel()
 
         # Get kernel ID
         result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
@@ -54,11 +50,9 @@ class TestKernelLifecycle:
 class TestKernelRemoveAndFetch:
     """Test kernel removal and fetch with set-default."""
 
+    @pytest.mark.serial
     def test_kernel_fetch_with_set_default(self, mvm_binary):
         """Fetch official kernel and set as default in one command."""
-        from tests.system.conftest import _skip_if_parallel
-
-        _skip_if_parallel()
 
         result = _run_mvm(
             mvm_binary,
@@ -70,11 +64,9 @@ class TestKernelRemoveAndFetch:
         )
         assert result.returncode == 0
 
+    @pytest.mark.serial
     def test_kernel_remove(self, mvm_binary):
         """Fetch a kernel then remove it."""
-        from tests.system.conftest import _skip_if_parallel
-
-        _skip_if_parallel()
 
         # Get existing kernels
         result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
@@ -90,6 +82,15 @@ class TestKernelRemoveAndFetch:
             pytest.skip("No kernel available to remove")
 
         kernel_id = existing[0]["id"][:6]
+
+        # Remove any VMs referencing this kernel first (they block removal)
+        vm_result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+        vms = json.loads(vm_result.stdout)
+        for vm in vms:
+            if vm.get("kernel_id", "").startswith(kernel_id):
+                _run_mvm(
+                    mvm_binary, "vm", "rm", vm["name"], "--force", check=False
+                )
 
         # Remove the kernel
         result = _run_mvm(

@@ -145,6 +145,23 @@ def prepare_system_env(mvm_binary, check_system_prerequisites) -> None:
         kernels = json.loads(result.stdout)
         if not kernels:
             missing.append("kernel")
+        else:
+            # Ensure a default kernel is set — VM creation requires it
+            # when --kernel is not passed explicitly.
+            has_default = any(k.get("is_default") for k in kernels)
+            if not has_default:
+                first_id = kernels[0]["id"][:6]
+                _print_prep(
+                    f"No default kernel set. Setting '{first_id}' as default..."
+                )
+                subprocess.run(
+                    [*shlex.split(binary), "kernel", "set-default", first_id],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    env={**os.environ, "NO_COLOR": "1"},
+                    check=True,
+                )
 
     # ── 3. Verify image cache ────────────────────────────────────────
     result = subprocess.run(
@@ -156,7 +173,9 @@ def prepare_system_env(mvm_binary, check_system_prerequisites) -> None:
     )
     cached_images: list[str] = []
     if result.returncode == 0:
-        cached_images = [i.get("name", "") for i in json.loads(result.stdout)]
+        cached_images = [
+            i.get("os_slug", "") for i in json.loads(result.stdout)
+        ]
 
     required_images = ["alpine-3.21", "ubuntu-24.04-minimal"]
     for img in required_images:
@@ -206,16 +225,6 @@ def _unique_subnet(network_name: str) -> str:
     octet2 = rng.randint(1, 254)
     octet3 = rng.randint(0, 254)
     return f"10.{octet2}.{octet3}.0/24"
-
-
-def _skip_if_parallel() -> None:
-    """Skip the current test if running under pytest-xdist.
-
-    Use for tests that mutate shared global state (images, kernels,
-    binaries in the shared cache) where parallel workers would race.
-    """
-    if os.environ.get("PYTEST_XDIST_WORKER"):
-        pytest.skip("Test mutates shared global state — not safe under xdist")
 
 
 # ============================================================================
@@ -271,10 +280,15 @@ def created_vm(
 ) -> Generator[dict[str, Any], None, None]:
     """Create a VM and guarantee cleanup.
 
+    Also creates a throwaway SSH key for SSH access and passes it via --ssh-key.
     Yields VM info dict from 'mvm vm ls --json'.
-    Cleans up VM even if test fails.
+    Cleans up VM and key even if test fails.
     """
-    # Create VM (image must be pre-cached or will download)
+    # Create a throwaway SSH key
+    key_name = f"sys-vmkey-{uuid.uuid4().hex[:6]}"
+    _run_mvm(mvm_binary, "key", "create", key_name, "--algorithm", "ed25519")
+
+    # Create VM with SSH key injected
     _run_mvm(
         mvm_binary,
         "vm",
@@ -283,6 +297,8 @@ def created_vm(
         unique_vm_name,
         "--image",
         "alpine-3.21",
+        "--ssh-key",
+        key_name,
     )
 
     # Get VM info
@@ -295,7 +311,7 @@ def created_vm(
     try:
         yield vm_info
     finally:
-        # Guaranteed cleanup
+        # Guaranteed cleanup — VM first (releases IP lease), key second
         _run_mvm(
             mvm_binary,
             "vm",
@@ -304,6 +320,7 @@ def created_vm(
             "--force",
             check=False,
         )
+        _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
 
 
 @pytest.fixture
@@ -351,12 +368,26 @@ def lifecycle_vm(mvm_binary) -> Generator[dict[str, Any], None, None]:
     """One VM shared across module for stateful operation tests.
 
     Used for pause→resume→stop→start→start chain tests.
-    VM is created once, goes through state changes, then cleaned up.
+    VM is created once with SSH key injection, goes through state changes,
+    then cleaned up.
     """
     vm_name = f"sys-lifecycle-{uuid.uuid4().hex[:8]}"
+    key_name = f"sys-lifecycle-key-{uuid.uuid4().hex[:6]}"
 
+    # Create throwaway SSH key
+    _run_mvm(mvm_binary, "key", "create", key_name, "--algorithm", "ed25519")
+
+    # Create VM with SSH key injected
     _run_mvm(
-        mvm_binary, "vm", "create", "--name", vm_name, "--image", "alpine-3.21"
+        mvm_binary,
+        "vm",
+        "create",
+        "--name",
+        vm_name,
+        "--image",
+        "alpine-3.21",
+        "--ssh-key",
+        key_name,
     )
 
     vms = _parse_vm_list(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
@@ -369,6 +400,7 @@ def lifecycle_vm(mvm_binary) -> Generator[dict[str, Any], None, None]:
         yield vm_info
     finally:
         _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+        _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
 
 
 # ============================================================================
@@ -420,14 +452,16 @@ def _parse_vm_list(json_output: str) -> list[dict[str, Any]]:
 
 
 def wait_for_ssh(
-    vm_ip: str,
+    binary: str,
+    vm_name: str,
     user: str,
     timeout: float,
 ) -> bool:
-    """Poll SSH until available or timeout.
+    """Poll SSH via mvm ssh until available or timeout.
 
     Args:
-        vm_ip: VM IP address
+        binary: MVM binary path (e.g. "uv run mvm")
+        vm_name: VM name to connect to
         user: SSH username (root for Alpine/Arch/Debian, ubuntu for Ubuntu)
         timeout: Maximum wait time in seconds
 
@@ -437,19 +471,19 @@ def wait_for_ssh(
     start = time.monotonic()
     while time.monotonic() - start < timeout:
         try:
-            # Try SSH connection
             result = subprocess.run(
                 [
+                    *shlex.split(binary),
                     "ssh",
-                    "-o",
-                    "StrictHostKeyChecking=no",
-                    "-o",
-                    "ConnectTimeout=2",
-                    f"{user}@{vm_ip}",
+                    vm_name,
+                    "-u",
+                    user,
+                    "-c",
                     "exit",
                 ],
                 capture_output=True,
                 timeout=5,
+                env={**os.environ, "NO_COLOR": "1"},
             )
             if result.returncode == 0:
                 return True

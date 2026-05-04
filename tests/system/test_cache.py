@@ -25,6 +25,8 @@ class TestCacheCommands:
     def test_cache_prune_vm_dry_run(self, mvm_binary, created_vm):
         """Prune VMs in dry-run mode should not remove the VM."""
         vm_name = created_vm["name"]
+        # Stop the VM so it appears as prunable
+        _run_mvm(mvm_binary, "vm", "stop", vm_name, check=False)
         result = _run_mvm(mvm_binary, "cache", "prune", "vm", "--dry-run")
         assert result.returncode == 0
         assert "DRY RUN" in result.stdout or vm_name in result.stdout

@@ -53,11 +53,9 @@ class TestKeyLifecycle:
         assert result.returncode == 0
         assert created_key in result.stdout
 
+    @pytest.mark.serial
     def test_key_set_default(self, mvm_binary, created_key):
         """Set key as default."""
-        from tests.system.conftest import _skip_if_parallel
-
-        _skip_if_parallel()
         result = _run_mvm(mvm_binary, "key", "set-default", created_key)
         assert result.returncode == 0
 
@@ -139,11 +137,9 @@ class TestKeyLifecycle:
         data = json.loads(result.stdout)
         assert "name" in data
 
+    @pytest.mark.serial
     def test_key_set_default_clear(self, mvm_binary, created_key):
         """Set key as default then clear the default."""
-        from tests.system.conftest import _skip_if_parallel
-
-        _skip_if_parallel()
         result = _run_mvm(mvm_binary, "key", "set-default", created_key)
         assert result.returncode == 0
         result = _run_mvm(mvm_binary, "key", "set-default", "--clear")

@@ -76,6 +76,7 @@ markers = [
     "slow: test takes >30 seconds",
     "requires_kvm: requires /dev/kvm access",
     "requires_network: requires network setup",
+    "serial: test mutates shared global state — cannot run in parallel",
 ]
 filterwarnings = [
     "ignore::ResourceWarning:coverage.collector",

@@ -151,15 +151,16 @@ tasks:
     cmds:
       - uv run mvm image fetch ubuntu-24.04-minimal
   sys-test:
-    desc: Run all system tests in parallel (requires sys-setup + mvm group)
+    desc: Run all system tests — parallel-safe with -n auto, then serial one at a time
     deps: [sys-setup]
     cmds:
-      - uv run pytest tests/system/ -v -n auto --no-cov -rx
+      - uv run pytest tests/system/ -m "not serial" -v -n auto --no-cov -rx
+      - uv run pytest tests/system/ -m "serial" -v -n 0 --no-cov -rx
   sys-test-seq:
-    desc: Run all system tests sequentially (no xdist)
+    desc: Run serial-only system tests sequentially
     deps: [sys-setup]
     cmds:
-      - uv run pytest tests/system/ -v --no-cov -rx -n 0
+      - uv run pytest tests/system/ -m "serial" -v --no-cov -rx -n 0
   sys-test-fast:
     desc: Run fast system tests only — no KVM, no slow downloads (no mvm group needed)
     cmds:
