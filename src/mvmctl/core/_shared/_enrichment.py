@@ -8,10 +8,14 @@ all FK values and resolving them in a single query per relation.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
 from mvmctl.core._shared._resolver_registry import get as get_resolver
+from mvmctl.exceptions import MVMError
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -131,7 +135,16 @@ class RelationEnricher:
             results = {}
             for fk_val in fk_values:
                 method = getattr(resolver, spec.method)
-                results[fk_val] = method(fk_val)
+                try:
+                    results[fk_val] = method(fk_val)
+                except MVMError:
+                    logger.debug(
+                        "Enrichment soft-fail: %s %s not found for FK %r",
+                        spec.resolver,
+                        spec.method,
+                        fk_val,
+                    )
+                    results[fk_val] = None
 
         relation_name = spec.relation_name or spec.fk_field.removesuffix("_id")
         for entity in entities:
@@ -163,7 +176,16 @@ class RelationEnricher:
             results = {}
             for sid in source_ids:
                 method = getattr(resolver, spec.method)
-                results[sid] = method(sid)
+                try:
+                    results[sid] = method(sid)
+                except MVMError:
+                    logger.debug(
+                        "Enrichment soft-fail: reverse %s %s not found for %r",
+                        spec.resolver,
+                        spec.method,
+                        sid,
+                    )
+                    results[sid] = []
 
         relation_name = spec.relation_name or spec.fk_field
         for entity in entities:
@@ -200,7 +222,16 @@ class RelationEnricher:
             results = {}
             for parent_id in parent_ids:
                 method = getattr(resolver, spec.method)
-                results[parent_id] = method(parent_id)
+                try:
+                    results[parent_id] = method(parent_id)
+                except MVMError:
+                    logger.debug(
+                        "Enrichment soft-fail: nested %s %s not found for %r",
+                        spec.resolver,
+                        spec.method,
+                        parent_id,
+                    )
+                    results[parent_id] = None
 
         for entity in entities:
             parent = getattr(entity, spec.fk_field, None)
