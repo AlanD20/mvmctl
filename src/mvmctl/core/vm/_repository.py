@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from mvmctl.core._shared._db import Database, _graceful_read
 from mvmctl.models import VMInstanceItem, VMStatus
 
@@ -154,9 +156,10 @@ class VMRepository:
                     nocloud_net_port, nocloud_net_pid, relay_pid,
                     exit_code, vcpu_count, mem_size_mib, disk_size_mib,
                     rootfs_path, rootfs_suffix, enable_pci, enable_logging,
-                    enable_metrics, enable_console, created_at, updated_at,
+                    enable_metrics, enable_console, ssh_keys, ssh_user,
+                    created_at, updated_at,
                     log_path, serial_output_path, lsm_flags, boot_args
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     status = excluded.status,
@@ -186,6 +189,8 @@ class VMRepository:
                     enable_logging = excluded.enable_logging,
                     enable_metrics = excluded.enable_metrics,
                     enable_console = excluded.enable_console,
+                    ssh_keys = excluded.ssh_keys,
+                    ssh_user = excluded.ssh_user,
                     log_path = excluded.log_path,
                     serial_output_path = excluded.serial_output_path,
                     lsm_flags = excluded.lsm_flags,
@@ -222,6 +227,10 @@ class VMRepository:
                     vm.enable_logging,
                     vm.enable_metrics,
                     vm.enable_console,
+                    json.dumps(vm.ssh_keys)
+                    if vm.ssh_keys is not None
+                    else None,
+                    vm.ssh_user,
                     vm.created_at,
                     vm.updated_at,
                     vm.log_path,

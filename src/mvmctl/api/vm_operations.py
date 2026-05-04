@@ -148,6 +148,19 @@ class VMCreateContext:
     def set_resolved(self, resolved: ResolvedVMCreateInput) -> None:
         self.resolved = resolved
 
+    @property
+    def _ssh_pubkey_contents(self) -> list[str]:
+        """Extract public key content strings from resolved SSHKeyItem list."""
+        contents: list[str] = []
+        if self.resolved is None:
+            return contents
+        for k in self.resolved.ssh_keys:
+            if k.public_key_path:
+                path = Path(k.public_key_path)
+                if path.exists():
+                    contents.append(path.read_text().strip())
+        return contents
+
     def set_firecracker_manager(self, manager: FirecrackerSpawner) -> None:
         self.fc_manager = manager
 
@@ -368,7 +381,7 @@ class VMCreateContext:
         if mode == CloudInitMode.OFF:
             gp.set_hostname(self.resolved.name)
             gp.inject_dns(dns_server=self.resolved.dns_server)
-            gp.setup_ssh(self.resolved.user, self.resolved.ssh_keys)
+            gp.setup_ssh(self.resolved.user, self._ssh_pubkey_contents)
             gp.disable_cloud_init()
             self.mark_created("cloud-init-off")
 
@@ -385,7 +398,7 @@ class VMCreateContext:
                 network=self.resolved.network,
                 network_prefix_len=self.resolved.network_prefix_len,
                 skip_network_config=self.resolved.skip_ci_network_config,
-                ssh_pubkeys=self.resolved.ssh_keys,
+                ssh_pubkeys=self._ssh_pubkey_contents,
                 custom_user_data_path=self.resolved.custom_user_data_path,
                 nocloud_net_port=self.resolved.nocloud_net_port,
                 cloud_init_iso_path=self.resolved.cloud_init_iso_path,
@@ -414,7 +427,7 @@ class VMCreateContext:
                 network=self.resolved.network,
                 network_prefix_len=self.resolved.network_prefix_len,
                 skip_network_config=self.resolved.skip_ci_network_config,
-                ssh_pubkeys=self.resolved.ssh_keys,
+                ssh_pubkeys=self._ssh_pubkey_contents,
                 custom_user_data_path=self.resolved.custom_user_data_path,
                 nocloud_net_port=self.resolved.nocloud_net_port,
                 cloud_init_iso_path=self.resolved.cloud_init_iso_path,
@@ -593,6 +606,8 @@ class VMCreateContext:
             exit_code=None,
             lsm_flags=self.resolved.lsm_flags,
             boot_args=self.resolved.boot_args,
+            ssh_keys=[k.id for k in self.resolved.ssh_keys],
+            ssh_user=self.resolved.user,
         )
 
         if (
@@ -845,6 +860,8 @@ class VMOperation:
                 "serial_output_path": vm.serial_output_path,
                 "lsm_flags": vm.lsm_flags,
                 "boot_args": vm.boot_args,
+                "ssh_keys": vm.ssh_keys,
+                "ssh_user": vm.ssh_user,
             }
             for vm in vms
         ]
@@ -911,6 +928,8 @@ class VMOperation:
                     "status": vm.status,
                     "pid": vm.pid,
                     "exit_code": vm.exit_code,
+                    "ssh_keys": vm.ssh_keys,
+                    "ssh_user": vm.ssh_user,
                 },
                 "resources": {
                     "vcpus": vm.vcpu_count,
@@ -982,6 +1001,8 @@ class VMOperation:
             "relay_running": relay_running,
             "relay_pid": relay_pid,
             "relay_socket_path": relay_socket_path,
+            "ssh_keys": vm.ssh_keys,
+            "ssh_user": vm.ssh_user,
         }
 
     @staticmethod

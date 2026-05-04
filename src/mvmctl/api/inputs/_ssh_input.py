@@ -14,6 +14,7 @@ from mvmctl.core.key._service import KeyService
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.core.vm._resolver import VMResolver
 from mvmctl.exceptions import SSHError
+from mvmctl.models import VMInstanceItem
 from mvmctl.utils._validators import NetworkValidator
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,7 @@ class SSHRequest:
     def __init__(self, inputs: SSHInput, db: Database) -> None:
         self._inputs = inputs
         self._db = db
+        self._vm: VMInstanceItem | None = None
 
     def resolve(self) -> ResolvedSSHInput:
         """Resolve all inputs to explicit values."""
@@ -95,14 +97,17 @@ class SSHRequest:
 
         repo = VMRepository(self._db)
         resolver = VMResolver(repo)
-        vm = resolver.resolve(target)
-        if not vm.ipv4:
+        self._vm = resolver.resolve(target)
+        if not self._vm.ipv4:
             raise SSHError(f"VM '{target}' has no IP address")
-        return vm.ipv4
+        return self._vm.ipv4
 
     def _resolve_user(self) -> str:
         if self._inputs.user is not None:
             return self._inputs.user
+        # Check VM's stored ssh_user
+        if self._vm and self._vm.ssh_user:
+            return self._vm.ssh_user
         return str(SettingsService.resolve(self._db, "defaults.vm", "ssh_user"))
 
     def _resolve_key(self) -> Path | None:
@@ -114,7 +119,8 @@ class SSHRequest:
            - Try as key name via KeyResolver
            - Try as filesystem path via KeyService validation
         2. If not provided:
-           - Try default keys via KeyResolver
+           - Check VM's stored ssh_keys (most specific — exact keys injected)
+           - Fall back to default keys
         """
         key_repo = KeyRepository(self._db)
         key_resolver = KeyResolver(key_repo)
@@ -144,7 +150,19 @@ class SSHRequest:
                 f"Key '{key_str}' not found or is not a valid private key"
             )
 
-        # 2. No key provided — use default keys from key domain
+        # 2. No key provided — check VM's stored ssh_keys (most specific)
+        if self._vm and self._vm.ssh_keys:
+            for key_id in self._vm.ssh_keys:
+                try:
+                    key_item = key_resolver.by_id(key_id)
+                    if key_item.private_key_path:
+                        path = Path(key_item.private_key_path)
+                        if path.exists():
+                            return path
+                except Exception:
+                    continue
+
+        # 3. Fall back to default keys
         defaults = key_resolver.get_defaults()
         for key_item in defaults:
             if key_item.private_key_path:

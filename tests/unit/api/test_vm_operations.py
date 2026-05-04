@@ -441,7 +441,7 @@ class TestVMOperationSnapshot:
             VMInput(identifiers=["test-vm"]), mem_in, state_in
         )
         mock_controller.load_snapshot.assert_called_once_with(
-            mem_in, state_in, None
+            mem_in, state_in, False
         )
 
 

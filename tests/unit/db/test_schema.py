@@ -213,6 +213,8 @@ class TestColumnStructure:
         "enable_metrics": "INTEGER",
         "enable_console": "INTEGER",
         "boot_args": "TEXT",
+        "ssh_keys": "TEXT",
+        "ssh_user": "TEXT",
         "created_at": "TIMESTAMP",
         "updated_at": "TIMESTAMP",
     }
@@ -441,10 +443,12 @@ class TestConstraints:
             "api_socket_path, config_path, cloud_init_mode, "
             "vcpu_count, mem_size_mib, disk_size_mib, rootfs_path, rootfs_suffix, "
             "enable_pci, enable_logging, enable_metrics, enable_console, "
+            "ssh_keys, ssh_user, "
             "created_at, updated_at) "
-"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-                "?, ?, ?, ?, ?, ?, ?, ?, ?, "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
                 "datetime('now'), datetime('now'))",
+
                 (
                     "vm1",
                     "myvm",
@@ -469,6 +473,8 @@ class TestConstraints:
                     1,
                     0,
                     1,
+                    None,  # ssh_keys
+                    None,  # ssh_user
                 ),
             )
         with pytest.raises(sqlite3.IntegrityError):
@@ -478,9 +484,10 @@ class TestConstraints:
                 "api_socket_path, config_path, cloud_init_mode, "
                 "vcpu_count, mem_size_mib, disk_size_mib, rootfs_path, rootfs_suffix, "
                 "enable_pci, enable_logging, enable_metrics, enable_console, "
+                "ssh_keys, ssh_user, "
                 "created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-                "?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
                 "datetime('now'), datetime('now'))",
                 (
                     "vm2",
@@ -506,6 +513,8 @@ class TestConstraints:
                     1,
                     0,
                     1,
+                    None,  # ssh_keys
+                    None,  # ssh_user
                 ),
             )
 
@@ -589,9 +598,10 @@ class TestConstraints:
                 "api_socket_path, config_path, cloud_init_mode, "
                 "vcpu_count, mem_size_mib, disk_size_mib, rootfs_path, rootfs_suffix, "
                 "enable_pci, enable_logging, enable_metrics, enable_console, "
+                "ssh_keys, ssh_user, "
                 "created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-                "?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
                 "datetime('now'), datetime('now'))",
                 (
                     "vm1",
@@ -617,6 +627,8 @@ class TestConstraints:
                     1,
                     0,
                     1,
+                    None,  # ssh_keys
+                    None,  # ssh_user
                 ),
             )
 
@@ -666,9 +678,10 @@ class TestConstraints:
                 "api_socket_path, config_path, cloud_init_mode, "
                 "vcpu_count, mem_size_mib, disk_size_mib, rootfs_path, rootfs_suffix, "
                 "enable_pci, enable_logging, enable_metrics, enable_console, "
+                "ssh_keys, ssh_user, "
                 "created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-                "?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
                 "datetime('now'), datetime('now'))",
                 (
                     "vm1",
@@ -694,6 +707,8 @@ class TestConstraints:
                     1,
                     0,
                     1,
+                    None,  # ssh_keys
+                    None,  # ssh_user
                 ),
             )
 

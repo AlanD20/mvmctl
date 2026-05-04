@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
-from mvmctl.models.result import ProgressEvent
 from mvmctl.utils.common import CommonUtils
+
+if TYPE_CHECKING:
+    from mvmctl.models.result import ProgressEvent
 
 
 class OperationUtils:
@@ -44,6 +47,8 @@ class OperationUtils:
         """
         if on_progress is None:
             return None
+
+        from mvmctl.models.result import ProgressEvent
 
         fmt = CommonUtils.format_bytes_human_readable
         total_str = ""

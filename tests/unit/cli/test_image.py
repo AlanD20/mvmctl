@@ -119,7 +119,7 @@ class TestImageFetch:
             ],
         )
         assert result.exit_code == 0
-        assert "Image ready" in result.output
+        assert "fetched successfully" in result.output
 
     @patch("mvmctl.cli.image.ImageOperation")
     def test_fetch_with_force(self, mock_img_op, tmp_path):

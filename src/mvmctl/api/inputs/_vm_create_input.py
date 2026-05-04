@@ -27,7 +27,6 @@ from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.core.kernel._resolver import KernelResolver
 from mvmctl.core.key._repository import KeyRepository
 from mvmctl.core.key._resolver import KeyResolver
-from mvmctl.core.key._service import KeyService
 from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.core.network._resolver import NetworkResolver
 from mvmctl.core.vm._firecracker import DriveConfig
@@ -45,10 +44,10 @@ from mvmctl.models import (
     ImageItem,
     KernelItem,
     NetworkItem,
+    SSHKeyItem,
 )
 from mvmctl.utils._disk import parse_disk_size
 from mvmctl.utils._validators import NetworkValidator, VMValidator
-from mvmctl.utils.common import CacheUtils
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +124,6 @@ class ResolvedVMCreateInput:
     network_netmask: str
     disk_size_bytes: int
     disk_size_mib: int
-    ssh_keys: list[str]
 
     lsm_flags: str
 
@@ -152,6 +150,7 @@ class ResolvedVMCreateInput:
     cloud_init_iso_path: Path | None = None
 
     boot_args: str | None = None
+    ssh_keys: list[SSHKeyItem] = field(default_factory=list)
     extra_drives: list[DriveConfig] = field(default_factory=list)
 
 
@@ -524,18 +523,15 @@ class VMCreateRequest:
 
         return fc_binary
 
-    def _resolve_ssh_keys(self) -> list[str]:
-        """Resolve SSH keys to public key content"""
+    def _resolve_ssh_keys(self) -> list[SSHKeyItem]:
+        """Resolve SSH keys to key items (carries both IDs and pubkey paths)."""
 
         ssh_keys = (
             self._key_resolver.get_defaults()
             if len(self._inputs.ssh_keys) == 0
             else self._key_resolver.resolve_many(self._inputs.ssh_keys).items
         )
-
-        key_service = KeyService(KeyRepository(self._db))
-        keys_dir = CacheUtils.get_keys_dir()
-        return key_service.get_pubkeys(ssh_keys, keys_dir)
+        return ssh_keys
 
     def _resolve_cloud_init_mode(self) -> CloudInitModeResolved:
 

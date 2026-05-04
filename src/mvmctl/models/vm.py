@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 from enum import StrEnum, auto
 from pathlib import Path
 from typing import Any
@@ -65,6 +66,15 @@ class VMInstanceItem:
     serial_output_path: str | None = None
     lsm_flags: str | None = None
     boot_args: str | None = None
+    ssh_keys: list[str] = field(
+        default_factory=list
+    )  # SSH key fingerprints stored in VM
+    ssh_user: str | None = None  # SSH user for this VM
+
+    def __post_init__(self) -> None:
+        """Deserialize ssh_keys from JSON string when loading from DB."""
+        if isinstance(self.ssh_keys, str):
+            self.ssh_keys = json.loads(self.ssh_keys)
 
     # Resolved relations
     kernel: KernelItem | None = None

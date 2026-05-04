@@ -260,8 +260,9 @@ def image_fetch(
 
     assert result.item is not None
     short_id = HashGenerator.shorten(result.item.id)
-    print_success(f"Image ready: {result.item.path}")
-    print_info(f"  ID: {short_id}")
+    print_success(
+        f"Image '{result.item.os_name}' fetched successfully (ID: {short_id})"
+    )
     if set_default:
         print_success(f"Default image set to: {image_selector}")
 
