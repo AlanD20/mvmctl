@@ -179,6 +179,12 @@ class NoCloudNetServerManager:
             # Auto-allocate port from range if requested
             if self._port == 0:
                 import socket
+                import time
+
+                from mvmctl.utils.common import CacheUtils
+
+                bin_dir = CacheUtils.get_bin_dir()
+                binary = bin_dir / "mvm-nocloud-server"
 
                 allocated = False
                 for port in range(
@@ -192,17 +198,80 @@ class NoCloudNetServerManager:
                                 socket.SOL_SOCKET, socket.SO_REUSEADDR, 1
                             )
                             s.bind((self._ipv4_gateway, port))
-                            self._port = port
-                            allocated = True
-                            break
                     except OSError:
                         continue
+
+                    # Build server_cmd for this port
+                    if binary.exists():
+                        server_cmd = [
+                            str(binary),
+                            "--cloud-init-dir",
+                            str(self._path),
+                            "--port",
+                            str(port),
+                            "--host",
+                            self._ipv4_gateway,
+                            "--pid-file",
+                            str(self._pid_path),
+                            "--log-file",
+                            str(self._log_path),
+                        ]
+                    else:
+                        server_cmd = [
+                            sys.executable,
+                            "-m",
+                            "mvmctl.services.nocloud_server.process",
+                            "--cloud-init-dir",
+                            str(self._path),
+                            "--port",
+                            str(port),
+                            "--host",
+                            self._ipv4_gateway,
+                            "--pid-file",
+                            str(self._pid_path),
+                            "--log-file",
+                            str(self._log_path),
+                        ]
+
+                    try:
+                        proc = subprocess.Popen(
+                            server_cmd,
+                            stdin=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            start_new_session=True,
+                        )
+                    except OSError:
+                        continue
+
+                    # Verify process is alive (wait briefly for initialization)
+                    time.sleep(0.2)
+                    if proc.poll() is not None:
+                        # Process died immediately — likely port conflict
+                        continue
+
+                    self._pid = proc.pid
+                    self._port = port
+                    self._url = f"http://{self._ipv4_gateway}:{port}/"
+                    allocated = True
+
+                    logger.info(
+                        "Started NoCloud-net server for %s on %s:%d (PID: %d)",
+                        self._name,
+                        self._ipv4_gateway,
+                        port,
+                        proc.pid,
+                    )
+
+                    return self._url, self._port, proc.pid
+
                 if not allocated:
                     raise NoCloudServerError(
                         f"No available port in range "
                         f"{self._port_range_start}-{self._port_range_end}"
                     )
 
+            # Pre-allocated port case (self._port != 0)
             # Try compiled binary first, fall back to sys.executable -m
             from mvmctl.utils.common import CacheUtils
 
@@ -251,6 +320,14 @@ class NoCloudNetServerManager:
                 raise NoCloudServerError(
                     f"Failed to spawn nocloud-net server process: {e}"
                 ) from e
+
+            # Verify process is alive
+            time.sleep(0.2)
+            if proc.poll() is not None:
+                raise NoCloudServerError(
+                    f"Pre-allocated port {self._port} — "
+                    f"spawned nocloud-net server exited immediately"
+                )
 
             self._pid = proc.pid
             self._url = f"http://{self._ipv4_gateway}:{self._port}/"

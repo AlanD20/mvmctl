@@ -38,6 +38,10 @@ from mvmctl.api.inputs import (
 from mvmctl.api.inputs._vm_create_input import VMCreateInput
 from mvmctl.api.inputs._vm_import_input import VMImportInput, VMImportRequest
 from mvmctl.api.inputs._vm_input import VMInput, VMRequest
+from mvmctl.constants import (
+    CONST_POLL_STEP_SECONDS,
+    CONST_SOCKET_TIMEOUT_SECONDS,
+)
 from mvmctl.core._shared import Database
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.cloudinit._provisioner import (
@@ -1064,6 +1068,239 @@ class VMOperation:
         }
 
     @staticmethod
+    def _respawn_firecracker(vm: VMInstanceItem) -> None:
+        """Re-spawn Firecracker process for a stopped VM.
+
+        After vm stop, the Firecracker process is dead and the API socket is
+        gone.  This method:
+
+        1. Resolves binary, kernel, image, network from DB
+        2. Rebuilds the FirecrackerConfig with stored VM data
+        3. Re-starts the nocloud-net server if it was running
+        4. Removes stale API socket file from previous run
+        5. Re-ensures TAP device exists
+        6. Creates FirecrackerSpawner, writes config, spawns process
+        7. Updates PID and process_start_time in DB and in-memory VM object
+
+        Args:
+            vm: The VM instance to respawn (must be in STOPPED state).
+
+        Raises:
+            VMNotFoundError: If any referenced asset is not found in DB.
+            MVMError: If spawning fails.
+
+        """
+        from mvmctl.services.nocloud_server.manager import (
+            NoCloudNetServerManager,
+        )
+
+        db = Database()
+
+        # Resolve dependencies from DB using stored full IDs
+        binary = BinaryRepository(db).get(vm.binary_id)
+        if binary is None:
+            raise VMNotFoundError(
+                f"Binary not found for VM '{vm.name}' (ID: {vm.binary_id})"
+            )
+
+        kernel = KernelRepository(db).get(vm.kernel_id)
+        if kernel is None:
+            raise VMNotFoundError(
+                f"Kernel not found for VM '{vm.name}' (ID: {vm.kernel_id})"
+            )
+
+        image = ImageRepository(db).get(vm.image_id)
+        if image is None:
+            raise VMNotFoundError(
+                f"Image not found for VM '{vm.name}' (ID: {vm.image_id})"
+            )
+
+        net_repo = NetworkRepository(db)
+        network = net_repo.get(vm.network_id)
+        if network is None:
+            raise VMNotFoundError(
+                f"Network not found for VM '{vm.name}' (ID: {vm.network_id})"
+            )
+
+        # Resolve dependencies from DB using stored full IDs
+        binary = BinaryRepository(db).get(vm.binary_id)
+        logger.info("[RESPAWN] Binary resolved: %s", binary is not None)
+        if binary is None:
+            raise VMNotFoundError(
+                f"Binary not found for VM '{vm.name}' (ID: {vm.binary_id})"
+            )
+        logger.info("[RESPAWN] Kernel lookup...")
+        kernel = KernelRepository(db).get(vm.kernel_id)
+        logger.info("[RESPAWN] Kernel resolved: %s", kernel is not None)
+        if kernel is None:
+            raise VMNotFoundError(
+                f"Kernel not found for VM '{vm.name}' (ID: {vm.kernel_id})"
+            )
+
+        logger.info("[RESPAWN] Image lookup...")
+        image = ImageRepository(db).get(vm.image_id)
+        logger.info("[RESPAWN] Image resolved: %s", image is not None)
+        if image is None:
+            raise VMNotFoundError(
+                f"Image not found for VM '{vm.name}' (ID: {vm.image_id})"
+            )
+
+        logger.info("[RESPAWN] Network lookup...")
+        net_repo = NetworkRepository(db)
+        network = net_repo.get(vm.network_id)
+        logger.info("[RESPAWN] Network resolved: %s", network is not None)
+        if network is None:
+            raise VMNotFoundError(
+                f"Network not found for VM '{vm.name}' (ID: {vm.network_id})"
+            )
+
+        # Compute netmask from subnet
+        network_netmask = NetworkUtils.compute_subnet_mask(network.subnet)
+
+        # Determine cloud-init mode and ISO path
+        cloud_init_mode = None
+        cloud_init_iso_path = None
+        cloud_init_nocloud_url = None
+
+        if vm.cloud_init_mode:
+            cloud_init_mode = CloudInitMode(vm.cloud_init_mode)
+
+        # Check if cloud-init ISO exists on disk
+        iso_path = vm.vm_dir / "cloud-init" / "seed.iso"
+        if iso_path.exists():
+            cloud_init_iso_path = iso_path
+
+        # Rebuild nocloud URL if nocloud-net was configured
+        if vm.nocloud_net_port and network.ipv4_gateway:
+            cloud_init_nocloud_url = (
+                f"http://{network.ipv4_gateway}:{vm.nocloud_net_port}/"
+            )
+
+        # Build FirecrackerConfig
+        fc_config = FirecrackerConfig(
+            vm_dir=vm.vm_dir,
+            rootfs_path=vm.vm_dir / vm.rootfs_path,
+            binary_path=str(binary.resolved_path),
+            kernel_path=str(kernel.resolved_path),
+            vcpu_count=vm.vcpu_count,
+            mem_size_mib=vm.mem_size_mib,
+            guest_ip=vm.ipv4,
+            guest_mac=vm.mac,
+            tap_name=vm.tap_device,
+            network_gateway=network.ipv4_gateway,
+            network_netmask=network_netmask,
+            image_fs_uuid=image.fs_uuid,
+            image_fs_type=image.fs_type,
+            boot_args=vm.boot_args,
+            lsm_flags=vm.lsm_flags,
+            enable_pci=vm.enable_pci,
+            enable_console=vm.enable_console,
+            enable_logging=vm.enable_logging,
+            enable_metrics=vm.enable_metrics,
+            log_level="Debug",
+            log_filename=vm.log_path or "firecracker.log",
+            serial_output_filename=vm.serial_output_path
+            or "firecracker.console.log",
+            metrics_filename="firecracker.metrics",
+            api_socket_filename=vm.api_socket_path,
+            pid_filename="firecracker.pid",
+            config_filename=vm.config_path,
+            cloud_init_mode=cloud_init_mode,
+            cloud_init_iso_path=cloud_init_iso_path,
+            cloud_init_nocloud_url=cloud_init_nocloud_url,
+        )
+
+        # Re-start nocloud-net server if needed
+        if cloud_init_mode == CloudInitMode.NET:
+            nocloud_manager = NoCloudNetServerManager(
+                id=vm.id,
+                path=vm.vm_dir,
+                name=vm.name,
+                ipv4_gateway=network.ipv4_gateway,
+                port=vm.nocloud_net_port or 0,
+            )
+            if vm.nocloud_net_pid:
+                try:
+                    os.kill(vm.nocloud_net_pid, 0)
+                except (ProcessLookupError, PermissionError):
+                    nocloud_manager.start()
+            else:
+                nocloud_manager.start()
+
+        # Force-kill any remaining Firecracker process (e.g., if stop()
+        # failed to kill due to the non-child waitpid issue).
+        if vm.pid:
+            try:
+                os.kill(vm.pid, signal.SIGKILL)
+                # Brief wait for the process to die
+                _kill_waited = 0.0
+                while _kill_waited < 2.0:
+                    try:
+                        os.kill(vm.pid, 0)
+                    except ProcessLookupError:
+                        break
+                    time.sleep(0.1)
+                    _kill_waited += 0.1
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+
+        # Remove stale API socket if present from previous run
+        api_socket = vm.vm_dir / vm.api_socket_path
+        if api_socket.exists():
+            api_socket.unlink()
+
+        # Re-ensure TAP device exists before spawning
+        net_service = NetworkService(net_repo)
+        bridge_addr = NetworkUtils.compute_bridge_address(
+            network.ipv4_gateway, network.subnet
+        )
+        net_service.ensure_bridge(network.bridge, bridge_addr)
+        net_service.ensure_tap(
+            vm.tap_device, network.bridge, network_id=network.id
+        )
+
+        # Spawn Firecracker
+        spawner = FirecrackerSpawner(fc_config)
+        spawner.write_to_file()
+        spawner.spawn()
+
+        if spawner.pid is None:
+            raise MVMError(
+                f"Failed to spawn Firecracker process for VM '{vm.name}'"
+            )
+
+        # Wait for Firecracker API socket to become available
+        api_socket_path = vm.vm_dir / vm.api_socket_path
+        _socket_waited = 0.0
+        _socket_timeout = CONST_SOCKET_TIMEOUT_SECONDS
+        while _socket_waited < _socket_timeout:
+            if api_socket_path.exists():
+                break
+            time.sleep(CONST_POLL_STEP_SECONDS)
+            _socket_waited += CONST_POLL_STEP_SECONDS
+        else:
+            raise MVMError(
+                f"Firecracker API socket not available after "
+                f"{_socket_timeout}s for VM '{vm.name}'"
+            )
+
+        # Update PID and process_start_time in DB
+        vm_repo = VMRepository(db)
+        vm_repo.update_process_info(
+            vm.id, spawner.pid, spawner.process_start_time
+        )
+
+        # Update status to RUNNING — Firecracker auto-boots with --config-file,
+        # so no InstanceStart API call is needed. The status update is done here
+        # to avoid a redundant (and failing) InstanceStart from VMController.
+        vm_repo.update_status(vm.id, VMStatus.RUNNING.value)
+
+        # Update in-memory VM object for subsequent operations
+        vm.pid = spawner.pid
+        vm.process_start_time = spawner.process_start_time
+        vm.status = VMStatus.RUNNING.value
+
+    @staticmethod
     def start(inputs: VMInput) -> BatchResult[VMInstanceItem]:
         """Start one or more VMs."""
         resolved = VMRequest(inputs=inputs, db=Database()).resolve()
@@ -1072,7 +1309,13 @@ class VMOperation:
 
         for vm in resolved.vms:
             try:
-                service.start(vm)
+                # If VM is stopped, respawn Firecracker process
+                # (this also updates status to RUNNING — FC auto-boots)
+                if vm.status == VMStatus.STOPPED.value:
+                    VMOperation._respawn_firecracker(vm)
+                else:
+                    # For paused VMs, just send InstanceStart via API
+                    service.start(vm)
                 AuditLog.log("vm.start", context=f"name={vm.name}")
                 results.append(
                     OperationResult(
@@ -1105,6 +1348,17 @@ class VMOperation:
         for vm in resolved.vms:
             try:
                 service.stop(vm, force=resolved.force)
+
+                # Defense-in-depth: force-kill if stop() silently left the
+                # Firecracker process alive (non-child process cannot be
+                # reaped via waitpid, causing _reaped flag to prematurely
+                # short-circuit the SIGTERM/SIGKILL cascade).
+                if vm.pid and is_process_running(vm.pid):
+                    try:
+                        os.kill(vm.pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+
                 AuditLog.log("vm.stop", context=f"name={vm.name}")
                 results.append(
                     OperationResult(
@@ -1442,8 +1696,12 @@ class VMOperation:
                 if vm.id:
                     lease_repo = LeaseRepository(Database())
                     lease_repo.release_by_vm(vm.id)
-            except NetworkError as exc:
-                logger.warning("Failed to release network IP: %s", exc)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to release network IP for VM '%s': %s",
+                    vm.name,
+                    exc,
+                )
 
         cleanup_tasks = [
             _cleanup_console,

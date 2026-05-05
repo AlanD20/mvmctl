@@ -15,7 +15,6 @@ from mvmctl.core.vm._repository import VMRepository
 from mvmctl.core.vm._resolver import VMResolver
 from mvmctl.exceptions import SSHError
 from mvmctl.models import VMInstanceItem
-from mvmctl.utils._validators import NetworkValidator
 
 logger = logging.getLogger(__name__)
 
@@ -68,23 +67,17 @@ class SSHRequest:
         Resolve target to an IP address.
 
         Resolution order:
-        1. If --ip provided, use directly
-        2. If --name, --mac, or vm_id provided:
-           - If it's an IP address, use directly
-           - Otherwise resolve as VM entity and return its IPv4
-        3. Error if none provided
+        1. Pick the first non-None identifier from: --ip, --name, --mac, vm_id
+        2. Try to resolve it as a VM entity (handles name, IP, MAC, ID prefix)
+        3. If resolved, returns the VM's ipv4 and sets self._vm for key resolution
+        4. If not resolved (e.g. IP not in DB), falls back to the raw identifier
+        5. Error if no identifier provided at all
         """
-        if self._inputs.ip is not None:
-            return self._inputs.ip
-
         target = (
-            self._inputs.name
-            if self._inputs.name is not None
-            else (
-                self._inputs.mac
-                if self._inputs.mac is not None
-                else self._inputs.vm_id
-            )
+            self._inputs.ip
+            or self._inputs.name
+            or self._inputs.mac
+            or self._inputs.vm_id
         )
 
         if target is None:
@@ -92,15 +85,18 @@ class SSHRequest:
                 "Provide either a VM identifier, --name, --mac, or --ip"
             )
 
-        if NetworkValidator.is_ip_address(target):
-            return target
-
+        # Try to resolve as a VM entity — handles names, IPs, MACs, ID prefixes
         repo = VMRepository(self._db)
         resolver = VMResolver(repo)
-        self._vm = resolver.resolve(target)
-        if not self._vm.ipv4:
-            raise SSHError(f"VM '{target}' has no IP address")
-        return self._vm.ipv4
+        try:
+            self._vm = resolver.resolve(target)
+            if self._vm.ipv4:
+                return self._vm.ipv4
+        except Exception:
+            pass
+
+        # Fallback: use the raw identifier (e.g. --ip for a VM not in DB)
+        return target
 
     def _resolve_user(self) -> str:
         if self._inputs.user is not None:

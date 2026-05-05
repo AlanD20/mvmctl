@@ -256,6 +256,16 @@ class VMRepository:
                 (pid, vm_id),
             )
 
+    def update_process_info(
+        self, vm_id: str, pid: int | None, process_start_time: int | None
+    ) -> None:
+        """Update PID and process start time."""
+        with self._db.connect() as conn:
+            conn.execute(
+                "UPDATE vm_instances SET pid = ?, process_start_time = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (pid, process_start_time, vm_id),
+            )
+
     def update_exit_code(self, vm_id: str, exit_code: int) -> None:
         """Update only the VM exit code field."""
         with self._db.connect() as conn:

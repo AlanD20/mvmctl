@@ -439,7 +439,7 @@ class TestSSHJourney:
             "--name",
             vm_info["name"],
             "-c",
-            "uname -r",
+            "uname -a",
             check=False,
         )
         assert result.returncode == 0
@@ -664,6 +664,20 @@ class TestVMExportImportJourney:
     def test_journey_export_then_import(
         self, mvm_binary, unique_vm_name, tmp_path
     ):
+        # Use a dedicated network to avoid IP conflicts with
+        # parallel test workers on the default network.
+        unique_network = f"{unique_vm_name}-net"
+        subnet = _unique_subnet(unique_network)
+        _run_mvm(
+            mvm_binary,
+            "network",
+            "create",
+            unique_network,
+            "--subnet",
+            subnet,
+            "--non-interactive",
+        )
+
         result = _run_mvm(
             mvm_binary,
             "vm",
@@ -672,6 +686,8 @@ class TestVMExportImportJourney:
             unique_vm_name,
             "--image",
             "alpine-3.21",
+            "--network",
+            unique_network,
         )
         assert result.returncode == 0
 
@@ -709,6 +725,22 @@ class TestVMExportImportJourney:
                 "vm",
                 "rm",
                 new_name,
+                "--force",
+                check=False,
+            )
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                unique_vm_name,
+                "--force",
+                check=False,
+            )
+            _run_mvm(
+                mvm_binary,
+                "network",
+                "rm",
+                unique_network,
                 "--force",
                 check=False,
             )

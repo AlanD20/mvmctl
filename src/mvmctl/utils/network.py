@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import logging
-import random
 import secrets
-import string
 import subprocess
 from pathlib import Path
 
@@ -105,9 +104,15 @@ class NetworkUtils:
 
     @staticmethod
     def generate_tap_name(network_name: str, vm_name: str) -> str:
-        """Generate a TAP device name."""
-        rand_suffix = "".join(random.choices(string.ascii_lowercase, k=3))
-        return f"{CLI_NAME}-{network_name[:3]}-{vm_name[:3]}-{rand_suffix}"
+        """Generate a unique TAP device name (max 16 chars for IFNAMSIZ).
+
+        Uses a deterministic hash of network+VM name to ensure uniqueness
+        while staying within the 16-character IFNAMSIZ limit.
+
+        """
+        raw = f"{network_name}-{vm_name}"
+        tap_hash = hashlib.sha256(raw.encode()).hexdigest()[:11]
+        return f"{CLI_NAME}-{tap_hash}"
 
     # --- IP Allocation ---
 

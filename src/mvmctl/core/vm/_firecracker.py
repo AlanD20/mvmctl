@@ -162,6 +162,7 @@ class FirecrackerSpawner:
             self.serial_output_fp = self.create_filepointer(
                 self._serial_output_path
             )
+            fc_stdout = self.serial_output_fp
 
         fc_proc: subprocess.Popen[Any] | None = None
         self.fc_log_fp = self.create_filepointer(self._log_path)
@@ -181,13 +182,19 @@ class FirecrackerSpawner:
             pass_fds=fc_pass_fds,
         )
 
-        time.sleep(CONST_POLL_STEP_SECONDS)
-        poll_result = fc_proc.poll()
+        # Wait for Firecracker to initialize (poll every 0.1s for up to 2s)
+        max_startup_wait = 2.0
+        waited = 0.0
 
-        if poll_result is not None and isinstance(poll_result, int):
-            raise FirecrackerSpawnError(
-                f"Firecracker process exited immediately with code {poll_result}"
-            )
+        while waited < max_startup_wait:
+            time.sleep(CONST_POLL_STEP_SECONDS)
+            waited += CONST_POLL_STEP_SECONDS
+            poll_result = fc_proc.poll()
+
+            if poll_result is not None and isinstance(poll_result, int):
+                raise FirecrackerSpawnError(
+                    f"Firecracker process exited immediately with code {poll_result}"
+                )
 
         # Close file pointers since the firecracker process is managing them
         self._close_filepointers()

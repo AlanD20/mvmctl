@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from mvmctl.api.inputs._kernel_input import KernelInput
@@ -80,7 +79,7 @@ class KernelOperation:
                 )
 
             if existing is not None:
-                existing_path = Path(existing.path)
+                existing_path = existing.resolved_path
                 if existing_path.exists():
                     logger.info("Kernel already exists: %s", existing.path)
                     return OperationResult(
@@ -202,10 +201,13 @@ class KernelOperation:
 
             repo.upsert(kernel_item)
 
-            # Clean up old kernel file if ID changed
+            # Clean up old kernel file if ID changed AND the path is different
+            # from the newly downloaded file (avoids deleting the file we just
+            # downloaded when the file is re-downloaded to the same path).
             if existing is not None and existing.id != kernel_item.id:
                 old_path = existing.resolved_path
-                if old_path.exists():
+                new_path = fetch_result.path.resolve()
+                if old_path.resolve() != new_path and old_path.exists():
                     old_path.unlink()
                     logger.info(
                         "Cleaned up old kernel file for %s-%s",

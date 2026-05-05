@@ -148,20 +148,27 @@ def prepare_system_env(mvm_binary, check_system_prerequisites) -> None:
         else:
             # Ensure a default kernel is set — VM creation requires it
             # when --kernel is not passed explicitly.
-            has_default = any(k.get("is_default") for k in kernels)
-            if not has_default:
-                first_id = kernels[0]["id"][:6]
-                _print_prep(
-                    f"No default kernel set. Setting '{first_id}' as default..."
-                )
-                subprocess.run(
-                    [*shlex.split(binary), "kernel", "set-default", first_id],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    env={**os.environ, "NO_COLOR": "1"},
-                    check=True,
-                )
+            # Only consider kernels that are BOTH present on disk AND set as default,
+            # because stale DB records can have is_default=1 but is_present=0.
+            present = [k for k in kernels if k.get("is_present")]
+            has_valid_default = any(k.get("is_default") and k.get("is_present") for k in kernels)
+            if not has_valid_default:
+                if present:
+                    first_id = present[0]["id"][:6]
+                    _print_prep(
+                        f"No default kernel set (or default is missing from disk). "
+                        f"Setting '{first_id}' as default..."
+                    )
+                    subprocess.run(
+                        [*shlex.split(binary), "kernel", "set-default", first_id],
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        env={**os.environ, "NO_COLOR": "1"},
+                        check=True,
+                    )
+                else:
+                    missing.append("kernel (no present kernels on disk)")
 
     # ── 3. Verify image cache ────────────────────────────────────────
     result = subprocess.run(
@@ -284,9 +291,11 @@ def created_vm(
     Yields VM info dict from 'mvm vm ls --json'.
     Cleans up VM and key even if test fails.
     """
-    # Create a throwaway SSH key
+    # Create a throwaway SSH key and set it as default so that
+    # tests using `mvm ssh --ip` can find the right key automatically.
     key_name = f"sys-vmkey-{uuid.uuid4().hex[:6]}"
     _run_mvm(mvm_binary, "key", "create", key_name, "--algorithm", "ed25519")
+    _run_mvm(mvm_binary, "key", "set-default", key_name, check=False)
 
     # Create VM with SSH key injected
     _run_mvm(
@@ -412,7 +421,7 @@ def _run_mvm(
     binary: str,
     *args: str,
     check: bool = True,
-    timeout: Optional[int] = 300,
+    timeout: int = 60,
 ) -> subprocess.CompletedProcess[str]:
     """Run mvm command via subprocess.
 
