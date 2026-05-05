@@ -87,8 +87,17 @@ class TestInitHelpers:
 
     def test_compose_all_changed(self):
         from mvmctl.cli.init import _compose_host_setup_message
-        before = {"group_exists": False, "sudoers_exists": False, "user_in_group": False}
-        after = {"group_exists": True, "sudoers_exists": True, "user_in_group": True}
+
+        before = {
+            "group_exists": False,
+            "sudoers_exists": False,
+            "user_in_group": False,
+        }
+        after = {
+            "group_exists": True,
+            "sudoers_exists": True,
+            "user_in_group": True,
+        }
         result = _compose_host_setup_message(before, after)
         assert "group created" in result
         assert "sudoers configured" in result
@@ -96,15 +105,33 @@ class TestInitHelpers:
 
     def test_compose_none_changed(self):
         from mvmctl.cli.init import _compose_host_setup_message
-        before = {"group_exists": False, "sudoers_exists": False, "user_in_group": False}
-        after = {"group_exists": False, "sudoers_exists": False, "user_in_group": False}
+
+        before = {
+            "group_exists": False,
+            "sudoers_exists": False,
+            "user_in_group": False,
+        }
+        after = {
+            "group_exists": False,
+            "sudoers_exists": False,
+            "user_in_group": False,
+        }
         result = _compose_host_setup_message(before, after)
         assert result == "Host already configured"
 
     def test_compose_partial(self):
         from mvmctl.cli.init import _compose_host_setup_message
-        before = {"group_exists": False, "sudoers_exists": False, "user_in_group": False}
-        after = {"group_exists": True, "sudoers_exists": False, "user_in_group": False}
+
+        before = {
+            "group_exists": False,
+            "sudoers_exists": False,
+            "user_in_group": False,
+        }
+        after = {
+            "group_exists": True,
+            "sudoers_exists": False,
+            "user_in_group": False,
+        }
         result = _compose_host_setup_message(before, after)
         assert "group created" in result
         assert "sudoers" not in result
@@ -112,8 +139,17 @@ class TestInitHelpers:
 
     def test_compose_sudoers_only(self):
         from mvmctl.cli.init import _compose_host_setup_message
-        before = {"group_exists": True, "sudoers_exists": False, "user_in_group": True}
-        after = {"group_exists": True, "sudoers_exists": True, "user_in_group": True}
+
+        before = {
+            "group_exists": True,
+            "sudoers_exists": False,
+            "user_in_group": True,
+        }
+        after = {
+            "group_exists": True,
+            "sudoers_exists": True,
+            "user_in_group": True,
+        }
         result = _compose_host_setup_message(before, after)
         assert "sudoers configured" in result
         assert "group" not in result
@@ -126,12 +162,22 @@ class TestInitStepDisplay:
     @patch("mvmctl.cli.init.InitOperation")
     def test_step_failure(self, mock_init_op):
         steps = [
-            InitStepResult(step="local_state", success=True, message="State loaded"),
-            InitStepResult(step="host", success=False, message="Root privileges required"),
-            InitStepResult(step="cache", success=True, message="Cache initialized"),
-            InitStepResult(step="binary", success=True, message="Binary available"),
+            InitStepResult(
+                step="local_state", success=True, message="State loaded"
+            ),
+            InitStepResult(
+                step="host", success=False, message="Root privileges required"
+            ),
+            InitStepResult(
+                step="cache", success=True, message="Cache initialized"
+            ),
+            InitStepResult(
+                step="binary", success=True, message="Binary available"
+            ),
         ]
-        mock_init_op.run.return_value = InitResult(steps=steps, host_ready=False)
+        mock_init_op.run.return_value = InitResult(
+            steps=steps, host_ready=False
+        )
         result = runner.invoke(app, ["init", "--non-interactive"])
         assert result.exit_code == 1
         assert "sudoers / mvm group" in result.output
@@ -142,7 +188,9 @@ class TestInitStepDisplay:
         steps = [
             InitStepResult(step="local_state", success=True, message="Started"),
         ]
-        mock_init_op.run.return_value = InitResult(steps=steps, host_ready=False)
+        mock_init_op.run.return_value = InitResult(
+            steps=steps, host_ready=False
+        )
         result = runner.invoke(app, ["init", "--non-interactive"])
         assert result.exit_code == 1
         assert "not checked" in result.output
@@ -167,22 +215,34 @@ class TestInitInteractiveFlow:
     @patch("mvmctl.cli.init.typer.confirm")
     @patch("mvmctl.cli.init.InitOperation")
     def test_sudo_flow_approved(
-        self, mock_init_op, mock_confirm, mock_check_state,
-        mock_sudo, mock_compose,
+        self,
+        mock_init_op,
+        mock_confirm,
+        mock_check_state,
+        mock_sudo,
+        mock_compose,
     ):
         needs_sudo = MagicMock()
         needs_sudo.code = "privilege.sudo_required"
         needs_sudo.context = {}
 
         mock_init_op.run.side_effect = [
-            InitResult(steps=[], host_ready=False, needs_interaction=needs_sudo),
             InitResult(
-                steps=[InitStepResult(step="local_state", success=True, message="State loaded")],
+                steps=[], host_ready=False, needs_interaction=needs_sudo
+            ),
+            InitResult(
+                steps=[
+                    InitStepResult(
+                        step="local_state", success=True, message="State loaded"
+                    )
+                ],
                 host_ready=True,
             ),
         ]
         mock_check_state.return_value = {
-            "group_exists": False, "sudoers_exists": False, "user_in_group": False,
+            "group_exists": False,
+            "sudoers_exists": False,
+            "user_in_group": False,
         }
         mock_confirm.return_value = True
         mock_sudo.return_value = MagicMock(returncode=0)
@@ -196,17 +256,24 @@ class TestInitInteractiveFlow:
     @patch("mvmctl.cli.init.typer.confirm")
     @patch("mvmctl.cli.init.InitOperation")
     def test_sudo_flow_declined(
-        self, mock_init_op, mock_confirm, mock_check_state,
+        self,
+        mock_init_op,
+        mock_confirm,
+        mock_check_state,
     ):
         needs_sudo = MagicMock()
         needs_sudo.code = "privilege.sudo_required"
         needs_sudo.context = {}
 
         mock_init_op.run.return_value = InitResult(
-            steps=[], host_ready=False, needs_interaction=needs_sudo,
+            steps=[],
+            host_ready=False,
+            needs_interaction=needs_sudo,
         )
         mock_check_state.return_value = {
-            "group_exists": False, "sudoers_exists": False, "user_in_group": False,
+            "group_exists": False,
+            "sudoers_exists": False,
+            "user_in_group": False,
         }
         mock_confirm.return_value = False
 
@@ -219,17 +286,25 @@ class TestInitInteractiveFlow:
     @patch("mvmctl.cli.init.typer.confirm")
     @patch("mvmctl.cli.init.InitOperation")
     def test_sudo_flow_subprocess_fails(
-        self, mock_init_op, mock_confirm, mock_check_state, mock_sudo,
+        self,
+        mock_init_op,
+        mock_confirm,
+        mock_check_state,
+        mock_sudo,
     ):
         needs_sudo = MagicMock()
         needs_sudo.code = "privilege.sudo_required"
         needs_sudo.context = {}
 
         mock_init_op.run.return_value = InitResult(
-            steps=[], host_ready=False, needs_interaction=needs_sudo,
+            steps=[],
+            host_ready=False,
+            needs_interaction=needs_sudo,
         )
         mock_check_state.return_value = {
-            "group_exists": False, "sudoers_exists": False, "user_in_group": False,
+            "group_exists": False,
+            "sudoers_exists": False,
+            "user_in_group": False,
         }
         mock_confirm.return_value = True
         mock_sudo.return_value = MagicMock(returncode=1)
@@ -241,7 +316,9 @@ class TestInitInteractiveFlow:
     @patch("mvmctl.cli.init.typer.confirm")
     @patch("mvmctl.cli.init.InitOperation")
     def test_binary_download_approved(
-        self, mock_init_op, mock_confirm,
+        self,
+        mock_init_op,
+        mock_confirm,
     ):
         needs_bin = MagicMock()
         needs_bin.code = "binary.confirm_download"
@@ -250,7 +327,11 @@ class TestInitInteractiveFlow:
         mock_init_op.run.side_effect = [
             InitResult(steps=[], host_ready=False, needs_interaction=needs_bin),
             InitResult(
-                steps=[InitStepResult(step="binary", success=True, message="Downloaded")],
+                steps=[
+                    InitStepResult(
+                        step="binary", success=True, message="Downloaded"
+                    )
+                ],
                 host_ready=True,
             ),
         ]
@@ -264,14 +345,18 @@ class TestInitInteractiveFlow:
     @patch("mvmctl.cli.init.typer.confirm")
     @patch("mvmctl.cli.init.InitOperation")
     def test_binary_download_declined(
-        self, mock_init_op, mock_confirm,
+        self,
+        mock_init_op,
+        mock_confirm,
     ):
         needs_bin = MagicMock()
         needs_bin.code = "binary.confirm_download"
         needs_bin.context = {"latest_version": "1.15.0"}
 
         mock_init_op.run.return_value = InitResult(
-            steps=[], host_ready=False, needs_interaction=needs_bin,
+            steps=[],
+            host_ready=False,
+            needs_interaction=needs_bin,
         )
         mock_confirm.return_value = False
 
@@ -286,7 +371,9 @@ class TestInitInteractiveFlow:
         needs_bin.context = {}  # No latest_version
 
         mock_init_op.run.return_value = InitResult(
-            steps=[], host_ready=False, needs_interaction=needs_bin,
+            steps=[],
+            host_ready=False,
+            needs_interaction=needs_bin,
         )
 
         result = runner.invoke(app, ["init"])
@@ -301,7 +388,9 @@ class TestInitInteractiveFlow:
         needs_unknown.context = {}
 
         mock_init_op.run.return_value = InitResult(
-            steps=[], host_ready=False, needs_interaction=needs_unknown,
+            steps=[],
+            host_ready=False,
+            needs_interaction=needs_unknown,
         )
 
         result = runner.invoke(app, ["init"])

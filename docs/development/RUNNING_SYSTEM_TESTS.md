@@ -17,7 +17,7 @@ sudo usermod -aG kvm $USER
 
 # 3. Initialize mvm (requires sudo for first-time host setup)
 uv run mvm init --non-interactive
-# Or manually: sudo mvm host init && uv run mvm bin fetch
+# Or manually: sudo mvm host init && uv run mvm bin pull
 ```
 
 ### Auto-fetch on test run
@@ -47,10 +47,10 @@ automatically on the first serial run. Progress messages are printed to stderr:
 > multiple workers download the same asset simultaneously. Pre-fetch assets
 > manually before running in parallel:
 > ```bash
-> uv run mvm kernel fetch --type official --set-default
-> uv run mvm image fetch alpine-3.21
-> uv run mvm image fetch ubuntu-24.04-minimal
-> uv run mvm bin fetch <version> --set-default
+> uv run mvm kernel pull --type official --set-default
+> uv run mvm image pull alpine-3.21
+> uv run mvm image pull ubuntu-24.04-minimal
+> uv run mvm bin pull <version> --set-default
 > ```
 
 ## Run

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from mvmctl.api.console_operations import ConsoleConnectionInfo, ConsoleOperation
-from mvmctl.models.result import OperationResult
+from mvmctl.api.console_operations import (
+    ConsoleConnectionInfo,
+    ConsoleOperation,
+)
 from mvmctl.exceptions import MVMError
 
 

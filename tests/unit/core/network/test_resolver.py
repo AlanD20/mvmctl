@@ -141,7 +141,10 @@ class TestNetworkResolverResolveMany:
     def test_partial_errors(self, mocker):
         net1 = _make_net(name="net1", net_id="id1")
         mock_repo = MagicMock()
-        mock_repo.get_by_name.side_effect = [net1, NetworkNotFoundError("not found")]
+        mock_repo.get_by_name.side_effect = [
+            net1,
+            NetworkNotFoundError("not found"),
+        ]
         resolver = NetworkResolver(mock_repo)
         result = resolver.resolve_many(["net1", "bad"])
         assert len(result.items) == 1

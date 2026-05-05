@@ -138,7 +138,9 @@ class TestDownloadFile:
         assert dest.read_bytes() == full_data
 
     @patch("mvmctl.utils.http.HttpDownload.with_download")
-    def test_download_file_without_progress(self, mock_with_download, tmp_path: Path):
+    def test_download_file_without_progress(
+        self, mock_with_download, tmp_path: Path
+    ):
         """Should work without progress bar parameter."""
         dest = tmp_path / "target.bin"
         full_data = b"Complete file content for progress test"

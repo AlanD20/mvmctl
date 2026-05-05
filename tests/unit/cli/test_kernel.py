@@ -1,7 +1,6 @@
 """Tests for CLI kernel commands."""
 
 from __future__ import annotations
-from mvmctl.models.result import BatchResult, OperationResult
 
 import json
 from unittest.mock import patch
@@ -11,6 +10,7 @@ from click.testing import CliRunner
 from mvmctl.exceptions import MVMError
 from mvmctl.main import app
 from mvmctl.models import KernelItem
+from mvmctl.models.result import BatchResult, OperationResult
 
 runner = CliRunner()
 
@@ -70,32 +70,40 @@ class TestKernelLs:
         assert result.exit_code == 0
 
 
-class TestKernelFetch:
-    """Tests for 'kernel fetch' command."""
+class TestKernelPull:
+    """Tests for 'kernel pull' command."""
 
     @patch("mvmctl.cli.kernel.KernelOperation")
-    def test_fetch_success(self, mock_krn_op):
-        mock_krn_op.fetch.return_value = OperationResult(status="success", code="kernel.fetched", item=_make_kernel("vmlinux-6.1.0"))
+    def test_pull_success(self, mock_krn_op):
+        mock_krn_op.pull.return_value = OperationResult(
+            status="success",
+            code="kernel.pulled",
+            item=_make_kernel("vmlinux-6.1.0"),
+        )
         result = runner.invoke(
             app,
             [
                 "kernel",
-                "fetch",
+                "pull",
                 "--type",
                 "firecracker",
             ],
         )
         assert result.exit_code == 0
-        assert "fetched" in result.output.lower()
+        assert "pulled" in result.output.lower()
 
     @patch("mvmctl.cli.kernel.KernelOperation")
-    def test_fetch_with_version_and_arch(self, mock_krn_op):
-        mock_krn_op.fetch.return_value = OperationResult(status="success", code="kernel.fetched", item=_make_kernel("vmlinux-6.1.0"))
+    def test_pull_with_version_and_arch(self, mock_krn_op):
+        mock_krn_op.pull.return_value = OperationResult(
+            status="success",
+            code="kernel.pulled",
+            item=_make_kernel("vmlinux-6.1.0"),
+        )
         result = runner.invoke(
             app,
             [
                 "kernel",
-                "fetch",
+                "pull",
                 "--type",
                 "firecracker",
                 "--version",
@@ -105,34 +113,34 @@ class TestKernelFetch:
             ],
         )
         assert result.exit_code == 0
-        call_input = mock_krn_op.fetch.call_args[0][0]
+        call_input = mock_krn_op.pull.call_args[0][0]
         assert call_input.version == "6.1.0"
         assert call_input.arch == "x86_64"
 
     @patch("mvmctl.cli.kernel.KernelOperation")
-    def test_fetch_missing_type(self, mock_krn_op):
-        result = runner.invoke(app, ["kernel", "fetch"])
+    def test_pull_missing_type(self, mock_krn_op):
+        result = runner.invoke(app, ["kernel", "pull"])
         assert result.exit_code == 2  # Required --type option missing
         assert (
             "Missing option" in result.output or "type" in result.output.lower()
         )
 
     @patch("mvmctl.cli.kernel.KernelOperation")
-    def test_fetch_error(self, mock_krn_op):
-        mock_krn_op.fetch.side_effect = MVMError("No version available")
+    def test_pull_error(self, mock_krn_op):
+        mock_krn_op.pull.side_effect = MVMError("No version available")
         result = runner.invoke(
             app,
             [
                 "kernel",
-                "fetch",
+                "pull",
                 "--type",
                 "firecracker",
             ],
         )
         assert result.exit_code == 1
 
-    def test_fetch_help(self):
-        result = runner.invoke(app, ["kernel", "fetch", "--help"])
+    def test_pull_help(self):
+        result = runner.invoke(app, ["kernel", "pull", "--help"])
         assert result.exit_code == 0
 
 
@@ -141,14 +149,30 @@ class TestKernelRemove:
 
     @patch("mvmctl.cli.kernel.KernelOperation")
     def test_rm_success(self, mock_krn_op):
-        mock_krn_op.remove.return_value = BatchResult(items=[OperationResult(status="success", code="kernel.removed", message="Kernel removed")])
+        mock_krn_op.remove.return_value = BatchResult(
+            items=[
+                OperationResult(
+                    status="success",
+                    code="kernel.removed",
+                    message="Kernel removed",
+                )
+            ]
+        )
         result = runner.invoke(app, ["kernel", "rm", "abc123"])
         assert result.exit_code == 0
         assert "removed" in result.output.lower()
 
     @patch("mvmctl.cli.kernel.KernelOperation")
     def test_rm_multiple(self, mock_krn_op):
-        mock_krn_op.remove.return_value = BatchResult(items=[OperationResult(status="success", code="kernel.removed", message="Kernel removed")])
+        mock_krn_op.remove.return_value = BatchResult(
+            items=[
+                OperationResult(
+                    status="success",
+                    code="kernel.removed",
+                    message="Kernel removed",
+                )
+            ]
+        )
         result = runner.invoke(app, ["kernel", "rm", "abc123", "def456"])
         assert result.exit_code == 0
 
@@ -173,7 +197,11 @@ class TestKernelSetDefault:
 
     @patch("mvmctl.cli.kernel.KernelOperation")
     def test_set_default_success(self, mock_krn_op):
-        mock_krn_op.set_default.return_value = OperationResult(status='success', code='kernel.default_set', message='Default kernel set')
+        mock_krn_op.set_default.return_value = OperationResult(
+            status="success",
+            code="kernel.default_set",
+            message="Default kernel set",
+        )
         result = runner.invoke(app, ["kernel", "set-default", "abc123"])
         assert result.exit_code == 0
         assert "Default kernel set" in result.output

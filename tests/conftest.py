@@ -20,7 +20,9 @@ from tests.helpers.paths import make_test_paths
 
 
 @pytest.fixture(autouse=True)
-def isolate_config_and_cache(request, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def isolate_config_and_cache(
+    request, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     """Ensure tests never write to real config or cache directories.
 
     Skipped for system tests (marked with @pytest.mark.system).
@@ -45,7 +47,9 @@ def isolate_config_and_cache(request, tmp_path: Path, monkeypatch: pytest.Monkey
 
 
 @pytest.fixture(autouse=True)
-def _isolate_iptables_rules(request, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolate_iptables_rules(
+    request, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Isolate iptables rules for unit/integration tests.
 
     Flushes MVM-specific iptables chains before each test to prevent
@@ -59,14 +63,24 @@ def _isolate_iptables_rules(request, tmp_path: Path, monkeypatch: pytest.MonkeyP
 
     # Flush MVM-specific iptables chains (ignore errors if chains don't exist)
     subprocess.run(
-        ["iptables", "-t", "nat", "-F", "MVM-POSTROUTING"], capture_output=True, check=False
+        ["iptables", "-t", "nat", "-F", "MVM-POSTROUTING"],
+        capture_output=True,
+        check=False,
     )
-    subprocess.run(["iptables", "-F", "MVM-FORWARD"], capture_output=True, check=False)
-    subprocess.run(["iptables", "-F", "MVM-NOCLOUD-INPUT"], capture_output=True, check=False)
+    subprocess.run(
+        ["iptables", "-F", "MVM-FORWARD"], capture_output=True, check=False
+    )
+    subprocess.run(
+        ["iptables", "-F", "MVM-NOCLOUD-INPUT"],
+        capture_output=True,
+        check=False,
+    )
 
     fake_rules = str(tmp_path / "iptables" / "rules.v4")
     try:
-        monkeypatch.setattr("mvmctl.constants.IPTABLES_RULES_V4", fake_rules, raising=False)
+        monkeypatch.setattr(
+            "mvmctl.constants.IPTABLES_RULES_V4", fake_rules, raising=False
+        )
     except ImportError:
         pass
 
@@ -98,7 +112,9 @@ def _is_sudo_command(command: object) -> bool:
 
 
 @pytest.fixture(autouse=True)
-def _block_real_sudo_invocations(request, monkeypatch: pytest.MonkeyPatch) -> None:
+def _block_real_sudo_invocations(
+    request, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Fail fast when tests attempt a real sudo invocation.
 
     Enabled in CI with MVM_TEST_ENFORCE_NO_SUDO=1.
@@ -127,7 +143,9 @@ def _block_real_sudo_invocations(request, monkeypatch: pytest.MonkeyPatch) -> No
 
     real_run = subprocess.run
 
-    def guarded_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def guarded_run(
+        *args: object, **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         command = kwargs.get("args", args[0] if args else None)
         if _is_sudo_command(command):
             raise AssertionError(

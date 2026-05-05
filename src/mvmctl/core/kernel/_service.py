@@ -33,7 +33,7 @@ from mvmctl.exceptions import (
     KernelError,
     MVMError,
 )
-from mvmctl.models import KernelFetchResult, KernelItem, KernelSpec
+from mvmctl.models import KernelItem, KernelPullResult, KernelSpec
 from mvmctl.utils.http import HttpDownload
 from mvmctl.utils.template import render_optional_template, render_template
 from mvmctl.utils.yaml import (
@@ -913,15 +913,16 @@ class KernelService:
         arch: str,
         output_dir: Path,
         progress_callback: Callable[[int, int | None], None] | None = None,
-    ) -> KernelFetchResult:
+    ) -> KernelPullResult:
         """
-        Download a Firecracker CI kernel from GitHub.
+        Download Firecracker-compatible kernel from GitHub releases.
+
         Args:
             ci_version: Firecracker CI version string.
             arch: Target architecture.
             output_path: Destination path for the downloaded kernel.
         Returns:
-            KernelFetchResult with path, version, arch, type, warnings, info.
+            KernelPullResult with path, version, arch, type, warnings, info.
         """
         if not spec.list_url_template:
             raise KernelError(
@@ -957,7 +958,7 @@ class KernelService:
         output_path = output_dir / f"{spec.output_name}-{kernel_version}-{arch}"
         if output_path.exists():
             logger.info("Firecracker CI kernel already cached: %s", output_path)
-            return KernelFetchResult(
+            return KernelPullResult(
                 path=output_path,
                 version=kernel_version,
                 arch=arch,
@@ -1010,7 +1011,7 @@ class KernelService:
             ) from exc
         output_path.chmod(CONST_FILE_PERMS_EXECUTABLE)
         logger.info("Firecracker CI kernel saved: %s", output_path)
-        return KernelFetchResult(
+        return KernelPullResult(
             path=output_path,
             version=kernel_version,
             arch=arch,
@@ -1087,7 +1088,7 @@ class KernelService:
         clean_build: bool = False,
         kernel_config: Path | None = None,
         progress_callback: Callable[[int, int | None], None] | None = None,
-    ) -> KernelFetchResult:
+    ) -> KernelPullResult:
         """
         Build an official kernel from source.
         Args:
@@ -1099,7 +1100,7 @@ class KernelService:
             clean_build: Whether to skip build cache.
             kernel_config: Optional custom config path.
         Returns:
-            KernelFetchResult with build results.
+            KernelPullResult with build results.
         """
         cls.check_build_dependencies()
         output_path = output_dir / f"{spec.output_name}-{spec.version}-{arch}"
@@ -1125,7 +1126,7 @@ class KernelService:
             warnings.extend(build_result.build_result.warnings)
             info_messages.extend(build_result.build_result.info_messages)
         info_messages.append(f"Kernel built: {output_path}")
-        return KernelFetchResult(
+        return KernelPullResult(
             path=output_path,
             version=spec.version,
             arch=arch,

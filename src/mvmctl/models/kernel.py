@@ -38,9 +38,9 @@ class KernelItem:
 
 
 @dataclass
-class KernelFetchResult:
+class KernelPullResult:
     """
-    Unified result from kernel fetch/build operations.
+    Unified result from kernel pull/build operations.
 
     This dataclass provides a consistent return type for both Firecracker
     download and official kernel build paths, eliminating the need for

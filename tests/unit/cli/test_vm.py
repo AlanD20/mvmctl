@@ -1,7 +1,6 @@
 """Tests for CLI VM commands."""
 
 from __future__ import annotations
-from mvmctl.models.result import NeedsInteraction, OperationResult
 
 import json
 from unittest.mock import MagicMock, patch
@@ -11,6 +10,7 @@ from click.testing import CliRunner
 from mvmctl.exceptions import MVMError
 from mvmctl.main import app
 from mvmctl.models import VMInstanceItem
+from mvmctl.models.result import NeedsInteraction, OperationResult
 
 runner = CliRunner()
 
@@ -115,7 +115,9 @@ class TestVMCreate:
 
     @patch("mvmctl.cli.vm.VMOperation")
     def test_create_success(self, mock_vm_op):
-        mock_vm_op.create.return_value = OperationResult(status='success', code='vm.created', message='VM created')
+        mock_vm_op.create.return_value = OperationResult(
+            status="success", code="vm.created", message="VM created"
+        )
         result = runner.invoke(
             app,
             [
@@ -164,20 +166,26 @@ class TestVMRemove:
 
     @patch("mvmctl.cli.vm.VMOperation")
     def test_rm_success(self, mock_vm_op):
-        mock_vm_op.remove.return_value = OperationResult(status='success', code='vm.removed', message='VM removed')
+        mock_vm_op.remove.return_value = OperationResult(
+            status="success", code="vm.removed", message="VM removed"
+        )
         result = runner.invoke(app, ["vm", "rm", "myvm"])
         assert result.exit_code == 0
         assert "removed" in result.output.lower()
 
     @patch("mvmctl.cli.vm.VMOperation")
     def test_rm_multiple(self, mock_vm_op):
-        mock_vm_op.remove.return_value = OperationResult(status='success', code='vm.removed', message='VM removed')
+        mock_vm_op.remove.return_value = OperationResult(
+            status="success", code="vm.removed", message="VM removed"
+        )
         result = runner.invoke(app, ["vm", "rm", "vm1", "vm2"])
         assert result.exit_code == 0
 
     @patch("mvmctl.cli.vm.VMOperation")
     def test_rm_with_name_flag(self, mock_vm_op):
-        mock_vm_op.remove.return_value = OperationResult(status='success', code='vm.removed', message='VM removed')
+        mock_vm_op.remove.return_value = OperationResult(
+            status="success", code="vm.removed", message="VM removed"
+        )
         result = runner.invoke(app, ["vm", "rm", "--name", "myvm", "myvm"])
         assert result.exit_code == 0
 
@@ -194,14 +202,18 @@ class TestVMStart:
 
     @patch("mvmctl.cli.vm.VMOperation")
     def test_start_success(self, mock_vm_op):
-        mock_vm_op.start.return_value = OperationResult(status='success', code='vm.started', message='VM started')
+        mock_vm_op.start.return_value = OperationResult(
+            status="success", code="vm.started", message="VM started"
+        )
         result = runner.invoke(app, ["vm", "start", "myvm"])
         assert result.exit_code == 0
         assert "started" in result.output.lower()
 
     @patch("mvmctl.cli.vm.VMOperation")
     def test_start_with_name_flag(self, mock_vm_op):
-        mock_vm_op.start.return_value = OperationResult(status='success', code='vm.started', message='VM started')
+        mock_vm_op.start.return_value = OperationResult(
+            status="success", code="vm.started", message="VM started"
+        )
         result = runner.invoke(app, ["vm", "start", "--name", "myvm", "myvm"])
         assert result.exit_code == 0
 
@@ -222,14 +234,18 @@ class TestVMStop:
 
     @patch("mvmctl.cli.vm.VMOperation")
     def test_stop_success(self, mock_vm_op):
-        mock_vm_op.stop.return_value = OperationResult(status='success', code='vm.stopped', message='VM stopped')
+        mock_vm_op.stop.return_value = OperationResult(
+            status="success", code="vm.stopped", message="VM stopped"
+        )
         result = runner.invoke(app, ["vm", "stop", "myvm"])
         assert result.exit_code == 0
         assert "stopped" in result.output.lower()
 
     @patch("mvmctl.cli.vm.VMOperation")
     def test_stop_with_force(self, mock_vm_op):
-        mock_vm_op.stop.return_value = OperationResult(status='success', code='vm.stopped', message='VM stopped')
+        mock_vm_op.stop.return_value = OperationResult(
+            status="success", code="vm.stopped", message="VM stopped"
+        )
         result = runner.invoke(app, ["vm", "stop", "myvm", "--force"])
         assert result.exit_code == 0
         call_kwargs = mock_vm_op.stop.call_args
@@ -247,14 +263,18 @@ class TestVMReboot:
 
     @patch("mvmctl.cli.vm.VMOperation")
     def test_reboot_success(self, mock_vm_op):
-        mock_vm_op.reboot.return_value = OperationResult(status='success', code='vm.rebooted', message='VM rebooted')
+        mock_vm_op.reboot.return_value = OperationResult(
+            status="success", code="vm.rebooted", message="VM rebooted"
+        )
         result = runner.invoke(app, ["vm", "reboot", "myvm"])
         assert result.exit_code == 0
         assert "rebooted" in result.output.lower()
 
     @patch("mvmctl.cli.vm.VMOperation")
     def test_reboot_with_force(self, mock_vm_op):
-        mock_vm_op.reboot.return_value = OperationResult(status='success', code='vm.rebooted', message='VM rebooted')
+        mock_vm_op.reboot.return_value = OperationResult(
+            status="success", code="vm.rebooted", message="VM rebooted"
+        )
         result = runner.invoke(app, ["vm", "reboot", "myvm", "--force"])
         assert result.exit_code == 0
 
@@ -270,7 +290,9 @@ class TestVMPause:
 
     @patch("mvmctl.cli.vm.VMOperation")
     def test_pause_success(self, mock_vm_op):
-        mock_vm_op.pause.return_value = OperationResult(status='success', code='vm.paused', message='VM paused')
+        mock_vm_op.pause.return_value = OperationResult(
+            status="success", code="vm.paused", message="VM paused"
+        )
         result = runner.invoke(app, ["vm", "pause", "myvm"])
         assert result.exit_code == 0
         assert "paused" in result.output.lower()
@@ -287,7 +309,9 @@ class TestVMResume:
 
     @patch("mvmctl.cli.vm.VMOperation")
     def test_resume_success(self, mock_vm_op):
-        mock_vm_op.resume.return_value = OperationResult(status='success', code='vm.resumed', message='VM resumed')
+        mock_vm_op.resume.return_value = OperationResult(
+            status="success", code="vm.resumed", message="VM resumed"
+        )
         result = runner.invoke(app, ["vm", "resume", "myvm"])
         assert result.exit_code == 0
         assert "resumed" in result.output.lower()
@@ -304,7 +328,11 @@ class TestVMSnapshot:
 
     @patch("mvmctl.cli.vm.VMOperation")
     def test_snapshot_success(self, mock_vm_op, tmp_path):
-        mock_vm_op.snapshot.return_value = OperationResult(status='success', code='vm.snapshot_created', message='Snapshot created')
+        mock_vm_op.snapshot.return_value = OperationResult(
+            status="success",
+            code="vm.snapshot_created",
+            message="Snapshot created",
+        )
         mem_file = tmp_path / "mem.snap"
         state_file = tmp_path / "state.snap"
         result = runner.invoke(
@@ -348,7 +376,11 @@ class TestVMLoad:
 
     @patch("mvmctl.cli.vm.VMOperation")
     def test_load_success(self, mock_vm_op, tmp_path):
-        mock_vm_op.load_snapshot.return_value = OperationResult(status='success', code='vm.snapshot_loaded', message='Snapshot loaded')
+        mock_vm_op.load_snapshot.return_value = OperationResult(
+            status="success",
+            code="vm.snapshot_loaded",
+            message="Snapshot loaded",
+        )
         mem_file = tmp_path / "mem.snap"
         state_file = tmp_path / "state.snap"
         result = runner.invoke(
@@ -366,7 +398,11 @@ class TestVMLoad:
 
     @patch("mvmctl.cli.vm.VMOperation")
     def test_load_with_resume(self, mock_vm_op, tmp_path):
-        mock_vm_op.load_snapshot.return_value = OperationResult(status='success', code='vm.snapshot_loaded', message='Snapshot loaded')
+        mock_vm_op.load_snapshot.return_value = OperationResult(
+            status="success",
+            code="vm.snapshot_loaded",
+            message="Snapshot loaded",
+        )
         mem_file = tmp_path / "mem.snap"
         state_file = tmp_path / "state.snap"
         result = runner.invoke(
@@ -497,10 +533,13 @@ class TestVMImport:
 
     def test_import_success(self, mocker, tmp_path):
         from mvmctl.models.result import OperationResult
-        mocker.patch("mvmctl.cli.vm.VMOperation.import_",
-                     return_value=OperationResult(
-                         status="success", code="ok", message="imported"
-                     ))
+
+        mocker.patch(
+            "mvmctl.cli.vm.VMOperation.import_",
+            return_value=OperationResult(
+                status="success", code="ok", message="imported"
+            ),
+        )
         config = tmp_path / "config.json"
         config.write_text('{"name": "myvm"}')
         result = runner.invoke(app, ["vm", "import", str(config)])
@@ -510,6 +549,7 @@ class TestVMImport:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_import_with_name_override(self, mock_vm_op, tmp_path):
         from mvmctl.models.result import OperationResult
+
         mock_vm_op.import_.return_value = OperationResult(
             status="success", code="ok", message="imported"
         )
@@ -598,9 +638,12 @@ class TestVMCreateEdgeCases:
         result = runner.invoke(
             app,
             [
-                "vm", "create",
-                "--name", "testvm",
-                "--image", "ubuntu-24.04",
+                "vm",
+                "create",
+                "--name",
+                "testvm",
+                "--image",
+                "ubuntu-24.04",
                 "--skip-cleanup",
             ],
             input="y\n",
@@ -615,10 +658,14 @@ class TestVMCreateEdgeCases:
         result = runner.invoke(
             app,
             [
-                "vm", "create",
-                "--name", "testvm",
-                "--image", "ubuntu-24.04",
-                "--ssh-key", "mykey,pubkey",
+                "vm",
+                "create",
+                "--name",
+                "testvm",
+                "--image",
+                "ubuntu-24.04",
+                "--ssh-key",
+                "mykey,pubkey",
             ],
         )
         assert result.exit_code == 0
@@ -631,17 +678,28 @@ class TestVMCreateEdgeCases:
         result = runner.invoke(
             app,
             [
-                "vm", "create",
-                "--name", "fullvm",
-                "--image", "ubuntu-24.04",
-                "--kernel", "krn1",
-                "--vcpus", "4",
-                "--mem", "1024",
-                "--disk-size", "10G",
-                "--ip", "10.0.0.42",
-                "--network", "mynet",
-                "--mac", "02:FC:00:00:00:02",
-                "--user", "admin",
+                "vm",
+                "create",
+                "--name",
+                "fullvm",
+                "--image",
+                "ubuntu-24.04",
+                "--kernel",
+                "krn1",
+                "--vcpus",
+                "4",
+                "--mem",
+                "1024",
+                "--disk-size",
+                "10G",
+                "--ip",
+                "10.0.0.42",
+                "--network",
+                "mynet",
+                "--mac",
+                "02:FC:00:00:00:02",
+                "--user",
+                "admin",
                 "--no-enable-pci",
                 "--enable-logging",
                 "--no-enable-metrics",
@@ -728,17 +786,22 @@ class TestVMSnapshotEdgeCases:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_snapshot_with_ip_flag(self, mock_vm_op, tmp_path):
         mock_vm_op.snapshot.return_value = OperationResult(
-            status="success", code="vm.snapshot_created", message="Snapshot created"
+            status="success",
+            code="vm.snapshot_created",
+            message="Snapshot created",
         )
         mem_file = tmp_path / "mem.snap"
         state_file = tmp_path / "state.snap"
         result = runner.invoke(
             app,
             [
-                "vm", "snapshot",
+                "vm",
+                "snapshot",
                 "10.0.0.5",
-                str(mem_file), str(state_file),
-                "--ip", "10.0.0.5",
+                str(mem_file),
+                str(state_file),
+                "--ip",
+                "10.0.0.5",
             ],
         )
         assert result.exit_code == 0
@@ -750,17 +813,22 @@ class TestVMLoadEdgeCases:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_load_with_ip_flag(self, mock_vm_op, tmp_path):
         mock_vm_op.load_snapshot.return_value = OperationResult(
-            status="success", code="vm.snapshot_loaded", message="Snapshot loaded"
+            status="success",
+            code="vm.snapshot_loaded",
+            message="Snapshot loaded",
         )
         mem_file = tmp_path / "mem.snap"
         state_file = tmp_path / "state.snap"
         result = runner.invoke(
             app,
             [
-                "vm", "load",
+                "vm",
+                "load",
                 "10.0.0.5",
-                str(mem_file), str(state_file),
-                "--ip", "10.0.0.5",
+                str(mem_file),
+                str(state_file),
+                "--ip",
+                "10.0.0.5",
             ],
         )
         assert result.exit_code == 0
@@ -859,7 +927,10 @@ class TestVMExportEdgeCases:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_export_stdout(self, mock_vm_op):
         mock_config = MagicMock()
-        mock_config.to_dict.return_value = {"name": "myvm", "schema_version": "1.0"}
+        mock_config.to_dict.return_value = {
+            "name": "myvm",
+            "schema_version": "1.0",
+        }
         mock_vm_op.export.return_value = mock_config
         result = runner.invoke(app, ["vm", "export", "myvm"])
         assert result.exit_code == 0

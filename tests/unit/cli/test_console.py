@@ -45,14 +45,18 @@ class TestConsoleKill:
 
     @patch("mvmctl.cli.console.ConsoleOperation")
     def test_console_kill_success(self, mock_console_op):
-        mock_console_op.kill.return_value = OperationResult(status="success", code="console.killed")
+        mock_console_op.kill.return_value = OperationResult(
+            status="success", code="console.killed"
+        )
         result = runner.invoke(app, ["console", "--name", "testvm", "--kill"])
         assert result.exit_code == 0
         assert "stopped" in result.output.lower()
 
     @patch("mvmctl.cli.console.ConsoleOperation")
     def test_console_kill_not_running(self, mock_console_op):
-        mock_console_op.kill.return_value = OperationResult(status="skipped", code="console.not_running")
+        mock_console_op.kill.return_value = OperationResult(
+            status="skipped", code="console.not_running"
+        )
         result = runner.invoke(app, ["console", "--name", "testvm", "--kill"])
         assert result.exit_code == 1
         assert "No console relay" in result.output
@@ -76,8 +80,13 @@ class TestConsoleAttach:
     @patch("mvmctl.cli.console._connect_socket")
     @patch("mvmctl.cli.console.ConsoleOperation")
     def test_console_attach_no_terminal(
-        self, mock_console_op, mock_connect, mock_interact,
-        mock_tcsetattr, mock_tcgetattr, mock_setraw
+        self,
+        mock_console_op,
+        mock_connect,
+        mock_interact,
+        mock_tcsetattr,
+        mock_tcgetattr,
+        mock_setraw,
     ):
         mock_console_op.attach.return_value = MagicMock(
             socket_path="/tmp/test.sock",
@@ -88,12 +97,15 @@ class TestConsoleAttach:
         # Mock sys.stdin.fileno() for tty.setraw
         with patch("sys.stdin.fileno", return_value=0):
             from mvmctl.cli.console import _attach_to_console
+
             _attach_to_console("testvm")
         mock_connect.assert_called_once()
 
     @patch("mvmctl.cli.console.ConsoleOperation")
     def test_console_attach_not_found(self, mock_console_op):
-        mock_console_op.get_connection_info.side_effect = MVMError("VM not found")
+        mock_console_op.get_connection_info.side_effect = MVMError(
+            "VM not found"
+        )
         result = runner.invoke(app, ["console", "--name", "nonexistent"])
         assert result.exit_code == 1
         assert "not found" in result.output.lower()
@@ -170,7 +182,8 @@ class TestConsoleKillExtras:
     @patch("mvmctl.cli.console.ConsoleOperation")
     def test_console_kill_error_status(self, mock_console_op):
         mock_console_op.kill.return_value = OperationResult(
-            status="error", code="console.kill_failed",
+            status="error",
+            code="console.kill_failed",
             message="Failed to stop console relay",
         )
         result = runner.invoke(app, ["console", "--name", "testvm", "--kill"])
@@ -184,7 +197,8 @@ class TestConsoleAttachErrorPaths:
     @patch("mvmctl.cli.console.ConsoleOperation")
     def test_attach_socket_connect_fail(self, mock_console_op):
         mock_console_op.get_connection_info.return_value = MagicMock(
-            socket_path="/tmp/test.sock", vm_name="testvm",
+            socket_path="/tmp/test.sock",
+            vm_name="testvm",
         )
         with patch("mvmctl.cli.console._connect_socket", return_value=None):
             result = runner.invoke(app, ["console", "--name", "testvm"])
@@ -200,6 +214,7 @@ class TestConsoleSocketFunctions:
             mock_sock = MagicMock()
             mock_socket.return_value = mock_sock
             from mvmctl.cli.console import _connect_socket
+
             result = _connect_socket("/tmp/test.sock")
             assert result is mock_sock
             mock_sock.connect.assert_called_once_with("/tmp/test.sock")
@@ -209,6 +224,7 @@ class TestConsoleSocketFunctions:
         with patch("socket.socket") as mock_socket:
             mock_socket.return_value.connect.side_effect = OSError("refused")
             from mvmctl.cli.console import _connect_socket
+
             result = _connect_socket("/tmp/test.sock")
             assert result is None
 
@@ -218,6 +234,7 @@ class TestConsoleSocketFunctions:
                 ConnectionRefusedError()
             )
             from mvmctl.cli.console import _connect_socket
+
             result = _connect_socket("/tmp/test.sock")
             assert result is None
 
@@ -225,12 +242,14 @@ class TestConsoleSocketFunctions:
         with patch("socket.socket") as mock_socket:
             mock_socket.return_value.connect.side_effect = FileNotFoundError()
             from mvmctl.cli.console import _connect_socket
+
             result = _connect_socket("/tmp/test.sock")
             assert result is None
 
     def test_try_send_success(self):
         mock_sock = MagicMock()
         from mvmctl.cli.console import _try_send
+
         _try_send(mock_sock, b"data")
         mock_sock.sendall.assert_called_once_with(b"data")
 
@@ -238,16 +257,19 @@ class TestConsoleSocketFunctions:
         mock_sock = MagicMock()
         mock_sock.sendall.side_effect = BrokenPipeError()
         from mvmctl.cli.console import _try_send
+
         _try_send(mock_sock, b"data")
 
     def test_try_send_oserror(self):
         mock_sock = MagicMock()
         mock_sock.sendall.side_effect = OSError()
         from mvmctl.cli.console import _try_send
+
         _try_send(mock_sock, b"data")
 
     def test_try_send_connection_reset(self):
         mock_sock = MagicMock()
         mock_sock.sendall.side_effect = ConnectionResetError()
         from mvmctl.cli.console import _try_send
+
         _try_send(mock_sock, b"data")

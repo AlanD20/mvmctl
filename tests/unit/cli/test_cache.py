@@ -18,10 +18,15 @@ class TestCacheInit:
 
     @patch("mvmctl.cli.cache.CacheOperation")
     def test_init_success(self, mock_cache_op):
-        mock_cache_op.init_all.return_value = OperationResult(status="success", code="cache.initialized", message="Cache initialized", item={
-            "images": "/tmp/cache/images",
-            "kernels": "/tmp/cache/kernels",
-        })
+        mock_cache_op.init_all.return_value = OperationResult(
+            status="success",
+            code="cache.initialized",
+            message="Cache initialized",
+            item={
+                "images": "/tmp/cache/images",
+                "kernels": "/tmp/cache/kernels",
+            },
+        )
         result = runner.invoke(app, ["cache", "init"])
         assert result.exit_code == 0
         assert "initialized" in result.output.lower()
@@ -43,60 +48,80 @@ class TestCachePrune:
 
     @patch("mvmctl.cli.cache.CacheOperation")
     def test_prune_vm_success(self, mock_cache_op):
-        mock_cache_op.prune_vms.return_value = OperationResult(status="success", code="cache.pruned", item=["vm1", "vm2"])
+        mock_cache_op.prune_vms.return_value = OperationResult(
+            status="success", code="cache.pruned", item=["vm1", "vm2"]
+        )
         result = runner.invoke(app, ["cache", "prune", "vm"])
         assert result.exit_code == 0
         assert "Pruned" in result.output
 
     @patch("mvmctl.cli.cache.CacheOperation")
     def test_prune_vm_empty(self, mock_cache_op):
-        mock_cache_op.prune_vms.return_value = OperationResult(status="success", code="cache.pruned", item=[])
+        mock_cache_op.prune_vms.return_value = OperationResult(
+            status="success", code="cache.pruned", item=[]
+        )
         result = runner.invoke(app, ["cache", "prune", "vm"])
         assert result.exit_code == 0
         assert "No VMs to prune" in result.output
 
     @patch("mvmctl.cli.cache.CacheOperation")
     def test_prune_network_success(self, mock_cache_op):
-        mock_cache_op.prune_networks.return_value = OperationResult(status="success", code="cache.pruned", item=["net1"])
+        mock_cache_op.prune_networks.return_value = OperationResult(
+            status="success", code="cache.pruned", item=["net1"]
+        )
         result = runner.invoke(app, ["cache", "prune", "network"])
         assert result.exit_code == 0
         assert "Pruned" in result.output
 
     @patch("mvmctl.cli.cache.CacheOperation")
     def test_prune_image_success(self, mock_cache_op):
-        mock_cache_op.prune_images.return_value = OperationResult(status="success", code="cache.pruned", item=["img1"])
+        mock_cache_op.prune_images.return_value = OperationResult(
+            status="success", code="cache.pruned", item=["img1"]
+        )
         result = runner.invoke(app, ["cache", "prune", "image"])
         assert result.exit_code == 0
 
     @patch("mvmctl.cli.cache.CacheOperation")
     def test_prune_kernel_success(self, mock_cache_op):
-        mock_cache_op.prune_kernels.return_value = OperationResult(status="success", code="cache.pruned", item=["krn1"])
+        mock_cache_op.prune_kernels.return_value = OperationResult(
+            status="success", code="cache.pruned", item=["krn1"]
+        )
         result = runner.invoke(app, ["cache", "prune", "kernel"])
         assert result.exit_code == 0
 
     @patch("mvmctl.cli.cache.CacheOperation")
     def test_prune_binary_success(self, mock_cache_op):
-        mock_cache_op.prune_binaries.return_value = OperationResult(status="success", code="cache.pruned", item=["bin1"])
+        mock_cache_op.prune_binaries.return_value = OperationResult(
+            status="success", code="cache.pruned", item=["bin1"]
+        )
         result = runner.invoke(app, ["cache", "prune", "binary"])
         assert result.exit_code == 0
         assert "Pruned" in result.output
 
     @patch("mvmctl.cli.cache.CacheOperation")
     def test_prune_misc_success(self, mock_cache_op):
-        mock_cache_op.prune_misc.return_value = OperationResult(status="success", code="cache.pruned", item={
-            "appliance": True,
-            "warm_images": False,
-        })
+        mock_cache_op.prune_misc.return_value = OperationResult(
+            status="success",
+            code="cache.pruned",
+            item={
+                "appliance": True,
+                "warm_images": False,
+            },
+        )
         result = runner.invoke(app, ["cache", "prune", "misc"])
         assert result.exit_code == 0
         assert "appliance" in result.output.lower()
 
     @patch("mvmctl.cli.cache.CacheOperation")
     def test_prune_misc_empty(self, mock_cache_op):
-        mock_cache_op.prune_misc.return_value = OperationResult(status="success", code="cache.pruned", item={
-            "appliance": False,
-            "warm_images": False,
-        })
+        mock_cache_op.prune_misc.return_value = OperationResult(
+            status="success",
+            code="cache.pruned",
+            item={
+                "appliance": False,
+                "warm_images": False,
+            },
+        )
         result = runner.invoke(app, ["cache", "prune", "misc"])
         assert result.exit_code == 0
         assert "No misc cache" in result.output
@@ -113,20 +138,34 @@ class TestCachePrune:
 
     @patch("mvmctl.cli.cache.CacheOperation")
     def test_prune_network_dry_run(self, mock_cache_op):
-        mock_cache_op.prune_networks.return_value = OperationResult(status="success", code="cache.pruned", item=["net1"])
+        mock_cache_op.prune_networks.return_value = OperationResult(
+            status="success", code="cache.pruned", item=["net1"]
+        )
         result = runner.invoke(app, ["cache", "prune", "network", "--dry-run"])
         assert result.exit_code == 0
         assert "DRY RUN" in result.output
 
     @patch("mvmctl.cli.cache.CacheOperation")
     def test_prune_all_success(self, mock_cache_op):
-        mock_cache_op.prune_all.return_value = OperationResult(status="success", code="cache.pruned", item=PruneAllResult(pruned_ids=[], failed_ids=[], had_running_vms=False))
+        mock_cache_op.prune_all.return_value = OperationResult(
+            status="success",
+            code="cache.pruned",
+            item=PruneAllResult(
+                pruned_ids=[], failed_ids=[], had_running_vms=False
+            ),
+        )
         result = runner.invoke(app, ["cache", "prune", "--all", "--force"])
         assert result.exit_code == 0
 
     @patch("mvmctl.cli.cache.CacheOperation")
     def test_prune_all_dry_run(self, mock_cache_op):
-        mock_cache_op.prune_all.return_value = OperationResult(status="success", code="cache.pruned", item=PruneAllResult(pruned_ids=[], failed_ids=[], had_running_vms=False))
+        mock_cache_op.prune_all.return_value = OperationResult(
+            status="success",
+            code="cache.pruned",
+            item=PruneAllResult(
+                pruned_ids=[], failed_ids=[], had_running_vms=False
+            ),
+        )
         result = runner.invoke(app, ["cache", "prune", "--all", "--dry-run"])
         assert result.exit_code == 0
         assert "DRY RUN" in result.output
@@ -137,37 +176,55 @@ class TestCacheClean:
 
     @patch("mvmctl.cli.cache.CacheOperation")
     def test_clean_dry_run(self, mock_cache_op):
-        mock_cache_op.clean.return_value = OperationResult(status="success", code="cache.cleaned", item=CleanResult(prune_result=PruneAllResult(pruned_ids=[], failed_ids=[], had_running_vms=False), cache_dir_removed=False, cache_dir=""))
+        mock_cache_op.clean.return_value = OperationResult(
+            status="success",
+            code="cache.cleaned",
+            item=CleanResult(
+                prune_result=PruneAllResult(
+                    pruned_ids=[], failed_ids=[], had_running_vms=False
+                ),
+                cache_dir_removed=False,
+                cache_dir="",
+            ),
+        )
         result = runner.invoke(app, ["cache", "clean", "--dry-run"])
         assert result.exit_code == 0
         assert "DRY RUN" in result.output
 
     @patch("mvmctl.cli.cache.CacheOperation")
     def test_clean_success(self, mock_cache_op, tmp_path):
-        mock_cache_op.clean.return_value = OperationResult(status="success", code="cache.cleaned", item=CleanResult(
-            prune_result=PruneAllResult(
-                pruned_ids=["vm1"],
-                failed_ids=[],
-                had_running_vms=False,
+        mock_cache_op.clean.return_value = OperationResult(
+            status="success",
+            code="cache.cleaned",
+            item=CleanResult(
+                prune_result=PruneAllResult(
+                    pruned_ids=["vm1"],
+                    failed_ids=[],
+                    had_running_vms=False,
+                ),
+                cache_dir_removed=True,
+                cache_dir=str(tmp_path / "cache"),
             ),
-            cache_dir_removed=True,
-            cache_dir=str(tmp_path / "cache"),
-        ))
+        )
         result = runner.invoke(app, ["cache", "clean", "--force"])
         assert result.exit_code == 0
         assert "Pruned" in result.output
 
     @patch("mvmctl.cli.cache.CacheOperation")
     def test_clean_with_failures(self, mock_cache_op, tmp_path):
-        mock_cache_op.clean.return_value = OperationResult(status="success", code="cache.cleaned", item=CleanResult(
-            prune_result=PruneAllResult(
-                pruned_ids=["vm1"],
-                failed_ids=["vm2"],
-                had_running_vms=True,
+        mock_cache_op.clean.return_value = OperationResult(
+            status="success",
+            code="cache.cleaned",
+            item=CleanResult(
+                prune_result=PruneAllResult(
+                    pruned_ids=["vm1"],
+                    failed_ids=["vm2"],
+                    had_running_vms=True,
+                ),
+                cache_dir_removed=False,
+                cache_dir=str(tmp_path / "cache"),
             ),
-            cache_dir_removed=False,
-            cache_dir=str(tmp_path / "cache"),
-        ))
+        )
         result = runner.invoke(app, ["cache", "clean", "--force"])
         assert result.exit_code == 0
         assert "Failed to prune" in result.output
@@ -304,7 +361,8 @@ class TestCachePruneMiscEdgeCases:
     @patch("mvmctl.cli.cache.CacheOperation")
     def test_prune_misc_warm_images_only(self, mock_cache_op):
         mock_cache_op.prune_misc.return_value = OperationResult(
-            status="success", code="cache.pruned",
+            status="success",
+            code="cache.pruned",
             item={"appliance": False, "warm_images": True},
         )
         result = runner.invoke(app, ["cache", "prune", "misc"])
@@ -314,7 +372,8 @@ class TestCachePruneMiscEdgeCases:
     @patch("mvmctl.cli.cache.CacheOperation")
     def test_prune_misc_dry_run(self, mock_cache_op):
         mock_cache_op.prune_misc.return_value = OperationResult(
-            status="success", code="cache.pruned",
+            status="success",
+            code="cache.pruned",
             item={"appliance": True, "warm_images": True},
         )
         result = runner.invoke(app, ["cache", "prune", "misc", "--dry-run"])
@@ -337,8 +396,11 @@ class TestCachePruneAllEdgeCases:
     @patch("mvmctl.cli.cache.CacheOperation")
     def test_prune_all_with_pruned_ids(self, mock_cache_op):
         mock_cache_op.prune_all.return_value = OperationResult(
-            status="success", code="cache.pruned",
-            item=PruneAllResult(pruned_ids=["vm1", "vm2"], failed_ids=[], had_running_vms=False),
+            status="success",
+            code="cache.pruned",
+            item=PruneAllResult(
+                pruned_ids=["vm1", "vm2"], failed_ids=[], had_running_vms=False
+            ),
         )
         result = runner.invoke(app, ["cache", "prune", "--all", "--force"])
         assert result.exit_code == 0
@@ -347,8 +409,11 @@ class TestCachePruneAllEdgeCases:
     @patch("mvmctl.cli.cache.CacheOperation")
     def test_prune_all_with_failed_ids(self, mock_cache_op):
         mock_cache_op.prune_all.return_value = OperationResult(
-            status="success", code="cache.pruned",
-            item=PruneAllResult(pruned_ids=["vm1"], failed_ids=["vm2"], had_running_vms=False),
+            status="success",
+            code="cache.pruned",
+            item=PruneAllResult(
+                pruned_ids=["vm1"], failed_ids=["vm2"], had_running_vms=False
+            ),
         )
         result = runner.invoke(app, ["cache", "prune", "--all", "--force"])
         assert result.exit_code == 0
@@ -357,8 +422,11 @@ class TestCachePruneAllEdgeCases:
     @patch("mvmctl.cli.cache.CacheOperation")
     def test_prune_all_with_running_vms(self, mock_cache_op):
         mock_cache_op.prune_all.return_value = OperationResult(
-            status="success", code="cache.pruned",
-            item=PruneAllResult(pruned_ids=[], failed_ids=[], had_running_vms=True),
+            status="success",
+            code="cache.pruned",
+            item=PruneAllResult(
+                pruned_ids=[], failed_ids=[], had_running_vms=True
+            ),
         )
         result = runner.invoke(app, ["cache", "prune", "--all", "--force"])
         assert result.exit_code == 0
@@ -395,9 +463,13 @@ class TestCacheCleanEdgeCases:
     @patch("mvmctl.cli.cache.CacheOperation")
     def test_clean_cache_dir_not_removed(self, mock_cache_op):
         mock_cache_op.clean.return_value = OperationResult(
-            status="success", code="cache.cleaned", item=CleanResult(
+            status="success",
+            code="cache.cleaned",
+            item=CleanResult(
                 prune_result=PruneAllResult(
-                    pruned_ids=["vm1"], failed_ids=[], had_running_vms=False,
+                    pruned_ids=["vm1"],
+                    failed_ids=[],
+                    had_running_vms=False,
                 ),
                 cache_dir_removed=False,
                 cache_dir="/tmp/cache",

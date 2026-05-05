@@ -17,6 +17,7 @@ class TestCacheInitAll:
         """init_all() creates cache directories and builds guestfs appliance."""
         # Enable guestfs so appliance build runs
         from mvmctl.core.config._service import SettingsService
+
         mocker.patch.object(SettingsService, "resolve", return_value=True)
         mock_cache_utils = mocker.patch(
             "mvmctl.api.cache_operations.CacheUtils"
@@ -56,6 +57,7 @@ class TestCacheInitAll:
     def test_calls_on_progress(self, mocker):
         """init_all() invokes on_progress callback for appliance phase."""
         from mvmctl.core.config._service import SettingsService
+
         mocker.patch.object(SettingsService, "resolve", return_value=True)
         mocker.patch("mvmctl.api.cache_operations.CacheUtils")
         mock_guestfs = mocker.patch(
@@ -75,6 +77,7 @@ class TestCacheInitAll:
     def test_guestfs_build_fails_gracefully(self, mocker):
         """init_all() handles guestfs build failure."""
         from mvmctl.core.config._service import SettingsService
+
         mocker.patch.object(SettingsService, "resolve", return_value=True)
         mocker.patch("mvmctl.api.cache_operations.CacheUtils")
         mock_guestfs = mocker.patch(
@@ -224,7 +227,9 @@ class TestCachePruneNetworks:
         mock_net_op = mocker.patch(
             "mvmctl.api.network_operations.NetworkOperation.remove"
         )
-        mock_net_op.return_value = OperationResult(status="success", code="network.removed")
+        mock_net_op.return_value = OperationResult(
+            status="success", code="network.removed"
+        )
 
         result = CacheOperation.prune_networks()
         assert result.item == ["unused-net"]
@@ -262,7 +267,9 @@ class TestCachePruneNetworks:
         mock_net_op = mocker.patch(
             "mvmctl.api.network_operations.NetworkOperation.remove"
         )
-        mock_net_op.return_value = OperationResult(status="success", code="network.removed")
+        mock_net_op.return_value = OperationResult(
+            status="success", code="network.removed"
+        )
 
         result = CacheOperation.prune_networks(dry_run=True)
         assert result.item == ["unused-net"]
@@ -433,28 +440,52 @@ class TestCachePruneAll:
     def test_prune_all_aggregates_results(self, mocker):
         """prune_all() aggregates results from all sub-prunes."""
         mocker.patch.object(
-            CacheOperation, "prune_vms", return_value=OperationResult(status="success", code="cache.pruned", item=["vm1", "vm2"])
+            CacheOperation,
+            "prune_vms",
+            return_value=OperationResult(
+                status="success", code="cache.pruned", item=["vm1", "vm2"]
+            ),
         )
         mocker.patch.object(
-            CacheOperation, "prune_networks", return_value=OperationResult(status="success", code="cache.pruned", item=["net1"])
+            CacheOperation,
+            "prune_networks",
+            return_value=OperationResult(
+                status="success", code="cache.pruned", item=["net1"]
+            ),
         )
         mocker.patch.object(
-            CacheOperation, "prune_images", return_value=OperationResult(status="success", code="cache.pruned", item=["img1"])
+            CacheOperation,
+            "prune_images",
+            return_value=OperationResult(
+                status="success", code="cache.pruned", item=["img1"]
+            ),
         )
         mocker.patch.object(
-            CacheOperation, "prune_kernels", return_value=OperationResult(status="success", code="cache.pruned", item=["kern1"])
+            CacheOperation,
+            "prune_kernels",
+            return_value=OperationResult(
+                status="success", code="cache.pruned", item=["kern1"]
+            ),
         )
         mocker.patch.object(
-            CacheOperation, "prune_binaries", return_value=OperationResult(status="success", code="cache.pruned", item=["bin1"])
+            CacheOperation,
+            "prune_binaries",
+            return_value=OperationResult(
+                status="success", code="cache.pruned", item=["bin1"]
+            ),
         )
         mocker.patch.object(
             CacheOperation,
             "prune_misc",
-            return_value=OperationResult(status="success", code="cache.pruned", item={
-                "appliance": True,
-                "warm_images": False,
-                "guestfs_state": True,
-            }),
+            return_value=OperationResult(
+                status="success",
+                code="cache.pruned",
+                item={
+                    "appliance": True,
+                    "warm_images": False,
+                    "guestfs_state": True,
+                },
+            ),
         )
 
         mock_vm_repo = mocker.MagicMock()
@@ -489,19 +520,53 @@ class TestCachePruneAll:
             return_value=mock_vm_repo,
         )
 
-        mocker.patch.object(CacheOperation, "prune_vms", return_value=OperationResult(status="success", code="cache.pruned", item=[]))
-        mocker.patch.object(CacheOperation, "prune_networks", return_value=OperationResult(status="success", code="cache.pruned", item=[]))
-        mocker.patch.object(CacheOperation, "prune_images", return_value=OperationResult(status="success", code="cache.pruned", item=[]))
-        mocker.patch.object(CacheOperation, "prune_kernels", return_value=OperationResult(status="success", code="cache.pruned", item=[]))
-        mocker.patch.object(CacheOperation, "prune_binaries", return_value=OperationResult(status="success", code="cache.pruned", item=[]))
+        mocker.patch.object(
+            CacheOperation,
+            "prune_vms",
+            return_value=OperationResult(
+                status="success", code="cache.pruned", item=[]
+            ),
+        )
+        mocker.patch.object(
+            CacheOperation,
+            "prune_networks",
+            return_value=OperationResult(
+                status="success", code="cache.pruned", item=[]
+            ),
+        )
+        mocker.patch.object(
+            CacheOperation,
+            "prune_images",
+            return_value=OperationResult(
+                status="success", code="cache.pruned", item=[]
+            ),
+        )
+        mocker.patch.object(
+            CacheOperation,
+            "prune_kernels",
+            return_value=OperationResult(
+                status="success", code="cache.pruned", item=[]
+            ),
+        )
+        mocker.patch.object(
+            CacheOperation,
+            "prune_binaries",
+            return_value=OperationResult(
+                status="success", code="cache.pruned", item=[]
+            ),
+        )
         mocker.patch.object(
             CacheOperation,
             "prune_misc",
-            return_value=OperationResult(status="success", code="cache.pruned", item={
-                "appliance": False,
-                "warm_images": False,
-                "guestfs_state": False,
-            }),
+            return_value=OperationResult(
+                status="success",
+                code="cache.pruned",
+                item={
+                    "appliance": False,
+                    "warm_images": False,
+                    "guestfs_state": False,
+                },
+            ),
         )
 
         result = CacheOperation.prune_all()

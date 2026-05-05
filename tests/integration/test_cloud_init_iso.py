@@ -46,7 +46,11 @@ def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         lambda *args, **kwargs: provisioner_mock,
     )
 
-    return {"subprocess": sub_mock, "popen": popen_mock, "provisioner": provisioner_mock}
+    return {
+        "subprocess": sub_mock,
+        "popen": popen_mock,
+        "provisioner": provisioner_mock,
+    }
 
 
 # ======================================================================

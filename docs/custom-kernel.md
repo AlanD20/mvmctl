@@ -17,8 +17,8 @@ Firecracker requires a kernel that is:
 
 | Workflow | Command | Time | Use when |
 |----------|---------|------|----------|
-| **Firecracker CI kernel** | `mvm kernel fetch --type firecracker` | ~30s (download only) | Production use, fastest start times |
-| **Official upstream kernel** | `mvm kernel fetch --type official` | 10-30 min (compile) | Custom configs, latest features, debugging |
+| **Firecracker CI kernel** | `mvm kernel pull --type firecracker` | ~30s (download only) | Production use, fastest start times |
+| **Official upstream kernel** | `mvm kernel pull --type official` | 10-30 min (compile) | Custom configs, latest features, debugging |
 
 ---
 
@@ -90,16 +90,16 @@ against the exact Firecracker version.
 
 ```bash
 # Download the Firecracker CI kernel matching the active binary version
-mvm kernel fetch --type firecracker
+mvm kernel pull --type firecracker
 
 # Download for a specific CI version
-mvm kernel fetch --type firecracker --version 1.12
+mvm kernel pull --type firecracker --version 1.12
 
 # Download for a different architecture
-mvm kernel fetch --type firecracker --arch aarch64
+mvm kernel pull --type firecracker --arch aarch64
 
 # Set as default kernel after download
-mvm kernel fetch --type firecracker --set-default
+mvm kernel pull --type firecracker --set-default
 ```
 
 The kernel is saved to `~/.cache/mvmctl/kernels/vmlinux-fc-<version>-<arch>`.
@@ -117,24 +117,24 @@ Build any Linux kernel version from source with Firecracker's recommended config
 
 ```bash
 # Build the default version (6.19.9) with Firecracker config
-mvm kernel fetch --type official
+mvm kernel pull --type official
 
 # Build a specific version
-mvm kernel fetch --type official --version 6.1.102
+mvm kernel pull --type official --version 6.1.102
 
 # Build with parallel jobs (faster)
-mvm kernel fetch --type official --jobs 8
+mvm kernel pull --type official --jobs 8
 
 # Bypass cache and force a clean build
-mvm kernel fetch --type official --clean-build
+mvm kernel pull --type official --clean-build
 
 # Keep the build directory after completion (useful for debugging)
-mvm kernel fetch --type official --keep-build-dir
+mvm kernel pull --type official --keep-build-dir
 ```
 
 ### Build process
 
-`mvm kernel fetch --type official` runs the following steps automatically:
+`mvm kernel pull --type official` runs the following steps automatically:
 
 | Step | Description |
 |------|-------------|
@@ -161,7 +161,7 @@ CONFIG_9P_FS_POSIX_ACL=y
 EOF
 
 # Build with your custom overlay applied last
-mvm kernel fetch --type official \
+mvm kernel pull --type official \
   --version 6.1.102 \
   --kernel-config /tmp/my-overrides.config
 
@@ -231,7 +231,7 @@ Install the build tools as shown in [Prerequisites](#prerequisites).
 
 The config file may be incompatible with the kernel version. Try without a custom config:
 ```bash
-mvm kernel fetch --type official --version 6.1.102
+mvm kernel pull --type official --version 6.1.102
 ```
 
 ### VM panics on boot
@@ -288,7 +288,7 @@ Then update `config_url_template` in `src/mvmctl/assets/kernels.yaml` if needed.
 
 | Constant | Description |
 |----------|-------------|
-| `DEFAULT_KERNEL_VERSION` | Default kernel version for `mvm kernel fetch --type official` (in `OVERRIDABLE_DEFAULTS`) |
+| `DEFAULT_KERNEL_VERSION` | Default kernel version for `mvm kernel pull --type official` (in `OVERRIDABLE_DEFAULTS`) |
 | `KERNEL_TYPE_OFFICIAL` | The string `"official"` for kernel type references |
 | `KERNEL_TYPE_FIRECRACKER` | The string `"firecracker"` for kernel type references |
 

@@ -90,7 +90,12 @@ class TestBatchResult:
             OperationResult(status="failure", code="e"),
         ]
         batch = BatchResult(items=items)
-        assert batch.status_summary == {"success": 2, "skipped": 1, "error": 1, "failure": 1}
+        assert batch.status_summary == {
+            "success": 2,
+            "skipped": 1,
+            "error": 1,
+            "failure": 1,
+        }
 
     def test_successes_returns_only_success_items(self) -> None:
         items = [
@@ -206,7 +211,12 @@ class TestProgressEvent:
     """Tests for ProgressEvent dataclass."""
 
     def test_fields_stored_correctly(self) -> None:
-        event = ProgressEvent(phase="network", status="running", percent=50.0, message="Configuring bridge")
+        event = ProgressEvent(
+            phase="network",
+            status="running",
+            percent=50.0,
+            message="Configuring bridge",
+        )
         assert event.phase == "network"
         assert event.status == "running"
         assert event.percent == 50.0
@@ -245,17 +255,25 @@ class TestNeedsInteraction:
         assert ni.context == {"command": "sudo mvm host init"}
 
     def test_context_defaults_to_empty_dict(self) -> None:
-        ni = NeedsInteraction(code="host.sudo", message="Sudo required", input_type="sudo")
+        ni = NeedsInteraction(
+            code="host.sudo", message="Sudo required", input_type="sudo"
+        )
         assert ni.context == {}
 
     def test_confirm_input_type(self) -> None:
-        ni = NeedsInteraction(code="user.confirm", message="Proceed?", input_type="confirm")
+        ni = NeedsInteraction(
+            code="user.confirm", message="Proceed?", input_type="confirm"
+        )
         assert ni.input_type == "confirm"
 
     def test_choice_input_type(self) -> None:
-        ni = NeedsInteraction(code="user.choice", message="Pick one", input_type="choice")
+        ni = NeedsInteraction(
+            code="user.choice", message="Pick one", input_type="choice"
+        )
         assert ni.input_type == "choice"
 
     def test_input_input_type(self) -> None:
-        ni = NeedsInteraction(code="user.input", message="Enter value", input_type="input")
+        ni = NeedsInteraction(
+            code="user.input", message="Enter value", input_type="input"
+        )
         assert ni.input_type == "input"

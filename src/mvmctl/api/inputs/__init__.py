@@ -8,15 +8,15 @@ and portable export configurations.
 
 from __future__ import annotations
 
-from mvmctl.api.inputs._binary_fetch_input import (
-    BinaryFetchInput,
-    BinaryFetchRequest,
-    ResolvedBinaryFetchInput,
-)
 from mvmctl.api.inputs._binary_input import (
     BinaryInput,
     BinaryRequest,
     ResolvedBinaryInput,
+)
+from mvmctl.api.inputs._binary_pull_input import (
+    BinaryPullInput,
+    BinaryPullRequest,
+    ResolvedBinaryPullInput,
 )
 from mvmctl.api.inputs._config_input import (
     ConfigInput,
@@ -29,23 +29,23 @@ from mvmctl.api.inputs._console_input import (
     ResolvedConsoleInput,
 )
 from mvmctl.api.inputs._image_acquire_input import (
-    ImageFetchInput,
     ImageImportInput,
+    ImagePullInput,
 )
 from mvmctl.api.inputs._image_input import (
     ImageInput,
     ImageRequest,
     ResolvedImageInput,
 )
-from mvmctl.api.inputs._kernel_fetch_input import (
-    KernelFetchInput,
-    KernelFetchRequest,
-    ResolvedKernelFetchRequest,
-)
 from mvmctl.api.inputs._kernel_input import (
     KernelInput,
     KernelRequest,
     ResolvedKernelInput,
+)
+from mvmctl.api.inputs._kernel_pull_input import (
+    KernelPullInput,
+    KernelPullRequest,
+    ResolvedKernelPullRequest,
 )
 from mvmctl.api.inputs._key_create_input import (
     KeyCreateInput,
@@ -111,21 +111,21 @@ __all__ = [
     "LogInput",
     "LogRequest",
     "ResolvedLogInput",
-    "BinaryFetchInput",
-    "BinaryFetchRequest",
+    "BinaryPullInput",
+    "BinaryPullRequest",
     "BinaryInput",
     "BinaryRequest",
     "CloudInitModeResolved",
     "ConfigInput",
     "ConfigRequest",
     "ResolvedConfigInput",
-    "ImageFetchInput",
+    "ImagePullInput",
     "ImageImportInput",
     "ImageInput",
     "ImageRequest",
     "ResolvedImageInput",
-    "KernelFetchInput",
-    "KernelFetchRequest",
+    "KernelPullInput",
+    "KernelPullRequest",
     "KernelInput",
     "KernelRequest",
     "KeyCreateInput",
@@ -136,9 +136,9 @@ __all__ = [
     "NetworkCreateRequest",
     "NetworkInput",
     "NetworkRequest",
-    "ResolvedBinaryFetchInput",
+    "ResolvedBinaryPullInput",
     "ResolvedBinaryInput",
-    "ResolvedKernelFetchRequest",
+    "ResolvedKernelPullRequest",
     "ResolvedKernelInput",
     "ResolvedKeyCreateInput",
     "ResolvedKeyInput",

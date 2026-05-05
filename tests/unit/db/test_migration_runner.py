@@ -300,6 +300,7 @@ class TestRollback:
     ) -> None:
         # Ensure db_migrations table exists (empty) before calling rollback
         from contextlib import closing
+
         with closing(sqlite3.connect(str(db_path))) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS db_migrations (

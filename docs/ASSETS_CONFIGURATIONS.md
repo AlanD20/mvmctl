@@ -25,9 +25,9 @@ kernels remain as `images.yaml` and `kernels.yaml` respectively.
 ## images.yaml
 
 **Path:** `src/mvmctl/assets/images.yaml`
-**Consumed by:** `mvm image fetch`, `mvm image ls --remote`, `core.image._service.ImageService`
+**Consumed by:** `mvm image pull`, `mvm image ls --remote`, `core.image._service.ImageService`
 
-Defines the catalogue of rootfs images available via `mvm image fetch <id>`.
+Defines the catalogue of rootfs images available via `mvm image pull <id>`.
 
 ### Structure
 
@@ -48,7 +48,7 @@ images:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `id` | ✅ | Short identifier used on the CLI (`mvm image fetch <id>`). Must be unique across all entries. |
+| `id` | ✅ | Short identifier used on the CLI (`mvm image pull <id>`). Must be unique across all entries. |
 | `name` | ✅ | Human-readable label shown in `mvm image ls`. |
 | `source` | ✅ | Download URL. Either a concrete URL or a **template URL** (see [Template sources](#template-sources)). |
 | `format` | ✅ | Format of the downloaded file. See [Format types](#format-types). |
@@ -120,7 +120,7 @@ special `id` value or `format` is required.
 ## kernels.yaml
 
 **Path:** `src/mvmctl/assets/kernels.yaml`
-**Consumed by:** `mvm kernel fetch` (build pipeline or direct download)
+**Consumed by:** `mvm kernel pull` (build pipeline or direct download)
 
 Defines the default parameters for the official upstream kernel build workflow and the Firecracker CI kernel download workflow.
 
@@ -248,7 +248,7 @@ source, add it to `images.yaml` and reinstall, or use `mvm image import` for loc
 
 ## Adding a new image
 
-To register a new rootfs image that can be fetched via `mvm image fetch`:
+To register a new rootfs image that can be fetched via `mvm image pull`:
 
 **1. Append an entry to `src/mvmctl/assets/images.yaml`:**
 
@@ -296,7 +296,7 @@ uv run mvm image ls --remote
 The new ID should appear in the table. Fetch it to confirm end-to-end:
 
 ```bash
-uv run mvm image fetch <your-new-id>
+uv run mvm image pull <your-new-id>
 ```
 
 ---
@@ -309,7 +309,7 @@ the constants relevant to asset management.
 
 | Constant | Source key | Description |
 |----------|------------|-------------|
-| `DEFAULT_KERNEL_VERSION` | `defaults.kernel.version` | Default version for `mvm kernel fetch --type official` |
+| `DEFAULT_KERNEL_VERSION` | `defaults.kernel.version` | Default version for `mvm kernel pull --type official` |
 | `DEFAULT_KERNEL_ARCH` | `defaults.kernel.arch` | Default architecture for kernel operations |
 | `DEFAULT_IMAGE_ARCH` | `defaults.image.arch` | Default architecture for image operations |
 | `DEFAULT_FIRECRACKER_CI_VERSION` | runtime-resolved | CI version used when config lookup fails |

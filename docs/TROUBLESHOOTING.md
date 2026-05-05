@@ -132,7 +132,7 @@ mvm network ls
 
 **Solution:**
 ```bash
-mvm kernel fetch --type firecracker
+mvm kernel pull --type firecracker
 ```
 
 ---
@@ -169,7 +169,7 @@ mvm logs myvm --os
 
 **Common causes:**
 
-**1. Missing or broken jailer.** Firecracker requires the `jailer` binary alongside it. If the binary was fetched with `mvm bin fetch`, it should be bundled, but manual installs may miss it.
+**1. Missing or broken jailer.** Firecracker requires the `jailer` binary alongside it. If the binary was fetched with `mvm bin pull`, it should be bundled, but manual installs may miss it.
 
 **2. Kernel file is not readable by Firecracker.** Verify the kernel exists and is accessible:
 ```bash
@@ -202,7 +202,7 @@ mvm bin ls
 
 **Solution:**
 ```bash
-mvm image fetch ubuntu-24.04
+mvm image pull ubuntu-24.04
 mvm image ls   # ✓ should appear
 ```
 
@@ -214,7 +214,7 @@ mvm image ls   # ✓ should appear
 
 **Solution:**
 ```bash
-mvm bin fetch 1.15.0
+mvm bin pull 1.15.0
 mvm bin default <id>
 ```
 

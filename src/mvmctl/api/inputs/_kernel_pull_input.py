@@ -1,4 +1,4 @@
-"""Kernel fetch resolver — resolves and validates kernel fetch/build inputs."""
+"""Kernel pull resolver — resolves and validates kernel pull/build inputs."""
 
 from __future__ import annotations
 
@@ -12,19 +12,19 @@ from mvmctl.exceptions import KernelError
 from mvmctl.utils.common import CacheUtils
 
 __all__ = [
-    "KernelFetchInput",
-    "KernelFetchRequest",
-    "ResolvedKernelFetchRequest",
+    "KernelPullInput",
+    "KernelPullRequest",
+    "ResolvedKernelPullRequest",
 ]
 
 
 @dataclass
-class KernelFetchInput:
+class KernelPullInput:
     """
-    Input model for kernel fetch and build operations.
+    Input model for kernel pull and build operations.
 
     Optional fields are None when not provided by the user.
-    DB-backed defaults are resolved by KernelFetchRequest.
+    DB-backed defaults are resolved by KernelPullRequest.
     """
 
     kernel_type: str
@@ -41,11 +41,11 @@ class KernelFetchInput:
 
 
 @dataclass(frozen=True)
-class ResolvedKernelFetchRequest:
+class ResolvedKernelPullRequest:
     """
-    Immutable resolved inputs for kernel fetch/build — all values explicit.
+    Immutable resolved inputs for kernel pull/build — all values explicit.
 
-    Output of KernelFetchRequest.resolve(). No None values for required fields.
+    Output of KernelPullRequest.resolve(). No None values for required fields.
     """
 
     kernel_type: str
@@ -59,29 +59,29 @@ class ResolvedKernelFetchRequest:
     version: str | None = None
 
 
-class KernelFetchRequest:
+class KernelPullRequest:
     """
-    Resolve and validate kernel fetch/build inputs.
+    Resolve and validate kernel pull/build inputs.
 
-    Takes KernelFetchInput and resolves DB-backed defaults,
-    computes output paths, and produces a ResolvedKernelFetchRequest
-    suitable for kernel fetch/build operations.
+    Takes KernelPullInput and resolves DB-backed defaults,
+    computes output paths, and produces a ResolvedKernelPullRequest
+    suitable for kernel pull/build operations.
     """
 
-    _result: ResolvedKernelFetchRequest | None = None
+    _result: ResolvedKernelPullRequest | None = None
 
     def __init__(
-        self, *, inputs: KernelFetchInput, db: Database | None = None
+        self, *, inputs: KernelPullInput, db: Database | None = None
     ) -> None:
         """Initialize the resolver with database and sub-resolvers."""
         self._inputs = inputs
         self._db = db if db is not None else Database()
 
     @property
-    def result(self) -> ResolvedKernelFetchRequest | None:
+    def result(self) -> ResolvedKernelPullRequest | None:
         return self._result
 
-    def resolve(self) -> ResolvedKernelFetchRequest:
+    def resolve(self) -> ResolvedKernelPullRequest:
         """
         Resolve all inputs to explicit values.
 
@@ -118,7 +118,7 @@ class KernelFetchRequest:
                 self._db, "defaults.kernel", "build_jobs"
             )
 
-        self._result = ResolvedKernelFetchRequest(
+        self._result = ResolvedKernelPullRequest(
             kernel_type=self._inputs.kernel_type,
             version=version,
             arch=arch,
@@ -136,7 +136,7 @@ class KernelFetchRequest:
         return self._result
 
     def ensure_validate(self) -> None:
-        """Validate resolved kernel fetch inputs."""
+        """Validate resolved kernel pull inputs."""
         import re
 
         if self._result is None:

@@ -43,6 +43,3 @@ class TestConstantsFile:
         assert len(matches) >= 5, (
             f"Expected at least 5 DEFAULT_* values in constants.py, found {len(matches)}"
         )
-
-
-

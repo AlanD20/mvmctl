@@ -136,7 +136,7 @@ def _handle_interactive_flow(
 
     while True:
         # When downloading a binary, don't wrap in Rich spinner —
-        # BinaryOperation.fetch uses ASCIIProgressBar which needs direct
+        # BinaryOperation.pull uses ASCIIProgressBar which needs direct
         # terminal access (\r carriage return). A concurrent Live display
         # (console.status) would interfere with the cursor tracking.
         if download_version:
@@ -241,11 +241,11 @@ def _handle_interactive_flow(
                 print_info("")
                 print_info(f"downloading Firecracker v{latest} ...")
                 download_version = latest
-                # Don't wrap download in spinner — BinaryOperation.fetch
+                # Don't wrap download in spinner — BinaryOperation.pull
                 # has its own ASCIIProgressBar.
                 continue  # Re-run with download_version set
             else:
-                print_info("skipped. Run 'mvm bin fetch <version>' manually.")
+                print_info("skipped. Run 'mvm bin pull <version>' manually.")
                 break
 
         # ── Handle guestfs enable prompt ──────────────────────────────

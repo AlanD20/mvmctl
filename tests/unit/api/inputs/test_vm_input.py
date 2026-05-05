@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mvmctl.api.inputs._vm_input import VMInput, VMRequest, ResolvedVMInput
+from mvmctl.api.inputs._vm_input import ResolvedVMInput, VMInput, VMRequest
 from mvmctl.exceptions import VMNotFoundError
 from mvmctl.models import VMInstanceItem
 
@@ -111,8 +111,10 @@ class TestVMRequest:
             req.resolve()
 
     def test_resolve_multiple_vms(self, mocker):
-        vms = [_make_vm(name="vm1", vm_id="id1"),
-               _make_vm(name="vm2", vm_id="id2")]
+        vms = [
+            _make_vm(name="vm1", vm_id="id1"),
+            _make_vm(name="vm2", vm_id="id2"),
+        ]
         mocker.patch("mvmctl.api.inputs._vm_input.Database")
         mock_resolver = MagicMock()
         mock_resolver.resolve_many.return_value = MagicMock(

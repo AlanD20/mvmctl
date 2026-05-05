@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib
 import inspect
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from click.testing import CliRunner
 
@@ -239,31 +239,47 @@ class TestMainUtils:
     def test_get_git_version_info_exception(self, mocker):
         from mvmctl.main import _get_git_version_info
 
-        mocker.patch("mvmctl.main.Path.exists", side_effect=Exception("permission denied"))
+        mocker.patch(
+            "mvmctl.main.Path.exists",
+            side_effect=Exception("permission denied"),
+        )
         result = _get_git_version_info()
         assert result is None
 
     def test_get_version_fallback(self, mocker):
         from mvmctl.main import _get_version
 
-        mocker.patch("mvmctl.main.importlib.metadata.version", side_effect=Exception("not found"))
-        mocker.patch.object(main_module, "_get_git_version_info", return_value=None)
+        mocker.patch(
+            "mvmctl.main.importlib.metadata.version",
+            side_effect=Exception("not found"),
+        )
+        mocker.patch.object(
+            main_module, "_get_git_version_info", return_value=None
+        )
         result = _get_version()
         assert result is not None
 
     def test_get_version_with_git_tag(self, mocker):
         from mvmctl.main import _get_version
 
-        mocker.patch("mvmctl.main.importlib.metadata.version", return_value="1.0.0")
-        mocker.patch.object(main_module, "_get_git_version_info", return_value="v2.0.0")
+        mocker.patch(
+            "mvmctl.main.importlib.metadata.version", return_value="1.0.0"
+        )
+        mocker.patch.object(
+            main_module, "_get_git_version_info", return_value="v2.0.0"
+        )
         result = _get_version()
         assert result == "v2.0.0"
 
     def test_get_version_with_git_commit(self, mocker):
         from mvmctl.main import _get_version
 
-        mocker.patch("mvmctl.main.importlib.metadata.version", return_value="1.0.0")
-        mocker.patch.object(main_module, "_get_git_version_info", return_value="git+deadbeef")
+        mocker.patch(
+            "mvmctl.main.importlib.metadata.version", return_value="1.0.0"
+        )
+        mocker.patch.object(
+            main_module, "_get_git_version_info", return_value="git+deadbeef"
+        )
         result = _get_version()
         assert "git+" in result
 
@@ -303,19 +319,25 @@ class TestMainVersionExtended:
     """Extended tests for version command with git info."""
 
     def test_version_cmd_with_git_tag(self, mocker):
-        mocker.patch.object(main_module, "_get_git_version_info", return_value="v2.0.0")
+        mocker.patch.object(
+            main_module, "_get_git_version_info", return_value="v2.0.0"
+        )
         result = invoke_cli(["version"])
         assert result.exit_code == 0
         assert "tagged" in result.output
 
     def test_version_cmd_with_git_commit(self, mocker):
-        mocker.patch.object(main_module, "_get_git_version_info", return_value="git+abc1234")
+        mocker.patch.object(
+            main_module, "_get_git_version_info", return_value="git+abc1234"
+        )
         result = invoke_cli(["version"])
         assert result.exit_code == 0
         assert "built from" in result.output
 
     def test_version_cmd_no_git(self, mocker):
-        mocker.patch.object(main_module, "_get_git_version_info", return_value=None)
+        mocker.patch.object(
+            main_module, "_get_git_version_info", return_value=None
+        )
         result = invoke_cli(["version"])
         assert result.exit_code == 0
 

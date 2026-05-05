@@ -115,7 +115,9 @@ class TestKeyCreate:
         assert key.item.comment == f"test-key@{socket.gethostname()}"
         keys_dir = CacheUtils.get_keys_dir()
         pub_content = (keys_dir / "test-key.pub").read_text().strip()
-        assert key.item.fingerprint == _compute_expected_fingerprint(pub_content)
+        assert key.item.fingerprint == _compute_expected_fingerprint(
+            pub_content
+        )
 
         assert (keys_dir / "test-key").exists()
         assert (keys_dir / "test-key.pub").exists()
@@ -134,7 +136,9 @@ class TestKeyCreate:
         assert key.item.name == "test-rsa"
         keys_dir = CacheUtils.get_keys_dir()
         pub_content = (keys_dir / "test-rsa.pub").read_text().strip()
-        assert key.item.fingerprint == _compute_expected_fingerprint(pub_content)
+        assert key.item.fingerprint == _compute_expected_fingerprint(
+            pub_content
+        )
 
     def test_create_keypair_default_status(
         self, monkeypatch: pytest.MonkeyPatch

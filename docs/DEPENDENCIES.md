@@ -8,8 +8,8 @@ These binaries are required for basic operations like managing VMs, networking, 
 
 | Binary | Category | Purpose | Package (Debian/Ubuntu) | Package (Arch) |
 | :--- | :--- | :--- | :--- | :--- |
-| `firecracker` | Core | The MicroVM VMM | Managed via `mvm bin fetch` | Managed via `mvm bin fetch` |
-| `jailer` | Core | Security isolation for Firecracker | Managed via `mvm bin fetch` | Managed via `mvm bin fetch` |
+| `firecracker` | Core | The MicroVM VMM | Managed via `mvm bin pull` | Managed via `mvm bin pull` |
+| `jailer` | Core | Security isolation for Firecracker | Managed via `mvm bin pull` | Managed via `mvm bin pull` |
 | `ip` | Network | Bridge and TAP interface management | `iproute2` | `iproute2` |
 | `iptables` | Network | NAT and firewall rule management | `iptables` | `iptables` |
 | `sysctl` | System | Enabling IP forwarding on the host | `procps` | `procps-ng` |
@@ -176,7 +176,7 @@ sg mvm -c 'sudo -n ~/.cache/mvmctl/bin/mvm-provision --help'
 ## 4. Kernel Build Dependencies (Optional)
 
 These are only required if you intend to build custom kernels from source.
-Kernel building is integrated into `mvm kernel fetch --type official --clean-build`,
+Kernel building is integrated into `mvm kernel pull --type official --clean-build`,
 not a separate subcommand.
 
 | Binary | Category | Package (Debian/Ubuntu) | Package (Arch) |
@@ -207,10 +207,10 @@ This section maps specific `mvm` commands to the external binaries they invoke.
 | | `reset` | `sudo`, `groupdel`, `sysctl` |
 | **`mvm network`** | `create` | `ip`, `iptables`, `sysctl` |
 | | `ls`, `inspect`, `rm`, `sync`, `set-default` | `ip`, `iptables` |
-| **`mvm bin`** | `fetch`, `ls`, `rm`, `default` | (Internal Python logic) |
+| **`mvm bin`** | `pull`, `ls`, `rm`, `default` | (Internal Python logic) |
 | **`mvm image`** | `import` | `qemu-img`, `sfdisk`, `parted`, `blkid`, `mount`, `umount`, `tar`, `truncate`, `mkfs.ext4`, `unsquashfs` |
 | | `ls`, `rm` | (Internal Python logic) |
-| **`mvm kernel`** | `fetch` | (Internal Python logic; add `--type official --clean-build` to trigger kernel compilation) |
+| **`mvm kernel`** | `pull` | (Internal Python logic; add `--type official --clean-build` to trigger kernel compilation) |
 | | `fetch --type official --clean-build` | `make`, `gcc`, `ld`, `flex`, `bison`, `bc`, `pahole`, `git`, `curl`, `pkg-config` |
 | | `ls`, `rm`, `set-default` | (Internal Python logic) |
 | **`mvm key`** | `create` | `ssh-keygen` |

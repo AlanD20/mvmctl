@@ -163,9 +163,7 @@ class TestDownloadProgressBridge:
         # ``started_at`` is set during the first call.
         # First call:  time.monotonic → 10.0  (sets started_at)
         # Second call: time.monotonic → 13.0  (elapsed = 3.0 ≥ 1.0)
-        mocker.patch.object(
-            real_time, "monotonic", side_effect=[10.0, 13.0]
-        )
+        mocker.patch.object(real_time, "monotonic", side_effect=[10.0, 13.0])
 
         events: list[ProgressEvent] = []
         bridge = OperationUtils.download_progress_bridge(
@@ -188,9 +186,7 @@ class TestDownloadProgressBridge:
 
         # First call:  time.monotonic → 10.0  (sets started_at)
         # Second call: time.monotonic → 10.3  (elapsed = 0.3 < 1.0)
-        mocker.patch.object(
-            real_time, "monotonic", side_effect=[10.0, 10.3]
-        )
+        mocker.patch.object(real_time, "monotonic", side_effect=[10.0, 10.3])
 
         events: list[ProgressEvent] = []
         bridge = OperationUtils.download_progress_bridge(

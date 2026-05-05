@@ -1,7 +1,7 @@
 """Integration tests for binary operations through the real public API.
 
 Tests exercise the complete binary orchestration flow:
-  fetch → list → get → set_default → ensure_default → remove
+  pull → list → get → set_default → ensure_default → remove
 
 Only HTTP download operations are mocked. ALL orchestration logic in api/
 and core/ runs unmocked.
@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from mvmctl.api import BinaryFetchInput, BinaryInput, BinaryOperation
-from mvmctl.exceptions import BinaryError, BinaryNotFoundError
+from mvmctl.api import BinaryInput, BinaryOperation, BinaryPullInput
+from mvmctl.exceptions import BinaryNotFoundError
 
 # ======================================================================
 # Shared helpers
@@ -65,18 +65,18 @@ class _BinaryTestBase:
 
 
 # ======================================================================
-# Binary fetch tests
+# Binary pull tests
 # ======================================================================
 
 
-class TestBinaryFetch(_BinaryTestBase):
-    """Test binary fetch operations."""
+class TestBinaryPull(_BinaryTestBase):
+    """Test binary pull operations."""
 
-    def test_fetch_new_version(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Fetch a new binary version and verify result contains both binaries."""
+    def test_pull_new_version(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Pull a new binary version and verify result contains both binaries."""
         self._setup_download_mocks(monkeypatch, "1.16.0")
 
-        result = BinaryOperation.fetch(BinaryFetchInput(version="1.16.0"))
+        result = BinaryOperation.pull(BinaryPullInput(version="1.16.0"))
 
         assert len(result.item) == 2
         names = [b.name for b in result.item]
@@ -94,12 +94,11 @@ class TestBinaryFetch(_BinaryTestBase):
         assert jl.resolved_path.exists()
         assert jl.resolved_path.name == "jailer-v1.16.0"
 
-    def test_fetch_existing_version_no_override(self) -> None:
-        """Fetching an existing version without override returns existing DB entries."""
+    def test_pull_existing_version_no_override(self) -> None:
+        """Pulling an existing version without override returns existing DB entries."""
         # Seed jailer so both firecracker and jailer exist for v1.15.0
         from mvmctl.core._shared import Database
         from mvmctl.core.binary._repository import BinaryRepository
-        from mvmctl.models.result import OperationResult
         from mvmctl.models.binary import BinaryItem
 
         db = Database()
@@ -120,8 +119,8 @@ class TestBinaryFetch(_BinaryTestBase):
         )
 
         # 1.15.0 firecracker is pre-seeded by _seed_full_test_fixtures
-        result = BinaryOperation.fetch(
-            BinaryFetchInput(version="1.15.0", download_override=False)
+        result = BinaryOperation.pull(
+            BinaryPullInput(version="1.15.0", download_override=False)
         )
 
         assert len(result.item) == 2
@@ -134,9 +133,9 @@ class TestBinaryFetch(_BinaryTestBase):
         assert jl.version == "1.15.0"
         assert jl.path == "jailer"
 
-    def test_fetch_invalid_version(self) -> None:
-        """Fetching with an invalid version format returns error status."""
-        result = BinaryOperation.fetch(BinaryFetchInput(version="not-a-version"))
+    def test_pull_invalid_version(self) -> None:
+        """Pulling with an invalid version format returns error status."""
+        result = BinaryOperation.pull(BinaryPullInput(version="not-a-version"))
         assert result.status == "error"
 
 
@@ -188,11 +187,11 @@ class TestBinaryDefault(_BinaryTestBase):
     """Test default binary operations."""
 
     def test_set_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Set a newly fetched binary as default."""
+        """Set a newly pulled binary as default."""
         self._setup_download_mocks(monkeypatch, "1.16.0")
-        BinaryOperation.fetch(BinaryFetchInput(version="1.16.0"))
+        BinaryOperation.pull(BinaryPullInput(version="1.16.0"))
 
-        # The newly fetched binary should not be default yet
+        # The newly pulled binary should not be default yet
         binaries = BinaryOperation.get(
             BinaryInput(names=["firecracker"], version="1.16.0")
         )
@@ -237,7 +236,7 @@ class TestBinaryRemove(_BinaryTestBase):
     def test_remove_binary(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Remove a specific binary by name and version."""
         self._setup_download_mocks(monkeypatch, "1.16.0")
-        BinaryOperation.fetch(BinaryFetchInput(version="1.16.0"))
+        BinaryOperation.pull(BinaryPullInput(version="1.16.0"))
 
         # Verify it exists
         binaries = BinaryOperation.get(
@@ -274,7 +273,7 @@ class TestBinaryRemove(_BinaryTestBase):
     def test_remove_by_version(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """remove_by_version removes both firecracker and jailer for a version."""
         self._setup_download_mocks(monkeypatch, "1.16.0")
-        BinaryOperation.fetch(BinaryFetchInput(version="1.16.0"))
+        BinaryOperation.pull(BinaryPullInput(version="1.16.0"))
 
         # Verify both exist before removal
         binaries = BinaryOperation.list_local()

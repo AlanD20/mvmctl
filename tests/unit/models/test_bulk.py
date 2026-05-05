@@ -40,63 +40,77 @@ class TestBulkResult:
     """Tests for BulkResult[T] aggregation properties."""
 
     def test_successes_returns_successful_items(self) -> None:
-        result = BulkResult(items=[
-            BulkResultItem(item="vm-1"),
-            BulkResultItem(item="vm-2", error=RuntimeError("boom")),
-            BulkResultItem(item="vm-3"),
-        ])
+        result = BulkResult(
+            items=[
+                BulkResultItem(item="vm-1"),
+                BulkResultItem(item="vm-2", error=RuntimeError("boom")),
+                BulkResultItem(item="vm-3"),
+            ]
+        )
         assert result.successes == ["vm-1", "vm-3"]
 
     def test_failures_returns_item_error_tuples(self) -> None:
         exc = RuntimeError("boom")
-        result = BulkResult(items=[
-            BulkResultItem(item="vm-1"),
-            BulkResultItem(item="vm-2", error=exc),
-            BulkResultItem(item="vm-3", error=ValueError("bad")),
-        ])
+        result = BulkResult(
+            items=[
+                BulkResultItem(item="vm-1"),
+                BulkResultItem(item="vm-2", error=exc),
+                BulkResultItem(item="vm-3", error=ValueError("bad")),
+            ]
+        )
         failures = result.failures
         assert len(failures) == 2
         assert failures[0] == ("vm-2", exc)
         assert isinstance(failures[1][1], ValueError)
 
     def test_has_errors_true_when_any_item_has_error(self) -> None:
-        result = BulkResult(items=[
-            BulkResultItem(item="vm-1"),
-            BulkResultItem(item="vm-2", error=RuntimeError("boom")),
-        ])
+        result = BulkResult(
+            items=[
+                BulkResultItem(item="vm-1"),
+                BulkResultItem(item="vm-2", error=RuntimeError("boom")),
+            ]
+        )
         assert result.has_errors is True
 
     def test_has_errors_false_when_all_succeed(self) -> None:
-        result = BulkResult(items=[
-            BulkResultItem(item="vm-1"),
-            BulkResultItem(item="vm-2"),
-        ])
+        result = BulkResult(
+            items=[
+                BulkResultItem(item="vm-1"),
+                BulkResultItem(item="vm-2"),
+            ]
+        )
         assert result.has_errors is False
 
     def test_success_count_counts_correctly(self) -> None:
-        result = BulkResult(items=[
-            BulkResultItem(item="vm-1"),
-            BulkResultItem(item="vm-2", error=RuntimeError("boom")),
-            BulkResultItem(item="vm-3"),
-            BulkResultItem(item="vm-4", error=ValueError("bad")),
-        ])
+        result = BulkResult(
+            items=[
+                BulkResultItem(item="vm-1"),
+                BulkResultItem(item="vm-2", error=RuntimeError("boom")),
+                BulkResultItem(item="vm-3"),
+                BulkResultItem(item="vm-4", error=ValueError("bad")),
+            ]
+        )
         assert result.success_count == 2
 
     def test_failure_count_counts_correctly(self) -> None:
-        result = BulkResult(items=[
-            BulkResultItem(item="vm-1"),
-            BulkResultItem(item="vm-2", error=RuntimeError("boom")),
-            BulkResultItem(item="vm-3"),
-            BulkResultItem(item="vm-4", error=ValueError("bad")),
-        ])
+        result = BulkResult(
+            items=[
+                BulkResultItem(item="vm-1"),
+                BulkResultItem(item="vm-2", error=RuntimeError("boom")),
+                BulkResultItem(item="vm-3"),
+                BulkResultItem(item="vm-4", error=ValueError("bad")),
+            ]
+        )
         assert result.failure_count == 2
 
     def test_total_returns_item_count(self) -> None:
-        result = BulkResult(items=[
-            BulkResultItem(item="vm-1"),
-            BulkResultItem(item="vm-2"),
-            BulkResultItem(item="vm-3"),
-        ])
+        result = BulkResult(
+            items=[
+                BulkResultItem(item="vm-1"),
+                BulkResultItem(item="vm-2"),
+                BulkResultItem(item="vm-3"),
+            ]
+        )
         assert result.total == 3
 
     def test_empty_items_successes(self) -> None:
@@ -124,10 +138,12 @@ class TestBulkResult:
         assert result.total == 0
 
     def test_all_failures_no_successes(self) -> None:
-        result = BulkResult(items=[
-            BulkResultItem(item="vm-1", error=RuntimeError("a")),
-            BulkResultItem(item="vm-2", error=RuntimeError("b")),
-        ])
+        result = BulkResult(
+            items=[
+                BulkResultItem(item="vm-1", error=RuntimeError("a")),
+                BulkResultItem(item="vm-2", error=RuntimeError("b")),
+            ]
+        )
         assert result.successes == []
         assert len(result.failures) == 2
         assert result.success_count == 0
@@ -135,10 +151,12 @@ class TestBulkResult:
         assert result.total == 2
 
     def test_all_successes_no_failures(self) -> None:
-        result = BulkResult(items=[
-            BulkResultItem(item="vm-1"),
-            BulkResultItem(item="vm-2"),
-        ])
+        result = BulkResult(
+            items=[
+                BulkResultItem(item="vm-1"),
+                BulkResultItem(item="vm-2"),
+            ]
+        )
         assert len(result.successes) == 2
         assert result.failures == []
         assert result.success_count == 2

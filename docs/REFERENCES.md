@@ -62,11 +62,11 @@ Kernel management.
 | Command | Description |
 |---------|-------------|
 | `mvm kernel ls` | List cached kernels |
-| `mvm kernel fetch` | Download or build a kernel (official or Firecracker-optimized) |
+| `mvm kernel pull` | Download or build a kernel (official or Firecracker-optimized) |
 | `mvm kernel set-default` | Set a kernel as the default for VM creation |
 | `mvm kernel rm` | Remove a cached kernel |
 
-**`fetch` flags:**
+**`pull` flags:**
 
 | Flag | Description | Default |
 |------|-------------|---------|
@@ -88,26 +88,14 @@ Image management.
 | Command | Description |
 |---------|-------------|
 | `mvm image ls` | List available and cached images |
-| `mvm image fetch ID` | Download an image by its ID |
+| `mvm image pull ID` | Download an image by its ID |
 | `mvm image import NAME PATH` | Import a local image file with a display name |
 | `mvm image set-default` | Set the default image for VM creation |
 | `mvm image rm ID` | Remove a cached image |
 | `mvm image warm IMAGE` | Pre-decompress image for fast VM creation |
 | `mvm image inspect NAME` | Show detailed image information |
 
-**Supported image IDs:**
-
-| ID | Description |
-|----|-------------|
-| `ubuntu-24.04` | Ubuntu 24.04 LTS (Noble) |
-| `ubuntu-22.04` | Ubuntu 22.04 LTS (Jammy) |
-| `archlinux` | Arch Linux cloud image |
-| `debian-bookworm` | Debian 12 (Bookworm) |
-| `alpine-3.21` | Alpine Linux 3.21 |
-| `ubuntu-24.04-minimal` | Ubuntu 24.04 LTS Minimal (Noble) |
-| `ubuntu-fc` | Ubuntu 24.04 with Firecracker-optimized kernel |
-
-**`fetch` flags:**
+**`pull` flags:**
 
 | Flag | Description | Default |
 |------|-------------|---------|
@@ -128,7 +116,7 @@ Firecracker binary management.
 | Command | Description |
 |---------|-------------|
 | `mvm bin ls` | List local Firecracker versions |
-| `mvm bin fetch VERSION` | Download a specific Firecracker release |
+| `mvm bin pull VERSION` | Download a specific Firecracker release |
 | `mvm bin default` | Set the active Firecracker version |
 | `mvm bin rm VERSION` | Remove a cached version |
 

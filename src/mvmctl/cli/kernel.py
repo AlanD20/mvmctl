@@ -9,17 +9,17 @@ from typing import TYPE_CHECKING
 import typer
 from rich.console import Console
 
-from mvmctl.api import KernelFetchInput as _KernelFetchInput
 from mvmctl.api import KernelInput as _KernelInput
 from mvmctl.api import KernelOperation as _KernelOperation
+from mvmctl.api import KernelPullInput as _KernelPullInput
 
 if TYPE_CHECKING:
-    from mvmctl.api.inputs._kernel_fetch_input import KernelFetchInput
     from mvmctl.api.inputs._kernel_input import KernelInput
+    from mvmctl.api.inputs._kernel_pull_input import KernelPullInput
     from mvmctl.api.kernel_operations import KernelOperation
 else:
     KernelOperation = _KernelOperation
-    KernelFetchInput = _KernelFetchInput
+    KernelPullInput = _KernelPullInput
     KernelInput = _KernelInput
 from mvmctl.models.result import OperationResult, ProgressEvent
 from mvmctl.utils._io import (
@@ -66,7 +66,7 @@ def kernel_ls(
 
     if not kernels:
         print_info(
-            "No kernels found. Use 'mvm kernel fetch --type firecracker' to download one."
+            "No kernels found. Use 'mvm kernel pull --type firecracker' to download one."
         )
         return
 
@@ -160,9 +160,9 @@ def _print_kernel_details_tree(info: KernelItem) -> None:
         print(line)
 
 
-@kernel_app.command(name="fetch")
+@kernel_app.command(name="pull")
 @handle_errors
-def kernel_fetch(
+def kernel_pull(
     kernel_type: str = typer.Option(
         ..., "--type", help="Kernel type: firecracker or official"
     ),
@@ -190,8 +190,8 @@ def kernel_fetch(
         help="Custom kernel config file to apply as a fragment",
     ),
 ) -> None:
-    """Fetch or build a kernel."""
-    inputs = KernelFetchInput(
+    """Pull or build a kernel."""
+    inputs = KernelPullInput(
         kernel_type=kernel_type,
         version=version,
         arch=arch,
@@ -208,7 +208,7 @@ def kernel_fetch(
             if event.message:
                 status.update(event.message)
 
-        result = KernelOperation.fetch(inputs, on_progress=_on_progress)
+        result = KernelOperation.pull(inputs, on_progress=_on_progress)
     if isinstance(result, OperationResult):
         if result.is_error:
             print_error(result.message)
@@ -220,12 +220,12 @@ def kernel_fetch(
             raise typer.Exit(code=0)
         if result.item:
             print_success(
-                f"Kernel '{result.item.name}' fetched successfully "
+                f"Kernel '{result.item.name}' pulled successfully "
                 f"(ID: {HashGenerator.shorten(result.item.id)})"
             )
     else:
         # Fallback for unexpected non-OperationResult returns
-        print_success("Kernel fetch completed")
+        print_success("Kernel pull completed")
 
 
 @kernel_app.command(

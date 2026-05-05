@@ -11,8 +11,8 @@ from tests.system.conftest import _run_mvm
 pytestmark = [pytest.mark.system, pytest.mark.slow]
 
 
-class TestImageFetch:
-    """Test image fetching operations."""
+class TestImagePull:
+    """Test image pulling operations."""
 
     @pytest.mark.parametrize(
         "image_id",
@@ -22,13 +22,13 @@ class TestImageFetch:
         ],
     )
     @pytest.mark.serial
-    def test_image_fetch(self, mvm_binary, image_id):
-        """Fetch each supported image.
+    def test_image_pull(self, mvm_binary, image_id):
+        """Pull each supported image.
 
         Tests a lightweight image (alpine) and a common one (ubuntu-minimal).
         Full list of 5 images is tested in CI on a schedule, not per-PR.
         """
-        result = _run_mvm(mvm_binary, "image", "fetch", image_id, timeout=300)
+        result = _run_mvm(mvm_binary, "image", "pull", image_id, timeout=300)
         assert result.returncode == 0
         assert "ready" in result.stdout.lower()
 
@@ -89,7 +89,7 @@ class TestImageDefaults:
         """Set image as default."""
 
         # Ensure image exists before setting default
-        _run_mvm(mvm_binary, "image", "fetch", "alpine-3.21", check=False)
+        _run_mvm(mvm_binary, "image", "pull", "alpine-3.21", check=False)
 
         result = _run_mvm(mvm_binary, "image", "set-default", "alpine-3.21")
         assert result.returncode == 0
@@ -147,18 +147,18 @@ class TestImageRemove:
         ]
         assert not any(i["id"] == target_id for i in after)
 
-        # Re-fetch so other tests aren't broken
-        refetch = _run_mvm(
-            mvm_binary, "image", "fetch", "alpine-3.21", check=False
+        # Re-pull so other tests aren't broken
+        repull = _run_mvm(
+            mvm_binary, "image", "pull", "alpine-3.21", check=False
         )
-        assert refetch.returncode == 0, f"Re-fetch failed: {refetch.stderr}"
+        assert repull.returncode == 0, f"Re-pull failed: {repull.stderr}"
 
-    def test_image_fetch_nonexistent(self, mvm_binary):
-        """Fetch a nonexistent image and expect failure."""
+    def test_image_pull_nonexistent(self, mvm_binary):
+        """Pull a nonexistent image and expect failure."""
         result = _run_mvm(
             mvm_binary,
             "image",
-            "fetch",
+            "pull",
             "completely-nonexistent-image-12345",
             check=False,
         )
@@ -176,7 +176,7 @@ class TestImageImport:
         import shutil
 
         # Ensure alpine is cached
-        _run_mvm(mvm_binary, "image", "fetch", "alpine-3.21", check=False)
+        _run_mvm(mvm_binary, "image", "pull", "alpine-3.21", check=False)
 
         # Get cached image info
         result = _run_mvm(mvm_binary, "image", "ls", "--json")

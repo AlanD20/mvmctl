@@ -84,10 +84,10 @@ Top-level sections map to `MVMConfig` dataclass fields:
 
 ### `images.yaml` — Image Catalog
 
-Each entry → `ImageSpec` dataclass. `id` becomes the CLI argument to `mvm image fetch`:
+Each entry → `ImageSpec` dataclass. `id` becomes the CLI argument to `mvm image pull`:
 
 ```yaml
-- id: ubuntu-24.04              # mvm image fetch ubuntu-24.04
+- id: ubuntu-24.04              # mvm image pull ubuntu-24.04
   type: ubuntu                  # OS family
   version: "24.04"               # OS version
   name: Ubuntu 24.04             # Human-readable name

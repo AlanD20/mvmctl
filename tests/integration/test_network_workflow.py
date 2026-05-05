@@ -13,12 +13,12 @@ import pytest
 
 from mvmctl.api import NetworkCreateInput, NetworkInput, NetworkOperation
 from mvmctl.exceptions import NetworkError, NetworkNotFoundError
-from mvmctl.models.result import OperationResult
 from mvmctl.models.network import (
     IPTablesRuleItem,
     NetworkItem,
     NetworkLeaseItem,
 )
+from mvmctl.models.result import OperationResult
 
 
 @pytest.fixture(autouse=True)
@@ -220,7 +220,9 @@ class TestNetworkForceRemoval:
         mocks["provisioner"].set_hostname.return_value = mocks["provisioner"]
         mocks["provisioner"].inject_dns.return_value = mocks["provisioner"]
         mocks["provisioner"].setup_ssh.return_value = mocks["provisioner"]
-        mocks["provisioner"].disable_cloud_init.return_value = mocks["provisioner"]
+        mocks["provisioner"].disable_cloud_init.return_value = mocks[
+            "provisioner"
+        ]
         mocks["provisioner"].run.return_value = None
 
         # 1. Create a dedicated network

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from mvmctl.core.network._lease_resolver import NetworkLeaseResolver
 from mvmctl.models import NetworkLeaseItem
 

@@ -16,7 +16,6 @@ import pytest
 
 from mvmctl.api import ConsoleOperation, VMCreateInput, VMInput, VMOperation
 from mvmctl.exceptions import MVMError, VMNotFoundError
-from mvmctl.models.result import OperationResult
 from mvmctl.models.vm import ConsoleState, VMInstanceItem
 from mvmctl.utils.common import CacheUtils
 
@@ -51,7 +50,11 @@ def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     # Mock os.kill so fake PIDs appear alive
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
 
-    return {"subprocess": sub_mock, "popen": popen_mock, "provisioner": provisioner_mock}
+    return {
+        "subprocess": sub_mock,
+        "popen": popen_mock,
+        "provisioner": provisioner_mock,
+    }
 
 
 class TestConsoleWorkflow:

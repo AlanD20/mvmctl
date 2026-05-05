@@ -9,10 +9,10 @@ from typing import TYPE_CHECKING, Any, cast
 import typer
 from rich.console import Console
 
-from mvmctl.api import ImageFetchInput as _ImageFetchInput
 from mvmctl.api import ImageImportInput as _ImageImportInput
 from mvmctl.api import ImageInput as _ImageInput
 from mvmctl.api import ImageOperation as _ImageOperation
+from mvmctl.api import ImagePullInput as _ImagePullInput
 from mvmctl.constants import IMAGE_IMPORT_FORMAT_MAP
 from mvmctl.models import ImageItem, ImageSpec
 from mvmctl.models.result import (
@@ -23,13 +23,13 @@ from mvmctl.models.result import (
 if TYPE_CHECKING:
     from mvmctl.api.image_operations import ImageOperation
     from mvmctl.api.inputs._image_acquire_input import (
-        ImageFetchInput,
         ImageImportInput,
+        ImagePullInput,
     )
     from mvmctl.api.inputs._image_input import ImageInput
 else:
     ImageOperation = _ImageOperation
-    ImageFetchInput = _ImageFetchInput
+    ImagePullInput = _ImagePullInput
     ImageImportInput = _ImageImportInput
     ImageInput = _ImageInput
 from mvmctl.utils._io import (
@@ -184,8 +184,8 @@ def _list_local_images(images: list[ImageItem], *, json_output: bool) -> None:
     )
 
 
-@image_app.command(name="fetch")
-def image_fetch(
+@image_app.command(name="pull")
+def image_pull(
     image_selector: str = typer.Argument(
         ...,
         help="Image ID or image type from 'mvm image ls --remote' (e.g. ubuntu-24.04 or ubuntu)",
@@ -229,7 +229,7 @@ def image_fetch(
         else []
     )
 
-    fetch_input = ImageFetchInput(
+    pull_input = ImagePullInput(
         os_slug=image_selector,
         type=image_type or image_selector,
         version=version,
@@ -246,7 +246,7 @@ def image_fetch(
             if event.message:
                 status.update(event.message)
 
-        result = ImageOperation.fetch(fetch_input, on_progress=_on_progress)
+        result = ImageOperation.pull(pull_input, on_progress=_on_progress)
 
     if isinstance(result, NeedsInteraction):
         print_info(result.message)
@@ -261,7 +261,7 @@ def image_fetch(
     assert result.item is not None
     short_id = HashGenerator.shorten(result.item.id)
     print_success(
-        f"Image '{result.item.os_name}' fetched successfully (ID: {short_id})"
+        f"Image '{result.item.os_name}' pulled successfully (ID: {short_id})"
     )
     if set_default:
         print_success(f"Default image set to: {image_selector}")

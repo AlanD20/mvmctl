@@ -146,10 +146,10 @@ mvm vm rm --name myvm --force                    # Remove a VM
 ### Resource Management
 
 ```bash
-mvm image fetch ubuntu-24.04    # Download an OS image
+mvm image pull ubuntu-24.04    # Download an OS image
 mvm image ls                   # List available images
-mvm kernel fetch               # Download Firecracker kernel
-mvm bin fetch 1.15.0          # Download Firecracker binary
+mvm kernel pull               # Download Firecracker kernel
+mvm bin pull 1.15.0          # Download Firecracker binary
 mvm key create mykey          # Generate SSH key
 ```
 
@@ -233,8 +233,8 @@ Common issues and quick fixes:
 | **Permission denied: /dev/kvm** | If missing: `sudo modprobe kvm kvm_intel`. If unreadable: `sudo usermod -aG kvm $USER` then log out/back in |
 | **Bridge not found** | Run `sudo mvm host init` once |
 | **VM won't boot / SSH times out** | Cloud-init takes 30-60s on first boot. Watch with `mvm logs myvm --follow` |
-| **Kernel not found** | `mvm kernel fetch` |
-| **Image not found** | `mvm image fetch ubuntu-24.04` |
+| **Kernel not found** | `mvm kernel pull` |
+| **Image not found** | `mvm image pull ubuntu-24.04` |
 | **NoCloud server failed** | Port range exhausted. Check: `sudo ss -tlnp \| grep -E ':(8[0-9]{3}\|9[0-9]{3})'` |
 
 See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for complete troubleshooting guide including:

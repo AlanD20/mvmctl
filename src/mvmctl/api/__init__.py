@@ -37,14 +37,14 @@ __all__ = [
     "SSHOperation",
     "VMOperation",
     # Input classes
-    "BinaryFetchInput",
+    "BinaryPullInput",
     "BinaryInput",
     "ConsoleInput",
     "ConsoleRequest",
-    "ImageFetchInput",
+    "ImagePullInput",
     "ImageImportInput",
     "ImageInput",
-    "KernelFetchInput",
+    "KernelPullInput",
     "KernelInput",
     "KeyCreateInput",
     "KeyInput",
@@ -78,25 +78,25 @@ _LAZY_MAP: dict[str, tuple[str, str]] = {
     "SSHOperation": ("mvmctl.api.ssh_operations", "SSHOperation"),
     "VMOperation": ("mvmctl.api.vm_operations", "VMOperation"),
     # ── Input classes ───────────────────────────────────────────────
-    "BinaryFetchInput": (
-        "mvmctl.api.inputs._binary_fetch_input",
-        "BinaryFetchInput",
+    "BinaryPullInput": (
+        "mvmctl.api.inputs._binary_pull_input",
+        "BinaryPullInput",
     ),
     "BinaryInput": ("mvmctl.api.inputs._binary_input", "BinaryInput"),
     "ConsoleInput": ("mvmctl.api.inputs._console_input", "ConsoleInput"),
     "ConsoleRequest": ("mvmctl.api.inputs._console_input", "ConsoleRequest"),
-    "ImageFetchInput": (
+    "ImagePullInput": (
         "mvmctl.api.inputs._image_acquire_input",
-        "ImageFetchInput",
+        "ImagePullInput",
     ),
     "ImageImportInput": (
         "mvmctl.api.inputs._image_acquire_input",
         "ImageImportInput",
     ),
     "ImageInput": ("mvmctl.api.inputs._image_input", "ImageInput"),
-    "KernelFetchInput": (
-        "mvmctl.api.inputs._kernel_fetch_input",
-        "KernelFetchInput",
+    "KernelPullInput": (
+        "mvmctl.api.inputs._kernel_pull_input",
+        "KernelPullInput",
     ),
     "KernelInput": ("mvmctl.api.inputs._kernel_input", "KernelInput"),
     "KeyCreateInput": (

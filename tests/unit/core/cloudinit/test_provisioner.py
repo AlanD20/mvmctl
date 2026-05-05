@@ -7,15 +7,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# CloudInitMode is only imported under TYPE_CHECKING in the source module.
+# Inject at runtime so comparisons like CloudInitMode.OFF work in tests.
+import mvmctl.core.cloudinit._provisioner as _pv_mod
 from mvmctl.core.cloudinit._provisioner import (
     CloudInitProvisionConfig,
     CloudInitProvisioner,
 )
 from mvmctl.models import CloudInitMode, NetworkItem
 
-# CloudInitMode is only imported under TYPE_CHECKING in the source module.
-# Inject at runtime so comparisons like CloudInitMode.OFF work in tests.
-import mvmctl.core.cloudinit._provisioner as _pv_mod
 _pv_mod.CloudInitMode = CloudInitMode
 
 

@@ -14,7 +14,7 @@ from mvmctl.utils.common import CacheUtils
 
 __all__ = [
     "ImageImportInput",
-    "ImageFetchInput",
+    "ImagePullInput",
     "ImageAcquireRequest",
     "ResolvedImageAcquireInput",
 ]
@@ -45,8 +45,8 @@ class ImageImportInput:
 
 
 @dataclass
-class ImageFetchInput:
-    """Input model for image fetch and registration operations."""
+class ImagePullInput:
+    """Input model for image pull and registration operations."""
 
     os_slug: str
     type: str
@@ -83,7 +83,7 @@ class ImageAcquireRequest:
     def __init__(
         self,
         *,
-        inputs: ImageFetchInput | ImageImportInput,
+        inputs: ImagePullInput | ImageImportInput,
         db: Database | None = None,
     ) -> None:
         """Initialize the resolver with database and sub-resolvers."""
@@ -95,9 +95,9 @@ class ImageAcquireRequest:
     def result(self) -> ResolvedImageAcquireInput | None:
         return self._result
 
-    def resolve_fetch(self) -> ResolvedImageAcquireInput:
-        if not isinstance(self._inputs, ImageFetchInput):
-            raise ImageAcquireError("Expected ImageFetchInput")
+    def resolve_pull(self) -> ResolvedImageAcquireInput:
+        if not isinstance(self._inputs, ImagePullInput):
+            raise ImageAcquireError("Expected ImagePullInput")
 
         # Default arch
         if self._inputs.arch is not None:

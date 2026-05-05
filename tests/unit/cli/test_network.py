@@ -62,7 +62,12 @@ class TestNetworkLs:
     @patch("mvmctl.cli.network.NetworkOperation")
     def test_ls_json(self, mock_net_op):
         mock_net_op.to_json.return_value = [
-            {"name": "testnet", "vm_count": 0, "leases": [], "iptables_rules": []}
+            {
+                "name": "testnet",
+                "vm_count": 0,
+                "leases": [],
+                "iptables_rules": [],
+            }
         ]
         result = runner.invoke(app, ["network", "ls", "--json"])
         assert result.exit_code == 0
@@ -97,6 +102,7 @@ class TestNetworkCreate:
     def test_create_success(self, mock_ifaces, mock_net_op):
         mock_ifaces.return_value = ["eth0"]
         from mvmctl.models.result import OperationResult
+
         mock_net_op.create.return_value = MagicMock(
             spec=OperationResult,
             status="success",
@@ -226,20 +232,22 @@ class TestNetworkSync:
     @patch("mvmctl.cli.network.NetworkOperation")
     def test_sync_all(self, mock_net_op):
         test_id = "a" * 64
-        mock_net_op.list_all.return_value = [NetworkItem(
-            id=test_id,
-            name="testnet",
-            subnet="192.168.100.0/24",
-            bridge="mvm-testnet",
-            ipv4_gateway="192.168.100.1",
-            bridge_active=True,
-            nat_enabled=True,
-            is_default=False,
-            is_present=True,
-            created_at="2026-01-01T12:00:00+00:00",
-            updated_at="2026-01-01T12:00:00+00:00",
-            leases=[],
-        )]
+        mock_net_op.list_all.return_value = [
+            NetworkItem(
+                id=test_id,
+                name="testnet",
+                subnet="192.168.100.0/24",
+                bridge="mvm-testnet",
+                ipv4_gateway="192.168.100.1",
+                bridge_active=True,
+                nat_enabled=True,
+                is_default=False,
+                is_present=True,
+                created_at="2026-01-01T12:00:00+00:00",
+                updated_at="2026-01-01T12:00:00+00:00",
+                leases=[],
+            )
+        ]
         mock_net_op.sync.return_value = MagicMock(
             status="success",
             item={test_id: {"verified": 5, "added": 2, "orphaned": 1}},
@@ -250,20 +258,22 @@ class TestNetworkSync:
     @patch("mvmctl.cli.network.NetworkOperation")
     def test_sync_json(self, mock_net_op):
         test_id = "b" * 64
-        mock_net_op.list_all.return_value = [NetworkItem(
-            id=test_id,
-            name="testnet",
-            subnet="192.168.100.0/24",
-            bridge="mvm-testnet",
-            ipv4_gateway="192.168.100.1",
-            bridge_active=True,
-            nat_enabled=True,
-            is_default=False,
-            is_present=True,
-            created_at="2026-01-01T12:00:00+00:00",
-            updated_at="2026-01-01T12:00:00+00:00",
-            leases=[],
-        )]
+        mock_net_op.list_all.return_value = [
+            NetworkItem(
+                id=test_id,
+                name="testnet",
+                subnet="192.168.100.0/24",
+                bridge="mvm-testnet",
+                ipv4_gateway="192.168.100.1",
+                bridge_active=True,
+                nat_enabled=True,
+                is_default=False,
+                is_present=True,
+                created_at="2026-01-01T12:00:00+00:00",
+                updated_at="2026-01-01T12:00:00+00:00",
+                leases=[],
+            )
+        ]
         mock_net_op.sync.return_value = MagicMock(
             status="success",
             item={test_id: {"verified": 5, "added": 2, "orphaned": 1}},

@@ -1,4 +1,4 @@
-"""Extended tests for ImageOperation — covering fetch, import_, and edge cases."""
+"""Extended tests for ImageOperation — covering pull, import_, and edge cases."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ import pytest
 
 from mvmctl.api.image_operations import ImageOperation
 from mvmctl.api.inputs._image_acquire_input import (
-    ImageFetchInput,
     ImageImportInput,
+    ImagePullInput,
 )
 from mvmctl.api.inputs._image_input import ImageInput
 from mvmctl.exceptions import ImageAcquireError, ImageError
@@ -61,7 +61,7 @@ def _make_op_result(
     return r
 
 
-def _setup_fetch_mocks(
+def _setup_pull_mocks(
     mocker,
     spec_id: str = "ubuntu-24.04",
     existing_image: ImageItem | None = None,
@@ -89,7 +89,7 @@ def _setup_fetch_mocks(
     mock_resolved.set_default = True
     mock_resolved.arch = "x86_64"
     mock_request = MagicMock()
-    mock_request.resolve_fetch.return_value = mock_resolved
+    mock_request.resolve_pull.return_value = mock_resolved
     mocker.patch(
         "mvmctl.api.image_operations.ImageAcquireRequest",
         return_value=mock_request,
@@ -135,12 +135,12 @@ def _setup_fetch_mocks(
     return deps
 
 
-class TestImageOperationFetch:
-    """Tests for ImageOperation.fetch()."""
+class TestImageOperationPull:
+    """Tests for ImageOperation.pull()."""
 
-    def test_fetch_early_return_image_exists(self, mocker):
+    def test_pull_early_return_image_exists(self, mocker):
         existing = _make_image(os_slug="ubuntu-24.04")
-        _setup_fetch_mocks(mocker, existing_image=existing, force=False)
+        _setup_pull_mocks(mocker, existing_image=existing, force=False)
 
         mock_path = MagicMock()
         mock_path.exists.return_value = True
@@ -151,18 +151,18 @@ class TestImageOperationFetch:
             return_value=mock_images_dir,
         )
 
-        result = ImageOperation.fetch(
-            ImageFetchInput(os_slug="ubuntu-24.04", type="qcow2")
+        result = ImageOperation.pull(
+            ImagePullInput(os_slug="ubuntu-24.04", type="qcow2")
         )
         assert result.status == "skipped"
         assert result.code == "image.already_present"
         assert result.item is existing
 
-    def test_fetch_force_re_fetch_despite_existing(self, mocker):
+    def test_pull_force_re_pull_despite_existing(self, mocker):
         existing = _make_image(
             os_slug="ubuntu-24.04", image_id="old-" + "x" * 61
         )
-        deps = _setup_fetch_mocks(mocker, existing_image=existing, force=True)
+        deps = _setup_pull_mocks(mocker, existing_image=existing, force=True)
 
         mock_download_path = Path("/tmp/images/downloaded.qcow2")
         mock_extracted_path = Path("/tmp/images/extracted.ext4")
@@ -176,14 +176,14 @@ class TestImageOperationFetch:
         )
         deps["image_svc"].optimize_image.return_value = new_item
 
-        result = ImageOperation.fetch(
-            ImageFetchInput(os_slug="ubuntu-24.04", type="qcow2", force=True)
+        result = ImageOperation.pull(
+            ImagePullInput(os_slug="ubuntu-24.04", type="qcow2", force=True)
         )
         assert result.status == "success"
         assert result.code == "image.acquired"
 
-    def test_fetch_successful_download(self, mocker):
-        deps = _setup_fetch_mocks(mocker, existing_image=None)
+    def test_pull_successful_download(self, mocker):
+        deps = _setup_pull_mocks(mocker, existing_image=None)
 
         mock_download_path = Path("/tmp/images/downloaded.qcow2")
         mock_extracted_path = Path("/tmp/images/extracted.ext4")
@@ -195,8 +195,8 @@ class TestImageOperationFetch:
         new_item = _make_image(os_slug="ubuntu-24.04")
         deps["image_svc"].optimize_image.return_value = new_item
 
-        result = ImageOperation.fetch(
-            ImageFetchInput(os_slug="ubuntu-24.04", type="qcow2")
+        result = ImageOperation.pull(
+            ImagePullInput(os_slug="ubuntu-24.04", type="qcow2")
         )
         assert result.status == "success"
         assert result.code == "image.acquired"
@@ -204,8 +204,8 @@ class TestImageOperationFetch:
         deps["image_svc"].extract_downloaded_image.assert_called_once()
         deps["image_svc"].optimize_image.assert_called_once()
 
-    def test_fetch_calls_progress_callback(self, mocker):
-        deps = _setup_fetch_mocks(mocker)
+    def test_pull_calls_progress_callback(self, mocker):
+        deps = _setup_pull_mocks(mocker)
 
         on_progress = MagicMock()
         deps["image_svc"].download_image.return_value = Path("/tmp/dl.qcow2")
@@ -214,14 +214,14 @@ class TestImageOperationFetch:
         )
         deps["image_svc"].optimize_image.return_value = _make_image()
 
-        ImageOperation.fetch(
-            ImageFetchInput(os_slug="ubuntu-24.04", type="qcow2"),
+        ImageOperation.pull(
+            ImagePullInput(os_slug="ubuntu-24.04", type="qcow2"),
             on_progress=on_progress,
         )
         assert on_progress.call_count >= 3
 
-    def test_fetch_root_partition_detection_error(self, mocker):
-        deps = _setup_fetch_mocks(mocker)
+    def test_pull_root_partition_detection_error(self, mocker):
+        deps = _setup_pull_mocks(mocker)
         deps["image_svc"].download_image.return_value = Path("/tmp/dl.qcow2")
         from mvmctl.exceptions import RootPartitionDetectionError
 
@@ -231,14 +231,14 @@ class TestImageOperationFetch:
             "no root partition"
         )
 
-        result = ImageOperation.fetch(
-            ImageFetchInput(os_slug="ubuntu-24.04", type="qcow2")
+        result = ImageOperation.pull(
+            ImagePullInput(os_slug="ubuntu-24.04", type="qcow2")
         )
         assert result.status == "error"
         assert result.code == "image.acquire_failed"
 
-    def test_fetch_tie_detected_error(self, mocker):
-        deps = _setup_fetch_mocks(mocker)
+    def test_pull_tie_detected_error(self, mocker):
+        deps = _setup_pull_mocks(mocker)
         deps["image_svc"].download_image.return_value = Path("/tmp/dl.qcow2")
         from mvmctl.exceptions import TieDetectedError
 
@@ -248,18 +248,18 @@ class TestImageOperationFetch:
             "multiple partitions"
         )
 
-        result = ImageOperation.fetch(
-            ImageFetchInput(os_slug="ubuntu-24.04", type="qcow2")
+        result = ImageOperation.pull(
+            ImagePullInput(os_slug="ubuntu-24.04", type="qcow2")
         )
         assert result.status == "error"
 
-    def test_fetch_cleans_up_old_image(self, mocker):
+    def test_pull_cleans_up_old_image(self, mocker):
         existing = _make_image(
             os_slug="ubuntu-24.04",
             image_id="old-" + "x" * 60,
             path="images/old-ubuntu.ext4",
         )
-        deps = _setup_fetch_mocks(mocker, existing_image=existing, force=True)
+        deps = _setup_pull_mocks(mocker, existing_image=existing, force=True)
 
         deps["image_svc"].download_image.return_value = Path("/tmp/dl.qcow2")
         deps["image_svc"].extract_downloaded_image.return_value = Path(
@@ -271,15 +271,15 @@ class TestImageOperationFetch:
         deps["image_svc"].optimize_image.return_value = new_item
         deps["image_svc"].remove_many_paths.return_value = ["old-file"]
 
-        ImageOperation.fetch(
-            ImageFetchInput(os_slug="ubuntu-24.04", type="qcow2", force=True)
+        ImageOperation.pull(
+            ImagePullInput(os_slug="ubuntu-24.04", type="qcow2", force=True)
         )
         deps["image_svc"].remove_many_paths.assert_called_once_with([existing])
 
-    def test_fetch_with_default_firecracker_ci_version(self, mocker):
+    def test_pull_with_default_firecracker_ci_version(self, mocker):
         mock_firecracker = MagicMock()
         mock_firecracker.ci_version = "v1.11"
-        deps = _setup_fetch_mocks(
+        deps = _setup_pull_mocks(
             mocker,
             existing_image=None,
             default_firecracker=mock_firecracker,
@@ -290,14 +290,14 @@ class TestImageOperationFetch:
         )
         deps["image_svc"].optimize_image.return_value = _make_image()
 
-        ImageOperation.fetch(
-            ImageFetchInput(os_slug="ubuntu-24.04", type="qcow2")
+        ImageOperation.pull(
+            ImagePullInput(os_slug="ubuntu-24.04", type="qcow2")
         )
         call_args = deps["image_svc"].download_image.call_args
         assert call_args is not None
         assert call_args[0][4] == "v1.11"
 
-    def test_fetch_resolved_output_dir_none_raises(self, mocker):
+    def test_pull_resolved_output_dir_none_raises(self, mocker):
         mocker.patch("mvmctl.api.image_operations.Database")
         mock_repo = MagicMock()
         mocker.patch(
@@ -307,15 +307,15 @@ class TestImageOperationFetch:
         mock_resolved = MagicMock()
         mock_resolved.output_dir = None
         mock_request = MagicMock()
-        mock_request.resolve_fetch.return_value = mock_resolved
+        mock_request.resolve_pull.return_value = mock_resolved
         mocker.patch(
             "mvmctl.api.image_operations.ImageAcquireRequest",
             return_value=mock_request,
         )
 
         with pytest.raises(ImageError, match="Failed to resolve output_dir"):
-            ImageOperation.fetch(
-                ImageFetchInput(os_slug="ubuntu-24.04", type="qcow2")
+            ImageOperation.pull(
+                ImagePullInput(os_slug="ubuntu-24.04", type="qcow2")
             )
 
 
@@ -620,8 +620,8 @@ class TestImageOperationHelpersExtended:
         )
         assert result is None
 
-    def test_fetch_image_with_no_ci_version(self, mocker):
-        deps = _setup_fetch_mocks(
+    def test_pull_image_with_no_ci_version(self, mocker):
+        deps = _setup_pull_mocks(
             mocker, existing_image=None, default_firecracker=None
         )
         deps["image_svc"].download_image.return_value = Path("/tmp/dl.qcow2")
@@ -630,7 +630,7 @@ class TestImageOperationHelpersExtended:
         )
         deps["image_svc"].optimize_image.return_value = _make_image()
 
-        result = ImageOperation.fetch(
-            ImageFetchInput(os_slug="ubuntu-24.04", type="qcow2")
+        result = ImageOperation.pull(
+            ImagePullInput(os_slug="ubuntu-24.04", type="qcow2")
         )
         assert result.status == "success"

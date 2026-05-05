@@ -8,11 +8,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from mvmctl.api.inputs._kernel_fetch_input import (
-    KernelFetchInput,
-    KernelFetchRequest,
-)
 from mvmctl.api.inputs._kernel_input import KernelInput
+from mvmctl.api.inputs._kernel_pull_input import (
+    KernelPullInput,
+    KernelPullRequest,
+)
 from mvmctl.constants import DEFAULT_FIRECRACKER_CI_VERSION
 from mvmctl.core._shared import Database
 from mvmctl.core.binary._repository import BinaryRepository
@@ -21,7 +21,7 @@ from mvmctl.core.kernel._controller import KernelController
 from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.core.kernel._service import KernelService
 from mvmctl.exceptions import KernelError
-from mvmctl.models import KernelFetchResult, KernelItem
+from mvmctl.models import KernelItem, KernelPullResult
 from mvmctl.models.result import (
     BatchResult,
     NeedsInteraction,
@@ -46,16 +46,16 @@ class KernelOperation:
     """
 
     @staticmethod
-    def fetch(
-        inputs: KernelFetchInput,
+    def pull(
+        inputs: KernelPullInput,
         *,
         on_progress: Callable[[ProgressEvent], None] | None = None,
     ) -> OperationResult[KernelItem] | NeedsInteraction:
         """
-        Fetch or build a kernel based on type.
+        Pull or build a kernel based on type.
 
         Args:
-            inputs: KernelFetchInput with kernel_type, version, arch, etc.
+            inputs: KernelPullInput with kernel_type, version, arch, etc.
             on_progress: Optional callback for progress events.
 
         Returns:
@@ -67,7 +67,7 @@ class KernelOperation:
             repo = KernelRepository(db)
 
             # Resolve and validate inputs
-            request = KernelFetchRequest(inputs=inputs, db=db)
+            request = KernelPullRequest(inputs=inputs, db=db)
             resolved = request.resolve()
 
             # Check for existing kernel
@@ -102,7 +102,7 @@ class KernelOperation:
             spec = specs[0]
 
             kernel_service = KernelService(repo)
-            fetch_result: KernelFetchResult
+            fetch_result: KernelPullResult
 
             if resolved.kernel_type == "firecracker":
                 binary_service = BinaryService(BinaryRepository(db))
@@ -214,7 +214,7 @@ class KernelOperation:
                     )
 
             AuditLog.log(
-                "kernel.fetch",
+                "kernel.pull",
                 changes={
                     "id": kernel_item.id,
                     "type": kernel_item.type,
@@ -224,14 +224,14 @@ class KernelOperation:
             )
             return OperationResult(
                 status="success",
-                code="kernel.fetched",
-                message=f"Kernel '{kernel_item.name}' fetched successfully",
+                code="kernel.pulled",
+                message=f"Kernel '{kernel_item.name}' pulled successfully",
                 item=kernel_item,
             )
         except KernelError as e:
             return OperationResult(
                 status="error",
-                code="kernel.fetch_failed",
+                code="kernel.pull_failed",
                 message=str(e),
                 exception=e,
             )

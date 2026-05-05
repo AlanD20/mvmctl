@@ -184,7 +184,9 @@ class TestNetworkServiceBridge:
             NetworkUtils, "get_bridge_taps", return_value=["tap-vm1", "tap-vm2"]
         )
         mocker.patch.object(NetworkUtils, "tap_exists", return_value=True)
-        mocker.patch.object(NetworkUtils, "get_tap_bridge", return_value="mvm-test-net")
+        mocker.patch.object(
+            NetworkUtils, "get_tap_bridge", return_value="mvm-test-net"
+        )
         mocker.patch.object(NetworkService, "remove_raw_tap")
         mock_remove_tap = mocker.patch.object(
             NetworkService, "remove_tap", autospec=True
@@ -1398,7 +1400,9 @@ class TestNetworkServiceReconcileEdgeCases:
 class TestNetworkServiceRemoveStaleInterfaces:
     """Tests for NetworkService.remove_stale_interfaces()."""
 
-    def test_no_bridges_returns_empty(self, repo: NetworkRepository, mocker) -> None:
+    def test_no_bridges_returns_empty(
+        self, repo: NetworkRepository, mocker
+    ) -> None:
         """Should return empty list when no bridges exist."""
         mocker.patch.object(NetworkUtils, "get_bridges", return_value=[])
 
@@ -1447,7 +1451,9 @@ class TestNetworkServiceRemoveStaleInterfaces:
         self, repo: NetworkRepository, mocker
     ) -> None:
         """Should record warning when slave removal fails."""
-        mocker.patch.object(NetworkUtils, "get_bridges", return_value=["mvm-net"])
+        mocker.patch.object(
+            NetworkUtils, "get_bridges", return_value=["mvm-net"]
+        )
         mocker.patch.object(
             NetworkUtils, "get_bridge_slaves", return_value=["mvm-net-tap1"]
         )
@@ -1480,7 +1486,9 @@ class TestNetworkServiceRemoveStaleInterfaces:
                 return ["mvm-testnet-tap1", "mvm-testnet-tap2"]
             return []
 
-        mocker.patch.object(NetworkUtils, "get_bridge_slaves", side_effect=_slaves)
+        mocker.patch.object(
+            NetworkUtils, "get_bridge_slaves", side_effect=_slaves
+        )
         mock_raw = mocker.patch.object(NetworkService, "remove_raw_tap")
 
         service = NetworkService(repo)

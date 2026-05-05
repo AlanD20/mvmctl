@@ -446,37 +446,36 @@ class TestConstraints:
             "ssh_keys, ssh_user, "
             "created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-                "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-                "datetime('now'), datetime('now'))",
-
-                (
-                    "vm1",
-                    "myvm",
-                    "running",
-                    1000,
-                    "10.0.0.2",
-                    "aa:bb:cc:dd:ee:ff",
-                    "net1",
-                    "tap0",
-                    "img1",
-                    "kern1",
-                    "bin1",
-                    "/sock",
-                    "/cfg",
-                    "nocloud",
-                    2,
-                    1024,
-                    5120,
-                    "/rootfs",
-                    ".ext4",
-                    0,
-                    1,
-                    0,
-                    1,
-                    None,  # ssh_keys
-                    None,  # ssh_user
-                ),
-            )
+            "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+            "datetime('now'), datetime('now'))",
+            (
+                "vm1",
+                "myvm",
+                "running",
+                1000,
+                "10.0.0.2",
+                "aa:bb:cc:dd:ee:ff",
+                "net1",
+                "tap0",
+                "img1",
+                "kern1",
+                "bin1",
+                "/sock",
+                "/cfg",
+                "nocloud",
+                2,
+                1024,
+                5120,
+                "/rootfs",
+                ".ext4",
+                0,
+                1,
+                0,
+                1,
+                None,  # ssh_keys
+                None,  # ssh_user
+            ),
+        )
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(
                 "INSERT INTO vm_instances (id, name, status, pid, ipv4, mac, "

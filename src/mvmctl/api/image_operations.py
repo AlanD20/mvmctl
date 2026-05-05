@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING, Any
 
 from mvmctl.api.inputs._image_acquire_input import (
     ImageAcquireRequest,
-    ImageFetchInput,
     ImageImportInput,
+    ImagePullInput,
 )
 from mvmctl.api.inputs._image_input import ImageInput
 from mvmctl.constants import DEFAULT_FIRECRACKER_CI_VERSION
@@ -51,16 +51,16 @@ class ImageOperation:
     """
 
     @staticmethod
-    def fetch(
-        inputs: ImageFetchInput,
+    def pull(
+        inputs: ImagePullInput,
         *,
         on_progress: Callable[[ProgressEvent], None] | None = None,
     ) -> OperationResult[ImageItem] | NeedsInteraction:
         """
-        Fetch image from remote URL, handle partition detection/retry, persist to DB.
+        Pull image from remote URL, handle partition detection/retry, persist to DB.
 
         Args:
-            inputs: ImageFetchInput containing spec, output_dir, force, partition,
+            inputs: ImagePullInput containing spec, output_dir, force, partition,
                    and skip_optimization.
             on_progress: Optional callback for progress events.
 
@@ -75,7 +75,7 @@ class ImageOperation:
         db = Database()
         repo = ImageRepository(db)
         request = ImageAcquireRequest(inputs=inputs, db=db)
-        resolved = request.resolve_fetch()
+        resolved = request.resolve_pull()
         if resolved.output_dir is None:
             raise ImageError("Failed to resolve output_dir")
 
@@ -161,7 +161,7 @@ class ImageOperation:
                     ProgressEvent(
                         phase="complete",
                         status="complete",
-                        message="Image fetch complete.",
+                        message="Image pull complete.",
                     )
                 )
 

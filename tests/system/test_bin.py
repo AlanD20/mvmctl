@@ -38,13 +38,13 @@ class TestBinLifecycle:
         assert result.returncode == 0
 
 
-class TestBinaryFetchAndLifecycle:
-    """Test Firecracker binary fetch, set-default, and remove operations."""
+class TestBinaryPullAndLifecycle:
+    """Test Firecracker binary pull, set-default, and remove operations."""
 
     @pytest.mark.slow
     @pytest.mark.serial
-    def test_bin_fetch_and_set_default(self, mvm_binary):
-        """Fetch a specific binary version and set as default."""
+    def test_bin_pull_and_set_default(self, mvm_binary):
+        """Pull a specific binary version and set as default."""
 
         result = _run_mvm(mvm_binary, "bin", "ls", "--remote")
         versions = re.findall(r"\d+\.\d+\.\d+", result.stdout)
@@ -52,7 +52,7 @@ class TestBinaryFetchAndLifecycle:
             pytest.skip("No remote versions available")
         target = versions[-2]  # One before the latest version
 
-        _run_mvm(mvm_binary, "bin", "fetch", target, "--set-default", "--force")
+        _run_mvm(mvm_binary, "bin", "pull", target, "--set-default", "--force")
 
     @pytest.mark.slow
     @pytest.mark.serial
@@ -71,7 +71,7 @@ class TestBinaryFetchAndLifecycle:
         cached = _run_mvm(mvm_binary, "bin", "ls", "--json")
         cached_versions = {v.get("version") for v in json.loads(cached.stdout)}
         if target not in cached_versions:
-            _run_mvm(mvm_binary, "bin", "fetch", target, check=False)
+            _run_mvm(mvm_binary, "bin", "pull", target, check=False)
 
         # Remove by version
         result = _run_mvm(

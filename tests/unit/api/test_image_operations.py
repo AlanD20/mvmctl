@@ -66,7 +66,8 @@ class TestImageOperationList:
             "mvmctl.api.image_operations.Database",
         )
         mocker.patch(
-            "mvmctl.api.image_operations.ImageRepository", return_value=mock_repo
+            "mvmctl.api.image_operations.ImageRepository",
+            return_value=mock_repo,
         )
         mocker.patch(
             "mvmctl.core.image._service.ImageService", return_value=mock_service
@@ -86,10 +87,12 @@ class TestImageOperationList:
         mock_repo = MagicMock()
         mocker.patch("mvmctl.api.image_operations.Database")
         mocker.patch(
-            "mvmctl.api.image_operations.ImageRepository", return_value=mock_repo
+            "mvmctl.api.image_operations.ImageRepository",
+            return_value=mock_repo,
         )
         mocker.patch(
-            "mvmctl.api.image_operations.ImageResolver", return_value=mock_resolver
+            "mvmctl.api.image_operations.ImageResolver",
+            return_value=mock_resolver,
         )
 
         result = ImageOperation.list_(ImageInput(id=["ubuntu-24.04"]))
@@ -104,7 +107,8 @@ class TestImageOperationList:
         mock_service.list_local.return_value = []
         mocker.patch("mvmctl.api.image_operations.Database")
         mocker.patch(
-            "mvmctl.api.image_operations.ImageRepository", return_value=mock_repo
+            "mvmctl.api.image_operations.ImageRepository",
+            return_value=mock_repo,
         )
         mocker.patch(
             "mvmctl.core.image._service.ImageService", return_value=mock_service
@@ -151,14 +155,16 @@ class TestImageOperationList:
 
     def test_list_remote_resolves_sizes(self, mocker):
         """list_(remote=True) calls resolve_remote_sizes."""
-        mock_specs = [ImageSpec(
-            id="test",
-            image_type="test",
-            version="1",
-            name="Test",
-            source="https://example.com/test.qcow2",
-            format="qcow2",
-        )]
+        mock_specs = [
+            ImageSpec(
+                id="test",
+                image_type="test",
+                version="1",
+                name="Test",
+                source="https://example.com/test.qcow2",
+                format="qcow2",
+            )
+        ]
         mock_firecracker = MagicMock()
         mock_firecracker.ci_version = "v1.10"
         mock_binary_svc = MagicMock()
@@ -218,7 +224,9 @@ class TestImageOperationGet:
             return_value=mock_request,
         )
 
-        with pytest.raises(ImageError, match="Expected exactly one image identifier"):
+        with pytest.raises(
+            ImageError, match="Expected exactly one image identifier"
+        ):
             ImageOperation.get(ImageInput(os_slug=["ambiguous"]))
 
     def test_get_delegates_to_image_request(self, mocker):
@@ -285,12 +293,15 @@ class TestImageOperationSetDefault:
         )
         mock_repo = MagicMock()
         mocker.patch(
-            "mvmctl.api.image_operations.ImageRepository", return_value=mock_repo
+            "mvmctl.api.image_operations.ImageRepository",
+            return_value=mock_repo,
         )
         mocker.patch("mvmctl.api.image_operations.Database")
         mocker.patch("mvmctl.utils.auditlog.AuditLog.log")
 
-        result = ImageOperation.set_default(ImageInput(os_slug=["ubuntu-24.04"]))
+        result = ImageOperation.set_default(
+            ImageInput(os_slug=["ubuntu-24.04"])
+        )
         assert result.status == "success"
         assert result.code == "image.default_set"
         assert result.item is mock_image
@@ -309,7 +320,9 @@ class TestImageOperationSetDefault:
         mocker.patch("mvmctl.api.image_operations.ImageRepository")
         mocker.patch("mvmctl.api.image_operations.Database")
 
-        with pytest.raises(ImageError, match="Expected exactly one image identifier"):
+        with pytest.raises(
+            ImageError, match="Expected exactly one image identifier"
+        ):
             ImageOperation.set_default(ImageInput(os_slug=["ambiguous"]))
 
     def test_set_default_audit_logged(self, mocker):

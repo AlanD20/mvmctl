@@ -20,10 +20,10 @@ class TestKernelLifecycle:
         assert result.returncode == 0
 
     @pytest.mark.serial
-    def test_kernel_fetch(self, mvm_binary):
-        """Fetch official kernel."""
+    def test_kernel_pull(self, mvm_binary):
+        """Pull official kernel."""
 
-        result = _run_mvm(mvm_binary, "kernel", "fetch", "--type", "official")
+        result = _run_mvm(mvm_binary, "kernel", "pull", "--type", "official")
         assert result.returncode == 0
 
     def test_kernel_list_json(self, mvm_binary):
@@ -35,7 +35,7 @@ class TestKernelLifecycle:
 
     @pytest.mark.serial
     def test_kernel_set_default(self, mvm_binary):
-        """Set kernel as default (uses the one fetched in test_kernel_fetch)."""
+        """Set kernel as default (uses the one pulled in test_kernel_pull)."""
 
         # Get kernel ID
         result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
@@ -47,17 +47,17 @@ class TestKernelLifecycle:
         assert result.returncode == 0
 
 
-class TestKernelRemoveAndFetch:
-    """Test kernel removal and fetch with set-default."""
+class TestKernelRemoveAndPull:
+    """Test kernel removal and pull with set-default."""
 
     @pytest.mark.serial
-    def test_kernel_fetch_with_set_default(self, mvm_binary):
-        """Fetch official kernel and set as default in one command."""
+    def test_kernel_pull_with_set_default(self, mvm_binary):
+        """Pull official kernel and set as default in one command."""
 
         result = _run_mvm(
             mvm_binary,
             "kernel",
-            "fetch",
+            "pull",
             "--type",
             "official",
             "--set-default",
@@ -73,8 +73,8 @@ class TestKernelRemoveAndFetch:
         existing = json.loads(result.stdout)
 
         if not existing:
-            # Fetch one first
-            _run_mvm(mvm_binary, "kernel", "fetch", "--type", "official")
+            # Pull one first
+            _run_mvm(mvm_binary, "kernel", "pull", "--type", "official")
             result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
             existing = json.loads(result.stdout)
 
@@ -107,11 +107,11 @@ class TestKernelRemoveAndFetch:
         remaining = json.loads(result.stdout)
         assert not any(k["id"].startswith(kernel_id) for k in remaining)
 
-        # Re-fetch so other tests aren't broken
+        # Re-pull so other tests aren't broken
         _run_mvm(
             mvm_binary,
             "kernel",
-            "fetch",
+            "pull",
             "--type",
             "official",
             "--set-default",

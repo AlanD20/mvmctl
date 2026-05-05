@@ -46,7 +46,11 @@ class TestVMCreateAndList:
             "mvmctl.api.vm_operations.Provisioner",
             lambda *args, **kwargs: provisioner_mock,
         )
-        return {"subprocess": sub_mock, "popen": popen_mock, "provisioner": provisioner_mock}
+        return {
+            "subprocess": sub_mock,
+            "popen": popen_mock,
+            "provisioner": provisioner_mock,
+        }
 
     def test_create_vm(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Create a VM via the real API and verify the DB record."""
@@ -56,7 +60,9 @@ class TestVMCreateAndList:
         mocks["provisioner"].set_hostname.return_value = mocks["provisioner"]
         mocks["provisioner"].inject_dns.return_value = mocks["provisioner"]
         mocks["provisioner"].setup_ssh.return_value = mocks["provisioner"]
-        mocks["provisioner"].disable_cloud_init.return_value = mocks["provisioner"]
+        mocks["provisioner"].disable_cloud_init.return_value = mocks[
+            "provisioner"
+        ]
         mocks["provisioner"].run.return_value = None
 
         VMOperation.create(
@@ -82,7 +88,9 @@ class TestVMCreateAndList:
         mocks["provisioner"].set_hostname.return_value = mocks["provisioner"]
         mocks["provisioner"].inject_dns.return_value = mocks["provisioner"]
         mocks["provisioner"].setup_ssh.return_value = mocks["provisioner"]
-        mocks["provisioner"].disable_cloud_init.return_value = mocks["provisioner"]
+        mocks["provisioner"].disable_cloud_init.return_value = mocks[
+            "provisioner"
+        ]
         mocks["provisioner"].run.return_value = None
 
         VMOperation.create(
@@ -104,7 +112,9 @@ class TestVMCreateAndList:
         mocks["provisioner"].set_hostname.return_value = mocks["provisioner"]
         mocks["provisioner"].inject_dns.return_value = mocks["provisioner"]
         mocks["provisioner"].setup_ssh.return_value = mocks["provisioner"]
-        mocks["provisioner"].disable_cloud_init.return_value = mocks["provisioner"]
+        mocks["provisioner"].disable_cloud_init.return_value = mocks[
+            "provisioner"
+        ]
         mocks["provisioner"].run.return_value = None
 
         VMOperation.create(
@@ -120,7 +130,9 @@ class TestVMCreateAndList:
         mocks["provisioner"].set_hostname.return_value = mocks["provisioner"]
         mocks["provisioner"].inject_dns.return_value = mocks["provisioner"]
         mocks["provisioner"].setup_ssh.return_value = mocks["provisioner"]
-        mocks["provisioner"].disable_cloud_init.return_value = mocks["provisioner"]
+        mocks["provisioner"].disable_cloud_init.return_value = mocks[
+            "provisioner"
+        ]
         mocks["provisioner"].run.return_value = None
 
         VMOperation.create(
@@ -141,7 +153,9 @@ class TestVMCreateAndList:
         mocks["provisioner"].set_hostname.return_value = mocks["provisioner"]
         mocks["provisioner"].inject_dns.return_value = mocks["provisioner"]
         mocks["provisioner"].setup_ssh.return_value = mocks["provisioner"]
-        mocks["provisioner"].disable_cloud_init.return_value = mocks["provisioner"]
+        mocks["provisioner"].disable_cloud_init.return_value = mocks[
+            "provisioner"
+        ]
         mocks["provisioner"].run.return_value = None
 
         VMOperation.create(
@@ -174,7 +188,11 @@ class TestVMRemove:
             "mvmctl.api.vm_operations.Provisioner",
             lambda *args, **kwargs: provisioner_mock,
         )
-        return {"subprocess": sub_mock, "popen": popen_mock, "provisioner": provisioner_mock}
+        return {
+            "subprocess": sub_mock,
+            "popen": popen_mock,
+            "provisioner": provisioner_mock,
+        }
 
     def _create_vm(
         self, monkeypatch: pytest.MonkeyPatch, name: str
@@ -184,7 +202,9 @@ class TestVMRemove:
         mocks["provisioner"].set_hostname.return_value = mocks["provisioner"]
         mocks["provisioner"].inject_dns.return_value = mocks["provisioner"]
         mocks["provisioner"].setup_ssh.return_value = mocks["provisioner"]
-        mocks["provisioner"].disable_cloud_init.return_value = mocks["provisioner"]
+        mocks["provisioner"].disable_cloud_init.return_value = mocks[
+            "provisioner"
+        ]
         mocks["provisioner"].run.return_value = None
 
         VMOperation.create(
@@ -259,7 +279,11 @@ class TestVMStatusFiltering:
         provisioner_mock.setup_ssh.return_value = provisioner_mock
         provisioner_mock.disable_cloud_init.return_value = provisioner_mock
         provisioner_mock.run.return_value = None
-        return {"subprocess": sub_mock, "popen": popen_mock, "provisioner": provisioner_mock}
+        return {
+            "subprocess": sub_mock,
+            "popen": popen_mock,
+            "provisioner": provisioner_mock,
+        }
 
     def _create_vm(self, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
         _mocks = self._setup_mocks(monkeypatch)
@@ -347,7 +371,11 @@ class TestVMSnapshotWorkflow:
             MagicMock(return_value=None),
         )
 
-        return {"subprocess": sub_mock, "popen": popen_mock, "provisioner": provisioner_mock}
+        return {
+            "subprocess": sub_mock,
+            "popen": popen_mock,
+            "provisioner": provisioner_mock,
+        }
 
     def test_create_and_snapshot(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -421,7 +449,11 @@ class TestVMInspect:
         provisioner_mock.setup_ssh.return_value = provisioner_mock
         provisioner_mock.disable_cloud_init.return_value = provisioner_mock
         provisioner_mock.run.return_value = None
-        return {"subprocess": sub_mock, "popen": popen_mock, "provisioner": provisioner_mock}
+        return {
+            "subprocess": sub_mock,
+            "popen": popen_mock,
+            "provisioner": provisioner_mock,
+        }
 
     def test_inspect_vm(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Create a VM and inspect it, verifying all flat-mode fields."""
@@ -516,7 +548,11 @@ class TestVMCreateExplicit:
         provisioner_mock.setup_ssh.return_value = provisioner_mock
         provisioner_mock.disable_cloud_init.return_value = provisioner_mock
         provisioner_mock.run.return_value = None
-        return {"subprocess": sub_mock, "popen": popen_mock, "provisioner": provisioner_mock}
+        return {
+            "subprocess": sub_mock,
+            "popen": popen_mock,
+            "provisioner": provisioner_mock,
+        }
 
     def _seed_second_image(self) -> str:
         from mvmctl.core._shared import Database
@@ -741,7 +777,11 @@ class TestVMRemoveForce:
         provisioner_mock.setup_ssh.return_value = provisioner_mock
         provisioner_mock.disable_cloud_init.return_value = provisioner_mock
         provisioner_mock.run.return_value = None
-        return {"subprocess": sub_mock, "popen": popen_mock, "provisioner": provisioner_mock}
+        return {
+            "subprocess": sub_mock,
+            "popen": popen_mock,
+            "provisioner": provisioner_mock,
+        }
 
     def test_remove_vm_with_force(
         self, monkeypatch: pytest.MonkeyPatch

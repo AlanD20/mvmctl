@@ -7,17 +7,17 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from mvmctl.api import BinaryFetchInput as _BinaryFetchInput
 from mvmctl.api import BinaryInput as _BinaryInput
 from mvmctl.api import BinaryOperation as _BinaryOperation
+from mvmctl.api import BinaryPullInput as _BinaryPullInput
 
 if TYPE_CHECKING:
     from mvmctl.api.binary_operations import BinaryOperation
-    from mvmctl.api.inputs._binary_fetch_input import BinaryFetchInput
     from mvmctl.api.inputs._binary_input import BinaryInput
+    from mvmctl.api.inputs._binary_pull_input import BinaryPullInput
 else:
     BinaryOperation = _BinaryOperation
-    BinaryFetchInput = _BinaryFetchInput
+    BinaryPullInput = _BinaryPullInput
     BinaryInput = _BinaryInput
 from mvmctl.models.result import OperationResult
 from mvmctl.utils._io import (
@@ -110,9 +110,9 @@ def bin_ls(
     raise typer.Exit(code=0)
 
 
-@bin_app.command(name="fetch")
+@bin_app.command(name="pull")
 @handle_errors
-def bin_fetch(
+def bin_pull(
     version: str = typer.Argument(
         ..., help="Version to download (e.g. 1.15.0)"
     ),
@@ -151,12 +151,12 @@ def bin_fetch(
             raise typer.Exit(code=0)
         download_override = True
 
-    inputs = BinaryFetchInput(
+    inputs = BinaryPullInput(
         version=version,
         set_as_default=set_default,
         download_override=download_override,
     )
-    result: OperationResult[list[BinaryItem]] = BinaryOperation.fetch(inputs)  # type: ignore[assignment]
+    result: OperationResult[list[BinaryItem]] = BinaryOperation.pull(inputs)  # type: ignore[assignment]
 
     if result.is_error:
         print_error(result.message)

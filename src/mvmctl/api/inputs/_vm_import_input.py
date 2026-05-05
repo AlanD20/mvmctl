@@ -115,7 +115,7 @@ class VMImportRequest:
         except ImageNotFoundError as exc:
             raise ImageNotFoundError(
                 f"Image '{image_config.os_slug}' not found. "
-                f"Fetch it first: mvm image fetch {image_config.os_slug}"
+                f"Fetch it first: mvm image pull {image_config.os_slug}"
             ) from exc
 
     def _resolve_kernel(
@@ -133,7 +133,7 @@ class VMImportRequest:
             raise KernelNotFoundError(
                 f"Kernel version={kernel_config.version!r}, "
                 f"type={kernel_config.type!r} not found. "
-                f"Fetch it first: mvm kernel fetch --type {kernel_config.type}"
+                f"Fetch it first: mvm kernel pull --type {kernel_config.type}"
             ) from exc
 
     def _resolve_binary(
@@ -151,7 +151,7 @@ class VMImportRequest:
             raise BinaryNotFoundError(
                 f"Binary {binary_config.name!r} "
                 f"version={binary_config.version!r} not found. "
-                f"Fetch it first: mvm bin fetch {binary_config.version}"
+                f"Fetch it first: mvm bin pull {binary_config.version}"
             ) from exc
 
     def _resolve_network(

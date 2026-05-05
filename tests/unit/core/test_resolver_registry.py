@@ -17,6 +17,7 @@ class TestResolverRegistry:
 
     def test_register_and_get(self) -> None:
         """A registered factory can be retrieved via get()."""
+
         # Use a simple type for the test
         class FakeResolver:
             pass

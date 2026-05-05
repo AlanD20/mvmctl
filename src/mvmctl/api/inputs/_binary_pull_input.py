@@ -1,4 +1,4 @@
-"""Binary fetch resolver for download operations."""
+"""Binary pull resolver for download operations."""
 
 from __future__ import annotations
 
@@ -11,15 +11,15 @@ from mvmctl.exceptions import BinaryError
 from mvmctl.utils.common import CacheUtils
 
 __all__ = [
-    "BinaryFetchInput",
-    "BinaryFetchRequest",
-    "ResolvedBinaryFetchInput",
+    "BinaryPullInput",
+    "BinaryPullRequest",
+    "ResolvedBinaryPullInput",
 ]
 
 
 @dataclass
-class BinaryFetchInput:
-    """Raw input for binary fetch operation."""
+class BinaryPullInput:
+    """Raw input for binary pull operation."""
 
     version: str
     set_as_default: bool = False
@@ -27,8 +27,8 @@ class BinaryFetchInput:
 
 
 @dataclass(frozen=True)
-class ResolvedBinaryFetchInput:
-    """Immutable resolved binary fetch request."""
+class ResolvedBinaryPullInput:
+    """Immutable resolved binary pull request."""
 
     version: str
     set_as_default: bool
@@ -37,27 +37,27 @@ class ResolvedBinaryFetchInput:
 
 
 @dataclass
-class BinaryFetchRequest:
-    """Resolve binary fetch inputs."""
+class BinaryPullRequest:
+    """Resolve binary pull inputs."""
 
-    _result: ResolvedBinaryFetchInput | None = None
+    _result: ResolvedBinaryPullInput | None = None
 
     def __init__(
-        self, *, inputs: BinaryFetchInput, db: Database | None = None
+        self, *, inputs: BinaryPullInput, db: Database | None = None
     ) -> None:
         self._inputs = inputs
         self._db = db if db is not None else Database()
 
     @property
-    def result(self) -> ResolvedBinaryFetchInput | None:
+    def result(self) -> ResolvedBinaryPullInput | None:
         return self._result
 
-    def resolve(self) -> ResolvedBinaryFetchInput:
+    def resolve(self) -> ResolvedBinaryPullInput:
         """
-        Resolve and validate fetch inputs.
+        Resolve and validate pull inputs.
 
         Returns:
-            ResolvedBinaryFetchInput with resolved values.
+            ResolvedBinaryPullInput with resolved values.
 
         Raises:
             BinaryError: If version format is invalid.
@@ -76,7 +76,7 @@ class BinaryFetchRequest:
         # Resolve bin_dir
         bin_dir = CacheUtils.get_bin_dir()
 
-        self._result = ResolvedBinaryFetchInput(
+        self._result = ResolvedBinaryPullInput(
             version=version,
             set_as_default=self._inputs.set_as_default,
             bin_dir=bin_dir,
@@ -91,7 +91,7 @@ class BinaryFetchRequest:
     def ensure_validate(self) -> None:
         """Validate version is valid semver-like string."""
         if self._result is None:
-            raise BinaryError("No resolved fetch input to validate")
+            raise BinaryError("No resolved pull input to validate")
 
         if not self._result.version:
             raise BinaryError("Version cannot be empty")

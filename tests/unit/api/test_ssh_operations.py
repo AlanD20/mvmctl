@@ -6,7 +6,6 @@ from pathlib import Path
 
 from mvmctl.api.inputs._ssh_input import SSHInput
 from mvmctl.api.ssh_operations import SSHOperation
-from mvmctl.models.result import OperationResult
 
 
 class TestSSHOperationConnect:

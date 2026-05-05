@@ -36,10 +36,16 @@ def _has_check_privileges_call(function_node: ast.AST) -> bool:
     for child in ast.walk(function_node):
         if isinstance(child, ast.Call):
             if isinstance(child.func, ast.Name):
-                if child.func.id in ("check_privileges", "check_privileges_interactive"):
+                if child.func.id in (
+                    "check_privileges",
+                    "check_privileges_interactive",
+                ):
                     return True
             elif isinstance(child.func, ast.Attribute):
-                if child.func.attr in ("check_privileges", "check_privileges_interactive"):
+                if child.func.attr in (
+                    "check_privileges",
+                    "check_privileges_interactive",
+                ):
                     return True
     return False
 
@@ -68,7 +74,9 @@ class TestAPIPrivilegeChecks:
                 violations.append(f"{api_file} - {func_name}() not found")
                 continue
             if not _has_check_privileges_call(func_node):
-                violations.append(f"{api_file}:{func_node.lineno} - {func_name}() missing privilege check")
+                violations.append(
+                    f"{api_file}:{func_node.lineno} - {func_name}() missing privilege check"
+                )
 
         if violations:
             pytest.fail("Missing privilege check(s):\n" + "\n".join(violations))

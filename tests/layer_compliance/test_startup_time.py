@@ -157,7 +157,9 @@ class TestStartupTimeCompliance:
         """Main CLI startup must complete in < 200ms."""
         elapsed_ms = _measure_startup_time(None)
 
-        print(f"\n[MEASUREMENT] CLI startup: {elapsed_ms:.1f}ms (limit: {MAX_STARTUP_MS}ms)")
+        print(
+            f"\n[MEASUREMENT] CLI startup: {elapsed_ms:.1f}ms (limit: {MAX_STARTUP_MS}ms)"
+        )
 
         assert elapsed_ms <= MAX_STARTUP_MS, (
             f"CLI startup time {elapsed_ms:.1f}ms exceeds limit of {MAX_STARTUP_MS}ms.\n"

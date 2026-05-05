@@ -54,8 +54,8 @@ uv run pytest tests/
 
 1. KVM available: /dev/kvm must exist
 2. mvm group: user must be in mvm group (run `sudo mvm host init`)
-3. Images pre-cached: `mvm image fetch alpine-3.21`
-4. Default kernel set: `mvm kernel fetch --type firecracker`
+3. Images pre-cached: `mvm image pull alpine-3.21`
+4. Default kernel set: `mvm kernel pull --type firecracker`
 
 ## ANTI-PATTERNS
 

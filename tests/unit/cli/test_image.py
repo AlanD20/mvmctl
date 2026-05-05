@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from click.testing import CliRunner
 
@@ -99,13 +99,13 @@ class TestImageLs:
         assert result.exit_code == 0
 
 
-class TestImageFetch:
-    """Tests for 'image fetch' command."""
+class TestImagePull:
+    """Tests for 'image pull' command."""
 
     @patch("mvmctl.cli.image.ImageOperation")
-    def test_fetch_success(self, mock_img_op):
+    def test_pull_success(self, mock_img_op):
         img = _make_image("Ubuntu 24.04")
-        mock_img_op.fetch.return_value = OperationResult(
+        mock_img_op.pull.return_value = OperationResult(
             status="success",
             code="image.acquired",
             item=img,
@@ -114,17 +114,17 @@ class TestImageFetch:
             app,
             [
                 "image",
-                "fetch",
+                "pull",
                 "ubuntu-24.04",
             ],
         )
         assert result.exit_code == 0
-        assert "fetched successfully" in result.output
+        assert "pulled successfully" in result.output
 
     @patch("mvmctl.cli.image.ImageOperation")
-    def test_fetch_with_force(self, mock_img_op, tmp_path):
+    def test_pull_with_force(self, mock_img_op, tmp_path):
         img = _make_image("Ubuntu 24.04")
-        mock_img_op.fetch.return_value = OperationResult(
+        mock_img_op.pull.return_value = OperationResult(
             status="success",
             code="image.acquired",
             item=img,
@@ -133,7 +133,7 @@ class TestImageFetch:
             app,
             [
                 "image",
-                "fetch",
+                "pull",
                 "ubuntu-24.04",
                 "--force",
             ],
@@ -141,18 +141,18 @@ class TestImageFetch:
         assert result.exit_code == 0
 
     @patch("mvmctl.cli.image.ImageOperation")
-    def test_fetch_not_found(self, mock_img_op):
-        mock_img_op.fetch.return_value = OperationResult(
+    def test_pull_not_found(self, mock_img_op):
+        mock_img_op.pull.return_value = OperationResult(
             status="error",
             code="image.not_found",
             message="Failed to download image 'nonexistent'",
         )
-        result = runner.invoke(app, ["image", "fetch", "nonexistent"])
+        result = runner.invoke(app, ["image", "pull", "nonexistent"])
         assert result.exit_code == 1
         assert "Failed to download" in result.output
 
-    def test_fetch_help(self):
-        result = runner.invoke(app, ["image", "fetch", "--help"])
+    def test_pull_help(self):
+        result = runner.invoke(app, ["image", "pull", "--help"])
         assert result.exit_code == 0
 
 
@@ -161,14 +161,30 @@ class TestImageRemove:
 
     @patch("mvmctl.cli.image.ImageOperation")
     def test_rm_success(self, mock_img_op):
-        mock_img_op.remove.return_value = BatchResult(items=[OperationResult(status="success", code="image.removed", message="Image removed")])
+        mock_img_op.remove.return_value = BatchResult(
+            items=[
+                OperationResult(
+                    status="success",
+                    code="image.removed",
+                    message="Image removed",
+                )
+            ]
+        )
         result = runner.invoke(app, ["image", "rm", "abc123"])
         assert result.exit_code == 0
         assert "Removed" in result.output
 
     @patch("mvmctl.cli.image.ImageOperation")
     def test_rm_multiple(self, mock_img_op):
-        mock_img_op.remove.return_value = BatchResult(items=[OperationResult(status="success", code="image.removed", message="Image removed")])
+        mock_img_op.remove.return_value = BatchResult(
+            items=[
+                OperationResult(
+                    status="success",
+                    code="image.removed",
+                    message="Image removed",
+                )
+            ]
+        )
         result = runner.invoke(app, ["image", "rm", "abc123", "def456"])
         assert result.exit_code == 0
 
@@ -193,7 +209,11 @@ class TestImageSetDefault:
 
     @patch("mvmctl.cli.image.ImageOperation")
     def test_set_default_success(self, mock_img_op):
-        mock_img_op.set_default.return_value = OperationResult(status='success', code='image.default_set', message='Default image set')
+        mock_img_op.set_default.return_value = OperationResult(
+            status="success",
+            code="image.default_set",
+            message="Default image set",
+        )
         result = runner.invoke(app, ["image", "set-default", "abc123"])
         assert result.exit_code == 0
         assert "Default image set" in result.output
@@ -316,7 +336,9 @@ class TestImageWarm:
         warm_path = tmp_path / "warm" / "ubuntu-24.04.ext4"
         warm_path.parent.mkdir(parents=True)
         warm_path.write_bytes(b"\x00" * 1024)
-        mock_img_op.warm.return_value = OperationResult(status="success", code="image.warmed", item=[warm_path])
+        mock_img_op.warm.return_value = OperationResult(
+            status="success", code="image.warmed", item=[warm_path]
+        )
         result = runner.invoke(app, ["image", "warm", "ubuntu-24.04"])
         assert result.exit_code == 0
         assert "warmed" in result.output.lower()
@@ -390,73 +412,89 @@ class TestImageLsExtended:
         assert "Database connection failed" in result.output
 
 
-class TestImageFetchExtended:
-    """Extended tests for 'image fetch' — uncovered paths."""
+class TestImagePullExtended:
+    """Extended tests for 'image pull' — uncovered paths."""
 
-    def test_fetch_needs_interaction(self, mocker):
+    def test_pull_needs_interaction(self, mocker):
         """Should prompt when NeedsInteraction is returned."""
         mock = mocker.patch("mvmctl.cli.image.ImageOperation")
-        mock.fetch.return_value = NeedsInteraction(
+        mock.pull.return_value = NeedsInteraction(
             code="sudo.required",
             message="Sudo access required to continue",
             input_type="sudo",
             context={"command": "sudo mvm host init"},
         )
-        result = runner.invoke(app, ["image", "fetch", "ubuntu-24.04"])
+        result = runner.invoke(app, ["image", "pull", "ubuntu-24.04"])
         assert result.exit_code == 0
         assert "Sudo access required" in result.output
 
-    def test_fetch_error_result(self, mocker):
+    def test_pull_error_result(self, mocker):
         """Should fail cleanly on error OperationResult."""
         mock = mocker.patch("mvmctl.cli.image.ImageOperation")
-        mock.fetch.return_value = OperationResult(
+        mock.pull.return_value = OperationResult(
             status="error",
             code="image.download_failed",
             message="Network timeout during download",
         )
-        result = runner.invoke(app, ["image", "fetch", "ubuntu-24.04"])
+        result = runner.invoke(app, ["image", "pull", "ubuntu-24.04"])
         assert result.exit_code == 1
         assert "Network timeout" in result.output
 
-    def test_fetch_with_set_default(self, mocker):
+    def test_pull_with_set_default(self, mocker):
         """Should confirm default image when --set-default."""
         mock = mocker.patch("mvmctl.cli.image.ImageOperation")
         img = _make_image("Ubuntu 24.04")
-        mock.fetch.return_value = OperationResult(
+        mock.pull.return_value = OperationResult(
             status="success",
             code="image.acquired",
             item=img,
         )
         result = runner.invoke(
-            app, ["image", "fetch", "ubuntu-24.04", "--set-default"]
+            app, ["image", "pull", "ubuntu-24.04", "--set-default"]
         )
         assert result.exit_code == 0
         assert "Default image set" in result.output
 
-    def test_fetch_progress_callback(self, mocker):
+    def test_pull_progress_callback(self, mocker):
         """Should handle progress events with and without messages."""
         mock = mocker.patch("mvmctl.cli.image.ImageOperation")
         img = _make_image("Ubuntu 24.04")
 
-        def mock_fetch(fetch_input, on_progress=None):
+        def mock_pull(pull_input, on_progress=None):
             if on_progress:
-                on_progress(ProgressEvent(phase="download", status="running", message="Downloading..."))
-                on_progress(ProgressEvent(phase="download", status="running", message=None))
-                on_progress(ProgressEvent(phase="complete", status="complete", message="Done"))
-            return OperationResult(status="success", code="image.acquired", item=img)
+                on_progress(
+                    ProgressEvent(
+                        phase="download",
+                        status="running",
+                        message="Downloading...",
+                    )
+                )
+                on_progress(
+                    ProgressEvent(
+                        phase="download", status="running", message=None
+                    )
+                )
+                on_progress(
+                    ProgressEvent(
+                        phase="complete", status="complete", message="Done"
+                    )
+                )
+            return OperationResult(
+                status="success", code="image.acquired", item=img
+            )
 
-        mock.fetch.side_effect = mock_fetch
-        result = runner.invoke(app, ["image", "fetch", "ubuntu-24.04"])
+        mock.pull.side_effect = mock_pull
+        result = runner.invoke(app, ["image", "pull", "ubuntu-24.04"])
         assert result.exit_code == 0
 
-    def test_fetch_error_no_message(self, mocker):
+    def test_pull_error_no_message(self, mocker):
         """Should use fallback message when result has no message."""
         mock = mocker.patch("mvmctl.cli.image.ImageOperation")
-        mock.fetch.return_value = OperationResult(
+        mock.pull.return_value = OperationResult(
             status="error",
             code="image.download_failed",
         )
-        result = runner.invoke(app, ["image", "fetch", "nonexistent"])
+        result = runner.invoke(app, ["image", "pull", "nonexistent"])
         assert result.exit_code == 1
         assert "Failed to download" in result.output
 
@@ -495,10 +533,22 @@ class TestImageRemoveExtended:
         """Should handle batch with successes and failures."""
         mock = mocker.patch("mvmctl.cli.image.ImageOperation")
         img1 = _make_image("Ubuntu 24.04", image_id="img-ok-" + "x" * 55)
-        mock.remove.return_value = BatchResult(items=[
-            OperationResult(status="success", code="image.removed", message="Removed", item=img1),
-            OperationResult(status="error", code="image.not_found", message="Image not found", item=None),
-        ])
+        mock.remove.return_value = BatchResult(
+            items=[
+                OperationResult(
+                    status="success",
+                    code="image.removed",
+                    message="Removed",
+                    item=img1,
+                ),
+                OperationResult(
+                    status="error",
+                    code="image.not_found",
+                    message="Image not found",
+                    item=None,
+                ),
+            ]
+        )
         result = runner.invoke(app, ["image", "rm", "ok123", "bad456"])
         assert result.exit_code == 0
         assert "Removed" in result.output
@@ -508,9 +558,16 @@ class TestImageRemoveExtended:
         """Should pass --force to API."""
         mock = mocker.patch("mvmctl.cli.image.ImageOperation")
         img = _make_image("Ubuntu 24.04")
-        mock.remove.return_value = BatchResult(items=[
-            OperationResult(status="success", code="image.removed", message="Removed", item=img),
-        ])
+        mock.remove.return_value = BatchResult(
+            items=[
+                OperationResult(
+                    status="success",
+                    code="image.removed",
+                    message="Removed",
+                    item=img,
+                ),
+            ]
+        )
         result = runner.invoke(app, ["image", "rm", "--force", "abc123"])
         assert result.exit_code == 0
         mock.remove.assert_called_once()
@@ -533,7 +590,9 @@ class TestImageInspectExtended:
     def test_inspect_missing_image_marker(self, mocker):
         """Should show '(missing)' for images not on disk."""
         mock = mocker.patch("mvmctl.cli.image.ImageOperation")
-        mock.inspect.return_value = _make_image("Ubuntu 24.04", is_present=False)
+        mock.inspect.return_value = _make_image(
+            "Ubuntu 24.04", is_present=False
+        )
         result = runner.invoke(app, ["image", "inspect", "abc123"])
         assert result.exit_code == 0
         assert "(missing)" in result.output
@@ -541,7 +600,9 @@ class TestImageInspectExtended:
     def test_inspect_tree_missing(self, mocker):
         """Should show missing marker in tree format."""
         mock = mocker.patch("mvmctl.cli.image.ImageOperation")
-        mock.inspect.return_value = _make_image("Ubuntu 24.04", is_present=False)
+        mock.inspect.return_value = _make_image(
+            "Ubuntu 24.04", is_present=False
+        )
         result = runner.invoke(app, ["image", "inspect", "abc123", "--tree"])
         assert result.exit_code == 0
         assert "(missing)" in result.output
@@ -549,7 +610,10 @@ class TestImageInspectExtended:
     def test_inspect_dict_json(self, mocker):
         """Should handle dict return with --json."""
         mock = mocker.patch("mvmctl.cli.image.ImageOperation")
-        mock.inspect.return_value = {"os_slug": "ubuntu-24.04", "os_name": "Ubuntu"}
+        mock.inspect.return_value = {
+            "os_slug": "ubuntu-24.04",
+            "os_name": "Ubuntu",
+        }
         result = runner.invoke(app, ["image", "inspect", "abc123", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -602,9 +666,7 @@ class TestImageImportExtended:
         mock = mocker.patch("mvmctl.cli.image.ImageOperation")
         source = tmp_path / "image.unknown_ext"
         source.write_bytes(b"data")
-        result = runner.invoke(
-            app, ["image", "import", "Test OS", str(source)]
-        )
+        result = runner.invoke(app, ["image", "import", "Test OS", str(source)])
         assert result.exit_code == 1
         assert "auto-detect" in result.output.lower()
 
@@ -618,9 +680,7 @@ class TestImageImportExtended:
         )
         source = tmp_path / "source.qcow2"
         source.write_bytes(b"data")
-        result = runner.invoke(
-            app, ["image", "import", "Test OS", str(source)]
-        )
+        result = runner.invoke(app, ["image", "import", "Test OS", str(source)])
         assert result.exit_code == 1
         assert "Import process failed" in result.output
 
@@ -633,9 +693,7 @@ class TestImageImportExtended:
         )
         source = tmp_path / "source.qcow2"
         source.write_bytes(b"data")
-        result = runner.invoke(
-            app, ["image", "import", "Test OS", str(source)]
-        )
+        result = runner.invoke(app, ["image", "import", "Test OS", str(source)])
         assert result.exit_code == 1
         assert "Failed to import image" in result.output
 
@@ -663,15 +721,19 @@ class TestImageImportExtended:
 
         def mock_import(spec, on_progress=None):
             if on_progress:
-                on_progress(ProgressEvent(phase="import", status="running", message="Importing..."))
-            return OperationResult(status="success", code="image.imported", item=img)
+                on_progress(
+                    ProgressEvent(
+                        phase="import", status="running", message="Importing..."
+                    )
+                )
+            return OperationResult(
+                status="success", code="image.imported", item=img
+            )
 
         mock.import_.side_effect = mock_import
         source = tmp_path / "source.qcow2"
         source.write_bytes(b"data")
-        result = runner.invoke(
-            app, ["image", "import", "Test OS", str(source)]
-        )
+        result = runner.invoke(app, ["image", "import", "Test OS", str(source)])
         assert result.exit_code == 0
 
     def test_import_with_disable_detector(self, mocker, tmp_path):
@@ -686,7 +748,15 @@ class TestImageImportExtended:
         source = tmp_path / "source.qcow2"
         source.write_bytes(b"data")
         result = runner.invoke(
-            app, ["image", "import", "Test OS", str(source), "--disable-detector", "type,label"]
+            app,
+            [
+                "image",
+                "import",
+                "Test OS",
+                str(source),
+                "--disable-detector",
+                "type,label",
+            ],
         )
         assert result.exit_code == 0
 
@@ -713,7 +783,11 @@ class TestImageWarmExtended:
 
         def mock_warm(vm_input, on_progress=None):
             if on_progress:
-                on_progress(ProgressEvent(phase="warm", status="running", message="Warming..."))
+                on_progress(
+                    ProgressEvent(
+                        phase="warm", status="running", message="Warming..."
+                    )
+                )
             return OperationResult(
                 status="success",
                 code="image.warmed",

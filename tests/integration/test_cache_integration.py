@@ -19,7 +19,6 @@ from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.exceptions import VMNotFoundError
-from mvmctl.models.result import OperationResult
 from mvmctl.models import (
     BinaryItem,
     CleanResult,
@@ -28,6 +27,7 @@ from mvmctl.models import (
     PruneAllResult,
     VMStatus,
 )
+from mvmctl.models.result import OperationResult
 from mvmctl.utils.common import CacheUtils
 
 # ======================================================================
@@ -97,7 +97,11 @@ class TestCachePruneVMs:
         provisioner_mock.setup_ssh.return_value = provisioner_mock
         provisioner_mock.disable_cloud_init.return_value = provisioner_mock
         provisioner_mock.run.return_value = None
-        return {"subprocess": sub_mock, "popen": popen_mock, "provisioner": provisioner_mock}
+        return {
+            "subprocess": sub_mock,
+            "popen": popen_mock,
+            "provisioner": provisioner_mock,
+        }
 
     def _create_vm(self, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
         """Create a VM with all mocks applied."""
@@ -106,7 +110,9 @@ class TestCachePruneVMs:
         mocks["provisioner"].set_hostname.return_value = mocks["provisioner"]
         mocks["provisioner"].inject_dns.return_value = mocks["provisioner"]
         mocks["provisioner"].setup_ssh.return_value = mocks["provisioner"]
-        mocks["provisioner"].disable_cloud_init.return_value = mocks["provisioner"]
+        mocks["provisioner"].disable_cloud_init.return_value = mocks[
+            "provisioner"
+        ]
         mocks["provisioner"].run.return_value = None
         VMOperation.create(
             VMCreateInput(name=name, ssh_keys=[], enable_console=False)
@@ -365,7 +371,11 @@ class TestCachePruneAll:
         provisioner_mock.setup_ssh.return_value = provisioner_mock
         provisioner_mock.disable_cloud_init.return_value = provisioner_mock
         provisioner_mock.run.return_value = None
-        return {"subprocess": sub_mock, "popen": popen_mock, "provisioner": provisioner_mock}
+        return {
+            "subprocess": sub_mock,
+            "popen": popen_mock,
+            "provisioner": provisioner_mock,
+        }
 
     def _create_vm(self, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
         """Create a VM with all mocks applied."""
@@ -374,7 +384,9 @@ class TestCachePruneAll:
         mocks["provisioner"].set_hostname.return_value = mocks["provisioner"]
         mocks["provisioner"].inject_dns.return_value = mocks["provisioner"]
         mocks["provisioner"].setup_ssh.return_value = mocks["provisioner"]
-        mocks["provisioner"].disable_cloud_init.return_value = mocks["provisioner"]
+        mocks["provisioner"].disable_cloud_init.return_value = mocks[
+            "provisioner"
+        ]
         mocks["provisioner"].run.return_value = None
         VMOperation.create(
             VMCreateInput(name=name, ssh_keys=[], enable_console=False)

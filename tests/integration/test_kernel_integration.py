@@ -1,7 +1,7 @@
 """Integration tests for Kernel API operations.
 
 Tests exercise the complete kernel orchestration flow:
-  fetch → list → get → inspect → set_default → remove
+  pull → list → get → inspect → set_default → remove
 
 Only subprocess and HTTP download operations are mocked. ALL orchestration
 logic in api/ and core/ runs unmocked.
@@ -11,15 +11,15 @@ from __future__ import annotations
 
 import pytest
 
-from mvmctl.api import KernelFetchInput, KernelInput, KernelOperation
-from mvmctl.exceptions import KernelError, KernelNotFoundError
-from mvmctl.models.result import BatchResult, OperationResult
+from mvmctl.api import KernelInput, KernelOperation, KernelPullInput
+from mvmctl.exceptions import KernelNotFoundError
 from mvmctl.models import (
-    KernelFetchResult,
+    KernelPullResult,
     KernelItem,
     VMInstanceItem,
     VMStatus,
 )
+from mvmctl.models.result import BatchResult, OperationResult
 from mvmctl.utils.common import CacheUtils
 
 # ======================================================================
@@ -27,19 +27,19 @@ from mvmctl.utils.common import CacheUtils
 # ======================================================================
 
 
-def _mock_fetch_firecracker_kernel(
+def _mock_pull_firecracker_kernel(
     cls: type,  # noqa: ARG001
     spec: object,  # noqa: ARG001
     ci_version: str,  # noqa: ARG001
     arch: str,
     output_dir: object,  # noqa: ARG001
     **kwargs: object,  # noqa: ARG001
-) -> KernelFetchResult:
+) -> KernelPullResult:
     """Return a fake firecracker kernel result pointing to a real file."""
     kernels_dir = CacheUtils.get_kernels_dir()
     fake_path = kernels_dir / "vmlinux-firecracker-6.1.0-x86_64"
     fake_path.write_text("fake firecracker kernel")
-    return KernelFetchResult(
+    return KernelPullResult(
         path=fake_path,
         version="6.1.0",
         arch=arch,
@@ -48,24 +48,24 @@ def _mock_fetch_firecracker_kernel(
 
 
 # ======================================================================
-# Kernel fetch tests
+# Kernel pull tests
 # ======================================================================
 
 
-class TestKernelFetch:
-    """Test kernel fetch through the real API."""
+class TestKernelPull:
+    """Test kernel pull through the real API."""
 
-    def test_fetch_firecracker_kernel(
+    def test_pull_firecracker_kernel(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Fetch a firecracker kernel and verify the DB record."""
+        """Pull a firecracker kernel and verify the DB record."""
         monkeypatch.setattr(
             "mvmctl.core.kernel._service.KernelService.fetch_firecracker_kernel",
-            classmethod(_mock_fetch_firecracker_kernel),
+            classmethod(_mock_pull_firecracker_kernel),
         )
 
-        result = KernelOperation.fetch(
-            KernelFetchInput(kernel_type="firecracker", version="6.1.0")
+        result = KernelOperation.pull(
+            KernelPullInput(kernel_type="firecracker", version="6.1.0")
         )
 
         assert isinstance(result, OperationResult)
@@ -79,19 +79,17 @@ class TestKernelFetch:
         assert result.item.is_present is True
         assert result.item.resolved_path.exists()
 
-    def test_fetch_invalid_kernel_type(self) -> None:
-        """Fetching with an unsupported kernel type returns error."""
-        result = KernelOperation.fetch(
-            KernelFetchInput(kernel_type="invalid", version="6.1.0")
+    def test_pull_invalid_kernel_type(self) -> None:
+        """Pulling with an unsupported kernel type returns error."""
+        result = KernelOperation.pull(
+            KernelPullInput(kernel_type="invalid", version="6.1.0")
         )
         assert result.status == "error"
 
-    def test_fetch_invalid_version_format(self) -> None:
-        """Fetching with an invalid version format returns error."""
-        result = KernelOperation.fetch(
-            KernelFetchInput(
-                kernel_type="official", version="not-a-version"
-            )
+    def test_pull_invalid_version_format(self) -> None:
+        """Pulling with an invalid version format returns error."""
+        result = KernelOperation.pull(
+            KernelPullInput(kernel_type="official", version="not-a-version")
         )
         assert result.status == "error"
 
@@ -158,28 +156,29 @@ class TestKernelDefault:
     """Test kernel default management through the real API."""
 
     def test_set_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Set a fetched kernel as default and verify is_default=True."""
+        """Set a pulled kernel as default and verify is_default=True."""
         monkeypatch.setattr(
             "mvmctl.core.kernel._service.KernelService.fetch_firecracker_kernel",
-            classmethod(_mock_fetch_firecracker_kernel),
+            classmethod(_mock_pull_firecracker_kernel),
         )
 
-        fetched = KernelOperation.fetch(
-            KernelFetchInput(kernel_type="firecracker", version="6.1.0")
+        fetched = KernelOperation.pull(
+            KernelPullInput(kernel_type="firecracker", version="6.1.0")
         )
 
-        # Initially the seeded kernel is default, not the fetched one
+        # Initially the seeded kernel is default, not the pulled one
         assert not fetched.item.is_default
 
         KernelOperation.set_default(KernelInput(id=[fetched.item.id]))
 
-        # Verify the fetched kernel is now default
+        # Verify the pulled kernel is now default
         kernel = KernelOperation.get(KernelInput(id=[fetched.item.id]))
         assert kernel.is_default
 
         # Verify the old default is no longer default
         old = KernelOperation.get(KernelInput(id=["a" * 64]))
         assert not old.is_default
+
 
 # ======================================================================
 # Kernel remove tests
@@ -190,14 +189,14 @@ class TestKernelRemove:
     """Test kernel removal through the real API."""
 
     def test_remove_kernel(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Fetch a kernel, verify it exists, then remove it."""
+        """Pull a kernel, verify it exists, then remove it."""
         monkeypatch.setattr(
             "mvmctl.core.kernel._service.KernelService.fetch_firecracker_kernel",
-            classmethod(_mock_fetch_firecracker_kernel),
+            classmethod(_mock_pull_firecracker_kernel),
         )
 
-        fetched = KernelOperation.fetch(
-            KernelFetchInput(kernel_type="firecracker", version="6.1.0")
+        fetched = KernelOperation.pull(
+            KernelPullInput(kernel_type="firecracker", version="6.1.0")
         )
 
         # Verify it exists in list

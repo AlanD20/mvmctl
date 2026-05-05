@@ -5,12 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import sqlite3
-
-import pytest
-
 from mvmctl.api.host_operations import HostOperation
-from mvmctl.exceptions import HostError
 from mvmctl.models import VMStatus
 from mvmctl.models.result import OperationResult
 
@@ -145,9 +140,7 @@ class TestHostOperationInit:
         mocker.patch("mvmctl.api.host_operations.HostService")
 
         HostOperation.init(Path("/tmp"))
-        mock_check.assert_called_once_with(
-            "/usr/sbin/ip", "initialize host"
-        )
+        mock_check.assert_called_once_with("/usr/sbin/ip", "initialize host")
 
 
 class TestHostOperationClean:
@@ -281,7 +274,9 @@ class TestHostOperationReset:
         )
         mocker.patch(
             "mvmctl.api.host_operations.HostOperation.clean",
-            return_value=OperationResult(status="success", code="ok", item=["Cleaned TAPs"]),
+            return_value=OperationResult(
+                status="success", code="ok", item=["Cleaned TAPs"]
+            ),
         )
         mock_repo = MagicMock()
         mock_repo.list_changes.return_value = []
@@ -312,4 +307,3 @@ class TestHostOperationReset:
         result = HostOperation.reset(Path("/tmp"))
         assert "Cleaned TAPs" in result.item
         mock_service.restore_state.assert_called_once()
-

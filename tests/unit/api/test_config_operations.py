@@ -7,7 +7,6 @@ from unittest.mock import patch
 import pytest
 
 from mvmctl.api.config_operations import ConfigOperation
-from mvmctl.models.result import OperationResult
 from mvmctl.exceptions import ConfigError
 
 

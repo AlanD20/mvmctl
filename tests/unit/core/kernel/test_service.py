@@ -301,7 +301,10 @@ class TestFetchFirecrackerKernel:
         with (
             patch(
                 "mvmctl.core.kernel._service.HttpDownload.read_raw_content",
-                side_effect=[list_resp, HttpDownloadError("sha256 fetch failed")],
+                side_effect=[
+                    list_resp,
+                    HttpDownloadError("sha256 fetch failed"),
+                ],
             ),
             pytest.raises(KernelError, match="Checksum required"),
         ):

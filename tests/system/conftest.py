@@ -110,12 +110,12 @@ def timing_targets() -> dict[str, float]:
 def prepare_system_env(mvm_binary, check_system_prerequisites) -> None:
     """Verify required assets are cached before tests run.
 
-    Does NOT auto-fetch — run ``task sys-setup`` first to pre-fetch
+    Does NOT auto-pull — run ``task sys-setup`` first to pre-pull
     kernels, images, and binaries with visible progress.
     """
     binary = mvm_binary
 
-    # xdist workers skip verification — assets must be pre-fetched before
+    # xdist workers skip verification — assets must be pre-pulled before
     # running in parallel (avoids race conditions).
     if os.environ.get("PYTEST_XDIST_WORKER"):
         return

@@ -108,7 +108,9 @@ class TestInit:
 
 
 class TestStop:
-    def test_stop_is_idempotent_when_not_running(self, mock_repo: MagicMock) -> None:
+    def test_stop_is_idempotent_when_not_running(
+        self, mock_repo: MagicMock
+    ) -> None:
         vm = _make_vm(status=VMStatus.STOPPED.value)
         controller = VMController(entity=vm, repo=mock_repo)
         controller.stop()
@@ -191,7 +193,9 @@ class TestStop:
 
 
 class TestPause:
-    def test_pause_is_idempotent_when_already_paused(self, mock_repo: MagicMock) -> None:
+    def test_pause_is_idempotent_when_already_paused(
+        self, mock_repo: MagicMock
+    ) -> None:
         vm = _make_vm(status=VMStatus.PAUSED.value)
         controller = VMController(entity=vm, repo=mock_repo)
         controller.pause()
@@ -227,7 +231,9 @@ class TestPause:
 
 
 class TestResume:
-    def test_resume_is_idempotent_when_running(self, mock_repo: MagicMock) -> None:
+    def test_resume_is_idempotent_when_running(
+        self, mock_repo: MagicMock
+    ) -> None:
         vm = _make_vm(status=VMStatus.RUNNING.value)
         controller = VMController(entity=vm, repo=mock_repo)
         controller.resume()
@@ -263,7 +269,9 @@ class TestResume:
 
 
 class TestStart:
-    def test_start_is_idempotent_when_running(self, mock_repo: MagicMock) -> None:
+    def test_start_is_idempotent_when_running(
+        self, mock_repo: MagicMock
+    ) -> None:
         vm = _make_vm(status=VMStatus.RUNNING.value)
         controller = VMController(entity=vm, repo=mock_repo)
         controller.start()

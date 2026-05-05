@@ -1503,10 +1503,10 @@ def main() -> None:
         print("Downloading Firecracker 1.15.0 ...")
         BinaryOperation.fetch(BinaryFetchInput(version="1.15.0"))
 
-    # 4. Ensure a kernel is available (via CLI: mvm kernel fetch)
+    # 4. Ensure a kernel is available (via CLI: mvm kernel pull)
     # or use KernelOperation.fetch() directly for custom kernels
 
-    # 5. Ensure an image is available (via CLI: mvm image fetch)
+    # 5. Ensure an image is available (via CLI: mvm image pull)
     # or use ImageOperation.fetch() directly
 
     # 6. Create or register an SSH key

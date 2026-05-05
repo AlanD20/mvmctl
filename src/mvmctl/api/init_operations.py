@@ -233,10 +233,10 @@ class InitOperation:
     def _download_binary(version: str) -> InitStepResult:
         """Download a specific binary version."""
         from mvmctl.api.binary_operations import BinaryOperation
-        from mvmctl.api.inputs._binary_fetch_input import BinaryFetchInput
+        from mvmctl.api.inputs._binary_pull_input import BinaryPullInput
 
-        fetch_result = BinaryOperation.fetch(
-            BinaryFetchInput(version=version, set_as_default=True)
+        fetch_result = BinaryOperation.pull(
+            BinaryPullInput(version=version, set_as_default=True)
         )
         if isinstance(fetch_result, NeedsInteraction):
             return InitStepResult(
@@ -255,7 +255,7 @@ class InitOperation:
     def _download_binary_latest() -> InitStepResult:
         """Download the latest remote binary version (non-interactive only)."""
         from mvmctl.api.binary_operations import BinaryOperation
-        from mvmctl.api.inputs._binary_fetch_input import BinaryFetchInput
+        from mvmctl.api.inputs._binary_pull_input import BinaryPullInput
 
         try:
             versions = BinaryOperation.list_remote(limit=1)
@@ -264,8 +264,8 @@ class InitOperation:
                     "binary", False, "No remote versions found"
                 )
 
-            fetch_result = BinaryOperation.fetch(
-                BinaryFetchInput(version=versions[0], set_as_default=True)
+            fetch_result = BinaryOperation.pull(
+                BinaryPullInput(version=versions[0], set_as_default=True)
             )
             if isinstance(fetch_result, NeedsInteraction):
                 return InitStepResult(

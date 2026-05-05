@@ -1,13 +1,13 @@
 """Tests for CLI config commands."""
 
 from __future__ import annotations
-from mvmctl.models.result import OperationResult
 
 from unittest.mock import patch
 
 from click.testing import CliRunner
 
 from mvmctl.main import app
+from mvmctl.models.result import OperationResult
 
 runner = CliRunner()
 
@@ -55,7 +55,9 @@ class TestConfigSet:
 
     @patch("mvmctl.cli.config.ConfigOperation")
     def test_set_value(self, mock_cfg_op):
-        mock_cfg_op.set.return_value = OperationResult(status='success', code='config.set', message='Configuration updated')
+        mock_cfg_op.set.return_value = OperationResult(
+            status="success", code="config.set", message="Configuration updated"
+        )
         result = runner.invoke(
             app, ["config", "set", "defaults.vm", "network_interface", "eth0"]
         )
@@ -108,7 +110,9 @@ class TestConfigReset:
 
     @patch("mvmctl.cli.config.ConfigOperation")
     def test_reset_key(self, mock_cfg_op):
-        mock_cfg_op.reset.return_value = OperationResult(status="success", code="config.reset", item=1)
+        mock_cfg_op.reset.return_value = OperationResult(
+            status="success", code="config.reset", item=1
+        )
         result = runner.invoke(
             app, ["config", "reset", "defaults.vm", "network_interface"]
         )
@@ -117,13 +121,17 @@ class TestConfigReset:
 
     @patch("mvmctl.cli.config.ConfigOperation")
     def test_reset_category(self, mock_cfg_op):
-        mock_cfg_op.reset.return_value = OperationResult(status="success", code="config.reset", item=3)
+        mock_cfg_op.reset.return_value = OperationResult(
+            status="success", code="config.reset", item=3
+        )
         result = runner.invoke(app, ["config", "reset", "defaults.vm"])
         assert result.exit_code == 0
 
     @patch("mvmctl.cli.config.ConfigOperation")
     def test_reset_all(self, mock_cfg_op):
-        mock_cfg_op.reset.return_value = OperationResult(status="success", code="config.reset", item=5)
+        mock_cfg_op.reset.return_value = OperationResult(
+            status="success", code="config.reset", item=5
+        )
         result = runner.invoke(app, ["config", "reset", "--all"])
         assert result.exit_code == 0
 

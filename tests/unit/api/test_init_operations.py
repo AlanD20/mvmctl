@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from mvmctl.api.init_operations import InitOperation, InitResult, InitStepResult
-from mvmctl.models.result import OperationResult
 from mvmctl.models.result import NeedsInteraction, OperationResult
 
 
@@ -164,7 +163,9 @@ class TestStepCache:
         mock_cache = mocker.patch(
             "mvmctl.api.cache_operations.CacheOperation.init_all"
         )
-        mock_cache.return_value = OperationResult(status="success", code="cache.initialized", item={})
+        mock_cache.return_value = OperationResult(
+            status="success", code="cache.initialized", item={}
+        )
 
         result = InitOperation._step_cache()
 
@@ -177,7 +178,11 @@ class TestStepCache:
         mock_cache = mocker.patch(
             "mvmctl.api.cache_operations.CacheOperation.init_all"
         )
-        mock_cache.return_value = OperationResult(status="success", code="cache.initialized", item={"guestfs_appliance": "/tmp/appliance"})
+        mock_cache.return_value = OperationResult(
+            status="success",
+            code="cache.initialized",
+            item={"guestfs_appliance": "/tmp/appliance"},
+        )
 
         result = InitOperation._step_cache()
 
@@ -547,9 +552,7 @@ class TestStepGuestfs:
     def test_prompts_when_available_and_undecided(self, mocker):
         """_step_guestfs returns NeedsInteraction when guestfs available and undecided."""
         # Make the import succeed
-        mocker.patch.dict(
-            "sys.modules", {"guestfs": mocker.MagicMock()}
-        )
+        mocker.patch.dict("sys.modules", {"guestfs": mocker.MagicMock()})
         # Mock settings service set to detect if called
         mock_set = mocker.patch(
             "mvmctl.core.config._service.SettingsService.set"

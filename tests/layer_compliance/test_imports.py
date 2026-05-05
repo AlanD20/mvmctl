@@ -43,7 +43,10 @@ def _parse_imports(file_path: Path) -> list[tuple[str, str, int]]:
     def _is_in_type_checking(node: ast.AST) -> bool:
         for parent in ast.walk(tree):
             if isinstance(parent, ast.If):
-                if isinstance(parent.test, ast.Name) and parent.test.id == "TYPE_CHECKING":
+                if (
+                    isinstance(parent.test, ast.Name)
+                    and parent.test.id == "TYPE_CHECKING"
+                ):
                     for child in ast.walk(parent):
                         if child is node:
                             return True
@@ -89,13 +92,17 @@ class TestCLILayerImports:
             imports = _parse_imports(file_path)
             for import_type, import_path, line_no in imports:
                 if _is_core_violation(import_path):
-                    violations.append({
-                        "file": _get_relative_path(file_path),
-                        "line": line_no,
-                        "import": import_path,
-                    })
+                    violations.append(
+                        {
+                            "file": _get_relative_path(file_path),
+                            "line": line_no,
+                            "import": import_path,
+                        }
+                    )
         if violations:
-            msgs = [f"  {v['file']}:{v['line']} - {v['import']}" for v in violations]
+            msgs = [
+                f"  {v['file']}:{v['line']} - {v['import']}" for v in violations
+            ]
             pytest.fail(
                 f"Found {len(violations)} CLI→Core import violation(s):\n"
                 + "\n".join(msgs)
@@ -120,13 +127,17 @@ class TestAPILayerImports:
             imports = _parse_imports(file_path)
             for import_type, import_path, line_no in imports:
                 if "Controller" in import_path:
-                    violations.append({
-                        "file": _get_relative_path(file_path),
-                        "line": line_no,
-                        "import": import_path,
-                    })
+                    violations.append(
+                        {
+                            "file": _get_relative_path(file_path),
+                            "line": line_no,
+                            "import": import_path,
+                        }
+                    )
         if violations:
-            msgs = [f"  {v['file']}:{v['line']} - {v['import']}" for v in violations]
+            msgs = [
+                f"  {v['file']}:{v['line']} - {v['import']}" for v in violations
+            ]
             pytest.fail(
                 f"Found {len(violations)} API→Controller import violation(s):\n"
                 + "\n".join(msgs)
@@ -146,8 +157,20 @@ class TestCoreServiceIsolation:
     - mvmctl.utils (helpers)
     """
 
-    SERVICE_DIRS = ["binary", "image", "kernel", "key", "network", "host", "logs",
-                    "console", "ssh", "config", "cloudinit", "cache"]
+    SERVICE_DIRS = [
+        "binary",
+        "image",
+        "kernel",
+        "key",
+        "network",
+        "host",
+        "logs",
+        "console",
+        "ssh",
+        "config",
+        "cloudinit",
+        "cache",
+    ]
 
     def test_no_cross_service_imports(self):
         violations = []
@@ -158,7 +181,9 @@ class TestCoreServiceIsolation:
             for file_path in domain_dir.rglob("_service.py"):
                 self._check_service_file(file_path, violations)
         if violations:
-            msgs = [f"  {v['file']}:{v['line']} - {v['import']}" for v in violations]
+            msgs = [
+                f"  {v['file']}:{v['line']} - {v['import']}" for v in violations
+            ]
             pytest.fail(
                 f"Found {len(violations)} cross-service import violation(s):\n"
                 + "\n".join(msgs)
@@ -185,11 +210,13 @@ class TestCoreServiceIsolation:
                     # Allow same-domain _service imports
                     current_domain = file_path.parent.name
                     if parts[2] != current_domain:
-                        violations.append({
-                            "file": _get_relative_path(file_path),
-                            "line": line_no,
-                            "import": import_path,
-                        })
+                        violations.append(
+                            {
+                                "file": _get_relative_path(file_path),
+                                "line": line_no,
+                                "import": import_path,
+                            }
+                        )
 
 
 class TestAPIVsCoreBoundary:
@@ -204,13 +231,17 @@ class TestAPIVsCoreBoundary:
             imports = _parse_imports(file_path)
             for import_type, import_path, line_no in imports:
                 if import_path.startswith("mvmctl.api"):
-                    violations.append({
-                        "file": _get_relative_path(file_path),
-                        "line": line_no,
-                        "import": import_path,
-                    })
+                    violations.append(
+                        {
+                            "file": _get_relative_path(file_path),
+                            "line": line_no,
+                            "import": import_path,
+                        }
+                    )
         if violations:
-            msgs = [f"  {v['file']}:{v['line']} - {v['import']}" for v in violations]
+            msgs = [
+                f"  {v['file']}:{v['line']} - {v['import']}" for v in violations
+            ]
             pytest.fail(
                 f"Found {len(violations)} Core→API import violation(s):\n"
                 + "\n".join(msgs)
@@ -239,13 +270,17 @@ class TestDBImportCompliance:
             imports = _parse_imports(file_path)
             for import_type, import_path, line_no in imports:
                 if self._is_db_violation(import_path):
-                    violations.append({
-                        "file": _get_relative_path(file_path),
-                        "line": line_no,
-                        "import": import_path,
-                    })
+                    violations.append(
+                        {
+                            "file": _get_relative_path(file_path),
+                            "line": line_no,
+                            "import": import_path,
+                        }
+                    )
         if violations:
-            msgs = [f"  {v['file']}:{v['line']} - {v['import']}" for v in violations]
+            msgs = [
+                f"  {v['file']}:{v['line']} - {v['import']}" for v in violations
+            ]
             pytest.fail(
                 f"Found {len(violations)} CLI→DB import violation(s):\n"
                 + "\n".join(msgs)
@@ -267,13 +302,17 @@ class TestDBImportCompliance:
                 if import_path.startswith("mvmctl.db.models"):
                     continue
                 if import_path.startswith("mvmctl.db"):
-                    violations.append({
-                        "file": _get_relative_path(file_path),
-                        "line": line_no,
-                        "import": import_path,
-                    })
+                    violations.append(
+                        {
+                            "file": _get_relative_path(file_path),
+                            "line": line_no,
+                            "import": import_path,
+                        }
+                    )
         if violations:
-            msgs = [f"  {v['file']}:{v['line']} - {v['import']}" for v in violations]
+            msgs = [
+                f"  {v['file']}:{v['line']} - {v['import']}" for v in violations
+            ]
             pytest.fail(
                 f"Found {len(violations)} Core→DB import violation(s):\n"
                 + "\n".join(msgs)

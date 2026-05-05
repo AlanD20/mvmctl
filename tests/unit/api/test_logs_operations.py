@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mvmctl.api.logs_operations import LogOperation
 from mvmctl.api.inputs._logs_input import LogInput
+from mvmctl.api.logs_operations import LogOperation
 from mvmctl.exceptions import VMNotFoundError
 
 

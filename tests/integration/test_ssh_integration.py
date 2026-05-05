@@ -17,9 +17,8 @@ import pytest
 
 from mvmctl.api import SSHOperation, VMCreateInput, VMInput, VMOperation
 from mvmctl.api.inputs import SSHInput
-from mvmctl.exceptions import SSHError, VMNotFoundError
-from mvmctl.models.result import OperationResult
 from mvmctl.models import VMInstanceItem
+from mvmctl.models.result import OperationResult
 
 
 def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
@@ -209,4 +208,6 @@ class TestSSHEdgeCases:
         result = SSHOperation.connect(SSHInput())
         assert isinstance(result, OperationResult)
         assert result.status == "error"
-        assert "identifier" in result.message.lower() or "--name" in result.message
+        assert (
+            "identifier" in result.message.lower() or "--name" in result.message
+        )

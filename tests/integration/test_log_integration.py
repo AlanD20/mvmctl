@@ -43,7 +43,11 @@ def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         "mvmctl.api.vm_operations.Provisioner",
         lambda *args, **kwargs: provisioner_mock,
     )
-    return {"subprocess": sub_mock, "popen": popen_mock, "provisioner": provisioner_mock}
+    return {
+        "subprocess": sub_mock,
+        "popen": popen_mock,
+        "provisioner": provisioner_mock,
+    }
 
 
 def _create_vm(monkeypatch: pytest.MonkeyPatch, name: str) -> VMInstanceItem:

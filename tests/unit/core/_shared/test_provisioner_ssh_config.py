@@ -1,4 +1,5 @@
 """Test the SSH config generation in GuestfsProvisioner."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -45,7 +46,9 @@ def test_configure_ssh_keys_skips_when_no_sshd_config() -> None:
     # Should NOT write mvm.conf
     for call_args in handle.write.call_args_list:
         if "mvm.conf" in str(call_args):
-            raise AssertionError("mvm.conf should not be written when sshd_config is missing")
+            raise AssertionError(
+                "mvm.conf should not be written when sshd_config is missing"
+            )
 
 
 def test_configure_ssh_keys_allow_users_for_non_root() -> None:

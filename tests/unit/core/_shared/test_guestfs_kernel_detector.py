@@ -26,20 +26,30 @@ def _make_modules_mock(version: str, virtio_files: list[str]) -> MagicMock:
     """Create a Path-like mock for /lib/modules/<version> with virtio files."""
     m = MagicMock(spec=Path)
     m.is_dir.return_value = True
-    m.__truediv__.side_effect = lambda other: _make_path_in_modules(version, str(other), virtio_files)
+    m.__truediv__.side_effect = lambda other: _make_path_in_modules(
+        version, str(other), virtio_files
+    )
     return m
 
 
-def _make_path_in_modules(version: str, subpath: str, virtio_files: list[str]) -> MagicMock:
+def _make_path_in_modules(
+    version: str, subpath: str, virtio_files: list[str]
+) -> MagicMock:
     """Create a mock for a path like /lib/modules/<version>/kernel/drivers/..."""
     m = MagicMock(spec=Path)
     m.is_dir.return_value = True
-    m.rglob.side_effect = lambda pattern: _resolve_virtio_glob(pattern, virtio_files)
-    m.glob.side_effect = lambda pattern: _resolve_virtio_glob(pattern, virtio_files)
+    m.rglob.side_effect = lambda pattern: _resolve_virtio_glob(
+        pattern, virtio_files
+    )
+    m.glob.side_effect = lambda pattern: _resolve_virtio_glob(
+        pattern, virtio_files
+    )
     return m
 
 
-def _resolve_virtio_glob(pattern: str, virtio_files: list[str]) -> list[MagicMock]:
+def _resolve_virtio_glob(
+    pattern: str, virtio_files: list[str]
+) -> list[MagicMock]:
     """Match virtio files against a glob pattern like virtio_net.ko.zst."""
     parts = pattern.replace("*.", ".").split(".")
     if len(parts) < 2:
@@ -73,7 +83,11 @@ def mock_boot_dir(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     """Mock /boot as an existing directory."""
     m = MagicMock(spec=Path)
     m.is_dir.return_value = True
-    monkeypatch.setattr(Path, "is_dir", lambda self: True if str(self) == "/boot" else Path.is_dir(self))
+    monkeypatch.setattr(
+        Path,
+        "is_dir",
+        lambda self: True if str(self) == "/boot" else Path.is_dir(self),
+    )
     return m
 
 
@@ -85,8 +99,11 @@ def mock_boot_dir(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 class TestExtractVersion:
     """Covers version extraction from kernel files (file command + filename fallback)."""
 
-    def test_extract_from_file_output(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_extract_from_file_output(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """file command returns a standard version string."""
+
         def mock_run(*args: object, **kwargs: object) -> MagicMock:
             result = MagicMock()
             result.stdout = "Linux kernel x86 boot executable, bzImage, version 6.8.0-40-generic (buildd@ubuntu) ..."
@@ -100,8 +117,11 @@ class TestExtractVersion:
         version = KernelDetector._extract_version(kernel)
         assert version == "6.8.0-40-generic"
 
-    def test_extract_from_arch_filename(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_extract_from_arch_filename(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Arch-style vmlinuz-linux without version in file output falls back to filename."""
+
         def mock_run(*args: object, **kwargs: object) -> MagicMock:
             result = MagicMock()
             result.stdout = "Linux kernel x86 boot executable, bzImage, ..."
@@ -116,8 +136,11 @@ class TestExtractVersion:
         version = KernelDetector._extract_version(kernel)
         assert version is None
 
-    def test_extract_from_file_with_arch_version(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_extract_from_file_with_arch_version(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Arch kernel with version in file output."""
+
         def mock_run(*args: object, **kwargs: object) -> MagicMock:
             result = MagicMock()
             result.stdout = "Linux kernel x86 boot executable, bzImage, version 7.0.2-arch1-1 (linux@archlinux) ..."
@@ -131,20 +154,28 @@ class TestExtractVersion:
         version = KernelDetector._extract_version(kernel)
         assert version == "7.0.2-arch1-1"
 
-    def test_file_command_timed_out(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_file_command_timed_out(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Timeout raises subprocess.TimeoutExpired → returns None."""
+
         def mock_run(*args: object, **kwargs: object) -> MagicMock:
             import subprocess
+
             raise subprocess.TimeoutExpired(cmd="file", timeout=5)
 
         monkeypatch.setattr(
             "mvmctl.core._shared._guestfs._kernel_detector.subprocess.run",
             mock_run,
         )
-        assert KernelDetector._extract_version(_make_file_mock("vmlinuz-xyz")) is None
+        assert (
+            KernelDetector._extract_version(_make_file_mock("vmlinuz-xyz"))
+            is None
+        )
 
     def test_file_not_found(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """FileNotFoundError when file command itself is missing."""
+
         def mock_run(*args: object, **kwargs: object) -> MagicMock:
             raise FileNotFoundError("file not found")
 
@@ -152,7 +183,10 @@ class TestExtractVersion:
             "mvmctl.core._shared._guestfs._kernel_detector.subprocess.run",
             mock_run,
         )
-        assert KernelDetector._extract_version(_make_file_mock("vmlinuz-xyz")) is None
+        assert (
+            KernelDetector._extract_version(_make_file_mock("vmlinuz-xyz"))
+            is None
+        )
 
 
 # =========================================================================
@@ -265,7 +299,9 @@ class TestScoringHelpers:
 class TestFindBestKernel:
     """End-to-end detection with mocked filesystem."""
 
-    def test_no_kernels_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_no_kernels_returns_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """No kernels in /boot → returns None."""
         monkeypatch.setattr(Path, "is_dir", lambda self: str(self) == "/boot")
         monkeypatch.setattr(
@@ -275,14 +311,20 @@ class TestFindBestKernel:
         )
         assert KernelDetector.find_best_kernel() is None
 
-    def test_single_kernel_picked(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_single_kernel_picked(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Single kernel with modules → returns it."""
         version = "6.8.0-40-generic"
 
         monkeypatch.setattr(
             KernelDetector,
             "_scan_boot_directory",
-            classmethod(lambda cls: [(_make_file_mock("vmlinuz-6.8.0-40-generic"), version)]),
+            classmethod(
+                lambda cls: [
+                    (_make_file_mock("vmlinuz-6.8.0-40-generic"), version)
+                ]
+            ),
         )
 
         monkeypatch.setattr(Path, "is_dir", lambda self: True)
@@ -296,7 +338,11 @@ class TestFindBestKernel:
                 return [_make_file_mock(f) for f in virtio_files]
             if self.name == "net":
                 return [_make_file_mock("virtio_net.ko.zst")]
-            return orig_rglob(self, pattern) if hasattr(orig_rglob, "__call__") else []
+            return (
+                orig_rglob(self, pattern)
+                if hasattr(orig_rglob, "__call__")
+                else []
+            )
 
         monkeypatch.setattr(Path, "rglob", mock_rglob)
         monkeypatch.setattr(Path, "glob", mock_rglob)
@@ -306,7 +352,9 @@ class TestFindBestKernel:
         assert result is not None
         assert result[0].name == "vmlinuz-6.8.0-40-generic"
 
-    def test_upstream_preferred_over_custom(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_upstream_preferred_over_custom(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Upstream kernel (with virtio_net, no custom suffix) wins over custom."""
         upstream_version = "7.0.2-arch1-1"
         custom_version = "7.0.2-arch1-1-g14"
@@ -317,10 +365,12 @@ class TestFindBestKernel:
         monkeypatch.setattr(
             KernelDetector,
             "_scan_boot_directory",
-            classmethod(lambda cls: [
-                (custom_kernel, custom_version),
-                (upstream_kernel, upstream_version),
-            ]),
+            classmethod(
+                lambda cls: [
+                    (custom_kernel, custom_version),
+                    (upstream_kernel, upstream_version),
+                ]
+            ),
         )
 
         monkeypatch.setattr(Path, "is_dir", lambda self: True)
@@ -328,11 +378,14 @@ class TestFindBestKernel:
         # Track calls to build module path mocks
         module_paths: dict[str, list[str]] = {
             "7.0.2-arch1-1": [
-                "virtio_net.ko.zst", "virtio_balloon.ko.zst",
-                "virtio_input.ko.zst", "virtio_mmio.ko.zst",
+                "virtio_net.ko.zst",
+                "virtio_balloon.ko.zst",
+                "virtio_input.ko.zst",
+                "virtio_mmio.ko.zst",
             ],
             "7.0.2-arch1-1-g14": [
-                "virtio_mem.ko.zst", "virtio_vdpa.ko.zst",
+                "virtio_mem.ko.zst",
+                "virtio_vdpa.ko.zst",
             ],
         }
 
@@ -351,6 +404,7 @@ class TestFindBestKernel:
                                 if "virtio" not in pattern:
                                     return []
                                 return [_make_file_mock(f) for f in vf_list]
+
                             return rglob_fn
 
                         m.rglob.side_effect = make_rglob(files)
@@ -365,31 +419,47 @@ class TestFindBestKernel:
             f"Expected upstream vmlinuz-linux, got {result[0].name}"
         )
 
-    def test_only_custom_kernel_still_returns(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_only_custom_kernel_still_returns(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """When only a custom kernel is available, it's still returned (not None)."""
         version = "7.0.2-arch1-1-g14"
 
         monkeypatch.setattr(
             KernelDetector,
             "_scan_boot_directory",
-            classmethod(lambda cls: [(_make_file_mock("vmlinuz-linux-g14"), version)]),
+            classmethod(
+                lambda cls: [(_make_file_mock("vmlinuz-linux-g14"), version)]
+            ),
         )
 
         monkeypatch.setattr(Path, "is_dir", lambda self: True)
-        monkeypatch.setattr(Path, "rglob", lambda self, p: [_make_file_mock("virtio_mem.ko.zst")])
-        monkeypatch.setattr(Path, "glob", lambda self, p: [_make_file_mock("virtio_mem.ko.zst")])
+        monkeypatch.setattr(
+            Path,
+            "rglob",
+            lambda self, p: [_make_file_mock("virtio_mem.ko.zst")],
+        )
+        monkeypatch.setattr(
+            Path, "glob", lambda self, p: [_make_file_mock("virtio_mem.ko.zst")]
+        )
         monkeypatch.setattr(Path, "__truediv__", lambda self, other: self)
 
         result = KernelDetector.find_best_kernel()
         assert result is not None
         assert result[0].name == "vmlinuz-linux-g14"
 
-    def test_missing_modules_skipped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_missing_modules_skipped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Kernel without matching /lib/modules/<version> is skipped."""
         monkeypatch.setattr(
             KernelDetector,
             "_scan_boot_directory",
-            classmethod(lambda cls: [(_make_file_mock("vmlinuz-missing"), "9.9.9-nonexistent")]),
+            classmethod(
+                lambda cls: [
+                    (_make_file_mock("vmlinuz-missing"), "9.9.9-nonexistent")
+                ]
+            ),
         )
 
         def mock_is_dir(self: Path) -> bool:
@@ -448,6 +518,7 @@ class TestRealWorldPatterns:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Version regex extracts correctly from real-world file outputs."""
+
         def mock_run(*args: object, **kwargs: object) -> MagicMock:
             result = MagicMock()
             result.stdout = file_output
@@ -460,7 +531,9 @@ class TestRealWorldPatterns:
         kernel = _make_file_mock("vmlinuz")
         assert KernelDetector._extract_version(kernel) == expected_version
 
-    def test_custom_suffix_detected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_custom_suffix_detected(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Custom kernel with -g14 suffix gets correct penalty and doesn't win."""
         file_output = (
             "Linux kernel x86 boot executable, bzImage, version "

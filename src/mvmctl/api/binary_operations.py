@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import logging
 
-from mvmctl.api.inputs._binary_fetch_input import (
-    BinaryFetchInput,
-    BinaryFetchRequest,
-)
 from mvmctl.api.inputs._binary_input import (
     BinaryInput,
     BinaryRequest,
+)
+from mvmctl.api.inputs._binary_pull_input import (
+    BinaryPullInput,
+    BinaryPullRequest,
 )
 from mvmctl.core._shared import Database
 from mvmctl.core.binary._controller import BinaryController
@@ -43,14 +43,14 @@ class BinaryOperation:
     """Binary management orchestration."""
 
     @staticmethod
-    def fetch(
-        inputs: BinaryFetchInput,
+    def pull(
+        inputs: BinaryPullInput,
     ) -> OperationResult[list[BinaryItem]] | NeedsInteraction:
         """
         Download a binary version.
 
         Flow:
-        1. Resolve inputs via BinaryFetchRequest
+        1. Resolve inputs via BinaryPullRequest
         2. Check if version already exists in DB
         3. If exists and no override, return existing binaries
         4. Download via BinaryService.download()
@@ -59,7 +59,7 @@ class BinaryOperation:
         7. Return OperationResult
 
         Args:
-            inputs: BinaryFetchInput with version and set_as_default flag.
+            inputs: BinaryPullInput with version and set_as_default flag.
 
         Returns:
             OperationResult with firecracker and jailer entries.
@@ -73,7 +73,7 @@ class BinaryOperation:
             repo = BinaryRepository(db)
 
             # Resolve inputs
-            request = BinaryFetchRequest(inputs=inputs, db=db)
+            request = BinaryPullRequest(inputs=inputs, db=db)
             resolved = request.resolve()
 
             # Check if version already exists
@@ -107,7 +107,7 @@ class BinaryOperation:
                 binary.is_default = should_set_default
                 repo.upsert(binary)
 
-            AuditLog.log("binary.fetch", changes={"version": resolved.version})
+            AuditLog.log("binary.pull", changes={"version": resolved.version})
 
             return OperationResult(
                 status="success",
@@ -118,7 +118,7 @@ class BinaryOperation:
         except BinaryError as e:
             return OperationResult(
                 status="error",
-                code="binary.fetch_failed",
+                code="binary.pull_failed",
                 message=str(e),
                 exception=e,
             )

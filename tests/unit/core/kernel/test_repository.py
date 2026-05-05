@@ -447,8 +447,18 @@ class TestQueryVMsByKernel:
                 "fs_uuid, original_size, minimum_rootfs_size_mib, pulled_at, "
                 "is_default, is_present, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, datetime('now'), datetime('now'))",
-                ("i" * 64, "test-os", "Test OS", "x86_64", "/img", "ext4",
-                 None, 2048, 1024, _TIMESTAMP),
+                (
+                    "i" * 64,
+                    "test-os",
+                    "Test OS",
+                    "x86_64",
+                    "/img",
+                    "ext4",
+                    None,
+                    2048,
+                    1024,
+                    _TIMESTAMP,
+                ),
             )
             conn.execute(
                 "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway, "

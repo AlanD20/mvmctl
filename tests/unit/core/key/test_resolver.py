@@ -118,7 +118,10 @@ class TestKeyResolverResolve:
         key = _make_key(kid="SHA256:abc123")
         mock_repo = MagicMock()
         mock_repo.get_by_name.return_value = None  # name fails
-        mock_repo.find_by_prefix.side_effect = [[], [key]]  # id succeeds on 2nd try
+        mock_repo.find_by_prefix.side_effect = [
+            [],
+            [key],
+        ]  # id succeeds on 2nd try
         resolver = KeyResolver(mock_repo)
         result = resolver.resolve("abc123")
         assert result.id == "SHA256:abc123"
@@ -165,7 +168,10 @@ class TestKeyResolverResolveMany:
     def test_partial_errors(self, mocker):
         key1 = _make_key(name="k1")
         mock_repo = MagicMock()
-        mock_repo.get_by_name.side_effect = [key1, KeyNotFoundError("not found")]
+        mock_repo.get_by_name.side_effect = [
+            key1,
+            KeyNotFoundError("not found"),
+        ]
         resolver = KeyResolver(mock_repo)
         result = resolver.resolve_many(["k1", "bad"])
         assert len(result.items) == 1
