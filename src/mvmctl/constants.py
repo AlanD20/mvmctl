@@ -53,9 +53,9 @@ OVERRIDABLE_DEFAULTS: Final[dict[str, dict[str, Any]]] = {
         "import_format": "auto",
     },
     "defaults.kernel": {
-        "version": "6.19.9",
         "arch": "x86_64",
-        "build_jobs": 4,
+        "version": "6.19.9",         # default for --type official; firecracker uses CI version
+        "build_jobs": None,          # None → all available cores (os.cpu_count())
     },
     "defaults.firecracker": {
         "log_level": "Debug",
@@ -77,12 +77,31 @@ OVERRIDABLE_DEFAULTS: Final[dict[str, dict[str, Any]]] = {
     "defaults.binary": {
         "remote_version_limit": 5,
     },
+    "settings": {
+        "guestfs_enabled": False,
+    },
 }
 
 
 def get_default(category: str, key: str) -> Any:
     """Return the hardcoded default value for a user-overridable setting."""
     return OVERRIDABLE_DEFAULTS[category][key]
+
+
+def is_compiled_mode() -> bool:
+    """Return True when running as a compiled binary (Nuitka/PyInstaller).
+
+    In development mode (``uv run mvm``, ``python -m mvmctl``, ``pip install -e .``),
+    ``sys.frozen`` is not set and compiled binary assets do not exist on disk.
+    The code falls back to Python-based alternatives (e.g. running service
+    binaries via ``sys.executable .../process.py``).
+
+    In compiled mode (final build distributed to users), all service binaries
+    are embedded in the single-file executable and extracted on first run.
+    """
+    import sys
+
+    return getattr(sys, "frozen", False)
 
 
 # ===========================================================================
@@ -186,6 +205,14 @@ DEFAULT_SUDOERS_DIR: Final[str] = "/etc/sudoers"
 DEFAULT_SYSCTL_CONF_PATH: Final[str] = "/etc/sysctl.d/mvmctl.conf"
 
 # --- Privileged binaries ---
+# Service binary names embedded in the compiled mvm binary.
+# Extracted to CacheUtils.get_bin_dir() on `mvm init`.
+SERVICE_BINARY_NAMES: Final[list[str]] = [
+    "mvm-console-relay",
+    "mvm-nocloud-server",
+    "mvm-provision",
+]
+
 PRIVILEGED_BINARIES: Final[dict[str, str]] = {
     "/usr/sbin/ip": "iproute2",
     "/usr/sbin/iptables": "iptables",
@@ -193,6 +220,12 @@ PRIVILEGED_BINARIES: Final[dict[str, str]] = {
     "/usr/sbin/sysctl": "procps",
     "/usr/sbin/modprobe": "kmod",
 }
+
+# mvmctl service binaries that need passwordless sudo access.
+# Paths are resolved at sudoers generation time via CacheUtils.get_bin_dir().
+PRIVILEGED_SERVICE_BINARIES: Final[list[str]] = [
+    "mvm-provision",
+]
 
 REQUIRED_BINARIES: Final[list[str]] = [
     "ip",

@@ -38,7 +38,7 @@ class TestInit:
         mock_init_op.run.return_value = _make_init_result(host_ready=True)
         result = runner.invoke(app, ["init", "--non-interactive"])
         assert result.exit_code == 0
-        assert "Host ready" in result.output
+        assert "all set" in result.output
 
     @patch("mvmctl.cli.init.InitOperation")
     def test_init_host_not_ready(self, mock_init_op):
@@ -134,8 +134,8 @@ class TestInitStepDisplay:
         mock_init_op.run.return_value = InitResult(steps=steps, host_ready=False)
         result = runner.invoke(app, ["init", "--non-interactive"])
         assert result.exit_code == 1
-        assert "Root privileges required" in result.output
-        assert "Host setup incomplete" in result.output
+        assert "sudoers / mvm group" in result.output
+        assert "incomplete" in result.output.lower()
 
     @patch("mvmctl.cli.init.InitOperation")
     def test_missing_steps(self, mock_init_op):
@@ -212,7 +212,7 @@ class TestInitInteractiveFlow:
 
         result = runner.invoke(app, ["init"])
         assert result.exit_code == 1
-        assert "Skipped" in result.output
+        assert "skipped" in result.output
 
     @patch("mvmctl.cli.init._run_with_sudo")
     @patch("mvmctl.cli.init._check_host_state")
@@ -236,7 +236,7 @@ class TestInitInteractiveFlow:
 
         result = runner.invoke(app, ["init"])
         assert result.exit_code == 1
-        assert "Host init failed" in result.output
+        assert "host init failed" in result.output
 
     @patch("mvmctl.cli.init.typer.confirm")
     @patch("mvmctl.cli.init.InitOperation")
@@ -259,7 +259,7 @@ class TestInitInteractiveFlow:
         result = runner.invoke(app, ["init"])
         assert result.exit_code == 0
         assert mock_init_op.run.call_count == 2
-        assert "Downloading" in result.output
+        assert "downloading" in result.output
 
     @patch("mvmctl.cli.init.typer.confirm")
     @patch("mvmctl.cli.init.InitOperation")
@@ -277,7 +277,7 @@ class TestInitInteractiveFlow:
 
         result = runner.invoke(app, ["init"])
         assert result.exit_code == 1
-        assert "Skipped" in result.output
+        assert "skipped" in result.output
 
     @patch("mvmctl.cli.init.InitOperation")
     def test_binary_download_no_version(self, mock_init_op):
@@ -291,7 +291,8 @@ class TestInitInteractiveFlow:
 
         result = runner.invoke(app, ["init"])
         assert result.exit_code == 1
-        assert "No Firecracker binary" in result.output
+        assert "no firecracker binary" in result.output.lower()
+        assert "remote versions" in result.output
 
     @patch("mvmctl.cli.init.InitOperation")
     def test_unknown_interaction(self, mock_init_op):
@@ -305,4 +306,4 @@ class TestInitInteractiveFlow:
 
         result = runner.invoke(app, ["init"])
         assert result.exit_code == 1
-        assert "Unhandled interaction" in result.output
+        assert "unhandled interaction" in result.output.lower()

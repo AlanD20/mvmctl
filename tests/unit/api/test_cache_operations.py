@@ -15,6 +15,9 @@ class TestCacheInitAll:
 
     def test_creates_directories_and_builds_appliance(self, mocker):
         """init_all() creates cache directories and builds guestfs appliance."""
+        # Enable guestfs so appliance build runs
+        from mvmctl.core.config._service import SettingsService
+        mocker.patch.object(SettingsService, "resolve", return_value=True)
         mock_cache_utils = mocker.patch(
             "mvmctl.api.cache_operations.CacheUtils"
         )
@@ -52,6 +55,8 @@ class TestCacheInitAll:
 
     def test_calls_on_progress(self, mocker):
         """init_all() invokes on_progress callback for appliance phase."""
+        from mvmctl.core.config._service import SettingsService
+        mocker.patch.object(SettingsService, "resolve", return_value=True)
         mocker.patch("mvmctl.api.cache_operations.CacheUtils")
         mock_guestfs = mocker.patch(
             "mvmctl.api.cache_operations.GuestfsService"
@@ -69,6 +74,8 @@ class TestCacheInitAll:
 
     def test_guestfs_build_fails_gracefully(self, mocker):
         """init_all() handles guestfs build failure."""
+        from mvmctl.core.config._service import SettingsService
+        mocker.patch.object(SettingsService, "resolve", return_value=True)
         mocker.patch("mvmctl.api.cache_operations.CacheUtils")
         mock_guestfs = mocker.patch(
             "mvmctl.api.cache_operations.GuestfsService"

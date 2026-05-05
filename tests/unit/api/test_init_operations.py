@@ -321,47 +321,58 @@ class TestStepBinary:
 class TestRun:
     """Tests for InitOperation.run() — full orchestration."""
 
+    def _mock_all_steps(self, mocker, **overrides):
+        """Mock the 6 init steps with defaults that pass through.
+
+        The init flow is now:
+          0. _step_local_state
+          1. _step_service_binaries
+          2. _step_host
+          3. _step_guestfs
+          4. _step_cache
+          5. _step_binary
+
+        Each can be overridden via keyword argument.
+        """
+        defaults = {
+            "_step_local_state": InitStepResult("local_state", True, "Ready"),
+            "_step_service_binaries": InitStepResult(
+                "service_binaries", True, "Service binaries ready"
+            ),
+            "_step_host": (
+                InitStepResult("host", True, "Ready"),
+                None,
+            ),
+            "_step_guestfs": (
+                InitStepResult("guestfs", True, "libguestfs disabled"),
+                None,
+            ),
+            "_step_cache": InitStepResult("cache", True, "Ready"),
+            "_step_binary": (
+                InitStepResult("binary", True, "Ready"),
+                None,
+            ),
+        }
+        final = {**defaults, **overrides}
+        for name, ret in final.items():
+            mocker.patch.object(InitOperation, name, return_value=ret)
+
     def test_full_success_flow(self, mocker):
         """run() completes all steps successfully."""
-        mocker.patch.object(
-            InitOperation,
-            "_step_local_state",
-            return_value=InitStepResult("local_state", True, "Ready"),
-        )
-        mocker.patch.object(
-            InitOperation,
-            "_step_host",
-            return_value=(InitStepResult("host", True, "Ready"), None),
-        )
-        mocker.patch.object(
-            InitOperation,
-            "_step_cache",
-            return_value=InitStepResult("cache", True, "Ready"),
-        )
-        mocker.patch.object(
-            InitOperation,
-            "_step_binary",
-            return_value=(InitStepResult("binary", True, "Ready"), None),
-        )
+        self._mock_all_steps(mocker)
 
         result = InitOperation.run()
 
         assert isinstance(result, InitResult)
         assert result.host_ready is True
         assert result.needs_interaction is None
-        assert len(result.steps) == 4
+        assert len(result.steps) == 6
 
     def test_stops_at_host_interaction(self, mocker):
         """run() stops early when host step needs interaction."""
-        mocker.patch.object(
-            InitOperation,
-            "_step_local_state",
-            return_value=InitStepResult("local_state", True, "Ready"),
-        )
-        mocker.patch.object(
-            InitOperation,
-            "_step_host",
-            return_value=(
+        self._mock_all_steps(
+            mocker,
+            _step_host=(
                 InitStepResult("host", False, "Need sudo"),
                 NeedsInteraction(
                     code="privilege.sudo_required",
@@ -375,30 +386,14 @@ class TestRun:
 
         assert result.needs_interaction is not None
         assert result.host_ready is False
-        # Should only have 2 steps (local_state + host) — not cache or binary
-        assert len(result.steps) == 2
+        # Should have 3 steps (local_state, service_binaries, host)
+        assert len(result.steps) == 3
 
     def test_stops_at_binary_interaction(self, mocker):
         """run() stops early when binary step needs interaction."""
-        mocker.patch.object(
-            InitOperation,
-            "_step_local_state",
-            return_value=InitStepResult("local_state", True, "Ready"),
-        )
-        mocker.patch.object(
-            InitOperation,
-            "_step_host",
-            return_value=(InitStepResult("host", True, "Ready"), None),
-        )
-        mocker.patch.object(
-            InitOperation,
-            "_step_cache",
-            return_value=InitStepResult("cache", True, "Ready"),
-        )
-        mocker.patch.object(
-            InitOperation,
-            "_step_binary",
-            return_value=(
+        self._mock_all_steps(
+            mocker,
+            _step_binary=(
                 InitStepResult("binary", False, "Need download"),
                 NeedsInteraction(
                     code="binary.confirm_download",
@@ -412,63 +407,163 @@ class TestRun:
 
         assert result.needs_interaction is not None
         assert result.host_ready is False
+        assert len(result.steps) == 6
+
+    def test_stops_at_guestfs_interaction(self, mocker):
+        """run() stops early when guestfs step needs interaction."""
+        self._mock_all_steps(
+            mocker,
+            _step_guestfs=(
+                InitStepResult("guestfs", False, "libguestfs is available"),
+                NeedsInteraction(
+                    code="guestfs.confirm_enable",
+                    message="libguestfs is available. Enable it as a fallback?",
+                    input_type="confirm",
+                ),
+            ),
+        )
+
+        result = InitOperation.run()
+
+        assert result.needs_interaction is not None
+        assert result.host_ready is False
+        # local_state + service_binaries + host + guestfs
         assert len(result.steps) == 4
 
     def test_skip_host(self, mocker):
         """run() skips host step when skip_host=True."""
-        mocker.patch.object(
-            InitOperation,
-            "_step_local_state",
-            return_value=InitStepResult("local_state", True, "Ready"),
-        )
-        mocker.patch.object(
-            InitOperation,
-            "_step_host",
-            return_value=(InitStepResult("host", True, "Skipped"), None),
-        )
-        mocker.patch.object(
-            InitOperation,
-            "_step_cache",
-            return_value=InitStepResult("cache", True, "Ready"),
-        )
-        mocker.patch.object(
-            InitOperation,
-            "_step_binary",
-            return_value=(InitStepResult("binary", True, "Ready"), None),
+        self._mock_all_steps(
+            mocker,
+            _step_host=(InitStepResult("host", True, "Skipped"), None),
         )
 
         result = InitOperation.run(skip_host=True)
 
         assert result.host_ready is True
-        assert result.steps[1].message == "Skipped"
+        # step[0]=local_state, step[1]=service_binaries, step[2]=host
+        assert result.steps[2].message == "Skipped"
 
     def test_sudo_completed_flag(self, mocker):
         """run() handles sudo_completed flag correctly."""
-        mocker.patch.object(
-            InitOperation,
-            "_step_local_state",
-            return_value=InitStepResult("local_state", True, "Ready"),
-        )
-        mocker.patch.object(
-            InitOperation,
-            "_step_host",
-            return_value=(InitStepResult("host", True, "Sudo done"), None),
-        )
-        mocker.patch.object(
-            InitOperation,
-            "_step_cache",
-            return_value=InitStepResult("cache", True, "Ready"),
-        )
-        mocker.patch.object(
-            InitOperation,
-            "_step_binary",
-            return_value=(InitStepResult("binary", True, "Ready"), None),
+        self._mock_all_steps(
+            mocker,
+            _step_host=(InitStepResult("host", True, "Sudo done"), None),
         )
 
         result = InitOperation.run(sudo_completed=True)
 
         assert result.host_ready is True
-        assert result.steps[1].message == "Sudo done"
+        # step[0]=local_state, step[1]=service_binaries, step[2]=host
+        assert result.steps[2].message == "Sudo done"
+
+
+class TestStepServiceBinaries:
+    """Tests for InitOperation._step_service_binaries()."""
+
+    def test_success(self, mocker):
+        """_step_service_binaries returns success when extraction works."""
+        mock_extract = mocker.patch(
+            "mvmctl.core.binary._service.BinaryService.extract_service_binaries",
+            return_value=[],
+        )
+
+        result = InitOperation._step_service_binaries()
+
+        assert result.step == "service_binaries"
+        assert result.success is True
+        assert "Service binaries ready" in result.message
+        mock_extract.assert_called_once()
+
+    def test_failure(self, mocker):
+        """_step_service_binaries returns failure when extraction fails."""
+        mocker.patch(
+            "mvmctl.core.binary._service.BinaryService.extract_service_binaries",
+            side_effect=RuntimeError("No embedded binary"),
+        )
+
+        result = InitOperation._step_service_binaries()
+
+        assert result.step == "service_binaries"
+        assert result.success is False
+        assert "Service binary extraction failed" in result.message
+
+
+class TestStepGuestfs:
+    """Tests for InitOperation._step_guestfs()."""
+
+    def test_disabled_when_guestfs_enabled_false(self, mocker):
+        """_step_guestfs disables and returns success when guestfs_enabled=False."""
+        mock_set = mocker.patch(
+            "mvmctl.core.config._service.SettingsService.set"
+        )
+
+        result, needs = InitOperation._step_guestfs(guestfs_enabled=False)
+
+        assert result.step == "guestfs"
+        assert result.success is True
+        assert "disabled" in result.message.lower()
+        assert needs is None
+        mock_set.assert_called_once_with("settings", "guestfs_enabled", False)
+
+    def test_enabled_when_guestfs_enabled_true(self, mocker):
+        """_step_guestfs enables and returns success when guestfs_enabled=True."""
+        mock_set = mocker.patch(
+            "mvmctl.core.config._service.SettingsService.set"
+        )
+
+        result, needs = InitOperation._step_guestfs(guestfs_enabled=True)
+
+        assert result.step == "guestfs"
+        assert result.success is True
+        assert "enabled" in result.message.lower()
+        assert needs is None
+        mock_set.assert_called_once_with("settings", "guestfs_enabled", True)
+
+    def test_auto_disabled_when_not_installed(self, mocker):
+        """_step_guestfs auto-disables when libguestfs is not available."""
+        # Mock the import to fail
+        import builtins
+
+        real_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "guestfs":
+                raise ModuleNotFoundError("No module named 'guestfs'")
+            return real_import(name, *args, **kwargs)
+
+        mocker.patch.object(builtins, "__import__", mock_import)
+        mock_set = mocker.patch(
+            "mvmctl.core.config._service.SettingsService.set"
+        )
+
+        result, needs = InitOperation._step_guestfs()
+
+        assert result.step == "guestfs"
+        assert result.success is True
+        assert result.message == "not installed"
+        assert needs is None
+        mock_set.assert_called_once_with("settings", "guestfs_enabled", False)
+
+    def test_prompts_when_available_and_undecided(self, mocker):
+        """_step_guestfs returns NeedsInteraction when guestfs available and undecided."""
+        # Make the import succeed
+        mocker.patch.dict(
+            "sys.modules", {"guestfs": mocker.MagicMock()}
+        )
+        # Mock settings service set to detect if called
+        mock_set = mocker.patch(
+            "mvmctl.core.config._service.SettingsService.set"
+        )
+
+        result, needs = InitOperation._step_guestfs()
+
+        assert result.step == "guestfs"
+        assert result.success is False
+        assert result.message == "available"
+        assert needs is not None
+        assert needs.code == "guestfs.confirm_enable"
+        # Should NOT have persisted any setting yet
+        mock_set.assert_not_called()
 
 
 class TestInitStepResult:

@@ -131,6 +131,7 @@ def _handle_interactive_flow(
     sudo_was_completed = False
     download_version: str | None = None
     host_setup_message: str | None = None
+    guestfs_enabled: bool | None = None
     result: InitResult
 
     while True:
@@ -146,6 +147,7 @@ def _handle_interactive_flow(
                 sudo_completed=sudo_was_completed,
                 host_setup_message=host_setup_message,
                 download_version=download_version,
+                guestfs_enabled=guestfs_enabled,
             )
         else:
             with console.status("", spinner="dots") as status:
@@ -163,6 +165,7 @@ def _handle_interactive_flow(
                     sudo_completed=sudo_was_completed,
                     host_setup_message=host_setup_message,
                     download_version=download_version,
+                    guestfs_enabled=guestfs_enabled,
                 )
 
         if result.needs_interaction is None:
@@ -178,29 +181,16 @@ def _handle_interactive_flow(
                 host_state_before["group_exists"]
                 and host_state_before["user_in_group"]
             ):
-                print_warning(
-                    "Elevated privileges required for this operation."
-                )
-                print_info(
-                    "Your user is in the 'mvm' group but the current "
-                    "session does not have the group active yet."
-                )
-                print_info("Run: newgrp mvm")
+                print_warning("group active, but not in this session")
+                print_info("run:  newgrp mvm")
             elif host_state_before["group_exists"]:
-                print_warning(
-                    "Elevated privileges required for this operation."
-                )
-                print_info(
-                    "The 'mvm' group exists but sudoers file is missing. "
-                    "Run: sudo mvm host init"
-                )
+                print_warning("sudoers file is missing")
+                print_info("run:  sudo mvm host init")
             else:
-                print_warning(
-                    "This requires sudo once to create the 'mvm' group "
-                    "and sudoers drop-in."
-                )
+                print_warning("this requires sudo once")
                 print_info(
-                    "After this, you won't need sudo for any mvm commands."
+                    "creates the mvm group and sudoers drop-in for "
+                    "passwordless sudo on future runs"
                 )
 
             if non_interactive:
@@ -213,7 +203,7 @@ def _handle_interactive_flow(
                 proc = _run_with_sudo()
                 if proc.returncode != 0:
                     print_warning(
-                        "Host init failed. Run 'sudo mvm host init' manually."
+                        "host init failed. Run 'sudo mvm host init' manually."
                     )
                     break
 
@@ -230,7 +220,7 @@ def _handle_interactive_flow(
                 continue
             else:
                 print_info(
-                    "Skipped. Run 'sudo mvm host init' manually when ready."
+                    "skipped. Run 'sudo mvm host init' manually when ready."
                 )
                 break
 
@@ -239,27 +229,38 @@ def _handle_interactive_flow(
             latest = interaction.context.get("latest_version", "")
             if not latest:
                 print_warning(
-                    "No Firecracker binary found and no remote versions available."
+                    "no Firecracker binary found and no remote versions available."
                 )
                 break
 
-            print_info(f"Latest available: v{latest}")
+            print_info(f"latest available: v{latest}")
 
             if non_interactive or typer.confirm(
                 f"Download v{latest}?", default=True
             ):
                 print_info("")
-                print_info(f"Downloading Firecracker v{latest}...")
+                print_info(f"downloading Firecracker v{latest} ...")
                 download_version = latest
                 # Don't wrap download in spinner — BinaryOperation.fetch
                 # has its own ASCIIProgressBar.
                 continue  # Re-run with download_version set
             else:
-                print_info("Skipped. Run 'mvm bin fetch <version>' manually.")
+                print_info("skipped. Run 'mvm bin fetch <version>' manually.")
                 break
 
+        # ── Handle guestfs enable prompt ──────────────────────────────
+        if interaction.code == "guestfs.confirm_enable":
+            if non_interactive or typer.confirm(
+                "Enable libguestfs as a provisioning fallback?",
+                default=False,
+            ):
+                guestfs_enabled = True
+            else:
+                guestfs_enabled = False
+            continue  # Re-run with guestfs_enabled set
+
         # Unknown interaction — stop
-        print_warning(f"Unhandled interaction: {interaction.code}")
+        print_warning(f"unhandled interaction: {interaction.code}")
         break
 
     return result
@@ -277,44 +278,45 @@ def init_run(
 ) -> None:
     """Initialize mvm host, network, and binary — run this to get started."""
     print_info("")
-    print_info("mvm — Setup Wizard")
-    print_info("=" * 40)
-    print_info("")
-    print_info(
-        "Note: On first run, building the libguestfs appliance can take a few minutes."
-    )
+    print_info("mvm init — first-time setup")
+    print_info("─" * 40)
 
     result = _handle_interactive_flow(
         skip_host=skip_host,
         non_interactive=non_interactive,
     )
 
-    # Print step results
+    # Print step results — compact one-liners
     step_labels = {
-        "local_state": "Local state",
-        "host": "Host privileges",
-        "cache": "Cache directories",
-        "binary": "Firecracker binary",
+        "local_state": "local state",
+        "service_binaries": "service binaries",
+        "host": "sudoers / mvm group",
+        "guestfs": "libguestfs",
+        "cache": "cache directories",
+        "binary": "firecracker binary",
     }
     print_info("")
     for step in result.steps:
         label = step_labels.get(step.step, step.step)
         if step.success:
-            print_success(f"{label}: {step.message}")
+            if step.message:
+                print_success(f"{label}  ({step.message})")
+            else:
+                print_success(label)
         else:
-            print_warning(f"{label}: {step.message}")
+            print_warning(f"{label} — {step.message}")
 
     # Missing steps (if any were skipped due to early return)
     present = {s.step for s in result.steps}
     for key, label in step_labels.items():
         if key not in present:
-            print_warning(f"{label}: not checked")
+            print_warning(f"{label} — not checked")
 
     print_info("")
     if result.host_ready:
-        print_success("Host ready!")
+        print_success("all set")
     else:
-        print_warning("Host setup incomplete. Run 'mvm init' again.")
+        print_warning("setup incomplete — run 'mvm init' again")
         raise typer.Exit(code=1)
 
 

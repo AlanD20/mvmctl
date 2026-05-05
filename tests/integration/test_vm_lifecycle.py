@@ -41,22 +41,23 @@ class TestVMCreateAndList:
         monkeypatch.setattr("subprocess.Popen", popen_mock)
 
         # Mock GuestfsProvisioner.run to avoid real libguestfs
-        gp_mock = MagicMock()
+        provisioner_mock = MagicMock()
         monkeypatch.setattr(
-            "mvmctl.api.vm_operations.GuestfsProvisioner",
-            lambda *args, **kwargs: gp_mock,
+            "mvmctl.api.vm_operations.Provisioner",
+            lambda *args, **kwargs: provisioner_mock,
         )
-        return {"subprocess": sub_mock, "popen": popen_mock, "guestfs": gp_mock}
+        return {"subprocess": sub_mock, "popen": popen_mock, "provisioner": provisioner_mock}
 
     def test_create_vm(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Create a VM via the real API and verify the DB record."""
         mocks = self._setup_mocks(monkeypatch)
         # GuestfsProvisioner needs resize, run etc as chainable methods
-        mocks["guestfs"].resize.return_value = mocks["guestfs"]
-        mocks["guestfs"].set_hostname.return_value = mocks["guestfs"]
-        mocks["guestfs"].inject_dns.return_value = mocks["guestfs"]
-        mocks["guestfs"].setup_ssh.return_value = mocks["guestfs"]
-        mocks["guestfs"].run.return_value = None
+        mocks["provisioner"].resize.return_value = mocks["provisioner"]
+        mocks["provisioner"].set_hostname.return_value = mocks["provisioner"]
+        mocks["provisioner"].inject_dns.return_value = mocks["provisioner"]
+        mocks["provisioner"].setup_ssh.return_value = mocks["provisioner"]
+        mocks["provisioner"].disable_cloud_init.return_value = mocks["provisioner"]
+        mocks["provisioner"].run.return_value = None
 
         VMOperation.create(
             VMCreateInput(
@@ -77,11 +78,12 @@ class TestVMCreateAndList:
     def test_list_vms(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Create two VMs and verify list_all returns both."""
         mocks = self._setup_mocks(monkeypatch)
-        mocks["guestfs"].resize.return_value = mocks["guestfs"]
-        mocks["guestfs"].set_hostname.return_value = mocks["guestfs"]
-        mocks["guestfs"].inject_dns.return_value = mocks["guestfs"]
-        mocks["guestfs"].setup_ssh.return_value = mocks["guestfs"]
-        mocks["guestfs"].run.return_value = None
+        mocks["provisioner"].resize.return_value = mocks["provisioner"]
+        mocks["provisioner"].set_hostname.return_value = mocks["provisioner"]
+        mocks["provisioner"].inject_dns.return_value = mocks["provisioner"]
+        mocks["provisioner"].setup_ssh.return_value = mocks["provisioner"]
+        mocks["provisioner"].disable_cloud_init.return_value = mocks["provisioner"]
+        mocks["provisioner"].run.return_value = None
 
         VMOperation.create(
             VMCreateInput(name="list-vm-1", ssh_keys=[], enable_console=False)
@@ -98,11 +100,12 @@ class TestVMCreateAndList:
     def test_get_vm_by_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Get a VM by its name identifier."""
         mocks = self._setup_mocks(monkeypatch)
-        mocks["guestfs"].resize.return_value = mocks["guestfs"]
-        mocks["guestfs"].set_hostname.return_value = mocks["guestfs"]
-        mocks["guestfs"].inject_dns.return_value = mocks["guestfs"]
-        mocks["guestfs"].setup_ssh.return_value = mocks["guestfs"]
-        mocks["guestfs"].run.return_value = None
+        mocks["provisioner"].resize.return_value = mocks["provisioner"]
+        mocks["provisioner"].set_hostname.return_value = mocks["provisioner"]
+        mocks["provisioner"].inject_dns.return_value = mocks["provisioner"]
+        mocks["provisioner"].setup_ssh.return_value = mocks["provisioner"]
+        mocks["provisioner"].disable_cloud_init.return_value = mocks["provisioner"]
+        mocks["provisioner"].run.return_value = None
 
         VMOperation.create(
             VMCreateInput(name="get-by-name", ssh_keys=[], enable_console=False)
@@ -113,11 +116,12 @@ class TestVMCreateAndList:
     def test_get_vm_by_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Get a VM by its ID (SHA256 hash prefix)."""
         mocks = self._setup_mocks(monkeypatch)
-        mocks["guestfs"].resize.return_value = mocks["guestfs"]
-        mocks["guestfs"].set_hostname.return_value = mocks["guestfs"]
-        mocks["guestfs"].inject_dns.return_value = mocks["guestfs"]
-        mocks["guestfs"].setup_ssh.return_value = mocks["guestfs"]
-        mocks["guestfs"].run.return_value = None
+        mocks["provisioner"].resize.return_value = mocks["provisioner"]
+        mocks["provisioner"].set_hostname.return_value = mocks["provisioner"]
+        mocks["provisioner"].inject_dns.return_value = mocks["provisioner"]
+        mocks["provisioner"].setup_ssh.return_value = mocks["provisioner"]
+        mocks["provisioner"].disable_cloud_init.return_value = mocks["provisioner"]
+        mocks["provisioner"].run.return_value = None
 
         VMOperation.create(
             VMCreateInput(name="get-by-id", ssh_keys=[], enable_console=False)
@@ -133,11 +137,12 @@ class TestVMCreateAndList:
     ) -> None:
         """Create a VM using the default network (no explicit network_name)."""
         mocks = self._setup_mocks(monkeypatch)
-        mocks["guestfs"].resize.return_value = mocks["guestfs"]
-        mocks["guestfs"].set_hostname.return_value = mocks["guestfs"]
-        mocks["guestfs"].inject_dns.return_value = mocks["guestfs"]
-        mocks["guestfs"].setup_ssh.return_value = mocks["guestfs"]
-        mocks["guestfs"].run.return_value = None
+        mocks["provisioner"].resize.return_value = mocks["provisioner"]
+        mocks["provisioner"].set_hostname.return_value = mocks["provisioner"]
+        mocks["provisioner"].inject_dns.return_value = mocks["provisioner"]
+        mocks["provisioner"].setup_ssh.return_value = mocks["provisioner"]
+        mocks["provisioner"].disable_cloud_init.return_value = mocks["provisioner"]
+        mocks["provisioner"].run.return_value = None
 
         VMOperation.create(
             VMCreateInput(
@@ -164,22 +169,23 @@ class TestVMRemove:
         monkeypatch.setattr("subprocess.run", sub_mock)
         monkeypatch.setattr("subprocess.Popen", popen_mock)
 
-        gp_mock = MagicMock()
+        provisioner_mock = MagicMock()
         monkeypatch.setattr(
-            "mvmctl.api.vm_operations.GuestfsProvisioner",
-            lambda *args, **kwargs: gp_mock,
+            "mvmctl.api.vm_operations.Provisioner",
+            lambda *args, **kwargs: provisioner_mock,
         )
-        return {"subprocess": sub_mock, "popen": popen_mock, "guestfs": gp_mock}
+        return {"subprocess": sub_mock, "popen": popen_mock, "provisioner": provisioner_mock}
 
     def _create_vm(
         self, monkeypatch: pytest.MonkeyPatch, name: str
     ) -> VMInstanceItem:
         mocks = self._setup_mocks(monkeypatch)
-        mocks["guestfs"].resize.return_value = mocks["guestfs"]
-        mocks["guestfs"].set_hostname.return_value = mocks["guestfs"]
-        mocks["guestfs"].inject_dns.return_value = mocks["guestfs"]
-        mocks["guestfs"].setup_ssh.return_value = mocks["guestfs"]
-        mocks["guestfs"].run.return_value = None
+        mocks["provisioner"].resize.return_value = mocks["provisioner"]
+        mocks["provisioner"].set_hostname.return_value = mocks["provisioner"]
+        mocks["provisioner"].inject_dns.return_value = mocks["provisioner"]
+        mocks["provisioner"].setup_ssh.return_value = mocks["provisioner"]
+        mocks["provisioner"].disable_cloud_init.return_value = mocks["provisioner"]
+        mocks["provisioner"].run.return_value = None
 
         VMOperation.create(
             VMCreateInput(name=name, ssh_keys=[], enable_console=False)
@@ -242,17 +248,18 @@ class TestVMStatusFiltering:
         monkeypatch.setattr("subprocess.run", sub_mock)
         monkeypatch.setattr("subprocess.Popen", popen_mock)
 
-        gp_mock = MagicMock()
+        provisioner_mock = MagicMock()
         monkeypatch.setattr(
-            "mvmctl.api.vm_operations.GuestfsProvisioner",
-            lambda *args, **kwargs: gp_mock,
+            "mvmctl.api.vm_operations.Provisioner",
+            lambda *args, **kwargs: provisioner_mock,
         )
-        gp_mock.resize.return_value = gp_mock
-        gp_mock.set_hostname.return_value = gp_mock
-        gp_mock.inject_dns.return_value = gp_mock
-        gp_mock.setup_ssh.return_value = gp_mock
-        gp_mock.run.return_value = None
-        return {"subprocess": sub_mock, "popen": popen_mock, "guestfs": gp_mock}
+        provisioner_mock.resize.return_value = provisioner_mock
+        provisioner_mock.set_hostname.return_value = provisioner_mock
+        provisioner_mock.inject_dns.return_value = provisioner_mock
+        provisioner_mock.setup_ssh.return_value = provisioner_mock
+        provisioner_mock.disable_cloud_init.return_value = provisioner_mock
+        provisioner_mock.run.return_value = None
+        return {"subprocess": sub_mock, "popen": popen_mock, "provisioner": provisioner_mock}
 
     def _create_vm(self, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
         _mocks = self._setup_mocks(monkeypatch)
@@ -318,16 +325,17 @@ class TestVMSnapshotWorkflow:
         monkeypatch.setattr("subprocess.run", sub_mock)
         monkeypatch.setattr("subprocess.Popen", popen_mock)
 
-        gp_mock = MagicMock()
+        provisioner_mock = MagicMock()
         monkeypatch.setattr(
-            "mvmctl.api.vm_operations.GuestfsProvisioner",
-            lambda *args, **kwargs: gp_mock,
+            "mvmctl.api.vm_operations.Provisioner",
+            lambda *args, **kwargs: provisioner_mock,
         )
-        gp_mock.resize.return_value = gp_mock
-        gp_mock.set_hostname.return_value = gp_mock
-        gp_mock.inject_dns.return_value = gp_mock
-        gp_mock.setup_ssh.return_value = gp_mock
-        gp_mock.run.return_value = None
+        provisioner_mock.resize.return_value = provisioner_mock
+        provisioner_mock.set_hostname.return_value = provisioner_mock
+        provisioner_mock.inject_dns.return_value = provisioner_mock
+        provisioner_mock.setup_ssh.return_value = provisioner_mock
+        provisioner_mock.disable_cloud_init.return_value = provisioner_mock
+        provisioner_mock.run.return_value = None
 
         # Mock the FirecrackerSpawner.snapshot() so it doesn't issue real API calls
         monkeypatch.setattr(
@@ -339,7 +347,7 @@ class TestVMSnapshotWorkflow:
             MagicMock(return_value=None),
         )
 
-        return {"subprocess": sub_mock, "popen": popen_mock, "guestfs": gp_mock}
+        return {"subprocess": sub_mock, "popen": popen_mock, "provisioner": provisioner_mock}
 
     def test_create_and_snapshot(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -402,17 +410,18 @@ class TestVMInspect:
         monkeypatch.setattr("subprocess.run", sub_mock)
         monkeypatch.setattr("subprocess.Popen", popen_mock)
 
-        gp_mock = MagicMock()
+        provisioner_mock = MagicMock()
         monkeypatch.setattr(
-            "mvmctl.api.vm_operations.GuestfsProvisioner",
-            lambda *args, **kwargs: gp_mock,
+            "mvmctl.api.vm_operations.Provisioner",
+            lambda *args, **kwargs: provisioner_mock,
         )
-        gp_mock.resize.return_value = gp_mock
-        gp_mock.set_hostname.return_value = gp_mock
-        gp_mock.inject_dns.return_value = gp_mock
-        gp_mock.setup_ssh.return_value = gp_mock
-        gp_mock.run.return_value = None
-        return {"subprocess": sub_mock, "popen": popen_mock, "guestfs": gp_mock}
+        provisioner_mock.resize.return_value = provisioner_mock
+        provisioner_mock.set_hostname.return_value = provisioner_mock
+        provisioner_mock.inject_dns.return_value = provisioner_mock
+        provisioner_mock.setup_ssh.return_value = provisioner_mock
+        provisioner_mock.disable_cloud_init.return_value = provisioner_mock
+        provisioner_mock.run.return_value = None
+        return {"subprocess": sub_mock, "popen": popen_mock, "provisioner": provisioner_mock}
 
     def test_inspect_vm(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Create a VM and inspect it, verifying all flat-mode fields."""
@@ -496,17 +505,18 @@ class TestVMCreateExplicit:
         monkeypatch.setattr("subprocess.run", sub_mock)
         monkeypatch.setattr("subprocess.Popen", popen_mock)
 
-        gp_mock = MagicMock()
+        provisioner_mock = MagicMock()
         monkeypatch.setattr(
-            "mvmctl.api.vm_operations.GuestfsProvisioner",
-            lambda *args, **kwargs: gp_mock,
+            "mvmctl.api.vm_operations.Provisioner",
+            lambda *args, **kwargs: provisioner_mock,
         )
-        gp_mock.resize.return_value = gp_mock
-        gp_mock.set_hostname.return_value = gp_mock
-        gp_mock.inject_dns.return_value = gp_mock
-        gp_mock.setup_ssh.return_value = gp_mock
-        gp_mock.run.return_value = None
-        return {"subprocess": sub_mock, "popen": popen_mock, "guestfs": gp_mock}
+        provisioner_mock.resize.return_value = provisioner_mock
+        provisioner_mock.set_hostname.return_value = provisioner_mock
+        provisioner_mock.inject_dns.return_value = provisioner_mock
+        provisioner_mock.setup_ssh.return_value = provisioner_mock
+        provisioner_mock.disable_cloud_init.return_value = provisioner_mock
+        provisioner_mock.run.return_value = None
+        return {"subprocess": sub_mock, "popen": popen_mock, "provisioner": provisioner_mock}
 
     def _seed_second_image(self) -> str:
         from mvmctl.core._shared import Database
@@ -720,17 +730,18 @@ class TestVMRemoveForce:
         monkeypatch.setattr("subprocess.run", sub_mock)
         monkeypatch.setattr("subprocess.Popen", popen_mock)
 
-        gp_mock = MagicMock()
+        provisioner_mock = MagicMock()
         monkeypatch.setattr(
-            "mvmctl.api.vm_operations.GuestfsProvisioner",
-            lambda *args, **kwargs: gp_mock,
+            "mvmctl.api.vm_operations.Provisioner",
+            lambda *args, **kwargs: provisioner_mock,
         )
-        gp_mock.resize.return_value = gp_mock
-        gp_mock.set_hostname.return_value = gp_mock
-        gp_mock.inject_dns.return_value = gp_mock
-        gp_mock.setup_ssh.return_value = gp_mock
-        gp_mock.run.return_value = None
-        return {"subprocess": sub_mock, "popen": popen_mock, "guestfs": gp_mock}
+        provisioner_mock.resize.return_value = provisioner_mock
+        provisioner_mock.set_hostname.return_value = provisioner_mock
+        provisioner_mock.inject_dns.return_value = provisioner_mock
+        provisioner_mock.setup_ssh.return_value = provisioner_mock
+        provisioner_mock.disable_cloud_init.return_value = provisioner_mock
+        provisioner_mock.run.return_value = None
+        return {"subprocess": sub_mock, "popen": popen_mock, "provisioner": provisioner_mock}
 
     def test_remove_vm_with_force(
         self, monkeypatch: pytest.MonkeyPatch

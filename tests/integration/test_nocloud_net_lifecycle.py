@@ -81,17 +81,18 @@ class TestNocloudNetLifecycle:
         socket_cls, _ = _make_socket_mock()
         monkeypatch.setattr("socket.socket", socket_cls)
 
-        # Mock GuestfsProvisioner to avoid real libguestfs
-        gp_mock = MagicMock()
-        gp_mock.resize.return_value = gp_mock
-        gp_mock.set_hostname.return_value = gp_mock
-        gp_mock.inject_dns.return_value = gp_mock
-        gp_mock.setup_ssh.return_value = gp_mock
-        gp_mock.inject_cloud_init.return_value = gp_mock
-        gp_mock.run.return_value = None
+        # Mock Provisioner to avoid real libguestfs
+        provisioner_mock = MagicMock()
+        provisioner_mock.resize.return_value = provisioner_mock
+        provisioner_mock.set_hostname.return_value = provisioner_mock
+        provisioner_mock.inject_dns.return_value = provisioner_mock
+        provisioner_mock.setup_ssh.return_value = provisioner_mock
+        provisioner_mock.disable_cloud_init.return_value = provisioner_mock
+        provisioner_mock.inject_cloud_init.return_value = provisioner_mock
+        provisioner_mock.run.return_value = None
         monkeypatch.setattr(
-            "mvmctl.api.vm_operations.GuestfsProvisioner",
-            lambda *args, **kwargs: gp_mock,
+            "mvmctl.api.vm_operations.Provisioner",
+            lambda *args, **kwargs: provisioner_mock,
         )
 
         # Mock os.access to always succeed

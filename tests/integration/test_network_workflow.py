@@ -200,15 +200,15 @@ class TestNetworkForceRemoval:
         monkeypatch.setattr("subprocess.run", sub_mock)
         monkeypatch.setattr("subprocess.Popen", popen_mock)
 
-        gp_mock = MagicMock()
+        provisioner_mock = MagicMock()
         monkeypatch.setattr(
-            "mvmctl.api.vm_operations.GuestfsProvisioner",
-            lambda *args, **kwargs: gp_mock,
+            "mvmctl.api.vm_operations.Provisioner",
+            lambda *args, **kwargs: provisioner_mock,
         )
         return {
             "subprocess": sub_mock,
             "popen": popen_mock,
-            "guestfs": gp_mock,
+            "provisioner": provisioner_mock,
         }
 
     def test_remove_network_with_force(
@@ -216,11 +216,12 @@ class TestNetworkForceRemoval:
     ) -> None:
         """Create network with attached VM, remove with force=True, verify soft delete."""
         mocks = self._setup_vm_mocks(monkeypatch)
-        mocks["guestfs"].resize.return_value = mocks["guestfs"]
-        mocks["guestfs"].set_hostname.return_value = mocks["guestfs"]
-        mocks["guestfs"].inject_dns.return_value = mocks["guestfs"]
-        mocks["guestfs"].setup_ssh.return_value = mocks["guestfs"]
-        mocks["guestfs"].run.return_value = None
+        mocks["provisioner"].resize.return_value = mocks["provisioner"]
+        mocks["provisioner"].set_hostname.return_value = mocks["provisioner"]
+        mocks["provisioner"].inject_dns.return_value = mocks["provisioner"]
+        mocks["provisioner"].setup_ssh.return_value = mocks["provisioner"]
+        mocks["provisioner"].disable_cloud_init.return_value = mocks["provisioner"]
+        mocks["provisioner"].run.return_value = None
 
         # 1. Create a dedicated network
         NetworkOperation.create(

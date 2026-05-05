@@ -41,11 +41,25 @@ These binaries are required for importing images, converting formats, and genera
 | `cloud-localds` | Cloud-Init | Creating `nocloud` seed ISOs | `cloud-image-utils` | `cloud-utils` |
 | `ssh-keygen` | Remote | Generating SSH keypairs for microVMs | `openssh-client` | `openssh` |
 
-## 3. libguestfs Dependencies (Optional)
+## 3. Image Provisioning Dependencies (Optional — Two Paths)
 
-For cloud-init injection into disk images via injection mode (`--cloud-init-mode inject`), mvmctl uses libguestfs. This requires both system libraries and Python bindings.
+`mvm vm create` can provision the root filesystem via **two paths**:
 
-### System Packages (Required for Runtime)
+| Aspect | libguestfs Path (legacy) | Loop-Mount (mvm-provision) Path |
+| :--- | :--- | :--- |
+| **Binary** | `guestfs` Python module + supermin appliance | `mvm-provision` standalone compiled binary |
+| **Speed** | ~2600–3000ms per VM | ~200ms per VM |
+| **Sudo** | `supermin` needs passwordless sudo | `mvm-provision` needs passwordless sudo |
+| **Python dep** | Requires system `python3-libguestfs` (not on PyPI) | Zero Python deps (stdlib only) |
+| **System tools** | Depends on supermin + guestfs appliance | Uses direct `losetup`/`mount`/`chroot`/`resize2fs`/`btrfs` |
+| **Fallback** | Used when `mvm-provision` binary unavailable or `sudo` not configured | Primary path when compiled binary is installed and sudo configured |
+| **Availability** | Checked at `mvm init` step 4, stored as `settings.guestfs_enabled` | Installed at `mvm init` step 2 via binary extraction |
+
+### 3.1 libguestfs Path (Legacy)
+
+For cloud-init injection into disk images via injection mode (`--cloud-init-mode inject`), mvmctl can use libguestfs. This requires both system libraries and Python bindings.
+
+#### System Packages (Required for Runtime)
 
 These provide the libguestfs C library, appliance tools, and supermin:
 
@@ -64,7 +78,7 @@ sudo dnf install libguestfs libguestfs-tools supermin
 sudo pacman -S libguestfs supermin
 ```
 
-### Python Bindings (Required for Development/Builds)
+#### Python Bindings (Required for Development/Builds)
 
 The Python `guestfs` module is needed when:
 - Running mvmctl from source with direct injection mode
@@ -92,7 +106,7 @@ sudo pacman -S libguestfs supermin  # Python bindings included in libguestfs pac
 > You must install the Python bindings through your distribution's package manager before
 > building or running mvmctl from source with direct injection mode.
 
-### Sudoers Configuration
+#### Guestfs Sudoers Configuration
 
 libguestfs uses `supermin` to build the appliance. Add to `/etc/sudoers.d/mvm`:
 
@@ -106,7 +120,7 @@ Or if supermin is in a different location:
 %mvm ALL=(ALL) NOPASSWD: /usr/libexec/supermin/*
 ```
 
-### Verification
+#### Guestfs Verification
 
 Check libguestfs is working:
 
@@ -118,6 +132,45 @@ Check supermin sudoers entry:
 
 ```bash
 sg mvm -c 'sudo -n /usr/bin/supermin --version'
+```
+
+### 3.2 Loop-Mount (mvm-provision) Path (Primary)
+
+The `mvm-provision` binary is a standalone compiled binary (Nuitka `--onefile`) that provisions root filesystem images directly via loop-mount, without libguestfs. It reads JSON operations from stdin, performs all operations via system tools, and writes JSON results to stdout.
+
+**The binary uses only stdlib Python — zero external Python dependencies.** It communicates with system tools via subprocess.
+
+#### System Binaries Required
+
+| Binary | Purpose | Package (Debian/Ubuntu) | Package (Arch) |
+| :--- | :--- | :--- | :--- |
+| `losetup` | Setting up and detaching loop devices with partition scanning | `util-linux` | `util-linux` |
+| `blkid` | Detecting filesystem type of each partition | `util-linux` | `util-linux` |
+| `blockdev` | Querying partition/device size in bytes (largest root detection) | `util-linux` | `util-linux` |
+| `mount` | Mounting the root partition (ext4 and btrfs paths) | `util-linux` | `util-linux` |
+| `umount` | Unmounting the root partition | `util-linux` | `util-linux` |
+| `e2fsck` | Filesystem check before ext4 resize operations | `e2fsprogs` | `e2fsprogs` |
+| `resize2fs` | Growing and shrinking ext4 filesystems | `e2fsprogs` | `e2fsprogs` |
+| `tune2fs` | Reading ext4 block count/size for shrink size calculation | `e2fsprogs` | `e2fsprogs` |
+| `btrfs` | Growing and shrinking btrfs filesystems (`btrfs filesystem resize`) | `btrfs-progs` | `btrfs-progs` |
+| `chroot` | Running shell commands inside the mounted rootfs | `coreutils` | `coreutils` |
+
+> **Note:** All `util-linux` and `e2fsprogs` binaries are already required by the image import pipeline (see §2). Only `btrfs-progs` is unique to the provisioner path (and only needed when provisioning btrfs images).
+
+#### Provisioner Sudoers Configuration
+
+`mvm-provision` needs passwordless sudo for loop device setup, mount, and blockdev operations. Added automatically by `mvm host init` (step 2 extracts the binary, step 3 writes the sudoers drop-in):
+
+```
+%mvm ALL=(ALL) NOPASSWD: /home/*/.cache/mvmctl/bin/mvm-provision
+```
+
+#### Provisioner Verification
+
+Check the binary is installed and sudo is configured:
+
+```bash
+sg mvm -c 'sudo -n ~/.cache/mvmctl/bin/mvm-provision --help'
 ```
 
 ## 4. Kernel Build Dependencies (Optional)
@@ -162,7 +215,7 @@ This section maps specific `mvm` commands to the external binaries they invoke.
 | | `ls`, `rm`, `set-default` | (Internal Python logic) |
 | **`mvm key`** | `create` | `ssh-keygen` |
 | | `add`, `ls`, `rm` | (Internal Python logic) |
-| **`mvm vm`** | `create` | `firecracker`, `jailer`, `ip`, `iptables`, `cloud-localds` (if cloud-init) |
+| **`mvm vm`** | `create` | **Primary:** `firecracker`, `jailer`, `ip`, `iptables`, `cloud-localds` (if cloud-init), `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `chroot` (+ `btrfs` for btrfs images) |
 | | `ls`, `ps`, `inspect` | (Internal Python logic) |
 | | `start`, `stop`, `reboot` | `firecracker`, `ip`, `iptables` |
 | | `rm` | `firecracker`, `ip`, `iptables` |

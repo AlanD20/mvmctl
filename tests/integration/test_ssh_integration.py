@@ -31,16 +31,17 @@ def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr("subprocess.run", sub_mock)
     monkeypatch.setattr("subprocess.Popen", popen_mock)
 
-    # Mock GuestfsProvisioner to avoid real libguestfs
-    gp_mock = MagicMock()
-    gp_mock.resize.return_value = gp_mock
-    gp_mock.set_hostname.return_value = gp_mock
-    gp_mock.inject_dns.return_value = gp_mock
-    gp_mock.setup_ssh.return_value = gp_mock
-    gp_mock.run.return_value = None
+    # Mock Provisioner to avoid real libguestfs
+    provisioner_mock = MagicMock()
+    provisioner_mock.resize.return_value = provisioner_mock
+    provisioner_mock.set_hostname.return_value = provisioner_mock
+    provisioner_mock.inject_dns.return_value = provisioner_mock
+    provisioner_mock.setup_ssh.return_value = provisioner_mock
+    provisioner_mock.disable_cloud_init.return_value = provisioner_mock
+    provisioner_mock.run.return_value = None
     monkeypatch.setattr(
-        "mvmctl.api.vm_operations.GuestfsProvisioner",
-        lambda *args, **kwargs: gp_mock,
+        "mvmctl.api.vm_operations.Provisioner",
+        lambda *args, **kwargs: provisioner_mock,
     )
 
     # Mock os.execvp so SSH interactive sessions don't replace the test process
@@ -53,7 +54,7 @@ def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     return {
         "subprocess": sub_mock,
         "popen": popen_mock,
-        "guestfs": gp_mock,
+        "provisioner": provisioner_mock,
         "execvp_calls": execvp_calls,
     }
 

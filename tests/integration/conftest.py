@@ -543,6 +543,11 @@ def _ensure_cache_files(cache_dir: Path) -> None:
     fc_file = bin_dir / "firecracker"
     fc_file.write_text("fake firecracker")
     fc_file.chmod(0o755)
+    # mvm-provision binary — needed by LoopMountManager.is_binary_available()
+    # and HostService.validate_sudoers_binaries()
+    prov_file = bin_dir / "mvm-provision"
+    prov_file.write_text("fake mvm-provision")
+    prov_file.chmod(0o755)
 
 
 @pytest.fixture(autouse=True)

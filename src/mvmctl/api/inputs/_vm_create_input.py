@@ -44,6 +44,7 @@ from mvmctl.models import (
     ImageItem,
     KernelItem,
     NetworkItem,
+    ProvisionerType,
     SSHKeyItem,
 )
 from mvmctl.utils._disk import parse_disk_size
@@ -151,6 +152,7 @@ class ResolvedVMCreateInput:
 
     boot_args: str | None = None
     ssh_keys: list[SSHKeyItem] = field(default_factory=list)
+    provisioner: ProvisionerType = ProvisionerType.LOOP_MOUNT
     extra_drives: list[DriveConfig] = field(default_factory=list)
 
 
@@ -218,6 +220,7 @@ class VMCreateRequest:
         rootfs_disk_size_bytes = rootfs_disk_size_mib * CONST_MEBIBYTE_BYTES
 
         ci_mode_result = self._resolve_cloud_init_mode()
+        provisioner = self._resolve_provisioner()
 
         # Resolve firecracker defaults
         log_level = str(
@@ -315,6 +318,7 @@ class VMCreateRequest:
             requested_guest_mac=self._inputs.requested_guest_mac,
             requested_guest_ip=self._inputs.requested_guest_ip,
             ssh_keys=ssh_keys,
+            provisioner=provisioner,
             disk_size_bytes=rootfs_disk_size_bytes,
             disk_size_mib=rootfs_disk_size_mib,
             nocloud_net_port=self._inputs.nocloud_net_port
@@ -573,3 +577,26 @@ class VMCreateRequest:
             mode = CloudInitModeResolved(mode=CloudInitMode.OFF, iso_path=None)
 
         return mode
+
+    def _resolve_provisioner(self) -> ProvisionerType:
+        """Resolve which provisioner to use.
+
+        Checks the loop-mount binary first, then falls back to guestfs
+        if enabled in settings. Raises ``VMCreateError`` if neither is
+        available.
+        """
+        from mvmctl.core._shared._loopmount import LoopMountManager
+
+        guestfs_enabled = bool(
+            self._resolve_setting("settings", "guestfs_enabled")
+        )
+        if guestfs_enabled:
+            return ProvisionerType.GUESTFS
+        elif LoopMountManager.is_binary_available():
+            return ProvisionerType.LOOP_MOUNT
+
+        raise VMCreateError(
+            "No provisioner available: loop-mount binary not found and "
+            "libguestfs is not enabled. "
+            "Run 'mvm init' to set up service binaries or enable libguestfs."
+        )

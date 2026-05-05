@@ -86,21 +86,28 @@ class TestCachePruneVMs:
         monkeypatch.setattr("subprocess.run", sub_mock)
         monkeypatch.setattr("subprocess.Popen", popen_mock)
 
-        gp_mock = MagicMock()
+        provisioner_mock = MagicMock()
         monkeypatch.setattr(
-            "mvmctl.api.vm_operations.GuestfsProvisioner",
-            lambda *args, **kwargs: gp_mock,
+            "mvmctl.api.vm_operations.Provisioner",
+            lambda *args, **kwargs: provisioner_mock,
         )
-        return {"subprocess": sub_mock, "popen": popen_mock, "guestfs": gp_mock}
+        provisioner_mock.resize.return_value = provisioner_mock
+        provisioner_mock.set_hostname.return_value = provisioner_mock
+        provisioner_mock.inject_dns.return_value = provisioner_mock
+        provisioner_mock.setup_ssh.return_value = provisioner_mock
+        provisioner_mock.disable_cloud_init.return_value = provisioner_mock
+        provisioner_mock.run.return_value = None
+        return {"subprocess": sub_mock, "popen": popen_mock, "provisioner": provisioner_mock}
 
     def _create_vm(self, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
         """Create a VM with all mocks applied."""
         mocks = self._setup_mocks(monkeypatch)
-        mocks["guestfs"].resize.return_value = mocks["guestfs"]
-        mocks["guestfs"].set_hostname.return_value = mocks["guestfs"]
-        mocks["guestfs"].inject_dns.return_value = mocks["guestfs"]
-        mocks["guestfs"].setup_ssh.return_value = mocks["guestfs"]
-        mocks["guestfs"].run.return_value = None
+        mocks["provisioner"].resize.return_value = mocks["provisioner"]
+        mocks["provisioner"].set_hostname.return_value = mocks["provisioner"]
+        mocks["provisioner"].inject_dns.return_value = mocks["provisioner"]
+        mocks["provisioner"].setup_ssh.return_value = mocks["provisioner"]
+        mocks["provisioner"].disable_cloud_init.return_value = mocks["provisioner"]
+        mocks["provisioner"].run.return_value = None
         VMOperation.create(
             VMCreateInput(name=name, ssh_keys=[], enable_console=False)
         )
@@ -347,21 +354,28 @@ class TestCachePruneAll:
         monkeypatch.setattr("subprocess.run", sub_mock)
         monkeypatch.setattr("subprocess.Popen", popen_mock)
 
-        gp_mock = MagicMock()
+        provisioner_mock = MagicMock()
         monkeypatch.setattr(
-            "mvmctl.api.vm_operations.GuestfsProvisioner",
-            lambda *args, **kwargs: gp_mock,
+            "mvmctl.api.vm_operations.Provisioner",
+            lambda *args, **kwargs: provisioner_mock,
         )
-        return {"subprocess": sub_mock, "popen": popen_mock, "guestfs": gp_mock}
+        provisioner_mock.resize.return_value = provisioner_mock
+        provisioner_mock.set_hostname.return_value = provisioner_mock
+        provisioner_mock.inject_dns.return_value = provisioner_mock
+        provisioner_mock.setup_ssh.return_value = provisioner_mock
+        provisioner_mock.disable_cloud_init.return_value = provisioner_mock
+        provisioner_mock.run.return_value = None
+        return {"subprocess": sub_mock, "popen": popen_mock, "provisioner": provisioner_mock}
 
     def _create_vm(self, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
         """Create a VM with all mocks applied."""
         mocks = self._setup_mocks(monkeypatch)
-        mocks["guestfs"].resize.return_value = mocks["guestfs"]
-        mocks["guestfs"].set_hostname.return_value = mocks["guestfs"]
-        mocks["guestfs"].inject_dns.return_value = mocks["guestfs"]
-        mocks["guestfs"].setup_ssh.return_value = mocks["guestfs"]
-        mocks["guestfs"].run.return_value = None
+        mocks["provisioner"].resize.return_value = mocks["provisioner"]
+        mocks["provisioner"].set_hostname.return_value = mocks["provisioner"]
+        mocks["provisioner"].inject_dns.return_value = mocks["provisioner"]
+        mocks["provisioner"].setup_ssh.return_value = mocks["provisioner"]
+        mocks["provisioner"].disable_cloud_init.return_value = mocks["provisioner"]
+        mocks["provisioner"].run.return_value = None
         VMOperation.create(
             VMCreateInput(name=name, ssh_keys=[], enable_console=False)
         )

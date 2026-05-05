@@ -379,7 +379,7 @@ Legacy format example:
 
 ## Cloud-Init
 
-`mvm` uses **off** (no cloud-init) as the default mode. When you want cloud-init provisioning, use `--cloud-init-mode inject` (default when enabled, uses libguestfs), `iso` (generates a cloud-init ISO), or `net` (nocloud-net HTTP server).
+`mvm` uses **off** (no cloud-init) as the default mode. When you want cloud-init provisioning, use `--cloud-init-mode inject` (default when enabled, uses the loop-mount provisioner binary with libguestfs as fallback), `iso` (generates a cloud-init ISO), or `net` (nocloud-net HTTP server).
 
 ### How It Works
 
@@ -393,7 +393,7 @@ Legacy format example:
 
 | Mode | Flag | Description |
 |------|------|-------------|
-| **inject** | `--cloud-init-mode inject` | Direct injection into rootfs using libguestfs |
+| **inject** | `--cloud-init-mode inject` | Direct injection into rootfs via loop-mount provisioner (guestfs fallback) |
 | **net** | `--cloud-init-mode net` | Serves cloud-init files via HTTP (nocloud-net) |
 | **iso** | `--cloud-init-mode iso` | Uses a pre-existing ISO file |
 | **off** | `--cloud-init-mode off` | Skips cloud-init entirely (default) |

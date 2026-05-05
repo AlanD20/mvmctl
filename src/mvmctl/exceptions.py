@@ -354,6 +354,24 @@ class GuestfsApplianceError(GuestfsError):
     pass
 
 
+class LoopMountError(MVMError):
+    """Base loop-mount provisioning error."""
+
+    pass
+
+
+class LoopMountBinaryNotFoundError(LoopMountError):
+    """Binary not found at configured path."""
+
+    pass
+
+
+class LoopMountTimeoutError(LoopMountError):
+    """Loop-mount binary did not complete within the timeout."""
+
+    pass
+
+
 class RootPartitionDetectionError(MVMError):
     """Root partition could not be detected."""
 

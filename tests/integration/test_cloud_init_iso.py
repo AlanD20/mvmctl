@@ -4,7 +4,7 @@ Tests exercise the CloudInitProvisioner and the VM creation flow with
 different cloud-init modes (ISO, OFF, INJECT, NET).
 
 Only subprocess calls (genisoimage, cloud-localds, cp, ip, etc.) and
-GuestfsProvisioner are mocked. ALL orchestration logic runs unmocked.
+Provisioner are mocked. ALL orchestration logic runs unmocked.
 """
 
 from __future__ import annotations
@@ -32,21 +32,21 @@ def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     monkeypatch.setattr("subprocess.run", sub_mock)
     monkeypatch.setattr("subprocess.Popen", popen_mock)
 
-    # Mock GuestfsProvisioner to avoid real libguestfs
-    gp_mock = MagicMock()
-    gp_mock.resize.return_value = gp_mock
-    gp_mock.set_hostname.return_value = gp_mock
-    gp_mock.inject_dns.return_value = gp_mock
-    gp_mock.setup_ssh.return_value = gp_mock
-    gp_mock.inject_cloud_init.return_value = gp_mock
-    gp_mock.disable_cloud_init.return_value = gp_mock
-    gp_mock.run.return_value = None
+    # Mock Provisioner to avoid real libguestfs
+    provisioner_mock = MagicMock()
+    provisioner_mock.resize.return_value = provisioner_mock
+    provisioner_mock.set_hostname.return_value = provisioner_mock
+    provisioner_mock.inject_dns.return_value = provisioner_mock
+    provisioner_mock.setup_ssh.return_value = provisioner_mock
+    provisioner_mock.disable_cloud_init.return_value = provisioner_mock
+    provisioner_mock.inject_cloud_init.return_value = provisioner_mock
+    provisioner_mock.run.return_value = None
     monkeypatch.setattr(
-        "mvmctl.api.vm_operations.GuestfsProvisioner",
-        lambda *args, **kwargs: gp_mock,
+        "mvmctl.api.vm_operations.Provisioner",
+        lambda *args, **kwargs: provisioner_mock,
     )
 
-    return {"subprocess": sub_mock, "popen": popen_mock, "guestfs": gp_mock}
+    return {"subprocess": sub_mock, "popen": popen_mock, "provisioner": provisioner_mock}
 
 
 # ======================================================================
@@ -161,7 +161,7 @@ class TestCloudInitISOEdgeCases:
     def test_cloud_init_off_skips_injection(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """OFF mode means GuestfsProvisioner.disable_cloud_init is called."""
+        """OFF mode means Provisioner.disable_cloud_init is called."""
         _setup_mocks(monkeypatch)
 
         VMOperation.create(
@@ -290,7 +290,7 @@ class TestCloudInitManualProvisioner:
         """CloudInitProvisioner in INJECT mode creates cloud-init files only.
 
         In INJECT mode the files are written to disk and later injected
-        into the rootfs by GuestfsProvisioner — no ISO is generated.
+        into the rootfs by Provisioner — no ISO is generated.
         """
         from mvmctl.core.cloudinit._provisioner import (
             CloudInitProvisionConfig,

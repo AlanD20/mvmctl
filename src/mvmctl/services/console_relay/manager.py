@@ -138,23 +138,44 @@ class ConsoleRelayManager:
                     f"Console relay already running for ID: {self._id}"
                 )
 
-            relay_cmd = [
-                sys.executable,
-                "-m",
-                "mvmctl.services.console_relay.process",
-                "--id",
-                self._id,
-                "--name",
-                self._name,
-                "--pty-controller-fd",
-                str(pty_controller_fd),
-                "--socket-path",
-                str(self._socket_path),
-                "--pid-file",
-                str(self._pid_path),
-                "--log-file",
-                str(self._log_path),
-            ]
+            from mvmctl.utils.common import CacheUtils
+
+            bin_dir = CacheUtils.get_bin_dir()
+            binary = bin_dir / "mvm-console-relay"
+            if binary.exists():
+                relay_cmd = [
+                    str(binary),
+                    "--id",
+                    self._id,
+                    "--name",
+                    self._name,
+                    "--pty-controller-fd",
+                    str(pty_controller_fd),
+                    "--socket-path",
+                    str(self._socket_path),
+                    "--pid-file",
+                    str(self._pid_path),
+                    "--log-file",
+                    str(self._log_path),
+                ]
+            else:
+                relay_cmd = [
+                    sys.executable,
+                    "-m",
+                    "mvmctl.services.console_relay.process",
+                    "--id",
+                    self._id,
+                    "--name",
+                    self._name,
+                    "--pty-controller-fd",
+                    str(pty_controller_fd),
+                    "--socket-path",
+                    str(self._socket_path),
+                    "--pid-file",
+                    str(self._pid_path),
+                    "--log-file",
+                    str(self._log_path),
+                ]
 
             try:
                 proc = subprocess.Popen(

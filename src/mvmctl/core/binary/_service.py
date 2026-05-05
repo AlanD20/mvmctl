@@ -7,7 +7,10 @@ Handles download, list, remove, and path resolution for Firecracker binaries.
 from __future__ import annotations
 
 import logging
+import os
+import shutil
 import stat
+import sys
 import tarfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,6 +19,7 @@ from mvmctl.constants import (
     CONST_BUFFER_SIZE_BYTES,
     CONST_HTTP_TIMEOUT_SECONDS,
     CONST_MIN_BINARY_SIZE_BYTES,
+    SERVICE_BINARY_NAMES,
 )
 from mvmctl.constants import (
     FIRECRACKER_GITHUB_DOWNLOAD_URL as _GITHUB_DOWNLOAD_URL,
@@ -272,6 +276,99 @@ class BinaryService:
             self.remove(binary, force=force)
             deleted.append(binary)
         return deleted
+
+    @staticmethod
+    @staticmethod
+    def _get_embedded_path(name: str) -> Path | None:
+        """Return the path to an embedded service binary, or None if not available.
+
+        In compiled mode (Nuitka --onefile), binaries are embedded via
+        --include-data-dir and are available relative to the executable.
+        In development mode, pre-built binaries don't exist.
+        """
+        from mvmctl.constants import is_compiled_mode
+
+        if not is_compiled_mode():
+            return None
+
+        base = Path(sys.argv[0]).parent
+        candidate = base / "mvmctl" / "services" / name
+        if candidate.exists():
+            return candidate
+        temp_dir = os.environ.get("NUITKA_TEMP_DIR", "")
+        if temp_dir:
+            candidate = Path(temp_dir) / "mvmctl" / "services" / name
+            if candidate.exists():
+                return candidate
+        return None
+
+    def extract_service_binaries(self) -> list[BinaryItem]:
+        """Extract the combined multidist service binary and create symlinks/DB entries.
+
+        The combined ``mvm-services`` binary contains all 3 service entry points.
+        At extraction time, we copy this single binary and create symlinks for
+        each service name (``mvm-console-relay``, ``mvm-nocloud-server``,
+        ``mvm-provision``).
+
+        In development mode (not frozen), this is a no-op — the managers
+        fall back to ``sys.executable -m ...`` or guestfs respectively.
+
+        Returns:
+            List of BinaryItem records that were extracted.
+        """
+        from datetime import UTC, datetime
+
+        from mvmctl import __version__ as mvmctl_version
+        from mvmctl.constants import CONST_FILE_PERMS_EXECUTABLE
+        from mvmctl.utils.common import CacheUtils
+        from mvmctl.utils.crypto import HashGenerator
+
+        bin_dir = CacheUtils.get_bin_dir()
+        now = datetime.now(UTC).isoformat()
+        extracted: list[BinaryItem] = []
+
+        # Copy the combined multidist binary
+        combined_name = "mvm-services"
+        combined_dest = bin_dir / combined_name
+
+        combined_src = BinaryService._get_embedded_path(combined_name)
+        if combined_src is None:
+            logger.debug(
+                "Combined service binary not embedded, skipping extraction"
+            )
+            return extracted
+
+        # Always overwrite — ensures idempotent recovery from corrupted binaries
+        combined_dest.unlink(missing_ok=True)
+        shutil.copy2(str(combined_src), str(combined_dest))
+        combined_dest.chmod(CONST_FILE_PERMS_EXECUTABLE)
+        logger.info("Extracted combined service binary: %s", combined_name)
+
+        # Always recreate symlinks — handles corrupted/missing symlinks
+        for name in SERVICE_BINARY_NAMES:
+            link_path = bin_dir / name
+            link_path.unlink(missing_ok=True)
+            link_path.symlink_to(combined_name)
+
+            # Create DB entry
+            sha256 = HashGenerator.binary(combined_dest, name, mvmctl_version)
+            item = BinaryItem(
+                id=sha256,
+                name=name,
+                version=mvmctl_version,
+                full_version=mvmctl_version,
+                ci_version=None,
+                path=name,
+                is_default=True,
+                is_present=True,
+                created_at=now,
+                updated_at=now,
+            )
+            self._repo.upsert(item)
+            extracted.append(item)
+            logger.info("Registered service binary: %s", name)
+
+        return extracted
 
     @staticmethod
     def _normalize_version(version: str) -> str:

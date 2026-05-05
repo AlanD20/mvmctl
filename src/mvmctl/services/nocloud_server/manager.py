@@ -203,21 +203,41 @@ class NoCloudNetServerManager:
                         f"{self._port_range_start}-{self._port_range_end}"
                     )
 
-            server_cmd = [
-                sys.executable,
-                "-m",
-                "mvmctl.services.nocloud_server.process",
-                "--cloud-init-dir",
-                str(self._path),
-                "--port",
-                str(self._port),
-                "--host",
-                self._ipv4_gateway,
-                "--pid-file",
-                str(self._pid_path),
-                "--log-file",
-                str(self._log_path),
-            ]
+            # Try compiled binary first, fall back to sys.executable -m
+            from mvmctl.utils.common import CacheUtils
+
+            bin_dir = CacheUtils.get_bin_dir()
+            binary = bin_dir / "mvm-nocloud-server"
+            if binary.exists():
+                server_cmd = [
+                    str(binary),
+                    "--cloud-init-dir",
+                    str(self._path),
+                    "--port",
+                    str(self._port),
+                    "--host",
+                    self._ipv4_gateway,
+                    "--pid-file",
+                    str(self._pid_path),
+                    "--log-file",
+                    str(self._log_path),
+                ]
+            else:
+                server_cmd = [
+                    sys.executable,
+                    "-m",
+                    "mvmctl.services.nocloud_server.process",
+                    "--cloud-init-dir",
+                    str(self._path),
+                    "--port",
+                    str(self._port),
+                    "--host",
+                    self._ipv4_gateway,
+                    "--pid-file",
+                    str(self._pid_path),
+                    "--log-file",
+                    str(self._log_path),
+                ]
 
             try:
                 proc = subprocess.Popen(

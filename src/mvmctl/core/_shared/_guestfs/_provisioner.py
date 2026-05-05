@@ -244,22 +244,15 @@ class GuestfsProvisioner:
             handle.sync()
 
         self.enable_ssh(handle)
+
+        from mvmctl.core._shared._provisioner._content import (
+            ProvisionerContent,
+        )
+
         handle.mkdir_p("/usr/local/bin")
         handle.write(
             "/usr/local/bin/first-boot-ssh-installer.sh",
-            "#!/bin/bash\n"
-            "if ! command -v sshd >/dev/null 2>&1 && ! command -v ssh >/dev/null 2>&1; then\n"
-            "  if command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm openssh 2>/dev/null || true;\n"
-            "  elif command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y openssh-server 2>/dev/null || true;\n"
-            "  elif command -v apk >/dev/null 2>&1; then apk add --no-cache openssh 2>/dev/null || true; fi;\n"
-            "fi\n"
-            "if command -v systemctl >/dev/null 2>&1; then\n"
-            "  systemctl enable --now sshd 2>/dev/null || systemctl enable --now ssh 2>/dev/null || true;\n"
-            "elif [ -f /sbin/openrc ]; then\n"
-            "  rc-update add sshd default 2>/dev/null || rc-update add ssh default 2>/dev/null || true;\n"
-            "  rc-service sshd start 2>/dev/null || rc-service ssh start 2>/dev/null || true;\n"
-            "fi\n"
-            "systemctl disable first-boot-ssh-installer.service 2>/dev/null || true\n",
+            ProvisionerContent.first_boot_installer(),
         )
         handle.chmod(
             CONST_FILE_PERMS_EXECUTABLE,
@@ -268,10 +261,7 @@ class GuestfsProvisioner:
         handle.mkdir_p("/etc/systemd/system")
         handle.write(
             "/etc/systemd/system/first-boot-ssh-installer.service",
-            "[Unit]\nDescription=First-boot SSH installer\nAfter=network.target\n"
-            "ConditionFirstBoot=yes\n\n[Service]\nType=oneshot\n"
-            "ExecStart=/usr/local/bin/first-boot-ssh-installer.sh\n"
-            "RemainAfterExit=yes\n\n[Install]\nWantedBy=multi-user.target\n",
+            ProvisionerContent.first_boot_service(),
         )
         handle.chmod(
             CONST_FILE_PERMS_PUBLIC_KEY,
@@ -350,13 +340,15 @@ class GuestfsProvisioner:
 
         handle.write("/etc/hostname", hostname)
 
-        hosts_content = ""
+        existing_hosts = ""
         if handle.exists("/etc/hosts"):
-            hosts_content = handle.read_file("/etc/hosts")
-            if isinstance(hosts_content, bytes):
-                hosts_content = hosts_content.decode("utf-8", errors="replace")
+            existing_hosts = handle.read_file("/etc/hosts")
+            if isinstance(existing_hosts, bytes):
+                existing_hosts = existing_hosts.decode(
+                    "utf-8", errors="replace"
+                )
 
-        lines = hosts_content.splitlines() if hosts_content else []
+        lines = existing_hosts.splitlines() if existing_hosts else []
         new_lines = []
         found_host_entry = False
         for line in lines:
@@ -521,22 +513,16 @@ class GuestfsProvisioner:
                 )
                 return
 
+            from mvmctl.core._shared._provisioner._content import (
+                ProvisionerContent,
+            )
+
             sshd_config_dir = "/etc/ssh/sshd_config.d"
             guestfs_handle.mkdir_p(sshd_config_dir)
-            config_lines = [
-                "PubkeyAuthentication yes",
-                "AuthorizedKeysFile .ssh/authorized_keys",
-                "PasswordAuthentication no",
-                "PermitEmptyPasswords no",
-                "UsePAM yes",
-            ]
-            if self._user != "root":
-                config_lines.append(f"AllowUsers {self._user}")
-            else:
-                config_lines.append("PermitRootLogin prohibit-password")
-
+            user = self._user or "root"
             guestfs_handle.write(
-                f"{sshd_config_dir}/mvm.conf", "\n".join(config_lines) + "\n"
+                f"{sshd_config_dir}/mvm.conf",
+                ProvisionerContent.sshd_config(user),
             )
             guestfs_handle.chmod(
                 CONST_FILE_PERMS_PUBLIC_KEY, f"{sshd_config_dir}/mvm.conf"

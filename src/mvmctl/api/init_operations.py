@@ -114,6 +114,61 @@ class InitOperation:
         return InitStepResult("host", False, result.message), None
 
     @staticmethod
+    def _step_guestfs(
+        guestfs_enabled: bool | None = None,
+    ) -> tuple[InitStepResult, NeedsInteraction | None]:
+        """Step 4: Check libguestfs availability and prompt user.
+
+        When ``guestfs_enabled`` is provided (from a previous interaction
+        round), the decision is persisted directly.  Otherwise the method
+        detects availability and either auto-disables (not installed) or
+        asks the user via ``NeedsInteraction``.
+
+        Args:
+            guestfs_enabled: Pre-resolved user decision from CLI prompt.
+                ``None`` means the user hasn't decided yet.
+        """
+        from mvmctl.core._shared._db import Database
+        from mvmctl.core.config._repository import SettingsRepository
+        from mvmctl.core.config._service import SettingsService
+
+        db = Database()
+        repo = SettingsRepository(db)
+        svc = SettingsService(repo)
+
+        # ── User already decided (from previous NeedsInteraction round) ──
+        if guestfs_enabled is not None:
+            svc.set("settings", "guestfs_enabled", guestfs_enabled)
+            if guestfs_enabled:
+                return InitStepResult("guestfs", True, "enabled"), None
+            return InitStepResult("guestfs", True, "disabled"), None
+
+        # ── First pass — detect availability ────────────────────────────
+        try:
+            import guestfs  # noqa: F401
+
+            available = True
+        except ImportError:
+            available = False
+
+        if not available:
+            # Not installed — no point prompting
+            svc.set("settings", "guestfs_enabled", False)
+            return InitStepResult("guestfs", True, "not installed"), None
+
+        # Installed but user hasn't decided — prompt
+        return InitStepResult(
+            "guestfs",
+            False,
+            "available",
+        ), NeedsInteraction(
+            code="guestfs.confirm_enable",
+            message="libguestfs is available. Enable it as a fallback?",
+            input_type="confirm",
+            context={},
+        )
+
+    @staticmethod
     def _step_cache(
         *,
         on_progress: Callable[[ProgressEvent], None] | None = None,
@@ -262,6 +317,25 @@ class InitOperation:
         )
 
     @staticmethod
+    def _step_service_binaries() -> InitStepResult:
+        """Step 2: Extract embedded service binaries."""
+        try:
+            from mvmctl.core.binary._repository import BinaryRepository
+            from mvmctl.core.binary._service import BinaryService
+
+            repo = BinaryRepository(Database())
+            BinaryService(repo).extract_service_binaries()
+            return InitStepResult(
+                "service_binaries", True, "Service binaries ready"
+            )
+        except Exception as e:
+            return InitStepResult(
+                "service_binaries",
+                False,
+                f"Service binary extraction failed: {e}",
+            )
+
+    @staticmethod
     def run(
         skip_host: bool = False,
         non_interactive: bool = False,
@@ -270,6 +344,7 @@ class InitOperation:
         sudo_completed: bool = False,
         host_setup_message: str | None = None,
         download_version: str | None = None,
+        guestfs_enabled: bool | None = None,
     ) -> InitResult:
         """
         Run the init wizard steps in sequence.
@@ -286,6 +361,9 @@ class InitOperation:
                 subprocess actually accomplished.
             download_version: If provided, download this binary version
                 (used after the CLI handles the download prompt).
+            guestfs_enabled: Pre-resolved user decision for libguestfs.
+                Pass ``True`` or ``False`` after the CLI handles the
+                ``guestfs.confirm_enable`` prompt.
 
         Returns:
             InitResult with per-step status.  If ``needs_interaction`` is set,
@@ -298,7 +376,12 @@ class InitOperation:
         # ── Step 1: Local state ─────────────────────────────────────────────
         steps.append(InitOperation._step_local_state())
 
-        # ── Step 2: Host ────────────────────────────────────────────────────
+        # ── Step 2: Service binaries ────────────────────────────────────────
+        # Must run before Host step so that binaries exist on disk when
+        # write_sudoers() validates and writes the sudoers drop-in.
+        steps.append(InitOperation._step_service_binaries())
+
+        # ── Step 3: Host ────────────────────────────────────────────────────
         host_result, host_interaction = InitOperation._step_host(
             skip=skip_host,
             sudo_completed=sudo_completed,
@@ -313,10 +396,23 @@ class InitOperation:
                 needs_interaction=host_interaction,
             )
 
-        # ── Step 3: Cache ───────────────────────────────────────────────────
+        # ── Step 4: Guestfs ─────────────────────────────────────────────────
+        guestfs_result, guestfs_interaction = InitOperation._step_guestfs(
+            guestfs_enabled=guestfs_enabled,
+        )
+        steps.append(guestfs_result)
+
+        if guestfs_interaction is not None:
+            return InitResult(
+                steps=steps,
+                host_ready=False,
+                needs_interaction=guestfs_interaction,
+            )
+
+        # ── Step 5: Cache ───────────────────────────────────────────────────
         steps.append(InitOperation._step_cache(on_progress=on_progress))
 
-        # ── Step 4: Binary ──────────────────────────────────────────────────
+        # ── Step 6: Binary ──────────────────────────────────────────────────
         binary_result, binary_interaction = InitOperation._step_binary(
             non_interactive=non_interactive,
             download_version=download_version,

@@ -35,6 +35,7 @@ from mvmctl.models.network import (
     NetworkItem,
     NetworkLeaseItem,
 )
+from mvmctl.models.provisioner import ProvisionerType
 from mvmctl.models.vm import (
     ConsoleInfo,
     ConsoleState,
@@ -69,6 +70,7 @@ __all__ = [
     "KernelSpec",
     "NetworkItem",
     "NetworkLeaseItem",
+    "ProvisionerType",
     "CleanResult",
     "PruneAllResult",
     "SSHKeyItem",

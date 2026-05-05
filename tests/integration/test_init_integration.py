@@ -230,7 +230,9 @@ class TestInitWizard:
 
     def test_run_skip_host(self) -> None:
         """run(skip_host=True) skips host step but runs local_state, cache, binary."""
-        result = InitOperation.run(skip_host=True)
+        # Pass guestfs_enabled=False to prevent libguestfs detection from
+        # blocking the flow — guestfs is installed in the test venv.
+        result = InitOperation.run(skip_host=True, guestfs_enabled=False)
 
         assert isinstance(result, InitResult)
 
@@ -249,7 +251,7 @@ class TestInitWizard:
 
     def test_run_non_interactive(self) -> None:
         """run(non_interactive=True) completes successfully with pre-seeded binary."""
-        result = InitOperation.run(non_interactive=True)
+        result = InitOperation.run(non_interactive=True, guestfs_enabled=False)
 
         assert isinstance(result, InitResult)
         assert result.host_ready is True
@@ -265,6 +267,8 @@ class TestInitWizard:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """run(download_version='1.16.0') fetches the requested binary version."""
+        from mvmctl.core.host._service import HostService
+
         # Clear pre-seeded binaries so the download path is exercised
         db = Database()
         binary_repo = BinaryRepository(db)
@@ -276,9 +280,17 @@ class TestInitWizard:
             if child.is_file():
                 child.unlink()
 
+        # Mock validate_sudoers_binaries — the mvm-provision file was
+        # deleted above as part of clearing the pre-seeded cache.
+        monkeypatch.setattr(
+            HostService, "validate_sudoers_binaries", lambda: None
+        )
+
         _setup_download_mocks(monkeypatch, "1.16.0")
 
-        result = InitOperation.run(download_version="1.16.0")
+        result = InitOperation.run(
+            download_version="1.16.0", guestfs_enabled=False
+        )
 
         assert isinstance(result, InitResult)
         assert result.host_ready is True
@@ -305,11 +317,11 @@ class TestInitEdgeCases:
 
     def test_run_when_already_initialized(self) -> None:
         """Running the wizard twice succeeds both times."""
-        result1 = InitOperation.run()
+        result1 = InitOperation.run(guestfs_enabled=False)
         assert isinstance(result1, InitResult)
         assert result1.host_ready is True
 
-        result2 = InitOperation.run()
+        result2 = InitOperation.run(guestfs_enabled=False)
         assert isinstance(result2, InitResult)
         assert result2.host_ready is True
 

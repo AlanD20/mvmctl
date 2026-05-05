@@ -6,7 +6,7 @@ the real public API. Verifies that:
 - OFF mode skips cloud-init injection
 - SSH keys are properly passed through the creation pipeline
 
-Only subprocess calls and GuestfsProvisioner are mocked.
+Only subprocess calls and Provisioner are mocked.
 """
 
 from __future__ import annotations
@@ -29,24 +29,24 @@ def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     monkeypatch.setattr("subprocess.run", sub_mock)
     monkeypatch.setattr("subprocess.Popen", popen_mock)
 
-    # Mock GuestfsProvisioner — chained method calls + tracking
-    gp_mock = MagicMock()
-    gp_mock.resize.return_value = gp_mock
-    gp_mock.set_hostname.return_value = gp_mock
-    gp_mock.inject_dns.return_value = gp_mock
-    gp_mock.setup_ssh.return_value = gp_mock
-    gp_mock.inject_cloud_init.return_value = gp_mock
-    gp_mock.disable_cloud_init.return_value = gp_mock
-    gp_mock.run.return_value = None
+    # Mock Provisioner — chained method calls + tracking
+    provisioner_mock = MagicMock()
+    provisioner_mock.resize.return_value = provisioner_mock
+    provisioner_mock.set_hostname.return_value = provisioner_mock
+    provisioner_mock.inject_dns.return_value = provisioner_mock
+    provisioner_mock.setup_ssh.return_value = provisioner_mock
+    provisioner_mock.disable_cloud_init.return_value = provisioner_mock
+    provisioner_mock.inject_cloud_init.return_value = provisioner_mock
+    provisioner_mock.run.return_value = None
     monkeypatch.setattr(
-        "mvmctl.api.vm_operations.GuestfsProvisioner",
-        lambda *args, **kwargs: gp_mock,
+        "mvmctl.api.vm_operations.Provisioner",
+        lambda *args, **kwargs: provisioner_mock,
     )
 
     return {
         "subprocess": sub_mock,
         "popen": popen_mock,
-        "guestfs": gp_mock,
+        "provisioner": provisioner_mock,
     }
 
 
@@ -72,8 +72,8 @@ class TestVMDirectInjection:
         assert isinstance(vm, VMInstanceItem)
         assert vm.cloud_init_mode == CloudInitMode.INJECT.value
 
-        # Verify that inject_cloud_init was called on GuestfsProvisioner
-        mocks["guestfs"].inject_cloud_init.assert_called_once()
+        # Verify that inject_cloud_init was called on Provisioner
+        mocks["provisioner"].inject_cloud_init.assert_called_once()
 
         # Verify VM directory was created
         vm_dir = CacheUtils.get_vm_dir(vm.id)
@@ -86,7 +86,7 @@ class TestVMDirectInjection:
     def test_disabled_mode_skips_injection(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """OFF mode means inject_cloud_init is NOT called on GuestfsProvisioner."""
+        """OFF mode means inject_cloud_init is NOT called on Provisioner."""
         mocks = _setup_mocks(monkeypatch)
 
         VMOperation.create(
@@ -99,9 +99,9 @@ class TestVMDirectInjection:
         )
 
         # In OFF mode, disable_cloud_init should be called
-        mocks["guestfs"].disable_cloud_init.assert_called_once()
+        mocks["provisioner"].disable_cloud_init.assert_called_once()
         # inject_cloud_init should NOT be called
-        mocks["guestfs"].inject_cloud_init.assert_not_called()
+        mocks["provisioner"].inject_cloud_init.assert_not_called()
 
         vm = VMOperation.get(VMInput(identifiers=["test-disabled-vm"]))
         assert vm.cloud_init_mode == CloudInitMode.OFF.value

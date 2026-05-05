@@ -82,6 +82,11 @@ filterwarnings = [
     "ignore::ResourceWarning:coverage.collector",
 ]
 
+[tool.coverage.run]
+omit = [
+    "*/services/loopmount/process.py",
+]
+
 [dependency-groups]
 dev = [
     "mypy>=1.19,<2",

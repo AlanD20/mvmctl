@@ -38,7 +38,7 @@ from mvmctl.api.inputs._vm_create_input import VMCreateInput
 from mvmctl.api.inputs._vm_import_input import VMImportInput, VMImportRequest
 from mvmctl.api.inputs._vm_input import VMInput, VMRequest
 from mvmctl.core._shared import Database
-from mvmctl.core._shared._guestfs import GuestfsProvisioner
+from mvmctl.core._shared._provisioner import Provisioner
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.cloudinit._provisioner import (
     CloudInitProvisionConfig,
@@ -370,21 +370,22 @@ class VMCreateContext:
         # Cloud-init provisioning
         mode = self.resolved.cloud_init_mode
 
-        gp = GuestfsProvisioner(
-            self.rootfs_path,
-            readonly=False,
+        provisioner = Provisioner(
+            rootfs_path=self.rootfs_path,
+            provisioner_type=self.resolved.provisioner,
+            fs_type=self.resolved.image.fs_type,
             root_uid=self.resolved.root_uid,
             root_gid=self.resolved.root_gid,
             user_uid=self.resolved.user_uid,
             user_gid=self.resolved.user_gid,
         )
-        gp.resize(self.resolved.disk_size_bytes)
+        provisioner.resize(self.resolved.disk_size_bytes)
 
         if mode == CloudInitMode.OFF:
-            gp.set_hostname(self.resolved.name)
-            gp.inject_dns(dns_server=self.resolved.dns_server)
-            gp.setup_ssh(self.resolved.user, self._ssh_pubkey_contents)
-            gp.disable_cloud_init()
+            provisioner.set_hostname(self.resolved.name)
+            provisioner.inject_dns(dns_server=self.resolved.dns_server)
+            provisioner.setup_ssh(self.resolved.user, self._ssh_pubkey_contents)
+            provisioner.disable_cloud_init()
             self.mark_created("cloud-init-off")
 
         elif mode == CloudInitMode.INJECT:
@@ -413,7 +414,7 @@ class VMCreateContext:
             ci_provisioner = CloudInitProvisioner(ci_config)
             self.cloud_init_result = ci_provisioner.provision()
 
-            gp.inject_cloud_init(ci_config.cloud_init_dir)
+            provisioner.inject_cloud_init(ci_config.cloud_init_dir)
             self.mark_created("cloud-init-inject")
 
         else:  # ISO or NET
@@ -447,7 +448,8 @@ class VMCreateContext:
             else:
                 self.mark_created("cloud-init-net")
 
-        gp.run()
+        # Execute all queued operations
+        provisioner.run()
 
         if self._on_progress is not None:
             self._on_progress(

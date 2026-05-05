@@ -35,7 +35,8 @@ class CacheOperation:
         """Initialize all cache directories.
 
         Creates all necessary cache directories and optionally builds the
-        libguestfs fixed appliance for faster image operations.
+        libguestfs fixed appliance for faster image operations (only when
+        ``guestfs_enabled`` is set in user settings).
 
         Args:
             on_progress: Optional callback for progress events during
@@ -45,8 +46,11 @@ class CacheOperation:
             OperationResult with item dict containing cache_dir path,
             list of created directory paths, and guestfs_appliance path if built.
         """
+        from mvmctl.core.config._service import SettingsService
+
         cache_dir = CacheUtils.get_cache_dir()
         created: list[str] = []
+        guestfs_enabled: bool = False
 
         # Core directories
         dirs = [
@@ -60,16 +64,29 @@ class CacheOperation:
         for path in dirs:
             created.append(str(path))
 
-        # libguestfs fixed appliance (heavy operation)
-        if on_progress is not None:
-            on_progress(
-                ProgressEvent(
-                    phase="appliance",
-                    status="running",
-                    message="Building libguestfs appliance...",
-                )
+        # Check whether guestfs was enabled by the user
+        from mvmctl.core._shared import Database
+
+        db = Database()
+        try:
+            guestfs_enabled = bool(
+                SettingsService.resolve(db, "settings", "guestfs_enabled")
             )
-        appliance_path = CacheOperation._build_guestfs_appliance(cache_dir)
+        except Exception:
+            pass
+
+        # libguestfs fixed appliance (heavy operation) — only when enabled
+        appliance_path: Path | None = None
+        if guestfs_enabled:
+            if on_progress is not None:
+                on_progress(
+                    ProgressEvent(
+                        phase="appliance",
+                        status="running",
+                        message="Building libguestfs appliance...",
+                    )
+                )
+            appliance_path = CacheOperation._build_guestfs_appliance(cache_dir)
 
         # Detected guestfs kernel
         from mvmctl.core._shared._guestfs import KernelDetector

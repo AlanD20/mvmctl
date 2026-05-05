@@ -171,21 +171,57 @@ class HostService:
 
     @staticmethod
     def validate_sudoers_binaries() -> None:
-        """Verify that all privileged binaries referenced in the sudoers drop-in exist on disk."""
+        """Verify that all privileged binaries referenced in the sudoers drop-in exist on disk.
+
+        In development mode (``pip install -e .``, ``uv run mvm``), service
+        binaries are not embedded and are not expected on disk.  The
+        ``LoopMountManager`` falls back to
+        ``sys.executable services/loopmount/process.py`` at runtime, so
+        there is nothing to validate.  Only in a compiled distribution do
+        we require the extracted binaries to be present.
+        """
+        from mvmctl.constants import (
+            PRIVILEGED_SERVICE_BINARIES,
+            is_compiled_mode,
+        )
+        from mvmctl.utils.common import CacheUtils
+
         for binary, pkg in PRIVILEGED_BINARIES.items():
             if not Path(binary).exists():
                 raise HostError(
                     f"Required binary not found: {binary} (install {pkg})"
                 )
 
+        # Service binaries only exist in compiled mode
+        if not is_compiled_mode():
+            return
+
+        for name in PRIVILEGED_SERVICE_BINARIES:
+            path = CacheUtils.get_bin_dir() / name
+            if not path.exists():
+                raise HostError(
+                    f"Required service binary not found: {path}. "
+                    f"Run 'mvm init' to extract service binaries."
+                )
+
     @staticmethod
     def _generate_sudoers_content(group_name: str) -> str:
         """Generate the sudoers drop-in content granting the group passwordless access."""
-        from mvmctl.constants import PROJECT_NAME
+        from mvmctl.constants import PRIVILEGED_SERVICE_BINARIES, PROJECT_NAME
 
         if not re.fullmatch(r"[a-z][a-z0-9_-]{0,30}", group_name):
             raise HostError(f"Invalid group name: {group_name!r}")
-        binaries_str = ", ".join(PRIVILEGED_BINARIES)
+
+        # System binaries (static paths)
+        binaries = list(PRIVILEGED_BINARIES.keys())
+
+        # Service binaries (dynamic paths resolved at runtime)
+        from mvmctl.utils.common import CacheUtils
+
+        for name in PRIVILEGED_SERVICE_BINARIES:
+            binaries.append(str(CacheUtils.get_bin_dir() / name))
+
+        binaries_str = ", ".join(binaries)
         return (
             f"# Managed by {PROJECT_NAME} — do not edit manually.\n"
             f"# To remove: {PROJECT_NAME} host reset\n"
