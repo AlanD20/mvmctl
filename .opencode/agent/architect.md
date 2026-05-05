@@ -589,6 +589,45 @@ from mvmctl.core._shared._db import Database
 | Default values in API/Core | Only in CLI layer; API/Core receive explicit values |
 | Orchestration in `core/` | Orchestration lives in `api/` — core domains are isolated |
 
+## Build System
+
+The project uses `scripts/build_services.py` to compile standalone binaries via Nuitka.
+
+### Usage
+
+```
+python scripts/build_services.py                    # Build everything (default: --release --fast)
+python scripts/build_services.py --release          # Build services + mvm binary
+python scripts/build_services.py --services         # Build all service binaries only
+python scripts/build_services.py --service <name>   # Build a single service (e.g. mvm-console-relay)
+python scripts/build_services.py --mvm              # Build main mvm binary only
+python scripts/build_services.py --fast             # Fast compile (default) — minimal Nuitka flags
+python scripts/build_services.py --optimize         # Aggressive optimization (LTO, anti-bloat, -Os)
+```
+
+### Build modes
+
+| Mode | Flags | Use case |
+|------|-------|----------|
+| `--fast` (default) | `--onefile`, `--jobs=N` | Development iteration, quick CI |
+| `--optimize` | `--lto=yes`, anti-bloat, no-docstrings, no-asserts, `-Os`, `--deployment`, etc. | Release builds, smallest binary |
+
+### Key architectural decisions
+
+- **Nuitka** (not PyInstaller) is the build tool. PyInstaller hooks exist but are unused — they only serve as fallback documentation.
+- **Multidist services**: All 3 services (`mvm-console-relay`, `mvm-nocloud-server`, `mvm-provision`) are compiled into a single `mvm-services` binary using `--main` flags with symlinks. Runtime dispatch is via `sys.argv[0]`.
+- **Static libpython**: Auto-detected — if the current Python has `libpython*.a`, `--static-libpython=yes` is added in `--optimize` mode. If not available (e.g., uv's standalone Python), a warning is shown and dynamic linking is used.
+- **Dynamic import workaround**: Libraries with runtime registries (e.g., `passlib`) are force-included via `--include-module` to prevent tree-shaking.
+- **`sys.executable`**: The script uses `sys.executable -m nuitka` so it runs with the same Python that invoked the script. This preserves static libpython detection behavior.
+
+### Prerequisites
+
+```
+uv sync --group dev --group build
+```
+
+Output binaries land in `dist/` (mvm) and `dist/services/` (mvm-services).
+
 ## Domain Implementation Methodology
 
 ### Core Principle: One Domain at a Time

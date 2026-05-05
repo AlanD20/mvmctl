@@ -370,6 +370,24 @@ When you need approval to fix pre-existing linting errors, the user MUST say one
 
 **If uncertain whether the user approved:** Ask again. Do NOT assume.
 
+## Build System Awareness
+
+The project uses `scripts/build_services.py` to compile standalone binaries via Nuitka.
+
+When you modify code that affects the runtime binary (service processes, main entry point, or modules that need explicit inclusion), be aware:
+
+1. **Service binaries** (`mvm-console-relay`, `mvm-nocloud-server`, `mvm-provision`) are compiled as a single multidist binary (`mvm-services`) from `src/mvmctl/services/`.
+2. **Main binary** (`mvm`) includes the entire `mvmctl` package via `--include-package=mvmctl`.
+3. **Dynamic imports**: Modules loaded via runtime registries (e.g., `passlib.handlers.*`) need `--include-module` in `MAIN_FAST_FLAGS` to prevent tree-shaking.
+4. **Build commands**:
+   ```bash
+   python scripts/build_services.py --release --fast      # Development build
+   python scripts/build_services.py --release --optimize  # Release build
+   ```
+5. **Prerequisites**: `uv sync --group dev --group build`
+
+If you add a dependency that uses dynamic imports (plugin systems, registry patterns), update the `--include-module` list in `scripts/build_services.py` and inform the orchestrator.
+
 ## Verification Checklist
 
 After completing a refactoring task:
@@ -379,6 +397,7 @@ After completing a refactoring task:
 - [ ] Linters pass on entire `src/` tree: `uv run ruff check src/ && uv run ruff format --check src/ && uv run mypy src/`
 - [ ] Pre-existing linting errors were NOT fixed without explicit approval
 - [ ] Did NOT run tests unless explicitly asked by the user (and never system tests)
+- [ ] If build script was modified: linters pass on scripts/ too: `uv run ruff check scripts/ && uv run mypy scripts/`
 
 ## Example Workflow
 
