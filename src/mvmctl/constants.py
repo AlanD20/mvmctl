@@ -40,7 +40,7 @@ OVERRIDABLE_DEFAULTS: Final[dict[str, dict[str, Any]]] = {
         "enable_metrics": False,
         "enable_console": True,
         "lsm_flags": "landlock,lockdown,yama,integrity,selinux,bpf",
-        "boot_args": "console=ttyS0 reboot=k panic=1 net.ifnames=0 rw rootwait",
+        "boot_args": "console=ttyS0 reboot=k panic=1 net.ifnames=0 rw rootwait quiet loglevel=3",
         "guest_mac_prefix": "02:FC",
     },
     "defaults.network": {
@@ -363,6 +363,14 @@ def _resolve_version() -> str:
         return "0.0.0"
 
 
+# ── Eager constants (resolved once at module load) ──────────────────────
+CLI_NAME: str = _resolve_cli_name()
+MVM_UNIX_GROUP: str = CLI_NAME
+MVM_FORWARD_CHAIN: str = f"{CLI_NAME.upper()}-FORWARD"
+MVM_POSTROUTING_CHAIN: str = f"{CLI_NAME.upper()}-POSTROUTING"
+MVM_NOCLOUD_NET_INPUT_CHAIN: str = f"{CLI_NAME.upper()}-NOCLOUDNET-INPUT"
+
+
 def env_var(suffix: str) -> str:
     """
     Return the environment variable name for the given suffix.
@@ -374,7 +382,7 @@ def env_var(suffix: str) -> str:
         Full environment variable name in uppercase.
 
     """
-    return f"{__getattr__('CLI_NAME').upper()}_{suffix}"
+    return f"{CLI_NAME.upper()}_{suffix}"
 
 
 def __getattr__(name: str) -> Any:
@@ -385,34 +393,12 @@ def __getattr__(name: str) -> Any:
         val = _resolve_project_name()
         _LAZY_CONSTANTS[name] = val
         return val
-    if name == "CLI_NAME":
-        val = _resolve_cli_name()
-        _LAZY_CONSTANTS[name] = val
-        return val
     if name == "HTTP_USER_AGENT":
-        val = f"{__getattr__('CLI_NAME')}/{_resolve_version()}"
-        _LAZY_CONSTANTS[name] = val
-        return val
-    if name == "MVM_FORWARD_CHAIN":
-        val = f"{__getattr__('CLI_NAME').upper()}-FORWARD"
-        _LAZY_CONSTANTS[name] = val
-        return val
-    if name == "MVM_POSTROUTING_CHAIN":
-        val = f"{__getattr__('CLI_NAME').upper()}-POSTROUTING"
-        _LAZY_CONSTANTS[name] = val
-        return val
-    if name == "MVM_NOCLOUD_NET_INPUT_CHAIN":
-        val = f"{__getattr__('CLI_NAME').upper()}-NOCLOUDNET-INPUT"
-        _LAZY_CONSTANTS[name] = val
-        return val
-    if name == "MVM_UNIX_GROUP":
-        val = __getattr__("CLI_NAME")
+        val = f"{CLI_NAME}/{_resolve_version()}"
         _LAZY_CONSTANTS[name] = val
         return val
     if name == "SUDOERS_DROP_IN_PATH":
-        val = "/etc/sudoers.d/{cli_name}".format(
-            cli_name=__getattr__("CLI_NAME")
-        )
+        val = "/etc/sudoers.d/{cli_name}".format(cli_name=CLI_NAME)
         _LAZY_CONSTANTS[name] = val
         return val
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

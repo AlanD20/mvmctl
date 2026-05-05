@@ -15,6 +15,7 @@ from mvmctl.constants import (
     CONST_SHADOW_MAX_DAYS,
     CONST_SHADOW_MIN_DAYS,
     CONST_SHADOW_WARN_DAYS,
+    CONST_SHRINK_SAFETY_MARGIN,
     DEFAULT_LIBGUESTFS_SEED_DIR,
 )
 from mvmctl.core._shared._guestfs import OptimizedGuestfs
@@ -64,6 +65,7 @@ class GuestfsProvisioner:
         self._user: str | None = None
         self._ssh_pubkeys: list[str] = []
         self._cloud_init_dir: Path | None = None
+        self._shrink_result: int | None = None
         self._ops: list[str] = []
 
     # =====================================================================
@@ -105,6 +107,21 @@ class GuestfsProvisioner:
         self._ops.append("disable_cloud_init")
         return self
 
+    def shrink(self) -> Self:
+        """Queue shrink-to-minimum operation."""
+        self._ops.append("shrink")
+        return self
+
+    def deblob(self) -> Self:
+        """Queue deblob (OS cache cleanup + fstab fix) operation."""
+        self._ops.append("deblob")
+        return self
+
+    def fix_fstab(self) -> Self:
+        """Queue fstab fix for Firecracker (PARTUUID → /dev/vda)."""
+        self._ops.append("fix_fstab")
+        return self
+
     # =====================================================================
     # Execution — single guestfs session for all queued operations
     # =====================================================================
@@ -129,10 +146,12 @@ class GuestfsProvisioner:
         if not self._ops and not needs_resize:
             return  # nothing to do
 
-        assert target_size is not None  # guarded by needs_resize above
-
-        # Phase 0: file truncation (before guestfs mount)
+        # Phase 0: file truncation (before guestfs mount) — only when resizing
         if needs_resize:
+            if target_size is None:  # pragma: no cover
+                raise VMBuilderError(
+                    "Internal error: target_size is None during resize"
+                )
             self._do_truncate_file(self._rootfs_path, target_size)
 
         # Phase 1: guestfs session
@@ -144,6 +163,10 @@ class GuestfsProvisioner:
 
                 # Phase 1a: filesystem resize
                 if needs_resize:
+                    if target_size is None:  # pragma: no cover
+                        raise VMBuilderError(
+                            "Internal error: target_size is None during resize"
+                        )
                     self._do_filesystem_resize(
                         handle, self._rootfs_path, target_size
                     )
@@ -157,6 +180,12 @@ class GuestfsProvisioner:
                         handle.umount("/")
                     except Exception:
                         pass
+
+        # Phase 2: post-session truncation (shrink-to-minimum resize)
+        if self._shrink_result is not None:
+            final_size = int(self._shrink_result * CONST_SHRINK_SAFETY_MARGIN)
+            with open(self._rootfs_path, "r+b") as f:
+                f.truncate(final_size)
 
     @staticmethod
     def _do_truncate_file(path: Path, target_size: int) -> None:
@@ -190,6 +219,130 @@ class GuestfsProvisioner:
             handle.mount(root_device, "/")
             handle.btrfs_filesystem_resize("/", target_size)
             handle.umount(root_device)
+
+    def _do_shrink(self, handle: Any) -> None:
+        """Shrink filesystem to minimum size. Stores result for post-session truncation.
+
+        Only shrinks when there is significant free space to reclaim (>2% free).
+        """
+        filesystems: dict[str, str] = handle.list_filesystems()
+        root_device: str | None = None
+        for candidate in ("/dev/sda", "/dev/vda", "/dev/sda1", "/dev/vda1"):
+            if candidate in filesystems:
+                root_device = candidate
+                break
+        if root_device is None and filesystems:
+            root_device = str(list(filesystems.keys())[0])
+        if root_device is None:
+            raise VMBuilderError("No filesystem found for shrink")
+
+        fs_type = handle.vfs_type(root_device)
+
+        # Skip shrink for unsupported filesystem types
+        if fs_type not in ("ext2", "ext3", "ext4", "btrfs"):
+            logger.debug(
+                "Skipping shrink: %s filesystem not supported",
+                fs_type,
+            )
+            return
+
+        # Check free space — skip if there isn't enough to reclaim
+        stat = handle.statvfs("/")
+        free_ratio = stat.get("bfree", 0) / max(stat.get("blocks", 1), 1)
+        if free_ratio <= 0.02:
+            logger.debug(
+                "Filesystem has %.1f%% free space after deblob, skipping shrink",
+                free_ratio * 100,
+            )
+            return
+
+        if fs_type in ("ext2", "ext3", "ext4"):
+            handle.zero_free_space("/")
+            handle.umount("/")
+            handle.e2fsck(root_device, correct=True)
+            handle.resize2fs_size(root_device, 0)
+        else:  # btrfs
+            handle.sh("fstrim -av / 2>/dev/null || true")
+            handle.btrfs_filesystem_sync("/")
+            handle.btrfs_filesystem_resize("/", 0)
+            handle.umount("/")
+
+        self._shrink_result = handle.blockdev_getsize64(root_device)
+
+    def _do_deblob(self, handle: Any) -> None:
+        """Run OS cache cleanup and fstab fix inside the mounted guestfs image."""
+        from mvmctl.core._shared._provisioner._content import (
+            ChrootOp,
+            FileOp,
+            Operation,
+            ProvisionerContent,
+        )
+
+        # Detect OS from mounted filesystem
+        os_id, os_id_like = self._parse_os_release(handle)
+        os_type = os_id if os_id else os_id_like
+
+        ops: list[Operation] = list(
+            ProvisionerContent.build_deblob_ops(os_type or "linux")
+        )
+        ops.extend(ProvisionerContent.build_fix_fstab_ops())
+
+        for op in ops:
+            match op:
+                case ChrootOp():
+                    handle.sh(op.command)
+                case FileOp():
+                    data_str: str = (
+                        op.data.decode("utf-8", errors="replace")
+                        if isinstance(op.data, bytes)
+                        else str(op.data)
+                    )
+                    handle.write(op.path, data_str)
+
+    @staticmethod
+    def _do_fix_fstab(handle: Any) -> None:
+        """Fix /etc/fstab for Firecracker (PARTUUID → /dev/vda)."""
+        from mvmctl.core._shared._provisioner._content import (
+            ChrootOp,
+            FileOp,
+            Operation,
+            ProvisionerContent,
+        )
+
+        ops: list[Operation] = list(ProvisionerContent.build_fix_fstab_ops())
+        for op in ops:
+            match op:
+                case ChrootOp():
+                    handle.sh(op.command)
+                case FileOp():
+                    data_str: str = (
+                        op.data.decode("utf-8", errors="replace")
+                        if isinstance(op.data, bytes)
+                        else str(op.data)
+                    )
+                    handle.write(op.path, data_str)
+
+    @staticmethod
+    def _parse_os_release(handle: Any) -> tuple[str, str]:
+        """Parse ``/etc/os-release`` from the mounted filesystem.
+
+        Returns ``("", "")`` if the file cannot be read or parsed.
+        """
+        try:
+            raw = handle.read_file("/etc/os-release")
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8", errors="replace")
+            id_val = ""
+            id_like_val = ""
+            for line in raw.splitlines():
+                line = line.strip()
+                if line.startswith("ID="):
+                    id_val = line.split("=", 1)[1].strip("\"'").lower()
+                elif line.startswith("ID_LIKE="):
+                    id_like_val = line.split("=", 1)[1].strip("\"'").lower()
+            return id_val, id_like_val
+        except Exception:
+            return "", ""
 
     def _do_setup_ssh(self, handle: Any) -> None:
         """Configure SSH, user, host keys, and first-boot services."""

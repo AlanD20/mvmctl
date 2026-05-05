@@ -21,15 +21,12 @@ from mvmctl.constants import (
     CONST_ROOTFS_HEADROOM_FACTOR,
     CONST_RUNTIME_BUFFER_MB,
     CONST_SECTOR_SIZE_BYTES,
-    CONST_SHRINK_SAFETY_MARGIN,
     HTTP_TIMEOUT_SHA256_FETCH_S,
     SUPPORTED_IMAGE_EXTENSIONS,
 )
 from mvmctl.core._shared import AssetManager
-from mvmctl.core._shared._guestfs import OptimizedGuestfs
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.exceptions import (
-    GuestfsNotAvailableError,
     ImageCompressionError,
     ImageCorruptError,
     ImageDecompressionError,
@@ -38,20 +35,14 @@ from mvmctl.exceptions import (
     ImageValidationError,
 )
 from mvmctl.models import ImageItem, ImageSpec
-from mvmctl.utils.common import CacheUtils, CommonUtils
+from mvmctl.models.provisioner import ProvisionerType
+from mvmctl.utils.common import CacheUtils
 from mvmctl.utils.http import HttpDownload
 from mvmctl.utils.template import render_optional_template, render_template
 
 logger = logging.getLogger(__name__)
 
 _SECTOR_SIZE = CONST_SECTOR_SIZE_BYTES
-
-
-class _NoPartitionTable:
-    """Sentinel: raw image has no partition table and should be used as-is."""
-
-
-_NO_PARTITION_TABLE = _NoPartitionTable()
 
 
 class ImageService:
@@ -72,49 +63,6 @@ class ImageService:
 
         """
         self._repo = repo
-
-    def _process_format(
-        self,
-        fmt: str,
-        input_path: Path,
-        final_path: Path,
-        minimum_rootfs_size: int | str = "dynamic",
-        partition: int | None = None,
-        disabled_detectors: list[str] | None = None,
-    ) -> Path:
-        """
-        Route to the appropriate format handler.
-
-        Each handler receives only the parameters it needs.
-        """
-        if fmt == "qcow2":
-            return self._handle_qcow2(
-                input_path, final_path, partition, disabled_detectors
-            )
-        elif fmt == "tar-rootfs":
-            return self._handle_tar_rootfs(
-                input_path, final_path, minimum_rootfs_size
-            )
-        elif fmt == "raw":
-            return self._handle_raw(
-                input_path, final_path, partition, disabled_detectors
-            )
-        elif fmt == "squashfs":
-            return self._handle_squashfs(
-                input_path,
-                final_path,
-                minimum_rootfs_size,
-            )
-        elif fmt == "vhd":
-            return self._handle_vhd(
-                input_path, final_path, partition, disabled_detectors
-            )
-        elif fmt == "vhdx":
-            return self._handle_vhdx(
-                input_path, final_path, partition, disabled_detectors
-            )
-        else:
-            raise ImageError(f"Unknown format: {fmt}")
 
     def remove_many(self, images: list[ImageItem], force: bool = False) -> None:
         """
@@ -204,144 +152,6 @@ class ImageService:
                 return candidate
         return None
 
-    def extract_partition(
-        self,
-        raw_path: Path,
-        output_path: Path,
-        partition: int | None = None,
-        disabled_detectors: list[str] | None = None,
-    ) -> Path:
-        """Extract root partition from raw disk image."""
-        from mvmctl.utils._disk import RootPartitionDetector
-
-        try:
-            # Check if the image is a direct filesystem (superfloppy) using blkid
-            fs_type = self.detect_filesystem_type(raw_path)
-            if fs_type in ("ext4", "ext3", "ext2", "btrfs", "xfs"):
-                logger.info("Image is %s filesystem, using as-is", fs_type)
-                try:
-                    subprocess.run(
-                        [
-                            "cp",
-                            "--sparse=always",
-                            str(raw_path),
-                            str(output_path),
-                        ],
-                        check=True,
-                        capture_output=True,
-                    )
-                except (subprocess.CalledProcessError, FileNotFoundError):
-                    self._copy_with_dd(raw_path, output_path, sparse=True)
-                ext_map = {
-                    "ext4": ".ext4",
-                    "ext3": ".ext4",
-                    "ext2": ".ext4",
-                    "btrfs": ".btrfs",
-                    "xfs": ".xfs",
-                }
-                ext = ext_map.get(fs_type, ".img")
-                final_path = output_path.with_suffix(ext)
-                output_path.rename(final_path)
-                return final_path
-
-            parsed = self._parse_partitions_sfdisk(raw_path, partition)
-            if parsed is None:
-                parsed = self._parse_partitions_parted(raw_path, partition)
-
-            if parsed is None:
-                raise ImageError(
-                    "Failed to parse partition table: neither sfdisk nor parted is available or succeeded"
-                )
-
-            if isinstance(parsed, _NoPartitionTable):
-                logger.info("No partition table found, using image as-is")
-                shutil.move(str(raw_path), str(output_path))
-                return output_path
-
-            if not isinstance(parsed, tuple):
-                raise ImageError(
-                    f"Unexpected parse result type: {type(parsed).__name__}"
-                )
-
-            partitions, requested_partition = parsed
-
-            if len(partitions) == 0:
-                logger.info("No partitions found, using image as-is")
-                shutil.move(str(raw_path), str(output_path))
-                return output_path
-
-            # Determine which partition to extract
-            if len(partitions) > 1 and requested_partition is None:
-                logger.info("Found %d partitions:", len(partitions))
-                for i, p in enumerate(partitions, 1):
-                    logger.debug(
-                        "  %d: start=%s size=%s type=%s",
-                        i,
-                        p.get("start"),
-                        p.get("size"),
-                        p.get("type", "?"),
-                    )
-                detector = RootPartitionDetector(
-                    disabled_detectors=disabled_detectors
-                )
-                chosen_idx = detector.detect(partitions)
-                logger.info(
-                    "Detector selected partition %d as root", chosen_idx
-                )
-                chosen = partitions[chosen_idx - 1]
-                partition_num = chosen_idx
-            elif requested_partition is not None:
-                if requested_partition < 1 or requested_partition > len(
-                    partitions
-                ):
-                    raise ImageError(
-                        f"Partition {requested_partition} out of range (1-{len(partitions)})"
-                    )
-                logger.info("Found %d partitions:", len(partitions))
-                logger.info("Using partition %d as root", requested_partition)
-                chosen = partitions[requested_partition - 1]
-                partition_num = requested_partition
-            else:
-                chosen = partitions[0]
-                partition_num = 1
-
-            start_sector = CommonUtils.safe_int(chosen.get("start"), 0)
-            size_val = chosen.get("size")
-            sector_count: int | None = (
-                CommonUtils.safe_int(size_val, 0) if size_val else None
-            )
-
-            skip_bytes = start_sector * _SECTOR_SIZE
-            count_bytes = sector_count * _SECTOR_SIZE if sector_count else None
-
-            # Validate extraction is within file bounds
-            raw_file_size = raw_path.stat().st_size
-            if skip_bytes >= raw_file_size:
-                raise ImageError(
-                    f"Partition {partition_num} start sector ({start_sector}) "
-                    f"offset ({skip_bytes} bytes) exceeds file size ({raw_file_size} bytes). "
-                    f"Partition table may be corrupted or in unsupported format."
-                )
-
-            logger.info(
-                "Extracting partition %d (start=%d, offset=%d bytes)...",
-                partition_num,
-                start_sector,
-                skip_bytes,
-            )
-
-            self._copy_bytes_dd(raw_path, output_path, skip_bytes, count_bytes)
-
-            output_path = self._detect_and_rename_fs(output_path)
-
-            logger.info("Extracted to %s", output_path.name)
-            return output_path
-
-        except OSError as e:
-            raise ImageError("Extraction failed") from e
-        except (IndexError, ValueError) as e:
-            raise ImageError("Failed to parse partition table") from e
-
     def optimize_image(
         self,
         image_path: Path,
@@ -349,8 +159,20 @@ class ImageService:
         spec: ImageSpec,
         timestamp: str,
         skip_optimization: bool = False,
+        provisioner_type: ProvisionerType = ProvisionerType.LOOP_MOUNT,
     ) -> ImageItem:
-        """Shrink and compress image. Returns fully constructed ImageItem."""
+        """Shrink and compress image. Returns fully constructed ImageItem.
+
+        Args:
+            image_path: Path to the extracted root filesystem image.
+            image_id: Unique image identifier.
+            spec: Image specification from the catalog.
+            timestamp: ISO timestamp for the operation.
+            skip_optimization: If True, skip shrink and compression steps.
+            provisioner_type: Which backend to use for shrink/deblob.
+                Defaults to LOOP_MOUNT. Use GUESTFS for the libguestfs path.
+
+        """
         import time
 
         t0 = time.monotonic()
@@ -387,9 +209,24 @@ class ImageService:
                 f"Image processing failed: output file not created at {image_path}"
             )
 
-        shrunk_path, pre_shrink_size, post_shrink_size = (
-            self.shrink_with_guestfs(image_path)
+        # ── Shrink + deblob via ImageProvisioner ──────────────────────
+        from mvmctl.core.image._provisioner import ImageProvisioner
+
+        pre_shrink_size = image_path.stat().st_size
+
+        p = ImageProvisioner(
+            image_path=image_path,
+            provisioner_type=provisioner_type,
+            fs_type=fs_type,
         )
+        p.deblob()
+        p.shrink()
+        p.run()
+
+        # After shrink the file may be smaller
+        post_shrink_size = image_path.stat().st_size
+        shrunk_path = image_path
+
         t2 = time.monotonic()
         logger.info("  shrink: %.2fs", t2 - t1)
         shrink_successful = (
@@ -488,59 +325,38 @@ class ImageService:
 
         return download_path
 
-    def extract_downloaded_image(
-        self,
-        download_path: Path,
-        spec: ImageSpec,
-        image_id: str,
-        output_dir: Path,
-        partition: int | None,
-        disabled_detectors: list[str] | None = None,
-    ) -> Path:
-        """Extract/convert downloaded image to final format. Returns extracted path."""
-        logger.info("Preparing & optimizing image...")
-        actual_path = self._process_format(
-            spec.format,
-            input_path=download_path,
-            final_path=output_dir / f"{image_id}.img",
-            partition=partition,
-            disabled_detectors=disabled_detectors,
-        )
-
-        if actual_path is None:
-            raise ImageError("Failed to determine image path")
-
-        return actual_path
-
-    def extract_import_image(
+    def extract_image(
         self,
         source_path: Path,
         image_id: str,
         output_dir: Path,
         format: str,
-        partition: int | None,
-        disabled_detectors: list[str] | None,
+        partition: int | None = None,
+        disabled_detectors: list[str] | None = None,
+        provisioner_type: ProvisionerType = ProvisionerType.LOOP_MOUNT,
     ) -> Path:
-        """Extract/convert imported local image. Returns extracted path."""
-        logger.info(
-            "Importing %s as '%s' (format: %s)...",
-            source_path.name,
-            image_id,
-            format,
-        )
+        """Extract/convert a source image to a root filesystem.
 
-        actual_path = self._process_format(
-            format,
-            input_path=source_path,
-            final_path=output_dir / f"{image_id}.img",
-            partition=partition,
-            disabled_detectors=disabled_detectors,
-        )
+        Handles all formats: qcow2, vhd, vhdx, raw, tar-rootfs, squashfs.
+        """
+        final_path = output_dir / f"{image_id}.img"
 
-        if actual_path is None:
-            raise ImageError("Failed to determine image path")
-
-        return actual_path
+        if format in ("qcow2", "vhd", "vhdx", "raw"):
+            return self._extract_disk_image(
+                source_path,
+                final_path,
+                format,
+                partition=partition,
+                disabled_detectors=disabled_detectors,
+                provisioner_type=provisioner_type,
+            )
+        elif format == "tar-rootfs":
+            self.create_ext4_from_tar(source_path, final_path, "dynamic")
+            return final_path
+        elif format == "squashfs":
+            return self._handle_squashfs(source_path, final_path, "dynamic")
+        else:
+            raise ImageError(f"Unknown format: {format}")
 
     def materialize_to(
         self, image_id: str, fs_type: str, output_path: Path
@@ -809,158 +625,11 @@ class ImageService:
 
         return results
 
-    def shrink_with_guestfs(self, image_path: Path) -> tuple[Path, int, int]:
-        """Shrink an image to its minimum size using libguestfs.
-
-        Deblob (cache scrub + network config) runs *always* — this frees
-        space inside the guest and applies OS-specific fixes (e.g.
-        Alpine's ``denyinterfaces eth0``).  Filesystem shrinking only
-        runs when there is significant free space to reclaim.
-        """
+    @staticmethod
+    def _convert_to_raw(input_path: Path, output_path: Path, fmt: str) -> None:
+        """Convert a disk image to raw format using qemu-img."""
         try:
-            og = OptimizedGuestfs(image_path, readonly=False)
-        except GuestfsNotAvailableError:
-            logger.warning("libguestfs not available, skipping image shrink")
-            return (
-                image_path,
-                image_path.stat().st_size,
-                image_path.stat().st_size,
-            )
-
-        self._validate_image_path(image_path)
-
-        original_size = image_path.stat().st_size
-
-        try:
-            with og:
-                partitions = og.list_partitions()
-                root_device = partitions[0] if partitions else "/dev/sda"
-
-                # ── Phase 1: deblob — runs on EVERY image fetch/import ──
-                og.mount_rootfs()
-                og.deblob()
-
-                # ── Phase 2: shrink — only if there is space to reclaim ──
-                # Use guestfs statvfs for accurate reading (dumpe2fs on the
-                # external file would miss QEMU page-cache writes).
-                fs_type = og.vfs_type(root_device)
-                if fs_type not in ("ext2", "ext3", "ext4", "btrfs"):
-                    og._handle.umount("/")
-                    if fs_type:
-                        logger.debug(
-                            "Skipping shrink: %s filesystem not supported",
-                            fs_type,
-                        )
-                    else:
-                        logger.debug(
-                            "Skipping shrink: filesystem type could not be "
-                            "detected (may already be minimal or raw image)"
-                        )
-                    return image_path, original_size, original_size
-
-                stat = og._handle.statvfs("/")
-                free_ratio = stat.get("bfree", 0) / max(
-                    stat.get("blocks", 1), 1
-                )
-                if free_ratio <= 0.02:
-                    og._handle.umount("/")
-                    logger.debug(
-                        "Filesystem has %.1f%% free space after deblob, "
-                        "skipping shrink for %s",
-                        free_ratio * 100,
-                        image_path.name,
-                    )
-                    return image_path, original_size, original_size
-
-                og._handle.umount("/")
-
-                if fs_type in ("ext2", "ext3", "ext4"):
-                    og.shrink_ext4(root_device)
-                else:  # btrfs
-                    og.shrink_btrfs(root_device)
-
-                new_size = og.blockdev_getsize64(root_device)
-
-            final_size = int(new_size * CONST_SHRINK_SAFETY_MARGIN)
-            with open(image_path, "r+b") as f:
-                f.truncate(final_size)
-
-            actual_final = image_path.stat().st_size
-            logger.info(
-                "Shrunk %s: %d MB → %d MB (%.1fx reduction)",
-                image_path.name,
-                original_size // CONST_MEBIBYTE_BYTES,
-                actual_final // CONST_MEBIBYTE_BYTES,
-                original_size / actual_final
-                if actual_final > 0
-                else CONST_RATIO_MIN,
-            )
-
-            return image_path, original_size, actual_final
-
-        except Exception as e:
-            logger.debug("Failed to shrink image: %s", e)
-            return image_path, original_size, image_path.stat().st_size
-
-    def grow_rootfs_with_guestfs(
-        self, image_path: Path, target_size_bytes: int
-    ) -> None:
-        """
-        Grow the root filesystem to target size using libguestfs.
-
-        Args:
-            image_path: Path to the disk image.
-            target_size_bytes: Target size in bytes to grow the filesystem to.
-
-        Raises:
-            ImageError: If libguestfs is unavailable, target size is smaller than
-                current size, or resize operation fails.
-
-        """
-        try:
-            og = OptimizedGuestfs(image_path, readonly=False)
-        except GuestfsNotAvailableError:
-            raise ImageError("libguestfs required for disk resize") from None
-
-        self._validate_image_path(image_path)
-
-        current_size = image_path.stat().st_size
-
-        if current_size >= target_size_bytes:
-            raise ImageError(
-                f"Requested disk size ({target_size_bytes // CONST_MEBIBYTE_BYTES} MB) "
-                f"is smaller than current image size ({current_size // CONST_MEBIBYTE_BYTES} MB). "
-                "Cannot shrink filesystem. Use a larger size or recreate VM with smaller image."
-            )
-
-        try:
-            with open(image_path, "r+b") as file_handle:
-                file_handle.truncate(target_size_bytes)
-
-            with og:
-                partitions = og.list_partitions()
-                root_device = partitions[0] if partitions else "/dev/sda"
-                og.grow_fs(root_device, target_size_bytes)
-
-            logger.info(
-                "Grew rootfs: %d MB --> %d MB",
-                current_size // CONST_MEBIBYTE_BYTES,
-                target_size_bytes // CONST_MEBIBYTE_BYTES,
-            )
-        except ImageError:
-            raise
-        except Exception as exc:
-            raise ImageError(f"Failed to grow rootfs: {exc}") from exc
-
-    def convert_qcow2_to_raw(
-        self,
-        qcow2_path: Path,
-        raw_path: Path,
-    ) -> bool:
-        """Convert qcow2 to raw using qemu-img."""
-        try:
-            logger.info("Converting %s to raw...", qcow2_path.name)
-
+            logger.info("Converting %s to raw...", input_path.name)
             subprocess.run(
                 [
                     "qemu-img",
@@ -968,7 +637,7 @@ class ImageService:
                     "-m",
                     "16",
                     "-f",
-                    "qcow2",
+                    fmt,
                     "-O",
                     "raw",
                     "-t",
@@ -976,104 +645,19 @@ class ImageService:
                     "-T",
                     "none",
                     "-W",
-                    str(qcow2_path),
-                    str(raw_path),
+                    str(input_path),
+                    str(output_path),
                 ],
                 capture_output=True,
                 text=True,
                 check=True,
             )
-
-            logger.info("Converted to %s", raw_path.name)
-            return True
-
+            logger.info("Converted to %s", output_path.name)
         except subprocess.CalledProcessError as e:
             detail = e.stderr.strip() if e.stderr else "no details"
             raise ImageError(f"qemu-img conversion failed: {detail}") from e
-        except FileNotFoundError as e:
-            raise ImageError("qemu-img not found. Install qemu-utils.") from e
-
-    def convert_vhd_to_raw(
-        self,
-        vhd_path: Path,
-        raw_path: Path,
-    ) -> bool:
-        """Convert VHD to raw using qemu-img."""
-        try:
-            logger.info("Converting %s to raw...", vhd_path.name)
-
-            subprocess.run(
-                [
-                    "qemu-img",
-                    "convert",
-                    "-m",
-                    "16",
-                    "-f",
-                    "vpc",
-                    "-O",
-                    "raw",
-                    "-t",
-                    "none",
-                    "-T",
-                    "none",
-                    "-W",
-                    str(vhd_path),
-                    str(raw_path),
-                ],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-
-            logger.info("Converted to %s", raw_path.name)
-            return True
-
-        except subprocess.CalledProcessError as e:
-            detail = e.stderr.strip() if e.stderr else "no details"
-            raise ImageError(f"qemu-img conversion failed: {detail}") from e
-        except FileNotFoundError as e:
-            raise ImageError("qemu-img not found. Install qemu-utils.") from e
-
-    def convert_vhdx_to_raw(
-        self,
-        vhdx_path: Path,
-        raw_path: Path,
-    ) -> bool:
-        """Convert VHDX to raw using qemu-img."""
-        try:
-            logger.info("Converting %s to raw...", vhdx_path.name)
-
-            subprocess.run(
-                [
-                    "qemu-img",
-                    "convert",
-                    "-m",
-                    "16",
-                    "-f",
-                    "vhdx",
-                    "-O",
-                    "raw",
-                    "-t",
-                    "none",
-                    "-T",
-                    "none",
-                    "-W",
-                    str(vhdx_path),
-                    str(raw_path),
-                ],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-
-            logger.info("Converted to %s", raw_path.name)
-            return True
-
-        except subprocess.CalledProcessError as e:
-            detail = e.stderr.strip() if e.stderr else "no details"
-            raise ImageError(f"qemu-img conversion failed: {detail}") from e
-        except FileNotFoundError as e:
-            raise ImageError("qemu-img not found. Install qemu-utils.") from e
+        except FileNotFoundError:
+            raise ImageError("qemu-img not found. Install qemu-utils.")
 
     def create_ext4_from_tar(
         self,
@@ -1319,142 +903,6 @@ class ImageService:
 
         return images
 
-    def _parse_partitions_sfdisk(
-        self,
-        raw_path: Path,
-        partition: int | None,
-    ) -> tuple[list[dict[str, object]], int | None] | _NoPartitionTable | None:
-        """Parse partition table using sfdisk."""
-        import json as json_mod
-
-        try:
-            sfdisk_result = subprocess.run(
-                ["sfdisk", "--json", str(raw_path)],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            table = json_mod.loads(sfdisk_result.stdout)
-            partitions_raw = table.get("partitiontable", {}).get(
-                "partitions", []
-            )
-
-            if not partitions_raw:
-                return _NO_PARTITION_TABLE
-
-            partitions: list[dict[str, object]] = []
-            for p in partitions_raw:
-                start = p.get("start")
-                size = p.get("size")
-                if not isinstance(start, (int, float)) or not isinstance(
-                    size, (int, float)
-                ):
-                    raise ImageError("Failed to parse partition table")
-                partitions.append(
-                    {
-                        "start": int(start),
-                        "size": int(size),
-                        "type": p.get("type", ""),
-                        "node": p.get("node", ""),
-                    }
-                )
-
-            return partitions, partition
-
-        except (
-            FileNotFoundError,
-            subprocess.CalledProcessError,
-            json_mod.JSONDecodeError,
-            KeyError,
-        ):
-            return None
-
-    def _parse_partitions_parted(
-        self,
-        raw_path: Path,
-        partition: int | None,
-    ) -> tuple[list[dict[str, object]], int | None] | _NoPartitionTable | None:
-        """Parse partition table using parted (fallback when sfdisk unavailable)."""
-        try:
-            result = subprocess.run(
-                ["parted", "-sm", str(raw_path), "unit", "B", "print"],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-        except (FileNotFoundError, subprocess.CalledProcessError):
-            return None
-
-        lines = result.stdout.strip().split("\n")
-        if not lines or lines[0] != "BYT;":
-            return None
-
-        partitions: list[dict[str, object]] = []
-        for line in lines[2:]:
-            line = line.rstrip(";")
-            if not line:
-                continue
-            parts = line.split(":")
-            if len(parts) < 6:
-                continue
-            try:
-                number = parts[0]
-                start_bytes = int(parts[1].rstrip("B"))
-                size_bytes = int(parts[3].rstrip("B"))
-                filesystem = parts[4]
-                part_type = parts[5]
-            except (ValueError, IndexError):
-                return None
-
-            start_sector = start_bytes // _SECTOR_SIZE
-            size_sector = size_bytes // _SECTOR_SIZE
-            partitions.append(
-                {
-                    "start": start_sector,
-                    "size": size_sector,
-                    "type": part_type,
-                    "node": number,
-                    "fstype": filesystem,
-                }
-            )
-
-        if not partitions:
-            return _NO_PARTITION_TABLE
-
-        return partitions, partition
-
-    def _copy_bytes_dd(
-        self,
-        src: Path,
-        dst: Path,
-        skip_bytes: int,
-        count_bytes: int | None,
-    ) -> None:
-        """Copy bytes from *src* starting at *skip_bytes* into *dst* using dd."""
-        cmd = [
-            "dd",
-            f"if={src}",
-            f"of={dst}",
-            "bs=1M",
-            f"skip={skip_bytes}",
-            "iflag=skip_bytes,count_bytes",
-            "conv=sparse,fsync",
-            "status=none",
-        ]
-        if count_bytes is not None:
-            cmd.append(f"count={count_bytes}")
-        try:
-            subprocess.run(cmd, check=True, capture_output=True)
-        except subprocess.CalledProcessError as e:
-            stderr = (
-                e.stderr.decode()
-                if isinstance(e.stderr, bytes)
-                else (e.stderr if e.stderr else "")
-            )
-            raise ImageError(f"dd failed: {stderr}") from e
-        except FileNotFoundError:
-            raise ImageError("dd not found. Install coreutils.") from None
-
     def _copy_with_dd(
         self, src: Path, dst: Path, *, sparse: bool = False
     ) -> None:
@@ -1530,27 +978,6 @@ class ImageService:
             "Ensure the image has a valid filesystem."
         )
 
-    def _detect_and_rename_fs(self, output_path: Path) -> Path:
-        """Detect filesystem type via blkid and rename output file accordingly."""
-        try:
-            blkid_result = subprocess.run(
-                ["blkid", "-o", "value", "-s", "TYPE", str(output_path)],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            fs_type = blkid_result.stdout.strip()
-            if fs_type:
-                ext_map = {"ext4": ".ext4", "btrfs": ".btrfs", "xfs": ".xfs"}
-                ext = ext_map.get(fs_type, ".img")
-                final_path = output_path.with_suffix(ext)
-                output_path.rename(final_path)
-                output_path = final_path
-                logger.info("Detected filesystem: %s", fs_type)
-        except FileNotFoundError:
-            pass
-        return output_path
-
     def _validate_image_path(self, image_path: Path) -> Path:
         """
         Validate that an image path exists.
@@ -1588,63 +1015,94 @@ class ImageService:
         calculated_mib = int(content_mib * CONST_ROOTFS_HEADROOM_FACTOR)
         return max(CONST_MIN_ROOTFS_SIZE_MIB, calculated_mib)
 
-    def _handle_qcow2(
-        self,
-        input_path: Path,
-        final_path: Path,
+    @staticmethod
+    def _extract_via_backend(
+        raw_path: Path,
+        output_path: Path,
         partition: int | None = None,
         disabled_detectors: list[str] | None = None,
+        provisioner_type: ProvisionerType = ProvisionerType.LOOP_MOUNT,
     ) -> Path:
-        """Handle qcow2 format."""
-        with tempfile.TemporaryDirectory(
-            dir=CacheUtils.get_temp_dir()
-        ) as tmpdir:
-            raw_path = Path(tmpdir) / "intermediate.raw"
-            self.convert_qcow2_to_raw(input_path, raw_path)
+        """Extract root partition from a raw disk image via the selected backend."""
+        from mvmctl.core._shared._provisioner._backend import (
+            ProvisionerBackend,
+        )
 
-            # Try guestfs-based extraction first (more reliable)
-            actual_path = OptimizedGuestfs.extract_partition(
-                raw_path, final_path.with_suffix(".img"), partition
-            )
-            if actual_path is not None:
-                return actual_path
-
-            # Fall back to sfdisk/fdisk parsing
-            logger.info(
-                "Guestfs extraction unavailable, falling back to manual partition parsing"
-            )
-            actual_path = self.extract_partition(
+        backend = ProvisionerBackend.get_image(
+            raw_path,
+            provisioner_type=provisioner_type,
+        )
+        try:
+            return backend.extract_partition(
                 raw_path,
-                final_path.with_suffix(".img"),
+                output_path,
                 partition=partition,
                 disabled_detectors=disabled_detectors,
             )
-            return actual_path
+        except RuntimeError as e:
+            raise ImageError(str(e)) from e
 
-    def _handle_tar_rootfs(
+    def _extract_disk_image(
         self,
         input_path: Path,
-        final_path: Path,
-        minimum_rootfs_size: int | str,
-    ) -> Path:
-        """Handle tar-rootfs format."""
-        self.create_ext4_from_tar(input_path, final_path, minimum_rootfs_size)
-        return final_path
-
-    def _handle_raw(
-        self,
-        input_path: Path,
-        final_path: Path,
+        output_path: Path,
+        format: str,
         partition: int | None = None,
         disabled_detectors: list[str] | None = None,
+        provisioner_type: ProvisionerType = ProvisionerType.LOOP_MOUNT,
     ) -> Path:
-        """Handle raw format."""
-        return self.extract_partition(
-            input_path,
-            final_path.with_suffix(".img"),
-            partition,
-            disabled_detectors,
-        )
+        """Extract root partition from a disk image (qcow2, vhd, vhdx, raw).
+
+        For qcow2/vhd/vhdx: converts to raw via qemu-img first, then extracts.
+        For raw: extracts directly.
+
+        Tries the selected backend first (e.g. guestfs), falls back to the
+        loop-mount backend (sfdisk/fdisk + dd) if that fails.
+        """
+        if format in ("qcow2", "vhd", "vhdx"):
+            fmt_flag = {"qcow2": "qcow2", "vhd": "vpc", "vhdx": "vhdx"}[format]
+            with tempfile.TemporaryDirectory(
+                dir=CacheUtils.get_temp_dir()
+            ) as tmpdir:
+                raw_path = Path(tmpdir) / "intermediate.raw"
+                self._convert_to_raw(input_path, raw_path, fmt_flag)
+                try:
+                    return self._extract_via_backend(
+                        raw_path,
+                        output_path.with_suffix(".img"),
+                        partition=partition,
+                        disabled_detectors=disabled_detectors,
+                        provisioner_type=provisioner_type,
+                    )
+                except (ImageError, RuntimeError):
+                    pass  # fall back to loop-mount below
+                return self._extract_via_backend(
+                    raw_path,
+                    output_path.with_suffix(".img"),
+                    partition=partition,
+                    disabled_detectors=disabled_detectors,
+                    provisioner_type=ProvisionerType.LOOP_MOUNT,
+                )
+        elif format == "raw":
+            try:
+                return self._extract_via_backend(
+                    input_path,
+                    output_path.with_suffix(".img"),
+                    partition=partition,
+                    disabled_detectors=disabled_detectors,
+                    provisioner_type=provisioner_type,
+                )
+            except (ImageError, RuntimeError):
+                pass  # fall back to loop-mount below
+            return self._extract_via_backend(
+                input_path,
+                output_path.with_suffix(".img"),
+                partition=partition,
+                disabled_detectors=disabled_detectors,
+                provisioner_type=ProvisionerType.LOOP_MOUNT,
+            )
+        else:
+            raise ImageError(f"Unsupported disk image format: {format}")
 
     def _handle_squashfs(
         self,
@@ -1726,86 +1184,6 @@ class ImageService:
 
         logger.info("Created ext4 from squashfs: %s", final_path)
         return final_path
-
-    def _handle_vhd(
-        self,
-        input_path: Path,
-        final_path: Path,
-        partition: int | None = None,
-        disabled_detectors: list[str] | None = None,
-    ) -> Path:
-        """
-        Handle VHD format.
-
-        Tries guestfs-based extraction first for reliability with non-standard
-        VHD images (e.g., Alpine), falls back to sfdisk/fdisk parsing.
-        """
-        with tempfile.TemporaryDirectory(
-            dir=CacheUtils.get_temp_dir()
-        ) as tmpdir:
-            raw_path = Path(tmpdir) / "intermediate.raw"
-            self.convert_vhd_to_raw(input_path, raw_path)
-
-            # Try guestfs-based extraction first (more reliable for VHD)
-            actual_path = OptimizedGuestfs.extract_partition(
-                raw_path, final_path.with_suffix(".img"), partition
-            )
-            if actual_path is not None:
-                return actual_path
-
-            # Fall back to sfdisk/fdisk parsing
-            logger.info(
-                "Guestfs extraction unavailable, falling back to manual partition parsing"
-            )
-            actual_path = self.extract_partition(
-                raw_path,
-                final_path.with_suffix(".img"),
-                partition=partition,
-                disabled_detectors=disabled_detectors,
-            )
-            if actual_path is None:
-                raise ImageError("Failed to extract partition from VHD")
-            return actual_path
-
-    def _handle_vhdx(
-        self,
-        input_path: Path,
-        final_path: Path,
-        partition: int | None = None,
-        disabled_detectors: list[str] | None = None,
-    ) -> Path:
-        """
-        Handle VHDX format.
-
-        Tries guestfs-based extraction first for reliability with VHDX images,
-        falls back to sfdisk/fdisk parsing.
-        """
-        with tempfile.TemporaryDirectory(
-            dir=CacheUtils.get_temp_dir()
-        ) as tmpdir:
-            raw_path = Path(tmpdir) / "intermediate.raw"
-            self.convert_vhdx_to_raw(input_path, raw_path)
-
-            # Try guestfs-based extraction first (more reliable for VHDX)
-            actual_path = OptimizedGuestfs.extract_partition(
-                raw_path, final_path.with_suffix(".img"), partition
-            )
-            if actual_path is not None:
-                return actual_path
-
-            # Fall back to sfdisk/fdisk parsing
-            logger.info(
-                "Guestfs extraction unavailable, falling back to manual partition parsing"
-            )
-            actual_path = self.extract_partition(
-                raw_path,
-                final_path.with_suffix(".img"),
-                partition=partition,
-                disabled_detectors=disabled_detectors,
-            )
-            if actual_path is None:
-                raise ImageError("Failed to extract partition from VHDX")
-            return actual_path
 
     @staticmethod
     def _get_template_variables(

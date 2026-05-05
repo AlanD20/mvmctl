@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import datetime
 import json
 import os
 import signal
@@ -21,6 +22,19 @@ import tempfile
 from typing import Any
 
 _LINUX_FS_TYPES = frozenset({"ext2", "ext3", "ext4", "btrfs"})
+
+_DEBUG_LOG_PATH = "/tmp/mvm-provision-debug.log"
+
+_DEFAULT_SHELLS = [
+    "/bin/sh",
+    "/bin/bash",
+    "/bin/dash",
+    "/bin/ash",
+    "/usr/bin/sh",
+    "/usr/bin/bash",
+    "/bin/busybox",
+    "/usr/bin/busybox",
+]
 
 
 class Provisioner:
@@ -35,6 +49,8 @@ class Provisioner:
         self._ops = ops
         self._image: str = ops["image"]
         self._fs_type_hint: str | None = ops.get("fs_type")
+        self._action: str = ops.get("action", "provision")
+        self._debug: bool = ops.get("debug", False)
 
         raw_ops: Any = ops.get("operations", {})
         self._operations: dict[str, Any] = (
@@ -53,6 +69,15 @@ class Provisioner:
         self._current_step: str = "init"
         self._resize_new_bytes: int | None = None
 
+    def _debug_log(self, msg: str) -> None:
+        if not self._debug:
+            return
+        ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with open(_DEBUG_LOG_PATH, "a") as f:
+            f.write(
+                f"[{ts}] [PID={os.getpid()}] [step={self._current_step}] {msg}\n"
+            )
+
     # ── Public API ──────────────────────────────────────────────────────
 
     def run(self) -> dict[str, Any]:
@@ -62,12 +87,30 @@ class Provisioner:
         ``commands_run`` on success, or ``status``, ``error``, and
         ``step`` on failure.
 
+        When ``self._action == "detect_os"``, returns ``status`` and
+        ``os_type`` instead.
+
         Cleanup (umount, detach loop) always runs via ``finally``.
         """
         self._current_step = "parse"
+
+        # Short-circuit for detect_os action
+        if self._action == "detect_os":
+            try:
+                result = self.detect_os()
+            except Exception as exc:
+                result = {
+                    "status": "error",
+                    "error": str(exc),
+                    "step": self._current_step,
+                }
+            finally:
+                self._cleanup()
+            return result
+
         files_written = 0
         commands_run = 0
-        result: dict[str, Any] = {}
+        result = {}
 
         try:
             # Pre-loop resize: grow (truncate file before mounting)
@@ -77,6 +120,21 @@ class Provisioner:
             ):
                 self._current_step = "resize"
                 self._truncate_file(self._resize["bytes"])
+
+            if self._debug:
+                self._debug_log(
+                    f"uid={os.getuid()} gid={os.getgid()} euid={os.geteuid()}"
+                )
+                self._debug_log(
+                    f"image={self._image} fs_type_hint={self._fs_type_hint}"
+                )
+                try:
+                    with open(f"/proc/{os.getpid()}/status") as f:
+                        for line in f:
+                            if line.startswith("Cap"):
+                                self._debug_log(f"cap: {line.strip()}")
+                except OSError as exc:
+                    self._debug_log(f"cannot read /proc/self/status: {exc}")
 
             # Loop device setup
             self._current_step = "loop"
@@ -118,7 +176,8 @@ class Provisioner:
                 and self._resize.get("action") == "shrink"
             ):
                 self._current_step = "resize"
-                self._shrink()
+                headroom = self._resize.get("headroom", 0)
+                self._shrink(headroom)
 
             # Post-mount resize: grow (ext4 only; btrfs was grown after truncate)
             if (
@@ -127,6 +186,7 @@ class Provisioner:
                 and self._fs_type != "btrfs"
             ):
                 self._current_step = "resize"
+                self._unmount()
                 self._run_e2fsck()
                 self._run_resize2fs()
 
@@ -151,6 +211,52 @@ class Provisioner:
             self._truncate_file(self._resize_new_bytes)
 
         return result
+
+    # ── OS detection ────────────────────────────────────────────────────
+
+    def detect_os(self) -> dict[str, Any]:
+        """Detect the OS from the mounted image.
+
+        Mounts the image, reads ``/etc/os-release`` to extract the ``ID``
+        field, and returns the OS type. Cleanup happens in the caller's
+        ``finally`` block.
+
+        Returns:
+            A dict with ``status`` and ``os_type`` on success, or
+            ``status``, ``error``, and ``step`` on failure.
+        """
+        self._current_step = "loop"
+        self._setup_loop()
+
+        self._current_step = "partition"
+        self._find_root_partition()
+
+        self._current_step = "detect_fs"
+        self._detect_fs_type()
+
+        self._current_step = "mount"
+        self._mount_point = tempfile.mkdtemp(prefix="mvm-provision-")
+        self._mount()
+
+        # Read /etc/os-release
+        os_release_path = os.path.join(self._mount_point, "etc", "os-release")
+        os_type: str | None = None
+        if os.path.exists(os_release_path):
+            with open(os_release_path) as f:
+                for line in f:
+                    if line.startswith("ID="):
+                        raw = line.split("=", 1)[1].strip().strip('"')
+                        os_type = raw
+                        break
+
+        if os_type is None:
+            return {
+                "status": "ok",
+                "os_type": "linux",
+                "note": "could not detect specific OS",
+            }
+
+        return {"status": "ok", "os_type": os_type}
 
     # ── Signal handling ─────────────────────────────────────────────────
 
@@ -298,12 +404,14 @@ class Provisioner:
         if self._fs_type == "btrfs":
             subprocess.run(
                 ["mount", "-t", "btrfs", self._root_part, self._mount_point],
+                capture_output=True,
                 check=True,
                 timeout=15,
             )
         else:
             subprocess.run(
                 ["mount", self._root_part, self._mount_point],
+                capture_output=True,
                 check=True,
                 timeout=15,
             )
@@ -312,12 +420,16 @@ class Provisioner:
         """Unmount the mount point. Safe to call when not mounted."""
         if self._mount_point is None:
             return
-        subprocess.run(["umount", self._mount_point], check=False, timeout=15)
+        subprocess.run(
+            ["umount", self._mount_point],
+            capture_output=True,
+            check=False,
+            timeout=15,
+        )
 
     # ── File operations ─────────────────────────────────────────────────
 
     def _write_file(self, file_op: dict[str, Any]) -> None:
-        """Write a single file inside the mount point."""
         if self._mount_point is None:
             raise RuntimeError("Not mounted")
         path: str = file_op["path"]
@@ -327,14 +439,34 @@ class Provisioner:
         gid: int = file_op.get("gid", 0)
 
         full_path = os.path.join(self._mount_point, path.lstrip("/"))
+        self._debug_log(f"write: path={path} full={full_path}")
+
+        # Remove existing path (handles symlinks, sockets, FIFOs, hardlinks)
+        if os.path.lexists(full_path):
+            try:
+                self._debug_log(f"write: removing existing at {path}")
+                os.unlink(full_path)
+            except OSError as exc:
+                self._debug_log(f"write: failed to remove {path}: {exc}")
+                raise RuntimeError(f"Cannot remove existing path {path}: {exc}")
+
         parent = os.path.dirname(full_path)
         os.makedirs(parent, exist_ok=True)
 
         data = base64.b64decode(data_b64)
+        self._debug_log(f"write: writing {len(data)} bytes to {path}")
         with open(full_path, "wb") as f:
             f.write(data)
-        os.chmod(full_path, mode)
-        os.chown(full_path, uid, gid)
+
+        # Set permissions (best effort — root in container may lack CAP_CHOWN)
+        try:
+            os.chmod(full_path, mode)
+        except OSError as exc:
+            self._debug_log(f"write: chmod failed for {path}: {exc}")
+        try:
+            os.chown(full_path, uid, gid)
+        except OSError as exc:
+            self._debug_log(f"write: chown failed for {path}: {exc}")
 
     def _copy_directory(self, copy_op: dict[str, Any]) -> int:
         """Copy a directory tree into the mount point.
@@ -378,13 +510,64 @@ class Provisioner:
     # ── Chroot commands ─────────────────────────────────────────────────
 
     def _run_chroot_command(self, command: str) -> None:
-        """Run a shell command inside a chroot environment."""
         if self._mount_point is None:
             raise RuntimeError("Not mounted")
-        subprocess.run(
-            ["chroot", self._mount_point, "sh", "-c", command],
-            check=True,
-            timeout=60,
+
+        # Ensure /dev/null exists in the chroot — missing on some images
+        null_path = os.path.join(self._mount_point, "dev", "null")
+        if not os.path.exists(null_path):
+            dev_dir = os.path.dirname(null_path)
+            os.makedirs(dev_dir, exist_ok=True)
+            os.mknod(null_path, 0o666, os.makedev(1, 3))
+
+        custom_shell = self._ops.get("shell")
+        shells = [custom_shell] if custom_shell else _DEFAULT_SHELLS
+
+        env = os.environ.copy()
+        env["PATH"] = (
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        )
+
+        self._debug_log(f"chroot: command={command[:100]}")
+
+        last_error = ""
+        for shell in shells:
+            shell_in_chroot = os.path.join(self._mount_point, shell.lstrip("/"))
+            if not os.path.exists(shell_in_chroot):
+                continue
+
+            self._debug_log(f"chroot: trying shell={shell}")
+            # busybox needs "sh" as the applet name before "-c"
+            if os.path.basename(shell) == "busybox":
+                cmd = ["chroot", self._mount_point, shell, "sh", "-c", command]
+            else:
+                cmd = ["chroot", self._mount_point, shell, "-c", command]
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+            )
+            try:
+                stdout, stderr = proc.communicate(timeout=60)
+            except subprocess.TimeoutExpired:
+                self._debug_log("chroot: timeout after 60s, killing")
+                proc.kill()
+                proc.wait(timeout=5)
+                raise RuntimeError(f"chroot command timed out: {command[:100]}")
+
+            self._debug_log(f"chroot: shell={shell} exit={proc.returncode}")
+            if proc.returncode == 0:
+                return
+            last_error = (
+                stderr.decode("utf-8", errors="replace") if stderr else ""
+            )
+
+        self._debug_log(
+            f"chroot: all shells failed, last_error={last_error[:200]}"
+        )
+        raise RuntimeError(
+            f"chroot failed (no working shell found): {last_error[:500]}"
         )
 
     # ── Resize helpers ──────────────────────────────────────────────────
@@ -398,6 +581,7 @@ class Provisioner:
         """Run e2fsck. Required before any resize2fs operation."""
         subprocess.run(
             ["e2fsck", "-f", "-y", self._root_part],
+            capture_output=True,
             check=True,
             timeout=120,
         )
@@ -406,6 +590,7 @@ class Provisioner:
         """Grow an ext4 filesystem to fill the available device space."""
         subprocess.run(
             ["resize2fs", self._root_part],
+            capture_output=True,
             check=True,
             timeout=120,
         )
@@ -414,6 +599,7 @@ class Provisioner:
         """Shrink an ext4 filesystem to its minimum size."""
         subprocess.run(
             ["resize2fs", "-M", self._root_part],
+            capture_output=True,
             check=True,
             timeout=120,
         )
@@ -442,14 +628,102 @@ class Provisioner:
         assert self._mount_point is not None
         subprocess.run(
             ["btrfs", "filesystem", "resize", "max", self._mount_point],
+            capture_output=True,
             check=True,
             timeout=120,
         )
 
-    def _shrink_btrfs(self, target_bytes: int) -> None:
-        """Resize a btrfs filesystem to a specific size."""
+    def _calc_btrfs_min_size(self) -> int:
+        """Calculate minimum file size for a btrfs filesystem.
+
+        Uses ``btrfs filesystem usage`` to determine used space, then
+        adds at least 100% headroom for metadata relocation.
+
+        Returns minimum size in bytes (0 if unresolvable).
+        """
         assert self._mount_point is not None
+        import re as _re
+
+        # Get current device size as upper bound
+        dev_result = subprocess.run(
+            ["blockdev", "--getsize64", self._root_part],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        current_size = 0
+        if dev_result.returncode == 0 and dev_result.stdout.strip():
+            try:
+                current_size = int(dev_result.stdout.strip())
+            except ValueError:
+                pass
+
+        result = subprocess.run(
+            ["btrfs", "filesystem", "usage", "-b", self._mount_point],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            if current_size:
+                return current_size
+            return 0
+
+        used_bytes = 0
+        for line in result.stdout.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("Used:"):
+                m = _re.search(r"[\d.]+", stripped)
+                if m:
+                    try:
+                        used_bytes = int(float(m.group()))
+                    except ValueError:
+                        pass
+                break
+
+        if used_bytes == 0:
+            return current_size or 0
+
+        # btrfs needs free space for metadata relocation during shrink.
+        # Use generous headroom: used + min(used, 2 GiB) + 1 GiB buffer
+        headroom = min(used_bytes, 2 * 1024 * 1024 * 1024) + (
+            1024 * 1024 * 1024
+        )
+        target = used_bytes + headroom
+
+        # Clamp to current size (can't grow during shrink)
+        if current_size and target > current_size:
+            # Shrink by at most 256 MiB if we can't make meaningful progress
+            target = max(
+                current_size - (256 * 1024 * 1024),
+                used_bytes + (512 * 1024 * 1024),
+            )
+
+        return target
+
+    def _shrink_btrfs(self, target_bytes: int) -> None:
+        """Resize a btrfs filesystem to a specific size.
+
+        When *target_bytes* is 0, calculates the minimum size via
+        ``_calc_btrfs_min_size()`` instead (no kernel-native
+        "shrink-to-minimum" for btrfs).
+        """
+        assert self._mount_point is not None
+
+        # fstrim before shrink to free unused blocks
         subprocess.run(
+            ["fstrim", self._mount_point],
+            capture_output=True,
+            timeout=30,
+        )
+
+        if target_bytes == 0:
+            target_bytes = self._calc_btrfs_min_size()
+
+        if target_bytes == 0:
+            raise RuntimeError("Cannot determine btrfs shrink target size")
+
+        result = subprocess.run(
             [
                 "btrfs",
                 "filesystem",
@@ -457,20 +731,70 @@ class Provisioner:
                 str(target_bytes),
                 self._mount_point,
             ],
-            check=True,
+            capture_output=True,
             timeout=120,
         )
+        if result.returncode != 0:
+            stderr_text = result.stderr.decode() if result.stderr else ""
+            raise RuntimeError(
+                f"btrfs filesystem resize to {target_bytes} failed "
+                f"(exit {result.returncode}): {stderr_text}"
+            )
 
-    def _shrink(self) -> None:
+    def _get_btrfs_device_size(self) -> int:
+        """Get the btrfs filesystem device size in bytes from ``btrfs filesystem show``."""
+        assert self._mount_point is not None
+        import re as _re
+
+        result = subprocess.run(
+            ["btrfs", "filesystem", "show", self._mount_point],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode != 0:
+            return 0
+        # Parse line like:   devid    1 size 1.75GiB used 1.32GiB path /dev/loop0
+        for line in result.stdout.splitlines():
+            if "devid" in line and "size" in line:
+                m = _re.search(r"size\s+([\d.]+)([kKmMgGtTbB])", line)
+                if m:
+                    val = float(m.group(1))
+                    unit = m.group(2).lower()
+                    multipliers = {
+                        "k": 1024,
+                        "m": 1024**2,
+                        "g": 1024**3,
+                        "t": 1024**4,
+                        "b": 1,
+                    }
+                    return int(val * multipliers.get(unit, 1))
+        return 0
+
+    def _shrink(self, headroom: int = 0) -> None:
         """Execute the shrink resize operation."""
         assert self._resize is not None
         if self._fs_type == "btrfs":
             self._shrink_btrfs(self._resize["bytes"])
-            self._resize_new_bytes = self._resize["bytes"]
+            self._resize_new_bytes = self._get_btrfs_device_size()
         else:
+            self._unmount()
             self._run_e2fsck()
             self._run_resize2fs_min()
+            if headroom > 0:
+                self._run_resize2fs_headroom(headroom)
             self._resize_new_bytes = self._get_fs_byte_size()
+
+    def _run_resize2fs_headroom(self, headroom_bytes: int) -> None:
+        """Grow filesystem by headroom bytes after shrinking to minimum."""
+        current_size = self._get_fs_byte_size()
+        target_size = current_size + headroom_bytes
+        subprocess.run(
+            ["resize2fs", self._root_part, str(target_size)],
+            capture_output=True,
+            check=True,
+            timeout=120,
+        )
 
     # ── Cleanup ─────────────────────────────────────────────────────────
 

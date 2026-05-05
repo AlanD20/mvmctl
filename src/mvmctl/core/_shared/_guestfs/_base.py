@@ -465,8 +465,24 @@ class OptimizedGuestfs:
             with og as og:
                 partitions = og.list_partitions()
                 if not partitions:
-                    logger.debug("No partitions found in image")
-                    return None
+                    # No partition table — check if image is a direct filesystem (superfloppy)
+                    try:
+                        fs_type = og.vfs_type("/dev/sda")
+                        logger.debug("Superfloppy image detected: %s", fs_type)
+                        # Copy the whole file as-is
+                        import shutil
+
+                        shutil.copy2(raw_path, output_path)
+                        logger.info(
+                            "Copied superfloppy image: %s",
+                            output_path.name,
+                        )
+                        return output_path
+                    except Exception:
+                        logger.debug(
+                            "No partitions and not a superfloppy filesystem"
+                        )
+                        return None
 
                 root_device: str | None = None
                 if partition is not None:

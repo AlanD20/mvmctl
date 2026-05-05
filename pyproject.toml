@@ -80,6 +80,12 @@ markers = [
 ]
 filterwarnings = [
     "ignore::ResourceWarning:coverage.collector",
+    # ResourceWarning for unclosed sqlite3 connections — connections are
+    # properly closed via Database.connect() context manager, but test
+    # code and mock teardown sometimes leave references that trigger this
+    # warning during GC. The connection WILL be closed by sqlite3 on
+    # garbage collection, so these are harmless.
+    "ignore:unclosed database:ResourceWarning",
 ]
 
 [tool.coverage.run]

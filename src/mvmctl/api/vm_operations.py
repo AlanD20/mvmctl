@@ -14,6 +14,7 @@ import logging
 import os
 import shutil
 import signal
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -38,7 +39,6 @@ from mvmctl.api.inputs._vm_create_input import VMCreateInput
 from mvmctl.api.inputs._vm_import_input import VMImportInput, VMImportRequest
 from mvmctl.api.inputs._vm_input import VMInput, VMRequest
 from mvmctl.core._shared import Database
-from mvmctl.core._shared._provisioner import Provisioner
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.cloudinit._provisioner import (
     CloudInitProvisionConfig,
@@ -54,6 +54,7 @@ from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.core.network._lease_service import LeaseService
 from mvmctl.core.network._repository import LeaseRepository, NetworkRepository
 from mvmctl.core.network._service import NetworkService
+from mvmctl.core.vm import VMProvisioner
 from mvmctl.core.vm._controller import VMController
 from mvmctl.core.vm._firecracker import FirecrackerSpawner
 from mvmctl.core.vm._repository import VMRepository
@@ -289,6 +290,9 @@ class VMCreateContext:
         if self.resolved is None:
             raise VMCreateError("Failed to resolve necessary dependencies")
 
+        _t0 = time.perf_counter()
+        _step_start = _t0
+
         from mvmctl.utils.fs import FsUtils
 
         self.guest_mac = (
@@ -354,6 +358,11 @@ class VMCreateContext:
         )
         self.mark_created("network_tap")
 
+        logger.info(
+            "[timing] network_setup: %.3fs", time.perf_counter() - _step_start
+        )
+        _step_start = time.perf_counter()
+
         if self._on_progress is not None:
             self._on_progress(
                 ProgressEvent(
@@ -367,10 +376,15 @@ class VMCreateContext:
         self.clone_image()
         self.mark_created("rootfs")
 
+        logger.info(
+            "[timing] image_clone: %.3fs", time.perf_counter() - _step_start
+        )
+        _step_start = time.perf_counter()
+
         # Cloud-init provisioning
         mode = self.resolved.cloud_init_mode
 
-        provisioner = Provisioner(
+        provisioner = VMProvisioner(
             rootfs_path=self.rootfs_path,
             provisioner_type=self.resolved.provisioner,
             fs_type=self.resolved.image.fs_type,
@@ -380,6 +394,12 @@ class VMCreateContext:
             user_gid=self.resolved.user_gid,
         )
         provisioner.resize(self.resolved.disk_size_bytes)
+
+        logger.info(
+            "[timing] provisioner_setup: %.3fs",
+            time.perf_counter() - _step_start,
+        )
+        _step_start = time.perf_counter()
 
         if mode == CloudInitMode.OFF:
             provisioner.set_hostname(self.resolved.name)
@@ -448,8 +468,16 @@ class VMCreateContext:
             else:
                 self.mark_created("cloud-init-net")
 
+        # Fix fstab for Firecracker (superfloppy /dev/vda layout)
+        provisioner.fix_fstab()
+
         # Execute all queued operations
         provisioner.run()
+
+        logger.info(
+            "[timing] provisioner_run: %.3fs", time.perf_counter() - _step_start
+        )
+        _step_start = time.perf_counter()
 
         if self._on_progress is not None:
             self._on_progress(
@@ -470,6 +498,12 @@ class VMCreateContext:
         firecracker_spawner.write_to_file()
         self.mark_created("firecracker")
 
+        logger.info(
+            "[timing] firecracker_config: %.3fs",
+            time.perf_counter() - _step_start,
+        )
+        _step_start = time.perf_counter()
+
         if self.fc_manager is None:
             raise VMCreateError("Firecracker manager is not set in context")
 
@@ -484,6 +518,7 @@ class VMCreateContext:
             )
 
         # Console
+        _console_start = time.perf_counter()
         if self.resolved.enable_console:
             from mvmctl.core.console._controller import ConsoleController
 
@@ -495,6 +530,7 @@ class VMCreateContext:
                 pid_filename=self.resolved.console_pid_filename,
             )
             self.relay.create_pty()
+        _console_elapsed = time.perf_counter() - _console_start
 
         relay_enabled = self.relay is not None
         relay_client_fd = (
@@ -504,12 +540,19 @@ class VMCreateContext:
         self.fc_manager.spawn(
             relay_enabled=relay_enabled, relay_client_fd=relay_client_fd
         )
+        logger.info(
+            "[timing] firecracker_spawn: %.3fs",
+            time.perf_counter() - _step_start,
+        )
+        _step_start = time.perf_counter()
 
         # Start console relay if enabled
         if self.resolved.enable_console and self.relay is not None:
             self.relay.close_client_fd()
             self.relay.start()
             self.mark_created("console_relay")
+
+        logger.info("[timing] console_setup: %.3fs", _console_elapsed)
 
         if self._on_progress is not None:
             self._on_progress(
@@ -519,6 +562,8 @@ class VMCreateContext:
                     message="VM created successfully",
                 )
             )
+
+        logger.info("[timing] total: %.3fs", time.perf_counter() - _t0)
 
     def build_firecracker_config(self) -> FirecrackerConfig | None:
         """Build Firecracker spawn configuration from resolved state."""

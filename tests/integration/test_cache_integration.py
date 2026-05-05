@@ -88,7 +88,7 @@ class TestCachePruneVMs:
 
         provisioner_mock = MagicMock()
         monkeypatch.setattr(
-            "mvmctl.api.vm_operations.Provisioner",
+            "mvmctl.api.vm_operations.VMProvisioner",
             lambda *args, **kwargs: provisioner_mock,
         )
         provisioner_mock.resize.return_value = provisioner_mock
@@ -362,7 +362,7 @@ class TestCachePruneAll:
 
         provisioner_mock = MagicMock()
         monkeypatch.setattr(
-            "mvmctl.api.vm_operations.Provisioner",
+            "mvmctl.api.vm_operations.VMProvisioner",
             lambda *args, **kwargs: provisioner_mock,
         )
         provisioner_mock.resize.return_value = provisioner_mock

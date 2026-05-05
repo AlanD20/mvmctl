@@ -1,90 +1,156 @@
 [
   {
-    "tag": "round-1",
-    "timestamp": "2026-05-04T12:46:20+00:00",
+    "tag": "guestfs-seq",
+    "timestamp": "2026-05-05T20:51:51+00:00",
     "kernel": "default",
     "results": [
       {
         "name": "ubuntu-24.04",
-        "threshold_s": 15,
-        "create_s": 5.7,
-        "total_s": 10.7,
-        "passed": true,
+        "threshold_s": 5,
+        "create_s": 3,
+        "total_s": 5.3,
+        "passed": false,
         "error": null,
         "kernel": "firecracker:6.1.155",
-        "attempt": 2
+        "attempt": 1
       },
       {
         "name": "ubuntu-24.04-minimal",
-        "threshold_s": 15,
-        "create_s": 5.1,
-        "total_s": 10.3,
-        "passed": true,
+        "threshold_s": 5,
+        "create_s": 2.5,
+        "total_s": 5.6,
+        "passed": false,
         "error": null,
         "kernel": "firecracker:6.1.155",
-        "attempt": 2
+        "attempt": 1
       },
       {
         "name": "ubuntu-fc",
-        "threshold_s": 14,
-        "create_s": 4.9,
-        "total_s": 7.9,
+        "threshold_s": 5,
+        "create_s": 2.3,
+        "total_s": 3.8,
         "passed": true,
         "error": null,
         "kernel": "firecracker:6.1.155",
-        "attempt": 2
+        "attempt": 1
       },
       {
         "name": "alpine-3.21",
-        "threshold_s": 18,
-        "create_s": 4.8,
-        "total_s": 15.4,
+        "threshold_s": 5,
+        "create_s": 2.1,
+        "total_s": 3.6,
         "passed": true,
         "error": null,
         "kernel": "firecracker:6.1.155",
-        "attempt": 7
+        "attempt": 1
       },
       {
         "name": "debian-bookworm",
-        "threshold_s": 15,
-        "create_s": 6.3,
-        "total_s": 16.0,
-        "passed": false,
-        "error": "SSH unavailable after 16.0s (threshold 15s)",
-        "kernel": "firecracker:6.1.155"
+        "threshold_s": 5,
+        "create_s": 3.1,
+        "total_s": 4.6,
+        "passed": true,
+        "error": null,
+        "kernel": "firecracker:6.1.155",
+        "attempt": 1
       },
       {
         "name": "archlinux",
-        "threshold_s": 30,
-        "create_s": 6.0,
-        "total_s": 22.4,
-        "passed": true,
-        "error": null,
-        "kernel": "official:6.19.9",
-        "attempt": 11
+        "threshold_s": 5,
+        "create_s": 2.8,
+        "total_s": 5.3,
+        "passed": false,
+        "error": "SSH unavailable after 5.3s (threshold 5s)",
+        "kernel": "official:6.19.9"
       }
     ]
   },
   {
-    "tag": "round-2",
-    "timestamp": "2026-05-04T12:46:47+00:00",
+    "tag": "guestfs-parallel",
+    "timestamp": "2026-05-05T20:52:09+00:00",
     "kernel": "default",
     "results": [
       {
         "name": "ubuntu-24.04",
-        "threshold_s": 15,
-        "create_s": 5.6,
-        "total_s": 11.4,
-        "passed": true,
+        "threshold_s": 5,
+        "create_s": 4.4,
+        "total_s": 6.9,
+        "passed": false,
         "error": null,
         "kernel": "firecracker:6.1.155",
-        "attempt": 3
+        "attempt": 1
       },
       {
         "name": "ubuntu-24.04-minimal",
-        "threshold_s": 15,
-        "create_s": 5.0,
-        "total_s": 11.9,
+        "threshold_s": 5,
+        "create_s": 3.2,
+        "total_s": 5.7,
+        "passed": false,
+        "error": null,
+        "kernel": "firecracker:6.1.155",
+        "attempt": 1
+      },
+      {
+        "name": "ubuntu-fc",
+        "threshold_s": 5,
+        "create_s": 3.2,
+        "total_s": 4.7,
+        "passed": true,
+        "error": null,
+        "kernel": "firecracker:6.1.155",
+        "attempt": 1
+      },
+      {
+        "name": "alpine-3.21",
+        "threshold_s": 5,
+        "create_s": 3.1,
+        "total_s": 4.6,
+        "passed": true,
+        "error": null,
+        "kernel": "firecracker:6.1.155",
+        "attempt": 1
+      },
+      {
+        "name": "debian-bookworm",
+        "threshold_s": 5,
+        "create_s": 4.4,
+        "total_s": 6,
+        "passed": false,
+        "error": null,
+        "kernel": "firecracker:6.1.155",
+        "attempt": 1
+      },
+      {
+        "name": "archlinux",
+        "threshold_s": 5,
+        "create_s": 4.2,
+        "total_s": 5.5,
+        "passed": false,
+        "error": "SSH unavailable after 5.5s (threshold 5s)",
+        "kernel": "official:6.19.9"
+      }
+    ]
+  },
+  {
+    "tag": "loopmount-seq",
+    "timestamp": "2026-05-05T21:00:55+00:00",
+    "kernel": "default",
+    "results": [
+      {
+        "name": "ubuntu-24.04",
+        "threshold_s": 5,
+        "create_s": 2.2,
+        "total_s": 4.3,
+        "passed": true,
+        "error": null,
+        "kernel": "firecracker:6.1.155",
+        "attempt": 1
+      },
+      {
+        "name": "ubuntu-24.04-minimal",
+        "threshold_s": 5,
+        "create_s": 1.7,
+        "total_s": 4.2,
         "passed": true,
         "error": null,
         "kernel": "firecracker:6.1.155",
@@ -92,9 +158,9 @@
       },
       {
         "name": "ubuntu-fc",
-        "threshold_s": 14,
-        "create_s": 4.9,
-        "total_s": 8.2,
+        "threshold_s": 5,
+        "create_s": 1.2,
+        "total_s": 3.1,
         "passed": true,
         "error": null,
         "kernel": "firecracker:6.1.155",
@@ -102,32 +168,99 @@
       },
       {
         "name": "alpine-3.21",
-        "threshold_s": 18,
-        "create_s": 4.7,
-        "total_s": 13.8,
+        "threshold_s": 5,
+        "create_s": 1.1,
+        "total_s": 2.6,
         "passed": true,
         "error": null,
         "kernel": "firecracker:6.1.155",
-        "attempt": 6
+        "attempt": 1
       },
       {
         "name": "debian-bookworm",
-        "threshold_s": 15,
-        "create_s": 5.9,
-        "total_s": 15.6,
+        "threshold_s": 5,
+        "create_s": 2.4,
+        "total_s": 4.0,
+        "passed": true,
+        "error": null,
+        "kernel": "firecracker:6.1.155",
+        "attempt": 1
+      },
+      {
+        "name": "archlinux",
+        "threshold_s": 5,
+        "create_s": 1.7,
+        "total_s": 4.7,
+        "passed": true,
+        "error": null,
+        "kernel": "official:6.19.9",
+        "attempt": 3
+      }
+    ]
+  },
+  {
+    "tag": "loopmount-parallel",
+    "timestamp": "2026-05-05T21:01:25+00:00",
+    "kernel": "default",
+    "results": [
+      {
+        "name": "ubuntu-24.04",
+        "threshold_s": 5,
+        "create_s": 3.0,
+        "total_s": 5.7,
         "passed": false,
-        "error": "SSH unavailable after 15.6s (threshold 15s)",
+        "error": null,
+        "kernel": "firecracker:6.1.155",
+        "attempt": 1
+      },
+      {
+        "name": "ubuntu-24.04-minimal",
+        "threshold_s": 5,
+        "create_s": 2.6,
+        "total_s": 4.5,
+        "passed": true,
+        "error": null,
+        "kernel": "firecracker:6.1.155",
+        "attempt": 1
+      },
+      {
+        "name": "ubuntu-fc",
+        "threshold_s": 5,
+        "create_s": 1.9,
+        "total_s": 3.5,
+        "passed": true,
+        "error": null,
+        "kernel": "firecracker:6.1.155",
+        "attempt": 1
+      },
+      {
+        "name": "alpine-3.21",
+        "threshold_s": 5,
+        "create_s": 1.8,
+        "total_s": 4.2,
+        "passed": true,
+        "error": null,
+        "kernel": "firecracker:6.1.155",
+        "attempt": 2
+      },
+      {
+        "name": "debian-bookworm",
+        "threshold_s": 5,
+        "create_s": 3.4,
+        "total_s": 5.1,
+        "passed": false,
+        "error": "SSH unavailable after 5.1s (threshold 5s)",
         "kernel": "firecracker:6.1.155"
       },
       {
         "name": "archlinux",
-        "threshold_s": 30,
-        "create_s": 5.8,
-        "total_s": 23.2,
-        "passed": true,
+        "threshold_s": 5,
+        "create_s": 2.2,
+        "total_s": 5.3,
+        "passed": false,
         "error": null,
         "kernel": "official:6.19.9",
-        "attempt": 12
+        "attempt": 3
       }
     ]
   }

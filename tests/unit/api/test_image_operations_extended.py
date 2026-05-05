@@ -169,7 +169,7 @@ class TestImageOperationPull:
         deps["image_svc"].download_image.return_value = mock_download_path
         deps[
             "image_svc"
-        ].extract_downloaded_image.return_value = mock_extracted_path
+        ].extract_image.return_value = mock_extracted_path
 
         new_item = _make_image(
             os_slug="ubuntu-24.04", image_id="new-" + "x" * 60
@@ -190,7 +190,7 @@ class TestImageOperationPull:
         deps["image_svc"].download_image.return_value = mock_download_path
         deps[
             "image_svc"
-        ].extract_downloaded_image.return_value = mock_extracted_path
+        ].extract_image.return_value = mock_extracted_path
 
         new_item = _make_image(os_slug="ubuntu-24.04")
         deps["image_svc"].optimize_image.return_value = new_item
@@ -201,7 +201,7 @@ class TestImageOperationPull:
         assert result.status == "success"
         assert result.code == "image.acquired"
         deps["image_svc"].download_image.assert_called_once()
-        deps["image_svc"].extract_downloaded_image.assert_called_once()
+        deps["image_svc"].extract_image.assert_called_once()
         deps["image_svc"].optimize_image.assert_called_once()
 
     def test_pull_calls_progress_callback(self, mocker):
@@ -209,7 +209,7 @@ class TestImageOperationPull:
 
         on_progress = MagicMock()
         deps["image_svc"].download_image.return_value = Path("/tmp/dl.qcow2")
-        deps["image_svc"].extract_downloaded_image.return_value = Path(
+        deps["image_svc"].extract_image.return_value = Path(
             "/tmp/ext.ext4"
         )
         deps["image_svc"].optimize_image.return_value = _make_image()
@@ -227,7 +227,7 @@ class TestImageOperationPull:
 
         deps[
             "image_svc"
-        ].extract_downloaded_image.side_effect = RootPartitionDetectionError(
+        ].extract_image.side_effect = RootPartitionDetectionError(
             "no root partition"
         )
 
@@ -244,7 +244,7 @@ class TestImageOperationPull:
 
         deps[
             "image_svc"
-        ].extract_downloaded_image.side_effect = TieDetectedError(
+        ].extract_image.side_effect = TieDetectedError(
             "multiple partitions"
         )
 
@@ -262,7 +262,7 @@ class TestImageOperationPull:
         deps = _setup_pull_mocks(mocker, existing_image=existing, force=True)
 
         deps["image_svc"].download_image.return_value = Path("/tmp/dl.qcow2")
-        deps["image_svc"].extract_downloaded_image.return_value = Path(
+        deps["image_svc"].extract_image.return_value = Path(
             "/tmp/ext.ext4"
         )
         new_item = _make_image(
@@ -285,7 +285,7 @@ class TestImageOperationPull:
             default_firecracker=mock_firecracker,
         )
         deps["image_svc"].download_image.return_value = Path("/tmp/dl.qcow2")
-        deps["image_svc"].extract_downloaded_image.return_value = Path(
+        deps["image_svc"].extract_image.return_value = Path(
             "/tmp/ext.ext4"
         )
         deps["image_svc"].optimize_image.return_value = _make_image()
@@ -397,7 +397,7 @@ class TestImageOperationImport:
 
     def test_import_success(self, mocker):
         deps = self._setup_import_mocks(mocker)
-        deps["image_svc"].extract_import_image.return_value = Path(
+        deps["image_svc"].extract_image.return_value = Path(
             "/tmp/extracted.ext4"
         )
         new_item = _make_image(os_slug="custom-image")
@@ -410,7 +410,7 @@ class TestImageOperationImport:
         )
         assert result.status == "success"
         assert result.code == "image.imported"
-        deps["image_svc"].extract_import_image.assert_called_once()
+        deps["image_svc"].extract_image.assert_called_once()
         deps["image_svc"].optimize_image.assert_called_once()
 
     def test_import_extract_error(self, mocker):
@@ -419,7 +419,7 @@ class TestImageOperationImport:
 
         deps[
             "image_svc"
-        ].extract_import_image.side_effect = RootPartitionDetectionError(
+        ].extract_image.side_effect = RootPartitionDetectionError(
             "bad partition"
         )
 
@@ -440,7 +440,7 @@ class TestImageOperationImport:
         deps = self._setup_import_mocks(
             mocker, existing_image=existing, force=True
         )
-        deps["image_svc"].extract_import_image.return_value = Path(
+        deps["image_svc"].extract_image.return_value = Path(
             "/tmp/extracted.ext4"
         )
         new_item = _make_image(
@@ -460,7 +460,7 @@ class TestImageOperationImport:
 
     def test_import_calls_progress_callback(self, mocker):
         deps = self._setup_import_mocks(mocker)
-        deps["image_svc"].extract_import_image.return_value = Path(
+        deps["image_svc"].extract_image.return_value = Path(
             "/tmp/extracted.ext4"
         )
         deps["image_svc"].optimize_image.return_value = _make_image()
@@ -533,7 +533,7 @@ class TestImageOperationImport:
         deps = self._setup_import_mocks(
             mocker, existing_image=existing, force=True
         )
-        deps["image_svc"].extract_import_image.return_value = Path(
+        deps["image_svc"].extract_image.return_value = Path(
             "/tmp/extracted.ext4"
         )
         new_item = _make_image(
@@ -625,7 +625,7 @@ class TestImageOperationHelpersExtended:
             mocker, existing_image=None, default_firecracker=None
         )
         deps["image_svc"].download_image.return_value = Path("/tmp/dl.qcow2")
-        deps["image_svc"].extract_downloaded_image.return_value = Path(
+        deps["image_svc"].extract_image.return_value = Path(
             "/tmp/ext.ext4"
         )
         deps["image_svc"].optimize_image.return_value = _make_image()

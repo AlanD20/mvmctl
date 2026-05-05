@@ -230,6 +230,11 @@ def vm_create(
         "--no-console",
         help="Disable serial console",
     ),
+    boot_args: str | None = typer.Option(
+        None,
+        "--boot-args",
+        help="Kernel boot arguments (default: from constants.py)",
+    ),
     lsm_flags: str | None = typer.Option(
         None,
         "--lsm-flags",
@@ -287,6 +292,7 @@ def vm_create(
                 enable_metrics=enable_metrics,
                 firecracker_bin=firecracker_bin,
                 lsm_flags=lsm_flags,
+                boot_args=boot_args,
                 image=image,
                 kernel_id=kernel,
                 image_path=image_path,

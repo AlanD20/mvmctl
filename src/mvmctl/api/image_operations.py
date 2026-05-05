@@ -27,6 +27,7 @@ from mvmctl.exceptions import (
     TieDetectedError,
 )
 from mvmctl.models import ImageItem, ImageSpec
+from mvmctl.models.provisioner import ProvisionerType
 from mvmctl.models.result import BatchResult, OperationResult, ProgressEvent
 from mvmctl.utils.auditlog import AuditLog
 from mvmctl.utils.common import CacheUtils
@@ -133,13 +134,16 @@ class ImageOperation:
                         message="Extracting image...",
                     )
                 )
-            extracted_path = image_service.extract_downloaded_image(
+            provisioner_type = ImageOperation._resolve_image_provisioner()
+            logger.info("Preparing & optimizing image...")
+            extracted_path = image_service.extract_image(
                 download_path,
-                spec,
                 image_id,
                 resolved.output_dir,
-                resolved.partition,
-                resolved.disabled_detectors,
+                spec.format,
+                partition=resolved.partition,
+                disabled_detectors=resolved.disabled_detectors,
+                provisioner_type=provisioner_type,
             )
             if on_progress is not None:
                 on_progress(
@@ -155,6 +159,7 @@ class ImageOperation:
                 spec,
                 timestamp,
                 resolved.skip_optimization,
+                provisioner_type=provisioner_type,
             )
             if on_progress is not None:
                 on_progress(
@@ -277,13 +282,15 @@ class ImageOperation:
                         message="Extracting image...",
                     )
                 )
-            extracted_path = image_service.extract_import_image(
+            provisioner_type = ImageOperation._resolve_image_provisioner()
+            extracted_path = image_service.extract_image(
                 resolved.source_path,
                 image_id,
                 resolved.output_dir,
                 resolved.format,
-                resolved.partition,
-                resolved.disabled_detectors,
+                partition=resolved.partition,
+                disabled_detectors=resolved.disabled_detectors,
+                provisioner_type=provisioner_type,
             )
             if on_progress is not None:
                 on_progress(
@@ -299,6 +306,7 @@ class ImageOperation:
                 spec,
                 timestamp,
                 resolved.skip_optimization,
+                provisioner_type=provisioner_type,
             )
             if on_progress is not None:
                 on_progress(
@@ -608,6 +616,25 @@ class ImageOperation:
             code="image.warmed",
             item=warmed_paths,
         )
+
+    @staticmethod
+    def _resolve_image_provisioner() -> ProvisionerType:
+        """Resolve which provisioner backend to use for image optimization.
+
+        Checks the ``guestfs_enabled`` setting. Returns LOOP_MOUNT by default.
+        """
+        from mvmctl.core.config._service import SettingsService
+
+        db = Database()
+        try:
+            guestfs_enabled = SettingsService.resolve(
+                db, "settings", "guestfs_enabled"
+            )
+            if guestfs_enabled:
+                return ProvisionerType.GUESTFS
+        except Exception:
+            pass
+        return ProvisionerType.LOOP_MOUNT
 
     @staticmethod
     def find_existing_image(

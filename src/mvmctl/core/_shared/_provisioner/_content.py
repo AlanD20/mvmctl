@@ -338,3 +338,239 @@ class ProvisionerContent:
         return [
             ResizeOp(action="grow", bytes=target_size_bytes),
         ]
+
+    @classmethod
+    def build_shrink_ops(cls, limit_bytes: int = 0) -> list[Operation]:
+        """Generate operation for filesystem shrink to minimum size."""
+        return [
+            ResizeOp(action="shrink", bytes=limit_bytes),
+        ]
+
+    @classmethod
+    def build_deblob_ops(cls, os_type: str) -> list[Operation]:
+        """Generate OS cache cleanup and fstab fix operations.
+
+        Args:
+            os_type: Detected OS identifier (e.g. ``"ubuntu"``, ``"alpine"``,
+                ``"arch"``, ``"debian"``, ``"fedora"``).
+
+        Returns:
+            List of FileOp/ChrootOp operations for OS cleanup.
+
+        """
+        ops: list[Operation] = []
+
+        # ── Common cleanup (all distros) ──────────────────────────────
+        ops.append(
+            ChrootOp("rm -rf /var/log/* /tmp/* /var/tmp/* 2>/dev/null || true")
+        )
+        ops.append(
+            ChrootOp(
+                "rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/* "
+                "2>/dev/null || true"
+            )
+        )
+        ops.append(
+            ChrootOp("find /var/log -type f -delete 2>/dev/null || true")
+        )
+
+        # ── MicroVM boot optimizations (systemd) ──────────────────────────
+        ops.append(
+            ChrootOp(
+                "# Mask non-essential systemd services for faster microVM boot\n"
+                "if command -v systemctl >/dev/null 2>&1; then\n"
+                "  for svc in \\\n"
+                "    systemd-timesyncd.service \\\n"
+                "    systemd-resolved.service \\\n"
+                "    systemd-time-wait-sync.service \\\n"
+                "    systemd-firstboot.service \\\n"
+                "    ldconfig.service \\\n"
+                "    modprobe@drm.service \\\n"
+                "    modprobe@efi_pstore.service \\\n"
+                "    sys-kernel-debug.mount \\\n"
+                "    systemd-boot-update.service; do\n"
+                '    ln -sf /dev/null "/etc/systemd/system/$svc" 2>/dev/null || true\n'
+                "  done\n"
+                "fi"
+            )
+        )
+
+        # ── OS-specific cache cleanup ─────────────────────────────────
+        os_lower = os_type.lower()
+        if os_lower in ("ubuntu", "debian"):
+            ops.append(ChrootOp("apt-get clean 2>/dev/null || true"))
+            ops.append(
+                ChrootOp(
+                    "rm -rf /var/cache/apt/archives/*.deb 2>/dev/null || true"
+                )
+            )
+            ops.append(
+                ChrootOp("rm -rf /var/cache/debconf/* 2>/dev/null || true")
+            )
+            # MicroVM boot optimizations
+            ops.append(
+                ChrootOp(
+                    "# Mask unnecessary timer services for microVM\n"
+                    "systemctl mask e2scrub_all.timer "
+                    "e2scrub_reap.service "
+                    "apt-daily.timer "
+                    "apt-daily-upgrade.timer "
+                    "2>/dev/null || true"
+                )
+            )
+        elif os_lower in ("alpine",):
+            ops.append(ChrootOp("apk cache clean 2>/dev/null || true"))
+            ops.append(ChrootOp("rm -rf /var/cache/apk/* 2>/dev/null || true"))
+            ops.append(
+                ChrootOp(
+                    "grep -qxF 'denyinterfaces eth0' /etc/dhcpcd.conf "
+                    "2>/dev/null || echo 'denyinterfaces eth0' >> /etc/dhcpcd.conf"
+                )
+            )
+            # MicroVM boot optimizations: pre-enable SSH
+            ops.append(
+                ChrootOp(
+                    "# Pre-enable SSH daemon for OpenRC\n"
+                    "rc-update add sshd default 2>/dev/null || "
+                    "rc-update add ssh default 2>/dev/null || true"
+                )
+            )
+            # Enable parallel OpenRC service startup (handle both commented and uncommented)
+            ops.append(
+                ChrootOp(
+                    "# Enable parallel service startup (microVM optimisation)\n"
+                    # Remove any existing rc_parallel line (commented or not), then append new
+                    "sed -i '/^rc_parallel=/d; /^#rc_parallel=/d' /etc/rc.conf 2>/dev/null; "
+                    "echo 'rc_parallel=\"YES\"' >> /etc/rc.conf"
+                )
+            )
+            # Disable cloud-init services (not needed in microVM)
+            ops.append(
+                ChrootOp(
+                    "# Disable cloud-init services for faster boot\n"
+                    "rc-update del cloud-init default 2>/dev/null || true; "
+                    "rc-update del cloud-config default 2>/dev/null || true; "
+                    "rc-update del cloud-final default 2>/dev/null || true; "
+                    "rc-update del cloud-init-hotplugd default 2>/dev/null || true; "
+                    "rc-update del cloud-init ssh 2>/dev/null || true"
+                )
+            )
+            # Disable chronyd (time sync not needed, kvm-clock handles it)
+            ops.append(
+                ChrootOp("rc-update del chronyd default 2>/dev/null || true")
+            )
+            # Disable serial getty (ttyS0) to save boot time
+            ops.append(
+                ChrootOp(
+                    "# Disable serial getty on ttyS0\n"
+                    "sed -i '/ttyS0/s/^/#/' /etc/inittab 2>/dev/null || true"
+                )
+            )
+        elif os_lower in ("arch", "archlinux", "manjaro"):
+            ops.append(ChrootOp("pacman -Sc --noconfirm 2>/dev/null || true"))
+            ops.append(
+                ChrootOp("rm -rf /var/cache/pacman/pkg/* 2>/dev/null || true")
+            )
+            # MicroVM boot optimizations: pre-initialize pacman keyring
+            # (saves ~3.7s on every boot)
+            ops.append(ChrootOp("pacman-key --init 2>/dev/null || true"))
+            ops.append(
+                ChrootOp("pacman-key --populate archlinux 2>/dev/null || true")
+            )
+            # Pre-create systemd-firstboot configs to skip firstboot prompts
+            # (saves ~700ms on first boot)
+            ops.append(
+                ChrootOp(
+                    "echo 'mvm' > /etc/hostname 2>/dev/null || true; "
+                    "echo 'LANG=en_US.UTF-8' > /etc/locale.conf 2>/dev/null || true; "
+                    "echo 'KEYMAP=us' > /etc/vconsole.conf 2>/dev/null || true"
+                )
+            )
+            # Mask pacman-init.service (still runs on every boot even with pre-initialized keyring)
+            # (saves ~2s on every boot)
+            ops.append(
+                ChrootOp(
+                    "ln -sf /dev/null "
+                    "/etc/systemd/system/pacman-init.service 2>/dev/null || true"
+                )
+            )
+            # Mask systemd-firstboot.service (still runs on first boot even with config files)
+            # (saves ~700ms on first boot)
+            ops.append(
+                ChrootOp(
+                    "ln -sf /dev/null "
+                    "/etc/systemd/system/systemd-firstboot.service 2>/dev/null || true"
+                )
+            )
+            # Btrfs boot optimizations for single-device microVM
+            ops.append(
+                ChrootOp(
+                    "# Remove btrfs mkinitcpio hook (not needed for single-device btrfs)\n"
+                    "if [ -f /etc/mkinitcpio.conf ]; then\n"
+                    "  sed -i 's/ btrfs / /g' /etc/mkinitcpio.conf 2>/dev/null || true\n"
+                    "fi"
+                )
+            )
+            ops.append(
+                ChrootOp(
+                    "# Consolidate btrfs metadata chunks\n"
+                    "command -v btrfs >/dev/null 2>&1 && "
+                    "btrfs balance start -dusage=0 / "
+                    "2>/dev/null || true"
+                )
+            )
+            # Mask systemd-udev-settle (not needed with known hardware)
+            ops.append(
+                ChrootOp(
+                    "ln -sf /dev/null "
+                    "/etc/systemd/system/systemd-udev-settle.service "
+                    "2>/dev/null || true"
+                )
+            )
+        elif os_lower in ("fedora", "centos", "rhel", "rocky", "almalinux"):
+            ops.append(
+                ChrootOp(
+                    "dnf clean all 2>/dev/null || yum clean all 2>/dev/null || true"
+                )
+            )
+            ops.append(
+                ChrootOp(
+                    "rm -rf /var/cache/dnf/* /var/cache/yum/* 2>/dev/null || true"
+                )
+            )
+        else:
+            # Generic: clear all cache dirs
+            ops.append(ChrootOp("rm -rf /var/cache/* 2>/dev/null || true"))
+
+        ops.append(ChrootOp("rm -rf /var/lib/apt/lists/* 2>/dev/null || true"))
+
+        return ops
+
+    @classmethod
+    def build_fix_fstab_ops(cls) -> list[Operation]:
+        """Generate operation to fix /etc/fstab for Firecracker (PARTUUID → /dev/vda).
+
+        For superfloppy images (raw ext4/btrfs without partition table),
+        systemd must not wait for non-existent partitions like /boot/efi
+        or /dev/vda1 — that causes a 90-second timeout and emergency mode.
+        """
+        return [
+            ChrootOp(
+                "if [ -f /etc/fstab ]; then "
+                # Replace PARTUUID root entries with /dev/vda (superfloppy safe)
+                "sed -i 's/^PARTUUID=[^[:space:]]*/\\/dev\\/vda/' /etc/fstab; "
+                # Replace UUID root entries with /dev/vda
+                "sed -i 's/^UUID=[^[:space:]]*/\\/dev\\/vda/' /etc/fstab; "
+                # Add noatime to root mount options for reduced metadata writes
+                "sed -i '/^\\/dev\\/vda\\s/ s/defaults/noatime,defaults/' /etc/fstab; "
+                # Comment out any remaining PARTUUID lines (non-root partitions)
+                "sed -i '/^PARTUUID=/s/^/#/' /etc/fstab; "
+                # Comment out /boot/efi mount (EFI partition doesn't exist)
+                "sed -i '/\\/boot\\/efi/s/^/#/' /etc/fstab; "
+                # Comment out swap entries (swap partition doesn't exist)
+                "sed -i '/ swap /s/^/#/' /etc/fstab; "
+                # Comment out any /dev/vda1..N references (partitions don't exist)
+                "sed -i '/\\/dev\\/vda[0-9]/s/^/#/' /etc/fstab; "
+                "fi"
+            ),
+        ]

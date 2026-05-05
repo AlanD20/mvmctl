@@ -43,7 +43,7 @@ class TestVMCreateAndList:
         # Mock GuestfsProvisioner.run to avoid real libguestfs
         provisioner_mock = MagicMock()
         monkeypatch.setattr(
-            "mvmctl.api.vm_operations.Provisioner",
+            "mvmctl.api.vm_operations.VMProvisioner",
             lambda *args, **kwargs: provisioner_mock,
         )
         return {
@@ -185,7 +185,7 @@ class TestVMRemove:
 
         provisioner_mock = MagicMock()
         monkeypatch.setattr(
-            "mvmctl.api.vm_operations.Provisioner",
+            "mvmctl.api.vm_operations.VMProvisioner",
             lambda *args, **kwargs: provisioner_mock,
         )
         return {
@@ -270,7 +270,7 @@ class TestVMStatusFiltering:
 
         provisioner_mock = MagicMock()
         monkeypatch.setattr(
-            "mvmctl.api.vm_operations.Provisioner",
+            "mvmctl.api.vm_operations.VMProvisioner",
             lambda *args, **kwargs: provisioner_mock,
         )
         provisioner_mock.resize.return_value = provisioner_mock
@@ -351,7 +351,7 @@ class TestVMSnapshotWorkflow:
 
         provisioner_mock = MagicMock()
         monkeypatch.setattr(
-            "mvmctl.api.vm_operations.Provisioner",
+            "mvmctl.api.vm_operations.VMProvisioner",
             lambda *args, **kwargs: provisioner_mock,
         )
         provisioner_mock.resize.return_value = provisioner_mock
@@ -440,7 +440,7 @@ class TestVMInspect:
 
         provisioner_mock = MagicMock()
         monkeypatch.setattr(
-            "mvmctl.api.vm_operations.Provisioner",
+            "mvmctl.api.vm_operations.VMProvisioner",
             lambda *args, **kwargs: provisioner_mock,
         )
         provisioner_mock.resize.return_value = provisioner_mock
@@ -539,7 +539,7 @@ class TestVMCreateExplicit:
 
         provisioner_mock = MagicMock()
         monkeypatch.setattr(
-            "mvmctl.api.vm_operations.Provisioner",
+            "mvmctl.api.vm_operations.VMProvisioner",
             lambda *args, **kwargs: provisioner_mock,
         )
         provisioner_mock.resize.return_value = provisioner_mock
@@ -768,7 +768,7 @@ class TestVMRemoveForce:
 
         provisioner_mock = MagicMock()
         monkeypatch.setattr(
-            "mvmctl.api.vm_operations.Provisioner",
+            "mvmctl.api.vm_operations.VMProvisioner",
             lambda *args, **kwargs: provisioner_mock,
         )
         provisioner_mock.resize.return_value = provisioner_mock

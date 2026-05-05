@@ -39,7 +39,7 @@ def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     provisioner_mock.disable_cloud_init.return_value = provisioner_mock
     provisioner_mock.run.return_value = None
     monkeypatch.setattr(
-        "mvmctl.api.vm_operations.Provisioner",
+        "mvmctl.api.vm_operations.VMProvisioner",
         lambda *args, **kwargs: provisioner_mock,
     )
 

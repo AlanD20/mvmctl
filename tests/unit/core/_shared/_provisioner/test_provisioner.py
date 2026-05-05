@@ -7,11 +7,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mvmctl.core._shared._provisioner._provisioner import (
-    Provisioner,
+from mvmctl.core._shared._provisioner._backend import (
     _GuestfsBackend,
     _LoopMountBackend,
 )
+from mvmctl.core.vm._provisioner import VMProvisioner
 from mvmctl.models.provisioner import ProvisionerType
 
 
@@ -157,37 +157,46 @@ class TestGuestfsBackend:
 
 
 class TestProvisioner:
-    """Tests for Provisioner — backend selection and dispatch."""
+    """Tests for VMProvisioner — backend selection and dispatch."""
 
-    def test_loop_mount_backend_selection(self):
-        """Provisioner selects _LoopMountBackend when type is LOOP_MOUNT."""
-        p = Provisioner(
+    def test_loop_mount_selection(self):
+        """VMProvisioner selects _LoopMountBackend when type is LOOP_MOUNT."""
+        p = VMProvisioner(
             Path("/fake/rootfs.ext4"),
             provisioner_type=ProvisionerType.LOOP_MOUNT,
             fs_type="ext4",
         )
         assert isinstance(p._backend, _LoopMountBackend)
 
+    @patch(
+        "mvmctl.core._shared._provisioner._backend.ProvisionerBackend."
+        "_ensure_guestfs_appliance"
+    )
     @patch("mvmctl.core._shared._guestfs.GuestfsProvisioner")
-    def test_guestfs_backend_selection(self, _MockGP):
-        """Provisioner selects _GuestfsBackend when type is GUESTFS."""
-        p = Provisioner(
+    def test_guestfs_backend_selection(
+        self, _MockGP, _MockAppliance
+    ):
+        """VMProvisioner selects _GuestfsBackend when type is GUESTFS."""
+        p = VMProvisioner(
             Path("/fake/rootfs.ext4"),
             provisioner_type=ProvisionerType.GUESTFS,
+            fs_type="ext4",
         )
         assert isinstance(p._backend, _GuestfsBackend)
+        _MockAppliance.assert_called_once()
 
     def test_unknown_type_raises_value_error(self):
-        """Provisioner raises ValueError for unknown provisioner type."""
+        """VMProvisioner raises ValueError for unknown provisioner type."""
         with pytest.raises(ValueError, match="Unknown provisioner type"):
-            Provisioner(
+            VMProvisioner(
                 Path("/fake/rootfs.ext4"),
                 provisioner_type="unknown",  # type: ignore[arg-type]
+                fs_type="ext4",
             )
 
     def test_all_builder_methods_delegate(self):
-        """All builder methods on Provisioner delegate to the backend."""
-        p = Provisioner(
+        """All builder methods on VMProvisioner delegate to the backend."""
+        p = VMProvisioner(
             Path("/fake/rootfs.ext4"),
             provisioner_type=ProvisionerType.LOOP_MOUNT,
             fs_type="ext4",

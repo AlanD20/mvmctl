@@ -18,7 +18,7 @@ from mvmctl.exceptions import (
     LoopMountError,
     LoopMountTimeoutError,
 )
-from mvmctl.utils.common import CacheUtils
+from mvmctl.utils.common import CacheUtils, is_debug_mode
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +88,8 @@ class LoopMountManager:
         }
         if fs_type:
             payload["fs_type"] = fs_type
+        if is_debug_mode():
+            payload["debug"] = True
         return payload
 
     # ------------------------------------------------------------------
@@ -166,12 +168,20 @@ class LoopMountManager:
 
         if proc.returncode != 0:
             error_msg = LoopMountManager._extract_error(proc)
+            logger.debug(
+                "Loop-mount binary exited with code %d: %s (cmd=%s, image=%s)",
+                proc.returncode,
+                error_msg,
+                cmd[0],
+                image_path,
+            )
             raise LoopMountError(f"Loop-mount binary failed: {error_msg}")
 
         try:
-            parsed: Any = json.loads(
-                proc.stdout.decode("utf-8", errors="replace")
-            )
+            raw_stdout: str | bytes = proc.stdout
+            if isinstance(raw_stdout, bytes):
+                raw_stdout = raw_stdout.decode("utf-8", errors="replace")
+            parsed: Any = json.loads(raw_stdout)
         except (json.JSONDecodeError, ValueError) as e:
             raise LoopMountError(f"Failed to parse loop-mount response: {e}")
 
@@ -193,6 +203,102 @@ class LoopMountManager:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # OS detection
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def detect_os(
+        image_path: str,
+        fs_type: str | None = None,
+        timeout: int = LOOP_MOUNT_TIMEOUT,
+    ) -> str:
+        """
+        Detect the OS from a root filesystem image using the loop-mount binary.
+
+        Args:
+            image_path: Path to the root filesystem image.
+            fs_type: Filesystem type hint (auto-detected if not provided).
+            timeout: Maximum time in seconds.
+
+        Returns:
+            OS type string (e.g., ``"ubuntu"``, ``"debian"``, ``"alpine"``,
+            ``"arch"``).
+
+        Raises:
+            LoopMountError: If binary fails or response is invalid.
+            LoopMountTimeoutError: If the binary does not complete within the
+                timeout.
+        """
+        binary = LoopMountManager._resolve_binary_path()
+        if binary is not None:
+            cmd = ["sudo", "-n", str(binary)]
+        else:
+            cmd = ["sudo", "-n", sys.executable, str(_DEV_PROCESS_PATH)]
+
+        payload: dict[str, object] = {
+            "image": image_path,
+            "action": "detect_os",
+        }
+        if fs_type:
+            payload["fs_type"] = fs_type
+
+        payload_bytes = json.dumps(payload).encode("utf-8")
+
+        logger.debug("Running OS detection: image=%s", image_path)
+
+        try:
+            proc = subprocess.run(
+                cmd,
+                input=payload_bytes,
+                capture_output=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            raise LoopMountTimeoutError(
+                f"OS detection timed out after {timeout}s for {image_path}"
+            )
+
+        if proc.returncode != 0:
+            error_msg = LoopMountManager._extract_error(proc)
+            logger.debug(
+                "OS detection via loop-mount binary exited with code %d: %s "
+                "(cmd=%s, image=%s)",
+                proc.returncode,
+                error_msg,
+                cmd[0],
+                image_path,
+            )
+            raise LoopMountError(f"OS detection failed: {error_msg}")
+
+        try:
+            raw_stdout: str | bytes = proc.stdout
+            if isinstance(raw_stdout, bytes):
+                raw_stdout = raw_stdout.decode("utf-8", errors="replace")
+            parsed: Any = json.loads(raw_stdout)
+        except (json.JSONDecodeError, ValueError) as e:
+            raise LoopMountError(f"Failed to parse OS detection response: {e}")
+
+        if not isinstance(parsed, dict):
+            raise LoopMountError(
+                f"OS detection response is not a dict: {type(parsed).__name__}"
+            )
+
+        status: object = parsed.get("status", "")
+        if status == "error":
+            raise LoopMountError(
+                f"Loop-mount OS detection error: {parsed.get('error', 'unknown')} "
+                f"(step: {parsed.get('step', 'unknown')})"
+            )
+
+        os_type_value: object = parsed.get("os_type")
+        if not isinstance(os_type_value, str):
+            raise LoopMountError(
+                "Invalid OS detection response: missing os_type"
+            )
+
+        return os_type_value
+
     @staticmethod
     def _extract_error(
         proc: subprocess.CompletedProcess[bytes],
@@ -201,9 +307,10 @@ class LoopMountManager:
         stderr_text = proc.stderr.decode("utf-8", errors="replace").strip()
         error_msg = stderr_text or f"Exit code {proc.returncode}"
         try:
-            err_result: Any = json.loads(
-                proc.stdout.decode("utf-8", errors="replace")
-            )
+            raw_stdout: str | bytes = proc.stdout
+            if isinstance(raw_stdout, bytes):
+                raw_stdout = raw_stdout.decode("utf-8", errors="replace")
+            err_result: Any = json.loads(raw_stdout)
             if (
                 isinstance(err_result, dict)
                 and err_result.get("status") == "error"

@@ -19,7 +19,6 @@ import pytest
 
 from mvmctl.api import ImageImportInput, ImageInput, ImageOperation
 from mvmctl.exceptions import (
-    GuestfsNotAvailableError,
     ImageError,
     ImageNotFoundError,
 )
@@ -94,14 +93,6 @@ def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     popen_mock = SmartPopenMock()
     monkeypatch.setattr("subprocess.run", sub_mock)
     monkeypatch.setattr("subprocess.Popen", popen_mock)
-
-    def _raise_guestfs(*args: object, **kwargs: object) -> None:
-        raise GuestfsNotAvailableError("mock")
-
-    monkeypatch.setattr(
-        "mvmctl.core.image._service.OptimizedGuestfs",
-        _raise_guestfs,
-    )
 
     return {"subprocess": sub_mock, "popen": popen_mock}
 

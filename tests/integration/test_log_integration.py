@@ -40,7 +40,7 @@ def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
 
     provisioner_mock = MagicMock()
     monkeypatch.setattr(
-        "mvmctl.api.vm_operations.Provisioner",
+        "mvmctl.api.vm_operations.VMProvisioner",
         lambda *args, **kwargs: provisioner_mock,
     )
     return {

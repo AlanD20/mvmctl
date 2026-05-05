@@ -37,22 +37,31 @@ def service(repo: ImageRepository) -> ImageService:
 
 
 # =========================================================================
-# convert_qcow2_to_raw
+# _convert_to_raw
 # =========================================================================
 
 
-class TestConvertQcow2ToRaw:
-    def test_success(self, service: ImageService, tmp_path: Path) -> None:
+class TestConvertToRaw:
+    @pytest.mark.parametrize(
+        ("fmt", "format_flag"),
+        [
+            ("qcow2", "qcow2"),
+            ("vhd", "vpc"),
+            ("vhdx", "vhdx"),
+        ],
+    )
+    def test_success(
+        self, service: ImageService, tmp_path: Path, fmt: str, format_flag: str
+    ) -> None:
         with patch.object(subprocess, "run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
-            qcow2 = tmp_path / "image.qcow2"
+            src = tmp_path / f"image.{fmt}"
             raw = tmp_path / "image.raw"
-            result = service.convert_qcow2_to_raw(qcow2, raw)
-            assert result is True
+            ImageService._convert_to_raw(src, raw, format_flag)
             mock_run.assert_called_once()
             cmd = mock_run.call_args[0][0]
             assert cmd[0] == "qemu-img"
-            assert "-f" in cmd and "qcow2" in cmd
+            assert "-f" in cmd and format_flag in cmd
             assert "-O" in cmd and "raw" in cmd
 
     def test_called_process_error(
@@ -63,8 +72,8 @@ class TestConvertQcow2ToRaw:
                 1, "qemu-img", stderr="error"
             )
             with pytest.raises(ImageError, match="qemu-img conversion failed"):
-                service.convert_qcow2_to_raw(
-                    tmp_path / "image.qcow2", tmp_path / "image.raw"
+                ImageService._convert_to_raw(
+                    tmp_path / "image.qcow2", tmp_path / "image.raw", "qcow2"
                 )
 
     def test_file_not_found(
@@ -73,8 +82,8 @@ class TestConvertQcow2ToRaw:
         with patch.object(subprocess, "run") as mock_run:
             mock_run.side_effect = FileNotFoundError("qemu-img not found")
             with pytest.raises(ImageError, match="qemu-img not found"):
-                service.convert_qcow2_to_raw(
-                    tmp_path / "image.qcow2", tmp_path / "image.raw"
+                ImageService._convert_to_raw(
+                    tmp_path / "image.qcow2", tmp_path / "image.raw", "qcow2"
                 )
 
     def test_uses_parallel_coroutines(
@@ -84,57 +93,11 @@ class TestConvertQcow2ToRaw:
             mock_run.return_value = MagicMock(returncode=0)
             qcow2 = tmp_path / "image.qcow2"
             raw = tmp_path / "image.raw"
-            service.convert_qcow2_to_raw(qcow2, raw)
+            ImageService._convert_to_raw(qcow2, raw, "qcow2")
             cmd = mock_run.call_args[0][0]
             assert "-m" in cmd
             m_idx = cmd.index("-m")
             assert cmd[m_idx + 1] == "16"
-
-
-# =========================================================================
-# convert_vhd_to_raw
-# =========================================================================
-
-
-class TestConvertVhdToRaw:
-    def test_success(self, service: ImageService, tmp_path: Path) -> None:
-        with patch.object(subprocess, "run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            vhd = tmp_path / "image.vhd"
-            raw = tmp_path / "image.raw"
-            result = service.convert_vhd_to_raw(vhd, raw)
-            assert result is True
-            cmd = mock_run.call_args[0][0]
-            assert (
-                "-f" in cmd and "vpc" in cmd
-            )  # VHD format is "vpc" for qemu-img
-
-    def test_failure(self, service: ImageService, tmp_path: Path) -> None:
-        with patch.object(subprocess, "run") as mock_run:
-            mock_run.side_effect = subprocess.CalledProcessError(
-                1, "qemu-img", stderr="error"
-            )
-            with pytest.raises(ImageError):
-                service.convert_vhd_to_raw(
-                    tmp_path / "image.vhd", tmp_path / "image.raw"
-                )
-
-
-# =========================================================================
-# convert_vhdx_to_raw
-# =========================================================================
-
-
-class TestConvertVhdxToRaw:
-    def test_success(self, service: ImageService, tmp_path: Path) -> None:
-        with patch.object(subprocess, "run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            vhdx = tmp_path / "image.vhdx"
-            raw = tmp_path / "image.raw"
-            result = service.convert_vhdx_to_raw(vhdx, raw)
-            assert result is True
-            cmd = mock_run.call_args[0][0]
-            assert "-f" in cmd and "vhdx" in cmd
 
 
 # =========================================================================
