@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from mvmctl.core.logs._service import LogService
-from mvmctl.exceptions import ConfigError, MVMError, VMNotFoundError
+from mvmctl.exceptions import ConfigError, LogsError, MVMError, VMNotFoundError
 
 
 class TestGetLogPath:
@@ -53,7 +53,7 @@ class TestGetLogPath:
         vm_dir.mkdir()
 
         with patch_get_vm_dir(vm_dir):
-            with pytest.raises(ConfigError, match="Unknown log type"):
+            with pytest.raises(LogsError, match="Unknown log type"):
                 LogService.get_log_path(
                     "a" * 64,
                     "unknown",

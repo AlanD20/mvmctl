@@ -617,9 +617,9 @@ class ProvisionerBackend:
         if not appliance_dir.is_dir() or not required.issubset(
             {p.name for p in appliance_dir.iterdir()}
         ):
-            from mvmctl.exceptions import MVMError
+            from mvmctl.exceptions import GuestfsError
 
-            raise MVMError(
+            raise GuestfsError(
                 "libguestfs appliance cache not found. Run:  mvm cache init"
             )
 

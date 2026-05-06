@@ -361,10 +361,20 @@ class TestVMOperationStateTransitions:
         mock_service.resume.assert_called_once()
 
     def test_reboot(self, mocker, mock_resolved):
-        """reboot() calls VMService.reboot()."""
-        mock_service, _ = self._setup_mocks(mocker, mock_resolved)
+        """reboot() stops VM controller and respawns firecracker."""
+        _, _ = self._setup_mocks(mocker, mock_resolved)
+        mock_vm = mock_resolved.vms[0]
+        mock_controller = mocker.MagicMock()
+        mocker.patch(
+            "mvmctl.api.vm_operations.VMController",
+            return_value=mock_controller,
+        )
+        mock_respawn = mocker.patch(
+            "mvmctl.api.vm_operations.VMOperation._respawn_firecracker"
+        )
         VMOperation.reboot(VMInput(identifiers=["test-vm"]))
-        mock_service.reboot.assert_called_once()
+        mock_controller.stop.assert_called_once_with(force=False)
+        mock_respawn.assert_called_once_with(mock_vm)
 
 
 class TestVMOperationSnapshot:

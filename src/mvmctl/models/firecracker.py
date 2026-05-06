@@ -63,3 +63,8 @@ class FirecrackerConfig:
     cloud_init_mode: CloudInitMode | None
     cloud_init_iso_path: Path | None
     cloud_init_nocloud_url: str | None
+
+    # Spawn behavior
+    relay_enabled: bool = False
+    relay_client_fd: int | None = None
+    snapshot_mode: bool = False

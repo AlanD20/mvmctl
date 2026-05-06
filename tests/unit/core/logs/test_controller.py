@@ -275,7 +275,7 @@ class TestLogController:
 
     def test_show_unknown_log_type(self, db: Database, tmp_path: Path) -> None:
         """show() raises ConfigError for unknown log type."""
-        from mvmctl.exceptions import ConfigError
+        from mvmctl.exceptions import LogsError
 
         _seed_vm(db, "testvm", "abc123", tmp_path)
         vm_dir = tmp_path / "abc123"
@@ -286,7 +286,7 @@ class TestLogController:
         ):
             repo = VMRepository(db)
             controller = LogController("testvm", repo)
-            with pytest.raises(ConfigError, match="Unknown log type"):
+            with pytest.raises(LogsError, match="Unknown log type"):
                 controller.show(
                     "unknown",
                     lines=50,

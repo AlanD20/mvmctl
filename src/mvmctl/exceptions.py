@@ -185,6 +185,10 @@ class ConsoleError(MVMError):
     """
 
 
+class LogsError(MVMError):
+    """Log file read or tail operation failure."""
+
+
 class PrivilegeError(HostError):
     """Insufficient privileges for an operation."""
 
@@ -299,6 +303,10 @@ class VMCreateError(MVMError):
     created before the failure (VM directory, TAP device, network IP,
     firewall rules, nocloud server, console relay).
     """
+
+
+class VMStateError(MVMError):
+    """Raised when a VM state transition is invalid."""
 
 
 class VMRequestError(MVMError):

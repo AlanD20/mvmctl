@@ -614,13 +614,29 @@ class ImageService:
                 results.append(cached_path)
                 continue
 
-            fmt = image.compressed_format or "zst"
-            suffix = f".{fmt}" if not fmt.startswith(".") else fmt
             images_dir = CacheUtils.get_images_dir()
-            compressed_path = images_dir / Path(image.path).with_suffix(suffix)
 
-            logger.info("Decompressing to cache: %s", cached_path.name)
-            self.decompress(compressed_path, cached_path, compressed_format=fmt)
+            if image.compressed_format is None:
+                # Image is not compressed — copy directly to warm cache
+                source_path = images_dir / image.path
+                logger.info(
+                    "Copying uncompressed image to cache: %s", cached_path.name
+                )
+                import shutil
+
+                shutil.copy2(str(source_path), str(cached_path))
+            else:
+                fmt = image.compressed_format
+                suffix = f".{fmt}" if not fmt.startswith(".") else fmt
+                compressed_path = images_dir / Path(image.path).with_suffix(
+                    suffix
+                )
+
+                logger.info("Decompressing to cache: %s", cached_path.name)
+                self.decompress(
+                    compressed_path, cached_path, compressed_format=fmt
+                )
+
             results.append(cached_path)
 
         return results

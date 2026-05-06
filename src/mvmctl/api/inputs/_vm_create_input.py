@@ -46,6 +46,7 @@ from mvmctl.models import (
     NetworkItem,
     ProvisionerType,
     SSHKeyItem,
+    VMInstanceItem,
 )
 from mvmctl.utils._disk import parse_disk_size
 from mvmctl.utils._validators import NetworkValidator, VMValidator
@@ -75,8 +76,6 @@ class VMCreateInput:
     image: str | None = None
     kernel_id: str | None = None
     binary_id: str | None = None
-    image_path: Path | None = None
-    kernel_path: Path | None = None
     disk_size: str | None = None
     requested_guest_ip: str | None = None
     skip_ci_network_config: bool = False
@@ -194,6 +193,163 @@ class VMCreateRequest:
     def _resolve_setting(self, category: str, key: str) -> Any:
         return SettingsService.resolve(self._db, category, key)
 
+    @classmethod
+    def from_vm(
+        cls,
+        vm: VMInstanceItem,
+        *,
+        db: Database | None = None,
+    ) -> ResolvedVMCreateInput:
+        """Build ResolvedVMCreateInput from an enriched VM's stored state for respawn.
+
+        Maps VM fields directly for stored values and resolves DB defaults
+        for everything else (filenames, UIDs, network config, etc.).
+        """
+        _db = db if db is not None else Database()
+
+        if vm.network is None:
+            raise NetworkNotFoundError(
+                f"Network not found for VM '{vm.name}' (ID: {vm.network_id})"
+            )
+        if vm.image is None:
+            raise ImageNotFoundError(
+                f"Image not found for VM '{vm.name}' (ID: {vm.image_id})"
+            )
+        if vm.kernel is None:
+            raise KernelNotFoundError(
+                f"Kernel not found for VM '{vm.name}' (ID: {vm.kernel_id})"
+            )
+        if vm.binary is None:
+            raise BinaryNotFoundError(
+                f"Binary not found for VM '{vm.name}' (ID: {vm.binary_id})"
+            )
+
+        ipv4_net = ipaddress.IPv4Network(vm.network.subnet, strict=False)
+
+        return ResolvedVMCreateInput(
+            name=vm.name,
+            vm_id=vm.id,
+            vm_dir=vm.vm_dir,
+            vcpu_count=vm.vcpu_count,
+            mem_size_mib=vm.mem_size_mib,
+            user=vm.ssh_user
+            if vm.ssh_user
+            else str(SettingsService.resolve(_db, "defaults.vm", "ssh_user")),
+            dns_server=str(
+                SettingsService.resolve(_db, "defaults.vm", "dns_server")
+            ),
+            root_uid=int(
+                SettingsService.resolve(_db, "defaults.vm", "root_uid")
+            ),
+            root_gid=int(
+                SettingsService.resolve(_db, "defaults.vm", "root_gid")
+            ),
+            user_uid=int(
+                SettingsService.resolve(_db, "defaults.vm", "user_uid")
+            ),
+            user_gid=int(
+                SettingsService.resolve(_db, "defaults.vm", "user_gid")
+            ),
+            guest_mac_prefix=str(
+                SettingsService.resolve(_db, "defaults.vm", "guest_mac_prefix")
+            ),
+            network=vm.network,
+            image=vm.image,
+            kernel=vm.kernel,
+            binary=vm.binary,
+            network_prefix_len=ipv4_net.prefixlen,
+            cloud_init_mode=CloudInitMode(vm.cloud_init_mode)
+            if vm.cloud_init_mode
+            else CloudInitMode.OFF,
+            skip_ci_network_config=False,
+            enable_pci=vm.enable_pci,
+            enable_console=vm.enable_console,
+            enable_logging=vm.enable_logging,
+            enable_metrics=vm.enable_metrics,
+            keep_cloud_init_iso=False,
+            skip_cleanup=False,
+            network_netmask=str(ipv4_net.netmask),
+            disk_size_bytes=vm.disk_size_mib * CONST_MEBIBYTE_BYTES,
+            disk_size_mib=vm.disk_size_mib,
+            lsm_flags=vm.lsm_flags
+            if vm.lsm_flags
+            else str(SettingsService.resolve(_db, "defaults.vm", "lsm_flags")),
+            log_level=str(
+                SettingsService.resolve(
+                    _db, "defaults.firecracker", "log_level"
+                )
+            ),
+            log_filename=str(
+                SettingsService.resolve(
+                    _db, "defaults.firecracker", "log_filename"
+                )
+            ),
+            serial_output_filename=str(
+                SettingsService.resolve(
+                    _db, "defaults.firecracker", "serial_output_filename"
+                )
+            ),
+            metrics_filename=str(
+                SettingsService.resolve(
+                    _db, "defaults.firecracker", "metrics_filename"
+                )
+            ),
+            api_socket_filename=str(
+                SettingsService.resolve(
+                    _db, "defaults.firecracker", "api_socket_filename"
+                )
+            ),
+            pid_filename=str(
+                SettingsService.resolve(
+                    _db, "defaults.firecracker", "pid_filename"
+                )
+            ),
+            config_filename=str(
+                SettingsService.resolve(
+                    _db, "defaults.firecracker", "config_filename"
+                )
+            ),
+            console_socket_filename=str(
+                SettingsService.resolve(
+                    _db, "defaults.firecracker", "console_socket_filename"
+                )
+            ),
+            console_pid_filename=str(
+                SettingsService.resolve(
+                    _db, "defaults.firecracker", "console_pid_filename"
+                )
+            ),
+            cloud_init_iso_name=str(
+                SettingsService.resolve(_db, "defaults.cloudinit", "iso_name")
+            ),
+            nocloud_port_range_start=int(
+                SettingsService.resolve(
+                    _db, "defaults.cloudinit", "nocloud_port_range_start"
+                )
+            ),
+            nocloud_port_range_end=int(
+                SettingsService.resolve(
+                    _db, "defaults.cloudinit", "nocloud_port_range_end"
+                )
+            ),
+            nocloud_max_port_retries=int(
+                SettingsService.resolve(
+                    _db, "defaults.cloudinit", "nocloud_max_port_retries"
+                )
+            ),
+            requested_guest_ip=vm.ipv4,
+            requested_guest_mac=vm.mac,
+            nocloud_net_port=vm.nocloud_net_port,
+            custom_user_data_path=None,
+            cloud_init_iso_path=None,
+            boot_args=vm.boot_args
+            if vm.boot_args
+            else str(SettingsService.resolve(_db, "defaults.vm", "boot_args")),
+            ssh_keys=[],
+            provisioner=ProvisionerType.LOOP_MOUNT,
+            extra_drives=[],
+        )
+
     def resolve(self) -> ResolvedVMCreateInput:
         """Resolve all inputs to explicit values."""
 
@@ -221,60 +377,6 @@ class VMCreateRequest:
 
         ci_mode_result = self._resolve_cloud_init_mode()
         provisioner = self._resolve_provisioner()
-
-        # Resolve firecracker defaults
-        log_level = str(
-            self._resolve_setting("defaults.firecracker", "log_level")
-        )
-        log_filename = str(
-            self._resolve_setting("defaults.firecracker", "log_filename")
-        )
-        serial_output_filename = str(
-            self._resolve_setting(
-                "defaults.firecracker", "serial_output_filename"
-            )
-        )
-        metrics_filename = str(
-            self._resolve_setting("defaults.firecracker", "metrics_filename")
-        )
-        api_socket_filename = str(
-            self._resolve_setting("defaults.firecracker", "api_socket_filename")
-        )
-        pid_filename = str(
-            self._resolve_setting("defaults.firecracker", "pid_filename")
-        )
-        config_filename = str(
-            self._resolve_setting("defaults.firecracker", "config_filename")
-        )
-        console_socket_filename = str(
-            self._resolve_setting(
-                "defaults.firecracker", "console_socket_filename"
-            )
-        )
-        console_pid_filename = str(
-            self._resolve_setting(
-                "defaults.firecracker", "console_pid_filename"
-            )
-        )
-        # Resolve cloud-init defaults
-        cloud_init_iso_name = str(
-            self._resolve_setting("defaults.cloudinit", "iso_name")
-        )
-        nocloud_port_range_start = int(
-            self._resolve_setting(
-                "defaults.cloudinit", "nocloud_port_range_start"
-            )
-        )
-        nocloud_port_range_end = int(
-            self._resolve_setting(
-                "defaults.cloudinit", "nocloud_port_range_end"
-            )
-        )
-        nocloud_max_port_retries = int(
-            self._resolve_setting(
-                "defaults.cloudinit", "nocloud_max_port_retries"
-            )
-        )
 
         self._result = ResolvedVMCreateInput(
             name=self._inputs.name,
@@ -341,21 +443,61 @@ class VMCreateRequest:
             if self._inputs.lsm_flags is not None
             else self._resolve_setting("defaults.vm", "lsm_flags"),
             extra_drives=[],
-            # Firecracker file/path defaults
-            log_level=log_level,
-            log_filename=log_filename,
-            serial_output_filename=serial_output_filename,
-            metrics_filename=metrics_filename,
-            api_socket_filename=api_socket_filename,
-            pid_filename=pid_filename,
-            config_filename=config_filename,
-            console_socket_filename=console_socket_filename,
-            console_pid_filename=console_pid_filename,
-            # Cloud-init defaults
-            cloud_init_iso_name=cloud_init_iso_name,
-            nocloud_port_range_start=nocloud_port_range_start,
-            nocloud_port_range_end=nocloud_port_range_end,
-            nocloud_max_port_retries=nocloud_max_port_retries,
+            log_level=str(
+                self._resolve_setting("defaults.firecracker", "log_level")
+            ),
+            log_filename=str(
+                self._resolve_setting("defaults.firecracker", "log_filename")
+            ),
+            serial_output_filename=str(
+                self._resolve_setting(
+                    "defaults.firecracker", "serial_output_filename"
+                )
+            ),
+            metrics_filename=str(
+                self._resolve_setting(
+                    "defaults.firecracker", "metrics_filename"
+                )
+            ),
+            api_socket_filename=str(
+                self._resolve_setting(
+                    "defaults.firecracker", "api_socket_filename"
+                )
+            ),
+            pid_filename=str(
+                self._resolve_setting("defaults.firecracker", "pid_filename")
+            ),
+            config_filename=str(
+                self._resolve_setting("defaults.firecracker", "config_filename")
+            ),
+            console_socket_filename=str(
+                self._resolve_setting(
+                    "defaults.firecracker", "console_socket_filename"
+                )
+            ),
+            console_pid_filename=str(
+                self._resolve_setting(
+                    "defaults.firecracker", "console_pid_filename"
+                )
+            ),
+            cloud_init_iso_name=str(
+                self._resolve_setting("defaults.cloudinit", "iso_name")
+            ),
+            nocloud_port_range_start=int(
+                self._resolve_setting(
+                    "defaults.cloudinit", "nocloud_port_range_start"
+                )
+            ),
+            nocloud_port_range_end=int(
+                self._resolve_setting(
+                    "defaults.cloudinit", "nocloud_port_range_end"
+                )
+            ),
+            nocloud_max_port_retries=int(
+                self._resolve_setting(
+                    "defaults.cloudinit", "nocloud_max_port_retries"
+                )
+            ),
         )
 
         # Validate
@@ -450,11 +592,6 @@ class VMCreateRequest:
     def _resolve_image(self) -> ImageItem:
         """Resolve image to path, ID, fs_uuid, and fs_type."""
 
-        if self._inputs.image_path is not None:
-            # TODO: need to identify fs uuid since this is non-imported image
-            # maybe enforce importing?
-            pass
-
         image = (
             self._image_resolver.get_default()
             if self._inputs.image is None
@@ -471,10 +608,6 @@ class VMCreateRequest:
 
     def _resolve_kernel(self) -> KernelItem:
         """Resolve kernel to path and ID."""
-
-        if self._inputs.kernel_path is not None:
-            # TODO: kernel is fine to be passed, but maybe enforce importing?
-            pass
 
         kernel = (
             self._kernel_resolver.get_default()

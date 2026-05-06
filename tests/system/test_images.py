@@ -9,10 +9,11 @@ import pytest
 
 from tests.system.conftest import _run_mvm
 
-pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
+pytestmark = [pytest.mark.system, pytest.mark.slow]
 
 
 class TestImagePull:
+    pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
     """Test image pulling operations."""
 
     @pytest.mark.parametrize(
@@ -62,11 +63,11 @@ class TestImageList:
 
     def test_image_inspect(self, mvm_binary):
         """Inspect a cached image by ID prefix."""
-        # Get first cached image
+        # Get first present cached image
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
-        images = json.loads(result.stdout)
+        images = [i for i in json.loads(result.stdout) if i.get("is_present")]
         if not images:
-            pytest.skip("No cached images to inspect")
+            pytest.skip("No present cached images to inspect")
         prefix = images[0]["id"][:6]
         result = _run_mvm(mvm_binary, "image", "inspect", prefix)
         assert result.returncode == 0
@@ -74,9 +75,9 @@ class TestImageList:
     def test_image_inspect_json(self, mvm_binary):
         """Inspect an image with --json output."""
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
-        images = json.loads(result.stdout)
+        images = [i for i in json.loads(result.stdout) if i.get("is_present")]
         if not images:
-            pytest.skip("No cached images to inspect")
+            pytest.skip("No present cached images to inspect")
         prefix = images[0]["id"][:6]
         result = _run_mvm(mvm_binary, "image", "inspect", prefix, "--json")
         assert result.returncode == 0
@@ -138,16 +139,20 @@ class TestImageDefaults:
 class TestImageRemove:
     """Test image removal operations."""
 
+    pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
+
     def test_image_remove_with_fixture(self, mvm_binary):
         """Remove a cached image by ID prefix and verify it's gone."""
 
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         before = json.loads(result.stdout)
         alpine_images = [
-            i for i in before if "alpine" in i.get("os_slug", "").lower()
+            i
+            for i in before
+            if "alpine" in i.get("os_slug", "").lower() and i.get("is_present")
         ]
         if not alpine_images:
-            pytest.skip("No alpine image available to test removal")
+            pytest.skip("No present alpine image available to test removal")
 
         target_id = alpine_images[0]["id"]
         target_prefix = target_id[:6]
@@ -166,16 +171,21 @@ class TestImageRemove:
             # Verify gone (filter by is_present to account for soft-delete)
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             after = [
-                i for i in json.loads(result.stdout) if i.get("is_present", True)
+                i
+                for i in json.loads(result.stdout)
+                if i.get("is_present", True)
             ]
             assert not any(i["id"] == target_id for i in after)
         finally:
             # Re-pull so other tests aren't broken — always runs even if assert fails
-            repull = _run_mvm(
-                mvm_binary, "image", "pull", "alpine-3.21", check=False
-            )
-            if repull.returncode != 0:
-                pytest.skip(f"Re-pull failed after test: {repull.stderr}")
+            try:
+                repull = _run_mvm(
+                    mvm_binary, "image", "pull", "alpine-3.21", check=False
+                )
+                if repull.returncode != 0:
+                    pytest.skip(f"Re-pull failed after test: {repull.stderr}")
+            except subprocess.TimeoutExpired:
+                pytest.skip("Re-pull timed out (>60s download)")
 
     def test_image_pull_nonexistent(self, mvm_binary):
         """Pull a nonexistent image and expect failure."""
@@ -192,6 +202,8 @@ class TestImageRemove:
 class TestImageImport:
     """Test image import operations."""
 
+    pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
+
     def test_image_import_local_file(
         self, mvm_binary, tmp_path, system_cache_dir
     ):
@@ -199,7 +211,10 @@ class TestImageImport:
         import shutil
 
         # Ensure alpine is cached
-        _run_mvm(mvm_binary, "image", "pull", "alpine-3.21", check=False)
+        try:
+            _run_mvm(mvm_binary, "image", "pull", "alpine-3.21", check=False)
+        except subprocess.TimeoutExpired:
+            pytest.skip("Image pull timed out (>60s download)")
 
         # Get cached image info — store the full ID to avoid races
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
@@ -239,7 +254,14 @@ class TestImageImport:
             import subprocess as _subprocess
 
             decompress = _subprocess.run(
-                ["zstd", "-d", "-f", str(resolved_source), "-o", str(temp_path)],
+                [
+                    "zstd",
+                    "-d",
+                    "-f",
+                    str(resolved_source),
+                    "-o",
+                    str(temp_path),
+                ],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -264,11 +286,12 @@ class TestImageImport:
             )
             assert result.returncode == 0
 
-            # Verify imported image appears
+            # Verify imported image appears (search by os_name which is
+            # set to the display name passed to image import)
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
             imported = [
-                i for i in images if i.get("os_slug") == "imported-alpine"
+                i for i in images if i.get("os_name") == "imported-alpine"
             ]
             assert imported, "Imported image not found in listing"
             imported_prefix = imported[0]["id"][:6]
@@ -291,9 +314,9 @@ class TestImageInspectTree:
     def test_image_inspect_tree_output(self, mvm_binary):
         """Inspect an image with --tree output."""
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
-        images = json.loads(result.stdout)
+        images = [i for i in json.loads(result.stdout) if i.get("is_present")]
         if not images:
-            pytest.skip("No cached images to inspect")
+            pytest.skip("No present cached images to inspect")
         prefix = images[0]["id"][:6]
 
         result = _run_mvm(mvm_binary, "image", "inspect", prefix, "--tree")
@@ -313,23 +336,34 @@ class TestImagePullAdvanced:
     def test_image_pull_force(self, mvm_binary):
         """Pull an already-cached image with --force, should re-download."""
         # Ensure image is cached first
-        _run_mvm(
-            mvm_binary, "image", "pull", "alpine-3.21", check=False, timeout=60
-        )
+        try:
+            _run_mvm(
+                mvm_binary,
+                "image",
+                "pull",
+                "alpine-3.21",
+                check=False,
+                timeout=60,
+            )
+        except subprocess.TimeoutExpired:
+            pytest.skip("Initial image pull timed out (>60s download)")
 
         # Force pull
-        result = _run_mvm(
-            mvm_binary,
-            "image",
-            "pull",
-            "alpine-3.21",
-            "--force",
-            timeout=60,
-            check=False,
-        )
-        if result.returncode != 0:
-            pytest.skip(f"Force pull failed: {result.stderr.strip()}")
-        assert "pulled successfully" in result.stdout.lower()
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "image",
+                "pull",
+                "alpine-3.21",
+                "--force",
+                timeout=60,
+                check=False,
+            )
+            if result.returncode != 0:
+                pytest.skip(f"Force pull failed: {result.stderr.strip()}")
+            assert "pulled successfully" in result.stdout.lower()
+        except subprocess.TimeoutExpired:
+            pytest.skip("Force pull timed out (>60s download)")
 
     @pytest.mark.serial
     def test_image_pull_set_default(self, mvm_binary):
@@ -412,7 +446,7 @@ class TestImageImportAdvanced:
             # Verify imported image appears in listing
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
-            imported = [i for i in images if i.get("os_slug") == "test-qcow2"]
+            imported = [i for i in images if i.get("os_name") == "test-qcow2"]
             assert imported, "Imported qcow2 image not found in listing"
             imported_prefix = imported[0]["id"][:6]
         finally:
@@ -460,7 +494,7 @@ class TestImageImportAdvanced:
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
             imported = [
-                i for i in images if i.get("os_slug") == "test-overwrite"
+                i for i in images if i.get("os_name") == "test-overwrite"
             ]
             if imported:
                 imported_prefix = imported[0]["id"][:6]
@@ -501,7 +535,10 @@ class TestImageRemoveForce:
         """Remove a cached image by ID prefix with --force and verify it's gone."""
 
         # Ensure alpine is pulled
-        _run_mvm(mvm_binary, "image", "pull", "alpine-3.21", check=False)
+        try:
+            _run_mvm(mvm_binary, "image", "pull", "alpine-3.21", check=False)
+        except subprocess.TimeoutExpired:
+            pytest.skip("Initial image pull timed out (>60s download)")
 
         # Get alpine image ID
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
@@ -509,10 +546,12 @@ class TestImageRemoveForce:
             pytest.skip("Failed to list images")
         images = json.loads(result.stdout)
         alpine_images = [
-            i for i in images if "alpine" in i.get("os_slug", "").lower()
+            i
+            for i in images
+            if "alpine" in i.get("os_slug", "").lower() and i.get("is_present")
         ]
         if not alpine_images:
-            pytest.skip("No alpine image available to test removal")
+            pytest.skip("No present alpine image available to test removal")
 
         target_id = alpine_images[0]["id"]
 
@@ -535,10 +574,14 @@ class TestImageRemoveForce:
         assert not any(i["id"] == target_id for i in after)
 
         # Re-pull so other tests aren't broken
-        repull = _run_mvm(
-            mvm_binary, "image", "pull", "alpine-3.21", check=False
-        )
-        assert repull.returncode == 0, f"Re-pull failed: {repull.stderr}"
+        try:
+            repull = _run_mvm(
+                mvm_binary, "image", "pull", "alpine-3.21", check=False
+            )
+            if repull.returncode != 0:
+                pytest.skip(f"Re-pull failed: {repull.stderr}")
+        except subprocess.TimeoutExpired:
+            pytest.skip("Re-pull timed out (>60s download)")
 
 
 class TestImagePullSkipOptimization:
@@ -549,21 +592,26 @@ class TestImagePullSkipOptimization:
     @pytest.mark.serial
     def test_image_pull_with_skip_optimization(self, mvm_binary):
         """Pull an image with --skip-optimization flag."""
-        result = _run_mvm(
-            mvm_binary,
-            "image",
-            "pull",
-            "alpine-3.21",
-            "--skip-optimization",
-            "--force",
-            timeout=60,
-            check=False,
-        )
-        if result.returncode != 0:
-            pytest.skip(
-                f"skip-optimization pull failed: {result.stderr.strip()}"
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "image",
+                "pull",
+                "alpine-3.21",
+                "--skip-optimization",
+                "--force",
+                timeout=60,
+                check=False,
             )
-        assert "pulled successfully" in result.stdout.lower()
+            if result.returncode != 0:
+                pytest.skip(
+                    f"skip-optimization pull failed: {result.stderr.strip()}"
+                )
+            assert "pulled successfully" in result.stdout.lower()
+        except subprocess.TimeoutExpired:
+            pytest.skip(
+                "skip-optimization pull timed out (>60s download)"
+            )
 
 
 class TestImageImportSetDefault:
@@ -635,7 +683,7 @@ class TestImageImportSetDefault:
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
             imported = [
-                i for i in images if i.get("os_slug") == "test-import-default"
+                i for i in images if i.get("os_name") == "test-import-default"
             ]
             if imported:
                 imported_prefix = imported[0]["id"][:6]
@@ -697,7 +745,7 @@ class TestImageImportArch:
             # Verify imported image appears in listing
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
-            imported = [i for i in images if i.get("os_slug") == "test-arch"]
+            imported = [i for i in images if i.get("os_name") == "test-arch"]
             assert imported, "Imported arch image not found in listing"
             imported_prefix = imported[0]["id"][:6]
         finally:

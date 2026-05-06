@@ -160,16 +160,6 @@ def vm_create(
         "--kernel",
         help="Kernel short ID or path to vmlinux file",
     ),
-    image_path: Path | None = typer.Option(
-        None,
-        "--image-path",
-        help="Direct path to rootfs image file (overrides --image)",
-    ),
-    kernel_path: Path | None = typer.Option(
-        None,
-        "--kernel-path",
-        help="Direct path to vmlinux kernel file (overrides --kernel)",
-    ),
     vcpus: int | None = typer.Option(
         None,
         "--vcpus",
@@ -295,8 +285,6 @@ def vm_create(
                 boot_args=boot_args,
                 image=image,
                 kernel_id=kernel,
-                image_path=image_path,
-                kernel_path=kernel_path,
                 disk_size=disk_size,
                 requested_guest_ip=ip,
                 network_name=network_name,
@@ -326,7 +314,18 @@ def vm_rm(
     force: bool = typer.Option(False, "--force", "-f", help="Force removal"),
 ) -> None:
     """Remove one or more VMs."""
-    VMOperation.remove(VMInput(identifiers=list(identifiers), force=force))
+    result = VMOperation.remove(
+        VMInput(identifiers=list(identifiers), force=force)
+    )
+    if result.has_any_error:
+        for r in result.items:
+            if r.is_ok:
+                if r.item:
+                    print_success(f"Removed VM '{r.item.name}'")
+            else:
+                item_name = r.item.name if r.item else "unknown"
+                print_error(r.message or f"Failed to remove VM '{item_name}'")
+        raise typer.Exit(code=1)
     print_success("VMs removed")
 
 
@@ -338,7 +337,12 @@ def vm_start(
     ),
 ) -> None:
     """Start a stopped VM."""
-    VMOperation.start(VMInput(identifiers=[identifier]))
+    result = VMOperation.start(VMInput(identifiers=[identifier]))
+    if result.has_any_error:
+        for r in result.items:
+            if not r.is_ok:
+                print_error(r.message or f"Failed to start VM '{identifier}'")
+        raise typer.Exit(code=1)
     print_success(f"VM '{identifier}' started")
 
 
@@ -351,7 +355,12 @@ def vm_stop(
     force: bool = typer.Option(False, "--force", "-f", help="Force stop"),
 ) -> None:
     """Stop a running VM."""
-    VMOperation.stop(VMInput(identifiers=[identifier], force=force))
+    result = VMOperation.stop(VMInput(identifiers=[identifier], force=force))
+    if result.has_any_error:
+        for r in result.items:
+            if not r.is_ok:
+                print_error(r.message or f"Failed to stop VM '{identifier}'")
+        raise typer.Exit(code=1)
     print_success(f"VM '{identifier}' stopped")
 
 
@@ -364,7 +373,12 @@ def vm_reboot(
     force: bool = typer.Option(False, "--force", "-f", help="Force reboot"),
 ) -> None:
     """Reboot a VM."""
-    VMOperation.reboot(VMInput(identifiers=[identifier], force=force))
+    result = VMOperation.reboot(VMInput(identifiers=[identifier], force=force))
+    if result.has_any_error:
+        for r in result.items:
+            if not r.is_ok:
+                print_error(r.message or f"Failed to reboot VM '{identifier}'")
+        raise typer.Exit(code=1)
     print_success(f"VM '{identifier}' rebooted")
 
 
@@ -376,7 +390,12 @@ def vm_pause(
     ),
 ) -> None:
     """Pause a running VM."""
-    VMOperation.pause(VMInput(identifiers=[identifier]))
+    result = VMOperation.pause(VMInput(identifiers=[identifier]))
+    if result.has_any_error:
+        for r in result.items:
+            if not r.is_ok:
+                print_error(r.message or f"Failed to pause VM '{identifier}'")
+        raise typer.Exit(code=1)
     print_success(f"VM '{identifier}' paused")
 
 
@@ -388,7 +407,12 @@ def vm_resume(
     ),
 ) -> None:
     """Resume a paused VM."""
-    VMOperation.resume(VMInput(identifiers=[identifier]))
+    result = VMOperation.resume(VMInput(identifiers=[identifier]))
+    if result.has_any_error:
+        for r in result.items:
+            if not r.is_ok:
+                print_error(r.message or f"Failed to resume VM '{identifier}'")
+        raise typer.Exit(code=1)
     print_success(f"VM '{identifier}' resumed")
 
 

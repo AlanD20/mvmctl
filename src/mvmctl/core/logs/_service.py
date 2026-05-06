@@ -8,7 +8,7 @@ from collections.abc import Generator
 from pathlib import Path
 
 from mvmctl.constants import LOG_FOLLOW_POLL_INTERVAL_S
-from mvmctl.exceptions import ConfigError, MVMError, VMNotFoundError
+from mvmctl.exceptions import LogsError, VMNotFoundError
 from mvmctl.utils.common import CacheUtils
 
 
@@ -37,7 +37,7 @@ class LogService:
 
         Raises:
             VMNotFoundError: If VM directory does not exist
-            MVMError: If log type is unknown or log file not found
+            LogsError: If log type is unknown or log file not found
 
         """
         vm_dir = CacheUtils.get_vm_dir(vm_hash)
@@ -50,7 +50,7 @@ class LogService:
         elif log_type == "os":
             log_file = vm_dir / log_filename
         else:
-            raise ConfigError(f"Unknown log type '{log_type}'. Valid: boot, os")
+            raise LogsError(f"Unknown log type '{log_type}'. Valid: boot, os")
 
         if not log_file.exists():
             raise VMNotFoundError(f"Log file not found for VM: {log_file}")
@@ -70,7 +70,7 @@ class LogService:
             List of line strings.
 
         Raises:
-            MVMError: If the log file cannot be read.
+            LogsError: If the log file cannot be read.
 
         """
         try:
@@ -78,7 +78,7 @@ class LogService:
                 last_lines = deque(f, maxlen=lines)
                 return [line.rstrip("\n") for line in last_lines]
         except OSError as e:
-            raise MVMError(f"Error reading log file: {e}") from e
+            raise LogsError(f"Error reading log file: {e}") from e
 
     @staticmethod
     def follow_log(log_file: Path) -> Generator[str]:
@@ -88,7 +88,7 @@ class LogService:
         Yields new lines as they are written.
 
         Raises:
-            MVMError: If the log file cannot be read
+            LogsError: If the log file cannot be read
 
         """
         try:
@@ -102,4 +102,4 @@ class LogService:
                         continue
                     yield line.rstrip("\n")
         except OSError as e:
-            raise MVMError(f"Error following log: {e}") from e
+            raise LogsError(f"Error following log: {e}") from e

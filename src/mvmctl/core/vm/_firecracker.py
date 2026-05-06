@@ -138,18 +138,33 @@ class FirecrackerSpawner:
     def config_path(self) -> Path:
         return self._config_path
 
-    def spawn(
-        self,
-        *,
-        relay_enabled: bool = False,
-        relay_client_fd: int | None = None,
-    ) -> None:
+    def spawn(self, *, wait_for_socket: bool = False) -> None:
+        """
+        Start a Firecracker process.
 
+        Args:
+            wait_for_socket: If True, wait for the API socket to become
+                available before returning. Used when the caller needs to
+                make immediate subsequent Firecracker API calls.
+
+        Raises:
+            FirecrackerSpawnError: If the process fails to start or exits
+                prematurely, or if the API socket does not become
+                available within the timeout.
+
+        """
+        # Remove stale API socket from previous run
+        if self._api_socket_path.exists():
+            self._api_socket_path.unlink()
+
+        relay_enabled = self._config.relay_enabled
+        relay_client_fd = self._config.relay_client_fd
+        snapshot_mode = self._config.snapshot_mode
         fc_stdin: int | None = subprocess.DEVNULL
         fc_stdout: int | TextIO | None = self.serial_output_fp
         fc_pass_fds: Collection[int] = []
 
-        if self._config.enable_console and relay_enabled:
+        if not snapshot_mode and self._config.enable_console and relay_enabled:
             if relay_client_fd is None:
                 raise FirecrackerSpawnError(
                     "Console enabled but PTY client FD is None"
@@ -167,14 +182,16 @@ class FirecrackerSpawner:
         fc_proc: subprocess.Popen[Any] | None = None
         self.fc_log_fp = self.create_filepointer(self._log_path)
 
+        fc_cmd = [
+            self._config.binary_path,
+            "--api-sock",
+            str(self._api_socket_path),
+        ]
+        if not snapshot_mode:
+            fc_cmd.extend(["--config-file", str(self._config_path)])
+
         fc_proc = subprocess.Popen(
-            [
-                self._config.binary_path,
-                "--api-sock",
-                str(self._api_socket_path),
-                "--config-file",
-                str(self._config_path),
-            ],
+            fc_cmd,
             stdin=fc_stdin,
             stdout=fc_stdout,
             stderr=self.fc_log_fp,
@@ -206,6 +223,20 @@ class FirecrackerSpawner:
             fc_proc.pid
         )
         FsUtils.write_pid_file(self._pid_path, fc_proc.pid)
+
+        # ── Optional: wait for API socket ──────────────────────────────
+        if wait_for_socket:
+            _waited = 0.0
+            while _waited < CONST_SOCKET_TIMEOUT_SECONDS:
+                if self._api_socket_path.exists():
+                    break
+                time.sleep(CONST_POLL_STEP_SECONDS)
+                _waited += CONST_POLL_STEP_SECONDS
+            else:
+                raise FirecrackerSpawnError(
+                    f"Firecracker API socket not available after "
+                    f"{CONST_SOCKET_TIMEOUT_SECONDS}s"
+                )
 
     def cleanup(self) -> None:
         """Perform cleanup of all created resources."""

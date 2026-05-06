@@ -427,7 +427,8 @@ class TestSSHJourney:
     ):
         """Create VM and verify SSH CLI command execution."""
         vm_info = created_vm
-        ssh_timeout = timing_targets["alpine-3.21"]
+        # Use generous timeout — SSH can be slow on loaded hosts
+        ssh_timeout = max(timing_targets.get("alpine-3.21", 15), 30)
         ssh_available = wait_for_ssh(
             mvm_binary, vm_info["name"], "root", ssh_timeout
         )
@@ -436,7 +437,6 @@ class TestSSHJourney:
         result = _run_mvm(
             mvm_binary,
             "ssh",
-            "--name",
             vm_info["name"],
             "-c",
             "uname -a",

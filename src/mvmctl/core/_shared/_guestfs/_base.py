@@ -13,8 +13,8 @@ from mvmctl.constants import (
     CONST_SHRINK_SAFETY_MARGIN,
 )
 from mvmctl.exceptions import (
+    GuestfsError,
     GuestfsNotAvailableError,
-    MVMError,
     MVMRuntimeError,
 )
 
@@ -120,7 +120,7 @@ class OptimizedGuestfs:
                 if attempt < 2:
                     time.sleep(0.5 * (attempt + 1))
         self._restore_environment()
-        raise MVMError(
+        raise GuestfsError(
             f"Failed to launch guestfs: {last_error}"
         ) from last_error
 
@@ -128,7 +128,7 @@ class OptimizedGuestfs:
     def _handle(self) -> guestfs.GuestFS:
         """Return the raw guestfs handle, raising if not initialized."""
         if self._g is None:
-            raise MVMError(
+            raise GuestfsError(
                 "Guestfs handle not initialized. "
                 "Use 'with OptimizedGuestfs(...)' to properly initialize."
             )
@@ -146,7 +146,7 @@ class OptimizedGuestfs:
             assert isinstance(filesystems, dict)
             root_device = str(list(filesystems.keys())[0])
         if root_device is None:
-            raise MVMError(f"No filesystem found in {self.disk_path}")
+            raise GuestfsError(f"No filesystem found in {self.disk_path}")
         self._handle.mount(root_device, "/")
         return root_device
 
@@ -414,7 +414,9 @@ class OptimizedGuestfs:
             finally:
                 self._handle.umount(device)
         else:
-            raise MVMError(f"Cannot grow {fs_type} filesystem: not supported")
+            raise GuestfsError(
+                f"Cannot grow {fs_type} filesystem: not supported"
+            )
 
     def list_partitions(self) -> list[str]:
         """List partitions in the disk image."""

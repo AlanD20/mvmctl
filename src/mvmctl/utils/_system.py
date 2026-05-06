@@ -205,6 +205,32 @@ class ProcessSignalHandler:
         """Send SIGKILL. Returns True if signal was sent."""
         return self.send_signal(signal.SIGKILL)
 
+    def kill_and_wait(self, kill_timeout: float = 2.0) -> bool:
+        """Send SIGKILL and poll until the process is dead.
+
+        Args:
+            kill_timeout: Seconds to wait for the process to die.
+
+        Returns:
+            True if the process was confirmed dead within timeout.
+            False if the process still exists after timeout.
+
+        """
+        # Already dead — nothing to do
+        if not self.is_alive():
+            return True
+
+        self.send_signal(signal.SIGKILL)
+
+        _waited = 0.0
+        while _waited < kill_timeout:
+            if not self.is_alive():
+                return True
+            time.sleep(0.1)
+            _waited += 0.1
+
+        return False
+
     @classmethod
     def terminate_batch(
         cls,

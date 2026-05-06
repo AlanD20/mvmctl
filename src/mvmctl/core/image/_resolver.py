@@ -74,12 +74,22 @@ class ImageResolver:
             return None
         return self._enrich([image])[0]
 
+    def by_name(self, name: str) -> ImageItem:
+        """Resolve by display name (os_name)."""
+        db_image = self._repo.get_by_name(name)
+        if db_image is None:
+            raise ImageNotFoundError(f"Image not found by name: {name!r}")
+        return self._enrich([db_image])[0]
+
     def resolve(self, value: str) -> ImageItem:
-        """Resolve image by os_slug or ID prefix."""
+        """Resolve image by os_slug, display name, or ID prefix."""
         try:
             image = self.by_os_slug(value)
         except ImageNotFoundError:
-            image = self.by_id(value)
+            try:
+                image = self.by_name(value)
+            except ImageNotFoundError:
+                image = self.by_id(value)
         return image
 
     def resolve_many(self, identifiers: list[str]) -> ImageResolveResult:

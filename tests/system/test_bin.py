@@ -103,15 +103,38 @@ class TestBinaryPullAndLifecycle:
     def test_bin_rm_by_id(self, mvm_binary):
         """Remove a cached binary by its 6-character ID prefix."""
 
+        import re
+
         result = _run_mvm(mvm_binary, "bin", "ls", "--json")
         binaries = json.loads(result.stdout)
-        if not binaries:
-            pytest.skip("No cached binaries")
 
-        # Find a binary that is NOT the default
         non_defaults = [b for b in binaries if not b.get("is_default", False)]
         if not non_defaults:
-            pytest.skip("All cached binaries are the default — cannot remove")
+            # Pull a throwaway older version so we have a non-default to remove
+            remote_result = _run_mvm(mvm_binary, "bin", "ls", "--remote")
+            versions = re.findall(r"\d+\.\d+\.\d+", remote_result.stdout)
+            if not versions:
+                pytest.skip(
+                    "No remote versions available to pull for removal test"
+                )
+
+            default_version = next(
+                (b.get("version") for b in binaries if b.get("is_default")),
+                None,
+            )
+            target_version = next(
+                (v for v in versions if v != default_version), versions[-1]
+            )
+            _run_mvm(mvm_binary, "bin", "pull", target_version, check=False)
+
+            # Re-read after pull
+            result = _run_mvm(mvm_binary, "bin", "ls", "--json")
+            binaries = json.loads(result.stdout)
+            non_defaults = [
+                b for b in binaries if not b.get("is_default", False)
+            ]
+            if not non_defaults:
+                pytest.skip("Could not pull extra binary for removal test")
 
         target = non_defaults[0]
         target_prefix = target["id"][:6]

@@ -52,6 +52,23 @@ class ImageRepository:
             return None
         return ImageItem(**dict(row))
 
+    @_graceful_read(default=None)
+    def get_by_name(self, name: str) -> ImageItem | None:
+        """Return an image by its display name (os_name), or None if not found.
+
+        This is particularly useful for imported images where the
+        os_name is set to the import name but the os_slug is derived
+        from the detected filesystem OS.
+        """
+        with self._db.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM images WHERE os_name = ? AND deleted_at IS NULL AND is_present = 1",
+                (name,),
+            ).fetchone()
+        if row is None:
+            return None
+        return ImageItem(**dict(row))
+
     @_graceful_read(factory=list)
     def list_all(self) -> list[ImageItem]:
         """Return all images."""

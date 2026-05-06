@@ -12,7 +12,7 @@ from pathlib import Path
 
 from mvmctl.core.vm._firecracker import FirecrackerClient
 from mvmctl.core.vm._repository import VMRepository
-from mvmctl.exceptions import MVMError
+from mvmctl.exceptions import MVMError, VMStateError
 from mvmctl.models import VMInstanceItem, VMStatus
 from mvmctl.utils._system import ProcessSignalHandler
 
@@ -130,25 +130,25 @@ class VMController:
 
         # Cannot pause from these states
         if self._vm.status == VMStatus.STARTING.value:
-            raise MVMError(
+            raise VMStateError(
                 f"VM '{name}' is still starting — cannot pause (current state: {self._vm.status})"
             )
         if self._vm.status == VMStatus.STOPPED.value:
-            raise MVMError(
+            raise VMStateError(
                 f"VM '{name}' is stopped — cannot pause (current state: {self._vm.status})"
             )
         if self._vm.status == VMStatus.STOPPING.value:
-            raise MVMError(
+            raise VMStateError(
                 f"VM '{name}' is shutting down — cannot pause (current state: {self._vm.status})"
             )
         if self._vm.status in (VMStatus.ERROR.value, VMStatus.CRASHED.value):
-            raise MVMError(
+            raise VMStateError(
                 f"VM '{name}' is in {self._vm.status} state — cannot pause (current state: {self._vm.status})"
             )
 
         # Valid transition — must be RUNNING
         if not self._vm.api_socket_path:
-            raise MVMError(f"VM '{name}' has no API socket enabled")
+            raise VMStateError(f"VM '{name}' has no API socket enabled")
         client = FirecrackerClient(self._vm.vm_dir / self._vm.api_socket_path)
         try:
             client.pause_vm()
@@ -172,25 +172,25 @@ class VMController:
 
         # Error/crashed state
         if self._vm.status in (VMStatus.ERROR.value, VMStatus.CRASHED.value):
-            raise MVMError(
+            raise VMStateError(
                 f"VM '{name}' is in {self._vm.status} state — remove and recreate (current state: {self._vm.status})"
             )
 
         # Wrong direction — stopped
         if self._vm.status == VMStatus.STOPPED.value:
-            raise MVMError(
+            raise VMStateError(
                 f"VM '{name}' is stopped — use start() instead (current state: {self._vm.status})"
             )
 
         # Wrong direction — shutting down
         if self._vm.status == VMStatus.STOPPING.value:
-            raise MVMError(
+            raise VMStateError(
                 f"VM '{name}' is shutting down — use start() after it stops (current state: {self._vm.status})"
             )
 
         # Valid transition — must be PAUSED
         if not self._vm.api_socket_path:
-            raise MVMError(f"VM '{name}' has no API socket enabled")
+            raise VMStateError(f"VM '{name}' has no API socket enabled")
         client = FirecrackerClient(self._vm.vm_dir / self._vm.api_socket_path)
         try:
             client.resume_vm()
@@ -220,19 +220,19 @@ class VMController:
 
         # Error/crashed state
         if self._vm.status in (VMStatus.ERROR.value, VMStatus.CRASHED.value):
-            raise MVMError(
+            raise VMStateError(
                 f"VM '{name}' is in {self._vm.status} state — remove and recreate (current state: {self._vm.status})"
             )
 
         # Wrong direction — paused
         if self._vm.status == VMStatus.PAUSED.value:
-            raise MVMError(
+            raise VMStateError(
                 f"VM '{name}' is paused — use resume() instead (current state: {self._vm.status})"
             )
 
         # Valid transition — must be STOPPED
         if not self._vm.api_socket_path:
-            raise MVMError(f"VM '{name}' has no API socket enabled")
+            raise VMStateError(f"VM '{name}' has no API socket enabled")
 
         client = FirecrackerClient(self._vm.vm_dir / self._vm.api_socket_path)
         try:
@@ -259,22 +259,68 @@ class VMController:
         """
         Snapshot VM memory and disk state.
 
+        The VM is automatically paused before snapshotting and resumed
+        afterwards so the caller gets back a running VM.
+
         Args:
             mem_out: Memory snapshot output path
             state_out: VM state output path
 
         Raises:
-            MVMError: If socket not found or snapshot fails
+            MVMError: If socket not found, VM in invalid state, or
+                      snapshot fails
 
         """
-        if not self._vm.api_socket_path:
-            raise MVMError(
-                f"Socket not found for VM '{self._vm.name}'. Must be running with --enable-api-socket"
+        name = self._vm.name
+
+        # Validate state — snapshot requires RUNNING or PAUSED
+        if self._vm.status == VMStatus.STARTING.value:
+            raise VMStateError(
+                f"VM '{name}' is still starting — cannot snapshot (current state: {self._vm.status})"
             )
+        if self._vm.status == VMStatus.STOPPED.value:
+            raise VMStateError(
+                f"VM '{name}' is stopped — cannot snapshot (current state: {self._vm.status})"
+            )
+        if self._vm.status == VMStatus.STOPPING.value:
+            raise VMStateError(
+                f"VM '{name}' is shutting down — cannot snapshot (current state: {self._vm.status})"
+            )
+        if self._vm.status in (VMStatus.ERROR.value, VMStatus.CRASHED.value):
+            raise VMStateError(
+                f"VM '{name}' is in {self._vm.status} state — cannot snapshot (current state: {self._vm.status})"
+            )
+
+        if not self._vm.api_socket_path:
+            raise VMStateError(
+                f"Socket not found for VM '{name}'. Must be running with --enable-api-socket"
+            )
+
         client = FirecrackerClient(self._vm.vm_dir / self._vm.api_socket_path)
+        was_running = self._vm.status == VMStatus.RUNNING.value
         try:
+            # Pause before snapshotting (Firecracker requires VM to be paused)
+            if was_running:
+                client.pause_vm()
+                self._repo.update_status(self._vm.id, VMStatus.PAUSED.value)
+                self._vm.status = VMStatus.PAUSED.value
+
             client.create_snapshot(mem_out, state_out)
         finally:
+            # Resume if we paused it
+            if was_running:
+                try:
+                    client.resume_vm()
+                    self._repo.update_status(
+                        self._vm.id, VMStatus.RUNNING.value
+                    )
+                    self._vm.status = VMStatus.RUNNING.value
+                except MVMError:
+                    logger.warning(
+                        "Failed to resume VM '%s' after snapshot — "
+                        "leaving in paused state",
+                        name,
+                    )
             client.close()
 
     def load_snapshot(
@@ -293,12 +339,20 @@ class VMController:
 
         """
         if not self._vm.api_socket_path:
-            raise MVMError(
+            raise VMStateError(
                 f"Socket not found for VM '{self._vm.name}'. Must be running with --enable-api-socket"
             )
         client = FirecrackerClient(self._vm.vm_dir / self._vm.api_socket_path)
         try:
             client.load_snapshot(mem_in, state_in, resume_after)
+            # Update status based on whether VM was resumed
+            new_status = (
+                VMStatus.RUNNING.value
+                if resume_after
+                else VMStatus.PAUSED.value
+            )
+            self._repo.update_status(self._vm.id, new_status)
+            self._vm.status = new_status
         finally:
             client.close()
 
