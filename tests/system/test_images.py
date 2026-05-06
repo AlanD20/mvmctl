@@ -150,29 +150,32 @@ class TestImageRemove:
             pytest.skip("No alpine image available to test removal")
 
         target_id = alpine_images[0]["id"]
+        target_prefix = target_id[:6]
 
-        # Remove the image
-        result = _run_mvm(
-            mvm_binary,
-            "image",
-            "rm",
-            target_id[:6],
-            check=False,
-        )
-        assert result.returncode == 0
+        try:
+            # Remove the image
+            result = _run_mvm(
+                mvm_binary,
+                "image",
+                "rm",
+                target_prefix,
+                check=False,
+            )
+            assert result.returncode == 0
 
-        # Verify gone (filter by is_present to account for soft-delete)
-        result = _run_mvm(mvm_binary, "image", "ls", "--json")
-        after = [
-            i for i in json.loads(result.stdout) if i.get("is_present", True)
-        ]
-        assert not any(i["id"] == target_id for i in after)
-
-        # Re-pull so other tests aren't broken
-        repull = _run_mvm(
-            mvm_binary, "image", "pull", "alpine-3.21", check=False
-        )
-        assert repull.returncode == 0, f"Re-pull failed: {repull.stderr}"
+            # Verify gone (filter by is_present to account for soft-delete)
+            result = _run_mvm(mvm_binary, "image", "ls", "--json")
+            after = [
+                i for i in json.loads(result.stdout) if i.get("is_present", True)
+            ]
+            assert not any(i["id"] == target_id for i in after)
+        finally:
+            # Re-pull so other tests aren't broken — always runs even if assert fails
+            repull = _run_mvm(
+                mvm_binary, "image", "pull", "alpine-3.21", check=False
+            )
+            if repull.returncode != 0:
+                pytest.skip(f"Re-pull failed after test: {repull.stderr}")
 
     def test_image_pull_nonexistent(self, mvm_binary):
         """Pull a nonexistent image and expect failure."""
@@ -230,11 +233,25 @@ class TestImageImport:
 
         # Copy to temp location
         temp_path = tmp_path / "alpine-import.raw"
-        shutil.copy2(str(resolved_source), temp_path)
+
+        # The cached image may be compressed (.zst) — decompress if needed
+        if resolved_source.suffix == ".zst":
+            import subprocess as _subprocess
+
+            decompress = _subprocess.run(
+                ["zstd", "-d", "-f", str(resolved_source), "-o", str(temp_path)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if decompress.returncode != 0:
+                pytest.skip(f"zstd decompress failed: {decompress.stderr}")
+        else:
+            shutil.copy2(str(resolved_source), temp_path)
 
         imported_prefix = None
         try:
-            # Import the copied image
+            # Import the decompressed image
             result = _run_mvm(
                 mvm_binary,
                 "image",

@@ -24,7 +24,7 @@ class BinaryRepository:
         """Return a binary by its full 64-char ID, or None if not found."""
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM binaries WHERE id = ? AND deleted_at IS NULL",
+                "SELECT * FROM binaries WHERE id = ? AND deleted_at IS NULL AND is_present = 1",
                 (binary_id,),
             ).fetchone()
         if row is None:
@@ -36,7 +36,7 @@ class BinaryRepository:
         """Return all binaries whose ID starts with prefix."""
         with self._db.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM binaries WHERE id LIKE ? AND deleted_at IS NULL",
+                "SELECT * FROM binaries WHERE id LIKE ? AND deleted_at IS NULL AND is_present = 1",
                 (f"{prefix}%",),
             ).fetchall()
         return [BinaryItem(**dict(row)) for row in rows]
@@ -55,7 +55,7 @@ class BinaryRepository:
         """Return all binaries with a given name."""
         with self._db.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM binaries WHERE name = ? AND deleted_at IS NULL ORDER BY created_at",
+                "SELECT * FROM binaries WHERE name = ? AND deleted_at IS NULL AND is_present = 1 ORDER BY created_at",
                 (name,),
             ).fetchall()
         return [BinaryItem(**dict(row)) for row in rows]
@@ -67,7 +67,7 @@ class BinaryRepository:
         """Return a binary by its name and version, or None if not found."""
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM binaries WHERE name = ? AND version = ? AND deleted_at IS NULL LIMIT 1",
+                "SELECT * FROM binaries WHERE name = ? AND version = ? AND deleted_at IS NULL AND is_present = 1 LIMIT 1",
                 (name, version),
             ).fetchone()
         if row is None:
@@ -146,7 +146,7 @@ class BinaryRepository:
         """Return the default binary entry for a given name, or None."""
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM binaries WHERE name = ? AND is_default = 1 AND deleted_at IS NULL LIMIT 1",
+                "SELECT * FROM binaries WHERE name = ? AND is_default = 1 AND deleted_at IS NULL AND is_present = 1 LIMIT 1",
                 (name,),
             ).fetchone()
         if row is None:

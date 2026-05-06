@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from mvmctl.utils.common import CommonUtils
+
 
 @dataclass
 class SSHKeyItem:
@@ -21,3 +23,7 @@ class SSHKeyItem:
     updated_at: str
 
     private_key_path: str | None = None
+
+    def __post_init__(self) -> None:
+        """Coerce bool fields loaded from SQLite."""
+        CommonUtils.coerce_bool_fields(self, {"is_default", "is_present"})

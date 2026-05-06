@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from mvmctl.utils.common import CommonUtils
+
 
 @dataclass
 class HostStateItem:
@@ -16,6 +18,18 @@ class HostStateItem:
     default_network_created: bool
     initialized_at: str
     updated_at: str
+
+    def __post_init__(self) -> None:
+        """Coerce bool fields loaded from SQLite."""
+        CommonUtils.coerce_bool_fields(
+            self,
+            {
+                "initialized",
+                "mvm_group_created",
+                "sudoers_configured",
+                "default_network_created",
+            },
+        )
 
 
 @dataclass
@@ -35,3 +49,7 @@ class HostStateChangeItem:
     original_value: str | None = None
     reverted_at: str | None = None
     revert_mechanism: str | None = None
+
+    def __post_init__(self) -> None:
+        """Coerce bool fields loaded from SQLite."""
+        CommonUtils.coerce_bool_fields(self, {"reverted"})

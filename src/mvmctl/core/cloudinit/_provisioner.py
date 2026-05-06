@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from mvmctl.constants import CONST_DIR_PERMS_CACHE
 from mvmctl.core._shared import IPTablesTracker
@@ -13,6 +12,7 @@ from mvmctl.exceptions import (
     CloudInitNetModeError,
 )
 from mvmctl.models import (
+    CloudInitMode,
     IPTablesChain,
     IPTablesPort,
     IPTablesProtocol,
@@ -24,9 +24,6 @@ from mvmctl.models import (
     NetworkItem,
 )
 from mvmctl.services.nocloud_server.manager import NoCloudNetServerManager
-
-if TYPE_CHECKING:
-    from mvmctl.models import CloudInitMode
 
 
 @dataclass

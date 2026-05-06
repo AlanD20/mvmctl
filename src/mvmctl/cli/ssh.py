@@ -33,7 +33,7 @@ ssh_app = typer.Typer(
 def ssh_connect(
     ctx: typer.Context,
     identifier: str = typer.Argument(
-        None, help="VM name, ID prefix, IP, or MAC address"
+        ..., help="VM name, ID prefix, IP, or MAC address"
     ),
     user: str | None = typer.Option(
         None, "--user", "-u", help="SSH user (default: from user config)"
@@ -44,31 +44,21 @@ def ssh_connect(
     cmd: str | None = typer.Option(
         None, "--cmd", "-c", help="Command to execute"
     ),
-    ip: str | None = typer.Option(
-        None, "--ip", help="IP address to connect to (skips all validation)"
-    ),
-    mac: str | None = typer.Option(None, "--mac", help="VM MAC address"),
-    name: str | None = typer.Option(
-        None, "--name", "-n", help="VM name (validates as entity name)"
-    ),
 ) -> None:
     """
     Open an SSH session into a VM.
 
-    Provide a VM identifier as a positional argument, or use
-    --name, --ip, or --mac to specify the VM explicitly.
+    Provide a VM identifier (name, ID prefix, IP, or MAC address) as the
+    positional argument.
     """
     if ctx.invoked_subcommand is not None:
         return
 
     inputs = SSHInput(
-        vm_id=identifier,
+        identifier=identifier,
         user=user,
         key=key,
         cmd=cmd,
-        ip=ip,
-        mac=mac,
-        name=name,
     )
     result = SSHOperation.connect(inputs)
     if result.is_error:

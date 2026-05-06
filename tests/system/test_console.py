@@ -63,7 +63,7 @@ class TestConsoleKill:
 
 
 class TestConsoleIdentifierFlags:
-    """Test console state using --name and --ip identifier flags."""
+    """Test console state using positional identifiers (name, IP)."""
 
     pytestmark = [
         pytest.mark.system,
@@ -72,11 +72,10 @@ class TestConsoleIdentifierFlags:
     ]
 
     def test_console_state_by_name_flag(self, mvm_binary, created_vm):
-        """Show console relay state using --name flag."""
+        """Show console relay state using VM name as positional arg."""
         result = _run_mvm(
             mvm_binary,
             "console",
-            "--name",
             created_vm["name"],
             "--state",
         )
@@ -89,14 +88,13 @@ class TestConsoleIdentifierFlags:
         )
 
     def test_console_state_by_ip(self, mvm_binary, created_vm):
-        """Show console relay state using --ip flag."""
+        """Show console relay state using IP as positional arg."""
         ip = created_vm.get("ipv4")
         if not ip:
             pytest.skip("VM has no IPv4 address assigned")
         result = _run_mvm(
             mvm_binary,
             "console",
-            "--ip",
             ip,
             "--state",
         )

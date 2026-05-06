@@ -24,7 +24,7 @@ class KernelRepository:
         """Return a kernel by its full 64-char ID, or None if not found."""
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM kernels WHERE id = ? AND deleted_at IS NULL",
+                "SELECT * FROM kernels WHERE id = ? AND deleted_at IS NULL AND is_present = 1",
                 (kernel_id,),
             ).fetchone()
         if row is None:
@@ -36,7 +36,7 @@ class KernelRepository:
         """Return all kernels whose ID starts with prefix."""
         with self._db.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM kernels WHERE id LIKE ? AND deleted_at IS NULL",
+                "SELECT * FROM kernels WHERE id LIKE ? AND deleted_at IS NULL AND is_present = 1",
                 (f"{prefix}%",),
             ).fetchall()
         return [KernelItem(**dict(row)) for row in rows]
@@ -133,7 +133,7 @@ class KernelRepository:
         """Return the default kernel entry, or None if not set."""
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM kernels WHERE is_default = 1 AND deleted_at IS NULL LIMIT 1"
+                "SELECT * FROM kernels WHERE is_default = 1 AND deleted_at IS NULL AND is_present = 1 LIMIT 1"
             ).fetchone()
         if row is None:
             return None
@@ -144,7 +144,7 @@ class KernelRepository:
         """Return a kernel by its name, or None if not found."""
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM kernels WHERE name = ? AND deleted_at IS NULL LIMIT 1",
+                "SELECT * FROM kernels WHERE name = ? AND deleted_at IS NULL AND is_present = 1 LIMIT 1",
                 (name,),
             ).fetchone()
         if row is None:
@@ -156,7 +156,7 @@ class KernelRepository:
         """Return a kernel by its version and type, or None if not found."""
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM kernels WHERE type = ? AND deleted_at IS NULL LIMIT 1",
+                "SELECT * FROM kernels WHERE type = ? AND deleted_at IS NULL AND is_present = 1 LIMIT 1",
                 (type,),
             ).fetchone()
         if row is None:
@@ -170,7 +170,7 @@ class KernelRepository:
         """Return a kernel by its version and type, or None if not found."""
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM kernels WHERE version = ? AND type = ? AND deleted_at IS NULL LIMIT 1",
+                "SELECT * FROM kernels WHERE version = ? AND type = ? AND deleted_at IS NULL AND is_present = 1 LIMIT 1",
                 (version, type),
             ).fetchone()
         if row is None:

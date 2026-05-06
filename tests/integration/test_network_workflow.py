@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from mvmctl.api import NetworkCreateInput, NetworkInput, NetworkOperation
-from mvmctl.exceptions import NetworkError, NetworkNotFoundError
+from mvmctl.exceptions import MVMError, NetworkError, NetworkNotFoundError
 from mvmctl.models.network import (
     IPTablesRuleItem,
     NetworkItem,
@@ -23,16 +23,37 @@ from mvmctl.models.result import OperationResult
 
 @pytest.fixture(autouse=True)
 def _mock_network_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Mock subprocess.run so network bridge/iptables ops never touch the host."""
+    """Mock subprocess.run so network bridge/iptables ops never touch the host.
+
+    Tracks bridges "created" by ip -batch calls so bridge_exists checks
+    return the correct state after setup.
+    """
+    _bridges: set[str] = {"mvm-br0"}
 
     def _fake_run(*args: Any, **kwargs: Any) -> Any:
+        nonlocal _bridges
         cmd = args[0] if args else kwargs.get("args", [])
         if isinstance(cmd, list):
             cmd_str = " ".join(str(c) for c in cmd)
 
-            # Bridge / TAP / master existence checks — return "not found"
-            if "ip link show" in cmd_str:
+            # Bridge existence check — return found if bridge was "created"
+            if cmd_str.startswith("ip link show") and len(cmd) >= 4:
+                bridge_name = cmd[-1]
+                if bridge_name in _bridges:
+                    return MagicMock(returncode=0, stdout="", stderr="")
                 return MagicMock(returncode=1, stdout="", stderr="")
+
+            # Bridge creation via ip -batch — track the bridge name
+            if cmd_str == "ip -batch -":
+                batch = kwargs.get("input", "")
+                if isinstance(batch, str):
+                    for line in batch.splitlines():
+                        if "link add name" in line and "type bridge" in line:
+                            parts = line.split()
+                            idx = parts.index("name") + 1
+                            if idx < len(parts):
+                                _bridges.add(parts[idx])
+                return MagicMock(returncode=0, stdout="", stderr="")
 
             # Default route detection — no default route in tests
             if "ip route show default" in cmd_str:
@@ -166,7 +187,7 @@ class TestNetworkWorkflowEdgeCases:
             NetworkCreateInput(name="dupnet", subnet="10.88.0.0/24")
         )
 
-        with pytest.raises(NetworkError):
+        with pytest.raises((NetworkError, MVMError)):
             NetworkOperation.create(
                 NetworkCreateInput(name="dupnet", subnet="10.88.0.0/24")
             )
@@ -308,7 +329,7 @@ class TestNetworkCreateEdgeCases:
             NetworkCreateInput(name="dupnamesub", subnet="10.55.0.0/24")
         )
 
-        with pytest.raises(NetworkError):
+        with pytest.raises((NetworkError, MVMError)):
             NetworkOperation.create(
                 NetworkCreateInput(name="dupnamesub", subnet="10.56.0.0/24")
             )

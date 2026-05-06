@@ -76,7 +76,7 @@ class TestSSHConnect:
         assert isinstance(vm, VMInstanceItem)
         assert vm.ipv4
 
-        result = SSHOperation.connect(SSHInput(name="ssh-default-vm"))
+        result = SSHOperation.connect(SSHInput(identifier="ssh-default-vm"))
         assert result.item == 0
         assert len(mocks["execvp_calls"]) == 1
         file, args = mocks["execvp_calls"][0]
@@ -99,7 +99,7 @@ class TestSSHConnect:
         assert isinstance(vm, VMInstanceItem)
 
         result = SSHOperation.connect(
-            SSHInput(name="ssh-user-vm", user="ubuntu")
+            SSHInput(identifier="ssh-user-vm", user="ubuntu")
         )
         assert result.item == 0
         assert len(mocks["execvp_calls"]) == 1
@@ -123,7 +123,7 @@ class TestSSHConnect:
             "-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----"
         )
 
-        result = SSHOperation.connect(SSHInput(name="ssh-key-vm", key=key_path))
+        result = SSHOperation.connect(SSHInput(identifier="ssh-key-vm", key=key_path))
         assert result.item == 0
         assert len(mocks["execvp_calls"]) == 1
         _file, args = mocks["execvp_calls"][0]
@@ -145,7 +145,7 @@ class TestSSHResolution:
         vm = VMOperation.get(VMInput(identifiers=["ssh-name-vm"]))
         assert isinstance(vm, VMInstanceItem)
 
-        result = SSHOperation.connect(SSHInput(name="ssh-name-vm"))
+        result = SSHOperation.connect(SSHInput(identifier="ssh-name-vm"))
         assert result.item == 0
         assert len(mocks["execvp_calls"]) == 1
         _file, args = mocks["execvp_calls"][0]
@@ -164,7 +164,7 @@ class TestSSHResolution:
         assert isinstance(vm, VMInstanceItem)
         assert len(vm.id) >= 6
 
-        result = SSHOperation.connect(SSHInput(vm_id=vm.id[:6]))
+        result = SSHOperation.connect(SSHInput(identifier=vm.id[:6]))
         assert result.item == 0
         assert len(mocks["execvp_calls"]) == 1
         _file, args = mocks["execvp_calls"][0]
@@ -172,7 +172,7 @@ class TestSSHResolution:
 
     def test_connect_nonexistent_vm(self) -> None:
         """Connecting to a nonexistent VM returns error status."""
-        result = SSHOperation.connect(SSHInput(name="no-such-vm"))
+        result = SSHOperation.connect(SSHInput(identifier="no-such-vm"))
         assert isinstance(result, OperationResult)
         assert result.status == "error"
 
@@ -195,7 +195,7 @@ class TestSSHEdgeCases:
         assert isinstance(vm, VMInstanceItem)
 
         result = SSHOperation.connect(
-            SSHInput(name="ssh-bad-user-vm", user="123invalid")
+            SSHInput(identifier="ssh-bad-user-vm", user="123invalid")
         )
         assert isinstance(result, OperationResult)
         assert result.status == "error"
@@ -205,9 +205,6 @@ class TestSSHEdgeCases:
 
     def test_connect_empty_identifiers(self) -> None:
         """Connect with no VM identifiers returns error status."""
-        result = SSHOperation.connect(SSHInput())
+        result = SSHOperation.connect(SSHInput(identifier=""))
         assert isinstance(result, OperationResult)
         assert result.status == "error"
-        assert (
-            "identifier" in result.message.lower() or "--name" in result.message
-        )

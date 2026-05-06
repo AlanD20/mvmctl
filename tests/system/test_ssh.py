@@ -17,7 +17,7 @@ class TestSSHConnect:
     def test_ssh_command_execution(
         self, mvm_binary, created_vm, timing_targets
     ):
-        """Execute a command via SSH on a running VM using --name."""
+        """Execute a command via SSH on a running VM using name as positional arg."""
         vm_info = created_vm
         ssh_timeout = timing_targets["alpine-3.21"]
         ssh_available = wait_for_ssh(
@@ -28,7 +28,6 @@ class TestSSHConnect:
         result = _run_mvm(
             mvm_binary,
             "ssh",
-            "--name",
             vm_info["name"],
             "-c",
             "echo hello",
@@ -57,7 +56,7 @@ class TestSSHConnect:
     @pytest.mark.requires_kvm
     @pytest.mark.slow
     def test_ssh_with_ip_flag(self, mvm_binary, created_vm, timing_targets):
-        """Connect via --ip flag instead of VM name."""
+        """Connect via IP as positional arg instead of VM name."""
         vm_info = created_vm
         ssh_timeout = timing_targets["alpine-3.21"]
         ssh_available = wait_for_ssh(
@@ -68,13 +67,12 @@ class TestSSHConnect:
         result = _run_mvm(
             mvm_binary,
             "ssh",
-            "--ip",
             vm_info["ipv4"],
             "-c",
             "whoami",
             check=False,
         )
-        assert result.returncode == 0, f"SSH via --ip failed: {result.stderr}"
+        assert result.returncode == 0, f"SSH via IP failed: {result.stderr}"
         assert "root" in result.stdout, (
             f"Expected 'root' in output, got: {result.stdout}"
         )
@@ -90,7 +88,6 @@ class TestSSHConnect:
         result = _run_mvm(
             mvm_binary,
             "ssh",
-            "--name",
             vm_info["name"],
             "-u",
             "root",
@@ -134,7 +131,6 @@ class TestSSHConnect:
         result = _run_mvm(
             mvm_binary,
             "ssh",
-            "--name",
             vm_info["name"],
             "--key",
             str(test_key),
@@ -149,6 +145,7 @@ class TestSSHConnect:
         if result.returncode != 0:
             assert (
                 "Permission denied" in result.stderr
+                or "authentication" in result.stderr.lower()
                 or "key" in result.stderr.lower()
             )
         else:

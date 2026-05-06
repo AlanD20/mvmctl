@@ -186,7 +186,7 @@ class TestVMRemove:
         mock_vm_op.remove.return_value = OperationResult(
             status="success", code="vm.removed", message="VM removed"
         )
-        result = runner.invoke(app, ["vm", "rm", "--name", "myvm", "myvm"])
+        result = runner.invoke(app, ["vm", "rm", "myvm"])
         assert result.exit_code == 0
 
     @patch("mvmctl.cli.vm.VMOperation")
@@ -214,7 +214,7 @@ class TestVMStart:
         mock_vm_op.start.return_value = OperationResult(
             status="success", code="vm.started", message="VM started"
         )
-        result = runner.invoke(app, ["vm", "start", "--name", "myvm", "myvm"])
+        result = runner.invoke(app, ["vm", "start", "myvm"])
         assert result.exit_code == 0
 
     @patch("mvmctl.cli.vm.VMOperation")
@@ -346,7 +346,7 @@ class TestVMSnapshot:
             ],
         )
         assert result.exit_code == 0
-        assert "snapshot saved" in result.output.lower()
+        assert "snapshot created" in result.output.lower()
 
     @patch("mvmctl.cli.vm.VMOperation")
     def test_snapshot_api_error(self, mock_vm_op, tmp_path):
@@ -719,7 +719,7 @@ class TestVMStopEdgeCases:
         )
         result = runner.invoke(
             app,
-            ["vm", "stop", "10.0.0.5", "--ip", "10.0.0.5"],
+            ["vm", "stop", "10.0.0.5"],
         )
         assert result.exit_code == 0
 
@@ -730,7 +730,7 @@ class TestVMStopEdgeCases:
         )
         result = runner.invoke(
             app,
-            ["vm", "stop", "02:FC:00:00:00:01", "--mac", "02:FC:00:00:00:01"],
+            ["vm", "stop", "02:FC:00:00:00:01"],
         )
         assert result.exit_code == 0
 
@@ -745,7 +745,7 @@ class TestVMRebootEdgeCases:
         )
         result = runner.invoke(
             app,
-            ["vm", "reboot", "10.0.0.5", "--ip", "10.0.0.5"],
+            ["vm", "reboot", "10.0.0.5"],
         )
         assert result.exit_code == 0
 
@@ -760,7 +760,7 @@ class TestVMPauseEdgeCases:
         )
         result = runner.invoke(
             app,
-            ["vm", "pause", "10.0.0.5", "--ip", "10.0.0.5"],
+            ["vm", "pause", "10.0.0.5"],
         )
         assert result.exit_code == 0
 
@@ -775,7 +775,7 @@ class TestVMResumeEdgeCases:
         )
         result = runner.invoke(
             app,
-            ["vm", "resume", "10.0.0.5", "--ip", "10.0.0.5"],
+            ["vm", "resume", "10.0.0.5"],
         )
         assert result.exit_code == 0
 
@@ -800,8 +800,6 @@ class TestVMSnapshotEdgeCases:
                 "10.0.0.5",
                 str(mem_file),
                 str(state_file),
-                "--ip",
-                "10.0.0.5",
             ],
         )
         assert result.exit_code == 0
@@ -827,8 +825,6 @@ class TestVMLoadEdgeCases:
                 "10.0.0.5",
                 str(mem_file),
                 str(state_file),
-                "--ip",
-                "10.0.0.5",
             ],
         )
         assert result.exit_code == 0
@@ -840,39 +836,37 @@ class TestVMInspectTree:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_inspect_tree(self, mock_vm_op):
         mock_vm_op.inspect.return_value = {
-            "name": "myvm",
-            "id": "abc-id",
-            "status": "running",
-            "created_at": "2026-01-01T12:00:00",
-            "pid": 1234,
-            "exit_code": None,
-            "vcpus": 2,
-            "mem_mib": 512,
-            "disk_mib": 2048,
-            "ipv4": "10.0.0.2",
-            "mac": "02:FC:00:00:00:01",
-            "tap_device": "mvm-default-tap0",
-            "network_name": "default",
-            "network_id": "net-default",
-            "image_id": "i" * 64,
-            "image_name": "Ubuntu 24.04",
-            "kernel_id": "k" * 64,
-            "kernel_version": "6.1.0",
-            "binary_id": "b" * 64,
-            "binary_name": "firecracker",
-            "vm_dir": "/tmp/vm",
-            "rootfs_path": "/tmp/vm/rootfs.ext4",
-            "config_path": "/tmp/vm/vm.json",
-            "log_path": "/tmp/vm/fc.log",
-            "serial_output_path": "/tmp/vm/serial.log",
-            "relay_running": False,
-            "relay_pid": None,
-            "relay_socket_path": None,
-            "enable_pci": False,
-            "enable_console": False,
-            "enable_logging": True,
-            "enable_metrics": False,
-            "cloud_init_mode": "off",
+            "vm": {
+                "name": "myvm",
+                "id": "abc-id",
+                "status": "running",
+                "pid": 1234,
+                "exit_code": None,
+            },
+            "resources": {"vcpus": 2, "mem": 512, "disk": 2048},
+            "networking": {
+                "ipv4": "10.0.0.2",
+                "mac": "02:FC:00:00:00:01",
+                "network_name": "default",
+                "tap_device": "mvm-default-tap0",
+            },
+            "assets": {
+                "image_name": "Ubuntu 24.04",
+                "kernel_version": "6.1.0",
+                "binary_name": "firecracker",
+            },
+            "filesystem": {
+                "vm_dir": "/tmp/vm",
+                "rootfs_path": "/tmp/vm/rootfs.ext4",
+                "config_path": "/tmp/vm/vm.json",
+                "log_path": "/tmp/vm/fc.log",
+                "serial_output_path": "/tmp/vm/serial.log",
+            },
+            "console": {
+                "relay_running": False,
+                "relay_pid": None,
+                "relay_socket_path": None,
+            },
         }
         result = runner.invoke(app, ["vm", "inspect", "myvm", "--tree"])
         assert result.exit_code == 0
@@ -882,39 +876,37 @@ class TestVMInspectTree:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_inspect_tree_with_nulls(self, mock_vm_op):
         mock_vm_op.inspect.return_value = {
-            "name": "nullvm",
-            "id": "null-id",
-            "status": "stopped",
-            "created_at": None,
-            "pid": None,
-            "exit_code": 0,
-            "vcpus": 1,
-            "mem_mib": 256,
-            "disk_mib": 1024,
-            "ipv4": None,
-            "mac": None,
-            "tap_device": None,
-            "network_name": None,
-            "network_id": None,
-            "image_id": "i" * 64,
-            "image_name": None,
-            "kernel_id": "k" * 64,
-            "kernel_version": None,
-            "binary_id": "b" * 64,
-            "binary_name": None,
-            "vm_dir": "/tmp/vm",
-            "rootfs_path": "/tmp/vm/rootfs.ext4",
-            "config_path": None,
-            "log_path": None,
-            "serial_output_path": None,
-            "relay_running": False,
-            "relay_pid": None,
-            "relay_socket_path": None,
-            "enable_pci": False,
-            "enable_console": False,
-            "enable_logging": True,
-            "enable_metrics": False,
-            "cloud_init_mode": "off",
+            "vm": {
+                "name": "nullvm",
+                "id": "null-id",
+                "status": "stopped",
+                "pid": None,
+                "exit_code": 0,
+            },
+            "resources": {"vcpus": 1, "mem": 256, "disk": 1024},
+            "networking": {
+                "ipv4": None,
+                "mac": None,
+                "network_name": None,
+                "tap_device": None,
+            },
+            "assets": {
+                "image_name": None,
+                "kernel_version": None,
+                "binary_name": None,
+            },
+            "filesystem": {
+                "vm_dir": "/tmp/vm",
+                "rootfs_path": "/tmp/vm/rootfs.ext4",
+                "config_path": None,
+                "log_path": None,
+                "serial_output_path": None,
+            },
+            "console": {
+                "relay_running": False,
+                "relay_pid": None,
+                "relay_socket_path": None,
+            },
         }
         result = runner.invoke(app, ["vm", "inspect", "nullvm", "--tree"])
         assert result.exit_code == 0

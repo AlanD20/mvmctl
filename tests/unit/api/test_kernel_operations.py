@@ -78,6 +78,7 @@ class TestKernelPull:
             return_value="kern-hash",
         )
         mock_repo = MagicMock()
+        mock_repo.get_by_type.return_value = None  # No existing kernel
         mocker.patch(
             "mvmctl.api.kernel_operations.KernelRepository",
             return_value=mock_repo,
@@ -121,9 +122,14 @@ class TestKernelPull:
         assert result.item.id == existing.id
 
     def test_pull_raises_on_bad_spec_count(self, mocker):
-        """pull() raises KernelError when spec count != 1."""
+        """pull() returns error result when spec count != 1."""
         mocker.patch("mvmctl.api.kernel_operations.Database")
-        mocker.patch("mvmctl.api.kernel_operations.KernelRepository")
+        mock_repo = MagicMock()
+        mock_repo.get_by_type.return_value = None  # No existing kernel
+        mocker.patch(
+            "mvmctl.api.kernel_operations.KernelRepository",
+            return_value=mock_repo,
+        )
         mock_request = MagicMock()
         resolved = MagicMock(kernel_type="firecracker", version="5.10")
         mock_request.resolve.return_value = resolved
@@ -137,6 +143,7 @@ class TestKernelPull:
         )
         result = KernelOperation.pull(MagicMock(kernel_type="firecracker"))
         assert result.status == "error"
+        assert "Expected exactly one" in result.message
 
 
 class TestKernelRemove:

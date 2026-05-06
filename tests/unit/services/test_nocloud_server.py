@@ -97,7 +97,7 @@ class TestStart:
     def test_start_spawns_subprocess(
         self, mock_popen: MagicMock, manager: NoCloudNetServerManager
     ) -> None:
-        mock_popen.return_value = MagicMock(pid=12345)
+        mock_popen.return_value = MagicMock(pid=12345, poll=lambda: None)
 
         url, port, pid = manager.start()
 
@@ -114,7 +114,7 @@ class TestStart:
     def test_start_passes_correct_args(
         self, mock_popen: MagicMock, manager: NoCloudNetServerManager
     ) -> None:
-        mock_popen.return_value = MagicMock(pid=12345)
+        mock_popen.return_value = MagicMock(pid=12345, poll=lambda: None)
 
         manager.start()
 
@@ -133,7 +133,7 @@ class TestStart:
     def test_start_raises_if_already_running(
         self, mock_popen: MagicMock, manager: NoCloudNetServerManager
     ) -> None:
-        mock_popen.return_value = MagicMock(pid=12345)
+        mock_popen.return_value = MagicMock(pid=12345, poll=lambda: None)
 
         manager.start()
         with pytest.raises(
@@ -143,8 +143,16 @@ class TestStart:
 
     @patch("mvmctl.services.nocloud_server.manager.subprocess.Popen")
     def test_start_handles_spawn_error(
-        self, mock_popen: MagicMock, manager: NoCloudNetServerManager
+        self, mock_popen: MagicMock, vm_path: Path
     ) -> None:
+        # Use fixed port to exercise the pre-allocated port error path
+        manager = NoCloudNetServerManager(
+            id="test-vm",
+            path=vm_path,
+            ipv4_gateway="127.0.0.1",
+            port=8080,
+            name="test-vm",
+        )
         mock_popen.side_effect = OSError("spawn failed")
 
         with pytest.raises(NoCloudServerError, match="Failed to spawn"):
@@ -162,7 +170,7 @@ class TestStart:
         mock_popen: MagicMock,
         manager: NoCloudNetServerManager,
     ) -> None:
-        mock_popen.return_value = MagicMock(pid=12345)
+        mock_popen.return_value = MagicMock(pid=12345, poll=lambda: None)
         mock_socket = MagicMock()
         mock_socket_class.return_value.__enter__.return_value = mock_socket
 
@@ -204,7 +212,7 @@ class TestStop:
         mock_popen: MagicMock,
         manager: NoCloudNetServerManager,
     ) -> None:
-        mock_popen.return_value = MagicMock(pid=12345)
+        mock_popen.return_value = MagicMock(pid=12345, poll=lambda: None)
         manager.start()
 
         with patch(
@@ -224,7 +232,7 @@ class TestStop:
         mock_popen: MagicMock,
         manager: NoCloudNetServerManager,
     ) -> None:
-        mock_popen.return_value = MagicMock(pid=12345)
+        mock_popen.return_value = MagicMock(pid=12345, poll=lambda: None)
         manager.start()
 
         with patch("mvmctl.services.nocloud_server.manager.os.kill"):
@@ -247,7 +255,7 @@ class TestStop:
         mock_popen: MagicMock,
         manager: NoCloudNetServerManager,
     ) -> None:
-        mock_popen.return_value = MagicMock(pid=12345)
+        mock_popen.return_value = MagicMock(pid=12345, poll=lambda: None)
         manager.start()
 
         with patch("mvmctl.services.nocloud_server.manager.os.kill"):
@@ -264,7 +272,7 @@ class TestStop:
         mock_popen: MagicMock,
         manager: NoCloudNetServerManager,
     ) -> None:
-        mock_popen.return_value = MagicMock(pid=12345)
+        mock_popen.return_value = MagicMock(pid=12345, poll=lambda: None)
         pid_file = manager._pid_path
         pid_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -288,7 +296,7 @@ class TestTerminate:
         mock_popen: MagicMock,
         manager: NoCloudNetServerManager,
     ) -> None:
-        mock_popen.return_value = MagicMock(pid=12345)
+        mock_popen.return_value = MagicMock(pid=12345, poll=lambda: None)
         manager.start()
 
         with patch(
@@ -323,7 +331,7 @@ class TestIsRunning:
         mock_popen: MagicMock,
         manager: NoCloudNetServerManager,
     ) -> None:
-        mock_popen.return_value = MagicMock(pid=12345)
+        mock_popen.return_value = MagicMock(pid=12345, poll=lambda: None)
         manager.start()
 
         with patch(

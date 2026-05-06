@@ -24,7 +24,7 @@ class NetworkRepository:
         """Return a network by its full 64-char ID, or None if not found."""
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM networks WHERE id = ? AND deleted_at IS NULL",
+                "SELECT * FROM networks WHERE id = ? AND deleted_at IS NULL AND is_present = 1",
                 (network_id,),
             ).fetchone()
         if row is None:
@@ -36,7 +36,7 @@ class NetworkRepository:
         """Return a network by name, or None if not found."""
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM networks WHERE name = ? AND deleted_at IS NULL",
+                "SELECT * FROM networks WHERE name = ? AND deleted_at IS NULL AND is_present = 1",
                 (name,),
             ).fetchone()
         if row is None:
@@ -48,7 +48,7 @@ class NetworkRepository:
         """Return all networks whose ID starts with prefix."""
         with self._db.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM networks WHERE id LIKE ? AND deleted_at IS NULL",
+                "SELECT * FROM networks WHERE id LIKE ? AND deleted_at IS NULL AND is_present = 1",
                 (f"{prefix}%",),
             ).fetchall()
         return [NetworkItem(**dict(row)) for row in rows]
@@ -127,7 +127,7 @@ class NetworkRepository:
         """Return the default network entry, or None if not set."""
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM networks WHERE is_default = 1 AND deleted_at IS NULL LIMIT 1"
+                "SELECT * FROM networks WHERE is_default = 1 AND deleted_at IS NULL AND is_present = 1 LIMIT 1"
             ).fetchone()
         if row is None:
             return None

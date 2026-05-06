@@ -262,7 +262,7 @@ class TestKeyCreateAdvanced:
                 (k for k in data if k["name"] == unique_key_name), None
             )
             assert key_entry is not None
-            assert key_entry.get("is_default") is True
+            assert key_entry.get("is_default")
         finally:
             _run_mvm(mvm_binary, "key", "rm", unique_key_name, check=False)
             _run_mvm(mvm_binary, "key", "set-default", "--clear", check=False)

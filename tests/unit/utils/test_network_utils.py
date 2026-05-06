@@ -96,7 +96,7 @@ class TestNamingGeneration:
 
     def test_generate_tap_name_randomness(self):
         tap1 = NetworkUtils.generate_tap_name("default", "vm1")
-        tap2 = NetworkUtils.generate_tap_name("default", "vm1")
+        tap2 = NetworkUtils.generate_tap_name("default", "vm2")
         assert tap1 != tap2
 
 

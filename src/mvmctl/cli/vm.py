@@ -324,19 +324,9 @@ def vm_rm(
         ..., help="VM names, ID prefixes, IPs, or MAC addresses"
     ),
     force: bool = typer.Option(False, "--force", "-f", help="Force removal"),
-    ip: str | None = typer.Option(None, "--ip", help="VM IP address"),
-    mac: str | None = typer.Option(None, "--mac", help="VM MAC address"),
-    name: str | None = typer.Option(None, "--name", "-n", help="VM name"),
 ) -> None:
     """Remove one or more VMs."""
-    ids = list(identifiers)
-    if ip is not None:
-        ids.append(ip)
-    if mac is not None:
-        ids.append(mac)
-    if name is not None:
-        ids.append(name)
-    VMOperation.remove(VMInput(identifiers=ids, force=force))
+    VMOperation.remove(VMInput(identifiers=list(identifiers), force=force))
     print_success("VMs removed")
 
 
@@ -346,19 +336,9 @@ def vm_start(
     identifier: str = typer.Argument(
         ..., help="VM name, ID prefix, IP, or MAC address"
     ),
-    ip: str | None = typer.Option(None, "--ip", help="VM IP address"),
-    mac: str | None = typer.Option(None, "--mac", help="VM MAC address"),
-    name: str | None = typer.Option(None, "--name", "-n", help="VM name"),
 ) -> None:
     """Start a stopped VM."""
-    ids = [identifier]
-    if ip is not None:
-        ids.append(ip)
-    if mac is not None:
-        ids.append(mac)
-    if name is not None:
-        ids.append(name)
-    VMOperation.start(VMInput(identifiers=ids))
+    VMOperation.start(VMInput(identifiers=[identifier]))
     print_success(f"VM '{identifier}' started")
 
 
@@ -369,19 +349,9 @@ def vm_stop(
         ..., help="VM name, ID prefix, IP, or MAC address"
     ),
     force: bool = typer.Option(False, "--force", "-f", help="Force stop"),
-    ip: str | None = typer.Option(None, "--ip", help="VM IP address"),
-    mac: str | None = typer.Option(None, "--mac", help="VM MAC address"),
-    name: str | None = typer.Option(None, "--name", "-n", help="VM name"),
 ) -> None:
     """Stop a running VM."""
-    ids = [identifier]
-    if ip is not None:
-        ids.append(ip)
-    if mac is not None:
-        ids.append(mac)
-    if name is not None:
-        ids.append(name)
-    VMOperation.stop(VMInput(identifiers=ids, force=force))
+    VMOperation.stop(VMInput(identifiers=[identifier], force=force))
     print_success(f"VM '{identifier}' stopped")
 
 
@@ -392,19 +362,9 @@ def vm_reboot(
         ..., help="VM name, ID prefix, IP, or MAC address"
     ),
     force: bool = typer.Option(False, "--force", "-f", help="Force reboot"),
-    ip: str | None = typer.Option(None, "--ip", help="VM IP address"),
-    mac: str | None = typer.Option(None, "--mac", help="VM MAC address"),
-    name: str | None = typer.Option(None, "--name", "-n", help="VM name"),
 ) -> None:
     """Reboot a VM."""
-    ids = [identifier]
-    if ip is not None:
-        ids.append(ip)
-    if mac is not None:
-        ids.append(mac)
-    if name is not None:
-        ids.append(name)
-    VMOperation.reboot(VMInput(identifiers=ids, force=force))
+    VMOperation.reboot(VMInput(identifiers=[identifier], force=force))
     print_success(f"VM '{identifier}' rebooted")
 
 
@@ -414,19 +374,9 @@ def vm_pause(
     identifier: str = typer.Argument(
         ..., help="VM name, ID prefix, IP, or MAC address"
     ),
-    ip: str | None = typer.Option(None, "--ip", help="VM IP address"),
-    mac: str | None = typer.Option(None, "--mac", help="VM MAC address"),
-    name: str | None = typer.Option(None, "--name", "-n", help="VM name"),
 ) -> None:
     """Pause a running VM."""
-    ids = [identifier]
-    if ip is not None:
-        ids.append(ip)
-    if mac is not None:
-        ids.append(mac)
-    if name is not None:
-        ids.append(name)
-    VMOperation.pause(VMInput(identifiers=ids))
+    VMOperation.pause(VMInput(identifiers=[identifier]))
     print_success(f"VM '{identifier}' paused")
 
 
@@ -436,19 +386,9 @@ def vm_resume(
     identifier: str = typer.Argument(
         ..., help="VM name, ID prefix, IP, or MAC address"
     ),
-    ip: str | None = typer.Option(None, "--ip", help="VM IP address"),
-    mac: str | None = typer.Option(None, "--mac", help="VM MAC address"),
-    name: str | None = typer.Option(None, "--name", "-n", help="VM name"),
 ) -> None:
     """Resume a paused VM."""
-    ids = [identifier]
-    if ip is not None:
-        ids.append(ip)
-    if mac is not None:
-        ids.append(mac)
-    if name is not None:
-        ids.append(name)
-    VMOperation.resume(VMInput(identifiers=ids))
+    VMOperation.resume(VMInput(identifiers=[identifier]))
     print_success(f"VM '{identifier}' resumed")
 
 
@@ -460,20 +400,15 @@ def vm_snapshot(
     ),
     mem_file: Path = typer.Argument(..., help="Memory snapshot output path"),
     state_file: Path = typer.Argument(..., help="State snapshot output path"),
-    ip: str | None = typer.Option(None, "--ip", help="VM IP address"),
-    mac: str | None = typer.Option(None, "--mac", help="VM MAC address"),
-    name: str | None = typer.Option(None, "--name", "-n", help="VM name"),
 ) -> None:
     """Snapshot VM memory and disk state."""
-    ids = [identifier]
-    if ip is not None:
-        ids.append(ip)
-    if mac is not None:
-        ids.append(mac)
-    if name is not None:
-        ids.append(name)
-    VMOperation.snapshot(VMInput(identifiers=ids), mem_file, state_file)
-    print_success(f"VM '{identifier}' snapshot saved")
+    result = VMOperation.snapshot(
+        VMInput(identifiers=[identifier]), mem_file, state_file
+    )
+    if result.is_error:
+        print_error(result.message)
+        raise typer.Exit(code=1)
+    print_success(result.message or f"VM '{identifier}' snapshot saved")
 
 
 @vm_app.command(name="load")
@@ -487,20 +422,10 @@ def vm_load(
     resume: bool = typer.Option(
         False, "--resume", help="Resume VM after loading"
     ),
-    ip: str | None = typer.Option(None, "--ip", help="VM IP address"),
-    mac: str | None = typer.Option(None, "--mac", help="VM MAC address"),
-    name: str | None = typer.Option(None, "--name", "-n", help="VM name"),
 ) -> None:
     """Load VM from snapshot."""
-    ids = [identifier]
-    if ip is not None:
-        ids.append(ip)
-    if mac is not None:
-        ids.append(mac)
-    if name is not None:
-        ids.append(name)
     VMOperation.load_snapshot(
-        VMInput(identifiers=ids),
+        VMInput(identifiers=[identifier]),
         mem_file,
         state_file,
         resume_after=resume,
@@ -516,19 +441,9 @@ def vm_inspect(
     ),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     tree: bool = typer.Option(False, "--tree", help="Output in tree format"),
-    ip: str | None = typer.Option(None, "--ip", help="VM IP address"),
-    mac: str | None = typer.Option(None, "--mac", help="VM MAC address"),
-    name: str | None = typer.Option(None, "--name", "-n", help="VM name"),
 ) -> None:
     """Show detailed information about a VM."""
-    ids = [identifier]
-    if ip is not None:
-        ids.append(ip)
-    if mac is not None:
-        ids.append(mac)
-    if name is not None:
-        ids.append(name)
-    info = VMOperation.inspect(VMInput(identifiers=ids), tree=tree)
+    info = VMOperation.inspect(VMInput(identifiers=[identifier]), tree=tree)
 
     if json_output:
         typer.echo(json.dumps(info, indent=2, default=str))
@@ -607,63 +522,71 @@ def vm_inspect(
 
 
 def _print_vm_inspect_tree(info: dict[str, Any]) -> None:
-    """Print VM inspection info in tree format."""
-    print(f"{info['name']}")
+    """Print VM inspection info in tree format.
+
+    API returns nested dict when tree=True:
+        info['vm']         -> name, id, status, pid, exit_code
+        info['resources']  -> vcpus, mem, disk
+        info['networking'] -> ipv4, mac, network_name, tap_device
+        info['assets']     -> image_name, kernel_version, binary_name
+        info['filesystem'] -> vm_dir, rootfs_path, config_path, log_path, serial_output_path
+        info['console']    -> relay_running, relay_pid, relay_socket_path
+    """
+    vm = info["vm"]
+    resources = info["resources"]
+    networking = info["networking"]
+    assets = info["assets"]
+    fs = info["filesystem"]
+    console = info["console"]
+
+    print(f"{vm['name']}")
 
     tree_lines: list[str] = []
     tree_lines.append("├── VM")
-    tree_lines.append(f"│   ├── Name:       {info['name']}")
-    tree_lines.append(f"│   ├── ID:         {info['id']}")
-    tree_lines.append(f"│   ├── Status:     {info['status']}")
+    tree_lines.append(f"│   ├── Name:       {vm['name']}")
+    tree_lines.append(f"│   ├── ID:         {vm['id']}")
+    tree_lines.append(f"│   ├── Status:     {vm['status']}")
     tree_lines.append(
-        f"│   ├── PID:        {info['pid'] if info['pid'] is not None else '-'}"
+        f"│   ├── PID:        {vm['pid'] if vm['pid'] is not None else '-'}"
     )
     tree_lines.append(
-        f"│   └── Exit Code:  {info['exit_code'] if info['exit_code'] is not None else '-'}"
+        f"│   └── Exit Code:  {vm['exit_code'] if vm['exit_code'] is not None else '-'}"
     )
 
     tree_lines.append("├── Resources")
-    tree_lines.append(f"│   ├── vCPUs:      {info['vcpus']}")
-    tree_lines.append(f"│   ├── Memory:     {info['mem_mib']} MiB")
-    tree_lines.append(f"│   └── Disk:       {info['disk_mib']} MiB")
+    tree_lines.append(f"│   ├── vCPUs:      {resources['vcpus']}")
+    tree_lines.append(f"│   ├── Memory:     {resources['mem']} MiB")
+    tree_lines.append(f"│   └── Disk:       {resources['disk']} MiB")
 
     tree_lines.append("├── Networking")
-    tree_lines.append(f"│   ├── IPv4:       {info['ipv4'] or '-'}")
-    tree_lines.append(f"│   ├── MAC:        {info['mac'] or '-'}")
+    tree_lines.append(f"│   ├── IPv4:       {networking['ipv4'] or '-'}")
+    tree_lines.append(f"│   ├── MAC:        {networking['mac'] or '-'}")
     tree_lines.append(
-        f"│   ├── Network:    {info['network_name'] or info['network_id'][:6] if info['network_id'] else '-'}"
+        f"│   ├── Network:    {networking['network_name'] or '-'}"
     )
-    tree_lines.append(f"│   └── TAP:        {info['tap_device'] or '-'}")
+    tree_lines.append(f"│   └── TAP:        {networking['tap_device'] or '-'}")
 
     tree_lines.append("├── Assets")
-    tree_lines.append(
-        f"│   ├── Image:      {info['image_name'] or info['image_id'][:6] if info['image_id'] else '-'}"
-    )
-    tree_lines.append(
-        f"│   ├── Kernel:     {info['kernel_version'] or info['kernel_id'][:6] if info['kernel_id'] else '-'}"
-    )
-    tree_lines.append(
-        f"│   └── Binary:     {info['binary_name'] or info['binary_id'][:6] if info['binary_id'] else '-'}"
-    )
+    tree_lines.append(f"│   ├── Image:      {assets['image_name'] or '-'}")
+    tree_lines.append(f"│   ├── Kernel:     {assets['kernel_version'] or '-'}")
+    tree_lines.append(f"│   └── Binary:     {assets['binary_name'] or '-'}")
 
     tree_lines.append("├── Filesystem")
-    tree_lines.append(f"│   ├── VM Dir:     {info['vm_dir']}")
-    tree_lines.append(f"│   ├── Rootfs:     {info['rootfs_path']}")
-    tree_lines.append(f"│   ├── Config:     {info['config_path'] or '-'}")
-    tree_lines.append(f"│   ├── Log:        {info['log_path'] or '-'}")
-    tree_lines.append(
-        f"│   └── Serial:     {info['serial_output_path'] or '-'}"
-    )
+    tree_lines.append(f"│   ├── VM Dir:     {fs['vm_dir']}")
+    tree_lines.append(f"│   ├── Rootfs:     {fs['rootfs_path']}")
+    tree_lines.append(f"│   ├── Config:     {fs['config_path'] or '-'}")
+    tree_lines.append(f"│   ├── Log:        {fs['log_path'] or '-'}")
+    tree_lines.append(f"│   └── Serial:     {fs['serial_output_path'] or '-'}")
 
     tree_lines.append("└── Console")
     tree_lines.append(
-        f"    ├── Relay Running:  {'yes' if info['relay_running'] else 'no'}"
+        f"    ├── Relay Running:  {'yes' if console['relay_running'] else 'no'}"
     )
     tree_lines.append(
-        f"    ├── Relay PID:      {info['relay_pid'] if info['relay_pid'] is not None else '-'}"
+        f"    ├── Relay PID:      {console['relay_pid'] if console['relay_pid'] is not None else '-'}"
     )
     tree_lines.append(
-        f"    └── Relay Socket:   {info['relay_socket_path'] or '-'}"
+        f"    └── Relay Socket:   {console['relay_socket_path'] or '-'}"
     )
 
     for line in tree_lines:

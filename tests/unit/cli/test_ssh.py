@@ -20,7 +20,7 @@ class TestSSH:
         mock_ssh_op.connect.return_value = OperationResult(
             status="success", code="ssh.connected", item=0
         )
-        result = runner.invoke(app, ["ssh", "--name", "myvm"])
+        result = runner.invoke(app, ["ssh", "myvm"])
         assert result.exit_code == 0
 
     @patch("mvmctl.cli.ssh.SSHOperation")
@@ -31,7 +31,7 @@ class TestSSH:
             message="SSH connection failed",
             item=1,
         )
-        result = runner.invoke(app, ["ssh", "--name", "badvm"])
+        result = runner.invoke(app, ["ssh", "badvm"])
         assert result.exit_code == 1
 
     @patch("mvmctl.cli.ssh.SSHOperation")
@@ -40,7 +40,7 @@ class TestSSH:
             status="success", code="ssh.connected", item=0
         )
         result = runner.invoke(
-            app, ["ssh", "--name", "myvm", "--user", "admin"]
+            app, ["ssh", "myvm", "--user", "admin"]
         )
         assert result.exit_code == 0
         call_input = mock_ssh_op.connect.call_args[0][0]
@@ -52,7 +52,7 @@ class TestSSH:
             status="success", code="ssh.connected", item=0
         )
         result = runner.invoke(
-            app, ["ssh", "--name", "myvm", "--cmd", "ls -la"]
+            app, ["ssh", "myvm", "--cmd", "ls -la"]
         )
         assert result.exit_code == 0
         call_input = mock_ssh_op.connect.call_args[0][0]
@@ -66,7 +66,7 @@ class TestSSH:
         key_file = tmp_path / "test_key"
         key_file.write_text("private key")
         result = runner.invoke(
-            app, ["ssh", "--name", "myvm", "--key", str(key_file)]
+            app, ["ssh", "myvm", "--key", str(key_file)]
         )
         assert result.exit_code == 0
         call_input = mock_ssh_op.connect.call_args[0][0]
@@ -77,7 +77,7 @@ class TestSSH:
         mock_ssh_op.connect.return_value = OperationResult(
             status="success", code="ssh.connected", item=0
         )
-        result = runner.invoke(app, ["ssh", "--ip", "10.0.0.2"])
+        result = runner.invoke(app, ["ssh", "10.0.0.2"])
         assert result.exit_code == 0
 
     @patch("mvmctl.cli.ssh.SSHOperation")
@@ -88,9 +88,8 @@ class TestSSH:
         result = runner.invoke(app, ["ssh", "myvm"])
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.ssh.SSHOperation")
-    def test_ssh_no_args(self, mock_ssh_op):
-        """No args shows help."""
+    def test_ssh_no_args(self):
+        """No args shows help (no_args_is_help=True)."""
         result = runner.invoke(app, ["ssh"])
         assert result.exit_code == 0
 

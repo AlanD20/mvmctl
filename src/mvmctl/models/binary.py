@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from mvmctl.utils.common import CommonUtils
+
 
 @dataclass
 class BinaryItem:
@@ -27,6 +29,10 @@ class BinaryItem:
     created_at: str
     updated_at: str
     deleted_at: str | None = None
+
+    def __post_init__(self) -> None:
+        """Coerce bool fields loaded from SQLite."""
+        CommonUtils.coerce_bool_fields(self, {"is_default", "is_present"})
 
     @property
     def resolved_path(self) -> Path:

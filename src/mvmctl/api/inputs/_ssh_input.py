@@ -23,13 +23,10 @@ logger = logging.getLogger(__name__)
 class SSHInput:
     """Raw SSH identifiers from CLI."""
 
-    vm_id: str | None = None
+    identifier: str
     user: str | None = None
     key: Path | None = None
     cmd: str | None = None
-    ip: str | None = None
-    name: str | None = None
-    mac: str | None = None
 
 
 @dataclass(frozen=True)
@@ -67,22 +64,17 @@ class SSHRequest:
         Resolve target to an IP address.
 
         Resolution order:
-        1. Pick the first non-None identifier from: --ip, --name, --mac, vm_id
-        2. Try to resolve it as a VM entity (handles name, IP, MAC, ID prefix)
+        1. Use identifier from SSHInput (handles name, IP, MAC, ID prefix)
+        2. Try to resolve it as a VM entity
         3. If resolved, returns the VM's ipv4 and sets self._vm for key resolution
-        4. If not resolved (e.g. IP not in DB), falls back to the raw identifier
+        4. If not resolved (e.g. raw IP not in DB), falls back to the raw identifier
         5. Error if no identifier provided at all
         """
-        target = (
-            self._inputs.ip
-            or self._inputs.name
-            or self._inputs.mac
-            or self._inputs.vm_id
-        )
+        target = self._inputs.identifier
 
         if target is None:
             raise SSHError(
-                "Provide either a VM identifier, --name, --mac, or --ip"
+                "Provide a VM identifier (name, ID prefix, IP, or MAC address)"
             )
 
         # Try to resolve as a VM entity — handles names, IPs, MACs, ID prefixes
@@ -95,7 +87,7 @@ class SSHRequest:
         except Exception:
             pass
 
-        # Fallback: use the raw identifier (e.g. --ip for a VM not in DB)
+        # Fallback: use the raw identifier (e.g. IP for a VM not in DB)
         return target
 
     def _resolve_user(self) -> str:

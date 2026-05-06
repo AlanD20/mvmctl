@@ -35,7 +35,7 @@ class ImageRepository:
         """Return all images whose ID starts with prefix."""
         with self._db.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM images WHERE id LIKE ? AND deleted_at IS NULL",
+                "SELECT * FROM images WHERE id LIKE ? AND deleted_at IS NULL AND is_present = 1",
                 (f"{prefix}%",),
             ).fetchall()
         return [ImageItem(**dict(row)) for row in rows]
@@ -45,7 +45,7 @@ class ImageRepository:
         """Return an image by its os_slug, or None if not found."""
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM images WHERE os_slug = ? AND deleted_at IS NULL",
+                "SELECT * FROM images WHERE os_slug = ? AND deleted_at IS NULL AND is_present = 1",
                 (os_slug,),
             ).fetchone()
         if row is None:
@@ -138,7 +138,7 @@ class ImageRepository:
         """Return the default image entry, or None if not set."""
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM images WHERE is_default = 1 LIMIT 1"
+                "SELECT * FROM images WHERE is_default = 1 AND is_present = 1 LIMIT 1"
             ).fetchone()
         if row is None:
             return None

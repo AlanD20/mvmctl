@@ -35,7 +35,7 @@ class TestSSHOperationConnect:
 
         # OperationResult check
         _connect = SSHOperation.connect(
-            SSHInput(name="test-vm", user="ubuntu", cmd="uptime")
+            SSHInput(identifier="test-vm", user="ubuntu", cmd="uptime")
         )
 
         assert _connect.item == 0
@@ -68,7 +68,7 @@ class TestSSHOperationConnect:
         mock_ssh_service.connect.return_value = 0
 
         # OperationResult check
-        _connect = SSHOperation.connect(SSHInput(name="test-vm", user="ubuntu"))
+        _connect = SSHOperation.connect(SSHInput(identifier="test-vm", user="ubuntu"))
 
         assert _connect.item == 0
         mock_ssh_service.connect.assert_called_once_with(
@@ -100,7 +100,7 @@ class TestSSHOperationConnect:
         mock_ssh_service.connect.return_value = 1
 
         # OperationResult check
-        _connect = SSHOperation.connect(SSHInput(name="test-vm", cmd="false"))
+        _connect = SSHOperation.connect(SSHInput(identifier="test-vm", cmd="false"))
 
         assert _connect.item == 1
 
@@ -126,7 +126,7 @@ class TestSSHOperationConnect:
 
         mock_audit = mocker.patch("mvmctl.utils.auditlog.AuditLog.log")
 
-        SSHOperation.connect(SSHInput(name="test-vm", user="root"))
+        SSHOperation.connect(SSHInput(identifier="test-vm", user="root"))
 
         mock_audit.assert_called_once_with(
             "vm.ssh",

@@ -255,6 +255,7 @@ class ProvisionerContent:
 
         if user != "root":
             ops.append(ChrootOp(f"useradd -m {user}"))
+            ops.append(ChrootOp("mkdir -p /etc/sudoers.d"))
             ops.append(
                 ChrootOp(
                     f"echo '{user} ALL=(ALL) NOPASSWD: ALL' > "

@@ -10,6 +10,7 @@ from mvmctl.constants import (
     MVM_NOCLOUD_NET_INPUT_CHAIN,
     MVM_POSTROUTING_CHAIN,
 )
+from mvmctl.utils.common import CommonUtils
 
 
 class IPTablesTable(str, Enum):
@@ -77,6 +78,18 @@ class NetworkItem:
 
     nat_gateways: str | None = None
 
+    def __post_init__(self) -> None:
+        """Coerce bool fields loaded from SQLite."""
+        CommonUtils.coerce_bool_fields(
+            self,
+            {
+                "bridge_active",
+                "nat_enabled",
+                "is_default",
+                "is_present",
+            },
+        )
+
     # Resolved relations
     leases: list[NetworkLeaseItem] | None = None
     iptables_rules: list[IPTablesRuleItem] | None = None
@@ -126,3 +139,7 @@ class IPTablesRuleItem:
     command_string: str | None = None
     created_at: str | None = None
     last_verified_at: str | None = None
+
+    def __post_init__(self) -> None:
+        """Coerce bool fields loaded from SQLite."""
+        CommonUtils.coerce_bool_fields(self, {"is_active"})

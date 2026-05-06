@@ -29,12 +29,9 @@ console_app = typer.Typer(
 @handle_errors
 def console(
     ctx: typer.Context,
-    identifier: str | None = typer.Argument(
-        None, help="VM name, ID, IP, or MAC address"
+    identifier: str = typer.Argument(
+        ..., help="VM name, ID, IP, or MAC address"
     ),
-    name: str | None = typer.Option(None, "--name", "-n", help="VM name"),
-    ip: str | None = typer.Option(None, "--ip", help="VM guest IP address"),
-    mac: str | None = typer.Option(None, "--mac", help="VM guest MAC address"),
     state: bool = typer.Option(
         False, "--state", help="Show console state without attaching"
     ),
@@ -43,62 +40,53 @@ def console(
     """
     Attach to a VM console.
 
-    Provide a VM identifier as a positional argument, or use
-    --name, --ip, or --mac to specify the VM explicitly.
+    Provide a VM identifier (name, ID prefix, IP, or MAC address) as the
+    positional argument.
 
     Press Ctrl+X then D to detach from the console.
     """
     if ctx.invoked_subcommand is not None:
         return
 
-    # Resolve identifier: explicit flags take priority, then positional
-    vm_id: str | None = name or ip or mac or identifier
-    if not vm_id:
-        print_error(
-            "Provide a VM name, ID, IP, or MAC as argument, "
-            "or use --name, --ip, or --mac"
-        )
-        raise typer.Exit(1)
-
     if state:
-        _show_console_state(vm_id)
+        _show_console_state(identifier)
     elif kill:
-        _kill_console_relay(vm_id)
+        _kill_console_relay(identifier)
     else:
-        _attach_to_console(vm_id)
+        _attach_to_console(identifier)
 
 
-def _show_console_state(vm_id: str) -> None:
+def _show_console_state(identifier: str) -> None:
     """Display console relay state for a VM."""
-    state_dict = ConsoleOperation.get_state(vm_id)
+    state_dict = ConsoleOperation.get_state(identifier)
 
     status = "running" if state_dict["running"] else "stopped"
-    print_info(f"Console for '{vm_id}': {status}")
+    print_info(f"Console for '{identifier}': {status}")
     if state_dict["pid"]:
         print_info(f"  PID: {state_dict['pid']}")
     if state_dict["socket_path"]:
         print_info(f"  Socket: {state_dict['socket_path']}")
 
 
-def _kill_console_relay(vm_id: str) -> None:
+def _kill_console_relay(identifier: str) -> None:
     """Kill the console relay for a VM."""
-    result = ConsoleOperation.kill(vm_id)
+    result = ConsoleOperation.kill(identifier)
 
     if result.status == "success":
-        print_success(f"Console relay stopped for '{vm_id}'")
+        print_success(f"Console relay stopped for '{identifier}'")
     elif result.status == "skipped":
-        print_error(f"No console relay running for '{vm_id}'")
+        print_error(f"No console relay running for '{identifier}'")
         raise typer.Exit(1)
     else:
         print_error(
-            result.message or f"Failed to stop console relay for '{vm_id}'"
+            result.message or f"Failed to stop console relay for '{identifier}'"
         )
         raise typer.Exit(1)
 
 
-def _attach_to_console(vm_id: str) -> None:
+def _attach_to_console(identifier: str) -> None:
     """Attach to VM console interactively."""
-    attach_info = ConsoleOperation.get_connection_info(vm_id)
+    attach_info = ConsoleOperation.get_connection_info(identifier)
 
     print_info(f"Attaching to console of '{attach_info.vm_name}'...")
     print_info("Press Ctrl+X then D to detach")

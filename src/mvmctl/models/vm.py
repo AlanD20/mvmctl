@@ -12,6 +12,7 @@ from mvmctl.models.binary import BinaryItem
 from mvmctl.models.image import ImageItem
 from mvmctl.models.kernel import KernelItem
 from mvmctl.models.network import NetworkItem
+from mvmctl.utils.common import CommonUtils
 
 
 class VMStatus(StrEnum):
@@ -75,6 +76,15 @@ class VMInstanceItem:
         """Deserialize ssh_keys from JSON string when loading from DB."""
         if isinstance(self.ssh_keys, str):
             self.ssh_keys = json.loads(self.ssh_keys)
+        CommonUtils.coerce_bool_fields(
+            self,
+            {
+                "enable_pci",
+                "enable_logging",
+                "enable_metrics",
+                "enable_console",
+            },
+        )
 
     # Resolved relations
     kernel: KernelItem | None = None

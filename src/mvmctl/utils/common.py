@@ -472,6 +472,24 @@ class CommonUtils:
             return "   "
 
     @staticmethod
+    def coerce_bool_fields(instance: object, field_names: set[str]) -> None:
+        """Coerce specified fields to Python bool.
+
+        SQLite returns integers (0/1) for boolean columns. This coerces
+        them to proper Python bool values. Idempotent for already-correct
+        bool values.
+
+        Args:
+            instance: Dataclass instance with the fields.
+            field_names: Set of field names to coerce.
+
+        """
+        for name in field_names:
+            value = getattr(instance, name)
+            if not isinstance(value, bool):
+                setattr(instance, name, bool(value))
+
+    @staticmethod
     def coerce(value: Any, expected_type: type) -> Any:
         """
         Coerce a value to the expected type.

@@ -6,6 +6,8 @@ import platform
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from mvmctl.utils.common import CommonUtils
+
 if TYPE_CHECKING:
     from mvmctl.models.vm import VMInstanceItem
 
@@ -34,6 +36,10 @@ class ImageItem:
     compressed_format: str | None = None
     deleted_at: str | None = None
     vms: list[VMInstanceItem] | None = None
+
+    def __post_init__(self) -> None:
+        """Coerce bool fields loaded from SQLite."""
+        CommonUtils.coerce_bool_fields(self, {"is_default", "is_present"})
 
 
 @dataclass
