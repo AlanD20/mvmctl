@@ -1,7 +1,7 @@
 # Active Improvements
 
 This document tracks incomplete improvements and planned features.
-For completed items, see [docs/IMPROVEMENTS_ARCHIVE.md](IMPROVEMENTS_ARCHIVE.md).
+For completed items, see [archives/IMPROVEMENTS_001_ARCHIVED.md](archives/IMPROVEMENTS_001_ARCHIVED.md).
 
 ## Project Guidelines
 

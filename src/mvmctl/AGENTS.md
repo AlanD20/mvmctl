@@ -11,6 +11,7 @@ Main Python package for the `mvmctl` microVM CLI. This root orchestrates the laz
 | `core/` | Isolated business logic and Firecracker interactions |
 | `models/` | Pure `@dataclass` objects for domain data |
 | `utils/` | Shared tool wrappers and filesystem helpers |
+| `tui/` | Textual TUI application (domain/, screens/, widgets/) |
 | `assets/` | Bundled YAML configs (images, kernels) |
 | `services/` | Long-running subprocesses (console relay, etc.) |
 | `db/` | SQLite schema, migrations, and ORM models |
@@ -18,7 +19,7 @@ Main Python package for the `mvmctl` microVM CLI. This root orchestrates the laz
 ## WHERE TO LOOK
 
 - `main.py` — Entry point. Implements `LazyMVMGroup` (Click) to lazy-load Typer sub-apps.
-- `constants.py` — Single source of truth. Defines `DEFAULT_*` and `FALLBACK_*` values.
+- `constants.py` — Single source of truth. Defines `OVERRIDABLE_DEFAULTS` dict and standalone constants.
 - `exceptions.py` — Typed exception hierarchy. All custom errors inherit from `MVMError`.
 - `__init__.py` — Package metadata. Contains only `__version__`.
 

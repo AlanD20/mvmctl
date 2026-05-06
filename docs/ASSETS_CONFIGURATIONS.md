@@ -4,8 +4,9 @@ This document describes the three bundled YAML files that drive asset management
 `mvm`, how each field is interpreted at runtime, and how to extend them.
 
 All three files live under `src/mvmctl/assets/` and are packaged into the installed
-wheel. They are read-only at runtime — user overrides are resolved from runtime state
-(`~/.cache/mvmctl/metadata.json`) and `MVM_*` environment variables, not by editing
+wheel. They are read-only at runtime — user overrides are resolved from the SQLite
+database (`~/.cache/mvmctl/mvmdb.db`), runtime config (`~/.config/mvmctl/config.json`),
+and `MVM_*` environment variables, not by editing
 these files directly. Images and
 kernels remain as `images.yaml` and `kernels.yaml` respectively.
 
@@ -180,7 +181,7 @@ kernel-firecracker:
 | `config_fragments` | Paths or URLs to additional kernel config files merged on top of the base config. |
 | `output_name` | Base filename for the compiled or downloaded `vmlinux` binary in the kernels cache. |
 | `build_dir` | Working directory for the kernel compilation. Cleaned up automatically unless `--keep-build-dir` is passed. |
-| `parallel_jobs` | `make -j` value. `null` defers to `defaults.kernel.build_jobs` (default: 4). |
+| `parallel_jobs` | `make -j` value. `null` defers to `defaults.kernel.build_jobs` (default: `None` = all available cores via `os.cpu_count()`). |
 | `enabled_configs` | List of kernel `CONFIG_*` options passed to `scripts/config --enable`. |
 | `disabled_configs` | List of kernel `CONFIG_*` options passed to `scripts/config --disable`. |
 | `set_val_configs` | List of `{option, value}` pairs passed to `scripts/config --set-val`. |
@@ -217,13 +218,13 @@ and other fixed values.
 |-----|---------|-------------|
 | `version` | `6.19.9` | Default kernel version |
 | `arch` | `x86_64` | Default architecture |
-| `build_jobs` | `4` | Parallel compilation jobs (`make -j`) |
+| `build_jobs` | `None` | Parallel compilation jobs (`None` = all available cores via `os.cpu_count()`) |
 
 ### Related constants
 
 | Constant | Source | Description |
 |----------|--------|-------------|
-| `DEFAULT_FIRECRACKER_CI_VERSION` | `constants.py` (standalone constant) | CI version used when config lookup fails — resolves to `v1.15` at runtime |
+| `DEFAULT_FIRECRACKER_CI_VERSION` | `constants.py` (standalone constant) | CI version used when config lookup fails — resolves to `v1.15` at runtime (standalone constant in `constants.py`) |
 
 ---
 
@@ -233,11 +234,10 @@ Values are resolved in this order, from lowest to highest precedence:
 
 ```
 1. `OVERRIDABLE_DEFAULTS` dict in `constants.py` (fallback defaults — these are the floor)
-2. Runtime state files:
-   - `~/.config/mvmctl/config.json` for general config and assets paths
-   - `~/.cache/mvmctl/metadata.json` for image/kernel/binary defaults (`is_default`)
-3. MVM_* environment variables (e.g. MVM_CACHE_DIR, MVM_KERNEL)
-4. CLI flags (e.g. --out, --force, --arch)
+2. SQLite database (`~/.cache/mvmctl/mvmdb.db`) — canonical store for asset defaults (`is_default` markers) and runtime state
+3. Runtime config file: `~/.config/mvmctl/config.json` for user overrides  
+4. `MVM_*` environment variables (e.g. MVM_CACHE_DIR, MVM_KERNEL)
+5. CLI flags (e.g. --out, --force, --arch)
 ```
 
 `images.yaml` and `kernels.yaml` define the available asset catalogue and are not part
@@ -307,19 +307,19 @@ uv run mvm image pull <your-new-id>
 exposes both inline constants and lazily-resolved values. The table below lists
 the constants relevant to asset management.
 
-| Constant | Source key | Description |
-|----------|------------|-------------|
-| `DEFAULT_KERNEL_VERSION` | `defaults.kernel.version` | Default version for `mvm kernel pull --type official` |
-| `DEFAULT_KERNEL_ARCH` | `defaults.kernel.arch` | Default architecture for kernel operations |
-| `DEFAULT_IMAGE_ARCH` | `defaults.image.arch` | Default architecture for image operations |
-| `DEFAULT_FIRECRACKER_CI_VERSION` | runtime-resolved | CI version used when config lookup fails |
-| `SUPPORTED_IMAGE_EXTENSIONS` | inline constant | File extensions scanned for cached images |
-| `IMAGE_IMPORT_FORMAT_MAP` | inline constant | Extension → format auto-detection table |
-| `HTTP_TIMEOUT_KERNEL_DOWNLOAD_S` | inline constant | Timeout (seconds) for kernel tarball download |
-| `HTTP_TIMEOUT_KERNEL_CONFIG_S` | inline constant | Timeout for kernel config download |
-| `HTTP_TIMEOUT_SHA256_FETCH_S` | inline constant | Timeout for SHA-256 checksum fetch |
-| `FIRECRACKER_GITHUB_RELEASES_API_URL` | inline constant | GitHub API endpoint for Firecracker releases |
-| `FIRECRACKER_GITHUB_DOWNLOAD_URL` | inline constant | Base URL for Firecracker release assets |
+| Access pattern | Config path | Description |
+|----------------|-------------|-------------|
+| `get_default("defaults.kernel", "version")` | `defaults.kernel.version` | Default version for `mvm kernel pull --type official` |
+| `get_default("defaults.kernel", "arch")` | `defaults.kernel.arch` | Default architecture for kernel operations |
+| `get_default("defaults.image", "arch")` | `defaults.image.arch` | Default architecture for image operations |
+| `DEFAULT_FIRECRACKER_CI_VERSION` (standalone constant) | `constants.py:119` | CI version used when config lookup fails |
+| `SUPPORTED_IMAGE_EXTENSIONS` (standalone constant) | `constants.py:142` | File extensions scanned for cached images |
+| `IMAGE_IMPORT_FORMAT_MAP` (standalone constant) | `constants.py:151` | Extension → format auto-detection table |
+| `HTTP_TIMEOUT_KERNEL_DOWNLOAD_S` (standalone constant) | `constants.py:290` | Timeout (seconds) for kernel tarball download |
+| `HTTP_TIMEOUT_KERNEL_CONFIG_S` (standalone constant) | `constants.py:291` | Timeout for kernel config download |
+| `HTTP_TIMEOUT_SHA256_FETCH_S` (standalone constant) | `constants.py:292` | Timeout for SHA-256 checksum fetch |
+| `FIRECRACKER_GITHUB_RELEASES_API_URL` (standalone constant) | `constants.py:308` | GitHub API endpoint for Firecracker releases |
+| `FIRECRACKER_GITHUB_DOWNLOAD_URL` (standalone constant) | `constants.py:311` | Base URL for Firecracker release assets |
 
 > **Note:** The kernel config lists (`enabled_configs`, `disabled_configs`, `set_val_configs`,
 > `required_settings`) are defined per-kernel in `kernels.yaml`, not as module-level constants.

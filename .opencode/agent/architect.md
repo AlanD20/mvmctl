@@ -697,11 +697,11 @@ api/inputs/
 ├── _image_input.py           # ImageInput, ImageRequest, ResolvedImageInput
 ├── _image_acquire_input.py   # ImageAcquireInput, ImageAcquireRequest, ResolvedImageAcquireInput
 ├── _kernel_input.py          # KernelInput, KernelRequest, ResolvedKernelInput
-├── _kernel_fetch_input.py    # KernelFetchInput, KernelFetchRequest, ResolvedKernelFetchInput
+├── _kernel_pull_input.py     # KernelPullInput, KernelPullRequest, ResolvedKernelPullInput
 ├── _key_input.py             # KeyInput, KeyRequest, ResolvedKeyInput
 ├── _key_create_input.py      # KeyCreateInput, KeyCreateRequest, ResolvedKeyCreateInput
 ├── _binary_input.py          # BinaryInput, BinaryRequest, ResolvedBinaryInput
-├── _binary_fetch_input.py    # BinaryFetchInput, BinaryFetchRequest, ResolvedBinaryFetchInput
+├── _binary_pull_input.py     # BinaryPullInput, BinaryPullRequest, ResolvedBinaryPullInput
 ├── _config_input.py          # ConfigInput, ConfigRequest, ResolvedConfigInput
 ├── _console_input.py         # ConsoleInput, ConsoleRequest, ResolvedConsoleInput
 ├── _logs_input.py            # LogsInput, LogsRequest, ResolvedLogsInput

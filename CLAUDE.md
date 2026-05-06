@@ -7,11 +7,9 @@
 
 > **Legacy bash scripts** are preserved in `legacy/` for reference.
 
-### ⚠️ ABSOLUTE RULES
- 
-1. **NEVER read files yourself** — spawn a subagent to do it
-2. **NEVER edit/create code yourself** — spawn a subagent to do it
-3. **ALWAYS use default subagent** — NEVER use `agentName: "Plan"` (omit `agentName` entirely)
+### ⚠️ IMPORTANT RULES
+1. Always verify your understanding against actual code before making changes
+2. Run CI checks (`ruff check`, `mypy`, `pytest`) before finishing
 
 ### User Confirmation Required
 
@@ -36,7 +34,8 @@ uv run ruff check src/ && uv run mypy src/  # Lint + type check
 
 # Build standalone binary (Nuitka — recommended)
 uv sync --group dev --group build
-uv run --group build python -m nuitka --onefile --output-dir=dist --output-filename=mvm --include-package=mvmctl --include-data-dir=src/mvmctl/assets=mvmctl/assets --lto=yes --enable-plugin=anti-bloat src/mvmctl/main.py
+python scripts/build_services.py                # Build everything
+python scripts/build_services.py --mvm          # Build main mvm binary only
 # Output: dist/mvm
 ```
 
@@ -54,7 +53,7 @@ src/mvmctl/
 ├── utils/           # Shared helpers: fs, _system, http, network, crypto, template, yaml, _validators, etc.
 ├── assets/          # Bundled YAML configs (images.yaml, kernels.yaml) + JSON templates (firecracker.template.json, cloud-init.template.yaml)
 └── services/        # Runtime subprocess services (console_relay, nocloud_server)
-tests/               # integration, system, layer_compliance tests (27 files across 3 subdirectories)
+tests/               # 149 files across 4 subdirectories (111 unit + 17 integration + 14 system + 7 layer_compliance)
 docs/                # API and release docs
 legacy/              # Archived bash scripts (single-vm, multi-vm, assets)
 pyproject.toml       # Build, ruff, mypy strict, pytest (80% branch coverage gate)
@@ -84,9 +83,9 @@ User → mvm → main.py → cli/*.py → api/*.py → core/*.py → models/ + u
 
 - **Cache:** `~/.cache/mvmctl/` (`MVM_CACHE_DIR`)
 - **Config:** `~/.config/mvmctl/config.json` (`MVM_CONFIG_DIR`) — JSON, not YAML
-- **Metadata:** `~/.cache/mvmctl/metadata.json` (`MVM_CACHE_DIR`) — images/kernels/binaries + `is_default` markers
+- **Database:** `~/.cache/mvmctl/mvmdb.db` — SQLite DB (canonical asset state with `is_default` markers, VM records, network/lease state)
 - **Env prefix:** `MVM_` (e.g. `MVM_CACHE_DIR`, `MVM_KERNEL`)
-- **Priority:** constants.py fallbacks → state files (config.json + metadata.json) → MVM_* env vars → CLI flags
+- **Priority:** constants.py fallbacks → SQLite DB (mvmdb.db) → config.json → MVM_* env vars → CLI flags
 
 ## Architecture Constraints
 

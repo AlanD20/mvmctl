@@ -279,16 +279,14 @@ Then update `config_url_template` in `src/mvmctl/assets/kernels.yaml` if needed.
 | Kernel | Status | Notes |
 |--------|--------|-------|
 | 6.1.x LTS | ✅ Supported | Long-term support, recommended for production |
-| 5.10.x LTS | ✅ Supported | Older LTS, still works |
-| 6.6.x LTS | ✅ Supported | Newer LTS |
-| 6.9.x | ✅ Supported | Short-term, use LTS for production |
-| < 4.14 | ❌ Not supported | Missing required Firecracker features |
+| 6.6.x LTS | ✅ Supported | Newer LTS, recommended for production |
+| 6.12.x LTS | ✅ Supported | Latest LTS |
 
 ### Relevant constants (src/mvmctl/constants.py)
 
 | Constant | Description |
 |----------|-------------|
-| `DEFAULT_KERNEL_VERSION` | Default kernel version for `mvm kernel pull --type official` (in `OVERRIDABLE_DEFAULTS`) |
+| `OVERRIDABLE_DEFAULTS["defaults.kernel"]["version"]` | Default kernel version for `mvm kernel pull --type official` |
 | `KERNEL_TYPE_OFFICIAL` | The string `"official"` for kernel type references |
 | `KERNEL_TYPE_FIRECRACKER` | The string `"firecracker"` for kernel type references |
 

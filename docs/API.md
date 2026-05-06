@@ -57,14 +57,14 @@ from mvmctl.api import (
     VMInput,
     NetworkCreateInput,
     NetworkInput,
-    ImageFetchInput,
+    ImagePullInput,
     ImageImportInput,
     ImageInput,
-    KernelFetchInput,
+    KernelPullInput,
     KernelInput,
     KeyCreateInput,
     KeyInput,
-    BinaryFetchInput,
+    BinaryPullInput,
     BinaryInput,
     SSHInput,
     ConsoleInput,
@@ -858,7 +858,7 @@ Metadata includes `network_count` and `bridges_reconciled`.
 
 All methods are `@staticmethod`. Images are identified using `ImageInput` objects.
 
-#### `ImageOperation.fetch(inputs: ImageFetchInput, phase_callback: Callable[[str], None] | None = None) -> OperationResult[ImageItem] | NeedsInteraction`
+#### `ImageOperation.fetch(inputs: ImagePullInput, phase_callback: Callable[[str], None] | None = None) -> OperationResult[ImageItem] | NeedsInteraction`
 
 Download and convert a VM rootfs image (qcow2, tar, or raw) to an ext4 file, then
 register it in the database.
@@ -948,7 +948,7 @@ Pre-decompress images to the ready pool for fast VM creation.
 
 All methods are `@staticmethod`. Kernels are identified using `KernelInput` objects.
 
-#### `KernelOperation.fetch(inputs: KernelFetchInput) -> OperationResult[KernelItem] | NeedsInteraction`
+#### `KernelOperation.fetch(inputs: KernelPullInput) -> OperationResult[KernelItem] | NeedsInteraction`
 
 Fetch or build a Firecracker kernel.
 
@@ -1090,7 +1090,7 @@ Export a keypair to a destination directory.
 
 All methods are `@staticmethod`. Binaries are identified using `BinaryInput` objects.
 
-#### `BinaryOperation.fetch(inputs: BinaryFetchInput) -> OperationResult[list[BinaryItem]] | NeedsInteraction`
+#### `BinaryOperation.fetch(inputs: BinaryPullInput) -> OperationResult[list[BinaryItem]] | NeedsInteraction`
 
 Download a specific Firecracker/jailer binary version from GitHub releases.
 
@@ -1466,10 +1466,10 @@ from pathlib import Path
 
 from mvmctl.api import (
     BinaryOperation,
-    BinaryFetchInput,
+    BinaryPullInput,
     HostOperation,
     ImageOperation,
-    ImageFetchInput,
+    ImagePullInput,
     InitOperation,
     KeyOperation,
     KeyCreateInput,
@@ -1501,7 +1501,7 @@ def main() -> None:
     local = BinaryOperation.list_local()
     if not local:
         print("Downloading Firecracker 1.15.0 ...")
-        BinaryOperation.fetch(BinaryFetchInput(version="1.15.0"))
+        BinaryOperation.fetch(BinaryPullInput(version="1.15.0"))
 
     # 4. Ensure a kernel is available (via CLI: mvm kernel pull)
     # or use KernelOperation.fetch() directly for custom kernels

@@ -9,7 +9,7 @@ Before releasing, ensure the following are available on your workstation:
 - **Python 3.13+** — required for local development and building
 - **Linux (KVM-capable host)** — required to run integration tests and to produce a valid binary
 - **git** — for tagging and pushing
-- **uv** — for dependency management and running tools (`pip install uv` or see [uv docs](https://docs.astral.sh/uv/))
+- **uv** — for dependency management and running tools (see [uv docs](https://docs.astral.sh/uv/))
 
 ## Bumping the Version
 
@@ -44,43 +44,27 @@ This produces a standard `.whl` and `.tar.gz` in the `dist/` folder:
 uv build
 ```
 
-### 2. Building the Standalone Binary with uv
+### 2. Building the Standalone Binary
 
-You can build a standalone executable using either **PyInstaller** or **Nuitka**.
-
-#### Option A: PyInstaller (Bundled Byte-code)
-
-PyInstaller produces a single-file executable by bundling the Python interpreter and byte-code. This is fast to build but has a slight decompression overhead on startup.
+Use the build script to produce a standalone binary:
 
 ```bash
-uv run --group build pyinstaller --onefile --name mvm --collect-all mvmctl src/mvmctl/main.py
-# The output will be located at dist/mvm
+uv run python scripts/build_services.py
 ```
 
-#### Option B: Nuitka (Compiled C++)
+The output will be located at `dist/mvm`.
 
-Nuitka translates the Python code into C++ and compiles it into a machine-code binary. This results in much faster startup and overall execution, though the build time is significantly longer.
+### 3. Verifying the Binary
+
+Verify the binary works correctly:
 
 ```bash
-uv run --group build python -m nuitka --onefile --output-dir=dist --output-filename=mvm-nuitka --include-package=mvmctl --include-data-dir=src/mvmctl/assets=mvmctl/assets src/mvmctl/main.py
-# The output will be located at dist/mvm-nuitka
+# Check the version
+./dist/mvm --version
+
+# Check help
+./dist/mvm --help
 ```
-
-### 3. Comparing Performance
-
-To compare the startup and execution speed of both binaries, use the `time` command:
-
-```bash
-# Compare help output speed
-time ./dist/mvm --help
-time ./dist/mvm-nuitka --help
-
-# Compare version output speed
-time ./dist/mvm --version
-time ./dist/mvm-nuitka --version
-```
-
-Look at the `real` time to see the total elapsed time for each. Nuitka should typically be faster due to the lack of a decompression step.
 
 ### 4. Tagging and Pushing
 
@@ -96,7 +80,7 @@ git push origin v1.2.3
 
 Pushing a tag that matches `v*` triggers the `release.yml` GitHub Actions workflow. Do not push the tag until the version bump commit is on `main` and CI is green.
 
-> **Test gate**: The `ci.yml` workflow runs `pytest` with a 79% coverage minimum on every push and pull request to `main`. If tests fail, the CI run is red and the tag must not be pushed — the release workflow does not re-run tests, so a red `main` means a broken binary may be released. Always verify CI is green on the version-bump commit before tagging.
+> **Test gate**: The `ci.yml` workflow runs `pytest` with an 80% coverage minimum on every push and pull request to `main`. If tests fail, the CI run is red and the tag must not be pushed — the release workflow does not re-run tests, so a red `main` means a broken binary may be released. Always verify CI is green on the version-bump commit before tagging.
 
 ## What the Release Workflow Does Automatically
 
@@ -132,19 +116,19 @@ chmod +x mvm
 ### PyPI verification
 
 ```bash
-# Install from PyPI
-pip install mvmctl==1.2.3
+# Install from PyPI with uv
+uv tool install mvmctl==1.2.3
 
 # Check the version
 mvm --version
 # Expected: mvm 1.2.3
 ```
 
-### pipx / uvx verification
+### uv tool install / uvx verification
 
 ```bash
-# Install with pipx
-pipx install mvmctl==1.2.3
+# Install with uv
+uv tool install mvmctl==1.2.3
 mvm --version
 
 # Or run directly with uvx (no install)
@@ -188,7 +172,7 @@ If a release is broken and should not be installed by anyone:
 
 ```bash
 # Yank the specific version (requires PyPI credentials or token)
-pip install twine
+uv tool install twine
 twine yank mvmctl 1.2.3
 ```
 
@@ -250,9 +234,7 @@ To build packages locally (for testing):
 sudo apt-get install debhelper build-essential
 
 # Build the binary first
-uv run --group build python -m nuitka --onefile --output-dir=dist --output-filename=mvm \
-  --include-package=mvmctl --include-data-dir=src/mvmctl/assets=mvmctl/assets \
-  --lto=yes src/mvmctl/main.py
+uv run python scripts/build_services.py
 
 # Build the .deb (using dh-compatible rules)
 mkdir -p debian
@@ -283,22 +265,10 @@ rpmbuild -bb ~/rpmbuild/SPECS/mvmctl.spec
 
 mvmctl uses dynamic imports for optional dependencies to keep the core runtime lightweight:
 
-| Module | Import Pattern | Nuitka Flag | PyInstaller Hook |
-|--------|---------------|-------------|------------------|
-| `guestfs` | `importlib.import_module("guestfs")` | `--include-package=guestfs` | `--hidden-import=guestfs` |
+| Module | Import Pattern | Nuitka Flag |
+|--------|---------------|-------------|
+| `guestfs` | `importlib.import_module("guestfs")` | `--include-package=guestfs` |
 
 ### Why Explicit Inclusion Is Required
 
-Nuitka and PyInstaller perform static analysis to detect dependencies. Because mvmctl imports `guestfs` dynamically only when `--cloud-init-mode inject` is used, static analysis cannot detect this dependency. Without explicit flags:
-
-- Nuitka: Module not included → `GuestfsNotAvailableError` at runtime
-- PyInstaller: Module not included → `ModuleNotFoundError` at runtime
-
-### Build Matrix
-
-| Build Type | Command | Guestfs Support |
-|------------|---------|-----------------|
-| Minimal | `uv sync --group dev --group build` | No (nocloud-net only) |
-| Full (with guestfs) | Install `python3-libguestfs` via distro package manager, then `uv sync --group dev --group build` | Yes — `guestfs` is a system/distro package only; there is no `--group guestfs` uv group in this repo |
-
-> **Note:** Even with guestfs included in the binary, the host system must still have libguestfs0 and supermin installed. The Python bindings are bundled; the C library and appliance are system dependencies.
+Nuitka performs static analysis to detect dependencies. Because mvmctl imports `guestfs` dynamically only when `--cloud-init-mode inject` is used, static analysis cannot detect this dependency. Without explicit flags the module won't be included.

@@ -1,5 +1,7 @@
 # libguestfs Boot Time Optimizations
 
+> **Note:** This document describes planned optimization strategies that have not yet been implemented. The referenced file `src/mvmctl/core/rootfs_injector.py` does not exist in the current codebase.
+
 ## Overview
 
 This document describes the boot-time optimizations applied when using libguestfs for cloud-init injection in mvmctl. These optimizations reduce appliance startup time by configuring the backend directly, minimizing resource allocation, and disabling unnecessary services. All optimizations documented here are compatible with and highly beneficial for both **ext4** and **btrfs** root filesystems.

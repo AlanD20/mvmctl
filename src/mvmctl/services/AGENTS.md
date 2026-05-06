@@ -11,12 +11,12 @@ src/mvmctl/services/
 ├── __init__.py              # Package marker only
 ├── console_relay/           # PTY-to-socket relay for VM serial console
 │   ├── __init__.py
-│   ├── manager.py          # 456 lines — ConsoleRelayManager lifecycle
-│   └── process.py          # 186 lines — Standalone PTY relay subprocess
+│   ├── manager.py          # 382 lines — ConsoleRelayManager lifecycle
+│   └── process.py          # 211 lines — Standalone PTY relay subprocess
 └── nocloud_server/          # HTTP server for cloud-init nocloud-net datasource
     ├── __init__.py
-    ├── manager.py          # 488 lines — NoCloudNetServerManager lifecycle
-    └── process.py          # 154 lines — Standalone HTTP server subprocess
+    ├── manager.py          # 411 lines — NoCloudNetServerManager lifecycle
+    └── process.py          # 179 lines — Standalone HTTP server subprocess
 ```
 
 ## ARCHITECTURE

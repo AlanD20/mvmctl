@@ -1,5 +1,7 @@
 # Fast Durable Image Copy for microVMs
 
+> **Note:** This document describes planned optimization strategies that have not yet been implemented. The actual image copy implementation may differ.
+
 ## Overview
 
 When a microVM starts, its rootfs image is copied from a tmpfs (RAM disk) cache to the VM's persistent directory on disk. This copy must be **durable** — if the host crashes, the VM rootfs must not be corrupt. But it also needs to be **fast**, because tmpfs → disk copies of multi-GB images can dominate VM launch latency.

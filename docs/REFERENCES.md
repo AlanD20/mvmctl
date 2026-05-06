@@ -167,6 +167,7 @@ VM lifecycle management.
 | `--enable-logging/--no-enable-logging` | Enable Firecracker logging | from config |
 | `--enable-metrics/--no-enable-metrics` | Enable Firecracker metrics | from config |
 | `--lsm-flags FLAGS` | Linux Security Module kernel cmdline flags | from config |
+| `--boot-args ARGS` | Kernel boot arguments | from config |
 | `--no-console` | Disable serial console | false |
 | `--firecracker-bin PATH` | Path to firecracker binary | active version |
 | `--skip-cleanup` | Keep resources on failure for debugging | false |

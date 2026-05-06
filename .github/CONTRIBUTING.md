@@ -51,6 +51,7 @@ mvmctl/
 │   │   ├── kernel/   # _controller.py, _service.py, _repository.py, _resolver.py
 │   │   ├── key/      # _controller.py, _service.py, _repository.py, _resolver.py
 │   │   ├── binary/   # _controller.py, _service.py, _repository.py, _resolver.py
+│   │   ├── cache/    # _service.py, _repository.py
 │   │   ├── config/   # _service.py, _repository.py, _constraints.py
 │   │   ├── console/  # _controller.py
 │   │   ├── ssh/      # _service.py
@@ -62,10 +63,10 @@ mvmctl/
 │   ├── assets/       # Bundled YAML configs (images.yaml, kernels.yaml) + JSON templates (firecracker.template.json, cloud-init.template.yaml)
 │   └── services/     # Runtime subprocess services (console_relay, nocloud_server)
 ├── tests/
-│   ├── integration/      # Workflow tests — 8 files
-│   ├── system/           # Full-stack tests (KVM/root not required) — 13 files
-│   ├── layer_compliance/  # Architecture constraint verification — 5 files
-│   └── core/_shared/     # Core infra tests — 1 file
+│   ├── unit/                # Unit tests — 111 files
+│   ├── integration/         # Workflow tests — 17 files
+│   ├── system/              # Full-stack tests — 14 files (KVM/root not required)
+│   └── layer_compliance/    # Architecture constraint verification — 7 files
 ├── pyproject.toml
 └── README.md
 ```
@@ -137,13 +138,6 @@ Image specifications are defined in YAML config files and loaded using the `Imag
 (`src/mvmctl/models/image.py`). Each entry describes where to download an image, its source
 format, and how to convert it for use with Firecracker.
 
-**Supported source formats** (handled by `ImageService._process_format()` in `src/mvmctl/core/image/_service.py`):
-
-- `qcow2` — QEMU copy-on-write image; converted to raw with `qemu-img`, then the root
-  partition is extracted.
-- `tar-rootfs` — Root filesystem tarball; unpacked into a new ext4 image.
-- `raw` — Raw disk image; the root partition is extracted directly.
-
 **Steps to add a new image:**
 
 1. Open (or create) the images YAML config at `src/mvmctl/assets/images.yaml`.
@@ -160,10 +154,7 @@ format, and how to convert it for use with Firecracker.
        sha256: "abc123..."   # optional but recommended
    ```
 
-3. Confirm the `format` value is handled in `ImageService._process_format()` in
-   `src/mvmctl/core/image/_service.py`. If you need a new format, add a handler method
-   following the `_handle_<format>` pattern.
-4. Add tests in `tests/integration/` or `tests/system/` covering the new handler or any conversion logic.
+3. Add tests in `tests/integration/` or `tests/system/` covering the new handler or any conversion logic.
 
 ## Adding a Test
 
@@ -192,7 +183,7 @@ Use `pytest.fixture` for shared setup. Keep unit tests fast; avoid `sleep()` or 
 - **Tests must not require root, KVM, or a real network.** Mock all subprocess calls.
 - **Coverage gate:** 80% branch coverage minimum. Dropping coverage will fail CI.
 - **Architecture layers:** `cli/` → `api/` → `core/` — three-tier, no skipping layers. `api/` is the only layer that imports multiple core domains. Core domains are isolated — never import one domain from another. See [`AGENTS.md`](AGENTS.md) for the full architecture reference.
-- **No hardcoded defaults** — use `FALLBACK_*` constants in `constants.py`.
+- **No hardcoded defaults** — use the `OVERRIDABLE_DEFAULTS` dict in `constants.py`.
 - **Strict mypy** — no `type: ignore` suppressions.
 - One feature or fix per PR; write a clear description of *why*, not just *what*.
 
@@ -252,11 +243,11 @@ The project name is defined once in `pyproject.toml` under `[project] name`. Cha
 - The cache directory name (`~/.cache/mvmctl/`)
 - The network device prefixes (`mvm-br0`, `fc-<name>-0`)
 
-To rename the project, update `pyproject.toml` and rebuild with Nuitka/PyInstaller using `--output-filename <new-name>` or `--name <new-name>`. No grep-and-replace needed.
+To rename the project, update `pyproject.toml` and rebuild with the build script (`scripts/build_services.py`). No grep-and-replace needed.
 
 ### Working with libguestfs (direct cloud-init mode)
 
-If you're developing or testing the **direct cloud-init injection** feature (`--cloud-init-mode direct`),
+If you're developing or testing the **direct cloud-init injection** feature (\`--cloud-init-mode inject\`),
 you need the `guestfs` Python bindings available in your uv virtual environment.
 Since `guestfs` is not on PyPI and must come from your system package manager, use the
 Taskfile helper to symlink the system bindings into the uv venv:

@@ -13,11 +13,9 @@ It handles everything from downloading official kernels and root filesystem imag
 - **Package Management:** `uv`
 - **Testing & Linting:** `pytest`, `ruff`, `mypy`
 
-### ⚠️ ABSOLUTE RULES
- 
-1. **NEVER read files yourself** — spawn a subagent to do it
-2. **NEVER edit/create code yourself** — spawn a subagent to do it
-3. **ALWAYS use default subagent** — NEVER use `agentName: "Plan"` (omit `agentName` entirely)
+### ⚠️ IMPORTANT RULES
+1. Always verify your understanding against actual code before making changes
+2. Run CI checks before finishing: ruff, mypy, pytest
 
 ### User Confirmation Required
 
@@ -58,16 +56,12 @@ uv run mvm --help
 
 **Building a Standalone Binary:**
 
-Nuitka (Compiled C++ performance — Recommended for releases):
+Nuitka (Compiled binary — Recommended for releases):
 ```bash
-uv run --group build python -m nuitka --onefile --output-dir=dist --output-filename=mvm --include-package=mvmctl --include-data-dir=src/mvmctl/assets=mvmctl/assets --lto=yes --enable-plugin=anti-bloat src/mvmctl/main.py
+uv sync --group dev --group build
+python scripts/build_services.py --mvm
+./dist/mvm --version
 ```
-
-PyInstaller (Faster build, useful during development):
-```bash
-uv run --group build pyinstaller --onefile --name mvm --collect-all mvmctl src/mvmctl/main.py
-```
-*Note: Binaries are located in the `dist/` directory.*
 
 ## Testing and Quality Gates
 **ALL code changes MUST pass CI checks before completion.**
@@ -75,8 +69,8 @@ uv run --group build pyinstaller --onefile --name mvm --collect-all mvmctl src/m
 All checks are enforced in CI and must pass before opening a PR.
 
 ```bash
-# Tests (Must mock all subprocess calls; no root/KVM/real network required)
-uv run pytest tests/ -x -q
+# Tests (Must mock all subprocess calls; no root/KVM/real network required; 80% branch coverage minimum)
+uv run pytest tests/ -q --cov=src/mvmctl -n auto --cov-fail-under=80
 
 # Linting & Formatting
 uv run ruff check src/
@@ -117,7 +111,7 @@ Co-authored-by: Adam <adam@example.com>  # WRONG - no contribution to this chang
 ```
 
 ## Development Conventions
-- **Defaults:** Never hardcode defaults in function parameters. Fallback defaults reside in `constants.py` with a `FALLBACK_` prefix. User-facing asset defaults are resolved from `~/.cache/mvmctl/metadata.json` (`is_default` markers) and `MVM_*` environment variables.
-- **Privilege Model:** `sudo mvm host init` is run once to set up the host (mvm group, sudoers). Normal commands run rootless and validate privileges via the `mvm` group.
+- **Defaults:** Never hardcode defaults in function parameters. All defaults live in `constants.py` under the `OVERRIDABLE_DEFAULTS` dict with category keys (e.g., `defaults.vm`, `defaults.network`). User-facing asset defaults are resolved from the SQLite database (`is_default` markers) and `MVM_*` environment variables.
+- **Privilege Model:** `mvm host init` is run once to set up the host (mvm group, sudoers). Normal commands run rootless and validate privileges via the `mvm` group.
 - **Asset ID System:** Downloaded or imported assets (images, kernels) use a full 64-character SHA256 hash as their persistent ID. The CLI displays and accepts the first 6 characters as a prefix.
 - **Error Handling:** Avoid bare `except:` blocks. Catch specific domain exceptions derived from `exceptions.py`.

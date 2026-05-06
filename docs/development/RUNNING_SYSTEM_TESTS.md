@@ -57,14 +57,14 @@ automatically on the first serial run. Progress messages are printed to stderr:
 
 | Suite | Command | What it tests |
 |-------|---------|---------------|
-| Network | `pytest tests/system/test_network.py -v` | CRUD, inspect (table+JSON), iptables, bridge, --no-nat, set-default, ls --json, rm multiple, error paths (15 tests) |
-| Keys | `pytest tests/system/test_keys.py -v` | CRUD (ed25519, rsa, ecdsa), add existing, export, inspect (table+JSON), set-default/clear, ls --json, error paths (15 tests) |
-| Images | `pytest tests/system/test_images.py -v` | Fetch (alpine+ubuntu), list (table/JSON/remote), inspect (table+JSON), set/get-default, warm, remove, fetch error (11 tests) |
-| Kernel | `pytest tests/system/test_kernel.py -v` | Fetch official + set-default, list (empty/JSON), set-default, remove (6 tests) |
-| Binary | `pytest tests/system/test_bin.py -v` | List local/JSON/remote (with limit), fetch+set-default, set-default by ID, remove by version (7 tests) |
-| VM Lifecycle | `pytest tests/system/test_vm_lifecycle.py -v` | Create per image, state transitions (pause/resume/stop/start/reboot), stop/reboot --force, remove running w/o force, SSH, list, remove/force-remove, duplicate reject, nonexistent error, inspect, export, cleanup --dry-run (21 tests) |
-| Host | `pytest tests/system/test_host.py -v` | Host status check (table+JSON), graceful skip if uninitialized (2 tests) |
-| Full Journeys | `pytest tests/system/test_full_journeys.py -v` | Create+SSH, network→VM, network→VM+explicit IP, key→VM, full state chain, explicit IP, 2 VMs same net, reboot chain, SSH CLI cmd, multiple SSH keys (10 tests) |
+| Network | `pytest tests/system/test_network.py -v` | CRUD, inspect (table+JSON), iptables, bridge, --no-nat, set-default, ls --json, rm multiple, error paths, sync, gateway (21 tests) |
+| Keys | `pytest tests/system/test_keys.py -v` | CRUD (ed25519, rsa, ecdsa), add existing, export, inspect (table+JSON), set-default/clear, ls --json, error paths, bits/comment/out/force (19 tests) |
+| Images | `pytest tests/system/test_images.py -v` | Fetch (alpine+ubuntu), list (table/JSON/remote), inspect (table+JSON/tree), set/get-default, warm, remove, fetch error, import qcow2/raw, pull --force, pull --set-default (16 tests) |
+| Kernel | `pytest tests/system/test_kernel.py -v` | Fetch official + set-default, list (empty/JSON), set-default, remove, inspect table/JSON/tree, nonexistent (10 tests) |
+| Binary | `pytest tests/system/test_bin.py -v` | List local/JSON/remote (with limit), fetch+set-default, set-default by ID, remove by version, pull --force (8 tests) |
+| VM Lifecycle | `pytest tests/system/test_vm_lifecycle.py -v` | Create per image, state transitions (pause/resume/stop/start/reboot), stop/reboot --force, remove running w/o force, SSH, list, remove/force-remove, duplicate reject, nonexistent error, inspect, export, snapshot/load, export/import roundtrip, vcpus/memory/disk flags, static IP, MAC, named network, kernel, boot-args, no-console, SSH key file, enable-pci, ps (47 tests) |
+| Host | `pytest tests/system/test_host.py -v` | Host status check (table+JSON), clean/reset blocked by running VM (4 tests) |
+| Full Journeys | `pytest tests/system/test_full_journeys.py -v` | Create+SSH, network→VM, network→VM+explicit IP, key→VM, full state chain, explicit IP, 2 VMs same net, reboot chain, SSH CLI cmd, multiple SSH keys, ping, export/import, concurrent creation (13 tests) |
 
 ```bash
 # All system tests (serial — safest, auto-fetches missing assets)
@@ -166,3 +166,16 @@ Many gaps above are covered at the integration level (`tests/integration/`). Int
 | `test_network_workflow.py` | Duplicate network, nonexistent remove/inspect, missing CIDR, invalid CIDR, custom gateway, --no-nat, subprocess bridge setup/teardown |
 | `test_host_init_reset.py` | Host init workflow, reset rollback, privilege escalation |
 | `test_cli_smoke.py` | All command groups load without errors, help output, unknown commands |
+| `test_binary_integration.py` | Binary pull, list, set-default, remove with mocked subprocess |
+| `test_cache_integration.py` | Cache init, prune operations with mocked filesystem |
+| `test_cloud_init_iso.py` | Cloud-init ISO generation and validation |
+| `test_config_integration.py` | Config file loading, merging, and override resolution |
+| `test_console_integration.py` | Console relay subprocess management |
+| `test_image_integration.py` | Image pull, list, inspect, remove, import with mocked downloads |
+| `test_init_integration.py` | Init wizard flow, non-interactive mode |
+| `test_kernel_integration.py` | Kernel pull (official/firecracker), list, inspect, remove |
+| `test_key_integration.py` | Key create (ed25519/rsa/ecdsa), list, inspect, export, remove |
+| `test_log_integration.py` | Logging and metrics configuration for Firecracker |
+| `test_nocloud_net_lifecycle.py` | NoCloud network lifecycle with mocked subprocess |
+| `test_ssh_integration.py` | SSH client invocation and key-based auth flow |
+| `test_vm_direct_injection.py` | VM direct file injection workflow |

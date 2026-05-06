@@ -21,7 +21,7 @@
 ```bash
 # Create and SSH into a VM in under 60 seconds
 mvm vm create --name myvm --image ubuntu-24.04
-mvm ssh --name myvm
+mvm ssh myvm
 ```
 
 ---
@@ -120,7 +120,7 @@ mvm vm create --name myvm --image ubuntu-24.04
 mvm logs myvm --follow
 
 # SSH in
-mvm ssh --name myvm
+mvm ssh myvm
 
 # List running VMs
 mvm vm ls
@@ -138,26 +138,26 @@ mvm vm rm --name myvm
 ```bash
 mvm vm create --name myvm --image ubuntu-24.04   # Create and start a VM
 mvm vm ls                                         # List all VMs
-mvm ssh --name myvm                           # SSH into a VM
-mvm console myvm                                 # Console access (no SSH)
-mvm vm rm --name myvm --force                    # Remove a VM
+mvm ssh myvm                                      # SSH into a VM
+mvm console myvm                                  # Console access (no SSH)
+mvm vm rm --name myvm --force                     # Remove a VM
 ```
 
 ### Resource Management
 
 ```bash
-mvm image pull ubuntu-24.04    # Download an OS image
-mvm image ls                   # List available images
-mvm kernel pull               # Download Firecracker kernel
-mvm bin pull 1.15.0          # Download Firecracker binary
-mvm key create mykey          # Generate SSH key
+mvm image pull ubuntu-24.04       # Download an OS image
+mvm image ls                      # List available images
+mvm kernel pull --type firecracker # Download Firecracker kernel
+mvm bin pull 1.15.0               # Download Firecracker binary
+mvm key create mykey              # Generate SSH key
 ```
 
 ### System Setup
 
 ```bash
-sudo mvm host init    # One-time host setup (KVM, networking)
-mvm cache prune       # Clean up stale cache
+mvm host init    # One-time host setup (KVM, networking)
+mvm cache prune  # Clean up stale cache
 ```
 
 See [docs/REFERENCES.md](docs/REFERENCES.md) for the complete command reference with all flags and options.
@@ -189,9 +189,9 @@ Produces a standalone single-file binary — no Python runtime required on the t
 git clone https://github.com/AlanD20/mvmctl
 cd mvmctl
 uv sync --group dev --group build
-uv run python -m nuitka --onefile --output-dir=dist --output-filename=mvm \
-  --include-package=mvmctl --include-data-dir=src/mvmctl/assets=mvmctl/assets \
-  --lto=yes --enable-plugin=anti-bloat src/mvmctl/main.py
+python scripts/build_services.py      # Build everything (fast mode)
+# Or just the main binary:
+python scripts/build_services.py --mvm
 # Output: dist/mvm
 ./dist/mvm --version
 ```
@@ -204,21 +204,20 @@ See [docs/RELEASE.md](docs/RELEASE.md) for detailed build instructions.
 
 ```
 ~/.cache/mvmctl/
-├── bin/               # Firecracker + jailer binaries
+├── bin/               # Firecracker + jailer binaries + service binaries (mvm-console-relay, mvm-nocloud-server, mvm-provision)
 ├── kernels/           # vmlinux kernel images
-├── images/            # Root filesystem images (.ext4, .btrfs)
+├── images/            # Root filesystem images (.ext4, .btrfs, .zst)
 ├── keys/              # Cached SSH public keys
 ├── networks/          # Per-network config + IP leases
 ├── vms/               # Per-VM state
-│   └── <vm-sha>/           # VM directories named by SHA256 hash
+│   └── <vm-sha>/      # VM directories named by SHA256 hash
 │       ├── rootfs.ext4
 │       ├── firecracker.json
-│       ├── firecracker.log       # Firecracker process log (--type os)
-│       ├── firecracker.console.log  # Serial console output (--type boot)
+│       ├── firecracker.log
+│       ├── firecracker.console.log
 │       ├── firecracker.pid
-│       ├── firecracker.sock      # API socket (--enable-api-socket only)
 │       └── cloud-init/
-├── metadata.json      # Asset registry (images, kernels, binaries)
+├── mvmdb.db           # SQLite database (canonical asset state)
 └── audit.log          # Append-only operation log
 ```
 
@@ -231,7 +230,7 @@ Common issues and quick fixes:
 | Issue | Solution |
 |-------|----------|
 | **Permission denied: /dev/kvm** | If missing: `sudo modprobe kvm kvm_intel`. If unreadable: `sudo usermod -aG kvm $USER` then log out/back in |
-| **Bridge not found** | Run `sudo mvm host init` once |
+| **Bridge not found** | Run `mvm host init` once |
 | **VM won't boot / SSH times out** | Cloud-init takes 30-60s on first boot. Watch with `mvm logs myvm --follow` |
 | **Kernel not found** | `mvm kernel pull` |
 | **Image not found** | `mvm image pull ubuntu-24.04` |

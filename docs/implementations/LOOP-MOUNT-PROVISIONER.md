@@ -138,12 +138,15 @@ src/mvmctl/services/loopmount/      ← standalone binary (stdlib only, no mvmct
 
 src/mvmctl/core/_shared/_loopmount/ ← Python-side lifecycle management
 ├── __init__.py
-├── _exceptions.py                  # LoopMountError types
-└── _manager.py                     # LoopMountManager — binary resolution, JSON, subprocess
+├── _manager.py                     # LoopMountManager — binary resolution, JSON, subprocess
+└── _provisioner.py                 # LoopMountProvisioner — high-level operation builder
+
+# LoopMountError / LoopMountTimeoutError defined in src/mvmctl/exceptions.py
 
 src/mvmctl/core/_shared/_provisioner/ ← Public abstraction (used by API)
 ├── __init__.py
-└── _provisioner.py                 # Provisioner class + _LoopMountBackend + _GuestfsBackend
+├── _backend.py                     # ProvisionerBackend + _LoopMountBackend + _GuestfsBackend
+└── _content.py                     # ProvisionerContent — shared file/command/template definitions
 ```
 
 ### What it replaces (in `vm create`)
@@ -171,7 +174,7 @@ if not self._provision_via_binary():
 
 | Current (guestfs) | New (loop) |
 |-------------------|------------|
-| `GuestfsProvisioner(rootfs_path, ...)` | `ProvisionerManager.provision(ops)` |
+| `GuestfsProvisioner(rootfs_path, ...)` | `LoopMountManager.provision(ops)` |
 | `.setup_ssh(user, pubkeys)` | `ops["files"]` (SSH keys, user, sshd config) + `ops["commands"]` (ssh-keygen -A, useradd) |
 | `.set_hostname(name)` | `ops["files"]` (/etc/hostname, /etc/hosts) |
 | `.inject_dns(dns_server)` | `ops["files"]` (/etc/resolv.conf) |
@@ -292,7 +295,7 @@ All steps wrapped in `try/finally` — `umount` and `losetup -d` run even on err
 
 ### Binary Availability Check
 
-The `ProvisionerManager.is_binary_available()` method checks if the compiled binary exists at `CacheUtils.get_bin_dir() / "mvm-provision"`. This is called by `_provision_via_binary()` in `VMCreateContext` to decide whether to try the binary path.
+The `LoopMountManager.is_binary_available()` method checks if the compiled binary exists at `CacheUtils.get_bin_dir() / "mvm-provision"`. This is called by `_provision_via_binary()` in `VMCreateContext` to decide whether to try the binary path.
 
 ### Fallback
 
@@ -387,11 +390,12 @@ Only the provisioner needs sudo — console relay and nocloud server run as the 
 |------|--------|
 | `services/loopmount/process.py` | **New** — standalone stdlib binary, JSON stdin/stdout, loop mount + provision |
 | `core/_shared/_loopmount/_manager.py` | **New** — `LoopMountManager.provision()` method, binary dev fallback |
-| `core/_shared/_loopmount/_exceptions.py` | **New** — `LoopMountError` types |
-| `core/_shared/_provisioner/_provisioner.py` | **New** — `Provisioner`, `_LoopMountBackend`, `_GuestfsBackend` |
+| `exceptions.py` | **New** — `LoopMountError`, `LoopMountTimeoutError` in shared hierarchy |
+| `core/_shared/_provisioner/_backend.py` | **New** — `ProvisionerBackend`, `_LoopMountBackend`, `_GuestfsBackend` |
+| `core/_shared/_provisioner/_content.py` | **New** — `ProvisionerContent` — shared provisioning templates |
 | `services/console_relay/manager.py` | Binary-first fallback: try `mvm-console-relay`, fall back to `sys.executable -m` |
 | `services/nocloud_server/manager.py` | Binary-first fallback: try `mvm-nocloud-server`, fall back to `sys.executable -m` |
-| `api/vm_operations.py` | Replaced `GuestfsProvisioner` + fallback with single `Provisioner` class |
+| `api/vm_operations.py` | Replaced `GuestfsProvisioner` + fallback with `ProvisionerBackend` dispatching to `LoopMountBackend` / `GuestfsBackend` |
 | `api/init_operations.py` | Step 5 (`_step_service_binaries()`) delegates to `BinaryService.extract_service_binaries()` |
 | `core/binary/_service.py` | Added `extract_service_binaries()` and `_get_embedded_path()` — handles combined multidist binary + symlinks |
 | `core/host/_service.py` | `_generate_sudoers_content()` includes `PRIVILEGED_SERVICE_BINARIES` paths resolved at runtime |

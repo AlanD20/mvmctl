@@ -55,11 +55,11 @@ src/mvmctl/
 │       ├── _image_input.py
 │       ├── _image_acquire_input.py
 │       ├── _kernel_input.py
-│       ├── _kernel_fetch_input.py
+│       ├── _kernel_pull_input.py
 │       ├── _key_input.py
 │       ├── _key_create_input.py
 │       ├── _binary_input.py
-│       ├── _binary_fetch_input.py
+│       ├── _binary_pull_input.py
 │       ├── _ssh_input.py
 │       ├── _config_input.py
 │       ├── _console_input.py
@@ -159,16 +159,19 @@ src/mvmctl/
 │
 ├── models/                                  # Pure @dataclass objects
 │   ├── __init__.py                          # Re-exports all model types
-│   ├── vm.py                                # VMInstanceItem, VMInspectInfo, ConsoleInfo, ConsoleState
-│   ├── network.py                           # NetworkItem, NetworkLeaseItem, IPTablesRuleItem
+│   ├── binary.py                            # BinaryItem
+│   ├── bulk.py                              # BulkResult, BulkResultItem
+│   ├── cache.py                             # CacheResult, PruneAllResult, CleanResult
+│   ├── cloudinit.py                         # CloudInitMode, CloudInitStatus
+│   ├── firecracker.py                       # FirecrackerConfig
+│   ├── host.py                              # HostStateItem, HostStateChangeItem
 │   ├── image.py                             # ImageItem, ImageSpec
 │   ├── kernel.py                            # KernelItem, KernelSpec
-│   ├── binary.py                            # BinaryItem
 │   ├── key.py                               # SSHKeyItem
-│   ├── host.py                              # HostStateItem, HostStateChangeItem
-│   ├── firecracker.py                       # FirecrackerConfig
-│   ├── cloudinit.py                         # CloudInitMode, CloudInitStatus
-│   └── bulk.py                              # BulkResult, BulkResultItem
+│   ├── network.py                           # NetworkItem, NetworkLeaseItem, IPTablesRuleItem
+│   ├── provisioner.py                       # Provisioner operation models
+│   ├── result.py                            # OperationResult, BatchResult, etc.
+│   └── vm.py                                # VMInstanceItem, VMInspectInfo, ConsoleInfo, ConsoleState
 │
 ├── services/                                # Long-running subprocess services
 │   ├── console_relay/                       # Console relay service
@@ -188,7 +191,8 @@ src/mvmctl/
 ├── db/                                      # SQLite schema, migrations, ORM models
 │   ├── __init__.py
 │   └── migrations/
-│       └── __init__.py
+│       ├── __init__.py
+│       └── 001_initial_schema.sql
 │
 ├── assets/                                  # Bundled YAML configs
 │   ├── __init__.py

@@ -36,13 +36,14 @@ mvmctl/
 │   ├── utils/           # Shared helpers
 │   ├── assets/          # Bundled YAML configs
 │   ├── services/        # Runtime subprocess services
+│   ├── tui/             # Textual TUI application (domain/, screens/, widgets/)
 │   └── db/              # SQLite schema, migrations, and ORM models
 ├── legacy/              # Pre-refactor phase documentation & assets
 ├── scripts/             # Build & release helper scripts
 ├── stubs/               # Type stubs for external dependencies
 ├── packaging/           # Distribution packaging configs
 ├── docs/                # Project documentation
-├── tests/               # 138 test files (100 unit + 17 integration + 14 system + 7 layer_compliance)
+├── tests/               # 149 test files (111 unit + 17 integration + 14 system + 7 layer_compliance)
 └── pyproject.toml       
 ```
 
@@ -93,10 +94,10 @@ Every downloaded/imported asset gets a **full 64-char SHA256 hash**. CLI display
 |-----------|---------|
 | Hardcode paths/names | `constants.py` or `MVM_*` env vars |
 | Business logic in `cli/` | Move to `core/`, expose via `api/` |
-| `print()` in `core/` | `from mvmctl.utils._io import print_info` — only in CLI |
+| `print()` in `core/` | `from mvmctl.utils._io import print_info` -- only in CLI |
 | Bare `except:` | Catch specific types from `exceptions.py` |
-| Skip failing tests | Fix the test; coverage drop = CI failure |
-| `as any` / `type: ignore` | Strict mypy — no suppressions allowed |
+| Skip failing tests | Fix the test -- coverage drop = CI failure |
+| `as any` / `type: ignore` | Strict mypy -- no suppressions allowed |
 
 ## TESTING
 - **80% branch coverage** minimum

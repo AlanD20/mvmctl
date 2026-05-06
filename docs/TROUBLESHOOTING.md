@@ -100,13 +100,13 @@ sudo systemctl enable iptables.service
 
 Then re-run to save a fresh snapshot:
 ```bash
-sudo mvm host init
+mvm host init
 ```
 
 If rules are partially corrupted, you can clean and re-init:
 ```bash
-sudo mvm host clean
-sudo mvm host init
+mvm host clean
+mvm host init
 ```
 
 ---
@@ -117,7 +117,7 @@ sudo mvm host init
 
 **Solution:**
 
-Run `sudo mvm host init` once; the bridge is auto-created with the name `<cli_name>-<network_name>` (default is `mvm-net`).
+Run `mvm host init` once; the bridge is auto-created with the name `<cli_name>-<network_name>` (default is `mvm-net`).
 
 To see the default bridge name:
 ```bash
@@ -226,13 +226,13 @@ mvm bin default <id>
 
 **Solution:**
 
-Run `sudo mvm host init` first to set up the `mvm` group and sudoers configuration.
+Run `mvm host init` first to set up the `mvm` group and sudoers configuration.
 
 ---
 
 ## Undoing host init — `host clean` vs `host reset`
 
-**Problem:** You want to roll back the changes made by `sudo mvm host init`.
+**Problem:** You want to roll back the changes made by `mvm host init`.
 
 There are two levels of undo depending on how much you want to remove:
 
@@ -256,7 +256,7 @@ It does **NOT** touch:
 - ❌ Sysctl `ip_forward` setting
 - ❌ The iptables rules file
 
-Run `sudo mvm host init` afterwards to recreate the default network.
+Run `mvm host init` afterwards to recreate the default network.
 
 ### `mvm host reset` — Full factory reset
 
@@ -271,7 +271,7 @@ Does everything `clean` does, **plus**:
 - Restores `net.ipv4.ip_forward` to its original value
 - Removes the iptables rules file
 
-After reset, run `sudo mvm host init` from scratch to set everything up again.
+After reset, run `mvm host init` from scratch to set everything up again.
 
 > ⚠️ Both commands refuse to run if any VMs are still running. Stop them first with `mvm vm rm --name <name>`.
 
@@ -360,7 +360,7 @@ mvm console myvm
 
 **Solution:**
 
-Make sure you've run `sudo mvm host init` and are in the `mvm` group:
+Make sure you've run `mvm host init` and are in the `mvm` group:
 ```bash
 # Check group membership
 groups | grep mvm

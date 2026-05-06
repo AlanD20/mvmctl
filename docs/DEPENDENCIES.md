@@ -20,7 +20,8 @@ These binaries are required for basic operations like managing VMs, networking, 
 | `lsmod` | Kernel | Checking for KVM module status | `kmod` | `kmod` |
 | `modprobe` | Kernel | Loading required KVM modules | `kmod` | `kmod` |
 | `dumpe2fs` | Filesystem | Filesystem inspection (image import) | `e2fsprogs` | `e2fsprogs` |
-| `gpasswd` | Privilege | Managing group membership | `passwd` | `shadow` |
+| `iptables-save` | Network | Persisting iptables rules for reboot survival | `iptables` | `iptables` |
+
 
 ## 2. Image & Cloud-Init Dependencies
 
@@ -38,14 +39,14 @@ These binaries are required for importing images, converting formats, and genera
 | `mkfs.ext4` | Image | Formatting extracted rootfs images | `e2fsprogs` | `e2fsprogs` |
 | `unsquashfs` | Image | Extracting rootfs from SquashFS images | `squashfs-tools` | `squashfs-tools` |
 | `tar` | Archive | Extracting rootfs from tarballs | `tar` | `tar` |
-| `cloud-localds` | Cloud-Init | Creating `nocloud` seed ISOs | `cloud-image-utils` | `cloud-utils` |
+| `cloud-localds` | Cloud-Init | Creating `nocloud` seed ISOs (ISO mode only) | `cloud-image-utils` | `cloud-utils` |
 | `ssh-keygen` | Remote | Generating SSH keypairs for microVMs | `openssh-client` | `openssh` |
 
 ## 3. Image Provisioning Dependencies (Optional — Two Paths)
 
 `mvm vm create` can provision the root filesystem via **two paths**:
 
-| Aspect | libguestfs Path (legacy) | Loop-Mount (mvm-provision) Path |
+| Aspect | libguestfs Path | Loop-Mount (mvm-provision) Path |
 | :--- | :--- | :--- |
 | **Binary** | `guestfs` Python module + supermin appliance | `mvm-provision` standalone compiled binary |
 | **Speed** | ~2600–3000ms per VM | ~200ms per VM |
@@ -55,7 +56,7 @@ These binaries are required for importing images, converting formats, and genera
 | **Fallback** | Used when `mvm-provision` binary unavailable or `sudo` not configured | Primary path when compiled binary is installed and sudo configured |
 | **Availability** | Checked at `mvm init` step 4, stored as `settings.guestfs_enabled` | Installed at `mvm init` step 2 via binary extraction |
 
-### 3.1 libguestfs Path (Legacy)
+### 3.1 libguestfs Path
 
 For cloud-init injection into disk images via injection mode (`--cloud-init-mode inject`), mvmctl can use libguestfs. This requires both system libraries and Python bindings.
 
@@ -205,17 +206,17 @@ This section maps specific `mvm` commands to the external binaries they invoke.
 | :--- | :--- | :--- |
 | **`mvm host`** | `init` | `sudo`, `groupadd`, `usermod`, `visudo`, `sysctl`, `ip`, `iptables`, `iptables-save`, `lsmod`, `modprobe` |
 | | `reset` | `sudo`, `groupdel`, `sysctl` |
-| **`mvm network`** | `create` | `ip`, `iptables`, `sysctl` |
+| **`mvm network`** | `create` | `ip`, `iptables` |
 | | `ls`, `inspect`, `rm`, `sync`, `set-default` | `ip`, `iptables` |
 | **`mvm bin`** | `pull`, `ls`, `rm`, `default` | (Internal Python logic) |
 | **`mvm image`** | `import` | `qemu-img`, `sfdisk`, `parted`, `blkid`, `mount`, `umount`, `tar`, `truncate`, `mkfs.ext4`, `unsquashfs` |
 | | `ls`, `rm` | (Internal Python logic) |
 | **`mvm kernel`** | `pull` | (Internal Python logic; add `--type official --clean-build` to trigger kernel compilation) |
-| | `fetch --type official --clean-build` | `make`, `gcc`, `ld`, `flex`, `bison`, `bc`, `pahole`, `git`, `curl`, `pkg-config` |
+| | `pull --type official --clean-build` | `make`, `gcc`, `ld`, `flex`, `bison`, `bc`, `pahole`, `git`, `curl`, `pkg-config` |
 | | `ls`, `rm`, `set-default` | (Internal Python logic) |
 | **`mvm key`** | `create` | `ssh-keygen` |
 | | `add`, `ls`, `rm` | (Internal Python logic) |
-| **`mvm vm`** | `create` | **Primary:** `firecracker`, `jailer`, `ip`, `iptables`, `cloud-localds` (if cloud-init), `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `chroot` (+ `btrfs` for btrfs images) |
+| **`mvm vm`** | `create` | **Primary:** `firecracker`, `jailer`, `ip`, `iptables`, `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `chroot` (+ `btrfs` for btrfs images) |
 | | `ls`, `ps`, `inspect` | (Internal Python logic) |
 | | `start`, `stop`, `reboot` | `firecracker`, `ip`, `iptables` |
 | | `rm` | `firecracker`, `ip`, `iptables` |
@@ -229,5 +230,6 @@ This section maps specific `mvm` commands to the external binaries they invoke.
   - `kvm_intel` or `kvm_amd`: Vendor-specific KVM extensions.
   - `tun`: Required for TAP networking.
   - `bridge`: Required for bridge networking.
+  - `vhost_vsock`: Required for console relay (PTY-over-vsock).
 - **Hardware Virtualization**: VT-x (Intel) or AMD-V must be enabled in the BIOS/UEFI.
 - **Permissions**: The user running `mvmctl` must be in the `mvm` group (created by `mvm host init`).
