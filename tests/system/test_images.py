@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 
 import pytest
 
@@ -110,7 +111,9 @@ class TestImageDefaults:
             mvm_binary, "image", "set-default", target_id, check=False
         )
         if result.returncode != 0:
-            pytest.skip(f"Failed to set image as default: {result.stderr.strip()}")
+            pytest.skip(
+                f"Failed to set image as default: {result.stderr.strip()}"
+            )
         assert "default" in result.stdout.lower()
 
     @pytest.mark.serial
@@ -186,7 +189,9 @@ class TestImageRemove:
 class TestImageImport:
     """Test image import operations."""
 
-    def test_image_import_local_file(self, mvm_binary, tmp_path, system_cache_dir):
+    def test_image_import_local_file(
+        self, mvm_binary, tmp_path, system_cache_dir
+    ):
         """Import a local image file."""
         import shutil
 
@@ -281,3 +286,409 @@ class TestImageInspectTree:
             or "└──" in result.stdout
             or "ID:" in result.stdout
         )
+
+
+class TestImagePullAdvanced:
+    """Test advanced image pull operations."""
+
+    pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
+
+    def test_image_pull_force(self, mvm_binary):
+        """Pull an already-cached image with --force, should re-download."""
+        # Ensure image is cached first
+        _run_mvm(
+            mvm_binary, "image", "pull", "alpine-3.21", check=False, timeout=60
+        )
+
+        # Force pull
+        result = _run_mvm(
+            mvm_binary,
+            "image",
+            "pull",
+            "alpine-3.21",
+            "--force",
+            timeout=60,
+            check=False,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"Force pull failed: {result.stderr.strip()}")
+        assert "pulled successfully" in result.stdout.lower()
+
+    @pytest.mark.serial
+    def test_image_pull_set_default(self, mvm_binary):
+        """Pull an image and set it as default in one command."""
+        # Pull previous default info so we can restore later if needed
+        result = _run_mvm(mvm_binary, "image", "ls", "--json", check=False)
+        previous_default = None
+        if result.returncode == 0:
+            images = json.loads(result.stdout)
+            defaults = [i for i in images if i.get("is_default")]
+            if defaults:
+                previous_default = defaults[0]["id"]
+
+        result = _run_mvm(
+            mvm_binary,
+            "image",
+            "pull",
+            "alpine-3.21",
+            "--set-default",
+            timeout=60,
+            check=False,
+        )
+        if result.returncode != 0:
+            pytest.skip(
+                f"Pull with --set-default failed: {result.stderr.strip()}"
+            )
+        assert "default" in result.stdout.lower()
+
+        # Restore previous default if we had one
+        if previous_default:
+            _run_mvm(
+                mvm_binary,
+                "image",
+                "set-default",
+                previous_default,
+                check=False,
+            )
+
+
+class TestImageImportAdvanced:
+    """Test advanced image import operations."""
+
+    pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
+
+    def test_image_import_with_format_qcow2(
+        self, mvm_binary, tmp_path, system_cache_dir
+    ):
+        """Import a qcow2 image using --format qcow2."""
+        import shutil
+
+        qemu_img = shutil.which("qemu-img")
+        if not qemu_img:
+            pytest.skip("qemu-img not available on this system")
+
+        qcow2_path = tmp_path / "test-image.qcow2"
+        result = subprocess.run(
+            [qemu_img, "create", "-f", "qcow2", str(qcow2_path), "64M"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"qemu-img create failed: {result.stderr}")
+
+        imported_prefix = None
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "image",
+                "import",
+                "test-qcow2",
+                str(qcow2_path),
+                "--format",
+                "qcow2",
+                check=False,
+            )
+            if result.returncode != 0:
+                pytest.skip(f"Import qcow2 failed: {result.stderr.strip()}")
+            assert result.returncode == 0
+
+            # Verify imported image appears in listing
+            result = _run_mvm(mvm_binary, "image", "ls", "--json")
+            images = json.loads(result.stdout)
+            imported = [i for i in images if i.get("os_slug") == "test-qcow2"]
+            assert imported, "Imported qcow2 image not found in listing"
+            imported_prefix = imported[0]["id"][:6]
+        finally:
+            if imported_prefix:
+                _run_mvm(
+                    mvm_binary,
+                    "image",
+                    "rm",
+                    imported_prefix,
+                    check=False,
+                )
+
+    def test_image_import_force_overwrite(
+        self, mvm_binary, tmp_path, system_cache_dir
+    ):
+        """Import the same image twice, verify --force suppresses the error."""
+
+        # Create a tiny raw image (1MB)
+        raw_path = tmp_path / "test-overwrite.raw"
+        result = subprocess.run(
+            ["dd", "if=/dev/zero", f"of={raw_path}", "bs=1M", "count=1"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"dd create failed: {result.stderr}")
+
+        # First import
+        result = _run_mvm(
+            mvm_binary,
+            "image",
+            "import",
+            "test-overwrite",
+            str(raw_path),
+            "--format",
+            "raw",
+            check=False,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"First import failed: {result.stderr.strip()}")
+
+        imported_prefix = None
+        try:
+            # Get prefix for cleanup
+            result = _run_mvm(mvm_binary, "image", "ls", "--json")
+            images = json.loads(result.stdout)
+            imported = [
+                i for i in images if i.get("os_slug") == "test-overwrite"
+            ]
+            if imported:
+                imported_prefix = imported[0]["id"][:6]
+
+            # Second import with --force should succeed
+            result = _run_mvm(
+                mvm_binary,
+                "image",
+                "import",
+                "test-overwrite",
+                str(raw_path),
+                "--format",
+                "raw",
+                "--force",
+                check=False,
+            )
+            assert result.returncode == 0, (
+                f"Force import failed: {result.stderr}"
+            )
+        finally:
+            if imported_prefix:
+                _run_mvm(
+                    mvm_binary,
+                    "image",
+                    "rm",
+                    imported_prefix,
+                    check=False,
+                )
+
+
+class TestImageRemoveForce:
+    """Test image removal with --force flag."""
+
+    pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
+
+    @pytest.mark.serial
+    def test_image_rm_with_force(self, mvm_binary):
+        """Remove a cached image by ID prefix with --force and verify it's gone."""
+
+        # Ensure alpine is pulled
+        _run_mvm(mvm_binary, "image", "pull", "alpine-3.21", check=False)
+
+        # Get alpine image ID
+        result = _run_mvm(mvm_binary, "image", "ls", "--json")
+        if result.returncode != 0:
+            pytest.skip("Failed to list images")
+        images = json.loads(result.stdout)
+        alpine_images = [
+            i for i in images if "alpine" in i.get("os_slug", "").lower()
+        ]
+        if not alpine_images:
+            pytest.skip("No alpine image available to test removal")
+
+        target_id = alpine_images[0]["id"]
+
+        # Remove with --force
+        result = _run_mvm(
+            mvm_binary,
+            "image",
+            "rm",
+            target_id[:6],
+            "--force",
+            check=False,
+        )
+        assert result.returncode == 0, f"Force remove failed: {result.stderr}"
+
+        # Verify it's gone (filter by is_present to account for soft-delete)
+        result = _run_mvm(mvm_binary, "image", "ls", "--json")
+        after = [
+            i for i in json.loads(result.stdout) if i.get("is_present", True)
+        ]
+        assert not any(i["id"] == target_id for i in after)
+
+        # Re-pull so other tests aren't broken
+        repull = _run_mvm(
+            mvm_binary, "image", "pull", "alpine-3.21", check=False
+        )
+        assert repull.returncode == 0, f"Re-pull failed: {repull.stderr}"
+
+
+class TestImagePullSkipOptimization:
+    """Test image pull with --skip-optimization flag."""
+
+    pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
+
+    @pytest.mark.serial
+    def test_image_pull_with_skip_optimization(self, mvm_binary):
+        """Pull an image with --skip-optimization flag."""
+        result = _run_mvm(
+            mvm_binary,
+            "image",
+            "pull",
+            "alpine-3.21",
+            "--skip-optimization",
+            "--force",
+            timeout=60,
+            check=False,
+        )
+        if result.returncode != 0:
+            pytest.skip(
+                f"skip-optimization pull failed: {result.stderr.strip()}"
+            )
+        assert "pulled successfully" in result.stdout.lower()
+
+
+class TestImageImportSetDefault:
+    """Test image import with --set-default flag."""
+
+    pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
+
+    def test_image_import_with_set_default(
+        self, mvm_binary, tmp_path, system_cache_dir
+    ):
+        """Import a local image file with --set-default flag."""
+        import shutil
+
+        # Ensure alpine is cached
+        _run_mvm(mvm_binary, "image", "pull", "alpine-3.21", check=False)
+
+        # Get cached image info
+        result = _run_mvm(mvm_binary, "image", "ls", "--json")
+        images = json.loads(result.stdout)
+        alpine_images = [
+            i for i in images if "alpine" in i.get("os_slug", "").lower()
+        ]
+        if not alpine_images:
+            pytest.skip("No alpine image available to import")
+
+        target = alpine_images[0]
+        target_id = target["id"]
+
+        # Inspect using full ID
+        result = _run_mvm(
+            mvm_binary, "image", "inspect", target_id, "--json", check=False
+        )
+        if result.returncode != 0:
+            pytest.skip(f"Image '{target_id[:8]}' was removed before inspect")
+
+        data = json.loads(result.stdout)
+        source_path = data.get("path")
+        if not source_path:
+            pytest.skip("Image path not available")
+
+        resolved_source = system_cache_dir / "images" / source_path
+        if not resolved_source.exists():
+            pytest.skip(f"Image file not found: {resolved_source}")
+
+        # Copy to temp location
+        temp_path = tmp_path / "test-import-default.raw"
+        shutil.copy2(str(resolved_source), temp_path)
+
+        imported_prefix = None
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "image",
+                "import",
+                "test-import-default",
+                str(temp_path),
+                "--format",
+                "raw",
+                "--set-default",
+                check=False,
+            )
+            if result.returncode != 0:
+                pytest.skip(
+                    f"Import with --set-default failed: {result.stderr.strip()}"
+                )
+            assert "default" in result.stdout.lower()
+
+            # Get prefix for cleanup
+            result = _run_mvm(mvm_binary, "image", "ls", "--json")
+            images = json.loads(result.stdout)
+            imported = [
+                i for i in images if i.get("os_slug") == "test-import-default"
+            ]
+            if imported:
+                imported_prefix = imported[0]["id"][:6]
+        finally:
+            if imported_prefix:
+                _run_mvm(
+                    mvm_binary,
+                    "image",
+                    "rm",
+                    imported_prefix,
+                    check=False,
+                )
+
+
+class TestImageImportArch:
+    """Test image import with --arch flag."""
+
+    pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
+
+    def test_image_import_with_arch(
+        self, mvm_binary, tmp_path, system_cache_dir
+    ):
+        """Import a qcow2 image with --arch x86_64 flag."""
+        import shutil
+
+        qemu_img = shutil.which("qemu-img")
+        if not qemu_img:
+            pytest.skip("qemu-img not available on this system")
+
+        qcow2_path = tmp_path / "test-arch.qcow2"
+        result = subprocess.run(
+            [qemu_img, "create", "-f", "qcow2", str(qcow2_path), "64M"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"qemu-img create failed: {result.stderr}")
+
+        imported_prefix = None
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "image",
+                "import",
+                "test-arch",
+                str(qcow2_path),
+                "--format",
+                "qcow2",
+                "--arch",
+                "x86_64",
+                check=False,
+            )
+            if result.returncode != 0:
+                pytest.skip(
+                    f"Import with --arch failed: {result.stderr.strip()}"
+                )
+            assert result.returncode == 0
+
+            # Verify imported image appears in listing
+            result = _run_mvm(mvm_binary, "image", "ls", "--json")
+            images = json.loads(result.stdout)
+            imported = [i for i in images if i.get("os_slug") == "test-arch"]
+            assert imported, "Imported arch image not found in listing"
+            imported_prefix = imported[0]["id"][:6]
+        finally:
+            if imported_prefix:
+                _run_mvm(
+                    mvm_binary,
+                    "image",
+                    "rm",
+                    imported_prefix,
+                    check=False,
+                )

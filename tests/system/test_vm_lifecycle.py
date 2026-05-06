@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from tests.system.conftest import _run_mvm, wait_for_ssh
+from tests.system.conftest import _run_mvm, _unique_subnet, wait_for_ssh
 
 pytestmark = [pytest.mark.system, pytest.mark.requires_kvm, pytest.mark.slow]
 
@@ -329,6 +329,186 @@ class TestVMRemove:
                 check=False,
             )
 
+
+class TestVMConfigOptionsAdvanced:
+    """Test advanced vm create option flags."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+    ]
+
+    def test_vm_create_with_user_data(
+        self, mvm_binary, unique_vm_name, tmp_path
+    ):
+        """Create VM with custom --user-data cloud-init file."""
+        vm_name = unique_vm_name
+        user_data_path = tmp_path / "user-data.cfg"
+        user_data_path.write_text(
+            "#cloud-config\nruncmd:\n  - touch /tmp/user-data-test\n"
+        )
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--user-data",
+                str(user_data_path),
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next(v for v in vms if v["name"] == vm_name)
+            assert vm["status"] == "running"
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                vm_name,
+                "--force",
+                check=False,
+            )
+
+    def test_vm_create_with_cloud_init_mode(self, mvm_binary, unique_vm_name):
+        """Create VM with --cloud-init-mode inject."""
+        vm_name = unique_vm_name
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--cloud-init-mode",
+                "inject",
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next(v for v in vms if v["name"] == vm_name)
+            assert vm["status"] == "running"
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                vm_name,
+                "--force",
+                check=False,
+            )
+
+    def test_vm_create_with_enable_logging(self, mvm_binary, unique_vm_name):
+        """Create VM with --enable-logging."""
+        vm_name = unique_vm_name
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--enable-logging",
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next(v for v in vms if v["name"] == vm_name)
+            assert vm["status"] == "running"
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                vm_name,
+                "--force",
+                check=False,
+            )
+
+    def test_vm_create_with_no_enable_logging(self, mvm_binary, unique_vm_name):
+        """Create VM with --no-enable-logging."""
+        vm_name = unique_vm_name
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--no-enable-logging",
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next(v for v in vms if v["name"] == vm_name)
+            assert vm["status"] == "running"
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                vm_name,
+                "--force",
+                check=False,
+            )
+
+    def test_vm_create_with_enable_metrics(self, mvm_binary, unique_vm_name):
+        """Create VM with --enable-metrics."""
+        vm_name = unique_vm_name
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--enable-metrics",
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next(v for v in vms if v["name"] == vm_name)
+            assert vm["status"] == "running"
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                vm_name,
+                "--force",
+                check=False,
+            )
+
+    def test_vm_create_with_no_enable_metrics(self, mvm_binary, unique_vm_name):
+        """Create VM with --no-enable-metrics."""
+        vm_name = unique_vm_name
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--no-enable-metrics",
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next(v for v in vms if v["name"] == vm_name)
+            assert vm["status"] == "running"
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                vm_name,
+                "--force",
+                check=False,
+            )
+
     def test_vm_remove_nonexistent(self, mvm_binary):
         """Remove a VM that does not exist should fail."""
         nonexistent = "nonexistent-vm-name-xyz"
@@ -496,8 +676,484 @@ class TestVMExportImport:
             )
 
 
-class TestVMCreateNegativePaths:
-    """Test VM creation with invalid inputs."""
+class TestVMConfigOptions:
+    """Test every vm create option flag — each flag must actually apply."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+    ]
+
+    # ── vCPUs ──────────────────────────────────────────────────────────
+
+    def test_vm_create_with_vcpus(self, mvm_binary, unique_vm_name):
+        """Create VM with custom --vcpus. Assert the count is reflected in vm ls."""
+        vm_name = unique_vm_name
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--vcpus",
+                "2",
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next(v for v in vms if v["name"] == vm_name)
+            assert vm["vcpu_count"] == 2, (
+                f"Expected vcpu_count=2, got {vm['vcpu_count']}"
+            )
+        finally:
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+
+    def test_vm_create_with_vcpus_zero_fails(self, mvm_binary, unique_vm_name):
+        """Creating a VM with --vcpus 0 must fail."""
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "create",
+            "--name",
+            unique_vm_name,
+            "--image",
+            "alpine-3.21",
+            "--vcpus",
+            "0",
+            check=False,
+        )
+        assert result.returncode != 0
+
+    # ── Memory ─────────────────────────────────────────────────────────
+
+    def test_vm_create_with_memory(self, mvm_binary, unique_vm_name):
+        """Create VM with custom --mem. Assert the value is reflected."""
+        vm_name = unique_vm_name
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--mem",
+                "1024",
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next(v for v in vms if v["name"] == vm_name)
+            assert vm["mem_size_mib"] == 1024, (
+                f"Expected mem_size_mib=1024, got {vm['mem_size_mib']}"
+            )
+        finally:
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+
+    def test_vm_create_with_memory_zero_fails(self, mvm_binary, unique_vm_name):
+        """Creating a VM with --mem 0 must fail."""
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "create",
+            "--name",
+            unique_vm_name,
+            "--image",
+            "alpine-3.21",
+            "--mem",
+            "0",
+            check=False,
+        )
+        assert result.returncode != 0
+
+    # ── Disk size ──────────────────────────────────────────────────────
+
+    def test_vm_create_with_disk_size(self, mvm_binary, unique_vm_name):
+        """Create VM with custom --disk-size. Assert the size in MiB."""
+        vm_name = unique_vm_name
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--disk-size",
+                "2G",
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next(v for v in vms if v["name"] == vm_name)
+            # 2GiB = 2048 MiB
+            assert vm["disk_size_mib"] == 2048, (
+                f"Expected disk_size_mib=2048, got {vm['disk_size_mib']}"
+            )
+        finally:
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+
+    def test_vm_create_with_disk_size_zero_fails(
+        self, mvm_binary, unique_vm_name
+    ):
+        """Creating a VM with --disk-size 0 must fail."""
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "create",
+            "--name",
+            unique_vm_name,
+            "--image",
+            "alpine-3.21",
+            "--disk-size",
+            "0",
+            check=False,
+        )
+        assert result.returncode != 0
+
+    # ── Static IP ──────────────────────────────────────────────────────
+
+    def test_vm_create_with_static_ip(
+        self, mvm_binary, unique_vm_name, created_network
+    ):
+        """Create VM with a specific --ip on a dedicated network. Assert it sticks."""
+        vm_name = unique_vm_name
+        subnet = _unique_subnet(created_network)
+        # Pick an IP inside the subnet (gateway is subnet +1)
+        octets = subnet.split(".")[:3]
+        static_ip = f"{octets[0]}.{octets[1]}.{octets[2]}.50"
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--network",
+                created_network,
+                "--ip",
+                static_ip,
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next(v for v in vms if v["name"] == vm_name)
+            assert vm["ipv4"] == static_ip, (
+                f"Expected ipv4={static_ip}, got {vm['ipv4']}"
+            )
+        finally:
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+
+    def test_vm_create_with_invalid_ip_fails(self, mvm_binary, unique_vm_name):
+        """Creating a VM with an invalid --ip should fail."""
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "create",
+            "--name",
+            unique_vm_name,
+            "--image",
+            "alpine-3.21",
+            "--ip",
+            "999.999.999.999",
+            check=False,
+        )
+        assert result.returncode != 0
+
+    # ── Custom MAC ─────────────────────────────────────────────────────
+
+    def test_vm_create_with_custom_mac(self, mvm_binary, unique_vm_name):
+        """Create VM with a custom --mac. Assert it appears in vm ls."""
+        vm_name = unique_vm_name
+        custom_mac = "aa:bb:cc:dd:ee:ff"
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--mac",
+                custom_mac,
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next(v for v in vms if v["name"] == vm_name)
+            assert vm["mac"] == custom_mac, (
+                f"Expected mac={custom_mac}, got {vm['mac']}"
+            )
+        finally:
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+
+    # ── Specific network ───────────────────────────────────────────────
+
+    def test_vm_create_with_named_network(
+        self, mvm_binary, unique_vm_name, created_network
+    ):
+        """Create VM on a specific named network. Assert network_id matches."""
+        vm_name = unique_vm_name
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--network",
+                created_network,
+            )
+            # Get network ID from ls
+            nets = json.loads(
+                _run_mvm(mvm_binary, "network", "ls", "--json").stdout
+            )
+            net = next(n for n in nets if n["name"] == created_network)
+            net_id = net["id"]
+
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next(v for v in vms if v["name"] == vm_name)
+            assert vm["network_id"] == net_id, (
+                f"Expected network_id={net_id}, got {vm['network_id']}"
+            )
+        finally:
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+
+    # ── Specific kernel ────────────────────────────────────────────────
+
+    def test_vm_create_with_specific_kernel(self, mvm_binary, unique_vm_name):
+        """Create VM with a specific --kernel. Assert kernel_id matches."""
+        vm_name = unique_vm_name
+        # Use the firecracker kernel that was present earlier
+        # Get the first present kernel
+        kernels = json.loads(
+            _run_mvm(mvm_binary, "kernel", "ls", "--json").stdout
+        )
+        present = [k for k in kernels if k.get("is_present")]
+        if not present:
+            pytest.skip("No present kernel to test with")
+        kernel_id_prefix = present[0]["id"][:6]
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--kernel",
+                kernel_id_prefix,
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next(v for v in vms if v["name"] == vm_name)
+            assert vm["kernel_id"].startswith(kernel_id_prefix), (
+                f"Expected kernel_id to start with {kernel_id_prefix}, "
+                f"got {vm['kernel_id']}"
+            )
+        finally:
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+
+    # ── Boot args ──────────────────────────────────────────────────────
+
+    def test_vm_create_with_boot_args(self, mvm_binary, unique_vm_name):
+        """Create VM with custom --boot-args. Assert in vm ls."""
+        vm_name = unique_vm_name
+        custom_boot_args = "quiet loglevel=3"
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--boot-args",
+                custom_boot_args,
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next(v for v in vms if v["name"] == vm_name)
+            stored_args = vm.get("boot_args", "")
+            assert custom_boot_args in stored_args, (
+                f"Expected boot_args to contain '{custom_boot_args}', "
+                f"got '{stored_args}'"
+            )
+        finally:
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+
+    # ── No console ─────────────────────────────────────────────────────
+
+    def test_vm_create_with_no_console(self, mvm_binary, unique_vm_name):
+        """Create VM with --no-console. Assert enable_console=False."""
+        vm_name = unique_vm_name
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--no-console",
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next(v for v in vms if v["name"] == vm_name)
+            assert vm.get("enable_console") is False, (
+                f"Expected enable_console=False, got {vm.get('enable_console')}"
+            )
+        finally:
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+
+    # ── SSH key via file path ──────────────────────────────────────────
+
+    def test_vm_create_with_ssh_key_filepath(
+        self, mvm_binary, unique_vm_name, tmp_path
+    ):
+        """Create VM with --ssh-key pointing to a file path instead of key name."""
+        import subprocess as _subprocess
+
+        vm_name = unique_vm_name
+        key_path = tmp_path / "test_key_tmp"
+        pub_key_path = tmp_path / "test_key_tmp.pub"
+        _subprocess.run(
+            [
+                "ssh-keygen",
+                "-t",
+                "ed25519",
+                "-f",
+                str(key_path),
+                "-N",
+                "",
+                "-q",
+            ],
+            check=True,
+        )
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--ssh-key",
+                str(pub_key_path),
+            )
+            # VM created successfully with the key; verify it's running
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next(v for v in vms if v["name"] == vm_name)
+            assert vm["status"] == "running", (
+                f"Expected status=running, got {vm['status']}"
+            )
+        finally:
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+
+    # ── Ubuntu image ───────────────────────────────────────────────────
+
+    def test_vm_create_with_ubuntu_image(self, mvm_binary, unique_vm_name):
+        """Create VM with Ubuntu image (not just alpine)."""
+        vm_name = unique_vm_name
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "ubuntu-24.04-minimal",
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next(v for v in vms if v["name"] == vm_name)
+            assert vm["status"] == "running", (
+                f"Expected status=running, got {vm['status']}"
+            )
+        finally:
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+
+    # ── Enable PCI ─────────────────────────────────────────────────────
+
+    def test_vm_create_with_enable_pci(self, mvm_binary, unique_vm_name):
+        """Create VM with --enable-pci. Assert enable_pci=True."""
+        vm_name = unique_vm_name
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--enable-pci",
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next(v for v in vms if v["name"] == vm_name)
+            assert vm.get("enable_pci") is True, (
+                f"Expected enable_pci=True, got {vm.get('enable_pci')}"
+            )
+        finally:
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+
+    def test_vm_create_with_no_enable_pci(self, mvm_binary, unique_vm_name):
+        """Create VM with --no-enable-pci. Assert enable_pci=False."""
+        vm_name = unique_vm_name
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--no-enable-pci",
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next(v for v in vms if v["name"] == vm_name)
+            assert vm.get("enable_pci") is False, (
+                f"Expected enable_pci=False, got {vm.get('enable_pci')}"
+            )
+        finally:
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+
+
+class TestVMInspectJson:
+    """Test vm inspect --json output."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+    ]
+
+    def test_vm_inspect_json(self, mvm_binary, created_vm):
+        """vm inspect --json should return structured JSON with key fields."""
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "inspect",
+            created_vm["name"],
+            "--json",
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert isinstance(data, dict)
+        assert "id" in data
+        assert "name" in data
+        assert "status" in data
+        assert "ip" in data
+        assert "mac" in data
+        assert "paths" in data
+        assert "features" in data
+
+
+class TestVMCreateNegativeEdgeCases:
+    """Test edge cases and invalid values for vm create options."""
 
     pytestmark = [pytest.mark.system, pytest.mark.requires_kvm]
 
@@ -570,3 +1226,511 @@ class TestVMCreateNegativePaths:
             "--force",
             check=False,
         )
+
+    def test_vm_create_with_vcpus_negative_fails(
+        self, mvm_binary, unique_vm_name
+    ):
+        """Creating a VM with negative --vcpus must fail."""
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "create",
+            "--name",
+            unique_vm_name,
+            "--image",
+            "alpine-3.21",
+            "--vcpus",
+            "-1",
+            check=False,
+        )
+        assert result.returncode != 0
+
+    def test_vm_create_with_disk_size_excessive_fails(
+        self, mvm_binary, unique_vm_name
+    ):
+        """Creating a VM with excessively large --disk-size must fail."""
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "create",
+            "--name",
+            unique_vm_name,
+            "--image",
+            "alpine-3.21",
+            "--disk-size",
+            "100T",
+            check=False,
+        )
+        assert result.returncode != 0
+
+
+class TestVMAdvancedCreateEdgeCases:
+    """Test vm create flags not yet covered."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+    ]
+
+    def test_vm_create_with_image_path(
+        self, mvm_binary, unique_vm_name, tmp_path, system_cache_dir
+    ):
+        """Create VM using --image-path instead of --image."""
+        vm_name = unique_vm_name
+
+        # Get first present image's cached file path
+        images = json.loads(
+            _run_mvm(mvm_binary, "image", "ls", "--json").stdout
+        )
+        present = [i for i in images if i.get("is_present")]
+        if not present:
+            pytest.skip("No present image to copy")
+
+        image = present[0]
+        image_rel_path = image["path"]
+        cache_image_path = system_cache_dir / "images" / image_rel_path
+        if not cache_image_path.exists():
+            pytest.skip(f"Cached image not found at {cache_image_path}")
+
+        # Copy to a temp path
+        copied_path = tmp_path / image_rel_path
+        import shutil
+
+        shutil.copy2(str(cache_image_path), str(copied_path))
+
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image-path",
+                str(copied_path),
+                "--kernel",
+                "vmlinux-official",
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next((v for v in vms if v["name"] == vm_name), None)
+            assert vm is not None, f"VM {vm_name} not found after creation"
+            assert vm["status"] == "running", (
+                f"Expected running, got {vm['status']}"
+            )
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                vm_name,
+                "--force",
+                check=False,
+            )
+
+    def test_vm_create_with_kernel_path(
+        self, mvm_binary, unique_vm_name, system_cache_dir
+    ):
+        """Create VM using --kernel-path instead of --kernel."""
+        vm_name = unique_vm_name
+
+        # Get first present kernel's file path
+        kernels = json.loads(
+            _run_mvm(mvm_binary, "kernel", "ls", "--json").stdout
+        )
+        present = [k for k in kernels if k.get("is_present")]
+        if not present:
+            pytest.skip("No present kernel to use")
+
+        kernel = present[0]
+        kernel_rel_path = kernel["path"]
+        kernel_path = system_cache_dir / "kernels" / kernel_rel_path
+        if not kernel_path.exists():
+            pytest.skip(f"Kernel file not found at {kernel_path}")
+
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--kernel-path",
+                str(kernel_path),
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next((v for v in vms if v["name"] == vm_name), None)
+            assert vm is not None
+            assert vm["status"] == "running"
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                vm_name,
+                "--force",
+                check=False,
+            )
+
+    def test_vm_create_with_nocloud_net_port(self, mvm_binary, unique_vm_name):
+        """Create VM with --nocloud-net-port 0 (auto port)."""
+        vm_name = unique_vm_name
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--nocloud-net-port",
+                "0",
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next((v for v in vms if v["name"] == vm_name), None)
+            assert vm is not None
+            assert vm["status"] == "running"
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                vm_name,
+                "--force",
+                check=False,
+            )
+
+    def test_vm_create_with_user(self, mvm_binary, unique_vm_name):
+        """Create VM with --user myuser."""
+        vm_name = unique_vm_name
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--user",
+                "myuser",
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next((v for v in vms if v["name"] == vm_name), None)
+            assert vm is not None
+            assert vm["status"] == "running"
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                vm_name,
+                "--force",
+                check=False,
+            )
+
+    def test_vm_create_with_lsm_flags(self, mvm_binary, unique_vm_name):
+        """Create VM with --lsm-flags."""
+        vm_name = unique_vm_name
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--lsm-flags",
+                "apparmor=0",
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next((v for v in vms if v["name"] == vm_name), None)
+            assert vm is not None
+            assert vm["status"] == "running"
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                vm_name,
+                "--force",
+                check=False,
+            )
+
+    def test_vm_create_with_firecracker_bin(
+        self, mvm_binary, unique_vm_name, system_cache_dir
+    ):
+        """Create VM with --firecracker-bin pointing to a binary path."""
+        vm_name = unique_vm_name
+
+        # Get first present firecracker binary path
+        bins = json.loads(_run_mvm(mvm_binary, "bin", "ls", "--json").stdout)
+        firecracker_bins = [
+            b
+            for b in bins
+            if b.get("name") == "firecracker" and b.get("is_present")
+        ]
+        if not firecracker_bins:
+            pytest.skip("No firecracker binary available")
+
+        bin_rel_path = firecracker_bins[0]["path"]
+        bin_path = system_cache_dir / "bin" / bin_rel_path
+        if not bin_path.exists():
+            pytest.skip(f"Firecracker binary not found at {bin_path}")
+
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--firecracker-bin",
+                str(bin_path),
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next((v for v in vms if v["name"] == vm_name), None)
+            assert vm is not None
+            assert vm["status"] == "running"
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                vm_name,
+                "--force",
+                check=False,
+            )
+
+    def test_vm_create_loopmount_backend(self, mvm_binary, unique_vm_name):
+        """Create VM with default (loopmount) backend. Verify guestfs NOT enabled."""
+        vm_name = unique_vm_name
+
+        # Check guestfs is not enabled (skip confirm but proceed either way)
+        guestfs_result = _run_mvm(
+            mvm_binary,
+            "config",
+            "get",
+            "settings",
+            "guestfs_enabled",
+            check=False,
+        )
+        if guestfs_result.returncode == 0 and "True" in guestfs_result.stdout:
+            pytest.skip(
+                "guestfs_enabled is currently True; test requires it False"
+            )
+
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next((v for v in vms if v["name"] == vm_name), None)
+            assert vm is not None
+            assert vm["status"] == "running"
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                vm_name,
+                "--force",
+                check=False,
+            )
+
+    @pytest.mark.serial
+    def test_vm_create_guestfs_backend(self, mvm_binary, unique_vm_name):
+        """Create VM with guestfs backend enabled."""
+        vm_name = unique_vm_name
+
+        # Enable guestfs
+        _run_mvm(
+            mvm_binary,
+            "config",
+            "set",
+            "settings",
+            "guestfs_enabled",
+            "true",
+        )
+
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next((v for v in vms if v["name"] == vm_name), None)
+            assert vm is not None
+            assert vm["status"] == "running"
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                vm_name,
+                "--force",
+                check=False,
+            )
+            # Restore guestfs setting to default
+            _run_mvm(
+                mvm_binary,
+                "config",
+                "reset",
+                "settings",
+                "guestfs_enabled",
+                check=False,
+            )
+
+
+class TestVMIdentifierFlags:
+    """Test vm commands using --ip/--mac/--name flags instead of positional."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+    ]
+
+    def test_vm_stop_by_name_flag(self, mvm_binary, created_vm):
+        """Stop VM using --name flag (not positional)."""
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "stop",
+            "--name",
+            created_vm["name"],
+        )
+        assert result.returncode == 0
+
+    def test_vm_stop_by_ip(self, mvm_binary, created_vm):
+        """Stop VM using --ip flag."""
+        ip = created_vm.get("ipv4", "")
+        if not ip:
+            pytest.skip("VM has no IP address")
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "stop",
+            "--ip",
+            ip,
+        )
+        assert result.returncode == 0
+
+    def test_vm_rm_by_name_flag(self, mvm_binary, unique_vm_name):
+        """Remove VM using --name flag (not positional)."""
+        _run_mvm(
+            mvm_binary,
+            "vm",
+            "create",
+            "--name",
+            unique_vm_name,
+            "--image",
+            "alpine-3.21",
+        )
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                "--name",
+                unique_vm_name,
+                "--force",
+            )
+            assert result.returncode == 0
+
+            # Verify VM is gone
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            assert not any(v["name"] == unique_vm_name for v in vms), (
+                f"VM {unique_vm_name} still present after rm"
+            )
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                unique_vm_name,
+                "--force",
+                check=False,
+            )
+
+    def test_vm_inspect_by_name_flag(self, mvm_binary, created_vm):
+        """Inspect VM using --name flag."""
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "inspect",
+            "--name",
+            created_vm["name"],
+        )
+        assert result.returncode == 0
+        assert created_vm["name"] in result.stdout
+
+
+class TestVMInspectTree:
+    """Test vm inspect --tree output."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+    ]
+
+    def test_vm_inspect_tree_output(self, mvm_binary, created_vm):
+        """Inspect VM with --tree format."""
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "inspect",
+            created_vm["name"],
+            "--tree",
+        )
+        assert result.returncode == 0
+        # Tree output should contain tree-drawing characters
+        assert "├──" in result.stdout or "└──" in result.stdout, (
+            "Expected tree characters in --tree output"
+        )
+
+
+class TestVMExportToFile:
+    """Test vm export with output file."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+    ]
+
+    def test_vm_export_to_file(self, mvm_binary, created_vm, tmp_path):
+        """Export VM config to a file path."""
+        export_path = tmp_path / "vm_export.json"
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "export",
+            created_vm["name"],
+            str(export_path),
+        )
+        assert result.returncode == 0
+        assert export_path.exists(), f"Export file not found at {export_path}"
+
+        # Verify it's valid JSON with required keys
+        data = json.loads(export_path.read_text())
+        assert isinstance(data, dict)
+        for key in ("name", "compute", "image", "kernel", "network"):
+            assert key in data, f"Expected key '{key}' in exported config"

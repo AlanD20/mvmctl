@@ -9,7 +9,11 @@ import pytest
 
 from tests.system.conftest import _run_mvm, _unique_subnet
 
-pytestmark = [pytest.mark.system, pytest.mark.requires_network]
+pytestmark = [
+    pytest.mark.system,
+    pytest.mark.requires_network,
+    pytest.mark.slow,
+]
 
 
 def _compute_bridge_name(name: str) -> str:
@@ -316,3 +320,162 @@ class TestNetworkSync:
         assert result.returncode == 0
         data = json.loads(result.stdout)
         assert isinstance(data, dict)
+
+
+class TestNetworkAdvancedCreate:
+    """Test advanced network creation options."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_network,
+        pytest.mark.slow,
+    ]
+
+    def test_network_create_with_ipv4_gateway(
+        self, mvm_binary, unique_network_name
+    ):
+        """Create a network with explicit --ipv4-gateway."""
+        subnet = _unique_subnet(unique_network_name)
+        custom_gateway = subnet.replace(".0/24", ".100")
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "network",
+                "create",
+                unique_network_name,
+                "--subnet",
+                subnet,
+                "--ipv4-gateway",
+                custom_gateway,
+                "--non-interactive",
+            )
+            assert result.returncode == 0
+
+            # Inspect and verify gateway
+            inspect = _run_mvm(
+                mvm_binary,
+                "network",
+                "inspect",
+                unique_network_name,
+                "--json",
+            )
+            data = json.loads(inspect.stdout)
+            assert data.get("ipv4_gateway") == custom_gateway, (
+                f"Expected gateway {custom_gateway}, got {data.get('ipv4_gateway')}"
+            )
+        finally:
+            _run_mvm(
+                mvm_binary, "network", "rm", unique_network_name, check=False
+            )
+
+    def test_network_create_with_nat_gateways(
+        self, mvm_binary, unique_network_name
+    ):
+        """Create a network with explicit --nat-gateways."""
+        subnet = _unique_subnet(unique_network_name)
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "network",
+                "create",
+                unique_network_name,
+                "--subnet",
+                subnet,
+                "--nat-gateways",
+                "wlo1",
+                "--non-interactive",
+            )
+            assert result.returncode == 0
+
+            # Verify NAT gateways in inspect output
+            inspect = _run_mvm(
+                mvm_binary,
+                "network",
+                "inspect",
+                unique_network_name,
+                "--json",
+            )
+            data = json.loads(inspect.stdout)
+            gateways = data.get("nat_gateways", [])
+            assert "wlo1" in gateways, (
+                f"Expected nat_gateways to contain 'wlo1', got {gateways}"
+            )
+        finally:
+            _run_mvm(
+                mvm_binary, "network", "rm", unique_network_name, check=False
+            )
+
+    def test_network_create_invalid_gateway_fails(
+        self, mvm_binary, unique_network_name
+    ):
+        """Creating a network with an invalid gateway should fail."""
+        result = _run_mvm(
+            mvm_binary,
+            "network",
+            "create",
+            unique_network_name,
+            "--subnet",
+            "10.99.99.0/24",
+            "--ipv4-gateway",
+            "not-an-ip",
+            "--non-interactive",
+            check=False,
+        )
+        assert result.returncode != 0
+        # Cleanup if somehow created
+        _run_mvm(mvm_binary, "network", "rm", unique_network_name, check=False)
+
+
+class TestNetworkInspectTree:
+    """Test network inspect with --tree flag."""
+
+    pytestmark = [pytest.mark.system, pytest.mark.requires_network]
+
+    def test_network_inspect_tree(self, mvm_binary, created_network):
+        """Inspect a network with --tree and verify tree characters in output."""
+        result = _run_mvm(
+            mvm_binary,
+            "network",
+            "inspect",
+            created_network,
+            "--tree",
+        )
+        assert result.returncode == 0
+        assert "├──" in result.stdout or "└──" in result.stdout
+
+
+class TestNetworkRemoveForce:
+    """Test network removal with --force flag."""
+
+    pytestmark = [pytest.mark.system, pytest.mark.requires_network]
+
+    def test_network_rm_with_force(self, mvm_binary, unique_network_name):
+        """Create a network and remove it with --force, verify cleanup."""
+        subnet = _unique_subnet(unique_network_name)
+        try:
+            # Create
+            _run_mvm(
+                mvm_binary,
+                "network",
+                "create",
+                unique_network_name,
+                "--subnet",
+                subnet,
+                "--non-interactive",
+            )
+
+            # Remove with --force
+            result = _run_mvm(
+                mvm_binary, "network", "rm", unique_network_name, "--force"
+            )
+            assert result.returncode == 0
+        finally:
+            # Cleanup in case force removal failed
+            _run_mvm(
+                mvm_binary, "network", "rm", unique_network_name, check=False
+            )
+
+        # Verify network is gone via JSON listing
+        ls_result = _run_mvm(mvm_binary, "network", "ls", "--json")
+        networks = json.loads(ls_result.stdout)
+        assert not any(n.get("name") == unique_network_name for n in networks)

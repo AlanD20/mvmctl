@@ -59,3 +59,24 @@ class TestConfigLifecycle:
         assert result.returncode == 0
         assert result.stdout.strip()
         assert "[defaults.vm]" in result.stdout
+
+    @pytest.mark.serial
+    def test_config_reset_all(self, mvm_binary):
+        """Reset all config overrides globally."""
+        # First set a value so there is something to reset
+        _run_mvm(mvm_binary, "config", "set", "defaults.vm", "vcpu_count", "6")
+
+        # Reset all
+        result = _run_mvm(mvm_binary, "config", "reset", "--all")
+        assert result.returncode == 0
+
+        # Verify the value is no longer the custom one
+        result = _run_mvm(
+            mvm_binary,
+            "config",
+            "get",
+            "defaults.vm",
+            "vcpu_count",
+        )
+        assert result.returncode == 0
+        assert "6" not in result.stdout

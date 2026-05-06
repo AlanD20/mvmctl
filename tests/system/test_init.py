@@ -29,8 +29,7 @@ class TestInitWizard:
         assert result.returncode == 0
         output = result.stdout + result.stderr
         assert any(
-            phrase in output
-            for phrase in ("all set", "ready", "Setup Wizard")
+            phrase in output for phrase in ("all set", "ready", "Setup Wizard")
         ), f"Output missing expected phrases:\n{output}"
 
     def test_init_idempotent(self, mvm_binary):

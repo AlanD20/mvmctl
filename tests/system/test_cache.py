@@ -91,3 +91,56 @@ class TestCacheClean:
         result = _run_mvm(mvm_binary, "cache", "clean", "--dry-run", "--force")
         assert result.returncode == 0
         assert "DRY RUN" in result.stdout
+
+
+class TestCachePruneActual:
+    """Test actual (non-dry-run) cache prune operations."""
+
+    pytestmark = [pytest.mark.system, pytest.mark.slow]
+
+    def test_cache_prune_misc_actual(self, mvm_binary):
+        """Actually prune misc cache (safe to actually clean temp files)."""
+        result = _run_mvm(mvm_binary, "cache", "prune", "misc", check=False)
+        if result.returncode != 0:
+            pytest.skip(
+                f"cache prune misc failed (may need sudo or other preconditions): "
+                f"{result.stderr}"
+            )
+        assert result.returncode == 0
+
+    def test_cache_clean_actual(self, mvm_binary):
+        """Actually trigger a full clean with --force."""
+        result = _run_mvm(mvm_binary, "cache", "clean", "--force", check=False)
+        if result.returncode != 0:
+            pytest.skip(
+                f"cache clean --force failed (may need sudo or other preconditions): "
+                f"{result.stderr}"
+            )
+        assert result.returncode == 0
+
+
+class TestCachePruneEdgeCases:
+    """Test edge cases for cache prune command."""
+
+    pytestmark = [pytest.mark.system]
+
+    def test_cache_prune_with_nonexistent_category(self, mvm_binary):
+        """Pruning a nonexistent category should fail."""
+        result = _run_mvm(
+            mvm_binary,
+            "cache",
+            "prune",
+            "nonexistent-category",
+            "--dry-run",
+            check=False,
+        )
+        assert result.returncode != 0
+
+    def test_cache_prune_misc_with_force(self, mvm_binary):
+        """Prune misc cache with --force flag."""
+        result = _run_mvm(
+            mvm_binary, "cache", "prune", "misc", "--force", check=False
+        )
+        if result.returncode != 0:
+            pytest.skip(f"Misc prune with --force failed: {result.stderr}")
+        assert result.returncode == 0

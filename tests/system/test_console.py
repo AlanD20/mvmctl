@@ -60,3 +60,50 @@ class TestConsoleKill:
             # Relay was not running — expect clear error message
             combined = result.stdout + result.stderr
             assert "No console relay" in combined
+
+
+class TestConsoleIdentifierFlags:
+    """Test console state using --name and --ip identifier flags."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+    ]
+
+    def test_console_state_by_name_flag(self, mvm_binary, created_vm):
+        """Show console relay state using --name flag."""
+        result = _run_mvm(
+            mvm_binary,
+            "console",
+            "--name",
+            created_vm["name"],
+            "--state",
+        )
+        assert result.returncode == 0
+        combined = result.stdout + result.stderr
+        assert (
+            "Console" in combined
+            or "running" in combined
+            or "stopped" in combined
+        )
+
+    def test_console_state_by_ip(self, mvm_binary, created_vm):
+        """Show console relay state using --ip flag."""
+        ip = created_vm.get("ipv4")
+        if not ip:
+            pytest.skip("VM has no IPv4 address assigned")
+        result = _run_mvm(
+            mvm_binary,
+            "console",
+            "--ip",
+            ip,
+            "--state",
+        )
+        assert result.returncode == 0
+        combined = result.stdout + result.stderr
+        assert (
+            "Console" in combined
+            or "running" in combined
+            or "stopped" in combined
+        )

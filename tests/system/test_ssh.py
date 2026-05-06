@@ -78,3 +78,78 @@ class TestSSHConnect:
         assert "root" in result.stdout, (
             f"Expected 'root' in output, got: {result.stdout}"
         )
+
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    def test_ssh_with_user_flag(self, mvm_binary, created_vm, timing_targets):
+        """SSH with explicit --user flag."""
+        vm_info = created_vm
+        ssh_timeout = timing_targets["alpine-3.21"]
+        wait_for_ssh(mvm_binary, vm_info["name"], "root", ssh_timeout)
+
+        result = _run_mvm(
+            mvm_binary,
+            "ssh",
+            "--name",
+            vm_info["name"],
+            "-u",
+            "root",
+            "-c",
+            "whoami",
+            check=False,
+        )
+        assert result.returncode == 0, (
+            f"SSH with --user failed: {result.stderr}"
+        )
+        assert "root" in result.stdout
+
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    def test_ssh_with_key_path(
+        self, mvm_binary, created_vm, timing_targets, tmp_path
+    ):
+        """SSH with explicit --key pointing to a private key file."""
+        import subprocess as _subprocess
+
+        vm_info = created_vm
+        ssh_timeout = timing_targets["alpine-3.21"]
+        wait_for_ssh(mvm_binary, vm_info["name"], "root", ssh_timeout)
+
+        # Create a throwaway key for the SSH test
+        test_key = tmp_path / "ssh_test_key"
+        _subprocess.run(
+            [
+                "ssh-keygen",
+                "-t",
+                "ed25519",
+                "-f",
+                str(test_key),
+                "-N",
+                "",
+                "-q",
+            ],
+            check=True,
+        )
+
+        result = _run_mvm(
+            mvm_binary,
+            "ssh",
+            "--name",
+            vm_info["name"],
+            "--key",
+            str(test_key),
+            "-c",
+            "whoami",
+            check=False,
+        )
+        # Will likely fail because the key isn't authorized on the VM,
+        # but the SSH connection itself should attempt and fail gracefully.
+        # This tests that --key is accepted as a valid file path and that
+        # SSH uses it (even if auth fails).
+        if result.returncode != 0:
+            assert (
+                "Permission denied" in result.stderr
+                or "key" in result.stderr.lower()
+            )
+        else:
+            assert "root" in result.stdout

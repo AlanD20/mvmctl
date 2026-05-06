@@ -12,7 +12,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Generator, Optional
+from typing import Any, Generator
 
 import pytest
 
@@ -151,7 +151,9 @@ def prepare_system_env(mvm_binary, check_system_prerequisites) -> None:
             # Only consider kernels that are BOTH present on disk AND set as default,
             # because stale DB records can have is_default=1 but is_present=0.
             present = [k for k in kernels if k.get("is_present")]
-            has_valid_default = any(k.get("is_default") and k.get("is_present") for k in kernels)
+            has_valid_default = any(
+                k.get("is_default") and k.get("is_present") for k in kernels
+            )
             if not has_valid_default:
                 if present:
                     first_id = present[0]["id"][:6]
@@ -160,7 +162,12 @@ def prepare_system_env(mvm_binary, check_system_prerequisites) -> None:
                         f"Setting '{first_id}' as default..."
                     )
                     subprocess.run(
-                        [*shlex.split(binary), "kernel", "set-default", first_id],
+                        [
+                            *shlex.split(binary),
+                            "kernel",
+                            "set-default",
+                            first_id,
+                        ],
                         capture_output=True,
                         text=True,
                         timeout=30,

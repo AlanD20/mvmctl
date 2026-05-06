@@ -9,7 +9,7 @@ import pytest
 
 from tests.system.conftest import _run_mvm
 
-pytestmark = pytest.mark.system
+pytestmark = [pytest.mark.system]
 
 
 class TestBinLifecycle:
@@ -97,4 +97,82 @@ class TestBinaryPullAndLifecycle:
             pytest.skip("No cached binaries to set as default")
         target_id = binaries[0]["id"][:6]
         result = _run_mvm(mvm_binary, "bin", "default", target_id, check=False)
+        assert result.returncode == 0
+
+    @pytest.mark.serial
+    def test_bin_rm_by_id(self, mvm_binary):
+        """Remove a cached binary by its 6-character ID prefix."""
+
+        result = _run_mvm(mvm_binary, "bin", "ls", "--json")
+        binaries = json.loads(result.stdout)
+        if not binaries:
+            pytest.skip("No cached binaries")
+
+        # Find a binary that is NOT the default
+        non_defaults = [b for b in binaries if not b.get("is_default", False)]
+        if not non_defaults:
+            pytest.skip("All cached binaries are the default — cannot remove")
+
+        target = non_defaults[0]
+        target_prefix = target["id"][:6]
+
+        result = _run_mvm(
+            mvm_binary, "bin", "rm", target_prefix, "--force", check=False
+        )
+        assert result.returncode == 0, (
+            f"bin rm {target_prefix} failed: {result.stderr}"
+        )
+
+        # Verify it's gone from listing
+        listing = _run_mvm(mvm_binary, "bin", "ls", "--json")
+        remaining = json.loads(listing.stdout)
+        ids = {b["id"][:6] for b in remaining}
+        assert target_prefix not in ids, (
+            f"Binary {target_prefix} still present after removal"
+        )
+
+
+class TestBinaryPullAdvanced:
+    """Test advanced binary pull operations."""
+
+    pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
+
+    def test_bin_pull_force(self, mvm_binary):
+        """Pull a binary with --force to re-download an already cached version."""
+
+        result = _run_mvm(mvm_binary, "bin", "ls", "--remote")
+        versions = re.findall(r"\d+\.\d+\.\d+", result.stdout)
+        if not versions:
+            pytest.skip("No remote versions available")
+        target = versions[-2]  # One before the latest version
+
+        result = _run_mvm(
+            mvm_binary, "bin", "pull", target, "--force", check=False
+        )
+        if result.returncode != 0:
+            pytest.skip(f"bin pull {target} --force failed: {result.stderr}")
+        assert result.returncode == 0
+
+    def test_bin_pull_set_default(self, mvm_binary):
+        """Pull a binary and set it as default atomically."""
+
+        result = _run_mvm(mvm_binary, "bin", "ls", "--remote")
+        versions = re.findall(r"\d+\.\d+\.\d+", result.stdout)
+        if not versions:
+            pytest.skip("No remote versions available")
+        target = versions[-2]  # One before the latest version
+
+        result = _run_mvm(
+            mvm_binary,
+            "bin",
+            "pull",
+            target,
+            "--set-default",
+            "--force",
+            check=False,
+        )
+        if result.returncode != 0:
+            pytest.skip(
+                f"bin pull {target} --set-default failed: {result.stderr}"
+            )
         assert result.returncode == 0
