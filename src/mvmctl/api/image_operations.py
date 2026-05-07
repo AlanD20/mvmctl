@@ -179,12 +179,24 @@ class ImageOperation:
                 exception=e,
             )
 
+        # If --set-default was explicitly passed, use that.
+        # Otherwise, if the existing image was the default, transfer the flag
+        # to the replacement so we don't orphan the default.
         image_item.is_default = resolved.set_default
+        if (
+            not resolved.set_default
+            and existing_image is not None
+            and existing_image.is_default
+        ):
+            image_item.is_default = True
         repo.upsert(image_item)
 
-        # Clean up old image files if the ID changed after successful upsert
+        # Clean up old image files if the ID changed after successful upsert.
+        # Also soft-delete the old DB record so it won't be returned by
+        # future queries (the file is gone but the DB still has is_present=1).
         if existing_image is not None and existing_image.id != image_item.id:
             removed = image_service.remove_many_paths([existing_image])
+            repo.soft_delete(existing_image.id)
             if removed:
                 logger.info(
                     "Cleaned up %d old image file(s) for %s",
@@ -324,12 +336,24 @@ class ImageOperation:
                 exception=e,
             )
 
+        # If --set-default was explicitly passed, use that.
+        # Otherwise, if the existing image was the default, transfer the flag
+        # to the replacement so we don't orphan the default.
         image_item.is_default = resolved.set_default
+        if (
+            not resolved.set_default
+            and existing_image is not None
+            and existing_image.is_default
+        ):
+            image_item.is_default = True
         repo.upsert(image_item)
 
-        # Clean up old image files if the ID changed after successful upsert
+        # Clean up old image files if the ID changed after successful upsert.
+        # Also soft-delete the old DB record so it won't be returned by
+        # future queries (the file is gone but the DB still has is_present=1).
         if existing_image is not None and existing_image.id != image_item.id:
             removed = image_service.remove_many_paths([existing_image])
+            repo.soft_delete(existing_image.id)
             if removed:
                 logger.info(
                     "Cleaned up %d old image file(s) for %s",

@@ -115,7 +115,6 @@ tasks:
     desc: Verify the link works within uv/pyenv
     cmds:
       - uv run python -c "import guestfs; print('libguestfs is active in .venv')"
-
   # =====================================================================
   # System Test Setup — pre-pull required assets before running tests
   # =====================================================================
@@ -150,7 +149,6 @@ tasks:
       - uv run mvm bin ls --json | uv run python -c "import sys,json; sys.exit(0 if json.load(sys.stdin) else 1)"
     cmds:
       - uv run mvm bin pull 1.15.1 --set-default
-
   # =====================================================================
   # System Tests — these run on real KVM hardware, produce release gate
   # =====================================================================
@@ -173,11 +171,11 @@ tasks:
     desc: Run all system tests — parallel → serial → cache LAST
     deps: [sys-setup]
     cmds:
-      - echo "=== Phase 1: Parallel-safe tests (-n auto) ==="
+      - 'echo "=== Phase 1: Parallel-safe tests (-n auto) ==="'
       - uv run pytest tests/system/ --ignore=tests/system/test_cache.py -m "not serial" -v -n auto --no-cov -rx
-      - echo "=== Phase 2: State-modifying tests (-n 0, sequential) ==="
+      - 'echo "=== Phase 2: State-modifying tests (-n 0, sequential) ==="'
       - uv run pytest tests/system/ --ignore=tests/system/test_cache.py -m "serial" -v -n 0 --no-cov -rx
-      - echo "=== Phase 3: Cache cleanup (LAST! destroys environment) ==="
+      - 'echo "=== Phase 3: Cache cleanup (LAST! destroys environment) ==="'
       - uv run pytest tests/system/test_cache.py -v --no-cov -rx
   sys-test-fast:
     desc: Run fast system tests only — no KVM, no slow downloads, no cache cleanup

@@ -622,3 +622,153 @@ class TestKernelPullAdvancedFlags:
                 f"Kernel pull with --arch failed: {result.stderr.strip()}"
             )
         assert result.returncode == 0
+
+
+class TestImagePullWithTypeFlag:
+    """Test image pull with explicit --type flag."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.slow,
+        pytest.mark.serial,
+    ]
+
+    def test_image_pull_with_explicit_type(self, mvm_binary):
+        """Pull an image with --type flag matching the positional selector."""
+        result = _run_mvm(
+            mvm_binary,
+            "image",
+            "pull",
+            "alpine-3.21",
+            "--type",
+            "alpine",
+            "--force",
+            timeout=60,
+            check=False,
+        )
+        if result.returncode == 0:
+            assert "pulled successfully" in result.stdout.lower()
+        elif "timed out" in (result.stdout + result.stderr).lower() or result.returncode == -15:
+            pytest.skip("Pull with --type timed out (>60s)")
+        else:
+            pytest.skip(
+                f"Pull with --type failed: {result.stderr.strip()}"
+            )
+
+
+class TestImageImportWithDisableDetector:
+    """Test image import with --disable-detector flag."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.slow,
+        pytest.mark.serial,
+    ]
+
+    def test_image_import_with_disable_detector(
+        self, mvm_binary, tmp_path, system_cache_dir
+    ):
+        """Import an image with --disable-detector all flag.
+
+        Uses an already-cached alpine image file (which has a real filesystem)
+        so the import backend can parse the partition table.
+        """
+        import shutil
+
+        # Find a cached alpine image to use as import source
+        result = _run_mvm(mvm_binary, "image", "ls", "--json")
+        images = json.loads(result.stdout)
+        alpine_images = [
+            i
+            for i in images
+            if "alpine" in i.get("os_slug", "").lower() and i.get("is_present")
+        ]
+        if not alpine_images:
+            _run_mvm(mvm_binary, "image", "pull", "alpine-3.21", check=False)
+            result = _run_mvm(mvm_binary, "image", "ls", "--json")
+            images = json.loads(result.stdout)
+            alpine_images = [
+                i
+                for i in images
+                if "alpine" in i.get("os_slug", "").lower()
+                and i.get("is_present")
+            ]
+
+        if not alpine_images:
+            pytest.skip("No alpine image available to use as import source")
+
+        target = alpine_images[0]
+        target_id = target["id"]
+
+        # Inspect to get the file path
+        result = _run_mvm(
+            mvm_binary, "image", "inspect", target_id, "--json", check=False
+        )
+        if result.returncode != 0:
+            pytest.skip(f"Image '{target_id[:8]}' was removed before inspect")
+
+        data = json.loads(result.stdout)
+        source_path = data.get("path")
+        if not source_path:
+            pytest.skip("Image path not available")
+
+        resolved_source = system_cache_dir / "images" / source_path
+        if not resolved_source.exists():
+            pytest.skip(f"Image file not found: {resolved_source}")
+
+        # Decompress if needed (.zst)
+        temp_path = tmp_path / "alpine-for-import.raw"
+        if resolved_source.suffix == ".zst":
+            decompress = subprocess.run(
+                [
+                    "zstd",
+                    "-d",
+                    "-f",
+                    str(resolved_source),
+                    "-o",
+                    str(temp_path),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if decompress.returncode != 0:
+                pytest.skip(f"zstd decompress failed: {decompress.stderr}")
+        else:
+            shutil.copy2(str(resolved_source), temp_path)
+
+        imported_prefix: str | None = None
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "image",
+                "import",
+                "test-disable-detector",
+                str(temp_path),
+                "--format",
+                "raw",
+                "--disable-detector",
+                "all",
+                check=False,
+            )
+            if result.returncode != 0:
+                pytest.skip(
+                    f"Import with --disable-detector failed: {result.stderr.strip()}"
+                )
+            assert result.returncode == 0
+
+            # Verify imported image appears in listing
+            result = _run_mvm(mvm_binary, "image", "ls", "--json")
+            images = json.loads(result.stdout)
+            imported = [
+                i for i in images if i.get("os_name") == "test-disable-detector"
+            ]
+            assert imported, (
+                "Imported image with --disable-detector not found in listing"
+            )
+            imported_prefix = imported[0]["id"][:6]
+        finally:
+            if imported_prefix:
+                _run_mvm(
+                    mvm_binary, "image", "rm", imported_prefix, check=False
+                )

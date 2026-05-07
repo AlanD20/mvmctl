@@ -53,7 +53,19 @@ __all__ = [
     "NetworkInput",
     "SSHInput",
     "VMCreateInput",
+    "VMImportInput",
+    "VMImportRequest",
     "VMInput",
+    # Export/import config models
+    "VMExportComputeConfig",
+    "VMExportImageConfig",
+    "VMExportKernelConfig",
+    "VMExportBinaryConfig",
+    "VMExportNetworkConfig",
+    "VMExportBootConfig",
+    "VMExportFirecrackerConfig",
+    "VMExportCloudInitConfig",
+    "VMExportConfig",
 ]
 
 _LAZY_MAP: dict[str, tuple[str, str]] = {
@@ -115,7 +127,52 @@ _LAZY_MAP: dict[str, tuple[str, str]] = {
         "mvmctl.api.inputs._vm_create_input",
         "VMCreateInput",
     ),
+    "VMImportInput": (
+        "mvmctl.api.inputs._vm_import_input",
+        "VMImportInput",
+    ),
+    "VMImportRequest": (
+        "mvmctl.api.inputs._vm_import_input",
+        "VMImportRequest",
+    ),
     "VMInput": ("mvmctl.api.inputs._vm_input", "VMInput"),
+    # ── Export/import config models ────────────────────────────
+    "VMExportComputeConfig": (
+        "mvmctl.api.inputs._vm_export_config",
+        "VMExportComputeConfig",
+    ),
+    "VMExportImageConfig": (
+        "mvmctl.api.inputs._vm_export_config",
+        "VMExportImageConfig",
+    ),
+    "VMExportKernelConfig": (
+        "mvmctl.api.inputs._vm_export_config",
+        "VMExportKernelConfig",
+    ),
+    "VMExportBinaryConfig": (
+        "mvmctl.api.inputs._vm_export_config",
+        "VMExportBinaryConfig",
+    ),
+    "VMExportNetworkConfig": (
+        "mvmctl.api.inputs._vm_export_config",
+        "VMExportNetworkConfig",
+    ),
+    "VMExportBootConfig": (
+        "mvmctl.api.inputs._vm_export_config",
+        "VMExportBootConfig",
+    ),
+    "VMExportFirecrackerConfig": (
+        "mvmctl.api.inputs._vm_export_config",
+        "VMExportFirecrackerConfig",
+    ),
+    "VMExportCloudInitConfig": (
+        "mvmctl.api.inputs._vm_export_config",
+        "VMExportCloudInitConfig",
+    ),
+    "VMExportConfig": (
+        "mvmctl.api.inputs._vm_export_config",
+        "VMExportConfig",
+    ),
 }
 
 

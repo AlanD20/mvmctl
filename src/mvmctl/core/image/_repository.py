@@ -42,10 +42,10 @@ class ImageRepository:
 
     @_graceful_read(default=None)
     def get_by_os_slug(self, os_slug: str) -> ImageItem | None:
-        """Return an image by its os_slug, or None if not found."""
+        """Return an image by its os_slug, preferring the default, or None if not found."""
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM images WHERE os_slug = ? AND deleted_at IS NULL AND is_present = 1",
+                "SELECT * FROM images WHERE os_slug = ? AND deleted_at IS NULL AND is_present = 1 ORDER BY is_default DESC, created_at DESC",
                 (os_slug,),
             ).fetchone()
         if row is None:
