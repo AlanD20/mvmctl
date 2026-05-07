@@ -262,6 +262,7 @@ CONST_DIR_PERMS_CACHE: Final[int] = 0o700
 CONST_FILE_PERMS_SHADOW: Final[int] = 0o640
 CONST_FILE_PERMS_SUDOERS: Final[int] = 0o440
 CONST_FILE_PERMS_CONFIG: Final[int] = 0o600
+CONST_FILE_PERMS_DB: Final[int] = 0o640
 CONST_FILE_PERMS_EXECUTABLE: Final[int] = 0o755
 
 # --- /etc/shadow fields ---

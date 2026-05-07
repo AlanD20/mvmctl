@@ -43,10 +43,13 @@ class SSHOperation:
                 changes={"ip": resolved.target_ip, "user": resolved.user},
             )
 
-            exit_code = SSHService.connect(
+            service = SSHService(
                 ip=resolved.target_ip,
                 user=resolved.user,
                 key_path=resolved.key,
+                timeout=resolved.timeout,
+            )
+            exit_code = service.connect(
                 command=resolved.cmd,
                 exec_mode=resolved.cmd is None,
             )

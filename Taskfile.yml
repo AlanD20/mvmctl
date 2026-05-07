@@ -153,31 +153,33 @@ tasks:
   # System Tests — these run on real KVM hardware, produce release gate
   # =====================================================================
   # TARGETS:
-  #   sys-test      — FULL run: parallel-safe (1) → state-modifying (2) → cache (3)
-  #   sys-test-fast — DEV run: only read-only / non-KVM / non-slow tests
+  #   sys-test      — FULL run: serial (1) → cache LAST (2)
+  #   sys-test-fast — DEV run: only non-slow, non-KVM tests
   #
   # MARKERS (pytest -m):
   #   system          — every test in tests/system/
   #   serial          — modifies shared mutable state (defaults, global cache);
-  #                     MUST run without parallelism (-n 0)
+  #                     MUST run without parallelism (-n 0).
+  #                     ALL system tests are serial because they share a
+  #                     single SQLite DB at a fixed path.
   #   slow            — tests taking >30 seconds (downloads, VM creation)
   #   requires_kvm    — tests that create actual VMs (need /dev/kvm)
   #   requires_network — tests that create host network bridges
   #
   # IMPORTANT: test_cache.py MUST run LAST — cache clean --force destroys
   #            everything (DB, service binaries, iptables chains).
+  #            prepare_system_env auto-pulls missing assets so `sys-setup`
+  #            is a soft dep — tests recover from `cache clean` automatically.
   # =====================================================================
   sys-test:
-    desc: Run all system tests — parallel → serial → cache LAST
+    desc: Run all system tests — serial (1) → cache LAST (2)
     deps: [sys-setup]
     cmds:
-      - 'echo "=== Phase 1: Parallel-safe tests (-n auto) ==="'
-      - uv run pytest tests/system/ --ignore=tests/system/test_cache.py -m "not serial" -v -n auto --no-cov -rx
-      - 'echo "=== Phase 2: State-modifying tests (-n 0, sequential) ==="'
-      - uv run pytest tests/system/ --ignore=tests/system/test_cache.py -m "serial" -v -n 0 --no-cov -rx
-      - 'echo "=== Phase 3: Cache cleanup (LAST! destroys environment) ==="'
-      - uv run pytest tests/system/test_cache.py -v --no-cov -rx
+      - 'echo "=== Phase 1: All system tests (serial, excludes cache) ==="'
+      - uv run pytest tests/system/ --ignore=tests/system/test_cache.py -v -n 0 --no-cov -rx
+      - 'echo "=== Phase 2: Cache cleanup (LAST! destroys environment) ==="'
+      - uv run pytest tests/system/test_cache.py -v -n 0 --no-cov -rx
   sys-test-fast:
     desc: Run fast system tests only — no KVM, no slow downloads, no cache cleanup
     cmds:
-      - uv run pytest tests/system/ --ignore=tests/system/test_cache.py -v -n auto --no-cov -m "not slow and not requires_kvm"
+      - uv run pytest tests/system/ --ignore=tests/system/test_cache.py -v -n 0 --no-cov -m "not slow and not requires_kvm"

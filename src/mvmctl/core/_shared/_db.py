@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, TypeVar, cast
 
+from mvmctl.constants import CONST_FILE_PERMS_DB
 from mvmctl.exceptions import MigrationError
 from mvmctl.utils.common import CacheUtils
 
@@ -115,6 +116,7 @@ class Database:
             check_same_thread=False,
             isolation_level=None,
         )
+        self._db_path.chmod(CONST_FILE_PERMS_DB)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA journal_mode = WAL")
@@ -287,6 +289,7 @@ class Database:
         applied_count = 0
 
         with closing(sqlite3.connect(self._db_path)) as conn:
+            self._db_path.chmod(CONST_FILE_PERMS_DB)
             conn.execute("PRAGMA foreign_keys = ON")
             conn.execute("PRAGMA busy_timeout = 5000")
             self._ensure_migrations_table(conn)

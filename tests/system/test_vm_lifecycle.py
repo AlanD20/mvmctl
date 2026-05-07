@@ -9,7 +9,7 @@ import pytest
 
 from tests.system.conftest import _run_mvm, _unique_subnet, wait_for_ssh
 
-pytestmark = [pytest.mark.system, pytest.mark.requires_kvm, pytest.mark.slow]
+pytestmark = [pytest.mark.system, pytest.mark.requires_kvm, pytest.mark.slow, pytest.mark.serial]
 
 
 class TestVMCreatePerImage:

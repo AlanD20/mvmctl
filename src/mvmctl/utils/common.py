@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from mvmctl.constants import DEBUG_MODE
+from mvmctl.constants import CONST_DIR_PERMS_CACHE, DEBUG_MODE
 from mvmctl.exceptions import MVMError
 
 # Shell metacharacters that must be rejected from user input
@@ -118,7 +118,7 @@ class CacheUtils:
             The resolved directory path.
 
         """
-        path.mkdir(parents=True, exist_ok=True)
+        path.mkdir(parents=True, exist_ok=True, mode=CONST_DIR_PERMS_CACHE)
         return path
 
     @staticmethod
@@ -141,7 +141,7 @@ class CacheUtils:
 
         base = tmp_path if tmp_path is not None else Path(tempfile.gettempdir())
         cache_dir = Path(base / PROJECT_NAME / "ready")
-        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_dir.mkdir(parents=True, exist_ok=True, mode=CONST_DIR_PERMS_CACHE)
         return cache_dir
 
     @staticmethod
@@ -211,11 +211,6 @@ class CacheUtils:
         return CacheUtils.get_config_dir() / "config.json"
 
     @staticmethod
-    def get_auditlog_path() -> Path:
-        """Return the path to the MVM config file (config.json)."""
-        return CacheUtils.get_cache_dir() / "audit.log"
-
-    @staticmethod
     def get_mvm_db_path() -> Path:
         """
         Return the path to the SQLite database file.
@@ -240,7 +235,7 @@ class CacheUtils:
     def get_vms_dir() -> Path:
         """Return the directory that holds VM state and per-VM dirs."""
         result = CacheUtils.get_cache_dir() / "vms"
-        result.mkdir(parents=True, exist_ok=True)
+        result.mkdir(parents=True, exist_ok=True, mode=CONST_DIR_PERMS_CACHE)
         return result
 
     @staticmethod
@@ -257,35 +252,35 @@ class CacheUtils:
     def get_images_dir() -> Path:
         """Return the directory for cached images."""
         result = CacheUtils.get_cache_dir() / "images"
-        result.mkdir(parents=True, exist_ok=True)
+        result.mkdir(parents=True, exist_ok=True, mode=CONST_DIR_PERMS_CACHE)
         return result
 
     @staticmethod
     def get_kernels_dir() -> Path:
         """Return the directory for cached kernels."""
         result = CacheUtils.get_cache_dir() / "kernels"
-        result.mkdir(parents=True, exist_ok=True)
+        result.mkdir(parents=True, exist_ok=True, mode=CONST_DIR_PERMS_CACHE)
         return result
 
     @staticmethod
     def get_keys_dir() -> Path:
         """Return the directory for SSH key management (in config dir)."""
         result = CacheUtils.get_config_dir() / "keys"
-        result.mkdir(parents=True, exist_ok=True)
+        result.mkdir(parents=True, exist_ok=True, mode=CONST_DIR_PERMS_CACHE)
         return result
 
     @staticmethod
     def get_bin_dir() -> Path:
         """Return the directory for cached Firecracker binaries."""
         result = CacheUtils.get_cache_dir() / "bin"
-        result.mkdir(parents=True, exist_ok=True)
+        result.mkdir(parents=True, exist_ok=True, mode=CONST_DIR_PERMS_CACHE)
         return result
 
     @staticmethod
     def get_logs_dir() -> Path:
         """Return the directory for VM and process log files."""
         result = CacheUtils.get_cache_dir() / "logs"
-        result.mkdir(parents=True, exist_ok=True)
+        result.mkdir(parents=True, exist_ok=True, mode=CONST_DIR_PERMS_CACHE)
         return result
 
     @staticmethod

@@ -6,7 +6,7 @@ import pytest
 
 from tests.system.conftest import _run_mvm, wait_for_ssh
 
-pytestmark = pytest.mark.system
+pytestmark = [pytest.mark.system, pytest.mark.serial]
 
 
 class TestSSHConnect:

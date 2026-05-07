@@ -10,7 +10,7 @@ import pytest
 
 from tests.system.conftest import _run_mvm
 
-pytestmark = [pytest.mark.system, pytest.mark.requires_kvm, pytest.mark.slow]
+pytestmark = [pytest.mark.system, pytest.mark.requires_kvm, pytest.mark.slow, pytest.mark.serial]
 
 
 class TestVMLogs:

@@ -106,13 +106,27 @@ def timing_targets() -> dict[str, float]:
     }
 
 
+def _pull_missing_asset(
+    binary: str, args: list[str], desc: str
+) -> None:
+    """Pull a missing asset via the mvm CLI."""
+    _print_prep(f"Pulling {desc}...")
+    result = subprocess.run(
+        [*shlex.split(binary), *args],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env={**os.environ, "NO_COLOR": "1"},
+    )
+    if result.returncode != 0:
+        pytest.skip(
+            f"Failed to pull {desc}: {result.stderr or result.stdout}"
+        )
+
+
 @pytest.fixture(scope="session", autouse=True)
 def prepare_system_env(mvm_binary, check_system_prerequisites) -> None:
-    """Verify required assets are cached before tests run.
-
-    Does NOT auto-pull — run ``task sys-setup`` first to pre-pull
-    kernels, images, and binaries with visible progress.
-    """
+    """Verify required assets are cached — auto-pull if missing."""
     binary = mvm_binary
 
     # xdist workers skip verification — assets must be pre-pulled before
@@ -122,16 +136,13 @@ def prepare_system_env(mvm_binary, check_system_prerequisites) -> None:
 
     _print_prep("Verifying system test assets...")
 
-    missing: list[str] = []
-
     # ── 1. Verify DB exists ──────────────────────────────────────────
     cache_dir = Path.home() / ".cache" / "mvmctl"
     db_path = cache_dir / "mvmdb.db"
     if not db_path.exists():
-        _print_prep("mvmctl not initialized. Run: sudo mvm host init")
         pytest.skip("mvmctl not initialized (run 'sudo mvm host init')")
 
-    # ── 2. Verify kernel cache ───────────────────────────────────────
+    # ── 2. Verify / auto-pull kernel ─────────────────────────────────
     result = subprocess.run(
         [*shlex.split(binary), "kernel", "ls", "--json"],
         capture_output=True,
@@ -139,84 +150,56 @@ def prepare_system_env(mvm_binary, check_system_prerequisites) -> None:
         timeout=30,
         env={**os.environ, "NO_COLOR": "1"},
     )
-    if result.returncode != 0:
-        missing.append("kernel (command failed)")
-    else:
+    kernels_have_default = False
+    if result.returncode == 0:
         kernels = json.loads(result.stdout)
-        if not kernels:
-            missing.append("kernel")
-        else:
-            # Ensure a default kernel is set — VM creation requires it
-            # when --kernel is not passed explicitly.
-            # Only consider kernels that are BOTH present on disk AND set as default,
-            # because stale DB records can have is_default=1 but is_present=0.
+        kernels_have_default = any(
+            k.get("is_default") and k.get("is_present") for k in kernels
+        )
+        if not kernels_have_default:
             present = [k for k in kernels if k.get("is_present")]
-            has_valid_default = any(
-                k.get("is_default") and k.get("is_present") for k in kernels
-            )
-            if not has_valid_default:
-                if present:
-                    first_id = present[0]["id"][:6]
-                    _print_prep(
-                        f"No default kernel set (or default is missing from disk). "
-                        f"Setting '{first_id}' as default..."
-                    )
-                    subprocess.run(
-                        [
-                            *shlex.split(binary),
-                            "kernel",
-                            "set-default",
-                            first_id,
-                        ],
-                        capture_output=True,
-                        text=True,
-                        timeout=30,
-                        env={**os.environ, "NO_COLOR": "1"},
-                        check=True,
-                    )
-                else:
-                    missing.append("kernel (no present kernels on disk)")
+            if present:
+                first_id = present[0]["id"][:6]
+                subprocess.run(
+                    [*shlex.split(binary), "kernel", "set-default", first_id],
+                    capture_output=True, text=True, timeout=30,
+                    env={**os.environ, "NO_COLOR": "1"}, check=True,
+                )
+                kernels_have_default = True
+    if not kernels_have_default:
+        _pull_missing_asset(
+            binary, ["kernel", "pull", "--type", "firecracker", "--set-default"],
+            "firecracker kernel",
+        )
 
-    # ── 3. Verify image cache ────────────────────────────────────────
+    # ── 3. Verify / auto-pull images ─────────────────────────────────
     result = subprocess.run(
         [*shlex.split(binary), "image", "ls", "--json"],
-        capture_output=True,
-        text=True,
-        timeout=30,
+        capture_output=True, text=True, timeout=30,
         env={**os.environ, "NO_COLOR": "1"},
     )
     cached_images: list[str] = []
     if result.returncode == 0:
-        cached_images = [
-            i.get("os_slug", "") for i in json.loads(result.stdout)
-        ]
+        cached_images = [i.get("os_slug", "") for i in json.loads(result.stdout)]
 
-    required_images = ["alpine-3.21", "ubuntu-24.04-minimal"]
+    required_images = ["alpine-3.21", "ubuntu-24.04-minimal", "ubuntu-24.04"]
     for img in required_images:
         if img not in cached_images:
-            missing.append(f"image '{img}'")
+            _pull_missing_asset(
+                binary, ["image", "pull", img], f"image '{img}'"
+            )
 
-    # ── 4. Verify binary cache ───────────────────────────────────────
+    # ── 4. Verify / auto-pull binary ─────────────────────────────────
     result = subprocess.run(
         [*shlex.split(binary), "bin", "ls", "--json"],
-        capture_output=True,
-        text=True,
-        timeout=30,
+        capture_output=True, text=True, timeout=30,
         env={**os.environ, "NO_COLOR": "1"},
     )
-    if result.returncode != 0:
-        missing.append("Firecracker binary (command failed)")
-    else:
-        binaries = json.loads(result.stdout)
-        if not binaries:
-            missing.append("Firecracker binary")
-
-    # ── 5. Skip with instructions if anything is missing ─────────────
-    if missing:
-        missing_str = ", ".join(missing)
-        _print_prep(f"Missing assets: {missing_str}")
-        _print_prep("Run: task sys-setup")
-        pytest.skip(f"Missing assets: {missing_str}. Run 'task sys-setup'.")
+    if result.returncode != 0 or not json.loads(result.stdout):
+        _pull_missing_asset(
+            binary, ["bin", "pull", "1.15.1", "--set-default"],
+            "firecracker binary",
+        )
 
     _print_prep("All required assets present.")
 
@@ -344,7 +327,10 @@ def created_vm(
 def created_network(
     mvm_binary, unique_network_name
 ) -> Generator[str, None, None]:
-    """Create a network and guarantee cleanup."""
+    """Create a network and guarantee cleanup.
+    
+    Restores the default network after removal if the test changed the default.
+    """
     subnet = _unique_subnet(unique_network_name)
     _run_mvm(
         mvm_binary,
@@ -360,6 +346,17 @@ def created_network(
         yield unique_network_name
     finally:
         _run_mvm(mvm_binary, "network", "rm", unique_network_name, check=False)
+        # If no network is the default, restore the first present one
+        import json as _json
+        result = _run_mvm(mvm_binary, "network", "ls", "--json", check=False)
+        if result.returncode == 0:
+            nets = _json.loads(result.stdout)
+            has_default = any(n.get("is_default") for n in nets)
+            if not has_default and nets:
+                _run_mvm(
+                    mvm_binary, "network", "set-default", nets[0]["name"],
+                    check=False
+                )
 
 
 @pytest.fixture

@@ -18,7 +18,7 @@ from tests.system.conftest import _run_mvm
 class TestConfigEdgeCases:
     """Tests for config command edge cases."""
 
-    pytestmark = [pytest.mark.system]
+    pytestmark = [pytest.mark.system, pytest.mark.serial]
 
     def test_config_get_category_only(self, mvm_binary):
         """``config get defaults.vm`` (no key) should return multiple keys."""
@@ -75,7 +75,7 @@ class TestConfigEdgeCases:
 class TestCacheEdgeCases:
     """Tests for cache command edge cases."""
 
-    pytestmark = [pytest.mark.system]
+    pytestmark = [pytest.mark.system, pytest.mark.serial]
 
     def test_cache_prune_no_args(self, mvm_binary):
         """``cache prune`` without resource and without --all should fail."""
@@ -141,6 +141,7 @@ class TestNetworkEdgeCases:
         pytest.mark.system,
         pytest.mark.requires_network,
         pytest.mark.slow,
+        pytest.mark.serial,
     ]
 
     def test_network_create_without_subnet(
@@ -176,6 +177,7 @@ class TestVMStateTransitionErrors:
         pytest.mark.system,
         pytest.mark.requires_kvm,
         pytest.mark.slow,
+        pytest.mark.serial,
     ]
 
     def test_vm_stop_stopped_vm(self, mvm_binary, created_vm):
@@ -275,7 +277,7 @@ class TestVMStateTransitionErrors:
 class TestImageAdvancedFlags:
     """Tests for image advanced flags and edge cases."""
 
-    pytestmark = [pytest.mark.system]
+    pytestmark = [pytest.mark.system, pytest.mark.serial]
 
     @pytest.mark.slow
     @pytest.mark.serial
@@ -318,7 +320,7 @@ class TestImageAdvancedFlags:
 class TestConfigEdgeCasesExtended:
     """Additional config command edge cases."""
 
-    pytestmark = [pytest.mark.system]
+    pytestmark = [pytest.mark.system, pytest.mark.serial]
 
     def test_config_get_nonexistent_key(self, mvm_binary):
         """``config get`` with nonexistent key should return guidance."""
@@ -391,6 +393,7 @@ class TestVMLogsByIdentifier:
         pytest.mark.system,
         pytest.mark.requires_kvm,
         pytest.mark.slow,
+        pytest.mark.serial,
     ]
 
     def test_logs_by_ip(self, mvm_binary, created_vm):
@@ -410,6 +413,7 @@ class TestVMCloudInitModes:
         pytest.mark.system,
         pytest.mark.requires_kvm,
         pytest.mark.slow,
+        pytest.mark.serial,
     ]
 
     def test_vm_create_cloud_init_mode_iso(self, mvm_binary, unique_vm_name):
@@ -506,6 +510,7 @@ class TestVMNocloudNetPort:
         pytest.mark.system,
         pytest.mark.requires_kvm,
         pytest.mark.slow,
+        pytest.mark.serial,
     ]
 
     def test_vm_create_with_nocloud_net_port_specific(

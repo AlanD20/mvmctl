@@ -108,6 +108,11 @@ def cache_prune(
 
     """
     if resource == "vm":
+        if not force and not dry_run:
+            print_warning("This will remove cached data for all VMs")
+            print_info("")
+            if not typer.confirm("Continue?", default=True):
+                raise typer.Exit()
         result = CacheOperation.prune_vms(
             dry_run=dry_run, include_all=all_resources
         )
@@ -128,6 +133,11 @@ def cache_prune(
             print_info("No VMs to prune")
 
     elif resource == "network":
+        if not force and not dry_run:
+            print_warning("This will remove cached data for all networks")
+            print_info("")
+            if not typer.confirm("Continue?", default=True):
+                raise typer.Exit()
         result = CacheOperation.prune_networks(
             dry_run=dry_run, include_all=all_resources
         )
@@ -148,6 +158,11 @@ def cache_prune(
             print_info("No networks to prune")
 
     elif resource == "image":
+        if not force and not dry_run:
+            print_warning("This will remove cached data for all images")
+            print_info("")
+            if not typer.confirm("Continue?", default=True):
+                raise typer.Exit()
         result = CacheOperation.prune_images(
             dry_run=dry_run, include_all=all_resources
         )
@@ -168,6 +183,11 @@ def cache_prune(
             print_info("No images to prune")
 
     elif resource == "kernel":
+        if not force and not dry_run:
+            print_warning("This will remove cached data for all kernels")
+            print_info("")
+            if not typer.confirm("Continue?", default=True):
+                raise typer.Exit()
         result = CacheOperation.prune_kernels(
             dry_run=dry_run, include_all=all_resources
         )
@@ -188,6 +208,11 @@ def cache_prune(
             print_info("No kernels to prune")
 
     elif resource == "binary":
+        if not force and not dry_run:
+            print_warning("This will remove cached data for all binaries")
+            print_info("")
+            if not typer.confirm("Continue?", default=True):
+                raise typer.Exit()
         result = CacheOperation.prune_binaries(
             dry_run=dry_run, include_all=all_resources
         )
@@ -208,6 +233,13 @@ def cache_prune(
             print_info("No binaries to prune")
 
     elif resource == "misc":
+        if not force and not dry_run:
+            print_warning(
+                "This will remove cached data (appliance folder, warm images)"
+            )
+            print_info("")
+            if not typer.confirm("Continue?", default=True):
+                raise typer.Exit()
         misc_op_result = CacheOperation.prune_misc(dry_run=dry_run)
         if misc_op_result.is_error:
             print_error(misc_op_result.message)
@@ -248,7 +280,7 @@ def cache_prune(
             print_info("  - ALL binaries (including default)")
             print_info("  - Appliance folder (libguestfs cache)")
             print_info("  - Warm images (tmpfs ready pool)")
-        elif not force:
+        elif not force and not dry_run:
             print_warning(
                 "This will remove ALL cache resources INCLUDING protected items:"
             )
@@ -260,7 +292,7 @@ def cache_prune(
             print_info("  - Appliance folder (libguestfs cache)")
             print_info("  - Warm images (tmpfs ready pool)")
             print_info("")
-            if not typer.confirm("Continue?"):
+            if not typer.confirm("Continue?", default=True):
                 print_info("Aborted")
                 raise typer.Exit()
 
@@ -335,7 +367,7 @@ def cache_clean(
         print_info("  - Warm images (tmpfs ready pool)")
         print_info("  - Host networking (TAPs, bridges, iptables chains)")
         print_info("  - Entire cache directory (~/.cache/mvmctl)")
-    elif not force:
+    elif not force and not dry_run:
         print_warning("This will COMPLETELY remove ALL cache data INCLUDING:")
         print_info("  - ALL VMs (including RUNNING and STARTING)")
         print_info("  - ALL networks (including default)")
@@ -347,8 +379,7 @@ def cache_clean(
         print_info("  - Host networking (TAPs, bridges, iptables chains)")
         print_info("  - Entire cache directory (~/.cache/mvmctl)")
         print_info("")
-        if not typer.confirm("Continue?"):
-            print_info("Aborted")
+        if not typer.confirm("Continue?", default=True):
             raise typer.Exit()
 
     op_result = CacheOperation.clean(dry_run=dry_run)

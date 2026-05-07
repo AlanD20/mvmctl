@@ -18,6 +18,7 @@ class TestSSHOperationConnect:
         mock_resolved.user = "ubuntu"
         mock_resolved.key = Path("/keys/test-key")
         mock_resolved.cmd = "uptime"
+        mock_resolved.timeout = None
 
         mock_request = mocker.MagicMock()
         mock_request.resolve.return_value = mock_resolved
@@ -31,7 +32,7 @@ class TestSSHOperationConnect:
         mock_ssh_service = mocker.patch(
             "mvmctl.api.ssh_operations.SSHService",
         )
-        mock_ssh_service.connect.return_value = 0
+        mock_ssh_service.return_value.connect.return_value = 0
 
         # OperationResult check
         _connect = SSHOperation.connect(
@@ -39,10 +40,14 @@ class TestSSHOperationConnect:
         )
 
         assert _connect.item == 0
-        mock_ssh_service.connect.assert_called_once_with(
+
+        mock_ssh_service.assert_called_once_with(
             ip="10.0.0.2",
             user="ubuntu",
             key_path=Path("/keys/test-key"),
+            timeout=None,
+        )
+        mock_ssh_service.return_value.connect.assert_called_once_with(
             command="uptime",
             exec_mode=False,
         )
@@ -54,6 +59,7 @@ class TestSSHOperationConnect:
         mock_resolved.user = "ubuntu"
         mock_resolved.key = Path("/keys/test-key")
         mock_resolved.cmd = None
+        mock_resolved.timeout = None
 
         mock_request = mocker.MagicMock()
         mock_request.resolve.return_value = mock_resolved
@@ -65,16 +71,22 @@ class TestSSHOperationConnect:
         mock_ssh_service = mocker.patch(
             "mvmctl.api.ssh_operations.SSHService",
         )
-        mock_ssh_service.connect.return_value = 0
+        mock_ssh_service.return_value.connect.return_value = 0
 
         # OperationResult check
-        _connect = SSHOperation.connect(SSHInput(identifier="test-vm", user="ubuntu"))
+        _connect = SSHOperation.connect(
+            SSHInput(identifier="test-vm", user="ubuntu")
+        )
 
         assert _connect.item == 0
-        mock_ssh_service.connect.assert_called_once_with(
+
+        mock_ssh_service.assert_called_once_with(
             ip="10.0.0.2",
             user="ubuntu",
             key_path=Path("/keys/test-key"),
+            timeout=None,
+        )
+        mock_ssh_service.return_value.connect.assert_called_once_with(
             command=None,
             exec_mode=True,
         )
@@ -86,6 +98,7 @@ class TestSSHOperationConnect:
         mock_resolved.user = "ubuntu"
         mock_resolved.key = None
         mock_resolved.cmd = "false"
+        mock_resolved.timeout = None
 
         mock_request = mocker.MagicMock()
         mock_request.resolve.return_value = mock_resolved
@@ -97,10 +110,12 @@ class TestSSHOperationConnect:
         mock_ssh_service = mocker.patch(
             "mvmctl.api.ssh_operations.SSHService",
         )
-        mock_ssh_service.connect.return_value = 1
+        mock_ssh_service.return_value.connect.return_value = 1
 
         # OperationResult check
-        _connect = SSHOperation.connect(SSHInput(identifier="test-vm", cmd="false"))
+        _connect = SSHOperation.connect(
+            SSHInput(identifier="test-vm", cmd="false")
+        )
 
         assert _connect.item == 1
 
@@ -111,6 +126,7 @@ class TestSSHOperationConnect:
         mock_resolved.user = "root"
         mock_resolved.key = None
         mock_resolved.cmd = None
+        mock_resolved.timeout = None
 
         mock_request = mocker.MagicMock()
         mock_request.resolve.return_value = mock_resolved
@@ -122,7 +138,7 @@ class TestSSHOperationConnect:
         mock_ssh_service = mocker.patch(
             "mvmctl.api.ssh_operations.SSHService",
         )
-        mock_ssh_service.connect.return_value = 0
+        mock_ssh_service.return_value.connect.return_value = 0
 
         mock_audit = mocker.patch("mvmctl.utils.auditlog.AuditLog.log")
 

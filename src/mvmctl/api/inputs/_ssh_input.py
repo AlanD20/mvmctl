@@ -27,6 +27,7 @@ class SSHInput:
     user: str | None = None
     key: Path | None = None
     cmd: str | None = None
+    timeout: int | None = None
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,7 @@ class ResolvedSSHInput:
     user: str
     key: Path | None
     cmd: str | None
+    timeout: int | None
 
 
 class SSHRequest:
@@ -57,6 +59,7 @@ class SSHRequest:
             user=user,
             key=key,
             cmd=self._inputs.cmd,
+            timeout=self._inputs.timeout,
         )
 
     def _resolve_target(self) -> str:

@@ -9,7 +9,7 @@ import pytest
 
 from tests.system.conftest import _run_mvm
 
-pytestmark = [pytest.mark.system, pytest.mark.slow]
+pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
 
 
 class TestImagePull:
@@ -154,6 +154,7 @@ class TestImageRemove:
         if not alpine_images:
             pytest.skip("No present alpine image available to test removal")
 
+        was_default = alpine_images[0].get("is_default", False)
         target_id = alpine_images[0]["id"]
         target_prefix = target_id[:6]
 
@@ -177,10 +178,14 @@ class TestImageRemove:
             ]
             assert not any(i["id"] == target_id for i in after)
         finally:
-            # Re-pull so other tests aren't broken — always runs even if assert fails
+            # Re-pull so other tests aren't broken — always runs even if assert fails.
+            # Restore default flag if the removed image was the default.
             try:
+                pull_args = ["image", "pull", "alpine-3.21"]
+                if was_default:
+                    pull_args.append("--set-default")
                 repull = _run_mvm(
-                    mvm_binary, "image", "pull", "alpine-3.21", check=False
+                    mvm_binary, *pull_args, check=False
                 )
                 if repull.returncode != 0:
                     pytest.skip(f"Re-pull failed after test: {repull.stderr}")
@@ -309,7 +314,7 @@ class TestImageImport:
 class TestImageInspectTree:
     """Test image inspect tree output."""
 
-    pytestmark = [pytest.mark.system]
+    pytestmark = [pytest.mark.system, pytest.mark.serial]
 
     def test_image_inspect_tree_output(self, mvm_binary):
         """Inspect an image with --tree output."""
@@ -553,6 +558,7 @@ class TestImageRemoveForce:
         if not alpine_images:
             pytest.skip("No present alpine image available to test removal")
 
+        was_default = alpine_images[0].get("is_default", False)
         target_id = alpine_images[0]["id"]
 
         # Remove with --force
@@ -573,10 +579,14 @@ class TestImageRemoveForce:
         ]
         assert not any(i["id"] == target_id for i in after)
 
-        # Re-pull so other tests aren't broken
+        # Re-pull to restore the image. Restore default flag if the removed
+        # image was the default.
         try:
+            pull_args = ["image", "pull", "alpine-3.21"]
+            if was_default:
+                pull_args.append("--set-default")
             repull = _run_mvm(
-                mvm_binary, "image", "pull", "alpine-3.21", check=False
+                mvm_binary, *pull_args, check=False
             )
             if repull.returncode != 0:
                 pytest.skip(f"Re-pull failed: {repull.stderr}")

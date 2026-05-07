@@ -8,7 +8,7 @@ import pytest
 
 from tests.system.conftest import _run_mvm
 
-pytestmark = [pytest.mark.system, pytest.mark.slow]
+pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
 
 
 class TestKernelLifecycle:
@@ -121,8 +121,6 @@ class TestKernelRemoveAndPull:
 
 class TestKernelInspect:
     """Test kernel inspect operations (table, json, tree)."""
-
-    pytestmark = [pytest.mark.system, pytest.mark.slow]
 
     def test_kernel_inspect_table(self, mvm_binary):
         """Inspect a kernel in table format."""

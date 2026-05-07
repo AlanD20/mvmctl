@@ -695,7 +695,14 @@ class NetworkService:
             effective_subnet,
         )
 
-    def ensure_tap(self, tap: str, bridge: str, *, network_id: str) -> None:
+    def ensure_tap(
+        self,
+        tap: str,
+        bridge: str,
+        *,
+        network_id: str,
+        subnet: str | None = None,
+    ) -> None:
         """
         Ensure a TAP device exists and is attached to the bridge with iptables rules.
 
@@ -714,6 +721,7 @@ class NetworkService:
             tap: TAP device name.
             bridge: Bridge interface name.
             network_id: Network UUID for iptables rule tracking.
+            subnet: CIDR subnet to constrain FORWARD rules (e.g. 10.0.0.0/24).
 
         """
         if NetworkUtils.tap_exists(tap):
@@ -781,7 +789,7 @@ class NetworkService:
             target=IPTablesTarget.ACCEPT,
             network_id=network_id,
             protocol=IPTablesProtocol.ALL,
-            source=IPTablesWildcard.ANY_CIDR,
+            source=subnet or IPTablesWildcard.ANY_CIDR,
             destination=IPTablesWildcard.ANY_CIDR,
             in_interface=bridge,
             out_interface=tap,
@@ -806,7 +814,7 @@ class NetworkService:
             network_id=network_id,
             protocol=IPTablesProtocol.ALL,
             source=IPTablesWildcard.ANY_CIDR,
-            destination=IPTablesWildcard.ANY_CIDR,
+            destination=subnet or IPTablesWildcard.ANY_CIDR,
             in_interface=tap,
             out_interface=bridge,
             sport=IPTablesPort.ANY,

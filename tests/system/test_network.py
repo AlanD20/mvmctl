@@ -13,6 +13,7 @@ pytestmark = [
     pytest.mark.system,
     pytest.mark.requires_network,
     pytest.mark.slow,
+    pytest.mark.serial,
 ]
 
 

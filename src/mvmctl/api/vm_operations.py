@@ -359,6 +359,7 @@ class VMCreateContext:
             self.tap_name,
             self.resolved.network.bridge,
             network_id=self.resolved.network.id,
+            subnet=self.resolved.network.subnet,
         )
         self.mark_created("network_tap")
 
@@ -777,6 +778,7 @@ class VMCreateContext:
             self._vm.tap_device,
             self._vm.network.bridge,
             network_id=self._vm.network.id,
+            subnet=self._vm.network.subnet,
         )
 
         # ── Build config and spawn ──

@@ -44,6 +44,9 @@ def ssh_connect(
     cmd: str | None = typer.Option(
         None, "--cmd", "-c", help="Command to execute"
     ),
+    timeout: int | None = typer.Option(
+        None, "--timeout", "-t", help="SSH connection timeout in seconds"
+    ),
 ) -> None:
     """
     Open an SSH session into a VM.
@@ -59,6 +62,7 @@ def ssh_connect(
         user=user,
         key=key,
         cmd=cmd,
+        timeout=timeout,
     )
     result = SSHOperation.connect(inputs)
     if result.is_error:
