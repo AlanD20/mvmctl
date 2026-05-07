@@ -246,6 +246,17 @@ def vm_create(
         envvar="MVM_FIRECRACKER_BIN",
         help="Path to firecracker binary (default: active version from mvm bin use)",
     ),
+    count: int | None = typer.Option(
+        None,
+        "--count",
+        "-c",
+        help="Number of VMs to create (default: 1)",
+    ),
+    atomic: bool = typer.Option(
+        False,
+        "--atomic",
+        help="If any VM fails, remove all successfully-created VMs (all-or-nothing)",
+    ),
     skip_cleanup: bool = typer.Option(
         False,
         "--skip-cleanup",
@@ -293,6 +304,8 @@ def vm_create(
                 cloud_init_mode=cloud_init_mode,
                 nocloud_net_port=nocloud_net_port,
                 skip_cleanup=skip_cleanup,
+                count=count,
+                atomic=atomic,
             ),
             on_progress=_on_progress,
         )
@@ -302,7 +315,14 @@ def vm_create(
     if result.is_error:
         print_error(result.message)
         raise typer.Exit(code=1)
-    print_success(f"VM '{name}' created")
+
+    if result.item is None:
+        print_error("Unexpected error: no VMs returned")
+        raise typer.Exit(code=1)
+
+    vms = result.item
+    names = [vm.name for vm in vms]
+    print_success(f"Created {len(vms)} VM(s): {', '.join(names)}")
 
 
 @vm_app.command(name="rm")

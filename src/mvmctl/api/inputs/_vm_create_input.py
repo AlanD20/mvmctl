@@ -89,6 +89,8 @@ class VMCreateInput:
     keep_cloud_init_iso: bool = False
     nocloud_net_port: int | None = None
     skip_cleanup: bool = False
+    count: int | None = None
+    atomic: bool = False
 
 
 @dataclass(frozen=True)
@@ -588,6 +590,43 @@ class VMCreateRequest:
             VMValidator.validate_boot_arg_component(
                 self._result.lsm_flags, "lsm_flags"
             )
+
+        # Batch validation
+        count = self._inputs.count if self._inputs.count is not None else 1
+        if count < 1:
+            raise VMCreateError("--count must be at least 1")
+
+        if count > 1:
+            if self._inputs.requested_guest_ip is not None:
+                raise VMCreateError("Cannot specify --ip with --count > 1")
+            if self._inputs.requested_guest_mac is not None:
+                raise VMCreateError("Cannot specify --mac with --count > 1")
+
+            # Check subnet capacity
+            from mvmctl.core.network._repository import LeaseRepository
+
+            lease_repo = LeaseRepository(self._db)
+            available = lease_repo.count_available(self._result.network.id)
+            if count > available:
+                raise VMCreateError(
+                    f"Subnet has only {available} IPs available, "
+                    f"but {count} VMs requested"
+                )
+
+            # Check global VM limit
+            from mvmctl.core.config._service import SettingsService
+            from mvmctl.core.vm._repository import VMRepository
+
+            vm_repo = VMRepository(self._db)
+            current = vm_repo.count()
+            max_vms = int(
+                SettingsService.resolve(self._db, "settings.vm", "max_vms")
+            )
+            if current + count > max_vms:
+                raise VMCreateError(
+                    f"Creating {count} VMs would exceed the limit "
+                    f"({current}/{max_vms}). Remove existing VMs first."
+                )
 
     def _resolve_image(self) -> ImageItem:
         """Resolve image to path, ID, fs_uuid, and fs_type."""

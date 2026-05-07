@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 from datetime import UTC
 
 from mvmctl.core._shared._db import Database, _graceful_read
@@ -263,3 +264,42 @@ class LeaseRepository:
         """Release all IP leases held by a VM."""
         with self._db.connect() as conn:
             conn.execute("DELETE FROM network_leases WHERE vm_id = ?", (vm_id,))
+
+    @_graceful_read(default=0)
+    def count_available(self, network_id: str) -> int:
+        """Return the number of available IP addresses in the network.
+
+        Computes total usable host addresses from the subnet, subtracts
+        the gateway and existing leases, and returns the remainder.
+
+        Args:
+            network_id: Full network ID to query.
+
+        Returns:
+            Number of available IP addresses (>= 0).
+
+        """
+        with self._db.connect() as conn:
+            # Get network subnet and gateway
+            network_row = conn.execute(
+                "SELECT subnet, ipv4_gateway FROM networks WHERE id = ? AND deleted_at IS NULL AND is_present = 1",
+                (network_id,),
+            ).fetchone()
+            if network_row is None:
+                return 0
+
+            subnet = network_row["subnet"]
+            gateway = network_row["ipv4_gateway"]
+
+            # Count existing leases
+            lease_row = conn.execute(
+                "SELECT COUNT(*) FROM network_leases WHERE network_id = ?",
+                (network_id,),
+            ).fetchone()
+            lease_count = lease_row[0] if lease_row else 0
+
+        network = ipaddress.IPv4Network(subnet, strict=False)
+        total_hosts = len(list(network.hosts()))
+        gateway_count = 1 if gateway else 0
+        available = total_hosts - gateway_count - lease_count
+        return max(0, available)

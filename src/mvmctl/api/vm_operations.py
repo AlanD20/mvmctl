@@ -80,6 +80,7 @@ from mvmctl.models.result import (
 from mvmctl.utils._system import SigtermContext, is_process_running
 from mvmctl.utils.auditlog import AuditLog
 from mvmctl.utils.common import CacheUtils
+from mvmctl.utils.crypto import HashGenerator
 from mvmctl.utils.network import NetworkUtils
 
 logger = logging.getLogger(__name__)
@@ -804,6 +805,7 @@ class VMOperation:
         *,
         audit_action: str,
         on_progress: Callable[[ProgressEvent], None] | None = None,
+        skip_limit_check: bool = False,
     ) -> VMInstanceItem:
         """Execute VM creation from already-resolved inputs."""
         HostPrivilegeHelper.check_privileges(
@@ -811,12 +813,15 @@ class VMOperation:
         )
         db = Database()
         vm_repo = VMRepository(db)
-        max_vms_val = int(SettingsService.resolve(db, "settings.vm", "max_vms"))
-        if vm_repo.count() >= max_vms_val:
-            raise MVMError(
-                f"VM limit reached ({max_vms_val}). "
-                f"Remove existing VMs before creating new ones."
+        if not skip_limit_check:
+            max_vms_val = int(
+                SettingsService.resolve(db, "settings.vm", "max_vms")
             )
+            if vm_repo.count() >= max_vms_val:
+                raise MVMError(
+                    f"VM limit reached ({max_vms_val}). "
+                    f"Remove existing VMs before creating new ones."
+                )
 
         ctx = VMCreateContext(
             name=resolved.name,
@@ -850,36 +855,143 @@ class VMOperation:
         return vm_instance
 
     @staticmethod
+    def _generate_batch_names(base_name: str, count: int) -> list[str]:
+        """Generate unique names for batch VM creation.
+
+        First VM keeps base name, subsequent VMs get -N suffix.
+        """
+        if count == 1:
+            return [base_name]
+        names = [base_name]
+        for i in range(2, count + 1):
+            names.append(f"{base_name}-{i}")
+        return names
+
+    @staticmethod
     def create(
         inputs: VMCreateInput,
         *,
         on_progress: Callable[[ProgressEvent], None] | None = None,
-    ) -> OperationResult[VMInstanceItem] | NeedsInteraction:
+    ) -> OperationResult[list[VMInstanceItem]] | NeedsInteraction:
         try:
             db = Database()
+
+            # Resolve shared state ONCE
             ctx = VMCreateContext(name=inputs.name)
             request = VMCreateRequest(
                 vm_id=ctx.vm_id, vm_dir=ctx.vm_dir, inputs=inputs, db=db
             )
             resolved = request.resolve()
-            vm_instance = VMOperation._execute_create(
-                resolved,
-                audit_action="vm.create",
-                on_progress=on_progress,
-            )
-            return OperationResult(
-                status="success",
-                code="vm.created",
-                item=vm_instance,
-                message=f"VM '{inputs.name}' created",
-            )
-        except MVMError as e:
-            if "limit" in str(e).lower():
+
+            count = inputs.count if inputs.count is not None else 1
+
+            if count == 1:
+                # Single VM — use existing logic but wrap in list
+                vm_instance = VMOperation._execute_create(
+                    resolved,
+                    audit_action="vm.create",
+                    on_progress=on_progress,
+                )
+                return OperationResult(
+                    status="success",
+                    code="vm.created",
+                    item=[vm_instance],
+                    message=f"VM '{inputs.name}' created",
+                )
+
+            # BATCH PATH
+            names = VMOperation._generate_batch_names(inputs.name, count)
+
+            # Pre-allocate: check name collisions
+            vm_repo = VMRepository(db)
+            for name in names:
+                if vm_repo.get_by_name(name) is not None:
+                    return OperationResult(
+                        status="error",
+                        code="vm.name_collision",
+                        message=f"VM name '{name}' already exists",
+                    )
+
+            created_vms: list[VMInstanceItem] = []
+            errors: list[str] = []
+
+            for idx, name in enumerate(names):
+                try:
+                    # Generate unique vm_id and vm_dir for this VM
+                    created_at = datetime.now()
+                    vm_id = HashGenerator.vm(name, created_at.isoformat())
+                    vm_dir = Path(CacheUtils.get_vm_dir(vm_id))
+
+                    # Create per-VM resolved input
+                    from dataclasses import replace
+
+                    vm_resolved = replace(
+                        resolved,
+                        name=name,
+                        vm_id=vm_id,
+                        vm_dir=vm_dir,
+                    )
+
+                    def _batch_progress(
+                        event: ProgressEvent,
+                        n: str = name,
+                        i: int = idx,
+                        total: int = count,
+                    ) -> None:
+                        if on_progress is not None:
+                            on_progress(
+                                ProgressEvent(
+                                    phase=event.phase,
+                                    status=event.status,
+                                    message=f"[{i + 1}/{total}] {n}: {event.message}",
+                                )
+                            )
+
+                    vm_instance = VMOperation._execute_create(
+                        vm_resolved,
+                        audit_action="vm.create",
+                        on_progress=_batch_progress,
+                        skip_limit_check=True,
+                    )
+                    created_vms.append(vm_instance)
+
+                except Exception as e:
+                    errors.append(f"{name}: {e}")
+                    if inputs.atomic and created_vms:
+                        # Rollback: remove all successfully created VMs
+                        for vm in created_vms:
+                            try:
+                                VMOperation.remove(
+                                    VMInput(identifiers=[vm.name], force=True)
+                                )
+                            except Exception:
+                                pass
+                        return OperationResult(
+                            status="error",
+                            code="vm.atomic_failed",
+                            message=f"Atomic creation failed at '{name}': {e}. "
+                            f"All {len(created_vms)} previously created VMs have been removed.",
+                        )
+
+            if errors and not created_vms:
                 return OperationResult(
                     status="error",
-                    code="vm.limit_reached",
-                    message=str(e),
+                    code="vm.create_failure",
+                    message="; ".join(errors),
                 )
+
+            message = f"Created {len(created_vms)} VM(s): {', '.join(vm.name for vm in created_vms)}"
+            if errors:
+                message += f"\nFailed: {'; '.join(errors)}"
+
+            return OperationResult(
+                status="success" if not errors else "warning",
+                code="vm.created_batch",
+                item=created_vms,
+                message=message,
+            )
+
+        except MVMError as e:
             return OperationResult(
                 status="error",
                 code="vm.create_failure",
