@@ -20,9 +20,9 @@ pytestmark = [
 class TestVMSnapshot:
     """Test VM snapshot creation."""
 
-    def test_vm_snapshot_creates_files(self, mvm_binary, created_vm):
+    def test_vm_snapshot_creates_files(self, mvm_binary, module_vm):
         """Snapshot a running VM and verify snapshot files are created."""
-        vm_name = created_vm["name"]
+        vm_name = module_vm["name"]
 
         # Get VM info to find vm_dir
         result = _run_mvm(mvm_binary, "vm", "inspect", vm_name, "--json")

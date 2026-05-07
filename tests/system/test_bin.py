@@ -42,6 +42,56 @@ class TestBinLifecycle:
             pytest.skip(f"Remote listing failed (network?): {result.stderr}")
 
 
+class TestBinaryPullAdvanced:
+    """Test advanced binary pull operations."""
+
+    pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.domain_bin]
+
+    def test_bin_pull_force(self, mvm_binary):
+        """Pull a binary with --force to re-download an already cached version."""
+
+        result = _run_mvm(mvm_binary, "bin", "ls", "--remote", check=False)
+        if result.returncode != 0:
+            pytest.skip(f"Remote listing failed (network?): {result.stderr}")
+        versions = re.findall(r"\d+\.\d+\.\d+", result.stdout)
+        if not versions:
+            pytest.skip("No remote versions available")
+        target = versions[-1]  # Latest version
+
+        result = _run_mvm(
+            mvm_binary, "bin", "pull", target, "--force", check=False
+        )
+        if result.returncode != 0:
+            pytest.skip(f"bin pull {target} --force failed: {result.stderr}")
+        assert result.returncode == 0
+
+    def test_bin_pull_set_default(self, mvm_binary):
+        """Pull a binary and set it as default atomically."""
+
+        result = _run_mvm(mvm_binary, "bin", "ls", "--remote", check=False)
+        if result.returncode != 0:
+            pytest.skip(f"Remote listing failed (network?): {result.stderr}")
+        versions = re.findall(r"\d+\.\d+\.\d+", result.stdout)
+        if not versions:
+            pytest.skip("No remote versions available")
+        target = versions[-1]  # Latest version
+
+        result = _run_mvm(
+            mvm_binary,
+            "bin",
+            "pull",
+            target,
+            "--set-default",
+            "--force",
+            check=False,
+        )
+        if result.returncode != 0:
+            pytest.skip(
+                f"bin pull {target} --set-default failed: {result.stderr}"
+            )
+        assert result.returncode == 0
+
+
 class TestBinaryPullAndLifecycle:
     """Test Firecracker binary pull, set-default, and remove operations."""
 
@@ -164,53 +214,3 @@ class TestBinaryPullAndLifecycle:
         assert target_prefix not in ids, (
             f"Binary {target_prefix} still present after removal"
         )
-
-
-class TestBinaryPullAdvanced:
-    """Test advanced binary pull operations."""
-
-    pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.domain_bin]
-
-    def test_bin_pull_force(self, mvm_binary):
-        """Pull a binary with --force to re-download an already cached version."""
-
-        result = _run_mvm(mvm_binary, "bin", "ls", "--remote", check=False)
-        if result.returncode != 0:
-            pytest.skip(f"Remote listing failed (network?): {result.stderr}")
-        versions = re.findall(r"\d+\.\d+\.\d+", result.stdout)
-        if not versions:
-            pytest.skip("No remote versions available")
-        target = versions[-2]  # One before the latest version
-
-        result = _run_mvm(
-            mvm_binary, "bin", "pull", target, "--force", check=False
-        )
-        if result.returncode != 0:
-            pytest.skip(f"bin pull {target} --force failed: {result.stderr}")
-        assert result.returncode == 0
-
-    def test_bin_pull_set_default(self, mvm_binary):
-        """Pull a binary and set it as default atomically."""
-
-        result = _run_mvm(mvm_binary, "bin", "ls", "--remote", check=False)
-        if result.returncode != 0:
-            pytest.skip(f"Remote listing failed (network?): {result.stderr}")
-        versions = re.findall(r"\d+\.\d+\.\d+", result.stdout)
-        if not versions:
-            pytest.skip("No remote versions available")
-        target = versions[-2]  # One before the latest version
-
-        result = _run_mvm(
-            mvm_binary,
-            "bin",
-            "pull",
-            target,
-            "--set-default",
-            "--force",
-            check=False,
-        )
-        if result.returncode != 0:
-            pytest.skip(
-                f"bin pull {target} --set-default failed: {result.stderr}"
-            )
-        assert result.returncode == 0

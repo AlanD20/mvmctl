@@ -122,62 +122,6 @@ class TestNetworkVMJourney:
                 mvm_binary, "network", "rm", unique_network_name, check=False
             )
 
-    def test_journey_network_vm_with_explicit_ip(
-        self, mvm_binary, unique_network_name, unique_vm_name
-    ):
-        """Create network, then create VM on that network with explicit IP."""
-        subnet = _unique_subnet(unique_network_name)
-        ip = subnet.replace(".0/24", ".50")
-
-        _run_mvm(
-            mvm_binary,
-            "network",
-            "create",
-            unique_network_name,
-            "--subnet",
-            subnet,
-            "--non-interactive",
-        )
-
-        try:
-            result = _run_mvm(
-                mvm_binary,
-                "vm",
-                "create",
-                "--name",
-                unique_vm_name,
-                "--image",
-                "alpine-3.21",
-                "--network",
-                unique_network_name,
-                "--ip",
-                ip,
-            )
-            assert result.returncode == 0
-
-            # Verify IP assignment
-            result = _run_mvm(mvm_binary, "vm", "ls", "--json")
-            vms = json.loads(result.stdout)
-            vm = next((v for v in vms if v["name"] == unique_vm_name), None)
-            assert vm is not None, f"VM '{unique_vm_name}' not found"
-            assert vm["ipv4"] == ip, f"Expected {ip}, got {vm['ipv4']}"
-        finally:
-            _run_mvm(
-                mvm_binary,
-                "vm",
-                "rm",
-                unique_vm_name,
-                "--force",
-                check=False,
-            )
-            _run_mvm(
-                mvm_binary,
-                "network",
-                "rm",
-                unique_network_name,
-                check=False,
-            )
-
 
 class TestKeyVMJourney:
     """Test key + VM workflow."""

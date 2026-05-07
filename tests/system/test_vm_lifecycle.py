@@ -197,15 +197,15 @@ class TestVMInspectExport:
         pytest.mark.slow,
     ]
 
-    def test_vm_inspect(self, mvm_binary, created_vm):
+    def test_vm_inspect(self, mvm_binary, module_vm):
         """Show detailed VM info via vm inspect."""
-        result = _run_mvm(mvm_binary, "vm", "inspect", created_vm["name"])
+        result = _run_mvm(mvm_binary, "vm", "inspect", module_vm["name"])
         assert result.returncode == 0
-        assert created_vm["name"] in result.stdout
+        assert module_vm["name"] in result.stdout
 
-    def test_vm_export(self, mvm_binary, created_vm):
+    def test_vm_export(self, mvm_binary, module_vm):
         """Export VM config as JSON."""
-        result = _run_mvm(mvm_binary, "vm", "export", created_vm["name"])
+        result = _run_mvm(mvm_binary, "vm", "export", module_vm["name"])
         assert result.returncode == 0
         config = json.loads(result.stdout)
         assert isinstance(config, dict)
@@ -233,19 +233,19 @@ class TestVMSSH:
 class TestVMList:
     """Test VM listing operations."""
 
-    def test_vm_list_json(self, mvm_binary, created_vm):
+    def test_vm_list_json(self, mvm_binary, module_vm):
         """List VMs in JSON format."""
         result = _run_mvm(mvm_binary, "vm", "ls", "--json")
         assert result.returncode == 0
 
         vms = json.loads(result.stdout)
-        assert any(v["name"] == created_vm["name"] for v in vms)
+        assert any(v["name"] == module_vm["name"] for v in vms)
 
-    def test_vm_list_table(self, mvm_binary, created_vm):
+    def test_vm_list_table(self, mvm_binary, module_vm):
         """List VMs in table format."""
         result = _run_mvm(mvm_binary, "vm", "ls")
         assert result.returncode == 0
-        assert created_vm["name"] in result.stdout
+        assert module_vm["name"] in result.stdout
 
 
 class TestVMRemove:
@@ -551,17 +551,17 @@ class TestVMProcessList:
         pytest.mark.slow,
     ]
 
-    def test_vm_ps_lists_running(self, mvm_binary, created_vm):
+    def test_vm_ps_lists_running(self, mvm_binary, module_vm):
         """vm ps lists running VMs including the created one."""
         result = _run_mvm(mvm_binary, "vm", "ps")
         assert result.returncode == 0
-        assert created_vm["name"] in result.stdout
+        assert module_vm["name"] in result.stdout
 
-    def test_vm_ps_json(self, mvm_binary, created_vm):
+    def test_vm_ps_json(self, mvm_binary, module_vm):
         """vm ps does not support --json; smoke test basic output."""
         result = _run_mvm(mvm_binary, "vm", "ps")
         assert result.returncode == 0
-        assert created_vm["name"] in result.stdout
+        assert module_vm["name"] in result.stdout
 
 
 class TestVMSnapshotAndLoad:
@@ -1211,13 +1211,13 @@ class TestVMInspectJson:
         pytest.mark.slow,
     ]
 
-    def test_vm_inspect_json(self, mvm_binary, created_vm):
+    def test_vm_inspect_json(self, mvm_binary, module_vm):
         """vm inspect --json should return structured JSON with key fields."""
         result = _run_mvm(
             mvm_binary,
             "vm",
             "inspect",
-            created_vm["name"],
+            module_vm["name"],
             "--json",
         )
         assert result.returncode == 0
@@ -1660,16 +1660,16 @@ class TestVMIdentifierFlags:
                 check=False,
             )
 
-    def test_vm_inspect_by_name_flag(self, mvm_binary, created_vm):
+    def test_vm_inspect_by_name_flag(self, mvm_binary, module_vm):
         """Inspect VM using name as positional argument."""
         result = _run_mvm(
             mvm_binary,
             "vm",
             "inspect",
-            created_vm["name"],
+            module_vm["name"],
         )
         assert result.returncode == 0
-        assert created_vm["name"] in result.stdout
+        assert module_vm["name"] in result.stdout
 
 
 class TestVMInspectTree:
@@ -1681,13 +1681,13 @@ class TestVMInspectTree:
         pytest.mark.slow,
     ]
 
-    def test_vm_inspect_tree_output(self, mvm_binary, created_vm):
+    def test_vm_inspect_tree_output(self, mvm_binary, module_vm):
         """Inspect VM with --tree format."""
         result = _run_mvm(
             mvm_binary,
             "vm",
             "inspect",
-            created_vm["name"],
+            module_vm["name"],
             "--tree",
         )
         assert result.returncode == 0
@@ -1706,14 +1706,14 @@ class TestVMExportToFile:
         pytest.mark.slow,
     ]
 
-    def test_vm_export_to_file(self, mvm_binary, created_vm, tmp_path):
+    def test_vm_export_to_file(self, mvm_binary, module_vm, tmp_path):
         """Export VM config to a file path."""
         export_path = tmp_path / "vm_export.json"
         result = _run_mvm(
             mvm_binary,
             "vm",
             "export",
-            created_vm["name"],
+            module_vm["name"],
             str(export_path),
         )
         assert result.returncode == 0

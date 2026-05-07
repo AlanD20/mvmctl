@@ -14,11 +14,9 @@ class TestSSHConnect:
 
     @pytest.mark.requires_kvm
     @pytest.mark.slow
-    def test_ssh_command_execution(
-        self, mvm_binary, created_vm, timing_targets
-    ):
+    def test_ssh_command_execution(self, mvm_binary, module_vm, timing_targets):
         """Execute a command via SSH on a running VM using name as positional arg."""
-        vm_info = created_vm
+        vm_info = module_vm
         ssh_timeout = timing_targets["alpine-3.21"]
         ssh_available = wait_for_ssh(
             mvm_binary, vm_info["name"], "root", ssh_timeout
@@ -53,11 +51,41 @@ class TestSSHConnect:
             f"got: {result.returncode}"
         )
 
+    def test_ssh_timeout_flag_fails_fast(self, mvm_binary):
+        """SSH with --timeout to nonexistent VM should fail fast (<5s not 60s).
+
+        Without --timeout, SSH to a nonexistent VM hangs for 60s waiting
+        for the default ConnectTimeout. With --timeout 2, it should fail
+        in under 5 seconds.
+        """
+        import time as _time
+
+        start = _time.monotonic()
+        result = _run_mvm(
+            mvm_binary,
+            "ssh",
+            "nonexistent-vm-timeout-test",
+            "--timeout",
+            "2",
+            "-c",
+            "echo hi",
+            check=False,
+        )
+        elapsed = _time.monotonic() - start
+        assert result.returncode != 0, (
+            f"Expected non-zero exit for nonexistent VM, "
+            f"got: {result.returncode} (took {elapsed:.1f}s)"
+        )
+        assert elapsed < 10, (
+            f"--timeout 2 should fail fast, but took {elapsed:.1f}s "
+            f"(default 60s timeout would have masked this)"
+        )
+
     @pytest.mark.requires_kvm
     @pytest.mark.slow
-    def test_ssh_with_ip_flag(self, mvm_binary, created_vm, timing_targets):
+    def test_ssh_with_ip_flag(self, mvm_binary, module_vm, timing_targets):
         """Connect via IP as positional arg instead of VM name."""
-        vm_info = created_vm
+        vm_info = module_vm
         ssh_timeout = timing_targets["alpine-3.21"]
         ssh_available = wait_for_ssh(
             mvm_binary, vm_info["name"], "root", ssh_timeout
@@ -79,9 +107,9 @@ class TestSSHConnect:
 
     @pytest.mark.requires_kvm
     @pytest.mark.slow
-    def test_ssh_with_user_flag(self, mvm_binary, created_vm, timing_targets):
+    def test_ssh_with_user_flag(self, mvm_binary, module_vm, timing_targets):
         """SSH with explicit --user flag."""
-        vm_info = created_vm
+        vm_info = module_vm
         ssh_timeout = timing_targets["alpine-3.21"]
         wait_for_ssh(mvm_binary, vm_info["name"], "root", ssh_timeout)
 
@@ -103,12 +131,12 @@ class TestSSHConnect:
     @pytest.mark.requires_kvm
     @pytest.mark.slow
     def test_ssh_with_key_path(
-        self, mvm_binary, created_vm, timing_targets, tmp_path
+        self, mvm_binary, module_vm, timing_targets, tmp_path
     ):
         """SSH with explicit --key pointing to a private key file."""
         import subprocess as _subprocess
 
-        vm_info = created_vm
+        vm_info = module_vm
         ssh_timeout = timing_targets["alpine-3.21"]
         wait_for_ssh(mvm_binary, vm_info["name"], "root", ssh_timeout)
 

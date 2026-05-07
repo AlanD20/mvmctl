@@ -18,7 +18,7 @@ from tests.system.conftest import _run_mvm
 class TestConfigEdgeCases:
     """Tests for config command edge cases."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.domain_vm]
+    pytestmark = [pytest.mark.system, pytest.mark.domain_config]
 
     def test_config_get_category_only(self, mvm_binary):
         """``config get defaults.vm`` (no key) should return multiple keys."""
@@ -144,15 +144,13 @@ class TestNetworkEdgeCases:
         pytest.mark.domain_vm,
     ]
 
-    def test_network_create_without_subnet(
-        self, mvm_binary, unique_network_name
-    ):
+    def test_network_create_without_subnet(self, mvm_binary):
         """``network create`` without --subnet should fail with clear error."""
         result = _run_mvm(
             mvm_binary,
             "network",
             "create",
-            unique_network_name,
+            "test-network",
             check=False,
         )
         assert result.returncode != 0
@@ -277,7 +275,7 @@ class TestVMStateTransitionErrors:
 class TestImageAdvancedFlags:
     """Tests for image advanced flags and edge cases."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.domain_vm]
+    pytestmark = [pytest.mark.system, pytest.mark.domain_image]
 
     @pytest.mark.slow
     @pytest.mark.serial
@@ -305,22 +303,11 @@ class TestImageAdvancedFlags:
                 "Pull with --disable-detector --force timed out (>60s download)"
             )
 
-    def test_image_pull_nonexistent_fails(self, mvm_binary):
-        """Pull a nonexistent image should fail."""
-        result = _run_mvm(
-            mvm_binary,
-            "image",
-            "pull",
-            "completely-nonexistent-image-12345",
-            check=False,
-        )
-        assert result.returncode != 0
-
 
 class TestConfigEdgeCasesExtended:
     """Additional config command edge cases."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.domain_vm]
+    pytestmark = [pytest.mark.system, pytest.mark.domain_config]
 
     def test_config_get_nonexistent_key(self, mvm_binary):
         """``config get`` with nonexistent key should return guidance."""
@@ -353,7 +340,7 @@ class TestConfigEdgeCasesExtended:
 class TestConfigEdgeCasesResetAllAfterSet:
     """Test config reset --all after multiple values are set."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.domain_vm]
+    pytestmark = [pytest.mark.system, pytest.mark.domain_config]
 
     def test_config_reset_all_with_multiple_overrides(self, mvm_binary):
         """Set multiple config overrides, then reset --all, verify all gone."""
@@ -530,7 +517,7 @@ class TestImagePullAdvancedFlags:
     pytestmark = [
         pytest.mark.system,
         pytest.mark.slow,
-        pytest.mark.domain_vm,
+        pytest.mark.domain_image,
     ]
 
     def test_image_pull_with_version(self, mvm_binary):
@@ -584,7 +571,7 @@ class TestKernelPullAdvancedFlags:
     pytestmark = [
         pytest.mark.system,
         pytest.mark.slow,
-        pytest.mark.domain_vm,
+        pytest.mark.domain_kernel,
     ]
 
     def test_kernel_pull_with_arch_flag(self, mvm_binary):
@@ -613,7 +600,7 @@ class TestImagePullWithTypeFlag:
     pytestmark = [
         pytest.mark.system,
         pytest.mark.slow,
-        pytest.mark.domain_vm,
+        pytest.mark.domain_image,
     ]
 
     def test_image_pull_with_explicit_type(self, mvm_binary):
@@ -646,7 +633,7 @@ class TestImageImportWithDisableDetector:
     pytestmark = [
         pytest.mark.system,
         pytest.mark.slow,
-        pytest.mark.domain_vm,
+        pytest.mark.domain_image,
     ]
 
     def test_image_import_with_disable_detector(

@@ -96,9 +96,6 @@ class TestImageDefaults:
     def test_image_set_default(self, mvm_binary):
         """Set image as default."""
 
-        # Ensure image exists before setting default
-        _run_mvm(mvm_binary, "image", "pull", "alpine-3.21", check=False)
-
         # Use --json to get the actual image ID, then set by ID
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         if result.returncode != 0:
@@ -152,12 +149,6 @@ class TestImageImport:
     ):
         """Import a local image file."""
         import shutil
-
-        # Ensure alpine is cached
-        try:
-            _run_mvm(mvm_binary, "image", "pull", "alpine-3.21", check=False)
-        except subprocess.TimeoutExpired:
-            pytest.skip("Image pull timed out (>60s download)")
 
         # Get cached image info — store the full ID to avoid races
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
@@ -521,9 +512,6 @@ class TestImageImportSetDefault:
         """Import a local image file with --set-default flag."""
         import shutil
 
-        # Ensure alpine is cached
-        _run_mvm(mvm_binary, "image", "pull", "alpine-3.21", check=False)
-
         # Get cached image info
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         images = json.loads(result.stdout)
@@ -671,12 +659,6 @@ class TestImageRemoveForce:
     def test_image_rm_with_force(self, mvm_binary):
         """Remove a cached image by ID prefix with --force and verify it's gone."""
 
-        # Ensure alpine is pulled
-        try:
-            _run_mvm(mvm_binary, "image", "pull", "alpine-3.21", check=False)
-        except subprocess.TimeoutExpired:
-            pytest.skip("Initial image pull timed out (>60s download)")
-
         # Get alpine image ID
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         if result.returncode != 0:
@@ -749,6 +731,7 @@ class TestImageRemove:
         was_default = alpine_images[0].get("is_default", False)
         target_id = alpine_images[0]["id"]
         target_prefix = target_id[:6]
+        was_removed = False
 
         try:
             # Remove the image
@@ -760,6 +743,7 @@ class TestImageRemove:
                 check=False,
             )
             assert result.returncode == 0
+            was_removed = True
 
             # Verify gone (filter by is_present to account for soft-delete)
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
@@ -770,17 +754,20 @@ class TestImageRemove:
             ]
             assert not any(i["id"] == target_id for i in after)
         finally:
-            # Re-pull so other tests aren't broken — always runs even if assert fails.
-            # Restore default flag if the removed image was the default.
-            try:
-                pull_args = ["image", "pull", "alpine-3.21"]
-                if was_default:
-                    pull_args.append("--set-default")
-                repull = _run_mvm(mvm_binary, *pull_args, check=False)
-                if repull.returncode != 0:
-                    pytest.skip(f"Re-pull failed after test: {repull.stderr}")
-            except subprocess.TimeoutExpired:
-                pytest.skip("Re-pull timed out (>60s download)")
+            if was_removed:
+                # Re-pull so other tests aren't broken — only if removal happened.
+                # Restore default flag if the removed image was the default.
+                try:
+                    pull_args = ["image", "pull", "alpine-3.21"]
+                    if was_default:
+                        pull_args.append("--set-default")
+                    repull = _run_mvm(mvm_binary, *pull_args, check=False)
+                    if repull.returncode != 0:
+                        pytest.skip(
+                            f"Re-pull failed after test: {repull.stderr}"
+                        )
+                except subprocess.TimeoutExpired:
+                    pytest.skip("Re-pull timed out (>60s download)")
 
     def test_image_pull_nonexistent(self, mvm_binary):
         """Pull a nonexistent image and expect failure."""

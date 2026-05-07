@@ -49,7 +49,7 @@ description: >-
 
   </example>
 mode: all
-temperature: 0.1
+temperature: 0.2
 permission:
   edit: allow
   write: allow

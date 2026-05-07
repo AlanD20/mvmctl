@@ -17,12 +17,12 @@ pytestmark = [
 class TestConsoleState:
     """Test console state reporting on a running VM."""
 
-    def test_console_state(self, mvm_binary, created_vm):
+    def test_console_state(self, mvm_binary, module_vm):
         """Show console relay state for a running VM."""
         result = _run_mvm(
             mvm_binary,
             "console",
-            created_vm["name"],
+            module_vm["name"],
             "--state",
         )
         assert result.returncode == 0
@@ -37,7 +37,7 @@ class TestConsoleState:
 class TestConsoleKill:
     """Test console relay kill operation."""
 
-    def test_console_kill(self, mvm_binary, created_vm):
+    def test_console_kill(self, mvm_binary, module_vm):
         """Kill the console relay for a VM.
 
         The relay may not be running if no one has attached yet,
@@ -46,7 +46,7 @@ class TestConsoleKill:
         result = _run_mvm(
             mvm_binary,
             "console",
-            created_vm["name"],
+            module_vm["name"],
             "--kill",
             check=False,
         )
@@ -72,12 +72,12 @@ class TestConsoleIdentifierFlags:
         pytest.mark.slow,
     ]
 
-    def test_console_state_by_name_flag(self, mvm_binary, created_vm):
+    def test_console_state_by_name_flag(self, mvm_binary, module_vm):
         """Show console relay state using VM name as positional arg."""
         result = _run_mvm(
             mvm_binary,
             "console",
-            created_vm["name"],
+            module_vm["name"],
             "--state",
         )
         assert result.returncode == 0
@@ -88,9 +88,9 @@ class TestConsoleIdentifierFlags:
             or "stopped" in combined
         )
 
-    def test_console_state_by_ip(self, mvm_binary, created_vm):
+    def test_console_state_by_ip(self, mvm_binary, module_vm):
         """Show console relay state using IP as positional arg."""
-        ip = created_vm.get("ipv4")
+        ip = module_vm.get("ipv4")
         if not ip:
             pytest.skip("VM has no IPv4 address assigned")
         result = _run_mvm(

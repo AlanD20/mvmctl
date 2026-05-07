@@ -21,28 +21,26 @@ pytestmark = [
 class TestVMLogs:
     """Test VM log viewing operations."""
 
-    def test_logs_boot_output(self, mvm_binary, created_vm):
+    def test_logs_boot_output(self, mvm_binary, module_vm):
         """Show boot log for a running VM."""
-        result = _run_mvm(mvm_binary, "logs", created_vm["name"])
+        result = _run_mvm(mvm_binary, "logs", module_vm["name"])
         assert result.returncode == 0
         assert result.stdout.strip()
 
-    def test_logs_os_output(self, mvm_binary, created_vm):
+    def test_logs_os_output(self, mvm_binary, module_vm):
         """Show Firecracker OS log for a running VM."""
-        result = _run_mvm(mvm_binary, "logs", created_vm["name"], "--os")
+        result = _run_mvm(mvm_binary, "logs", module_vm["name"], "--os")
         assert result.returncode == 0
 
-    def test_logs_lines_limit(self, mvm_binary, created_vm):
+    def test_logs_lines_limit(self, mvm_binary, module_vm):
         """Show last N lines of boot log."""
-        result = _run_mvm(
-            mvm_binary, "logs", created_vm["name"], "--lines", "5"
-        )
+        result = _run_mvm(mvm_binary, "logs", module_vm["name"], "--lines", "5")
         assert result.returncode == 0
         assert len(result.stdout.splitlines()) <= 5 + 2
 
-    def test_logs_follow_runs(self, mvm_binary, created_vm):
+    def test_logs_follow_runs(self, mvm_binary, module_vm):
         """Follow log output for a brief period."""
-        cmd = [*shlex.split(mvm_binary), "logs", created_vm["name"], "--follow"]
+        cmd = [*shlex.split(mvm_binary), "logs", module_vm["name"], "--follow"]
         try:
             result = subprocess.run(
                 cmd,

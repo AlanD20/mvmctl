@@ -88,17 +88,15 @@ class TestNetworkLifecycle:
                 mvm_binary, "network", "rm", unique_network_name, check=False
             )
 
-    def test_network_listing_and_verification(
-        self, mvm_binary, created_network
-    ):
+    def test_network_listing_and_verification(self, mvm_binary, module_network):
         """List networks and verify created network appears."""
         result = _run_mvm(mvm_binary, "network", "ls")
         assert result.returncode == 0
-        assert created_network in result.stdout
+        assert module_network in result.stdout
 
-    def test_ip_rule_verification_iptables(self, created_network):
+    def test_ip_rule_verification_iptables(self, module_network):
         """Verify iptables rules were created for network."""
-        bridge = _compute_bridge_name(created_network)
+        bridge = _compute_bridge_name(module_network)
         result = subprocess.run(
             ["sudo", "iptables", "-t", "nat", "-L"],
             capture_output=True,
@@ -108,9 +106,9 @@ class TestNetworkLifecycle:
         # Bridge name for this network should appear in iptables rules
         assert bridge in result.stdout
 
-    def test_nat_gateway_configuration(self, created_network):
+    def test_nat_gateway_configuration(self, module_network):
         """Verify bridge interface exists for created network."""
-        bridge = _compute_bridge_name(created_network)
+        bridge = _compute_bridge_name(module_network)
         result = subprocess.run(
             ["ip", "addr", "show"],
             capture_output=True,
@@ -123,7 +121,7 @@ class TestNetworkLifecycle:
         self, mvm_binary, unique_network_name
     ):
         """Create and delete network, verify cleanup."""
-        # Create — use created_network fixture pattern but manual for delete test
+        # Create — use module_network fixture pattern but manual for delete test
         _run_mvm(
             mvm_binary,
             "network",
@@ -153,14 +151,14 @@ class TestNetworkLifecycle:
         networks = json.loads(result.stdout)
         assert not any(n.get("name") == unique_network_name for n in networks)
 
-    def test_duplicate_network_handling(self, mvm_binary, created_network):
+    def test_duplicate_network_handling(self, mvm_binary, module_network):
         """Attempt to create duplicate network name is rejected."""
-        subnet = _unique_subnet(created_network)
+        subnet = _unique_subnet(module_network)
         result = _run_mvm(
             mvm_binary,
             "network",
             "create",
-            created_network,
+            module_network,
             "--subnet",
             subnet,
             "--non-interactive",
@@ -190,24 +188,24 @@ class TestNetworkLifecycle:
             or "invalid" in result.stderr.lower()
         )
 
-    def test_network_inspect(self, mvm_binary, created_network):
+    def test_network_inspect(self, mvm_binary, module_network):
         """Inspect a network and verify name appears in output."""
         result = _run_mvm(
             mvm_binary,
             "network",
             "inspect",
-            created_network,
+            module_network,
         )
         assert result.returncode == 0
-        assert created_network in result.stdout
+        assert module_network in result.stdout
 
-    def test_network_inspect_json(self, mvm_binary, created_network):
+    def test_network_inspect_json(self, mvm_binary, module_network):
         """Inspect a network with --json and verify parsed fields."""
         result = _run_mvm(
             mvm_binary,
             "network",
             "inspect",
-            created_network,
+            module_network,
             "--json",
         )
         assert result.returncode == 0
@@ -249,24 +247,24 @@ class TestNetworkLifecycle:
                 mvm_binary, "network", "rm", unique_network_name, check=False
             )
 
-    def test_network_set_default(self, mvm_binary, created_network):
+    def test_network_set_default(self, mvm_binary, module_network):
         """Set a network as the default."""
         result = _run_mvm(
             mvm_binary,
             "network",
             "set-default",
-            created_network,
+            module_network,
         )
         assert result.returncode == 0
         assert "default" in result.stdout.lower()
 
-    def test_network_list_json(self, mvm_binary, created_network):
+    def test_network_list_json(self, mvm_binary, module_network):
         """List networks in JSON format."""
         result = _run_mvm(mvm_binary, "network", "ls", "--json")
         assert result.returncode == 0
         data = json.loads(result.stdout)
         assert isinstance(data, list)
-        assert any(n["name"] == created_network for n in data)
+        assert any(n["name"] == module_network for n in data)
 
     def test_network_remove_multiple(self, mvm_binary, unique_network_name):
         """Remove multiple networks at once."""
@@ -303,19 +301,19 @@ class TestNetworkLifecycle:
 class TestNetworkSync:
     """Test mvm network sync command."""
 
-    def test_network_sync_all(self, mvm_binary, created_network):
+    def test_network_sync_all(self, mvm_binary, module_network):
         """Sync all networks."""
         result = _run_mvm(mvm_binary, "network", "sync", check=False)
         assert result.returncode == 0
 
-    def test_network_sync_specific(self, mvm_binary, created_network):
+    def test_network_sync_specific(self, mvm_binary, module_network):
         """Sync a specific network by name."""
         result = _run_mvm(
-            mvm_binary, "network", "sync", created_network, check=False
+            mvm_binary, "network", "sync", module_network, check=False
         )
         assert result.returncode == 0
 
-    def test_network_sync_json(self, mvm_binary, created_network):
+    def test_network_sync_json(self, mvm_binary, module_network):
         """Sync with JSON output."""
         result = _run_mvm(mvm_binary, "network", "sync", "--json", check=False)
         assert result.returncode == 0
@@ -439,13 +437,13 @@ class TestNetworkInspectTree:
         pytest.mark.domain_vm,
     ]
 
-    def test_network_inspect_tree(self, mvm_binary, created_network):
+    def test_network_inspect_tree(self, mvm_binary, module_network):
         """Inspect a network with --tree and verify tree characters in output."""
         result = _run_mvm(
             mvm_binary,
             "network",
             "inspect",
-            created_network,
+            module_network,
             "--tree",
         )
         assert result.returncode == 0

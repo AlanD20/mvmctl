@@ -214,17 +214,6 @@ class TestKernelRemoveAndPull:
         remaining = json.loads(result.stdout)
         assert not any(k["id"].startswith(kernel_id) for k in remaining)
 
-        # Re-pull so other tests aren't broken
-        _run_mvm(
-            mvm_binary,
-            "kernel",
-            "pull",
-            "--type",
-            "official",
-            "--set-default",
-            check=False,
-        )
-
 
 class TestKernelRemoveForce:
     """Test kernel removal with --force flag."""
@@ -285,14 +274,3 @@ class TestKernelRemoveForce:
         result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
         remaining = json.loads(result.stdout)
         assert not any(k["id"].startswith(target) for k in remaining)
-
-        # Re-pull the kernel so other tests aren't broken
-        _run_mvm(
-            mvm_binary,
-            "kernel",
-            "pull",
-            "--type",
-            "official",
-            check=False,
-            timeout=120,
-        )

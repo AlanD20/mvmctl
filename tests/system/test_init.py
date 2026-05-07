@@ -81,3 +81,41 @@ class TestInitWizard:
             keyword in lower
             for keyword in ("sudo", "root", "host init", "privilege")
         ), f"Missing error guidance in output:\n{output}"
+
+
+class TestRootFlags:
+    """Test root-level CLI flags (--version, --verbose, --debug)."""
+
+    def test_version_flag(self, mvm_binary):
+        """``mvm --version`` should print version and exit."""
+        result = _run_mvm(mvm_binary, "--version", check=False)
+        assert result.returncode == 0
+        assert result.stdout.strip(), "Expected version string in output"
+
+    def test_verbose_flag(self, mvm_binary):
+        """``mvm --verbose`` should enable verbose logging output."""
+        result = _run_mvm(
+            mvm_binary,
+            "--verbose",
+            "config",
+            "get",
+            "defaults.vm",
+            "vcpu_count",
+            check=False,
+        )
+        assert result.returncode == 0
+        assert "vcpu_count" in result.stdout
+
+    def test_debug_flag(self, mvm_binary):
+        """``mvm --debug`` should enable debug-level logging."""
+        result = _run_mvm(
+            mvm_binary,
+            "--debug",
+            "config",
+            "get",
+            "defaults.vm",
+            "vcpu_count",
+            check=False,
+        )
+        assert result.returncode == 0
+        assert "vcpu_count" in result.stdout

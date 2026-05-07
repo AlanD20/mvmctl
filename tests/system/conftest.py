@@ -423,7 +423,7 @@ def created_key(mvm_binary, unique_key_name) -> Generator[str, None, None]:
 def lifecycle_vm(mvm_binary) -> Generator[dict[str, Any], None, None]:
     """One VM shared across module for stateful operation tests.
 
-    Used for pause→resume→stop→start→start chain tests.
+    Used for pause->resume->stop->start->start chain tests.
     VM is created once with SSH key injection, goes through state changes,
     then cleaned up.
     """
@@ -451,6 +451,70 @@ def lifecycle_vm(mvm_binary) -> Generator[dict[str, Any], None, None]:
 
     if not vm_info:
         raise RuntimeError(f"Failed to create lifecycle VM: {vm_name}")
+
+    try:
+        yield vm_info
+    finally:
+        _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+        _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+
+
+@pytest.fixture(scope="module")
+def module_network(mvm_binary) -> Generator[str, None, None]:
+    """One network shared across a module for read-only network tests.
+
+    Created once, destroyed after the last test in the module.
+    Tests that specifically test network create/rm should NOT use this.
+    """
+    name = f"sys-modnet-{uuid.uuid4().hex[:6]}"
+    subnet = _unique_subnet(name)
+    _run_mvm(
+        mvm_binary,
+        "network",
+        "create",
+        name,
+        "--subnet",
+        subnet,
+        "--non-interactive",
+    )
+    try:
+        yield name
+    finally:
+        _run_mvm(mvm_binary, "network", "rm", name, check=False)
+
+
+@pytest.fixture(scope="module")
+def module_vm(mvm_binary) -> Generator[dict[str, Any], None, None]:
+    """One VM shared across a module for read-only VM tests.
+
+    Created once with SSH key injection, kept running.
+    Tests that modify VM state (stop, start, pause, resume, snapshot, rm)
+    should NOT use this -- they need their own dedicated VM via created_vm.
+    """
+    vm_name = f"sys-modvm-{uuid.uuid4().hex[:8]}"
+    key_name = f"sys-modvm-key-{uuid.uuid4().hex[:6]}"
+
+    # Create throwaway SSH key
+    _run_mvm(mvm_binary, "key", "create", key_name, "--algorithm", "ed25519")
+
+    # Create VM with SSH key injected
+    _run_mvm(
+        mvm_binary,
+        "vm",
+        "create",
+        "--name",
+        vm_name,
+        "--image",
+        "alpine-3.21",
+        "--ssh-key",
+        key_name,
+    )
+
+    vms = _parse_vm_list(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+    vm_info = next((v for v in vms if v["name"] == vm_name), None)
+
+    if not vm_info:
+        raise RuntimeError(f"Failed to create module VM: {vm_name}")
 
     try:
         yield vm_info
