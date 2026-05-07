@@ -65,6 +65,21 @@ CREATE TABLE binaries (
 CREATE INDEX idx_binaries_name ON binaries(name);
 CREATE INDEX idx_binaries_version ON binaries(version);
 
+-- VOLUMES: Persistent data disks attachable to VMs
+CREATE TABLE volumes (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    size_bytes INTEGER NOT NULL,
+    format TEXT NOT NULL DEFAULT 'raw',
+    path TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'available',
+    vm_id TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+CREATE INDEX idx_volumes_vm ON volumes(vm_id);
+CREATE INDEX idx_volumes_name ON volumes(name);
+
 -- NETWORKS: Named network definitions
 CREATE TABLE networks (
     id TEXT PRIMARY KEY,
@@ -137,6 +152,7 @@ CREATE TABLE vm_instances (
     boot_args TEXT NULL,
     ssh_keys TEXT NULL,         -- JSON array of SSH key fingerprints
     ssh_user TEXT NULL,          -- SSH user configured for this VM
+    volume_ids TEXT NULL,       -- JSON array of volume IDs
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     FOREIGN KEY (network_id) REFERENCES networks(id) ON DELETE RESTRICT,

@@ -85,6 +85,7 @@ markers = [
     "domain_config: system test for config management domain",
     "domain_host: (unused — host tests that create VMs are serial domain_vm)",
     "domain_init: system test for init wizard domain",
+    "domain_volume: system test for volume management domain",
     "domain_vm: system test for VM lifecycle domain",
 ]
 filterwarnings = [

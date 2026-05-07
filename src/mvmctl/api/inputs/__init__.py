@@ -103,6 +103,16 @@ from mvmctl.api.inputs._vm_input import (
     VMInput,
     VMRequest,
 )
+from mvmctl.api.inputs._volume_create_input import (
+    ResolvedVolumeCreateInput,
+    VolumeCreateInput,
+    VolumeCreateRequest,
+)
+from mvmctl.api.inputs._volume_input import (
+    ResolvedVolumeInput,
+    VolumeInput,
+    VolumeRequest,
+)
 
 __all__ = [
     "ConsoleInput",
@@ -145,10 +155,16 @@ __all__ = [
     "ResolvedNetworkCreateRequest",
     "ResolvedNetworkInput",
     "ResolvedSSHInput",
-    "ResolvedVMCreateInput",
-    "ResolvedVMInput",
     "SSHInput",
     "SSHRequest",
+    "ResolvedVolumeCreateInput",
+    "ResolvedVolumeInput",
+    "VolumeCreateInput",
+    "VolumeCreateRequest",
+    "VolumeInput",
+    "VolumeRequest",
+    "ResolvedVMCreateInput",
+    "ResolvedVMInput",
     "VMCreateInput",
     "VMCreateRequest",
     "VMExportBinaryConfig",

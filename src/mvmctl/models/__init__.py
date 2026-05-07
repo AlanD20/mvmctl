@@ -43,6 +43,7 @@ from mvmctl.models.vm import (
     VMInstanceItem,
     VMStatus,
 )
+from mvmctl.models.volume import VolumeItem
 
 __all__ = [
     "BinaryItem",
@@ -74,6 +75,7 @@ __all__ = [
     "CleanResult",
     "PruneAllResult",
     "SSHKeyItem",
+    "VolumeItem",
     "VMInspectInfo",
     "VMInstanceItem",
     "VMStatus",

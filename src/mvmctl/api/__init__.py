@@ -35,6 +35,7 @@ __all__ = [
     "LogOperation",
     "NetworkOperation",
     "SSHOperation",
+    "VolumeOperation",
     "VMOperation",
     # Input classes
     "BinaryPullInput",
@@ -52,6 +53,8 @@ __all__ = [
     "NetworkCreateInput",
     "NetworkInput",
     "SSHInput",
+    "VolumeCreateInput",
+    "VolumeInput",
     "VMCreateInput",
     "VMImportInput",
     "VMImportRequest",
@@ -88,6 +91,10 @@ _LAZY_MAP: dict[str, tuple[str, str]] = {
     "LogOperation": ("mvmctl.api.logs_operations", "LogOperation"),
     "NetworkOperation": ("mvmctl.api.network_operations", "NetworkOperation"),
     "SSHOperation": ("mvmctl.api.ssh_operations", "SSHOperation"),
+    "VolumeOperation": (
+        "mvmctl.api.volume_operations",
+        "VolumeOperation",
+    ),
     "VMOperation": ("mvmctl.api.vm_operations", "VMOperation"),
     # ── Input classes ───────────────────────────────────────────────
     "BinaryPullInput": (
@@ -123,6 +130,14 @@ _LAZY_MAP: dict[str, tuple[str, str]] = {
     ),
     "NetworkInput": ("mvmctl.api.inputs._network_input", "NetworkInput"),
     "SSHInput": ("mvmctl.api.inputs._ssh_input", "SSHInput"),
+    "VolumeCreateInput": (
+        "mvmctl.api.inputs._volume_create_input",
+        "VolumeCreateInput",
+    ),
+    "VolumeInput": (
+        "mvmctl.api.inputs._volume_input",
+        "VolumeInput",
+    ),
     "VMCreateInput": (
         "mvmctl.api.inputs._vm_create_input",
         "VMCreateInput",

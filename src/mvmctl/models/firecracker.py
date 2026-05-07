@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from mvmctl.models.cloudinit import CloudInitMode
 
@@ -63,6 +64,9 @@ class FirecrackerConfig:
     cloud_init_mode: CloudInitMode | None
     cloud_init_iso_path: Path | None
     cloud_init_nocloud_url: str | None
+
+    # Extra drives (volumes)
+    extra_drives: list[dict[str, Any]] = field(default_factory=list)
 
     # Spawn behavior
     relay_enabled: bool = False

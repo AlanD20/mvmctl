@@ -296,8 +296,9 @@ class FirecrackerSpawner:
             }
             drives.append(cloud_init_drive)
 
-        # Extra drives
-        # IMPROVEMENTS: Allow adding extra drives to be mounted, maybe introduce volumes?
+        # Extra drives (volumes)
+        for drive in self._config.extra_drives:
+            drives.append(drive)  # type: ignore[arg-type]
 
         return drives
 
@@ -855,3 +856,38 @@ class FirecrackerClient:
             logger.info("VM resumed")
         else:
             raise FirecrackerClientError(f"Failed to resume VM: {status}")
+
+    def put_drive(self, drive_config: DriveConfig) -> None:
+        """Attach or update a drive on a running VM via PUT /drives."""
+        body: dict[str, object] = {
+            "drive_id": drive_config["drive_id"],
+            "path_on_host": drive_config["path_on_host"],
+            "is_root_device": drive_config["is_root_device"],
+            "is_read_only": drive_config["is_read_only"],
+            "cache_type": drive_config["cache_type"],
+            "io_engine": drive_config["io_engine"],
+        }
+        status, data = self._request(
+            "PUT", f"/drives/{drive_config['drive_id']}", body
+        )
+        if status not in (
+            CONST_HTTP_STATUS_SUCCESS,
+            CONST_HTTP_STATUS_NO_CONTENT,
+        ):
+            msg = f"Failed to attach drive: {status}"
+            if data:
+                msg += f" Response: {data}"
+            raise FirecrackerClientError(msg)
+
+    def patch_drive(self, drive_id: str) -> None:
+        """Remove a drive from a running VM via PATCH /drives."""
+        body: dict[str, object] = {"drive_id": drive_id}
+        status, data = self._request("PATCH", f"/drives/{drive_id}", body)
+        if status not in (
+            CONST_HTTP_STATUS_SUCCESS,
+            CONST_HTTP_STATUS_NO_CONTENT,
+        ):
+            msg = f"Failed to detach drive: {status}"
+            if data:
+                msg += f" Response: {data}"
+            raise FirecrackerClientError(msg)

@@ -270,6 +270,13 @@ class CacheUtils:
         return result
 
     @staticmethod
+    def get_volumes_dir() -> Path:
+        """Return the directory for persistent volumes."""
+        result = CacheUtils.get_cache_dir() / "volumes"
+        result.mkdir(parents=True, exist_ok=True, mode=CONST_DIR_PERMS_CACHE)
+        return result
+
+    @staticmethod
     def get_bin_dir() -> Path:
         """Return the directory for cached Firecracker binaries."""
         result = CacheUtils.get_cache_dir() / "bin"

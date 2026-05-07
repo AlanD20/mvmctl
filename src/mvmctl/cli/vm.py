@@ -262,6 +262,12 @@ def vm_create(
         "--skip-cleanup",
         help="Skip cleanup if VM creation fails; keeps cloud-init ISO and partial resources (for debugging)",
     ),
+    volume: list[str] | None = typer.Option(
+        None,
+        "--volume",
+        "-v",
+        help="Attach volume(s) to the VM (can specify multiple times)",
+    ),
 ) -> None:
     """Create and start a new Firecracker VM."""
     if skip_cleanup:
@@ -304,8 +310,7 @@ def vm_create(
                 cloud_init_mode=cloud_init_mode,
                 nocloud_net_port=nocloud_net_port,
                 skip_cleanup=skip_cleanup,
-                count=count,
-                atomic=atomic,
+                volumes=volume,
             ),
             on_progress=_on_progress,
         )
@@ -685,3 +690,39 @@ def vm_import(
     elif result.status in ("error", "failure"):
         print_error(result.message)
         raise typer.Exit(code=1)
+
+
+@vm_app.command(name="attach-volume")
+@handle_errors
+def vm_attach_volume(
+    identifier: str = typer.Argument(
+        ..., help="VM name, ID prefix, IP, or MAC"
+    ),
+    volume_name: str = typer.Argument(..., help="Volume name"),
+) -> None:
+    """Attach a volume to a running VM."""
+    result = VMOperation.attach_volume(
+        VMInput(identifiers=[identifier]), volume_name
+    )
+    if result.is_error:
+        print_error(result.message)
+        raise typer.Exit(code=1)
+    print_success(result.message)
+
+
+@vm_app.command(name="detach-volume")
+@handle_errors
+def vm_detach_volume(
+    identifier: str = typer.Argument(
+        ..., help="VM name, ID prefix, IP, or MAC"
+    ),
+    volume_name: str = typer.Argument(..., help="Volume name"),
+) -> None:
+    """Detach a volume from a running VM."""
+    result = VMOperation.detach_volume(
+        VMInput(identifiers=[identifier]), volume_name
+    )
+    if result.is_error:
+        print_error(result.message)
+        raise typer.Exit(code=1)
+    print_success(result.message)

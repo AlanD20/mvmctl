@@ -44,6 +44,470 @@ class TestVMCreatePerImage:
         _run_mvm(mvm_binary, "vm", "rm", unique_vm_name, check=False)
 
 
+class TestVMBatchCreate:
+    """Test vm create --count and --atomic flags.
+
+    --count N creates N VMs with names base, base-2, base-3, ...
+    --atomic rolls back all VMs if any single VM fails.
+    """
+
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    def test_vm_create_count_default(self, mvm_binary, unique_vm_name):
+        """vm create without --count still creates 1 VM."""
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                unique_vm_name,
+                "--image",
+                "alpine-3.21",
+            )
+            assert result.returncode == 0
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                unique_vm_name,
+                "--force",
+                check=False,
+            )
+
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    def test_vm_create_count_multiple(self, mvm_binary, unique_vm_name):
+        """Create 3 VMs with --count 3 (base, base-2, base-3)."""
+        names = [
+            unique_vm_name,
+            f"{unique_vm_name}-2",
+            f"{unique_vm_name}-3",
+        ]
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                unique_vm_name,
+                "--image",
+                "alpine-3.21",
+                "--count",
+                "3",
+            )
+            assert result.returncode == 0
+
+            # Verify all 3 VMs are listed
+            ls_result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+            vms = json.loads(ls_result.stdout)
+            for name in names:
+                assert any(v["name"] == name for v in vms), (
+                    f"VM {name} not found"
+                )
+        finally:
+            for name in names:
+                _run_mvm(
+                    mvm_binary,
+                    "vm",
+                    "rm",
+                    name,
+                    "--force",
+                    check=False,
+                )
+
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    def test_vm_create_atomic_with_count(self, mvm_binary, unique_vm_name):
+        """--atomic --count 2 creates both VMs successfully."""
+        names = [unique_vm_name, f"{unique_vm_name}-2"]
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                unique_vm_name,
+                "--image",
+                "alpine-3.21",
+                "--count",
+                "2",
+                "--atomic",
+            )
+            assert result.returncode == 0
+
+            ls_result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+            vms = json.loads(ls_result.stdout)
+            for name in names:
+                assert any(v["name"] == name for v in vms), (
+                    f"VM {name} not found"
+                )
+        finally:
+            for name in names:
+                _run_mvm(
+                    mvm_binary,
+                    "vm",
+                    "rm",
+                    name,
+                    "--force",
+                    check=False,
+                )
+
+    def test_vm_create_count_zero_fails(self, mvm_binary, unique_vm_name):
+        """--count 0 should be rejected."""
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "create",
+            "--name",
+            unique_vm_name,
+            "--image",
+            "alpine-3.21",
+            "--count",
+            "0",
+            check=False,
+        )
+        assert result.returncode != 0
+
+    def test_vm_create_count_with_ip_fails(self, mvm_binary, unique_vm_name):
+        """--count > 1 with --ip should be rejected."""
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "create",
+            "--name",
+            unique_vm_name,
+            "--image",
+            "alpine-3.21",
+            "--count",
+            "2",
+            "--ip",
+            "10.99.99.99",
+            check=False,
+        )
+        assert result.returncode != 0
+
+    def test_vm_create_count_with_mac_fails(self, mvm_binary, unique_vm_name):
+        """--count > 1 with --mac should be rejected."""
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "create",
+            "--name",
+            unique_vm_name,
+            "--image",
+            "alpine-3.21",
+            "--count",
+            "2",
+            "--mac",
+            "aa:bb:cc:dd:ee:ff",
+            check=False,
+        )
+        assert result.returncode != 0
+
+    def test_vm_create_count_negative_fails(self, mvm_binary, unique_vm_name):
+        """--count -1 should be rejected (count must be at least 1)."""
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "create",
+            "--name",
+            unique_vm_name,
+            "--image",
+            "alpine-3.21",
+            "--count",
+            "-1",
+            check=False,
+        )
+        assert result.returncode != 0
+
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    def test_vm_create_atomic_without_count(self, mvm_binary, unique_vm_name):
+        """--atomic without --count should work (count=1 default)."""
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                unique_vm_name,
+                "--image",
+                "alpine-3.21",
+                "--atomic",
+            )
+            assert result.returncode == 0
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                unique_vm_name,
+                "--force",
+                check=False,
+            )
+
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    def test_vm_create_count_output_message(self, mvm_binary, unique_vm_name):
+        """Verify output says 'Created N VM(s): ...' for batch creation."""
+        names = [unique_vm_name, f"{unique_vm_name}-2"]
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                unique_vm_name,
+                "--image",
+                "alpine-3.21",
+                "--count",
+                "2",
+            )
+            assert result.returncode == 0
+            assert "Created 2 VM(s)" in result.stdout, (
+                f"Expected 'Created 2 VM(s)' in output, got: {result.stdout}"
+            )
+            assert unique_vm_name in result.stdout
+            assert f"{unique_vm_name}-2" in result.stdout
+        finally:
+            for name in names:
+                _run_mvm(
+                    mvm_binary,
+                    "vm",
+                    "rm",
+                    name,
+                    "--force",
+                    check=False,
+                )
+
+    def test_vm_create_count_explicit_1(self, mvm_binary, unique_vm_name):
+        """Explicit --count 1 should still create a single VM."""
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                unique_vm_name,
+                "--image",
+                "alpine-3.21",
+                "--count",
+                "1",
+            )
+            assert result.returncode == 0
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                unique_vm_name,
+                "--force",
+                check=False,
+            )
+
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    def test_vm_create_atomic_rollback_on_collision(
+        self, mvm_binary, unique_vm_name
+    ):
+        """--atomic must roll back all VMs if any single VM fails.
+
+        Strategy: pre-create VM 'base-2', then try --name base --count 2 --atomic.
+        First creates 'base' (succeeds), then tries 'base-2' (collision!).
+        Atomic mode should remove 'base' and report failure.
+        """
+        base_name = unique_vm_name
+        collision_name = f"{base_name}-2"
+        try:
+            # Pre-create the collision VM
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                collision_name,
+                "--image",
+                "alpine-3.21",
+            )
+
+            # Try atomic batch -- should fail at collision_name
+            result = _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                base_name,
+                "--image",
+                "alpine-3.21",
+                "--count",
+                "2",
+                "--atomic",
+                check=False,
+            )
+            assert result.returncode != 0, (
+                "Atomic batch should have failed on name collision"
+            )
+            assert (
+                "atomic" in result.stdout.lower()
+                or "failed" in result.stdout.lower()
+            ), f"Expected atomic failure message, got: {result.stdout}"
+
+            # Verify base_name was rolled back (removed)
+            ls_result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+            vms = json.loads(ls_result.stdout)
+            assert not any(v["name"] == base_name for v in vms), (
+                f"VM '{base_name}' should have been rolled back but still exists"
+            )
+        finally:
+            # Cleanup: remove both (collision_name still exists since it pre-existed)
+            for name in [base_name, collision_name]:
+                _run_mvm(
+                    mvm_binary,
+                    "vm",
+                    "rm",
+                    name,
+                    "--force",
+                    check=False,
+                )
+
+
+class TestVMVolumeIntegration:
+    """Test volume integration with VM lifecycle.
+
+    Covers vm create --volume, vm attach-volume, and vm detach-volume.
+    """
+
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    def test_vm_create_with_volume(
+        self, mvm_binary, unique_vm_name, unique_key_name
+    ):
+        """Create a volume and attach it at VM creation time via --volume."""
+        vol_name = f"sys-vol-vm-{unique_key_name}"
+        vm_name = unique_vm_name
+
+        # Create a throwaway SSH key for the VM
+        key_name = f"sys-volvm-key-{unique_key_name}"
+        _run_mvm(
+            mvm_binary, "key", "create", key_name, "--algorithm", "ed25519"
+        )
+
+        try:
+            # Create volume
+            _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
+
+            # Create VM with --volume
+            result = _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--volume",
+                vol_name,
+                "--ssh-key",
+                key_name,
+            )
+            assert result.returncode == 0
+
+            # Verify volume is now attached
+            vol_inspect = _run_mvm(
+                mvm_binary, "volume", "inspect", vol_name, "--json"
+            )
+            vol_data = json.loads(vol_inspect.stdout)
+            assert vol_data["status"] == "attached", (
+                f"Expected volume status 'attached', got '{vol_data['status']}'"
+            )
+        finally:
+            # Cleanup: VM first, then volume
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+            _run_mvm(
+                mvm_binary, "volume", "rm", vol_name, "--force", check=False
+            )
+            _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    def test_vm_attach_detach_volume(
+        self, mvm_binary, unique_vm_name, unique_key_name
+    ):
+        """Attach and detach a volume from a running VM."""
+        vol_name = f"sys-vol-ad-{unique_key_name}"
+        vm_name = unique_vm_name
+
+        # Create a throwaway SSH key
+        key_name = f"sys-volad-key-{unique_key_name}"
+        _run_mvm(
+            mvm_binary, "key", "create", key_name, "--algorithm", "ed25519"
+        )
+
+        try:
+            # Create the VM first
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--ssh-key",
+                key_name,
+            )
+
+            # Create a volume
+            _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
+
+            # Attach the volume to the running VM
+            result = _run_mvm(
+                mvm_binary,
+                "vm",
+                "attach-volume",
+                vm_name,
+                vol_name,
+            )
+            assert result.returncode == 0
+
+            # Verify volume status is now attached
+            vol_inspect = _run_mvm(
+                mvm_binary, "volume", "inspect", vol_name, "--json"
+            )
+            vol_data = json.loads(vol_inspect.stdout)
+            assert vol_data["status"] == "attached", (
+                f"Expected 'attached', got '{vol_data['status']}'"
+            )
+
+            # Detach the volume
+            result = _run_mvm(
+                mvm_binary,
+                "vm",
+                "detach-volume",
+                vm_name,
+                vol_name,
+            )
+            assert result.returncode == 0
+
+            # Verify volume status is now available
+            vol_inspect = _run_mvm(
+                mvm_binary, "volume", "inspect", vol_name, "--json"
+            )
+            vol_data = json.loads(vol_inspect.stdout)
+            assert vol_data["status"] == "available", (
+                f"Expected 'available', got '{vol_data['status']}'"
+            )
+        finally:
+            # Cleanup: VM first, then volume
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+            _run_mvm(
+                mvm_binary, "volume", "rm", vol_name, "--force", check=False
+            )
+            _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+
+
 class TestVMStateOperationsShared:
     """Test state operations on shared VM (module-scoped fixture).
 

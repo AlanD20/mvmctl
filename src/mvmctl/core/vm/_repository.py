@@ -158,8 +158,8 @@ class VMRepository:
                     rootfs_path, rootfs_suffix, enable_pci, enable_logging,
                     enable_metrics, enable_console, ssh_keys, ssh_user,
                     created_at, updated_at,
-                    log_path, serial_output_path, lsm_flags, boot_args
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    log_path, serial_output_path, lsm_flags, boot_args, volume_ids
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     status = excluded.status,
@@ -195,6 +195,7 @@ class VMRepository:
                     serial_output_path = excluded.serial_output_path,
                     lsm_flags = excluded.lsm_flags,
                     boot_args = excluded.boot_args,
+                    volume_ids = excluded.volume_ids,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -237,6 +238,7 @@ class VMRepository:
                     vm.serial_output_path,
                     vm.lsm_flags,
                     vm.boot_args,
+                    vm.volume_ids,
                 ),
             )
 

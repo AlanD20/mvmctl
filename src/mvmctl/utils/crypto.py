@@ -47,8 +47,14 @@ class HashGenerator:
 
     @staticmethod
     def network(name: str, subnet: str, created_at: str) -> str:
-        """Generate 64-char SHA256 hash for a network."""
+        """Generate a 64-char SHA256 hash for a network."""
         data = f"{name}:{subnet}:{created_at}"
+        return hashlib.sha256(data.encode()).hexdigest()
+
+    @staticmethod
+    def volume(name: str, created_at: str) -> str:
+        """Generate a SHA256 hash for a volume."""
+        data = f"{name}:{created_at}"
         return hashlib.sha256(data.encode()).hexdigest()
 
     @staticmethod

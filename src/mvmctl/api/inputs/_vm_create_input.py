@@ -91,6 +91,7 @@ class VMCreateInput:
     skip_cleanup: bool = False
     count: int | None = None
     atomic: bool = False
+    volumes: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -363,6 +364,7 @@ class VMCreateRequest:
         network = self._resolve_network()
         fc_binary = self._resolve_binary()
         ssh_keys = self._resolve_ssh_keys()
+        extra_drives = self._resolve_volumes()
 
         ipv4_net = ipaddress.IPv4Network(network.subnet, strict=False)
         network_prefix_len = ipv4_net.prefixlen
@@ -444,7 +446,7 @@ class VMCreateRequest:
             lsm_flags=self._inputs.lsm_flags
             if self._inputs.lsm_flags is not None
             else self._resolve_setting("defaults.vm", "lsm_flags"),
-            extra_drives=[],
+            extra_drives=extra_drives,
             log_level=str(
                 self._resolve_setting("defaults.firecracker", "log_level")
             ),
@@ -708,6 +710,34 @@ class VMCreateRequest:
             else self._key_resolver.resolve_many(self._inputs.ssh_keys).items
         )
         return ssh_keys
+
+    def _resolve_volumes(self) -> list[DriveConfig]:
+        """Resolve volume names to DriveConfig objects."""
+        if not self._inputs.volumes:
+            return []
+        from mvmctl.core.volume._repository import VolumeRepository
+        from mvmctl.core.volume._resolver import VolumeResolver
+
+        repo = VolumeRepository(self._db)
+        resolver = VolumeResolver(repo)
+        drives: list[DriveConfig] = []
+        for name in self._inputs.volumes:
+            vol = resolver.by_name(name)
+            if vol.status != "available":
+                raise VMCreateError(
+                    f"Volume '{name}' is not available (status: {vol.status})"
+                )
+            drives.append(
+                {
+                    "drive_id": f"vol-{len(drives) + 1}",
+                    "path_on_host": vol.path,
+                    "is_root_device": False,
+                    "is_read_only": False,
+                    "cache_type": "Unsafe",
+                    "io_engine": "Sync",
+                }
+            )
+        return drives
 
     def _resolve_cloud_init_mode(self) -> CloudInitModeResolved:
 

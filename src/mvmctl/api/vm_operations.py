@@ -59,6 +59,9 @@ from mvmctl.core.vm._controller import VMController
 from mvmctl.core.vm._firecracker import FirecrackerSpawner
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.core.vm._service import VMService
+from mvmctl.core.volume._controller import VolumeController
+from mvmctl.core.volume._repository import VolumeRepository
+from mvmctl.core.volume._resolver import VolumeResolver
 from mvmctl.exceptions import (
     MVMError,
     NetworkError,
@@ -1807,6 +1810,85 @@ class VMOperation:
                 )
             except FileNotFoundError:
                 pass
+
+    @staticmethod
+    def attach_volume(
+        vm_inputs: VMInput, volume_name: str
+    ) -> OperationResult[VMInstanceItem]:
+        """Attach a volume to a running VM."""
+        db = Database()
+        vm_resolver = VMRequest(inputs=vm_inputs, db=db)
+        resolved_vm = vm_resolver.resolve()
+        if len(resolved_vm.vms) != 1:
+            raise VMNotFoundError("Expected exactly one VM identifier")
+        vm = resolved_vm.vms[0]
+
+        vol_repo = VolumeRepository(db)
+        vol_resolver = VolumeResolver(vol_repo)
+        vol = vol_resolver.by_name(volume_name)
+
+        if vol.status != "available":
+            raise VMCreateError(f"Volume '{volume_name}' is not available")
+
+        controller = VolumeController(vol, vol_repo)
+        controller.attach(vm.id)
+
+        # Hot-plug via Firecracker API
+        if vm.pid and is_process_running(vm.pid):
+            from mvmctl.core.vm._firecracker import FirecrackerClient
+
+            socket_path = vm.vm_dir / vm.api_socket_path
+            drive_config: dict[str, object] = {
+                "drive_id": f"vol-{vol.name}",
+                "path_on_host": vol.path,
+                "is_root_device": False,
+                "is_read_only": False,
+                "cache_type": "Unsafe",
+                "io_engine": "Sync",
+            }
+            with FirecrackerClient(socket_path) as client:
+                client.put_drive(drive_config)  # type: ignore[arg-type]
+
+        return OperationResult(
+            status="success",
+            code="vm.volume_attached",
+            item=vm,
+            message=f"Volume '{volume_name}' attached to VM '{vm.name}'",
+        )
+
+    @staticmethod
+    def detach_volume(
+        vm_inputs: VMInput, volume_name: str
+    ) -> OperationResult[VMInstanceItem]:
+        """Detach a volume from a running VM."""
+        db = Database()
+        vm_resolver = VMRequest(inputs=vm_inputs, db=db)
+        resolved_vm = vm_resolver.resolve()
+        if len(resolved_vm.vms) != 1:
+            raise VMNotFoundError("Expected exactly one VM identifier")
+        vm = resolved_vm.vms[0]
+
+        vol_repo = VolumeRepository(db)
+        vol_resolver = VolumeResolver(vol_repo)
+        vol = vol_resolver.by_name(volume_name)
+
+        controller = VolumeController(vol, vol_repo)
+        controller.detach()
+
+        # Hot-unplug via Firecracker API
+        if vm.pid and is_process_running(vm.pid):
+            from mvmctl.core.vm._firecracker import FirecrackerClient
+
+            socket_path = vm.vm_dir / vm.api_socket_path
+            with FirecrackerClient(socket_path) as client:
+                client.patch_drive(f"vol-{vol.name}")
+
+        return OperationResult(
+            status="success",
+            code="vm.volume_detached",
+            item=vm,
+            message=f"Volume '{volume_name}' detached from VM '{vm.name}'",
+        )
 
 
 __all__ = [

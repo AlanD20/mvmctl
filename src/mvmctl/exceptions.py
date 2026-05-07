@@ -40,6 +40,14 @@ class ImageNotFoundError(MVMError):
     """Image does not exist in registry."""
 
 
+class VolumeNotFoundError(MVMError):
+    """Raised when a volume cannot be found."""
+
+
+class VolumeCreateError(MVMError):
+    """Raised when volume creation fails."""
+
+
 class ImageAcquireError(MVMError):
     """Image fetch/import failure."""
 

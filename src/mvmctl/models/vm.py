@@ -71,6 +71,7 @@ class VMInstanceItem:
         default_factory=list
     )  # SSH key fingerprints stored in VM
     ssh_user: str | None = None  # SSH user for this VM
+    volume_ids: str | None = None  # JSON array of attached volume IDs
 
     def __post_init__(self) -> None:
         """Deserialize ssh_keys from JSON string when loading from DB."""
