@@ -9,7 +9,12 @@ import pytest
 
 from tests.system.conftest import _run_mvm
 
-pytestmark = [pytest.mark.system, pytest.mark.requires_kvm, pytest.mark.slow, pytest.mark.serial]
+pytestmark = [
+    pytest.mark.system,
+    pytest.mark.requires_kvm,
+    pytest.mark.slow,
+    pytest.mark.domain_vm,
+]
 
 
 class TestVMSnapshot:

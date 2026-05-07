@@ -18,7 +18,7 @@ from tests.system.conftest import _run_mvm
 class TestConfigEdgeCases:
     """Tests for config command edge cases."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.serial]
+    pytestmark = [pytest.mark.system, pytest.mark.domain_vm]
 
     def test_config_get_category_only(self, mvm_binary):
         """``config get defaults.vm`` (no key) should return multiple keys."""
@@ -29,7 +29,6 @@ class TestConfigEdgeCases:
         assert "mem_size_mib" in result.stdout
         assert "boot_args" in result.stdout
 
-    @pytest.mark.serial
     def test_config_reset_category_only(self, mvm_binary):
         """``config reset defaults.vm`` (no key) should reset all keys in category."""
         # Set a value first so there is something to reset
@@ -75,7 +74,7 @@ class TestConfigEdgeCases:
 class TestCacheEdgeCases:
     """Tests for cache command edge cases."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.serial]
+    pytestmark = [pytest.mark.system, pytest.mark.serial, pytest.mark.domain_vm]
 
     def test_cache_prune_no_args(self, mvm_binary):
         """``cache prune`` without resource and without --all should fail."""
@@ -142,6 +141,7 @@ class TestNetworkEdgeCases:
         pytest.mark.requires_network,
         pytest.mark.slow,
         pytest.mark.serial,
+        pytest.mark.domain_vm,
     ]
 
     def test_network_create_without_subnet(
@@ -177,7 +177,7 @@ class TestVMStateTransitionErrors:
         pytest.mark.system,
         pytest.mark.requires_kvm,
         pytest.mark.slow,
-        pytest.mark.serial,
+        pytest.mark.domain_vm,
     ]
 
     def test_vm_stop_stopped_vm(self, mvm_binary, created_vm):
@@ -277,7 +277,7 @@ class TestVMStateTransitionErrors:
 class TestImageAdvancedFlags:
     """Tests for image advanced flags and edge cases."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.serial]
+    pytestmark = [pytest.mark.system, pytest.mark.domain_vm]
 
     @pytest.mark.slow
     @pytest.mark.serial
@@ -320,7 +320,7 @@ class TestImageAdvancedFlags:
 class TestConfigEdgeCasesExtended:
     """Additional config command edge cases."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.serial]
+    pytestmark = [pytest.mark.system, pytest.mark.domain_vm]
 
     def test_config_get_nonexistent_key(self, mvm_binary):
         """``config get`` with nonexistent key should return guidance."""
@@ -353,14 +353,12 @@ class TestConfigEdgeCasesExtended:
 class TestConfigEdgeCasesResetAllAfterSet:
     """Test config reset --all after multiple values are set."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.serial]
+    pytestmark = [pytest.mark.system, pytest.mark.domain_vm]
 
     def test_config_reset_all_with_multiple_overrides(self, mvm_binary):
         """Set multiple config overrides, then reset --all, verify all gone."""
         # Set two values
-        _run_mvm(
-            mvm_binary, "config", "set", "defaults.vm", "vcpu_count", "8"
-        )
+        _run_mvm(mvm_binary, "config", "set", "defaults.vm", "vcpu_count", "8")
         _run_mvm(
             mvm_binary,
             "config",
@@ -393,7 +391,7 @@ class TestVMLogsByIdentifier:
         pytest.mark.system,
         pytest.mark.requires_kvm,
         pytest.mark.slow,
-        pytest.mark.serial,
+        pytest.mark.domain_vm,
     ]
 
     def test_logs_by_ip(self, mvm_binary, created_vm):
@@ -413,7 +411,7 @@ class TestVMCloudInitModes:
         pytest.mark.system,
         pytest.mark.requires_kvm,
         pytest.mark.slow,
-        pytest.mark.serial,
+        pytest.mark.domain_vm,
     ]
 
     def test_vm_create_cloud_init_mode_iso(self, mvm_binary, unique_vm_name):
@@ -431,18 +429,14 @@ class TestVMCloudInitModes:
                 "--cloud-init-mode",
                 "iso",
             )
-            vms = json.loads(
-                _run_mvm(mvm_binary, "vm", "ls", "--json").stdout
-            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
             vm = next((v for v in vms if v["name"] == vm_name), None)
             assert vm is not None, f"VM '{vm_name}' not found"
             assert vm["status"] == "running", (
                 f"Expected running, got {vm['status']}"
             )
         finally:
-            _run_mvm(
-                mvm_binary, "vm", "rm", vm_name, "--force", check=False
-            )
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
 
     def test_vm_create_cloud_init_mode_net(self, mvm_binary, unique_vm_name):
         """Create VM with --cloud-init-mode net."""
@@ -459,22 +453,16 @@ class TestVMCloudInitModes:
                 "--cloud-init-mode",
                 "net",
             )
-            vms = json.loads(
-                _run_mvm(mvm_binary, "vm", "ls", "--json").stdout
-            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
             vm = next((v for v in vms if v["name"] == vm_name), None)
             assert vm is not None, f"VM '{vm_name}' not found"
             assert vm["status"] == "running", (
                 f"Expected running, got {vm['status']}"
             )
         finally:
-            _run_mvm(
-                mvm_binary, "vm", "rm", vm_name, "--force", check=False
-            )
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
 
-    def test_vm_create_cloud_init_mode_off(
-        self, mvm_binary, unique_vm_name
-    ):
+    def test_vm_create_cloud_init_mode_off(self, mvm_binary, unique_vm_name):
         """Create VM with --cloud-init-mode off (explicit)."""
         vm_name = unique_vm_name
         try:
@@ -489,18 +477,14 @@ class TestVMCloudInitModes:
                 "--cloud-init-mode",
                 "off",
             )
-            vms = json.loads(
-                _run_mvm(mvm_binary, "vm", "ls", "--json").stdout
-            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
             vm = next((v for v in vms if v["name"] == vm_name), None)
             assert vm is not None, f"VM '{vm_name}' not found"
             assert vm["status"] == "running", (
                 f"Expected running, got {vm['status']}"
             )
         finally:
-            _run_mvm(
-                mvm_binary, "vm", "rm", vm_name, "--force", check=False
-            )
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
 
 
 class TestVMNocloudNetPort:
@@ -510,7 +494,7 @@ class TestVMNocloudNetPort:
         pytest.mark.system,
         pytest.mark.requires_kvm,
         pytest.mark.slow,
-        pytest.mark.serial,
+        pytest.mark.domain_vm,
     ]
 
     def test_vm_create_with_nocloud_net_port_specific(
@@ -530,18 +514,14 @@ class TestVMNocloudNetPort:
                 "--nocloud-net-port",
                 "12345",
             )
-            vms = json.loads(
-                _run_mvm(mvm_binary, "vm", "ls", "--json").stdout
-            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
             vm = next((v for v in vms if v["name"] == vm_name), None)
             assert vm is not None, f"VM '{vm_name}' not found"
             assert vm["status"] == "running", (
                 f"Expected running, got {vm['status']}"
             )
         finally:
-            _run_mvm(
-                mvm_binary, "vm", "rm", vm_name, "--force", check=False
-            )
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
 
 
 class TestImagePullAdvancedFlags:
@@ -550,7 +530,7 @@ class TestImagePullAdvancedFlags:
     pytestmark = [
         pytest.mark.system,
         pytest.mark.slow,
-        pytest.mark.serial,
+        pytest.mark.domain_vm,
     ]
 
     def test_image_pull_with_version(self, mvm_binary):
@@ -593,9 +573,7 @@ class TestImagePullAdvancedFlags:
             if result.returncode == 0:
                 assert "pulled successfully" in result.stdout.lower()
             else:
-                pytest.skip(
-                    f"Pull with --arch failed: {result.stderr.strip()}"
-                )
+                pytest.skip(f"Pull with --arch failed: {result.stderr.strip()}")
         except subprocess.TimeoutExpired:
             pytest.skip("Pull with --arch timed out (>60s)")
 
@@ -606,7 +584,7 @@ class TestKernelPullAdvancedFlags:
     pytestmark = [
         pytest.mark.system,
         pytest.mark.slow,
-        pytest.mark.serial,
+        pytest.mark.domain_vm,
     ]
 
     def test_kernel_pull_with_arch_flag(self, mvm_binary):
@@ -635,7 +613,7 @@ class TestImagePullWithTypeFlag:
     pytestmark = [
         pytest.mark.system,
         pytest.mark.slow,
-        pytest.mark.serial,
+        pytest.mark.domain_vm,
     ]
 
     def test_image_pull_with_explicit_type(self, mvm_binary):
@@ -653,12 +631,13 @@ class TestImagePullWithTypeFlag:
         )
         if result.returncode == 0:
             assert "pulled successfully" in result.stdout.lower()
-        elif "timed out" in (result.stdout + result.stderr).lower() or result.returncode == -15:
+        elif (
+            "timed out" in (result.stdout + result.stderr).lower()
+            or result.returncode == -15
+        ):
             pytest.skip("Pull with --type timed out (>60s)")
         else:
-            pytest.skip(
-                f"Pull with --type failed: {result.stderr.strip()}"
-            )
+            pytest.skip(f"Pull with --type failed: {result.stderr.strip()}")
 
 
 class TestImageImportWithDisableDetector:
@@ -667,7 +646,7 @@ class TestImageImportWithDisableDetector:
     pytestmark = [
         pytest.mark.system,
         pytest.mark.slow,
-        pytest.mark.serial,
+        pytest.mark.domain_vm,
     ]
 
     def test_image_import_with_disable_detector(

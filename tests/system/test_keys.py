@@ -10,7 +10,7 @@ import pytest
 
 from tests.system.conftest import _run_mvm
 
-pytestmark = [pytest.mark.system, pytest.mark.serial]
+pytestmark = [pytest.mark.system, pytest.mark.domain_key]
 
 
 class TestKeyLifecycle:
@@ -54,7 +54,6 @@ class TestKeyLifecycle:
         assert result.returncode == 0
         assert created_key in result.stdout
 
-    @pytest.mark.serial
     def test_key_set_default(self, mvm_binary, created_key):
         """Set key as default."""
         result = _run_mvm(mvm_binary, "key", "set-default", created_key)
@@ -138,7 +137,6 @@ class TestKeyLifecycle:
         data = json.loads(result.stdout)
         assert "name" in data
 
-    @pytest.mark.serial
     def test_key_set_default_clear(self, mvm_binary, created_key):
         """Set key as default then clear the default."""
         result = _run_mvm(mvm_binary, "key", "set-default", created_key)
@@ -267,7 +265,6 @@ class TestKeyCreateAdvanced:
             _run_mvm(mvm_binary, "key", "rm", unique_key_name, check=False)
             _run_mvm(mvm_binary, "key", "set-default", "--clear", check=False)
 
-    @pytest.mark.serial
     def test_key_create_force_overwrite(self, mvm_binary, unique_key_name):
         """Force overwrite an existing key with --force."""
         _run_mvm(

@@ -13,7 +13,7 @@ pytestmark = [
     pytest.mark.system,
     pytest.mark.requires_kvm,
     pytest.mark.slow,
-    pytest.mark.serial,
+    pytest.mark.domain_vm,
 ]
 
 

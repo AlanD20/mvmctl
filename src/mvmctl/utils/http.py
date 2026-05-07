@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import tempfile
 import time
 from collections.abc import Callable
@@ -427,6 +428,27 @@ class HttpDownload:
                 temp_path.unlink(missing_ok=True)
 
     @staticmethod
+    def _resolve_mirror_path(url: str) -> Path | None:
+        """
+        Check if the URL's file exists in the local asset mirror directory.
+
+        Reads the ``MVM_ASSET_MIRROR`` environment variable to locate the
+        mirror directory.  The filename is extracted from the last URL path
+        segment, stripping any query-string parameters.
+
+        Returns:
+            The full ``Path`` to the mirrored file if it exists, or ``None``
+            if the env var is unset or the file is not present in the mirror.
+        """
+        mirror_dir = os.environ.get("MVM_ASSET_MIRROR")
+        if not mirror_dir:
+            return None
+        # Extract filename from URL (last segment after '/', strip query params)
+        filename = url.rsplit("/", 1)[-1].split("?", 1)[0]
+        mirror_path = Path(mirror_dir) / filename
+        return mirror_path if mirror_path.is_file() else None
+
+    @staticmethod
     def download_file(
         url: str,
         dest: Path,
@@ -463,6 +485,31 @@ class HttpDownload:
 
         """
         dest.parent.mkdir(parents=True, exist_ok=True)
+
+        # --- Local asset mirror check ---
+        mirror_path = HttpDownload._resolve_mirror_path(url)
+        if mirror_path is not None:
+            shutil.copy2(mirror_path, dest)
+            logger.info("Using local mirror for %s", url)
+            if expected_sha256 is not None:
+                # Verify SHA256 of the mirrored file
+                actual_hash = hashlib.sha256()
+                with dest.open("rb") as f:
+                    while True:
+                        chunk = f.read(CONST_DOWNLOAD_CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        actual_hash.update(chunk)
+                if actual_hash.hexdigest().lower() == expected_sha256.lower():
+                    return True
+                logger.warning(
+                    "Mirror checksum mismatch for %s, falling back to HTTP download",
+                    url,
+                )
+                dest.unlink(missing_ok=True)
+                # Fall through to HTTP download below
+            else:
+                return True
 
         if expected_sha256 is None:
             if silent_missing_checksum:
@@ -529,5 +576,23 @@ class HttpDownload:
                     f"Checksum mismatch! Expected {expected_sha256}, got {actual_sha256}"
                 )
             logger.info("Checksum verified")
+
+        # ── Auto-populate the local asset mirror ──────────────────────────
+        # After a successful download, copy the file into the mirror
+        # directory (MVM_ASSET_MIRROR) so subsequent runs use a fast local
+        # copy instead of re-downloading from the internet.
+        mirror_dir = os.environ.get("MVM_ASSET_MIRROR")
+        if mirror_dir:
+            filename = url.rsplit("/", 1)[-1].split("?", 1)[0]
+            mirror_path = Path(mirror_dir) / filename
+            if not mirror_path.exists():
+                mirror_path.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    shutil.copy2(dest, mirror_path)
+                    logger.info("Copied to asset mirror: %s", mirror_path)
+                except OSError:
+                    logger.warning(
+                        "Failed to copy to asset mirror: %s", mirror_path
+                    )
 
         return True

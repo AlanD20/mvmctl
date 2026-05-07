@@ -14,6 +14,7 @@ pytestmark = [
     pytest.mark.requires_network,
     pytest.mark.slow,
     pytest.mark.serial,
+    pytest.mark.domain_vm,
 ]
 
 
@@ -248,7 +249,6 @@ class TestNetworkLifecycle:
                 mvm_binary, "network", "rm", unique_network_name, check=False
             )
 
-    @pytest.mark.serial
     def test_network_set_default(self, mvm_binary, created_network):
         """Set a network as the default."""
         result = _run_mvm(
@@ -330,6 +330,8 @@ class TestNetworkAdvancedCreate:
         pytest.mark.system,
         pytest.mark.requires_network,
         pytest.mark.slow,
+        pytest.mark.serial,
+        pytest.mark.domain_vm,
     ]
 
     def test_network_create_with_ipv4_gateway(
@@ -430,7 +432,12 @@ class TestNetworkAdvancedCreate:
 class TestNetworkInspectTree:
     """Test network inspect with --tree flag."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.requires_network]
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_network,
+        pytest.mark.serial,
+        pytest.mark.domain_vm,
+    ]
 
     def test_network_inspect_tree(self, mvm_binary, created_network):
         """Inspect a network with --tree and verify tree characters in output."""
@@ -448,7 +455,12 @@ class TestNetworkInspectTree:
 class TestNetworkRemoveForce:
     """Test network removal with --force flag."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.requires_network]
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_network,
+        pytest.mark.serial,
+        pytest.mark.domain_vm,
+    ]
 
     def test_network_rm_with_force(self, mvm_binary, unique_network_name):
         """Create a network and remove it with --force, verify cleanup."""

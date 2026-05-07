@@ -74,6 +74,8 @@ class SSHService:
             "StrictHostKeyChecking=no",
             "-o",
             "UserKnownHostsFile=/dev/null",
+            "-o",
+            "BatchMode=yes",
         ]
 
         if self._timeout is not None:

@@ -9,7 +9,12 @@ import pytest
 
 from tests.system.conftest import _run_mvm, _unique_subnet, wait_for_ssh
 
-pytestmark = [pytest.mark.system, pytest.mark.requires_kvm, pytest.mark.slow, pytest.mark.serial]
+pytestmark = [
+    pytest.mark.system,
+    pytest.mark.requires_kvm,
+    pytest.mark.slow,
+    pytest.mark.domain_vm,
+]
 
 
 class TestVMCreatePerImage:
@@ -46,7 +51,7 @@ class TestVMStateOperationsShared:
     in sequence. Tests assume VM is RUNNING at start.
     """
 
-    pytestmark = pytest.mark.shared_vm
+    pytestmark = [pytest.mark.shared_vm, pytest.mark.serial]
 
     def test_vm_pause_resume_chain(self, mvm_binary, lifecycle_vm):
         """Pause then resume VM. Leaves VM in RUNNING state."""

@@ -43,6 +43,8 @@ class TestSSHServiceBuildCommand:
             "StrictHostKeyChecking=no",
             "-o",
             "UserKnownHostsFile=/dev/null",
+            "-o",
+            "BatchMode=yes",
             "root@10.20.0.2",
         ]
 

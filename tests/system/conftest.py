@@ -106,9 +106,7 @@ def timing_targets() -> dict[str, float]:
     }
 
 
-def _pull_missing_asset(
-    binary: str, args: list[str], desc: str
-) -> None:
+def _pull_missing_asset(binary: str, args: list[str], desc: str) -> None:
     """Pull a missing asset via the mvm CLI."""
     _print_prep(f"Pulling {desc}...")
     result = subprocess.run(
@@ -119,9 +117,35 @@ def _pull_missing_asset(
         env={**os.environ, "NO_COLOR": "1"},
     )
     if result.returncode != 0:
-        pytest.skip(
-            f"Failed to pull {desc}: {result.stderr or result.stdout}"
-        )
+        pytest.skip(f"Failed to pull {desc}: {result.stderr or result.stdout}")
+
+
+def _cleanup_stale_processes() -> None:
+    """Kill any leftover Firecracker or jailer processes from prior runs.
+
+    Stale processes hold binary files open (mmap), which makes
+    ``bin pull --force`` fail with "Text file busy".
+    Uses ``pgrep`` + direct ``kill`` to avoid ``pkill -f`` hanging
+    (the pattern can match the calling shell's own command line).
+    """
+    for name in ("firecracker", "jailer"):
+        try:
+            out = subprocess.run(
+                ["pgrep", name],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if out.returncode != 0 or not out.stdout.strip():
+                continue
+            pids = out.stdout.strip().splitlines()
+            subprocess.run(
+                ["kill", "-9", *pids],
+                capture_output=True,
+                timeout=5,
+            )
+        except FileNotFoundError:
+            pass  # pgrep or kill not available
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -133,6 +157,9 @@ def prepare_system_env(mvm_binary, check_system_prerequisites) -> None:
     # running in parallel (avoids race conditions).
     if os.environ.get("PYTEST_XDIST_WORKER"):
         return
+
+    # Clean up any stale Firecracker processes from prior runs
+    _cleanup_stale_processes()
 
     _print_prep("Verifying system test assets...")
 
@@ -162,25 +189,33 @@ def prepare_system_env(mvm_binary, check_system_prerequisites) -> None:
                 first_id = present[0]["id"][:6]
                 subprocess.run(
                     [*shlex.split(binary), "kernel", "set-default", first_id],
-                    capture_output=True, text=True, timeout=30,
-                    env={**os.environ, "NO_COLOR": "1"}, check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    env={**os.environ, "NO_COLOR": "1"},
+                    check=True,
                 )
                 kernels_have_default = True
     if not kernels_have_default:
         _pull_missing_asset(
-            binary, ["kernel", "pull", "--type", "firecracker", "--set-default"],
+            binary,
+            ["kernel", "pull", "--type", "firecracker", "--set-default"],
             "firecracker kernel",
         )
 
     # ── 3. Verify / auto-pull images ─────────────────────────────────
     result = subprocess.run(
         [*shlex.split(binary), "image", "ls", "--json"],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
         env={**os.environ, "NO_COLOR": "1"},
     )
     cached_images: list[str] = []
     if result.returncode == 0:
-        cached_images = [i.get("os_slug", "") for i in json.loads(result.stdout)]
+        cached_images = [
+            i.get("os_slug", "") for i in json.loads(result.stdout)
+        ]
 
     required_images = ["alpine-3.21", "ubuntu-24.04-minimal", "ubuntu-24.04"]
     for img in required_images:
@@ -192,12 +227,15 @@ def prepare_system_env(mvm_binary, check_system_prerequisites) -> None:
     # ── 4. Verify / auto-pull binary ─────────────────────────────────
     result = subprocess.run(
         [*shlex.split(binary), "bin", "ls", "--json"],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
         env={**os.environ, "NO_COLOR": "1"},
     )
     if result.returncode != 0 or not json.loads(result.stdout):
         _pull_missing_asset(
-            binary, ["bin", "pull", "1.15.1", "--set-default"],
+            binary,
+            ["bin", "pull", "1.15.1", "--set-default"],
             "firecracker binary",
         )
 
@@ -328,7 +366,7 @@ def created_network(
     mvm_binary, unique_network_name
 ) -> Generator[str, None, None]:
     """Create a network and guarantee cleanup.
-    
+
     Restores the default network after removal if the test changed the default.
     """
     subnet = _unique_subnet(unique_network_name)
@@ -348,14 +386,18 @@ def created_network(
         _run_mvm(mvm_binary, "network", "rm", unique_network_name, check=False)
         # If no network is the default, restore the first present one
         import json as _json
+
         result = _run_mvm(mvm_binary, "network", "ls", "--json", check=False)
         if result.returncode == 0:
             nets = _json.loads(result.stdout)
             has_default = any(n.get("is_default") for n in nets)
             if not has_default and nets:
                 _run_mvm(
-                    mvm_binary, "network", "set-default", nets[0]["name"],
-                    check=False
+                    mvm_binary,
+                    "network",
+                    "set-default",
+                    nets[0]["name"],
+                    check=False,
                 )
 
 

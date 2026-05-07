@@ -6,7 +6,7 @@ import pytest
 
 from tests.system.conftest import _run_mvm
 
-pytestmark = [pytest.mark.system, pytest.mark.serial]
+pytestmark = [pytest.mark.system, pytest.mark.domain_config]
 
 
 class TestConfigLifecycle:
@@ -20,7 +20,6 @@ class TestConfigLifecycle:
         assert result.returncode == 0
         assert "vcpu_count" in result.stdout
 
-    @pytest.mark.serial
     def test_config_set_and_get(self, mvm_binary):
         """Set a config value and read it back."""
         result = _run_mvm(
@@ -37,7 +36,6 @@ class TestConfigLifecycle:
         # Cleanup: reset back to default
         _run_mvm(mvm_binary, "config", "reset", "defaults.vm", "vcpu_count")
 
-    @pytest.mark.serial
     def test_config_reset(self, mvm_binary):
         """Reset a config value to its default."""
         _run_mvm(mvm_binary, "config", "set", "defaults.vm", "vcpu_count", "4")
@@ -60,7 +58,6 @@ class TestConfigLifecycle:
         assert result.stdout.strip()
         assert "[defaults.vm]" in result.stdout
 
-    @pytest.mark.serial
     def test_config_reset_all(self, mvm_binary):
         """Reset all config overrides globally."""
         # First set a value so there is something to reset

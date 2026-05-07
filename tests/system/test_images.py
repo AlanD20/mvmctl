@@ -9,12 +9,17 @@ import pytest
 
 from tests.system.conftest import _run_mvm
 
-pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
+pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.domain_image]
 
 
 class TestImagePull:
-    pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
     """Test image pulling operations."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.slow,
+        pytest.mark.domain_image,
+    ]
 
     @pytest.mark.parametrize(
         "image_id",
@@ -23,7 +28,6 @@ class TestImagePull:
             "ubuntu-24.04-minimal",
         ],
     )
-    @pytest.mark.serial
     def test_image_pull(self, mvm_binary, image_id):
         """Pull each supported image.
 
@@ -89,7 +93,6 @@ class TestImageList:
 class TestImageDefaults:
     """Test image default operations."""
 
-    @pytest.mark.serial
     def test_image_set_default(self, mvm_binary):
         """Set image as default."""
 
@@ -117,7 +120,6 @@ class TestImageDefaults:
             )
         assert "default" in result.stdout.lower()
 
-    @pytest.mark.serial
     def test_image_warm(self, mvm_binary):
         """Pre-decompress image to ready pool for fast VM creation."""
 
@@ -136,78 +138,14 @@ class TestImageDefaults:
         )
 
 
-class TestImageRemove:
-    """Test image removal operations."""
-
-    pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
-
-    def test_image_remove_with_fixture(self, mvm_binary):
-        """Remove a cached image by ID prefix and verify it's gone."""
-
-        result = _run_mvm(mvm_binary, "image", "ls", "--json")
-        before = json.loads(result.stdout)
-        alpine_images = [
-            i
-            for i in before
-            if "alpine" in i.get("os_slug", "").lower() and i.get("is_present")
-        ]
-        if not alpine_images:
-            pytest.skip("No present alpine image available to test removal")
-
-        was_default = alpine_images[0].get("is_default", False)
-        target_id = alpine_images[0]["id"]
-        target_prefix = target_id[:6]
-
-        try:
-            # Remove the image
-            result = _run_mvm(
-                mvm_binary,
-                "image",
-                "rm",
-                target_prefix,
-                check=False,
-            )
-            assert result.returncode == 0
-
-            # Verify gone (filter by is_present to account for soft-delete)
-            result = _run_mvm(mvm_binary, "image", "ls", "--json")
-            after = [
-                i
-                for i in json.loads(result.stdout)
-                if i.get("is_present", True)
-            ]
-            assert not any(i["id"] == target_id for i in after)
-        finally:
-            # Re-pull so other tests aren't broken — always runs even if assert fails.
-            # Restore default flag if the removed image was the default.
-            try:
-                pull_args = ["image", "pull", "alpine-3.21"]
-                if was_default:
-                    pull_args.append("--set-default")
-                repull = _run_mvm(
-                    mvm_binary, *pull_args, check=False
-                )
-                if repull.returncode != 0:
-                    pytest.skip(f"Re-pull failed after test: {repull.stderr}")
-            except subprocess.TimeoutExpired:
-                pytest.skip("Re-pull timed out (>60s download)")
-
-    def test_image_pull_nonexistent(self, mvm_binary):
-        """Pull a nonexistent image and expect failure."""
-        result = _run_mvm(
-            mvm_binary,
-            "image",
-            "pull",
-            "completely-nonexistent-image-12345",
-            check=False,
-        )
-        assert result.returncode != 0
-
-
 class TestImageImport:
     """Test image import operations."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.slow,
+        pytest.mark.domain_image,
+    ]
 
     def test_image_import_local_file(
         self, mvm_binary, tmp_path, system_cache_dir
@@ -314,7 +252,7 @@ class TestImageImport:
 class TestImageInspectTree:
     """Test image inspect tree output."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.serial]
+    pytestmark = [pytest.mark.system, pytest.mark.domain_image]
 
     def test_image_inspect_tree_output(self, mvm_binary):
         """Inspect an image with --tree output."""
@@ -336,7 +274,11 @@ class TestImageInspectTree:
 class TestImagePullAdvanced:
     """Test advanced image pull operations."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.slow,
+        pytest.mark.domain_image,
+    ]
 
     def test_image_pull_force(self, mvm_binary):
         """Pull an already-cached image with --force, should re-download."""
@@ -370,7 +312,6 @@ class TestImagePullAdvanced:
         except subprocess.TimeoutExpired:
             pytest.skip("Force pull timed out (>60s download)")
 
-    @pytest.mark.serial
     def test_image_pull_set_default(self, mvm_binary):
         """Pull an image and set it as default in one command."""
         # Pull previous default info so we can restore later if needed
@@ -411,7 +352,11 @@ class TestImagePullAdvanced:
 class TestImageImportAdvanced:
     """Test advanced image import operations."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.slow,
+        pytest.mark.domain_image,
+    ]
 
     def test_image_import_with_format_qcow2(
         self, mvm_binary, tmp_path, system_cache_dir
@@ -530,76 +475,15 @@ class TestImageImportAdvanced:
                 )
 
 
-class TestImageRemoveForce:
-    """Test image removal with --force flag."""
-
-    pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
-
-    @pytest.mark.serial
-    def test_image_rm_with_force(self, mvm_binary):
-        """Remove a cached image by ID prefix with --force and verify it's gone."""
-
-        # Ensure alpine is pulled
-        try:
-            _run_mvm(mvm_binary, "image", "pull", "alpine-3.21", check=False)
-        except subprocess.TimeoutExpired:
-            pytest.skip("Initial image pull timed out (>60s download)")
-
-        # Get alpine image ID
-        result = _run_mvm(mvm_binary, "image", "ls", "--json")
-        if result.returncode != 0:
-            pytest.skip("Failed to list images")
-        images = json.loads(result.stdout)
-        alpine_images = [
-            i
-            for i in images
-            if "alpine" in i.get("os_slug", "").lower() and i.get("is_present")
-        ]
-        if not alpine_images:
-            pytest.skip("No present alpine image available to test removal")
-
-        was_default = alpine_images[0].get("is_default", False)
-        target_id = alpine_images[0]["id"]
-
-        # Remove with --force
-        result = _run_mvm(
-            mvm_binary,
-            "image",
-            "rm",
-            target_id[:6],
-            "--force",
-            check=False,
-        )
-        assert result.returncode == 0, f"Force remove failed: {result.stderr}"
-
-        # Verify it's gone (filter by is_present to account for soft-delete)
-        result = _run_mvm(mvm_binary, "image", "ls", "--json")
-        after = [
-            i for i in json.loads(result.stdout) if i.get("is_present", True)
-        ]
-        assert not any(i["id"] == target_id for i in after)
-
-        # Re-pull to restore the image. Restore default flag if the removed
-        # image was the default.
-        try:
-            pull_args = ["image", "pull", "alpine-3.21"]
-            if was_default:
-                pull_args.append("--set-default")
-            repull = _run_mvm(
-                mvm_binary, *pull_args, check=False
-            )
-            if repull.returncode != 0:
-                pytest.skip(f"Re-pull failed: {repull.stderr}")
-        except subprocess.TimeoutExpired:
-            pytest.skip("Re-pull timed out (>60s download)")
-
-
 class TestImagePullSkipOptimization:
     """Test image pull with --skip-optimization flag."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.slow,
+        pytest.mark.domain_image,
+    ]
 
-    @pytest.mark.serial
     def test_image_pull_with_skip_optimization(self, mvm_binary):
         """Pull an image with --skip-optimization flag."""
         try:
@@ -619,15 +503,17 @@ class TestImagePullSkipOptimization:
                 )
             assert "pulled successfully" in result.stdout.lower()
         except subprocess.TimeoutExpired:
-            pytest.skip(
-                "skip-optimization pull timed out (>60s download)"
-            )
+            pytest.skip("skip-optimization pull timed out (>60s download)")
 
 
 class TestImageImportSetDefault:
     """Test image import with --set-default flag."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.slow,
+        pytest.mark.domain_image,
+    ]
 
     def test_image_import_with_set_default(
         self, mvm_binary, tmp_path, system_cache_dir
@@ -711,7 +597,11 @@ class TestImageImportSetDefault:
 class TestImageImportArch:
     """Test image import with --arch flag."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.slow,
+        pytest.mark.domain_image,
+    ]
 
     def test_image_import_with_arch(
         self, mvm_binary, tmp_path, system_cache_dir
@@ -767,3 +657,138 @@ class TestImageImportArch:
                     imported_prefix,
                     check=False,
                 )
+
+
+class TestImageRemoveForce:
+    """Test image removal with --force flag."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.slow,
+        pytest.mark.domain_image,
+    ]
+
+    def test_image_rm_with_force(self, mvm_binary):
+        """Remove a cached image by ID prefix with --force and verify it's gone."""
+
+        # Ensure alpine is pulled
+        try:
+            _run_mvm(mvm_binary, "image", "pull", "alpine-3.21", check=False)
+        except subprocess.TimeoutExpired:
+            pytest.skip("Initial image pull timed out (>60s download)")
+
+        # Get alpine image ID
+        result = _run_mvm(mvm_binary, "image", "ls", "--json")
+        if result.returncode != 0:
+            pytest.skip("Failed to list images")
+        images = json.loads(result.stdout)
+        alpine_images = [
+            i
+            for i in images
+            if "alpine" in i.get("os_slug", "").lower() and i.get("is_present")
+        ]
+        if not alpine_images:
+            pytest.skip("No present alpine image available to test removal")
+
+        was_default = alpine_images[0].get("is_default", False)
+        target_id = alpine_images[0]["id"]
+
+        # Remove with --force
+        result = _run_mvm(
+            mvm_binary,
+            "image",
+            "rm",
+            target_id[:6],
+            "--force",
+            check=False,
+        )
+        assert result.returncode == 0, f"Force remove failed: {result.stderr}"
+
+        # Verify it's gone (filter by is_present to account for soft-delete)
+        result = _run_mvm(mvm_binary, "image", "ls", "--json")
+        after = [
+            i for i in json.loads(result.stdout) if i.get("is_present", True)
+        ]
+        assert not any(i["id"] == target_id for i in after)
+
+        # Re-pull to restore the image. Restore default flag if the removed
+        # image was the default.
+        try:
+            pull_args = ["image", "pull", "alpine-3.21"]
+            if was_default:
+                pull_args.append("--set-default")
+            repull = _run_mvm(mvm_binary, *pull_args, check=False)
+            if repull.returncode != 0:
+                pytest.skip(f"Re-pull failed: {repull.stderr}")
+        except subprocess.TimeoutExpired:
+            pytest.skip("Re-pull timed out (>60s download)")
+
+
+class TestImageRemove:
+    """Test image removal operations."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.slow,
+        pytest.mark.domain_image,
+    ]
+
+    def test_image_remove_with_fixture(self, mvm_binary):
+        """Remove a cached image by ID prefix and verify it's gone."""
+
+        result = _run_mvm(mvm_binary, "image", "ls", "--json")
+        before = json.loads(result.stdout)
+        alpine_images = [
+            i
+            for i in before
+            if "alpine" in i.get("os_slug", "").lower() and i.get("is_present")
+        ]
+        if not alpine_images:
+            pytest.skip("No present alpine image available to test removal")
+
+        was_default = alpine_images[0].get("is_default", False)
+        target_id = alpine_images[0]["id"]
+        target_prefix = target_id[:6]
+
+        try:
+            # Remove the image
+            result = _run_mvm(
+                mvm_binary,
+                "image",
+                "rm",
+                target_prefix,
+                check=False,
+            )
+            assert result.returncode == 0
+
+            # Verify gone (filter by is_present to account for soft-delete)
+            result = _run_mvm(mvm_binary, "image", "ls", "--json")
+            after = [
+                i
+                for i in json.loads(result.stdout)
+                if i.get("is_present", True)
+            ]
+            assert not any(i["id"] == target_id for i in after)
+        finally:
+            # Re-pull so other tests aren't broken — always runs even if assert fails.
+            # Restore default flag if the removed image was the default.
+            try:
+                pull_args = ["image", "pull", "alpine-3.21"]
+                if was_default:
+                    pull_args.append("--set-default")
+                repull = _run_mvm(mvm_binary, *pull_args, check=False)
+                if repull.returncode != 0:
+                    pytest.skip(f"Re-pull failed after test: {repull.stderr}")
+            except subprocess.TimeoutExpired:
+                pytest.skip("Re-pull timed out (>60s download)")
+
+    def test_image_pull_nonexistent(self, mvm_binary):
+        """Pull a nonexistent image and expect failure."""
+        result = _run_mvm(
+            mvm_binary,
+            "image",
+            "pull",
+            "completely-nonexistent-image-12345",
+            check=False,
+        )
+        assert result.returncode != 0

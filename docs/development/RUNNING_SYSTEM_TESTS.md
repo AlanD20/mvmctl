@@ -20,38 +20,69 @@ uv run mvm init --non-interactive
 # Or manually: sudo mvm host init && uv run mvm bin pull
 ```
 
+### Local asset mirror (speed up repeated runs)
+
+System tests download large files (kernel vmlinux, Ubuntu images, Firecracker
+binaries) from the internet. A local asset mirror makes repeated test runs
+**dramatically faster** by copying cached files instead of re-downloading.
+
+The mirror is at `~/.cache/mvm-asset-mirror/` — deliberately **outside**
+`~/.cache/mvmctl/` so that `cache clean --force` does not wipe it.
+
+#### How it works
+
+`HttpDownload.download_file()` in `utils/http.py` checks the `MVM_ASSET_MIRROR`
+environment variable before making an HTTP request. If the file exists in the
+mirror directory (matched by URL basename), it copies it locally and verifies
+the SHA256 checksum. After a successful HTTP download, the file is automatically
+copied **into** the mirror for future use.
+
+This is completely transparent — no changes anywhere in `core/` or `api/`.
+
+#### Seeding the mirror
+
+```bash
+# One-time: download everything and cache in the mirror
+task sys-setup-seed
+
+# Or manually:
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm kernel pull --type firecracker --set-default
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm image pull alpine-3.21
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm image pull ubuntu-24.04-minimal
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm bin pull 1.15.1 --set-default
+```
+
+The first run downloads from the internet (slow). Subsequent runs copy from
+the mirror (fast):
+
+| Asset | First run (HTTP) | Subsequent (mirror) |
+|-------|-----------------|-------------------|
+| Firecracker kernel (43 MB) | ~30-60s | **< 1s** |
+| Alpine image (203 MB) | ~2-5 min | **~1.5s** |
+| Ubuntu 24.04 (220 MB) | ~5-10 min | **~1s download + ~40s processing** |
+| Firecracker binary (7.3 MB) | ~10-20s | **< 1s** |
+
+> **Note:** Image "processing" (extracting tar.xz, converting to ext4, shrinking,
+> compressing with zstd) is unavoidable and adds 15-40s per image even with the
+> mirror. Only the network download is eliminated.
+
+The `sys-test` and `sys-test-fast` tasks automatically set `MVM_ASSET_MIRROR`,
+so the mirror is used whenever it has been seeded.
+
 ### Auto-fetch on test run
 
-The `prepare_system_env` fixture (session-scoped, autouse) automatically fetches
-any missing assets when you run the tests **serially**:
+The `prepare_system_env` fixture (session-scoped, autouse) automatically
+**pulls any missing assets** when you run the tests **serially**:
 
-- **Official kernel** — fetched if not cached
-- **Alpine 3.21 image** — fetched if not cached
-- **Ubuntu 24.04 minimal image** — fetched if not cached
-- **Firecracker binary** — latest version fetched if none cached
+- **Firecracker kernel** — fetched if not cached
+- **Alpine 3.21** — fetched if not cached
+- **Ubuntu 24.04** — fetched if not cached
+- **Ubuntu 24.04 minimal** — fetched if not cached
+- **Firecracker binary** — fetched if none cached
 
 This means you only need steps 1–3 above. Asset fetches are handled
-automatically on the first serial run. Progress messages are printed to stderr:
-
-```
-[prepare] Checking system environment...
-[prepare] No kernel cached. Fetching official kernel...
-[prepare] Image 'ubuntu-24.04-minimal' not cached. Fetching (this may take a while)...
-[prepare] System environment ready.
-```
-
-> **Note:** Asset fetches download over the network and may take several minutes
-> on the first run. Subsequent runs are fast (cache-hit).
->
-> **Parallel runs (`-n auto`) skip auto-fetch** to avoid race conditions where
-> multiple workers download the same asset simultaneously. Pre-fetch assets
-> manually before running in parallel:
-> ```bash
-> uv run mvm kernel pull --type official --set-default
-> uv run mvm image pull alpine-3.21
-> uv run mvm image pull ubuntu-24.04-minimal
-> uv run mvm bin pull <version> --set-default
-> ```
+automatically. If `MVM_ASSET_MIRROR` is set (it is when using `task sys-test`),
+fetches copy from the local mirror instead of downloading from the internet.
 
 ## Run
 
@@ -67,14 +98,20 @@ automatically on the first serial run. Progress messages are printed to stderr:
 | Full Journeys | `pytest tests/system/test_full_journeys.py -v` | Create+SSH, network→VM, network→VM+explicit IP, key→VM, full state chain, explicit IP, 2 VMs same net, reboot chain, SSH CLI cmd, multiple SSH keys, ping, export/import, concurrent creation (13 tests) |
 
 ```bash
-# All system tests (serial — safest, auto-fetches missing assets)
-pytest tests/system/ -v
+# All system tests (recommended — uses asset mirror, serial, cache last)
+task sys-test
 
-# All system tests (parallel — requires pre-fetched assets)
-pytest tests/system/ -v -n auto
+# Fast subset (no KVM, no slow downloads, uses asset mirror)
+task sys-test-fast
 
-# Fast subset (no slow tests, no KVM-required tests)
-pytest tests/system/ -v -m "system and not slow and not requires_kvm"
+# Seed the asset mirror (one-time, then fast copies thereafter)
+task sys-setup-seed
+```
+
+To run individual test files manually with the mirror:
+
+```bash
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run pytest tests/system/test_config.py -v
 ```
 
 ## What is NOT tested (known gaps)
