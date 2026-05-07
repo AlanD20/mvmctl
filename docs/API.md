@@ -92,7 +92,7 @@ from mvmctl.api.vm_operations import VMOperation  # ❌ WRONG — internal modul
 |---|---|
 | `VMOperation` | VM lifecycle: create, remove, import, export, list, inspect, get, start/stop, pause/resume, reboot, snapshot, load snapshot |
 | `NetworkOperation` | Network management: create, remove, list, get, inspect, set default, restore, sync, create default |
-| `ImageOperation` | Image operations: fetch, import, list, get, set default, remove, inspect, warm |
+| `ImageOperation` | Image operations: pull, import, list, get, set default, remove, inspect, warm |
 | `KernelOperation` | Kernel operations: fetch, list, get, inspect, set default, remove |
 | `KeyOperation` | SSH key registry: add, create, list, get, remove, inspect, set defaults, get defaults, clear defaults, export |
 | `BinaryOperation` | Binary management: fetch, get, list local/remote, set default, remove (by id/version), ensure default |
@@ -167,6 +167,8 @@ Runtime state for a registered VM.
 | `serial_output_path` | `str \| None` | Serial console output path |
 | `lsm_flags` | `str \| None` | Linux Security Module flags |
 | `boot_args` | `str \| None` | Kernel boot arguments |
+| `ssh_keys` | `list[str]` | SSH key names injected into the guest |
+| `ssh_user` | `str \| None` | SSH username for this VM |
 
 **Resolved relations** (populated on request):
 
@@ -480,6 +482,7 @@ All exceptions derive from `mvmctl.exceptions.MVMError`.
 
 ```
 MVMError
+├── MVMRuntimeError           — Runtime assertion failure — invariant violated in production
 ├── VMNotFoundError           — VM does not exist in state
 ├── BinaryNotFoundError       — Binary does not exist in registry
 ├── KernelNotFoundError       — Kernel does not exist in registry
@@ -507,6 +510,7 @@ MVMError
 ├── HostError                 — Host configuration or prerequisite failure
 │   └── PrivilegeError        — Insufficient privileges for an operation
 ├── ConsoleError              — Console or PTY operation failure
+├── LogsError                 — Log file read or tail operation failure
 ├── ProcessError              — Subprocess execution failure
 ├── AssetNotFoundError        — Asset not found locally or remotely
 ├── BundledAssetError         — Bundled asset access failure
@@ -526,12 +530,18 @@ MVMError
 │   ├── CloudInitNetModeError     — Nocloud-net server or iptables rule failure
 │   └── CloudInitInjectModeError  — Rootfs cloud-init injection failure
 ├── VMCreateError             — VM creation failure (partial cleanup)
+├── VMStateError              — VM state transition is invalid
 ├── VMRequestError            — Error during VM request resolution
 ├── VMBuilderError            — VM builder failure (partial cleanup)
-├── GuestfsNotAvailableError  — libguestfs bindings not available
-├── GuestfsLaunchError        — Guestfs appliance failed to launch
-├── GuestfsMountError         — Unable to mount rootfs in guestfs
-├── GuestfsWriteError         — Failed to write files to guestfs
+├── GuestfsError              — Base exception for libguestfs-related errors
+│   ├── GuestfsNotAvailableError  — libguestfs bindings not available
+│   ├── GuestfsWriteError         — Failed to write files to guestfs
+│   ├── GuestfsApplianceError     — libguestfs fixed appliance build failure
+│   ├── GuestfsLaunchError        — Guestfs appliance failed to launch
+│   └── GuestfsMountError         — Unable to mount rootfs in guestfs
+├── LoopMountError            — Base loop-mount provisioning error
+│   ├── LoopMountBinaryNotFoundError  — Binary not found at configured path
+│   └── LoopMountTimeoutError        — Loop-mount binary did not complete within timeout
 ├── RootPartitionDetectionError
 ├── TieDetectedError
 ├── DownloadError             — Download operation failure
@@ -552,6 +562,18 @@ except NetworkError as e:
     print(f"Network setup failed: {e}")
 except MVMError as e:
     print(f"Unexpected MVM error: {e}")
+```
+
+In debug mode, use `format_exception_debug(exc, debug)` from `mvmctl.exceptions` to
+format exceptions with full traceback information:
+
+```python
+from mvmctl.exceptions import MVMError, format_exception_debug
+
+try:
+    result = NetworkOperation.create(...)
+except MVMError as e:
+    print(format_exception_debug(e, debug=True))  # Shows traceback
 ```
 
 ---
@@ -648,6 +670,18 @@ Return all registered VMs, optionally filtered by status.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `status` | `VMStatus \| list[VMStatus] \| None` | `None` | Filter by status(es); `None` returns all |
+
+---
+
+#### `VMOperation.to_json(vms: list[VMInstanceItem]) -> list[dict[str, Any]]`
+
+Convert enriched VM model list to JSON-serializable dicts. Relies on `list_all()` having already populated `vm.network`.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `vms` | `list[VMInstanceItem]` | — | VM records (must have network enriched via list_all) |
+
+**Returns:** List of VM dicts suitable for JSON serialization.
 
 ---
 
@@ -840,7 +874,7 @@ Restore all networks from DB after reboot (re-create bridges and NAT rules).
 
 ---
 
-#### `NetworkOperation.sync(network_id: str | None = None) -> dict[str, dict[str, int]]`
+#### `NetworkOperation.sync(network_id: str | None = None) -> OperationResult[dict[str, dict[str, int]]]`
 
 Sync networks: first reconciles bridge state (DB vs kernel), then ensures all
 active DB iptables rules exist in host iptables and detects orphaned host rules.
@@ -849,7 +883,7 @@ active DB iptables rules exist in host iptables and detects orphaned host rules.
 |-----------|------|---------|-------------|
 | `network_id` | `str \| None` | `None` | Specific network ID, or `None` for all networks |
 
-**Returns:** Dict mapping `network_id` → `{"added": int, "verified": int, "orphaned": int}`.
+**Returns:** `OperationResult` wrapping a dict mapping `network_id` → `{"added": int, "verified": int, "orphaned": int}`.
 Metadata includes `network_count` and `bridges_reconciled`.
 
 ---
@@ -858,7 +892,7 @@ Metadata includes `network_count` and `bridges_reconciled`.
 
 All methods are `@staticmethod`. Images are identified using `ImageInput` objects.
 
-#### `ImageOperation.fetch(inputs: ImagePullInput, phase_callback: Callable[[str], None] | None = None) -> OperationResult[ImageItem] | NeedsInteraction`
+#### `ImageOperation.pull(inputs: ImagePullInput, *, on_progress: Callable[[ProgressEvent], None] | None = None) -> OperationResult[ImageItem] | NeedsInteraction`
 
 Download and convert a VM rootfs image (qcow2, tar, or raw) to an ext4 file, then
 register it in the database.
@@ -874,9 +908,9 @@ register it in the database.
 | `inputs.partition` | `int \| None` | `None` | Partition number to extract |
 | `inputs.skip_optimization` | `bool` | `False` | Skip filesystem optimization |
 | `inputs.disabled_detectors` | `list[str]` | `[]` | Disabled partition detectors |
-| `phase_callback` | `Callable \| None` | `None` | Callback for phase updates |
+| `on_progress` | `Callable \| None` | `None` | Callback for progress events |
 
-**Returns:** `ImageAcquireResult` with the created `ImageItem`.
+**Returns:** `OperationResult[ImageItem]` wrapping the created `ImageItem`, or `NeedsInteraction` if sudo is required.
 
 ---
 
@@ -1298,6 +1332,7 @@ Open an interactive SSH session into a VM, or execute a command.
 | `inputs.user` | `str \| None` | `None` | SSH user |
 | `inputs.key` | `Path \| None` | `None` | Path to private key |
 | `inputs.cmd` | `str \| None` | `None` | Command to execute |
+| `inputs.timeout` | `int \| None` | `None` | SSH connection timeout in seconds |
 | `inputs.ip` | `str \| None` | `None` | Direct IP address |
 | `inputs.name` | `str \| None` | `None` | VM name |
 | `inputs.mac` | `str \| None` | `None` | VM MAC address |
@@ -1507,7 +1542,7 @@ def main() -> None:
     # or use KernelOperation.fetch() directly for custom kernels
 
     # 5. Ensure an image is available (via CLI: mvm image pull)
-    # or use ImageOperation.fetch() directly
+    # or use ImageOperation.pull() directly
 
     # 6. Create or register an SSH key
     key = KeyOperation.create(

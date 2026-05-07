@@ -258,6 +258,8 @@ Cache management.
 | `--dry-run` | Show what would be removed without actually removing |
 | `--force, -f` | Skip confirmation |
 
+> **Note:** Each per-resource prune subcommand (`vm`, `network`, `image`, `kernel`, `binary`, `misc`) prompts for confirmation unless `--force` is passed.
+
 **`cache clean` flags:**
 
 | Flag | Description |
@@ -304,6 +306,7 @@ VM SSH access.
 | `--user, -u USER` | SSH user |
 | `--key PATH` | SSH private key file or directory of keys |
 | `--cmd, -c CMD` | Command to execute |
+| `--timeout, -t SECONDS` | SSH connection timeout in seconds |
 | `--ip IP` | IP address to connect to (skips validation) |
 | `--mac MAC` | VM MAC address |
 | `--name, -n NAME` | VM name |
@@ -312,13 +315,11 @@ VM SSH access.
 
 ## Configuration
 
-`mvm` stores runtime configuration at `~/.config/mvmctl/config.json` (overridable with `MVM_CONFIG_DIR`) and asset/default state in `~/.cache/mvmctl/metadata.json` (overridable with `MVM_CACHE_DIR`).
-
 ### Configuration Priority (lowest → highest)
 
 1. Built-in fallbacks (`constants.py`)
-2. Runtime state files (`~/.config/mvmctl/config.json`)
-3. Asset registry (`~/.cache/mvmctl/metadata.json`)
+2. SQLite database (`~/.cache/mvmctl/mvmdb.db`) — canonical store for asset defaults
+3. Runtime config file: `~/.config/mvmctl/config.json`
 4. `MVM_*` environment variables
 5. CLI flags
 
@@ -334,9 +335,9 @@ VM SSH access.
 }
 ```
 
-### Asset Registry (metadata.json)
+### Asset Registry
 
-> **Note:** `metadata.json` is a **legacy compatibility shim** for asset defaults. The **canonical source of truth** is the SQLite database (`mvmdb.db`) which stores images, kernels, binaries, networks, keys, and VM state. `metadata.json` is preserved for backward compatibility but may be removed in a future release.
+The **canonical source of truth** is the SQLite database (`~/.cache/mvmctl/mvmdb.db`) which stores images, kernels, binaries, networks, keys, and VM state. The legacy `metadata.json` file is no longer used.
 
 Legacy format example:
 
@@ -420,21 +421,20 @@ Legacy format example:
 
 ```
 ~/.cache/mvmctl/
-├── bin/               # Firecracker + jailer binaries
+├── bin/               # Firecracker + jailer binaries + service binaries (mvm-console-relay, mvm-nocloud-server, mvm-provision)
 ├── kernels/           # vmlinux kernel images
-├── images/            # Root filesystem images (.ext4)
+├── images/            # Root filesystem images (.ext4, .btrfs, .zst)
 ├── keys/              # Cached SSH public keys
 ├── networks/          # Per-network config + IP leases
 ├── vms/               # Per-VM state
-│   └── <vm-sha>/      # VM state by full SHA256 hash
+│   └── <vm-sha>/      # VM directories named by SHA256 hash
 │       ├── rootfs.ext4
 │       ├── firecracker.json
 │       ├── firecracker.log
 │       ├── firecracker.console.log
 │       ├── firecracker.pid
-│       ├── firecracker.sock
 │       └── cloud-init/
-├── metadata.json      # Asset registry
+├── mvmdb.db           # SQLite database (canonical asset state)
 └── audit.log          # Append-only operation log
 ```
 

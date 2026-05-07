@@ -13,7 +13,7 @@ Main Python package for the `mvmctl` microVM CLI. This root orchestrates the laz
 | `utils/` | Shared tool wrappers and filesystem helpers |
 | `tui/` | Textual TUI application (domain/, screens/, widgets/) |
 | `assets/` | Bundled YAML configs (images, kernels) |
-| `services/` | Long-running subprocesses (console relay, etc.) |
+| `services/` | Long-running subprocesses (console relay, nocloud server, loopmount provisioner) |
 | `db/` | SQLite schema, migrations, and ORM models |
 
 ## WHERE TO LOOK

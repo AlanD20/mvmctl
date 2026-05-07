@@ -312,14 +312,14 @@ the constants relevant to asset management.
 | `get_default("defaults.kernel", "version")` | `defaults.kernel.version` | Default version for `mvm kernel pull --type official` |
 | `get_default("defaults.kernel", "arch")` | `defaults.kernel.arch` | Default architecture for kernel operations |
 | `get_default("defaults.image", "arch")` | `defaults.image.arch` | Default architecture for image operations |
-| `DEFAULT_FIRECRACKER_CI_VERSION` (standalone constant) | `constants.py:119` | CI version used when config lookup fails |
-| `SUPPORTED_IMAGE_EXTENSIONS` (standalone constant) | `constants.py:142` | File extensions scanned for cached images |
-| `IMAGE_IMPORT_FORMAT_MAP` (standalone constant) | `constants.py:151` | Extension → format auto-detection table |
-| `HTTP_TIMEOUT_KERNEL_DOWNLOAD_S` (standalone constant) | `constants.py:290` | Timeout (seconds) for kernel tarball download |
-| `HTTP_TIMEOUT_KERNEL_CONFIG_S` (standalone constant) | `constants.py:291` | Timeout for kernel config download |
-| `HTTP_TIMEOUT_SHA256_FETCH_S` (standalone constant) | `constants.py:292` | Timeout for SHA-256 checksum fetch |
-| `FIRECRACKER_GITHUB_RELEASES_API_URL` (standalone constant) | `constants.py:308` | GitHub API endpoint for Firecracker releases |
-| `FIRECRACKER_GITHUB_DOWNLOAD_URL` (standalone constant) | `constants.py:311` | Base URL for Firecracker release assets |
+| `DEFAULT_FIRECRACKER_CI_VERSION` (standalone constant) | `constants.py` (Section 3 — VM constants) | CI version used when config lookup fails |
+| `SUPPORTED_IMAGE_EXTENSIONS` (standalone constant) | `constants.py` (Section 5 — Image & rootfs processing) | File extensions scanned for cached images |
+| `IMAGE_IMPORT_FORMAT_MAP` (standalone constant) | `constants.py` (Section 5) | Extension → format auto-detection table |
+| `HTTP_TIMEOUT_KERNEL_DOWNLOAD_S` (standalone constant) | `constants.py` (Section 10 — HTTP / download) | Timeout (seconds) for kernel tarball download |
+| `HTTP_TIMEOUT_KERNEL_CONFIG_S` (standalone constant) | `constants.py` (Section 10) | Timeout for kernel config download |
+| `HTTP_TIMEOUT_SHA256_FETCH_S` (standalone constant) | `constants.py` (Section 10) | Timeout for SHA-256 checksum fetch |
+| `FIRECRACKER_GITHUB_RELEASES_API_URL` (standalone constant) | `constants.py` (Section 10) | GitHub API endpoint for Firecracker releases |
+| `FIRECRACKER_GITHUB_DOWNLOAD_URL` (standalone constant) | `constants.py` (Section 10) | Base URL for Firecracker release assets |
 
 > **Note:** The kernel config lists (`enabled_configs`, `disabled_configs`, `set_val_configs`,
 > `required_settings`) are defined per-kernel in `kernels.yaml`, not as module-level constants.

@@ -39,7 +39,7 @@ The project strictly adheres to a three-layer architecture: **CLI → API → Co
 - **`core/`**: Isolated domain logic in subdirectories (e.g., `vm/`, `network/`, `host/`). Each domain has Controller, Service, Repository, and Resolver modules. No cross-domain imports. No defaults. Returns data or raises typed exceptions (`MVMError`).
 - **`models/`**: Pure `@dataclass` objects containing domain data (e.g., `VMInstanceItem`, `FirecrackerConfig`, `ImageSpec`). No side effects.
 - **`utils/`**: Shared helpers (fs, _system, http, network, crypto, template, yaml, _validators) with no domain knowledge.
-- **`services/`**: Runtime subprocess services — `console_relay/` (PTY-to-vsock bridge) and `nocloud_server/` (HTTP cloud-init datasource).
+- **`services/`**: Runtime subprocess services — `console_relay/` (PTY-to-vsock bridge), `nocloud_server/` (HTTP cloud-init datasource), and `loopmount/` (rootfs provisioning binary).
 
 ## Building and Running
 The project uses `uv` for dependency management.

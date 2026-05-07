@@ -11,12 +11,20 @@ src/mvmctl/services/
 ├── __init__.py              # Package marker only
 ├── console_relay/           # PTY-to-socket relay for VM serial console
 │   ├── __init__.py
-│   ├── manager.py          # 382 lines — ConsoleRelayManager lifecycle
-│   └── process.py          # 211 lines — Standalone PTY relay subprocess
+│   ├── _defaults.py         # Default configuration values
+│   ├── client.py            # ConsoleRelayClient — socket connection
+│   ├── exceptions.py        # Console relay exceptions
+│   ├── manager.py           # ConsoleRelayManager lifecycle
+│   └── process.py           # Standalone PTY relay subprocess
+├── loopmount/               # Loop-mount rootfs provisioning
+│   ├── __init__.py
+│   └── process.py           # Standalone mvm-provision subprocess (stdin/stdout JSON protocol)
 └── nocloud_server/          # HTTP server for cloud-init nocloud-net datasource
     ├── __init__.py
-    ├── manager.py          # 411 lines — NoCloudNetServerManager lifecycle
-    └── process.py          # 179 lines — Standalone HTTP server subprocess
+    ├── _defaults.py         # Default configuration values
+    ├── exceptions.py        # Nocloud server exceptions
+    ├── manager.py           # NoCloudNetServerManager lifecycle
+    └── process.py           # Standalone HTTP server subprocess
 ```
 
 ## ARCHITECTURE
@@ -84,6 +92,40 @@ api/vm_operations.py (or core/vm/_controller.py)
 
 **CLI enable:** `mvm vm create --name <vm>` (nocloud-net is default behavior)
 
+## LOOP-MOUNT PROVISIONER
+
+**Purpose:** Provision root filesystem images via loop-mount (SSH keys, hostname, DNS, resize) without libguestfs
+
+**Process:** `loopmount/process.py:Provisioner` (standalone binary — no manager in services/)
+- `main()` entry point — reads JSON operations from stdin, writes JSON results to stdout
+- `Provisioner` class — handles partition detection, mounting, file operations, chroot commands
+- Operation types: `resize`, `set_hostname`, `inject_dns`, `setup_ssh`, `disable_cloud_init`, `inject_cloud_init`, `fix_fstab`, `detect_os`, `deblob`
+- Filesystem grow and shrink for ext4 (resize2fs/e2fsck) and btrfs (btrfs filesystem resize)
+- Chroot execution for post-mount operations (user creation, SSH setup, package manager cache clean)
+- PARTUUID → /dev/vda fstab fixing for Firecracker compatibility
+- Graceful error handling with JSON error responses
+- `--input-json` flag for file-based input (testing) or stdin-based (production)
+- No manager in services/ — lifecycle managed by `LoopMountManager` in `core/_shared/_loopmount/`
+
+**Architecture:**
+
+```
+VMProvisioner → ProvisionerBackend → LoopMountProvisioner → LoopMountManager → spawns → mvm-provision
+                                                                                             │
+                                         JSON ops stdin ──→ losetup/mount/chroot
+                                         JSON results ←── stdout
+```
+
+**CLI integration:** `mvm vm create` uses loop-mount as the default provisioning backend
+
+**Related:**
+- `core/_shared/_loopmount/_manager.py` — `LoopMountManager` (binary execution/lifecycle)
+- `core/_shared/_loopmount/_provisioner.py` — `LoopMountProvisioner` (operation builder)
+- `core/_shared/_provisioner/_backend.py` — `_LoopMountBackend` (backend adapter)
+- `core/vm/_provisioner.py` — `VMProvisioner` (unified builder API)
+- `core/image/_provisioner.py` — `ImageProvisioner` (image conversion backend)
+- `models/provisioner.py` — `ProvisionerType` enum
+
 ## ANTI-PATTERNS
 
 | Forbidden | Correct |
@@ -101,11 +143,15 @@ uv run pytest tests/unit/services/console_relay/ -v
 
 # Nocloud server tests
 uv run pytest tests/unit/services/nocloud_server/ -v
+
+# Loop-mount provisioner tests
+uv run pytest tests/unit/services/loopmount/ -v
 ```
 
 ## NOTES
 
 - PID files: `$MVM_CACHE_DIR/vms/<vm-name>/console.pid` and `nocloud-server.pid`
-- Port allocation for nocloud-net: tries 8000-9000, binds to gateway IP to test availability
-- Firewall rules (iptables) managed by `core/firewall.py`, not services/
+- Manager runs in parent (core/ or services/), process runs standalone
+- Port allocation for nocloud-net: tries 8000-9000, binds to gateway IP
+- Firewall rules (iptables) managed by `core/_shared/_iptables_tracker/`, not services/
 - Services auto-exit when parent process terminates; `cleanup_orphans()` handles stale PIDs

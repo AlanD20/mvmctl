@@ -267,8 +267,9 @@ mvmctl uses dynamic imports for optional dependencies to keep the core runtime l
 
 | Module | Import Pattern | Nuitka Flag |
 |--------|---------------|-------------|
-| `guestfs` | `importlib.import_module("guestfs")` | `--include-package=guestfs` |
+| `passlib.handlers.bcrypt` | Dynamic registry (passlib) | `--include-module=passlib.handlers.bcrypt` |
+| `passlib.handlers.sha512_crypt` | Dynamic registry (passlib) | `--include-module=passlib.handlers.sha512_crypt` |
 
 ### Why Explicit Inclusion Is Required
 
-Nuitka performs static analysis to detect dependencies. Because mvmctl imports `guestfs` dynamically only when `--cloud-init-mode inject` is used, static analysis cannot detect this dependency. Without explicit flags the module won't be included.
+Nuitka performs static analysis to detect dependencies. Because `passlib` uses a dynamic registry to load hash handlers at runtime, static analysis cannot trace these imports. Without explicit `--include-module` flags (e.g., `passlib.handlers.bcrypt`, `passlib.handlers.sha512_crypt`) these modules would be tree-shaken away from the compiled binary.

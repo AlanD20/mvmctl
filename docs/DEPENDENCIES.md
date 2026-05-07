@@ -21,6 +21,7 @@ These binaries are required for basic operations like managing VMs, networking, 
 | `modprobe` | Kernel | Loading required KVM modules | `kmod` | `kmod` |
 | `dumpe2fs` | Filesystem | Filesystem inspection (image import) | `e2fsprogs` | `e2fsprogs` |
 | `iptables-save` | Network | Persisting iptables rules for reboot survival | `iptables` | `iptables` |
+| `mvm-provision` | Provisioning | Loop-mount rootfs provisioning | Managed via `mvm init` | Managed via `mvm init` |
 
 
 ## 2. Image & Cloud-Init Dependencies
@@ -216,7 +217,7 @@ This section maps specific `mvm` commands to the external binaries they invoke.
 | | `ls`, `rm`, `set-default` | (Internal Python logic) |
 | **`mvm key`** | `create` | `ssh-keygen` |
 | | `add`, `ls`, `rm` | (Internal Python logic) |
-| **`mvm vm`** | `create` | **Primary:** `firecracker`, `jailer`, `ip`, `iptables`, `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `chroot` (+ `btrfs` for btrfs images) |
+| **`mvm vm`** | `create` | **Primary:** `firecracker`, `jailer`, `ip`, `iptables`, `mvm-provision`, `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `chroot` (+ `btrfs` for btrfs images) |
 | | `ls`, `ps`, `inspect` | (Internal Python logic) |
 | | `start`, `stop`, `reboot` | `firecracker`, `ip`, `iptables` |
 | | `rm` | `firecracker`, `ip`, `iptables` |

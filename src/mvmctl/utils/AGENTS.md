@@ -81,7 +81,7 @@ Domain-agnostic CLI helpers for Typer commands.
 ### common.py
 Common utilities shared across all layers.
 - **Debug state:** `set_debug_mode(bool)`, `is_debug_mode()` — Global debug flag
-- `CacheUtils` — `get_cache_dir()`, `get_config_dir()`, `get_config_path()`, `get_auditlog_path()`, `get_mvm_db_path()`, `get_temp_dir()`, `get_vms_dir()`, `get_vm_dir(id)`, `get_images_dir()`, `get_kernels_dir()`, `get_bin_dir()`, `get_logs_dir()`, `get_keys_dir()`, `get_warm_image_dir()` — All env-var aware with SUDO_USER home resolution; `resolve_dir()` ensures directory exists
+- `CacheUtils` — `get_cache_dir()`, `get_config_dir()`, `get_config_path()`, `get_mvm_db_path()`, `get_temp_dir()`, `get_vms_dir()`, `get_vm_dir(id)`, `get_images_dir()`, `get_kernels_dir()`, `get_bin_dir()`, `get_logs_dir()`, `get_keys_dir()`, `get_warm_image_dir()` — All env-var aware with SUDO_USER home resolution; `resolve_dir()` ensures directory exists (with `CONST_DIR_PERMS_CACHE` mode)
 - `CommonUtils` — `validate_entity_name()` (defense-in-depth: dangerous chars, reserved names, IP-like, pattern), `contains_dangerous_chars()`, `is_reserved_name()`, `sanitize_for_log()`, `human_readable_datetime()` (ISO→"YYYY/MM/DD HH:MM:SS"), `format_bytes_human_readable()` (IEC binary units), `coerce()` (type coercion), `safe_int()` (safe extraction)
 
 ### crypto.py

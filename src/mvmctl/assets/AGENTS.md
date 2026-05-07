@@ -1,8 +1,8 @@
 # mvmctl/assets/ — Bundled Configuration
 
-**Scope:** Static YAML/JSON assets bundled with the package; read at runtime, never mutated
+**Scope:** Static YAML/JSON assets bundled with the package; read-only templates, never mutated
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
-**Rule:** Never read directly — use `constants.py` for runtime defaults, `get_assets_dir()` for bundled YAML, and `importlib.resources` for templates
+**Rule:** Never read directly — use `AssetManager` (via `importlib.resources`) for all bundled asset access
 
 ## STRUCTURE
 
@@ -17,29 +17,42 @@ src/mvmctl/assets/
 
 ## HOW ACCESSED
 
+All bundled assets are accessed through `AssetManager` (in `core/_shared/_asset_manager.py`), which wraps `importlib.resources` for reliable access regardless of installation method (pip, Nuitka, PyInstaller):
+
 ```python
-# Runtime defaults live in constants.py (OVERRIDABLE_DEFAULTS dict, not a separate file)
-from mvmctl.constants import get_default
+from mvmctl.core._shared import AssetManager
 
-# YAML loading goes through core/config.py
-from mvmctl.api.config import load_config
-from mvmctl.utils.fs import get_assets_dir
-config = load_config(get_assets_dir())  # Returns MVMConfig dataclass
+asset = AssetManager()
 
-# Image/kernel catalog lists
-from mvmctl.core.config import load_images_from_yaml, load_kernels_from_yaml
-images = load_images_from_yaml(get_assets_dir())   # list[ImageSpec]
-kernels = load_kernels_from_yaml(get_assets_dir())  # list[KernelSpec]
+# Read YAML catalogs
+images_yaml = asset.read_file("images.yaml")     # Used by ImageService
+kernels_yaml = asset.read_file("kernels.yaml")   # Used by KernelService
 
-# Path to assets dir (inside installed package — NOT under cache)
-from mvmctl.utils.fs import get_assets_dir
-assets = get_assets_dir()  # Path(__file__).parent.parent / "assets"
+# Read cloud-init template (Jinja2)
+cloud_init_template = asset.read_file("cloud-init.template.yaml")
+# Used by CloudInitManager in core/cloudinit/_manager.py
 
-# Templates via importlib.resources (required for PyInstaller/Nuitka builds)
-import importlib.resources
-template_path = importlib.resources.files("mvmctl.assets") / "cloud-init.template.yaml"
-template_content = template_path.read_text()  # Used by core/cloud_init.py
+# Read firecracker boot config template
+fc_template = asset.read_file("firecracker.template.json")
+
+# Check if a file exists
+if asset.file_exists("custom.template.yaml"):
+    content = asset.read_file("custom.template.yaml")
+
+# List all available asset files
+files = asset.list_files()
 ```
+
+**Key consumers:**
+
+| Asset | Consumer | Method |
+|-------|----------|--------|
+| `images.yaml` | `core/image/_service.py:ImageService.load_available_images()` | `AssetManager().read_file("images.yaml")` |
+| `kernels.yaml` | `core/kernel/_service.py:KernelService.load_kernels_from_yaml()` | `AssetManager().read_file("kernels.yaml")` |
+| `cloud-init.template.yaml` | `core/cloudinit/_manager.py:CloudInitManager` | `AssetManager().read_file("cloud-init.template.yaml")` |
+| `firecracker.template.json` | *(reference/documentation — config built programmatically by `FirecrackerSpawner.generate()`)* | `AssetManager().read_file("firecracker.template.json")` |
+
+There is no `get_assets_dir()` utility function. The `AssetManager` class is the single entry point for all bundled asset access.
 
 ## FILE SCHEMAS
 
@@ -86,9 +99,11 @@ Two entries covering both acquisition strategies:
 
 Each entry carries `enabled_configs`, `disabled_configs`, `set_val_configs`, `required_settings` — applied during build patching.
 
-### `firecracker.template.json` — Boot Config Template
+### `firecracker.template.json` — Boot Config Template (Reference)
 
-Python `str.format()`-style (via `utils/template.py:render_template`). Rendered by `core/config_gen.py:ConfigGenerator`:
+This file serves as a structural reference. The actual Firecracker boot config is built **programmatically** by `core/vm/_firecracker.py:FirecrackerSpawner.generate()`, which constructs a `FirecrackerConfigDict` directly in Python — not from this template.
+
+Template structure for reference:
 
 ```json
 {
@@ -129,7 +144,7 @@ Python `str.format()`-style (via `utils/template.py:render_template`). Rendered 
 
 ### `cloud-init.template.yaml` — Cloud-Init User-Data Template
 
-Jinja2 template rendered by `core/cloud_init.py:write_cloud_init()`. Variables injected at VM creation time:
+Jinja2 template rendered by `core/cloudinit/_manager.py:CloudInitManager`. Variables injected at VM creation time:
 
 | Variable | Description | Source |
 |----------|-------------|--------|
@@ -153,7 +168,7 @@ Jinja2 template rendered by `core/cloud_init.py:write_cloud_init()`. Variables i
 
 | Forbidden | Correct |
 |-----------|---------|
-| Parse `assets/*.yaml` directly with `yaml.safe_load` | Use `load_config()` or `load_images_from_yaml()` |
+| Parse `assets/*.yaml` directly with `yaml.safe_load` | Use `AssetManager().read_file()` through domain services |
 | Hardcode URLs in Python | Read via `MVMConfig.urls.*` or `get_default()` |
 | Edit defaults to change per-VM behavior | CLI flags or `mvm config set` |
 | Add secrets or tokens to any YAML file | Environment variables only |

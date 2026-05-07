@@ -149,7 +149,7 @@ mvm vm rm --name myvm --force                     # Remove a VM
 mvm image pull ubuntu-24.04       # Download an OS image
 mvm image ls                      # List available images
 mvm kernel pull --type firecracker # Download Firecracker kernel
-mvm bin pull 1.15.0               # Download Firecracker binary
+mvm bin pull 1.15.0               # Download Firecracker + jailer binaries
 mvm key create mykey              # Generate SSH key
 ```
 

@@ -24,13 +24,14 @@ Initial release of mvmctl — a production-grade Python CLI for managing Firecra
 - **`mvm bin`** — Firecracker binary management: ls, fetch, default, rm
 - **`mvm cache`** — Cache lifecycle: init, prune (per-resource or all), clean
 - **`mvm logs`** — Log streaming: boot logs (serial console) and Firecracker OS logs with --follow
-- **`mvm ssh`** — SSH into VMs by name, ID, IP, or MAC with custom user and key
+- **`mvm ssh`** — SSH into VMs by name, ID, IP, or MAC with custom user, key, and connection timeout
 
 #### Architecture
 - **Three-layer architecture** (CLI → API → Core) with strict import boundaries
 - **LazyMVMGroup** — Custom Click group with lazy-loaded Typer sub-apps for sub-150ms startup
 - **Controller / Service / Repository / Resolver** pattern across all 13 core domains
 - **Input → Request → Resolved** pipeline for type-safe, validated VM operations
+- **Provisioning backend abstraction** (LoopMount vs Guestfs) with factory pattern
 - **SQLite database** with migration system for persistent state (vms, networks, images, kernels, binaries, keys, host state, iptables rules, IP leases)
 - **Relation enrichment** system with batch loading to prevent N+1 queries
 - **Privilege delegation** model via `mvm` unix group and sudoers drop-in (no sudo for normal operations)
@@ -61,6 +62,7 @@ Initial release of mvmctl — a production-grade Python CLI for managing Firecra
 - SHA256 checksum verification for downloaded images
 - Image warm pool for fast VM creation (pre-extracted ready-to-copy images)
 - Incremental copy with reflink/FICLONE when filesystem supports it
+- Loop-mount provisioner backend for rootfs operations without libguestfs dependency
 
 #### Kernel Management
 - Download pre-built Firecracker CI kernels (optimized, fast boot)
@@ -90,6 +92,7 @@ Initial release of mvmctl — a production-grade Python CLI for managing Firecra
 #### Services
 - **Console relay** — PTY-over-vsock bridge for interactive serial console without SSH
 - **nocloud-net server** — Per-VM HTTP server for cloud-init datasource delivery
+- **mvm-provision** — Loop-mount rootfs provisioning binary for SSH key injection, hostname setup, DNS config, cloud-init disable, and filesystem resize (~200ms per VM, replaces libguestfs as primary path)
 
 #### Developer Experience
 - **Python API** — All CLI commands map 1:1 to `*Operation` static methods in `mvmctl.api`
@@ -100,7 +103,7 @@ Initial release of mvmctl — a production-grade Python CLI for managing Firecra
 
 #### Distribution
 - Standalone Nuitka-compiled binary (zero Python runtime dependency)
-- PyInstaller fallback for development builds
+- Nuitka is the sole build tool (no PyInstaller fallback)
 - PyPI package (`mvmctl`)
 - Distribution packages: .deb (Debian/Ubuntu), .rpm (RHEL/Fedora), PKGBUILD (Arch Linux)
 - Man page (`mvm.1`)

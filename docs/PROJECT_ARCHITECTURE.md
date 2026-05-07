@@ -71,6 +71,7 @@ src/mvmctl/
 │   │   ├── _service.py                      # VMService (stateless — bulk operations)
 │   │   ├── _repository.py                   # VMRepository (database operations)
 │   │   ├── _resolver.py                     # VMResolver (entity resolution)
+│   │   ├── _provisioner.py                  # VMProvisioner (rootfs provisioning via backend selection)
 │   │   └── _firecracker.py                  # FirecrackerSpawner, FirecrackerClient
 │   ├── network/                             # Networking (bridge, tap, NAT, IP lease)
 │   │   ├── _controller.py                   # NetworkController
@@ -107,21 +108,23 @@ src/mvmctl/
 │   ├── cache/                               # Cache management
 │   │   └── _service.py
 │   ├── config/                              # Configuration management
-│   │   ├── _constraints.py
-│   │   ├── _repository.py
-│   │   └── _service.py
+│   │   ├── _constraints.py                  # ConstraintRegistry (cross-key validation)
+│   │   ├── _repository.py                   # SettingsRepository (DB CRUD)
+│   │   └── _service.py                      # SettingsService (validation + type coercion)
 │   ├── console/                             # Console relay
 │   │   ├── __init__.py
-│   │   └── _controller.py                   # ConsoleController
+│   │   └── _controller.py                   # ConsoleController (stateful — console relay management)
 │   ├── logs/                                # Log management
 │   │   ├── __init__.py
-│   │   ├── _controller.py
-│   │   └── _service.py
+│   │   ├── _controller.py                   # LogController (stateful — bound to VM entity)
+│   │   └── _service.py                      # LogService (stateless log file operations)
 │   ├── cloudinit/                           # Cloud-init provisioning
-│   │   ├── _manager.py                      # CloudInitManager
+│   │   ├── _manager.py                      # CloudInitManager (orchestration state tracker)
 │   │   └── _provisioner.py                  # CloudInitProvisioner
+│   ├── guestfs/                             # Guestfs filesystem provisioning
+│   │   └── (lives in _shared/_guestfs/)     # Cross-domain filesystem operations
 │   ├── ssh/                                 # SSH operations
-│   │   └── _service.py
+│   │   └── _service.py                      # SSHService (stateful — stores connection params as instance state)
 │   └── _shared/                           # Shared infrastructure
 │       ├── __init__.py
 │       ├── _db.py                           # Database (connection manager)
@@ -131,10 +134,18 @@ src/mvmctl/
 │       ├── _parallel.py                     # ParallelExecutor
 │       ├── _guestfs/                        # Guestfs provisioning utilities
 │       │   ├── __init__.py
-│       │   ├── _base.py
+│       │   ├── _base.py                      # OptimizedGuestfs — low-level guestfs wrapper
 │       │   ├── _kernel_detector.py
-│       │   ├── _provisioner.py
-│       │   └── _service.py
+│       │   ├── _provisioner.py               # GuestfsProvisioner — all provisioning operations
+│       │   └── _service.py                   # GuestfsService — appliance management
+│       ├── _loopmount/                       # Loop-mount provisioning (mvm-provision binary interface)
+│       │   ├── __init__.py
+│       │   ├── _manager.py
+│       │   └── _provisioner.py
+│       ├── _provisioner/                     # Provisioner backend abstraction (factory + backends)
+│       │   ├── __init__.py
+│       │   ├── _backend.py
+│       │   └── _content.py
 │       └── _iptables_tracker/               # Generic iptables rule tracking
 │           ├── __init__.py
 │           ├── _repository.py
@@ -181,6 +192,9 @@ src/mvmctl/
 │   │   ├── client.py
 │   │   ├── manager.py
 │   │   └── process.py
+│   ├── loopmount/                           # Loop-mount binary (mvm-provision entry point)
+│   │   ├── __init__.py
+│   │   └── process.py                       # Standalone mvm-provision binary entry point
 │   └── nocloud_server/                      # NoCloud server service
 │       ├── __init__.py
 │       ├── _defaults.py
@@ -259,6 +273,8 @@ class VMController:
     def pause(self) -> None: ...
     def snapshot(self, mem_out: Path, state_out: Path) -> None: ...
 ```
+
+**Note:** While `VMController` still provides `start()`, `stop()`, and `pause()` for individual VM operations, bulk lifecycle operations (e.g., stopping multiple VMs) are handled by `VMService` in the API layer. The `VMService.stop_many()` creates per-VM `VMController` instances internally via `ParallelExecutor`.
 
 ### Service (Stateless / Bulk)
 
