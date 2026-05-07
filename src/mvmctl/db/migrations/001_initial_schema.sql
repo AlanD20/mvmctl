@@ -188,7 +188,7 @@ CREATE TABLE iptables_rules (
     chain_name TEXT NOT NULL CHECK(chain_name LIKE 'MVM-%'),  -- Only MVM-* chains
 
     -- Rule Parameters (explicit columns for precise matching)
-    rule_type TEXT NOT NULL CHECK(rule_type IN ('masquerade', 'forward_in', 'forward_out', 'nocloud_input')),
+    rule_type TEXT NOT NULL CHECK(rule_type IN ('masquerade', 'forward_in', 'forward_out', 'nocloudnet_input')),
     protocol TEXT NOT NULL CHECK(protocol IN ('tcp', 'udp', 'icmp', 'all')),  -- Default: 'all'
     source TEXT NOT NULL,                        -- Default: '0.0.0.0/0' (any source)
     destination TEXT NOT NULL,                   -- Default: '0.0.0.0/0' (any destination)

@@ -75,42 +75,31 @@ tasks:
     desc: Links libguestfs into uv .venv (Supports Arch, Debian, Fedora, Ubuntu)
     vars:
       HOST_PYTHON: /usr/bin/python3
-      # Find the site-packages path from the system python
       HOST_SITE:
         sh: /usr/bin/python3 -c "import site; print(site.getsitepackages()[0])"
-      # Find the site-packages path from the uv venv
       VENV_SITE:
         sh: uv run python -c "import site; print(site.getsitepackages()[0])"
     cmds:
       - |
-        # 1. Clean up any old broken links first
         rm -rf "{{.VENV_SITE}}/guestfs" "{{.VENV_SITE}}/guestfs.py" "{{.VENV_SITE}}/libguestfsmod*"
-
-        # 2. Handle Directory Layout (Debian/Ubuntu/Fedora/RHEL)
         if [ -d "{{.HOST_SITE}}/guestfs" ]; then
           ln -sf "{{.HOST_SITE}}/guestfs" "{{.VENV_SITE}}/"
-          echo "🚀 Linked guestfs directory (Debian/Fedora style)"
-
-        # 3. Handle Flat Layout (Arch)
+          echo "Linked guestfs directory (Debian/Fedora style)"
         elif [ -f "{{.HOST_SITE}}/guestfs.py" ]; then
           ln -sf "{{.HOST_SITE}}/guestfs.py" "{{.VENV_SITE}}/guestfs.py"
-          echo "🚀 Linked guestfs.py (Arch style)"
+          echo "Linked guestfs.py (Arch style)"
         else
-          echo "❌ Error: Could not find guestfs in {{.HOST_SITE}}"
+          echo "Error: Could not find guestfs in {{.HOST_SITE}}"
           exit 1
         fi
-
-        # 4. Handle the Binary Module (.so)
-        # We find the file and link it both as its original name AND the generic name
         SRC_SO=$(ls {{.HOST_SITE}}/libguestfsmod.*.so 2>/dev/null | head -n 1)
         if [ -n "$SRC_SO" ]; then
           SO_NAME=$(basename "$SRC_SO")
           ln -sf "$SRC_SO" "{{.VENV_SITE}}/$SO_NAME"
-          # Link generic name to ensure Python loader finds it regardless of ABI quirks
           ln -sf "$SRC_SO" "{{.VENV_SITE}}/libguestfsmod.so"
-          echo "🚀 Linked $SO_NAME as libguestfsmod.so"
+          echo "Linked $SO_NAME as libguestfsmod.so"
         else
-          echo "⚠️ Warning: libguestfsmod.so not found. System bindings might be incomplete."
+          echo "Warning: libguestfsmod.so not found. System bindings might be incomplete."
         fi
     silent: true
   unlink-guestfs:
@@ -120,48 +109,77 @@ tasks:
         sh: uv run python -c "import site; print(site.getsitepackages()[0])"
     cmds:
       - rm -rf "{{.VENV_SITE}}/guestfs" "{{.VENV_SITE}}/guestfs.py" "{{.VENV_SITE}}/libguestfsmod*"
-      - echo "✨ Unlinked."
+      - echo "Unlinked."
     silent: true
   test-guestfs:
     desc: Verify the link works within uv/pyenv
     cmds:
-      - uv run python -c "import guestfs; print('✅ libguestfs is active in .venv')"
+      - uv run python -c "import guestfs; print('libguestfs is active in .venv')"
+
+  # =====================================================================
+  # System Test Setup — pre-pull required assets before running tests
+  # =====================================================================
   sys-setup:
-    desc: Pre-fetch required system test assets (kernel + images) with visible progress
+    desc: Pre-fetch required system test assets (kernel + images + service binaries)
     deps:
       - sys-setup-kernel
       - sys-setup-image-alpine
       - sys-setup-image-ubuntu
+      - sys-setup-binary
   sys-setup-kernel:
-    desc: Fetch kernel if not cached
+    desc: Fetch kernel if not cached (uses 'mvm kernel pull --type official')
     status:
       - uv run python -c "import json,subprocess as sp; r=sp.run(['uv','run','mvm','kernel','ls','--json'],capture_output=True,text=True); exit(0 if r.returncode==0 and json.loads(r.stdout) else 1)"
     cmds:
-      - uv run mvm kernel fetch --type firecracker --set-default
+      - uv run mvm kernel pull --type official
   sys-setup-image-alpine:
     desc: Fetch alpine-3.21 if not cached
     status:
       - uv run mvm image ls --json | uv run python -c "import sys,json; sys.exit(0 if any(i.get('os_slug')=='alpine-3.21' for i in json.load(sys.stdin)) else 1)"
     cmds:
-      - uv run mvm image fetch alpine-3.21
+      - uv run mvm image pull alpine-3.21
   sys-setup-image-ubuntu:
     desc: Fetch ubuntu-24.04-minimal if not cached
     status:
       - uv run mvm image ls --json | uv run python -c "import sys,json; sys.exit(0 if any(i.get('os_slug')=='ubuntu-24.04-minimal' for i in json.load(sys.stdin)) else 1)"
     cmds:
-      - uv run mvm image fetch ubuntu-24.04-minimal
+      - uv run mvm image pull ubuntu-24.04-minimal
+  sys-setup-binary:
+    desc: Fetch firecracker binary if not cached
+    status:
+      - uv run mvm bin ls --json | uv run python -c "import sys,json; sys.exit(0 if json.load(sys.stdin) else 1)"
+    cmds:
+      - uv run mvm bin pull 1.15.1 --set-default
+
+  # =====================================================================
+  # System Tests — these run on real KVM hardware, produce release gate
+  # =====================================================================
+  # TARGETS:
+  #   sys-test      — FULL run: parallel-safe (1) → state-modifying (2) → cache (3)
+  #   sys-test-fast — DEV run: only read-only / non-KVM / non-slow tests
+  #
+  # MARKERS (pytest -m):
+  #   system          — every test in tests/system/
+  #   serial          — modifies shared mutable state (defaults, global cache);
+  #                     MUST run without parallelism (-n 0)
+  #   slow            — tests taking >30 seconds (downloads, VM creation)
+  #   requires_kvm    — tests that create actual VMs (need /dev/kvm)
+  #   requires_network — tests that create host network bridges
+  #
+  # IMPORTANT: test_cache.py MUST run LAST — cache clean --force destroys
+  #            everything (DB, service binaries, iptables chains).
+  # =====================================================================
   sys-test:
-    desc: Run all system tests — parallel-safe with -n auto, then serial one at a time
+    desc: Run all system tests — parallel → serial → cache LAST
     deps: [sys-setup]
     cmds:
-      - uv run pytest tests/system/ -m "not serial" -v -n auto --no-cov -rx
-      - uv run pytest tests/system/ -m "serial" -v -n 0 --no-cov -rx
-  sys-test-seq:
-    desc: Run serial-only system tests sequentially
-    deps: [sys-setup]
-    cmds:
-      - uv run pytest tests/system/ -m "serial" -v --no-cov -rx -n 0
+      - echo "=== Phase 1: Parallel-safe tests (-n auto) ==="
+      - uv run pytest tests/system/ --ignore=tests/system/test_cache.py -m "not serial" -v -n auto --no-cov -rx
+      - echo "=== Phase 2: State-modifying tests (-n 0, sequential) ==="
+      - uv run pytest tests/system/ --ignore=tests/system/test_cache.py -m "serial" -v -n 0 --no-cov -rx
+      - echo "=== Phase 3: Cache cleanup (LAST! destroys environment) ==="
+      - uv run pytest tests/system/test_cache.py -v --no-cov -rx
   sys-test-fast:
-    desc: Run fast system tests only — no KVM, no slow downloads (no mvm group needed)
+    desc: Run fast system tests only — no KVM, no slow downloads, no cache cleanup
     cmds:
-      - uv run pytest tests/system/ -v -n auto --no-cov -m "not slow and not requires_kvm"
+      - uv run pytest tests/system/ --ignore=tests/system/test_cache.py -v -n auto --no-cov -m "not slow and not requires_kvm"

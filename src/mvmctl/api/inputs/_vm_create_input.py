@@ -672,7 +672,9 @@ class VMCreateRequest:
 
     def _resolve_cloud_init_mode(self) -> CloudInitModeResolved:
 
-        # Off is default cloud-init mode — most stable across all image types
+        # Off is default cloud-init mode — most stable across all image types.
+        # SSH key injection happens directly via the provisioner during image
+        # preparation regardless of cloud-init mode, so Off is sufficient.
         mode = CloudInitModeResolved(mode=CloudInitMode.OFF, iso_path=None)
 
         if self._inputs.cloud_init_mode is None:

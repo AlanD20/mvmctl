@@ -160,7 +160,7 @@ class TestBuildComment:
             IPTablesRuleType.NOCLOUDNET_INPUT, "test-net", ""
         )
         assert comment.startswith("mvm:")
-        assert "nocloudnet" in comment
+        assert "nocloudnet_input" in comment
         assert "test-net" in comment
 
     def test_build_comment_with_context(self, tracker: IPTablesTracker) -> None:

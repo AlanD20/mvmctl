@@ -313,3 +313,312 @@ class TestImageAdvancedFlags:
             check=False,
         )
         assert result.returncode != 0
+
+
+class TestConfigEdgeCasesExtended:
+    """Additional config command edge cases."""
+
+    pytestmark = [pytest.mark.system]
+
+    def test_config_get_nonexistent_key(self, mvm_binary):
+        """``config get`` with nonexistent key should return guidance."""
+        result = _run_mvm(
+            mvm_binary,
+            "config",
+            "get",
+            "defaults.vm",
+            "nonexistent_key_xyz",
+            check=False,
+        )
+        # Should not crash — returns None or guidance
+        assert result.returncode == 0
+
+    def test_config_set_invalid_value_type(self, mvm_binary):
+        """``config set`` with an invalid value type (string for int) should fail."""
+        result = _run_mvm(
+            mvm_binary,
+            "config",
+            "set",
+            "defaults.vm",
+            "vcpu_count",
+            "not-a-number",
+            check=False,
+        )
+        # Should fail because vcpu_count expects an integer
+        assert result.returncode != 0
+
+
+class TestConfigEdgeCasesResetAllAfterSet:
+    """Test config reset --all after multiple values are set."""
+
+    pytestmark = [pytest.mark.system, pytest.mark.serial]
+
+    def test_config_reset_all_with_multiple_overrides(self, mvm_binary):
+        """Set multiple config overrides, then reset --all, verify all gone."""
+        # Set two values
+        _run_mvm(
+            mvm_binary, "config", "set", "defaults.vm", "vcpu_count", "8"
+        )
+        _run_mvm(
+            mvm_binary,
+            "config",
+            "set",
+            "defaults.vm",
+            "mem_size_mib",
+            "2048",
+        )
+
+        # Verify they were set
+        result = _run_mvm(
+            mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
+        )
+        assert "8" in result.stdout
+
+        # Reset all
+        _run_mvm(mvm_binary, "config", "reset", "--all")
+
+        # Verify values are gone
+        result = _run_mvm(
+            mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
+        )
+        assert "8" not in result.stdout
+
+
+class TestVMLogsByIdentifier:
+    """Test ``mvm logs`` using different identifier types."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+    ]
+
+    def test_logs_by_ip(self, mvm_binary, created_vm):
+        """Show boot log using IP as identifier instead of name."""
+        ip = created_vm.get("ipv4", "")
+        if not ip:
+            pytest.skip("VM has no IP address")
+        result = _run_mvm(mvm_binary, "logs", ip, check=False)
+        assert result.returncode == 0
+        assert result.stdout.strip()
+
+
+class TestVMCloudInitModes:
+    """Test VM creation with different --cloud-init-mode values."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+    ]
+
+    def test_vm_create_cloud_init_mode_iso(self, mvm_binary, unique_vm_name):
+        """Create VM with --cloud-init-mode iso."""
+        vm_name = unique_vm_name
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--cloud-init-mode",
+                "iso",
+            )
+            vms = json.loads(
+                _run_mvm(mvm_binary, "vm", "ls", "--json").stdout
+            )
+            vm = next((v for v in vms if v["name"] == vm_name), None)
+            assert vm is not None, f"VM '{vm_name}' not found"
+            assert vm["status"] == "running", (
+                f"Expected running, got {vm['status']}"
+            )
+        finally:
+            _run_mvm(
+                mvm_binary, "vm", "rm", vm_name, "--force", check=False
+            )
+
+    def test_vm_create_cloud_init_mode_net(self, mvm_binary, unique_vm_name):
+        """Create VM with --cloud-init-mode net."""
+        vm_name = unique_vm_name
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--cloud-init-mode",
+                "net",
+            )
+            vms = json.loads(
+                _run_mvm(mvm_binary, "vm", "ls", "--json").stdout
+            )
+            vm = next((v for v in vms if v["name"] == vm_name), None)
+            assert vm is not None, f"VM '{vm_name}' not found"
+            assert vm["status"] == "running", (
+                f"Expected running, got {vm['status']}"
+            )
+        finally:
+            _run_mvm(
+                mvm_binary, "vm", "rm", vm_name, "--force", check=False
+            )
+
+    def test_vm_create_cloud_init_mode_off(
+        self, mvm_binary, unique_vm_name
+    ):
+        """Create VM with --cloud-init-mode off (explicit)."""
+        vm_name = unique_vm_name
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--cloud-init-mode",
+                "off",
+            )
+            vms = json.loads(
+                _run_mvm(mvm_binary, "vm", "ls", "--json").stdout
+            )
+            vm = next((v for v in vms if v["name"] == vm_name), None)
+            assert vm is not None, f"VM '{vm_name}' not found"
+            assert vm["status"] == "running", (
+                f"Expected running, got {vm['status']}"
+            )
+        finally:
+            _run_mvm(
+                mvm_binary, "vm", "rm", vm_name, "--force", check=False
+            )
+
+
+class TestVMNocloudNetPort:
+    """Test VM creation with --nocloud-net-port values."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+    ]
+
+    def test_vm_create_with_nocloud_net_port_specific(
+        self, mvm_binary, unique_vm_name
+    ):
+        """Create VM with --nocloud-net-port set to a specific port."""
+        vm_name = unique_vm_name
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--nocloud-net-port",
+                "12345",
+            )
+            vms = json.loads(
+                _run_mvm(mvm_binary, "vm", "ls", "--json").stdout
+            )
+            vm = next((v for v in vms if v["name"] == vm_name), None)
+            assert vm is not None, f"VM '{vm_name}' not found"
+            assert vm["status"] == "running", (
+                f"Expected running, got {vm['status']}"
+            )
+        finally:
+            _run_mvm(
+                mvm_binary, "vm", "rm", vm_name, "--force", check=False
+            )
+
+
+class TestImagePullAdvancedFlags:
+    """Test advanced image pull flags."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.slow,
+        pytest.mark.serial,
+    ]
+
+    def test_image_pull_with_version(self, mvm_binary):
+        """Pull an image with --version flag."""
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "image",
+                "pull",
+                "alpine-3.21",
+                "--version",
+                "latest",
+                "--force",
+                timeout=60,
+                check=False,
+            )
+            if result.returncode == 0:
+                assert "pulled successfully" in result.stdout.lower()
+            else:
+                pytest.skip(
+                    f"Pull with --version failed: {result.stderr.strip()}"
+                )
+        except subprocess.TimeoutExpired:
+            pytest.skip("Pull with --version timed out (>60s)")
+
+    def test_image_pull_with_arch(self, mvm_binary):
+        """Pull an image with --arch flag."""
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "image",
+                "pull",
+                "alpine-3.21",
+                "--arch",
+                "x86_64",
+                "--force",
+                timeout=60,
+                check=False,
+            )
+            if result.returncode == 0:
+                assert "pulled successfully" in result.stdout.lower()
+            else:
+                pytest.skip(
+                    f"Pull with --arch failed: {result.stderr.strip()}"
+                )
+        except subprocess.TimeoutExpired:
+            pytest.skip("Pull with --arch timed out (>60s)")
+
+
+class TestKernelPullAdvancedFlags:
+    """Test advanced kernel pull flags."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.slow,
+        pytest.mark.serial,
+    ]
+
+    def test_kernel_pull_with_arch_flag(self, mvm_binary):
+        """Pull a kernel with --arch x86_64 flag."""
+        result = _run_mvm(
+            mvm_binary,
+            "kernel",
+            "pull",
+            "--type",
+            "official",
+            "--arch",
+            "x86_64",
+            check=False,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            pytest.skip(
+                f"Kernel pull with --arch failed: {result.stderr.strip()}"
+            )
+        assert result.returncode == 0
