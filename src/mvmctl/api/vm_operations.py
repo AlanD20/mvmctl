@@ -62,6 +62,7 @@ from mvmctl.core.vm._service import VMService
 from mvmctl.core.volume._controller import VolumeController
 from mvmctl.core.volume._repository import VolumeRepository
 from mvmctl.core.volume._resolver import VolumeResolver
+from mvmctl.core.volume._service import VolumeService
 from mvmctl.exceptions import (
     MVMError,
     NetworkError,
@@ -73,6 +74,7 @@ from mvmctl.models import (
     FirecrackerConfig,
     VMInstanceItem,
     VMStatus,
+    VolumeStatus,
 )
 from mvmctl.models.result import (
     BatchResult,
@@ -82,7 +84,7 @@ from mvmctl.models.result import (
 )
 from mvmctl.utils._system import SigtermContext, is_process_running
 from mvmctl.utils.auditlog import AuditLog
-from mvmctl.utils.common import CacheUtils
+from mvmctl.utils.common import CacheUtils, CommonUtils
 from mvmctl.utils.crypto import HashGenerator
 from mvmctl.utils.network import NetworkUtils
 
@@ -619,6 +621,7 @@ class VMCreateContext:
                 if self.cloud_init_result
                 else None
             ),
+            extra_drives=self.resolved.extra_drives,
         )
 
     def to_model(self) -> VMInstanceItem | None:
@@ -858,17 +861,31 @@ class VMOperation:
         return vm_instance
 
     @staticmethod
-    def _generate_batch_names(base_name: str, count: int) -> list[str]:
-        """Generate unique names for batch VM creation.
+    def _populate_vm_volume_ids(
+        volume_names: list[str],
+        vm_instance: VMInstanceItem,
+        db: Database,
+    ) -> None:
+        """Set the JSON ``volume_ids`` field on a VM after volume attachment.
 
-        First VM keeps base name, subsequent VMs get -N suffix.
+        Re-upserts the VM record so ``volume_ids`` persists in the DB,
+        enabling ``VMResolver`` enrichment to resolve back to
+        ``VolumeItem`` objects.
+
+        Args:
+            volume_names: Volume names that were attached to this VM.
+            vm_instance: The VM model to update (modified in-place).
+            db: Database instance for queries.
+
         """
-        if count == 1:
-            return [base_name]
-        names = [base_name]
-        for i in range(2, count + 1):
-            names.append(f"{base_name}-{i}")
-        return names
+        from mvmctl.core.volume._repository import VolumeRepository
+        from mvmctl.core.volume._resolver import VolumeResolver
+
+        repo = VolumeRepository(db)
+        resolver = VolumeResolver(repo)
+        vol_ids = [resolver.by_name(name).id for name in volume_names]
+        vm_instance.volume_ids = vol_ids
+        VMRepository(db).upsert(vm_instance)
 
     @staticmethod
     def create(
@@ -895,6 +912,14 @@ class VMOperation:
                     audit_action="vm.create",
                     on_progress=on_progress,
                 )
+                if inputs.volumes:
+                    VolumeService(VolumeRepository(db)).mark_volumes_attached(
+                        vm_id=vm_instance.id,
+                        volume_names=inputs.volumes,
+                    )
+                    VMOperation._populate_vm_volume_ids(
+                        inputs.volumes, vm_instance, db
+                    )
                 return OperationResult(
                     status="success",
                     code="vm.created",
@@ -903,17 +928,16 @@ class VMOperation:
                 )
 
             # BATCH PATH
-            names = VMOperation._generate_batch_names(inputs.name, count)
+            names = CommonUtils.generate_batch_names(inputs.name, count)
 
-            # Pre-allocate: check name collisions
-            vm_repo = VMRepository(db)
-            for name in names:
-                if vm_repo.get_by_name(name) is not None:
-                    return OperationResult(
-                        status="error",
-                        code="vm.name_collision",
-                        message=f"VM name '{name}' already exists",
-                    )
+            # Pre-allocate: check name collisions (single query)
+            existing = VMRepository(db).get_by_names(names)
+            if existing:
+                return OperationResult(
+                    status="error",
+                    code="vm.name_collision",
+                    message=f"VM name(s) already exist: {', '.join(sorted(existing))}",
+                )
 
             created_vms: list[VMInstanceItem] = []
             errors: list[str] = []
@@ -956,6 +980,16 @@ class VMOperation:
                         on_progress=_batch_progress,
                         skip_limit_check=True,
                     )
+                    if inputs.volumes:
+                        VolumeService(
+                            VolumeRepository(db)
+                        ).mark_volumes_attached(
+                            vm_id=vm_instance.id,
+                            volume_names=inputs.volumes,
+                        )
+                        VMOperation._populate_vm_volume_ids(
+                            inputs.volumes, vm_instance, db
+                        )
                     created_vms.append(vm_instance)
 
                 except Exception as e:
@@ -1823,31 +1857,25 @@ class VMOperation:
             raise VMNotFoundError("Expected exactly one VM identifier")
         vm = resolved_vm.vms[0]
 
+        if vm.status != VMStatus.STOPPED:
+            raise VMCreateError(
+                f"Cannot attach volume to VM '{vm.name}': "
+                f"VM is in '{vm.status}' state, must be 'stopped'. "
+                "Stop the VM first, then attach the volume, then start the VM again."
+            )
+
         vol_repo = VolumeRepository(db)
         vol_resolver = VolumeResolver(vol_repo)
         vol = vol_resolver.by_name(volume_name)
 
-        if vol.status != "available":
+        if vol.status != VolumeStatus.AVAILABLE:
             raise VMCreateError(f"Volume '{volume_name}' is not available")
 
         controller = VolumeController(vol, vol_repo)
         controller.attach(vm.id)
 
-        # Hot-plug via Firecracker API
-        if vm.pid and is_process_running(vm.pid):
-            from mvmctl.core.vm._firecracker import FirecrackerClient
-
-            socket_path = vm.vm_dir / vm.api_socket_path
-            drive_config: dict[str, object] = {
-                "drive_id": f"vol-{vol.name}",
-                "path_on_host": vol.path,
-                "is_root_device": False,
-                "is_read_only": False,
-                "cache_type": "Unsafe",
-                "io_engine": "Sync",
-            }
-            with FirecrackerClient(socket_path) as client:
-                client.put_drive(drive_config)  # type: ignore[arg-type]
+        # No Firecracker hot-plug needed — VM is stopped.
+        # The drive config will be picked up on next VM start.
 
         return OperationResult(
             status="success",
@@ -1868,6 +1896,13 @@ class VMOperation:
             raise VMNotFoundError("Expected exactly one VM identifier")
         vm = resolved_vm.vms[0]
 
+        if vm.status != VMStatus.STOPPED:
+            raise VMCreateError(
+                f"Cannot detach volume from VM '{vm.name}': "
+                f"VM is in '{vm.status}' state, must be 'stopped'. "
+                "Stop the VM first, then detach the volume, then start the VM again."
+            )
+
         vol_repo = VolumeRepository(db)
         vol_resolver = VolumeResolver(vol_repo)
         vol = vol_resolver.by_name(volume_name)
@@ -1875,13 +1910,8 @@ class VMOperation:
         controller = VolumeController(vol, vol_repo)
         controller.detach()
 
-        # Hot-unplug via Firecracker API
-        if vm.pid and is_process_running(vm.pid):
-            from mvmctl.core.vm._firecracker import FirecrackerClient
-
-            socket_path = vm.vm_dir / vm.api_socket_path
-            with FirecrackerClient(socket_path) as client:
-                client.patch_drive(f"vol-{vol.name}")
+        # No Firecracker hot-unplug needed — VM is stopped.
+        # The drive config will be rebuilt on next VM start.
 
         return OperationResult(
             status="success",

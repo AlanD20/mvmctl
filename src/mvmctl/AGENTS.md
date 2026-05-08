@@ -12,7 +12,7 @@ Main Python package for the `mvmctl` microVM CLI. This root orchestrates the laz
 | `models/` | Pure `@dataclass` objects for domain data |
 | `utils/` | Shared tool wrappers and filesystem helpers |
 | `assets/` | Bundled YAML configs (images, kernels) |
-| `services/` | Long-running subprocesses (console relay, nocloud server, loopmount provisioner) |
+| `services/` | Long-running subprocesses (console relay, nocloud server, loopmount provisioner, mvm-provision) |
 | `db/` | SQLite schema, migrations, and ORM models |
 
 ## WHERE TO LOOK

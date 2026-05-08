@@ -8,7 +8,7 @@ import pytest
 
 from tests.system.conftest import _run_mvm
 
-pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.domain_kernel]
+pytestmark = [pytest.mark.system, pytest.mark.domain_kernel]
 
 
 class TestKernelLifecycle:
@@ -19,6 +19,7 @@ class TestKernelLifecycle:
         result = _run_mvm(mvm_binary, "kernel", "ls")
         assert result.returncode == 0
 
+    @pytest.mark.slow
     def test_kernel_pull(self, mvm_binary):
         """Pull official kernel."""
 
@@ -123,6 +124,8 @@ class TestKernelInspect:
 class TestKernelPullWithVersion:
     """Test kernel pull with the --version flag."""
 
+    pytestmark = [pytest.mark.slow]
+
     def test_kernel_pull_with_version(self, mvm_binary):
         """Pull a firecracker kernel with --version flag."""
         result = _run_mvm(
@@ -150,6 +153,8 @@ class TestKernelPullWithVersion:
 
 class TestKernelRemoveAndPull:
     """Test kernel removal and pull with set-default."""
+
+    pytestmark = [pytest.mark.slow]
 
     def test_kernel_pull_with_set_default(self, mvm_binary):
         """Pull official kernel and set as default in one command."""
@@ -217,6 +222,8 @@ class TestKernelRemoveAndPull:
 
 class TestKernelRemoveForce:
     """Test kernel removal with --force flag."""
+
+    pytestmark = [pytest.mark.slow]
 
     def test_kernel_rm_with_force(self, mvm_binary):
         """Remove a kernel using --force even if VMs reference it."""

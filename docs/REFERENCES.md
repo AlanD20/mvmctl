@@ -20,6 +20,7 @@ This document provides detailed reference for all `mvm` commands, configuration 
   - [mvm cache](#mvm-cache) — Cache management
   - [mvm logs](#mvm-logs) — VM logs
   - [mvm ssh](#mvm-ssh) — VM SSH access
+  - [mvm volume](#mvm-volume) — Persistent storage
 - [Configuration](#configuration)
 - [Cloud-Init](#cloud-init)
 - [Environment Variables](#environment-variables)
@@ -171,6 +172,8 @@ VM lifecycle management.
 | `--no-console` | Disable serial console | false |
 | `--firecracker-bin PATH` | Path to firecracker binary | active version |
 | `--skip-cleanup` | Keep resources on failure for debugging | false |
+| `--count N` | Create N VMs in batch (base name keeps, subsequent get `-N` suffix) | 1 |
+| `--atomic` | All-or-nothing batch: roll back all VMs if any creation fails | false |
 
 ---
 
@@ -310,6 +313,35 @@ VM SSH access.
 | `--ip IP` | IP address to connect to (skips validation) |
 | `--mac MAC` | VM MAC address |
 | `--name, -n NAME` | VM name |
+
+---
+
+### `mvm volume`
+
+Persistent data disk management. Create, remove, list, inspect, and resize volumes.
+
+| Command | Description |
+|---------|-------------|
+| `mvm volume create <name> <size>` | Create a new volume (raw or qcow2) |
+| `mvm volume rm <names...>` | Remove one or more volumes |
+| `mvm volume ls` | List all volumes |
+| `mvm volume inspect <name>` | Show detailed volume info |
+| `mvm volume resize <name> <size>` | Resize an existing volume |
+
+**`volume create` flags:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `<name>` | Volume name **(required)** | — |
+| `<size>` | Volume size, e.g. `10G`, `512M` **(required)** | — |
+| `--format FORMAT` | Disk format: `raw` or `qcow2` | `raw` |
+
+**`volume rm` flags:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `<names...>` | Volume names or ID prefixes **(required)** | — |
+| `--force, -f` | Remove even if attached to VMs | false |
 
 ---
 

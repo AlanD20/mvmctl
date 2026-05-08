@@ -278,6 +278,16 @@ def vm_create(
 
     effective_ssh_keys = ssh_key.split(",") if ssh_key is not None else []
 
+    # --count and --volume are mutually exclusive: cannot attach same volume
+    # to multiple VMs.
+    effective_count = count or 1
+    if effective_count > 1 and volume:
+        print_error(
+            "Cannot use --count with --volume: a volume can only be "
+            "attached to a single VM. Create VMs individually with --volume."
+        )
+        raise typer.Exit(code=1)
+
     console = Console()
 
     with console.status("", spinner="dots") as status:
@@ -311,6 +321,8 @@ def vm_create(
                 nocloud_net_port=nocloud_net_port,
                 skip_cleanup=skip_cleanup,
                 volumes=volume,
+                count=count,
+                atomic=atomic,
             ),
             on_progress=_on_progress,
         )

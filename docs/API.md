@@ -52,6 +52,7 @@ from mvmctl.api import (
     ConsoleOperation,
     ConfigOperation,
     LogOperation,
+    VolumeOperation,
     # Input classes
     VMCreateInput,
     VMInput,
@@ -70,6 +71,8 @@ from mvmctl.api import (
     ConsoleInput,
     ConsoleRequest,
     LogInput,
+    VolumeCreateInput,
+    VolumeInput,
     # Result types
     InitResult,
     InitStepResult,
@@ -103,6 +106,7 @@ from mvmctl.api.vm_operations import VMOperation  # ❌ WRONG — internal modul
 | `ConsoleOperation` | Console relay: get connection info, get state, kill |
 | `ConfigOperation` | User settings: get, set, reset, list all config overrides |
 | `LogOperation` | VM log streaming and retrieval |
+| `VolumeOperation` | Persistent data disk management: create, remove, list, get, inspect, resize |
 
 ---
 
@@ -472,6 +476,24 @@ A single change applied during `host init`.
 | `reverted_at` | `str \| None` | ISO 8601 reversion timestamp |
 | `revert_mechanism` | `str \| None` | How the change was reverted |
 
+### `mvmctl.models.volume`
+
+#### `VolumeItem`
+
+Persistent data disk attachable to VMs — maps to the `volumes` table.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `str` | Volume ID (hash) |
+| `name` | `str` | Volume name |
+| `size_bytes` | `int` | Volume size in bytes |
+| `format` | `str` | Disk format (`"raw"` or `"qcow2"`) |
+| `path` | `str` | Path to the disk file |
+| `status` | `str` | Volume status (`"available"` or `"attached"`) |
+| `vm_id` | `str \| None` | VM ID this volume is attached to, or `None` |
+| `created_at` | `str` | ISO 8601 creation timestamp |
+| `updated_at` | `str` | ISO 8601 update timestamp |
+
 ---
 
 ## Error Handling
@@ -531,6 +553,8 @@ MVMError
 │   └── CloudInitInjectModeError  — Rootfs cloud-init injection failure
 ├── VMCreateError             — VM creation failure (partial cleanup)
 ├── VMStateError              — VM state transition is invalid
+├── VolumeCreateError         — Volume creation or resize failure
+├── VolumeNotFoundError       — Volume not found in registry
 ├── VMRequestError            — Error during VM request resolution
 ├── VMBuilderError            — VM builder failure (partial cleanup)
 ├── GuestfsError              — Base exception for libguestfs-related errors
@@ -620,6 +644,9 @@ process, and registers the VM in the database.
 | `inputs.boot_args` | `str \| None` | `None` | Override kernel boot arguments |
 | `inputs.lsm_flags` | `str \| None` | `None` | Linux Security Module flags |
 | `inputs.skip_cleanup` | `bool` | `False` | Skip cleanup on failure |
+| `inputs.count` | `int \| None` | `None` | Batch count: create N VMs (first keeps base name, subsequent get `-N` suffix) |
+| `inputs.atomic` | `bool` | `False` | All-or-nothing batch: roll back all VMs if any creation fails |
+| `inputs.volumes` | `list[str] \| None` | `None` | Volume names or IDs to attach to the VM |
 
 **Resolves (DB-backed defaults):**
 - CPU count, memory, user, PCI, console, logging, metrics — from `constants.py`
@@ -1480,6 +1507,73 @@ If `follow=False`, yields the last N lines then stops.
 | `inputs.lines` | `int \| None` | `None` | Number of lines to show |
 
 **Yields:** Log line strings.
+
+---
+
+### `VolumeOperation`
+
+All methods are `@staticmethod`. Volumes are identified using `VolumeInput` objects.
+
+#### `VolumeOperation.create(inputs: VolumeCreateInput) -> OperationResult[VolumeItem]`
+
+Create a new persistent data disk.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `inputs.name` | `str` | — | Volume name (required) |
+| `inputs.size` | `str` | — | Volume size, e.g. `"10G"`, `"512M"` |
+| `inputs.format` | `str \| None` | `None` | Disk format: `"raw"` or `"qcow2"` |
+
+**Returns:** `OperationResult[VolumeItem]` wrapping the created `VolumeItem`.
+
+**Raises:** `VolumeCreateError` if the volume already exists or creation fails.
+
+---
+
+#### `VolumeOperation.remove(inputs: VolumeInput, force: bool = False) -> BatchResult[VolumeItem]`
+
+Remove one or more volumes.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `inputs.name` | `list[str]` | `[]` | Volume names to remove |
+| `inputs.id` | `list[str]` | `[]` | Volume ID prefixes to remove |
+| `force` | `bool` | `False` | Remove even if attached to VMs |
+
+---
+
+#### `VolumeOperation.list_() -> list[VolumeItem]`
+
+List all registered volumes.
+
+---
+
+#### `VolumeOperation.get(inputs: VolumeInput) -> VolumeItem`
+
+Get a single volume by name or ID prefix.
+
+**Raises:** `VolumeNotFoundError` if not found or ambiguous.
+
+---
+
+#### `VolumeOperation.inspect(inputs: VolumeInput) -> dict[str, Any]`
+
+Return full details for a volume as a dictionary, including `qemu-img info` disk metadata.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `inputs` | `VolumeInput` | — | Must resolve to exactly one volume |
+
+---
+
+#### `VolumeOperation.resize(inputs: VolumeCreateInput) -> OperationResult[VolumeItem]`
+
+Resize an existing volume to a new size.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `inputs.name` | `str` | — | Volume name |
+| `inputs.size` | `str` | — | New size, e.g. `"20G"` |
 
 ---
 

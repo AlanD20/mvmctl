@@ -7,6 +7,8 @@ default to None, and basic equality works.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from mvmctl.models.binary import BinaryItem
 from mvmctl.models.host import HostStateChangeItem, HostStateItem
 from mvmctl.models.image import ImageItem
@@ -110,6 +112,48 @@ class TestKernelItem:
         k1 = self._make()
         k2 = self._make()
         assert k1 == k2
+
+
+class TestKernelPullResult:
+    """Tests for KernelPullResult dataclass."""
+
+    def test_name_property(self, tmp_path: Path) -> None:
+        """name property returns the Path's filename."""
+        from mvmctl.models.kernel import KernelPullResult
+
+        result = KernelPullResult(
+            path=tmp_path / "vmlinux-6.1",
+            version="6.1",
+            arch="x86_64",
+            kernel_type="firecracker",
+        )
+        assert result.name == "vmlinux-6.1"
+
+    def test_exists_returns_true(self, tmp_path: Path) -> None:
+        """exists() returns True when path exists."""
+        from mvmctl.models.kernel import KernelPullResult
+
+        kernel_path = tmp_path / "vmlinux-6.1"
+        kernel_path.write_text("kernel-data")
+        result = KernelPullResult(
+            path=kernel_path,
+            version="6.1",
+            arch="x86_64",
+            kernel_type="firecracker",
+        )
+        assert result.exists() is True
+
+    def test_exists_returns_false(self, tmp_path: Path) -> None:
+        """exists() returns False when path does not exist."""
+        from mvmctl.models.kernel import KernelPullResult
+
+        result = KernelPullResult(
+            path=tmp_path / "nonexistent-kernel",
+            version="6.1",
+            arch="x86_64",
+            kernel_type="firecracker",
+        )
+        assert result.exists() is False
 
 
 class TestBinaryItem:
@@ -306,6 +350,21 @@ class TestVMInstanceItem:
         vm1 = self._make()
         vm2 = self._make()
         assert vm1 == vm2
+
+    def test_volume_ids_deserializes_from_json_string(self) -> None:
+        """volume_ids is deserialized from a JSON string in __post_init__."""
+        vm = self._make(volume_ids='["vol1","vol2"]')
+        assert vm.volume_ids == ["vol1", "vol2"]
+
+    def test_ssh_keys_deserializes_from_json_string(self) -> None:
+        """ssh_keys is deserialized from a JSON string in __post_init__."""
+        vm = self._make(ssh_keys='["key1","key2"]')
+        assert vm.ssh_keys == ["key1", "key2"]
+
+    def test_volume_ids_remains_list(self) -> None:
+        """volume_ids stays as-is when already a list (not a JSON string)."""
+        vm = self._make(volume_ids=["vol1"])
+        assert vm.volume_ids == ["vol1"]
 
 
 class TestHostStateItem:

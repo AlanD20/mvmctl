@@ -91,7 +91,7 @@ When the refactor is complete:
 - Behavioral contract preserved — identical inputs produce identical outputs
 - Flow is clean — setup, validation, execution, termination
 - Names reveal intent — the code explains itself
-- CI gates pass — ruff, mypy, pytest 80%
+- CI gates pass — ruff, format, mypy, pytest 80%
 
 I do not pad work. I do not refactor for the sake of refactoring. Done means done.
 
@@ -144,7 +144,7 @@ I do not pad work. I do not refactor for the sake of refactoring. Done means don
 - [ ] Names reveal intent
 - [ ] Utilities extracted where appropriate
 - [ ] Behavioral contract preserved
-- [ ] CI gates pass (ruff, mypy, pytest 80%)
+- [ ] CI gates pass (ruff, format, mypy, pytest 80%)
 
 ## Quick Reference
 

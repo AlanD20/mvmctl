@@ -11,7 +11,7 @@ Initial release of mvmctl — a production-grade Python CLI for managing Firecra
 
 ### Added
 
-#### CLI Commands (13 top-level groups, 40+ subcommands)
+#### CLI Commands (14 top-level groups, 45+ subcommands)
 - **`mvm vm`** — Full VM lifecycle: create, ls, ps, rm, start, stop, reboot, pause, resume, snapshot, load, inspect, export, import
 - **`mvm console`** — Interactive serial console access via PTY-over-vsock relay (attach, --state, --kill)
 - **`mvm host`** — Host configuration: init (KVM, modules, sysctl, mvm group, sudoers), ls, clean, reset
@@ -25,19 +25,21 @@ Initial release of mvmctl — a production-grade Python CLI for managing Firecra
 - **`mvm cache`** — Cache lifecycle: init, prune (per-resource or all), clean
 - **`mvm logs`** — Log streaming: boot logs (serial console) and Firecracker OS logs with --follow
 - **`mvm ssh`** — SSH into VMs by name, ID, IP, or MAC with custom user, key, and connection timeout
+- **`mvm volume`** — Persistent data disk management: create, rm, ls, inspect, resize
 
 #### Architecture
 - **Three-layer architecture** (CLI → API → Core) with strict import boundaries
 - **LazyMVMGroup** — Custom Click group with lazy-loaded Typer sub-apps for sub-150ms startup
-- **Controller / Service / Repository / Resolver** pattern across all 13 core domains
+- **Controller / Service / Repository / Resolver** pattern across all 14 core domains
 - **Input → Request → Resolved** pipeline for type-safe, validated VM operations
 - **Provisioning backend abstraction** (LoopMount vs Guestfs) with factory pattern
-- **SQLite database** with migration system for persistent state (vms, networks, images, kernels, binaries, keys, host state, iptables rules, IP leases)
+- **SQLite database** with migration system for persistent state (vms, networks, images, kernels, binaries, keys, host state, iptables rules, IP leases, volumes)
 - **Relation enrichment** system with batch loading to prevent N+1 queries
 - **Privilege delegation** model via `mvm` unix group and sudoers drop-in (no sudo for normal operations)
 
 #### VM Lifecycle
 - Create VMs with configurable vCPUs, memory, disk size, PCI, console, logging, and metrics
+- Batch VM creation via `--count N` and all-or-nothing `--atomic` flag
 - Root filesystem images via durable incremental copying with reflink/FICLONE support
 - Snapshot and restore (memory + VM state) via Firecracker API socket
 - Export VM configurations as portable JSON

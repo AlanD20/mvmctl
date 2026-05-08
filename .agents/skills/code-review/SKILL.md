@@ -32,8 +32,8 @@ I am NOT for designing new architecture — use `@.agents/skills/architect/` ski
 ## Checks
 
 ### Architecture
-- [ ] cli/ imports only from api/, never core/ directly (except known violations)
-- [ ] api/ adds `check_privileges()` before privileged ops
+- [ ] cli/ imports only from api/, never core/ directly
+- [ ] api/ adds `HostPrivilegeHelper.check_privileges()` before privileged ops
 - [ ] core/ raises typed exceptions, never prints
 - [ ] models/ has only dataclasses with `__post_init__` validation
 
@@ -77,7 +77,7 @@ I am NOT for designing new architecture — use `@.agents/skills/architect/` ski
 uv run ruff check src/
 uv run ruff format --check src/
 uv run mypy src/
-uv run pytest tests/ -q --cov=src/mvmctl --cov-fail-under=80
+uv run pytest tests/ -q --cov=src/mvmctl -n auto --cov-fail-under=80
 ```
 
 ## Quick Reference

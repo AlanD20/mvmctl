@@ -517,3 +517,24 @@ class VMValidator:
                     errors.append(f"Invalid root UUID format: {root_uuid}")
 
         return errors
+
+
+class VolumeValidator:
+    """Validate volume-specific inputs."""
+
+    @staticmethod
+    def validate_name(name: str) -> str:
+        """
+        Validate volume name.
+
+        Args:
+            name: Volume name to validate.
+
+        Returns:
+            The validated name.
+
+        Raises:
+            MVMError: If name is invalid.
+
+        """
+        return CommonUtils.validate_entity_name(name, entity_type="volume")

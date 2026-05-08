@@ -138,6 +138,83 @@ Every change you make falls into one of two categories. There is no third catego
 
 But each fix still follows simple (auto-approve) or complex (report) rules based on the change itself.
 
+### Destructive Tests Must Be Last in Domain File
+
+Every domain test file MUST order test classes so that **destructive tests** (remove, delete, clean, force-delete, prune, etc.) are defined at the **end of the file**, after all non-destructive tests. This ensures:
+
+- **Setup reuse** — Non-destructive tests run first and leave shared state intact
+- **Isolation** — Destructive cleanup does not break subsequent tests
+- **Clarity** — Readers see what operations are safe vs. state-altering
+
+**Existing examples (required pattern):**
+- `test_images.py` → `TestImageRemoveForce` / `TestImageRemove` are the last classes
+- `test_network.py` → `TestNetworkRemoveForce` is the last class
+- `test_kernel.py` → `TestKernelRemoveForce` is the last class
+- `test_cache.py` → `TestCacheClean` / `TestCachePruneActual` / `TestCachePruneEdgeCases` are the last classes
+- `test_vm_lifecycle.py` → `TestVMRemove`, `TestVMExportImport`, `TestVMCreateNegativeEdgeCases` etc. are defined after `TestVMList`, `TestVMSSH`, `TestVMStateOperations`
+
+**Consequence:** When adding a new test class that performs destructive operations, place it after all non-destructive classes for that domain. If no non-destructive classes exist yet, add both — non-destructive first, destructive last.
+
+## CLEAN TEST DESIGN FOR SYSTEM TESTS
+
+System tests follow a strict clean design. Every domain test file MUST adhere to these principles:
+
+### 1. One Domain Per File
+Each `tests/system/test_*.py` tests exactly one CLI domain (vm, network, image, kernel, key, bin, host, cache, config, console, logs, ssh, init).
+
+### 2. File Structure (top-to-bottom)
+```
+1. Module docstring describing the domain being tested
+2. Standard imports (json, subprocess, pytest, conftest._run_mvm)
+3. pytestmark list with domain marker
+4. Helper functions (domain-specific, if needed)
+5. Non-destructive test classes (ordered from simple → complex)
+6. Destructive test classes (remove, clean, force-ops)  ← see "Destructive Tests Must Be Last"
+```
+
+### 3. Naming Convention
+- **File:** `test_<domain>.py` (e.g., `test_images.py`, `test_network.py`)
+- **Class:** `Test<Domain><Operation>` (e.g., `TestImagePull`, `TestImageRemove`, `TestNetworkLifecycle`)
+- **Method:** `test_<operation>_<variant>` (e.g., `test_image_remove_with_fixture`, `test_image_pull_nonexistent`)
+- **Docstring:** Every class and method MUST have a brief docstring explaining what it tests
+
+### 4. Pytestmark Requirements
+Every test class MUST explicitly declare its markers:
+```python
+pytestmark = [
+    pytest.mark.system,
+    pytest.mark.domain_<domain>,
+    # optional: pytest.mark.slow, pytest.mark.requires_kvm, pytest.mark.serial
+]
+```
+File-level `pytestmark` provides defaults; class-level `pytestmark` overrides/extends them.
+
+### 5. Independence
+- Tests MUST NOT depend on other tests' side effects
+- Use fixtures (`created_vm`, `created_network`, `created_key`, `unique_vm_name`, `mvm_binary`) for setup/teardown
+- Use `finally:` blocks or fixture-scoped cleanup for destructive operations
+- Parametrize across variants (e.g., `TestImagePull` parametrizes `alpine-3.21` and `ubuntu-24.04-minimal`)
+
+### 6. Failure Cases Use check=False
+Every test that expects a non-zero exit code MUST pass `check=False` to `_run_mvm()`:
+```python
+result = _run_mvm(mvm_binary, "image", "rm", target_prefix, check=False)
+assert result.returncode == 0
+```
+
+### 7. JSON Output Validation
+For any command supporting `--json`, the test MUST parse and assert against the JSON structure:
+```python
+result = _run_mvm(mvm_binary, "network", "ls", "--json")
+networks = json.loads(result.stdout)
+assert any(n.get("name") == expected_name for n in networks)
+```
+
+### 8. Cleanup Hygiene
+- Every destructive test restores removed state (re-pull image, recreate network)
+- OR uses `pytest.skip()` with explanation if restoration fails
+- No test leaves the system in a degraded state for subsequent tests
+
 ### When Stuck — USE @explore
 
 If you are struggling, looping, guessing, or assuming:
@@ -461,3 +538,54 @@ When done, present a report like:
 
 ### Verdict: RELEASE READY ✅ / NOT READY ❌
 ```
+
+## Build & Test the Release Binary
+
+### Prerequisites
+
+```bash
+uv sync --group dev --group build
+```
+
+### Build the Binary
+
+**Fast build** (for iterative testing):
+```bash
+python scripts/build_services.py --release
+```
+
+**Optimized build** (production — LTO, anti-bloat, smaller binary):
+```bash
+python scripts/build_services.py --release --optimize
+```
+
+Output: `dist/mvm` (main binary) and `dist/services/mvm-services` (service binaries).
+
+### System Test the Built Binary
+
+Run system tests against the built binary with the asset mirror:
+
+```bash
+# Run all system tests
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror sg mvm -c './dist/mvm --version'
+
+# Run system tests by domain
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror sg mvm -c 'uv run pytest tests/system/test_bin.py -v'
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror sg mvm -c 'uv run pytest tests/system/test_config.py -v'
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror sg mvm -c 'uv run pytest tests/system/test_network.py -v'
+# ... etc (follow execution order in System Test Execution Protocol)
+```
+
+The built `dist/mvm` binary is self-contained — it does NOT need `uv run` or the Python source. The `sg mvm -c` wrapper is still required for group privileges.
+
+### QA Build Verification Checklist
+
+After building and running system tests, report remaining user tasks:
+
+- [ ] All system tests pass against `dist/mvm`
+- [ ] Binary runs: `./dist/mvm --version` returns correct version
+- [ ] Binary runs: `./dist/mvm --help` shows all commands
+- [ ] Binary is self-contained: `file dist/mvm` shows ELF executable
+- [ ] Binary size recorded (expect ~15-25 MB optimized, ~30-50 MB fast mode)
+
+**QA engineer does NOT version-bump, tag, or push. These are user tasks.**

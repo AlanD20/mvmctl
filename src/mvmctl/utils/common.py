@@ -462,6 +462,31 @@ class CommonUtils:
         return f"{size_float:.1f} TiB"
 
     @staticmethod
+    def generate_batch_names(base_name: str, count: int) -> list[str]:
+        """Generate unique names for batch VM creation.
+
+        First VM keeps base name, subsequent VMs get -N suffix.
+
+        Args:
+            base_name: Base name for the VM.
+            count: Number of VMs to generate names for.
+
+        Returns:
+            List of unique VM names. When count=1, returns ``[base_name]``.
+            When count>1, returns ``[base_name, base_name-2, base_name-3, ...]``.
+
+        Example:
+            >>> CommonUtils.generate_batch_names("my-vm", 3)
+            ['my-vm', 'my-vm-2', 'my-vm-3']
+        """
+        if count == 1:
+            return [base_name]
+        names = [base_name]
+        for i in range(2, count + 1):
+            names.append(f"{base_name}-{i}")
+        return names
+
+    @staticmethod
     def _get_combined_marker(is_default: bool, is_missing: bool) -> str:
         """Get combined default and existence marker."""
         if is_default and is_missing:

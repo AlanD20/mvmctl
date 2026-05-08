@@ -14,11 +14,11 @@ from mvmctl.api.inputs._volume_create_input import (
 from mvmctl.api.inputs._volume_input import VolumeInput, VolumeRequest
 from mvmctl.core._shared import Database
 from mvmctl.core.volume._repository import VolumeRepository
-from mvmctl.core.volume._resolver import VolumeResolver
 from mvmctl.core.volume._service import VolumeService
 from mvmctl.exceptions import VolumeCreateError, VolumeNotFoundError
-from mvmctl.models import VolumeItem
+from mvmctl.models import VolumeItem, VolumeStatus
 from mvmctl.models.result import BatchResult, OperationResult
+from mvmctl.utils._disk import DiskUtils
 from mvmctl.utils.auditlog import AuditLog
 from mvmctl.utils.crypto import HashGenerator
 
@@ -50,19 +50,14 @@ class VolumeOperation:
         repo = VolumeRepository(db)
 
         request = VolumeCreateRequest(inputs=inputs, db=db)
-        resolved = request.resolve()
-
-        # Check for existing volume with same name
-        existing = repo.get_by_name(resolved.name)
-        if existing is not None:
+        try:
+            resolved = request.resolve()
+        except VolumeCreateError as e:
             return OperationResult(
                 status="error",
                 code="volume.already_exists",
-                message=f"Volume '{resolved.name}' already exists",
+                message=str(e),
             )
-
-        service = VolumeService(repo)
-        service.create_disk(resolved.path, resolved.size_bytes, resolved.format)
 
         timestamp = datetime.now(tz=UTC).isoformat()
         volume_id = HashGenerator.volume(resolved.name, timestamp)
@@ -73,13 +68,13 @@ class VolumeOperation:
             size_bytes=resolved.size_bytes,
             format=resolved.format,
             path=str(resolved.path),
-            status="available",
+            status=VolumeStatus.AVAILABLE,
             vm_id=None,
             created_at=timestamp,
             updated_at=timestamp,
         )
 
-        repo.upsert(volume_item)
+        VolumeService(repo).create_disk(volume_item)
 
         AuditLog.log("volume.create", changes={"name": resolved.name})
 
@@ -110,17 +105,15 @@ class VolumeOperation:
         resolved = VolumeRequest(inputs=inputs, db=db).resolve()
 
         results: list[OperationResult[VolumeItem]] = []
-        for volume in resolved.items:
+        for volume in resolved.volumes:
             try:
-                if volume.status == "attached" and not force:
+                if volume.status == VolumeStatus.ATTACHED and not force:
                     raise VolumeCreateError(
                         f"Volume '{volume.name}' is attached to a VM. "
                         "Use --force to remove anyway."
                     )
 
-                service = VolumeService(repo)
-                service.remove_disk(Path(volume.path))
-                repo.delete(volume.id)
+                VolumeService(repo).remove_disk(volume)
 
                 AuditLog.log("volume.remove", changes={"name": volume.name})
 
@@ -173,10 +166,10 @@ class VolumeOperation:
         """
         resolved = VolumeRequest(inputs=inputs, db=Database()).resolve()
 
-        if len(resolved.items) > 1:
+        if len(resolved.volumes) > 1:
             raise VolumeNotFoundError("Expected exactly one volume identifier")
 
-        return resolved.items[0]
+        return resolved.volumes[0]
 
     @staticmethod
     def inspect(inputs: VolumeInput) -> dict[str, Any]:
@@ -193,6 +186,14 @@ class VolumeOperation:
         service = VolumeService(VolumeRepository(Database()))
         disk_info = service.get_disk_info(Path(volume_item.path))
 
+        # Resolve VM name if attached (cross-domain enrichment)
+        vm_name: str | None = None
+        if volume_item.vm_id:
+            from mvmctl.core.vm._repository import VMRepository
+
+            vm = VMRepository(Database()).get(volume_item.vm_id)
+            vm_name = vm.name if vm is not None else None
+
         return {
             "id": volume_item.id,
             "name": volume_item.name,
@@ -201,6 +202,7 @@ class VolumeOperation:
             "path": volume_item.path,
             "status": volume_item.status,
             "vm_id": volume_item.vm_id,
+            "vm_name": vm_name,
             "created_at": volume_item.created_at,
             "updated_at": volume_item.updated_at,
             "disk_info": disk_info,
@@ -208,10 +210,11 @@ class VolumeOperation:
 
     @staticmethod
     def resize(inputs: VolumeCreateInput) -> OperationResult[VolumeItem]:
-        """Resize a volume by name.
+        """Resize a volume by name or ID prefix.
 
         Args:
-            inputs: VolumeCreateInput containing name and new size.
+            inputs: VolumeCreateInput containing the target identifier
+                    (via ``name``) and new size.
 
         Returns:
             OperationResult with updated volume metadata.
@@ -220,36 +223,26 @@ class VolumeOperation:
         db = Database()
         repo = VolumeRepository(db)
 
-        # Resolve volume by name
-        volume = VolumeResolver(repo).by_name(inputs.name)
+        # ── Resolve via VolumeInput + VolumeRequest pipeline ─────────────
+        # The user may pass a name OR an ID prefix.  VolumeRequest handles
+        # both through VolumeResolver.resolve_many().
+        vol_input = VolumeInput(name=[inputs.name])
+        resolved_vol = VolumeRequest(inputs=vol_input, db=db).resolve()
+        volume = resolved_vol.volumes[0]
 
-        request = VolumeCreateRequest(inputs=inputs, db=db)
-        resolved = request.resolve()
+        # ── Parse size directly ──────────────────────────────────────────
+        # VolumeCreateRequest is NOT used here because its ensure_validate()
+        # rejects existing volume names (creation-side check).  Resize
+        # operates on an existing volume, so we parse size directly.
+        size_bytes = DiskUtils.parse_disk_size_to_bytes(inputs.size)
 
-        service = VolumeService(repo)
-        service.resize_disk(
-            Path(volume.path), resolved.size_bytes, volume.format
-        )
+        updated = VolumeService(repo).resize_disk(volume, size_bytes)
 
-        updated = VolumeItem(
-            id=volume.id,
-            name=volume.name,
-            size_bytes=resolved.size_bytes,
-            format=volume.format,
-            path=volume.path,
-            status=volume.status,
-            vm_id=volume.vm_id,
-            created_at=volume.created_at,
-            updated_at=datetime.now(tz=UTC).isoformat(),
-        )
-
-        repo.upsert(updated)
-
-        AuditLog.log("volume.resize", changes={"name": inputs.name})
+        AuditLog.log("volume.resize", changes={"name": volume.name})
 
         return OperationResult(
             status="success",
             code="volume.resized",
             item=updated,
-            message=f"Volume '{inputs.name}' resized",
+            message=f"Volume '{volume.name}' resized",
         )

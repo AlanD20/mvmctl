@@ -41,6 +41,29 @@ class VMRepository:
             return None
         return VMInstanceItem(**dict(row))
 
+    def get_by_names(self, names: list[str]) -> set[str]:
+        """Return the set of VM names that already exist from a list.
+
+        Uses a single ``WHERE name IN (...)` query instead of N individual
+        lookups, saving N-1 round trips.
+
+        Args:
+            names: List of VM names to check for collisions.
+
+        Returns:
+            Set of names from the input that already exist in the database.
+
+        """
+        if not names:
+            return set()
+        placeholders = ",".join("?" for _ in names)
+        with self._db.connect() as conn:
+            rows = conn.execute(
+                f"SELECT name FROM vm_instances WHERE name IN ({placeholders})",
+                names,
+            ).fetchall()
+        return {row["name"] for row in rows}
+
     @_graceful_read(default=None)
     def find_by_ip(self, ipv4: str) -> VMInstanceItem | None:
         """Return a VM by IP address, or None if not found."""
@@ -238,7 +261,9 @@ class VMRepository:
                     vm.serial_output_path,
                     vm.lsm_flags,
                     vm.boot_args,
-                    vm.volume_ids,
+                    json.dumps(vm.volume_ids)
+                    if vm.volume_ids is not None
+                    else None,
                 ),
             )
 

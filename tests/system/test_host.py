@@ -8,7 +8,7 @@ import pytest
 
 from tests.system.conftest import _run_mvm
 
-pytestmark = [pytest.mark.system, pytest.mark.serial, pytest.mark.domain_vm]
+pytestmark = [pytest.mark.system, pytest.mark.domain_host]
 
 
 class TestHostStatus:
@@ -41,7 +41,7 @@ class TestHostCleanSafety:
         pytest.mark.requires_kvm,
         pytest.mark.slow,
         pytest.mark.serial,
-        pytest.mark.domain_vm,
+        pytest.mark.domain_host,
     ]
 
     def test_host_clean_blocked_by_running_vm(self, mvm_binary, unique_vm_name):
@@ -91,7 +91,7 @@ class TestHostResetSafety:
         pytest.mark.requires_kvm,
         pytest.mark.slow,
         pytest.mark.serial,
-        pytest.mark.domain_vm,
+        pytest.mark.domain_host,
     ]
 
     def test_host_reset_blocked_by_running_vm(self, mvm_binary, unique_vm_name):

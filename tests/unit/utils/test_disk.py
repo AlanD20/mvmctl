@@ -10,6 +10,7 @@ from mvmctl.exceptions import (
     TieDetectedError,
 )
 from mvmctl.utils._disk import (
+    DiskUtils,
     FilesystemDetector,
     LabelDetector,
     RootPartitionDetector,
@@ -17,74 +18,73 @@ from mvmctl.utils._disk import (
     TypeCodeDetector,
     format_disk_size,
     format_sectors_human_readable,
-    parse_disk_size,
 )
 
 # =========================================================================
-# parse_disk_size
+# DiskUtils.parse_disk_size_to_bytes
 # =========================================================================
 
 
 class TestParseDiskSize:
-    """Tests for parse_disk_size function."""
+    """Tests for DiskUtils.parse_disk_size_to_bytes."""
 
     def test_parse_bytes(self) -> None:
-        assert parse_disk_size("512B") == 512
-        assert parse_disk_size("1024") == 1024  # no unit → bytes
-        assert parse_disk_size("0B") == 0
+        assert DiskUtils.parse_disk_size_to_bytes("512B") == 512
+        assert DiskUtils.parse_disk_size_to_bytes("1024") == 1024  # no unit → bytes
+        assert DiskUtils.parse_disk_size_to_bytes("0B") == 0
 
     def test_parse_kilobytes(self) -> None:
-        assert parse_disk_size("1K") == 1024
-        assert parse_disk_size("1KB") == 1024
-        assert parse_disk_size("512K") == 512 * 1024
-        assert parse_disk_size("2.5KB") == int(2.5 * 1024)
+        assert DiskUtils.parse_disk_size_to_bytes("1K") == 1024
+        assert DiskUtils.parse_disk_size_to_bytes("1KB") == 1024
+        assert DiskUtils.parse_disk_size_to_bytes("512K") == 512 * 1024
+        assert DiskUtils.parse_disk_size_to_bytes("2.5KB") == int(2.5 * 1024)
 
     def test_parse_megabytes(self) -> None:
-        assert parse_disk_size("1M") == 1024**2
-        assert parse_disk_size("1MB") == 1024**2
-        assert parse_disk_size("512M") == 512 * 1024**2
-        assert parse_disk_size("2.5MB") == int(2.5 * 1024**2)
+        assert DiskUtils.parse_disk_size_to_bytes("1M") == 1024**2
+        assert DiskUtils.parse_disk_size_to_bytes("1MB") == 1024**2
+        assert DiskUtils.parse_disk_size_to_bytes("512M") == 512 * 1024**2
+        assert DiskUtils.parse_disk_size_to_bytes("2.5MB") == int(2.5 * 1024**2)
 
     def test_parse_gigabytes(self) -> None:
-        assert parse_disk_size("1G") == 1024**3
-        assert parse_disk_size("1GB") == 1024**3
-        assert parse_disk_size("2G") == 2 * 1024**3
-        assert parse_disk_size("2.5GB") == int(2.5 * 1024**3)
+        assert DiskUtils.parse_disk_size_to_bytes("1G") == 1024**3
+        assert DiskUtils.parse_disk_size_to_bytes("1GB") == 1024**3
+        assert DiskUtils.parse_disk_size_to_bytes("2G") == 2 * 1024**3
+        assert DiskUtils.parse_disk_size_to_bytes("2.5GB") == int(2.5 * 1024**3)
 
     def test_parse_terabytes(self) -> None:
-        assert parse_disk_size("1T") == 1024**4
-        assert parse_disk_size("1TB") == 1024**4
-        assert parse_disk_size("2T") == 2 * 1024**4
+        assert DiskUtils.parse_disk_size_to_bytes("1T") == 1024**4
+        assert DiskUtils.parse_disk_size_to_bytes("1TB") == 1024**4
+        assert DiskUtils.parse_disk_size_to_bytes("2T") == 2 * 1024**4
 
     def test_case_insensitive(self) -> None:
-        assert parse_disk_size("1g") == 1024**3
-        assert parse_disk_size("1gb") == 1024**3
-        assert parse_disk_size("1G") == 1024**3
-        assert parse_disk_size("512m") == 512 * 1024**2
-        assert parse_disk_size("512M") == 512 * 1024**2
+        assert DiskUtils.parse_disk_size_to_bytes("1g") == 1024**3
+        assert DiskUtils.parse_disk_size_to_bytes("1gb") == 1024**3
+        assert DiskUtils.parse_disk_size_to_bytes("1G") == 1024**3
+        assert DiskUtils.parse_disk_size_to_bytes("512m") == 512 * 1024**2
+        assert DiskUtils.parse_disk_size_to_bytes("512M") == 512 * 1024**2
 
     def test_whitespace_allowed(self) -> None:
-        assert parse_disk_size("1 G") == 1024**3
-        assert parse_disk_size("512  M") == 512 * 1024**2
-        assert parse_disk_size("  2.5 GB  ") == int(2.5 * 1024**3)
+        assert DiskUtils.parse_disk_size_to_bytes("1 G") == 1024**3
+        assert DiskUtils.parse_disk_size_to_bytes("512  M") == 512 * 1024**2
+        assert DiskUtils.parse_disk_size_to_bytes("  2.5 GB  ") == int(2.5 * 1024**3)
 
     def test_invalid_format_raises(self) -> None:
         with pytest.raises(MVMError, match="Invalid disk size format"):
-            parse_disk_size("abc")
+            DiskUtils.parse_disk_size_to_bytes("abc")
         with pytest.raises(MVMError, match="Invalid disk size format"):
-            parse_disk_size("1X")
+            DiskUtils.parse_disk_size_to_bytes("1X")
         with pytest.raises(MVMError, match="Invalid disk size format"):
-            parse_disk_size("G")
+            DiskUtils.parse_disk_size_to_bytes("G")
         with pytest.raises(MVMError, match="Invalid disk size format"):
-            parse_disk_size("")
+            DiskUtils.parse_disk_size_to_bytes("")
         with pytest.raises(MVMError, match="Invalid disk size format"):
-            parse_disk_size("1XB")
+            DiskUtils.parse_disk_size_to_bytes("1XB")
         with pytest.raises(MVMError, match="Invalid disk size format"):
-            parse_disk_size("1PB")
+            DiskUtils.parse_disk_size_to_bytes("1PB")
 
     def test_negative_size_raises(self) -> None:
         with pytest.raises(MVMError, match="Invalid disk size format"):
-            parse_disk_size("-1G")
+            DiskUtils.parse_disk_size_to_bytes("-1G")
 
 
 # =========================================================================

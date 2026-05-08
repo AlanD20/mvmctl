@@ -71,12 +71,14 @@ class VMInstanceItem:
         default_factory=list
     )  # SSH key fingerprints stored in VM
     ssh_user: str | None = None  # SSH user for this VM
-    volume_ids: str | None = None  # JSON array of attached volume IDs
+    volume_ids: list[str] | None = None  # Attached volume IDs
 
     def __post_init__(self) -> None:
-        """Deserialize ssh_keys from JSON string when loading from DB."""
+        """Deserialize ssh_keys and volume_ids from JSON strings when loading from DB."""
         if isinstance(self.ssh_keys, str):
             self.ssh_keys = json.loads(self.ssh_keys)
+        if isinstance(self.volume_ids, str):
+            self.volume_ids = json.loads(self.volume_ids)
         CommonUtils.coerce_bool_fields(
             self,
             {

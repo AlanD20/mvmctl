@@ -56,6 +56,13 @@ class VMResolver:
             method="list_by_network_id",
             relation_name="leases",
         ),
+        "volumes": RelationSpec(
+            fk_field="volume_ids",
+            resolver="volume",
+            method="by_id",
+            relation_name="volumes",
+            batch_method="resolve_by_vm_volume_ids",
+        ),
     }
 
     def __init__(

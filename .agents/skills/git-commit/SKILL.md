@@ -42,8 +42,8 @@ uv run ruff format --check src/
 # Type checking (strict mode, NO type: ignore allowed)
 uv run mypy src/
 
-# Tests with 80% branch coverage
-uv run pytest tests/ -q --cov=src/mvmctl --cov-fail-under=80
+# Tests with 80% branch coverage (parallel)
+uv run pytest tests/ -q --cov=src/mvmctl -n auto --cov-fail-under=80
 ```
 
 **If checks fail:**
@@ -136,7 +136,7 @@ Before committing:
 | Linting | `uv run ruff check src/` | Clean |
 | Formatting | `uv run ruff format --check src/` | Clean |
 | Type Check | `uv run mypy src/` | Strict mode |
-| Tests | `uv run pytest tests/ -q --cov=src/mvmctl --cov-fail-under=80` | 80% branch |
+| Tests | `uv run pytest tests/ -q --cov=src/mvmctl -n auto --cov-fail-under=80` | 80% branch |
 | Staged files | `git status` | No forbidden files |
 | Commit msg | `git log --oneline -1` | Clear and descriptive |
 

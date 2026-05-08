@@ -4,9 +4,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import NotRequired, TypedDict
 
 from mvmctl.models.cloudinit import CloudInitMode
+
+
+class DriveConfig(TypedDict):
+    drive_id: str
+    path_on_host: str
+    is_root_device: bool
+    is_read_only: bool
+    partuuid: NotRequired[str]
+    cache_type: str
+    io_engine: str
+    rate_limiter: NotRequired[object | None]
+    socket: NotRequired[str | None]
 
 
 @dataclass
@@ -66,7 +78,7 @@ class FirecrackerConfig:
     cloud_init_nocloud_url: str | None
 
     # Extra drives (volumes)
-    extra_drives: list[dict[str, Any]] = field(default_factory=list)
+    extra_drives: list[DriveConfig] = field(default_factory=list)
 
     # Spawn behavior
     relay_enabled: bool = False

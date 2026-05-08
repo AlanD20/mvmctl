@@ -16,7 +16,7 @@ from mvmctl.exceptions import (
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "parse_disk_size",
+    "DiskUtils",
     "format_sectors_human_readable",
     "format_disk_size",
     "PartitionDetector",
@@ -48,52 +48,56 @@ _SIZE_PATTERN: Final[re.Pattern[str]] = re.compile(
 )
 
 
-def parse_disk_size(size_str: str) -> int:
-    """
-    Parse disk size string to bytes.
+class DiskUtils:
+    """Disk size parsing and formatting utilities."""
 
-    Supports: 512M, 1G, 2.5GB, 1024K, etc.
-    Case-insensitive. Whitespace allowed between number and unit.
+    @staticmethod
+    def parse_disk_size_to_bytes(size_str: str) -> int:
+        """
+        Parse disk size string to bytes.
 
-    Args:
-        size_str: Size string like "512M", "1G", "2.5GB"
+        Supports: 512M, 1G, 2.5GB, 1024K, etc.
+        Case-insensitive. Whitespace allowed between number and unit.
 
-    Returns:
-        Size in bytes as integer
+        Args:
+            size_str: Size string like "512M", "1G", "2.5GB"
 
-    Raises:
-        MVMError: If format is invalid
+        Returns:
+            Size in bytes as integer
 
-    """
-    size_str = size_str.strip().upper()
-    match = _SIZE_PATTERN.match(size_str)
+        Raises:
+            MVMError: If format is invalid
 
-    if not match:
-        raise MVMError(
-            f"Invalid disk size format: '{size_str}'. "
-            "Expected format: <number><unit> where unit is B, K, KB, M, MB, G, GB, T, TB"
-        )
+        """
+        size_str = size_str.strip().upper()
+        match = _SIZE_PATTERN.match(size_str)
 
-    number_str, unit = match.groups()
-    unit = unit or "B"  # Default to bytes if no unit
+        if not match:
+            raise MVMError(
+                f"Invalid disk size format: '{size_str}'. "
+                "Expected format: <number><unit> where unit is B, K, KB, M, MB, G, GB, T, TB"
+            )
 
-    try:
-        number = float(number_str)
-    except ValueError:
-        raise MVMError(f"Invalid number in disk size: '{number_str}'")
+        number_str, unit = match.groups()
+        unit = unit or "B"  # Default to bytes if no unit
 
-    multiplier = _SIZE_MULTIPLIERS.get(unit.upper())
-    if multiplier is None:
-        raise MVMError(
-            f"Unknown size unit: '{unit}'. Valid: B, K, KB, M, MB, G, GB, T, TB"
-        )
+        try:
+            number = float(number_str)
+        except ValueError:
+            raise MVMError(f"Invalid number in disk size: '{number_str}'")
 
-    bytes_count = int(number * multiplier)
+        multiplier = _SIZE_MULTIPLIERS.get(unit.upper())
+        if multiplier is None:
+            raise MVMError(
+                f"Unknown size unit: '{unit}'. Valid: B, K, KB, M, MB, G, GB, T, TB"
+            )
 
-    if bytes_count < 0:
-        raise MVMError(f"Disk size cannot be negative: {size_str}")
+        bytes_count = int(number * multiplier)
 
-    return bytes_count
+        if bytes_count < 0:
+            raise MVMError(f"Disk size cannot be negative: {size_str}")
+
+        return bytes_count
 
 
 def format_sectors_human_readable(

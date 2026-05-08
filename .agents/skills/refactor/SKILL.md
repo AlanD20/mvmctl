@@ -38,7 +38,7 @@ I am NOT for implementing new features — use `@.agents/skills/architect/` skil
 You MUST perform due diligence before making any changes:
 
 1. Read the function definition THOROUGHLY
-2. Spawn `@explore` agents to find ALL call sites of this function
+2. Use `explore` agent to find ALL call sites of this function
 3. Map every input, output, and side effect
 4. Understand the contract this function promises to maintain
 
@@ -88,10 +88,10 @@ If you rename during refactor, you are EMPOWERED to do so — the name must serv
 Shared logic belongs in utils/:
 
 - Pure helper functions → utils/ (no domain knowledge)
-- Repeated subprocess patterns → utils/process.py
+- Repeated subprocess patterns → utils/process_utils.py
 - File operations → utils/fs.py
 - HTTP operations → utils/http.py
-- Guestfs operations → utils/guestfs.py
+- Network helpers → utils/network.py
 
 **MEMO**: "Centralize tools; distribute only the orchestration."
 
@@ -114,7 +114,7 @@ The user has vision. You have only analysis.
 ### Step 1: Investigation (MANDATORY)
 ```
 1. Read the function completely — all paths, branches, edge cases
-2. List ALL callers via @explore
+2. List ALL callers via explore agent
 3. Document:
    - Inputs (parameters, globals, file state)
    - Outputs (return values, exceptions, side effects)
@@ -148,7 +148,7 @@ The user has vision. You have only analysis.
 ```
 1. Run: uv run ruff check src/
 2. Run: uv run mypy src/
-3. Run: uv run pytest tests/ -q --cov=src/mvmctl --cov-fail-under=80
+3. Run: uv run pytest tests/ -q --cov=src/mvmctl -n auto --cov-fail-under=80
 ```
 
 ## Checklist
@@ -159,7 +159,7 @@ The user has vision. You have only analysis.
 - [ ] Variables renamed for clarity
 - [ ] Utilities extracted to utils/ if applicable
 - [ ] Behavioral equivalence verified
-- [ ] CI gates pass (ruff, mypy, pytest 80%)
+- [ ] CI gates pass (ruff, format, mypy, pytest 80%)
 
 ## Quick Reference
 

@@ -79,6 +79,7 @@ class TestTableCreation:
         "networks",
         "network_leases",
         "vm_instances",
+        "volumes",
         "host_state",
         "host_state_changes",
         "db_migrations",
@@ -215,6 +216,7 @@ class TestColumnStructure:
         "boot_args": "TEXT",
         "ssh_keys": "TEXT",
         "ssh_user": "TEXT",
+        "volume_ids": "TEXT",
         "created_at": "TIMESTAMP",
         "updated_at": "TIMESTAMP",
     }

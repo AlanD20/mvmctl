@@ -36,6 +36,7 @@ src/mvmctl/
 │   ├── __init__.py                         # Re-exports all Operation + Input classes
 │   ├── vm_operations.py                    # VMOperation — VM lifecycle orchestration
 │   ├── network_operations.py               # NetworkOperation
+│   ├── volume_operations.py                # VolumeOperation — persistent storage management
 │   ├── host_operations.py                  # HostOperation
 │   ├── image_operations.py                 # ImageOperation
 │   ├── kernel_operations.py                # KernelOperation
@@ -63,7 +64,9 @@ src/mvmctl/
 │       ├── _ssh_input.py
 │       ├── _config_input.py
 │       ├── _console_input.py
-│       └── _logs_input.py
+│       ├── _logs_input.py
+│       ├── _volume_input.py               # VolumeInput → VolumeRequest → ResolvedVolumeInput
+│       └── _volume_create_input.py        # VolumeCreateInput → VolumeCreateRequest → ResolvedVolumeCreateInput
 │
 ├── core/                                    # Isolated domain logic
 │   ├── vm/                                  # VM lifecycle
@@ -123,6 +126,11 @@ src/mvmctl/
 │   │   └── _provisioner.py                  # CloudInitProvisioner
 │   ├── guestfs/                             # Guestfs filesystem provisioning
 │   │   └── (lives in _shared/_guestfs/)     # Cross-domain filesystem operations
+│   ├── volume/                              # Persistent storage volumes
+│   │   ├── _controller.py                   # VolumeController (stateful — per-volume attach/detach)
+│   │   ├── _service.py                      # VolumeService (disk creation, removal, resize, inspect)
+│   │   ├── _repository.py                   # VolumeRepository (database operations)
+│   │   └── _resolver.py                     # VolumeResolver (entity resolution)
 │   ├── ssh/                                 # SSH operations
 │   │   └── _service.py                      # SSHService (stateful — stores connection params as instance state)
 │   └── _shared/                           # Shared infrastructure
@@ -166,6 +174,7 @@ src/mvmctl/
 │   ├── init.py
 │   ├── logs.py
 │   ├── ssh.py
+│   ├── volume.py
 │   └── ...
 │
 ├── models/                                  # Pure @dataclass objects
@@ -182,7 +191,8 @@ src/mvmctl/
 │   ├── network.py                           # NetworkItem, NetworkLeaseItem, IPTablesRuleItem
 │   ├── provisioner.py                       # Provisioner operation models
 │   ├── result.py                            # OperationResult, BatchResult, etc.
-│   └── vm.py                                # VMInstanceItem, VMInspectInfo, ConsoleInfo, ConsoleState
+│   ├── vm.py                                # VMInstanceItem, VMInspectInfo, ConsoleInfo, ConsoleState
+│   └── volume.py                            # VolumeItem
 │
 ├── services/                                # Long-running subprocess services
 │   ├── console_relay/                       # Console relay service
@@ -680,6 +690,10 @@ class BinaryItem: ...
 @dataclass
 class SSHKeyItem: ...
 
+# models/volume.py
+@dataclass
+class VolumeItem: ...
+
 # models/host.py
 @dataclass
 class HostStateItem: ...
@@ -955,7 +969,7 @@ Create a new domain folder when:
 
 ## Summary
 
-- **Domains ≠ CLI commands** — Domains are business capabilities (vm, network, image, kernel, key, binary, host, config, console, logs, cache, cloudinit, ssh)
+- **Domains ≠ CLI commands** — Domains are business capabilities (vm, network, volume, image, kernel, key, binary, host, config, console, logs, cache, cloudinit, ssh)
 - **3-layer architecture** — CLI → API → Core, strict import boundaries
 - **Orchestration lives in `api/`** — `api/*_operations.py` is the ONLY place that imports multiple domain modules
 - **Domain isolation** — Domains only import `core/_shared/`, never other domains

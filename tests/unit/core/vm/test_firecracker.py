@@ -333,6 +333,251 @@ class TestInstanceControl:
 
 
 # ---------------------------------------------------------------------------
+# Tests: FirecrackerClient drive operations
+# ---------------------------------------------------------------------------
+
+
+class TestFirecrackerClientDriveOps:
+    def test_put_drive_success(self, tmp_path: Path) -> None:
+        """put_drive should succeed with valid drive config."""
+        sock = tmp_path / "test.sock"
+        sock.touch()
+        client = FirecrackerClient(sock)
+        mock_conn = MagicMock()
+        mock_conn.getresponse.return_value = _mock_response(204)
+        client._conn = mock_conn
+
+        drive_config = {
+            "drive_id": "vol-1",
+            "path_on_host": "/volumes/test.raw",
+            "is_root_device": False,
+            "is_read_only": False,
+            "cache_type": "Unsafe",
+            "io_engine": "Sync",
+        }
+        client.put_drive(drive_config)
+        mock_conn.request.assert_called_once()
+
+    def test_put_drive_success_200(self, tmp_path: Path) -> None:
+        """put_drive with status 200 should also succeed."""
+        sock = tmp_path / "test.sock"
+        sock.touch()
+        client = FirecrackerClient(sock)
+        mock_conn = MagicMock()
+        mock_conn.getresponse.return_value = _mock_response(200)
+        client._conn = mock_conn
+
+        drive_config = {
+            "drive_id": "vol-1",
+            "path_on_host": "/volumes/test.raw",
+            "is_root_device": False,
+            "is_read_only": False,
+            "cache_type": "Unsafe",
+            "io_engine": "Sync",
+        }
+        client.put_drive(drive_config)
+        mock_conn.request.assert_called_once()
+
+    def test_put_drive_failure(self, tmp_path: Path) -> None:
+        """put_drive should raise on non-success status."""
+        sock = tmp_path / "test.sock"
+        sock.touch()
+        client = FirecrackerClient(sock)
+        mock_conn = MagicMock()
+        mock_conn.getresponse.return_value = _mock_response(500)
+        client._conn = mock_conn
+
+        with pytest.raises(
+            FirecrackerClientError, match="Failed to attach drive"
+        ):
+            client.put_drive(
+                {
+                    "drive_id": "v1",
+                    "path_on_host": "/p",
+                    "is_root_device": False,
+                    "is_read_only": False,
+                    "cache_type": "Unsafe",
+                    "io_engine": "Sync",
+                }
+            )
+
+    def test_put_drive_failure_with_data(self, tmp_path: Path) -> None:
+        """put_drive failure should include response data in error."""
+        sock = tmp_path / "test.sock"
+        sock.touch()
+        client = FirecrackerClient(sock)
+        mock_conn = MagicMock()
+        mock_conn.getresponse.return_value = _mock_response(
+            500, {"error": "no space"}
+        )
+        client._conn = mock_conn
+
+        with pytest.raises(
+            FirecrackerClientError, match="Response: {'error': 'no space'}"
+        ):
+            client.put_drive(
+                {
+                    "drive_id": "v1",
+                    "path_on_host": "/p",
+                    "is_root_device": False,
+                    "is_read_only": False,
+                    "cache_type": "Unsafe",
+                    "io_engine": "Sync",
+                }
+            )
+
+    def test_patch_drive_success(self, tmp_path: Path) -> None:
+        """patch_drive should succeed with valid drive_id."""
+        sock = tmp_path / "test.sock"
+        sock.touch()
+        client = FirecrackerClient(sock)
+        mock_conn = MagicMock()
+        mock_conn.getresponse.return_value = _mock_response(204)
+        client._conn = mock_conn
+
+        client.patch_drive("vol-1")
+        mock_conn.request.assert_called_once()
+
+    def test_patch_drive_success_200(self, tmp_path: Path) -> None:
+        """patch_drive with status 200 should also succeed."""
+        sock = tmp_path / "test.sock"
+        sock.touch()
+        client = FirecrackerClient(sock)
+        mock_conn = MagicMock()
+        mock_conn.getresponse.return_value = _mock_response(200)
+        client._conn = mock_conn
+
+        client.patch_drive("vol-1")
+        mock_conn.request.assert_called_once()
+
+    def test_patch_drive_failure(self, tmp_path: Path) -> None:
+        """patch_drive should raise on non-success status."""
+        sock = tmp_path / "test.sock"
+        sock.touch()
+        client = FirecrackerClient(sock)
+        mock_conn = MagicMock()
+        mock_conn.getresponse.return_value = _mock_response(500)
+        client._conn = mock_conn
+
+        with pytest.raises(
+            FirecrackerClientError, match="Failed to detach drive"
+        ):
+            client.patch_drive("vol-1")
+
+    def test_patch_drive_failure_with_data(self, tmp_path: Path) -> None:
+        """patch_drive failure should include response data in error."""
+        sock = tmp_path / "test.sock"
+        sock.touch()
+        client = FirecrackerClient(sock)
+        mock_conn = MagicMock()
+        mock_conn.getresponse.return_value = _mock_response(
+            500, {"error": "not found"}
+        )
+        client._conn = mock_conn
+
+        with pytest.raises(
+            FirecrackerClientError, match="Response: {'error': 'not found'}"
+        ):
+            client.patch_drive("vol-1")
+
+
+class TestFirecrackerSpawnerExtraDrives:
+    """Test _build_drives_config with extra drives."""
+
+    def _make_config(
+        self,
+        extra_drives: list[dict[str, object]] | None = None,
+    ) -> FirecrackerConfig:
+        kwargs: dict[str, object] = {}
+        if extra_drives is not None:
+            kwargs["extra_drives"] = extra_drives
+        return FirecrackerConfig(
+            vm_dir=Path("/tmp/vm"),
+            rootfs_path=Path("/tmp/rootfs.ext4"),
+            binary_path="/bin/firecracker",
+            kernel_path="/tmp/vmlinux",
+            vcpu_count=2,
+            mem_size_mib=512,
+            guest_ip="10.0.0.2",
+            guest_mac="02:fc:00:00:00:01",
+            tap_name="tap0",
+            network_gateway="10.0.0.1",
+            network_netmask="255.255.255.0",
+            image_fs_uuid=None,
+            image_fs_type="ext4",
+            boot_args="console=ttyS0",
+            lsm_flags="",
+            enable_pci=False,
+            enable_console=False,
+            enable_logging=True,
+            enable_metrics=False,
+            log_level="Info",
+            log_filename="fc.log",
+            serial_output_filename="serial.log",
+            metrics_filename="fc.metrics",
+            api_socket_filename="fc.socket",
+            pid_filename="fc.pid",
+            config_filename="vm.json",
+            cloud_init_mode=None,
+            cloud_init_iso_path=None,
+            cloud_init_nocloud_url=None,
+            **kwargs,
+        )
+
+    def test_extra_drives_included(self) -> None:
+        """_build_drives_config should include extra drives."""
+        config = self._make_config(extra_drives=[
+            {
+                "drive_id": "vol-1",
+                "path_on_host": "/volumes/test.raw",
+                "is_root_device": False,
+                "is_read_only": False,
+                "cache_type": "Unsafe",
+                "io_engine": "Sync",
+            }
+        ])
+        spawner = FirecrackerSpawner(config)
+        drives = spawner._build_drives_config()
+        assert len(drives) == 2  # rootfs + extra drive
+        assert drives[1]["drive_id"] == "vol-1"
+        assert drives[1]["path_on_host"] == "/volumes/test.raw"
+
+    def test_no_extra_drives(self) -> None:
+        """_build_drives_config without extra drives should return only rootfs."""
+        config = self._make_config()
+        spawner = FirecrackerSpawner(config)
+        drives = spawner._build_drives_config()
+        assert len(drives) == 1
+        assert drives[0]["drive_id"] == "rootfs"
+
+    def test_multiple_extra_drives(self) -> None:
+        """_build_drives_config should include multiple extra drives."""
+        config = self._make_config(extra_drives=[
+            {
+                "drive_id": "vol-1",
+                "path_on_host": "/volumes/test1.raw",
+                "is_root_device": False,
+                "is_read_only": False,
+                "cache_type": "Unsafe",
+                "io_engine": "Sync",
+            },
+            {
+                "drive_id": "vol-2",
+                "path_on_host": "/volumes/test2.raw",
+                "is_root_device": False,
+                "is_read_only": True,
+                "cache_type": "Unsafe",
+                "io_engine": "Sync",
+            },
+        ])
+        spawner = FirecrackerSpawner(config)
+        drives = spawner._build_drives_config()
+        assert len(drives) == 3  # rootfs + 2 extra drives
+        assert drives[1]["drive_id"] == "vol-1"
+        assert drives[2]["drive_id"] == "vol-2"
+
+
+# ---------------------------------------------------------------------------
 # Tests: FirecrackerSpawner
 # ---------------------------------------------------------------------------
 

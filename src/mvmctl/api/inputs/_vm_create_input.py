@@ -29,7 +29,8 @@ from mvmctl.core.key._repository import KeyRepository
 from mvmctl.core.key._resolver import KeyResolver
 from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.core.network._resolver import NetworkResolver
-from mvmctl.core.vm._firecracker import DriveConfig
+from mvmctl.core.vm._repository import VMRepository
+from mvmctl.core.volume._repository import VolumeRepository
 from mvmctl.exceptions import (
     BinaryNotFoundError,
     CloudInitModeError,
@@ -41,6 +42,7 @@ from mvmctl.exceptions import (
 from mvmctl.models import (
     BinaryItem,
     CloudInitMode,
+    DriveConfig,
     ImageItem,
     KernelItem,
     NetworkItem,
@@ -48,7 +50,7 @@ from mvmctl.models import (
     SSHKeyItem,
     VMInstanceItem,
 )
-from mvmctl.utils._disk import parse_disk_size
+from mvmctl.utils._disk import DiskUtils
 from mvmctl.utils._validators import NetworkValidator, VMValidator
 
 logger = logging.getLogger(__name__)
@@ -183,6 +185,8 @@ class VMCreateRequest:
         self._vm_dir = vm_dir
         self._inputs = inputs
         self._db = db if db is not None else Database()
+        self._vm_repo = VMRepository(self._db)
+        self._vol_repo = VolumeRepository(self._db)
         self._network_resolver = NetworkResolver(NetworkRepository(self._db))
         self._binary_resolver = BinaryResolver(BinaryRepository(self._db))
         self._image_resolver = ImageResolver(ImageRepository(self._db))
@@ -372,7 +376,8 @@ class VMCreateRequest:
 
         if self._inputs.disk_size is not None:
             rootfs_disk_size_mib = (
-                parse_disk_size(self._inputs.disk_size) // CONST_MEBIBYTE_BYTES
+                DiskUtils.parse_disk_size_to_bytes(self._inputs.disk_size)
+                // CONST_MEBIBYTE_BYTES
             )
         else:
             rootfs_disk_size_mib = image.minimum_rootfs_size_mib
@@ -616,14 +621,8 @@ class VMCreateRequest:
                 )
 
             # Check global VM limit
-            from mvmctl.core.config._service import SettingsService
-            from mvmctl.core.vm._repository import VMRepository
-
-            vm_repo = VMRepository(self._db)
-            current = vm_repo.count()
-            max_vms = int(
-                SettingsService.resolve(self._db, "settings.vm", "max_vms")
-            )
+            current = self._vm_repo.count()
+            max_vms = int(self._resolve_setting("settings.vm", "max_vms"))
             if current + count > max_vms:
                 raise VMCreateError(
                     f"Creating {count} VMs would exceed the limit "
@@ -715,28 +714,11 @@ class VMCreateRequest:
         """Resolve volume names to DriveConfig objects."""
         if not self._inputs.volumes:
             return []
-        from mvmctl.core.volume._repository import VolumeRepository
-        from mvmctl.core.volume._resolver import VolumeResolver
 
-        repo = VolumeRepository(self._db)
-        resolver = VolumeResolver(repo)
-        drives: list[DriveConfig] = []
-        for name in self._inputs.volumes:
-            vol = resolver.by_name(name)
-            if vol.status != "available":
-                raise VMCreateError(
-                    f"Volume '{name}' is not available (status: {vol.status})"
-                )
-            drives.append(
-                {
-                    "drive_id": f"vol-{len(drives) + 1}",
-                    "path_on_host": vol.path,
-                    "is_root_device": False,
-                    "is_read_only": False,
-                    "cache_type": "Unsafe",
-                    "io_engine": "Sync",
-                }
-            )
+        from mvmctl.core.volume._service import VolumeService
+
+        service = VolumeService(self._vol_repo)
+        drives = service.resolve_to_drives(self._inputs.volumes)
         return drives
 
     def _resolve_cloud_init_mode(self) -> CloudInitModeResolved:

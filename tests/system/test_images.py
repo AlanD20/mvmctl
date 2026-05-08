@@ -9,7 +9,7 @@ import pytest
 
 from tests.system.conftest import _run_mvm
 
-pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.domain_image]
+pytestmark = [pytest.mark.system, pytest.mark.domain_image]
 
 
 class TestImagePull:

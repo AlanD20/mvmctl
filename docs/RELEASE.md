@@ -4,272 +4,169 @@ This document covers how to release a new version of mvmctl.
 
 ## Prerequisites
 
-Before releasing, ensure the following are available on your workstation:
-
-- **Python 3.13+** — required for local development and building
-- **Linux (KVM-capable host)** — required to run integration tests and to produce a valid binary
-- **git** — for tagging and pushing
-- **uv** — for dependency management and running tools (see [uv docs](https://docs.astral.sh/uv/))
+- **Python 3.13+** — local development and building
+- **Linux (KVM-capable host)** — integration tests and valid binary
+- **git** — tagging and pushing
+- **uv** — dependency management (see [uv docs](https://docs.astral.sh/uv/))
 
 ## Bumping the Version
 
-The version is defined in one place: the `version` field under `[project]` in `pyproject.toml`. Update it there, and also update the `__version__` fallback in `src/mvmctl/__init__.py` to match.
+Use the automated bump script:
 
-### Manual Version Bump
+```bash
+./bump-version.py 0.2.0              # Bump to 0.2.0
+./bump-version.py 0.2.0 --dry-run    # Preview changes only
+./bump-version.py 0.2.0 --commit     # Bump and auto-commit
+./bump-version.py 0.2.0 --aur        # Also update AUR PKGBUILD checksums
+```
 
-Manually update these files:
-
-1. `pyproject.toml` — update `version`
-2. `src/mvmctl/__init__.py` — update `__version__`
-3. `docs/mvm.1` — update version in `.TH` line
-4. `CHANGELOG.md` — add new version section
+Files updated: `pyproject.toml`, `src/mvmctl/__init__.py`, `packaging/PKGBUILD`, `packaging/mvmctl.spec`, `packaging/debian/changelog`, `docs/mvm.1`
 
 This project uses **semantic versioning** (MAJOR.MINOR.PATCH):
+- **MAJOR** — incompatible API or CLI changes
+- **MINOR** — new functionality, backward-compatible
+- **PATCH** — backward-compatible bug fixes
 
-- **MAJOR** — increment when you make incompatible API or CLI changes (e.g., removing a command, renaming a flag without a deprecation alias, changing config file format in a breaking way).
-- **MINOR** — increment when you add new functionality in a backward-compatible manner (e.g., new commands, new flags, new config keys with defaults).
-- **PATCH** — increment when you make backward-compatible bug fixes (e.g., fixing a crash, correcting wrong behavior, documentation fixes that ship with the binary).
+## Build Verification
 
-Example: going from `0.3.1` to `0.4.0` means new features were added; going to `0.3.2` means only bugs were fixed.
-
-## Building Locally
-
-While the release workflow automates the binary build on GitHub Actions, you can build both the Python package and the standalone binary locally for testing.
-
-### 1. Building the Python Wheel with uv
-
-This produces a standard `.whl` and `.tar.gz` in the `dist/` folder:
+Before tagging, verify the build locally:
 
 ```bash
-uv build
+uv sync --group dev --group build
+python scripts/build_services.py --release           # Release build (fast mode)
+python scripts/build_services.py --release --optimize # Optimized release build (LTO, smaller binary)
 ```
 
-### 2. Building the Standalone Binary
+Output: `dist/mvm` (main binary) and `dist/services/mvm-services` (multidist services binary).
 
-Use the build script to produce a standalone binary:
-
-```bash
-uv run python scripts/build_services.py
-```
-
-The output will be located at `dist/mvm`.
-
-### 3. Verifying the Binary
-
-Verify the binary works correctly:
+Verify the binary:
 
 ```bash
-# Check the version
 ./dist/mvm --version
-
-# Check help
 ./dist/mvm --help
 ```
 
-### 4. Tagging and Pushing
-
-After committing the version bump:
+## Tag and Push
 
 ```bash
 # Create an annotated tag
-git tag -a v1.2.3 -m "Release v1.2.3"
+git tag -a v0.2.0 -m "Release v0.2.0"
 
-# Push the tag to the remote (this triggers the release workflow)
-git push origin v1.2.3
+# Push the tag (triggers release.yml workflow)
+git push origin v0.2.0
 ```
 
-Pushing a tag that matches `v*` triggers the `release.yml` GitHub Actions workflow. Do not push the tag until the version bump commit is on `main` and CI is green.
+> **Test gate**: The `ci.yml` workflow runs `pytest` with an 80% coverage minimum on every push and PR to `main`. Always verify CI is green on the version-bump commit before tagging. Pushing a tag that matches `v*` triggers `release.yml`.
 
-> **Test gate**: The `ci.yml` workflow runs `pytest` with an 80% coverage minimum on every push and pull request to `main`. If tests fail, the CI run is red and the tag must not be pushed — the release workflow does not re-run tests, so a red `main` means a broken binary may be released. Always verify CI is green on the version-bump commit before tagging.
+## What the CI Pipeline Does (`.github/workflows/release.yml`)
 
-## What the Release Workflow Does Automatically
+Triggered on tag push `v*.*.*`:
 
-Once the tag is pushed, `release.yml` runs without any manual intervention:
+| Job | Description |
+|-----|-------------|
+| **test** | Runs all tests with 79% coverage gate |
+| **build** | Builds Nuitka binary on `ubuntu-24.04`, generates SHA256, uploads as artifact |
+| **build-deb** | Builds `.deb` package via `dpkg-buildpackage` (needs build) |
+| **build-rpm** | Builds `.rpm` in Fedora container (needs build) |
+| **build-arch** | Creates Arch PKGBUILD files (needs build) |
+| **publish-pypi** | Publishes wheel + sdist to PyPI via trusted publishing (needs all prior) |
+| **upload-packages-to-release** | Uploads all packages to the GitHub release |
 
-1. **Binary builds** — Nuitka builds a standalone `mvm` binary on the runner:
-   - `ubuntu-24.04` (glibc 2.39) — uploaded as artifact `mvm-linux-ubuntu-24.04`, attached to release as `mvm`
+## Packaging Formats
 
-2. **GitHub release creation** — a GitHub release is created for the tag with auto-generated release notes. The binary is attached as a release asset.
-
-3. **Artifact upload** — all build artifacts are uploaded as GitHub Actions artifacts for debugging if needed.
-
-> **Note:** PyPI publishing is **not** automated by the release workflow. To publish to PyPI, follow the manual steps in the [Yanking a Bad Release](#yanking-a-bad-release) section or run `uv build && twine upload dist/*` after verifying the release.
-
-You do not need to run Nuitka or `gh release` manually. Binary builds and GitHub release creation are automated.
+| Format | Location | Dependencies |
+|--------|----------|-------------|
+| `.deb` | `packaging/debian/` | `iproute2, iptables, qemu-utils, libguestfs-tools, xorriso` |
+| `.rpm` | `packaging/mvmctl.spec` | `iproute, iptables, qemu-img, libguestfs, xorriso, openssh-clients` |
+| Arch Linux | `packaging/PKGBUILD` | `iproute2, iptables, qemu, libguestfs, xorriso, openssh` |
+| PyPI | via trusted publishing | Python package (wheel + sdist) |
 
 ## Verifying a Release
 
-After the workflow completes (typically 5-10 minutes), verify the release is correct:
-
-### Binary verification
+After the workflow completes (typically 5-10 minutes):
 
 ```bash
-# Download the binary for your platform
-curl -L -o mvm https://github.com/<org>/mvmctl/releases/download/v1.2.3/mvm-linux-ubuntu-24.04
+# Download the binary
+curl -L -o mvm https://github.com/AlanD20/mvmctl/releases/download/v0.2.0/mvm
 chmod +x mvm
 
-# Check the version
+# Verify checksum
+sha256sum -c mvm.sha256
+
+# Check version
 ./mvm --version
-# Expected: mvm 1.2.3
+# Expected: mvm 0.2.0
 ```
 
 ### PyPI verification
 
 ```bash
-# Install from PyPI with uv
-uv tool install mvmctl==1.2.3
-
-# Check the version
+uv tool install mvmctl==0.2.0
 mvm --version
-# Expected: mvm 1.2.3
-```
-
-### uv tool install / uvx verification
-
-```bash
-# Install with uv
-uv tool install mvmctl==1.2.3
-mvm --version
-
-# Or run directly with uvx (no install)
-uvx mvmctl==1.2.3 mvm --version
+# Expected: mvm 0.2.0
 ```
 
 ### GitHub release page
 
 Visit the releases page and confirm:
-- The release notes are present and accurate.
-- The `mvm` binary asset and `mvm.sha256` checksum file are attached.
+- Release notes are present and accurate
+- The `mvm` binary and `mvm.sha256` checksum are attached
 
 ## Issuing a Hotfix
 
-If a bug is found in a released version and `main` has moved on with new features, issue a hotfix from the release tag:
-
 ```bash
 # Branch from the release tag
-git checkout -b hotfix/v1.2.4 v1.2.3
+git checkout -b hotfix/v0.2.1 v0.2.0
 
-# Make the fix
-# ...
+# Make the fix, then bump version
+./bump-version.py 0.2.1 --commit
 
-# Bump the patch version in pyproject.toml and src/mvmctl/__init__.py
-# e.g., 1.2.3 -> 1.2.4
-
-# Commit, tag, and push
-git commit -am "fix: description of the hotfix"
-git tag -a v1.2.4 -m "Release v1.2.4 (hotfix)"
-git push origin hotfix/v1.2.4
-git push origin v1.2.4
+# Tag and push
+git push origin hotfix/v0.2.1
+git tag -a v0.2.1 -m "Release v0.2.1 (hotfix)"
+git push origin v0.2.1
 ```
 
-Then open a PR to merge the hotfix branch back into `main` so the fix is not lost.
+Then open a PR to merge the hotfix branch back into `main`.
 
 ## Yanking a Bad Release
-
-If a release is broken and should not be installed by anyone:
 
 ### Yank from PyPI
 
 ```bash
-# Yank the specific version (requires PyPI credentials or token)
 uv tool install twine
-twine yank mvmctl 1.2.3
+twine yank mvmctl 0.2.0
 ```
-
-Yanking does not delete the release — it marks it so that `pip install mvmctl` will not pick it up, but `pip install mvmctl==1.2.3` still works for anyone who explicitly pins to it.
 
 ### Mark or delete the GitHub release
 
-- To mark as pre-release (warns users but keeps the assets available):
-  ```bash
-  gh release edit v1.2.3 --prerelease
-  ```
+```bash
+# Mark as pre-release
+gh release edit v0.2.0 --prerelease
 
-- To delete the release entirely (removes assets and release notes):
-  ```bash
-  gh release delete v1.2.3 --yes
-  ```
+# Or delete entirely
+gh release delete v0.2.0 --yes
+git tag -d v0.2.0
+git push origin :refs/tags/v0.2.0
+```
 
-- Optionally delete the tag as well:
-  ```bash
-  git tag -d v1.2.3
-  git push origin :refs/tags/v1.2.3
-  ```
-
-After yanking, immediately publish a new patch release with the fix (see "Issuing a Hotfix" above).
+After yanking, immediately publish a new patch release with the fix.
 
 ## Man Page Installation
 
-A man page is included at `docs/mvm.1`. Install it system-wide:
-
-### Manual Installation
-
 ```bash
-# Copy to system man page directory
 sudo cp docs/mvm.1 /usr/local/share/man/man1/
-sudo mandb  # Update man database
-
-# View the man page
+sudo mandb
 man mvm
 ```
 
-### Package Installation (when packaging for distributions)
+## Appendix: Dynamic Import Handling
 
-For distro packages (deb, rpm, etc.), install to:
-- **Debian/Ubuntu**: `/usr/share/man/man1/mvm.1`
-- **RHEL/CentOS/Fedora**: `/usr/share/man/man1/mvm.1`
-- **Arch**: `/usr/share/man/man1/mvm.1`
+Nuitka performs static analysis to detect dependencies. Modules using dynamic registries (e.g., `passlib`) must be force-included:
 
-## Distribution Package Builds
+| Module | Nuitka Flag |
+|--------|-------------|
+| `passlib.handlers.bcrypt` | `--include-module=passlib.handlers.bcrypt` |
+| `passlib.handlers.sha512_crypt` | `--include-module=passlib.handlers.sha512_crypt` |
 
-The CI builds distribution packages using GitHub Actions workflows. Refer to `.github/workflows/release.yml` for the exact build matrix.
-
-### Local Package Building
-
-To build packages locally (for testing):
-
-#### Debian/Ubuntu
-```bash
-# Install build dependencies
-sudo apt-get install debhelper build-essential
-
-# Build the binary first
-uv run python scripts/build_services.py
-
-# Build the .deb (using dh-compatible rules)
-mkdir -p debian
-cp -r .github/workflows/release/debian/* debian/ 2>/dev/null || true
-dpkg-buildpackage -us -uc -b
-# Package will be at ../mvmctl_*.deb
-```
-
-#### RPM (on Fedora/RHEL)
-```bash
-# Install build tools
-sudo dnf install rpm-build rpmdevtools
-
-# Set up build tree
-rpmdev-setuptree
-
-# Copy files
-cp .github/workflows/release/mvmctl.spec ~/rpmbuild/SPECS/
-cp dist/mvm ~/rpmbuild/SOURCES/
-cp docs/mvm.1 ~/rpmbuild/SOURCES/
-
-# Build
-rpmbuild -bb ~/rpmbuild/SPECS/mvmctl.spec
-# Package will be at ~/rpmbuild/RPMS/x86_64/*.rpm
-```
-
-## Appendix: Dynamic Import Handling in Compiled Binaries
-
-mvmctl uses dynamic imports for optional dependencies to keep the core runtime lightweight:
-
-| Module | Import Pattern | Nuitka Flag |
-|--------|---------------|-------------|
-| `passlib.handlers.bcrypt` | Dynamic registry (passlib) | `--include-module=passlib.handlers.bcrypt` |
-| `passlib.handlers.sha512_crypt` | Dynamic registry (passlib) | `--include-module=passlib.handlers.sha512_crypt` |
-
-### Why Explicit Inclusion Is Required
-
-Nuitka performs static analysis to detect dependencies. Because `passlib` uses a dynamic registry to load hash handlers at runtime, static analysis cannot trace these imports. Without explicit `--include-module` flags (e.g., `passlib.handlers.bcrypt`, `passlib.handlers.sha512_crypt`) these modules would be tree-shaken away from the compiled binary.
+These are already configured in `scripts/build_services.py`.

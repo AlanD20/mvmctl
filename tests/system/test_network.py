@@ -14,7 +14,7 @@ pytestmark = [
     pytest.mark.requires_network,
     pytest.mark.slow,
     pytest.mark.serial,
-    pytest.mark.domain_vm,
+    pytest.mark.domain_network,
 ]
 
 
@@ -45,8 +45,6 @@ class TestNetworkLifecycle:
         self, mvm_binary, unique_network_name
     ):
         """Create network with a dynamically generated unique subnet."""
-        from tests.system.conftest import _unique_subnet
-
         subnet = _unique_subnet(unique_network_name)
         try:
             result = _run_mvm(
@@ -69,8 +67,6 @@ class TestNetworkLifecycle:
         self, mvm_binary, unique_network_name
     ):
         """Create network with custom CIDR."""
-        from tests.system.conftest import _unique_subnet
-
         subnet = _unique_subnet(unique_network_name)
         try:
             result = _run_mvm(
@@ -329,7 +325,7 @@ class TestNetworkAdvancedCreate:
         pytest.mark.requires_network,
         pytest.mark.slow,
         pytest.mark.serial,
-        pytest.mark.domain_vm,
+        pytest.mark.domain_network,
     ]
 
     def test_network_create_with_ipv4_gateway(
@@ -434,7 +430,7 @@ class TestNetworkInspectTree:
         pytest.mark.system,
         pytest.mark.requires_network,
         pytest.mark.serial,
-        pytest.mark.domain_vm,
+        pytest.mark.domain_network,
     ]
 
     def test_network_inspect_tree(self, mvm_binary, module_network):
@@ -456,8 +452,9 @@ class TestNetworkRemoveForce:
     pytestmark = [
         pytest.mark.system,
         pytest.mark.requires_network,
+        pytest.mark.slow,
         pytest.mark.serial,
-        pytest.mark.domain_vm,
+        pytest.mark.domain_network,
     ]
 
     def test_network_rm_with_force(self, mvm_binary, unique_network_name):

@@ -312,11 +312,15 @@ class TestVMBatchCreate:
     def test_vm_create_atomic_rollback_on_collision(
         self, mvm_binary, unique_vm_name
     ):
-        """--atomic must roll back all VMs if any single VM fails.
+        """--atomic must reject batch on name collision.
 
         Strategy: pre-create VM 'base-2', then try --name base --count 2 --atomic.
-        First creates 'base' (succeeds), then tries 'base-2' (collision!).
-        Atomic mode should remove 'base' and report failure.
+        The pre-allocation check catches the name collision before any VMs
+        are created, so atomic rollback is not triggered (no VMs to roll back).
+
+        NOTE: To exercise the actual atomic rollback path (mid-batch failure),
+        we would need subnet exhaustion or another runtime failure that happens
+        after at least one VM has been created.
         """
         base_name = unique_vm_name
         collision_name = f"{base_name}-2"
@@ -332,7 +336,7 @@ class TestVMBatchCreate:
                 "alpine-3.21",
             )
 
-            # Try atomic batch -- should fail at collision_name
+            # Try batch -- should fail with name collision
             result = _run_mvm(
                 mvm_binary,
                 "vm",
@@ -347,21 +351,21 @@ class TestVMBatchCreate:
                 check=False,
             )
             assert result.returncode != 0, (
-                "Atomic batch should have failed on name collision"
+                "Batch should have failed on name collision"
             )
             assert (
-                "atomic" in result.stdout.lower()
-                or "failed" in result.stdout.lower()
-            ), f"Expected atomic failure message, got: {result.stdout}"
+                "already exist" in result.stdout.lower()
+                or "already exist" in result.stderr.lower()
+            ), f"Expected name collision message, got: {result.stdout}"
 
-            # Verify base_name was rolled back (removed)
+            # Verify base_name was NOT created (pre-allocation blocked it)
             ls_result = _run_mvm(mvm_binary, "vm", "ls", "--json")
             vms = json.loads(ls_result.stdout)
             assert not any(v["name"] == base_name for v in vms), (
-                f"VM '{base_name}' should have been rolled back but still exists"
+                f"VM '{base_name}' should not have been created"
             )
         finally:
-            # Cleanup: remove both (collision_name still exists since it pre-existed)
+            # Cleanup
             for name in [base_name, collision_name]:
                 _run_mvm(
                     mvm_binary,
@@ -371,6 +375,38 @@ class TestVMBatchCreate:
                     "--force",
                     check=False,
                 )
+
+    def test_vm_create_count_with_volume_fails(
+        self, mvm_binary, unique_key_name
+    ):
+        """Using --count with --volume should be rejected early."""
+        vol_name = f"sys-vol-cv-{unique_key_name}"
+        try:
+            _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
+
+            result = _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                "should-not-create",
+                "--image",
+                "alpine-3.21",
+                "--count",
+                "2",
+                "--volume",
+                vol_name,
+                check=False,
+            )
+            assert result.returncode != 0
+            assert (
+                "cannot use --count with --volume" in result.stdout.lower()
+                or "cannot use --count with --volume" in result.stderr.lower()
+            ), f"Expected mutual exclusion error, got: {result.stdout}"
+        finally:
+            _run_mvm(
+                mvm_binary, "volume", "rm", vol_name, "--force", check=False
+            )
 
 
 class TestVMVolumeIntegration:
@@ -435,7 +471,11 @@ class TestVMVolumeIntegration:
     def test_vm_attach_detach_volume(
         self, mvm_binary, unique_vm_name, unique_key_name
     ):
-        """Attach and detach a volume from a running VM."""
+        """Attach and detach a volume from a VM.
+
+        The VM must be in STOPPED state to attach/detach volumes.
+        Correct workflow: create VM → stop → attach → start → stop → detach.
+        """
         vol_name = f"sys-vol-ad-{unique_key_name}"
         vm_name = unique_vm_name
 
@@ -446,7 +486,7 @@ class TestVMVolumeIntegration:
         )
 
         try:
-            # Create the VM first
+            # Create the VM
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -462,7 +502,10 @@ class TestVMVolumeIntegration:
             # Create a volume
             _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
 
-            # Attach the volume to the running VM
+            # Stop the VM before attaching volume
+            _run_mvm(mvm_binary, "vm", "stop", vm_name, "--force")
+
+            # Attach volume — should succeed (VM is stopped)
             result = _run_mvm(
                 mvm_binary,
                 "vm",
@@ -481,7 +524,7 @@ class TestVMVolumeIntegration:
                 f"Expected 'attached', got '{vol_data['status']}'"
             )
 
-            # Detach the volume
+            # Detach volume — VM is already stopped
             result = _run_mvm(
                 mvm_binary,
                 "vm",
@@ -491,7 +534,7 @@ class TestVMVolumeIntegration:
             )
             assert result.returncode == 0
 
-            # Verify volume status is now available
+            # Verify volume is available again
             vol_inspect = _run_mvm(
                 mvm_binary, "volume", "inspect", vol_name, "--json"
             )
@@ -499,11 +542,114 @@ class TestVMVolumeIntegration:
             assert vol_data["status"] == "available", (
                 f"Expected 'available', got '{vol_data['status']}'"
             )
+
         finally:
             # Cleanup: VM first, then volume
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
             _run_mvm(
                 mvm_binary, "volume", "rm", vol_name, "--force", check=False
+            )
+            _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    def test_vm_attach_volume_running_vm_fails(
+        self, mvm_binary, unique_vm_name, unique_key_name
+    ):
+        """Attaching a volume to a RUNNING VM should fail with clear error."""
+        vol_name = f"sys-vol-run-{unique_key_name}"
+        vm_name = unique_vm_name
+        key_name = f"sys-volrun-key-{unique_key_name}"
+        _run_mvm(
+            mvm_binary, "key", "create", key_name, "--algorithm", "ed25519"
+        )
+
+        try:
+            _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--ssh-key",
+                key_name,
+            )
+
+            # Try attaching to RUNNING VM — should fail
+            result = _run_mvm(
+                mvm_binary,
+                "vm",
+                "attach-volume",
+                vm_name,
+                vol_name,
+                check=False,
+            )
+            assert result.returncode != 0
+            # Error should mention VM is running
+            assert "running" in (result.stdout + result.stderr).lower()
+        finally:
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+            _run_mvm(
+                mvm_binary, "volume", "rm", vol_name, "--force", check=False
+            )
+            _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    def test_vm_detach_volume_running_vm_fails(
+        self, mvm_binary, unique_vm_name, unique_key_name
+    ):
+        """Detaching a volume from a RUNNING VM should fail with clear error."""
+        vol_name = f"sys-vol-det-{unique_key_name}"
+        vm_name = unique_vm_name
+        key_name = f"sys-voldet-key-{unique_key_name}"
+        _run_mvm(
+            mvm_binary, "key", "create", key_name, "--algorithm", "ed25519"
+        )
+
+        try:
+            _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--ssh-key",
+                key_name,
+            )
+
+            # Stop VM, attach volume, then restart
+            _run_mvm(mvm_binary, "vm", "stop", vm_name, "--force")
+            _run_mvm(mvm_binary, "vm", "attach-volume", vm_name, vol_name)
+            _run_mvm(mvm_binary, "vm", "start", vm_name)
+
+            # Try detaching from RUNNING VM — should fail
+            result = _run_mvm(
+                mvm_binary,
+                "vm",
+                "detach-volume",
+                vm_name,
+                vol_name,
+                check=False,
+            )
+            assert result.returncode != 0
+            # Error should mention VM is running
+            assert "running" in (result.stdout + result.stderr).lower()
+        finally:
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+            _run_mvm(
+                mvm_binary,
+                "volume",
+                "rm",
+                vol_name,
+                "--force",
+                check=False,
             )
             _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
 
@@ -650,6 +796,17 @@ class TestVMStateOperationsIndependent:
                 "--force",
                 check=False,
             )
+
+    def test_vm_reboot_force_independent(self, mvm_binary, created_vm):
+        """Reboot VM with --force using a dedicated VM (avoids shared state issues)."""
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "reboot",
+            created_vm["name"],
+            "--force",
+        )
+        assert result.returncode == 0
 
 
 class TestVMInspectExport:
@@ -1215,6 +1372,75 @@ class TestVMExportImport:
                 check=False,
             )
 
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    def test_vm_import_without_name_override(
+        self, mvm_binary, unique_vm_name, tmp_path, unique_network_name
+    ):
+        """Import a VM without --name override — should use original name from config."""
+        from tests.system.conftest import _unique_subnet
+
+        network_name = unique_network_name
+        subnet = _unique_subnet(network_name)
+        _run_mvm(
+            mvm_binary,
+            "network",
+            "create",
+            network_name,
+            "--subnet",
+            subnet,
+            "--non-interactive",
+        )
+
+        vm_name = unique_vm_name
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--network",
+                network_name,
+            )
+
+            # Export VM config
+            result = _run_mvm(mvm_binary, "vm", "export", vm_name)
+            export_data = json.loads(result.stdout)
+
+            # Remove original VM to release IP lease
+            _run_mvm(mvm_binary, "vm", "rm", vm_name)
+
+            # Save export to file and import WITHOUT --name override
+            export_path = tmp_path / "vm_export.json"
+            export_path.write_text(json.dumps(export_data))
+
+            result = _run_mvm(
+                mvm_binary,
+                "vm",
+                "import",
+                str(export_path),
+            )
+            assert result.returncode == 0
+
+            # Verify imported VM exists with ORIGINAL name (not overridden)
+            result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+            vms = json.loads(result.stdout)
+            imported_vm = next((v for v in vms if v["name"] == vm_name), None)
+            assert imported_vm is not None, f"Imported VM '{vm_name}' not found"
+        finally:
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+            _run_mvm(
+                mvm_binary,
+                "network",
+                "rm",
+                network_name,
+                "--force",
+                check=False,
+            )
+
 
 class TestVMConfigOptions:
     """Test every vm create option flag — each flag must actually apply."""
@@ -1594,7 +1820,7 @@ class TestVMConfigOptions:
             )
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
-            _run_mvm(mvm_binary, "key", "rm", key_name, "--force", check=False)
+            _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
 
     # ── Ubuntu image ───────────────────────────────────────────────────
 
@@ -2021,6 +2247,9 @@ class TestVMAdvancedCreateEdgeCases:
             "guestfs_enabled",
             "true",
         )
+
+        # Build libguestfs appliance now that guestfs is enabled
+        _run_mvm(mvm_binary, "cache", "init")
 
         try:
             _run_mvm(

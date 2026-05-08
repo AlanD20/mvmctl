@@ -628,6 +628,54 @@ uv sync --group dev --group build
 
 Output binaries land in `dist/` (mvm) and `dist/services/` (mvm-services).
 
+For the full release workflow (version bump, tag, CI pipeline, packaging), see [`docs/RELEASE.md`](../docs/RELEASE.md).
+
+## Asset Mirror
+
+The project includes a transparent local file cache for downloaded assets (kernels, images, binaries). Controlled by a single environment variable — no code changes needed.
+
+### Environment Variable
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `MVM_ASSET_MIRROR` | Path to local asset mirror directory | Unset (mirror disabled) |
+
+Read directly from `os.environ` in `utils/http.py` — NOT in `constants.py`.
+
+### How It Works
+
+1. **Before HTTP download**: `HttpDownload._resolve_mirror_path()` checks if the file exists at `$MVM_ASSET_MIRROR/<filename>`. If found, copies locally instead of HTTP download.
+2. **After successful HTTP download**: File is automatically copied into the mirror for future use.
+3. **SHA256 mismatch**: Falls back to HTTP download transparently.
+
+### Recommended Location
+
+```
+~/.cache/mvm-asset-mirror/
+```
+
+Deliberately **outside** `~/.cache/mvmctl/` so `cache clean --force` does not wipe it.
+
+### Seeding the Mirror (One-Time)
+
+```bash
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm kernel pull --type firecracker --set-default
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm image pull alpine-3.21
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm image pull ubuntu-24.04-minimal
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm bin pull 1.15.1 --set-default
+```
+
+Or via Taskfile: `task sys-setup-seed`
+
+### Performance
+
+| Asset | First run (HTTP) | Subsequent (mirror) |
+|-------|-----------------|-------------------|
+| Firecracker kernel (43 MB) | ~30-60s | **< 1s** |
+| Alpine image (203 MB) | ~2-5 min | **~1.5s** |
+| Ubuntu 24.04 (220 MB) | ~5-10 min | **~1s download + ~40s processing** |
+| Firecracker binary (7.3 MB) | ~10-20s | **< 1s** |
+
 ## Domain Implementation Methodology
 
 ### Core Principle: One Domain at a Time
@@ -1006,6 +1054,120 @@ def resolve(self, entity: str) -> "VMInstanceItem":     # ❌ WRONG — no quote
 - ✅ Core classes return `*Item` models only
 - ✅ Validation goes in Request classes, not Service
 - ✅ Orchestration goes in Operation classes, not Controller
+
+## New Domain Implementation Checklist
+
+When implementing a domain from scratch (e.g., adding a new resource type like volumes, snapshots, etc.), the following files MUST be created and wired together in order:
+
+### Phase 0 — Domain Classification
+Before writing any code, determine whether the new domain is **serving an existing domain** or is an **independent domain**. This classification dictates where wiring happens:
+
+- **Serving domain** (e.g., volumes serve VMs, leases serve networks): The domain primarily exists as a sub-resource of another entity. Wiring happens inside the parent domain's `_resolver.py` (add a `RelationSpec` to `RELATIONS`), and the parent's `Operation` class handles lifecycle orchestration. The serving domain may not need its own CLI commands if it's fully managed through the parent.
+- **Independent domain** (e.g., images, kernels, networks): The domain stands alone with its own CRUD lifecycle. It gets its own CLI commands, its own `*Operation` class, and full input/request/resolve pipeline. Wiring involves registering the Typer app in `main.py` and the resolver via `register()`.
+
+**If the classification is unclear, stop and ask for clarification. Getting this wrong means wiring things in the wrong place.**
+
+### 1. Data Model (`src/mvmctl/models/{domain}.py`)
+- Create a `{domain}Item` dataclass with all columns that would exist in a DB table
+- Every field must have a concrete type — no `Any`, no `dict`
+- Use `str | None = None` for optional fields, NOT bare optionals without defaults
+- Add `from __future__ import annotations` as the first import after the docstring
+- Register the model in `src/mvmctl/models/__init__.py`
+
+### 2. Core Repository (`src/mvmctl/core/{domain}/_repository.py`)
+- Create a `{Domain}Repository` class with `__init__(self, db=None)`
+- Must implement at minimum: `get(id)`, `get_by_name(name)`, `find_by_prefix(prefix)`, `list_all()`, `upsert(item)`, `delete(id)`, `count()`
+- All queries use SQL-level operations (`COUNT(*)`, `WHERE id IN (...)`) — never fetch-then-filter in Python
+- Use `@_graceful_read(default=None)` or `@_graceful_read(factory=list)` decorators for read methods
+
+### 3. Core Resolver (`src/mvmctl/core/{domain}/_resolver.py`)
+- Create a `{Domain}Resolver` class with `__init__(self, repo=None)`
+- Must implement: `by_id(id)`, `by_name(name)`, `resolve(value)`, `resolve_many(identifiers)`
+- `resolve()` tries name first, then ID prefix — consistent with all existing resolvers
+- Register with the shared registry at the bottom: `register("{domain}", lambda: {Domain}Resolver)`
+- Define a `{Domain}ResolveResult` dataclass with `items`, `errors`, `exit_code` if resolve_many is needed
+
+### 4. Core Service (`src/mvmctl/core/{domain}/_service.py`)
+- Create a `{Domain}Service` class with `__init__(self, repo: {Domain}Repository)` — repo is required, never optional
+- Contains ONLY stateless infrastructure operations (disk create/remove, subprocess calls, etc.)
+- Does NOT do orchestration (no imports from other domains)
+- Does NOT do validation requiring DB queries (that goes in Request classes)
+
+### 5. Core Controller (`src/mvmctl/core/{domain}/_controller.py`)
+- Create a `{Domain}Controller` class with `__init__(self, entity: str | {domain}Item, repo: {Domain}Repository)`
+- Manages state for exactly ONE entity — instantiated per-item
+- Methods return `{domain}Item` or `None` — never return Config/Input classes
+- Typical methods: `get()`, state transitions like `attach()`, `detach()`, `set_default()`
+
+### 6. API Layer — Input Classes (`src/mvmctl/api/inputs/_{domain}_input.py`)
+- Create `{Domain}Input` for existing-resource actions: thin dataclass with `id: list[str]`, `name: list[str]`
+- Create `{Domain}Request` that resolves Input to DB records: `resolve()` calls `ensure_validate()` as the **last step before returning**, returns `Resolved{domain}Input`
+- `ensure_validate()` is always executed inside `resolve()`, never left to the caller — this guarantees validation cannot be skipped
+- Create `Resolved{domain}Input` frozen dataclass with resolved `volumes: list[{domain}Item]`
+- For creation: `{Domain}CreateInput` (raw CLI params), `{Domain}CreateRequest` (resolves defaults), `Resolved{domain}CreateInput` (frozen, all explicit)
+- Validation happens in `ensure_validate()`, not in Service methods
+
+### 7. API Layer — Operations (`src/mvmctl/api/{domain}_operations.py`)
+- Create a `{Domain}Operation` class with ALL methods as `@staticmethod`
+- Category A (existing resource): take `{Domain}Input`, create `{Domain}Request`, call `resolve()`
+- Category B (creation): take `{Domain}CreateInput`, create `{Domain}CreateRequest`, call `resolve()`
+- Orchestration (importing multiple domains) lives here and ONLY here
+- Each method returns `OperationResult[T]` or `BatchResult[T]` from `mvmctl.models.result`
+
+### 8. CLI Layer (`src/mvmctl/cli/{domain}.py`)
+- Create a Typer app: `{domain}_app = typer.Typer(help="...", no_args_is_help=True)`
+- Every command function decorated with `@handle_errors`
+- Import from `mvmctl.api import {Domain}Operation, {Domain}Input, {Domain}CreateInput` — NEVER from core
+- Wire the app into the main CLI in `src/mvmctl/main.py`
+- Use `print_success()`, `print_error()`, `print_table()`, `print_inspect_header()` from `mvmctl.utils._io`
+- Do NOT put business logic or DB queries in CLI files
+
+### 9. DB Schema (`src/mvmctl/db/migrations/`)
+- Add a new migration file `NNN_{feature}.sql` with `CREATE TABLE IF NOT EXISTS {domain}s (...)`
+- Include all columns matching the `{domain}Item` dataclass
+- Add appropriate indexes (name, FK columns, status)
+- Do NOT modify existing migration files — always add a new one
+
+### 10. Registration & Wiring
+- Register the resolver (done automatically via `register()` call in the resolver file)
+- Add `{domain}Item` to `src/mvmctl/models/__init__.py`
+- If the domain is a relation of another entity, add a `RelationSpec` to the parent resolver's `RELATIONS` dict
+- For JSON-array FK enrichment, implement a batch_method (see `VolumeResolver.resolve_by_vm_volume_ids`)
+
+### Verification Checklist
+- [ ] All files import `from __future__ import annotations`
+- [ ] `ruff check src/` passes with no errors in new files
+- [ ] `mypy src/` passes with no errors in new files
+- [ ] Core domain never imports from other core domains
+- [ ] CLI only imports from `mvmctl.api`
+- [ ] Repository uses `self._db`, not raw sqlite3
+- [ ] Resolver is registered via `register()` call
+- [ ] `{domain}Item` is exported from `models/__init__.py`
+
+### Critical Rule — Ambiguity Must Stop Execution
+If any design decision in the checklist above is unclear, conflicts with the existing architecture, or may not be feasible within the current patterns (e.g., the FK relationship doesn't match any existing `RelationSpec` pattern, or the domain's lifecycle doesn't fit Controller/Service boundaries), the agent MUST stop immediately and ask the user for clarification. The agent MUST NOT guess, invent a novel pattern, implement a workaround, or proceed based on assumptions. Guessing leads to inconsistent architecture, silent bugs, and rework. When in doubt, stop and escalate.
+
+### Testing Requirements
+
+**Unit & Integration Tests** — Every new domain MUST have corresponding unit and integration tests:
+- Test the repository's SQL queries (get, list, upsert, delete, count) with a real SQLite database
+- Test the resolver's resolution logic (by_name, by_id, resolve_many, edge cases like ambiguous matches and not-found)
+- Test the service's stateless operations (disk creation, subprocess calls mocked)
+- Test the controller's state transitions (attach, detach, status changes)
+- Test the API operation class end-to-end (mocked sub-dependencies, verify correct orchestration)
+- Test the Request class validation in `ensure_validate()` — both happy path and every rejection path
+- Tests MUST verify real business logic and requirements — no tautological tests (e.g., mocking a method and asserting it was called with the same mock value is not a meaningful test)
+- Coverage must meet the CI gate of ≥80% branch coverage
+
+**System Tests** — The production release gate:
+- Create a `tests/system/test_{domain}.py` file with black-box CLI subprocess tests
+- Cover the happy path for every CLI command (create, list, get/inspect, remove)
+- Cover every realistic edge case: duplicate names, nonexistent resources, invalid inputs, force flags
+- Test the real-world integration path end-to-end (e.g., create volume → attach to VM → verify attachment)
+- Register the `domain_{domain}` pytest marker in `pyproject.toml`
+- Tests must be clean, isolated, use `unique_*` fixtures, and clean up in `finally` blocks
+- **Destructive commands (remove, delete, force-cleanup) MUST be placed at the end of the test file**, after all read-only and state-inspection tests. This prevents a destructive test from destabilizing the environment for subsequent tests — whether running serially (`-n 0`) or in parallel (`--dist loadfile`). Read-only tests that share a module-scoped fixture must come first, destructive tests that tear down shared state come last.
+- System tests are the release gate — a domain is NOT production-ready until its system tests pass on real hardware
 
 ## Architectural Authority and Autonomy
 

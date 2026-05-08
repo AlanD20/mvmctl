@@ -18,7 +18,7 @@ from mvmctl.models.cloudinit import (
     CloudInitMode,
     CloudInitStatus,
 )
-from mvmctl.models.firecracker import FirecrackerConfig
+from mvmctl.models.firecracker import DriveConfig, FirecrackerConfig
 from mvmctl.models.host import HostStateChangeItem, HostStateItem
 from mvmctl.models.image import ImageItem, ImageSpec
 from mvmctl.models.kernel import KernelItem, KernelPullResult, KernelSpec
@@ -43,7 +43,7 @@ from mvmctl.models.vm import (
     VMInstanceItem,
     VMStatus,
 )
-from mvmctl.models.volume import VolumeItem
+from mvmctl.models.volume import VolumeItem, VolumeStatus
 
 __all__ = [
     "BinaryItem",
@@ -53,6 +53,7 @@ __all__ = [
     "CloudInitStatus",
     "ConsoleInfo",
     "ConsoleState",
+    "DriveConfig",
     "FirecrackerConfig",
     "HostStateChangeItem",
     "HostStateItem",
@@ -76,7 +77,9 @@ __all__ = [
     "PruneAllResult",
     "SSHKeyItem",
     "VolumeItem",
+    "VolumeStatus",
     "VMInspectInfo",
     "VMInstanceItem",
     "VMStatus",
+    "VolumeStatus",
 ]

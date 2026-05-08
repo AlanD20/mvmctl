@@ -24,7 +24,7 @@ from mvmctl.exceptions import (
     FirecrackerSpawnError,
     SocketNotFoundError,
 )
-from mvmctl.models import CloudInitMode, FirecrackerConfig
+from mvmctl.models import CloudInitMode, DriveConfig, FirecrackerConfig
 from mvmctl.utils.fs import FsUtils
 
 logger = logging.getLogger(__name__)
@@ -34,18 +34,6 @@ class BootSourceConfig(TypedDict):
     boot_args: str
     kernel_image_path: str
     initrd_path: NotRequired[str | None]
-
-
-class DriveConfig(TypedDict):
-    drive_id: str
-    path_on_host: str
-    is_root_device: bool
-    is_read_only: bool
-    partuuid: NotRequired[str]
-    cache_type: str
-    io_engine: str
-    rate_limiter: NotRequired[object | None]
-    socket: NotRequired[str | None]
 
 
 class NetworkInterfaceConfig(TypedDict):
@@ -298,7 +286,7 @@ class FirecrackerSpawner:
 
         # Extra drives (volumes)
         for drive in self._config.extra_drives:
-            drives.append(drive)  # type: ignore[arg-type]
+            drives.append(drive)
 
         return drives
 

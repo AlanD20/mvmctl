@@ -172,6 +172,8 @@ def volume_inspect(
     print_section_header("STORAGE")
     print_key_value("Path", info["path"])
     print_key_value("VM ID", info["vm_id"] or "-")
+    if info.get("vm_name"):
+        print_key_value("VM Name", info["vm_name"])
 
     disk_info = info.get("disk_info", {})
     if disk_info:
@@ -183,7 +185,7 @@ def volume_inspect(
 @volume_app.command(name="resize")
 @handle_errors
 def volume_resize(
-    name: str = typer.Argument(..., help="Volume name"),
+    name: str = typer.Argument(..., help="Volume name or ID prefix"),
     size: str = typer.Argument(..., help="New size (e.g., 1G, 512M)"),
 ) -> None:
     """Resize a volume."""

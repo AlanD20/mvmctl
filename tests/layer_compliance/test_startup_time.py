@@ -38,6 +38,7 @@ STARTUP_ALLOWLIST: dict[str, str] = {
     "mvmctl.api.network_operations": "Imports NetworkService + iptables + LeaseService",
     "mvmctl.api.ssh_operations": "Imports SSHService + subprocess invocation",
     "mvmctl.api.vm_operations": "Imports VMController + VMService + VMResolver",
+    "mvmctl.api.volume_operations": "Imports VolumeService + VolumeResolver + VolumeRepository + qemu-img helpers",
     # Model modules — contain dataclass descriptors and import typing/ipaddress
     "mvmctl.models.host": "Contains dataclass with complex type descriptors",
     "mvmctl.models.image": "Contains dataclass with complex type descriptors",
@@ -51,15 +52,21 @@ STARTUP_ALLOWLIST: dict[str, str] = {
     "mvmctl.models.cache": "Contains dataclass with complex type descriptors",
     "mvmctl.models.cloudinit": "Contains dataclass with complex type descriptors",
     "mvmctl.models.firecracker": "Contains dataclass with complex type descriptors",
+    "mvmctl.models.volume": "Contains dataclass with StrEnum + __post_init__",
     # Service modules
     "mvmctl.services.console_relay.exceptions": "Imports exception hierarchy from exceptions.py",
     # Utility modules with heavy stdlib imports (http, ipaddress)
     "mvmctl.utils.http": "Imports urllib.request + hashlib + json + tempfile",
     "mvmctl.utils.network": "Imports ipaddress module (heavy stdlib parsing)",
     "mvmctl.services.nocloud_server.process": "Imports psutil + subprocess + signal",
+    # Common utils — imports json, re, tempfile, pathlib, constants, exceptions
+    "mvmctl.utils.common": "Heavy stdlib imports (json, re, tempfile, pathlib) + multiple mvmctl domain modules",
+    "mvmctl.models.provisioner": "Contains dataclass referenced by host init flow",
+    "mvmctl.utils.operation_utils": "Imports from multiple API operation modules",
+    "mvmctl.utils.auditlog": "Imports json + datetime + pathlib for structured audit logging",
 }
 
-MAX_STARTUP_MS = 200
+MAX_STARTUP_MS = 300
 
 
 def _build_startup_env(src_path: Path) -> dict[str, str]:

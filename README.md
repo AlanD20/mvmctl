@@ -137,6 +137,7 @@ mvm vm rm --name myvm
 
 ```bash
 mvm vm create --name myvm --image ubuntu-24.04   # Create and start a VM
+mvm vm create --name cluster --count 3 --atomic   # Batch-create 3 VMs
 mvm vm ls                                         # List all VMs
 mvm ssh myvm                                      # SSH into a VM
 mvm console myvm                                  # Console access (no SSH)
@@ -146,11 +147,13 @@ mvm vm rm --name myvm --force                     # Remove a VM
 ### Resource Management
 
 ```bash
-mvm image pull ubuntu-24.04       # Download an OS image
-mvm image ls                      # List available images
-mvm kernel pull --type firecracker # Download Firecracker kernel
-mvm bin pull 1.15.0               # Download Firecracker + jailer binaries
-mvm key create mykey              # Generate SSH key
+mvm volume create data 10G          # Create persistent data disk
+mvm volume ls                       # List volumes
+mvm image pull ubuntu-24.04        # Download an OS image
+mvm image ls                       # List available images
+mvm kernel pull --type firecracker  # Download Firecracker kernel
+mvm bin pull 1.15.0                # Download Firecracker + jailer binaries
+mvm key create mykey               # Generate SSH key
 ```
 
 ### System Setup
@@ -208,6 +211,7 @@ See [docs/RELEASE.md](docs/RELEASE.md) for detailed build instructions.
 ├── kernels/           # vmlinux kernel images
 ├── images/            # Root filesystem images (.ext4, .btrfs, .zst)
 ├── keys/              # Cached SSH public keys
+├── volumes/           # Persistent data disks (raw / qcow2)
 ├── networks/          # Per-network config + IP leases
 ├── vms/               # Per-VM state
 │   └── <vm-sha>/      # VM directories named by SHA256 hash

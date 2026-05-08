@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from mvmctl.core.volume._repository import VolumeRepository
 from mvmctl.core.volume._resolver import VolumeResolver
-from mvmctl.models import VolumeItem
+from mvmctl.models import VolumeItem, VolumeStatus
 
 
 class VolumeController:
@@ -50,7 +50,7 @@ class VolumeController:
             size_bytes=self._volume.size_bytes,
             format=self._volume.format,
             path=self._volume.path,
-            status="attached",
+            status=VolumeStatus.ATTACHED,
             vm_id=vm_id,
             created_at=self._volume.created_at,
             updated_at=self._volume.updated_at,
@@ -70,7 +70,7 @@ class VolumeController:
             size_bytes=self._volume.size_bytes,
             format=self._volume.format,
             path=self._volume.path,
-            status="available",
+            status=VolumeStatus.AVAILABLE,
             vm_id=None,
             created_at=self._volume.created_at,
             updated_at=self._volume.updated_at,

@@ -29,7 +29,7 @@ class VolumeInput:
 class ResolvedVolumeInput:
     """Resolved volume identifiers."""
 
-    items: list[VolumeItem]
+    volumes: list[VolumeItem]
 
 
 class VolumeRequest:
@@ -72,7 +72,7 @@ class VolumeRequest:
                 f"Could not resolve any volumes: {', '.join(result.errors)}"
             )
 
-        self._result = ResolvedVolumeInput(items=result.items)
+        self._result = ResolvedVolumeInput(volumes=result.items)
 
         self.ensure_validate()
 
@@ -85,5 +85,5 @@ class VolumeRequest:
                 "Failed to resolve necessary dependencies to validate"
             )
 
-        if not self._result.items:
+        if not self._result.volumes:
             raise VolumeNotFoundError("No volumes found matching identifiers")

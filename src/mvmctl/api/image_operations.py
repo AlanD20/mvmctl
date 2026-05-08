@@ -153,6 +153,7 @@ class ImageOperation:
                         message="Optimizing image...",
                     )
                 )
+            opt_warnings: list[str] = []
             image_item = image_service.optimize_image(
                 extracted_path,
                 image_id,
@@ -160,6 +161,7 @@ class ImageOperation:
                 timestamp,
                 resolved.skip_optimization,
                 provisioner_type=provisioner_type,
+                warnings=opt_warnings,
             )
             if on_progress is not None:
                 on_progress(
@@ -204,10 +206,15 @@ class ImageOperation:
                     spec.id,
                 )
 
+        msg = "Image pulled successfully"
+        if opt_warnings:
+            msg += f" ({'; '.join(opt_warnings)})"
+
         return OperationResult(
             status="success",
             code="image.acquired",
             item=image_item,
+            message=msg,
         )
 
     @staticmethod
@@ -285,6 +292,7 @@ class ImageOperation:
         image_service = ImageService(repo)
 
         # ORCHESTRATION: extract → optimize
+        import_warnings: list[str] = []
         try:
             if on_progress is not None:
                 on_progress(
@@ -319,6 +327,7 @@ class ImageOperation:
                 timestamp,
                 resolved.skip_optimization,
                 provisioner_type=provisioner_type,
+                warnings=import_warnings,
             )
             if on_progress is not None:
                 on_progress(
@@ -361,10 +370,15 @@ class ImageOperation:
                     derived_id,
                 )
 
+        import_msg = "Image imported successfully"
+        if import_warnings:
+            import_msg += f" ({'; '.join(import_warnings)})"
+
         return OperationResult(
             status="success",
             code="image.imported",
             item=image_item,
+            message=import_msg,
         )
 
     @staticmethod

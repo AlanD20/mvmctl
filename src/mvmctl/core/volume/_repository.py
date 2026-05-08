@@ -94,6 +94,28 @@ class VolumeRepository:
         with self._db.connect() as conn:
             conn.execute("DELETE FROM volumes WHERE id = ?", (volume_id,))
 
+    def find_by_ids(self, volume_ids: list[str]) -> list[VolumeItem]:
+        """Return all volumes matching the given IDs.
+
+        Uses a single ``WHERE id IN (?,?,...)`` query.
+
+        Args:
+            volume_ids: List of full 64-char volume IDs.
+
+        Returns:
+            List of matching VolumeItem records.
+
+        """
+        if not volume_ids:
+            return []
+        placeholders = ",".join("?" for _ in volume_ids)
+        with self._db.connect() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM volumes WHERE id IN ({placeholders})",
+                volume_ids,
+            ).fetchall()
+        return [VolumeItem(**dict(row)) for row in rows]
+
     @_graceful_read(default=0)
     def count(self) -> int:
         """Return the total number of volumes."""

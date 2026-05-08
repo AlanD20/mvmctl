@@ -10,6 +10,7 @@ from typing import Any
 
 from mvmctl.core.volume._repository import VolumeRepository
 from mvmctl.exceptions import VolumeCreateError
+from mvmctl.models import DriveConfig, VolumeItem, VolumeStatus
 
 logger = logging.getLogger(__name__)
 
@@ -26,26 +27,26 @@ class VolumeService:
     def __init__(self, repo: VolumeRepository) -> None:
         self._repo = repo
 
-    def create_disk(
-        self, path: Path, size_bytes: int, format: str = "raw"
-    ) -> None:
-        """Create a disk file at the specified path.
+    def create_disk(self, volume: VolumeItem) -> VolumeItem:
+        """Create a disk file and persist the volume record.
 
         Args:
-            path: Path where the disk file should be created.
-            size_bytes: Size of the disk in bytes.
-            format: Disk format, either "raw" or "qcow2". Defaults to "raw".
+            volume: VolumeItem with id, name, size_bytes, format, path, and status.
+
+        Returns:
+            The persisted VolumeItem.
 
         Raises:
             VolumeCreateError: If the disk creation fails.
 
         """
-        path.parent.mkdir(parents=True, exist_ok=True)
+        disk_path = Path(volume.path)
+        disk_path.parent.mkdir(parents=True, exist_ok=True)
 
-        if format == "raw":
+        if volume.format == "raw":
             try:
                 subprocess.run(
-                    ["fallocate", "-l", str(size_bytes), str(path)],
+                    ["fallocate", "-l", str(volume.size_bytes), str(disk_path)],
                     check=True,
                     capture_output=True,
                 )
@@ -56,7 +57,7 @@ class VolumeService:
                 raise VolumeCreateError(
                     "fallocate not found. Install util-linux."
                 ) from e
-        elif format == "qcow2":
+        elif volume.format == "qcow2":
             try:
                 subprocess.run(
                     [
@@ -64,8 +65,8 @@ class VolumeService:
                         "create",
                         "-f",
                         "qcow2",
-                        str(path),
-                        str(size_bytes),
+                        str(disk_path),
+                        str(volume.size_bytes),
                     ],
                     check=True,
                     capture_output=True,
@@ -80,42 +81,52 @@ class VolumeService:
                     "qemu-img not found. Install qemu-utils."
                 ) from e
         else:
-            raise VolumeCreateError(f"Unsupported format: {format}")
+            raise VolumeCreateError(f"Unsupported format: {volume.format}")
 
-    def remove_disk(self, path: Path) -> None:
-        """Remove a disk file from disk.
+        self._repo.upsert(volume)
+        return volume
+
+    def remove_disk(self, volume: VolumeItem) -> None:
+        """Remove a disk file and its DB record.
 
         Args:
-            path: Path to the disk file to remove.
+            volume: VolumeItem to remove (file and DB record).
 
         """
-        if path.exists():
-            path.unlink(missing_ok=True)
+        self._repo.delete(volume.id)
+        disk_path = Path(volume.path)
+        if disk_path.exists():
+            disk_path.unlink(missing_ok=True)
 
     def resize_disk(
-        self, path: Path, size_bytes: int, format: str = "raw"
-    ) -> None:
-        """Resize a disk file.
+        self, volume: VolumeItem, new_size_bytes: int
+    ) -> VolumeItem:
+        """Resize a disk file and update the DB record.
 
         For raw format, uses fallocate (grow only).
         For qcow2 format, uses qemu-img resize.
 
         Args:
-            path: Path to the disk file to resize.
-            size_bytes: New size of the disk in bytes.
-            format: Disk format, either "raw" or "qcow2". Defaults to "raw".
+            volume: VolumeItem to resize.
+            new_size_bytes: New size of the disk in bytes.
+
+        Returns:
+            The updated VolumeItem with new size and timestamp.
 
         Raises:
             VolumeCreateError: If the resize fails.
 
         """
-        if not path.exists():
-            raise VolumeCreateError(f"Disk file not found: {path}")
+        from datetime import UTC, datetime
 
-        if format == "raw":
+        disk_path = Path(volume.path)
+        if not disk_path.exists():
+            raise VolumeCreateError(f"Disk file not found: {disk_path}")
+
+        if volume.format == "raw":
             try:
                 subprocess.run(
-                    ["fallocate", "-l", str(size_bytes), str(path)],
+                    ["fallocate", "-l", str(new_size_bytes), str(disk_path)],
                     check=True,
                     capture_output=True,
                 )
@@ -128,14 +139,14 @@ class VolumeService:
                 raise VolumeCreateError(
                     "fallocate not found. Install util-linux."
                 ) from e
-        elif format == "qcow2":
+        elif volume.format == "qcow2":
             try:
                 subprocess.run(
                     [
                         "qemu-img",
                         "resize",
-                        str(path),
-                        str(size_bytes),
+                        str(disk_path),
+                        str(new_size_bytes),
                     ],
                     check=True,
                     capture_output=True,
@@ -150,9 +161,16 @@ class VolumeService:
                     "qemu-img not found. Install qemu-utils."
                 ) from e
         else:
-            raise VolumeCreateError(f"Unsupported format: {format}")
+            raise VolumeCreateError(f"Unsupported format: {volume.format}")
 
-    def get_disk_info(self, path: Path) -> dict[str, Any]:
+        # Update and persist DB record
+        volume.size_bytes = new_size_bytes
+        volume.updated_at = datetime.now(tz=UTC).isoformat()
+        self._repo.upsert(volume)
+        return volume
+
+    @staticmethod
+    def get_disk_info(path: Path) -> dict[str, Any]:
         """Get disk information using qemu-img info.
 
         Args:
@@ -185,3 +203,72 @@ class VolumeService:
 
         data: dict[str, Any] = json.loads(result.stdout)
         return data
+
+    def resolve_to_drives(self, volume_names: list[str]) -> list[DriveConfig]:
+        """Resolve volume names to Firecracker drive configurations.
+
+        Validates each volume is available and builds the drive config
+        dicts needed by the Firecracker boot config.
+
+        Args:
+            volume_names: List of volume names to resolve.
+
+        Returns:
+            List of drive config dicts (drive_id, path_on_host, etc.).
+
+        Raises:
+            VolumeCreateError: If any volume is not available.
+
+        """
+        if not volume_names:
+            return []
+
+        from mvmctl.core.volume._resolver import VolumeResolver
+
+        drives: list[DriveConfig] = []
+        result = VolumeResolver(self._repo).resolve_many(volume_names)
+
+        for vol in result.items:
+            if vol.status != VolumeStatus.AVAILABLE:
+                raise VolumeCreateError(
+                    f"Volume '{vol.name}' is not available "
+                    f"(status: {vol.status})"
+                )
+            drives.append(
+                {
+                    "drive_id": f"vol-{len(drives) + 1}",
+                    "path_on_host": vol.path,
+                    "is_root_device": False,
+                    "is_read_only": False,
+                    "cache_type": "Unsafe",
+                    "io_engine": "Sync",
+                }
+            )
+        return drives
+
+    def mark_volumes_attached(
+        self, vm_id: str, volume_names: list[str]
+    ) -> None:
+        """Mark volumes as attached to a VM after successful VM creation.
+
+        Resolves each volume by name and updates its DB status to 'attached'.
+
+        Args:
+            vm_id: ID of the VM to attach the volumes to.
+            volume_names: List of volume names to attach.
+
+        """
+        from mvmctl.core.volume._controller import VolumeController
+        from mvmctl.core.volume._resolver import VolumeResolver
+
+        for vol_name in volume_names:
+            try:
+                vol = VolumeResolver(self._repo).by_name(vol_name)
+                controller = VolumeController(vol, self._repo)
+                controller.attach(vm_id)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to mark volume '%s' as attached: %s",
+                    vol_name,
+                    exc,
+                )

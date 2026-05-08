@@ -107,13 +107,16 @@ tests/
 ├── unit/
 │   ├── conftest.py          # isolate_config_and_cache (autouse) — fresh dirs
 │   ├── test_cli_*.py        # CLI layer tests — CliRunner
-│   └── test_*.py            # Core/API unit tests — 54 files
+│   └── test_*.py            # Core/API unit tests — 138 files
 ├── integration/
-│   └── test_*.py            # Multi-module workflows — 7 files
+│   └── test_*.py            # Multi-module workflows — 20 files
+├── system/
+│   └── test_*.py            # Full-system tests — 20 files
 └── layer_compliance/
     ├── test_imports.py      # cli/ never imports from core/
     ├── test_constants.py    # No hardcoded defaults
-    └── test_privilege.py    # Privilege checks in api/
+    ├── test_privilege.py    # Privilege checks in api/
+    └── test_startup_time.py # Module import startup benchmarks
 ```
 
 ## Mocking Patterns
@@ -146,27 +149,27 @@ assert result.exit_code == 0
 |---------|----------|---------|-------|
 | `_mock_sudo_cache` | tests/conftest.py | Prevents real sudo calls | autouse ALL |
 | `isolate_config_and_cache` | tests/unit/conftest.py | Fresh config/cache dirs | autouse unit |
-| `vm_manager` | unit/conftest.py | Real VMManager instance | unit |
-| `sample_vm` | unit/conftest.py | Valid VM dataclass | unit |
-| `mock_subprocess_run_success` | unit/conftest.py | Mock subprocess success | unit |
+| `_setup_database` | tests/unit/conftest.py | Fresh in-memory database | autouse unit |
+| `_isolate_iptables_rules` | tests/unit/conftest.py | Fresh iptables rules | autouse unit |
 
-## Layer Compliance Tests
+## Layer Compliance Tests (8 files)
 
 These are the WATCHTOWERS:
 
 - **test_imports.py**: cli/ never imports from core/ directly
 - **test_constants.py**: No hardcoded defaults, constants.py is single source
 - **test_privilege.py**: Privilege checks exist in api/ layer, NOT in cli/
+- **test_startup_time.py**: Module import startup benchmark checks
 
 ## CI Commands (The Gauntlet)
 
 ### Essential Commands
 ```bash
-# Fast run (stop on first failure)
-uv run pytest tests/ -x -q
+# Fast run (stop on first failure, parallel)
+uv run pytest tests/ -x -q -n auto
 
 # Coverage report (fails if <80% branch)
-uv run pytest tests/ --cov=mvmctl --cov-fail-under=80
+uv run pytest tests/ --cov=mvmctl -n auto --cov-fail-under=80
 
 # Layer compliance only
 uv run pytest tests/layer_compliance/ -v
@@ -180,7 +183,7 @@ uv run pytest tests/unit/test_vm_manager.py -v
 uv run ruff check src/
 uv run ruff format --check src/
 uv run mypy src/
-uv run pytest tests/ -q --cov=src/mvmctl --cov-fail-under=80
+uv run pytest tests/ -q --cov=src/mvmctl -n auto --cov-fail-under=80
 ```
 
 ## TDD Checklist (The Dance Steps)

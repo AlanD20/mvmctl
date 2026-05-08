@@ -116,7 +116,10 @@ class TestVMCreate:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_create_success(self, mock_vm_op):
         mock_vm_op.create.return_value = OperationResult(
-            status="success", code="vm.created", message="VM created"
+            status="success",
+            code="vm.created",
+            message="VM created",
+            item=[_make_vm("newvm")],
         )
         result = runner.invoke(
             app,
@@ -645,7 +648,10 @@ class TestVMCreateEdgeCases:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_create_with_skip_cleanup(self, mock_vm_op):
         mock_vm_op.create.return_value = OperationResult(
-            status="success", code="vm.created", message="VM created"
+            status="success",
+            code="vm.created",
+            message="VM created",
+            item=[_make_vm("testvm")],
         )
         result = runner.invoke(
             app,
@@ -665,7 +671,10 @@ class TestVMCreateEdgeCases:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_create_with_ssh_keys(self, mock_vm_op):
         mock_vm_op.create.return_value = OperationResult(
-            status="success", code="vm.created", message="VM created"
+            status="success",
+            code="vm.created",
+            message="VM created",
+            item=[_make_vm("testvm")],
         )
         result = runner.invoke(
             app,
@@ -685,7 +694,10 @@ class TestVMCreateEdgeCases:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_create_with_all_options(self, mock_vm_op):
         mock_vm_op.create.return_value = OperationResult(
-            status="success", code="vm.created", message="VM created"
+            status="success",
+            code="vm.created",
+            message="VM created",
+            item=[_make_vm("fullvm")],
         )
         result = runner.invoke(
             app,

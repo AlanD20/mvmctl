@@ -160,6 +160,7 @@ class ImageService:
         timestamp: str,
         skip_optimization: bool = False,
         provisioner_type: ProvisionerType = ProvisionerType.LOOP_MOUNT,
+        warnings: list[str] | None = None,
     ) -> ImageItem:
         """Shrink and compress image. Returns fully constructed ImageItem.
 
@@ -221,7 +222,13 @@ class ImageService:
         )
         p.deblob()
         p.shrink()
-        p.run()
+        optimized = p.run()
+        if warnings is not None and not optimized:
+            warnings.append(
+                "Image optimization skipped: no provisioner backend available. "
+                "Run 'python scripts/build_services.py' or enable libguestfs for "
+                "faster boot times."
+            )
 
         # After shrink the file may be smaller
         post_shrink_size = image_path.stat().st_size

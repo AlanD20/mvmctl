@@ -66,12 +66,12 @@ Skipping layers is architectural debt. If you see:
 
 This is the MOST CRITICAL architectural rule:
 
-**ONLY the API layer (`api/`) may query the database (`mvmctl.core.mvm_db.MVMDatabase`).**
+**ONLY the API layer (`api/`) may query the database via the `Database` class (`core/_shared/_db.py`).**
 
 | Layer | Database Query Policy | Example |
 |-------|----------------------|---------|
 | **CLI** | **ABSOLUTELY FORBIDDEN** | CLI passes `None` → API queries DB |
-| **API** | **REQUIRED for DB-backed defaults** | API receives `None` → queries `db.get_default_image()` → passes explicit value to Core |
+| **API** | **REQUIRED for DB-backed defaults** | API receives `None` → creates `Database()` → resolves via `{Domain}Request.resolve()` → passes explicit to Core |
 | **Core** | **ABSOLUTELY FORBIDDEN** | Core receives explicit values from API |
 
 **Why this matters:**
@@ -93,9 +93,9 @@ Circular dependencies are the root of all architectural evil:
 - **NO layer imports from `cli/`** — one-way flow only
 
 **Critical import rules:**
-- CLI **NEVER** imports from `mvmctl.core.mvm_db` or `mvmctl.db`
-- Core **NEVER** imports from `mvmctl.core.mvm_db` (except metadata.py for registration)
-- **ONLY** API layer imports from `mvmctl.core.mvm_db`
+- CLI **NEVER** imports from `mvmctl.core` — uses `mvmctl.api` only
+- Core **NEVER** imports from `db/` module — `Database` lives in `core/_shared/_db.py`, domain repos in `core/{domain}/_repository.py`
+- **ONLY** API layer creates `Database` instances and orchestrates domain repositories
 
 **MEMO**: "Import only from below. Never from beside. Never skip layers."
 
@@ -124,7 +124,7 @@ When placing code, ask: "What is this module's SOLE PURPOSE?"
 - NO business logic. NO print statements. NO subprocess.
 
 **api/ SOLE PURPOSE**: Add privilege checks, query DB for defaults, delegate to core/, return results
-- `check_privileges(binary_path)` before ANY privileged operation
+- `HostPrivilegeHelper.check_privileges(binary, operation_description)` before ANY privileged operation
 - **Query database** when CLI passes `None` for DB-backed defaults (image, kernel, binary, network)
 - Pass explicit values to Core — never pass `None` for required parameters
 - `__all__` exports only
@@ -136,11 +136,11 @@ When placing code, ask: "What is this module's SOLE PURPOSE?"
 - **NO database queries** — receive explicit values from API
 - NO console output. NO privilege checks.
 
-**db/ SOLE PURPOSE**: Define schema and ORM models
+**db/ SOLE PURPOSE**: Define schema and manage migrations
 - SQL migrations in `migrations/*.sql`
-- ORM dataclasses in `models.py`
-- **NO business logic** — API does all querying
-- MVMDatabase class for API use only
+- Active `Database` class lives in `core/_shared/_db.py`
+- Domain row dataclasses live in `models/` — not in `db/`
+- **NO business logic** — API orchestrates, Repositories query
 
 **models/ SOLE PURPOSE**: Contain data
 - `@dataclass` ONLY
@@ -170,7 +170,7 @@ When placing code, ask: "What is this module's SOLE PURPOSE?"
 ```
 Does the code need to query the database?
 ├── YES → Is it in api/ layer?
-│   ├── YES → ✅ CORRECT — proceed with MVMDatabase()
+│   ├── YES → ✅ CORRECT — proceed with Database() + Domain resolution
 │   └── NO (cli/ or core/) → ❌ VIOLATION — move to api/
 └── NO → Does it receive values that might be None?
     ├── YES → Should those values come from DB?
@@ -185,9 +185,10 @@ Does the code need to query the database?
 - [ ] Does data flow follow cli → api → core → models?
 - [ ] cli/ imports ONLY from api/? (NEVER from core/ or db/)
 - [ ] **NO database queries in cli/ or core/?**
-- [ ] api/ adds `check_privileges()` before privileged ops?
+- [ ] api/ adds `HostPrivilegeHelper.check_privileges()` before privileged ops?
 - [ ] api/ queries DB when CLI passes `None` for DB-backed defaults?
 - [ ] api/ passes explicit values to core/?
+- [ ] **api/ every existing-resource operation uses `{Domain}Input` + `{Domain}Request.resolve()`?** (NO direct `Resolver.by_name()`, `Resolver.by_id()`, or `Repository.get()` calls in operation methods — the Input→Request→Resolved pipeline is the ONLY allowed resolution path)
 - [ ] core/ raises typed exceptions, never prints?
 - [ ] models/ is @dataclass ONLY, no side effects?
 - [ ] NO hardcoded defaults (use FALLBACK_* in constants.py)?
@@ -220,15 +221,15 @@ For defaults stored in SQLite (e.g., default image, kernel, binary):
 def create(image: Optional[str] = typer.Option(None, "--image")):
     create_vm(image=image)  # ✅ Passes None if user didn't specify
 
-# api/vms.py — API queries DB
+# api/vms.py — API creates Database + resolves via Input→Request pipeline
 def create_vm(image: Optional[str] = None, ...) -> VMInstance:
-    if image is None:
-        db = MVMDatabase()
-        default = db.get_default_image()  # ✅ API queries DB
-        image = default.path if default else None
+    db = Database()
+    inputs = VMCreateInput(image=image, ...)
+    request = VMCreateRequest(inputs=inputs, db=db)
+    resolved = request.resolve()  # Resolves DB-backed defaults
     
-    check_privileges(...)
-    return _core_create_vm(image=image, ...)  # Passes explicit value
+    HostPrivilegeHelper.check_privileges(...)
+    return _core_create_vm(image=resolved.image, ...)  # Passes explicit value
 
 # core/vm_lifecycle.py — Core receives explicit
 def create_vm(image: str, ...) -> VMInstance:
@@ -240,23 +241,21 @@ def create_vm(image: str, ...) -> VMInstance:
 
 | Forbidden Pattern | Why | Correct Approach |
 |-------------------|-----|------------------|
-| CLI querying database via `get_default_image_entry()` | CLI is client, not resolver | CLI passes `None`, API queries DB |
-| Core importing `mvmctl.core.mvm_db` | Core should not depend on DB | API queries DB, passes explicit values |
+| CLI querying database directly | CLI is client, not resolver | CLI passes `None`, API resolves via `{Domain}Request.resolve()` |
+| Core importing `Database` from `core/_shared/_db.py` | Core should not depend on DB directly at runtime | API queries DB via repositories, passes explicit values |
 | API function with default param (`def func(arg=DEFAULT)`) | Bypasses DB resolution | Use `Optional[T]` and resolve in function body |
 | `typer.Option(DEFAULT_*, ...)` | Import-time evaluation | Use `typer.Option(None, ...)` + runtime resolution |
 | Skipping API layer (cli → core) | Violates layer boundary | cli → api → core always |
 | Core printing to console | Output belongs in CLI | Return data or raise exception |
 | Models with side effects | Pure data only | Move logic to core/ |
+| Bypassing the Input→Request→Resolved pipeline in API operations | Skips DB-backed default resolution, breaks ID-prefix resolution, bypasses validation | Use `{Domain}Input` + `{Domain}Request.resolve()` pipeline |
 | Hardcoded paths | Breaks configurability | Use constants.py + env vars |
 
-## Known Violations (Documented)
+## (No Known Violations)
 
-These exist and are tolerated — they are NOT patterns to follow:
+All CLI files now correctly import from `mvmctl.api` only. There are currently no tolerated import violations.
 
-- `cli/bin.py` imports from `core/metadata` directly
-- `cli/init.py` imports from `core/config_state` directly
-
-**MEMO**: "The exception proves the rule. Do not make new exceptions."
+**MEMO**: "Keep it clean. Every violation is a debt that must be repaid."
 
 ## Entry Point Mental Model
 
@@ -290,7 +289,7 @@ This project has multiple AGENTS.md files defining architecture:
 | Question | Answer |
 |----------|--------|
 | New command? | cli/ calls api/ |
-| Need DB default? | api/ queries MVMDatabase, passes explicit to core/ |
+| Need DB default? | api/ creates Database() + resolves via {Domain}Request, passes explicit to core/ |
 | Privileged op? | api/ checks privileges → calls core/ |
 | Data container? | models/ @dataclass |
 | Helper function? | utils/ (pure, no domain) |

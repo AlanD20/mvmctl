@@ -101,6 +101,26 @@ class TestOverridableDefaults:
         net_defaults = OVERRIDABLE_DEFAULTS["defaults.network"]
         assert "172.27.0.0/24" in net_defaults["subnet"]
 
+    def test_get_default_success(self):
+        """get_default() returns the correct default value for a known key."""
+        from mvmctl.constants import get_default
+
+        result = get_default("defaults.vm", "vcpu_count")
+        assert result == 1
+
+    def test_get_default_nested(self):
+        """get_default() handles nested category/key lookups."""
+        from mvmctl.constants import get_default
+
+        result = get_default("settings", "guestfs_enabled")
+        assert result is False
+
+    def test_is_compiled_mode(self):
+        """is_compiled_mode() returns False in development (non-frozen) mode."""
+        from mvmctl.constants import is_compiled_mode
+
+        assert is_compiled_mode() is False
+
 
 class TestConstants:
     """Tests for specific constant values."""

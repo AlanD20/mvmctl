@@ -139,8 +139,8 @@ After init: NO sudo needed for normal commands.
 
 ### Runtime Checks (The Gate)
 ```python
-from mvmctl.core.host_privilege import check_privileges
-check_privileges("/usr/sbin/ip")  # Validates mvm group membership
+from mvmctl.core.host._helper import HostPrivilegeHelper
+HostPrivilegeHelper.check_privileges("/usr/sbin/ip", "describe operation")  # Validates mvm group membership
 ```
 
 **Where to Check**:
@@ -176,19 +176,19 @@ check_privileges("/usr/sbin/ip")  # Validates mvm group membership
 
 **Location**: `$MVM_CACHE_DIR/audit.log`
 
-**Called From**: cli/ layer only (NOT from api/ or core/)
+**Called From**: api/ layer only (resolved operations), NOT from core/
 
 **Usage**:
 ```python
 from mvmctl.utils.auditlog import AuditLog
-AuditLog.log("vm_create", {"name": vm_name}, {"image": image_id})
+AuditLog.log("vm.create", changes={"name": vm_name}, context="image=abc123")
 ```
 
 ## Security Checklist
 
 - [ ] Subprocess uses list form (NO shell=True)
 - [ ] Subprocess calls only in core/ (never cli/ or models/)
-- [ ] Privilege checks via `check_privileges()` in api/ layer
+- [ ] Privilege checks via `HostPrivilegeHelper.check_privileges()` in api/ layer
 - [ ] File paths use `get_cache_dir()` / `get_config_dir()` helpers
 - [ ] Network rules in `MVM-NOCLOUDNET-INPUT` chain only
 - [ ] Per-VM firewall rules with source IP restriction
@@ -202,9 +202,9 @@ AuditLog.log("vm_create", {"name": vm_name}, {"image": image_id})
 | Aspect | Pattern | Location |
 |--------|---------|----------|
 | Subprocess | List form, NO shell=True | core/ only |
-| Privilege checks | `check_privileges(binary_path)` | api/ layer |
+| Privilege checks | `HostPrivilegeHelper.check_privileges(binary, operation_description)` | api/ layer |
 | File paths | `get_cache_dir()` / `get_config_dir()` | utils/fs.py |
 | Network rules | `MVM-NOCLOUDNET-INPUT` chain | core/network/_service.py |
-| Audit logging | `log_audit(action, details)` | cli/ layer |
+| Audit logging | `AuditLog.log(operation, changes, context)` | api/ layer |
 | SUDO_USER | Resolve to invoking user | utils/fs.py |
 

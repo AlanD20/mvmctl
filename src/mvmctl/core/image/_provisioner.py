@@ -65,15 +65,24 @@ class ImageProvisioner:
 
     # -- execution ---------------------------------------------------------
 
-    def run(self) -> None:
-        """Execute all queued operations with the selected backend."""
+    def run(self) -> bool:
+        """Execute all queued operations with the selected backend.
+
+        Returns:
+            True if optimization ran successfully, False if it was skipped
+            (e.g. no provisioner backend available).
+
+        """
         from mvmctl.exceptions import LoopMountError
 
         try:
             self._backend.run()
+            return True
         except (LoopMountError, OSError, RuntimeError) as exc:
-            logger.debug(
-                "Image optimization (deblob/shrink) backend failed: %s: %s",
-                type(exc).__name__,
+            logger.warning(
+                "Image optimization (deblob/shrink) skipped: %s. "
+                "Build the provisioner binary with 'python scripts/build_services.py' "
+                "or enable libguestfs to enable boot optimization.",
                 exc,
             )
+            return False

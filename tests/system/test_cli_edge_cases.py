@@ -14,6 +14,8 @@ import pytest
 
 from tests.system.conftest import _run_mvm
 
+pytestmark = [pytest.mark.system]
+
 
 class TestConfigEdgeCases:
     """Tests for config command edge cases."""
@@ -74,7 +76,7 @@ class TestConfigEdgeCases:
 class TestCacheEdgeCases:
     """Tests for cache command edge cases."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.serial, pytest.mark.domain_vm]
+    pytestmark = [pytest.mark.system, pytest.mark.serial]
 
     def test_cache_prune_no_args(self, mvm_binary):
         """``cache prune`` without resource and without --all should fail."""
@@ -141,7 +143,7 @@ class TestNetworkEdgeCases:
         pytest.mark.requires_network,
         pytest.mark.slow,
         pytest.mark.serial,
-        pytest.mark.domain_vm,
+        pytest.mark.domain_network,
     ]
 
     def test_network_create_without_subnet(self, mvm_binary):
@@ -743,3 +745,36 @@ class TestImageImportWithDisableDetector:
                 _run_mvm(
                     mvm_binary, "image", "rm", imported_prefix, check=False
                 )
+
+
+class TestHelpCommand:
+    """Tests for the ``help`` CLI command."""
+
+    pytestmark = [pytest.mark.system]
+
+    def test_help_root(self, mvm_binary):
+        """``mvm help`` should show root help."""
+        result = _run_mvm(mvm_binary, "help")
+        assert result.returncode == 0
+        assert "Usage:" in result.stdout
+
+    def test_help_subcommand(self, mvm_binary):
+        """``mvm help vm`` should show vm help."""
+        result = _run_mvm(mvm_binary, "help", "vm")
+        assert result.returncode == 0
+
+    def test_help_subsubcommand(self, mvm_binary):
+        """``mvm help vm create`` should show vm create help."""
+        result = _run_mvm(mvm_binary, "help", "vm", "create")
+        assert result.returncode == 0
+        assert "Create and start" in result.stdout
+
+    def test_help_nonexistent(self, mvm_binary):
+        """``mvm help nonexistent`` should fail."""
+        result = _run_mvm(mvm_binary, "help", "nonexistent", check=False)
+        assert result.returncode != 0
+
+    def test_help_version(self, mvm_binary):
+        """``mvm help version`` should show version help."""
+        result = _run_mvm(mvm_binary, "help", "version")
+        assert result.returncode == 0
