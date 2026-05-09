@@ -99,7 +99,7 @@ The list form is MANDATORY:
 **ALWAYS**:
 - Use list form: `["ip", "link", "add", name, "type", "bridge"]`
 - Capture stderr and include in exceptions
-- Raise typed `ProcessError` from utils/process.py
+- Raise typed `ProcessError` from mvmctl/exceptions.py
 - Call subprocess ONLY in core/ (never cli/ or models/)
 
 **MEMO**: "The list form is safety. The string form is a loaded weapon."
@@ -113,7 +113,7 @@ The list form is MANDATORY:
 | Command form | List: `["ip", "link", "add", ...]` | String: `"ip link add ..."` |
 | Shell | NEVER | Always dangerous |
 | Error capture | Must include stderr | Silently ignored |
-| Exception type | `ProcessError` from utils/process.py | Bare `Exception` |
+| Exception type | `ProcessError` from mvmctl/exceptions.py | Bare `Exception` |
 | Location | core/ ONLY | cli/, api/, models/ — NEVER |
 
 ### Example (The Correct Way)

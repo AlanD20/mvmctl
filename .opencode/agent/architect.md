@@ -479,10 +479,11 @@ src/mvmctl/
 │   ├── init_operations.py       # Init orchestration
 │   ├── logs_operations.py       # Logs orchestration
 │   ├── ssh_operations.py        # SSH orchestration
+│   ├── volume_operations.py     # Volume orchestration
 │   └── inputs/                  # Request → ResolvedRequest pattern
 ├── core/             # Business logic — isolated domains ONLY (no orchestration)
 │   ├── {domain}/     # VM, network, image, kernel, key, binary, host, config,
-│   │                 # console, logs, cache, cloudinit, ssh (13 domains)
+│   │                 # console, logs, cache, cloudinit, ssh, volume (14 domains)
 │   │   ├── _controller.py    # Stateful entity operations
 │   │   ├── _service.py       # Stateless operations
 │   │   ├── _repository.py    # Database operations (ALL queries go here)
@@ -596,27 +597,26 @@ The project uses `scripts/build_services.py` to compile standalone binaries via 
 ### Usage
 
 ```
-python scripts/build_services.py                    # Build everything (default: --release --fast)
-python scripts/build_services.py --release          # Build services + mvm binary
+python scripts/build_services.py                    # Build everything (default: --release)
 python scripts/build_services.py --services         # Build all service binaries only
-python scripts/build_services.py --service <name>   # Build a single service (e.g. mvm-console-relay)
+python scripts/build_services.py --service <name>   # Build a specific service (e.g. mvm-console-relay)
 python scripts/build_services.py --mvm              # Build main mvm binary only
-python scripts/build_services.py --fast             # Fast compile (default) — minimal Nuitka flags
-python scripts/build_services.py --optimize         # Aggressive optimization (LTO, anti-bloat, -Os)
+python scripts/build_services.py --release          # Aggressive optimization (LTO, anti-bloat, --deployment, DEFAULT)
+python scripts/build_services.py --fast             # Fast compile — minimal Nuitka flags
 ```
 
 ### Build modes
 
 | Mode | Flags | Use case |
 |------|-------|----------|
-| `--fast` (default) | `--onefile`, `--jobs=N` | Development iteration, quick CI |
-| `--optimize` | `--lto=yes`, anti-bloat, no-docstrings, no-asserts, `-Os`, `--deployment`, etc. | Release builds, smallest binary |
+| `--fast` | `--onefile`, `--jobs=N` | Development iteration, quick CI |
+| `--release` (default) | `--lto=yes`, anti-bloat, no-docstrings, no-asserts, `-Os`, `--deployment`, etc. | Release builds, smallest binary |
 
 ### Key architectural decisions
 
 - **Nuitka** (not PyInstaller) is the build tool. PyInstaller hooks exist but are unused — they only serve as fallback documentation.
 - **Multidist services**: All 3 services (`mvm-console-relay`, `mvm-nocloud-server`, `mvm-provision`) are compiled into a single `mvm-services` binary using `--main` flags with symlinks. Runtime dispatch is via `sys.argv[0]`.
-- **Static libpython**: Auto-detected — if the current Python has `libpython*.a`, `--static-libpython=yes` is added in `--optimize` mode. If not available (e.g., uv's standalone Python), a warning is shown and dynamic linking is used.
+- **Static libpython**: Auto-detected — if the current Python has `libpython*.a`, `--static-libpython=yes` is added in `--release` mode. If not available (e.g., uv's standalone Python), a warning is shown and dynamic linking is used.
 - **Dynamic import workaround**: Libraries with runtime registries (e.g., `passlib`) are force-included via `--include-module` to prevent tree-shaking.
 - **`sys.executable`**: The script uses `sys.executable -m nuitka` so it runs with the same Python that invoked the script. This preserves static libpython detection behavior.
 
@@ -754,6 +754,8 @@ api/inputs/
 ├── _console_input.py         # ConsoleInput, ConsoleRequest, ResolvedConsoleInput
 ├── _logs_input.py            # LogsInput, LogsRequest, ResolvedLogsInput
 ├── _ssh_input.py             # SSHInput, SSHRequest, ResolvedSSHInput
+├── _volume_input.py          # VolumeInput, VolumeRequest, ResolvedVolumeInput
+├── _volume_create_input.py   # VolumeCreateInput, VolumeCreateRequest, ResolvedVolumeCreateInput
 ├── _vm_export_config.py      # VMExportConfigInput, VMExportConfigRequest, ResolvedVMExportConfigInput
 ├── _vm_import_input.py       # VMImportInput, VMImportRequest, ResolvedVMImportInput
 └── ...
@@ -772,6 +774,7 @@ api/
 ├── init_operations.py        # InitOperation (initialize, status, etc.)
 ├── logs_operations.py        # LogsOperation (tail, list, etc.)
 ├── ssh_operations.py         # SSHOperation (connect, config, etc.)
+├── volume_operations.py      # VolumeOperation (create, remove, list, get, etc.)
 └── ...
 ```
 

@@ -19,7 +19,7 @@ src/mvmctl/db/migrations/
 ## WHERE TO LOOK
 
 ### 001_initial_schema.sql
-- Creates all tables: `images`, `kernels`, `binaries`, `networks`, `network_leases`, `vm_instances`, `host_state`, `host_state_changes`, `iptables_rules`, `ssh_keys`, `user_settings`
+- Creates all tables: `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_leases`, `vm_instances`, `host_state`, `host_state_changes`, `iptables_rules`, `ssh_keys`, `user_settings`
 - Each asset table has `is_default INTEGER` column for default tracking
 - Foreign keys link VMs to assets and networks
 - The `db_migrations` tracking table is created at runtime by `Database._ensure_migrations_table()` (not in SQL)

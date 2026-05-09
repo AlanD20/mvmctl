@@ -83,7 +83,7 @@ api/inputs/
 ├── _vm_input.py              # VMInput, VMRequest, ResolvedVMInput
 ├── _vm_create_input.py       # VMCreateInput, VMCreateRequest, ResolvedVMCreateInput
 ├── _network_input.py         # NetworkInput, NetworkRequest, ResolvedNetworkInput
-├── _network_create_input.py  # NetworkCreateInput, NetworkCreateRequest, ResolvedNetworkCreateRequest
+├── _network_create_input.py  # NetworkCreateInput, NetworkCreateRequest, ResolvedNetworkCreateInput
 └── ...
 
 api/
@@ -740,3 +740,4 @@ class VMRepository:
 - **Updated:** 2026-04-30 — Fixed VMService pattern (actual bulk operations coordinator), Repository pattern types (VMInstanceItem, list_all, count_by_status), and standardized Resolved naming convention (Resolved*Input)
 - **Purpose:** Generic domain implementation methodology for mvmctl
 - **Reference Domain:** network (first application)
+- **Implemented Domains:** network, key, binary, kernel, image, host, config, cache, SSH, console, logs, **volume**, **VM** (reference)

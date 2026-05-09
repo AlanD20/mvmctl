@@ -26,7 +26,8 @@ tests/integration/
 ├── test_kernel_integration.py     # Kernel fetch/remove workflow
 ├── test_key_integration.py        # Key CRUD workflow
 ├── test_log_integration.py        # Log tailing workflow
-└── test_ssh_integration.py        # SSH config generation workflow
+├── test_ssh_integration.py        # SSH config generation workflow
+└── test_volume_db.py              # Volume DB persistence workflow
 ```
 
 ## TEST SCOPE
@@ -111,6 +112,11 @@ Integration tests differ from unit tests:
 ### test_ssh_integration.py
 - SSH config generation workflow
 
+### test_volume_db.py
+- Volume CRUD operations with DB persistence
+- Tests volume create/attach/detach/remove workflow
+- Verifies volume state transitions and metadata tracking
+
 ## CONVENTIONS
 
 ### subprocess Handling
@@ -162,7 +168,7 @@ uv run pytest tests/integration/ -x -v
 
 ## NOTES
 
-- **17 test files**: Covering host, VM, network, nocloud-net, cloud-init, console, smoke, binary, cache, config, image, init, kernel, key, logs, ssh, and direct injection tests
+- **18 test files**: Covering host, VM, network, nocloud-net, cloud-init, console, smoke, binary, cache, config, image, init, kernel, key, logs, ssh, direct injection, and volume DB tests
 - Tests are more coarse-grained than unit tests
 - Some tests may require root for network operations (marked accordingly)
 - Uses same mocking infrastructure as unit tests (see parent `tests/conftest.py`)

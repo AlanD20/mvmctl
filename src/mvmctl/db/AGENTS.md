@@ -38,7 +38,7 @@ src/mvmctl/db/
 ├── __init__.py              # Package marker
 └── migrations/
     ├── __init__.py           # Package marker
-    └── 001_initial_schema.sql  # Full schema: 9 tables + db_migrations tracking
+    └── 001_initial_schema.sql  # Full schema: 12 tables + db_migrations tracking
 ```
 
 The canonical row models (`VMInstanceItem`, `NetworkItem`, `ImageItem`, `KernelItem`, `BinaryItem`, `HostStateItem`, `IPTablesRuleItem`, etc.) live in `src/mvmctl/models/`.
@@ -47,7 +47,7 @@ The canonical row models (`VMInstanceItem`, `NetworkItem`, `ImageItem`, `KernelI
 
 | Task | Module | Key entry point |
 |------|--------|-----------------|
-| Schema definitions | `migrations/001_initial_schema.sql` | 10 CREATE TABLE statements |
+| Schema definitions | `migrations/001_initial_schema.sql` | 12 CREATE TABLE statements |
 | Run migrations | `core/_shared/_db.py` | `Database.migrate()` or `Database._run_migrations()` |
 | Domain row dataclasses | `src/mvmctl/models/` | `*Item` dataclass per domain |
 
@@ -59,22 +59,30 @@ The canonical row models (`VMInstanceItem`, `NetworkItem`, `ImageItem`, `KernelI
 | `binaries` | Binary entries (firecracker, jailer) with `name`, `version`, `path`, `is_default` |
 | `images` | Image entries with hash, os_slug, path, arch, `is_default`, `minimum_rootfs_size_mib` |
 | `kernels` | Kernel entries with version, path, `is_default` |
+| `volumes` | Volume entries with name, path, size, backing, vm_id |
 | `networks` | Named network configs with subnet, gateway, bridge, `is_default` |
 | `network_leases` | IP lease records with network_id, ipv4, vm_id, expiry |
 | `vm_instances` | VM runtime state with all config, PIDs, sockets, status |
 | `host_state` | Host initialization state (singleton id=1) |
 | `host_state_changes` | Host config changes for rollback tracking |
 | `iptables_rules` | Tracked iptables rules with parameters, network_id, lifecycle |
+| `ssh_keys` | SSH key entries with name, public_key, fingerprint, `is_default` |
+| `user_settings` | User-level configuration key/value pairs |
 | `db_migrations` | Migration tracking: version, name, applied_at |
 
 ### Key Constraints
 - `images(os_slug)` — UNIQUE
+- `kernels(name)` — UNIQUE
+- `binaries(name, version)` — UNIQUE composite
+- `volumes(name)` — UNIQUE
 - `networks(name)` — UNIQUE
 - `network_leases(network_id, ipv4)` — UNIQUE composite
 - `vm_instances(name)` — UNIQUE
 - `host_state(id=1)` — Singleton enforced in code
 - `host_state_changes(session_id, change_order)` — UNIQUE composite
 - `iptables_rules` — Complex unique index on active rules
+- `ssh_keys(name)` — UNIQUE
+- `ssh_keys(fingerprint)` — UNIQUE
 - `db_migrations(version)` — UNIQUE
 - Foreign keys enabled via `PRAGMA foreign_keys = ON`
 

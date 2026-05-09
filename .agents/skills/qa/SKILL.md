@@ -103,20 +103,22 @@ Skipping steps creates debt. Writing tests after code is NOT TDD — it is test-
 
 ```
 tests/
-├── conftest.py              # Root: _mock_sudo_cache (autouse ALL) — seals the jar
+├── conftest.py              # Root: _mock_sudo_cache, isolate_config_and_cache, _isolate_iptables_rules, _setup_database, _block_real_sudo_invocations, _mock_privilege_checks (autouse ALL) — seals the jar
 ├── unit/
-│   ├── conftest.py          # isolate_config_and_cache (autouse) — fresh dirs
 │   ├── test_cli_*.py        # CLI layer tests — CliRunner
-│   └── test_*.py            # Core/API unit tests — 138 files
+│   └── test_*.py            # Core/API unit tests — 118 files
 ├── integration/
-│   └── test_*.py            # Multi-module workflows — 20 files
+│   └── test_*.py            # Multi-module workflows — 18 files
 ├── system/
-│   └── test_*.py            # Full-system tests — 20 files
+│   └── test_*.py            # Full-system tests — 18 files
 └── layer_compliance/
     ├── test_imports.py      # cli/ never imports from core/
     ├── test_constants.py    # No hardcoded defaults
     ├── test_privilege.py    # Privilege checks in api/
-    └── test_startup_time.py # Module import startup benchmarks
+    ├── test_startup_time.py # Module import startup benchmarks
+    ├── test_cleanup.py      # Pytest temp dir cleanup behavior
+    ├── test_memory_leak_patterns.py  # Detects potential memory leak patterns
+    └── test_blocking_loops.py       # Detects blocking calls in async paths
 ```
 
 ## Mocking Patterns
@@ -148,18 +150,23 @@ assert result.exit_code == 0
 | Fixture | Location | Purpose | Scope |
 |---------|----------|---------|-------|
 | `_mock_sudo_cache` | tests/conftest.py | Prevents real sudo calls | autouse ALL |
-| `isolate_config_and_cache` | tests/unit/conftest.py | Fresh config/cache dirs | autouse unit |
-| `_setup_database` | tests/unit/conftest.py | Fresh in-memory database | autouse unit |
-| `_isolate_iptables_rules` | tests/unit/conftest.py | Fresh iptables rules | autouse unit |
+| `isolate_config_and_cache` | tests/conftest.py | Fresh config/cache dirs | autouse ALL |
+| `_setup_database` | tests/conftest.py | Fresh in-memory database | autouse ALL |
+| `_isolate_iptables_rules` | tests/conftest.py | Fresh iptables rules | autouse ALL |
+| `_block_real_sudo_invocations` | tests/conftest.py | Blocks real sudo calls | autouse ALL (enforced) |
+| `_mock_privilege_checks` | tests/conftest.py | Mocks HostPrivilegeHelper | autouse ALL |
 
-## Layer Compliance Tests (8 files)
+## Layer Compliance Tests (7 files)
 
 These are the WATCHTOWERS:
 
 - **test_imports.py**: cli/ never imports from core/ directly
-- **test_constants.py**: No hardcoded defaults, constants.py is single source
+- **test_constants.py**: No hardcoded defaults, constants.py is single source of truth
 - **test_privilege.py**: Privilege checks exist in api/ layer, NOT in cli/
 - **test_startup_time.py**: Module import startup benchmark checks
+- **test_cleanup.py**: Pytest temp dir cleanup behavior
+- **test_memory_leak_patterns.py**: Detects potential memory leak patterns
+- **test_blocking_loops.py**: Detects blocking calls in async paths
 
 ## CI Commands (The Gauntlet)
 

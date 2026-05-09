@@ -49,10 +49,8 @@ Host configuration. One-time, machine-global setup.
 |---------|-------------|
 | `mvm host init` | Apply host config (KVM, modules, ip_forward, mvm group, sudoers). Idempotent. |
 | `mvm host ls` | Show current host configuration state |
-| `mvm host clean` | Remove networking config (bridges, TAPs, iptables). Does not touch sysctl/group. |
-| `mvm host reset` | Full rollback: networking + sysctl + sudoers + group removal. |
-| | `mvm host clean --force` | Skip confirmation |
-| | `mvm host reset --force` | Skip confirmation |
+| `mvm host clean [--force]` | Remove networking config (bridges, TAPs, iptables). Does not touch sysctl/group. |
+| `mvm host reset [--force]` | Full rollback: networking + sysctl + sudoers + group removal. |
 
 ---
 
@@ -225,8 +223,8 @@ SSH key management.
 | `mvm key create NAME` | Generate a new ED25519 keypair |
 | `mvm key rm NAME` | Remove a key from the cache |
 | `mvm key inspect NAME` | Show fingerprint and public key content |
-| `mvm key set-default KEY1 [KEY2...]` | Set default keys for new VMs |
-| `mvm key export NAME` | Export a key to ~/.ssh |
+| `mvm key default NAMES... [--clear]` | Set default keys for new VMs, or clear all defaults with `--clear` |
+| `mvm key export NAME --out DIR` | Export a key to a directory |
 
 ---
 
@@ -444,8 +442,9 @@ Legacy format example:
 | `MVM_CACHE_DIR` | Override cache directory | `~/.cache/mvmctl` |
 | `MVM_CONFIG_DIR` | Override config directory | `~/.config/mvmctl` |
 | `MVM_LOG_LEVEL` | Set log verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | `INFO` |
-| `MVM_KERNEL` | Override default kernel path | (from metadata) |
-| `MVM_FIRECRACKER_BIN` | Override Firecracker binary path | (from metadata) |
+| `MVM_FIRECRACKER_BIN` | Override Firecracker binary path | (default from DB) |
+| `MVM_ASSET_MIRROR` | Local mirror directory for downloaded assets | (not set) |
+| `MVM_ESCALATED` | Set by sudo wrapper to indicate privilege escalation | `1` |
 
 ---
 

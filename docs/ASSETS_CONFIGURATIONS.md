@@ -92,8 +92,8 @@ source: "https://spec.ccfc.min/firecracker-ci/{ci_version}/{arch}/ubuntu-{ubuntu
 Resolution works as follows:
 
 1. The active Firecracker CI version is read from the default binary entry in
-   `~/.cache/mvmctl/metadata.json` (`binaries.*.ci_version` where `is_default=1`),
-falling back to `DEFAULT_FIRECRACKER_CI_VERSION` (standalone constant in `constants.py`).
+   the SQLite database (`mvmdb.db`), falling back to
+   `DEFAULT_FIRECRACKER_CI_VERSION` (standalone constant in `constants.py`).
 2. The host architecture is detected via `platform.machine()`, falling back to
    `defaults.kernel.arch` in `OVERRIDABLE_DEFAULTS`.
 3. The `list_url_template` field in the image's YAML entry is queried to list all

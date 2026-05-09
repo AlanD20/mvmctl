@@ -49,8 +49,8 @@ permission:
     "uv run python *": allow
     "sg mvm *": allow
     "sudo *": deny
-    "sudo *uv run mvm host init*": allow
-    "sudo *uv run mvm init*": allow
+    "sudo *mvm init*": allow
+    "sudo *mvm host init*": allow
     "git checkout *": deny
     "git revert *": deny
     "git clean *": deny
@@ -160,7 +160,7 @@ Every domain test file MUST order test classes so that **destructive tests** (re
 System tests follow a strict clean design. Every domain test file MUST adhere to these principles:
 
 ### 1. One Domain Per File
-Each `tests/system/test_*.py` tests exactly one CLI domain (vm, network, image, kernel, key, bin, host, cache, config, console, logs, ssh, init).
+Each `tests/system/test_*.py` tests exactly one CLI domain (vm, network, image, kernel, key, bin, host, cache, config, console, logs, ssh, init, volume).
 
 ### 2. File Structure (top-to-bottom)
 ```
@@ -255,7 +255,9 @@ MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm bin pull 1.15.1 --set-defa
 ### Sudo & UV Path
 
 - **Always use `~/.pyenv/shims/uv`** as the uv path. Never use bare `uv` with sudo.
-- For one-time setup (requires sudo): `sudo ~/.pyenv/shims/uv run mvm host init` or `sudo ~/.pyenv/shims/uv run mvm init`
+- For one-time setup via uv (requires sudo): `sudo ~/.pyenv/shims/uv run mvm host init` or `sudo ~/.pyenv/shims/uv run mvm init`
+- For one-time setup via built binary (requires `cp dist/mvm ~/.local/bin/mvm` first): `sudo ~/.local/bin/mvm init` or `sudo ~/.local/bin/mvm host init`
+- The built binary **MUST** be copied to `~/.local/bin/mvm` — that is the only path where `sudo` will work with the binary
 - For running system tests: `sg mvm -c 'uv run pytest tests/system/test_xxx.py -v'`
 - For running mvm commands: `sg mvm -c 'uv run mvm <command>'`
 - DO NOT use sudo for regular mvm commands (vm create, network create, etc.)
@@ -281,6 +283,7 @@ Read EVERY file in `src/mvmctl/cli/`. The files are:
 - `src/mvmctl/cli/logs.py` — Log management (callback, 4 flags)
 - `src/mvmctl/cli/ssh.py` — SSH access (callback, 5 flags)
 - `src/mvmctl/cli/init.py` — Init wizard (callback, 2 flags)
+- `src/mvmctl/cli/volume.py` — Volume management (5 subcommands)
 
 For each file, extract:
 - Every `@app.command(name="...")` or function name → subcommand
@@ -349,6 +352,11 @@ Read EVERY file in `tests/system/`. The files are:
 | `domain_host` | Host | test_host.py |
 | `domain_config` | Config | test_config.py |
 | `domain_init` | Init wizard | test_init.py |
+| `domain_cache` | Cache | test_cache.py |
+| `domain_console` | Console | test_console.py |
+| `domain_logs` | Logs | test_logs.py |
+| `domain_ssh` | SSH | test_ssh.py |
+| `domain_volume` | Volume | test_volume.py |
 
 ```bash
 # Run all tests for a specific domain
@@ -551,12 +559,12 @@ uv sync --group dev --group build
 
 **Fast build** (for iterative testing):
 ```bash
-python scripts/build_services.py --release
+python scripts/build_services.py --fast
 ```
 
 **Optimized build** (production — LTO, anti-bloat, smaller binary):
 ```bash
-python scripts/build_services.py --release --optimize
+python scripts/build_services.py --release
 ```
 
 Output: `dist/mvm` (main binary) and `dist/services/mvm-services` (service binaries).

@@ -8,22 +8,26 @@
 
 ```
 tests/system/
-├── conftest.py              # Fixtures: mvm_binary, created_vm, created_network, created_key
-├── test_bin.py              # Firecracker binary tests
-├── test_cache.py            # Cache management tests
-├── test_config.py          # Configuration tests
-├── test_console.py         # Console access tests
-├── test_full_journeys.py    # End-to-end journey tests
-├── test_host.py             # Host configuration tests
-├── test_images.py           # Image management tests
-├── test_init.py            # Init tests
-├── test_kernel.py           # Kernel tests
-├── test_keys.py             # SSH key tests
-├── test_logs.py            # Log tests
-├── test_network.py          # Network CRUD tests
-├── test_ssh.py             # SSH config tests
-├── test_vm_lifecycle.py     # VM lifecycle tests
-└── __init__.py
+├── conftest.py                 # Fixtures: mvm_binary, created_vm, created_network, created_key
+├── __init__.py
+├── test_bin.py                 # Firecracker binary tests
+├── test_cache.py               # Cache management tests
+├── test_cli_edge_cases.py      # CLI edge case tests (help, error handling)
+├── test_config.py              # Configuration tests
+├── test_console.py             # Console access tests
+├── test_full_journeys.py       # End-to-end journey tests
+├── test_host.py                # Host configuration tests
+├── test_image_import_create_vm.py  # Image import + VM create workflow
+├── test_images.py              # Image management tests
+├── test_init.py                # Init tests
+├── test_kernel.py              # Kernel tests
+├── test_keys.py                # SSH key tests
+├── test_logs.py                # Log tests
+├── test_network.py             # Network CRUD tests
+├── test_ssh.py                 # SSH config tests
+├── test_vm_lifecycle.py        # VM lifecycle tests
+├── test_vm_snapshot_load.py    # VM snapshot save/load tests
+└── test_volume.py              # Volume CRUD and lifecycle tests
 ```
 
 ## MARKERS
@@ -68,6 +72,6 @@ uv run pytest tests/
 
 ## NOTES
 
-- **14 test files**: Covering bin, cache, config, console, full_journeys, host, images, init, kernel, keys, logs, network, ssh, and VM lifecycle
+- **18 test files**: Covering bin, cache, cli_edge_cases, config, console, full_journeys, host, image_import_create_vm, images, init, kernel, keys, logs, network, ssh, vm_lifecycle, vm_snapshot_load, and volume
 - Requires real system environment (KVM, mvm group, network privileges)
 - Completely black-box testing via CLI binary calls

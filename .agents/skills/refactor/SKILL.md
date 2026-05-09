@@ -88,7 +88,7 @@ If you rename during refactor, you are EMPOWERED to do so — the name must serv
 Shared logic belongs in utils/:
 
 - Pure helper functions → utils/ (no domain knowledge)
-- Repeated subprocess patterns → utils/process_utils.py
+- Repeated subprocess patterns → utils/operation_utils.py
 - File operations → utils/fs.py
 - HTTP operations → utils/http.py
 - Network helpers → utils/network.py

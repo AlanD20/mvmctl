@@ -151,25 +151,17 @@ src/mvmctl/core/_shared/_provisioner/ ← Public abstraction (used by API)
 
 ### What it replaces (in `vm create`)
 
-The binary-vs-guestfs decision lives inside `VMCreateContext.execute()` in `api/vm_operations.py`. The existing `GuestfsProvisioner` is still built and queued as the fallback path. At the `gp.run()` call point, `_provision_via_binary()` is tried first:
+The binary-vs-guestfs decision lives inside `ProvisionerBackend` in `core/_shared/_provisioner/_backend.py`. `ProvisionerBackend._get_backend_for_create()` selects `_LoopMountBackend` (binary) or `_GuestfsBackend` (guestfs) based on a config check and binary availability:
 
 ```python
-# In VMCreateContext.execute():
-# Build GuestfsProvisioner (fallback path, unchanged)
-gp = GuestfsProvisioner(self.rootfs_path, ...)
-gp.resize(self.resolved.disk_size_bytes)
-if mode == CloudInitMode.OFF:
-    gp.set_hostname(...)
-    gp.inject_dns(...)
-    gp.setup_ssh(...)
-    gp.disable_cloud_init()
-elif mode == CloudInitMode.INJECT:
-    ...
-    gp.inject_cloud_init(...)
-
-# Try binary first, fall back to guestfs
-if not self._provision_via_binary():
-    gp.run()  # Fallback: ~2600ms guestfs
+# In ProvisionerBackend:
+@staticmethod
+def _get_backend_for_create(
+    rootfs_path: str, fs_type: str
+) -> _LoopMountBackend | _GuestfsBackend:
+    if ProvisionerBackend._loop_mount_available():
+        return _LoopMountBackend(rootfs_path, fs_type)
+    return _GuestfsBackend(rootfs_path, fs_type)
 ```
 
 | Current (guestfs) | New (loop) |
@@ -295,11 +287,11 @@ All steps wrapped in `try/finally` — `umount` and `losetup -d` run even on err
 
 ### Binary Availability Check
 
-The `LoopMountManager.is_binary_available()` method checks if the compiled binary exists at `CacheUtils.get_bin_dir() / "mvm-provision"`. This is called by `_provision_via_binary()` in `VMCreateContext` to decide whether to try the binary path.
+`ProvisionerBackend._loop_mount_available()` checks if the config has `guestfs_enabled=false` and the compiled binary exists at `CacheUtils.get_bin_dir() / "mvm-provision"`.
 
 ### Fallback
 
-If `mvm-provision` is not installed (binary not extracted, sudo not configured), or if the binary exits with an error, `VMCreateContext._provision_via_binary()` returns `False` and the existing `gp.run()` (guestfs) fallback executes transparently.
+If `mvm-provision` is not installed (binary not extracted, sudo not configured), or if the binary exits with an error, `_LoopMountBackend.run()` raises an exception and `ProvisionerBackend` falls back to `_GuestfsBackend` transparently.
 
 ## Binary Embedding
 

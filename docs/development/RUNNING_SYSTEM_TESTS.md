@@ -50,7 +50,7 @@ sudo ~/.pyenv/shims/uv run mvm host init
 # Disable guestfs (loop-mount is the primary provisioning backend)
 uv run mvm config set settings guestfs_enabled false
 
-# Build the mvm-provision service binary (Nuitka onefile for loop-mount backend)
+# Build the mvm-services combined binary (Nuitka multidist for loop-mount backend + console relay + nocloud server)
 uv run python scripts/build_services.py
 
 # Pull default assets
@@ -184,7 +184,8 @@ MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run pytest tests/system/test_volum
 | **Volume** (`test_volume.py`) | 17 | CRUD lifecycle: create (raw/qcow2), ls (table/JSON), inspect (table/JSON), rm (single/multiple/--force/nonexistent), resize, empty ls, duplicate name rejection, invalid size/format rejection, nonexistent inspect/resize |
 | **VM Batch Create** (`test_vm_lifecycle.py::TestVMBatchCreate`) | 12 | --count default, --count 3, --atomic with/without count, --count 0/-1 rejected, --count + --ip/mac rejected, --count + --volume rejected, explicit --count 1, atomic rollback on name collision |
 | **VM-Volume Integration** (`test_vm_lifecycle.py::TestVMVolumeIntegration`) | 2 | vm create --volume (create + attach at boot), vm attach-volume + detach-volume (stop → attach → start → stop → detach) |
-| **VM Lifecycle** (`test_vm_lifecycle.py` other classes) | 49 | Create per image, pause/resume/stop/start/reboot, --force variants, remove running without --force, SSH, list (table/JSON), inspect/export, snapshot/load, export/import roundtrip, vcpus/memory/disk flags, static IP, MAC, named network, kernel override, boot-args, no-console, SSH key file, enable-pci, enable-logging, enable-metrics, ps, user-data, cloud-init-mode, duplicate name rejection, nonexistent errors |
+| **VM Lifecycle** (`test_vm_lifecycle.py` other classes) | 49 | Create per image, pause/resume/stop/start/reboot, --force variants, remove running without --force, SSH, list (table/JSON), inspect/export, export/import roundtrip, vcpus/memory/disk flags, static IP, MAC, named network, kernel override, boot-args, no-console, SSH key file, enable-pci, enable-logging, enable-metrics, ps, user-data, cloud-init-mode, duplicate name rejection, nonexistent errors |
+| **VM Snapshot/Load** (`test_vm_snapshot_load.py`) | 7 | snapshot/load, export/import roundtrip, error paths |
 | **Network** (`test_network.py`) | 23 | CRUD, inspect (table/JSON), iptables, bridge, --no-nat, set-default, ls --json, rm multiple, error paths, sync, gateway |
 | **Keys** (`test_keys.py`) | 22 | CRUD (ed25519, rsa, ecdsa), add existing, export, inspect (table+JSON), set-default/clear, ls --json, error paths, bits/comment/out/force |
 | **Images** (`test_images.py`) | 20 | Fetch (alpine+ubuntu), list (table/JSON/remote), inspect (table/JSON/tree), set/get-default, warm, remove, fetch error, import qcow2/raw, pull --force, pull --set-default |
@@ -198,8 +199,9 @@ MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run pytest tests/system/test_volum
 | **Config** (`test_config.py`) | 5 | Config CRUD |
 | **Init** (`test_init.py`) | 6 | Init wizard (non-interactive mode) |
 | **Cache** (`test_cache.py`) | 13 | Cache prune (dry-run and actual), init, clean --force |
-| **CLI Edge Cases** (`test_cli_edge_cases.py`) | 27 | Root flags (--version, --verbose, --debug), domain-specific edge cases |
-| **Total** | **265** | |
+| **CLI Edge Cases** (`test_cli_edge_cases.py`) | 32 | Root flags (--version, --verbose, --debug), domain-specific edge cases |
+| **Image Import + VM Create** (`test_image_import_create_vm.py`) | 2 | Import image then create VM from it |
+| **Total** | **283** | |
 
 ### Running with sudo
 
@@ -297,6 +299,8 @@ real hardware:
 | `test_nocloud_net_lifecycle.py` | NoCloud network lifecycle with mocked subprocess |
 | `test_ssh_integration.py` | SSH client invocation and key-based auth flow |
 | `test_vm_direct_injection.py` | VM direct file injection workflow |
+| `test_volume_db.py` | Volume repository CRUD operations with real SQLite |
+| `test_cli_smoke.py` | Basic CLI invocation and help output smoke tests |
 
 ## Troubleshooting
 

@@ -577,10 +577,7 @@ libguestfs-make-fixed-appliance ~/.cache/mvmctl/appliance
 For more detailed error output, set debug mode:
 
 ```bash
-# Set in config
-mvm config set debug enabled true
-
-# Or use environment variable
+# Use the log level environment variable
 MVM_LOG_LEVEL=DEBUG mvm vm create --name myvm --image ubuntu-24.04
 ```
 

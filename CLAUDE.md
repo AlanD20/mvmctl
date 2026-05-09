@@ -53,7 +53,7 @@ src/mvmctl/
 ├── utils/           # Shared helpers: fs, _system, http, network, crypto, template, yaml, _validators, etc.
 ├── assets/          # Bundled YAML configs (images.yaml, kernels.yaml) + JSON templates (firecracker.template.json, cloud-init.template.yaml)
 └── services/        # Runtime subprocess services (console_relay, nocloud_server, loopmount)
-tests/               # 149 files across 4 subdirectories (111 unit + 17 integration + 14 system + 7 layer_compliance)
+tests/               # 161 files across 4 subdirectories (118 unit + 18 integration + 18 system + 7 layer_compliance)
 docs/                # API and release docs
 legacy/              # Archived bash scripts (single-vm, multi-vm, assets)
 pyproject.toml       # Build, ruff, mypy strict, pytest (80% branch coverage gate)

@@ -11,6 +11,7 @@ src/mvmctl/utils/
 ├── __init__.py          # Package entry — re-exports _disk, _io, _system, _validators, crypto, fs, http
 ├── _disk.py             # Disk size parsing/formatting + root partition detection (PartitionDetector etc.)
 ├── _io.py               # Console output helpers — print_info, print_table, setup_logging, log_exception
+├── _lazy_import.py      # Reusable lazy import helper for module __init__.py re-exports
 ├── _system.py           # Subprocess wrappers — run_cmd, stream_cmd, privileged_cmd; signal handling; ProcessSignalHandler
 ├── _validators.py       # Combined validation — KeyValidator, NetworkValidator, VMValidator classes
 ├── auditlog.py          # Append-only audit log — AuditLog class (structured JSON lines)
@@ -20,6 +21,7 @@ src/mvmctl/utils/
 ├── fs.py                # Filesystem operations — FsUtils (read_json/yaml/raw, secure_mkdir, chown, pid files)
 ├── http.py              # HTTP downloads — HttpDownload (resumable, SHA256 verify, retry, cache), HttpCache
 ├── network.py           # Network utilities — NetworkUtils (MAC/TAP/bridge, iptables, subnet math, interface queries)
+├── operation_utils.py   # Operation utilities — bridges between raw progress and UI events
 ├── progress.py          # ASCII progress bars — ASCIIProgressBar, Spinner (threaded indeterminate spinner)
 ├── template.py          # String template rendering — render_template, render_optional_template
 └── yaml.py              # YAML field extraction — require_str, optional_str, optional_int, require_str_list, parse_set_val_list

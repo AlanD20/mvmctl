@@ -20,7 +20,7 @@ Use the automated bump script:
 ./bump-version.py 0.2.0 --aur        # Also update AUR PKGBUILD checksums
 ```
 
-Files updated: `pyproject.toml`, `src/mvmctl/__init__.py`, `packaging/PKGBUILD`, `packaging/mvmctl.spec`, `packaging/debian/changelog`, `docs/mvm.1`
+Files updated: `pyproject.toml`, `src/mvmctl/__init__.py`, `packaging/PKGBUILD`, `packaging/mvmctl.spec`, `packaging/debian/changelog`, `packaging/debian/control`, `docs/mvm.1`, `docs/RELEASE.md`
 
 This project uses **semantic versioning** (MAJOR.MINOR.PATCH):
 - **MAJOR** — incompatible API or CLI changes

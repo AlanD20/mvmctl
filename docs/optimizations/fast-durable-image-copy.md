@@ -1,6 +1,6 @@
 # Fast Durable Image Copy for microVMs
 
-> **Note:** This document describes planned optimization strategies that have not yet been implemented. The actual image copy implementation may differ.
+> **Note:** This document describes the image copy optimization strategies implemented in mvmctl. See `src/mvmctl/core/image/_service.py` method `materialize_to()` for the actual implementation.
 
 ## Overview
 

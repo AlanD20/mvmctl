@@ -1,14 +1,14 @@
 # libguestfs Boot Time Optimizations
 
-> **Note:** This document describes planned optimization strategies that have not yet been implemented. The referenced file `src/mvmctl/core/rootfs_injector.py` does not exist in the current codebase.
+> **Note:** The guestfs provisioning path is the **fallback backend** in mvmctl. The primary provisioning backend is the loop-mount binary (`mvm-provision` via `_LoopMountBackend`). Guestfs is used only when the loop-mount binary is unavailable or `guestfs_enabled` is set to `true` in config.
 
 ## Overview
 
-This document describes the boot-time optimizations applied when using libguestfs for cloud-init injection in mvmctl. These optimizations reduce appliance startup time by configuring the backend directly, minimizing resource allocation, and disabling unnecessary services. All optimizations documented here are compatible with and highly beneficial for both **ext4** and **btrfs** root filesystems.
+This document describes the boot-time optimizations for the fallback libguestfs provisioning path in mvmctl. These optimizations reduce appliance startup time by configuring the backend directly, minimizing resource allocation, and disabling unnecessary services. All optimizations documented here are compatible with and highly beneficial for both **ext4** and **btrfs** root filesystems.
 
 ## Applied Optimizations
 
-The following optimizations are implemented in `src/mvmctl/core/rootfs_injector.py`:
+These optimizations are applied via the `_GuestfsBackend` class in `src/mvmctl/core/_shared/_provisioner/_backend.py`:
 
 ### 1. Direct Backend (Environment Variable)
 

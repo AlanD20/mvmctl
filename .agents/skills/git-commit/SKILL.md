@@ -33,7 +33,7 @@ I am NOT for reviewing code quality — use `@.agents/skills/code-review/` skill
 Run these commands and verify clean output:
 
 ```bash
-# Ruff linting (line length 100, py313)
+# Ruff linting (line length 80, py313)
 uv run ruff check src/
 
 # Ruff formatting (double quotes, space indent)

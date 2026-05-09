@@ -6,7 +6,7 @@ Main Python package for the `mvmctl` microVM CLI. This root orchestrates the laz
 
 | Directory | Purpose |
 |-----------|---------|
-| `cli/` | Thin Typer command definitions and CLI-only logic |
+| `cli/` | Thin Typer command definitions for all domains (vm, image, kernel, network, key, volume, bin, config, console, logs, ssh, host, init, cache) |
 | `api/` | Stable public API boundary with privilege checks |
 | `core/` | Isolated business logic and Firecracker interactions |
 | `models/` | Pure `@dataclass` objects for domain data |

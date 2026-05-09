@@ -403,6 +403,7 @@ All domains are converted. The following table shows which patterns each API ope
 |--------|------|------------------------|--------------|
 | **Host** | `api/host_operations.py` | `OperationResult` / `NeedsInteraction` | N/A |
 | **VM** | `api/vm_operations.py` | `OperationResult` / `BatchResult` / `NeedsInteraction` | `on_progress` (create only) |
+| **Volume** | `api/volume_operations.py` | `OperationResult` / `BatchResult` | N/A |
 | **Network** | `api/network_operations.py` | `OperationResult` / `NeedsInteraction` | N/A |
 | **Image** | `api/image_operations.py` | `OperationResult` / `BatchResult` / `NeedsInteraction` | `on_progress` (fetch, import, warm) |
 | **Kernel** | `api/kernel_operations.py` | `OperationResult` / `BatchResult` / `NeedsInteraction` | `on_progress` (fetch only) |
@@ -412,6 +413,7 @@ All domains are converted. The following table shows which patterns each API ope
 | **Config** | `api/config_operations.py` | `OperationResult` | N/A |
 | **SSH** | `api/ssh_operations.py` | `OperationResult` | N/A |
 | **Console** | `api/console_operations.py` | `OperationResult` | N/A |
+| **Logs** | `api/logs_operations.py` | `OperationResult` | N/A |
 | **Init** | `api/init_operations.py` | `InitResult` (wizard-specific) with `NeedsInteraction` | `on_progress` threaded to cache |
 
 ---
@@ -577,3 +579,12 @@ Every `code` value currently used in the codebase:
 | `console.killed` | success | Console | Console relay stopped |
 | `console.not_running` | skipped | Console | Console relay not running |
 | `console.kill_failed` | error | Console | Console relay stop failed |
+| `volume.created` | success | Volume | Volume created successfully |
+| `volume.create_failed` | error | Volume | Volume creation failed |
+| `volume.removed` | success | Volume | Volume removed |
+| `volume.remove_failed` | error | Volume | Volume removal failed |
+| `volume.resized` | success | Volume | Volume resized |
+| `volume.resize_failed` | error | Volume | Volume resize failed |
+| `logs.stream_started` | success | Logs | Log streaming started |
+| `logs.stream_failed` | error | Logs | Log streaming failed |
+| `logs.stream_stopped` | success | Logs | Log streaming stopped |

@@ -56,6 +56,8 @@ from mvmctl.api import (
     # Input classes
     VMCreateInput,
     VMInput,
+    VMImportInput,
+    VMImportRequest,
     NetworkCreateInput,
     NetworkInput,
     ImagePullInput,
@@ -73,6 +75,16 @@ from mvmctl.api import (
     LogInput,
     VolumeCreateInput,
     VolumeInput,
+    # Export/import config models
+    VMExportComputeConfig,
+    VMExportImageConfig,
+    VMExportKernelConfig,
+    VMExportBinaryConfig,
+    VMExportNetworkConfig,
+    VMExportBootConfig,
+    VMExportFirecrackerConfig,
+    VMExportCloudInitConfig,
+    VMExportConfig,
     # Result types
     InitResult,
     InitStepResult,

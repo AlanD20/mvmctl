@@ -146,6 +146,7 @@ src/mvmctl/
 │   ├── init_operations.py        # Init orchestration
 │   ├── logs_operations.py        # Logs orchestration
 │   ├── ssh_operations.py         # SSH orchestration
+│   ├── volume_operations.py      # Volume orchestration
 │   └── inputs/                   # Request → ResolvedRequest pattern (grows with project)
 ├── core/             # Business logic — isolated domains ONLY (no orchestration)
 │   ├── vm/                      # Controller, Service, Repository, Resolver
@@ -158,9 +159,9 @@ src/mvmctl/
 │   ├── config/                  # Controller, Service, Repository, Resolver
 │   ├── console/                 # Controller, Service, Repository, Resolver
 │   ├── logs/                    # Controller, Service, Repository, Resolver
-│   ├── cache/                   # Controller, Service, Repository, Resolver
 │   ├── cloudinit/               # Controller, Service, Repository, Resolver
 │   ├── ssh/                     # Controller, Service, Repository, Resolver
+│   ├── volume/                  # Controller, Service, Repository, Resolver
 │   └── _shared/                 # Shared infrastructure (Database, iptables, etc.)
 ├── models/           # Pure @dataclass objects
 ├── utils/            # Shared helpers
@@ -381,8 +382,8 @@ When you modify code that affects the runtime binary (service processes, main en
 3. **Dynamic imports**: Modules loaded via runtime registries (e.g., `passlib.handlers.*`) need `--include-module` in `MAIN_FAST_FLAGS` to prevent tree-shaking.
 4. **Build commands**:
    ```bash
-   python scripts/build_services.py --release --fast      # Development build
-   python scripts/build_services.py --release --optimize  # Release build
+   python scripts/build_services.py --fast       # Development build (fast compile)
+   python scripts/build_services.py --release    # Release build (optimized, DEFAULT)
    ```
 5. **Prerequisites**: `uv sync --group dev --group build`
 

@@ -4,7 +4,7 @@
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Coverage Gate:** 80% branch coverage (`pyproject.toml --cov-fail-under=80`)
 **Rule:** Tests must NEVER require root, KVM, or real network stack (except system tests)
-**Files:** 149 test files (111 unit + 17 integration + 14 system + 7 layer_compliance)
+**Files:** 161 test files (118 unit + 18 integration + 18 system + 7 layer_compliance)
 
 ## STRUCTURE
 
@@ -13,13 +13,13 @@ tests/
 ├── conftest.py              # Root: _mock_sudo_cache, isolate_config_and_cache, _isolate_iptables_rules, _setup_database (autouse)
 ├── helpers/
 │   └── paths.py             # make_test_paths(tmp_path) — single source of truth for canonical test paths
-├── unit/                    # 111 unit test files across all modules
+├── unit/                    # 118 unit test files across all modules
 ├── integration/
 │   ├── conftest.py          # Integration-specific fixtures
-│   └── test_*.py            # Multi-module workflow tests (17 files)
+│   └── test_*.py            # Multi-module workflow tests (18 files)
 ├── system/
 │   ├── conftest.py          # Real hardware fixtures; _restore_real_dirs override
-│   └── test_*.py            # Black-box CLI tests via subprocess (14 files)
+│   └── test_*.py            # Black-box CLI tests via subprocess (18 files)
 ├── layer_compliance/
 │   ├── test_imports.py      # Enforces import boundaries (cli→api→core only)
 │   ├── test_constants.py    # Ensures constants.py is single source of truth
@@ -227,7 +227,7 @@ uv run pytest tests/ -n auto
 
 ## NOTES
 
-- **149 total test files**: 111 unit + 17 integration + 14 system + 7 layer_compliance
+- **161 total test files**: 118 unit + 18 integration + 18 system + 7 layer_compliance
 - mypy strict exempted for tests (`pyproject.toml` overrides: no `disallow_untyped_defs`)
 - All tests run as non-root; no KVM access required (except system tests)
 - Fixtures in `unit/conftest.py` auto-used for all unit tests

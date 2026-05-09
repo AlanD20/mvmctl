@@ -43,7 +43,7 @@ mvmctl/
 ├── stubs/               # Type stubs for external dependencies
 ├── packaging/           # Distribution packaging configs
 ├── docs/                # Project documentation
-├── tests/               # 186 test files (138 unit + 20 integration + 20 system + 8 layer_compliance)
+├── tests/               # 161 test files (118 unit + 18 integration + 18 system + 7 layer_compliance)
 └── pyproject.toml       
 ```
 
