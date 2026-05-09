@@ -167,6 +167,7 @@ class TestVMOperationCreate:
         mock_resolved = mocker.MagicMock()
         mock_resolved.vm_id = "generated-vm-id"
         mock_resolved.name = "test-vm"
+        mock_resolved.volumes = []
         mock_request = mocker.MagicMock()
         mock_request.resolve.return_value = mock_resolved
         mocker.patch(

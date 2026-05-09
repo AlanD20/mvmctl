@@ -63,8 +63,7 @@ def handle_errors(func: F) -> F:
                 pass
             raise typer.Exit(code=0)
         except PrivilegeError as e:
-            logger.error("Privilege error in CLI command: %s", e)
-            logger.debug("Full traceback:", exc_info=True)
+            logger.debug("Privilege error in CLI command: %s", e, exc_info=True)
             print_error(str(e))
             if e.details:
                 detail_msg = e.details.get("message", "")
@@ -75,13 +74,11 @@ def handle_errors(func: F) -> F:
                     print_info(f"  - {suggestion}")
             raise typer.Exit(code=1) from e
         except MVMError as e:
-            logger.error("%s in CLI command: %s", e.__class__.__name__, e)
-            logger.debug("Full traceback:", exc_info=True)
+            logger.debug("%s in CLI command: %s", e.__class__.__name__, e, exc_info=True)
             _print_error(str(e))
             raise typer.Exit(code=1) from e
         except sqlite3.OperationalError as e:
-            logger.error("Database error in CLI command: %s", e)
-            logger.debug("Full traceback:", exc_info=True)
+            logger.debug("Database error in CLI command: %s", e, exc_info=True)
             msg = str(e)
             if "no such table" in msg:
                 print_error(

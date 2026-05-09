@@ -10,6 +10,7 @@ from pathlib import Path
 from mvmctl.core._shared import Database
 from mvmctl.core._shared._guestfs import GuestfsService
 from mvmctl.core.binary._repository import BinaryRepository
+from mvmctl.core.binary._service import BinaryService
 from mvmctl.core.cache import CacheService
 from mvmctl.core.config._service import SettingsService
 from mvmctl.core.host._helper import HostPrivilegeHelper
@@ -63,6 +64,19 @@ class CacheOperation:
         ]
         for path in dirs:
             created.append(str(path))
+
+        # Extract embedded service binaries (compiled mode only)
+        from mvmctl.constants import is_compiled_mode
+
+        if is_compiled_mode():
+            try:
+                from mvmctl.core._shared import Database as _ExtractDb
+
+                BinaryService(
+                    BinaryRepository(_ExtractDb())
+                ).extract_service_binaries()
+            except Exception:
+                logger.exception("Failed to extract embedded service binaries")
 
         # Check whether guestfs was enabled by the user
         from mvmctl.core._shared import Database

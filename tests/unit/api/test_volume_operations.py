@@ -191,7 +191,7 @@ class TestVolumeOperationRemove:
         )
         mocker.patch("mvmctl.api.volume_operations.Database")
 
-        result = VolumeOperation.remove(VolumeInput(name=["test-vol"]))
+        result = VolumeOperation.remove(VolumeInput(identifiers=["test-vol"]))
 
         assert result.items[0].is_ok
         assert result.items[0].status == "success"
@@ -222,7 +222,7 @@ class TestVolumeOperationRemove:
         mocker.patch("mvmctl.api.volume_operations.Database")
 
         result = VolumeOperation.remove(
-            VolumeInput(name=["test-vol"]), force=False
+            VolumeInput(identifiers=["test-vol"]), force=False
         )
 
         assert result.items[0].is_error
@@ -350,7 +350,7 @@ class TestVolumeOperationGet:
             return_value=mock_request,
         )
 
-        result = VolumeOperation.get(VolumeInput(name=["test-vol"]))
+        result = VolumeOperation.get(VolumeInput(identifiers=["test-vol"]))
 
         assert result is vol
         assert result.name == "test-vol"
@@ -369,7 +369,7 @@ class TestVolumeOperationGet:
         )
 
         with pytest.raises(VolumeNotFoundError, match="Expected exactly one"):
-            VolumeOperation.get(VolumeInput(name=["ambiguous"]))
+            VolumeOperation.get(VolumeInput(identifiers=["ambiguous"]))
 
 
 class TestVolumeOperationInspect:
@@ -393,7 +393,7 @@ class TestVolumeOperationInspect:
         mocker.patch("mvmctl.api.volume_operations.VolumeRepository")
         mocker.patch("mvmctl.api.volume_operations.Database")
 
-        result = VolumeOperation.inspect(VolumeInput(name=["test-vol"]))
+        result = VolumeOperation.inspect(VolumeInput(identifiers=["test-vol"]))
 
         assert result["name"] == "test-vol"
         assert result["id"] == vol.id

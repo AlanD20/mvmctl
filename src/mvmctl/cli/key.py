@@ -20,6 +20,7 @@ else:
     KeyOperation = _KeyOperation
     KeyInput = _KeyInput
     KeyCreateInput = _KeyCreateInput
+from mvmctl.cli._completion import _complete_key_names
 from mvmctl.utils._io import (
     print_error,
     print_info,
@@ -93,12 +94,12 @@ def key_ls(
 def key_add(
     name: str = typer.Argument(..., help="Key name"),
     path: Path = typer.Argument(..., help="Path to public key file"),
-    overwrite: bool = typer.Option(
-        False, "--overwrite", help="Overwrite existing key"
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Overwrite existing key"
     ),
 ) -> None:
     """Add an existing public key to the cache."""
-    result = KeyOperation.add(name=name, pub_key_path=path, overwrite=overwrite)
+    result = KeyOperation.add(name=name, pub_key_path=path, overwrite=force)
     if result.is_error:
         print_error(result.message or f"Failed to add key '{name}'")
         raise typer.Exit(code=1)
@@ -163,7 +164,9 @@ def key_create(
 @handle_errors
 def key_rm(
     ctx: typer.Context,
-    names: list[str] = typer.Argument(None, help="Key name(s) to remove"),
+    names: list[str] = typer.Argument(
+        None, help="Key name(s) to remove", autocompletion=_complete_key_names
+    ),
 ) -> None:
     """Remove one or more SSH keys."""
     effective_names: list[str] = list(names) if names else []
@@ -188,7 +191,9 @@ def key_rm(
 @handle_errors
 def key_inspect(
     ctx: typer.Context,
-    name: str = typer.Argument(None, help="Key name or ID"),
+    name: str = typer.Argument(
+        None, help="Key name or ID", autocompletion=_complete_key_names
+    ),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     tree: bool = typer.Option(False, "--tree", help="Output in tree format"),
 ) -> None:
@@ -233,7 +238,9 @@ def key_inspect(
 @handle_errors
 def key_export(
     ctx: typer.Context,
-    name: str = typer.Argument(None, help="Key name or ID"),
+    name: str = typer.Argument(
+        None, help="Key name or ID", autocompletion=_complete_key_names
+    ),
     out: Path = typer.Option(..., "--out", help="Destination directory"),
     force: bool = typer.Option(
         False, "--force", "-f", help="Overwrite existing files"
@@ -252,11 +259,13 @@ def key_export(
     print_info(f"Exported public key to {public_path}")
 
 
-@key_app.command(name="set-default")
+@key_app.command(name="default")
 @handle_errors
 def key_set_default(
     names: list[str] = typer.Argument(
-        None, help="Key name(s) to set as default"
+        None,
+        help="Key name(s) to set as default",
+        autocompletion=_complete_key_names,
     ),
     clear: bool = typer.Option(False, "--clear", help="Clear all default keys"),
 ) -> None:

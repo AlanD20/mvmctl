@@ -87,6 +87,10 @@ markers = [
     "domain_init: system test for init wizard domain",
     "domain_volume: system test for volume management domain",
     "domain_vm: system test for VM lifecycle domain",
+    "domain_invariant: system test for invariant enforcement",
+    "domain_outcome: system test for business outcome verification",
+    "domain_consistency: system test for CLI consistency across command groups",
+    "domain_cross_resource: system test for cross-resource consistency",
 ]
 filterwarnings = [
     "ignore::ResourceWarning:coverage.collector",

@@ -56,7 +56,7 @@ class TestKeyLifecycle:
 
     def test_key_set_default(self, mvm_binary, created_key):
         """Set key as default."""
-        result = _run_mvm(mvm_binary, "key", "set-default", created_key)
+        result = _run_mvm(mvm_binary, "key", "default", created_key)
         assert result.returncode == 0
 
     def test_key_delete(self, mvm_binary, unique_key_name):
@@ -139,9 +139,9 @@ class TestKeyLifecycle:
 
     def test_key_set_default_clear(self, mvm_binary, created_key):
         """Set key as default then clear the default."""
-        result = _run_mvm(mvm_binary, "key", "set-default", created_key)
+        result = _run_mvm(mvm_binary, "key", "default", created_key)
         assert result.returncode == 0
-        result = _run_mvm(mvm_binary, "key", "set-default", "--clear")
+        result = _run_mvm(mvm_binary, "key", "default", "--clear")
         assert result.returncode == 0
 
     def test_key_export(self, mvm_binary, created_key, tmp_path):
@@ -263,7 +263,7 @@ class TestKeyCreateAdvanced:
             assert key_entry.get("is_default")
         finally:
             _run_mvm(mvm_binary, "key", "rm", unique_key_name, check=False)
-            _run_mvm(mvm_binary, "key", "set-default", "--clear", check=False)
+            _run_mvm(mvm_binary, "key", "default", "--clear", check=False)
 
     def test_key_create_force_overwrite(self, mvm_binary, unique_key_name):
         """Force overwrite an existing key with --force."""
@@ -338,7 +338,7 @@ class TestKeyAddOverwrite:
 
         # Third add with --overwrite should succeed
         result = _run_mvm(
-            mvm_binary, "key", "add", key_name, pub_key_path, "--overwrite"
+            mvm_binary, "key", "add", key_name, pub_key_path, "--force"
         )
         assert result.returncode == 0
 

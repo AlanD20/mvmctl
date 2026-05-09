@@ -182,6 +182,7 @@ _COMMAND_SPECS: dict[str, _LazyCommandSpec] = {
 _STATIC_COMMAND_HELP: dict[str, str] = {
     **{name: spec.help_text for name, spec in _COMMAND_SPECS.items()},
     "version": "Show the version and exit",
+    "completion": "Print shell completion script",
     "help": "Show help for mvm or a subcommand",
 }
 
@@ -200,6 +201,7 @@ _COMMAND_ORDER = [
     "config",
     "cache",
     "version",
+    "completion",
     "help",
 ]
 
@@ -243,6 +245,8 @@ class LazyMVMGroup(click.Group):
     ) -> click.Command | None:
         if cmd_name == "version":
             return version_cmd
+        if cmd_name == "completion":
+            return completion_cmd
         if cmd_name == "help":
             return help_cmd
 
@@ -308,6 +312,28 @@ def app(ctx: click.Context, verbose: bool, debug: bool) -> None:
     from mvmctl.utils._io import setup_logging
 
     setup_logging(verbose=verbose, debug=debug)
+
+
+@click.command(name="completion", help="Print shell completion script")
+@click.argument("shell", type=click.Choice(["bash", "zsh", "fish"]))
+@click.pass_context
+def completion_cmd(ctx: click.Context, shell: str) -> None:
+    """Print shell completion script for mvm.
+
+    Install completion by adding the output to your shell config:
+
+        eval "$(mvm completion bash)"
+    """
+    from click.shell_completion import BashComplete, FishComplete, ZshComplete
+
+    root = ctx.find_root()
+    complete_cls = {
+        "bash": BashComplete,
+        "zsh": ZshComplete,
+        "fish": FishComplete,
+    }[shell]
+    complete = complete_cls(root.command, {}, "mvm", "MVM_COMPLETE")
+    click.echo(complete.source())
 
 
 @click.command(name="version", help="Show the version and exit")

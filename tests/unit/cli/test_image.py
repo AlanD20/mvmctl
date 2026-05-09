@@ -214,18 +214,18 @@ class TestImageSetDefault:
             code="image.default_set",
             message="Default image set",
         )
-        result = runner.invoke(app, ["image", "set-default", "abc123"])
+        result = runner.invoke(app, ["image", "default", "abc123"])
         assert result.exit_code == 0
         assert "Default image set" in result.output
 
     @patch("mvmctl.cli.image.ImageOperation")
     def test_set_default_not_found(self, mock_img_op):
         mock_img_op.set_default.side_effect = MVMError("not found")
-        result = runner.invoke(app, ["image", "set-default", "badid"])
+        result = runner.invoke(app, ["image", "default", "badid"])
         assert result.exit_code == 1
 
     def test_set_default_help(self):
-        result = runner.invoke(app, ["image", "set-default", "--help"])
+        result = runner.invoke(app, ["image", "default", "--help"])
         assert result.exit_code == 0
 
 
@@ -450,7 +450,7 @@ class TestImagePullExtended:
             item=img,
         )
         result = runner.invoke(
-            app, ["image", "pull", "ubuntu-24.04", "--set-default"]
+            app, ["image", "pull", "ubuntu-24.04", "--default"]
         )
         assert result.exit_code == 0
         assert "Default image set" in result.output
@@ -510,7 +510,7 @@ class TestImageSetDefaultExtended:
             code="image.not_found",
             message="Image ID prefix 'badid' not found",
         )
-        result = runner.invoke(app, ["image", "set-default", "badid"])
+        result = runner.invoke(app, ["image", "default", "badid"])
         assert result.exit_code == 1
         assert "not found" in result.output
 
@@ -521,7 +521,7 @@ class TestImageSetDefaultExtended:
             status="error",
             code="image.default_failed",
         )
-        result = runner.invoke(app, ["image", "set-default", "badid"])
+        result = runner.invoke(app, ["image", "default", "badid"])
         assert result.exit_code == 1
         assert "Failed to set default image" in result.output
 
@@ -709,7 +709,7 @@ class TestImageImportExtended:
         source = tmp_path / "source.qcow2"
         source.write_bytes(b"data")
         result = runner.invoke(
-            app, ["image", "import", "Test OS", str(source), "--set-default"]
+            app, ["image", "import", "Test OS", str(source), "--default"]
         )
         assert result.exit_code == 0
         assert "Default image set" in result.output

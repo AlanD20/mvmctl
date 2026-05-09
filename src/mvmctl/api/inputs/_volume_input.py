@@ -21,8 +21,7 @@ __all__ = [
 class VolumeInput:
     """Identifiers for existing volume actions (ls, rm, inspect, get)."""
 
-    id: list[str] = field(default_factory=list)
-    name: list[str] = field(default_factory=list)
+    identifiers: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -60,7 +59,7 @@ class VolumeRequest:
             VolumeNotFoundError: If any identifier cannot be resolved.
 
         """
-        identifiers = self._inputs.id + self._inputs.name
+        identifiers = self._inputs.identifiers
 
         if not identifiers:
             raise VolumeNotFoundError("No volume identifiers provided")

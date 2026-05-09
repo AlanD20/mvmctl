@@ -36,13 +36,14 @@ class TestKernelLifecycle:
     def test_kernel_set_default(self, mvm_binary):
         """Set kernel as default (uses the one pulled in test_kernel_pull)."""
 
-        # Get kernel ID
+        # Get kernel ID — only operate on present kernels
         result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
         kernels = json.loads(result.stdout)
-        if not kernels:
-            pytest.skip("No kernel to set as default")
-        kernel_id = kernels[0]["id"]
-        result = _run_mvm(mvm_binary, "kernel", "set-default", kernel_id[:6])
+        present = [k for k in kernels if k.get("is_present")]
+        if not present:
+            pytest.skip("No present kernel to set as default")
+        kernel_id = present[0]["id"]
+        result = _run_mvm(mvm_binary, "kernel", "default", kernel_id[:6])
         assert result.returncode == 0
 
 
@@ -165,27 +166,28 @@ class TestKernelRemoveAndPull:
             "pull",
             "--type",
             "official",
-            "--set-default",
+            "--default",
         )
         assert result.returncode == 0
 
     def test_kernel_remove(self, mvm_binary):
         """Fetch a kernel then remove it."""
 
-        # Get existing kernels
+        # Get existing kernels — only operate on present ones
         result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
         existing = json.loads(result.stdout)
+        present = [k for k in existing if k.get("is_present")]
 
-        if not existing:
+        if not present:
             # Pull one first
             _run_mvm(mvm_binary, "kernel", "pull", "--type", "official")
             result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
-            existing = json.loads(result.stdout)
+            present = [k for k in json.loads(result.stdout) if k.get("is_present")]
 
-        if not existing:
+        if not present:
             pytest.skip("No kernel available to remove")
 
-        kernel_id = existing[0]["id"][:6]
+        kernel_id = present[0]["id"][:6]
 
         # Remove any VMs referencing this kernel first (they block removal)
         vm_result = _run_mvm(mvm_binary, "vm", "ls", "--json")
@@ -248,6 +250,11 @@ class TestKernelRemoveForce:
         if not kernels:
             pytest.skip("No kernel available to remove")
 
+        # Only consider present kernels for removal
+        present = [k for k in kernels if k.get("is_present")]
+        if not present:
+            pytest.skip("No present kernel available to remove")
+
         # Find a kernel that no VM references
         vm_result = _run_mvm(mvm_binary, "vm", "ls", "--json", check=False)
         vm_kernel_ids: set[str] = set()
@@ -258,7 +265,7 @@ class TestKernelRemoveForce:
             }
 
         target = None
-        for kernel in kernels:
+        for kernel in present:
             kid = kernel["id"][:6]
             if not any(vm_id.startswith(kid) for vm_id in vm_kernel_ids):
                 target = kid

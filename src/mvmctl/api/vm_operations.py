@@ -861,33 +861,6 @@ class VMOperation:
         return vm_instance
 
     @staticmethod
-    def _populate_vm_volume_ids(
-        volume_names: list[str],
-        vm_instance: VMInstanceItem,
-        db: Database,
-    ) -> None:
-        """Set the JSON ``volume_ids`` field on a VM after volume attachment.
-
-        Re-upserts the VM record so ``volume_ids`` persists in the DB,
-        enabling ``VMResolver`` enrichment to resolve back to
-        ``VolumeItem`` objects.
-
-        Args:
-            volume_names: Volume names that were attached to this VM.
-            vm_instance: The VM model to update (modified in-place).
-            db: Database instance for queries.
-
-        """
-        from mvmctl.core.volume._repository import VolumeRepository
-        from mvmctl.core.volume._resolver import VolumeResolver
-
-        repo = VolumeRepository(db)
-        resolver = VolumeResolver(repo)
-        vol_ids = [resolver.by_name(name).id for name in volume_names]
-        vm_instance.volume_ids = vol_ids
-        VMRepository(db).upsert(vm_instance)
-
-    @staticmethod
     def create(
         inputs: VMCreateInput,
         *,
@@ -912,14 +885,14 @@ class VMOperation:
                     audit_action="vm.create",
                     on_progress=on_progress,
                 )
-                if inputs.volumes:
-                    VolumeService(VolumeRepository(db)).mark_volumes_attached(
+                if resolved.volumes:
+                    VolumeService(VolumeRepository(db)).set_volumes_state(
+                        volumes=resolved.volumes,
+                        state=VolumeStatus.ATTACHED,
                         vm_id=vm_instance.id,
-                        volume_names=inputs.volumes,
                     )
-                    VMOperation._populate_vm_volume_ids(
-                        inputs.volumes, vm_instance, db
-                    )
+                    vm_instance.volume_ids = [v.id for v in resolved.volumes]
+                    VMRepository(db).upsert(vm_instance)
                 return OperationResult(
                     status="success",
                     code="vm.created",
@@ -980,16 +953,16 @@ class VMOperation:
                         on_progress=_batch_progress,
                         skip_limit_check=True,
                     )
-                    if inputs.volumes:
-                        VolumeService(
-                            VolumeRepository(db)
-                        ).mark_volumes_attached(
+                    if vm_resolved.volumes:
+                        VolumeService(VolumeRepository(db)).set_volumes_state(
+                            volumes=vm_resolved.volumes,
+                            state=VolumeStatus.ATTACHED,
                             vm_id=vm_instance.id,
-                            volume_names=inputs.volumes,
                         )
-                        VMOperation._populate_vm_volume_ids(
-                            inputs.volumes, vm_instance, db
-                        )
+                        vm_instance.volume_ids = [
+                            v.id for v in vm_resolved.volumes
+                        ]
+                        VMRepository(db).upsert(vm_instance)
                     created_vms.append(vm_instance)
 
                 except Exception as e:
@@ -1073,6 +1046,11 @@ class VMOperation:
 
                 VMOperation._perform_removal_cleanup(vm, vm.network_id)
 
+                # Detach any attached volumes before removing the VM record
+                VolumeService(VolumeRepository(db)).set_volumes_state(
+                    volumes=vm.volumes, state=VolumeStatus.AVAILABLE
+                )
+
                 # Deregister from DB and remove directory
                 repo.delete(vm.id)
                 if vm_dir.exists():
@@ -1129,7 +1107,7 @@ class VMOperation:
             vms = repo.list_all()
 
         if vms:
-            VMResolver(repo, include=["network"])._enrich(vms)
+            VMResolver(repo, include=["network", "volumes"])._enrich(vms)
 
         return vms
 
@@ -1292,6 +1270,16 @@ class VMOperation:
                     "relay_pid": relay_pid,
                     "relay_socket_path": relay_socket_path,
                 },
+                "volumes": [
+                    {
+                        "id": v.id,
+                        "name": v.name,
+                        "size": v.size_bytes,
+                        "format": v.format,
+                        "status": v.status,
+                    }
+                    for v in (vm.volumes or [])
+                ],
             }
 
         # Flat mode — enriched dict
@@ -1334,6 +1322,16 @@ class VMOperation:
             "relay_socket_path": relay_socket_path,
             "ssh_keys": vm.ssh_keys,
             "ssh_user": vm.ssh_user,
+            "volumes": [
+                {
+                    "id": v.id,
+                    "name": v.name,
+                    "size": v.size_bytes,
+                    "format": v.format,
+                    "status": v.status,
+                }
+                for v in (vm.volumes or [])
+            ],
         }
 
     @staticmethod
@@ -1354,7 +1352,7 @@ class VMOperation:
         # Enrich VM with resolved relations
         repo = VMRepository(db)
         resolver = VMResolver(
-            repo, include=["binary", "kernel", "image", "network"]
+            repo, include=["binary", "kernel", "image", "network", "volumes"]
         )
         resolver._enrich([vm])
 
@@ -1866,7 +1864,7 @@ class VMOperation:
 
         vol_repo = VolumeRepository(db)
         vol_resolver = VolumeResolver(vol_repo)
-        vol = vol_resolver.by_name(volume_name)
+        vol = vol_resolver.resolve(volume_name)
 
         if vol.status != VolumeStatus.AVAILABLE:
             raise VMCreateError(f"Volume '{volume_name}' is not available")
@@ -1874,8 +1872,15 @@ class VMOperation:
         controller = VolumeController(vol, vol_repo)
         controller.attach(vm.id)
 
-        # No Firecracker hot-plug needed — VM is stopped.
-        # The drive config will be picked up on next VM start.
+        # Update VM's volume_ids to persist the attachment for next start.
+        # Firecracker has no hot-plug — drives are configured on spawn, so
+        # we persist volume_ids in the VM record so the next start includes
+        # the volume as an extra drive in the Firecracker config.
+        vm_volume_ids = list(vm.volume_ids) if vm.volume_ids else []
+        if vol.id not in vm_volume_ids:
+            vm_volume_ids.append(vol.id)
+        vm.volume_ids = vm_volume_ids
+        VMRepository(db).upsert(vm)
 
         return OperationResult(
             status="success",
@@ -1905,13 +1910,17 @@ class VMOperation:
 
         vol_repo = VolumeRepository(db)
         vol_resolver = VolumeResolver(vol_repo)
-        vol = vol_resolver.by_name(volume_name)
+        vol = vol_resolver.resolve(volume_name)
 
         controller = VolumeController(vol, vol_repo)
         controller.detach()
 
-        # No Firecracker hot-unplug needed — VM is stopped.
-        # The drive config will be rebuilt on next VM start.
+        # Update VM's volume_ids to persist the detachment for next start.
+        vm_volume_ids = list(vm.volume_ids) if vm.volume_ids else []
+        if vol.id in vm_volume_ids:
+            vm_volume_ids.remove(vol.id)
+        vm.volume_ids = vm_volume_ids
+        VMRepository(db).upsert(vm)
 
         return OperationResult(
             status="success",

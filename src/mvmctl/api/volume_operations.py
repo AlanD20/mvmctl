@@ -226,7 +226,7 @@ class VolumeOperation:
         # ── Resolve via VolumeInput + VolumeRequest pipeline ─────────────
         # The user may pass a name OR an ID prefix.  VolumeRequest handles
         # both through VolumeResolver.resolve_many().
-        vol_input = VolumeInput(name=[inputs.name])
+        vol_input = VolumeInput(identifiers=[inputs.name])
         resolved_vol = VolumeRequest(inputs=vol_input, db=db).resolve()
         volume = resolved_vol.volumes[0]
 

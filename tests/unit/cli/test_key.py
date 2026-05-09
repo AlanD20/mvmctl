@@ -116,7 +116,7 @@ class TestKeyAdd:
                 "add",
                 "testkey",
                 str(key_file),
-                "--overwrite",
+                "--force",
             ],
         )
         assert result.exit_code == 0
@@ -306,7 +306,7 @@ class TestKeySetDefault:
             code="key.default_set",
             message="Default key(s) set",
         )
-        result = runner.invoke(app, ["key", "set-default", "mykey"])
+        result = runner.invoke(app, ["key", "default", "mykey"])
         assert result.exit_code == 0
         assert "mykey" in result.output
 
@@ -317,19 +317,19 @@ class TestKeySetDefault:
             code="key.defaults_cleared",
             message="Defaults cleared",
         )
-        result = runner.invoke(app, ["key", "set-default", "--clear"])
+        result = runner.invoke(app, ["key", "default", "--clear"])
         assert result.exit_code == 0
         assert "Cleared" in result.output
 
     @patch("mvmctl.cli.key.KeyOperation")
     def test_set_default_no_args(self, mock_key_op):
-        result = runner.invoke(app, ["key", "set-default"])
+        result = runner.invoke(app, ["key", "default"])
         assert result.exit_code == 1
 
     @patch("mvmctl.cli.key.KeyOperation")
     def test_set_default_api_error(self, mock_key_op):
         mock_key_op.set_default.side_effect = MVMKeyError("not found")
-        result = runner.invoke(app, ["key", "set-default", "badkey"])
+        result = runner.invoke(app, ["key", "default", "badkey"])
         assert result.exit_code == 1
 
 

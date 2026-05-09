@@ -19,6 +19,7 @@ else:
     BinaryOperation = _BinaryOperation
     BinaryPullInput = _BinaryPullInput
     BinaryInput = _BinaryInput
+from mvmctl.cli._completion import _complete_binary_versions
 from mvmctl.models.result import OperationResult
 from mvmctl.utils._io import (
     print_error,
@@ -118,7 +119,7 @@ def bin_pull(
     ),
     set_default: bool = typer.Option(
         False,
-        "--set-default",
+        "--default",
         "-d",
         help="Set as default after download",
     ),
@@ -191,7 +192,9 @@ def bin_pull(
 @handle_errors
 def bin_rm(
     identifiers: list[str] | None = typer.Argument(
-        None, help="Binary ID(s) to remove (6-char prefix accepted)"
+        None,
+        help="Binary ID(s) to remove (6-char prefix accepted)",
+        autocompletion=_complete_binary_versions,
     ),
     version: str = typer.Option(
         None,
@@ -233,7 +236,9 @@ def bin_rm(
 @handle_errors
 def bin_default(
     identifier: str = typer.Argument(
-        ..., help="Binary ID to set as default (6-char prefix accepted)"
+        ...,
+        help="Binary ID to set as default (6-char prefix accepted)",
+        autocompletion=_complete_binary_versions,
     ),
 ) -> None:
     """Set a binary as the active default."""

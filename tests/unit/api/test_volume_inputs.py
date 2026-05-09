@@ -24,28 +24,24 @@ from mvmctl.models import VolumeItem
 
 class TestVolumeInput:
     def test_default_empty_identifiers(self):
-        """VolumeInput should default to empty id and name lists."""
+        """VolumeInput should default to empty identifiers list."""
         inp = VolumeInput()
-        assert inp.id == []
-        assert inp.name == []
+        assert inp.identifiers == []
 
-    def test_with_id_only(self):
-        """VolumeInput with only id provided."""
-        inp = VolumeInput(id=["vol-1"])
-        assert inp.id == ["vol-1"]
-        assert inp.name == []
+    def test_with_identifiers(self):
+        """VolumeInput with identifiers provided."""
+        inp = VolumeInput(identifiers=["vol-1", "my-vol"])
+        assert inp.identifiers == ["vol-1", "my-vol"]
 
-    def test_with_name_only(self):
-        """VolumeInput with only name provided."""
-        inp = VolumeInput(name=["my-vol"])
-        assert inp.id == []
-        assert inp.name == ["my-vol"]
+    def test_with_single_identifier(self):
+        """VolumeInput with a single identifier."""
+        inp = VolumeInput(identifiers=["my-vol"])
+        assert inp.identifiers == ["my-vol"]
 
-    def test_with_both(self):
-        """VolumeInput with both id and name."""
-        inp = VolumeInput(id=["vol-1"], name=["my-vol"])
-        assert inp.id == ["vol-1"]
-        assert inp.name == ["my-vol"]
+    def test_with_multiple_identifiers(self):
+        """VolumeInput with multiple identifiers."""
+        inp = VolumeInput(identifiers=["vol-1", "my-vol", "abc123"])
+        assert inp.identifiers == ["vol-1", "my-vol", "abc123"]
 
 
 class TestVolumeRequest:
@@ -77,7 +73,7 @@ class TestVolumeRequest:
             return_value=mock_resolver,
         ):
             request = VolumeRequest(
-                inputs=VolumeInput(name=["my-vol"]),
+                inputs=VolumeInput(identifiers=["my-vol"]),
                 db=MagicMock(),
             )
             result = request.resolve()
@@ -109,7 +105,7 @@ class TestVolumeRequest:
             return_value=mock_resolver,
         ):
             request = VolumeRequest(
-                inputs=VolumeInput(name=["vol-1", "vol-2"]),
+                inputs=VolumeInput(identifiers=["vol-1", "vol-2"]),
                 db=MagicMock(),
             )
             with pytest.raises(
@@ -131,7 +127,7 @@ class TestVolumeRequest:
             return_value=mock_resolver,
         ):
             request = VolumeRequest(
-                inputs=VolumeInput(name=["ghost"]),
+                inputs=VolumeInput(identifiers=["ghost"]),
                 db=MagicMock(),
             )
             with pytest.raises(
@@ -158,7 +154,7 @@ class TestVolumeRequest:
             "mvmctl.api.inputs._volume_input.VolumeResolver",
             return_value=mock_resolver,
         ):
-            request = VolumeRequest(inputs=VolumeInput(name=["v"]))
+            request = VolumeRequest(inputs=VolumeInput(identifiers=["v"]))
             assert request._db is not None
             # Should resolve with no errors
             result = request.resolve()
@@ -166,7 +162,7 @@ class TestVolumeRequest:
     def test_ensure_validate_with_none_result_raises(self):
         """Calling ensure_validate directly with _result=None should raise."""
         request = VolumeRequest(
-            inputs=VolumeInput(name=["test"]),
+            inputs=VolumeInput(identifiers=["test"]),
             db=MagicMock(),
         )
         # _result is None before resolve

@@ -86,6 +86,13 @@ class BinaryOperation:
                 # Early exit: return existing binaries without downloading
                 assert fc_exists is not None
                 assert jl_exists is not None
+                if resolved.set_as_default:
+                    for b in (fc_exists, jl_exists):
+                        repo.set_default(
+                            name=b.name,
+                            version=b.version,
+                            path=b.path,
+                        )
                 return OperationResult(
                     status="skipped",
                     code="binary.already_present",
@@ -104,8 +111,13 @@ class BinaryOperation:
 
             # Persist to DB
             for binary in binaries:
-                binary.is_default = should_set_default
                 repo.upsert(binary)
+                if should_set_default:
+                    repo.set_default(
+                        name=binary.name,
+                        version=binary.version,
+                        path=binary.path,
+                    )
 
             AuditLog.log("binary.pull", changes={"version": resolved.version})
 

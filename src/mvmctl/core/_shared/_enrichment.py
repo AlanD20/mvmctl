@@ -8,6 +8,7 @@ all FK values and resolving them in a single query per relation.
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any, TypeVar
@@ -120,8 +121,17 @@ class RelationEnricher:
         fk_values: list[str] = []
         seen: set[str] = set()
         for entity in entities:
-            val = getattr(entity, spec.fk_field, None)
-            if val and val not in seen:
+            raw_val = getattr(entity, spec.fk_field, None)
+            if raw_val is None:
+                continue
+            # Normalize list-type FK (e.g. volume_ids) to stable JSON string
+            # for hashing and dict key lookup.
+            val: str = (
+                json.dumps(raw_val, sort_keys=True)
+                if isinstance(raw_val, list)
+                else raw_val
+            )
+            if val not in seen:
                 seen.add(val)
                 fk_values.append(val)
 
@@ -148,9 +158,15 @@ class RelationEnricher:
 
         relation_name = spec.relation_name or spec.fk_field.removesuffix("_id")
         for entity in entities:
-            val = getattr(entity, spec.fk_field, None)
-            if val:
-                setattr(entity, relation_name, results.get(val))
+            raw_val = getattr(entity, spec.fk_field, None)
+            if raw_val is None:
+                continue
+            val = (
+                json.dumps(raw_val, sort_keys=True)
+                if isinstance(raw_val, list)
+                else raw_val
+            )
+            setattr(entity, relation_name, results.get(val))
 
     def _resolve_reverse(
         self,

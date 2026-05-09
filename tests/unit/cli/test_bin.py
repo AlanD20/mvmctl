@@ -117,7 +117,7 @@ class TestBinPull:
             code="binary.downloaded",
             item=[_make_binary("firecracker", "1.15.0")],
         )
-        result = runner.invoke(app, ["bin", "pull", "1.15.0", "--set-default"])
+        result = runner.invoke(app, ["bin", "pull", "1.15.0", "--default"])
         assert result.exit_code == 0
         assert "Default binary set" in result.output
 

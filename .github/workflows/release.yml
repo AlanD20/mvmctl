@@ -66,7 +66,7 @@ jobs:
         run: uv run pytest tests/ -v --tb=short
 
       - name: Build binary
-        run: uv run python -m nuitka --onefile --output-dir=dist --output-filename=mvm --include-package=mvmctl --include-data-dir=src/mvmctl/assets=mvmctl/assets --lto=yes --enable-plugin=anti-bloat --jobs=$(nproc) src/mvmctl/main.py
+        run: uv run python scripts/build_services.py --mvm --release
 
       - name: Smoke test binary
         run: |

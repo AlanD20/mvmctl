@@ -210,6 +210,7 @@ class TestStepBinary:
     def test_local_active_default(self, mocker):
         """_step_binary() succeeds when local default binary exists."""
         mock_binary = mocker.MagicMock()
+        mock_binary.name = "firecracker"
         mock_binary.is_default = True
         mock_binary.version = "1.15.0"
 
@@ -230,6 +231,7 @@ class TestStepBinary:
     def test_local_with_repair(self, mocker):
         """_step_binary() sets default when local exists but none active."""
         mock_binary = mocker.MagicMock()
+        mock_binary.name = "firecracker"
         mock_binary.is_default = False
         mock_binary.version = "1.15.0"
 

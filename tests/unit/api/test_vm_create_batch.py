@@ -147,6 +147,7 @@ class TestBatchCreation:
             ssh_keys=[],
             provisioner=MagicMock(),
             extra_drives=[],
+            volumes=[],
             __dataclass_fields__=None,  # Trick dataclasses.replace
         )
 

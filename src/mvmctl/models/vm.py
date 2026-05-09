@@ -12,6 +12,7 @@ from mvmctl.models.binary import BinaryItem
 from mvmctl.models.image import ImageItem
 from mvmctl.models.kernel import KernelItem
 from mvmctl.models.network import NetworkItem
+from mvmctl.models.volume import VolumeItem
 from mvmctl.utils.common import CommonUtils
 
 
@@ -94,6 +95,7 @@ class VMInstanceItem:
     image: ImageItem | None = None
     binary: BinaryItem | None = None
     network: NetworkItem | None = None
+    volumes: list[VolumeItem] = field(default_factory=list)
 
     @property
     def vm_dir(self) -> Path:

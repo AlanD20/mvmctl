@@ -6,6 +6,7 @@ import typer
 
 from mvmctl.api.inputs._logs_input import LogInput
 from mvmctl.api.logs_operations import LogOperation
+from mvmctl.cli._completion import _complete_vm_names
 from mvmctl.utils.cli import handle_errors
 
 logs_app = typer.Typer(
@@ -22,7 +23,9 @@ logs_app = typer.Typer(
 def logs(
     ctx: typer.Context,
     identifier: str = typer.Argument(
-        ..., help="VM name, ID, IP, or MAC address"
+        ...,
+        help="VM name, ID, IP, or MAC address",
+        autocompletion=_complete_vm_names,
     ),
     os_log: bool = typer.Option(
         False, "--os", help="Show Firecracker OS log instead of boot log"

@@ -1,8 +1,11 @@
 """
 ImageProvisioner — image optimization via backends.
 
-Queues shrink, deblob, and fstab-fix operations on a root filesystem image,
-then executes them via the selected backend (loop-mount or guestfs)::
+Debloats (OS cache cleanup + fstab fix) and optionally shrinks a root
+filesystem image, then executes them via the selected backend (loop-mount
+or guestfs).  Debloat and shrink are run as **separate backend sessions**
+so a shrink failure (e.g. filesystem already at minimum size) never
+prevents the debloat step from being applied::
 
     from mvmctl.core.image._provisioner import ImageProvisioner
 
@@ -21,11 +24,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from mvmctl.core._shared._provisioner._backend import (
-    ProvisionerBackend,
-    _GuestfsBackend,
-    _LoopMountBackend,
-)
+from mvmctl.core._shared._provisioner._backend import ProvisionerBackend
 from mvmctl.models.provisioner import ProvisionerType
 
 logger = logging.getLogger(__name__)
@@ -34,8 +33,9 @@ logger = logging.getLogger(__name__)
 class ImageProvisioner:
     """Optimize a root filesystem image — shrink, deblob, fix fstab.
 
-    All builder methods queue operations.  Call ``.run()`` to execute
-    everything in a single session.
+    ``deblob()`` and ``shrink()`` are **declarative** — they only set
+    flags.  ``run()`` creates a fresh backend for each phase so a
+    failure in one phase never leaks into the next.
     """
 
     def __init__(
@@ -45,44 +45,74 @@ class ImageProvisioner:
         provisioner_type: ProvisionerType,
         fs_type: str,
     ) -> None:
-        self._backend: _LoopMountBackend | _GuestfsBackend = (
-            ProvisionerBackend.get_image(
-                image_path,
-                provisioner_type=provisioner_type,
-                fs_type=fs_type,
-            )
-        )
+        self._image_path = image_path
+        self._provisioner_type = provisioner_type
+        self._fs_type = fs_type
+        self._deblob = False
+        self._shrink = False
 
-    # -- builder methods --------------------------------------------------
+    # -- builder methods (declarative) ------------------------------------
 
     def deblob(self) -> None:
-        """Detect OS and queue cache cleanup + fstab fix."""
-        self._backend.deblob()
+        """Mark that deblob + fstab fix should run."""
+        self._deblob = True
 
     def shrink(self) -> None:
-        """Queue filesystem shrink to minimum size."""
-        self._backend.shrink()
+        """Mark that filesystem shrink should run."""
+        self._shrink = True
 
     # -- execution ---------------------------------------------------------
 
     def run(self) -> bool:
-        """Execute all queued operations with the selected backend.
+        """Execute queued operations with the selected backend.
+
+        Runs deblob and shrink as **separate backend sessions** so that a
+        shrink failure (e.g. filesystem already at minimum size) does not
+        prevent the deblob step from being applied.
 
         Returns:
-            True if optimization ran successfully, False if it was skipped
-            (e.g. no provisioner backend available).
+            True if at least one phase ran successfully, False if all
+            phases were skipped or failed.
 
         """
         from mvmctl.exceptions import LoopMountError
 
-        try:
-            self._backend.run()
-            return True
-        except (LoopMountError, OSError, RuntimeError) as exc:
-            logger.warning(
-                "Image optimization (deblob/shrink) skipped: %s. "
-                "Build the provisioner binary with 'python scripts/build_services.py' "
-                "or enable libguestfs to enable boot optimization.",
-                exc,
+        deblob_ok = False
+        shrink_ok = False
+
+        # Phase 1: deblob + fstab fix (fresh backend — no state leakage)
+        if self._deblob:
+            backend = ProvisionerBackend.get_image(
+                self._image_path,
+                provisioner_type=self._provisioner_type,
+                fs_type=self._fs_type,
             )
-            return False
+            backend.deblob()
+            try:
+                backend.run()
+                deblob_ok = True
+            except (LoopMountError, OSError, RuntimeError) as exc:
+                logger.warning(
+                    "Debloating skipped: %s. "
+                    "Build the provisioner binary with 'python scripts/build_services.py' "
+                    "or enable libguestfs to enable boot optimization.",
+                    exc,
+                )
+
+        # Phase 2: shrink (fresh backend — deblob state completely isolated)
+        if self._shrink:
+            backend = ProvisionerBackend.get_image(
+                self._image_path,
+                provisioner_type=self._provisioner_type,
+                fs_type=self._fs_type,
+            )
+            backend.shrink()
+            try:
+                backend.run()
+                shrink_ok = True
+            except (LoopMountError, OSError, RuntimeError) as exc:
+                logger.warning(
+                    "Shrink skipped (image may already be minimal): %s", exc
+                )
+
+        return deblob_ok or shrink_ok

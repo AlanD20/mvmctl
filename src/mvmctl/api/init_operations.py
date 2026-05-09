@@ -204,8 +204,9 @@ class InitOperation:
         from mvmctl.api.binary_operations import BinaryOperation
 
         local = BinaryOperation.list_local()
-        if local:
-            active = [v for v in local if v.is_default]
+        fc_binaries = [b for b in local if b.name in ("firecracker", "jailer")]
+        if fc_binaries:
+            active = [v for v in fc_binaries if v.is_default]
             if active:
                 return InitStepResult(
                     "binary", True, f"Binary available (v{active[0].version})"
@@ -218,7 +219,7 @@ class InitOperation:
                     f"Binary available (v{repaired.item.version}) — set as default",
                 ), None
             return InitStepResult(
-                "binary", True, f"Binary available (v{local[0].version})"
+                "binary", True, f"Binary available (v{fc_binaries[0].version})"
             ), None
 
         if download_version:

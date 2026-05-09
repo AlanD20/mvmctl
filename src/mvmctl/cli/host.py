@@ -105,6 +105,7 @@ def help_cmd(ctx: typer.Context) -> None:
 
 
 @host_app.command(name="init")
+@handle_errors
 def host_init() -> None:
     """
     Apply host configuration changes. Idempotent.
@@ -158,10 +159,26 @@ def host_init() -> None:
                     raise typer.Exit(code=1)
 
                 try:
-                    env = os.environ.copy()
-                    env["MVM_SUDO_RESTART"] = "1"
-                    env["MVM_ESCALATED"] = "1"
-                    subprocess.run(["sudo"] + sys.argv, check=False, env=env)
+                    # Build env var assignments for the 'env' utility.
+                    # We use 'sudo env VAR=val command' instead of relying on
+                    # 'sudo -E' because 'sudo -E' requires sudoers to allow
+                    # environment preservation, which is not guaranteed.
+                    env_assignments: list[str] = [
+                        "MVM_SUDO_RESTART=1",
+                        "MVM_ESCALATED=1",
+                    ]
+                    for key in (
+                        "MVM_CONFIG_DIR",
+                        "MVM_CACHE_DIR",
+                        "HOME",
+                        "PATH",
+                    ):
+                        if key in os.environ:
+                            env_assignments.append(f"{key}={os.environ[key]}")
+                    subprocess.run(
+                        ["sudo", "env", *env_assignments, *sys.argv],
+                        check=False,
+                    )
                 except FileNotFoundError:
                     print_error("sudo command not found")
             raise typer.Exit(code=1)

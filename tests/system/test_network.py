@@ -248,7 +248,7 @@ class TestNetworkLifecycle:
         result = _run_mvm(
             mvm_binary,
             "network",
-            "set-default",
+            "default",
             module_network,
         )
         assert result.returncode == 0

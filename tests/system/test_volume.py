@@ -149,9 +149,13 @@ class TestVolumeLifecycle:
             check=False,
         )
         assert result.returncode != 0
+        # Flatten whitespace for matching — Rich Console may wrap long lines
+        import re as _re
+        stderr_flat = _re.sub(r"\s+", " ", result.stderr.lower())
+        stdout_flat = _re.sub(r"\s+", " ", result.stdout.lower())
         assert (
-            "not found" in result.stdout.lower()
-            or "not found" in result.stderr.lower()
+            "not found" in stdout_flat
+            or "not found" in stderr_flat
         )
 
     def test_volume_resize(self, mvm_binary, unique_key_name):

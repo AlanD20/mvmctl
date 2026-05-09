@@ -278,23 +278,50 @@ class BinaryService:
         return deleted
 
     @staticmethod
-    @staticmethod
     def _get_embedded_path(name: str) -> Path | None:
         """Return the path to an embedded service binary, or None if not available.
 
         In compiled mode (Nuitka --onefile), binaries are embedded via
         --include-data-dir and are available relative to the executable.
         In development mode, pre-built binaries don't exist.
+
+        Resolution order:
+        1. ``__compiled__.containing_dir`` — Nuitka onefile temp extraction dir
+           or standalone dist directory (official Nuitka API).
+        2. ``sys.argv[0]`` parent dir — standalone dist layout fallback.
+        3. ``NUITKA_TEMP_DIR`` env var — explicit temp directory override.
         """
         from mvmctl.constants import is_compiled_mode
 
         if not is_compiled_mode():
             return None
 
+        # Strategy 1: Nuitka compiled mode — __compiled__.containing_dir
+        # abstracts the temp extraction dir (onefile) or dist dir (standalone).
+        try:
+            containing_dir = __compiled__.containing_dir  # type: ignore[name-defined] # noqa: F821
+            candidate = Path(containing_dir) / "mvmctl" / "services" / name
+            if candidate.exists():
+                return candidate
+        except NameError:
+            pass
+
+        # Strategy 2: Relative to sys.executable parent (Nuitka onefile temp dir).
+        # In Nuitka --onefile, sys.executable is the python3 in the temp dir
+        # (e.g. /tmp/onefile_XXXX/python3), and embedded data is at
+        # /tmp/onefile_XXXX/mvmctl/services/<name>.
+        exe_parent = Path(sys.executable).parent
+        candidate = exe_parent / "mvmctl" / "services" / name
+        if candidate.exists():
+            return candidate
+
+        # Strategy 3: Relative to sys.argv[0] parent (standalone dist layout)
         base = Path(sys.argv[0]).parent
         candidate = base / "mvmctl" / "services" / name
         if candidate.exists():
             return candidate
+
+        # Strategy 4: Explicit override via env var
         temp_dir = os.environ.get("NUITKA_TEMP_DIR", "")
         if temp_dir:
             candidate = Path(temp_dir) / "mvmctl" / "services" / name

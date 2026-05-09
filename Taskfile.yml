@@ -1,9 +1,7 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
 version: '3'
-
 vars:
   ASSET_MIRROR: '{{.HOME}}/.cache/mvm-asset-mirror'
-
 tasks:
   sync:
     desc: Install development dependencies (uv sync --group dev)
@@ -152,7 +150,7 @@ tasks:
     status:
       - uv run mvm bin ls --json | uv run python -c "import sys,json; sys.exit(0 if json.load(sys.stdin) else 1)"
     cmds:
-      - uv run mvm bin pull 1.15.1 --set-default
+      - uv run mvm bin pull 1.15.1 --default
   # =====================================================================
   # System Tests — these run on real KVM hardware, produce release gate
   # =====================================================================
@@ -214,11 +212,11 @@ tasks:
     cmds:
       - mkdir -p {{.ASSET_MIRROR}}
       - 'echo "Seeding asset mirror ({{.ASSET_MIRROR}})..."'
-      - 'MVM_ASSET_MIRROR={{.ASSET_MIRROR}} uv run mvm kernel pull --type firecracker --set-default'
+      - 'MVM_ASSET_MIRROR={{.ASSET_MIRROR}} uv run mvm kernel pull --type firecracker --default'
       - 'MVM_ASSET_MIRROR={{.ASSET_MIRROR}} uv run mvm image pull alpine-3.21'
       - 'MVM_ASSET_MIRROR={{.ASSET_MIRROR}} uv run mvm image pull ubuntu-24.04-minimal'
       - 'MVM_ASSET_MIRROR={{.ASSET_MIRROR}} uv run mvm image pull ubuntu-24.04'
-      - 'MVM_ASSET_MIRROR={{.ASSET_MIRROR}} uv run mvm bin pull 1.15.1 --set-default'
+      - 'MVM_ASSET_MIRROR={{.ASSET_MIRROR}} uv run mvm bin pull 1.15.1 --default'
   sys-test:
     desc: Run all system tests — parallel domain (1) → serial VM (2) → cache LAST (3) [uses asset mirror]
     deps: [sys-setup]

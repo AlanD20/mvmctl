@@ -31,6 +31,8 @@ from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.core.network._resolver import NetworkResolver
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.core.volume._repository import VolumeRepository
+from mvmctl.core.volume._resolver import VolumeResolver
+from mvmctl.core.volume._service import VolumeService
 from mvmctl.exceptions import (
     BinaryNotFoundError,
     CloudInitModeError,
@@ -49,6 +51,8 @@ from mvmctl.models import (
     ProvisionerType,
     SSHKeyItem,
     VMInstanceItem,
+    VolumeItem,
+    VolumeStatus,
 )
 from mvmctl.utils._disk import DiskUtils
 from mvmctl.utils._validators import NetworkValidator, VMValidator
@@ -158,6 +162,7 @@ class ResolvedVMCreateInput:
     ssh_keys: list[SSHKeyItem] = field(default_factory=list)
     provisioner: ProvisionerType = ProvisionerType.LOOP_MOUNT
     extra_drives: list[DriveConfig] = field(default_factory=list)
+    volumes: list[VolumeItem] = field(default_factory=list)
 
 
 @dataclass
@@ -192,6 +197,7 @@ class VMCreateRequest:
         self._image_resolver = ImageResolver(ImageRepository(self._db))
         self._kernel_resolver = KernelResolver(KernelRepository(self._db))
         self._key_resolver = KeyResolver(KeyRepository(self._db))
+        self._volume_resolver = VolumeResolver(VolumeRepository(self._db))
 
     @property
     def result(self) -> ResolvedVMCreateInput | None:
@@ -232,6 +238,7 @@ class VMCreateRequest:
             )
 
         ipv4_net = ipaddress.IPv4Network(vm.network.subnet, strict=False)
+        extra_drives = VolumeService.volumes_to_drives(vm.volumes)
 
         return ResolvedVMCreateInput(
             name=vm.name,
@@ -354,7 +361,8 @@ class VMCreateRequest:
             else str(SettingsService.resolve(_db, "defaults.vm", "boot_args")),
             ssh_keys=[],
             provisioner=ProvisionerType.LOOP_MOUNT,
-            extra_drives=[],
+            volumes=vm.volumes,
+            extra_drives=extra_drives,
         )
 
     def resolve(self) -> ResolvedVMCreateInput:
@@ -368,8 +376,9 @@ class VMCreateRequest:
         network = self._resolve_network()
         fc_binary = self._resolve_binary()
         ssh_keys = self._resolve_ssh_keys()
-        extra_drives = self._resolve_volumes()
+        volumes = self._resolve_volumes()
 
+        extra_drives = VolumeService.volumes_to_drives(volumes)
         ipv4_net = ipaddress.IPv4Network(network.subnet, strict=False)
         network_prefix_len = ipv4_net.prefixlen
         network_netmask = ipv4_net.netmask
@@ -452,6 +461,7 @@ class VMCreateRequest:
             if self._inputs.lsm_flags is not None
             else self._resolve_setting("defaults.vm", "lsm_flags"),
             extra_drives=extra_drives,
+            volumes=volumes,
             log_level=str(
                 self._resolve_setting("defaults.firecracker", "log_level")
             ),
@@ -640,7 +650,7 @@ class VMCreateRequest:
         if image is None:
             raise ImageNotFoundError(
                 "No image specified and no default image set. "
-                "Use 'mvm image fetch <name>' then 'mvm image set-default <name>', "
+                "Use 'mvm image fetch <name>' then 'mvm image default <name>', "
                 "or pass --image."
             )
 
@@ -657,7 +667,7 @@ class VMCreateRequest:
         if kernel is None:
             raise KernelNotFoundError(
                 "No kernel specified and no default kernel set. "
-                "Use 'mvm kernel fetch --type <firecracker|official>' then 'mvm kernel set-default <id>', "
+                "Use 'mvm kernel fetch --type <firecracker|official>' then 'mvm kernel default <id>', "
                 "or pass --kernel."
             )
 
@@ -675,7 +685,7 @@ class VMCreateRequest:
         if network is None:
             raise NetworkNotFoundError(
                 "No network specified and no default network set. "
-                "Use 'mvm network create' then 'mvm network set-default <id>', "
+                "Use 'mvm network create' then 'mvm network default <id>', "
                 "or pass --network."
             )
 
@@ -694,7 +704,7 @@ class VMCreateRequest:
         if fc_binary is None:
             raise BinaryNotFoundError(
                 "No binary specified and no default binary set. "
-                "Use 'mvm bin fetch <version>' then 'mvm bin set-default <id>', "
+                "Use 'mvm bin fetch <version>' then 'mvm bin default <id>', "
                 "or pass --firecracker-bin."
             )
 
@@ -710,16 +720,26 @@ class VMCreateRequest:
         )
         return ssh_keys
 
-    def _resolve_volumes(self) -> list[DriveConfig]:
-        """Resolve volume names to DriveConfig objects."""
+    def _resolve_volumes(self) -> list[VolumeItem]:
+        """Resolve volume names to VolumeItems and DriveConfigs.
+
+        Returns:
+            Tuple of (resolved VolumeItems, drive configs for Firecracker).
+
+        Raises:
+            VolumeCreateError: If any volume cannot be resolved or is unavailable.
+
+        """
         if not self._inputs.volumes:
             return []
 
-        from mvmctl.core.volume._service import VolumeService
+        result = self._volume_resolver.resolve_many(self._inputs.volumes)
+        if result.errors and not result.items:
+            from mvmctl.exceptions import VolumeCreateError
 
-        service = VolumeService(self._vol_repo)
-        drives = service.resolve_to_drives(self._inputs.volumes)
-        return drives
+            raise VolumeCreateError(result.errors[0])
+
+        return result.items
 
     def _resolve_cloud_init_mode(self) -> CloudInitModeResolved:
 

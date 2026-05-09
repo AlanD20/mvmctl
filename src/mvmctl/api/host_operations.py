@@ -92,6 +92,17 @@ class HostOperation:
         # anything we create during init is accessible after sudo exits.
         FsUtils.chown_to_real_user(cache_dir)
 
+        # --- Extract embedded service binaries (compiled mode only) ---
+        try:
+            from mvmctl.constants import is_compiled_mode
+            if is_compiled_mode():
+                from mvmctl.core.binary._repository import BinaryRepository
+                from mvmctl.core.binary._service import BinaryService
+                repo = BinaryRepository(Database())
+                BinaryService(repo).extract_service_binaries()
+        except Exception:
+            logger.exception("Failed to extract embedded service binaries")
+
         # --- System health checks ---
         if not HostService.check_kvm_access():
             kvm = Path("/dev/kvm")

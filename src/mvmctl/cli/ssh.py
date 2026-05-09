@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 else:
     SSHOperation = _SSHOperation
     SSHInput = _SSHInput
+from mvmctl.cli._completion import _complete_vm_names
 from mvmctl.utils._io import print_error
 from mvmctl.utils.cli import handle_errors
 
@@ -33,7 +34,9 @@ ssh_app = typer.Typer(
 def ssh_connect(
     ctx: typer.Context,
     identifier: str = typer.Argument(
-        ..., help="VM name, ID prefix, IP, or MAC address"
+        ...,
+        help="VM name, ID prefix, IP, or MAC address",
+        autocompletion=_complete_vm_names,
     ),
     user: str | None = typer.Option(
         None, "--user", "-u", help="SSH user (default: from user config)"

@@ -20,6 +20,7 @@ else:
     NetworkOperation = _NetworkOperation
     NetworkInput = _NetworkInput
     NetworkCreateInput = _NetworkCreateInput
+from mvmctl.cli._completion import _complete_network_names
 from mvmctl.models.result import OperationResult
 from mvmctl.utils._io import (
     print_error,
@@ -105,14 +106,16 @@ def network_ls(
 
 
 @network_app.command(
-    name="set-default",
+    name="default",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 @handle_errors
 def network_set_default(
     ctx: typer.Context,
     name: str | None = typer.Argument(
-        None, help="Network name to set as default"
+        None,
+        help="Network name to set as default",
+        autocompletion=_complete_network_names,
     ),
 ) -> None:
     """Set a network as the default for VM creation."""
@@ -240,7 +243,11 @@ def network_create(
 )
 @handle_errors
 def network_rm(
-    names: list[str] = typer.Argument(None, help="Network names to remove"),
+    names: list[str] = typer.Argument(
+        None,
+        help="Network names to remove",
+        autocompletion=_complete_network_names,
+    ),
     force: bool = typer.Option(
         False, "--force", "-f", help="Remove even if referenced by VMs"
     ),
@@ -268,7 +275,11 @@ def network_rm(
 @handle_errors
 def network_inspect(
     ctx: typer.Context,
-    name: str | None = typer.Argument(None, help="Network name"),
+    name: str | None = typer.Argument(
+        None,
+        help="Network name",
+        autocompletion=_complete_network_names,
+    ),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     tree: bool = typer.Option(False, "--tree", help="Output in tree format"),
 ) -> None:

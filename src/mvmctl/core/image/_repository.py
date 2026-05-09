@@ -144,9 +144,12 @@ class ImageRepository:
         """Set one image as default, clearing all others atomically."""
         with self._db.connect() as conn:
             conn.execute("BEGIN")
-            conn.execute("UPDATE images SET is_default = 0")
             conn.execute(
-                "UPDATE images SET is_default = 1 WHERE id = ?", (image_id,)
+                "UPDATE images SET is_default = 0 WHERE deleted_at IS NULL"
+            )
+            conn.execute(
+                "UPDATE images SET is_default = 1 WHERE id = ? AND deleted_at IS NULL",
+                (image_id,),
             )
             conn.execute("COMMIT")
 

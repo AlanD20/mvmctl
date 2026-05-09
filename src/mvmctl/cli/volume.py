@@ -10,6 +10,7 @@ import typer
 from mvmctl.api import VolumeCreateInput as _VolumeCreateInput
 from mvmctl.api import VolumeInput as _VolumeInput
 from mvmctl.api import VolumeOperation as _VolumeOperation
+from mvmctl.cli._completion import _complete_volume_names
 from mvmctl.utils._io import (
     print_error,
     print_inspect_header,
@@ -73,8 +74,10 @@ def volume_create(
 @volume_app.command(name="rm")
 @handle_errors
 def volume_rm(
-    names: list[str] = typer.Argument(
-        ..., help="Volume names or ID prefixes to remove"
+    identifiers: list[str] = typer.Argument(
+        ...,
+        help="Volume names or ID prefixes to remove",
+        autocompletion=_complete_volume_names,
     ),
     force: bool = typer.Option(
         False, "--force", "-f", help="Remove even if attached to VMs"
@@ -82,7 +85,7 @@ def volume_rm(
 ) -> None:
     """Remove one or more volumes."""
     result = VolumeOperation.remove(
-        VolumeInput(id=[], name=list(names)), force=force
+        VolumeInput(identifiers=identifiers), force=force
     )
     for r in result.items:
         item_name = r.item.name if r.item else "unknown"
@@ -109,6 +112,7 @@ def volume_ls(
                 {
                     "id": vol.id,
                     "name": vol.name,
+                    "size": vol.size_bytes,
                     "size_bytes": vol.size_bytes,
                     "format": vol.format,
                     "status": vol.status,
@@ -142,11 +146,15 @@ def volume_ls(
 @volume_app.command(name="inspect")
 @handle_errors
 def volume_inspect(
-    name: str = typer.Argument(..., help="Volume name or ID prefix"),
+    identifier: str = typer.Argument(
+        ...,
+        help="Volume name or ID prefix",
+        autocompletion=_complete_volume_names,
+    ),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """Show detailed information about a volume."""
-    info = VolumeOperation.inspect(VolumeInput(id=[], name=[name]))
+    info = VolumeOperation.inspect(VolumeInput(identifiers=[identifier]))
 
     if json_output:
         typer.echo(json.dumps(info, indent=2, default=str))
@@ -185,11 +193,17 @@ def volume_inspect(
 @volume_app.command(name="resize")
 @handle_errors
 def volume_resize(
-    name: str = typer.Argument(..., help="Volume name or ID prefix"),
+    identifier: str = typer.Argument(
+        ...,
+        help="Volume name or ID prefix",
+        autocompletion=_complete_volume_names,
+    ),
     size: str = typer.Argument(..., help="New size (e.g., 1G, 512M)"),
 ) -> None:
     """Resize a volume."""
-    result = VolumeOperation.resize(VolumeCreateInput(name=name, size=size))
+    result = VolumeOperation.resize(
+        VolumeCreateInput(name=identifier, size=size)
+    )
     if result.is_error:
         print_error(result.message)
         raise typer.Exit(code=1)

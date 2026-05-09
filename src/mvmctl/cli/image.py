@@ -13,6 +13,10 @@ from mvmctl.api import ImageImportInput as _ImageImportInput
 from mvmctl.api import ImageInput as _ImageInput
 from mvmctl.api import ImageOperation as _ImageOperation
 from mvmctl.api import ImagePullInput as _ImagePullInput
+from mvmctl.cli._completion import (
+    _complete_local_image_ids,
+    _complete_remote_image_ids,
+)
 from mvmctl.constants import IMAGE_IMPORT_FORMAT_MAP
 from mvmctl.models import ImageItem, ImageSpec
 from mvmctl.models.result import (
@@ -134,6 +138,7 @@ def _list_local_images(images: list[ImageItem], *, json_output: bool) -> None:
             data.append(
                 {
                     "id": img.id,
+                    "name": img.os_name,
                     "os_slug": img.os_slug,
                     "os_name": img.os_name,
                     "arch": img.arch,
@@ -185,10 +190,12 @@ def _list_local_images(images: list[ImageItem], *, json_output: bool) -> None:
 
 
 @image_app.command(name="pull")
+@handle_errors
 def image_pull(
     image_selector: str = typer.Argument(
         ...,
         help="Image ID or image type from 'mvm image ls --remote' (e.g. ubuntu-24.04 or ubuntu)",
+        autocompletion=_complete_remote_image_ids,
     ),
     image_type: str | None = typer.Option(
         None,
@@ -209,7 +216,7 @@ def image_pull(
         False, "--force", "-f", help="Re-download even if exists"
     ),
     set_default: bool = typer.Option(
-        False, "--set-default", help="Set as default image after download"
+        False, "--default", help="Set as default image after download"
     ),
     skip_optimization: bool = typer.Option(
         False,
@@ -269,10 +276,14 @@ def image_pull(
     raise typer.Exit(code=0)
 
 
-@image_app.command(name="set-default")
+@image_app.command(name="default")
 @handle_errors
 def image_set_default(
-    prefix: str = typer.Argument(..., help="Image ID prefix to set as default"),
+    prefix: str = typer.Argument(
+        ...,
+        help="Image ID prefix to set as default",
+        autocompletion=_complete_local_image_ids,
+    ),
 ) -> None:
     """Set the default image for VM creation."""
     result = ImageOperation.set_default(ImageInput(id=[prefix]))
@@ -289,7 +300,9 @@ def image_set_default(
 @handle_errors
 def image_rm(
     prefixes: list[str] | None = typer.Argument(
-        None, help="Image ID prefixes to remove"
+        None,
+        help="Image ID prefixes to remove",
+        autocompletion=_complete_local_image_ids,
     ),
     force: bool = typer.Option(
         False, "--force", "-f", help="Remove even if referenced by VMs"
@@ -320,7 +333,11 @@ def image_rm(
 @image_app.command(name="inspect")
 @handle_errors
 def image_inspect(
-    prefix: str = typer.Argument(..., help="Image ID prefix to inspect"),
+    prefix: str = typer.Argument(
+        ...,
+        help="Image ID prefix to inspect",
+        autocompletion=_complete_local_image_ids,
+    ),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     tree: bool = typer.Option(False, "--tree", help="Output in tree format"),
 ) -> None:
@@ -478,7 +495,7 @@ def image_import(
         False, "--force", "-f", help="Overwrite existing"
     ),
     set_default: bool = typer.Option(
-        False, "--set-default", help="Set as default after import"
+        False, "--default", help="Set as default after import"
     ),
     skip_optimization: bool = typer.Option(
         False,
@@ -564,6 +581,7 @@ def image_warm(
     image_id: str = typer.Argument(
         ...,
         help="Image ID, hash prefix, or OS slug to warm (e.g., 'ubuntu-24.04', 'abc123')",
+        autocompletion=_complete_local_image_ids,
     ),
 ) -> None:
     """

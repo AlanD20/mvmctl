@@ -92,16 +92,34 @@ def is_compiled_mode() -> bool:
     """Return True when running as a compiled binary (Nuitka/PyInstaller).
 
     In development mode (``uv run mvm``, ``python -m mvmctl``, ``pip install -e .``),
-    ``sys.frozen`` is not set and compiled binary assets do not exist on disk.
-    The code falls back to Python-based alternatives (e.g. running service
-    binaries via ``sys.executable .../process.py``).
+    compiled binary assets do not exist on disk. The code falls back to
+    Python-based alternatives (e.g. running service binaries via
+    ``sys.executable .../process.py``).
 
     In compiled mode (final build distributed to users), all service binaries
     are embedded in the single-file executable and extracted on first run.
     """
     import sys
 
-    return getattr(sys, "frozen", False)
+    # PyInstaller sets sys.frozen
+    if getattr(sys, "frozen", False):
+        return True
+
+    # Nuitka sets __compiled__ in builtins for compiled code
+    try:
+        import __builtins__
+        if hasattr(__builtins__, "__compiled__"):
+            return True
+    except ImportError:
+        pass
+
+    # Detect Nuitka onefile: sys.executable points to python3 inside
+    # /tmp/onefile_{PID}_{TIME}/ (verified via strace on v4.0.8)
+    exe = getattr(sys, "executable", "") or ""
+    if "/onefile_" in exe and exe.endswith("/python3"):
+        return True
+
+    return False
 
 
 # ===========================================================================

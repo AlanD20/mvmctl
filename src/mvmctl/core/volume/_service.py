@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from mvmctl.core.volume._repository import VolumeRepository
+from mvmctl.core.volume._resolver import VolumeResolver
 from mvmctl.exceptions import VolumeCreateError
 from mvmctl.models import DriveConfig, VolumeItem, VolumeStatus
 
@@ -26,6 +27,7 @@ class VolumeService:
 
     def __init__(self, repo: VolumeRepository) -> None:
         self._repo = repo
+        self._resolver = VolumeResolver(self._repo)
 
     def create_disk(self, volume: VolumeItem) -> VolumeItem:
         """Create a disk file and persist the volume record.
@@ -204,14 +206,15 @@ class VolumeService:
         data: dict[str, Any] = json.loads(result.stdout)
         return data
 
-    def resolve_to_drives(self, volume_names: list[str]) -> list[DriveConfig]:
-        """Resolve volume names to Firecracker drive configurations.
+    @staticmethod
+    def volumes_to_drives(volumes: list[VolumeItem]) -> list[DriveConfig]:
+        """Convert VolumeItems to Firecracker drive configurations.
 
         Validates each volume is available and builds the drive config
         dicts needed by the Firecracker boot config.
 
         Args:
-            volume_names: List of volume names to resolve.
+            volumes: Pre-resolved VolumeItem objects.
 
         Returns:
             List of drive config dicts (drive_id, path_on_host, etc.).
@@ -220,16 +223,12 @@ class VolumeService:
             VolumeCreateError: If any volume is not available.
 
         """
-        if not volume_names:
-            return []
-
-        from mvmctl.core.volume._resolver import VolumeResolver
-
         drives: list[DriveConfig] = []
-        result = VolumeResolver(self._repo).resolve_many(volume_names)
-
-        for vol in result.items:
-            if vol.status != VolumeStatus.AVAILABLE:
+        for vol in volumes:
+            if vol.status not in (
+                VolumeStatus.AVAILABLE,
+                VolumeStatus.ATTACHED,
+            ):
                 raise VolumeCreateError(
                     f"Volume '{vol.name}' is not available "
                     f"(status: {vol.status})"
@@ -246,29 +245,55 @@ class VolumeService:
             )
         return drives
 
-    def mark_volumes_attached(
-        self, vm_id: str, volume_names: list[str]
+    def set_volumes_state(
+        self,
+        volumes: list[VolumeItem],
+        state: VolumeStatus,
+        vm_id: str | None = None,
     ) -> None:
-        """Mark volumes as attached to a VM after successful VM creation.
+        """Set all volumes in the given list to the target state.
 
-        Resolves each volume by name and updates its DB status to 'attached'.
+        For ``ATTACHED`` state, requires ``vm_id`` and calls
+        ``VolumeController.attach()`` on each volume. Skips volumes that
+        are already attached (idempotent).
+
+        For ``AVAILABLE`` state (detach), calls ``VolumeController.detach()``
+        on each volume that is currently attached. Skips already-detached
+        volumes (idempotent).
 
         Args:
-            vm_id: ID of the VM to attach the volumes to.
-            volume_names: List of volume names to attach.
+            volumes: Pre-resolved VolumeItem objects.
+            state: Target state (VolumeStatus.ATTACHED or VolumeStatus.AVAILABLE).
+            vm_id: Required when state is ATTACHED. The VM to attach to.
+
+        Raises:
+            ValueError: If state is ATTACHED and vm_id is None.
 
         """
+        if not volumes:
+            return
         from mvmctl.core.volume._controller import VolumeController
-        from mvmctl.core.volume._resolver import VolumeResolver
 
-        for vol_name in volume_names:
-            try:
-                vol = VolumeResolver(self._repo).by_name(vol_name)
-                controller = VolumeController(vol, self._repo)
-                controller.attach(vm_id)
-            except Exception as exc:
-                logger.warning(
-                    "Failed to mark volume '%s' as attached: %s",
-                    vol_name,
-                    exc,
-                )
+        if state == VolumeStatus.ATTACHED:
+            if vm_id is None:
+                raise ValueError("vm_id is required when state is ATTACHED")
+            for vol in volumes:
+                try:
+                    controller = VolumeController(vol, self._repo)
+                    controller.attach(vm_id)
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to attach volume '%s': %s",
+                        vol.name,
+                        exc,
+                    )
+        elif state == VolumeStatus.AVAILABLE:
+            for vol in volumes:
+                try:
+                    if vol.status == VolumeStatus.ATTACHED.value:
+                        controller = VolumeController(vol, self._repo)
+                        controller.detach()
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to detach volume '%s': %s", vol.name, exc
+                    )

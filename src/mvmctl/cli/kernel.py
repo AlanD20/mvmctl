@@ -21,6 +21,7 @@ else:
     KernelOperation = _KernelOperation
     KernelPullInput = _KernelPullInput
     KernelInput = _KernelInput
+from mvmctl.cli._completion import _complete_kernel_ids
 from mvmctl.models.result import OperationResult, ProgressEvent
 from mvmctl.utils._io import (
     print_error,
@@ -96,7 +97,11 @@ def kernel_ls(
 @kernel_app.command(name="inspect")
 @handle_errors
 def kernel_inspect(
-    prefix: str = typer.Argument(..., help="Kernel ID prefix to inspect"),
+    prefix: str = typer.Argument(
+        ...,
+        help="Kernel ID prefix to inspect",
+        autocompletion=_complete_kernel_ids,
+    ),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     tree: bool = typer.Option(False, "--tree", help="Output in tree format"),
 ) -> None:
@@ -173,7 +178,7 @@ def kernel_pull(
         None, "--arch", help="Architecture (x86_64, arm64)"
     ),
     set_default: bool = typer.Option(
-        False, "--set-default", help="Set as default after fetch"
+        False, "--default", help="Set as default after fetch"
     ),
     jobs: int | None = typer.Option(
         None, "--jobs", help="Parallel build jobs (official only)"
@@ -229,13 +234,17 @@ def kernel_pull(
 
 
 @kernel_app.command(
-    name="set-default",
+    name="default",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 @handle_errors
 def kernel_set_default(
     ctx: typer.Context,
-    kernel_id: str = typer.Argument(None, help="Kernel ID prefix or name"),
+    kernel_id: str = typer.Argument(
+        None,
+        help="Kernel ID prefix or name",
+        autocompletion=_complete_kernel_ids,
+    ),
 ) -> None:
     """Set a kernel as the default."""
     kernel_id = CliUtils.check_name_arg(ctx, kernel_id)
@@ -257,7 +266,9 @@ def kernel_set_default(
 def kernel_rm(
     ctx: typer.Context,
     identifiers: list[str] = typer.Argument(
-        None, help="Kernel ID prefixes or names to remove"
+        None,
+        help="Kernel ID prefixes or names to remove",
+        autocompletion=_complete_kernel_ids,
     ),
     force: bool = typer.Option(
         False, "--force", help="Remove even if referenced by VMs"

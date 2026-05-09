@@ -411,80 +411,55 @@ class TestVolumeServiceResizeDiskMissingBranches:
             service.resize_disk(vol, 2147483648)
 
 
-class TestVolumeServiceResolveToDrives:
-    """Tests for resolve_to_drives()."""
+class TestVolumeServiceVolumesToDrives:
+    """Tests for volumes_to_drives()."""
 
-    def test_resolve_empty(self, service: VolumeService):
-        """resolve_to_drives with empty list should return empty list."""
-        result = service.resolve_to_drives([])
+    def test_volumes_to_drives_empty(self):
+        """volumes_to_drives with empty list should return empty list."""
+        result = VolumeService.volumes_to_drives([])
         assert result == []
 
-    def test_resolve_all_available(self, service: VolumeService):
-        """resolve_to_drives with available volumes should return drive configs."""
+    def test_volumes_to_drives_available(self):
+        """volumes_to_drives with available volumes should return drive configs."""
         vol = _make_volume(name="my-vol", path="/volumes/my-vol.raw")
-        with patch(
-            "mvmctl.core.volume._resolver.VolumeResolver"
-        ) as mock_resolver_cls:
-            mock_resolver = MagicMock()
-            mock_resolver_cls.return_value = mock_resolver
-            mock_resolver.resolve_many.return_value = MagicMock(
-                items=[vol], errors=[], exit_code=0
-            )
 
-            result = service.resolve_to_drives(["my-vol"])
+        result = VolumeService.volumes_to_drives([vol])
 
-            assert len(result) == 1
-            assert result[0]["drive_id"] == "vol-1"
-            assert result[0]["path_on_host"] == "/volumes/my-vol.raw"
-            assert result[0]["is_root_device"] is False
-            mock_resolver.resolve_many.assert_called_once_with(["my-vol"])
+        assert len(result) == 1
+        assert result[0]["drive_id"] == "vol-1"
+        assert result[0]["path_on_host"] == "/volumes/my-vol.raw"
+        assert result[0]["is_root_device"] is False
 
-    def test_resolve_not_available_raises(self, service: VolumeService):
-        """resolve_to_drives with non-available volume should raise."""
+    def test_volumes_to_drives_not_available_raises(self):
+        """volumes_to_drives with non-available volume should raise."""
         vol = _make_volume(
             name="my-vol", status=VolumeStatus.ATTACHED.value
         )
-        with patch(
-            "mvmctl.core.volume._resolver.VolumeResolver"
-        ) as mock_resolver_cls:
-            mock_resolver = MagicMock()
-            mock_resolver_cls.return_value = mock_resolver
-            mock_resolver.resolve_many.return_value = MagicMock(
-                items=[vol], errors=[], exit_code=0
-            )
 
-            with pytest.raises(
-                VolumeCreateError, match="is not available"
-            ):
-                service.resolve_to_drives(["my-vol"])
+        with pytest.raises(
+            VolumeCreateError, match="is not available"
+        ):
+            VolumeService.volumes_to_drives([vol])
 
-    def test_resolve_multiple_drives(self, service: VolumeService):
-        """resolve_to_drives with multiple volumes should assign sequential IDs."""
+    def test_volumes_to_drives_multiple(self):
+        """volumes_to_drives with multiple volumes should assign sequential IDs."""
         vol1 = _make_volume(name="vol-a", path="/volumes/vol-a.raw")
         vol2 = _make_volume(name="vol-b", path="/volumes/vol-b.raw")
-        with patch(
-            "mvmctl.core.volume._resolver.VolumeResolver"
-        ) as mock_resolver_cls:
-            mock_resolver = MagicMock()
-            mock_resolver_cls.return_value = mock_resolver
-            mock_resolver.resolve_many.return_value = MagicMock(
-                items=[vol1, vol2], errors=[], exit_code=0
-            )
 
-            result = service.resolve_to_drives(["vol-a", "vol-b"])
+        result = VolumeService.volumes_to_drives([vol1, vol2])
 
-            assert len(result) == 2
-            assert result[0]["drive_id"] == "vol-1"
-            assert result[0]["path_on_host"] == "/volumes/vol-a.raw"
-            assert result[1]["drive_id"] == "vol-2"
-            assert result[1]["path_on_host"] == "/volumes/vol-b.raw"
+        assert len(result) == 2
+        assert result[0]["drive_id"] == "vol-1"
+        assert result[0]["path_on_host"] == "/volumes/vol-a.raw"
+        assert result[1]["drive_id"] == "vol-2"
+        assert result[1]["path_on_host"] == "/volumes/vol-b.raw"
 
 
-class TestVolumeServiceMarkVolumesAttached:
-    """Tests for mark_volumes_attached()."""
+class TestVolumeServiceSetVolumesState:
+    """Tests for set_volumes_state()."""
 
-    def test_mark_volumes_attached_success(self, service: VolumeService):
-        """mark_volumes_attached should resolve and attach volumes."""
+    def test_set_volumes_state_attach_success(self, service: VolumeService):
+        """set_volumes_state(ATTACHED) should attach volumes."""
         vol = MagicMock(spec=VolumeItem)
         vol.name = "my-vol"
 
@@ -492,45 +467,87 @@ class TestVolumeServiceMarkVolumesAttached:
 
         mock_controller = MagicMock(spec=VolumeController)
 
-        with (
-            patch(
-                "mvmctl.core.volume._resolver.VolumeResolver"
-            ) as mock_resolver_cls,
-            patch(
-                "mvmctl.core.volume._controller.VolumeController",
-                return_value=mock_controller,
-            ) as mock_ctrl_cls,
-        ):
-            mock_resolver_instance = MagicMock()
-            mock_resolver_cls.return_value = mock_resolver_instance
-            mock_resolver_instance.by_name.return_value = vol
+        with patch(
+            "mvmctl.core.volume._controller.VolumeController",
+            return_value=mock_controller,
+        ) as mock_ctrl_cls:
+            service.set_volumes_state(
+                volumes=[vol],
+                state=VolumeStatus.ATTACHED,
+                vm_id="vm-123",
+            )
 
-            service.mark_volumes_attached("vm-123", ["my-vol"])
-
-            mock_resolver_cls.assert_called_once_with(service._repo)
-            mock_resolver_instance.by_name.assert_called_once_with("my-vol")
             mock_ctrl_cls.assert_called_once_with(vol, service._repo)
             mock_controller.attach.assert_called_once_with("vm-123")
 
-    def test_mark_volumes_attached_logs_warning_on_error(
+    def test_set_volumes_state_attach_no_vm_id_raises(self, service: VolumeService):
+        """set_volumes_state(ATTACHED) without vm_id should raise ValueError."""
+        with pytest.raises(ValueError, match="vm_id is required"):
+            service.set_volumes_state(
+                volumes=[MagicMock(spec=VolumeItem)],
+                state=VolumeStatus.ATTACHED,
+            )
+
+    def test_set_volumes_state_detach_success(self, service: VolumeService):
+        """set_volumes_state(AVAILABLE) should detach volumes."""
+        vol = MagicMock(spec=VolumeItem)
+        vol.name = "my-vol"
+        vol.status = VolumeStatus.ATTACHED.value
+
+        from mvmctl.core.volume._controller import VolumeController
+
+        mock_controller = MagicMock(spec=VolumeController)
+
+        with patch(
+            "mvmctl.core.volume._controller.VolumeController",
+            return_value=mock_controller,
+        ) as mock_ctrl_cls:
+            service.set_volumes_state(
+                volumes=[vol],
+                state=VolumeStatus.AVAILABLE,
+            )
+
+            mock_ctrl_cls.assert_called_once_with(vol, service._repo)
+            mock_controller.detach.assert_called_once()
+
+    def test_set_volumes_state_detach_skips_already_detached(
+        self, service: VolumeService
+    ):
+        """set_volumes_state(AVAILABLE) should skip already-detached volumes."""
+        vol = MagicMock(spec=VolumeItem)
+        vol.name = "my-vol"
+        vol.status = VolumeStatus.AVAILABLE.value
+
+        with patch(
+            "mvmctl.core.volume._controller.VolumeController"
+        ) as mock_ctrl_cls:
+            service.set_volumes_state(
+                volumes=[vol],
+                state=VolumeStatus.AVAILABLE,
+            )
+
+            mock_ctrl_cls.assert_not_called()
+
+    def test_set_volumes_state_logs_warning_on_error(
         self, service: VolumeService, caplog
     ):
-        """mark_volumes_attached should log a warning if attachment fails."""
+        """set_volumes_state should log a warning if operation fails."""
         import logging
 
         caplog.set_level(logging.WARNING)
 
+        vol = MagicMock(spec=VolumeItem)
+        vol.name = "my-vol"
+
         with patch(
-            "mvmctl.core.volume._resolver.VolumeResolver"
-        ) as mock_resolver_cls:
-            mock_resolver_instance = MagicMock()
-            mock_resolver_cls.return_value = mock_resolver_instance
-            mock_resolver_instance.by_name.side_effect = ValueError(
-                "volume disappeared"
+            "mvmctl.core.volume._controller.VolumeController",
+            side_effect=ValueError("operation failed"),
+        ):
+            service.set_volumes_state(
+                volumes=[vol],
+                state=VolumeStatus.ATTACHED,
+                vm_id="vm-123",
             )
 
-            service.mark_volumes_attached("vm-123", ["missing-vol"])
-
-            assert "Failed to mark volume" in caplog.text
-            assert "missing-vol" in caplog.text
-            assert "volume disappeared" in caplog.text
+        assert "Failed to attach volume" in caplog.text
+        assert "my-vol" in caplog.text

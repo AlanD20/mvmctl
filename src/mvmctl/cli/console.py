@@ -11,6 +11,7 @@ import tty
 import typer
 
 from mvmctl.api.console_operations import ConsoleOperation
+from mvmctl.cli._completion import _complete_vm_names
 from mvmctl.constants import CONST_CONSOLE_SOCKET_TIMEOUT_S
 from mvmctl.exceptions import MVMError
 from mvmctl.utils._io import print_error, print_info, print_success
@@ -30,7 +31,9 @@ console_app = typer.Typer(
 def console(
     ctx: typer.Context,
     identifier: str = typer.Argument(
-        ..., help="VM name, ID, IP, or MAC address"
+        ...,
+        help="VM name, ID, IP, or MAC address",
+        autocompletion=_complete_vm_names,
     ),
     state: bool = typer.Option(
         False, "--state", help="Show console state without attaching"

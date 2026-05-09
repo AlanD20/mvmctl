@@ -202,23 +202,23 @@ class TestKernelSetDefault:
             code="kernel.default_set",
             message="Default kernel set",
         )
-        result = runner.invoke(app, ["kernel", "set-default", "abc123"])
+        result = runner.invoke(app, ["kernel", "default", "abc123"])
         assert result.exit_code == 0
         assert "Default kernel set" in result.output
 
     @patch("mvmctl.cli.kernel.KernelOperation")
     def test_set_default_no_args(self, mock_krn_op):
-        result = runner.invoke(app, ["kernel", "set-default"])
+        result = runner.invoke(app, ["kernel", "default"])
         assert result.exit_code == 1
 
     @patch("mvmctl.cli.kernel.KernelOperation")
     def test_set_default_not_found(self, mock_krn_op):
         mock_krn_op.set_default.side_effect = MVMError("not found")
-        result = runner.invoke(app, ["kernel", "set-default", "badid"])
+        result = runner.invoke(app, ["kernel", "default", "badid"])
         assert result.exit_code == 1
 
     def test_set_default_help(self):
-        result = runner.invoke(app, ["kernel", "set-default", "--help"])
+        result = runner.invoke(app, ["kernel", "default", "--help"])
         assert result.exit_code == 0
 
 

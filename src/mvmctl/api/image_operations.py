@@ -95,6 +95,8 @@ class ImageOperation:
             resolved_path = images_dir / existing_image.path
             if resolved_path.exists():
                 logger.info("Image already exists: %s", existing_image.path)
+                if resolved.set_default:
+                    repo.set_default(existing_image.id)
                 return OperationResult(
                     status="skipped",
                     code="image.already_present",
@@ -181,17 +183,11 @@ class ImageOperation:
                 exception=e,
             )
 
-        # If --set-default was explicitly passed, use that.
-        # Otherwise, if the existing image was the default, transfer the flag
-        # to the replacement so we don't orphan the default.
-        image_item.is_default = resolved.set_default
-        if (
-            not resolved.set_default
-            and existing_image is not None
-            and existing_image.is_default
-        ):
-            image_item.is_default = True
         repo.upsert(image_item)
+        if resolved.set_default:
+            repo.set_default(image_item.id)
+        elif existing_image is not None and existing_image.is_default:
+            repo.set_default(image_item.id)
 
         # Clean up old image files if the ID changed after successful upsert.
         # Also soft-delete the old DB record so it won't be returned by
@@ -278,6 +274,8 @@ class ImageOperation:
             resolved_path = images_dir / existing_image.path
             if resolved_path.exists():
                 logger.info("Image already exists: %s", existing_image.path)
+                if resolved.set_default:
+                    repo.set_default(existing_image.id)
                 return OperationResult(
                     status="skipped",
                     code="image.already_present",
@@ -345,17 +343,11 @@ class ImageOperation:
                 exception=e,
             )
 
-        # If --set-default was explicitly passed, use that.
-        # Otherwise, if the existing image was the default, transfer the flag
-        # to the replacement so we don't orphan the default.
-        image_item.is_default = resolved.set_default
-        if (
-            not resolved.set_default
-            and existing_image is not None
-            and existing_image.is_default
-        ):
-            image_item.is_default = True
         repo.upsert(image_item)
+        if resolved.set_default:
+            repo.set_default(image_item.id)
+        elif existing_image is not None and existing_image.is_default:
+            repo.set_default(image_item.id)
 
         # Clean up old image files if the ID changed after successful upsert.
         # Also soft-delete the old DB record so it won't be returned by

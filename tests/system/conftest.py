@@ -188,7 +188,7 @@ def prepare_system_env(mvm_binary, check_system_prerequisites) -> None:
             if present:
                 first_id = present[0]["id"][:6]
                 subprocess.run(
-                    [*shlex.split(binary), "kernel", "set-default", first_id],
+                    [*shlex.split(binary), "kernel", "default", first_id],
                     capture_output=True,
                     text=True,
                     timeout=30,
@@ -199,7 +199,7 @@ def prepare_system_env(mvm_binary, check_system_prerequisites) -> None:
     if not kernels_have_default:
         _pull_missing_asset(
             binary,
-            ["kernel", "pull", "--type", "firecracker", "--set-default"],
+            ["kernel", "pull", "--type", "firecracker", "--default"],
             "firecracker kernel",
         )
 
@@ -235,7 +235,7 @@ def prepare_system_env(mvm_binary, check_system_prerequisites) -> None:
     if result.returncode != 0 or not json.loads(result.stdout):
         _pull_missing_asset(
             binary,
-            ["bin", "pull", "1.15.1", "--set-default"],
+            ["bin", "pull", "1.15.1", "--default"],
             "firecracker binary",
         )
 
@@ -323,7 +323,7 @@ def created_vm(
     # tests using `mvm ssh --ip` can find the right key automatically.
     key_name = f"sys-vmkey-{uuid.uuid4().hex[:6]}"
     _run_mvm(mvm_binary, "key", "create", key_name, "--algorithm", "ed25519")
-    _run_mvm(mvm_binary, "key", "set-default", key_name, check=False)
+    _run_mvm(mvm_binary, "key", "default", key_name, check=False)
 
     # Create VM with SSH key injected (default cloud-init mode is fine --
     # the provisioner handles SSH key injection directly via the rootfs)
@@ -395,7 +395,7 @@ def created_network(
                 _run_mvm(
                     mvm_binary,
                     "network",
-                    "set-default",
+                    "default",
                     nets[0]["name"],
                     check=False,
                 )

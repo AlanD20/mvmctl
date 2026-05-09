@@ -210,19 +210,19 @@ class TestNetworkSetDefault:
     @patch("mvmctl.cli.network.NetworkOperation")
     def test_set_default_success(self, mock_net_op):
         mock_net_op.set_default.return_value = MagicMock(status="success")
-        result = runner.invoke(app, ["network", "set-default", "mynet"])
+        result = runner.invoke(app, ["network", "default", "mynet"])
         assert result.exit_code == 0
         assert "mynet" in result.output
 
     @patch("mvmctl.cli.network.NetworkOperation")
     def test_set_default_no_args(self, mock_net_op):
-        result = runner.invoke(app, ["network", "set-default"])
+        result = runner.invoke(app, ["network", "default"])
         assert result.exit_code == 1
 
     @patch("mvmctl.cli.network.NetworkOperation")
     def test_set_default_api_error(self, mock_net_op):
         mock_net_op.set_default.side_effect = NetworkError("no such network")
-        result = runner.invoke(app, ["network", "set-default", "missing"])
+        result = runner.invoke(app, ["network", "default", "missing"])
         assert result.exit_code == 1
 
 

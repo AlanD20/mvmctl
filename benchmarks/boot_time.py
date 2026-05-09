@@ -77,7 +77,7 @@ RESULTS_FILE = HERE / "results.json"
 # Helpers
 # ---------------------------------------------------------------------------
 
-MVM = ["uv", "run", "mvm"]
+MVM: list[str] = ["uv", "run", "mvm"]
 
 
 def _mvm(*args: str, timeout: int = 120) -> subprocess.CompletedProcess:
@@ -492,11 +492,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Kernel ID/prefix to use for all VMs. Omit to use default kernel.",
     )
+    parser.add_argument(
+        "--bin",
+        type=str,
+        default=None,
+        help="Path to mvm binary (e.g. ./dist/mvm). Default: uv run mvm",
+    )
     return parser.parse_args(argv)
 
 
 def main() -> int:
     args = parse_args()
+
+    # --bin flag: override the mvm command (default: ["uv", "run", "mvm"])
+    if args.bin:
+        MVM.clear()
+        MVM.append(args.bin)
 
     # --history mode --------------------------------------------------------
     if args.compare:

@@ -123,10 +123,8 @@ class TestBinaryPull:
         mocker.patch("mvmctl.api.binary_operations.AuditLog")
 
         BinaryOperation.pull(MagicMock(version="1.15.0"))
-        # Should set is_default=True since no default exists
-        calls = mock_repo.upsert.call_args_list
-        for call in calls:
-            assert call[0][0].is_default is True
+        # Should call set_default since no default exists
+        mock_repo.set_default.assert_called()
 
     def test_pull_download_override(self, mocker):
         """pull() downloads even when exists if download_override=True."""

@@ -109,7 +109,7 @@ class TestImageDefaults:
         target_id = alpine_images[0]["id"]
 
         result = _run_mvm(
-            mvm_binary, "image", "set-default", target_id, check=False
+            mvm_binary, "image", "default", target_id, check=False
         )
         if result.returncode != 0:
             pytest.skip(
@@ -319,7 +319,7 @@ class TestImagePullAdvanced:
             "image",
             "pull",
             "alpine-3.21",
-            "--set-default",
+            "--default",
             timeout=60,
             check=False,
         )
@@ -334,7 +334,7 @@ class TestImagePullAdvanced:
             _run_mvm(
                 mvm_binary,
                 "image",
-                "set-default",
+                "default",
                 previous_default,
                 check=False,
             )
@@ -554,7 +554,7 @@ class TestImageImportSetDefault:
                 str(temp_path),
                 "--format",
                 "raw",
-                "--set-default",
+                "--default",
                 check=False,
             )
             if result.returncode != 0:
@@ -698,7 +698,7 @@ class TestImageRemoveForce:
         try:
             pull_args = ["image", "pull", "alpine-3.21"]
             if was_default:
-                pull_args.append("--set-default")
+                pull_args.append("--default")
             repull = _run_mvm(mvm_binary, *pull_args, check=False)
             if repull.returncode != 0:
                 pytest.skip(f"Re-pull failed: {repull.stderr}")
@@ -760,7 +760,7 @@ class TestImageRemove:
                 try:
                     pull_args = ["image", "pull", "alpine-3.21"]
                     if was_default:
-                        pull_args.append("--set-default")
+                        pull_args.append("--default")
                     repull = _run_mvm(mvm_binary, *pull_args, check=False)
                     if repull.returncode != 0:
                         pytest.skip(

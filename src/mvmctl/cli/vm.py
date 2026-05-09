@@ -23,6 +23,7 @@ else:
     VMOperation = _VMOperation
     VMInput = _VMInput
     VMCreateInput = _VMCreateInput
+from mvmctl.cli._completion import _complete_vm_names
 from mvmctl.utils._io import (
     print_error,
     print_inspect_header,
@@ -346,7 +347,9 @@ def vm_create(
 @handle_errors
 def vm_rm(
     identifiers: list[str] = typer.Argument(
-        ..., help="VM names, ID prefixes, IPs, or MAC addresses"
+        ...,
+        help="VM names, ID prefixes, IPs, or MAC addresses",
+        autocompletion=_complete_vm_names,
     ),
     force: bool = typer.Option(False, "--force", "-f", help="Force removal"),
 ) -> None:
@@ -370,7 +373,9 @@ def vm_rm(
 @handle_errors
 def vm_start(
     identifier: str = typer.Argument(
-        ..., help="VM name, ID prefix, IP, or MAC address"
+        ...,
+        help="VM name, ID prefix, IP, or MAC address",
+        autocompletion=_complete_vm_names,
     ),
 ) -> None:
     """Start a stopped VM."""
@@ -387,7 +392,9 @@ def vm_start(
 @handle_errors
 def vm_stop(
     identifier: str = typer.Argument(
-        ..., help="VM name, ID prefix, IP, or MAC address"
+        ...,
+        help="VM name, ID prefix, IP, or MAC address",
+        autocompletion=_complete_vm_names,
     ),
     force: bool = typer.Option(False, "--force", "-f", help="Force stop"),
 ) -> None:
@@ -405,7 +412,9 @@ def vm_stop(
 @handle_errors
 def vm_reboot(
     identifier: str = typer.Argument(
-        ..., help="VM name, ID prefix, IP, or MAC address"
+        ...,
+        help="VM name, ID prefix, IP, or MAC address",
+        autocompletion=_complete_vm_names,
     ),
     force: bool = typer.Option(False, "--force", "-f", help="Force reboot"),
 ) -> None:
@@ -423,7 +432,9 @@ def vm_reboot(
 @handle_errors
 def vm_pause(
     identifier: str = typer.Argument(
-        ..., help="VM name, ID prefix, IP, or MAC address"
+        ...,
+        help="VM name, ID prefix, IP, or MAC address",
+        autocompletion=_complete_vm_names,
     ),
 ) -> None:
     """Pause a running VM."""
@@ -440,7 +451,9 @@ def vm_pause(
 @handle_errors
 def vm_resume(
     identifier: str = typer.Argument(
-        ..., help="VM name, ID prefix, IP, or MAC address"
+        ...,
+        help="VM name, ID prefix, IP, or MAC address",
+        autocompletion=_complete_vm_names,
     ),
 ) -> None:
     """Resume a paused VM."""
@@ -457,7 +470,9 @@ def vm_resume(
 @handle_errors
 def vm_snapshot(
     identifier: str = typer.Argument(
-        ..., help="VM name, ID prefix, IP, or MAC address"
+        ...,
+        help="VM name, ID prefix, IP, or MAC address",
+        autocompletion=_complete_vm_names,
     ),
     mem_file: Path = typer.Argument(..., help="Memory snapshot output path"),
     state_file: Path = typer.Argument(..., help="State snapshot output path"),
@@ -476,7 +491,9 @@ def vm_snapshot(
 @handle_errors
 def vm_load(
     identifier: str = typer.Argument(
-        ..., help="VM name, ID prefix, IP, or MAC address"
+        ...,
+        help="VM name, ID prefix, IP, or MAC address",
+        autocompletion=_complete_vm_names,
     ),
     mem_file: Path = typer.Argument(..., help="Memory snapshot input path"),
     state_file: Path = typer.Argument(..., help="State snapshot input path"),
@@ -498,7 +515,9 @@ def vm_load(
 @handle_errors
 def vm_inspect(
     identifier: str = typer.Argument(
-        ..., help="VM name, ID prefix, IP, or MAC address"
+        ...,
+        help="VM name, ID prefix, IP, or MAC address",
+        autocompletion=_complete_vm_names,
     ),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     tree: bool = typer.Option(False, "--tree", help="Output in tree format"),
@@ -658,7 +677,9 @@ def _print_vm_inspect_tree(info: dict[str, Any]) -> None:
 @handle_errors
 def vm_export(
     identifier: str = typer.Argument(
-        ..., help="VM name, ID, IP, or MAC address"
+        ...,
+        help="VM name, ID, IP, or MAC address",
+        autocompletion=_complete_vm_names,
     ),
     output: Path | None = typer.Argument(
         None, help="Output file path (prints to stdout if omitted)"
@@ -708,7 +729,9 @@ def vm_import(
 @handle_errors
 def vm_attach_volume(
     identifier: str = typer.Argument(
-        ..., help="VM name, ID prefix, IP, or MAC"
+        ...,
+        help="VM name, ID prefix, IP, or MAC",
+        autocompletion=_complete_vm_names,
     ),
     volume_name: str = typer.Argument(..., help="Volume name"),
 ) -> None:
@@ -726,7 +749,9 @@ def vm_attach_volume(
 @handle_errors
 def vm_detach_volume(
     identifier: str = typer.Argument(
-        ..., help="VM name, ID prefix, IP, or MAC"
+        ...,
+        help="VM name, ID prefix, IP, or MAC",
+        autocompletion=_complete_vm_names,
     ),
     volume_name: str = typer.Argument(..., help="Volume name"),
 ) -> None:

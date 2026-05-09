@@ -82,6 +82,8 @@ class KernelOperation:
                 existing_path = existing.resolved_path
                 if existing_path.exists():
                     logger.info("Kernel already exists: %s", existing.path)
+                    if resolved.set_default:
+                        repo.set_default(existing.id)
                     return OperationResult(
                         status="skipped",
                         code="kernel.already_present",
@@ -193,13 +195,16 @@ class KernelOperation:
                 arch=resolved.arch,
                 type=resolved.kernel_type,
                 path=fetch_result.path.name,
-                is_default=resolved.set_default,
+                is_default=False,
                 is_present=True,
                 created_at=timestamp,
                 updated_at=timestamp,
             )
 
             repo.upsert(kernel_item)
+
+            if resolved.set_default:
+                repo.set_default(kernel_item.id)
 
             # Clean up old kernel file if ID changed AND the path is different
             # from the newly downloaded file (avoids deleting the file we just

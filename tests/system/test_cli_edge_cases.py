@@ -163,7 +163,7 @@ class TestNetworkEdgeCases:
         result = _run_mvm(
             mvm_binary,
             "network",
-            "set-default",
+            "default",
             "nonexistent-network-name-xyz",
             check=False,
         )

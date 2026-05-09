@@ -53,13 +53,20 @@ def _run_with_sudo() -> subprocess.CompletedProcess[str]:
     visible.
     """
     mvm_bin = shutil.which("mvm") or sys.argv[0]
-    env = os.environ.copy()
-    env["MVM_ESCALATED"] = "1"
+
+    # Build env var assignments for the 'env' utility.
+    # We use 'sudo env VAR=val command' instead of 'sudo -E command'
+    # because 'sudo -E' requires sudoers to allow environment preservation,
+    # which is not guaranteed on all systems.
+    env_assignments: list[str] = ["MVM_ESCALATED=1"]
+    for key in ("MVM_CONFIG_DIR", "MVM_CACHE_DIR", "HOME", "PATH"):
+        if key in os.environ:
+            env_assignments.append(f"{key}={os.environ[key]}")
+
     print_info("")
     print_info("Running host init with sudo...")
     return subprocess.run(
-        ["sudo", "-E", mvm_bin, "host", "init"],
-        env=env,
+        ["sudo", "env", *env_assignments, mvm_bin, "host", "init"],
         stdout=None,
         stderr=None,
         text=True,

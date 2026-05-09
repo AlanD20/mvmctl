@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from pathlib import Path
 
 import pytest
@@ -650,6 +651,124 @@ class TestVMVolumeIntegration:
                 vol_name,
                 "--force",
                 check=False,
+            )
+            _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    def test_vm_create_volume_by_id_prefix(
+        self, mvm_binary, unique_vm_name, unique_key_name
+    ):
+        """Create VM with --volume <6-char-id-prefix> (ID-prefix fallback)."""
+        vol_name = f"sys-vol-prefix-{uuid.uuid4().hex[:6]}"
+        vm_name = unique_vm_name
+
+        # Create SSH key
+        key_name = f"sys-volpref-key-{unique_key_name}"
+        _run_mvm(
+            mvm_binary, "key", "create", key_name, "--algorithm", "ed25519"
+        )
+
+        try:
+            # Create a volume with a known name
+            _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
+
+            # Get the volume's full ID from volume ls --json
+            vol_ls = _run_mvm(mvm_binary, "volume", "ls", "--json")
+            vols = json.loads(vol_ls.stdout)
+            vol_info = next(v for v in vols if v["name"] == vol_name)
+            vol_id = vol_info["id"]
+            vol_id_prefix = vol_id[:6]
+
+            # Create VM with --volume using ID prefix (NOT the name)
+            result = _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--volume",
+                vol_id_prefix,
+                "--ssh-key",
+                key_name,
+            )
+            assert result.returncode == 0
+
+            # Verify volume status is "attached"
+            vol_inspect = _run_mvm(
+                mvm_binary, "volume", "inspect", vol_name, "--json"
+            )
+            vol_data = json.loads(vol_inspect.stdout)
+            assert vol_data["status"] == "attached", (
+                f"Expected volume status 'attached', got '{vol_data['status']}'"
+            )
+        finally:
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+            _run_mvm(
+                mvm_binary, "volume", "rm", vol_name, "--force", check=False
+            )
+            _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    def test_vm_rm_transitions_volume_to_available(
+        self, mvm_binary, unique_vm_name, unique_key_name
+    ):
+        """Remove VM transitions attached volumes to "available"."""
+        vol_name = f"sys-vol-rm-{uuid.uuid4().hex[:6]}"
+        vm_name = unique_vm_name
+
+        # Create SSH key
+        key_name = f"sys-volrm-key-{unique_key_name}"
+        _run_mvm(
+            mvm_binary, "key", "create", key_name, "--algorithm", "ed25519"
+        )
+
+        try:
+            # Create volume
+            _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
+
+            # Create VM with --volume, --ssh-key, and --image alpine-3.21
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--volume",
+                vol_name,
+                "--ssh-key",
+                key_name,
+            )
+
+            # Verify volume status is "attached"
+            vol_inspect = _run_mvm(
+                mvm_binary, "volume", "inspect", vol_name, "--json"
+            )
+            vol_data = json.loads(vol_inspect.stdout)
+            assert vol_data["status"] == "attached", (
+                f"Expected 'attached', got '{vol_data['status']}'"
+            )
+
+            # Remove VM
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force")
+
+            # Verify volume status is "available"
+            vol_inspect = _run_mvm(
+                mvm_binary, "volume", "inspect", vol_name, "--json"
+            )
+            vol_data = json.loads(vol_inspect.stdout)
+            assert vol_data["status"] == "available", (
+                f"Expected 'available', got '{vol_data['status']}'"
+            )
+        finally:
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+            _run_mvm(
+                mvm_binary, "volume", "rm", vol_name, "--force", check=False
             )
             _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
 

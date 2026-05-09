@@ -81,7 +81,7 @@ class TestBinaryPullAdvanced:
             "bin",
             "pull",
             target,
-            "--set-default",
+            "--default",
             "--force",
             check=False,
         )
@@ -107,7 +107,7 @@ class TestBinaryPullAndLifecycle:
             pytest.skip("No remote versions available")
         target = versions[-2]  # One before the latest version
 
-        _run_mvm(mvm_binary, "bin", "pull", target, "--set-default", "--force")
+        _run_mvm(mvm_binary, "bin", "pull", target, "--default", "--force")
 
     @pytest.mark.slow
     def test_bin_remove_by_version(self, mvm_binary):
