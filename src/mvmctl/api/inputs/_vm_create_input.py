@@ -440,9 +440,7 @@ class VMCreateRequest:
             provisioner=provisioner,
             disk_size_bytes=rootfs_disk_size_bytes,
             disk_size_mib=rootfs_disk_size_mib,
-            nocloud_net_port=self._inputs.nocloud_net_port
-            if ci_mode_result.mode == CloudInitMode.NET
-            else None,
+            nocloud_net_port=self._inputs.nocloud_net_port,
             custom_user_data_path=self._inputs.custom_user_data,
             skip_ci_network_config=self._inputs.skip_ci_network_config,
             network_prefix_len=network_prefix_len,

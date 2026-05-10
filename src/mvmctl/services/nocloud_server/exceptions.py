@@ -1,5 +1,7 @@
 """NoCloud server exceptions."""
 
+from __future__ import annotations
+
 from mvmctl.exceptions import MVMError
 
 

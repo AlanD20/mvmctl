@@ -5,6 +5,8 @@ Provides a high-level client for bidirectional console communication
 with detach keybind support.
 """
 
+from __future__ import annotations
+
 import select
 import socket
 from collections.abc import Generator

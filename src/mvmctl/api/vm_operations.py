@@ -676,6 +676,8 @@ class VMCreateContext:
         ):
             vm_instance.nocloud_net_port = self.cloud_init_result.nocloud_port
             vm_instance.nocloud_net_pid = self.cloud_init_result.nocloud_pid
+        elif self.resolved and self.resolved.nocloud_net_port is not None:
+            vm_instance.nocloud_net_port = self.resolved.nocloud_net_port
 
         if self.relay and self.relay.pid and self.relay.socket_path:
             vm_instance.relay_socket_path = self.relay.socket_path.name
@@ -1025,8 +1027,36 @@ class VMOperation:
         resolver = VMRequest(inputs=inputs, db=db)
         resolved = resolver.resolve()
 
+        if not resolved.vms:
+            return BatchResult(
+                items=[
+                    OperationResult(
+                        status="error",
+                        code="vm.not_found",
+                        message="No VMs found matching the given identifiers",
+                    )
+                ]
+            )
+
+        # Report any identifiers that couldn't be resolved
+        unresolved_count = len(inputs.identifiers) - len(resolved.vms)
+        if unresolved_count > 0:
+            logger.warning(
+                "VM rm: %d identifier(s) could not be resolved (out of %d)",
+                unresolved_count,
+                len(inputs.identifiers),
+            )
+
         repo = VMRepository(db)
         results: list[OperationResult[VMInstanceItem]] = []
+        if unresolved_count > 0:
+            results.append(
+                OperationResult(
+                    status="error",
+                    code="vm.not_found",
+                    message=f"{unresolved_count} VM identifier(s) not found",
+                )
+            )
 
         for vm in resolved.vms:
             try:
@@ -1306,6 +1336,8 @@ class VMOperation:
             "created_at": vm.created_at,
             "updated_at": vm.updated_at,
             "cloud_init_mode": vm.cloud_init_mode,
+            "nocloud_net_port": vm.nocloud_net_port,
+            "nocloud_net_pid": vm.nocloud_net_pid,
             "enable_pci": vm.enable_pci,
             "enable_console": vm.enable_console,
             "enable_logging": vm.enable_logging,
@@ -1628,6 +1660,18 @@ class VMOperation:
         if len(resolved.vms) != 1:
             raise VMNotFoundError("Expected exactly one VM identifier")
         vm = resolved.vms[0]
+        # Validate snapshot files exist before loading
+        missing: list[str] = []
+        if not mem_in.exists():
+            missing.append(str(mem_in))
+        if not state_in.exists():
+            missing.append(str(state_in))
+        if missing:
+            paths = ", ".join(missing)
+            from mvmctl.exceptions import MVMError
+
+            raise MVMError(f"Snapshot file(s) not found: {paths}")
+
         try:
             # If the VM is stopped, we need to spawn a fresh Firecracker
             # process in pre-boot (snapshot) mode so the API socket is

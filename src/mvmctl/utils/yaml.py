@@ -7,6 +7,8 @@ presence failures so that callers can convert the error into whatever domain
 exception is appropriate.
 """
 
+from __future__ import annotations
+
 from typing import Any
 
 

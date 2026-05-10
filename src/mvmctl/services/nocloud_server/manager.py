@@ -9,12 +9,15 @@ The server runs as a subprocess that survives beyond the CLI process lifetime,
 providing better isolation and reliability compared to thread-based servers.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 import signal
 import subprocess
 import sys
 import threading
+import time
 import warnings
 from pathlib import Path
 
@@ -179,7 +182,6 @@ class NoCloudNetServerManager:
             # Auto-allocate port from range if requested
             if self._port == 0:
                 import socket
-                import time
 
                 from mvmctl.utils.common import CacheUtils
 

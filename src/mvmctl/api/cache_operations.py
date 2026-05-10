@@ -65,18 +65,17 @@ class CacheOperation:
         for path in dirs:
             created.append(str(path))
 
-        # Extract embedded service binaries (compiled mode only)
-        from mvmctl.constants import is_compiled_mode
+        # Extract embedded service binaries and create service symlinks
+        # In compiled mode: copies the binary from embedded data
+        # In dev mode: creates symlinks only (binary already exists from build)
+        try:
+            from mvmctl.core._shared import Database as _ExtractDb
 
-        if is_compiled_mode():
-            try:
-                from mvmctl.core._shared import Database as _ExtractDb
-
-                BinaryService(
-                    BinaryRepository(_ExtractDb())
-                ).extract_service_binaries()
-            except Exception:
-                logger.exception("Failed to extract embedded service binaries")
+            BinaryService(
+                BinaryRepository(_ExtractDb())
+            ).extract_service_binaries()
+        except Exception:
+            logger.exception("Failed to extract embedded service binaries")
 
         # Check whether guestfs was enabled by the user
         from mvmctl.core._shared import Database
@@ -393,6 +392,10 @@ class CacheOperation:
 
         removed: list[str] = []
         for binary in all_binaries:
+            # Skip service binaries (mvm-provision, mvm-nocloud-server, mvm-console-relay)
+            if binary.name.startswith("mvm-"):
+                continue
+
             if not include_all:
                 if binary.version == default_version:
                     continue

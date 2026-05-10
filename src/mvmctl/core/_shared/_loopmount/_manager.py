@@ -27,7 +27,7 @@ LOOP_MOUNT_TIMEOUT = 60
 
 # Development-mode fallback path to process.py
 _DEV_PROCESS_PATH = (
-    Path(__file__).resolve().parent.parent.parent.parent.parent
+    Path(__file__).resolve().parent.parent.parent.parent
     / "services"
     / "loopmount"
     / "process.py"
@@ -326,5 +326,7 @@ class LoopMountManager:
 
     @staticmethod
     def is_binary_available() -> bool:
-        """Check if the compiled loop-mount binary is available."""
-        return LoopMountManager._resolve_binary_path() is not None
+        """Check if loop-mount provisioning is available (compiled binary or dev fallback)."""
+        if LoopMountManager._resolve_binary_path() is not None:
+            return True
+        return _DEV_PROCESS_PATH.exists()

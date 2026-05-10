@@ -186,7 +186,9 @@ class KernelOperation:
             # Parse filename for base_name
             parsed = KernelService.parse_filename(fetch_result.path.name)
 
-            # Build KernelItem (path is relative — filename only)
+            # Store the resolved absolute path so resolved_path
+            # points to the correct filesystem location even when
+            # a custom output directory was used.
             kernel_item = KernelItem(
                 id=kernel_id,
                 name=fetch_result.path.name,
@@ -194,7 +196,7 @@ class KernelOperation:
                 version=fetch_result.version,
                 arch=resolved.arch,
                 type=resolved.kernel_type,
-                path=fetch_result.path.name,
+                path=str(fetch_result.path.resolve()),
                 is_default=False,
                 is_present=True,
                 created_at=timestamp,

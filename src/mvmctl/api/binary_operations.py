@@ -237,6 +237,13 @@ class BinaryOperation:
                         normalized,
                     )
 
+            if not binaries_to_remove:
+                return OperationResult(
+                    status="error",
+                    code="binary.not_found",
+                    message=f"No binaries found for version {normalized}",
+                )
+
             if binaries_to_remove:
                 service = BinaryService(repo=repo)
                 service.remove_many(binaries_to_remove, force=force)

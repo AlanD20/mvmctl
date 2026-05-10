@@ -99,23 +99,40 @@ class CloudInitManager:
 
         import yaml
 
-        custom_userdata: dict[str, Any] = {}
         content = self._config.custom_user_data_path.read_text()
-        if not (
-            content.startswith("#cloud-config")
-            or content.startswith("Content-Type:")
-        ):
-            logger.warning(
-                "user-data file does not start with '#cloud-config' or MIME boundary header"
+
+        # Detect content type from first line. Cloud-init supports:
+        #   1. #cloud-config  — YAML configuration (merge SSH keys, validate)
+        #   2. #!             — Shell scripts (write as-is, no processing)
+        #   3. Content-Type:  — MIME multi-part messages (write as-is)
+        if content.startswith("#!"):
+            # Shell script: write as-is. No SSH key merging or directive
+            # validation needed — keys are injected separately.
+            (self._config.cloud_init_dir / "user-data").write_text(content)
+            return
+
+        if content.startswith("Content-Type:"):
+            # MIME multi-part: write as-is.
+            (self._config.cloud_init_dir / "user-data").write_text(content)
+            return
+
+        if not content.startswith("#cloud-config"):
+            raise CloudInitProvisionError(
+                "Custom user-data must start with '#cloud-config' (YAML), "
+                "'#!' (shell script), or 'Content-Type:' (MIME multipart). "
+                f"Got: {content[:80]!r}"
             )
+
+        # YAML cloud-config: parse, validate, and merge SSH keys
+        custom_userdata: dict[str, Any] = {}
         try:
             loaded = yaml.safe_load(content)
             if isinstance(loaded, dict):
                 custom_userdata = loaded
                 self._validate_user_data(custom_userdata)
-            elif loaded is not None:
+            else:
                 raise CloudInitProvisionError(
-                    "Custom user-data must parse to a YAML mapping/object"
+                    "Cloud-config user-data must parse to a YAML mapping/object"
                 )
         except yaml.YAMLError as exc:
             raise CloudInitProvisionError(

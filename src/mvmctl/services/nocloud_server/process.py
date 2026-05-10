@@ -9,6 +9,8 @@ It is designed to run as a persistent process that survives beyond
 the CLI process lifetime.
 """
 
+from __future__ import annotations
+
 import argparse
 import os
 import signal

@@ -4,6 +4,8 @@ Console controller for VM serial console access.
 Provides high-level console relay management.
 """
 
+from __future__ import annotations
+
 import os
 from pathlib import Path
 

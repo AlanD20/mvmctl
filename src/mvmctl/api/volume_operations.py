@@ -104,6 +104,17 @@ class VolumeOperation:
 
         resolved = VolumeRequest(inputs=inputs, db=db).resolve()
 
+        if not resolved.volumes:
+            return BatchResult(
+                items=[
+                    OperationResult(
+                        status="error",
+                        code="volume.not_found",
+                        message="No volumes found matching the given identifiers",
+                    )
+                ]
+            )
+
         results: list[OperationResult[VolumeItem]] = []
         for volume in resolved.volumes:
             try:

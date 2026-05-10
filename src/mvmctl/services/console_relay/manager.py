@@ -5,6 +5,8 @@ Manages the lifecycle of console relay processes, including starting,
 stopping, and cleanup of relay instances.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 import signal

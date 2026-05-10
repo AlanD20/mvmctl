@@ -37,7 +37,17 @@ class KernelItem:
 
     @property
     def resolved_path(self) -> Path:
-        """Absolute path resolved against the kernels cache directory."""
+        """Absolute filesystem path for this kernel.
+
+        If ``self.path`` is already absolute, returns it directly
+        (supporting kernels fetched to custom output directories).
+        Otherwise, resolves the relative path against the default
+        kernels cache directory for backward compatibility with
+        existing database records.
+        """
+        path = Path(self.path)
+        if path.is_absolute():
+            return path
         from mvmctl.utils.common import CacheUtils
 
         return CacheUtils.get_kernels_dir() / self.path

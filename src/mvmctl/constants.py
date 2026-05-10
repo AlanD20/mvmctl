@@ -1,5 +1,7 @@
 """Project identity constants derived from pyproject.toml metadata."""
 
+from __future__ import annotations
+
 import functools
 from typing import Any, Final
 

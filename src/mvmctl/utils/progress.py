@@ -6,6 +6,8 @@ non-TTY environments. It avoids Rich Progress API for lightweight operation
 in CI/script environments.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 import shutil

@@ -359,25 +359,35 @@ class BinaryService:
         combined_dest = bin_dir / combined_name
 
         combined_src = BinaryService._get_embedded_path(combined_name)
-        if combined_src is None:
-            logger.debug(
-                "Combined service binary not embedded, skipping extraction"
-            )
-            return extracted
 
-        # Always overwrite — ensures idempotent recovery from corrupted binaries
-        combined_dest.unlink(missing_ok=True)
-        shutil.copy2(str(combined_src), str(combined_dest))
-        combined_dest.chmod(CONST_FILE_PERMS_EXECUTABLE)
-        logger.info("Extracted combined service binary: %s", combined_name)
+        # Step 1: Copy the combined binary (only in compiled mode when embedded)
+        if combined_src is not None:
+            combined_dest.unlink(missing_ok=True)
+            shutil.copy2(str(combined_src), str(combined_dest))
+            combined_dest.chmod(CONST_FILE_PERMS_EXECUTABLE)
+            logger.info("Extracted combined service binary: %s", combined_name)
+        else:
+            logger.debug("Combined service binary not embedded, skipping copy")
 
-        # Always recreate symlinks — handles corrupted/missing symlinks
+        # Step 2: Always create symlinks — works in both compiled and dev mode.
+        # In dev mode, mvm-services may already exist from a prior build.
         for name in SERVICE_BINARY_NAMES:
             link_path = bin_dir / name
             link_path.unlink(missing_ok=True)
             link_path.symlink_to(combined_name)
 
-            # Create DB entry
+        # Step 3: Create DB entries only if the combined binary is available.
+        # In dev mode without a prior build, the binary may not exist at the
+        # cache path — services fall back to sys.executable -m ... in that case.
+        if not combined_dest.exists():
+            logger.debug(
+                "Combined service binary not found at %s, "
+                "skipping DB upsert (dev mode without build)",
+                combined_dest,
+            )
+            return extracted
+
+        for name in SERVICE_BINARY_NAMES:
             sha256 = HashGenerator.binary(combined_dest, name, mvmctl_version)
             item = BinaryItem(
                 id=sha256,

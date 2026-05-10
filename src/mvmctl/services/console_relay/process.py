@@ -5,6 +5,8 @@ Reads from PTY master file descriptor, writes to console.log file,
 and forwards to a Unix socket for CLI attachment.
 """
 
+from __future__ import annotations
+
 import argparse
 import os
 import select
