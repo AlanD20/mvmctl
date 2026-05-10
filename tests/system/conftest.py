@@ -325,6 +325,18 @@ def created_vm(
     _run_mvm(mvm_binary, "key", "create", key_name, "--algorithm", "ed25519")
     _run_mvm(mvm_binary, "key", "default", key_name, check=False)
 
+    # Create dedicated network for this VM
+    net_name = f"sys-vm-net-{uuid.uuid4().hex[:6]}"
+    _run_mvm(
+        mvm_binary,
+        "network",
+        "create",
+        net_name,
+        "--subnet",
+        _unique_subnet(net_name),
+        "--non-interactive",
+    )
+
     _run_mvm(
         mvm_binary,
         "vm",
@@ -334,7 +346,7 @@ def created_vm(
         "--image",
         "alpine-3.21",
         "--network",
-        "net",
+        net_name,
         "--ssh-key",
         key_name,
     )
@@ -349,7 +361,7 @@ def created_vm(
     try:
         yield vm_info
     finally:
-        # Guaranteed cleanup — VM first (releases IP lease), key second
+        # Guaranteed cleanup — VM first (releases IP lease), then network, then key
         _run_mvm(
             mvm_binary,
             "vm",
@@ -358,6 +370,7 @@ def created_vm(
             "--force",
             check=False,
         )
+        _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
         _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
 
 
@@ -429,11 +442,23 @@ def lifecycle_vm(mvm_binary) -> Generator[dict[str, Any], None, None]:
     """
     vm_name = f"sys-lifecycle-{uuid.uuid4().hex[:8]}"
     key_name = f"sys-lifecycle-key-{uuid.uuid4().hex[:6]}"
+    net_name = f"sys-lifecycle-net-{uuid.uuid4().hex[:6]}"
 
     # Create throwaway SSH key
     _run_mvm(mvm_binary, "key", "create", key_name, "--algorithm", "ed25519")
 
-    # Create VM with SSH key injected
+    # Create dedicated network
+    _run_mvm(
+        mvm_binary,
+        "network",
+        "create",
+        net_name,
+        "--subnet",
+        _unique_subnet(net_name),
+        "--non-interactive",
+    )
+
+    # Create VM with SSH key injected and network
     _run_mvm(
         mvm_binary,
         "vm",
@@ -444,6 +469,8 @@ def lifecycle_vm(mvm_binary) -> Generator[dict[str, Any], None, None]:
         "alpine-3.21",
         "--ssh-key",
         key_name,
+        "--network",
+        net_name,
     )
 
     vms = _parse_vm_list(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
@@ -456,6 +483,7 @@ def lifecycle_vm(mvm_binary) -> Generator[dict[str, Any], None, None]:
         yield vm_info
     finally:
         _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+        _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
         _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
 
 
@@ -493,11 +521,23 @@ def module_vm(mvm_binary) -> Generator[dict[str, Any], None, None]:
     """
     vm_name = f"sys-modvm-{uuid.uuid4().hex[:8]}"
     key_name = f"sys-modvm-key-{uuid.uuid4().hex[:6]}"
+    net_name = f"sys-modvm-net-{uuid.uuid4().hex[:6]}"
 
     # Create throwaway SSH key
     _run_mvm(mvm_binary, "key", "create", key_name, "--algorithm", "ed25519")
 
-    # Create VM with SSH key injected
+    # Create dedicated network for this VM
+    _run_mvm(
+        mvm_binary,
+        "network",
+        "create",
+        net_name,
+        "--subnet",
+        _unique_subnet(net_name),
+        "--non-interactive",
+    )
+
+    # Create VM with SSH key injected and network attached
     _run_mvm(
         mvm_binary,
         "vm",
@@ -506,6 +546,8 @@ def module_vm(mvm_binary) -> Generator[dict[str, Any], None, None]:
         vm_name,
         "--image",
         "alpine-3.21",
+        "--network",
+        net_name,
         "--ssh-key",
         key_name,
     )
@@ -520,6 +562,7 @@ def module_vm(mvm_binary) -> Generator[dict[str, Any], None, None]:
         yield vm_info
     finally:
         _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+        _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
         _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
 
 

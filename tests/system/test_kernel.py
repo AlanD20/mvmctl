@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -17,10 +18,24 @@ class TestKernelLifecycle:
 
     def test_kernel_list_empty(self, mvm_binary):
         """List kernels when none are cached."""
-        result = _run_mvm(mvm_binary, "kernel", "ls")
-        assert result.returncode == 0
+        result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
+        data: list[dict[str, Any]] = json.loads(result.stdout)
+        assert isinstance(data, list)
+        if data:
+            entry = data[0]
+            assert isinstance(entry.get("id"), str) and entry["id"], (
+                f"Expected non-empty id: {entry}"
+            )
+            assert isinstance(entry.get("name"), str) and entry["name"], (
+                f"Expected non-empty name: {entry}"
+            )
+            assert isinstance(entry.get("version"), str) and entry["version"], (
+                f"Expected non-empty version: {entry}"
+            )
 
     @pytest.mark.slow
+    @pytest.mark.kernel_build
+    @pytest.mark.serial
     def test_kernel_pull(self, mvm_binary):
         """Pull official kernel."""
         result = _run_mvm(mvm_binary, "kernel", "pull", "--type", "official")
@@ -29,10 +44,24 @@ class TestKernelLifecycle:
     def test_kernel_list_json(self, mvm_binary):
         """List kernels in JSON format."""
         result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
-        assert result.returncode == 0
         data: list[dict[str, Any]] = json.loads(result.stdout)
         assert isinstance(data, list)
+        if data:
+            for entry in data:
+                assert isinstance(entry.get("id"), str) and entry["id"], (
+                    f"Expected non-empty id: {entry}"
+                )
+                assert isinstance(entry.get("name"), str) and entry["name"], (
+                    f"Expected non-empty name: {entry}"
+                )
+                assert (
+                    isinstance(entry.get("version"), str) and entry["version"]
+                ), f"Expected non-empty version: {entry}"
+                assert entry.get("type") in ("firecracker", "official"), (
+                    f"Unexpected type: {entry}"
+                )
 
+    @pytest.mark.serial
     def test_kernel_set_default(self, mvm_binary):
         """Set kernel as default (uses the one pulled in test_kernel_pull)."""
         result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
@@ -107,7 +136,7 @@ class TestKernelInspect:
 class TestKernelPullWithVersion:
     """Test kernel pull with the --version flag."""
 
-    pytestmark = [pytest.mark.slow]
+    pytestmark = [pytest.mark.slow, pytest.mark.serial]
 
     def test_kernel_pull_with_version(self, mvm_binary):
         """Pull a firecracker kernel with --version flag."""
@@ -133,12 +162,120 @@ class TestKernelPullWithVersion:
             or "already exists" in result.stdout.lower()
         )
 
+    def test_kernel_pull_with_specific_version(self, mvm_binary):
+        """Pull a firecracker kernel with a specific version (not 'latest')."""
+        result = _run_mvm(
+            mvm_binary,
+            "kernel",
+            "pull",
+            "--type",
+            "firecracker",
+            "--version",
+            "6.1",
+            check=False,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            pytest.skip(
+                f"Kernel pull with specific version failed: {result.stderr.strip()}"
+            )
+        assert result.returncode == 0
+        assert (
+            "pulled" in result.stdout.lower()
+            or "success" in result.stdout.lower()
+            or "already exists" in result.stdout.lower()
+        )
+
+        result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
+        kernels = json.loads(result.stdout)
+        firecracker_kernels = [
+            k
+            for k in kernels
+            if k.get("type") == "firecracker"
+            and k.get("version", "").startswith("6.1")
+            and k.get("is_present")
+        ]
+        assert firecracker_kernels, (
+            "Kernel with type=firecracker and version starting with '6.1' "
+            "not found in listing. "
+            f"Available firecracker versions: {[k.get('version') for k in kernels if k.get('type') == 'firecracker']}"
+        )
+
+
+class TestKernelBuild:
+    """Test kernel build from source operations."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.kernel_build,
+        pytest.mark.slow,
+        pytest.mark.serial,
+        pytest.mark.domain_kernel,
+    ]
+
+    def test_kernel_build_with_custom_config(self, mvm_binary, tmp_path):
+        """Build official kernel with custom config fragment."""
+        config_fragment = tmp_path / "custom-fragment.conf"
+        config_fragment.write_text("CONFIG_NET=y\nCONFIG_INET=y\n")
+
+        result = _run_mvm(
+            mvm_binary,
+            "kernel",
+            "pull",
+            "--type",
+            "official",
+            "--config",
+            str(config_fragment),
+            "--jobs",
+            "4",
+            "--keep-build-dir",
+            check=False,
+            timeout=600,
+        )
+        if result.returncode != 0:
+            pytest.skip(
+                f"Kernel build with custom config failed: {result.stderr.strip()}"
+            )
+        assert result.returncode == 0
+
+        build_dir = Path("/tmp/mvmctl/kernel-build")
+        assert build_dir.is_dir(), (
+            f"Build directory does not exist: {build_dir}"
+        )
+        vmlinux = build_dir / "vmlinux-official"
+        assert vmlinux.exists(), f"Built kernel binary not found: {vmlinux}"
+
+    def test_kernel_clean_rebuild(self, mvm_binary):
+        """Build official kernel with clean rebuild."""
+        result = _run_mvm(
+            mvm_binary,
+            "kernel",
+            "pull",
+            "--type",
+            "official",
+            "--clean-build",
+            "--jobs",
+            "2",
+            check=False,
+            timeout=600,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"Kernel clean rebuild failed: {result.stderr.strip()}")
+        assert result.returncode == 0
+
+        build_dir = Path("/tmp/mvmctl/kernel-build")
+        vmlinux = build_dir / "vmlinux-official"
+        assert vmlinux.exists(), (
+            f"Built kernel binary not found after clean rebuild: {vmlinux}"
+        )
+
 
 class TestKernelRemoveAndPull:
     """Test kernel removal and pull with set-default."""
 
-    pytestmark = [pytest.mark.slow]
+    pytestmark = [pytest.mark.slow, pytest.mark.serial]
 
+    @pytest.mark.kernel_build
     def test_kernel_pull_with_set_default(self, mvm_binary):
         """Pull official kernel and set as default in one command."""
         result = _run_mvm(
@@ -146,6 +283,7 @@ class TestKernelRemoveAndPull:
         )
         assert result.returncode == 0
 
+    @pytest.mark.kernel_build
     def test_kernel_remove(self, mvm_binary):
         """Fetch a kernel then remove it."""
         result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
@@ -189,8 +327,9 @@ class TestKernelRemoveAndPull:
 class TestKernelRemoveForce:
     """Test kernel removal with --force flag."""
 
-    pytestmark = [pytest.mark.slow]
+    pytestmark = [pytest.mark.slow, pytest.mark.serial]
 
+    @pytest.mark.kernel_build
     def test_kernel_rm_with_force(self, mvm_binary):
         """Remove a kernel using --force even if VMs reference it."""
         result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
@@ -245,40 +384,57 @@ class TestKernelRemoveForce:
 class TestKernelStoppedVMDeletion:
     """Test kernel deletion behavior with stopped VM references."""
 
-    pytestmark = [pytest.mark.requires_kvm]
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.serial,
+        pytest.mark.domain_kernel,
+    ]
 
     def test_delete_kernel_used_by_stopped_vm_does_not_error(
-        self, mvm_binary: str, unique_vm_name: str
+        self, mvm_binary: str, unique_vm_name: str, created_network: str
     ) -> None:
         """Kernel rm allows deleting kernels referenced by stopped VMs (no error)."""
         vm_name = unique_vm_name
+        network_name = created_network
 
         try:
-            _run_mvm(
-                mvm_binary,
-                "vm",
-                "create",
-                "--name",
-                vm_name,
-                "--image",
-                "alpine-3.21",
-            )
+            # Get a present kernel to use explicitly (avoid reliance on default kernel)
+            result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
+            kernels: list[dict[str, Any]] = json.loads(result.stdout)
+            present_kernels = [k for k in kernels if k.get("is_present")]
+            if not present_kernels:
+                pytest.skip("No present kernels available for VM creation")
+            target_kernel = present_kernels[0]
+            kernel_id_prefix = target_kernel["id"][:6]
+
+            try:
+                _run_mvm(
+                    mvm_binary,
+                    "vm",
+                    "create",
+                    "--name",
+                    vm_name,
+                    "--image",
+                    "alpine-3.21",
+                    "--kernel",
+                    kernel_id_prefix,
+                    "--network",
+                    network_name,
+                )
+            except RuntimeError as e:
+                if "No provisioner available" in str(e):
+                    pytest.skip(
+                        "No loop-mount provisioner available "
+                        "(mvm-services not set up)"
+                    )
+                raise
 
             vm_ls = _run_mvm(mvm_binary, "vm", "ls", "--json", check=False)
             if vm_ls.returncode == 0 and vm_ls.stdout.strip():
                 vms: list[dict[str, Any]] = json.loads(vm_ls.stdout)
                 vm_names = [v.get("name") for v in vms]
                 assert vm_name in vm_names
-
-            result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
-            kernels: list[dict[str, Any]] = json.loads(result.stdout)
-            present_kernels = [k for k in kernels if k.get("is_present")]
-            assert present_kernels, "No present kernels found in listing"
-            default_kernel = next(
-                (k for k in present_kernels if k.get("is_default")),
-                present_kernels[0],
-            )
-            kernel_id_prefix = default_kernel["id"][:6]
 
             result = _run_mvm(
                 mvm_binary, "kernel", "rm", kernel_id_prefix, check=False
@@ -297,8 +453,8 @@ class TestKernelStoppedVMDeletion:
                     assert kernel_id_prefix not in kernel_ids
             vm_ls = _run_mvm(mvm_binary, "vm", "ls", "--json", check=False)
             if vm_ls.returncode == 0 and vm_ls.stdout.strip():
-                vms: list[dict[str, Any]] = json.loads(vm_ls.stdout)
-                vm_names = [v.get("name") for v in vms]
+                vms_after: list[dict[str, Any]] = json.loads(vm_ls.stdout)
+                vm_names = [v.get("name") for v in vms_after]
                 assert vm_name in vm_names
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)

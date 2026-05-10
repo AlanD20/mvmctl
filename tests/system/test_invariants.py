@@ -180,12 +180,23 @@ class TestInvariants:
 
     @pytest.mark.requires_kvm
     def test_image_in_use_by_vm(
-        self, mvm_binary: str, unique_vm_name: str
+        self, mvm_binary: str, unique_vm_name: str, unique_network_name: str
     ) -> None:
         """VM references image_id — verify the image exists in image ls."""
         vm_name = unique_vm_name
+        net_name = unique_network_name
+        subnet = _unique_subnet(net_name)
 
         try:
+            _run_mvm(
+                mvm_binary,
+                "network",
+                "create",
+                net_name,
+                "--subnet",
+                subnet,
+                "--non-interactive",
+            )
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -194,6 +205,8 @@ class TestInvariants:
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
             )
 
             vm_result = _run_mvm(mvm_binary, "vm", "inspect", vm_name, "--json")
@@ -210,15 +223,27 @@ class TestInvariants:
             )
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
     @pytest.mark.requires_kvm
     def test_kernel_in_use_by_vm(
-        self, mvm_binary: str, unique_vm_name: str
+        self, mvm_binary: str, unique_vm_name: str, unique_network_name: str
     ) -> None:
         """VM references kernel_id — verify the kernel exists in kernel ls."""
         vm_name = unique_vm_name
+        net_name = unique_network_name
+        subnet = _unique_subnet(net_name)
 
         try:
+            _run_mvm(
+                mvm_binary,
+                "network",
+                "create",
+                net_name,
+                "--subnet",
+                subnet,
+                "--non-interactive",
+            )
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -227,6 +252,8 @@ class TestInvariants:
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
             )
 
             vm_result = _run_mvm(mvm_binary, "vm", "inspect", vm_name, "--json")
@@ -243,15 +270,27 @@ class TestInvariants:
             )
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
     @pytest.mark.requires_kvm
     def test_network_in_use_by_vm(
-        self, mvm_binary: str, unique_vm_name: str
+        self, mvm_binary: str, unique_vm_name: str, unique_network_name: str
     ) -> None:
         """VM references network_id — verify the network exists."""
         vm_name = unique_vm_name
+        net_name = unique_network_name
+        subnet = _unique_subnet(net_name)
 
         try:
+            _run_mvm(
+                mvm_binary,
+                "network",
+                "create",
+                net_name,
+                "--subnet",
+                subnet,
+                "--non-interactive",
+            )
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -260,6 +299,8 @@ class TestInvariants:
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
             )
 
             vm_result = _run_mvm(mvm_binary, "vm", "inspect", vm_name, "--json")
@@ -276,6 +317,7 @@ class TestInvariants:
             )
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
     def test_default_resource_is_present(self, mvm_binary: str) -> None:
         """Default resource must exist and be present on disk."""
@@ -459,11 +501,14 @@ class TestVolumeVMConsistency:
         mvm_binary: str,
         unique_vm_name: str,
         unique_key_name: str,
+        unique_network_name: str,
     ) -> None:
         """Volume inspect should show the ID of the VM it is attached to."""
         key_name = f"sys-cr-vm-{unique_key_name}"
         vol_name = f"sys-cr-vol-{unique_key_name}"
         vm_name = unique_vm_name
+        net_name = unique_network_name
+        subnet = _unique_subnet(net_name)
 
         try:
             _run_mvm(
@@ -472,12 +517,23 @@ class TestVolumeVMConsistency:
             _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
             _run_mvm(
                 mvm_binary,
+                "network",
+                "create",
+                net_name,
+                "--subnet",
+                subnet,
+                "--non-interactive",
+            )
+            _run_mvm(
+                mvm_binary,
                 "vm",
                 "create",
                 "--name",
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
                 "--volume",
                 vol_name,
                 "--ssh-key",
@@ -508,6 +564,7 @@ class TestVolumeVMConsistency:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
             _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
             _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network
@@ -517,11 +574,14 @@ class TestVolumeVMConsistency:
         mvm_binary: str,
         unique_vm_name: str,
         unique_key_name: str,
+        unique_network_name: str,
     ) -> None:
         """VM inspect should list attached volumes."""
         key_name = f"sys-cr-vs-{unique_key_name}"
         vol_name = f"sys-cr-vs-{unique_key_name}"
         vm_name = unique_vm_name
+        net_name = unique_network_name
+        subnet = _unique_subnet(net_name)
 
         try:
             _run_mvm(
@@ -530,12 +590,23 @@ class TestVolumeVMConsistency:
             _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
             _run_mvm(
                 mvm_binary,
+                "network",
+                "create",
+                net_name,
+                "--subnet",
+                subnet,
+                "--non-interactive",
+            )
+            _run_mvm(
+                mvm_binary,
                 "vm",
                 "create",
                 "--name",
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
                 "--volume",
                 vol_name,
                 "--ssh-key",
@@ -558,6 +629,7 @@ class TestVolumeVMConsistency:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
             _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
             _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network
@@ -567,17 +639,29 @@ class TestVolumeVMConsistency:
         mvm_binary: str,
         unique_vm_name: str,
         unique_key_name: str,
+        unique_network_name: str,
     ) -> None:
         """VM creation with --volume using a 6-char volume ID prefix works."""
         key_name = f"sys-cr-pf-{unique_key_name}"
         vol_name = f"sys-cr-pf-{unique_key_name}"
         vm_name = unique_vm_name
+        net_name = unique_network_name
+        subnet = _unique_subnet(net_name)
 
         try:
             _run_mvm(
                 mvm_binary, "key", "create", key_name, "--algorithm", "ed25519"
             )
             _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
+            _run_mvm(
+                mvm_binary,
+                "network",
+                "create",
+                net_name,
+                "--subnet",
+                subnet,
+                "--non-interactive",
+            )
 
             vol_inspect = _run_mvm(
                 mvm_binary, "volume", "inspect", vol_name, "--json"
@@ -593,6 +677,8 @@ class TestVolumeVMConsistency:
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
                 "--volume",
                 vol_id_prefix,
                 "--ssh-key",
@@ -613,6 +699,7 @@ class TestVolumeVMConsistency:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
             _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
             _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network
@@ -622,17 +709,29 @@ class TestVolumeVMConsistency:
         mvm_binary: str,
         unique_vm_name: str,
         unique_key_name: str,
+        unique_network_name: str,
     ) -> None:
         """VM creation with --volume using the volume name works."""
         key_name = f"sys-cr-nm-{unique_key_name}"
         vol_name = f"sys-cr-nm-{unique_key_name}"
         vm_name = unique_vm_name
+        net_name = unique_network_name
+        subnet = _unique_subnet(net_name)
 
         try:
             _run_mvm(
                 mvm_binary, "key", "create", key_name, "--algorithm", "ed25519"
             )
             _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
+            _run_mvm(
+                mvm_binary,
+                "network",
+                "create",
+                net_name,
+                "--subnet",
+                subnet,
+                "--non-interactive",
+            )
 
             result = _run_mvm(
                 mvm_binary,
@@ -642,6 +741,8 @@ class TestVolumeVMConsistency:
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
                 "--volume",
                 vol_name,
                 "--ssh-key",
@@ -662,6 +763,7 @@ class TestVolumeVMConsistency:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
             _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
             _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network
@@ -671,11 +773,14 @@ class TestVolumeVMConsistency:
         mvm_binary: str,
         unique_vm_name: str,
         unique_key_name: str,
+        unique_network_name: str,
     ) -> None:
         """Removing a VM releases its attached volume back to 'available'."""
         key_name = f"sys-cr-rl-{unique_key_name}"
         vol_name = f"sys-cr-rl-{unique_key_name}"
         vm_name = unique_vm_name
+        net_name = unique_network_name
+        subnet = _unique_subnet(net_name)
 
         try:
             _run_mvm(
@@ -684,12 +789,23 @@ class TestVolumeVMConsistency:
             _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
             _run_mvm(
                 mvm_binary,
+                "network",
+                "create",
+                net_name,
+                "--subnet",
+                subnet,
+                "--non-interactive",
+            )
+            _run_mvm(
+                mvm_binary,
                 "vm",
                 "create",
                 "--name",
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
                 "--volume",
                 vol_name,
                 "--ssh-key",
@@ -719,6 +835,7 @@ class TestVolumeVMConsistency:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
             _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
             _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
 
 class TestNetworkVMConsistency:
@@ -854,7 +971,11 @@ class TestNetworkVMConsistency:
 class TestAtMostOneDefaultImage:
     """No two images can be the default simultaneously."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.domain_invariant]
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.serial,
+        pytest.mark.domain_invariant,
+    ]
 
     def test_at_most_one_default_image(self, mvm_binary) -> None:
         """Pull two images with --default and verify exactly one default at a time."""
@@ -914,7 +1035,11 @@ class TestAtMostOneDefaultImage:
 class TestAtMostOneDefaultKernel:
     """No two kernels can be the default simultaneously."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.domain_invariant]
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.serial,
+        pytest.mark.domain_invariant,
+    ]
 
     def test_at_most_one_default_kernel(self, mvm_binary) -> None:
         """Set different kernels as default and verify exactly one default."""
@@ -1001,7 +1126,11 @@ class TestAtMostOneDefaultKernel:
 class TestAtMostOneDefaultBinary:
     """No two binaries can be the default simultaneously."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.domain_invariant]
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.serial,
+        pytest.mark.domain_invariant,
+    ]
 
     def test_at_most_one_default_binary(self, mvm_binary) -> None:
         """Set different binaries as default and verify exactly one default."""
@@ -1049,9 +1178,20 @@ class TestAtMostOneDefaultBinary:
         first_round = [
             b for b in json.loads(result.stdout) if b.get("is_default")
         ]
-        assert len(first_round) == 1, (
-            f"Expected exactly 1 default binary after first set, "
-            f"got {len(first_round)}"
+        # Binaries support per-name defaults (firecracker, jailer, service bins).
+        # Verify at most 1 default per name after first set.
+        first_defaults_by_name: dict[str, list[dict[str, Any]]] = {}
+        for b in first_round:
+            name = b.get("name", "unknown")
+            first_defaults_by_name.setdefault(name, []).append(b)
+        for name, defaults in first_defaults_by_name.items():
+            assert len(defaults) <= 1, (
+                f"binary/{name}: expected at most 1 default after first set, "
+                f"got {len(defaults)}"
+            )
+        first_target_name = first_target.get("name", "unknown")
+        assert first_target_name in first_defaults_by_name, (
+            f"binary/{first_target_name}: expected a default after first set"
         )
 
         result = _run_mvm(mvm_binary, "bin", "ls", "--json")
@@ -1082,12 +1222,23 @@ class TestAtMostOneDefaultBinary:
         second_round = [
             b for b in json.loads(result.stdout) if b.get("is_default")
         ]
-        assert len(second_round) == 1, (
-            f"Expected exactly 1 default binary after second set, "
-            f"got {len(second_round)}"
+        # Verify at most 1 default per name after second set.
+        second_defaults_by_name: dict[str, list[dict[str, Any]]] = {}
+        for b in second_round:
+            name = b.get("name", "unknown")
+            second_defaults_by_name.setdefault(name, []).append(b)
+        for name, defaults in second_defaults_by_name.items():
+            assert len(defaults) <= 1, (
+                f"binary/{name}: expected at most 1 default after second set, "
+                f"got {len(defaults)}"
+            )
+        # Verify second_target's name default is the one we set.
+        second_target_name = second_target.get("name", "unknown")
+        assert second_target_name in second_defaults_by_name, (
+            f"binary/{second_target_name}: expected a default after second set"
         )
-        assert second_round[0]["id"] == second_target_id, (
-            "Second binary did not become the sole default"
+        assert second_defaults_by_name[second_target_name][0]["id"] == second_target_id, (
+            "Second binary did not become the sole default for its name"
         )
 
         if original_default_id:
@@ -1105,6 +1256,7 @@ class TestAtMostOneDefaultNetwork:
 
     pytestmark = [
         pytest.mark.system,
+        pytest.mark.serial,
         pytest.mark.domain_invariant,
         pytest.mark.requires_network,
     ]
@@ -1197,11 +1349,14 @@ class TestVolumeTransitionsToAvailableAfterVmRm:
         mvm_binary,
         unique_vm_name,
         unique_key_name,
+        unique_network_name,
     ) -> None:
         """Create VM with a volume, remove VM, verify volume returns to available."""
         key_name = f"sys-inv-key-{unique_key_name}"
         vol_name = f"sys-inv-vol-{unique_key_name}"
         vm_name = unique_vm_name
+        net_name = unique_network_name
+        subnet = _unique_subnet(net_name)
 
         try:
             _run_mvm(
@@ -1214,6 +1369,15 @@ class TestVolumeTransitionsToAvailableAfterVmRm:
             )
 
             _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
+            _run_mvm(
+                mvm_binary,
+                "network",
+                "create",
+                net_name,
+                "--subnet",
+                subnet,
+                "--non-interactive",
+            )
 
             result = _run_mvm(
                 mvm_binary,
@@ -1223,6 +1387,8 @@ class TestVolumeTransitionsToAvailableAfterVmRm:
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
                 "--volume",
                 vol_name,
                 "--ssh-key",
@@ -1277,6 +1443,7 @@ class TestVolumeTransitionsToAvailableAfterVmRm:
                 check=False,
             )
             _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
 
 # ============================================================================

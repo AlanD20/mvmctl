@@ -12,6 +12,12 @@ pytestmark = [pytest.mark.system, pytest.mark.domain_init]
 class TestInitWizard:
     """Test the mvm init wizard (non-destructive, no sudo required with --skip-host)."""
 
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.serial,
+        pytest.mark.domain_init,
+    ]
+
     def test_init_non_interactive_skip_host(self, mvm_binary):
         """Run init in non-interactive mode skipping host setup.
 

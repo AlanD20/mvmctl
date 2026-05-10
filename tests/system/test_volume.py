@@ -8,7 +8,7 @@ import uuid
 
 import pytest
 
-from tests.system.conftest import _run_mvm
+from tests.system.conftest import _run_mvm, _unique_subnet
 
 pytestmark = [
     pytest.mark.system,
@@ -63,6 +63,32 @@ class TestVolumeLifecycle:
             )
             data = json.loads(inspect.stdout)
             assert data["format"] == "qcow2"
+            assert data["size_bytes"] == 512 * 1024 * 1024
+            assert data["status"] == "available"
+        finally:
+            _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
+
+    def test_volume_create_with_format_raw(self, mvm_binary, unique_key_name):
+        """Create a volume with --format raw and verify format via inspect --json."""
+        vol_name = f"sys-vol-raw-{unique_key_name}"
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "volume",
+                "create",
+                vol_name,
+                "512M",
+                "--format",
+                "raw",
+            )
+            assert result.returncode == 0
+            assert vol_name in result.stdout
+
+            inspect = _run_mvm(
+                mvm_binary, "volume", "inspect", vol_name, "--json"
+            )
+            data = json.loads(inspect.stdout)
+            assert data["format"] == "raw"
             assert data["size_bytes"] == 512 * 1024 * 1024
             assert data["status"] == "available"
         finally:
@@ -302,6 +328,37 @@ class TestVolumeLifecycle:
         finally:
             _run_mvm(mvm_binary, "volume", "rm", vol1, vol2, check=False)
 
+    @pytest.mark.skip(
+        reason=(
+            "BUG B4: volume rm accepts nonexistent volume names "
+            "(returns 0 instead of error)"
+        )
+    )
+    def test_volume_remove_partial_failure(self, mvm_binary, unique_key_name):
+        """Remove one existing volume and one nonexistent — existing should still be removed."""
+        vol_name = f"sys-vol-partial-{unique_key_name}"
+        nonexistent = "nonexistent-volume-partial-test"
+        try:
+            _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
+
+            result = _run_mvm(
+                mvm_binary,
+                "volume",
+                "rm",
+                vol_name,
+                nonexistent,
+                check=False,
+            )
+            assert result.returncode != 0
+            combined = (result.stdout + result.stderr).lower()
+            assert nonexistent in combined
+
+            result = _run_mvm(mvm_binary, "volume", "ls", "--json")
+            volumes = json.loads(result.stdout)
+            assert not any(v["name"] == vol_name for v in volumes)
+        finally:
+            _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
+
     def test_volume_resize_shrink_documents_behavior(
         self, mvm_binary: str, unique_key_name: str
     ) -> None:
@@ -348,7 +405,11 @@ class TestVolumeLifecycle:
 
     @pytest.mark.requires_kvm
     def test_volume_invariants_available_attached_cycle(
-        self, mvm_binary: str, unique_vm_name: str, unique_key_name: str
+        self,
+        mvm_binary: str,
+        unique_vm_name: str,
+        unique_key_name: str,
+        unique_network_name: str,
     ) -> None:
         """Verify volume invariants: vm_id and path correctness.
 
@@ -358,8 +419,11 @@ class TestVolumeLifecycle:
         """
         vm_name = unique_vm_name
         vol_name = f"sys-vol-inv-{unique_key_name}"
+        net_name = unique_network_name
+        subnet = _unique_subnet(net_name)
 
         try:
+            _run_mvm(mvm_binary, "network", "create", net_name, "--subnet", subnet, "--non-interactive")
             _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
 
             # State 1: available — vm_id must be null, path must exist on disk
@@ -381,6 +445,8 @@ class TestVolumeLifecycle:
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
             )
             _run_mvm(mvm_binary, "vm", "stop", vm_name, "--force")
             _run_mvm(mvm_binary, "vm", "attach-volume", vm_name, vol_name)
@@ -418,6 +484,7 @@ class TestVolumeLifecycle:
             _run_mvm(
                 mvm_binary, "volume", "rm", vol_name, "--force", check=False
             )
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
     # ──────────────────────────────────────────────────────────────────
     # Resource exhaustion / input validation edge cases
@@ -492,12 +559,13 @@ class TestVolumeAttachDetach:
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network
     def test_attach_detach_then_stop_start(
-        self, mvm_binary, unique_vm_name, unique_key_name
+        self, mvm_binary, unique_vm_name, unique_key_name, unique_network_name
     ):
         """Create VM with volume, stop, detach, re-attach, start — full lifecycle."""
         vm_name = unique_vm_name
         key_name = unique_key_name
         vol_name = f"sys-st-vol-{unique_key_name}"
+        net_name = unique_network_name
 
         try:
             _run_mvm(
@@ -508,6 +576,7 @@ class TestVolumeAttachDetach:
                 "--algorithm",
                 "ed25519",
             )
+            _run_mvm(mvm_binary, "network", "create", net_name, "--subnet", _unique_subnet(net_name), "--non-interactive")
             _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
 
             _run_mvm(
@@ -518,6 +587,8 @@ class TestVolumeAttachDetach:
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
                 "--volume",
                 vol_name,
                 "--ssh-key",
@@ -560,16 +631,18 @@ class TestVolumeAttachDetach:
                 check=False,
             )
             _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network
     def test_attach_volume_to_stopped_then_start(
-        self, mvm_binary, unique_vm_name, unique_key_name
+        self, mvm_binary, unique_vm_name, unique_key_name, unique_network_name
     ):
         """Attach volume to a stopped VM then start it — Bug #7 scenario."""
         vm_name = unique_vm_name
         key_name = unique_key_name
         vol_name = f"sys-st-vol-{unique_key_name}"
+        net_name = unique_network_name
 
         try:
             _run_mvm(
@@ -580,6 +653,7 @@ class TestVolumeAttachDetach:
                 "--algorithm",
                 "ed25519",
             )
+            _run_mvm(mvm_binary, "network", "create", net_name, "--subnet", _unique_subnet(net_name), "--non-interactive")
             _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
 
             _run_mvm(
@@ -590,6 +664,8 @@ class TestVolumeAttachDetach:
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
                 "--ssh-key",
                 key_name,
             )
@@ -622,16 +698,18 @@ class TestVolumeAttachDetach:
                 check=False,
             )
             _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network
     def test_attach_detach_attach_same_volume(
-        self, mvm_binary, unique_vm_name, unique_key_name
+        self, mvm_binary, unique_vm_name, unique_key_name, unique_network_name
     ):
         """Detach volume, verify available, re-attach, verify attached."""
         vm_name = unique_vm_name
         key_name = unique_key_name
         vol_name = f"sys-st-vol-{unique_key_name}"
+        net_name = unique_network_name
 
         try:
             _run_mvm(
@@ -642,6 +720,7 @@ class TestVolumeAttachDetach:
                 "--algorithm",
                 "ed25519",
             )
+            _run_mvm(mvm_binary, "network", "create", net_name, "--subnet", _unique_subnet(net_name), "--non-interactive")
             _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
 
             _run_mvm(
@@ -652,6 +731,8 @@ class TestVolumeAttachDetach:
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
                 "--volume",
                 vol_name,
                 "--ssh-key",
@@ -688,6 +769,7 @@ class TestVolumeAttachDetach:
                 check=False,
             )
             _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
 
 class TestVolumeCrossVM:
@@ -703,6 +785,7 @@ class TestVolumeCrossVM:
         mvm_binary: str,
         unique_vm_name: str,
         unique_key_name: str,
+        unique_network_name: str,
     ) -> None:
         """Attaching an already-attached volume to a different VM must fail.
 
@@ -713,9 +796,11 @@ class TestVolumeCrossVM:
         vm_a = unique_vm_name
         vm_b = f"sys-vm-b-{uuid.uuid4().hex[:6]}"
         vol_name = f"sys-xvm-vol-{unique_key_name}"
+        net_name = unique_network_name
 
         try:
             _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
+            _run_mvm(mvm_binary, "network", "create", net_name, "--subnet", _unique_subnet(net_name), "--non-interactive")
 
             _run_mvm(
                 mvm_binary,
@@ -725,6 +810,8 @@ class TestVolumeCrossVM:
                 vm_a,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
             )
             _run_mvm(
                 mvm_binary,
@@ -734,6 +821,8 @@ class TestVolumeCrossVM:
                 vm_b,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
             )
 
             _run_mvm(mvm_binary, "vm", "stop", vm_a, "--force")
@@ -781,6 +870,7 @@ class TestVolumeCrossVM:
                 "--force",
                 check=False,
             )
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
 
 class TestVolumeRunningVMDependency:
@@ -800,11 +890,13 @@ class TestVolumeRunningVMDependency:
         mvm_binary,
         unique_vm_name,
         unique_key_name,
+        unique_network_name,
     ):
         """Deleting a volume attached to a running VM should be rejected."""
         vm_name = unique_vm_name
         key_name = unique_key_name
         vol_name = f"sys-dep-vol-{unique_key_name}"
+        net_name = unique_network_name
 
         try:
             _run_mvm(
@@ -816,6 +908,7 @@ class TestVolumeRunningVMDependency:
                 "ed25519",
             )
             _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
+            _run_mvm(mvm_binary, "network", "create", net_name, "--subnet", _unique_subnet(net_name), "--non-interactive")
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -824,6 +917,8 @@ class TestVolumeRunningVMDependency:
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
                 "--volume",
                 vol_name,
                 "--ssh-key",
@@ -867,6 +962,7 @@ class TestVolumeRunningVMDependency:
                 check=False,
             )
             _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network
@@ -876,11 +972,13 @@ class TestVolumeRunningVMDependency:
         mvm_binary,
         unique_vm_name,
         unique_key_name,
+        unique_network_name,
     ):
         """--force allows deleting a volume even when attached to a running VM."""
         vm_name = unique_vm_name
         key_name = unique_key_name
         vol_name = f"sys-dep-vol-{unique_key_name}"
+        net_name = unique_network_name
 
         try:
             _run_mvm(
@@ -892,6 +990,7 @@ class TestVolumeRunningVMDependency:
                 "ed25519",
             )
             _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
+            _run_mvm(mvm_binary, "network", "create", net_name, "--subnet", _unique_subnet(net_name), "--non-interactive")
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -900,6 +999,8 @@ class TestVolumeRunningVMDependency:
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
                 "--volume",
                 vol_name,
                 "--ssh-key",
@@ -939,6 +1040,7 @@ class TestVolumeRunningVMDependency:
                 check=False,
             )
             _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network
@@ -948,11 +1050,13 @@ class TestVolumeRunningVMDependency:
         mvm_binary,
         unique_vm_name,
         unique_key_name,
+        unique_network_name,
     ):
         """Resizing a volume attached to a running VM should succeed."""
         vm_name = unique_vm_name
         key_name = unique_key_name
         vol_name = f"sys-dep-vol-{unique_key_name}"
+        net_name = unique_network_name
 
         try:
             _run_mvm(
@@ -964,6 +1068,7 @@ class TestVolumeRunningVMDependency:
                 "ed25519",
             )
             _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
+            _run_mvm(mvm_binary, "network", "create", net_name, "--subnet", _unique_subnet(net_name), "--non-interactive")
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -972,6 +1077,8 @@ class TestVolumeRunningVMDependency:
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
                 "--volume",
                 vol_name,
                 "--ssh-key",
@@ -1030,6 +1137,7 @@ class TestVolumeRunningVMDependency:
                 check=False,
             )
             _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
 
 class TestVolumeNegativeFailure:
@@ -1041,11 +1149,13 @@ class TestVolumeNegativeFailure:
 
     @pytest.mark.requires_kvm
     def test_attach_nonexistent_volume_to_vm_fails(
-        self, mvm_binary, unique_vm_name
+        self, mvm_binary, unique_vm_name, unique_network_name
     ):
         """Attaching a nonexistent volume should give clear error."""
         vm_name = unique_vm_name
+        net_name = unique_network_name
         try:
+            _run_mvm(mvm_binary, "network", "create", net_name, "--subnet", _unique_subnet(net_name), "--non-interactive")
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -1054,6 +1164,8 @@ class TestVolumeNegativeFailure:
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
             )
 
             _run_mvm(mvm_binary, "vm", "stop", vm_name, "--force")
@@ -1087,14 +1199,17 @@ class TestVolumeNegativeFailure:
                 )
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
     @pytest.mark.requires_kvm
     def test_detach_nonexistent_volume_from_vm_fails(
-        self, mvm_binary, unique_vm_name
+        self, mvm_binary, unique_vm_name, unique_network_name
     ):
         """Detaching a nonexistent volume should give clear error."""
         vm_name = unique_vm_name
+        net_name = unique_network_name
         try:
+            _run_mvm(mvm_binary, "network", "create", net_name, "--subnet", _unique_subnet(net_name), "--non-interactive")
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -1103,6 +1218,8 @@ class TestVolumeNegativeFailure:
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
             )
 
             _run_mvm(mvm_binary, "vm", "stop", vm_name, "--force")
@@ -1142,3 +1259,4 @@ class TestVolumeNegativeFailure:
                 assert len(attached_vols) == 0
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)

@@ -11,7 +11,7 @@ import subprocess
 
 import pytest
 
-from tests.system.conftest import _run_mvm
+from tests.system.conftest import _run_mvm, _unique_subnet
 
 pytestmark = [pytest.mark.system]
 
@@ -41,10 +41,22 @@ class TestCacheEdgeCases:
 
     @pytest.mark.requires_kvm
     @pytest.mark.slow
-    def test_cache_prune_vm_no_dry_run(self, mvm_binary, unique_vm_name):
+    def test_cache_prune_vm_no_dry_run(
+        self, mvm_binary, unique_vm_name, unique_network_name
+    ):
         """Stop a VM, prune it (no --dry-run), verify it is gone."""
         vm_name = unique_vm_name
+        net_name = unique_network_name
         try:
+            _run_mvm(
+                mvm_binary,
+                "network",
+                "create",
+                net_name,
+                "--subnet",
+                _unique_subnet(net_name),
+                "--non-interactive",
+            )
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -53,6 +65,8 @@ class TestCacheEdgeCases:
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
             )
 
             _run_mvm(mvm_binary, "vm", "stop", vm_name)
@@ -84,6 +98,7 @@ class TestCacheEdgeCases:
                 "--force",
                 check=False,
             )
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
 
 class TestNetworkEdgeCases:
@@ -165,11 +180,23 @@ class TestVMStateTransitionErrors:
             f"Resume on running VM failed: {result.stderr}"
         )
 
-    def test_vm_rm_multiple_identifiers(self, mvm_binary, unique_vm_name):
+    def test_vm_rm_multiple_identifiers(
+        self, mvm_binary, unique_vm_name, unique_network_name
+    ):
         """Remove two VMs at once using multiple positional args."""
         name1 = f"{unique_vm_name}-a"
         name2 = f"{unique_vm_name}-b"
+        net_name = unique_network_name
         try:
+            _run_mvm(
+                mvm_binary,
+                "network",
+                "create",
+                net_name,
+                "--subnet",
+                _unique_subnet(net_name),
+                "--non-interactive",
+            )
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -178,6 +205,8 @@ class TestVMStateTransitionErrors:
                 name1,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
             )
             _run_mvm(
                 mvm_binary,
@@ -187,6 +216,8 @@ class TestVMStateTransitionErrors:
                 name2,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
             )
 
             result = _run_mvm(mvm_binary, "vm", "rm", name1, name2, "--force")
@@ -216,6 +247,7 @@ class TestVMStateTransitionErrors:
                 "--force",
                 check=False,
             )
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
 
 class TestImageAdvancedFlags:
@@ -280,10 +312,22 @@ class TestVMCloudInitModes:
         pytest.mark.domain_vm,
     ]
 
-    def test_vm_create_cloud_init_mode_iso(self, mvm_binary, unique_vm_name):
+    def test_vm_create_cloud_init_mode_iso(
+        self, mvm_binary, unique_vm_name, unique_network_name
+    ):
         """Create VM with --cloud-init-mode iso."""
         vm_name = unique_vm_name
+        net_name = unique_network_name
         try:
+            _run_mvm(
+                mvm_binary,
+                "network",
+                "create",
+                net_name,
+                "--subnet",
+                _unique_subnet(net_name),
+                "--non-interactive",
+            )
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -292,6 +336,8 @@ class TestVMCloudInitModes:
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
                 "--cloud-init-mode",
                 "iso",
             )
@@ -303,11 +349,24 @@ class TestVMCloudInitModes:
             )
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
-    def test_vm_create_cloud_init_mode_net(self, mvm_binary, unique_vm_name):
+    def test_vm_create_cloud_init_mode_net(
+        self, mvm_binary, unique_vm_name, unique_network_name
+    ):
         """Create VM with --cloud-init-mode net."""
         vm_name = unique_vm_name
+        net_name = unique_network_name
         try:
+            _run_mvm(
+                mvm_binary,
+                "network",
+                "create",
+                net_name,
+                "--subnet",
+                _unique_subnet(net_name),
+                "--non-interactive",
+            )
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -316,6 +375,8 @@ class TestVMCloudInitModes:
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
                 "--cloud-init-mode",
                 "net",
             )
@@ -327,11 +388,24 @@ class TestVMCloudInitModes:
             )
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
-    def test_vm_create_cloud_init_mode_off(self, mvm_binary, unique_vm_name):
+    def test_vm_create_cloud_init_mode_off(
+        self, mvm_binary, unique_vm_name, unique_network_name
+    ):
         """Create VM with --cloud-init-mode off (explicit)."""
         vm_name = unique_vm_name
+        net_name = unique_network_name
         try:
+            _run_mvm(
+                mvm_binary,
+                "network",
+                "create",
+                net_name,
+                "--subnet",
+                _unique_subnet(net_name),
+                "--non-interactive",
+            )
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -340,6 +414,8 @@ class TestVMCloudInitModes:
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
                 "--cloud-init-mode",
                 "off",
             )
@@ -351,6 +427,7 @@ class TestVMCloudInitModes:
             )
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
 
 class TestVMNocloudNetPort:
@@ -364,11 +441,21 @@ class TestVMNocloudNetPort:
     ]
 
     def test_vm_create_with_nocloud_net_port_specific(
-        self, mvm_binary, unique_vm_name
+        self, mvm_binary, unique_vm_name, unique_network_name
     ):
         """Create VM with --nocloud-net-port set to a specific port."""
         vm_name = unique_vm_name
+        net_name = unique_network_name
         try:
+            _run_mvm(
+                mvm_binary,
+                "network",
+                "create",
+                net_name,
+                "--subnet",
+                _unique_subnet(net_name),
+                "--non-interactive",
+            )
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -377,6 +464,8 @@ class TestVMNocloudNetPort:
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
                 "--nocloud-net-port",
                 "12345",
             )
@@ -388,6 +477,7 @@ class TestVMNocloudNetPort:
             )
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
 
 class TestImagePullAdvancedFlags:
@@ -396,6 +486,7 @@ class TestImagePullAdvancedFlags:
     pytestmark = [
         pytest.mark.system,
         pytest.mark.slow,
+        pytest.mark.serial,
         pytest.mark.domain_image,
     ]
 
@@ -450,6 +541,8 @@ class TestKernelPullAdvancedFlags:
     pytestmark = [
         pytest.mark.system,
         pytest.mark.slow,
+        pytest.mark.serial,
+        pytest.mark.kernel_build,
         pytest.mark.domain_kernel,
     ]
 
@@ -479,6 +572,7 @@ class TestImagePullWithTypeFlag:
     pytestmark = [
         pytest.mark.system,
         pytest.mark.slow,
+        pytest.mark.serial,
         pytest.mark.domain_image,
     ]
 
@@ -512,6 +606,7 @@ class TestImageImportWithDisableDetector:
     pytestmark = [
         pytest.mark.system,
         pytest.mark.slow,
+        pytest.mark.serial,
         pytest.mark.domain_image,
     ]
 

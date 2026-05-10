@@ -5,6 +5,8 @@ Merged from: test_config.py (existing), test_cli_edge_cases.py (config test clas
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from tests.system.conftest import _run_mvm
@@ -22,7 +24,21 @@ class TestConfigLifecycle:
         )
         assert result.returncode == 0
         assert "vcpu_count" in result.stdout
+        match = re.search(
+            r"vcpu_count\s*[=:]\s*(\d+|\(default\))", result.stdout
+        )
+        assert match, f"Could not find vcpu_count value in: {result.stdout}"
+        value_str = match.group(1)
+        if value_str.isdigit():
+            assert int(value_str) > 0, (
+                f"Expected positive vcpu_count, got {value_str}"
+            )
+        else:
+            assert value_str == "(default)", (
+                f"Unexpected value format: {value_str}"
+            )
 
+    @pytest.mark.serial
     def test_config_set_and_get(self, mvm_binary):
         """Set a config value and read it back."""
         result = _run_mvm(
@@ -39,6 +55,7 @@ class TestConfigLifecycle:
         # Cleanup: reset back to default
         _run_mvm(mvm_binary, "config", "reset", "defaults.vm", "vcpu_count")
 
+    @pytest.mark.serial
     def test_config_reset(self, mvm_binary):
         """Reset a config value to its default."""
         _run_mvm(mvm_binary, "config", "set", "defaults.vm", "vcpu_count", "4")
@@ -61,6 +78,7 @@ class TestConfigLifecycle:
         assert result.stdout.strip()
         assert "[defaults.vm]" in result.stdout
 
+    @pytest.mark.serial
     def test_config_reset_all(self, mvm_binary):
         """Reset all config overrides globally."""
         # First set a value so there is something to reset
@@ -100,6 +118,7 @@ class TestConfigEdgeCases:
         assert "mem_size_mib" in result.stdout
         assert "boot_args" in result.stdout
 
+    @pytest.mark.serial
     def test_config_reset_category_only(self, mvm_binary):
         """``config reset defaults.vm`` (no key) should reset all keys in category."""
         _run_mvm(mvm_binary, "config", "set", "defaults.vm", "vcpu_count", "6")
@@ -172,7 +191,11 @@ class TestConfigEdgeCasesExtended:
 class TestConfigEdgeCasesResetAllAfterSet:
     """Test config reset --all after multiple values are set."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.domain_config]
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.serial,
+        pytest.mark.domain_config,
+    ]
 
     def test_config_reset_all_with_multiple_overrides(self, mvm_binary):
         """Set multiple config overrides, then reset --all, verify all gone."""

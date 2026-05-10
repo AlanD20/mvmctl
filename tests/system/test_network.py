@@ -87,9 +87,13 @@ class TestNetworkLifecycle:
 
     def test_network_listing_and_verification(self, mvm_binary, module_network):
         """List networks and verify created network appears."""
-        result = _run_mvm(mvm_binary, "network", "ls")
-        assert result.returncode == 0
-        assert module_network in result.stdout
+        result = _run_mvm(mvm_binary, "network", "ls", "--json")
+        networks: list[dict[str, Any]] = json.loads(result.stdout)
+        matched = [n for n in networks if n.get("name") == module_network]
+        assert len(matched) == 1, f"Network '{module_network}' not found in JSON listing"
+        network = matched[0]
+        assert isinstance(network.get("id"), str) and network["id"], f"Expected non-empty id: {network}"
+        assert isinstance(network.get("subnet"), str) and network["subnet"], f"Expected non-empty subnet: {network}"
 
     def test_ip_rule_verification_iptables(self, module_network):
         """Verify iptables rules were created for network."""
@@ -144,9 +148,17 @@ class TestNetworkLifecycle:
 
     def test_network_inspect(self, mvm_binary, module_network):
         """Inspect a network and verify name appears in output."""
-        result = _run_mvm(mvm_binary, "network", "inspect", module_network)
-        assert result.returncode == 0
-        assert module_network in result.stdout
+        result = _run_mvm(mvm_binary, "network", "inspect", module_network, "--json")
+        data: dict[str, Any] = json.loads(result.stdout)
+        assert data.get("name") == module_network, (
+            f"Expected name '{module_network}', got '{data.get('name')}'"
+        )
+        assert isinstance(data.get("subnet"), str) and "/" in data.get("subnet", ""), (
+            f"Expected CIDR format subnet, got: {data.get('subnet')}"
+        )
+        assert isinstance(data.get("bridge"), str) and data["bridge"], (
+            f"Expected non-empty bridge name, got: {data.get('bridge')}"
+        )
 
     def test_network_inspect_json(self, mvm_binary, module_network):
         """Inspect a network with --json and verify parsed fields."""
@@ -194,6 +206,34 @@ class TestNetworkLifecycle:
             _run_mvm(
                 mvm_binary, "network", "rm", unique_network_name, check=False
             )
+
+    def test_network_default_without_name(self, mvm_binary):
+        """Calling network default without a name should show guidance."""
+        result = _run_mvm(mvm_binary, "network", "default", check=False)
+        assert result.returncode != 0
+        assert "Usage" in result.stdout or "Usage" in result.stderr, (
+            f"Expected usage/help message, got: {result.stdout} / {result.stderr}"
+        )
+
+    def test_network_ls_structure(self, mvm_binary, module_network):
+        """Verify network ls --json returns a list with well-formed entries.
+
+        Every entry must have non-empty name, id, and subnet fields.
+        """
+        result = _run_mvm(mvm_binary, "network", "ls", "--json")
+        data: list[dict[str, Any]] = json.loads(result.stdout)
+        assert isinstance(data, list)
+        if data:
+            for entry in data:
+                assert isinstance(entry.get("name"), str) and entry["name"], (
+                    f"Expected non-empty name: {entry}"
+                )
+                assert isinstance(entry.get("id"), str) and entry["id"], (
+                    f"Expected non-empty id: {entry}"
+                )
+                assert isinstance(entry.get("subnet"), str) and entry["subnet"], (
+                    f"Expected non-empty subnet: {entry}"
+                )
 
     def test_network_set_default(self, mvm_binary, module_network):
         """Set a network as the default."""

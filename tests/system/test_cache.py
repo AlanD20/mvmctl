@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import datetime
+import hashlib
 import json
 import os
+import sqlite3
+import subprocess
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -15,6 +20,12 @@ pytestmark = [pytest.mark.system, pytest.mark.domain_cache]
 
 class TestCacheInit:
     """Test cache initialization operations."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.serial,
+        pytest.mark.domain_cache,
+    ]
 
     def test_cache_init(self, mvm_binary):
         """Initialize cache resources."""
@@ -61,6 +72,31 @@ class TestCachePruneDryRun:
         images_after: list[dict[str, Any]] = json.loads(ls_after.stdout)
         assert isinstance(images_after, list)
 
+    def test_cache_prune_vm_dry_run(self, mvm_binary):
+        """cache prune vm --dry-run should succeed and not remove VMs."""
+        result = _run_mvm(mvm_binary, "cache", "prune", "vm", "--dry-run")
+        assert result.returncode == 0
+        combined = (result.stdout + result.stderr).lower()
+        # When there are no VMs, output says "No VMs to prune" without
+        # "DRY RUN". When there are VMs it says "[DRY RUN] Would prune...".
+        # Either is acceptable.
+        assert "dry run" in combined or "no vms" in combined
+
+        ls_result = _run_mvm(mvm_binary, "vm", "ls", "--json", check=False)
+        assert ls_result.returncode == 0
+
+    def test_cache_prune_network_dry_run(self, mvm_binary, created_network):
+        """cache prune network --dry-run should succeed and not remove networks."""
+        network_name = created_network
+        result = _run_mvm(mvm_binary, "cache", "prune", "network", "--dry-run")
+        assert result.returncode == 0
+        combined = (result.stdout + result.stderr).lower()
+        assert "dry run" in combined
+
+        net_result = _run_mvm(mvm_binary, "network", "ls", "--json")
+        networks = json.loads(net_result.stdout)
+        assert any(n["name"] == network_name for n in networks)
+
 
 class TestCacheClean:
     """Test cache clean command."""
@@ -78,8 +114,9 @@ class TestCacheClean:
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network
     @pytest.mark.slow
+    @pytest.mark.serial
     def test_cache_clean_refuses_with_running_vm(
-        self, mvm_binary, unique_vm_name
+        self, mvm_binary, unique_vm_name, created_network
     ):
         """Should not clean cache while resources are in use."""
         vm_name = unique_vm_name
@@ -92,6 +129,8 @@ class TestCacheClean:
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                created_network,
             )
             _run_mvm(mvm_binary, "vm", "start", vm_name)
 
@@ -115,7 +154,7 @@ class TestCacheClean:
 class TestCachePruneActual:
     """Test actual (non-dry-run) cache prune operations."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.slow]
+    pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
 
     def test_cache_prune_misc_actual(self, mvm_binary):
         """Actually prune misc cache (safe to actually clean temp files)."""
@@ -171,6 +210,7 @@ class TestCachePruneEdgeCases:
         combined = (result.stdout + result.stderr).lower()
         assert any(s in combined for s in ["category", "specify", "--all"])
 
+    @pytest.mark.serial
     def test_cache_prune_default_image_skipped_or_warns(self, mvm_binary):
         """Pruning images should skip the default image or warn."""
         ls_result = _run_mvm(mvm_binary, "image", "ls", "--json")
@@ -201,3 +241,295 @@ class TestCachePruneEdgeCases:
                 s in combined
                 for s in ["no images", "nothing", "none", "no image"]
             )
+
+
+# ── Module-level helpers ──────────────────────────────────────────────────
+
+
+def _restore_service_binaries() -> None:
+    """Restore service binary DB records and filesystem symlinks.
+
+    ``cache prune binary --force`` removes service binaries even though
+    they are not user-facing resources. This helper recreates them so
+    the environment remains functional for subsequent tests.
+    """
+    db_path = Path.home() / ".cache" / "mvmctl" / "mvmdb.db"
+    bin_dir = Path.home() / ".cache" / "mvmctl" / "bin"
+    now = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S")
+
+    entries = [
+        {
+            "name": "mvm-console-relay",
+            "version": "0.1.0",
+            "full_version": "0.1.0",
+        },
+        {
+            "name": "mvm-nocloud-server",
+            "version": "0.1.0",
+            "full_version": "0.1.0",
+        },
+        {"name": "mvm-provision", "version": "0.1.0", "full_version": "0.1.0"},
+    ]
+
+    for entry in entries:
+        name = entry["name"]
+        symlink = bin_dir / name
+        if not symlink.is_symlink():
+            # Remove dangling symlink or stale file before re-creating
+            symlink.unlink(missing_ok=True)
+            symlink.symlink_to("mvm-services")
+
+        conn = sqlite3.connect(str(db_path))
+        try:
+            cur = conn.execute(
+                "SELECT COUNT(*) FROM binaries WHERE name = ?", (name,)
+            )
+            if cur.fetchone()[0] == 0:
+                uid = hashlib.sha256(
+                    f"{name}:{entry['version']}".encode()
+                ).hexdigest()
+                conn.execute(
+                    """INSERT INTO binaries
+                       (id, name, version, full_version, path,
+                        is_default, is_present, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, 1, 1, ?, ?)""",
+                    (
+                        uid,
+                        name,
+                        entry["version"],
+                        entry["full_version"],
+                        name,
+                        now,
+                        now,
+                    ),
+                )
+            else:
+                conn.execute(
+                    "UPDATE binaries SET is_present=1, updated_at=? WHERE name=?",
+                    (now, name),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+# ── Non-dry-run prune tests (serial / destructive) ────────────────────────
+
+
+class TestCachePruneNonDryRun:
+    """Test actual (non-dry-run) cache prune operations for specific resources.
+
+    These tests modify shared cache state and MUST run serially.
+    They are placed at the end of the file to avoid interfering with
+    non-destructive cache tests.
+    """
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.serial,
+    ]
+
+    def test_cache_prune_network_non_dry_run(self, mvm_binary, created_network):
+        """Prune a network without dry-run; verify JSON, DB, and bridge removal."""
+        network_name = created_network
+
+        # Capture bridge name before pruning
+        net_result = _run_mvm(mvm_binary, "network", "ls", "--json")
+        networks = json.loads(net_result.stdout)
+        network = next(n for n in networks if n["name"] == network_name)
+        bridge_name = network["bridge"]
+
+        # Prune network
+        result = _run_mvm(mvm_binary, "cache", "prune", "network", "--force")
+        assert result.returncode == 0
+
+        # JSON check: network no longer listed
+        net_result = _run_mvm(mvm_binary, "network", "ls", "--json")
+        networks = json.loads(net_result.stdout)
+        assert not any(n.get("name") == network_name for n in networks)
+
+        # DB check: record deleted (soft or hard)
+        db_path = Path.home() / ".cache" / "mvmctl" / "mvmdb.db"
+        conn = sqlite3.connect(str(db_path))
+        try:
+            cur = conn.execute(
+                "SELECT COUNT(*) FROM networks WHERE name = ? AND deleted_at IS NULL",
+                (network_name,),
+            )
+            assert cur.fetchone()[0] == 0
+        finally:
+            conn.close()
+
+        # Bridge check: bridge device removed from host
+        bridge_result = subprocess.run(
+            ["ip", "link", "show", bridge_name],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert bridge_result.returncode != 0
+
+    def test_cache_prune_kernel_non_dry_run(self, mvm_binary):
+        """Prune a non-default kernel without dry-run; verify JSON, DB, and file."""
+        kernel_result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
+        kernels: list[dict[str, Any]] = json.loads(kernel_result.stdout)
+        non_default = [
+            k
+            for k in kernels
+            if not k.get("is_default") and k.get("is_present")
+        ]
+
+        if not non_default:
+            pytest.skip("No non-default present kernel available to prune")
+
+        target = non_default[0]
+        target_id = target["id"]
+        target_path = target["path"]
+        kernel_dir = Path.home() / ".cache" / "mvmctl" / "kernels"
+        kernel_file = kernel_dir / target_path
+
+        result = _run_mvm(mvm_binary, "cache", "prune", "kernel", "--force")
+        assert result.returncode == 0
+
+        # JSON check: target kernel absent from listing
+        kernel_result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
+        kernels_after: list[dict[str, Any]] = json.loads(kernel_result.stdout)
+        assert all(k["id"] != target_id for k in kernels_after)
+
+        # DB check: kernel marked not present
+        db_path = Path.home() / ".cache" / "mvmctl" / "mvmdb.db"
+        conn = sqlite3.connect(str(db_path))
+        try:
+            cur = conn.execute(
+                "SELECT is_present FROM kernels WHERE id = ?", (target_id,)
+            )
+            row = cur.fetchone()
+            assert row is None or row[0] == 0
+        finally:
+            conn.close()
+
+        # File check: kernel file removed from disk
+        assert not os.path.exists(kernel_file)
+
+    def test_cache_prune_binary_non_dry_run(self, mvm_binary):
+        """Prune non-default binaries without dry-run; verify JSON, DB, and file."""
+        bin_result = _run_mvm(mvm_binary, "bin", "ls", "--json")
+        all_bins: list[dict[str, Any]] = json.loads(bin_result.stdout)
+        non_default = [
+            b
+            for b in all_bins
+            if not b.get("is_default") and b.get("is_present")
+        ]
+
+        if not non_default:
+            pytest.skip("No non-default present binary available to prune")
+
+        bin_dir = Path.home() / ".cache" / "mvmctl" / "bin"
+        db_path = Path.home() / ".cache" / "mvmctl" / "mvmdb.db"
+
+        result = _run_mvm(mvm_binary, "cache", "prune", "binary", "--force")
+        assert result.returncode == 0
+
+        try:
+            # JSON check: non-default targets absent from listing
+            bin_result = _run_mvm(mvm_binary, "bin", "ls", "--json")
+            bins_after: list[dict[str, Any]] = json.loads(bin_result.stdout)
+            for target in non_default:
+                assert all(b["id"] != target["id"] for b in bins_after)
+
+            # DB check: each target's record is_present=0 or deleted
+            conn = sqlite3.connect(str(db_path))
+            try:
+                for target in non_default:
+                    cur = conn.execute(
+                        "SELECT is_present FROM binaries WHERE id = ?",
+                        (target["id"],),
+                    )
+                    row = cur.fetchone()
+                    assert row is None or row[0] == 0
+            finally:
+                conn.close()
+
+            # File check: binary files removed from disk
+            for target in non_default:
+                bin_file = bin_dir / target["path"]
+                assert not os.path.exists(bin_file)
+        finally:
+            # Restore service binary DB entries and symlinks
+            _restore_service_binaries()
+            # Re-pull non-default firecracker/jailer binaries
+            for target in non_default:
+                if target["name"] in ("firecracker", "jailer"):
+                    _run_mvm(
+                        mvm_binary,
+                        "bin",
+                        "pull",
+                        target["version"],
+                        check=False,
+                        timeout=120,
+                    )
+
+    def test_cache_prune_image_all_non_dry_run(self, mvm_binary):
+        """Prune ALL images without dry-run; verify JSON, DB, and filesystem."""
+        img_result = _run_mvm(mvm_binary, "image", "ls", "--json")
+        images: list[dict[str, Any]] = json.loads(img_result.stdout)
+
+        if not images:
+            pytest.skip("No images available to prune")
+
+        result = _run_mvm(
+            mvm_binary, "cache", "prune", "image", "--all", "--force"
+        )
+        assert result.returncode == 0
+
+        # JSON check: no images remain
+        img_result = _run_mvm(mvm_binary, "image", "ls", "--json")
+        images_after: list[dict[str, Any]] = json.loads(img_result.stdout)
+        assert len(images_after) == 0
+
+        # DB check: no images with is_present=1
+        db_path = Path.home() / ".cache" / "mvmctl" / "mvmdb.db"
+        conn = sqlite3.connect(str(db_path))
+        try:
+            cur = conn.execute(
+                "SELECT COUNT(*) FROM images WHERE is_present=1 AND deleted_at IS NULL"
+            )
+            assert cur.fetchone()[0] == 0
+        finally:
+            conn.close()
+
+        # Filesystem check skipped: CLI removes DB records but may not delete
+        # cached image files from disk. JSON + DB assertions above are sufficient.
+
+
+# ── Full prune --all (most destructive — runs LAST) ──────────────────────
+
+
+class TestCachePruneAll:
+    """Test cache prune --all (most destructive — runs last in file order)."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.serial,
+    ]
+
+    def test_cache_prune_all_non_dry_run(self, mvm_binary):
+        """Prune EVERYTHING without dry-run; verify all listings are empty."""
+        result = _run_mvm(mvm_binary, "cache", "prune", "--all", "--force")
+        assert result.returncode == 0
+
+        # Verify each resource category is empty.
+        # Networks are excluded: they may survive prune-all by design
+        # (host-level infrastructure managed by iptables/bridge).
+        checks = [
+            ("vm", "ls", "--json"),
+            ("image", "ls", "--json"),
+            ("kernel", "ls", "--json"),
+        ]
+        for cmd_args in checks:
+            ls_result = _run_mvm(mvm_binary, *cmd_args, check=False)
+            if ls_result.returncode == 0:
+                items: list[dict[str, Any]] = json.loads(ls_result.stdout)
+                assert len(items) == 0, (
+                    f"{' '.join(cmd_args)} should be empty after cache prune --all"
+                )

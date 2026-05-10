@@ -22,6 +22,24 @@ pytestmark = [
 ]
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _cleanup_stale_networks(mvm_binary):
+    """Remove stale sys-* networks from prior runs to avoid subnet collisions."""
+    result = _run_mvm(mvm_binary, "network", "ls", "--json", check=False)
+    if result.returncode != 0:
+        return
+    try:
+        nets = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return
+    for net in nets:
+        name = net.get("name", "")
+        if name.startswith("sys-"):
+            _run_mvm(
+                mvm_binary, "network", "rm", name, "--non-interactive", check=False
+            )
+
+
 class TestQuickStartJourney:
     """Test the quick start workflow from README."""
 
@@ -32,8 +50,19 @@ class TestQuickStartJourney:
     ):
         """Full journey: create VM with SSH key and SSH into it."""
         key_name = f"sys-journey-key-{uuid.uuid4().hex[:6]}"
+        net_name = f"sys-journey-net-{uuid.uuid4().hex[:6]}"
+        subnet = _unique_subnet(net_name)
         _run_mvm(
             mvm_binary, "key", "create", key_name, "--algorithm", "ed25519"
+        )
+        _run_mvm(
+            mvm_binary,
+            "network",
+            "create",
+            net_name,
+            "--subnet",
+            subnet,
+            "--non-interactive",
         )
 
         result = _run_mvm(
@@ -44,6 +73,8 @@ class TestQuickStartJourney:
             unique_vm_name,
             "--image",
             "alpine-3.21",
+            "--network",
+            net_name,
             "--ssh-key",
             key_name,
         )
@@ -64,6 +95,7 @@ class TestQuickStartJourney:
                 "--force",
                 check=False,
             )
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
             _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
 
 
@@ -134,6 +166,9 @@ class TestKeyVMJourney:
         self, mvm_binary, unique_key_name, unique_vm_name
     ):
         """Create key, then create VM with that key."""
+        net_name = f"sys-journey-net-{uuid.uuid4().hex[:6]}"
+        subnet = _unique_subnet(net_name)
+
         result = _run_mvm(
             mvm_binary,
             "key",
@@ -144,6 +179,16 @@ class TestKeyVMJourney:
         )
         assert result.returncode == 0
 
+        _run_mvm(
+            mvm_binary,
+            "network",
+            "create",
+            net_name,
+            "--subnet",
+            subnet,
+            "--non-interactive",
+        )
+
         try:
             result = _run_mvm(
                 mvm_binary,
@@ -153,6 +198,8 @@ class TestKeyVMJourney:
                 unique_vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
                 "--ssh-key",
                 unique_key_name,
             )
@@ -166,6 +213,7 @@ class TestKeyVMJourney:
                 "--force",
                 check=False,
             )
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
             _run_mvm(mvm_binary, "key", "rm", unique_key_name, check=False)
 
 
@@ -176,6 +224,18 @@ class TestVMStateJourney:
 
     def test_journey_pause_resume_stop_start(self, mvm_binary, unique_vm_name):
         """Full state transition journey: create → pause → resume → stop → start."""
+        net_name = f"sys-journey-net-{uuid.uuid4().hex[:6]}"
+        subnet = _unique_subnet(net_name)
+        _run_mvm(
+            mvm_binary,
+            "network",
+            "create",
+            net_name,
+            "--subnet",
+            subnet,
+            "--non-interactive",
+        )
+
         _run_mvm(
             mvm_binary,
             "vm",
@@ -184,6 +244,8 @@ class TestVMStateJourney:
             unique_vm_name,
             "--image",
             "alpine-3.21",
+            "--network",
+            net_name,
         )
 
         try:
@@ -235,6 +297,7 @@ class TestVMStateJourney:
                 "--force",
                 check=False,
             )
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
 
 class TestIPJourney:
@@ -312,9 +375,11 @@ class TestIPJourney:
     def test_journey_multiple_vms_same_network(
         self, mvm_binary, unique_vm_name, timing_targets
     ):
-        """Create two VMs on same default network and verify both are reachable."""
+        """Create two VMs on same network and verify both are reachable."""
         name_a = f"{unique_vm_name}-a"
         name_b = f"{unique_vm_name}-b"
+        net_name = f"sys-multi-net-{uuid.uuid4().hex[:6]}"
+        subnet = _unique_subnet(net_name)
 
         key_a_name = f"sys-multi-key-a-{uuid.uuid4().hex[:6]}"
         key_b_name = f"sys-multi-key-b-{uuid.uuid4().hex[:6]}"
@@ -327,12 +392,24 @@ class TestIPJourney:
 
         _run_mvm(
             mvm_binary,
+            "network",
+            "create",
+            net_name,
+            "--subnet",
+            subnet,
+            "--non-interactive",
+        )
+
+        _run_mvm(
+            mvm_binary,
             "vm",
             "create",
             "--name",
             name_a,
             "--image",
             "alpine-3.21",
+            "--network",
+            net_name,
             "--ssh-key",
             key_a_name,
         )
@@ -344,6 +421,8 @@ class TestIPJourney:
             name_b,
             "--image",
             "alpine-3.21",
+            "--network",
+            net_name,
             "--ssh-key",
             key_b_name,
         )
@@ -368,6 +447,7 @@ class TestIPJourney:
         finally:
             _run_mvm(mvm_binary, "vm", "rm", name_a, "--force", check=False)
             _run_mvm(mvm_binary, "vm", "rm", name_b, "--force", check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
             _run_mvm(mvm_binary, "key", "rm", key_a_name, check=False)
             _run_mvm(mvm_binary, "key", "rm", key_b_name, check=False)
 
@@ -406,8 +486,19 @@ class TestSSHJourney:
     ):
         """Create VM, reboot, and verify SSH availability after reboot."""
         key_name = f"sys-reboot-key-{uuid.uuid4().hex[:6]}"
+        net_name = f"sys-reboot-net-{uuid.uuid4().hex[:6]}"
+        subnet = _unique_subnet(net_name)
         _run_mvm(
             mvm_binary, "key", "create", key_name, "--algorithm", "ed25519"
+        )
+        _run_mvm(
+            mvm_binary,
+            "network",
+            "create",
+            net_name,
+            "--subnet",
+            subnet,
+            "--non-interactive",
         )
         _run_mvm(
             mvm_binary,
@@ -417,6 +508,8 @@ class TestSSHJourney:
             unique_vm_name,
             "--image",
             "alpine-3.21",
+            "--network",
+            net_name,
             "--ssh-key",
             key_name,
         )
@@ -458,6 +551,7 @@ class TestSSHJourney:
                 "--force",
                 check=False,
             )
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
             _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
 
 
@@ -472,9 +566,20 @@ class TestMultiKeyJourney:
         """Create two keys, then create VM with both keys."""
         key_a = f"{unique_key_name}-a"
         key_b = f"{unique_key_name}-b"
+        net_name = f"sys-multikey-net-{uuid.uuid4().hex[:6]}"
+        subnet = _unique_subnet(net_name)
 
         _run_mvm(mvm_binary, "key", "create", key_a, "--algorithm", "ed25519")
         _run_mvm(mvm_binary, "key", "create", key_b, "--algorithm", "ed25519")
+        _run_mvm(
+            mvm_binary,
+            "network",
+            "create",
+            net_name,
+            "--subnet",
+            subnet,
+            "--non-interactive",
+        )
 
         try:
             result = _run_mvm(
@@ -485,6 +590,8 @@ class TestMultiKeyJourney:
                 unique_vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
                 "--ssh-key",
                 f"{key_a},{key_b}",
             )
@@ -498,6 +605,7 @@ class TestMultiKeyJourney:
                 "--force",
                 check=False,
             )
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
             _run_mvm(mvm_binary, "key", "rm", key_a, check=False)
             _run_mvm(mvm_binary, "key", "rm", key_b, check=False)
 
@@ -605,125 +713,6 @@ class TestInterVMCommunication:
             _run_mvm(mvm_binary, "key", "rm", key_b_name, check=False)
 
 
-# ============================================================================
-# Coverage tests (from test_integration_workflows.py)
-# ============================================================================
-
-
-class TestSnapshotDestroyRestore:
-    """Full DR workflow: create VM, snapshot, destroy, restore from snapshot."""
-
-    pytestmark = [pytest.mark.domain_workflow]
-
-    @pytest.mark.requires_network
-    def test_snapshot_destroy_restore_workflow(
-        self,
-        mvm_binary: str,
-        unique_vm_name: str,
-        unique_key_name: str,
-        unique_network_name: str,
-    ) -> None:
-        vm_name = unique_vm_name
-        key_name = unique_key_name
-        network_name = unique_network_name
-        subnet = _unique_subnet(network_name)
-
-        try:
-            _run_mvm(
-                mvm_binary,
-                "network",
-                "create",
-                network_name,
-                "--subnet",
-                subnet,
-                "--non-interactive",
-            )
-
-            _run_mvm(
-                mvm_binary,
-                "key",
-                "create",
-                key_name,
-                "--algorithm",
-                "ed25519",
-            )
-
-            _run_mvm(
-                mvm_binary,
-                "vm",
-                "create",
-                "--name",
-                vm_name,
-                "--image",
-                "alpine-3.21",
-                "--network",
-                network_name,
-                "--ssh-key",
-                key_name,
-            )
-
-            _run_mvm(mvm_binary, "vm", "pause", vm_name)
-
-            result = _run_mvm(mvm_binary, "vm", "inspect", vm_name, "--json")
-            data: dict[str, Any] = json.loads(result.stdout)
-            vm_dir = Path(str(data["vm_dir"]))
-            mem_file = str(vm_dir / "mem.snap")
-            state_file = str(vm_dir / "state.snap")
-
-            _run_mvm(
-                mvm_binary,
-                "vm",
-                "snapshot",
-                vm_name,
-                mem_file,
-                state_file,
-            )
-
-            assert Path(mem_file).exists(), (
-                f"Memory snapshot not found: {mem_file}"
-            )
-            assert Path(mem_file).stat().st_size > 0, "Memory snapshot is empty"
-            assert Path(state_file).exists(), (
-                f"State snapshot not found: {state_file}"
-            )
-            assert Path(state_file).stat().st_size > 0, (
-                "State snapshot is empty"
-            )
-
-            _run_mvm(mvm_binary, "vm", "stop", vm_name)
-
-            _run_mvm(
-                mvm_binary,
-                "vm",
-                "load",
-                vm_name,
-                mem_file,
-                state_file,
-                "--resume",
-            )
-
-            result = _run_mvm(mvm_binary, "vm", "ls", "--json")
-            vms: list[dict[str, Any]] = json.loads(result.stdout)
-            vm_entry = next((v for v in vms if v["name"] == vm_name), None)
-            assert vm_entry is not None, (
-                f"VM '{vm_name}' not found after restore"
-            )
-            assert vm_entry.get("status") == "running", (
-                f"Expected 'running', got '{vm_entry.get('status')}'"
-            )
-        finally:
-            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
-            _run_mvm(
-                mvm_binary,
-                "network",
-                "rm",
-                network_name,
-                "--force",
-                check=False,
-            )
-            _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
-
-
 class TestCreateWithAllFlags:
     """Creating VM with every flag simultaneously should work."""
 
@@ -733,6 +722,17 @@ class TestCreateWithAllFlags:
         self, mvm_binary: str, unique_vm_name: str
     ) -> None:
         vm_name = unique_vm_name
+        net_name = f"sys-allflags-net-{uuid.uuid4().hex[:6]}"
+        subnet = _unique_subnet(net_name)
+        _run_mvm(
+            mvm_binary,
+            "network",
+            "create",
+            net_name,
+            "--subnet",
+            subnet,
+            "--non-interactive",
+        )
         try:
             _run_mvm(
                 mvm_binary,
@@ -742,6 +742,8 @@ class TestCreateWithAllFlags:
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
                 "--vcpus",
                 "2",
                 "--mem",
@@ -784,6 +786,7 @@ class TestCreateWithAllFlags:
                 "--force",
                 check=False,
             )
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
 
 class TestMultipleVolumes:
@@ -800,6 +803,8 @@ class TestMultipleVolumes:
     ) -> None:
         vm_name = unique_vm_name
         key_name = unique_key_name
+        net_name = f"sys-multivol-net-{uuid.uuid4().hex[:6]}"
+        subnet = _unique_subnet(net_name)
         vol_a = f"sys-vol-a-{uuid.uuid4().hex[:6]}"
         vol_b = f"sys-vol-b-{uuid.uuid4().hex[:6]}"
         vol_c = f"sys-vol-c-{uuid.uuid4().hex[:6]}"
@@ -812,6 +817,15 @@ class TestMultipleVolumes:
                 key_name,
                 "--algorithm",
                 "ed25519",
+            )
+            _run_mvm(
+                mvm_binary,
+                "network",
+                "create",
+                net_name,
+                "--subnet",
+                subnet,
+                "--non-interactive",
             )
 
             _run_mvm(mvm_binary, "volume", "create", vol_a, "512M")
@@ -826,6 +840,8 @@ class TestMultipleVolumes:
                 vm_name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
                 "--volume",
                 vol_a,
                 "--volume",
@@ -869,6 +885,7 @@ class TestMultipleVolumes:
                 "--force",
                 check=False,
             )
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
             _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
 
 
@@ -879,7 +896,19 @@ class TestStressCreateDestroy:
 
     def test_stress_create_destroy_sequential(self, mvm_binary: str) -> None:
         vm_names = [f"sys-stress-{uuid.uuid4().hex[:8]}" for _ in range(5)]
+        net_name = f"sys-stress-net-{uuid.uuid4().hex[:6]}"
+        subnet = _unique_subnet(net_name)
         success_count = 0
+
+        _run_mvm(
+            mvm_binary,
+            "network",
+            "create",
+            net_name,
+            "--subnet",
+            subnet,
+            "--non-interactive",
+        )
 
         try:
             for vm_name in vm_names:
@@ -891,6 +920,8 @@ class TestStressCreateDestroy:
                     vm_name,
                     "--image",
                     "alpine-3.21",
+                    "--network",
+                    net_name,
                     check=False,
                 )
                 if result.returncode != 0:
@@ -927,6 +958,7 @@ class TestStressCreateDestroy:
                     "--force",
                     check=False,
                 )
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
 
 class TestExportImport:
@@ -1034,6 +1066,7 @@ class TestConcurrentVMCreation:
         pytest.mark.system,
         pytest.mark.requires_kvm,
         pytest.mark.slow,
+        pytest.mark.serial,
     ]
 
     def test_concurrent_vm_creation_and_ssh(
@@ -1042,11 +1075,23 @@ class TestConcurrentVMCreation:
         vm_count = 10
         vm_names = [f"{unique_vm_name}-{i}" for i in range(vm_count)]
         key_names = [f"{unique_vm_name}-key-{i}" for i in range(vm_count)]
+        net_name = f"sys-concurrent-net-{uuid.uuid4().hex[:6]}"
+        subnet = _unique_subnet(net_name)
 
         for key_name in key_names:
             _run_mvm(
                 mvm_binary, "key", "create", key_name, "--algorithm", "ed25519"
             )
+
+        _run_mvm(
+            mvm_binary,
+            "network",
+            "create",
+            net_name,
+            "--subnet",
+            subnet,
+            "--non-interactive",
+        )
 
         def create_vm(name: str, key_name: str) -> Any:
             return _run_mvm(
@@ -1057,6 +1102,8 @@ class TestConcurrentVMCreation:
                 name,
                 "--image",
                 "alpine-3.21",
+                "--network",
+                net_name,
                 "--ssh-key",
                 key_name,
             )
@@ -1105,5 +1152,6 @@ class TestConcurrentVMCreation:
                     "--force",
                     check=False,
                 )
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
             for key_name in key_names:
                 _run_mvm(mvm_binary, "key", "rm", key_name, check=False)

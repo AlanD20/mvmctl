@@ -66,6 +66,7 @@ class TestKeyLifecycle:
         data = json.loads(result.stdout)
         assert any(k["name"] == created_key for k in data)
 
+    @pytest.mark.serial
     def test_key_set_default(self, mvm_binary, created_key):
         """Set key as default and verify is_default in ls --json."""
         result = _run_mvm(mvm_binary, "key", "default", created_key)
@@ -177,6 +178,7 @@ class TestKeyLifecycle:
         data = json.loads(result.stdout)
         assert "name" in data
 
+    @pytest.mark.serial
     def test_key_set_default_clear(self, mvm_binary, created_key):
         """Set key as default then clear the default."""
         _run_mvm(mvm_binary, "key", "default", created_key)
@@ -231,6 +233,7 @@ class TestKeyLifecycle:
         finally:
             _run_mvm(mvm_binary, "key", "rm", unique_key_name, check=False)
 
+    @pytest.mark.serial
     def test_remove_default_key_when_only_key(
         self, mvm_binary, unique_key_name
     ):
@@ -254,6 +257,29 @@ class TestKeyLifecycle:
             assert unique_key_name not in names
         finally:
             _run_mvm(mvm_binary, "key", "rm", unique_key_name, check=False)
+
+    def test_key_rm_multiple(self, mvm_binary, unique_key_name):
+        """Remove two keys at once and verify both are gone via ls --json."""
+        key1 = f"{unique_key_name}-multi1"
+        key2 = f"{unique_key_name}-multi2"
+        try:
+            _run_mvm(
+                mvm_binary, "key", "create", key1, "--algorithm", "ed25519"
+            )
+            _run_mvm(
+                mvm_binary, "key", "create", key2, "--algorithm", "ed25519"
+            )
+
+            result = _run_mvm(mvm_binary, "key", "rm", key1, key2)
+            assert result.returncode == 0
+
+            result = _run_mvm(mvm_binary, "key", "ls", "--json")
+            data = json.loads(result.stdout)
+            assert not any(k["name"] == key1 for k in data)
+            assert not any(k["name"] == key2 for k in data)
+        finally:
+            _run_mvm(mvm_binary, "key", "rm", key1, check=False)
+            _run_mvm(mvm_binary, "key", "rm", key2, check=False)
 
 
 class TestKeyCreateAdvanced:
@@ -328,6 +354,7 @@ class TestKeyCreateAdvanced:
         finally:
             _run_mvm(mvm_binary, "key", "rm", unique_key_name, check=False)
 
+    @pytest.mark.serial
     def test_key_create_with_set_default(self, mvm_binary, unique_key_name):
         """Create key with --set-default and verify is_default in ls --json."""
         result = _run_mvm(
@@ -488,10 +515,12 @@ class TestKeyRunningVMDependency:
         mvm_binary,
         unique_vm_name,
         unique_key_name,
+        created_network,
     ):
         """SSH key used by a running VM — documents current behavior."""
         vm_name = unique_vm_name
         key_name = unique_key_name
+        network_name = created_network
 
         try:
             _run_mvm(
@@ -502,17 +531,27 @@ class TestKeyRunningVMDependency:
                 "--algorithm",
                 "ed25519",
             )
-            _run_mvm(
-                mvm_binary,
-                "vm",
-                "create",
-                "--name",
-                vm_name,
-                "--image",
-                "alpine-3.21",
-                "--ssh-key",
-                key_name,
-            )
+            try:
+                _run_mvm(
+                    mvm_binary,
+                    "vm",
+                    "create",
+                    "--name",
+                    vm_name,
+                    "--image",
+                    "alpine-3.21",
+                    "--network",
+                    network_name,
+                    "--ssh-key",
+                    key_name,
+                )
+            except RuntimeError as e:
+                if "No provisioner available" in str(e):
+                    pytest.skip(
+                        "No loop-mount provisioner available "
+                        "(mvm-services not set up)"
+                    )
+                raise
             _run_mvm(mvm_binary, "vm", "start", vm_name)
 
             _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
@@ -530,11 +569,17 @@ class TestKeyRunningVMDependency:
 class TestKeyDefaults:
     """Test SSH key default behavior — multiple defaults are supported."""
 
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.serial,
+        pytest.mark.domain_key,
+    ]
+
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network
     @pytest.mark.slow
     def test_multiple_default_ssh_keys(
-        self, mvm_binary, unique_vm_name, unique_key_name
+        self, mvm_binary, unique_vm_name, unique_key_name, created_network
     ) -> None:
         # Rationale: Needs a real VM to verify both default keys appear in
         # the VM's ssh_keys list. The SSH key domain uniquely allows
@@ -542,6 +587,7 @@ class TestKeyDefaults:
         key1 = f"{unique_key_name}-1"
         key2 = f"{unique_key_name}-2"
         vm_name = unique_vm_name
+        network_name = created_network
 
         try:
             _run_mvm(
@@ -571,17 +617,27 @@ class TestKeyDefaults:
             assert k2.get("is_default"), f"'{key2}' should be default"
             key_ids = [k1["id"], k2["id"]]
 
-            _run_mvm(
-                mvm_binary,
-                "vm",
-                "create",
-                "--name",
-                vm_name,
-                "--image",
-                "alpine-3.21",
-                "--ssh-key",
-                f"{key1},{key2}",
-            )
+            try:
+                _run_mvm(
+                    mvm_binary,
+                    "vm",
+                    "create",
+                    "--name",
+                    vm_name,
+                    "--image",
+                    "alpine-3.21",
+                    "--network",
+                    network_name,
+                    "--ssh-key",
+                    f"{key1},{key2}",
+                )
+            except RuntimeError as e:
+                if "No provisioner available" in str(e):
+                    pytest.skip(
+                        "No loop-mount provisioner available "
+                        "(mvm-services not set up)"
+                    )
+                raise
 
             result = _run_mvm(mvm_binary, "vm", "inspect", vm_name, "--json")
             data = json.loads(result.stdout)
