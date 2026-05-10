@@ -108,6 +108,7 @@ def is_compiled_mode() -> bool:
     # Nuitka sets __compiled__ in builtins for compiled code
     try:
         import __builtins__
+
         if hasattr(__builtins__, "__compiled__"):
             return True
     except ImportError:

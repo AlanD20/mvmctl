@@ -95,9 +95,11 @@ class HostOperation:
         # --- Extract embedded service binaries (compiled mode only) ---
         try:
             from mvmctl.constants import is_compiled_mode
+
             if is_compiled_mode():
                 from mvmctl.core.binary._repository import BinaryRepository
                 from mvmctl.core.binary._service import BinaryService
+
                 repo = BinaryRepository(Database())
                 BinaryService(repo).extract_service_binaries()
         except Exception:

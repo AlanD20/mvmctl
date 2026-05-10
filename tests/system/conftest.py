@@ -325,8 +325,6 @@ def created_vm(
     _run_mvm(mvm_binary, "key", "create", key_name, "--algorithm", "ed25519")
     _run_mvm(mvm_binary, "key", "default", key_name, check=False)
 
-    # Create VM with SSH key injected (default cloud-init mode is fine --
-    # the provisioner handles SSH key injection directly via the rootfs)
     _run_mvm(
         mvm_binary,
         "vm",
@@ -335,6 +333,8 @@ def created_vm(
         unique_vm_name,
         "--image",
         "alpine-3.21",
+        "--network",
+        "net",
         "--ssh-key",
         key_name,
     )

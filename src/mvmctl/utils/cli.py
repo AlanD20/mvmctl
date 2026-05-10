@@ -74,7 +74,9 @@ def handle_errors(func: F) -> F:
                     print_info(f"  - {suggestion}")
             raise typer.Exit(code=1) from e
         except MVMError as e:
-            logger.debug("%s in CLI command: %s", e.__class__.__name__, e, exc_info=True)
+            logger.debug(
+                "%s in CLI command: %s", e.__class__.__name__, e, exc_info=True
+            )
             _print_error(str(e))
             raise typer.Exit(code=1) from e
         except sqlite3.OperationalError as e:

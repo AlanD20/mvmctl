@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import subprocess
+from typing import Any
 
 import pytest
 
-from tests.system.conftest import _run_mvm
+from tests.system.conftest import _run_mvm, _unique_subnet
 
 pytestmark = [pytest.mark.system, pytest.mark.domain_image]
 
@@ -65,9 +66,27 @@ class TestImageList:
         result = _run_mvm(mvm_binary, "image", "ls", "--remote")
         assert result.returncode == 0
 
+    def test_image_ls_remote_works(self, mvm_binary):
+        """Listing remote images should return a non-empty list."""
+        result = _run_mvm(
+            mvm_binary,
+            "image",
+            "ls",
+            "--remote",
+            "--json",
+            timeout=30,
+            check=False,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            pytest.skip("Remote listing not available or returned empty")
+        try:
+            data = json.loads(result.stdout)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            pytest.skip("Remote listing returned non-JSON output")
+        assert len(data) > 0, "Expected at least one remote image"
+
     def test_image_inspect(self, mvm_binary):
         """Inspect a cached image by ID prefix."""
-        # Get first present cached image
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         images = [i for i in json.loads(result.stdout) if i.get("is_present")]
         if not images:
@@ -95,8 +114,6 @@ class TestImageDefaults:
 
     def test_image_set_default(self, mvm_binary):
         """Set image as default."""
-
-        # Use --json to get the actual image ID, then set by ID
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         if result.returncode != 0:
             pytest.skip("Failed to list images")
@@ -117,9 +134,26 @@ class TestImageDefaults:
             )
         assert "default" in result.stdout.lower()
 
+    def test_set_default_nonexistent_image_fails(self, mvm_binary):
+        """Setting default to a nonexistent image slug should fail."""
+        result = _run_mvm(
+            mvm_binary,
+            "image",
+            "default",
+            "totally-nonexistent-image",
+            check=False,
+        )
+        assert result.returncode != 0
+        assert result.stderr, (
+            f"Expected stderr with error message, got stdout={result.stdout}"
+        )
+
+
+class TestImageWarm:
+    """Test image warm operations."""
+
     def test_image_warm(self, mvm_binary):
         """Pre-decompress image to ready pool for fast VM creation."""
-
         result = _run_mvm(
             mvm_binary,
             "image",
@@ -132,6 +166,20 @@ class TestImageDefaults:
         assert (
             "warmed" in result.stdout.lower()
             or "ready" in result.stdout.lower()
+        )
+
+    def test_warm_nonexistent_image_fails(self, mvm_binary):
+        """Warming a nonexistent image slug should fail with clear error."""
+        result = _run_mvm(
+            mvm_binary,
+            "image",
+            "warm",
+            "totally-nonexistent-image",
+            check=False,
+        )
+        assert result.returncode != 0
+        assert result.stderr, (
+            f"Expected stderr with error message, got stdout={result.stdout}"
         )
 
 
@@ -150,7 +198,6 @@ class TestImageImport:
         """Import a local image file."""
         import shutil
 
-        # Get cached image info — store the full ID to avoid races
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         images = json.loads(result.stdout)
         alpine_images = [
@@ -162,12 +209,10 @@ class TestImageImport:
         target = alpine_images[0]
         target_id = target["id"]
 
-        # Inspect using full ID (avoids prefix lookup races)
         result = _run_mvm(
             mvm_binary, "image", "inspect", target_id, "--json", check=False
         )
         if result.returncode != 0:
-            # Image was removed by a concurrent test — skip rather than fail
             pytest.skip(f"Image '{target_id[:8]}' was removed before inspect")
 
         data = json.loads(result.stdout)
@@ -175,15 +220,12 @@ class TestImageImport:
         if not source_path:
             pytest.skip("Image path not available")
 
-        # The path from inspect is relative — resolve against images dir
         resolved_source = system_cache_dir / "images" / source_path
         if not resolved_source.exists():
             pytest.skip(f"Image file not found: {resolved_source}")
 
-        # Copy to temp location
         temp_path = tmp_path / "alpine-import.raw"
 
-        # The cached image may be compressed (.zst) — decompress if needed
         if resolved_source.suffix == ".zst":
             import subprocess as _subprocess
 
@@ -207,7 +249,6 @@ class TestImageImport:
 
         imported_prefix = None
         try:
-            # Import the decompressed image
             result = _run_mvm(
                 mvm_binary,
                 "image",
@@ -220,8 +261,6 @@ class TestImageImport:
             )
             assert result.returncode == 0
 
-            # Verify imported image appears (search by os_name which is
-            # set to the display name passed to image import)
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
             imported = [
@@ -238,6 +277,23 @@ class TestImageImport:
                     imported_prefix,
                     check=False,
                 )
+
+    def test_import_from_nonexistent_path_fails(self, mvm_binary):
+        """Import from a path that does not exist should fail with clear error."""
+        result = _run_mvm(
+            mvm_binary,
+            "image",
+            "import",
+            "/tmp/nonexistent-path-that-does-not-exist.qcow2",
+            "--os-slug",
+            "test-fail",
+            check=False,
+        )
+        assert result.returncode != 0
+        combined = (result.stdout + result.stderr).lower()
+        assert any(s in combined for s in ["not found", "no such", "exist"]), (
+            f"Expected error about nonexistent path, got: {result.stderr}"
+        )
 
 
 class TestImageInspectTree:
@@ -263,7 +319,7 @@ class TestImageInspectTree:
 
 
 class TestImagePullAdvanced:
-    """Test advanced image pull operations."""
+    """Test advanced image pull operations — edge cases and state verification."""
 
     pytestmark = [
         pytest.mark.system,
@@ -271,73 +327,141 @@ class TestImagePullAdvanced:
         pytest.mark.domain_image,
     ]
 
-    def test_image_pull_force(self, mvm_binary):
-        """Pull an already-cached image with --force, should re-download."""
-        # Ensure image is cached first
-        try:
-            _run_mvm(
-                mvm_binary,
-                "image",
-                "pull",
-                "alpine-3.21",
-                check=False,
-                timeout=60,
-            )
-        except subprocess.TimeoutExpired:
-            pytest.skip("Initial image pull timed out (>60s download)")
+    def test_pull_cached_image_with_default_sets_default(
+        self, mvm_binary: str
+    ) -> None:
+        """Pull already-cached alpine-3.21 with --default must set it as sole default."""
+        result = _run_mvm(mvm_binary, "image", "ls", "--json", check=False)
+        if result.returncode != 0 or not result.stdout.strip():
+            pytest.skip("Cannot list images")
+        images: list[dict[str, Any]] = json.loads(result.stdout)
+        alpine_present = any(
+            i.get("os_slug") == "alpine-3.21" and i.get("is_present")
+            for i in images
+        )
+        if not alpine_present:
+            pytest.skip("alpine-3.21 not cached")
 
-        # Force pull
+        original_defaults = [i for i in images if i.get("is_default")]
+        original_default_id: str | None = (
+            original_defaults[0]["id"] if original_defaults else None
+        )
+
         try:
             result = _run_mvm(
                 mvm_binary,
                 "image",
                 "pull",
                 "alpine-3.21",
-                "--force",
+                "--default",
                 timeout=60,
                 check=False,
             )
             if result.returncode != 0:
-                pytest.skip(f"Force pull failed: {result.stderr.strip()}")
-            assert "pulled successfully" in result.stdout.lower()
-        except subprocess.TimeoutExpired:
-            pytest.skip("Force pull timed out (>60s download)")
+                pytest.skip(
+                    f"Pull with --default failed: {result.stderr.strip()}"
+                )
 
-    def test_image_pull_set_default(self, mvm_binary):
-        """Pull an image and set it as default in one command."""
-        # Pull previous default info so we can restore later if needed
+            result = _run_mvm(mvm_binary, "image", "ls", "--json")
+            images_after: list[dict[str, Any]] = json.loads(result.stdout)
+            defaults = [i for i in images_after if i.get("is_default")]
+            assert len(defaults) == 1, (
+                f"Expected exactly 1 default image, got {len(defaults)}"
+            )
+            assert defaults[0]["os_slug"] == "alpine-3.21", (
+                f"Expected alpine-3.21 as default, got {defaults[0].get('os_slug')}"
+            )
+        finally:
+            if original_default_id:
+                _run_mvm(
+                    mvm_binary,
+                    "image",
+                    "default",
+                    original_default_id[:6],
+                    check=False,
+                )
+
+    def test_pull_cached_image_with_force_redownloads(
+        self, mvm_binary: str
+    ) -> None:
+        """Pull already-cached alpine-3.21 with --force should re-download."""
         result = _run_mvm(mvm_binary, "image", "ls", "--json", check=False)
-        previous_default = None
-        if result.returncode == 0:
-            images = json.loads(result.stdout)
-            defaults = [i for i in images if i.get("is_default")]
-            if defaults:
-                previous_default = defaults[0]["id"]
+        if result.returncode != 0 or not result.stdout.strip():
+            pytest.skip("Cannot list images")
+        images: list[dict[str, Any]] = json.loads(result.stdout)
+        alpine_present = any(
+            i.get("os_slug") == "alpine-3.21" and i.get("is_present")
+            for i in images
+        )
+        if not alpine_present:
+            pytest.skip("alpine-3.21 not cached")
 
         result = _run_mvm(
             mvm_binary,
             "image",
             "pull",
             "alpine-3.21",
-            "--default",
+            "--force",
             timeout=60,
             check=False,
         )
         if result.returncode != 0:
-            pytest.skip(
-                f"Pull with --set-default failed: {result.stderr.strip()}"
-            )
-        assert "default" in result.stdout.lower()
+            pytest.skip(f"Force pull failed: {result.stderr.strip()}")
 
-        # Restore previous default if we had one
-        if previous_default:
-            _run_mvm(
-                mvm_binary,
-                "image",
-                "default",
-                previous_default,
-                check=False,
-            )
+        assert (
+            "pulled" in result.stdout.lower()
+            or "success" in result.stdout.lower()
+        ), f"Expected pull success message, got: {result.stdout}"
+
+        result = _run_mvm(mvm_binary, "image", "ls", "--json")
+        images_after: list[dict[str, Any]] = json.loads(result.stdout)
+        alpine_still_present = any(
+            i.get("os_slug") == "alpine-3.21" and i.get("is_present")
+            for i in images_after
+        )
+        assert alpine_still_present, "alpine-3.21 missing after --force pull"
+
+    def test_pull_nonexistent_image_fails_gracefully(
+        self, mvm_binary: str
+    ) -> None:
+        """Pull a nonexistent image slug should fail with clear error."""
+        result = _run_mvm(
+            mvm_binary,
+            "image",
+            "pull",
+            "totally-nonexistent-image-name-12345",
+            check=False,
+        )
+        assert result.returncode != 0
+        combined = (result.stdout + result.stderr).lower()
+        assert any(
+            s in combined for s in ["not found", "no such", "invalid"]
+        ), f"Expected error about nonexistent image, got: {result.stderr}"
+
+    def test_pull_image_with_version_flag(self, mvm_binary: str) -> None:
+        """Pull alpine-3.21 with --version 3.21 should succeed."""
+        result = _run_mvm(
+            mvm_binary,
+            "image",
+            "pull",
+            "alpine-3.21",
+            "--version",
+            "3.21",
+            timeout=60,
+            check=False,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"Pull with --version failed: {result.stderr.strip()}")
+
+        result = _run_mvm(mvm_binary, "image", "ls", "--json")
+        images: list[dict[str, Any]] = json.loads(result.stdout)
+        alpine_present = any(
+            i.get("os_slug") == "alpine-3.21" and i.get("is_present")
+            for i in images
+        )
+        assert alpine_present, (
+            "alpine-3.21 not present after pull with --version flag"
+        )
 
 
 class TestImageImportAdvanced:
@@ -384,7 +508,6 @@ class TestImageImportAdvanced:
                 pytest.skip(f"Import qcow2 failed: {result.stderr.strip()}")
             assert result.returncode == 0
 
-            # Verify imported image appears in listing
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
             imported = [i for i in images if i.get("os_name") == "test-qcow2"]
@@ -404,8 +527,6 @@ class TestImageImportAdvanced:
         self, mvm_binary, tmp_path, system_cache_dir
     ):
         """Import the same image twice, verify --force suppresses the error."""
-
-        # Create a tiny raw image (1MB)
         raw_path = tmp_path / "test-overwrite.raw"
         result = subprocess.run(
             ["dd", "if=/dev/zero", f"of={raw_path}", "bs=1M", "count=1"],
@@ -415,7 +536,6 @@ class TestImageImportAdvanced:
         if result.returncode != 0:
             pytest.skip(f"dd create failed: {result.stderr}")
 
-        # First import
         result = _run_mvm(
             mvm_binary,
             "image",
@@ -431,7 +551,6 @@ class TestImageImportAdvanced:
 
         imported_prefix = None
         try:
-            # Get prefix for cleanup
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
             imported = [
@@ -440,7 +559,6 @@ class TestImageImportAdvanced:
             if imported:
                 imported_prefix = imported[0]["id"][:6]
 
-            # Second import with --force should succeed
             result = _run_mvm(
                 mvm_binary,
                 "image",
@@ -512,7 +630,6 @@ class TestImageImportSetDefault:
         """Import a local image file with --set-default flag."""
         import shutil
 
-        # Get cached image info
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         images = json.loads(result.stdout)
         alpine_images = [
@@ -524,7 +641,6 @@ class TestImageImportSetDefault:
         target = alpine_images[0]
         target_id = target["id"]
 
-        # Inspect using full ID
         result = _run_mvm(
             mvm_binary, "image", "inspect", target_id, "--json", check=False
         )
@@ -540,7 +656,6 @@ class TestImageImportSetDefault:
         if not resolved_source.exists():
             pytest.skip(f"Image file not found: {resolved_source}")
 
-        # Copy to temp location
         temp_path = tmp_path / "test-import-default.raw"
         shutil.copy2(str(resolved_source), temp_path)
 
@@ -563,7 +678,6 @@ class TestImageImportSetDefault:
                 )
             assert "default" in result.stdout.lower()
 
-            # Get prefix for cleanup
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
             imported = [
@@ -630,7 +744,6 @@ class TestImageImportArch:
                 )
             assert result.returncode == 0
 
-            # Verify imported image appears in listing
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
             imported = [i for i in images if i.get("os_name") == "test-arch"]
@@ -658,8 +771,6 @@ class TestImageRemoveForce:
 
     def test_image_rm_with_force(self, mvm_binary):
         """Remove a cached image by ID prefix with --force and verify it's gone."""
-
-        # Get alpine image ID
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         if result.returncode != 0:
             pytest.skip("Failed to list images")
@@ -675,26 +786,17 @@ class TestImageRemoveForce:
         was_default = alpine_images[0].get("is_default", False)
         target_id = alpine_images[0]["id"]
 
-        # Remove with --force
         result = _run_mvm(
-            mvm_binary,
-            "image",
-            "rm",
-            target_id[:6],
-            "--force",
-            check=False,
+            mvm_binary, "image", "rm", target_id[:6], "--force", check=False
         )
         assert result.returncode == 0, f"Force remove failed: {result.stderr}"
 
-        # Verify it's gone (filter by is_present to account for soft-delete)
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         after = [
             i for i in json.loads(result.stdout) if i.get("is_present", True)
         ]
         assert not any(i["id"] == target_id for i in after)
 
-        # Re-pull to restore the image. Restore default flag if the removed
-        # image was the default.
         try:
             pull_args = ["image", "pull", "alpine-3.21"]
             if was_default:
@@ -717,7 +819,6 @@ class TestImageRemove:
 
     def test_image_remove_with_fixture(self, mvm_binary):
         """Remove a cached image by ID prefix and verify it's gone."""
-
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         before = json.loads(result.stdout)
         alpine_images = [
@@ -734,18 +835,12 @@ class TestImageRemove:
         was_removed = False
 
         try:
-            # Remove the image
             result = _run_mvm(
-                mvm_binary,
-                "image",
-                "rm",
-                target_prefix,
-                check=False,
+                mvm_binary, "image", "rm", target_prefix, check=False
             )
             assert result.returncode == 0
             was_removed = True
 
-            # Verify gone (filter by is_present to account for soft-delete)
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             after = [
                 i
@@ -755,8 +850,6 @@ class TestImageRemove:
             assert not any(i["id"] == target_id for i in after)
         finally:
             if was_removed:
-                # Re-pull so other tests aren't broken — only if removal happened.
-                # Restore default flag if the removed image was the default.
                 try:
                     pull_args = ["image", "pull", "alpine-3.21"]
                     if was_default:
@@ -769,13 +862,586 @@ class TestImageRemove:
                 except subprocess.TimeoutExpired:
                     pytest.skip("Re-pull timed out (>60s download)")
 
-    def test_image_pull_nonexistent(self, mvm_binary):
-        """Pull a nonexistent image and expect failure."""
+
+class TestImageImportCreateVM:
+    """Test the full end-to-end flow of importing an image and creating a VM."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+        pytest.mark.domain_vm,
+    ]
+
+    def test_imported_image_vm_creation(
+        self,
+        mvm_binary,
+        unique_vm_name,
+        unique_network_name,
+        tmp_path,
+        system_cache_dir,
+    ):
+        """Import a cached alpine image and create a running VM from it."""
+        import subprocess as _subprocess
+
+        _run_mvm(mvm_binary, "image", "pull", "alpine-3.21", check=False)
+
+        result = _run_mvm(mvm_binary, "image", "ls", "--json")
+        images = json.loads(result.stdout)
+        alpine_images = [
+            i
+            for i in images
+            if "alpine" in i.get("os_slug", "").lower() and i.get("is_present")
+        ]
+        if not alpine_images:
+            pytest.skip("No present alpine image available")
+
+        target = alpine_images[0]
+        target_id = target["id"]
+
         result = _run_mvm(
-            mvm_binary,
-            "image",
-            "pull",
-            "completely-nonexistent-image-12345",
+            mvm_binary, "image", "inspect", target_id, "--json", check=False
+        )
+        if result.returncode != 0:
+            pytest.skip(f"Image '{target_id[:8]}' was removed before inspect")
+
+        data = json.loads(result.stdout)
+        source_path = data.get("path")
+        if not source_path:
+            pytest.skip("Image path not available")
+
+        resolved_source = system_cache_dir / "images" / source_path
+        if not resolved_source.exists():
+            pytest.skip(f"Image file not found: {resolved_source}")
+
+        temp_path = tmp_path / "alpine-for-import.raw"
+
+        if resolved_source.suffix == ".zst":
+            decompress = _subprocess.run(
+                [
+                    "zstd",
+                    "-d",
+                    "-f",
+                    str(resolved_source),
+                    "-o",
+                    str(temp_path),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if decompress.returncode != 0:
+                pytest.skip(f"zstd decompress failed: {decompress.stderr}")
+        else:
+            import shutil
+
+            shutil.copy2(str(resolved_source), temp_path)
+
+        import_name = f"imported-{unique_vm_name}"
+        network_name = unique_network_name
+        subnet = _unique_subnet(network_name)
+        vm_name = unique_vm_name
+
+        imported_prefix: str | None = None
+
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "image",
+                "import",
+                import_name,
+                str(temp_path),
+                "--format",
+                "raw",
+                "--skip-optimization",
+                check=False,
+            )
+            if result.returncode != 0:
+                pytest.skip(f"Image import failed: {result.stderr.strip()}")
+            assert result.returncode == 0
+
+            result = _run_mvm(mvm_binary, "image", "ls", "--json")
+            images = json.loads(result.stdout)
+            imported = [i for i in images if i.get("os_name") == import_name]
+            assert imported, (
+                f"Imported image '{import_name}' not found in listing"
+            )
+            imported_prefix = imported[0]["id"][:6]
+
+            result = _run_mvm(
+                mvm_binary,
+                "network",
+                "create",
+                network_name,
+                "--subnet",
+                subnet,
+                "--non-interactive",
+            )
+            assert result.returncode == 0, (
+                f"Network create failed: {result.stderr}"
+            )
+
+            try:
+                result = _run_mvm(
+                    mvm_binary,
+                    "vm",
+                    "create",
+                    "--name",
+                    vm_name,
+                    "--image",
+                    import_name,
+                    "--network",
+                    network_name,
+                )
+                assert result.returncode == 0, (
+                    f"VM create failed: {result.stderr}"
+                )
+
+                result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+                vms = json.loads(result.stdout)
+                vm = next((v for v in vms if v["name"] == vm_name), None)
+                assert vm is not None, f"VM '{vm_name}' not found in listing"
+                assert vm["status"] == "running", (
+                    f"Expected VM status 'running', got '{vm['status']}'"
+                )
+                assert vm.get("image_id", ""), f"VM has no image_id: {vm}"
+
+                inspect_result = _run_mvm(
+                    mvm_binary, "vm", "inspect", vm_name, "--json"
+                )
+                inspect_data = json.loads(inspect_result.stdout)
+                assert import_name in str(inspect_data.get("image_name", "")), (
+                    f"VM image_name doesn't contain '{import_name}': "
+                    f"{inspect_data.get('image_name')}"
+                )
+
+            finally:
+                _run_mvm(
+                    mvm_binary, "vm", "rm", vm_name, "--force", check=False
+                )
+                _run_mvm(
+                    mvm_binary,
+                    "network",
+                    "rm",
+                    network_name,
+                    "--force",
+                    check=False,
+                )
+
+        finally:
+            if imported_prefix:
+                _run_mvm(
+                    mvm_binary, "image", "rm", imported_prefix, check=False
+                )
+
+    def test_import_ubuntu_tar_rootfs(
+        self,
+        mvm_binary,
+        unique_vm_name,
+        unique_network_name,
+        tmp_path,
+    ):
+        """Download Ubuntu 24.04 minimal tar-rootfs, import, create VM, verify running."""
+        import subprocess as _subprocess
+
+        ubuntu_url = (
+            "https://cloud-images.ubuntu.com/minimal/releases/noble/release/"
+            "ubuntu-24.04-minimal-cloudimg-amd64-root.tar.xz"
+        )
+        download_path = tmp_path / "ubuntu-24.04-minimal-root.tar.xz"
+
+        download = _subprocess.run(
+            ["curl", "-sSL", "-o", str(download_path), ubuntu_url],
+            capture_output=True,
+            text=True,
+            timeout=120,
             check=False,
         )
-        assert result.returncode != 0
+        if download.returncode != 0 or not download_path.exists():
+            pytest.skip(f"Failed to download Ubuntu image: {download.stderr}")
+
+        import_name = f"ubuntu-imported-{unique_vm_name}"
+        network_name = unique_network_name
+        subnet = _unique_subnet(network_name)
+        vm_name = unique_vm_name
+        imported_prefix: str | None = None
+
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "image",
+                "import",
+                import_name,
+                str(download_path),
+                "--format",
+                "tar-rootfs",
+                "--skip-optimization",
+                check=False,
+            )
+            if result.returncode != 0:
+                pytest.skip(
+                    f"Ubuntu image import failed: {result.stderr.strip()}"
+                )
+            assert result.returncode == 0
+
+            result = _run_mvm(mvm_binary, "image", "ls", "--json")
+            images = json.loads(result.stdout)
+            imported = [i for i in images if i.get("os_name") == import_name]
+            assert imported, (
+                f"Imported image '{import_name}' not found in listing"
+            )
+            imported_prefix = imported[0]["id"][:6]
+
+            result = _run_mvm(
+                mvm_binary,
+                "network",
+                "create",
+                network_name,
+                "--subnet",
+                subnet,
+                "--non-interactive",
+            )
+            assert result.returncode == 0, (
+                f"Network create failed: {result.stderr}"
+            )
+
+            try:
+                result = _run_mvm(
+                    mvm_binary,
+                    "vm",
+                    "create",
+                    "--name",
+                    vm_name,
+                    "--image",
+                    import_name,
+                    "--network",
+                    network_name,
+                )
+                assert result.returncode == 0, (
+                    f"VM create with imported Ubuntu failed: {result.stderr}"
+                )
+
+                result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+                vms = json.loads(result.stdout)
+                vm = next((v for v in vms if v["name"] == vm_name), None)
+                assert vm is not None, f"VM '{vm_name}' not found in listing"
+                assert vm["status"] == "running", (
+                    f"Expected VM status 'running', got '{vm['status']}'"
+                )
+
+            finally:
+                _run_mvm(
+                    mvm_binary, "vm", "rm", vm_name, "--force", check=False
+                )
+                _run_mvm(
+                    mvm_binary,
+                    "network",
+                    "rm",
+                    network_name,
+                    "--force",
+                    check=False,
+                )
+
+        finally:
+            if imported_prefix:
+                _run_mvm(
+                    mvm_binary, "image", "rm", imported_prefix, check=False
+                )
+
+
+class TestImageDependencyDeletion:
+    """Test dependency ordering for image deletion — references by VMs block removal."""
+
+    @pytest.mark.requires_kvm
+    def test_delete_image_used_by_stopped_vm_fails(
+        self,
+        mvm_binary: str,
+        unique_vm_name: str,
+    ) -> None:
+        """Deleting an image referenced by a stopped VM should be rejected."""
+        vm_name = unique_vm_name
+
+        try:
+            ls_result = _run_mvm(
+                mvm_binary, "image", "ls", "--json", check=False
+            )
+            alpine_present = False
+            if ls_result.returncode == 0 and ls_result.stdout.strip():
+                images: list[dict[str, Any]] = json.loads(ls_result.stdout)
+                alpine_present = any(
+                    i.get("os_slug") == "alpine-3.21" and i.get("is_present")
+                    for i in images
+                )
+            if not alpine_present:
+                _run_mvm(
+                    mvm_binary, "image", "pull", "alpine-3.21", timeout=180
+                )
+
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+            )
+
+            ins_result = _run_mvm(
+                mvm_binary, "vm", "inspect", vm_name, "--json", check=False
+            )
+            assert ins_result.returncode == 0, (
+                f"Failed to inspect VM: {ins_result.stderr}"
+            )
+            vm_info: dict[str, Any] = json.loads(ins_result.stdout)
+            image_id_full = vm_info.get("image_id", "")
+            assert image_id_full
+            image_id_prefix = image_id_full[:6]
+
+            result = _run_mvm(
+                mvm_binary, "image", "rm", image_id_prefix, check=False
+            )
+            combined = (result.stdout + result.stderr).lower()
+            assert "referenced" in combined or "in use" in combined, (
+                f"Expected image rm to report reference, got: "
+                f"rc={result.returncode} stdout={result.stdout}"
+            )
+
+            ls_image = _run_mvm(
+                mvm_binary, "image", "ls", "--json", check=False
+            )
+            if ls_image.returncode == 0 and ls_image.stdout.strip():
+                images_after = json.loads(ls_image.stdout)
+                alpine_after = next(
+                    (
+                        i
+                        for i in images_after
+                        if i.get("os_slug") == "alpine-3.21"
+                    ),
+                    None,
+                )
+                assert alpine_after is not None
+
+            ls_vm = _run_mvm(mvm_binary, "vm", "ls", "--json", check=False)
+            if ls_vm.returncode == 0 and ls_vm.stdout.strip():
+                vms_after = json.loads(ls_vm.stdout)
+                vm_names = [v.get("name") for v in vms_after]
+                assert vm_name in vm_names
+        finally:
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+
+    @pytest.mark.requires_kvm
+    @pytest.mark.requires_network
+    @pytest.mark.slow
+    def test_delete_image_used_by_running_vm_fails_without_force(
+        self,
+        mvm_binary: str,
+        unique_vm_name: str,
+    ) -> None:
+        """Deleting an image referenced by a running VM should be rejected."""
+        vm_name = unique_vm_name
+
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+            )
+            _run_mvm(mvm_binary, "vm", "start", vm_name)
+
+            vm_ls = _run_mvm(mvm_binary, "vm", "ls", "--json", check=False)
+            if vm_ls.returncode == 0 and vm_ls.stdout.strip():
+                vms = json.loads(vm_ls.stdout)
+                vm_names = [v.get("name") for v in vms]
+                assert vm_name in vm_names
+
+            ins_result = _run_mvm(
+                mvm_binary, "vm", "inspect", vm_name, "--json", check=False
+            )
+            assert ins_result.returncode == 0
+            vm_info: dict[str, Any] = json.loads(ins_result.stdout)
+            image_id_full = vm_info.get("image_id", "")
+            assert image_id_full
+            image_id_prefix = image_id_full[:6]
+
+            result = _run_mvm(
+                mvm_binary, "image", "rm", image_id_prefix, check=False
+            )
+            combined = (result.stdout + result.stderr).lower()
+            assert "referenced" in combined or "in use" in combined, (
+                f"Expected image rm to report reference, got: "
+                f"rc={result.returncode} stdout={result.stdout}"
+            )
+
+            ls_image = _run_mvm(
+                mvm_binary, "image", "ls", "--json", check=False
+            )
+            if ls_image.returncode == 0 and ls_image.stdout.strip():
+                images_after = json.loads(ls_image.stdout)
+                alpine_after = next(
+                    (
+                        i
+                        for i in images_after
+                        if i.get("os_slug") == "alpine-3.21"
+                    ),
+                    None,
+                )
+                assert alpine_after is not None
+
+            ls_vm = _run_mvm(mvm_binary, "vm", "ls", "--json", check=False)
+            if ls_vm.returncode == 0 and ls_vm.stdout.strip():
+                vms_after = json.loads(ls_vm.stdout)
+                vm_names = [v.get("name") for v in vms_after]
+                assert vm_name in vm_names
+        finally:
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+
+    def test_delete_default_image_promotes_other_or_clears(
+        self,
+        mvm_binary: str,
+    ) -> None:
+        """Deleting a formerly-default image should not leave orphans."""
+        result = _run_mvm(mvm_binary, "image", "ls", "--json")
+        images = json.loads(result.stdout)
+        present_images = [i for i in images if i.get("is_present", True)]
+
+        if len(present_images) < 2:
+            pytest.skip("Need at least 2 present images for this test")
+
+        default_img = next(
+            (i for i in present_images if i.get("is_default")),
+            present_images[0],
+        )
+        other_img = next(
+            (i for i in present_images if i["id"] != default_img["id"]),
+            None,
+        )
+
+        if other_img is None:
+            pytest.skip("No non-default image available to set as default")
+
+        old_default_prefix = default_img["id"][:6]
+        other_prefix = other_img["id"][:6]
+
+        try:
+            _run_mvm(mvm_binary, "image", "default", other_prefix, check=False)
+
+            _run_mvm(mvm_binary, "image", "rm", old_default_prefix, check=False)
+
+            result = _run_mvm(mvm_binary, "image", "ls", "--json")
+            images_after = json.loads(result.stdout)
+            default_count = sum(1 for i in images_after if i.get("is_default"))
+            assert default_count <= 1, (
+                f"Expected at most 1 default image, got {default_count}"
+            )
+        finally:
+            result = _run_mvm(mvm_binary, "image", "ls", "--json")
+            images_final = json.loads(result.stdout)
+            has_default = any(i.get("is_default") for i in images_final)
+            if not has_default and images_final:
+                _run_mvm(
+                    mvm_binary,
+                    "image",
+                    "default",
+                    images_final[0]["id"][:6],
+                    check=False,
+                )
+
+
+class TestImageDefaultMigration:
+    """Test that the default image migrates to a new record on force re-pull."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.slow,
+        pytest.mark.domain_image,
+    ]
+
+    def test_default_migrates_to_new_image_on_force_repull(
+        self, mvm_binary: str
+    ) -> None:
+        """When force-re-pulling the default image, default should migrate to new record."""
+        # Rationale: Uses image ls --json (free) and image pull --force (~200MB download, marked slow).
+        # No VMs, networks, or volumes needed — pure image-record state verification.
+        result = _run_mvm(mvm_binary, "image", "ls", "--json", check=False)
+        if result.returncode != 0 or not result.stdout.strip():
+            pytest.skip("Cannot list images")
+        images: list[dict[str, Any]] = json.loads(result.stdout)
+
+        present_alpine = [
+            i
+            for i in images
+            if i.get("os_slug") == "alpine-3.21" and i.get("is_present")
+        ]
+        if not present_alpine:
+            pytest.skip("alpine-3.21 not cached")
+
+        old_alpine = present_alpine[0]
+        old_alpine_id: str = old_alpine["id"]
+
+        original_defaults = [i for i in images if i.get("is_default")]
+        original_default_id: str | None = (
+            original_defaults[0]["id"] if original_defaults else None
+        )
+
+        changed_default = False
+        if not old_alpine.get("is_default"):
+            _run_mvm(mvm_binary, "image", "default", old_alpine_id[:6])
+            changed_default = True
+
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "image",
+                "pull",
+                "alpine-3.21",
+                "--force",
+                timeout=180,
+                check=False,
+            )
+            if result.returncode != 0:
+                pytest.skip(f"Force pull failed: {result.stderr.strip()}")
+
+            result = _run_mvm(mvm_binary, "image", "ls", "--json")
+            images_after: list[dict[str, Any]] = json.loads(result.stdout)
+
+            alpine_after = [
+                i for i in images_after if i.get("os_slug") == "alpine-3.21"
+            ]
+            assert len(alpine_after) >= 1, (
+                "Expected at least one alpine-3.21 record after force re-pull"
+            )
+
+            new_default = next(
+                (i for i in alpine_after if i.get("is_default")), None
+            )
+            assert new_default is not None, (
+                "Expected a default alpine-3.21 after force re-pull"
+            )
+            assert new_default["id"] != old_alpine_id, (
+                "Expected new alpine record ID different from old one"
+            )
+            assert new_default.get("is_present"), (
+                "New alpine record should be present"
+            )
+
+            old_record = next(
+                (i for i in alpine_after if i["id"] == old_alpine_id), None
+            )
+            if old_record is not None:
+                assert not old_record.get("is_present"), (
+                    "Old alpine record should not be present after force re-pull"
+                )
+        finally:
+            if changed_default and original_default_id:
+                _run_mvm(
+                    mvm_binary,
+                    "image",
+                    "default",
+                    original_default_id[:6],
+                    check=False,
+                )

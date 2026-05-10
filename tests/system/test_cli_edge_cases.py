@@ -1,13 +1,12 @@
 """CLI edge case system tests — untested paths across all command groups.
 
-These tests cover edge cases and error paths not exercised by the primary
-test files in tests/system/. They are black-box CLI integration tests
-that invoke ``mvm`` via subprocess.
+Merged from: test_cli_edge_cases.py (existing), test_cli_usability.py (coverage)
 """
 
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 
 import pytest
@@ -16,61 +15,17 @@ from tests.system.conftest import _run_mvm
 
 pytestmark = [pytest.mark.system]
 
-
-class TestConfigEdgeCases:
-    """Tests for config command edge cases."""
-
-    pytestmark = [pytest.mark.system, pytest.mark.domain_config]
-
-    def test_config_get_category_only(self, mvm_binary):
-        """``config get defaults.vm`` (no key) should return multiple keys."""
-        result = _run_mvm(mvm_binary, "config", "get", "defaults.vm")
-        assert result.returncode == 0
-        # The output should contain multiple setting keys from the category
-        assert "vcpu_count" in result.stdout
-        assert "mem_size_mib" in result.stdout
-        assert "boot_args" in result.stdout
-
-    def test_config_reset_category_only(self, mvm_binary):
-        """``config reset defaults.vm`` (no key) should reset all keys in category."""
-        # Set a value first so there is something to reset
-        _run_mvm(mvm_binary, "config", "set", "defaults.vm", "vcpu_count", "6")
-
-        # Verify it was set
-        result = _run_mvm(
-            mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
-        )
-        assert "6" in result.stdout
-
-        # Reset the entire category (no key)
-        result = _run_mvm(mvm_binary, "config", "reset", "defaults.vm")
-        assert result.returncode == 0
-        assert "override(s)" in result.stdout
-
-        # Verify the custom value is gone (back to default)
-        result = _run_mvm(
-            mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
-        )
-        assert "6" not in result.stdout
-
-    def test_config_reset_no_args(self, mvm_binary):
-        """``config reset`` with no args should print guidance (exit 0)."""
-        result = _run_mvm(mvm_binary, "config", "reset")
-        assert result.returncode == 0
-        assert "Provide a category" in result.stdout
-
-    def test_config_set_invalid_category(self, mvm_binary):
-        """``config set`` with invalid category should fail."""
-        result = _run_mvm(
-            mvm_binary,
-            "config",
-            "set",
-            "nonexistent.cat",
-            "some_key",
-            "some_value",
-            check=False,
-        )
-        assert result.returncode != 0
+_HELP_COMMANDS = [
+    "vm",
+    "network",
+    "image",
+    "kernel",
+    "key",
+    "volume",
+    "bin",
+    "config",
+    "cache",
+]
 
 
 class TestCacheEdgeCases:
@@ -90,7 +45,6 @@ class TestCacheEdgeCases:
         """Stop a VM, prune it (no --dry-run), verify it is gone."""
         vm_name = unique_vm_name
         try:
-            # Create VM (without SSH key to keep it simple)
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -101,10 +55,8 @@ class TestCacheEdgeCases:
                 "alpine-3.21",
             )
 
-            # Stop VM so it becomes prunable
             _run_mvm(mvm_binary, "vm", "stop", vm_name)
 
-            # Prune VM (actual removal, not dry-run)
             result = _run_mvm(
                 mvm_binary,
                 "cache",
@@ -118,7 +70,6 @@ class TestCacheEdgeCases:
                     f"{result.stderr.strip()}"
                 )
 
-            # Verify VM is gone from listing
             ls_result = _run_mvm(mvm_binary, "vm", "ls", "--json")
             vms = json.loads(ls_result.stdout)
             assert not any(v["name"] == vm_name for v in vms), (
@@ -184,10 +135,8 @@ class TestVMStateTransitionErrors:
         """Stopping an already-stopped VM should be idempotent."""
         vm_name = created_vm["name"]
 
-        # First stop
         _run_mvm(mvm_binary, "vm", "stop", vm_name)
 
-        # Second stop — should succeed (idempotent)
         result = _run_mvm(mvm_binary, "vm", "stop", vm_name, check=False)
         assert result.returncode == 0, f"Second stop failed: {result.stderr}"
 
@@ -195,10 +144,8 @@ class TestVMStateTransitionErrors:
         """Pausing a stopped VM should fail."""
         vm_name = created_vm["name"]
 
-        # Stop the VM first
         _run_mvm(mvm_binary, "vm", "stop", vm_name)
 
-        # Try to pause — should fail since VM is not running
         result = _run_mvm(mvm_binary, "vm", "pause", vm_name, check=False)
         assert result.returncode != 0
 
@@ -223,7 +170,6 @@ class TestVMStateTransitionErrors:
         name1 = f"{unique_vm_name}-a"
         name2 = f"{unique_vm_name}-b"
         try:
-            # Create two VMs
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -243,11 +189,9 @@ class TestVMStateTransitionErrors:
                 "alpine-3.21",
             )
 
-            # Remove both with --force
             result = _run_mvm(mvm_binary, "vm", "rm", name1, name2, "--force")
             assert result.returncode == 0
 
-            # Verify both are gone
             vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
             assert not any(v["name"] == name1 for v in vms), (
                 f"VM {name1} still present after rm"
@@ -304,73 +248,6 @@ class TestImageAdvancedFlags:
             pytest.skip(
                 "Pull with --disable-detector --force timed out (>60s download)"
             )
-
-
-class TestConfigEdgeCasesExtended:
-    """Additional config command edge cases."""
-
-    pytestmark = [pytest.mark.system, pytest.mark.domain_config]
-
-    def test_config_get_nonexistent_key(self, mvm_binary):
-        """``config get`` with nonexistent key should return guidance."""
-        result = _run_mvm(
-            mvm_binary,
-            "config",
-            "get",
-            "defaults.vm",
-            "nonexistent_key_xyz",
-            check=False,
-        )
-        # Should not crash — returns None or guidance
-        assert result.returncode == 0
-
-    def test_config_set_invalid_value_type(self, mvm_binary):
-        """``config set`` with an invalid value type (string for int) should fail."""
-        result = _run_mvm(
-            mvm_binary,
-            "config",
-            "set",
-            "defaults.vm",
-            "vcpu_count",
-            "not-a-number",
-            check=False,
-        )
-        # Should fail because vcpu_count expects an integer
-        assert result.returncode != 0
-
-
-class TestConfigEdgeCasesResetAllAfterSet:
-    """Test config reset --all after multiple values are set."""
-
-    pytestmark = [pytest.mark.system, pytest.mark.domain_config]
-
-    def test_config_reset_all_with_multiple_overrides(self, mvm_binary):
-        """Set multiple config overrides, then reset --all, verify all gone."""
-        # Set two values
-        _run_mvm(mvm_binary, "config", "set", "defaults.vm", "vcpu_count", "8")
-        _run_mvm(
-            mvm_binary,
-            "config",
-            "set",
-            "defaults.vm",
-            "mem_size_mib",
-            "2048",
-        )
-
-        # Verify they were set
-        result = _run_mvm(
-            mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
-        )
-        assert "8" in result.stdout
-
-        # Reset all
-        _run_mvm(mvm_binary, "config", "reset", "--all")
-
-        # Verify values are gone
-        result = _run_mvm(
-            mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
-        )
-        assert "8" not in result.stdout
 
 
 class TestVMLogsByIdentifier:
@@ -648,7 +525,6 @@ class TestImageImportWithDisableDetector:
         """
         import shutil
 
-        # Find a cached alpine image to use as import source
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         images = json.loads(result.stdout)
         alpine_images = [
@@ -673,7 +549,6 @@ class TestImageImportWithDisableDetector:
         target = alpine_images[0]
         target_id = target["id"]
 
-        # Inspect to get the file path
         result = _run_mvm(
             mvm_binary, "image", "inspect", target_id, "--json", check=False
         )
@@ -689,7 +564,6 @@ class TestImageImportWithDisableDetector:
         if not resolved_source.exists():
             pytest.skip(f"Image file not found: {resolved_source}")
 
-        # Decompress if needed (.zst)
         temp_path = tmp_path / "alpine-for-import.raw"
         if resolved_source.suffix == ".zst":
             decompress = subprocess.run(
@@ -730,7 +604,6 @@ class TestImageImportWithDisableDetector:
                 )
             assert result.returncode == 0
 
-            # Verify imported image appears in listing
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
             imported = [
@@ -778,3 +651,175 @@ class TestHelpCommand:
         """``mvm help version`` should show version help."""
         result = _run_mvm(mvm_binary, "help", "version")
         assert result.returncode == 0
+
+
+# ============================================================================
+# CLI usability tests (from coverage/test_cli_usability.py)
+# ============================================================================
+
+
+class TestHelpOutputConsistentFormat:
+    """All --help outputs share common structural elements."""
+
+    pytestmark = [pytest.mark.system, pytest.mark.domain_usability]
+
+    @pytest.mark.parametrize("cmd_group", _HELP_COMMANDS)
+    def test_help_contains_common_elements(
+        self, mvm_binary: str, cmd_group: str
+    ) -> None:
+        """Every command group's ``--help`` should contain ``Usage:``, ``Commands:``, ``--help``."""
+        result = _run_mvm(mvm_binary, cmd_group, "--help")
+        help_text = result.stdout
+
+        assert "Usage:" in help_text, f"'{cmd_group} --help' missing 'Usage:'"
+        assert "Commands:" in help_text, (
+            f"'{cmd_group} --help' missing 'Commands:'"
+        )
+        assert "--help" in help_text, (
+            f"'{cmd_group} --help' missing '--help' reference"
+        )
+
+
+class TestHelpOutputShowsSubcommands:
+    """Each command's --help should list its subcommands."""
+
+    pytestmark = [pytest.mark.system, pytest.mark.domain_usability]
+
+    def test_vm_help_lists_subcommands(self, mvm_binary: str) -> None:
+        """``vm --help`` should list expected VM subcommands."""
+        result = _run_mvm(mvm_binary, "vm", "--help")
+        help_text = result.stdout
+
+        expected = {
+            "create",
+            "rm",
+            "start",
+            "stop",
+            "reboot",
+            "pause",
+            "resume",
+            "ls",
+            "ps",
+            "inspect",
+            "snapshot",
+            "load",
+            "export",
+            "import",
+            "attach-volume",
+            "detach-volume",
+        }
+        for cmd in expected:
+            assert cmd in help_text, f"'vm --help' missing '{cmd}' subcommand"
+
+    def test_image_help_lists_subcommands(self, mvm_binary: str) -> None:
+        """``image --help`` should list expected image subcommands."""
+        result = _run_mvm(mvm_binary, "image", "--help")
+        help_text = result.stdout
+
+        expected = {
+            "ls",
+            "pull",
+            "default",
+            "rm",
+            "inspect",
+            "import",
+            "warm",
+        }
+        for cmd in expected:
+            assert cmd in help_text, (
+                f"'image --help' missing '{cmd}' subcommand"
+            )
+
+
+class TestErrorMessageIsActionable:
+    """Error messages should guide the user to fix the problem."""
+
+    pytestmark = [pytest.mark.system, pytest.mark.domain_usability]
+
+    def test_vm_rm_nonexistent(self, mvm_binary: str) -> None:
+        """``vm rm`` with a nonexistent VM name should produce an actionable error."""
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "rm",
+            "nonexistent-vm-12345",
+            check=False,
+        )
+        assert result.returncode != 0, "Expected rm of nonexistent VM to fail"
+
+        error_text = result.stderr + result.stdout
+        assert len(error_text) > 20, (
+            f"Error message too short ({len(error_text)} chars): {error_text!r}"
+        )
+
+        assert any(
+            word in error_text.lower()
+            for word in ["not found", "no such", "doesn't exist", "unknown"]
+        ), f"Error message should contain a helpful phrase, got: {error_text!r}"
+
+
+class TestDebugFlagOutput:
+    """The ``--debug`` flag should produce additional diagnostic output."""
+
+    pytestmark = [pytest.mark.system, pytest.mark.domain_usability]
+
+    def test_debug_flag_produces_output(self, mvm_binary: str) -> None:
+        """``--debug vm ls --json`` should include debug-level output."""
+        result = _run_mvm(
+            mvm_binary,
+            "--debug",
+            "vm",
+            "ls",
+            "--json",
+            check=False,
+        )
+
+        combined = result.stderr + result.stdout
+        debug_marker_found = (
+            "DEBUG:" in result.stderr
+            or "DEBUG:" in combined
+            or "[DEBUG]" in result.stderr
+        )
+
+        assert result.returncode == 0 or debug_marker_found, (
+            "Command should either succeed or produce debug output. "
+            f"Return code: {result.returncode}, stderr: {result.stderr!r}"
+        )
+
+
+class TestVersionFlag:
+    """The ``--version`` flag should show a version string."""
+
+    pytestmark = [pytest.mark.system, pytest.mark.domain_usability]
+
+    def test_version_output(self, mvm_binary: str) -> None:
+        """``--version`` should show a non-empty version string."""
+        result = _run_mvm(mvm_binary, "--version")
+        version_text = result.stdout.strip()
+
+        assert version_text, "--version output should not be empty"
+        assert re.search(r"\d", version_text), (
+            f"--version output should contain a digit: {version_text!r}"
+        )
+
+
+class TestHelpSubcommandShowsCorrectly:
+    """``mvm help <subcommand>`` and ``mvm <subcommand> --help`` should match."""
+
+    pytestmark = [pytest.mark.system, pytest.mark.domain_usability]
+
+    def test_help_vm_equivalent_to_vm_help(self, mvm_binary: str) -> None:
+        """``mvm help vm`` and ``mvm vm --help`` should both show VM help."""
+        result_help = _run_mvm(mvm_binary, "help", "vm")
+        result_flag = _run_mvm(mvm_binary, "vm", "--help")
+
+        assert "Usage:" in result_help.stdout, "'mvm help vm' missing 'Usage:'"
+        assert "Usage:" in result_flag.stdout, (
+            "'mvm vm --help' missing 'Usage:'"
+        )
+        assert "create" in result_help.stdout, (
+            "'mvm help vm' missing 'create' subcommand"
+        )
+        assert "create" in result_flag.stdout, (
+            "'mvm vm --help' missing 'create' subcommand"
+        )

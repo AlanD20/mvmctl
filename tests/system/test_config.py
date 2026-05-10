@@ -1,4 +1,7 @@
-"""Config management system tests."""
+"""Config management system tests.
+
+Merged from: test_config.py (existing), test_cli_edge_cases.py (config test classes)
+"""
 
 from __future__ import annotations
 
@@ -77,3 +80,120 @@ class TestConfigLifecycle:
         )
         assert result.returncode == 0
         assert "6" not in result.stdout
+
+
+# ============================================================================
+# Config edge cases (from test_cli_edge_cases.py)
+# ============================================================================
+
+
+class TestConfigEdgeCases:
+    """Tests for config command edge cases."""
+
+    pytestmark = [pytest.mark.system, pytest.mark.domain_config]
+
+    def test_config_get_category_only(self, mvm_binary):
+        """``config get defaults.vm`` (no key) should return multiple keys."""
+        result = _run_mvm(mvm_binary, "config", "get", "defaults.vm")
+        assert result.returncode == 0
+        assert "vcpu_count" in result.stdout
+        assert "mem_size_mib" in result.stdout
+        assert "boot_args" in result.stdout
+
+    def test_config_reset_category_only(self, mvm_binary):
+        """``config reset defaults.vm`` (no key) should reset all keys in category."""
+        _run_mvm(mvm_binary, "config", "set", "defaults.vm", "vcpu_count", "6")
+
+        result = _run_mvm(
+            mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
+        )
+        assert "6" in result.stdout
+
+        result = _run_mvm(mvm_binary, "config", "reset", "defaults.vm")
+        assert result.returncode == 0
+        assert "override(s)" in result.stdout
+
+        result = _run_mvm(
+            mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
+        )
+        assert "6" not in result.stdout
+
+    def test_config_reset_no_args(self, mvm_binary):
+        """``config reset`` with no args should print guidance (exit 0)."""
+        result = _run_mvm(mvm_binary, "config", "reset")
+        assert result.returncode == 0
+        assert "Provide a category" in result.stdout
+
+    def test_config_set_invalid_category(self, mvm_binary):
+        """``config set`` with invalid category should fail."""
+        result = _run_mvm(
+            mvm_binary,
+            "config",
+            "set",
+            "nonexistent.cat",
+            "some_key",
+            "some_value",
+            check=False,
+        )
+        assert result.returncode != 0
+
+
+class TestConfigEdgeCasesExtended:
+    """Additional config command edge cases."""
+
+    pytestmark = [pytest.mark.system, pytest.mark.domain_config]
+
+    def test_config_get_nonexistent_key(self, mvm_binary):
+        """``config get`` with nonexistent key should return guidance."""
+        result = _run_mvm(
+            mvm_binary,
+            "config",
+            "get",
+            "defaults.vm",
+            "nonexistent_key_xyz",
+            check=False,
+        )
+        assert result.returncode == 0
+
+    def test_config_set_invalid_value_type(self, mvm_binary):
+        """``config set`` with an invalid value type (string for int) should fail."""
+        result = _run_mvm(
+            mvm_binary,
+            "config",
+            "set",
+            "defaults.vm",
+            "vcpu_count",
+            "not-a-number",
+            check=False,
+        )
+        assert result.returncode != 0
+
+
+class TestConfigEdgeCasesResetAllAfterSet:
+    """Test config reset --all after multiple values are set."""
+
+    pytestmark = [pytest.mark.system, pytest.mark.domain_config]
+
+    def test_config_reset_all_with_multiple_overrides(self, mvm_binary):
+        """Set multiple config overrides, then reset --all, verify all gone."""
+        _run_mvm(mvm_binary, "config", "set", "defaults.vm", "vcpu_count", "8")
+        _run_mvm(
+            mvm_binary,
+            "config",
+            "set",
+            "defaults.vm",
+            "mem_size_mib",
+            "2048",
+        )
+
+        result = _run_mvm(
+            mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
+        )
+        assert "8" in result.stdout
+
+        _run_mvm(mvm_binary, "config", "reset", "--all")
+
+        result = _run_mvm(
+            mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
+        )
+        assert "8" not in result.stdout

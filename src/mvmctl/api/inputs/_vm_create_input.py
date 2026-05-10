@@ -52,7 +52,6 @@ from mvmctl.models import (
     SSHKeyItem,
     VMInstanceItem,
     VolumeItem,
-    VolumeStatus,
 )
 from mvmctl.utils._disk import DiskUtils
 from mvmctl.utils._validators import NetworkValidator, VMValidator
