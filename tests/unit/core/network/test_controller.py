@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from mvmctl.core._shared import Database
 from mvmctl.core.network._controller import NetworkController
 from mvmctl.core.network._repository import NetworkRepository
+from mvmctl.core.network._service import NetworkService
 from mvmctl.exceptions import NetworkError, NetworkNotFoundError
 from mvmctl.models import NetworkItem
 
@@ -203,11 +206,16 @@ class TestNetworkControllerGetLeases:
         assert vm_ids == {"vm-test-1", "vm-test-2"}
 
 
-class TestNetworkControllerRemove:
-    """Tests for remove() — DB removal only."""
+class TestNetworkServiceRemove:
+    """Tests for NetworkService.remove() — infrastructure + DB removal."""
+
+    def _make_service(self, repo: NetworkRepository) -> NetworkService:
+        """Create NetworkService and mock subprocess calls."""
+        service = NetworkService(repo)
+        return service
 
     def test_remove_raises_when_vms_reference(
-        self, seed_network: NetworkItem, repo: NetworkRepository
+        self, seed_network: NetworkItem, repo: NetworkRepository, mocker
     ) -> None:
         """remove() raises NetworkError when VMs reference the network and force=False."""
         # Seed a VM that references this network
@@ -318,20 +326,41 @@ class TestNetworkControllerRemove:
                 ),
             )
 
-        controller = NetworkController(seed_network, repo)
+        # Mock subprocess calls for NAT and bridge teardown
+        mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
+        mocker.patch(
+            "mvmctl.utils.network.NetworkUtils.get_bridge_taps", return_value=[]
+        )
+        mocker.patch.object(NetworkService, "remove_nat", autospec=True)
+        mocker.patch.object(NetworkService, "remove_bridge", autospec=True)
+        # The VM reference check comes from VMRepository.find_by_network_id,
+        # which queries the database directly (no mock needed since we seeded the VM)
+
+        # Populate seed_network.vms so the enrichment-like check in
+        # NetworkService.remove() sees the referencing VMs.
+        seed_network.vms = [vm]
+
+        service = self._make_service(repo)
         with pytest.raises(NetworkError, match="referenced by VMs"):
-            controller.remove(force=False)
+            service.remove(seed_network, force=False)
 
     def test_remove_hard_deletes_when_no_vms(
-        self, seed_network: NetworkItem, repo: NetworkRepository
+        self, seed_network: NetworkItem, repo: NetworkRepository, mocker
     ) -> None:
         """remove() hard-deletes the network when no VMs reference it."""
-        controller = NetworkController(seed_network, repo)
-        controller.remove(force=False)
+        mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
+        mocker.patch(
+            "mvmctl.utils.network.NetworkUtils.get_bridge_taps", return_value=[]
+        )
+        mocker.patch.object(NetworkService, "remove_nat", autospec=True)
+        mocker.patch.object(NetworkService, "remove_bridge", autospec=True)
+
+        service = self._make_service(repo)
+        service.remove(seed_network, force=False)
         assert repo.get("ctrl-net-001") is None
 
     def test_remove_force_with_vms(
-        self, seed_network: NetworkItem, repo: NetworkRepository
+        self, seed_network: NetworkItem, repo: NetworkRepository, mocker
     ) -> None:
         """remove(force=True) soft-deletes even when VMs reference it."""
         from mvmctl.models import VMInstanceItem
@@ -441,8 +470,19 @@ class TestNetworkControllerRemove:
                 ),
             )
 
-        controller = NetworkController(seed_network, repo)
-        controller.remove(force=True)
+        # Populate seed_network.vms so the enrichment-like check in
+        # NetworkService.remove() sees the referencing VMs.
+        seed_network.vms = [vm]
+
+        mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
+        mocker.patch(
+            "mvmctl.utils.network.NetworkUtils.get_bridge_taps", return_value=[]
+        )
+        mocker.patch.object(NetworkService, "remove_nat", autospec=True)
+        mocker.patch.object(NetworkService, "remove_bridge", autospec=True)
+
+        service = self._make_service(repo)
+        service.remove(seed_network, force=True)
         # Network should be soft-deleted (still exists in DB with deleted_at)
         fetched = repo.get("ctrl-net-001")
         assert fetched is None  # get() filters out deleted

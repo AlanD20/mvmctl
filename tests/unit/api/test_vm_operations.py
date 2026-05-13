@@ -446,14 +446,21 @@ class TestVMOperationSnapshot:
             return_value=mock_controller,
         )
 
-        mem_in = Path("/tmp/mem")
-        state_in = Path("/tmp/state")
-        VMOperation.load_snapshot(
-            VMInput(identifiers=["test-vm"]), mem_in, state_in
-        )
-        mock_controller.load_snapshot.assert_called_once_with(
-            mem_in, state_in, False
-        )
+        # Snapshot files must exist on disk for validation
+        mem_in = Path("/tmp/test-load-snap-mem")
+        state_in = Path("/tmp/test-load-snap-state")
+        mem_in.write_text("mem data")
+        state_in.write_text("state data")
+        try:
+            VMOperation.load_snapshot(
+                VMInput(identifiers=["test-vm"]), mem_in, state_in
+            )
+            mock_controller.load_snapshot.assert_called_once_with(
+                mem_in, state_in, False
+            )
+        finally:
+            mem_in.unlink(missing_ok=True)
+            state_in.unlink(missing_ok=True)
 
 
 class TestVMOperationInspect:

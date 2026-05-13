@@ -16,8 +16,6 @@ class TestLogOperation:
 
     def _setup_mocks(self, mocker, follow: bool) -> tuple[MagicMock, MagicMock]:
         """Set up common mocks and return (mock_controller, mock_resolved)."""
-        mocker.patch("mvmctl.api.logs_operations.Database")
-        mocker.patch("mvmctl.api.logs_operations.VMRepository")
 
         mock_controller = MagicMock()
         mocker.patch(
@@ -82,7 +80,6 @@ class TestLogOperation:
 
     def test_stream_propagates_resolve_error(self, mocker):
         """stream() propagates VMNotFoundError from LogRequest.resolve()."""
-        mocker.patch("mvmctl.api.logs_operations.Database")
         mock_request = MagicMock()
         mock_request.resolve.side_effect = VMNotFoundError("VM not found")
         mocker.patch(

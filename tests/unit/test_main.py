@@ -207,7 +207,7 @@ class TestMainUtils:
         from mvmctl.main import _get_git_version_info
 
         mocker.patch("mvmctl.main.Path.exists", return_value=True)
-        mock_run = mocker.patch("mvmctl.main.subprocess.run")
+        mock_run = mocker.patch("mvmctl.main.run_cmd")
         mock_run.return_value = MagicMock(returncode=0, stdout="v1.0.0\n")
         result = _get_git_version_info()
         assert result == "v1.0.0"
@@ -216,7 +216,7 @@ class TestMainUtils:
         from mvmctl.main import _get_git_version_info
 
         mocker.patch("mvmctl.main.Path.exists", return_value=True)
-        mock_run = mocker.patch("mvmctl.main.subprocess.run")
+        mock_run = mocker.patch("mvmctl.main.run_cmd")
         mock_run.side_effect = [
             MagicMock(returncode=1, stdout=""),
             MagicMock(returncode=0, stdout="abc1234\n"),
@@ -228,7 +228,7 @@ class TestMainUtils:
         from mvmctl.main import _get_git_version_info
 
         mocker.patch("mvmctl.main.Path.exists", return_value=True)
-        mock_run = mocker.patch("mvmctl.main.subprocess.run")
+        mock_run = mocker.patch("mvmctl.main.run_cmd")
         mock_run.side_effect = [
             MagicMock(returncode=1, stdout=""),
             MagicMock(returncode=1, stdout=""),

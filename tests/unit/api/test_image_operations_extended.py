@@ -167,9 +167,7 @@ class TestImageOperationPull:
         mock_download_path = Path("/tmp/images/downloaded.qcow2")
         mock_extracted_path = Path("/tmp/images/extracted.ext4")
         deps["image_svc"].download_image.return_value = mock_download_path
-        deps[
-            "image_svc"
-        ].extract_image.return_value = mock_extracted_path
+        deps["image_svc"].extract_image.return_value = mock_extracted_path
 
         new_item = _make_image(
             os_slug="ubuntu-24.04", image_id="new-" + "x" * 60
@@ -188,9 +186,7 @@ class TestImageOperationPull:
         mock_download_path = Path("/tmp/images/downloaded.qcow2")
         mock_extracted_path = Path("/tmp/images/extracted.ext4")
         deps["image_svc"].download_image.return_value = mock_download_path
-        deps[
-            "image_svc"
-        ].extract_image.return_value = mock_extracted_path
+        deps["image_svc"].extract_image.return_value = mock_extracted_path
 
         new_item = _make_image(os_slug="ubuntu-24.04")
         deps["image_svc"].optimize_image.return_value = new_item
@@ -209,9 +205,7 @@ class TestImageOperationPull:
 
         on_progress = MagicMock()
         deps["image_svc"].download_image.return_value = Path("/tmp/dl.qcow2")
-        deps["image_svc"].extract_image.return_value = Path(
-            "/tmp/ext.ext4"
-        )
+        deps["image_svc"].extract_image.return_value = Path("/tmp/ext.ext4")
         deps["image_svc"].optimize_image.return_value = _make_image()
 
         ImageOperation.pull(
@@ -242,9 +236,7 @@ class TestImageOperationPull:
         deps["image_svc"].download_image.return_value = Path("/tmp/dl.qcow2")
         from mvmctl.exceptions import TieDetectedError
 
-        deps[
-            "image_svc"
-        ].extract_image.side_effect = TieDetectedError(
+        deps["image_svc"].extract_image.side_effect = TieDetectedError(
             "multiple partitions"
         )
 
@@ -262,9 +254,7 @@ class TestImageOperationPull:
         deps = _setup_pull_mocks(mocker, existing_image=existing, force=True)
 
         deps["image_svc"].download_image.return_value = Path("/tmp/dl.qcow2")
-        deps["image_svc"].extract_image.return_value = Path(
-            "/tmp/ext.ext4"
-        )
+        deps["image_svc"].extract_image.return_value = Path("/tmp/ext.ext4")
         new_item = _make_image(
             os_slug="ubuntu-24.04", image_id="new-" + "x" * 60
         )
@@ -285,9 +275,7 @@ class TestImageOperationPull:
             default_firecracker=mock_firecracker,
         )
         deps["image_svc"].download_image.return_value = Path("/tmp/dl.qcow2")
-        deps["image_svc"].extract_image.return_value = Path(
-            "/tmp/ext.ext4"
-        )
+        deps["image_svc"].extract_image.return_value = Path("/tmp/ext.ext4")
         deps["image_svc"].optimize_image.return_value = _make_image()
 
         ImageOperation.pull(
@@ -558,38 +546,29 @@ class TestImageOperationRemoveExtended:
         img1 = _make_image("ubuntu-24.04")
         img2 = _make_image("debian-12")
         mock_resolved = MagicMock()
-        mock_resolved.items = [img1, img2]
+        mock_resolved.images = [img1, img2]
         mock_request = MagicMock()
         mock_request.resolve.return_value = mock_resolved
         mocker.patch(
             "mvmctl.api.inputs._image_input.ImageRequest",
             return_value=mock_request,
         )
-        mock_resolver = MagicMock()
-        mock_resolver._enrich.return_value = [img1, img2]
-        mocker.patch(
-            "mvmctl.core.image._resolver.ImageResolver",
-            return_value=mock_resolver,
-        )
-        mock_repo = MagicMock()
-        mocker.patch(
-            "mvmctl.api.image_operations.ImageRepository",
-            return_value=mock_repo,
-        )
         mocker.patch("mvmctl.api.image_operations.Database")
 
-        mock_controller = MagicMock()
+        mock_image_svc = MagicMock()
         mocker.patch(
-            "mvmctl.core.image._controller.ImageController",
-            return_value=mock_controller,
+            "mvmctl.api.image_operations.ImageRepository",
+        )
+        mocker.patch(
+            "mvmctl.core.image._service.ImageService",
+            return_value=mock_image_svc,
         )
 
         result = ImageOperation.remove(
             ImageInput(os_slug=["ubuntu-24.04", "debian-12"]), force=True
         )
         assert result.all_ok
-        assert mock_controller.remove.call_count == 2
-        mock_controller.remove.assert_called_with(force=True)
+        assert mock_image_svc.remove.call_count == 2
 
 
 class TestImageOperationHelpersExtended:
@@ -625,9 +604,7 @@ class TestImageOperationHelpersExtended:
             mocker, existing_image=None, default_firecracker=None
         )
         deps["image_svc"].download_image.return_value = Path("/tmp/dl.qcow2")
-        deps["image_svc"].extract_image.return_value = Path(
-            "/tmp/ext.ext4"
-        )
+        deps["image_svc"].extract_image.return_value = Path("/tmp/ext.ext4")
         deps["image_svc"].optimize_image.return_value = _make_image()
 
         result = ImageOperation.pull(

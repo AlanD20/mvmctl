@@ -10,11 +10,11 @@ from mvmctl.core.cache._service import CacheService
 class TestPruneWarmImages:
     """Tests for CacheService.prune_warm_images()."""
 
-    def test_no_warm_dir(self, monkeypatch):
+    def test_no_warm_dir(self, monkeypatch, tmp_path):
         """prune_warm_images returns False when warm dir does not exist."""
         monkeypatch.setattr(
             "mvmctl.core.cache._service.CacheUtils.get_warm_image_dir",
-            lambda: Path("/nonexistent"),
+            lambda: tmp_path / "nonexistent",
         )
         assert CacheService.prune_warm_images(dry_run=False) is False
         assert CacheService.prune_warm_images(dry_run=True) is False

@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mvmctl.core.volume._resolver import VolumeResolver, VolumeResolveResult
 from mvmctl.core.volume._repository import VolumeRepository
+from mvmctl.core.volume._resolver import VolumeResolver, VolumeResolveResult
 from mvmctl.exceptions import VolumeNotFoundError
 from mvmctl.models import VolumeItem
 

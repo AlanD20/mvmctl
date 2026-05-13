@@ -201,7 +201,7 @@ class TestLogController:
 
     def test_show_boot_log(self, db: Database, tmp_path: Path) -> None:
         """show() returns boot log lines."""
-        _seed_vm(db, "testvm", "abc123", tmp_path)
+        vm_hash = _seed_vm(db, "testvm", "abc123", tmp_path)
         vm_dir = tmp_path / "abc123"
         vm_dir.mkdir(parents=True)
         log_file = vm_dir / "firecracker.console.log"
@@ -211,7 +211,9 @@ class TestLogController:
             "mvmctl.utils.common.CacheUtils.get_vm_dir", return_value=vm_dir
         ):
             repo = VMRepository(db)
-            controller = LogController("testvm", repo)
+            vm = repo.get(vm_hash)
+            assert vm is not None
+            controller = LogController(vm)
             result = controller.show(
                 "boot",
                 lines=50,
@@ -223,7 +225,7 @@ class TestLogController:
 
     def test_show_os_log(self, db: Database, tmp_path: Path) -> None:
         """show() returns OS log lines."""
-        _seed_vm(db, "testvm", "abc123", tmp_path)
+        vm_hash = _seed_vm(db, "testvm", "abc123", tmp_path)
         vm_dir = tmp_path / "abc123"
         vm_dir.mkdir(parents=True)
         log_file = vm_dir / "firecracker.log"
@@ -233,7 +235,9 @@ class TestLogController:
             "mvmctl.utils.common.CacheUtils.get_vm_dir", return_value=vm_dir
         ):
             repo = VMRepository(db)
-            controller = LogController("testvm", repo)
+            vm = repo.get(vm_hash)
+            assert vm is not None
+            controller = LogController(vm)
             result = controller.show(
                 "os",
                 lines=50,
@@ -246,7 +250,7 @@ class TestLogController:
         self, db: Database, tmp_path: Path
     ) -> None:
         """show() returns the last N lines."""
-        _seed_vm(db, "testvm", "abc123", tmp_path)
+        vm_hash = _seed_vm(db, "testvm", "abc123", tmp_path)
         vm_dir = tmp_path / "abc123"
         vm_dir.mkdir(parents=True)
         log_file = vm_dir / "firecracker.console.log"
@@ -256,7 +260,9 @@ class TestLogController:
             "mvmctl.utils.common.CacheUtils.get_vm_dir", return_value=vm_dir
         ):
             repo = VMRepository(db)
-            controller = LogController("testvm", repo)
+            vm = repo.get(vm_hash)
+            assert vm is not None
+            controller = LogController(vm)
             result = controller.show(
                 "boot",
                 lines=5,
@@ -267,17 +273,11 @@ class TestLogController:
         assert result[0] == "line 95"
         assert result[-1] == "line 99"
 
-    def test_show_nonexistent_vm(self, db: Database) -> None:
-        """show() raises VMNotFoundError for nonexistent VM."""
-        repo = VMRepository(db)
-        with pytest.raises(VMNotFoundError, match="VM not found"):
-            LogController("nonexistent-vm", repo)
-
-    def test_show_unknown_log_type(self, db: Database, tmp_path: Path) -> None:
-        """show() raises ConfigError for unknown log type."""
-        from mvmctl.exceptions import LogsError
-
-        _seed_vm(db, "testvm", "abc123", tmp_path)
+    def test_show_nonexistent_log_file(
+        self, db: Database, tmp_path: Path
+    ) -> None:
+        """show() raises VMNotFoundError when log file does not exist."""
+        vm_hash = _seed_vm(db, "testvm", "abc123", tmp_path)
         vm_dir = tmp_path / "abc123"
         vm_dir.mkdir(parents=True)
 
@@ -285,18 +285,43 @@ class TestLogController:
             "mvmctl.utils.common.CacheUtils.get_vm_dir", return_value=vm_dir
         ):
             repo = VMRepository(db)
-            controller = LogController("testvm", repo)
-            with pytest.raises(LogsError, match="Unknown log type"):
+            vm = repo.get(vm_hash)
+            assert vm is not None
+            controller = LogController(vm)
+            with pytest.raises(VMNotFoundError, match="Log file not found"):
                 controller.show(
-                    "unknown",
+                    "boot",
                     lines=50,
                     log_filename="firecracker.log",
                     serial_output_filename="firecracker.console.log",
                 )
 
+    def test_show_unknown_log_type(self, db: Database, tmp_path: Path) -> None:
+        """show() treats unknown type as 'os' (validation is at API layer)."""
+        vm_hash = _seed_vm(db, "testvm", "abc123", tmp_path)
+        vm_dir = tmp_path / "abc123"
+        vm_dir.mkdir(parents=True)
+        log_file = vm_dir / "firecracker.log"
+        log_file.write_text("os line 1\nos line 2\n")
+
+        with patch(
+            "mvmctl.utils.common.CacheUtils.get_vm_dir", return_value=vm_dir
+        ):
+            repo = VMRepository(db)
+            vm = repo.get(vm_hash)
+            assert vm is not None
+            controller = LogController(vm)
+            result = controller.show(
+                "unknown",
+                lines=50,
+                log_filename="firecracker.log",
+                serial_output_filename="firecracker.console.log",
+            )
+        assert len(result) == 2
+
     def test_follow_yields_lines(self, db: Database, tmp_path: Path) -> None:
         """follow() yields log lines as they become available."""
-        _seed_vm(db, "testvm", "abc123", tmp_path)
+        vm_hash = _seed_vm(db, "testvm", "abc123", tmp_path)
         vm_dir = tmp_path / "abc123"
         vm_dir.mkdir(parents=True)
         (vm_dir / "firecracker.console.log").write_text("line 1\nline 2\n")
@@ -313,7 +338,9 @@ class TestLogController:
             patch.object(LogService, "follow_log", side_effect=_fake_follow),
         ):
             repo = VMRepository(db)
-            controller = LogController("testvm", repo)
+            vm = repo.get(vm_hash)
+            assert vm is not None
+            controller = LogController(vm)
             gen = controller.follow(
                 "boot",
                 log_filename="firecracker.log",
@@ -368,6 +395,6 @@ class TestLogController:
         )
         repo.upsert(vm)
 
-        controller = LogController("testvm", repo)
+        controller = LogController(vm)
         assert controller.vm.name == "testvm"
         assert controller.vm.id == "abc123"

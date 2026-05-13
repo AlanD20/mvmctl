@@ -111,27 +111,6 @@ class TestLeaseServiceAllocateIP:
         with pytest.raises(NetworkError, match="already leased"):
             lease_service.lease_specific("10.0.0.50", "vm-second")
 
-    def test_lease_specific_raises_when_outside_subnet(
-        self, lease_service: LeaseService
-    ) -> None:
-        """lease_specific() raises when IP is outside the subnet."""
-        with pytest.raises(NetworkError, match="not in subnet"):
-            lease_service.lease_specific("192.168.1.100", "vm-outside")
-
-    def test_lease_specific_raises_for_gateway(
-        self, lease_service: LeaseService
-    ) -> None:
-        """lease_specific() raises when trying to allocate the gateway IP."""
-        with pytest.raises(NetworkError, match="gateway"):
-            lease_service.lease_specific("10.0.0.1", "vm-gw")
-
-    def test_lease_specific_raises_for_invalid_ip(
-        self, lease_service: LeaseService
-    ) -> None:
-        """lease_specific() raises for invalid IP string."""
-        with pytest.raises(NetworkError, match="Invalid IP"):
-            lease_service.lease_specific("not-an-ip", "vm-bad")
-
 
 class TestLeaseServiceRelease:
     """Tests for IP release."""

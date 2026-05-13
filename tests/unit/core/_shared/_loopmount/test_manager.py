@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mvmctl.core._shared._loopmount._manager import LoopMountManager
-from mvmctl.exceptions import LoopMountError, LoopMountTimeoutError
+from mvmctl.core._shared._loopmount._manager import (
+    LoopMountManager,
+)
+from mvmctl.exceptions import (
+    LoopMountError,
+    LoopMountTimeoutError,
+    ProcessError,
+)
 from mvmctl.utils.common import CacheUtils
 
 
@@ -116,7 +121,7 @@ class TestIsBinaryAvailable:
 
         assert LoopMountManager.is_binary_available() is True
 
-    def test_not_available(self):
+    def test_not_available(self, mocker):
         bin_dir = CacheUtils.get_bin_dir()
         if bin_dir.exists():
             for f in bin_dir.iterdir():
@@ -125,6 +130,14 @@ class TestIsBinaryAvailable:
         else:
             bin_dir.mkdir(parents=True, exist_ok=True)
 
+        # _DEV_PROCESS_PATH points to source code, which always exists in dev.
+        # Replace the entire _DEV_PROCESS_PATH with a mock that returns False for exists().
+        mock_path = mocker.MagicMock()
+        mock_path.exists.return_value = False
+        mocker.patch(
+            "mvmctl.core._shared._loopmount._manager._DEV_PROCESS_PATH",
+            mock_path,
+        )
         assert LoopMountManager.is_binary_available() is False
 
 
@@ -132,8 +145,8 @@ class TestExtractError:
     def test_extract_error_from_stderr(self):
         proc = MagicMock()
         proc.returncode = 1
-        proc.stderr = b"some error message"
-        proc.stdout = b"{}"
+        proc.stderr = "some error message"
+        proc.stdout = "{}"
         result = LoopMountManager._extract_error(proc)
         assert "some error message" in result
 
@@ -161,15 +174,14 @@ class TestExecute:
     @patch(
         "mvmctl.core._shared._loopmount._manager.LoopMountManager._resolve_binary_path"
     )
-    @patch("mvmctl.core._shared._loopmount._manager.subprocess.run")
+    @patch("mvmctl.core._shared._loopmount._manager.run_cmd")
     def test_success_binary_path(self, mock_run, mock_resolve):
         """execute() uses compiled binary when available."""
         mock_resolve.return_value = Path("/usr/bin/mvm-provision")
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[],
+        mock_run.return_value = MagicMock(
             returncode=0,
-            stdout=json.dumps({"status": "ok"}).encode(),
-            stderr=b"",
+            stdout=json.dumps({"status": "ok"}),
+            stderr="",
         )
         result = LoopMountManager.execute(image_path="/img.ext4")
         assert result == {"status": "ok"}
@@ -181,11 +193,11 @@ class TestExecute:
     @patch(
         "mvmctl.core._shared._loopmount._manager.LoopMountManager._resolve_binary_path"
     )
-    @patch("mvmctl.core._shared._loopmount._manager.subprocess.run")
+    @patch("mvmctl.core._shared._loopmount._manager.run_cmd")
     def test_timeout(self, mock_run, mock_resolve):
         """execute() raises LoopMountTimeoutError on subprocess timeout."""
         mock_resolve.return_value = None  # dev mode
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd=[], timeout=60)
+        mock_run.side_effect = ProcessError("Command timed out after 60s")
 
         with pytest.raises(LoopMountTimeoutError, match="timed out"):
             LoopMountManager.execute(image_path="/img.ext4", timeout=60)
@@ -193,15 +205,14 @@ class TestExecute:
     @patch(
         "mvmctl.core._shared._loopmount._manager.LoopMountManager._resolve_binary_path"
     )
-    @patch("mvmctl.core._shared._loopmount._manager.subprocess.run")
+    @patch("mvmctl.core._shared._loopmount._manager.run_cmd")
     def test_nonzero_returncode(self, mock_run, mock_resolve):
         """execute() raises LoopMountError on non-zero exit."""
         mock_resolve.return_value = None
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[],
+        mock_run.return_value = MagicMock(
             returncode=1,
-            stdout=b"{}",
-            stderr=b"mount failed",
+            stdout="{}",
+            stderr="mount failed",
         )
         with pytest.raises(LoopMountError, match="mount failed"):
             LoopMountManager.execute(image_path="/img.ext4")
@@ -209,15 +220,14 @@ class TestExecute:
     @patch(
         "mvmctl.core._shared._loopmount._manager.LoopMountManager._resolve_binary_path"
     )
-    @patch("mvmctl.core._shared._loopmount._manager.subprocess.run")
+    @patch("mvmctl.core._shared._loopmount._manager.run_cmd")
     def test_invalid_json_response(self, mock_run, mock_resolve):
         """execute() raises LoopMountError when response is not valid JSON."""
         mock_resolve.return_value = None
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[],
+        mock_run.return_value = MagicMock(
             returncode=0,
-            stdout=b"not valid json",
-            stderr=b"",
+            stdout="not valid json",
+            stderr="",
         )
         with pytest.raises(LoopMountError, match="Failed to parse"):
             LoopMountManager.execute(image_path="/img.ext4")
@@ -225,15 +235,14 @@ class TestExecute:
     @patch(
         "mvmctl.core._shared._loopmount._manager.LoopMountManager._resolve_binary_path"
     )
-    @patch("mvmctl.core._shared._loopmount._manager.subprocess.run")
+    @patch("mvmctl.core._shared._loopmount._manager.run_cmd")
     def test_response_not_dict(self, mock_run, mock_resolve):
         """execute() raises LoopMountError when response is not a dict."""
         mock_resolve.return_value = None
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[],
+        mock_run.return_value = MagicMock(
             returncode=0,
-            stdout=b'["not", "a", "dict"]',
-            stderr=b"",
+            stdout='["not", "a", "dict"]',
+            stderr="",
         )
         with pytest.raises(LoopMountError, match="not a dict"):
             LoopMountManager.execute(image_path="/img.ext4")
@@ -241,12 +250,11 @@ class TestExecute:
     @patch(
         "mvmctl.core._shared._loopmount._manager.LoopMountManager._resolve_binary_path"
     )
-    @patch("mvmctl.core._shared._loopmount._manager.subprocess.run")
+    @patch("mvmctl.core._shared._loopmount._manager.run_cmd")
     def test_error_status_response(self, mock_run, mock_resolve):
         """execute() raises LoopMountError when response has error status."""
         mock_resolve.return_value = None
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[],
+        mock_run.return_value = MagicMock(
             returncode=0,
             stdout=json.dumps(
                 {
@@ -254,8 +262,8 @@ class TestExecute:
                     "error": "filesystem not found",
                     "step": "mount",
                 }
-            ).encode(),
-            stderr=b"",
+            ),
+            stderr="",
         )
         with pytest.raises(LoopMountError, match="filesystem not found"):
             LoopMountManager.execute(image_path="/img.ext4")
@@ -263,15 +271,14 @@ class TestExecute:
     @patch(
         "mvmctl.core._shared._loopmount._manager.LoopMountManager._resolve_binary_path"
     )
-    @patch("mvmctl.core._shared._loopmount._manager.subprocess.run")
+    @patch("mvmctl.core._shared._loopmount._manager.run_cmd")
     def test_with_all_operation_types(self, mock_run, mock_resolve):
         """execute() builds correct payload with all operation types."""
         mock_resolve.return_value = None
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[],
+        mock_run.return_value = MagicMock(
             returncode=0,
-            stdout=json.dumps({"status": "ok"}).encode(),
-            stderr=b"",
+            stdout=json.dumps({"status": "ok"}),
+            stderr="",
         )
         LoopMountManager.execute(
             image_path="/img.ext4",

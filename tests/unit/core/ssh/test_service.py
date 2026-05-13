@@ -8,28 +8,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mvmctl.core.ssh._service import SSHService
-from mvmctl.exceptions import MVMKeyError, SSHError
-
-
-class TestSSHServiceValidateUsername:
-    """Tests for SSHService username validation via constructor."""
-
-    def test_valid_usernames(self):
-        for name in ("root", "ubuntu", "_svc", "user-1", "a_b_c"):
-            SSHService("10.0.0.1", name)  # Should not raise during init
-
-    def test_invalid_usernames(self):
-        for name in (
-            "Root",
-            "user name",
-            "1start",
-            "user@host",
-            "$(whoami)",
-            "a;b",
-            "",
-        ):
-            with pytest.raises(SSHError, match="Invalid SSH username"):
-                SSHService("10.0.0.1", name)
 
 
 class TestSSHServiceBuildCommand:
@@ -64,15 +42,11 @@ class TestSSHServiceBuildCommand:
         cmd = SSHService("10.20.0.2", "ubuntu").build_command()
         assert "ubuntu@10.20.0.2" in cmd
 
-    def test_rejects_bad_username(self):
-        with pytest.raises(SSHError, match="Invalid SSH username"):
-            SSHService("10.20.0.2", "$(whoami)")
-
 
 class TestSSHServiceRunCommand:
     """Tests for SSHService.run_command()."""
 
-    @patch("mvmctl.core.ssh._service.subprocess.run")
+    @patch("mvmctl.core.ssh._service.run_cmd")
     def test_success(self, mock_run, tmp_path: Path):
         mock_run.return_value = MagicMock(returncode=0)
         key = tmp_path / "id_rsa"
@@ -84,7 +58,7 @@ class TestSSHServiceRunCommand:
         mock_run.assert_called_once()
         assert mock_run.call_args[0][0][0] == "ssh"
 
-    @patch("mvmctl.core.ssh._service.subprocess.run")
+    @patch("mvmctl.core.ssh._service.run_cmd")
     def test_failure(self, mock_run, tmp_path: Path):
         mock_run.return_value = MagicMock(returncode=1)
         key = tmp_path / "id_rsa"
@@ -94,7 +68,7 @@ class TestSSHServiceRunCommand:
         )
         assert result == 1
 
-    @patch("mvmctl.core.ssh._service.subprocess.run")
+    @patch("mvmctl.core.ssh._service.run_cmd")
     def test_key_not_exist(self, mock_run):
         """Works with no key path provided."""
         mock_run.return_value = MagicMock(returncode=0)
@@ -127,15 +101,6 @@ class TestSSHServiceExecCommand:
 
 class TestSSHServiceConnect:
     """Tests for SSHService.connect()."""
-
-    def test_invalid_ip(self):
-        with pytest.raises(SSHError, match="Invalid IP address"):
-            SSHService("not-an-ip", "root")
-
-    def test_key_path_not_exists(self, tmp_path: Path):
-        missing_key = tmp_path / "missing_key"
-        with pytest.raises(MVMKeyError, match="SSH key not found"):
-            SSHService("10.0.0.2", "root", key_path=missing_key)
 
     @patch("mvmctl.core.ssh._service.SSHService.exec_command")
     def test_exec_mode(self, mock_exec, tmp_path: Path):

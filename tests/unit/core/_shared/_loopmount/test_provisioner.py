@@ -105,9 +105,9 @@ class TestLoopMountProvisionerBuilder:
         assert str(ci_dir) in op.src
         assert "nocloud-net" in op.dst
 
-    def test_inject_cloud_init_nonexistent_dir(self):
+    def test_inject_cloud_init_nonexistent_dir(self, tmp_path):
         lp = LoopMountProvisioner(Path("/fake/rootfs.ext4"), "ext4")
-        lp.inject_cloud_init(Path("/nonexistent"))
+        lp.inject_cloud_init(tmp_path / "nonexistent")
         assert lp._ops == []
 
     def test_multiple_operations_accumulate(self):

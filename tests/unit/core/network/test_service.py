@@ -10,7 +10,7 @@ import pytest
 from mvmctl.core._shared import Database
 from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.core.network._service import NetworkService
-from mvmctl.exceptions import NetworkError
+from mvmctl.exceptions import NetworkError, ProcessError
 from mvmctl.models import NetworkItem
 from mvmctl.utils.network import NetworkUtils
 
@@ -149,13 +149,11 @@ class TestNetworkServiceBridge:
         self, repo: NetworkRepository, mocker
     ) -> None:
         """ensure_bridge() raises NetworkError when bridge creation fails."""
-        import subprocess
-
         mocker.patch.object(NetworkUtils, "bridge_exists", return_value=False)
         mocker.patch.object(
             NetworkUtils,
             "_run_batch",
-            side_effect=subprocess.CalledProcessError(1, ["ip", "-batch", "-"]),
+            side_effect=ProcessError("Command failed (exit 1): ip"),
         )
 
         service = NetworkService(repo)
@@ -293,13 +291,11 @@ class TestNetworkServiceTap:
         self, repo: NetworkRepository, default_network, mocker
     ) -> None:
         """ensure_tap() raises NetworkError when TAP creation fails."""
-        import subprocess
-
         mocker.patch.object(NetworkUtils, "tap_exists", return_value=False)
         mocker.patch.object(
             NetworkUtils,
             "_run_batch",
-            side_effect=subprocess.CalledProcessError(1, ["ip", "-batch", "-"]),
+            side_effect=ProcessError("Command failed (exit 1): ip"),
         )
 
         service = NetworkService(repo)
@@ -963,7 +959,7 @@ class TestNetworkServiceRemove:
     def test_remove_calls_remove_nat_and_bridge(
         self, repo: NetworkRepository, default_network, mocker
     ) -> None:
-        """remove() calls remove_nat, remove_bridge, and controller.remove."""
+        """remove() calls remove_nat, remove_bridge, and performs DB deletion."""
         mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
         mocker.patch.object(NetworkUtils, "get_bridge_taps", return_value=[])
         mock_remove_nat = mocker.patch.object(
@@ -972,16 +968,14 @@ class TestNetworkServiceRemove:
         mock_remove_bridge = mocker.patch.object(
             NetworkService, "remove_bridge", autospec=True
         )
-        mock_controller = mocker.patch(
-            "mvmctl.core.network._controller.NetworkController"
-        )
 
         service = NetworkService(repo)
         service.remove(default_network)
 
         mock_remove_nat.assert_called_once()
         mock_remove_bridge.assert_called_once()
-        mock_controller.return_value.remove.assert_called_once_with(force=False)
+        # Verify DB deletion happened (no VMs reference this network)
+        assert repo.get(default_network.id) is None
 
     def test_remove_tolerates_nat_failure(
         self, repo: NetworkRepository, default_network, mocker
@@ -994,15 +988,18 @@ class TestNetworkServiceRemove:
             autospec=True,
         )
         mocker.patch.object(NetworkService, "remove_bridge", autospec=True)
-        mocker.patch("mvmctl.core.network._controller.NetworkController")
+        mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
+        mocker.patch.object(NetworkUtils, "get_bridge_taps", return_value=[])
 
         service = NetworkService(repo)
         service.remove(default_network)
+        # Verify DB deletion still happened
+        assert repo.get(default_network.id) is None
 
     def test_remove_tolerates_bridge_failure(
         self, repo: NetworkRepository, default_network, mocker
     ) -> None:
-        """remove() continues with controller.remove even if bridge removal fails."""
+        """remove() performs DB deletion even if bridge removal fails."""
         mocker.patch.object(
             NetworkService,
             "remove_nat",
@@ -1014,38 +1011,39 @@ class TestNetworkServiceRemove:
             side_effect=NetworkError("Bridge failed"),
             autospec=True,
         )
-        mock_controller = mocker.patch(
-            "mvmctl.core.network._controller.NetworkController"
-        )
+        mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
+        mocker.patch.object(NetworkUtils, "get_bridge_taps", return_value=[])
 
         service = NetworkService(repo)
         service.remove(default_network)
-
-        mock_controller.return_value.remove.assert_called_once_with(force=False)
+        # Verify DB deletion still happened despite bridge failure
+        assert repo.get(default_network.id) is None
 
     def test_remove_with_nat_disabled(
         self, repo: NetworkRepository, mocker
     ) -> None:
         """remove() skips NAT when nat_enabled is False."""
-        network_no_nat = NetworkItem(
-            id="net-no-nat",
-            name="test-no-nat",
-            subnet="10.1.0.0/24",
-            bridge="mvm-no-nat",
-            ipv4_gateway="10.1.0.1",
-            bridge_active=True,
-            nat_enabled=False,
-            is_default=False,
-            is_present=True,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
+        repo.upsert(
+            network_no_nat := NetworkItem(
+                id="net-no-nat",
+                name="test-no-nat",
+                subnet="10.1.0.0/24",
+                bridge="mvm-no-nat",
+                ipv4_gateway="10.1.0.1",
+                bridge_active=True,
+                nat_enabled=False,
+                is_default=False,
+                is_present=True,
+                created_at="2026-01-01T00:00:00Z",
+                updated_at="2026-01-01T00:00:00Z",
+            )
         )
         mocker.patch.object(NetworkUtils, "get_bridge_taps", return_value=[])
         mock_remove_nat = mocker.patch.object(
             NetworkService, "remove_nat", autospec=True
         )
         mocker.patch.object(NetworkService, "remove_bridge", autospec=True)
-        mocker.patch("mvmctl.core.network._controller.NetworkController")
+        mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
 
         service = NetworkService(repo)
         service.remove(network_no_nat)
@@ -1322,7 +1320,7 @@ class TestNetworkServiceReconcileEdgeCases:
         mocker.patch.object(
             NetworkUtils,
             "_run_batch",
-            side_effect=subprocess.CalledProcessError(1, ["ip", "-batch", "-"]),
+            side_effect=ProcessError("Command failed (exit 1): ip"),
         )
 
         service = NetworkService(repo)

@@ -226,11 +226,12 @@ class TestBinaryRemoveByVersion:
             "mvmctl.api.binary_operations.BinaryService",
             return_value=mock_service,
         )
+        mock_resolver.enrich.side_effect = lambda bins: bins
         mocker.patch("mvmctl.api.binary_operations.AuditLog")
 
         BinaryOperation.remove_by_version("1.15.0")
-        args, kwargs = mock_service.remove_many.call_args
-        assert len(args[0]) == 2
+        args, kwargs = mock_service.remove.call_args
+        assert mock_service.remove.call_count == 2
 
     def test_remove_by_version_partial(self, mocker):
         """remove_by_version() handles when one binary not found."""
@@ -250,6 +251,7 @@ class TestBinaryRemoveByVersion:
             "mvmctl.api.binary_operations.BinaryService",
             return_value=mock_service,
         )
+        mock_resolver.enrich.side_effect = lambda bins: bins
         mocker.patch("mvmctl.api.binary_operations.AuditLog")
         from mvmctl.exceptions import BinaryNotFoundError
 
@@ -260,7 +262,7 @@ class TestBinaryRemoveByVersion:
 
         BinaryOperation.remove_by_version("1.15.0")
         # Should still remove firecracker even if jailer not found
-        assert mock_service.remove_many.call_count == 1
+        assert mock_service.remove.call_count == 1
 
     def test_remove_by_version_skips_if_none_found(self, mocker):
         mocker.patch("mvmctl.api.binary_operations.Database")
@@ -281,9 +283,10 @@ class TestBinaryRemoveByVersion:
             "mvmctl.api.binary_operations.BinaryService",
             return_value=mock_service,
         )
+        mock_resolver.enrich.side_effect = lambda bins: bins
 
         BinaryOperation.remove_by_version("1.14.0")
-        mock_service.remove_many.assert_not_called()
+        mock_service.remove.assert_not_called()
 
 
 class TestBinaryGet:

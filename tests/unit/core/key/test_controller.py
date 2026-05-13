@@ -73,14 +73,6 @@ class TestKeyControllerInit:
         controller = KeyController(SAMPLE_KEY, repo)
         assert controller.inspect() == SAMPLE_KEY
 
-    def test_remove(self):
-        """remove delegates to repo.delete with the key id."""
-        repo = MagicMock()
-        controller = KeyController(SAMPLE_KEY, repo)
-        controller.remove()
-        repo.delete.assert_called_once_with("sha256-abc123")
-
-
 class TestKeyControllerExport:
     def test_export_success(self, tmp_path: Path) -> None:
         """Export copies both key files to destination and sets 0600 perms."""

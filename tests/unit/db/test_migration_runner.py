@@ -241,10 +241,10 @@ class TestValidateMigrations:
         (migrations_dir / "002_more.sql").write_text("SELECT 2;\n")
         assert db.validate_migrations() == []
 
-    def test_returns_error_for_missing_dir(self, db_path: Path) -> None:
+    def test_returns_error_for_missing_dir(self, db_path: Path, tmp_path: Path) -> None:
         d = Database(db_path=db_path)
         original = d._get_migrations_dir
-        d._get_migrations_dir = lambda: Path("/nonexistent")  # type: ignore[method-assign]
+        d._get_migrations_dir = lambda: tmp_path / "nonexistent"  # type: ignore[method-assign]
         errors = d.validate_migrations()
         assert len(errors) >= 1
         assert "not found" in errors[0].lower()

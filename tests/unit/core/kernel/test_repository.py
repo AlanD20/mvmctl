@@ -419,17 +419,21 @@ class TestUpdateManyIsPresent:
 
 
 # ======================================================================
-# query_vms_by_kernel()
+# find_by_kernel_id() — moved to VMRepository
 # ======================================================================
 
 
 class TestQueryVMsByKernel:
-    """Tests for KernelRepository.query_vms_by_kernel()."""
+    """Tests for VMRepository.find_by_kernel_id()."""
 
     def test_no_vms(self, repo: KernelRepository) -> None:
+        from mvmctl.core._shared import Database as DB
+        from mvmctl.core.vm._repository import VMRepository
+
         k = _make_kernel()
         repo.upsert(k)
-        vms = repo.query_vms_by_kernel(k.id)
+        vm_repo = VMRepository(DB())
+        vms = vm_repo.find_by_kernel_id(k.id)
         assert vms == []
 
     def test_with_vms(self, repo: KernelRepository) -> None:
@@ -503,7 +507,7 @@ class TestQueryVMsByKernel:
         )
         vm_repo.upsert(vm)
 
-        vms = repo.query_vms_by_kernel(k.id)
+        vms = vm_repo.find_by_kernel_id(k.id)
         assert len(vms) == 1
         assert vms[0].name == "test-vm"
         assert vms[0].kernel_id == k.id

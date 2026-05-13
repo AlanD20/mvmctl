@@ -14,7 +14,6 @@ from mvmctl.utils._system import (
     SigtermContext,
     has_python_ancestor,
     is_process_running,
-    privileged_cmd,
     require_mvm_group_membership,
     run_cmd,
     sigterm_context,
@@ -141,6 +140,9 @@ class TestRunCmd:
             text=True,
             check=True,
             cwd="/tmp",
+            timeout=None,
+            input=None,
+            env=None,
         )
 
     @patch("mvmctl.utils._system.subprocess.run")
@@ -153,6 +155,9 @@ class TestRunCmd:
             text=True,
             check=True,
             cwd=None,
+            timeout=None,
+            input=None,
+            env=None,
         )
 
 
@@ -241,32 +246,59 @@ class TestStreamCmd:
 
 
 # ---------------------------------------------------------------------------
-# privileged_cmd
+# run_cmd — privileged=True
 # ---------------------------------------------------------------------------
 
 
-class TestPrivilegedCmd:
-    """Tests for privileged_cmd()."""
+class TestRunCmdPrivileged:
+    """Tests for run_cmd with privileged=True."""
 
+    @patch("mvmctl.utils._system.subprocess.run")
     @patch("mvmctl.utils._system.os.getuid", return_value=0)
-    def test_as_root_returns_unchanged(self, mock_getuid):
-        result = privileged_cmd(["ip", "link"])
-        assert result == ["ip", "link"]
+    def test_as_root_no_sudo(self, mock_getuid, mock_run):
+        """When running as root, privileged=True does not prepend sudo."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        run_cmd(["ip", "link"], privileged=True)
+        mock_run.assert_called_once()
+        args = mock_run.call_args[0][0]
+        assert args == ["ip", "link"]
 
+    @patch("mvmctl.utils._system.subprocess.run")
     @patch("mvmctl.utils._system.require_mvm_group_membership")
     @patch("mvmctl.utils._system.os.getuid", return_value=1000)
-    def test_as_non_root_prepends_sudo(self, mock_getuid, mock_require):
-        result = privileged_cmd(["ip", "link"])
-        assert result == ["sudo", "ip", "link"]
+    def test_as_non_root_prepends_sudo(
+        self, mock_getuid, mock_require, mock_run
+    ):
+        """When not root, privileged=True prepends sudo and checks group."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        run_cmd(["ip", "link"], privileged=True)
+        mock_require.assert_called_once()
+        mock_run.assert_called_once()
+        args = mock_run.call_args[0][0]
+        assert args == ["sudo", "ip", "link"]
 
+    @patch("mvmctl.utils._system.subprocess.run")
     @patch("mvmctl.utils._system.require_mvm_group_membership")
     @patch("mvmctl.utils._system.os.getuid", return_value=1000)
-    def test_as_non_root_requires_group(self, mock_getuid, mock_require):
+    def test_as_non_root_requires_group(
+        self, mock_getuid, mock_require, mock_run
+    ):
+        """When group membership check fails, run_cmd raises PrivilegeError."""
         from mvmctl.exceptions import PrivilegeError
 
         mock_require.side_effect = PrivilegeError("Not in mvm group")
         with pytest.raises(PrivilegeError):
-            privileged_cmd(["ip", "link"])
+            run_cmd(["ip", "link"], privileged=True)
+        mock_run.assert_not_called()
+
+    @patch("mvmctl.utils._system.subprocess.run")
+    @patch("mvmctl.utils._system.os.getuid", return_value=0)
+    def test_privileged_false_does_not_add_sudo(self, mock_getuid, mock_run):
+        """privileged=False (default) does not add sudo even when called on same args."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        run_cmd(["ip", "link"], privileged=False)
+        args = mock_run.call_args[0][0]
+        assert args == ["ip", "link"]
 
 
 # ---------------------------------------------------------------------------
@@ -375,6 +407,7 @@ class TestHasPythonAncestor:
 class TestRequireMvmGroupMembership:
     """Tests for require_mvm_group_membership()."""
 
+    @patch("mvmctl.utils._system._MVM_GROUP_VERIFIED", False)
     @patch("grp.getgrnam", side_effect=KeyError("mvm"))
     @patch("pwd.getpwnam")
     def test_missing_group_raises(self, mock_pwd_unused, mock_grp_unused):
@@ -1184,6 +1217,7 @@ class TestStreamCmdNew:
 
 
 @pytest.mark.real_mvm_group_check
+@patch("mvmctl.utils._system._MVM_GROUP_VERIFIED", False)
 class TestRequireMvmGroupMembershipNew:
     """Additional tests for require_mvm_group_membership()."""
 

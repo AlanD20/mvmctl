@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,7 +11,7 @@ from mvmctl.core._shared._iptables_tracker import (
     IPTablesRuleRepository,
     IPTablesTracker,
 )
-from mvmctl.exceptions import IPTablesTrackerError
+from mvmctl.exceptions import IPTablesTrackerError, ProcessError
 from mvmctl.models import (
     IPTablesChain,
     IPTablesPort,
@@ -183,12 +182,12 @@ class TestEnsureRule:
         def _mock_subprocess_run(cmd, **kwargs):
             # -C check fails (rule doesn't exist)
             if "-C" in cmd:
-                raise subprocess.CalledProcessError(1, cmd)
+                raise ProcessError("Command failed (exit 1): iptables")
             # -A succeeds
             return MagicMock(returncode=0, stdout=b"", stderr=b"")
 
         with patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.subprocess.run",
+            "mvmctl.core._shared._iptables_tracker._tracker.run_cmd",
             side_effect=_mock_subprocess_run,
         ):
             rule = _make_rule(dport=9090)
@@ -214,7 +213,7 @@ class TestEnsureRule:
             return MagicMock(returncode=0)
 
         with patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.subprocess.run",
+            "mvmctl.core._shared._iptables_tracker._tracker.run_cmd",
             side_effect=_mock_subprocess_run,
         ):
             rule = _make_rule(dport=7070)
@@ -233,13 +232,13 @@ class TestEnsureRule:
 
         def _mock_subprocess_run(cmd, **kwargs):
             if "-C" in cmd:
-                raise subprocess.CalledProcessError(1, cmd)
-            raise subprocess.CalledProcessError(
-                1, cmd, stderr=b"iptables: Resource temporarily unavailable"
+                raise ProcessError("Command failed (exit 1): iptables")
+            raise ProcessError(
+                "Command failed (exit 1): iptables: Resource temporarily unavailable"
             )
 
         with patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.subprocess.run",
+            "mvmctl.core._shared._iptables_tracker._tracker.run_cmd",
             side_effect=_mock_subprocess_run,
         ):
             rule = _make_rule(dport=6060)
@@ -267,7 +266,7 @@ class TestRemoveRule:
             return MagicMock(returncode=0)
 
         with patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.subprocess.run",
+            "mvmctl.core._shared._iptables_tracker._tracker.run_cmd",
             side_effect=_mock_subprocess_run,
         ):
             result = tracker.remove_rule(db_rule)
@@ -286,7 +285,7 @@ class TestRemoveRule:
             return MagicMock(returncode=1)
 
         with patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.subprocess.run",
+            "mvmctl.core._shared._iptables_tracker._tracker.run_cmd",
             side_effect=_mock_subprocess_run,
         ):
             result = tracker.remove_rule(rule)
@@ -311,7 +310,7 @@ class TestEnsureChain:
             return MagicMock(returncode=0)
 
         with patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.subprocess.run",
+            "mvmctl.core._shared._iptables_tracker._tracker.run_cmd",
             side_effect=_mock_subprocess_run,
         ):
             result = tracker.ensure_chain(_VALID_CHAIN)
@@ -322,7 +321,7 @@ class TestEnsureChain:
     ) -> None:
         """ensure_chain returns False when chain already exists."""
         with patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.subprocess.run",
+            "mvmctl.core._shared._iptables_tracker._tracker.run_cmd",
             return_value=MagicMock(returncode=0),
         ):
             result = tracker.ensure_chain(_VALID_CHAIN)
@@ -338,13 +337,11 @@ class TestEnsureChain:
             call_count[0] += 1
             if call_count[0] == 1:
                 return MagicMock(returncode=1)  # Check fails
-            # Chain creation with check=True raises CalledProcessError
-            error = subprocess.CalledProcessError(1, cmd)
-            error.stderr = b"Chain already exists"
-            raise error
+            # Chain creation with check=True raises ProcessError
+            raise ProcessError("Chain already exists")
 
         with patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.subprocess.run",
+            "mvmctl.core._shared._iptables_tracker._tracker.run_cmd",
             side_effect=_mock_subprocess_run,
         ):
             result = tracker.ensure_chain(_VALID_CHAIN)
@@ -361,12 +358,10 @@ class TestEnsureChain:
             if call_count[0] == 1:
                 return MagicMock(returncode=1)  # Check fails
             # Other error with check=True
-            error = subprocess.CalledProcessError(1, cmd)
-            error.stderr = b"Permission denied"
-            raise error
+            raise ProcessError("Permission denied")
 
         with patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.subprocess.run",
+            "mvmctl.core._shared._iptables_tracker._tracker.run_cmd",
             side_effect=_mock_subprocess_run,
         ):
             with pytest.raises(IPTablesTrackerError, match="Failed to create"):
@@ -388,7 +383,7 @@ class TestEnsureJumpRule:
             return MagicMock(returncode=0)
 
         with patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.subprocess.run",
+            "mvmctl.core._shared._iptables_tracker._tracker.run_cmd",
             side_effect=_mock_subprocess_run,
         ):
             result = tracker.ensure_jump_rule("INPUT", _VALID_CHAIN.value)
@@ -399,7 +394,7 @@ class TestEnsureJumpRule:
     ) -> None:
         """ensure_jump_rule returns success when jump rule exists."""
         with patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.subprocess.run",
+            "mvmctl.core._shared._iptables_tracker._tracker.run_cmd",
             return_value=MagicMock(returncode=0),
         ):
             result = tracker.ensure_jump_rule("INPUT", _VALID_CHAIN.value)
@@ -429,7 +424,7 @@ class TestFlushChain:
             return MagicMock(returncode=0)
 
         with patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.subprocess.run",
+            "mvmctl.core._shared._iptables_tracker._tracker.run_cmd",
             side_effect=_mock_subprocess_run,
         ):
             result = tracker.flush_chain(_VALID_CHAIN)
@@ -438,7 +433,7 @@ class TestFlushChain:
     def test_flush_chain_not_exists(self, tracker: IPTablesTracker) -> None:
         """flush_chain returns False when chain doesn't exist."""
         with patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.subprocess.run",
+            "mvmctl.core._shared._iptables_tracker._tracker.run_cmd",
             return_value=MagicMock(returncode=1),
         ):
             result = tracker.flush_chain(_VALID_CHAIN)
@@ -454,10 +449,10 @@ class TestFlushChain:
             call_count[0] += 1
             if call_count[0] == 1:
                 return MagicMock(returncode=0)  # Chain exists
-            raise subprocess.CalledProcessError(1, cmd, stderr=b"fail")
+            raise ProcessError("Command failed (exit 1): iptables -F")
 
         with patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.subprocess.run",
+            "mvmctl.core._shared._iptables_tracker._tracker.run_cmd",
             side_effect=_mock_subprocess_run,
         ):
             with pytest.raises(IPTablesTrackerError, match="Failed to flush"):
@@ -484,7 +479,7 @@ class TestRemoveChain:
                 return_value=True,
             ),
             patch(
-                "mvmctl.core._shared._iptables_tracker._tracker.subprocess.run",
+                "mvmctl.core._shared._iptables_tracker._tracker.run_cmd",
                 return_value=MagicMock(returncode=0),
             ),
         ):

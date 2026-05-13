@@ -441,7 +441,7 @@ class TestImageEdgeCases:
             return images
 
         monkeypatch.setattr(
-            "mvmctl.core.image._resolver.ImageResolver._enrich",
+            "mvmctl.core.image._resolver.ImageResolver.enrich",
             _mock_enrich,
         )
 
@@ -476,7 +476,7 @@ class TestImageEdgeCases:
             return images
 
         monkeypatch.setattr(
-            "mvmctl.core.image._resolver.ImageResolver._enrich",
+            "mvmctl.core.image._resolver.ImageResolver.enrich",
             _mock_enrich,
         )
 

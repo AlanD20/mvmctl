@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from mvmctl.core.logs._service import LogService
-from mvmctl.exceptions import ConfigError, LogsError, MVMError, VMNotFoundError
+from mvmctl.exceptions import MVMError, VMNotFoundError
 
 
 class TestGetLogPath:
@@ -48,18 +48,20 @@ class TestGetLogPath:
         assert result == log_file
 
     def test_get_log_path_unknown_type(self, tmp_path: Path) -> None:
-        """get_log_path raises ConfigError for unknown log type."""
+        """get_log_path treats unknown type as 'os' (validation is at API layer)."""
         vm_dir = tmp_path / "test-vm"
         vm_dir.mkdir()
+        log_file = vm_dir / "firecracker.log"
+        log_file.write_text("os log\n")
 
         with patch_get_vm_dir(vm_dir):
-            with pytest.raises(LogsError, match="Unknown log type"):
-                LogService.get_log_path(
-                    "a" * 64,
-                    "unknown",
-                    log_filename="firecracker.log",
-                    serial_output_filename="firecracker.console.log",
-                )
+            result = LogService.get_log_path(
+                "a" * 64,
+                "unknown",
+                log_filename="firecracker.log",
+                serial_output_filename="firecracker.console.log",
+            )
+        assert result == log_file
 
     def test_get_log_path_missing_vm(self, tmp_path: Path) -> None:
         """get_log_path raises VMNotFoundError when VM directory missing."""

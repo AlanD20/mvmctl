@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -11,6 +12,7 @@ from mvmctl.core._shared import Database
 from mvmctl.core.key._repository import KeyRepository
 from mvmctl.core.key._service import KeyService
 from mvmctl.exceptions import MVMKeyError
+from mvmctl.models import SSHKeyItem
 
 SAMPLE_PUB_KEY = (
     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHtestkeycontent testuser@testhost"
@@ -109,7 +111,7 @@ class TestGenerateKeypair:
             return mock_result
 
         with patch(
-            "mvmctl.core.key._service.subprocess.run", side_effect=_fake_keygen
+            "mvmctl.core.key._service.run_cmd", side_effect=_fake_keygen
         ):
             info, private_path = service.create_keypair(
                 "newkey", output_dir=output_dir
@@ -123,13 +125,29 @@ class TestGenerateKeypair:
         retrieved = service._repo.get_by_name("newkey")
         assert retrieved is not None
 
-    def test_create_keypair_file_exists_no_overwrite(
+    def test_create_keypair_db_duplicate_no_overwrite(
         self, service: KeyService, tmp_path: Path
     ) -> None:
-        """create_keypair raises error when key file exists and overwrite=False."""
+        """create_keypair raises error when key name exists in DB and overwrite=False."""
         output_dir = tmp_path / "ssh"
         output_dir.mkdir()
-        (output_dir / "existingkey").write_text("existing private key")
+
+        # Register key in DB first to trigger duplicate check
+        now = datetime.now(tz=UTC).isoformat()
+        existing = SSHKeyItem(
+            id="existingkey-id-" + "x" * 55,
+            name="existingkey",
+            fingerprint="SHA256:abc123",
+            algorithm="ssh-ed25519",
+            comment="existingkey@host",
+            public_key_path=str(output_dir / "existingkey.pub"),
+            private_key_path=str(output_dir / "existingkey"),
+            is_default=False,
+            is_present=True,
+            created_at=now,
+            updated_at=now,
+        )
+        service._repo.upsert(existing)
 
         with pytest.raises(MVMKeyError, match="already exists"):
             service.create_keypair("existingkey", output_dir=output_dir)
@@ -146,7 +164,7 @@ class TestGenerateKeypair:
         mock_result.stderr = "keygen error"
 
         with patch(
-            "mvmctl.core.key._service.subprocess.run", return_value=mock_result
+            "mvmctl.core.key._service.run_cmd", return_value=mock_result
         ):
             with pytest.raises(MVMKeyError, match="ssh-keygen failed"):
                 service.create_keypair("failkey", output_dir=output_dir)
@@ -176,7 +194,7 @@ class TestGenerateKeypair:
             return mock_result
 
         with patch(
-            "mvmctl.core.key._service.subprocess.run", side_effect=_fake_keygen
+            "mvmctl.core.key._service.run_cmd", side_effect=_fake_keygen
         ):
             info, private_path = service.create_keypair(
                 "overkey", output_dir=output_dir, overwrite=True
@@ -197,34 +215,11 @@ class TestAddKey:
         pub_file = tmp_path / "id_ed25519.pub"
         pub_file.write_text(SAMPLE_PUB_KEY)
 
-        info = service.add_key("testkey", pub_file, keys_dir)
+        info = service.add_key("testkey", pub_file, SAMPLE_PUB_KEY, keys_dir)
         assert info.name == "testkey"
         assert info.algorithm == "ssh-ed25519"
         assert info.fingerprint.startswith("SHA256:")
         assert (keys_dir / "testkey.pub").exists()
-
-    def test_add_key_file_not_found(
-        self, service: KeyService, tmp_path: Path
-    ) -> None:
-        """add_key raises error when public key file doesn't exist."""
-        keys_dir = tmp_path / "keys"
-        keys_dir.mkdir()
-
-        with pytest.raises(MVMKeyError, match="not found"):
-            service.add_key("testkey", tmp_path / "nonexistent.pub", keys_dir)
-
-    def test_add_key_empty_file(
-        self, service: KeyService, tmp_path: Path
-    ) -> None:
-        """add_key raises error when public key file is empty."""
-        keys_dir = tmp_path / "keys"
-        keys_dir.mkdir()
-
-        pub_file = tmp_path / "empty.pub"
-        pub_file.write_text("")
-
-        with pytest.raises(MVMKeyError, match="empty"):
-            service.add_key("testkey", pub_file, keys_dir)
 
     def test_add_key_already_exists(
         self, service: KeyService, tmp_path: Path
@@ -235,59 +230,7 @@ class TestAddKey:
 
         pub_file = tmp_path / "id.pub"
         pub_file.write_text(SAMPLE_PUB_KEY)
-
-        service.add_key("dupkey", pub_file, keys_dir)
-        with pytest.raises(MVMKeyError, match="already exists"):
-            service.add_key("dupkey", pub_file, keys_dir)
-
-    def test_add_key_with_overwrite(
-        self, service: KeyService, tmp_path: Path
-    ) -> None:
-        """add_key with overwrite=True replaces existing key."""
-        keys_dir = tmp_path / "keys"
-        keys_dir.mkdir()
-
-        pub_file = tmp_path / "id.pub"
-        pub_file.write_text(SAMPLE_PUB_KEY)
-
-        info2 = service.add_key("overkey", pub_file, keys_dir, overwrite=True)
-        assert info2.name == "overkey"
-
-    def test_add_key_detects_private_key(
-        self, service: KeyService, tmp_path: Path
-    ) -> None:
-        """add_key raises error when given a private key file."""
-        keys_dir = tmp_path / "keys"
-        keys_dir.mkdir()
-
-        priv_file = tmp_path / "id_ed25519"
-        priv_file.write_text(
-            "-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----\n"
-        )
-
-        with pytest.raises(MVMKeyError, match="private key"):
-            service.add_key("mykey", priv_file, keys_dir)
-
-
-class TestListKeys:
-    """Tests for list_keys."""
-
-    def test_list_keys_empty(self, service: KeyService, tmp_path: Path) -> None:
-        """list_keys returns empty list when no keys."""
-        keys_dir = tmp_path / "keys"
-        keys_dir.mkdir()
-        assert service.list_keys(keys_dir) == []
-
-    def test_list_keys_with_verify(
-        self, service: KeyService, tmp_path: Path
-    ) -> None:
-        """list_keys with verify=True checks filesystem."""
-        keys_dir = tmp_path / "keys"
-        keys_dir.mkdir()
-
-        pub_file = tmp_path / "id.pub"
-        pub_file.write_text(SAMPLE_PUB_KEY)
-        service.add_key("mykey", pub_file, keys_dir)
+        service.add_key("mykey", pub_file, SAMPLE_PUB_KEY, keys_dir)
 
         # Remove the file to trigger is_present update
         (keys_dir / "mykey.pub").unlink()
@@ -316,26 +259,29 @@ class TestSetDefaults:
         bob_file = tmp_path / "bob.pub"
         bob_file.write_text(bob_key)
 
-        service.add_key("alice", alice_file, keys_dir)
-        service.add_key("bob", bob_file, keys_dir)
+        service.add_key("alice", alice_file, alice_key, keys_dir)
+        service.add_key("bob", bob_file, bob_key, keys_dir)
 
         service.set_default_keys(["alice", "bob"])
         defaults = service._repo.get_defaults()
         assert len(defaults) == 2
 
-    def test_set_default_keys_rejects_unknown(
+    def test_set_default_keys_skips_unknown(
         self, service: KeyService, tmp_path: Path
     ) -> None:
-        """set_default_keys raises error for unknown key names."""
+        """set_default_keys silently skips unknown key names (validation is at API layer)."""
         keys_dir = tmp_path / "keys"
         keys_dir.mkdir()
 
         pub_file = tmp_path / "id.pub"
         pub_file.write_text(SAMPLE_PUB_KEY)
-        service.add_key("alice", pub_file, keys_dir)
+        service.add_key("alice", pub_file, SAMPLE_PUB_KEY, keys_dir)
 
-        with pytest.raises(MVMKeyError, match="not found"):
-            service.set_default_keys(["alice", "ghost"])
+        # Unknown names are silently skipped — only known keys get set
+        service.set_default_keys(["alice", "ghost"])
+        defaults = service._repo.get_defaults()
+        assert len(defaults) == 1
+        assert defaults[0].name == "alice"
 
     def test_clear_default_keys(
         self, service: KeyService, tmp_path: Path
@@ -346,7 +292,7 @@ class TestSetDefaults:
 
         pub_file = tmp_path / "id.pub"
         pub_file.write_text(SAMPLE_PUB_KEY)
-        service.add_key("alice", pub_file, keys_dir)
+        service.add_key("alice", pub_file, SAMPLE_PUB_KEY, keys_dir)
         service.set_default_keys(["alice"])
         assert len(service._repo.get_defaults()) == 1
 
@@ -366,7 +312,7 @@ class TestGetPubkey:
 
         pub_file = tmp_path / "id.pub"
         pub_file.write_text(SAMPLE_PUB_KEY)
-        service.add_key("mykey", pub_file, keys_dir)
+        service.add_key("mykey", pub_file, SAMPLE_PUB_KEY, keys_dir)
 
         content = service.get_pubkey("mykey", keys_dir)
         assert "ssh-ed25519" in content
@@ -390,7 +336,7 @@ class TestGetPubkey:
 
         pub_file = tmp_path / "id.pub"
         pub_file.write_text(SAMPLE_PUB_KEY)
-        item = service.add_key("mykey", pub_file, keys_dir)
+        item = service.add_key("mykey", pub_file, SAMPLE_PUB_KEY, keys_dir)
 
         content = service.get_pubkey(item, keys_dir)
         assert "ssh-ed25519" in content

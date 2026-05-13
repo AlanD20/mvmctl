@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from mvmctl.core._shared._guestfs._kernel_detector import KernelDetector
+from mvmctl.exceptions import ProcessError
 
 # =========================================================================
 # Helpers
@@ -110,7 +111,7 @@ class TestExtractVersion:
             return result
 
         monkeypatch.setattr(
-            "mvmctl.core._shared._guestfs._kernel_detector.subprocess.run",
+            "mvmctl.core._shared._guestfs._kernel_detector.run_cmd",
             mock_run,
         )
         kernel = _make_file_mock("vmlinuz-6.8.0-40-generic")
@@ -128,7 +129,7 @@ class TestExtractVersion:
             return result
 
         monkeypatch.setattr(
-            "mvmctl.core._shared._guestfs._kernel_detector.subprocess.run",
+            "mvmctl.core._shared._guestfs._kernel_detector.run_cmd",
             mock_run,
         )
         kernel = _make_file_mock("vmlinuz-linux")
@@ -147,7 +148,7 @@ class TestExtractVersion:
             return result
 
         monkeypatch.setattr(
-            "mvmctl.core._shared._guestfs._kernel_detector.subprocess.run",
+            "mvmctl.core._shared._guestfs._kernel_detector.run_cmd",
             mock_run,
         )
         kernel = _make_file_mock("vmlinuz-linux")
@@ -157,30 +158,26 @@ class TestExtractVersion:
     def test_file_command_timed_out(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Timeout raises subprocess.TimeoutExpired → returns None."""
+        """Timeout raises ProcessError → re-raised by _extract_version."""
 
         def mock_run(*args: object, **kwargs: object) -> MagicMock:
-            import subprocess
-
-            raise subprocess.TimeoutExpired(cmd="file", timeout=5)
+            raise ProcessError("Command timed out after 5s: file")
 
         monkeypatch.setattr(
-            "mvmctl.core._shared._guestfs._kernel_detector.subprocess.run",
+            "mvmctl.core._shared._guestfs._kernel_detector.run_cmd",
             mock_run,
         )
-        assert (
+        with pytest.raises(ProcessError, match="timed out"):
             KernelDetector._extract_version(_make_file_mock("vmlinuz-xyz"))
-            is None
-        )
 
     def test_file_not_found(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """FileNotFoundError when file command itself is missing."""
+        """ProcessError when file command itself is missing."""
 
         def mock_run(*args: object, **kwargs: object) -> MagicMock:
-            raise FileNotFoundError("file not found")
+            raise ProcessError("Command not found: file")
 
         monkeypatch.setattr(
-            "mvmctl.core._shared._guestfs._kernel_detector.subprocess.run",
+            "mvmctl.core._shared._guestfs._kernel_detector.run_cmd",
             mock_run,
         )
         assert (
@@ -525,7 +522,7 @@ class TestRealWorldPatterns:
             return result
 
         monkeypatch.setattr(
-            "mvmctl.core._shared._guestfs._kernel_detector.subprocess.run",
+            "mvmctl.core._shared._guestfs._kernel_detector.run_cmd",
             mock_run,
         )
         kernel = _make_file_mock("vmlinuz")
@@ -546,7 +543,7 @@ class TestRealWorldPatterns:
             return result
 
         monkeypatch.setattr(
-            "mvmctl.core._shared._guestfs._kernel_detector.subprocess.run",
+            "mvmctl.core._shared._guestfs._kernel_detector.run_cmd",
             mock_run,
         )
 

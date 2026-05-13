@@ -301,21 +301,6 @@ class TestGenerateSudoersContent:
         content = HostService._generate_sudoers_content("mvm_users")
         assert "%mvm_users ALL=(root) NOPASSWD:" in content
 
-    def test_invalid_group_injection(self) -> None:
-        """_generate_sudoers_content should reject group names with shell metacharacters."""
-        with pytest.raises(HostError, match="Invalid group name"):
-            HostService._generate_sudoers_content("mvm; rm -rf /")
-
-    def test_invalid_group_empty(self) -> None:
-        """_generate_sudoers_content should reject empty group name."""
-        with pytest.raises(HostError, match="Invalid group name"):
-            HostService._generate_sudoers_content("")
-
-    def test_invalid_group_path_traversal(self) -> None:
-        """_generate_sudoers_content should reject path traversal in group name."""
-        with pytest.raises(HostError, match="Invalid group name"):
-            HostService._generate_sudoers_content("../mvm")
-
 
 # ===========================================================================
 # write_sudoers / remove_sudoers

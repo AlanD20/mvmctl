@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -10,7 +9,7 @@ import pytest
 
 from mvmctl.core.volume._repository import VolumeRepository
 from mvmctl.core.volume._service import VolumeService
-from mvmctl.exceptions import VolumeCreateError
+from mvmctl.exceptions import ProcessError, VolumeCreateError
 from mvmctl.models import VolumeItem, VolumeStatus
 
 
@@ -49,7 +48,7 @@ class TestVolumeServiceCreateDisk:
         """Creating a raw disk should invoke fallocate with size."""
         path = tmp_path / "test.raw"
         vol = _make_volume(path=str(path), size_bytes=1073741824)
-        with patch.object(subprocess, "run") as mock_run:
+        with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
 
             service.create_disk(vol)
@@ -66,7 +65,7 @@ class TestVolumeServiceCreateDisk:
         """Creating a disk should ensure parent directories exist."""
         path = tmp_path / "subdir" / "test.raw"
         vol = _make_volume(path=str(path), size_bytes=1073741824)
-        with patch.object(subprocess, "run") as mock_run:
+        with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
 
             service.create_disk(vol)
@@ -79,7 +78,7 @@ class TestVolumeServiceCreateDisk:
         """Creating a qcow2 disk should invoke qemu-img create."""
         path = tmp_path / "test.qcow2"
         vol = _make_volume(path=str(path), size_bytes=1073741824, fmt="qcow2")
-        with patch.object(subprocess, "run") as mock_run:
+        with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
 
             service.create_disk(vol)
@@ -98,10 +97,9 @@ class TestVolumeServiceCreateDisk:
         """Disk creation failure should raise VolumeCreateError."""
         path = tmp_path / "test.raw"
         vol = _make_volume(path=str(path), size_bytes=1073741824)
-        with patch.object(subprocess, "run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=1, stderr=b"disk full")
-            mock_run.side_effect = subprocess.CalledProcessError(
-                1, ["fallocate"], stderr=b"disk full"
+        with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
+            mock_run.side_effect = ProcessError(
+                "Command failed (exit 1): fallocate"
             )
 
             with pytest.raises(VolumeCreateError, match="fallocate failed"):
@@ -122,10 +120,10 @@ class TestVolumeServiceCreateDisk:
         """Missing fallocate binary should raise VolumeCreateError."""
         path = tmp_path / "test.raw"
         vol = _make_volume(path=str(path), size_bytes=1073741824)
-        with patch.object(subprocess, "run") as mock_run:
-            mock_run.side_effect = FileNotFoundError()
+        with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
+            mock_run.side_effect = ProcessError("Command not found: fallocate")
 
-            with pytest.raises(VolumeCreateError, match="fallocate not found"):
+            with pytest.raises(VolumeCreateError, match="fallocate failed"):
                 service.create_disk(vol)
 
     def test_create_qcow2_qemu_img_not_found(
@@ -134,10 +132,12 @@ class TestVolumeServiceCreateDisk:
         """Missing qemu-img binary should raise VolumeCreateError."""
         path = tmp_path / "test.qcow2"
         vol = _make_volume(path=str(path), size_bytes=1073741824, fmt="qcow2")
-        with patch.object(subprocess, "run") as mock_run:
-            mock_run.side_effect = FileNotFoundError()
+        with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
+            mock_run.side_effect = ProcessError("Command not found: qemu-img")
 
-            with pytest.raises(VolumeCreateError, match="qemu-img not found"):
+            with pytest.raises(
+                VolumeCreateError, match="qemu-img create failed"
+            ):
                 service.create_disk(vol)
 
     def test_create_disk_upserts_and_returns_volume(
@@ -146,7 +146,7 @@ class TestVolumeServiceCreateDisk:
         """create_disk should upsert the volume record and return it."""
         path = tmp_path / "test.raw"
         vol = _make_volume(path=str(path), size_bytes=1073741824)
-        with patch.object(subprocess, "run") as mock_run:
+        with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
             result = service.create_disk(vol)
         assert result is vol
@@ -195,7 +195,7 @@ class TestVolumeServiceResizeDisk:
         path = tmp_path / "test.raw"
         path.write_text("fake")
         vol = _make_volume(path=str(path), fmt="raw")
-        with patch.object(subprocess, "run") as mock_run:
+        with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
 
             result = service.resize_disk(vol, 2147483648)
@@ -214,7 +214,7 @@ class TestVolumeServiceResizeDisk:
         path = tmp_path / "test.qcow2"
         path.write_text("fake")
         vol = _make_volume(path=str(path), fmt="qcow2")
-        with patch.object(subprocess, "run") as mock_run:
+        with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
 
             result = service.resize_disk(vol, 2147483648)
@@ -253,9 +253,9 @@ class TestVolumeServiceResizeDisk:
         path = tmp_path / "test.raw"
         path.write_text("fake")
         vol = _make_volume(path=str(path), fmt="raw")
-        with patch.object(subprocess, "run") as mock_run:
-            mock_run.side_effect = subprocess.CalledProcessError(
-                1, ["fallocate"], stderr=b"no space"
+        with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
+            mock_run.side_effect = ProcessError(
+                "Command failed (exit 1): fallocate"
             )
 
             with pytest.raises(
@@ -272,7 +272,7 @@ class TestVolumeServiceGetDiskInfo:
         path = tmp_path / "test.raw"
         path.write_text("fake")
         mock_json = '{"format": "raw", "virtual-size": 1073741824, "actual-size": 123456}'
-        with patch.object(subprocess, "run") as mock_run:
+        with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout=mock_json)
 
             result = service.get_disk_info(path)
@@ -288,18 +288,19 @@ class TestVolumeServiceGetDiskInfo:
     def test_get_disk_info_passes_text_true(
         self, service: VolumeService, tmp_path: Path
     ):
-        """get_disk_info should pass text=True to subprocess.run."""
+        """get_disk_info should call run_cmd with the correct command."""
         path = tmp_path / "test.raw"
         path.write_text("fake")
-        with patch.object(subprocess, "run") as mock_run:
+        with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout='{"format": "raw"}'
             )
 
             service.get_disk_info(path)
 
-            kwargs = mock_run.call_args[1]
-            assert kwargs.get("text") is True
+            mock_run.assert_called_once()
+            cmd = mock_run.call_args[0][0]
+            assert cmd[0] == "qemu-img"
 
     def test_get_disk_info_nonexistent_raises(
         self, service: VolumeService, tmp_path: Path
@@ -315,9 +316,9 @@ class TestVolumeServiceGetDiskInfo:
         """qemu-img info failure should raise VolumeCreateError."""
         path = tmp_path / "test.raw"
         path.write_text("fake")
-        with patch.object(subprocess, "run") as mock_run:
-            mock_run.side_effect = subprocess.CalledProcessError(
-                1, ["qemu-img"], stderr="file not found"
+        with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
+            mock_run.side_effect = ProcessError(
+                "Command failed (exit 1): qemu-img"
             )
 
             with pytest.raises(VolumeCreateError, match="qemu-img info failed"):
@@ -329,10 +330,10 @@ class TestVolumeServiceGetDiskInfo:
         """Missing qemu-img binary should raise VolumeCreateError."""
         path = tmp_path / "test.raw"
         path.write_text("fake")
-        with patch.object(subprocess, "run") as mock_run:
-            mock_run.side_effect = FileNotFoundError()
+        with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
+            mock_run.side_effect = ProcessError("Command not found: qemu-img")
 
-            with pytest.raises(VolumeCreateError, match="qemu-img not found"):
+            with pytest.raises(VolumeCreateError, match="qemu-img info failed"):
                 service.get_disk_info(path)
 
 
@@ -345,11 +346,13 @@ class TestVolumeServiceCreateDiskMissingBranches:
         """qcow2 creation failure should raise VolumeCreateError."""
         path = tmp_path / "test.qcow2"
         vol = _make_volume(path=str(path), size_bytes=1073741824, fmt="qcow2")
-        with patch.object(subprocess, "run") as mock_run:
-            mock_run.side_effect = subprocess.CalledProcessError(
-                1, ["qemu-img"], stderr=b"invalid size"
+        with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
+            mock_run.side_effect = ProcessError(
+                "Command failed (exit 1): qemu-img"
             )
-            with pytest.raises(VolumeCreateError, match="qemu-img create failed"):
+            with pytest.raises(
+                VolumeCreateError, match="qemu-img create failed"
+            ):
                 service.create_disk(vol)
 
 
@@ -363,10 +366,10 @@ class TestVolumeServiceResizeDiskMissingBranches:
         path = tmp_path / "test.raw"
         path.write_text("fake")
         vol = _make_volume(path=str(path), fmt="raw")
-        with patch.object(subprocess, "run") as mock_run:
-            mock_run.side_effect = FileNotFoundError()
+        with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
+            mock_run.side_effect = ProcessError("Command not found: fallocate")
             with pytest.raises(
-                VolumeCreateError, match="fallocate not found"
+                VolumeCreateError, match="fallocate resize failed"
             ):
                 service.resize_disk(vol, 2147483648)
 
@@ -377,9 +380,9 @@ class TestVolumeServiceResizeDiskMissingBranches:
         path = tmp_path / "test.qcow2"
         path.write_text("fake")
         vol = _make_volume(path=str(path), fmt="qcow2")
-        with patch.object(subprocess, "run") as mock_run:
-            mock_run.side_effect = subprocess.CalledProcessError(
-                1, ["qemu-img"], stderr=b"no space"
+        with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
+            mock_run.side_effect = ProcessError(
+                "Command failed (exit 1): qemu-img"
             )
             with pytest.raises(
                 VolumeCreateError, match="qemu-img resize failed"
@@ -393,10 +396,10 @@ class TestVolumeServiceResizeDiskMissingBranches:
         path = tmp_path / "test.qcow2"
         path.write_text("fake")
         vol = _make_volume(path=str(path), fmt="qcow2")
-        with patch.object(subprocess, "run") as mock_run:
-            mock_run.side_effect = FileNotFoundError()
+        with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
+            mock_run.side_effect = ProcessError("Command not found: qemu-img")
             with pytest.raises(
-                VolumeCreateError, match="qemu-img not found"
+                VolumeCreateError, match="qemu-img resize failed"
             ):
                 service.resize_disk(vol, 2147483648)
 
@@ -430,16 +433,14 @@ class TestVolumeServiceVolumesToDrives:
         assert result[0]["path_on_host"] == "/volumes/my-vol.raw"
         assert result[0]["is_root_device"] is False
 
-    def test_volumes_to_drives_not_available_raises(self):
-        """volumes_to_drives with non-available volume should raise."""
-        vol = _make_volume(
-            name="my-vol", status=VolumeStatus.ATTACHED.value
-        )
+    def test_volumes_to_drives_with_attached_status(self):
+        """volumes_to_drives with attached volume should succeed (both statuses allowed)."""
+        vol = _make_volume(name="my-vol", status=VolumeStatus.ATTACHED.value)
 
-        with pytest.raises(
-            VolumeCreateError, match="is not available"
-        ):
-            VolumeService.volumes_to_drives([vol])
+        result = VolumeService.volumes_to_drives([vol])
+        assert len(result) == 1
+        assert result[0]["drive_id"] == "vol-1"
+        assert result[0]["path_on_host"] == vol.path
 
     def test_volumes_to_drives_multiple(self):
         """volumes_to_drives with multiple volumes should assign sequential IDs."""
@@ -480,7 +481,9 @@ class TestVolumeServiceSetVolumesState:
             mock_ctrl_cls.assert_called_once_with(vol, service._repo)
             mock_controller.attach.assert_called_once_with("vm-123")
 
-    def test_set_volumes_state_attach_no_vm_id_raises(self, service: VolumeService):
+    def test_set_volumes_state_attach_no_vm_id_raises(
+        self, service: VolumeService
+    ):
         """set_volumes_state(ATTACHED) without vm_id should raise ValueError."""
         with pytest.raises(ValueError, match="vm_id is required"):
             service.set_volumes_state(

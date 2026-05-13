@@ -416,6 +416,10 @@ class TestVMSnapshotWorkflow:
             mem_out=mem_path,
             state_out=state_path,
         )
+        # The mock VMController.snapshot doesn't create files;
+        # create them so load_snapshot's file-existence check passes.
+        mem_path.write_text("")
+        state_path.write_text("")
         VMOperation.load_snapshot(
             VMInput(identifiers=["load-snap-vm"]),
             mem_in=mem_path,

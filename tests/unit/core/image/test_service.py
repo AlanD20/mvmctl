@@ -81,7 +81,7 @@ class TestConvertToRaw:
     ) -> None:
         with patch.object(subprocess, "run") as mock_run:
             mock_run.side_effect = FileNotFoundError("qemu-img not found")
-            with pytest.raises(ImageError, match="qemu-img not found"):
+            with pytest.raises(ImageError, match="qemu-img conversion failed"):
                 ImageService._convert_to_raw(
                     tmp_path / "image.qcow2", tmp_path / "image.raw", "qcow2"
                 )

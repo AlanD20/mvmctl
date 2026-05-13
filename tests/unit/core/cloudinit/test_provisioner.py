@@ -138,10 +138,6 @@ class TestCloudInitProvisioner:
             patch(
                 "mvmctl.core._shared._iptables_tracker._repository.IPTablesRuleRepository"
             ),
-            patch(
-                "mvmctl.core.network._service.subprocess.run",
-                return_value=MagicMock(returncode=0, stdout="", stderr=""),
-            ),
         ):
             mock_mgr = MagicMock()
             mock_mgr_cls.return_value = mock_mgr

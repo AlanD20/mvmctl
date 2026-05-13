@@ -1,107 +1,17 @@
-"""Integration test fixtures — subprocess mocks + asset seeding.
-
-IMPORTANT — Root conftest workaround:
-The root ``tests/conftest.py`` references non-existent modules:
-  - ``mvmctl.core.host_setup`` (in _isolate_iptables_rules)
-  - ``mvmctl.core.host_state``   (in _isolate_iptables_rules)
-  - ``mvmctl.core.host_privilege`` (in _mock_privilege_checks)
-
-``monkeypatch.setattr(..., raising=False)`` with non-existent MODULES
-raises ImportError in modern pytest. We register dummy modules here
-(at module-import time) so those patches don't crash at fixture runtime.
-"""
+"""Integration test fixtures — subprocess mocks + asset seeding."""
 
 from __future__ import annotations
 
-import importlib as _importlib
 import json
 import os
 import shutil
 import subprocess
-import sys as _sys
 from pathlib import Path
-from types import ModuleType as _ModuleType
 from unittest.mock import MagicMock
 
 import pytest
 
 from tests.helpers.paths import make_test_paths
-
-# ---- Dummy modules for broken root conftest patches ----
-# pytest.monkeypatch.setattr("pkg.mod.attr", value) resolves the path by
-# walking getattr() on each parent.  If the module is only in sys.modules
-# but NOT an attribute of its parent package (e.g. mvmctl.core is a
-# namespace/pkgutil-style package that doesn't list its sub-modules), the
-# getattr chain fails.
-#
-# We work around this by explicitly injecting the dummy into sys.modules
-# AND setting it as an attribute on the parent package.
-
-
-def _ensure_dummy_module(dotted: str) -> None:
-    """Make *dotted* importable as a module with a single sentinel attr."""
-    if dotted in _sys.modules:
-        return
-
-    parts = dotted.split(".")
-    # Import the top-level+parent chain so getattr works
-    for i in range(1, len(parts)):
-        try:
-            _importlib.import_module(".".join(parts[:i]))
-        except ImportError:
-            pass
-
-    mod = _ModuleType(dotted)
-    mod.IPTABLES_RULES_V4 = (
-        ""  # referenced by root conftest _isolate_iptables_rules
-    )
-    mod.check_privileges = (
-        None  # referenced by root conftest _mock_privilege_checks
-    )
-    mod.check_privileges_interactive = (
-        None  # also referenced by root conftest _mock_privilege_checks
-    )
-    _sys.modules[dotted] = mod
-
-    # Inject as attribute on parent package so getattr chain works
-    parent_pkg = _sys.modules.get(".".join(parts[:-1]))
-    if parent_pkg is not None:
-        setattr(parent_pkg, parts[-1], mod)
-
-
-for _mod_name in (
-    "mvmctl.core.host_setup",
-    "mvmctl.core.host_state",
-    "mvmctl.core.host_privilege",
-    "mvmctl.api.host",
-):
-    _ensure_dummy_module(_mod_name)
-
-# ---- mvmctl.utils.process (referenced by root conftest _mock_sudo_cache) ----
-_proc_mod = _ModuleType("mvmctl.utils.process")
-_proc_mod._SUDO_CREDENTIALS_VALID = True
-_proc_mod._SUDO_CACHE_TIMESTAMP = 0.0
-_proc_mod._SUDO_VALIDATION_IN_PROGRESS = False
-_sys.modules["mvmctl.utils.process"] = _proc_mod
-_utils_pkg = _sys.modules.get("mvmctl.utils")
-if _utils_pkg is not None:
-    setattr(_utils_pkg, "process", _proc_mod)
-
-# ---- mvmctl.core.mvm_db (referenced by root conftest _setup_database) ----
-_mvm_db_mod = _ModuleType("mvmctl.core.mvm_db")
-
-
-class _DummyMVMDatabase:
-    @staticmethod
-    def migrate() -> None:
-        pass
-
-
-_mvm_db_mod.MVMDatabase = _DummyMVMDatabase
-_sys.modules["mvmctl.core.mvm_db"] = _mvm_db_mod
-_core_pkg = _sys.modules.get("mvmctl.core")
-if _core_pkg is not None:
-    setattr(_core_pkg, "mvm_db", _mvm_db_mod)
 
 # ======================================================================
 # Smart subprocess mocks
@@ -278,6 +188,16 @@ class SmartPopenMock:
         if "firecracker" in cmd_str and "--api-sock" in cmd_str:
             proc.pid = 1000
             proc.poll.return_value = None
+            # Create the API socket file so FirecrackerSpawner's poll
+            # loop sees the socket appear. This mirrors what the real
+            # Firecracker process does on startup.
+            if isinstance(cmd, list):
+                for i, arg in enumerate(cmd):
+                    if arg == "--api-sock" and i + 1 < len(cmd):
+                        sock_path = Path(str(cmd[i + 1]))
+                        sock_path.parent.mkdir(parents=True, exist_ok=True)
+                        sock_path.touch()
+                        break
         elif "console_relay" in cmd_str:
             proc.pid = 2000
             # Write pid file and socket file if specified
@@ -354,23 +274,8 @@ def isolate_config_and_cache(request, monkeypatch: pytest.MonkeyPatch):
 
 
 # ======================================================================
-# Host-level mocks (root conftest's _mock_privilege_checks patches the
-# WRONG path — we patch the correct one here)
+# Host-level mocks
 # ======================================================================
-
-
-@pytest.fixture(autouse=True)
-def _mock_host_privilege_helper(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Mock HostPrivilegeHelper.check_privileges to skip OS-level checks.
-
-    The root conftest's ``_mock_privilege_checks`` patches the non-existent
-    path ``mvmctl.core.host_privilege.check_privileges`` — this fixture
-    patches the REAL path instead.
-    """
-    monkeypatch.setattr(
-        "mvmctl.core.host._helper.HostPrivilegeHelper.check_privileges",
-        MagicMock(return_value=None),
-    )
 
 
 @pytest.fixture(autouse=True)

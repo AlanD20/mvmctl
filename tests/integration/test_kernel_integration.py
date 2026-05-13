@@ -14,8 +14,8 @@ import pytest
 from mvmctl.api import KernelInput, KernelOperation, KernelPullInput
 from mvmctl.exceptions import KernelNotFoundError
 from mvmctl.models import (
-    KernelPullResult,
     KernelItem,
+    KernelPullResult,
     VMInstanceItem,
     VMStatus,
 )

@@ -412,7 +412,8 @@ class TestCachePruneMisc:
     """Tests for CacheOperation.prune_misc()."""
 
     def test_prune_misc_returns_dict(self, mocker):
-        """prune_misc() returns dict with appliance, warm_images, guestfs_state."""
+        """prune_misc() returns dict with appliance, warm_images, guestfs_state,
+        stale_provision_mounts."""
         mocker.patch(
             "mvmctl.api.cache_operations.GuestfsService.prune_appliance",
             return_value=True,
@@ -425,12 +426,17 @@ class TestCachePruneMisc:
             "mvmctl.api.cache_operations.GuestfsService.clean_stale_guestfs_state",
             return_value=True,
         )
+        mocker.patch(
+            "mvmctl.api.cache_operations.CacheService.clean_stale_provision_mounts",
+            return_value=True,
+        )
 
         result = CacheOperation.prune_misc()
         assert result.item == {
             "appliance": True,
             "warm_images": True,
             "guestfs_state": True,
+            "stale_provision_mounts": True,
         }
 
 

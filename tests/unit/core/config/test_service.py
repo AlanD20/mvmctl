@@ -160,10 +160,12 @@ class TestSettingsServiceDelete:
         result = service.delete("defaults.vm", "vcpu_count")
         assert result is False
 
-    def test_delete_invalid_key_raises(self, service: SettingsService) -> None:
-        """delete() raises ConfigError for non-overridable keys."""
-        with pytest.raises(ConfigError, match="not a valid setting key"):
-            service.delete("defaults.vm", "nonexistent")
+    def test_delete_invalid_key_returns_false(
+        self, service: SettingsService
+    ) -> None:
+        """delete() returns False for non-overridable keys (validation is at API layer)."""
+        result = service.delete("defaults.vm", "nonexistent")
+        assert result is False
 
     def test_delete_returns_to_default(self, service: SettingsService) -> None:
         """After delete(), the value reverts to the hardcoded default."""

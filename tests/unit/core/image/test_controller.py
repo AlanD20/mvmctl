@@ -1,13 +1,12 @@
-"""Tests for ImageController — image lifecycle management."""
+"""Tests for ImageController — image lifecycle management (adapted for ImageService)."""
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mvmctl.core.image._controller import ImageController
+from mvmctl.core.image._service import ImageService
 from mvmctl.exceptions import ImageError
 from mvmctl.models import ImageItem
 from mvmctl.models.vm import VMInstanceItem
@@ -64,47 +63,11 @@ SAMPLE_IMAGE = ImageItem(
 )
 
 
-class TestImageControllerInit:
-    def test_with_imageitem(self):
-        repo = MagicMock()
-        controller = ImageController(SAMPLE_IMAGE, repo)
-        assert controller._image == SAMPLE_IMAGE
-        assert controller._repo is repo
+class TestImageServiceRemovePath:
+    """Tests for ImageService._remove_image_files()."""
 
-    def test_get_returns_image(self):
-        repo = MagicMock()
-        controller = ImageController(SAMPLE_IMAGE, repo)
-        assert controller.get() == SAMPLE_IMAGE
-
-
-class TestImageControllerPaths:
-    def test_image_path(self):
-        repo = MagicMock()
-        controller = ImageController(SAMPLE_IMAGE, repo)
-        path = controller.image_path
-        assert isinstance(path, Path)
-
-    def test_compressed_path_default_zst(self):
-        repo = MagicMock()
-        image = ImageItem(
-            **{**SAMPLE_IMAGE.__dict__, "compressed_format": None}
-        )
-        controller = ImageController(image, repo)
-        compressed = controller.compressed_path
-        assert compressed.suffix == ".zst"
-
-    def test_compressed_path_with_fmt(self):
-        repo = MagicMock()
-        image = ImageItem(
-            **{**SAMPLE_IMAGE.__dict__, "compressed_format": "gz"}
-        )
-        controller = ImageController(image, repo)
-        compressed = controller.compressed_path
-        assert compressed.suffix == ".gz"
-
-
-class TestImageControllerRemovePath:
     def test_remove_path(self, tmp_path):
+        """_remove_image_files() removes image files from disk."""
         repo = MagicMock()
         images_dir = tmp_path / "images"
         images_dir.mkdir(parents=True)
@@ -116,59 +79,69 @@ class TestImageControllerRemovePath:
         (warm_dir / ("a" * 64 + "_warm.ext4")).write_text("warm data")
 
         with patch(
-            "mvmctl.core.image._controller.CacheUtils.get_images_dir",
+            "mvmctl.utils.common.CacheUtils.get_images_dir",
             return_value=images_dir,
         ):
             with patch(
-                "mvmctl.core.image._controller.CacheUtils.get_warm_image_dir",
+                "mvmctl.utils.common.CacheUtils.get_warm_image_dir",
                 return_value=warm_dir,
             ):
-                controller = ImageController(SAMPLE_IMAGE, repo)
-                removed = controller.remove_path()
+                service = ImageService(repo)
+                removed = service._remove_image_files(SAMPLE_IMAGE)
 
         assert len(removed) > 0
 
 
-class TestImageControllerRemove:
+class TestImageServiceRemove:
+    """Tests for ImageService.remove()."""
+
     def test_remove_without_force_raises(self):
+        """remove() raises ImageError when VMs reference image and force=False."""
         repo = MagicMock()
-
-        vm = _make_vm()
-        image_with_vms = ImageItem(**{**SAMPLE_IMAGE.__dict__, "vms": [vm]})
-        controller = ImageController(image_with_vms, repo)
-
-        with pytest.raises(ImageError, match="referenced by VMs"):
-            controller.remove(force=False)
-
-    def test_remove_with_force_soft_deletes(self):
-        repo = MagicMock()
-
         vm = _make_vm()
         image_with_vms = ImageItem(**{**SAMPLE_IMAGE.__dict__, "vms": [vm]})
 
         with patch(
-            "mvmctl.core.image._controller.ImageController.remove_path",
-            return_value=[],
+            "mvmctl.core.image._resolver.ImageResolver.enrich",
+            return_value=[image_with_vms],
         ):
-            controller = ImageController(image_with_vms, repo)
-            controller.remove(force=True)
+            service = ImageService(repo)
+            with pytest.raises(ImageError, match="referenced by VMs"):
+                service.remove(image_with_vms, force=False)
+
+    def test_remove_with_force_soft_deletes(self):
+        """remove() soft-deletes when VMs reference image and force=True."""
+        repo = MagicMock()
+        vm = _make_vm()
+        image_with_vms = ImageItem(**{**SAMPLE_IMAGE.__dict__, "vms": [vm]})
+
+        with patch(
+            "mvmctl.core.image._resolver.ImageResolver.enrich",
+            return_value=[image_with_vms],
+        ):
+            service = ImageService(repo)
+            service.remove(image_with_vms, force=True)
 
         repo.soft_delete.assert_called_once()
 
     def test_remove_without_vms_hard_deletes(self):
+        """remove() hard-deletes when no VMs reference image."""
         repo = MagicMock()
+        no_vms_image = ImageItem(**{**SAMPLE_IMAGE.__dict__, "vms": []})
 
         with patch(
-            "mvmctl.core.image._controller.ImageController.remove_path",
-            return_value=[],
+            "mvmctl.core.image._resolver.ImageResolver.enrich",
+            return_value=[no_vms_image],
         ):
-            controller = ImageController(SAMPLE_IMAGE, repo)
-            controller.remove(force=False)
+            service = ImageService(repo)
+            service.remove(no_vms_image, force=False)
 
         repo.delete.assert_called_once()
 
 
-class TestImageControllerPruneCached:
+class TestImageServicePruneCached:
+    """Tests for ImageController.prune_cached() — static method kept in ImageController."""
+
     def test_prune_cached_removes_files(self, tmp_path):
         warm_dir = tmp_path / "warm"
         warm_dir.mkdir()
@@ -179,16 +152,20 @@ class TestImageControllerPruneCached:
             "mvmctl.core.image._controller.CacheUtils.get_warm_image_dir",
             return_value=warm_dir,
         ):
+            from mvmctl.core.image._controller import ImageController
+
             count = ImageController.prune_cached()
 
         assert count == 2
-        assert not warm_dir.exists() or not any(warm_dir.iterdir())
 
-    def test_prune_cached_no_dir(self):
+    def test_prune_cached_no_dir(self, tmp_path):
+        nonexistent = tmp_path / "does-not-exist"
         with patch(
             "mvmctl.core.image._controller.CacheUtils.get_warm_image_dir",
-            return_value=Path("/nonexistent"),
+            return_value=nonexistent,
         ):
+            from mvmctl.core.image._controller import ImageController
+
             count = ImageController.prune_cached()
 
         assert count == 0

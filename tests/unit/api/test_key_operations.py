@@ -162,7 +162,11 @@ class TestKeyOperationCreate:
 class TestKeyOperationAdd:
     """Tests for KeyOperation.add()."""
 
-    def test_adds_existing_key(self, mocker):
+    SAMPLE_PUB_KEY = (
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHtestkeycontent testuser@testhost"
+    )
+
+    def test_adds_existing_key(self, mocker, tmp_path: Path):
         """add() adds an existing public key to cache."""
         mock_key_item = _make_key("imported-key")
         mock_service = mocker.MagicMock()
@@ -178,11 +182,19 @@ class TestKeyOperationAdd:
         )
         mock_audit = mocker.patch("mvmctl.utils.auditlog.AuditLog.log")
 
-        result = KeyOperation.add("imported-key", Path("/tmp/key.pub"))
+        # Create a real public key file so API-layer validation passes
+        pub_key_file = tmp_path / "key.pub"
+        pub_key_file.write_text(self.SAMPLE_PUB_KEY)
+
+        result = KeyOperation.add("imported-key", pub_key_file)
 
         assert result.item.name == "imported-key"
         mock_service.add_key.assert_called_once_with(
-            "imported-key", Path("/tmp/key.pub"), Path("/keys"), overwrite=False
+            "imported-key",
+            pub_key_file,
+            self.SAMPLE_PUB_KEY,
+            Path("/keys"),
+            overwrite=False,
         )
         mock_audit.assert_called_once()
 
@@ -202,12 +214,10 @@ class TestKeyOperationRemove:
             return_value=mock_request,
         )
 
-        mock_controller = mocker.MagicMock()
-        mocker.patch(
-            "mvmctl.api.key_operations.KeyController",
-            return_value=mock_controller,
+        mock_repo_class = mocker.patch(
+            "mvmctl.api.key_operations.KeyRepository"
         )
-        mocker.patch("mvmctl.api.key_operations.KeyRepository")
+        mock_repo = mock_repo_class.return_value
         mocker.patch(
             "mvmctl.api.key_operations.CacheUtils.get_keys_dir",
             return_value=Path("/keys"),
@@ -218,7 +228,7 @@ class TestKeyOperationRemove:
         KeyOperation.remove(KeyInput(name=["remove-me"]))
 
         assert mock_unlink.call_count == 2  # pub + priv files
-        mock_controller.remove.assert_called_once()
+        mock_repo.delete.assert_called_once_with(mock_key.id)
 
 
 class TestKeyOperationSetDefault:

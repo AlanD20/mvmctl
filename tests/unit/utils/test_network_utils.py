@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import subprocess
 from unittest.mock import MagicMock
 
 import pytest
 
-from mvmctl.exceptions import NetworkError
+from mvmctl.exceptions import NetworkError, ProcessError
 from mvmctl.utils.network import NetworkUtils
 
 
@@ -208,7 +207,7 @@ class TestDetectOutboundInterface:
     """Tests for detect_outbound_interface."""
 
     def test_returns_interface(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout="default via 10.0.0.1 dev eth0 proto static\n",
@@ -219,7 +218,7 @@ class TestDetectOutboundInterface:
         assert result == "eth0"
 
     def test_returns_none_when_no_default_route(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout="",
@@ -230,14 +229,14 @@ class TestDetectOutboundInterface:
         assert result is None
 
     def test_returns_none_when_called_process_error(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
-        mock_run.side_effect = subprocess.CalledProcessError(1, ["ip", "route"])
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
+        mock_run.side_effect = ProcessError("Command failed (exit 1): ip")
 
         result = NetworkUtils.detect_outbound_interface()
         assert result is None
 
     def test_parses_dev_from_middle(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout="default via 192.168.1.1 dev wlp2s0 proto dhcp metric 600\n",
@@ -252,20 +251,18 @@ class TestBridgeExists:
     """Tests for bridge_exists."""
 
     def test_returns_true(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(returncode=0)
 
         result = NetworkUtils.bridge_exists("br0")
         assert result is True
         mock_run.assert_called_once_with(
             ["ip", "link", "show", "br0"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
             check=False,
         )
 
     def test_returns_false(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(returncode=1)
 
         result = NetworkUtils.bridge_exists("nonexistent")
@@ -276,20 +273,18 @@ class TestTapExists:
     """Tests for tap_exists."""
 
     def test_returns_true(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(returncode=0)
 
         result = NetworkUtils.tap_exists("tap0")
         assert result is True
         mock_run.assert_called_once_with(
             ["ip", "link", "show", "tap0"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
             check=False,
         )
 
     def test_returns_false(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(returncode=1)
 
         result = NetworkUtils.tap_exists("nonexistent")
@@ -300,33 +295,31 @@ class TestChainExists:
     """Tests for chain_exists."""
 
     def test_returns_true(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(returncode=0)
 
         result = NetworkUtils.chain_exists("MVM-FORWARD")
         assert result is True
         mock_run.assert_called_once_with(
             ["iptables", "-t", "filter", "-L", "MVM-FORWARD", "-n"],
-            capture_output=True,
             check=False,
         )
 
     def test_returns_false(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(returncode=1)
 
         result = NetworkUtils.chain_exists("NONEXISTENT")
         assert result is False
 
     def test_custom_table(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(returncode=0)
 
         result = NetworkUtils.chain_exists("MVM-POSTROUTING", table="nat")
         assert result is True
         mock_run.assert_called_once_with(
             ["iptables", "-t", "nat", "-L", "MVM-POSTROUTING", "-n"],
-            capture_output=True,
             check=False,
         )
 
@@ -335,7 +328,7 @@ class TestGetTuntapDevices:
     """Tests for get_tuntap_devices."""
 
     def test_returns_devices(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout=(
@@ -351,7 +344,7 @@ class TestGetTuntapDevices:
         assert result == ["tap0", "tap1"]
 
     def test_returns_empty_when_no_devices(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout="",
@@ -362,7 +355,7 @@ class TestGetTuntapDevices:
         assert result == []
 
     def test_returns_empty_on_failure(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(returncode=2, stdout="", stderr="")
 
         result = NetworkUtils.get_tuntap_devices()
@@ -373,7 +366,7 @@ class TestGetBridges:
     """Tests for get_bridges."""
 
     def test_returns_bridges(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout=(
@@ -389,7 +382,7 @@ class TestGetBridges:
         assert result == ["br0", "mvm-mynet"]
 
     def test_returns_empty_when_no_bridges(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout="",
@@ -400,7 +393,7 @@ class TestGetBridges:
         assert result == []
 
     def test_returns_empty_on_failure(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(returncode=2, stdout="", stderr="")
 
         result = NetworkUtils.get_bridges()
@@ -411,7 +404,7 @@ class TestGetBridgeTaps:
     """Tests for get_bridge_taps."""
 
     def test_returns_taps(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout=(
@@ -427,7 +420,7 @@ class TestGetBridgeTaps:
         assert result == ["tap0", "tap1"]
 
     def test_returns_empty_when_no_taps(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout="",
@@ -438,7 +431,7 @@ class TestGetBridgeTaps:
         assert result == []
 
     def test_returns_empty_on_failure(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="")
 
         result = NetworkUtils.get_bridge_taps("mvm-bridge")
@@ -449,7 +442,7 @@ class TestGetTapBridge:
     """Tests for get_tap_bridge."""
 
     def test_returns_bridge(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout=(
@@ -463,7 +456,7 @@ class TestGetTapBridge:
         assert result == "br0"
 
     def test_returns_none_when_not_attached(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout=(
@@ -477,8 +470,8 @@ class TestGetTapBridge:
         assert result is None
 
     def test_returns_none_on_called_process_error(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
-        mock_run.side_effect = subprocess.CalledProcessError(1, ["ip", "link"])
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
+        mock_run.side_effect = ProcessError("Command failed (exit 1): ip")
 
         result = NetworkUtils.get_tap_bridge("nonexistent")
         assert result is None
@@ -488,7 +481,7 @@ class TestBridgeHasSubnet:
     """Tests for bridge_has_subnet."""
 
     def test_returns_true(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout="2: br0    inet 10.0.0.1/24 scope global br0       valid_lft forever preferred_lft forever\n",
@@ -499,7 +492,7 @@ class TestBridgeHasSubnet:
         assert result is True
 
     def test_returns_false_when_subnet_not_found(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout="2: br0    inet 172.16.0.1/16 scope global br0\n",
@@ -510,7 +503,7 @@ class TestBridgeHasSubnet:
         assert result is False
 
     def test_returns_false_on_failure(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="")
 
         result = NetworkUtils.bridge_has_subnet("br0", "10.0.0.0/24")
@@ -521,7 +514,7 @@ class TestEnsureInterfaceReady:
     """Tests for ensure_interface_ready."""
 
     def test_ready(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout="2: eth0    inet 10.0.0.5/24 scope global eth0\n",
@@ -565,7 +558,7 @@ class TestEnsureInterfaceReady:
             NetworkUtils.ensure_interface_ready("eth0")
 
     def test_raises_when_operstate_oserror(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout="2: eth0    inet 10.0.0.5/24 scope global eth0\n",
@@ -580,7 +573,7 @@ class TestEnsureInterfaceReady:
         assert result is True
 
     def test_raises_when_no_ipv4(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout="",
@@ -598,7 +591,7 @@ class TestEnsureInterfaceReady:
             NetworkUtils.ensure_interface_ready("eth0")
 
     def test_raises_when_ip_command_fails(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(
             returncode=1,
             stdout="",
@@ -616,8 +609,8 @@ class TestEnsureInterfaceReady:
             NetworkUtils.ensure_interface_ready("eth0")
 
     def test_raises_when_ip_command_not_found(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
-        mock_run.side_effect = FileNotFoundError()
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
+        mock_run.side_effect = ProcessError("Command not found: ip")
         mock_path = mocker.patch("mvmctl.utils.network.Path")
         mock_path.return_value.exists.return_value = True
         operstate_mock = mock_path.return_value.__truediv__.return_value
@@ -634,11 +627,7 @@ class TestDetectIptablesBackendConflict:
     """Tests for detect_iptables_backend_conflict."""
 
     def test_no_rules_no_conflict(self, mocker):
-        mocker.patch(
-            "mvmctl.utils._system.privileged_cmd",
-            side_effect=lambda cmd: cmd,
-        )
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         no_rules_output = (
             "Chain INPUT (policy ACCEPT 0 packets, 0 bytes)\n"
             "    pkts bytes target     prot opt in     out     source               destination\n"
@@ -659,11 +648,7 @@ class TestDetectIptablesBackendConflict:
         assert "nft" in diagnosis
 
     def test_legacy_active_only(self, mocker):
-        mocker.patch(
-            "mvmctl.utils._system.privileged_cmd",
-            side_effect=lambda cmd: cmd,
-        )
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         rules_with_traffic = (
             "Chain INPUT (policy ACCEPT 0 packets, 0 bytes)\n"
             "    pkts bytes target     prot opt in     out     source               destination\n"
@@ -689,11 +674,7 @@ class TestDetectIptablesBackendConflict:
         assert "legacy" in diagnosis
 
     def test_both_active_conflict(self, mocker):
-        mocker.patch(
-            "mvmctl.utils._system.privileged_cmd",
-            side_effect=lambda cmd: cmd,
-        )
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         rules_with_traffic = (
             "Chain INPUT (policy ACCEPT 0 packets, 0 bytes)\n"
             "    pkts bytes target     prot opt in     out     source               destination\n"
@@ -713,11 +694,7 @@ class TestDetectIptablesBackendConflict:
         assert "nft active: True" in diagnosis
 
     def test_exception_during_legacy_check(self, mocker):
-        mocker.patch(
-            "mvmctl.utils._system.privileged_cmd",
-            side_effect=lambda cmd: cmd,
-        )
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         no_rules_output = (
             "Chain INPUT (policy ACCEPT 0 packets, 0 bytes)\n"
             "    pkts bytes target     prot opt in     out     source               destination\n"
@@ -725,7 +702,7 @@ class TestDetectIptablesBackendConflict:
         )
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="", stderr="nf_tables"),
-            subprocess.CalledProcessError(1, ["iptables-legacy"]),
+            ProcessError("Command failed (exit 1): iptables-legacy"),
             MagicMock(returncode=0, stdout=no_rules_output, stderr=""),
         ]
 
@@ -737,11 +714,7 @@ class TestDetectIptablesBackendConflict:
         assert "nft active: False" in diagnosis
 
     def test_exception_during_nft_check(self, mocker):
-        mocker.patch(
-            "mvmctl.utils._system.privileged_cmd",
-            side_effect=lambda cmd: cmd,
-        )
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         rules_with_traffic = (
             "Chain INPUT (policy ACCEPT 0 packets, 0 bytes)\n"
             "    pkts bytes target     prot opt in     out     source               destination\n"
@@ -750,7 +723,7 @@ class TestDetectIptablesBackendConflict:
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="", stderr="nf_tables"),
             MagicMock(returncode=0, stdout=rules_with_traffic, stderr=""),
-            subprocess.CalledProcessError(1, ["iptables"]),
+            ProcessError("Command failed (exit 1): iptables"),
         ]
 
         has_conflict, diagnosis = (
@@ -830,24 +803,20 @@ class TestRunBatch:
     """Tests for _run_batch."""
 
     def test_runs_batch_successfully(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         NetworkUtils._run_batch(["cmd1", "cmd2"])
 
         mock_run.assert_called_once_with(
-            ["sudo", "ip", "-batch", "-"],
+            ["ip", "-batch", "-"],
+            privileged=True,
             input="cmd1\ncmd2\n",
-            text=True,
-            check=True,
-            capture_output=True,
         )
 
     def test_raises_on_failure(self, mocker):
-        mock_run = mocker.patch("mvmctl.utils.network.subprocess.run")
-        mock_run.side_effect = subprocess.CalledProcessError(
-            1, ["ip", "-batch", "-"]
-        )
+        mock_run = mocker.patch("mvmctl.utils.network.run_cmd")
+        mock_run.side_effect = ProcessError("Command failed (exit 1): ip")
 
-        with pytest.raises(subprocess.CalledProcessError):
+        with pytest.raises(ProcessError):
             NetworkUtils._run_batch(["failing_cmd"])

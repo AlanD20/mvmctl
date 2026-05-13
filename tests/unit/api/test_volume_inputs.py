@@ -8,14 +8,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mvmctl.api.inputs._volume_create_input import (
+    ResolvedVolumeCreateInput,
     VolumeCreateInput,
     VolumeCreateRequest,
-    ResolvedVolumeCreateInput,
 )
 from mvmctl.api.inputs._volume_input import (
+    ResolvedVolumeInput,
     VolumeInput,
     VolumeRequest,
-    ResolvedVolumeInput,
 )
 from mvmctl.core.volume._repository import VolumeRepository
 from mvmctl.exceptions import VolumeCreateError, VolumeNotFoundError

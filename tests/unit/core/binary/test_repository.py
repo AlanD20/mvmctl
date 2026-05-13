@@ -251,11 +251,13 @@ class TestBinaryRepository:
         assert b1 is None or not b1.is_present
         assert b2 is None or not b2.is_present
 
-    def test_query_vms_by_binary_empty(self, db: Database) -> None:
-        """query_vms_by_binary returns empty list when no VMs reference binary."""
+    def test_find_by_binary_id_empty(self, db: Database) -> None:
+        """VMRepository.find_by_binary_id returns empty list when no VMs reference binary."""
+        from mvmctl.core.vm._repository import VMRepository
+
         bid = _seed_binary(db)
-        repo = BinaryRepository(db)
-        assert repo.query_vms_by_binary(bid) == []
+        vm_repo = VMRepository(db)
+        assert vm_repo.find_by_binary_id(bid) == []
 
 
 @pytest.fixture

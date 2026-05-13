@@ -201,7 +201,7 @@ class TestImageOperationGet:
         """get() resolves identifier and returns single ImageItem."""
         mock_image = _make_image("ubuntu-24.04")
         mock_resolved = MagicMock()
-        mock_resolved.items = [mock_image]
+        mock_resolved.images = [mock_image]
         mock_request = MagicMock()
         mock_request.resolve.return_value = mock_resolved
         mocker.patch(
@@ -216,7 +216,7 @@ class TestImageOperationGet:
     def test_get_multiple_raises_error(self, mocker):
         """get() raises ImageError when multiple items resolved."""
         mock_resolved = MagicMock()
-        mock_resolved.items = [_make_image("img1"), _make_image("img2")]
+        mock_resolved.images = [_make_image("img1"), _make_image("img2")]
         mock_request = MagicMock()
         mock_request.resolve.return_value = mock_resolved
         mocker.patch(
@@ -232,7 +232,7 @@ class TestImageOperationGet:
     def test_get_delegates_to_image_request(self, mocker):
         """get() delegates resolution to ImageRequest."""
         mock_resolved = MagicMock()
-        mock_resolved.items = [_make_image("ubuntu-24.04")]
+        mock_resolved.images = [_make_image("ubuntu-24.04")]
         mock_request = MagicMock()
         mock_request.resolve.return_value = mock_resolved
         mocker.patch(
@@ -284,7 +284,7 @@ class TestImageOperationSetDefault:
         """set_default() resolves image and calls repo.set_default()."""
         mock_image = _make_image("ubuntu-24.04")
         mock_resolved = MagicMock()
-        mock_resolved.items = [mock_image]
+        mock_resolved.images = [mock_image]
         mock_request = MagicMock()
         mock_request.resolve.return_value = mock_resolved
         mocker.patch(
@@ -310,7 +310,7 @@ class TestImageOperationSetDefault:
     def test_set_default_multiple_raises(self, mocker):
         """set_default() raises ImageError when multiple images resolved."""
         mock_resolved = MagicMock()
-        mock_resolved.items = [_make_image("img1"), _make_image("img2")]
+        mock_resolved.images = [_make_image("img1"), _make_image("img2")]
         mock_request = MagicMock()
         mock_request.resolve.return_value = mock_resolved
         mocker.patch(
@@ -329,7 +329,7 @@ class TestImageOperationSetDefault:
         """set_default() logs the action via AuditLog."""
         mock_image = _make_image("ubuntu-24.04")
         mock_resolved = MagicMock()
-        mock_resolved.items = [mock_image]
+        mock_resolved.images = [mock_image]
         mock_request = MagicMock()
         mock_request.resolve.return_value = mock_resolved
         mocker.patch(
@@ -351,53 +351,53 @@ class TestImageOperationRemove:
         self, mocker, images: list[ImageItem]
     ) -> tuple[MagicMock, MagicMock]:
         mock_resolved = MagicMock()
-        mock_resolved.items = images
+        mock_resolved.images = images
         mock_request = MagicMock()
         mock_request.resolve.return_value = mock_resolved
         mocker.patch(
             "mvmctl.api.inputs._image_input.ImageRequest",
             return_value=mock_request,
         )
-        mock_resolver = MagicMock()
-        mock_resolver._enrich.return_value = images
+        mock_image_svc = MagicMock()
         mocker.patch(
-            "mvmctl.core.image._resolver.ImageResolver",
-            return_value=mock_resolver,
+            "mvmctl.api.image_operations.ImageRepository",
         )
-        mock_controller = MagicMock()
-        mocker.patch(
-            "mvmctl.core.image._controller.ImageController",
-            return_value=mock_controller,
-        )
-        mocker.patch("mvmctl.api.image_operations.ImageRepository")
         mocker.patch("mvmctl.api.image_operations.Database")
-        return mock_request, mock_controller
+        mocker.patch(
+            "mvmctl.core.image._service.ImageService",
+            return_value=mock_image_svc,
+        )
+        return mock_request, mock_image_svc
 
     def test_remove_success(self, mocker):
-        """remove() resolves, enriches, and calls controller.remove()."""
+        """remove() resolves, resolves, and calls image_svc.remove()."""
         mock_image = _make_image("ubuntu-24.04")
-        _, mock_controller = self._setup_remove_mocks(mocker, [mock_image])
+        _, mock_image_svc = self._setup_remove_mocks(mocker, [mock_image])
 
         result = ImageOperation.remove(ImageInput(os_slug=["ubuntu-24.04"]))
         assert result.all_ok
         assert len(result.items) == 1
         assert result.items[0].status == "success"
         assert result.items[0].code == "image.removed"
-        mock_controller.remove.assert_called_once_with(force=False)
+        mock_image_svc.remove.assert_called_once_with(
+            mock_image, force=False
+        )
 
     def test_remove_with_force_flag(self, mocker):
-        """remove() passes force=True to controller.remove()."""
+        """remove() passes force=True to image_svc.remove()."""
         mock_image = _make_image("ubuntu-24.04")
-        _, mock_controller = self._setup_remove_mocks(mocker, [mock_image])
+        _, mock_image_svc = self._setup_remove_mocks(mocker, [mock_image])
 
         ImageOperation.remove(ImageInput(os_slug=["ubuntu-24.04"]), force=True)
-        mock_controller.remove.assert_called_once_with(force=True)
+        mock_image_svc.remove.assert_called_once_with(
+            mock_image, force=True
+        )
 
     def test_remove_controller_error(self, mocker):
-        """remove() returns error OperationResult when controller.remove() raises."""
+        """remove() returns error OperationResult when ImageService.remove() raises."""
         mock_image = _make_image("ubuntu-24.04")
-        _, mock_controller = self._setup_remove_mocks(mocker, [mock_image])
-        mock_controller.remove.side_effect = ImageError(
+        _, mock_image_svc = self._setup_remove_mocks(mocker, [mock_image])
+        mock_image_svc.remove.side_effect = ImageError(
             "Image is referenced by running VMs"
         )
 
@@ -426,7 +426,7 @@ class TestImageOperationWarm:
         self, mocker, images: list[ImageItem]
     ) -> tuple[MagicMock, MagicMock]:
         mock_resolved = MagicMock()
-        mock_resolved.items = images
+        mock_resolved.images = images
         mock_request = MagicMock()
         mock_request.resolve.return_value = mock_resolved
         mocker.patch(

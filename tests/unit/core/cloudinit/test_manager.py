@@ -158,7 +158,7 @@ class TestCloudInitManager:
     def test_custom_user_data(self, config: CloudInitProvisionConfig) -> None:
         """write_config_files with custom user-data preserves it."""
         custom_ud = config.cloud_init_dir / "custom.yaml"
-        custom_ud.write_text("custom_key: custom_value\n")
+        custom_ud.write_text("#cloud-config\ncustom_key: custom_value\n")
         config.custom_user_data_path = custom_ud
 
         with patch(

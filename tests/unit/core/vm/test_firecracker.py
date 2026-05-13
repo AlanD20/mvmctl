@@ -828,6 +828,12 @@ class TestFirecrackerSpawnerSpawn:
 
         spawner = FirecrackerSpawner(config)
 
+        # Replace _api_socket_path with a mock so we can control exists().
+        # PosixPath.exists is read-only, so patch.object won't work on it.
+        mock_socket_path = MagicMock()
+        mock_socket_path.exists.side_effect = [False, True]  # no stale → appears
+        spawner._api_socket_path = mock_socket_path
+
         mock_proc = MagicMock()
         mock_proc.pid = 99999
         mock_proc.poll.return_value = None

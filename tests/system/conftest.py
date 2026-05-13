@@ -4,9 +4,12 @@ System tests are black-box integration tests that invoke mvm via subprocess.
 NO imports from mvmctl.* — tests must work against the actual CLI.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -17,39 +20,14 @@ from typing import Any, Generator
 import pytest
 
 # ============================================================================
-# Session-scoped fixtures (expensive setup, run once per session)
+# Session-scoped fixtures (shared by all domains)
 # ============================================================================
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _verify_system_test_iptables() -> None:
-    """Verify MVM iptables chains exist without modifying them.
-
-    System tests require that 'mvm host init' has been run so that the
-    MVM iptables chains exist. We intentionally do NOT flush them here
-    because that would break the default network's NAT rules. Individual
-    tests are responsible for cleaning up their own networks.
-    """
-    for chain in ("MVM-POSTROUTING", "MVM-FORWARD", "MVM-NOCLOUDNET-INPUT"):
-        table = "-t nat" if chain == "MVM-POSTROUTING" else ""
-        result = subprocess.run(
-            ["sudo", "iptables", *table.split(), "-L", chain],
-            capture_output=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            pytest.skip(
-                f"iptables chain '{chain}' not found. "
-                "Run 'sudo mvm host init' first."
-            )
 
 
 @pytest.fixture(scope="session")
 def mvm_binary() -> str:
     """Resolve MVM binary path from env var or default."""
     binary = os.environ.get("MVM_BINARY", "uv run mvm")
-
-    # Verify binary works
     result = subprocess.run(
         [*shlex.split(binary), "--version"],
         capture_output=True,
@@ -58,330 +36,407 @@ def mvm_binary() -> str:
     )
     if result.returncode != 0:
         pytest.skip(f"MVM binary not functional: {binary}")
-
     return binary
 
 
 @pytest.fixture(scope="session")
 def check_system_prerequisites() -> None:
-    """Verify system can run real VM tests.
-
-    Fails fast with clear message if prerequisites not met.
-    """
-    # Check KVM
+    """Verify system can run real VM tests."""
     if not Path("/dev/kvm").exists():
         pytest.skip("System tests require /dev/kvm (KVM not available)")
-
-    # Check mvm group membership
     import grp
 
     try:
         mvm_group = grp.getgrnam("mvm")
         if mvm_group.gr_gid not in os.getgroups() and os.getgid() != 0:
-            pytest.skip("User not in 'mvm' group (run 'mvm host init' first)")
+            pytest.skip("User not in 'mvm' group")
     except KeyError:
-        pytest.skip("'mvm' group not found (run 'mvm host init' first)")
-
-    # Check host initialization
-    cache_dir = Path.home() / ".cache" / "mvmctl"
-    if not (cache_dir / "mvmdb.db").exists():
-        pytest.skip("mvmctl not initialized (run 'mvm host init' first)")
+        pytest.skip("'mvm' group not found")
+    if not (Path.home() / ".cache" / "mvmctl" / "mvmdb.db").exists():
+        pytest.skip("mvmctl not initialized (run 'mvm host init')")
 
 
 @pytest.fixture(scope="session")
 def system_cache_dir() -> Path:
-    """Real mvmctl cache directory (NOT the isolated tmp_path)."""
     return Path.home() / ".cache" / "mvmctl"
 
 
 @pytest.fixture(scope="session")
 def timing_targets() -> dict[str, float]:
-    """Per-image boot timing targets in seconds."""
     return {
-        "alpine-3.21": 15.0,
+        "alpine-3.21": 10.0,
         "ubuntu-24.04-minimal": 10.0,
-        "ubuntu-24.04": 20.0,
+        "ubuntu-24.04": 10.0,
         "archlinux": 10.0,
         "debian-bookworm": 10.0,
     }
 
 
-def _pull_missing_asset(binary: str, args: list[str], desc: str) -> None:
-    """Pull a missing asset via the mvm CLI."""
-    _print_prep(f"Pulling {desc}...")
-    result = subprocess.run(
-        [*shlex.split(binary), *args],
-        capture_output=True,
-        text=True,
-        timeout=300,
-        env={**os.environ, "NO_COLOR": "1"},
-    )
-    if result.returncode != 0:
-        pytest.skip(f"Failed to pull {desc}: {result.stderr or result.stdout}")
-
-
-def _cleanup_stale_processes() -> None:
-    """Kill any leftover Firecracker or jailer processes from prior runs.
-
-    Stale processes hold binary files open (mmap), which makes
-    ``bin pull --force`` fail with "Text file busy".
-    Uses ``pgrep`` + direct ``kill`` to avoid ``pkill -f`` hanging
-    (the pattern can match the calling shell's own command line).
-    """
-    for name in ("firecracker", "jailer"):
-        try:
-            out = subprocess.run(
-                ["pgrep", name],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if out.returncode != 0 or not out.stdout.strip():
-                continue
-            pids = out.stdout.strip().splitlines()
-            subprocess.run(
-                ["kill", "-9", *pids],
-                capture_output=True,
-                timeout=5,
-            )
-        except FileNotFoundError:
-            pass  # pgrep or kill not available
-
-
-@pytest.fixture(scope="session", autouse=True)
-def prepare_system_env(mvm_binary, check_system_prerequisites) -> None:
-    """Verify required assets are cached — auto-pull if missing."""
-    binary = mvm_binary
-
-    # xdist workers skip verification — assets must be pre-pulled before
-    # running in parallel (avoids race conditions).
-    if os.environ.get("PYTEST_XDIST_WORKER"):
-        return
-
-    # Clean up any stale Firecracker processes from prior runs
-    _cleanup_stale_processes()
-
-    _print_prep("Verifying system test assets...")
-
-    # ── 1. Verify DB exists ──────────────────────────────────────────
-    cache_dir = Path.home() / ".cache" / "mvmctl"
-    db_path = cache_dir / "mvmdb.db"
-    if not db_path.exists():
-        pytest.skip("mvmctl not initialized (run 'sudo mvm host init')")
-
-    # ── 2. Verify / auto-pull kernel ─────────────────────────────────
-    result = subprocess.run(
-        [*shlex.split(binary), "kernel", "ls", "--json"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        env={**os.environ, "NO_COLOR": "1"},
-    )
-    kernels_have_default = False
-    if result.returncode == 0:
-        kernels = json.loads(result.stdout)
-        kernels_have_default = any(
-            k.get("is_default") and k.get("is_present") for k in kernels
-        )
-        if not kernels_have_default:
-            present = [k for k in kernels if k.get("is_present")]
-            if present:
-                first_id = present[0]["id"][:6]
-                subprocess.run(
-                    [*shlex.split(binary), "kernel", "default", first_id],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    env={**os.environ, "NO_COLOR": "1"},
-                    check=True,
-                )
-                kernels_have_default = True
-    if not kernels_have_default:
-        _pull_missing_asset(
-            binary,
-            ["kernel", "pull", "--type", "firecracker", "--default"],
-            "firecracker kernel",
-        )
-
-    # ── 3. Verify / auto-pull images ─────────────────────────────────
-    result = subprocess.run(
-        [*shlex.split(binary), "image", "ls", "--json"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        env={**os.environ, "NO_COLOR": "1"},
-    )
-    cached_images: list[str] = []
-    if result.returncode == 0:
-        cached_images = [
-            i.get("os_slug", "") for i in json.loads(result.stdout)
-        ]
-
-    required_images = ["alpine-3.21", "ubuntu-24.04-minimal", "ubuntu-24.04"]
-    for img in required_images:
-        if img not in cached_images:
-            _pull_missing_asset(
-                binary, ["image", "pull", img], f"image '{img}'"
-            )
-
-    # ── 4. Verify / auto-pull binary ─────────────────────────────────
-    result = subprocess.run(
-        [*shlex.split(binary), "bin", "ls", "--json"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        env={**os.environ, "NO_COLOR": "1"},
-    )
-    if result.returncode != 0 or not json.loads(result.stdout):
-        _pull_missing_asset(
-            binary,
-            ["bin", "pull", "1.15.1", "--default"],
-            "firecracker binary",
-        )
-
-    _print_prep("All required assets present.")
+# ============================================================================
+# Internal asset helpers (not exported, used by fixtures within this file)
+# ============================================================================
 
 
 def _print_prep(msg: str) -> None:
-    """Print a prepare-step message that is visible even with pytest output capture."""
     print(f"[prepare] {msg}", file=sys.stderr, flush=True)
 
 
-def _unique_subnet(network_name: str) -> str:
-    """Generate a deterministic unique /24 subnet from a network name.
+def _cleanup_stale_processes() -> None:
+    for name in ("firecracker", "jailer"):
+        try:
+            out = subprocess.run(
+                ["pgrep", name], capture_output=True, text=True, timeout=5
+            )
+            if out.returncode == 0 and out.stdout.strip():
+                subprocess.run(
+                    ["kill", "-9", *out.stdout.strip().splitlines()],
+                    capture_output=True,
+                    timeout=5,
+                )
+        except FileNotFoundError:
+            pass
 
-    Uses the network name as a seed so the same name always produces
-    the same subnet, but different names produce different subnets.
-    This avoids collisions when tests run in parallel via pytest-xdist.
+
+def _run_cmd(
+    binary: str, args: list[str], *, timeout: int = 60
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [*shlex.split(binary), *args],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env={**os.environ, "NO_COLOR": "1"},
+    )
+
+
+def _pull_asset(binary: str, args: list[str], desc: str) -> None:
+    _print_prep(f"Pulling {desc}...")
+    r = _run_cmd(binary, args, timeout=300)
+    if r.returncode != 0:
+        pytest.skip(f"Failed to pull {desc}: {r.stderr or r.stdout}")
+
+
+def _ensure_kernel(binary: str) -> None:
+    r = _run_cmd(binary, ["kernel", "ls", "--json"], timeout=30)
+    if r.returncode != 0:
+        _pull_asset(
+            binary,
+            ["kernel", "pull", "--type", "firecracker", "--default"],
+            "kernel",
+        )
+        return
+    kernels = json.loads(r.stdout)
+    if not any(k.get("is_default") and k.get("is_present") for k in kernels):
+        present = [k for k in kernels if k.get("is_present")]
+        if present:
+            _run_cmd(
+                binary, ["kernel", "default", present[0]["id"][:6]], timeout=30
+            )
+        else:
+            _pull_asset(
+                binary,
+                ["kernel", "pull", "--type", "firecracker", "--default"],
+                "kernel",
+            )
+
+
+def _ensure_image(binary: str, image: str = "alpine-3.21") -> None:
+    r = _run_cmd(binary, ["image", "ls", "--json"], timeout=30)
+    cached = json.loads(r.stdout) if r.returncode == 0 else []
+    if image not in [i.get("os_slug", "") for i in cached]:
+        _pull_asset(binary, ["image", "pull", image], f"image '{image}'")
+
+
+def _ensure_binary(binary: str) -> None:
+    r = _run_cmd(binary, ["bin", "ls", "--json"], timeout=30)
+    has = False
+    if r.returncode == 0:
+        has = any(
+            b.get("name") == "firecracker" and b.get("is_present")
+            for b in json.loads(r.stdout)
+        )
+    if not has:
+        _pull_asset(
+            binary, ["bin", "pull", "1.15.1", "--default"], "firecracker binary"
+        )
+
+
+def _ensure_services_binary(binary: str) -> None:
+    """Ensure mvm-services binary (mvm-provision) is registered in the DB.
+
+    Service binaries (mvm-provision, mvm-console-relay, mvm-nocloud-server)
+    can be removed by ``cache clean --force``. This function re-extracts the
+    combined ``mvm-services`` binary from the build output and re-registers
+    it in the DB so VM creation does not fail.
     """
-    import random
+    r = _run_cmd(binary, ["bin", "ls", "--json"], timeout=30)
+    has_provision = False
+    if r.returncode == 0:
+        has_provision = any(
+            b.get("name") == "mvm-provision" and b.get("is_present")
+            for b in json.loads(r.stdout)
+        )
+    if has_provision:
+        return
 
-    rng = random.Random(network_name)
-    octet2 = rng.randint(1, 254)
-    octet3 = rng.randint(0, 254)
-    return f"10.{octet2}.{octet3}.0/24"
+    # Binary missing — attempt to re-extract from build output
+    services_src = Path("dist/services/mvm-services")
+    if not services_src.exists():
+        _print_prep(
+            "WARNING: dist/services/mvm-services not found. "
+            "Run 'python scripts/build_services.py' to build it."
+        )
+        return
+
+    bin_dir = Path.home() / ".cache" / "mvmctl" / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    dest = bin_dir / "mvm-services"
+    shutil.copy2(str(services_src), str(dest))
+    dest.chmod(0o755)
+    _print_prep("Copied mvm-services binary to cache bin dir")
+
+    # Try to register in DB (bin register may not exist as a CLI command)
+    register_result = _run_cmd(
+        binary,
+        ["bin", "register", str(dest), "--name", "mvm-provision"],
+        timeout=30,
+        check=False,
+    )
+    if register_result.returncode != 0:
+        _print_prep(
+            "WARNING: 'bin register' command not available. "
+            "Service binary copied but not DB-registered. "
+            "Run 'mvm init' to register it."
+        )
+
+
+def ensure_vm_deps(binary: str) -> None:
+    """Ensure kernel, alpine image, and firecracker binary are available.
+
+    Call this before inline ``vm create`` calls in tests that don't use
+    the ``created_vm`` or ``minimal_vm`` fixtures (which call it internally).
+    Guestfs is disabled by default (``settings.guestfs_enabled = False`` in
+    ``constants.py``) — only loop-mount is used for provisioning.
+    """
+    _ensure_kernel(binary)
+    _ensure_image(binary)
+    _ensure_binary(binary)
+    _ensure_services_binary(binary)
 
 
 # ============================================================================
-# Function-scoped autouse fixture (CRITICAL: overrides root conftest)
+# Autouse fixture: override root conftest env isolation
 # ============================================================================
 
 
 @pytest.fixture(autouse=True)
 def _restore_real_dirs(monkeypatch, system_cache_dir) -> None:
-    """CRITICAL: Override root conftest env var isolation.
-
-    The root tests/conftest.py has an autouse fixture that redirects
-    MVM_CACHE_DIR and MVM_CONFIG_DIR to empty tmp_path directories.
-    This breaks system tests because subprocess mvm invocations inherit
-    those env vars and can't find cached images/kernels.
-
-    This fixture overrides them back to real paths.
-    """
-    real_config = Path.home() / ".config" / "mvmctl"
-
     monkeypatch.setenv("MVM_CACHE_DIR", str(system_cache_dir))
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(real_config))
+    monkeypatch.setenv(
+        "MVM_CONFIG_DIR", str(Path.home() / ".config" / "mvmctl")
+    )
     monkeypatch.setenv("MVM_TEMP_DIR", str(Path("/tmp") / "mvmctl"))
-    monkeypatch.setenv("NO_COLOR", "1")  # Prevent ANSI codes in output
+    monkeypatch.setenv("NO_COLOR", "1")
 
 
 # ============================================================================
-# Function-scoped fixtures (per test, with guaranteed cleanup)
+# Per-test fixtures
 # ============================================================================
 
 
 @pytest.fixture
 def unique_vm_name() -> str:
-    """Generate unique VM name for test isolation."""
     return f"sys-vm-{uuid.uuid4().hex[:8]}"
 
 
 @pytest.fixture
 def unique_network_name() -> str:
-    """Generate unique network name for test isolation."""
     return f"sys-net-{uuid.uuid4().hex[:6]}"
 
 
 @pytest.fixture
 def unique_key_name() -> str:
-    """Generate unique key name for test isolation."""
     return f"sys-key-{uuid.uuid4().hex[:6]}"
+
+
+def _unique_subnet(network_name: str) -> str:
+    import random
+
+    rng = random.Random(network_name)
+    return f"10.{rng.randint(1, 254)}.{rng.randint(0, 254)}.0/24"
+
+
+# ============================================================================
+# VM creation: two levels shared across domains
+# ============================================================================
+
+
+def _create_minimal_vm_core(
+    binary: str,
+    vm_name: str,
+    net_name: str,
+    *,
+    ssh_key_name: str | None = None,
+    extra_args: list[str] | None = None,
+) -> dict[str, Any]:
+    """Core VM creation — ensures kernel/image/binary, creates network, returns VM info.
+
+    All VM fixtures (minimal_vm, created_vm, module_vm, lifecycle_vm) delegate
+    to this function so that asset verification happens in one place.
+    """
+    ensure_vm_deps(binary)
+
+    subnet = _unique_subnet(net_name)
+    _run_mvm(
+        binary,
+        "network",
+        "create",
+        net_name,
+        "--subnet",
+        subnet,
+        "--non-interactive",
+    )
+
+    cmd: list[str] = [
+        "vm",
+        "create",
+        "--name",
+        vm_name,
+        "--image",
+        "alpine-3.21",
+        "--network",
+        net_name,
+        "--no-console",
+    ]
+    if ssh_key_name:
+        cmd.extend(["--ssh-key", ssh_key_name])
+    if extra_args:
+        cmd.extend(extra_args)
+    _run_mvm(binary, *cmd)
+
+    vms = _parse_vm_list(_run_mvm(binary, "vm", "ls", "--json").stdout)
+    vm_info = next((v for v in vms if v["name"] == vm_name), None)
+    if not vm_info:
+        raise RuntimeError(f"Failed to find created VM: {vm_name}")
+    return vm_info
+
+
+def _cleanup_vm_resources(
+    binary: str, vm_name: str, net_name: str, key_name: str | None = None
+) -> None:
+    """Clean up VM, network, and optional key."""
+    _run_mvm(binary, "vm", "rm", vm_name, "--force", check=False)
+    _run_mvm(binary, "network", "rm", net_name, check=False)
+    if key_name:
+        _run_mvm(binary, "key", "rm", key_name, check=False)
+
+
+# -- minimal_vm: bare VM, no SSH key, no extras ---------------------------
+
+
+@pytest.fixture
+def minimal_vm(
+    mvm_binary, unique_vm_name, unique_network_name
+) -> Generator[dict[str, Any], None, None]:
+    """Bare VM: no SSH, no console. Fastest creation. Self-contained deps."""
+    vm_name = unique_vm_name
+    net_name = unique_network_name
+    vm_info = _create_minimal_vm_core(mvm_binary, vm_name, net_name)
+    try:
+        yield vm_info
+    finally:
+        _cleanup_vm_resources(mvm_binary, vm_name, net_name)
+
+
+# -- created_vm: VM with SSH key -------------------------------------------
 
 
 @pytest.fixture
 def created_vm(
     mvm_binary, unique_vm_name
 ) -> Generator[dict[str, Any], None, None]:
-    """Create a VM and guarantee cleanup.
-
-    Also creates a throwaway SSH key for SSH access and passes it via --ssh-key.
-    Yields VM info dict from 'mvm vm ls --json'.
-    Cleans up VM and key even if test fails.
-    """
-    # Create a throwaway SSH key and set it as default so that
-    # tests using `mvm ssh --ip` can find the right key automatically.
+    """VM with SSH key injected. Self-contained deps. No console."""
+    vm_name = unique_vm_name
     key_name = f"sys-vmkey-{uuid.uuid4().hex[:6]}"
+    net_name = f"sys-vm-net-{uuid.uuid4().hex[:6]}"
+
     _run_mvm(mvm_binary, "key", "create", key_name, "--algorithm", "ed25519")
     _run_mvm(mvm_binary, "key", "default", key_name, check=False)
 
-    # Create dedicated network for this VM
-    net_name = f"sys-vm-net-{uuid.uuid4().hex[:6]}"
+    vm_info = _create_minimal_vm_core(
+        mvm_binary, vm_name, net_name, ssh_key_name=key_name
+    )
+    try:
+        yield vm_info
+    finally:
+        _cleanup_vm_resources(mvm_binary, vm_name, net_name, key_name)
+
+
+# -- module_vm: module-scoped VM with SSH key (read-only tests) ------------
+
+
+@pytest.fixture(scope="module")
+def module_vm(mvm_binary) -> Generator[dict[str, Any], None, None]:
+    """Module-scoped VM with SSH key. Shared across a module for read-only tests."""
+    vm_name = f"sys-modvm-{uuid.uuid4().hex[:8]}"
+    key_name = f"sys-modvm-key-{uuid.uuid4().hex[:6]}"
+    net_name = f"sys-modvm-net-{uuid.uuid4().hex[:6]}"
+
+    _run_mvm(mvm_binary, "key", "create", key_name, "--algorithm", "ed25519")
+    vm_info = _create_minimal_vm_core(
+        mvm_binary, vm_name, net_name, ssh_key_name=key_name
+    )
+    try:
+        yield vm_info
+    finally:
+        _cleanup_vm_resources(mvm_binary, vm_name, net_name, key_name)
+
+
+# -- module_network: module-scoped network --------------------------------
+
+
+@pytest.fixture(scope="module")
+def module_network(mvm_binary) -> Generator[str, None, None]:
+    """Module-scoped network for read-only tests."""
+    name = f"sys-modnet-{uuid.uuid4().hex[:6]}"
     _run_mvm(
         mvm_binary,
         "network",
         "create",
-        net_name,
+        name,
         "--subnet",
-        _unique_subnet(net_name),
+        _unique_subnet(name),
         "--non-interactive",
     )
-
-    _run_mvm(
-        mvm_binary,
-        "vm",
-        "create",
-        "--name",
-        unique_vm_name,
-        "--image",
-        "alpine-3.21",
-        "--network",
-        net_name,
-        "--ssh-key",
-        key_name,
-    )
-
-    # Get VM info
-    vms = _parse_vm_list(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
-    vm_info = next((v for v in vms if v["name"] == unique_vm_name), None)
-
-    if not vm_info:
-        raise RuntimeError(f"Failed to find created VM: {unique_vm_name}")
-
     try:
-        yield vm_info
+        yield name
     finally:
-        # Guaranteed cleanup — VM first (releases IP lease), then network, then key
-        _run_mvm(
-            mvm_binary,
-            "vm",
-            "rm",
-            unique_vm_name,
-            "--force",
-            check=False,
-        )
-        _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
-        _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+        _run_mvm(mvm_binary, "network", "rm", name, check=False)
+        result = _run_mvm(mvm_binary, "network", "ls", "--json", check=False)
+        if result.returncode == 0:
+            import json as _json
+
+            nets = _json.loads(result.stdout)
+            if not any(n.get("is_default") for n in nets) and nets:
+                _run_mvm(
+                    mvm_binary,
+                    "network",
+                    "default",
+                    nets[0]["name"],
+                    check=False,
+                )
+
+
+# ============================================================================
+# Other shared fixtures
+# ============================================================================
 
 
 @pytest.fixture
 def created_network(
     mvm_binary, unique_network_name
 ) -> Generator[str, None, None]:
-    """Create a network and guarantee cleanup.
-
-    Restores the default network after removal if the test changed the default.
-    """
+    """Create a network and guarantee cleanup."""
     subnet = _unique_subnet(unique_network_name)
     _run_mvm(
         mvm_binary,
@@ -392,19 +447,16 @@ def created_network(
         subnet,
         "--non-interactive",
     )
-
     try:
         yield unique_network_name
     finally:
         _run_mvm(mvm_binary, "network", "rm", unique_network_name, check=False)
-        # If no network is the default, restore the first present one
         import json as _json
 
         result = _run_mvm(mvm_binary, "network", "ls", "--json", check=False)
         if result.returncode == 0:
             nets = _json.loads(result.stdout)
-            has_default = any(n.get("is_default") for n in nets)
-            if not has_default and nets:
+            if not any(n.get("is_default") for n in nets) and nets:
                 _run_mvm(
                     mvm_binary,
                     "network",
@@ -420,7 +472,6 @@ def created_key(mvm_binary, unique_key_name) -> Generator[str, None, None]:
     _run_mvm(
         mvm_binary, "key", "create", unique_key_name, "--algorithm", "ed25519"
     )
-
     try:
         yield unique_key_name
     finally:
@@ -428,168 +479,15 @@ def created_key(mvm_binary, unique_key_name) -> Generator[str, None, None]:
 
 
 # ============================================================================
-# Module-scoped fixtures (shared across tests in a module)
-# ============================================================================
-
-
-@pytest.fixture(scope="module")
-def lifecycle_vm(mvm_binary) -> Generator[dict[str, Any], None, None]:
-    """One VM shared across module for stateful operation tests.
-
-    Used for pause->resume->stop->start->start chain tests.
-    VM is created once with SSH key injection, goes through state changes,
-    then cleaned up.
-    """
-    vm_name = f"sys-lifecycle-{uuid.uuid4().hex[:8]}"
-    key_name = f"sys-lifecycle-key-{uuid.uuid4().hex[:6]}"
-    net_name = f"sys-lifecycle-net-{uuid.uuid4().hex[:6]}"
-
-    # Create throwaway SSH key
-    _run_mvm(mvm_binary, "key", "create", key_name, "--algorithm", "ed25519")
-
-    # Create dedicated network
-    _run_mvm(
-        mvm_binary,
-        "network",
-        "create",
-        net_name,
-        "--subnet",
-        _unique_subnet(net_name),
-        "--non-interactive",
-    )
-
-    # Create VM with SSH key injected and network
-    _run_mvm(
-        mvm_binary,
-        "vm",
-        "create",
-        "--name",
-        vm_name,
-        "--image",
-        "alpine-3.21",
-        "--ssh-key",
-        key_name,
-        "--network",
-        net_name,
-    )
-
-    vms = _parse_vm_list(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
-    vm_info = next((v for v in vms if v["name"] == vm_name), None)
-
-    if not vm_info:
-        raise RuntimeError(f"Failed to create lifecycle VM: {vm_name}")
-
-    try:
-        yield vm_info
-    finally:
-        _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
-        _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
-        _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
-
-
-@pytest.fixture(scope="module")
-def module_network(mvm_binary) -> Generator[str, None, None]:
-    """One network shared across a module for read-only network tests.
-
-    Created once, destroyed after the last test in the module.
-    Tests that specifically test network create/rm should NOT use this.
-    """
-    name = f"sys-modnet-{uuid.uuid4().hex[:6]}"
-    subnet = _unique_subnet(name)
-    _run_mvm(
-        mvm_binary,
-        "network",
-        "create",
-        name,
-        "--subnet",
-        subnet,
-        "--non-interactive",
-    )
-    try:
-        yield name
-    finally:
-        _run_mvm(mvm_binary, "network", "rm", name, check=False)
-
-
-@pytest.fixture(scope="module")
-def module_vm(mvm_binary) -> Generator[dict[str, Any], None, None]:
-    """One VM shared across a module for read-only VM tests.
-
-    Created once with SSH key injection, kept running.
-    Tests that modify VM state (stop, start, pause, resume, snapshot, rm)
-    should NOT use this -- they need their own dedicated VM via created_vm.
-    """
-    vm_name = f"sys-modvm-{uuid.uuid4().hex[:8]}"
-    key_name = f"sys-modvm-key-{uuid.uuid4().hex[:6]}"
-    net_name = f"sys-modvm-net-{uuid.uuid4().hex[:6]}"
-
-    # Create throwaway SSH key
-    _run_mvm(mvm_binary, "key", "create", key_name, "--algorithm", "ed25519")
-
-    # Create dedicated network for this VM
-    _run_mvm(
-        mvm_binary,
-        "network",
-        "create",
-        net_name,
-        "--subnet",
-        _unique_subnet(net_name),
-        "--non-interactive",
-    )
-
-    # Create VM with SSH key injected and network attached
-    _run_mvm(
-        mvm_binary,
-        "vm",
-        "create",
-        "--name",
-        vm_name,
-        "--image",
-        "alpine-3.21",
-        "--network",
-        net_name,
-        "--ssh-key",
-        key_name,
-    )
-
-    vms = _parse_vm_list(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
-    vm_info = next((v for v in vms if v["name"] == vm_name), None)
-
-    if not vm_info:
-        raise RuntimeError(f"Failed to create module VM: {vm_name}")
-
-    try:
-        yield vm_info
-    finally:
-        _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
-        _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
-        _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
-
-
-# ============================================================================
-# Helper functions (not fixtures)
+# Helper functions (used by test files)
 # ============================================================================
 
 
 def _run_mvm(
-    binary: str,
-    *args: str,
-    check: bool = True,
-    timeout: int = 60,
+    binary: str, *args: str, check: bool = True, timeout: int = 60
 ) -> subprocess.CompletedProcess[str]:
-    """Run mvm command via subprocess.
-
-    Args:
-        binary: MVM binary path or "uv run mvm"
-        args: Command arguments
-        check: Raise on non-zero exit (default True)
-        timeout: Command timeout in seconds
-
-    Returns:
-        CompletedProcess with stdout/stderr
-    """
+    """Run mvm command via subprocess."""
     cmd = [*shlex.split(binary), *args]
-
     result = subprocess.run(
         cmd,
         capture_output=True,
@@ -597,40 +495,19 @@ def _run_mvm(
         timeout=timeout,
         env={**os.environ, "NO_COLOR": "1"},
     )
-
     if check and result.returncode != 0:
         raise RuntimeError(
-            f"mvm command failed: {' '.join(args)}\n"
-            f"stdout: {result.stdout}\n"
-            f"stderr: {result.stderr}"
+            f"mvm command failed: {' '.join(args)}\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
-
     return result
 
 
 def _parse_vm_list(json_output: str) -> list[dict[str, Any]]:
-    """Parse 'mvm vm ls --json' output."""
-    data: list[dict[str, Any]] = json.loads(json_output)
-    return data
+    return json.loads(json_output) if json_output else []
 
 
-def wait_for_ssh(
-    binary: str,
-    vm_name: str,
-    user: str,
-    timeout: float,
-) -> bool:
-    """Poll SSH via mvm ssh until available or timeout.
-
-    Args:
-        binary: MVM binary path (e.g. "uv run mvm")
-        vm_name: VM name to connect to
-        user: SSH username (root for Alpine/Arch/Debian, ubuntu for Ubuntu)
-        timeout: Maximum wait time in seconds
-
-    Returns:
-        True if SSH available, False if timeout
-    """
+def wait_for_ssh(binary: str, vm_name: str, user: str, timeout: float) -> bool:
+    """Poll SSH via mvm ssh until available or timeout."""
     start = time.monotonic()
     while time.monotonic() - start < timeout:
         try:
@@ -641,7 +518,7 @@ def wait_for_ssh(
                     vm_name,
                     "-u",
                     user,
-                    "-c",
+                    "--cmd",
                     "exit",
                 ],
                 capture_output=True,
@@ -652,7 +529,5 @@ def wait_for_ssh(
                 return True
         except subprocess.TimeoutExpired:
             pass
-
         time.sleep(0.5)
-
     return False
