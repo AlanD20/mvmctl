@@ -39,10 +39,16 @@ class SettingsService:
         Set a validated setting value.
 
         Raises:
-            ConfigError: If the key is not overridable or value has wrong type.
+            ConfigError: If the value has wrong type.
+
+        Notes:
+            The 'key is overridable' check is handled by the API layer
+            (ConfigRequest) before this method is called.
 
         """
         expected_type = self._get_expected_type(category, key)
+        # Caller (ConfigRequest) validates that the key is overridable;
+        # this guard is for internal consistency.
         if expected_type is None:
             raise ConfigError(
                 f"'{category}.{key}' is not an overridable setting. "
@@ -83,9 +89,13 @@ class SettingsService:
         return OVERRIDABLE_DEFAULTS[category][key]
 
     def delete(self, category: str, key: str) -> bool:
-        """Delete a setting after validating the key exists."""
-        if self._get_expected_type(category, key) is None:
-            raise ConfigError(f"'{category}.{key}' is not a valid setting key")
+        """Delete a setting.
+
+        Notes:
+            Key existence validation is handled by the API layer
+            (ConfigRequest) before this method is called.
+
+        """
         return self._repo.delete(category, key)
 
     @classmethod

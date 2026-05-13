@@ -13,8 +13,9 @@ from mvmctl.core.key._resolver import KeyResolver
 from mvmctl.core.key._service import KeyService
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.core.vm._resolver import VMResolver
-from mvmctl.exceptions import SSHError
+from mvmctl.exceptions import MVMKeyError, SSHError
 from mvmctl.models import VMInstanceItem
+from mvmctl.utils._validators import NetworkValidator, VMValidator
 
 logger = logging.getLogger(__name__)
 
@@ -44,23 +45,46 @@ class ResolvedSSHInput:
 class SSHRequest:
     """Resolve SSHInput against the database."""
 
+    _result: ResolvedSSHInput | None = None
+
     def __init__(self, inputs: SSHInput, db: Database) -> None:
         self._inputs = inputs
         self._db = db
         self._vm: VMInstanceItem | None = None
+
+    @property
+    def result(self) -> ResolvedSSHInput | None:
+        return self._result
 
     def resolve(self) -> ResolvedSSHInput:
         """Resolve all inputs to explicit values."""
         target_ip = self._resolve_target()
         user = self._resolve_user()
         key = self._resolve_key()
-        return ResolvedSSHInput(
+
+        self._result = ResolvedSSHInput(
             target_ip=target_ip,
             user=user,
             key=key,
             cmd=self._inputs.cmd,
             timeout=self._inputs.timeout,
         )
+
+        # Validate
+        self.ensure_validate()
+
+        return self._result
+
+    def ensure_validate(self) -> None:
+        """Validate resolved SSH parameters — caller validates, receiver trusts."""
+
+        if not NetworkValidator.is_ip_address(self._result.target_ip):
+            raise SSHError(f"Invalid IP address: {self._result.target_ip}")
+
+        VMValidator.validate_ssh_username(self._result.user)
+
+        if self._result.key is not None and not self._result.key.exists():
+            raise MVMKeyError(f"SSH key not found: {self._result.key}")
 
     def _resolve_target(self) -> str:
         """

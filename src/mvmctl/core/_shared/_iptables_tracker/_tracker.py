@@ -9,12 +9,11 @@ from __future__ import annotations
 
 import logging
 import shlex
-import subprocess
 from dataclasses import dataclass
 from enum import Enum
 
 from mvmctl.constants import CONST_IPTABLES_MAX_COMMENT_LEN
-from mvmctl.exceptions import IPTablesTrackerError
+from mvmctl.exceptions import IPTablesTrackerError, ProcessError
 from mvmctl.models import (
     IPTablesChain,
     IPTablesPort,
@@ -24,7 +23,7 @@ from mvmctl.models import (
     IPTablesTable,
     IPTablesWildcard,
 )
-from mvmctl.utils._system import privileged_cmd
+from mvmctl.utils._system import run_cmd
 from mvmctl.utils.network import NetworkUtils
 
 from ._repository import IPTablesRuleRepository
@@ -126,13 +125,12 @@ class IPTablesTracker:
         # Check if rule exists in iptables
         iptables_exists = False
         try:
-            subprocess.run(
-                privileged_cmd(check_args),
-                capture_output=True,
-                check=True,
+            run_cmd(
+                check_args,
+                privileged=True,
             )
             iptables_exists = True
-        except subprocess.CalledProcessError:
+        except ProcessError:
             pass
 
         # If rule exists in both DB and iptables, update verification timestamp
@@ -148,15 +146,14 @@ class IPTablesTracker:
 
         # Create the rule in iptables
         try:
-            subprocess.run(
-                privileged_cmd(add_args),
-                capture_output=True,
-                check=True,
+            run_cmd(
+                add_args,
+                privileged=True,
             )
-        except subprocess.CalledProcessError as e:
+        except ProcessError as e:
             return IPTablesRuleResult(
                 success=False,
-                error_message=f"Failed to create rule: {e.stderr.decode()}",
+                error_message=f"Failed to create rule: {e}",
                 command_executed=add_args,
             )
 
@@ -216,9 +213,9 @@ class IPTablesTracker:
         )
 
         # Remove from iptables
-        delete_result = subprocess.run(
-            privileged_cmd(delete_args),
-            capture_output=True,
+        delete_result = run_cmd(
+            delete_args,
+            privileged=True,
             check=False,
         )
 
@@ -232,7 +229,7 @@ class IPTablesTracker:
                 if not self._rule_exists_by_interfaces(effective_rule):
                     pass  # Rule is truly gone
                 else:
-                    stderr = delete_result.stderr.decode()
+                    stderr = delete_result.stderr
                     return IPTablesRuleResult(
                         success=False,
                         error_message=f"Failed to remove rule: {stderr}",
@@ -273,10 +270,9 @@ class IPTablesTracker:
             "--line-numbers",
             "-v",
         ]
-        result = subprocess.run(
-            privileged_cmd(list_cmd),
-            capture_output=True,
-            text=True,
+        result = run_cmd(
+            list_cmd,
+            privileged=True,
             check=False,
         )
         if result.returncode != 0:
@@ -307,9 +303,9 @@ class IPTablesTracker:
                         rule.chain_name,
                         line_num,
                     ]
-                    del_result = subprocess.run(
-                        privileged_cmd(del_cmd),
-                        capture_output=True,
+                    del_result = run_cmd(
+                        del_cmd,
+                        privileged=True,
                         check=False,
                     )
                     return del_result.returncode == 0
@@ -335,10 +331,9 @@ class IPTablesTracker:
             "-n",
             "-v",
         ]
-        result = subprocess.run(
-            privileged_cmd(list_cmd),
-            capture_output=True,
-            text=True,
+        result = run_cmd(
+            list_cmd,
+            privileged=True,
             check=False,
         )
         if result.returncode != 0:
@@ -448,9 +443,9 @@ class IPTablesTracker:
 
         # Check if chain exists
         cmd_check = ["iptables", "-t", table, "-L", chain_name_str, "-n"]
-        result = subprocess.run(
-            privileged_cmd(cmd_check),
-            capture_output=True,
+        result = run_cmd(
+            cmd_check,
+            privileged=True,
             check=False,
         )
         if result.returncode == 0:
@@ -461,18 +456,14 @@ class IPTablesTracker:
         cmd_create = ["iptables", "-t", table, "-N", chain_name_str]
         created = False
         try:
-            subprocess.run(
-                privileged_cmd(cmd_create), check=True, capture_output=True
+            run_cmd(
+                cmd_create,
+                privileged=True,
             )
             logger.debug("Created iptables chain %s", chain_name_str)
             created = True
-        except subprocess.CalledProcessError as e:
-            stderr = ""
-            if isinstance(e.stderr, bytes):
-                stderr = e.stderr.decode(errors="ignore")
-            elif isinstance(e.stderr, str):
-                stderr = e.stderr
-            if "Chain already exists" in stderr:
+        except ProcessError as e:
+            if "Chain already exists" in str(e):
                 logger.debug("Chain %s already exists", chain_name_str)
                 return False
             raise IPTablesTrackerError(
@@ -516,9 +507,9 @@ class IPTablesTracker:
         """
         # Check if jump rule exists
         cmd_check = ["iptables", "-t", table, "-C", from_chain, "-j", to_chain]
-        result = subprocess.run(
-            privileged_cmd(cmd_check),
-            capture_output=True,
+        result = run_cmd(
+            cmd_check,
+            privileged=True,
             check=False,
         )
 
@@ -540,8 +531,9 @@ class IPTablesTracker:
             to_chain,
         ]
         try:
-            subprocess.run(
-                privileged_cmd(cmd_insert), check=True, capture_output=True
+            run_cmd(
+                cmd_insert,
+                privileged=True,
             )
             logger.debug(
                 "Inserted jump rule %s -> %s at position %d",
@@ -550,14 +542,9 @@ class IPTablesTracker:
                 position,
             )
             return IPTablesRuleResult(success=True, command_executed=cmd_insert)
-        except subprocess.CalledProcessError as e:
-            stderr = ""
-            if isinstance(e.stderr, bytes):
-                stderr = e.stderr.decode(errors="ignore")
-            elif isinstance(e.stderr, str):
-                stderr = e.stderr
+        except ProcessError as e:
             error_msg = (
-                f"Failed to add jump rule {from_chain} -> {to_chain}: {stderr}"
+                f"Failed to add jump rule {from_chain} -> {to_chain}: {e}"
             )
             logger.error(error_msg)
             return IPTablesRuleResult(success=False, error_message=error_msg)
@@ -586,9 +573,9 @@ class IPTablesTracker:
 
         # Check if chain exists first
         cmd_check = ["iptables", "-t", table, "-L", chain_name_str, "-n"]
-        result = subprocess.run(
-            privileged_cmd(cmd_check),
-            capture_output=True,
+        result = run_cmd(
+            cmd_check,
+            privileged=True,
             check=False,
         )
         if result.returncode != 0:
@@ -600,11 +587,12 @@ class IPTablesTracker:
         # Flush the chain in iptables
         cmd_flush = ["iptables", "-t", table, "-F", chain_name_str]
         try:
-            subprocess.run(
-                privileged_cmd(cmd_flush), check=True, capture_output=True
+            run_cmd(
+                cmd_flush,
+                privileged=True,
             )
             logger.debug("Flushed all rules from chain %s", chain_name_str)
-        except subprocess.CalledProcessError as e:
+        except ProcessError as e:
             raise IPTablesTrackerError(
                 f"Failed to flush {chain_name_str} chain"
             ) from e
@@ -663,13 +651,14 @@ class IPTablesTracker:
         # Delete the chain (iptables automatically removes rules)
         cmd_delete = ["iptables", "-t", table.value, "-X", chain_name_str]
         try:
-            subprocess.run(
-                privileged_cmd(cmd_delete), check=True, capture_output=True
+            run_cmd(
+                cmd_delete,
+                privileged=True,
             )
             logger.debug("Deleted chain %s", chain_name_str)
-        except subprocess.CalledProcessError as e:
+        except ProcessError as e:
             raise IPTablesTrackerError(
-                f"Failed to delete {chain_name_str} chain: {e.stderr.decode() if e.stderr else e}"
+                f"Failed to delete {chain_name_str} chain: {e}"
             ) from e
 
         return True

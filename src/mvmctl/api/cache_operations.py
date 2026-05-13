@@ -53,6 +53,9 @@ class CacheOperation:
         created: list[str] = []
         guestfs_enabled: bool = False
 
+        # Ensure DB schema exists before any DB writes.
+        Database().migrate()
+
         # Core directories
         dirs = [
             CacheUtils.get_vms_dir(),
@@ -78,8 +81,6 @@ class CacheOperation:
             logger.exception("Failed to extract embedded service binaries")
 
         # Check whether guestfs was enabled by the user
-        from mvmctl.core._shared import Database
-
         db = Database()
         try:
             guestfs_enabled = bool(
@@ -217,6 +218,14 @@ class CacheOperation:
                 leases = lease_repo.list_all(network.id)
                 if leases:
                     continue
+
+            # Soft-deleted networks (is_present=0) have no infrastructure —
+            # skip API remove and delete the DB record directly
+            if not network.is_present:
+                if not dry_run:
+                    repo.delete(network.id)
+                removed.append(network.name)
+                continue
 
             if not dry_run:
                 try:
@@ -431,22 +440,27 @@ class CacheOperation:
     def prune_misc(
         dry_run: bool = False,
     ) -> OperationResult[dict[str, bool]]:
-        """Prune miscellaneous cache: appliance, warm images, and stale guestfs state.
+        """Prune miscellaneous cache: appliance, warm images, stale guestfs state,
+        and stale provision mount directories.
 
-        Always removes appliance, warm images, and stale libguestfs locks/sockets
-        — no protection flags.
+        Always removes appliance, warm images, stale libguestfs locks/sockets,
+        and stale ``mvm-provision-*`` mount points in ``/tmp/`` — no protection flags.
 
         Args:
             dry_run: If True, only report what would be removed.
 
         Returns:
-            OperationResult with item dict with keys "appliance",
-            "warm_images", and "guestfs_state" indicating whether each was removed.
+            OperationResult with item dict with keys ``"appliance"``,
+            ``"warm_images"``, ``"guestfs_state"``, and
+            ``"stale_provision_mounts"`` indicating whether each was removed.
         """
         result = {
             "appliance": GuestfsService.prune_appliance(dry_run),
             "warm_images": CacheService.prune_warm_images(dry_run),
             "guestfs_state": GuestfsService.clean_stale_guestfs_state(),
+            "stale_provision_mounts": CacheService.clean_stale_provision_mounts(
+                dry_run
+            ),
         }
         return OperationResult(
             status="success",
@@ -512,6 +526,8 @@ class CacheOperation:
             pruned_ids.append("warm_images")
         if misc.get("guestfs_state"):
             pruned_ids.append("guestfs_state")
+        if misc.get("stale_provision_mounts"):
+            pruned_ids.append("stale_provision_mounts")
 
         result = PruneAllResult(
             pruned_ids=pruned_ids,

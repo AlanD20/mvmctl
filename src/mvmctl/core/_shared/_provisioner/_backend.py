@@ -36,7 +36,9 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from mvmctl.exceptions import ProcessError
 from mvmctl.models.provisioner import ProvisionerType
+from mvmctl.utils._system import run_cmd
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +152,6 @@ class _LoopMountBackend:
         """
         import logging
         import shutil
-        import subprocess
 
         from mvmctl.utils._disk import RootPartitionDetector
         from mvmctl.utils.common import CommonUtils
@@ -164,17 +165,15 @@ class _LoopMountBackend:
             if fs_type in ("ext4", "ext3", "ext2", "btrfs", "xfs"):
                 log.info("Image is %s filesystem, using as-is", fs_type)
                 try:
-                    subprocess.run(
+                    run_cmd(
                         [
                             "cp",
                             "--sparse=always",
                             str(raw_path),
                             str(output_path),
                         ],
-                        check=True,
-                        capture_output=True,
                     )
-                except (subprocess.CalledProcessError, FileNotFoundError):
+                except (ProcessError, FileNotFoundError):
                     self._copy_bytes_dd(raw_path, output_path, 0, None)
                 ext_map = {
                     "ext4": ".ext4",
@@ -289,8 +288,6 @@ class _LoopMountBackend:
         src: Path, dst: Path, skip_bytes: int, count_bytes: int | None
     ) -> None:
         """Copy bytes from *src* starting at *skip_bytes* into *dst* using dd."""
-        import subprocess
-
         cmd = [
             "dd",
             f"if={src}",
@@ -304,32 +301,21 @@ class _LoopMountBackend:
         if count_bytes is not None:
             cmd.append(f"count={count_bytes}")
         try:
-            subprocess.run(cmd, check=True, capture_output=True)
-        except subprocess.CalledProcessError as e:
-            stderr = (
-                e.stderr.decode()
-                if isinstance(e.stderr, bytes)
-                else (e.stderr if e.stderr else "")
-            )
-            raise RuntimeError(f"dd failed: {stderr}") from e
-        except FileNotFoundError:
-            raise RuntimeError("dd not found. Install coreutils.")
+            run_cmd(cmd)
+        except ProcessError as e:
+            raise RuntimeError(f"dd failed: {e}") from e
 
     @staticmethod
     def _detect_filesystem_type(image_path: Path) -> str | None:
         """Detect filesystem type using blkid."""
-        import subprocess
-
         try:
-            blkid_result = subprocess.run(
+            blkid_result = run_cmd(
                 ["blkid", "-o", "value", "-s", "TYPE", str(image_path)],
-                capture_output=True,
-                text=True,
                 check=False,
             )
             fs_type = blkid_result.stdout.strip()
             return fs_type if fs_type else None
-        except FileNotFoundError:
+        except ProcessError:
             return None
 
     @staticmethod
@@ -339,14 +325,10 @@ class _LoopMountBackend:
     ) -> tuple[list[dict[str, object]], int | None] | object | None:
         """Parse partition table using sfdisk."""
         import json as json_mod
-        import subprocess
 
         try:
-            sfdisk_result = subprocess.run(
+            sfdisk_result = run_cmd(
                 ["sfdisk", "--json", str(raw_path)],
-                capture_output=True,
-                text=True,
-                check=True,
             )
             table = json_mod.loads(sfdisk_result.stdout)
             partitions_raw = table.get("partitiontable", {}).get(
@@ -376,8 +358,7 @@ class _LoopMountBackend:
             return partitions, partition
 
         except (
-            FileNotFoundError,
-            subprocess.CalledProcessError,
+            ProcessError,
             json_mod.JSONDecodeError,
             KeyError,
         ):
@@ -389,16 +370,11 @@ class _LoopMountBackend:
         partition: int | None,
     ) -> tuple[list[dict[str, object]], int | None] | object | None:
         """Parse partition table using parted (fallback when sfdisk unavailable)."""
-        import subprocess
-
         try:
-            result = subprocess.run(
+            result = run_cmd(
                 ["parted", "-sm", str(raw_path), "unit", "B", "print"],
-                capture_output=True,
-                text=True,
-                check=True,
             )
-        except (FileNotFoundError, subprocess.CalledProcessError):
+        except ProcessError:
             return None
 
         _SECTOR_SIZE = 512
@@ -444,13 +420,10 @@ class _LoopMountBackend:
     def _detect_and_rename_fs(output_path: Path) -> Path:
         """Detect filesystem type via blkid and rename output file accordingly."""
         import logging
-        import subprocess
 
         try:
-            blkid_result = subprocess.run(
+            blkid_result = run_cmd(
                 ["blkid", "-o", "value", "-s", "TYPE", str(output_path)],
-                capture_output=True,
-                text=True,
                 check=False,
             )
             fs_type = blkid_result.stdout.strip()
@@ -467,7 +440,7 @@ class _LoopMountBackend:
                 logging.getLogger(__name__).info(
                     "Detected filesystem: %s", fs_type
                 )
-        except FileNotFoundError:
+        except ProcessError:
             pass
         return output_path
 

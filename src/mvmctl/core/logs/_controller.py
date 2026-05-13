@@ -5,8 +5,6 @@ from __future__ import annotations
 from collections.abc import Generator
 
 from mvmctl.core.logs._service import LogService
-from mvmctl.core.vm._repository import VMRepository
-from mvmctl.core.vm._resolver import VMResolver
 from mvmctl.models import VMInstanceItem
 
 
@@ -15,19 +13,12 @@ class LogController:
     Stateful log controller bound to a single VM.
 
     Args:
-        entity: VM identifier (name, ID, IP, MAC) or VMInstanceItem
-        repo: VMRepository instance
+        vm: Resolved VMInstanceItem whose logs to view.
 
     """
 
-    def __init__(
-        self, entity: str | VMInstanceItem, repo: VMRepository
-    ) -> None:
-        if isinstance(entity, VMInstanceItem):
-            self._vm = entity
-        else:
-            resolver = VMResolver(repo)
-            self._vm = resolver.resolve(entity)
+    def __init__(self, vm: VMInstanceItem) -> None:
+        self._vm = vm
         self._hash: str = self._vm.id if self._vm.id else self._vm.name
 
     @property

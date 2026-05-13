@@ -12,13 +12,13 @@ import hashlib
 import logging
 import shutil
 import socket
-import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
 from mvmctl.core.key._repository import KeyRepository
 from mvmctl.exceptions import MVMKeyError
 from mvmctl.models import SSHKeyItem
+from mvmctl.utils._system import run_cmd
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ class KeyService:
         if algorithm == "rsa":
             cmd.extend(["-b", str(bits or 4096)])
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = run_cmd(cmd, check=False)
         if result.returncode != 0:
             raise MVMKeyError(f"ssh-keygen failed: {result.stderr.strip()}")
 
@@ -155,16 +155,15 @@ class KeyService:
         return contents
 
     def set_default_keys(self, names: list[str]) -> None:
-        """Set the default SSH keys."""
+        """Set the default SSH keys.
+
+        Notes:
+            Key name existence validation is handled by the API layer
+            (KeyRequest.resolve()) before this method is called.
+
+        """
         all_keys = self._repo.list_all()
         name_to_key = {k.name: k for k in all_keys}
-
-        for name in names:
-            if name not in name_to_key:
-                raise MVMKeyError(
-                    f"Key '{name}' not found in cache. "
-                    "Add it first with 'mvm key add' or 'mvm key create'."
-                )
 
         for name in names:
             if name in name_to_key:
@@ -231,6 +230,11 @@ class KeyService:
         Returns:
             Tuple of (SSHKeyItem, private_key_path).
 
+        Notes:
+            File conflict validation is handled by the API layer before
+            this method is called. This method handles DB duplicate
+            detection (state) and overwrite file cleanup (execution).
+
         """
         self.check_dependencies()
 
@@ -239,16 +243,6 @@ class KeyService:
 
         private_key_path = output_dir / name
         pub_key_path = output_dir / f"{name}.pub"
-
-        if not overwrite and (
-            private_key_path.exists() or pub_key_path.exists()
-        ):
-            existing = (
-                private_key_path if private_key_path.exists() else pub_key_path
-            )
-            raise MVMKeyError(
-                f"Key file already exists: {existing}. Use --overwrite to replace."
-            )
 
         existing_key = self._repo.get_by_name(name)
         if existing_key is not None:
@@ -296,6 +290,7 @@ class KeyService:
         self,
         name: str,
         pub_key_path: Path,
+        pub_key_content: str,
         keys_dir: Path,
         *,
         overwrite: bool = False,
@@ -305,31 +300,16 @@ class KeyService:
 
         Args:
             name: Key name.
-            pub_key_path: Path to public key file.
+            pub_key_path: Original public key file path (for metadata).
+            pub_key_content: Pre-read and validated public key content.
             keys_dir: Directory to copy the public key into.
             overwrite: Whether to overwrite existing.
 
+        Notes:
+            File format validation (path existence, empty content, private-key
+            detection) is handled by the API layer before this method is called.
+
         """
-        pub_key_path = Path(pub_key_path)
-        if not pub_key_path.exists():
-            raise MVMKeyError(f"Public key file not found: {pub_key_path}")
-
-        content = pub_key_path.read_text().strip()
-        if not content:
-            raise MVMKeyError(f"Public key file is empty: {pub_key_path}")
-
-        if self._is_private_key(content):
-            pub_path = Path(str(pub_key_path) + ".pub")
-            if pub_path.exists():
-                raise MVMKeyError(
-                    f"'{pub_key_path}' looks like a private key.\n"
-                    f"Use the public key instead: mvm key add {name} {pub_path}"
-                )
-            raise MVMKeyError(
-                f"'{pub_key_path}' looks like a private key.\n"
-                f"Pass the corresponding .pub file instead: mvm key add {name} <path>.pub"
-            )
-
         existing = self._repo.get_by_name(name)
         if existing is not None:
             if overwrite:
@@ -342,7 +322,7 @@ class KeyService:
                     f"Key '{name}' already exists. Remove it first to replace."
                 )
 
-        self._persist_public_key(name, content, keys_dir)
+        self._persist_public_key(name, pub_key_content, keys_dir)
 
         private_key_path = pub_key_path.with_suffix("")
         if private_key_path == pub_key_path:
@@ -351,14 +331,14 @@ class KeyService:
             private_key_path.exists() and private_key_path != pub_key_path
         )
 
-        fingerprint = self._compute_fingerprint(content)
+        fingerprint = self._compute_fingerprint(pub_key_content)
         now = datetime.now(UTC).isoformat()
         ssh_key = SSHKeyItem(
             id=fingerprint,
             name=name,
             fingerprint=fingerprint,
-            algorithm=self._parse_algorithm(content),
-            comment=self._parse_comment(content),
+            algorithm=self._parse_algorithm(pub_key_content),
+            comment=self._parse_comment(pub_key_content),
             private_key_path=str(private_key_path)
             if private_key_exists
             else None,

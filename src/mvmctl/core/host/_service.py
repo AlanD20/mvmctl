@@ -5,7 +5,6 @@ from __future__ import annotations
 import grp
 import logging
 import os
-import re
 import shutil
 import subprocess
 import tempfile
@@ -26,8 +25,9 @@ from mvmctl.constants import (
     SUDOERS_DROP_IN_PATH,
 )
 from mvmctl.core.host._repository import HostRepository
-from mvmctl.exceptions import HostError
+from mvmctl.exceptions import HostError, ProcessError
 from mvmctl.models import HostStateChangeItem
+from mvmctl.utils._system import run_cmd
 
 logger = logging.getLogger(__name__)
 
@@ -68,16 +68,15 @@ class HostService:
 
         """
         try:
-            result = subprocess.run(
+            result = run_cmd(
                 cmd,
-                capture_output=capture,
-                text=True,
                 check=check,
+                capture=capture,
             )
-        except subprocess.CalledProcessError as e:
+        except ProcessError as e:
+            if "Command not found" in str(e):
+                raise HostError(missing_msg) from e
             raise HostError(f"{failure_msg}: {e}") from e
-        except FileNotFoundError as e:
-            raise HostError(missing_msg) from e
         return result
 
     @staticmethod
@@ -206,11 +205,14 @@ class HostService:
 
     @staticmethod
     def _generate_sudoers_content(group_name: str) -> str:
-        """Generate the sudoers drop-in content granting the group passwordless access."""
-        from mvmctl.constants import PRIVILEGED_SERVICE_BINARIES, PROJECT_NAME
+        """Generate the sudoers drop-in content granting the group passwordless access.
 
-        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,30}", group_name):
-            raise HostError(f"Invalid group name: {group_name!r}")
+        Notes:
+            Group name format validation is handled by the API layer
+            (HostOperation.init) before this method is called.
+
+        """
+        from mvmctl.constants import PRIVILEGED_SERVICE_BINARIES, PROJECT_NAME
 
         # System binaries (static paths)
         binaries = list(PRIVILEGED_BINARIES.keys())
@@ -239,16 +241,15 @@ class HostService:
             f.write(content)
             tmp_path = f.name
         try:
-            result = subprocess.run(
+            result = run_cmd(
                 ["visudo", "-c", "-f", tmp_path],
-                capture_output=True,
-                text=True,
+                check=False,
             )
             if result.returncode != 0:
                 raise HostError(
                     f"Generated sudoers file failed visudo validation: {result.stderr}"
                 )
-        except FileNotFoundError:
+        except ProcessError:
             raise HostError("visudo not found — cannot validate sudoers syntax")
         finally:
             try:
@@ -353,10 +354,8 @@ class HostService:
     def _is_module_loaded(module: str) -> bool:
         """Check if a kernel module is loaded."""
         try:
-            result = subprocess.run(
+            result = run_cmd(
                 ["lsmod"],
-                capture_output=True,
-                text=True,
                 check=False,
             )
             if result.returncode != 0:
@@ -366,7 +365,7 @@ class HostService:
                 for line in result.stdout.splitlines()
                 if line
             )
-        except (OSError, subprocess.CalledProcessError):
+        except (OSError, ProcessError):
             return False
 
     @staticmethod
@@ -417,10 +416,8 @@ class HostService:
         vendor_modules: list[str] = []
         for mod in ("kvm_intel", "kvm_amd"):
             if HostService._is_module_loaded(mod) or (
-                subprocess.run(
+                run_cmd(
                     ["modprobe", "--dry-run", mod],
-                    capture_output=True,
-                    text=True,
                     check=False,
                 ).returncode
                 == 0
@@ -475,13 +472,10 @@ class HostService:
         """Save iptables rules to file."""
         rules_path = Path(IPTABLES_RULES_V4)
         try:
-            result = subprocess.run(
+            result = run_cmd(
                 ["iptables-save"],
-                capture_output=True,
-                text=True,
-                check=True,
             )
-        except (subprocess.CalledProcessError, FileNotFoundError):
+        except ProcessError:
             logger.warning(
                 "iptables-save unavailable — rules will not survive reboot. "
                 "Install iptables-persistent (Debian/Ubuntu) or iptables-services (RHEL)."
@@ -624,11 +618,10 @@ class HostService:
                     try:
                         if change.original_value is not None:
                             if str(target).startswith(DEFAULT_SUDOERS_DIR):
-                                result = subprocess.run(
+                                result = run_cmd(
                                     ["visudo", "-c", "-f", "-"],
                                     input=change.original_value,
-                                    capture_output=True,
-                                    text=True,
+                                    check=False,
                                 )
                                 if result.returncode != 0:
                                     raise HostError(

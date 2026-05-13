@@ -238,10 +238,10 @@ class BinaryService:
 
     def remove(self, binary: BinaryItem, *, force: bool = False) -> BinaryItem:
         """
-        Remove a specific binary by item.
+        Remove a specific binary from disk and database.
 
-        Delegates to BinaryController for VM reference checks and
-        soft/hard delete logic.
+        Hard-deletes when no VMs reference the binary.
+        Soft-deletes only when VMs still reference it (to preserve history).
 
         Args:
             binary: The BinaryItem to remove.
@@ -250,11 +250,29 @@ class BinaryService:
         Returns:
             The removed BinaryItem.
 
-        """
-        from mvmctl.core.binary._controller import BinaryController
+        Raises:
+            BinaryError: If binary is referenced by VMs and force is False.
 
-        controller = BinaryController(binary, self._repo)
-        controller.remove(force=force)
+        """
+        vms = binary.vms or []
+        has_vms = bool(vms)
+
+        if has_vms and not force:
+            raise BinaryError(
+                f"Binary referenced by VMs: {', '.join(v.name for v in vms)}"
+            )
+
+        # Delete file from disk
+        binary_path = binary.resolved_path
+        if binary_path.exists():
+            binary_path.unlink()
+
+        # Hard delete if no VMs, soft delete if VMs exist (with force)
+        if has_vms:
+            self._repo.soft_delete(binary.id)
+        else:
+            self._repo.delete(binary.id)
+
         return binary
 
     def remove_many(

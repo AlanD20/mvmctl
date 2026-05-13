@@ -113,3 +113,17 @@ class LoopMountProvisioner:
             resize=resize,
         )
         logger.info("Loop-mount provisioning succeeded")
+
+    # -- cleanup ------------------------------------------------------------
+
+    @staticmethod
+    def cleanup_mount(mount_point: Path) -> bool:
+        """Unmount and remove a stale provision mount point.
+
+        Args:
+            mount_point: Path to the mount point to clean up.
+
+        Returns:
+            True if successfully cleaned, False otherwise.
+        """
+        return LoopMountManager.cleanup_mount(str(mount_point))

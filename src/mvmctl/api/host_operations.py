@@ -5,6 +5,7 @@ from __future__ import annotations  # ruff: isort: skip
 import logging
 import os
 import pwd
+import re
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -206,6 +207,10 @@ class HostOperation:
             )
             db_changes.append(change_item)
             all_changes.append(change_item)
+
+        # Validate group name format (caller validates, receiver trusts)
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,30}", MVM_UNIX_GROUP):
+            raise HostError(f"Invalid group name: {MVM_UNIX_GROUP!r}")
 
         sudoers_path = Path(SUDOERS_DROP_IN_PATH)
         sudoers_stale = True

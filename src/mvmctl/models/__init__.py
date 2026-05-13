@@ -11,39 +11,44 @@ for stability guarantees::
 
 from __future__ import annotations
 
-from mvmctl.models.binary import BinaryItem
-from mvmctl.models.bulk import BulkResult, BulkResultItem
-from mvmctl.models.cache import CleanResult, PruneAllResult
-from mvmctl.models.cloudinit import (
-    CloudInitMode,
-    CloudInitStatus,
-)
-from mvmctl.models.firecracker import DriveConfig, FirecrackerConfig
-from mvmctl.models.host import HostStateChangeItem, HostStateItem
-from mvmctl.models.image import ImageItem, ImageSpec
-from mvmctl.models.kernel import KernelItem, KernelPullResult, KernelSpec
-from mvmctl.models.key import SSHKeyItem
-from mvmctl.models.network import (
-    IPTablesChain,
-    IPTablesPort,
-    IPTablesProtocol,
-    IPTablesRuleItem,
-    IPTablesRuleType,
-    IPTablesTable,
-    IPTablesTarget,
-    IPTablesWildcard,
-    NetworkItem,
-    NetworkLeaseItem,
-)
-from mvmctl.models.provisioner import ProvisionerType
-from mvmctl.models.vm import (
-    ConsoleInfo,
-    ConsoleState,
-    VMInspectInfo,
-    VMInstanceItem,
-    VMStatus,
-)
-from mvmctl.models.volume import VolumeItem, VolumeStatus
+from typing import TYPE_CHECKING
+
+from mvmctl.utils._lazy_import import resolve_lazy
+
+if TYPE_CHECKING:
+    from mvmctl.models.binary import BinaryItem
+    from mvmctl.models.bulk import BulkResult, BulkResultItem
+    from mvmctl.models.cache import CleanResult, PruneAllResult
+    from mvmctl.models.cloudinit import (
+        CloudInitMode,
+        CloudInitStatus,
+    )
+    from mvmctl.models.firecracker import DriveConfig, FirecrackerConfig
+    from mvmctl.models.host import HostStateChangeItem, HostStateItem
+    from mvmctl.models.image import ImageItem, ImageSpec
+    from mvmctl.models.kernel import KernelItem, KernelPullResult, KernelSpec
+    from mvmctl.models.key import SSHKeyItem
+    from mvmctl.models.network import (
+        IPTablesChain,
+        IPTablesPort,
+        IPTablesProtocol,
+        IPTablesRuleItem,
+        IPTablesRuleType,
+        IPTablesTable,
+        IPTablesTarget,
+        IPTablesWildcard,
+        NetworkItem,
+        NetworkLeaseItem,
+    )
+    from mvmctl.models.provisioner import ProvisionerType
+    from mvmctl.models.vm import (
+        ConsoleInfo,
+        ConsoleState,
+        VMInspectInfo,
+        VMInstanceItem,
+        VMStatus,
+    )
+    from mvmctl.models.volume import VolumeItem, VolumeStatus
 
 __all__ = [
     "BinaryItem",
@@ -83,3 +88,49 @@ __all__ = [
     "VMStatus",
     "VolumeStatus",
 ]
+
+_LAZY_MAP = {
+    "BinaryItem": ("mvmctl.models.binary", "BinaryItem"),
+    "BulkResult": ("mvmctl.models.bulk", "BulkResult"),
+    "BulkResultItem": ("mvmctl.models.bulk", "BulkResultItem"),
+    "CleanResult": ("mvmctl.models.cache", "CleanResult"),
+    "PruneAllResult": ("mvmctl.models.cache", "PruneAllResult"),
+    "CloudInitMode": ("mvmctl.models.cloudinit", "CloudInitMode"),
+    "CloudInitStatus": ("mvmctl.models.cloudinit", "CloudInitStatus"),
+    "DriveConfig": ("mvmctl.models.firecracker", "DriveConfig"),
+    "FirecrackerConfig": ("mvmctl.models.firecracker", "FirecrackerConfig"),
+    "HostStateChangeItem": ("mvmctl.models.host", "HostStateChangeItem"),
+    "HostStateItem": ("mvmctl.models.host", "HostStateItem"),
+    "ImageItem": ("mvmctl.models.image", "ImageItem"),
+    "ImageSpec": ("mvmctl.models.image", "ImageSpec"),
+    "KernelItem": ("mvmctl.models.kernel", "KernelItem"),
+    "KernelPullResult": ("mvmctl.models.kernel", "KernelPullResult"),
+    "KernelSpec": ("mvmctl.models.kernel", "KernelSpec"),
+    "SSHKeyItem": ("mvmctl.models.key", "SSHKeyItem"),
+    "IPTablesChain": ("mvmctl.models.network", "IPTablesChain"),
+    "IPTablesPort": ("mvmctl.models.network", "IPTablesPort"),
+    "IPTablesProtocol": ("mvmctl.models.network", "IPTablesProtocol"),
+    "IPTablesRuleItem": ("mvmctl.models.network", "IPTablesRuleItem"),
+    "IPTablesRuleType": ("mvmctl.models.network", "IPTablesRuleType"),
+    "IPTablesTable": ("mvmctl.models.network", "IPTablesTable"),
+    "IPTablesTarget": ("mvmctl.models.network", "IPTablesTarget"),
+    "IPTablesWildcard": ("mvmctl.models.network", "IPTablesWildcard"),
+    "NetworkItem": ("mvmctl.models.network", "NetworkItem"),
+    "NetworkLeaseItem": ("mvmctl.models.network", "NetworkLeaseItem"),
+    "ProvisionerType": ("mvmctl.models.provisioner", "ProvisionerType"),
+    "ConsoleInfo": ("mvmctl.models.vm", "ConsoleInfo"),
+    "ConsoleState": ("mvmctl.models.vm", "ConsoleState"),
+    "VMInspectInfo": ("mvmctl.models.vm", "VMInspectInfo"),
+    "VMInstanceItem": ("mvmctl.models.vm", "VMInstanceItem"),
+    "VMStatus": ("mvmctl.models.vm", "VMStatus"),
+    "VolumeItem": ("mvmctl.models.volume", "VolumeItem"),
+    "VolumeStatus": ("mvmctl.models.volume", "VolumeStatus"),
+}
+
+
+def __getattr__(name: str) -> object:
+    return resolve_lazy(name, _LAZY_MAP, __name__)
+
+
+def __dir__() -> list[str]:
+    return __all__

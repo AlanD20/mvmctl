@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
-import subprocess
 from pathlib import Path
 from typing import Any
 
 from mvmctl.core.volume._repository import VolumeRepository
 from mvmctl.core.volume._resolver import VolumeResolver
-from mvmctl.exceptions import VolumeCreateError
+from mvmctl.exceptions import ProcessError, VolumeCreateError
 from mvmctl.models import DriveConfig, VolumeItem, VolumeStatus
+from mvmctl.utils._system import run_cmd
 
 logger = logging.getLogger(__name__)
 
@@ -47,21 +47,14 @@ class VolumeService:
 
         if volume.format == "raw":
             try:
-                subprocess.run(
+                run_cmd(
                     ["fallocate", "-l", str(volume.size_bytes), str(disk_path)],
-                    check=True,
-                    capture_output=True,
                 )
-            except subprocess.CalledProcessError as e:
-                stderr = e.stderr.decode() if e.stderr else "no details"
-                raise VolumeCreateError(f"fallocate failed: {stderr}") from e
-            except FileNotFoundError as e:
-                raise VolumeCreateError(
-                    "fallocate not found. Install util-linux."
-                ) from e
+            except ProcessError as e:
+                raise VolumeCreateError(f"fallocate failed: {e}") from e
         elif volume.format == "qcow2":
             try:
-                subprocess.run(
+                run_cmd(
                     [
                         "qemu-img",
                         "create",
@@ -70,18 +63,9 @@ class VolumeService:
                         str(disk_path),
                         str(volume.size_bytes),
                     ],
-                    check=True,
-                    capture_output=True,
                 )
-            except subprocess.CalledProcessError as e:
-                stderr = e.stderr.decode() if e.stderr else "no details"
-                raise VolumeCreateError(
-                    f"qemu-img create failed: {stderr}"
-                ) from e
-            except FileNotFoundError as e:
-                raise VolumeCreateError(
-                    "qemu-img not found. Install qemu-utils."
-                ) from e
+            except ProcessError as e:
+                raise VolumeCreateError(f"qemu-img create failed: {e}") from e
         else:
             raise VolumeCreateError(f"Unsupported format: {volume.format}")
 
@@ -127,41 +111,23 @@ class VolumeService:
 
         if volume.format == "raw":
             try:
-                subprocess.run(
+                run_cmd(
                     ["fallocate", "-l", str(new_size_bytes), str(disk_path)],
-                    check=True,
-                    capture_output=True,
                 )
-            except subprocess.CalledProcessError as e:
-                stderr = e.stderr.decode() if e.stderr else "no details"
-                raise VolumeCreateError(
-                    f"fallocate resize failed: {stderr}"
-                ) from e
-            except FileNotFoundError as e:
-                raise VolumeCreateError(
-                    "fallocate not found. Install util-linux."
-                ) from e
+            except ProcessError as e:
+                raise VolumeCreateError(f"fallocate resize failed: {e}") from e
         elif volume.format == "qcow2":
             try:
-                subprocess.run(
+                run_cmd(
                     [
                         "qemu-img",
                         "resize",
                         str(disk_path),
                         str(new_size_bytes),
                     ],
-                    check=True,
-                    capture_output=True,
                 )
-            except subprocess.CalledProcessError as e:
-                stderr = e.stderr.decode() if e.stderr else "no details"
-                raise VolumeCreateError(
-                    f"qemu-img resize failed: {stderr}"
-                ) from e
-            except FileNotFoundError as e:
-                raise VolumeCreateError(
-                    "qemu-img not found. Install qemu-utils."
-                ) from e
+            except ProcessError as e:
+                raise VolumeCreateError(f"qemu-img resize failed: {e}") from e
         else:
             raise VolumeCreateError(f"Unsupported format: {volume.format}")
 
@@ -189,19 +155,11 @@ class VolumeService:
             raise VolumeCreateError(f"Disk file not found: {path}")
 
         try:
-            result = subprocess.run(
+            result = run_cmd(
                 ["qemu-img", "info", "--output=json", str(path)],
-                check=True,
-                capture_output=True,
-                text=True,
             )
-        except subprocess.CalledProcessError as e:
-            stderr = e.stderr.strip() if e.stderr else "no details"
-            raise VolumeCreateError(f"qemu-img info failed: {stderr}") from e
-        except FileNotFoundError as e:
-            raise VolumeCreateError(
-                "qemu-img not found. Install qemu-utils."
-            ) from e
+        except ProcessError as e:
+            raise VolumeCreateError(f"qemu-img info failed: {e}") from e
 
         data: dict[str, Any] = json.loads(result.stdout)
         return data

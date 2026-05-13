@@ -7,7 +7,7 @@ from typing import Any
 
 from mvmctl.core._shared import Database
 from mvmctl.core.config._repository import SettingsRepository
-from mvmctl.core.config._service import SettingsService
+from mvmctl.core.config._service import OVERRIDABLE_SETTINGS, SettingsService
 from mvmctl.exceptions import ConfigError
 
 
@@ -60,6 +60,14 @@ class ConfigRequest:
             if self._inputs.value is None:
                 raise ConfigError("Value is required for set operation")
 
+            # Validate key is overridable (caller validates, receiver trusts)
+            cat_settings = OVERRIDABLE_SETTINGS.get(category)
+            if cat_settings is None or key not in cat_settings:
+                raise ConfigError(
+                    f"'{category}.{key}' is not an overridable setting. "
+                    f"Use 'mvm config list' to see valid keys."
+                )
+
         elif self._inputs.action == "reset":
             if self._inputs.all_overrides:
                 # category and key are both optional for --all
@@ -69,6 +77,12 @@ class ConfigRequest:
                     "Category is required for reset operation (or use --all)"
                 )
             # key is optional for category-level reset
+            if key is not None:
+                cat_settings = OVERRIDABLE_SETTINGS.get(category or "")
+                if cat_settings is None or key not in cat_settings:
+                    raise ConfigError(
+                        f"'{category}.{key}' is not a valid setting key"
+                    )
 
         return ResolvedConfigInput(
             action=self._inputs.action,

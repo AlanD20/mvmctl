@@ -55,6 +55,19 @@ class KeyCreateRequest:
     def result(self) -> ResolvedKeyCreateInput | None:
         return self._result
 
+    @staticmethod
+    def _key_files_exist(name: str, output_dir: Path) -> None:
+        """Check if key files already exist on disk (caller-validation)."""
+        private_key_path = output_dir / name
+        pub_key_path = output_dir / f"{name}.pub"
+        if private_key_path.exists() or pub_key_path.exists():
+            existing = (
+                private_key_path if private_key_path.exists() else pub_key_path
+            )
+            raise MVMKeyError(
+                f"Key file already exists: {existing}. Use --force to replace."
+            )
+
     def resolve(self) -> ResolvedKeyCreateInput:
         """Resolve defaults and validate."""
         # Validate key name early — before any work
@@ -78,6 +91,10 @@ class KeyCreateRequest:
 
         # Default output_dir resolved via CacheUtils
         output_dir = self._inputs.output_dir or CacheUtils.get_keys_dir()
+
+        # File conflict validation (caller validates)
+        if not self._inputs.overwrite:
+            self._key_files_exist(self._inputs.name, output_dir)
 
         self._result = ResolvedKeyCreateInput(
             name=self._inputs.name,

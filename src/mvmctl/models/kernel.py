@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from mvmctl.utils.common import CommonUtils
+
+if TYPE_CHECKING:
+    from mvmctl.models.vm import VMInstanceItem
 
 
 @dataclass
@@ -30,6 +34,8 @@ class KernelItem:
     created_at: str
     updated_at: str
     deleted_at: str | None = None
+
+    vms: list[VMInstanceItem] | None = None
 
     def __post_init__(self) -> None:
         """Coerce bool fields loaded from SQLite."""

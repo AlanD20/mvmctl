@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 import shutil
+from pathlib import Path
 
 from mvmctl.core._shared._guestfs import GuestfsService
+from mvmctl.core._shared._loopmount._manager import LoopMountManager
 from mvmctl.utils.common import CacheUtils
 
 logger = logging.getLogger(__name__)
@@ -69,6 +71,50 @@ class CacheService:
                 except OSError:
                     pass
         return True
+
+    @staticmethod
+    def clean_stale_provision_mounts(dry_run: bool = False) -> bool:
+        """Clean stale mvm-provision mount directories in /tmp/.
+
+        Scans ``/tmp/`` for directories matching ``mvm-provision-*``,
+        unmounts any that are still mounted, and removes the mount point.
+        These mounts are left behind when the loop-mount provision process
+        crashes or is killed before its cleanup handler runs.
+
+        Args:
+            dry_run: If True, only report what would be cleaned.
+
+        Returns:
+            True if any stale provision mount directories were found
+            (and cleaned, unless dry_run is True).
+        """
+        tmp = Path("/tmp")
+        cleaned = False
+
+        for path in tmp.glob("mvm-provision-*"):
+            if not path.is_dir():
+                continue
+
+            if not dry_run:
+                try:
+                    if path.is_mount():
+                        logger.info(
+                            "Unmounting stale provision mount: %s", path
+                        )
+                        LoopMountManager.cleanup_mount(str(path))
+
+                    logger.info(
+                        "Removing stale provision mount point: %s", path
+                    )
+                    path.rmdir()
+                except OSError:
+                    logger.warning(
+                        "Failed to clean stale provision mount: %s", path
+                    )
+
+            cleaned = True
+
+        return cleaned
 
 
 __all__ = ["CacheService"]

@@ -164,9 +164,15 @@ class BinaryOperation:
         resolved = request.resolve()
 
         service = BinaryService(repo=repo)
+
+        # Batch-enrich with VM references for VM reference check
+        enriched = BinaryResolver(repo, include=["vm"]).enrich(
+            resolved.binaries
+        )
+
         items: list[OperationResult[BinaryItem]] = []
 
-        for binary in resolved.binaries:
+        for binary in enriched:
             try:
                 service.remove(binary, force=force)
                 items.append(
@@ -246,9 +252,14 @@ class BinaryOperation:
 
             if binaries_to_remove:
                 service = BinaryService(repo=repo)
-                service.remove_many(binaries_to_remove, force=force)
 
-                for binary in binaries_to_remove:
+                # Batch-enrich with VM references for VM reference check
+                enriched = BinaryResolver(repo, include=["vm"]).enrich(
+                    binaries_to_remove
+                )
+
+                for binary in enriched:
+                    service.remove(binary, force=force)
                     AuditLog.log(
                         "binary.remove",
                         changes={

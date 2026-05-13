@@ -121,6 +121,77 @@ class VMRepository:
         return result[0] if result else 0
 
     @_graceful_read(factory=list)
+    def find_by_network_id(self, network_id: str) -> list[VMInstanceItem]:
+        """Return all VMs that reference the given network ID."""
+        with self._db.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM vm_instances WHERE network_id = ?",
+                (network_id,),
+            ).fetchall()
+        return [VMInstanceItem(**dict(row)) for row in rows]
+
+    @_graceful_read(factory=list)
+    def get_by_network_ids(
+        self, network_ids: list[str]
+    ) -> list[VMInstanceItem]:
+        """Return all VMs referencing any of the given network IDs."""
+        if not network_ids:
+            return []
+        placeholders = ",".join("?" * len(network_ids))
+        query = (
+            f"SELECT * FROM vm_instances WHERE network_id IN ({placeholders})"
+        )
+        with self._db.connect() as conn:
+            rows = conn.execute(query, network_ids).fetchall()
+        return [VMInstanceItem(**dict(row)) for row in rows]
+
+    @_graceful_read(factory=list)
+    def find_by_kernel_id(self, kernel_id: str) -> list[VMInstanceItem]:
+        """Return all VMs that reference the given kernel ID."""
+        with self._db.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM vm_instances WHERE kernel_id = ?",
+                (kernel_id,),
+            ).fetchall()
+        return [VMInstanceItem(**dict(row)) for row in rows]
+
+    @_graceful_read(factory=list)
+    def get_by_kernel_ids(self, kernel_ids: list[str]) -> list[VMInstanceItem]:
+        """Return all VMs referencing any of the given kernel IDs."""
+        if not kernel_ids:
+            return []
+        placeholders = ",".join("?" * len(kernel_ids))
+        query = (
+            f"SELECT * FROM vm_instances WHERE kernel_id IN ({placeholders})"
+        )
+        with self._db.connect() as conn:
+            rows = conn.execute(query, kernel_ids).fetchall()
+        return [VMInstanceItem(**dict(row)) for row in rows]
+
+    @_graceful_read(factory=list)
+    def find_by_binary_id(self, binary_id: str) -> list[VMInstanceItem]:
+        """Return all VMs that reference the given binary ID."""
+        with self._db.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM vm_instances WHERE binary_id = ?",
+                (binary_id,),
+            ).fetchall()
+        return [VMInstanceItem(**dict(row)) for row in rows]
+
+    @_graceful_read(factory=list)
+    def get_by_binary_ids(self, binary_ids: list[str]) -> list[VMInstanceItem]:
+        """Return all VMs referencing any of the given binary IDs."""
+        if not binary_ids:
+            return []
+        placeholders = ",".join("?" * len(binary_ids))
+        query = (
+            f"SELECT * FROM vm_instances WHERE binary_id IN ({placeholders})"
+        )
+        with self._db.connect() as conn:
+            rows = conn.execute(query, binary_ids).fetchall()
+        return [VMInstanceItem(**dict(row)) for row in rows]
+
+    @_graceful_read(factory=list)
     def list_all(self) -> list[VMInstanceItem]:
         """Return all VM records."""
         with self._db.connect() as conn:

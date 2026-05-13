@@ -6,7 +6,7 @@ import ipaddress
 from datetime import UTC
 
 from mvmctl.core._shared._db import Database, _graceful_read
-from mvmctl.models import NetworkItem, NetworkLeaseItem, VMInstanceItem
+from mvmctl.models import NetworkItem, NetworkLeaseItem
 
 
 class NetworkRepository:
@@ -157,25 +157,6 @@ class NetworkRepository:
                 "UPDATE networks SET deleted_at = ?, is_present = 0 WHERE id = ?",
                 (now, network_id),
             )
-
-    @_graceful_read(factory=list)
-    def query_vms_by_network(self, network_id: str) -> list[VMInstanceItem]:
-        """
-        Return all VMs that reference the given network ID.
-
-        Args:
-            network_id: Full network ID to query.
-
-        Returns:
-            List of VMInstanceItem records referencing this network.
-
-        """
-        with self._db.connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM vm_instances WHERE network_id = ?",
-                (network_id,),
-            ).fetchall()
-        return [VMInstanceItem(**dict(row)) for row in rows]
 
     def delete(self, network_id: str) -> None:
         """Delete a network by ID. No-op if not found."""

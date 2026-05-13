@@ -42,6 +42,14 @@ class NetworkResolver:
             is_reverse=True,
             batch_method="list_by_network_id_batch",
         ),
+        "vm": RelationSpec(
+            fk_field="id",
+            resolver="vm",
+            method="find_by_network_id",
+            relation_name="vms",
+            is_reverse=True,
+            batch_method="by_network_id_batch",
+        ),
     }
 
     def __init__(
@@ -53,7 +61,7 @@ class NetworkResolver:
         self._repo = repo if repo is not None else NetworkRepository()
         self._include = include
 
-    def _enrich(self, networks: list[NetworkItem]) -> list[NetworkItem]:
+    def enrich(self, networks: list[NetworkItem]) -> list[NetworkItem]:
         """Enrich networks with relations if include is set."""
         if self._include and networks:
             RelationEnricher().enrich(networks, self._include, self.RELATIONS)
@@ -66,21 +74,21 @@ class NetworkResolver:
             raise NetworkNotFoundError(f"Network not found: {network_id}")
         if len(matches) > 1:
             raise NetworkNotFoundError(f"Network ID is ambiguous: {network_id}")
-        return self._enrich(matches)[0]
+        return self.enrich(matches)[0]
 
     def by_name(self, name: str) -> NetworkItem:
         """Resolve network by name."""
         network = self._repo.get_by_name(name)
         if network is None:
             raise NetworkNotFoundError(f"Network not found: {name}")
-        return self._enrich([network])[0]
+        return self.enrich([network])[0]
 
     def get_default(self) -> NetworkItem | None:
         """Resolve the default network, or None if not set."""
         network = self._repo.get_default()
         if network is None:
             return None
-        return self._enrich([network])[0]
+        return self.enrich([network])[0]
 
     def resolve(self, value: str) -> NetworkItem:
         """Resolve network by name or ID prefix."""
@@ -113,7 +121,7 @@ class NetworkResolver:
             except Exception as e:
                 errors.append(f"{identifier}: {e}")
 
-        items = self._enrich(items)
+        items = self.enrich(items)
 
         exit_code = 1 if errors and not items else 0
         return NetworkResolveResult(

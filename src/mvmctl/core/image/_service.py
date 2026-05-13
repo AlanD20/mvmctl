@@ -7,7 +7,6 @@ import os
 import re
 import shutil
 import struct
-import subprocess
 import tarfile
 import tempfile
 from collections.abc import Callable
@@ -33,9 +32,11 @@ from mvmctl.exceptions import (
     ImageEmptyError,
     ImageError,
     ImageValidationError,
+    ProcessError,
 )
 from mvmctl.models import ImageItem, ImageSpec
 from mvmctl.models.provisioner import ProvisionerType
+from mvmctl.utils._system import run_cmd
 from mvmctl.utils.common import CacheUtils
 from mvmctl.utils.http import HttpDownload
 from mvmctl.utils.template import render_optional_template, render_template
@@ -64,29 +65,46 @@ class ImageService:
         """
         self._repo = repo
 
-    def remove_many(self, images: list[ImageItem], force: bool = False) -> None:
+    def remove(self, image: ImageItem, force: bool = False) -> None:
         """
-        Remove multiple images, enriching with VM references first.
+        Remove an image, handling file deletion and hard/soft delete.
 
-        Uses a single batch query to enrich all images with their VMs,
-        then creates a controller per image to handle removal.
+        The image must be pre-enriched with VM references by the caller.
+
+        Args:
+            image: Pre-enriched ImageItem record to remove.
+            force: If True, remove even if referenced by VMs.
+
+        Raises:
+            ImageError: If the image is referenced by VMs and force is False.
+
         """
-        from mvmctl.core.image._controller import ImageController
-        from mvmctl.core.image._resolver import ImageResolver
+        from mvmctl.utils.auditlog import AuditLog
 
-        # Enrich with VMs (single batch query via resolver)
-        resolver = ImageResolver(self._repo, include=["vm"])
-        enriched = resolver._enrich(images)
+        vms = image.vms or []
+        has_vms = bool(vms)
 
-        for image in enriched:
-            controller = ImageController(image, self._repo)
-            controller.remove(force=force)
+        if has_vms and not force:
+            names = ", ".join(vm.name for vm in vms)
+            raise ImageError(f"Image is referenced by VMs: {names}")
+
+        # Delete ALL related files from disk
+        removed = self._remove_image_files(image)
+        if removed:
+            logger.info("Removed image files: %s", ", ".join(removed))
+
+        # Hard delete if no VMs, soft delete if VMs exist (with force)
+        if has_vms:
+            self._repo.soft_delete(image.id)
+        else:
+            self._repo.delete(image.id)
+
+        # Audit log
+        AuditLog.log("image.remove", changes={"id": image.id})
 
     def remove_many_paths(self, images: list[ImageItem]) -> list[str]:
         """
         Remove files for multiple images from disk. No DB changes.
-
-        Creates a controller per image to handle file removal.
 
         Args:
             images: List of ImageItems whose files should be removed.
@@ -95,12 +113,38 @@ class ImageService:
             Flat list of all removed filenames.
 
         """
-        from mvmctl.core.image._controller import ImageController
-
         removed: list[str] = []
         for image in images:
-            controller = ImageController(image, self._repo)
-            removed.extend(controller.remove_path())
+            removed.extend(self._remove_image_files(image))
+        return removed
+
+    @staticmethod
+    def _remove_image_files(image: ImageItem) -> list[str]:
+        """
+        Remove all files for an image from disk. No DB changes.
+
+        Removes files matching image.id from:
+        - images directory (.zst, .img, .download, etc.)
+        - warm cache directory (.ext4, .btrfs, etc.)
+
+        Returns:
+            List of removed filenames for logging.
+
+        """
+        images_dir = CacheUtils.get_images_dir()
+        warm_dir = CacheUtils.get_warm_image_dir()
+        removed: list[str] = []
+
+        for candidate in images_dir.glob(f"{image.id}*"):
+            if candidate.is_file():
+                candidate.unlink(missing_ok=True)
+                removed.append(candidate.name)
+
+        for candidate in warm_dir.glob(f"{image.id}*"):
+            if candidate.is_file():
+                candidate.unlink(missing_ok=True)
+                removed.append(candidate.name)
+
         return removed
 
     def list_local(self, verify: bool = True) -> list[ImageItem]:
@@ -393,7 +437,7 @@ class ImageService:
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            subprocess.run(
+            run_cmd(
                 [
                     "cp",
                     "--reflink=auto",
@@ -401,10 +445,8 @@ class ImageService:
                     str(cached_path),
                     str(output_path),
                 ],
-                check=True,
-                capture_output=True,
             )
-        except (subprocess.CalledProcessError, FileNotFoundError):
+        except ProcessError:
             self._copy_with_dd(cached_path, output_path, sparse=True)
 
         with open(output_path, "rb") as f:
@@ -653,7 +695,7 @@ class ImageService:
         """Convert a disk image to raw format using qemu-img."""
         try:
             logger.info("Converting %s to raw...", input_path.name)
-            subprocess.run(
+            run_cmd(
                 [
                     "qemu-img",
                     "convert",
@@ -671,15 +713,10 @@ class ImageService:
                     str(input_path),
                     str(output_path),
                 ],
-                capture_output=True,
-                text=True,
-                check=True,
             )
             logger.info("Converted to %s", output_path.name)
-        except subprocess.CalledProcessError as e:
-            detail = e.stderr.strip() if e.stderr else "no details"
-            raise ImageError(f"qemu-img conversion failed: {detail}") from e
-        except FileNotFoundError:
+        except ProcessError as e:
+            raise ImageError(f"qemu-img conversion failed: {e}") from e
             raise ImageError("qemu-img not found. Install qemu-utils.")
 
     def create_ext4_from_tar(
@@ -711,21 +748,18 @@ class ImageService:
                     "--no-same-owner",
                     "--no-same-permissions",
                 ]
-                subprocess.run(cmd, capture_output=True, check=True)
+                run_cmd(cmd)
                 t2 = time.monotonic()
                 logger.info("  tar extract: %.2fs", t2 - t1)
 
-                subprocess.run(
+                run_cmd(
                     ["chmod", "-R", "u+rwx", tmpdir],
-                    capture_output=True,
                     check=False,
                 )
                 t3 = time.monotonic()
                 logger.info("  chmod: %.2fs", t3 - t2)
 
-                du_result = subprocess.run(
-                    ["du", "-sb", tmpdir], capture_output=True, text=True
-                )
+                du_result = run_cmd(["du", "-sb", tmpdir], check=False)
                 if du_result.returncode not in (0, 1):
                     raise ImageError(
                         f"Failed to get directory size: {du_result.stderr}"
@@ -746,18 +780,14 @@ class ImageService:
 
                 logger.info("Creating ext4 image (%d MiB)...", raw_size_mb)
 
-                subprocess.run(
+                run_cmd(
                     ["truncate", "-s", f"{raw_size_mb}M", str(output_path)],
-                    capture_output=True,
-                    check=True,
                 )
                 t5 = time.monotonic()
                 logger.info("  truncate: %.2fs", t5 - t4)
 
-                subprocess.run(
+                run_cmd(
                     ["mkfs.ext4", "-d", tmpdir, "-F", str(output_path)],
-                    capture_output=True,
-                    check=True,
                 )
                 t6 = time.monotonic()
                 logger.info("  mkfs.ext4: %.2fs", t6 - t5)
@@ -765,45 +795,30 @@ class ImageService:
             logger.info("Created %s (total: %.2fs)", output_path.name, t6 - t0)
             return True
 
-        except subprocess.CalledProcessError as e:
-            stderr_msg = (
-                e.stderr.decode()
-                if isinstance(e.stderr, bytes)
-                else (e.stderr if e.stderr else "no_details")
-            )
-            logger.error("Failed to create ext4 image: %s", stderr_msg)
-            raise ImageError(
-                f"Failed to create ext4 image: {stderr_msg}"
-            ) from e
-        except FileNotFoundError as e:
-            raise ImageError(
-                "Required tool not found: tar, truncate, or mkfs.ext4"
-            ) from e
+        except ProcessError as e:
+            logger.error("Failed to create ext4 image: %s", e)
+            raise ImageError(f"Failed to create ext4 image: {e}") from e
 
     def detect_filesystem_type(self, image_path: Path) -> str | None:
         """Detect filesystem type using blkid."""
         try:
-            blkid_result = subprocess.run(
+            blkid_result = run_cmd(
                 ["blkid", "-o", "value", "-s", "TYPE", str(image_path)],
-                capture_output=True,
-                text=True,
                 check=False,
             )
             fs_type = blkid_result.stdout.strip()
             return fs_type if fs_type else None
-        except FileNotFoundError:
+        except ProcessError:
             return None
 
     def get_filesystem_uuid(self, image_path: Path) -> str | None:
         """Get filesystem UUID from image using blkid."""
         try:
-            blkid_result = subprocess.run(
+            blkid_result = run_cmd(
                 ["blkid", "-p", "-s", "UUID", "-o", "value", str(image_path)],
-                capture_output=True,
-                text=True,
                 check=False,
             )
-        except FileNotFoundError:
+        except ProcessError:
             return None
 
         fs_uuid = blkid_result.stdout.strip()
@@ -932,7 +947,7 @@ class ImageService:
         """Copy file from *src* to *dst* using dd."""
         conv = "sparse,fsync" if sparse else "fsync"
         try:
-            subprocess.run(
+            run_cmd(
                 [
                     "dd",
                     f"if={src}",
@@ -941,10 +956,8 @@ class ImageService:
                     f"conv={conv}",
                     "status=none",
                 ],
-                check=True,
-                capture_output=True,
             )
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        except ProcessError as e:
             raise ImageError(f"dd copy failed: {e}") from e
 
     def _validate_downloaded_file(
@@ -1141,17 +1154,11 @@ class ImageService:
             extract_dir = tmpdir_path / "squashfs-root"
 
             try:
-                subprocess.run(
+                run_cmd(
                     ["unsquashfs", "-d", str(extract_dir), str(input_path)],
-                    capture_output=True,
-                    check=True,
                 )
-            except subprocess.CalledProcessError as e:
+            except ProcessError as e:
                 raise ImageError("unsquashfs failed") from e
-            except FileNotFoundError as e:
-                raise ImageError(
-                    "unsquashfs not found. Install squashfs-tools."
-                ) from e
 
             if not shutil.which("mkfs.ext4"):
                 raise ImageError(
@@ -1159,14 +1166,11 @@ class ImageService:
                 )
 
             try:
-                du_result = subprocess.run(
+                du_result = run_cmd(
                     ["du", "-sb", str(extract_dir)],
-                    capture_output=True,
-                    text=True,
-                    check=True,
                 )
                 content_bytes = int(du_result.stdout.split()[0])
-            except (subprocess.CalledProcessError, ValueError, IndexError):
+            except (ProcessError, ValueError, IndexError):
                 content_bytes = 0
 
             if minimum_rootfs_size == "dynamic":
@@ -1177,16 +1181,14 @@ class ImageService:
                 image_size_mb = int(minimum_rootfs_size)
 
             try:
-                subprocess.run(
+                run_cmd(
                     ["truncate", "-s", f"{image_size_mb}M", str(final_path)],
-                    capture_output=True,
-                    check=True,
                 )
-            except subprocess.CalledProcessError as e:
+            except ProcessError as e:
                 raise ImageError("Failed to allocate ext4 image file") from e
 
             try:
-                subprocess.run(
+                run_cmd(
                     [
                         "mkfs.ext4",
                         "-d",
@@ -1195,14 +1197,10 @@ class ImageService:
                         "",
                         str(final_path),
                     ],
-                    capture_output=True,
-                    text=True,
-                    check=True,
                 )
-            except subprocess.CalledProcessError as e:
-                stderr_msg = e.stderr.strip() if e.stderr else "no_details"
+            except ProcessError as e:
                 raise ImageError(
-                    f"Failed to create ext4 from squashfs: {stderr_msg}"
+                    f"Failed to create ext4 from squashfs: {e}"
                 ) from e
 
         logger.info("Created ext4 from squashfs: %s", final_path)

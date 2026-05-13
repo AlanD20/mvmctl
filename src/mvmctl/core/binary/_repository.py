@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC
 
 from mvmctl.core._shared._db import Database, _graceful_read
-from mvmctl.models import BinaryItem, VMInstanceItem
+from mvmctl.models import BinaryItem
 
 
 class BinaryRepository:
@@ -163,25 +163,6 @@ class BinaryRepository:
                 "UPDATE binaries SET deleted_at = ?, is_present = 0 WHERE id = ?",
                 (now, binary_id),
             )
-
-    @_graceful_read(factory=list)
-    def query_vms_by_binary(self, binary_id: str) -> list[VMInstanceItem]:
-        """
-        Return all VMs that reference the given binary ID.
-
-        Args:
-            binary_id: Full binary ID to query.
-
-        Returns:
-            List of VMInstanceItem records referencing this binary.
-
-        """
-        with self._db.connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM vm_instances WHERE binary_id = ?",
-                (binary_id,),
-            ).fetchall()
-        return [VMInstanceItem(**dict(row)) for row in rows]
 
     def update_many_is_present(
         self, binary_ids: list[str], is_present: bool

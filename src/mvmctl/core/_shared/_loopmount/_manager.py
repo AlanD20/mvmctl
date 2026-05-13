@@ -17,7 +17,9 @@ from typing import Any
 from mvmctl.exceptions import (
     LoopMountError,
     LoopMountTimeoutError,
+    ProcessError,
 )
+from mvmctl.utils._system import run_cmd
 from mvmctl.utils.common import CacheUtils, is_debug_mode
 
 logger = logging.getLogger(__name__)
@@ -155,16 +157,18 @@ class LoopMountManager:
         )
 
         try:
-            proc = subprocess.run(
+            proc = run_cmd(
                 cmd,
-                input=payload_bytes,
-                capture_output=True,
+                input=payload_bytes.decode("utf-8"),
                 timeout=timeout,
+                check=False,
             )
-        except subprocess.TimeoutExpired:
-            raise LoopMountTimeoutError(
-                f"Loop-mount binary timed out after {timeout}s for {image_path}"
-            )
+        except ProcessError as e:
+            if "timed out" in str(e):
+                raise LoopMountTimeoutError(
+                    f"Loop-mount binary timed out after {timeout}s for {image_path}"
+                ) from None
+            raise ProcessError(f"Failed to run loop-mount binary: {e}") from e
 
         if proc.returncode != 0:
             error_msg = LoopMountManager._extract_error(proc)
@@ -248,16 +252,18 @@ class LoopMountManager:
         logger.debug("Running OS detection: image=%s", image_path)
 
         try:
-            proc = subprocess.run(
+            proc = run_cmd(
                 cmd,
-                input=payload_bytes,
-                capture_output=True,
+                input=payload_bytes.decode("utf-8"),
                 timeout=timeout,
+                check=False,
             )
-        except subprocess.TimeoutExpired:
-            raise LoopMountTimeoutError(
-                f"OS detection timed out after {timeout}s for {image_path}"
-            )
+        except ProcessError as e:
+            if "timed out" in str(e):
+                raise LoopMountTimeoutError(
+                    f"OS detection timed out after {timeout}s for {image_path}"
+                ) from None
+            raise ProcessError(f"Failed to run OS detection: {e}") from e
 
         if proc.returncode != 0:
             error_msg = LoopMountManager._extract_error(proc)
@@ -301,15 +307,13 @@ class LoopMountManager:
 
     @staticmethod
     def _extract_error(
-        proc: subprocess.CompletedProcess[bytes],
+        proc: subprocess.CompletedProcess[str],
     ) -> str:
         """Extract an error message from a failed loop-mount subprocess."""
-        stderr_text = proc.stderr.decode("utf-8", errors="replace").strip()
+        stderr_text = (proc.stderr or "").strip()
         error_msg = stderr_text or f"Exit code {proc.returncode}"
         try:
-            raw_stdout: str | bytes = proc.stdout
-            if isinstance(raw_stdout, bytes):
-                raw_stdout = raw_stdout.decode("utf-8", errors="replace")
+            raw_stdout = proc.stdout or ""
             err_result: Any = json.loads(raw_stdout)
             if (
                 isinstance(err_result, dict)
@@ -319,6 +323,53 @@ class LoopMountManager:
         except (json.JSONDecodeError, ValueError):
             pass
         return error_msg
+
+    # ------------------------------------------------------------------
+    # Cleanup mount
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def cleanup_mount(mount_point: str) -> bool:
+        """Unmount and remove a stale provision mount point.
+
+        Spawns the mvm-provision binary with ``--umount <mount_point>``
+        to perform the unmount + rmdir as root.
+
+        Args:
+            mount_point: Absolute path to the mount point directory.
+
+        Returns:
+            True if the mount point was successfully cleaned (or didn't
+            exist in the first place). False if cleanup failed.
+        """
+        path = Path(mount_point)
+        if not path.exists():
+            logger.info(
+                "Mount point does not exist, nothing to clean: %s", mount_point
+            )
+            return False
+
+        binary = LoopMountManager._resolve_binary_path()
+        if binary is not None:
+            cmd = ["sudo", "-n", str(binary), "--umount", mount_point]
+        else:
+            cmd = [
+                "sudo",
+                "-n",
+                sys.executable,
+                str(_DEV_PROCESS_PATH),
+                "--umount",
+                mount_point,
+            ]
+
+        logger.debug("Cleaning stale mount point: %s", mount_point)
+
+        try:
+            proc = run_cmd(cmd, timeout=30, check=False)
+            return proc.returncode == 0
+        except ProcessError:
+            logger.warning("Failed to clean stale mount point: %s", mount_point)
+            return False
 
     # ------------------------------------------------------------------
     # Availability check

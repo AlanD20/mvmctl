@@ -104,9 +104,39 @@ class KeyOperation:
         repo = KeyRepository(db)
         service = KeyService(repo)
         keys_dir = CacheUtils.get_keys_dir()
+
         try:
+            # Validate file before calling service (caller validates)
+            pub_key_path = Path(pub_key_path)
+            if not pub_key_path.exists():
+                raise MVMKeyError(f"Public key file not found: {pub_key_path}")
+
+            pub_key_content = pub_key_path.read_text().strip()
+            if not pub_key_content:
+                raise MVMKeyError(f"Public key file is empty: {pub_key_path}")
+
+            if (
+                "-----BEGIN" in pub_key_content
+                and "PRIVATE KEY-----" in pub_key_content
+            ):
+                alt_path = Path(str(pub_key_path) + ".pub")
+                if alt_path.exists():
+                    raise MVMKeyError(
+                        f"'{pub_key_path}' looks like a private key.\n"
+                        f"Use the public key instead: mvm key add {name} {alt_path}"
+                    )
+                raise MVMKeyError(
+                    f"'{pub_key_path}' looks like a private key.\n"
+                    f"Pass the corresponding .pub file instead: "
+                    f"mvm key add {name} <path>.pub"
+                )
+
             key_item = service.add_key(
-                name, pub_key_path, keys_dir, overwrite=overwrite
+                name,
+                pub_key_path,
+                pub_key_content,
+                keys_dir,
+                overwrite=overwrite,
             )
         except Exception as e:
             return OperationResult(
@@ -143,8 +173,7 @@ class KeyOperation:
                 if priv_file.exists():
                     priv_file.unlink()
 
-                controller = KeyController(key, repo)
-                controller.remove()
+                repo.delete(key.id)
                 AuditLog.log("key.remove", changes={"name": key.name})
                 results.append(
                     OperationResult(

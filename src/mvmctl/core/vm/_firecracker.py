@@ -126,14 +126,13 @@ class FirecrackerSpawner:
     def config_path(self) -> Path:
         return self._config_path
 
-    def spawn(self, *, wait_for_socket: bool = False) -> None:
+    def spawn(self) -> None:
         """
         Start a Firecracker process.
 
-        Args:
-            wait_for_socket: If True, wait for the API socket to become
-                available before returning. Used when the caller needs to
-                make immediate subsequent Firecracker API calls.
+        Polls for the API socket to become available (up to 2s, every
+        0.1s) and exits early as soon as the socket appears. If the
+        process dies before the socket is created, raises immediately.
 
         Raises:
             FirecrackerSpawnError: If the process fails to start or exits
@@ -187,18 +186,31 @@ class FirecrackerSpawner:
             pass_fds=fc_pass_fds,
         )
 
-        # Wait for Firecracker to initialize (poll every 0.1s for up to 2s)
+        # Wait for Firecracker to initialize (poll every 0.1s for up to 2s).
+        # Exit early as soon as the API socket appears.
         max_startup_wait = 2.0
         waited = 0.0
 
         while waited < max_startup_wait:
             time.sleep(CONST_POLL_STEP_SECONDS)
             waited += CONST_POLL_STEP_SECONDS
+
+            # Early exit: socket appeared → Firecracker is ready
+            if self._api_socket_path.exists():
+                break
+
             poll_result = fc_proc.poll()
 
             if poll_result is not None and isinstance(poll_result, int):
                 raise FirecrackerSpawnError(
                     f"Firecracker process exited immediately with code {poll_result}"
+                )
+        else:
+            # Loop fell through without breaking → socket never appeared
+            if not self._api_socket_path.exists():
+                raise FirecrackerSpawnError(
+                    f"Firecracker API socket not available after "
+                    f"{max_startup_wait}s"
                 )
 
         # Close file pointers since the firecracker process is managing them
@@ -211,20 +223,6 @@ class FirecrackerSpawner:
             fc_proc.pid
         )
         FsUtils.write_pid_file(self._pid_path, fc_proc.pid)
-
-        # ── Optional: wait for API socket ──────────────────────────────
-        if wait_for_socket:
-            _waited = 0.0
-            while _waited < CONST_SOCKET_TIMEOUT_SECONDS:
-                if self._api_socket_path.exists():
-                    break
-                time.sleep(CONST_POLL_STEP_SECONDS)
-                _waited += CONST_POLL_STEP_SECONDS
-            else:
-                raise FirecrackerSpawnError(
-                    f"Firecracker API socket not available after "
-                    f"{CONST_SOCKET_TIMEOUT_SECONDS}s"
-                )
 
     def cleanup(self) -> None:
         """Perform cleanup of all created resources."""

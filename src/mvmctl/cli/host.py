@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 from typing import TYPE_CHECKING
 
@@ -26,6 +25,7 @@ from mvmctl.utils._io import (
     print_table,
     print_warning,
 )
+from mvmctl.utils._system import run_cmd
 from mvmctl.utils.cli import handle_errors
 from mvmctl.utils.common import CacheUtils, CommonUtils
 from mvmctl.utils.fs import FsUtils
@@ -175,9 +175,10 @@ def host_init() -> None:
                     ):
                         if key in os.environ:
                             env_assignments.append(f"{key}={os.environ[key]}")
-                    subprocess.run(
+                    run_cmd(
                         ["sudo", "env", *env_assignments, *sys.argv],
                         check=False,
+                        capture=False,
                     )
                 except FileNotFoundError:
                     print_error("sudo command not found")

@@ -798,14 +798,27 @@ class Provisioner:
 
     # ── Cleanup ─────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _cleanup_mount(mount_point: str) -> bool:
+        """Unmount and remove a mount point. Returns True on success."""
+        result = subprocess.run(
+            ["umount", mount_point],
+            capture_output=True,
+            check=False,
+            timeout=15,
+        )
+        unmount_ok = result.returncode == 0
+        try:
+            os.rmdir(mount_point)
+            rmdir_ok = True
+        except OSError:
+            rmdir_ok = False
+        return unmount_ok and rmdir_ok
+
     def _cleanup(self) -> None:
         """Unmount and detach loop device. Always runs on finally."""
         if self._mount_point is not None:
-            self._unmount()
-            try:
-                os.rmdir(self._mount_point)
-            except OSError:
-                pass
+            self._cleanup_mount(self._mount_point)
         if self._loop_dev is not None:
             self._detach_loop()
 
@@ -822,7 +835,16 @@ def main() -> int:
         "--input-json",
         help="Read JSON from file instead of stdin (for testing)",
     )
+    parser.add_argument(
+        "--umount",
+        help="Unmount and remove a mount point, then exit (no JSON input needed)",
+    )
     args = parser.parse_args()
+
+    # --umount shortcut: no JSON, no image, just unmount + rmdir
+    if args.umount:
+        success = Provisioner._cleanup_mount(args.umount)
+        return 0 if success else 1
 
     if args.input_json:
         with open(args.input_json) as f:

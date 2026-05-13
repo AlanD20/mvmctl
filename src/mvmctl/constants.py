@@ -108,13 +108,10 @@ def is_compiled_mode() -> bool:
         return True
 
     # Nuitka sets __compiled__ in builtins for compiled code
-    try:
-        import __builtins__
+    import builtins
 
-        if hasattr(__builtins__, "__compiled__"):
-            return True
-    except ImportError:
-        pass
+    if getattr(builtins, "__compiled__", False):
+        return True
 
     # Detect Nuitka onefile: sys.executable points to python3 inside
     # /tmp/onefile_{PID}_{TIME}/ (verified via strace on v4.0.8)

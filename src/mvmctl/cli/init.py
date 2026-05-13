@@ -26,6 +26,7 @@ else:
 from mvmctl.constants import MVM_UNIX_GROUP, SUDOERS_DROP_IN_PATH
 from mvmctl.models.result import ProgressEvent
 from mvmctl.utils._io import print_info, print_success, print_warning
+from mvmctl.utils._system import run_cmd
 from mvmctl.utils.cli import handle_errors
 
 init_app = typer.Typer(
@@ -65,11 +66,10 @@ def _run_with_sudo() -> subprocess.CompletedProcess[str]:
 
     print_info("")
     print_info("Running host init with sudo...")
-    return subprocess.run(
+    return run_cmd(
         ["sudo", "env", *env_assignments, mvm_bin, "host", "init"],
-        stdout=None,
-        stderr=None,
-        text=True,
+        check=False,
+        capture=False,
     )
 
 

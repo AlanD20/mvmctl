@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from mvmctl.constants import (
     MVM_FORWARD_CHAIN,
@@ -11,6 +12,9 @@ from mvmctl.constants import (
     MVM_POSTROUTING_CHAIN,
 )
 from mvmctl.utils.common import CommonUtils
+
+if TYPE_CHECKING:
+    from mvmctl.models.vm import VMInstanceItem
 
 
 class IPTablesTable(str, Enum):
@@ -93,6 +97,7 @@ class NetworkItem:
     # Resolved relations
     leases: list[NetworkLeaseItem] | None = None
     iptables_rules: list[IPTablesRuleItem] | None = None
+    vms: list[VMInstanceItem] | None = None
 
     @property
     def nat_gateways_list(self) -> list[str]:

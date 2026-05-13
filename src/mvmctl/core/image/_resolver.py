@@ -45,7 +45,7 @@ class ImageResolver:
         self._repo = repo if repo is not None else ImageRepository()
         self._include = include
 
-    def _enrich(self, images: list[ImageItem]) -> list[ImageItem]:
+    def enrich(self, images: list[ImageItem]) -> list[ImageItem]:
         """Enrich images with relations if include is set."""
         if self._include and images:
             RelationEnricher().enrich(images, self._include, self.RELATIONS)
@@ -58,28 +58,28 @@ class ImageResolver:
             raise ImageNotFoundError(f"Image not found: {image_id!r}")
         if len(matches) > 1:
             raise ImageNotFoundError(f"Image ID is ambiguous: {image_id!r}")
-        return self._enrich(matches)[0]
+        return self.enrich(matches)[0]
 
     def by_os_slug(self, os_slug: str) -> ImageItem:
         """Resolve by OS slug."""
         db_image = self._repo.get_by_os_slug(os_slug)
         if db_image is None:
             raise ImageNotFoundError(f"Image not found: {os_slug!r}")
-        return self._enrich([db_image])[0]
+        return self.enrich([db_image])[0]
 
     def get_default(self) -> ImageItem | None:
         """Resolve the default image, or None if not set."""
         image = self._repo.get_default()
         if image is None:
             return None
-        return self._enrich([image])[0]
+        return self.enrich([image])[0]
 
     def by_name(self, name: str) -> ImageItem:
         """Resolve by display name (os_name)."""
         db_image = self._repo.get_by_name(name)
         if db_image is None:
             raise ImageNotFoundError(f"Image not found by name: {name!r}")
-        return self._enrich([db_image])[0]
+        return self.enrich([db_image])[0]
 
     def resolve(self, value: str) -> ImageItem:
         """Resolve image by os_slug, display name, or ID prefix."""
@@ -115,7 +115,7 @@ class ImageResolver:
             except Exception as e:
                 errors.append(f"{identifier}: {e}")
 
-        items = self._enrich(items)
+        items = self.enrich(items)
 
         exit_code = 1 if errors and not items else 0
         return ImageResolveResult(

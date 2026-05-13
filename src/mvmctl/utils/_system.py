@@ -5,7 +5,6 @@ from __future__ import annotations
 import errno
 import logging
 import os
-import shlex
 import signal
 import subprocess
 import threading
@@ -20,11 +19,11 @@ from mvmctl.exceptions import ProcessError
 logger = logging.getLogger(__name__)
 
 _STDERR_PREVIEW_LIMIT = 100
+_MVM_GROUP_VERIFIED: bool = False
 
 __all__ = [
     "run_cmd",
     "stream_cmd",
-    "privileged_cmd",
     "require_mvm_group_membership",
     "is_process_running",
     "has_python_ancestor",
@@ -417,6 +416,11 @@ def run_cmd(
     check: bool = True,
     capture: bool = True,
     cwd: str | None = None,
+    timeout: float | None = None,
+    input: str | None = None,
+    env: dict[str, str] | None = None,
+    privileged: bool = False,
+    text: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     """
     Run a subprocess command and return the completed-process result.
@@ -426,34 +430,45 @@ def run_cmd(
         check: Raise ``ProcessError`` on non-zero exit code when ``True``.
         capture: Capture stdout/stderr when ``True``; inherit from parent otherwise.
         cwd: Working directory for the subprocess, or ``None`` for the current directory.
+        timeout: Optional timeout in seconds. Raises ``ProcessError`` if exceeded.
+        input: Optional string to pass to the subprocess's stdin.
+        env: Optional environment variables for the subprocess.
+        privileged: When ``True``, run the command with ``sudo`` (prepend
+            ``sudo`` to the command if not running as root).
+        text: When ``True`` (default), return stdout/stderr as strings;
+            when ``False``, return as bytes.
 
     Returns:
         The ``subprocess.CompletedProcess`` result.
 
     Raises:
-        ProcessError: If the command is not found or exits with a non-zero code.
+        ProcessError: If the command is not found, exits with a non-zero code,
+            or exceeds the optional timeout.
 
     """
-    logger.debug("$ %s", shlex.join(args))
+    if privileged:
+        if os.getuid() != 0:
+            require_mvm_group_membership()
+            args = ["sudo", *args]
     try:
         result = subprocess.run(
             args,
             capture_output=capture,
-            text=True,
+            text=text,
             check=check,
             cwd=cwd,
+            timeout=timeout,
+            input=input,
+            env=env,
         )
     except FileNotFoundError as e:
         raise ProcessError(f"Command not found: {args[0]}") from e
+    except subprocess.TimeoutExpired as e:
+        raise ProcessError(
+            f"Command timed out after {timeout}s: {args[0]}"
+        ) from e
     except subprocess.CalledProcessError as e:
         stderr = (e.stderr or "").strip()
-        logger.debug(
-            "Command failed (exit %s): %s\nstderr=%s",
-            e.returncode,
-            shlex.join(args),
-            stderr,
-            exc_info=True,
-        )
         sanitized_stderr = _sanitize_stderr(stderr)
         raise ProcessError(
             f"Command failed (exit {e.returncode}): {args[0]}"
@@ -481,7 +496,6 @@ def stream_cmd(
         ProcessError: If the command is not found or exits with a non-zero code.
 
     """
-    logger.debug("$ %s", shlex.join(args))
     try:
         proc = subprocess.Popen(
             args,
@@ -597,21 +611,17 @@ def _validate_sudo_credentials() -> bool:
         _SUDO_VALIDATION_IN_PROGRESS = False
 
 
-def privileged_cmd(cmd: list[str]) -> list[str]:
-    """
-    Prepend sudo if not running as root.
-
-    Requires the user to be in the mvm group (configured by 'mvm host init').
-    Raises PrivilegeError if the user lacks group membership.
-    """
-    if os.getuid() != 0:
-        require_mvm_group_membership()
-        return ["sudo"] + cmd
-    return cmd
-
-
 def require_mvm_group_membership() -> None:
-    """Raise PrivilegeError if user is not in the mvm group with active credentials."""
+    """Raise PrivilegeError if user is not in the mvm group with active credentials.
+
+    Results are cached per-process via a module-level flag since group
+    membership is immutable within a process lifetime (os.getgroups()
+    returns what was set at login/newgrp time).
+    """
+    global _MVM_GROUP_VERIFIED
+    if _MVM_GROUP_VERIFIED:
+        return
+
     import grp
     import pwd
 
@@ -644,6 +654,8 @@ def require_mvm_group_membership() -> None:
             f"does not have the group active yet. Please log out and log back in, "
             f"or run: newgrp {MVM_UNIX_GROUP}"
         )
+
+    _MVM_GROUP_VERIFIED = True
 
 
 def is_process_running(pid: int | None) -> bool:

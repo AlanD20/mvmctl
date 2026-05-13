@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC
 
 from mvmctl.core._shared._db import Database, _graceful_read
-from mvmctl.models import KernelItem, VMInstanceItem
+from mvmctl.models import KernelItem
 
 
 class KernelRepository:
@@ -176,22 +176,3 @@ class KernelRepository:
         if row is None:
             return None
         return KernelItem(**dict(row))
-
-    @_graceful_read(factory=list)
-    def query_vms_by_kernel(self, kernel_id: str) -> list[VMInstanceItem]:
-        """
-        Return all VMs that reference the given kernel ID.
-
-        Args:
-            kernel_id: Full kernel ID to query.
-
-        Returns:
-            List of VMInstanceItem records referencing this kernel.
-
-        """
-        with self._db.connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM vm_instances WHERE kernel_id = ?",
-                (kernel_id,),
-            ).fetchall()
-        return [VMInstanceItem(**dict(row)) for row in rows]

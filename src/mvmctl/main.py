@@ -6,13 +6,14 @@ from __future__ import annotations
 import importlib
 import os
 import signal
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import click
+
+from mvmctl.utils._system import run_cmd
 
 
 def _setup_signal_handlers() -> None:
@@ -80,7 +81,7 @@ def _get_git_version_info() -> str | None:
             return None
 
         # Check if current commit has a tag
-        result = subprocess.run(
+        result = run_cmd(
             [
                 "git",
                 "-C",
@@ -90,18 +91,14 @@ def _get_git_version_info() -> str | None:
                 "--exact-match",
                 "HEAD",
             ],
-            capture_output=True,
-            text=True,
             check=False,
         )
         if result.returncode == 0:
             return result.stdout.strip()  # Return the tag
 
         # No tag, get short commit hash
-        result = subprocess.run(
+        result = run_cmd(
             ["git", "-C", str(repo_dir), "rev-parse", "--short", "HEAD"],
-            capture_output=True,
-            text=True,
             check=False,
         )
         if result.returncode == 0:
@@ -193,6 +190,7 @@ _COMMAND_ORDER = [
     "image",
     "network",
     "vm",
+    "volume",
     "key",
     "ssh",
     "console",

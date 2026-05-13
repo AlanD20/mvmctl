@@ -11,12 +11,20 @@ if TYPE_CHECKING:
 class MVMError(Exception):
     """Base exception for all MVM errors."""
 
+    def __init__(self, message: str = "", code: str | None = None) -> None:
+        self.code = code
+        super().__init__(message)
+
 
 class MVMRuntimeError(MVMError):
     """Runtime assertion failure — invariant violated in production."""
 
 
-class VMNotFoundError(MVMError):
+class VMError(MVMError):
+    """Base exception for all VM-domain errors."""
+
+
+class VMNotFoundError(VMError):
     """VM does not exist in state."""
 
 
@@ -123,15 +131,19 @@ class KernelError(MVMError):
     """Kernel build or configuration failure."""
 
 
-class FirecrackerClientError(MVMError):
+class FirecrackerError(MVMError):
+    """Base exception for all Firecracker-domain errors."""
+
+
+class FirecrackerClientError(FirecrackerError):
     """Firecracker process or API failure."""
 
 
-class FirecrackerSpawnError(MVMError):
+class FirecrackerSpawnError(FirecrackerError):
     """Firecracker spawn failure."""
 
 
-class FirecrackerConfigError(MVMError):
+class FirecrackerConfigError(FirecrackerError):
     """Firecracker config generation failure."""
 
 
@@ -302,7 +314,7 @@ class CloudInitInjectModeError(CloudInitError):
     """Rootfs cloud-init injection failure."""
 
 
-class VMCreateError(MVMError):
+class VMCreateError(VMError):
     """
     VM creation failed - resources may have been partially created.
 
@@ -313,17 +325,17 @@ class VMCreateError(MVMError):
     """
 
 
-class VMStateError(MVMError):
+class VMStateError(VMError):
     """Raised when a VM state transition is invalid."""
 
 
-class VMRequestError(MVMError):
+class VMRequestError(VMError):
     """Error during VM request resolution or validation."""
 
     pass
 
 
-class VMBuilderError(MVMError):
+class VMBuilderError(VMError):
     """
     VM builder failed - resources may have been partially created.
 

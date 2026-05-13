@@ -102,9 +102,23 @@ class VolumeOperation:
         db = Database()
         repo = VolumeRepository(db)
 
-        resolved = VolumeRequest(inputs=inputs, db=db).resolve()
+        request = VolumeRequest(inputs=inputs, db=db)
+        resolved = request.resolve()
 
-        if not resolved.volumes:
+        results: list[OperationResult[VolumeItem]] = []
+
+        # Surface partial-match errors from resolver (identifiers that didn't
+        # match any volume, e.g. "nonexistent-volume").
+        for error_msg in request.errors:
+            results.append(
+                OperationResult(
+                    status="error",
+                    code="volume.not_found",
+                    message=error_msg,
+                )
+            )
+
+        if not resolved.volumes and not results:
             return BatchResult(
                 items=[
                     OperationResult(
@@ -114,8 +128,6 @@ class VolumeOperation:
                     )
                 ]
             )
-
-        results: list[OperationResult[VolumeItem]] = []
         for volume in resolved.volumes:
             try:
                 if volume.status == VolumeStatus.ATTACHED and not force:

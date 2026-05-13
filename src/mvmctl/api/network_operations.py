@@ -147,6 +147,7 @@ class NetworkOperation:
 
         """
         from mvmctl.api.inputs._network_input import NetworkRequest
+        from mvmctl.core.network._resolver import NetworkResolver
 
         db = Database()
         repo = NetworkRepository(db)
@@ -164,8 +165,14 @@ class NetworkOperation:
                 exception=e,
             )
 
+        # Batch-enrich with VM references for VM reference check
+        enriched = NetworkResolver(repo, include=["vm"]).enrich(
+            resolved.networks
+        )
+
         try:
-            service.remove_many(resolved.networks, force=force)
+            for network in enriched:
+                service.remove(network, force=force)
         except NetworkError as e:
             error_msg = str(e)
             code = (
@@ -214,7 +221,7 @@ class NetworkOperation:
         from mvmctl.core.network._resolver import NetworkResolver
 
         resolver = NetworkResolver(repo, include=["leases"])
-        return resolver._enrich(networks)
+        return resolver.enrich(networks)
 
     @staticmethod
     def get(inputs: NetworkInput) -> NetworkItem:

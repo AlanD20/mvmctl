@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 
 from mvmctl.core._shared import RelationEnricher, RelationSpec
 from mvmctl.core.kernel._repository import KernelRepository
@@ -25,7 +27,16 @@ class KernelResolveResult:
 class KernelResolver:
     """Resolver for kernel resources."""
 
-    RELATIONS: dict[str, RelationSpec] = {}
+    RELATIONS: dict[str, RelationSpec] = {
+        "vm": RelationSpec(
+            fk_field="id",
+            resolver="vm",
+            method="find_by_kernel_id",
+            relation_name="vms",
+            is_reverse=True,
+            batch_method="by_kernel_id_batch",
+        ),
+    }
 
     def __init__(
         self,
@@ -36,7 +47,7 @@ class KernelResolver:
         self._repo = repo if repo is not None else KernelRepository()
         self._include = include
 
-    def _enrich(self, kernels: list[KernelItem]) -> list[KernelItem]:
+    def enrich(self, kernels: list[KernelItem]) -> list[KernelItem]:
         """Enrich kernels with relations if include is set."""
         if self._include and kernels:
             RelationEnricher().enrich(kernels, self._include, self.RELATIONS)
@@ -49,7 +60,7 @@ class KernelResolver:
             raise KernelNotFoundError(f"Kernel not found: {kernel_id!r}")
         if len(matches) > 1:
             raise KernelNotFoundError(f"Kernel ID is ambiguous: {kernel_id!r}")
-        return self._enrich(matches)[0]
+        return self.enrich(matches)[0]
 
     def by_version_type(self, version: str, type: str) -> KernelItem:
         """Resolve by version and type (both required)."""
@@ -58,21 +69,57 @@ class KernelResolver:
             raise KernelNotFoundError(
                 f"Kernel not found: version={version!r}, type={type!r}"
             )
-        return self._enrich([kernel])[0]
+        return self.enrich([kernel])[0]
 
     def get_default(self) -> KernelItem | None:
         """Resolve the default kernel, or None if not set."""
         kernel = self._repo.get_default()
         if kernel is None:
             return None
-        return self._enrich([kernel])[0]
+        return self.enrich([kernel])[0]
 
     def resolve(self, value: str) -> KernelItem:
-        """Resolve kernel by ID prefix or ``type:version`` (e.g. ``official:6.19.9``)."""
+        """Resolve kernel by ID prefix, ``type:version`` (e.g. ``official:6.19.9``), or file path."""
         if ":" in value:
             parts = value.split(":", maxsplit=1)
             return self.by_version_type(parts[1], parts[0])
-        return self.by_id(value)
+
+        try:
+            return self.by_id(value)
+        except KernelNotFoundError:
+            pass
+
+        # Fallback: treat value as a filesystem path to a vmlinux binary.
+        path = Path(value)
+        if path.exists():
+            return self._item_from_path(path)
+
+        raise KernelNotFoundError(f"Kernel not found: {value!r}")
+
+    @staticmethod
+    def _item_from_path(path: Path) -> KernelItem:
+        """Construct a KernelItem from an existing file path.
+
+        The resulting item is ephemeral — it is not stored in the DB but
+        carries the absolute path so the VM creation pipeline can use it.
+        """
+        resolved = path.expanduser().resolve()
+        name = resolved.name
+        now = datetime.now(UTC).isoformat()
+
+        return KernelItem(
+            id=name,
+            name=name,
+            base_name=name,
+            version="unknown",
+            arch="unknown",
+            type="external",
+            path=str(resolved),
+            is_default=False,
+            is_present=True,
+            created_at=now,
+            updated_at=now,
+        )
 
     def resolve_many(
         self,
@@ -109,7 +156,7 @@ class KernelResolver:
             except Exception as e:
                 errors.append(f"{identifier}: {e}")
 
-        items = self._enrich(items)
+        items = self.enrich(items)
 
         exit_code = 1 if errors and not items else 0
         return KernelResolveResult(

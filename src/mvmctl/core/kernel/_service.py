@@ -32,8 +32,10 @@ from mvmctl.exceptions import (
     HttpDownloadError,
     KernelError,
     MVMError,
+    ProcessError,
 )
 from mvmctl.models import KernelItem, KernelPullResult, KernelSpec
+from mvmctl.utils._system import run_cmd
 from mvmctl.utils.http import HttpDownload
 from mvmctl.utils.template import render_optional_template, render_template
 from mvmctl.utils.yaml import (
@@ -117,19 +119,41 @@ class KernelService:
 
     def remove(self, kernel: KernelItem, *, force: bool = False) -> KernelItem:
         """
-        Remove a single kernel.
-        Delegates to KernelController for VM reference checks and
-        soft/hard delete logic.
+        Remove a single kernel from disk and database.
+
+        Hard-deletes when no VMs reference the kernel.
+        Soft-deletes only when VMs still reference it (to preserve history).
+
         Args:
             kernel: The KernelItem to remove.
             force: If True, remove even if referenced by VMs.
+
         Returns:
             The removed KernelItem.
-        """
-        from mvmctl.core.kernel._controller import KernelController
 
-        controller = KernelController(kernel, self._repo)
-        controller.remove(force=force)
+        Raises:
+            KernelError: If kernel is referenced by VMs and force is False.
+
+        """
+        vms = kernel.vms or []
+        has_vms = bool(vms)
+
+        if has_vms and not force:
+            raise KernelError(
+                f"Kernel referenced by VMs: {', '.join(v.name for v in vms)}"
+            )
+
+        # Delete file from disk
+        kernel_path = kernel.resolved_path
+        if kernel_path.exists():
+            kernel_path.unlink()
+
+        # Hard delete if no VMs, soft delete if VMs exist (with force)
+        if has_vms:
+            self._repo.soft_delete(kernel.id)
+        else:
+            self._repo.delete(kernel.id)
+
         return kernel
 
     def remove_many(
@@ -367,15 +391,17 @@ class KernelService:
         """Run make command in kernel directory."""
         cmd = ["make", target, f"-j{jobs}"]
         if capture_output:
-            result = subprocess.run(
+            result = run_cmd(
                 cmd,
-                cwd=kernel_dir,
-                capture_output=True,
-                text=True,
+                cwd=str(kernel_dir),
             )
             return result.returncode, result.stdout, result.stderr
         else:
-            returncode = subprocess.run(cmd, cwd=kernel_dir).returncode
+            returncode = run_cmd(
+                cmd,
+                cwd=str(kernel_dir),
+                capture=False,
+            ).returncode
             return returncode, "", ""
 
     @staticmethod
@@ -383,11 +409,10 @@ class KernelService:
         config_script: Path, args: list[str], kernel_dir: Path
     ) -> None:
         """Run scripts/config with the given args, logging a warning on failure."""
-        result = subprocess.run(
+        result = run_cmd(
             [str(config_script)] + args,
-            cwd=kernel_dir,
-            capture_output=True,
-            text=True,
+            cwd=str(kernel_dir),
+            check=False,
         )
         if result.returncode != 0:
             logger.warning(
@@ -1050,14 +1075,13 @@ class KernelService:
         ]
         for pkg_name, display_name in library_checks:
             try:
-                result = subprocess.run(
+                result = run_cmd(
                     ["pkg-config", "--exists", pkg_name],
-                    capture_output=True,
-                    text=True,
+                    check=False,
                 )
                 if result.returncode != 0:
                     missing_deps.append(display_name)
-            except FileNotFoundError:
+            except ProcessError:
                 missing_deps.append(display_name)
         if missing_deps:
             missing_str = ", ".join(sorted(missing_deps))

@@ -261,6 +261,7 @@ class KernelOperation:
 
         """
         from mvmctl.api.inputs._kernel_input import KernelRequest
+        from mvmctl.core.kernel._resolver import KernelResolver
 
         db = Database()
         repo = KernelRepository(db)
@@ -270,9 +271,13 @@ class KernelOperation:
         resolved = request.resolve()
 
         service = KernelService(repo)
+
+        # Batch-enrich with VM references for VM reference check
+        enriched = KernelResolver(repo, include=["vm"]).enrich(resolved.kernels)
+
         items: list[OperationResult[KernelItem]] = []
 
-        for kernel in resolved.kernels:
+        for kernel in enriched:
             try:
                 service.remove(kernel, force=force or resolved.force)
                 items.append(

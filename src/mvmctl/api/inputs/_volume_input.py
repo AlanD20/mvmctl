@@ -35,6 +35,7 @@ class VolumeRequest:
     """Request that resolves VolumeInput to VolumeItem via DB."""
 
     _result: ResolvedVolumeInput | None = None
+    _errors: list[str]
 
     def __init__(
         self, *, inputs: VolumeInput, db: Database | None = None
@@ -43,6 +44,7 @@ class VolumeRequest:
         self._inputs = inputs
         self._db = db if db is not None else Database()
         self._volume_resolver = VolumeResolver(VolumeRepository(self._db))
+        self._errors = []
 
     @property
     def result(self) -> ResolvedVolumeInput | None:
@@ -71,11 +73,21 @@ class VolumeRequest:
                 f"Could not resolve any volumes: {', '.join(result.errors)}"
             )
 
+        # Store partial-match errors so callers (e.g. VolumeOperation.remove())
+        # can surface them rather than silently dropping unresolvable identifiers.
+        if result.errors:
+            self._errors = result.errors
+
         self._result = ResolvedVolumeInput(volumes=result.items)
 
         self.ensure_validate()
 
         return self._result
+
+    @property
+    def errors(self) -> list[str]:
+        """Partial-match errors from resolution (identifiers that couldn't be resolved)."""
+        return self._errors
 
     def ensure_validate(self) -> None:
         """Validate resolved volume inputs."""

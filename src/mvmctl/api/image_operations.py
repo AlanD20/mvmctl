@@ -389,22 +389,24 @@ class ImageOperation:
 
         """
         from mvmctl.api.inputs._image_input import ImageRequest
-        from mvmctl.core.image._controller import ImageController
-        from mvmctl.core.image._resolver import ImageResolver
+        from mvmctl.core.image._service import ImageService
 
         db = Database()
         repo = ImageRepository(db)
-
         resolved = ImageRequest(inputs=inputs, db=db).resolve()
-        resolver = ImageResolver(repo, include=["vm"])
-        enriched = resolver._enrich(resolved.items)
 
-        results: list[OperationResult[ImageItem]] = []
+        service = ImageService(repo)
+
+        # Batch-enrich all resolved images with VM references
+        resolver = ImageResolver(repo, include=["vm"])
+        enriched = resolver.enrich(resolved.images)
+
+        items: list[OperationResult[ImageItem]] = []
+
         for image in enriched:
             try:
-                controller = ImageController(image, repo)
-                controller.remove(force=force)
-                results.append(
+                service.remove(image, force=force)
+                items.append(
                     OperationResult(
                         status="success",
                         code="image.removed",
@@ -412,7 +414,7 @@ class ImageOperation:
                     )
                 )
             except Exception as e:
-                results.append(
+                items.append(
                     OperationResult(
                         status="error",
                         code="image.remove_failed",
@@ -421,7 +423,7 @@ class ImageOperation:
                         exception=e,
                     )
                 )
-        return BatchResult(items=results)
+        return BatchResult(items=items)
 
     @staticmethod
     def list_(
@@ -497,10 +499,10 @@ class ImageOperation:
         # Resolve identifiers using ImageRequest pattern
         resolved = ImageRequest(inputs=inputs, db=db).resolve()
 
-        if len(resolved.items) > 1:
+        if len(resolved.images) > 1:
             raise ImageError("Expected exactly one image identifier")
 
-        return resolved.items[0]
+        return resolved.images[0]
 
     @staticmethod
     def _image_to_dict(img: ImageItem) -> dict[str, Any]:
@@ -571,10 +573,10 @@ class ImageOperation:
         # Resolve identifiers using ImageRequest pattern
         resolved = ImageRequest(inputs=inputs, db=db).resolve()
 
-        if len(resolved.items) > 1:
+        if len(resolved.images) > 1:
             raise ImageError("Expected exactly one image identifier")
 
-        image_item = resolved.items[0]
+        image_item = resolved.images[0]
         repo.set_default(image_item.id)
 
         AuditLog.log("image.set_default", changes={"id": image_item.id[:6]})
@@ -609,7 +611,7 @@ class ImageOperation:
 
         db = Database()
         repo = ImageRepository(db)
-        images = ImageRequest(inputs=inputs, db=db).resolve().items
+        images = ImageRequest(inputs=inputs, db=db).resolve().images
 
         if on_progress is not None:
             on_progress(

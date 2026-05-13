@@ -3,10 +3,14 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-import subprocess
 from pathlib import Path
 
-from mvmctl.utils._system import ProcessSignalHandler, has_python_ancestor
+from mvmctl.exceptions import ProcessError
+from mvmctl.utils._system import (
+    ProcessSignalHandler,
+    has_python_ancestor,
+    run_cmd,
+)
 from mvmctl.utils.common import CacheUtils
 
 from ._kernel_detector import KernelDetector
@@ -67,22 +71,14 @@ class GuestfsService:
             )
 
         try:
-            subprocess.run(
-                [make_tool, str(appliance_dir)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                text=True,
-                check=True,
-                timeout=60,
-                env=env,
-            )
-        except subprocess.TimeoutExpired:
-            logger.warning("libguestfs appliance build timed out after 60s")
-            return None
-        except subprocess.CalledProcessError as e:
-            logger.warning("libguestfs appliance build failed: %s", e.stderr)
-            return None
-        except FileNotFoundError:
+            run_cmd([make_tool, str(appliance_dir)], timeout=60, env=env)
+        except ProcessError as e:
+            if "timed out" in str(e):
+                logger.warning("libguestfs appliance build timed out after 60s")
+                return None
+            if "Command not found" in str(e):
+                return None
+            logger.warning("libguestfs appliance build failed: %s", str(e))
             return None
         else:
             logger.info("libguestfs fixed appliance built at %s", appliance_dir)

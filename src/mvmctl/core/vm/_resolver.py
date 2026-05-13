@@ -129,6 +129,45 @@ class VMResolver:
                 results[vm.image_id].append(vm)
         return results
 
+    def by_network_id_batch(
+        self, network_ids: list[str]
+    ) -> dict[str, list[VMInstanceItem]]:
+        """Batch-resolve VMs by network IDs."""
+        vms = self._repo.get_by_network_ids(network_ids)
+        results: dict[str, list[VMInstanceItem]] = {
+            nid: [] for nid in network_ids
+        }
+        for vm in vms:
+            if vm.network_id in results:
+                results[vm.network_id].append(vm)
+        return results
+
+    def by_kernel_id_batch(
+        self, kernel_ids: list[str]
+    ) -> dict[str, list[VMInstanceItem]]:
+        """Batch-resolve VMs by kernel IDs."""
+        vms = self._repo.get_by_kernel_ids(kernel_ids)
+        results: dict[str, list[VMInstanceItem]] = {
+            kid: [] for kid in kernel_ids
+        }
+        for vm in vms:
+            if vm.kernel_id in results:
+                results[vm.kernel_id].append(vm)
+        return results
+
+    def by_binary_id_batch(
+        self, binary_ids: list[str]
+    ) -> dict[str, list[VMInstanceItem]]:
+        """Batch-resolve VMs by binary IDs."""
+        vms = self._repo.get_by_binary_ids(binary_ids)
+        results: dict[str, list[VMInstanceItem]] = {
+            bid: [] for bid in binary_ids
+        }
+        for vm in vms:
+            if vm.binary_id in results:
+                results[vm.binary_id].append(vm)
+        return results
+
     def resolve(self, identifier: str) -> VMInstanceItem:
         """Resolve VM by name, ip, mac, or id prefix."""
         try:

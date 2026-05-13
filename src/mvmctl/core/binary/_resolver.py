@@ -25,7 +25,16 @@ class BinaryResolveResult:
 class BinaryResolver:
     """Resolver for firecracker binary."""
 
-    RELATIONS: dict[str, RelationSpec] = {}
+    RELATIONS: dict[str, RelationSpec] = {
+        "vm": RelationSpec(
+            fk_field="id",
+            resolver="vm",
+            method="find_by_binary_id",
+            relation_name="vms",
+            is_reverse=True,
+            batch_method="by_binary_id_batch",
+        ),
+    }
 
     def __init__(
         self,
@@ -36,7 +45,7 @@ class BinaryResolver:
         self._repo = repo if repo is not None else BinaryRepository()
         self._include = include
 
-    def _enrich(self, binaries: list[BinaryItem]) -> list[BinaryItem]:
+    def enrich(self, binaries: list[BinaryItem]) -> list[BinaryItem]:
         """Enrich binaries with relations if include is set."""
         if self._include and binaries:
             RelationEnricher().enrich(binaries, self._include, self.RELATIONS)
@@ -49,7 +58,7 @@ class BinaryResolver:
             raise BinaryNotFoundError(f"Binary not found: {binary_id}")
         if len(matches) > 1:
             raise BinaryNotFoundError(f"Binary ID is ambiguous: {binary_id}")
-        return self._enrich(matches)[0]
+        return self.enrich(matches)[0]
 
     def by_name_version(self, name: str, version: str) -> BinaryItem:
         """Resolve binary by name and version (both required)."""
@@ -58,14 +67,14 @@ class BinaryResolver:
             raise BinaryNotFoundError(
                 f"Binary not found: name={name!r}, version={version!r}"
             )
-        return self._enrich([binary])[0]
+        return self.enrich([binary])[0]
 
     def get_default(self, name: str) -> BinaryItem | None:
         """Resolve the default binary for a given name, or None if not set."""
         binary = self._repo.get_default(name)
         if binary is None:
             return None
-        return self._enrich([binary])[0]
+        return self.enrich([binary])[0]
 
     def resolve(self, value: str) -> BinaryItem:
         """Resolve binary by ID prefix."""
@@ -107,7 +116,7 @@ class BinaryResolver:
             except Exception as e:
                 errors.append(f"{identifier}: {e}")
 
-        items = self._enrich(items)
+        items = self.enrich(items)
 
         exit_code = 1 if errors and not items else 0
         return BinaryResolveResult(

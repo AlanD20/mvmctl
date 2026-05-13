@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from mvmctl.api.inputs._vm_input import VMInput, VMRequest
 from mvmctl.core._shared import Database
 from mvmctl.core.config._service import SettingsService
+from mvmctl.exceptions import LogsError
 from mvmctl.models import VMInstanceItem
 
 
@@ -48,6 +49,11 @@ class LogRequest:
         """Resolve all inputs to explicit values."""
         vm = self._resolve_vm()
         log_type = self._resolve_log_type()
+
+        # Validate log_type before passing to service
+        if log_type not in ("boot", "os"):
+            raise LogsError(f"Unknown log type '{log_type}'. Valid: boot, os")
+
         lines = self._resolve_lines()
         follow = self._resolve_follow()
         log_filename = str(

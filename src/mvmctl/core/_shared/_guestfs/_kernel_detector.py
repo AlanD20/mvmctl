@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 import re
-import subprocess
 from functools import lru_cache
 from pathlib import Path
+
+from mvmctl.exceptions import ProcessError
+from mvmctl.utils._system import run_cmd
 
 logger = logging.getLogger(__name__)
 
@@ -109,15 +111,13 @@ class KernelDetector:
     def _extract_version(cls, kernel_path: Path) -> str | None:
         """Extract kernel version from a kernel image using the file command."""
         try:
-            result = subprocess.run(
-                ["file", str(kernel_path)],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=5,
-            )
+            result = run_cmd(["file", str(kernel_path)], check=False, timeout=5)
             output = result.stdout
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        except ProcessError as e:
+            if "timed out" in str(e):
+                raise ProcessError(
+                    f"'file' command timed out for {kernel_path}"
+                ) from None
             logger.debug("Failed to run file on %s: %s", kernel_path, e)
             return None
 

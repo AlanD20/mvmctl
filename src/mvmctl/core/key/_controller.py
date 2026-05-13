@@ -60,14 +60,6 @@ class KeyController:
         """Return the SSHKeyItem model for this key."""
         return self._key
 
-    def remove(self) -> None:
-        """
-        Remove the resolved key from database only.
-
-        File cleanup is handled by the orchestration layer.
-        """
-        self._repo.delete(self._key.id)
-
     def export(
         self, destination: Path, *, keys_dir: Path, overwrite: bool = False
     ) -> tuple[Path, Path]:

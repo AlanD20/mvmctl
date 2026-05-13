@@ -45,12 +45,12 @@ class LogService:
         if not vm_dir.exists():
             raise VMNotFoundError(f"VM directory not found at {vm_dir}")
 
+        # log_type is validated by the API layer (LogRequest) before
+        # this method is called, so only "boot" and "os" are possible.
         if log_type == "boot":
             log_file = vm_dir / serial_output_filename
-        elif log_type == "os":
-            log_file = vm_dir / log_filename
         else:
-            raise LogsError(f"Unknown log type '{log_type}'. Valid: boot, os")
+            log_file = vm_dir / log_filename
 
         if not log_file.exists():
             raise VMNotFoundError(f"Log file not found for VM: {log_file}")

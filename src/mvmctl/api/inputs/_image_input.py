@@ -29,7 +29,7 @@ class ImageInput:
 class ResolvedImageInput:
     """Resolved image identifiers."""
 
-    items: list[ImageItem]
+    images: list[ImageItem]
 
 
 class ImageRequest:
@@ -72,7 +72,7 @@ class ImageRequest:
                 f"Could not resolve any images: {', '.join(result.errors)}"
             )
 
-        self._result = ResolvedImageInput(items=result.items)
+        self._result = ResolvedImageInput(images=result.items)
 
         # Validate
         self.ensure_validate()
@@ -86,5 +86,5 @@ class ImageRequest:
                 "Failed to resolve necessary dependencies to validate"
             )
 
-        if not self._result.items:
+        if not self._result.images:
             raise ImageNotFoundError("No images found matching identifiers")

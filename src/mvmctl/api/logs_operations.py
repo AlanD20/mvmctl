@@ -5,9 +5,7 @@ from __future__ import annotations
 from collections.abc import Generator
 
 from mvmctl.api.inputs._logs_input import LogInput, LogRequest
-from mvmctl.core._shared import Database
 from mvmctl.core.logs._controller import LogController
-from mvmctl.core.vm._repository import VMRepository
 
 
 class LogOperation:
@@ -28,8 +26,8 @@ class LogOperation:
             Log line strings
 
         """
-        resolved = LogRequest(inputs=inputs, db=Database()).resolve()
-        controller = LogController(resolved.vm, VMRepository(Database()))
+        resolved = LogRequest(inputs=inputs).resolve()
+        controller = LogController(resolved.vm)
         if resolved.follow:
             yield from controller.follow(
                 resolved.log_type,

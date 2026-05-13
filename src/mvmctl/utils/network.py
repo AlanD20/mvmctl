@@ -6,12 +6,11 @@ import hashlib
 import ipaddress
 import logging
 import secrets
-import subprocess
 from pathlib import Path
 
 from mvmctl.constants import CLI_NAME
-from mvmctl.exceptions import NetworkError
-from mvmctl.utils._system import privileged_cmd
+from mvmctl.exceptions import NetworkError, ProcessError
+from mvmctl.utils._system import run_cmd
 
 logger = logging.getLogger(__name__)
 
@@ -186,13 +185,10 @@ class NetworkUtils:
 
         """
         try:
-            result = subprocess.run(
+            result = run_cmd(
                 ["ip", "route", "show", "default"],
-                capture_output=True,
-                text=True,
-                check=True,
             )
-        except subprocess.CalledProcessError:
+        except ProcessError:
             logger.debug(
                 "Failed to detect outbound network interface", exc_info=True
             )
@@ -210,10 +206,8 @@ class NetworkUtils:
     @staticmethod
     def bridge_exists(bridge: str) -> bool:
         """Check if a bridge interface exists."""
-        result = subprocess.run(
+        result = run_cmd(
             ["ip", "link", "show", bridge],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
             check=False,
         )
         return result.returncode == 0
@@ -221,10 +215,8 @@ class NetworkUtils:
     @staticmethod
     def tap_exists(tap: str) -> bool:
         """Check if a TAP interface exists."""
-        result = subprocess.run(
+        result = run_cmd(
             ["ip", "link", "show", tap],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
             check=False,
         )
         return result.returncode == 0
@@ -232,9 +224,8 @@ class NetworkUtils:
     @staticmethod
     def chain_exists(chain: str, table: str = "filter") -> bool:
         """Check if an iptables chain exists."""
-        result = subprocess.run(
+        result = run_cmd(
             ["iptables", "-t", table, "-L", chain, "-n"],
-            capture_output=True,
             check=False,
         )
         return result.returncode == 0
@@ -242,10 +233,8 @@ class NetworkUtils:
     @staticmethod
     def get_tuntap_devices() -> list[str]:
         """List all TUN/TAP devices."""
-        result = subprocess.run(
+        result = run_cmd(
             ["ip", "-o", "link", "show", "type", "tuntap"],
-            capture_output=True,
-            text=True,
             check=False,
         )
         if result.returncode != 0:
@@ -261,10 +250,8 @@ class NetworkUtils:
     @staticmethod
     def get_bridges() -> list[str]:
         """List all bridge interfaces."""
-        result = subprocess.run(
+        result = run_cmd(
             ["ip", "-o", "link", "show", "type", "bridge"],
-            capture_output=True,
-            text=True,
             check=False,
         )
         if result.returncode != 0:
@@ -291,10 +278,8 @@ class NetworkUtils:
             List of slave interface names.
 
         """
-        result = subprocess.run(
+        result = run_cmd(
             ["ip", "-o", "link", "show", "master", bridge],
-            capture_output=True,
-            text=True,
             check=False,
         )
         if result.returncode != 0:
@@ -313,10 +298,8 @@ class NetworkUtils:
     @staticmethod
     def get_bridge_taps(bridge: str) -> list[str]:
         """List all TAP devices currently attached to the bridge."""
-        result = subprocess.run(
+        result = run_cmd(
             ["ip", "link", "show", "master", bridge],
-            capture_output=True,
-            text=True,
             check=False,
         )
         if result.returncode != 0:
@@ -371,13 +354,11 @@ class NetworkUtils:
             )
 
         try:
-            result = subprocess.run(
+            result = run_cmd(
                 ["ip", "-o", "-4", "addr", "show", interface],
-                capture_output=True,
-                text=True,
                 check=False,
             )
-        except FileNotFoundError as e:
+        except ProcessError as e:
             raise NetworkError(
                 "'ip' command not found — install iproute2"
             ) from e
@@ -401,21 +382,17 @@ class NetworkUtils:
             Tuple of (has_conflict, diagnosis_string).
 
         """
-        from mvmctl.utils._system import privileged_cmd as _privileged_cmd
-
-        result = subprocess.run(
+        result = run_cmd(
             ["iptables", "--version"],
-            capture_output=True,
-            text=True,
+            check=False,
         )
         current_backend = "nft" if "nf_tables" in result.stderr else "legacy"
 
         legacy_active = False
         try:
-            legacy_result = subprocess.run(
-                _privileged_cmd(["iptables-legacy", "-L", "-n", "-v"]),
-                capture_output=True,
-                text=True,
+            legacy_result = run_cmd(
+                ["iptables-legacy", "-L", "-n", "-v"],
+                privileged=True,
                 check=False,
             )
             if legacy_result.returncode == 0:
@@ -434,10 +411,9 @@ class NetworkUtils:
 
         nft_active = False
         try:
-            nft_result = subprocess.run(
-                _privileged_cmd(["iptables", "-L", "-n", "-v"]),
-                capture_output=True,
-                text=True,
+            nft_result = run_cmd(
+                ["iptables", "-L", "-n", "-v"],
+                privileged=True,
                 check=False,
             )
             if nft_result.returncode == 0:
@@ -472,19 +448,19 @@ class NetworkUtils:
 
         """
         try:
-            result = subprocess.run(
+            result = run_cmd(
                 ["ip", "link", "show", tap],
-                capture_output=True,
-                text=True,
-                check=True,
+                check=False,
             )
+            if result.returncode != 0:
+                return None
             for line in result.stdout.splitlines():
                 if "master" in line:
                     parts = line.split()
                     for i, part in enumerate(parts):
                         if part == "master" and i + 1 < len(parts):
                             return parts[i + 1]
-        except subprocess.CalledProcessError:
+        except ProcessError:
             pass
         return None
 
@@ -494,21 +470,13 @@ class NetworkUtils:
     def _run_batch(commands: list[str]) -> None:
         """Execute a batch of ip commands using ip -batch mode."""
         batch = "\n".join(commands) + "\n"
-        subprocess.run(
-            privileged_cmd(["ip", "-batch", "-"]),
-            input=batch,
-            text=True,
-            check=True,
-            capture_output=True,
-        )
+        run_cmd(["ip", "-batch", "-"], privileged=True, input=batch)
 
     @staticmethod
     def bridge_has_subnet(bridge: str, subnet: str) -> bool:
         """Check if a bridge already has a given subnet assigned."""
-        result = subprocess.run(
+        result = run_cmd(
             ["ip", "-o", "addr", "show", bridge],
-            capture_output=True,
-            text=True,
             check=False,
         )
         if result.returncode != 0:

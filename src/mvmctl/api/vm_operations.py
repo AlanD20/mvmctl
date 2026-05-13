@@ -82,7 +82,7 @@ from mvmctl.models.result import (
     OperationResult,
     ProgressEvent,
 )
-from mvmctl.utils._system import SigtermContext, is_process_running
+from mvmctl.utils._system import SigtermContext, is_process_running, run_cmd
 from mvmctl.utils.auditlog import AuditLog
 from mvmctl.utils.common import CacheUtils, CommonUtils
 from mvmctl.utils.crypto import HashGenerator
@@ -412,10 +412,13 @@ class VMCreateContext:
         )
         _step_start = time.perf_counter()
 
-        if mode == CloudInitMode.OFF:
+        # Common operations for OFF and INJECT modes — SSH keys, hostname, DNS
+        if mode in (CloudInitMode.OFF, CloudInitMode.INJECT):
             provisioner.set_hostname(self.resolved.name)
             provisioner.inject_dns(dns_server=self.resolved.dns_server)
             provisioner.setup_ssh(self.resolved.user, self._ssh_pubkey_contents)
+
+        if mode == CloudInitMode.OFF:
             provisioner.disable_cloud_init()
             self.mark_created("cloud-init-off")
 
@@ -798,7 +801,7 @@ class VMCreateContext:
 
         spawner = FirecrackerSpawner(fc_config)
         spawner.write_to_file()
-        spawner.spawn(wait_for_socket=True)
+        spawner.spawn()
 
         if spawner.pid is None:
             raise MVMError("Failed to spawn Firecracker process")
@@ -1877,11 +1880,8 @@ class VMOperation:
 
         if vm.ipv4:
             try:
-                import subprocess
-
-                subprocess.run(
+                run_cmd(
                     ["ssh-keygen", "-R", vm.ipv4],
-                    capture_output=True,
                     check=False,
                 )
             except FileNotFoundError:
