@@ -1,8 +1,14 @@
 # --from-volume: Full-disk boot from a volume
 
-**Phase:** After volume domain (IMPROVEMENTS_003) is completed
+> ## Status: ❌ NOT IMPLEMENTED
+>
+> This feature depends on the volume domain (✅ completed). The integration wiring exists (volumes can be attached to VMs), but `--from-volume` as a replacement for `--image` + `--kernel` has NOT been implemented.
+>
+> **Last verified:** 2026-05-13
+
+**Phase:** After volume domain (IMPROVEMENTS_003) is completed ✅
 **Complexity:** Medium
-**Depends on:** Volume domain, VM creation pipeline
+**Depends on:** Volume domain ✅ (done), VM creation pipeline ✅ (exists)
 
 ## Goal
 
@@ -29,7 +35,7 @@ This means you'd typically:
 ## Integration points
 
 | Layer | Change |
-|-------|--------|
+|---|---|
 | `VMCreateInput` | Add `from_volume: str \| None = None` — mutually exclusive with `image` |
 | `VMCreateRequest.resolve()` | Skip image/kernel resolution. Resolve volume instead. Set `is_root_device=True` on volume drive. |
 | `FirecrackerConfig` | Rootfs path comes from volume, not from warm-image pool |

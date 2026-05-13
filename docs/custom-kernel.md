@@ -76,6 +76,15 @@ sudo dnf install -y \
   bc
 ```
 
+Additional build tools that may be needed (required for `--type official --clean-build`):
+```bash
+# Debian/Ubuntu
+sudo apt-get install -y dwarves git curl pkg-config
+
+# Arch
+sudo pacman -S --needed pahole git curl pkgconf
+```
+
 Verify tools are present:
 ```bash
 which make gcc flex bison bc
@@ -99,10 +108,10 @@ mvm kernel pull --type firecracker --version 1.12
 mvm kernel pull --type firecracker --arch aarch64
 
 # Set as default kernel after download
-mvm kernel pull --type firecracker --set-default
+mvm kernel pull --type firecracker --default
 ```
 
-The kernel is saved to `~/.cache/mvmctl/kernels/vmlinux-fc-<version>-<arch>`.
+The kernel is saved to `~/.cache/mvmctl/kernels/` with a name derived from the CI version and architecture.
 
 **Why use this?** These kernels are curated by the Firecracker team, are the smallest and
 fastest to boot, and have guaranteed compatibility with the matching Firecracker release.
@@ -163,7 +172,7 @@ EOF
 # Build with your custom overlay applied last
 mvm kernel pull --type official \
   --version 6.1.102 \
-  --kernel-config /tmp/my-overrides.config
+  --config /tmp/my-overrides.config
 
 # The overlay is applied AFTER the Firecracker defaults — your settings win
 ```
@@ -181,7 +190,7 @@ settings are defined under `required_settings` in `src/mvmctl/assets/kernels.yam
 If a required setting is missing, you will be prompted:
 
 ```
-⚠  Required kernel settings missing: CONFIG_VIRTIO_BLK, CONFIG_VIRTIO_NET
+Required kernel settings missing: CONFIG_VIRTIO_BLK, CONFIG_VIRTIO_NET
 Proceed with build anyway? (missing settings may affect VM stability) [y/N]:
 ```
 
@@ -197,23 +206,23 @@ correctly with Firecracker.
 mvm kernel ls
 
 # Set a kernel as default for vm create
-mvm kernel set-default vmlinux-fc-1.12-x86_64
+mvm kernel default vmlinux-firecracker-1.12-x86_64
 
 # Remove a kernel
-mvm kernel rm vmlinux-fc-1.10-x86_64
+mvm kernel rm vmlinux-firecracker-1.10-x86_64
 ```
 
-The `Def` column (✓) in `mvm kernel ls` shows the active default kernel.
+The `Def` column in `mvm kernel ls` shows the active default kernel.
 
 ---
 
 ## Using a Custom Kernel with a VM
 
 ```bash
-# Use the default kernel (set via set-default)
+# Use the default kernel (set via mvm kernel default)
 mvm vm create -n myvm --image ubuntu-24.04
 
-# Use a specific kernel path
+# Use a specific kernel by path
 mvm vm create -n myvm \
   --image ubuntu-24.04 \
   --kernel ~/.cache/mvmctl/kernels/vmlinux-custom
@@ -249,12 +258,7 @@ Common causes:
 ### Kernel too large
 
 The Firecracker CI kernel is typically ~5 MiB. If your custom kernel is much larger,
-check for unnecessary configs:
-```bash
-grep -c "=y" ~/.cache/mvmctl/kernels/vmlinux.config
-```
-
-Consider using the Firecracker CI kernel as your base config.
+check for unnecessary configs. Consider using the Firecracker CI kernel as your base config.
 
 ### "Required kernel settings missing" during build
 
@@ -278,9 +282,11 @@ Then update `config_url_template` in `src/mvmctl/assets/kernels.yaml` if needed.
 
 | Kernel | Status | Notes |
 |--------|--------|-------|
-| 6.1.x LTS | ✅ Supported | Long-term support, recommended for production |
-| 6.6.x LTS | ✅ Supported | Newer LTS, recommended for production |
-| 6.12.x LTS | ✅ Supported | Latest LTS |
+| 6.1.x LTS | Supported | Long-term support, recommended for production |
+| 6.6.x LTS | Supported | Newer LTS, recommended for production |
+| 6.12.x LTS | Supported | Latest LTS |
+
+> **Note:** The default kernel version (`6.19.9`) is **NOT** an LTS kernel. It is the latest upstream stable at the time of release. If you need long-term support, explicitly pass `--version 6.1.102` or `--version 6.12.21` to `mvm kernel pull --type official`. The LTS versions in the table above are tested and known to work — use them for production deployments.
 
 ### Relevant constants (src/mvmctl/constants.py)
 
@@ -306,9 +312,9 @@ by reading the YAML file through the `AssetManager` or via `core.kernel._service
 | YAML field | Description |
 |------------|-------------|
 | `required_settings` | Config options that must be `=y` after build; missing ones trigger a confirmation prompt |
-| `enabled_configs` | Config options always enabled (`--enable`) during the build |
-| `disabled_configs` | Config options always disabled (`--disable`) during the build |
-| `set_val_configs` | Config options set to a specific integer value (`--set-val`) during the build |
+| `enabled_configs` | Config options always enabled during the build |
+| `disabled_configs` | Config options always disabled during the build |
+| `set_val_configs` | Config options set to a specific integer value during the build |
 
 ---
 

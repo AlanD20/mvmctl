@@ -1,0 +1,3 @@
+# Loopmount over Guestfs as Default Provisioning Backend
+
+Loop-mount provisioning (via `mvm-provision` binary using `losetup` + `mount` + chroot commands) is the default rootfs provisioning backend. Guestfs (libguestfs Python bindings) is a fallback available when the loop-mount binary is not built. Loopmount creates VMs in ~200ms vs guestfs ~2600ms for the same operation. Guestfs is disabled by default (`guestfs_enabled = False` in `constants.py`). The code checks `guestfs_enabled` first before checking `LoopMountManager.is_binary_available()`, so an unintended `True` override silently selects the slow backend — this was discovered as a real regression. If both backends are available, loopmount is always preferred.

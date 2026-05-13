@@ -116,7 +116,7 @@ Every test in the specification document follows this exact structure:
 
 ```yaml
 test_name: test_<resource>_<action>_<expected_behavior>
-file: coverage/test_<category>.py
+  file: tests/system/<domain>/test_<category>.py
 fixtures: [mvm_binary, unique_vm_name, ...]     # cheapest possible
 markers: [requires_kvm, slow, ...]               # only if truly needed
 steps:
@@ -143,13 +143,15 @@ Before adding a fixture or creating a resource, check the cost hierarchy.
 If you can test with a key instead of a VM, do it. If you can skip the
 test when no target resource exists, do that instead.
 
-### Rule 2: One file per agent
+### Rule 2: One file per agent — file lives under tests/system/<domain>/
 Each agent writes to exactly one file. No two agents touch the same file.
-Files live in `tests/system/coverage/`.
+Files live in `tests/system/<domain>/` subdirectories organized by domain
+(e.g. `tests/system/vm/`, `tests/system/network/`, `tests/system/keys/`).
 
 ### Rule 3: Self-contained tests
-Every test creates its own resources with unique names. No shared fixtures
-between tests within a file (except `mvm_binary` which is session-scoped).
+Every test creates its own resources with unique names. Use function-scoped
+fixtures (like `created_vm`, `created_network`, `created_key` from `conftest.py`)
+for shared setup/teardown of expensive resources.
 
 ### Rule 4: Cleanup in `finally`
 Every resource created must be destroyed in a `finally` block.
@@ -160,13 +162,16 @@ Use `check=False` on cleanup commands.
 - `unique_vm_name: str` — uuid-based unique VM name per test
 - `unique_key_name: str` — uuid-based unique key name per test
 - `unique_network_name: str` — uuid-based unique network name
+- `created_vm` — function-scoped fixture that creates a VM with SSH key and cleanup
+- `created_network` — function-scoped fixture that creates a network with cleanup
+- `created_key` — function-scoped fixture that creates an SSH key with cleanup
+- `minimal_vm` — function-scoped fixture that creates a bare VM (no SSH key, no console)
+- `module_vm` — module-scoped VM with SSH key shared across read-only tests
+- `module_network` — module-scoped network shared across read-only tests
 - `tmp_path: Path` — temporary directory for file operations
 
-Do NOT use `created_vm`, `created_network`, or `created_key` fixtures
-because they use module-scoped resources that create state pollution.
-
 ### Rule 6: Fixture order
-When using multiple unique_* fixtures, they must appear in this order
+When using multiple `unique_*` fixtures, they must appear in this order
 in the function signature: `mvm_binary, unique_vm_name, unique_key_name`.
 
 ### Rule 7: Markers
@@ -237,6 +242,16 @@ def test_something(self, mvm_binary, unique_vm_name):
     # which requires a stopped VM state. A key or volume fixture won't do.
 ```
 
+**CRITICAL — Option C verification standard:**
+Every test must pass `ruff check`, `ruff format`, and `mypy` (strict mode
+for `src/`, relaxed for `tests/`) before submission. Run:
+```bash
+uv run ruff check tests/system/<domain>/test_<file>.py
+uv run ruff format --check tests/system/<domain>/test_<file>.py
+```
+Do NOT submit failing ruff or mypy output. Each agent is responsible for
+ensuring its single file meets CI quality gates.
+
 ---
 
 ## What the Agent Must NOT Do
@@ -250,7 +265,7 @@ def test_something(self, mvm_binary, unique_vm_name):
 - ❌ Modify `conftest.py` or `pyproject.toml` (marker registration)
 - ❌ Run the tests — just write the code
 - ❌ Import from `mvmctl.*` — tests are black-box subprocess only
-- ❌ Use `created_vm`, `created_network`, or `created_key` fixtures
+- ❌ Use module-scoped `created_*` fixtures without understanding their lifecycle
 
 ---
 
@@ -261,7 +276,7 @@ def test_something(self, mvm_binary, unique_vm_name):
 [ ] Did I skip creating resources that already exist in the system?
 [ ] Does every `requires_kvm` test ACTUALLY create a VM?
 [ ] Is cleanup in a `finally` block, not after the assertion?
-[ ] Did I avoid `created_vm` / `created_network` / `created_key`?
+[ ] Did I choose the right scope for `created_*` fixtures (function vs module)?
 [ ] Did I add a `# Rationale:` comment?
 [ ] Is `ruff check` and `ruff format` clean?
 ```

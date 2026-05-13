@@ -103,7 +103,7 @@ You are a production engineer for the **mvmctl** project — a speed-first CLI f
 1. READ any existing source file (except under `tests/`) to understand patterns and conventions (regardless of size). Do NOT read files under `tests/`.
 2. EDIT files anywhere in the repository except under `tests/`. (NEVER edit files under `tests/`.)
 3. WRITE new files anywhere in the repository except under `tests/`. (NEVER write files under `tests/`.)
-4. Run linters: `uv run ruff check src/`, `uv run ruff format src/`, `uv run mypy src/`.
+4. Run linters: `uv run ruff check src/`, `uv run ruff format --check src/`, `uv run mypy src/`.
 5. Run tests ONLY when explicitly asked: `uv run pytest tests/ -q --cov=src/mvmctl -n auto --cov-fail-under=80`.
 
 ---
@@ -128,6 +128,7 @@ Core (isolated domain logic + shared infrastructure)
 
 ```
 src/mvmctl/
+├── main.py           # LazyMVMGroup (click.Group) — lazy-loads sub-apps
 ├── cli/              # Typer commands — arg parsing, output formatting, default resolution
 ├── api/              # PUBLIC INTERFACE — orchestration across multiple domains
 │   ├── {domain}_operations.py    # Operation classes (static methods)
@@ -363,31 +364,74 @@ def __dir__() -> list[str]:
 
 ```
 MVMError                              # Root — carries optional code field
+├── MVMRuntimeError                   # Runtime assertion failure
 ├── VMError                           # VM domain category
-│   ├── VMCreateError                 # VM creation failure
+│   ├── VMCreateError                 # VM creation failure (mid-rollback)
 │   ├── VMStateError                  # Invalid state transition
-│   └── VMBuilderError                # Builder failure
-├── NetworkError                      # Network domain category
-│   └── NetworkSubnetOverlapError     # Subnet overlap (code="network.subnet.overlap")
-├── FirecrackerError                  # Firecracker category
+│   ├── VMRequestError                # Request resolution failure
+│   ├── VMBuilderError                # Builder failure (mid-rollback)
+│   └── VMNotFoundError               # VM not found in state
+├── NetworkError                      # Network domain
+├── FirecrackerError                  # Firecracker domain
 │   ├── FirecrackerClientError        # API communication failure
+│   │   └── SocketNotFoundError       # Unix socket not found
 │   ├── FirecrackerSpawnError         # Spawn failure
 │   └── FirecrackerConfigError        # Config generation failure
 ├── ImageError                        # Image domain
+│   ├── ImageCompressionError         # Compression failure
+│   ├── ImageDecompressionError       # Decompression failure
+│   ├── ImageCorruptError             # Corrupted file
+│   ├── ImageEmptyError               # Empty file
+│   ├── ImageValidationError          # Format validation failure
+│   └── ChecksumMismatchError         # SHA256 checksum mismatch
 ├── KernelError                       # Kernel domain
 ├── BinaryError                       # Binary domain
+│   └── BinaryAlreadyExistsError      # Version already exists
 ├── HostError                         # Host domain
-│   └── PrivilegeError               # Insufficient privileges
+│   └── PrivilegeError                # Insufficient privileges
 ├── ConfigError                       # Configuration errors
 ├── CloudInitError                    # Cloud-init errors
+│   ├── CloudInitProvisionError       # Invalid user data
+│   ├── CloudInitModeError            # Mode resolution failure
+│   ├── CloudInitOffModeError         # OFF mode failure
+│   ├── CloudInitIsoModeError         # ISO creation failure
+│   ├── CloudInitNetModeError         # Nocloud-net failure
+│   └── CloudInitInjectModeError      # Rootfs injection failure
 ├── ConsoleError                      # Console errors
+├── LogsError                         # Log read/tail errors
 ├── SSHError                          # SSH errors
 ├── MVMKeyError                       # SSH key management errors
-├── VolumeCreateError                 # Volume creation errors
+│   ├── KeyExportError                # Export failure
+│   ├── KeyDependencyError            # ssh-keygen missing
+│   └── KeyFileError                  # File read/write failure
 ├── GuestfsError                      # libguestfs errors
+│   ├── GuestfsNotAvailableError      # Python bindings not found
+│   ├── GuestfsLaunchError            # Appliance launch failure
+│   ├── GuestfsMountError             # Rootfs mount failure
+│   ├── GuestfsWriteError             # File write failure
+│   └── GuestfsApplianceError         # Fixed appliance build failure
 ├── LoopMountError                    # Loop-mount errors
+│   ├── LoopMountBinaryNotFoundError  # Binary not found
+│   └── LoopMountTimeoutError         # Timeout
 ├── ProcessError                      # Subprocess errors
-└── DatabaseError                     # Database errors
+├── DatabaseError                     # Database errors
+│   └── MigrationError                # Migration failure
+├── AssetNotFoundError                # Asset not found locally/remotely
+├── BundledAssetError                 # Bundled package asset failure
+│   └── BundledAssetNotFoundError     # Bundled file not found
+├── ImageAcquireError                 # Image fetch/import failure
+├── IPTablesTrackerError              # IPTables action failure
+├── VolumeCreateError                 # Volume creation failure
+├── VolumeNotFoundError               # Volume not found
+├── ImageNotFoundError                # Image not found
+├── BinaryNotFoundError               # Binary not found
+├── KernelNotFoundError               # Kernel not found
+├── NetworkNotFoundError              # Network not found
+├── KeyNotFoundError                  # SSH key not found
+├── RootPartitionDetectionError       # Root partition detection failure
+├── TieDetectedError                  # Multiple partition tie
+├── DownloadError                     # Download failure
+└── HttpDownloadError                 # HTTP download failure
 ```
 
 ### Code Field
@@ -474,7 +518,7 @@ result = run_cmd(["ip", "link", "set", tap, "down"], privileged=True)
 subprocess.run(["iptables", ...], check=True)  # NEVER
 ```
 
-The centralized runner (`run_cmd`) provides: consistent logging of every command, privilege escalation via `privileged_cmd()`, timeout enforcement, and uniform error handling.
+The centralized runner (`run_cmd`) provides: consistent logging of every command, privilege escalation via `require_mvm_group_membership()` + sudo prepending on the ``privileged=True`` flag, timeout enforcement, and uniform error handling.
 
 ---
 

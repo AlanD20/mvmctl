@@ -144,7 +144,9 @@ CONST_CONSOLE_DETACH_SEQUENCE = b"\x18d"  # Ctrl+X, then 'd'
 |-----------|-------------|
 | `ConsoleRelayError` | Base class for all relay errors |
 | `ConsoleRelayAlreadyRunningError` | Attempting to start already-running relay |
+| `ConsoleRelayNotRunningError` | Attempting to stop or interact with a relay that is not running |
 | `ConsoleRelayProcessError` | Subprocess fails to start |
+| `ConsoleRelayPermissionError` | Relay lacks necessary permissions (e.g., for PTY or socket) |
 | `ConsoleRelayConnectionError` | Client fails to connect to socket |
 
 ## Thread Safety

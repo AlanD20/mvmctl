@@ -1,14 +1,20 @@
 # Assets Configuration Reference
 
-This document describes the three bundled YAML files that drive asset management in
+This document describes the four bundled YAML/template files that drive asset management in
 `mvm`, how each field is interpreted at runtime, and how to extend them.
 
-All three files live under `src/mvmctl/assets/` and are packaged into the installed
+All four files live under `src/mvmctl/assets/` and are packaged into the installed
 wheel. They are read-only at runtime — user overrides are resolved from the SQLite
 database (`~/.cache/mvmctl/mvmdb.db`), runtime config (`~/.config/mvmctl/config.json`),
-and `MVM_*` environment variables, not by editing
-these files directly. Images and
-kernels remain as `images.yaml` and `kernels.yaml` respectively.
+and `MVM_*` environment variables, not by editing these files directly.
+
+The asset YAML files are:
+- `images.yaml` — catalogue of downloadable rootfs images
+- `kernels.yaml` — kernel build/download specifications
+- `cloud-init.template.yaml` — template for cloud-init user-data
+- `firecracker.template.json` — template for Firecracker VM JSON configuration
+
+Images and kernels remain as `images.yaml` and `kernels.yaml` respectively.
 
 ---
 
@@ -86,7 +92,7 @@ When the `source` URL contains `{…}` placeholder tokens, `mvm` treats it as a
 directly.
 
 ```yaml
-source: "https://spec.ccfc.min/firecracker-ci/{ci_version}/{arch}/ubuntu-{ubuntu_version}.squashfs"
+source: "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/{ci_version}/{arch}/ubuntu-24.04.squashfs"
 ```
 
 Resolution works as follows:
@@ -106,15 +112,21 @@ special `id` value or `format` is required.
 
 ### Current images
 
+The actual YAML (`src/mvmctl/assets/images.yaml`) currently defines 7 images:
+
 | ID | Name | Format | Type |
 |----|------|--------|------|
 | `ubuntu-24.04` | Ubuntu 24.04 LTS (Noble) | `tar-rootfs` | ubuntu |
-| `ubuntu-24.04-minimal` | Ubuntu 24.04 Minimal | `tar-rootfs` | ubuntu |
+| `ubuntu-24.04-minimal` | Ubuntu 24.04 Minimal | `tar-rootfs` | — |
 | `ubuntu-22.04` | Ubuntu 22.04 LTS (Jammy) | `tar-rootfs` | ubuntu |
 | `archlinux` | Arch Linux | `qcow2` | archlinux |
 | `debian-bookworm` | Debian 12 (Bookworm) | `qcow2` | debian |
 | `ubuntu-fc` | Ubuntu (Firecracker CI) | `squashfs` | firecracker |
 | `alpine-3.21` | Alpine Linux 3.21 | `vhd` | alpine |
+
+> **Note:** `alpine-3.21` is the only image whose `sha256_url` points to a `.sha512` file rather than `.sha256` (Alpine upstream provides SHA-512 checksums). The fetch logic handles this transparently — see the field reference above.
+>
+> **Note:** `ubuntu-fc` has `sha256_url: null` (no upstream checksum file). This is an exception — the image is fetched from a Firecracker CI S3 bucket that does not publish sidecar checksums. Dynamic S3 resolution is used instead.
 
 ---
 
@@ -206,7 +218,9 @@ defaults.kernel:        Default kernel version, architecture, build_jobs
 defaults.firecracker:   Log filenames, socket filenames, log level
 defaults.cloudinit:     ISO name, nocloud-net port range
 defaults.binary:        Remote version limit for bin ls
+settings:               General settings
 settings.vm:            Log lines, log follow, max_vms
+settings:               Guestfs enabled flag
 ```
 
 Additional (non-dict) constants are defined inline for HTTP timeouts, URLs, file permissions,
@@ -224,7 +238,7 @@ and other fixed values.
 
 | Constant | Source | Description |
 |----------|--------|-------------|
-| `DEFAULT_FIRECRACKER_CI_VERSION` | `constants.py` (standalone constant) | CI version used when config lookup fails — resolves to `v1.15` at runtime (standalone constant in `constants.py`) |
+| `DEFAULT_FIRECRACKER_CI_VERSION` | `constants.py` (standalone constant) | CI version used when config lookup fails — resolves to `v1.15` at runtime |
 
 ---
 
@@ -276,8 +290,8 @@ use `{placeholder}` tokens in `source`:
 ```yaml
 - id: my-dynamic-image
   name: "My Dynamic Image"
-  source: "https://s3.example.com/{ci_version}/{arch}/my-image.squashfs"
-  list_url_template: "http://s3.example.com/?prefix={ci_version}/{arch}/my-image&list-type=2"
+  source: "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/{ci_version}/{arch}/my-image.squashfs"
+  list_url_template: "http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/my-image&list-type=2"
   format: squashfs
   sha256: null
   sha256_url: null
@@ -312,14 +326,14 @@ the constants relevant to asset management.
 | `get_default("defaults.kernel", "version")` | `defaults.kernel.version` | Default version for `mvm kernel pull --type official` |
 | `get_default("defaults.kernel", "arch")` | `defaults.kernel.arch` | Default architecture for kernel operations |
 | `get_default("defaults.image", "arch")` | `defaults.image.arch` | Default architecture for image operations |
-| `DEFAULT_FIRECRACKER_CI_VERSION` (standalone constant) | `constants.py` (Section 3 — VM constants) | CI version used when config lookup fails |
-| `SUPPORTED_IMAGE_EXTENSIONS` (standalone constant) | `constants.py` (Section 5 — Image & rootfs processing) | File extensions scanned for cached images |
-| `IMAGE_IMPORT_FORMAT_MAP` (standalone constant) | `constants.py` (Section 5) | Extension → format auto-detection table |
-| `HTTP_TIMEOUT_KERNEL_DOWNLOAD_S` (standalone constant) | `constants.py` (Section 10 — HTTP / download) | Timeout (seconds) for kernel tarball download |
-| `HTTP_TIMEOUT_KERNEL_CONFIG_S` (standalone constant) | `constants.py` (Section 10) | Timeout for kernel config download |
-| `HTTP_TIMEOUT_SHA256_FETCH_S` (standalone constant) | `constants.py` (Section 10) | Timeout for SHA-256 checksum fetch |
-| `FIRECRACKER_GITHUB_RELEASES_API_URL` (standalone constant) | `constants.py` (Section 10) | GitHub API endpoint for Firecracker releases |
-| `FIRECRACKER_GITHUB_DOWNLOAD_URL` (standalone constant) | `constants.py` (Section 10) | Base URL for Firecracker release assets |
+| `DEFAULT_FIRECRACKER_CI_VERSION` (standalone constant) | `constants.py` (VM constants section) | CI version used when config lookup fails |
+| `SUPPORTED_IMAGE_EXTENSIONS` (standalone constant) | `constants.py` (Image & rootfs processing) | File extensions scanned for cached images |
+| `IMAGE_IMPORT_FORMAT_MAP` (standalone constant) | `constants.py` (Image & rootfs processing) | Extension → format auto-detection table |
+| `HTTP_TIMEOUT_KERNEL_DOWNLOAD_S` (standalone constant) | `constants.py` (HTTP / download) | Timeout (seconds) for kernel tarball download |
+| `HTTP_TIMEOUT_KERNEL_CONFIG_S` (standalone constant) | `constants.py` (HTTP / download) | Timeout for kernel config download |
+| `HTTP_TIMEOUT_SHA256_FETCH_S` (standalone constant) | `constants.py` (HTTP / download) | Timeout for SHA-256 checksum fetch |
+| `FIRECRACKER_GITHUB_RELEASES_API_URL` (standalone constant) | `constants.py` (HTTP / download) | GitHub API endpoint for Firecracker releases |
+| `FIRECRACKER_GITHUB_DOWNLOAD_URL` (standalone constant) | `constants.py` (HTTP / download) | Base URL for Firecracker release assets |
 
 > **Note:** The kernel config lists (`enabled_configs`, `disabled_configs`, `set_val_configs`,
 > `required_settings`) are defined per-kernel in `kernels.yaml`, not as module-level constants.

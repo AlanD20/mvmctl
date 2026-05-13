@@ -5,15 +5,17 @@
 Three-layer architecture with strict import boundaries: **CLI → API → Core**.
 
 ```
-mvmctl/
+src/mvmctl/
 ├── api/              # Public interface + ORCHESTRATION (imports multiple domains)
 ├── core/             # All business logic (isolated domains + shared infrastructure)
-├── cli/              # Frontend (Typer commands)
+├── cli/              # Frontend (Click/Typer commands)
 ├── services/         # Long-running subprocess services
 ├── db/               # SQLite schema, migrations, ORM models
-├── assets/           # Bundled YAML configs
+├── assets/           # Bundled YAML configs and templates
 ├── models/           # Pure @dataclass objects
-└── utils/            # Shared helpers
+├── utils/            # Shared helpers
+├── __pyinstaller/    # PyInstaller hooks for standalone binary builds
+└── py.typed          # PEP 561 marker — declares the package supports strict typing
 ```
 
 **Key Principle:** Domains are **business capabilities**, not CLI commands. A single CLI command (like `mvm vm create`) often orchestrates multiple domains.
@@ -43,7 +45,10 @@ src/mvmctl/
 │   ├── key_operations.py                   # KeyOperation
 │   ├── binary_operations.py                # BinaryOperation
 │   ├── cache_operations.py                 # CacheOperation
-│   ├── init_operations.py                  # InitOperation (init, reset, prune)
+│   ├── config_operations.py                # ConfigOperation
+│   ├── console_operations.py               # ConsoleOperation
+│   ├── init_operations.py                  # InitOperation
+│   ├── logs_operations.py                  # LogOperation
 │   ├── ssh_operations.py                   # SSHOperation
 │   └── inputs/                             # Input/Request/Resolved classes
 │       ├── __init__.py
@@ -85,6 +90,7 @@ src/mvmctl/
 │   │   └── _resolver.py                     # NetworkResolver
 │   ├── image/                               # OS images
 │   │   ├── _controller.py                   # ImageController
+│   │   ├── _provisioner.py                  # ImageProvisioner (image optimization via backends)
 │   │   ├── _service.py                      # ImageService
 │   │   ├── _repository.py                   # ImageRepository
 │   │   └── _resolver.py                     # ImageResolver
@@ -122,16 +128,16 @@ src/mvmctl/
 │   │   ├── _controller.py                   # LogController (stateful — bound to VM entity)
 │   │   └── _service.py                      # LogService (stateless log file operations)
 │   ├── cloudinit/                           # Cloud-init provisioning
+│   │   ├── __init__.py
 │   │   ├── _manager.py                      # CloudInitManager (orchestration state tracker)
 │   │   └── _provisioner.py                  # CloudInitProvisioner
-│   ├── guestfs/                             # Guestfs filesystem provisioning
-│   │   └── (lives in _shared/_guestfs/)     # Cross-domain filesystem operations
 │   ├── volume/                              # Persistent storage volumes
 │   │   ├── _controller.py                   # VolumeController (stateful — per-volume attach/detach)
 │   │   ├── _service.py                      # VolumeService (disk creation, removal, resize, inspect)
 │   │   ├── _repository.py                   # VolumeRepository (database operations)
 │   │   └── _resolver.py                     # VolumeResolver (entity resolution)
 │   ├── ssh/                                 # SSH operations
+│   │   ├── __init__.py
 │   │   └── _service.py                      # SSHService (stateful — stores connection params as instance state)
 │   └── _shared/                           # Shared infrastructure
 │       ├── __init__.py
@@ -140,17 +146,17 @@ src/mvmctl/
 │       ├── _resolver_registry.py            # Lazy resolver registry (prevents circular imports)
 │       ├── _asset_manager.py                # Generic asset management
 │       ├── _parallel.py                     # ParallelExecutor
-│       ├── _guestfs/                        # Guestfs provisioning utilities
+│       ├── _guestfs/                        # Guestfs filesystem provisioning utilities
 │       │   ├── __init__.py
-│       │   ├── _base.py                      # OptimizedGuestfs — low-level guestfs wrapper
+│       │   ├── _base.py                     # OptimizedGuestfs — low-level guestfs wrapper
 │       │   ├── _kernel_detector.py
-│       │   ├── _provisioner.py               # GuestfsProvisioner — all provisioning operations
-│       │   └── _service.py                   # GuestfsService — appliance management
-│       ├── _loopmount/                       # Loop-mount provisioning (mvm-provision binary interface)
+│       │   ├── _provisioner.py              # GuestfsProvisioner — all provisioning operations
+│       │   └── _service.py                  # GuestfsService — appliance management
+│       ├── _loopmount/                      # Loop-mount provisioning (mvm-provision binary interface)
 │       │   ├── __init__.py
 │       │   ├── _manager.py
 │       │   └── _provisioner.py
-│       ├── _provisioner/                     # Provisioner backend abstraction (factory + backends)
+│       ├── _provisioner/                    # Provisioner backend abstraction (factory + backends)
 │       │   ├── __init__.py
 │       │   ├── _backend.py
 │       │   └── _content.py
@@ -160,7 +166,7 @@ src/mvmctl/
 │           ├── _resolver.py
 │           └── _tracker.py
 │
-├── cli/                                     # Thin Typer command definitions
+├── cli/                                     # Thin Click/Typer command definitions
 │   ├── vm.py
 │   ├── network.py
 │   ├── image.py
@@ -175,24 +181,24 @@ src/mvmctl/
 │   ├── logs.py
 │   ├── ssh.py
 │   ├── volume.py
-│   └── ...
+│   └── _completion.py                       # Shell completion helpers (8 functions)
 │
 ├── models/                                  # Pure @dataclass objects
 │   ├── __init__.py                          # Re-exports all model types
 │   ├── binary.py                            # BinaryItem
 │   ├── bulk.py                              # BulkResult, BulkResultItem
-│   ├── cache.py                             # CacheResult, PruneAllResult, CleanResult
+│   ├── cache.py                             # PruneAllResult, CleanResult
 │   ├── cloudinit.py                         # CloudInitMode, CloudInitStatus
-│   ├── firecracker.py                       # FirecrackerConfig
+│   ├── firecracker.py                       # FirecrackerConfig, DriveConfig
 │   ├── host.py                              # HostStateItem, HostStateChangeItem
 │   ├── image.py                             # ImageItem, ImageSpec
-│   ├── kernel.py                            # KernelItem, KernelSpec
+│   ├── kernel.py                            # KernelItem, KernelSpec, KernelPullResult
 │   ├── key.py                               # SSHKeyItem
-│   ├── network.py                           # NetworkItem, NetworkLeaseItem, IPTablesRuleItem
-│   ├── provisioner.py                       # Provisioner operation models
-│   ├── result.py                            # OperationResult, BatchResult, etc.
-│   ├── vm.py                                # VMInstanceItem, VMInspectInfo, ConsoleInfo, ConsoleState
-│   └── volume.py                            # VolumeItem
+│   ├── network.py                           # NetworkItem, NetworkLeaseItem, IPTablesRuleItem, IPTablesChain, IPTablesPort, IPTablesProtocol, IPTablesRuleType, IPTablesTable, IPTablesTarget, IPTablesWildcard
+│   ├── provisioner.py                       # ProvisionerType
+│   ├── result.py                            # OperationResult, BatchResult, ProgressEvent, NeedsInteraction, OperationStatus
+│   ├── vm.py                                # VMInstanceItem, VMInspectInfo, ConsoleInfo, ConsoleState, VMStatus
+│   └── volume.py                            # VolumeItem, VolumeStatus
 │
 ├── services/                                # Long-running subprocess services
 │   ├── console_relay/                       # Console relay service
@@ -201,7 +207,8 @@ src/mvmctl/
 │   │   ├── exceptions.py
 │   │   ├── client.py
 │   │   ├── manager.py
-│   │   └── process.py
+│   │   ├── process.py
+│   │   └── README.md
 │   ├── loopmount/                           # Loop-mount binary (mvm-provision entry point)
 │   │   ├── __init__.py
 │   │   └── process.py                       # Standalone mvm-provision binary entry point
@@ -218,38 +225,58 @@ src/mvmctl/
 │       ├── __init__.py
 │       └── 001_initial_schema.sql
 │
-├── assets/                                  # Bundled YAML configs
+├── assets/                                  # Bundled YAML configs and templates
 │   ├── __init__.py
 │   ├── cloud-init.template.yaml
 │   ├── firecracker.template.json
 │   ├── images.yaml
 │   └── kernels.yaml
 │
-└── utils/                                   # Shared helpers (pure, no domain knowledge)
-    ├── __init__.py
-    ├── _disk.py
-    ├── _io.py
-    ├── _lazy_import.py
-    ├── _system.py
-    ├── _validators.py
-    ├── auditlog.py
-    ├── cli.py
-    ├── common.py
-    ├── crypto.py
-    ├── fs.py
-    ├── http.py
-    ├── network.py
-    ├── operation_utils.py
-    ├── progress.py
-    ├── template.py
-    └── yaml.py
+├── utils/                                   # Shared helpers (pure, no domain knowledge)
+│   ├── __init__.py
+│   ├── _disk.py
+│   ├── _io.py
+│   ├── _lazy_import.py
+│   ├── _system.py
+│   ├── _validators.py
+│   ├── auditlog.py
+│   ├── cli.py
+│   ├── common.py
+│   ├── crypto.py
+│   ├── fs.py
+│   ├── http.py
+│   ├── network.py
+│   ├── operation_utils.py
+│   ├── progress.py
+│   ├── template.py
+│   └── yaml.py
+│
+├── __pyinstaller/                           # PyInstaller hooks for standalone builds
+│   └── hook-mvmctl.py
+│
+└── py.typed                                 # PEP 561 marker — declares the package supports strict typing
 ```
+
+**Note:** `utils/AGENTS.md` documents each util module's purpose and key exported symbols. Read it before adding new helpers to avoid duplication.
+
+Several directories include `AGENTS.md` files that document their structure and conventions for AI-assisted development: `src/mvmctl/` (root), `utils/`, `db/`, `db/migrations/`, `assets/`, `services/`, `services/console_relay/`, and `services/nocloud_server/`.
 
 ## Core Structure — Domain Files
 
 ### Standard Domain Pattern (4 Files)
 
 Each domain follows a consistent pattern with four files representing different concerns:
+
+> **Note:** 7 of the 14 domains break this pattern:
+> - **host** — has no resolver (uses helper instead)
+> - **cache** — service-only (no controller, repository, or resolver)
+> - **config** — has `_constraints.py` instead of a controller
+> - **console** — controller-only (no service, repository, or resolver)
+> - **logs** — has controller + service (no repository or resolver)
+> - **cloudinit** — uses `_manager.py` + `_provisioner.py` instead of the 4-file pattern
+> - **ssh** — service-only (no controller, repository, or resolver)
+>
+> Note: guestfs is not a domain; it lives in `core/_shared/_guestfs/` as shared infrastructure.
 
 ```
 core/{domain}/
@@ -266,7 +293,7 @@ core/{domain}/
 | **Database operations** | `Repository` | ALL data access — get, list, count, upsert, delete. SQL-level ops. | `VMRepository(db).list_by_status(status)` |
 | **Entity resolution** | `Resolver` | Resolve identifiers to domain objects | `VMResolver(repo).resolve_many(["vm1", "vm2"])` |
 
-**Note:** Some domains have additional files (e.g., `vm/_firecracker.py`, `network/_lease_service.py`, `host/_helper.py`) for domain-specific subsystems. The 4-file pattern is the default minimum.
+**Note:** Some domains have additional files (e.g., `vm/_firecracker.py`, `vm/_provisioner.py`, `network/_lease_service.py`, `host/_helper.py`) for domain-specific subsystems. The 4-file pattern is the default minimum.
 
 ### Controller (Stateful)
 
@@ -293,8 +320,8 @@ A Service handles stateless operations — often coordinating multiple Controlle
 ```python
 # core/vm/_service.py
 class VMService:
-    def __init__(self, db: Database) -> None:
-        self._repo = VMRepository(db)
+    def __init__(self, repo: VMRepository) -> None:
+        self._repo = repo
 
     def stop(self, vm: VMInstanceItem, force: bool = False) -> None:
         controller = VMController(entity=vm, repo=self._repo)
@@ -311,7 +338,7 @@ The Repository owns ALL database access for its domain. Single-file, no separate
 ```python
 # core/vm/_repository.py
 class VMRepository:
-    def __init__(self, db: Database) -> None: ...
+    def __init__(self, db: Database | None = None) -> None: ...
 
     def get(self, id: str) -> VMInstanceItem | None: ...
     def get_by_name(self, name: str) -> VMInstanceItem | None: ...
@@ -364,33 +391,40 @@ for a domain (e.g., VMOperation has create, remove, start, stop, etc.).
 # api/vm_operations.py
 class VMOperation:
     @staticmethod
-    def create(inputs: VMCreateInput) -> None:
+    def create(inputs: VMCreateInput) -> OperationResult[list[VMInstanceItem]] | NeedsInteraction:
         """Creates a VM — orchestrates vm, network, image, kernel, binary, cloudinit."""
 
     @staticmethod
-    def remove(inputs: VMInput) -> None:
+    def remove(inputs: VMInput) -> BatchResult[VMInstanceItem]:
         """Removes one or more VMs."""
 
     @staticmethod
-    def list_all() -> list[VMInstanceItem]: ...
+    def list_all(status: VMStatus | list[VMStatus] | None = None) -> list[VMInstanceItem]: ...
 
     @staticmethod
-    def start(inputs: VMInput) -> None: ...
+    def start(inputs: VMInput) -> BatchResult[VMInstanceItem]: ...
 
     @staticmethod
-    def stop(inputs: VMInput) -> None: ...
+    def stop(inputs: VMInput) -> BatchResult[VMInstanceItem]: ...
 
     @staticmethod
-    def reboot(inputs: VMInput) -> None: ...
+    def reboot(inputs: VMInput) -> BatchResult[VMInstanceItem]: ...
 
     @staticmethod
-    def snapshot(inputs: VMInput, mem_out: Path, state_out: Path) -> None: ...
+    def snapshot(inputs: VMInput, mem_out: Path, state_out: Path) -> OperationResult[VMInstanceItem]: ...
 ```
 
 ### Public API Surface
 
 The `api/__init__.py` re-exports ALL public Operation and Input types. CLI code imports
 exclusively from this surface:
+
+Exports include:
+- **Operation classes:** `BinaryOperation`, `CacheOperation`, `ConfigOperation`, `ConsoleOperation`, `HostOperation`, `ImageOperation`, `InitOperation`, `KernelOperation`, `KeyOperation`, `LogOperation`, `NetworkOperation`, `SSHOperation`, `VMOperation`, `VolumeOperation`
+- **Console types:** `ConsoleConnectionInfo`
+- **Init types:** `InitResult`, `InitStepResult`
+- **Input classes:** `BinaryPullInput`, `BinaryInput`, `ConsoleInput`, `ConsoleRequest`, `ImagePullInput`, `ImageImportInput`, `ImageInput`, `KernelPullInput`, `KernelInput`, `KeyCreateInput`, `KeyInput`, `LogInput`, `NetworkCreateInput`, `NetworkInput`, `SSHInput`, `VolumeCreateInput`, `VolumeInput`, `VMCreateInput`, `VMImportInput`, `VMImportRequest`, `VMInput`
+- **VM export/import config models:** `VMExportComputeConfig`, `VMExportImageConfig`, `VMExportKernelConfig`, `VMExportBinaryConfig`, `VMExportNetworkConfig`, `VMExportBootConfig`, `VMExportFirecrackerConfig`, `VMExportCloudInitConfig`, `VMExportConfig`
 
 ```python
 # ✅ CORRECT — CLI imports from mvmctl.api
@@ -401,7 +435,7 @@ VMOperation.create(request)
 ```
 
 ```python
-# ❌ WRONG — deep imports into core or submodules
+# ❌ WRONG — deep imports into api or core submodules
 from mvmctl.api.vm_operations import VMOperation            # ❌
 from mvmctl.core.vm._controller import VMController          # ❌
 ```
@@ -440,7 +474,7 @@ class VMCreateInput:
 
 # 2. VMOperation.create() creates VMCreateRequest, which resolves
 class VMCreateRequest:
-    def __init__(self, *, inputs: VMCreateInput, db: Database | None = None):
+    def __init__(self, *, vm_id: str, vm_dir: Path, inputs: VMCreateInput, db: Database | None = None):
         self._inputs = inputs
         self._db = db or Database()
         # Sub-resolvers created from DB
@@ -471,6 +505,8 @@ class ResolvedVMCreateInput:
     # ... all fields resolved, no Nones for required params
 ```
 
+Note that `VMCreateRequest.__init__` takes `vm_id` and `vm_dir` (pre-computed by `VMCreateContext`) in addition to the standard `inputs` and `db` parameters.
+
 ### VM Operations Flow (Simple — References Existing VM)
 
 ```python
@@ -484,7 +520,7 @@ class VMInput:
 class VMRequest:
     def __init__(self, *, inputs: VMInput, db: Database | None = None):
         self._inputs = inputs
-        self._vm_resolver = VMResolver(VMRepository(db), include=["image", "kernel", "network.leases"])
+        self._vm_resolver = VMResolver(VMRepository(db), include=["image", "kernel", "network.leases", "volumes"])
 
     def resolve(self) -> ResolvedVMInput:
         result = self._vm_resolver.resolve_many(self._inputs.identifiers)
@@ -499,9 +535,9 @@ class ResolvedVMInput:
     force: bool
 ```
 
-### Default Resolution (CLI Layer)
+### Default Resolution (API Layer)
 
-Defaults are resolved at the CLI layer and passed as `None` to `*Input`:
+Defaults are resolved at the API layer (Input → Request pipeline), with the CLI passing `None` for optionals:
 
 ```python
 # cli/vm.py  ✅ CORRECT
@@ -532,10 +568,12 @@ vcpus: Optional[int] = typer.Option(None, "--vcpus", help="Number of vCPUs")
 
 | CLI Command | Domains Involved | Why |
 |-------------|-----------------|-----|
-| `mvm vm create` | vm + network + image + kernel + binary + cloudinit | Creates VM requires network, image, kernel, binary, and cloud-init |
+| `mvm vm create` | vm + network + image + kernel + binary + cloudinit + volume | Creates VM requires network, image, kernel, binary, cloud-init, and optionally volumes |
 | `mvm vm stop` | vm | Single domain operation |
 | `mvm network create` | network | Single domain operation |
 | `mvm host init` | host + network | Host setup requires network initialization |
+| `mvm volume create` | volume | Single domain operation |
+| `mvm vm attach-volume` | vm + volume | Attaching a volume requires vm and volume domains |
 
 ## File Placement Rules
 
@@ -594,6 +632,9 @@ Infrastructure tool placement:
 ├── Is it specific to one domain's concerns? (IP lease for networks)
 │   └── YES → core/{domain}/ (e.g., core/network/_lease_service.py)
 │
+├── Is it a filesystem provisioning backend? (guestfs, loopmount, provisioner abstraction)
+│   └── YES → core/_shared/_guestfs/, core/_shared/_loopmount/, core/_shared/_provisioner/
+│
 └── Is it shared by multiple domains but has domain logic? (iptables rules)
     └── DECISION:
         - Generic iptables → core/_shared/_iptables_tracker/
@@ -609,6 +650,7 @@ from mvmctl.api import VMOperation, VMCreateInput, VMInput
 # ✅ API — orchestrates multiple core domains
 from mvmctl.core.vm import VMController, VMRepository
 from mvmctl.core.network import NetworkService, NetworkRepository
+from mvmctl.core.volume import VolumeController, VolumeRepository
 from mvmctl.core._shared._db import Database
 
 # ✅ Domain — ONLY imports _shared (never other domains)
@@ -618,6 +660,7 @@ from mvmctl.core._shared._iptables_tracker import IPTablesTracker
 # ✅ Domain resolvers — located in each domain
 from mvmctl.core.vm._resolver import VMResolver
 from mvmctl.core.network._resolver import NetworkResolver
+from mvmctl.core.volume._resolver import VolumeResolver
 
 # ❌ FORBIDDEN — Domains never import other domains or orchestration
 # In core/vm/_controller.py:
@@ -631,7 +674,7 @@ from mvmctl.core.image import ImageController            # NEVER
 ```
      api/
     /    \
-   vm    network    image    kernel    binary    key    host ...
+   vm    network    image    kernel    binary    key    host    volume ...
     \    /
    core/_shared/
 ```
@@ -655,7 +698,7 @@ from mvmctl.core.image import ImageController            # NEVER
 | DB-backed resolver | `*Request` | `api/inputs/_*_input.py` | `VMCreateRequest` |
 | Resolved frozen output | `Resolved*Input` | `api/inputs/_*_input.py` | `ResolvedVMCreateInput` |
 | Shared infrastructure | None | `core/_shared/` | `Database`, `IPTablesTracker` |
-| Domain-specific helpers | Descriptive | `core/{domain}/` | `GuestfsProvisioner` |
+| Domain-specific helpers | Descriptive | `core/{domain}/` | `VMProvisioner` |
 
 ### Model Naming — `*Item` Suffix
 
@@ -741,6 +784,11 @@ class VMResolver:
             fk_field="network", resolver="network_lease",
             method="list_by_network_id", relation_name="leases",
         ),
+        "volumes": RelationSpec(
+            fk_field="volume_ids", resolver="volume",
+            method="by_id", relation_name="volumes",
+            batch_method="resolve_by_vm_volume_ids",
+        ),
     }
 
     def __init__(
@@ -761,8 +809,13 @@ class VMResolver:
 
     # ALL methods call self._enrich() before returning
     def by_id(self, vm_id: str) -> VMInstanceItem:
-        vm = self._repo.find_by_prefix(vm_id)[0]
-        return self._enrich([vm])[0]
+        matches = self._repo.find_by_prefix(vm_id)
+        if len(matches) == 0:
+            raise VMNotFoundError(f"VM not found: {vm_id}")
+        if len(matches) > 1:
+            names = ", ".join(vm.name for vm in matches)
+            raise VMNotFoundError(f"ID {vm_id} matches multiple VMs: {names}")
+        return self._enrich(matches)[0]
 
     def resolve_many(self, identifiers: list[str]) -> VMResolveResult:
         vms = self._repo.get_many(identifiers)
@@ -781,16 +834,19 @@ VMResolver
 ├── "image"           → ImageResolver.resolve(image_id)
 ├── "binary"          → BinaryResolver.resolve(binary_id)
 ├── "network"         → NetworkResolver.resolve(network_id)
-└── "network.leases"  → NetworkLeaseResolver.list_by_network_id(network.id)
+├── "network.leases"  → NetworkLeaseResolver.list_by_network_id(network.id)
+└── "volumes"         → VolumeResolver.resolve_by_vm_volume_ids(vm_instance_ids)  # batch_method in RelationSpec
 
 NetworkResolver
 ├── "leases"          → NetworkLeaseResolver.list_by_network_id(network.id)
-└── "iptables_rules"  → IPTablesRuleResolver.list_by_network_id(network.id)
+├── "iptables_rules"  → IPTablesRuleResolver.list_by_network_id(network.id)
+└── "vms"             → VMResolver.resolve_many_by_network_id(network.id)  # VMs on this network
 
 ImageResolver         → (no relations)
 KernelResolver        → (no relations)
 BinaryResolver        → (no relations)
 KeyResolver           → (no relations)
+VolumeResolver        → (no relations)
 NetworkLeaseResolver  → (no relations)
 IPTablesRuleResolver  → (no relations)
 ```
@@ -813,6 +869,7 @@ class VMInstanceItem:
     image: ImageItem | None = None
     binary: BinaryItem | None = None
     network: NetworkItem | None = None
+    volumes: list[VolumeItem] = field(default_factory=list)
 
 # models/network.py
 @dataclass
@@ -824,6 +881,7 @@ class NetworkItem:
     # Resolved relations
     leases: list[NetworkLeaseItem] | None = None
     iptables_rules: list[IPTablesRuleItem] | None = None
+    vms: list[VMInstanceItem] | None = None
 ```
 
 ### Batch Loading — How N+1 is Prevented
@@ -940,6 +998,7 @@ core/vm/
 ├── _controller.py          # VMController (primary lifecycle)
 ├── _service.py             # VMService (bulk operations)
 ├── _firecracker.py         # FirecrackerSpawner (process management)
+├── _provisioner.py         # VMProvisioner (rootfs provisioning)
 ├── _resolver.py            # VMResolver (resolve by name/id/ip/mac)
 ├── _repository.py          # VMRepository (database operations)
 └── __init__.py
@@ -975,7 +1034,7 @@ Create a new domain folder when:
 - **Domain isolation** — Domains only import `core/_shared/`, never other domains
 - **Input → Request → Resolved pattern** — `*Input` (raw) → `*Request(input, db).resolve()` → `Resolved*Input` (frozen)
 - **`resolve()` validates internally** — calls `ensure_validate()` after constructing the resolved result
-- **Defaults only at CLI layer** — `None` in Input means "use DB default" (resolved by Request)
+- **Defaults resolved at API layer** — `None` in Input means "use DB default" (resolved by Request)
 - **Naming** — `Controller` (stateful), `Service` (stateless), `Repository` (DB), `Resolver` (lookup)
 - **Model naming** — `*Item` suffix: `VMInstanceItem`, `NetworkItem`, `ImageItem`, etc.
 - **API surface** — `api/__init__.py` re-exports all Operation and Input types
@@ -983,5 +1042,5 @@ Create a new domain folder when:
 - **SQL-level computation** — Use `COUNT(*)`, `WHERE IN` instead of fetch-all + Python filtering
 - **Flexible queries** — Accept `single_value | list[single_value]` for filtering parameters
 - **Relation enrichment** — `include` on resolver constructor, `RELATIONS` dict with `RelationSpec`, `RelationEnricher` batch-loads with deduplication
-- **Infrastructure placement** — Generic → `_shared/`, domain-specific → `{domain}/`
+- **Infrastructure placement** — Generic → `_shared/`, domain-specific → `{domain}/`, filesystem provisioning → `_shared/_guestfs/`, `_shared/_loopmount/`, `_shared/_provisioner/`
 - **File naming** — `_controller.py`, `_service.py`, `_repository.py`, `_resolver.py`

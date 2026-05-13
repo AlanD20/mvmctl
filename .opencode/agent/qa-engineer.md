@@ -109,7 +109,7 @@ to run QA, you MUST:
 1. **BUILD** — Build the release binary via `python scripts/build_services.py --fast`
 2. **AUDIT** — Comprehensively audit ALL CLI commands, subcommands, and flags against
    `tests/system/` to identify blind spots. Do this FIRST every release cycle.
-3. **EXECUTE** — Run each system test file one by one at `tests/system/`
+3. **EXECUTE** — Run each system test file one by one at `tests/system/<domain>/`
 4. **FIX** — If a test fails, investigate and fix it before moving to the next test
 5. **COVER** — Ensure ALL CLI commands and flags have system test coverage
 6. **REPORT** — Give a clear readiness status at the end
@@ -138,7 +138,7 @@ A test is INCOMPLETE if any of these paths exist but are not taken:
 
 4. **iptables verification** — If the operation modifies network state (network create,
    network rm, network sync), verify iptables rules contain or lack the expected bridge/TAP.
-   Use `subprocess.run(["sudo", "iptables", "-L", ...])`.
+   Use `run_cmd(["iptables", "-L", ...], privileged=True)` from ``mvmctl.utils._system``.
 
 5. **DB-level verification** — If the operation modifies the database (create/remove
    resource, change defaults, update status), open `~/.cache/mvmctl/mvmdb.db` directly
@@ -189,24 +189,46 @@ Focus on edge cases that actually happen in real use:
 
 ## SYSTEM TEST FILE STRUCTURE
 
-### One File Per CLI Domain
+### One Subdirectory Per CLI Domain
 
-Each file tests exactly one CLI domain. You do NOT need to memorize the file listing —
-run `ls tests/system/` to see the current state. The desired architecture is:
+Each domain has its own subdirectory under `tests/system/`. Run `ls tests/system/`
+to see the current state. The current structure is:
 
-- One `test_<domain>.py` file per CLI command group (vm, network, image, kernel, key, bin,
-  host, cache, config, console, logs, ssh, init, volume)
-- `test_full_journeys.py` for cross-domain end-to-end workflows
-- `test_invariants.py` for cross-cutting concerns (JSON consistency, default invariants,
-  cross-resource references)
-- `test_cli_edge_cases.py` for CLI-wide edge cases (help output, flag naming)
-- `test_zzz_destructive.py` for `cache clean --force` (runs LAST in the suite)
+```
+tests/system/
+├── bin/                 # Binary management (test_bin.py)
+├── cache/               # Cache management (test_cache.py)
+├── cli/                 # CLI-wide edge cases (test_cli_edge_cases.py)
+├── config/              # Configuration commands (test_config.py)
+├── console/             # Console access (test_console.py)
+├── full_journeys/       # Cross-domain end-to-end workflows (test_full_journeys.py)
+├── host/                # Host configuration (test_host.py)
+├── images/              # Image management (test_images.py)
+├── init/                # Init wizard (test_init.py)
+├── invariants/          # Cross-cutting concerns (test_invariants.py)
+├── kernel/              # Kernel management (test_kernel.py)
+├── keys/                # SSH key management (test_keys.py)
+├── logs/                # VM log viewing (test_logs.py)
+├── network/             # Network management (test_network.py)
+├── ssh/                 # SSH access (test_ssh.py)
+├── vm/                  # VM lifecycle (test_vm_lifecycle.py, test_vm_snapshot_load.py)
+├── volume/              # Volume management (test_volume.py)
+└── zzz_destructive/     # Destructive cleanup (test_zzz_destructive.py) — runs LAST
+```
+
+Each subdirectory contains:
+- **`test_<domain>.py`** — The main test file
+- **`conftest.py`** — Domain-specific fixtures
+- **`__init__.py`** — Package marker
+
+The root `tests/system/conftest.py` provides session-scoped fixtures (`mvm_binary`,
+`unique_vm_name`, `unique_key_name`, `unique_network_name`, etc.).
 
 ### VM Lifecycle File Split
 
-`test_vm_lifecycle.py` MUST be structured as focused classes, NOT one monolithic class.
-Run `grep "^class " tests/system/test_vm_lifecycle.py` to see the current state.
-The target class structure is:
+`tests/system/vm/test_vm_lifecycle.py` MUST be structured as focused classes,
+NOT one monolithic class. Run `grep "^class " tests/system/vm/test_vm_lifecycle.py`
+to see the current state. The target class structure is:
 
 ```
 TestVMCreate              — all create variants (per image, with flags)
@@ -220,12 +242,25 @@ TestVMSSHIntegration      — SSH into created VMs with key
 TestVMCloudInit           — cloud-init modes, user-data, nocloud-net-port
 ```
 
-Tests for `vm snapshot` and `vm load` go in `test_vm_snapshot_load.py` (extracted from
-`test_full_journeys.py`). Tests for the `logs` CLI command go in `test_logs.py`
-(extracted from `test_console.py`). These extractions follow the same class
-naming convention.
+Tests for `vm snapshot` and `vm load` go in `tests/system/vm/test_vm_snapshot_load.py`.
+Tests for the `logs` CLI command go in `tests/system/logs/test_logs.py`.
+Tests for `console` CLI commands go in `tests/system/console/test_console.py`.
+These follow the same class naming convention.
 
 ### Markers Registry
+
+All test markers are defined in ``pyproject.toml`` under ``[tool.pytest.ini_options] markers``.
+Key markers include:
+
+- ``system`` — real hardware integration test (requires KVM, mvm group)
+- ``serial`` — must run without parallelism (creates real VMs)
+- ``domain_<name>`` — scoped to one CLI domain (e.g., ``domain_vm``, ``domain_image``)
+- ``requires_kvm`` — requires ``/dev/kvm`` access
+- ``requires_network`` — requires network setup
+- ``kernel_build`` — kernel build from source (excluded from default run)
+- ``host_reset`` — host reset/clean with sudo (excluded from default run)
+
+Run ``grep "^markers" pyproject.toml`` to see the full list.
 
 ### Non-Destructive Before Destructive
 
@@ -245,7 +280,7 @@ force-delete, prune) are at the END of the file, after all non-destructive class
 
 ### Naming Convention
 
-- **File:** `test_<domain>.py`
+- **File:** `test_<domain>.py` inside `tests/system/<domain>/`
 - **Class:** `Test<Domain><Operation>` (e.g., `TestImagePull`, `TestNetworkLifecycle`)
 - **Method:** `test_<operation>_<variant>`
 - **Docstring:** Every class and method MUST have a brief docstring
@@ -355,43 +390,49 @@ releasable.
 
 ## SUDO & UV PATH
 
-- **Always use `~/.pyenv/shims/uv`** as the uv path. Never use bare `uv` with sudo.
+- **Always use `uv`** (resolved via PATH). Never use bare `uv` with sudo in an unactivated shell.
 - For one-time setup via uv (requires sudo):
-  `sudo ~/.pyenv/shims/uv run mvm host init`
+  `sudo uv run mvm host init`
 - For one-time setup via built binary:
   `sudo ~/.local/bin/mvm host init`
 - The built binary **MUST** be copied to `~/.local/bin/mvm` — that is the only path
   where `sudo` will work with the binary
-- For running system tests: `sg mvm -c 'uv run pytest tests/system/test_xxx.py -v'`
+- For running system tests: `sg mvm -c 'uv run pytest tests/system/<domain>/test_xxx.py -v'`
 - For running mvm commands: `sg mvm -c 'uv run mvm <command>'`
 - DO NOT use sudo for regular mvm commands (vm create, network create, etc.)
 - Only use sudo when actually needed: `host init`, `host clean`, `host reset`
 - `sudo` is allowed for: `mvm init`, `mvm host init`, `mvm host clean`, `mvm host reset`
+- For verbose or debug output, use the `--verbose` or `--debug` CLI flags instead of `MVM_LOG_LEVEL=DEBUG`:
+  ```bash
+  sg mvm -c 'uv run mvm --debug vm create --name test-vm'
+  sg mvm -c 'uv run mvm --verbose vm ls'
+  ```
+  The `--debug` flag sets log level to DEBUG; `--verbose` sets it to INFO. Both are available on every command via the root `mvm` group.
 
 ## EXECUTION ORDER
 
 Run tests in dependency order to surface failures early:
 
 **Phase 1 — No KVM, No Network (fast):**
-1. `-m domain_bin` — binary management
-2. `-m domain_config` — config operations
-3. `-m domain_key` — SSH key management
-4. `-m domain_init` — init wizard
-5. `-m domain_host` — host status checks, host clean/reset safety
-6. `-m domain_kernel` — kernel list/inspect/remove
+1. `tests/system/bin/test_bin.py` — binary management
+2. `tests/system/config/test_config.py` — config operations
+3. `tests/system/keys/test_keys.py` — SSH key management
+4. `tests/system/init/test_init.py` — init wizard
+5. `tests/system/host/test_host.py` — host status checks, host clean/reset safety
+6. `tests/system/kernel/test_kernel.py` — kernel list/inspect/remove
 
 **Phase 2 — Network-dependent (needs real bridges):**
-7. `-m domain_network` — network CRUD
+7. `tests/system/network/test_network.py` — network CRUD
 
 **Phase 3 — KVM-dependent (needs real VMs):**
-8. `-m domain_image` — image pull/list/inspect
-9. `test_console.py` — console state/kill
-10. `test_logs.py` — log streaming
-11. `test_ssh.py` — SSH into running VM
-12. `test_vm_lifecycle.py` — full lifecycle
-13. `test_vm_snapshot_load.py` — snapshot/load
-14. `test_full_journeys.py` — end-to-end, concurrency, stress
-15. `test_cli_edge_cases.py` — CLI-wide edge cases
+8. `tests/system/images/test_images.py` — image pull/list/inspect
+9. `tests/system/console/test_console.py` — console state/kill
+10. `tests/system/logs/test_logs.py` — log streaming
+11. `tests/system/ssh/test_ssh.py` — SSH into running VM
+12. `tests/system/vm/test_vm_lifecycle.py` — full lifecycle
+13. `tests/system/vm/test_vm_snapshot_load.py` — snapshot/load
+14. `tests/system/full_journeys/test_full_journeys.py` — end-to-end, concurrency, stress
+15. `tests/system/cli/test_cli_edge_cases.py` — CLI-wide edge cases
 
 For each file: run, fix failures, re-run, move on only when ALL tests pass.
 
@@ -401,7 +442,7 @@ Always run with `MVM_ASSET_MIRROR` to avoid re-downloading on every run:
 
 ```bash
 export MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror
-MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror sg mvm -c 'uv run pytest tests/system/test_xxx.py -v'
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror sg mvm -c 'uv run pytest tests/system/<domain>/test_xxx.py -v'
 ```
 
 Seeding the mirror (one-time):
@@ -411,6 +452,17 @@ MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm image pull alpine-3.21
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm image pull ubuntu-24.04-minimal
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm bin pull 1.15.1 --set-default
 ```
+
+Or via Taskfile: `task sys-setup-seed`
+
+### Performance
+
+| Asset | First run (HTTP) | Subsequent (mirror) |
+|-------|-----------------|-------------------|
+| Firecracker kernel (43 MB) | ~30-60s | **< 1s** |
+| Alpine image (203 MB) | ~2-5 min | **~1.5s** |
+| Ubuntu 24.04 (220 MB) | ~5-10 min | **~1s download + ~40s processing** |
+| Firecracker binary (7.3 MB) | ~10-20s | **< 1s** |
 
 ## CHANGE CLASSIFICATION: SIMPLE VS COMPLEX
 
@@ -464,7 +516,7 @@ After building, run system tests against the binary:
 
 ```bash
 cp dist/mvm ~/.local/bin/mvm
-MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror sg mvm -c 'pytest tests/system/test_xxx.py -v'
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror sg mvm -c 'pytest tests/system/<domain>/test_xxx.py -v'
 ```
 
 The built binary is self-contained — it does NOT need `uv run` or Python source.
@@ -506,8 +558,8 @@ Before reporting "release ready", ALL of these must pass:
 ## RELEASE READINESS REPORT
 
 ### Tests Executed: N/N ✅
-- test_bin.py: ✅ (X tests, 0 failed)
-- test_config.py: ✅ (X tests, 0 failed)
+- tests/system/bin/test_bin.py: ✅ (X tests, 0 failed)
+- tests/system/config/test_config.py: ✅ (X tests, 0 failed)
 - ...
 
 ### Coverage Gaps Addressed: X/Y

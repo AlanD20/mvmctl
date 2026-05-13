@@ -1,5 +1,28 @@
 # Snapshot-Based Instant VM Cloning & Next-Level Optimizations
 
+> ## Status: ❌ NOT IMPLEMENTED (Design Document Only)
+>
+> None of the phases described here have been implemented. The snapshot API exists in `FirecrackerSpawner`/`VMController` (create_snapshot, load_snapshot), but no snapshot domain, CLI commands, pool manager, or CoW rootfs backend exists.
+>
+> | Section | Status |
+> |---------|--------|
+> | Snapshot Domain (model, repo, CLI) | ❌ |
+> | vm create --snapshot path | ❌ |
+> | VM Hot-Standby Pool | ❌ |
+> | Overlayfs / CoW Rootfs | ❌ |
+> | All phases (1-4) | ❌ |
+>
+> **What DOES exist (building blocks):**
+> - `FirecrackerSpawner.create_snapshot()` / `load_snapshot()` ✅
+> - `VMController.snapshot()` / `load_snapshot()` ✅
+> - `VMStatus.PAUSED` in models ✅
+> - `--reflink=auto` for CoW on btrfs/XFS ✅
+> - `ParallelExecutor` for batch operations ✅
+>
+> **Last verified:** 2026-05-13
+
+---
+
 **Phase:** Multi-phase — spans 3-4 milestones  
 **Complexity:** Very High  
 **Depends on:** Host kernel config (huge pages, cgroup v2), Firecracker v1.12+
@@ -20,7 +43,7 @@
 
 ---
 
-## 1. Snapshot-Based VM Cloning (The Big One)
+## 1. Snapshot-Based VM Cloning (The Big One) ❌ NOT IMPLEMENTED
 
 ### 1.1 How Firecracker Snapshots Work
 
@@ -116,7 +139,7 @@ When using 2MB huge pages, snapshot restore **requires** UFFD:
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-### 1.2 Snapshot Domain
+### 1.2 Snapshot Domain ❌ NOT IMPLEMENTED
 
 A new domain `snapshot` with full CRUD lifecycle.
 
@@ -142,21 +165,7 @@ class SnapshotItem:
     created_at: str                 # ISO timestamp
 ```
 
-#### Disk Layout
-
-```
-~/.cache/mvmctl/snapshots/
-├── <snapshot-name>/
-│   ├── vm.mem                ← Raw guest RAM dump
-│   ├── vm.vmstate            ← Serde bitcode VM state
-│   ├── rootfs.ext4           ← Frozen root block device
-│   ├── firecracker.json      ← Original Firecracker config
-│   └── metadata.json         ← JSON metadata
-└── <another-snapshot>/
-    └── ...
-```
-
-#### CLI Commands
+#### CLI Commands ❌ NOT IMPLEMENTED
 
 ```
 # Create a snapshot from a running VM
@@ -172,287 +181,15 @@ mvm snapshot get <name> [--json]
 mvm snapshot rm <name> [--force]
 ```
 
-#### API Operations
+### 1.3 `vm create --snapshot` ❌ NOT IMPLEMENTED
 
-```python
-class SnapshotOperation:
-    @staticmethod
-    def create(inputs: SnapshotCreateInput) -> OperationResult[SnapshotItem]:
-        """Create snapshot from a running VM."""
+### 1.4 Network Uniqueness for Clones ❌ NOT IMPLEMENTED
 
-    @staticmethod
-    def get(inputs: SnapshotInput) -> SnapshotItem:
-        """Get snapshot details."""
-
-    @staticmethod
-    def list(inputs: SnapshotInput) -> list[SnapshotItem]:
-        """List all snapshots."""
-
-    @staticmethod
-    def remove(inputs: SnapshotInput) -> BatchResult[SnapshotItem]:
-        """Remove one or more snapshots (free disk space)."""
-```
-
-### 1.3 `vm create --snapshot`
-
-Instead of `--image` / `--kernel`, a new VM can be created from a snapshot:
-
-```
-mvm vm create \
-  --snapshot my-snapshot \          # REQUIRED (instead of --image + --kernel)
-  --name my-clone \                 # REQUIRED: New VM name
-  --ssh-key my-key \                # Inject SSH public key post-resume
-  --hostname my-clone-host \        # Set hostname via vsock agent
-  --network default \               # Which network bridge to attach to
-  --tap auto \                      # Auto-allocate TAP device
-  --ip auto \                       # Auto-allocate IP from pool
-  --disk-size 5G \                  # Grow rootfs (CoW layer only)
-  --user-data ./config.yaml \       # Re-apply cloud-init user-data
-  --diff \                          # Create diff snapshot from current state
-  --count 5 \                       # Batch: create 5 clones from same snapshot
-  --atomic \                        # All-or-nothing batch creation
-```
-
-**What changes in the VM creation pipeline:**
-
-The current `VMCreateContext.execute()` has these phases:
-```
-clone_image → provisioner → firecracker_spawn → console_setup
-```
-
-The snapshot path replaces the first four phases:
-```
-coow_rootfs → snapshot_load + network_overrides → post_resume_agent → console_setup
-```
-
-#### New `VMCreateContext` Path
-
-```python
-class VMCreateContext:
-    # ... existing fields ...
-
-    def execute_snapshot_clone(self) -> None:
-        """Clone from snapshot instead of fresh boot."""
-
-        # 1. Pre-allocate network resources
-        tap = self._net_pool.acquire()
-        self.tap_name = tap.name
-        self.guest_mac = tap.mac
-        self.guest_ip = tap.ip
-
-        # 2. Create CoW rootfs from snapshot's frozen rootfs
-        self.rootfs_path = CoWUtils.create_cow_view(
-            base_path=self.resolved.snapshot.rootfs_path,
-            cow_dir=self.vm_dir / "cow",
-        )
-        self.mark_created("rootfs")
-
-        # 3. Pre-allocate socket paths, cgroup, jailer dir
-        FsUtils.secure_mkdir(self.vm_dir, self.resolved.name)
-        self.mark_created("vm_dir")
-
-        # 4. Start Firecracker in snapshot mode (no --config-file)
-        fc_config = self.build_firecracker_config(snapshot_mode=True)
-        firecracker_spawner = FirecrackerSpawner(fc_config)
-        self.set_firecracker_manager(firecracker_spawner)
-        firecracker_spawner.write_logger_config_only()
-        self.mark_created("firecracker")
-
-        # 5. Load snapshot with network_overrides
-        self.fc_manager.load_snapshot(
-            mem_path=self.resolved.snapshot.mem_file_path,
-            snapshot_path=self.resolved.snapshot.vmstate_file_path,
-            resume=False,
-            network_overrides=[
-                {"iface_id": "eth0", "host_dev_name": self.tap_name}
-            ],
-        )
-
-        # 6. Resume
-        self.fc_manager.resume_vm()
-
-        # 7. Post-resume: agent-based configuration
-        if self.resolved.ssh_keys:
-            self._post_resume_vsock_configure()
-```
-
-### 1.4 Network Uniqueness for Clones
-
-#### The Problem
-
-When you clone a snapshot, the frozen guest has:
-- A fixed MAC address (from the original `network-interfaces` config)
-- A fixed IP address (from DHCP lease or static config inside the guest)
-- A fixed hostname
-
-10 clones from the same snapshot = 10 VMs fighting for the same IP/MAC/hostname.
-
-#### The Solution Stack
-
-**Step 1: `network_overrides` (Firecracker v1.12.0+)**
-
-The snapshot load API accepts remapping of host TAP devices:
-
-```json
-PUT /snapshot/load
-{
-    "snapshot_path": "./vm.vmstate",
-    "mem_backend": {
-        "backend_path": "./vm.mem",
-        "backend_type": "File"
-    },
-    "network_overrides": [
-        {"iface_id": "eth0", "host_dev_name": "vmtap-clone-42"}
-    ]
-}
-```
-
-This makes the guest's `eth0` point to `vmtap-clone-42` instead of the original TAP. The guest still has the same MAC/IP inside — but the host side is different.
-
-**Step 2: Network Namespace per Clone**
-
-Each clone's Firecracker process runs in its own netns:
-
-```bash
-ip netns add clone-42
-ip link add veth-host-42 type veth peer name veth-clone-42
-ip link set veth-clone-42 netns clone-42
-ip link set veth-host-42 master br0    # Attach to bridge
-ip link set veth-host-42 up
-# Inside netns:
-ip netns exec clone-42 ip tuntap add name tap0 mode tap
-ip netns exec clone-42 ip link set tap0 master bridge0
-ip netns exec clone-42 ip link set tap0 up
-# Start Firecracker in this netns
-ip netns exec clone-42 firecracker --api-sock /tmp/fc.sock ...
-```
-
-The `veth` pair gives each clone:
-- Unique host-side interface on the bridge
-- Unique MAC (auto-generated by `veth`) for host-side routing
-- Same guest-side TAP name (`tap0`) — doesn't conflict because it's in a different netns
-
-**Step 3: iptables NAT for Unique External IPs**
-
-```bash
-# Outbound (all clones share egress IP):
-iptables -t nat -A POSTROUTING -s 10.0.0.0/24 -o eth0 -j MASQUERADE
-
-# Inbound (route unique external ports/IPs to specific clones):
-iptables -t nat -A PREROUTING -d <external-ip-1> -j DNAT --to-destination 10.0.0.2
-iptables -t nat -A PREROUTING -d <external-ip-2> -j DNAT --to-destination 10.0.0.3
-```
-
-**Step 4: Guest-Side Reconfiguration (vsock Agent)**
-
-After resume, a lightweight agent inside the guest (listening on vsock) performs:
-
-```bash
-# Called by vsock agent after resume:
-ip addr del 10.0.0.2/24 dev eth0
-ip addr add 10.0.0.42/24 dev eth0
-ip route add default via 10.0.0.1
-hostnamectl set-hostname clone-42
-ssh-keygen -A
-rm -f /var/lib/systemd/random-seed
-systemctl restart sshd
-```
-
-#### Simpler Alternative: Same-IP Workers
-
-If clones don't need unique inbound connectivity (e.g., they're all workers pulling from a queue):
-
-1. All clones share guest IP `10.0.0.2`
-2. Host uses `MASQUERADE` for outbound (all clones share host IP)
-3. No guest reconfiguration needed for networking
-4. Only need `network_overrides` for correct TAP routing
-
-This is the **recommended starting point** — much simpler and covers most use cases.
-
-### 1.5 Memory Determinism & Security
-
-#### What's Duplicated vs What's Unique
-
-When 10 clones resume from the same snapshot:
-
-| Component | Identical? | Mechanism |
-|-----------|-----------|-----------|
-| **Kernel memory** | ✅ Identical (initially) | MAP_PRIVATE of same mem_file |
-| **Kernel CSPRNG** | ❌ **Reseeded per clone** | VMGenID device (Firecracker 1.8+, Linux 5.18+) writes new 16-byte random ID → kernel reseeds `drivers/char/random.c` |
-| **`/dev/urandom`** | ❌ **Different per clone** | Reseeded via VMGenID |
-| **Userspace memory** | ✅ **Identical** | MAP_PRIVATE — until COW page faults |
-| **SSH host keys** | ✅ **Identical** | Generated at first boot, frozen in snapshot |
-| **`/var/lib/systemd/random-seed`** | ✅ **Identical** | File on disk, frozen |
-| **TLS session keys in memory** | ✅ **Identical** | In userspace heap at snapshot time |
-| **Application secrets in RAM** | ✅ **Identical** | Must be handled by application |
-| **OpenSSL RNG state** | ✅ **Same seed (initially)** | Userspace PRNG, not touched by VMGenID |
-| **File descriptors** | ❌ **Different** | New FDs per clone (TAP, socket) |
-| **RDRAND/RDSEED** | ❌ **Different** | Hardware random per CPU |
-
-#### The Critical Problem: SSH Host Keys
-
-Every clone from the same snapshot has **identical SSH host keys**. This allows:
-- MitM attacks between clones (host key collision)
-- A compromise of one clone reveals the host key for all others
-
-**Solution — Golden Snapshot Preparation:**
-
-```bash
-# Run INSIDE the VM BEFORE taking the snapshot:
-rm -f /etc/ssh/ssh_host_*
-rm -f /var/lib/systemd/random-seed
-rm -f /var/lib/sss/db/*
-rm -f /etc/machine-id
-rm -f /var/lib/dbus/machine-id
-# Clear bash history
-> ~/.bash_history
-> /root/.bash_history
-# Clear temp files
-rm -rf /tmp/*
-# Zero out unused disk space for better sparse/diff snapshots
-dd if=/dev/zero of=/zerofile bs=1M; rm -f /zerofile
-
-# Then take the snapshot. On each clone's first boot after resume:
-# (via vsock agent or init script)
-ssh-keygen -A
-systemd-machine-id-setup
-echo "clone-42" > /etc/hostname
-```
-
-#### VMGenID — How It Works
-
-Firecracker implements the **Virtual Machine Generation Identifier** device (since v1.8 x86_64, v1.9 ARM):
-
-1. On snapshot load, Firecracker generates a **new cryptographically random 16-byte value**
-2. Writes it to the VMGenID device MMIO region
-3. **Injects an interrupt** to the guest
-4. Linux kernel (5.18+) handles the interrupt in `drivers/char/random.c`:
-   - Reads the new VMGenID value
-   - Immediately forces a **CSPRNG reseed**
-   - The reseed is mixed into `input_pool` and `crng`
-5. After reseed: `getrandom()`, `/dev/urandom`, `/dev/random` all produce **unique output per clone**
-
-**However**, VMGenID only reseeds the **kernel's** CSPRNG. Userspace PRNG state (Python's `random`, OpenSSL, libsodium, etc.) is NOT automatically reseeded unless they call `getrandom()`.
-
-#### Secure Usage Patterns (per Firecracker Docs)
-
-| Pattern | Description | Secure? |
-|---------|-------------|---------|
-| **Example 1** | Create snapshot → **terminate original** → resume exactly one clone | ✅ **Yes** — no duplication possible |
-| **Example 2** | Create snapshot → original continues running → ALSO resume a clone | ❌ **No** — two instances sharing kernel/device state |
-| **Example 3** | Create snapshot → **resume 10 clones** from same files | ❌ **No** — duplicate SSH keys, TLS state, PRNG |
-| **mvmctl clone** | Create snapshot → resume multiple clones + post-resume agent cleans up unique state | **Mitigated** — needs careful agent implementation |
-
-The mvmctl clone pattern (Example 3 + mitigation) is acceptable for development/testing. For production, the post-resume agent MUST:
-1. Regenerate SSH host keys
-2. Reset `/var/lib/systemd/random-seed`
-3. Set unique hostname
-4. Call `spsystemctl restart sshd`
-5. Reset any application-level secrets
+### 1.5 Memory Determinism & Security ❌ NOT IMPLEMENTED
 
 ---
 
-## 2. VM Hot-Standby Pool
+## 2. VM Hot-Standby Pool ❌ NOT IMPLEMENTED
 
 ### What It Is
 
@@ -555,23 +292,15 @@ class VMHotStandbyPool:
 ### Sizing Guidelines
 
 | Pool Size | Memory Usage (1GB RAM VMs) | Use Case |
-|-----------|---------------------------|----------|
+|---|---|---|
 | 3 | 3 GB | Development / light load |
 | 10 | 10 GB | Production (moderate) |
 | 50 | 50 GB | High density (needs ballooning) |
 | 100+ | 100+ GB | Requires memory overcommit + balloon |
 
-### Fly.io Pattern
-
-Fly.io separates "create" from "start":
-- **Create** (slow): Image pull, host selection, DB persistence, resource allocation. User waits once.
-- **Start** (fast): Just a message to the host to resume a pre-allocated machine. ~300ms cross-continent, ~10ms same-region.
-
-The mvmctl pool replicates this: create happens once (snapshot taken, pool filled), start is instant (resume from pool).
-
 ---
 
-## 3. Overlayfs / CoW Rootfs
+## 3. Overlayfs / CoW Rootfs ❌ NOT IMPLEMENTED
 
 ### The Problem
 
@@ -638,59 +367,39 @@ mount -t overlay overlay -o lowerdir=/base-ro,upperdir=/scratch/upper,workdir=/s
 ### Estimated Impact
 
 | Approach | Clone Time | Disk Usage | Complexity |
-|----------|-----------|------------|------------|
-| Current (reflink tmpfs) | 100-500ms | Full copy per VM | ✅ None |
-| Btrfs snapshots | **~1ms** | CoW, shared base | ⚠️ Needs btrfs |
-| Device-mapper | **~1ms** | CoW, small COW file | ⚠️ More complex setup |
-| OverlayFS | **~1ms** | CoW, shared base | ⚠️ Needs guest changes |
+|---|---|---|---|
+| Current (reflink tmpfs) ✅ | 100-500ms | Full copy per VM | ✅ None |
+| Btrfs snapshots ❌ | **~1ms** | CoW, shared base | ⚠️ Needs btrfs |
+| Device-mapper ❌ | **~1ms** | CoW, small COW file | ⚠️ More complex setup |
+| OverlayFS ❌ | **~1ms** | CoW, shared base | ⚠️ Needs guest changes |
 
 **Recommendation:** Start with **device-mapper** (no filesystem requirement, proven by Fly.io). Fall back to reflink if device-mapper is unavailable.
 
 ---
 
-## 4. Implementation Roadmap
+## 4. Implementation Roadmap — ALL PHASES ❌ NOT IMPLEMENTED
 
-### Phase 1: Foundation (Week 1)
+### Phase 1: Foundation (Week 1) ❌
 
-| Item | Effort | Depends On |
-|------|--------|------------|
-| Add `--python-flag=no_warnings` to build | 1 hour | Nothing |
-| Huge pages: add to `FirecrackerConfig` + host docs | 1 day | Nothing |
-| cgroup v2 + `kvm.nx_huge_pages=never` docs | 0.5 day | Nothing |
-| Kernel boot args: add safe params (`no_timer_check`, `audit=0`, etc.) | 1 hour | Nothing |
+| Item | Effort | Depends On | Status |
+|---|---|---|---|
+| Add `--python-flag=no_warnings` to build | 1 hour | Nothing | ❌ |
+| Huge pages: add to `FirecrackerConfig` + host docs | 1 day | Nothing | ❌ |
+| cgroup v2 + `kvm.nx_huge_pages=never` docs | 0.5 day | Nothing | ❌ |
+| Kernel boot args: add safe params | 1 hour | Nothing | ⚠️ Partial (basic args exist) |
 
-### Phase 2: Snapshot Domain (Weeks 2-3)
+### Phase 2: Snapshot Domain (Weeks 2-3) ❌
 
-| Item | Effort | Depends On |
-|------|--------|------------|
-| `SnapshotItem` model + `SnapshotRepository` | 1 day | Nothing |
-| `snapshot create` (pause + snapshot API + rootfs copy) | 3 days | Firecracker snapshot API (✅ exists) |
-| `snapshot list / get / rm` | 1 day | SnapshotRepository |
-| snapshot CLI commands | 1 day | SnapshotOperation |
-| Snapshot metadata + disk layout | 1 day | Nothing |
-| **Total** | **~1 week** | |
+| Item | Effort | Status |
+|---|---|---|
+| `SnapshotItem` model + `SnapshotRepository` | 1 day | ❌ |
+| `snapshot create` (pause + snapshot API + rootfs copy) | 3 days | ❌ (API methods exist, but no domain) |
+| `snapshot list / get / rm` | 1 day | ❌ |
+| snapshot CLI commands | 1 day | ❌ |
 
-### Phase 3: Clone from Snapshot (Weeks 3-5)
+### Phase 3: Clone from Snapshot (Weeks 3-5) ❌
 
-| Item | Effort | Depends On |
-|------|--------|------------|
-| CoW rootfs backend (device-mapper) | 3 days | Nothing |
-| `vm create --snapshot` path in `VMCreateContext` | 3 days | Snapshot domain, CoW rootfs |
-| `network_overrides` support in FirecrackerSpawner | 1 day | Firecracker v1.12+ |
-| Pre-resource pool (TAP/IP/MAC) | 2 days | Nothing |
-| vsock agent for post-resume config | 5 days | vsock support in VM images |
-| **Total** | **~2 weeks** | |
-
-### Phase 4: Hot-Standby Pool (Weeks 5-7)
-
-| Item | Effort | Depends On |
-|------|--------|------------|
-| `VMHotStandbyPool` class | 3 days | Snapshot cloning (Phase 3) |
-| Background replenisher | 2 days | VMHotStandbyPool |
-| `mvm-d` daemon (persistent mode) | 5 days | VMHotStandbyPool |
-| CLI integration (CLI → daemon UDS) | 3 days | mvm-d |
-| Resource pool lifecycle (create/release) | 2 days | Everything above |
-| **Total** | **~2 weeks** | |
+### Phase 4: Hot-Standby Pool (Weeks 5-7) ❌
 
 ### Expected Performance Trajectory
 
@@ -701,16 +410,4 @@ Phase 1 (kernel tuning):    2-7s       (-10-20%)
 Phase 2 (snapshot clone):   50-200ms   (-95% from cold boot)
 Phase 3 (CoW rootfs):       50-150ms   (-additional disk time)
 Phase 4 (hot pool):         10-50ms    (-pop from pool)
-```
-
-The hot pool path:
-```
-acquire() → resume (3-8ms) → configure (5-20ms) → return
-                                  ≈ 10-50ms total
-```
-
-Golden VM build (one-time):
-```
-boot (3-10s) → snapshot create (1-2s for mem dump) → store
-                                  ≈ 5-15s total (paid once)
 ```

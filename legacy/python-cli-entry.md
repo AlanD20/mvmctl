@@ -1,3 +1,9 @@
+> **⚠️ ARCHIVED — Historical document from an earlier phase.**
+> The project has evolved significantly. See [CONTEXT.md](../CONTEXT.md) for current domain language,
+> [docs/PROJECT_ARCHITECTURE.md](../docs/PROJECT_ARCHITECTURE.md) for the current architecture,
+> and [docs/API.md](../docs/API.md) for the current API reference.
+> This file is kept for historical reference only.
+
 # Agent Instructions — Firecracker Manager CLI
 
 ---
@@ -90,7 +96,7 @@ This applies especially when:
 > environment variables, file paths, or API functions **must be reflected immediately in
 > all relevant documentation files.**
 >
-> Documentation that does not match the code is treated as a bug, not a cosmetic issue.
+> **Documentation that does not match the code is treated as a bug, not a cosmetic issue.**
 
 After any such change, update every affected file from this list before marking the
 requirement complete:

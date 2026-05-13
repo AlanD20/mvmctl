@@ -50,9 +50,9 @@ Five statuses, distinguished by whether the consumer should be happy, informed, 
 
 ### Dataclass Definitions
 
-```python
-# src/mvmctl/models/result.py
+Located at `src/mvmctl/models/result.py`:
 
+```python
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -168,7 +168,7 @@ class BatchResult(Generic[T]):
 The `code` field MUST follow the convention `<domain>.<verb>[.<reason>]` and doubles as the audit log event name:
 
 ```python
-# API layer (vm_operations.py)
+# API layer (src/mvmctl/api/vm_operations.py)
 result = OperationResult(
     status="success",
     code="vm.created",         # ← IS the audit event name
@@ -238,7 +238,7 @@ class ProgressEvent:
 The direct pattern — no helper function needed:
 
 ```python
-# api/vm_operations.py
+# src/mvmctl/api/vm_operations.py
 
 class VMCreateContext:
     def execute(self) -> None:
@@ -397,24 +397,25 @@ while True:
 
 ## Implementation Status
 
-All domains are converted. The following table shows which patterns each API operation uses:
+All domains are converted. The following table shows which patterns each API operation uses.
+All files are under `src/mvmctl/api/`:
 
 | Domain | File | Mutation methods return | Progress via |
 |--------|------|------------------------|--------------|
-| **Host** | `api/host_operations.py` | `OperationResult` / `NeedsInteraction` | N/A |
-| **VM** | `api/vm_operations.py` | `OperationResult` / `BatchResult` / `NeedsInteraction` | `on_progress` (create only) |
-| **Volume** | `api/volume_operations.py` | `OperationResult` / `BatchResult` | N/A |
-| **Network** | `api/network_operations.py` | `OperationResult` / `NeedsInteraction` | N/A |
-| **Image** | `api/image_operations.py` | `OperationResult` / `BatchResult` / `NeedsInteraction` | `on_progress` (fetch, import, warm) |
-| **Kernel** | `api/kernel_operations.py` | `OperationResult` / `BatchResult` / `NeedsInteraction` | `on_progress` (fetch only) |
-| **Binary** | `api/binary_operations.py` | `OperationResult` / `BatchResult` | `ASCIIProgressBar` (not `on_progress`) |
-| **Key** | `api/key_operations.py` | `OperationResult` / `BatchResult` | N/A |
-| **Cache** | `api/cache_operations.py` | `OperationResult` | `on_progress` (init only) |
-| **Config** | `api/config_operations.py` | `OperationResult` | N/A |
-| **SSH** | `api/ssh_operations.py` | `OperationResult` | N/A |
-| **Console** | `api/console_operations.py` | `OperationResult` | N/A |
-| **Logs** | `api/logs_operations.py` | `OperationResult` | N/A |
-| **Init** | `api/init_operations.py` | `InitResult` (wizard-specific) with `NeedsInteraction` | `on_progress` threaded to cache |
+| **Host** | `host_operations.py` | `OperationResult` / `NeedsInteraction` | N/A |
+| **VM** | `vm_operations.py` | `OperationResult` / `BatchResult` / `NeedsInteraction` | `on_progress` (create only) |
+| **Volume** | `volume_operations.py` | `OperationResult` / `BatchResult` | N/A |
+| **Network** | `network_operations.py` | `OperationResult` / `NeedsInteraction` | N/A |
+| **Image** | `image_operations.py` | `OperationResult` / `BatchResult` / `NeedsInteraction` | `on_progress` (fetch, import, warm) |
+| **Kernel** | `kernel_operations.py` | `OperationResult` / `BatchResult` / `NeedsInteraction` | `on_progress` (fetch only) |
+| **Binary** | `binary_operations.py` | `OperationResult` / `BatchResult` | `ASCIIProgressBar` (not `on_progress`) |
+| **Key** | `key_operations.py` | `OperationResult` / `BatchResult` | N/A |
+| **Cache** | `cache_operations.py` | `OperationResult` | `on_progress` (init only) |
+| **Config** | `config_operations.py` | `OperationResult` | N/A |
+| **SSH** | `ssh_operations.py` | `OperationResult` | N/A |
+| **Console** | `console_operations.py` | `OperationResult` | N/A |
+| **Logs** | `logs_operations.py` | `OperationResult` | N/A |
+| **Init** | `init_operations.py` | `InitResult` (wizard-specific) with `NeedsInteraction` | `on_progress` threaded to cache |
 
 ---
 
@@ -493,8 +494,11 @@ Every `code` value currently used in the codebase:
 | Code | Status | Domain | Meaning |
 |------|--------|--------|---------|
 | `vm.created` | success | VM | VM was created successfully |
-| `vm.limit_reached` | error | VM | Max VM count reached |
+| `vm.name_collision` | error | VM | VM name collision during batch create |
+| `vm.atomic_failed` | failure | VM | Atomic batch create failed |
 | `vm.create_failure` | failure | VM | VM creation failed unexpectedly |
+| `vm.created_batch` | success | VM | Batch VMs created |
+| `vm.not_found` | error | VM | VM not found |
 | `vm.removed` | success | VM | VM was removed |
 | `vm.remove_failed` | error | VM | VM removal failed |
 | `vm.started` | success | VM | VM was started |
@@ -513,6 +517,8 @@ Every `code` value currently used in the codebase:
 | `vm.load_snapshot_failed` | error | VM | VM snapshot load failed |
 | `vm.imported` | success | VM | VM was imported from config |
 | `vm.import_failed` | error | VM | VM import failed |
+| `vm.volume_attached` | success | VM | Volume attached to VM |
+| `vm.volume_detached` | success | VM | Volume detached from VM |
 | `host.init.complete` | success | Host | Host initialization complete |
 | `host.init.noop` | skipped | Host | Host already configured |
 | `host.kvm.missing` | error | Host | KVM device not found |
@@ -520,32 +526,41 @@ Every `code` value currently used in the codebase:
 | `host.iptables.conflict` | error | Host | Mixed iptables backend |
 | `host.binaries.missing` | error | Host | Required system binaries missing |
 | `host.cleaned` | success | Host | Host networking cleaned |
+| `host.clean_failed` | failure | Host | Host networking clean failed |
 | `host.reset` | success | Host | Host reset to pre-init state |
+| `host.reset_failed` | failure | Host | Host reset failed |
 | `privilege.sudo_required` | needs_input | Host | Root privileges required |
 | `network.created` | success | Network | Network created successfully |
 | `network.create_failed` | error | Network | Network creation failed |
 | `network.default_set` | success | Network | Default network changed |
 | `network.default_set_failed` | error | Network | Failed to set default network |
 | `network.default_created` | success | Network | Default network created |
+| `network.default_created_failed` | error | Network | Default network creation failed |
 | `network.removed` | success | Network | Network removed |
 | `network.remove_failed` | error | Network | Network removal failed |
 | `network.in_use` | error | Network | Network has attached VMs |
 | `network.synced` | success | Network | Network rules synced |
+| `network.sync_failed` | error | Network | Network sync failed |
 | `network.restored` | success | Network | Network state restored |
+| `network.restore_failed` | error | Network | Network state restoration failed |
 | `cache.initialized` | success | Cache | Cache initialized |
 | `cache.pruned` | success | Cache | Cache resources pruned |
 | `cache.cleaned` | success | Cache | Full cache clean completed |
 | `binary.downloaded` | success | Binary | Binary downloaded successfully |
 | `binary.already_present` | skipped | Binary | Binary already exists in cache |
+| `binary.pull_failed` | error | Binary | Binary pull failed |
 | `binary.removed` | success | Binary | Binary removed from cache |
 | `binary.remove_failed` | error | Binary | Binary removal failed |
+| `binary.not_found` | error | Binary | Binary not found |
 | `binary.default_set` | success | Binary | Default binary changed |
 | `binary.default_set_failed` | error | Binary | Failed to set default binary |
 | `binary.default_repaired` | success | Binary | Default binary was repaired |
 | `binary.default_unchanged` | skipped | Binary | Default binary already correct |
+| `binary.ensure_default_failed` | failure | Binary | Failed to ensure default binary |
 | `binary.confirm_download` | needs_input | Binary | Ask user before downloading |
-| `kernel.fetched` | success | Kernel | Kernel fetched successfully |
 | `kernel.already_present` | skipped | Kernel | Kernel already exists |
+| `kernel.pulled` | success | Kernel | Kernel pulled successfully |
+| `kernel.pull_failed` | error | Kernel | Kernel pull failed |
 | `kernel.removed` | success | Kernel | Kernel removed |
 | `kernel.remove_failed` | error | Kernel | Kernel removal failed |
 | `kernel.default_set` | success | Kernel | Default kernel changed |
@@ -580,11 +595,10 @@ Every `code` value currently used in the codebase:
 | `console.not_running` | skipped | Console | Console relay not running |
 | `console.kill_failed` | error | Console | Console relay stop failed |
 | `volume.created` | success | Volume | Volume created successfully |
-| `volume.create_failed` | error | Volume | Volume creation failed |
+| `volume.already_exists` | error | Volume | Volume already exists |
+| `volume.not_found` | error | Volume | Volume not found |
 | `volume.removed` | success | Volume | Volume removed |
 | `volume.remove_failed` | error | Volume | Volume removal failed |
 | `volume.resized` | success | Volume | Volume resized |
-| `volume.resize_failed` | error | Volume | Volume resize failed |
-| `logs.stream_started` | success | Logs | Log streaming started |
-| `logs.stream_failed` | error | Logs | Log streaming failed |
-| `logs.stream_stopped` | success | Logs | Log streaming stopped |
+| `guestfs.confirm_enable` | needs_input | Init | Confirm guestfs enable |
+| `binary.confirm_download` | needs_input | Init | Confirm binary download |

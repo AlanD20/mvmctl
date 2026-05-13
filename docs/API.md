@@ -92,6 +92,12 @@ from mvmctl.api import (
 )
 ```
 
+Result types like `CleanResult` and `PruneAllResult` are imported from `mvmctl.models`:
+
+```python
+from mvmctl.models import CleanResult, PruneAllResult
+```
+
 Deep imports from sub-modules are **not** part of the public API:
 
 ```python
@@ -108,9 +114,9 @@ from mvmctl.api.vm_operations import VMOperation  # ❌ WRONG — internal modul
 | `VMOperation` | VM lifecycle: create, remove, import, export, list, inspect, get, start/stop, pause/resume, reboot, snapshot, load snapshot |
 | `NetworkOperation` | Network management: create, remove, list, get, inspect, set default, restore, sync, create default |
 | `ImageOperation` | Image operations: pull, import, list, get, set default, remove, inspect, warm |
-| `KernelOperation` | Kernel operations: fetch, list, get, inspect, set default, remove |
+| `KernelOperation` | Kernel operations: pull, list, get, inspect, set default, remove |
 | `KeyOperation` | SSH key registry: add, create, list, get, remove, inspect, set defaults, get defaults, clear defaults, export |
-| `BinaryOperation` | Binary management: fetch, get, list local/remote, set default, remove (by id/version), ensure default |
+| `BinaryOperation` | Binary management: pull, get, list local/remote, set default, remove (by id/version), ensure default |
 | `HostOperation` | Host init/reset/clean, state retrieval, privilege checks, KVM access, running VMs |
 | `CacheOperation` | Cache lifecycle: init, prune per-asset-type, prune misc, prune all, clean |
 | `SSHOperation` | SSH connection to VMs |
@@ -185,6 +191,7 @@ Runtime state for a registered VM.
 | `boot_args` | `str \| None` | Kernel boot arguments |
 | `ssh_keys` | `list[str]` | SSH key names injected into the guest |
 | `ssh_user` | `str \| None` | SSH username for this VM |
+| `volume_ids` | `list[str] \| None` | Attached volume IDs |
 
 **Resolved relations** (populated on request):
 
@@ -194,6 +201,7 @@ Runtime state for a registered VM.
 | `image` | `ImageItem \| None` | Resolved image record |
 | `binary` | `BinaryItem \| None` | Resolved binary record |
 | `network` | `NetworkItem \| None` | Resolved network record |
+| `volumes` | `list[VolumeItem]` | Resolved volume records |
 
 #### `ConsoleInfo`
 
@@ -322,6 +330,12 @@ iptables rule record.
 | `dport` | `int` | Destination port |
 | `network_id` | `str` | Associated network |
 | `is_active` | `bool` | Whether the rule is applied |
+| `id` | `int \| None` | Rule ID |
+| `network_name` | `str \| None` | Network name |
+| `comment_tag` | `str \| None` | iptables comment tag |
+| `command_string` | `str \| None` | iptables command string |
+| `created_at` | `str \| None` | ISO 8601 creation timestamp |
+| `last_verified_at` | `str \| None` | ISO 8601 last verified timestamp |
 
 ### `mvmctl.models.image`
 
@@ -366,6 +380,7 @@ Specification for downloading a VM rootfs image, loaded from bundled YAML.
 | `sha256` | `str \| None` | Expected SHA256 checksum |
 | `sha256_url` | `str \| None` | URL to SHA256 checksum file |
 | `list_url_template` | `str \| None` | URL template for listing available versions |
+| `size` | `int \| None` | Raw image size in bytes (remote listing) |
 
 ### `mvmctl.models.kernel`
 
@@ -388,9 +403,9 @@ Kernel record — maps to the `kernels` table.
 | `updated_at` | `str` | ISO 8601 update timestamp |
 | `deleted_at` | `str \| None` | ISO 8601 deletion timestamp |
 
-#### `KernelFetchResult`
+#### `KernelPullResult`
 
-Result returned by kernel fetch/build operations.
+Result returned by kernel pull/build operations.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -412,6 +427,17 @@ Specification for building or fetching a kernel, loaded from bundled YAML.
 | `version` | `str` | Version |
 | `source` | `str` | Source URL |
 | `output_name` | `str` | Output filename |
+| `build_dir` | `str` | Build directory name |
+| `list_url_template` | `str \| None` | URL template for listing available versions |
+| `config_url_template` | `str \| None` | URL template for kernel config fragments |
+| `sha256` | `str \| None` | Expected SHA256 checksum |
+| `sha256_url` | `str \| None` | URL to SHA256 checksum file |
+| `config_fragments` | `list[str]` | Kernel config fragment files to apply |
+| `parallel_jobs` | `int \| None` | Parallel build job count |
+| `enabled_configs` | `list[str]` | Kernel config options to enable |
+| `disabled_configs` | `list[str]` | Kernel config options to disable |
+| `set_val_configs` | `list[tuple[str, str]]` | Kernel config options with values |
+| `required_settings` | `list[str]` | Required kernel config settings |
 
 ### `mvmctl.models.binary`
 
@@ -501,7 +527,7 @@ Persistent data disk attachable to VMs — maps to the `volumes` table.
 | `size_bytes` | `int` | Volume size in bytes |
 | `format` | `str` | Disk format (`"raw"` or `"qcow2"`) |
 | `path` | `str` | Path to the disk file |
-| `status` | `str` | Volume status (`"available"` or `"attached"`) |
+| `status` | `VolumeStatus` | Volume status (`"AVAILABLE"` or `"ATTACHED"`) |
 | `vm_id` | `str \| None` | VM ID this volume is attached to, or `None` |
 | `created_at` | `str` | ISO 8601 creation timestamp |
 | `updated_at` | `str` | ISO 8601 update timestamp |
@@ -517,7 +543,12 @@ All exceptions derive from `mvmctl.exceptions.MVMError`.
 ```
 MVMError
 ├── MVMRuntimeError           — Runtime assertion failure — invariant violated in production
-├── VMNotFoundError           — VM does not exist in state
+├── VMError                   — Base exception for VM-domain errors
+│   ├── VMNotFoundError       — VM does not exist in state
+│   ├── VMCreateError         — VM creation failure (partial cleanup)
+│   ├── VMStateError          — VM state transition is invalid
+│   ├── VMRequestError        — Error during VM request resolution or validation
+│   └── VMBuilderError        — VM builder failure (partial cleanup)
 ├── BinaryNotFoundError       — Binary does not exist in registry
 ├── KernelNotFoundError       — Kernel does not exist in registry
 ├── NetworkNotFoundError      — Network does not exist in registry
@@ -534,10 +565,11 @@ MVMError
 │   ├── ImageValidationError
 │   └── ChecksumMismatchError
 ├── KernelError               — Kernel build or configuration failure
-├── FirecrackerClientError    — Firecracker process or API failure
-│   └── SocketNotFoundError
-├── FirecrackerSpawnError     — Firecracker spawn failure
-├── FirecrackerConfigError    — Firecracker config generation failure
+├── FirecrackerError          — Base exception for Firecracker-domain errors
+│   ├── FirecrackerClientError    — Firecracker process or API failure
+│   │   └── SocketNotFoundError   — Unix socket for VM API not found
+│   ├── FirecrackerSpawnError     — Firecracker spawn failure
+│   └── FirecrackerConfigError    — Firecracker config generation failure
 ├── ConfigError               — Configuration loading/validation failure
 ├── DatabaseError             — Database operation failure
 │   └── MigrationError
@@ -556,6 +588,8 @@ MVMError
 │   ├── KeyExportError
 │   ├── KeyDependencyError
 │   └── KeyFileError
+├── VolumeCreateError         — Volume creation or resize failure
+├── VolumeNotFoundError       — Volume not found in registry
 ├── CloudInitError            — Cloud-init ISO creation failure
 │   ├── CloudInitProvisionError   — Cloud-init provisioning failure
 │   ├── CloudInitModeError        — Cloud-init mode failure
@@ -563,12 +597,6 @@ MVMError
 │   ├── CloudInitIsoModeError     — ISO creation failure
 │   ├── CloudInitNetModeError     — Nocloud-net server or iptables rule failure
 │   └── CloudInitInjectModeError  — Rootfs cloud-init injection failure
-├── VMCreateError             — VM creation failure (partial cleanup)
-├── VMStateError              — VM state transition is invalid
-├── VolumeCreateError         — Volume creation or resize failure
-├── VolumeNotFoundError       — Volume not found in registry
-├── VMRequestError            — Error during VM request resolution
-├── VMBuilderError            — VM builder failure (partial cleanup)
 ├── GuestfsError              — Base exception for libguestfs-related errors
 │   ├── GuestfsNotAvailableError  — libguestfs bindings not available
 │   ├── GuestfsWriteError         — Failed to write files to guestfs
@@ -620,7 +648,7 @@ except MVMError as e:
 
 All methods are `@staticmethod`. VM instances are identified using `VMInput` objects.
 
-#### `VMOperation.create(inputs: VMCreateInput) -> OperationResult[VMInstanceItem] | NeedsInteraction`
+#### `VMOperation.create(inputs: VMCreateInput, *, on_progress: Callable[[ProgressEvent], None] | None = None) -> OperationResult[list[VMInstanceItem]] | NeedsInteraction`
 
 Create and start a new Firecracker microVM. Copies the rootfs image, generates cloud-init
 data, sets up bridge networking, writes the Firecracker JSON config, starts the Firecracker
@@ -641,8 +669,6 @@ process, and registers the VM in the database.
 | `inputs.image` | `str \| None` | `None` | Image name/ID (DB-backed) |
 | `inputs.kernel_id` | `str \| None` | `None` | Kernel ID (DB-backed) |
 | `inputs.binary_id` | `str \| None` | `None` | Binary ID (DB-backed) |
-| `inputs.image_path` | `Path \| None` | `None` | Explicit image path |
-| `inputs.kernel_path` | `Path \| None` | `None` | Explicit kernel path |
 | `inputs.disk_size` | `str \| None` | `None` | Rootfs size (e.g. `"2G"`) |
 | `inputs.requested_guest_ip` | `str \| None` | `None` | Static IP to assign |
 | `inputs.network_name` | `str \| None` | `None` | Network name |
@@ -694,10 +720,7 @@ still running. Tears down TAP device, iptables rules, deregisters the VM.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `inputs.name` | `list[str]` | `[]` | VM names to remove |
-| `inputs.id` | `list[str]` | `[]` | VM IDs to remove |
-| `inputs.guest_mac` | `list[str]` | `[]` | Guest MAC addresses to resolve |
-| `inputs.guest_ip` | `list[str]` | `[]` | Guest IP addresses to resolve |
+| `inputs.identifiers` | `list[str]` | `[]` | VM names, ID prefixes, IPs, or MAC addresses to resolve |
 | `inputs.force` | `bool \| None` | `None` | Skip graceful shutdown |
 
 ---
@@ -971,7 +994,7 @@ Import an existing local image file and register it in the database.
 
 ---
 
-#### `ImageOperation.remove(inputs: ImageInput, force: bool = False) -> None`
+#### `ImageOperation.remove(inputs: ImageInput, force: bool = False) -> BatchResult[ImageItem]`
 
 Remove an image from cache and database.
 
@@ -982,7 +1005,7 @@ Remove an image from cache and database.
 
 ---
 
-#### `ImageOperation.list_(inputs: ImageInput | None = None, remote: bool = False) -> list[ImageItem] | list[ImageSpec]`
+#### `ImageOperation.list_(inputs: ImageInput | None = None, *, remote: bool = False) -> list[ImageItem] | list[ImageSpec]`
 
 List images.
 
@@ -1021,7 +1044,7 @@ Pre-decompress images to the ready pool for fast VM creation.
 
 All methods are `@staticmethod`. Kernels are identified using `KernelInput` objects.
 
-#### `KernelOperation.fetch(inputs: KernelPullInput) -> OperationResult[KernelItem] | NeedsInteraction`
+#### `KernelOperation.pull(inputs: KernelPullInput) -> OperationResult[KernelItem] | NeedsInteraction`
 
 Fetch or build a Firecracker kernel.
 
@@ -1151,11 +1174,11 @@ Clear all default keys.
 
 ---
 
-#### `KeyOperation.export(inputs: KeyInput, destination: Path, overwrite: bool = False) -> tuple[Path, Path]`
+#### `KeyOperation.export(inputs: KeyInput, destination: Path, overwrite: bool = False) -> OperationResult[tuple[Path, Path]]`
 
 Export a keypair to a destination directory.
 
-**Returns:** `(public_key_path, private_key_path)` tuple.
+**Returns:** `OperationResult[tuple[Path, Path]]` wrapping `(public_key_path, private_key_path)`.
 
 ---
 
@@ -1163,7 +1186,7 @@ Export a keypair to a destination directory.
 
 All methods are `@staticmethod`. Binaries are identified using `BinaryInput` objects.
 
-#### `BinaryOperation.fetch(inputs: BinaryPullInput) -> OperationResult[list[BinaryItem]] | NeedsInteraction`
+#### `BinaryOperation.pull(inputs: BinaryPullInput) -> OperationResult[list[BinaryItem]] | NeedsInteraction`
 
 Download a specific Firecracker/jailer binary version from GitHub releases.
 
@@ -1267,14 +1290,14 @@ Return the current value of `net.ipv4.ip_forward` (`"0"` or `"1"`).
 
 ---
 
-#### `HostOperation.clean(cache_dir: Path) -> list[str]`
+#### `HostOperation.clean(cache_dir: Path) -> OperationResult[list[str]]`
 
 Remove all networking configuration (bridges, TAP devices, iptables rules). Does NOT
 revert sysctl settings or remove the sudoers drop-in.
 
 ---
 
-#### `HostOperation.reset(cache_dir: Path) -> list[str]`
+#### `HostOperation.reset(cache_dir: Path) -> OperationResult[list[str]]`
 
 Full rollback to pre-init state: networking config, sysctl changes, sudoers drop-in,
 and project group removal.
@@ -1405,7 +1428,10 @@ the corresponding `InitStepResult` has `needs_interaction=True`.
 | `skip_host` | `bool` | `False` | Skip the host privilege-setup step |
 | `non_interactive` | `bool` | `False` | Use defaults, skip all user prompts |
 | `sudo_completed` | `bool` | `False` | Host init was already done via `sudo mvm host init` |
+| `host_setup_message` | `str \| None` | `None` | Descriptive message for the host step result when sudo_completed is True |
 | `download_version` | `str \| None` | `None` | Specific binary version to download |
+| `on_progress` | `Callable \| None` | `None` | Callback for progress events during long-running steps |
+| `guestfs_enabled` | `bool \| None` | `None` | Pre-resolved user decision for libguestfs |
 
 ---
 
@@ -1468,7 +1494,7 @@ Get a config override value.
 
 ---
 
-#### `ConfigOperation.set(category: str, key: str, value: Any) -> None`
+#### `ConfigOperation.set(category: str, key: str, value: Any) -> OperationResult[None]`
 
 Set a config override value.
 
@@ -1477,6 +1503,8 @@ Set a config override value.
 | `category` | `str` | — | Setting category |
 | `key` | `str` | — | Setting key |
 | `value` | `Any` | — | Value to set |
+
+**Returns:** `OperationResult[None]` with code `"config.set"` on success.
 
 ---
 
@@ -1620,6 +1648,7 @@ from mvmctl.api import (
     VMCreateInput,
 )
 from mvmctl.exceptions import MVMError
+from mvmctl.models.result import NeedsInteraction, OperationResult
 from mvmctl.utils.common import CacheUtils
 
 CACHE_DIR = CacheUtils.get_cache_dir()
@@ -1631,7 +1660,11 @@ def main() -> None:
     print("Database ready.")
 
     # 2. Initialise the host (idempotent)
-    changes = HostOperation.init(CACHE_DIR)
+    host_result = HostOperation.init(CACHE_DIR)
+    if isinstance(host_result, NeedsInteraction):
+        print("Host init requires sudo. Run: sudo mvm host init")
+        return
+    changes = host_result.metadata.get("changes", [])
     if changes:
         for change in changes:
             print(f"  Applied: {change.setting} = {change.applied_value}")
@@ -1642,26 +1675,42 @@ def main() -> None:
     local = BinaryOperation.list_local()
     if not local:
         print("Downloading Firecracker 1.15.0 ...")
-        BinaryOperation.fetch(BinaryPullInput(version="1.15.0"))
+        result = BinaryOperation.pull(BinaryPullInput(version="1.15.0"))
+        if isinstance(result, NeedsInteraction):
+            print("Binary download requires privileges.")
+            return
+        if result.is_error:
+            print(f"Download failed: {result.message}")
+            return
 
     # 4. Ensure a kernel is available (via CLI: mvm kernel pull)
-    # or use KernelOperation.fetch() directly for custom kernels
+    # or use KernelOperation.pull() directly for custom kernels
 
     # 5. Ensure an image is available (via CLI: mvm image pull)
     # or use ImageOperation.pull() directly
 
     # 6. Create or register an SSH key
-    key = KeyOperation.create(
+    key_result = KeyOperation.create(
         KeyCreateInput(name="my-api-key", set_default=True)
     )
+    if key_result.is_error:
+        print(f"Key creation failed: {key_result.message}")
+        return
+    key = key_result.item
+    assert key is not None
     print(f"Created SSH key: {key.name} ({key.fingerprint})")
 
     # 7. Ensure the default network exists
-    default_net = NetworkOperation.create_default_network()
+    net_result = NetworkOperation.create_default_network()
+    if net_result.is_error:
+        print(f"Network creation failed: {net_result.message}")
+        return
+    default_net = net_result.item
+    assert default_net is not None
     print(f"Default network: {default_net.name} ({default_net.subnet})")
 
     # 8. Create a VM using the API
-    VMOperation.create(
+    create_result = VMOperation.create(
         VMCreateInput(
             name="my-api-vm",
             ssh_keys=["my-api-key"],
@@ -1671,7 +1720,15 @@ def main() -> None:
             network_name="net",          # default network name
         )
     )
-    print("VM created.")
+    if isinstance(create_result, NeedsInteraction):
+        print("VM creation requires privileges.")
+        return
+    if create_result.is_error:
+        print(f"VM creation failed: {create_result.message}")
+        return
+    created_vms = create_result.item or []
+    names = [vm.name for vm in created_vms]
+    print(f"Created VM(s): {', '.join(names)}")
 
     # 9. List all VMs
     instances = VMOperation.list_all()
@@ -1686,4 +1743,3 @@ if __name__ == "__main__":
     except MVMError as e:
         print(f"Error: {e}")
         raise SystemExit(1)
-```

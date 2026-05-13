@@ -60,7 +60,8 @@ Size comparison: 3 separate binaries would be ~5-7MB (each with own ~1MB runtime
 Every manager uses the same pattern:
 
 ```python
-# In console_relay/manager.py, nocloud_server/manager.py, provisioner/manager.py
+# In console_relay/manager.py, nocloud_server/manager.py
+# In core/_shared/_loopmount/_manager.py (for provisioner)
 from mvmctl.utils.common import CacheUtils
 
 bin_dir = CacheUtils.get_bin_dir()
@@ -75,7 +76,7 @@ else:
 This means:
 - **Compiled mode**: binary exists at `BIN_DIR` → used
 - **Development mode**: binary doesn't exist → falls back to `sys.executable -m ...`
-- For the provisioner, the dev fallback is in `ProvisionerManager.provision()` which tries `sudo python process.py`
+- For the provisioner, both paths use `sudo -n` prepended to the command
 
 ## Old vs. New
 
@@ -122,7 +123,7 @@ proc = subprocess.Popen(
 Every service `process.py` follows these rules:
 
 1. **Zero external dependencies** — stdlib only (`json`, `os`, `sys`, `subprocess`, `socket`, `select`, `signal`, `argparse`, `tempfile`, `shutil`, `base64`)
-2. **No mvmctl imports** — completely standalone
+2. **No mvmctl imports** — completely standalone (except `console_relay/process.py` which imports `CONST_CONSOLE_READ_BUFFER_SIZE` from `_defaults.py`)
 3. **JSON on stdin/stdout** for structured communication (provisioner only; console relay and nocloud server use CLI args)
 4. **CLI argument interface** — `argparse` for flags
 5. **Compiled with Nuitka** — `--onefile --lto=yes --enable-plugin=anti-bloat`
@@ -145,35 +146,45 @@ src/mvmctl/core/_shared/_loopmount/ ← Python-side lifecycle management
 
 src/mvmctl/core/_shared/_provisioner/ ← Public abstraction (used by API)
 ├── __init__.py
-├── _backend.py                     # ProvisionerBackend + _LoopMountBackend + _GuestfsBackend
+├── _backend.py                     # ProvisionerBackend factory + _LoopMountBackend + _GuestfsBackend
 └── _content.py                     # ProvisionerContent — shared file/command/template definitions
 ```
 
-### What it replaces (in `vm create`)
+### How the provisioner is selected
 
-The binary-vs-guestfs decision lives inside `ProvisionerBackend` in `core/_shared/_provisioner/_backend.py`. `ProvisionerBackend._get_backend_for_create()` selects `_LoopMountBackend` (binary) or `_GuestfsBackend` (guestfs) based on a config check and binary availability:
+The loop-mount vs guestfs decision is made at the API level via `ProvisionerType` enum.
+`ProvisionerBackend` is a factory that constructs the correct backend based on this type:
 
 ```python
-# In ProvisionerBackend:
+# In ProvisionerBackend (core/_shared/_provisioner/_backend.py):
 @staticmethod
-def _get_backend_for_create(
-    rootfs_path: str, fs_type: str
+def get_vm(
+    rootfs_path: Path,
+    *,
+    provisioner_type: ProvisionerType,
+    fs_type: str,
+    ...
 ) -> _LoopMountBackend | _GuestfsBackend:
-    if ProvisionerBackend._loop_mount_available():
+    if provisioner_type == ProvisionerType.LOOP_MOUNT:
         return _LoopMountBackend(rootfs_path, fs_type)
-    return _GuestfsBackend(rootfs_path, fs_type)
+    elif provisioner_type == ProvisionerType.GUESTFS:
+        ...
 ```
+
+Binary availability is checked via `LoopMountManager.is_binary_available()`, and
+the `ProvisionerType` enum is set based on whether the binary exists and whether
+guestfs is enabled in config.
 
 | Current (guestfs) | New (loop) |
 |-------------------|------------|
-| `GuestfsProvisioner(rootfs_path, ...)` | `LoopMountManager.provision(ops)` |
-| `.setup_ssh(user, pubkeys)` | `ops["files"]` (SSH keys, user, sshd config) + `ops["commands"]` (ssh-keygen -A, useradd) |
-| `.set_hostname(name)` | `ops["files"]` (/etc/hostname, /etc/hosts) |
-| `.inject_dns(dns_server)` | `ops["files"]` (/etc/resolv.conf) |
-| `.disable_cloud_init()` | `ops["files"]` (cloud-init disable files) + `ops["commands"]` (mask services) |
-| `.inject_cloud_init(dir)` | `ops["copy_dirs"]` (copy cloud-init seed directory) |
-| `.resize(bytes)` | `ops["resize"]` |
-| `.run()` → **2600ms** QEMU launch | **~200ms** loop mount + operations |
+| `GuestfsProvisioner(rootfs_path, ...)` | `LoopMountProvisioner(rootfs_path, fs_type)` |
+| `.setup_ssh(user, pubkeys)` | `.setup_ssh(user, pubkeys)` — same API via shared content builders |
+| `.set_hostname(name)` | `.set_hostname(name)` |
+| `.inject_dns(dns_server)` | `.inject_dns(dns_server=dns_server)` |
+| `.disable_cloud_init()` | `.disable_cloud_init()` |
+| `.inject_cloud_init(dir)` | `.inject_cloud_init(cloud_init_dir)` |
+| `.resize(bytes)` | `.resize(target_size_bytes)` |
+| `.run()` → **2600ms** QEMU launch | `.run()` → **~200ms** loop mount + operations |
 
 ### JSON Protocol (stdin → stdout)
 
@@ -219,6 +230,16 @@ def _get_backend_for_create(
 }
 ```
 
+The binary also supports a `detect_os` action (no operations needed):
+
+```json
+{
+  "image": "/path/to/rootfs.img",
+  "action": "detect_os",
+  "fs_type": "ext4"
+}
+```
+
 **Output (success):**
 
 ```json
@@ -238,17 +259,19 @@ The binary exits with code 0 on success, 1 on error.
 ```
 1. losetup -f -P --show <image>       # Set up loop with partition scanning
 2. Detect root partition:
-   - /dev/loopNp1 exists  → use p1 (partitioned image)
-   - /dev/loopNp1 missing → use /dev/loopN directly (raw filesystem)
-3. Detect filesystem type via blkid (fallback: ext4)
+   - Scans /dev/loopNp1..p16 for Linux filesystems (ext4, btrfs, xfs)
+   - Tries p1, p2 in order first
+   - If multiple Linux filesystems found, picks the largest by device size
+   - Falls back to p1, then to raw loop device for raw filesystem images
+3. Detect filesystem type via blkid (fallback: ext4, or use fs_type hint from input)
 4. mount <root_part> <mount_point>
 5. Write all ops["files"] with base64 decode, correct mode/uid/gid
 6. Copy all ops["copy_dirs"] from host src to guest dst (recursive os.walk)
 7. chroot <mount_point> sh -c <cmd> for each ops["commands"]
 8. if resize.grow:
      - truncate file to target size (before loop setup)
-     - e2fsck -f -y + resize2fs     (ext4)
-     - btrfs filesystem resize max  (btrfs)
+     - for non-btrfs: unmount, e2fsck -f -y + resize2fs
+     - for btrfs: btrfs filesystem resize max /mnt (while mounted)
 9. if resize.shrink:
      - e2fsck -f -y + resize2fs -M  (ext4, capture new size)
      - btrfs filesystem resize ...  (btrfs)
@@ -287,11 +310,13 @@ All steps wrapped in `try/finally` — `umount` and `losetup -d` run even on err
 
 ### Binary Availability Check
 
-`ProvisionerBackend._loop_mount_available()` checks if the config has `guestfs_enabled=false` and the compiled binary exists at `CacheUtils.get_bin_dir() / "mvm-provision"`.
+The `LoopMountManager.is_binary_available()` method checks whether the compiled binary (`CacheUtils.get_bin_dir() / "mvm-provision"`) exists, or whether the development-mode fallback (`services/loopmount/process.py`) is present.
 
-### Fallback
+### Backend Selection
 
-If `mvm-provision` is not installed (binary not extracted, sudo not configured), or if the binary exits with an error, `_LoopMountBackend.run()` raises an exception and `ProvisionerBackend` falls back to `_GuestfsBackend` transparently.
+`ProvisionerBackend` uses a factory pattern to select `_LoopMountBackend` or `_GuestfsBackend` based on a `ProvisionerType` enum. The type is determined by the caller (API layer) based on:
+- Config setting `settings.guestfs_enabled` — if false, prefer LOOP_MOUNT
+- Binary availability via `LoopMountManager.is_binary_available()`
 
 ## Binary Embedding
 
@@ -304,7 +329,7 @@ If `mvm-provision` is not installed (binary not extracted, sudo not configured),
 A dedicated Python script handles the build:
 
 ```bash
-python scripts/build_services.py
+uv run python scripts/build_services.py
 ```
 
 The script uses **Nuitka's multidist** feature to compile all 3 services into a single `mvm-services` binary. Since all 3 source files are named `process.py` (would collide on basename), the script creates temporary symlinks with unique names in `build/symlinks/`:
@@ -330,7 +355,7 @@ The main binary includes the combined service binary via `--include-data-dir=dis
 
 The existing `Taskfile.yml` `build-nuitka` task handles the main binary only. The script handles the full build chain.
 
-Supports `--services-only` and `--main-only` flags for partial builds.
+Supports `--services`, `--service <name>`, and `--mvm` flags for partial builds.
 
 ### Extraction (`mvm init`, Step 5)
 
@@ -381,13 +406,14 @@ Only the provisioner needs sudo — console relay and nocloud server run as the 
 | File | Change |
 |------|--------|
 | `services/loopmount/process.py` | **New** — standalone stdlib binary, JSON stdin/stdout, loop mount + provision |
-| `core/_shared/_loopmount/_manager.py` | **New** — `LoopMountManager.provision()` method, binary dev fallback |
+| `core/_shared/_loopmount/_manager.py` | **New** — `LoopMountManager.execute()` and `detect_os()` methods, binary dev fallback |
+| `core/_shared/_loopmount/_provisioner.py` | **New** — `LoopMountProvisioner` — accumulates ops and delegates to `LoopMountManager.execute()` |
 | `exceptions.py` | **New** — `LoopMountError`, `LoopMountTimeoutError` in shared hierarchy |
-| `core/_shared/_provisioner/_backend.py` | **New** — `ProvisionerBackend`, `_LoopMountBackend`, `_GuestfsBackend` |
+| `core/_shared/_provisioner/_backend.py` | **New** — `ProvisionerBackend` factory, `_LoopMountBackend`, `_GuestfsBackend` |
 | `core/_shared/_provisioner/_content.py` | **New** — `ProvisionerContent` — shared provisioning templates |
 | `services/console_relay/manager.py` | Binary-first fallback: try `mvm-console-relay`, fall back to `sys.executable -m` |
 | `services/nocloud_server/manager.py` | Binary-first fallback: try `mvm-nocloud-server`, fall back to `sys.executable -m` |
-| `api/vm_operations.py` | Replaced `GuestfsProvisioner` + fallback with `ProvisionerBackend` dispatching to `LoopMountBackend` / `GuestfsBackend` |
+| `api/vm_operations.py` | Replaced `GuestfsProvisioner` with `ProvisionerBackend` dispatching based on `ProvisionerType` enum |
 | `api/init_operations.py` | Step 5 (`_step_service_binaries()`) delegates to `BinaryService.extract_service_binaries()` |
 | `core/binary/_service.py` | Added `extract_service_binaries()` and `_get_embedded_path()` — handles combined multidist binary + symlinks |
 | `core/host/_service.py` | `_generate_sudoers_content()` includes `PRIVILEGED_SERVICE_BINARIES` paths resolved at runtime |

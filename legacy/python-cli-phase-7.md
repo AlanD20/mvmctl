@@ -1,3 +1,9 @@
+> **⚠️ ARCHIVED — Historical document from an earlier phase.**
+> The project has evolved significantly. See [CONTEXT.md](../CONTEXT.md) for current domain language,
+> [docs/PROJECT_ARCHITECTURE.md](../docs/PROJECT_ARCHITECTURE.md) for the current architecture,
+> and [docs/API.md](../docs/API.md) for the current API reference.
+> This file is kept for historical reference only.
+
 - then go over the entire available commands, ensure the logic exists in core, and wrapped in api, then utilized in cli for frontend usage. this requires an extensive amount of rework, and an extensive amount of changes. plan accordingly and ensure to run the verification twice, where the second time, YOU DO NOT ASSUME, you VALIDATE AGAIN to ensure nothing is missed. If there is conflicting logics in core and api, be sure to create a section so that a human manually chooses which logic to be picked
 - `mvm kernel fetch` requires understanding if a kernel needs a build or it's pre-built, lets add a field in assets/kernels.yaml for each kernel to identify if compiling required, perhaps `compile` field if true, then compiling is required, otherwise no build and directly the binary is the kernel
     - the previous requirement is necessary since in cli/configure.py there is _build_default_kernel which hard-codes the kerne name, and not enough identifier if a kernel requires compiling or not.

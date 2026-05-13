@@ -13,7 +13,7 @@ Provisioning backends handle root filesystem operations: resizing, SSH key injec
 ### 1.1 Loop-Mount Backend (Primary, ~200ms)
 
 - **Factory name:** `ProvisionerType.LOOP_MOUNT`
-- **Binary:** `mvm-provision` (compiled Nuitka multidist binary; symlink to `mvm-services`)
+- **Binary:** `mvm-provision` (symlink to combined `mvm-services` multidist binary)
 - **Architecture:**
   ```
   VMProvisioner → ProvisionerBackend.get_vm() → _LoopMountBackend → LoopMountProvisioner → LoopMountManager → mvm-provision binary (subprocess via sudo -n)
@@ -32,7 +32,7 @@ Provisioning backends handle root filesystem operations: resizing, SSH key injec
   - OS detection (/etc/os-release parsing)
   - Deblob (clean package caches) + fix fstab (PARTUUID → /dev/vda)
   - Write arbitrary files with mode/uid/gid (base64-encoded content)
-  - Execute chroot commands (tries multiple shell paths: /bin/sh, /bin/bash, /bin/dash, /bin/ash, busybox)
+  - Execute chroot commands (tries multiple shell paths: /bin/sh, /bin/bash, /bin/dash, /bin/ash, /usr/bin/sh, /usr/bin/bash, /bin/busybox, /usr/bin/busybox)
 - **Binary Flow:**
   ```
   1. truncate file (pre-loop for grow resize)
@@ -83,7 +83,7 @@ Provisioning backends handle root filesystem operations: resizing, SSH key injec
   - Cached at `~/.cache/mvmctl/appliance/` (requires `kernel`, `initrd`, `root` files)
   - `KernelDetector.find_best_kernel()` selects a kernel with virtio drivers for appliance build
   - Stale state cleanup: orphaned QEMU processes, lock files, daemon sockets, cached appliances
-  - Pruning via `GuestfsService.prune_appliance()` (called by `mvm cache prune`)
+  - Pruning via `GuestfsService.prune_appliance()` (called by `mvm cache prune misc`)
 - **Files:**
   - `core/_shared/_guestfs/_provisioner.py` — `GuestfsProvisioner` (all rootfs operations via guestfs API)
   - `core/_shared/_guestfs/_base.py` — `OptimizedGuestfs` (low-level wrapper: handle creation, mount, partition extraction)
@@ -138,7 +138,8 @@ Both backends share provisioning operation definitions via `ProvisionerContent` 
 | `build_ssh_ops(user, pubkeys)` | Authorized keys, sshd config, first-boot installer, host key generator |
 | `build_cloud_init_disable_ops()` | Datasource blocking + service masking |
 | `build_cloud_init_inject_ops(dir)` | Copy cloud-init seed directory tree |
-| `build_resize_ops(target_size)` | Grow/shrink filesystem |
+| `build_resize_ops(target_size)` | Grow filesystem to target size |
+| `build_shrink_ops(limit_bytes)` | Shrink filesystem to minimum (0) or limit bytes |
 | `build_deblob_ops(os_type)` | OS-specific cache cleanup (apt, yum, apk, pacman) |
 | `build_fix_fstab_ops()` | PARTUUID → /dev/vda in /etc/fstab |
 
@@ -178,13 +179,13 @@ VMOperation.create()
   → CloudInitProvisioner.prepare()
     → Generate user-data, meta-data, network-config
     → CloudInitManager.write_config_files()
-    → NoCloudNetServerManager.start_server()
+    → NoCloudNetServerManager.start()
       → Validates port availability (8000-9000 range)
       → Spawns nocloud_server/process.py (HTTP server subprocess)
       → Binds to bridge gateway IP (never 0.0.0.0)
-      → Adds iptables rule allowing VM access (MVM_NOCLOUDNET_INPUT chain)
+      → Adds iptables rule allowing VM access (MVM_NOCLOUD_NET_INPUT_CHAIN)
   → VM boots with ds=nocloud-net kernel parameter
-  → Server stops when VM reaches running/configured state
+  → Server stays running for the lifetime of the VM (stopped on VM removal)
 ```
 
 ### ISO Mode Architecture
@@ -232,7 +233,13 @@ All three service binaries are compiled into a **single combined Nuitka multidis
 | `mvm-nocloud-server → mvm-services` | `nocloud_server.process.main()` | user | HTTP server for cloud-init nocloud-net |
 | `mvm-provision → mvm-services` | `loopmount.process.main()` | **root** (sudo -n) | Loop-mount rootfs provisioning |
 
-**Binary-first Fallback Pattern** — Every manager tries the compiled binary first, falls back to `sys.executable -m ...` in development mode:
+**Binary-first Fallback Pattern** — Every manager tries the compiled binary first, falls back to a development-mode invocation:
+
+| Service | Compiled | Dev fallback |
+|---------|----------|-------------|
+| console-relay | `mvm-console-relay` | `sys.executable -m mvmctl.services.console_relay.process` |
+| nocloud-server | `mvm-nocloud-server` | `sys.executable -m mvmctl.services.nocloud_server.process` |
+| mvm-provision | `mvm-provision` (via `sudo -n`) | `sudo -n sys.executable <path>/services/loopmount/process.py` |
 
 ```python
 bin_dir = CacheUtils.get_bin_dir()
@@ -240,51 +247,51 @@ binary = bin_dir / "mvm-<service-name>"
 if binary.exists():
     cmd = [str(binary), ...]        # Compiled mode
 else:
-    cmd = [sys.executable, "-m", "mvmctl.services.<service>.process", ...]  # Dev mode
+    cmd = [...]                     # Dev mode (varies per service)
 ```
 
 ### 3.2 Console Relay
 
 - **Binary symlink:** `mvm-console-relay` → `mvm-services`
-- **Purpose:** PTY-over-vsock bridge for interactive serial console (Firecracker VM ←→ user)
+- **Purpose:** PTY-to-socket relay for interactive serial console — reads from PTY master fd, forwards to both a Unix socket (for CLI attachment) and a log file
 - **Files:**
-  - `services/console_relay/manager.py` — `ConsoleRelayManager` (lifecycle: start/stop/kill/monitor)
+  - `services/console_relay/manager.py` — `ConsoleRelayManager` (lifecycle: start/stop/terminate)
   - `services/console_relay/process.py` — PTY relay subprocess (stdlib-only)
   - `services/console_relay/client.py` — `ConsoleRelayClient` (socket connection for CLI)
 - **Architecture:**
   ```
   ConsoleController → ConsoleRelayManager → spawns → console_relay/process.py
                                                                      │
-                                            PTY master fd ← → Unix socket ← → Client (CLI)
-                                                                    │
-                                                              console.log
+                                             PTY master fd ← → Unix socket ← → Client (CLI)
+                                                                     │
+                                                               console.log
   ```
 - **Speed:** Real-time (`select.select()` multiplexing between PTY, socket, and log file)
 - **Signals:** SIGTERM/SIGINT for graceful shutdown (PID file + socket cleanup)
-- **PID file:** `$MVM_CACHE_DIR/vms/<vm-name>/console.pid`
-- **Socket:** `$MVM_CACHE_DIR/vms/<vm-name>/console.sock`
-- **Log:** `$MVM_CACHE_DIR/vms/<vm-name>/firecracker.console.log`
+- **PID file:** `$MVM_CACHE_DIR/vms/<vm-id>/console.pid`
+- **Socket:** `$MVM_CACHE_DIR/vms/<vm-id>/console.sock`
+- **Log:** `$MVM_CACHE_DIR/vms/<vm-id>/firecracker.console.log`
 
 ### 3.3 NoCloud Server
 
 - **Binary symlink:** `mvm-nocloud-server` → `mvm-services`
 - **Purpose:** HTTP server serving cloud-init meta-data/user-data/network-config to VMs
 - **Files:**
-  - `services/nocloud_server/manager.py` — `NoCloudNetServerManager` (lifecycle: start/stop, port allocation, orphan cleanup)
+  - `services/nocloud_server/manager.py` — `NoCloudNetServerManager` (lifecycle: start/stop/terminate, port allocation, orphan cleanup)
   - `services/nocloud_server/process.py` — HTTP server subprocess (stdlib-only, `HTTPServer` + `SimpleHTTPRequestHandler`)
 - **Architecture:**
   ```
   CloudInitProvisioner → NoCloudNetServerManager → spawns → nocloud_server/process.py
                                                                              │
-                                                HTTPServer(bind=gateway_ip) ← → VM guest (HTTP)
-                                                                    │
-                                                              serves: meta-data
-                                                                     user-data
-                                                                     network-config
+                                                 HTTPServer(bind=gateway_ip) ← → VM guest (HTTP)
+                                                                     │
+                                                               serves: meta-data
+                                                                      user-data
+                                                                      network-config
   ```
 - **Port range:** 8000–9000 (auto-allocated via `socket.bind()` test)
-- **Security:** Binds to bridge gateway IP only (never `0.0.0.0`), iptables firewall rule in `MVM_NOCLOUDNET_INPUT` chain
-- **PID file:** `$MVM_CACHE_DIR/vms/<vm-name>/nocloud-server.pid`
+- **Security:** Binds to bridge gateway IP only (never `0.0.0.0`), iptables firewall rule in `MVM_NOCLOUD_NET_INPUT_CHAIN`
+- **PID file:** `$MVM_CACHE_DIR/vms/<vm-id>/nocloud-server.pid`
 - **Headers:** Cache-disabling headers (`Cache-Control: no-cache, no-store, must-revalidate`)
 
 ### 3.4 Loop-Mount Provisioner Service
@@ -300,10 +307,10 @@ else:
                                                                                          │
                                                                                   sudo -n mvm-provision
                                                                                          │
-                                                    JSON ops stdin → losetup/mount/chroot → JSON results stdout
+                                                     JSON ops stdin → losetup/mount/chroot → JSON results stdout
   ```
 - **Communication:** Receives JSON operation list on stdin, writes JSON results to stdout
-- **Timeout:** 60 seconds (configurable via `LOOP_MOUNT_TIMEOUT`)
+- **Timeout:** 60 seconds (configurable via `LOOP_MOUNT_TIMEOUT` Python constant in `core/_shared/_loopmount/_manager.py`)
 - **Sudo:** Requires passwordless sudo via `/etc/sudoers.d/mvm-provision` drop-in
 - **Speed:** ~200ms per VM (full provisioning: SSH + DNS + hostname + resize)
 
@@ -313,10 +320,10 @@ else:
 |-------|--------|-----------|
 | **Init** | Extract combined `mvm-services` binary + create symlinks | `BinaryService.extract_service_binaries()` |
 | **Init** | Create sudoers drop-in for `mvm-provision` | `HostService._generate_sudoers_content()` |
-| **Create VM** | Start NoCloud server (net mode) or inject cloud-init (inject mode) | `NoCloudNetServerManager.start_server()` / `VMProvisioner` |
-| **Create VM** | Start console relay (if `--enable-console`) | `ConsoleRelayManager.start_relay()` |
+| **Create VM** | Start NoCloud server (net mode) or inject cloud-init (inject mode) | `NoCloudNetServerManager.start()` / `VMProvisioner` |
+| **Create VM** | Start console relay (unless `--no-console`) | `ConsoleRelayManager.start()` |
 | **Runtime** | Provision rootfs via loop-mount or guestfs | `VMProvisioner.run()` |
-| **Remove VM** | Stop console relay + NoCloud server + clean iptables rules | `ConsoleRelayManager.stop_relay()`, `NoCloudNetServerManager.stop_server()` |
+| **Remove VM** | Stop console relay + NoCloud server + clean iptables rules | `ConsoleRelayManager.stop()`, `NoCloudNetServerManager.stop()` |
 | **Cache prune** | Clean up stale PID files + orphan processes | `cleanup_orphans()` methods |
 
 ---
@@ -330,8 +337,8 @@ else:
 | Minimal VM, no customization | Off mode cloud-init | Fastest boot, no provisioning at all |
 | Dynamic cloud-init needed | Net mode cloud-init | Config served over network, no rootfs modification |
 | Custom ISO required | ISO mode cloud-init | Use pre-built cloud-init ISO via `cloud-localds` |
-| Console access needed | Console Relay | Automatically started with `--enable-console` |
-| Development environment | Loop-Mount (dev fallback) | Falls back to `sys.executable -m ...` when binary not extracted |
+| Console access needed | Console Relay | Automatically started (disable with `--no-console`) |
+| Development environment | Loop-Mount (dev fallback) | Falls back to running via `sys.executable` when binary not extracted |
 | Image optimization | Loop-Mount partition extraction | ~500ms vs ~2000ms for guestfs extraction |
 
 ---
@@ -355,7 +362,7 @@ The loop-mount backend is the default and preferred path. GuestFS is only used a
 
 ## 6. Binary Embedding & Build
 
-All service binaries are compiled via Nuitka's multidist feature:
+All service binaries are compiled into a single `mvm-services` binary via Nuitka's multidist feature:
 
 ```bash
 python scripts/build_services.py --release --fast   # Development build
@@ -388,8 +395,8 @@ Only `mvm-provision` requires passwordless sudo. Managed by `HostService._genera
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           CLI Layer (typer)                                  │
-│  mvm vm create --name my-vm --cloud-init-mode inject                        │
+│                           CLI Layer (Click + Typer)                          │
+│  mvm vm create -n my-vm --cloud-init-mode inject                            │
 └───────────────────────────┬─────────────────────────────────────────────────┘
                             │
                             ▼
@@ -404,8 +411,8 @@ Only `mvm-provision` requires passwordless sudo. Managed by `HostService._genera
 │    │   │       └── JSON in/out                                              │
 │    │   └── GUESTFS   → _GuestfsBackend → GuestfsProvisioner                 │
 │    │       └── OptimizedGuestfs → libguestfs (QEMU appliance)              │
-│    ├── ConsoleRelayManager.start_relay()  (if --enable-console)             │
-│    └── NoCloudNetServerManager.start_server()  (if net mode)               │
+│    ├── ConsoleRelayManager.start()  (unless --no-console)                   │
+│    └── NoCloudNetServerManager.start()  (if net mode)                      │
 └───────────────────────────┬─────────────────────────────────────────────────┘
                             │
                             ▼
@@ -414,6 +421,7 @@ Only `mvm-provision` requires passwordless sudo. Managed by `HostService._genera
 │                                                                             │
 │  core/vm/          VMController, VMService, VMRepository                    │
 │  core/network/     NetworkController, NetworkService, NetworkRepository     │
+│  core/volume/      VolumeController, VolumeService, VolumeRepository        │
 │  core/cloudinit/   CloudInitProvisioner, CloudInitManager                   │
 │  core/_shared/_loopmount/   LoopMountProvisioner, LoopMountManager          │
 │  core/_shared/_guestfs/     GuestfsProvisioner, OptimizedGuestfs, GuestfsService │

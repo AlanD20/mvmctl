@@ -1,3 +1,9 @@
+> **⚠️ ARCHIVED — Historical document from an earlier phase.**
+> The project has evolved significantly. See [CONTEXT.md](../CONTEXT.md) for current domain language,
+> [docs/PROJECT_ARCHITECTURE.md](../docs/PROJECT_ARCHITECTURE.md) for the current architecture,
+> and [docs/API.md](../docs/API.md) for the current API reference.
+> This file is kept for historical reference only.
+
 - changes to default configuration for the cli application
     - the assets directory must be an absolute path to the cache folder which FCM_CACHE_DIR by default is ~/.cache/firecracker-manager but users can override this
     - the default bridge name is mvm-bridge

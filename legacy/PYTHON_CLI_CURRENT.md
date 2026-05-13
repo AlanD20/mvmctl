@@ -1,3 +1,9 @@
+> **⚠️ ARCHIVED — Historical document from an earlier phase.**
+> The project has evolved significantly. See [CONTEXT.md](../CONTEXT.md) for current domain language,
+> [docs/PROJECT_ARCHITECTURE.md](../docs/PROJECT_ARCHITECTURE.md) for the current architecture,
+> and [docs/API.md](../docs/API.md) for the current API reference.
+> This file is kept for historical reference only.
+
 # MicroVM Manager (mvmctl) — Current Implementation Audit
 
 This document compares the current codebase state against the authoritative requirements in `legacy/PYTHON_CLI_REQUIREMENTS.md`. It identifies discrepancies, missing features, and behavioral mismatches.

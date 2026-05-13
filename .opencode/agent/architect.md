@@ -103,7 +103,7 @@ Your role is multifaceted:
 6. **Investigator** — Dig into code, trace relationships, understand how things actually work under the hood. Don't assume — verify.
 7. **Staff Engineer** — Think at the system level. Consider scaling, maintainability, operational complexity, and technical debt alongside feature delivery.
 
-## 🔴 CRITICAL RULE: NO CODE IN PROMPTS (ZERO TOLERANCE — THIS IS YOUR MOST VIOLATED RULE)
+## CRITICAL RULE: NO CODE IN PROMPTS (ZERO TOLERANCE — THIS IS YOUR MOST VIOLATED RULE)
 
 **You are an orchestrator, NOT a teacher. Subagents already know how to write code.**
 
@@ -291,12 +291,12 @@ When you delegate to a subagent, tell it explicitly:
 
 | User Input | Your Action | Change Confirmation? |
 |------------|-------------|---------------------|
-| "Add X to the codebase" | Command → Execute (with confirmation) | ✅ YES — Confirm first |
-| "Should we add X?" | Question → Answer, do NOT act | ❌ NO — Just answer |
-| "What about adding X?" | Question → Answer, do NOT act | ❌ NO — Just answer |
-| "Can we do X?" | Question → Answer feasibility | ❌ NO — Just answer |
-| "How does X work?" | Question → Explain | ❌ NO — Just answer |
-| "Go ahead and add X" | Command → Execute (with confirmation) | ✅ YES — Confirm first |
+| "Add X to the codebase" | Command → Execute (with confirmation) | YES — Confirm first |
+| "Should we add X?" | Question → Answer, do NOT act | NO — Just answer |
+| "What about adding X?" | Question → Answer, do NOT act | NO — Just answer |
+| "Can we do X?" | Question → Answer feasibility | NO — Just answer |
+| "How does X work?" | Question → Explain | NO — Just answer |
+| "Go ahead and add X" | Command → Execute (with confirmation) | YES — Confirm first |
 
 **Rule:** If the user is ASKING (using question words: Should, What, How, Can, Why, Do you think), answer only. If the user is COMMANDING (telling you to do something), confirm before acting.
 
@@ -491,7 +491,7 @@ Only include constraints that the subagent CANNOT know from its own instruction.
 Examples of GOOD task-specific constraints:
 - "This method must match the pattern used in ImageRepository.count()"
 - "Use the same return type as the existing list_by_status() method"
-- "This test must be placed in test_vm_lifecycle.py, class TestVMConfigOptions"
+- "This test must be placed in tests/system/vm/test_vm_lifecycle.py, class TestVMConfigOptions"
 - "This test must be marked serial because it changes the default image"
 
 Examples of BAD task-specific constraints (the subagent already knows these):
@@ -563,10 +563,10 @@ CRITICAL RULES — VIOLATION IS A CRITICAL FAILURE:
 GOAL: Add system test for vm ps subcommand.
 
 SOURCE FILES TO READ:
-- tests/system/test_vm_lifecycle.py (existing patterns)
+- tests/system/vm/test_vm_lifecycle.py (existing patterns)
 
 TARGET FILES:
-- tests/system/test_vm_lifecycle.py (add a new test class)
+- tests/system/vm/test_vm_lifecycle.py (add a new test class)
 
 TASK-SPECIFIC CONSTRAINTS:
 - Place after TestVMConfigOptions, before TestVMRemove
@@ -715,10 +715,10 @@ You are the qa-engineer agent. [full role clarification block from Subagent Enfo
 GOAL: Add a system test for the `vm ps` subcommand.
 
 SOURCE FILES TO READ:
-- tests/system/test_vm_lifecycle.py (existing patterns)
+- tests/system/vm/test_vm_lifecycle.py (existing patterns)
 
 TARGET FILES:
-- tests/system/test_vm_lifecycle.py (add a new test class)
+- tests/system/vm/test_vm_lifecycle.py (add a new test class)
 
 TASK-SPECIFIC CONSTRAINTS:
 - Place after TestVMConfigOptions, before TestVMRemove
@@ -854,17 +854,67 @@ from mvmctl.core.vm._controller import VMController           # Use lazy __getat
 **Exception hierarchy (3-level):** `MVMError` → `{Domain}Error` → `{Domain}{Specific}Error`. Every exception carries an optional `code: str | None` for programmatic branching.
 
 ```
-MVMError
-├── NetworkError
-│   └── NetworkSubnetOverlapError (code="network.subnet.overlap")
-├── VMError
-│   ├── VMCreateError
-│   └── VMStateError
-├── FirecrackerError
-│   ├── FirecrackerClientError
-│   ├── FirecrackerSpawnError
-│   └── FirecrackerConfigError
-└── ... (ImageError, KernelError, BinaryError, HostError, etc.)
+MVMError                              # Root — carries optional code field
+├── VMError                           # VM domain
+│   ├── VMCreateError                 # VM creation failure (mid-rollback)
+│   ├── VMStateError                  # Invalid state transition
+│   ├── VMRequestError                # Request resolution failure
+│   ├── VMBuilderError                # Builder failure (mid-rollback)
+│   └── VMNotFoundError               # VM not found in state
+├── NetworkError                      # Network setup/teardown failure
+├── FirecrackerError                  # Firecracker domain
+│   ├── FirecrackerClientError        # Process/API failure
+│   │   └── SocketNotFoundError       # Unix socket not found
+│   ├── FirecrackerSpawnError         # Spawn failure
+│   └── FirecrackerConfigError        # Config generation failure
+├── ImageError                        # Image download/conversion failure
+│   ├── ImageCompressionError         # Compression failure
+│   ├── ImageDecompressionError       # Decompression failure
+│   ├── ImageCorruptError             # Corrupted file
+│   ├── ImageEmptyError               # Empty file
+│   ├── ImageValidationError          # Format validation failure
+│   └── ChecksumMismatchError         # SHA256 checksum mismatch
+├── KernelError                       # Kernel build/config failure
+├── BinaryError                       # Binary management
+│   └── BinaryAlreadyExistsError      # Version already exists
+├── HostError                         # Host configuration failure
+│   └── PrivilegeError                # Insufficient privileges
+├── ConfigError                       # Configuration loading failure
+├── CloudInitError                    # Cloud-init provisioning failure
+│   ├── CloudInitProvisionError       # Invalid user data
+│   ├── CloudInitModeError            # Mode resolution failure
+│   └── ... (OffMode, IsoMode, NetMode, InjectMode)
+├── ConsoleError                      # Console/PTY operation failure
+├── LogsError                         # Log read/tail failure
+├── SSHError                          # SSH connection failure
+├── MVMKeyError                       # SSH key management
+│   ├── KeyExportError                # Export failure
+│   ├── KeyDependencyError            # ssh-keygen missing
+│   └── KeyFileError                  # File read/write failure
+├── GuestfsError                      # libguestfs errors
+│   ├── GuestfsNotAvailableError      # Python bindings not found
+│   ├── GuestfsLaunchError            # Appliance launch failure
+│   ├── GuestfsMountError             # Rootfs mount failure
+│   ├── GuestfsWriteError             # File write failure
+│   └── GuestfsApplianceError         # Fixed appliance build failure
+├── LoopMountError                    # Loop-mount provisioning
+│   ├── LoopMountBinaryNotFoundError  # Binary not found
+│   └── LoopMountTimeoutError         # Timeout
+├── ProcessError                      # Subprocess execution failure
+├── DatabaseError                     # Database operation failure
+│   └── MigrationError                # Migration version/filename failure
+├── ImageAcquireError                 # Image fetch/import failure (direct child)
+├── IPTablesTrackerError              # IPTables action failure (direct child)
+├── AssetNotFoundError                # Asset not found locally/remotely
+├── BundledAssetError                 # Bundled package asset failure
+│   └── BundledAssetNotFoundError     # Bundled file not found
+├── ... (ImageNotFoundError, BinaryNotFoundError, KernelNotFoundError,
+│        NetworkNotFoundError, KeyNotFoundError, VolumeNotFoundError,
+│        VolumeCreateError are direct MVMError children for legacy compat)
+├── RootPartitionDetectionError       # Root partition detection failure
+├── TieDetectedError                  # Multiple partition tie
+├── DownloadError                     # Download failure
+└── HttpDownloadError                 # HTTP download failure
 ```
 
 **Error message format (user-facing):** `"What happened. Why it happened. Possible fix."`
@@ -996,10 +1046,10 @@ The API layer has a precise data flow pattern for handling user input. This patt
 
 ```
 CLI → VMInput → VMOperation.rm(input) → VMRequest(input, db).resolve()
-                                              ↓
-                                    ResolvedVMInput (frozen, validated)
-                                              ↓
-                                    Operation acts on resolved data
+                                               ↓
+                                     ResolvedVMInput (frozen, validated)
+                                               ↓
+                                     Operation acts on resolved data
 ```
 
 - **`VMInput`** — Raw identifiers from CLI (name, id, IP, MAC). Thin dataclass with list fields for identifiers plus optional flags.
@@ -1011,10 +1061,10 @@ CLI → VMInput → VMOperation.rm(input) → VMRequest(input, db).resolve()
 
 ```
 CLI → VMCreateInput → VMOperation.create(input) → VMCreateRequest(input, db).resolve()
-                                                        ↓
-                                              ResolvedVMCreateInput (frozen, validated)
-                                                        ↓
-                                              Operation creates the resource
+                                                         ↓
+                                               ResolvedVMCreateInput (frozen, validated)
+                                                         ↓
+                                               Operation creates the resource
 ```
 
 - **`VMCreateInput`** — Raw creation parameters from CLI. Optional fields are `None` — defaults are resolved by the Request.
@@ -1121,6 +1171,7 @@ class NetworkCreateRequest:
   - This is the ONE exception to "Service does not validate"
 
 **Caller-Validates / Receiver-Trusts:**
+
 The API layer is responsible for passing clean, validated data to Core. Service and Controller trust that data. Defensive validation in Service is a code smell — it adds latency and conflates concerns.
 
 Validation that requires DB queries (like subnet overlap) belongs in the **API Request** resolver for structural checks, or in **Service** as a state-detection guard if it depends on runtime system state rather than caller input.
@@ -1435,7 +1486,7 @@ If any design decision in the checklist above is unclear, conflicts with the exi
 - Coverage must meet the CI gate of ≥80% branch coverage
 
 **System Tests** — The production release gate:
-- Create a `tests/system/test_{domain}.py` file with black-box CLI subprocess tests
+- Create a `tests/system/{domain}/test_{domain}.py` file with black-box CLI subprocess tests
 - Cover the happy path for every CLI command (create, list, get/inspect, remove)
 - Cover every realistic edge case: duplicate names, nonexistent resources, invalid inputs, force flags
 - Test the real-world integration path end-to-end (e.g., create volume → attach to VM → verify attachment)

@@ -171,26 +171,27 @@ mvm logs myvm --os
 
 **1. Missing or broken jailer.** Firecracker requires the `jailer` binary alongside it. If the binary was fetched with `mvm bin pull`, it should be bundled, but manual installs may miss it.
 
-**2. Kernel file is not readable by Firecracker.** Verify the kernel exists and is accessible:
+**2. Kernel file is not readable by Firecracker.** Verify the kernel exists and the path is correct:
 ```bash
-ls -l $(mvm kernel ls --json | grep path)
+mvm kernel ls --json | python3 -c "import sys,json; [print(k['path']) for k in json.load(sys.stdin)]"
+ls -l <path_from_output>
 ```
 
 **3. Invalid boot arguments.** Custom boot args (set via `mvm config`) may contain typos or flags the kernel doesn't understand. Reset to defaults:
 ```bash
-mvm config reset vm.boot_args
+mvm config reset defaults.vm boot_args
 ```
 
 **4. Socket path too long.** Firecracker uses Unix domain sockets which have a 108-character path limit. Long VM names or deep cache directories can exceed this. Check:
 ```bash
 # See the VM's socket path
-ls -la ~/.cache/mvmctl/vms/<myvm>/run/
+ls -la ~/.cache/mvmctl/vms/*/run/
 # If it looks very long, try a shorter VM name
 ```
 
 **5. Binary / kernel architecture mismatch.** A kernel built for `x86_64` won't boot under an `aarch64` Firecracker binary. Verify both match:
 ```bash
-file $(mvm kernel ls --json | grep path)
+file $(mvm kernel ls --json | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['path'])")
 mvm bin ls
 ```
 
@@ -203,7 +204,7 @@ mvm bin ls
 **Solution:**
 ```bash
 mvm image pull ubuntu-24.04
-mvm image ls   # ✓ should appear
+mvm image ls   # should appear
 ```
 
 ---
@@ -228,6 +229,12 @@ mvm bin default <id>
 
 Run `mvm host init` first to set up the `mvm` group and sudoers configuration.
 
+All privileged commands (those requiring bridge/TAP/iptables changes) must be executed within the `mvm` group context. Use the `sg mvm -c` pattern:
+```bash
+sg mvm -c 'mvm host init'
+sg mvm -c 'mvm network create --name mynet'
+```
+
 ---
 
 ## Undoing host init — `host clean` vs `host reset`
@@ -241,31 +248,31 @@ There are two levels of undo depending on how much you want to remove:
 Stop all running VMs first, then:
 
 ```bash
-sudo mvm host clean
+mvm host clean
 ```
 
 This removes:
-- All `mvm-*` bridges and TAP devices
-- All iptables chains (`MVM-FORWARD`, `MVM-POSTROUTING`, `MVM-NOCLOUDNET-INPUT`)
+- All bridges and TAP devices
+- All iptables chains used by mvm
 - The default network from the database
 - Any orphaned bridges and rules
 
 It does **NOT** touch:
-- ❌ The `mvm` system group or your user membership
-- ❌ The sudoers drop-in file
-- ❌ Sysctl `ip_forward` setting
-- ❌ The iptables rules file
+- The `mvm` system group or your user membership
+- The sudoers drop-in file
+- Sysctl `ip_forward` setting
+- The iptables rules file
 
 Run `mvm host init` afterwards to recreate the default network.
 
 ### `mvm host reset` — Full factory reset
 
 ```bash
-sudo mvm host reset --force
+mvm host reset --force
 ```
 
 Does everything `clean` does, **plus**:
-- Removes the sudoers drop-in (`/etc/sudoers.d/mvmctl`)
+- Removes the sudoers drop-in (`/etc/sudoers.d/mvm`)
 - Removes your user from the `mvm` group
 - Deletes the `mvm` system group
 - Restores `net.ipv4.ip_forward` to its original value
@@ -273,7 +280,7 @@ Does everything `clean` does, **plus**:
 
 After reset, run `mvm host init` from scratch to set everything up again.
 
-> ⚠️ Both commands refuse to run if any VMs are still running. Stop them first with `mvm vm rm --name <name>`.
+> Both commands refuse to run if any VMs are still running. Stop them first with `mvm vm rm --name <name>`.
 
 ---
 
@@ -288,7 +295,7 @@ The port range (8000-9000) may be exhausted. Check for stale servers:
 # List processes using nocloud ports
 sudo ss -tlnp | grep -E ':(8[0-9]{3}|9[0-9]{3})'
 # Kill any orphaned mvm processes
-pkill -f nocloud-net-server
+pkill -f mvm-nocloud-server
 ```
 
 ---
@@ -414,7 +421,7 @@ mvm cache prune vm --dry-run  # Preview what would be removed
 mvm cache prune vm            # Actually remove stale entries
 ```
 
-For a complete reset (⚠️ removes all VMs):
+For a complete reset (removes all VMs):
 ```bash
 mvm vm ls                  # Check what VMs exist
 mvm cache prune --all      # Prune everything
@@ -426,7 +433,7 @@ mvm cache prune --all      # Prune everything
 
 **Symptom:** Image downloads fail mid-way, VM creation fails with disk errors, or `df` shows the cache partition is full.
 
-**Cause:** VM images are typically 1–3 GB each, and each VM clones its root filesystem for isolation. A few VMs can easily consume 10–20 GB.
+**Cause:** VM images are typically 1-3 GB each, and each VM clones its root filesystem for isolation. A few VMs can easily consume 10-20 GB.
 
 **Diagnosis:**
 
@@ -467,12 +474,7 @@ mvm vm rm --name <vm-name>           # Remove VM and its disk
 mvm cache prune --all                # Remove all cached artifacts
 ```
 
-**5. Change the cache directory** to a partition with more space:
-```bash
-mvm config set paths.cache_dir /mnt/bigdisk/mvmctl-cache
-```
-
-> ⚠️ The cache directory defaults to `~/.cache/mvmctl/`. If your home partition is small, consider symlinking it or configuring a different path.
+> The cache directory defaults to `~/.cache/mvmctl/`. To change it, set the `MVM_CACHE_DIR` environment variable to point to a partition with more space.
 
 ---
 
@@ -498,7 +500,7 @@ Here is the chain of failure:
 1. `libguestfs-make-fixed-appliance` iterates `/lib/modules/*`, picks the kernel with the latest version.
 2. It boots that kernel inside a QEMU microVM using `virtio-scsi-pci` to expose the appliance disk.
 3. If the selected kernel lacks `CONFIG_VIRTIO_PCI`, the virtio PCI device never materializes.
-4. No SCSI host appears → no block devices under `/sys/block/` → supermin's initrd spins forever waiting for the root disk UUID.
+4. No SCSI host appears -> no block devices under `/sys/block/` -> supermin's initrd spins forever waiting for the root disk UUID.
 
 **Why a stock kernel is installed but still not used:**
 
@@ -572,14 +574,59 @@ libguestfs-make-fixed-appliance ~/.cache/mvmctl/appliance
 
 ---
 
-## Debug mode
+## Volume not found
 
-For more detailed error output, set debug mode:
+**Problem:** `mvm volume inspect` or `mvm volume resize` returns "Volume not found".
+
+**Solution:**
 
 ```bash
+mvm volume ls   # List all volumes to see available names and ID prefixes
+mvm volume inspect <name-or-prefix>   # Use the name or first 6+ chars of the ID
+```
+
+Volume lookup accepts full names or short ID prefixes (minimum 6 characters). If the prefix is ambiguous (matches multiple volumes), the command will report an error.
+
+---
+
+## Cannot remove volume attached to a VM
+
+**Problem:** `mvm volume rm` fails because the volume is attached to a running VM.
+
+**Solution:**
+
+```bash
+# Detach the volume from the VM first
+mvm vm detach-volume <vm-identifier> <volume-name>
+
+# Then remove the volume
+mvm volume rm <volume-name>
+```
+
+Or force-remove (removes the volume record and file but does not hot-unplug from the VM):
+
+```bash
+mvm volume rm <volume-name> --force
+```
+
+---
+
+## Debug mode
+
+For more detailed error output, use the built-in CLI flags or the environment variable:
+
+```bash
+# Use the --debug flag (sets log level to DEBUG)
+mvm --debug vm create --name myvm --image ubuntu-24.04
+
+# Use the --verbose flag (sets log level to INFO)
+mvm --verbose vm create --name myvm --image ubuntu-24.04
+
 # Use the log level environment variable
 MVM_LOG_LEVEL=DEBUG mvm vm create --name myvm --image ubuntu-24.04
 ```
+
+The `--debug` flag has highest priority, followed by `--verbose`, then `MVM_LOG_LEVEL`. All commands support the `--debug` and `--verbose` flags.
 
 ---
 

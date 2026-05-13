@@ -1,0 +1,3 @@
+# Three-Layer Architecture: CLI → API → Core
+
+All code follows a strict three-layer flow: CLI → API → Core. The CLI layer handles argument parsing, output formatting, and constants-backed defaults — no business logic, no DB queries. The API layer is the sole orchestrator of multiple core domains, handles privilege checks and DB-backed defaults, and is the stable public Python surface. Core domains are strictly isolated — they never import from other core domains, only from `_shared`. Violations are enforced by AST-based CI tests (`test_imports.py`). The API layer's `__init__.py` is the curated public interface; external consumers (CLI, TUI, scripts) must `from mvmctl.api import ...` and never import from `mvmctl.core` or `mvmctl.cli` directly.

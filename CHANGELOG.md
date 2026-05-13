@@ -7,33 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.0]
 
-Initial release of mvmctl — a production-grade Python CLI for managing Firecracker microVMs.
+Initial release of mvmctl -- a production-grade Python CLI for managing Firecracker microVMs.
 
 ### Added
 
-#### CLI Commands (14 top-level groups, 45+ subcommands)
-- **`mvm vm`** — Full VM lifecycle: create, ls, ps, rm, start, stop, reboot, pause, resume, snapshot, load, inspect, export, import
-- **`mvm console`** — Interactive serial console access via PTY-over-vsock relay (attach, --state, --kill)
-- **`mvm host`** — Host configuration: init (KVM, modules, sysctl, mvm group, sudoers), ls, clean, reset
-- **`mvm network`** — Named bridge networks with NAT: create, rm, ls, inspect, set-default, sync
-- **`mvm key`** — SSH key management: ls, add, create, rm, inspect, set-default, export
-- **`mvm config`** — Runtime configuration: get, set, list, reset
-- **`mvm init`** — Interactive setup wizard with non-interactive mode
-- **`mvm kernel`** — Kernel management: ls, fetch (official and Firecracker-optimized), set-default, rm
-- **`mvm image`** — Image management: ls, fetch, set-default, rm, inspect, import, warm
-- **`mvm bin`** — Firecracker binary management: ls, fetch, default, rm
-- **`mvm cache`** — Cache lifecycle: init, prune (per-resource or all), clean
-- **`mvm logs`** — Log streaming: boot logs (serial console) and Firecracker OS logs with --follow
-- **`mvm ssh`** — SSH into VMs by name, ID, IP, or MAC with custom user, key, and connection timeout
-- **`mvm volume`** — Persistent data disk management: create, rm, ls, inspect, resize
+#### CLI Commands (14 top-level groups, 70+ subcommands)
+- **`mvm vm`** -- Full VM lifecycle: ls, ps, create, rm, start, stop, reboot, pause, resume, snapshot, load, inspect, export, import, attach-volume, detach-volume
+- **`mvm console`** -- Interactive serial console access via PTY-over-vsock relay (attach, --state, --kill)
+- **`mvm host`** -- Host configuration: init (KVM, modules, sysctl, mvm group, sudoers), ls, clean, reset
+- **`mvm network`** -- Named bridge networks with NAT: ls, default, create, rm, inspect, sync
+- **`mvm key`** -- SSH key management: ls, add, create, rm, inspect, export, default
+- **`mvm config`** -- Runtime configuration: get, set, list, reset
+- **`mvm init`** -- Interactive setup wizard with non-interactive mode
+- **`mvm kernel`** -- Kernel management: ls, inspect, pull, default, rm
+- **`mvm image`** -- Image management: ls, pull, default, rm, inspect, import, warm
+- **`mvm bin`** -- Firecracker binary management: ls, pull, rm, default
+- **`mvm cache`** -- Cache lifecycle: init, prune (per-resource or all), clean
+- **`mvm logs`** -- Log streaming: boot logs (serial console) and Firecracker OS logs with --follow
+- **`mvm ssh`** -- SSH into VMs by name, ID, IP, or MAC with custom user, key, and connection timeout
+- **`mvm volume`** -- Persistent data disk management: create, rm, ls, inspect, resize
 
 #### Architecture
-- **Three-layer architecture** (CLI → API → Core) with strict import boundaries
-- **LazyMVMGroup** — Custom Click group with lazy-loaded Typer sub-apps for sub-150ms startup
+- **Three-layer architecture** (CLI -> API -> Core) with strict import boundaries
+- **LazyMVMGroup** -- Custom Click group with lazy-loaded Typer sub-apps for sub-150ms startup
 - **Controller / Service / Repository / Resolver** pattern across all 14 core domains
-- **Input → Request → Resolved** pipeline for type-safe, validated VM operations
+- **Input -> Request -> Resolved** pipeline for type-safe, validated VM operations
 - **Provisioning backend abstraction** (LoopMount vs Guestfs) with factory pattern
-- **SQLite database** with migration system for persistent state (vms, networks, images, kernels, binaries, keys, host state, iptables rules, IP leases, volumes)
+- **SQLite database** (`db/migrations/` directory) with migration system (`001_initial_schema.sql`) for persistent state: images, kernels, binaries, volumes, networks, network_leases, vm_instances, host_state, host_state_changes, iptables_rules, ssh_keys, user_settings
+- **Shared utility helpers** (`utils/`): fs, _system, http, network, crypto, template, yaml, _validators, _io, _lazy_import, progress, cli, operation_utils, auditlog, common, _disk
 - **Relation enrichment** system with batch loading to prevent N+1 queries
 - **Privilege delegation** model via `mvm` unix group and sudoers drop-in (no sudo for normal operations)
 
@@ -42,7 +43,7 @@ Initial release of mvmctl — a production-grade Python CLI for managing Firecra
 - Batch VM creation via `--count N` and all-or-nothing `--atomic` flag
 - Root filesystem images via durable incremental copying with reflink/FICLONE support
 - Snapshot and restore (memory + VM state) via Firecracker API socket
-- Export VM configurations as portable JSON
+- Export VM configurations as portable JSON using semantic references (os_slug, version, name)
 - Import previously exported VM configurations
 - Cloud-init provisioning in four modes: inject (libguestfs), net (nocloud-net HTTP server), iso, off
 - Firecracker process lifecycle: spawn, monitor, signal (SIGTERM/SIGKILL), exit code tracking
@@ -59,8 +60,8 @@ Initial release of mvmctl — a production-grade Python CLI for managing Firecra
 #### Image Management
 - Fetch images by OS slug (ubuntu-24.04, ubuntu-22.04, archlinux, debian-bookworm, alpine-3.21)
 - Import local image files with automatic format detection
-- Format support: qcow2, raw, tar-rootfs, squashfs, vhd
-- Automated conversion pipeline: download → decompress → format conversion → root partition extraction → filesystem optimization
+- Format support: qcow2, raw, vhd, vhdx, tar-rootfs, squashfs
+- Automated conversion pipeline: download -> decompress -> format conversion -> root partition extraction -> filesystem optimization
 - SHA256 checksum verification for downloaded images
 - Image warm pool for fast VM creation (pre-extracted ready-to-copy images)
 - Incremental copy with reflink/FICLONE when filesystem supports it
@@ -88,31 +89,32 @@ Initial release of mvmctl — a production-grade Python CLI for managing Firecra
 - Load KVM kernel modules (kvm, kvm_intel/kvm_amd)
 - Create mvm unix group and sudoers drop-in with passwordless access to privileged binaries
 - Setup iptables chains for VM traffic management
-- Idempotent — safe to run multiple times
+- Idempotent -- safe to run multiple times
 - Full reset: revert all host changes including networking, sysctl, sudoers, and group
 
 #### Services
-- **Console relay** — PTY-over-vsock bridge for interactive serial console without SSH
-- **nocloud-net server** — Per-VM HTTP server for cloud-init datasource delivery
-- **mvm-provision** — Loop-mount rootfs provisioning binary for SSH key injection, hostname setup, DNS config, cloud-init disable, and filesystem resize (~200ms per VM, replaces libguestfs as primary path)
+- **Console relay** -- PTY-over-vsock bridge for interactive serial console without SSH
+- **nocloud-net server** -- Per-VM HTTP server for cloud-init datasource delivery
+- **mvm-provision** -- Loop-mount rootfs provisioning binary for SSH key injection, hostname setup, DNS config, cloud-init disable, and filesystem resize (~200ms per VM, replaces libguestfs as primary path)
 
 #### Developer Experience
-- **Python API** — All CLI commands map 1:1 to `*Operation` static methods in `mvmctl.api`
-- **Strict mypy** — Full type annotations across the codebase, no `type: ignore` suppressions
-- **Ruff** — Linting and formatting, zero-tolerance for violations
-- **Test suite** — Unit, integration, system, and layer compliance tests
-- **uv** — Fast Python package and project management
+- **Python API** -- All CLI commands map 1:1 to `*Operation` static methods in `mvmctl.api`
+- **Strict mypy** -- Full type annotations across the codebase, no `type: ignore` suppressions
+- **Ruff** -- Linting and formatting, zero-tolerance for violations
+- **Test suite** -- Unit, integration, system, and layer compliance tests
+- **uv** -- Fast Python package and project management
+- **Build scripts** (`scripts/`): build_services.py, run_tests.py, setup-test-environment.py, profile_test_memory.py
 
 #### Distribution
 - Standalone Nuitka-compiled binary (zero Python runtime dependency)
-- Nuitka is the sole build tool (no PyInstaller fallback)
+- Nuitka is the primary build tool (PyInstaller is available as a fallback)
 - PyPI package (`mvmctl`)
 - Distribution packages: .deb (Debian/Ubuntu), .rpm (RHEL/Fedora), PKGBUILD (Arch Linux)
 - Man page (`mvm.1`)
 
 #### Performance
 - CLI startup under 150ms via lazy-loading LazyMVMGroup
-- Batch relation loading with deduplication (O(relations) queries, not O(entities × relations))
+- Batch relation loading with deduplication (O(relations) queries, not O(entities x relations))
 - Durable incremental image copying with reflink support (instant copy on btrfs/XFS)
 - SQL-level computation (COUNT, WHERE IN) instead of fetch-all + Python filtering
 

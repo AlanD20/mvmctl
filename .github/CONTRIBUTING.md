@@ -37,12 +37,12 @@ mvmctl/
 │   │   ├── image_operations.py, kernel_operations.py, binary_operations.py
 │   │   ├── key_operations.py, console_operations.py, logs_operations.py
 │   │   ├── cache_operations.py, config_operations.py, ssh_operations.py
-│   │   ├── init_operations.py
+│   │   ├── init_operations.py, volume_operations.py
 │   │   └── inputs/   # Request schema factory
 │   ├── cli/          # Typer command groups (thin — no business logic)
 │   │   ├── vm.py, network.py, host.py, image.py, kernel.py, bin.py
 │   │   ├── key.py, console.py, logs.py, cache.py, config.py
-│   │   ├── ssh.py, init.py
+│   │   ├── ssh.py, init.py, volume.py
 │   ├── core/         # Isolated domain logic (no cross-domain imports)
 │   │   ├── vm/       # _controller.py, _service.py, _repository.py, _resolver.py, _firecracker.py
 │   │   ├── network/  # _controller.py, _service.py, _repository.py, _resolver.py, _lease_service.py, _lease_resolver.py
@@ -57,15 +57,16 @@ mvmctl/
 │   │   ├── ssh/      # _service.py
 │   │   ├── cloudinit/ # _provisioner.py, _manager.py
 │   │   ├── logs/     # _controller.py, _service.py
+│   │   ├── volume/   # _controller.py, _service.py, _repository.py, _resolver.py
 │   │   └── _shared/  # Shared infra: _db.py (Database), _asset_manager.py, _iptables_tracker/, _guestfs/, etc.
 │   ├── models/       # Pure @dataclass models (VMInstanceItem, NetworkItem, ImageSpec, FirecrackerConfig, etc.)
 │   ├── utils/        # Shared helpers (fs.py, _system.py, http.py, network.py, crypto.py, template.py, yaml.py, etc.)
 │   ├── assets/       # Bundled YAML configs (images.yaml, kernels.yaml) + JSON templates (firecracker.template.json, cloud-init.template.yaml)
 │   └── services/     # Runtime subprocess services (console_relay, nocloud_server)
 ├── tests/
-│   ├── unit/                # Unit tests — 111 files
-│   ├── integration/         # Workflow tests — 17 files
-│   ├── system/              # Full-stack tests — 14 files (KVM/root not required)
+│   ├── unit/                # Unit tests — 118 files
+│   ├── integration/         # Workflow tests — 18 files
+│   ├── system/              # Full-stack tests — 19 files (KVM/root not required)
 │   └── layer_compliance/    # Architecture constraint verification — 7 files
 ├── pyproject.toml
 └── README.md
@@ -183,6 +184,26 @@ Use `pytest.fixture` for shared setup. Keep unit tests fast; avoid `sleep()` or 
 - **Tests must not require root, KVM, or a real network.** Mock all subprocess calls.
 - **Coverage gate:** 80% branch coverage minimum. Dropping coverage will fail CI.
 - **Architecture layers:** `cli/` → `api/` → `core/` — three-tier, no skipping layers. `api/` is the only layer that imports multiple core domains. Core domains are isolated — never import one domain from another. See [`AGENTS.md`](AGENTS.md) for the full architecture reference.
+- **Lazy imports in `__init__.py`:** All package `__init__.py` files MUST use PEP 562 `__getattr__` lazy imports via `resolve_lazy()`. Eager imports at package level are forbidden — they cascade-load all submodules even when only one class is needed, adding ~230ms+ to CLI startup time.
+  ```python
+  from __future__ import annotations
+  from mvmctl.utils._lazy_import import resolve_lazy
+
+  __all__ = ["ExportedClass1", "ExportedClass2"]
+
+  _LAZY_MAP: dict[str, tuple[str, str]] = {
+      "ExportedClass1": ("module.path._submodule", "ExportedClass1"),
+      ...
+  }
+
+  def __getattr__(name: str) -> object:
+      return resolve_lazy(name, _LAZY_MAP, __name__)
+
+  def __dir__() -> list[str]:
+      return __all__
+  ```
+- **`from __future__ import annotations`:** Every Python file MUST include `from __future__ import annotations` as its first import (after the file docstring). This enables PEP 604 union syntax (`str | None` instead of `Optional[str]`) and defers annotation evaluation, improving startup time.
+- **Controller convention:** `Controller` classes handle state management only — `start()`, `stop()`, `pause()`, `resume()`, `snapshot()`. They do NOT have `create()`, `remove()`, `list()`, or `inspect()` methods. Creation/removal belongs in the `Service` layer, cross-domain orchestration in the `API`/`Operation` layer.
 - **No hardcoded defaults** — use the `OVERRIDABLE_DEFAULTS` dict in `constants.py`.
 - **Strict mypy** — no `type: ignore` suppressions.
 - One feature or fix per PR; write a clear description of *why*, not just *what*.
@@ -227,7 +248,7 @@ All MVM environment variables use the `MVM_` prefix.
 |---|---|---|
 | `MVM_CACHE_DIR` | Override the cache directory for images, kernels, and VM state | `~/.cache/mvmctl` |
 | `MVM_CONFIG_DIR` | Override the config directory | `~/.config/mvmctl` |
-| `MVM_LOG_LEVEL` | Set log verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | `INFO` |
+| `MVM_LOG_LEVEL` | Set log verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | `WARNING` |
 | `MVM_FIRECRACKER_BIN` | Path to the Firecracker binary | auto-detected from metadata |
 
 When writing code that reads config or paths, always go through the settings module rather than reading env vars directly. That keeps everything in one place and makes testing easier.
@@ -308,6 +329,12 @@ PyInstaller can also be used for faster compilation during development. The GitH
 Networking operations (bridge/TAP setup, iptables, sysctl) require elevated privileges.
 Rather than requiring `sudo` for every command, mvm uses a privilege delegation model:
 
+All privileged commands must be executed within the `mvm` group context. Use the `sg mvm -c` pattern:
+```bash
+sg mvm -c 'mvm host init'
+sg mvm -c 'mvm network create --name mynet'
+```
+
 1. **`sudo mvm host init`** creates a system group (`mvm`) and a sudoers drop-in file
    (`/etc/sudoers.d/mvm`) that grants members of the `mvm` group passwordless access
    to a specific set of binaries defined in `mvmctl.constants.PRIVILEGED_BINARIES`.
@@ -315,7 +342,7 @@ Rather than requiring `sudo` for every command, mvm uses a privilege delegation 
 2. **`PRIVILEGED_BINARIES`** is the single source of truth for which system binaries
    the sudoers file grants access to:
    - `/usr/sbin/ip` (iproute2)
-   - `/usr/sbin/iptables`, `/usr/sbin/iptables-restore`, `/usr/sbin/iptables-save`
+   - `/usr/sbin/iptables`, `/usr/sbin/iptables-save`
    - `/usr/sbin/sysctl` (procps)
 
 3. **`HostPrivilegeHelper.check_privileges(binary, description)`** (in `src/mvmctl/core/host/_helper.py`)

@@ -1,5 +1,11 @@
 # JSON output mode
 
+> ## Status: ❌ NOT IMPLEMENTED
+>
+> No code has been written for this feature. The API layer returns `OperationResult` with structured data, and the CLI layer uses Rich/text output. No `--json` flag exists.
+>
+> **Last verified:** 2026-05-13
+
 **Phase:** Standalone — orthogonal to all features
 **Complexity:** Low
 **Depends on:** Nothing

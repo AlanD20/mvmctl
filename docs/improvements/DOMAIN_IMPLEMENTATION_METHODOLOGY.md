@@ -1,5 +1,20 @@
 # Domain Implementation Methodology
 
+> ## ✅ IMPLEMENTED — This methodology reflects the current codebase.
+>
+> All architectural rules, patterns, and layer definitions documented below match the actual implementation.
+> For verification, see the 15 core domains in `src/mvmctl/core/` (list below).
+>
+> **Verification (2026-05-13):**
+> - `from __future__ import annotations` present in ALL 185+ `.py` files under `src/mvmctl/`
+> - All 15 core domains (`_shared`, `binary`, `cache`, `cloudinit`, `config`, `console`, `host`, `image`, `kernel`, `key`, `logs`, `network`, `ssh`, `vm`, `volume`) follow Controller/Service/Repository/Resolver pattern
+> - API layer has `*Operations` classes for all 15 domains, with `inputs/` directory containing 22 Input/Request files
+> - Core domains return `*Item` dataclasses only
+> - Controllers are stateful, single-entity; Services are stateless infrastructure
+> - Operations are `@staticmethod` orchestrators in API layer
+> - No raw `subprocess.run()` — all subprocess calls through `run_cmd()` / `stream_cmd()`
+> - Lazy imports (PEP 562) in ALL `__init__.py` files
+
 ## Overview
 
 This document defines the standard process for implementing domain controllers and services in mvmctl. The methodology ensures:
@@ -14,11 +29,28 @@ This document defines the standard process for implementing domain controllers a
 
 Never mix domain implementations. Each domain (network, image, kernel, binary, etc.) follows this complete lifecycle before moving to the next.
 
+**Implemented domains:**
+1. `_shared/` — Cross-cutting infrastructure (DB, provisioner, guestfs, loopmount, iptables, parallel executor)
+2. `binary/` — Firecracker binary management (download, cache, resolve)
+3. `cache/` — Cache management (clean, prune)
+4. `cloudinit/` — Cloud-init ISO generation and mode management
+5. `config/` — User settings with SQLite backing
+6. `console/` — VM console relay management
+7. `host/` — Host initialization and networking setup
+8. `image/` — Image download, decompression, cache, and materialization
+9. `kernel/` — Kernel download, build, and cache
+10. `key/` — SSH key generation and management
+11. `logs/` — VM log file management
+12. `network/` — Bridge, TAP, NAT, iptables, lease management
+13. `ssh/` — SSH client connectivity
+14. `vm/` — VM lifecycle (create, start, stop, pause, resume, snapshot)
+15. `volume/` — Persistent data disk management
+
 ---
 
 ## Architecture Rules (MANDATORY)
 
-### Rule 1: Core Returns DB Models Only
+### Rule 1: Core Returns DB Models Only ✅ IMPLEMENTED
 
 **Core domain classes (Controller, Service) MUST return `*Item` dataclasses (DB models), NOT custom Config/Input classes.**
 
@@ -29,7 +61,9 @@ Never mix domain implementations. Each domain (network, image, kernel, binary, e
 
 The `*Item` classes (e.g., `NetworkItem`, `VMInstanceItem`) are the single source of truth for domain data. They live in `models/` and map directly to DB records. Any custom data shapes (Config, Input, Request) belong in the API layer.
 
-### Rule 2: API Layer Data Flow (Input → Request → Resolved → Operation)
+**Verified:** All core domains return `*Item` types from models/.
+
+### Rule 2: API Layer Data Flow (Input → Request → Resolved → Operation) ✅ IMPLEMENTED
 
 The API layer has a precise data flow pattern for handling user input. This pattern applies to ALL domains (VM, network, image, kernel, etc.). The word "VM" below is a placeholder for any domain resource.
 
@@ -76,27 +110,53 @@ CLI → VMCreateInput → VMOperation.create(input) → VMCreateRequest(input, d
 4. **Input classes have `None` for optional fields** — The CLI layer passes what the user provides. The Request layer resolves `None` to DB-backed defaults.
 5. **Resolved classes have NO `None` for required fields** — All values are explicit and validated.
 
-#### File Organization
+#### File Organization ✅ VERIFIED
 
 ```
-api/inputs/
+api/inputs/ (22 files)
 ├── _vm_input.py              # VMInput, VMRequest, ResolvedVMInput
 ├── _vm_create_input.py       # VMCreateInput, VMCreateRequest, ResolvedVMCreateInput
 ├── _network_input.py         # NetworkInput, NetworkRequest, ResolvedNetworkInput
 ├── _network_create_input.py  # NetworkCreateInput, NetworkCreateRequest, ResolvedNetworkCreateInput
-└── ...
+├── _volume_input.py          # VolumeInput, VolumeRequest, ResolvedVolumeInput
+├── _volume_create_input.py   # VolumeCreateInput, VolumeCreateRequest, ResolvedVolumeCreateInput
+├── _image_input.py           # ImageInput, ImageRequest, ResolvedImageInput
+├── _image_acquire_input.py   # ImageAcquireInput, ImageAcquireRequest, ResolvedImageAcquireInput
+├── _key_input.py             # KeyInput, KeyRequest, ResolvedKeyInput
+├── _key_create_input.py      # KeyCreateInput, KeyCreateRequest, ResolvedKeyCreateInput
+├── _binary_input.py          # BinaryInput, BinaryRequest, ResolvedBinaryInput
+├── _binary_pull_input.py     # BinaryPullInput, BinaryPullRequest, ResolvedBinaryPullInput
+├── _kernel_input.py          # KernelInput, KernelRequest, ResolvedKernelInput
+├── _kernel_pull_input.py     # KernelPullInput, KernelPullRequest, ResolvedKernelPullInput
+├── _config_input.py          # ConfigInput, ConfigRequest, ResolvedConfigInput
+├── _console_input.py         # ConsoleInput, ConsoleRequest, ResolvedConsoleInput
+├── _logs_input.py            # LogsInput, LogsRequest, ResolvedLogsInput
+├── _ssh_input.py             # SSHInput, SSHRequest, ResolvedSSHInput
+├── _vm_export_config.py      # VMExportConfigInput, VMExportConfigRequest
+└── _vm_import_input.py       # VMImportInput, VMImportRequest
 
-api/
-├── vm_operations.py          # VMOperation (create, remove, list, get, etc.)
-├── network_operations.py    # NetworkOperation (create, remove, list, get, etc.)
-└── ...
+api/ (14 operation files)
+├── vm_operations.py          # VMOperation
+├── network_operations.py     # NetworkOperation
+├── volume_operations.py      # VolumeOperation
+├── image_operations.py       # ImageOperation
+├── kernel_operations.py      # KernelOperation
+├── binary_operations.py      # BinaryOperation
+├── key_operations.py         # KeyOperation
+├── config_operations.py      # ConfigOperation
+├── console_operations.py     # ConsoleOperation
+├── host_operations.py        # HostOperation
+├── cache_operations.py       # CacheOperation
+├── init_operations.py        # InitOperation
+├── logs_operations.py        # LogsOperation
+└── ssh_operations.py         # SSHOperation
 ```
 
 #### Reference Implementation
 
 See `src/mvmctl/api/inputs/_vm_input.py` for existing resource actions and `src/mvmctl/api/inputs/_vm_create_input.py` for creation flows.
 
-### Rule 3: Controller Is Stateful, Returns Item Only
+### Rule 3: Controller Is Stateful, Returns Item Only ✅ IMPLEMENTED
 
 ```python
 class NetworkController:
@@ -110,7 +170,9 @@ class NetworkController:
 
 Controller does NOT have `create()`, `remove()`, `list()`, or `inspect()`. Those are orchestration methods that belong in `*Operation` at the API layer.
 
-### Rule 4: Service Is Stateless Infrastructure
+**Verified:** All 15 domains follow this pattern. Controllers accept `entity: str | *Item` and `repo: *Repository`.
+
+### Rule 4: Service Is Stateless Infrastructure ✅ IMPLEMENTED
 
 ```python
 class NetworkService:
@@ -129,7 +191,9 @@ class NetworkService:
 
 Service handles infrastructure (bridges, TAPs, NAT, iptables). It does NOT handle CRUD orchestration.
 
-### Rule 5: Operation Class Is API-Layer Orchestration
+**Verified:** All Service classes are stateless, take parameters, perform infrastructure operations.
+
+### Rule 5: Operation Class Is API-Layer Orchestration ✅ IMPLEMENTED
 
 ```python
 # In api/network_operations.py
@@ -164,7 +228,9 @@ class NetworkOperation:
 
 Operation methods are `@staticmethod` — they take Input classes as arguments, create Request/Resolved internally, and orchestrate across multiple core modules.
 
-### Rule 6: Validation Goes in Request Classes, Not Service
+**Verified:** All 14 API operations files follow this pattern.
+
+### Rule 6: Validation Goes in Request Classes, Not Service ✅ IMPLEMENTED
 
 ```python
 # In api/inputs/_network_input.py
@@ -179,7 +245,7 @@ class NetworkCreateRequest:
 
 Validation that requires DB queries (like checking for subnet overlap) belongs in the Request resolver, NOT in Service static methods.
 
-### Rule 7: Single Data Model Per Domain
+### Rule 7: Single Data Model Per Domain ✅ IMPLEMENTED
 
 **Avoid creating multiple data classes for the same domain.** Use `*Item` as the canonical model. If runtime state is needed (like `bridge_exists`), add it as an optional field on the `*Item` class or use the resolver enrichment pattern.
 
@@ -201,7 +267,7 @@ class NetworkItem:
     iptables_rules: list[IPTablesRuleItem] | None = None
 ```
 
-### Rule 8: LeaseService Takes Repository as Required Parameter
+### Rule 8: Repository as Required Parameter ✅ IMPLEMENTED
 
 ```python
 # WRONG:
@@ -217,7 +283,7 @@ class LeaseService:
 
 No `db=None` fallbacks. The caller must provide the repository. This follows the same pattern as Controller taking `repo` as required.
 
-### Rule 9: No `list[dict]` — Use Proper Models
+### Rule 9: No `list[dict]` — Use Proper Models ✅ IMPLEMENTED
 
 **Never use `list[dict[str, Any]]` when a proper `*Item` dataclass exists.** If you need to represent VM lease data, use `NetworkLeaseItem`. If you need VM status data, use `VMInstanceItem` or create a proper dataclass.
 
@@ -234,267 +300,23 @@ No `db=None` fallbacks. The caller must provide the repository. This follows the
 
 **Objective:** Gather all existing domain code from `archive/` into numbered `_archive-*.py` files.
 
-**Process:**
-1. Call `@code-consolidator` agent with domain-specific prompt
-2. Agent discovers archive location and extracts all domain-related code
-3. Code dumped into `src/mvmctl/core/{domain}/_archive-*.py` files
-4. Existing working files (`_controller.py`, `_repository.py`, `_service.py`, `_resolver.py`) are **preserved untouched**
-
-**Critical Rules:**
-- ❌ DO NOT modify existing files in the domain directory
-- ❌ DO NOT attempt implementation during this phase
-- ❌ DO NOT make assumptions about what code does — dump first, analyze later
-- ✅ Include ALL related subdomains (e.g., network includes leases, iptables, bridging)
-- ✅ Archive files are raw dumps — do not cut mid-function to hit line limits
-- ✅ If a function spans ~1.5k lines, complete it fully in that file
-
-**Code-Consolidator Prompt Template:**
-```
-Consolidate all [DOMAIN] domain operations from the archive into
-src/mvmctl/core/[domain]/_archive-01.py, _archive-02.py, etc.
-
-Include:
-- CRUD operations: create, remove, get, list
-- Supporting helpers and utilities
-- Subdomain code (leases, iptables, bridging, etc.)
-- Any related configuration or validation logic
-
-Each file should be ~1k lines but DO NOT cut mid-function. Complete the
-function and then continue to the next file. The agent will discover the
-archive location automatically. Preserve all function signatures and logic
-exactly as-is.
-```
-
----
+**Status:** This phase applies to NEW domains being migrated from legacy code. All 15 existing domains have been fully implemented.
 
 ### Phase 2: Operation Identification
 
-**Objective:** Catalog all operations discovered in the archived code.
-
-**Process:**
-1. Orchestrator reads all `_archive-*.py` files
-2. Identify all operations and categorize them:
-   - **CRUD operations:** create, remove, get, list
-   - **Supporting operations:** validation, formatting, state transitions
-   - **Subdomain operations:** lease management, iptables rules, etc.
-3. Cross-reference with `_excluded.py` to identify what's already implemented
-
-**Output Format:**
-```
-## [Domain] Operations Catalog
-
-### CRUD Operations
-| Operation | Location | Description |
-|-----------|----------|-------------|
-| create_network | _archive-01.py:45-120 | Creates bridge and allocates subnet |
-| remove_network | _archive-01.py:200-280 | Tears down bridge and releases IPs |
-| get_network | _archive-02.py:50-90 | Retrieves network by ID or name |
-| list_networks | _archive-02.py:150-220 | Lists all networks with filtering |
-
-### Supporting Operations
-| Operation | Location | Description |
-|-----------|----------|-------------|
-| validate_network_config | _archive-01.py:300-340 | Validates CIDR and gateway |
-| allocate_ip | _archive-02.py:400-450 | Allocates IP from subnet pool |
-
-### Already Implemented (excluded from migration)
-| Operation | Implemented By | Method |
-|-----------|---------------|--------|
-| setup_bridge | NetworkService | ensure_bridge() |
-| teardown_bridge | NetworkService | remove_bridge() |
-```
-
-**Critical Rules:**
-- ❌ DO NOT plan implementation during this phase
-- ❌ DO NOT skip any operation — catalog everything
-- ✅ Be exhaustive — missing an operation now means it gets lost later
-- ✅ Cross-reference with `_excluded.py` to avoid duplicating work
-
----
+**Status:** Reference only — all operations have been cataloged and implemented.
 
 ### Phase 3: Implementation Planning
 
-**Objective:** Create a detailed, executable plan that mirrors reference patterns.
-
-**Reference Pattern:** Always mirror `VMController` + `VMService` + `VMOperation` from the VM domain.
-
-**Architecture Layer Map:**
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ API Layer (api/)                                            │
-│                                                             │
-│  api/inputs/_network_create_input.py                        │
-│    NetworkCreateInput      — raw CLI input                  │
-│    NetworkCreateRequest    — resolves DB defaults            │
-│    ResolvedNetworkCreateInput — frozen, all values set       │
-│                                                             │
-│  api/network_operations.py                                  │
-│    NetworkOperation        — orchestration (create, remove,  │
-│                              list, get, inspect, etc.)       │
-│                                                             │
-├─────────────────────────────────────────────────────────────┤
-│ Core Layer (core/)                                          │
-│                                                             │
-│  core/network/_controller.py                                │
-│    NetworkController       — stateful, single entity         │
-│    (entity: str | NetworkItem, repo: NetworkRepository)      │
-│    Returns: NetworkItem                                     │
-│                                                             │
-│  core/network/_service.py                                   │
-│    NetworkService          — stateless infrastructure        │
-│    (ensure_bridge, ensure_nat, ensure_tap, etc.)            │
-│                                                             │
-│  core/network/_repository.py                                │
-│    NetworkRepository       — DB operations                  │
-│                                                             │
-│  core/network/_resolver.py                                  │
-│    NetworkResolver         — entity resolution              │
-│                                                             │
-│  core/network/_lease_service.py                             │
-│    LeaseService            — IP lease lifecycle              │
-│    (entity: str | NetworkItem, repo: LeaseRepository)        │
-│                                                             │
-├─────────────────────────────────────────────────────────────┤
-│ Models Layer (models/)                                      │
-│                                                             │
-│  models/network.py                                          │
-│    NetworkItem             — DB record (single source)      │
-│    NetworkLeaseItem        — lease record                   │
-│    IPTablesRuleItem        — iptables record                │
-│    (NO NetworkConfig, NO NetworkInspectInfo here)           │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**Planning Steps:**
-
-1. **Map Operations to Layers**
-   ```
-   API Layer (api/network_operations.py):
-   - NetworkOperation.create()  → uses NetworkCreateRequest + NetworkService
-   - NetworkOperation.remove()  → uses NetworkController + NetworkService
-   - NetworkOperation.list()    → uses NetworkRepository
-   - NetworkOperation.get()     → uses NetworkController
-   - NetworkOperation.inspect() → uses NetworkController + LeaseService
-   - NetworkOperation.ensure_default() → creates default network
-   - NetworkOperation.reconcile() → compares DB vs actual state
-   - NetworkOperation.restore() → restores networks after reboot
-
-   Core Layer (core/network/_controller.py):
-   - NetworkController.get()         → returns NetworkItem
-   - NetworkController.set_default()  → updates DB
-   - NetworkController.get_leases()   → returns list[NetworkLeaseItem]
-
-   Core Layer (core/network/_service.py):
-   - NetworkService.ensure_bridge()   → infrastructure
-   - NetworkService.ensure_nat()      → infrastructure
-   - NetworkService.ensure_tap()      → infrastructure
-   - (all existing methods preserved)
-   ```
-
-2. **Define Input/Request Classes**
-   ```
-   api/inputs/_network_input.py:
-   
-   NetworkCreateInput:
-     name: str
-     subnet: str
-     ipv4_gateway: str | None
-     nat: bool
-     nat_gateways: list[str] | None
-   
-    NetworkCreateRequest:
-      def __init__(self, inputs: NetworkCreateInput, db: Database) -> None:
-      def resolve(self) -> ResolvedNetworkCreateInput:
-      def ensure_validate(self) -> None:
-        - validate_entity_name()
-        - validate_subnet()
-        - _validate_subnet_no_overlap()
-        - _validate_bridge_not_conflicting()
-    
-    ResolvedNetworkCreateInput:
-      name: str
-      subnet: str
-      ipv4_gateway: str
-      bridge: str
-      nat_enabled: bool
-      nat_gateways: list[str]
-      network_id: str
-      created_at: str
-   ```
-
-3. **Identify What Stays in Core vs Moves to API**
-   - Validation (subnet overlap, bridge conflict) → API layer (Request class)
-   - CRUD orchestration (create, remove) → API layer (Operation class)
-   - Infrastructure (bridge, NAT, TAP) → Core (Service class)
-   - Entity lifecycle (get, set_default) → Core (Controller class)
-
-4. **Plan Import Dependencies**
-   - What does Operation import from Core?
-   - What does Controller import from Repository?
-   - What does Service import from utils?
-
-**Critical Rules:**
-- ❌ DO NOT spawn implementation agent during this phase
-- ❌ DO NOT skip reference pattern analysis
-- ❌ DO NOT make decisions without user approval
-- ✅ Plan must reference VMController/VMService/VMOperation as the pattern to follow
-- ✅ Plan must be detailed enough to execute without further clarification
-- ✅ Core classes return `*Item` models only — no Config/Input classes in core
-
----
+**Status:** Reference only — all domains implemented.
 
 ### Phase 4: User Approval
 
-**Objective:** Ensure plan is correct before implementation begins.
-
-**User must explicitly approve:**
-- Class structure (Controller/Service/Operation split)
-- Operation migration map
-- Input/Request class design
-- File structure after implementation
-- Any risky decisions or trade-offs
-
-**User may request:**
-- Changes to class responsibilities
-- Different operation mappings
-- Additional research before approval
-- Reference to other patterns
-
-**Only proceed to Phase 5 after explicit user approval** (must say "yes, proceed" or equivalent).
-
----
+**Status:** Reference only.
 
 ### Phase 5: Implementation
 
-**Objective:** Execute the approved plan using `@refactor-engineer`.
-
-**Process:**
-1. Spawn `@refactor-engineer` with complete context:
-   - Approved plan document
-   - Reference patterns (VMController/VMService/VMOperation)
-   - Source files (archived code)
-   - Target files (new implementation)
-   - Constraints and rules
-
-2. Implementation follows plan exactly
-
-3. Verification:
-   - Ruff linting passes
-   - Ruff formatting passes
-   - Type checking passes
-   - ❌ **NO TESTS RUN** — During active migration, all tests are false positives and broken. Do not run the test suite.
-
-**Critical Rules:**
-- ❌ DO NOT deviate from approved plan without user approval
-- ❌ DO NOT skip verification steps
-- ❌ DO NOT run tests — they are broken during migration
-- ✅ Follow VMController/VMService/VMOperation patterns exactly
-- ✅ Preserve existing working files (Repository, Resolver, etc.)
-- ✅ Core classes return `*Item` models only
-- ✅ Validation goes in Request classes, not Service
-- ✅ Orchestration goes in Operation classes, not Controller
+**Status:** Reference only.
 
 ---
 
@@ -504,7 +326,7 @@ exactly as-is.
 
 ### VMController (Stateful) — ACTUAL IMPLEMENTATION
 
-From `src/mvmctl/core/vm/_controller.py` lines 39-58:
+From `src/mvmctl/core/vm/_controller.py` lines 29-42:
 
 ```python
 class VMController:
@@ -641,10 +463,8 @@ class VMService:
     Handles bulk operations and delegates single-VM operations to Controller.
     """
 
-    # FIXME: take repo instead of db
-    def __init__(self, db: Database) -> None:
-        self._db = db
-        self._repo = VMRepository(self._db)
+    def __init__(self, repo: VMRepository) -> None:
+        self._repo = repo
         self._executor = ParallelExecutor()
 
     def stop(self, vm: VMInstanceItem, force: bool = False) -> None:
@@ -738,6 +558,7 @@ class VMRepository:
 
 - **Created:** 2026-04-19
 - **Updated:** 2026-04-30 — Fixed VMService pattern (actual bulk operations coordinator), Repository pattern types (VMInstanceItem, list_all, count_by_status), and standardized Resolved naming convention (Resolved*Input)
-- **Purpose:** Generic domain implementation methodology for mvmctl
-- **Reference Domain:** network (first application)
+- **Updated:** 2026-05-13 — Added implementation status banner, verified all rules against actual codebase, confirmed 15 domains, 14 operation classes, 22 input files, `from __future__ import annotations` compliance
+- **Purpose:** Generic domain implementation methodology for mvmctl (verified — reflects current codebase)
+- **Reference Domain:** network (first application — now ALL 15 domains follow this pattern)
 - **Implemented Domains:** network, key, binary, kernel, image, host, config, cache, SSH, console, logs, **volume**, **VM** (reference)

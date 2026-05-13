@@ -9,7 +9,7 @@
 
 ### ⚠️ IMPORTANT RULES
 1. Always verify your understanding against actual code before making changes
-2. Run CI checks (`ruff check`, `mypy`, `pytest`) before finishing
+2. Run CI checks (`ruff check`, `ruff format --check`, `mypy`, `pytest`) before finishing
 
 ### User Confirmation Required
 
@@ -30,11 +30,10 @@ This applies to all edits, fixes, features, and refactoring. No exceptions.
 ```bash
 uv sync --group dev            # Install all deps
 uv run pytest tests/ -x -q    # Run tests (stop at first failure)
-uv run ruff check src/ && uv run mypy src/  # Lint + type check
+uv run ruff check src/ && uv run ruff format --check src/ && uv run mypy src/  # Lint + format + type check
 
 # Build standalone binary (Nuitka — recommended)
 uv sync --group dev --group build
-python scripts/build_services.py                # Build everything
 python scripts/build_services.py --mvm          # Build main mvm binary only
 # Output: dist/mvm
 ```
@@ -51,11 +50,21 @@ src/mvmctl/
 ├── core/            # All business logic, subprocess, Firecracker interaction
 ├── models/          # Pure dataclasses (VMInstanceItem, FirecrackerConfig, ImageSpec, NetworkItem, etc.)
 ├── utils/           # Shared helpers: fs, _system, http, network, crypto, template, yaml, _validators, etc.
+├── db/              # SQLite schema, migrations, and ORM models
 ├── assets/          # Bundled YAML configs (images.yaml, kernels.yaml) + JSON templates (firecracker.template.json, cloud-init.template.yaml)
-└── services/        # Runtime subprocess services (console_relay, nocloud_server, loopmount)
-tests/               # 161 files across 4 subdirectories (118 unit + 18 integration + 18 system + 7 layer_compliance)
-docs/                # API and release docs
-legacy/              # Archived bash scripts (single-vm, multi-vm, assets)
+├── services/        # Runtime subprocess services (console_relay, nocloud_server, loopmount)
+stubs/               # Type stubs for external dependencies (guestfs.pyi, psutil.pyi)
+packaging/           # Distribution packaging configs (.deb, .rpm, PKGBUILD)
+scripts/             # Build & release helper scripts (build_services.py, setup-test-environment.py)
+tests/               # 164 test_*.py files across 5 top-level directories (118 unit + 18 integration + 19 system + 7 layer_compliance + 2 helpers)
+docs/                # Project documentation
+  ├── adr/           # 7 Architecture Decision Records
+  ├── analyses/      # Technical analyses
+  ├── development/   # Development guides
+  ├── implementations/ # Implementation plans
+  ├── improvements/  # Improvement proposals
+  └── optimizations/ # Optimization strategies
+legacy/              # Pre-refactor phase documentation & assets (51 files inc. phase docs, bash scripts)
 pyproject.toml       # Build, ruff, mypy strict, pytest (80% branch coverage gate)
 ```
 
@@ -72,11 +81,12 @@ User → mvm → main.py → cli/*.py → api/*.py → core/*.py → models/ + u
 | VM lifecycle | `src/mvmctl/core/vm/` (domain logic) + `src/mvmctl/api/vm_operations.py` (orchestration) |
 | VM Firecracker API | `src/mvmctl/core/vm/_firecracker.py` |
 | Network setup | `src/mvmctl/core/network/` (domain logic) + `src/mvmctl/api/network_operations.py` (orchestration) |
+| Volume management | `src/mvmctl/core/volume/` (domain logic) + `src/mvmctl/api/volume_operations.py` (orchestration) |
 | Host init / privilege | `src/mvmctl/core/host/` (domain logic) + `src/mvmctl/api/host_operations.py` (orchestration) |
 | Privilege checks | `src/mvmctl/core/host/_helper.py` (HostPrivilegeHelper) |
 | Asset management | `src/mvmctl/core/_shared/_asset_manager.py` |
 | CLI commands | `src/mvmctl/cli/` (thin Typer commands, registered in `main.py:_COMMAND_SPECS`) |
-| Tests | `tests/integration/`, `tests/system/`, `tests/layer_compliance/` |
+| Tests | `tests/unit/`, `tests/integration/`, `tests/system/` (per-domain subdirectories), `tests/layer_compliance/` |
 | CI/CD | `.github/workflows/ci.yml`, `.github/workflows/release.yml` |
 
 ## Configuration
@@ -85,7 +95,7 @@ User → mvm → main.py → cli/*.py → api/*.py → core/*.py → models/ + u
 - **Config:** `~/.config/mvmctl/config.json` (`MVM_CONFIG_DIR`) — JSON, not YAML
 - **Database:** `~/.cache/mvmctl/mvmdb.db` — SQLite DB (canonical asset state with `is_default` markers, VM records, network/lease state)
 - **Env prefix:** `MVM_` (e.g. `MVM_CACHE_DIR`, `MVM_KERNEL`)
-- **Priority:** constants.py fallbacks → SQLite DB (mvmdb.db) → config.json → MVM_* env vars → CLI flags
+- **Priority:** CLI flags → MVM_* env vars → config.json → SQLite DB (mvmdb.db) → constants.py fallbacks
 
 ## Architecture Constraints
 
@@ -139,8 +149,4 @@ Co-authored-by: Adam <adam@example.com>  # WRONG - no contribution to this chang
 ## Related Files
 
 - `AGENTS.md` — Full architecture reference for AI agents
-- `src/mvmctl/core/AGENTS.md` — Core module inventory
-- `src/mvmctl/cli/AGENTS.md` — CLI wiring, Typer patterns
-- `src/mvmctl/api/AGENTS.md` — API layer pattern
-- `src/mvmctl/services/AGENTS.md` — Runtime services (console_relay, nocloud_server)
-- `tests/AGENTS.md` — Test fixtures, mock conventions
+- `CONTEXT.md` — Domain language, conventions, patterns, and architecture rules

@@ -13,7 +13,7 @@ It handles everything from downloading official kernels and root filesystem imag
 - **Package Management:** `uv`
 - **Testing & Linting:** `pytest`, `ruff`, `mypy`
 
-### ⚠️ IMPORTANT RULES
+### IMPORTANT RULES
 1. Always verify your understanding against actual code before making changes
 2. Run CI checks before finishing: ruff, mypy, pytest
 
@@ -36,9 +36,10 @@ The project strictly adheres to a three-layer architecture: **CLI → API → Co
 
 - **`cli/`**: Command definitions, argument parsing, and formatting output. No business logic. No database queries. Resolves defaults from `constants.py`.
 - **`api/`**: Stable public Python API boundary. Performs privilege checks, resolves DB-backed defaults when CLI passes `None`, and orchestrates multiple core domains (the ONLY layer that imports across domains).
-- **`core/`**: Isolated domain logic in subdirectories (e.g., `vm/`, `network/`, `host/`). Each domain has Controller, Service, Repository, and Resolver modules. No cross-domain imports. No defaults. Returns data or raises typed exceptions (`MVMError`).
+- **`core/`**: Isolated domain logic in subdirectories (e.g., `vm/`, `network/`, `host/`). Data-heavy domains follow a Controller, Service, Repository, and Resolver pattern. Simpler domains (cache, cloudinit, config, console, logs) may have fewer files. No cross-domain imports. No defaults. Returns data or raises typed exceptions (`MVMError`).
 - **`models/`**: Pure `@dataclass` objects containing domain data (e.g., `VMInstanceItem`, `FirecrackerConfig`, `ImageSpec`). No side effects.
 - **`utils/`**: Shared helpers (fs, _system, http, network, crypto, template, yaml, _validators) with no domain knowledge.
+- **`db/`**: SQLite database with migration system (`migrations/001_initial_schema.sql`) for persistent state (VMs, networks, images, kernels, binaries, keys, host state, iptables rules, IP leases, volumes).
 - **`services/`**: Runtime subprocess services — `console_relay/` (PTY-to-vsock bridge), `nocloud_server/` (HTTP cloud-init datasource), and `loopmount/` (rootfs provisioning binary).
 
 ## Building and Running
@@ -82,7 +83,7 @@ uv run mypy src/
 
 **If checks fail:**
 - Fix linting/formatting issues with `uv run ruff check src/ --fix` and `uv run ruff format src/`
-- Fix type errors with proper type annotations  
+- Fix type errors with proper type annotations
 - Fix failing tests — NEVER delete tests to make them pass
 
 *Note: A minimum of 80% branch coverage is strictly enforced.*
@@ -115,3 +116,6 @@ Co-authored-by: Adam <adam@example.com>  # WRONG - no contribution to this chang
 - **Privilege Model:** `mvm host init` is run once to set up the host (mvm group, sudoers). Normal commands run rootless and validate privileges via the `mvm` group.
 - **Asset ID System:** Downloaded or imported assets (images, kernels) use a full 64-character SHA256 hash as their persistent ID. The CLI displays and accepts the first 6 characters as a prefix.
 - **Error Handling:** Avoid bare `except:` blocks. Catch specific domain exceptions derived from `exceptions.py`.
+- **Error Code Format:** Every exception carries an optional `code: str | None` string for fine-grained programmatic branching. Format is dot-separated with domain prefix (e.g., `network.subnet.overlap`, `vm.create.binary_not_found`).
+- **API Result Types:** The API layer returns `OperationResult[T]` (single result with status/code/message/item), `BatchResult[T]` (collection of results), or `NeedsInteraction` (requires user action like sudo prompt) for the CLI/TUI to consume.
+- **AGENTS.md:** The only `AGENTS.md` file is at the project root (`AGENTS.md`). Per-folder AGENTS.md files have been removed — they caused agents to skip the root file. Use `CONTEXT.md` and `docs/adr/` for architecture context.

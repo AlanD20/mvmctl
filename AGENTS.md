@@ -1,112 +1,43 @@
 # mvmctl
 
-**Scope:** Production-grade Python CLI for managing microVMs
-**Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
-**Stack:** Python 3.13, Click (root), Typer (sub-apps), Rich, uv
-**Entry:** `mvm` console script → `main.py:LazyMVMGroup` (NOT a Typer root app)
+**Scope:** Production-grade Python CLI for managing Firecracker microVMs.
+**Stack:** Python 3.13, Click (root), Typer (sub-apps), Rich, uv.
+**Entry:** `mvm` console script → `main.py:LazyMVMGroup` (Click group, NOT Typer root app).
 
-### Agent CLI Execution
-To execute the `mvmctl` CLI with proper group privileges, use:
-`sg mvm -c 'mvm ...'`
+## Where to find context
 
-### CI Verification (MANDATORY)
-**ALL code changes MUST pass CI checks before completion.**
-Before finishing any implementation, you MUST verify:
-1. **Ruff Linting** — `uv run ruff check src/` must be clean
-2. **Ruff Formatting** — `uv run ruff format --check src/` must pass
-3. **Type Checking** — `uv run mypy src/` must pass (strict mode)
-4. **Tests** — `uv run pytest tests/ -q --cov=src/mvmctl -n auto --cov-fail-under=80` must pass
+This is the **only** AGENTS.md in the project. Per-folder AGENTS.md files have been removed — they caused agents to skip this file and miss the two primary context sources:
 
-**If checks fail:**
-- Fix linting/formatting issues with `uv run ruff check src/ --fix` and `uv run ruff format src/`
-- Fix type errors with proper type annotations
-- Fix failing tests — NEVER delete tests to make them pass
+1. **`CONTEXT.md`** — Domain language, conventions, patterns, and architecture rules. Start here for every task.
+2. **`docs/adr/`** — Architecture Decision Records for hard-to-reverse decisions made with real trade-offs.
 
-## STRUCTURE
-```
-mvmctl/
-├── src/mvmctl/
-│   ├── main.py          # LazyMVMGroup (click.Group)
-│   ├── constants.py     # Single source of truth 
-│   ├── exceptions.py    # Custom exception hierarchy
-│   ├── cli/             # Thin Typer command definitions (no business logic)
-│   ├── api/             # Stable public Python API boundary. 
-│   ├── core/            # All business logic, subprocesses, and Firecracker interactions
-│   ├── models/          # Pure @dataclass objects
-│   ├── utils/           # Shared helpers
-│   ├── assets/          # Bundled YAML configs
-│   ├── services/        # Runtime subprocess services
-│   ├── tui/             # Textual TUI application (domain/, screens/, widgets/)
-│   └── db/              # SQLite schema, migrations, and ORM models
-├── legacy/              # Pre-refactor phase documentation & assets
-├── scripts/             # Build & release helper scripts
-├── stubs/               # Type stubs for external dependencies
-├── packaging/           # Distribution packaging configs
-├── docs/                # Project documentation
-├── tests/               # 161 test files (118 unit + 18 integration + 18 system + 7 layer_compliance)
-└── pyproject.toml       
-```
+Individual agent instructions live in `.opencode/agent/`:
+- `architect.md` — Planner, analyzer, delegator. NEVER writes code.
+- `engineer.md` — Production code engineer. Handles everything except `tests/`.
+- `qa-engineer.md` — Test owner. Handles only `tests/`.
 
-## RESOLUTION LAYER MANDATE (MANDATORY — NO EXCEPTIONS)
+## Agent boundaries (ABSOLUTE)
 
-| Layer | Resolves | How |
-|-------|----------|-----|
-| **CLI** | User input + constants-backed defaults | `DEFAULT_*` from `constants.py` if flag not provided. No DB queries ever. |
-| **API** | DB-backed defaults | Query SQLite (`MVMDatabase`) when CLI passes `None`. |
-| **Core** | Nothing — executes only | Receives ALL explicit, resolved values. No `None` for required params. No DB. |
-| **Models** | Nothing | Pure `@dataclass` containers. No defaults for config-backed fields. |
+- **`engineer` agent**: Handles **everything except `tests/`** — src/mvmctl/, scripts/, benchmarks/, docs/, stubs/, pyproject.toml, etc.
+- **`qa-engineer` agent**: Handles **only `tests/`** — unit, integration, system, layer_compliance.
+- **`architect` agent**: Plans, analyzes, delegates. NEVER writes code. May spawn `explore` for research.
 
-## ORCHESTRATION ARCHITECTURE (The Burger Analogy)
-**Key principle**: Core modules are **ISOLATED**. They do not call each other. The **API layer is the ONLY entity** that calls multiple core modules and sequences them together. 
+## CI commands (agents MUST run these before finishing)
 
-## CONVENTIONS
-- **cli/** — arg parsing + output formatting ONLY; imports from `mvmctl.api` (public surface); runtime default resolution; NO business logic
-- **api/** — public Python API surface (re-exported via `api/__init__.py`); privilege checks + DB resolution + **SOLE orchestrator** of core modules; **NO default values in params**
-- **core/** — isolated domain logic: Controller (stateful), Service (stateless), Repository (DB), Resolver (resolution); **NO default values in params**; **ISOLATED** — no cross-core imports; returns `*Item` models only
-- **models/** — `@dataclass` only; `*Item` suffix (e.g., `VMInstanceItem`, `NetworkItem`); **NO default values for config-backed fields**
-- **utils/** — pure helpers with no domain knowledge. **All external tool wrappers MUST be centralized in `utils/` — NEVER scattered in `core/`.**
-
-### Import Pattern
-All CLI code must use the public api/ surface:
-```python
-from mvmctl.api import VMOperation, VMCreateInput  # ✅ CORRECT
-from mvmctl.api.vm_operations import VMOperation    # ❌ WRONG — deep import
-```
-
-### Default Values Rule (STRICT ENFORCEMENT - ZERO TOLERANCE)
-**Default values belong ONLY in the CLI layer.** API, Core, and Models must receive explicit values.
-- NO `typer.Option(DEFAULT_*, ...)`
-- NO `typer.Option(get_assets_dir(), ...)`
-- NO non-None default for config-backed values
-
-**MANDATORY CORRECT PATTERN:**
-```python
-vcpus: Optional[int] = typer.Option(None, "--vcpus", help="Number of vCPUs")
-defaults = _get_vm_defaults()
-effective_vcpus = vcpus if vcpus is not None else defaults.vcpu_count
-```
-
-## ASSET ID SYSTEM
-Every downloaded/imported asset gets a **full 64-char SHA256 hash**. CLI displays first 6 chars. Removal and lookup accept the 6-char prefix.
-
-## ANTI-PATTERNS
-| Forbidden | Correct |
-|-----------|---------|
-| Hardcode paths/names | `constants.py` or `MVM_*` env vars |
-| Business logic in `cli/` | Move to `core/`, expose via `api/` |
-| `print()` in `core/` | `from mvmctl.utils._io import print_info` -- only in CLI |
-| Bare `except:` | Catch specific types from `exceptions.py` |
-| Skip failing tests | Fix the test -- coverage drop = CI failure |
-| `as any` / `type: ignore` | Strict mypy -- no suppressions allowed |
-
-## TESTING
-- **80% branch coverage** minimum
-- Tests must NOT require root, KVM, or real network. Mock all subprocess calls.
-- Use `@pytest.fixture(autouse=True)` for `_mock_sudo_cache`, `isolate_config_and_cache`, `_isolate_iptables_rules`, `_setup_database`.
-
-## COMMANDS
 ```bash
 uv sync --group dev
-uv run pytest tests/ -x -q -n auto
-uv run ruff check src/ && uv run mypy src/
+uv run ruff check src/ && uv run ruff format --check src/
+uv run mypy src/
+uv run pytest tests/ -q -n auto -x
 ```
+
+## Critical rules (violation = critical failure)
+
+- Core domains NEVER import from other core domains. Only `_shared` is allowed.
+- Controller = state management per entity (start/stop/pause/resume). No remove(), no create().
+- Service does NOT validate caller input. Caller validates, receiver trusts.
+- ALL subprocess calls through `run_cmd()` / `stream_cmd()` — no raw `subprocess.run()`.
+- Lazy imports (PEP 562) in ALL `__init__.py` — no eager imports.
+- `from __future__ import annotations` in every `.py` file under `src/mvmctl/`.
+- The API layer is the SOLE orchestrator of multiple core domains.
+- Validation lives in API `*Input` / `*Request` classes, not in Service/Controller.

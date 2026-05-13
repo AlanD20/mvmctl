@@ -1,5 +1,12 @@
 # nftables for iptables at scale
 
+> ## Status: ❌ NOT IMPLEMENTED
+>
+> The `_iptables_tracker/` module only supports `iptables` CLI subprocess calls. No nftables backend exists.
+> No abstract firewall backend interface has been defined.
+>
+> **Last verified:** 2026-05-13
+
 **Phase:** Standalone — when iptables becomes a bottleneck
 **Complexity:** High
 **Depends on:** Nothing, but only matters at 50+ VMs

@@ -20,7 +20,7 @@ Both layers matter because pytest's default behavior runs all tests in a single 
 - Discovers tests via `pytest --collect-only`
 - Runs **each** test in its own subprocess
 - Monitors peak RSS memory via `psutil`
-- Sorts results by memory usage
+- Sorts results by peak memory usage (descending)
 - Flags tests exceeding a configurable threshold
 
 **Why subprocess isolation matters:**
@@ -32,31 +32,31 @@ Both layers matter because pytest's default behavior runs all tests in a single 
 Basic file-level profiling:
 
 ```bash
-python scripts/profile_test_memory.py tests/unit/services/test_console_relay_client.py --level file --threshold-mb 500
+uv run python scripts/profile_test_memory.py tests/unit/services/test_console_relay_client.py --level file --threshold-mb 500
 ```
 
 Individual test profiling (pinpoints exact test):
 
 ```bash
-python scripts/profile_test_memory.py tests/unit/services/test_console_relay_client.py --level test --threshold-mb 500
+uv run python scripts/profile_test_memory.py tests/unit/services/test_console_relay_client.py --level test --threshold-mb 500
 ```
 
 Profile an entire directory:
 
 ```bash
-python scripts/profile_test_memory.py tests/unit/ --level file --threshold-mb 200
+uv run python scripts/profile_test_memory.py tests/unit/ --level file --threshold-mb 200
 ```
 
 With verbose output (shows stdout on failures):
 
 ```bash
-python scripts/profile_test_memory.py tests/unit/ --level test --threshold-mb 200 -v
+uv run python scripts/profile_test_memory.py tests/unit/ --level test --threshold-mb 200 -v
 ```
 
 Save results to TSV:
 
 ```bash
-python scripts/profile_test_memory.py tests/unit/ --level file --output memory_report.tsv
+uv run python scripts/profile_test_memory.py tests/unit/ --level file --output memory_report.tsv
 ```
 
 #### Command Reference
@@ -72,14 +72,14 @@ python scripts/profile_test_memory.py tests/unit/ --level file --output memory_r
 
 #### Interpreting Results
 
-Example output:
+The profiler always runs tests with `--no-cov` to avoid coverage-instrumentation overhead in the memory measurement. Example output:
 
 ```
-Test                                                                      Status    Peak MB    Time (s)
------------------------------------------------------------------------   ------   --------   ---------
-tests/unit/services/test_console_relay_client.py::test_receive_skips_    FAIL       4426.0        68.0
-tests/unit/services/test_console_relay_client.py::test_receive_yields_   PASS          0.0         0.5
-tests/unit/services/test_console_relay_client.py::test_start_listens_    PASS          0.0         1.2
+Name                                                                          Status    Peak MB
+---------------------------------------------------------------------------   ------   --------
+tests/unit/services/test_console_relay_client.py::test_receive_skips_          FAIL       4426.0
+tests/unit/services/test_console_relay_client.py::test_receive_yields_         PASS          0.0
+tests/unit/services/test_console_relay_client.py::test_start_listens_          PASS          0.0
 
 Flagged potential leaks (Peak > 500.0 MB):
   tests/unit/services/test_console_relay_client.py::test_receive_skips_when_socket_not_in_ready  — 4426.0 MB
@@ -93,7 +93,7 @@ Flagged potential leaks (Peak > 500.0 MB):
 
 - Only works on pytest-discoverable targets (tests, not arbitrary scripts)
 - Measures RSS, not Python heap specifically (includes interpreter overhead)
-- Baseline for a single test is ~700–800 MB due to pytest-cov instrumentation when running the full suite; use `--no-cov` for cleaner measurements
+- The profiler always passes `--no-cov` and `--timeout=60` to pytest; results reflect bare test overhead, not coverage instrumentation
 
 ---
 
@@ -155,10 +155,10 @@ Step-by-step guide:
 
    ```bash
    # Start broad — file level
-   python scripts/profile_test_memory.py tests/unit/ --level file --threshold-mb 500
+   uv run python scripts/profile_test_memory.py tests/unit/ --level file --threshold-mb 500
 
    # Drill down — test level on the worst file
-   python scripts/profile_test_memory.py tests/unit/services/test_console_relay_client.py --level test --threshold-mb 500
+   uv run python scripts/profile_test_memory.py tests/unit/services/test_console_relay_client.py --level test --threshold-mb 500
    ```
 
 3. **Fix the root cause** (usually one of):
@@ -171,7 +171,7 @@ Step-by-step guide:
 
    ```bash
    # Re-run the specific test via profiler
-   python scripts/profile_test_memory.py <test_id> --level test --threshold-mb 200
+   uv run python scripts/profile_test_memory.py <test_id> --level test --threshold-mb 200
 
    # Re-run compliance to ensure no new patterns were introduced
    uv run pytest tests/layer_compliance/test_memory_leak_patterns.py -v --no-cov
@@ -208,6 +208,6 @@ The console relay client leak we fixed demonstrates the full workflow:
 ## Limitations and Known Gaps
 
 - **Compliance tests are static analysis** — they catch patterns, not runtime behavior. A loop with a complex exit condition may pass compliance but still leak under specific inputs.
-- **Profiler measures RSS** — it includes interpreter overhead, pytest plugins, and coverage instrumentation. A test using 800 MB doesn't necessarily have an 800 MB leak; compare relative differences between tests.
+- **Profiler measures RSS** — it includes interpreter overhead and pytest plugins. A test using 800 MB doesn't necessarily have an 800 MB leak; compare relative differences between tests.
 - **Neither tool catches reference cycles** — Python's cyclic garbage collector handles most cycles automatically. For cycle leaks, use `tracemalloc` or `objgraph`.
 - **Neither tool catches C-extension leaks** — if a C library (e.g., libguestfs) leaks memory, these tools will show elevated RSS but won't identify the C code.

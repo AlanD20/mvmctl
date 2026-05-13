@@ -8,20 +8,22 @@ These binaries are required for basic operations like managing VMs, networking, 
 
 | Binary | Category | Purpose | Package (Debian/Ubuntu) | Package (Arch) |
 | :--- | :--- | :--- | :--- | :--- |
-| `firecracker` | Core | The MicroVM VMM | Managed via `mvm bin pull` | Managed via `mvm bin pull` |
-| `jailer` | Core | Security isolation for Firecracker | Managed via `mvm bin pull` | Managed via `mvm bin pull` |
+| `firecracker` + `jailer` | Core | MicroVM VMM + security isolation | Managed via `mvm bin pull` | Managed via `mvm bin pull` |
 | `ip` | Network | Bridge and TAP interface management | `iproute2` | `iproute2` |
 | `iptables` | Network | NAT and firewall rule management | `iptables` | `iptables` |
 | `sysctl` | System | Enabling IP forwarding on the host | `procps` | `procps-ng` |
 | `sudo` | Privilege | Running `mvm host init` and privileged commands | `sudo` | `sudo` |
 | `groupadd` | Privilege | Creating the `mvm` system group | `passwd` | `shadow` |
 | `usermod` | Privilege | Adding users to the `mvm` group | `passwd` | `shadow` |
+| `groupdel` | Privilege | Removing the `mvm` group on `mvm host reset` | `passwd` | `shadow` |
 | `visudo` | Privilege | Validating sudoers drop-in files | `sudo` | `sudo` |
 | `lsmod` | Kernel | Checking for KVM module status | `kmod` | `kmod` |
 | `modprobe` | Kernel | Loading required KVM modules | `kmod` | `kmod` |
 | `dumpe2fs` | Filesystem | Filesystem inspection (image import) | `e2fsprogs` | `e2fsprogs` |
 | `iptables-save` | Network | Persisting iptables rules for reboot survival | `iptables` | `iptables` |
-| `mvm-provision` | Provisioning | Loop-mount rootfs provisioning | Managed via `mvm init` | Managed via `mvm init` |
+| `mvm-provision` | Provisioning | Loop-mount rootfs provisioning (symlink to combined multidist binary `mvm-services`) | Managed via `mvm init` | Managed via `mvm init` |
+| `mvm-console-relay` | Provisioning | PTY-over-vsock console relay service (symlink to `mvm-services`) | Managed via `mvm init` | Managed via `mvm init` |
+| `mvm-nocloud-server` | Provisioning | NoCloud-net metadata/IPv4 HTTP server (symlink to `mvm-services`) | Managed via `mvm init` | Managed via `mvm init` |
 
 
 ## 2. Image & Cloud-Init Dependencies
@@ -42,6 +44,7 @@ These binaries are required for importing images, converting formats, and genera
 | `tar` | Archive | Extracting rootfs from tarballs | `tar` | `tar` |
 | `cloud-localds` | Cloud-Init | Creating `nocloud` seed ISOs (ISO mode only) | `cloud-image-utils` | `cloud-utils` |
 | `ssh-keygen` | Remote | Generating SSH keypairs for microVMs | `openssh-client` | `openssh` |
+| `zstandard` (Python) | Image | Compressing and decompressing images via zstd (`core/image/_service.py`) | `pip install zstandard` or `uv sync` | `pip install zstandard` or `uv sync` |
 
 ## 3. Image Provisioning Dependencies (Optional — Two Paths)
 
@@ -49,13 +52,13 @@ These binaries are required for importing images, converting formats, and genera
 
 | Aspect | libguestfs Path | Loop-Mount (mvm-provision) Path |
 | :--- | :--- | :--- |
-| **Binary** | `guestfs` Python module + supermin appliance | `mvm-provision` standalone compiled binary |
+| **Binary** | `guestfs` Python module + supermin appliance | `mvm-provision` (symlink to combined `mvm-services` multidist binary) |
 | **Speed** | ~2600–3000ms per VM | ~200ms per VM |
 | **Sudo** | `supermin` needs passwordless sudo | `mvm-provision` needs passwordless sudo |
 | **Python dep** | Requires system `python3-libguestfs` (not on PyPI) | Zero Python deps (stdlib only) |
 | **System tools** | Depends on supermin + guestfs appliance | Uses direct `losetup`/`mount`/`chroot`/`resize2fs`/`btrfs` |
 | **Fallback** | Used when `mvm-provision` binary unavailable or `sudo` not configured | Primary path when compiled binary is installed and sudo configured |
-| **Availability** | Checked at `mvm init` step 4, stored as `settings.guestfs_enabled` | Installed at `mvm init` step 2 via binary extraction |
+| **Availability** | Checked at `mvm init`, stored as `settings.guestfs_enabled` | Installed at `mvm init` via binary extraction |
 
 ### 3.1 libguestfs Path
 
@@ -138,7 +141,7 @@ sg mvm -c 'sudo -n /usr/bin/supermin --version'
 
 ### 3.2 Loop-Mount (mvm-provision) Path (Primary)
 
-The `mvm-provision` binary is a standalone compiled binary (Nuitka `--onefile`) that provisions root filesystem images directly via loop-mount, without libguestfs. It reads JSON operations from stdin, performs all operations via system tools, and writes JSON results to stdout.
+The `mvm-provision` binary is a symlink to the combined `mvm-services` multidist binary (compiled via Nuitka). It provisions root filesystem images directly via loop-mount, without libguestfs. It reads JSON operations from stdin, performs all operations via system tools, and writes JSON results to stdout.
 
 **The binary uses only stdlib Python — zero external Python dependencies.** It communicates with system tools via subprocess.
 
@@ -157,11 +160,11 @@ The `mvm-provision` binary is a standalone compiled binary (Nuitka `--onefile`) 
 | `btrfs` | Growing and shrinking btrfs filesystems (`btrfs filesystem resize`) | `btrfs-progs` | `btrfs-progs` |
 | `chroot` | Running shell commands inside the mounted rootfs | `coreutils` | `coreutils` |
 
-> **Note:** All `util-linux` and `e2fsprogs` binaries are already required by the image import pipeline (see §2). Only `btrfs-progs` is unique to the provisioner path (and only needed when provisioning btrfs images).
+> **Note:** All `util-linux` and `e2fsprogs` binaries are already required by the image import pipeline (see SS2). Only `btrfs-progs` is unique to the provisioner path (and only needed when provisioning btrfs images).
 
 #### Provisioner Sudoers Configuration
 
-`mvm-provision` needs passwordless sudo for loop device setup, mount, and blockdev operations. Added automatically by `mvm host init` (step 2 extracts the binary, step 3 writes the sudoers drop-in):
+`mvm-provision` needs passwordless sudo for loop device setup, mount, and blockdev operations. Added automatically by `mvm host init` (the binary is extracted and the sudoers drop-in is written):
 
 ```
 %mvm ALL=(ALL) NOPASSWD: /home/*/.cache/mvmctl/bin/mvm-provision
@@ -206,23 +209,32 @@ This section maps specific `mvm` commands to the external binaries they invoke.
 | Command Group | Command(s) | Required Binaries |
 | :--- | :--- | :--- |
 | **`mvm host`** | `init` | `sudo`, `groupadd`, `usermod`, `visudo`, `sysctl`, `ip`, `iptables`, `iptables-save`, `lsmod`, `modprobe` |
+| | `ls` | (Internal Python logic) |
+| | `clean` | `sudo`, `ip`, `iptables` |
 | | `reset` | `sudo`, `groupdel`, `sysctl` |
 | **`mvm network`** | `create` | `ip`, `iptables` |
-| | `ls`, `inspect`, `rm`, `sync`, `set-default` | `ip`, `iptables` |
+| | `ls`, `inspect`, `rm`, `sync`, `default` | (Internal Python logic; `rm`/`sync` may call `ip`/`iptables` for cleanup) |
 | **`mvm bin`** | `pull`, `ls`, `rm`, `default` | (Internal Python logic) |
 | **`mvm image`** | `import` | `qemu-img`, `sfdisk`, `parted`, `blkid`, `mount`, `umount`, `tar`, `truncate`, `mkfs.ext4`, `unsquashfs` |
-| | `ls`, `rm` | (Internal Python logic) |
-| **`mvm kernel`** | `pull` | (Internal Python logic; add `--type official --clean-build` to trigger kernel compilation) |
+| | `pull` | `qemu-img` (may trigger image conversion/optimization) |
+| | `ls`, `rm`, `inspect`, `default`, `warm` | (Internal Python logic) |
+| **`mvm kernel`** | `pull` | (Internal Python logic for firecracker type; `--type official --clean-build` triggers kernel compilation) |
 | | `pull --type official --clean-build` | `make`, `gcc`, `ld`, `flex`, `bison`, `bc`, `pahole`, `git`, `curl`, `pkg-config` |
-| | `ls`, `rm`, `set-default` | (Internal Python logic) |
+| | `ls`, `rm`, `default`, `inspect` | (Internal Python logic) |
 | **`mvm key`** | `create` | `ssh-keygen` |
-| | `add`, `ls`, `rm` | (Internal Python logic) |
+| | `add`, `ls`, `rm`, `inspect`, `export`, `default` | (Internal Python logic) |
 | **`mvm vm`** | `create` | **Primary:** `firecracker`, `jailer`, `ip`, `iptables`, `mvm-provision`, `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `chroot` (+ `btrfs` for btrfs images) |
 | | `ls`, `ps`, `inspect` | (Internal Python logic) |
-| | `start`, `stop`, `reboot` | `firecracker`, `ip`, `iptables` |
+| | `start`, `stop`, `reboot`, `pause`, `resume` | `firecracker`, `ip`, `iptables` |
 | | `rm` | `firecracker`, `ip`, `iptables` |
+| | `snapshot`, `load`, `export`, `import` | (Internal Python logic) |
+| | `attach-volume`, `detach-volume` | `firecracker` |
 | **`mvm ssh`** | `ssh` | (User's SSH client — not invoked by mvmctl) |
-| **`mvm logs`** | _(invoked directly)_ | (Internal Python logic) |
+| **`mvm console`** | `console` | (Internal Python logic — connects via Unix socket) |
+| **`mvm logs`** | `logs` | (Internal Python logic) |
+| **`mvm config`** | `get`, `set`, `reset`, `list` | (Internal Python logic) |
+| **`mvm cache`** | `init`, `prune`, `clean` | (Internal Python logic; may trigger host cleanup) |
+| **`mvm init`** | `init` | `sudo`, `groupadd`, `usermod`, `visudo` |
 
 ## 6. Host System Requirements
 

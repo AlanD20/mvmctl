@@ -1,5 +1,14 @@
 # Planned Improvements — IMPROVEMENTS_003
 
+> ## Status Overview
+>
+> | Feature | Status | Notes |
+> |---------|--------|-------|
+> | `--count` for `mvm vm create` | ❌ NOT IMPLEMENTED | Design complete, no code written |
+> | Volume domain | ✅ **IMPLEMENTED** | Moved to IMPROVEMENTS_002 as completed item |
+>
+> **Last verified:** 2026-05-13
+
 This document tracks planned features with architectural analysis and implementation strategy.
 For active improvements, see [IMPROVEMENTS_002.md](IMPROVEMENTS_002.md).
 
@@ -7,7 +16,7 @@ For active improvements, see [IMPROVEMENTS_002.md](IMPROVEMENTS_002.md).
 
 ## Feature 1: `--count` for `mvm vm create`
 
-**Status:** Planned
+**Status:** ❌ NOT IMPLEMENTED — Design complete, implementation pending
 **Complexity:** Medium
 **Files affected:** ~5 (mostly `vm_operations.py`, `_vm_create_input.py`, `cli/vm.py`)
 
@@ -21,7 +30,7 @@ Creates 5 VMs (`my-vm`, `my-vm-2`, `my-vm-3`, `my-vm-4`, `my-vm-5`) with the sam
 ### Validation rules
 
 | Condition | Behavior |
-|-----------|----------|
+|---|---|
 | `--count 1` (default) | No change — existing behavior |
 | `--count N` + `--ip` | ❌ Conflict error |
 | `--count N` + `--mac` | ❌ Conflict error |
@@ -119,7 +128,7 @@ print_success(f"Created {len(vms)} VM(s): {', '.join(vm.name for vm in vms)}")
 ### Failure handling
 
 | Scenario | Behavior |
-|----------|----------|
+|---|---|
 | VM 3 of 10 fails during rootfs copy | Log error, continue with remaining. Report summary at end |
 | All succeed | Return list of created VM names |
 | All fail | Return aggregate error |
@@ -170,223 +179,30 @@ mvm vm create my-vm --image ubuntu-24.04 --count 5             # Best-effort (de
 
 ---
 
+## Feature 2: Volume domain ✅ IMPLEMENTED
 
+**Original status:** Planned → **✅ COMPLETED**
 
-## Feature 2: Volume domain
+Volume domain has been fully implemented. See `core/volume/`, `api/volume_operations.py`, `cli/volume.py`, `models/volume.py`.
 
-**Status:** Planned
-**Complexity:** Medium-High
-**Files affected:** ~15 (new domain + integration across existing stack)
+Refer to the actual implementation in the codebase rather than this design document.
 
-### What is a volume?
-
-A persistent data disk, independent of any VM. Created once, attachable to VMs as an additional block device. Survives VM deletion. Think `docker volume`.
-
-### CLI surface
-
-```bash
-# Volume CRUD
-mvm volume create my-data --size 10G                    # Create a 10GB raw disk
-mvm volume create my-data --size 10G --format qcow2     # Create qcow2
-mvm volume rm my-data                                   # Remove a volume
-mvm volume ls                                           # List volumes
-mvm volume inspect my-data                              # Show volume details
-
-# Attachment during VM creation
-mvm vm create my-vm --image ubuntu-24.04 --volume my-data  # Attach at create time
-mvm vm create my-vm --image ubuntu-24.04 --volume vol-a --volume vol-b  # Multiple volumes
-
-# Attachment to running VMs (hot-plug)
-mvm vm attach-volume my-vm my-data                      # Attach to running VM
-mvm vm detach-volume my-vm my-data                      # Detach from running VM
-```
-
-### Architecture — standard domain pattern
-
-```
-models/volume.py — VolumeItem
-core/volume/
-  _controller.py    — VolumeController (single volume lifecycle)
-  _service.py       — VolumeService (create disk image, resize, format)
-  _repository.py    — VolumeRepository (DB CRUD)
-  _resolver.py      — VolumeResolver (resolve by name/prefix)
-api/inputs/
-  _volume_input.py          — VolumeInput → VolumeRequest → ResolvedVolumeInput
-  _volume_create_input.py   — VolumeCreateInput → ... → ResolvedVolumeCreateInput
-api/volume_operations.py    — VolumeOperation (create, rm, ls, get, inspect)
-cli/volume.py               — Typer commands
-```
-
-### VolumeItem model
-
-```python
-@dataclass
-class VolumeItem:
-    id: str                # SHA256 hash
-    name: str              # User-friendly name (UNIQUE)
-    size_bytes: int        # Size in bytes
-    format: str            # 'raw' | 'qcow2'
-    path: str              # Absolute path to disk image
-    status: str            # 'available' | 'attached'
-    vm_id: str | None      # Which VM it's attached to (None if available)
-    created_at: str
-    updated_at: str
-```
-
-### DB schema — modify existing, NOT a new migration
-
-**Pre-production rule: no backward compatibility, no legacy code.** Edit `001_initial_schema.sql` directly. Add `volumes` table + `volume_ids` column to `vm_instances` inline. Never leave dead migration files behind.
-
-Add a prominent banner at the top of `001_initial_schema.sql`:
-
-```sql
--- ⚠️ PRE-PRODUCTION: This schema is mutated directly.
--- No backward compatibility migrations.
--- Old databases should be deleted and recreated.
-```
-
-Then add to the existing schema:
-
-```sql
--- VOLUMES: Persistent data disks attachable to VMs
-CREATE TABLE volumes (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
-    size_bytes INTEGER NOT NULL,
-    format TEXT NOT NULL DEFAULT 'raw',
-    path TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'available',
-    vm_id TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
-);
-CREATE INDEX idx_volumes_vm ON volumes(vm_id);
-CREATE INDEX idx_volumes_name ON volumes(name);
-```
-
-And add to `vm_instances`: `volume_ids TEXT` (JSON array, nullable) — persisted attached volume IDs so they survive VM restart.
-
-### Core layer
-
-**VolumeService** — stateless disk operations:
-```python
-class VolumeService:
-    @staticmethod
-    def create_disk(path: Path, size_bytes: int, format: str = "raw") -> None:
-        """Create a disk image. Uses qemu-img for qcow2, fallocate for raw."""
-
-    @staticmethod
-    def remove_disk(path: Path) -> None:
-        """Remove disk image from disk."""
-
-    @staticmethod
-    def get_disk_info(path: Path) -> dict:
-        """Get disk size, format, actual usage via qemu-img info."""
-```
-
-**VolumeController** — stateful entity operations:
-```python
-class VolumeController:
-    def __init__(self, entity: str | VolumeItem, repo: VolumeRepository) -> None:
-        ...
-
-    def get(self) -> VolumeItem: ...
-    def attach(self, vm_id: str) -> None: ...    # Update DB status
-    def detach(self) -> None: ...                 # Update DB status
-```
-
-### Integration points — the pipeline
-
-The pipeline from `--volume` CLI flag to Firecracker drive is **half-wired already**. This completes it:
-
-```
-cli/vm.py: --volume flag
-    │
-    ▼
-VMCreateInput.volumes: list[str] | None   ← NEW field
-    │
-    ▼
-VMCreateRequest.resolve()
-    │  └─ resolves volume names → VolumeItem → DriveConfig objects
-    │  └─ populates ResolvedVMCreateInput.extra_drives ✅ (field exists!)
-    ▼
-VMOperation._build_firecracker_config()
-    │  └─ reads extra_drives → passes to FirecrackerConfig  ← NEW
-    ▼
-FirecrackerConfig.extra_drives: list[DriveConfig]   ← NEW field
-    │
-    ▼
-FirecrackerSpawner._build_drives_config()
-    │  └─ iterates extra_drives, appends to drives list ✅ (TODO exists!)
-    ▼
-Firecracker boots with /dev/vdb, /dev/vdc, etc.
-```
-
-### Hot-plug for running VMs
-
-Firecracker API supports `PUT /drives` to attach/detach drives on a running VM:
-
-```python
-# In core/vm/_firecracker.py (FirecrackerClient)
-def put_drive(self, drive_config: DriveConfig) -> None:
-    """Attach or update a drive on a running VM via PUT /drives."""
-    ...
-
-def patch_drive(self, drive_id: str) -> None:
-    """Remove a drive from a running VM via PATCH /drives."""
-    ...
-```
-
-CLI chain:
-```
-mvm vm attach-volume my-vm my-data
-→ VMOperation.attach_volume(inputs)
-  → Resolves VM, resolves Volume
-  → VolumeController.attach(vm_id) — updates DB
-  → FirecrackerClient.put_drive(drive_config) — hot-plug
-```
-
-### Additional improvements (inline)
-
-**Volume resize (grow only):**
-```bash
-mvm volume resize my-data 20G
-```
-Uses `qemu-img resize` for qcow2, `fallocate` for raw.
-
-**Drive limit per VM:**
-- Firecracker max drives = 8 (including rootfs + cloud-init)
-- So max volumes per VM = 6 (ISO mode) or 7 (NET/INJECT mode)
-- Validate at attach time, fail with clear message
-
-### Implementation order
-
-1. **DB changes** — Add `volumes` table + `volume_ids` column to `vm_instances` in existing schema
-2. **Models** — `VolumeItem` dataclass
-3. **Core domain** — Repository → Service → Resolver → Controller (in that order)
-4. **Input layer** — `VolumeInput`, `VolumeRequest`, `ResolvedVolumeInput`
-5. **API layer** — `VolumeOperation` (create, rm, ls, get, inspect)
-6. **CLI layer** — `cli/volume.py` commands
-7. **VM integration** — wire `extra_drives` through `VMCreateInput` → `VMCreateRequest` → `FirecrackerConfig` → `FirecrackerSpawner`
-8. **Hot-plug** — `FirecrackerClient.put_drive()` + attach/detach operations
-9. **Respawn** — ensure attached volumes are re-attached on VM restart (`from_vm()`)
-10. Volume resize command
-11. Drive limit validation at attach time
+---
 
 ## Dependency between features
 
 The two features are **independent** and can be implemented in parallel or sequentially. `--count` is purely additive to the VM create flow. Volumes are a new domain that only needs the `extra_drives` wiring in the VM creation pipeline, which doesn't conflict with `--count`.
 
-**However**: if you want `mvm vm create --count 5 --volume my-data`, then both features need to be done. The volume integration simply adds extra drives to each per-VM `VMCreateContext`, which works naturally with batch creation.
+**However**: if you want `mvm vm create --count 5 --volume my-data`, then both features need to be done. The volume integration simply adds extra drives to each per-VM `VMCreateContext`, which works naturally with batch creation. (Volume integration is already done ✅, only `--count` remains.)
 
 ## Future phases (separate docs)
 
-| Phase | File | Description |
-|-------|------|-------------|
-| After volumes | [IMPROVEMENTS_004.md](IMPROVEMENTS_004.md) | `--from-volume` — full-disk boot from a volume |
-| After `--count` stable | [IMPROVEMENTS_005.md](IMPROVEMENTS_005.md) | Resource grouping (batch ID) |
-| Any time | [IMPROVEMENTS_006.md](IMPROVEMENTS_006.md) | JSON output mode |
-| When needed | [IMPROVEMENTS_007.md](IMPROVEMENTS_007.md) | nftables for iptables at scale |
+| Phase | File | Description | Status |
+|---|---|---|---|
+| After volumes | [IMPROVEMENTS_004.md](IMPROVEMENTS_004.md) | `--from-volume` — full-disk boot from a volume | ❌ Pending |
+| After `--count` stable | [IMPROVEMENTS_005.md](IMPROVEMENTS_005.md) | Resource grouping (batch ID) | ❌ Pending |
+| Any time | [IMPROVEMENTS_006.md](IMPROVEMENTS_006.md) | JSON output mode | ❌ Pending |
+| When needed | [IMPROVEMENTS_007.md](IMPROVEMENTS_007.md) | nftables for iptables at scale | ❌ Pending |
 
 ---
 

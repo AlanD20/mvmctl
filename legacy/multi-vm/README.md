@@ -1,3 +1,9 @@
+> **⚠️ ARCHIVED — Historical document from an earlier phase.**
+> The project has evolved significantly. See [CONTEXT.md](../../CONTEXT.md) for current domain language,
+> [docs/PROJECT_ARCHITECTURE.md](../../docs/PROJECT_ARCHITECTURE.md) for the current architecture,
+> and [docs/API.md](../../docs/API.md) for the current API reference.
+> This file is kept for historical reference only.
+
 # Firecracker Multi-VM Setup
 
 A scalable multi-virtual machine setup using AWS Firecracker with Ubuntu, bridge networking, and cloud-init provisioning.

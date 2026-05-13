@@ -1,8 +1,14 @@
 # Resource grouping (batch ID)
 
+> ## Status: ❌ NOT IMPLEMENTED
+>
+> Depends on `--count` feature (also ❌ not implemented). No code has been written.
+>
+> **Last verified:** 2026-05-13
+
 **Phase:** Standalone — after `--count` feature is stable
 **Complexity:** Low
-**Depends on:** `--count` for `mvm vm create`
+**Depends on:** `--count` for `mvm vm create` ❌
 
 ## Goal
 
