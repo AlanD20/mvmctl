@@ -131,10 +131,10 @@ class LoopMountManager:
         """
         binary = LoopMountManager._resolve_binary_path()
         if binary is not None:
-            cmd = ["sudo", "-n", str(binary)]
+            cmd = [str(binary)]
         else:
             # Development mode: run process.py directly via Python
-            cmd = ["sudo", "-n", sys.executable, str(_DEV_PROCESS_PATH)]
+            cmd = [sys.executable, str(_DEV_PROCESS_PATH)]
 
         ops = LoopMountManager._build_ops(
             image_path=image_path,
@@ -162,6 +162,7 @@ class LoopMountManager:
                 input=payload_bytes.decode("utf-8"),
                 timeout=timeout,
                 check=False,
+                privileged=True,
             )
         except ProcessError as e:
             if "timed out" in str(e):
@@ -236,9 +237,9 @@ class LoopMountManager:
         """
         binary = LoopMountManager._resolve_binary_path()
         if binary is not None:
-            cmd = ["sudo", "-n", str(binary)]
+            cmd = [str(binary)]
         else:
-            cmd = ["sudo", "-n", sys.executable, str(_DEV_PROCESS_PATH)]
+            cmd = [sys.executable, str(_DEV_PROCESS_PATH)]
 
         payload: dict[str, object] = {
             "image": image_path,
@@ -257,6 +258,7 @@ class LoopMountManager:
                 input=payload_bytes.decode("utf-8"),
                 timeout=timeout,
                 check=False,
+                privileged=True,
             )
         except ProcessError as e:
             if "timed out" in str(e):
@@ -351,11 +353,9 @@ class LoopMountManager:
 
         binary = LoopMountManager._resolve_binary_path()
         if binary is not None:
-            cmd = ["sudo", "-n", str(binary), "--umount", mount_point]
+            cmd = [str(binary), "--umount", mount_point]
         else:
             cmd = [
-                "sudo",
-                "-n",
                 sys.executable,
                 str(_DEV_PROCESS_PATH),
                 "--umount",
@@ -365,7 +365,7 @@ class LoopMountManager:
         logger.debug("Cleaning stale mount point: %s", mount_point)
 
         try:
-            proc = run_cmd(cmd, timeout=30, check=False)
+            proc = run_cmd(cmd, privileged=True, timeout=30, check=False)
             return proc.returncode == 0
         except ProcessError:
             logger.warning("Failed to clean stale mount point: %s", mount_point)

@@ -14,7 +14,6 @@ import logging
 import os
 import shutil
 import signal
-import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -87,6 +86,7 @@ from mvmctl.utils.auditlog import AuditLog
 from mvmctl.utils.common import CacheUtils, CommonUtils
 from mvmctl.utils.crypto import HashGenerator
 from mvmctl.utils.network import NetworkUtils
+from mvmctl.utils.timinglog import timed
 
 logger = logging.getLogger(__name__)
 
@@ -300,9 +300,6 @@ class VMCreateContext:
         if self.resolved is None:
             raise VMCreateError("Failed to resolve necessary dependencies")
 
-        _t0 = time.perf_counter()
-        _step_start = _t0
-
         from mvmctl.utils.fs import FsUtils
 
         self.guest_mac = (
@@ -328,51 +325,47 @@ class VMCreateContext:
                 )
             )
 
-        # IP Lease
-        lease_repo = LeaseRepository(self._db)
-        lease_manager = LeaseService(self.resolved.network, lease_repo)
-        if self.resolved.requested_guest_ip:
-            self.guest_ip = lease_manager.lease_specific(
-                self.resolved.requested_guest_ip, self.vm_id
+        with timed("network_setup", self.name, self.vm_id):
+            # IP Lease
+            lease_repo = LeaseRepository(self._db)
+            lease_manager = LeaseService(self.resolved.network, lease_repo)
+            if self.resolved.requested_guest_ip:
+                self.guest_ip = lease_manager.lease_specific(
+                    self.resolved.requested_guest_ip, self.vm_id
+                )
+            else:
+                self.guest_ip = lease_manager.lease(self.vm_id)
+
+            # Networking
+            net_repo = NetworkRepository(self._db)
+            net_service = NetworkService(net_repo)
+            bridge_addr = NetworkUtils.compute_bridge_address(
+                self.resolved.network.ipv4_gateway,
+                self.resolved.network.subnet,
             )
-        else:
-            self.guest_ip = lease_manager.lease(self.vm_id)
+            net_service.ensure_bridge(self.resolved.network.bridge, bridge_addr)
 
-        # Networking
-        net_repo = NetworkRepository(self._db)
-        net_service = NetworkService(net_repo)
-        bridge_addr = NetworkUtils.compute_bridge_address(
-            self.resolved.network.ipv4_gateway,
-            self.resolved.network.subnet,
-        )
-        net_service.ensure_bridge(self.resolved.network.bridge, bridge_addr)
+            # NAT rules shouldn't be tracked since we don't clean it up, and most of the time
+            # NAT rules are created after network is created, this is here just to ensure the
+            # network NAT rules are present.
+            if (
+                self.resolved.network.nat_enabled
+                and self.resolved.network.nat_gateways
+            ):
+                net_service.ensure_nat(
+                    self.resolved.network.bridge,
+                    self.resolved.network.nat_gateways_list,
+                    subnet=self.resolved.network.subnet,
+                    network_id=self.resolved.network.id,
+                )
 
-        # NAT rules shouldn't be tracked since we don't clean it up, and most of the time
-        # NAT rules are created after network is created, this is here just to ensure the
-        # network NAT rules are present.
-        if (
-            self.resolved.network.nat_enabled
-            and self.resolved.network.nat_gateways
-        ):
-            net_service.ensure_nat(
+            net_service.ensure_tap(
+                self.tap_name,
                 self.resolved.network.bridge,
-                self.resolved.network.nat_gateways_list,
-                subnet=self.resolved.network.subnet,
                 network_id=self.resolved.network.id,
+                subnet=self.resolved.network.subnet,
             )
-
-        net_service.ensure_tap(
-            self.tap_name,
-            self.resolved.network.bridge,
-            network_id=self.resolved.network.id,
-            subnet=self.resolved.network.subnet,
-        )
-        self.mark_created("network_tap")
-
-        logger.info(
-            "[timing] network_setup: %.3fs", time.perf_counter() - _step_start
-        )
-        _step_start = time.perf_counter()
+            self.mark_created("network_tap")
 
         if self._on_progress is not None:
             self._on_progress(
@@ -384,13 +377,9 @@ class VMCreateContext:
             )
 
         # Rootfs
-        self.clone_image()
-        self.mark_created("rootfs")
-
-        logger.info(
-            "[timing] image_clone: %.3fs", time.perf_counter() - _step_start
-        )
-        _step_start = time.perf_counter()
+        with timed("image_clone", self.name, self.vm_id):
+            self.clone_image()
+            self.mark_created("rootfs")
 
         # Cloud-init provisioning
         mode = self.resolved.cloud_init_mode
@@ -404,94 +393,87 @@ class VMCreateContext:
             user_uid=self.resolved.user_uid,
             user_gid=self.resolved.user_gid,
         )
-        provisioner.resize(self.resolved.disk_size_bytes)
+        with timed("provisioner_setup", self.name, self.vm_id):
+            provisioner.resize(self.resolved.disk_size_bytes)
 
-        logger.info(
-            "[timing] provisioner_setup: %.3fs",
-            time.perf_counter() - _step_start,
-        )
-        _step_start = time.perf_counter()
+        with timed("provisioner_run", self.name, self.vm_id):
+            # Common operations for OFF and INJECT modes — SSH keys, hostname, DNS
+            if mode in (CloudInitMode.OFF, CloudInitMode.INJECT):
+                provisioner.set_hostname(self.resolved.name)
+                provisioner.inject_dns(dns_server=self.resolved.dns_server)
+                provisioner.setup_ssh(
+                    self.resolved.user, self._ssh_pubkey_contents
+                )
 
-        # Common operations for OFF and INJECT modes — SSH keys, hostname, DNS
-        if mode in (CloudInitMode.OFF, CloudInitMode.INJECT):
-            provisioner.set_hostname(self.resolved.name)
-            provisioner.inject_dns(dns_server=self.resolved.dns_server)
-            provisioner.setup_ssh(self.resolved.user, self._ssh_pubkey_contents)
+            if mode == CloudInitMode.OFF:
+                provisioner.disable_cloud_init()
+                self.mark_created("cloud-init-off")
 
-        if mode == CloudInitMode.OFF:
-            provisioner.disable_cloud_init()
-            self.mark_created("cloud-init-off")
+            elif mode == CloudInitMode.INJECT:
+                ci_config = CloudInitProvisionConfig(
+                    mode=mode,
+                    vm_name=self.resolved.name,
+                    vm_id=self.vm_id,
+                    vm_dir=self.vm_dir,
+                    cloud_init_dir=(self.vm_dir / "cloud-init"),
+                    guest_ip=self.guest_ip,
+                    tap_name=self.tap_name,
+                    user=self.resolved.user,
+                    network=self.resolved.network,
+                    network_prefix_len=self.resolved.network_prefix_len,
+                    skip_network_config=self.resolved.skip_ci_network_config,
+                    ssh_pubkeys=self._ssh_pubkey_contents,
+                    custom_user_data_path=self.resolved.custom_user_data_path,
+                    nocloud_net_port=self.resolved.nocloud_net_port,
+                    cloud_init_iso_path=self.resolved.cloud_init_iso_path,
+                    keep_cloud_init_iso=self.resolved.keep_cloud_init_iso,
+                    cloud_init_iso_name=self.resolved.cloud_init_iso_name,
+                    nocloud_port_range_start=self.resolved.nocloud_port_range_start,
+                    nocloud_port_range_end=self.resolved.nocloud_port_range_end,
+                    nocloud_max_port_retries=self.resolved.nocloud_max_port_retries,
+                )
+                ci_provisioner = CloudInitProvisioner(ci_config)
+                self.cloud_init_result = ci_provisioner.provision()
 
-        elif mode == CloudInitMode.INJECT:
-            ci_config = CloudInitProvisionConfig(
-                mode=mode,
-                vm_name=self.resolved.name,
-                vm_id=self.vm_id,
-                vm_dir=self.vm_dir,
-                cloud_init_dir=(self.vm_dir / "cloud-init"),
-                guest_ip=self.guest_ip,
-                tap_name=self.tap_name,
-                user=self.resolved.user,
-                network=self.resolved.network,
-                network_prefix_len=self.resolved.network_prefix_len,
-                skip_network_config=self.resolved.skip_ci_network_config,
-                ssh_pubkeys=self._ssh_pubkey_contents,
-                custom_user_data_path=self.resolved.custom_user_data_path,
-                nocloud_net_port=self.resolved.nocloud_net_port,
-                cloud_init_iso_path=self.resolved.cloud_init_iso_path,
-                keep_cloud_init_iso=self.resolved.keep_cloud_init_iso,
-                cloud_init_iso_name=self.resolved.cloud_init_iso_name,
-                nocloud_port_range_start=self.resolved.nocloud_port_range_start,
-                nocloud_port_range_end=self.resolved.nocloud_port_range_end,
-                nocloud_max_port_retries=self.resolved.nocloud_max_port_retries,
-            )
-            ci_provisioner = CloudInitProvisioner(ci_config)
-            self.cloud_init_result = ci_provisioner.provision()
+                provisioner.inject_cloud_init(ci_config.cloud_init_dir)
+                self.mark_created("cloud-init-inject")
 
-            provisioner.inject_cloud_init(ci_config.cloud_init_dir)
-            self.mark_created("cloud-init-inject")
+            else:  # ISO or NET
+                ci_config = CloudInitProvisionConfig(
+                    mode=mode,
+                    vm_name=self.resolved.name,
+                    vm_id=self.vm_id,
+                    vm_dir=self.vm_dir,
+                    cloud_init_dir=(self.vm_dir / "cloud-init"),
+                    guest_ip=self.guest_ip,
+                    tap_name=self.tap_name,
+                    user=self.resolved.user,
+                    network=self.resolved.network,
+                    network_prefix_len=self.resolved.network_prefix_len,
+                    skip_network_config=self.resolved.skip_ci_network_config,
+                    ssh_pubkeys=self._ssh_pubkey_contents,
+                    custom_user_data_path=self.resolved.custom_user_data_path,
+                    nocloud_net_port=self.resolved.nocloud_net_port,
+                    cloud_init_iso_path=self.resolved.cloud_init_iso_path,
+                    keep_cloud_init_iso=self.resolved.keep_cloud_init_iso,
+                    cloud_init_iso_name=self.resolved.cloud_init_iso_name,
+                    nocloud_port_range_start=self.resolved.nocloud_port_range_start,
+                    nocloud_port_range_end=self.resolved.nocloud_port_range_end,
+                    nocloud_max_port_retries=self.resolved.nocloud_max_port_retries,
+                )
+                ci_provisioner = CloudInitProvisioner(ci_config)
+                self.cloud_init_result = ci_provisioner.provision()
 
-        else:  # ISO or NET
-            ci_config = CloudInitProvisionConfig(
-                mode=mode,
-                vm_name=self.resolved.name,
-                vm_id=self.vm_id,
-                vm_dir=self.vm_dir,
-                cloud_init_dir=(self.vm_dir / "cloud-init"),
-                guest_ip=self.guest_ip,
-                tap_name=self.tap_name,
-                user=self.resolved.user,
-                network=self.resolved.network,
-                network_prefix_len=self.resolved.network_prefix_len,
-                skip_network_config=self.resolved.skip_ci_network_config,
-                ssh_pubkeys=self._ssh_pubkey_contents,
-                custom_user_data_path=self.resolved.custom_user_data_path,
-                nocloud_net_port=self.resolved.nocloud_net_port,
-                cloud_init_iso_path=self.resolved.cloud_init_iso_path,
-                keep_cloud_init_iso=self.resolved.keep_cloud_init_iso,
-                cloud_init_iso_name=self.resolved.cloud_init_iso_name,
-                nocloud_port_range_start=self.resolved.nocloud_port_range_start,
-                nocloud_port_range_end=self.resolved.nocloud_port_range_end,
-                nocloud_max_port_retries=self.resolved.nocloud_max_port_retries,
-            )
-            ci_provisioner = CloudInitProvisioner(ci_config)
-            self.cloud_init_result = ci_provisioner.provision()
+                if mode == CloudInitMode.ISO:
+                    self.mark_created("cloud-init-iso")
+                else:
+                    self.mark_created("cloud-init-net")
 
-            if mode == CloudInitMode.ISO:
-                self.mark_created("cloud-init-iso")
-            else:
-                self.mark_created("cloud-init-net")
+            # Fix fstab for Firecracker (superfloppy /dev/vda layout)
+            provisioner.fix_fstab()
 
-        # Fix fstab for Firecracker (superfloppy /dev/vda layout)
-        provisioner.fix_fstab()
-
-        # Execute all queued operations
-        provisioner.run()
-
-        logger.info(
-            "[timing] provisioner_run: %.3fs", time.perf_counter() - _step_start
-        )
-        _step_start = time.perf_counter()
+            # Execute all queued operations
+            provisioner.run()
 
         if self._on_progress is not None:
             self._on_progress(
@@ -503,20 +485,15 @@ class VMCreateContext:
             )
 
         # Firecracker
-        fc_config = self.build_firecracker_config()
-        if fc_config is None:
-            raise VMCreateError("Firecracker config is not set in context")
+        with timed("firecracker_config", self.name, self.vm_id):
+            fc_config = self.build_firecracker_config()
+            if fc_config is None:
+                raise VMCreateError("Firecracker config is not set in context")
 
-        firecracker_spawner = FirecrackerSpawner(fc_config)
-        self.set_firecracker_manager(firecracker_spawner)
-        firecracker_spawner.write_to_file()
-        self.mark_created("firecracker")
-
-        logger.info(
-            "[timing] firecracker_config: %.3fs",
-            time.perf_counter() - _step_start,
-        )
-        _step_start = time.perf_counter()
+            firecracker_spawner = FirecrackerSpawner(fc_config)
+            self.set_firecracker_manager(firecracker_spawner)
+            firecracker_spawner.write_to_file()
+            self.mark_created("firecracker")
 
         if self.fc_manager is None:
             raise VMCreateError("Firecracker manager is not set in context")
@@ -532,19 +509,18 @@ class VMCreateContext:
             )
 
         # Console
-        _console_start = time.perf_counter()
-        if self.resolved.enable_console:
-            from mvmctl.core.console._controller import ConsoleController
+        with timed("console_setup", self.name, self.vm_id):
+            if self.resolved.enable_console:
+                from mvmctl.core.console._controller import ConsoleController
 
-            self.relay = ConsoleController(
-                vm_id=self.vm_id,
-                vm_dir=self.vm_dir,
-                vm_name=self.resolved.name,
-                socket_filename=self.resolved.console_socket_filename,
-                pid_filename=self.resolved.console_pid_filename,
-            )
-            self.relay.create_pty()
-        _console_elapsed = time.perf_counter() - _console_start
+                self.relay = ConsoleController(
+                    vm_id=self.vm_id,
+                    vm_dir=self.vm_dir,
+                    vm_name=self.resolved.name,
+                    socket_filename=self.resolved.console_socket_filename,
+                    pid_filename=self.resolved.console_pid_filename,
+                )
+                self.relay.create_pty()
 
         # Set relay config on the FirecrackerConfig (shared via spawner._config)
         fc_config.relay_enabled = self.relay is not None
@@ -552,20 +528,14 @@ class VMCreateContext:
             self.relay.client_fd if self.relay is not None else None
         )
 
-        self.fc_manager.spawn()
-        logger.info(
-            "[timing] firecracker_spawn: %.3fs",
-            time.perf_counter() - _step_start,
-        )
-        _step_start = time.perf_counter()
+        with timed("firecracker_spawn", self.name, self.vm_id):
+            self.fc_manager.spawn()
 
         # Start console relay if enabled
         if self.resolved.enable_console and self.relay is not None:
             self.relay.close_client_fd()
             self.relay.start()
             self.mark_created("console_relay")
-
-        logger.info("[timing] console_setup: %.3fs", _console_elapsed)
 
         if self._on_progress is not None:
             self._on_progress(
@@ -575,8 +545,6 @@ class VMCreateContext:
                     message="VM created successfully",
                 )
             )
-
-        logger.info("[timing] total: %.3fs", time.perf_counter() - _t0)
 
     def build_firecracker_config(self) -> FirecrackerConfig | None:
         """Build Firecracker spawn configuration from resolved state."""
@@ -843,7 +811,10 @@ class VMOperation:
         )
         ctx.set_resolved(resolved)
 
-        with SigtermContext(lambda: ctx.cleanup()):
+        with (
+            timed("overall", resolved.name, resolved.vm_id),
+            SigtermContext(lambda: ctx.cleanup()),
+        ):
             try:
                 ctx.execute()
                 vm_instance = ctx.to_model()

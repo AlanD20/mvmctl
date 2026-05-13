@@ -17,12 +17,17 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import json
+import os
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Enable internal timing instrumentation (MVM_TIMING_ENABLED env var)
+# so every `mvm` subprocess records per-phase timing to ~/.cache/mvmctl/timing.log.
+_TIMING_ENV = os.environ | {"MVM_TIMING_ENABLED": "1"}
 
 # ---------------------------------------------------------------------------
 # Config — add / remove / adjust images and thresholds here
@@ -87,6 +92,7 @@ def _mvm(*args: str, timeout: int = 120) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         timeout=timeout,
+        env=_TIMING_ENV,
     )
 
 
