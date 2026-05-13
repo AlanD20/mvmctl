@@ -326,17 +326,6 @@ class VMCreateContext:
             )
 
         with timed("network_setup", self.name, self.vm_id):
-            # IP Lease
-            lease_repo = LeaseRepository(self._db)
-            lease_manager = LeaseService(self.resolved.network, lease_repo)
-            if self.resolved.requested_guest_ip:
-                self.guest_ip = lease_manager.lease_specific(
-                    self.resolved.requested_guest_ip, self.vm_id
-                )
-            else:
-                self.guest_ip = lease_manager.lease(self.vm_id)
-
-            # Networking
             net_repo = NetworkRepository(self._db)
             net_service = NetworkService(net_repo)
             bridge_addr = NetworkUtils.compute_bridge_address(
@@ -345,26 +334,38 @@ class VMCreateContext:
             )
             net_service.ensure_bridge(self.resolved.network.bridge, bridge_addr)
 
-            # NAT rules shouldn't be tracked since we don't clean it up, and most of the time
-            # NAT rules are created after network is created, this is here just to ensure the
-            # network NAT rules are present.
-            if (
-                self.resolved.network.nat_enabled
-                and self.resolved.network.nat_gateways
-            ):
-                net_service.ensure_nat(
+            with net_service.batch():
+                # IP Lease
+                lease_repo = LeaseRepository(self._db)
+                lease_manager = LeaseService(self.resolved.network, lease_repo)
+                if self.resolved.requested_guest_ip:
+                    self.guest_ip = lease_manager.lease_specific(
+                        self.resolved.requested_guest_ip, self.vm_id
+                    )
+                else:
+                    self.guest_ip = lease_manager.lease(self.vm_id)
+
+                # NAT rules shouldn't be tracked since we don't clean it up, and most of the time
+                # NAT rules are created after network is created, this is here just to ensure the
+                # network NAT rules are present.
+                if (
+                    self.resolved.network.nat_enabled
+                    and self.resolved.network.nat_gateways
+                ):
+                    net_service.ensure_nat(
+                        self.resolved.network.bridge,
+                        self.resolved.network.nat_gateways_list,
+                        subnet=self.resolved.network.subnet,
+                        network_id=self.resolved.network.id,
+                    )
+
+                net_service.ensure_tap(
+                    self.tap_name,
                     self.resolved.network.bridge,
-                    self.resolved.network.nat_gateways_list,
-                    subnet=self.resolved.network.subnet,
                     network_id=self.resolved.network.id,
+                    subnet=self.resolved.network.subnet,
                 )
 
-            net_service.ensure_tap(
-                self.tap_name,
-                self.resolved.network.bridge,
-                network_id=self.resolved.network.id,
-                subnet=self.resolved.network.subnet,
-            )
             self.mark_created("network_tap")
 
         if self._on_progress is not None:
@@ -468,6 +469,10 @@ class VMCreateContext:
                     self.mark_created("cloud-init-iso")
                 else:
                     self.mark_created("cloud-init-net")
+
+            # Deblob (OS cache cleanup) unless explicitly skipped
+            if not self.resolved.skip_deblob:
+                provisioner.deblob()
 
             # Fix fstab for Firecracker (superfloppy /dev/vda layout)
             provisioner.fix_fstab()
@@ -778,6 +783,53 @@ class VMCreateContext:
 
 
 class VMOperation:
+    @staticmethod
+    def prune(
+        dry_run: bool = False,
+        include_all: bool = False,
+    ) -> OperationResult[list[str]]:
+        """Prune VMs based on their status.
+
+        By default, prunes all VMs EXCEPT those in RUNNING or STARTING state.
+        Use ``include_all=True`` to prune ALL VMs regardless of state.
+
+        Args:
+            dry_run: If True, only report what would be removed.
+            include_all: Prune ALL VMs including RUNNING and STARTING.
+
+        Returns:
+            OperationResult with item list of VM names that were removed.
+        """
+        HostPrivilegeHelper.check_privileges("/usr/sbin/ip", "prune VMs")
+        db = Database()
+        vms = VMRepository(db).list_all()
+
+        removed: list[str] = []
+        for vm in vms:
+            if vm.status in (VMStatus.RUNNING, VMStatus.STARTING):
+                if not include_all:
+                    continue
+
+            if not dry_run:
+                try:
+                    from mvmctl.api.inputs._vm_input import VMInput
+
+                    VMOperation.remove(
+                        VMInput(identifiers=[vm.name], force=True)
+                    )
+                    removed.append(vm.name)
+                except Exception as e:
+                    logger.warning("Failed to remove VM %s: %s", vm.name, e)
+            else:
+                removed.append(vm.name)
+
+        return OperationResult(
+            status="success",
+            code="cache.pruned",
+            message=f"Pruned {len(removed)} VM(s)",
+            item=removed,
+        )
+
     @staticmethod
     def _execute_create(
         resolved: ResolvedVMCreateInput,

@@ -81,6 +81,7 @@ OVERRIDABLE_DEFAULTS: Final[dict[str, dict[str, Any]]] = {
     },
     "settings": {
         "guestfs_enabled": False,
+        "firewall_backend": "nftables",
     },
 }
 
@@ -235,6 +236,7 @@ PRIVILEGED_BINARIES: Final[dict[str, str]] = {
     "/usr/sbin/ip": "iproute2",
     "/usr/sbin/iptables": "iptables",
     "/usr/sbin/iptables-save": "iptables",
+    "/usr/sbin/nft": "nftables",
     "/usr/sbin/sysctl": "procps",
     "/usr/sbin/modprobe": "kmod",
 }
@@ -248,6 +250,7 @@ PRIVILEGED_SERVICE_BINARIES: Final[list[str]] = [
 REQUIRED_BINARIES: Final[list[str]] = [
     "ip",
     "iptables",
+    "nft",
     "qemu-img",
     "ssh-keygen",
     "tar",

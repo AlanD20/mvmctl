@@ -43,6 +43,64 @@ class BinaryOperation:
     """Binary management orchestration."""
 
     @staticmethod
+    def prune(
+        dry_run: bool = False,
+        include_all: bool = False,
+    ) -> OperationResult[list[str]]:
+        """Prune unused binaries.
+
+        Args:
+            dry_run: If True, only report what would be removed.
+            include_all: If True, remove ALL binaries including default version.
+
+        Returns:
+            OperationResult with item list of binary identifiers (name:version)
+            that were removed.
+        """
+        db = Database()
+        repo = BinaryRepository(db)
+        all_binaries = repo.list_all()
+
+        default_binary = repo.get_default("firecracker")
+        default_version = default_binary.version if default_binary else None
+
+        removed: list[str] = []
+        for binary in all_binaries:
+            # Skip service binaries (mvm-provision, mvm-nocloud-server, mvm-console-relay)
+            if binary.name.startswith("mvm-"):
+                continue
+
+            if not include_all:
+                if binary.version == default_version:
+                    continue
+
+            if not dry_run:
+                try:
+                    from mvmctl.api.inputs._binary_input import BinaryInput
+
+                    BinaryOperation.remove(
+                        BinaryInput(id=[binary.id]),
+                        force=include_all,
+                    )
+                    removed.append(f"{binary.name}:{binary.version}")
+                except Exception as e:
+                    logger.warning(
+                        "Failed to remove binary %s:%s: %s",
+                        binary.name,
+                        binary.version,
+                        e,
+                    )
+            else:
+                removed.append(f"{binary.name}:{binary.version}")
+
+        return OperationResult(
+            status="success",
+            code="cache.pruned",
+            message=f"Pruned {len(removed)} binary(ies)",
+            item=removed,
+        )
+
+    @staticmethod
     def pull(
         inputs: BinaryPullInput,
     ) -> OperationResult[list[BinaryItem]] | NeedsInteraction:

@@ -101,8 +101,8 @@ class HostOperation:
                 from mvmctl.core.binary._repository import BinaryRepository
                 from mvmctl.core.binary._service import BinaryService
 
-                repo = BinaryRepository(Database())
-                BinaryService(repo).extract_service_binaries()
+                bin_repo = BinaryRepository(Database())
+                BinaryService(bin_repo).extract_service_binaries()
         except Exception:
             logger.exception("Failed to extract embedded service binaries")
 
@@ -162,6 +162,26 @@ class HostOperation:
             )
 
         HostService.validate_sudoers_binaries()
+
+        # --- Nftables availability check ---
+        # nftables is the default firewall backend.  If the kernel does
+        # not support nftables NAT (nft_chain_nat), fall back to iptables.
+        _nft_available = NetworkService.check_nftables_available()
+
+        if not _nft_available:
+            logger.warning(
+                "nftables NAT not available (kernel module nft_chain_nat missing). "
+                "Falling back to iptables backend. "
+                "To use nftables, rebuild kernel with CONFIG_NFT_CHAIN_NAT=y."
+            )
+            try:
+                from mvmctl.core.config._repository import SettingsRepository
+
+                SettingsService(SettingsRepository(Database())).set(
+                    "settings", "firewall_backend", "iptables"
+                )
+            except Exception:
+                pass
 
         if not HostService.check_cloud_localds():
             logger.warning(
@@ -494,11 +514,11 @@ class HostOperation:
 
             # Remove MVM chains
             try:
-                net_service.remove_mvm_chains()
-                summary.append("Removed MVM iptables chains")
+                net_service.tracker.teardown()
+                summary.append("Removed MVM firewall chains")
             except NetworkError as e:
                 summary.append(
-                    f"Warning: failed to remove MVM iptables chains: {e}"
+                    f"Warning: failed to remove MVM firewall chains: {e}"
                 )
 
             if not summary:

@@ -6,21 +6,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from mvmctl.constants import CONST_DIR_PERMS_CACHE
-from mvmctl.core._shared import IPTablesTracker
 from mvmctl.exceptions import (
     CloudInitIsoModeError,
     CloudInitNetModeError,
 )
 from mvmctl.models import (
     CloudInitMode,
-    IPTablesChain,
-    IPTablesPort,
-    IPTablesProtocol,
-    IPTablesRuleItem,
-    IPTablesRuleType,
-    IPTablesTable,
-    IPTablesTarget,
-    IPTablesWildcard,
+    FirewallChain,
+    FirewallPort,
+    FirewallProtocol,
+    FirewallRule,
+    FirewallRuleType,
+    FirewallTable,
+    FirewallTarget,
+    FirewallWildcard,
     NetworkItem,
 )
 from mvmctl.services.nocloud_server.manager import NoCloudNetServerManager
@@ -69,7 +68,7 @@ class CloudInitProvisionResult:
     nocloud_port: int = 0
     nocloud_pid: int | None = None
     nocloud_net_manager: NoCloudNetServerManager | None = None
-    nocloud_net_rules: list[IPTablesRuleItem] = field(default_factory=list)
+    nocloud_net_rules: list[FirewallRule] = field(default_factory=list)
 
 
 class CloudInitProvisioner:
@@ -142,36 +141,31 @@ class CloudInitProvisioner:
             )
             url, port, pid = net_manager.start()
 
-            from mvmctl.core._shared import Database
-            from mvmctl.core._shared._iptables_tracker._repository import (
-                IPTablesRuleRepository,
+            from mvmctl.core._shared import Database, FirewallTracker
+
+            tracker = FirewallTracker(Database())
+            tracker.ensure_chain(
+                FirewallChain.MVM_NOCLOUDNET_INPUT, auto_jump_from="INPUT"
             )
 
-            iptables_tracker = IPTablesTracker(
-                IPTablesRuleRepository(Database())
-            )
-            iptables_tracker.ensure_chain(
-                IPTablesChain.MVM_NOCLOUDNET_INPUT, auto_jump_from="INPUT"
-            )
-
-            nocloud_net_in_rule = IPTablesRuleItem(
-                table_name=IPTablesTable.FILTER,
-                chain_name=IPTablesChain.MVM_NOCLOUDNET_INPUT,
-                rule_type=IPTablesRuleType.NOCLOUDNET_INPUT,
-                target=IPTablesTarget.ACCEPT,
+            nocloud_net_in_rule = FirewallRule(
+                table_name=FirewallTable.FILTER,
+                chain_name=FirewallChain.MVM_NOCLOUDNET_INPUT,
+                rule_type=FirewallRuleType.NOCLOUDNET_INPUT,
+                target=FirewallTarget.ACCEPT,
                 network_id=self._config.network.id,
-                network_name=self._config.network.name,
-                protocol=IPTablesProtocol.TCP,
+                protocol=FirewallProtocol.TCP,
                 source=self._config.guest_ip,
                 destination=self._config.network.ipv4_gateway,
                 in_interface=self._config.tap_name,
-                out_interface=IPTablesWildcard.ANY_INTERFACE,
-                sport=IPTablesPort.ANY,
+                out_interface=FirewallWildcard.ANY_INTERFACE,
+                sport=FirewallPort.ANY,
                 dport=port,
+                network_name=self._config.network.name,
                 comment_tag=f"# nocloudnet:{self._config.vm_name}:{port}",
                 is_active=True,
             )
-            iptables_tracker.ensure_rule(nocloud_net_in_rule)
+            tracker.ensure_rule(nocloud_net_in_rule)
 
             return CloudInitProvisionResult(
                 mode=CloudInitMode.NET,

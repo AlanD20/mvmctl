@@ -13,18 +13,18 @@ from mvmctl.core._shared._iptables_tracker import (
 )
 from mvmctl.exceptions import IPTablesTrackerError, ProcessError
 from mvmctl.models import (
-    IPTablesChain,
-    IPTablesPort,
-    IPTablesProtocol,
-    IPTablesRuleItem,
-    IPTablesRuleType,
-    IPTablesTable,
-    IPTablesTarget,
-    IPTablesWildcard,
+    FirewallChain,
+    FirewallPort,
+    FirewallProtocol,
+    FirewallRule,
+    FirewallRuleType,
+    FirewallTable,
+    FirewallTarget,
+    FirewallWildcard,
 )
 
-_VALID_RULE_TYPE = IPTablesRuleType.FORWARD_IN
-_VALID_CHAIN = IPTablesChain.MVM_FORWARD
+_VALID_RULE_TYPE = FirewallRuleType.FORWARD_IN
+_VALID_CHAIN = FirewallChain.MVM_FORWARD
 
 
 @pytest.fixture
@@ -44,25 +44,25 @@ def tracker(repo: IPTablesRuleRepository) -> IPTablesTracker:
     return IPTablesTracker(repo)
 
 
-def _make_rule(**kwargs: object) -> IPTablesRuleItem:
+def _make_rule(**kwargs: object) -> FirewallRule:
     defaults: dict[str, object] = dict(
-        table_name=IPTablesTable.FILTER,
+        table_name=FirewallTable.FILTER,
         chain_name=_VALID_CHAIN,
         rule_type=_VALID_RULE_TYPE,
-        protocol=IPTablesProtocol.TCP,
+        protocol=FirewallProtocol.TCP,
         source="10.0.0.10",
         destination="10.0.0.1",
         in_interface="tap0",
-        out_interface=IPTablesWildcard.ANY_INTERFACE,
-        target=IPTablesTarget.ACCEPT,
-        sport=IPTablesPort.ANY,
+        out_interface=FirewallWildcard.ANY_INTERFACE,
+        target=FirewallTarget.ACCEPT,
+        sport=FirewallPort.ANY,
         dport=8080,
         network_id="net-test",
         is_active=True,
         comment_tag="mvm:test:net-test",
     )
     defaults.update(kwargs)
-    return IPTablesRuleItem(**defaults)
+    return FirewallRule(**defaults)
 
 
 class TestEnsureChainWithJumpRule:
@@ -94,7 +94,7 @@ class TestEnsureChainWithJumpRule:
         ):
             result = tracker.ensure_chain(
                 _VALID_CHAIN,
-                table=IPTablesTable.FILTER,
+                table=FirewallTable.FILTER,
                 auto_jump_from="FORWARD",
                 position=1,
             )
@@ -129,7 +129,7 @@ class TestEnsureChainWithJumpRule:
             ):
                 tracker.ensure_chain(
                     _VALID_CHAIN,
-                    table=IPTablesTable.FILTER,
+                    table=FirewallTable.FILTER,
                     auto_jump_from="FORWARD",
                     position=1,
                 )
@@ -153,7 +153,7 @@ class TestEnsureChainWithJumpRule:
             side_effect=_mock_run,
         ):
             result = tracker.ensure_chain(
-                _VALID_CHAIN, table=IPTablesTable.FILTER
+                _VALID_CHAIN, table=FirewallTable.FILTER
             )
         assert result is False
 
@@ -184,7 +184,7 @@ class TestEnsureJumpRuleFailure:
             result = tracker.ensure_jump_rule(
                 "INPUT",
                 _VALID_CHAIN.value,
-                table=IPTablesTable.FILTER,
+                table=FirewallTable.FILTER,
                 position=1,
             )
         assert result.success is False
@@ -213,7 +213,7 @@ class TestEnsureJumpRuleFailure:
             result = tracker.ensure_jump_rule(
                 "INPUT",
                 _VALID_CHAIN.value,
-                table=IPTablesTable.FILTER,
+                table=FirewallTable.FILTER,
                 position=1,
             )
         assert result.success is False
@@ -285,7 +285,7 @@ class TestRemoveByLineNumber:
             return MagicMock(returncode=0)
 
         rule = _make_rule(
-            in_interface="tap0", out_interface=IPTablesWildcard.ANY_INTERFACE
+            in_interface="tap0", out_interface=FirewallWildcard.ANY_INTERFACE
         )
 
         with patch(
@@ -307,7 +307,7 @@ class TestRemoveByLineNumber:
         ):
             rule = _make_rule(
                 in_interface="tap99",
-                out_interface=IPTablesWildcard.ANY_INTERFACE,
+                out_interface=FirewallWildcard.ANY_INTERFACE,
             )
             result = tracker._remove_by_line_number(rule)
         assert result is False
@@ -338,7 +338,7 @@ class TestRemoveByLineNumber:
             return MagicMock(returncode=1)
 
         rule = _make_rule(
-            in_interface="tap0", out_interface=IPTablesWildcard.ANY_INTERFACE
+            in_interface="tap0", out_interface=FirewallWildcard.ANY_INTERFACE
         )
 
         with patch(
@@ -368,8 +368,8 @@ class TestRemoveByLineNumber:
             return MagicMock(returncode=0)
 
         rule = _make_rule(
-            in_interface=IPTablesWildcard.ANY_INTERFACE,
-            out_interface=IPTablesWildcard.ANY_INTERFACE,
+            in_interface=FirewallWildcard.ANY_INTERFACE,
+            out_interface=FirewallWildcard.ANY_INTERFACE,
         )
 
         with patch(
@@ -405,7 +405,7 @@ class TestRuleExistsByInterfaces:
         ):
             rule = _make_rule(
                 in_interface="tap0",
-                out_interface=IPTablesWildcard.ANY_INTERFACE,
+                out_interface=FirewallWildcard.ANY_INTERFACE,
             )
             result = tracker._rule_exists_by_interfaces(rule)
         assert result is True
@@ -427,7 +427,7 @@ class TestRuleExistsByInterfaces:
         ):
             rule = _make_rule(
                 in_interface="tap99",
-                out_interface=IPTablesWildcard.ANY_INTERFACE,
+                out_interface=FirewallWildcard.ANY_INTERFACE,
             )
             result = tracker._rule_exists_by_interfaces(rule)
         assert result is False
@@ -456,8 +456,8 @@ class TestRuleExistsByInterfaces:
             return_value=MagicMock(returncode=0, stdout=output, stderr=""),
         ):
             rule = _make_rule(
-                in_interface=IPTablesWildcard.ANY_INTERFACE,
-                out_interface=IPTablesWildcard.ANY_INTERFACE,
+                in_interface=FirewallWildcard.ANY_INTERFACE,
+                out_interface=FirewallWildcard.ANY_INTERFACE,
             )
             result = tracker._rule_exists_by_interfaces(rule)
         assert result is True
@@ -468,7 +468,7 @@ class TestBuildIptablesArgsEdgeCases:
 
     def test_excludes_wildcard_protocol(self, tracker: IPTablesTracker) -> None:
         """ALL protocol should not add -p flag."""
-        rule = _make_rule(protocol=IPTablesProtocol.ALL)
+        rule = _make_rule(protocol=FirewallProtocol.ALL)
         args = tracker._build_iptables_args(
             rule, IPTablesTracker.RuleAction.CHECK
         )
@@ -476,7 +476,7 @@ class TestBuildIptablesArgsEdgeCases:
 
     def test_excludes_wildcard_source(self, tracker: IPTablesTracker) -> None:
         """ANY_CIDR source should not add -s flag."""
-        rule = _make_rule(source=IPTablesWildcard.ANY_CIDR)
+        rule = _make_rule(source=FirewallWildcard.ANY_CIDR)
         args = tracker._build_iptables_args(
             rule, IPTablesTracker.RuleAction.CHECK
         )
@@ -486,7 +486,7 @@ class TestBuildIptablesArgsEdgeCases:
         self, tracker: IPTablesTracker
     ) -> None:
         """ANY_CIDR destination should not add -d flag."""
-        rule = _make_rule(destination=IPTablesWildcard.ANY_CIDR)
+        rule = _make_rule(destination=FirewallWildcard.ANY_CIDR)
         args = tracker._build_iptables_args(
             rule, IPTablesTracker.RuleAction.CHECK
         )
@@ -497,7 +497,7 @@ class TestBuildIptablesArgsEdgeCases:
     ) -> None:
         """All specific fields should be included in args."""
         rule = _make_rule(
-            protocol=IPTablesProtocol.TCP,
+            protocol=FirewallProtocol.TCP,
             source="10.0.0.1",
             destination="10.0.0.2",
             in_interface="eth0",

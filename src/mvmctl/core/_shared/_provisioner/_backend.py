@@ -116,14 +116,17 @@ class _LoopMountBackend:
             return "linux"
 
     def deblob(self) -> None:
-        """Queue deblob (OS cache cleanup + fstab fix) operations."""
+        """Queue deblob (OS cache cleanup) operations.
+
+        Note: ``fix_fstab`` is NOT called here — it is queued separately
+        by the caller (``vm_operations.py``) to avoid duplicate execution.
+        """
         os_type = self.detect_os()
         from mvmctl.core._shared._provisioner._content import (
             ProvisionerContent,
         )
 
         ops = ProvisionerContent.build_deblob_ops(os_type)
-        ops.extend(ProvisionerContent.build_fix_fstab_ops())
         self._queue_ops(ops)
 
     def fix_fstab(self) -> None:

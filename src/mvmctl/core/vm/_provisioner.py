@@ -94,6 +94,10 @@ class VMProvisioner:
         """Queue fstab fix for Firecracker (PARTUUID → /dev/vda)."""
         self._backend.fix_fstab()
 
+    def deblob(self) -> None:
+        """Queue debloat operations (OS cache cleanup)."""
+        self._backend.deblob()
+
     # -- execution ---------------------------------------------------------
 
     def run(self) -> None:

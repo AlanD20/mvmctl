@@ -13,19 +13,19 @@ from mvmctl.core._shared._iptables_tracker import (
 )
 from mvmctl.exceptions import IPTablesTrackerError, ProcessError
 from mvmctl.models import (
-    IPTablesChain,
-    IPTablesPort,
-    IPTablesProtocol,
-    IPTablesRuleItem,
-    IPTablesRuleType,
-    IPTablesTable,
-    IPTablesTarget,
-    IPTablesWildcard,
+    FirewallChain,
+    FirewallPort,
+    FirewallProtocol,
+    FirewallRule,
+    FirewallRuleType,
+    FirewallTable,
+    FirewallTarget,
+    FirewallWildcard,
 )
 
 # DB CHECK constraint only allows: 'masquerade', 'forward_in', 'forward_out', 'nocloud_input'
-_VALID_RULE_TYPE = IPTablesRuleType.FORWARD_IN
-_VALID_CHAIN = IPTablesChain.MVM_FORWARD
+_VALID_RULE_TYPE = FirewallRuleType.FORWARD_IN
+_VALID_CHAIN = FirewallChain.MVM_FORWARD
 
 
 @pytest.fixture
@@ -83,21 +83,21 @@ def _seed_network(
 
 def _make_rule(
     network_id: str = "net-test",
-    chain_name: IPTablesChain = _VALID_CHAIN,
-    rule_type: IPTablesRuleType = _VALID_RULE_TYPE,
-    protocol: IPTablesProtocol = IPTablesProtocol.TCP,
+    chain_name: FirewallChain = _VALID_CHAIN,
+    rule_type: FirewallRuleType = _VALID_RULE_TYPE,
+    protocol: FirewallProtocol = FirewallProtocol.TCP,
+    target: FirewallTarget = FirewallTarget.ACCEPT,
     source: str = "10.0.0.10",
     destination: str = "10.0.0.1",
     in_interface: str = "tap0",
-    out_interface: str = IPTablesWildcard.ANY_INTERFACE,
-    target: IPTablesTarget = IPTablesTarget.ACCEPT,
-    sport: int = IPTablesPort.ANY,
+    out_interface: str = "*",
+    sport: int = FirewallPort.ANY,
     dport: int = 8080,
     comment_tag: str | None = None,
-) -> IPTablesRuleItem:
-    """Create a standard IPTablesRuleItem for testing (DB-valid by default)."""
-    return IPTablesRuleItem(
-        table_name=IPTablesTable.FILTER,
+) -> FirewallRule:
+    """Create a standard FirewallRule for testing (DB-valid by default)."""
+    return FirewallRule(
+        table_name=FirewallTable.FILTER,
         chain_name=chain_name,
         rule_type=rule_type,
         protocol=protocol,
@@ -125,11 +125,11 @@ class TestBuildIptablesArgs:
         )
         assert args[0] == "iptables"
         assert args[1] == "-t"
-        assert IPTablesTable.FILTER.value in args
+        assert FirewallTable.FILTER.value in args
         assert "-C" in args
         assert _VALID_CHAIN.value in args
         assert "-p" in args
-        assert IPTablesProtocol.TCP.value in args
+        assert FirewallProtocol.TCP.value in args
         assert "-s" in args
         assert "10.0.0.10" in args
 
@@ -156,7 +156,7 @@ class TestBuildComment:
     def test_build_comment_basic(self, tracker: IPTablesTracker) -> None:
         """_build_comment creates standard comment format."""
         comment = tracker._build_comment(
-            IPTablesRuleType.NOCLOUDNET_INPUT, "test-net", ""
+            FirewallRuleType.NOCLOUDNET_INPUT, "test-net", ""
         )
         assert comment.startswith("mvm:")
         assert "nocloudnet_input" in comment
@@ -165,7 +165,7 @@ class TestBuildComment:
     def test_build_comment_with_context(self, tracker: IPTablesTracker) -> None:
         """_build_comment appends context."""
         comment = tracker._build_comment(
-            IPTablesRuleType.NOCLOUDNET_INPUT, "test-net", "vm123"
+            FirewallRuleType.NOCLOUDNET_INPUT, "test-net", "vm123"
         )
         assert "vm123" in comment
 
@@ -522,7 +522,7 @@ class TestRepositoryIntegration:
         rule = _make_rule(
             dport=2222,
             network_id=_seed_network(db, "net-abc"),
-            protocol=IPTablesProtocol.TCP,
+            protocol=FirewallProtocol.TCP,
             source="10.0.0.20",
             destination="10.0.0.1",
             in_interface="tap1",
@@ -530,16 +530,16 @@ class TestRepositoryIntegration:
         repo.insert(rule)
 
         found = repo.find_by_attributes(
-            table_name=IPTablesTable.FILTER,
+            table_name=FirewallTable.FILTER,
             chain_name=_VALID_CHAIN,
             rule_type=_VALID_RULE_TYPE,
             network_id="net-abc",
-            protocol=IPTablesProtocol.TCP,
+            protocol=FirewallProtocol.TCP,
             source="10.0.0.20",
             destination="10.0.0.1",
             in_interface="tap1",
-            out_interface=IPTablesWildcard.ANY_INTERFACE,
-            sport=IPTablesPort.ANY,
+            out_interface=FirewallWildcard.ANY_INTERFACE,
+            sport=FirewallPort.ANY,
             dport=2222,
         )
         assert found is not None
@@ -578,11 +578,11 @@ class TestRepositoryIntegration:
         repo.insert(_make_rule(dport=8888))
 
         count = repo.mark_deleted_by_table_chain_name(
-            IPTablesTable.FILTER, _VALID_CHAIN
+            FirewallTable.FILTER, _VALID_CHAIN
         )
         assert count == 2
         remaining = repo.get_by_table_chain_name(
-            IPTablesTable.FILTER.value, _VALID_CHAIN.value, active_only=True
+            FirewallTable.FILTER.value, _VALID_CHAIN.value, active_only=True
         )
         assert len(remaining) == 0
 

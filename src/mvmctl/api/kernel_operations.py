@@ -45,6 +45,69 @@ class KernelOperation:
     """
 
     @staticmethod
+    def prune(
+        dry_run: bool = False,
+        include_all: bool = False,
+    ) -> OperationResult[list[str]]:
+        """Prune unused kernels.
+
+        Args:
+            dry_run: If True, only report what would be removed.
+            include_all: If True, remove ALL kernels including default and referenced.
+
+        Returns:
+            OperationResult with item list of kernel IDs that were removed.
+        """
+        from mvmctl.core.vm._repository import VMRepository
+
+        db = Database()
+        repo = KernelRepository(db)
+
+        # Get referenced kernel IDs from VMs
+        vm_repo = VMRepository(db)
+        vms = vm_repo.list_all()
+        referenced_kernel_ids: set[str] = set()
+        for vm in vms:
+            if vm.kernel_id:
+                referenced_kernel_ids.add(vm.kernel_id)
+
+        default_item = repo.get_default()
+        default_id = default_item.id if default_item else None
+
+        all_kernels = repo.list_all()
+        removed: list[str] = []
+
+        for kernel in all_kernels:
+            if not include_all:
+                if kernel.id == default_id:
+                    continue
+                if kernel.id in referenced_kernel_ids:
+                    continue
+
+            if not dry_run:
+                try:
+                    from mvmctl.api.inputs._kernel_input import KernelInput
+
+                    KernelOperation.remove(
+                        KernelInput(id=[kernel.id]),
+                        force=include_all,
+                    )
+                    removed.append(kernel.id)
+                except Exception as e:
+                    logger.warning(
+                        "Failed to remove kernel %s: %s", kernel.id, e
+                    )
+            else:
+                removed.append(kernel.id)
+
+        return OperationResult(
+            status="success",
+            code="cache.pruned",
+            message=f"Pruned {len(removed)} kernel(s)",
+            item=removed,
+        )
+
+    @staticmethod
     def pull(
         inputs: KernelPullInput,
         *,

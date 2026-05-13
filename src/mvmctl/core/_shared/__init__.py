@@ -21,10 +21,10 @@ if TYPE_CHECKING:
     from mvmctl.core._shared._asset_manager import AssetManager
     from mvmctl.core._shared._db import Database
     from mvmctl.core._shared._enrichment import RelationEnricher, RelationSpec
+    from mvmctl.core._shared._firewall_tracker import FirewallTracker
     from mvmctl.core._shared._iptables_tracker import (
         IPTablesRuleRepository,
         IPTablesRuleResolver,
-        IPTablesRuleResult,
         IPTablesTracker,
     )
     from mvmctl.core._shared._parallel import ParallelExecutor
@@ -34,10 +34,11 @@ if TYPE_CHECKING:
 __all__ = [
     "AssetManager",
     "Database",
+    "FirewallRuleResult",
+    "FirewallTracker",
     "get_resolver",
     "IPTablesRuleRepository",
     "IPTablesRuleResolver",
-    "IPTablesRuleResult",
     "IPTablesTracker",
     "ParallelExecutor",
     "register",
@@ -48,6 +49,11 @@ __all__ = [
 _LAZY_MAP = {
     "AssetManager": ("mvmctl.core._shared._asset_manager", "AssetManager"),
     "Database": ("mvmctl.core._shared._db", "Database"),
+    "FirewallRuleResult": ("mvmctl.models.network", "FirewallRuleResult"),
+    "FirewallTracker": (
+        "mvmctl.core._shared._firewall_tracker",
+        "FirewallTracker",
+    ),
     "RelationEnricher": ("mvmctl.core._shared._enrichment", "RelationEnricher"),
     "RelationSpec": ("mvmctl.core._shared._enrichment", "RelationSpec"),
     "IPTablesRuleRepository": (
@@ -57,10 +63,6 @@ _LAZY_MAP = {
     "IPTablesRuleResolver": (
         "mvmctl.core._shared._iptables_tracker._resolver",
         "IPTablesRuleResolver",
-    ),
-    "IPTablesRuleResult": (
-        "mvmctl.core._shared._iptables_tracker._tracker",
-        "IPTablesRuleResult",
     ),
     "IPTablesTracker": (
         "mvmctl.core._shared._iptables_tracker._tracker",

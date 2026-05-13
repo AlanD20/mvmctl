@@ -277,5 +277,49 @@ CREATE TABLE user_settings (
     PRIMARY KEY (category, key)
 );
 
+-- NFTABLES_RULES: Tracks every nftables rule created by mvmctl
+CREATE TABLE IF NOT EXISTS nftables_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    -- Rule Location
+    chain TEXT NOT NULL CHECK(chain LIKE 'MVM-%'),       -- Only MVM-* chains (same as iptables)
+    rule_type TEXT NOT NULL CHECK(rule_type IN ('masquerade', 'forward_in', 'forward_out', 'nocloudnet_input')),
+    table_name TEXT NOT NULL CHECK(table_name IN ('filter')),
+
+    -- Rule Parameters
+    protocol TEXT NOT NULL CHECK(protocol IN ('tcp', 'udp', 'icmp', 'all')),
+    source TEXT NOT NULL,
+    destination TEXT NOT NULL,
+    in_interface TEXT NOT NULL,
+    out_interface TEXT NOT NULL,
+    target TEXT NOT NULL,
+    sport INTEGER NOT NULL,
+    dport INTEGER NOT NULL,
+
+    -- Resource Reference
+    network_id TEXT NOT NULL REFERENCES networks(id) ON DELETE CASCADE,
+
+    -- Identification & Debugging
+    nft_handle INTEGER NULL,
+    comment_tag TEXT NULL,
+    command_string TEXT NULL,
+
+    -- Lifecycle
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    last_verified_at TIMESTAMP NULL,
+    is_active INTEGER DEFAULT 1 NOT NULL CHECK(is_active IN (0, 1))
+);
+
+CREATE INDEX IF NOT EXISTS idx_nftables_rules_network ON nftables_rules(network_id);
+CREATE INDEX IF NOT EXISTS idx_nftables_rules_chain ON nftables_rules(chain);
+CREATE INDEX IF NOT EXISTS idx_nftables_rules_active ON nftables_rules(is_active) WHERE is_active = 1;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_nftables_rules_unique_active
+    ON nftables_rules(network_id, rule_type, chain,
+                      COALESCE(protocol, ''), COALESCE(source, ''),
+                      COALESCE(destination, ''), COALESCE(in_interface, ''),
+                      COALESCE(out_interface, ''), target,
+                      COALESCE(sport, -1), COALESCE(dport, -1))
+    WHERE is_active = 1;
+
 -- Set schema version
 PRAGMA user_version = 1;

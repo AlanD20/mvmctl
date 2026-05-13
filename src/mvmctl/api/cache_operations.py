@@ -12,11 +12,7 @@ from mvmctl.core._shared._guestfs import GuestfsService
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.binary._service import BinaryService
 from mvmctl.core.cache import CacheService
-from mvmctl.core.config._service import SettingsService
 from mvmctl.core.host._helper import HostPrivilegeHelper
-from mvmctl.core.image._repository import ImageRepository
-from mvmctl.core.kernel._repository import KernelRepository
-from mvmctl.core.network._repository import LeaseRepository, NetworkRepository
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.models import CleanResult, PruneAllResult, VMStatus
 from mvmctl.models.result import OperationResult, ProgressEvent
@@ -135,306 +131,46 @@ class CacheOperation:
         dry_run: bool = False,
         include_all: bool = False,
     ) -> OperationResult[list[str]]:
-        """Prune VMs based on their status.
+        """Prune VMs via :meth:`VMOperation.prune`."""
+        from mvmctl.api.vm_operations import VMOperation
 
-        By default, prunes all VMs EXCEPT those in RUNNING or STARTING state.
-        Use ``include_all=True`` to prune ALL VMs regardless of state.
-
-        Args:
-            dry_run: If True, only report what would be removed.
-            include_all: Prune ALL VMs including RUNNING and STARTING.
-
-        Returns:
-            OperationResult with item list of VM names that were removed.
-        """
-        HostPrivilegeHelper.check_privileges("/usr/sbin/ip", "prune VMs")
-        db = Database()
-        vms = VMRepository(db).list_all()
-
-        removed: list[str] = []
-        for vm in vms:
-            if vm.status in (VMStatus.RUNNING, VMStatus.STARTING):
-                if not include_all:
-                    continue
-
-            if not dry_run:
-                try:
-                    from mvmctl.api.inputs._vm_input import VMInput
-                    from mvmctl.api.vm_operations import VMOperation
-
-                    VMOperation.remove(
-                        VMInput(identifiers=[vm.name], force=True)
-                    )
-                    removed.append(vm.name)
-                except Exception as e:
-                    logger.warning("Failed to remove VM %s: %s", vm.name, e)
-            else:
-                removed.append(vm.name)
-
-        return OperationResult(
-            status="success",
-            code="cache.pruned",
-            message=f"Pruned {len(removed)} VM(s)",
-            item=removed,
-        )
+        return VMOperation.prune(dry_run=dry_run, include_all=include_all)
 
     @staticmethod
     def prune_networks(
         dry_run: bool = False, include_all: bool = False
     ) -> OperationResult[list[str]]:
-        """Prune unused networks.
+        """Prune unused networks via :meth:`NetworkOperation.prune`."""
+        from mvmctl.api.network_operations import NetworkOperation
 
-        Args:
-            dry_run: If True, only report what would be removed.
-            include_all: If True, remove ALL networks including default and referenced.
-
-        Returns:
-            OperationResult with item list of network names that were removed.
-        """
-        HostPrivilegeHelper.check_privileges("/usr/sbin/ip", "prune networks")
-        db = Database()
-        repo = NetworkRepository(db)
-        all_networks = repo.list_all()
-
-        # Get referenced network IDs from VMs
-        vm_repo = VMRepository(db)
-        vms = vm_repo.list_all()
-        referenced_network_ids: set[str] = set()
-        for vm in vms:
-            if vm.network_id:
-                referenced_network_ids.add(vm.network_id)
-
-        lease_repo = LeaseRepository(db)
-        removed: list[str] = []
-
-        for network in all_networks:
-            if not include_all:
-                if network.name == str(
-                    SettingsService.resolve(db, "defaults.network", "name")
-                ):
-                    continue
-                if network.id in referenced_network_ids:
-                    continue
-                leases = lease_repo.list_all(network.id)
-                if leases:
-                    continue
-
-            # Soft-deleted networks (is_present=0) have no infrastructure —
-            # skip API remove and delete the DB record directly
-            if not network.is_present:
-                if not dry_run:
-                    repo.delete(network.id)
-                removed.append(network.name)
-                continue
-
-            if not dry_run:
-                try:
-                    from mvmctl.api.inputs._network_input import NetworkInput
-                    from mvmctl.api.network_operations import NetworkOperation
-
-                    remove_result = NetworkOperation.remove(
-                        NetworkInput(name=[network.name]),
-                        force=include_all,
-                    )
-                    if remove_result.is_error:
-                        logger.warning(
-                            "Failed to remove network %s: %s",
-                            network.name,
-                            remove_result.message,
-                        )
-                    else:
-                        removed.append(network.name)
-                except Exception as e:
-                    logger.warning(
-                        "Failed to remove network %s: %s", network.name, e
-                    )
-            else:
-                removed.append(network.name)
-
-        return OperationResult(
-            status="success",
-            code="cache.pruned",
-            message=f"Pruned {len(removed)} network(s)",
-            item=removed,
-        )
+        return NetworkOperation.prune(dry_run=dry_run, include_all=include_all)
 
     @staticmethod
     def prune_images(
         dry_run: bool = False, include_all: bool = False
     ) -> OperationResult[list[str]]:
-        """Prune unused images.
+        """Prune unused images via :meth:`ImageOperation.prune`."""
+        from mvmctl.api.image_operations import ImageOperation
 
-        Args:
-            dry_run: If True, only report what would be removed.
-            include_all: If True, remove ALL images including default and referenced.
-
-        Returns:
-            OperationResult with item list of image IDs that were removed.
-        """
-        db = Database()
-        repo = ImageRepository(db)
-
-        # Get referenced image IDs from VMs
-        vm_repo = VMRepository(db)
-        vms = vm_repo.list_all()
-        referenced_image_ids: set[str] = set()
-        for vm in vms:
-            if vm.image_id:
-                referenced_image_ids.add(vm.image_id)
-
-        default_item = repo.get_default()
-        default_id = default_item.id if default_item else None
-
-        all_images = repo.list_all()
-        removed: list[str] = []
-
-        for image in all_images:
-            if not include_all:
-                if image.id == default_id:
-                    continue
-                if image.id in referenced_image_ids:
-                    continue
-
-            if not dry_run:
-                try:
-                    from mvmctl.api.image_operations import ImageOperation
-                    from mvmctl.api.inputs._image_input import ImageInput
-
-                    ImageOperation.remove(
-                        ImageInput(id=[image.id]),
-                        force=include_all,
-                    )
-                    removed.append(image.id)
-                except Exception as e:
-                    logger.warning("Failed to remove image %s: %s", image.id, e)
-            else:
-                removed.append(image.id)
-
-        return OperationResult(
-            status="success",
-            code="cache.pruned",
-            message=f"Pruned {len(removed)} image(s)",
-            item=removed,
-        )
+        return ImageOperation.prune(dry_run=dry_run, include_all=include_all)
 
     @staticmethod
     def prune_kernels(
         dry_run: bool = False, include_all: bool = False
     ) -> OperationResult[list[str]]:
-        """Prune unused kernels.
+        """Prune unused kernels via :meth:`KernelOperation.prune`."""
+        from mvmctl.api.kernel_operations import KernelOperation
 
-        Args:
-            dry_run: If True, only report what would be removed.
-            include_all: If True, remove ALL kernels including default and referenced.
-
-        Returns:
-            OperationResult with item list of kernel IDs that were removed.
-        """
-        db = Database()
-        repo = KernelRepository(db)
-
-        # Get referenced kernel IDs from VMs
-        vm_repo = VMRepository(db)
-        vms = vm_repo.list_all()
-        referenced_kernel_ids: set[str] = set()
-        for vm in vms:
-            if vm.kernel_id:
-                referenced_kernel_ids.add(vm.kernel_id)
-
-        default_item = repo.get_default()
-        default_id = default_item.id if default_item else None
-
-        all_kernels = repo.list_all()
-        removed: list[str] = []
-
-        for kernel in all_kernels:
-            if not include_all:
-                if kernel.id == default_id:
-                    continue
-                if kernel.id in referenced_kernel_ids:
-                    continue
-
-            if not dry_run:
-                try:
-                    from mvmctl.api.inputs._kernel_input import KernelInput
-                    from mvmctl.api.kernel_operations import KernelOperation
-
-                    KernelOperation.remove(
-                        KernelInput(id=[kernel.id]),
-                        force=include_all,
-                    )
-                    removed.append(kernel.id)
-                except Exception as e:
-                    logger.warning(
-                        "Failed to remove kernel %s: %s", kernel.id, e
-                    )
-            else:
-                removed.append(kernel.id)
-
-        return OperationResult(
-            status="success",
-            code="cache.pruned",
-            message=f"Pruned {len(removed)} kernel(s)",
-            item=removed,
-        )
+        return KernelOperation.prune(dry_run=dry_run, include_all=include_all)
 
     @staticmethod
     def prune_binaries(
         dry_run: bool = False, include_all: bool = False
     ) -> OperationResult[list[str]]:
-        """Prune unused binaries.
+        """Prune unused binaries via :meth:`BinaryOperation.prune`."""
+        from mvmctl.api.binary_operations import BinaryOperation
 
-        Args:
-            dry_run: If True, only report what would be removed.
-            include_all: If True, remove ALL binaries including default version.
-
-        Returns:
-            OperationResult with item list of binary identifiers (name:version)
-            that were removed.
-        """
-        db = Database()
-        repo = BinaryRepository(db)
-        all_binaries = repo.list_all()
-
-        default_binary = repo.get_default("firecracker")
-        default_version = default_binary.version if default_binary else None
-
-        removed: list[str] = []
-        for binary in all_binaries:
-            # Skip service binaries (mvm-provision, mvm-nocloud-server, mvm-console-relay)
-            if binary.name.startswith("mvm-"):
-                continue
-
-            if not include_all:
-                if binary.version == default_version:
-                    continue
-
-            if not dry_run:
-                try:
-                    from mvmctl.api.binary_operations import BinaryOperation
-                    from mvmctl.api.inputs._binary_input import BinaryInput
-
-                    BinaryOperation.remove(
-                        BinaryInput(id=[binary.id]),
-                        force=include_all,
-                    )
-                    removed.append(f"{binary.name}:{binary.version}")
-                except Exception as e:
-                    logger.warning(
-                        "Failed to remove binary %s:%s: %s",
-                        binary.name,
-                        binary.version,
-                        e,
-                    )
-            else:
-                removed.append(f"{binary.name}:{binary.version}")
-
-        return OperationResult(
-            status="success",
-            code="cache.pruned",
-            message=f"Pruned {len(removed)} binary(ies)",
-            item=removed,
-        )
+        return BinaryOperation.prune(dry_run=dry_run, include_all=include_all)
 
     @staticmethod
     def prune_misc(

@@ -1,4 +1,4 @@
-"""IPTables tracker — idempotent iptables rule management with DB persistence."""
+"""IPTables / NFTables tracker — idempotent firewall rule management with DB persistence."""
 
 from __future__ import annotations
 
@@ -9,12 +9,11 @@ from mvmctl.utils._lazy_import import resolve_lazy
 if TYPE_CHECKING:
     from ._repository import IPTablesRuleRepository
     from ._resolver import IPTablesRuleResolver
-    from ._tracker import IPTablesRuleResult, IPTablesTracker
+    from ._tracker import IPTablesTracker
 
 __all__ = [
     "IPTablesRuleRepository",
     "IPTablesRuleResolver",
-    "IPTablesRuleResult",
     "IPTablesTracker",
 ]
 
@@ -26,10 +25,6 @@ _LAZY_MAP = {
     "IPTablesRuleResolver": (
         "mvmctl.core._shared._iptables_tracker._resolver",
         "IPTablesRuleResolver",
-    ),
-    "IPTablesRuleResult": (
-        "mvmctl.core._shared._iptables_tracker._tracker",
-        "IPTablesRuleResult",
     ),
     "IPTablesTracker": (
         "mvmctl.core._shared._iptables_tracker._tracker",

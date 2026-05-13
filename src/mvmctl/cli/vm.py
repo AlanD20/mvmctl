@@ -263,6 +263,11 @@ def vm_create(
         "--skip-cleanup",
         help="Skip cleanup if VM creation fails; keeps cloud-init ISO and partial resources (for debugging)",
     ),
+    skip_deblob: bool = typer.Option(
+        False,
+        "--skip-deblob",
+        help="Skip debloat operations on rootfs (removes OS caches, cleans package manager caches)",
+    ),
     volume: list[str] | None = typer.Option(
         None,
         "--volume",
@@ -321,6 +326,7 @@ def vm_create(
                 cloud_init_mode=cloud_init_mode,
                 nocloud_net_port=nocloud_net_port,
                 skip_cleanup=skip_cleanup,
+                skip_deblob=skip_deblob,
                 volumes=volume,
                 count=count,
                 atomic=atomic,

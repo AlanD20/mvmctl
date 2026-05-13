@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from mvmctl.core._shared import Database
 from mvmctl.core.config._service import SettingsService
+from mvmctl.core.host._helper import HostPrivilegeHelper
 from mvmctl.core.host._repository import HostRepository
 from mvmctl.core.network._controller import NetworkController
 from mvmctl.core.network._repository import NetworkRepository
@@ -35,6 +36,90 @@ class NetworkOperation:
     All methods are @staticmethod — they take Input classes as arguments,
     create Request/Resolved internally, and orchestrate across core modules.
     """
+
+    @staticmethod
+    def prune(
+        dry_run: bool = False,
+        include_all: bool = False,
+    ) -> OperationResult[list[str]]:
+        """Prune unused networks.
+
+        Args:
+            dry_run: If True, only report what would be removed.
+            include_all: If True, remove ALL networks including default and referenced.
+
+        Returns:
+            OperationResult with item list of network names that were removed.
+        """
+        from mvmctl.core.network._repository import LeaseRepository
+        from mvmctl.core.vm._repository import VMRepository
+
+        HostPrivilegeHelper.check_privileges("/usr/sbin/ip", "prune networks")
+        db = Database()
+        repo = NetworkRepository(db)
+        all_networks = repo.list_all()
+
+        # Get referenced network IDs from VMs
+        vm_repo = VMRepository(db)
+        vms = vm_repo.list_all()
+        referenced_network_ids: set[str] = set()
+        for vm in vms:
+            if vm.network_id:
+                referenced_network_ids.add(vm.network_id)
+
+        lease_repo = LeaseRepository(db)
+        default_net_name = str(
+            SettingsService.resolve(db, "defaults.network", "name")
+        )
+        removed: list[str] = []
+
+        for network in all_networks:
+            if not include_all:
+                if network.name == default_net_name:
+                    continue
+                if network.id in referenced_network_ids:
+                    continue
+                leases = lease_repo.list_all(network.id)
+                if leases:
+                    continue
+
+            # Soft-deleted networks (is_present=0) have no infrastructure —
+            # skip API remove and delete the DB record directly
+            if not network.is_present:
+                if not dry_run:
+                    repo.delete(network.id)
+                removed.append(network.name)
+                continue
+
+            if not dry_run:
+                try:
+                    from mvmctl.api.inputs._network_input import NetworkInput
+
+                    remove_result = NetworkOperation.remove(
+                        NetworkInput(name=[network.name]),
+                        force=include_all,
+                    )
+                    if remove_result.is_error:
+                        logger.warning(
+                            "Failed to remove network %s: %s",
+                            network.name,
+                            remove_result.message,
+                        )
+                    else:
+                        removed.append(network.name)
+                except Exception as e:
+                    logger.warning(
+                        "Failed to remove network %s: %s", network.name, e
+                    )
+            else:
+                removed.append(network.name)
+
+        return OperationResult(
+            status="success",
+            code="cache.pruned",
+            message=f"Pruned {len(removed)} network(s)",
+            item=removed,
+        )
 
     @staticmethod
     def create(

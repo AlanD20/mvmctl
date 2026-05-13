@@ -71,104 +71,60 @@ class TestCacheInit:
 
 
 class TestCachePruneVMs:
-    """Test CacheOperation.prune_vms with real VM lifecycle."""
-
-    @staticmethod
-    def _setup_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
-        """Apply subprocess mocks and return references for assertions."""
-        from tests.integration.conftest import (
-            SmartPopenMock,
-            SmartSubprocessMock,
-        )
-
-        sub_mock = SmartSubprocessMock()
-        popen_mock = SmartPopenMock()
-        monkeypatch.setattr("subprocess.run", sub_mock)
-        monkeypatch.setattr("subprocess.Popen", popen_mock)
-
-        provisioner_mock = MagicMock()
-        monkeypatch.setattr(
-            "mvmctl.api.vm_operations.VMProvisioner",
-            lambda *args, **kwargs: provisioner_mock,
-        )
-        provisioner_mock.resize.return_value = provisioner_mock
-        provisioner_mock.set_hostname.return_value = provisioner_mock
-        provisioner_mock.inject_dns.return_value = provisioner_mock
-        provisioner_mock.setup_ssh.return_value = provisioner_mock
-        provisioner_mock.disable_cloud_init.return_value = provisioner_mock
-        provisioner_mock.run.return_value = None
-        return {
-            "subprocess": sub_mock,
-            "popen": popen_mock,
-            "provisioner": provisioner_mock,
-        }
-
-    def _create_vm(self, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
-        """Create a VM with all mocks applied."""
-        mocks = self._setup_mocks(monkeypatch)
-        mocks["provisioner"].resize.return_value = mocks["provisioner"]
-        mocks["provisioner"].set_hostname.return_value = mocks["provisioner"]
-        mocks["provisioner"].inject_dns.return_value = mocks["provisioner"]
-        mocks["provisioner"].setup_ssh.return_value = mocks["provisioner"]
-        mocks["provisioner"].disable_cloud_init.return_value = mocks[
-            "provisioner"
-        ]
-        mocks["provisioner"].run.return_value = None
-        VMOperation.create(
-            VMCreateInput(name=name, ssh_keys=[], enable_console=False)
-        )
+    """Test CacheOperation.prune_vms — now delegates to VMOperation.prune()."""
 
     def test_prune_vms_dry_run_skips_running(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """dry_run=True with default include_all=False skips running VMs."""
-        self._create_vm(monkeypatch, "prune-dry-vm")
+        """dry_run=True with default include_all=False delegates to VMOperation.prune."""
+        mock_prune = MagicMock(
+            return_value=OperationResult(
+                status="success", code="cache.pruned", item=[]
+            )
+        )
+        monkeypatch.setattr(
+            "mvmctl.api.vm_operations.VMOperation.prune", mock_prune
+        )
 
         result = CacheOperation.prune_vms(dry_run=True)
         assert result.item == []
-
-        vm = VMOperation.get(VMInput(identifiers=["prune-dry-vm"]))
-        assert vm.name == "prune-dry-vm"
-        assert vm.status == VMStatus.RUNNING.value
+        mock_prune.assert_called_once_with(dry_run=True, include_all=False)
 
     def test_prune_vms_dry_run_include_all_reports_running(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """dry_run=True with include_all=True reports running VMs for removal."""
-        self._create_vm(monkeypatch, "prune-include-vm")
+        """dry_run=True with include_all=True delegates to VMOperation.prune."""
+        mock_prune = MagicMock(
+            return_value=OperationResult(
+                status="success", code="cache.pruned", item=["prune-include-vm"]
+            )
+        )
+        monkeypatch.setattr(
+            "mvmctl.api.vm_operations.VMOperation.prune", mock_prune
+        )
 
         result = CacheOperation.prune_vms(dry_run=True, include_all=True)
         assert result.item == ["prune-include-vm"]
-
-        vm = VMOperation.get(VMInput(identifiers=["prune-include-vm"]))
-        assert vm.name == "prune-include-vm"
+        mock_prune.assert_called_once_with(dry_run=True, include_all=True)
 
     def test_prune_vms_actual_removes_stopped(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """prune_vms(dry_run=False) removes stopped VMs."""
-        self._create_vm(monkeypatch, "prune-real-vm")
-
-        # Patch VMController.stop to avoid real OS signals in tests
-        # and to allow VMOperation.remove() to succeed on stopped VMs.
-        def _patched_stop(self, force: bool = False) -> None:
-            self._repo.update_status(self._vm.id, VMStatus.STOPPED.value)
-
-        monkeypatch.setattr(
-            "mvmctl.core.vm._controller.VMController.stop",
-            _patched_stop,
+        """prune_vms(dry_run=False) delegates to VMOperation.prune."""
+        mock_prune = MagicMock(
+            return_value=OperationResult(
+                status="success",
+                code="cache.pruned",
+                item=["prune-real-vm"],
+            )
         )
-
-        VMOperation.stop(VMInput(identifiers=["prune-real-vm"]))
-
-        vm = VMOperation.get(VMInput(identifiers=["prune-real-vm"]))
-        assert vm.status == VMStatus.STOPPED.value
+        monkeypatch.setattr(
+            "mvmctl.api.vm_operations.VMOperation.prune", mock_prune
+        )
 
         result = CacheOperation.prune_vms(dry_run=False)
         assert result.item == ["prune-real-vm"]
-
-        with pytest.raises(VMNotFoundError):
-            VMOperation.get(VMInput(identifiers=["prune-real-vm"]))
+        mock_prune.assert_called_once_with(dry_run=False, include_all=False)
 
     def test_prune_vms_empty_returns_empty(self) -> None:
         """prune_vms with no VMs returns an empty list."""
@@ -396,7 +352,27 @@ class TestCachePruneAll:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """prune_all(dry_run=True) returns PruneAllResult with aggregated IDs."""
-        self._create_vm(monkeypatch, "prune-all-vm")
+        # Mock VMOperation.prune so CacheOperation.prune_vms delegates correctly
+        mock_prune = MagicMock(
+            return_value=OperationResult(
+                status="success",
+                code="cache.pruned",
+                item=["prune-all-vm"],
+            )
+        )
+        monkeypatch.setattr(
+            "mvmctl.api.vm_operations.VMOperation.prune", mock_prune
+        )
+
+        # Mock VMRepository so had_running_vms is True and the VM is found
+        mock_vm = MagicMock()
+        mock_vm.status = VMStatus.RUNNING
+        mock_repo = MagicMock()
+        mock_repo.list_all.return_value = [mock_vm]
+        monkeypatch.setattr(
+            "mvmctl.api.cache_operations.VMRepository",
+            lambda db: mock_repo,
+        )
 
         result = CacheOperation.prune_all(dry_run=True, include_all=True)
 

@@ -45,6 +45,8 @@ class Provisioner:
     All operations use subprocess calls to system tools.
     """
 
+    BATCH_SIZE = 10
+
     def __init__(self, ops: dict[str, Any]) -> None:
         self._ops = ops
         self._image: str = ops["image"]
@@ -60,6 +62,9 @@ class Provisioner:
         self._resize: dict[str, Any] | None = (
             raw_resize if isinstance(raw_resize, dict) else None
         )
+
+        # Chroot command buffer — accumulated and flushed in batches
+        self._chroot_cmd_buffer: list[str] = []
 
         # Runtime state — set during run()
         self._loop_dev: str | None = None
@@ -153,22 +158,31 @@ class Provisioner:
             self._mount_point = tempfile.mkdtemp(prefix="mvm-provision-")
             self._mount()
 
+            # Flush any pending chroot commands before file operations
+            self._flush_chroot_buffer()
+
             # Write files
             for file_op in self._operations.get("files", []):
                 self._current_step = "write"
                 self._write_file(file_op)
                 files_written += 1
 
+            # Flush any pending chroot commands before copy directories
+            self._flush_chroot_buffer()
+
             # Copy directories
             for copy_op in self._operations.get("copy_dirs", []):
                 self._current_step = "copy_dir"
                 files_written += self._copy_directory(copy_op)
 
-            # Chroot commands
+            # Chroot commands (buffered, then flushed in batches)
             for cmd in self._operations.get("commands", []):
                 self._current_step = "chroot"
                 self._run_chroot_command(cmd)
                 commands_run += 1
+
+            # Flush any remaining buffered chroot commands
+            self._flush_chroot_buffer()
 
             # Post-mount resize: shrink
             if (
@@ -510,8 +524,30 @@ class Provisioner:
     # ── Chroot commands ─────────────────────────────────────────────────
 
     def _run_chroot_command(self, command: str) -> None:
+        """Buffer a single chroot command for batched execution.
+
+        Commands are accumulated in ``_chroot_cmd_buffer`` and flushed
+        as a single ``chroot`` invocation joined with `` && `` when the
+        buffer reaches ``BATCH_SIZE``.
+        """
+        self._chroot_cmd_buffer.append(command)
+        if len(self._chroot_cmd_buffer) >= self.BATCH_SIZE:
+            self._flush_chroot_buffer()
+
+    def _flush_chroot_buffer(self) -> None:
+        """Execute all buffered chroot commands as a single chroot invocation.
+
+        Joins commands with `` && `` and runs them inside a single
+        chroot subprocess.  This is a no-op when the buffer is empty.
+        """
+        if not self._chroot_cmd_buffer:
+            return
         if self._mount_point is None:
             raise RuntimeError("Not mounted")
+
+        command = " && ".join(self._chroot_cmd_buffer)
+        count = len(self._chroot_cmd_buffer)
+        self._chroot_cmd_buffer.clear()
 
         # Ensure /dev/null exists in the chroot — missing on some images
         null_path = os.path.join(self._mount_point, "dev", "null")
@@ -528,7 +564,10 @@ class Provisioner:
             "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
         )
 
-        self._debug_log(f"chroot: command={command[:100]}")
+        self._debug_log(
+            f"chroot: executing batch of {count} commands, "
+            f"first={command[:100]}"
+        )
 
         last_error = ""
         for shell in shells:
@@ -539,7 +578,14 @@ class Provisioner:
             self._debug_log(f"chroot: trying shell={shell}")
             # busybox needs "sh" as the applet name before "-c"
             if os.path.basename(shell) == "busybox":
-                cmd = ["chroot", self._mount_point, shell, "sh", "-c", command]
+                cmd = [
+                    "chroot",
+                    self._mount_point,
+                    shell,
+                    "sh",
+                    "-c",
+                    command,
+                ]
             else:
                 cmd = ["chroot", self._mount_point, shell, "-c", command]
             proc = subprocess.Popen(
@@ -800,7 +846,42 @@ class Provisioner:
 
     @staticmethod
     def _cleanup_mount(mount_point: str) -> bool:
-        """Unmount and remove a mount point. Returns True on success."""
+        """Unmount and remove a mount point.
+
+        Fast path: tries ``umount`` first.  If it fails (e.g. orphaned
+        gpg-agent from a batched chroot session), scans ``/proc`` for
+        processes whose root is inside the mount point, kills them,
+        and retries.  The process scan is only on the slow path.
+        """
+        # Fast path: try umount directly (succeeds ~99% of the time)
+        result = subprocess.run(
+            ["umount", mount_point],
+            capture_output=True,
+            check=False,
+            timeout=15,
+        )
+        if result.returncode == 0:
+            try:
+                os.rmdir(mount_point)
+            except OSError:
+                pass
+            return True
+
+        # Slow path: umount failed — find and kill orphaned processes
+        mount_point_real = os.path.realpath(mount_point)
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            try:
+                root_link = f"/proc/{entry}/root"
+                if os.path.islink(root_link):
+                    target = os.readlink(root_link)
+                    if target == mount_point_real:
+                        os.kill(int(entry), signal.SIGKILL)
+            except (OSError, ProcessLookupError):
+                pass
+
+        # Retry umount after killing orphaned processes
         result = subprocess.run(
             ["umount", mount_point],
             capture_output=True,

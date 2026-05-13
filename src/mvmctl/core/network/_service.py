@@ -4,24 +4,23 @@ from __future__ import annotations
 
 import logging
 import shlex
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mvmctl.core._shared import (
-    IPTablesRuleRepository,
-    IPTablesTracker,
-)
+from mvmctl.core._shared import FirewallTracker
 from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.exceptions import NetworkError, ProcessError
 from mvmctl.models import (
-    IPTablesChain,
-    IPTablesPort,
-    IPTablesProtocol,
-    IPTablesRuleItem,
-    IPTablesRuleType,
-    IPTablesTable,
-    IPTablesTarget,
-    IPTablesWildcard,
+    FirewallChain,
+    FirewallPort,
+    FirewallProtocol,
+    FirewallRule,
+    FirewallRuleType,
+    FirewallTable,
+    FirewallTarget,
+    FirewallWildcard,
     NetworkItem,
 )
 from mvmctl.utils._system import run_cmd
@@ -33,38 +32,45 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# MVM iptables chains configuration: (chain_enum, table_enum, jump_from_chain)
-_MVM_CHAINS_CONFIG: list[tuple[IPTablesChain, IPTablesTable, str]] = [
-    (IPTablesChain.MVM_FORWARD, IPTablesTable.FILTER, "FORWARD"),
-    (IPTablesChain.MVM_POSTROUTING, IPTablesTable.NAT, "POSTROUTING"),
-    (IPTablesChain.MVM_NOCLOUDNET_INPUT, IPTablesTable.FILTER, "INPUT"),
-]
-
-
 class NetworkService:
     """
-    Manages network interfaces, bridges, TAP devices, and NAT rules.
+    Manages network interfaces, bridges, TAP devices, and NAT/firewall rules.
 
     Stateless class - all methods require explicit parameters.
-    Shares database connection with IPTablesTracker for rule synchronization.
+    Supports both iptables and nftables backends, determined by the
+    ``firewall_backend`` setting ("iptables" or "nftables").
+    Shares database connection with trackers for rule synchronization.
     """
 
     def __init__(self, repo: NetworkRepository) -> None:
         """
         Initialize NetworkService.
 
+        Selects the firewall backend (iptables or nftables) based on the
+        ``firewall_backend`` setting and stores the chosen tracker as
+        ``self._tracker``.  Exactly one tracker is instantiated.
+
         Args:
             repo: NetworkRepository instance for network DB operations.
 
         """
         self._repo = repo
-        self._iptables_repo = IPTablesRuleRepository(repo.db)
-        self._tracker = IPTablesTracker(repo=self._iptables_repo)
+        self._tracker = FirewallTracker(repo.db)
 
     @property
-    def tracker(self) -> IPTablesTracker:
-        """Create an IPTablesTracker with the shared repository."""
+    def tracker(self) -> FirewallTracker:
+        """Return the active firewall tracker instance."""
         return self._tracker
+
+    @contextmanager
+    def batch(self) -> Generator[None, None, None]:
+        """Context manager: queue firewall rules, flush atomically on exit.
+
+        Delegates to :meth:`FirewallTracker.batch` which handles the
+        batching logic for both iptables and nftables backends.
+        """
+        with self._tracker.batch():
+            yield
 
     def list_all(self, verify: bool = True) -> list[NetworkItem]:
         """
@@ -94,97 +100,21 @@ class NetworkService:
         return networks
 
     def ensure_mvm_chains(self) -> None:
+        """Ensure firewall chains exist via the active backend.
+
+        Delegates to :meth:`FirewallTracker.initialize` which handles
+        both iptables and nftables backends. Idempotent.
         """
-        Ensure MVM iptables chains exist with proper jump rules.
-
-        Idempotent operation - safe to call multiple times.
-        Creates MVM chains and sets up jump rules from standard chains.
-
-        Creates three chains:
-        - MVM-FORWARD (filter table, jumped from FORWARD)
-        - MVM-POSTROUTING (nat table, jumped from POSTROUTING)
-        - MVM-NOCLOUDNET-INPUT (filter table, jumped from INPUT)
-        """
-
-        for chain_enum, table_enum, jump_from in _MVM_CHAINS_CONFIG:
-            self._tracker.ensure_chain(
-                chain_name=chain_enum,
-                table=table_enum,
-                auto_jump_from=jump_from,
-                position=1,
-            )
-
-    def remove_mvm_chains(self) -> None:
-        """
-        Remove all MVM iptables chains and their rules.
-
-        Deletes jump rules from standard chains, flushes custom chains,
-        then removes the chains themselves.  Uses direct iptables calls
-        rather than the tracker so that ``chain_exists()`` (which runs
-        without privileges) cannot silently skip deletion.
-        """
-        for chain_enum, table_enum, jump_from in _MVM_CHAINS_CONFIG:
-            chain_name = chain_enum.value
-            table = table_enum.value
-
-            # 1. Delete the jump rule from the standard chain first.
-            try:
-                run_cmd(
-                    [
-                        "iptables",
-                        "-t",
-                        table,
-                        "-D",
-                        jump_from,
-                        "-j",
-                        chain_name,
-                    ],
-                    privileged=True,
-                )
-                logger.debug(
-                    "Removed jump rule from %s to %s", jump_from, chain_name
-                )
-            except ProcessError:
-                logger.debug(
-                    "Jump rule from %s to %s not found (already clean)",
-                    jump_from,
-                    chain_name,
-                )
-
-            # 2. Flush the custom chain (remove all rules inside it).
-            try:
-                run_cmd(
-                    ["iptables", "-t", table, "-F", chain_name],
-                    privileged=True,
-                )
-                logger.debug("Flushed chain %s", chain_name)
-            except ProcessError:
-                logger.debug("Chain %s not found or already empty", chain_name)
-
-            # 3. Delete the custom chain.
-            try:
-                run_cmd(
-                    ["iptables", "-t", table, "-X", chain_name],
-                    privileged=True,
-                )
-                logger.debug("Deleted chain %s", chain_name)
-            except ProcessError:
-                logger.debug(
-                    "Chain %s not found for deletion (already clean)",
-                    chain_name,
-                )
+        self._tracker.initialize()
 
     def initialize(self) -> None:
-        """
-        Initialize MVM iptables chains with proper jump rules.
+        """Ensure firewall chains exist via the active backend.
 
-        Idempotent operation - safe to call multiple times.
-        Creates MVM chains and sets up jump rules from standard chains.
-
-        .. deprecated::
-            Use :meth:`ensure_mvm_chains` instead.
+        For iptables: creates MVM chains with jump rules from standard chains.
+        For nftables: creates the nftables table, hook chains, and custom chains.
+        Idempotent — safe to call multiple times.
         """
-        self.ensure_mvm_chains()
+        self._tracker.initialize()
 
     def detect_iptables_backend_conflict(self) -> tuple[bool, str]:
         """Detect mixed iptables backend conflict."""
@@ -400,6 +330,57 @@ class NetworkService:
         )
 
     @staticmethod
+    def check_nftables_available() -> bool:
+        """
+        Check if nftables with MASQUERADE support is available.
+
+        Tests nft binary existence, kernel module availability, and actual
+        MASQUERADE rule creation capability. All commands use ``check=False``
+        so no exceptions escape this method.
+
+        Returns:
+            True if nftables with MASQUERADE is available, False otherwise.
+
+        """
+        # Check nft binary exists and runs
+        result = run_cmd(["nft", "--version"], privileged=True, check=False)
+        if result.returncode != 0:
+            logger.debug("nftables not available: nft --version failed")
+            return False
+
+        # Attempt to load the NAT chain kernel module (best-effort)
+        run_cmd(["modprobe", "nft_chain_nat"], privileged=True, check=False)
+
+        # Test that MASQUERADE actually works by creating a temporary table
+        test = (
+            "add table inet __mvm_nft_test\n"
+            "add chain inet __mvm_nft_test test_post "
+            "{ type nat hook postrouting priority srcnat; policy accept; }\n"
+            "add rule inet __mvm_nft_test test_post masquerade\n"
+        )
+        test_result = run_cmd(
+            ["nft", "-f", "-"],
+            privileged=True,
+            check=False,
+            input=test,
+        )
+
+        # Cleanup — best-effort, ignore failures
+        run_cmd(
+            ["nft", "delete", "table", "inet", "__mvm_nft_test"],
+            privileged=True,
+            check=False,
+        )
+
+        available = test_result.returncode == 0
+        if not available:
+            logger.debug(
+                "nftables MASQUERADE not available "
+                "(kernel module nft_chain_nat may be missing)"
+            )
+        return available
+
+    @staticmethod
     def remove_stale_interfaces(prefix: str) -> list[str]:
         """Remove all slave interfaces attached to bridges matching a prefix.
 
@@ -446,48 +427,61 @@ class NetworkService:
         self.initialize()
 
         for gateway_iface in nat_gateways:
-            context = f"{bridge}:{gateway_iface}"
-
-            # MASQUERADE rule
-            masquerade_rule = IPTablesRuleItem(
-                table_name=IPTablesTable.NAT,
-                chain_name=IPTablesChain.MVM_POSTROUTING,
-                rule_type=IPTablesRuleType.MASQUERADE,
-                target=IPTablesTarget.MASQUERADE,
+            masquerade_rule = FirewallRule(
+                table_name=FirewallTable.NAT,
+                chain_name=FirewallChain.MVM_POSTROUTING,
+                rule_type=FirewallRuleType.MASQUERADE,
+                target=FirewallTarget.MASQUERADE,
                 network_id=network_id,
-                protocol=IPTablesProtocol.ALL,
+                protocol=FirewallProtocol.ALL,
                 source=subnet,
-                destination=IPTablesWildcard.ANY_CIDR,
-                in_interface=IPTablesWildcard.ANY_INTERFACE,
+                destination=FirewallWildcard.ANY_CIDR,
+                in_interface=FirewallWildcard.ANY_INTERFACE,
                 out_interface=gateway_iface,
-                sport=IPTablesPort.ANY,
-                dport=IPTablesPort.ANY,
+                sport=FirewallPort.ANY,
+                dport=FirewallPort.ANY,
                 is_active=True,
                 network_name=bridge,
             )
+            forward_out_rule = FirewallRule(
+                table_name=FirewallTable.FILTER,
+                chain_name=FirewallChain.MVM_FORWARD,
+                rule_type=FirewallRuleType.FORWARD_OUT,
+                target=FirewallTarget.ACCEPT,
+                network_id=network_id,
+                protocol=FirewallProtocol.ALL,
+                source=subnet,
+                destination=FirewallWildcard.ANY_CIDR,
+                in_interface=bridge,
+                out_interface=gateway_iface,
+                sport=FirewallPort.ANY,
+                dport=FirewallPort.ANY,
+                is_active=True,
+                network_name=bridge,
+            )
+            forward_in_rule = FirewallRule(
+                table_name=FirewallTable.FILTER,
+                chain_name=FirewallChain.MVM_FORWARD,
+                rule_type=FirewallRuleType.FORWARD_IN,
+                target=FirewallTarget.ACCEPT,
+                network_id=network_id,
+                protocol=FirewallProtocol.ALL,
+                source=FirewallWildcard.ANY_CIDR,
+                destination=subnet,
+                in_interface=gateway_iface,
+                out_interface=bridge,
+                sport=FirewallPort.ANY,
+                dport=FirewallPort.ANY,
+                is_active=True,
+                network_name=bridge,
+            )
+
+            context = f"{bridge}:{gateway_iface}"
             result = self._tracker.ensure_rule(masquerade_rule, context=context)
             if not result.success:
                 raise NetworkError(
                     f"Failed to add MASQUERADE rule for {bridge} via {gateway_iface}: {result.error_message}"
                 )
-
-            # Forward out rule
-            forward_out_rule = IPTablesRuleItem(
-                table_name=IPTablesTable.FILTER,
-                chain_name=IPTablesChain.MVM_FORWARD,
-                rule_type=IPTablesRuleType.FORWARD_OUT,
-                target=IPTablesTarget.ACCEPT,
-                network_id=network_id,
-                protocol=IPTablesProtocol.ALL,
-                source=subnet,
-                destination=IPTablesWildcard.ANY_CIDR,
-                in_interface=bridge,
-                out_interface=gateway_iface,
-                sport=IPTablesPort.ANY,
-                dport=IPTablesPort.ANY,
-                is_active=True,
-                network_name=bridge,
-            )
             result = self._tracker.ensure_rule(
                 forward_out_rule, context=context
             )
@@ -495,24 +489,6 @@ class NetworkService:
                 raise NetworkError(
                     f"Failed to add FORWARD out rule for {bridge} via {gateway_iface}: {result.error_message}"
                 )
-
-            # Forward in rule
-            forward_in_rule = IPTablesRuleItem(
-                table_name=IPTablesTable.FILTER,
-                chain_name=IPTablesChain.MVM_FORWARD,
-                rule_type=IPTablesRuleType.FORWARD_IN,
-                target=IPTablesTarget.ACCEPT,
-                network_id=network_id,
-                protocol=IPTablesProtocol.ALL,
-                source=IPTablesWildcard.ANY_CIDR,
-                destination=subnet,
-                in_interface=gateway_iface,
-                out_interface=bridge,
-                sport=IPTablesPort.ANY,
-                dport=IPTablesPort.ANY,
-                is_active=True,
-                network_name=bridge,
-            )
             result = self._tracker.ensure_rule(forward_in_rule, context=context)
             if not result.success:
                 raise NetworkError(
@@ -593,81 +569,70 @@ class NetworkService:
                 ", ".join(attached_taps),
             )
 
+        rules_to_remove: list[FirewallRule] = []
         for gateway_iface in effective_nat_gateways:
-            masquerade_rule = IPTablesRuleItem(
-                table_name=IPTablesTable.NAT,
-                chain_name=IPTablesChain.MVM_POSTROUTING,
-                rule_type=IPTablesRuleType.MASQUERADE,
-                target=IPTablesTarget.MASQUERADE,
-                network_id=network_id,
-                protocol=IPTablesProtocol.ALL,
-                source=effective_subnet,
-                destination=IPTablesWildcard.ANY_CIDR,
-                in_interface=IPTablesWildcard.ANY_INTERFACE,
-                out_interface=gateway_iface,
-                sport=IPTablesPort.ANY,
-                dport=IPTablesPort.ANY,
-                is_active=True,
-                network_name=bridge,
-            )
-            result = self._tracker.remove_rule(masquerade_rule)
-            if not result.success:
-                logger.warning(
-                    "Failed to remove MASQUERADE rule for %s via %s: %s",
-                    bridge,
-                    gateway_iface,
-                    result.error_message,
+            rules_to_remove.append(
+                FirewallRule(
+                    table_name=FirewallTable.NAT,
+                    chain_name=FirewallChain.MVM_POSTROUTING,
+                    rule_type=FirewallRuleType.MASQUERADE,
+                    target=FirewallTarget.MASQUERADE,
+                    network_id=network_id,
+                    protocol=FirewallProtocol.ALL,
+                    source=effective_subnet,
+                    destination=FirewallWildcard.ANY_CIDR,
+                    in_interface=FirewallWildcard.ANY_INTERFACE,
+                    out_interface=gateway_iface,
+                    sport=FirewallPort.ANY,
+                    dport=FirewallPort.ANY,
+                    is_active=True,
+                    network_name=bridge,
                 )
+            )
+            rules_to_remove.append(
+                FirewallRule(
+                    table_name=FirewallTable.FILTER,
+                    chain_name=FirewallChain.MVM_FORWARD,
+                    rule_type=FirewallRuleType.FORWARD_OUT,
+                    target=FirewallTarget.ACCEPT,
+                    network_id=network_id,
+                    protocol=FirewallProtocol.ALL,
+                    source=effective_subnet,
+                    destination=FirewallWildcard.ANY_CIDR,
+                    in_interface=bridge,
+                    out_interface=gateway_iface,
+                    sport=FirewallPort.ANY,
+                    dport=FirewallPort.ANY,
+                    is_active=True,
+                    network_name=bridge,
+                )
+            )
+            rules_to_remove.append(
+                FirewallRule(
+                    table_name=FirewallTable.FILTER,
+                    chain_name=FirewallChain.MVM_FORWARD,
+                    rule_type=FirewallRuleType.FORWARD_IN,
+                    target=FirewallTarget.ACCEPT,
+                    network_id=network_id,
+                    protocol=FirewallProtocol.ALL,
+                    source=FirewallWildcard.ANY_CIDR,
+                    destination=effective_subnet,
+                    in_interface=gateway_iface,
+                    out_interface=bridge,
+                    sport=FirewallPort.ANY,
+                    dport=FirewallPort.ANY,
+                    is_active=True,
+                    network_name=bridge,
+                )
+            )
 
-            forward_out_rule = IPTablesRuleItem(
-                table_name=IPTablesTable.FILTER,
-                chain_name=IPTablesChain.MVM_FORWARD,
-                rule_type=IPTablesRuleType.FORWARD_OUT,
-                target=IPTablesTarget.ACCEPT,
-                network_id=network_id,
-                protocol=IPTablesProtocol.ALL,
-                source=effective_subnet,
-                destination=IPTablesWildcard.ANY_CIDR,
-                in_interface=bridge,
-                out_interface=gateway_iface,
-                sport=IPTablesPort.ANY,
-                dport=IPTablesPort.ANY,
-                is_active=True,
-                network_name=bridge,
+        result = self._tracker.batch_remove_rules(rules_to_remove)
+        if not result.success:
+            logger.warning(
+                "Failed to remove NAT rules for %s: %s",
+                bridge,
+                result.error_message,
             )
-            result = self._tracker.remove_rule(forward_out_rule)
-            if not result.success:
-                logger.warning(
-                    "Failed to remove FORWARD out rule for %s via %s: %s",
-                    bridge,
-                    gateway_iface,
-                    result.error_message,
-                )
-
-            forward_in_rule = IPTablesRuleItem(
-                table_name=IPTablesTable.FILTER,
-                chain_name=IPTablesChain.MVM_FORWARD,
-                rule_type=IPTablesRuleType.FORWARD_IN,
-                target=IPTablesTarget.ACCEPT,
-                network_id=network_id,
-                protocol=IPTablesProtocol.ALL,
-                source=IPTablesWildcard.ANY_CIDR,
-                destination=effective_subnet,
-                in_interface=gateway_iface,
-                out_interface=bridge,
-                sport=IPTablesPort.ANY,
-                dport=IPTablesPort.ANY,
-                is_active=True,
-                network_name=bridge,
-            )
-            result = self._tracker.remove_rule(forward_in_rule)
-            if not result.success:
-                logger.warning(
-                    "Failed to remove FORWARD in rule for %s via %s: %s",
-                    bridge,
-                    gateway_iface,
-                    result.error_message,
-                )
 
         logger.info(
             "NAT rules removed for bridge %s via %s (source %s)",
@@ -763,22 +728,39 @@ class NetworkService:
 
         self.initialize()
 
-        forward_bridge_to_tap = IPTablesRuleItem(
-            table_name=IPTablesTable.FILTER,
-            chain_name=IPTablesChain.MVM_FORWARD,
-            rule_type=IPTablesRuleType.FORWARD_OUT,
-            target=IPTablesTarget.ACCEPT,
+        forward_bridge_to_tap = FirewallRule(
+            table_name=FirewallTable.FILTER,
+            chain_name=FirewallChain.MVM_FORWARD,
+            rule_type=FirewallRuleType.FORWARD_OUT,
+            target=FirewallTarget.ACCEPT,
             network_id=network_id,
-            protocol=IPTablesProtocol.ALL,
-            source=subnet or IPTablesWildcard.ANY_CIDR,
-            destination=IPTablesWildcard.ANY_CIDR,
+            protocol=FirewallProtocol.ALL,
+            source=subnet or FirewallWildcard.ANY_CIDR,
+            destination=FirewallWildcard.ANY_CIDR,
             in_interface=bridge,
             out_interface=tap,
-            sport=IPTablesPort.ANY,
-            dport=IPTablesPort.ANY,
+            sport=FirewallPort.ANY,
+            dport=FirewallPort.ANY,
             is_active=True,
             network_name=bridge,
         )
+        forward_tap_to_bridge = FirewallRule(
+            table_name=FirewallTable.FILTER,
+            chain_name=FirewallChain.MVM_FORWARD,
+            rule_type=FirewallRuleType.FORWARD_IN,
+            target=FirewallTarget.ACCEPT,
+            network_id=network_id,
+            protocol=FirewallProtocol.ALL,
+            source=FirewallWildcard.ANY_CIDR,
+            destination=subnet or FirewallWildcard.ANY_CIDR,
+            in_interface=tap,
+            out_interface=bridge,
+            sport=FirewallPort.ANY,
+            dport=FirewallPort.ANY,
+            is_active=True,
+            network_name=bridge,
+        )
+
         result = self._tracker.ensure_rule(
             forward_bridge_to_tap, context=f"tap:{tap}"
         )
@@ -786,23 +768,6 @@ class NetworkService:
             raise NetworkError(
                 f"Failed to add FORWARD rule for bridge {bridge} to TAP {tap}: {result.error_message}"
             )
-
-        forward_tap_to_bridge = IPTablesRuleItem(
-            table_name=IPTablesTable.FILTER,
-            chain_name=IPTablesChain.MVM_FORWARD,
-            rule_type=IPTablesRuleType.FORWARD_IN,
-            target=IPTablesTarget.ACCEPT,
-            network_id=network_id,
-            protocol=IPTablesProtocol.ALL,
-            source=IPTablesWildcard.ANY_CIDR,
-            destination=subnet or IPTablesWildcard.ANY_CIDR,
-            in_interface=tap,
-            out_interface=bridge,
-            sport=IPTablesPort.ANY,
-            dport=IPTablesPort.ANY,
-            is_active=True,
-            network_name=bridge,
-        )
         result = self._tracker.ensure_rule(
             forward_tap_to_bridge, context=f"tap:{tap}"
         )
@@ -840,50 +805,44 @@ class NetworkService:
                 tap,
             )
         else:
-            forward_bridge_to_tap = IPTablesRuleItem(
-                table_name=IPTablesTable.FILTER,
-                chain_name=IPTablesChain.MVM_FORWARD,
-                rule_type=IPTablesRuleType.FORWARD_OUT,
-                target=IPTablesTarget.ACCEPT,
-                network_id=network_id,
-                protocol=IPTablesProtocol.ALL,
-                source=IPTablesWildcard.ANY_CIDR,
-                destination=IPTablesWildcard.ANY_CIDR,
-                in_interface=effective_bridge,
-                out_interface=tap,
-                sport=IPTablesPort.ANY,
-                dport=IPTablesPort.ANY,
-                is_active=True,
-                network_name=effective_bridge,
-            )
-            result = self._tracker.remove_rule(forward_bridge_to_tap)
+            rules_to_remove: list[FirewallRule] = [
+                FirewallRule(
+                    table_name=FirewallTable.FILTER,
+                    chain_name=FirewallChain.MVM_FORWARD,
+                    rule_type=FirewallRuleType.FORWARD_OUT,
+                    target=FirewallTarget.ACCEPT,
+                    network_id=network_id,
+                    protocol=FirewallProtocol.ALL,
+                    source=FirewallWildcard.ANY_CIDR,
+                    destination=FirewallWildcard.ANY_CIDR,
+                    in_interface=effective_bridge,
+                    out_interface=tap,
+                    sport=FirewallPort.ANY,
+                    dport=FirewallPort.ANY,
+                    is_active=True,
+                    network_name=effective_bridge,
+                ),
+                FirewallRule(
+                    table_name=FirewallTable.FILTER,
+                    chain_name=FirewallChain.MVM_FORWARD,
+                    rule_type=FirewallRuleType.FORWARD_IN,
+                    target=FirewallTarget.ACCEPT,
+                    network_id=network_id,
+                    protocol=FirewallProtocol.ALL,
+                    source=FirewallWildcard.ANY_CIDR,
+                    destination=FirewallWildcard.ANY_CIDR,
+                    in_interface=tap,
+                    out_interface=effective_bridge,
+                    sport=FirewallPort.ANY,
+                    dport=FirewallPort.ANY,
+                    is_active=True,
+                    network_name=effective_bridge,
+                ),
+            ]
+            result = self._tracker.batch_remove_rules(rules_to_remove)
             if not result.success:
                 logger.warning(
-                    "Failed to remove FORWARD rule (bridge->tap) for %s: %s",
-                    tap,
-                    result.error_message,
-                )
-
-            forward_tap_to_bridge = IPTablesRuleItem(
-                table_name=IPTablesTable.FILTER,
-                chain_name=IPTablesChain.MVM_FORWARD,
-                rule_type=IPTablesRuleType.FORWARD_IN,
-                target=IPTablesTarget.ACCEPT,
-                network_id=network_id,
-                protocol=IPTablesProtocol.ALL,
-                source=IPTablesWildcard.ANY_CIDR,
-                destination=IPTablesWildcard.ANY_CIDR,
-                in_interface=tap,
-                out_interface=effective_bridge,
-                sport=IPTablesPort.ANY,
-                dport=IPTablesPort.ANY,
-                is_active=True,
-                network_name=effective_bridge,
-            )
-            result = self._tracker.remove_rule(forward_tap_to_bridge)
-            if not result.success:
-                logger.warning(
-                    "Failed to remove FORWARD rule (tap->bridge) for %s: %s",
+                    "Failed to remove FORWARD rules for TAP %s: %s",
                     tap,
                     result.error_message,
                 )
@@ -968,7 +927,7 @@ class NetworkService:
             Dict with counts: {"added": int, "verified": int, "orphaned": int}
 
         """
-        db_rules = self._iptables_repo.get_by_network_id(
+        db_rules = self._tracker.repo.get_by_network_id(
             network.id, active_only=True
         )
 
@@ -990,7 +949,7 @@ class NetworkService:
     def _count_orphaned_rules(
         self,
         network: NetworkItem,
-        db_rules: list[IPTablesRuleItem],
+        db_rules: list[FirewallRule],
     ) -> int:
         """
         Count host iptables rules that don't match any active DB rule.

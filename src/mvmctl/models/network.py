@@ -17,7 +17,14 @@ if TYPE_CHECKING:
     from mvmctl.models.vm import VMInstanceItem
 
 
-class IPTablesTable(str, Enum):
+class FirewallBackendType(str, Enum):
+    """Firewall backend type — iptables or nftables."""
+
+    IPTABLES = "iptables"
+    NFTABLES = "nftables"
+
+
+class FirewallTable(str, Enum):
     FILTER = "filter"
     NAT = "nat"
     MANGLE = "mangle"
@@ -25,27 +32,27 @@ class IPTablesTable(str, Enum):
     SECURITY = "security"
 
 
-class IPTablesChain(str, Enum):
+class FirewallChain(str, Enum):
     MVM_FORWARD = MVM_FORWARD_CHAIN
     MVM_POSTROUTING = MVM_POSTROUTING_CHAIN
     MVM_NOCLOUDNET_INPUT = MVM_NOCLOUD_NET_INPUT_CHAIN
 
 
-class IPTablesRuleType(str, Enum):
+class FirewallRuleType(str, Enum):
     MASQUERADE = "masquerade"
     FORWARD_IN = "forward_in"
     FORWARD_OUT = "forward_out"
     NOCLOUDNET_INPUT = "nocloudnet_input"
 
 
-class IPTablesProtocol(str, Enum):
+class FirewallProtocol(str, Enum):
     TCP = "tcp"
     UDP = "udp"
     ICMP = "icmp"
     ALL = "all"
 
 
-class IPTablesTarget(str, Enum):
+class FirewallTarget(str, Enum):
     ACCEPT = "ACCEPT"
     DROP = "DROP"
     REJECT = "REJECT"
@@ -54,12 +61,12 @@ class IPTablesTarget(str, Enum):
     MARK = "MARK"
 
 
-class IPTablesWildcard(str, Enum):
+class FirewallWildcard(str, Enum):
     ANY_CIDR = "0.0.0.0/0"
     ANY_INTERFACE = "*"
 
 
-class IPTablesPort(int, Enum):
+class FirewallPort(int, Enum):
     ANY = 0
 
 
@@ -96,7 +103,7 @@ class NetworkItem:
 
     # Resolved relations
     leases: list[NetworkLeaseItem] | None = None
-    iptables_rules: list[IPTablesRuleItem] | None = None
+    iptables_rules: list[FirewallRule] | None = None
     vms: list[VMInstanceItem] | None = None
 
     @property
@@ -121,18 +128,18 @@ class NetworkLeaseItem:
 
 
 @dataclass
-class IPTablesRuleItem:
-    """IPTables rule record — maps to iptables_rules table."""
+class FirewallRule:
+    """Firewall rule record — maps to iptables_rules or nftables_rules table."""
 
-    table_name: IPTablesTable
-    chain_name: IPTablesChain
-    rule_type: IPTablesRuleType
-    protocol: IPTablesProtocol
+    table_name: FirewallTable
+    chain_name: FirewallChain
+    rule_type: FirewallRuleType
+    protocol: FirewallProtocol
     source: str
     destination: str
     in_interface: str
     out_interface: str
-    target: IPTablesTarget
+    target: FirewallTarget
     sport: int
     dport: int
     network_id: str
@@ -148,3 +155,13 @@ class IPTablesRuleItem:
     def __post_init__(self) -> None:
         """Coerce bool fields loaded from SQLite."""
         CommonUtils.coerce_bool_fields(self, {"is_active"})
+
+
+@dataclass
+class FirewallRuleResult:
+    """Result of a firewall rule operation — used by both iptables and nftables trackers."""
+
+    success: bool
+    rule: FirewallRule | None = None
+    error_message: str | None = None
+    command_executed: str | None = None

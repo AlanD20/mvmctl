@@ -94,318 +94,167 @@ class TestCacheInitAll:
 
 
 class TestCachePruneVMs:
-    """Tests for CacheOperation.prune_vms()."""
+    """Tests for CacheOperation.prune_vms() — now delegates to VMOperation.prune()."""
 
     def test_prune_skips_running_vms(self, mocker):
-        """prune_vms() skips RUNNING/STARTING VMs by default."""
-        mock_vm_running = MagicMock()
-        mock_vm_running.name = "running-vm"
-        mock_vm_running.status = VMStatus.RUNNING
-
-        mock_vm_stopped = MagicMock()
-        mock_vm_stopped.name = "stopped-vm"
-        mock_vm_stopped.status = VMStatus.STOPPED
-
-        mock_repo = mocker.MagicMock()
-        mock_repo.list_all.return_value = [mock_vm_running, mock_vm_stopped]
-        mocker.patch(
-            "mvmctl.api.cache_operations.VMRepository",
-            return_value=mock_repo,
+        """prune_vms() delegates to VMOperation.prune which skips RUNNING/STARTING VMs by default."""
+        mock_prune = mocker.patch(
+            "mvmctl.api.vm_operations.VMOperation.prune",
+            return_value=OperationResult(
+                status="success",
+                code="cache.pruned",
+                item=["stopped-vm"],
+            ),
         )
 
-        # VMOperation is imported locally inside prune_vms()
-        mock_vm_op = mocker.patch("mvmctl.api.vm_operations.VMOperation.remove")
-
         result = CacheOperation.prune_vms()
+
         assert result.item == ["stopped-vm"]
-        mock_vm_op.assert_called_once()
+        mock_prune.assert_called_once_with(dry_run=False, include_all=False)
 
     def test_prune_dry_run(self, mocker):
-        """prune_vms() with dry_run doesn't actually remove VMs."""
-        mock_vm = MagicMock()
-        mock_vm.name = "stopped-vm"
-        mock_vm.status = VMStatus.STOPPED
-
-        mock_repo = mocker.MagicMock()
-        mock_repo.list_all.return_value = [mock_vm]
-        mocker.patch(
-            "mvmctl.api.cache_operations.VMRepository",
-            return_value=mock_repo,
+        """prune_vms() delegates to VMOperation.prune with dry_run=True."""
+        mock_prune = mocker.patch(
+            "mvmctl.api.vm_operations.VMOperation.prune",
+            return_value=OperationResult(
+                status="success",
+                code="cache.pruned",
+                item=["stopped-vm"],
+            ),
         )
-
-        mock_vm_op = mocker.patch("mvmctl.api.vm_operations.VMOperation.remove")
 
         result = CacheOperation.prune_vms(dry_run=True)
+
         assert result.item == ["stopped-vm"]
-        mock_vm_op.assert_not_called()
+        mock_prune.assert_called_once_with(dry_run=True, include_all=False)
 
     def test_prune_include_all(self, mocker):
-        """prune_vms() with include_all prunes RUNNING VMs too."""
-        mock_vm = MagicMock()
-        mock_vm.name = "running-vm"
-        mock_vm.status = VMStatus.RUNNING
-
-        mock_repo = mocker.MagicMock()
-        mock_repo.list_all.return_value = [mock_vm]
-        mocker.patch(
-            "mvmctl.api.cache_operations.VMRepository",
-            return_value=mock_repo,
+        """prune_vms() delegates to VMOperation.prune with include_all=True."""
+        mock_prune = mocker.patch(
+            "mvmctl.api.vm_operations.VMOperation.prune",
+            return_value=OperationResult(
+                status="success",
+                code="cache.pruned",
+                item=["running-vm"],
+            ),
         )
-
-        mock_vm_op = mocker.patch("mvmctl.api.vm_operations.VMOperation.remove")
 
         result = CacheOperation.prune_vms(include_all=True)
+
         assert result.item == ["running-vm"]
-        mock_vm_op.assert_called_once()
+        mock_prune.assert_called_once_with(dry_run=False, include_all=True)
 
     def test_prune_handles_remove_failure(self, mocker):
-        """prune_vms() logs warning when VM removal fails."""
-        mock_vm = MagicMock()
-        mock_vm.name = "failing-vm"
-        mock_vm.status = VMStatus.STOPPED
-
-        mock_repo = mocker.MagicMock()
-        mock_repo.list_all.return_value = [mock_vm]
-        mocker.patch(
-            "mvmctl.api.cache_operations.VMRepository",
-            return_value=mock_repo,
+        """prune_vms() delegates to VMOperation.prune which handles removal failures."""
+        mock_prune = mocker.patch(
+            "mvmctl.api.vm_operations.VMOperation.prune",
+            return_value=OperationResult(
+                status="success",
+                code="cache.pruned",
+                item=[],
+            ),
         )
-
-        mocker.patch(
-            "mvmctl.api.vm_operations.VMOperation.remove",
-            side_effect=RuntimeError("Failed"),
-        )
-        mock_logger = mocker.patch("mvmctl.api.cache_operations.logger")
 
         result = CacheOperation.prune_vms()
+
         assert result.item == []
-        mock_logger.warning.assert_called()
+        mock_prune.assert_called_once_with(dry_run=False, include_all=False)
 
 
 class TestCachePruneNetworks:
-    """Tests for CacheOperation.prune_networks()."""
+    """Tests for CacheOperation.prune_networks() — now delegates to NetworkOperation.prune()."""
 
     def test_prune_networks_skips_default_and_referenced(self, mocker):
-        """prune_networks() skips default and referenced networks."""
-        mock_default_net = MagicMock()
-        mock_default_net.name = "default"
-        mock_default_net.id = "net-default"
-
-        mock_unused_net = MagicMock()
-        mock_unused_net.name = "unused-net"
-        mock_unused_net.id = "net-unused"
-
-        mock_net_repo = mocker.MagicMock()
-        mock_net_repo.list_all.return_value = [
-            mock_default_net,
-            mock_unused_net,
-        ]
-        mocker.patch(
-            "mvmctl.api.cache_operations.NetworkRepository",
-            return_value=mock_net_repo,
-        )
-
-        mock_vm_repo = mocker.MagicMock()
-        mock_vm_repo.list_all.return_value = []
-        mocker.patch(
-            "mvmctl.api.cache_operations.VMRepository",
-            return_value=mock_vm_repo,
-        )
-
-        mock_lease_repo = mocker.MagicMock()
-        mock_lease_repo.list_all.return_value = []
-        mocker.patch(
-            "mvmctl.api.cache_operations.LeaseRepository",
-            return_value=mock_lease_repo,
-        )
-
-        mocker.patch(
-            "mvmctl.api.cache_operations.SettingsService.resolve",
-            return_value="default",
-        )
-
-        mock_net_op = mocker.patch(
-            "mvmctl.api.network_operations.NetworkOperation.remove"
-        )
-        mock_net_op.return_value = OperationResult(
-            status="success", code="network.removed"
+        """prune_networks() delegates to NetworkOperation.prune which skips default/referenced."""
+        mock_prune = mocker.patch(
+            "mvmctl.api.network_operations.NetworkOperation.prune",
+            return_value=OperationResult(
+                status="success", code="cache.pruned", item=["unused-net"]
+            ),
         )
 
         result = CacheOperation.prune_networks()
         assert result.item == ["unused-net"]
-        mock_net_op.assert_called_once()
+        mock_prune.assert_called_once_with(dry_run=False, include_all=False)
 
     def test_prune_networks_dry_run(self, mocker):
-        """prune_networks() with dry_run doesn't actually remove networks."""
-        mock_unused_net = MagicMock()
-        mock_unused_net.name = "unused-net"
-        mock_unused_net.id = "net-unused"
-
-        mock_net_repo = mocker.MagicMock()
-        mock_net_repo.list_all.return_value = [mock_unused_net]
-        mocker.patch(
-            "mvmctl.api.cache_operations.NetworkRepository",
-            return_value=mock_net_repo,
-        )
-        mock_vm_repo = mocker.MagicMock()
-        mock_vm_repo.list_all.return_value = []
-        mocker.patch(
-            "mvmctl.api.cache_operations.VMRepository",
-            return_value=mock_vm_repo,
-        )
-        mock_lease_repo = mocker.MagicMock()
-        mock_lease_repo.list_all.return_value = []
-        mocker.patch(
-            "mvmctl.api.cache_operations.LeaseRepository",
-            return_value=mock_lease_repo,
-        )
-        mocker.patch(
-            "mvmctl.api.cache_operations.SettingsService.resolve",
-            return_value="default",
-        )
-
-        mock_net_op = mocker.patch(
-            "mvmctl.api.network_operations.NetworkOperation.remove"
-        )
-        mock_net_op.return_value = OperationResult(
-            status="success", code="network.removed"
+        """prune_networks() delegates to NetworkOperation.prune with dry_run=True."""
+        mock_prune = mocker.patch(
+            "mvmctl.api.network_operations.NetworkOperation.prune",
+            return_value=OperationResult(
+                status="success", code="cache.pruned", item=["unused-net"]
+            ),
         )
 
         result = CacheOperation.prune_networks(dry_run=True)
         assert result.item == ["unused-net"]
-        mock_net_op.assert_not_called()
+        mock_prune.assert_called_once_with(dry_run=True, include_all=False)
 
 
 class TestCachePruneImages:
-    """Tests for CacheOperation.prune_images()."""
+    """Tests for CacheOperation.prune_images() — now delegates to ImageOperation.prune()."""
 
     def test_prune_images_skips_default_and_referenced(self, mocker):
-        """prune_images() skips default and referenced images."""
-        mock_default = MagicMock()
-        mock_default.id = "img-default"
-        mock_referenced = MagicMock()
-        mock_referenced.id = "img-referenced"
-        mock_unused = MagicMock()
-        mock_unused.id = "img-unused"
-
-        mock_repo = mocker.MagicMock()
-        mock_repo.list_all.return_value = [
-            mock_default,
-            mock_referenced,
-            mock_unused,
-        ]
-        mock_repo.get_default.return_value = mock_default
-        mocker.patch(
-            "mvmctl.api.cache_operations.ImageRepository",
-            return_value=mock_repo,
-        )
-
-        mock_vm_repo = mocker.MagicMock()
-        mock_vm_with_ref = MagicMock()
-        mock_vm_with_ref.image_id = "img-referenced"
-        mock_vm_repo.list_all.return_value = [mock_vm_with_ref]
-        mocker.patch(
-            "mvmctl.api.cache_operations.VMRepository",
-            return_value=mock_vm_repo,
-        )
-
-        mock_image_op = mocker.patch(
-            "mvmctl.api.image_operations.ImageOperation.remove"
+        """prune_images() delegates to ImageOperation.prune which skips default/referenced."""
+        mock_prune = mocker.patch(
+            "mvmctl.api.image_operations.ImageOperation.prune",
+            return_value=OperationResult(
+                status="success", code="cache.pruned", item=["img-unused"]
+            ),
         )
 
         result = CacheOperation.prune_images()
         assert result.item == ["img-unused"]
-        mock_image_op.assert_called_once()
+        mock_prune.assert_called_once_with(dry_run=False, include_all=False)
 
     def test_prune_images_dry_run(self, mocker):
-        """prune_images() with dry_run doesn't remove images."""
-        mock_unused = MagicMock()
-        mock_unused.id = "img-unused"
-
-        mock_repo = mocker.MagicMock()
-        mock_repo.list_all.return_value = [mock_unused]
-        mock_repo.get_default.return_value = None
-        mocker.patch(
-            "mvmctl.api.cache_operations.ImageRepository",
-            return_value=mock_repo,
-        )
-        mock_vm_repo = mocker.MagicMock()
-        mock_vm_repo.list_all.return_value = []
-        mocker.patch(
-            "mvmctl.api.cache_operations.VMRepository",
-            return_value=mock_vm_repo,
-        )
-
-        mock_image_op = mocker.patch(
-            "mvmctl.api.image_operations.ImageOperation.remove"
+        """prune_images() delegates to ImageOperation.prune with dry_run=True."""
+        mock_prune = mocker.patch(
+            "mvmctl.api.image_operations.ImageOperation.prune",
+            return_value=OperationResult(
+                status="success", code="cache.pruned", item=["img-unused"]
+            ),
         )
 
         result = CacheOperation.prune_images(dry_run=True)
         assert result.item == ["img-unused"]
-        mock_image_op.assert_not_called()
+        mock_prune.assert_called_once_with(dry_run=True, include_all=False)
 
 
 class TestCachePruneKernels:
-    """Tests for CacheOperation.prune_kernels()."""
+    """Tests for CacheOperation.prune_kernels() — now delegates to KernelOperation.prune()."""
 
     def test_prune_kernels_skips_default_and_referenced(self, mocker):
-        """prune_kernels() skips default and referenced kernels."""
-        mock_default = MagicMock()
-        mock_default.id = "kern-default"
-        mock_unused = MagicMock()
-        mock_unused.id = "kern-unused"
-
-        mock_repo = mocker.MagicMock()
-        mock_repo.list_all.return_value = [mock_default, mock_unused]
-        mock_repo.get_default.return_value = mock_default
-        mocker.patch(
-            "mvmctl.api.cache_operations.KernelRepository",
-            return_value=mock_repo,
-        )
-
-        mock_vm_repo = mocker.MagicMock()
-        mock_vm_repo.list_all.return_value = []
-        mocker.patch(
-            "mvmctl.api.cache_operations.VMRepository",
-            return_value=mock_vm_repo,
-        )
-
-        mock_kernel_op = mocker.patch(
-            "mvmctl.api.kernel_operations.KernelOperation.remove"
+        """prune_kernels() delegates to KernelOperation.prune which skips default/referenced."""
+        mock_prune = mocker.patch(
+            "mvmctl.api.kernel_operations.KernelOperation.prune",
+            return_value=OperationResult(
+                status="success", code="cache.pruned", item=["kern-unused"]
+            ),
         )
 
         result = CacheOperation.prune_kernels()
         assert result.item == ["kern-unused"]
-        mock_kernel_op.assert_called_once()
+        mock_prune.assert_called_once_with(dry_run=False, include_all=False)
 
 
 class TestCachePruneBinaries:
-    """Tests for CacheOperation.prune_binaries()."""
+    """Tests for CacheOperation.prune_binaries() — now delegates to BinaryOperation.prune()."""
 
     def test_prune_binaries_skips_default(self, mocker):
-        """prune_binaries() skips default binary version."""
-        mock_default = MagicMock()
-        mock_default.name = "firecracker"
-        mock_default.version = "1.15.0"
-        mock_other = MagicMock()
-        mock_other.name = "firecracker"
-        mock_other.version = "1.14.0"
-
-        mock_repo = mocker.MagicMock()
-        mock_repo.list_all.return_value = [mock_default, mock_other]
-        mock_repo.get_default.return_value = mock_default
-        mocker.patch(
-            "mvmctl.api.cache_operations.BinaryRepository",
-            return_value=mock_repo,
-        )
-
-        mock_bin_op = mocker.patch(
-            "mvmctl.api.binary_operations.BinaryOperation.remove"
+        """prune_binaries() delegates to BinaryOperation.prune which skips default version."""
+        mock_prune = mocker.patch(
+            "mvmctl.api.binary_operations.BinaryOperation.prune",
+            return_value=OperationResult(
+                status="success",
+                code="cache.pruned",
+                item=["firecracker:1.14.0"],
+            ),
         )
 
         result = CacheOperation.prune_binaries()
         assert result.item == ["firecracker:1.14.0"]
-        mock_bin_op.assert_called_once()
+        mock_prune.assert_called_once_with(dry_run=False, include_all=False)
 
 
 class TestCachePruneMisc:

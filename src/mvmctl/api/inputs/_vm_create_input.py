@@ -94,6 +94,7 @@ class VMCreateInput:
     keep_cloud_init_iso: bool = False
     nocloud_net_port: int | None = None
     skip_cleanup: bool = False
+    skip_deblob: bool = False
     count: int | None = None
     atomic: bool = False
     volumes: list[str] | None = None
@@ -129,6 +130,7 @@ class ResolvedVMCreateInput:
 
     keep_cloud_init_iso: bool
     skip_cleanup: bool
+    skip_deblob: bool
     network_netmask: str
     disk_size_bytes: int
     disk_size_mib: int
@@ -281,6 +283,7 @@ class VMCreateRequest:
             enable_metrics=vm.enable_metrics,
             keep_cloud_init_iso=False,
             skip_cleanup=False,
+            skip_deblob=False,
             network_netmask=str(ipv4_net.netmask),
             disk_size_bytes=vm.disk_size_mib * CONST_MEBIBYTE_BYTES,
             disk_size_mib=vm.disk_size_mib,
@@ -434,6 +437,7 @@ class VMCreateRequest:
             if self._inputs.enable_metrics is not None
             else self._resolve_setting("defaults.vm", "enable_metrics"),
             skip_cleanup=self._inputs.skip_cleanup,
+            skip_deblob=self._inputs.skip_deblob,
             requested_guest_mac=self._inputs.requested_guest_mac,
             requested_guest_ip=self._inputs.requested_guest_ip,
             ssh_keys=ssh_keys,

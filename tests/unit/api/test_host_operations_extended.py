@@ -560,11 +560,11 @@ class TestHostOperationCleanExtended:
         )
         result = HostOperation.clean(Path("/tmp"))
         assert result.status == "success"
-        mock_net_svc.remove_mvm_chains.assert_called_once()
+        mock_net_svc.tracker.teardown.assert_called_once()
 
     def test_clean_mvm_chains_error_handled(self, mocker):
         mock_net_svc = MagicMock()
-        mock_net_svc.remove_mvm_chains.side_effect = NetworkError(
+        mock_net_svc.tracker.teardown.side_effect = NetworkError(
             "chains error"
         )
         mocker.patch(

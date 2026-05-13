@@ -52,6 +52,67 @@ class ImageOperation:
     """
 
     @staticmethod
+    def prune(
+        dry_run: bool = False,
+        include_all: bool = False,
+    ) -> OperationResult[list[str]]:
+        """Prune unused images.
+
+        Args:
+            dry_run: If True, only report what would be removed.
+            include_all: If True, remove ALL images including default and referenced.
+
+        Returns:
+            OperationResult with item list of image IDs that were removed.
+        """
+        from mvmctl.core.vm._repository import VMRepository
+
+        db = Database()
+        repo = ImageRepository(db)
+
+        # Get referenced image IDs from VMs
+        vm_repo = VMRepository(db)
+        vms = vm_repo.list_all()
+        referenced_image_ids: set[str] = set()
+        for vm in vms:
+            if vm.image_id:
+                referenced_image_ids.add(vm.image_id)
+
+        default_item = repo.get_default()
+        default_id = default_item.id if default_item else None
+
+        all_images = repo.list_all()
+        removed: list[str] = []
+
+        for image in all_images:
+            if not include_all:
+                if image.id == default_id:
+                    continue
+                if image.id in referenced_image_ids:
+                    continue
+
+            if not dry_run:
+                try:
+                    from mvmctl.api.inputs._image_input import ImageInput
+
+                    ImageOperation.remove(
+                        ImageInput(id=[image.id]),
+                        force=include_all,
+                    )
+                    removed.append(image.id)
+                except Exception as e:
+                    logger.warning("Failed to remove image %s: %s", image.id, e)
+            else:
+                removed.append(image.id)
+
+        return OperationResult(
+            status="success",
+            code="cache.pruned",
+            message=f"Pruned {len(removed)} image(s)",
+            item=removed,
+        )
+
+    @staticmethod
     def pull(
         inputs: ImagePullInput,
         *,

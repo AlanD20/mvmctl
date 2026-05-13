@@ -53,37 +53,25 @@ def default_network(repo: NetworkRepository) -> NetworkItem:
 class TestNetworkServiceInitialize:
     """Tests for NetworkService.initialize() / ensure_mvm_chains()."""
 
-    def test_initialize_calls_ensure_mvm_chains(
+    def test_initialize_calls_tracker_initialize(
         self, repo: NetworkRepository, mocker
     ) -> None:
-        """initialize() delegates to ensure_mvm_chains()."""
+        """initialize() delegates to _tracker.initialize()."""
         mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
         service = NetworkService(repo)
-        spy = mocker.spy(service, "ensure_mvm_chains")
+        mock_init = mocker.patch.object(service._tracker, "initialize")
         service.initialize()
-        spy.assert_called_once()
+        mock_init.assert_called_once()
 
-    def test_ensure_mvm_chains_calls_iptables(
+    def test_ensure_mvm_chains_calls_tracker_initialize(
         self, repo: NetworkRepository, mocker
     ) -> None:
-        """ensure_mvm_chains() creates 3 MVM chains with appropriate iptables calls."""
-        mock_run = mocker.patch(
-            "subprocess.run", return_value=MagicMock(returncode=0)
-        )
+        """ensure_mvm_chains() delegates to the tracker's initialize method (backend-agnostic)."""
+        mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
         service = NetworkService(repo)
+        mock_init = mocker.patch.object(service._tracker, "initialize")
         service.ensure_mvm_chains()
-
-        # ensure_chain for each of the 3 chains triggers several subprocess calls
-        # (create chain + insert jump rule for each)
-        assert mock_run.call_count > 0
-        # Verify chain names appear in command args
-        all_args = []
-        for call_args in mock_run.call_args_list:
-            args = call_args[0][0]
-            all_args.extend(args)
-        assert "MVM-FORWARD" in str(all_args) or "MVM-POSTROUTING" in str(
-            all_args
-        )
+        mock_init.assert_called_once()
 
 
 class TestNetworkServiceBridge:
@@ -362,9 +350,10 @@ class TestNetworkServiceNat:
         """ensure_nat() creates MASQUERADE + FORWARD rules."""
         mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
         mocker.patch("os.getuid", return_value=0)
-        # Mock iptables_rule_exists to return False so rules are added
+        # Mock FirewallTracker to avoid hitting the nftables backend / DB
         mocker.patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.ensure_chain"
+            "mvmctl.core._shared._firewall_tracker.FirewallTracker.ensure_rule",
+            return_value=MagicMock(success=True),
         )
 
         service = NetworkService(repo)
@@ -375,7 +364,7 @@ class TestNetworkServiceNat:
             network_id=default_network.id,
         )
 
-        # Should have subprocess calls for iptables commands
+        # Should have subprocess calls for firewall commands
         assert service.tracker is not None
 
     def test_ensure_nat_raises_on_failure(
@@ -384,14 +373,14 @@ class TestNetworkServiceNat:
         """ensure_nat() raises NetworkError when MASQUERADE add fails."""
         # Mock ensure_chain to pass
         mocker.patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.ensure_chain"
+            "mvmctl.core._shared._firewall_tracker.FirewallTracker.ensure_chain"
         )
         # Mock ensure_rule to return failure
         mock_result = MagicMock()
         mock_result.success = False
         mock_result.error_message = "iptables failed"
         mocker.patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.ensure_rule",
+            "mvmctl.core._shared._firewall_tracker.FirewallTracker.ensure_rule",
             return_value=mock_result,
         )
 
@@ -411,7 +400,7 @@ class TestNetworkServiceNat:
         mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
         mocker.patch.object(NetworkUtils, "get_bridge_taps", return_value=[])
         mocker.patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.remove_rule",
+            "mvmctl.core._shared._firewall_tracker.FirewallTracker.remove_rule",
             return_value=MagicMock(success=True),
         )
 
@@ -451,7 +440,7 @@ class TestNetworkServiceNat:
             NetworkUtils, "get_bridge_taps", return_value=["tap-vm1"]
         )
         mocker.patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.remove_rule",
+            "mvmctl.core._shared._firewall_tracker.FirewallTracker.remove_rule",
             return_value=MagicMock(success=True),
         )
 
@@ -471,7 +460,7 @@ class TestNetworkServiceNat:
         """remove_nat() resolves subnet/gateways from DB when not provided."""
         mocker.patch.object(NetworkUtils, "get_bridge_taps", return_value=[])
         mocker.patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.remove_rule",
+            "mvmctl.core._shared._firewall_tracker.FirewallTracker.remove_rule",
             return_value=MagicMock(success=True),
         )
 
@@ -602,78 +591,6 @@ class TestEnsureInterfaceReady:
             NetworkUtils.ensure_interface_ready("eth0")
 
 
-class TestNetworkServiceRemoveMvmChains:
-    """Tests for remove_mvm_chains()."""
-
-    def test_removes_all_chains_successfully(
-        self, repo: NetworkRepository, mocker
-    ) -> None:
-        """remove_mvm_chains() removes jump rules, flushes, deletes chains."""
-        mock_run = mocker.patch(
-            "subprocess.run", return_value=MagicMock(returncode=0)
-        )
-
-        service = NetworkService(repo)
-        service.remove_mvm_chains()
-
-        # 3 chains * 3 operations each (jump, flush, delete) = 9 calls
-        assert mock_run.call_count == 9
-
-    def test_tolerates_missing_jump_rules(
-        self, repo: NetworkRepository, mocker
-    ) -> None:
-        """remove_mvm_chains() tolerates -D failures for jump rules."""
-        call_count: list[int] = [0]
-
-        def _mock_run(cmd: list[str], **kwargs: object) -> MagicMock:
-            call_count[0] += 1
-            if call_count[0] in (1, 4, 7):
-                # -D jump rule fails
-                raise subprocess.CalledProcessError(1, cmd)
-            return MagicMock(returncode=0)
-
-        mocker.patch("subprocess.run", side_effect=_mock_run)
-
-        service = NetworkService(repo)
-        service.remove_mvm_chains()
-
-    def test_tolerates_flush_failures(
-        self, repo: NetworkRepository, mocker
-    ) -> None:
-        """remove_mvm_chains() tolerates -F failures."""
-        call_count: list[int] = [0]
-
-        def _mock_run(cmd: list[str], **kwargs: object) -> MagicMock:
-            call_count[0] += 1
-            if call_count[0] in (2, 5, 8):
-                # -F flush fails
-                raise subprocess.CalledProcessError(1, cmd)
-            return MagicMock(returncode=0)
-
-        mocker.patch("subprocess.run", side_effect=_mock_run)
-
-        service = NetworkService(repo)
-        service.remove_mvm_chains()
-
-    def test_tolerates_delete_failures(
-        self, repo: NetworkRepository, mocker
-    ) -> None:
-        """remove_mvm_chains() tolerates -X failures."""
-        call_count: list[int] = [0]
-
-        def _mock_run(cmd: list[str], **kwargs: object) -> MagicMock:
-            call_count[0] += 1
-            if call_count[0] in (3, 6, 9):
-                # -X delete fails
-                raise subprocess.CalledProcessError(1, cmd, stderr=b"error")
-            return MagicMock(returncode=0)
-
-        mocker.patch("subprocess.run", side_effect=_mock_run)
-
-        service = NetworkService(repo)
-        service.remove_mvm_chains()
-
-
 class TestNetworkServiceEnsureIpForwardingFallback:
     """Tests for ensure_ip_forwarding() sysctl fallback."""
 
@@ -749,7 +666,7 @@ class TestNetworkServiceTapEdgeCases:
 
         call_count: list[int] = [0]
         mock_remove = mocker.patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.remove_rule",
+            "mvmctl.core._shared._firewall_tracker.FirewallTracker.remove_rule",
         )
 
         def _ensure_rule_side(*args: object, **kwargs: object) -> MagicMock:
@@ -763,7 +680,7 @@ class TestNetworkServiceTapEdgeCases:
             return result
 
         mocker.patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.ensure_rule",
+            "mvmctl.core._shared._firewall_tracker.FirewallTracker.ensure_rule",
             side_effect=_ensure_rule_side,
         )
 
@@ -786,7 +703,7 @@ class TestNetworkServiceTapEdgeCases:
         mocker.patch.object(NetworkUtils, "get_tap_bridge", return_value=None)
         mock_raw = mocker.patch.object(NetworkService, "remove_raw_tap")
         mock_remove = mocker.patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.remove_rule",
+            "mvmctl.core._shared._firewall_tracker.FirewallTracker.remove_rule",
         )
 
         service = NetworkService(repo)
@@ -805,7 +722,7 @@ class TestNetworkServiceTapEdgeCases:
         )
         mock_raw = mocker.patch.object(NetworkService, "remove_raw_tap")
         mocker.patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.remove_rule",
+            "mvmctl.core._shared._firewall_tracker.FirewallTracker.remove_rule",
             return_value=MagicMock(success=False, error_message="not found"),
         )
 
@@ -825,7 +742,7 @@ class TestNetworkServiceTapEdgeCases:
             NetworkUtils, "get_tap_bridge", return_value="mvm-test-net"
         )
         mocker.patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.remove_rule",
+            "mvmctl.core._shared._firewall_tracker.FirewallTracker.remove_rule",
             return_value=MagicMock(success=True),
         )
         mocker.patch.object(
@@ -892,7 +809,7 @@ class TestNetworkServiceNatEdgeCases:
         """remove_nat() logs warning when individual remove_rule fails."""
         mocker.patch.object(NetworkUtils, "get_bridge_taps", return_value=[])
         mocker.patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.remove_rule",
+            "mvmctl.core._shared._firewall_tracker.FirewallTracker.remove_rule",
             return_value=MagicMock(success=False, error_message="not found"),
         )
 
@@ -916,8 +833,8 @@ class TestNetworkServiceNatEdgeCases:
         mock_resolver = mocker.patch.object(
             NetworkResolver, "by_name", return_value=default_network
         )
-        mock_remove = mocker.patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.remove_rule",
+        mock_batch_remove = mocker.patch(
+            "mvmctl.core._shared._firewall_tracker.FirewallTracker.batch_remove_rules",
             return_value=MagicMock(success=True),
         )
 
@@ -929,7 +846,9 @@ class TestNetworkServiceNatEdgeCases:
         )
 
         mock_resolver.assert_called_once_with("test-net")
-        assert mock_remove.call_count == 3  # 3 rules per gateway
+        mock_batch_remove.assert_called_once()
+        # Verify 3 rules were passed (MASQUERADE + FORWARD_OUT + FORWARD_IN per gateway)
+        assert len(mock_batch_remove.call_args[0][0]) == 3
 
     def test_remove_nat_force_with_taps_present(
         self, repo: NetworkRepository, default_network, mocker
@@ -939,7 +858,7 @@ class TestNetworkServiceNatEdgeCases:
             NetworkUtils, "get_bridge_taps", return_value=["tap-vm1"]
         )
         mocker.patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.remove_rule",
+            "mvmctl.core._shared._firewall_tracker.FirewallTracker.remove_rule",
             return_value=MagicMock(success=True),
         )
 
@@ -1119,7 +1038,7 @@ class TestNetworkServiceSyncIptables:
     ) -> None:
         """sync_iptables_rules() verifies existing DB rules."""
         mocker.patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.ensure_rule",
+            "mvmctl.core._shared._firewall_tracker.FirewallTracker.ensure_rule",
             return_value=MagicMock(success=True, command_executed=None),
         )
         mocker.patch.object(
@@ -1128,35 +1047,35 @@ class TestNetworkServiceSyncIptables:
 
         # Insert a DB rule
         from mvmctl.models import (
-            IPTablesChain,
-            IPTablesPort,
-            IPTablesProtocol,
-            IPTablesRuleItem,
-            IPTablesRuleType,
-            IPTablesTable,
-            IPTablesTarget,
-            IPTablesWildcard,
+            FirewallChain,
+            FirewallPort,
+            FirewallProtocol,
+            FirewallRule,
+            FirewallRuleType,
+            FirewallTable,
+            FirewallTarget,
+            FirewallWildcard,
         )
 
-        db_rule = IPTablesRuleItem(
-            table_name=IPTablesTable.FILTER,
-            chain_name=IPTablesChain.MVM_FORWARD,
-            rule_type=IPTablesRuleType.FORWARD_IN,
-            protocol=IPTablesProtocol.ALL,
-            source=IPTablesWildcard.ANY_CIDR,
-            destination=IPTablesWildcard.ANY_CIDR,
-            in_interface=IPTablesWildcard.ANY_INTERFACE,
-            out_interface=IPTablesWildcard.ANY_INTERFACE,
-            target=IPTablesTarget.ACCEPT,
-            sport=IPTablesPort.ANY,
-            dport=IPTablesPort.ANY,
+        db_rule = FirewallRule(
+            table_name=FirewallTable.FILTER,
+            chain_name=FirewallChain.MVM_FORWARD,
+            rule_type=FirewallRuleType.FORWARD_IN,
+            protocol=FirewallProtocol.ALL,
+            source=FirewallWildcard.ANY_CIDR,
+            destination=FirewallWildcard.ANY_CIDR,
+            in_interface=FirewallWildcard.ANY_INTERFACE,
+            out_interface=FirewallWildcard.ANY_INTERFACE,
+            target=FirewallTarget.ACCEPT,
+            sport=FirewallPort.ANY,
+            dport=FirewallPort.ANY,
             network_id=default_network.id,
             is_active=True,
             network_name=default_network.name,
             comment_tag="mvm:test:sync",
         )
         service = NetworkService(repo)
-        service._iptables_repo.insert(db_rule)
+        service._tracker.repo.insert(db_rule)
 
         result = service.sync_iptables_rules(default_network)
 
@@ -1169,7 +1088,7 @@ class TestNetworkServiceSyncIptables:
     ) -> None:
         """sync_iptables_rules() adds rules that need to be created."""
         mocker.patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.ensure_rule",
+            "mvmctl.core._shared._firewall_tracker.FirewallTracker.ensure_rule",
             return_value=MagicMock(
                 success=True, command_executed=["iptables", "-A"]
             ),
@@ -1179,35 +1098,35 @@ class TestNetworkServiceSyncIptables:
         )
 
         from mvmctl.models import (
-            IPTablesChain,
-            IPTablesPort,
-            IPTablesProtocol,
-            IPTablesRuleItem,
-            IPTablesRuleType,
-            IPTablesTable,
-            IPTablesTarget,
-            IPTablesWildcard,
+            FirewallChain,
+            FirewallPort,
+            FirewallProtocol,
+            FirewallRule,
+            FirewallRuleType,
+            FirewallTable,
+            FirewallTarget,
+            FirewallWildcard,
         )
 
-        db_rule = IPTablesRuleItem(
-            table_name=IPTablesTable.FILTER,
-            chain_name=IPTablesChain.MVM_FORWARD,
-            rule_type=IPTablesRuleType.FORWARD_IN,
-            protocol=IPTablesProtocol.ALL,
-            source=IPTablesWildcard.ANY_CIDR,
-            destination=IPTablesWildcard.ANY_CIDR,
-            in_interface=IPTablesWildcard.ANY_INTERFACE,
-            out_interface=IPTablesWildcard.ANY_INTERFACE,
-            target=IPTablesTarget.ACCEPT,
-            sport=IPTablesPort.ANY,
-            dport=IPTablesPort.ANY,
+        db_rule = FirewallRule(
+            table_name=FirewallTable.FILTER,
+            chain_name=FirewallChain.MVM_FORWARD,
+            rule_type=FirewallRuleType.FORWARD_IN,
+            protocol=FirewallProtocol.ALL,
+            source=FirewallWildcard.ANY_CIDR,
+            destination=FirewallWildcard.ANY_CIDR,
+            in_interface=FirewallWildcard.ANY_INTERFACE,
+            out_interface=FirewallWildcard.ANY_INTERFACE,
+            target=FirewallTarget.ACCEPT,
+            sport=FirewallPort.ANY,
+            dport=FirewallPort.ANY,
             network_id=default_network.id,
             is_active=True,
             network_name=default_network.name,
             comment_tag="mvm:test:add",
         )
         service = NetworkService(repo)
-        service._iptables_repo.insert(db_rule)
+        service._tracker.repo.insert(db_rule)
 
         result = service.sync_iptables_rules(default_network)
 
@@ -1259,21 +1178,29 @@ class TestNetworkServiceSyncIptables:
             ),
         )
 
-        from mvmctl.models import IPTablesRuleItem
+        from mvmctl.models import (
+            FirewallChain,
+            FirewallProtocol,
+            FirewallRule,
+            FirewallRuleType,
+            FirewallTable,
+            FirewallTarget,
+            FirewallWildcard,
+        )
 
-        existing_rule = IPTablesRuleItem(
-            table_name=None,  # type: ignore[arg-type]
-            chain_name=None,  # type: ignore[arg-type]
-            rule_type=None,  # type: ignore[arg-type]
-            protocol=None,  # type: ignore[arg-type]
-            source="",
-            destination="",
-            in_interface="",
-            out_interface="",
-            target=None,  # type: ignore[arg-type]
+        existing_rule = FirewallRule(
+            table_name=FirewallTable.FILTER,
+            chain_name=FirewallChain.MVM_FORWARD,
+            rule_type=FirewallRuleType.FORWARD_IN,
+            protocol=FirewallProtocol.ALL,
+            source=FirewallWildcard.ANY_CIDR,
+            destination=FirewallWildcard.ANY_CIDR,
+            in_interface=FirewallWildcard.ANY_INTERFACE,
+            out_interface=FirewallWildcard.ANY_INTERFACE,
+            target=FirewallTarget.ACCEPT,
             sport=0,
             dport=0,
-            network_id="",
+            network_id="test-net",
             is_active=True,
             comment_tag="mvm:forward_in:test-net:existing",
         )
@@ -1332,7 +1259,7 @@ class TestNetworkServiceReconcileEdgeCases:
     ) -> None:
         """ensure_nat() raises NetworkError when FORWARD_OUT rule fails."""
         mocker.patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.ensure_chain"
+            "mvmctl.core._shared._firewall_tracker.FirewallTracker.ensure_chain"
         )
         call_count: list[int] = [0]
 
@@ -1348,7 +1275,7 @@ class TestNetworkServiceReconcileEdgeCases:
             return result
 
         mocker.patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.ensure_rule",
+            "mvmctl.core._shared._firewall_tracker.FirewallTracker.ensure_rule",
             side_effect=_ensure_rule_side,
         )
 
@@ -1366,7 +1293,7 @@ class TestNetworkServiceReconcileEdgeCases:
     ) -> None:
         """ensure_nat() raises NetworkError when FORWARD_IN rule fails."""
         mocker.patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.ensure_chain"
+            "mvmctl.core._shared._firewall_tracker.FirewallTracker.ensure_chain"
         )
         call_count: list[int] = [0]
 
@@ -1381,7 +1308,7 @@ class TestNetworkServiceReconcileEdgeCases:
             return result
 
         mocker.patch(
-            "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker.ensure_rule",
+            "mvmctl.core._shared._firewall_tracker.FirewallTracker.ensure_rule",
             side_effect=_ensure_rule_side,
         )
 

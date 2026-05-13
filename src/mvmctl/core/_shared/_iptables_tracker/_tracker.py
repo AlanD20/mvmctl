@@ -9,36 +9,26 @@ from __future__ import annotations
 
 import logging
 import shlex
-from dataclasses import dataclass
 from enum import Enum
 
 from mvmctl.constants import CONST_IPTABLES_MAX_COMMENT_LEN
 from mvmctl.exceptions import IPTablesTrackerError, ProcessError
 from mvmctl.models import (
-    IPTablesChain,
-    IPTablesPort,
-    IPTablesProtocol,
-    IPTablesRuleItem,
-    IPTablesRuleType,
-    IPTablesTable,
-    IPTablesWildcard,
+    FirewallChain,
+    FirewallPort,
+    FirewallProtocol,
+    FirewallRule,
+    FirewallRuleType,
+    FirewallTable,
+    FirewallWildcard,
 )
+from mvmctl.models.network import FirewallRuleResult
 from mvmctl.utils._system import run_cmd
 from mvmctl.utils.network import NetworkUtils
 
 from ._repository import IPTablesRuleRepository
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class IPTablesRuleResult:
-    """Result of a rule operation."""
-
-    success: bool
-    rule: IPTablesRuleItem | None = None
-    error_message: str | None = None
-    command_executed: list[str] | None = None
 
 
 class IPTablesTracker:
@@ -76,9 +66,30 @@ class IPTablesTracker:
         """Initialize IPTablesTracker with optional database instance."""
         self._repo = repo
 
+    def initialize(self) -> None:
+        """Ensure MVM iptables chains exist with jump rules from standard chains.
+
+        Creates three chains (idempotent):
+        - ``MVM-FORWARD`` (filter table, jumped from FORWARD)
+        - ``MVM-POSTROUTING`` (nat table, jumped from POSTROUTING)
+        - ``MVM-NOCLOUDNET-INPUT`` (filter table, jumped from INPUT)
+        """
+        chains: list[tuple[FirewallChain, FirewallTable, str]] = [
+            (FirewallChain.MVM_FORWARD, FirewallTable.FILTER, "FORWARD"),
+            (FirewallChain.MVM_POSTROUTING, FirewallTable.NAT, "POSTROUTING"),
+            (FirewallChain.MVM_NOCLOUDNET_INPUT, FirewallTable.FILTER, "INPUT"),
+        ]
+        for chain_enum, table_enum, jump_from in chains:
+            self.ensure_chain(
+                chain_name=chain_enum,
+                table=table_enum,
+                auto_jump_from=jump_from,
+                position=1,
+            )
+
     def ensure_rule(
-        self, rule: IPTablesRuleItem, *, context: str = ""
-    ) -> IPTablesRuleResult:
+        self, rule: FirewallRule, *, context: str = ""
+    ) -> FirewallRuleResult:
         """
         Idempotently ensure a rule exists in iptables and database.
 
@@ -89,11 +100,11 @@ class IPTablesTracker:
         5. Return rule metadata
 
         Args:
-            rule: IPTablesRuleItem dataclass containing all rule parameters.
+            rule: FirewallRule dataclass containing all rule parameters.
             context: Optional context string for comment (e.g., "nocloud:vm123").
 
         Returns:
-            IPTablesRuleResult with success status and rule metadata.
+            FirewallRuleResult with success status and rule metadata.
 
         """
         # Build comment if not already set
@@ -137,12 +148,12 @@ class IPTablesTracker:
         if existing_db_rule and iptables_exists:
             if existing_db_rule.id is not None:
                 self._repo.update_verified_at(existing_db_rule.id)
-            return IPTablesRuleResult(success=True, rule=existing_db_rule)
+            return FirewallRuleResult(success=True, rule=existing_db_rule)
 
         # If rule exists in iptables but not in DB, record it
         if iptables_exists and not existing_db_rule:
             recorded_rule = self._repo.insert(rule)
-            return IPTablesRuleResult(success=True, rule=recorded_rule)
+            return FirewallRuleResult(success=True, rule=recorded_rule)
 
         # Create the rule in iptables
         try:
@@ -151,10 +162,10 @@ class IPTablesTracker:
                 privileged=True,
             )
         except ProcessError as e:
-            return IPTablesRuleResult(
+            return FirewallRuleResult(
                 success=False,
                 error_message=f"Failed to create rule: {e}",
-                command_executed=add_args,
+                command_executed=" ".join(add_args) if add_args else None,
             )
 
         # Record in database (insert new or reactivate existing)
@@ -167,13 +178,13 @@ class IPTablesTracker:
         else:
             recorded_rule = self._repo.insert(rule)
 
-        return IPTablesRuleResult(
+        return FirewallRuleResult(
             success=True,
             rule=recorded_rule,
-            command_executed=add_args,
+            command_executed=" ".join(add_args) if add_args else None,
         )
 
-    def remove_rule(self, rule: IPTablesRuleItem) -> IPTablesRuleResult:
+    def remove_rule(self, rule: FirewallRule) -> FirewallRuleResult:
         """
         Remove a specific rule from iptables and mark as deleted in database.
 
@@ -230,25 +241,27 @@ class IPTablesTracker:
                     pass  # Rule is truly gone
                 else:
                     stderr = delete_result.stderr
-                    return IPTablesRuleResult(
+                    return FirewallRuleResult(
                         success=False,
                         error_message=f"Failed to remove rule: {stderr}",
-                        command_executed=delete_args,
+                        command_executed=" ".join(delete_args)
+                        if delete_args
+                        else None,
                     )
 
         # Mark as deleted in database if we found it
         if db_rule_id is not None:
             self._repo.mark_deleted(db_rule_id)
 
-        return IPTablesRuleResult(
+        return FirewallRuleResult(
             success=True,
             rule=effective_rule,
-            command_executed=delete_args,
+            command_executed=" ".join(delete_args) if delete_args else None,
         )
 
     def _remove_by_line_number(
         self,
-        rule: IPTablesRuleItem,
+        rule: FirewallRule,
     ) -> bool:
         """
         Remove a rule by scanning iptables output and deleting by line number.
@@ -280,9 +293,9 @@ class IPTablesTracker:
 
         in_iface = rule.in_interface
         out_iface = rule.out_interface
-        if in_iface == IPTablesWildcard.ANY_INTERFACE:
+        if in_iface == FirewallWildcard.ANY_INTERFACE:
             in_iface = "*"
-        if out_iface == IPTablesWildcard.ANY_INTERFACE:
+        if out_iface == FirewallWildcard.ANY_INTERFACE:
             out_iface = "*"
 
         for line in result.stdout.splitlines():
@@ -315,7 +328,7 @@ class IPTablesTracker:
 
     def _rule_exists_by_interfaces(
         self,
-        rule: IPTablesRuleItem,
+        rule: FirewallRule,
     ) -> bool:
         """
         Check if a rule with the given interfaces exists in the chain.
@@ -341,9 +354,9 @@ class IPTablesTracker:
 
         in_iface = rule.in_interface
         out_iface = rule.out_interface
-        if in_iface == IPTablesWildcard.ANY_INTERFACE:
+        if in_iface == FirewallWildcard.ANY_INTERFACE:
             in_iface = "*"
-        if out_iface == IPTablesWildcard.ANY_INTERFACE:
+        if out_iface == FirewallWildcard.ANY_INTERFACE:
             out_iface = "*"
 
         for line in result.stdout.splitlines():
@@ -361,7 +374,7 @@ class IPTablesTracker:
 
     def _build_iptables_args(
         self,
-        rule: IPTablesRuleItem,
+        rule: FirewallRule,
         action: RuleAction,
     ) -> list[str]:
         """Build iptables command arguments from rule specification."""
@@ -374,25 +387,25 @@ class IPTablesTracker:
         ]
 
         # Only add -p flag if protocol is not ALL (wildcard)
-        if rule.protocol != IPTablesProtocol.ALL:
+        if rule.protocol != FirewallProtocol.ALL:
             args.extend(["-p", rule.protocol.value])
 
-        if rule.source != IPTablesWildcard.ANY_CIDR:
+        if rule.source != FirewallWildcard.ANY_CIDR:
             args.extend(["-s", rule.source])
 
-        if rule.destination != IPTablesWildcard.ANY_CIDR:
+        if rule.destination != FirewallWildcard.ANY_CIDR:
             args.extend(["-d", rule.destination])
 
-        if rule.in_interface != IPTablesWildcard.ANY_INTERFACE:
+        if rule.in_interface != FirewallWildcard.ANY_INTERFACE:
             args.extend(["-i", rule.in_interface])
 
-        if rule.out_interface != IPTablesWildcard.ANY_INTERFACE:
+        if rule.out_interface != FirewallWildcard.ANY_INTERFACE:
             args.extend(["-o", rule.out_interface])
 
-        if rule.sport != IPTablesPort.ANY:
+        if rule.sport != FirewallPort.ANY:
             args.extend(["--sport", str(rule.sport)])
 
-        if rule.dport != IPTablesPort.ANY:
+        if rule.dport != FirewallPort.ANY:
             args.extend(["--dport", str(rule.dport)])
 
         args.extend(["-j", rule.target.value])
@@ -404,7 +417,7 @@ class IPTablesTracker:
 
     def _build_comment(
         self,
-        rule_type: IPTablesRuleType,
+        rule_type: FirewallRuleType,
         network_name: str,
         context: str,
     ) -> str:
@@ -417,10 +430,36 @@ class IPTablesTracker:
             comment = comment[: self.MAX_COMMENT_LEN]
         return comment
 
+    def batch_ensure_rules(
+        self, rules: list[FirewallRule]
+    ) -> FirewallRuleResult:
+        """Add multiple rules, one at a time.
+
+        For ``iptables``, each rule is handled individually (no batch
+        optimisation).  The method exists for interface compatibility with
+        ``NFTablesTracker.batch_ensure_rules()`` which applies all rules
+        atomically via ``nft -f -``.
+        """
+        for rule in rules:
+            self.ensure_rule(rule)
+        return FirewallRuleResult(success=True)
+
+    def batch_remove_rules(
+        self, rules: list[FirewallRule]
+    ) -> FirewallRuleResult:
+        """Remove multiple rules, one at a time.
+
+        Interface compatibility counterpart for
+        ``NFTablesTracker.batch_remove_rules()``.
+        """
+        for rule in rules:
+            self.remove_rule(rule)
+        return FirewallRuleResult(success=True)
+
     def ensure_chain(
         self,
-        chain_name: IPTablesChain,
-        table: IPTablesTable = IPTablesTable.FILTER,
+        chain_name: FirewallChain,
+        table: FirewallTable = FirewallTable.FILTER,
         auto_jump_from: str | None = None,
         position: int = 1,
     ) -> bool:
@@ -486,9 +525,9 @@ class IPTablesTracker:
         self,
         from_chain: str,
         to_chain: str,
-        table: IPTablesTable = IPTablesTable.FILTER,
+        table: FirewallTable = FirewallTable.FILTER,
         position: int = 1,
-    ) -> IPTablesRuleResult:
+    ) -> FirewallRuleResult:
         """
         Idempotently ensure a jump rule exists from a standard chain to a custom chain.
 
@@ -502,7 +541,7 @@ class IPTablesTracker:
             position: Position to insert the rule (1 = top). Default is 1.
 
         Returns:
-            IPTablesRuleResult with success status.
+            FirewallRuleResult with success status.
 
         """
         # Check if jump rule exists
@@ -517,7 +556,7 @@ class IPTablesTracker:
             logger.debug(
                 "Jump rule %s -> %s already exists", from_chain, to_chain
             )
-            return IPTablesRuleResult(success=True)
+            return FirewallRuleResult(success=True)
 
         # Insert jump rule at specified position
         cmd_insert = [
@@ -541,18 +580,58 @@ class IPTablesTracker:
                 to_chain,
                 position,
             )
-            return IPTablesRuleResult(success=True, command_executed=cmd_insert)
+            return FirewallRuleResult(
+                success=True,
+                command_executed=" ".join(cmd_insert) if cmd_insert else None,
+            )
         except ProcessError as e:
             error_msg = (
                 f"Failed to add jump rule {from_chain} -> {to_chain}: {e}"
             )
             logger.error(error_msg)
-            return IPTablesRuleResult(success=False, error_message=error_msg)
+            return FirewallRuleResult(success=False, error_message=error_msg)
+
+    def teardown(self) -> None:
+        """Remove all MVM iptables chains and their jump rules.
+
+        Best-effort — all subprocess calls use ``check=False`` so that
+        already-clean state is handled silently.
+        Always returns ``None``.
+        """
+        chains: list[tuple[FirewallChain, FirewallTable, str]] = [
+            (FirewallChain.MVM_FORWARD, FirewallTable.FILTER, "FORWARD"),
+            (FirewallChain.MVM_POSTROUTING, FirewallTable.NAT, "POSTROUTING"),
+            (FirewallChain.MVM_NOCLOUDNET_INPUT, FirewallTable.FILTER, "INPUT"),
+        ]
+        for chain_enum, table_enum, jump_from in chains:
+            chain_name = chain_enum.value
+            table = table_enum.value
+
+            # 1. Delete the jump rule from the parent chain
+            run_cmd(
+                ["iptables", "-t", table, "-D", jump_from, "-j", chain_name],
+                privileged=True,
+                check=False,
+            )
+
+            # 2. Flush the custom chain
+            run_cmd(
+                ["iptables", "-t", table, "-F", chain_name],
+                privileged=True,
+                check=False,
+            )
+
+            # 3. Delete the custom chain
+            run_cmd(
+                ["iptables", "-t", table, "-X", chain_name],
+                privileged=True,
+                check=False,
+            )
 
     def flush_chain(
         self,
-        chain_name: IPTablesChain,
-        table: IPTablesTable = IPTablesTable.FILTER,
+        chain_name: FirewallChain,
+        table: FirewallTable = FirewallTable.FILTER,
     ) -> bool:
         """
         Flush all rules from an iptables chain and mark them deleted in DB.
@@ -611,8 +690,8 @@ class IPTablesTracker:
 
     def remove_chain(
         self,
-        chain_name: IPTablesChain,
-        table: IPTablesTable = IPTablesTable.FILTER,
+        chain_name: FirewallChain,
+        table: FirewallTable = FirewallTable.FILTER,
     ) -> bool:
         """
         Delete an iptables chain and mark its rules as deleted in DB.
@@ -664,4 +743,4 @@ class IPTablesTracker:
         return True
 
 
-__all__ = ["IPTablesTracker", "IPTablesRuleResult"]
+__all__ = ["IPTablesTracker", "FirewallRuleResult"]

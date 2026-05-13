@@ -14,7 +14,7 @@ import pytest
 from mvmctl.api import NetworkCreateInput, NetworkInput, NetworkOperation
 from mvmctl.exceptions import MVMError, NetworkError, NetworkNotFoundError
 from mvmctl.models.network import (
-    IPTablesRuleItem,
+    FirewallRule,
     NetworkItem,
     NetworkLeaseItem,
 )
@@ -158,7 +158,7 @@ class TestNetworkLifecycleWorkflow:
             for lease in network.leases or []
         )
         assert network.iptables_rules is None or all(
-            isinstance(rule, IPTablesRuleItem)
+            isinstance(rule, FirewallRule)
             for rule in network.iptables_rules or []
         )
 

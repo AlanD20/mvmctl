@@ -14,7 +14,7 @@ def _complete_remote_image_ids(incomplete: str) -> list[str]:
     try:
         from mvmctl.api import ImageOperation
 
-        images = ImageOperation.list_(remote=True)
+        images = ImageOperation.list_(remote=True)  # type: ignore[attr-defined]
         results: list[str] = []
         for img in images:
             if (
@@ -34,7 +34,7 @@ def _complete_local_image_ids(incomplete: str) -> list[str]:
     try:
         from mvmctl.api import ImageOperation
 
-        images = ImageOperation.list_(remote=False)
+        images = ImageOperation.list_(remote=False)  # type: ignore[attr-defined]
         results: list[str] = []
         for img in images:
             if hasattr(img, "id") and img.id:
@@ -58,7 +58,7 @@ def _complete_vm_names(incomplete: str) -> list[str]:
     try:
         from mvmctl.api import VMInput, VMOperation
 
-        vms = VMOperation.list_all(VMInput())
+        vms = VMOperation.list_all(VMInput())  # type: ignore[attr-defined, operator]
         results: list[str] = []
         for vm in vms:
             if (
@@ -93,7 +93,7 @@ def _complete_network_names(incomplete: str) -> list[str]:
     try:
         from mvmctl.api import NetworkInput, NetworkOperation
 
-        networks = NetworkOperation.list_all(NetworkInput())
+        networks = NetworkOperation.list_all(NetworkInput())  # type: ignore[attr-defined, operator]
         results: list[str] = []
         for net in networks:
             if (
@@ -116,7 +116,7 @@ def _complete_kernel_ids(incomplete: str) -> list[str]:
     try:
         from mvmctl.api import KernelOperation
 
-        kernels = KernelOperation.list_all()
+        kernels = KernelOperation.list_all()  # type: ignore[attr-defined]
         results: list[str] = []
         for k in kernels:
             if k.type and k.version:
@@ -137,7 +137,7 @@ def _complete_binary_versions(incomplete: str) -> list[str]:
     try:
         from mvmctl.api import BinaryOperation
 
-        binaries = BinaryOperation.list_local()
+        binaries = BinaryOperation.list_local()  # type: ignore[attr-defined]
         results: list[str] = []
         for b in binaries:
             if (
@@ -160,7 +160,7 @@ def _complete_key_names(incomplete: str) -> list[str]:
     try:
         from mvmctl.api import KeyInput, KeyOperation
 
-        keys = KeyOperation.list_all(KeyInput())
+        keys = KeyOperation.list_all(KeyInput())  # type: ignore[attr-defined, operator]
         results: list[str] = []
         for k in keys:
             if (
@@ -193,7 +193,7 @@ def _complete_volume_names(incomplete: str) -> list[str]:
     try:
         from mvmctl.api import VolumeInput, VolumeOperation
 
-        volumes = VolumeOperation.list_(VolumeInput())
+        volumes = VolumeOperation.list_(VolumeInput())  # type: ignore[attr-defined, operator]
         results: list[str] = []
         for v in volumes:
             if (

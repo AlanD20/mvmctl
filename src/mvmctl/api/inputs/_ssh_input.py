@@ -77,6 +77,8 @@ class SSHRequest:
 
     def ensure_validate(self) -> None:
         """Validate resolved SSH parameters — caller validates, receiver trusts."""
+        if self._result is None:
+            raise SSHError("resolve() must be called before validation")
 
         if not NetworkValidator.is_ip_address(self._result.target_ip):
             raise SSHError(f"Invalid IP address: {self._result.target_ip}")

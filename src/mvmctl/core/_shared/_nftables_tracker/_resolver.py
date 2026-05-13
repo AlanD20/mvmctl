@@ -1,26 +1,28 @@
-"""IPTables rule resolution helpers."""
+"""NFTables rule resolution helpers."""
 
 from __future__ import annotations
 
 from mvmctl.core._shared._enrichment import RelationEnricher, RelationSpec
-from mvmctl.core._shared._iptables_tracker import IPTablesRuleRepository
+from mvmctl.core._shared._nftables_tracker._repository import (
+    NFTablesRuleRepository,
+)
 from mvmctl.models import FirewallRule
 
-__all__ = ["IPTablesRuleResolver"]
+__all__ = ["NFTablesRuleResolver"]
 
 
-class IPTablesRuleResolver:
-    """Resolver for iptables rules."""
+class NFTablesRuleResolver:
+    """Resolver for nftables rules."""
 
     RELATIONS: dict[str, RelationSpec] = {}
 
     def __init__(
         self,
-        repo: IPTablesRuleRepository | None = None,
+        repo: NFTablesRuleRepository | None = None,
         *,
         include: list[str] | None = None,
     ) -> None:
-        self._repo = repo if repo is not None else IPTablesRuleRepository()
+        self._repo = repo if repo is not None else NFTablesRuleRepository()
         self._include = include
 
     def _enrich(self, rules: list[FirewallRule]) -> list[FirewallRule]:
@@ -30,14 +32,14 @@ class IPTablesRuleResolver:
         return rules
 
     def list_by_network_id(self, network_id: str) -> list[FirewallRule]:
-        """List all iptables rules for a network."""
+        """List all nftables rules for a network."""
         rules = self._repo.list_by_network_id(network_id)
         return self._enrich(rules)
 
     def list_by_network_id_batch(
         self, network_ids: list[str]
     ) -> dict[str, list[FirewallRule]]:
-        """Batch-resolve iptables rules by network IDs."""
+        """Batch-resolve nftables rules by network IDs."""
         rules = self._repo.list_by_network_id_batch(network_ids)
         results: dict[str, list[FirewallRule]] = {
             nid: [] for nid in network_ids
@@ -55,11 +57,11 @@ class IPTablesRuleResolver:
         return self._enrich([rule])[0]
 
     def list_all(self) -> list[FirewallRule]:
-        """List all iptables rules."""
+        """List all nftables rules."""
         rules = self._repo.list_all()
         return self._enrich(rules)
 
 
 from mvmctl.core._shared._resolver_registry import register  # noqa: E402
 
-register("iptables_rule", lambda: IPTablesRuleResolver)
+register("nftables_rule", lambda: NFTablesRuleResolver)
