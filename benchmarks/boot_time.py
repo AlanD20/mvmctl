@@ -198,7 +198,7 @@ def bench_image(cfg: ImageBenchConfig, *, kernel_id: str | None = None) -> dict:
                 r = _mvm(
                     "ssh",
                     vm_name,
-                    "-c",
+                    "--cmd",
                     "echo OK",
                     timeout=SSH_SUBPROCESS_TIMEOUT,
                 )

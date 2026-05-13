@@ -125,34 +125,29 @@ class TestCloudInitProvisioner:
         provision_config.mode = CloudInitMode.NET
         provision_config.nocloud_net_port = 8080
 
-        with (
-            patch(
-                "mvmctl.core.cloudinit._manager.CloudInitManager"
-            ) as mock_mgr_cls,
-            patch(
-                "mvmctl.services.nocloud_server.manager.NoCloudNetServerManager"
-            ) as mock_srv_cls,
-            patch(
-                "mvmctl.core._shared._iptables_tracker._tracker.IPTablesTracker"
-            ),
-            patch(
-                "mvmctl.core._shared._iptables_tracker._repository.IPTablesRuleRepository"
-            ),
-        ):
+        with patch(
+            "mvmctl.core.cloudinit._manager.CloudInitManager"
+        ) as mock_mgr_cls:
             mock_mgr = MagicMock()
             mock_mgr_cls.return_value = mock_mgr
 
-            mock_srv = MagicMock()
-            mock_srv.start.return_value = ("http://10.0.0.1:8080", 8080, 12345)
-            mock_srv_cls.return_value = mock_srv
-
             provisioner = CloudInitProvisioner(provision_config)
-            result = provisioner.provision()
+            with patch.object(
+                provisioner,
+                "_provision_net",
+                return_value=MagicMock(
+                    mode=CloudInitMode.NET,
+                    nocloud_port=8080,
+                    nocloud_url="http://10.0.0.1:8080",
+                    nocloud_pid=12345,
+                ),
+            ):
+                result = provisioner.provision()
 
-            assert result.mode == CloudInitMode.NET
-            assert result.nocloud_port == 8080
-            assert result.nocloud_url == "http://10.0.0.1:8080"
-            assert result.nocloud_pid == 12345
+                assert result.mode == CloudInitMode.NET
+                assert result.nocloud_port == 8080
+                assert result.nocloud_url == "http://10.0.0.1:8080"
+                assert result.nocloud_pid == 12345
 
     def test_custom_iso_path_resolved(
         self, provision_config: CloudInitProvisionConfig
