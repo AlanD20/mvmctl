@@ -218,9 +218,8 @@ defaults.kernel:        Default kernel version, architecture, build_jobs
 defaults.firecracker:   Log filenames, socket filenames, log level
 defaults.cloudinit:     ISO name, nocloud-net port range
 defaults.binary:        Remote version limit for bin ls
-settings:               General settings
+settings:               General settings (guestfs_enabled, firewall_backend)
 settings.vm:            Log lines, log follow, max_vms
-settings:               Guestfs enabled flag
 ```
 
 Additional (non-dict) constants are defined inline for HTTP timeouts, URLs, file permissions,
@@ -332,6 +331,7 @@ the constants relevant to asset management.
 | `HTTP_TIMEOUT_KERNEL_DOWNLOAD_S` (standalone constant) | `constants.py` (HTTP / download) | Timeout (seconds) for kernel tarball download |
 | `HTTP_TIMEOUT_KERNEL_CONFIG_S` (standalone constant) | `constants.py` (HTTP / download) | Timeout for kernel config download |
 | `HTTP_TIMEOUT_SHA256_FETCH_S` (standalone constant) | `constants.py` (HTTP / download) | Timeout for SHA-256 checksum fetch |
+| `HTTP_TIMEOUT_SHA256_SIDECAR_S` (standalone constant) | `constants.py` (HTTP / download) | Timeout for SHA-256 sidecar checksum fetch |
 | `FIRECRACKER_GITHUB_RELEASES_API_URL` (standalone constant) | `constants.py` (HTTP / download) | GitHub API endpoint for Firecracker releases |
 | `FIRECRACKER_GITHUB_DOWNLOAD_URL` (standalone constant) | `constants.py` (HTTP / download) | Base URL for Firecracker release assets |
 

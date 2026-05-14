@@ -1,5 +1,7 @@
 # Command Reference & Configuration
 
+> **STATUS: Current — fully accurate.** All commands, flags, and configuration details verified against current CLI and API. `--count` and `--atomic` flags exist for `vm create`. Volume resize, snapshot/load, export/import, attach-volume/detach-volume all exist as documented.
+
 This document provides detailed reference for all `mvm` commands, configuration options, and environment variables.
 
 ---

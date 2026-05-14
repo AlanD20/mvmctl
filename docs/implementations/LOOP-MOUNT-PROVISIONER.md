@@ -1,3 +1,5 @@
+> **STATUS: Current — fully accurate.** All paths, patterns, and architecture described match the current codebase. The loop-mount binary lives at `src/mvmctl/services/loopmount/process.py`, manager at `core/_shared/_loopmount/_manager.py`, and backend at `core/_shared/_provisioner/_backend.py`.
+
 # Service Binaries & Loop-Mount Provisioner
 
 ## Problem

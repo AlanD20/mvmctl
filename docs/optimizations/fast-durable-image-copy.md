@@ -1,8 +1,8 @@
 # Fast Durable Image Copy for microVMs
 
-> **Status: ✅ IMPLEMENTED** — All optimizations described here are fully implemented in the current codebase.
-> 
-> See `src/mvmctl/core/image/_service.py` method `materialize_to()` for the actual implementation.
+> **STATUS: Current — fully accurate.** All optimizations (reflink, sparse, fdatasync) confirmed in `materialize_to()` at `src/mvmctl/core/image/_service.py:427`.
+>
+> **Note:** Line numbers in code references below have been updated to match the current file (earlier docs referenced pre-427 lines).
 
 ## Overview
 
@@ -29,19 +29,19 @@ Three optimizations work together:
 
 `cp --reflink=auto` creates an instant CoW clone on btrfs/XFS filesystems — no actual data is written, only metadata. On non-CoW filesystems (ext4), it silently falls back to a regular copy.
 
-**Code reference:** `src/mvmctl/core/image/_service.py` line 443: `"--reflink=auto"`
+**Code reference:** `src/mvmctl/core/image/_service.py` line 458: `"--reflink=auto"`
 
 ### 2. Sparse Detection ✅ IMPLEMENTED
 
 `--sparse=always` uses `lseek(SEEK_HOLE/SEEK_DATA)` to detect zero-filled regions and skips writing them. A 2 GB rootfs with 400 MB of actual data writes 400 MB, not 2 GB. This gives **2–5× speedup** on sparse images, which is typical for freshly decompressed ext4 rootfs images.
 
-**Code reference:** `src/mvmctl/core/image/_service.py` line 444: `"--sparse=always"`
+**Code reference:** `src/mvmctl/core/image/_service.py` line 459: `"--sparse=always"`
 
 ### 3. Durability via fdatasync ✅ IMPLEMENTED
 
 After the copy, `os.fdatasync()` flushes file data and critical metadata (file size) to disk, but skips non-critical metadata (mtime/atime/ctime). This is **~10–30% faster** than `fsync()` for new files.
 
-**Code reference:** `src/mvmctl/core/image/_service.py` line 453: `os.fdatasync(f.fileno())`
+**Code reference:** `src/mvmctl/core/image/_service.py` line 468: `os.fdatasync(f.fileno())`
 
 **Why `fdatasync()` and not `fsync()`?**
 
@@ -56,7 +56,7 @@ For a VM rootfs image, the data must survive a crash. The file's mtime doesn't m
 
 If `cp` fails entirely (binary missing, disk full, etc.), the fallback is `dd conv=sparse,fsync` to preserve holes and ensure durability, instead of falling back to `shutil.copy2` which writes all bytes including zeros.
 
-**Code reference:** `src/mvmctl/core/image/_service.py` line 450: `self._copy_with_dd(cached_path, output_path, sparse=True)`
+**Code reference:** `src/mvmctl/core/image/_service.py` line 465: `self._copy_with_dd(cached_path, output_path, sparse=True)` (actual `_copy_with_dd` method at line 959)
 
 ## Performance Characteristics
 

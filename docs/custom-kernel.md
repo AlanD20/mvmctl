@@ -1,5 +1,7 @@
 # Building a Custom Kernel for Firecracker
 
+> **STATUS: Partially outdated** — The "Verifying Required Settings" section describes an interactive user prompt ("Proceed with build anyway?") that does not exist. The actual code (`core/kernel/_service.py:620-624`) returns a `KernelConfigResult` with `success=False` and warnings but no interactive prompt. All other content is accurate.
+
 This guide covers how to build a custom Linux kernel optimised for Firecracker microVMs,
 either from the pre-configured Firecracker CI kernel or from upstream kernel sources.
 
@@ -187,15 +189,15 @@ mvm kernel pull --type official \
 After building, `mvm` verifies that all required kernel settings are present. The required
 settings are defined under `required_settings` in `src/mvmctl/assets/kernels.yaml` for the `kernel-official` entry.
 
-If a required setting is missing, you will be prompted:
+If a required setting is missing, a warning is logged and the build continues (the
+`KernelConfigResult` has `success=False` but the pipeline does not abort). The missing
+settings are collected and returned as warnings in the final result:
 
 ```
 Required kernel settings missing: CONFIG_VIRTIO_BLK, CONFIG_VIRTIO_NET
-Proceed with build anyway? (missing settings may affect VM stability) [y/N]:
 ```
 
-Answering `N` aborts the build. Answering `Y` continues but the kernel may not work
-correctly with Firecracker.
+**Code reference:** `src/mvmctl/core/kernel/_service.py` lines 616-624
 
 ---
 

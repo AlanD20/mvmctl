@@ -166,7 +166,7 @@ Mandatory for any domain that has public CLI commands or API endpoints. No short
 *Example: `VMInput` (raw name/id/IP/MAC) -> `VMRequest(db).resolve()` (resolves to DB records, validates) -> `ResolvedVMInput` (frozen, all fields explicit, `vms: list[VMInstanceItem]`).*
 
 ### SQLite schema overview
-12 tables in `migrations/001_initial_schema.sql`: `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_leases`, `vm_instances`, `host_state`, `host_state_changes`, `iptables_rules`, `ssh_keys`, `user_settings`. Each asset table has `is_default INTEGER` for default tracking. Foreign keys link VMs to assets and networks. Key constraints: `networks(name)` UNIQUE, `vm_instances(name)` UNIQUE, `ssh_keys(name)` UNIQUE, `volumes(name)` UNIQUE, `network_leases(network_id, ipv4)` UNIQUE composite. Foreign keys enabled via `PRAGMA foreign_keys = ON`.
+13 tables in `migrations/001_initial_schema.sql`: `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_leases`, `vm_instances`, `host_state`, `host_state_changes`, `iptables_rules`, `nftables_rules`, `ssh_keys`, `user_settings`. Each asset table has `is_default INTEGER` for default tracking. Foreign keys link VMs to assets and networks. Key constraints: `networks(name)` UNIQUE, `vm_instances(name)` UNIQUE, `ssh_keys(name)` UNIQUE, `volumes(name)` UNIQUE, `network_leases(network_id, ipv4)` UNIQUE composite. Foreign keys enabled via `PRAGMA foreign_keys = ON`.
 
 **Portable reference fields** (used for export/import across environments -- never internal SHA256 IDs):
 - Images: `(os_slug, arch)` -- unique identifier across environments
@@ -375,7 +375,7 @@ The centralized runner provides: consistent logging (`logger.debug` of the comma
 - "What level of CLI coverage is required" was ambiguous -- resolved: **gap matrix must be zero**. Every CLI subcommand and every flag on every command must have a system test covering both happy path and error edge cases. Any untested command or flag is a blocking release risk.
 - "Who owns tests/" was ambiguous -- resolved: **QA engineer agent** is the sole owner and operator of `tests/`. The engineer agent is strictly forbidden from touching any file under `tests/` at any cost (read, write, edit, create, delete, rename, patch). The only legitimate interaction with tests/ from the engineer agent is running `uv run pytest` when explicitly asked.
 - "Where does context live" -- resolved: **Single root AGENTS.md** is the only AGENTS.md in the project. Per-folder AGENTS.md files are deleted -- they caused agents to skip the root file and miss CONTEXT.md + ADRs. All domain language lives in `CONTEXT.md`. All hard-to-reverse architectural decisions live in `docs/adr/`. The root AGENTS.md is a short pointer to these two files.
-- "What about expensive/infrequent tests" -- resolved: two **exclusive markers** added. `pytest.mark.kernel_build` for kernel build-from-source tests (10+ min, needs gcc/make). `pytest.mark.host_reset` for host clean/reset with sudo (modifies real system state). Both excluded from default `pytest tests/system/` runs. Invoke explicitly with `-m kernel_build` or `-m host_reset`.
+- "What about expensive/infrequent tests" -- resolved: two **exclusive markers** added. `pytest.mark.kernel_build` for kernel build-from-source tests (10+ min, needs gcc/make). `pytest.mark.host_reset` for host clean/reset with sudo (modifies real system state). Both excluded from default `uv run scripts/run_tests.py --system` runs. Invoke explicitly with `-m kernel_build` or `-m host_reset`.
 - "What about parallel test safety" -- resolved: every test that modifies shared state (defaults, cache, assets, binaries, kernels) must be marked `pytest.mark.serial` to prevent xdist race conditions.
 - "How do system tests handle sudo operations" -- resolved: `sudo` is allowed for `mvm init`, `mvm host init`, `mvm host clean`, and `mvm host reset`. Use the built binary at `~/.local/bin/mvm` for sudo operations. The QA engineer agent has explicit sudo permission for these four command patterns.
 - "What is the release gate" -- resolved: the release gate is **system tests passing against `dist/mvm`**. Before reporting release ready, the QA engineer must: (1) build `dist/mvm` via `scripts/build_services.py --fast`, (2) copy to `~/.local/bin/mvm`, (3) run all system tests against the binary, (4) report pass/fail status.
@@ -394,12 +394,18 @@ Mocks subprocess calls only (via `SmartSubprocessMock` in integration conftest).
 Black-box CLI subprocess tests (no mocking, no imports from `mvmctl`). Operates against the real system -- real kernel, images, binaries, bridges, SQLite DB at `~/.cache/mvmctl/mvmdb.db`. Verifies actual business outcomes at the OS level: JSON state, filesystem state, process state, iptables state. Runs in `tests/system/`. The primary release gate -- a domain is NOT production-ready until its system tests pass on real hardware.
 
 **Execution strategy -- MUST run per-file, never as a single batch:**
-System tests are expensive and stateful. Running `pytest tests/system/` as a single invocation is UNDEFINED behavior -- the `prepare_system_env` session fixture pulls large assets (images, kernels, binaries) and the tests leave real system state (bridges, iptables rules, VMs) that pollutes subsequent test files. Instead, run each file individually:
+System tests are expensive and stateful. Running all files via `uv run scripts/run_tests.py --system` as a single invocation is UNDEFINED behavior -- the `prepare_system_env` session fixture pulls large assets (images, kernels, binaries) and the tests leave real system state (bridges, iptables rules, VMs) that pollutes subsequent test files. Instead, run per-domain or per-file:
 
 ```bash
-pytest tests/system/test_network.py -n 0
+# Per-domain (recommended):
+uv run scripts/run_tests.py --system --domain network
+uv run scripts/run_tests.py --system --domain vm
+
+# Per-file:
+uv run scripts/run_tests.py --system --test tests/system/network/test_network.py
+
+# Raw pytest (fallback for single files):
 pytest tests/system/test_vm_lifecycle.py -n 0
-# etc.
 ```
 
 Running individual test classes (not full files) within a file is also safe, provided the class is self-contained with its own fixture setup/teardown. Cross-file test ordering dependencies MUST NOT be assumed -- each file must be independently runnable.

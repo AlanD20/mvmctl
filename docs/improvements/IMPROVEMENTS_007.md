@@ -1,11 +1,12 @@
 # nftables for iptables at scale
 
-> ## Status: ❌ NOT IMPLEMENTED
+> ## STATUS: Partially outdated
 >
-> The `_iptables_tracker/` module only supports `iptables` CLI subprocess calls. No nftables backend exists.
-> No abstract firewall backend interface has been defined.
+> The nftables migration is now **implemented**. `core/_shared/_nftables_tracker/` provides a full `NFTablesTracker`. `core/_shared/_firewall_tracker.py` provides the abstract `FirewallTracker` that delegates to either backend. Default `firewall_backend` is `"nftables"`.
 >
-> **Last verified:** 2026-05-13
+> The content below (problem analysis, architecture) remains relevant for understanding the migration that was completed.
+>
+> **Last verified:** 2026-05-14
 
 **Phase:** Standalone — when iptables becomes a bottleneck
 **Complexity:** High

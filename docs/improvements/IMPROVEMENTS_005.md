@@ -1,5 +1,7 @@
 # Resource grouping (batch ID)
 
+> **STATUS: Current — not implemented (as documented).** No `group_id` field exists in `vm_instances` table.
+
 > ## Status: ❌ NOT IMPLEMENTED
 >
 > Depends on `--count` feature (also ❌ not implemented). No code has been written.

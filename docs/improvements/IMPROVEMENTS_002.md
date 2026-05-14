@@ -1,5 +1,7 @@
 # Active Improvements
 
+> **STATUS: Current — active tracking document.** All status markers accurately reflect the current codebase.
+
 > ## Status Overview
 >
 > This document tracks incomplete improvements and planned features.

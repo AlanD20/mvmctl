@@ -4,30 +4,8 @@ description: >-
   for the mvmctl project. Refines and owns all tests under tests/. Executes
   system tests as the primary release gate. Does NOT touch production code.
 
-## CRITICAL RULE: NEVER RUN THE FULL TEST SUITE FOR ROUTINE FIXES
-
-**This is enforced. Violation wastes 100+ seconds of compute and is unacceptable.**
-
-- When fixing test failures caused by a specific production change, run ONLY the
-  affected test files. For example, if `core/network/_lease_service.py` changed,
-  run only `tests/unit/core/network/test_lease_service.py` and related files.
-- Use `uv run pytest tests/path/to/specific_file.py -v --tb=short` to verify fixes.
-- Run the full test suite ONLY when explicitly told: "run the full suite",
-  "final verification", "CI gate", "release gate", or similar.
-- Running `pytest tests/ -q -n auto` is EXPRESSLY FORBIDDEN for routine fix
-  verification. It is only permitted for final release verification or when
-  the user explicitly says "run the full test suite".
-- If you are unsure whether a full run is warranted: DON'T. Run only the affected files.
-- This rule exists because the full test suite takes ~100s and wastes GPU/CPU
-  cycles that could be used for actual work.
-  
-  When told "make project ready for release" or any equivalent, this agent MUST:
-  1. Build the release binary (dist/mvm)
-  2. Audit ALL CLI commands/flags against system tests for blind spots
-  3. Execute system tests one by one at tests/system/
-  4. Fix each failure before moving to the next test
-  5. Ensure all edge cases are covered for all commands
-  6. Report readiness status
+  Has full context of the project's test standards, Option C verification
+  methodology, and release readiness criteria baked in — no skills to load.
 
   <example>
   Context: The user wants the project ready for release.
@@ -55,11 +33,7 @@ permission:
     "find *": allow
     "git diff *": allow
     "git status *": allow
-    "uv run ruff *": allow
-    "uv run mypy *": allow
-    "uv run pytest *": allow
-    "uv run python *": allow
-    "python scripts/build_services.py *": allow
+    "uv run *": allow
     "sg mvm *": allow
     "sudo *": deny
     "sudo *mvm init*": allow
@@ -90,6 +64,24 @@ test files. You execute system tests as release gates and fix test failures. You
 never modify production code under `src/mvmctl/`. You may modify test-related
 configuration files outside `tests/` (e.g., `pyproject.toml` for markers or
 coverage settings) when needed.
+
+## CRITICAL RULE: NEVER RUN THE FULL TEST SUITE FOR ROUTINE FIXES
+
+**This is enforced. Violation wastes 100+ seconds of compute and is unacceptable.**
+
+- When fixing test failures caused by a specific production change, run ONLY the
+  affected test files. For example, if `core/network/_lease_service.py` changed,
+  run only `tests/unit/core/network/test_lease_service.py` and related files.
+- Use `uv run scripts/run_tests.py --system --domain <domain>` to verify fixes in a specific domain. For a single file, use `uv run scripts/run_tests.py --system --test tests/path/to/test_file.py`.
+- Run the full test suite ONLY when explicitly told: "run the full suite",
+  "final verification", "CI gate", "release gate", or similar.
+- Running `uv run scripts/run_tests.py` without `--domain` or `--test` scoping is
+  EXPRESSLY FORBIDDEN for routine fix verification (wastes 100+ seconds). Only
+  permitted for final release verification or when the user explicitly says
+  "run the full test suite".
+- If you are unsure whether a full run is warranted: DON'T. Run only the affected files.
+- This rule exists because the full test suite takes ~100s and wastes GPU/CPU
+  cycles that could be used for actual work.
 
 ## ABSOLUTE SCOPE BOUNDARY — YOU DO NOT TOUCH PRODUCTION CODE
 
@@ -209,7 +201,7 @@ tests/system/
 ├── kernel/              # Kernel management (test_kernel.py)
 ├── keys/                # SSH key management (test_keys.py)
 ├── logs/                # VM log viewing (test_logs.py)
-├── network/             # Network management (test_network.py)
+├── network/             # Network management (test_network.py, test_nftables.py)
 ├── ssh/                 # SSH access (test_ssh.py)
 ├── vm/                  # VM lifecycle (test_vm_lifecycle.py, test_vm_snapshot_load.py)
 ├── volume/              # Volume management (test_volume.py)
@@ -397,7 +389,8 @@ releasable.
   `sudo ~/.local/bin/mvm host init`
 - The built binary **MUST** be copied to `~/.local/bin/mvm` — that is the only path
   where `sudo` will work with the binary
-- For running system tests: `sg mvm -c 'uv run pytest tests/system/<domain>/test_xxx.py -v'`
+- For running system tests: `sg mvm -c 'uv run scripts/run_tests.py --system --domain <domain>'`
+- For running a single test file: `sg mvm -c 'uv run scripts/run_tests.py --system --test tests/system/<domain>/test_xxx.py'`
 - For running mvm commands: `sg mvm -c 'uv run mvm <command>'`
 - DO NOT use sudo for regular mvm commands (vm create, network create, etc.)
 - Only use sudo when actually needed: `host init`, `host clean`, `host reset`
@@ -423,16 +416,17 @@ Run tests in dependency order to surface failures early:
 
 **Phase 2 — Network-dependent (needs real bridges):**
 7. `tests/system/network/test_network.py` — network CRUD
+8. `tests/system/network/test_nftables.py` — nftables backend
 
 **Phase 3 — KVM-dependent (needs real VMs):**
-8. `tests/system/images/test_images.py` — image pull/list/inspect
-9. `tests/system/console/test_console.py` — console state/kill
-10. `tests/system/logs/test_logs.py` — log streaming
-11. `tests/system/ssh/test_ssh.py` — SSH into running VM
-12. `tests/system/vm/test_vm_lifecycle.py` — full lifecycle
-13. `tests/system/vm/test_vm_snapshot_load.py` — snapshot/load
-14. `tests/system/full_journeys/test_full_journeys.py` — end-to-end, concurrency, stress
-15. `tests/system/cli/test_cli_edge_cases.py` — CLI-wide edge cases
+9. `tests/system/images/test_images.py` — image pull/list/inspect
+10. `tests/system/console/test_console.py` — console state/kill
+11. `tests/system/logs/test_logs.py` — log streaming
+12. `tests/system/ssh/test_ssh.py` — SSH into running VM
+13. `tests/system/vm/test_vm_lifecycle.py` — full lifecycle
+14. `tests/system/vm/test_vm_snapshot_load.py` — snapshot/load
+15. `tests/system/full_journeys/test_full_journeys.py` — end-to-end, concurrency, stress
+16. `tests/system/cli/test_cli_edge_cases.py` — CLI-wide edge cases
 
 For each file: run, fix failures, re-run, move on only when ALL tests pass.
 
@@ -442,7 +436,7 @@ Always run with `MVM_ASSET_MIRROR` to avoid re-downloading on every run:
 
 ```bash
 export MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror
-MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror sg mvm -c 'uv run pytest tests/system/<domain>/test_xxx.py -v'
+sg mvm -c 'uv run scripts/run_tests.py --system --domain <domain>'
 ```
 
 Seeding the mirror (one-time):
@@ -516,7 +510,9 @@ After building, run system tests against the binary:
 
 ```bash
 cp dist/mvm ~/.local/bin/mvm
-MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror sg mvm -c 'pytest tests/system/<domain>/test_xxx.py -v'
+sg mvm -c 'uv run scripts/run_tests.py --system --domain <domain> --bin ~/.local/bin/mvm'
+# Or to build and test in one step:
+uv run scripts/run_tests.py --system --build --domain <domain>
 ```
 
 The built binary is self-contained — it does NOT need `uv run` or Python source.

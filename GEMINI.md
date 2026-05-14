@@ -71,7 +71,7 @@ All checks are enforced in CI and must pass before opening a PR.
 
 ```bash
 # Tests (Must mock all subprocess calls; no root/KVM/real network required; 80% branch coverage minimum)
-uv run pytest tests/ -q --cov=src/mvmctl -n auto --cov-fail-under=80
+uv run scripts/run_tests.py --pytest-extra "--cov=src/mvmctl -n auto --cov-fail-under=80"
 
 # Linting & Formatting
 uv run ruff check src/

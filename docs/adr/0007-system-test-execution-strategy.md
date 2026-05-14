@@ -4,7 +4,7 @@ System tests (`tests/system/`) are black-box CLI subprocess tests that operate a
 
 ## Context
 
-System tests are expensive and stateful. A single test file can take 30s–10m depending on the assets it needs (image downloads, kernel builds, VM boot time). Running all files in a single `pytest tests/system/` invocation causes:
+System tests are expensive and stateful. A single test file can take 30s–10m depending on the assets it needs (image downloads, kernel builds, VM boot time). Running all files in a single `uv run scripts/run_tests.py --system` invocation causes:
 
 1. **Session-scoped state sharing**: `prepare_system_env` (session-scoped per subdirectory) pulls assets once per session. If one file's test modifies shared state (default image, default network, cached binary), subsequent files inherit polluted state.
 2. **Cross-file state pollution**: A VM left running by `test_vm_lifecycle.py` causes `test_host.py::TestHostCleanSafety` to fail (host clean is blocked by running VMs). A removed binary in one file causes `test_bin.py` tests in the same session to fail.
@@ -15,12 +15,15 @@ System tests are expensive and stateful. A single test file can take 30s–10m d
 System tests MUST be executed **per-file**, never as a single batch:
 
 ```bash
-# Correct: per-file
-pytest tests/system/network/test_network.py -n 0
-pytest tests/system/vm/test_vm_lifecycle.py -n 0
+# Correct: per-file (via the test runner script)
+uv run scripts/run_tests.py --system --domain network
+uv run scripts/run_tests.py --system --domain vm
 
-# WRONG: undefined behavior, state pollution
-pytest tests/system/
+# Correct: single file (via --test flag)
+uv run scripts/run_tests.py --system --test tests/system/network/test_network.py
+
+# WRONG: undefined behavior, state pollution (running all system tests at once)
+uv run scripts/run_tests.py --system
 ```
 
 Running individual test classes (not full files) within a file is also safe, provided the class is self-contained with its own fixture setup/teardown.
@@ -42,7 +45,7 @@ Accepted.
 
 ## Consequences
 
-- **CI pipeline**: Must run system test files individually, collecting results from each. A dedicated CI step or orchestration script is required — a single `pytest tests/system/` call is forbidden. The `Taskfile.yml` implements this via phased execution (domain tests parallel, VM tests serial/parallel, cache cleanup last).
+- **CI pipeline**: Must run system test files individually, collecting results from each. A dedicated CI step or orchestration script is required — a single `uv run scripts/run_tests.py --system` call is forbidden. The `Taskfile.yml` implements this via phased execution (domain tests parallel, VM tests serial/parallel, cache cleanup last).
 - **Local development**: Developers run individual files relevant to their change. Running all files is done infrequently (pre-release).
 - **Faster feedback loop**: A single file failure doesn't block other files. Developers can fix one file and re-run it without re-running everything.
 - **Redundant downloads**: Each file independently verifies that required assets exist, with a small overhead (~0.5s per file for `kernel ls --json` + `image ls --json` + `bin ls --json`). This is acceptable for isolation.

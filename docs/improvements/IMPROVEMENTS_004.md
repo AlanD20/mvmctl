@@ -1,5 +1,7 @@
 # --from-volume: Full-disk boot from a volume
 
+> **STATUS: Current — not implemented (as documented).** No `--from-volume` code exists in the codebase.
+
 > ## Status: ❌ NOT IMPLEMENTED
 >
 > This feature depends on the volume domain (✅ completed). The integration wiring exists (volumes can be attached to VMs), but `--from-volume` as a replacement for `--image` + `--kernel` has NOT been implemented.

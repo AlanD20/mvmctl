@@ -1,6 +1,6 @@
 # Next-Level Optimization: Sub-100ms VM Creation
 
-> **Status: REFERENCE DOCUMENT** — This document catalogs forward-looking optimizations. Most are still pending implementation.
+> **STATUS: Partially outdated** — Section 4.3 (nftables migration) is now implemented. The `_nftables_tracker/` module and `FirewallTracker` abstraction at `core/_shared/_firewall_tracker.py` provide nftables support. Default firewall backend is `"nftables"`. All other sections remain accurate as forward-looking optimizations.
 > 
 > **Goal:** Reduce VM creation from ~3-10s (current) to <100ms for hot-pool VMs
 > and <500ms for cold-start VMs, enabling high-density microVM operations.
@@ -35,7 +35,7 @@ These are already implemented in the codebase and will NOT be covered here:
 | tmpfs ready pool (pre-decompress images to `/dev/shm`) ✅ | `core/image/_service.py` | [`fast-durable-image-copy.md`](fast-durable-image-copy.md) |
 | reflink + sparse copy with `fdatasync()` ✅ | `core/image/_service.py:materialize_to()` | [`fast-durable-image-copy.md`](fast-durable-image-copy.md) |
 | libguestfs: direct backend, `cachemode=writeback`, minimal vCPU/mem ✅ | `core/_shared/_provisioner/_backend.py` | [`guestfs_boot.md`](guestfs_boot.md) |
-| Fixed appliance, disabled recovery/autosync ✅ | `core/_shared/_guestfs/_base.py` | [`guestfs_boot.md`](guestfs_boot.md) |
+| Fixed appliance, disabled recovery/autosync ✅ | `core/_shared/_guestfs/_base.py`, `_service.py` | [`guestfs_boot.md`](guestfs_boot.md) |
 | Loop-mount backend (mvm-provision binary, faster than guestfs) ✅ | `core/_shared/_loopmount/` | — |
 | ThreadPoolExecutor for batch VM operations ✅ | `core/_shared/_parallel.py`, `core/vm/_service.py` | — |
 | Firecracker snapshot/resume API (create_snapshot, load_snapshot) ✅ | `core/vm/_firecracker.py` | — |
@@ -229,11 +229,11 @@ kernel-mediated file transfers.
 **Current approach:** The `cp` command with `--reflink=auto --sparse=always` is
 already well-optimized. This is only relevant for fallback paths.
 
-### 4.3 nftables Migration ⏳ NOT IMPLEMENTED
+### 4.3 nftables Migration ✅ IMPLEMENTED
 
-**What it is:** Replace `iptables` commands with `nft` (nftables) commands.
+**What it is:** Replaces `iptables` commands with `nft` (nftables) commands.
 
-**Status:** ❌ NOT IMPLEMENTED — The `_iptables_tracker/` module only supports `iptables`.
+**Status:** ✅ IMPLEMENTED — `core/_shared/_nftables_tracker/` provides a full NFTablesTracker implementation. `core/_shared/_firewall_tracker.py` abstracts both backends. The default `firewall_backend` in config is `"nftables"`.
 
 ### 4.4 Nuitka Compilation Optimization ✅ IMPLEMENTED
 
@@ -290,7 +290,7 @@ Rank │ Optimization                    │ Impact       │ Effort    │ Stat
   8  │ Network resource pre-creation   │ High          │ 1 week    │ ❌ Not done
   9  │ Custom minimal kernel           │ High          │ 1-2 weeks │ ❌ Not done
  10  │ Kernel boot params tuning       │ Medium        │ 1 hour    │ ⚠️ Partial
- 11  │ nftables migration              │ Medium        │ 3-5 days  │ ❌ Not done
+  11  │ nftables migration              │ Medium        │ 3-5 days  │ ✅ Done
  12  │ Nuitka optimization             │ Low           │ 1 day     │ ✅ Done
  13  │ os.posix_spawn()                │ Low-Medium    │ 1 day     │ ❌ Not done
  14  │ Pre-allocated resource pools    │ Low-Medium    │ 2-3 days  │ ❌ Not done

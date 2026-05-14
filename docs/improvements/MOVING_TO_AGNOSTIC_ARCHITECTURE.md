@@ -1,5 +1,7 @@
 # Moving to a VMM-Agnostic Architecture
 
+> **STATUS: Current — not implemented (as documented).** All 15 tracked components remain unstarted. Codebase is fully Firecracker-coupled.
+
 > ## ⚠️ NOT IMPLEMENTED — Design Proposal Only
 >
 > **Status:** This is a forward-looking design document. **None of the proposed changes have been implemented.**

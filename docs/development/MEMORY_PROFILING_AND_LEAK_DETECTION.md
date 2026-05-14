@@ -121,21 +121,30 @@ Flagged potential leaks (Peak > 500.0 MB):
 
 ```bash
 # Run only memory leak compliance tests
-uv run pytest tests/layer_compliance/test_memory_leak_patterns.py -v --no-cov
+uv run scripts/run_tests.py --compliance --pytest-extra "-v --no-cov -k test_memory_leak_patterns"
 
 # Run all layer compliance tests (includes imports, constants, startup time, etc.)
-uv run pytest tests/layer_compliance/ -v --no-cov
+uv run scripts/run_tests.py --compliance --pytest-extra "-v --no-cov"
 ```
 
 #### Adding Allowlist Entries
 
-If a violation is a false positive (legitimate infinite loop in a daemon, etc.), add the file path to the appropriate allowlist in the test with a documented justification:
+If a violation is a false positive (legitimate infinite loop in a daemon, etc.), add the file path to the appropriate category allowlist in the test with a documented justification:
 
 ```python
-ALLOWLIST_INFINITE_LOOPS: dict[str, str] = {
-    "src/mvmctl/core/logs/_service.py": "Log-following generator — cooperative termination via yield",
+CATEGORY_1_ALLOWLIST: dict[str, str] = {
+    "src/mvmctl/core/logs/_service.py": (
+        "Log-following generator intentionally runs until the consumer closes it. "
+        "yield statement provides cooperative termination."
+    ),
 }
 ```
+
+The four category allowlists map to the detection classes above:
+- `CATEGORY_1_ALLOWLIST` — Infinite Loops
+- `CATEGORY_2_ALLOWLIST` — Unbounded Accumulation
+- `CATEGORY_3_ALLOWLIST` — Resource Leaks
+- `CATEGORY_4_ALLOWLIST` — Mock Abuse
 
 > **Note:** Allowlists are documentation. Don't add entries to silence failures — fix the underlying pattern or justify why it's safe.
 
@@ -148,7 +157,7 @@ Step-by-step guide:
 1. **Run the compliance test first** (fast, catches obvious patterns):
 
    ```bash
-   uv run pytest tests/layer_compliance/test_memory_leak_patterns.py -v --no-cov
+   uv run scripts/run_tests.py --compliance --pytest-extra "-v --no-cov"
    ```
 
 2. **If compliance passes, use the profiler to isolate the leak:**
@@ -174,7 +183,7 @@ Step-by-step guide:
    uv run python scripts/profile_test_memory.py <test_id> --level test --threshold-mb 200
 
    # Re-run compliance to ensure no new patterns were introduced
-   uv run pytest tests/layer_compliance/test_memory_leak_patterns.py -v --no-cov
+   uv run scripts/run_tests.py --compliance --pytest-extra "-v --no-cov"
    ```
 
 ---

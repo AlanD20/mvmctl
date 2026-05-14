@@ -365,8 +365,9 @@ The loop-mount backend is the default and preferred path. GuestFS is only used a
 All service binaries are compiled into a single `mvm-services` binary via Nuitka's multidist feature:
 
 ```bash
-python scripts/build_services.py --release --fast   # Development build
-python scripts/build_services.py --release --optimize  # Release build
+python scripts/build_services.py                    # Build everything (release, default)
+python scripts/build_services.py --fast             # Development build — minimal flags, no optimization
+python scripts/build_services.py --release          # Release build — Nuitka with LTO, tree-shaking, minimal size
 ```
 
 The build script creates temporary symlinks in `build/symlinks/` (since all three sources are named `process.py`) and compiles them into a single `mvm-services` binary. The main `mvm` binary embeds this via `--include-data-dir`.

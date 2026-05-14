@@ -1,3 +1,5 @@
+> **STATUS: Current — general reference guide.** This is a Firecracker vsock/PTY tutorial, not a codebase-specific document. The patterns described match how mvmctl's console relay works. No changes needed.
+
 # Firecracker PTY-over-Vsock Bridge Implementation Guide
 
 ## Overview

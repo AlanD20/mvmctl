@@ -37,22 +37,22 @@ Each file MUST be run individually. See [ADR 0007](/docs/adr/0007-system-test-ex
 
 ```bash
 # Run system tests via the unified test runner (default source mode):
-uv run python scripts/run_tests.py --system
+uv run scripts/run_tests.py --system
 
 # Build a onefile binary first, then run (faster, sudo handled internally):
-uv run python scripts/run_tests.py --system --build
+uv run scripts/run_tests.py --system --build
 
 # Run a specific domain:
-uv run python scripts/run_tests.py --system --domain vm
+uv run scripts/run_tests.py --system --domain vm
 
 # Re-run only previously failed tests:
-uv run python scripts/run_tests.py --system --failed-only
+uv run scripts/run_tests.py --system --failed-only
 
 # Use a specific binary (skips build):
-uv run python scripts/run_tests.py --system --bin /path/to/mvm
+uv run scripts/run_tests.py --system --bin /path/to/mvm
 
 # Run all three levels (unit, integration, system):
-uv run python scripts/run_tests.py
+uv run scripts/run_tests.py
 ```
 
 The script:
@@ -65,6 +65,10 @@ The script:
 
 ```bash
 # Test files are organized per-domain under tests/system/{domain}/
+# Using the script:
+uv run scripts/run_tests.py --system --test tests/system/network/test_network.py
+
+# Or directly with pytest (fallback):
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror MVM_BINARY=dist/mvm \
   uv run pytest tests/system/network/test_network.py -n 0
 ```
@@ -87,14 +91,17 @@ MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror MVM_BINARY=dist/mvm \
 MUST run **per-file**, never as a single batch. Use the script:
 
 ```bash
-uv run python scripts/run_tests.py --system
-uv run python scripts/run_tests.py --system --build       # with built binary
-uv run python scripts/run_tests.py --system --failed-only  # re-run failures
+uv run scripts/run_tests.py --system
+uv run scripts/run_tests.py --system --build       # with built binary
+uv run scripts/run_tests.py --system --failed-only  # re-run failures
 ```
 
-The `prepare_system_env` session fixture automatically pulls missing assets
-per-file. The `MVM_BINARY` env var selects the binary (default: `uv run mvm`).
-The `MVM_ASSET_MIRROR` env var enables cached asset copies.
+Domain-level `prepare_system_env` session fixtures verify prerequisites (KVM,
+mvm group, mvmctl initialization). VM creation helpers (`ensure_vm_deps()`)
+pull missing assets (kernel, image, binary) as needed — the session fixture
+only skips if prerequisites are not met. The `MVM_BINARY` env var selects the
+binary (default: `uv run mvm`). The `MVM_ASSET_MIRROR` env var enables cached
+asset copies.
 
 ### Without vs with built binary
 

@@ -28,7 +28,7 @@ Individual agent instructions live in `.opencode/agent/`:
 uv sync --group dev
 uv run ruff check src/ && uv run ruff format --check src/
 uv run mypy src/
-uv run pytest tests/ -q -n auto -x
+uv run scripts/run_tests.py --ci
 ```
 
 ## Critical rules (violation = critical failure)

@@ -1,6 +1,6 @@
 # libguestfs Boot Time Optimizations
 
-> **Status: ✅ IMPLEMENTED** — All optimizations described here are implemented in the codebase.
+> **STATUS: Partially outdated** — Items #8 and #9 marked ⏳ PENDING in the original doc are now implemented.
 >
 > Implementation location: `src/mvmctl/core/_shared/_guestfs/_base.py`
 >
@@ -106,13 +106,17 @@ g.add_drive(rootfs_path, readonly=False, format="raw", cachemode="writeback")
 
 **Code reference:** `src/mvmctl/core/_shared/_guestfs/_base.py` line 92
 
-### 8. Appliance Cache in RAM (Environment Variable)
+### 8. Appliance Cache in RAM (Environment Variable) ✅ IMPLEMENTED
 
-**Status: ⏳ PENDING** — Not currently implemented. The `LIBGUESTFS_CACHEDIR` environment variable is saved/restored but `/dev/shm` is not explicitly set.
+The `LIBGUESTFS_CACHEDIR` environment variable is set to `/dev/shm` when available, reducing appliance load time by using tmpfs.
 
+**Implementation:**
 ```python
-os.environ["LIBGUESTFS_CACHEDIR"] = "/dev/shm"
+if Path("/dev/shm").exists():
+    os.environ["LIBGUESTFS_CACHEDIR"] = "/dev/shm"
 ```
+
+**Code reference:** `src/mvmctl/core/_shared/_guestfs/_base.py` lines 47-48
 
 ### 9. Disable QEMU File Locking (Environment Variable) ✅ IMPLEMENTED
 
@@ -123,20 +127,18 @@ Setting `QEMU_LOCKING=off` disables this locking mechanism. This is safe in mvmc
 - The ready pool image is effectively read-only after creation
 - No concurrent writers or shared storage scenarios exist
 
-**Code reference:** Handled implicitly by the guestfs environment setup (not explicitly set as env var, but QEMU lock contention is avoided by the copy-per-VM pattern).
-
-### 10. Fixed Appliance (Environment Variable)
-
-**Status: ⏳ PENDING** — Not currently implemented as an automatic optimization. The `mvm cache init` flow does not yet pre-build a fixed appliance. This is set up by the user manually if desired.
-
-```bash
-# First, create the fixed appliance once: this is performed by mvm cache init
-mkdir -p $MVM_CACHE_DIR/appliance
-libguestfs-make-fixed-appliance $MVM_CACHE_DIR/appliance
-
-# Then, use it by setting LIBGUESTFS_PATH:
-export LIBGUESTFS_PATH=$MVM_CACHE_DIR/appliance
+**Implementation:**
+```python
+os.environ["QEMU_LOCKING"] = "off"
 ```
+
+**Code reference:** `src/mvmctl/core/_shared/_guestfs/_base.py` line 51
+
+### 10. Fixed Appliance (Automatic) ✅ IMPLEMENTED
+
+`GuestfsService.build_appliance()` at `core/_shared/_guestfs/_service.py:25` attempts to build a fixed appliance during `mvm cache init` (called from `CacheOperation.initialize()` at `api/cache_operations.py:127`). It runs `libguestfs-make-fixed-appliance` if available on the system. If the tool is not installed, it silently skips the build (returns `None`).
+
+**Code reference:** `src/mvmctl/core/_shared/_guestfs/_service.py` line 25
 
 ## Recommended Implementation Pattern
 
@@ -199,8 +201,8 @@ finally:
 |-------------------|-----------------------|----------------------|
 | None (Default) | 8.0s - 15.0s | 10.0s - 20.0s |
 | Basic (1-4) ✅ | 3.0s - 5.0s | 4.0s - 6.0s |
-| Aggressive (1-8) ✅ (1-7) | 1.0s - 3.0s | 2.0s - 4.0s |
-| Ultimate (Fixed App) ⏳ | < 1.0s | < 2.0s |
+| Aggressive (1-9) ✅ (1-9) | 1.0s - 3.0s | 2.0s - 4.0s |
+| Ultimate (Fixed App) ✅ | < 1.0s | < 2.0s |
 
 *Note: Measurement variance is primarily driven by CPU speed and disk I/O. Results are consistent across both **ext4** and **btrfs** when using `cachemode="unsafe"`.*
 
@@ -214,7 +216,7 @@ finally:
 | 4 | Minimal memory (`set_memsize(256)`) | ✅ | `_base.py:83-84` |
 | 5 | Disable recovery process | ✅ | `_base.py:75-76` |
 | 6 | Disable autosync | ✅ | `_base.py:77-78` |
-| 7 | Format + cache mode (`cachemode="writeback"`) | ✅ (note: `writeback` not `unsafe`) | `_base.py:92` |
-| 8 | Appliance cache in RAM (`/dev/shm`) | ⏳ PENDING | — |
-| 9 | QEMU lock disable | ✅ (implicit via pattern) | — |
-| 10 | Fixed appliance | ⏳ PENDING | — |
+| 7 | Format + cache mode (`cachemode="writeback"`) | ✅ | `_base.py:88-93` |
+| 8 | Appliance cache in RAM (`/dev/shm`) | ✅ | `_base.py:47-48` |
+| 9 | QEMU lock disable (`QEMU_LOCKING=off`) | ✅ | `_base.py:51` |
+| 10 | Fixed appliance | ✅ | `_service.py:25` (via `cache init`) |

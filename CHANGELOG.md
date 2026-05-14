@@ -33,8 +33,8 @@ Initial release of mvmctl -- a production-grade Python CLI for managing Firecrac
 - **Controller / Service / Repository / Resolver** pattern across all 14 core domains
 - **Input -> Request -> Resolved** pipeline for type-safe, validated VM operations
 - **Provisioning backend abstraction** (LoopMount vs Guestfs) with factory pattern
-- **SQLite database** (`db/migrations/` directory) with migration system (`001_initial_schema.sql`) for persistent state: images, kernels, binaries, volumes, networks, network_leases, vm_instances, host_state, host_state_changes, iptables_rules, ssh_keys, user_settings
-- **Shared utility helpers** (`utils/`): fs, _system, http, network, crypto, template, yaml, _validators, _io, _lazy_import, progress, cli, operation_utils, auditlog, common, _disk
+- **SQLite database** (`db/migrations/` directory) with migration system (`001_initial_schema.sql`) for persistent state: images, kernels, binaries, volumes, networks, network_leases, vm_instances, host_state, host_state_changes, iptables_rules, nftables_rules, ssh_keys, user_settings
+- **Shared utility helpers** (`utils/`): fs, _system, http, network, crypto, template, yaml, _validators, _io, _lazy_import, progress, cli, operation_utils, auditlog, common, _disk, timinglog
 - **Relation enrichment** system with batch loading to prevent N+1 queries
 - **Privilege delegation** model via `mvm` unix group and sudoers drop-in (no sudo for normal operations)
 

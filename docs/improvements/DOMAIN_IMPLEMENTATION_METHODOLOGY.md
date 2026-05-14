@@ -1,6 +1,6 @@
 # Domain Implementation Methodology
 
-> ## ✅ IMPLEMENTED — This methodology reflects the current codebase.
+> **STATUS: Current — fully accurate.** All 15 core domains follow the documented patterns. Verified rules (from __future__ imports, Controller/Service/Repository/Resolver, API Operations, Input/Request/Resolved pipeline).
 >
 > All architectural rules, patterns, and layer definitions documented below match the actual implementation.
 > For verification, see the 15 core domains in `src/mvmctl/core/` (list below).

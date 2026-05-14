@@ -1045,34 +1045,34 @@ The API layer has a precise data flow pattern for handling user input. This patt
 **Category A: Existing Resource Actions** (remove, ssh, console, get, list, inspect)
 
 ```
-CLI → VMInput → VMOperation.rm(input) → VMRequest(input, db).resolve()
-                                               ↓
-                                     ResolvedVMInput (frozen, validated)
-                                               ↓
-                                     Operation acts on resolved data
+CLI → VMInput → VMOperation.remove(inputs=input) → VMRequest(*, inputs=input, db=db).resolve()
+                                                          ↓
+                                                ResolvedVMInput (frozen, validated)
+                                                          ↓
+                                                Operation acts on resolved data
 ```
 
 - **`VMInput`** — Raw identifiers from CLI (name, id, IP, MAC). Thin dataclass with list fields for identifiers plus optional flags.
-- **`VMRequest`** — Takes `VMInput` + `db`. Has `resolve()` that resolves identifiers to actual DB records. Calls `ensure_validate()` internally after resolution.
+- **`VMRequest`** — Keyword-only args `inputs` + `db`. Has `resolve()` that resolves identifiers to actual DB records. Validates inline via `_validate_identifiers()` during resolution.
 - **`ResolvedVMInput`** — Frozen dataclass containing fully resolved DB records. These records are guaranteed to exist in the DB.
-- **`VMOperation`** — Static methods take `VMInput` as first argument. They create a `VMRequest`, call `resolve()`, and use `ResolvedVMInput` to perform the action.
+- **`VMOperation`** — Static methods take an Input class as argument. They create a `VMRequest`, call `resolve()`, and use `ResolvedVMInput` to perform the action.
 
 **Category B: Resource Creation** (create)
 
 ```
-CLI → VMCreateInput → VMOperation.create(input) → VMCreateRequest(input, db).resolve()
-                                                         ↓
-                                               ResolvedVMCreateInput (frozen, validated)
-                                                         ↓
-                                               Operation creates the resource
+CLI → VMCreateInput → VMOperation.create(inputs=input) → VMCreateRequest(*, vm_id=..., vm_dir=..., inputs=input, db=db).resolve()
+                                                                ↓
+                                                      ResolvedVMCreateInput (frozen, validated)
+                                                                ↓
+                                                      Operation creates the resource
 ```
 
 - **`VMCreateInput`** — Raw creation parameters from CLI. Optional fields are `None` — defaults are resolved by the Request.
-- **`VMCreateRequest`** — Takes `VMCreateInput` + `db`. Resolves DB-backed defaults and calls `ensure_validate()` internally.
+- **`VMCreateRequest`** — Takes keyword-only `vm_id`, `vm_dir`, `inputs` (VMCreateInput), `db`. Resolves DB-backed defaults and calls `ensure_validate()` internally as the last step.
 - **`ResolvedVMCreateInput`** — Frozen dataclass with ALL values resolved and validated. No `None` values for required fields.
 
 **Key Principles:**
-1. **`resolve()` always calls `ensure_validate()`** — Validation happens AFTER resolution, not before.
+1. **`resolve()` calls `ensure_validate()` (or validates inline)** — NetworkRequest, NetworkCreateRequest, and VMCreateRequest call `ensure_validate()` as the last step. VMRequest validates inline via `_validate_identifiers()` during resolution. In all cases validation operates on fully resolved data.
 2. **`ResolvedVM*` classes are frozen** — Immutable once created. Prevents accidental mutation during orchestration.
 3. **`VMOperation` methods are `@staticmethod`** — They take Input classes as arguments and create Request/Resolved internally.
 4. **Input classes have `None` for optional fields** — The CLI layer passes what the user provides. The Request layer resolves `None` to DB-backed defaults.

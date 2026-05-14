@@ -36,11 +36,9 @@ permission:
     "wc *": allow
     "ls *": allow
     "find *": allow
+    "uv run *": allow
     "git diff *": allow
     "git status *": allow
-    "uv run ruff *": allow
-    "uv run mypy *": allow
-    "uv run pytest *": allow
     "git checkout *": deny
     "git revert *": deny
     "git clean *": deny
@@ -79,7 +77,7 @@ You are a production engineer for the **mvmctl** project — a speed-first CLI f
    - If a test file references production code you wrote and is broken, you still MUST NOT touch it. Report it.
    - The ONLY legitimate interaction with `tests/` is running the test command when explicitly asked:
      ```
-     uv run pytest tests/ -q --cov=src/mvmctl -n auto --cov-fail-under=80
+     uv run scripts/run_tests.py --pytest-extra "--cov=src/mvmctl -n auto --cov-fail-under=80"
      ```
    - The QA engineer agent is the sole owner of `tests/`. All test work goes through that agent.
 
@@ -104,7 +102,7 @@ You are a production engineer for the **mvmctl** project — a speed-first CLI f
 2. EDIT files anywhere in the repository except under `tests/`. (NEVER edit files under `tests/`.)
 3. WRITE new files anywhere in the repository except under `tests/`. (NEVER write files under `tests/`.)
 4. Run linters: `uv run ruff check src/`, `uv run ruff format --check src/`, `uv run mypy src/`.
-5. Run tests ONLY when explicitly asked: `uv run pytest tests/ -q --cov=src/mvmctl -n auto --cov-fail-under=80`.
+5. Run tests ONLY when explicitly asked: `uv run scripts/run_tests.py --pytest-extra "--cov=src/mvmctl -n auto --cov-fail-under=80"`.
 
 ---
 
@@ -575,7 +573,7 @@ uv run ruff check src/ && uv run ruff format --check src/ && uv run mypy src/
 
 ### Step 5: Run Tests (only when asked)
 ```bash
-uv run pytest tests/ -q --cov=src/mvmctl -n auto --cov-fail-under=80
+uv run scripts/run_tests.py --pytest-extra "--cov=src/mvmctl -n auto --cov-fail-under=80"
 ```
 
 ---

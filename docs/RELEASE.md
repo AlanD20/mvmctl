@@ -64,7 +64,7 @@ Triggered on tag push `v*.*.*`:
 
 | Job | Description |
 |-----|-------------|
-| **test** | Runs all tests with 79% coverage gate |
+| **test** | Runs all tests with 80% coverage gate |
 | **build** | Builds Nuitka binary on `ubuntu-24.04`, generates SHA256, uploads as artifact |
 | **build-deb** | Builds `.deb` package via `dpkg-buildpackage` (needs build) |
 | **build-rpm** | Builds `.rpm` in Fedora container (needs build) |

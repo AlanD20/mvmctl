@@ -1,3 +1,5 @@
+> **STATUS: Current — fully accurate.** All patterns (OperationResult, BatchResult, NeedsInteraction, ProgressEvent) match the current codebase at `src/mvmctl/models/result.py`. The master code table reflects current codes.
+
 # API-to-Consumer Communication Pattern
 
 ## Overview

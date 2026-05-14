@@ -1,5 +1,7 @@
 # Snapshot-Based Instant VM Cloning & Next-Level Optimizations
 
+> **STATUS: Current — not implemented (as documented).** Building blocks exist (create_snapshot/load_snapshot, ParallelExecutor), but no snapshot domain, CLI commands, pool manager, or CoW rootfs.
+
 > ## Status: ❌ NOT IMPLEMENTED (Design Document Only)
 >
 > None of the phases described here have been implemented. The snapshot API exists in `FirecrackerSpawner`/`VMController` (create_snapshot, load_snapshot), but no snapshot domain, CLI commands, pool manager, or CoW rootfs backend exists.

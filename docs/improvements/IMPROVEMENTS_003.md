@@ -4,10 +4,10 @@
 >
 > | Feature | Status | Notes |
 > |---------|--------|-------|
-> | `--count` for `mvm vm create` | ❌ NOT IMPLEMENTED | Design complete, no code written |
+> | `--count` for `mvm vm create` | ✅ **IMPLEMENTED** | `--count N` and `--atomic` flags exist in `cli/vm.py`. `VMCreateInput.count`, `generate_batch_names()` in `utils/common.py`. |
 > | Volume domain | ✅ **IMPLEMENTED** | Moved to IMPROVEMENTS_002 as completed item |
 >
-> **Last verified:** 2026-05-13
+> **Last verified:** 2026-05-14
 
 This document tracks planned features with architectural analysis and implementation strategy.
 For active improvements, see [IMPROVEMENTS_002.md](IMPROVEMENTS_002.md).
@@ -16,7 +16,7 @@ For active improvements, see [IMPROVEMENTS_002.md](IMPROVEMENTS_002.md).
 
 ## Feature 1: `--count` for `mvm vm create`
 
-**Status:** ❌ NOT IMPLEMENTED — Design complete, implementation pending
+**Status:** ✅ **IMPLEMENTED** — See `cli/vm.py`, `VMCreateInput.count`, `generate_batch_names()` in `utils/common.py`
 **Complexity:** Medium
 **Files affected:** ~5 (mostly `vm_operations.py`, `_vm_create_input.py`, `cli/vm.py`)
 

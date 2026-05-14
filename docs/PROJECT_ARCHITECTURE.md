@@ -194,7 +194,7 @@ src/mvmctl/
 │   ├── image.py                             # ImageItem, ImageSpec
 │   ├── kernel.py                            # KernelItem, KernelSpec, KernelPullResult
 │   ├── key.py                               # SSHKeyItem
-│   ├── network.py                           # NetworkItem, NetworkLeaseItem, IPTablesRuleItem, IPTablesChain, IPTablesPort, IPTablesProtocol, IPTablesRuleType, IPTablesTable, IPTablesTarget, IPTablesWildcard
+│   ├── network.py                           # NetworkItem, NetworkLeaseItem, FirewallRule, FirewallChain, FirewallPort, FirewallProtocol, FirewallRuleType, FirewallTable, FirewallTarget, FirewallWildcard, FirewallBackendType, FirewallRuleResult
 │   ├── provisioner.py                       # ProvisionerType
 │   ├── result.py                            # OperationResult, BatchResult, ProgressEvent, NeedsInteraction, OperationStatus
 │   ├── vm.py                                # VMInstanceItem, VMInspectInfo, ConsoleInfo, ConsoleState, VMStatus
@@ -308,7 +308,10 @@ class VMController:
     def stop(self, force: bool = False) -> None: ...
     def start(self) -> None: ...
     def pause(self) -> None: ...
+    def resume(self) -> None: ...
+    def reboot(self, force: bool = False) -> None: ...
     def snapshot(self, mem_out: Path, state_out: Path) -> None: ...
+    def load_snapshot(self, mem_in: Path, state_in: Path, resume_after: bool = False) -> None: ...
 ```
 
 **Note:** While `VMController` still provides `start()`, `stop()`, and `pause()` for individual VM operations, bulk lifecycle operations (e.g., stopping multiple VMs) are handled by `VMService` in the API layer. The `VMService.stop_many()` creates per-VM `VMController` instances internally via `ParallelExecutor`.
@@ -835,12 +838,12 @@ VMResolver
 ├── "binary"          → BinaryResolver.resolve(binary_id)
 ├── "network"         → NetworkResolver.resolve(network_id)
 ├── "network.leases"  → NetworkLeaseResolver.list_by_network_id(network.id)
-└── "volumes"         → VolumeResolver.resolve_by_vm_volume_ids(vm_instance_ids)  # batch_method in RelationSpec
+└── "volumes"         → VolumeResolver.by_id  # per-VM; batch via resolve_by_vm_volume_ids
 
 NetworkResolver
 ├── "leases"          → NetworkLeaseResolver.list_by_network_id(network.id)
 ├── "iptables_rules"  → IPTablesRuleResolver.list_by_network_id(network.id)
-└── "vms"             → VMResolver.resolve_many_by_network_id(network.id)  # VMs on this network
+└── "vms"             → VMResolver.find_by_network_id(network.id)  # batch: by_network_id_batch
 
 ImageResolver         → (no relations)
 KernelResolver        → (no relations)

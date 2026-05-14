@@ -286,7 +286,7 @@ Each domain has:
 - **Provisioning backends**: Two paths for root filesystem provisioning:
   - **LoopMount** (primary, ~200ms per VM) -- Standalone compiled `mvm-provision` binary extracted at `mvm init`. Uses `losetup`/`mount`/`chroot` directly.
   - **GuestFS** (fallback, disabled by default) -- Uses `libguestfs` Python bindings (~2600-3000ms per VM). Enabled during `mvm init`.
-- **iptables tracker**: Tracks NAT/forwarding rules for clean teardown.
+- **Firewall trackers**: Dual-backend firewall rule tracking — **iptables** (legacy) and **nftables** (default). Configurable via `firewall_backend` setting.
 - **Resolver registry**: Central registry for entity resolvers.
 
 ### Build System

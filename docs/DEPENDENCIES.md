@@ -11,6 +11,7 @@ These binaries are required for basic operations like managing VMs, networking, 
 | `firecracker` + `jailer` | Core | MicroVM VMM + security isolation | Managed via `mvm bin pull` | Managed via `mvm bin pull` |
 | `ip` | Network | Bridge and TAP interface management | `iproute2` | `iproute2` |
 | `iptables` | Network | NAT and firewall rule management | `iptables` | `iptables` |
+| `nft` | Network | nftables firewall (alternative to iptables, default backend) | `nftables` | `nftables` |
 | `sysctl` | System | Enabling IP forwarding on the host | `procps` | `procps-ng` |
 | `sudo` | Privilege | Running `mvm host init` and privileged commands | `sudo` | `sudo` |
 | `groupadd` | Privilege | Creating the `mvm` system group | `passwd` | `shadow` |
@@ -25,6 +26,8 @@ These binaries are required for basic operations like managing VMs, networking, 
 | `mvm-console-relay` | Provisioning | PTY-over-vsock console relay service (symlink to `mvm-services`) | Managed via `mvm init` | Managed via `mvm init` |
 | `mvm-nocloud-server` | Provisioning | NoCloud-net metadata/IPv4 HTTP server (symlink to `mvm-services`) | Managed via `mvm init` | Managed via `mvm init` |
 
+> **Firewall backend**: The `firewall_backend` setting (default: `nftables`) controls whether mvmctl uses `nft` or `iptables` for firewall rules. When nftables NAT is unavailable (kernel module `nft_chain_nat` missing), it falls back to `iptables` automatically during `mvm host init`.
+
 
 ## 2. Image & Cloud-Init Dependencies
 
@@ -34,7 +37,7 @@ These binaries are required for importing images, converting formats, and genera
 | :--- | :--- | :--- | :--- | :--- |
 | `qemu-img` | Image | Converting and resizing disk images | `qemu-utils` | `qemu-img` |
 | `sfdisk` | Image | Partition table manipulation | `util-linux` | `util-linux` |
-| `parted` | Image | Machine-parseable partition table reading | `parted` | `parted` |
+| `parted` | Image | Machine-parseable partition table reading (fallback when `sfdisk` unavailable) | `parted` | `parted` |
 | `blkid` | Image | Detecting root partitions and UUIDs | `util-linux` | `util-linux` |
 | `mount` | Image | Mounting images for rootfs extraction | `util-linux` | `util-linux` |
 | `umount` | Image | Unmounting images | `util-linux` | `util-linux` |
@@ -208,11 +211,11 @@ This section maps specific `mvm` commands to the external binaries they invoke.
 
 | Command Group | Command(s) | Required Binaries |
 | :--- | :--- | :--- |
-| **`mvm host`** | `init` | `sudo`, `groupadd`, `usermod`, `visudo`, `sysctl`, `ip`, `iptables`, `iptables-save`, `lsmod`, `modprobe` |
+| **`mvm host`** | `init` | `sudo`, `groupadd`, `usermod`, `visudo`, `sysctl`, `ip`, `iptables`, `iptables-save`, `lsmod`, `modprobe`, `nft` |
 | | `ls` | (Internal Python logic) |
 | | `clean` | `sudo`, `ip`, `iptables` |
 | | `reset` | `sudo`, `groupdel`, `sysctl` |
-| **`mvm network`** | `create` | `ip`, `iptables` |
+| **`mvm network`** | `create` | `ip`, `iptables` (or `nft` depending on `firewall_backend`) |
 | | `ls`, `inspect`, `rm`, `sync`, `default` | (Internal Python logic; `rm`/`sync` may call `ip`/`iptables` for cleanup) |
 | **`mvm bin`** | `pull`, `ls`, `rm`, `default` | (Internal Python logic) |
 | **`mvm image`** | `import` | `qemu-img`, `sfdisk`, `parted`, `blkid`, `mount`, `umount`, `tar`, `truncate`, `mkfs.ext4`, `unsquashfs` |
@@ -223,7 +226,7 @@ This section maps specific `mvm` commands to the external binaries they invoke.
 | | `ls`, `rm`, `default`, `inspect` | (Internal Python logic) |
 | **`mvm key`** | `create` | `ssh-keygen` |
 | | `add`, `ls`, `rm`, `inspect`, `export`, `default` | (Internal Python logic) |
-| **`mvm vm`** | `create` | **Primary:** `firecracker`, `jailer`, `ip`, `iptables`, `mvm-provision`, `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `chroot` (+ `btrfs` for btrfs images) |
+| **`mvm vm`** | `create` | **Primary:** `firecracker`, `jailer`, `ip`, `iptables` (or `nft`), `mvm-provision`, `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `chroot` (+ `btrfs` for btrfs images) |
 | | `ls`, `ps`, `inspect` | (Internal Python logic) |
 | | `start`, `stop`, `reboot`, `pause`, `resume` | `firecracker`, `ip`, `iptables` |
 | | `rm` | `firecracker`, `ip`, `iptables` |

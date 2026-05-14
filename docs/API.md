@@ -92,10 +92,10 @@ from mvmctl.api import (
 )
 ```
 
-Result types like `CleanResult` and `PruneAllResult` are imported from `mvmctl.models`:
+Result and model types like `CleanResult`, `PruneAllResult`, `VMInstanceItem`, `NetworkItem`, and `BulkResult` are imported from `mvmctl.models`:
 
 ```python
-from mvmctl.models import CleanResult, PruneAllResult
+from mvmctl.models import CleanResult, PruneAllResult, VMInstanceItem, BulkResult
 ```
 
 Deep imports from sub-modules are **not** part of the public API:
@@ -296,7 +296,8 @@ Network record — maps to the `networks` table.
 | Field | Type | Description |
 |-------|------|-------------|
 | `leases` | `list[NetworkLeaseItem] \| None` | IP leases for this network |
-| `iptables_rules` | `list[IPTablesRuleItem] \| None` | iptables rules for this network |
+| `iptables_rules` | `list[FirewallRule] \| None` | Firewall rules for this network |
+| `vms` | `list[VMInstanceItem] \| None` | VMs attached to this network |
 
 #### `NetworkLeaseItem`
 
@@ -311,29 +312,29 @@ IP lease entry.
 | `vm_id` | `str \| None` | VM ID holding the lease |
 | `expires_at` | `str \| None` | ISO 8601 expiry timestamp |
 
-#### `IPTablesRuleItem`
+#### `FirewallRule`
 
-iptables rule record.
+Firewall rule record — used by both iptables and nftables backends.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `table_name` | `IPTablesTable` | Table (filter, nat, mangle, raw, security) |
-| `chain_name` | `IPTablesChain` | Chain name |
-| `rule_type` | `IPTablesRuleType` | Rule type |
-| `protocol` | `IPTablesProtocol` | Protocol (tcp, udp, icmp, all) |
+| `table_name` | `FirewallTable` | Table (filter, nat, mangle, raw, security) |
+| `chain_name` | `FirewallChain` | Chain name |
+| `rule_type` | `FirewallRuleType` | Rule type |
+| `protocol` | `FirewallProtocol` | Protocol (tcp, udp, icmp, all) |
 | `source` | `str` | Source CIDR |
 | `destination` | `str` | Destination CIDR |
 | `in_interface` | `str` | Input interface |
 | `out_interface` | `str` | Output interface |
-| `target` | `IPTablesTarget` | Target (ACCEPT, DROP, MASQUERADE, etc.) |
+| `target` | `FirewallTarget` | Target (ACCEPT, DROP, MASQUERADE, etc.) |
 | `sport` | `int` | Source port |
 | `dport` | `int` | Destination port |
 | `network_id` | `str` | Associated network |
 | `is_active` | `bool` | Whether the rule is applied |
 | `id` | `int \| None` | Rule ID |
 | `network_name` | `str \| None` | Network name |
-| `comment_tag` | `str \| None` | iptables comment tag |
-| `command_string` | `str \| None` | iptables command string |
+| `comment_tag` | `str \| None` | Firewall comment tag |
+| `command_string` | `str \| None` | Firewall command string |
 | `created_at` | `str \| None` | ISO 8601 creation timestamp |
 | `last_verified_at` | `str \| None` | ISO 8601 last verified timestamp |
 
@@ -361,6 +362,7 @@ Image record — maps to the `images` table.
 | `fs_uuid` | `str \| None` | Filesystem UUID (auto-detected) |
 | `compressed_size` | `int \| None` | Compressed size in bytes |
 | `compression_ratio` | `float \| None` | Compression ratio |
+| `distro` | `str \| None` | Detected OS distribution (e.g. `"ubuntu"`) |
 | `compressed_format` | `str \| None` | Compression format |
 | `deleted_at` | `str \| None` | ISO 8601 deletion timestamp |
 
@@ -682,6 +684,7 @@ process, and registers the VM in the database.
 | `inputs.boot_args` | `str \| None` | `None` | Override kernel boot arguments |
 | `inputs.lsm_flags` | `str \| None` | `None` | Linux Security Module flags |
 | `inputs.skip_cleanup` | `bool` | `False` | Skip cleanup on failure |
+| `inputs.skip_deblob` | `bool` | `False` | Skip debloat operations on rootfs |
 | `inputs.count` | `int \| None` | `None` | Batch count: create N VMs (first keeps base name, subsequent get `-N` suffix) |
 | `inputs.atomic` | `bool` | `False` | All-or-nothing batch: roll back all VMs if any creation fails |
 | `inputs.volumes` | `list[str] \| None` | `None` | Volume names or IDs to attach to the VM |
@@ -928,6 +931,18 @@ Ensure the default network exists, creating it if needed. Called automatically b
 
 ---
 
+#### `NetworkOperation.to_json(networks: list[NetworkItem]) -> list[dict[str, Any]]`
+
+Convert a list of NetworkItem records to JSON-serializable dicts.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `networks` | `list[NetworkItem]` | — | Network records (will be enriched with leases and rules) |
+
+**Returns:** List of network dicts suitable for JSON serialization.
+
+---
+
 #### `NetworkOperation.restore() -> OperationResult[list[str]]`
 
 Restore all networks from DB after reboot (re-create bridges and NAT rules).
@@ -983,7 +998,7 @@ Import an existing local image file and register it in the database.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `inputs.name` | `str` | — | Name for the imported image |
-| `inputs.format` | `str` | — | Source format (`"qcow2"`, `"raw"`, etc.) |
+| `inputs.format` | `str \| None` | `None` | Source format (`"qcow2"`, `"raw"`, etc.) |
 | `inputs.source_path` | `Path` | — | Path to the source image file |
 | `inputs.force` | `bool` | `False` | Re-import even if cached |
 | `inputs.arch` | `str \| None` | `None` | Architecture |
@@ -1390,14 +1405,11 @@ Open an interactive SSH session into a VM, or execute a command.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `inputs.vm_id` | `str \| None` | `None` | VM identifier |
+| `inputs.identifier` | `str` | — | VM name, ID, IP, or MAC address |
 | `inputs.user` | `str \| None` | `None` | SSH user |
 | `inputs.key` | `Path \| None` | `None` | Path to private key |
 | `inputs.cmd` | `str \| None` | `None` | Command to execute |
 | `inputs.timeout` | `int \| None` | `None` | SSH connection timeout in seconds |
-| `inputs.ip` | `str \| None` | `None` | Direct IP address |
-| `inputs.name` | `str \| None` | `None` | VM name |
-| `inputs.mac` | `str \| None` | `None` | VM MAC address |
 
 **Returns:** Exit code from the SSH session.
 
@@ -1411,7 +1423,7 @@ Initialize the local SQLite database (run migrations).
 
 ---
 
-#### `InitOperation.setup_host(cache_dir: Path) -> list[HostStateChangeItem]`
+#### `InitOperation.setup_host(cache_dir: Path) -> OperationResult[Any] | NeedsInteraction`
 
 Set up host configuration. Delegates to `HostOperation.init()`.
 
@@ -1542,7 +1554,7 @@ If `follow=False`, yields the last N lines then stops.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `inputs.identifier` | `str` | — | VM name, ID, MAC, or IP address |
-| `inputs.log_type` | `str \| None` | `None` | Log type (`"serial"`, `"firecracker"`, or `None` for both) |
+| `inputs.os_log` | `bool` | `False` | Read VM OS serial log instead of boot log |
 | `inputs.follow` | `bool` | `False` | Follow (tail -f) mode |
 | `inputs.lines` | `int \| None` | `None` | Number of lines to show |
 
@@ -1576,8 +1588,7 @@ Remove one or more volumes.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `inputs.name` | `list[str]` | `[]` | Volume names to remove |
-| `inputs.id` | `list[str]` | `[]` | Volume ID prefixes to remove |
+| `inputs.identifiers` | `list[str]` | `[]` | Volume names or ID prefixes to resolve |
 | `force` | `bool` | `False` | Remove even if attached to VMs |
 
 ---

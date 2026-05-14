@@ -29,7 +29,7 @@ This applies to all edits, fixes, features, and refactoring. No exceptions.
 
 ```bash
 uv sync --group dev            # Install all deps
-uv run pytest tests/ -x -q    # Run tests (stop at first failure)
+uv run scripts/run_tests.py --ci    # Run all tests (CI mode, stops at first failure)
 uv run ruff check src/ && uv run ruff format --check src/ && uv run mypy src/  # Lint + format + type check
 
 # Build standalone binary (Nuitka — recommended)
@@ -113,7 +113,7 @@ User → mvm → main.py → cli/*.py → api/*.py → core/*.py → models/ + u
 uv run ruff check src/          # Must be clean
 uv run ruff format --check src/ # Must be clean
 uv run mypy src/                # Strict mode — no type: ignore allowed
-uv run pytest tests/ -q         # 80% branch coverage minimum
+uv run scripts/run_tests.py      # Run all three levels (unit, integration, system)
 ```
 
 **If checks fail:**

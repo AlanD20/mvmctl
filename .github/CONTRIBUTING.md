@@ -77,17 +77,17 @@ Three-tier architecture: **CLI → API → Core**. `cli/` stays thin (arg parsin
 ## Running Tests
 
 ```bash
-# Run all tests
-uv run pytest tests/ -v
+# Run all tests (all three levels)
+uv run scripts/run_tests.py
 
 # Run a specific file
-uv run pytest tests/integration/test_vm_lifecycle.py -v
+uv run scripts/run_tests.py --test tests/integration/test_vm_lifecycle.py
 
 # Run tests matching a name pattern
-uv run pytest tests/ -v -k "test_create"
+uv run scripts/run_tests.py --pytest-extra "-v -k test_create"
 
-# Run with coverage
-uv run pytest tests/ -v --cov-report=term-missing
+# Run with coverage via the script
+uv run scripts/run_tests.py --pytest-extra "--cov=src/mvmctl --cov-report=term-missing"
 ```
 
 Tests don't need root or KVM. Integration and system tests mock all subprocess calls — check their docstrings.
@@ -232,7 +232,7 @@ Keep the subject line under 72 characters. Add a body if the change needs explan
 2. Make your changes. Keep commits focused.
 3. Run tests and linting:
    ```bash
-   uv run ruff check src/ && uv run pytest tests/ -v
+    uv run ruff check src/ && uv run scripts/run_tests.py
    ```
 4. Push your branch and open a PR against `main`.
 5. Fill in the PR description with what changed and why.
