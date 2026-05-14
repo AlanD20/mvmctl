@@ -497,15 +497,42 @@ class TestImagePullAdvancedFlags:
     ]
 
     def test_image_pull_with_version(self, mvm_binary):
-        """Pull an image with --version flag."""
+        """Pull an image with --version flag, dynamically resolved from remote listing."""
+        # First, get the remote listing to find an image with version metadata
+        result = _run_mvm(
+            mvm_binary,
+            "image",
+            "ls",
+            "--remote",
+            "--json",
+            timeout=30,
+            check=False,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            pytest.skip("Remote listing not available (network?)")
+        try:
+            remote_images = json.loads(result.stdout)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            pytest.skip("Remote listing returned non-JSON output")
+        if not remote_images:
+            pytest.skip("No remote images available")
+        # Find the first image that has both id and version fields
+        test_img = next(
+            (img for img in remote_images if img.get("id") and img.get("version")),
+            None,
+        )
+        if test_img is None:
+            pytest.skip("No remote image has both id and version metadata")
+        selector = test_img["id"]
+        version = test_img["version"]
         try:
             result = _run_mvm(
                 mvm_binary,
                 "image",
                 "pull",
-                "alpine-3.21",
+                selector,
                 "--version",
-                "latest",
+                version,
                 "--force",
                 timeout=60,
                 check=False,
@@ -514,10 +541,13 @@ class TestImagePullAdvancedFlags:
                 assert "pulled successfully" in result.stdout.lower()
             else:
                 pytest.skip(
-                    f"Pull with --version failed: {result.stderr.strip()}"
+                    f"Pull {selector} --version {version} failed: "
+                    f"{result.stderr.strip()}"
                 )
         except subprocess.TimeoutExpired:
-            pytest.skip("Pull with --version timed out (>60s)")
+            pytest.skip(
+                f"Pull {selector} --version {version} timed out (>60s)"
+            )
 
     def test_image_pull_with_arch(self, mvm_binary):
         """Pull an image with --arch flag."""

@@ -551,15 +551,33 @@ class TestImageImportAdvanced:
         qemu_img = shutil.which("qemu-img")
         if not qemu_img:
             pytest.skip("qemu-img not available on this system")
+        mkfs_ext4 = shutil.which("mkfs.ext4")
+        if not mkfs_ext4:
+            pytest.skip("mkfs.ext4 not available on this system")
 
+        raw_path = tmp_path / "test-image.raw"
         qcow2_path = tmp_path / "test-image.qcow2"
         result = subprocess.run(
-            [qemu_img, "create", "-f", "qcow2", str(qcow2_path), "64M"],
+            ["truncate", "--size", "64M", str(raw_path)],
             capture_output=True,
             text=True,
         )
         if result.returncode != 0:
-            pytest.skip(f"qemu-img create failed: {result.stderr}")
+            pytest.skip(f"truncate failed: {result.stderr}")
+        result = subprocess.run(
+            [mkfs_ext4, "-F", str(raw_path)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"mkfs.ext4 failed: {result.stderr}")
+        result = subprocess.run(
+            [qemu_img, "convert", "-f", "raw", "-O", "qcow2", str(raw_path), str(qcow2_path)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"qemu-img convert failed: {result.stderr}")
 
         imported_prefix = None
         try:
@@ -596,14 +614,27 @@ class TestImageImportAdvanced:
         self, mvm_binary, tmp_path, system_cache_dir
     ):
         """Import the same image twice, verify --force suppresses the error."""
+        import shutil
+
+        mkfs_ext4 = shutil.which("mkfs.ext4")
+        if not mkfs_ext4:
+            pytest.skip("mkfs.ext4 not available on this system")
+
         raw_path = tmp_path / "test-overwrite.raw"
         result = subprocess.run(
-            ["dd", "if=/dev/zero", f"of={raw_path}", "bs=1M", "count=1"],
+            ["truncate", "--size", "64M", str(raw_path)],
             capture_output=True,
             text=True,
         )
         if result.returncode != 0:
-            pytest.skip(f"dd create failed: {result.stderr}")
+            pytest.skip(f"truncate failed: {result.stderr}")
+        result = subprocess.run(
+            [mkfs_ext4, "-F", str(raw_path)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"mkfs.ext4 failed: {result.stderr}")
 
         result = _run_mvm(
             mvm_binary,
@@ -657,15 +688,33 @@ class TestImageImportAdvanced:
         qemu_img = shutil.which("qemu-img")
         if not qemu_img:
             pytest.skip("qemu-img not available on this system")
+        mkfs_ext4 = shutil.which("mkfs.ext4")
+        if not mkfs_ext4:
+            pytest.skip("mkfs.ext4 not available on this system")
 
+        raw_path = tmp_path / "test-rootpart.raw"
         qcow2_path = tmp_path / "test-rootpart.qcow2"
         result = subprocess.run(
-            [qemu_img, "create", "-f", "qcow2", str(qcow2_path), "64M"],
+            ["truncate", "--size", "64M", str(raw_path)],
             capture_output=True,
             text=True,
         )
         if result.returncode != 0:
-            pytest.skip(f"qemu-img create failed: {result.stderr}")
+            pytest.skip(f"truncate failed: {result.stderr}")
+        result = subprocess.run(
+            [mkfs_ext4, "-F", str(raw_path)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"mkfs.ext4 failed: {result.stderr}")
+        result = subprocess.run(
+            [qemu_img, "convert", "-f", "raw", "-O", "qcow2", str(raw_path), str(qcow2_path)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"qemu-img convert failed: {result.stderr}")
 
         imported_prefix = None
         try:
@@ -706,14 +755,27 @@ class TestImageImportAdvanced:
         self, mvm_binary, tmp_path, system_cache_dir
     ):
         """Import a raw image without specifying --format (auto-detect)."""
+        import shutil
+
+        mkfs_ext4 = shutil.which("mkfs.ext4")
+        if not mkfs_ext4:
+            pytest.skip("mkfs.ext4 not available on this system")
+
         raw_path = tmp_path / "test-autodetect.raw"
         result = subprocess.run(
-            ["dd", "if=/dev/zero", f"of={raw_path}", "bs=1M", "count=1"],
+            ["truncate", "--size", "64M", str(raw_path)],
             capture_output=True,
             text=True,
         )
         if result.returncode != 0:
-            pytest.skip(f"dd create failed: {result.stderr}")
+            pytest.skip(f"truncate failed: {result.stderr}")
+        result = subprocess.run(
+            [mkfs_ext4, "-F", str(raw_path)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"mkfs.ext4 failed: {result.stderr}")
 
         imported_prefix = None
         try:
@@ -878,15 +940,33 @@ class TestImageImportArch:
         qemu_img = shutil.which("qemu-img")
         if not qemu_img:
             pytest.skip("qemu-img not available on this system")
+        mkfs_ext4 = shutil.which("mkfs.ext4")
+        if not mkfs_ext4:
+            pytest.skip("mkfs.ext4 not available on this system")
 
+        raw_path = tmp_path / "test-arch.raw"
         qcow2_path = tmp_path / "test-arch.qcow2"
         result = subprocess.run(
-            [qemu_img, "create", "-f", "qcow2", str(qcow2_path), "64M"],
+            ["truncate", "--size", "64M", str(raw_path)],
             capture_output=True,
             text=True,
         )
         if result.returncode != 0:
-            pytest.skip(f"qemu-img create failed: {result.stderr}")
+            pytest.skip(f"truncate failed: {result.stderr}")
+        result = subprocess.run(
+            [mkfs_ext4, "-F", str(raw_path)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"mkfs.ext4 failed: {result.stderr}")
+        result = subprocess.run(
+            [qemu_img, "convert", "-f", "raw", "-O", "qcow2", str(raw_path), str(qcow2_path)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"qemu-img convert failed: {result.stderr}")
 
         imported_prefix = None
         try:

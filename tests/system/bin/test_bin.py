@@ -306,7 +306,7 @@ class TestBinaryEdges:
         assert len(data) > 0
 
     def test_bin_ls_remote_with_limit(self, mvm_binary):
-        """Remote listing with --limit should work."""
+        """Remote listing with --limit flag should work (limit is display-only in JSON)."""
         result = _run_mvm(
             mvm_binary,
             "bin",
@@ -320,11 +320,8 @@ class TestBinaryEdges:
         if result.returncode != 0:
             pytest.skip(f"Remote listing failed (network?): {result.stderr}")
         data = json.loads(result.stdout)
-        if len(data) > 3:
-            pytest.skip(
-                f"--limit 3 returned {len(data)} entries in JSON mode "
-                "(limit is display-only for table output)"
-            )
+        assert isinstance(data, list), f"Expected list, got {type(data)}"
+        assert len(data) >= 1, f"Expected at least one binary, got {len(data)}"
 
     def test_pull_nonexistent_version_fails(self, mvm_binary):
         """Pulling a nonexistent version should fail gracefully."""

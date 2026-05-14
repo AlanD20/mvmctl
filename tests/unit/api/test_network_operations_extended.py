@@ -180,6 +180,10 @@ class TestNetworkOperationCreate:
 
         mocker.patch("mvmctl.api.network_operations.Database")
         mocker.patch(
+            "mvmctl.core.config._service.SettingsService.resolve",
+            return_value="iptables",
+        )
+        mocker.patch(
             "mvmctl.api.network_operations.HashGenerator.network",
             return_value="hash123",
         )
@@ -328,6 +332,10 @@ class TestNetworkOperationRemove:
             return_value=mock_request,
         )
         mocker.patch("mvmctl.api.network_operations.Database")
+        mocker.patch(
+            "mvmctl.core.config._service.SettingsService.resolve",
+            return_value="iptables",
+        )
         mock_repo = MagicMock()
         mocker.patch(
             "mvmctl.api.network_operations.NetworkRepository",
@@ -916,6 +924,10 @@ class TestNetworkOperationSync:
             return_value=mock_repo,
         )
         mocker.patch("mvmctl.api.network_operations.Database")
+        mocker.patch(
+            "mvmctl.core.config._service.SettingsService.resolve",
+            return_value="iptables",
+        )
 
         result = NetworkOperation.sync(network_id="nonexistent")
         assert result.status == "error"
@@ -957,6 +969,10 @@ class TestNetworkOperationSync:
             return_value=mock_repo,
         )
         mocker.patch("mvmctl.api.network_operations.Database")
+        mocker.patch(
+            "mvmctl.core.config._service.SettingsService.resolve",
+            return_value="iptables",
+        )
 
         result = NetworkOperation.sync()
         assert result.status == "error"
@@ -996,6 +1012,10 @@ class TestNetworkOperationRestore:
             return_value=mock_repo,
         )
         mocker.patch("mvmctl.api.network_operations.Database")
+        mocker.patch(
+            "mvmctl.core.config._service.SettingsService.resolve",
+            return_value="iptables",
+        )
 
         result = NetworkOperation.restore()
         assert result.status == "error"
@@ -1010,6 +1030,10 @@ class TestNetworkOperationRestore:
             return_value=mock_repo,
         )
         mocker.patch("mvmctl.api.network_operations.Database")
+        mocker.patch(
+            "mvmctl.core.config._service.SettingsService.resolve",
+            return_value="iptables",
+        )
         mocker.patch(
             "mvmctl.api.network_operations.NetworkUtils.compute_bridge_address",
             side_effect=NetworkError("bad address"),

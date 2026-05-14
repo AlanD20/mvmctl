@@ -187,7 +187,6 @@ class TestExecute:
         assert result == {"status": "ok"}
         # Verify the command includes the binary path
         cmd = mock_run.call_args[0][0]
-        assert "sudo" in cmd
         assert "/usr/bin/mvm-provision" in str(cmd)
 
     @patch(

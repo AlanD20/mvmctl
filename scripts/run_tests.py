@@ -291,6 +291,7 @@ def run_test_file(
         "--no-cov",
         "-n",
         "0",
+        "-rs",
     ]
     if extra_args:
         pytest_cmd.extend(extra_args)
@@ -314,6 +315,7 @@ def run_test_file(
     fail_lines = [
         l for l in lines if l.startswith("FAILED") or l.startswith("ERROR")
     ]
+    skip_lines = [l for l in lines if l.startswith("SKIPPED")]
 
     # Classify result
     if result.returncode == 0:
@@ -342,6 +344,12 @@ def run_test_file(
             print(f"         {fl.strip()}")
         if len(fail_lines) > 5:
             print(f"         ... and {len(fail_lines) - 5} more")
+    if skip_lines:
+        print(f"       Skipped: {len(skip_lines)}")
+        for sl in skip_lines[:10]:
+            print(f"         {sl.strip()}")
+        if len(skip_lines) > 10:
+            print(f"         ... and {len(skip_lines) - 10} more")
     print()
 
     return status
@@ -383,6 +391,7 @@ def _run_pytest_level(
         "-q",
         "--no-header",
         "--no-cov",
+        "-rs",
         "-o",
         "addopts=",
     ]
@@ -417,6 +426,7 @@ def _run_pytest_level(
         for line in lines
         if line.startswith("FAILED") or line.startswith("ERROR")
     ]
+    skip_lines = [l for l in lines if l.startswith("SKIPPED")]
     pytest_summary = next(
         (
             line
@@ -433,11 +443,12 @@ def _run_pytest_level(
             print(f"         {fl.strip()}")
         if len(fail_lines) > 5:
             print(f"         ... and {len(fail_lines) - 5} more")
-    # Show last non-empty, non-dot lines for context
-    tail = [ln.strip() for ln in lines if ln.strip() and not ln.startswith(".")]
-    if tail:
-        for ln in tail[-3:]:
-            print(f"       {ln}")
+    if skip_lines:
+        print(f"       Skipped: {len(skip_lines)}")
+        for sl in skip_lines[:10]:
+            print(f"         {sl.strip()}")
+        if len(skip_lines) > 10:
+            print(f"         ... and {len(skip_lines) - 10} more")
     return False
 
 

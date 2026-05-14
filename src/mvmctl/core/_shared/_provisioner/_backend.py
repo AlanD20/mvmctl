@@ -337,7 +337,11 @@ class _LoopMountBackend:
         try:
             sfdisk_result = run_cmd(
                 ["sfdisk", "--json", str(raw_path)],
+                check=False,
             )
+            if sfdisk_result.returncode != 0:
+                return _NO_PARTITION_TABLE
+
             table = json_mod.loads(sfdisk_result.stdout)
             partitions_raw = table.get("partitiontable", {}).get(
                 "partitions", []
@@ -366,7 +370,6 @@ class _LoopMountBackend:
             return partitions, partition
 
         except (
-            ProcessError,
             json_mod.JSONDecodeError,
             KeyError,
         ):
@@ -381,6 +384,7 @@ class _LoopMountBackend:
         try:
             result = run_cmd(
                 ["parted", "-sm", str(raw_path), "unit", "B", "print"],
+                check=False,
             )
         except ProcessError:
             return None
