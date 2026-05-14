@@ -471,8 +471,9 @@ class VMCreateContext:
                     self.mark_created("cloud-init-net")
 
             # Deblob (OS cache cleanup) unless explicitly skipped
+            # Pass pre-detected distro to eliminate redundant OS detection
             if not self.resolved.skip_deblob:
-                provisioner.deblob()
+                provisioner.deblob(os_type=self.resolved.image.distro)
 
             # Fix fstab for Firecracker (superfloppy /dev/vda layout)
             provisioner.fix_fstab()

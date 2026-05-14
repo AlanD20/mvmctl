@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from tests.system.conftest import _run_mvm, _unique_subnet
+from tests.system.conftest import _run_mvm, _unique_subnet, ensure_vm_deps
 
 pytestmark = [pytest.mark.system, pytest.mark.domain_image]
 
@@ -1148,6 +1148,7 @@ class TestImageImportCreateVM:
                 f"Network create failed: {result.stderr}"
             )
 
+            ensure_vm_deps(mvm_binary)
             try:
                 try:
                     result = _run_mvm(
@@ -1280,6 +1281,7 @@ class TestImageImportCreateVM:
                 f"Network create failed: {result.stderr}"
             )
 
+            ensure_vm_deps(mvm_binary)
             try:
                 try:
                     result = _run_mvm(

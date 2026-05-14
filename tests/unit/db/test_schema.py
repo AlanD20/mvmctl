@@ -86,6 +86,7 @@ class TestTableCreation:
         "iptables_rules",
         "ssh_keys",
         "user_settings",
+        "nftables_rules",
     }
 
     def test_all_tables_exist(self, conn: sqlite3.Connection) -> None:
@@ -109,6 +110,7 @@ class TestColumnStructure:
         "id": "TEXT",
         "os_slug": "TEXT",
         "os_name": "TEXT",
+        "distro": "TEXT",
         "arch": "TEXT",
         "path": "TEXT",
         "fs_type": "TEXT",

@@ -1,25 +1,42 @@
 #!/usr/bin/env python3
-"""Run tests at one or more levels (unit, integration, system) in sequence.
+"""Run tests at one or more levels (unit, compliance, integration, system) in sequence.
 
-Levels run in the order: unit → integration → system. If a level fails, execution
-stops immediately and the script exits with the total failure count.
+Levels run in the order: unit → compliance → integration → system. If a level fails,
+execution stops immediately and the script exits with the total failure count.
 
-Unit and integration tests run in parallel via pytest-xdist (if available).
+Unit, compliance, and integration tests run in parallel via pytest-xdist (if available).
 System tests run one file at a time to avoid cross-file state pollution.
 
+Compliance tests are NOT included by default — they must be explicitly requested with
+``--compliance``.
+
 Usage:
-    python scripts/run_tests.py                                              # run all three levels
+    python scripts/run_tests.py                                              # run unit + integration + system
     python scripts/run_tests.py --unit                                       # unit only
+    python scripts/run_tests.py --compliance                                 # compliance only
     python scripts/run_tests.py --integration                                # integration only
     python scripts/run_tests.py --system                                     # system only (legacy behavior)
-    python scripts/run_tests.py --unit --integration                         # unit + integration
-    python scripts/run_tests.py --unit --system                              # unit + system
+    python scripts/run_tests.py --unit --compliance                          # unit + compliance
+    python scripts/run_tests.py --unit --compliance --integration            # unit + compliance + integration
+    python scripts/run_tests.py --unit --compliance --integration --system   # all four levels
     python scripts/run_tests.py --system --build                             # system with build
-    python scripts/run_tests.py --unit --integration --system --build        # all levels, system with build
     python scripts/run_tests.py --list                                       # list all test files
+
+    # --pytest-extra: pass extra flags through to pytest invocations
+    python scripts/run_tests.py --unit --pytest-extra "--cov=src/mvmctl --cov-fail-under=80"
+    python scripts/run_tests.py --compliance --pytest-extra "-x"
+    python scripts/run_tests.py --system --pytest-extra "-x --timeout=60"
+    python scripts/run_tests.py --test tests/unit/test_foo.py --pytest-extra "-p no:cacheprovider"
     python scripts/run_tests.py --list --unit                                # list unit test files
+    python scripts/run_tests.py --list --compliance                          # list compliance test files
     python scripts/run_tests.py --list --system --domain vm                  # list vm domain system tests
-    python scripts/run_tests.py --list --unit --system                       # list unit + system test files
+    python scripts/run_tests.py --list --unit --compliance --system          # list unit + compliance + system
+
+    # --test: run a single specific test file (absolute or relative to repo root)
+    python scripts/run_tests.py --test tests/unit/test_foo.py                # run a specific unit test
+    python scripts/run_tests.py --test tests/layer_compliance/test_foo.py --compliance
+    python scripts/run_tests.py --test tests/system/vm/test_vm.py --system  # system test, single file
+    python scripts/run_tests.py --test tests/unit/test_foo.py --unit --system  # file matches unit level only
 
     # --system flags (only apply to system mode):
     python scripts/run_tests.py --system --build                             # build dist/mvm onefile first
@@ -46,7 +63,7 @@ Usage:
 
     # --ci: Sets MVM_TEST_ENFORCE_NO_SUDO=1 in the environment.
     #   No separate execution path — runs the same as without --ci.
-    #   Works with any combination of --unit, --integration, --system.
+    #   Works with any combination of --unit, --compliance, --integration, --system.
 """
 
 from __future__ import annotations
@@ -64,6 +81,7 @@ REPO_DIR = Path(__file__).resolve().parent.parent
 SYSTEM_TEST_DIR = REPO_DIR / "tests" / "system"
 UNIT_TEST_DIR = REPO_DIR / "tests" / "unit"
 INTEGRATION_TEST_DIR = REPO_DIR / "tests" / "integration"
+COMPLIANCE_TEST_DIR = REPO_DIR / "tests" / "layer_compliance"
 DEFAULT_MIRROR = Path.home() / ".cache" / "mvm-asset-mirror"
 BUILT_BINARY = REPO_DIR / "dist" / "mvm"
 
@@ -182,6 +200,36 @@ def get_test_files(domain: str | None = None) -> list[Path]:
     return sorted(SYSTEM_TEST_DIR.rglob("test_*.py"))
 
 
+def _resolve_test_file(path_str: str) -> Path:
+    """Resolve a test file path, supporting absolute or repo-root-relative paths."""
+    p = Path(path_str)
+    if p.is_absolute():
+        return p.resolve()
+    return (REPO_DIR / p).resolve()
+
+
+def _get_file_test_level(file_path: Path) -> str | None:
+    """Determine the test level (unit/integration/system) from a file's path.
+
+    Returns ``None`` if the path is not under any recognised test directory.
+    """
+    try:
+        rel = file_path.relative_to(REPO_DIR)
+    except ValueError:
+        return None
+    parts = rel.parts
+    if len(parts) >= 2 and parts[0] == "tests":
+        if parts[1] == "unit":
+            return "unit"
+        if parts[1] == "integration":
+            return "integration"
+        if parts[1] == "system":
+            return "system"
+        if parts[1] == "layer_compliance":
+            return "compliance"
+    return None
+
+
 def parse_results(results_file: Path) -> dict[str, str]:
     """Parse saved results file: {filename: PASS/FAIL/SKIP}.
 
@@ -222,26 +270,34 @@ def copy_results_with_timestamp(results_file: Path) -> None:
 
 
 def run_test_file(
-    test_file: Path, binary: str, mirror: Path | None, use_mirror: bool
+    test_file: Path,
+    binary: str,
+    mirror: Path | None,
+    use_mirror: bool,
+    extra_args: list[str] | None = None,
 ) -> str:
     """Run a single system test file. Returns PASS, FAIL, or SKIP."""
     env = {**os.environ, "MVM_BINARY": binary, "NO_COLOR": "1"}
     if use_mirror and mirror:
         env["MVM_ASSET_MIRROR"] = str(mirror)
 
+    pytest_cmd: list[str] = [
+        "uv",
+        "run",
+        "pytest",
+        str(test_file),
+        "-q",
+        "--no-header",
+        "--no-cov",
+        "-n",
+        "0",
+    ]
+    if extra_args:
+        pytest_cmd.extend(extra_args)
+
     start = time.monotonic()
     result = subprocess.run(
-        [
-            "uv",
-            "run",
-            "pytest",
-            str(test_file),
-            "-q",
-            "--no-header",
-            "--no-cov",
-            "-n",
-            "0",
-        ],
+        pytest_cmd,
         cwd=REPO_DIR,
         capture_output=True,
         text=True,
@@ -306,21 +362,37 @@ def _check_xdist() -> bool:
     return _XDIST_AVAILABLE
 
 
-def _run_pytest_level(test_dir: Path, label: str, timeout: int = 1200) -> bool:
-    """Run pytest on a test directory. Returns True if all tests pass."""
+def _run_pytest_level(
+    test_dir: Path,
+    label: str,
+    timeout: int = 1200,
+    test_file: Path | None = None,
+    extra_args: list[str] | None = None,
+) -> bool:
+    """Run pytest on a test directory. Returns True if all tests pass.
+
+    When *test_file* is provided it overrides *test_dir* and forces serial
+    execution (``-n 0``) to avoid xdist issues with a single file.
+    """
+    target = str(test_file) if test_file else str(test_dir)
     cmd: list[str] = [
         "uv",
         "run",
         "pytest",
-        str(test_dir),
+        target,
         "-q",
         "--no-header",
         "--no-cov",
         "-o",
         "addopts=",
     ]
-    if _check_xdist():
+    if test_file:
+        cmd.extend(["-n", "0"])
+    elif _check_xdist():
         cmd.extend(["-n", "auto"])
+
+    if extra_args:
+        cmd.extend(extra_args)
 
     _info(f"Running {label} tests ...")
     start = time.monotonic()
@@ -376,6 +448,10 @@ def _list_mode(levels: list[str], domain: str | None = None) -> None:
             print("=== Unit tests ===")
             for f in sorted(UNIT_TEST_DIR.rglob("test_*.py")):
                 print(f"  {f.name}")
+        elif level == "compliance":
+            print("=== Layer compliance tests ===")
+            for f in sorted(COMPLIANCE_TEST_DIR.rglob("test_*.py")):
+                print(f"  {f.name}")
         elif level == "integration":
             print("=== Integration tests ===")
             for f in sorted(INTEGRATION_TEST_DIR.rglob("test_*.py")):
@@ -386,7 +462,10 @@ def _list_mode(levels: list[str], domain: str | None = None) -> None:
                 print(f"  {f.name}")
 
 
-def _run_system_tests(args: argparse.Namespace) -> int:
+def _run_system_tests(
+    args: argparse.Namespace,
+    extra_args: list[str] | None = None,
+) -> int:
     """Run system tests one file at a time. Returns number of failures."""
     # Determine binary
     if args.build:
@@ -438,7 +517,11 @@ def _run_system_tests(args: argparse.Namespace) -> int:
             flush=True,
         )
         status = run_test_file(
-            test_file, binary, mirror, use_mirror=mirror is not None
+            test_file,
+            binary,
+            mirror,
+            use_mirror=mirror is not None,
+            extra_args=extra_args,
         )
         append_result(RESULTS_FILE, name, status)
         if status == "PASS":
@@ -462,25 +545,96 @@ def _run_system_tests(args: argparse.Namespace) -> int:
     return failed
 
 
-def _run_levels(args: argparse.Namespace, levels: list[str]) -> int:
+def _run_single_system_test(
+    args: argparse.Namespace,
+    test_file: Path,
+    extra_args: list[str] | None = None,
+) -> int:
+    """Run a single system test file in isolation. Returns 1 on failure, 0 on success.
+
+    Skips mirror seeding, domain filtering, and ``--failed-only`` logic —
+    those are irrelevant when the user specified an exact file.
+    """
+    if args.build:
+        binary = build_binary()
+    elif args.binary:
+        binary = args.binary
+    else:
+        binary = "uv run mvm"
+
+    _info(f"Using binary: {binary}")
+    mirror = None if args.no_mirror else DEFAULT_MIRROR
+
+    _info(f"Running system test: {test_file.name}")
+    start = time.monotonic()
+    status = run_test_file(
+        test_file,
+        binary,
+        mirror,
+        use_mirror=mirror is not None,
+        extra_args=extra_args,
+    )
+    elapsed = int(time.monotonic() - start)
+
+    if status == "PASS":
+        return 0
+    _fail(f"System test failed: {test_file.name} ({_fmt_duration(elapsed)})")
+    return 1
+
+
+def _run_levels(
+    args: argparse.Namespace, levels: list[str], test_file: Path | None = None
+) -> int:
     """Run tests for the specified levels in sequence.
+
+    When *test_file* is provided it is passed down to individual level runners
+    instead of running the full directory.
 
     Returns the total number of failures (0 on success).
     """
+    extra_args: list[str] | None = (
+        args.pytest_extra.split() if args.pytest_extra else None
+    )
+
     failures = 0
     for level in levels:
         if level == "unit":
-            ok = _run_pytest_level(UNIT_TEST_DIR, "unit tests")
+            ok = _run_pytest_level(
+                UNIT_TEST_DIR,
+                "unit tests",
+                test_file=test_file,
+                extra_args=extra_args,
+            )
+            if not ok:
+                failures += 1
+                return failures
+        elif level == "compliance":
+            ok = _run_pytest_level(
+                COMPLIANCE_TEST_DIR,
+                "layer compliance tests",
+                test_file=test_file,
+                extra_args=extra_args,
+            )
             if not ok:
                 failures += 1
                 return failures
         elif level == "integration":
-            ok = _run_pytest_level(INTEGRATION_TEST_DIR, "integration tests")
+            ok = _run_pytest_level(
+                INTEGRATION_TEST_DIR,
+                "integration tests",
+                test_file=test_file,
+                extra_args=extra_args,
+            )
             if not ok:
                 failures += 1
                 return failures
         elif level == "system":
-            sys_failures = _run_system_tests(args)
+            if test_file:
+                sys_failures = _run_single_system_test(
+                    args, test_file, extra_args=extra_args
+                )
+            else:
+                sys_failures = _run_system_tests(args, extra_args=extra_args)
             if sys_failures > 0:
                 failures += sys_failures
                 print()
@@ -502,6 +656,11 @@ def main() -> None:
         help="Run unit tests",
     )
     parser.add_argument(
+        "--compliance",
+        action="store_true",
+        help="Run layer compliance tests (not included by default)",
+    )
+    parser.add_argument(
         "--integration",
         action="store_true",
         help="Run integration tests",
@@ -515,6 +674,15 @@ def main() -> None:
         "--ci",
         action="store_true",
         help="Sets MVM_TEST_ENFORCE_NO_SUDO=1 in the environment",
+    )
+
+    # Single-file flag
+    parser.add_argument(
+        "--test",
+        "--file",
+        dest="test_file",
+        default=None,
+        help="Run a specific test file (absolute path or relative to repo root)",
     )
 
     # System-only flags (unchanged)
@@ -551,12 +719,35 @@ def main() -> None:
         help="Re-run only previously failed tests (reads .reports/system-test-results.txt)",
     )
 
+    # Extra pytest flags (all test levels)
+    parser.add_argument(
+        "--pytest-extra",
+        dest="pytest_extra",
+        default=None,
+        help="Extra flags to pass through to pytest (e.g. --pytest-extra \"-x --timeout=60\")",
+    )
+
     args = parser.parse_args()
+
+    # Resolve and validate --test/--file argument
+    test_file: Path | None = None
+    if args.test_file:
+        test_file = _resolve_test_file(args.test_file)
+        if not test_file.is_file():
+            parser.error(f"Test file not found: {test_file}")
+        name = test_file.name
+        if not (name.startswith("test_") or name.endswith("_test.py")):
+            parser.error(
+                f"File does not look like a test file: {name} "
+                "(must start with test_ or end with _test.py)"
+            )
 
     # Determine which levels to run
     levels: list[str] = []
     if args.unit:
         levels.append("unit")
+    if args.compliance:
+        levels.append("compliance")
     if args.integration:
         levels.append("integration")
     if args.system:
@@ -564,8 +755,25 @@ def main() -> None:
     if not levels:
         levels = ["unit", "integration", "system"]
 
-    # Validate: --domain requires --system
-    if args.domain and "system" not in levels:
+    # When --test is provided, narrow levels to the file's actual location
+    if test_file:
+        file_level = _get_file_test_level(test_file)
+        if file_level is None:
+            parser.error(
+                f"Cannot determine test level for {test_file} — "
+                "must be under tests/unit/, tests/integration/, "
+                "tests/layer_compliance/, or tests/system/"
+            )
+        matched = [lvl for lvl in levels if lvl == file_level]
+        if not matched:
+            parser.error(
+                f"Test file {test_file.name} is a {file_level} test, "
+                f"but --{file_level} was not requested"
+            )
+        levels = matched
+
+    # Validate: --domain requires --system (skip when running a specific file)
+    if not test_file and args.domain and "system" not in levels:
         parser.error("--domain requires --system (it is a system-test concept)")
 
     # CI mode: just set the env var, then fall through to normal execution
@@ -578,7 +786,7 @@ def main() -> None:
         return
 
     # Run levels in sequence
-    total_failures = _run_levels(args, levels)
+    total_failures = _run_levels(args, levels, test_file=test_file)
 
     if total_failures == 0:
         _ok("All tests passed")

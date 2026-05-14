@@ -9,6 +9,7 @@ CREATE TABLE images (
     id TEXT PRIMARY KEY,
     os_slug TEXT NOT NULL,
     os_name TEXT NOT NULL,
+    distro TEXT NULL,
     arch TEXT NOT NULL,
     path TEXT NOT NULL,
     fs_type TEXT NOT NULL,

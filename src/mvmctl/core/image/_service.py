@@ -297,6 +297,20 @@ class ImageService:
                 "Image shrinking not performed (filesystem type may be unsupported or detection failed)"
             )
 
+        # ── Detect OS type from the optimized image ──────────────────
+        distro: str | None = None
+        try:
+            dp = ImageProvisioner(
+                image_path=image_path,
+                provisioner_type=provisioner_type,
+                fs_type=fs_type,
+            )
+            distro = dp.detect_os()
+        except Exception:
+            logger.warning(
+                "Failed to detect OS type for image %s", image_id, exc_info=True
+            )
+
         compressed_path = self.compress(shrunk_path)
         t3 = time.monotonic()
         logger.info("  compress: %.2fs", t3 - t2)
@@ -318,6 +332,7 @@ class ImageService:
             os_slug=spec.id,
             os_name=spec.name,
             arch=spec.arch,
+            distro=distro,
             path=str(compressed_path.name),
             fs_type=fs_type,
             minimum_rootfs_size_mib=minimum_rootfs_size_mib,

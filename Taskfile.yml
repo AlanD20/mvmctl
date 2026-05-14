@@ -28,21 +28,21 @@ tasks:
     cmds:
       - uv run mypy src/
   test:
-    desc: Run pytest with 60% branch coverage gate
+    desc: Run all tests with 60% branch coverage gate (via test runner)
     cmds:
-      - uv run pytest tests/ -v -n auto --tb=short --cov=src/mvmctl --cov-report=term-missing --cov-fail-under=60
+      - uv run scripts/run_tests.py --pytest-extra "--cov=src/mvmctl --cov-report=term-missing --cov-fail-under=60"
   test-integration:
-    desc: Run pytest integration tests
+    desc: Run integration tests via the test runner script
     cmds:
-      - uv run pytest tests/integration -v -n auto --tb=short
+      - uv run scripts/run_tests.py --integration
   test-ci:
-    desc: Run pytest with 60% branch coverage gate
+    desc: Run all tests with 60% branch coverage gate in CI mode (via test runner)
     cmds:
-      - MVM_TEST_ENFORCE_NO_SUDO=1 uv run pytest tests/ -v --tb=short --cov=src/mvmctl --cov-report=term-missing --cov-fail-under=60
+      - uv run scripts/run_tests.py --ci --pytest-extra "--cov=src/mvmctl --cov-report=term-missing --cov-fail-under=60"
   test-ci-fast:
-    desc: Run tests without coverage — stop on first failure (fast feedback)
+    desc: Run all test levels — stop on first failure (fast feedback)
     cmds:
-      - MVM_TEST_ENFORCE_NO_SUDO=1 uv run pytest tests/ -x -q
+      - uv run scripts/run_tests.py --ci
   check:
     desc: Run all quality gates — lint, format-check, typecheck
     cmds:

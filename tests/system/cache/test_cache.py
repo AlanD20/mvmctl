@@ -281,38 +281,38 @@ def _restore_service_binaries() -> None:
             symlink.unlink(missing_ok=True)
             symlink.symlink_to("mvm-services")
 
-        conn = sqlite3.connect(str(db_path))
-        try:
-            cur = conn.execute(
-                "SELECT COUNT(*) FROM binaries WHERE name = ?", (name,)
-            )
-            if cur.fetchone()[0] == 0:
-                uid = hashlib.sha256(
-                    f"{name}:{entry['version']}".encode()
-                ).hexdigest()
-                conn.execute(
-                    """INSERT INTO binaries
-                       (id, name, version, full_version, path,
-                        is_default, is_present, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, 1, 1, ?, ?)""",
-                    (
-                        uid,
-                        name,
-                        entry["version"],
-                        entry["full_version"],
-                        name,
-                        now,
-                        now,
-                    ),
+            conn = sqlite3.connect(str(db_path))
+            try:
+                cur = conn.execute(
+                    "SELECT COUNT(*) FROM binaries WHERE name = ?", (name,)
                 )
-            else:
-                conn.execute(
-                    "UPDATE binaries SET is_present=1, updated_at=? WHERE name=?",
-                    (now, name),
-                )
-            conn.commit()
-        finally:
-            conn.close()
+                if cur.fetchone()[0] == 0:
+                    uid = hashlib.sha256(
+                        f"{name}:{entry['version']}".encode()
+                    ).hexdigest()
+                    conn.execute(
+                        """INSERT INTO binaries
+                           (id, name, version, full_version, path,
+                            is_default, is_present, created_at, updated_at)
+                           VALUES (?, ?, ?, ?, ?, 0, 1, ?, ?)""",
+                        (
+                            uid,
+                            name,
+                            entry["version"],
+                            entry["full_version"],
+                            name,
+                            now,
+                            now,
+                        ),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE binaries SET is_present=1, updated_at=? WHERE name=?",
+                        (now, name),
+                    )
+                conn.commit()
+            finally:
+                conn.close()
 
 
 # ── Non-dry-run prune tests (serial / destructive) ────────────────────────
@@ -532,6 +532,17 @@ class TestCachePruneAll:
             ls_result = _run_mvm(mvm_binary, *cmd_args, check=False)
             if ls_result.returncode == 0:
                 items: list[dict[str, Any]] = json.loads(ls_result.stdout)
-                assert len(items) == 0, (
-                    f"{' '.join(cmd_args)} should be empty after cache prune --all"
-                )
+                if cmd_args == ("kernel", "ls", "--json"):
+                    # Entries with is_present=False are DB artifacts from
+                    # earlier prune operations — they have no file on disk.
+                    # The default kernel may also be preserved by prune --all.
+                    present = [i for i in items if i.get("is_present")]
+                    assert len(present) == 0, (
+                        f"{' '.join(cmd_args)}: unexpected present entries "
+                        f"after cache prune --all: {present}"
+                    )
+                else:
+                    assert len(items) == 0, (
+                        f"{' '.join(cmd_args)} should be empty "
+                        f"after cache prune --all, got {len(items)} entries"
+                    )

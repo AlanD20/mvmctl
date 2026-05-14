@@ -123,7 +123,7 @@ def save_run(run: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-def bench_image(cfg: ImageBenchConfig, *, kernel_id: str | None = None) -> dict:
+def bench_image(cfg: ImageBenchConfig, *, kernel_id: str | None = None, skip_deblob: bool = False) -> dict:
     """
     Benchmark a single image.  The threshold_s also serves as the max-wait:
     if SSH isn't available within that time the image is aborted immediately.
@@ -173,6 +173,8 @@ def bench_image(cfg: ImageBenchConfig, *, kernel_id: str | None = None) -> dict:
         ]
         if effective_kernel:
             cmd += ["--kernel", effective_kernel]
+        if skip_deblob:
+            cmd.append("--skip-deblob")
         r = _mvm(*cmd)
         t1 = time.monotonic()
         result["create_s"] = round(t1 - t0, 1)
@@ -504,6 +506,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Path to mvm binary (e.g. ./dist/mvm). Default: uv run mvm",
     )
+    parser.add_argument(
+        "--skip-deblob",
+        action="store_true",
+        default=False,
+        help="Pass --skip-deblob to mvm vm create (skip rootfs debloat).",
+    )
     return parser.parse_args(argv)
 
 
@@ -558,7 +566,7 @@ def main() -> int:
             max_workers=len(configs)
         ) as pool:
             fut_map = {
-                pool.submit(bench_image, cfg, kernel_id=args.kernel): cfg
+                pool.submit(bench_image, cfg, kernel_id=args.kernel, skip_deblob=args.skip_deblob): cfg
                 for cfg in configs
             }
             for future in concurrent.futures.as_completed(fut_map):
@@ -595,7 +603,7 @@ def main() -> int:
                 end=" ",
                 flush=True,
             )
-            r = bench_image(cfg, kernel_id=args.kernel)
+            r = bench_image(cfg, kernel_id=args.kernel, skip_deblob=args.skip_deblob)
             tag = "✅" if r["passed"] else "❌"
             print(f"{tag}")
             results_map[cfg.name] = r

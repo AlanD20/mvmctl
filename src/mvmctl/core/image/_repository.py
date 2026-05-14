@@ -84,13 +84,14 @@ class ImageRepository:
             conn.execute(
                 """
                 INSERT INTO images (
-                    id, os_slug, os_name, arch, path, fs_type, fs_uuid,
+                    id, os_slug, os_name, distro, arch, path, fs_type, fs_uuid,
                     compressed_size, original_size, compression_ratio,
                     compressed_format, minimum_rootfs_size_mib, pulled_at, is_default, is_present, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     os_slug = excluded.os_slug,
                     os_name = excluded.os_name,
+                    distro = excluded.distro,
                     arch = excluded.arch,
                     path = excluded.path,
                     fs_type = excluded.fs_type,
@@ -109,6 +110,7 @@ class ImageRepository:
                     image.id,
                     image.os_slug,
                     image.os_name,
+                    image.distro,
                     image.arch,
                     image.path,
                     image.fs_type,

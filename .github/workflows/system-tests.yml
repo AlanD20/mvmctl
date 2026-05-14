@@ -13,4 +13,4 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev
       - name: Run system tests
-        run: uv run pytest tests/system/ -v --tb=short
+        run: uv run scripts/run_tests.py --system

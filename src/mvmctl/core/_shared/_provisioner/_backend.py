@@ -115,13 +115,18 @@ class _LoopMountBackend:
             )
             return "linux"
 
-    def deblob(self) -> None:
+    def deblob(self, os_type: str | None = None) -> None:
         """Queue deblob (OS cache cleanup) operations.
+
+        If ``os_type`` is provided, it is used directly to select the
+        correct deblob operations, skipping an extra ``detect_os()`` call.
+        This eliminates the dual loop-mount cycle in the VM provisioner.
 
         Note: ``fix_fstab`` is NOT called here — it is queued separately
         by the caller (``vm_operations.py``) to avoid duplicate execution.
         """
-        os_type = self.detect_os()
+        if os_type is None:
+            os_type = self.detect_os()
         from mvmctl.core._shared._provisioner._content import (
             ProvisionerContent,
         )
@@ -554,8 +559,14 @@ class _GuestfsBackend:
             raise RuntimeError("Guestfs partition extraction failed")
         return result
 
-    def deblob(self) -> None:
-        """Queue deblob (OS cache cleanup + fstab fix) operation."""
+    def deblob(self, os_type: str | None = None) -> None:
+        """Queue deblob (OS cache cleanup + fstab fix) operation.
+
+        Args:
+            os_type: Ignored for guestfs backend (it detects OS internally).
+                Accepted for interface compatibility with ``_LoopMountBackend``.
+
+        """
         self._gp.deblob()
 
     def fix_fstab(self) -> None:

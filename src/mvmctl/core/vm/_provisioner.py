@@ -94,9 +94,17 @@ class VMProvisioner:
         """Queue fstab fix for Firecracker (PARTUUID → /dev/vda)."""
         self._backend.fix_fstab()
 
-    def deblob(self) -> None:
-        """Queue debloat operations (OS cache cleanup)."""
-        self._backend.deblob()
+    def deblob(self, os_type: str | None = None) -> None:
+        """Queue debloat operations (OS cache cleanup).
+
+        Args:
+            os_type: Pre-detected OS type string. If ``None``, the backend
+                will detect the OS from the rootfs (incurring an extra
+                loop-mount cycle). Pass the value from the image's
+                ``distro`` field to eliminate the redundant detection.
+
+        """
+        self._backend.deblob(os_type=os_type)
 
     # -- execution ---------------------------------------------------------
 

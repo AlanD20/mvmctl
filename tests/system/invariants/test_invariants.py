@@ -161,7 +161,12 @@ class TestInvariants:
             ("kernel", kernels),
             ("network", networks),
         ]:
-            defaults = [r for r in resource_list if r.get("is_default")]
+            # Only consider present entries — stale records (is_present=False)
+            # have been removed from disk and should not count.
+            defaults = [
+                r for r in resource_list
+                if r.get("is_default") and r.get("is_present", True)
+            ]
             assert len(defaults) <= 1, (
                 f"{domain_name}: expected at most 1 default, "
                 f"got {len(defaults)}"
@@ -169,7 +174,9 @@ class TestInvariants:
 
         binary_defaults_by_name: dict[str, list[dict[str, Any]]] = {}
         for b in binaries:
-            if b.get("is_default"):
+            # Only consider present entries — stale records (is_present=False)
+            # have been removed from disk and should not count.
+            if b.get("is_default") and b.get("is_present"):
                 name = b.get("name", "unknown")
                 binary_defaults_by_name.setdefault(name, []).append(b)
         for name, defaults in binary_defaults_by_name.items():
@@ -1138,23 +1145,32 @@ class TestAtMostOneDefaultBinary:
         binaries = json.loads(result.stdout)
         if not binaries:
             pytest.skip("No cached binaries available")
-        if not any(b.get("is_default") for b in binaries):
-            _run_mvm(
-                mvm_binary,
-                "bin",
-                "default",
-                binaries[0]["id"][:6],
-                check=False,
-            )
+        present_defaults = [b for b in binaries if b.get("is_default") and b.get("is_present")]
+        if not present_defaults and binaries:
+            first_present = next((b for b in binaries if b.get("is_present")), None)
+            if first_present:
+                _run_mvm(
+                    mvm_binary,
+                    "bin",
+                    "default",
+                    first_present["id"][:6],
+                    check=False,
+                )
 
         result = _run_mvm(mvm_binary, "bin", "ls", "--json")
         binaries = json.loads(result.stdout)
-        defaults = [b for b in binaries if b.get("is_default")]
+        defaults = [
+            b for b in binaries
+            if b.get("is_default") and b.get("is_present")
+        ]
         original_default_id: str | None = (
             defaults[0]["id"] if defaults else None
         )
 
-        non_defaults = [b for b in binaries if not b.get("is_default")]
+        non_defaults = [
+            b for b in binaries
+            if not b.get("is_default") and b.get("is_present")
+        ]
         if not non_defaults:
             pytest.skip("All cached binaries are already default")
 
@@ -1176,7 +1192,8 @@ class TestAtMostOneDefaultBinary:
 
         result = _run_mvm(mvm_binary, "bin", "ls", "--json")
         first_round = [
-            b for b in json.loads(result.stdout) if b.get("is_default")
+            b for b in json.loads(result.stdout)
+            if b.get("is_default") and b.get("is_present")
         ]
         # Binaries support per-name defaults (firecracker, jailer, service bins).
         # Verify at most 1 default per name after first set.
@@ -1196,7 +1213,8 @@ class TestAtMostOneDefaultBinary:
 
         result = _run_mvm(mvm_binary, "bin", "ls", "--json")
         other_non_defaults = [
-            b for b in json.loads(result.stdout) if not b.get("is_default")
+            b for b in json.loads(result.stdout)
+            if not b.get("is_default") and b.get("is_present")
         ]
         if not other_non_defaults:
             pytest.skip("No other binary to set as default")
@@ -1220,7 +1238,8 @@ class TestAtMostOneDefaultBinary:
 
         result = _run_mvm(mvm_binary, "bin", "ls", "--json")
         second_round = [
-            b for b in json.loads(result.stdout) if b.get("is_default")
+            b for b in json.loads(result.stdout)
+            if b.get("is_default") and b.get("is_present")
         ]
         # Verify at most 1 default per name after second set.
         second_defaults_by_name: dict[str, list[dict[str, Any]]] = {}

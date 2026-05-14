@@ -288,7 +288,7 @@ class Provisioner:
     def _setup_loop(self) -> None:
         """Set up a loop device with partition scanning."""
         result = subprocess.run(
-            ["losetup", "-f", "-P", "--show", self._image],
+            ["losetup", "-f", "-P", "--show", "--direct-io=on", self._image],
             capture_output=True,
             text=True,
             check=True,

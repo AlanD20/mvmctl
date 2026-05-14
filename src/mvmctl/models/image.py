@@ -30,6 +30,7 @@ class ImageItem:
     created_at: str
     updated_at: str
 
+    distro: str | None = None
     fs_uuid: str | None = None
     compressed_size: int | None = None
     compression_ratio: float | None = None

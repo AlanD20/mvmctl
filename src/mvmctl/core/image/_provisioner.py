@@ -53,6 +53,20 @@ class ImageProvisioner:
 
     # -- builder methods (declarative) ------------------------------------
 
+    def detect_os(self) -> str:
+        """Detect the OS type from the image using a fresh backend session.
+
+        Returns:
+            OS identifier string (e.g. ``"ubuntu"``, ``"debian"``, ``"alpine"``).
+
+        """
+        backend = ProvisionerBackend.get_image(
+            self._image_path,
+            provisioner_type=self._provisioner_type,
+            fs_type=self._fs_type,
+        )
+        return backend.detect_os()
+
     def deblob(self) -> None:
         """Mark that deblob + fstab fix should run."""
         self._deblob = True

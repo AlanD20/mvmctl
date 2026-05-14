@@ -583,6 +583,7 @@ class ImageOperation:
             "compressed_size": img.compressed_size,
             "original_size": img.original_size,
             "compression_ratio": img.compression_ratio,
+            "distro": img.distro,
             "compressed_format": img.compressed_format,
             "minimum_rootfs_size_mib": img.minimum_rootfs_size_mib,
             "pulled_at": img.pulled_at,

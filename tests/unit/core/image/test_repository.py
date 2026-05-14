@@ -24,6 +24,7 @@ def _make_image(
     is_default: bool = False,
     is_present: bool = True,
     fs_uuid: str | None = None,
+    distro: str | None = None,
 ) -> ImageItem:
     ts = datetime.now(tz=UTC).isoformat()
     return ImageItem(
@@ -34,6 +35,7 @@ def _make_image(
         path=path,
         fs_type=fs_type,
         fs_uuid=fs_uuid,
+        distro=distro,
         compressed_size=None,
         original_size=original_size,
         compression_ratio=None,
@@ -184,6 +186,46 @@ class TestImageRepository:
         result = self.repo.get("a" * 64)
         assert result is not None
         assert result.os_slug == "ubuntu-24.04-updated"
+
+    def test_upsert_preserves_distro(self) -> None:
+        """upsert() stores and retrieves distro field correctly."""
+        image = _make_image("a" * 64, os_slug="ubuntu-24.04", distro="ubuntu")
+        self.repo.upsert(image)
+
+        result = self.repo.get("a" * 64)
+        assert result is not None
+        assert result.distro == "ubuntu"
+
+    def test_upsert_updates_distro(self) -> None:
+        """upsert() updates distro field on re-insert."""
+        image = _make_image("a" * 64, os_slug="ubuntu-24.04", distro="ubuntu")
+        self._insert_direct(image)
+
+        updated = _make_image("a" * 64, os_slug="ubuntu-24.04", distro="canonical-ubuntu")
+        self.repo.upsert(updated)
+
+        result = self.repo.get("a" * 64)
+        assert result is not None
+        assert result.distro == "canonical-ubuntu"
+
+    def test_upsert_distro_defaults_to_none(self) -> None:
+        """upsert() stores distro as None when not provided."""
+        image = _make_image("a" * 64, os_slug="debian-12", distro=None)
+        self.repo.upsert(image)
+
+        result = self.repo.get("a" * 64)
+        assert result is not None
+        assert result.distro is None
+
+    def test_upsert_with_alpine_distro(self) -> None:
+        """upsert() works with alpine distro."""
+        image = _make_image("a" * 64, os_slug="alpine-3.21", distro="alpine")
+        self.repo.upsert(image)
+
+        result = self.repo.get("a" * 64)
+        assert result is not None
+        assert result.distro == "alpine"
+        assert result.os_slug == "alpine-3.21"
 
     # ------------------------------------------------------------------
     # soft_delete()

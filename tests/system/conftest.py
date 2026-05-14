@@ -98,7 +98,7 @@ def _cleanup_stale_processes() -> None:
 
 
 def _run_cmd(
-    binary: str, args: list[str], *, timeout: int = 60
+    binary: str, args: list[str], *, timeout: int = 60, check: bool = True
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [*shlex.split(binary), *args],
@@ -142,9 +142,44 @@ def _ensure_kernel(binary: str) -> None:
 
 def _ensure_image(binary: str, image: str = "alpine-3.21") -> None:
     r = _run_cmd(binary, ["image", "ls", "--json"], timeout=30)
-    cached = json.loads(r.stdout) if r.returncode == 0 else []
-    if image not in [i.get("os_slug", "") for i in cached]:
+    if r.returncode != 0:
         _pull_asset(binary, ["image", "pull", image], f"image '{image}'")
+        return
+    cached = json.loads(r.stdout) if r.stdout else []
+    matching = [
+        i for i in cached
+        if i.get("os_slug") == image and i.get("is_present")
+    ]
+    if not matching:
+        _pull_asset(binary, ["image", "pull", image], f"image '{image}'")
+        return
+
+    # Verify the image file actually exists on disk (DB may be stale)
+    inspect = _run_cmd(
+        binary,
+        ["image", "inspect", matching[0]["id"][:6], "--json"],
+        timeout=30,
+    )
+    if inspect.returncode == 0 and inspect.stdout.strip():
+        try:
+            info = json.loads(inspect.stdout)
+            img_rel_path = info.get("path", "")
+            if img_rel_path:
+                cache_dir = Path(
+                    os.environ.get("MVM_CACHE_DIR", Path.home() / ".cache" / "mvmctl")
+                )
+                img_file = cache_dir / "images" / img_rel_path
+                if not img_file.exists():
+                    _print_prep(
+                        f"Image file {img_file} missing — re-pulling {image}"
+                    )
+                    _pull_asset(
+                        binary,
+                        ["image", "pull", image, "--force"],
+                        f"image '{image}'",
+                    )
+        except (json.JSONDecodeError, KeyError, TypeError):
+            pass
 
 
 def _ensure_binary(binary: str) -> None:
@@ -191,23 +226,91 @@ def _ensure_services_binary(binary: str) -> None:
     bin_dir = Path.home() / ".cache" / "mvmctl" / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
     dest = bin_dir / "mvm-services"
-    shutil.copy2(str(services_src), str(dest))
+
+    # Retry copy on ETXTBUSY (errno 26) — stale service processes (nocloud,
+    # console-relay, mvm-provision) may hold the binary mmap'd even after
+    # VM cleanup.  Kill them before retrying.
+    import errno as _errno
+
+    _copy_retries = 5
+    for copy_attempt in range(_copy_retries):
+        try:
+            shutil.copy2(str(services_src), str(dest))
+            break
+        except OSError as _e:
+            if _e.errno != _errno.ETXTBSY:
+                raise
+            if copy_attempt >= _copy_retries - 1:
+                # Last retry — fall back: copy to a temp name, then rename
+                # (rename does not require opening the destination file).
+                _print_prep("Text file busy persists, trying rename fallback...")
+                import tempfile as _tempfile
+                _tmp_dest = dest.with_suffix(".tmp.copy")
+                shutil.copy2(str(services_src), str(_tmp_dest))
+                _tmp_dest.chmod(0o755)
+                _tmp_dest.rename(dest)
+                _print_prep("Renamed temp copy over destination")
+                break
+            _print_prep(
+                f"Text file busy on mvm-services, killing stale "
+                f"service processes and retrying "
+                f"({copy_attempt + 1}/{_copy_retries})..."
+            )
+            # Kill stale service processes that may hold the binary open
+            for _name in ("mvm-console-relay", "mvm-nocloud-server", "mvm-provision"):
+                try:
+                    subprocess.run(
+                        ["killall", "-9", _name],
+                        capture_output=True,
+                        timeout=5,
+                        check=False,
+                    )
+                except FileNotFoundError:
+                    pass
+            time.sleep(2.0)
     dest.chmod(0o755)
     _print_prep("Copied mvm-services binary to cache bin dir")
 
-    # Try to register in DB (bin register may not exist as a CLI command)
-    register_result = _run_cmd(
-        binary,
-        ["bin", "register", str(dest), "--name", "mvm-provision"],
-        timeout=30,
-        check=False,
-    )
-    if register_result.returncode != 0:
-        _print_prep(
-            "WARNING: 'bin register' command not available. "
-            "Service binary copied but not DB-registered. "
-            "Run 'mvm init' to register it."
-        )
+    # Register all service binaries directly in the DB since there is
+    # no CLI command to do so.  This mirrors _restore_service_binaries()
+    # in tests/system/cache/test_cache.py.
+    import sqlite3 as _sqlite3
+    import hashlib as _hashlib
+    import datetime as _datetime
+
+    db_path = Path.home() / ".cache" / "mvmctl" / "mvmdb.db"
+    _service_entries = [
+        ("mvm-console-relay", "0.1.0", "0.1.0"),
+        ("mvm-nocloud-server", "0.1.0", "0.1.0"),
+        ("mvm-provision", "0.1.0", "0.1.0"),
+    ]
+    _now = _datetime.datetime.now(_datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S")
+    _conn = _sqlite3.connect(str(db_path))
+    try:
+        for _sname, _sver, _sfullver in _service_entries:
+            _cur = _conn.execute(
+                "SELECT COUNT(*) FROM binaries WHERE name = ?", (_sname,)
+            )
+            if _cur.fetchone()[0] == 0:
+                _uid = _hashlib.sha256(
+                    f"{_sname}:{_sver}".encode()
+                ).hexdigest()
+                _conn.execute(
+                    """INSERT INTO binaries
+                       (id, name, version, full_version, path,
+                        is_default, is_present, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, 0, 1, ?, ?)""",
+                    (_uid, _sname, _sver, _sfullver, _sname, _now, _now),
+                )
+            else:
+                _conn.execute(
+                    "UPDATE binaries SET is_present=1, updated_at=? WHERE name=?",
+                    (_now, _sname),
+                )
+        _conn.commit()
+    finally:
+        _conn.close()
+    _print_prep("Service binaries registered in DB")
 
 
 def ensure_vm_deps(binary: str) -> None:
@@ -217,7 +320,16 @@ def ensure_vm_deps(binary: str) -> None:
     the ``created_vm`` or ``minimal_vm`` fixtures (which call it internally).
     Guestfs is disabled by default (``settings.guestfs_enabled = False`` in
     ``constants.py``) — only loop-mount is used for provisioning.
+
+    If a previous test enabled guestfs and failed to reset it, re-disable it
+    here so loop-mount provisioning works reliably.
     """
+    _run_cmd(
+        binary,
+        ["config", "set", "settings", "guestfs_enabled", "false"],
+        timeout=10,
+        check=False,
+    )
     _ensure_kernel(binary)
     _ensure_image(binary)
     _ensure_binary(binary)

@@ -368,13 +368,10 @@ class TestNetworkSync:
         assert isinstance(stats["orphaned"], int)
 
         # Verify rules exist in DB for this network
-        from mvmctl.core._shared import Database
-        from mvmctl.core._shared._iptables_tracker._repository import (
-            IPTablesRuleRepository,
-        )
+        from mvmctl.core._shared._firewall_tracker import FirewallTracker
 
-        repo = IPTablesRuleRepository(Database())
-        rules = repo.get_by_network_id(network.id, active_only=True)
+        tracker = FirewallTracker()
+        rules = tracker.repo.get_by_network_id(network.id, active_only=True)
         assert len(rules) > 0
         assert all(r.network_id == network.id for r in rules)
         assert all(r.is_active for r in rules)

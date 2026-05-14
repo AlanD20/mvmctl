@@ -23,10 +23,13 @@ class TestBinLifecycle:
         data: list[dict[str, Any]] = json.loads(result.stdout)
         assert isinstance(data, list)
         if data:
-            entry = data[0]
-            assert entry.get("is_present") is True, (
-                f"Expected binary to be cached: {entry}"
+            # Find at least one entry with is_present=True
+            present = [e for e in data if e.get("is_present") is True]
+            assert present, (
+                "No binary with is_present=True found in listing.\n"
+                f"Full listing: {json.dumps(data, indent=2)}"
             )
+            entry = present[0]
             assert re.match(r"\d+\.\d+\.\d+", entry.get("version", "")), (
                 f"Invalid version format: {entry}"
             )

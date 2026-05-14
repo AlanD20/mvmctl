@@ -512,13 +512,14 @@ class TestImageOperationHelpers:
 
     def test_image_to_dict_includes_all_fields(self):
         """_image_to_dict() includes all relevant fields."""
-        img = _make_image("ubuntu-24.04", fs_uuid="abc-123")
+        img = _make_image("ubuntu-24.04", fs_uuid="abc-123", distro="ubuntu")
         d = ImageOperation._image_to_dict(img)
         assert d["os_slug"] == "ubuntu-24.04"
         assert d["name"] == "Ubuntu 24.04 LTS"
         assert d["arch"] == "x86_64"
         assert d["fs_type"] == "ext4"
         assert d["fs_uuid"] == "abc-123"
+        assert d["distro"] == "ubuntu"
         assert d["compressed_size"] == 500
         assert d["compression_ratio"] == 2.0
         assert d["minimum_rootfs_size_mib"] == 2048
@@ -530,6 +531,20 @@ class TestImageOperationHelpers:
         img = _make_image("test")
         d = ImageOperation._image_to_dict(img)
         assert "deleted_at" not in d
+
+    def test_image_to_dict_includes_distro_when_set(self):
+        """_image_to_dict() includes distro field when set."""
+        img = _make_image("test", distro="alpine")
+        d = ImageOperation._image_to_dict(img)
+        assert "distro" in d
+        assert d["distro"] == "alpine"
+
+    def test_image_to_dict_distro_defaults_to_none(self):
+        """_image_to_dict() includes distro field as None when not set."""
+        img = _make_image("test")
+        d = ImageOperation._image_to_dict(img)
+        assert "distro" in d
+        assert d["distro"] is None
 
     def test_image_to_dict_handles_none_optionals(self):
         """_image_to_dict() handles None optional fields gracefully."""

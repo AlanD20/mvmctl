@@ -95,6 +95,8 @@ class ProvisionerContent:
             "PasswordAuthentication no",
             "PermitEmptyPasswords no",
             "UsePAM yes",
+            "UseDNS no",
+            "GSSAPIAuthentication no",
         ]
         if user != "root":
             lines.append(f"AllowUsers {user}")
@@ -474,9 +476,20 @@ class ProvisionerContent:
             )
             # MicroVM boot optimizations: pre-initialize pacman keyring
             # (saves ~3.7s on every boot)
-            ops.append(ChrootOp("pacman-key --init 2>/dev/null || true"))
+            # Only run if keyring not already populated (first time during
+            # image optimization bakes it into the cached image — subsequent
+            # runs during VM creation skip it, saving ~10s of entropy wait).
             ops.append(
-                ChrootOp("pacman-key --populate archlinux 2>/dev/null || true")
+                ChrootOp(
+                    "if [ ! -f /etc/pacman.d/gnupg/pubring.gpg ]; then "
+                    "pacman-key --init 2>/dev/null || true; fi"
+                )
+            )
+            ops.append(
+                ChrootOp(
+                    "if [ -f /etc/pacman.d/gnupg/pubring.gpg ]; then "
+                    "pacman-key --populate archlinux 2>/dev/null || true; fi"
+                )
             )
             # Pre-create systemd-firstboot configs to skip firstboot prompts
             # (saves ~700ms on first boot)

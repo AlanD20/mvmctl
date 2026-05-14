@@ -123,16 +123,53 @@ class TestNetworkLifecycle:
             f"Expected non-empty subnet: {network}"
         )
 
-    def test_ip_rule_verification_iptables(self, module_network):
-        """Verify iptables rules were created for network."""
+    def test_ip_rule_verification_iptables(self, mvm_binary, module_network):
+        """Verify firewall rules were created for network (iptables or nftables)."""
         bridge = _compute_bridge_name(module_network)
-        result = subprocess.run(
-            ["sudo", "iptables", "-t", "nat", "-L"],
-            capture_output=True,
-            text=True,
+
+        # Determine current firewall backend
+        backend_result = _run_mvm(
+            mvm_binary, "config", "get", "settings", "firewall_backend", check=False
         )
-        assert result.returncode == 0
-        assert bridge in result.stdout
+        backend = "nftables"  # hardcoded default in constants.py
+        if backend_result.returncode == 0 and backend_result.stdout.strip():
+            stdout_clean = backend_result.stdout.strip()
+            # Parse "settings.firewall_backend = nftables" format
+            if "=" in stdout_clean:
+                raw = stdout_clean.split("=")[-1].strip()
+                # "(default)" means the hardcoded default applies = nftables
+                if raw and raw != "(default)":
+                    backend = raw
+            else:
+                backend = stdout_clean
+
+        if backend == "nftables":
+            # In nftables mode, the bridge interface name appears in the
+            # MVM-FORWARD chain (iifname/oifname match), not POSTROUTING.
+            result = subprocess.run(
+                ["sudo", "nft", "list", "chain", "inet", "mvmctl", "MVM-FORWARD"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert result.returncode == 0, (
+                f"nft list chain MVM-FORWARD failed: {result.stderr}"
+            )
+            assert bridge in result.stdout, (
+                f"Bridge '{bridge}' not found in nftables MVM-FORWARD chain:\n"
+                f"{result.stdout}"
+            )
+        else:
+            result = subprocess.run(
+                ["sudo", "iptables", "-t", "nat", "-L"],
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode == 0
+            assert bridge in result.stdout, (
+                f"Bridge '{bridge}' not found in iptables nat table:\n"
+                f"{result.stdout}"
+            )
 
     def test_nat_gateway_configuration(self, module_network):
         """Verify bridge interface exists for created network."""
