@@ -42,7 +42,7 @@ def _seed_fk_tables(db: Database) -> None:
         )
         conn.execute(
             "INSERT OR IGNORE INTO images "
-            "(id, os_slug, os_name, arch, path, fs_type, minimum_rootfs_size_mib, original_size, pulled_at, is_default, created_at, updated_at) "
+            "(id, type, name, arch, path, fs_type, minimum_rootfs_size_mib, original_size, pulled_at, is_default, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 "img-001",

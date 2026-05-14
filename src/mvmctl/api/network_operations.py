@@ -13,7 +13,7 @@ from mvmctl.core.host._repository import HostRepository
 from mvmctl.core.network._controller import NetworkController
 from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.core.network._service import NetworkService
-from mvmctl.exceptions import NetworkError
+from mvmctl.exceptions import NetworkError, NetworkNotFoundError
 from mvmctl.models import NetworkItem
 from mvmctl.models.result import NeedsInteraction, OperationResult
 from mvmctl.utils.auditlog import AuditLog
@@ -242,7 +242,7 @@ class NetworkOperation:
         request = NetworkRequest(inputs=inputs, db=db)
         try:
             resolved = request.resolve()
-        except NetworkError as e:
+        except (NetworkError, NetworkNotFoundError) as e:
             return OperationResult(
                 status="error",
                 code="network.remove_failed",

@@ -25,8 +25,8 @@ class TestImageItem:
     def _make(self, **overrides: object) -> ImageItem:
         base = {
             "id": "a" * 64,
-            "os_slug": "ubuntu-24.04",
-            "os_name": "Ubuntu 24.04",
+            "type": "ubuntu-24.04",
+            "name": "Ubuntu 24.04",
             "arch": "x86_64",
             "path": "/cache/images/ubuntu-24.04.ext4",
             "fs_type": "ext4",
@@ -44,7 +44,7 @@ class TestImageItem:
     def test_required_fields(self) -> None:
         image = self._make()
         assert image.id == "a" * 64
-        assert image.os_slug == "ubuntu-24.04"
+        assert image.type == "ubuntu-24.04"
         assert image.path == "/cache/images/ubuntu-24.04.ext4"
         assert image.is_default is False
         assert image.is_present is True

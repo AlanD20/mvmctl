@@ -123,7 +123,9 @@ class TestSSHConnect:
             "-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----"
         )
 
-        result = SSHOperation.connect(SSHInput(identifier="ssh-key-vm", key=key_path))
+        result = SSHOperation.connect(
+            SSHInput(identifier="ssh-key-vm", key=key_path)
+        )
         assert result.item == 0
         assert len(mocks["execvp_calls"]) == 1
         _file, args = mocks["execvp_calls"][0]

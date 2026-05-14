@@ -19,7 +19,7 @@ from mvmctl.models.result import OperationResult
 
 
 def _make_image(
-    os_slug: str = "ubuntu-24.04",
+    type: str = "ubuntu-24.04",
     name: str = "Ubuntu 24.04 LTS",
     is_default: bool = False,
     is_present: bool = True,
@@ -27,11 +27,11 @@ def _make_image(
     **kwargs: object,
 ) -> ImageItem:
     defaults: dict = dict(
-        id=image_id or f"img-{os_slug}-" + "x" * 55,
-        os_slug=os_slug,
-        os_name=name,
+        id=image_id or f"img-{type}-" + "x" * 55,
+        type=type,
+        name=name,
         arch="x86_64",
-        path=f"images/{os_slug}.ext4",
+        path=f"images/{type}.ext4",
         fs_type="ext4",
         minimum_rootfs_size_mib=2048,
         original_size=1024,
@@ -74,7 +74,7 @@ def _setup_pull_mocks(
     mocker.patch("mvmctl.api.image_operations.Database", return_value=mock_db)
 
     mock_repo = MagicMock()
-    mock_repo.get_by_os_slug.return_value = existing_image
+    mock_repo.get_by_type.return_value = existing_image
     mocker.patch(
         "mvmctl.api.image_operations.ImageRepository", return_value=mock_repo
     )
@@ -139,7 +139,7 @@ class TestImageOperationPull:
     """Tests for ImageOperation.pull()."""
 
     def test_pull_early_return_image_exists(self, mocker):
-        existing = _make_image(os_slug="ubuntu-24.04")
+        existing = _make_image(type="ubuntu-24.04")
         _setup_pull_mocks(mocker, existing_image=existing, force=False)
 
         mock_path = MagicMock()
@@ -152,16 +152,14 @@ class TestImageOperationPull:
         )
 
         result = ImageOperation.pull(
-            ImagePullInput(os_slug="ubuntu-24.04", type="qcow2")
+            ImagePullInput(type="ubuntu-24.04")
         )
         assert result.status == "skipped"
         assert result.code == "image.already_present"
         assert result.item is existing
 
     def test_pull_force_re_pull_despite_existing(self, mocker):
-        existing = _make_image(
-            os_slug="ubuntu-24.04", image_id="old-" + "x" * 61
-        )
+        existing = _make_image(type="ubuntu-24.04", image_id="old-" + "x" * 61)
         deps = _setup_pull_mocks(mocker, existing_image=existing, force=True)
 
         mock_download_path = Path("/tmp/images/downloaded.qcow2")
@@ -169,13 +167,11 @@ class TestImageOperationPull:
         deps["image_svc"].download_image.return_value = mock_download_path
         deps["image_svc"].extract_image.return_value = mock_extracted_path
 
-        new_item = _make_image(
-            os_slug="ubuntu-24.04", image_id="new-" + "x" * 60
-        )
+        new_item = _make_image(type="ubuntu-24.04", image_id="new-" + "x" * 60)
         deps["image_svc"].optimize_image.return_value = new_item
 
         result = ImageOperation.pull(
-            ImagePullInput(os_slug="ubuntu-24.04", type="qcow2", force=True)
+            ImagePullInput(type="ubuntu-24.04", force=True)
         )
         assert result.status == "success"
         assert result.code == "image.acquired"
@@ -188,11 +184,11 @@ class TestImageOperationPull:
         deps["image_svc"].download_image.return_value = mock_download_path
         deps["image_svc"].extract_image.return_value = mock_extracted_path
 
-        new_item = _make_image(os_slug="ubuntu-24.04")
+        new_item = _make_image(type="ubuntu-24.04")
         deps["image_svc"].optimize_image.return_value = new_item
 
         result = ImageOperation.pull(
-            ImagePullInput(os_slug="ubuntu-24.04", type="qcow2")
+            ImagePullInput(type="ubuntu-24.04")
         )
         assert result.status == "success"
         assert result.code == "image.acquired"
@@ -209,7 +205,7 @@ class TestImageOperationPull:
         deps["image_svc"].optimize_image.return_value = _make_image()
 
         ImageOperation.pull(
-            ImagePullInput(os_slug="ubuntu-24.04", type="qcow2"),
+            ImagePullInput(type="ubuntu-24.04"),
             on_progress=on_progress,
         )
         assert on_progress.call_count >= 3
@@ -226,7 +222,7 @@ class TestImageOperationPull:
         )
 
         result = ImageOperation.pull(
-            ImagePullInput(os_slug="ubuntu-24.04", type="qcow2")
+            ImagePullInput(type="ubuntu-24.04")
         )
         assert result.status == "error"
         assert result.code == "image.acquire_failed"
@@ -241,13 +237,13 @@ class TestImageOperationPull:
         )
 
         result = ImageOperation.pull(
-            ImagePullInput(os_slug="ubuntu-24.04", type="qcow2")
+            ImagePullInput(type="ubuntu-24.04")
         )
         assert result.status == "error"
 
     def test_pull_cleans_up_old_image(self, mocker):
         existing = _make_image(
-            os_slug="ubuntu-24.04",
+            type="ubuntu-24.04",
             image_id="old-" + "x" * 60,
             path="images/old-ubuntu.ext4",
         )
@@ -255,14 +251,12 @@ class TestImageOperationPull:
 
         deps["image_svc"].download_image.return_value = Path("/tmp/dl.qcow2")
         deps["image_svc"].extract_image.return_value = Path("/tmp/ext.ext4")
-        new_item = _make_image(
-            os_slug="ubuntu-24.04", image_id="new-" + "x" * 60
-        )
+        new_item = _make_image(type="ubuntu-24.04", image_id="new-" + "x" * 60)
         deps["image_svc"].optimize_image.return_value = new_item
         deps["image_svc"].remove_many_paths.return_value = ["old-file"]
 
         ImageOperation.pull(
-            ImagePullInput(os_slug="ubuntu-24.04", type="qcow2", force=True)
+            ImagePullInput(type="ubuntu-24.04", force=True)
         )
         deps["image_svc"].remove_many_paths.assert_called_once_with([existing])
 
@@ -279,7 +273,7 @@ class TestImageOperationPull:
         deps["image_svc"].optimize_image.return_value = _make_image()
 
         ImageOperation.pull(
-            ImagePullInput(os_slug="ubuntu-24.04", type="qcow2")
+            ImagePullInput(type="ubuntu-24.04")
         )
         call_args = deps["image_svc"].download_image.call_args
         assert call_args is not None
@@ -303,7 +297,7 @@ class TestImageOperationPull:
 
         with pytest.raises(ImageError, match="Failed to resolve output_dir"):
             ImageOperation.pull(
-                ImagePullInput(os_slug="ubuntu-24.04", type="qcow2")
+                ImagePullInput(type="ubuntu-24.04")
             )
 
 
@@ -321,7 +315,7 @@ class TestImageOperationImport:
         mocker.patch("mvmctl.api.image_operations.Database")
 
         mock_repo = MagicMock()
-        mock_repo.get_by_os_slug.return_value = existing_image
+        mock_repo.get_by_type.return_value = existing_image
         mocker.patch(
             "mvmctl.api.image_operations.ImageRepository",
             return_value=mock_repo,
@@ -332,7 +326,7 @@ class TestImageOperationImport:
         mock_resolved.source_path = Path("/tmp/my-image.qcow2")
         mock_resolved.format = "qcow2"
         mock_resolved.arch = "x86_64"
-        mock_resolved.os_slug = "custom-image"
+        mock_resolved.type = "custom-image"
         mock_resolved.output_dir = Path("/tmp/images")
         mock_resolved.force = force
         mock_resolved.partition = None
@@ -363,7 +357,7 @@ class TestImageOperationImport:
         return deps
 
     def test_import_early_return_image_exists(self, mocker):
-        existing = _make_image(os_slug="custom-image")
+        existing = _make_image(type="custom-image")
         self._setup_import_mocks(mocker, existing_image=existing, force=False)
 
         mock_path = MagicMock()
@@ -388,7 +382,7 @@ class TestImageOperationImport:
         deps["image_svc"].extract_image.return_value = Path(
             "/tmp/extracted.ext4"
         )
-        new_item = _make_image(os_slug="custom-image")
+        new_item = _make_image(type="custom-image")
         deps["image_svc"].optimize_image.return_value = new_item
 
         result = ImageOperation.import_(
@@ -421,7 +415,7 @@ class TestImageOperationImport:
 
     def test_import_cleans_up_old_image(self, mocker):
         existing = _make_image(
-            os_slug="custom-image",
+            type="custom-image",
             image_id="old-" + "x" * 60,
             path="images/old-custom.ext4",
         )
@@ -431,9 +425,7 @@ class TestImageOperationImport:
         deps["image_svc"].extract_image.return_value = Path(
             "/tmp/extracted.ext4"
         )
-        new_item = _make_image(
-            os_slug="custom-image", image_id="new-" + "x" * 60
-        )
+        new_item = _make_image(type="custom-image", image_id="new-" + "x" * 60)
         deps["image_svc"].optimize_image.return_value = new_item
         deps["image_svc"].remove_many_paths.return_value = ["old-file"]
 
@@ -517,16 +509,14 @@ class TestImageOperationImport:
             )
 
     def test_import_force_reimport(self, mocker):
-        existing = _make_image(os_slug="custom-image")
+        existing = _make_image(type="custom-image")
         deps = self._setup_import_mocks(
             mocker, existing_image=existing, force=True
         )
         deps["image_svc"].extract_image.return_value = Path(
             "/tmp/extracted.ext4"
         )
-        new_item = _make_image(
-            os_slug="custom-image", image_id="new-" + "x" * 60
-        )
+        new_item = _make_image(type="custom-image", image_id="new-" + "x" * 60)
         deps["image_svc"].optimize_image.return_value = new_item
 
         result = ImageOperation.import_(
@@ -565,7 +555,7 @@ class TestImageOperationRemoveExtended:
         )
 
         result = ImageOperation.remove(
-            ImageInput(os_slug=["ubuntu-24.04", "debian-12"]), force=True
+            ImageInput(type=["ubuntu-24.04", "debian-12"]), force=True
         )
         assert result.all_ok
         assert mock_image_svc.remove.call_count == 2
@@ -578,7 +568,7 @@ class TestImageOperationHelpersExtended:
         self, mocker
     ):
         mock_repo = MagicMock()
-        mock_repo.get_by_os_slug.return_value = None
+        mock_repo.get_by_type.return_value = None
         mock_repo.get.return_value = None
         images_dir = MagicMock()
 
@@ -591,7 +581,7 @@ class TestImageOperationHelpersExtended:
     def test_find_existing_image_returns_none_when_no_path(self, mocker):
         item = _make_image("test", path="")
         mock_repo = MagicMock()
-        mock_repo.get_by_os_slug.return_value = item
+        mock_repo.get_by_type.return_value = item
         images_dir = MagicMock()
 
         result = ImageOperation.find_existing_image(
@@ -608,6 +598,6 @@ class TestImageOperationHelpersExtended:
         deps["image_svc"].optimize_image.return_value = _make_image()
 
         result = ImageOperation.pull(
-            ImagePullInput(os_slug="ubuntu-24.04", type="qcow2")
+            ImagePullInput(type="ubuntu-24.04")
         )
         assert result.status == "success"

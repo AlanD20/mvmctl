@@ -2,7 +2,7 @@
 VM import resolution — Input → Request → ResolvedVMCreateInput.
 
 Reads a portable VMExportConfig JSON file, resolves semantic references
-(os_slug, version, name) to actual DB records, and produces a
+(type, version, name) to actual DB records, and produces a
 ResolvedVMCreateInput ready for VM creation.
 """
 
@@ -106,16 +106,16 @@ class VMImportRequest:
         ).resolve()
 
     def _resolve_image(self, image_config: VMExportImageConfig) -> str | None:
-        if not image_config.os_slug:
+        if not image_config.type:
             return None
         resolver = ImageResolver(ImageRepository(self._db))
         try:
-            image = resolver.by_os_slug(image_config.os_slug)
-            return image.os_slug
+            image = resolver.by_type(image_config.type)
+            return image.type
         except ImageNotFoundError as exc:
             raise ImageNotFoundError(
-                f"Image '{image_config.os_slug}' not found. "
-                f"Fetch it first: mvm image pull {image_config.os_slug}"
+                f"Image '{image_config.type}' not found. "
+                f"Fetch it first: mvm image pull {image_config.type}"
             ) from exc
 
     def _resolve_kernel(

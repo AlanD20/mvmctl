@@ -165,8 +165,8 @@ def ensure_mirror_seeded(mirror: Path) -> None:
             "firecracker",
             "--default",
         ],
-        ["uv", "run", "mvm", "image", "pull", "alpine-3.21"],
-        ["uv", "run", "mvm", "image", "pull", "ubuntu-24.04-minimal"],
+        ["uv", "run", "mvm", "image", "pull", "alpine", "--version", "3.21"],
+        ["uv", "run", "mvm", "image", "pull", "ubuntu-minimal", "--version", "24.04"],
         ["uv", "run", "mvm", "bin", "pull", "1.15.1", "--default"],
     ]
     for cmd in seed_cmds:
@@ -344,6 +344,13 @@ def run_test_file(
             print(f"         {fl.strip()}")
         if len(fail_lines) > 5:
             print(f"         ... and {len(fail_lines) - 5} more")
+    if status == "FAIL":
+        # Show full failure context — assertion errors and traceback lines
+        detail = [l for l in lines if l.startswith("E   ") or "AssertionError" in l]
+        if detail:
+            print("       ── failure detail ──")
+            for dl in detail[:30]:
+                print(f"         {dl.strip()}")
     if skip_lines:
         print(f"       Skipped: {len(skip_lines)}")
         for sl in skip_lines[:10]:

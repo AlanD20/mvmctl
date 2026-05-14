@@ -39,9 +39,7 @@ class TestSSH:
         mock_ssh_op.connect.return_value = OperationResult(
             status="success", code="ssh.connected", item=0
         )
-        result = runner.invoke(
-            app, ["ssh", "myvm", "--user", "admin"]
-        )
+        result = runner.invoke(app, ["ssh", "myvm", "--user", "admin"])
         assert result.exit_code == 0
         call_input = mock_ssh_op.connect.call_args[0][0]
         assert call_input.user == "admin"
@@ -51,9 +49,7 @@ class TestSSH:
         mock_ssh_op.connect.return_value = OperationResult(
             status="success", code="ssh.connected", item=0
         )
-        result = runner.invoke(
-            app, ["ssh", "myvm", "--cmd", "ls -la"]
-        )
+        result = runner.invoke(app, ["ssh", "myvm", "--cmd", "ls -la"])
         assert result.exit_code == 0
         call_input = mock_ssh_op.connect.call_args[0][0]
         assert call_input.cmd == "ls -la"
@@ -65,9 +61,7 @@ class TestSSH:
         )
         key_file = tmp_path / "test_key"
         key_file.write_text("private key")
-        result = runner.invoke(
-            app, ["ssh", "myvm", "--key", str(key_file)]
-        )
+        result = runner.invoke(app, ["ssh", "myvm", "--key", str(key_file)])
         assert result.exit_code == 0
         call_input = mock_ssh_op.connect.call_args[0][0]
         assert str(call_input.key) == str(key_file)

@@ -4,11 +4,11 @@
 -- Created: 2026-04-02
 
 -- IMAGES: OS image metadata
--- JSON mappings: internal_id -> os_slug, filename -> path
+-- JSON mappings: internal_id -> type, filename -> path
 CREATE TABLE images (
     id TEXT PRIMARY KEY,
-    os_slug TEXT NOT NULL,
-    os_name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    name TEXT NOT NULL,
     distro TEXT NULL,
     arch TEXT NOT NULL,
     path TEXT NOT NULL,
@@ -26,8 +26,8 @@ CREATE TABLE images (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     deleted_at TIMESTAMP NULL
 );
-CREATE INDEX idx_images_os_slug ON images(os_slug);
-CREATE INDEX idx_images_name ON images(os_name);
+CREATE INDEX idx_images_type ON images(type);
+CREATE INDEX idx_images_name ON images(name);
 
 -- KERNELS: Firecracker kernel metadata
 -- JSON mappings: filename -> path, last_modified -> updated_at

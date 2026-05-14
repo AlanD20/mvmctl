@@ -73,6 +73,7 @@ class TestKeyControllerInit:
         controller = KeyController(SAMPLE_KEY, repo)
         assert controller.inspect() == SAMPLE_KEY
 
+
 class TestKeyControllerExport:
     def test_export_success(self, tmp_path: Path) -> None:
         """Export copies both key files to destination and sets 0600 perms."""

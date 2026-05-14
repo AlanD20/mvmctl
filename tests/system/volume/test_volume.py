@@ -328,12 +328,6 @@ class TestVolumeLifecycle:
         finally:
             _run_mvm(mvm_binary, "volume", "rm", vol1, vol2, check=False)
 
-    @pytest.mark.skip(
-        reason=(
-            "BUG B6: volume rm accepts nonexistent volume names "
-            "(returns 0 instead of error)"
-        )
-    )
     def test_volume_remove_partial_failure(self, mvm_binary, unique_key_name):
         """Remove one existing volume and one nonexistent — existing should still be removed."""
         vol_name = f"sys-vol-partial-{unique_key_name}"

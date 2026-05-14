@@ -14,7 +14,6 @@ from mvmctl.api.inputs._image_acquire_input import (
     ImagePullInput,
 )
 from mvmctl.api.inputs._image_input import ImageInput
-from mvmctl.constants import DEFAULT_FIRECRACKER_CI_VERSION
 from mvmctl.core._shared import Database
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.config._service import SettingsService
@@ -26,7 +25,7 @@ from mvmctl.exceptions import (
     RootPartitionDetectionError,
     TieDetectedError,
 )
-from mvmctl.models import ImageItem, ImageSpec
+from mvmctl.models import ImageItem, ImageSpec, ImageVersion
 from mvmctl.models.provisioner import ProvisionerType
 from mvmctl.models.result import BatchResult, OperationResult, ProgressEvent
 from mvmctl.utils.auditlog import AuditLog
@@ -141,13 +140,34 @@ class ImageOperation:
         if resolved.output_dir is None:
             raise ImageError("Failed to resolve output_dir")
 
+        # Resolve cache TTL and ci_version from settings/binary
+        if resolved.no_cache:
+            cache_ttl: int | None = None
+        else:
+            cache_ttl = int(
+                SettingsService.resolve(
+                    db, "defaults.image", "remote_list_cache_ttl"
+                )
+            )
+
+        binary_service = BinaryService(BinaryRepository(db))
+        default_firecracker = binary_service.get_default_firecracker()
+        ci_version: str | None = None
+        if default_firecracker and default_firecracker.ci_version:
+            ci_version = default_firecracker.ci_version
+
+        resolved_ci_version = ci_version or ""
+
         # Resolve spec
         spec = ImageService.get_specs_for(
-            [inputs.os_slug], inputs.version, resolved.arch
+            [inputs.type],
+            inputs.version,
+            resolved.arch,
+            cache_ttl_seconds=cache_ttl,
         )[0]
 
         # Single query for both early-return check and cleanup
-        existing_image = repo.get_by_os_slug(spec.id)
+        existing_image = repo.get_by_type(spec.id)
 
         # Early return if image exists and not forcing re-fetch
         if not resolved.force and existing_image is not None:
@@ -164,14 +184,6 @@ class ImageOperation:
                     item=existing_image,
                 )
 
-        binary_service = BinaryService(BinaryRepository(db))
-        default_firecracker = binary_service.get_default_firecracker()
-
-        # Get CI version for template resolution
-        ci_version = DEFAULT_FIRECRACKER_CI_VERSION
-        if default_firecracker and default_firecracker.ci_version:
-            ci_version = default_firecracker.ci_version
-
         # Generate image ID
         timestamp = datetime.now(tz=UTC).isoformat()
         image_id = HashGenerator.image(spec.id, spec.source, timestamp)
@@ -184,7 +196,7 @@ class ImageOperation:
                 image_id,
                 resolved.output_dir,
                 resolved.force,
-                ci_version,
+                resolved_ci_version,
                 progress_callback=OperationUtils.download_progress_bridge(
                     on_progress
                 ),
@@ -309,25 +321,19 @@ class ImageOperation:
         if not resolved.arch:
             raise ImageAcquireError("Failed to resolve format")
 
-        # Derive image ID from filename: lowercase, snake_case, no extension
-        import re
-
-        filename_stem = Path(resolved.source_path).stem
-        derived_id = re.sub(r"[\s\-\.]+", "_", filename_stem).lower()
-
-        # Build synthetic spec
+        # Build temporary spec for processing pipeline
         spec = ImageSpec(
-            id=derived_id,
-            image_type="custom",
+            id=resolved.type,
+            image_type=resolved.type,
             version="",
-            name=resolved.os_slug,
+            name=resolved.name or resolved.type,
             arch=resolved.arch,
             source=str(resolved.source_path),
             format=resolved.format,
         )
 
         # Single query for both early-return check and cleanup
-        existing_image = repo.get_by_os_slug(derived_id)
+        existing_image = repo.get_by_type(resolved.type)
 
         # Early return if image exists and not forcing re-import
         if not resolved.force and existing_image is not None:
@@ -420,7 +426,7 @@ class ImageOperation:
                 logger.info(
                     "Cleaned up %d old image file(s) for %s",
                     len(removed),
-                    derived_id,
+                    image_item.id,
                 )
 
         import_msg = "Image imported successfully"
@@ -488,43 +494,89 @@ class ImageOperation:
 
     @staticmethod
     def list_(
-        inputs: ImageInput | None = None, *, remote: bool = False
-    ) -> list[ImageItem] | list[ImageSpec]:
+        inputs: ImageInput | None = None,
+        *,
+        remote: bool = False,
+        no_cache: bool = False,
+        type_filter: str | None = None,
+    ) -> list[ImageItem] | list[ImageVersion]:
         """
         List images.
 
         Args:
             inputs: Optional ImageInput with identifiers to filter.
-            remote: If True, return available remote images from YAML config.
+            remote: If True, return available remote images discovered
+                    via the version resolver.
                     If False (default), return local cached images from DB.
+            no_cache: If True, bypass cached version listings and fetch
+                      live from upstream. Only relevant when ``remote=True``.
+            type_filter: If set and ``remote=True``, only return versions
+                         for this specific image type (e.g. ``"ubuntu"``).
 
         Returns:
-            List of ImageItem (local) or ImageSpec (remote).
+            List of ImageItem (local) or ImageVersion (remote).
 
         """
         from mvmctl.core._shared import Database
-        from mvmctl.core.binary._service import BinaryService
         from mvmctl.core.image._repository import ImageRepository
 
         db = Database()
         repo = ImageRepository(db)
 
         if remote:
-            # Load remote images from YAML
+            # Discover remote images via version resolver
             from mvmctl.core.image._service import ImageService
+            from mvmctl.core.image._version_resolver import (
+                HttpDirVersionResolver,
+            )
 
             arch = str(SettingsService.resolve(db, "defaults.image", "arch"))
-            specs = ImageService.load_available_images(arch)
-            binary_service = BinaryService(BinaryRepository(db))
-            default_firecracker = binary_service.get_default_firecracker()
+            image_types_config = ImageService.load_image_types_config()
 
-            # Get CI version for template resolution
-            ci_version = DEFAULT_FIRECRACKER_CI_VERSION
-            if default_firecracker and default_firecracker.ci_version:
-                ci_version = default_firecracker.ci_version
+            # If type_filter is set, only pass that single type's config
+            if type_filter:
+                image_types_config = [
+                    c
+                    for c in image_types_config
+                    if c.get("type") == type_filter
+                ]
+                if not image_types_config:
+                    return []
 
-            ImageService.resolve_remote_sizes(specs, ci_version)
-            return specs
+            # Resolve ci_version from default firecracker binary or fall back
+            from mvmctl.core.binary._service import BinaryService
+
+            resolved_ci_version: str | None = None
+            try:
+                binary_repo = BinaryRepository(db)
+                binary_service = BinaryService(binary_repo)
+                default_fc = binary_service.get_default_firecracker()
+                if default_fc and default_fc.ci_version:
+                    resolved_ci_version = default_fc.ci_version
+            except Exception:
+                pass  # Fall back to resolver's default constant
+
+            cache_ttl: int | None = (
+                None
+                if no_cache
+                else int(
+                    SettingsService.resolve(
+                        db, "defaults.image", "remote_list_cache_ttl"
+                    )
+                )
+            )
+
+            version_map = HttpDirVersionResolver.resolve(
+                image_types_config,
+                arch=arch,
+                cache_ttl_seconds=cache_ttl,
+                ci_version=resolved_ci_version,
+            )
+
+            flattened: list[ImageVersion] = []
+            for versions in version_map.values():
+                flattened.extend(versions)
+            return flattened
 
         # Local images from DB
         if inputs is None:
@@ -535,16 +587,16 @@ class ImageOperation:
 
         # Filter by identifiers if provided
         resolver = ImageResolver(repo)
-        result = resolver.resolve_many(inputs.id + inputs.os_slug)
+        result = resolver.resolve_many(inputs.id + inputs.type)
         return result.items
 
     @staticmethod
     def get(inputs: ImageInput) -> ImageItem:
         """
-        Get a single image by ID prefix or OS slug.
+        Get a single image by ID prefix or type.
 
         Args:
-            inputs: ImageInput with id_prefix or os_slug identifiers.
+            inputs: ImageInput with id_prefix or type identifiers.
 
         Returns:
             The resolved ImageItem.
@@ -574,8 +626,8 @@ class ImageOperation:
         """
         return {
             "id": img.id,
-            "os_slug": img.os_slug,
-            "name": img.os_name,
+            "type": img.type,
+            "name": img.name,
             "arch": img.arch,
             "path": img.path,
             "fs_type": img.fs_type,
@@ -601,7 +653,7 @@ class ImageOperation:
         Inspect an image with enriched data.
 
         Args:
-            inputs: ImageInput with id_prefix or os_slug identifiers.
+            inputs: ImageInput with id_prefix or type identifiers.
             is_json: If True, return a dict suitable for JSON serialization.
 
         Returns:
@@ -621,7 +673,7 @@ class ImageOperation:
         Set an image as the default.
 
         Args:
-            inputs: ImageInput with id_prefix or os_slug identifiers.
+            inputs: ImageInput with id_prefix or type identifiers.
 
         Returns:
             OperationResult with the image that was set as default.
@@ -661,7 +713,7 @@ class ImageOperation:
         so VM creation can use fast copy instead of waiting for decompression.
 
         Args:
-            inputs: ImageInput with id_prefix or os_slug identifiers.
+            inputs: ImageInput with id_prefix or type identifiers.
             on_progress: Optional callback for progress events.
 
         Returns:
@@ -748,7 +800,7 @@ class ImageOperation:
             The existing ImageItem if found on disk, otherwise None.
 
         """
-        item = repo.get_by_os_slug(spec.id)
+        item = repo.get_by_type(spec.id)
         if item is None:
             item = repo.get(spec.id)
 

@@ -48,12 +48,13 @@ class ImageImportInput:
 class ImagePullInput:
     """Input model for image pull and registration operations."""
 
-    os_slug: str
     type: str
+    name: str | None = None
     force: bool = False
     set_default: bool = False
     arch: str | None = None
     version: str | None = None
+    no_cache: bool = False
     partition: int | None = None
     skip_optimization: bool = False
     disabled_detectors: list[str] = field(default_factory=list)
@@ -63,12 +64,13 @@ class ImagePullInput:
 class ResolvedImageAcquireInput:
     """Resolved input model for image fetch and registration operations."""
 
-    os_slug: str
     type: str
     arch: str
     output_dir: Path
+    name: str | None = None
     source_path: Path | None = None
     version: str | None = None
+    no_cache: bool = False
     force: bool = False
     format: str | None = None
     set_default: bool = False
@@ -111,12 +113,13 @@ class ImageAcquireRequest:
         )
 
         self._result = ResolvedImageAcquireInput(
-            os_slug=self._inputs.os_slug,
             type=self._inputs.type,
+            name=self._inputs.name,
             force=self._inputs.force,
             set_default=self._inputs.set_default,
             arch=arch,
             version=self._inputs.version,
+            no_cache=self._inputs.no_cache,
             partition=self._inputs.partition,
             output_dir=CacheUtils.get_images_dir(),
             skip_optimization=self._inputs.skip_optimization,
@@ -152,9 +155,9 @@ class ImageAcquireRequest:
             )
 
         self._result = ResolvedImageAcquireInput(
-            os_slug=self._inputs.name,
+            type=self._inputs.name,
+            name=self._inputs.name,
             arch=arch,
-            type="custom",
             source_path=self._inputs.source_path,
             format=format_val,
             output_dir=CacheUtils.get_images_dir(),

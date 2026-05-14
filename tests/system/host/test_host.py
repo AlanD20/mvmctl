@@ -39,21 +39,31 @@ class TestHostStatus:
         assert "required_binaries" in data
         assert "ip_forward" in data
 
-    def test_host_ls_uninitialized(self, mvm_binary):
-        """Calling host ls --json on uninitialized host should error.
+    def test_host_ls_initialized_or_uninitialized(self, mvm_binary):
+        """host ls --json returns valid data or clear error depending on state.
 
-        If the host is already initialized, this test is skipped because
-        we cannot safely de-initialize a production system.
+        When the host IS initialized: verify JSON contains expected fields.
+        When NOT initialized: verify a clear error message is returned.
+        Either outcome is acceptable — the test always passes.
         """
         result = _run_mvm(mvm_binary, "host", "ls", "--json", check=False)
         if result.returncode == 0:
-            pytest.skip("Host is initialized — cannot test uninitialized path")
-        assert result.returncode != 0
-        combined = (result.stdout + result.stderr).lower()
-        assert any(
-            s in combined
-            for s in ["error", "not initialized", "not found", "no such"]
-        ), f"Unexpected output for uninitialized host: {combined}"
+            data = json.loads(result.stdout)
+            assert isinstance(data.get("kvm_accessible"), bool), (
+                f"kvm_accessible must be bool: {data}"
+            )
+            assert isinstance(data.get("required_binaries"), dict), (
+                f"required_binaries must be a dict: {data}"
+            )
+            assert "ip_forward" in data, (
+                f"host ls --json missing ip_forward: {data}"
+            )
+        else:
+            combined = (result.stdout + result.stderr).lower()
+            assert any(
+                s in combined
+                for s in ["error", "not initialized", "not found", "no such"]
+            ), f"Unexpected output for uninitialized host: {combined}"
 
 
 class TestHostCleanSafety:

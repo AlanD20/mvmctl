@@ -26,7 +26,7 @@ class ImageController:
     for fast VM rootfs cloning.
 
     Args:
-        entity: Image os_slug, ID prefix, or Image db model instance.
+        entity: Image type, ID prefix, or Image db model instance.
         repo: ImageRepository for DB operations.
 
     Raises:

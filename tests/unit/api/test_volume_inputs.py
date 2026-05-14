@@ -131,7 +131,8 @@ class TestVolumeRequest:
                 db=MagicMock(),
             )
             with pytest.raises(
-                VolumeNotFoundError, match="No volumes found matching identifiers"
+                VolumeNotFoundError,
+                match="No volumes found matching identifiers",
             ):
                 request.resolve()
 
@@ -167,7 +168,8 @@ class TestVolumeRequest:
         )
         # _result is None before resolve
         with pytest.raises(
-            VolumeNotFoundError, match="Failed to resolve necessary dependencies"
+            VolumeNotFoundError,
+            match="Failed to resolve necessary dependencies",
         ):
             request.ensure_validate()
 
@@ -217,14 +219,10 @@ class TestVolumeCreateRequest:
     def test_resolve_unsupported_format_raises(self):
         """VolumeCreateRequest should raise for unsupported format."""
         request = VolumeCreateRequest(
-            inputs=VolumeCreateInput(
-                name="my-vol", size="1G", format="vmdk"
-            ),
+            inputs=VolumeCreateInput(name="my-vol", size="1G", format="vmdk"),
             db=MagicMock(),
         )
-        with pytest.raises(
-            VolumeCreateError, match="Unsupported format"
-        ):
+        with pytest.raises(VolumeCreateError, match="Unsupported format"):
             request.resolve()
 
     def test_ensure_validate_before_resolve_raises(self):

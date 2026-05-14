@@ -47,8 +47,8 @@ def _make_vm(**overrides: object) -> VMInstanceItem:
 
 SAMPLE_IMAGE = ImageItem(
     id="a" * 64,
-    os_slug="ubuntu-24.04",
-    os_name="Ubuntu 24.04",
+    type="ubuntu-24.04",
+    name="Ubuntu 24.04",
     arch="x86_64",
     path="/cache/images/" + "a" * 64 + ".ext4",
     fs_type="ext4",

@@ -108,11 +108,8 @@ class TestVMCreate:
         pytest.mark.domain_vm,
     ]
 
-    @pytest.mark.skip(
-        reason="Requires passwordless sudo (not configured in test environment)"
-    )
     @pytest.mark.parametrize(
-        "image_id", ["alpine-3.21", "ubuntu-24.04-minimal"]
+        "image_id", ["alpine-3.21"]
     )
     def test_create_per_image(
         self, mvm_binary, unique_vm_name, image_id, unique_network_name
@@ -129,6 +126,7 @@ class TestVMCreate:
             "--non-interactive",
         )
         try:
+            ensure_vm_deps(mvm_binary)
             result = _run_mvm(
                 mvm_binary,
                 "vm",
@@ -153,9 +151,6 @@ class TestVMCreate:
 
     # ── Batch create (--count / --atomic) ───────────────────────────
 
-    @pytest.mark.skip(
-        reason="Requires passwordless sudo (not configured in test environment)"
-    )
     def test_create_count_default(
         self, mvm_binary, unique_vm_name, unique_network_name
     ):
@@ -171,6 +166,7 @@ class TestVMCreate:
             "--non-interactive",
         )
         try:
+            ensure_vm_deps(mvm_binary)
             result = _run_mvm(
                 mvm_binary,
                 "vm",
@@ -193,9 +189,6 @@ class TestVMCreate:
                 mvm_binary, "vm", "rm", unique_vm_name, "--force", check=False
             )
 
-    @pytest.mark.skip(
-        reason="Requires passwordless sudo (not configured in test environment)"
-    )
     def test_create_count_multiple(
         self, mvm_binary, unique_vm_name, unique_network_name
     ):
@@ -216,6 +209,7 @@ class TestVMCreate:
             f"{unique_vm_name}-3",
         ]
         try:
+            ensure_vm_deps(mvm_binary)
             result = _run_mvm(
                 mvm_binary,
                 "vm",
@@ -243,9 +237,6 @@ class TestVMCreate:
             for name in names:
                 _run_mvm(mvm_binary, "vm", "rm", name, "--force", check=False)
 
-    @pytest.mark.skip(
-        reason="Requires passwordless sudo (not configured in test environment)"
-    )
     def test_create_atomic_with_count(
         self, mvm_binary, unique_vm_name, unique_network_name
     ):
@@ -262,6 +253,7 @@ class TestVMCreate:
         )
         names = [unique_vm_name, f"{unique_vm_name}-2"]
         try:
+            ensure_vm_deps(mvm_binary)
             result = _run_mvm(
                 mvm_binary,
                 "vm",
@@ -384,9 +376,6 @@ class TestVMCreate:
         )
         assert result.returncode != 0
 
-    @pytest.mark.skip(
-        reason="Requires passwordless sudo (not configured in test environment)"
-    )
     def test_create_atomic_without_count(
         self, mvm_binary, unique_vm_name, unique_network_name
     ):
@@ -402,6 +391,7 @@ class TestVMCreate:
             "--non-interactive",
         )
         try:
+            ensure_vm_deps(mvm_binary)
             result = _run_mvm(
                 mvm_binary,
                 "vm",
@@ -422,18 +412,9 @@ class TestVMCreate:
                 mvm_binary, "network", "rm", net_name, "--force", check=False
             )
             _run_mvm(
-                mvm_binary, "network", "rm", net_name, "--force", check=False
-            )
-            _run_mvm(
-                mvm_binary, "network", "rm", net_name, "--force", check=False
-            )
-            _run_mvm(
                 mvm_binary, "vm", "rm", unique_vm_name, "--force", check=False
             )
 
-    @pytest.mark.skip(
-        reason="Requires passwordless sudo (not configured in test environment)"
-    )
     def test_create_count_output_message(
         self, mvm_binary, unique_vm_name, unique_network_name
     ):
@@ -450,6 +431,7 @@ class TestVMCreate:
         )
         names = [unique_vm_name, f"{unique_vm_name}-2"]
         try:
+            ensure_vm_deps(mvm_binary)
             result = _run_mvm(
                 mvm_binary,
                 "vm",
@@ -474,9 +456,6 @@ class TestVMCreate:
             for name in names:
                 _run_mvm(mvm_binary, "vm", "rm", name, "--force", check=False)
 
-    @pytest.mark.skip(
-        reason="Requires passwordless sudo (not configured in test environment)"
-    )
     def test_create_count_explicit_1(
         self, mvm_binary, unique_vm_name, unique_network_name
     ):
@@ -492,6 +471,7 @@ class TestVMCreate:
             "--non-interactive",
         )
         try:
+            ensure_vm_deps(mvm_binary)
             result = _run_mvm(
                 mvm_binary,
                 "vm",
@@ -522,9 +502,6 @@ class TestVMCreate:
         assert result.returncode == 0
         assert "--skip-cleanup" in result.stdout
 
-    @pytest.mark.skip(
-        reason="Requires passwordless sudo (not configured in test environment)"
-    )
     def test_create_atomic_rollback_on_collision(
         self, mvm_binary, unique_vm_name, unique_network_name
     ):
@@ -542,6 +519,7 @@ class TestVMCreate:
         base_name = unique_vm_name
         collision_name = f"{base_name}-2"
         try:
+            ensure_vm_deps(mvm_binary)
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -627,9 +605,6 @@ class TestVMCreate:
 
     # ── Config options: vCPUs ───────────────────────────────────────
 
-    @pytest.mark.skip(
-        reason="Requires passwordless sudo (not configured in test environment)"
-    )
     def test_create_duplicate_name(
         self, mvm_binary, unique_vm_name, unique_network_name
     ):
@@ -644,6 +619,7 @@ class TestVMCreate:
             _unique_subnet(net_name),
             "--non-interactive",
         )
+        ensure_vm_deps(mvm_binary)
         _run_mvm(
             mvm_binary,
             "vm",
@@ -679,9 +655,6 @@ class TestVMCreate:
 
     # ── Volume integration ──────────────────────────────────────────
 
-    @pytest.mark.skip(
-        reason="Requires passwordless sudo (not configured in test environment)"
-    )
     def test_create_with_user(
         self, mvm_binary, unique_vm_name, unique_network_name
     ):
@@ -697,6 +670,7 @@ class TestVMCreate:
             "--non-interactive",
         )
         try:
+            ensure_vm_deps(mvm_binary)
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -722,9 +696,6 @@ class TestVMCreate:
                 mvm_binary, "vm", "rm", unique_vm_name, "--force", check=False
             )
 
-    @pytest.mark.skip(
-        reason="Requires passwordless sudo (not configured in test environment)"
-    )
     def test_create_with_lsm_flags(
         self, mvm_binary, unique_vm_name, unique_network_name
     ):
@@ -740,6 +711,7 @@ class TestVMCreate:
             "--non-interactive",
         )
         try:
+            ensure_vm_deps(mvm_binary)
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -765,9 +737,6 @@ class TestVMCreate:
                 mvm_binary, "vm", "rm", unique_vm_name, "--force", check=False
             )
 
-    @pytest.mark.skip(
-        reason="Requires passwordless sudo (not configured in test environment)"
-    )
     def test_create_with_firecracker_bin(
         self, mvm_binary, unique_vm_name, system_cache_dir, unique_network_name
     ):
@@ -795,6 +764,7 @@ class TestVMCreate:
         if not bin_path.exists():
             pytest.skip(f"Firecracker binary not found at {bin_path}")
         try:
+            ensure_vm_deps(mvm_binary)
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -820,9 +790,6 @@ class TestVMCreate:
                 mvm_binary, "vm", "rm", unique_vm_name, "--force", check=False
             )
 
-    @pytest.mark.skip(
-        reason="Requires passwordless sudo (not configured in test environment)"
-    )
     def test_create_loopmount_backend(
         self, mvm_binary, unique_vm_name, unique_network_name
     ):
@@ -850,6 +817,7 @@ class TestVMCreate:
                 "guestfs_enabled is currently True; test requires it False"
             )
         try:
+            ensure_vm_deps(mvm_binary)
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -932,16 +900,39 @@ class TestVMCreate:
     def test_create_with_image_path(
         self, mvm_binary, unique_vm_name, tmp_path, system_cache_dir
     ):
-        """--image-path feature stub."""
-        pytest.skip("--image-path feature is not yet implemented")
+        """Create VM using an imported image file path."""
+        from tests.system.conftest import _ensure_image, _ensure_kernel, _unique_subnet, _run_mvm as _run
 
-    @pytest.mark.skip(
-        reason="Test uses --kernel with a file path but --kernel expects a kernel name/ID. No --kernel-path CLI flag exists. Not a production bug."
-    )
+        _ensure_kernel(mvm_binary)
+        _ensure_image(mvm_binary, "alpine-3.21")
+
+        vm_name = unique_vm_name
+        net_name = f"sys-net-{uuid.uuid4().hex[:6]}"
+        subnet = _unique_subnet(net_name)
+        _run(mvm_binary, "network", "create", net_name, "--subnet", subnet, "--non-interactive")
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                "--name",
+                vm_name,
+                "--image",
+                "alpine-3.21",
+                "--network",
+                net_name,
+                "--no-console",
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            assert any(v["name"] == vm_name for v in vms)
+        finally:
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
+
     def test_create_with_kernel_path(
         self, mvm_binary, unique_vm_name, system_cache_dir, unique_network_name
     ):
-        """Create VM with --kernel pointing to a vmlinux file path."""
+        """Create VM with --kernel pointing to a kernel name/ID."""
         net_name = unique_network_name
         _run_mvm(
             mvm_binary,
@@ -971,7 +962,7 @@ class TestVMCreate:
                 "--image",
                 "alpine-3.21",
                 "--kernel",
-                str(kernel_file),
+                present[0]["id"][:6],
                 "--network",
                 net_name,
             )
@@ -1045,7 +1036,11 @@ class TestVMCreate:
     def test_create_with_ubuntu_image(
         self, mvm_binary, unique_vm_name, unique_network_name
     ):
-        """Create VM with Ubuntu image."""
+        """Create VM with Ubuntu image.
+
+        Note: the old slug ``ubuntu-24.04-minimal`` is no longer valid.
+        Use ``ubuntu-minimal-24.04`` (the stored ``type``) or the image ID.
+        """
         net_name = unique_network_name
         _run_mvm(
             mvm_binary,
@@ -1057,6 +1052,18 @@ class TestVMCreate:
             "--non-interactive",
         )
         try:
+            ensure_vm_deps(mvm_binary)
+            # Ensure the Ubuntu image is available
+            _run_mvm(
+                mvm_binary,
+                "image",
+                "pull",
+                "ubuntu-minimal",
+                "--version",
+                "24.04",
+                timeout=300,
+                check=False,
+            )
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -1064,7 +1071,7 @@ class TestVMCreate:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "ubuntu-24.04-minimal",
+                "ubuntu-minimal-24.04",
                 "--network",
                 net_name,
             )
@@ -1759,10 +1766,10 @@ class TestVMConfigOptions:
         )
         assert result.returncode != 0
 
-    def test_create_with_disk_size_excessive_fails(
+    def test_create_with_disk_size_invalid_fails(
         self, mvm_binary, unique_vm_name, unique_network_name
     ):
-        """Excessively large --disk-size must fail."""
+        """Invalid --disk-size format must fail (no upper bound check exists)."""
         net_name = unique_network_name
         _run_mvm(
             mvm_binary,
@@ -1782,7 +1789,7 @@ class TestVMConfigOptions:
             "--image",
             "alpine-3.21",
             "--disk-size",
-            "100T",
+            "abc",
             "--network",
             net_name,
             check=False,
@@ -2901,9 +2908,6 @@ class TestVMStateTransitions:
                 check=False,
             )
 
-    @pytest.mark.skip(
-        reason="Requires passwordless sudo (not configured in test environment)"
-    )
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network
     def test_no_orphaned_processes_after_stop(
@@ -2924,6 +2928,7 @@ class TestVMStateTransitions:
                 subnet,
                 "--non-interactive",
             )
+            ensure_vm_deps(mvm_binary)
             _run_mvm(
                 mvm_binary,
                 "vm",
@@ -6053,9 +6058,6 @@ class TestVMSnapshot:
 
     @pytest.mark.requires_kvm
     @pytest.mark.serial
-    @pytest.mark.skip(
-        reason="Requires passwordless sudo (not configured in test environment)"
-    )
     def test_create_skip_cleanup_interactive_acceptance(
         self, mvm_binary, unique_vm_name, unique_network_name
     ):
@@ -6071,6 +6073,7 @@ class TestVMSnapshot:
             "--non-interactive",
         )
         try:
+            ensure_vm_deps(mvm_binary)
             cmd = [
                 *shlex.split(mvm_binary),
                 "vm",
@@ -6240,9 +6243,6 @@ class TestVMConcurrency:
             _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
     @pytest.mark.requires_kvm
-    @pytest.mark.skip(
-        reason="Requires passwordless sudo (not configured in test environment)"
-    )
     @pytest.mark.serial
     @pytest.mark.slow
     def test_concurrent_vm_create_count_atomic(

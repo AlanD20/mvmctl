@@ -30,7 +30,9 @@ class TestParseDiskSize:
 
     def test_parse_bytes(self) -> None:
         assert DiskUtils.parse_disk_size_to_bytes("512B") == 512
-        assert DiskUtils.parse_disk_size_to_bytes("1024") == 1024  # no unit → bytes
+        assert (
+            DiskUtils.parse_disk_size_to_bytes("1024") == 1024
+        )  # no unit → bytes
         assert DiskUtils.parse_disk_size_to_bytes("0B") == 0
 
     def test_parse_kilobytes(self) -> None:
@@ -66,7 +68,9 @@ class TestParseDiskSize:
     def test_whitespace_allowed(self) -> None:
         assert DiskUtils.parse_disk_size_to_bytes("1 G") == 1024**3
         assert DiskUtils.parse_disk_size_to_bytes("512  M") == 512 * 1024**2
-        assert DiskUtils.parse_disk_size_to_bytes("  2.5 GB  ") == int(2.5 * 1024**3)
+        assert DiskUtils.parse_disk_size_to_bytes("  2.5 GB  ") == int(
+            2.5 * 1024**3
+        )
 
     def test_invalid_format_raises(self) -> None:
         with pytest.raises(MVMError, match="Invalid disk size format"):

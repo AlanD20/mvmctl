@@ -8,15 +8,15 @@ from mvmctl.models import ImageItem
 
 
 def _make_image(
-    os_slug: str = "ubuntu-24.04",
-    os_name: str = "Ubuntu 24.04",
+    type: str = "ubuntu-24.04",
+    name: str = "Ubuntu 24.04",
     distro: str | None = None,
 ) -> ImageItem:
     ts = datetime.now(tz=UTC).isoformat()
     return ImageItem(
         id="a" * 64,
-        os_slug=os_slug,
-        os_name=os_name,
+        type=type,
+        name=name,
         arch="x86_64",
         path="ubuntu-24.04.ext4",
         fs_type="ext4",
@@ -46,15 +46,17 @@ class TestImageItemModel:
 
     def test_create_with_alpine_distro(self) -> None:
         """ImageItem with alpine distro."""
-        img = _make_image(os_slug="alpine-3.21", os_name="Alpine 3.21", distro="alpine")
+        img = _make_image(
+            type="alpine-3.21", name="Alpine 3.21", distro="alpine"
+        )
         assert img.distro == "alpine"
-        assert img.os_slug == "alpine-3.21"
+        assert img.type == "alpine-3.21"
 
     def test_create_with_debian_distro(self) -> None:
         """ImageItem with debian distro."""
-        img = _make_image(os_slug="debian-12", os_name="Debian 12", distro="debian")
+        img = _make_image(type="debian-12", name="Debian 12", distro="debian")
         assert img.distro == "debian"
-        assert img.os_slug == "debian-12"
+        assert img.type == "debian-12"
 
     def test_create_with_empty_distro_string(self) -> None:
         """ImageItem with empty string distro (treated as set but empty)."""
@@ -67,8 +69,8 @@ class TestImageItemModel:
         ts = datetime.now(tz=UTC).isoformat()
         img = ImageItem(
             id="b" * 64,
-            os_slug="fedora-40",
-            os_name="Fedora 40",
+            type="fedora-40",
+            name="Fedora 40",
             arch="x86_64",
             path="fedora-40.ext4",
             fs_type="ext4",

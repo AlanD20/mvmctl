@@ -18,7 +18,7 @@ from mvmctl.cli._completion import (
     _complete_remote_image_ids,
 )
 from mvmctl.constants import IMAGE_IMPORT_FORMAT_MAP
-from mvmctl.models import ImageItem, ImageSpec
+from mvmctl.models import ImageItem, ImageVersion
 from mvmctl.models.result import (
     NeedsInteraction,
     ProgressEvent,
@@ -72,60 +72,86 @@ def image_ls(
     remote: bool = typer.Option(
         False, "--remote", "-r", help="Show available remote images"
     ),
+    no_cache: bool = typer.Option(
+        False,
+        "--no-cache",
+        help="Skip cached version listing and fetch live from upstream",
+    ),
+    type_filter: str | None = typer.Option(
+        None, "--type", help="Filter by image type (e.g. ubuntu, alpine)"
+    ),
 ) -> None:
     """List cached images (or available remote images with --remote)."""
-    result = ImageOperation.list_(remote=remote)
     if remote:
+        with Console().status("Fetching remote images"):
+            result = ImageOperation.list_(
+                remote=True,
+                no_cache=no_cache,
+                type_filter=type_filter,
+            )
         _list_remote_images(
-            cast(list[ImageSpec], result), json_output=json_output
+            cast(list[ImageVersion], result), json_output=json_output
         )
     else:
+        result = ImageOperation.list_(remote=False)
         _list_local_images(
             cast(list[ImageItem], result), json_output=json_output
         )
 
 
-def _list_remote_images(images: list[ImageSpec], *, json_output: bool) -> None:
-    """Render remote available images."""
+def _list_remote_images(
+    versions: list[ImageVersion], *, json_output: bool
+) -> None:
+    """Render remote available images grouped by type."""
     if json_output:
         data = [
             {
-                "id": img.id,
-                "image_type": img.image_type,
-                "version": img.version,
-                "name": img.name,
-                "source": img.source,
-                "format": img.format,
-                "arch": img.arch,
-                "sha256": img.sha256,
-                "sha256_url": img.sha256_url,
-                "list_url_template": img.list_url_template,
-                "size": img.size,
+                "version": v.version,
+                "codename": v.codename,
+                "type": v.type,
+                "display_name": v.display_name or v.version,
+                "download_url": v.download_url,
+                "sha256_url": v.sha256_url,
+                "format": v.format,
             }
-            for img in images
+            for v in versions
         ]
         typer.echo(json.dumps(data, indent=2))
         return
 
+    # Group by type, preserving type order from the resolver
+    groups: dict[str, list[ImageVersion]] = {}
+    for v in versions:
+        groups.setdefault(v.type, []).append(v)
+
+    # Sort types alphabetically, versions descending within each type
+    sorted_types = sorted(groups.keys())
+
     rows: list[list[str]] = []
-    for img in images:
-        size_str = (
-            CommonUtils.format_bytes_human_readable(img.size)
-            if img.size
-            else "-"
-        )
-        rows.append(
-            [
-                img.id,
-                img.name,
-                "-",  # compression
-                img.format,
-                size_str,
-            ]
-        )
+    for type_key in sorted_types:
+        version_list = groups[type_key]
+        if not version_list:
+            continue
+
+        # Type-level display name from the first version's type_name
+        type_display = version_list[0].type_name or type_key
+
+        # Type header row
+        rows.append([type_key, type_display])
+
+        # Version rows with tree indent
+        for j, v in enumerate(version_list):
+            is_last = j == len(version_list) - 1
+            prefix = "  └─ " if is_last else "  ├─ "
+            display = v.display_name or v.version
+            rows.append([f"{prefix}{v.version}", display])
+
+    if not rows:
+        print_info("No remote images available.")
+        return
 
     print_table(
-        columns=["Image ID", "Name", "Compression", "Format", "Size"],
+        columns=["Type / Version", "Description"],
         rows=rows,
     )
 
@@ -138,9 +164,8 @@ def _list_local_images(images: list[ImageItem], *, json_output: bool) -> None:
             data.append(
                 {
                     "id": img.id,
-                    "name": img.os_name,
-                    "os_slug": img.os_slug,
-                    "os_name": img.os_name,
+                    "name": img.name,
+                    "type": img.type,
                     "arch": img.arch,
                     "path": img.path,
                     "fs_type": img.fs_type,
@@ -174,7 +199,7 @@ def _list_local_images(images: list[ImageItem], *, json_output: bool) -> None:
         rows.append(
             [
                 display_id,
-                img.os_name,
+                img.name,
                 img.fs_type,
                 CommonUtils.format_bytes_human_readable(size)
                 if size > 0
@@ -215,6 +240,11 @@ def image_pull(
     force: bool = typer.Option(
         False, "--force", "-f", help="Re-download even if exists"
     ),
+    no_cache: bool = typer.Option(
+        False,
+        "--no-cache",
+        help="Skip cached version listing and fetch live from upstream",
+    ),
     set_default: bool = typer.Option(
         False, "--default", help="Set as default image after download"
     ),
@@ -237,11 +267,11 @@ def image_pull(
     )
 
     pull_input = ImagePullInput(
-        os_slug=image_selector,
         type=image_type or image_selector,
         version=version,
         arch=arch,
         force=force,
+        no_cache=no_cache,
         skip_optimization=skip_optimization,
         disabled_detectors=disabled_detectors,
         set_default=set_default,
@@ -268,7 +298,7 @@ def image_pull(
     assert result.item is not None
     short_id = HashGenerator.shorten(result.item.id)
     print_success(
-        f"Image '{result.item.os_name}' pulled successfully (ID: {short_id})"
+        f"Image '{result.item.name}' pulled successfully (ID: {short_id})"
     )
     if set_default:
         print_success(f"Default image set to: {image_selector}")
@@ -363,15 +393,15 @@ def image_inspect(
 
 
 def _print_image_details(info: ImageItem) -> None:
-    os_slug = info.os_slug
+    type_ = info.type
     missing_marker = " (missing)" if not info.is_present else ""
 
-    print_inspect_header(f"Image: {os_slug}{missing_marker}")
+    print_inspect_header(f"Image: {type_}{missing_marker}")
 
     print_section_header("BASIC INFO")
     print_key_value("ID", info.id)
-    print_key_value("Name", info.os_name)
-    print_key_value("OS Slug", os_slug)
+    print_key_value("Name", info.name)
+    print_key_value("Type", type_)
     print_key_value("Arch", info.arch)
     print_key_value("Default", "Yes" if info.is_default else "No")
     print_key_value(
@@ -424,15 +454,15 @@ def _print_image_details(info: ImageItem) -> None:
 
 
 def _print_image_details_tree(info: ImageItem) -> None:
-    os_slug = info.os_slug
+    type_ = info.type
     missing_marker = " (missing)" if not info.is_present else ""
 
-    print(f"{os_slug}{missing_marker}")
+    print(f"{type_}{missing_marker}")
 
     tree_lines = [
         f"├── ID:          {info.id}",
-        f"├── Name:        {info.os_name}",
-        f"├── OS Slug:     {os_slug}",
+        f"├── Name:        {info.name}",
+        f"├── Type:        {type_}",
         f"├── Arch:        {info.arch}",
         f"├── Default:     {'Yes' if info.is_default else 'No'}",
         f"├── Pulled:      {CommonUtils.human_readable_datetime(info.pulled_at)}",

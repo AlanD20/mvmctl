@@ -12,6 +12,7 @@ dependencies = [
     "jinja2>=3.1,<4",
     "zstandard>=0.21.0",
     "passlib>=1.7.4",
+    "bcrypt>=3.2,<5",
 ]
 
 

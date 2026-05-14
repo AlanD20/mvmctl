@@ -53,6 +53,7 @@ OVERRIDABLE_DEFAULTS: Final[dict[str, dict[str, Any]]] = {
     "defaults.image": {
         "arch": "x86_64",
         "import_format": "auto",
+        "remote_list_cache_ttl": 3600,
     },
     "defaults.kernel": {
         "arch": "x86_64",
@@ -271,6 +272,9 @@ CONST_MIN_BINARY_SIZE_BYTES: Final[int] = 512
 # --- Libguestfs ---
 DEFAULT_LIBGUESTFS_SEED_DIR: Final[str] = "/var/lib/cloud/seed/nocloud"
 CONST_GUESTFS_OS_RELEASE_PATH: Final[str] = "/etc/os-release"
+
+# --- Image version listing ---
+CONST_IMAGE_VERSION_LIST_LIMIT: Final[int] = 5
 
 
 # ===========================================================================

@@ -131,8 +131,8 @@ class TestImageImport:
         assert result.status == "success"
         image = result.item
         assert isinstance(image, ImageItem)
-        assert image.os_name == "test-image"
-        assert image.os_slug == "test_image"
+        assert image.name == "test-image"
+        assert image.type == "test-image"
         assert image.is_present is True
         assert image.fs_type == "ext4"
         assert len(image.id) == 64  # SHA256 hash
@@ -159,8 +159,8 @@ class TestImageList:
 
         images = ImageOperation.list_()
         images = cast(list[ImageItem], images)
-        slugs = [img.os_slug for img in images]
-        assert "list_test" in slugs
+        slugs = [img.type for img in images]
+        assert "list-test" in slugs
 
     def test_list_images_filter_by_identifier(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -178,10 +178,10 @@ class TestImageList:
             )
         )
 
-        images = ImageOperation.list_(ImageInput(id=["filter_test"]))
+        images = ImageOperation.list_(ImageInput(id=["filter-test"]))
         images = cast(list[ImageItem], images)
         assert len(images) == 1
-        assert images[0].os_slug == "filter_test"
+        assert images[0].type == "filter-test"
 
     def test_list_images_empty_when_no_match(self) -> None:
         """list_ with non-matching identifier returns empty list."""
@@ -192,7 +192,7 @@ class TestImageList:
 class TestImageGet:
     """Test image retrieval through the real API."""
 
-    def test_get_image_by_os_slug(
+    def test_get_image_by_type(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """Get an image by its OS slug."""
@@ -208,10 +208,10 @@ class TestImageGet:
             )
         )
 
-        image = ImageOperation.get(ImageInput(id=["get_test"]))
+        image = ImageOperation.get(ImageInput(id=["get-test"]))
         assert isinstance(image, ImageItem)
-        assert image.os_slug == "get_test"
-        assert image.os_name == "get-test"
+        assert image.type == "get-test"
+        assert image.name == "get-test"
 
     def test_get_image_by_id_prefix(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -232,7 +232,7 @@ class TestImageGet:
 
         image = ImageOperation.get(ImageInput(id=[full_id[:6]]))
         assert image.id == full_id
-        assert image.os_name == "get-by-id"
+        assert image.name == "get-by-id"
 
 
 class TestImageInspect:
@@ -254,9 +254,9 @@ class TestImageInspect:
             )
         )
 
-        image = ImageOperation.inspect(ImageInput(id=["inspect_test"]))
+        image = ImageOperation.inspect(ImageInput(id=["inspect-test"]))
         assert isinstance(image, ImageItem)
-        assert image.os_slug == "inspect_test"
+        assert image.type == "inspect-test"
 
     def test_inspect_returns_dict_when_json(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -275,10 +275,10 @@ class TestImageInspect:
         )
 
         result = ImageOperation.inspect(
-            ImageInput(id=["inspect_json"]), is_json=True
+            ImageInput(id=["inspect-json"]), is_json=True
         )
         assert isinstance(result, dict)
-        assert result["os_slug"] == "inspect_json"
+        assert result["type"] == "inspect-json"
         assert result["name"] == "inspect-json"
         assert "id" in result
         assert "fs_type" in result
@@ -303,9 +303,9 @@ class TestImageSetDefault:
             )
         )
 
-        ImageOperation.set_default(ImageInput(id=["default_test"]))
+        ImageOperation.set_default(ImageInput(id=["default-test"]))
 
-        image = ImageOperation.get(ImageInput(id=["default_test"]))
+        image = ImageOperation.get(ImageInput(id=["default-test"]))
         assert bool(image.is_default) is True
 
 
@@ -329,7 +329,7 @@ class TestImageWarm:
         )
         image = result.item
 
-        warmed_paths = ImageOperation.warm(ImageInput(id=[image.os_slug]))
+        warmed_paths = ImageOperation.warm(ImageInput(id=[image.type]))
         assert isinstance(warmed_paths, OperationResult)
         assert len(warmed_paths.item) == 1
         warmed_path = warmed_paths.item[0]
@@ -356,10 +356,10 @@ class TestImageRemove:
             )
         )
 
-        ImageOperation.remove(ImageInput(id=["remove_test"]))
+        ImageOperation.remove(ImageInput(id=["remove-test"]))
 
         with pytest.raises(ImageNotFoundError):
-            ImageOperation.get(ImageInput(id=["remove_test"]))
+            ImageOperation.get(ImageInput(id=["remove-test"]))
 
     def test_remove_image_cleans_files(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -382,7 +382,7 @@ class TestImageRemove:
         image_file = images_dir / image.path
         assert image_file.exists()
 
-        ImageOperation.remove(ImageInput(id=["remove_files"]))
+        ImageOperation.remove(ImageInput(id=["remove-files"]))
 
         assert not image_file.exists()
 
@@ -434,7 +434,7 @@ class TestImageEdgeCases:
             _self: object, images: list[ImageItem]
         ) -> list[ImageItem]:
             for img in images:
-                if img.os_slug == "ref_vm":
+                if img.type == "ref-vm":
                     mock_vm = MagicMock()
                     mock_vm.name = "test-vm"
                     img.vms = [mock_vm]
@@ -445,7 +445,7 @@ class TestImageEdgeCases:
             _mock_enrich,
         )
 
-        result = ImageOperation.remove(ImageInput(id=["ref_vm"]), force=False)
+        result = ImageOperation.remove(ImageInput(id=["ref-vm"]), force=False)
         assert isinstance(result, BatchResult)
         assert result.has_any_error
 
@@ -469,7 +469,7 @@ class TestImageEdgeCases:
             _self: object, images: list[ImageItem]
         ) -> list[ImageItem]:
             for img in images:
-                if img.os_slug == "ref_vm_force":
+                if img.type == "ref-vm-force":
                     mock_vm = MagicMock()
                     mock_vm.name = "test-vm"
                     img.vms = [mock_vm]
@@ -480,7 +480,7 @@ class TestImageEdgeCases:
             _mock_enrich,
         )
 
-        ImageOperation.remove(ImageInput(id=["ref_vm_force"]), force=True)
+        ImageOperation.remove(ImageInput(id=["ref-vm-force"]), force=True)
 
         with pytest.raises(ImageNotFoundError):
-            ImageOperation.get(ImageInput(id=["ref_vm_force"]))
+            ImageOperation.get(ImageInput(id=["ref-vm-force"]))

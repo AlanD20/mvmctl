@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from tests.system.conftest import _run_mvm
+from tests.system.conftest import _ensure_kernel, _run_mvm
 
 # Cache directory for official kernel builds
 KERNEL_CACHE_DIR = Path.home() / ".cache" / "mvmctl" / "kernels"
@@ -82,6 +82,7 @@ class TestKernelInspect:
 
     def test_kernel_inspect_table(self, mvm_binary):
         """Inspect a kernel in table format."""
+        _ensure_kernel(mvm_binary)
         kernels: list[dict[str, Any]] = json.loads(
             _run_mvm(mvm_binary, "kernel", "ls", "--json").stdout
         )
@@ -95,6 +96,7 @@ class TestKernelInspect:
 
     def test_kernel_inspect_json(self, mvm_binary):
         """Inspect a kernel with --json output."""
+        _ensure_kernel(mvm_binary)
         kernels: list[dict[str, Any]] = json.loads(
             _run_mvm(mvm_binary, "kernel", "ls", "--json").stdout
         )
@@ -113,6 +115,7 @@ class TestKernelInspect:
 
     def test_kernel_inspect_tree(self, mvm_binary):
         """Inspect a kernel with --tree output."""
+        _ensure_kernel(mvm_binary)
         kernels: list[dict[str, Any]] = json.loads(
             _run_mvm(mvm_binary, "kernel", "ls", "--json").stdout
         )
@@ -422,6 +425,7 @@ class TestKernelStoppedVMDeletion:
 
         try:
             # Get a present kernel to use explicitly (avoid reliance on default kernel)
+            _ensure_kernel(mvm_binary)
             result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
             kernels: list[dict[str, Any]] = json.loads(result.stdout)
             present_kernels = [k for k in kernels if k.get("is_present")]

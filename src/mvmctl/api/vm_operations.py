@@ -1309,7 +1309,7 @@ class VMOperation:
                     "tap_device": vm.tap_device,
                 },
                 "assets": {
-                    "image_name": image.os_name if image else None,
+                    "image_name": image.name if image else None,
                     "kernel_version": kernel.version if kernel else None,
                     "binary_name": binary.name if binary else None,
                 },
@@ -1350,7 +1350,7 @@ class VMOperation:
             "mem_mib": vm.mem_size_mib,
             "disk_mib": vm.disk_size_mib,
             "image_id": vm.image_id,
-            "image_name": image.os_name if image else None,
+            "image_name": image.name if image else None,
             "kernel_id": vm.kernel_id,
             "kernel_version": kernel.version if kernel else None,
             "network_id": vm.network_id,
@@ -1683,6 +1683,8 @@ class VMOperation:
         resume_after: bool | None = None,
     ) -> OperationResult[VMInstanceItem]:
         """Load a snapshot into a single VM."""
+        from mvmctl.exceptions import MVMError
+
         resolved = VMRequest(inputs=inputs, db=Database()).resolve()
         if len(resolved.vms) != 1:
             raise VMNotFoundError("Expected exactly one VM identifier")
@@ -1695,8 +1697,6 @@ class VMOperation:
             missing.append(str(state_in))
         if missing:
             paths = ", ".join(missing)
-            from mvmctl.exceptions import MVMError
-
             raise MVMError(f"Snapshot file(s) not found: {paths}")
 
         try:
@@ -1773,7 +1773,7 @@ class VMOperation:
                 mem=vm.mem_size_mib,
             ),
             image=VMExportImageConfig(
-                os_slug=image.os_slug if image else None,
+                type=image.type if image else None,
                 arch=image.arch if image else None,
                 disk_size=f"{vm.disk_size_mib}M" if vm.disk_size_mib else None,
             ),

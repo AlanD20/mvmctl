@@ -64,9 +64,7 @@ class TestConsoleKill:
     @patch("mvmctl.cli.console.ConsoleOperation")
     def test_console_kill_not_found(self, mock_console_op):
         mock_console_op.kill.side_effect = MVMError("VM not found")
-        result = runner.invoke(
-            app, ["console", "nonexistent", "--kill"]
-        )
+        result = runner.invoke(app, ["console", "nonexistent", "--kill"])
         assert result.exit_code == 1
 
 

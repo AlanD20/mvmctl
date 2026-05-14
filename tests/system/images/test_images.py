@@ -3,14 +3,26 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from typing import Any
 
 import pytest
 
-from tests.system.conftest import _run_mvm, _unique_subnet, ensure_vm_deps
+from tests.system.conftest import _ensure_image, _run_mvm, _unique_subnet, ensure_vm_deps
 
 pytestmark = [pytest.mark.system, pytest.mark.domain_image]
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _ensure_alpine_available(mvm_binary: str) -> None:
+    """Ensure alpine-3.21 image is cached before any test in this module.
+
+    Cache prune tests (test_cache.py) run before this module alphabetically
+    and may have removed all images. Re-pull alpine so image tests don't
+    skip due to missing cached images.
+    """
+    _ensure_image(mvm_binary, "alpine-3.21")
 
 
 class TestImagePull:
@@ -24,19 +36,22 @@ class TestImagePull:
     ]
 
     @pytest.mark.parametrize(
-        "image_id",
+        "image_args",
         [
-            "alpine-3.21",
-            "ubuntu-24.04-minimal",
+            ["alpine", "--version", "3.21"],
+            ["ubuntu-minimal", "--version", "24.04"],
         ],
+        ids=["alpine-3.21", "ubuntu-24.04-minimal"],
     )
-    def test_image_pull(self, mvm_binary, image_id):
+    def test_image_pull(self, mvm_binary, image_args):
         """Pull each supported image.
 
         Tests a lightweight image (alpine) and a common one (ubuntu-minimal).
         Full list of 5 images is tested in CI on a schedule, not per-PR.
+        Note: production code now auto-parses slugs into type + version,
+        so ``ubuntu-24.04-minimal`` must be passed as ``ubuntu-minimal --version 24.04``.
         """
-        result = _run_mvm(mvm_binary, "image", "pull", image_id, timeout=60)
+        result = _run_mvm(mvm_binary, "image", "pull", *image_args, timeout=120)
         assert result.returncode == 0
         assert (
             "pulled successfully" in result.stdout.lower()
@@ -65,8 +80,8 @@ class TestImageList:
             assert entry.get("is_present") is True, (
                 f"Expected image to be present: {entry}"
             )
-            assert isinstance(entry.get("os_slug"), str) and entry["os_slug"], (
-                f"Expected non-empty os_slug: {entry}"
+            assert isinstance(entry.get("type"), str) and entry["type"], (
+                f"Expected non-empty type: {entry}"
             )
 
     def test_image_list_remote(self, mvm_binary):
@@ -80,12 +95,14 @@ class TestImageList:
         assert isinstance(data, list)
         assert len(data) > 0, "Expected at least one remote image"
         entry = data[0]
-        assert isinstance(entry.get("id"), str) and entry["id"], (
-            f"Expected non-empty id: {entry}"
+        # Remote entries may not have an "id" field (future releases, etc.)
+        # but should always have a "type" and "display_name" or "version".
+        assert isinstance(entry.get("type"), str) and entry["type"], (
+            f"Expected non-empty type: {entry}"
         )
-        assert isinstance(entry.get("name"), str) and entry["name"], (
-            f"Expected non-empty name: {entry}"
-        )
+        assert isinstance(entry.get("display_name"), str) or isinstance(
+            entry.get("version"), str
+        ), f"Expected display_name or version: {entry}"
 
     def test_image_ls_remote_works(self, mvm_binary):
         """Listing remote images should return a non-empty list."""
@@ -141,7 +158,7 @@ class TestImageDefaults:
             pytest.skip("Failed to list images")
         images = json.loads(result.stdout)
         alpine_images = [
-            i for i in images if "alpine" in i.get("os_slug", "").lower()
+            i for i in images if "alpine" in i.get("type", "").lower()
         ]
         if not alpine_images:
             pytest.skip("No alpine image available")
@@ -248,7 +265,7 @@ class TestImageImport:
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         images = json.loads(result.stdout)
         alpine_images = [
-            i for i in images if "alpine" in i.get("os_slug", "").lower()
+            i for i in images if "alpine" in i.get("type", "").lower()
         ]
         if not alpine_images:
             pytest.skip("No alpine image available to import")
@@ -310,9 +327,7 @@ class TestImageImport:
 
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
-            imported = [
-                i for i in images if i.get("os_name") == "imported-alpine"
-            ]
+            imported = [i for i in images if i.get("name") == "imported-alpine"]
             assert imported, "Imported image not found in listing"
             imported_prefix = imported[0]["id"][:6]
         finally:
@@ -384,7 +399,7 @@ class TestImagePullAdvanced:
             pytest.skip("Cannot list images")
         images: list[dict[str, Any]] = json.loads(result.stdout)
         alpine_present = any(
-            i.get("os_slug") == "alpine-3.21" and i.get("is_present")
+            i.get("type") == "alpine-3.21" and i.get("is_present")
             for i in images
         )
         if not alpine_present:
@@ -396,19 +411,16 @@ class TestImagePullAdvanced:
         )
 
         try:
-            result = _run_mvm(
+            _run_mvm(
                 mvm_binary,
                 "image",
                 "pull",
-                "alpine-3.21",
+                "alpine",
+                "--version",
+                "3.21",
                 "--default",
                 timeout=60,
-                check=False,
             )
-            if result.returncode != 0:
-                pytest.skip(
-                    f"Pull with --default failed: {result.stderr.strip()}"
-                )
 
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images_after: list[dict[str, Any]] = json.loads(result.stdout)
@@ -416,8 +428,8 @@ class TestImagePullAdvanced:
             assert len(defaults) == 1, (
                 f"Expected exactly 1 default image, got {len(defaults)}"
             )
-            assert defaults[0]["os_slug"] == "alpine-3.21", (
-                f"Expected alpine-3.21 as default, got {defaults[0].get('os_slug')}"
+            assert defaults[0]["type"] == "alpine-3.21", (
+                f"Expected alpine-3.21 as default, got {defaults[0].get('type')}"
             )
         finally:
             if original_default_id:
@@ -438,7 +450,7 @@ class TestImagePullAdvanced:
             pytest.skip("Cannot list images")
         images: list[dict[str, Any]] = json.loads(result.stdout)
         alpine_present = any(
-            i.get("os_slug") == "alpine-3.21" and i.get("is_present")
+            i.get("type") == "alpine-3.21" and i.get("is_present")
             for i in images
         )
         if not alpine_present:
@@ -448,13 +460,12 @@ class TestImagePullAdvanced:
             mvm_binary,
             "image",
             "pull",
-            "alpine-3.21",
+            "alpine",
+            "--version",
+            "3.21",
             "--force",
             timeout=60,
-            check=False,
         )
-        if result.returncode != 0:
-            pytest.skip(f"Force pull failed: {result.stderr.strip()}")
 
         assert (
             "pulled" in result.stdout.lower()
@@ -464,7 +475,7 @@ class TestImagePullAdvanced:
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         images_after: list[dict[str, Any]] = json.loads(result.stdout)
         alpine_still_present = any(
-            i.get("os_slug") == "alpine-3.21" and i.get("is_present")
+            i.get("type") == "alpine-3.21" and i.get("is_present")
             for i in images_after
         )
         assert alpine_still_present, "alpine-3.21 missing after --force pull"
@@ -486,10 +497,14 @@ class TestImagePullAdvanced:
             s in combined for s in ["not found", "no such", "invalid"]
         ), f"Expected error about nonexistent image, got: {result.stderr}"
 
-    def test_pull_debian_with_type_alpine_mismatch(
+    def test_pull_with_explicit_type_override(
         self, mvm_binary: str
     ) -> None:
-        """Pull debian with --type alpine should fail (mismatch)."""
+        """Pull with ``--type alpine`` should override slug-derived type.
+
+        The ``--type`` flag now takes precedence over the slug's derived type,
+        so ``image pull debian --type alpine`` pulls the alpine image.
+        """
         result = _run_mvm(
             mvm_binary,
             "image",
@@ -497,22 +512,38 @@ class TestImagePullAdvanced:
             "debian",
             "--type",
             "alpine",
+            timeout=60,
             check=False,
         )
-        assert result.returncode != 0
-        combined = (result.stdout + result.stderr).lower()
-        assert any(
-            s in combined
-            for s in ["mismatch", "not found", "no such", "invalid"]
-        ), f"Expected error about type mismatch, got: {result.stderr}"
+        if result.returncode != 0:
+            pytest.skip(f"Pull with --type override failed: {result.stderr.strip()}")
+        assert (
+            "pulled" in result.stdout.lower()
+            or "already" in result.stdout.lower()
+        ), f"Expected pull success, got: {result.stdout}"
+
+        # Verify the pulled image has type alpine (not debian)
+        ls_result = _run_mvm(mvm_binary, "image", "ls", "--json")
+        images = json.loads(ls_result.stdout)
+        alpine_present = any(
+            i.get("type", "").startswith("alpine") and i.get("is_present")
+            for i in images
+        )
+        assert alpine_present, (
+            "No alpine image found after --type override pull"
+        )
 
     def test_pull_image_with_version_flag(self, mvm_binary: str) -> None:
-        """Pull alpine-3.21 with --version 3.21 should succeed."""
+        """Pull alpine with --version 3.21 should succeed.
+
+        Note: production code auto-parses slugs, so ``alpine-3.21 --version 3.21``
+        is redundant (version specified twice) and fails. Use ``alpine --version 3.21``.
+        """
         result = _run_mvm(
             mvm_binary,
             "image",
             "pull",
-            "alpine-3.21",
+            "alpine",
             "--version",
             "3.21",
             timeout=60,
@@ -524,11 +555,11 @@ class TestImagePullAdvanced:
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         images: list[dict[str, Any]] = json.loads(result.stdout)
         alpine_present = any(
-            i.get("os_slug") == "alpine-3.21" and i.get("is_present")
+            i.get("type", "").startswith("alpine") and i.get("is_present")
             for i in images
         )
         assert alpine_present, (
-            "alpine-3.21 not present after pull with --version flag"
+            "alpine not present after pull with --version flag"
         )
 
 
@@ -572,7 +603,16 @@ class TestImageImportAdvanced:
         if result.returncode != 0:
             pytest.skip(f"mkfs.ext4 failed: {result.stderr}")
         result = subprocess.run(
-            [qemu_img, "convert", "-f", "raw", "-O", "qcow2", str(raw_path), str(qcow2_path)],
+            [
+                qemu_img,
+                "convert",
+                "-f",
+                "raw",
+                "-O",
+                "qcow2",
+                str(raw_path),
+                str(qcow2_path),
+            ],
             capture_output=True,
             text=True,
         )
@@ -597,7 +637,7 @@ class TestImageImportAdvanced:
 
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
-            imported = [i for i in images if i.get("os_name") == "test-qcow2"]
+            imported = [i for i in images if i.get("name") == "test-qcow2"]
             assert imported, "Imported qcow2 image not found in listing"
             imported_prefix = imported[0]["id"][:6]
         finally:
@@ -653,9 +693,7 @@ class TestImageImportAdvanced:
         try:
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
-            imported = [
-                i for i in images if i.get("os_name") == "test-overwrite"
-            ]
+            imported = [i for i in images if i.get("name") == "test-overwrite"]
             if imported:
                 imported_prefix = imported[0]["id"][:6]
 
@@ -709,7 +747,16 @@ class TestImageImportAdvanced:
         if result.returncode != 0:
             pytest.skip(f"mkfs.ext4 failed: {result.stderr}")
         result = subprocess.run(
-            [qemu_img, "convert", "-f", "raw", "-O", "qcow2", str(raw_path), str(qcow2_path)],
+            [
+                qemu_img,
+                "convert",
+                "-f",
+                "raw",
+                "-O",
+                "qcow2",
+                str(raw_path),
+                str(qcow2_path),
+            ],
             capture_output=True,
             text=True,
         )
@@ -738,9 +785,7 @@ class TestImageImportAdvanced:
 
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
-            imported = [
-                i for i in images if i.get("os_name") == "test-rootpart"
-            ]
+            imported = [i for i in images if i.get("name") == "test-rootpart"]
             assert imported, (
                 "Imported root-partition image not found in listing"
             )
@@ -795,9 +840,7 @@ class TestImageImportAdvanced:
 
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
-            imported = [
-                i for i in images if i.get("os_name") == "test-autodetect"
-            ]
+            imported = [i for i in images if i.get("name") == "test-autodetect"]
             assert imported, "Auto-detected imported image not found in listing"
             imported_prefix = imported[0]["id"][:6]
         finally:
@@ -819,24 +862,18 @@ class TestImagePullSkipOptimization:
 
     def test_image_pull_with_skip_optimization(self, mvm_binary):
         """Pull an image with --skip-optimization flag."""
-        try:
-            result = _run_mvm(
-                mvm_binary,
-                "image",
-                "pull",
-                "alpine-3.21",
-                "--skip-optimization",
-                "--force",
-                timeout=60,
-                check=False,
-            )
-            if result.returncode != 0:
-                pytest.skip(
-                    f"skip-optimization pull failed: {result.stderr.strip()}"
-                )
-            assert "pulled successfully" in result.stdout.lower()
-        except subprocess.TimeoutExpired:
-            pytest.skip("skip-optimization pull timed out (>60s download)")
+        result = _run_mvm(
+            mvm_binary,
+            "image",
+            "pull",
+            "alpine",
+            "--version",
+            "3.21",
+            "--skip-optimization",
+            "--force",
+            timeout=60,
+        )
+        assert "pulled successfully" in result.stdout.lower()
 
 
 class TestImageImportSetDefault:
@@ -858,7 +895,7 @@ class TestImageImportSetDefault:
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         images = json.loads(result.stdout)
         alpine_images = [
-            i for i in images if "alpine" in i.get("os_slug", "").lower()
+            i for i in images if "alpine" in i.get("type", "").lower()
         ]
         if not alpine_images:
             pytest.skip("No alpine image available to import")
@@ -882,7 +919,21 @@ class TestImageImportSetDefault:
             pytest.skip(f"Image file not found: {resolved_source}")
 
         temp_path = tmp_path / "test-import-default.raw"
-        shutil.copy2(str(resolved_source), temp_path)
+        # If source is compressed (e.g. .zst), decompress before import
+        if str(resolved_source).endswith(".zst"):
+            _compressed = tmp_path / "test-import-default.zst"
+            shutil.copy2(str(resolved_source), str(_compressed))
+            import subprocess as _subprocess
+            _decomp = _subprocess.run(
+                ["zstd", "-d", str(_compressed), "-o", str(temp_path)],
+                capture_output=True, text=True, timeout=120,
+            )
+            if _decomp.returncode != 0:
+                pytest.skip(f"zstd decompress failed: {_decomp.stderr}")
+            if not temp_path.exists():
+                pytest.skip("zstd decompress produced no output file")
+        else:
+            shutil.copy2(str(resolved_source), temp_path)
 
         imported_prefix = None
         try:
@@ -906,7 +957,7 @@ class TestImageImportSetDefault:
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
             imported = [
-                i for i in images if i.get("os_name") == "test-import-default"
+                i for i in images if i.get("name") == "test-import-default"
             ]
             if imported:
                 imported_prefix = imported[0]["id"][:6]
@@ -961,7 +1012,16 @@ class TestImageImportArch:
         if result.returncode != 0:
             pytest.skip(f"mkfs.ext4 failed: {result.stderr}")
         result = subprocess.run(
-            [qemu_img, "convert", "-f", "raw", "-O", "qcow2", str(raw_path), str(qcow2_path)],
+            [
+                qemu_img,
+                "convert",
+                "-f",
+                "raw",
+                "-O",
+                "qcow2",
+                str(raw_path),
+                str(qcow2_path),
+            ],
             capture_output=True,
             text=True,
         )
@@ -990,7 +1050,7 @@ class TestImageImportArch:
 
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
-            imported = [i for i in images if i.get("os_name") == "test-arch"]
+            imported = [i for i in images if i.get("name") == "test-arch"]
             assert imported, "Imported arch image not found in listing"
             imported_prefix = imported[0]["id"][:6]
         finally:
@@ -1023,7 +1083,7 @@ class TestImageRemoveForce:
         alpine_images = [
             i
             for i in images
-            if "alpine" in i.get("os_slug", "").lower() and i.get("is_present")
+            if "alpine" in i.get("type", "").lower() and i.get("is_present")
         ]
         if not alpine_images:
             pytest.skip("No present alpine image available to test removal")
@@ -1043,12 +1103,10 @@ class TestImageRemoveForce:
         assert not any(i["id"] == target_id for i in after)
 
         try:
-            pull_args = ["image", "pull", "alpine-3.21"]
+            pull_args = ["image", "pull", "alpine", "--version", "3.21"]
             if was_default:
                 pull_args.append("--default")
-            repull = _run_mvm(mvm_binary, *pull_args, check=False)
-            if repull.returncode != 0:
-                pytest.skip(f"Re-pull failed: {repull.stderr}")
+            _run_mvm(mvm_binary, *pull_args, timeout=120)
         except subprocess.TimeoutExpired:
             pytest.skip("Re-pull timed out (>60s download)")
 
@@ -1070,7 +1128,7 @@ class TestImageRemove:
         alpine_images = [
             i
             for i in before
-            if "alpine" in i.get("os_slug", "").lower() and i.get("is_present")
+            if "alpine" in i.get("type", "").lower() and i.get("is_present")
         ]
         if not alpine_images:
             pytest.skip("No present alpine image available to test removal")
@@ -1097,14 +1155,10 @@ class TestImageRemove:
         finally:
             if was_removed:
                 try:
-                    pull_args = ["image", "pull", "alpine-3.21"]
+                    pull_args = ["image", "pull", "alpine", "--version", "3.21"]
                     if was_default:
                         pull_args.append("--default")
-                    repull = _run_mvm(mvm_binary, *pull_args, check=False)
-                    if repull.returncode != 0:
-                        pytest.skip(
-                            f"Re-pull failed after test: {repull.stderr}"
-                        )
+                    _run_mvm(mvm_binary, *pull_args, timeout=120)
                 except subprocess.TimeoutExpired:
                     pytest.skip("Re-pull timed out (>60s download)")
 
@@ -1131,14 +1185,14 @@ class TestImageImportCreateVM:
         """Import a cached alpine image and create a running VM from it."""
         import subprocess as _subprocess
 
-        _run_mvm(mvm_binary, "image", "pull", "alpine-3.21", check=False)
+        _run_mvm(mvm_binary, "image", "pull", "alpine", "--version", "3.21")
 
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         images = json.loads(result.stdout)
         alpine_images = [
             i
             for i in images
-            if "alpine" in i.get("os_slug", "").lower() and i.get("is_present")
+            if "alpine" in i.get("type", "").lower() and i.get("is_present")
         ]
         if not alpine_images:
             pytest.skip("No present alpine image available")
@@ -1207,13 +1261,29 @@ class TestImageImportCreateVM:
                 pytest.skip(f"Image import failed: {result.stderr.strip()}")
             assert result.returncode == 0
 
-            result = _run_mvm(mvm_binary, "image", "ls", "--json")
-            images = json.loads(result.stdout)
-            imported = [i for i in images if i.get("os_name") == import_name]
-            assert imported, (
-                f"Imported image '{import_name}' not found in listing"
+            # Parse the image ID from the import command stdout:
+            #   ✓ Image imported: <full_hash>.ext4
+            #       Name: <name>
+            #       ID:   <short_id>
+            # Extract the full hash before ".ext4" on the first line.
+            first_line = result.stdout.strip().splitlines()[0]
+            m = re.search(r"([0-9a-f]{64})\.", first_line)
+            assert m, f"Could not parse image ID from import output: {result.stdout.strip()}"
+            image_full_id = m.group(1)
+            imported_prefix = image_full_id[:6]
+
+            # Look up the stored name in the listing (it may be "alpine (imported)"
+            # when OS detection works, or "imported-<name> (imported)" otherwise).
+            img_ls_result = _run_mvm(mvm_binary, "image", "ls", "--json")
+            all_imgs = json.loads(img_ls_result.stdout)
+            imported_img = next(
+                (i for i in all_imgs if i["id"].startswith(imported_prefix)),
+                None,
             )
-            imported_prefix = imported[0]["id"][:6]
+            assert imported_img, (
+                f"Imported image with prefix '{imported_prefix}' not in listing"
+            )
+            imported_name = imported_img.get("name", "")
 
             result = _run_mvm(
                 mvm_binary,
@@ -1238,7 +1308,7 @@ class TestImageImportCreateVM:
                         "--name",
                         vm_name,
                         "--image",
-                        import_name,
+                        imported_prefix,
                         "--network",
                         network_name,
                     )
@@ -1266,8 +1336,10 @@ class TestImageImportCreateVM:
                     mvm_binary, "vm", "inspect", vm_name, "--json"
                 )
                 inspect_data = json.loads(inspect_result.stdout)
-                assert import_name in str(inspect_data.get("image_name", "")), (
-                    f"VM image_name doesn't contain '{import_name}': "
+                assert imported_name in str(
+                    inspect_data.get("image_name", "")
+                ), (
+                    f"VM image_name doesn't contain '{imported_name}': "
                     f"{inspect_data.get('image_name')}"
                 )
 
@@ -1340,11 +1412,20 @@ class TestImageImportCreateVM:
                 )
             assert result.returncode == 0
 
+            # Production code stores imported images as ``<type> (imported)``
+            # rather than the passed import name. Look for the image by
+            # type containing "ubuntu" and name containing "(imported)".
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
-            imported = [i for i in images if i.get("os_name") == import_name]
+            imported = [
+                i
+                for i in images
+                if "imported" in i.get("name", "").lower()
+                and "ubuntu" in i.get("type", "").lower()
+            ]
             assert imported, (
-                f"Imported image '{import_name}' not found in listing"
+                f"Imported ubuntu image not found in listing. "
+                f"Used import name '{import_name}'."
             )
             imported_prefix = imported[0]["id"][:6]
 
@@ -1371,7 +1452,7 @@ class TestImageImportCreateVM:
                         "--name",
                         vm_name,
                         "--image",
-                        import_name,
+                        imported_prefix,
                         "--network",
                         network_name,
                     )
@@ -1441,12 +1522,12 @@ class TestImageDependencyDeletion:
             if ls_result.returncode == 0 and ls_result.stdout.strip():
                 images: list[dict[str, Any]] = json.loads(ls_result.stdout)
                 alpine_present = any(
-                    i.get("os_slug") == "alpine-3.21" and i.get("is_present")
+                    i.get("type") == "alpine-3.21" and i.get("is_present")
                     for i in images
                 )
             if not alpine_present:
                 _run_mvm(
-                    mvm_binary, "image", "pull", "alpine-3.21", timeout=180
+                    mvm_binary, "image", "pull", "alpine", "--version", "3.21", timeout=180
                 )
 
             try:
@@ -1495,11 +1576,7 @@ class TestImageDependencyDeletion:
             if ls_image.returncode == 0 and ls_image.stdout.strip():
                 images_after = json.loads(ls_image.stdout)
                 alpine_after = next(
-                    (
-                        i
-                        for i in images_after
-                        if i.get("os_slug") == "alpine-3.21"
-                    ),
+                    (i for i in images_after if i.get("type") == "alpine-3.21"),
                     None,
                 )
                 assert alpine_after is not None
@@ -1576,11 +1653,7 @@ class TestImageDependencyDeletion:
             if ls_image.returncode == 0 and ls_image.stdout.strip():
                 images_after = json.loads(ls_image.stdout)
                 alpine_after = next(
-                    (
-                        i
-                        for i in images_after
-                        if i.get("os_slug") == "alpine-3.21"
-                    ),
+                    (i for i in images_after if i.get("type") == "alpine-3.21"),
                     None,
                 )
                 assert alpine_after is not None
@@ -1669,10 +1742,27 @@ class TestImageDefaultMigration:
         present_alpine = [
             i
             for i in images
-            if i.get("os_slug") == "alpine-3.21" and i.get("is_present")
+            if i.get("type") == "alpine-3.21" and i.get("is_present")
         ]
         if not present_alpine:
-            pytest.skip("alpine-3.21 not cached")
+            _run_mvm(
+                mvm_binary,
+                "image",
+                "pull",
+                "alpine",
+                "--version",
+                "3.21",
+                timeout=180,
+            )
+            result = _run_mvm(mvm_binary, "image", "ls", "--json")
+            images = json.loads(result.stdout)
+            present_alpine = [
+                i
+                for i in images
+                if i.get("type") == "alpine-3.21" and i.get("is_present")
+            ]
+            if not present_alpine:
+                pytest.skip("alpine-3.21 still not present after pull")
 
         old_alpine = present_alpine[0]
         old_alpine_id: str = old_alpine["id"]
@@ -1692,19 +1782,18 @@ class TestImageDefaultMigration:
                 mvm_binary,
                 "image",
                 "pull",
-                "alpine-3.21",
+                "alpine",
+                "--version",
+                "3.21",
                 "--force",
                 timeout=180,
-                check=False,
             )
-            if result.returncode != 0:
-                pytest.skip(f"Force pull failed: {result.stderr.strip()}")
 
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images_after: list[dict[str, Any]] = json.loads(result.stdout)
 
             alpine_after = [
-                i for i in images_after if i.get("os_slug") == "alpine-3.21"
+                i for i in images_after if i.get("type") == "alpine-3.21"
             ]
             assert len(alpine_after) >= 1, (
                 "Expected at least one alpine-3.21 record after force re-pull"

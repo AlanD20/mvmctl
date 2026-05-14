@@ -292,9 +292,7 @@ class TestNetworkOperationRemove:
         result = NetworkOperation.remove(NetworkInput(name=["testnet"]))
         assert result.status == "success"
         assert result.code == "network.removed"
-        mock_service.remove.assert_called_once_with(
-            mock_item, force=False
-        )
+        mock_service.remove.assert_called_once_with(mock_item, force=False)
 
     def test_remove_with_force(self, mocker):
         mock_item = _make_network()
@@ -320,9 +318,7 @@ class TestNetworkOperationRemove:
         mocker.patch("mvmctl.api.network_operations.AuditLog")
 
         NetworkOperation.remove(NetworkInput(name=["testnet"]), force=True)
-        mock_service.remove.assert_called_once_with(
-            mock_item, force=True
-        )
+        mock_service.remove.assert_called_once_with(mock_item, force=True)
 
     def test_remove_resolution_failure(self, mocker):
         mock_request = MagicMock()
@@ -363,9 +359,7 @@ class TestNetworkOperationRemove:
             return_value=mock_repo,
         )
         mock_service = MagicMock()
-        mock_service.remove.side_effect = NetworkError(
-            "network in use by VM"
-        )
+        mock_service.remove.side_effect = NetworkError("network in use by VM")
         mocker.patch(
             "mvmctl.api.network_operations.NetworkService",
             return_value=mock_service,

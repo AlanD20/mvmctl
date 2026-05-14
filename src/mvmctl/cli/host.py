@@ -289,7 +289,7 @@ def host_ls(
 @host_app.command(name="clean")
 @handle_errors
 def host_clean(
-    force: bool = typer.Option(False, "--force", help="Skip confirmation"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Remove all networking config (bridges, TAPs, iptables). Does not touch sysctl or group."""
     _abort_if_vms_running("clean")
@@ -326,7 +326,7 @@ def host_clean(
 @host_app.command(name="reset")
 @handle_errors
 def host_reset(
-    force: bool = typer.Option(False, "--force", help="Skip confirmation"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """
     Full rollback: remove networking, revert sysctl, remove sudoers and group.

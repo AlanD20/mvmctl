@@ -31,6 +31,51 @@ uv run mypy src/
 uv run scripts/run_tests.py --ci
 ```
 
+## Running a specific test class with pytest
+
+Use `::` syntax to target a single class instead of running the whole file:
+
+```
+pytest tests/path/to/test_foo.py::TestBar
+```
+
+Concrete examples:
+- `pytest tests/unit/test_main.py::TestMainHelp`
+- `pytest tests/unit/test_main.py::TestMainSubcommands`
+- `pytest tests/unit/models/test_vm.py::TestVMStatus`
+- `pytest tests/unit/cli/test_network.py::TestNetworkLs`
+
+Drill further into a specific method: `pytest tests/unit/test_main.py::TestMainHelp::test_help`
+
+Key points:
+- The `::` separator drills into file → class (and optionally → method).
+- pytest does NOT default to `-x` (stop on first failure), so all tests in the class run.
+- Add `-v` for verbose output: `pytest -v tests/unit/test_main.py::TestMainHelp`
+- Add `-x` to stop on first failure within the class.
+- Combine with `-k` for additional filtering if needed.
+
+## SUDO & UV PATH
+
+- **Always use `uv`** (resolved via PATH). Never use bare `uv` with sudo in an unactivated shell.
+- For one-time setup via uv (requires sudo):
+  `sudo uv run mvm host init`
+- For one-time setup via built binary:
+  `sudo ~/.local/bin/mvm host init`
+- The built binary **MUST** be copied to `~/.local/bin/mvm` — that is the only path
+  where `sudo` will work with the binary
+- For running system tests: `sg mvm -c 'uv run scripts/run_tests.py --system --domain <domain>'`
+- For running a single test file: `sg mvm -c 'uv run scripts/run_tests.py --system --test tests/system/<domain>/test_xxx.py'`
+- For running mvm commands: `sg mvm -c 'uv run mvm <command>'`
+- DO NOT use sudo for regular mvm commands (vm create, network create, etc.)
+- Only use sudo when actually needed: `host init`, `host clean`, `host reset`
+- `sudo` is allowed for: `mvm init`, `mvm host init`, `mvm host clean`, `mvm host reset`
+- For verbose or debug output, use the `--verbose` or `--debug` CLI flags instead of `MVM_LOG_LEVEL=DEBUG`:
+  ```bash
+  sg mvm -c 'uv run mvm --debug vm create --name test-vm'
+  sg mvm -c 'uv run mvm --verbose vm ls'
+  ```
+  The `--debug` flag sets log level to DEBUG; `--verbose` sets it to INFO. Both are available on every command via the root `mvm` group.
+
 ## Critical rules (violation = critical failure)
 
 - Core domains NEVER import from other core domains. Only `_shared` is allowed.

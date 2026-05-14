@@ -48,19 +48,37 @@ class TestCacheCleanActual:
             "--skip-host",
             check=False,
         )
-        _run_mvm(mvm_binary, "bin", "pull", "1.15.0", check=False)
+        _run_mvm(mvm_binary, "bin", "pull", "1.15.1", "--default", check=False)
         bin_ls = _run_mvm(mvm_binary, "bin", "ls", "--json", check=False)
         if bin_ls.returncode == 0 and bin_ls.stdout.strip():
             bins = json.loads(bin_ls.stdout)
             fc = next((b for b in bins if b.get("name") == "firecracker"), None)
-            if fc:
+            if fc and not any(
+                b.get("is_default") for b in bins if b.get("name") == "firecracker"
+            ):
                 _run_mvm(
                     mvm_binary, "bin", "default", fc["id"][:6], check=False
                 )
-        _run_mvm(
+        kernel_result = _run_mvm(
             mvm_binary, "kernel", "pull", "--type", "firecracker", check=False
         )
-        _run_mvm(mvm_binary, "image", "pull", "alpine-3.21", check=False)
+        if kernel_result.returncode == 0:
+            # Fetch kernel listing and set the first present kernel as default
+            kernel_ls = _run_mvm(mvm_binary, "kernel", "ls", "--json", check=False)
+            if kernel_ls.returncode == 0 and kernel_ls.stdout.strip():
+                kernels = json.loads(kernel_ls.stdout)
+                present = [k for k in kernels if k.get("is_present")]
+                if present:
+                    _run_mvm(
+                        mvm_binary,
+                        "kernel",
+                        "default",
+                        present[0]["id"][:6],
+                        check=False,
+                    )
+        _run_mvm(
+            mvm_binary, "image", "pull", "alpine", "--version", "3.21", check=False
+        )
         _run_mvm(
             mvm_binary,
             "network",

@@ -339,8 +339,8 @@ def _seed_test_image(repo, image_id: str = "b" * 64) -> None:
     repo.upsert(
         ImageItem(
             id=image_id,
-            os_slug="ubuntu-24.04",
-            os_name="Ubuntu 24.04",
+            type="ubuntu-24.04",
+            name="Ubuntu 24.04",
             arch="x86_64",
             path="ubuntu-24.04.ext4",
             fs_type="ext4",

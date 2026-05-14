@@ -148,8 +148,8 @@ class TestCachePruneAssets:
         repo.upsert(
             ImageItem(
                 id=image_id,
-                os_slug="alpine-3.19",
-                os_name="Alpine 3.19",
+                type="alpine-3.19",
+                name="Alpine 3.19",
                 arch="x86_64",
                 path="alpine-3.19.ext4",
                 fs_type="ext4",

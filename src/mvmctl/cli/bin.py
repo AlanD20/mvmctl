@@ -19,6 +19,8 @@ else:
     BinaryOperation = _BinaryOperation
     BinaryPullInput = _BinaryPullInput
     BinaryInput = _BinaryInput
+from rich.console import Console
+
 from mvmctl.cli._completion import _complete_binary_versions
 from mvmctl.models.result import OperationResult
 from mvmctl.utils._io import (
@@ -84,7 +86,8 @@ def bin_ls(
     rows: list[list[str]] = []
 
     if remote:
-        remote_versions = BinaryOperation.list_remote(limit=limit)
+        with Console().status("Fetching remote versions"):
+            remote_versions = BinaryOperation.list_remote(limit=limit)
 
         for ver in remote_versions:
             cached = "✓" if ver in local_versions else " "

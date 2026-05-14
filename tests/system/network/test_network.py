@@ -129,7 +129,12 @@ class TestNetworkLifecycle:
 
         # Determine current firewall backend
         backend_result = _run_mvm(
-            mvm_binary, "config", "get", "settings", "firewall_backend", check=False
+            mvm_binary,
+            "config",
+            "get",
+            "settings",
+            "firewall_backend",
+            check=False,
         )
         backend = "nftables"  # hardcoded default in constants.py
         if backend_result.returncode == 0 and backend_result.stdout.strip():
@@ -147,7 +152,15 @@ class TestNetworkLifecycle:
             # In nftables mode, the bridge interface name appears in the
             # MVM-FORWARD chain (iifname/oifname match), not POSTROUTING.
             result = subprocess.run(
-                ["sudo", "nft", "list", "chain", "inet", "mvmctl", "MVM-FORWARD"],
+                [
+                    "sudo",
+                    "nft",
+                    "list",
+                    "chain",
+                    "inet",
+                    "mvmctl",
+                    "MVM-FORWARD",
+                ],
                 capture_output=True,
                 text=True,
                 check=False,

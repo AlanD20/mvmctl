@@ -570,8 +570,8 @@ class TestVMCreateExplicit:
         repo.upsert(
             ImageItem(
                 id=image_id,
-                os_slug="debian-12",
-                os_name="Debian 12",
+                type="debian-12",
+                name="Debian 12",
                 arch="x86_64",
                 path="debian-12.ext4",
                 fs_type="ext4",

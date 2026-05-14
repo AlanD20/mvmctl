@@ -77,13 +77,8 @@ class TestCacheEdgeCases:
                 "cache",
                 "prune",
                 "vm",
-                check=False,
+                "--force",
             )
-            if result.returncode != 0:
-                pytest.skip(
-                    f"cache prune vm failed (may need sudo): "
-                    f"{result.stderr.strip()}"
-                )
 
             ls_result = _run_mvm(mvm_binary, "vm", "ls", "--json")
             vms = json.loads(ls_result.stdout)
@@ -266,7 +261,9 @@ class TestImageAdvancedFlags:
                 mvm_binary,
                 "image",
                 "pull",
-                "alpine-3.21",
+                "alpine",
+                "--version",
+                "3.21",
                 "--disable-detector",
                 "all",
                 "--force",
@@ -516,14 +513,18 @@ class TestImagePullAdvancedFlags:
             pytest.skip("Remote listing returned non-JSON output")
         if not remote_images:
             pytest.skip("No remote images available")
-        # Find the first image that has both id and version fields
+        # Find the first image that has both type and version fields
         test_img = next(
-            (img for img in remote_images if img.get("id") and img.get("version")),
+            (
+                img
+                for img in remote_images
+                if img.get("type") and img.get("version")
+            ),
             None,
         )
         if test_img is None:
-            pytest.skip("No remote image has both id and version metadata")
-        selector = test_img["id"]
+            pytest.skip("No remote image has both type and version metadata")
+        selector = test_img["type"]
         version = test_img["version"]
         try:
             result = _run_mvm(
@@ -545,9 +546,7 @@ class TestImagePullAdvancedFlags:
                     f"{result.stderr.strip()}"
                 )
         except subprocess.TimeoutExpired:
-            pytest.skip(
-                f"Pull {selector} --version {version} timed out (>60s)"
-            )
+            pytest.skip(f"Pull {selector} --version {version} timed out (>60s)")
 
     def test_image_pull_with_arch(self, mvm_binary):
         """Pull an image with --arch flag."""
@@ -556,7 +555,9 @@ class TestImagePullAdvancedFlags:
                 mvm_binary,
                 "image",
                 "pull",
-                "alpine-3.21",
+                "alpine",
+                "--version",
+                "3.21",
                 "--arch",
                 "x86_64",
                 "--force",
@@ -661,17 +662,16 @@ class TestImageImportWithDisableDetector:
         alpine_images = [
             i
             for i in images
-            if "alpine" in i.get("os_slug", "").lower() and i.get("is_present")
+            if "alpine" in i.get("type", "").lower() and i.get("is_present")
         ]
         if not alpine_images:
-            _run_mvm(mvm_binary, "image", "pull", "alpine-3.21", check=False)
+            _run_mvm(mvm_binary, "image", "pull", "alpine", "--version", "3.21", check=False)
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
             alpine_images = [
                 i
                 for i in images
-                if "alpine" in i.get("os_slug", "").lower()
-                and i.get("is_present")
+                if "alpine" in i.get("type", "").lower() and i.get("is_present")
             ]
 
         if not alpine_images:
@@ -738,7 +738,7 @@ class TestImageImportWithDisableDetector:
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
             imported = [
-                i for i in images if i.get("os_name") == "test-disable-detector"
+                i for i in images if i.get("name") == "test-disable-detector"
             ]
             assert imported, (
                 "Imported image with --disable-detector not found in listing"

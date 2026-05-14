@@ -65,12 +65,6 @@ def kernel_ls(
         typer.echo(json.dumps(data, indent=2, default=str))
         return
 
-    if not kernels:
-        print_info(
-            "No kernels found. Use 'mvm kernel pull --type firecracker' to download one."
-        )
-        return
-
     rows: list[list[str]] = []
     for k in kernels:
         is_default = k.is_default
@@ -271,7 +265,7 @@ def kernel_rm(
         autocompletion=_complete_kernel_ids,
     ),
     force: bool = typer.Option(
-        False, "--force", help="Remove even if referenced by VMs"
+        False, "--force", "-f", help="Remove even if referenced by VMs"
     ),
 ) -> None:
     """Remove one or more kernels."""

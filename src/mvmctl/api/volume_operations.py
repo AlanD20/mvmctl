@@ -103,7 +103,19 @@ class VolumeOperation:
         repo = VolumeRepository(db)
 
         request = VolumeRequest(inputs=inputs, db=db)
-        resolved = request.resolve()
+        try:
+            resolved = request.resolve()
+        except VolumeNotFoundError as e:
+            return BatchResult(
+                items=[
+                    OperationResult(
+                        status="error",
+                        code="volume.not_found",
+                        message=str(e),
+                        exception=e,
+                    )
+                ]
+            )
 
         results: list[OperationResult[VolumeItem]] = []
 

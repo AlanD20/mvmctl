@@ -526,16 +526,18 @@ class TestFirecrackerSpawnerExtraDrives:
 
     def test_extra_drives_included(self) -> None:
         """_build_drives_config should include extra drives."""
-        config = self._make_config(extra_drives=[
-            {
-                "drive_id": "vol-1",
-                "path_on_host": "/volumes/test.raw",
-                "is_root_device": False,
-                "is_read_only": False,
-                "cache_type": "Unsafe",
-                "io_engine": "Sync",
-            }
-        ])
+        config = self._make_config(
+            extra_drives=[
+                {
+                    "drive_id": "vol-1",
+                    "path_on_host": "/volumes/test.raw",
+                    "is_root_device": False,
+                    "is_read_only": False,
+                    "cache_type": "Unsafe",
+                    "io_engine": "Sync",
+                }
+            ]
+        )
         spawner = FirecrackerSpawner(config)
         drives = spawner._build_drives_config()
         assert len(drives) == 2  # rootfs + extra drive
@@ -552,24 +554,26 @@ class TestFirecrackerSpawnerExtraDrives:
 
     def test_multiple_extra_drives(self) -> None:
         """_build_drives_config should include multiple extra drives."""
-        config = self._make_config(extra_drives=[
-            {
-                "drive_id": "vol-1",
-                "path_on_host": "/volumes/test1.raw",
-                "is_root_device": False,
-                "is_read_only": False,
-                "cache_type": "Unsafe",
-                "io_engine": "Sync",
-            },
-            {
-                "drive_id": "vol-2",
-                "path_on_host": "/volumes/test2.raw",
-                "is_root_device": False,
-                "is_read_only": True,
-                "cache_type": "Unsafe",
-                "io_engine": "Sync",
-            },
-        ])
+        config = self._make_config(
+            extra_drives=[
+                {
+                    "drive_id": "vol-1",
+                    "path_on_host": "/volumes/test1.raw",
+                    "is_root_device": False,
+                    "is_read_only": False,
+                    "cache_type": "Unsafe",
+                    "io_engine": "Sync",
+                },
+                {
+                    "drive_id": "vol-2",
+                    "path_on_host": "/volumes/test2.raw",
+                    "is_root_device": False,
+                    "is_read_only": True,
+                    "cache_type": "Unsafe",
+                    "io_engine": "Sync",
+                },
+            ]
+        )
         spawner = FirecrackerSpawner(config)
         drives = spawner._build_drives_config()
         assert len(drives) == 3  # rootfs + 2 extra drives
@@ -831,7 +835,10 @@ class TestFirecrackerSpawnerSpawn:
         # Replace _api_socket_path with a mock so we can control exists().
         # PosixPath.exists is read-only, so patch.object won't work on it.
         mock_socket_path = MagicMock()
-        mock_socket_path.exists.side_effect = [False, True]  # no stale → appears
+        mock_socket_path.exists.side_effect = [
+            False,
+            True,
+        ]  # no stale → appears
         spawner._api_socket_path = mock_socket_path
 
         mock_proc = MagicMock()

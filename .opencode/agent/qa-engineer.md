@@ -83,6 +83,29 @@ coverage settings) when needed.
 - This rule exists because the full test suite takes ~100s and wastes GPU/CPU
   cycles that could be used for actual work.
 
+## Running a specific test class with pytest
+
+Use `::` syntax to target a single class instead of running the whole file:
+
+```
+pytest tests/path/to/test_foo.py::TestBar
+```
+
+Concrete examples:
+- `pytest tests/unit/test_main.py::TestMainHelp`
+- `pytest tests/unit/test_main.py::TestMainSubcommands`
+- `pytest tests/unit/models/test_vm.py::TestVMStatus`
+- `pytest tests/unit/cli/test_network.py::TestNetworkLs`
+
+Drill further into a specific method: `pytest tests/unit/test_main.py::TestMainHelp::test_help`
+
+Key points:
+- The `::` separator drills into file → class (and optionally → method).
+- pytest does NOT default to `-x` (stop on first failure), so all tests in the class run.
+- Add `-v` for verbose output: `pytest -v tests/unit/test_main.py::TestMainHelp`
+- Add `-x` to stop on first failure within the class.
+- Combine with `-k` for additional filtering if needed.
+
 ## ABSOLUTE SCOPE BOUNDARY — YOU DO NOT TOUCH PRODUCTION CODE
 
 You write, edit, and maintain files under `tests/`. You never modify any file under

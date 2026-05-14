@@ -7,13 +7,12 @@ import logging
 import os
 import signal
 import subprocess
-import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
 
-from mvmctl.constants import CONST_TIMESTAMP_INITIAL, MVM_UNIX_GROUP
+from mvmctl.constants import MVM_UNIX_GROUP
 from mvmctl.exceptions import ProcessError
 
 logger = logging.getLogger(__name__)
@@ -518,97 +517,6 @@ def stream_cmd(
         if returncode != 0:
             # Sanitize error message: only show command name
             raise ProcessError(f"Command failed (exit {returncode}): {args[0]}")
-
-
-# Sudo credential cache with TTL (60 seconds)
-_SUDO_CACHE_LOCK = threading.Lock()
-_SUDO_CREDENTIALS_VALID = False
-_SUDO_CACHE_TIMESTAMP: float = CONST_TIMESTAMP_INITIAL
-_SUDO_CACHE_TTL_SECONDS = 60
-_SUDO_VALIDATION_IN_PROGRESS = False
-
-
-def _is_sudo_cached() -> bool:
-    """
-    Check if sudo credentials are currently cached and valid.
-
-    Returns True if credentials are cached and haven't expired.
-    """
-    global _SUDO_CREDENTIALS_VALID, _SUDO_CACHE_TIMESTAMP  # noqa: PLW0603
-
-    with _SUDO_CACHE_LOCK:
-        if not _SUDO_CREDENTIALS_VALID:
-            return False
-
-        elapsed = time.monotonic() - _SUDO_CACHE_TIMESTAMP
-        if elapsed > _SUDO_CACHE_TTL_SECONDS:
-            _SUDO_CREDENTIALS_VALID = False
-            return False
-
-        return True
-
-
-def _validate_sudo_credentials() -> bool:
-    """
-    Validate sudo credentials are cached and refresh if needed.
-
-    Uses sudo -n (non-interactive) to check if credentials are cached.
-    If not cached, uses sudo -v to validate (which may prompt for password).
-
-    Includes anti-recursion protection to prevent infinite loops.
-
-    Returns:
-        True if sudo credentials are valid and cached.
-
-    """
-    global _SUDO_CREDENTIALS_VALID, _SUDO_CACHE_TIMESTAMP, _SUDO_VALIDATION_IN_PROGRESS  # noqa: PLW0603
-
-    # Anti-recursion protection
-    if _SUDO_VALIDATION_IN_PROGRESS:
-        return False
-
-    # Fast path: check if already cached and not expired
-    if _is_sudo_cached():
-        return True
-
-    try:
-        _SUDO_VALIDATION_IN_PROGRESS = True
-
-        # First, try non-interactive check (sudo -n true)
-        # This succeeds if credentials are cached without requiring password
-        result = subprocess.run(
-            ["sudo", "-n", "true"],
-            capture_output=True,
-            check=False,
-        )
-
-        if result.returncode == 0:
-            with _SUDO_CACHE_LOCK:
-                _SUDO_CREDENTIALS_VALID = True
-                _SUDO_CACHE_TIMESTAMP = time.monotonic()
-            logger.debug("Sudo credentials validated (cached)")
-            return True
-
-        # Credentials not cached - try to validate with sudo -v
-        # This may prompt for password if required
-        result = subprocess.run(
-            ["sudo", "-v"],
-            capture_output=True,
-            check=False,
-        )
-
-        if result.returncode == 0:
-            with _SUDO_CACHE_LOCK:
-                _SUDO_CREDENTIALS_VALID = True
-                _SUDO_CACHE_TIMESTAMP = time.monotonic()
-            logger.debug("Sudo credentials validated (refreshed)")
-            return True
-
-        logger.debug("Sudo credential validation failed")
-        return False
-
-    finally:
-        _SUDO_VALIDATION_IN_PROGRESS = False
 
 
 def require_mvm_group_membership() -> None:

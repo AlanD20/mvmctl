@@ -173,9 +173,7 @@ class TestProvisioner:
         "_ensure_guestfs_appliance"
     )
     @patch("mvmctl.core._shared._guestfs.GuestfsProvisioner")
-    def test_guestfs_backend_selection(
-        self, _MockGP, _MockAppliance
-    ):
+    def test_guestfs_backend_selection(self, _MockGP, _MockAppliance):
         """VMProvisioner selects _GuestfsBackend when type is GUESTFS."""
         p = VMProvisioner(
             Path("/fake/rootfs.ext4"),

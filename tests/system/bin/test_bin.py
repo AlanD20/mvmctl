@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from tests.system.conftest import _run_mvm
+from tests.system.conftest import _ensure_services_binary, _run_mvm
 
 pytestmark = [pytest.mark.system, pytest.mark.domain_bin]
 
@@ -180,7 +180,21 @@ class TestBinaryPullAndLifecycle:
         versions = re.findall(r"\d+\.\d+\.\d+", result.stdout)
         if not versions:
             pytest.skip("No remote versions available")
-        target = versions[-2]
+        target = versions[-1]
+
+        # Use a version that is not currently the default to avoid conflicts
+        current_default = None
+        _cur_def = _run_mvm(mvm_binary, "bin", "ls", "--json", check=False)
+        if _cur_def.returncode == 0 and _cur_def.stdout:
+            import json as _json
+            for _b in _json.loads(_cur_def.stdout):
+                if _b.get("is_default"):
+                    current_default = _b.get("version")
+        if current_default and current_default in versions:
+            # Pick a different version from the one currently default
+            other = [v for v in versions if v != current_default]
+            if other:
+                target = other[0]
 
         pull_result = _run_mvm(
             mvm_binary,
@@ -192,9 +206,16 @@ class TestBinaryPullAndLifecycle:
             check=False,
         )
         if pull_result.returncode != 0:
-            pytest.skip(
-                f"bin pull {target} --default --force failed "
-                f"(environment/parallelism issue): {pull_result.stderr}"
+            # Try the first available version as fallback
+            target = versions[0]
+            pull_result = _run_mvm(
+                mvm_binary,
+                "bin",
+                "pull",
+                target,
+                "--default",
+                "--force",
+                check=False,
             )
 
     @pytest.mark.slow
@@ -492,6 +513,10 @@ class TestBinaryStoppedVMDeletion:
         """Binary rm allows deleting binaries referenced by stopped VMs."""
         vm_name = unique_vm_name
 
+        # Ensure VM deps (kernel, image, firecracker binary, service binaries) are available
+        from tests.system.conftest import ensure_vm_deps as _ensure_vm_deps
+        _ensure_vm_deps(mvm_binary)
+
         try:
             result = _run_mvm(
                 mvm_binary,
@@ -503,12 +528,7 @@ class TestBinaryStoppedVMDeletion:
                 module_network,
                 "--image",
                 "alpine-3.21",
-                check=False,
             )
-            if result.returncode != 0:
-                pytest.skip(
-                    f"VM creation failed (environment issue): {result.stderr or result.stdout}"
-                )
 
             vm_ls = _run_mvm(mvm_binary, "vm", "ls", "--json", check=False)
             if vm_ls.returncode == 0 and vm_ls.stdout.strip():
@@ -572,9 +592,21 @@ class TestServiceBinarySymlinks:
             "mvm-provision",
         ]
 
-        # Guard: skip if service symlinks aren't set up yet
+        # Ensure service binaries are registered and create symlinks
+        _ensure_services_binary(mvm_binary)
+
+        # If symlinks don't exist yet, create them directly so the test can proceed
+        for name in service_symlinks:
+            link_path = bin_dir / name
+            if not link_path.is_symlink():
+                services_bin = bin_dir / "mvm-services"
+                if services_bin.exists():
+                    link_path.unlink(missing_ok=True)
+                    link_path.symlink_to("mvm-services")
+
+        # Guard: skip if symlinks still can't be set up
         if not all((bin_dir / name).is_symlink() for name in service_symlinks):
-            pytest.skip("Service symlinks not found — run service init first")
+            pytest.skip("Service symlinks could not be created")
 
         try:
             # Verify pre-condition: all three symlinks exist and point correctly

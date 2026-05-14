@@ -14,9 +14,9 @@ class HashGenerator:
     """
 
     @staticmethod
-    def image(os_slug: str, source: str, timestamp: str) -> str:
+    def image(type_: str, source: str, timestamp: str) -> str:
         """Generate 64-char SHA256 hash for an image."""
-        data = f"{os_slug}:{source}:{timestamp}"
+        data = f"{type_}:{source}:{timestamp}"
         return hashlib.sha256(data.encode()).hexdigest()
 
     @staticmethod

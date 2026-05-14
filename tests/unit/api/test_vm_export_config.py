@@ -28,13 +28,13 @@ class TestVMExportConfigToDict:
         cfg = VMExportConfig(
             name="myvm",
             compute=VMExportComputeConfig(vcpus=4, mem=2048),
-            image=VMExportImageConfig(os_slug="ubuntu-24.04", arch="x86_64"),
+            image=VMExportImageConfig(type="ubuntu-24.04", arch="x86_64"),
         )
         d = cfg.to_dict()
         assert d["name"] == "myvm"
         assert d["compute"]["vcpus"] == 4
         assert d["compute"]["mem"] == 2048
-        assert d["image"]["os_slug"] == "ubuntu-24.04"
+        assert d["image"]["type"] == "ubuntu-24.04"
         assert d["image"]["arch"] == "x86_64"
 
     def test_to_dict_omits_none_values(self) -> None:
@@ -75,7 +75,7 @@ class TestVMExportConfigFromDict:
             {
                 "name": "vm",
                 "image": {
-                    "os_slug": "ubuntu",
+                    "type": "ubuntu",
                     "arch": "x86_64",
                 },
                 "unknown_key": "value",
@@ -83,7 +83,7 @@ class TestVMExportConfigFromDict:
             }
         )
         assert cfg.name == "vm"
-        assert cfg.image.os_slug == "ubuntu"
+        assert cfg.image.type == "ubuntu"
         assert not hasattr(cfg, "unknown_key")
 
     def test_from_dict_preserves_nested_sub_configs(self) -> None:
@@ -93,7 +93,7 @@ class TestVMExportConfigFromDict:
                 "name": "vm",
                 "compute": {"vcpus": 8, "mem": 4096},
                 "image": {
-                    "os_slug": "debian",
+                    "type": "debian",
                     "arch": "arm64",
                     "disk_size": "10G",
                 },
@@ -109,7 +109,7 @@ class TestVMExportConfigFromDict:
             }
         )
         assert cfg.compute.vcpus == 8
-        assert cfg.image.os_slug == "debian"
+        assert cfg.image.type == "debian"
         assert cfg.image.disk_size == "10G"
         assert cfg.kernel.version == "6.1.0"
         assert cfg.kernel.type == "vmlinux"
@@ -218,7 +218,7 @@ class TestVMExportConfigRoundtrip:
             schema_version="1.0",
             compute=VMExportComputeConfig(vcpus=2, mem=1024),
             image=VMExportImageConfig(
-                os_slug="ubuntu-24.04",
+                type="ubuntu-24.04",
                 arch="x86_64",
                 disk_size="2G",
             ),
@@ -243,7 +243,7 @@ class TestVMExportConfigRoundtrip:
 
         assert restored.name == "testvm"
         assert restored.compute.vcpus == 2
-        assert restored.image.os_slug == "ubuntu-24.04"
+        assert restored.image.type == "ubuntu-24.04"
         assert restored.kernel.type == "vmlinux"
         assert restored.binary.version == "v1.15.0"
         assert restored.network.subnet == "172.35.0.0/24"
@@ -264,7 +264,7 @@ class TestVMExportConfigRoundtrip:
             name="full-vm",
             compute=VMExportComputeConfig(vcpus=4, mem=2048),
             image=VMExportImageConfig(
-                os_slug="alpine-3.21",
+                type="alpine-3.21",
                 arch="aarch64",
                 disk_size="5G",
             ),
@@ -308,7 +308,7 @@ class TestVMExportConfigRoundtrip:
         restored = VMExportConfig.from_dict(d)
 
         assert restored.compute.vcpus == 4
-        assert restored.image.os_slug == "alpine-3.21"
+        assert restored.image.type == "alpine-3.21"
         assert restored.kernel.version == "6.6.0"
         assert restored.binary.name == "firecracker"
         assert restored.network.subnet == "10.99.0.0/16"
@@ -324,13 +324,13 @@ class TestVMExportConfigJsonFile:
         """Export to JSON file produces valid JSON."""
         cfg = VMExportConfig(
             name="myvm",
-            image=VMExportImageConfig(os_slug="ubuntu-24.04", arch="x86_64"),
+            image=VMExportImageConfig(type="ubuntu-24.04", arch="x86_64"),
         )
         cfg.to_json_file(tmp_path / "out.json")
         assert (tmp_path / "out.json").exists()
         data = json.loads((tmp_path / "out.json").read_text())
         assert data["name"] == "myvm"
-        assert data["image"]["os_slug"] == "ubuntu-24.04"
+        assert data["image"]["type"] == "ubuntu-24.04"
 
     def test_to_json_file_creates_parent_dirs(self, tmp_path: Path) -> None:
         """Parent directories are created if needed."""
@@ -345,7 +345,7 @@ class TestVMExportConfigJsonFile:
             "name": "myvm",
             "compute": {"vcpus": 8, "mem": 4096},
             "image": {
-                "os_slug": "ubuntu-24.04",
+                "type": "ubuntu-24.04",
                 "arch": "x86_64",
             },
         }
@@ -377,14 +377,14 @@ class TestVMExportConfigJsonFile:
         original = VMExportConfig(
             name="roundtrip",
             compute=VMExportComputeConfig(vcpus=2, mem=512),
-            image=VMExportImageConfig(os_slug="ubuntu-22.04", arch="x86_64"),
+            image=VMExportImageConfig(type="ubuntu-22.04", arch="x86_64"),
         )
         path = tmp_path / "export.json"
         original.to_json_file(path)
         restored = VMExportConfig.from_json_file(path)
         assert restored.name == "roundtrip"
         assert restored.compute.vcpus == 2
-        assert restored.image.os_slug == "ubuntu-22.04"
+        assert restored.image.type == "ubuntu-22.04"
 
 
 class TestVMExportNoInternalIds:
@@ -394,7 +394,7 @@ class TestVMExportNoInternalIds:
         """to_dict() output must not contain image_id, kernel_id, etc."""
         cfg = VMExportConfig(
             name="test",
-            image=VMExportImageConfig(os_slug="ubuntu-24.04", arch="x86_64"),
+            image=VMExportImageConfig(type="ubuntu-24.04", arch="x86_64"),
         )
         output = str(cfg.to_dict())
         assert "image_id" not in output
@@ -407,7 +407,7 @@ class TestVMExportNoInternalIds:
         cfg = VMExportConfig(
             name="full-test",
             compute=VMExportComputeConfig(vcpus=2, mem=1024),
-            image=VMExportImageConfig(os_slug="alpine-3.21", arch="x86_64"),
+            image=VMExportImageConfig(type="alpine-3.21", arch="x86_64"),
             kernel=VMExportKernelConfig(
                 version="5.15.0", arch="x86_64", type="vmlinux"
             ),
@@ -426,7 +426,7 @@ class TestVMExportNoInternalIds:
         """Only portable semantic refs are used, never internal IDs."""
         cfg = VMExportConfig(
             name="export-test",
-            image=VMExportImageConfig(os_slug="alpine-3.21", arch="x86_64"),
+            image=VMExportImageConfig(type="alpine-3.21", arch="x86_64"),
             kernel=VMExportKernelConfig(
                 version="5.15.0", arch="x86_64", type="vmlinux"
             ),
@@ -435,7 +435,7 @@ class TestVMExportNoInternalIds:
                 name="custom-net", subnet="10.0.0.0/24"
             ),
         )
-        assert cfg.image.os_slug == "alpine-3.21"
+        assert cfg.image.type == "alpine-3.21"
         assert cfg.kernel.version == "5.15.0"
         assert cfg.binary.version == "v1.14.0"
         assert cfg.network.name == "custom-net"
@@ -453,7 +453,7 @@ class TestSubConfigDataclasses:
     def test_image_config_defaults(self) -> None:
         """VMExportImageConfig defaults."""
         c = VMExportImageConfig()
-        assert c.os_slug is None
+        assert c.type is None
         assert c.arch is None
         assert c.disk_size is None
 

@@ -170,7 +170,11 @@ class TestVMRemove:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_rm_success(self, mock_vm_op):
         mock_vm_op.remove.return_value = BatchResult(
-            items=[OperationResult(status="success", code="vm.removed", message="VM removed")]
+            items=[
+                OperationResult(
+                    status="success", code="vm.removed", message="VM removed"
+                )
+            ]
         )
         result = runner.invoke(app, ["vm", "rm", "myvm"])
         assert result.exit_code == 0
@@ -179,7 +183,11 @@ class TestVMRemove:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_rm_multiple(self, mock_vm_op):
         mock_vm_op.remove.return_value = BatchResult(
-            items=[OperationResult(status="success", code="vm.removed", message="VM removed")]
+            items=[
+                OperationResult(
+                    status="success", code="vm.removed", message="VM removed"
+                )
+            ]
         )
         result = runner.invoke(app, ["vm", "rm", "vm1", "vm2"])
         assert result.exit_code == 0
@@ -187,7 +195,11 @@ class TestVMRemove:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_rm_with_name_flag(self, mock_vm_op):
         mock_vm_op.remove.return_value = BatchResult(
-            items=[OperationResult(status="success", code="vm.removed", message="VM removed")]
+            items=[
+                OperationResult(
+                    status="success", code="vm.removed", message="VM removed"
+                )
+            ]
         )
         result = runner.invoke(app, ["vm", "rm", "myvm"])
         assert result.exit_code == 0
@@ -195,7 +207,13 @@ class TestVMRemove:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_rm_api_error(self, mock_vm_op):
         mock_vm_op.remove.return_value = BatchResult(
-            items=[OperationResult(status="error", code="vm.remove_failed", message="VM not found")]
+            items=[
+                OperationResult(
+                    status="error",
+                    code="vm.remove_failed",
+                    message="VM not found",
+                )
+            ]
         )
         result = runner.invoke(app, ["vm", "rm", "nonexistent"])
         assert result.exit_code == 1
@@ -208,7 +226,11 @@ class TestVMStart:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_start_success(self, mock_vm_op):
         mock_vm_op.start.return_value = BatchResult(
-            items=[OperationResult(status="success", code="vm.started", message="VM started")]
+            items=[
+                OperationResult(
+                    status="success", code="vm.started", message="VM started"
+                )
+            ]
         )
         result = runner.invoke(app, ["vm", "start", "myvm"])
         assert result.exit_code == 0
@@ -217,7 +239,11 @@ class TestVMStart:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_start_with_name_flag(self, mock_vm_op):
         mock_vm_op.start.return_value = BatchResult(
-            items=[OperationResult(status="success", code="vm.started", message="VM started")]
+            items=[
+                OperationResult(
+                    status="success", code="vm.started", message="VM started"
+                )
+            ]
         )
         result = runner.invoke(app, ["vm", "start", "myvm"])
         assert result.exit_code == 0
@@ -225,7 +251,13 @@ class TestVMStart:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_start_api_error(self, mock_vm_op):
         mock_vm_op.start.return_value = BatchResult(
-            items=[OperationResult(status="error", code="vm.start_failed", message="VM not found")]
+            items=[
+                OperationResult(
+                    status="error",
+                    code="vm.start_failed",
+                    message="VM not found",
+                )
+            ]
         )
         result = runner.invoke(app, ["vm", "start", "nonexistent"])
         assert result.exit_code == 1
@@ -242,7 +274,11 @@ class TestVMStop:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_stop_success(self, mock_vm_op):
         mock_vm_op.stop.return_value = BatchResult(
-            items=[OperationResult(status="success", code="vm.stopped", message="VM stopped")]
+            items=[
+                OperationResult(
+                    status="success", code="vm.stopped", message="VM stopped"
+                )
+            ]
         )
         result = runner.invoke(app, ["vm", "stop", "myvm"])
         assert result.exit_code == 0
@@ -251,7 +287,11 @@ class TestVMStop:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_stop_with_force(self, mock_vm_op):
         mock_vm_op.stop.return_value = BatchResult(
-            items=[OperationResult(status="success", code="vm.stopped", message="VM stopped")]
+            items=[
+                OperationResult(
+                    status="success", code="vm.stopped", message="VM stopped"
+                )
+            ]
         )
         result = runner.invoke(app, ["vm", "stop", "myvm", "--force"])
         assert result.exit_code == 0
@@ -261,7 +301,13 @@ class TestVMStop:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_stop_api_error(self, mock_vm_op):
         mock_vm_op.stop.return_value = BatchResult(
-            items=[OperationResult(status="error", code="vm.stop_failed", message="VM not running")]
+            items=[
+                OperationResult(
+                    status="error",
+                    code="vm.stop_failed",
+                    message="VM not running",
+                )
+            ]
         )
         result = runner.invoke(app, ["vm", "stop", "myvm"])
         assert result.exit_code == 1
@@ -273,7 +319,11 @@ class TestVMReboot:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_reboot_success(self, mock_vm_op):
         mock_vm_op.reboot.return_value = BatchResult(
-            items=[OperationResult(status="success", code="vm.rebooted", message="VM rebooted")]
+            items=[
+                OperationResult(
+                    status="success", code="vm.rebooted", message="VM rebooted"
+                )
+            ]
         )
         result = runner.invoke(app, ["vm", "reboot", "myvm"])
         assert result.exit_code == 0
@@ -282,7 +332,11 @@ class TestVMReboot:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_reboot_with_force(self, mock_vm_op):
         mock_vm_op.reboot.return_value = BatchResult(
-            items=[OperationResult(status="success", code="vm.rebooted", message="VM rebooted")]
+            items=[
+                OperationResult(
+                    status="success", code="vm.rebooted", message="VM rebooted"
+                )
+            ]
         )
         result = runner.invoke(app, ["vm", "reboot", "myvm", "--force"])
         assert result.exit_code == 0
@@ -290,7 +344,13 @@ class TestVMReboot:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_reboot_api_error(self, mock_vm_op):
         mock_vm_op.reboot.return_value = BatchResult(
-            items=[OperationResult(status="error", code="vm.reboot_failed", message="VM not responsive")]
+            items=[
+                OperationResult(
+                    status="error",
+                    code="vm.reboot_failed",
+                    message="VM not responsive",
+                )
+            ]
         )
         result = runner.invoke(app, ["vm", "reboot", "myvm"])
         assert result.exit_code == 1
@@ -302,7 +362,11 @@ class TestVMPause:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_pause_success(self, mock_vm_op):
         mock_vm_op.pause.return_value = BatchResult(
-            items=[OperationResult(status="success", code="vm.paused", message="VM paused")]
+            items=[
+                OperationResult(
+                    status="success", code="vm.paused", message="VM paused"
+                )
+            ]
         )
         result = runner.invoke(app, ["vm", "pause", "myvm"])
         assert result.exit_code == 0
@@ -311,7 +375,13 @@ class TestVMPause:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_pause_api_error(self, mock_vm_op):
         mock_vm_op.pause.return_value = BatchResult(
-            items=[OperationResult(status="error", code="vm.pause_failed", message="VM not running")]
+            items=[
+                OperationResult(
+                    status="error",
+                    code="vm.pause_failed",
+                    message="VM not running",
+                )
+            ]
         )
         result = runner.invoke(app, ["vm", "pause", "myvm"])
         assert result.exit_code == 1
@@ -323,7 +393,11 @@ class TestVMResume:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_resume_success(self, mock_vm_op):
         mock_vm_op.resume.return_value = BatchResult(
-            items=[OperationResult(status="success", code="vm.resumed", message="VM resumed")]
+            items=[
+                OperationResult(
+                    status="success", code="vm.resumed", message="VM resumed"
+                )
+            ]
         )
         result = runner.invoke(app, ["vm", "resume", "myvm"])
         assert result.exit_code == 0
@@ -332,7 +406,13 @@ class TestVMResume:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_resume_api_error(self, mock_vm_op):
         mock_vm_op.resume.return_value = BatchResult(
-            items=[OperationResult(status="error", code="vm.resume_failed", message="VM not paused")]
+            items=[
+                OperationResult(
+                    status="error",
+                    code="vm.resume_failed",
+                    message="VM not paused",
+                )
+            ]
         )
         result = runner.invoke(app, ["vm", "resume", "myvm"])
         assert result.exit_code == 1
@@ -739,7 +819,11 @@ class TestVMStopEdgeCases:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_stop_with_ip_flag(self, mock_vm_op):
         mock_vm_op.stop.return_value = BatchResult(
-            items=[OperationResult(status="success", code="vm.stopped", message="VM stopped")]
+            items=[
+                OperationResult(
+                    status="success", code="vm.stopped", message="VM stopped"
+                )
+            ]
         )
         result = runner.invoke(
             app,
@@ -750,7 +834,11 @@ class TestVMStopEdgeCases:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_stop_with_mac_flag(self, mock_vm_op):
         mock_vm_op.stop.return_value = BatchResult(
-            items=[OperationResult(status="success", code="vm.stopped", message="VM stopped")]
+            items=[
+                OperationResult(
+                    status="success", code="vm.stopped", message="VM stopped"
+                )
+            ]
         )
         result = runner.invoke(
             app,
@@ -765,7 +853,11 @@ class TestVMRebootEdgeCases:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_reboot_with_ip_flag(self, mock_vm_op):
         mock_vm_op.reboot.return_value = BatchResult(
-            items=[OperationResult(status="success", code="vm.rebooted", message="VM rebooted")]
+            items=[
+                OperationResult(
+                    status="success", code="vm.rebooted", message="VM rebooted"
+                )
+            ]
         )
         result = runner.invoke(
             app,
@@ -780,7 +872,11 @@ class TestVMPauseEdgeCases:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_pause_with_ip_flag(self, mock_vm_op):
         mock_vm_op.pause.return_value = BatchResult(
-            items=[OperationResult(status="success", code="vm.paused", message="VM paused")]
+            items=[
+                OperationResult(
+                    status="success", code="vm.paused", message="VM paused"
+                )
+            ]
         )
         result = runner.invoke(
             app,
@@ -795,7 +891,11 @@ class TestVMResumeEdgeCases:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_resume_with_ip_flag(self, mock_vm_op):
         mock_vm_op.resume.return_value = BatchResult(
-            items=[OperationResult(status="success", code="vm.resumed", message="VM resumed")]
+            items=[
+                OperationResult(
+                    status="success", code="vm.resumed", message="VM resumed"
+                )
+            ]
         )
         result = runner.invoke(
             app,

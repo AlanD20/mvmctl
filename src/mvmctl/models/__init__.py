@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     )
     from mvmctl.models.firecracker import DriveConfig, FirecrackerConfig
     from mvmctl.models.host import HostStateChangeItem, HostStateItem
-    from mvmctl.models.image import ImageItem, ImageSpec
+    from mvmctl.models.image import ImageItem, ImageSpec, ImageVersion
     from mvmctl.models.kernel import KernelItem, KernelPullResult, KernelSpec
     from mvmctl.models.key import SSHKeyItem
     from mvmctl.models.network import (
@@ -74,6 +74,7 @@ __all__ = [
     "FirewallWildcard",
     "ImageItem",
     "ImageSpec",
+    "ImageVersion",
     "KernelPullResult",
     "KernelItem",
     "KernelSpec",
@@ -105,6 +106,7 @@ _LAZY_MAP = {
     "HostStateItem": ("mvmctl.models.host", "HostStateItem"),
     "ImageItem": ("mvmctl.models.image", "ImageItem"),
     "ImageSpec": ("mvmctl.models.image", "ImageSpec"),
+    "ImageVersion": ("mvmctl.models.image", "ImageVersion"),
     "KernelItem": ("mvmctl.models.kernel", "KernelItem"),
     "KernelPullResult": ("mvmctl.models.kernel", "KernelPullResult"),
     "KernelSpec": ("mvmctl.models.kernel", "KernelSpec"),

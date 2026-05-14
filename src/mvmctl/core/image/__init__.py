@@ -11,21 +11,30 @@ if TYPE_CHECKING:
     from mvmctl.core.image._repository import ImageRepository
     from mvmctl.core.image._resolver import ImageResolver, ImageResolveResult
     from mvmctl.core.image._service import ImageService
+    from mvmctl.core.image._version_resolver import HttpDirVersionResolver
+    from mvmctl.models.image import ImageVersion
 
 __all__ = [
+    "HttpDirVersionResolver",
     "ImageController",
     "ImageRepository",
     "ImageResolver",
     "ImageResolveResult",
     "ImageService",
+    "ImageVersion",
 ]
 
 _LAZY_MAP = {
+    "HttpDirVersionResolver": (
+        "mvmctl.core.image._version_resolver",
+        "HttpDirVersionResolver",
+    ),
     "ImageController": ("mvmctl.core.image._controller", "ImageController"),
     "ImageRepository": ("mvmctl.core.image._repository", "ImageRepository"),
     "ImageResolver": ("mvmctl.core.image._resolver", "ImageResolver"),
     "ImageResolveResult": ("mvmctl.core.image._resolver", "ImageResolveResult"),
     "ImageService": ("mvmctl.core.image._service", "ImageService"),
+    "ImageVersion": ("mvmctl.models.image", "ImageVersion"),
 }
 
 

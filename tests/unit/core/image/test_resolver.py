@@ -16,16 +16,16 @@ from mvmctl.models import ImageItem
 
 def _make_image(
     image_id: str,
-    os_slug: str = "ubuntu-24.04",
-    os_name: str = "Ubuntu 24.04",
+    type: str = "ubuntu-24.04",
+    name: str = "Ubuntu 24.04",
 ) -> ImageItem:
     ts = datetime.now(tz=UTC).isoformat()
     return ImageItem(
         id=image_id,
-        os_slug=os_slug,
-        os_name=os_name,
+        type=type,
+        name=name,
         arch="x86_64",
-        path=f"{os_slug}.ext4",
+        path=f"{type}.ext4",
         fs_type="ext4",
         fs_uuid=None,
         compressed_size=None,
@@ -56,9 +56,9 @@ class TestImageResolver:
     def _seed_images(self) -> None:
         """Insert test images into the database."""
         images = [
-            _make_image("abc12345" * 8, os_slug="ubuntu-24.04"),
-            _make_image("def67890" * 8, os_slug="debian-12"),
-            _make_image("ghi00000" * 8, os_slug="fedora-40"),
+            _make_image("abc12345" * 8, type="ubuntu-24.04"),
+            _make_image("def67890" * 8, type="debian-12"),
+            _make_image("ghi00000" * 8, type="fedora-40"),
         ]
         for img in images:
             self.repo.upsert(img)
@@ -72,7 +72,7 @@ class TestImageResolver:
         result = self.resolver.by_id("abc12345" * 8)
         assert result is not None
         assert result.id == "abc12345" * 8
-        assert result.os_slug == "ubuntu-24.04"
+        assert result.type == "ubuntu-24.04"
 
     def test_by_id_resolves_by_prefix(self) -> None:
         self._seed_images()
@@ -85,43 +85,43 @@ class TestImageResolver:
             self.resolver.by_id("nonexistent")
 
     def test_by_id_raises_when_ambiguous(self) -> None:
-        self.repo.upsert(_make_image("abc11111" * 8, os_slug="img-1"))
-        self.repo.upsert(_make_image("abc22222" * 8, os_slug="img-2"))
+        self.repo.upsert(_make_image("abc11111" * 8, type="img-1"))
+        self.repo.upsert(_make_image("abc22222" * 8, type="img-2"))
         with pytest.raises(ImageNotFoundError, match="ambiguous"):
             self.resolver.by_id("abc")
 
     # ------------------------------------------------------------------
-    # by_os_slug()
+    # by_type()
     # ------------------------------------------------------------------
 
-    def test_by_os_slug_resolves(self) -> None:
+    def test_by_type_resolves(self) -> None:
         self._seed_images()
-        result = self.resolver.by_os_slug("ubuntu-24.04")
-        assert result.os_slug == "ubuntu-24.04"
+        result = self.resolver.by_type("ubuntu-24.04")
+        assert result.type == "ubuntu-24.04"
 
-    def test_by_os_slug_raises_when_not_found(self) -> None:
+    def test_by_type_raises_when_not_found(self) -> None:
         self._seed_images()
         with pytest.raises(ImageNotFoundError, match="Image not found"):
-            self.resolver.by_os_slug("nonexistent")
+            self.resolver.by_type("nonexistent")
 
-    def test_by_os_slug_excludes_soft_deleted(self) -> None:
+    def test_by_type_excludes_soft_deleted(self) -> None:
         self._seed_images()
         self.repo.soft_delete("abc12345" * 8)
         with pytest.raises(ImageNotFoundError, match="Image not found"):
-            self.resolver.by_os_slug("ubuntu-24.04")
+            self.resolver.by_type("ubuntu-24.04")
 
     # ------------------------------------------------------------------
     # resolve()
     # ------------------------------------------------------------------
 
-    def test_resolve_by_os_slug_first(self) -> None:
-        """resolve() tries os_slug before ID prefix."""
+    def test_resolve_by_type_first(self) -> None:
+        """resolve() tries type before ID prefix."""
         self._seed_images()
         result = self.resolver.resolve("ubuntu-24.04")
-        assert result.os_slug == "ubuntu-24.04"
+        assert result.type == "ubuntu-24.04"
 
     def test_resolve_by_id_prefix_fallback(self) -> None:
-        """resolve() falls back to ID prefix when os_slug not found."""
+        """resolve() falls back to ID prefix when type not found."""
         self._seed_images()
         result = self.resolver.resolve("abc")
         assert result.id == "abc12345" * 8
@@ -131,16 +131,12 @@ class TestImageResolver:
         with pytest.raises(ImageNotFoundError):
             self.resolver.resolve("nonexistent")
 
-    def test_resolve_prefers_os_slug_over_prefix(self) -> None:
-        """An os_slug that's also an ID prefix should match os_slug first."""
-        self.repo.upsert(
-            _make_image("ubuntu-24.04" * 4, os_slug="custom-ubuntu")
-        )
-        self.repo.upsert(
-            _make_image("otherid12345" * 4, os_slug="ubuntu-24.04")
-        )
+    def test_resolve_prefers_type_over_prefix(self) -> None:
+        """An type that's also an ID prefix should match type first."""
+        self.repo.upsert(_make_image("ubuntu-24.04" * 4, type="custom-ubuntu"))
+        self.repo.upsert(_make_image("otherid12345" * 4, type="ubuntu-24.04"))
         result = self.resolver.resolve("ubuntu-24.04")
-        assert result.os_slug == "ubuntu-24.04"
+        assert result.type == "ubuntu-24.04"
 
     # ------------------------------------------------------------------
     # resolve_many()

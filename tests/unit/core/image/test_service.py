@@ -18,7 +18,6 @@ from mvmctl.exceptions import (
     ImageEmptyError,
     ImageError,
 )
-from mvmctl.models import ImageSpec
 
 
 @pytest.fixture
@@ -307,21 +306,6 @@ class TestDecompress:
 
 
 # =========================================================================
-# load_available_images
-# =========================================================================
-
-
-class TestLoadAvailableImages:
-    def test_returns_list_of_specs(self) -> None:
-        specs = ImageService.load_available_images("x86_64")
-        assert isinstance(specs, list)
-        if specs:
-            assert isinstance(specs[0], ImageSpec)
-            assert hasattr(specs[0], "id")
-            assert hasattr(specs[0], "source")
-
-
-# =========================================================================
 # get_specs_for
 # =========================================================================
 
@@ -329,10 +313,10 @@ class TestLoadAvailableImages:
 class TestGetSpecsFor:
     def test_returns_matching_specs(self) -> None:
         specs = ImageService.get_specs_for(
-            ["ubuntu-24.04"], version=None, arch="x86_64"
+            ["archlinux"], version="latest", arch="x86_64"
         )
         assert len(specs) >= 1
-        assert specs[0].id == "ubuntu-24.04"
+        assert specs[0].id == "archlinux-latest"
 
     def test_raises_for_missing(self) -> None:
         with pytest.raises(ImageError, match="not found"):

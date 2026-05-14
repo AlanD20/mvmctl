@@ -41,12 +41,12 @@ class ImageRepository:
         return [ImageItem(**dict(row)) for row in rows]
 
     @_graceful_read(default=None)
-    def get_by_os_slug(self, os_slug: str) -> ImageItem | None:
-        """Return an image by its os_slug, preferring the default, or None if not found."""
+    def get_by_type(self, type: str) -> ImageItem | None:
+        """Return an image by its type, preferring the default, or None if not found."""
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM images WHERE os_slug = ? AND deleted_at IS NULL AND is_present = 1 ORDER BY is_default DESC, created_at DESC",
-                (os_slug,),
+                "SELECT * FROM images WHERE type = ? AND deleted_at IS NULL AND is_present = 1 ORDER BY is_default DESC, created_at DESC",
+                (type,),
             ).fetchone()
         if row is None:
             return None
@@ -54,15 +54,15 @@ class ImageRepository:
 
     @_graceful_read(default=None)
     def get_by_name(self, name: str) -> ImageItem | None:
-        """Return an image by its display name (os_name), or None if not found.
+        """Return an image by its display name (name), or None if not found.
 
         This is particularly useful for imported images where the
-        os_name is set to the import name but the os_slug is derived
+        name is set to the import name but the type is derived
         from the detected filesystem OS.
         """
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM images WHERE os_name = ? AND deleted_at IS NULL AND is_present = 1",
+                "SELECT * FROM images WHERE name = ? AND deleted_at IS NULL AND is_present = 1",
                 (name,),
             ).fetchone()
         if row is None:
@@ -84,13 +84,13 @@ class ImageRepository:
             conn.execute(
                 """
                 INSERT INTO images (
-                    id, os_slug, os_name, distro, arch, path, fs_type, fs_uuid,
+                    id, type, name, distro, arch, path, fs_type, fs_uuid,
                     compressed_size, original_size, compression_ratio,
                     compressed_format, minimum_rootfs_size_mib, pulled_at, is_default, is_present, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
-                    os_slug = excluded.os_slug,
-                    os_name = excluded.os_name,
+                    type = excluded.type,
+                    name = excluded.name,
                     distro = excluded.distro,
                     arch = excluded.arch,
                     path = excluded.path,
@@ -108,8 +108,8 @@ class ImageRepository:
                 """,
                 (
                     image.id,
-                    image.os_slug,
-                    image.os_name,
+                    image.type,
+                    image.name,
                     image.distro,
                     image.arch,
                     image.path,

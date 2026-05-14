@@ -14,8 +14,8 @@ from mvmctl.models import ImageItem
 
 def _make_image(
     image_id: str,
-    os_slug: str = "ubuntu-24.04",
-    os_name: str = "Ubuntu 24.04",
+    type: str = "ubuntu-24.04",
+    name: str = "Ubuntu 24.04",
     arch: str = "x86_64",
     path: str = "ubuntu-24.04.ext4",
     fs_type: str = "ext4",
@@ -29,8 +29,8 @@ def _make_image(
     ts = datetime.now(tz=UTC).isoformat()
     return ImageItem(
         id=image_id,
-        os_slug=os_slug,
-        os_name=os_name,
+        type=type,
+        name=name,
         arch=arch,
         path=path,
         fs_type=fs_type,
@@ -69,14 +69,14 @@ class TestImageRepository:
     # ------------------------------------------------------------------
 
     def test_get_returns_image_when_found(self) -> None:
-        image = _make_image("a" * 64, os_slug="ubuntu-24.04")
+        image = _make_image("a" * 64, type="ubuntu-24.04")
         self._insert_direct(image)
 
         result = self.repo.get("a" * 64)
 
         assert result is not None
         assert result.id == "a" * 64
-        assert result.os_slug == "ubuntu-24.04"
+        assert result.type == "ubuntu-24.04"
 
     def test_get_returns_none_when_not_found(self) -> None:
         result = self.repo.get("nonexistent")
@@ -98,8 +98,8 @@ class TestImageRepository:
 
     def test_find_by_prefix_returns_matching_images(self) -> None:
         self._insert_direct(_make_image("abc12345" * 8))
-        self._insert_direct(_make_image("abc67890" * 8, os_slug="debian-12"))
-        self._insert_direct(_make_image("def00000" * 8, os_slug="fedora-40"))
+        self._insert_direct(_make_image("abc67890" * 8, type="debian-12"))
+        self._insert_direct(_make_image("def00000" * 8, type="fedora-40"))
 
         matches = self.repo.find_by_prefix("abc")
         assert len(matches) == 2
@@ -112,7 +112,7 @@ class TestImageRepository:
 
     def test_find_by_prefix_excludes_soft_deleted(self) -> None:
         self._insert_direct(_make_image("abc12345" * 8))
-        self._insert_direct(_make_image("abc00000" * 8, os_slug="debian-12"))
+        self._insert_direct(_make_image("abc00000" * 8, type="debian-12"))
         self.repo.soft_delete("abc12345" * 8)
 
         matches = self.repo.find_by_prefix("abc")
@@ -120,23 +120,23 @@ class TestImageRepository:
         assert matches[0].id == "abc00000" * 8
 
     # ------------------------------------------------------------------
-    # get_by_os_slug()
+    # get_by_type()
     # ------------------------------------------------------------------
 
-    def test_get_by_os_slug_found(self) -> None:
-        self._insert_direct(_make_image("a" * 64, os_slug="ubuntu-24.04"))
-        result = self.repo.get_by_os_slug("ubuntu-24.04")
+    def test_get_by_type_found(self) -> None:
+        self._insert_direct(_make_image("a" * 64, type="ubuntu-24.04"))
+        result = self.repo.get_by_type("ubuntu-24.04")
         assert result is not None
-        assert result.os_slug == "ubuntu-24.04"
+        assert result.type == "ubuntu-24.04"
 
-    def test_get_by_os_slug_not_found(self) -> None:
-        result = self.repo.get_by_os_slug("nonexistent")
+    def test_get_by_type_not_found(self) -> None:
+        result = self.repo.get_by_type("nonexistent")
         assert result is None
 
-    def test_get_by_os_slug_excludes_soft_deleted(self) -> None:
-        self._insert_direct(_make_image("a" * 64, os_slug="ubuntu-24.04"))
+    def test_get_by_type_excludes_soft_deleted(self) -> None:
+        self._insert_direct(_make_image("a" * 64, type="ubuntu-24.04"))
         self.repo.soft_delete("a" * 64)
-        result = self.repo.get_by_os_slug("ubuntu-24.04")
+        result = self.repo.get_by_type("ubuntu-24.04")
         assert result is None
 
     # ------------------------------------------------------------------
@@ -144,16 +144,16 @@ class TestImageRepository:
     # ------------------------------------------------------------------
 
     def test_list_all_returns_non_deleted_images(self) -> None:
-        self._insert_direct(_make_image("a" * 64, os_slug="ubuntu-24.04"))
-        self._insert_direct(_make_image("b" * 64, os_slug="debian-12"))
-        self._insert_direct(_make_image("c" * 64, os_slug="fedora-40"))
+        self._insert_direct(_make_image("a" * 64, type="ubuntu-24.04"))
+        self._insert_direct(_make_image("b" * 64, type="debian-12"))
+        self._insert_direct(_make_image("c" * 64, type="fedora-40"))
 
         results = self.repo.list_all()
         assert len(results) == 3
 
     def test_list_all_excludes_soft_deleted(self) -> None:
         self._insert_direct(_make_image("a" * 64))
-        self._insert_direct(_make_image("b" * 64, os_slug="debian-12"))
+        self._insert_direct(_make_image("b" * 64, type="debian-12"))
         self.repo.soft_delete("a" * 64)
 
         results = self.repo.list_all()
@@ -174,22 +174,22 @@ class TestImageRepository:
 
         result = self.repo.get("a" * 64)
         assert result is not None
-        assert result.os_slug == "ubuntu-24.04"
+        assert result.type == "ubuntu-24.04"
 
     def test_upsert_updates_existing_image(self) -> None:
-        image = _make_image("a" * 64, os_slug="ubuntu-24.04")
+        image = _make_image("a" * 64, type="ubuntu-24.04")
         self._insert_direct(image)
 
-        updated = _make_image("a" * 64, os_slug="ubuntu-24.04-updated")
+        updated = _make_image("a" * 64, type="ubuntu-24.04-updated")
         self.repo.upsert(updated)
 
         result = self.repo.get("a" * 64)
         assert result is not None
-        assert result.os_slug == "ubuntu-24.04-updated"
+        assert result.type == "ubuntu-24.04-updated"
 
     def test_upsert_preserves_distro(self) -> None:
         """upsert() stores and retrieves distro field correctly."""
-        image = _make_image("a" * 64, os_slug="ubuntu-24.04", distro="ubuntu")
+        image = _make_image("a" * 64, type="ubuntu-24.04", distro="ubuntu")
         self.repo.upsert(image)
 
         result = self.repo.get("a" * 64)
@@ -198,10 +198,12 @@ class TestImageRepository:
 
     def test_upsert_updates_distro(self) -> None:
         """upsert() updates distro field on re-insert."""
-        image = _make_image("a" * 64, os_slug="ubuntu-24.04", distro="ubuntu")
+        image = _make_image("a" * 64, type="ubuntu-24.04", distro="ubuntu")
         self._insert_direct(image)
 
-        updated = _make_image("a" * 64, os_slug="ubuntu-24.04", distro="canonical-ubuntu")
+        updated = _make_image(
+            "a" * 64, type="ubuntu-24.04", distro="canonical-ubuntu"
+        )
         self.repo.upsert(updated)
 
         result = self.repo.get("a" * 64)
@@ -210,7 +212,7 @@ class TestImageRepository:
 
     def test_upsert_distro_defaults_to_none(self) -> None:
         """upsert() stores distro as None when not provided."""
-        image = _make_image("a" * 64, os_slug="debian-12", distro=None)
+        image = _make_image("a" * 64, type="debian-12", distro=None)
         self.repo.upsert(image)
 
         result = self.repo.get("a" * 64)
@@ -219,13 +221,13 @@ class TestImageRepository:
 
     def test_upsert_with_alpine_distro(self) -> None:
         """upsert() works with alpine distro."""
-        image = _make_image("a" * 64, os_slug="alpine-3.21", distro="alpine")
+        image = _make_image("a" * 64, type="alpine-3.21", distro="alpine")
         self.repo.upsert(image)
 
         result = self.repo.get("a" * 64)
         assert result is not None
         assert result.distro == "alpine"
-        assert result.os_slug == "alpine-3.21"
+        assert result.type == "alpine-3.21"
 
     # ------------------------------------------------------------------
     # soft_delete()
@@ -264,9 +266,9 @@ class TestImageRepository:
 
     def test_set_default_clears_previous(self) -> None:
         self._insert_direct(
-            _make_image("a" * 64, os_slug="ubuntu-24.04", is_default=True)
+            _make_image("a" * 64, type="ubuntu-24.04", is_default=True)
         )
-        self._insert_direct(_make_image("b" * 64, os_slug="debian-12"))
+        self._insert_direct(_make_image("b" * 64, type="debian-12"))
 
         self.repo.set_default("b" * 64)
 
@@ -284,9 +286,9 @@ class TestImageRepository:
         assert result is None
 
     def test_get_default_returns_correct_image(self) -> None:
-        self._insert_direct(_make_image("a" * 64, os_slug="image-a"))
+        self._insert_direct(_make_image("a" * 64, type="image-a"))
         self._insert_direct(
-            _make_image("b" * 64, os_slug="image-b", is_default=True)
+            _make_image("b" * 64, type="image-b", is_default=True)
         )
 
         default = self.repo.get_default()
@@ -299,7 +301,7 @@ class TestImageRepository:
 
     def test_update_many_is_present_sets_false(self) -> None:
         self._insert_direct(_make_image("a" * 64))
-        self._insert_direct(_make_image("b" * 64, os_slug="debian-12"))
+        self._insert_direct(_make_image("b" * 64, type="debian-12"))
 
         self.repo.update_many_is_present(["a" * 64, "b" * 64], False)
 

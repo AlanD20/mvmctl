@@ -17,8 +17,8 @@ class ImageItem:
     """Image record — maps to images table."""
 
     id: str
-    os_slug: str
-    os_name: str
+    type: str
+    name: str
     arch: str
     path: str
     fs_type: str
@@ -56,3 +56,21 @@ class ImageSpec:
     sha256_url: str | None = None
     list_url_template: str | None = None
     size: int | None = None
+
+
+@dataclass
+class ImageVersion:
+    """A published version of an image type from an upstream provider.
+
+    NOT frozen — mutable for convenience. Returned by version resolvers
+    to describe an available download for a given image type.
+    """
+
+    version: str
+    codename: str | None
+    type: str
+    download_url: str
+    sha256_url: str | None
+    format: str
+    display_name: str = ""
+    type_name: str = ""

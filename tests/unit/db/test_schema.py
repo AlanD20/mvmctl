@@ -108,8 +108,8 @@ class TestColumnStructure:
 
     IMAGES_COLUMNS = {
         "id": "TEXT",
-        "os_slug": "TEXT",
-        "os_name": "TEXT",
+        "type": "TEXT",
+        "name": "TEXT",
         "distro": "TEXT",
         "arch": "TEXT",
         "path": "TEXT",
@@ -320,7 +320,7 @@ class TestIndexes:
 
     def test_images_indexes(self, conn: sqlite3.Connection) -> None:
         idxs = self._get_indexes(conn, "images")
-        assert "idx_images_os_slug" in idxs
+        assert "idx_images_type" in idxs
         assert "idx_images_name" in idxs
 
     def test_kernels_indexes(self, conn: sqlite3.Connection) -> None:
@@ -379,13 +379,13 @@ class TestIndexes:
 class TestConstraints:
     """Verify UNIQUE, CHECK, and NOT NULL constraints."""
 
-    def test_images_os_slug_indexed(self, conn: sqlite3.Connection) -> None:
-        """Verify images table has a performance index on os_slug."""
+    def test_images_type_indexed(self, conn: sqlite3.Connection) -> None:
+        """Verify images table has a performance index on type."""
         cursor = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='images'"
         )
         idxs = {row[0] for row in cursor.fetchall()}
-        assert "idx_images_os_slug" in idxs
+        assert "idx_images_type" in idxs
 
     def test_networks_name_unique(self, conn: sqlite3.Connection) -> None:
         conn.execute(
@@ -405,7 +405,7 @@ class TestConstraints:
     def test_vm_instances_name_unique(self, conn: sqlite3.Connection) -> None:
         # Insert prerequisites
         conn.execute(
-            "INSERT INTO images (id, os_slug, os_name, arch, path, fs_type, "
+            "INSERT INTO images (id, type, name, arch, path, fs_type, "
             "fs_uuid, original_size, minimum_rootfs_size_mib, pulled_at, "
             "is_default, is_present, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, datetime('now'), datetime('now'))",
@@ -559,7 +559,7 @@ class TestConstraints:
         self, conn: sqlite3.Connection
     ) -> None:
         conn.execute(
-            "INSERT INTO images (id, os_slug, os_name, arch, path, fs_type, "
+            "INSERT INTO images (id, type, name, arch, path, fs_type, "
             "fs_uuid, original_size, minimum_rootfs_size_mib, pulled_at, "
             "is_default, is_present, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, datetime('now'), datetime('now'))",
@@ -639,7 +639,7 @@ class TestConstraints:
         self, conn: sqlite3.Connection
     ) -> None:
         conn.execute(
-            "INSERT INTO images (id, os_slug, os_name, arch, path, fs_type, "
+            "INSERT INTO images (id, type, name, arch, path, fs_type, "
             "fs_uuid, original_size, minimum_rootfs_size_mib, pulled_at, "
             "is_default, is_present, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, datetime('now'), datetime('now'))",

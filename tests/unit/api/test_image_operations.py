@@ -17,11 +17,11 @@ import pytest
 from mvmctl.api.image_operations import ImageOperation
 from mvmctl.api.inputs._image_input import ImageInput
 from mvmctl.exceptions import ImageError
-from mvmctl.models import ImageItem, ImageSpec
+from mvmctl.models import ImageItem, ImageSpec, ImageVersion
 
 
 def _make_image(
-    os_slug: str = "ubuntu-24.04",
+    type: str = "ubuntu-24.04",
     name: str = "Ubuntu 24.04 LTS",
     is_default: bool = False,
     is_present: bool = True,
@@ -29,11 +29,11 @@ def _make_image(
     **kwargs,
 ) -> ImageItem:
     defaults: dict = dict(
-        id=image_id or f"img-{os_slug}-" + "x" * 55,
-        os_slug=os_slug,
-        os_name=name,
+        id=image_id or f"img-{type}-" + "x" * 55,
+        type=type,
+        name=name,
         arch="x86_64",
-        path=f"images/{os_slug}.ext4",
+        path=f"images/{type}.ext4",
         fs_type="ext4",
         minimum_rootfs_size_mib=2048,
         original_size=1024,
@@ -97,7 +97,7 @@ class TestImageOperationList:
 
         result = ImageOperation.list_(ImageInput(id=["ubuntu-24.04"]))
         assert len(result) == 1
-        assert result[0].os_slug == "ubuntu-24.04"
+        assert result[0].type == "ubuntu-24.04"
         mock_resolver.resolve_many.assert_called_once_with(["ubuntu-24.04"])
 
     def test_list_empty(self, mocker):
@@ -118,22 +118,24 @@ class TestImageOperationList:
         assert result == []
 
     def test_list_remote(self, mocker):
-        """list_(remote=True) returns ImageSpec list from YAML."""
-        mock_specs = [
-            ImageSpec(
-                id="ubuntu-24.04",
-                image_type="ubuntu",
+        """list_(remote=True) returns ImageVersion list from HttpDirVersionResolver."""
+        mock_versions = [
+            ImageVersion(
                 version="24.04",
-                name="Ubuntu 24.04",
-                source="https://example.com/ubuntu.qcow2",
+                codename="noble",
+                type="ubuntu",
+                download_url="https://example.com/ubuntu.qcow2",
+                sha256_url=None,
                 format="qcow2",
+                display_name="Ubuntu 24.04 LTS",
+                type_name="Ubuntu",
             ),
         ]
         mocker.patch("mvmctl.api.image_operations.Database")
         mocker.patch("mvmctl.api.image_operations.ImageRepository")
         mocker.patch(
             "mvmctl.api.image_operations.SettingsService.resolve",
-            return_value="x86_64",
+            side_effect=lambda db, cat, key: "x86_64" if key == "arch" else "3600",
         )
         mocker.patch(
             "mvmctl.api.image_operations.BinaryRepository",
@@ -142,28 +144,30 @@ class TestImageOperationList:
             "mvmctl.core.binary._service.BinaryService",
         )
         mocker.patch(
-            "mvmctl.core.image._service.ImageService.load_available_images",
-            return_value=mock_specs,
+            "mvmctl.core.image._service.ImageService.load_image_types_config",
+            return_value=[{"type": "ubuntu"}],
         )
         mocker.patch(
-            "mvmctl.core.image._service.ImageService.resolve_remote_sizes",
+            "mvmctl.core.image._version_resolver.HttpDirVersionResolver.resolve",
+            return_value={"ubuntu": mock_versions},
         )
 
         result = ImageOperation.list_(remote=True)
         assert len(result) == 1
-        assert result[0].id == "ubuntu-24.04"
+        assert result[0].type == "ubuntu"
+        assert result[0].version == "24.04"
 
     def test_list_remote_resolves_sizes(self, mocker):
-        """list_(remote=True) calls resolve_remote_sizes."""
-        mock_specs = [
-            ImageSpec(
-                id="test",
-                image_type="test",
-                version="1",
-                name="Test",
-                source="https://example.com/test.qcow2",
+        """list_(remote=True) delegates to HttpDirVersionResolver with ci_version."""
+        mock_versions = [
+            ImageVersion(
+                version="24.04",
+                codename="noble",
+                type="ubuntu",
+                download_url="https://example.com/ubuntu.qcow2",
+                sha256_url=None,
                 format="qcow2",
-            )
+            ),
         ]
         mock_firecracker = MagicMock()
         mock_firecracker.ci_version = "v1.10"
@@ -173,7 +177,7 @@ class TestImageOperationList:
         mocker.patch("mvmctl.api.image_operations.ImageRepository")
         mocker.patch(
             "mvmctl.api.image_operations.SettingsService.resolve",
-            return_value="x86_64",
+            side_effect=lambda db, cat, key: "x86_64" if key == "arch" else "3600",
         )
         mocker.patch(
             "mvmctl.api.image_operations.BinaryRepository",
@@ -183,15 +187,17 @@ class TestImageOperationList:
             return_value=mock_binary_svc,
         )
         mocker.patch(
-            "mvmctl.core.image._service.ImageService.load_available_images",
-            return_value=mock_specs,
+            "mvmctl.core.image._service.ImageService.load_image_types_config",
+            return_value=[{"type": "ubuntu"}],
         )
-        mock_resolve_sizes = mocker.patch(
-            "mvmctl.core.image._service.ImageService.resolve_remote_sizes",
+        mock_resolver = mocker.patch(
+            "mvmctl.core.image._version_resolver.HttpDirVersionResolver.resolve",
+            return_value={"ubuntu": mock_versions},
         )
 
         ImageOperation.list_(remote=True)
-        mock_resolve_sizes.assert_called_once_with(mock_specs, "v1.10")
+        mock_resolver.assert_called_once()
+        assert mock_resolver.call_args[1]["ci_version"] == "v1.10"
 
 
 class TestImageOperationGet:
@@ -209,8 +215,8 @@ class TestImageOperationGet:
             return_value=mock_request,
         )
 
-        result = ImageOperation.get(ImageInput(os_slug=["ubuntu-24.04"]))
-        assert result.os_slug == "ubuntu-24.04"
+        result = ImageOperation.get(ImageInput(type=["ubuntu-24.04"]))
+        assert result.type == "ubuntu-24.04"
         assert result.arch == "x86_64"
 
     def test_get_multiple_raises_error(self, mocker):
@@ -227,7 +233,7 @@ class TestImageOperationGet:
         with pytest.raises(
             ImageError, match="Expected exactly one image identifier"
         ):
-            ImageOperation.get(ImageInput(os_slug=["ambiguous"]))
+            ImageOperation.get(ImageInput(type=["ambiguous"]))
 
     def test_get_delegates_to_image_request(self, mocker):
         """get() delegates resolution to ImageRequest."""
@@ -240,7 +246,7 @@ class TestImageOperationGet:
             return_value=mock_request,
         )
 
-        ImageOperation.get(ImageInput(os_slug=["test"]))
+        ImageOperation.get(ImageInput(type=["test"]))
         mock_request.resolve.assert_called_once()
 
 
@@ -252,9 +258,9 @@ class TestImageOperationInspect:
         mock_image = _make_image("ubuntu-24.04")
         mocker.patch.object(ImageOperation, "get", return_value=mock_image)
 
-        result = ImageOperation.inspect(ImageInput(os_slug=["ubuntu-24.04"]))
+        result = ImageOperation.inspect(ImageInput(type=["ubuntu-24.04"]))
         assert isinstance(result, ImageItem)
-        assert result.os_slug == "ubuntu-24.04"
+        assert result.type == "ubuntu-24.04"
 
     def test_inspect_returns_dict(self, mocker):
         """inspect() with is_json=True returns dict representation."""
@@ -262,10 +268,10 @@ class TestImageOperationInspect:
         mocker.patch.object(ImageOperation, "get", return_value=mock_image)
 
         result = ImageOperation.inspect(
-            ImageInput(os_slug=["ubuntu-24.04"]), is_json=True
+            ImageInput(type=["ubuntu-24.04"]), is_json=True
         )
         assert isinstance(result, dict)
-        assert result["os_slug"] == "ubuntu-24.04"
+        assert result["type"] == "ubuntu-24.04"
 
     def test_inspect_calls_get(self, mocker):
         """inspect() delegates to get()."""
@@ -273,7 +279,7 @@ class TestImageOperationInspect:
             ImageOperation, "get", return_value=_make_image()
         )
 
-        ImageOperation.inspect(ImageInput(os_slug=["test"]))
+        ImageOperation.inspect(ImageInput(type=["test"]))
         mock_get.assert_called_once()
 
 
@@ -299,9 +305,7 @@ class TestImageOperationSetDefault:
         mocker.patch("mvmctl.api.image_operations.Database")
         mocker.patch("mvmctl.utils.auditlog.AuditLog.log")
 
-        result = ImageOperation.set_default(
-            ImageInput(os_slug=["ubuntu-24.04"])
-        )
+        result = ImageOperation.set_default(ImageInput(type=["ubuntu-24.04"]))
         assert result.status == "success"
         assert result.code == "image.default_set"
         assert result.item is mock_image
@@ -323,7 +327,7 @@ class TestImageOperationSetDefault:
         with pytest.raises(
             ImageError, match="Expected exactly one image identifier"
         ):
-            ImageOperation.set_default(ImageInput(os_slug=["ambiguous"]))
+            ImageOperation.set_default(ImageInput(type=["ambiguous"]))
 
     def test_set_default_audit_logged(self, mocker):
         """set_default() logs the action via AuditLog."""
@@ -340,7 +344,7 @@ class TestImageOperationSetDefault:
         mocker.patch("mvmctl.api.image_operations.Database")
         mock_audit = mocker.patch("mvmctl.utils.auditlog.AuditLog.log")
 
-        ImageOperation.set_default(ImageInput(os_slug=["ubuntu-24.04"]))
+        ImageOperation.set_default(ImageInput(type=["ubuntu-24.04"]))
         mock_audit.assert_called_once()
 
 
@@ -374,24 +378,20 @@ class TestImageOperationRemove:
         mock_image = _make_image("ubuntu-24.04")
         _, mock_image_svc = self._setup_remove_mocks(mocker, [mock_image])
 
-        result = ImageOperation.remove(ImageInput(os_slug=["ubuntu-24.04"]))
+        result = ImageOperation.remove(ImageInput(type=["ubuntu-24.04"]))
         assert result.all_ok
         assert len(result.items) == 1
         assert result.items[0].status == "success"
         assert result.items[0].code == "image.removed"
-        mock_image_svc.remove.assert_called_once_with(
-            mock_image, force=False
-        )
+        mock_image_svc.remove.assert_called_once_with(mock_image, force=False)
 
     def test_remove_with_force_flag(self, mocker):
         """remove() passes force=True to image_svc.remove()."""
         mock_image = _make_image("ubuntu-24.04")
         _, mock_image_svc = self._setup_remove_mocks(mocker, [mock_image])
 
-        ImageOperation.remove(ImageInput(os_slug=["ubuntu-24.04"]), force=True)
-        mock_image_svc.remove.assert_called_once_with(
-            mock_image, force=True
-        )
+        ImageOperation.remove(ImageInput(type=["ubuntu-24.04"]), force=True)
+        mock_image_svc.remove.assert_called_once_with(mock_image, force=True)
 
     def test_remove_controller_error(self, mocker):
         """remove() returns error OperationResult when ImageService.remove() raises."""
@@ -401,7 +401,7 @@ class TestImageOperationRemove:
             "Image is referenced by running VMs"
         )
 
-        result = ImageOperation.remove(ImageInput(os_slug=["ubuntu-24.04"]))
+        result = ImageOperation.remove(ImageInput(type=["ubuntu-24.04"]))
         assert result.has_any_error
         assert result.items[0].status == "error"
         assert "referenced" in str(result.items[0].exception)
@@ -413,7 +413,7 @@ class TestImageOperationRemove:
         self._setup_remove_mocks(mocker, [img1, img2])
 
         result = ImageOperation.remove(
-            ImageInput(os_slug=["ubuntu-24.04", "debian-12"])
+            ImageInput(type=["ubuntu-24.04", "debian-12"])
         )
         assert result.all_ok
         assert len(result.items) == 2
@@ -448,7 +448,7 @@ class TestImageOperationWarm:
         warm_path = Path("/cache/warm/ubuntu-24.04.ext4")
         mock_service.ensure_cached.return_value = [warm_path]
 
-        result = ImageOperation.warm(ImageInput(os_slug=["ubuntu-24.04"]))
+        result = ImageOperation.warm(ImageInput(type=["ubuntu-24.04"]))
         assert result.status == "success"
         assert result.code == "image.warmed"
         assert len(result.item) == 1
@@ -463,7 +463,7 @@ class TestImageOperationWarm:
 
         on_progress = MagicMock()
         ImageOperation.warm(
-            ImageInput(os_slug=["ubuntu-24.04"]), on_progress=on_progress
+            ImageInput(type=["ubuntu-24.04"]), on_progress=on_progress
         )
         assert on_progress.call_count == 2
         calls = [call[0][0].status for call in on_progress.call_args_list]
@@ -476,7 +476,7 @@ class TestImageOperationWarm:
         _, mock_service = self._setup_warm_mocks(mocker, [mock_image])
         mock_service.ensure_cached.side_effect = RuntimeError("Disk full")
 
-        result = ImageOperation.warm(ImageInput(os_slug=["ubuntu-24.04"]))
+        result = ImageOperation.warm(ImageInput(type=["ubuntu-24.04"]))
         assert result.status == "error"
         assert result.code == "image.warm_failed"
         assert "Disk full" in str(result.exception)
@@ -487,7 +487,7 @@ class TestImageOperationWarm:
         _, mock_service = self._setup_warm_mocks(mocker, [mock_image])
         mock_service.ensure_cached.return_value = [Path("/cache/warm/img.ext4")]
 
-        result = ImageOperation.warm(ImageInput(os_slug=["ubuntu-24.04"]))
+        result = ImageOperation.warm(ImageInput(type=["ubuntu-24.04"]))
         assert result.status == "success"
 
     def test_warm_multiple_images(self, mocker):
@@ -501,7 +501,7 @@ class TestImageOperationWarm:
         ]
 
         result = ImageOperation.warm(
-            ImageInput(os_slug=["ubuntu-24.04", "debian-12"])
+            ImageInput(type=["ubuntu-24.04", "debian-12"])
         )
         assert result.status == "success"
         mock_service.ensure_cached.assert_called_once_with([img1, img2])
@@ -514,7 +514,7 @@ class TestImageOperationHelpers:
         """_image_to_dict() includes all relevant fields."""
         img = _make_image("ubuntu-24.04", fs_uuid="abc-123", distro="ubuntu")
         d = ImageOperation._image_to_dict(img)
-        assert d["os_slug"] == "ubuntu-24.04"
+        assert d["type"] == "ubuntu-24.04"
         assert d["name"] == "Ubuntu 24.04 LTS"
         assert d["arch"] == "x86_64"
         assert d["fs_type"] == "ext4"
@@ -556,7 +556,7 @@ class TestImageOperationHelpers:
     def test_find_existing_image_found(self, mocker):
         """find_existing_image() returns item when found in repo and on disk."""
         mock_repo = MagicMock()
-        mock_repo.get_by_os_slug.return_value = _make_image(
+        mock_repo.get_by_type.return_value = _make_image(
             "ubuntu-24.04", path="images/ubuntu-24.04.ext4"
         )
         images_dir = MagicMock()
@@ -568,13 +568,13 @@ class TestImageOperationHelpers:
             MagicMock(id="ubuntu-24.04"), images_dir, mock_repo
         )
         assert result is not None
-        assert result.os_slug == "ubuntu-24.04"
-        mock_repo.get_by_os_slug.assert_called_once_with("ubuntu-24.04")
+        assert result.type == "ubuntu-24.04"
+        mock_repo.get_by_type.assert_called_once_with("ubuntu-24.04")
 
     def test_find_existing_image_not_in_db(self, mocker):
         """find_existing_image() returns None when not in repo."""
         mock_repo = MagicMock()
-        mock_repo.get_by_os_slug.return_value = None
+        mock_repo.get_by_type.return_value = None
         mock_repo.get.return_value = None
 
         result = ImageOperation.find_existing_image(
@@ -585,7 +585,7 @@ class TestImageOperationHelpers:
     def test_find_existing_image_not_on_disk(self, mocker):
         """find_existing_image() returns None when file missing on disk."""
         mock_repo = MagicMock()
-        mock_repo.get_by_os_slug.return_value = _make_image(
+        mock_repo.get_by_type.return_value = _make_image(
             "ubuntu-24.04", path="images/ubuntu-24.04.ext4"
         )
         images_dir = MagicMock()
@@ -599,9 +599,9 @@ class TestImageOperationHelpers:
         assert result is None
 
     def test_find_existing_image_falls_back_to_get_by_id(self, mocker):
-        """find_existing_image() falls back to repo.get() when get_by_os_slug returns None."""
+        """find_existing_image() falls back to repo.get() when get_by_type returns None."""
         mock_repo = MagicMock()
-        mock_repo.get_by_os_slug.return_value = None
+        mock_repo.get_by_type.return_value = None
         mock_repo.get.return_value = _make_image(
             "ubuntu-24.04", path="images/ubuntu-24.04.ext4"
         )
@@ -614,5 +614,5 @@ class TestImageOperationHelpers:
             MagicMock(id="ubuntu-24.04"), images_dir, mock_repo
         )
         assert result is not None
-        assert result.os_slug == "ubuntu-24.04"
+        assert result.type == "ubuntu-24.04"
         mock_repo.get.assert_called_once_with("ubuntu-24.04")

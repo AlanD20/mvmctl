@@ -9,7 +9,7 @@ from click.testing import CliRunner
 
 from mvmctl.exceptions import MVMError
 from mvmctl.main import app
-from mvmctl.models import ImageItem, ImageSpec
+from mvmctl.models import ImageItem
 from mvmctl.models.result import (
     BatchResult,
     NeedsInteraction,
@@ -22,17 +22,17 @@ runner = CliRunner()
 
 def _make_image(
     name: str = "Ubuntu 24.04 LTS",
-    os_slug: str = "ubuntu-24.04",
+    type: str = "ubuntu-24.04",
     is_default: bool = False,
     is_present: bool = True,
     image_id: str | None = None,
 ) -> ImageItem:
     return ImageItem(
-        id=image_id or f"img-{os_slug}-" + "x" * 55,
-        os_slug=os_slug,
-        os_name=name,
+        id=image_id or f"img-{type}-" + "x" * 55,
+        type=type,
+        name=name,
         arch="x86_64",
-        path=f"images/{os_slug}.ext4",
+        path=f"images/{type}.ext4",
         fs_type="ext4",
         minimum_rootfs_size_mib=2048,
         original_size=1024,
@@ -78,21 +78,23 @@ class TestImageLs:
 
     @patch("mvmctl.cli.image.ImageOperation")
     def test_ls_remote(self, mock_img_op):
-        from mvmctl.models import ImageSpec
+        from mvmctl.models.image import ImageVersion
 
         mock_img_op.list_.return_value = [
-            ImageSpec(
-                id="ubuntu-24.04",
-                image_type="ubuntu",
+            ImageVersion(
                 version="24.04",
-                name="Ubuntu 24.04 LTS",
-                source="https://example.com/ubuntu.qcow2",
+                codename="Noble",
+                type="ubuntu",
+                download_url="https://example.com/ubuntu.qcow2",
+                sha256_url="https://example.com/ubuntu.qcow2.sha256",
                 format="qcow2",
+                display_name="Ubuntu 24.04 LTS",
+                type_name="Ubuntu",
             ),
         ]
         result = runner.invoke(app, ["image", "ls", "--remote"])
         assert result.exit_code == 0
-        assert "ubuntu-24.04" in result.output
+        assert "24.04" in result.output
 
     def test_ls_help(self):
         result = runner.invoke(app, ["image", "ls", "--help"])
@@ -309,13 +311,13 @@ class TestImageInspect:
     @patch("mvmctl.cli.image.ImageOperation")
     def test_inspect_json(self, mock_img_op):
         mock_img_op.inspect.return_value = {
-            "os_slug": "ubuntu-24.04",
-            "os_name": "Ubuntu 24.04 LTS",
+            "type": "ubuntu-24.04",
+            "name": "Ubuntu 24.04 LTS",
         }
         result = runner.invoke(app, ["image", "inspect", "abc123", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
-        assert data["os_slug"] == "ubuntu-24.04"
+        assert data["type"] == "ubuntu-24.04"
 
     @patch("mvmctl.cli.image.ImageOperation")
     def test_inspect_not_found(self, mock_img_op):
@@ -369,39 +371,46 @@ class TestImageLsExtended:
     def test_ls_remote_json(self, mocker):
         """Should render remote images as JSON."""
         mock = mocker.patch("mvmctl.cli.image.ImageOperation")
+        from mvmctl.models.image import ImageVersion
+
         mock.list_.return_value = [
-            ImageSpec(
-                id="ubuntu-24.04",
-                image_type="ubuntu",
+            ImageVersion(
                 version="24.04",
-                name="Ubuntu 24.04 LTS",
-                source="https://example.com/ubuntu.qcow2",
+                codename="Noble",
+                type="ubuntu",
+                download_url="https://example.com/ubuntu.qcow2",
+                sha256_url="https://example.com/ubuntu.qcow2.sha256",
                 format="qcow2",
+                display_name="Ubuntu 24.04 LTS",
+                type_name="Ubuntu",
             ),
         ]
         result = runner.invoke(app, ["image", "ls", "--remote", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert len(data) == 1
-        assert data[0]["id"] == "ubuntu-24.04"
+        assert data[0]["version"] == "24.04"
 
     def test_ls_remote_size_none(self, mocker):
-        """Should show '-' for missing remote image size."""
+        """Should render remote images when size is not applicable (no size field in ImageVersion)."""
         mock = mocker.patch("mvmctl.cli.image.ImageOperation")
+        from mvmctl.models.image import ImageVersion
+
         mock.list_.return_value = [
-            ImageSpec(
-                id="ubuntu-24.04",
-                image_type="ubuntu",
+            ImageVersion(
                 version="24.04",
-                name="Ubuntu 24.04 LTS",
-                source="https://example.com/ubuntu.qcow2",
+                codename="Noble",
+                type="ubuntu",
+                download_url="https://example.com/ubuntu.qcow2",
+                sha256_url=None,
                 format="qcow2",
-                size=None,
+                display_name="Ubuntu 24.04 LTS",
+                type_name="Ubuntu",
             ),
         ]
         result = runner.invoke(app, ["image", "ls", "--remote"])
         assert result.exit_code == 0
-        assert "-" in result.output
+        assert "24.04" in result.output
 
     def test_ls_error(self, mocker):
         """Should handle API error."""
@@ -611,13 +620,13 @@ class TestImageInspectExtended:
         """Should handle dict return with --json."""
         mock = mocker.patch("mvmctl.cli.image.ImageOperation")
         mock.inspect.return_value = {
-            "os_slug": "ubuntu-24.04",
-            "os_name": "Ubuntu",
+            "type": "ubuntu-24.04",
+            "name": "Ubuntu",
         }
         result = runner.invoke(app, ["image", "inspect", "abc123", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
-        assert data["os_slug"] == "ubuntu-24.04"
+        assert data["type"] == "ubuntu-24.04"
 
     def test_inspect_with_fs_uuid(self, mocker):
         """Should show fs_uuid when present."""

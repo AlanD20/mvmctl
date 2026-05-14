@@ -62,7 +62,7 @@ def _seed_image(db: Database, img_id: str = "img-test") -> str:
     with db.connect() as conn:
         conn.execute(
             """
-            INSERT OR IGNORE INTO images (id, os_slug, os_name, arch, path, fs_type,
+            INSERT OR IGNORE INTO images (id, type, name, arch, path, fs_type,
                                           original_size, minimum_rootfs_size_mib,
                                           pulled_at, is_default, is_present,
                                           created_at, updated_at)

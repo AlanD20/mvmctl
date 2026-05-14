@@ -1,7 +1,7 @@
 """
 Portable VM configuration for export/import.
 
-Uses semantic references (os_slug, version, name) — NEVER internal SHA256 IDs.
+Uses semantic references (type, version, name) — NEVER internal SHA256 IDs.
 Nested sub-key structure for clean JSON export.
 """
 
@@ -47,10 +47,10 @@ class VMExportImageConfig:
     """
     Image specification using portable semantic refs.
 
-    image_id is FORBIDDEN — use os_slug + arch instead.
+    image_id is FORBIDDEN — use type + arch instead.
     """
 
-    os_slug: str | None = None  # e.g. "ubuntu-24.04" — required for import
+    type: str | None = None  # e.g. "ubuntu-24.04" — required for import
     arch: str | None = None  # e.g. "x86_64" — required for import
     disk_size: str | None = None  # e.g. "2G"
 
@@ -131,7 +131,7 @@ class VMExportConfig:
     """
     Portable VM configuration for export/import across hosts.
 
-    Uses semantic field references (os_slug, version, name) — NEVER internal IDs.
+    Uses semantic field references (type, version, name) — NEVER internal IDs.
     On import, API layer resolves semantic refs → actual paths via DB queries.
 
     None values mean "use the target system's default at import time."

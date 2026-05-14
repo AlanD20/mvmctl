@@ -694,7 +694,7 @@ def vm_export(
     """
     Export a VM's configuration to a portable JSON file.
 
-    The exported config uses semantic references (os_slug, version, name)
+    The exported config uses semantic references (type, version, name)
     instead of internal IDs, making it portable across machines.
     """
     config = VMOperation.export(VMInput(identifiers=[identifier]))

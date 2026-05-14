@@ -22,7 +22,7 @@ class ImageInput:
     """Identifiers for existing image actions (ls, rm, inspect, get)."""
 
     id: list[str] = field(default_factory=list)
-    os_slug: list[str] = field(default_factory=list)
+    type: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -60,7 +60,7 @@ class ImageRequest:
             ImageNotFoundError: If any identifier cannot be resolved.
 
         """
-        identifiers = self._inputs.id + self._inputs.os_slug
+        identifiers = self._inputs.id + self._inputs.type
 
         if not identifiers:
             raise ImageNotFoundError("No image identifiers provided")

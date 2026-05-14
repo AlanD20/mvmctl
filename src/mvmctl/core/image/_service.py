@@ -11,6 +11,7 @@ import tarfile
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from mvmctl.constants import (
     CONST_MEBIBYTE_BYTES,
@@ -25,6 +26,7 @@ from mvmctl.constants import (
 )
 from mvmctl.core._shared import AssetManager
 from mvmctl.core.image._repository import ImageRepository
+from mvmctl.core.image._version_resolver import HttpDirVersionResolver
 from mvmctl.exceptions import (
     ImageCompressionError,
     ImageCorruptError,
@@ -226,16 +228,37 @@ class ImageService:
         t1 = time.monotonic()
         logger.debug("  fs detect: %.2fs", t1 - t0)
 
+        # ── Detect OS type from the image (always, even when skipping) ──
+        from mvmctl.core.image._provisioner import ImageProvisioner
+
+        detected_os: str | None = None
+        try:
+            dp = ImageProvisioner(
+                image_path=image_path,
+                provisioner_type=provisioner_type,
+                fs_type=fs_type,
+            )
+            detected_os = dp.detect_os()
+        except Exception:
+            logger.warning(
+                "OS detection failed for %s, falling back to spec type",
+                image_id,
+                exc_info=True,
+            )
+        image_type = detected_os or spec.id
+        image_name = f"{image_type} (imported)"
+
         if skip_optimization:
             logger.info("Skipping optimization (shrink and compression)")
             actual_size = image_path.stat().st_size
             return ImageItem(
                 id=image_id,
-                os_slug=spec.id,
-                os_name=spec.name,
+                type=image_type,
+                name=image_name,
                 arch=spec.arch,
                 path=str(image_path.name),
                 fs_type=fs_type,
+                distro=detected_os,
                 minimum_rootfs_size_mib=actual_size // CONST_MEBIBYTE_BYTES,
                 original_size=actual_size,
                 is_default=False,
@@ -329,8 +352,8 @@ class ImageService:
 
         return ImageItem(
             id=image_id,
-            os_slug=spec.id,
-            os_name=spec.name,
+            type=spec.id,
+            name=spec.name,
             arch=spec.arch,
             distro=distro,
             path=str(compressed_path.name),
@@ -471,13 +494,35 @@ class ImageService:
 
     @classmethod
     def get_specs_for(
-        cls, os_slugs: list[str], version: str | None, arch: str
+        cls,
+        types: list[str],
+        version: str | None,
+        arch: str,
+        cache_ttl_seconds: int | None = None,
     ) -> list[ImageSpec]:
         """
-        Resolve ImageSpecs from the bundled images.yaml by os_slugs.
+        Resolve ImageSpecs from ``image_types:`` config by type identifiers.
+
+        Resolution proceeds in two phases:
+
+        **Phase 1 (fast-path)** — Type template construction. Runs only when
+        ``version`` is explicitly provided (not None). For each type,
+        if it has a matching ``image_types:`` config entry WITHOUT
+        ``file_discovery``, constructs the ``ImageSpec`` directly from URL
+        templates (no HTTP fetch).
+
+        **Phase 2** — Version resolver HTTP fetch. Types that require
+        directory listing discovery (new types, file_discovery-based types,
+        or when version is None) fall through to this phase. Fetches upstream
+        version listings via ``HttpDirVersionResolver``.
 
         Args:
-            os_slugs: List of image IDs from images.yaml (e.g., ['ubuntu-24.04']).
+            types: List of image type names (e.g., ['ubuntu']).
+            version: Optional version filter. When None, picks the latest version
+                from the version listing for types resolved via the resolver.
+            arch: Target architecture filter.
+            cache_ttl_seconds: TTL in seconds for HTTP response caching.
+                ``None`` (default) means no caching.
 
         Returns:
             List of matching ImageSpecs.
@@ -486,31 +531,92 @@ class ImageService:
             ImageError: If any image is not found in the catalog.
 
         """
-        all_specs = cls.load_available_images(arch)
-
-        spec_map = {spec.id: spec for spec in all_specs}
         results: list[ImageSpec] = []
-        missing: list[str] = []
+        remaining: list[str] = list(types)
 
-        for os_slug in os_slugs:
-            spec = spec_map.get(os_slug)
-            if spec is not None and (
-                version is None or spec.version == version
-            ):
-                results.append(spec)
-            else:
-                missing.append(os_slug)
+        # ── Load type configs once (shared by Phase 1 and Phase 2) ─────────
+        image_types_config: list[dict[str, Any]] = cls.load_image_types_config()
+        type_config_map = {cfg["type"]: cfg for cfg in image_types_config}
 
-        if missing:
-            available = ", ".join(spec_map.keys())
-            if version:
-                raise ImageError(
-                    f"Image(s) not found for version '{version}': "
-                    f"{', '.join(missing)}. Available: {available}"
+        # ── Phase 1a: fast-path — construct from type config when version is explicit ──
+        # When the user provides an explicit version and the type has a matching
+        # image_types config with URL templates, build the ImageSpec directly
+        # without fetching any HTTP directory listing.
+        if version is not None and remaining:
+            for type_ in list(remaining):
+                config = type_config_map.get(type_)
+                if config is None:
+                    continue  # No type config — stays in remaining for Phase 2
+
+                options = config.get("options", {}) or {}
+                file_discovery = options.get("file_discovery", {}) or {}
+                if file_discovery.get("enabled", False):
+                    continue  # Needs HTTP fetch to discover actual filename
+
+                spec = cls.construct_spec_from_type_config(
+                    config=config,
+                    version=version,
+                    arch=arch,
                 )
-            raise ImageError(
-                f"Image(s) not found: {', '.join(missing)}. Available: {available}"
-            )
+                results.append(spec)
+                remaining.remove(type_)
+
+        # Phase 2: try version resolver for types not in flat spec_map
+        if remaining:
+            available_http_types: set[str] = set()
+
+            for type_ in list(remaining):
+                config = type_config_map.get(type_)
+                if config is not None and config.get("resolver") == "http-dir":
+                    available_http_types.add(type_)
+
+                if config is None or config.get("resolver") != "http-dir":
+                    continue
+
+                version_result = HttpDirVersionResolver.resolve(
+                    [config], arch=arch, cache_ttl_seconds=cache_ttl_seconds
+                )
+                listings = version_result.get(type_, [])
+                if not listings:
+                    continue
+
+                if version is not None:
+                    matched = [v for v in listings if v.version == version]
+                    if not matched:
+                        continue
+                    v = matched[0]
+                else:
+                    # Pick the first (latest — already sorted desc)
+                    v = listings[0]
+
+                results.append(
+                    ImageSpec(
+                        id=f"{v.type}-{v.version}",
+                        image_type=v.type,
+                        version=v.version,
+                        name=f"{v.type} {v.version}",
+                        source=v.download_url,
+                        format=v.format,
+                        arch=arch,
+                    )
+                )
+                remaining.remove(type_)
+
+            # Anything still unresolved is genuinely not found
+            if remaining:
+                available_types_str = ", ".join(sorted(available_http_types))
+                if version:
+                    msg = (
+                        f"Image(s) not found for version '{version}': "
+                        f"{', '.join(remaining)}. "
+                    )
+                    if available_types_str:
+                        msg += f"Available image types: {available_types_str}"
+                    raise ImageError(msg)
+                msg = f"Image(s) not found: {', '.join(remaining)}. "
+                if available_types_str:
+                    msg += f"Available image types: {available_types_str}"
+                raise ImageError(msg)
 
         return results
 
@@ -927,34 +1033,136 @@ class ImageService:
         return specs
 
     @staticmethod
-    def load_available_images(arch: str) -> list[ImageSpec]:
-        """Load image specifications from YAML config file."""
+    def load_image_types_config() -> list[dict[str, Any]]:
+        """Load the ``image_types`` catalog from the bundled images.yaml.
+
+        Returns:
+            List of image type config dicts (e.g. ``type``, ``resolver``,
+            ``versions_url``, ``download_url``, ``format``, ``options``).
+
+        """
+        from typing import cast
+
         import yaml
 
         asset = AssetManager()
         remote_images_path = asset.get_file("images.yaml")
         with open(str(remote_images_path)) as f:
             data = yaml.safe_load(f)
+        return cast("list[dict[str, Any]]", data.get("image_types", []))
 
-        images = []
-        for img in data.get("images", []):
-            image_id = img["id"]
-            images.append(
-                ImageSpec(
-                    id=image_id,
-                    image_type=img.get("type", image_id),
-                    version=str(img.get("version", image_id)),
-                    arch=img.get("arch", arch),
-                    name=img.get("name", image_id),
-                    source=img["source"],
-                    format=img["format"],
-                    sha256=img.get("sha256"),
-                    sha256_url=img.get("sha256_url"),
-                    list_url_template=img.get("list_url_template"),
-                )
-            )
+    @staticmethod
+    def construct_spec_from_type_config(
+        config: dict[str, Any],
+        version: str,
+        arch: str,
+        ci_version: str | None = None,
+    ) -> ImageSpec:
+        """Construct an ``ImageSpec`` from a type config dict and explicit version/arch.
 
-        return images
+        Builds download/sha256 URLs directly from templates without any HTTP
+        fetch. This is the fast-path for types that have URL templates and
+        don't need file discovery from directory listings.
+
+        Handles all resolver types in ``image_types``:
+
+        * ``http-dir`` with ``codename_mapping`` — reverse-looks up the codename
+          from the version, applies ``arch_mapping``, renders URL templates.
+        * ``single-source`` (resolver is None or "") — always uses version
+          ``"latest"``, renders templates directly.
+        * ``firecracker-s3`` — uses ``ci_version`` (or
+          ``DEFAULT_FIRECRACKER_CI_VERSION``) and version to render templates.
+
+        Args:
+            config: Type config dict from the ``image_types`` section of
+                ``images.yaml`` (one element of the list).
+            version: Explicit version string (e.g. ``"24.04"``, ``"12"``).
+            arch: Target machine architecture (e.g. ``"x86_64"``, ``"aarch64"``).
+            ci_version: Firecracker CI version for ``firecracker-s3`` types.
+                Defaults to ``DEFAULT_FIRECRACKER_CI_VERSION`` if not provided.
+
+        Returns:
+            ImageSpec with fields populated from rendered templates.
+
+        """
+        type_name = config["type"]
+        resolver = config.get("resolver")
+        config_name = config.get("name", "") or ""
+        format_ = config["format"]
+        options = config.get("options", {}) or {}
+
+        # Single-source types always resolve to "latest"
+        if resolver is None or resolver == "":
+            version = "latest"
+
+        # ── Architecture mapping ──────────────────────────────────────────
+        arch_mapping = options.get("arch_mapping", {}) or {}
+        resolved_arch = arch_mapping.get(arch, arch)
+
+        # ── Version prefix (e.g. "v" for Alpine directory naming) ────────
+        version_prefix = options.get("version_prefix")
+        template_version = (
+            version_prefix + version if version_prefix else version
+        )
+
+        # ── Codename resolution ──────────────────────────────────────────
+        codename: str = version  # fallback when no codename_mapping
+        if resolver == "http-dir":
+            codename_mapping = options.get("codename_mapping", {}) or {}
+            if codename_mapping:
+                # Reverse mapping: version → codename
+                reverse_map = {v: k for k, v in codename_mapping.items()}
+                codename = reverse_map.get(version, version)
+
+        # ── Template variables ───────────────────────────────────────────
+        template_vars: dict[str, str] = {
+            "version": template_version,
+            "codename": codename if codename else "",
+            "arch": resolved_arch,
+        }
+        if resolver == "firecracker-s3":
+            template_vars["ci_version"] = ci_version or ""
+
+        # ── Render download URL ──────────────────────────────────────────
+        download_url_tmpl = config.get("download_url", "")
+        source = render_template(download_url_tmpl, template_vars)
+
+        # ── Render SHA256 URL ────────────────────────────────────────────
+        sha256_url: str | None = None
+        sha256_config = config.get("sha256_url")
+        if sha256_config:
+            try:
+                sha256_url = render_template(sha256_config, template_vars)
+            except (ValueError, KeyError):
+                sha256_url = None
+
+        # ── Build display name ───────────────────────────────────────────
+        version_name_template = config.get("version_name_template")
+        if version_name_template:
+            name_vars: dict[str, str] = {
+                "version": version,
+                "codename": codename if codename else "",
+                "type": type_name,
+            }
+            if resolver == "firecracker-s3":
+                name_vars["ci_version"] = ci_version or ""
+            try:
+                name = render_template(version_name_template, name_vars)
+            except (ValueError, KeyError):
+                name = f"{config_name} {version}".strip()
+        else:
+            name = f"{config_name} {version}".strip()
+
+        return ImageSpec(
+            id=f"{type_name}-{version}",
+            image_type=type_name,
+            version=version,
+            name=name,
+            source=source,
+            format=format_,
+            arch=arch,
+            sha256_url=sha256_url,
+        )
 
     def _copy_with_dd(
         self, src: Path, dst: Path, *, sparse: bool = False

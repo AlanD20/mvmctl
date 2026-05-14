@@ -564,9 +564,7 @@ class TestHostOperationCleanExtended:
 
     def test_clean_mvm_chains_error_handled(self, mocker):
         mock_net_svc = MagicMock()
-        mock_net_svc.tracker.teardown.side_effect = NetworkError(
-            "chains error"
-        )
+        mock_net_svc.tracker.teardown.side_effect = NetworkError("chains error")
         mocker.patch(
             "mvmctl.api.host_operations.NetworkService",
             return_value=mock_net_svc,

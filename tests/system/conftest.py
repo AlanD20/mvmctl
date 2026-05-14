@@ -141,17 +141,39 @@ def _ensure_kernel(binary: str) -> None:
 
 
 def _ensure_image(binary: str, image: str = "alpine-3.21") -> None:
+    """Ensure an image is cached, pulling if needed.
+
+    The *image* parameter should be a full slug like ``"alpine-3.21"``.
+    The production CLI auto-parses slugs into type + version, so stored
+    ``type`` may be the full slug (when OS detection fails) or just the
+    base type (when detection succeeds). We match by prefix so either
+    representation is found.
+    """
     r = _run_cmd(binary, ["image", "ls", "--json"], timeout=30)
     if r.returncode != 0:
-        _pull_asset(binary, ["image", "pull", image], f"image '{image}'")
+        _pull_asset(
+            binary,
+            ["image", "pull", image.split("-")[0], "--version", image.split("-")[1]],
+            f"image '{image}'",
+        )
         return
     cached = json.loads(r.stdout) if r.stdout else []
+    base = image.split("-")[0] if "-" in image else image
     matching = [
-        i for i in cached
-        if i.get("os_slug") == image and i.get("is_present")
+        i
+        for i in cached
+        if i.get("type", "").startswith(base) and i.get("is_present")
     ]
     if not matching:
-        _pull_asset(binary, ["image", "pull", image], f"image '{image}'")
+        if "-" in image:
+            parts = image.split("-", 1)
+            _pull_asset(
+                binary,
+                ["image", "pull", parts[0], "--version", parts[1]],
+                f"image '{image}'",
+            )
+        else:
+            _pull_asset(binary, ["image", "pull", image], f"image '{image}'")
         return
 
     # Verify the image file actually exists on disk (DB may be stale)
@@ -166,7 +188,9 @@ def _ensure_image(binary: str, image: str = "alpine-3.21") -> None:
             img_rel_path = info.get("path", "")
             if img_rel_path:
                 cache_dir = Path(
-                    os.environ.get("MVM_CACHE_DIR", Path.home() / ".cache" / "mvmctl")
+                    os.environ.get(
+                        "MVM_CACHE_DIR", Path.home() / ".cache" / "mvmctl"
+                    )
                 )
                 img_file = cache_dir / "images" / img_rel_path
                 if not img_file.exists():
@@ -243,8 +267,11 @@ def _ensure_services_binary(binary: str) -> None:
             if copy_attempt >= _copy_retries - 1:
                 # Last retry — fall back: copy to a temp name, then rename
                 # (rename does not require opening the destination file).
-                _print_prep("Text file busy persists, trying rename fallback...")
+                _print_prep(
+                    "Text file busy persists, trying rename fallback..."
+                )
                 import tempfile as _tempfile
+
                 _tmp_dest = dest.with_suffix(".tmp.copy")
                 shutil.copy2(str(services_src), str(_tmp_dest))
                 _tmp_dest.chmod(0o755)
@@ -257,7 +284,11 @@ def _ensure_services_binary(binary: str) -> None:
                 f"({copy_attempt + 1}/{_copy_retries})..."
             )
             # Kill stale service processes that may hold the binary open
-            for _name in ("mvm-console-relay", "mvm-nocloud-server", "mvm-provision"):
+            for _name in (
+                "mvm-console-relay",
+                "mvm-nocloud-server",
+                "mvm-provision",
+            ):
                 try:
                     subprocess.run(
                         ["killall", "-9", _name],
@@ -269,6 +300,13 @@ def _ensure_services_binary(binary: str) -> None:
                     pass
             time.sleep(2.0)
     dest.chmod(0o755)
+
+    # Create symlinks so the service binaries are findable by name
+    for _link_name in ("mvm-provision", "mvm-console-relay", "mvm-nocloud-server"):
+        _link_path = bin_dir / _link_name
+        _link_path.unlink(missing_ok=True)
+        _link_path.symlink_to(dest.name)
+        _print_prep(f"Created symlink: {_link_name} -> mvm-services")
     _print_prep("Copied mvm-services binary to cache bin dir")
 
     # Register all service binaries directly in the DB since there is
@@ -292,9 +330,7 @@ def _ensure_services_binary(binary: str) -> None:
                 "SELECT COUNT(*) FROM binaries WHERE name = ?", (_sname,)
             )
             if _cur.fetchone()[0] == 0:
-                _uid = _hashlib.sha256(
-                    f"{_sname}:{_sver}".encode()
-                ).hexdigest()
+                _uid = _hashlib.sha256(f"{_sname}:{_sver}".encode()).hexdigest()
                 _conn.execute(
                     """INSERT INTO binaries
                        (id, name, version, full_version, path,

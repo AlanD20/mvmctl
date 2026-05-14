@@ -42,12 +42,12 @@ def _complete_local_image_ids(incomplete: str) -> list[str]:
                 if short.startswith(incomplete) and short not in results:
                     results.append(short)
             if (
-                hasattr(img, "os_slug")
-                and img.os_slug
-                and img.os_slug.startswith(incomplete)
-                and img.os_slug not in results
+                hasattr(img, "type")
+                and img.type
+                and img.type.startswith(incomplete)
+                and img.type not in results
             ):
-                results.append(img.os_slug)
+                results.append(img.type)
         return results
     except Exception:
         return []

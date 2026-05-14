@@ -60,11 +60,11 @@ class ImageResolver:
             raise ImageNotFoundError(f"Image ID is ambiguous: {image_id!r}")
         return self.enrich(matches)[0]
 
-    def by_os_slug(self, os_slug: str) -> ImageItem:
-        """Resolve by OS slug."""
-        db_image = self._repo.get_by_os_slug(os_slug)
+    def by_type(self, type: str) -> ImageItem:
+        """Resolve by image type."""
+        db_image = self._repo.get_by_type(type)
         if db_image is None:
-            raise ImageNotFoundError(f"Image not found: {os_slug!r}")
+            raise ImageNotFoundError(f"Image not found: {type!r}")
         return self.enrich([db_image])[0]
 
     def get_default(self) -> ImageItem | None:
@@ -75,16 +75,16 @@ class ImageResolver:
         return self.enrich([image])[0]
 
     def by_name(self, name: str) -> ImageItem:
-        """Resolve by display name (os_name)."""
+        """Resolve by display name."""
         db_image = self._repo.get_by_name(name)
         if db_image is None:
             raise ImageNotFoundError(f"Image not found by name: {name!r}")
         return self.enrich([db_image])[0]
 
     def resolve(self, value: str) -> ImageItem:
-        """Resolve image by os_slug, display name, or ID prefix."""
+        """Resolve image by type, display name, or ID prefix."""
         try:
-            image = self.by_os_slug(value)
+            image = self.by_type(value)
         except ImageNotFoundError:
             try:
                 image = self.by_name(value)
@@ -93,7 +93,7 @@ class ImageResolver:
         return image
 
     def resolve_many(self, identifiers: list[str]) -> ImageResolveResult:
-        """Resolve multiple image identifiers by os_slug or id."""
+        """Resolve multiple image identifiers by type or id."""
         # Deduplicate identifiers while preserving order
         seen_inputs: set[str] = set()
         unique_ids: list[str] = []

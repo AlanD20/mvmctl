@@ -62,8 +62,8 @@ class TestRelationEnricher:
 
         image = ImageItem(
             id="i" * 64,
-            os_slug="ubuntu",
-            os_name="Ubuntu",
+            type="ubuntu",
+            name="Ubuntu",
             arch="x86_64",
             path="u.img",
             fs_type="ext4",
@@ -170,8 +170,8 @@ class TestRelationEnricher:
 
         img1 = ImageItem(
             id="i1" + "a" * 62,
-            os_slug="ubuntu",
-            os_name="Ubuntu",
+            type="ubuntu",
+            name="Ubuntu",
             arch="x86_64",
             path="u1.img",
             fs_type="ext4",
@@ -185,8 +185,8 @@ class TestRelationEnricher:
         )
         img2 = ImageItem(
             id="i2" + "b" * 62,
-            os_slug="debian",
-            os_name="Debian",
+            type="debian",
+            name="Debian",
             arch="x86_64",
             path="u2.img",
             fs_type="ext4",
@@ -324,8 +324,8 @@ class TestRelationEnricher:
 
         image = ImageItem(
             id="i" * 64,
-            os_slug="ubuntu",
-            os_name="Ubuntu",
+            type="ubuntu",
+            name="Ubuntu",
             arch="x86_64",
             path="u.img",
             fs_type="ext4",
@@ -437,8 +437,8 @@ class TestRelationEnricher:
 
         img1 = ImageItem(
             id="i1" + "a" * 62,
-            os_slug="ubuntu",
-            os_name="Ubuntu",
+            type="ubuntu",
+            name="Ubuntu",
             arch="x86_64",
             path="u1.img",
             fs_type="ext4",
@@ -452,8 +452,8 @@ class TestRelationEnricher:
         )
         img2 = ImageItem(
             id="i2" + "b" * 62,
-            os_slug="debian",
-            os_name="Debian",
+            type="debian",
+            name="Debian",
             arch="x86_64",
             path="u2.img",
             fs_type="ext4",
@@ -609,8 +609,8 @@ class TestRelationEnricher:
 
         image = ImageItem(
             id="i" * 64,
-            os_slug="ubuntu",
-            os_name="Ubuntu",
+            type="ubuntu",
+            name="Ubuntu",
             arch="x86_64",
             path="u.img",
             fs_type="ext4",

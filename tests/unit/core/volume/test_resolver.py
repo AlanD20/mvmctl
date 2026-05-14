@@ -111,7 +111,9 @@ class TestVolumeResolverResolveMany:
     def test_resolve_many_all_found(self):
         vols = [_make_volume("vol-a"), _make_volume("vol-b")]
         repo = MagicMock(spec=VolumeRepository)
-        repo.get_by_name.side_effect = lambda n: next(v for v in vols if v.name == n)
+        repo.get_by_name.side_effect = lambda n: next(
+            v for v in vols if v.name == n
+        )
         resolver = VolumeResolver(repo)
         result = resolver.resolve_many(["vol-a", "vol-b"])
         assert len(result.items) == 2
@@ -131,7 +133,9 @@ class TestVolumeResolverResolveMany:
         vol = _make_volume("vol-a")
         repo = MagicMock(spec=VolumeRepository)
         repo.get_by_name.side_effect = lambda n: vol if n == "vol-a" else None
-        repo.find_by_prefix.side_effect = lambda p: [] if p == "bad-vol" else [vol]
+        repo.find_by_prefix.side_effect = lambda p: (
+            [] if p == "bad-vol" else [vol]
+        )
         resolver = VolumeResolver(repo)
 
         result = resolver.resolve_many(["vol-a", "bad-vol"])
@@ -268,7 +272,9 @@ class TestVolumeResolverResolveByVmVolumeIds:
         good_json = json.dumps([vol1.id])
         bad_json = "invalid"
         empty_json = "[]"
-        result = resolver.resolve_by_vm_volume_ids([good_json, bad_json, empty_json])
+        result = resolver.resolve_by_vm_volume_ids(
+            [good_json, bad_json, empty_json]
+        )
         assert len(result[good_json]) == 1
         assert result[bad_json] == []
         assert result[empty_json] == []
