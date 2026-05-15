@@ -163,6 +163,9 @@ mvm image pull --type ubuntu
 # Pull a specific version
 mvm image pull --type ubuntu --version 24.04
 
+# Shorthand type:version syntax (equivalent to --type ubuntu --version 24.04)
+mvm image pull ubuntu:24.04
+
 # Pull a Debian image
 mvm image pull --type debian --version 12
 ```

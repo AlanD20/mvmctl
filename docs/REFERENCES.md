@@ -90,7 +90,7 @@ Image management.
 | Command | Description |
 |---------|-------------|
 | `mvm image ls [--remote] [--no-cache] [--type TEXT] [--json]` | List cached images (or available remote images with --remote) |
-| `mvm image pull IMAGE_SELECTOR [--type TEXT] [--version VERSION] [--no-cache]` | Download an image by its ID or type |
+| `mvm image pull IMAGE_SELECTOR [--type TEXT] [--version VERSION] [--no-cache]` | Download an image by type:version (e.g. ubuntu:24.04), ID, or type |
 | `mvm image import NAME PATH [--format FORMAT] [--arch ARCH] [--root-partition N] [--default] [--force, -f] [--skip-optimization] [--disable-detector NAME]` | Import a local image file (qcow2, raw, tar-rootfs) |
 | `mvm image default PREFIX` | Set the default image for VM creation |
 | `mvm image rm PREFIX` | Remove cached images by ID prefix |

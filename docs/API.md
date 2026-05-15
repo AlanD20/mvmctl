@@ -356,7 +356,8 @@ Image record — maps to the `images` table.
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | `str` | Image ID (hash) |
-| `type` | `str` | Image type identifier (e.g. `ubuntu-24.04`) |
+| `type` | `str` | Image type identifier (e.g. `ubuntu`, `alpine`, `debian`) |
+| `version` | `str` | Image version string (e.g. `24.04`) |
 | `name` | `str` | Human-readable image name |
 | `arch` | `str` | Architecture (e.g. `x86_64`) |
 | `path` | `str` | Relative path to the image file |
@@ -381,8 +382,7 @@ Specification for downloading a VM rootfs image, loaded from bundled YAML.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | `str` | Unique identifier; used as output filename base |
-| `image_type` | `str` | Image type |
+| `type` | `str` | Image type identifier (e.g. `ubuntu`, `alpine`, `debian`) |
 | `version` | `str` | Version string |
 | `name` | `str` | Human-readable display name |
 | `source` | `str` | Download URL for the image |
@@ -718,10 +718,9 @@ VMOperation.create(
         ssh_keys=["my-key"],
         vcpu_count=2,
         mem_size_mib=2048,
-        image="ubuntu-24.04",
+        image="ubuntu:24.04",
     )
 )
-```
 
 ---
 
@@ -1823,7 +1822,7 @@ def main() -> None:
             ssh_keys=["my-api-key"],
             vcpu_count=2,
             mem_size_mib=2048,
-            image="ubuntu-24.04",       # resolved from DB at API layer
+            image="ubuntu:24.04",       # resolved from DB at API layer
             network_name="net",          # default network name
         )
     )

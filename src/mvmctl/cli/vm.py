@@ -154,7 +154,7 @@ def vm_create(
     image: str | None = typer.Option(
         None,
         "--image",
-        help="Image name (e.g., ubuntu-24.04), short ID, or path to .ext4 file",
+        help="Image name, type:version (e.g. ubuntu:24.04), short ID, or path to .ext4 file",
     ),
     kernel: str | None = typer.Option(
         None,

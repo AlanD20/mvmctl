@@ -20,7 +20,7 @@
 
 ```bash
 # Create and SSH into a VM in under 60 seconds
-mvm vm create --name myvm --image ubuntu-24.04
+mvm vm create --name myvm --image ubuntu:24.04
 mvm ssh myvm
 ```
 
@@ -122,7 +122,7 @@ mvm key create test
 mvm key default test
 
 # Create and start a VM
-mvm vm create --name myvm --image ubuntu-24.04
+mvm vm create --name myvm --image ubuntu:24.04
 
 # Follow the boot log until SSH is ready (~30-60 s)
 mvm logs myvm --follow
@@ -144,7 +144,7 @@ mvm vm rm myvm
 ### VM Lifecycle
 
 ```bash
-mvm vm create --name myvm --image ubuntu-24.04   # Create and start a VM
+mvm vm create --name myvm --image ubuntu:24.04   # Create and start a VM
 mvm vm create --name cluster --count 3 --atomic   # Batch-create 3 VMs
 mvm vm ls                                         # List all VMs
 mvm ssh myvm                                      # SSH into a VM
@@ -157,7 +157,7 @@ mvm vm rm myvm --force, -f                         # Remove a VM (or use -f)
 ```bash
 mvm volume create data 10G          # Create persistent data disk
 mvm volume ls                       # List volumes
-mvm image pull ubuntu-24.04        # Download an OS image
+mvm image pull ubuntu:24.04        # Download an OS image
 mvm image ls                       # List available images
 mvm kernel pull --type firecracker  # Download Firecracker kernel
 mvm bin pull 1.15.0                # Download Firecracker + jailer binaries
@@ -316,7 +316,7 @@ Common issues and quick fixes:
 | **Bridge not found** | Run `mvm host init` once |
 | **VM won't boot / SSH times out** | Cloud-init takes 30-60s on first boot. Watch with `mvm logs myvm --follow` |
 | **Kernel not found** | `mvm kernel pull` |
-| **Image not found** | `mvm image pull ubuntu-24.04` |
+| **Image not found** | `mvm image pull ubuntu:24.04` |
 | **NoCloud server failed** | Port range exhausted. Check: `sudo ss -tlnp \| grep -E ':(8[0-9]{3}\|9[0-9]{3})'` |
 
 See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for complete troubleshooting guide including:

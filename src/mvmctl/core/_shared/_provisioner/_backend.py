@@ -528,18 +528,19 @@ class _GuestfsBackend:
 
         with og:
             og.mount_rootfs()
-            os_release_path = og._handle.find("/etc/os-release")
-            if not os_release_path:
-                os_release_path = og._handle.find("/usr/lib/os-release")
-            if not os_release_path:
+            os_release_content: bytes | None = None
+            if og._handle.is_file("/etc/os-release"):
+                raw = og._handle.read_file("/etc/os-release")
+                os_release_content = raw if isinstance(raw, bytes) else None
+            if os_release_content is None and og._handle.is_file(
+                "/usr/lib/os-release"
+            ):
+                raw = og._handle.read_file("/usr/lib/os-release")
+                os_release_content = raw if isinstance(raw, bytes) else None
+            if os_release_content is None:
                 return "linux"
 
-            raw_content: object = og._handle.read_file(os_release_path[0])
-            if isinstance(raw_content, bytes):
-                text = raw_content.decode("utf-8", errors="replace")
-            else:
-                text = str(raw_content)
-
+            text = os_release_content.decode("utf-8", errors="replace")
             for line in text.splitlines():
                 if line.startswith("ID="):
                     return line.split("=", 1)[1].strip().strip('"')

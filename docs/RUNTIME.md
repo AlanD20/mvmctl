@@ -387,16 +387,40 @@ The build script creates temporary symlinks in `build/symlinks/` (since all thre
 
 ### Extraction (mvm init, Step 5)
 
+`extract_service_binaries()` handles three scenarios:
+
+1. **Compiled mode (Nuitka build):** The combined binary is embedded via `--include-data-dir`. It is copied from the embedded path to the cache `bin/` directory.
+2. **Dev mode with prior build:** If running via `uv run` without embedding, the method falls back to `dist/services/mvm-services` (created by `scripts/build_services.py`).
+3. **Neither:** If the binary is neither embedded nor built, extraction is skipped with a debug log. Service processes fall back to `sys.executable -m ...` at runtime.
+
+Symlinks are always freshly created — the old symlink is removed first with `missing_ok=True`:
+
 ```python
 # In core/binary/_service.py:
 combined_src = BinaryService._get_embedded_path("mvm-services")
+
+# Step 1: Copy the combined binary — compiled mode (embedded) vs dev mode (dist/services/)
 if combined_src is not None:
-    shutil.copy2(combined_src, bin_dir / "mvm-services")
-    (bin_dir / "mvm-services").chmod(0o755)
-    for name in SERVICE_BINARY_NAMES:  # ["mvm-console-relay", "mvm-nocloud-server", "mvm-provision"]
-        link_path = bin_dir / name
-        if not link_path.exists():
-            link_path.symlink_to("mvm-services")
+    combined_dest.unlink(missing_ok=True)
+    shutil.copy2(str(combined_src), str(combined_dest))
+    combined_dest.chmod(0o755)
+else:
+    dev_src = Path("dist/services") / "mvm-services"
+    if dev_src.exists():
+        combined_dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(dev_src), str(combined_dest))
+        combined_dest.chmod(0o755)
+    else:
+        logger.debug(
+            "Combined service binary not found at dist/services/mvm-services, "
+            "skipping copy (dev mode without build), run scripts/build_services.py"
+        )
+
+# Step 2: Always recreate symlinks (works in compiled and dev mode)
+for name in SERVICE_BINARY_NAMES:
+    link_path = bin_dir / name
+    link_path.unlink(missing_ok=True)
+    link_path.symlink_to("mvm-services")
 ```
 
 ### Sudoers

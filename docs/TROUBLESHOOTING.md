@@ -203,7 +203,7 @@ mvm bin ls
 
 **Solution:**
 ```bash
-mvm image pull ubuntu-24.04
+mvm image pull ubuntu:24.04
 mvm image ls   # should appear
 ```
 
@@ -617,13 +617,13 @@ For more detailed error output, use the built-in CLI flags or the environment va
 
 ```bash
 # Use the --debug flag (sets log level to DEBUG)
-mvm --debug vm create --name myvm --image ubuntu-24.04
+mvm --debug vm create --name myvm --image ubuntu:24.04
 
 # Use the --verbose flag (sets log level to INFO)
-mvm --verbose vm create --name myvm --image ubuntu-24.04
+mvm --verbose vm create --name myvm --image ubuntu:24.04
 
 # Use the log level environment variable
-MVM_LOG_LEVEL=DEBUG mvm vm create --name myvm --image ubuntu-24.04
+MVM_LOG_LEVEL=DEBUG mvm vm create --name myvm --image ubuntu:24.04
 ```
 
 The `--debug` flag has highest priority, followed by `--verbose`, then `MVM_LOG_LEVEL`. All commands support the `--debug` and `--verbose` flags.

@@ -43,6 +43,12 @@ from mvmctl.utils.common import CacheUtils
 from mvmctl.utils.http import HttpDownload
 from mvmctl.utils.template import render_optional_template, render_template
 
+# Filesystem types whose shrink/deblob runs resize2fs/e2fsck — only ext family.
+# All other filesystem types (squashfs, btrfs, xfs, zfs, vfat, ntfs, iso9660, etc.)
+# are skipped because the tooling is filesystem-specific and unsupported formats
+# would crash with e2fsck exit code 8 ("operational error").
+_FS_CAN_SHRINK: frozenset[str] = frozenset({"ext4", "ext3", "ext2"})
+
 logger = logging.getLogger(__name__)
 
 _SECTOR_SIZE = CONST_SECTOR_SIZE_BYTES
@@ -288,9 +294,19 @@ class ImageService:
             provisioner_type=provisioner_type,
             fs_type=fs_type,
         )
-        p.deblob()
-        p.shrink()
-        optimized = p.run()
+
+        # Skip shrink/deblob for filesystems that e2fsck can't handle
+        # (squashfs, btrfs, xfs, etc. — see _FS_CAN_SHRINK constant)
+        if fs_type not in _FS_CAN_SHRINK:
+            logger.info(
+                "Skipping shrink/deblob for %s image (already optimized)",
+                fs_type,
+            )
+            optimized = True
+        else:
+            p.deblob()
+            p.shrink()
+            optimized = p.run()
         if warnings is not None and not optimized:
             warnings.append(
                 "Image optimization skipped: no provisioner backend available. "

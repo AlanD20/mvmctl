@@ -385,7 +385,21 @@ class BinaryService:
             combined_dest.chmod(CONST_FILE_PERMS_EXECUTABLE)
             logger.info("Extracted combined service binary: %s", combined_name)
         else:
-            logger.debug("Combined service binary not embedded, skipping copy")
+            # Dev mode: try to copy from dist/services/ build output
+            dev_src = Path("dist/services") / combined_name
+            if dev_src.exists():
+                combined_dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(dev_src), str(combined_dest))
+                combined_dest.chmod(CONST_FILE_PERMS_EXECUTABLE)
+                logger.info(
+                    "Copied %s from dist/services (dev mode)", combined_name
+                )
+            else:
+                logger.debug(
+                    "Combined service binary not found at dist/services/%s, "
+                    "skipping copy (dev mode without build), run scripts/build_services.py",
+                    combined_name,
+                )
 
         # Step 2: Always create symlinks — works in both compiled and dev mode.
         # In dev mode, mvm-services may already exist from a prior build.

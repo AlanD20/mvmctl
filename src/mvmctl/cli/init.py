@@ -257,13 +257,13 @@ def _handle_interactive_flow(
 
         # ── Handle guestfs enable prompt ──────────────────────────────
         if interaction.code == "guestfs.confirm_enable":
-            if non_interactive or typer.confirm(
-                "Enable libguestfs as a provisioning fallback?",
-                default=False,
-            ):
-                guestfs_enabled = True
-            else:
+            if non_interactive:
                 guestfs_enabled = False
+            else:
+                guestfs_enabled = typer.confirm(
+                    "Enable libguestfs as a provisioning fallback?",
+                    default=False,
+                )
             continue  # Re-run with guestfs_enabled set
 
         # Unknown interaction — stop

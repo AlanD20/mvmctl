@@ -125,7 +125,7 @@ class ImageProvisioner:
                 backend.run()
                 shrink_ok = True
             except (LoopMountError, OSError, RuntimeError) as exc:
-                logger.warning(
+                logger.debug(
                     "Shrink skipped (image may already be minimal): %s", exc
                 )
 

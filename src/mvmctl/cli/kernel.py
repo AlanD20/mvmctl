@@ -162,8 +162,13 @@ def _print_kernel_details_tree(info: KernelItem) -> None:
 @kernel_app.command(name="pull")
 @handle_errors
 def kernel_pull(
-    kernel_type: str = typer.Option(
-        ..., "--type", help="Kernel type: firecracker or official"
+    kernel_selector: str | None = typer.Argument(
+        None,
+        help="Shorthand: type:version (e.g. official:6.19.9). "
+        "Use '--type' and '--version' options for explicit control.",
+    ),
+    kernel_type: str | None = typer.Option(
+        None, "--type", help="Kernel type: firecracker or official"
     ),
     version: str | None = typer.Option(
         None, "--version", help="Kernel version"
@@ -189,10 +194,36 @@ def kernel_pull(
         help="Custom kernel config file to apply as a fragment",
     ),
 ) -> None:
-    """Pull or build a kernel."""
+    """Pull or build a kernel.
+
+    Examples:
+        mvm kernel pull official:6.19.9
+        mvm kernel pull official:6.19.9 --default
+        mvm kernel pull --type official --version 6.19.9
+        mvm kernel pull firecracker --arch arm64
+    """
+    # Parse ``type:version`` shorthand syntax (e.g. ``official:6.19.9``)
+    effective_type = kernel_type
+    effective_version = version
+    if kernel_type is None and kernel_selector is not None:
+        if ":" in kernel_selector:
+            parts = kernel_selector.rsplit(":", maxsplit=1)
+            effective_type = parts[0]
+            effective_version = parts[1]
+        else:
+            effective_type = kernel_selector
+
+    if effective_type is None:
+        print_error(
+            "Kernel type is required. "
+            "Use 'mvm kernel pull --type official' or "
+            "'mvm kernel pull official:6.19.9'"
+        )
+        raise typer.Exit(code=1)
+
     inputs = KernelPullInput(
-        kernel_type=kernel_type,
-        version=version,
+        kernel_type=effective_type,
+        version=effective_version,
         arch=arch,
         jobs=jobs,
         keep_build_dir=keep_build_dir,
