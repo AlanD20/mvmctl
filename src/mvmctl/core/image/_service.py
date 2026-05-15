@@ -624,6 +624,40 @@ class ImageService:
                 )
                 remaining.remove(type_)
 
+            # ── Handle remaining resolver types (firecracker-s3, single-source, etc.) ──
+            for type_ in list(remaining):
+                config = type_config_map.get(type_)
+                if config is None:
+                    continue
+                resolver = config.get("resolver")
+                if resolver == "http-dir":
+                    continue  # http-dir was already handled above
+
+                version_result = HttpDirVersionResolver.resolve(
+                    [config],
+                    arch=arch,
+                    cache_ttl_seconds=cache_ttl_seconds,
+                    ci_version=ci_version,
+                )
+                listings = version_result.get(type_, [])
+                if not listings:
+                    continue
+
+                # Pick the first (latest — already sorted desc)
+                v = listings[0]
+
+                results.append(
+                    ImageSpec(
+                        type=v.type,
+                        version=v.version,
+                        name=f"{v.type} {v.version}",
+                        source=v.download_url,
+                        format=v.format,
+                        arch=arch,
+                    )
+                )
+                remaining.remove(type_)
+
             # Anything still unresolved is genuinely not found
             if remaining:
                 available_types_str = ", ".join(sorted(available_http_types))

@@ -10,13 +10,13 @@
 
 ## Why mvmctl?
 
-- **Blazing fast** -- VMs boot in milliseconds, not minutes
-- **Powered by Firecracker** -- AWS's battle-tested microVM technology, the engine behind Lambda and Fargate
-- **Secure by default** -- Hardware-level isolation with KVM
-- **Works with your images** -- Ubuntu, Debian, Arch, Alpine, and more
-- **Simple CLI** -- One command to create, start, and SSH into a VM
-- **Console access** -- Interactive serial console without SSH (via `mvm console`)
-- **Pre-production** -- Still under active development.
+- ⚡ **Blazing fast** -- VMs boot in milliseconds, not minutes
+- 🔥 **Powered by Firecracker** -- AWS's battle-tested microVM technology, the engine behind Lambda and Fargate
+- 🛡️ **Secure by default** -- Hardware-level isolation with KVM
+- 🖼️ **Works with your images** -- Ubuntu, Debian, Arch, Alpine, and more
+- ⌨️ **Simple CLI** -- One command to create, start, and SSH into a VM
+- 🖥️ **Console access** -- Interactive serial console without SSH (via `mvm console`)
+- 🚧 **Pre-production** -- Still under active development.
 
 ```bash
 # Create and SSH into a VM in under 60 seconds

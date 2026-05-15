@@ -109,7 +109,7 @@ class TestVMCreate:
     ]
 
     @pytest.mark.parametrize(
-        "image_id", ["alpine-3.21"]
+        "image_id", ["alpine:3.21"]
     )
     def test_create_per_image(
         self, mvm_binary, unique_vm_name, image_id, unique_network_name
@@ -174,7 +174,7 @@ class TestVMCreate:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )
@@ -217,7 +217,7 @@ class TestVMCreate:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--count",
                 "3",
                 "--network",
@@ -261,7 +261,7 @@ class TestVMCreate:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--count",
                 "2",
                 "--atomic",
@@ -303,7 +303,7 @@ class TestVMCreate:
             "--name",
             unique_vm_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--count",
             "2",
             "--ip",
@@ -335,7 +335,7 @@ class TestVMCreate:
             "--name",
             unique_vm_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--count",
             "2",
             "--mac",
@@ -367,7 +367,7 @@ class TestVMCreate:
             "--name",
             unique_vm_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--count",
             "-1",
             "--network",
@@ -399,7 +399,7 @@ class TestVMCreate:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--atomic",
                 "--network",
                 net_name,
@@ -439,7 +439,7 @@ class TestVMCreate:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--count",
                 "2",
                 "--network",
@@ -479,7 +479,7 @@ class TestVMCreate:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--count",
                 "1",
                 "--network",
@@ -527,7 +527,7 @@ class TestVMCreate:
                 "--name",
                 collision_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )
@@ -538,7 +538,7 @@ class TestVMCreate:
                 "--name",
                 base_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--count",
                 "2",
                 "--atomic",
@@ -583,7 +583,7 @@ class TestVMCreate:
                 "--name",
                 "should-not-create",
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--count",
                 "2",
                 "--volume",
@@ -627,7 +627,7 @@ class TestVMCreate:
             "--name",
             unique_vm_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--network",
             net_name,
         )
@@ -639,7 +639,7 @@ class TestVMCreate:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
                 check=False,
@@ -678,7 +678,7 @@ class TestVMCreate:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--user",
                 "myuser",
                 "--network",
@@ -719,7 +719,7 @@ class TestVMCreate:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--lsm-flags",
                 "apparmor=0",
                 "--network",
@@ -772,7 +772,7 @@ class TestVMCreate:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--firecracker-bin",
                 str(bin_path),
                 "--network",
@@ -825,7 +825,7 @@ class TestVMCreate:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )
@@ -873,7 +873,7 @@ class TestVMCreate:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )
@@ -904,7 +904,7 @@ class TestVMCreate:
         from tests.system.conftest import _ensure_image, _ensure_kernel, _unique_subnet, _run_mvm as _run
 
         _ensure_kernel(mvm_binary)
-        _ensure_image(mvm_binary, "alpine-3.21")
+        _ensure_image(mvm_binary, "alpine:3.21")
 
         vm_name = unique_vm_name
         net_name = f"sys-net-{uuid.uuid4().hex[:6]}"
@@ -918,7 +918,7 @@ class TestVMCreate:
                 "--name",
                 vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
                 "--no-console",
@@ -960,7 +960,7 @@ class TestVMCreate:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--kernel",
                 present[0]["id"][:6],
                 "--network",
@@ -1015,7 +1015,7 @@ class TestVMCreate:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--ssh-key",
                 key_name,
                 "--network",
@@ -1039,7 +1039,7 @@ class TestVMCreate:
         """Create VM with Ubuntu image.
 
         Note: the old slug ``ubuntu-24.04-minimal`` is no longer valid.
-        Use ``ubuntu-minimal-24.04`` (the stored ``type``) or the image ID.
+        Use ``ubuntu-minimal:24.04`` (the stored ``type:version``) or the image ID.
         """
         net_name = unique_network_name
         _run_mvm(
@@ -1071,7 +1071,7 @@ class TestVMCreate:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "ubuntu-minimal-24.04",
+                "ubuntu-minimal:24.04",
                 "--network",
                 net_name,
             )
@@ -1110,7 +1110,7 @@ class TestVMCreate:
             "--name",
             "test-zero",
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--count",
             "0",
             "--network",
@@ -1149,7 +1149,7 @@ class TestVMCreate:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )
@@ -1181,7 +1181,7 @@ class TestVMCreate:
             "--name",
             long_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             check=False,
         )
         assert result.returncode != 0
@@ -1197,7 +1197,7 @@ class TestVMCreate:
             "--name",
             "test;rm -rf /",
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             check=False,
         )
         assert result.returncode != 0
@@ -1213,7 +1213,7 @@ class TestVMCreate:
             "--name",
             "test-\U0001f525-vm",
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             check=False,
         )
         assert result.returncode != 0
@@ -1250,7 +1250,7 @@ class TestVMCreate:
                 "--name",
                 "test-no-net",
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 "nonexistent-net-12345",
                 check=False,
@@ -1284,7 +1284,7 @@ class TestVMCreate:
             "--name",
             "test-no-kernel",
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--kernel",
             "nonexistent-kernel-12345",
             check=False,
@@ -1318,7 +1318,7 @@ class TestVMCreate:
             "--name",
             "test-bad-mac",
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--mac",
             "not-a-mac",
             "--network",
@@ -1376,7 +1376,7 @@ class TestVMCreate:
                 "--name",
                 vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )
@@ -1387,7 +1387,7 @@ class TestVMCreate:
                 "--name",
                 vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
                 check=False,
@@ -1448,7 +1448,7 @@ class TestVMConfigOptions:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--vcpus",
                 "2",
                 "--network",
@@ -1486,7 +1486,7 @@ class TestVMConfigOptions:
             "--name",
             unique_vm_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--vcpus",
             "0",
             "--network",
@@ -1516,7 +1516,7 @@ class TestVMConfigOptions:
             "--name",
             unique_vm_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--vcpus",
             "-1",
             "--network",
@@ -1567,7 +1567,7 @@ class TestVMConfigOptions:
                 "--name",
                 vm_noflag,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )
@@ -1582,7 +1582,7 @@ class TestVMConfigOptions:
                 "--name",
                 vm_flag,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--vcpus",
                 "2",
                 "--network",
@@ -1645,7 +1645,7 @@ class TestVMConfigOptions:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--mem",
                 "1024",
                 "--network",
@@ -1683,7 +1683,7 @@ class TestVMConfigOptions:
             "--name",
             unique_vm_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--mem",
             "0",
             "--network",
@@ -1716,7 +1716,7 @@ class TestVMConfigOptions:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--disk-size",
                 "2G",
                 "--network",
@@ -1757,7 +1757,7 @@ class TestVMConfigOptions:
             "--name",
             unique_vm_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--disk-size",
             "0",
             "--network",
@@ -1787,7 +1787,7 @@ class TestVMConfigOptions:
             "--name",
             unique_vm_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--disk-size",
             "abc",
             "--network",
@@ -1827,7 +1827,7 @@ class TestVMConfigOptions:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--kernel",
                 kernel_id_prefix,
                 "--network",
@@ -1873,7 +1873,7 @@ class TestVMConfigOptions:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--boot-args",
                 custom_boot_args,
                 "--network",
@@ -1915,7 +1915,7 @@ class TestVMConfigOptions:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--no-console",
                 "--network",
                 net_name,
@@ -1953,7 +1953,7 @@ class TestVMConfigOptions:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--enable-pci",
                 "--network",
                 net_name,
@@ -1991,7 +1991,7 @@ class TestVMConfigOptions:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--no-enable-pci",
                 "--network",
                 net_name,
@@ -2029,7 +2029,7 @@ class TestVMConfigOptions:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--enable-logging",
                 "--network",
                 net_name,
@@ -2067,7 +2067,7 @@ class TestVMConfigOptions:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--no-enable-logging",
                 "--network",
                 net_name,
@@ -2105,7 +2105,7 @@ class TestVMConfigOptions:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--enable-metrics",
                 "--network",
                 net_name,
@@ -2143,7 +2143,7 @@ class TestVMConfigOptions:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--no-enable-metrics",
                 "--network",
                 net_name,
@@ -2182,7 +2182,7 @@ class TestVMConfigOptions:
             "--name",
             "test-neg-cpu",
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--vcpus",
             "-1",
             "--network",
@@ -2214,7 +2214,7 @@ class TestVMConfigOptions:
             "--name",
             "test-zero-mem",
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--mem",
             "0",
             "--network",
@@ -2246,7 +2246,7 @@ class TestVMConfigOptions:
             "--name",
             "test-zero-disk",
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--mem",
             "512",
             "--disk-size",
@@ -2451,7 +2451,7 @@ class TestVMStateTransitions:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )
@@ -2499,7 +2499,7 @@ class TestVMStateTransitions:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )
@@ -2542,7 +2542,7 @@ class TestVMStateTransitions:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )
@@ -2601,7 +2601,7 @@ class TestVMStateTransitions:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )
@@ -2646,7 +2646,7 @@ class TestVMStateTransitions:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )
@@ -2691,7 +2691,7 @@ class TestVMStateTransitions:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )
@@ -2767,7 +2767,7 @@ class TestVMStateTransitions:
                 "--name",
                 vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )
@@ -2830,7 +2830,7 @@ class TestVMStateTransitions:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 network_name,
             )
@@ -2883,7 +2883,7 @@ class TestVMStateTransitions:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 network_name,
             )
@@ -2936,7 +2936,7 @@ class TestVMStateTransitions:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 network_name,
             )
@@ -3013,7 +3013,7 @@ class TestVMVolumeIntegration:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--volume",
                 vol_name,
                 "--ssh-key",
@@ -3065,7 +3065,7 @@ class TestVMVolumeIntegration:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--ssh-key",
                 key_name,
                 "--network",
@@ -3131,7 +3131,7 @@ class TestVMVolumeIntegration:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--ssh-key",
                 key_name,
                 "--network",
@@ -3187,7 +3187,7 @@ class TestVMVolumeIntegration:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--ssh-key",
                 key_name,
                 "--network",
@@ -3252,7 +3252,7 @@ class TestVMVolumeIntegration:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--volume",
                 vol_id_prefix,
                 "--ssh-key",
@@ -3305,7 +3305,7 @@ class TestVMVolumeIntegration:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--volume",
                 vol_name,
                 "--ssh-key",
@@ -3371,7 +3371,7 @@ class TestVMVolumeIntegration:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--volume",
                 vol_name,
                 "--ssh-key",
@@ -3449,7 +3449,7 @@ class TestVMVolumeIntegration:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--ssh-key",
                 key_name,
                 "--network",
@@ -3517,7 +3517,7 @@ class TestVMVolumeIntegration:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--volume",
                 vol_name,
                 "--ssh-key",
@@ -3590,7 +3590,7 @@ class TestVMVolumeIntegration:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--volume",
                 vol_name,
                 "--ssh-key",
@@ -3663,7 +3663,7 @@ class TestVMVolumeIntegration:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--volume",
                 vol_name,
                 "--ssh-key",
@@ -3733,7 +3733,7 @@ class TestVMVolumeIntegration:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--volume",
                 vol_name,
                 "--ssh-key",
@@ -3811,7 +3811,7 @@ class TestVMVolumeIntegration:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--volume",
                 vol_name,
                 "--network",
@@ -3887,7 +3887,7 @@ class TestVMVolumeIntegration:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )
@@ -3948,7 +3948,7 @@ class TestVMVolumeIntegration:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )
@@ -4027,7 +4027,7 @@ class TestVMVolumeIntegration:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--ssh-key",
                 key_name,
                 "--volume",
@@ -4036,7 +4036,7 @@ class TestVMVolumeIntegration:
                 net_name,
             )
             ssh_timeout = max(
-                timing_targets.get("alpine-3.21", 15), self._SSH_WAIT_TIMEOUT
+                timing_targets.get("alpine:3.21", 15), self._SSH_WAIT_TIMEOUT
             )
             ssh_available = wait_for_ssh(
                 mvm_binary, unique_vm_name, "root", ssh_timeout
@@ -4099,7 +4099,7 @@ class TestVMVolumeIntegration:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--ssh-key",
                 key_name,
                 "--volume",
@@ -4108,7 +4108,7 @@ class TestVMVolumeIntegration:
                 net_name,
             )
             ssh_timeout = max(
-                timing_targets.get("alpine-3.21", 15), self._SSH_WAIT_TIMEOUT
+                timing_targets.get("alpine:3.21", 15), self._SSH_WAIT_TIMEOUT
             )
             ssh_available = wait_for_ssh(
                 mvm_binary, unique_vm_name, "root", ssh_timeout
@@ -4196,7 +4196,7 @@ class TestVMVolumeIntegration:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--ssh-key",
                 key_name,
                 "--volume",
@@ -4205,7 +4205,7 @@ class TestVMVolumeIntegration:
                 net_name,
             )
             ssh_timeout = max(
-                timing_targets.get("alpine-3.21", 15), self._SSH_WAIT_TIMEOUT
+                timing_targets.get("alpine:3.21", 15), self._SSH_WAIT_TIMEOUT
             )
             ssh_available = wait_for_ssh(
                 mvm_binary, unique_vm_name, "root", ssh_timeout
@@ -4358,7 +4358,7 @@ class TestVMListInspect:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 network_name,
             )
@@ -4417,7 +4417,7 @@ class TestVMListInspect:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 network_name,
             )
@@ -4563,7 +4563,7 @@ class TestVMListInspect:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--vcpus",
                 "2",
                 "--mem",
@@ -4637,7 +4637,7 @@ class TestVMNetworkIntegration:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 created_network,
                 "--ip",
@@ -4672,7 +4672,7 @@ class TestVMNetworkIntegration:
             "--name",
             unique_vm_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--ip",
             "999.999.999.999",
             "--network",
@@ -4702,7 +4702,7 @@ class TestVMNetworkIntegration:
             "--name",
             unique_vm_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--ip",
             "not-an-ip",
             "--network",
@@ -4734,7 +4734,7 @@ class TestVMNetworkIntegration:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--mac",
                 custom_mac,
                 "--network",
@@ -4769,7 +4769,7 @@ class TestVMNetworkIntegration:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 created_network,
             )
@@ -4812,7 +4812,7 @@ class TestVMSSHIntegration:
             mvm_binary,
             created_vm["name"],
             "root",
-            timing_targets["alpine-3.21"],
+            timing_targets["alpine:3.21"],
         )
         assert available
 
@@ -4862,7 +4862,7 @@ class TestVMCloudInit:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--user-data",
                 str(user_data_path),
                 "--network",
@@ -4901,7 +4901,7 @@ class TestVMCloudInit:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--cloud-init-mode",
                 "inject",
                 "--network",
@@ -4940,7 +4940,7 @@ class TestVMCloudInit:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--nocloud-net-port",
                 "0",
                 "--network",
@@ -4980,7 +4980,7 @@ class TestVMCloudInit:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--cloud-init-mode",
                 "net",
                 "--nocloud-net-port",
@@ -5041,7 +5041,7 @@ class TestVMCloudInit:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--ssh-key",
                 key_name,
                 "--user-data",
@@ -5052,7 +5052,7 @@ class TestVMCloudInit:
                 net_name,
             )
             ssh_timeout = max(
-                timing_targets.get("alpine-3.21", 15), self._SSH_WAIT_TIMEOUT
+                timing_targets.get("alpine:3.21", 15), self._SSH_WAIT_TIMEOUT
             )
             ssh_available = wait_for_ssh(
                 mvm_binary, unique_vm_name, "root", ssh_timeout
@@ -5126,14 +5126,14 @@ class TestVMCloudInit:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--ssh-key",
                 key_name,
                 "--network",
                 net_name,
             )
             ssh_timeout = max(
-                timing_targets.get("alpine-3.21", 15), self._SSH_WAIT_TIMEOUT
+                timing_targets.get("alpine:3.21", 15), self._SSH_WAIT_TIMEOUT
             )
             ssh_available = wait_for_ssh(
                 mvm_binary, unique_vm_name, "root", ssh_timeout
@@ -5229,7 +5229,7 @@ class TestVMRemove:
             "--name",
             unique_vm_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--network",
             net_name,
         )
@@ -5285,7 +5285,7 @@ class TestVMRemove:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )
@@ -5340,7 +5340,7 @@ class TestVMRemove:
             "--name",
             unique_vm_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--network",
             net_name,
         )
@@ -5382,7 +5382,7 @@ class TestVMRemove:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )
@@ -5424,7 +5424,7 @@ class TestVMRemove:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )
@@ -5467,7 +5467,7 @@ class TestVMRemove:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )
@@ -5536,7 +5536,7 @@ class TestVMRemove:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )
@@ -5613,7 +5613,7 @@ class TestVMRemove:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--ssh-key",
                 key_name,
                 "--network",
@@ -5674,7 +5674,7 @@ class TestVMSnapshot:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 network_name,
             )
@@ -5779,7 +5779,7 @@ class TestVMSnapshot:
             "--name",
             unique_vm_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--network",
             net_name,
         )
@@ -5868,7 +5868,7 @@ class TestVMSnapshot:
             "--name",
             unique_vm_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--network",
             net_name,
         )
@@ -5928,7 +5928,7 @@ class TestVMSnapshot:
             "--name",
             unique_vm_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--network",
             net_name,
         )
@@ -6027,7 +6027,7 @@ class TestVMSnapshot:
             "--name",
             unique_vm_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--skip-cleanup",
             "--network",
             net_name,
@@ -6044,7 +6044,7 @@ class TestVMSnapshot:
                 "--name",
                 vm_name2,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )
@@ -6081,7 +6081,7 @@ class TestVMSnapshot:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--skip-cleanup",
                 "--network",
                 net_name,
@@ -6155,7 +6155,7 @@ class TestVMConcurrency:
                         "--name",
                         unique_vm_name,
                         "--image",
-                        "alpine-3.21",
+                        "alpine:3.21",
                         "--network",
                         net_name,
                         timeout=180,
@@ -6215,7 +6215,7 @@ class TestVMConcurrency:
                         "--name",
                         vm_name,
                         "--image",
-                        "alpine-3.21",
+                        "alpine:3.21",
                         "--network",
                         net_name,
                         timeout=180,
@@ -6270,7 +6270,7 @@ class TestVMConcurrency:
                 "--name",
                 base_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--count",
                 "3",
                 "--atomic",

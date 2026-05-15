@@ -1,7 +1,7 @@
 import os
 import shutil
 import subprocess
-import time
+
 import warnings
 from pathlib import Path
 
@@ -86,20 +86,17 @@ def _isolate_iptables_rules(
 
 
 @pytest.fixture(autouse=True)
-def _mock_sudo_cache(request, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pre-mark sudo credentials as cached so tests never invoke sudo -n/-v.
+def _mock_sudo_cache() -> None:
+    """No-op: sudo caching was removed during refactoring.
 
-    Skipped for system tests (marked with @pytest.mark.system).
+    The old _SUDO_CREDENTIALS_VALID / _SUDO_CACHE_TIMESTAMP /
+    _SUDO_VALIDATION_IN_PROGRESS constants were removed from
+    ``mvmctl.utils._system`` and replaced with group-membership-based
+    credential checks via ``require_mvm_group_membership()``.
+
+    Skipped for system tests (marked with @pytest.mark.system) — the
+    ``_block_real_sudo_invocations`` fixture handles sudo blocking.
     """
-    # Skip for system tests
-    if request.node.get_closest_marker("system"):
-        return
-
-    import mvmctl.utils._system as _sys
-
-    monkeypatch.setattr(_sys, "_SUDO_CREDENTIALS_VALID", True)
-    monkeypatch.setattr(_sys, "_SUDO_CACHE_TIMESTAMP", time.monotonic())
-    monkeypatch.setattr(_sys, "_SUDO_VALIDATION_IN_PROGRESS", False)
 
 
 def _is_sudo_command(command: object) -> bool:

@@ -88,7 +88,7 @@ class TestHostCleanSafety:
             "--name",
             unique_vm_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--network",
             created_network,
         )
@@ -142,7 +142,7 @@ class TestHostResetSafety:
             "--name",
             unique_vm_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--network",
             created_network,
         )

@@ -569,14 +569,17 @@ class TestImageOperationHelpersExtended:
     ):
         mock_repo = MagicMock()
         mock_repo.get_by_type.return_value = None
-        mock_repo.get.return_value = None
+        mock_repo.get_by_version_and_type.return_value = None
         images_dir = MagicMock()
 
+        spec = MagicMock(id="missing")
+        spec.type = "missing"
+        spec.version = "1.0"
         result = ImageOperation.find_existing_image(
-            MagicMock(id="missing"), images_dir, mock_repo
+            spec, images_dir, mock_repo
         )
         assert result is None
-        mock_repo.get.assert_called_once_with("missing")
+        mock_repo.get_by_version_and_type.assert_called_once_with("1.0", "missing")
 
     def test_find_existing_image_returns_none_when_no_path(self, mocker):
         item = _make_image("test", path="")
@@ -584,8 +587,10 @@ class TestImageOperationHelpersExtended:
         mock_repo.get_by_type.return_value = item
         images_dir = MagicMock()
 
+        spec = MagicMock(id="test")
+        spec.type = "test"
         result = ImageOperation.find_existing_image(
-            MagicMock(id="test"), images_dir, mock_repo
+            spec, images_dir, mock_repo
         )
         assert result is None
 

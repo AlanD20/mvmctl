@@ -46,24 +46,20 @@ class ImageBenchConfig:
 
 
 IMAGES: list[ImageBenchConfig] = [
+    ImageBenchConfig(name="alpine", threshold_s=5, kernel="official:6.19.9"),
     ImageBenchConfig(
-        name="ubuntu-24.04", threshold_s=5, kernel="firecracker:6.1.155"
+        name="ubuntu:24.04", threshold_s=5, kernel="official:6.19.9"
     ),
     ImageBenchConfig(
-        name="ubuntu-24.04-minimal",
+        name="ubuntu-minimal:24.04",
         threshold_s=5,
-        kernel="firecracker:6.1.155",
-    ),
-    ImageBenchConfig(
-        name="ubuntu-fc", threshold_s=5, kernel="firecracker:6.1.155"
-    ),
-    ImageBenchConfig(
-        name="alpine-3.21", threshold_s=5, kernel="firecracker:6.1.155"
-    ),
-    ImageBenchConfig(
-        name="debian-bookworm", threshold_s=5, kernel="firecracker:6.1.155"
+        kernel="official:6.19.9",
     ),
     ImageBenchConfig(name="archlinux", threshold_s=5, kernel="official:6.19.9"),
+    ImageBenchConfig(name="debian:12", threshold_s=5, kernel="official:6.19.9"),
+    ImageBenchConfig(
+        name="firecracker", threshold_s=5, kernel="official:6.19.9"
+    ),
 ]
 
 # Wall-clock timeout for the ssh subprocess (seconds).  Lower = more
@@ -137,7 +133,7 @@ def bench_image(cfg: ImageBenchConfig, *, kernel_id: str | None = None, skip_deb
     """
     effective_kernel = cfg.kernel or kernel_id
     unique = (
-        f"bm-{cfg.name.replace('.', '-').replace('_', '-')}-{int(time.time())}"
+        f"bm-{cfg.name.replace('.', '-').replace('_', '-').replace(':', '-')}-{int(time.time())}"
     )
     key_name = f"{unique}-key"
     vm_name = f"{unique}-vm"
@@ -155,7 +151,8 @@ def bench_image(cfg: ImageBenchConfig, *, kernel_id: str | None = None, skip_deb
     # -- key creation -------------------------------------------------------
     r = _mvm("key", "create", key_name, "--algorithm", "ed25519", "--force")
     if r.returncode != 0:
-        result["error"] = f"Key creation: {r.stderr.strip()[:300]}"
+        err_msg = (r.stderr or r.stdout or "").strip()[:300]
+        result["error"] = f"Key creation: {err_msg}"
         return result
 
     try:
@@ -180,7 +177,8 @@ def bench_image(cfg: ImageBenchConfig, *, kernel_id: str | None = None, skip_deb
         result["create_s"] = round(t1 - t0, 1)
 
         if r.returncode != 0:
-            result["error"] = f"VM creation: {r.stderr.strip()[:300]}"
+            err_msg = (r.stderr or r.stdout or "").strip()[:300]
+            result["error"] = f"VM creation: {err_msg}"
             return result
 
         # -- poll for SSH ---------------------------------------------------

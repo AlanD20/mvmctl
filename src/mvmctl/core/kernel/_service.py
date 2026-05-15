@@ -9,7 +9,6 @@ import re
 import shutil
 import subprocess
 import tarfile
-import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +25,10 @@ from mvmctl.constants import (
     KERNEL_TYPE_OFFICIAL,
 )
 from mvmctl.core._shared import AssetManager
+from mvmctl.core._shared._http_dir_version_resolver import (
+    HttpDirVersionResolver,
+    VersionInfo,
+)
 from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.exceptions import (
     ChecksumMismatchError,
@@ -196,6 +199,10 @@ class KernelService:
                 raise KernelError("Invalid kernels.yaml entry format")
             raw: dict[str, Any] = raw_any
             try:
+                opts_raw = raw.get("options")
+                opts: dict[str, Any] = (
+                    opts_raw if isinstance(opts_raw, dict) else {}
+                )
                 specs[spec_name] = KernelSpec(
                     name=spec_name,
                     kernel_type=require_str(raw, "type"),
@@ -217,6 +224,11 @@ class KernelService:
                         raw, "required_settings"
                     ),
                     set_val_configs=parse_set_val_list(raw, "set_val_configs"),
+                    resolver=optional_str(raw, "resolver"),
+                    versions_url=optional_str(raw, "versions_url"),
+                    options=opts if opts else None,
+                    file_pattern=optional_str(opts, "file_pattern"),
+                    file_suffix=optional_str(opts, "file_suffix"),
                 )
             except ValueError as exc:
                 raise KernelError(
@@ -262,11 +274,204 @@ class KernelService:
             if kernel_type is not None and spec.kernel_type != kernel_type:
                 continue
             if version is not None and spec.version != version:
-                continue
+                # Dynamic resolvers (http-dir, firecracker-s3) accept any
+                # version — the spec's version is just the default.
+                if spec.resolver in ("http-dir", "firecracker-s3"):
+                    import copy as _copy
+
+                    spec = _copy.copy(spec)
+                    spec.version = version
+                else:
+                    continue
             if filter_names is not None and spec.name not in filter_names:
                 continue
             filtered.append(spec)
         return filtered
+
+    @classmethod
+    def load_kernel_types_config(cls) -> list[dict[str, Any]]:
+        """Load raw kernel type config dicts from kernels.yaml.
+
+        Returns a list of config dicts in the same format as image types,
+        suitable for passing to ``HttpDirVersionResolver.resolve()``.
+        """
+        specs = cls._load_specs()
+        configs: list[dict[str, Any]] = []
+        for spec in specs.values():
+            config: dict[str, Any] = {
+                "type": spec.kernel_type,
+                "resolver": spec.resolver,
+                "version": spec.version,
+                "source": spec.source,
+                "versions_url": spec.versions_url,
+                "format": "tar.xz"
+                if spec.kernel_type == "official"
+                else "vmlinux",
+                "name": spec.name,
+            }
+            if spec.list_url_template:
+                config["list_url_template"] = spec.list_url_template
+            if spec.sha256_url:
+                config["sha256_url"] = spec.sha256_url
+            if spec.options:
+                config["options"] = spec.options
+            if spec.resolver == "http-dir":
+                config.setdefault("options", {})
+                config["options"]["version_discoveries"] = (
+                    spec.options.get("version_discoveries", [])
+                    if spec.options
+                    else []
+                )
+                config["options"]["file_pattern"] = (
+                    spec.file_pattern or "linux-"
+                )
+                config["options"]["file_suffix"] = spec.file_suffix or ".tar.xz"
+            elif spec.resolver == "firecracker-s3":
+                config.setdefault("options", {})
+                s3_pattern = (
+                    spec.options.get("s3_version_pattern", "vmlinux-([\\d.]+)")
+                    if spec.options
+                    else "vmlinux-([\\d.]+)"
+                )
+                config["options"]["s3_version_pattern"] = s3_pattern
+            configs.append(config)
+        return configs
+
+    @classmethod
+    def resolve_latest_version(
+        cls,
+        kernel_type: str,
+        ci_version: str | None = None,
+    ) -> str:
+        """Resolve 'latest' to the most recent version from upstream for the given kernel type.
+
+        Args:
+            kernel_type: Kernel type to resolve ('firecracker' or 'official').
+            ci_version: Firecracker CI version for firecracker-s3 types.
+
+        Returns:
+            The highest available version string.
+
+        Raises:
+            KernelError: If the kernel type is unknown or no versions are available.
+        """
+        configs = cls.load_kernel_types_config()
+        type_configs = [c for c in configs if c.get("type") == kernel_type]
+        if not type_configs:
+            raise KernelError(
+                f"Cannot resolve 'latest' for unknown type: {kernel_type}"
+            )
+
+        version_map = HttpDirVersionResolver.resolve(
+            type_configs,
+            arch="x86_64",
+            ci_version=ci_version,
+            limit=1,
+        )
+        all_versions: list[str] = []
+        for versions in version_map.values():
+            for v in versions:
+                all_versions.append(v.version)
+        if not all_versions:
+            raise KernelError(
+                f"Cannot resolve 'latest' for "
+                f"{kernel_type}: no versions available from upstream"
+            )
+        all_versions.sort(
+            key=lambda v: tuple(int(x) for x in v.split(".")),
+            reverse=True,
+        )
+        return all_versions[0]
+
+    @classmethod
+    def list_remote_versions(
+        cls,
+        specs: list[KernelSpec],
+        *,
+        arch: str,
+        cache_ttl_seconds: int | None = None,
+        ci_version: str | None = None,
+    ) -> dict[str, list[VersionInfo]]:
+        """List available remote kernel versions using the shared version resolver.
+
+        Converts ``KernelSpec`` objects to config dicts that the shared
+        ``HttpDirVersionResolver`` can consume, then fetches and returns
+        version listings for all provided specs.
+
+        Args:
+            specs: List of KernelSpec to resolve remote versions for.
+            arch: Target architecture.
+            cache_ttl_seconds: TTL in seconds for HTTP response caching.
+                ``None`` means no caching.
+            ci_version: Firecracker CI version for firecracker-s3 types.
+
+        Returns:
+            Dict mapping kernel type name to sorted list of ``VersionInfo``
+            (newest first).
+
+        """
+        configs: list[dict[str, Any]] = []
+        for spec in specs:
+            config: dict[str, Any] = {
+                "type": spec.kernel_type,
+                "format": "tar.xz"
+                if spec.kernel_type == "official"
+                else "vmlinux",
+            }
+
+            if spec.resolver == "http-dir" and spec.versions_url:
+                config["resolver"] = "http-dir"
+                config["versions_url"] = spec.versions_url
+
+                opts: dict[str, object] = {}
+                version_discoveries: list[str] = []
+                if spec.options and isinstance(spec.options, dict):
+                    raw_discoveries = spec.options.get(
+                        "version_discoveries", []
+                    )
+                    if isinstance(raw_discoveries, list):
+                        version_discoveries = [str(d) for d in raw_discoveries]
+                opts["version_discoveries"] = version_discoveries
+                opts["file_pattern"] = spec.file_pattern or "linux-"
+                opts["file_suffix"] = spec.file_suffix or ".tar.xz"
+                config["options"] = opts
+
+                # Download URL template
+                config["download_url"] = spec.source
+                config["sha256_url"] = spec.sha256_url
+
+            elif spec.resolver == "firecracker-s3" and spec.list_url_template:
+                config["resolver"] = "firecracker-s3"
+                config["source"] = spec.source
+                # Strip {version} from list_url_template for listing purposes
+                config["list_url_template"] = spec.list_url_template.replace(
+                    "{version}", ""
+                )
+                # Download URL template without {version} placeholder for listing
+                source_base = spec.source.rstrip("/")
+                config["download_url"] = (
+                    f"{source_base}/firecracker-ci/{{ci_version}}/{{arch}}/vmlinux-{{version}}"
+                )
+                if spec.sha256_url:
+                    config["sha256_url"] = spec.sha256_url
+
+                s3_opts: dict[str, object] = {}
+                if spec.options and isinstance(spec.options, dict):
+                    s3_opts["s3_version_pattern"] = spec.options.get(
+                        "s3_version_pattern", "vmlinux-([\\d.]+)"
+                    )
+                else:
+                    s3_opts["s3_version_pattern"] = "vmlinux-([\\d.]+)"
+                config["options"] = s3_opts
+
+            configs.append(config)
+
+        return HttpDirVersionResolver.resolve(
+            configs,
+            arch=arch,
+            cache_ttl_seconds=cache_ttl_seconds,
+            ci_version=ci_version,
+        )
 
     @staticmethod
     def parse_filename(filename: str) -> ParsedKernelFilename:
@@ -386,15 +591,25 @@ class KernelService:
         kernel_dir: Path,
         target: str,
         jobs: int,
-        capture_output: bool = False,
+        capture_output: bool = True,
     ) -> tuple[int, str, str]:
-        """Run make command in kernel directory."""
+        """Run make command in kernel directory.
+
+        Output is captured by default to avoid dumping raw build noise
+        (HOSTCC, LEX, etc.) to stdout. Config warnings are extracted
+        from captured stderr and logged at info level.
+        """
         cmd = ["make", target, f"-j{jobs}"]
         if capture_output:
             result = run_cmd(
                 cmd,
                 cwd=str(kernel_dir),
             )
+            # Log config warnings from make output
+            for line in (result.stderr or "").splitlines():
+                stripped = line.strip()
+                if ".config:" in stripped or "warning:" in stripped.lower():
+                    logger.info("  %s", stripped)
             return result.returncode, result.stdout, result.stderr
         else:
             returncode = run_cmd(
@@ -468,6 +683,7 @@ class KernelService:
         fragments: list[str],
         template_vars: dict[str, str],
         kernel_dir: Path,
+        on_status: Callable[[str], None] | None = None,
     ) -> None:
         config_path = kernel_dir / ".config"
         for idx, fragment in enumerate(fragments):
@@ -475,6 +691,8 @@ class KernelService:
             if rendered.startswith("http://") or rendered.startswith(
                 "https://"
             ):
+                if on_status:
+                    on_status(f"Fetching config fragment: {rendered}")
                 try:
                     content = HttpDownload.read_raw_content(
                         rendered,
@@ -492,6 +710,8 @@ class KernelService:
                     if rendered.startswith("assets/")
                     else rendered
                 )
+                if on_status:
+                    on_status(f"Applying config fragment: {rel}")
                 try:
                     content = AssetManager().read_file(rel)
                 except Exception as exc:
@@ -518,6 +738,7 @@ class KernelService:
         *,
         jobs: int,
         user_config_path: Path | None = None,
+        on_status: Callable[[str], None] | None = None,
     ) -> KernelConfigResult:
         """
         Configure kernel with Firecracker settings.
@@ -549,49 +770,83 @@ class KernelService:
                 version=version,
             )
             if spec.config_fragments:
+                if on_status:
+                    on_status("Applying kernel config fragments...")
                 cls._apply_config_fragments(
-                    spec.config_fragments, template_vars, kernel_dir
+                    spec.config_fragments,
+                    template_vars,
+                    kernel_dir,
+                    on_status=on_status,
                 )
         except KernelError:
+            if on_status:
+                on_status("Using defconfig instead...")
             logger.info("Using defconfig instead...")
             returncode, _, _ = cls._run_make(kernel_dir, "defconfig", jobs=jobs)
             if returncode != 0:
                 raise KernelError("defconfig failed")
         # Sync config to current kernel version
+        if on_status:
+            on_status("Synchronizing kernel config...")
         logger.info("Synchronizing config...")
         returncode, _, _ = cls._run_make(kernel_dir, "olddefconfig", jobs=jobs)
         if returncode != 0:
             raise KernelError("olddefconfig failed")
         config_script_path = kernel_dir / "scripts" / "config"
-        logger.info("Applying kernel options from kernels.yaml...")
-        for option in spec.enabled_configs:
-            cls._run_config_script(
-                config_script_path, ["--enable", option], kernel_dir
-            )
-        for option in spec.disabled_configs:
-            cls._run_config_script(
-                config_script_path, ["--disable", option], kernel_dir
-            )
-        for option, value in spec.set_val_configs:
-            cls._run_config_script(
-                config_script_path, ["--set-val", option, value], kernel_dir
-            )
+        if spec.enabled_configs:
+            if on_status:
+                on_status(
+                    f"Enabling {len(spec.enabled_configs)} kernel options..."
+                )
+            logger.info("Applying kernel options from kernels.yaml...")
+            for option in spec.enabled_configs:
+                cls._run_config_script(
+                    config_script_path, ["--enable", option], kernel_dir
+                )
+        if spec.disabled_configs:
+            if on_status:
+                on_status(
+                    f"Disabling {len(spec.disabled_configs)} kernel options..."
+                )
+            logger.info("Applying disabled kernel options...")
+            for option in spec.disabled_configs:
+                cls._run_config_script(
+                    config_script_path, ["--disable", option], kernel_dir
+                )
+        if spec.set_val_configs:
+            if on_status:
+                on_status(
+                    f"Setting {len(spec.set_val_configs)} kernel options..."
+                )
+            logger.info("Applying set-val kernel options...")
+            for option, value in spec.set_val_configs:
+                cls._run_config_script(
+                    config_script_path, ["--set-val", option, value], kernel_dir
+                )
+        if on_status:
+            on_status("Resolving config dependencies...")
         logger.info("Resolving dependencies...")
         returncode, _, _ = cls._run_make(kernel_dir, "olddefconfig", jobs=jobs)
         if returncode != 0:
             raise KernelError("olddefconfig failed after enabling options")
         # Apply user config fragment if provided
         if user_config_path and user_config_path.exists():
+            if on_status:
+                on_status(f"Applying user config fragment: {user_config_path}")
             logger.info("Applying user config fragment: %s", user_config_path)
             config_path = kernel_dir / ".config"
             user_content = user_config_path.read_text(encoding="utf-8")
             cls._merge_config_lines(user_content, config_path)
+            if on_status:
+                on_status("Resolving dependencies after user config...")
             logger.info("Resolving dependencies after user config...")
             returncode, _, _ = cls._run_make(
                 kernel_dir, "olddefconfig", jobs=jobs
             )
             if returncode != 0:
                 raise KernelError("olddefconfig failed after user config")
+        if on_status:
+            on_status("Verifying kernel configuration...")
         logger.info("Verifying configuration...")
         config_path = kernel_dir / ".config"
         config_content = config_path.read_text()
@@ -653,13 +908,8 @@ class KernelService:
         info_messages: list[str] = []
         warnings.append("Building kernel... (this may take 10-30 minutes)")
         cmd = ["make", "vmlinux", f"-j{jobs}"]
-        temp_log_path: Path | None = None
-        build_log_path = output_path.with_suffix(".build.log")
-        with tempfile.NamedTemporaryFile(
-            suffix=".log", delete=False
-        ) as tmp_log:
-            build_log_path = Path(tmp_log.name)
-        temp_log_path = build_log_path
+        build_log_path = output_path.parent / f"{output_path.name}.build.log"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             with open(build_log_path, "w", encoding="utf-8") as log_file:
                 proc = subprocess.Popen(
@@ -677,18 +927,12 @@ class KernelService:
                         warnings.append(line)
             if returncode != 0:
                 raise KernelError(
-                    f"Kernel build failed: Command failed (exit {returncode}): make"
+                    f"Kernel build failed (exit {returncode}). Log: {build_log_path}"
                 )
         except OSError as e:
             raise KernelError(
                 "Kernel build failed: unable to execute make"
             ) from e
-        finally:
-            if temp_log_path and temp_log_path.exists():
-                try:
-                    temp_log_path.unlink()
-                except OSError:
-                    pass
         # Copy vmlinux to output
         vmlinux_path = kernel_dir / "vmlinux"
         if not vmlinux_path.exists():
@@ -802,8 +1046,10 @@ class KernelService:
         Raises:
             KernelError: If a checksum is required but cannot be resolved.
         """
+        major = version.split(".")[0] if "." in version else version
         template_vars = {
             "version": version,
+            "series": major,
             "kernel_version": version,
             "ci_version": version,
             "arch": arch,
@@ -847,6 +1093,7 @@ class KernelService:
         user_config_path: Path | None = None,
         use_cache: bool = True,
         progress_callback: Callable[[int, int | None], None] | None = None,
+        on_status: Callable[[str], None] | None = None,
     ) -> KernelPipelineResult:
         """Orchestrate download → extract → configure → build."""
         # Compute config hash for caching
@@ -900,6 +1147,7 @@ class KernelService:
                 arch=arch,
                 jobs=jobs,
                 user_config_path=user_config_path,
+                on_status=on_status,
             )
             # 5. Build vmlinux
             build_result = cls.run_make_vmlinux(
@@ -1112,6 +1360,7 @@ class KernelService:
         clean_build: bool = False,
         kernel_config: Path | None = None,
         progress_callback: Callable[[int, int | None], None] | None = None,
+        on_status: Callable[[str], None] | None = None,
     ) -> KernelPullResult:
         """
         Build an official kernel from source.
@@ -1140,6 +1389,7 @@ class KernelService:
             spec=spec,
             use_cache=not clean_build,
             progress_callback=progress_callback,
+            on_status=on_status,
         )
         warnings: list[str] = []
         info_messages: list[str] = []

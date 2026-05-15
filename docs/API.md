@@ -1139,12 +1139,14 @@ Prune unused kernels. Skips default and referenced kernels by default.
 
 #### `KernelOperation.pull(inputs: KernelPullInput, *, on_progress: Callable[[ProgressEvent], None] | None = None) -> OperationResult[KernelItem] | NeedsInteraction`
 
-Fetch or build a Firecracker kernel.
+Fetch or build a Firecracker kernel. The CLI parses a `type:version` shorthand
+(e.g. `official:6.19.9`) and sets `kernel_type` and `version` accordingly.
+When calling the API directly, pass explicit `kernel_type` and `version`.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `inputs.kernel_type` | `str` | — | Kernel type (`"firecracker"` or `"official"`) |
-| `inputs.version` | `str \| None` | `None` | Kernel version (e.g. `"6.1.155"`) |
+| `inputs.kernel_type` | `str` | — | Kernel type (`"firecracker"` or `"official"`). May be omitted when using CLI shorthand. |
+| `inputs.version` | `str \| None` | `None` | Kernel version (e.g. `"6.1.155"`). Set to `"latest"` to resolve the latest upstream version dynamically. |
 | `inputs.arch` | `str \| None` | `None` | Architecture (default: host arch) |
 | `inputs.output_dir` | `Path \| None` | `None` | Output directory |
 | `inputs.output_name` | `str \| None` | `None` | Custom output filename |
@@ -1169,6 +1171,25 @@ Remove one or more kernels from cache and database.
 #### `KernelOperation.list_all() -> list[KernelItem]`
 
 List all kernels, syncing `is_present` with the filesystem.
+
+---
+
+#### `KernelOperation.list_remote(*, no_cache: bool = False) -> list[VersionInfo]`
+
+List available remote kernel versions from upstream providers.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `no_cache` | `bool` | `False` | Skip cached version listing and fetch live from upstream |
+
+**Returns:** List of `VersionInfo` objects, each with `version`, `type`, `display_name`, `download_url`.
+
+**Example:**
+```python
+result = KernelOperation.list_remote(no_cache=True)
+for v in result:
+    print(f"{v.type}:{v.version}")
+```
 
 ---
 

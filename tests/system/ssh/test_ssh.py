@@ -17,7 +17,7 @@ class TestSSHConnect:
     def test_ssh_command_execution(self, mvm_binary, module_vm, timing_targets):
         """Execute a command via SSH on a running VM using name as positional arg."""
         vm_info = module_vm
-        ssh_timeout = timing_targets["alpine-3.21"]
+        ssh_timeout = timing_targets["alpine:3.21"]
         ssh_available = wait_for_ssh(
             mvm_binary, vm_info["name"], "root", ssh_timeout
         )
@@ -86,7 +86,7 @@ class TestSSHConnect:
     def test_ssh_with_ip_flag(self, mvm_binary, module_vm, timing_targets):
         """Connect via IP as positional arg instead of VM name."""
         vm_info = module_vm
-        ssh_timeout = timing_targets["alpine-3.21"]
+        ssh_timeout = timing_targets["alpine:3.21"]
         ssh_available = wait_for_ssh(
             mvm_binary, vm_info["name"], "root", ssh_timeout
         )
@@ -110,7 +110,7 @@ class TestSSHConnect:
     def test_ssh_with_user_flag(self, mvm_binary, module_vm, timing_targets):
         """SSH with explicit --user flag."""
         vm_info = module_vm
-        ssh_timeout = timing_targets["alpine-3.21"]
+        ssh_timeout = timing_targets["alpine:3.21"]
         wait_for_ssh(mvm_binary, vm_info["name"], "root", ssh_timeout)
 
         result = _run_mvm(
@@ -137,7 +137,7 @@ class TestSSHConnect:
         import subprocess as _subprocess
 
         vm_info = module_vm
-        ssh_timeout = timing_targets["alpine-3.21"]
+        ssh_timeout = timing_targets["alpine:3.21"]
         wait_for_ssh(mvm_binary, vm_info["name"], "root", ssh_timeout)
 
         # Create a throwaway key for the SSH test

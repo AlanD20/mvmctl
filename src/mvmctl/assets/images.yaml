@@ -98,4 +98,5 @@ image_types:
     version_name_template: "Ubuntu {version} (Firecracker CI)"
     sha256_url: null
     format: squashfs
-    options: {}
+    options:
+      s3_version_pattern: "ubuntu-([0-9.]+)\\.squashfs"

@@ -447,13 +447,14 @@ class TestQueryVMsByKernel:
         db = DB()
         with db.connect() as conn:
             conn.execute(
-                "INSERT INTO images (id, type, name, arch, path, fs_type, "
+                "INSERT INTO images (id, type, version, name, arch, path, fs_type, "
                 "fs_uuid, original_size, minimum_rootfs_size_mib, pulled_at, "
                 "is_default, is_present, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, datetime('now'), datetime('now'))",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, datetime('now'), datetime('now'))",
                 (
                     "i" * 64,
                     "test-os",
+                    "1.0",
                     "Test OS",
                     "x86_64",
                     "/img",

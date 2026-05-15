@@ -316,7 +316,8 @@ class TestGetSpecsFor:
             ["archlinux"], version="latest", arch="x86_64"
         )
         assert len(specs) >= 1
-        assert specs[0].id == "archlinux-latest"
+        assert specs[0].type == "archlinux"
+        assert specs[0].version == "latest"
 
     def test_raises_for_missing(self) -> None:
         with pytest.raises(ImageError, match="not found"):

@@ -59,6 +59,8 @@ OVERRIDABLE_DEFAULTS: Final[dict[str, dict[str, Any]]] = {
         "arch": "x86_64",
         "version": "6.19.9",  # default for --type official; firecracker uses CI version
         "build_jobs": None,  # None → all available cores (os.cpu_count())
+        "remote_list_limit": 5,
+        "remote_list_cache_ttl": 4 * 3600,
     },
     "defaults.firecracker": {
         "log_level": "Debug",

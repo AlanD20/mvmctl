@@ -173,8 +173,8 @@ class TestNetworkWorkflowEdgeCases:
 
     def test_remove_nonexistent_network(self) -> None:
         """Test attempting to remove a network that doesn't exist."""
-        with pytest.raises(NetworkNotFoundError):
-            NetworkOperation.remove(NetworkInput(name=["missing-net"]))
+        result = NetworkOperation.remove(NetworkInput(name=["missing-net"]))
+        assert result.status == "error"
 
     def test_inspect_nonexistent_network(self) -> None:
         """Test attempting to inspect a network that doesn't exist."""

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import typer
 from rich.console import Console
@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from mvmctl.api.inputs._kernel_input import KernelInput
     from mvmctl.api.inputs._kernel_pull_input import KernelPullInput
     from mvmctl.api.kernel_operations import KernelOperation
+    from mvmctl.core._shared._http_dir_version_resolver import VersionInfo
 else:
     KernelOperation = _KernelOperation
     KernelPullInput = _KernelPullInput
@@ -56,34 +57,104 @@ def kernel_callback(ctx: typer.Context) -> None:
 @handle_errors
 def kernel_ls(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    remote: bool = typer.Option(
+        False, "--remote", "-r", help="Show available remote kernel versions"
+    ),
+    no_cache: bool = typer.Option(
+        False,
+        "--no-cache",
+        help="Skip cached version listing and fetch live from upstream",
+    ),
 ) -> None:
-    """List all kernels."""
-    kernels: list[KernelItem] = KernelOperation.list_all()
+    """List cached kernels (or available remote kernels with --remote)."""
+    if remote:
+        with Console().status("Fetching remote kernel versions"):
+            versions = KernelOperation.list_remote(no_cache=no_cache)
+        _list_remote_kernels(versions, json_output=json_output)
+    else:
+        kernels: list[KernelItem] = KernelOperation.list_all()
 
+        if json_output:
+            data = [KernelOperation._kernel_to_dict(k) for k in kernels]
+            typer.echo(json.dumps(data, indent=2, default=str))
+            return
+
+        rows: list[list[str]] = []
+        for k in kernels:
+            is_default = k.is_default
+            name_col = CommonUtils._get_combined_marker(
+                is_default, not k.is_present
+            )
+            rows.append(
+                [
+                    HashGenerator.shorten(k.id),
+                    f"{name_col}{k.base_name}",
+                    k.version,
+                    k.arch,
+                    k.type,
+                    CommonUtils.human_readable_datetime(k.created_at),
+                ]
+            )
+
+        print_table(
+            columns=["ID", "Name", "Version", "Arch", "Type", "Added"],
+            rows=rows,
+        )
+
+
+def _list_remote_kernels(
+    versions: list[VersionInfo], *, json_output: bool
+) -> None:
+    """Render remote available kernels grouped by type."""
     if json_output:
-        data = [KernelOperation._kernel_to_dict(k) for k in kernels]
-        typer.echo(json.dumps(data, indent=2, default=str))
+        data: list[dict[str, Any]] = [
+            {
+                "version": v.version,
+                "type": v.type,
+                "display_name": v.display_name,
+                "download_url": v.download_url,
+                "sha256_url": v.sha256_url,
+                "format": v.format,
+            }
+            for v in versions
+        ]
+        typer.echo(json.dumps(data, indent=2))
         return
 
+    # Group by type
+    groups: dict[str, list[VersionInfo]] = {}
+    for v in versions:
+        groups.setdefault(v.type, []).append(v)
+
+    sorted_types = sorted(groups.keys())
+
     rows: list[list[str]] = []
-    for k in kernels:
-        is_default = k.is_default
-        name_col = CommonUtils._get_combined_marker(
-            is_default, not k.is_present
+    for type_key in sorted_types:
+        version_list = groups[type_key]
+        if not version_list:
+            continue
+
+        parts = type_key.split("-", maxsplit=1)
+        type_display = (
+            f"{parts[0].title()} {parts[1]}"
+            if len(parts) > 1
+            else type_key.title()
         )
-        rows.append(
-            [
-                HashGenerator.shorten(k.id),
-                f"{name_col}{k.base_name}",
-                k.version,
-                k.arch,
-                k.type,
-                CommonUtils.human_readable_datetime(k.created_at),
-            ]
-        )
+        suffix = " (build required)" if type_key.startswith("official") else ""
+        rows.append([type_key, f"{type_display}{suffix}"])
+
+        for j, v in enumerate(version_list):
+            is_last = j == len(version_list) - 1
+            prefix = "  └─ " if is_last else "  ├─ "
+            display = v.display_name or v.version
+            rows.append([f"{prefix}{v.version}", display])
+
+    if not rows:
+        print_info("No remote kernels available.")
+        return
 
     print_table(
-        columns=["ID", "Name", "Version", "Arch", "Type", "Added"],
+        columns=["Type / Version", "Description"],
         rows=rows,
     )
 

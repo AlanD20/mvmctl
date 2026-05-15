@@ -77,7 +77,7 @@ class TestQuickStartJourney:
             "--name",
             unique_vm_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--network",
             net_name,
             "--ssh-key",
@@ -86,7 +86,7 @@ class TestQuickStartJourney:
         assert result.returncode == 0
 
         try:
-            ssh_timeout = timing_targets["alpine-3.21"]
+            ssh_timeout = timing_targets["alpine:3.21"]
             ssh_available = wait_for_ssh(
                 mvm_binary, unique_vm_name, "root", ssh_timeout
             )
@@ -134,7 +134,7 @@ class TestNetworkVMJourney:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 unique_network_name,
             )
@@ -202,7 +202,7 @@ class TestKeyVMJourney:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
                 "--ssh-key",
@@ -248,7 +248,7 @@ class TestVMStateJourney:
             "--name",
             unique_vm_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--network",
             net_name,
         )
@@ -339,7 +339,7 @@ class TestIPJourney:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 unique_network_name,
                 "--ip",
@@ -354,7 +354,7 @@ class TestIPJourney:
             assert vm is not None, f"VM '{unique_vm_name}' not found in listing"
             assert vm["ipv4"] == ip, f"Expected {ip}, got {vm['ipv4']}"
 
-            ssh_timeout = timing_targets["alpine-3.21"]
+            ssh_timeout = timing_targets["alpine:3.21"]
             ssh_available = wait_for_ssh(
                 mvm_binary, unique_vm_name, "root", ssh_timeout
             )
@@ -412,7 +412,7 @@ class TestIPJourney:
             "--name",
             name_a,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--network",
             net_name,
             "--ssh-key",
@@ -425,7 +425,7 @@ class TestIPJourney:
             "--name",
             name_b,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--network",
             net_name,
             "--ssh-key",
@@ -440,7 +440,7 @@ class TestIPJourney:
             assert vm_a is not None, f"VM '{name_a}' not found in listing"
             assert vm_b is not None, f"VM '{name_b}' not found in listing"
 
-            ssh_timeout = timing_targets["alpine-3.21"]
+            ssh_timeout = timing_targets["alpine:3.21"]
             ssh_a = wait_for_ssh(mvm_binary, name_a, "root", ssh_timeout)
             assert ssh_a, (
                 f"SSH not available for '{name_a}' within {ssh_timeout}s"
@@ -467,7 +467,7 @@ class TestSSHJourney:
     ):
         """Create VM and verify SSH CLI command execution."""
         vm_info = created_vm
-        ssh_timeout = max(timing_targets.get("alpine-3.21", 15), 30)
+        ssh_timeout = max(timing_targets.get("alpine:3.21", 15), 30)
         ssh_available = wait_for_ssh(
             mvm_binary, vm_info["name"], "root", ssh_timeout
         )
@@ -512,7 +512,7 @@ class TestSSHJourney:
             "--name",
             unique_vm_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--network",
             net_name,
             "--ssh-key",
@@ -525,7 +525,7 @@ class TestSSHJourney:
             vm = next((v for v in vms if v["name"] == unique_vm_name), None)
             assert vm is not None, f"VM '{unique_vm_name}' not found in listing"
 
-            ssh_timeout = timing_targets["alpine-3.21"]
+            ssh_timeout = timing_targets["alpine:3.21"]
             ssh_available = wait_for_ssh(
                 mvm_binary, unique_vm_name, "root", ssh_timeout
             )
@@ -594,7 +594,7 @@ class TestMultiKeyJourney:
                 "--name",
                 unique_vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
                 "--ssh-key",
@@ -659,7 +659,7 @@ class TestInterVMCommunication:
                 "--name",
                 name_a,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 unique_network_name,
                 "--ssh-key",
@@ -672,7 +672,7 @@ class TestInterVMCommunication:
                 "--name",
                 name_b,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 unique_network_name,
                 "--ssh-key",
@@ -686,7 +686,7 @@ class TestInterVMCommunication:
             assert vm_a is not None, f"VM '{name_a}' not found in listing"
             assert vm_b is not None, f"VM '{name_b}' not found in listing"
 
-            ssh_timeout = timing_targets["alpine-3.21"]
+            ssh_timeout = timing_targets["alpine:3.21"]
             ssh_available = wait_for_ssh(
                 mvm_binary, name_a, "root", ssh_timeout
             )
@@ -746,7 +746,7 @@ class TestCreateWithAllFlags:
                 "--name",
                 vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
                 "--vcpus",
@@ -844,7 +844,7 @@ class TestMultipleVolumes:
                 "--name",
                 vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
                 "--volume",
@@ -924,7 +924,7 @@ class TestStressCreateDestroy:
                     "--name",
                     vm_name,
                     "--image",
-                    "alpine-3.21",
+                    "alpine:3.21",
                     "--network",
                     net_name,
                     check=False,
@@ -1001,7 +1001,7 @@ class TestExportImport:
                 "--name",
                 vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 network_name,
             )
@@ -1106,7 +1106,7 @@ class TestConcurrentVMCreation:
                 "--name",
                 name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
                 "--ssh-key",
@@ -1138,7 +1138,7 @@ class TestConcurrentVMCreation:
                     f"VM '{vm['name']}' not RUNNING: {vm['status']}"
                 )
 
-            ssh_timeout = timing_targets["alpine-3.21"]
+            ssh_timeout = timing_targets["alpine:3.21"]
             for vm in created_vms:
                 ssh_available = wait_for_ssh(
                     mvm_binary, vm["name"], "root", ssh_timeout

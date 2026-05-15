@@ -107,11 +107,16 @@ mvm kernel pull --type firecracker --version 1.12
 # Download for a different architecture
 mvm kernel pull --type firecracker --arch aarch64
 
+# Using the type:version shorthand (equivalent to --type firecracker --version 6.1)
+mvm kernel pull firecracker:6.1
+
 # Set as default kernel after download
 mvm kernel pull --type firecracker --default
 ```
 
 The kernel is saved to `~/.cache/mvmctl/kernels/` with a name derived from the CI version and architecture.
+
+`mvm kernel pull` also accepts the shorthand `type:version` syntax (e.g. `firecracker:6.1`), which is equivalent to `--type firecracker --version 6.1`.
 
 **Why use this?** These kernels are curated by the Firecracker team, are the smallest and
 fastest to boot, and have guaranteed compatibility with the matching Firecracker release.
@@ -130,6 +135,9 @@ mvm kernel pull --type official
 
 # Build a specific version
 mvm kernel pull --type official --version 6.1.102
+
+# Using type:version shorthand (equivalent to --type official --version 6.19.9)
+mvm kernel pull official:6.19.9
 
 # Build with parallel jobs (faster)
 mvm kernel pull --type official --jobs 8
@@ -204,6 +212,9 @@ Required kernel settings missing: CONFIG_VIRTIO_BLK, CONFIG_VIRTIO_NET
 ```bash
 # List all cached kernels
 mvm kernel ls
+
+# List remote kernel versions available for download
+mvm kernel ls --remote
 
 # Set a kernel as default for vm create
 mvm kernel default vmlinux-firecracker-1.12-x86_64
@@ -286,7 +297,7 @@ Then update `config_url_template` in `src/mvmctl/assets/kernels.yaml` if needed.
 | 6.6.x LTS | Supported | Newer LTS, recommended for production |
 | 6.12.x LTS | Supported | Latest LTS |
 
-> **Note:** The default kernel version (`6.19.9`) is **NOT** an LTS kernel. It is the latest upstream stable at the time of release. If you need long-term support, explicitly pass `--version 6.1.102` or `--version 6.12.21` to `mvm kernel pull --type official`. The LTS versions in the table above are tested and known to work — use them for production deployments.
+> **Note:** The default kernel version (`6.19.9`) is **NOT** an LTS kernel. It is the latest upstream stable at the time of release. Use `--version latest` to resolve the most recent version from the upstream directory listing. If you need long-term support, explicitly pass `--version 6.1.102` or `--version 6.12.21` to `mvm kernel pull --type official`. The LTS versions in the table above are tested and known to work — use them for production deployments.
 
 ### Relevant constants (src/mvmctl/constants.py)
 

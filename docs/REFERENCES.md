@@ -62,8 +62,8 @@ Kernel management.
 
 | Command | Description |
 |---------|-------------|
-| `mvm kernel ls [--json]` | List all kernels |
-| `mvm kernel pull` | Pull or build a kernel |
+| `mvm kernel ls [--json] [-r, --remote] [--no-cache]` | List cached kernels (or available remote kernels with --remote) |
+| `mvm kernel pull [KERNEL_SELECTOR]` | Pull or build a kernel. Supports type:version shorthand (e.g. official:6.19.9) |
 | `mvm kernel default KERNEL_ID` | Set a kernel as the default |
 | `mvm kernel rm [IDENTIFIERS]... [-f, --force]` | Remove one or more kernels |
 | `mvm kernel inspect PREFIX [--json] [--tree]` | Show detailed information about a kernel |
@@ -72,7 +72,8 @@ Kernel management.
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--type` | `firecracker` or `official` **(required)** | --- |
+| `KERNEL_SELECTOR` | (positional) type:version shorthand e.g. official:6.19.9 | --- |
+| `--type` | `firecracker` or `official` (optional — inferred from type:version shorthand) | --- |
 | `--version VERSION` | Kernel version | (latest) |
 | `--arch` | Architecture (`x86_64`, `arm64`) | auto-detect |
 | `--default` | Set as default after fetch | false |
@@ -80,6 +81,8 @@ Kernel management.
 | `--keep-build-dir` | Keep build directory (official only) | false |
 | `--clean-build` | Bypass cache and force clean build (official only) | false |
 | `--config PATH` | Custom kernel config fragment file | --- |
+
+> **Note:** Use `mvm kernel ls -r` or `mvm kernel ls --remote` to list available versions from upstream.
 
 ---
 
@@ -364,6 +367,18 @@ Persistent data disk management. Create, remove, list, inspect, and resize volum
 3. Runtime config file: `~/.config/mvmctl/config.json`
 4. `MVM_*` environment variables
 5. CLI flags
+
+### Kernel Defaults
+
+Built-in fallbacks for kernel operations (defined in `constants.py` under `defaults.kernel`):
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `arch` | `x86_64` | Default architecture |
+| `version` | `6.19.9` | Default version for `--type official` |
+| `build_jobs` | `None` | Parallel build jobs (None = all cores) |
+| `remote_list_limit` | `5` | Max remote versions to list per type |
+| `remote_list_cache_ttl` | `14400` | Cache TTL in seconds (4 hours) for remote version listings |
 
 ### Example config.json
 

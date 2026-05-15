@@ -64,7 +64,7 @@ def logs_vm(mvm_binary: str) -> Generator[dict[str, Any], None, None]:
             "--name",
             vm_name,
             "--image",
-            "alpine-3.21",
+            "alpine:3.21",
             "--network",
             net_name,
             "--ssh-key",
@@ -163,7 +163,7 @@ class TestVMLogs:
                 "--name",
                 vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 created_network,
             )
@@ -193,7 +193,7 @@ class TestVMLogs:
                 "--name",
                 vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 created_network,
             )

@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from tests.system.conftest import _run_mvm, ensure_vm_deps
+from tests.system.conftest import _print_prep, _run_mvm, ensure_vm_deps
 
 pytestmark = [pytest.mark.system, pytest.mark.domain_cache]
 
@@ -129,7 +129,7 @@ class TestCacheClean:
                 "--name",
                 vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 created_network,
             )
@@ -439,11 +439,55 @@ class TestCachePruneNonDryRun:
             for b in all_bins
             if not b.get("is_default")
             and b.get("is_present")
-            and b.get("name") in ("firecracker", "jailer")
+            and b.get("name") in ("firecracker",)
         ]
 
         if not non_default:
-            pytest.skip("No non-default present binary available to prune")
+            # Try to pull a non-default binary from remote
+            remote_result = _run_mvm(
+                mvm_binary, "bin", "ls", "--remote", check=False
+            )
+            if remote_result.returncode == 0:
+                import re as _re
+                versions = _re.findall(
+                    r"\d+\.\d+\.\d+", remote_result.stdout
+                )
+                if versions:
+                    default_version = next(
+                        (
+                            b.get("version")
+                            for b in all_bins
+                            if b.get("is_default")
+                        ),
+                        None,
+                    )
+                    for v in versions:
+                        if v == default_version:
+                            continue
+                        pull = _run_mvm(
+                            mvm_binary,
+                            "bin",
+                            "pull",
+                            v,
+                            check=False,
+                            timeout=120,
+                        )
+                        if pull.returncode == 0:
+                            break
+                    # Re-list after pull attempt
+                    bin_result = _run_mvm(mvm_binary, "bin", "ls", "--json")
+                    all_bins = json.loads(bin_result.stdout)
+                    non_default = [
+                        b
+                        for b in all_bins
+                        if not b.get("is_default")
+                        and b.get("is_present")
+                        and b.get("name") in ("firecracker",)
+                    ]
+            if not non_default:
+                pytest.skip(
+                    "No non-default present binary available to prune"
+                )
 
         bin_dir = Path.home() / ".cache" / "mvmctl" / "bin"
         db_path = Path.home() / ".cache" / "mvmctl" / "mvmdb.db"
@@ -508,7 +552,7 @@ class TestCachePruneNonDryRun:
         if not images:
             # Ensure an image exists to test prune
             from tests.system.conftest import _ensure_image as _ensure_img
-            _ensure_img(mvm_binary, "alpine-3.21")
+            _ensure_img(mvm_binary, "alpine:3.21")
             img_result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(img_result.stdout)
 

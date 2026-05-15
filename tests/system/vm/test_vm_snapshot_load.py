@@ -64,7 +64,7 @@ class TestSnapshotDestroyRestore:
                 "--name",
                 vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 network_name,
                 "--ssh-key",

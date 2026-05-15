@@ -442,7 +442,7 @@ class TestKernelStoppedVMDeletion:
                     "--name",
                     vm_name,
                     "--image",
-                    "alpine-3.21",
+                    "alpine:3.21",
                     "--kernel",
                     kernel_id_prefix,
                     "--network",

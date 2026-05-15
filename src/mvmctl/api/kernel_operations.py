@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -14,8 +15,10 @@ from mvmctl.api.inputs._kernel_pull_input import (
 )
 from mvmctl.constants import DEFAULT_FIRECRACKER_CI_VERSION
 from mvmctl.core._shared import Database
+from mvmctl.core._shared._http_dir_version_resolver import VersionInfo
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.binary._service import BinaryService
+from mvmctl.core.config._service import SettingsService
 from mvmctl.core.kernel._controller import KernelController
 from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.core.kernel._service import KernelService
@@ -128,6 +131,23 @@ class KernelOperation:
             db = Database()
             repo = KernelRepository(db)
 
+            # Resolve "latest" version to concrete version using
+            # cross-domain orchestration (API layer responsibility).
+            if inputs.version == "latest":
+                ci_version: str | None = None
+                if inputs.kernel_type == "firecracker":
+                    try:
+                        binary_service = BinaryService(BinaryRepository(db))
+                        default_fc = binary_service.get_default_firecracker()
+                        if default_fc and default_fc.ci_version:
+                            ci_version = default_fc.ci_version
+                    except Exception:
+                        ci_version = DEFAULT_FIRECRACKER_CI_VERSION
+                resolved_version = KernelService.resolve_latest_version(
+                    inputs.kernel_type, ci_version=ci_version
+                )
+                inputs = replace(inputs, version=resolved_version)
+
             # Resolve and validate inputs
             request = KernelPullRequest(inputs=inputs, db=db)
             resolved = request.resolve()
@@ -222,6 +242,15 @@ class KernelOperation:
                     kernel_config=resolved.kernel_config,
                     progress_callback=OperationUtils.download_progress_bridge(
                         on_progress
+                    ),
+                    on_status=lambda msg: (
+                        on_progress(
+                            ProgressEvent(
+                                phase="build", status="running", message=msg
+                            )
+                        )
+                        if on_progress
+                        else None
                     ),
                 )
                 if on_progress is not None:
@@ -384,6 +413,73 @@ class KernelOperation:
         db = Database()
         repo = KernelRepository(db)
         return KernelService(repo).list_all()
+
+    @staticmethod
+    def list_remote(
+        *,
+        no_cache: bool = False,
+    ) -> list[VersionInfo]:
+        """
+        List available remote kernel versions.
+
+        Fetches version listings from upstream providers (kernel.org for
+        official kernels, Firecracker S3 for firecracker kernels) using
+        the shared version resolver.
+
+        Args:
+            no_cache: If True, bypass cached version listings and fetch
+                live from upstream.
+
+        Returns:
+            List of ``VersionInfo`` objects describing available versions.
+
+        """
+        configs = KernelService.load_kernel_types_config()
+
+        arch = "x86_64"  # Default arch for kernel listing
+        db = Database()
+        cache_ttl: int | None = (
+            None
+            if no_cache
+            else int(
+                SettingsService.resolve(
+                    db, "defaults.kernel", "remote_list_cache_ttl"
+                )
+            )
+        )
+
+        # Resolve ci_version from default firecracker binary
+        resolved_ci_version: str | None = None
+        try:
+            binary_repo = BinaryRepository(db)
+            binary_service = BinaryService(binary_repo)
+            default_fc = binary_service.get_default_firecracker()
+            if default_fc and default_fc.ci_version:
+                resolved_ci_version = default_fc.ci_version
+        except Exception:
+            pass  # Fall back to resolver's default constant
+
+        # Resolve remote_list_limit from settings
+        remote_list_limit: int = int(
+            SettingsService.resolve(db, "defaults.kernel", "remote_list_limit")
+        )
+
+        from mvmctl.core._shared._http_dir_version_resolver import (
+            HttpDirVersionResolver,
+        )
+
+        version_map = HttpDirVersionResolver.resolve(
+            configs,
+            arch=arch,
+            cache_ttl_seconds=cache_ttl,
+            ci_version=resolved_ci_version,
+            limit=remote_list_limit,
+        )
+
+        flattened: list[VersionInfo] = []
+        for versions in version_map.values():
+            flattened.extend(versions)
+        return flattened
 
     @staticmethod
     def get(inputs: KernelInput) -> KernelItem:

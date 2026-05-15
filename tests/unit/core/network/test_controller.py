@@ -253,12 +253,13 @@ class TestNetworkServiceRemove:
         now = "2026-01-01T00:00:00Z"
         with repo.db.connect() as conn:
             conn.execute(
-                "INSERT INTO images (id, type, name, arch, path, fs_type, "
+                "INSERT INTO images (id, type, version, name, arch, path, fs_type, "
                 "original_size, minimum_rootfs_size_mib, pulled_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     "img-001",
                     "test",
+                    "1.0",
                     "test-os",
                     "x86_64",
                     "/tmp/img",
@@ -397,12 +398,13 @@ class TestNetworkServiceRemove:
         now = "2026-01-01T00:00:00Z"
         with repo.db.connect() as conn:
             conn.execute(
-                "INSERT INTO images (id, type, name, arch, path, fs_type, "
+                "INSERT INTO images (id, type, version, name, arch, path, fs_type, "
                 "original_size, minimum_rootfs_size_mib, pulled_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     "img-001",
                     "test",
+                    "1.0",
                     "test-os",
                     "x86_64",
                     "/tmp/img",

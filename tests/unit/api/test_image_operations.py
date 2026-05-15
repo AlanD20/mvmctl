@@ -564,8 +564,10 @@ class TestImageOperationHelpers:
         candidate.exists.return_value = True
         images_dir.__truediv__.return_value = candidate
 
+        spec = MagicMock(id="ubuntu-24.04")
+        spec.type = "ubuntu-24.04"
         result = ImageOperation.find_existing_image(
-            MagicMock(id="ubuntu-24.04"), images_dir, mock_repo
+            spec, images_dir, mock_repo
         )
         assert result is not None
         assert result.type == "ubuntu-24.04"
@@ -575,10 +577,13 @@ class TestImageOperationHelpers:
         """find_existing_image() returns None when not in repo."""
         mock_repo = MagicMock()
         mock_repo.get_by_type.return_value = None
-        mock_repo.get.return_value = None
+        mock_repo.get_by_version_and_type.return_value = None
 
+        spec = MagicMock(id="missing")
+        spec.type = "missing"
+        spec.version = "1.0"
         result = ImageOperation.find_existing_image(
-            MagicMock(id="missing"), MagicMock(), mock_repo
+            spec, MagicMock(), mock_repo
         )
         assert result is None
 
@@ -593,16 +598,18 @@ class TestImageOperationHelpers:
         candidate.exists.return_value = False
         images_dir.__truediv__.return_value = candidate
 
+        spec = MagicMock(id="ubuntu-24.04")
+        spec.type = "ubuntu-24.04"
         result = ImageOperation.find_existing_image(
-            MagicMock(id="ubuntu-24.04"), images_dir, mock_repo
+            spec, images_dir, mock_repo
         )
         assert result is None
 
     def test_find_existing_image_falls_back_to_get_by_id(self, mocker):
-        """find_existing_image() falls back to repo.get() when get_by_type returns None."""
+        """find_existing_image() falls back to get_by_version_and_type when get_by_type returns None."""
         mock_repo = MagicMock()
         mock_repo.get_by_type.return_value = None
-        mock_repo.get.return_value = _make_image(
+        mock_repo.get_by_version_and_type.return_value = _make_image(
             "ubuntu-24.04", path="images/ubuntu-24.04.ext4"
         )
         images_dir = MagicMock()
@@ -610,9 +617,12 @@ class TestImageOperationHelpers:
         candidate.exists.return_value = True
         images_dir.__truediv__.return_value = candidate
 
+        spec = MagicMock(id="ubuntu-24.04")
+        spec.type = "ubuntu-24.04"
+        spec.version = "latest"
         result = ImageOperation.find_existing_image(
-            MagicMock(id="ubuntu-24.04"), images_dir, mock_repo
+            spec, images_dir, mock_repo
         )
         assert result is not None
         assert result.type == "ubuntu-24.04"
-        mock_repo.get.assert_called_once_with("ubuntu-24.04")
+        mock_repo.get_by_version_and_type.assert_called_once_with("latest", "ubuntu-24.04")

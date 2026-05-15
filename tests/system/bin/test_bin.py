@@ -246,9 +246,64 @@ class TestBinaryPullAndLifecycle:
         """Set a cached binary as default using bin default <id>."""
         result = _run_mvm(mvm_binary, "bin", "ls", "--json")
         binaries = json.loads(result.stdout)
+
+        # Find a non-default binary to set as default
+        non_default = [
+            b
+            for b in binaries
+            if not b.get("is_default", False)
+            and b.get("is_present")
+            and b.get("name") in ("firecracker",)
+        ]
+
+        # If no non-default firecracker exists, try to pull one
+        if not non_default:
+            remote_result = _run_mvm(
+                mvm_binary, "bin", "ls", "--remote", check=False
+            )
+            if remote_result.returncode == 0:
+                versions = re.findall(
+                    r"\d+\.\d+\.\d+", remote_result.stdout
+                )
+                if versions:
+                    default_version = next(
+                        (
+                            b.get("version")
+                            for b in binaries
+                            if b.get("is_default")
+                        ),
+                        None,
+                    )
+                    for v in versions:
+                        if v == default_version:
+                            continue
+                        pull = _run_mvm(
+                            mvm_binary,
+                            "bin",
+                            "pull",
+                            v,
+                            check=False,
+                            timeout=120,
+                        )
+                        if pull.returncode == 0:
+                            break
+                    # Re-list after pull attempt
+                    result = _run_mvm(mvm_binary, "bin", "ls", "--json")
+                    binaries = json.loads(result.stdout)
+                    non_default = [
+                        b
+                        for b in binaries
+                        if not b.get("is_default", False)
+                        and b.get("is_present")
+                        and b.get("name") in ("firecracker",)
+                    ]
+
         if not binaries:
             pytest.skip("No cached binaries to set as default")
-        target_id = binaries[0]["id"][:6]
+
+        # Use a non-default binary if available, otherwise fall back to any binary
+        target = non_default[0] if non_default else binaries[0]
+        target_id = target["id"][:6]
         result = _run_mvm(mvm_binary, "bin", "default", target_id, check=False)
         if result.returncode != 0:
             pytest.skip(
@@ -281,10 +336,20 @@ class TestBinaryPullAndLifecycle:
                 (b.get("version") for b in binaries if b.get("is_default")),
                 None,
             )
-            target_version = next(
-                (v for v in versions if v != default_version), versions[-1]
-            )
-            _run_mvm(mvm_binary, "bin", "pull", target_version, check=False)
+            # Try multiple versions until one pulls successfully
+            for target_version in versions:
+                if target_version == default_version:
+                    continue
+                pull = _run_mvm(
+                    mvm_binary,
+                    "bin",
+                    "pull",
+                    target_version,
+                    check=False,
+                    timeout=120,
+                )
+                if pull.returncode == 0:
+                    break
 
             result = _run_mvm(mvm_binary, "bin", "ls", "--json")
             binaries = json.loads(result.stdout)
@@ -527,7 +592,7 @@ class TestBinaryStoppedVMDeletion:
                 "--network",
                 module_network,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
             )
 
             vm_ls = _run_mvm(mvm_binary, "vm", "ls", "--json", check=False)

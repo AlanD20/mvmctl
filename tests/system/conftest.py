@@ -64,8 +64,8 @@ def system_cache_dir() -> Path:
 @pytest.fixture(scope="session")
 def timing_targets() -> dict[str, float]:
     return {
-        "alpine-3.21": 10.0,
-        "ubuntu-24.04-minimal": 10.0,
+        "alpine:3.21": 10.0,
+        "ubuntu:24.04": 10.0,
         "ubuntu-24.04": 10.0,
         "archlinux": 10.0,
         "debian-bookworm": 10.0,
@@ -140,40 +140,32 @@ def _ensure_kernel(binary: str) -> None:
             )
 
 
-def _ensure_image(binary: str, image: str = "alpine-3.21") -> None:
+def _ensure_image(binary: str, image: str = "alpine:3.21") -> None:
     """Ensure an image is cached, pulling if needed.
 
-    The *image* parameter should be a full slug like ``"alpine-3.21"``.
-    The production CLI auto-parses slugs into type + version, so stored
-    ``type`` may be the full slug (when OS detection fails) or just the
-    base type (when detection succeeds). We match by prefix so either
-    representation is found.
+    The *image* parameter should be in ``type:version`` format
+    (e.g. ``"alpine:3.21"``, ``"ubuntu:24.04"``).
     """
+    img_type = image.split(":")[0] if ":" in image else image
+    img_version = image.split(":")[1] if ":" in image else None
     r = _run_cmd(binary, ["image", "ls", "--json"], timeout=30)
     if r.returncode != 0:
-        _pull_asset(
-            binary,
-            ["image", "pull", image.split("-")[0], "--version", image.split("-")[1]],
-            f"image '{image}'",
-        )
+        pull_args = ["image", "pull", img_type]
+        if img_version:
+            pull_args.extend(["--version", img_version])
+        _pull_asset(binary, pull_args, f"image '{image}'")
         return
     cached = json.loads(r.stdout) if r.stdout else []
-    base = image.split("-")[0] if "-" in image else image
     matching = [
         i
         for i in cached
-        if i.get("type", "").startswith(base) and i.get("is_present")
+        if i.get("type", "").startswith(img_type) and i.get("is_present")
     ]
     if not matching:
-        if "-" in image:
-            parts = image.split("-", 1)
-            _pull_asset(
-                binary,
-                ["image", "pull", parts[0], "--version", parts[1]],
-                f"image '{image}'",
-            )
-        else:
-            _pull_asset(binary, ["image", "pull", image], f"image '{image}'")
+        pull_args = ["image", "pull", img_type]
+        if img_version:
+            pull_args.extend(["--version", img_version])
+        _pull_asset(binary, pull_args, f"image '{image}'")
         return
 
     # Verify the image file actually exists on disk (DB may be stale)
@@ -451,7 +443,7 @@ def _create_minimal_vm_core(
         "--name",
         vm_name,
         "--image",
-        "alpine-3.21",
+        "alpine:3.21",
         "--network",
         net_name,
         "--no-console",

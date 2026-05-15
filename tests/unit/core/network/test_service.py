@@ -383,6 +383,7 @@ class TestNetworkServiceNat:
             "mvmctl.core._shared._firewall_tracker.FirewallTracker.ensure_rule",
             return_value=mock_result,
         )
+        mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
 
         service = NetworkService(repo)
         with pytest.raises(NetworkError, match="Failed to add MASQUERADE"):
@@ -443,6 +444,7 @@ class TestNetworkServiceNat:
             "mvmctl.core._shared._firewall_tracker.FirewallTracker.remove_rule",
             return_value=MagicMock(success=True),
         )
+        mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
 
         service = NetworkService(repo)
         # Should not raise because force=True
@@ -463,6 +465,7 @@ class TestNetworkServiceNat:
             "mvmctl.core._shared._firewall_tracker.FirewallTracker.remove_rule",
             return_value=MagicMock(success=True),
         )
+        mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
 
         service = NetworkService(repo)
 
@@ -725,6 +728,7 @@ class TestNetworkServiceTapEdgeCases:
             "mvmctl.core._shared._firewall_tracker.FirewallTracker.remove_rule",
             return_value=MagicMock(success=False, error_message="not found"),
         )
+        mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
 
         service = NetworkService(repo)
         service.remove_tap(
@@ -745,6 +749,7 @@ class TestNetworkServiceTapEdgeCases:
             "mvmctl.core._shared._firewall_tracker.FirewallTracker.remove_rule",
             return_value=MagicMock(success=True),
         )
+        mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
         mocker.patch.object(
             NetworkService,
             "remove_raw_tap",
@@ -812,6 +817,7 @@ class TestNetworkServiceNatEdgeCases:
             "mvmctl.core._shared._firewall_tracker.FirewallTracker.remove_rule",
             return_value=MagicMock(success=False, error_message="not found"),
         )
+        mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
 
         service = NetworkService(repo)
         # Should not raise, just log warning
@@ -861,6 +867,7 @@ class TestNetworkServiceNatEdgeCases:
             "mvmctl.core._shared._firewall_tracker.FirewallTracker.remove_rule",
             return_value=MagicMock(success=True),
         )
+        mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
 
         service = NetworkService(repo)
         service.remove_nat(
@@ -1278,6 +1285,7 @@ class TestNetworkServiceReconcileEdgeCases:
             "mvmctl.core._shared._firewall_tracker.FirewallTracker.ensure_rule",
             side_effect=_ensure_rule_side,
         )
+        mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
 
         service = NetworkService(repo)
         with pytest.raises(NetworkError, match="Failed to add FORWARD out"):
@@ -1311,6 +1319,7 @@ class TestNetworkServiceReconcileEdgeCases:
             "mvmctl.core._shared._firewall_tracker.FirewallTracker.ensure_rule",
             side_effect=_ensure_rule_side,
         )
+        mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
 
         service = NetworkService(repo)
         with pytest.raises(NetworkError, match="Failed to add FORWARD in"):

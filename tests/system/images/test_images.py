@@ -22,7 +22,7 @@ def _ensure_alpine_available(mvm_binary: str) -> None:
     and may have removed all images. Re-pull alpine so image tests don't
     skip due to missing cached images.
     """
-    _ensure_image(mvm_binary, "alpine-3.21")
+    _ensure_image(mvm_binary, "alpine:3.21")
 
 
 class TestImagePull:
@@ -41,7 +41,7 @@ class TestImagePull:
             ["alpine", "--version", "3.21"],
             ["ubuntu-minimal", "--version", "24.04"],
         ],
-        ids=["alpine-3.21", "ubuntu-24.04-minimal"],
+        ids=["alpine:3.21", "ubuntu:24.04"],
     )
     def test_image_pull(self, mvm_binary, image_args):
         """Pull each supported image.
@@ -198,7 +198,7 @@ class TestImageWarm:
             mvm_binary,
             "image",
             "warm",
-            "alpine-3.21",
+            "alpine:3.21",
             check=False,
         )
         if result.returncode != 0:
@@ -399,7 +399,7 @@ class TestImagePullAdvanced:
             pytest.skip("Cannot list images")
         images: list[dict[str, Any]] = json.loads(result.stdout)
         alpine_present = any(
-            i.get("type") == "alpine-3.21" and i.get("is_present")
+            i.get("type") == "alpine" and i.get("is_present")
             for i in images
         )
         if not alpine_present:
@@ -428,8 +428,8 @@ class TestImagePullAdvanced:
             assert len(defaults) == 1, (
                 f"Expected exactly 1 default image, got {len(defaults)}"
             )
-            assert defaults[0]["type"] == "alpine-3.21", (
-                f"Expected alpine-3.21 as default, got {defaults[0].get('type')}"
+            assert defaults[0]["type"] == "alpine", (
+                f"Expected alpine:3.21 as default, got {defaults[0].get('type')}"
             )
         finally:
             if original_default_id:
@@ -450,7 +450,7 @@ class TestImagePullAdvanced:
             pytest.skip("Cannot list images")
         images: list[dict[str, Any]] = json.loads(result.stdout)
         alpine_present = any(
-            i.get("type") == "alpine-3.21" and i.get("is_present")
+            i.get("type") == "alpine" and i.get("is_present")
             for i in images
         )
         if not alpine_present:
@@ -475,7 +475,7 @@ class TestImagePullAdvanced:
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         images_after: list[dict[str, Any]] = json.loads(result.stdout)
         alpine_still_present = any(
-            i.get("type") == "alpine-3.21" and i.get("is_present")
+            i.get("type") == "alpine" and i.get("is_present")
             for i in images_after
         )
         assert alpine_still_present, "alpine-3.21 missing after --force pull"
@@ -1522,7 +1522,7 @@ class TestImageDependencyDeletion:
             if ls_result.returncode == 0 and ls_result.stdout.strip():
                 images: list[dict[str, Any]] = json.loads(ls_result.stdout)
                 alpine_present = any(
-                    i.get("type") == "alpine-3.21" and i.get("is_present")
+                    i.get("type") == "alpine" and i.get("is_present")
                     for i in images
                 )
             if not alpine_present:
@@ -1538,7 +1538,7 @@ class TestImageDependencyDeletion:
                     "--name",
                     vm_name,
                     "--image",
-                    "alpine-3.21",
+                    "alpine:3.21",
                     "--network",
                     created_network,
                 )
@@ -1576,7 +1576,7 @@ class TestImageDependencyDeletion:
             if ls_image.returncode == 0 and ls_image.stdout.strip():
                 images_after = json.loads(ls_image.stdout)
                 alpine_after = next(
-                    (i for i in images_after if i.get("type") == "alpine-3.21"),
+                    (i for i in images_after if i.get("type") == "alpine"),
                     None,
                 )
                 assert alpine_after is not None
@@ -1610,7 +1610,7 @@ class TestImageDependencyDeletion:
                     "--name",
                     vm_name,
                     "--image",
-                    "alpine-3.21",
+                    "alpine:3.21",
                     "--network",
                     created_network,
                 )
@@ -1653,7 +1653,7 @@ class TestImageDependencyDeletion:
             if ls_image.returncode == 0 and ls_image.stdout.strip():
                 images_after = json.loads(ls_image.stdout)
                 alpine_after = next(
-                    (i for i in images_after if i.get("type") == "alpine-3.21"),
+                    (i for i in images_after if i.get("type") == "alpine"),
                     None,
                 )
                 assert alpine_after is not None
@@ -1742,7 +1742,7 @@ class TestImageDefaultMigration:
         present_alpine = [
             i
             for i in images
-            if i.get("type") == "alpine-3.21" and i.get("is_present")
+            if i.get("type") == "alpine" and i.get("is_present")
         ]
         if not present_alpine:
             _run_mvm(
@@ -1759,7 +1759,7 @@ class TestImageDefaultMigration:
             present_alpine = [
                 i
                 for i in images
-                if i.get("type") == "alpine-3.21" and i.get("is_present")
+                if i.get("type") == "alpine" and i.get("is_present")
             ]
             if not present_alpine:
                 pytest.skip("alpine-3.21 still not present after pull")
@@ -1793,7 +1793,7 @@ class TestImageDefaultMigration:
             images_after: list[dict[str, Any]] = json.loads(result.stdout)
 
             alpine_after = [
-                i for i in images_after if i.get("type") == "alpine-3.21"
+                i for i in images_after if i.get("type") == "alpine"
             ]
             assert len(alpine_after) >= 1, (
                 "Expected at least one alpine-3.21 record after force re-pull"

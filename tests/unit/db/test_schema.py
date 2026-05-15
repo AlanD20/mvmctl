@@ -109,6 +109,7 @@ class TestColumnStructure:
     IMAGES_COLUMNS = {
         "id": "TEXT",
         "type": "TEXT",
+        "version": "TEXT",
         "name": "TEXT",
         "distro": "TEXT",
         "arch": "TEXT",
@@ -405,13 +406,14 @@ class TestConstraints:
     def test_vm_instances_name_unique(self, conn: sqlite3.Connection) -> None:
         # Insert prerequisites
         conn.execute(
-            "INSERT INTO images (id, type, name, arch, path, fs_type, "
+            "INSERT INTO images (id, type, version, name, arch, path, fs_type, "
             "fs_uuid, original_size, minimum_rootfs_size_mib, pulled_at, "
             "is_default, is_present, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, datetime('now'), datetime('now'))",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, datetime('now'), datetime('now'))",
             (
                 "img1",
                 "ubuntu-24.04",
+                "24.04",
                 "Ubuntu",
                 "x86_64",
                 "/p",
@@ -559,13 +561,14 @@ class TestConstraints:
         self, conn: sqlite3.Connection
     ) -> None:
         conn.execute(
-            "INSERT INTO images (id, type, name, arch, path, fs_type, "
+            "INSERT INTO images (id, type, version, name, arch, path, fs_type, "
             "fs_uuid, original_size, minimum_rootfs_size_mib, pulled_at, "
             "is_default, is_present, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, datetime('now'), datetime('now'))",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, datetime('now'), datetime('now'))",
             (
                 "img1",
                 "ubuntu",
+                "22.04",
                 "Ubuntu",
                 "x86_64",
                 "/p",
@@ -639,13 +642,14 @@ class TestConstraints:
         self, conn: sqlite3.Connection
     ) -> None:
         conn.execute(
-            "INSERT INTO images (id, type, name, arch, path, fs_type, "
+            "INSERT INTO images (id, type, version, name, arch, path, fs_type, "
             "fs_uuid, original_size, minimum_rootfs_size_mib, pulled_at, "
             "is_default, is_present, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, datetime('now'), datetime('now'))",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, datetime('now'), datetime('now'))",
             (
                 "img1",
                 "ubuntu",
+                "22.04",
                 "Ubuntu",
                 "x86_64",
                 "/p",

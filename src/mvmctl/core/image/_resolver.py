@@ -94,7 +94,10 @@ class ImageResolver:
         """Resolve image by ``type:version``, type, display name, or ID prefix."""
         if ":" in value:
             parts = value.split(":", maxsplit=1)
-            return self.by_version_type(parts[1], parts[0])
+            try:
+                return self.by_version_type(parts[1], parts[0])
+            except ImageNotFoundError:
+                value = parts[0]  # Fall back to type-only lookup
 
         try:
             image = self.by_type(value)

@@ -45,13 +45,14 @@ def conn(db: Database) -> sqlite3.Connection:
 def _insert_prerequisites(conn: sqlite3.Connection) -> None:
     """Insert common prerequisite records for VM tests."""
     conn.execute(
-        "INSERT INTO images (id, type, name, arch, path, fs_type, "
+        "INSERT INTO images (id, type, version, name, arch, path, fs_type, "
         "fs_uuid, original_size, minimum_rootfs_size_mib, pulled_at, "
         "is_default, is_present, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, datetime('now'), datetime('now'))",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, datetime('now'), datetime('now'))",
         (
             IMAGE_ID,
             "test-image",
+            "1.0",
             "Test Image",
             "x86_64",
             "/cache/img",

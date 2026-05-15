@@ -230,7 +230,7 @@ class TestNFTablesFirewallBackend:
                 "--name",
                 vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
                 "--ssh-key",
@@ -269,7 +269,7 @@ class TestNFTablesFirewallBackend:
             # ═════════════════════════════════════════════════════════
             # Step 7: SSH into the VM and verify echo
             # ═════════════════════════════════════════════════════════
-            ssh_timeout = timing_targets.get("alpine-3.21", 15.0)
+            ssh_timeout = timing_targets.get("alpine:3.21", 15.0)
             ssh_available = wait_for_ssh(
                 mvm_binary,
                 vm_name,

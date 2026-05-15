@@ -104,3 +104,8 @@ class KernelSpec:
     disabled_configs: list[str] = field(default_factory=list)
     set_val_configs: list[tuple[str, str]] = field(default_factory=list)
     required_settings: list[str] = field(default_factory=list)
+    resolver: str | None = None
+    versions_url: str | None = None
+    options: dict[str, object] | None = None
+    file_pattern: str | None = None
+    file_suffix: str | None = None

@@ -177,7 +177,7 @@ mvm image pull --type debian --version 12
 **Path:** `src/mvmctl/assets/kernels.yaml`
 **Consumed by:** `mvm kernel pull` (build pipeline or direct download)
 
-Defines the default parameters for the official upstream kernel build workflow and the Firecracker CI kernel download workflow.
+Defines the default parameters for the official upstream kernel build workflow and the Firecracker CI kernel download workflow. Supports dynamic version resolution via resolver strategies (like images.yaml).
 
 ### Structure
 
@@ -185,9 +185,11 @@ Defines the default parameters for the official upstream kernel build workflow a
 kernel-official:
   type: official               # kernel type (official or firecracker)
   version: <string>          # kernel version to fetch (e.g. "6.19.9")
-  source: <url>              # tarball URL (can reference {version})
+  resolver: http-dir          # version resolution strategy
+  versions_url: <url>         # URL for listing available kernel versions
+  source: <url>              # tarball URL (can reference {version} and {series})
   sha256: <hex|null>         # expected digest of the tarball, or null
-  sha256_url: <url|null>     # upstream checksum URL (informational)
+  sha256_url: <url|null>     # upstream checksum URL (uses {series} template)
   config_url_template: <url> # URL to fetch the base config from
   config_fragments:          # list of config overlay files or URLs to apply
     - <path_or_url>
@@ -203,10 +205,17 @@ kernel-official:
       value: <string>
   required_settings:         # settings that MUST be =y after build; missing ones trigger a prompt
     - <CONFIG_OPTION=y>
+  options:                   # resolver-specific configuration
+    version_discoveries:     # subdirectory patterns to scan on kernel.org
+      - "v6.x"
+      - "v7.x"
+    file_pattern: <string>  # filename prefix pattern for matching tarball entries
+    file_suffix: <string>   # filename suffix for matching tarball entries
 
 kernel-firecracker:
   type: firecracker
   version: <string>
+  resolver: firecracker-s3    # version resolution strategy
   source: <url>
   list_url_template: <url>   # S3 listing URL template for dynamically resolving the latest binary
   config_url_template: <url> # Optional base config template
@@ -220,6 +229,8 @@ kernel-firecracker:
   disabled_configs: []
   set_val_configs: []
   required_settings: []
+  options:                   # resolver-specific configuration
+    s3_version_pattern: <regex> # regex for extracting version strings from S3 listing keys
 ```
 
 ### Field reference
@@ -228,6 +239,8 @@ kernel-firecracker:
 |-------|-------------|
 | `type` | Whether this entry represents an `official` (built from source) or `firecracker` (pre-built) kernel. |
 | `version` | Kernel version string. Overridden by `--version` on the CLI. |
+| `resolver` | Version resolution strategy: `http-dir` for kernel.org directory listings, `firecracker-s3` for Firecracker CI S3 bucket. When set, the kernel supports dynamic version listing and `type:version` shorthand. |
+| `versions_url` | URL template for listing available kernel versions (`http-dir` resolver only). |
 | `source` | Tarball download URL or S3 base URL. |
 | `list_url_template` | S3 listing URL template for Firecracker CI kernels; placeholders: `{ci_version}`, `{arch}`, `{version}`. |
 | `config_url_template` | URL template to download the base `.config` file. |
@@ -240,6 +253,10 @@ kernel-firecracker:
 | `disabled_configs` | List of kernel `CONFIG_*` options passed to `scripts/config --disable`. |
 | `set_val_configs` | List of `{option, value}` pairs passed to `scripts/config --set-val`. |
 | `required_settings` | List of `CONFIG_OPTION=y` strings that must be present in `.config` after the build. |
+| `options.version_discoveries` | List of subdirectory patterns to scan on kernel.org (e.g. `v6.x`, `v7.x`) for version discovery. |
+| `options.file_pattern` | Filename prefix pattern for matching tarball entries (e.g. `linux-`). |
+| `options.file_suffix` | Filename suffix for matching tarball entries (e.g. `.tar.xz`). |
+| `options.s3_version_pattern` | Regex pattern for extracting version strings from S3 listing keys (`firecracker-s3` resolver only). |
 
 ---
 

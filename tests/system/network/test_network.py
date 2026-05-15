@@ -814,7 +814,7 @@ class TestNetworkVMDependency:
                 "--name",
                 vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )
@@ -857,7 +857,7 @@ class TestNetworkVMDependency:
                 "--name",
                 vm_name,
                 "--image",
-                "alpine-3.21",
+                "alpine:3.21",
                 "--network",
                 net_name,
             )

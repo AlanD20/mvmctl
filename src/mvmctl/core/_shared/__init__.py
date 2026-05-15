@@ -22,6 +22,10 @@ if TYPE_CHECKING:
     from mvmctl.core._shared._db import Database
     from mvmctl.core._shared._enrichment import RelationEnricher, RelationSpec
     from mvmctl.core._shared._firewall_tracker import FirewallTracker
+    from mvmctl.core._shared._http_dir_version_resolver import (
+        HttpDirVersionResolver,
+        VersionInfo,
+    )
     from mvmctl.core._shared._iptables_tracker import (
         IPTablesRuleRepository,
         IPTablesRuleResolver,
@@ -37,6 +41,7 @@ __all__ = [
     "FirewallRuleResult",
     "FirewallTracker",
     "get_resolver",
+    "HttpDirVersionResolver",
     "IPTablesRuleRepository",
     "IPTablesRuleResolver",
     "IPTablesTracker",
@@ -44,6 +49,7 @@ __all__ = [
     "register",
     "RelationEnricher",
     "RelationSpec",
+    "VersionInfo",
 ]
 
 _LAZY_MAP = {
@@ -68,7 +74,15 @@ _LAZY_MAP = {
         "mvmctl.core._shared._iptables_tracker._tracker",
         "IPTablesTracker",
     ),
+    "HttpDirVersionResolver": (
+        "mvmctl.core._shared._http_dir_version_resolver",
+        "HttpDirVersionResolver",
+    ),
     "ParallelExecutor": ("mvmctl.core._shared._parallel", "ParallelExecutor"),
+    "VersionInfo": (
+        "mvmctl.core._shared._http_dir_version_resolver",
+        "VersionInfo",
+    ),
     "get_resolver": ("mvmctl.core._shared._resolver_registry", "get"),
     "register": ("mvmctl.core._shared._resolver_registry", "register"),
 }
