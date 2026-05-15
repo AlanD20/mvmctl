@@ -245,7 +245,7 @@ class ImageService:
                 image_id,
                 exc_info=True,
             )
-        image_type = detected_os or spec.id
+        image_type = detected_os or spec.type
         image_name = f"{image_type} (imported)"
 
         if skip_optimization:
@@ -254,6 +254,7 @@ class ImageService:
             return ImageItem(
                 id=image_id,
                 type=image_type,
+                version=spec.version,
                 name=image_name,
                 arch=spec.arch,
                 path=str(image_path.name),
@@ -352,7 +353,8 @@ class ImageService:
 
         return ImageItem(
             id=image_id,
-            type=spec.id,
+            type=spec.type,
+            version=spec.version,
             name=spec.name,
             arch=spec.arch,
             distro=distro,
@@ -499,6 +501,7 @@ class ImageService:
         version: str | None,
         arch: str,
         cache_ttl_seconds: int | None = None,
+        ci_version: str | None = None,
     ) -> list[ImageSpec]:
         """
         Resolve ImageSpecs from ``image_types:`` config by type identifiers.
@@ -523,6 +526,9 @@ class ImageService:
             arch: Target architecture filter.
             cache_ttl_seconds: TTL in seconds for HTTP response caching.
                 ``None`` (default) means no caching.
+            ci_version: Firecracker CI version for ``firecracker-s3`` types.
+                Passed through to ``construct_spec_from_type_config``.
+                ``None`` (default) means no CI version override.
 
         Returns:
             List of matching ImageSpecs.
@@ -557,6 +563,7 @@ class ImageService:
                     config=config,
                     version=version,
                     arch=arch,
+                    ci_version=ci_version,
                 )
                 results.append(spec)
                 remaining.remove(type_)
@@ -591,8 +598,7 @@ class ImageService:
 
                 results.append(
                     ImageSpec(
-                        id=f"{v.type}-{v.version}",
-                        image_type=v.type,
+                        type=v.type,
                         version=v.version,
                         name=f"{v.type} {v.version}",
                         source=v.download_url,
@@ -1014,7 +1020,7 @@ class ImageService:
                             {
                                 "ci_version": ci_version,
                                 "arch": spec.arch,
-                                "image_type": spec.image_type,
+                                "image_type": spec.type,
                                 "version": spec.version,
                                 "image_version": spec.version,
                                 "ubuntu_version": spec.version,
@@ -1154,8 +1160,7 @@ class ImageService:
             name = f"{config_name} {version}".strip()
 
         return ImageSpec(
-            id=f"{type_name}-{version}",
-            image_type=type_name,
+            type=type_name,
             version=version,
             name=name,
             source=source,
@@ -1437,7 +1442,7 @@ class ImageService:
         variables = {
             "ci_version": ci_version,
             "arch": spec.arch,
-            "image_type": spec.image_type,
+            "image_type": spec.type,
             "version": spec.version,
             "image_version": spec.version,
             "ubuntu_version": spec.version,
@@ -1451,7 +1456,7 @@ class ImageService:
         """Resolve source URL by fetching and parsing CI image list."""
         if not spec.list_url_template:
             raise ImageError(
-                f"Missing 'list_url_template' in images.yaml for {spec.id}"
+                f"Missing 'list_url_template' in images.yaml for {spec.type}:{spec.version}"
             )
 
         list_url = render_template(spec.list_url_template, template_vars)

@@ -1,6 +1,5 @@
 # Image type catalog — used by the version listing system (mvm image pull --type)
 # =============================================================================
-
 image_types:
   - type: ubuntu
     name: "Ubuntu LTS"
@@ -24,7 +23,6 @@ image_types:
       arch_mapping:
         x86_64: "amd64"
         aarch64: "arm64"
-
   - type: ubuntu-minimal
     name: "Ubuntu Minimal"
     resolver: http-dir
@@ -42,7 +40,6 @@ image_types:
       arch_mapping:
         x86_64: "amd64"
         aarch64: "arm64"
-
   - type: debian
     name: "Debian"
     resolver: http-dir
@@ -62,7 +59,6 @@ image_types:
       arch_mapping:
         x86_64: "amd64"
         aarch64: "arm64"
-
   - type: alpine
     name: "Alpine Linux"
     resolver: http-dir
@@ -84,7 +80,6 @@ image_types:
         pattern: "aws_alpine"
         suffix: "-bios-cloudinit-r"
         sha256_suffix: ".sha512"
-
   - type: archlinux
     name: "Arch Linux"
     resolver: null
@@ -94,7 +89,6 @@ image_types:
     sha256_url: "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-{arch}-cloudimg.qcow2.SHA256"
     format: qcow2
     options: {}
-
   - type: firecracker
     name: "Firecracker CI Ubuntu"
     resolver: firecracker-s3

@@ -53,6 +53,20 @@ class ImageRepository:
         return ImageItem(**dict(row))
 
     @_graceful_read(default=None)
+    def get_by_version_and_type(
+        self, version: str, type: str
+    ) -> ImageItem | None:
+        """Return an image by its version and type, or None if not found."""
+        with self._db.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM images WHERE version = ? AND type = ? AND deleted_at IS NULL AND is_present = 1 LIMIT 1",
+                (version, type),
+            ).fetchone()
+        if row is None:
+            return None
+        return ImageItem(**dict(row))
+
+    @_graceful_read(default=None)
     def get_by_name(self, name: str) -> ImageItem | None:
         """Return an image by its display name (name), or None if not found.
 
@@ -84,12 +98,13 @@ class ImageRepository:
             conn.execute(
                 """
                 INSERT INTO images (
-                    id, type, name, distro, arch, path, fs_type, fs_uuid,
+                    id, type, version, name, distro, arch, path, fs_type, fs_uuid,
                     compressed_size, original_size, compression_ratio,
                     compressed_format, minimum_rootfs_size_mib, pulled_at, is_default, is_present, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     type = excluded.type,
+                    version = excluded.version,
                     name = excluded.name,
                     distro = excluded.distro,
                     arch = excluded.arch,
@@ -109,6 +124,7 @@ class ImageRepository:
                 (
                     image.id,
                     image.type,
+                    image.version,
                     image.name,
                     image.distro,
                     image.arch,

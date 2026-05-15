@@ -60,6 +60,15 @@ class ImageResolver:
             raise ImageNotFoundError(f"Image ID is ambiguous: {image_id!r}")
         return self.enrich(matches)[0]
 
+    def by_version_type(self, version: str, type: str) -> ImageItem:
+        """Resolve by version and type (both required)."""
+        db_image = self._repo.get_by_version_and_type(version, type)
+        if db_image is None:
+            raise ImageNotFoundError(
+                f"Image not found: version={version!r}, type={type!r}"
+            )
+        return self.enrich([db_image])[0]
+
     def by_type(self, type: str) -> ImageItem:
         """Resolve by image type."""
         db_image = self._repo.get_by_type(type)
@@ -82,7 +91,11 @@ class ImageResolver:
         return self.enrich([db_image])[0]
 
     def resolve(self, value: str) -> ImageItem:
-        """Resolve image by type, display name, or ID prefix."""
+        """Resolve image by ``type:version``, type, display name, or ID prefix."""
+        if ":" in value:
+            parts = value.split(":", maxsplit=1)
+            return self.by_version_type(parts[1], parts[0])
+
         try:
             image = self.by_type(value)
         except ImageNotFoundError:

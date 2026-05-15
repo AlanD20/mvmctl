@@ -8,6 +8,7 @@
 CREATE TABLE images (
     id TEXT PRIMARY KEY,
     type TEXT NOT NULL,
+    version TEXT NOT NULL,
     name TEXT NOT NULL,
     distro TEXT NULL,
     arch TEXT NOT NULL,

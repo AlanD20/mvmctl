@@ -29,6 +29,7 @@ class ImageItem:
     pulled_at: str
     created_at: str
     updated_at: str
+    version: str = ""
 
     distro: str | None = None
     fs_uuid: str | None = None
@@ -45,8 +46,7 @@ class ImageItem:
 
 @dataclass
 class ImageSpec:
-    id: str
-    image_type: str
+    type: str
     version: str
     name: str
     source: str

@@ -164,10 +164,11 @@ class ImageOperation:
             inputs.version,
             resolved.arch,
             cache_ttl_seconds=cache_ttl,
+            ci_version=resolved_ci_version,
         )[0]
 
         # Single query for both early-return check and cleanup
-        existing_image = repo.get_by_type(spec.id)
+        existing_image = repo.get_by_type(spec.type)
 
         # Early return if image exists and not forcing re-fetch
         if not resolved.force and existing_image is not None:
@@ -186,7 +187,9 @@ class ImageOperation:
 
         # Generate image ID
         timestamp = datetime.now(tz=UTC).isoformat()
-        image_id = HashGenerator.image(spec.id, spec.source, timestamp)
+        image_id = HashGenerator.image(
+            f"{spec.type}:{spec.version}", spec.source, timestamp
+        )
         image_service = ImageService(repo)
 
         # ORCHESTRATION: download → extract → optimize
@@ -272,7 +275,7 @@ class ImageOperation:
                 logger.info(
                     "Cleaned up %d old image file(s) for %s",
                     len(removed),
-                    spec.id,
+                    spec.type,
                 )
 
         msg = "Image pulled successfully"
@@ -323,8 +326,7 @@ class ImageOperation:
 
         # Build temporary spec for processing pipeline
         spec = ImageSpec(
-            id=resolved.type,
-            image_type=resolved.type,
+            type=resolved.type,
             version="",
             name=resolved.name or resolved.type,
             arch=resolved.arch,
@@ -352,7 +354,7 @@ class ImageOperation:
         # Generate image ID
         timestamp = datetime.now(tz=UTC).isoformat()
         image_id = HashGenerator.image(
-            spec.id, str(resolved.source_path), timestamp
+            f"{spec.type}:{spec.version}", str(resolved.source_path), timestamp
         )
         image_service = ImageService(repo)
 
@@ -800,9 +802,9 @@ class ImageOperation:
             The existing ImageItem if found on disk, otherwise None.
 
         """
-        item = repo.get_by_type(spec.id)
-        if item is None:
-            item = repo.get(spec.id)
+        item = repo.get_by_type(spec.type)
+        if item is None and spec.version:
+            item = repo.get_by_version_and_type(spec.version, spec.type)
 
         if item is not None and item.path:
             candidate = images_dir / item.path

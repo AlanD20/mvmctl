@@ -219,7 +219,7 @@ def _list_local_images(images: list[ImageItem], *, json_output: bool) -> None:
 def image_pull(
     image_selector: str = typer.Argument(
         ...,
-        help="Image ID or image type from 'mvm image ls --remote' (e.g. ubuntu-24.04 or ubuntu)",
+        help="Image ID or image type from 'mvm image ls --remote' (e.g. ubuntu:24.04 or ubuntu)",
         autocompletion=_complete_remote_image_ids,
     ),
     image_type: str | None = typer.Option(
@@ -266,9 +266,17 @@ def image_pull(
         else []
     )
 
+    # Parse ``type:version`` syntax (e.g. ``alpine:3.21``)
+    effective_type: str = image_type or image_selector
+    effective_version: str | None = version
+    if image_type is None and ":" in image_selector:
+        parts = image_selector.split(":", maxsplit=1)
+        effective_type = parts[0]
+        effective_version = parts[1]
+
     pull_input = ImagePullInput(
-        type=image_type or image_selector,
-        version=version,
+        type=effective_type,
+        version=effective_version,
         arch=arch,
         force=force,
         no_cache=no_cache,
