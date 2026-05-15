@@ -65,6 +65,8 @@ never modify production code under `src/mvmctl/`. You may modify test-related
 configuration files outside `tests/` (e.g., `pyproject.toml` for markers or
 coverage settings) when needed.
 
+For understanding architectural decisions behind the tested functionality, consult `docs/adr/` — Architecture Decision Records.
+
 ## CRITICAL RULE: NEVER RUN THE FULL TEST SUITE FOR ROUTINE FIXES
 
 **This is enforced. Violation wastes 100+ seconds of compute and is unacceptable.**
@@ -275,7 +277,7 @@ Key markers include:
 - ``kernel_build`` — kernel build from source (excluded from default run)
 - ``host_reset`` — host reset/clean with sudo (excluded from default run)
 
-Run ``grep "^markers" pyproject.toml`` to see the full list.
+Run ``grep -A 50 "^markers" pyproject.toml | head -50`` to see the full list.
 
 ### Non-Destructive Before Destructive
 

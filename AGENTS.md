@@ -6,7 +6,7 @@
 
 ## Where to find context
 
-This is the **only** AGENTS.md in the project. Per-folder AGENTS.md files have been removed — they caused agents to skip this file and miss the two primary context sources:
+This is the **only** AGENTS.md in the project. Per-folder AGENTS.md files in active source directories have been removed (the `legacy/` directory may still contain archived copies) — they caused agents to skip this file and miss the two primary context sources:
 
 1. **`CONTEXT.md`** — Domain language, conventions, patterns, and architecture rules. Start here for every task.
 2. **`docs/adr/`** — Architecture Decision Records for hard-to-reverse decisions made with real trade-offs.

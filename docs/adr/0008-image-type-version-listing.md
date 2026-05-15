@@ -27,5 +27,5 @@ Initially we considered a separate resolver class per provider (e.g., `UbuntuStr
 
 - Adding a new image type requires only YAML changes unless the provider uses a non-HTTP-listing format.
 - `ImageService.get_specs_for()` and its callers need updating to support the new resolution path.
-- `ImageVersion` becomes the canonical representation of a downloadable image — `ImageSpec` (the old config-backed model) will be phased out once migration is complete.
+- `ImageVersion` is the canonical representation of a downloadable image. Both `ImageSpec` (the config-backed model, used for image type definitions in YAML) and `ImageVersion` (returned by version resolvers) remain in active, coexisting use — the planned phase-out of `ImageSpec` has not been completed.
 - Alpine needs a secondary fetch to discover the full patch version from the `releases/cloud/` directory listing (the directory is `v3.21` but filenames contain `3.21.4`). This is handled transparently inside `HttpDirVersionResolver`.

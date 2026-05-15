@@ -21,7 +21,7 @@ These binaries are required for basic operations like managing VMs, networking, 
 | `lsmod` | Kernel | Checking for KVM module status | `kmod` | `kmod` |
 | `modprobe` | Kernel | Loading required KVM modules | `kmod` | `kmod` |
 | `dumpe2fs` | Filesystem | Filesystem inspection (image import) | `e2fsprogs` | `e2fsprogs` |
-| `iptables-save` | Network | Persisting iptables rules for reboot survival | `iptables` | `iptables` |
+| `iptables-save` | Network | Persisting iptables rules for reboot survival (optional — only used when available) | `iptables` | `iptables` |
 | `mvm-provision` | Provisioning | Loop-mount rootfs provisioning (symlink to combined multidist binary `mvm-services`) | Managed via `mvm init` | Managed via `mvm init` |
 | `mvm-console-relay` | Provisioning | PTY-over-vsock console relay service (symlink to `mvm-services`) | Managed via `mvm init` | Managed via `mvm init` |
 | `mvm-nocloud-server` | Provisioning | NoCloud-net metadata/IPv4 HTTP server (symlink to `mvm-services`) | Managed via `mvm init` | Managed via `mvm init` |
@@ -42,6 +42,9 @@ These binaries are required for importing images, converting formats, and genera
 | `mount` | Image | Mounting images for rootfs extraction | `util-linux` | `util-linux` |
 | `umount` | Image | Unmounting images | `util-linux` | `util-linux` |
 | `truncate` | Image | Creating sparse files for new images | `coreutils` | `coreutils` |
+| `dd` | Image | Raw block-level file copy (`ImageService._copy_with_dd()`) | `coreutils` | `coreutils` |
+| `du` | Image | Disk usage reporting (`ImageService.create_ext4_from_tar()`) | `coreutils` | `coreutils` |
+| `chmod` | System | Changing file permissions (used extensively across all domains) | `coreutils` | `coreutils` |
 | `mkfs.ext4` | Image | Formatting extracted rootfs images | `e2fsprogs` | `e2fsprogs` |
 | `unsquashfs` | Image | Extracting rootfs from SquashFS images | `squashfs-tools` | `squashfs-tools` |
 | `tar` | Archive | Extracting rootfs from tarballs | `tar` | `tar` |
@@ -211,7 +214,7 @@ This section maps specific `mvm` commands to the external binaries they invoke.
 
 | Command Group | Command(s) | Required Binaries |
 | :--- | :--- | :--- |
-| **`mvm host`** | `init` | `sudo`, `groupadd`, `usermod`, `visudo`, `sysctl`, `ip`, `iptables`, `iptables-save`, `lsmod`, `modprobe`, `nft` |
+| **`mvm host`** | `init` | `sudo`, `groupadd`, `usermod`, `visudo`, `sysctl`, `ip`, `iptables`, `lsmod`, `modprobe`, `nft` (+ `iptables-save` for reboot persistence, optional) |
 | | `ls` | (Internal Python logic) |
 | | `clean` | `sudo`, `ip`, `iptables` |
 | | `reset` | `sudo`, `groupdel`, `sysctl` |

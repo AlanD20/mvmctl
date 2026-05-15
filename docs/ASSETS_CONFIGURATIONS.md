@@ -9,12 +9,10 @@ database (`~/.cache/mvmctl/mvmdb.db`), runtime config (`~/.config/mvmctl/config.
 and `MVM_*` environment variables, not by editing these files directly.
 
 The asset YAML files are:
-- `images.yaml` — catalogue of downloadable rootfs images
+- `images.yaml` — catalogue of image types with version resolvers
 - `kernels.yaml` — kernel build/download specifications
 - `cloud-init.template.yaml` — template for cloud-init user-data
 - `firecracker.template.json` — template for Firecracker VM JSON configuration
-
-Images and kernels remain as `images.yaml` and `kernels.yaml` respectively.
 
 ---
 
@@ -32,101 +30,142 @@ Images and kernels remain as `images.yaml` and `kernels.yaml` respectively.
 ## images.yaml
 
 **Path:** `src/mvmctl/assets/images.yaml`
-**Consumed by:** `mvm image pull`, `mvm image ls --remote`, `core.image._service.ImageService`
+**Consumed by:** `mvm image pull`, `mvm image ls --remote`, `ImageService.get_specs_for()`, `ImageService.load_image_types_config()`
 
-Defines the catalogue of rootfs images available via `mvm image pull <id>`.
+Defines the catalogue of image types available via `mvm image pull --type <type>`. Unlike a flat list of versioned images, this file defines **image type templates** with version resolvers. A specific version is selected at fetch time based on the upstream directory listing or explicit `--version` flag.
 
 ### Structure
 
+The file uses a single top-level key `image_types` containing an ordered list of type definitions:
+
 ```yaml
-images:
-  - id: <string>            # unique identifier used on the CLI
-    type: <string>          # OS family (ubuntu, debian, alpine, etc.)
-    version: <string>       # OS version string
-    name: <string>          # human-readable display name
-    source: <url>           # download URL; may be a template (see below)
-    format: <string>        # source file format (see Format types)
-    sha256: <hex|null>      # expected SHA-256 of the downloaded file, or null
-    sha256_url: <url|null>  # (informational) upstream checksum URL
-    list_url_template: <url|null>  # S3 listing template (for template sources only)
+image_types:
+  - type: <string>              # OS family identifier (ubuntu, debian, alpine, etc.)
+    name: <string>              # human-readable display name
+    resolver: <string|null>     # resolution strategy: "http-dir", "firecracker-s3", or null
+    version_name_template: <str># Jinja2-like template for display name
+    versions_url: <url|null>    # URL to fetch directory listing from (http-dir resolver)
+    download_url: <url>         # download URL template; placeholders: {version}, {codename}, {arch}
+    sha256_url: <url|null>      # upstream checksum URL template, or null
+    format: <string>            # source file format (see Format types)
+    list_url_template: <url|null> # S3 listing URL template (firecracker-s3 resolver only)
+    options:                    # resolver-specific configuration
+      skip_patterns: [...]      # strings to filter out from directory listings
+      codename_mapping: {...}   # codename → version mapping (e.g. noble → 24.04)
+      arch_mapping: {...}       # mvm arch → upstream arch mapping (e.g. x86_64 → amd64)
+      version_prefix: <string>  # prefix to add to version for URL construction (e.g. "v")
+      file_discovery:           # configuration for dynamic filename resolution
+        enabled: <bool>
+        pattern: <string>       # glob-style filename pattern to match
+        suffix: <string>        # expected filename suffix
+        sha256_suffix: <string> # checksum file suffix (e.g. ".sha512")
 ```
+
+### Resolver strategies
+
+| `resolver` | Description | Example |
+|------------|-------------|---------|
+| `http-dir` | Fetches an HTML directory listing from `versions_url`, parses version directories, and selects the latest (or requested) version. Supports codename → version and arch mappings. | `ubuntu`, `debian`, `alpine` |
+| `firecracker-s3` | Uses S3 XML listing (`list_url_template`) to discover versions for a given CI version and architecture. | `firecracker` |
+| `null` / `""` | Single-source type with a fixed download URL. No version resolution — always uses `"latest"` as the version. | `archlinux` |
 
 ### Field reference
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `id` | ✅ | Short identifier used on the CLI (`mvm image pull <id>`). Must be unique across all entries. |
+| `type` | ✅ | Short identifier used on the CLI (`mvm image pull --type <type>`). Must be unique. |
 | `name` | ✅ | Human-readable label shown in `mvm image ls`. |
-| `source` | ✅ | Download URL. Either a concrete URL or a **template URL** (see [Template sources](#template-sources)). |
+| `resolver` | — | Resolution strategy. `"http-dir"` fetches directory listings, `"firecracker-s3"` uses S3 XML listings, `null` means a fixed single-source URL. |
+| `version_name_template` | — | Jinja2-like template for the display name (variables: `{version}`, `{codename}`, `{type}`, `{ci_version}`). |
+| `versions_url` | ✅ (http-dir) | URL to fetch the directory listing from. |
+| `download_url` | ✅ | URL template for the actual image file. Supports `{version}`, `{codename}`, `{arch}`, `{ci_version}`, and type-specific variables. |
+| `sha256_url` | — | URL template for the SHA-256 checksum file. May be `null` when checksums are not available or handled differently. |
 | `format` | ✅ | Format of the downloaded file. See [Format types](#format-types). |
-| `type` | — | OS family / distribution type (`ubuntu`, `debian`, `alpine`, `archlinux`, `firecracker`). |
-| `version` | — | OS version string (`24.04`, `12`, `3.21`, `latest`). |
-| `sha256` | — | Exact SHA-256 hex digest of the downloaded file. When `null`, the checksum is fetched from `sha256_url`. When set, the download is rejected if the digest does not match. |
-| `sha256_url` | — | Upstream checksum URL. When `sha256` is `null`, the fetch logic downloads this file to extract the matching digest. |
-| `list_url_template` | — | S3 listing URL template for template-based sources (see [Template sources](#template-sources)). |
+| `list_url_template` | — | S3 XML listing URL template for `firecracker-s3` resolver. Placeholders: `{ci_version}`, `{arch}`, `{version}`. |
+| `options` | — | Resolver-specific configuration (see [Options reference](#options-reference)). |
+
+### Options reference
+
+| Option | Used by | Description |
+|--------|---------|-------------|
+| `skip_patterns` | http-dir | List of substrings that cause a directory entry to be ignored (e.g. `"Parent Directory"`, `"edge"`). |
+| `codename_mapping` | http-dir | Maps upstream codenames to mvm version strings. The reverse mapping (version → codename) is used to construct download URLs. |
+| `arch_mapping` | http-dir, single-source | Maps mvm architecture names (e.g. `x86_64`, `aarch64`) to upstream architecture names (e.g. `amd64`, `arm64`). |
+| `version_prefix` | http-dir | String prepended to the version when constructing directory URLs (e.g. Alpine uses `"v"` → `v3.21`). |
+| `file_discovery.enabled` | http-dir | When `true`, the resolver does not use a fixed download URL. Instead it fetches the directory listing at `download_url` and searches for filenames matching `pattern` + `suffix`. |
+| `file_discovery.pattern` | file_discovery | Filename prefix pattern to match when scanning directory listings. |
+| `file_discovery.suffix` | file_discovery | Filename suffix to match (e.g. `"-bios-cloudinit-r"`). |
+| `file_discovery.sha256_suffix` | file_discovery | Checksum file suffix for file-discovery types (e.g. `".sha512"` for Alpine). |
 
 ### SHA-256 semantics
 
-```
-sha256: <hex>    → download verified against this exact digest
-sha256: null     → checksum fetched from `sha256_url` (sidecar file)
-```
+SHA-256 checksum resolution differs per image type:
 
-Setting `sha256: null` requires a valid `sha256_url` field. The fetch logic will
-download the checksum file and extract the matching digest for the downloaded asset.
+- **Ubuntu / Debian / Arch**: `sha256_url` template resolves to an upstream SHA256SUMS file. The fetch logic downloads the checksum file and extracts the matching digest for the downloaded filename.
+- **Alpine**: `sha256_url` is `null`; the `file_discovery.sha256_suffix` (`.sha512`) is appended to the discovered filename. Alpine provides SHA-512 rather than SHA-256 checksums.
+- **Firecracker CI**: `sha256_url` is `null`. No upstream checksum is published for Firecracker CI S3 assets. The download proceeds without checksum verification.
 
 ### Format types
 
 | `format` value | Source file | Conversion |
 |----------------|-------------|------------|
 | `qcow2` | QEMU copy-on-write v2 image | `qemu-img convert` → raw → root partition extracted |
-| `tar-rootfs` | Tar archive of a root filesystem | `mkfs.ext4` + `tar -xf` into a fresh image |
+| `tar-rootfs` | Tar archive of a root filesystem | `mkfs.ext4 -d` + `tar -xf` into a fresh image |
 | `raw` | Raw disk image | Root partition extracted directly |
 | `squashfs` | SquashFS filesystem image | `unsquashfs` → `mkfs.ext4 -d` |
-| `vhd` | Microsoft VHD image | `qemu-img convert` → raw → root partition extracted |
+| `vhd` | Microsoft VHD image | `qemu-img convert` (as vpc) → raw → root partition extracted |
+| `vhdx` | Microsoft VHDX image | `qemu-img convert` (as vhdx) → raw → root partition extracted |
 
-### Template sources
+### Template sources & version resolution
 
-When the `source` URL contains `{…}` placeholder tokens, `mvm` treats it as a
-**template** and resolves it dynamically at fetch time instead of downloading it
-directly.
+URL templates use `{placeholder}` syntax resolved at fetch time. Variables include:
 
-```yaml
-source: "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/{ci_version}/{arch}/ubuntu-24.04.squashfs"
-```
+| Variable | Source | Description |
+|----------|--------|-------------|
+| `{version}` | CLI flag `--version` or version resolver | OS version (e.g. `24.04`, `12`) |
+| `{codename}` | Reverse lookup from `codename_mapping` | Upstream codename (e.g. `noble`, `bookworm`) |
+| `{arch}` | CLI flag `--arch` or detected host arch | Target architecture (mapped via `arch_mapping`) |
+| `{ci_version}` | Default firecracker CI version | Firecracker CI version (e.g. `v1.15`) |
 
-Resolution works as follows:
+**Resolution flow** (`ImageService.construct_spec_from_type_config()`):
 
-1. The active Firecracker CI version is read from the default binary entry in
-   the SQLite database (`mvmdb.db`), falling back to
-   `DEFAULT_FIRECRACKER_CI_VERSION` (standalone constant in `constants.py`).
-2. The host architecture is detected via `platform.machine()`, falling back to
-   `defaults.kernel.arch` in `OVERRIDABLE_DEFAULTS`.
-3. The `list_url_template` field in the image's YAML entry is queried to list all
-   matching S3 objects for that version and architecture.
-4. The latest matching entry (lexicographic sort) is selected as the concrete download
-   URL, combining the S3 base with the key from the listing.
+1. If `resolver` is `null` (single-source): version is always `"latest"`, templates render directly.
+2. If `resolver` is `http-dir` with explicit `--version`: builds URLs directly from templates (no HTTP fetch) if the type has no `file_discovery`. Otherwise fetches the directory listing.
+3. If `resolver` is `http-dir` without explicit version or with `file_discovery`: fetches the `versions_url` directory listing via `HttpDirVersionResolver`, picks the latest version (or matching version), and renders templates.
+4. If `resolver` is `firecracker-s3`: uses S3 XML listing via `list_url_template` to discover available kernel versions for the `ci_version` and `arch`. The latest version (by semver) is selected.
 
-Any image entry whose `source` contains `{` triggers this path automatically — no
-special `id` value or `format` is required.
+### Current image types
 
-### Current images
+The actual YAML (`src/mvmctl/assets/images.yaml`) currently defines 6 image types:
 
-The actual YAML (`src/mvmctl/assets/images.yaml`) currently defines 7 images:
+| Type | Name | Format | Resolver | Versions |
+|------|------|--------|----------|----------|
+| `ubuntu` | Ubuntu LTS | `tar-rootfs` | http-dir | 20.04 (focal), 22.04 (jammy), 24.04 (noble), 26.04 (resolute) |
+| `ubuntu-minimal` | Ubuntu Minimal | `tar-rootfs` | http-dir | 20.04 (focal), 22.04 (jammy), 24.04 (noble), 26.04 (resolute) |
+| `debian` | Debian | `qcow2` | http-dir | 11 (bullseye), 12 (bookworm), 13 (trixie) |
+| `alpine` | Alpine Linux | `vhd` | http-dir | Dynamic — discovers version directories upstream |
+| `archlinux` | Arch Linux | `qcow2` | (null — single source) | `latest` |
+| `firecracker` | Firecracker CI Ubuntu | `squashfs` | firecracker-s3 | Dynamic — resolves via S3 listing |
 
-| ID | Name | Format | Type |
-|----|------|--------|------|
-| `ubuntu-24.04` | Ubuntu 24.04 LTS (Noble) | `tar-rootfs` | ubuntu |
-| `ubuntu-24.04-minimal` | Ubuntu 24.04 Minimal | `tar-rootfs` | — |
-| `ubuntu-22.04` | Ubuntu 22.04 LTS (Jammy) | `tar-rootfs` | ubuntu |
-| `archlinux` | Arch Linux | `qcow2` | archlinux |
-| `debian-bookworm` | Debian 12 (Bookworm) | `qcow2` | debian |
-| `ubuntu-fc` | Ubuntu (Firecracker CI) | `squashfs` | firecracker |
-| `alpine-3.21` | Alpine Linux 3.21 | `vhd` | alpine |
-
-> **Note:** `alpine-3.21` is the only image whose `sha256_url` points to a `.sha512` file rather than `.sha256` (Alpine upstream provides SHA-512 checksums). The fetch logic handles this transparently — see the field reference above.
+> **Note:** `alpine` is the only type using `file_discovery` — it discovers the exact filename from an Alpine cloud directory listing rather than using a fixed download URL. It also uses `.sha512` checksums (Alpine upstream provides SHA-512).
 >
-> **Note:** `ubuntu-fc` has `sha256_url: null` (no upstream checksum file). This is an exception — the image is fetched from a Firecracker CI S3 bucket that does not publish sidecar checksums. Dynamic S3 resolution is used instead.
+> **Note:** `firecracker` has `sha256_url: null` (no upstream checksum file). The image is fetched from a Firecracker CI S3 bucket that does not publish sidecar checksums.
+
+### Using image types on the CLI
+
+```bash
+# List all available remote image types
+mvm image ls --remote
+
+# Pull the latest Ubuntu 24.04
+mvm image pull --type ubuntu
+
+# Pull a specific version
+mvm image pull --type ubuntu --version 24.04
+
+# Pull a Debian image
+mvm image pull --type debian --version 12
+```
 
 ---
 
@@ -259,46 +298,51 @@ source, add it to `images.yaml` and reinstall, or use `mvm image import` for loc
 
 ---
 
-## Adding a new image
+## Adding a new image type
 
-To register a new rootfs image that can be fetched via `mvm image pull`:
+To register a new image type that can be fetched via `mvm image pull --type <type>`:
 
-**1. Append an entry to `src/mvmctl/assets/images.yaml`:**
+**1. Add an entry to the `image_types` list in `src/mvmctl/assets/images.yaml`:**
 
+For a type with a standard version resolver (http-dir):
 ```yaml
-- id: fedora-40                              # must be unique, no spaces
-  type: fedora                               # OS family
-  version: "40"                              # OS version
-  name: "Fedora 40 (Cloud)"
-  source: https://example.com/fedora-40-cloudimg.qcow2
+- type: fedora
+  name: "Fedora Cloud"
+  resolver: http-dir
+  version_name_template: "Fedora {version} (Cloud)"
+  versions_url: "https://download.fedoraproject.org/pub/fedora/linux/releases/"
+  download_url: "https://download.fedoraproject.org/pub/fedora/linux/releases/{version}/Cloud/{arch}/images/Fedora-Cloud-Base-{version}-{arch}.qcow2"
+  sha256_url: "https://download.fedoraproject.org/pub/fedora/linux/releases/{version}/Cloud/{arch}/images/Fedora-Cloud-{version}-{arch}-CHECKSUM"
   format: qcow2
-  sha256: null                               # null = checksum fetched from sha256_url
-  sha256_url: https://example.com/fedora-40-CHECKSUM
+  options:
+    skip_patterns:
+      - "test"
+      - "README"
+    arch_mapping:
+      x86_64: "x86_64"
+      aarch64: "aarch64"
 ```
 
-Set `sha256` to the exact SHA-256 hex digest of the file if you want integrity
-verification on every download. Set it to `null` for rolling-release URLs where the
-digest changes each build.
-
-**2. For template-based sources (dynamic resolution via S3 listing):**
-
-If the real download URL is only known at runtime (for example, because the exact
-version number is embedded in the filename and changes with each Firecracker release),
-use `{placeholder}` tokens in `source`:
-
+For a single-source type (no version resolution):
 ```yaml
-- id: my-dynamic-image
-  name: "My Dynamic Image"
-  source: "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/{ci_version}/{arch}/my-image.squashfs"
-  list_url_template: "http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/my-image&list-type=2"
-  format: squashfs
-  sha256: null
-  sha256_url: null
+- type: my-fixed-image
+  name: "My Fixed Image"
+  resolver: null
+  version_name_template: "My Image"
+  download_url: "https://example.com/my-image.qcow2"
+  sha256_url: "https://example.com/my-image.qcow2.SHA256"
+  format: qcow2
+  options: {}
 ```
 
-Any `source` value containing `{` is automatically treated as a template and passed to
-the dynamic resolver at fetch time. Make sure `list_url_template` is provided for
-template-based entries so the dynamic resolver can find the correct S3 listing endpoint.
+**2. Template variables supported in URL fields:**
+
+| Variable | Description |
+|----------|-------------|
+| `{version}` | OS version string (e.g. `40`), or `latest` for single-source types |
+| `{codename}` | Upstream codename (for http-dir types with codename_mapping) |
+| `{arch}` | Target architecture (mapped through `arch_mapping` if present) |
+| `{ci_version}` | Firecracker CI version (firecracker-s3 types only) |
 
 **3. Verify the new entry is visible:**
 
@@ -306,11 +350,13 @@ template-based entries so the dynamic resolver can find the correct S3 listing e
 uv run mvm image ls --remote
 ```
 
-The new ID should appear in the table. Fetch it to confirm end-to-end:
+The new type should appear in the table. Fetch it to confirm end-to-end:
 
 ```bash
-uv run mvm image pull <your-new-id>
+uv run mvm image pull --type fedora --version 40
 ```
+
+> **Note:** The `id` shown in `mvm image ls` is auto-generated as `{type}-{version}` (e.g. `fedora-40`). You do not specify it directly in the YAML.
 
 ---
 
@@ -337,7 +383,7 @@ the constants relevant to asset management.
 
 > **Note:** The kernel config lists (`enabled_configs`, `disabled_configs`, `set_val_configs`,
 > `required_settings`) are defined per-kernel in `kernels.yaml`, not as module-level constants.
-> Load them at runtime via `ImageService.load_available_images()` or by reading `kernels.yaml`
+> Load them at runtime via `KernelService.get_specs_for()` or by reading `kernels.yaml`
 > through `AssetManager`.
 
 ---

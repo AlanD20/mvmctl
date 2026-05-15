@@ -1,3 +1,6 @@
+⚠️ **ARCHIVED — This document contains AI agent instructions from an earlier phase of the project.**
+These rules DO NOT apply to the current codebase. See the project root `AGENTS.md` for current agent instructions.
+
 > **⚠️ ARCHIVED — Historical document from an earlier phase.**
 > The project has evolved significantly. See [CONTEXT.md](../CONTEXT.md) for current domain language,
 > [docs/PROJECT_ARCHITECTURE.md](../docs/PROJECT_ARCHITECTURE.md) for the current architecture,

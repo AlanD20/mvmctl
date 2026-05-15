@@ -5,10 +5,10 @@
 > All architectural rules, patterns, and layer definitions documented below match the actual implementation.
 > For verification, see the 15 core domains in `src/mvmctl/core/` (list below).
 >
-> **Verification (2026-05-13):**
-> - `from __future__ import annotations` present in ALL 185+ `.py` files under `src/mvmctl/`
-> - All 15 core domains (`_shared`, `binary`, `cache`, `cloudinit`, `config`, `console`, `host`, `image`, `kernel`, `key`, `logs`, `network`, `ssh`, `vm`, `volume`) follow Controller/Service/Repository/Resolver pattern
-> - API layer has `*Operations` classes for all 15 domains, with `inputs/` directory containing 22 Input/Request files
+> **Verification (2026-05-15):**
+> - `from __future__ import annotations` present in 192 of 194 `.py` files under `src/mvmctl/` (2 `_defaults.py` files are exempt — no code paths execute before imports)
+> - Core domains follow the Controller/Service/Repository/Resolver pattern where applicable; lighter domains use only the classes they need
+> - API layer has `*Operations` classes for all 15 domains, with `inputs/` directory containing 20 Input/Request files
 > - Core domains return `*Item` dataclasses only
 > - Controllers are stateful, single-entity; Services are stateless infrastructure
 > - Operations are `@staticmethod` orchestrators in API layer
@@ -113,7 +113,7 @@ CLI → VMCreateInput → VMOperation.create(input) → VMCreateRequest(input, d
 #### File Organization ✅ VERIFIED
 
 ```
-api/inputs/ (22 files)
+api/inputs/ (20 files)
 ├── _vm_input.py              # VMInput, VMRequest, ResolvedVMInput
 ├── _vm_create_input.py       # VMCreateInput, VMCreateRequest, ResolvedVMCreateInput
 ├── _network_input.py         # NetworkInput, NetworkRequest, ResolvedNetworkInput
@@ -134,22 +134,6 @@ api/inputs/ (22 files)
 ├── _ssh_input.py             # SSHInput, SSHRequest, ResolvedSSHInput
 ├── _vm_export_config.py      # VMExportConfigInput, VMExportConfigRequest
 └── _vm_import_input.py       # VMImportInput, VMImportRequest
-
-api/ (14 operation files)
-├── vm_operations.py          # VMOperation
-├── network_operations.py     # NetworkOperation
-├── volume_operations.py      # VolumeOperation
-├── image_operations.py       # ImageOperation
-├── kernel_operations.py      # KernelOperation
-├── binary_operations.py      # BinaryOperation
-├── key_operations.py         # KeyOperation
-├── config_operations.py      # ConfigOperation
-├── console_operations.py     # ConsoleOperation
-├── host_operations.py        # HostOperation
-├── cache_operations.py       # CacheOperation
-├── init_operations.py        # InitOperation
-├── logs_operations.py        # LogsOperation
-└── ssh_operations.py         # SSHOperation
 ```
 
 #### Reference Implementation
@@ -558,7 +542,8 @@ class VMRepository:
 
 - **Created:** 2026-04-19
 - **Updated:** 2026-04-30 — Fixed VMService pattern (actual bulk operations coordinator), Repository pattern types (VMInstanceItem, list_all, count_by_status), and standardized Resolved naming convention (Resolved*Input)
-- **Updated:** 2026-05-13 — Added implementation status banner, verified all rules against actual codebase, confirmed 15 domains, 14 operation classes, 22 input files, `from __future__ import annotations` compliance
+- **Updated:** 2026-05-13 — Added implementation status banner, verified all rules against actual codebase, confirmed 15 domains, 14 operation classes, 20 input files, `from __future__ import annotations` compliance
+- **Updated:** 2026-05-15 — Corrected input file count (20, not 22) and annotations coverage (192/194 files)
 - **Purpose:** Generic domain implementation methodology for mvmctl (verified — reflects current codebase)
 - **Reference Domain:** network (first application — now ALL 15 domains follow this pattern)
 - **Implemented Domains:** network, key, binary, kernel, image, host, config, cache, SSH, console, logs, **volume**, **VM** (reference)

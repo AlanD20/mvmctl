@@ -132,7 +132,7 @@ net.ipv4.ip_forward = 1
 
 ## Consequences
 
-- `sudo -n true`, `sudo -v`, and any non-listed command will fail for `mvm` group members. The `_validate_sudo_credentials()` function in `utils/_system.py` is aware of this and does NOT gate privileged execution on credential validation.
+- `sudo -n true`, `sudo -v`, and any non-listed command will fail for `mvm` group members. The `require_mvm_group_membership()` function in `utils/_system.py` is aware of this and does NOT gate privileged execution on credential validation.
 - Adding a new privileged binary requires updating `constants.py` (add to `PRIVILEGED_BINARIES` or `PRIVILEGED_SERVICE_BINARIES`) AND regenerating the sudoers file via `mvm host init`.
 - The `mvm-provision` binary MUST be compiled and symlinked at `~/.cache/mvmctl/bin/mvm-provision` for VM creation to work. If it's missing — as can happen after `cache clean --force` — the `_ensure_services_binary()` function in the test conftest re-extracts and re-registers it.
 - The group name is the CLI name resolved from console_scripts entry points. Currently `CLI_NAME = "mvm"`, so the group is `mvm`. If the CLI is renamed, the group name changes automatically.

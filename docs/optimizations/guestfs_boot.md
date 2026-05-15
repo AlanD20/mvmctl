@@ -176,9 +176,9 @@ try:
     if hasattr(g, "set_memsize"):
         g.set_memsize(256)
 
-    # Use explicit format and unsafe cache for speed.
+    # Use explicit format and writeback cache for speed.
     # Compatible with both ext4 and btrfs raw images.
-    g.add_drive(rootfs_path, readonly=False, format="raw", cachemode="unsafe")
+    g.add_drive_opts(rootfs_path, readonly=False, format="raw", cachemode="writeback")
     
     g.launch()
     
@@ -204,7 +204,7 @@ finally:
 | Aggressive (1-9) ✅ (1-9) | 1.0s - 3.0s | 2.0s - 4.0s |
 | Ultimate (Fixed App) ✅ | < 1.0s | < 2.0s |
 
-*Note: Measurement variance is primarily driven by CPU speed and disk I/O. Results are consistent across both **ext4** and **btrfs** when using `cachemode="unsafe"`.*
+*Note: Measurement variance is primarily driven by CPU speed and disk I/O. Results are consistent across both **ext4** and **btrfs** when using `cachemode="writeback"`.*
 
 ## Implementation Status Summary
 

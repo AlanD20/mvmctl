@@ -56,9 +56,9 @@ src/mvmctl/
 stubs/               # Type stubs for external dependencies (guestfs.pyi, psutil.pyi)
 packaging/           # Distribution packaging configs (.deb, .rpm, PKGBUILD)
 scripts/             # Build & release helper scripts (build_services.py, setup-test-environment.py)
-tests/               # 164 test_*.py files across 5 top-level directories (118 unit + 18 integration + 19 system + 7 layer_compliance + 2 helpers)
+tests/               # 166 test_*.py files across 5 top-level directories (119 unit + 18 integration + 20 system + 7 layer_compliance + 2 helpers)
 docs/                # Project documentation
-  ├── adr/           # 7 Architecture Decision Records
+  ├── adr/           # 9 Architecture Decision Records
   ├── analyses/      # Technical analyses
   ├── development/   # Development guides
   ├── implementations/ # Implementation plans

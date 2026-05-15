@@ -5,7 +5,7 @@ MicroVM Manager -- a speed-first CLI for managing Firecracker microVMs. Provides
 ## Language
 
 ### Domain
-A business capability with isolated logic. Each domain (vm, network, image, kernel, binary, key, host, config, cache, volume, console, logs, cloudinit, ssh) lives in `core/{domain}/` and consists of Controller, Service, Repository, and Resolver files. Domains do NOT import other domains.
+A business capability with isolated logic. Each domain (vm, network, image, kernel, binary, key, host, config, cache, volume, console, logs, cloudinit, ssh) lives in `core/{domain}/`. Data-heavy domains follow the Controller / Service / Repository / Resolver pattern; simpler domains may have fewer files (e.g., `cache/` and `ssh/` have only a Service, `console/` has only a Controller) -- see the domain table in the [Domain Structure](#domain) section for the exact composition of each domain. Domains do NOT import other domains.
 _Avoid_: Module, component, service (overloaded terms)
 
 ### Intra-domain orchestration
@@ -35,7 +35,7 @@ _Avoid_: Business logic in Repository
 ### Manager+Process pattern (runtime services)
 Long-running subprocesses (console relay, nocloud-net server, mvm-provision) follow a two-class split:
 - **Manager class** (e.g., `ConsoleRelayManager`): imported by core/. Handles start/stop/restart, PID files, health monitoring, orphan cleanup.
-- **Process class** (e.g., `process.py`): standalone `main()` entry point compiled via Nuitka. Has NO upward imports into `mvmctl` -- only stdlib + minimal shared defaults. Communicates with the parent via stdin/stdout JSON protocol or Unix sockets.
+- **Process class** (e.g., `process.py`): standalone `main()` entry point compiled via Nuitka. Has NO upward imports into `mvmctl` -- only stdlib + minimal shared defaults. Communicates with the parent via Unix socket; lifecycle managed via PID file and signals.
 
 The manager+process boundary enforces reliability: if the manager crashes, the subprocess continues running. If the subprocess crashes, the manager detects it via PID file + health check. Process binaries are compiled as a single multidist `mvm-services` binary with `sys.argv[0]` dispatch.
 
@@ -176,10 +176,13 @@ Mandatory for any domain that has public CLI commands or API endpoints. No short
 
 ### Layer compliance enforcement
 Architecture rules are enforced in CI via `tests/layer_compliance/`. Uses `ast.parse()` (not runtime imports) to scan source code:
-- **`test_imports.py`**: CLI may only import from `api/`, `models/`, `exceptions`, `constants`, `utils/` -- NOT from `core/` directly.
+- **`test_imports.py`**: CLI may only import from `api/`, `models/`, `exceptions`, `constants`, `utils/` — NOT from `core/` directly.
 - **`test_constants.py`**: No hardcoded paths, large integers, or list/dict literals outside `constants.py`.
 - **`test_privilege.py`**: Specific API functions must call `check_privileges()` before delegating to core.
 - **`test_startup_time.py`**: <200ms cold-start enforcement via subprocess spawn.
+- **`test_memory_leak_patterns.py`**: Detects patterns that cause memory leaks (cached subprocess results, mutable defaults).
+- **`test_blocking_loops.py`**: Detects blocking loops in async-adjacent code paths that would stall the event loop.
+- **`test_cleanup.py`**: Verifies cleanup patterns are followed (temp files, subprocess resources).
 
 ### Public API boundary
 The `mvmctl.api` package IS the stable, curated public interface for all consumers -- CLI, future TUI/GUI, and external scripts. It lazily re-exports all Operation classes and Input types via `__init__.py`. External code should `from mvmctl.api import VMOperation, VMCreateInput` and nothing else. The `mvmctl.core` package is an implementation detail. The CLI layer is just one frontend -- it has no special access privileges.

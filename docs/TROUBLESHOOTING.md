@@ -268,7 +268,7 @@ Run `mvm host init` afterwards to recreate the default network.
 ### `mvm host reset` — Full factory reset
 
 ```bash
-mvm host reset --force
+mvm host reset --force, -f
 ```
 
 Does everything `clean` does, **plus**:
@@ -280,7 +280,7 @@ Does everything `clean` does, **plus**:
 
 After reset, run `mvm host init` from scratch to set everything up again.
 
-> Both commands refuse to run if any VMs are still running. Stop them first with `mvm vm rm --name <name>`.
+> Both commands refuse to run if any VMs are still running. Stop them first with `mvm vm rm <name>`.
 
 ---
 
@@ -397,7 +397,7 @@ If the subnet is full, you have two options:
 **Option 1 — Remove unused VMs** to free their IP leases:
 ```bash
 mvm vm ls                    # List all VMs
-mvm vm rm --name <old-vm>    # Remove unneeded VMs
+mvm vm rm <old-vm>    # Remove unneeded VMs
 ```
 IPs are released automatically when VMs are removed.
 
@@ -466,7 +466,7 @@ mvm kernel rm <kernel-id>
 **3. Remove stopped VMs** — Each stopped VM still holds its cloned rootfs:
 ```bash
 mvm vm ls                            # List VMs
-mvm vm rm --name <vm-name>           # Remove VM and its disk
+mvm vm rm <vm-name>           # Remove VM and its disk
 ```
 
 **4. Purge the cache (nuclear option):**
@@ -606,7 +606,7 @@ mvm volume rm <volume-name>
 Or force-remove (removes the volume record and file but does not hot-unplug from the VM):
 
 ```bash
-mvm volume rm <volume-name> --force
+mvm volume rm <volume-name> --force, -f
 ```
 
 ---

@@ -1,12 +1,22 @@
 # JSON output mode
 
-> **STATUS: Current — not implemented (as documented).** No `--json` flag exists on CLI commands.
+> **STATUS: Current — partially implemented.** Per-command `--json` flags exist on most `ls`/`inspect` commands (vm, image, network, kernel, bin, host, key, volume), but there is NO global `--json` flag on the root CLI group.
 
-> ## Status: ❌ NOT IMPLEMENTED
+> ## Status: ⚠️ PARTIALLY IMPLEMENTED
 >
-> No code has been written for this feature. The API layer returns `OperationResult` with structured data, and the CLI layer uses Rich/text output. No `--json` flag exists.
+> Per-command `--json` flags exist on:
+> - `cli/vm.py` (lines 64, 528)
+> - `cli/image.py` (lines 71, 371)
+> - `cli/network.py` (lines 65, 283, 347)
+> - `cli/kernel.py` (lines 58, 99)
+> - `cli/bin.py` (line 61)
+> - `cli/host.py` (line 231)
+> - `cli/key.py` (lines 56, 197)
+> - `cli/volume.py` (lines 103, 154)
 >
-> **Last verified:** 2026-05-13
+> What does NOT exist is a **global** `--json` flag on the root CLI group that applies to ALL commands (including mutations like `create`, `remove`, etc.).
+>
+> **Last verified:** 2026-05-15
 
 **Phase:** Standalone — orthogonal to all features
 **Complexity:** Low
@@ -30,7 +40,7 @@ The API layer already returns `OperationResult` with structured data. The CLI la
 
 **CLI:** A global `--json` flag on the root `app` group (Click context). Each command checks `ctx.obj["json"]` and either prints formatted output or calls `json.dumps()` on the `OperationResult`.
 
-**Minimal change** — no API or Core modifications. Pure CLI layer.
+**Minimal change** — no API or Core modifications. Pure CLI layer. However, the per-command `--json` flags already handle `ls` and `inspect` for most domains, so the global flag would primarily benefit mutation commands (create, remove, etc.) and provide a single consistent mechanism.
 
 ## Why standalone
 

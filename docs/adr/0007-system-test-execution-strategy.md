@@ -36,8 +36,8 @@ The conftest must NEVER call `sudo` directly. The mvm application handles privil
 ### Passwordless sudo required for VM tests
 System tests that create VMs, build kernels, or run `host clean`/`host reset` require passwordless sudo configured via mvm group membership (set up by `sudo mvm host init`). Tests that do not need privileged operations (bin, config, cache, keys, logs, network, ssh, etc.) work without it.
 
-### Heavy asset downloads are session-level
-Images, kernels, and binaries are pulled once per test file via the session fixture `prepare_system_env` (defined in each subdirectory's `conftest.py`). Each file incurs the download cost if the assets aren't already cached. This is intentional — it keeps each file independently runnable and avoids cross-file state dependencies.
+### Heavy asset downloads happen on demand
+The session fixture `prepare_system_env` (defined in each subdirectory's `conftest.py`) only checks prerequisites — it verifies the mvmctl DB is initialized and skips the file if not. Heavy assets (kernels, images, binaries) are pulled on demand by `ensure_vm_deps()` which is called from the VM creation helpers (`_create_minimal_vm_core`, `module_vm`, etc.). Each file incurs the download cost if the assets aren't already cached. This is intentional — it keeps each file independently runnable and avoids cross-file state dependencies.
 
 ## Status
 

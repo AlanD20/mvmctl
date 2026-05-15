@@ -1,7 +1,5 @@
 # Building a Custom Kernel for Firecracker
 
-> **STATUS: Partially outdated** — The "Verifying Required Settings" section describes an interactive user prompt ("Proceed with build anyway?") that does not exist. The actual code (`core/kernel/_service.py:620-624`) returns a `KernelConfigResult` with `success=False` and warnings but no interactive prompt. All other content is accurate.
-
 This guide covers how to build a custom Linux kernel optimised for Firecracker microVMs,
 either from the pre-configured Firecracker CI kernel or from upstream kernel sources.
 

@@ -4,6 +4,10 @@
 > and [docs/API.md](../docs/API.md) for the current API reference.
 > This file is kept for historical reference only.
 
+> **⚠️ WARNING: Despite the filename, this document does NOT describe the current state of the project.**
+> It describes an audit of the **OLD codebase** (`src/mvm/`), which no longer exists.
+> The current codebase is at `src/mvmctl/` with a completely different architecture.
+
 # MicroVM Manager (mvmctl) — Current Implementation Audit
 
 This document compares the current codebase state against the authoritative requirements in `legacy/PYTHON_CLI_REQUIREMENTS.md`. It identifies discrepancies, missing features, and behavioral mismatches.

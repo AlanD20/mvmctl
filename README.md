@@ -104,7 +104,7 @@ uv run mvm --help
 
 ## Quick Start
 
-The easiest way to get started is with the interactive setup wizard. `mvm init` is the **only prerequisite** -- it handles database setup, host configuration (sudoers, mvm group), service binary extraction, and optional Firecracker download:
+The easiest way to get started is with the interactive setup wizard. `mvm init` is the **only mvm-specific prerequisite** -- it handles database setup, host configuration (sudoers, mvm group), service binary extraction, and optional Firecracker download. System packages (iproute2, iptables, qemu-img, e2fsprogs, cloud-image-utils) must still be installed separately via your package manager as listed in the [Prerequisites](#prerequisites) section above:
 
 ```bash
 # Interactive setup -- guides you through everything (DB, sudoers, binaries, downloads)
@@ -149,7 +149,7 @@ mvm vm create --name cluster --count 3 --atomic   # Batch-create 3 VMs
 mvm vm ls                                         # List all VMs
 mvm ssh myvm                                      # SSH into a VM
 mvm console myvm                                  # Console access (no SSH)
-mvm vm rm myvm --force                            # Remove a VM
+mvm vm rm myvm --force, -f                         # Remove a VM (or use -f)
 ```
 
 ### Resource Management
@@ -249,7 +249,7 @@ API (orchestration + privilege checks)   -- sequences multiple core domains
 Core (isolated business logic)           -- no cross-domain imports
 ```
 
-- **CLI** (`src/mvmctl/cli/`): Thin command definitions using a custom Click group (`LazyMVMGroup`) at root with Typer sub-apps. Resolves runtime defaults from `constants.py`. Calls the API layer only. No business logic, no DB queries. Startup under 150ms via lazy-loading.
+- **CLI** (`src/mvmctl/cli/`): Thin command definitions using a custom Click group (`LazyMVMGroup`) at root with Typer sub-apps. Resolves runtime defaults from `constants.py`. Calls the API layer only. No business logic, no DB queries. Startup under 200ms via lazy-loading.
 - **API** (`src/mvmctl/api/`): Public Python surface. Performs privilege escalation, resolves DB-backed defaults, and orchestrates **multiple core domains**. The ONLY layer allowed to import from multiple domains.
 - **Core** (`src/mvmctl/core/`): Isolated domain logic -- each domain is self-contained with Controller, Service, Repository, and Resolver files. **No cross-domain imports**. Returns `*Item` model objects only.
 

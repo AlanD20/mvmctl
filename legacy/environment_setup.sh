@@ -1,4 +1,10 @@
 #!/bin/bash
+# ======================================================================
+# ARCHIVED — Historical script from an earlier project phase.
+# This script modifies /etc/sysctl.conf and references scripts/tools
+# that no longer exist. Do NOT run this script.
+# Use `mvm host init` for current host setup.
+# ======================================================================
 set -e
 
 # Global Environment Setup for Firecracker VMs

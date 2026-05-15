@@ -98,11 +98,20 @@ Result and model types like `CleanResult`, `PruneAllResult`, `VMInstanceItem`, `
 from mvmctl.models import CleanResult, PruneAllResult, VMInstanceItem, BulkResult
 ```
 
-Deep imports from sub-modules are **not** part of the public API:
+Deep imports from sub-modules are **not** part of the public API at runtime:
 
 ```python
 from mvmctl.api import VMOperation  # ✅ CORRECT
-from mvmctl.api.vm_operations import VMOperation  # ❌ WRONG — internal module
+from mvmctl.api.vm_operations import VMOperation  # ❌ WRONG (runtime) — internal module
+```
+
+Deep imports are acceptable inside `TYPE_CHECKING` blocks for type annotations only, since those are never evaluated at runtime:
+
+```python
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from mvmctl.api.vm_operations import VMOperation  # ✅ OK for type hints only
 ```
 
 ---
@@ -111,14 +120,14 @@ from mvmctl.api.vm_operations import VMOperation  # ❌ WRONG — internal modul
 
 | Operation Class | Responsibility |
 |---|---|
-| `VMOperation` | VM lifecycle: create, remove, import, export, list, inspect, get, start/stop, pause/resume, reboot, snapshot, load snapshot |
+| `VMOperation` | VM lifecycle: create, remove, import, export, list, inspect, get, start/stop, pause/resume, reboot, snapshot, load snapshot, prune, attach-volume, detach-volume |
 | `NetworkOperation` | Network management: create, remove, list, get, inspect, set default, restore, sync, create default |
-| `ImageOperation` | Image operations: pull, import, list, get, set default, remove, inspect, warm |
-| `KernelOperation` | Kernel operations: pull, list, get, inspect, set default, remove |
+| `ImageOperation` | Image operations: pull, import, list, get, set default, remove, inspect, warm, prune |
+| `KernelOperation` | Kernel operations: pull, list, get, inspect, set default, remove, prune |
 | `KeyOperation` | SSH key registry: add, create, list, get, remove, inspect, set defaults, get defaults, clear defaults, export |
-| `BinaryOperation` | Binary management: pull, get, list local/remote, set default, remove (by id/version), ensure default |
+| `BinaryOperation` | Binary management: pull, get, list local/remote, set default, remove (by id/version), ensure default, prune |
 | `HostOperation` | Host init/reset/clean, state retrieval, privilege checks, KVM access, running VMs |
-| `CacheOperation` | Cache lifecycle: init, prune per-asset-type, prune misc, prune all, clean |
+| `CacheOperation` | Cache lifecycle: init, prune per-asset-type (vm, network, image, kernel, binary, misc), prune all, clean |
 | `SSHOperation` | SSH connection to VMs |
 | `InitOperation` | Onboarding wizard: database, host, cache, binary setup |
 | `ConsoleOperation` | Console relay: get connection info, get state, kill |
@@ -189,7 +198,7 @@ Runtime state for a registered VM.
 | `serial_output_path` | `str \| None` | Serial console output path |
 | `lsm_flags` | `str \| None` | Linux Security Module flags |
 | `boot_args` | `str \| None` | Kernel boot arguments |
-| `ssh_keys` | `list[str]` | SSH key names injected into the guest |
+| `ssh_keys` | `list[str]` | SSH key IDs (hashes) injected into the guest |
 | `ssh_user` | `str \| None` | SSH username for this VM |
 | `volume_ids` | `list[str] \| None` | Attached volume IDs |
 
@@ -253,10 +262,10 @@ Full inspection data for a VM.
 
 ```python
 class CloudInitMode(StrEnum):
-    INJECT = "inject"   # Inject cloud-init files into rootfs via libguestfs (filesystem-agnostic)
-    NET    = "net"      # Serve cloud-init files via HTTP (nocloud-net datasource)
-    OFF    = "off"      # Skip cloud-init entirely (no ISO mounted)
-    ISO    = "iso"      # Generate cloud-init ISO from config files
+    INJECT = "inject"  # Inject cloud-init files directly into rootfs via libguestfs
+    NET = "net"        # Serve cloud-init files via HTTP (nocloud-net datasource)
+    OFF = "off"        # Skip cloud-init entirely (no ISO mounted)
+    ISO = "iso"        # Generate cloud-init ISO from config files
 ```
 
 #### `CloudInitStatus`
@@ -347,8 +356,8 @@ Image record — maps to the `images` table.
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | `str` | Image ID (hash) |
-| `os_slug` | `str` | OS slug identifier (e.g. `ubuntu-24.04`) |
-| `os_name` | `str` | Human-readable OS name |
+| `type` | `str` | Image type identifier (e.g. `ubuntu-24.04`) |
+| `name` | `str` | Human-readable image name |
 | `arch` | `str` | Architecture (e.g. `x86_64`) |
 | `path` | `str` | Relative path to the image file |
 | `fs_type` | `str` | Filesystem type (e.g. `ext4`) |
@@ -855,9 +864,53 @@ against the database and creates a VM matching the exported configuration.
 
 ---
 
+#### `VMOperation.prune(dry_run: bool = False, include_all: bool = False) -> OperationResult[list[str]]`
+
+Prune VMs based on status. By default, prunes all VMs EXCEPT those in RUNNING or STARTING state.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `dry_run` | `bool` | `False` | Only report what would be removed |
+| `include_all` | `bool` | `False` | Prune ALL VMs including running |
+
+---
+
+#### `VMOperation.attach_volume(vm_inputs: VMInput, volume_name: str) -> OperationResult[VMInstanceItem]`
+
+Attach a volume to a VM (VM must be stopped).
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `vm_inputs` | `VMInput` | — | VM identifiers |
+| `volume_name` | `str` | — | Volume name to attach |
+
+---
+
+#### `VMOperation.detach_volume(vm_inputs: VMInput, volume_name: str) -> OperationResult[VMInstanceItem]`
+
+Detach a volume from a VM (VM must be stopped).
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `vm_inputs` | `VMInput` | — | VM identifiers |
+| `volume_name` | `str` | — | Volume name to detach |
+
+---
+
 ### `NetworkOperation`
 
 All methods are `@staticmethod`. Networks are identified using `NetworkInput` objects.
+
+#### `NetworkOperation.prune(dry_run: bool = False, include_all: bool = False) -> OperationResult[list[str]]`
+
+Prune unused networks. Skips default and referenced networks by default.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `dry_run` | `bool` | `False` | Only report what would be removed |
+| `include_all` | `bool` | `False` | Remove ALL networks including default and referenced |
+
+---
 
 #### `NetworkOperation.create(inputs: NetworkCreateInput) -> OperationResult[NetworkItem] | NeedsInteraction`
 
@@ -916,7 +969,7 @@ Return full details for a network, including live bridge status, leases, and ipt
 
 ---
 
-#### `NetworkOperation.set_default(inputs: NetworkInput) -> None`
+#### `NetworkOperation.set_default(inputs: NetworkInput) -> OperationResult[NetworkItem]`
 
 Set a network as the default.
 
@@ -969,6 +1022,17 @@ Metadata includes `network_count` and `bridges_reconciled`.
 
 All methods are `@staticmethod`. Images are identified using `ImageInput` objects.
 
+#### `ImageOperation.prune(dry_run: bool = False, include_all: bool = False) -> OperationResult[list[str]]`
+
+Prune unused images. Skips default and referenced images by default.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `dry_run` | `bool` | `False` | Only report what would be removed |
+| `include_all` | `bool` | `False` | Remove ALL images including default and referenced |
+
+---
+
 #### `ImageOperation.pull(inputs: ImagePullInput, *, on_progress: Callable[[ProgressEvent], None] | None = None) -> OperationResult[ImageItem] | NeedsInteraction`
 
 Download and convert a VM rootfs image (qcow2, tar, or raw) to an ext4 file, then
@@ -976,12 +1040,13 @@ register it in the database.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `inputs.os_slug` | `str` | — | OS slug (e.g. `"ubuntu-24.04"`) |
-| `inputs.type` | `str` | — | Image type from config |
+| `inputs.type` | `str` | — | Image type from images.yaml (e.g. `"ubuntu"`, `"debian"`) |
+| `inputs.name` | `str \| None` | `None` | Custom display name for the image |
 | `inputs.force` | `bool` | `False` | Re-download even if cached |
 | `inputs.set_default` | `bool` | `False` | Set this image as the default |
 | `inputs.arch` | `str \| None` | `None` | Architecture (default: host arch) |
 | `inputs.version` | `str \| None` | `None` | Version override |
+| `inputs.no_cache` | `bool` | `False` | Skip cached version listing and fetch live |
 | `inputs.partition` | `int \| None` | `None` | Partition number to extract |
 | `inputs.skip_optimization` | `bool` | `False` | Skip filesystem optimization |
 | `inputs.disabled_detectors` | `list[str]` | `[]` | Disabled partition detectors |
@@ -991,7 +1056,7 @@ register it in the database.
 
 ---
 
-#### `ImageOperation.import_(inputs: ImageImportInput) -> OperationResult[ImageItem]`
+#### `ImageOperation.import_(inputs: ImageImportInput, *, on_progress: Callable[[ProgressEvent], None] | None = None) -> OperationResult[ImageItem]`
 
 Import an existing local image file and register it in the database.
 
@@ -1006,6 +1071,7 @@ Import an existing local image file and register it in the database.
 | `inputs.partition` | `int \| None` | `None` | Partition number to extract |
 | `inputs.skip_optimization` | `bool` | `False` | Skip filesystem optimization |
 | `inputs.disabled_detectors` | `list[str]` | `[]` | Disabled partition detectors |
+| `on_progress` | `Callable \| None` | `None` | Callback for progress events |
 
 ---
 
@@ -1020,14 +1086,16 @@ Remove an image from cache and database.
 
 ---
 
-#### `ImageOperation.list_(inputs: ImageInput | None = None, *, remote: bool = False) -> list[ImageItem] | list[ImageSpec]`
+#### `ImageOperation.list_(inputs: ImageInput | None = None, *, remote: bool = False, no_cache: bool = False, type_filter: str | None = None) -> list[ImageItem] | list[ImageVersion]`
 
 List images.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `inputs` | `ImageInput \| None` | `None` | Filter by identifiers |
-| `remote` | `bool` | `False` | List remote images from YAML instead |
+| `remote` | `bool` | `False` | List remote images via version resolver |
+| `no_cache` | `bool` | `False` | Bypass cached version listings, fetch live |
+| `type_filter` | `str \| None` | `None` | Filter remote results by image type |
 
 ---
 
@@ -1059,7 +1127,18 @@ Pre-decompress images to the ready pool for fast VM creation.
 
 All methods are `@staticmethod`. Kernels are identified using `KernelInput` objects.
 
-#### `KernelOperation.pull(inputs: KernelPullInput) -> OperationResult[KernelItem] | NeedsInteraction`
+#### `KernelOperation.prune(dry_run: bool = False, include_all: bool = False) -> OperationResult[list[str]]`
+
+Prune unused kernels. Skips default and referenced kernels by default.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `dry_run` | `bool` | `False` | Only report what would be removed |
+| `include_all` | `bool` | `False` | Remove ALL kernels including default and referenced |
+
+---
+
+#### `KernelOperation.pull(inputs: KernelPullInput, *, on_progress: Callable[[ProgressEvent], None] | None = None) -> OperationResult[KernelItem] | NeedsInteraction`
 
 Fetch or build a Firecracker kernel.
 
@@ -1076,14 +1155,15 @@ Fetch or build a Firecracker kernel.
 | `inputs.clean_build` | `bool` | `False` | Clean before building |
 | `inputs.kernel_config` | `Path \| None` | `None` | Kernel config overlay |
 | `inputs.set_default` | `bool` | `False` | Set as default |
+| `on_progress` | `Callable \| None` | `None` | Callback for progress events |
 
 **Returns:** The created `KernelItem`.
 
 ---
 
-#### `KernelOperation.remove(inputs: KernelInput, force: bool = False) -> None`
+#### `KernelOperation.remove(inputs: KernelInput, force: bool = False) -> BatchResult[KernelItem]`
 
-Remove a kernel from cache and database.
+Remove one or more kernels from cache and database.
 
 ---
 
@@ -1201,6 +1281,17 @@ Export a keypair to a destination directory.
 
 All methods are `@staticmethod`. Binaries are identified using `BinaryInput` objects.
 
+#### `BinaryOperation.prune(dry_run: bool = False, include_all: bool = False) -> OperationResult[list[str]]`
+
+Prune unused binaries. Skips default version by default.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `dry_run` | `bool` | `False` | Only report what would be removed |
+| `include_all` | `bool` | `False` | Remove ALL binaries including default version |
+
+---
+
 #### `BinaryOperation.pull(inputs: BinaryPullInput) -> OperationResult[list[BinaryItem]] | NeedsInteraction`
 
 Download a specific Firecracker/jailer binary version from GitHub releases.
@@ -1215,13 +1306,13 @@ Download a specific Firecracker/jailer binary version from GitHub releases.
 
 ---
 
-#### `BinaryOperation.remove(inputs: BinaryInput, force: bool = False) -> None`
+#### `BinaryOperation.remove(inputs: BinaryInput, force: bool = False) -> BatchResult[BinaryItem]`
 
 Remove binaries by identifier.
 
 ---
 
-#### `BinaryOperation.remove_by_version(version: str, force: bool = False) -> None`
+#### `BinaryOperation.remove_by_version(version: str, force: bool = False) -> OperationResult[None]`
 
 Remove both firecracker and jailer binaries for a version (convenience).
 
@@ -1264,7 +1355,7 @@ marked default, sets the latest Firecracker binary as default.
 
 All methods are `@staticmethod`.
 
-#### `HostOperation.init(cache_dir: Path) -> OperationResult[Any] | NeedsInteraction`
+#### `HostOperation.init(cache_dir: Path, *, on_progress: Callable[[ProgressEvent], None] | None = None) -> OperationResult[Any] | NeedsInteraction`
 
 Apply host configuration: enable IP forwarding, persist sysctl, load KVM modules,
 create the `mvm` unix group, configure sudoers, set up iptables chains, and ensure
@@ -1273,6 +1364,7 @@ the default network. Fully idempotent.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `cache_dir` | `Path` | — | Cache root directory |
+| `on_progress` | `Callable \| None` | `None` | Callback for progress events |
 
 **Returns:** List of `HostStateChangeItem` describing every change applied.
 
@@ -1329,12 +1421,16 @@ Return all currently running VMs.
 
 All methods are `@staticmethod`.
 
-#### `CacheOperation.init_all() -> OperationResult[dict[str, str | list[str] | None]]`
+#### `CacheOperation.init_all(*, on_progress: Callable[[ProgressEvent], None] | None = None) -> OperationResult[dict[str, str | list[str] | None]]`
 
 Initialize all cache directories and optionally build the libguestfs fixed appliance.
 
-**Returns:** Dict with `cache_dir`, `directories` (list of created paths), and
-`guestfs_appliance` path.
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `on_progress` | `Callable \| None` | `None` | Callback for progress events |
+
+**Returns:** Dict with `cache_dir`, `directories` (list of created paths),
+`guestfs_appliance` path, and `guestfs_kernel` path.
 
 ---
 
@@ -1371,9 +1467,9 @@ Prune unused binaries. Skips default version by default.
 
 #### `CacheOperation.prune_misc(dry_run: bool = False) -> OperationResult[dict[str, bool]]`
 
-Prune miscellaneous cache: libguestfs appliance, warm images, and stale guestfs state.
+Prune miscellaneous cache: libguestfs appliance, warm images, stale guestfs state, and stale provision mount directories.
 
-**Returns:** Dict with `"appliance"`, `"warm_images"`, and `"guestfs_state"` booleans.
+**Returns:** Dict with `"appliance"`, `"warm_images"`, `"guestfs_state"`, and `"stale_provision_mounts"` booleans.
 
 ---
 
@@ -1429,7 +1525,7 @@ Set up host configuration. Delegates to `HostOperation.init()`.
 
 ---
 
-#### `InitOperation.run(skip_host: bool = False, non_interactive: bool = False, *, sudo_completed: bool = False, host_setup_message: str | None = None, download_version: str | None = None) -> InitResult`
+#### `InitOperation.run(skip_host: bool = False, non_interactive: bool = False, *, on_progress: Callable[[ProgressEvent], None] | None = None, sudo_completed: bool = False, host_setup_message: str | None = None, download_version: str | None = None, guestfs_enabled: bool | None = None) -> InitResult`
 
 Run the full init wizard: local state → host setup → cache init → binary fetch.
 Returns `InitResult` with per-step status. If a step needs user interaction,

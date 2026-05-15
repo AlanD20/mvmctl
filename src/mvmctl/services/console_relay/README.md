@@ -69,7 +69,8 @@ with ConsoleRelayClient(socket_path) as client:
 ### With Detach Sequence Detection
 
 ```python
-from mvmctl.services.console_relay import ConsoleRelayClient, CONST_CONSOLE_DETACH_SEQUENCE
+from mvmctl.services.console_relay import ConsoleRelayClient
+from mvmctl.services.console_relay._defaults import CONST_CONSOLE_DETACH_SEQUENCE
 
 input_buffer = bytearray()
 

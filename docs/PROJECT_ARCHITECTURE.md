@@ -160,7 +160,13 @@ src/mvmctl/
 │       │   ├── __init__.py
 │       │   ├── _backend.py
 │       │   └── _content.py
-│       └── _iptables_tracker/               # Generic iptables rule tracking
+│       ├── _firewall_tracker.py             # Unified firewall tracker — delegates to iptables/nftables backend
+│       ├── _iptables_tracker/               # Generic iptables rule tracking
+│       │   ├── __init__.py
+│       │   ├── _repository.py
+│       │   ├── _resolver.py
+│       │   └── _tracker.py
+│       └── _nftables_tracker/               # nftables rule tracking (default firewall backend)
 │           ├── __init__.py
 │           ├── _repository.py
 │           ├── _resolver.py
@@ -257,9 +263,9 @@ src/mvmctl/
 └── py.typed                                 # PEP 561 marker — declares the package supports strict typing
 ```
 
-**Note:** `utils/AGENTS.md` documents each util module's purpose and key exported symbols. Read it before adding new helpers to avoid duplication.
+**Key context sources:** Read `CONTEXT.md` first for domain language, conventions, and architecture rules. Architecture Decision Records in `docs/adr/` document hard-to-reverse decisions with real trade-offs.
 
-Several directories include `AGENTS.md` files that document their structure and conventions for AI-assisted development: `src/mvmctl/` (root), `utils/`, `db/`, `db/migrations/`, `assets/`, `services/`, `services/console_relay/`, and `services/nocloud_server/`.
+Agent instructions live in `.opencode/agent/*.md`.
 
 ## Core Structure — Domain Files
 
@@ -718,7 +724,7 @@ class NetworkItem: ...
 @dataclass
 class NetworkLeaseItem: ...
 @dataclass
-class IPTablesRuleItem: ...
+class FirewallRule: ...
 
 # models/image.py
 @dataclass
@@ -883,7 +889,7 @@ class NetworkItem:
 
     # Resolved relations
     leases: list[NetworkLeaseItem] | None = None
-    iptables_rules: list[IPTablesRuleItem] | None = None
+    iptables_rules: list[FirewallRule] | None = None
     vms: list[VMInstanceItem] | None = None
 ```
 

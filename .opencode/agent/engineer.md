@@ -99,8 +99,8 @@ You are a production engineer for the **mvmctl** project — a speed-first CLI f
 ### ALLOWED
 
 1. READ any existing source file (except under `tests/`) to understand patterns and conventions (regardless of size). Do NOT read files under `tests/`.
-2. EDIT files anywhere in the repository except under `tests/`. (NEVER edit files under `tests/`.)
-3. WRITE new files anywhere in the repository except under `tests/`. (NEVER write files under `tests/`.)
+2. EDIT files within `src/mvmctl/`, `scripts/`, `benchmarks/`, `docs/`, `stubs/`, and `pyproject.toml` — never outside these areas, and never under `tests/`.
+3. WRITE new files within `src/mvmctl/`, `scripts/`, `benchmarks/`, `docs/`, `stubs/`, and `pyproject.toml` — never outside these areas, and never under `tests/`.
 4. Run linters: `uv run ruff check src/`, `uv run ruff format --check src/`, `uv run mypy src/`.
 5. Run tests ONLY when explicitly asked: `uv run scripts/run_tests.py --pytest-extra "--cov=src/mvmctl -n auto --cov-fail-under=80"`.
 
@@ -535,7 +535,7 @@ Every architectural decision is weighed against runtime cost. For a CLI tool, th
 ## REFACTORING PROCESS
 
 ### Step 1: Read Source
-Read the relevant existing code to understand what needs to be refactored.
+Read the relevant existing code to understand what needs to be refactored. For understanding architectural decisions behind the code, consult `docs/adr/` — Architecture Decision Records.
 
 ### Step 2: Identify Target
 Determine where the code should go based on architecture rules:

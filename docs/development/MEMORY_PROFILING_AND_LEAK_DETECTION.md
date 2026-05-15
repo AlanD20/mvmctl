@@ -93,7 +93,7 @@ Flagged potential leaks (Peak > 500.0 MB):
 
 - Only works on pytest-discoverable targets (tests, not arbitrary scripts)
 - Measures RSS, not Python heap specifically (includes interpreter overhead)
-- The profiler always passes `--no-cov` and `--timeout=60` to pytest; results reflect bare test overhead, not coverage instrumentation
+- The profiler always passes `--no-cov` to pytest; results reflect bare test overhead, not coverage instrumentation
 
 ---
 

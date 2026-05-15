@@ -1,4 +1,10 @@
 #!/bin/bash
+# ======================================================================
+# ARCHIVED — Historical script from an earlier project phase.
+# This script references directories (assets/keys/, multi-vm/env/) and
+# workflows that no longer exist in the current project.
+# Do NOT run this script. See CONTEXT.md for current usage.
+# ======================================================================
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

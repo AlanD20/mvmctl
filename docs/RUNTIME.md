@@ -57,7 +57,7 @@ Provisioning backends handle root filesystem operations: resizing, SSH key injec
   - `core/_shared/_provisioner/_backend.py` — `_LoopMountBackend` (adapter, delegates to `LoopMountProvisioner`)
   - `core/_shared/_provisioner/_content.py` — `ProvisionerContent` (shared operation builders)
 
-### 1.2 GuestFS Backend (Fallback, ~2600ms)
+### 1.2 GuestFS Backend (Opt-in, ~2600ms)
 
 - **Factory name:** `ProvisionerType.GUESTFS`
 - **Binary:** libguestfs Python module + supermin QEMU appliance
@@ -68,7 +68,7 @@ Provisioning backends handle root filesystem operations: resizing, SSH key injec
 - **Speed:** ~2600ms per VM (QEMU appliance launch is the dominant cost)
 - **Dependencies:** `python3-libguestfs` (system package, not on PyPI), `supermin`, `qemu`, libguestfs fixed appliance
 - **Sudo:** Requires passwordless sudo for `supermin`
-- **Used when:** Loop-mount binary is unavailable (`mvm-provision` not extracted or sudo not configured)
+- **Used when:** GuestFS is enabled via the `guestfs_enabled` setting (opt-in). Falls back to loop-mount when GuestFS is not enabled.
 - **Capabilities:** Same as Loop-Mount (same operations via different mechanism)
 - **Key Differences from Loop-Mount:**
   - Uses `libguestfs` Python API instead of JSON subprocess protocol
@@ -328,7 +328,20 @@ else:
 
 ---
 
-## 4. Selection Guide
+## 4. Firewall Backends
+
+mvmctl supports two firewall backends for NAT, forwarding rules, and nocloud-net access control:
+
+| Backend | Default | Files |
+|---------|---------|-------|
+| **nftables** | Yes (setting `firewall_backend: nftables`) | `core/_shared/_nftables_tracker/` (tracker, repository, resolver) |
+| **iptables** | Fallback | `core/_shared/_iptables_tracker/` (tracker, repository, resolver) |
+
+A unified `FirewallTracker` in `core/_shared/_firewall_tracker.py` delegates to the active backend. The backend is selected via the `firewall_backend` setting. When nftables NAT is unavailable (kernel module `nft_chain_nat` missing), mvmctl falls back to iptables automatically during `mvm host init`.
+
+---
+
+## 5. Selection Guide
 
 | Scenario | Recommended Backend | Rationale |
 |----------|-------------------|-----------|
@@ -343,7 +356,7 @@ else:
 
 ---
 
-## 5. Performance Comparison
+## 6. Performance Comparison
 
 | Operation | Loop-Mount | GuestFS | Improvement |
 |-----------|-----------|---------|-------------|
@@ -356,11 +369,11 @@ else:
 | NoCloud server startup | ~50ms | N/A | — |
 | OS detection | ~100ms | ~600ms | **6x faster** |
 
-The loop-mount backend is the default and preferred path. GuestFS is only used as a fallback when the compiled `mvm-provision` binary is unavailable or its sudoers entry is missing.
+The loop-mount backend is the default and preferred path. GuestFS is an opt-in alternative enabled via the `guestfs_enabled` setting.
 
 ---
 
-## 6. Binary Embedding & Build
+## 7. Binary Embedding & Build
 
 All service binaries are compiled into a single `mvm-services` binary via Nuitka's multidist feature:
 
@@ -392,7 +405,7 @@ Only `mvm-provision` requires passwordless sudo. Managed by `HostService._genera
 
 ---
 
-## 7. Architecture Diagram
+## 8. Architecture Diagram
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐

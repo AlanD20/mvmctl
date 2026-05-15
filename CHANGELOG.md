@@ -113,7 +113,7 @@ Initial release of mvmctl -- a production-grade Python CLI for managing Firecrac
 - Man page (`mvm.1`)
 
 #### Performance
-- CLI startup under 150ms via lazy-loading LazyMVMGroup
+- CLI startup under 200ms via lazy-loading LazyMVMGroup
 - Batch relation loading with deduplication (O(relations) queries, not O(entities x relations))
 - Durable incremental image copying with reflink support (instant copy on btrfs/XFS)
 - SQL-level computation (COUNT, WHERE IN) instead of fetch-all + Python filtering
