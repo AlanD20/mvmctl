@@ -343,10 +343,24 @@ build/symlinks/
 └── mvm-provision       → src/mvmctl/services/loopmount/process.py
 ```
 
-Then builds with:
+Then builds using the flag set defined in `SERVICE_FLAGS` in `scripts/build_services.py`:
 
 ```bash
-nuitka --onefile --lto=yes --enable-plugin=anti-bloat ... \
+nuitka --onefile --lto=yes --enable-plugin=anti-bloat \
+  --python-flag=no_docstrings --python-flag=no_asserts \
+  --nofollow-import-to='*.tests' --nofollow-import-to='*.distutils' \
+  --nofollow-import-to='*.unittest' --nofollow-import-to='*.venv' \
+  --nofollow-import-to='*.ctypes' --nofollow-import-to='*.email' \
+  --nofollow-import-to='*.xml' --nofollow-import-to='*.logging' \
+  --nofollow-import-to='*.http' --nofollow-import-to='*.urllib' \
+  --nofollow-import-to='*.pdb' --nofollow-import-to='*.inspect' \
+  --nofollow-import-to='*.pydoc' --nofollow-import-to='*.ensurepip' \
+  --noinclude-setuptools-mode=error --noinclude-pytest-mode=error \
+  --noinclude-unittest-mode=error --noinclude-pydoc-mode=error \
+  --deployment --python-flag=isolated --python-flag=no_site \
+  --remove-output --noinclude-default-mode=nofollow \
+  --noinclude-IPython-mode=nofollow --noinclude-numba-mode=nofollow \
+  --noinclude-dask-mode=nofollow --nofollow-import-to=pkg_resources \
   --main=build/symlinks/mvm-console-relay \
   --main=build/symlinks/mvm-nocloud-server \
   --main=build/symlinks/mvm-provision \
@@ -357,7 +371,7 @@ The main binary includes the combined service binary via `--include-data-dir=dis
 
 The existing `Taskfile.yml` `build-nuitka` task handles the main binary only. The script handles the full build chain.
 
-Supports `--services`, `--service <name>`, and `--mvm` flags for partial builds.
+Supports `--services` and `--service <name>` flags for partial builds.
 
 ### Extraction (`mvm init`, Step 5)
 
@@ -381,7 +395,7 @@ if combined_src is not None:
         repo.upsert(BinaryItem(id=sha256, name=name, path=name, ...))
 ```
 
-Development mode (`sys.frozen` is False) is a no-op — binaries don't exist, managers fall back to `sys.executable -m ...`.
+Development mode (`is_compiled_mode()` returns False in `constants.py`) is a no-op — binaries don't exist, managers fall back to `sys.executable -m ...`. The `is_compiled_mode()` function checks multiple conditions (`sys.frozen`, `builtins.__compiled__`, and the `/onefile_` path in `sys.executable`) to reliably detect Nuitka onefile builds.
 
 All service binary names are defined in `constants.py`:
 ```python

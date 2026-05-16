@@ -136,9 +136,23 @@ os.environ["QEMU_LOCKING"] = "off"
 
 ### 10. Fixed Appliance (Automatic) ✅ IMPLEMENTED
 
-`GuestfsService.build_appliance()` at `core/_shared/_guestfs/_service.py:25` attempts to build a fixed appliance during `mvm cache init` (called from `CacheOperation.initialize()` at `api/cache_operations.py:127`). It runs `libguestfs-make-fixed-appliance` if available on the system. If the tool is not installed, it silently skips the build (returns `None`).
+`GuestfsService.build_appliance()` at `core/_shared/_guestfs/_service.py` attempts to build a fixed appliance during `mvm cache init` (called from `CacheOperation.initialize()` at `api/cache_operations.py`). It runs `libguestfs-make-fixed-appliance` if available on the system. If the tool is not installed, it silently skips the build (returns `None`).
 
-**Code reference:** `src/mvmctl/core/_shared/_guestfs/_service.py` line 25
+Before building, it calls `GuestfsService.clean_stale_guestfs_state()` to kill abandoned QEMU/guestfish processes, remove stale lock files, daemon sockets, and cached appliance directories that could cause the appliance build to hang.
+
+**Code reference:** `src/mvmctl/core/_shared/_guestfs/_service.py` — `build_appliance()` and `clean_stale_guestfs_state()` methods.
+
+### 11. Kernel Detection for Appliance (Automatic) ✅ IMPLEMENTED
+
+`OptimizedGuestfs._setup_environment()` uses `KernelDetector.find_best_kernel()` in `_base.py` to select the optimal host kernel for the libguestfs appliance. The detector scans `/boot` for kernel images, uses the `file` command to extract version strings, and scores candidates based on virtio module availability and whether the kernel looks like a custom build. Kernels with more virtio drivers (critical for guestfs) are ranked higher. The selected kernel is passed to the appliance via `SUPERMIN_KERNEL` and `SUPERMIN_MODULES` environment variables.
+
+**Code reference:** `src/mvmctl/core/_shared/_guestfs/_kernel_detector.py` — `KernelDetector.find_best_kernel()`.
+
+### 12. Retry Logic in `__enter__()` ✅ IMPLEMENTED
+
+The `OptimizedGuestfs.__enter__()` context manager (in `_base.py`) wraps `_create_handle()` and `g.launch()` in a retry loop with up to 3 attempts and 0.5s backoff between retries. Between each attempt, the previous handle is closed cleanly. This handles transient QEMU launch failures (resource contention, kernel detection race) without aborting the entire provisioning operation.
+
+**Code reference:** `src/mvmctl/core/_shared/_guestfs/_base.py` — `OptimizedGuestfs.__enter__()`.
 
 ## Recommended Implementation Pattern
 
@@ -219,4 +233,6 @@ finally:
 | 7 | Format + cache mode (`cachemode="writeback"`) | ✅ | `_base.py:88-93` |
 | 8 | Appliance cache in RAM (`/dev/shm`) | ✅ | `_base.py:47-48` |
 | 9 | QEMU lock disable (`QEMU_LOCKING=off`) | ✅ | `_base.py:51` |
-| 10 | Fixed appliance | ✅ | `_service.py:25` (via `cache init`) |
+| 10 | Fixed appliance | ✅ | `_service.py` `build_appliance()` (via `cache init`) |
+| 11 | Kernel detection (`KernelDetector.find_best_kernel()`) | ✅ | `_kernel_detector.py` |
+| 12 | Retry logic (3 attempts, 0.5s backoff in `__enter__`) | ✅ | `_base.py` `__enter__()` |

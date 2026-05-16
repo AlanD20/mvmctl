@@ -202,7 +202,7 @@ The two features are **independent** and can be implemented in parallel or seque
 | After volumes | [IMPROVEMENTS_004.md](IMPROVEMENTS_004.md) | `--from-volume` — full-disk boot from a volume | ❌ Pending |
 | After `--count` stable | [IMPROVEMENTS_005.md](IMPROVEMENTS_005.md) | Resource grouping (batch ID) | ❌ Pending |
 | Any time | [IMPROVEMENTS_006.md](IMPROVEMENTS_006.md) | JSON output mode | ⚠️ Partially Implemented |
-| When needed | [IMPROVEMENTS_007.md](IMPROVEMENTS_007.md) | nftables for iptables at scale | ❌ Pending |
+| When needed | [IMPROVEMENTS_007.md](IMPROVEMENTS_007.md) | nftables for iptables at scale | ✅ Done |
 
 ---
 

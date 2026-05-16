@@ -5,8 +5,8 @@ This document describes the four bundled YAML/template files that drive asset ma
 
 All four files live under `src/mvmctl/assets/` and are packaged into the installed
 wheel. They are read-only at runtime — user overrides are resolved from the SQLite
-database (`~/.cache/mvmctl/mvmdb.db`), runtime config (`~/.config/mvmctl/config.json`),
-and `MVM_*` environment variables, not by editing these files directly.
+database (`~/.cache/mvmctl/mvmdb.db`) and `MVM_*` environment variables, not by editing
+these files directly.
 
 The asset YAML files are:
 - `images.yaml` — catalogue of image types with version resolvers
@@ -96,6 +96,7 @@ image_types:
 | `file_discovery.pattern` | file_discovery | Filename prefix pattern to match when scanning directory listings. |
 | `file_discovery.suffix` | file_discovery | Filename suffix to match (e.g. `"-bios-cloudinit-r"`). |
 | `file_discovery.sha256_suffix` | file_discovery | Checksum file suffix for file-discovery types (e.g. `".sha512"` for Alpine). |
+| `convert_to` | single-source | Target filesystem format for single-source types that need conversion (e.g. `ext4`). |
 
 ### SHA-256 semantics
 
@@ -300,21 +301,10 @@ and other fixed values.
 
 ---
 
-## Configuration priority
-
-Values are resolved in this order, from lowest to highest precedence:
-
-```
-1. `OVERRIDABLE_DEFAULTS` dict in `constants.py` (fallback defaults — these are the floor)
-2. SQLite database (`~/.cache/mvmctl/mvmdb.db`) — canonical store for asset defaults (`is_default` markers) and runtime state
-3. Runtime config file: `~/.config/mvmctl/config.json` for user overrides  
-4. `MVM_*` environment variables (e.g. MVM_CACHE_DIR, MVM_KERNEL)
-5. CLI flags (e.g. --out, --force, --arch)
-```
-
 `images.yaml` and `kernels.yaml` define the available asset catalogue and are not part
-of this priority chain. They cannot be overridden at runtime — to use a different image
-source, add it to `images.yaml` and reinstall, or use `mvm image import` for local files.
+of the [configuration priority chain](REFERENCES.md#configuration). They cannot be overridden
+at runtime — to use a different image source, add it to `images.yaml` and reinstall,
+or use `mvm image import` for local files.
 
 ---
 
@@ -376,7 +366,7 @@ The new type should appear in the table. Fetch it to confirm end-to-end:
 uv run mvm image pull --type fedora --version 40
 ```
 
-> **Note:** The `id` shown in `mvm image ls` is auto-generated as `{type}-{version}` (e.g. `fedora-40`). You do not specify it directly in the YAML.
+> **Note:** The `id` shown in `mvm image ls` is a SHA-256 hash generated from the type, download URL, and timestamp. It is NOT derived from `{type}-{version}`. You do not specify the ID in the YAML — it is computed at pull time via `HashGenerator.image()`.
 
 ---
 
@@ -408,5 +398,5 @@ the constants relevant to asset management.
 
 ---
 
-*See also: [CUSTOM_KERNEL.md](CUSTOM_KERNEL.md) for the kernel build workflow,
+*See also: [KERNEL.md](KERNEL.md) for the kernel build workflow,
 [API.md](API.md) for the Python API reference.*

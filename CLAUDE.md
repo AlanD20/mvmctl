@@ -34,7 +34,7 @@ uv run ruff check src/ && uv run ruff format --check src/ && uv run mypy src/  #
 
 # Build standalone binary (Nuitka — recommended)
 uv sync --group dev --group build
-python scripts/build_services.py --mvm          # Build main mvm binary only
+python scripts/build_services.py                # Build everything (default)
 # Output: dist/mvm
 ```
 
@@ -56,7 +56,7 @@ src/mvmctl/
 stubs/               # Type stubs for external dependencies (guestfs.pyi, psutil.pyi)
 packaging/           # Distribution packaging configs (.deb, .rpm, PKGBUILD)
 scripts/             # Build & release helper scripts (build_services.py, profile_test_memory.py, run_tests.py, setup-test-environment.py)
-tests/               # 164 test_*.py files + 2 helpers (166 Python files total) across 5 top-level directories (119 unit + 18 integration + 20 system + 7 layer_compliance + 2 helpers)
+tests/               # 229 Python files across 5 top-level directories + root + helpers (139 unit + 20 integration + 58 system + 8 layer_compliance + 2 root + 2 helpers)
 docs/                # Project documentation
   ├── adr/           # 17 ADR files (15 unique ADR numbers: 0001-0015)
   ├── analyses/      # Technical analyses
@@ -64,7 +64,7 @@ docs/                # Project documentation
   ├── implementations/ # Implementation plans
   ├── improvements/  # Improvement proposals
   └── optimizations/ # Optimization strategies
-legacy/              # Pre-refactor phase documentation & assets (51 files inc. phase docs, bash scripts)
+legacy/              # Pre-refactor phase documentation & assets (25 files inc. phase docs, bash scripts)
 pyproject.toml       # Build, ruff, mypy strict, pytest (80% branch coverage gate)
 ```
 

@@ -118,9 +118,9 @@ All code should pass ruff with no errors. mypy is configured with `--strict`; ne
 2. Add a new Typer command function. Follow the existing pattern:
    ```python
    @app.command()
-   def my_command(
-       name: str = typer.Option(..., "--name", help="VM name"),
-   ) -> None:
+    def my_command(
+        name: str = typer.Argument(..., help="VM name"),
+    ) -> None:
        """Short description shown in --help."""
        from mvmctl.api import VMOperation, VMCreateInput
 
@@ -135,27 +135,120 @@ For entirely new command groups, create a `src/mvmctl/cli/mygroup.py` Typer app 
 
 ## Adding a New Image Type
 
-Image specifications are defined in YAML config files and loaded using the `ImageSpec` model
-(`src/mvmctl/models/image.py`). Each entry describes where to download an image, its source
-format, and how to convert it for use with Firecracker.
+Image types are defined in `src/mvmctl/assets/images.yaml` and describe how to discover,
+download, and verify cloud images for use with Firecracker. Each entry is a YAML mapping
+under the `image_types:` list key. The internal `ImageSpec` model (`src/mvmctl/models/image.py`)
+is constructed **from** these config entries and represents a resolved, version-pinned image
+ready for download — it is **not** a 1:1 serialization of the YAML format.
 
-**Steps to add a new image:**
+### images.yaml Format
 
-1. Open (or create) the images YAML config at `src/mvmctl/assets/images.yaml`.
-2. Add an entry following the `ImageSpec` schema:
+```yaml
+image_types:
+  - type: <string>              # Unique type key (e.g. "ubuntu", "debian", "alpine")
+    name: <string>              # Human-readable display name
+    resolver: <string | null>   # Version resolver strategy (see below)
+    versions_url: <string | null>  # URL template for listing available versions
+    download_url: <string>      # URL template for downloading a specific version
+    sha256_url: <string | null> # URL template for the SHA256 checksum file
+    format: <string>            # Source image format: tar-rootfs, qcow2, vhd, squashfs
+    options:                    # Resolver-specific configuration (see below)
+      ...
+```
 
-   ```yaml
-   images:
-     - id: debian-12
-       name: "Debian 12 (Bookworm)"
-       source: "https://example.com/debian-12-rootfs.tar.gz"
-       format: tar-rootfs
-       convert_to: ext4
-       size_mib: 2048
-       sha256: "abc123..."   # optional but recommended
-   ```
+### Resolver Types
 
-3. Add tests in `tests/integration/` or `tests/system/` covering the new handler or any conversion logic.
+| Resolver | Description | Example |
+|----------|-------------|---------|
+| `http-dir` | Scrapes an Apache/nginx directory listing to discover versions. Requires `versions_url` pointing to a directory index. | ubuntu, debian, alpine |
+| `firecracker-s3` | Uses S3 XML `ListBucket` requests to discover versions. Requires `list_url_template`. | firecracker CI images |
+| `null` | No version discovery — a single download URL with a pinned version. Used for rolling-release distros. | archlinux |
+
+### Options Sub-fields
+
+The `options:` block contains resolver-specific configuration:
+
+| Option | Type | Purpose | Used by |
+|--------|------|---------|---------|
+| `codename_mapping` | `map[str, str]` | Maps release codenames to version numbers (e.g. `noble → "24.04"`) | ubuntu, debian |
+| `arch_mapping` | `map[str, str]` | Maps local architecture names to upstream conventions (e.g. `x86_64 → amd64`) | all http-dir resolvers |
+| `skip_patterns` | `list[str]` | Directory listing entries to skip during version discovery | ubuntu, debian, alpine |
+| `version_prefix` | `str` | Prefix to add to discovered version strings (e.g. `"v"` for Alpine) | alpine |
+| `file_discovery` | `map` | For providers where versions are at the file level rather than subdirectories. Sub-fields: `enabled`, `pattern`, `suffix`, `sha256_suffix` | alpine |
+| `s3_version_pattern` | `str` | Regex to extract version from S3 object keys | firecracker-s3 |
+| `convert_to` | `str` | Target filesystem format to convert the downloaded image to (e.g. `ext4`) | archlinux (qcow2 → ext4) |
+| `version_name_template` | `str` | Template for the display name (uses `{codename}`, `{version}`, `{arch}` placeholders) | all resolvers |
+
+### Examples
+
+**http-dir resolver (Ubuntu):**
+
+```yaml
+image_types:
+  - type: ubuntu
+    name: "Ubuntu LTS"
+    resolver: http-dir
+    version_name_template: "Ubuntu {codename} ({version}) LTS"
+    versions_url: "https://cloud-images.ubuntu.com/releases/"
+    download_url: "https://cloud-images.ubuntu.com/{codename}/current/{codename}-server-cloudimg-{arch}-root.tar.xz"
+    sha256_url: "https://cloud-images.ubuntu.com/{codename}/current/SHA256SUMS"
+    format: tar-rootfs
+    options:
+      skip_patterns:
+        - streams
+        - releases
+        - server
+        - Parent Directory
+      codename_mapping:
+        noble: "24.04"
+        jammy: "22.04"
+        focal: "20.04"
+      arch_mapping:
+        x86_64: "amd64"
+        aarch64: "arm64"
+```
+
+**null resolver (single-source / rolling release):**
+
+```yaml
+image_types:
+  - type: archlinux
+    name: "Arch Linux"
+    resolver: null
+    version_name_template: "Arch Linux"
+    versions_url: null
+    download_url: "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-{arch}-cloudimg.qcow2"
+    sha256_url: "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-{arch}-cloudimg.qcow2.SHA256"
+    format: qcow2
+    options:
+      convert_to: ext4
+```
+
+### Adding Kernels (kernels.yaml)
+
+Kernels are defined in `src/mvmctl/assets/kernels.yaml` using a **different** top-level structure:
+
+```yaml
+kernel-official:     # Kernel set identifier
+  type: official     # "official" (build from kernel.org source) or "firecracker" (prebuilt binary)
+  version: "6.19.9"
+  resolver: http-dir
+  versions_url: "https://cdn.kernel.org/pub/linux/kernel/"
+  source: "https://cdn.kernel.org/pub/linux/kernel/v{series}.x/linux-{version}.tar.xz"
+  sha256_url: "..."
+  config_url_template: "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/resources/guest_configs/microvm-kernel-ci-{arch}-6.1.config"
+  output_name: vmlinux-official
+  options:
+    version_discoveries: ["v6.x", "v7.x"]
+    file_pattern: "linux-"
+    file_suffix: ".tar.xz"
+```
+
+Key differences from `images.yaml`:
+- Top-level keys are **named kernel set identifiers** (`kernel-official:`, `kernel-firecracker:`) rather than a list.
+- Each entry includes build configuration (`config_fragments`, `enabled_configs`, `disabled_configs`, `set_val_configs`).
+- The `source:` field points to kernel source tarballs, not pre-built images.
+- The `resolver:` can be `http-dir` (for kernel.org mirrors) or `firecracker-s3` (for Firecracker CI prebuilt kernels).
 
 ## Adding a Test
 
@@ -330,7 +423,7 @@ Rather than requiring `sudo` for every command, mvm uses a privilege delegation 
 All privileged commands must be executed within the `mvm` group context. Use the `sg mvm -c` pattern:
 ```bash
 sg mvm -c 'mvm host init'
-sg mvm -c 'mvm network create --name mynet'
+sg mvm -c 'mvm network create mynet'
 ```
 
 1. **`sudo mvm host init`** creates a system group (`mvm`) and a sudoers drop-in file

@@ -11,13 +11,24 @@ You can import the API directly to build automation scripts, GUIs, or TUIs witho
 going through the CLI. All system interactions (KVM, iptables, bridge devices) happen
 lazily — importing the package has no side effects.
 
+## Table of Contents
+
+- [Introduction](#introduction)
+- [Installation](#installation)
+- [Import Pattern](#import-pattern)
+- [Module Overview](#module-overview)
+- [Data Models](#data-models)
+- [Error Handling](#error-handling)
+- [Operation Reference](#operation-reference)
+- [End-to-End Example](#end-to-end-example)
+
 ---
 
 ## Installation
 
 ```bash
 # From source
-git clone https://github.com/your-org/mvmctl
+git clone https://github.com/AlanD20/mvmctl
 cd mvmctl
 uv sync
 ```
@@ -262,7 +273,7 @@ Full inspection data for a VM.
 
 ```python
 class CloudInitMode(StrEnum):
-    INJECT = "inject"  # Inject cloud-init files directly into rootfs via libguestfs
+    INJECT = "inject"  # Inject cloud-init files directly into rootfs via loop-mount provisioner (guestfs fallback)
     NET = "net"        # Serve cloud-init files via HTTP (nocloud-net datasource)
     OFF = "off"        # Skip cloud-init entirely (no ISO mounted)
     ISO = "iso"        # Generate cloud-init ISO from config files
@@ -449,6 +460,11 @@ Specification for building or fetching a kernel, loaded from bundled YAML.
 | `disabled_configs` | `list[str]` | Kernel config options to disable |
 | `set_val_configs` | `list[tuple[str, str]]` | Kernel config options with values |
 | `required_settings` | `list[str]` | Required kernel config settings |
+| `resolver` | `str \| None` | Version resolution strategy (`"http-dir"`, `"firecracker-s3"`, or `None`) |
+| `versions_url` | `str \| None` | URL for listing available kernel versions |
+| `options` | `dict[str, object] \| None` | Resolver-specific configuration options |
+| `file_pattern` | `str \| None` | Filename prefix pattern for matching tarball entries |
+| `file_suffix` | `str \| None` | Filename suffix for matching tarball entries |
 
 ### `mvmctl.models.binary`
 
@@ -600,7 +616,6 @@ MVMError
 │   ├── KeyDependencyError
 │   └── KeyFileError
 ├── VolumeError               — Volume operation failure
-├── VolumeError               — Volume creation or resize failure
 ├── VolumeNotFoundError       — Volume not found in registry
 ├── VersionError              — Version resolution failure
 ├── CloudInitError            — Cloud-init ISO creation failure

@@ -123,7 +123,7 @@ Your primary mission is **release readiness** — zero escaped defects that a re
 would encounter in production. When told "make project ready for release" or asked
 to run QA, you MUST:
 
-1. **BUILD** — Build the release binary via `python scripts/build_services.py --fast`
+1. **BUILD** — Build the release binary via `python scripts/build_services.py`
 2. **AUDIT** — Comprehensively audit ALL CLI commands, subcommands, and flags against
    `tests/system/` to identify blind spots. Do this FIRST every release cycle.
 3. **EXECUTE** — Run each system test file one by one at `tests/system/<domain>/`
@@ -188,7 +188,7 @@ A tautological test verifies something that must be trivially true by constructi
   the name you just passed in (the CLI prints what you gave it — proves nothing)
 - ❌ Checking that `--help` output contains "Usage:" (tests Typer, not mvmctl)
 - ❌ Asserting `returncode == 0` without verifying the downstream system state
-- ✅ Creating a resource with `--name foo`, then running `* ls --json` and asserting
+- ✅ Creating a resource (e.g. `vm create foo`), then running `* ls --json` and asserting
   the listing contains the created resource (proves the DB stored it)
 - ✅ Setting `vm default alpine-3.21`, then running `image ls --json` and asserting
   `is_default=True` on the alpine entry (proves the DB update happened)
@@ -198,8 +198,8 @@ A tautological test verifies something that must be trivially true by constructi
 ### Realistic Edge Cases Only
 
 Focus on edge cases that actually happen in real use:
-- ❌ `vm create --name "$(python3 -c 'print("A"*999)')"` (nobody does this)
-- ✅ `vm create --name test-1` then `vm create --name test-1` again (user typo)
+- ❌ `vm create "$(python3 -c 'print("A"*999)')"` (nobody does this)
+- ✅ `vm create test-1` then `vm create test-1` again (user typo)
 - ✅ `image pull alpine-3.21 --default` when alpine is already cached (idempotent)
 - ✅ `vm rm --force` on a VM that's already been removed (cleanup re-run)
 - ✅ `vm stop` then `vm attach-volume` then `vm start` (user attaching storage)
@@ -424,7 +424,7 @@ releasable.
 - `sudo` is allowed for: `mvm init`, `mvm host init`, `mvm host clean`, `mvm host reset`
 - For verbose or debug output, use the `--verbose` or `--debug` CLI flags instead of `MVM_LOG_LEVEL=DEBUG`:
   ```bash
-  sg mvm -c 'uv run mvm --debug vm create --name test-vm'
+  sg mvm -c 'uv run mvm --debug vm create test-vm'
   sg mvm -c 'uv run mvm --verbose vm ls'
   ```
   The `--debug` flag sets log level to DEBUG; `--verbose` sets it to INFO. Both are available on every command via the root `mvm` group.
@@ -471,7 +471,7 @@ Seeding the mirror (one-time):
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm kernel pull --type firecracker --default
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm image pull alpine-3.21
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm image pull ubuntu-24.04-minimal
-MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm bin pull 1.15.1 --default
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm bin pull firecracker --version 1.15.1 --default
 ```
 
 Or via Taskfile: `task sys-setup-seed`
@@ -525,9 +525,11 @@ Or via Taskfile: `task sys-setup-seed`
 
 ```bash
 uv sync --group dev --group build
-python scripts/build_services.py --fast      # Fast build for iterative testing
-python scripts/build_services.py --release    # Production (LTO, anti-bloat)
+python scripts/build_services.py              # Build everything (default)
+python scripts/build_services.py --services   # Build all service binaries only
 ```
+
+The flags control **what** to build (services, mvm, or both), not **how** — the build script always uses release-quality settings (LTO, anti-bloat, deployment mode).
 
 Output: `dist/mvm` (main binary) and `dist/services/mvm-services` (service binaries).
 

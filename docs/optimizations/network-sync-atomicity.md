@@ -1,6 +1,6 @@
 # Network Sync Atomicity — Zero-Downtime Firewall Rule Replacement
 
-> **STATUS: Current — fully accurate.** All mechanisms described below are implemented in `src/mvmctl/`. The nftables backend is the default (`settings.firewall_backend: "nftables"`); iptables is the legacy fallback. See also [ADR-0010] (firewall backend mutual exclusion) and the `CONTEXT.md` firewall backend section.
+> **STATUS: Current — corrected.** The iptables backend description was updated to reflect that `IPTablesTracker.batch_ensure_rules()` uses `iptables-restore` for atomic batch per table (not per-rule individual calls). All mechanisms described below are implemented in `src/mvmctl/`. The nftables backend is the default (`settings.firewall_backend: "nftables"`); iptables is the legacy fallback. See also [ADR-0010] (firewall backend mutual exclusion) and the `CONTEXT.md` firewall backend section.
 >
 > **Line numbers** in code references below match the current files at commit time.
 
@@ -43,10 +43,10 @@ For every network, the `is_present` flag in the database is reconciled against a
 ### Phase 3: Firewall Rule Sync
 
 ```
-network_operations.py:675-678  →  network/_service.py:924-958
+NetworkOperation.sync()  →  NetworkService.sync_iptables_rules()
 ```
 
-The core sync logic lives in `NetworkService.sync_iptables_rules()` at `src/mvmctl/core/network/_service.py:924`:
+The core sync logic lives in `NetworkService.sync_iptables_rules()` in `src/mvmctl/core/network/_service.py`:
 
 1. **Fetch active DB rules** for the network via `self._tracker.repo.get_by_network_id(network.id, active_only=True)`.
 2. **Batch-ensure each rule** inside a `FirewallTracker.batch()` context — all `ensure_rule` calls are queued and flushed atomically on context exit (nftables) or individually (iptables).
@@ -69,7 +69,7 @@ The `FirewallTracker` abstraction at `src/mvmctl/core/_shared/_firewall_tracker.
 ### nftables (default) — Atomic Batch via `nft -f -`
 
 ```
-_firewall_tracker.py:88-108  →  _nftables_tracker/_tracker.py:446-517
+FirewallTracker.batch() context  →  NFTablesTracker.batch_ensure_rules()
 ```
 
 When inside a batch context, `ensure_rule` queues the rule. On context exit, `NFTablesTracker.batch_ensure_rules()`:
@@ -89,26 +89,41 @@ run_cmd(["nft", "-f", "-"], privileged=True, input=nft_script)
 - MVM custom chains (MVM-FORWARD, MVM-POSTROUTING, MVM-NOCLOUDNET-INPUT) are **never flushed** during sync.
 - Only the system's built-in chains (FORWARD, POSTROUTING, INPUT) contain jump rules at position 0 — those are managed by `NFTablesTracker.initialize()` and are never touched during sync.
 
-### iptables (legacy) — Per-Rule Ensure
+### iptables (legacy) — Atomic Batch via `iptables-restore`
 
 ```
-_firewall_tracker.py:88-108  →  _iptables_tracker/_tracker.py:434-446
+FirewallTracker.batch() context  →  IPTablesTracker.batch_ensure_rules()
 ```
 
-The iptables backend's `batch_ensure_rules` does **not** batch at the kernel level. Each rule is processed individually:
+The iptables backend's `batch_ensure_rules` **does** use `iptables-restore` for atomic batch per table:
 
 ```python
 def batch_ensure_rules(self, rules: list[FirewallRule]) -> FirewallRuleResult:
-    for rule in rules:
-        self.ensure_rule(rule)
+    filter_rules = [r for r in rules if r.table_name == FirewallTable.FILTER]
+    nat_rules = [r for r in rules if r.table_name == FirewallTable.NAT]
+    try:
+        if filter_rules:
+            restore_input = self._build_restore_input(filter_rules, "filter")
+            run_cmd(["iptables-restore"], input=restore_input, privileged=True)
+        if nat_rules:
+            restore_input = self._build_restore_input(nat_rules, "nat")
+            run_cmd(["iptables-restore"], input=restore_input, privileged=True)
+    except ProcessError as e:
+        return FirewallRuleResult(success=False, error_message=str(e))
     return FirewallRuleResult(success=True)
 ```
 
-Each `ensure_rule` call performs:
-1. `iptables -C` to check if the rule exists (`iptables -t <table> -C <chain> ...`).
-2. `iptables -A` to add the rule only if it does not exist.
+The `_build_restore_input` method constructs an `iptables-restore`-compatible input stream for each table:
+1. `*{table}` header.
+2. Define MVM custom chains with zero counters (`:CHAIN - [0:0]`).
+3. Flush only MVM chains (`-F CHAIN`), not the entire table.
+4. Add conntrack `ESTABLISHED,RELATED` accept as the first rule in filter chains (preserves established connections during the atomic swap).
+5. Append all queued rules as `-A CHAIN ...` lines.
+6. `COMMIT` to apply the transaction.
 
-**No `iptables-restore`:** The sync path does not use `iptables-restore`. Each rule is independently checked and added. The interface exists for backward compatibility; for zero-downtime operation on iptables, the additive nature (no flush, no delete) provides safety even without atomic batch.
+**Why this is atomic per table:** `iptables-restore` applies the entire input as a single kernel transaction. The kernel either commits all changes or rejects the entire batch. There is no window where only half the rules are active. The conntrack accept rule at position 0 ensures existing flows are never disrupted during the atomic swap.
+
+**MVM chain flush is safe:** The flush targets only MVM custom chains (MVM-FORWARD, MVM-POSTROUTING, MVM-NOCLOUDNET-INPUT), not built-in chains (FORWARD, POSTROUTING, INPUT). Jump rules from built-in chains are left untouched — established by `IPTablesTracker.initialize()` and never modified during sync.
 
 ## Connection Safety
 
@@ -164,21 +179,21 @@ The jump rules at position 0 are established once by `NFTablesTracker.initialize
 
 The nftables backend avoids per-rule subprocess calls by deduplicating against the database in-process and issuing a single `nft -f -` for all new rules. The orphan scan uses 3 `nft -a list chain` calls to enumerate all rules in the three MVM chains and cross-reference them against DB records in Python.
 
-### iptables (~202 calls total)
+### iptables (~62-82 calls total)
 
 | Operation | Calls per network | Total (20 networks) |
 |-----------|------------------:|--------------------:|
 | Bridge check (`ip link show`) | 1 | 20 |
-| Per-rule `iptables -C` (10 rules) | 10 | 200 |
-| Per-rule `iptables -A` (0 if all exist) | 0 (best case) | 0 (best case) |
+| `iptables-restore` batch (filter table) | 1 | 20 |
+| `iptables-restore` batch (nat table, if any nat rules) | 0-1 | 0-20 |
 | Orphan scan (`iptables-save`) | 1 | 20 |
-| **Total subprocess calls** | **~10.1 (best case)** | **~202 (best case)** |
+| **Total subprocess calls** | **~3-4** | **~62-82** |
 
-The iptables backend pays a per-rule cost because `iptables -C` is a separate subprocess invocation for each rule. If rules are missing (worst case), each missing rule adds an additional `iptables -A` call, pushing the total toward ~402.
+The iptables backend uses `iptables-restore` per table, so the number of subprocess calls is **constant per network** regardless of how many rules need to be added — the `iptables-restore` call covers all rules in one atomic transaction per table. This makes the iptables backend's sync cost comparable to nftables (~62-82 calls vs ~62 calls for 20 networks).
 
 ### Key Insight
 
-The nftables backend is ~3× more efficient in subprocess calls for the sync operation, and critically, the number of subprocess calls is **constant per network** regardless of how many rules need to be added — the `nft -f -` call covers all new rules in one atomic transaction.
+Both backends now use atomic batch operations and have comparable subprocess call counts for the sync operation (~62 calls for nftables vs ~62-82 for iptables for 20 networks). The number of subprocess calls is **constant per network** for both backends, regardless of how many rules need to be added — `nft -f -` (nftables) and `iptables-restore` (iptables) each cover all rules in one atomic transaction per table.
 
 ## Related Documents
 

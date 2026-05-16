@@ -35,7 +35,7 @@ Stop and remove VMs by short ID or name.
 List running and stopped VMs.
 .TP
 .BR vm\ ps
-List running VMs (alias for ls).
+List running VMs (active processes).
 .TP
 .BR vm\ snapshot
 Snapshot VM memory and disk state.
@@ -66,6 +66,12 @@ Create a VM from a portable config file.
 .TP
 .BR vm\ export
 Export a VM's configuration to portable JSON.
+.TP
+.BR vm\ attach-volume
+Attach a volume to a running VM.
+.TP
+.BR vm\ detach-volume
+Detach a volume from a running VM.
 .SS Host Configuration
 .TP
 .BR host\ init
@@ -75,7 +81,7 @@ Apply host configuration (KVM, modules, ip_forward, mvm group, sudoers).
 Show current host configuration state.
 .TP
 .BR host\ clean
-Remove networking config (bridges, TAPs, iptables).
+Remove networking config (bridges, TAPs, firewall rules).
 .TP
 .BR host\ reset
 Full rollback: networking + sysctl + sudoers + group removal.
@@ -87,8 +93,14 @@ List cached kernels.
 .BR kernel\ pull
 Pull or build a kernel (official or Firecracker-optimized).
 .TP
+.BR kernel\ import
+Register a pre-built vmlinux file as a kernel.
+.TP
 .BR kernel\ default
 Set a kernel as the default for VM creation.
+.TP
+.BR kernel\ inspect
+Show detailed information about a kernel.
 .TP
 .BR kernel\ rm
 Remove a cached kernel.
@@ -127,6 +139,22 @@ Set the active Firecracker version.
 .TP
 .BR bin\ rm
 Remove a cached version.
+.SS Volume Management
+.TP
+.BR volume\ create
+Create a new persistent volume.
+.TP
+.BR volume\ rm
+Remove one or more volumes.
+.TP
+.BR volume\ ls
+List all volumes.
+.TP
+.BR volume\ inspect
+Show detailed information about a volume.
+.TP
+.BR volume\ resize
+Resize an existing volume.
 .SS Network Management
 .TP
 .BR network\ create
@@ -145,7 +173,7 @@ Show network details and IP leases.
 Set a network as the default for VM creation.
 .TP
 .BR network\ sync
-Sync iptables rules between database and host.
+Sync firewall rules between database and host.
 .SS SSH Key Management
 .TP
 .BR key\ ls
@@ -181,7 +209,7 @@ Completely clean all cache — prune everything, host clean, remove cache dir.
 .SS Other Commands
 .TP
 .BR console
-VM console access (PTY-over-vsock relay).
+VM console access (PTY relay).
 .RS
 .PP
 .B \-\-state
@@ -216,6 +244,25 @@ Show version and exit.
 .TP
 .BR help
 Show help for mvm or a subcommand.
+.SH SERVICE BINARIES
+The project ships three service binaries compiled into the \fBmvm-services\fR
+multi-call binary. These are extracted on first run via \fBmvm init\fR.
+.TP
+.BR mvm-console-relay
+Bidirectional PTY-to-socket relay for VM serial console access.
+Bridges Firecracker's serial console (Unix socket) to a host PTY,
+enabling interactive console access without SSH.
+.TP
+.BR mvm-nocloud-server
+HTTP server for the nocloud-net cloud-init datasource.
+Serves meta-data, user-data, and network-config to VMs during
+cloud-init provisioning.
+.TP
+.BR mvm-provision
+Privileged helper for loop-mount provisioning of root filesystem
+images. Handles partition detection, mounting, file operations,
+chroot commands, and filesystem resize (ext4/btrfs grow and shrink).
+Requires passwordless sudo access.
 .SH ENVIRONMENT
 .TP
 .BR MVM_CACHE_DIR
@@ -228,7 +275,13 @@ Override config directory (default: ~/.config/mvmctl).
 Override Firecracker binary path.
 .TP
 .BR MVM_LOG_LEVEL
-Set log level (DEBUG, INFO, WARNING, ERROR).
+Set log level (DEBUG, INFO, WARNING, ERROR, default: WARNING).
+.TP
+.BR MVM_ASSET_MIRROR
+Local mirror directory for downloaded assets (default: not set).
+.TP
+.BR MVM_TEMP_DIR
+Override temp directory (default: /tmp/mvmctl).
 .SH FILES
 .TP
 .I ~/.cache/mvmctl/
@@ -260,7 +313,7 @@ $ mvm image pull ubuntu:24.04
 Create and start a VM:
 .RS
 .nf
-$ mvm vm create --name myvm --image ubuntu:24.04
+$ mvm vm create myvm --image ubuntu:24.04
 $ mvm logs myvm --follow
 $ mvm ssh myvm
 .fi
@@ -278,7 +331,7 @@ Network management:
 .RS
 .nf
 $ mvm network create mynet --subnet 10.1.0.0/16
-$ mvm vm create --name myvm2 --image ubuntu:24.04 --network mynet
+$ mvm vm create myvm2 --image ubuntu:24.04 --network mynet
 .fi
 .RE
 .PP
@@ -296,7 +349,7 @@ KVM access (/dev/kvm) - add user to kvm group
 .IP \(bu 2
 Python 3.13+
 .IP \(bu 2
-System packages: iproute2, iptables, cloud-localds (cloud-image-utils on Debian/Ubuntu, cloud-utils on Arch), qemu-utils
+System packages: iproute2, iptables, nftables, qemu-utils
 .SH NOTES
 .IP \(bu 2
 After \fBsudo mvm host init\fR, normal mvm commands require no sudo.
@@ -309,6 +362,7 @@ CLI displays only first 6 characters of hashes as short IDs.
 .SH SEE ALSO
 .BR firecracker (1),
 .BR iptables (8),
+.BR nft (8),
 .BR ip (8)
 .SH BUGS
 Report bugs at: https://github.com/AlanD20/mvmctl/issues

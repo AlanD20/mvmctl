@@ -1,254 +1,217 @@
 # mvmctl Dependencies
 
-This document lists all external binary and system-level dependencies required for `mvmctl` to function correctly.
+This document lists all external binary and system-level dependencies required for `mvmctl`
+to function correctly, organized by necessity: what you always need vs what's only needed
+for specific features or chosen backends.
 
-## 1. Core Runtime Dependencies
+## Table of Contents
 
-These binaries are required for basic operations like managing VMs, networking, and host initialization.
+- [Required (Every Install)](#a-required-every-install)
+- [Firewall Backend (Choose One)](#b-firewall-backend-choose-one)
+- [Image & Storage](#c-image--storage)
+- [Cloud-Init](#d-cloud-init)
+- [Image Provisioning Backend (Choose One)](#e-image-provisioning-backend-choose-one)
+- [Kernel Build (Optional)](#f-kernel-build-optional)
+- [Host System Requirements](#g-host-system-requirements)
+- [Command Dependency Map](#h-command-dependency-map)
 
-| Binary | Category | Purpose | Package (Debian/Ubuntu) | Package (Arch) |
-| :--- | :--- | :--- | :--- | :--- |
-| `firecracker` + `jailer` | Core | MicroVM VMM + security isolation | Managed via `mvm bin pull` | Managed via `mvm bin pull` |
-| `ip` | Network | Bridge and TAP interface management | `iproute2` | `iproute2` |
-| `iptables` | Network | NAT and firewall rule management | `iptables` | `iptables` |
-| `nft` | Network | nftables firewall (alternative to iptables, default backend) | `nftables` | `nftables` |
-| `sysctl` | System | Enabling IP forwarding on the host | `procps` | `procps-ng` |
-| `sudo` | Privilege | Running `mvm host init` and privileged commands | `sudo` | `sudo` |
-| `groupadd` | Privilege | Creating the `mvm` system group | `passwd` | `shadow` |
-| `usermod` | Privilege | Adding users to the `mvm` group | `passwd` | `shadow` |
-| `groupdel` | Privilege | Removing the `mvm` group on `mvm host reset` | `passwd` | `shadow` |
-| `visudo` | Privilege | Validating sudoers drop-in files | `sudo` | `sudo` |
-| `lsmod` | Kernel | Checking for KVM module status | `kmod` | `kmod` |
-| `modprobe` | Kernel | Loading required KVM modules | `kmod` | `kmod` |
-| `dumpe2fs` | Filesystem | Filesystem inspection (image import) | `e2fsprogs` | `e2fsprogs` |
-| `iptables-save` | Network | Persisting iptables rules for reboot survival (optional — only used when available) | `iptables` | `iptables` |
-| `mvm-provision` | Provisioning | Loop-mount rootfs provisioning (symlink to combined multidist binary `mvm-services`) | Managed via `mvm init` | Managed via `mvm init` |
-| `mvm-console-relay` | Provisioning | PTY-over-vsock console relay service (symlink to `mvm-services`) | Managed via `mvm init` | Managed via `mvm init` |
-| `mvm-nocloud-server` | Provisioning | NoCloud-net metadata/IPv4 HTTP server (symlink to `mvm-services`) | Managed via `mvm init` | Managed via `mvm init` |
+---
 
-> **Firewall backend**: The `firewall_backend` setting (default: `nftables`) controls whether mvmctl uses `nft` or `iptables` for firewall rules.
+## A. Required (Every Install)
 
+These binaries must be present on the host for basic mvmctl operation. The `mvm init` wizard
+checks for them automatically.
 
-## 2. Image & Cloud-Init Dependencies
+| Binary | Purpose | Debian/Ubuntu | Arch |
+|--------|---------|---------------|------|
+| `sudo` | Privilege escalation for `mvm host init` and privileged ops | `sudo` | `sudo` |
+| `groupadd` | Creating the `mvm` system group | `passwd` | `shadow` |
+| `usermod` | Adding users to the `mvm` group | `passwd` | `shadow` |
+| `groupdel` | Removing the `mvm` group on `mvm host reset` | `passwd` | `shadow` |
+| `visudo` | Validating sudoers drop-in files | `sudo` | `sudo` |
+| `ip` | Bridge and TAP interface management | `iproute2` | `iproute2` |
+| `modprobe` | Loading KVM and networking kernel modules | `kmod` | `kmod` |
+| `lsmod` | Checking KVM module status | `kmod` | `kmod` |
+| `sysctl` | Enabling IP forwarding | `procps` | `procps-ng` |
+| `ssh-keygen` | Generating SSH keypairs for microVMs | `openssh-client` | `openssh` |
+| `tar` | Extracting rootfs from tarballs | `tar` | `tar` |
 
-These binaries are required for importing images, converting formats, and generating Cloud-Init seeds.
+---
 
-| Binary | Category | Purpose | Package (Debian/Ubuntu) | Package (Arch) |
-| :--- | :--- | :--- | :--- | :--- |
-| `qemu-img` | Image | Converting and resizing disk images | `qemu-utils` | `qemu-img` |
-| `sfdisk` | Image | Partition table manipulation | `util-linux` | `util-linux` |
-| `parted` | Image | Machine-parseable partition table reading (fallback when `sfdisk` unavailable) | `parted` | `parted` |
-| `blkid` | Image | Detecting root partitions and UUIDs | `util-linux` | `util-linux` |
-| `mount` | Image | Mounting images for rootfs extraction | `util-linux` | `util-linux` |
-| `umount` | Image | Unmounting images | `util-linux` | `util-linux` |
-| `truncate` | Image | Creating sparse files for new images | `coreutils` | `coreutils` |
-| `dd` | Image | Raw block-level file copy (`ImageService._copy_with_dd()`) | `coreutils` | `coreutils` |
-| `du` | Image | Disk usage reporting (`ImageService.create_ext4_from_tar()`) | `coreutils` | `coreutils` |
-| `chmod` | System | Changing file permissions (used extensively across all domains) | `coreutils` | `coreutils` |
-| `mkfs.ext4` | Image | Formatting extracted rootfs images | `e2fsprogs` | `e2fsprogs` |
-| `unsquashfs` | Image | Extracting rootfs from SquashFS images | `squashfs-tools` | `squashfs-tools` |
-| `tar` | Archive | Extracting rootfs from tarballs | `tar` | `tar` |
-| `cloud-localds` | Cloud-Init | Creating `nocloud` seed ISOs (ISO mode only) | `cloud-image-utils` | `cloud-utils` |
-| `ssh-keygen` | Remote | Generating SSH keypairs for microVMs | `openssh-client` | `openssh` |
-| `zstandard` (Python) | Image | Compressing and decompressing images via zstd (`core/image/_service.py`) | `pip install zstandard` or `uv sync` | `pip install zstandard` or `uv sync` |
+## B. Firewall Backend (Choose One)
 
-## 3. Image Provisioning Dependencies (Optional — Two Paths)
+mvmctl supports two firewall backends for NAT and forwarding rules. **nftables is the
+default** (`settings.firewall_backend: "nftables"`). Only one backend needs to be installed.
 
-`mvm vm create` can provision the root filesystem via **two paths**:
+| Backend | Binary | Debian/Ubuntu | Arch | Notes |
+|---------|--------|---------------|------|-------|
+| **nftables** (default) | `nft` | `nftables` | `nftables` | Modern, atomic batch, no legacy split |
+| iptables | `iptables` | `iptables` | `iptables` | Legacy; also needs `iptables-save` + `iptables-restore` for rule persistence |
 
-| Aspect | libguestfs Path | Loop-Mount (mvm-provision) Path |
-| :--- | :--- | :--- |
-| **Binary** | `guestfs` Python module + supermin appliance | `mvm-provision` (symlink to combined `mvm-services` multidist binary) |
-| **Speed** | ~2600–3000ms per VM | ~200ms per VM |
-| **Sudo** | `supermin` needs passwordless sudo | `mvm-provision` needs passwordless sudo |
-| **Python dep** | Requires system `python3-libguestfs` (not on PyPI) | Zero Python deps (stdlib only) |
-| **System tools** | Depends on supermin + guestfs appliance | Uses direct `losetup`/`mount`/`chroot`/`resize2fs`/`btrfs` |
-| **Fallback** | Used when `mvm-provision` binary unavailable or `sudo` not configured | Primary path when compiled binary is installed and sudo configured |
-| **Availability** | Checked at `mvm init`, stored as `settings.guestfs_enabled` | Installed at `mvm init` via binary extraction |
-
-### 3.1 libguestfs Path
-
-For cloud-init injection into disk images via injection mode (`--cloud-init-mode inject`), mvmctl can use libguestfs. This requires both system libraries and Python bindings.
-
-#### System Packages (Required for Runtime)
-
-These provide the libguestfs C library, appliance tools, and supermin:
-
-**Debian/Ubuntu:**
+**Switch backends at any time:**
 ```bash
-sudo apt-get install libguestfs0 libguestfs-tools supermin
+mvm config set settings firewall_backend nftables   # default
+mvm config set settings firewall_backend iptables
+mvm network sync                                    # reload rules
 ```
 
-**RHEL/CentOS/Fedora:**
-```bash
-sudo dnf install libguestfs libguestfs-tools supermin
-```
+---
 
-**Arch Linux:**
-```bash
-sudo pacman -S libguestfs supermin
-```
+## C. Image & Storage
 
-#### Python Bindings (Required for Development/Builds)
+These are required for pulling, importing, and converting VM images.
 
-The Python `guestfs` module is needed when:
-- Running mvmctl from source with direct injection mode
-- Building standalone binaries with guestfs support
+| Binary | Purpose | Debian/Ubuntu | Arch |
+|--------|---------|---------------|------|
+| `qemu-img` | Image conversion and resize | `qemu-utils` | `qemu-img` |
+| `mkfs.ext4` | Formatting extracted rootfs images | `e2fsprogs` | `e2fsprogs` |
+| `blkid` | Detecting root partitions and UUIDs | `util-linux` | `util-linux` |
+| `sfdisk` | Partition table manipulation | `util-linux` | `util-linux` |
+| `dumpe2fs` | Filesystem inspection | `e2fsprogs` | `e2fsprogs` |
+| `truncate` | Creating sparse files for new images | `coreutils` | `coreutils` |
+| `dd` | Raw block-level file copy | `coreutils` | `coreutils` |
+| `du` | Disk usage reporting | `coreutils` | `coreutils` |
+| `chmod` | File permission changes (used across all domains) | `coreutils` | `coreutils` |
+| `unsquashfs` | Extracting SquashFS images | `squashfs-tools` | `squashfs-tools` |
 
-**Install via system package manager (required — `guestfs` is not on PyPI):**
+**Python library:** `zstandard` — for zstd compression/decompression of images.
+Bundled into the compiled binary; included via `uv sync` when running from source.
 
-**Debian/Ubuntu:**
-```bash
-sudo apt-get install python3-libguestfs
-```
+---
 
-**RHEL/CentOS/Fedora:**
-```bash
-sudo dnf install python3-libguestfs
-```
+## D. Cloud-Init
 
-**Arch Linux:**
-```bash
-sudo pacman -S libguestfs supermin  # Python bindings included in libguestfs package
-```
+Required when using cloud-init to configure VMs.
 
-> **Note:** The `guestfs` Python package is **not available on PyPI** and cannot be installed via
-> `uv` or `pip`. There is no `--group guestfs` dependency group in this repository.
-> You must install the Python bindings through your distribution's package manager before
-> building or running mvmctl from source with direct injection mode.
+| Binary | Purpose | Debian/Ubuntu | Arch | Required For |
+|--------|---------|---------------|------|-------------|
+| `cloud-localds` | Creating nocloud seed ISOs | `cloud-image-utils` | `cloud-utils` | ISO mode (`--cloud-init-mode iso`) |
+| `ssh-keygen` | Generating SSH keypairs | `openssh-client` | `openssh` | Already listed in §A |
 
-#### Guestfs Sudoers Configuration
+---
 
-libguestfs uses `supermin` to build the appliance. Add to `/etc/sudoers.d/mvm`:
+## E. Image Provisioning Backend (Choose One)
 
-```
-%mvm ALL=(ALL) NOPASSWD: /usr/bin/supermin
-```
+Both `mvm vm create` (rootfs provisioning) and `mvm image pull`/`mvm image import`
+(image optimization — shrink, deblob, OS detection) use the same provisioning backend.
+**Loop-mount is the default and recommended** (~200ms per VM).
 
-Or if supermin is in a different location:
+### E1. Loop-Mount (Default)
 
-```
-%mvm ALL=(ALL) NOPASSWD: /usr/libexec/supermin/*
-```
+The `mvm-provision` binary is a symlink to the combined `mvm-services` multidist binary
+(compiled via Nuitka). It uses system tools directly — no Python dependencies beyond stdlib.
 
-#### Guestfs Verification
+**Installed by:** `mvm init` (extracts `mvm-provision` from the `mvm-services` bundle).
 
-Check libguestfs is working:
-
-```bash
-python3 -c "import guestfs; print('libguestfs available')"
-```
-
-Check supermin sudoers entry:
-
-```bash
-sg mvm -c 'sudo -n /usr/bin/supermin --version'
-```
-
-### 3.2 Loop-Mount (mvm-provision) Path (Primary)
-
-The `mvm-provision` binary is a symlink to the combined `mvm-services` multidist binary (compiled via Nuitka). It provisions root filesystem images directly via loop-mount, without libguestfs. It reads JSON operations from stdin, performs all operations via system tools, and writes JSON results to stdout.
-
-**The binary uses only stdlib Python — zero external Python dependencies.** It communicates with system tools via subprocess.
-
-#### System Binaries Required
-
-| Binary | Purpose | Package (Debian/Ubuntu) | Package (Arch) |
-| :--- | :--- | :--- | :--- |
-| `losetup` | Setting up and detaching loop devices with partition scanning | `util-linux` | `util-linux` |
-| `blkid` | Detecting filesystem type of each partition | `util-linux` | `util-linux` |
-| `blockdev` | Querying partition/device size in bytes (largest root detection) | `util-linux` | `util-linux` |
-| `mount` | Mounting the root partition (ext4 and btrfs paths) | `util-linux` | `util-linux` |
+| Binary | Purpose | Debian/Ubuntu | Arch |
+|--------|---------|---------------|------|
+| `losetup` | Loop device setup with partition scanning | `util-linux` | `util-linux` |
+| `blkid` | Filesystem type detection | `util-linux` | `util-linux` |
+| `blockdev` | Querying partition/device size | `util-linux` | `util-linux` |
+| `mount` | Mounting the root partition | `util-linux` | `util-linux` |
 | `umount` | Unmounting the root partition | `util-linux` | `util-linux` |
-| `e2fsck` | Filesystem check before ext4 resize operations | `e2fsprogs` | `e2fsprogs` |
+| `e2fsck` | Filesystem check before ext4 resize | `e2fsprogs` | `e2fsprogs` |
 | `resize2fs` | Growing and shrinking ext4 filesystems | `e2fsprogs` | `e2fsprogs` |
-| `tune2fs` | Reading ext4 block count/size for shrink size calculation | `e2fsprogs` | `e2fsprogs` |
-| `btrfs` | Growing and shrinking btrfs filesystems (`btrfs filesystem resize`) | `btrfs-progs` | `btrfs-progs` |
-| `chroot` | Running shell commands inside the mounted rootfs | `coreutils` | `coreutils` |
+| `tune2fs` | Reading ext4 block count for shrink calculation | `e2fsprogs` | `e2fsprogs` |
+| `btrfs` | Growing and shrinking btrfs filesystems | `btrfs-progs` | `btrfs-progs` |
+| `chroot` | Running commands inside the mounted rootfs | `coreutils` | `coreutils` |
 
-> **Note:** All `util-linux` and `e2fsprogs` binaries are already required by the image import pipeline (see SS2). Only `btrfs-progs` is unique to the provisioner path (and only needed when provisioning btrfs images).
+> Most binaries (`util-linux`, `e2fsprogs`) are already required by the image pipeline (§C).
+> Only `btrfs-progs` is unique to this path (and only needed for btrfs images).
 
-#### Provisioner Sudoers Configuration
+### E2. libguestfs (Alternative)
 
-`mvm-provision` needs passwordless sudo for loop device setup, mount, and blockdev operations. Added automatically by `mvm host init` (the binary is extracted and the sudoers drop-in is written):
-
-```
-%mvm ALL=(ALL) NOPASSWD: /home/*/.cache/mvmctl/bin/mvm-provision
-```
-
-#### Provisioner Verification
-
-Check the binary is installed and sudo is configured:
+libguestfs provides filesystem-agnostic rootfs access via a QEMU appliance.
+Slower (~2600ms per VM) but more capable OS detection. Enable with:
 
 ```bash
-sg mvm -c 'sudo -n ~/.cache/mvmctl/bin/mvm-provision --help'
+mvm config set settings guestfs_enabled true
 ```
 
-## 4. Kernel Build Dependencies (Optional)
+**System packages:**
 
-These are only required if you intend to build custom kernels from source.
-Kernel building is integrated into `mvm kernel pull --type official --clean-build`,
-not a separate subcommand.
+| Distro | Command |
+|--------|---------|
+| Debian/Ubuntu | `sudo apt-get install libguestfs0 libguestfs-tools supermin python3-libguestfs` |
+| RHEL/Fedora | `sudo dnf install libguestfs libguestfs-tools supermin python3-libguestfs` |
+| Arch | `sudo pacman -S libguestfs supermin` (Python bindings included) |
 
-| Binary | Category | Package (Debian/Ubuntu) | Package (Arch) |
-| :--- | :--- | :--- | :--- |
-| `make` | Build | `build-essential` | `base-devel` |
-| `gcc` | Build | `build-essential` | `base-devel` |
-| `ld` | Build | `binutils` | `binutils` |
-| `flex` | Build | `flex` | `flex` |
-| `bison` | Build | `bison` | `bison` |
-| `bc` | Build | `bc` | `bc` |
-| `pahole` | Build | `dwarves` | `pahole` |
-| `git` | Build | `git` | `git` |
-| `curl` | Build | `curl` | `curl` |
-| `pkg-config` | Build | `pkg-config` | `pkgconf` |
+> **Note:** The `guestfs` Python package is **not on PyPI**. It must be installed via your
+> system package manager. `mvm init` checks for it and configures the sudoers entry for
+> `supermin` automatically.
 
-### Required Development Libraries (Kernel Build)
-- **libelf**: `libelf-dev` (Debian/Ubuntu), `libelf` (Arch)
-- **openssl**: `libssl-dev` (Debian/Ubuntu), `openssl` (Arch)
-- **ncurses**: `libncurses-dev` (Debian/Ubuntu), `ncurses` (Arch)
+---
 
-## 5. Command Dependency Mapping
+## F. Kernel Build (Optional)
 
-This section maps specific `mvm` commands to the external binaries they invoke.
+Only needed for `mvm kernel pull --type official --clean-build`.
 
-| Command Group | Command(s) | Required Binaries |
-| :--- | :--- | :--- |
-| **`mvm host`** | `init` | `sudo`, `groupadd`, `usermod`, `visudo`, `sysctl`, `ip`, `iptables`, `lsmod`, `modprobe`, `nft` (+ `iptables-save` for reboot persistence, optional) |
-| | `ls` | (Internal Python logic) |
-| | `clean` | `sudo`, `ip`, `iptables` |
-| | `reset` | `sudo`, `groupdel`, `sysctl` |
-| **`mvm network`** | `create` | `ip`, `iptables` (or `nft` depending on `firewall_backend`) |
-| | `ls`, `inspect`, `rm`, `sync`, `default` | (Internal Python logic; `rm`/`sync` may call `ip`/`iptables` for cleanup) |
-| **`mvm bin`** | `pull`, `ls`, `rm`, `default` | (Internal Python logic) |
-| **`mvm image`** | `import` | `qemu-img`, `sfdisk`, `parted`, `blkid`, `mount`, `umount`, `tar`, `truncate`, `mkfs.ext4`, `unsquashfs` |
-| | `pull` | `qemu-img` (may trigger image conversion/optimization) |
-| | `ls`, `rm`, `inspect`, `default`, `warm` | (Internal Python logic) |
-| **`mvm kernel`** | `pull` | (Internal Python logic for firecracker type; `--type official --clean-build` triggers kernel compilation) |
-| | `pull --type official --clean-build` | `make`, `gcc`, `ld`, `flex`, `bison`, `bc`, `pahole`, `git`, `curl`, `pkg-config` |
-| | `ls`, `rm`, `default`, `inspect` | (Internal Python logic) |
-| **`mvm key`** | `create` | `ssh-keygen` |
-| | `add`, `ls`, `rm`, `inspect`, `export`, `default` | (Internal Python logic) |
-| **`mvm vm`** | `create` | **Primary:** `firecracker`, `jailer`, `ip`, `iptables` (or `nft`), `mvm-provision`, `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `chroot` (+ `btrfs` for btrfs images) |
-| | `ls`, `ps`, `inspect` | (Internal Python logic) |
-| | `start`, `stop`, `reboot`, `pause`, `resume` | `firecracker`, `ip`, `iptables` |
-| | `rm` | `firecracker`, `ip`, `iptables` |
-| | `snapshot`, `load`, `export`, `import` | (Internal Python logic) |
-| | `attach-volume`, `detach-volume` | `firecracker` |
-| **`mvm ssh`** | `ssh` | (User's SSH client — not invoked by mvmctl) |
-| **`mvm console`** | `console` | (Internal Python logic — connects via Unix socket) |
-| **`mvm logs`** | `logs` | (Internal Python logic) |
-| **`mvm config`** | `get`, `set`, `reset`, `list` | (Internal Python logic) |
-| **`mvm cache`** | `init`, `prune`, `clean` | (Internal Python logic; may trigger host cleanup) |
-| **`mvm init`** | `init` | `sudo`, `groupadd`, `usermod`, `visudo` |
+| Binary | Debian/Ubuntu | Arch |
+|--------|---------------|------|
+| `make` | `build-essential` | `base-devel` |
+| `gcc` | `build-essential` | `base-devel` |
+| `ld` | `binutils` | `binutils` |
+| `flex` | `flex` | `flex` |
+| `bison` | `bison` | `bison` |
+| `bc` | `bc` | `bc` |
+| `pahole` | `dwarves` | `pahole` |
+| `git` | `git` | `git` |
+| `curl` | `curl` | `curl` |
+| `pkg-config` | `pkg-config` | `pkgconf` |
 
-## 6. Host System Requirements
+**Development libraries:**
+- `libelf-dev` / `libelf` (Debian/Arch)
+- `libssl-dev` / `openssl` (Debian/Arch)
+- `libncurses-dev` / `ncurses` (Debian/Arch)
 
-- **Kernel Modules**:
-  - `kvm`: Required for hardware-accelerated virtualization.
-  - `kvm_intel` or `kvm_amd`: Vendor-specific KVM extensions.
-  - `tun`: Required for TAP networking.
-  - `bridge`: Required for bridge networking.
-  - `vhost_vsock`: Required for console relay (PTY-over-vsock).
-- **Hardware Virtualization**: VT-x (Intel) or AMD-V must be enabled in the BIOS/UEFI.
-- **Permissions**: The user running `mvmctl` must be in the `mvm` group (created by `mvm host init`).
+---
+
+## G. Host System Requirements
+
+### Kernel Modules
+
+| Module | Required For |
+|--------|-------------|
+| `kvm` | Hardware-accelerated virtualization |
+| `kvm_intel` or `kvm_amd` | Vendor-specific KVM extensions |
+| `tun` | TAP networking |
+| `bridge` | Bridge networking (loaded on demand) |
+| `vhost_vsock` | Console relay |
+
+### Hardware
+
+- **Virtualization**: VT-x (Intel) or AMD-V must be enabled in BIOS/UEFI.
+- **Permissions**: The user must be in the `mvm` group (created by `mvm host init`).
+
+---
+
+## H. Command Dependency Map
+
+| Command | External Binaries Invoked |
+|---------|--------------------------|
+| `mvm host init` | `sudo`, `groupadd`, `usermod`, `visudo`, `sysctl`, `ip`, `iptables`/`nft`, `modprobe` |
+| `mvm host clean` | `sudo`, `ip`, `iptables`/`nft` |
+| `mvm host reset` | `sudo`, `groupdel`, `sysctl` |
+| `mvm network create` | `ip`, `iptables`/`nft` |
+| `mvm network rm` / `sync` | `ip`, `iptables`/`nft` |
+| `mvm image pull` | `qemu-img` (may trigger conversion) |
+| `mvm image import` | `qemu-img`, `sfdisk`, `blkid`, `mount`, `umount`, `tar`, `truncate`, `mkfs.ext4`, `unsquashfs` |
+| `mvm kernel pull --type official` | `make`, `gcc`, `ld`, `flex`, `bison`, `bc`, `pahole`, `git`, `curl`, `pkg-config` |
+| `mvm kernel pull --type firecracker` | (internal Python logic — download only) |
+| `mvm key` | `create` → `ssh-keygen`; `add/ls/rm/inspect/export/default` → internal only |
+| `mvm bin` | `pull/ls/rm/default` → internal only (downloads from GitHub API) |
+| `mvm vm create` | `firecracker` + `jailer`, `ip`, `iptables`/`nft`, `mvm-provision`, `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `chroot` (+ `btrfs` for btrfs images) |
+| `mvm vm start/stop/reboot/pause/resume` | `firecracker`, `ip`, `iptables`/`nft` |
+| `mvm vm rm` | `firecracker`, `ip`, `iptables`/`nft` |
+| `mvm vm snapshot/load` | internal (Firecracker API via Unix socket) |
+| `mvm vm attach-volume` / `detach-volume` | `firecracker` |
+| `mvm volume` | `ls/inspect` → internal; `create/rm/resize` → `qemu-img` |
+| `mvm kernel pull --type firecracker` | internal (HTTP download) |
+| `mvm kernel pull --type official` | `make`, `gcc`, `ld`, `flex`, `bison`, `bc`, `pahole`, `git`, `curl`, `pkg-config` |
+| `mvm kernel import/ls/rm/default/inspect` | internal only |
+| `mvm cache init/prune/clean` | internal (filesystem + DB operations) |
+| `mvm config get/set/reset/list` | internal (DB operations) |
+| `mvm logs` | internal (file read) |
+| `mvm console` | internal (Unix socket PTY relay) |
+| `mvm ssh` | User's SSH client |
+| `mvm init` | `sudo`, `groupadd`, `usermod`, `visudo` |

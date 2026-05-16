@@ -1,4 +1,6 @@
-> **STATUS: Current — general reference guide.** This is a Firecracker vsock/PTY tutorial, not a codebase-specific document. The patterns described match how mvmctl's console relay works. No changes needed.
+> **STATUS: Current — general reference guide.** This is a Firecracker vsock/PTY tutorial, not a codebase-specific document. The patterns described match how mvmctl's console relay works conceptually, but note the implementation difference below. No changes needed.
+>
+> **Implementation note:** While this document describes vsock-based communication between guest and host, mvmctl's actual console relay (`mvm-console-relay`) uses **PTY passthrough via `--pty-controller-fd`** — the host process creates a PTY pair and passes the controller file descriptor to Firecracker's serial console. It does NOT use vsock devices for console communication. The general patterns of PTY allocation, raw terminal mode, and I/O bridging are conceptually similar regardless of transport.
 
 # Firecracker PTY-over-Vsock Bridge Implementation Guide
 

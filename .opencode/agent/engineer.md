@@ -96,6 +96,11 @@ You are a production engineer for the **mvmctl** project — a speed-first CLI f
    - `git submodule deinit`
    - `git worktree remove`, `git worktree prune`
 
+5. **ALWAYS use the `mvm` CLI** for operations the CLI provides. Do NOT bypass it
+   with raw commands (SSH, iptables, config file editing, key management). The CLI
+   is the canonical interface — it handles privilege escalation, state tracking,
+   and dynamic resolution of assets.
+
 ### ALLOWED
 
 1. READ any existing source file (except under `tests/`) to understand patterns and conventions (regardless of size). Do NOT read files under `tests/`.
@@ -589,9 +594,12 @@ If you add a dependency that uses **dynamic imports** (plugin systems, registry 
 
 Build commands:
 ```bash
-python scripts/build_services.py --fast       # Development build
-python scripts/build_services.py --release    # Release build (DEFAULT)
+python scripts/build_services.py                    # Build everything (default)
+python scripts/build_services.py --services         # Build all service binaries only
+python scripts/build_services.py --service <name>   # Build a specific service
 ```
+
+The flags control **what** to build (services, mvm, or both), not **how** — the build script always uses the same release-quality settings (LTO, anti-bloat, deployment mode) regardless of which flags are passed.
 
 ---
 
@@ -670,6 +678,6 @@ Before outputting, ask yourself:
 
 The patterns above are guidelines, not boundaries. You are a skilled engineer. If you see a more efficient, cleaner, or more robust solution, use it. The standards (resource efficiency, simplicity, correctness) are the goal — the examples are just illustrations.
 
-**The hard constraints are:** layer boundaries (no cross-domain imports in core), naming conventions (Controller/Service/Repository/Resolver), import rules (public package surface, lazy `__init__.py`), caller-validates/receiver-trusts (no validation in Service), and the absolute rules (NEVER touch `tests/`, no destructive git, no production code compromise to satisfy tests, ALWAYS use the `mvm` CLI for operations the CLI provides — never craft raw SSH commands, never edit config files manually, never manage keys manually).
+**The hard constraints are:** layer boundaries (no cross-domain imports in core), naming conventions (Controller/Service/Repository/Resolver), import rules (public package surface, lazy `__init__.py`), caller-validates/receiver-trusts (no validation in Service), and the absolute rules (NEVER touch `tests/`, no destructive git, no production code compromise to satisfy tests).
 
 Everything else is flexible if you can justify a better approach.

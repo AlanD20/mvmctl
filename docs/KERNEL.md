@@ -34,59 +34,8 @@ mvm host ls
 
 ### Official kernel builds only
 
-The following packages are required to compile the kernel from source:
-
-**Ubuntu / Debian:**
-```bash
-sudo apt-get install -y \
-  build-essential \
-  flex \
-  bison \
-  libelf-dev \
-  libssl-dev \
-  libncurses-dev \
-  bc \
-  gcc \
-  make
-```
-
-**Arch Linux:**
-```bash
-sudo pacman -S --needed \
-  base-devel \
-  flex \
-  bison \
-  libelf \
-  openssl \
-  ncurses \
-  bc
-```
-
-**Fedora / RHEL / AlmaLinux:**
-```bash
-sudo dnf groupinstall "Development Tools"
-sudo dnf install -y \
-  flex \
-  bison \
-  elfutils-libelf-devel \
-  openssl-devel \
-  ncurses-devel \
-  bc
-```
-
-Additional build tools that may be needed (required for `--type official --clean-build`):
-```bash
-# Debian/Ubuntu
-sudo apt-get install -y dwarves git curl pkg-config
-
-# Arch
-sudo pacman -S --needed pahole git curl pkgconf
-```
-
-Verify tools are present:
-```bash
-which make gcc flex bison bc
-```
+See [DEPENDENCIES.md#f-kernel-build-optional](DEPENDENCIES.md#f-kernel-build-optional) for the
+required build packages per distribution.
 
 ---
 
@@ -295,20 +244,6 @@ Common causes:
 - Missing `CONFIG_VIRTIO_NET` — VM has no network interface
 - Missing `CONFIG_SERIAL_8250` — No serial console output (boot log empty)
 
-### Kernel too large
-
-The Firecracker CI kernel is typically ~5 MiB. If your custom kernel is much larger,
-check for unnecessary configs. Consider using the Firecracker CI kernel as your base config.
-
-### "Required kernel settings missing" during build
-
-The Firecracker config URL may have changed. Check the kernel config template:
-```bash
-mvm kernel inspect <kernel-id> --json | python3 -c "import sys,json; print(json.load(sys.stdin).get('config_url_template', 'N/A'))"
-```
-
-If the URL is outdated, rebuild with a newer kernel version or check the Firecracker project for updated config URLs.
-
 ---
 
 ## Reference
@@ -323,34 +258,4 @@ If the URL is outdated, rebuild with a newer kernel version or check the Firecra
 
 > **Note:** The default kernel version (`6.19.9`) is **NOT** an LTS kernel. It is the latest upstream stable at the time of release. Use `--version latest` to resolve the most recent version from the upstream directory listing. If you need long-term support, explicitly pass `--version 6.1.102` or `--version 6.12.21` to `mvm kernel pull --type official`. The LTS versions in the table above are tested and known to work — use them for production deployments.
 
-### Relevant constants (src/mvmctl/constants.py)
-
-| Constant | Description |
-|----------|-------------|
-| `OVERRIDABLE_DEFAULTS["defaults.kernel"]["version"]` | Default kernel version for `mvm kernel pull --type official` |
-| `KERNEL_TYPE_OFFICIAL` | The string `"official"` for kernel type references |
-| `KERNEL_TYPE_FIRECRACKER` | The string `"firecracker"` for kernel type references |
-
-### Kernel config URLs (src/mvmctl/assets/kernels.yaml)
-
-The Firecracker config URLs are per-kernel in `kernels.yaml`, not in `constants.py`:
-
-| YAML field | Description |
-|------------|-------------|
-| `config_url_template` | URL template for Firecracker's recommended `.config` file |
-
-### Per-kernel config lists (src/mvmctl/assets/kernels.yaml — `kernel-official`)
-
-The kernel config lists are defined per-kernel in `kernels.yaml`. Load them at runtime
-by reading the YAML file through the `AssetManager` or via `core.kernel._service.KernelService`.
-
-| YAML field | Description |
-|------------|-------------|
-| `required_settings` | Config options that must be `=y` after build; missing ones trigger a confirmation prompt |
-| `enabled_configs` | Config options always enabled during the build |
-| `disabled_configs` | Config options always disabled during the build |
-| `set_val_configs` | Config options set to a specific integer value during the build |
-
----
-
-*See also: [Firecracker official documentation](https://github.com/firecracker-microvm/firecracker/blob/main/docs/getting-started.md)*
+*See also: [ASSETS_CONFIGURATIONS.md](ASSETS_CONFIGURATIONS.md) for the kernel YAML config reference and [Firecracker official documentation](https://github.com/firecracker-microvm/firecracker/blob/main/docs/getting-started.md).*

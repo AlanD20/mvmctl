@@ -59,6 +59,7 @@ src/mvmctl/
 │       ├── _network_input.py
 │       ├── _image_input.py
 │       ├── _image_acquire_input.py
+│       ├── _kernel_import_input.py       # KernelImportInput → KernelImportRequest → ResolvedKernelImportInput
 │       ├── _kernel_input.py
 │       ├── _kernel_pull_input.py
 │       ├── _key_input.py
@@ -92,7 +93,8 @@ src/mvmctl/
 │   │   ├── _provisioner.py                  # ImageProvisioner (image optimization via backends)
 │   │   ├── _service.py                      # ImageService
 │   │   ├── _repository.py                   # ImageRepository
-│   │   └── _resolver.py                     # ImageResolver
+│   │   ├── _resolver.py                     # ImageResolver
+│   │   └── _version_resolver.py             # HttpDirVersionResolver wrapper (image version listings)
 │   ├── kernel/                              # Kernel images
 │   │   ├── _controller.py                   # KernelController
 │   │   ├── _service.py                      # KernelService
@@ -143,6 +145,7 @@ src/mvmctl/
 │       ├── _db.py                           # Database (connection manager)
 │       ├── _enrichment.py                   # RelationEnricher (batch relation loading)
 │       ├── _http_dir_version_resolver.py    # HTTP directory version listing (image + kernel)
+│       ├── _version_resolver.py             # Shared version resolution (semver parsing, spec resolution)
 │       ├── _resolver_registry.py            # Lazy resolver registry (prevents circular imports)
 │       ├── _asset_manager.py                # Generic asset management
 │       ├── _parallel.py                     # ParallelExecutor
@@ -429,7 +432,7 @@ Exports include:
 - **Operation classes:** `BinaryOperation`, `CacheOperation`, `ConfigOperation`, `ConsoleOperation`, `HostOperation`, `ImageOperation`, `InitOperation`, `KernelOperation`, `KeyOperation`, `LogOperation`, `NetworkOperation`, `SSHOperation`, `VMOperation`, `VolumeOperation`
 - **Console types:** `ConsoleConnectionInfo`
 - **Init types:** `InitResult`, `InitStepResult`
-- **Input classes:** `BinaryPullInput`, `BinaryInput`, `ConsoleInput`, `ConsoleRequest`, `ImagePullInput`, `ImageImportInput`, `ImageInput`, `KernelPullInput`, `KernelInput`, `KeyCreateInput`, `KeyInput`, `LogInput`, `NetworkCreateInput`, `NetworkInput`, `SSHInput`, `VolumeCreateInput`, `VolumeInput`, `VMCreateInput`, `VMImportInput`, `VMImportRequest`, `VMInput`
+- **Input classes:** `BinaryPullInput`, `BinaryInput`, `ConsoleInput`, `ConsoleRequest`, `ImagePullInput`, `ImageImportInput`, `ImageInput`, `KernelImportInput`, `KernelImportRequest`, `ResolvedKernelImportInput`, `KernelPullInput`, `KernelInput`, `KeyCreateInput`, `KeyInput`, `LogInput`, `NetworkCreateInput`, `NetworkInput`, `SSHInput`, `VolumeCreateInput`, `VolumeInput`, `VMCreateInput`, `VMImportInput`, `VMImportRequest`, `VMInput`
 - **VM export/import config models:** `VMExportComputeConfig`, `VMExportImageConfig`, `VMExportKernelConfig`, `VMExportBinaryConfig`, `VMExportNetworkConfig`, `VMExportBootConfig`, `VMExportFirecrackerConfig`, `VMExportCloudInitConfig`, `VMExportConfig`
 
 ```python
@@ -660,7 +663,7 @@ from mvmctl.core.volume import VolumeController, VolumeRepository
 from mvmctl.core._shared._db import Database
 
 # ✅ Domain — ONLY imports _shared (never other domains)
-from mvmctl.core._shared._db import Database
+from mvmctl.core._shared import Database
 from mvmctl.core._shared._iptables_tracker import IPTablesTracker
 
 # ✅ Domain resolvers — located in each domain
@@ -932,6 +935,32 @@ from mvmctl.core._shared._resolver_registry import get
 
 resolver_class = get("kernel")   # Returns KernelResolver class
 ```
+
+#### Auto-Discovery via `_RESOLVER_MODULE_PATHS`
+
+The registry includes an **auto-discovery** mechanism that avoids requiring explicit module imports before calling `get()`. A `_RESOLVER_MODULE_PATHS` dict maps known resolver name strings to their module paths:
+
+```python
+_RESOLVER_MODULE_PATHS: dict[str, str] = {
+    "binary": "mvmctl.core.binary._resolver",
+    "image": "mvmctl.core.image._resolver",
+    "kernel": "mvmctl.core.kernel._resolver",
+    "key": "mvmctl.core.key._resolver",
+    "network": "mvmctl.core.network._resolver",
+    "network_lease": "mvmctl.core.network._lease_resolver",
+    "vm": "mvmctl.core.vm._resolver",
+    "volume": "mvmctl.core.volume._resolver",
+    "iptables_rule": "mvmctl.core._shared._iptables_tracker._resolver",
+}
+```
+
+When `get(name)` is called for an unregistered name, the registry:
+
+1. Looks up the name in `_RESOLVER_MODULE_PATHS`
+2. Calls `importlib.import_module(module_path)` to trigger the module-level `register()` side-effect
+3. Retries the factory lookup — if still not found, raises `KeyError`
+
+This means callers never need to manually import resolver modules. They simply call `get("vm")` and the auto-discovery handles the rest.
 
 ### Usage
 

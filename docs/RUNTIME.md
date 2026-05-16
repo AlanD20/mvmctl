@@ -4,6 +4,18 @@
 
 mvmctl uses several backend systems for provisioning, infrastructure, and service management. This document describes each backend, its purpose, when it's used, and how to choose between alternatives.
 
+## Table of Contents
+
+- [Overview](#overview)
+- [1. Provisioning Backends](#1-provisioning-backends)
+- [2. Cloud-Init Modes](#2-cloud-init-modes)
+- [3. Service Backends](#3-service-backends)
+- [4. Firewall Backends](#4-firewall-backends)
+- [5. Selection Guide](#5-selection-guide)
+- [6. Performance Comparison](#6-performance-comparison)
+- [7. Binary Embedding & Build](#7-binary-embedding--build)
+- [8. Architecture Diagram](#8-architecture-diagram)
+
 ---
 
 ## 1. Provisioning Backends
@@ -135,11 +147,11 @@ Both backends share provisioning operation definitions via `ProvisionerContent` 
 |----------------|---------|
 | `build_hostname_ops(hostname)` | /etc/hostname + /etc/hosts entries |
 | `build_dns_ops(dns_server)` | /etc/resolv.conf with nameserver |
-| `build_ssh_ops(user, pubkeys)` | Authorized keys, sshd config, first-boot installer, host key generator |
+| `build_ssh_ops(user, pubkeys)` | Authorized keys and user account setup (sshd config and host key generation handled by `build_deblob_ops`) |
 | `build_cloud_init_disable_ops()` | Datasource blocking + service masking |
 | `build_cloud_init_inject_ops(dir)` | Copy cloud-init seed directory tree |
 | `build_resize_ops(target_size)` | Grow filesystem to target size |
-| `build_shrink_ops(limit_bytes)` | Shrink filesystem to minimum (0) or limit bytes |
+| `build_shrink_ops(limit_bytes=0)` | Shrink filesystem to minimum (0) or limit bytes |
 | `build_deblob_ops(os_type)` | OS-specific cache cleanup (apt, yum, apk, pacman) |
 | `build_fix_fstab_ops()` | PARTUUID → /dev/vda in /etc/fstab |
 
@@ -183,7 +195,7 @@ VMOperation.create()
       → Validates port availability (8000-9000 range)
       → Spawns nocloud_server/process.py (HTTP server subprocess)
       → Binds to bridge gateway IP (never 0.0.0.0)
-      → Adds iptables rule allowing VM access (MVM_NOCLOUD_NET_INPUT_CHAIN)
+      → Adds firewall rule allowing VM access (via the active backend — default nftables, fallback iptables)
   → VM boots with ds=nocloud-net kernel parameter
   → Server stays running for the lifetime of the VM (stopped on VM removal)
 ```
@@ -290,7 +302,7 @@ else:
                                                                       network-config
   ```
 - **Port range:** 8000–9000 (auto-allocated via `socket.bind()` test)
-- **Security:** Binds to bridge gateway IP only (never `0.0.0.0`), iptables firewall rule in `MVM_NOCLOUD_NET_INPUT_CHAIN`
+- **Security:** Binds to bridge gateway IP only (never `0.0.0.0`), firewall rule in `MVM_NOCLOUD_NET_INPUT_CHAIN` (via active backend)
 - **PID file:** `$MVM_CACHE_DIR/vms/<vm-id>/nocloud-server.pid`
 - **Headers:** Cache-disabling headers (`Cache-Control: no-cache, no-store, must-revalidate`)
 

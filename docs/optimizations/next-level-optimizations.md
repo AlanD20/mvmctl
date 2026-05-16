@@ -216,10 +216,10 @@ hardware probing and security features in the guest.
 
 The current `boot_args` in `constants.py` (line 45):
 ```
-console=ttyS0 reboot=k panic=1 net.ifnames=0 rw rootwait quiet loglevel=3
+console=ttyS0 reboot=k panic=1 net.ifnames=0 rw rootwait quiet loglevel=3 no_timer_check clocksource=kvm-clock systemd.show_status=false
 ```
 
-Additional safe params still pending (`no_timer_check`, `audit=0`, `clocksource=kvm-clock`, `elevator=noop`).
+Three of the original candidates (`no_timer_check`, `clocksource=kvm-clock`, and `systemd.show_status=false`) have since been added to the boot_args. Remaining safe params still pending: `audit=0`, `elevator=noop`.
 
 ### 4.2 os.sendfile() / os.copy_file_range() for File I/O ⏳ NOT IMPLEMENTED
 

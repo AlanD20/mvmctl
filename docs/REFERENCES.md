@@ -1,7 +1,5 @@
 # Command Reference & Configuration
 
-> **STATUS: Updated — cache directory structure corrected.** `keys/` moved under `~/.config/mvmctl/`, `networks/` removed, `logs/` and `volumes/` added. All commands, flags, and configuration details verified against current CLI and API.
-
 This document provides detailed reference for all `mvm` commands, configuration options, and environment variables.
 
 ---
@@ -47,12 +45,12 @@ First-time setup wizard. Walks through host init, binary/kernel/image download, 
 
 Host configuration. One-time, machine-global setup.
 
-| Command | Description |
-|---------|-------------|
-| `mvm host init` | Apply host configuration changes. Idempotent. Creates mvm group, sudoers drop-in, enables IP forwarding, creates default network. |
-| `mvm host ls [--json]` | Show current host configuration state vs expected |
-| `mvm host clean [-f, --force]` | Remove all networking config (bridges, TAPs, iptables). Does not touch sysctl/group. |
-| `mvm host reset [-f, --force]` | Full rollback: remove networking, revert sysctl, remove sudoers... |
+| Command | Flags | Description |
+|---------|-------|-------------|
+| `mvm host init` | --- | Apply host configuration changes. Idempotent. Creates mvm group, sudoers drop-in, enables IP forwarding, creates default network. |
+| `mvm host ls` | `--json` | Show current host configuration state vs expected |
+| `mvm host clean` | `-f, --force` | Remove all networking config (bridges, TAPs, iptables). Does not touch sysctl/group. |
+| `mvm host reset` | `-f, --force` | Full rollback: remove networking, revert sysctl, remove sudoers... |
 
 ---
 
@@ -60,13 +58,14 @@ Host configuration. One-time, machine-global setup.
 
 Kernel management.
 
-| Command | Description |
-|---------|-------------|
-| `mvm kernel ls [--json] [-r, --remote] [--no-cache]` | List cached kernels (or available remote kernels with --remote) |
-| `mvm kernel pull [KERNEL_SELECTOR]` | Pull or build a kernel. Supports type:version shorthand (e.g. official:6.19.9) |
-| `mvm kernel default KERNEL_ID` | Set a kernel as the default |
-| `mvm kernel rm [IDENTIFIERS]... [-f, --force]` | Remove one or more kernels |
-| `mvm kernel inspect PREFIX [--json] [--tree]` | Show detailed information about a kernel |
+| Command | Flags | Description |
+|---------|-------|-------------|
+| `mvm kernel ls` | `--json, -r, --remote, --no-cache` | List cached kernels (or available remote kernels with --remote) |
+| `mvm kernel pull` | `[KERNEL_SELECTOR]`, `--type`, `--version`, `--arch`, `--default, -d`, `--jobs`, `--keep-build-dir`, `--clean-build`, `--config` | Pull or build a kernel. Supports type:version shorthand (e.g. official:6.19.9) |
+| `mvm kernel import` | `NAME`, `PATH`, `--version`, `--arch`, `--default, -d` | Register a vmlinux file as a kernel in the database |
+| `mvm kernel default` | `KERNEL_ID` | Set a kernel as the default |
+| `mvm kernel rm` | `[IDENTIFIERS]...`, `-f, --force` | Remove one or more kernels |
+| `mvm kernel inspect` | `PREFIX`, `--json`, `--tree` | Show detailed information about a kernel |
 
 **`pull` flags:**
 
@@ -90,15 +89,15 @@ Kernel management.
 
 Image management.
 
-| Command | Description |
-|---------|-------------|
-| `mvm image ls [--remote] [--no-cache] [--type TEXT] [--json]` | List cached images (or available remote images with --remote) |
-| `mvm image pull IMAGE_SELECTOR [--type TEXT] [--version VERSION] [--no-cache]` | Download an image by type:version (e.g. ubuntu:24.04), ID, or type |
-| `mvm image import NAME PATH [--format FORMAT] [--arch ARCH] [--root-partition N] [--default] [--force, -f] [--skip-optimization] [--disable-detector NAME]` | Import a local image file (qcow2, raw, tar-rootfs) |
-| `mvm image default PREFIX` | Set the default image for VM creation |
-| `mvm image rm PREFIX` | Remove cached images by ID prefix |
-| `mvm image warm IMAGE` | Pre-decompress image to ready pool for fast VM creation |
-| `mvm image inspect PREFIX [--json] [--tree]` | Show detailed information about an image |
+| Command | Flags | Description |
+|---------|-------|-------------|
+| `mvm image ls` | `--json, -r, --remote, --no-cache, --type` | List cached images (or available remote images with --remote) |
+| `mvm image pull` | `IMAGE_SELECTOR`, `--type`, `--version`, `--arch`, `--force, -f`, `--no-cache`, `--default, -d`, `--skip-optimization`, `--disable-detector` | Download an image by type:version (e.g. ubuntu:24.04), ID, or type |
+| `mvm image import` | `NAME`, `PATH`, `--format`, `--arch`, `--root-partition`, `--default, -d`, `--force, -f`, `--skip-optimization`, `--disable-detector` | Import a local image file (qcow2, raw, tar-rootfs) |
+| `mvm image default` | `PREFIX` | Set the default image for VM creation |
+| `mvm image rm` | `PREFIXES...`, `--force, -f` | Remove cached images by ID prefix |
+| `mvm image warm` | `IMAGE`, `--all, -a` | Pre-decompress image to ready pool for fast VM creation |
+| `mvm image inspect` | `PREFIX`, `--json`, `--tree` | Show detailed information about an image |
 
 **`pull` flags:**
 
@@ -131,12 +130,12 @@ Image management.
 
 Firecracker binary management.
 
-| Command | Description |
-|---------|-------------|
-| `mvm bin ls [--remote] [--limit N] [--json]` | List local (and optionally remote) Firecracker versions |
-| `mvm bin pull VERSION [--default] [--force, -f]` | Download a specific Firecracker version |
-| `mvm bin default BINARY_ID` | Set a binary as the active default |
-| `mvm bin rm [IDENTIFIERS]... [--version VERSION] [--force, -f]` | Remove one or more binaries, or use --version to remove a version pair |
+| Command | Flags | Description |
+|---------|-------|-------------|
+| `mvm bin ls` | `-r, --remote, --limit, --json` | List local (and optionally remote) Firecracker versions |
+| `mvm bin pull` | `BINARY_NAME`, `--version`, `--default, -d`, `--force, -f` | Download a Firecracker version by binary name |
+| `mvm bin default` | `BINARY_ID` | Set a binary as the active default |
+| `mvm bin rm` | `[IDENTIFIERS]...`, `--version`, `-f, --force` | Remove one or more binaries, or use --version to remove a version pair |
 
 ---
 
@@ -144,30 +143,30 @@ Firecracker binary management.
 
 VM lifecycle management.
 
-| Command | Description |
-|---------|-------------|
-| `mvm vm create` | Create and start a new Firecracker VM |
-| `mvm vm start IDENTIFIER` | Start a stopped VM |
-| `mvm vm stop IDENTIFIER [--force, -f]` | Stop a running VM |
-| `mvm vm reboot IDENTIFIER [--force, -f]` | Reboot a VM |
-| `mvm vm pause IDENTIFIER` | Pause a running VM |
-| `mvm vm resume IDENTIFIER` | Resume a paused VM |
-| `mvm vm rm [NAMES]... [--force, -f]` | Remove one or more VMs |
-| `mvm vm ls [--json]` | List all VMs |
-| `mvm vm ps` | List running VMs (active processes) |
-| `mvm vm inspect IDENTIFIER [--json] [--tree]` | Show detailed information about a VM |
-| `mvm vm snapshot IDENTIFIER MEM_FILE STATE_FILE` | Snapshot VM memory and disk state |
-| `mvm vm load IDENTIFIER MEM_FILE STATE_FILE [--resume]` | Load VM from snapshot |
-| `mvm vm export IDENTIFIER [OUTPUT]` | Export a VM's configuration to a portable JSON file |
-| `mvm vm import CONFIG_PATH [--name NAME]` | Create a VM from a portable config file |
-| `mvm vm attach-volume IDENTIFIER VOLUME_NAME` | Attach a volume to a stopped VM |
-| `mvm vm detach-volume IDENTIFIER VOLUME_NAME` | Detach a volume from a stopped VM |
+| Command | Flags | Description |
+|---------|-------|-------------|
+| `mvm vm create` | --- | Create and start a new Firecracker VM |
+| `mvm vm start` | `IDENTIFIER` | Start a stopped VM |
+| `mvm vm stop` | `IDENTIFIER`, `-f, --force` | Stop a running VM |
+| `mvm vm reboot` | `IDENTIFIER`, `-f, --force` | Reboot a VM |
+| `mvm vm pause` | `IDENTIFIER` | Pause a running VM |
+| `mvm vm resume` | `IDENTIFIER` | Resume a paused VM |
+| `mvm vm rm` | `[NAMES]...`, `-f, --force` | Remove one or more VMs |
+| `mvm vm ls` | `--json` | List all VMs |
+| `mvm vm ps` | --- | List running VMs (active processes) |
+| `mvm vm inspect` | `IDENTIFIER`, `--json`, `--tree` | Show detailed information about a VM |
+| `mvm vm snapshot` | `IDENTIFIER`, `MEM_FILE`, `STATE_FILE` | Snapshot VM memory and disk state |
+| `mvm vm load` | `IDENTIFIER`, `MEM_FILE`, `STATE_FILE`, `--resume` | Load VM from snapshot |
+| `mvm vm export` | `IDENTIFIER`, `[OUTPUT]` | Export a VM's configuration to a portable JSON file |
+| `mvm vm import` | `CONFIG_PATH`, `--name, -n` | Create a VM from a portable config file |
+| `mvm vm attach-volume` | `IDENTIFIER`, `VOLUME_NAME` | Attach a volume to a stopped VM |
+| `mvm vm detach-volume` | `IDENTIFIER`, `VOLUME_NAME` | Detach a volume from a stopped VM |
 
 **`vm create` flags:**
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--name, -n NAME` | VM name **(required)** | --- |
+| `NAME` | VM name **(required, positional)** | --- |
 | `--image IMAGE` | Image name, short ID, or path to .ext4 file | auto-detected |
 | `--kernel KERNEL` | Kernel short ID or path to vmlinux | auto-detected |
 | `--vcpus, --cpus N` | vCPU count | from config |
@@ -198,7 +197,7 @@ VM lifecycle management.
 
 ### `mvm console`
 
-VM console access without SSH. Uses a PTY-over-vsock relay.
+VM console access without SSH. Uses a PTY relay.
 
 | Command | Description |
 |---------|-------------|
@@ -218,14 +217,14 @@ VM console access without SSH. Uses a PTY-over-vsock relay.
 
 Named network management.
 
-| Command | Description |
-|---------|-------------|
-| `mvm network create [NAME] [--subnet SUBNET] [--ipv4-gateway GW] [--no-nat] [--nat-gateways GW] [--non-interactive]` | Create a named bridge network |
-| `mvm network rm [NAMES]... [--force, -f]` | Remove one or more networks by name |
-| `mvm network ls [--json]` | List all networks |
-| `mvm network inspect NAME [--json] [--tree]` | Show network details and IP leases |
-| `mvm network default [NAME]` | Set a network as the default for VM creation |
-| `mvm network sync [IDENTIFIER] [--json]` | Sync iptables rules between database and host |
+| Command | Flags | Description |
+|---------|-------|-------------|
+| `mvm network create` | `[NAME]`, `--subnet`, `--ipv4-gateway`, `--no-nat`, `--nat-gateways`, `--non-interactive` | Create a named bridge network |
+| `mvm network rm` | `[NAMES]...`, `-f, --force` | Remove one or more networks by name |
+| `mvm network ls` | `--json` | List all networks |
+| `mvm network inspect` | `[NAME]`, `--json`, `--tree` | Show network details and IP leases |
+| `mvm network default` | `[NAME]` | Set a network as the default for VM creation |
+| `mvm network sync` | `[IDENTIFIER]`, `--json` | Sync firewall rules between database and host |
 
 ---
 
@@ -233,15 +232,15 @@ Named network management.
 
 SSH key management.
 
-| Command | Description |
-|---------|-------------|
-| `mvm key ls` | List all SSH keys |
-| `mvm key add NAME PATH` | Add an existing public key to the cache |
-| `mvm key create NAME [--algorithm ALGO] [--bits N] [--comment C] [--out DIR] [--default] [--force, -f]` | Generate a new SSH keypair |
-| `mvm key rm [NAMES]...` | Remove one or more SSH keys |
-| `mvm key inspect NAME [--json]` | Inspect an SSH key |
-| `mvm key default [NAMES]... [--clear]` | Set default SSH keys, or clear with --clear |
-| `mvm key export NAME --out DIR [--force, -f]` | Export a keypair to a directory |
+| Command | Flags | Description |
+|---------|-------|-------------|
+| `mvm key ls` | `--json` | List all SSH keys |
+| `mvm key add` | `NAME`, `PATH`, `-f, --force` | Add an existing public key to the cache |
+| `mvm key create` | `NAME`, `--algorithm`, `--bits`, `--comment`, `--out`, `--default, -d`, `-f, --force` | Generate a new SSH keypair |
+| `mvm key rm` | `[NAMES]...`, `-f, --force` | Remove one or more SSH keys |
+| `mvm key inspect` | `[NAME]`, `--json`, `--tree` | Inspect an SSH key |
+| `mvm key default` | `[NAMES]...`, `--clear` | Set default SSH keys, or clear with --clear |
+| `mvm key export` | `[NAME]`, `--out`, `-f, --force` | Export a keypair to a directory |
 
 ---
 
@@ -326,13 +325,13 @@ VM SSH access.
 
 Persistent data disk management. Create, remove, list, inspect, and resize volumes.
 
-| Command | Description |
-|---------|-------------|
-| `mvm volume create NAME SIZE [--format FORMAT]` | Create a new persistent volume |
-| `mvm volume rm [IDENTIFIERS]... [--force, -f]` | Remove one or more volumes |
-| `mvm volume ls [--json]` | List all volumes |
-| `mvm volume inspect IDENTIFIER [--json]` | Show detailed information about a volume |
-| `mvm volume resize IDENTIFIER SIZE` | Resize a volume |
+| Command | Flags | Description |
+|---------|-------|-------------|
+| `mvm volume create` | `NAME`, `SIZE`, `--format` | Create a new persistent volume |
+| `mvm volume rm` | `[IDENTIFIERS]...`, `-f, --force` | Remove one or more volumes |
+| `mvm volume ls` | `--json` | List all volumes |
+| `mvm volume inspect` | `IDENTIFIER`, `--json` | Show detailed information about a volume |
+| `mvm volume resize` | `IDENTIFIER`, `SIZE` | Resize a volume |
 
 **`volume create` flags:**
 
@@ -360,13 +359,12 @@ Persistent data disk management. Create, remove, list, inspect, and resize volum
 
 ## Configuration
 
-### Configuration Priority (lowest → highest)
+### Configuration Priority (highest overrides lowest)
 
-1. Built-in fallbacks (`constants.py`)
-2. SQLite database (`~/.cache/mvmctl/mvmdb.db`) — canonical store for asset defaults
-3. Runtime config file: `~/.config/mvmctl/config.json`
-4. `MVM_*` environment variables
-5. CLI flags
+1. CLI flags (highest priority)
+2. `MVM_*` environment variables
+3. SQLite database (`~/.cache/mvmctl/mvmdb.db`) — canonical store for user overrides
+4. Built-in fallbacks (`constants.py`)
 
 ### Kernel Defaults
 
@@ -380,32 +378,22 @@ Built-in fallbacks for kernel operations (defined in `constants.py` under `defau
 | `remote_list_limit` | `5` | Max remote versions to list per type |
 | `remote_list_cache_ttl` | `14400` | Cache TTL in seconds (4 hours) for remote version listings |
 
-### Example config.json
-
-```json
-{
-  "assets": {
-    "kernels_dir": "/home/user/.cache/mvmctl/kernels",
-    "images_dir": "/home/user/.cache/mvmctl/images",
-    "bin_dir": "/home/user/.cache/mvmctl/bin"
-  }
-}
-```
-
-### Asset Registry
-
-The **canonical source of truth** is the SQLite database (`~/.cache/mvmctl/mvmdb.db`) which stores images, kernels, binaries, networks, keys, and VM state. The legacy `metadata.json` file is no longer used.
+The **canonical source of truth** is the SQLite database (`~/.cache/mvmctl/mvmdb.db`) which stores images, kernels, binaries, networks, keys, and VM state.
 
 ---
 
 ## Cloud-Init
 
-`mvm` uses **off** (no cloud-init) as the default mode. When you want cloud-init provisioning, use `--cloud-init-mode inject` (default when enabled, uses the loop-mount provisioner binary with libguestfs as fallback), `iso` (generates a cloud-init ISO via cloud-localds, or uses a custom ISO path), or `net` (nocloud-net HTTP server).
+`mvm` defaults to `--cloud-init-mode off` (no cloud-init). To enable provisioning, pass one of:
+
+- `--cloud-init-mode inject` — injects cloud-init files directly into the rootfs
+- `--cloud-init-mode iso` — generates a cloud-init ISO via `cloud-localds` (or use a custom ISO path)
+- `--cloud-init-mode net` — serves cloud-init files via a temporary HTTP (nocloud-net) server
 
 ### How It Works
 
 1. **HTTP Server**: A temporary HTTP server is started on the host (port range 8000-9000)
-2. **Firewall Rules**: iptables rules allow the VM to reach the server
+2. **Firewall Rules**: Firewall rules allow the VM to reach the server (via the active `nftables` or `iptables` backend)
 3. **Kernel Command Line**: The VM boots with `ds=nocloud-net;s=http://GATEWAY_IP:PORT/`
 4. **Configuration Delivery**: cloud-init fetches `meta-data`, `user-data`, and `network-config` via HTTP
 5. **Automatic Cleanup**: The HTTP server stops when the VM is removed
@@ -442,15 +430,11 @@ The **canonical source of truth** is the SQLite database (`~/.cache/mvmctl/mvmdb
 |----------|-------------|---------|
 | `MVM_CACHE_DIR` | Override cache directory | `~/.cache/mvmctl` |
 | `MVM_CONFIG_DIR` | Override config directory | `~/.config/mvmctl` |
-| `MVM_LOG_LEVEL` | Set log verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | `INFO` |
+| `MVM_LOG_LEVEL` | Set log verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | `WARNING` |
 | `MVM_FIRECRACKER_BIN` | Override Firecracker binary path | (default from DB) |
 | `MVM_ASSET_MIRROR` | Local mirror directory for downloaded assets | (not set) |
 | `MVM_ESCALATED` | Set by sudo wrapper to indicate privilege escalation | `1` |
-| `MVM_DB_FILENAME` | SQLite database filename | `mvmdb.db` |
-| `MVM_FORWARD_CHAIN` | iptables forward chain name | `MVM-FORWARD` |
-| `MVM_POSTROUTING_CHAIN` | iptables postrouting chain name | `MVM-POSTROUTING` |
-| `MVM_NOCLOUD_NET_INPUT_CHAIN` | iptables input chain for nocloud-net | `MVM-NOCLOUDNET-INPUT` |
-| `MVM_UNIX_GROUP` | Unix group for mvm management | `mvm` |
+| `MVM_TEMP_DIR` | Override temp directory for microVMs | `/tmp/mvmctl` |
 
 ---
 

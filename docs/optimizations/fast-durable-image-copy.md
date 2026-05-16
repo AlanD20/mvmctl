@@ -29,19 +29,19 @@ Three optimizations work together:
 
 `cp --reflink=auto` creates an instant CoW clone on btrfs/XFS filesystems — no actual data is written, only metadata. On non-CoW filesystems (ext4), it silently falls back to a regular copy.
 
-**Code reference:** `src/mvmctl/core/image/_service.py` line 481: `"--reflink=auto"`
+**Code reference:** The `materialize_to()` method in `src/mvmctl/core/image/_service.py` passes `"--reflink=auto"` to the `cp` command.
 
 ### 2. Sparse Detection ✅ IMPLEMENTED
 
 `--sparse=always` uses `lseek(SEEK_HOLE/SEEK_DATA)` to detect zero-filled regions and skips writing them. A 2 GB rootfs with 400 MB of actual data writes 400 MB, not 2 GB. This gives **2–5× speedup** on sparse images, which is typical for freshly decompressed ext4 rootfs images.
 
-**Code reference:** `src/mvmctl/core/image/_service.py` line 482: `"--sparse=always"`
+**Code reference:** The `materialize_to()` method in `src/mvmctl/core/image/_service.py` passes `"--sparse=always"` to the `cp` command.
 
 ### 3. Durability via fdatasync ✅ IMPLEMENTED
 
 After the copy, `os.fdatasync()` flushes file data and critical metadata (file size) to disk, but skips non-critical metadata (mtime/atime/ctime). This is **~10–30% faster** than `fsync()` for new files.
 
-**Code reference:** `src/mvmctl/core/image/_service.py` line 491: `os.fdatasync(f.fileno())`
+**Code reference:** After the copy, `materialize_to()` opens the output file and calls `os.fdatasync(f.fileno())` in `src/mvmctl/core/image/_service.py`.
 
 **Why `fdatasync()` and not `fsync()`?**
 
@@ -56,7 +56,7 @@ For a VM rootfs image, the data must survive a crash. The file's mtime doesn't m
 
 If `cp` fails entirely (binary missing, disk full, etc.), the fallback is `dd conv=sparse,fsync` to preserve holes and ensure durability, instead of falling back to `shutil.copy2` which writes all bytes including zeros.
 
-**Code reference:** `src/mvmctl/core/image/_service.py` line 488: `self._copy_with_dd(cached_path, output_path, sparse=True)` (actual `_copy_with_dd` method at line 1167)
+**Code reference:** When `cp` fails, `materialize_to()` falls back to `self._copy_with_dd(cached_path, output_path, sparse=True)` in `src/mvmctl/core/image/_service.py`. The `_copy_with_dd()` classmethod handles the `dd conv=sparse,fsync` fallback path.
 
 ## Performance Characteristics
 

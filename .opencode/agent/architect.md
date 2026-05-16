@@ -206,6 +206,9 @@ CRITICAL RULES — VIOLATION IS A CRITICAL FAILURE:
 5. Controller = state management only (start/stop/pause/resume). No remove(), no create().
 6. Service does NOT validate caller input. Caller validates, receiver trusts.
 7. ALL subprocess calls go through run_cmd()/stream_cmd() — no raw subprocess.run().
+8. ALWAYS use the `mvm` CLI for operations the CLI provides. Do NOT bypass the CLI
+   with raw commands (SSH, iptables, config file editing, key management, volume
+   operations).
 ```
 
 When spawning `qa-engineer`, you MUST include these rules in the prompt:
@@ -845,7 +848,7 @@ from mvmctl.core.vm._controller import VMController           # Use lazy __getat
 | Validation in Service/Controller | Move to API layer (caller validates, receiver trusts) |
 | Controller.remove() / Controller.create() | Controller is state management only — move to Service or Operation |
 | Eager imports in `__init__.py` | Use PEP 562 lazy imports via `resolve_lazy()` |
-| Deep imports from private modules in API/CLI | Import from public package surface (`__init__.py`) |
+| Deep imports from private modules in CLI | Import from public package surface via `mvmctl.api`. API code may deep-import from private core modules when the public surface would be verbose (many imports from one domain). |
 | Raw `subprocess.run()` scattered across modules | Use centralized `run_cmd()` / `stream_cmd()` from `utils/_system.py` |
 | Cross-domain table queries in Repository | Move query to owning domain's Repository; API layer orchestrates |
 
@@ -945,14 +948,13 @@ The project uses `scripts/build_services.py` to compile standalone binaries via 
 python scripts/build_services.py                    # Build everything (default)
 python scripts/build_services.py --services         # Build all service binaries only
 python scripts/build_services.py --service <name>   # Build a specific service (e.g. mvm-console-relay)
-python scripts/build_services.py --mvm              # Build main mvm binary only
 ```
 
 ### Key architectural decisions
 
 - **Nuitka** (not PyInstaller) is the build tool. PyInstaller hooks exist but are unused — they only serve as fallback documentation.
 - **Multidist services**: All 3 services (`mvm-console-relay`, `mvm-nocloud-server`, `mvm-provision`) are compiled into a single `mvm-services` binary using `--main` flags with symlinks. Runtime dispatch is via `sys.argv[0]`.
-- **Static libpython**: Auto-detected — if the current Python has `libpython*.a`, `--static-libpython=yes` is added in `--release` mode. If not available (e.g., uv's standalone Python), a warning is shown and dynamic linking is used.
+- **Static libpython**: Auto-detected — if the current Python has `libpython*.a`, `--static-libpython=yes` is added automatically. If not available (e.g., uv's standalone Python), a warning is shown and dynamic linking is used. The build always uses release-quality settings (LTO, anti-bloat, deployment mode) — the flags only control **what** to build, not **how**.
 - **Dynamic import workaround**: Libraries with runtime registries (e.g., `passlib`) are force-included via `--include-module` to prevent tree-shaking.
 - **`sys.executable`**: The script uses `sys.executable -m nuitka` so it runs with the same Python that invoked the script. This preserves static libpython detection behavior.
 
@@ -998,7 +1000,7 @@ Deliberately **outside** `~/.cache/mvmctl/` so `cache clean --force` does not wi
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm kernel pull --type firecracker --default
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm image pull alpine-3.21
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm image pull ubuntu-24.04-minimal
-MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm bin pull 1.15.1 --default
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm bin pull firecracker --version 1.15.1 --default
 ```
 
 Or via Taskfile: `task sys-setup-seed`

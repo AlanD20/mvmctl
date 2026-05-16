@@ -1,6 +1,45 @@
 # How to Write Docs
 
-## AI Agent Protocol for Doc Audits
+## Mandatory Rules for All Docs
+
+### Rule A: Every Doc Must Have a Table of Contents
+
+Every document under `docs/` with more than one section **MUST** have a `## Table of Contents`
+section after the introductory paragraph, with bullet links to every `##` heading in the file.
+Use GitHub-style anchors (lowercase, spaces to hyphens, strip non-alphanumeric).
+
+```markdown
+## Table of Contents
+
+- [Section One](#section-one)
+- [Section Two](#section-two)
+```
+
+This lets readers navigate without scrolling through hundreds of lines.
+
+### Rule B: Single Source of Truth — No Duplication
+
+**Never duplicate information that already exists in another document.** Duplication creates
+stale information — updating one copy but forgetting the other is the #1 source of doc rot.
+
+Instead of copying content from another doc, **link to it**:
+
+```markdown
+See [DEPENDENCIES.md](DEPENDENCIES.md) for the required build packages per distribution.
+```
+
+✅ **Correct:** Reference existing docs by link. Keep package tables in `DEPENDENCIES.md` only,
+kernel build commands in `KERNEL.md` only, etc.
+
+❌ **Wrong:** Copying the apt-get install command from DEPENDENCIES.md into TROUBLESHOOTING.md
+because it's convenient — now there are two places to update when the package name changes.
+
+**Exceptions:**
+- Troubleshooting sections may inline commands that are workarounds for automated processes.
+- The public site (`mvmctl.com`) may reference docs in the repo but should not inline
+  large sections from them.
+
+---
 
 When an agent is asked to audit and update all documentation, follow this exact protocol:
 
@@ -11,7 +50,7 @@ Spawn multiple `explore` agents in parallel — each responsible for a group of 
 | Agent | Scope |
 |-------|-------|
 | Explore 1 | Root docs (CONTEXT.md, AGENTS.md, README.md, CHANGELOG.md) |
-| Explore 2 | `docs/` folder (PROJECT_ARCHITECTURE.md, API.md, REFERENCES.md, TROUBLESHOOTING.md, RUNTIME.md, DEPENDENCIES.md, ASSETS_CONFIGURATIONS.md, CUSTOM_KERNEL.md, RELEASE.md) |
+| Explore 2 | `docs/` folder (PROJECT_ARCHITECTURE.md, API.md, REFERENCES.md, TROUBLESHOOTING.md, RUNTIME.md, DEPENDENCIES.md, ASSETS_CONFIGURATIONS.md, KERNEL.md, RELEASE.md) |
 | Explore 3 | ADR docs (all docs/adr/ files — currently 0001 through 0015) |
 | Explore 4 | Improvement, implementation, development, and optimization docs |
 | Explore 5 | Agent instruction files (`.opencode/agent/*.md`) |
@@ -42,6 +81,8 @@ Spawning agents in parallel is not optional — it's the only way to cover the f
 
 ## Audience Classification
 
+> This section describes the current audience structure implemented on the public site at [mvmctl.com](https://mvmctl.com).
+
 The project has two distinct documentation audiences:
 
 | Audience | Where they read | What they need |
@@ -58,6 +99,8 @@ The project has two distinct documentation audiences:
 ---
 
 ## Site Structure
+
+> These files exist and are actively maintained at `mvmctl.com/src/content/site/`. This section accurately describes their current structure.
 
 ### `landing.ts` — Marketing page
 - Hero with tagline, CTA, command preview
@@ -92,6 +135,8 @@ The project has two distinct documentation audiences:
 
 ## Content Contract — What Goes on the Public Site
 
+> This section defines the boundary between content that lives on the public site ([mvmctl.com](https://mvmctl.com)) vs content that belongs in the repo's `docs/` directory.
+
 ### ✅ Belongs on the site
 
 | Category | Examples |
@@ -118,7 +163,7 @@ The project has two distinct documentation audiences:
 | Sudoers/sudo internals | `PRIVILEGED_BINARIES`, `sg mvm -c`, sudoers file contents | `docs/adr/0009-sudo-privilege-architecture.md` |
 | Provisioner backends | LoopMount vs GuestFS comparison, losetup/btrfs/chroot deps | `CONTEXT.md`, `docs/adr/0006-loopmount-guestfs-mutual-exclusion.md` |
 | Manual sudoers config | `mvm init` handles this | No doc needed (automated) |
-| Kernel build deps | Build packages for `kernel pull --type official` | `docs/CUSTOM_KERNEL.md` |
+| Kernel build deps | Build packages for `kernel pull --type official` | `docs/KERNEL.md` |
 | DB schema | SQLite tables, migrations, column layout | `CONTEXT.md` |
 | Cache directory structure | `~/.cache/mvmctl/` filesystem layout | No doc needed (users don't need to know) |
 | Dependency tables per distro | `apt-get` vs `pacman` package names for every internal tool | `docs/DEPENDENCIES.md` |
@@ -144,16 +189,16 @@ The README and public website cover: **what it is, install, quick start, essenti
 
 Internal architecture — three-layer design, domain structure, Controller/Service/Repository pattern, DB schema, cache directory layout, build system internals, shared infrastructure — belongs in `docs/` or `CONTEXT.md`. A user should never need to know how the code is organized to use the tool.
 
-✅ **Correct:** Link to deeper docs: "See CUSTOM_KERNEL.md for building kernels from source."  
+✅ **Correct:** Link to deeper docs: "See KERNEL.md for building kernels from source."  
 ❌ **Wrong:** Inline a diagram of the three-layer architecture in the README.
 
 ### Rule 3: Commands Must Be Copy-Paste Ready
 
 Every code block should work if the user copies it line by line into their terminal. No placeholders, no `$USER`, no assumptions about prior state.
 
-✅ **Correct:** `mvm vm create --name myvm --image ubuntu:24.04`  
-❌ **Wrong:** `mvm vm create --name <vm-name> --image <image-id>`  
-❌ **Wrong:** `mvm vm create --name $VM_NAME --image $IMAGE` (shell variables that aren't defined)
+✅ **Correct:** `mvm vm create myvm --image ubuntu:24.04`  
+❌ **Wrong:** `mvm vm create <vm-name> --image ubuntu:24.04` (placeholders in command)
+❌ **Wrong:** `mvm vm create $VM_NAME --image $IMAGE` (shell variables that aren't defined)
 
 If a command requires a prerequisite, either include the prerequisite command in the block or add a clear instruction: `# First run: mvm image pull ubuntu:24.04`
 
@@ -173,15 +218,11 @@ Every section should lead with the simplest, most common operation. Advanced fla
 ✅ **Correct:**
 ```
 # Create a VM
-mvm vm create --name myvm --image ubuntu:24.04
-```
-Then further down:
-```
-# With custom resources
-mvm vm create --name myvm --image ubuntu:24.04 --vcpus 4 --mem 8192
-```
+mvm vm create myvm --image ubuntu:24.04
 
-❌ **Wrong:** Lead with `mvm vm create --name myvm --image ubuntu:24.04 --vcpus 4 --mem 8192 --disk-size 50G --network isolated --ip 10.0.0.50 --ssh-key mykey`
+mvm vm create myvm --image ubuntu:24.04 --vcpus 4 --mem 8192
+
+❌ **Wrong:** Lead with `mvm vm create myvm --image ubuntu:24.04 --vcpus 4 --mem 8192 --disk-size 50G --network isolated --ip 10.0.0.50 --ssh-key mykey`
 
 ### Rule 6: If the CLI Handles It, Don't Document the Manual Way
 

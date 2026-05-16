@@ -2,6 +2,32 @@
 
 Common issues and solutions when using `mvm`.
 
+## Table of Contents
+
+- [Permission denied: /dev/kvm](#permission-denied-devkvm)
+- [Mixed Firewall Backend](#mixed-firewall-backend)
+- [Firewall rules lost after reboot](#firewall-rules-lost-after-reboot)
+- [Bridge `<prefix>-net` not found / No such device](#bridge-prefix-net-not-found-no-such-device)
+- [Kernel not found](#kernel-not-found)
+- [VM won't boot / SSH times out](#vm-wont-boot-ssh-times-out)
+- [VM won't start / Firecracker exits immediately](#vm-wont-start-firecracker-exits-immediately)
+- [Image not found](#image-not-found)
+- [Firecracker binary not found](#firecracker-binary-not-found)
+- [host init has not been run](#host-init-has-not-been-run)
+- [Undoing host init — host clean vs host reset](#undoing-host-init-host-clean-vs-host-reset)
+- [NoCloud-net server failed to start](#nocloud-net-server-failed-to-start)
+- [VM can't fetch cloud-init data via nocloud-net](#vm-cant-fetch-cloud-init-data-via-nocloud-net)
+- [Cloud-init seems slow](#cloud-init-seems-slow)
+- [Console relay not working](#console-relay-not-working)
+- [Network creation fails with permission denied](#network-creation-fails-with-permission-denied)
+- [IP address exhaustion (no available IPs)](#ip-address-exhaustion-no-available-ips)
+- [Cache corruption or stale state](#cache-corruption-or-stale-state)
+- [Out of disk space for images or VMs](#out-of-disk-space-for-images-or-vms)
+- [libguestfs / mvm cache init hangs forever](#libguestfs-mvm-cache-init-hangs-forever)
+- [Volume not found](#volume-not-found)
+- [Cannot remove volume attached to a VM](#cannot-remove-volume-attached-to-a-vm)
+- [Debug mode](#debug-mode)
+
 ---
 
 ## Permission denied: /dev/kvm
@@ -36,30 +62,38 @@ groups | grep kvm
 
 ---
 
-## Mixed iptables Backend
+## Mixed Firewall Backend
 
 **Symptom:** VM has valid IP and gateway. ICMP (ping) works. TCP (curl/wget) times out.
 
 **Detection:**
-```bash
-# Check which backend iptables uses
-iptables --version
 
-# Check if iptables-legacy has active rules (pkts > 0)
-sudo iptables-legacy -L -n -v
+First check which firewall backend mvmctl is configured to use:
+```bash
+mvm config get settings firewall_backend
 ```
 
-**Cause:** Docker and mvmctl use different iptables backends. Rules go to different places.
+If the backend is `nftables` (default), verify the nftables ruleset contains mvm chains:
+```bash
+sudo nft list ruleset | grep -c "MVM-"
+```
+
+If the backend is `iptables`, check which iptables variant is active:
+```bash
+iptables --version
+```
+
+**Cause:** Docker and mvmctl use different firewall backends. Rules go to different places. mvmctl defaults to nftables; Docker may configure the system to use iptables-legacy, creating a split where rules are applied to the wrong backend.
 
 **Fix:**
 ```bash
-# Option 1: Clear orphaned legacy rules (quick fix)
-sudo iptables-legacy -F
+# Option 1: Sync firewall rules from the database
+mvm network sync
 
-# Option 2: Reboot host (clears both backends cleanly)
+# Option 2: Reboot host (clears all firewall state cleanly)
 sudo reboot
 
-# Option 3: Configure Docker to use same backend as mvmctl
+# Option 3: Configure Docker to use the same backend as mvmctl
 # Edit /etc/docker/daemon.json and restart Docker
 ```
 
@@ -188,7 +222,7 @@ mvm image ls   # should appear
 
 **Solution:**
 ```bash
-mvm bin pull 1.15.0
+mvm bin pull firecracker --version 1.15.0
 mvm bin default <id>
 ```
 
@@ -226,7 +260,7 @@ mvm host clean
 
 This removes:
 - All bridges and TAP devices
-- All iptables chains used by mvm
+- All firewall chains used by mvm
 - The default network from the database
 - Any orphaned bridges and rules
 
@@ -240,7 +274,7 @@ Run `mvm host init` afterwards to recreate the default network.
 ### `mvm host reset` — Full factory reset
 
 ```bash
-mvm host reset --force, -f
+mvm host reset --force
 ```
 
 Does everything `clean` does, **plus**:
@@ -278,6 +312,14 @@ pkill -f mvm-nocloud-server
 **Solution:**
 
 Verify firewall rules are configured:
+
+For the nftables backend (default):
+```bash
+sudo nft list chain inet filter MVM-NOCLOUDNET-INPUT
+# Should show rules allowing source IP to destination ports
+```
+
+For the iptables backend:
 ```bash
 sudo iptables -L MVM-NOCLOUDNET-INPUT -n -v
 # Should show rules allowing source IP to destination ports
@@ -577,7 +619,7 @@ mvm volume rm <volume-name>
 Or force-remove (removes the volume record and file but does not hot-unplug from the VM):
 
 ```bash
-mvm volume rm <volume-name> --force, -f
+mvm volume rm <volume-name> --force
 ```
 
 ---
@@ -588,13 +630,13 @@ For more detailed error output, use the built-in CLI flags or the environment va
 
 ```bash
 # Use the --debug flag (sets log level to DEBUG)
-mvm --debug vm create --name myvm --image ubuntu:24.04
+mvm --debug vm create myvm --image ubuntu:24.04
 
 # Use the --verbose flag (sets log level to INFO)
-mvm --verbose vm create --name myvm --image ubuntu:24.04
+mvm --verbose vm create myvm --image ubuntu:24.04
 
 # Use the log level environment variable
-MVM_LOG_LEVEL=DEBUG mvm vm create --name myvm --image ubuntu:24.04
+MVM_LOG_LEVEL=DEBUG mvm vm create myvm --image ubuntu:24.04
 ```
 
 The `--debug` flag has highest priority, followed by `--verbose`, then `MVM_LOG_LEVEL`. All commands support the `--debug` and `--verbose` flags.

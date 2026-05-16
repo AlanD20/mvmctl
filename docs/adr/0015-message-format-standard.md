@@ -50,5 +50,7 @@ Messages should not end with `!`. Use periods or (for success messages) nothing.
 | **Progress** | `"Creating X..."` (present progressive, `...`) | `"Downloading kernel from https://..."` |
 | **Completion** | `"X created"` (past tense, no period) | `"Snapshot created"` |
 | **Failure** | `"Failed to X: reason"` (consistent prefix) | `"Failed to create snapshot: disk full"` |
-| **Warning** | `"X not available — suggestion"` | `"nftables NAT not available — falling back to iptables"` |
+| **Warning** | `"X not available — suggestion"` | `"Active firewall backend: nftables"` |
 | **exc_info** | Always `exc_info=True` when inside an `except` block | `logger.warning("Failed to do X: %s", e, exc_info=True)` |
+
+> **Note:** The Warning example was updated to reflect the mutual-exclusion architecture (ADR-0010). Firewall backends are now mutually exclusive — `FirewallTracker` selects exactly one backend at construction time via the `firewall_backend` setting, with no fallback between them. The original example (`"nftables NAT not available — falling back to iptables"`) was removed because fallback no longer exists.

@@ -166,7 +166,7 @@ Mandatory for any domain that has public CLI commands or API endpoints. No short
 *Example: `VMInput` (raw name/id/IP/MAC) -> `VMRequest(db).resolve()` (resolves to DB records, validates) -> `ResolvedVMInput` (frozen, all fields explicit, `vms: list[VMInstanceItem]`).*
 
 ### SQLite schema overview
-13 tables in `migrations/001_initial_schema.sql`: `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_leases`, `vm_instances`, `host_state`, `host_state_changes`, `iptables_rules`, `nftables_rules`, `ssh_keys`, `user_settings`. Each asset table has `is_default INTEGER` for default tracking. Foreign keys link VMs to assets and networks. Key constraints: `networks(name)` UNIQUE, `vm_instances(name)` UNIQUE, `ssh_keys(name)` UNIQUE, `volumes(name)` UNIQUE, `network_leases(network_id, ipv4)` UNIQUE composite. Foreign keys enabled via `PRAGMA foreign_keys = ON`.
+12 tables in `migrations/001_initial_schema.sql`: `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_leases`, `vm_instances`, `host_state`, `host_state_changes`, `iptables_rules`, `nftables_rules`, `ssh_keys`, `user_settings`. Five tables (`images`, `kernels`, `binaries`, `networks`, `ssh_keys`) have `is_default INTEGER` for default tracking. Foreign keys link VMs to assets and networks. Key constraints: `networks(name)` UNIQUE, `vm_instances(name)` UNIQUE, `ssh_keys(name)` UNIQUE, `volumes(name)` UNIQUE, `network_leases(network_id, ipv4)` UNIQUE composite. Foreign keys enabled via `PRAGMA foreign_keys = ON`.
 
 **Portable reference fields** (used for export/import across environments -- never internal SHA256 IDs):
 - Images: `(os_slug, arch)` -- unique identifier across environments
@@ -241,7 +241,7 @@ A 3-level hierarchy: `MVMError` (root) -> `{Domain}Error` (domain category) -> `
 The `MVMError` base class has an optional `code: str | None` parameter:
 ```python
 class MVMError(Exception):
-    def __init__(self, message: str = "", *, code: str | None = None) -> None:
+    def __init__(self, message: str = "", code: str | None = None) -> None:
         self.code = code
         super().__init__(message)
 ```
@@ -251,6 +251,8 @@ The API layer returns three types that the CLI/TUI/GUI consumes:
 - **`OperationResult[T]`** -- Single operation result with `status` (success/error/warning), `code` (machine-readable), `message` (user-facing), `item` (payload), and optional `exception`.
 - **`BatchResult[T]`** -- Collection of `OperationResult` items from bulk operations.
 - **`NeedsInteraction`** -- Returned when the operation requires user action (e.g., sudo password prompt). The frontend checks for this type before treating the result as complete.
+
+Note: These types are NOT re-exported through ``mvmctl.api.__all__`` or ``mvmctl.models.__all__``. They must be imported directly from ``mvmctl.models.result``.
 
 ```
 MVMError                                     # Root -- carries optional code string
@@ -262,8 +264,11 @@ MVMError                                     # Root -- carries optional code str
 │   ├── VMRequestError                       # Request resolution/validation failure
 │   ├── VMBuilderError                       # VM builder failure (mid-rollback)
 │   └── VMNotFoundError                      # VM not found in state
+├── VolumeError                              # Volume operation failure
+├── VolumeNotFoundError                      # Volume not found
 ├── IPTablesTrackerError                     # IPTables action failure (direct MVMError child)
 ├── NetworkError                             # Network setup/teardown failure
+├── NetworkNotFoundError                     # Network not found in registry
 ├── ImageError                               # Image download/conversion failure
 │   ├── ImageCompressionError                # Compression failure
 │   ├── ImageDecompressionError              # Decompression failure
@@ -271,7 +276,9 @@ MVMError                                     # Root -- carries optional code str
 │   ├── ImageEmptyError                      # File is empty
 │   ├── ImageValidationError                 # Format validation failure
 │   └── ChecksumMismatchError                # SHA256 checksum mismatch
+├── ImageNotFoundError                       # Image not found in registry
 ├── KernelError                              # Kernel build/config failure
+├── KernelNotFoundError                      # Kernel not found in registry
 ├── FirecrackerError                         # Firecracker domain
 │   ├── FirecrackerClientError               # Process/API failure
 │   │   └── SocketNotFoundError              # Unix socket not found
@@ -286,15 +293,18 @@ MVMError                                     # Root -- carries optional code str
 ├── LogsError                                # Log read/tail failure
 ├── ProcessError                             # Subprocess execution failure
 ├── AssetNotFoundError                       # Asset not found locally/remotely
+├── BinaryNotFoundError                      # Binary not found in registry
 ├── BundledAssetError                        # Bundled package asset failure
 │   └── BundledAssetNotFoundError            # Bundled file not found
 ├── BinaryError                              # Binary management failure
 │   └── BinaryAlreadyExistsError             # Version already exists
+├── VersionError                             # Version resolution failure
 ├── SSHError                                 # SSH connection/config failure
 ├── MVMKeyError                              # SSH key management failure
 │   ├── KeyExportError                       # SSH key export failure
 │   ├── KeyDependencyError                   # ssh-keygen missing
 │   └── KeyFileError                         # Key file read/write failure
+├── KeyNotFoundError                         # SSH key not found in registry
 ├── CloudInitError                           # Cloud-init provisioning failure
 │   ├── CloudInitProvisionError              # Invalid custom user data
 │   ├── CloudInitModeError                   # Mode resolution failure
@@ -315,10 +325,6 @@ MVMError                                     # Root -- carries optional code str
 ├── TieDetectedError                         # Multiple partition tie
 ├── DownloadError                            # Download failure
 ├── HttpDownloadError                        # HTTP download failure (direct child)
-└── ... (ImageNotFoundError, BinaryNotFoundError, KernelNotFoundError,
-          NetworkNotFoundError, KeyNotFoundError, VolumeNotFoundError,
-          VolumeError are direct children of MVMError
-          for legacy compat)
 ```
 
 Error message format (user-facing, three parts in one line):
@@ -418,7 +424,7 @@ The centralized runner provides: consistent logging (`logger.debug` of the comma
 - "What about expensive/infrequent tests" -- resolved: two **exclusive markers** added. `pytest.mark.kernel_build` for kernel build-from-source tests (10+ min, needs gcc/make). `pytest.mark.host_reset` for host clean/reset with sudo (modifies real system state). Both excluded from default `uv run scripts/run_tests.py --system` runs. Invoke explicitly with `-m kernel_build` or `-m host_reset`.
 - "What about parallel test safety" -- resolved: every test that modifies shared state (defaults, cache, assets, binaries, kernels) must be marked `pytest.mark.serial` to prevent xdist race conditions.
 - "How do system tests handle sudo operations" -- resolved: `sudo` is allowed for `mvm init`, `mvm host init`, `mvm host clean`, and `mvm host reset`. Use the built binary at `~/.local/bin/mvm` for sudo operations. The QA engineer agent has explicit sudo permission for these four command patterns.
-- "What is the release gate" -- resolved: the release gate is **system tests passing against `dist/mvm`**. Before reporting release ready, the QA engineer must: (1) build `dist/mvm` via `scripts/build_services.py --fast`, (2) copy to `~/.local/bin/mvm`, (3) run all system tests against the binary, (4) report pass/fail status.
+- "What is the release gate" -- resolved: the release gate is **system tests passing against `dist/mvm`**. Before reporting release ready, the QA engineer must: (1) build `dist/mvm` via `scripts/build_services.py`, (2) copy to `~/.local/bin/mvm`, (3) run all system tests against the binary, (4) report pass/fail status.
 
 ## Test types (three-layer test pyramid)
 

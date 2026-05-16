@@ -60,7 +60,7 @@ uv run mvm --help
 Nuitka (Compiled binary — Recommended for releases):
 ```bash
 uv sync --group dev --group build
-python scripts/build_services.py --mvm
+python scripts/build_services.py
 ./dist/mvm --version
 ```
 

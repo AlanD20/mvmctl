@@ -20,7 +20,7 @@
 
 ```bash
 # Create and SSH into a VM in under 60 seconds
-mvm vm create --name myvm --image ubuntu:24.04
+mvm vm create myvm --image ubuntu:24.04
 mvm ssh myvm
 ```
 
@@ -51,11 +51,11 @@ mvm ssh myvm
 
   Ubuntu/Debian:
   ```bash
-  sudo apt-get install -y iproute2 iptables cloud-image-utils qemu-img e2fsprogs
+  sudo apt-get install -y iproute2 iptables nftables cloud-image-utils qemu-img e2fsprogs kmod
   ```
   Arch Linux:
   ```bash
-  sudo pacman -S --needed iproute2 iptables cloud-utils qemu-img e2fsprogs
+  sudo pacman -S --needed iproute2 iptables nftables cloud-utils qemu-img e2fsprogs kmod
   ```
 - **Root access (one-time):** run `mvm init` once to create the `mvm` group and a sudoers drop-in; normal `mvm` commands require no `sudo` after that
 - **Environment variables:** Configure runtime behavior via `MVM_*` variables. See [docs/REFERENCES.md](docs/REFERENCES.md#environment-variables) for the full list.
@@ -113,7 +113,7 @@ mvm init
 mvm key create test --default
 
 # Create and start a VM
-mvm vm create --name myvm --image ubuntu:24.04
+mvm vm create myvm --image ubuntu:24.04
 
 # Follow the boot log until SSH is ready (~30-60 s)
 mvm logs myvm --follow
@@ -135,12 +135,21 @@ mvm vm rm myvm
 ### VM Lifecycle
 
 ```bash
-mvm vm create --name myvm --image ubuntu:24.04   # Create and start a VM
-mvm vm create --name cluster --count 3 --atomic   # Batch-create 3 VMs
+mvm vm create myvm --image ubuntu:24.04   # Create and start a VM
+mvm vm create cluster --count 3 --atomic   # Batch-create 3 VMs
 mvm vm ls                                         # List all VMs
+mvm vm ps                                         # List running VMs (active processes)
 mvm ssh myvm                                      # SSH into a VM
 mvm console myvm                                  # Console access (no SSH)
 mvm vm rm myvm -f                                   # Remove a VM
+
+### Network Management
+
+```bash
+mvm network ls                                    # List all networks
+mvm network create my-net --subnet 192.168.100.0/24  # Create a named network
+mvm network rm my-net                             # Remove a network
+mvm network default my-net                        # Set as default for VM creation
 ```
 
 ### Resource Management
@@ -151,7 +160,7 @@ mvm volume ls                       # List volumes
 mvm image pull ubuntu:24.04        # Download an OS image
 mvm image ls                       # List available images
 mvm kernel pull --type firecracker  # Download Firecracker kernel
-mvm bin pull 1.15.0                # Download Firecracker + jailer binaries
+mvm bin pull firecracker --version 1.15.0  # Download Firecracker + jailer binaries
 mvm key create mykey --default      # Generate SSH key
 ```
 
@@ -160,6 +169,15 @@ mvm key create mykey --default      # Generate SSH key
 ```bash
 mvm host init    # One-time host setup (KVM, networking)
 mvm cache prune  # Clean up stale cache
+```
+
+### Configuration
+
+```bash
+mvm config get defaults.vm vcpu_count             # Get a config value
+mvm config set defaults.vm vcpu_count 4           # Set a config value
+mvm config reset defaults.vm vcpu_count           # Reset a config value to default
+mvm config list                                   # List all overridable settings
 ```
 
 See [docs/REFERENCES.md](docs/REFERENCES.md) for the complete command reference with all flags and options.
@@ -175,7 +193,7 @@ Comprehensive documentation is available in the `docs/` directory:
 | [docs/REFERENCES.md](docs/REFERENCES.md) | **Complete command reference** -- all `mvm` commands, flags, and options<br>**Configuration** -- config files, environment variables, cache structure<br>**Cloud-Init** -- nocloud-net setup, security, modes |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues and solutions<br>Debug mode, permission fixes, network issues |
 | [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | System dependencies by category<br>Package names for Debian/Ubuntu/Arch |
-| [docs/CUSTOM_KERNEL.md](docs/CUSTOM_KERNEL.md) | Building custom kernels for Firecracker |
+| [docs/KERNEL.md](docs/KERNEL.md) | Building kernels for Firecracker (CI and official) |
 | [docs/RELEASE.md](docs/RELEASE.md) | Release process and distribution packages |
 | [docs/API.md](docs/API.md) | Python API reference for programmatic usage |
 
@@ -192,10 +210,9 @@ git clone https://github.com/AlanD20/mvmctl
 cd mvmctl
 uv sync --group dev --group build
 python scripts/build_services.py      # Build everything (default mode)
-# Or just the main binary:
-python scripts/build_services.py --mvm
 # Output: dist/mvm
 ./dist/mvm --version
+sudo cp dist/mvm ~/.local/bin/mvm         # Install to PATH (required for sudo support)
 ```
 
 See [docs/RELEASE.md](docs/RELEASE.md) for detailed build instructions.

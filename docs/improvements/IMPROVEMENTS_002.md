@@ -34,7 +34,7 @@
 - [x] constrain TAP FORWARD rules to bridge subnet
     - ✅ **IMPLEMENTED** — `ensure_tap()` now uses bridge subnet for src/dst, matching `ensure_nat()`.
 
-## Networking (historical iptables output — kept for reference)
+## Networking (historical iptables output — kept for reference; nftables is now the default backend)
 ```text
 Chain MVM-FORWARD (1 references)
  pkts bytes target     prot opt in     out     source               destination

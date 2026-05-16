@@ -5,13 +5,15 @@ This document covers how to release a new version of mvmctl from start to finish
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
-- [Step 1: Bump the Version](#step-1-bump-the-version)
-- [Step 2: Build and Verify Locally](#step-2-build-and-verify-locally)
-- [Step 3: Commit and Push](#step-3-commit-and-push)
-- [Step 4: Tag and Push the Tag](#step-4-tag-and-push-the-tag)
-- [Step 5: CI Pipeline](#step-5-ci-pipeline)
-- [Step 6: Verify the Release](#step-6-verify-the-release)
-- [Step 7: Install the Man Page](#step-7-install-the-man-page)
+- [Step 1: Build and Verify Locally with Tests](#step-1-build-and-verify-locally-with-tests)
+- [Step 2: Bump the Version](#step-2-bump-the-version)
+- [Step 3: Build and Verify After Bump](#step-3-build-and-verify-after-bump)
+- [Step 4: Commit and Push](#step-4-commit-and-push)
+- [Step 5: Tag and Push the Tag](#step-5-tag-and-push-the-tag)
+- [Step 6: CI Pipeline](#step-6-ci-pipeline)
+- [Step 7: Verify the Release](#step-7-verify-the-release)
+- [Step 8: Update Downstream Packages](#step-8-update-downstream-packages)
+- [Step 9: Install the Man Page](#step-9-install-the-man-page)
 - [Issuing a Hotfix](#issuing-a-hotfix)
 - [Yanking a Bad Release](#yanking-a-bad-release)
 - [Appendix: Dynamic Import Handling](#appendix-dynamic-import-handling)
@@ -77,9 +79,10 @@ This project uses **semantic versioning** (MAJOR.MINOR.PATCH):
 
 ---
 
-## Step 2: Build and Verify Locally
+## Step 3: Build and Verify After Bump
 
-Before tagging, verify the build compiles and runs:
+After bumping the version, rebuild the binary to confirm the bumped version compiles
+and the new version string is embedded correctly:
 
 ```bash
 uv sync --group dev --group build
@@ -88,17 +91,15 @@ python scripts/build_services.py            # Build everything (default)
 
 Output: `dist/mvm` (main binary) and `dist/services/mvm-services` (multidist services binary).
 
-Verify the binary:
+Verify the binary reports the new version:
 ```bash
 ./dist/mvm --version
 ./dist/mvm --help
 ```
 
----
+## Step 4: Commit and Push
 
-## Step 3: Commit and Push
-
-If you used `--commit` in step 2, skip to step 4. Otherwise:
+If you used `--commit` in step 2, skip to step 5. Otherwise:
 
 ```bash
 git add pyproject.toml src/mvmctl/__init__.py CHANGELOG.md docs/mvm.1 \
@@ -112,7 +113,7 @@ gate. Do not tag until CI is green.
 
 ---
 
-## Step 4: Tag and Push the Tag
+## Step 5: Tag and Push the Tag
 
 ```bash
 # Create an annotated tag
@@ -126,13 +127,13 @@ Pushing a tag matching `v*.*.*` triggers the release workflow.
 
 ---
 
-## Step 5: CI Pipeline
+## Step 6: CI Pipeline
 
 The `.github/workflows/release.yml` workflow runs automatically when the tag is pushed:
 
 | Job | Description |
 |-----|-------------|
-| **test** | All tests with 80% coverage gate |
+| **test** | All tests with 79% coverage gate |
 | **build** | Nuitka binary on `ubuntu-24.04`, SHA256 checksum, uploaded as artifact |
 | **build-deb** | `.deb` package via `dpkg-buildpackage` |
 | **build-rpm** | `.rpm` in Fedora container |
@@ -144,7 +145,7 @@ The full run typically takes 5-10 minutes.
 
 ---
 
-## Step 6: Verify the Release
+## Step 7: Verify the Release
 
 ### Download and check the binary
 
@@ -173,7 +174,7 @@ Visit the releases page and confirm:
 
 ---
 
-## Step 7: Update Downstream Packages
+## Step 8: Update Downstream Packages
 
 After the release is published, update distribution packaging that requires hardcoded checksums.
 
@@ -197,7 +198,7 @@ git push aur master
 
 ---
 
-## Step 8: Install the Man Page
+## Step 9: Install the Man Page
 
 ```bash
 sudo cp docs/mvm.1 /usr/local/share/man/man1/

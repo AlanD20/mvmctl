@@ -37,9 +37,7 @@ def _get_firecracker_kernel_path(mvm_binary: str) -> str:
 
     Caller should invoke ``_ensure_kernel()`` first.
     """
-    kernels = json.loads(
-        _run_mvm(mvm_binary, "kernel", "ls", "--json").stdout
-    )
+    kernels = json.loads(_run_mvm(mvm_binary, "kernel", "ls", "--json").stdout)
     firecracker = [
         k
         for k in kernels
@@ -112,6 +110,7 @@ class TestKernelImportLifecycle:
     # ------------------------------------------------------------------
 
     def test_import_firecracker_kernel(self, mvm_binary: str) -> None:
+        # Rationale: Needs a real kernel file to test the import pipeline end-to-end
         """Import a firecracker kernel as a custom kernel and verify state."""
         type(self)._binary = mvm_binary
         _ensure_kernel(mvm_binary)
@@ -135,9 +134,7 @@ class TestKernelImportLifecycle:
             "--arch",
             import_arch,
         )
-        assert result.returncode == 0, (
-            f"kernel import failed: {result.stderr}"
-        )
+        assert result.returncode == 0, f"kernel import failed: {result.stderr}"
 
         # ------------------------------------------------------------------
         # Option C verification: JSON state
@@ -224,6 +221,7 @@ class TestKernelImportLifecycle:
     # ------------------------------------------------------------------
 
     def test_create_vm_with_imported_kernel(self, mvm_binary: str) -> None:
+        # Rationale: Needs a real VM to verify the imported kernel is used at boot
         """Create a VM using the imported kernel (from step 1)."""
         assert self._import_kernel_short_id is not None, (
             "Step 1 must complete before step 2"
@@ -267,12 +265,8 @@ class TestKernelImportLifecycle:
         # ------------------------------------------------------------------
         # Option C verification: vm ls --json
         # ------------------------------------------------------------------
-        vms = json.loads(
-            _run_mvm(mvm_binary, "vm", "ls", "--json").stdout
-        )
-        vm_entry = next(
-            (v for v in vms if v.get("name") == vm_name), None
-        )
+        vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+        vm_entry = next((v for v in vms if v.get("name") == vm_name), None)
         assert vm_entry is not None, (
             f"VM '{vm_name}' not found in vm ls --json after creation"
         )
@@ -308,18 +302,15 @@ class TestKernelImportLifecycle:
     # ------------------------------------------------------------------
 
     def test_imported_kernel_stop_start(self, mvm_binary: str) -> None:
+        # Rationale: Needs a real VM to verify the imported kernel survives stop/start
         """Stop the VM from step 2, then start it again."""
-        assert self._vm_name is not None, (
-            "Step 2 must complete before step 3"
-        )
+        assert self._vm_name is not None, "Step 2 must complete before step 3"
 
         vm_name = self._vm_name
 
         # Stop the VM
         result = _run_mvm(mvm_binary, "vm", "stop", vm_name)
-        assert result.returncode == 0, (
-            f"vm stop failed: {result.stderr}"
-        )
+        assert result.returncode == 0, f"vm stop failed: {result.stderr}"
 
         # Wait briefly for the stop to take effect
         time.sleep(2)
@@ -332,9 +323,7 @@ class TestKernelImportLifecycle:
 
         # Start the VM again
         result = _run_mvm(mvm_binary, "vm", "start", vm_name)
-        assert result.returncode == 0, (
-            f"vm start failed: {result.stderr}"
-        )
+        assert result.returncode == 0, f"vm start failed: {result.stderr}"
 
         # After start, the VM should be running
         time.sleep(2)
@@ -347,12 +336,8 @@ class TestKernelImportLifecycle:
         # ------------------------------------------------------------------
         # Option C: verify kernel_id is still our imported kernel
         # ------------------------------------------------------------------
-        vms = json.loads(
-            _run_mvm(mvm_binary, "vm", "ls", "--json").stdout
-        )
-        vm_entry = next(
-            (v for v in vms if v.get("name") == vm_name), None
-        )
+        vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+        vm_entry = next((v for v in vms if v.get("name") == vm_name), None)
         assert vm_entry is not None, (
             f"VM '{vm_name}' not found after stop/start cycle"
         )
@@ -406,6 +391,7 @@ class TestKernelImportAutoVersion:
     def test_import_auto_detected_version(
         self, mvm_binary: str, tmp_path: Path
     ) -> None:
+        # Rationale: Needs a real kernel file to test version auto-detection from filename
         """Copy firecracker kernel to a versioned temp filename and
         import without ``--version``; verify version is auto-detected."""
         _ensure_kernel(mvm_binary)
@@ -442,9 +428,7 @@ class TestKernelImportAutoVersion:
             kernels = json.loads(
                 _run_mvm(mvm_binary, "kernel", "ls", "--json").stdout
             )
-            imported = [
-                k for k in kernels if k.get("base_name") == import_name
-            ]
+            imported = [k for k in kernels if k.get("base_name") == import_name]
             assert len(imported) == 1, (
                 f"Expected 1 kernel with base_name='{import_name}', "
                 f"found {len(imported)}"
@@ -530,6 +514,7 @@ class TestKernelImportError:
     ]
 
     def test_import_nonexistent_path_fails(self, mvm_binary: str) -> None:
+        # Rationale: Only needs CLI validation — no real resources needed
         """Importing a non-existent file path must fail."""
         result = _run_mvm(
             mvm_binary,
@@ -550,11 +535,10 @@ class TestKernelImportError:
         assert any(
             s in combined
             for s in ["not found", "does not exist", "no such file"]
-        ), (
-            f"Expected error message about missing file, got: {combined}"
-        )
+        ), f"Expected error message about missing file, got: {combined}"
 
     def test_import_empty_name_fails(self, mvm_binary: str) -> None:
+        # Rationale: Only needs CLI validation — no real kernel creation needed
         """Importing with an empty name must fail."""
         # Use a real path (the firecracker kernel) but an empty name
         _ensure_kernel(mvm_binary)
@@ -577,6 +561,7 @@ class TestKernelImportError:
         )
 
     def test_import_unsupported_arch_fails(self, mvm_binary: str) -> None:
+        # Rationale: Only needs CLI validation — no resources needed
         """Importing with an unsupported architecture must fail."""
         _ensure_kernel(mvm_binary)
         source_path = _get_firecracker_kernel_path(mvm_binary)
@@ -601,9 +586,8 @@ class TestKernelImportError:
             f"Expected error mentioning 'arch', got: {combined}"
         )
 
-    def test_import_duplicate_name_succeeds(
-        self, mvm_binary: str
-    ) -> None:
+    def test_import_duplicate_name_succeeds(self, mvm_binary: str) -> None:
+        # Rationale: Needs a real kernel file to test duplicate import behavior
         """Importing a kernel with the same name+version+arch creates
         a new entry (different content-addressed ID). Type should be 'custom'.
         """
@@ -648,11 +632,7 @@ class TestKernelImportError:
             kernels = json.loads(
                 _run_mvm(mvm_binary, "kernel", "ls", "--json").stdout
             )
-            matching = [
-                k
-                for k in kernels
-                if k.get("base_name") == import_name
-            ]
+            matching = [k for k in kernels if k.get("base_name") == import_name]
             assert len(matching) >= 2, (
                 f"Expected at least 2 entries with base_name='{import_name}', "
                 f"found {len(matching)}"
@@ -691,6 +671,7 @@ class TestKernelImportCleanup:
     ]
 
     def test_remove_all_custom_kernels(self, mvm_binary: str) -> None:
+        # Rationale: Destructive cleanup — removes any leftover custom kernels and VMs
         """Remove every kernel with type=custom and cleanup any
         VMs that reference them."""
         # Gather all custom kernels
@@ -734,9 +715,7 @@ class TestKernelImportCleanup:
         # Verify no custom kernels remain
         result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
         remaining = json.loads(result.stdout) if result.stdout else []
-        custom_remaining = [
-            k for k in remaining if k.get("type") == "custom"
-        ]
+        custom_remaining = [k for k in remaining if k.get("type") == "custom"]
         assert len(custom_remaining) == 0, (
             f"Expected no custom kernels remaining after cleanup, "
             f"found {len(custom_remaining)}: "

@@ -71,7 +71,7 @@ Key points:
 - `sudo` is allowed for: `mvm init`, `mvm host init`, `mvm host clean`, `mvm host reset`
 - For verbose or debug output, use the `--verbose` or `--debug` CLI flags instead of `MVM_LOG_LEVEL=DEBUG`:
   ```bash
-  sg mvm -c 'uv run mvm --debug vm create --name test-vm'
+  sg mvm -c 'uv run mvm --debug vm create test-vm'
   sg mvm -c 'uv run mvm --verbose vm ls'
   ```
   The `--debug` flag sets log level to DEBUG; `--verbose` sets it to INFO. Both are available on every command via the root `mvm` group.
