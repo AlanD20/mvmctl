@@ -79,7 +79,7 @@ class BinaryOperation:
                     from mvmctl.api.inputs._binary_input import BinaryInput
 
                     BinaryOperation.remove(
-                        BinaryInput(id=[binary.id]),
+                        BinaryInput(identifiers=[binary.id]),
                         force=include_all,
                     )
                     removed.append(f"{binary.name}:{binary.version}")
@@ -113,11 +113,11 @@ class BinaryOperation:
         3. If exists and no override, return existing binaries
         4. Download via BinaryService.download()
         5. Upsert to DB via BinaryRepository
-        6. If set_as_default, mark as default
+        6. If set_default, mark as default
         7. Return OperationResult
 
         Args:
-            inputs: BinaryPullInput with version and set_as_default flag.
+            inputs: BinaryPullInput with version and set_default flag.
 
         Returns:
             OperationResult with firecracker and jailer entries.
@@ -144,7 +144,7 @@ class BinaryOperation:
                 # Early exit: return existing binaries without downloading
                 assert fc_exists is not None
                 assert jl_exists is not None
-                if resolved.set_as_default:
+                if resolved.set_default:
                     for b in (fc_exists, jl_exists):
                         repo.set_default(
                             name=b.name,
@@ -160,7 +160,7 @@ class BinaryOperation:
 
             # Download (override or first-time)
             no_default = repo.get_default("firecracker") is None
-            should_set_default = resolved.set_as_default or no_default
+            should_set_default = resolved.set_default or no_default
 
             binaries = BinaryService.download_firecracker(
                 version=resolved.version,

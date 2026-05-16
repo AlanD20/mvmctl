@@ -18,7 +18,7 @@ class KernelInput:
     """
     Input model for identifying existing kernels.
 
-    Used for operations on existing kernels (remove, get, inspect, set-default).
+    Used for operations on existing kernels (remove, get, inspect, default).
     Provides identifiers (name or id) to resolve the kernel from DB.
     """
 

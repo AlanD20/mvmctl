@@ -237,7 +237,7 @@ class InitOperation:
         from mvmctl.api.inputs._binary_pull_input import BinaryPullInput
 
         fetch_result = BinaryOperation.pull(
-            BinaryPullInput(version=version, set_as_default=True)
+            BinaryPullInput(version=version, set_default=True)
         )
         if isinstance(fetch_result, NeedsInteraction):
             return InitStepResult(
@@ -266,7 +266,7 @@ class InitOperation:
                 )
 
             fetch_result = BinaryOperation.pull(
-                BinaryPullInput(version=versions[0], set_as_default=True)
+                BinaryPullInput(version=versions[0], set_default=True)
             )
             if isinstance(fetch_result, NeedsInteraction):
                 return InitStepResult(

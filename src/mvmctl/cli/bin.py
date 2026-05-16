@@ -10,6 +10,7 @@ import typer
 from mvmctl.api import BinaryInput as _BinaryInput
 from mvmctl.api import BinaryOperation as _BinaryOperation
 from mvmctl.api import BinaryPullInput as _BinaryPullInput
+from mvmctl.core._shared import VersionError, VersionResolver
 
 if TYPE_CHECKING:
     from mvmctl.api.binary_operations import BinaryOperation
@@ -117,8 +118,11 @@ def bin_ls(
 @bin_app.command(name="pull")
 @handle_errors
 def bin_pull(
-    version: str = typer.Argument(
-        ..., help="Version to download (e.g. 1.15.0)"
+    name: str = typer.Argument(..., help="Binary name (e.g. firecracker)"),
+    version: str | None = typer.Option(
+        None,
+        "--version",
+        help="Version to download (e.g. 1.15.0, latest)",
     ),
     set_default: bool = typer.Option(
         False,
@@ -133,15 +137,36 @@ def bin_pull(
         help="Re-download even if version already exists",
     ),
 ) -> None:
-    """Download a specific Firecracker version."""
-    normalized = version.removeprefix("v")
-
-    # Check if version already exists (may not exist yet — that's OK)
+    """Download a Firecracker version."""
     from mvmctl.exceptions import BinaryNotFoundError
 
+    # Resolve version from remote
+    remote_versions = BinaryOperation.list_remote(limit=20)
+    if not remote_versions:
+        print_error("No remote Firecracker versions found")
+        raise typer.Exit(code=1)
+
+    if version is not None:
+        spec = VersionResolver.parse_spec(version)
+        try:
+            resolved_version = VersionResolver.resolve(remote_versions, spec)
+        except VersionError:
+            print_error(
+                f"Version '{version}' not found in remote versions. "
+                f"Available: {', '.join(remote_versions[:10])}"
+            )
+            raise typer.Exit(code=1)
+    else:
+        resolved_version = remote_versions[0]
+
+    normalized = resolved_version.removeprefix("v")
+
+    # Check if version already exists (may not exist yet — that's OK)
     try:
         already_exists = BinaryOperation.get(
-            BinaryInput(names=["firecracker", "jailer"], version=normalized)
+            BinaryInput(
+                identifiers=["firecracker", "jailer"], version=normalized
+            )
         )
     except BinaryNotFoundError:
         already_exists = []
@@ -156,8 +181,8 @@ def bin_pull(
         download_override = True
 
     inputs = BinaryPullInput(
-        version=version,
-        set_as_default=set_default,
+        version=normalized,
+        set_default=set_default,
         download_override=download_override,
     )
     result: OperationResult[list[BinaryItem]] = BinaryOperation.pull(inputs)  # type: ignore[assignment]
@@ -183,7 +208,7 @@ def bin_pull(
         print_info(f"  ID: {short_id}")
 
     if set_default:
-        print_success(f"Default binary set to v{version}")
+        print_success(f"Default binary set to v{normalized}")
 
     raise typer.Exit(code=0)
 
@@ -222,7 +247,7 @@ def bin_rm(
         print_error("Provide at least one binary ID to remove or use --version")
         raise typer.Exit(code=1)
 
-    inputs = BinaryInput(id=effective_ids)
+    inputs = BinaryInput(identifiers=effective_ids)
     batch_result = BinaryOperation.remove(inputs, force=force)
 
     for item_result in batch_result.items:
@@ -245,7 +270,7 @@ def bin_default(
     ),
 ) -> None:
     """Set a binary as the active default."""
-    inputs = BinaryInput(id=[identifier])
+    inputs = BinaryInput(identifiers=[identifier])
     result = BinaryOperation.set_default(inputs)
 
     if result.is_error:

@@ -248,7 +248,7 @@ def kernel_pull(
         None, "--arch", help="Architecture (x86_64, arm64)"
     ),
     set_default: bool = typer.Option(
-        False, "--default", help="Set as default after fetch"
+        False, "--default", "-d", help="Set as default after fetch"
     ),
     jobs: int | None = typer.Option(
         None, "--jobs", help="Parallel build jobs (official only)"

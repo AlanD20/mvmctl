@@ -246,7 +246,7 @@ def image_pull(
         help="Skip cached version listing and fetch live from upstream",
     ),
     set_default: bool = typer.Option(
-        False, "--default", help="Set as default image after download"
+        False, "--default", "-d", help="Set as default image after download"
     ),
     skip_optimization: bool = typer.Option(
         False,
@@ -533,7 +533,7 @@ def image_import(
         False, "--force", "-f", help="Overwrite existing"
     ),
     set_default: bool = typer.Option(
-        False, "--default", help="Set as default after import"
+        False, "--default", "-d", help="Set as default after import"
     ),
     skip_optimization: bool = typer.Option(
         False,

@@ -22,7 +22,7 @@ class BinaryPullInput:
     """Raw input for binary pull operation."""
 
     version: str
-    set_as_default: bool = False
+    set_default: bool = False
     download_override: bool = True
 
 
@@ -31,7 +31,7 @@ class ResolvedBinaryPullInput:
     """Immutable resolved binary pull request."""
 
     version: str
-    set_as_default: bool
+    set_default: bool
     bin_dir: Path
     download_override: bool
 
@@ -78,7 +78,7 @@ class BinaryPullRequest:
 
         self._result = ResolvedBinaryPullInput(
             version=version,
-            set_as_default=self._inputs.set_as_default,
+            set_default=self._inputs.set_default,
             bin_dir=bin_dir,
             download_override=self._inputs.download_override,
         )

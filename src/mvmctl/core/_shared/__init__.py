@@ -34,6 +34,11 @@ if TYPE_CHECKING:
     from mvmctl.core._shared._parallel import ParallelExecutor
     from mvmctl.core._shared._resolver_registry import get as get_resolver
     from mvmctl.core._shared._resolver_registry import register
+    from mvmctl.core._shared._version_resolver import (
+        VersionError,
+        VersionResolver,
+        VersionSpec,
+    )
 
 __all__ = [
     "AssetManager",
@@ -49,7 +54,10 @@ __all__ = [
     "register",
     "RelationEnricher",
     "RelationSpec",
+    "VersionError",
     "VersionInfo",
+    "VersionResolver",
+    "VersionSpec",
 ]
 
 _LAZY_MAP = {
@@ -82,6 +90,15 @@ _LAZY_MAP = {
     "VersionInfo": (
         "mvmctl.core._shared._http_dir_version_resolver",
         "VersionInfo",
+    ),
+    "VersionError": ("mvmctl.exceptions", "VersionError"),
+    "VersionResolver": (
+        "mvmctl.core._shared._version_resolver",
+        "VersionResolver",
+    ),
+    "VersionSpec": (
+        "mvmctl.core._shared._version_resolver",
+        "VersionSpec",
     ),
     "get_resolver": ("mvmctl.core._shared._resolver_registry", "get"),
     "register": ("mvmctl.core._shared._resolver_registry", "register"),

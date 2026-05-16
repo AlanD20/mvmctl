@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mvmctl.core._shared import RelationEnricher, RelationSpec
+from mvmctl.core._shared import RelationEnricher, RelationSpec, VersionResolver
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.exceptions import ImageNotFoundError
 from mvmctl.models import ImageItem
@@ -92,12 +92,12 @@ class ImageResolver:
 
     def resolve(self, value: str) -> ImageItem:
         """Resolve image by ``type:version``, type, display name, or ID prefix."""
-        if ":" in value:
-            parts = value.split(":", maxsplit=1)
+        prefix, rest = VersionResolver.parse_selector(value)
+        if prefix is not None:
             try:
-                return self.by_version_type(parts[1], parts[0])
+                return self.by_version_type(rest, prefix)
             except ImageNotFoundError:
-                value = parts[0]  # Fall back to type-only lookup
+                value = prefix  # Fall back to type-only lookup
 
         try:
             image = self.by_type(value)

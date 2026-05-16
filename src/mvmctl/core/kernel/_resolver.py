@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from mvmctl.core._shared import RelationEnricher, RelationSpec
+from mvmctl.core._shared import RelationEnricher, RelationSpec, VersionResolver
 from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.exceptions import KernelNotFoundError
 from mvmctl.models import KernelItem
@@ -87,9 +87,9 @@ class KernelResolver:
 
     def resolve(self, value: str) -> KernelItem:
         """Resolve kernel by ID prefix, ``type:version`` (e.g. ``official:6.19.9``), or file path."""
-        if ":" in value:
-            parts = value.split(":", maxsplit=1)
-            return self.by_version_type(parts[1], parts[0])
+        prefix, rest = VersionResolver.parse_selector(value)
+        if prefix is not None:
+            return self.by_version_type(rest, prefix)
 
         try:
             return self.by_id(value)

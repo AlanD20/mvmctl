@@ -27,6 +27,7 @@ from mvmctl.constants import (
 from mvmctl.constants import (
     FIRECRACKER_GITHUB_RELEASES_API_URL as _GITHUB_RELEASES_URL,
 )
+from mvmctl.core._shared import VersionResolver
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.exceptions import BinaryError, HttpDownloadError
 from mvmctl.models import BinaryItem
@@ -121,25 +122,8 @@ class BinaryService:
                 if isinstance(tag, str):
                     versions.append(BinaryService._normalize_version(tag))
 
-        versions.sort(key=BinaryService._semver_key, reverse=True)
+        versions.sort(key=VersionResolver.semver_key, reverse=True)
         return versions
-
-    @staticmethod
-    def _semver_key(v: str) -> tuple[int, ...]:
-        """
-        Convert a semver string to a sortable tuple of integers.
-
-        Args:
-            v: Version string like "1.15.0".
-
-        Returns:
-            Tuple of integers for sorting. Falls back to (0,) on parse failure.
-
-        """
-        try:
-            return tuple(int(x) for x in v.split("."))
-        except ValueError:
-            return (0,)
 
     @staticmethod
     def download_firecracker(version: str, bin_dir: Path) -> list[BinaryItem]:

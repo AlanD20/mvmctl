@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mvmctl.core._shared import RelationEnricher, RelationSpec
+from mvmctl.core._shared import RelationEnricher, RelationSpec, VersionResolver
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.exceptions import BinaryNotFoundError
 from mvmctl.models import BinaryItem
@@ -69,6 +69,20 @@ class BinaryResolver:
             )
         return self.enrich([binary])[0]
 
+    def by_name_latest(self, name: str) -> BinaryItem:
+        """Resolve binary by name — returns the highest local version."""
+        matches = self._repo.list_by_name(name)
+        if not matches:
+            raise BinaryNotFoundError(f"Binary not found by name: {name}")
+        if len(matches) == 1:
+            return self.enrich(matches)[0]
+
+        matches.sort(
+            key=lambda b: VersionResolver.semver_key(b.version),
+            reverse=True,
+        )
+        return self.enrich(matches)[0]
+
     def get_default(self, name: str) -> BinaryItem | None:
         """Resolve the default binary for a given name, or None if not set."""
         binary = self._repo.get_default(name)
@@ -77,9 +91,12 @@ class BinaryResolver:
         return self.enrich([binary])[0]
 
     def resolve(self, value: str) -> BinaryItem:
-        """Resolve binary by ID prefix."""
-        binary = self.by_id(value)
-        return binary
+        """Resolve binary by ID prefix or name (latest version)."""
+        try:
+            return self.by_id(value)
+        except BinaryNotFoundError:
+            pass
+        return self.by_name_latest(value)
 
     def resolve_many(
         self,

@@ -287,7 +287,7 @@ def init_run(
         False, "--skip-host", help="Skip host init step"
     ),
 ) -> None:
-    """Initialize mvm host, network, and binary — run this to get started."""
+    f"""Initialize {CLI_NAME} host, network, and binary — run this to get started."""
     print_info("")
     print_info(f"{CLI_NAME} init — first-time setup")
     print_info("─" * 40)

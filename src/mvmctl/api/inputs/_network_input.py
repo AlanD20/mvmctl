@@ -22,7 +22,7 @@ class NetworkInput:
     """
     Input model for identifying existing networks.
 
-    Used for operations on existing networks (remove, get, inspect, set-default).
+    Used for operations on existing networks (remove, get, inspect, default).
     Provides identifiers (name or id) to resolve the network from DB.
     """
 

@@ -1,10 +1,10 @@
-"""Binary request resolver for binary operations (get, remove, set-default, etc.)."""
+"""Binary request resolver for binary operations (get, remove, default, etc.)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from mvmctl.core._shared import Database
+from mvmctl.core._shared import Database, VersionResolver
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.binary._resolver import BinaryResolver
 from mvmctl.exceptions import BinaryError, BinaryNotFoundError
@@ -15,11 +15,15 @@ __all__ = ["BinaryInput", "BinaryRequest", "ResolvedBinaryInput"]
 
 @dataclass
 class BinaryInput:
-    """Raw identifiers for binary operations."""
+    """Raw identifiers for binary operations.
 
-    id: list[str] = field(default_factory=list)
-    names: list[str] = field(default_factory=list)
-    version: str = field(default_factory=str)
+    Each entry in *identifiers* is resolved by ID prefix first, then by
+    name.  When *version* is set, each identifier is treated as a name
+    and resolved together with that version.
+    """
+
+    identifiers: list[str] = field(default_factory=list)
+    version: str | None = None
 
 
 @dataclass(frozen=True)
@@ -50,9 +54,14 @@ class BinaryRequest:
         """
         Resolve identifiers to BinaryItem list.
 
-        - If id provided: use BinaryResolver.by_id() for each
-        - If name+version provided: use BinaryResolver.by_name_version() for each pair
-        - If only name provided: resolve default via BinaryResolver.get_default()
+        Each identifier is processed through ``VersionResolver.parse_selector``
+        to support both plain names/IDs and ``name:version`` inline format:
+
+        * ``BinaryInput(identifiers=["firecracker:1.15.0"])`` — inline format
+        * ``BinaryInput(identifiers=["firecracker"], version="1.15.0")`` — separate
+
+        If no inline version is found and *version* is set, each identifier
+        is paired with *version* for ``by_name_version()`` resolution.
 
         Returns:
             ResolvedBinaryInput with the resolved BinaryItem list.
@@ -61,14 +70,21 @@ class BinaryRequest:
             BinaryNotFoundError: If binary cannot be found.
 
         """
-        identifiers: list[str | list[str]] = list(self._inputs.id)
+        candidates: list[str | list[str]] = []
 
-        # Resolve by name+version
-        if self._inputs.names and self._inputs.version:
-            for bin in self._inputs.names:
-                identifiers.append([bin, self._inputs.version])
+        for ident in self._inputs.identifiers:
+            prefix, value = VersionResolver.parse_selector(ident)
+            if prefix is not None:
+                # name:version inline format
+                candidates.append([prefix, value])
+            elif self._inputs.version:
+                # Pair bare name with the shared version
+                candidates.append([ident, self._inputs.version])
+            else:
+                # Resolve by ID prefix or name
+                candidates.append(ident)
 
-        self.binaries = self._resolver.resolve_many(identifiers).items
+        self.binaries = self._resolver.resolve_many(candidates).items
 
         if not self.binaries:
             raise BinaryNotFoundError(
