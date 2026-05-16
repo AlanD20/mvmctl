@@ -359,7 +359,7 @@ class FirecrackerSpawner:
                 # For nocloud-net, validate URL is configured
                 if not self._config.cloud_init_nocloud_url:
                     raise FirecrackerConfigError(
-                        "NoCloud URL must be set when using NET mode, pos"
+                        "NoCloud URL must be set when using NET mode"
                     )
                 self._set_boot_arg(
                     boot_args,

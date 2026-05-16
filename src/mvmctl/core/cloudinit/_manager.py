@@ -2,7 +2,7 @@
 Cloud-init configuration management - OOP implementation.
 
 This module provides class-based cloud-init file generation and ISO creation.
-The logic mirrors src/mvmctl/core/cloud_init.py but uses OOP patterns.
+The logic mirrors the legacy cloud-init module but uses OOP patterns.
 """
 
 from __future__ import annotations

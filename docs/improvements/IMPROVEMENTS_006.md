@@ -6,9 +6,9 @@
 >
 > Per-command `--json` flags exist on:
 > - `cli/vm.py` (lines 64, 528)
-> - `cli/image.py` (lines 71, 371)
+> - `cli/image.py` (lines 71, 379)
 > - `cli/network.py` (lines 65, 283, 347)
-> - `cli/kernel.py` (lines 58, 99)
+> - `cli/kernel.py` (lines 59, 109)
 > - `cli/bin.py` (line 61)
 > - `cli/host.py` (line 231)
 > - `cli/key.py` (lines 56, 197)

@@ -284,7 +284,9 @@ def install_uv() -> None:
     if is_uv_installed():
         print_success("uv installed successfully")
     else:
-        print_warning("uv installation may have failed — please install manually")
+        print_warning(
+            "uv installation may have failed — please install manually"
+        )
 
 
 def setup_packages(os_family: str) -> None:
@@ -335,37 +337,61 @@ def setup_kvm(os_family: str) -> None:
         print_step("Detected Intel CPU — configuring kvm_intel...")
         nested_conf = Path("/etc/modprobe.d/kvm-intel.conf")
         nested_content = "options kvm_intel nested=1\n"
-        if not nested_conf.exists() or nested_conf.read_text() != nested_content:
+        if (
+            not nested_conf.exists()
+            or nested_conf.read_text() != nested_content
+        ):
             run_cmd(
-                ["sh", "-c", f"echo 'options kvm_intel nested=1' > {nested_conf}"],
+                [
+                    "sh",
+                    "-c",
+                    f"echo 'options kvm_intel nested=1' > {nested_conf}",
+                ],
                 sudo=True,
                 description="Enable nested virtualization for Intel",
             )
             print_step("Reloading kvm_intel module...")
             run_cmd(["modprobe", "-r", "kvm_intel"], sudo=True, check=False)
-            run_cmd(["modprobe", "kvm_intel"], sudo=True, description="Reload kvm_intel")
+            run_cmd(
+                ["modprobe", "kvm_intel"],
+                sudo=True,
+                description="Reload kvm_intel",
+            )
 
         if check_nested_virt_intel():
             print_success("Nested virtualization enabled for Intel")
         else:
-            print_warning("Could not verify nested virtualization — check BIOS settings")
+            print_warning(
+                "Could not verify nested virtualization — check BIOS settings"
+            )
     elif is_amd:
         print_step("Detected AMD CPU — configuring kvm_amd...")
         nested_conf = Path("/etc/modprobe.d/kvm-amd.conf")
         nested_content = "options kvm_amd nested=1\n"
-        if not nested_conf.exists() or nested_conf.read_text() != nested_content:
+        if (
+            not nested_conf.exists()
+            or nested_conf.read_text() != nested_content
+        ):
             run_cmd(
-                ["sh", "-c", f"echo 'options kvm_amd nested=1' > {nested_conf}"],
+                [
+                    "sh",
+                    "-c",
+                    f"echo 'options kvm_amd nested=1' > {nested_conf}",
+                ],
                 sudo=True,
                 description="Enable nested virtualization for AMD",
             )
             run_cmd(["modprobe", "-r", "kvm_amd"], sudo=True, check=False)
-            run_cmd(["modprobe", "kvm_amd"], sudo=True, description="Reload kvm_amd")
+            run_cmd(
+                ["modprobe", "kvm_amd"], sudo=True, description="Reload kvm_amd"
+            )
 
         if check_nested_virt_amd():
             print_success("Nested virtualization enabled for AMD")
         else:
-            print_warning("Could not verify nested virtualization — check BIOS settings")
+            print_warning(
+                "Could not verify nested virtualization — check BIOS settings"
+            )
     else:
         print_warning("No KVM vendor module detected")
 
@@ -385,7 +411,9 @@ def setup_kvm(os_family: str) -> None:
         if os.access(kvm_path, os.R_OK | os.W_OK):
             print_success("/dev/kvm is accessible")
         else:
-            print_warning("/dev/kvm exists but may not be accessible — try logging out and back in")
+            print_warning(
+                "/dev/kvm exists but may not be accessible — try logging out and back in"
+            )
     else:
         print_error("/dev/kvm not found — KVM is not available")
 
@@ -450,7 +478,7 @@ def download_assets(target_dir: Path) -> None:
     for image in TEST_IMAGES:
         print_step(f"Downloading image: {image}...")
         result = run_cmd(
-            ["uv", "run", "mvm", "image", "fetch", image],
+            ["uv", "run", "mvm", "image", "pull", image],
             workdir=str(target_dir),
             description=f"Fetch image {image}",
             check=False,
@@ -464,7 +492,16 @@ def download_assets(target_dir: Path) -> None:
 
     print_step("Downloading Firecracker kernel...")
     result = run_cmd(
-        ["uv", "run", "mvm", "kernel", "fetch"],
+        [
+            "uv",
+            "run",
+            "mvm",
+            "kernel",
+            "pull",
+            "--type",
+            "firecracker",
+            "--default",
+        ],
         workdir=str(target_dir),
         description="Fetch kernel",
         check=False,
@@ -476,7 +513,7 @@ def download_assets(target_dir: Path) -> None:
 
     print_step("Downloading Firecracker binary...")
     result = run_cmd(
-        ["uv", "run", "mvm", "bin", "fetch"],
+        ["uv", "run", "mvm", "bin", "pull", "1.15.1", "--default"],
         workdir=str(target_dir),
         description="Fetch Firecracker binary",
         check=False,
@@ -484,7 +521,9 @@ def download_assets(target_dir: Path) -> None:
     if result.returncode == 0:
         print_success("Firecracker binary downloaded")
     else:
-        print_warning("Failed to download Firecracker binary — will be fetched on-demand")
+        print_warning(
+            "Failed to download Firecracker binary — will be fetched on-demand"
+        )
 
 
 def validate_resources() -> dict:
@@ -504,19 +543,31 @@ def validate_resources() -> dict:
     }
 
     if avail_ram < MIN_RAM_GB:
-        print_error(f"RAM: {avail_ram:.1f} GiB available (minimum {MIN_RAM_GB} GiB required)")
+        print_error(
+            f"RAM: {avail_ram:.1f} GiB available (minimum {MIN_RAM_GB} GiB required)"
+        )
     elif avail_ram < RECOMMENDED_RAM_GB:
-        print_warning(f"RAM: {avail_ram:.1f} GiB available (recommended {RECOMMENDED_RAM_GB} GiB)")
+        print_warning(
+            f"RAM: {avail_ram:.1f} GiB available (recommended {RECOMMENDED_RAM_GB} GiB)"
+        )
     else:
-        print_success(f"RAM: {avail_ram:.1f} GiB available (recommended {RECOMMENDED_RAM_GB} GiB)")
+        print_success(
+            f"RAM: {avail_ram:.1f} GiB available (recommended {RECOMMENDED_RAM_GB} GiB)"
+        )
 
     if avail_disk < MIN_DISK_GB:
-        print_error(f"Disk: {avail_disk:.0f} GiB available (minimum {MIN_DISK_GB} GiB required)")
+        print_error(
+            f"Disk: {avail_disk:.0f} GiB available (minimum {MIN_DISK_GB} GiB required)"
+        )
     else:
-        print_success(f"Disk: {avail_disk:.0f} GiB available (recommended {MIN_DISK_GB} GiB)")
+        print_success(
+            f"Disk: {avail_disk:.0f} GiB available (recommended {MIN_DISK_GB} GiB)"
+        )
 
     if cpu_cores < RECOMMENDED_CPU_CORES:
-        print_warning(f"CPU: {cpu_cores} cores (recommended {RECOMMENDED_CPU_CORES}+)")
+        print_warning(
+            f"CPU: {cpu_cores} cores (recommended {RECOMMENDED_CPU_CORES}+)"
+        )
     else:
         print_success(f"CPU: {cpu_cores} cores ({cpu_model})")
 
@@ -605,7 +656,11 @@ def cleanup(uninstall_packages: bool = False) -> None:
     tmp_mvm = Path("/tmp/mvm")
     if tmp_mvm.exists():
         print_step(f"Removing temporary mvm directory: {tmp_mvm}")
-        run_cmd(["rm", "-rf", str(tmp_mvm)], sudo=True, description="Remove /tmp/mvm")
+        run_cmd(
+            ["rm", "-rf", str(tmp_mvm)],
+            sudo=True,
+            description="Remove /tmp/mvm",
+        )
         print_success("Temporary files removed")
 
     vms_dir = cache_dir / "vms"
@@ -740,7 +795,9 @@ def main() -> int:
     print_info("")
     print_info(f"  Project directory: {target_dir}")
     print_info(f"  Run tests: cd {target_dir} && uv run pytest tests/ -v")
-    print_info("  Run specific test file: uv run pytest tests/system/test_network.py -v")
+    print_info(
+        "  Run specific test file: uv run pytest tests/system/test_network.py -v"
+    )
     print_info(f"  Clean up: sudo python3 {__file__} --cleanup")
     print_info("")
     print_info(f"  Log file: {LOG_FILE}")

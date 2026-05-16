@@ -664,7 +664,7 @@ def _run_levels(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run tests at one or more levels (unit, integration, system).",
+        description="Run tests at one or more levels (unit, compliance, integration, system).",
     )
 
     # Level flags

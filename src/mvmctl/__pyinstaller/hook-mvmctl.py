@@ -1,4 +1,5 @@
-"""
+"""Fallback hook — this project builds with Nuitka, not PyInstaller.
+
 PyInstaller hook for mvmctl.
 
 This hook ensures PyInstaller collects all CLI submodules that are lazy-loaded

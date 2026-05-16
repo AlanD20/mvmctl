@@ -173,7 +173,7 @@ class InitOperation:
         *,
         on_progress: Callable[[ProgressEvent], None] | None = None,
     ) -> InitStepResult:
-        """Step 3: Cache directory initialisation."""
+        """Step 5: Cache directory initialisation."""
         try:
             result = CacheOperation.init_all(on_progress=on_progress)
             if result.is_error:
@@ -195,7 +195,7 @@ class InitOperation:
         non_interactive: bool,
         download_version: str | None,
     ) -> tuple[InitStepResult, NeedsInteraction | None]:
-        """Step 4: Firecracker binary availability.
+        """Step 6: Firecracker binary availability.
 
         Returns:
             Tuple of (step_result, needs_interaction). When user confirmation

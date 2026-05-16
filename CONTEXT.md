@@ -188,6 +188,30 @@ Architecture rules are enforced in CI via `tests/layer_compliance/`. Uses `ast.p
 The `mvmctl.api` package IS the stable, curated public interface for all consumers -- CLI, future TUI/GUI, and external scripts. It lazily re-exports all Operation classes and Input types via `__init__.py`. External code should `from mvmctl.api import VMOperation, VMCreateInput` and nothing else. The `mvmctl.core` package is an implementation detail. The CLI layer is just one frontend -- it has no special access privileges.
 _Avoid_: External consumers importing from `mvmctl.core` or `mvmctl.cli`
 
+### CLI is the canonical interface
+The `mvm` CLI is the ONLY supported interface for all mvmctl operations. Do NOT bypass it with raw commands. The CLI handles privilege escalation, database state tracking, and dynamic resolution of assets (IPs, keys, images, kernels). Bypassing it breaks the system:
+
+- **SSH**: Use `mvm ssh` — it resolves the correct IP, user, and key from the database. Raw `ssh user@ip` bypasses this resolution and WILL fail.
+- **Config**: Use `mvm config set/get/reset`. Editing `~/.config/mvmctl/config.json` manually will not trigger validation or DB sync.
+- **Keys**: Use `mvm key create/add/export`. Placing key files manually bypasses the database and cloud-init injection pipeline.
+- **Networks**: Use `mvm network create/rm/sync`. Running `ip`/`iptables` manually bypasses the firewall tracker and the network lease database.
+- **Volumes**: Use `mvm volume create/rm/resize`. Running `qemu-img`/`truncate` manually bypasses the volume database and the VM attachment tracker.
+
+### Provisioner Backend (LoopMount vs GuestFS — mutual exclusion)
+The project has TWO independent rootfs provisioning backends. They are **mutually exclusive** — a single VM or image operation uses exactly ONE backend, never a combination. The `guestfs_enabled` user setting is a **toggle selector**, not a preference.
+
+- **LoopMount** (default, `guestfs_enabled=false`): Uses the compiled `mvm-provision` binary via `losetup` + `mount` + `chroot`. ~200ms per VM. No system package dependencies beyond the extracted binary. Privileged via `mvm-provision` in sudoers.
+- **GuestFS** (opt-in, `guestfs_enabled=true`): Uses `libguestfs` Python bindings via QEMU appliance. ~2600ms per VM. Requires `python3-libguestfs`, `supermin`, QEMU (system packages). Privileged via `supermin` in sudoers. Enables more capable OS detection and init-system-aware SSH setup.
+
+Selection logic (in `VMCreateRequest._resolve_provisioner()` and `ImageOperation._resolve_image_provisioner()`):
+1. If `guestfs_enabled` is `True` → **GuestFS** (immediate return, no loop-mount check)
+2. Else if `mvm-provision` binary is available → **LoopMount**
+3. Else → error: no provisioner available
+
+`guestfs_enabled` is NOT a fallback — it overrides. When set to `True`, GuestFS is used even if the faster loop-mount binary is available. Toggle via `mvm init` prompt or `mvm config set settings guestfs_enabled true|false`.
+
+Both backends share `ProvisionerContent` builders (common data: cloud-init templates, fstab content) but have separate code paths, separate dependencies, separate sudoers entries, and separate error hierarchies (`GuestfsError` vs `LoopMountError`). See ADR-0010 for the full architecture rationale.
+
 ## Relationships
 
 - An **Operation** class orchestrates across **Domains**

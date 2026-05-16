@@ -636,7 +636,7 @@ class ProvisionerBackend:
             from mvmctl.exceptions import GuestfsError
 
             raise GuestfsError(
-                "libguestfs appliance cache not found. Run:  mvm cache init"
+                "libguestfs appliance cache not found. Run: mvm cache init"
             )
 
     @staticmethod

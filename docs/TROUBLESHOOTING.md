@@ -232,7 +232,7 @@ Run `mvm host init` first to set up the `mvm` group and sudoers configuration.
 All privileged commands (those requiring bridge/TAP/iptables changes) must be executed within the `mvm` group context. Use the `sg mvm -c` pattern:
 ```bash
 sg mvm -c 'mvm host init'
-sg mvm -c 'mvm network create --name mynet'
+sg mvm -c 'mvm network create mynet'
 ```
 
 ---
@@ -403,7 +403,7 @@ IPs are released automatically when VMs are removed.
 
 **Option 2 — Create a second network** with a larger or different subnet:
 ```bash
-mvm network create --name secondary --subnet 10.0.0.0/16
+mvm network create secondary --subnet 10.0.0.0/16
 ```
 Then create VMs on it with `--network secondary`.
 

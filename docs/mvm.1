@@ -84,10 +84,10 @@ Full rollback: networking + sysctl + sudoers + group removal.
 .BR kernel\ ls
 List cached kernels.
 .TP
-.BR kernel\ fetch
-Download or build a kernel (official or Firecracker-optimized).
+.BR kernel\ pull
+Pull or build a kernel (official or Firecracker-optimized).
 .TP
-.BR kernel\ set-default
+.BR kernel\ default
 Set a kernel as the default for VM creation.
 .TP
 .BR kernel\ rm
@@ -97,13 +97,13 @@ Remove a cached kernel.
 .BR image\ ls
 List available and cached images.
 .TP
-.BR image\ fetch
-Download an image by its ID (e.g., ubuntu-24.04, archlinux).
+.BR image\ pull
+Pull an image by its ID (e.g., ubuntu:24.04, archlinux).
 .TP
 .BR image\ import
 Import a local image file.
 .TP
-.BR image\ set-default
+.BR image\ default
 Set the default image for VM creation.
 .TP
 .BR image\ rm
@@ -119,8 +119,8 @@ Pre-decompress image to ready pool.
 .BR bin\ ls
 List local Firecracker versions.
 .TP
-.BR bin\ fetch
-Download a specific Firecracker release.
+.BR bin\ pull
+Pull a specific Firecracker release.
 .TP
 .BR bin\ default
 Set the active Firecracker version.
@@ -141,7 +141,7 @@ List all networks.
 .BR network\ inspect
 Show network details and IP leases.
 .TP
-.BR network\ set-default
+.BR network\ default
 Set a network as the default for VM creation.
 .TP
 .BR network\ sync
@@ -160,7 +160,7 @@ Generate a new ED25519 keypair.
 .BR key\ rm
 Remove a key from the cache.
 .TP
-.BR key\ set-default
+.BR key\ default
 Set one or more keys as defaults for new VMs.
 .TP
 .BR key\ inspect
@@ -237,8 +237,8 @@ Cache directory for binaries, kernels, images, VM state.
 .I ~/.config/mvmctl/config.json
 User configuration file.
 .TP
-.I ~/.cache/mvmctl/metadata.json
-Asset registry (images, kernels, binaries with default flags).
+.I ~/.cache/mvmctl/mvmdb.db
+SQLite database (images, kernels, binaries, VMs, networks, keys).
 .SH EXAMPLES
 .PP
 One-time host setup:
@@ -253,16 +253,16 @@ Download kernel and image:
 .RS
 .nf
 $ mvm kernel pull
-$ mvm image pull ubuntu-24.04
+$ mvm image pull ubuntu:24.04
 .fi
 .RE
 .PP
 Create and start a VM:
 .RS
 .nf
-$ mvm vm create --name myvm --image ubuntu-24.04
+$ mvm vm create --name myvm --image ubuntu:24.04
 $ mvm logs myvm --follow
-$ mvm ssh --name myvm
+$ mvm ssh myvm
 .fi
 .RE
 .PP
@@ -270,7 +270,7 @@ List and remove VMs:
 .RS
 .nf
 $ mvm vm ls
-$ mvm vm rm --name myvm --force
+$ mvm vm rm myvm --force
 .fi
 .RE
 .PP
@@ -278,7 +278,7 @@ Network management:
 .RS
 .nf
 $ mvm network create mynet --subnet 10.1.0.0/16
-$ mvm vm create --name myvm2 --image ubuntu-24.04 --network mynet
+$ mvm vm create --name myvm2 --image ubuntu:24.04 --network mynet
 .fi
 .RE
 .PP

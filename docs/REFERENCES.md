@@ -160,8 +160,8 @@ VM lifecycle management.
 | `mvm vm load IDENTIFIER MEM_FILE STATE_FILE [--resume]` | Load VM from snapshot |
 | `mvm vm export IDENTIFIER [OUTPUT]` | Export a VM's configuration to a portable JSON file |
 | `mvm vm import CONFIG_PATH [--name NAME]` | Create a VM from a portable config file |
-| `mvm vm attach-volume IDENTIFIER VOLUME_NAME` | Attach a volume to a running VM |
-| `mvm vm detach-volume IDENTIFIER VOLUME_NAME` | Detach a volume from a running VM |
+| `mvm vm attach-volume IDENTIFIER VOLUME_NAME` | Attach a volume to a stopped VM |
+| `mvm vm detach-volume IDENTIFIER VOLUME_NAME` | Detach a volume from a stopped VM |
 
 **`vm create` flags:**
 
@@ -237,7 +237,7 @@ SSH key management.
 |---------|-------------|
 | `mvm key ls` | List all SSH keys |
 | `mvm key add NAME PATH` | Add an existing public key to the cache |
-| `mvm key create NAME [--algorithm ALGO] [--bits N] [--comment C] [--out DIR] [--set-default] [--force, -f]` | Generate a new SSH keypair |
+| `mvm key create NAME [--algorithm ALGO] [--bits N] [--comment C] [--out DIR] [--default] [--force, -f]` | Generate a new SSH keypair |
 | `mvm key rm [NAMES]...` | Remove one or more SSH keys |
 | `mvm key inspect NAME [--json]` | Inspect an SSH key |
 | `mvm key default [NAMES]... [--clear]` | Set default SSH keys, or clear with --clear |

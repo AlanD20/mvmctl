@@ -14,7 +14,6 @@ src/mvmctl/
 ├── assets/           # Bundled YAML configs and templates
 ├── models/           # Pure @dataclass objects
 ├── utils/            # Shared helpers
-├── __pyinstaller/    # PyInstaller hooks for standalone binary builds
 └── py.typed          # PEP 561 marker — declares the package supports strict typing
 ```
 
@@ -143,6 +142,7 @@ src/mvmctl/
 │       ├── __init__.py
 │       ├── _db.py                           # Database (connection manager)
 │       ├── _enrichment.py                   # RelationEnricher (batch relation loading)
+│       ├── _http_dir_version_resolver.py    # HTTP directory version listing (image + kernel)
 │       ├── _resolver_registry.py            # Lazy resolver registry (prevents circular imports)
 │       ├── _asset_manager.py                # Generic asset management
 │       ├── _parallel.py                     # ParallelExecutor
@@ -256,9 +256,6 @@ src/mvmctl/
 │   ├── progress.py
 │   ├── template.py
 │   └── yaml.py
-│
-├── __pyinstaller/                           # PyInstaller hooks for standalone builds
-│   └── hook-mvmctl.py
 │
 └── py.typed                                 # PEP 561 marker — declares the package supports strict typing
 ```

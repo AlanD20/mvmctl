@@ -8,7 +8,7 @@ from collections.abc import Generator
 from pathlib import Path
 
 from mvmctl.constants import LOG_FOLLOW_POLL_INTERVAL_S
-from mvmctl.exceptions import LogsError, VMNotFoundError
+from mvmctl.exceptions import LogsError
 from mvmctl.utils.common import CacheUtils
 
 
@@ -36,14 +36,13 @@ class LogService:
             Path to log file
 
         Raises:
-            VMNotFoundError: If VM directory does not exist
-            LogsError: If log type is unknown or log file not found
+            LogsError: If VM directory does not exist or log file not found.
 
         """
         vm_dir = CacheUtils.get_vm_dir(vm_hash)
 
         if not vm_dir.exists():
-            raise VMNotFoundError(f"VM directory not found at {vm_dir}")
+            raise LogsError(f"VM directory not found at {vm_dir}")
 
         # log_type is validated by the API layer (LogRequest) before
         # this method is called, so only "boot" and "os" are possible.
@@ -53,7 +52,7 @@ class LogService:
             log_file = vm_dir / log_filename
 
         if not log_file.exists():
-            raise VMNotFoundError(f"Log file not found for VM: {log_file}")
+            raise LogsError(f"Log file not found for VM: {log_file}")
 
         return log_file
 

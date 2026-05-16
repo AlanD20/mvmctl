@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mvm CLI - Main entry point."""
+"""CLI - Main entry point."""
 
 from __future__ import annotations
 
@@ -156,7 +156,9 @@ _COMMAND_SPECS: dict[str, _LazyCommandSpec] = {
     "config": _LazyCommandSpec(
         "mvmctl.cli.config", "config_app", "Configuration commands"
     ),
-    "init": _LazyCommandSpec("mvmctl.cli.init", "init_app", "Initialize mvm"),
+    "init": _LazyCommandSpec(
+        "mvmctl.cli.init", "init_app", f"Initialize {_get_cli_name()}"
+    ),
     "kernel": _LazyCommandSpec(
         "mvmctl.cli.kernel", "kernel_app", "Kernel management"
     ),
@@ -180,7 +182,7 @@ _STATIC_COMMAND_HELP: dict[str, str] = {
     **{name: spec.help_text for name, spec in _COMMAND_SPECS.items()},
     "version": "Show the version and exit",
     "completion": "Print shell completion script",
-    "help": "Show help for mvm or a subcommand",
+    "help": f"Show help for {_get_cli_name()} or a subcommand",
 }
 
 _COMMAND_ORDER = [
@@ -218,14 +220,14 @@ def _warn_if_running_as_root() -> None:
         return
     # Suppress when configure already prompted the user and escalated on their
     # behalf — they accepted, so the warning is noise.
-    if os.environ.get("MVM_ESCALATED"):
+    if os.environ.get(_get_env_var("ESCALATED")):
         return
 
     from mvmctl.utils._io import print_warning
 
     print_warning(
-        "Warning: running as root. Consider using the 'mvm' group instead "
-        "(set up via 'sudo mvm host init')."
+        f"Warning: running as root. Consider using the '{_get_cli_name()}' group instead "
+        f"(set up via 'sudo {_get_cli_name()} host init')."
     )
 
 
@@ -316,11 +318,11 @@ def app(ctx: click.Context, verbose: bool, debug: bool) -> None:
 @click.argument("shell", type=click.Choice(["bash", "zsh", "fish"]))
 @click.pass_context
 def completion_cmd(ctx: click.Context, shell: str) -> None:
-    """Print shell completion script for mvm.
+    f"""Print shell completion script for {_get_cli_name()}.
 
     Install completion by adding the output to your shell config:
 
-        eval "$(mvm completion bash)"
+        eval "$({_get_cli_name()} completion bash)"
     """
     from click.shell_completion import BashComplete, FishComplete, ZshComplete
 
@@ -330,7 +332,9 @@ def completion_cmd(ctx: click.Context, shell: str) -> None:
         "zsh": ZshComplete,
         "fish": FishComplete,
     }[shell]
-    complete = complete_cls(root.command, {}, "mvm", "MVM_COMPLETE")
+    complete = complete_cls(
+        root.command, {}, _get_cli_name(), _get_env_var("COMPLETE")
+    )
     click.echo(complete.source())
 
 
@@ -348,7 +352,9 @@ def version_cmd() -> None:
             click.echo(f"  tagged: {git_info}")
 
 
-@click.command(name="help", help="Show help for mvm or a subcommand")
+@click.command(
+    name="help", help=f"Show help for {_get_cli_name()} or a subcommand"
+)
 @click.argument("args", nargs=-1)
 @click.pass_context
 def help_cmd(ctx: click.Context, args: tuple[str, ...]) -> None:

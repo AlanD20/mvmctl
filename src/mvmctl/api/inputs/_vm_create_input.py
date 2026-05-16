@@ -557,7 +557,7 @@ class VMCreateRequest:
             <= CONST_VM_MEM_MAX_MIB
         ):
             raise VMCreateError(
-                f"Invalid mem_size_mib={self._result.mem_size_mib}: must be between 128 and 65536"
+                f"Invalid mem_size_mib={self._result.mem_size_mib}: must be between {CONST_VM_MEM_MIN_MIB} and {CONST_VM_MEM_MAX_MIB}"
             )
 
         if not self._result.kernel.resolved_path.exists():
@@ -585,7 +585,7 @@ class VMCreateRequest:
                 f"Image {self._inputs.image} is missing"
                 f" minimum_rootfs_size_mib. "
                 f"This image was created with an older version. "
-                f"Re-import the image: mvm image fetch <slug> --force"
+                f"Re-import the image: mvm image pull <slug> --force"
             )
 
         if self._result.disk_size_bytes is not None:
@@ -651,7 +651,7 @@ class VMCreateRequest:
         if image is None:
             raise ImageNotFoundError(
                 "No image specified and no default image set. "
-                "Use 'mvm image fetch <name>' then 'mvm image default <name>', "
+                "Use 'mvm image pull <name>' then 'mvm image default <name>', "
                 "or pass --image."
             )
 
@@ -668,7 +668,7 @@ class VMCreateRequest:
         if kernel is None:
             raise KernelNotFoundError(
                 "No kernel specified and no default kernel set. "
-                "Use 'mvm kernel fetch --type <firecracker|official>' then 'mvm kernel default <id>', "
+                "Use 'mvm kernel pull --type <firecracker|official>' then 'mvm kernel default <id>', "
                 "or pass --kernel."
             )
 
@@ -705,7 +705,7 @@ class VMCreateRequest:
         if fc_binary is None:
             raise BinaryNotFoundError(
                 "No binary specified and no default binary set. "
-                "Use 'mvm bin fetch <version>' then 'mvm bin default <id>', "
+                "Use 'mvm bin pull <version>' then 'mvm bin default <id>', "
                 "or pass --firecracker-bin."
             )
 

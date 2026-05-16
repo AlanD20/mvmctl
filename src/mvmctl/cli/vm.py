@@ -245,7 +245,7 @@ def vm_create(
         None,
         "--firecracker-bin",
         envvar="MVM_FIRECRACKER_BIN",
-        help="Path to firecracker binary (default: active version from mvm bin use)",
+        help="Path to firecracker binary (default: active version from mvm bin default)",
     ),
     count: int | None = typer.Option(
         None,

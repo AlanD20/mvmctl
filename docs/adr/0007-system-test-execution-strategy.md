@@ -8,7 +8,7 @@ System tests are expensive and stateful. A single test file can take 30s–10m d
 
 1. **Session-scoped state sharing**: `prepare_system_env` (session-scoped per subdirectory) pulls assets once per session. If one file's test modifies shared state (default image, default network, cached binary), subsequent files inherit polluted state.
 2. **Cross-file state pollution**: A VM left running by `test_vm_lifecycle.py` causes `test_host.py::TestHostCleanSafety` to fail (host clean is blocked by running VMs). A removed binary in one file causes `test_bin.py` tests in the same session to fail.
-3. **Long wall-clock time**: A single session running all 19 system test files takes 20–45 minutes. A single failure at minute 30 requires re-running the entire session. This is unacceptable for CI iteration speed.
+3. **Long wall-clock time**: A single session running all 18 system test files (one per domain subdirectory) takes 20–45 minutes. A single failure at minute 30 requires re-running the entire session. This is unacceptable for CI iteration speed.
 
 ## Decision
 

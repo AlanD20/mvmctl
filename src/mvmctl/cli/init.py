@@ -23,7 +23,7 @@ else:
     InitOperation = _InitOperation
     InitResult = _InitResult
 
-from mvmctl.constants import MVM_UNIX_GROUP, SUDOERS_DROP_IN_PATH
+from mvmctl.constants import CLI_NAME, MVM_UNIX_GROUP, SUDOERS_DROP_IN_PATH
 from mvmctl.models.result import ProgressEvent
 from mvmctl.utils._io import print_info, print_success, print_warning
 from mvmctl.utils._system import run_cmd
@@ -31,7 +31,7 @@ from mvmctl.utils.cli import handle_errors
 
 init_app = typer.Typer(
     name="init",
-    help="Initialize mvm",
+    help=f"Initialize {CLI_NAME}",
     invoke_without_command=True,
     rich_markup_mode=None,
     add_completion=False,
@@ -48,12 +48,12 @@ def help_cmd(ctx: typer.Context) -> None:
 
 def _run_with_sudo() -> subprocess.CompletedProcess[str]:
     """
-    Spawn ``sudo mvm host init`` and return the completed process.
+    Spawn ``sudo host init`` with elevated privileges and return the completed process.
 
     Stderr is left attached to the terminal so the sudo password prompt is
     visible.
     """
-    mvm_bin = shutil.which("mvm") or sys.argv[0]
+    mvm_bin = shutil.which(CLI_NAME) or sys.argv[0]
 
     # Build env var assignments for the 'env' utility.
     # We use 'sudo env VAR=val command' instead of 'sudo -E command'
@@ -110,7 +110,7 @@ def _compose_host_setup_message(
 ) -> str:
     """Compose a human-readable message about what host setup changed.
 
-    Compares state snapshots taken before and after ``sudo mvm host init``
+    Compares state snapshots taken before and after ``sudo host init``
     to determine what was actually configured.
     """
     parts: list[str] = []
@@ -189,28 +189,30 @@ def _handle_interactive_flow(
                 and host_state_before["user_in_group"]
             ):
                 print_warning("group active, but not in this session")
-                print_info("run:  newgrp mvm")
+                print_info(f"run:  newgrp {MVM_UNIX_GROUP}")
             elif host_state_before["group_exists"]:
                 print_warning("sudoers file is missing")
-                print_info("run:  sudo mvm host init")
+                print_info(f"run:  sudo {CLI_NAME} host init")
             else:
                 print_warning("this requires sudo once")
                 print_info(
-                    "creates the mvm group and sudoers drop-in for "
+                    f"creates the {MVM_UNIX_GROUP} group and sudoers drop-in for "
                     "passwordless sudo on future runs"
                 )
 
             if non_interactive:
                 print_warning(
-                    "Host init requires root privileges. Run: sudo mvm host init"
+                    f"Host init requires root privileges. Run: sudo {CLI_NAME} host init"
                 )
                 break
 
-            if typer.confirm("Run 'sudo mvm host init' now?", default=True):
+            if typer.confirm(
+                f"Run 'sudo {CLI_NAME} host init' now?", default=True
+            ):
                 proc = _run_with_sudo()
                 if proc.returncode != 0:
                     print_warning(
-                        "host init failed. Run 'sudo mvm host init' manually."
+                        f"host init failed. Run 'sudo {CLI_NAME} host init' manually."
                     )
                     break
 
@@ -227,7 +229,7 @@ def _handle_interactive_flow(
                 continue
             else:
                 print_info(
-                    "skipped. Run 'sudo mvm host init' manually when ready."
+                    f"skipped. Run 'sudo {CLI_NAME} host init' manually when ready."
                 )
                 break
 
@@ -252,7 +254,9 @@ def _handle_interactive_flow(
                 # has its own ASCIIProgressBar.
                 continue  # Re-run with download_version set
             else:
-                print_info("skipped. Run 'mvm bin pull <version>' manually.")
+                print_info(
+                    f"skipped. Run '{CLI_NAME} bin pull <version>' manually."
+                )
                 break
 
         # ── Handle guestfs enable prompt ──────────────────────────────
@@ -285,7 +289,7 @@ def init_run(
 ) -> None:
     """Initialize mvm host, network, and binary — run this to get started."""
     print_info("")
-    print_info("mvm init — first-time setup")
+    print_info(f"{CLI_NAME} init — first-time setup")
     print_info("─" * 40)
 
     result = _handle_interactive_flow(
@@ -297,7 +301,7 @@ def init_run(
     step_labels = {
         "local_state": "local state",
         "service_binaries": "service binaries",
-        "host": "sudoers / mvm group",
+        "host": f"sudoers / {MVM_UNIX_GROUP} group",
         "guestfs": "libguestfs",
         "cache": "cache directories",
         "binary": "firecracker binary",
@@ -323,7 +327,7 @@ def init_run(
     if result.host_ready:
         print_success("all set")
     else:
-        print_warning("setup incomplete — run 'mvm init' again")
+        print_warning(f"setup incomplete — run '{CLI_NAME} init' again")
         raise typer.Exit(code=1)
 
 

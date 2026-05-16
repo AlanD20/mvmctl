@@ -2,8 +2,7 @@
 NoCloud-net server manager for coordinating VM cloud-init servers.
 
 This module provides a manager for NoCloudNetServer subprocess instances,
-ensuring proper port allocation, server lifecycle management, and cleanup
-of orphaned servers from crashed sessions.
+ensuring proper port allocation and server lifecycle management.
 
 The server runs as a subprocess that survives beyond the CLI process lifetime,
 providing better isolation and reliability compared to thread-based servers.
@@ -18,7 +17,6 @@ import subprocess
 import sys
 import threading
 import time
-import warnings
 from pathlib import Path
 
 from mvmctl.services.nocloud_server._defaults import (
@@ -392,22 +390,3 @@ class NoCloudNetServerManager:
             if self._pid is not None:
                 return self._send_signal(self._pid, 0)
             return False
-
-    def cleanup_orphans(self) -> list[str]:
-        """
-        Clean up any orphaned servers from previous crashed sessions.
-
-        .. deprecated::
-            This method is deprecated and will be removed in a future version.
-
-        Returns:
-            List of VM hashes that were cleaned up (always empty now)
-
-        """
-        warnings.warn(
-            "cleanup_orphans is deprecated and no longer functional",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        logger.debug("cleanup_orphans called but is deprecated")
-        return []

@@ -307,7 +307,6 @@ class ConsoleRelayManager:
         """
         return self.get_pid() is not None
 
-    # FIXME: this needs review because orphan cleanup requires looping through all vm dirs
     def cleanup_orphans(self) -> None:
         """
         Clean up any orphaned relays from previous crashed sessions.

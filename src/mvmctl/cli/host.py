@@ -88,7 +88,7 @@ def _abort_if_vms_running(action: str) -> None:
         print_error(
             f"Cannot {action}: {len(running)} VM(s) still running: {names}"
         )
-        print_error("Stop all VMs first with: mvm vm remove --name <name>")
+        print_error("Stop all VMs first with: mvm vm stop <name>")
         raise typer.Exit(code=1)
 
 

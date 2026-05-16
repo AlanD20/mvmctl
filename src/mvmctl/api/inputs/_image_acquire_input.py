@@ -62,7 +62,7 @@ class ImagePullInput:
 
 @dataclass
 class ResolvedImageAcquireInput:
-    """Resolved input model for image fetch and registration operations."""
+    """Resolved input model for image pull and registration operations."""
 
     type: str
     arch: str

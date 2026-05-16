@@ -95,7 +95,7 @@ def get_default(category: str, key: str) -> Any:
 
 
 def is_compiled_mode() -> bool:
-    """Return True when running as a compiled binary (Nuitka/PyInstaller).
+    """Return True when running as a compiled binary (Nuitka).
 
     In development mode (``uv run mvm``, ``python -m mvmctl``, ``pip install -e .``),
     compiled binary assets do not exist on disk. The code falls back to
@@ -107,7 +107,7 @@ def is_compiled_mode() -> bool:
     """
     import sys
 
-    # PyInstaller sets sys.frozen
+    # Some Nuitka builds set sys.frozen
     if getattr(sys, "frozen", False):
         return True
 
@@ -185,7 +185,9 @@ CONST_SHRINK_SAFETY_MARGIN: Final[float] = 1.01
 CONST_RATIO_MIN: Final[float] = 1.0
 CONST_MIN_ROOTFS_SIZE_MIB: Final[int] = 128
 CONST_ROOTFS_HEADROOM_FACTOR: Final[float] = 1.25
-CONST_ROOTFS_MIN_HEADROOM_BYTES: Final[int] = 150 * 1024 * 1024  # ext4 journal + metadata
+CONST_ROOTFS_MIN_HEADROOM_BYTES: Final[int] = (
+    150 * 1024 * 1024
+)  # ext4 journal + metadata
 CONST_PERCENT: Final[int] = 100
 MIN_ROOT_SIZE_MB: Final[int] = 500
 SIZE_TOO_SMALL_MB: Final[int] = 100

@@ -907,7 +907,6 @@ class ImageService:
             logger.info("Converted to %s", output_path.name)
         except ProcessError as e:
             raise ImageError(f"qemu-img conversion failed: {e}") from e
-            raise ImageError("qemu-img not found. Install qemu-utils.")
 
     def create_ext4_from_tar(
         self,

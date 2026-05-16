@@ -55,10 +55,10 @@ src/mvmctl/
 ├── services/        # Runtime subprocess services (console_relay, nocloud_server, loopmount)
 stubs/               # Type stubs for external dependencies (guestfs.pyi, psutil.pyi)
 packaging/           # Distribution packaging configs (.deb, .rpm, PKGBUILD)
-scripts/             # Build & release helper scripts (build_services.py, setup-test-environment.py)
-tests/               # 166 test_*.py files across 5 top-level directories (119 unit + 18 integration + 20 system + 7 layer_compliance + 2 helpers)
+scripts/             # Build & release helper scripts (build_services.py, profile_test_memory.py, run_tests.py, setup-test-environment.py)
+tests/               # 164 test_*.py files + 2 helpers (166 Python files total) across 5 top-level directories (119 unit + 18 integration + 20 system + 7 layer_compliance + 2 helpers)
 docs/                # Project documentation
-  ├── adr/           # 9 Architecture Decision Records
+  ├── adr/           # 11 ADR files (10 unique ADR numbers: 0001-0010)
   ├── analyses/      # Technical analyses
   ├── development/   # Development guides
   ├── implementations/ # Implementation plans

@@ -669,6 +669,6 @@ Before outputting, ask yourself:
 
 The patterns above are guidelines, not boundaries. You are a skilled engineer. If you see a more efficient, cleaner, or more robust solution, use it. The standards (resource efficiency, simplicity, correctness) are the goal — the examples are just illustrations.
 
-**The hard constraints are:** layer boundaries (no cross-domain imports in core), naming conventions (Controller/Service/Repository/Resolver), import rules (public package surface, lazy `__init__.py`), caller-validates/receiver-trusts (no validation in Service), and the absolute rules (NEVER touch `tests/`, no destructive git, no production code compromise to satisfy tests).
+**The hard constraints are:** layer boundaries (no cross-domain imports in core), naming conventions (Controller/Service/Repository/Resolver), import rules (public package surface, lazy `__init__.py`), caller-validates/receiver-trusts (no validation in Service), and the absolute rules (NEVER touch `tests/`, no destructive git, no production code compromise to satisfy tests, ALWAYS use the `mvm` CLI for operations the CLI provides — never craft raw SSH commands, never edit config files manually, never manage keys manually).
 
 Everything else is flexible if you can justify a better approach.

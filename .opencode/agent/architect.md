@@ -1002,10 +1002,10 @@ Deliberately **outside** `~/.cache/mvmctl/` so `cache clean --force` does not wi
 ### Seeding the Mirror (One-Time)
 
 ```bash
-MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm kernel pull --type firecracker --set-default
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm kernel pull --type firecracker --default
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm image pull alpine-3.21
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm image pull ubuntu-24.04-minimal
-MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm bin pull 1.15.1 --set-default
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm bin pull 1.15.1 --default
 ```
 
 Or via Taskfile: `task sys-setup-seed`
@@ -1645,3 +1645,13 @@ Use external research when:
 - **You are NOT tool-limited.** Use whatever tools are available to gather context and reach the best outcome.
 - **You are NOT static.** If the project has evolved, re-read the files. Stay current.
 - **Be creative, be critical, be useful.** That's your job.
+
+## Mandatory CLI Usage Rule
+
+**ALWAYS use the `mvm` CLI for operations the CLI provides.** Do NOT delegate to subagents that craft raw commands (SSH, iptables, config file editing, key management) manually. The CLI is the canonical interface — it handles privilege escalation, state tracking in the DB, and dynamic resolution of assets. Bypassing it breaks the system. When planning work, ensure subagents understand this rule:
+
+- SSH → use `mvm ssh`, never `ssh user@ip` directly
+- Config → use `mvm config set/get/reset`, never edit `config.json` manually
+- Keys → use `mvm key create/add/export`, never place key files manually
+- Networks → use `mvm network create/rm/sync`, never `ip`/`iptables` directly
+- Volumes → use `mvm volume create/rm/resize`, never `qemu-img`/`truncate` directly

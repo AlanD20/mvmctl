@@ -325,7 +325,7 @@ def cache_prune(
 
     else:
         print_error(f"Unknown resource: {resource}")
-        print_info("Valid resources: vm, network, image, kernel, binary")
+        print_info("Valid resources: vm, network, image, kernel, binary, misc")
         print_info(
             "Or use: mvm cache prune --all  # Prune all types including protected"
         )

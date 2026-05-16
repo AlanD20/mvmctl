@@ -203,7 +203,7 @@ settings are collected and returned as warnings in the final result:
 Required kernel settings missing: CONFIG_VIRTIO_BLK, CONFIG_VIRTIO_NET
 ```
 
-**Code reference:** `src/mvmctl/core/kernel/_service.py` lines 616-624
+**Code reference:** `KernelConfigResult` — returned by `KernelService.prepare_kernel_config()` — contains `success`, `warnings`, and `info_messages` fields
 
 ---
 
@@ -231,11 +231,11 @@ The `Def` column in `mvm kernel ls` shows the active default kernel.
 
 ```bash
 # Use the default kernel (set via mvm kernel default)
-mvm vm create -n myvm --image ubuntu-24.04
+mvm vm create -n myvm --image ubuntu:24.04
 
 # Use a specific kernel by path
 mvm vm create -n myvm \
-  --image ubuntu-24.04 \
+  --image ubuntu:24.04 \
   --kernel ~/.cache/mvmctl/kernels/vmlinux-custom
 ```
 
@@ -273,17 +273,12 @@ check for unnecessary configs. Consider using the Firecracker CI kernel as your 
 
 ### "Required kernel settings missing" during build
 
-The Firecracker config URL may have changed. Check kernels.yaml:
+The Firecracker config URL may have changed. Check the kernel config template:
 ```bash
-python3 -c "
-import yaml, importlib.resources
-with importlib.resources.files('mvmctl.assets').joinpath('kernels.yaml').open() as f:
-    k = yaml.safe_load(f)
-    print(k.get('kernel-official',{}).get('config_url_template','Not found'))
-"
+mvm kernel inspect <kernel-id> --json | python3 -c "import sys,json; print(json.load(sys.stdin).get('config_url_template', 'N/A'))"
 ```
 
-Then update `config_url_template` in `src/mvmctl/assets/kernels.yaml` if needed.
+If the URL is outdated, rebuild with a newer kernel version or check the Firecracker project for updated config URLs.
 
 ---
 

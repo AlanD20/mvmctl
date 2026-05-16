@@ -466,10 +466,10 @@ sg mvm -c 'uv run scripts/run_tests.py --system --domain <domain>'
 
 Seeding the mirror (one-time):
 ```bash
-MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm kernel pull --type firecracker --set-default
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm kernel pull --type firecracker --default
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm image pull alpine-3.21
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm image pull ubuntu-24.04-minimal
-MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm bin pull 1.15.1 --set-default
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror uv run mvm bin pull 1.15.1 --default
 ```
 
 Or via Taskfile: `task sys-setup-seed`
@@ -600,3 +600,13 @@ Before reporting "release ready", ALL of these must pass:
 
 ### Verdict: RELEASE READY ✅ / NOT READY ❌
 ```
+
+## Mandatory CLI Usage Rule
+
+**ALWAYS use the `mvm` CLI for operations the CLI provides.** Do NOT craft raw commands (SSH, iptables, config file editing, key management) manually. The CLI is the canonical interface — it handles privilege escalation, state tracking in the DB, and dynamic resolution of assets. Bypassing it breaks the system:
+
+- SSH → use `mvm ssh`, never `ssh user@ip` directly (the CLI resolves the correct IP, user, and key).
+- Config → use `mvm config set/get/reset`, never edit `config.json` manually.
+- Keys → use `mvm key create/add/export`, never place key files manually.
+- Networks → use `mvm network create/rm/sync`, never `ip`/`iptables` directly.
+- Volumes → use `mvm volume create/rm/resize`, never `qemu-img`/`truncate` directly.
