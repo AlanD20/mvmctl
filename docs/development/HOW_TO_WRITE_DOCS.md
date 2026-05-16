@@ -11,7 +11,7 @@ Spawn multiple `explore` agents in parallel — each responsible for a group of 
 | Agent | Scope |
 |-------|-------|
 | Explore 1 | Root docs (CONTEXT.md, AGENTS.md, README.md, CHANGELOG.md) |
-| Explore 2 | `docs/` folder (PROJECT_ARCHITECTURE.md, API.md, REFERENCES.md, TROUBLESHOOTING.md, RUNTIME.md, DEPENDENCIES.md, ASSETS_CONFIGURATIONS.md, custom-kernel.md, RELEASE.md) |
+| Explore 2 | `docs/` folder (PROJECT_ARCHITECTURE.md, API.md, REFERENCES.md, TROUBLESHOOTING.md, RUNTIME.md, DEPENDENCIES.md, ASSETS_CONFIGURATIONS.md, CUSTOM_KERNEL.md, RELEASE.md) |
 | Explore 3 | ADR docs (all docs/adr/ files — currently 0001 through 0015) |
 | Explore 4 | Improvement, implementation, development, and optimization docs |
 | Explore 5 | Agent instruction files (`.opencode/agent/*.md`) |
@@ -118,7 +118,7 @@ The project has two distinct documentation audiences:
 | Sudoers/sudo internals | `PRIVILEGED_BINARIES`, `sg mvm -c`, sudoers file contents | `docs/adr/0009-sudo-privilege-architecture.md` |
 | Provisioner backends | LoopMount vs GuestFS comparison, losetup/btrfs/chroot deps | `CONTEXT.md`, `docs/adr/0006-loopmount-guestfs-mutual-exclusion.md` |
 | Manual sudoers config | `mvm init` handles this | No doc needed (automated) |
-| Kernel build deps | Build packages for `kernel pull --type official` | `docs/custom-kernel.md` |
+| Kernel build deps | Build packages for `kernel pull --type official` | `docs/CUSTOM_KERNEL.md` |
 | DB schema | SQLite tables, migrations, column layout | `CONTEXT.md` |
 | Cache directory structure | `~/.cache/mvmctl/` filesystem layout | No doc needed (users don't need to know) |
 | Dependency tables per distro | `apt-get` vs `pacman` package names for every internal tool | `docs/DEPENDENCIES.md` |
@@ -144,7 +144,7 @@ The README and public website cover: **what it is, install, quick start, essenti
 
 Internal architecture — three-layer design, domain structure, Controller/Service/Repository pattern, DB schema, cache directory layout, build system internals, shared infrastructure — belongs in `docs/` or `CONTEXT.md`. A user should never need to know how the code is organized to use the tool.
 
-✅ **Correct:** Link to deeper docs: "See custom-kernel.md for building kernels from source."  
+✅ **Correct:** Link to deeper docs: "See CUSTOM_KERNEL.md for building kernels from source."  
 ❌ **Wrong:** Inline a diagram of the three-layer architecture in the README.
 
 ### Rule 3: Commands Must Be Copy-Paste Ready

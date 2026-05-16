@@ -408,5 +408,5 @@ the constants relevant to asset management.
 
 ---
 
-*See also: [custom-kernel.md](custom-kernel.md) for the kernel build workflow,
+*See also: [CUSTOM_KERNEL.md](CUSTOM_KERNEL.md) for the kernel build workflow,
 [API.md](API.md) for the Python API reference.*

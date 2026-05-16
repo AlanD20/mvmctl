@@ -114,7 +114,7 @@ Co-authored-by: Adam <adam@example.com>  # WRONG - no contribution to this chang
 ## Development Conventions
 - **Defaults:** Never hardcode defaults in function parameters. All defaults live in `constants.py` under the `OVERRIDABLE_DEFAULTS` dict with category keys (e.g., `defaults.vm`, `defaults.network`). User-facing asset defaults are resolved from the SQLite database (`is_default` markers) and `MVM_*` environment variables.
 - **Privilege Model:** `mvm host init` is run once to set up the host (mvm group, sudoers). Normal commands run rootless and validate privileges via the `mvm` group.
-- **Asset ID System:** Downloaded or imported assets (images, kernels) use a full 64-character SHA256 hash as their persistent ID. The CLI displays and accepts the first 6 characters as a prefix.
+- **Asset ID System:** Downloaded or imported assets (images, kernels, networks, binaries, volumes) use a 64-character SHA256 hash as their persistent ID. VM IDs use a 32-character truncated SHA256 hash (to keep filesystem paths under the Unix domain socket path limit). The CLI displays and accepts the first 12 characters as a prefix.
 - **Error Handling:** Avoid bare `except:` blocks. Catch specific domain exceptions derived from `exceptions.py`.
 - **Error Code Format:** Every exception carries an optional `code: str | None` string for fine-grained programmatic branching. Format is dot-separated with domain prefix (e.g., `network.subnet.overlap`, `vm.create.binary_not_found`).
 - **API Result Types:** The API layer returns `OperationResult[T]` (single result with status/code/message/item), `BatchResult[T]` (collection of results), or `NeedsInteraction` (requires user action like sudo prompt) for the CLI/TUI to consume.

@@ -238,8 +238,7 @@ Each subdirectory contains:
 - **`conftest.py`** — Domain-specific fixtures
 - **`__init__.py`** — Package marker
 
-The root `tests/system/conftest.py` provides session-scoped fixtures (`mvm_binary`,
-`unique_vm_name`, `unique_key_name`, `unique_network_name`, etc.).
+The root `tests/system/conftest.py` provides session-scoped `mvm_binary` and function-scoped unique name fixtures (`unique_vm_name`, `unique_key_name`, `unique_network_name`, etc.).
 
 ### VM Lifecycle File Split
 
@@ -248,12 +247,15 @@ NOT one monolithic class. Run `grep "^class " tests/system/vm/test_vm_lifecycle.
 to see the current state. The target class structure is:
 
 ```
+TestVMListEmpty           — ls --json with no VMs returns empty list
 TestVMCreate              — all create variants (per image, with flags)
 TestVMConfigOptions       — vcpus, mem, disk-size, boot-args, pci, logging, metrics
 TestVMStateTransitions    — start/stop/reboot/pause/resume + edge cases
 TestVMVolumeIntegration   — attach/detach/create-with-volume/rm-releases-volume
 TestVMListInspect         — ls/json, inspect/json/tree, export, import
 TestVMRemove              — rm, rm multiple, rm nonexistent, rm --force
+TestVMSnapshot            — snapshot creation and load
+TestVMConcurrency         — parallel vm operations
 TestVMNetworkIntegration  — static IP, custom MAC, named network
 TestVMSSHIntegration      — SSH into created VMs with key
 TestVMCloudInit           — cloud-init modes, user-data, nocloud-net-port

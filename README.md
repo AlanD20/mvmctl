@@ -175,7 +175,7 @@ Comprehensive documentation is available in the `docs/` directory:
 | [docs/REFERENCES.md](docs/REFERENCES.md) | **Complete command reference** -- all `mvm` commands, flags, and options<br>**Configuration** -- config files, environment variables, cache structure<br>**Cloud-Init** -- nocloud-net setup, security, modes |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues and solutions<br>Debug mode, permission fixes, network issues |
 | [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | System dependencies by category<br>Package names for Debian/Ubuntu/Arch |
-| [docs/custom-kernel.md](docs/custom-kernel.md) | Building custom kernels for Firecracker |
+| [docs/CUSTOM_KERNEL.md](docs/CUSTOM_KERNEL.md) | Building custom kernels for Firecracker |
 | [docs/RELEASE.md](docs/RELEASE.md) | Release process and distribution packages |
 | [docs/API.md](docs/API.md) | Python API reference for programmatic usage |
 
@@ -213,7 +213,7 @@ Common issues and quick fixes:
 | **VM won't boot / SSH times out** | Cloud-init takes 30-60s on first boot. Watch with `mvm logs myvm --follow` |
 | **Kernel not found** | `mvm kernel pull` |
 | **Image not found** | `mvm image pull ubuntu:24.04` |
-| **NoCloud server failed** | Port range exhausted. Check: `sudo ss -tlnp \| grep -E ':(8[0-9]{3}\|9[0-9]{3})'` |
+| **nocloud-net server failed** | Port range exhausted. Check: `sudo ss -tlnp \| grep -E ':(8[0-9]{3}\|9[0-9]{3})'` |
 
 See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for complete troubleshooting guide including:
 - Debug mode

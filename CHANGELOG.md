@@ -11,9 +11,9 @@ Initial release of mvmctl -- a production-grade Python CLI for managing Firecrac
 
 ### Added
 
-#### CLI Commands (14 top-level groups, 70+ subcommands)
+#### CLI Commands (14 top-level groups, 65+ subcommands)
 - **`mvm vm`** -- Full VM lifecycle: ls, ps, create, rm, start, stop, reboot, pause, resume, snapshot, load, inspect, export, import, attach-volume, detach-volume
-- **`mvm console`** -- Interactive serial console access via PTY-over-vsock relay (attach, --state, --kill)
+- **`mvm console`** -- Interactive serial console access via PTY-over-vsock relay with --state and --kill options (attach is default)
 - **`mvm host`** -- Host configuration: init (KVM, modules, sysctl, mvm group, sudoers), ls, clean, reset
 - **`mvm network`** -- Named bridge networks with NAT: ls, default, create, rm, inspect, sync
 - **`mvm key`** -- SSH key management: ls, add, create, rm, inspect, export, default

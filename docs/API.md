@@ -125,7 +125,7 @@ if TYPE_CHECKING:
 | `ImageOperation` | Image operations: pull, import, list, get, set default, remove, inspect, warm, prune |
 | `KernelOperation` | Kernel operations: pull, list, get, inspect, set default, remove, prune |
 | `KeyOperation` | SSH key registry: add, create, list, get, remove, inspect, set defaults, get defaults, clear defaults, export |
-| `BinaryOperation` | Binary management: pull, get, list local/remote, set default, remove (by id/version), ensure default, prune |
+| `BinaryOperation` | Binary management: pull, get, list, set default, remove (by id/version), ensure default, prune |
 | `HostOperation` | Host init/reset/clean, state retrieval, privilege checks, KVM access, running VMs |
 | `CacheOperation` | Cache lifecycle: init, prune per-asset-type (vm, network, image, kernel, binary, misc), prune all, clean |
 | `SSHOperation` | SSH connection to VMs |
@@ -599,8 +599,10 @@ MVMError
 │   ├── KeyExportError
 │   ├── KeyDependencyError
 │   └── KeyFileError
-├── VolumeCreateError         — Volume creation or resize failure
+├── VolumeError               — Volume operation failure
+├── VolumeError               — Volume creation or resize failure
 ├── VolumeNotFoundError       — Volume not found in registry
+├── VersionError              — Version resolution failure
 ├── CloudInitError            — Cloud-init ISO creation failure
 │   ├── CloudInitProvisionError   — Cloud-init provisioning failure
 │   ├── CloudInitModeError        — Cloud-init mode failure
@@ -1085,7 +1087,7 @@ Remove an image from cache and database.
 
 ---
 
-#### `ImageOperation.list_(inputs: ImageInput | None = None, *, remote: bool = False, no_cache: bool = False, type_filter: str | None = None) -> list[ImageItem] | list[ImageVersion]`
+#### `ImageOperation.list_all(inputs: ImageInput | None = None, *, remote: bool = False, no_cache: bool = False, type_filter: str | None = None) -> list[ImageItem] | list[ImageVersion]`
 
 List images.
 
@@ -1168,25 +1170,20 @@ Remove one or more kernels from cache and database.
 
 ---
 
-#### `KernelOperation.list_all() -> list[KernelItem]`
+#### `KernelOperation.list_all(remote: bool = False, *, no_cache: bool = False) -> list[KernelItem] | list[VersionInfo]`
 
-List all kernels, syncing `is_present` with the filesystem.
-
----
-
-#### `KernelOperation.list_remote(*, no_cache: bool = False) -> list[VersionInfo]`
-
-List available remote kernel versions from upstream providers.
+List kernels. When `remote=True`, lists available remote kernel versions from upstream providers. When `remote=False` (default), lists locally cached kernels, syncing `is_present` with the filesystem.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
+| `remote` | `bool` | `False` | List remote versions via version resolver |
 | `no_cache` | `bool` | `False` | Skip cached version listing and fetch live from upstream |
 
-**Returns:** List of `VersionInfo` objects, each with `version`, `type`, `display_name`, `download_url`.
+**Returns:** List of `KernelItem` (local) or `VersionInfo` (remote) objects.
 
 **Example:**
 ```python
-result = KernelOperation.list_remote(no_cache=True)
+result = KernelOperation.list_all(remote=True, no_cache=True)
 for v in result:
     print(f"{v.type}:{v.version}")
 ```
@@ -1319,7 +1316,7 @@ Download a specific Firecracker/jailer binary version from GitHub releases.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `inputs.version` | `str` | — | Semantic version string, e.g. `"1.15.0"` |
-| `inputs.set_as_default` | `bool` | `False` | Set as default after download |
+| `inputs.set_default` | `bool` | `False` | Set as default after download |
 | `inputs.download_override` | `bool` | `True` | Re-download even if cached |
 
 **Returns:** `OperationResult[list[BinaryItem]]` wrapping the downloaded binaries, or `NeedsInteraction` if sudo is required.
@@ -1344,15 +1341,14 @@ Get binaries by identifier.
 
 ---
 
-#### `BinaryOperation.list_local() -> list[BinaryItem]`
+#### `BinaryOperation.list_all(remote: bool = False, limit: int | None = None) -> list[BinaryItem] | list[str]`
 
-List all locally installed binaries.
+List binaries. When `remote=True`, lists available remote versions from GitHub releases. When `remote=False` (default), lists locally installed binaries.
 
----
-
-#### `BinaryOperation.list_remote(limit: int | None = None) -> list[str]`
-
-List available remote versions from GitHub releases.
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `remote` | `bool` | `False` | List remote versions |
+| `limit` | `int \| None` | `None` | Maximum number of remote versions to return |
 
 ---
 
@@ -1694,7 +1690,7 @@ Create a new persistent data disk.
 
 **Returns:** `OperationResult[VolumeItem]` wrapping the created `VolumeItem`.
 
-**Raises:** `VolumeCreateError` if the volume already exists or creation fails.
+**Raises:** `VolumeError` if the volume already exists or creation fails.
 
 ---
 
@@ -1709,7 +1705,7 @@ Remove one or more volumes.
 
 ---
 
-#### `VolumeOperation.list_() -> list[VolumeItem]`
+#### `VolumeOperation.list_all() -> list[VolumeItem]`
 
 List all registered volumes.
 
@@ -1799,7 +1795,7 @@ def main() -> None:
         print("Host already configured.")
 
     # 3. Ensure a Firecracker binary is available
-    local = BinaryOperation.list_local()
+    local = BinaryOperation.list_all()
     if not local:
         print("Downloading Firecracker 1.15.0 ...")
         result = BinaryOperation.pull(BinaryPullInput(version="1.15.0"))

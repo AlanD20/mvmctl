@@ -316,9 +316,9 @@ MVMError                                     # Root -- carries optional code str
 ├── DownloadError                            # Download failure
 ├── HttpDownloadError                        # HTTP download failure (direct child)
 └── ... (ImageNotFoundError, BinaryNotFoundError, KernelNotFoundError,
-         NetworkNotFoundError, KeyNotFoundError, VolumeNotFoundError,
-         VolumeCreateError are direct children of MVMError
-         for legacy compat)
+          NetworkNotFoundError, KeyNotFoundError, VolumeNotFoundError,
+          VolumeError are direct children of MVMError
+          for legacy compat)
 ```
 
 Error message format (user-facing, three parts in one line):

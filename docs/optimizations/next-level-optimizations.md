@@ -34,8 +34,8 @@ These are already implemented in the codebase and will NOT be covered here:
 |---|---|---|
 | tmpfs ready pool (pre-decompress images to `/dev/shm`) ✅ | `core/image/_service.py` | [`fast-durable-image-copy.md`](fast-durable-image-copy.md) |
 | reflink + sparse copy with `fdatasync()` ✅ | `core/image/_service.py:materialize_to()` | [`fast-durable-image-copy.md`](fast-durable-image-copy.md) |
-| libguestfs: direct backend, `cachemode=writeback`, minimal vCPU/mem ✅ | `core/_shared/_provisioner/_backend.py` | [`guestfs_boot.md`](guestfs_boot.md) |
-| Fixed appliance, disabled recovery/autosync ✅ | `core/_shared/_guestfs/_base.py`, `_service.py` | [`guestfs_boot.md`](guestfs_boot.md) |
+| libguestfs: direct backend, `cachemode=writeback`, minimal vCPU/mem ✅ | `core/_shared/_provisioner/_backend.py` | [`guestfs-boot.md`](guestfs-boot.md) |
+| Fixed appliance, disabled recovery/autosync ✅ | `core/_shared/_guestfs/_base.py`, `_service.py` | [`guestfs-boot.md`](guestfs-boot.md) |
 | Loop-mount backend (mvm-provision binary, faster than guestfs) ✅ | `core/_shared/_loopmount/` | — |
 | ThreadPoolExecutor for batch VM operations ✅ | `core/_shared/_parallel.py`, `core/vm/_service.py` | — |
 | Firecracker snapshot/resume API (create_snapshot, load_snapshot) ✅ | `core/vm/_firecracker.py` | — |
@@ -333,7 +333,7 @@ Golden VM build (one-time): 3-10s   (first boot, paid once)
 
 ### Existing Project Docs
 - [`fast-durable-image-copy.md`](fast-durable-image-copy.md) — Current image copy optimization ✅
-- [`guestfs_boot.md`](guestfs_boot.md) — Current guestfs optimization ✅
+- [`guestfs-boot.md`](guestfs-boot.md) — Current guestfs optimization ✅
 - [`docs/analyses/pause_resume_implementation.md`](../analyses/pause_resume_implementation.md) — Pause/resume analysis
 - [`core/vm/_firecracker.py`](../../src/mvmctl/core/vm/_firecracker.py) — Firecracker spawner + snapshot API
 - [`api/vm_operations.py`](../../src/mvmctl/api/vm_operations.py) — VM creation orchestration

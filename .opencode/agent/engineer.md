@@ -419,7 +419,8 @@ MVMError                              # Root — carries optional code field
 │   └── BundledAssetNotFoundError     # Bundled file not found
 ├── ImageAcquireError                 # Image fetch/import failure
 ├── IPTablesTrackerError              # IPTables action failure
-├── VolumeCreateError                 # Volume creation failure
+├── VersionError                      # Version resolution failure
+├── VolumeError                       # Volume creation failure
 ├── VolumeNotFoundError               # Volume not found
 ├── ImageNotFoundError                # Image not found
 ├── BinaryNotFoundError               # Binary not found

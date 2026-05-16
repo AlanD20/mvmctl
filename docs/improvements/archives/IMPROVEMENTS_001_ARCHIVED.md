@@ -77,7 +77,7 @@ Items here have been implemented and verified. For active/incomplete items, see 
 
 ## Guestfs (Completed)
 
-- [x] apply the aggressive optimization at docs/optimizations/guestfs_boot.md
+- [x] apply the aggressive optimization at docs/optimizations/guestfs-boot.md
 
 ## Console/Serial Access (Completed)
 

@@ -1,6 +1,6 @@
 # Command Reference & Configuration
 
-> **STATUS: Current — fully accurate.** All commands, flags, and configuration details verified against current CLI and API. `--count` and `--atomic` flags exist for `vm create`. Volume resize, snapshot/load, export/import, attach-volume/detach-volume all exist as documented.
+> **STATUS: Updated — cache directory structure corrected.** `keys/` moved under `~/.config/mvmctl/`, `networks/` removed, `logs/` and `volumes/` added. All commands, flags, and configuration details verified against current CLI and API.
 
 This document provides detailed reference for all `mvm` commands, configuration options, and environment variables.
 
@@ -461,8 +461,7 @@ The **canonical source of truth** is the SQLite database (`~/.cache/mvmctl/mvmdb
 ├── bin/               # Firecracker + jailer binaries + service binaries (mvm-console-relay, mvm-nocloud-server, mvm-provision)
 ├── kernels/           # vmlinux kernel images
 ├── images/            # Root filesystem images (.ext4, .btrfs, .zst)
-├── keys/              # Cached SSH public keys
-├── networks/          # Per-network config + IP leases
+├── logs/              # VM and process log files
 ├── volumes/           # Persistent disk volume files
 ├── vms/               # Per-VM state
 │   └── <vm-sha>/      # VM directories named by SHA256 hash
@@ -473,7 +472,11 @@ The **canonical source of truth** is the SQLite database (`~/.cache/mvmctl/mvmdb
 │       ├── firecracker.pid
 │       └── cloud-init/
 ├── mvmdb.db           # SQLite database (canonical asset state)
-└── audit.log          # Append-only operation log
+├── audit.log          # Append-only operation log
+└── ...
+
+~/.config/mvmctl/
+└── keys/              # Cached SSH public keys
 ```
 
 ---

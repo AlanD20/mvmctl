@@ -855,6 +855,7 @@ from mvmctl.core.vm._controller import VMController           # Use lazy __getat
 
 ```
 MVMError                              # Root — carries optional code field
+├── MVMRuntimeError                   # Runtime assertion failure
 ├── VMError                           # VM domain
 │   ├── VMCreateError                 # VM creation failure (mid-rollback)
 │   ├── VMStateError                  # Invalid state transition
@@ -905,12 +906,13 @@ MVMError                              # Root — carries optional code field
 │   └── MigrationError                # Migration version/filename failure
 ├── ImageAcquireError                 # Image fetch/import failure (direct child)
 ├── IPTablesTrackerError              # IPTables action failure (direct child)
+├── VersionError                      # Version resolution failure
 ├── AssetNotFoundError                # Asset not found locally/remotely
 ├── BundledAssetError                 # Bundled package asset failure
 │   └── BundledAssetNotFoundError     # Bundled file not found
 ├── ... (ImageNotFoundError, BinaryNotFoundError, KernelNotFoundError,
 │        NetworkNotFoundError, KeyNotFoundError, VolumeNotFoundError,
-│        VolumeCreateError are direct MVMError children for legacy compat)
+│        VolumeError are direct MVMError children for legacy compat)
 ├── RootPartitionDetectionError       # Root partition detection failure
 ├── TieDetectedError                  # Multiple partition tie
 ├── DownloadError                     # Download failure
@@ -1109,13 +1111,13 @@ Service handles infrastructure (bridges, TAPs, NAT, iptables). It does NOT handl
 class NetworkOperation:
     # Category A: Existing resource actions — take NetworkInput
     @staticmethod
-    def remove(inputs: NetworkInput) -> None: ...
+    def remove(inputs: NetworkInput, force: bool = False) -> OperationResult[NetworkItem]: ...
     @staticmethod
     def get(inputs: NetworkInput) -> NetworkItem: ...
     @staticmethod
-    def list(inputs: NetworkInput) -> list[NetworkItem]: ...
+    def list_all() -> list[NetworkItem]: ...
     @staticmethod
-    def inspect(inputs: NetworkInput) -> NetworkItem: ...
+    def inspect(inputs: NetworkInput, is_json: bool = False) -> NetworkItem | dict[str, Any]: ...
 
     # Category B: Resource creation — takes NetworkCreateInput
     @staticmethod

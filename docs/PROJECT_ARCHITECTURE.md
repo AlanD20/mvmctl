@@ -187,7 +187,7 @@ src/mvmctl/
 │   ├── logs.py
 │   ├── ssh.py
 │   ├── volume.py
-│   └── _completion.py                       # Shell completion helpers (8 functions)
+│   └── _completion.py                       # Shell completion helpers (11 functions)
 │
 ├── models/                                  # Pure @dataclass objects
 │   ├── __init__.py                          # Re-exports all model types
