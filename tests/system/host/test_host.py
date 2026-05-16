@@ -18,6 +18,8 @@ class TestHostStatus:
 
     def test_host_ls_basic(self, mvm_binary):
         """Show current host configuration state."""
+        # Rationale: Only needs JSON output from host ls. No expensive
+        # resources needed — testing structural field types in JSON response.
         result = _run_mvm(mvm_binary, "host", "ls", "--json", check=False)
         if result.returncode != 0:
             pytest.skip("Host not initialized (run 'mvm host init' first)")
@@ -31,6 +33,8 @@ class TestHostStatus:
 
     def test_host_ls_json(self, mvm_binary):
         """Show current host configuration state in JSON format."""
+        # Rationale: Only needs JSON output. No resources needed — testing
+        # field presence in JSON response.
         result = _run_mvm(mvm_binary, "host", "ls", "--json", check=False)
         if result.returncode != 0:
             pytest.skip("Host not initialized (run 'mvm host init' first)")
@@ -46,6 +50,8 @@ class TestHostStatus:
         When NOT initialized: verify a clear error message is returned.
         Either outcome is acceptable — the test always passes.
         """
+        # Rationale: Only needs JSON output. No resources needed — handles
+        # both initialized and uninitialized host states gracefully.
         result = _run_mvm(mvm_binary, "host", "ls", "--json", check=False)
         if result.returncode == 0:
             data = json.loads(result.stdout)
@@ -81,6 +87,9 @@ class TestHostCleanSafety:
         self, mvm_binary, unique_vm_name, created_network
     ):
         """Host clean should be blocked when a VM is running."""
+        # Rationale: Needs a real VM because we need a running VM to trigger
+        # the safety mechanism that blocks host clean. Network fixture needed
+        # for VM creation.
         _run_mvm(
             mvm_binary,
             "vm",
@@ -133,6 +142,9 @@ class TestHostResetSafety:
         self, mvm_binary, unique_vm_name, created_network
     ):
         """Host reset should be blocked when a VM is running."""
+        # Rationale: Needs a real VM because we need a running VM to trigger
+        # the safety mechanism that blocks host reset. Network fixture needed
+        # for VM creation.
         _run_mvm(
             mvm_binary,
             "vm",
@@ -186,6 +198,9 @@ class TestHostCleanDestructive:
 
     def test_host_clean_force(self, mvm_binary):
         """Execute host clean --force and verify it exits successfully."""
+        # Rationale: Needs sudo binary execution via ~/.local/bin/mvm.
+        # Host clean is the most destructive operation — requires real
+        # host initialization to be meaningful.
         check = _run_mvm(mvm_binary, "host", "ls", "--json", check=False)
         if check.returncode != 0:
             pytest.skip("Host not initialized — cannot test host clean")

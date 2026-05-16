@@ -163,7 +163,7 @@ class TestConsoleCallbackEdgeCases:
     @patch("mvmctl.cli.console._attach_to_console")
     @patch("mvmctl.cli.console.ConsoleOperation")
     def test_console_attach_via_name_cli(self, mock_console_op, mock_attach):
-        result = runner.invoke(app, ["console", "testvm"])
+        runner.invoke(app, ["console", "testvm"])
 
 
 class TestConsoleKillExtras:

@@ -31,10 +31,16 @@ _HELP_COMMANDS = [
 class TestCacheEdgeCases:
     """Tests for cache command edge cases."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.serial]
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.serial,
+        pytest.mark.domain_cache,
+    ]
 
     def test_cache_prune_no_args(self, mvm_binary):
         """``cache prune`` without resource and without --all should fail."""
+        # Rationale: No resources needed — testing CLI validation for
+        # missing arguments.
         result = _run_mvm(mvm_binary, "cache", "prune", check=False)
         assert result.returncode != 0
         assert "No resource specified" in result.stdout
@@ -45,6 +51,9 @@ class TestCacheEdgeCases:
         self, mvm_binary, unique_vm_name, unique_network_name
     ):
         """Stop a VM, prune it (no --dry-run), verify it is gone."""
+        # Rationale: Needs a real VM (unique_vm_name) + network
+        # (unique_network_name) to test actual cache prune of VMs.
+        # Destructive — removes the VM from cache.
         vm_name = unique_vm_name
         net_name = unique_network_name
         try:
@@ -71,7 +80,7 @@ class TestCacheEdgeCases:
 
             _run_mvm(mvm_binary, "vm", "stop", vm_name)
 
-            result = _run_mvm(
+            _run_mvm(
                 mvm_binary,
                 "cache",
                 "prune",
@@ -109,6 +118,8 @@ class TestNetworkEdgeCases:
 
     def test_network_create_without_subnet(self, mvm_binary):
         """``network create`` without --subnet should fail with clear error."""
+        # Rationale: No resources needed — testing CLI validation for
+        # missing --subnet flag.
         result = _run_mvm(
             mvm_binary,
             "network",
@@ -121,6 +132,8 @@ class TestNetworkEdgeCases:
 
     def test_network_set_default_nonexistent(self, mvm_binary):
         """``network set-default`` with nonexistent name should fail."""
+        # Rationale: No resources needed — testing CLI error for
+        # nonexistent network name.
         result = _run_mvm(
             mvm_binary,
             "network",
@@ -143,6 +156,8 @@ class TestVMStateTransitionErrors:
 
     def test_vm_stop_stopped_vm(self, mvm_binary, created_vm):
         """Stopping an already-stopped VM should be idempotent."""
+        # Rationale: Uses created_vm fixture (already exists via conftest).
+        # Tests idempotent state transition — no new resources created.
         vm_name = created_vm["name"]
 
         _run_mvm(mvm_binary, "vm", "stop", vm_name)
@@ -152,6 +167,8 @@ class TestVMStateTransitionErrors:
 
     def test_vm_pause_stopped_vm(self, mvm_binary, created_vm):
         """Pausing a stopped VM should fail."""
+        # Rationale: Uses created_vm fixture. Tests error case for
+        # invalid state transition (pause on stopped VM).
         vm_name = created_vm["name"]
 
         _run_mvm(mvm_binary, "vm", "stop", vm_name)
@@ -161,6 +178,8 @@ class TestVMStateTransitionErrors:
 
     def test_vm_start_running_vm(self, mvm_binary, created_vm):
         """Starting a running VM should succeed (idempotent)."""
+        # Rationale: Uses created_vm fixture. Tests idempotent
+        # start on already-running VM.
         vm_name = created_vm["name"]
         result = _run_mvm(mvm_binary, "vm", "start", vm_name, check=False)
         assert result.returncode == 0, (
@@ -169,11 +188,25 @@ class TestVMStateTransitionErrors:
 
     def test_vm_resume_running_vm(self, mvm_binary, created_vm):
         """Resuming a running VM should succeed (idempotent)."""
+        # Rationale: Uses created_vm fixture. Tests idempotent
+        # resume on already-running VM.
         vm_name = created_vm["name"]
         result = _run_mvm(mvm_binary, "vm", "resume", vm_name, check=False)
         assert result.returncode == 0, (
             f"Resume on running VM failed: {result.stderr}"
         )
+
+
+class TestVMDestructiveRmMultiple:
+    """Destructive: Remove multiple VMs."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+        pytest.mark.serial,
+        pytest.mark.domain_vm,
+    ]
 
     def test_vm_rm_multiple_identifiers(
         self, mvm_binary, unique_vm_name, unique_network_name
@@ -253,6 +286,8 @@ class TestImageAdvancedFlags:
     @pytest.mark.serial
     def test_image_pull_with_disable_detector(self, mvm_binary):
         """Pull an image with --disable-detector all --force."""
+        # Rationale: Downloads an image with --disable-detector flag.
+        # Needs network access to pull but no local VM resources.
         try:
             result = _run_mvm(
                 mvm_binary,
@@ -285,7 +320,7 @@ class TestVMLogsByIdentifier:
         pytest.mark.system,
         pytest.mark.requires_kvm,
         pytest.mark.slow,
-        pytest.mark.domain_vm,
+        pytest.mark.domain_logs,
     ]
 
     def test_logs_by_ip(self, mvm_binary, created_vm):
@@ -661,7 +696,15 @@ class TestImageImportWithDisableDetector:
             if "alpine" in i.get("type", "").lower() and i.get("is_present")
         ]
         if not alpine_images:
-            _run_mvm(mvm_binary, "image", "pull", "alpine", "--version", "3.21", check=False)
+            _run_mvm(
+                mvm_binary,
+                "image",
+                "pull",
+                "alpine",
+                "--version",
+                "3.21",
+                check=False,
+            )
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
             alpine_images = [
@@ -750,7 +793,7 @@ class TestImageImportWithDisableDetector:
 class TestHelpCommand:
     """Tests for the ``help`` CLI command."""
 
-    pytestmark = [pytest.mark.system]
+    pytestmark = [pytest.mark.system, pytest.mark.domain_cli]
 
     def test_help_root(self, mvm_binary):
         """``mvm help`` should show root help."""
@@ -788,7 +831,7 @@ class TestHelpCommand:
 class TestHelpOutputConsistentFormat:
     """All --help outputs share common structural elements."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.domain_usability]
+    pytestmark = [pytest.mark.system, pytest.mark.domain_cli]
 
     @pytest.mark.parametrize("cmd_group", _HELP_COMMANDS)
     def test_help_contains_common_elements(
@@ -810,7 +853,7 @@ class TestHelpOutputConsistentFormat:
 class TestHelpOutputShowsSubcommands:
     """Each command's --help should list its subcommands."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.domain_usability]
+    pytestmark = [pytest.mark.system, pytest.mark.domain_cli]
 
     def test_vm_help_lists_subcommands(self, mvm_binary: str) -> None:
         """``vm --help`` should list expected VM subcommands."""
@@ -861,7 +904,7 @@ class TestHelpOutputShowsSubcommands:
 class TestErrorMessageIsActionable:
     """Error messages should guide the user to fix the problem."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.domain_usability]
+    pytestmark = [pytest.mark.system, pytest.mark.domain_cli]
 
     def test_vm_rm_nonexistent(self, mvm_binary: str) -> None:
         """``vm rm`` with a nonexistent VM name should produce an actionable error."""
@@ -888,7 +931,7 @@ class TestErrorMessageIsActionable:
 class TestDebugFlagOutput:
     """The ``--debug`` flag should produce additional diagnostic output."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.domain_usability]
+    pytestmark = [pytest.mark.system, pytest.mark.domain_cli]
 
     def test_debug_flag_produces_output(self, mvm_binary: str) -> None:
         """``--debug vm ls --json`` should include debug-level output."""
@@ -917,7 +960,7 @@ class TestDebugFlagOutput:
 class TestVersionFlag:
     """The ``--version`` flag should show a version string."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.domain_usability]
+    pytestmark = [pytest.mark.system, pytest.mark.domain_cli]
 
     def test_version_output(self, mvm_binary: str) -> None:
         """``--version`` should show a non-empty version string."""
@@ -933,7 +976,7 @@ class TestVersionFlag:
 class TestHelpSubcommandShowsCorrectly:
     """``mvm help <subcommand>`` and ``mvm <subcommand> --help`` should match."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.domain_usability]
+    pytestmark = [pytest.mark.system, pytest.mark.domain_cli]
 
     def test_help_vm_equivalent_to_vm_help(self, mvm_binary: str) -> None:
         """``mvm help vm`` and ``mvm vm --help`` should both show VM help."""

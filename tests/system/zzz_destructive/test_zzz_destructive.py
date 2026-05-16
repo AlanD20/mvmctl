@@ -15,6 +15,7 @@ from tests.system.conftest import _run_mvm
 
 pytestmark = [
     pytest.mark.system,
+    pytest.mark.domain_cache,
     pytest.mark.serial,
     pytest.mark.slow,
 ]
@@ -30,6 +31,10 @@ class TestCacheCleanActual:
         chains. This test verifies that cache init + asset re-pull can recover
         the system state. iptables chains are NOT restored (need sudo host init).
         """
+        # Rationale: Needs actual cache state (SQLite DB, asset files) because
+        # modifying the cache destroys persisted data that no fixture or JSON
+        # query can simulate. A cache ls --json test would not exercise the
+        # destroy-and-recover code path.
         result = _run_mvm(mvm_binary, "cache", "clean", "--force", check=False)
         if result.returncode != 0:
             pytest.skip(
@@ -54,7 +59,9 @@ class TestCacheCleanActual:
             bins = json.loads(bin_ls.stdout)
             fc = next((b for b in bins if b.get("name") == "firecracker"), None)
             if fc and not any(
-                b.get("is_default") for b in bins if b.get("name") == "firecracker"
+                b.get("is_default")
+                for b in bins
+                if b.get("name") == "firecracker"
             ):
                 _run_mvm(
                     mvm_binary, "bin", "default", fc["id"][:6], check=False
@@ -64,7 +71,9 @@ class TestCacheCleanActual:
         )
         if kernel_result.returncode == 0:
             # Fetch kernel listing and set the first present kernel as default
-            kernel_ls = _run_mvm(mvm_binary, "kernel", "ls", "--json", check=False)
+            kernel_ls = _run_mvm(
+                mvm_binary, "kernel", "ls", "--json", check=False
+            )
             if kernel_ls.returncode == 0 and kernel_ls.stdout.strip():
                 kernels = json.loads(kernel_ls.stdout)
                 present = [k for k in kernels if k.get("is_present")]
@@ -77,7 +86,13 @@ class TestCacheCleanActual:
                         check=False,
                     )
         _run_mvm(
-            mvm_binary, "image", "pull", "alpine", "--version", "3.21", check=False
+            mvm_binary,
+            "image",
+            "pull",
+            "alpine",
+            "--version",
+            "3.21",
+            check=False,
         )
         _run_mvm(
             mvm_binary,

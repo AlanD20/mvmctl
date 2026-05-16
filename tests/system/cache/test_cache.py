@@ -29,12 +29,16 @@ class TestCacheInit:
 
     def test_cache_init(self, mvm_binary):
         """Initialize cache resources."""
+        # Rationale: Only needs CLI invocation. No expensive resources
+        # needed — testing cache initialization command.
         result = _run_mvm(mvm_binary, "cache", "init")
         assert result.returncode == 0
         assert "initialized" in result.stdout or "Cache" in result.stdout
 
     def test_cache_init_idempotent(self, mvm_binary):
         """Running cache init multiple times should be safe (idempotent)."""
+        # Rationale: Only needs CLI invocation. No resources needed —
+        # testing idempotency of cache init.
         result1 = _run_mvm(mvm_binary, "cache", "init")
         assert result1.returncode == 0
 
@@ -52,6 +56,8 @@ class TestCachePruneDryRun:
     @pytest.mark.slow
     def test_cache_prune_all_dry_run(self, mvm_binary, created_vm):
         """Prune all resources in dry-run mode should not remove the VM."""
+        # Rationale: Needs a real VM (created_vm) because we need an
+        # existing VM to verify dry-run doesn't prune it. Requires KVM.
         vm_name = created_vm["name"]
         result = _run_mvm(mvm_binary, "cache", "prune", "--all", "--dry-run")
         assert result.returncode == 0
@@ -63,6 +69,8 @@ class TestCachePruneDryRun:
 
     def test_cache_prune_dry_run_shows_what_would_be_removed(self, mvm_binary):
         """cache prune --dry-run --all should succeed and print summary."""
+        # Rationale: Only needs CLI invocation. No resources needed —
+        # testing dry-run mode doesn't modify state.
         result = _run_mvm(mvm_binary, "cache", "prune", "--dry-run", "--all")
         assert result.returncode == 0
         combined = (result.stdout + result.stderr).lower()
@@ -74,6 +82,8 @@ class TestCachePruneDryRun:
 
     def test_cache_prune_vm_dry_run(self, mvm_binary):
         """cache prune vm --dry-run should succeed and not remove VMs."""
+        # Rationale: Only needs CLI invocation. No resources needed —
+        # dry-run doesn't modify state.
         result = _run_mvm(mvm_binary, "cache", "prune", "vm", "--dry-run")
         assert result.returncode == 0
         combined = (result.stdout + result.stderr).lower()
@@ -87,6 +97,8 @@ class TestCachePruneDryRun:
 
     def test_cache_prune_network_dry_run(self, mvm_binary, created_network):
         """cache prune network --dry-run should succeed and not remove networks."""
+        # Rationale: Uses created_network fixture (already exists) to
+        # verify dry-run doesn't prune it. No VM needed.
         network_name = created_network
         result = _run_mvm(mvm_binary, "cache", "prune", "network", "--dry-run")
         assert result.returncode == 0
@@ -103,6 +115,8 @@ class TestCacheClean:
 
     def test_cache_clean_dry_run(self, mvm_binary):
         """cache clean --dry-run --force should preview what would be removed."""
+        # Rationale: Only needs CLI invocation. No resources needed —
+        # dry-run doesn't modify state.
         result = _run_mvm(mvm_binary, "cache", "clean", "--dry-run", "--force")
         assert result.returncode == 0
         combined = (result.stdout + result.stderr).lower()
@@ -119,6 +133,8 @@ class TestCacheClean:
         self, mvm_binary, unique_vm_name, created_network
     ):
         """Should not clean cache while resources are in use."""
+        # Rationale: Needs a real VM (unique_vm_name) with running state
+        # to verify cache clean is blocked. Requires KVM and network.
         vm_name = unique_vm_name
         try:
             ensure_vm_deps(mvm_binary)
@@ -154,10 +170,17 @@ class TestCacheClean:
 class TestCachePruneActual:
     """Test actual (non-dry-run) cache prune operations."""
 
-    pytestmark = [pytest.mark.system, pytest.mark.slow, pytest.mark.serial]
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.slow,
+        pytest.mark.serial,
+        pytest.mark.domain_cache,
+    ]
 
     def test_cache_prune_misc_actual(self, mvm_binary):
         """Actually prune misc cache (safe to actually clean temp files)."""
+        # Rationale: Only needs CLI invocation. Prunes non-critical temp
+        # files — no VM or network resources needed.
         result = _run_mvm(mvm_binary, "cache", "prune", "misc", "--force")
         assert result.returncode == 0
 
@@ -166,6 +189,8 @@ class TestCachePruneActual:
 
     def test_cache_prune_misc_with_force(self, mvm_binary):
         """Prune misc cache with --force flag."""
+        # Rationale: Only needs CLI invocation. Tests --force variant
+        # of misc prune — no resources needed.
         result = _run_mvm(
             mvm_binary, "cache", "prune", "misc", "--force", check=False
         )
@@ -179,6 +204,8 @@ class TestCachePruneEdgeCases:
 
     def test_cache_prune_with_nonexistent_category(self, mvm_binary):
         """Pruning a nonexistent category should fail."""
+        # Rationale: No resources needed — testing CLI validation for
+        # nonexistent resource category.
         result = _run_mvm(
             mvm_binary,
             "cache",
@@ -191,6 +218,8 @@ class TestCachePruneEdgeCases:
 
     def test_cache_prune_nonexistent_category_flag(self, mvm_binary):
         """cache prune with an unknown flag should fail."""
+        # Rationale: No resources needed — testing CLI validation for
+        # unknown flag in prune command.
         result = _run_mvm(
             mvm_binary, "cache", "prune", "--nonexistent-category", check=False
         )
@@ -200,6 +229,8 @@ class TestCachePruneEdgeCases:
 
     def test_cache_prune_without_category_or_all_fails(self, mvm_binary):
         """cache prune without resource and --all should fail with guidance."""
+        # Rationale: No resources needed — testing CLI error guidance
+        # when no arguments are provided.
         result = _run_mvm(mvm_binary, "cache", "prune", check=False)
         assert result.returncode != 0
         combined = (result.stdout + result.stderr).lower()
@@ -208,6 +239,8 @@ class TestCachePruneEdgeCases:
     @pytest.mark.serial
     def test_cache_prune_default_image_skipped_or_warns(self, mvm_binary):
         """Pruning images should skip the default image or warn."""
+        # Rationale: Only needs image listing. Tests that the default
+        # image is preserved during prune — no VM needed.
         ls_result = _run_mvm(mvm_binary, "image", "ls", "--json")
         images: list[dict[str, Any]] = json.loads(ls_result.stdout)
         default_image = next(
@@ -216,7 +249,6 @@ class TestCachePruneEdgeCases:
 
         result = _run_mvm(mvm_binary, "cache", "prune", "image", "--force")
         assert result.returncode == 0
-        combined = (result.stdout + result.stderr).lower()
 
         if default_image:
             ls_after = _run_mvm(mvm_binary, "image", "ls", "--json")
@@ -319,10 +351,13 @@ class TestCachePruneNonDryRun:
     pytestmark = [
         pytest.mark.system,
         pytest.mark.serial,
+        pytest.mark.domain_cache,
     ]
 
     def test_cache_prune_network_non_dry_run(self, mvm_binary, created_network):
         """Prune a network without dry-run; verify JSON, DB, and bridge removal."""
+        # Rationale: Uses created_network fixture to test actual prune.
+        # Verifies JSON, DB, and bridge device removal — real state mutation.
         network_name = created_network
 
         # Capture bridge name before pruning
@@ -363,6 +398,8 @@ class TestCachePruneNonDryRun:
 
     def test_cache_prune_kernel_non_dry_run(self, mvm_binary):
         """Prune a non-default kernel without dry-run; verify JSON, DB, and file."""
+        # Rationale: Needs existing kernels to find a non-default one
+        # to prune. Verifies JSON, DB, and filesystem after removal.
         kernel_result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
         kernels: list[dict[str, Any]] = json.loads(kernel_result.stdout)
         non_default = [
@@ -431,6 +468,8 @@ class TestCachePruneNonDryRun:
 
     def test_cache_prune_binary_non_dry_run(self, mvm_binary):
         """Prune non-default binaries without dry-run; verify JSON, DB, and file."""
+        # Rationale: Needs existing binaries to find a non-default one
+        # to prune. Verifies JSON, DB, and filesystem after removal.
         bin_result = _run_mvm(mvm_binary, "bin", "ls", "--json")
         all_bins: list[dict[str, Any]] = json.loads(bin_result.stdout)
         non_default = [
@@ -448,9 +487,8 @@ class TestCachePruneNonDryRun:
             )
             if remote_result.returncode == 0:
                 import re as _re
-                versions = _re.findall(
-                    r"\d+\.\d+\.\d+", remote_result.stdout
-                )
+
+                versions = _re.findall(r"\d+\.\d+\.\d+", remote_result.stdout)
                 if versions:
                     default_version = next(
                         (
@@ -484,9 +522,7 @@ class TestCachePruneNonDryRun:
                         and b.get("name") in ("firecracker",)
                     ]
             if not non_default:
-                pytest.skip(
-                    "No non-default present binary available to prune"
-                )
+                pytest.skip("No non-default present binary available to prune")
 
         bin_dir = Path.home() / ".cache" / "mvmctl" / "bin"
         db_path = Path.home() / ".cache" / "mvmctl" / "mvmdb.db"
@@ -545,12 +581,15 @@ class TestCachePruneNonDryRun:
 
     def test_cache_prune_image_all_non_dry_run(self, mvm_binary):
         """Prune ALL images without dry-run; verify JSON, DB, and filesystem."""
+        # Rationale: Needs existing images to prune. Verifies JSON and DB
+        # state after pruning all images (filesystem check is optional).
         img_result = _run_mvm(mvm_binary, "image", "ls", "--json")
         images: list[dict[str, Any]] = json.loads(img_result.stdout)
 
         if not images:
             # Ensure an image exists to test prune
             from tests.system.conftest import _ensure_image as _ensure_img
+
             _ensure_img(mvm_binary, "alpine:3.21")
             img_result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(img_result.stdout)
@@ -592,10 +631,13 @@ class TestCachePruneAll:
     pytestmark = [
         pytest.mark.system,
         pytest.mark.serial,
+        pytest.mark.domain_cache,
     ]
 
     def test_cache_prune_all_non_dry_run(self, mvm_binary):
         """Prune EVERYTHING without dry-run; verify all listings are empty."""
+        # Rationale: Most destructive operation. Prunes all resource
+        # categories and verifies each listing is empty after.
         result = _run_mvm(mvm_binary, "cache", "prune", "--all", "--force")
         assert result.returncode == 0
 

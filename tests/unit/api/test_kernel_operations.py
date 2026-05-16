@@ -325,21 +325,3 @@ class TestKernelSetDefault:
         mocker.patch("mvmctl.api.kernel_operations.AuditLog")
 
         KernelOperation.set_default(MagicMock(identifiers=["kern-001"]))
-
-    def test_set_default_success(self, mocker):
-        mocker.patch("mvmctl.api.kernel_operations.Database")
-        mock_repo = MagicMock()
-        mocker.patch(
-            "mvmctl.api.kernel_operations.KernelRepository",
-            return_value=mock_repo,
-        )
-        kern = _make_kernel()
-        mock_request = MagicMock()
-        mock_request.resolve.return_value = MagicMock(kernels=[kern])
-        mocker.patch(
-            "mvmctl.api.inputs._kernel_input.KernelRequest",
-            return_value=mock_request,
-        )
-        mocker.patch("mvmctl.api.kernel_operations.KernelController")
-        mocker.patch("mvmctl.api.kernel_operations.AuditLog")
-        KernelOperation.set_default(MagicMock(identifiers=["kern-001"]))

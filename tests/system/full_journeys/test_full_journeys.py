@@ -17,6 +17,7 @@ from tests.system.conftest import _run_mvm, _unique_subnet, wait_for_ssh
 
 pytestmark = [
     pytest.mark.system,
+    pytest.mark.domain_workflow,
     pytest.mark.requires_kvm,
     pytest.mark.slow,
 ]
@@ -54,6 +55,9 @@ class TestQuickStartJourney:
         self, mvm_binary, unique_vm_name, timing_targets
     ):
         """Full journey: create VM with SSH key and SSH into it."""
+        # Rationale: Needs a real VM with SSH key and network to exercise the
+        # full create-and-SSH workflow from README. No cheaper fixture covers
+        # the cross-domain SSH integration path.
         key_name = f"sys-journey-key-{uuid.uuid4().hex[:6]}"
         net_name = f"sys-journey-net-{uuid.uuid4().hex[:6]}"
         subnet = _unique_subnet(net_name)
@@ -113,6 +117,9 @@ class TestNetworkVMJourney:
         self, mvm_binary, unique_network_name, unique_vm_name
     ):
         """Create network, then create VM on that network."""
+        # Rationale: Needs a real network and VM to verify the network→VM
+        # dependency chain. A network fixture alone cannot verify that VMs
+        # are correctly associated with their network at creation time.
         subnet = _unique_subnet(unique_network_name)
         result = _run_mvm(
             mvm_binary,
@@ -169,6 +176,9 @@ class TestKeyVMJourney:
         self, mvm_binary, unique_key_name, unique_vm_name
     ):
         """Create key, then create VM with that key."""
+        # Rationale: Needs a real SSH key and VM to verify the key→VM
+        # dependency chain. A key fixture alone cannot verify that VMs
+        # correctly reference created keys.
         net_name = f"sys-journey-net-{uuid.uuid4().hex[:6]}"
         subnet = _unique_subnet(net_name)
 
@@ -226,6 +236,9 @@ class TestVMStateJourney:
 
     def test_journey_pause_resume_stop_start(self, mvm_binary, unique_vm_name):
         """Full state transition journey: create → pause → resume → stop → start."""
+        # Rationale: Needs a real VM and network to exercise the full state
+        # machine (pause→resume→stop→start). No cheaper fixture covers all
+        # four state transitions in a single workflow.
         net_name = f"sys-journey-net-{uuid.uuid4().hex[:6]}"
         subnet = _unique_subnet(net_name)
         _run_mvm(
@@ -310,6 +323,9 @@ class TestIPJourney:
         self, mvm_binary, unique_vm_name, unique_network_name, timing_targets
     ):
         """Create VM with explicit IP on a dedicated network and verify assignment."""
+        # Rationale: Needs a real VM, network, and SSH key to verify explicit
+        # IP assignment and subsequent SSH connectivity. A ls --json or key
+        # fixture alone cannot verify that the assigned IP is reachable.
         subnet = _unique_subnet(unique_network_name)
         ip = subnet.replace(".0/24", ".100")
 
@@ -376,6 +392,9 @@ class TestIPJourney:
         self, mvm_binary, unique_vm_name, timing_targets
     ):
         """Create two VMs on same network and verify both are reachable."""
+        # Rationale: Needs two real VMs, a network, and two SSH keys to verify
+        # multi-VM coexistence and independent SSH reachability on the same
+        # network. No single-VM or list-json test can verify this.
         name_a = f"{unique_vm_name}-a"
         name_b = f"{unique_vm_name}-b"
         net_name = f"sys-multi-net-{uuid.uuid4().hex[:6]}"
@@ -459,6 +478,9 @@ class TestSSHJourney:
         self, mvm_binary, created_vm, timing_targets
     ):
         """Create VM and verify SSH CLI command execution."""
+        # Rationale: Uses the `created_vm` fixture (which includes key+network)
+        # to verify that `mvm ssh --cmd` executes commands inside the guest.
+        # A JSON test cannot verify in-guest command execution.
         vm_info = created_vm
         ssh_timeout = max(timing_targets.get("alpine:3.21", 15), 30)
         ssh_available = wait_for_ssh(
@@ -483,6 +505,9 @@ class TestSSHJourney:
         self, mvm_binary, unique_vm_name, timing_targets
     ):
         """Create VM, reboot, and verify SSH availability after reboot."""
+        # Rationale: Needs a real VM with SSH key and network to verify that
+        # SSH connectivity survives a VM reboot. A JSON state test cannot
+        # verify in-guest service availability after reboot.
         key_name = f"sys-reboot-key-{uuid.uuid4().hex[:6]}"
         net_name = f"sys-reboot-net-{uuid.uuid4().hex[:6]}"
         subnet = _unique_subnet(net_name)
@@ -561,6 +586,9 @@ class TestMultiKeyJourney:
         self, mvm_binary, unique_key_name, unique_vm_name
     ):
         """Create two keys, then create VM with both keys."""
+        # Rationale: Needs two real SSH keys and a VM to verify that comma-
+        # separated --ssh-key values are accepted and both keys are registered.
+        # A single-key test cannot verify multi-key handling.
         key_a = f"{unique_key_name}-a"
         key_b = f"{unique_key_name}-b"
         net_name = f"sys-multikey-net-{uuid.uuid4().hex[:6]}"
@@ -619,6 +647,10 @@ class TestInterVMCommunication:
     def test_journey_ping_between_vms(
         self, mvm_binary, unique_network_name, unique_vm_name, timing_targets
     ):
+        """Create two VMs on same network and verify inter-VM ping."""
+        # Rationale: Needs two real VMs on the same network with SSH keys to
+        # verify inter-VM reachability via ICMP. No single-VM or JSON test
+        # can verify this.
         subnet = _unique_subnet(unique_network_name)
         name_a = f"{unique_vm_name}-a"
         name_b = f"{unique_vm_name}-b"
@@ -715,6 +747,9 @@ class TestCreateWithAllFlags:
     def test_create_with_all_flags(
         self, mvm_binary: str, unique_vm_name: str
     ) -> None:
+        # Rationale: Needs a real VM with every creation flag set to verify
+        # that all flags are accepted and persisted correctly. A ls --json
+        # or inspect test with minimal VMs cannot verify this combination.
         vm_name = unique_vm_name
         net_name = f"sys-allflags-net-{uuid.uuid4().hex[:6]}"
         subnet = _unique_subnet(net_name)
@@ -794,6 +829,9 @@ class TestMultipleVolumes:
         unique_vm_name: str,
         unique_key_name: str,
     ) -> None:
+        # Rationale: Needs three real volumes, a VM, an SSH key, and a network
+        # to verify that multiple --volume flags are accepted and all volumes
+        # attach correctly. A single-volume test cannot verify this.
         vm_name = unique_vm_name
         key_name = unique_key_name
         net_name = f"sys-multivol-net-{uuid.uuid4().hex[:6]}"
@@ -887,6 +925,9 @@ class TestStressCreateDestroy:
     pytestmark = [pytest.mark.domain_workflow]
 
     def test_stress_create_destroy_sequential(self, mvm_binary: str) -> None:
+        # Rationale: Needs 5 real VMs and a network to detect resource leak
+        # accumulation across sequential create/destroy cycles. No single-VM
+        # test can detect leak accumulation over multiple cycles.
         vm_names = [f"sys-stress-{uuid.uuid4().hex[:8]}" for _ in range(5)]
         net_name = f"sys-stress-net-{uuid.uuid4().hex[:6]}"
         subnet = _unique_subnet(net_name)
@@ -964,6 +1005,9 @@ class TestExportImport:
         unique_vm_name: str,
         tmp_path: Path,
     ) -> None:
+        # Rationale: Needs a real VM and network to exercise the full
+        # export→remove→import→verify roundtrip. No JSON-listing test can
+        # verify that exported config is structurally valid for re-import.
         vm_name = unique_vm_name
         new_name = f"{vm_name}-imported"
         network_name = f"{vm_name}-net"
@@ -1062,6 +1106,9 @@ class TestConcurrentVMCreation:
     def test_concurrent_vm_creation_and_ssh(
         self, mvm_binary, unique_vm_name, timing_targets
     ):
+        # Rationale: Needs 10 real VMs, 10 SSH keys, and a network to detect
+        # race conditions in concurrent VM creation. No sequential-creation
+        # test can verify thread safety of the DB and IP allocation.
         vm_count = 10
         vm_names = [f"{unique_vm_name}-{i}" for i in range(vm_count)]
         key_names = [f"{unique_vm_name}-key-{i}" for i in range(vm_count)]

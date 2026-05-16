@@ -13,12 +13,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mvmctl.api import CacheOperation, VMCreateInput, VMInput, VMOperation
+from mvmctl.api import CacheOperation, VMCreateInput, VMOperation
 from mvmctl.core._shared import Database
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.core.kernel._repository import KernelRepository
-from mvmctl.exceptions import VMNotFoundError
 from mvmctl.models import (
     BinaryItem,
     CleanResult,

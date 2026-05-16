@@ -21,7 +21,10 @@ pytestmark = [
 class TestSnapshotDestroyRestore:
     """Full DR workflow: create VM, snapshot, destroy, restore from snapshot."""
 
-    pytestmark = [pytest.mark.domain_workflow]
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.domain_workflow,
+    ]
 
     @pytest.mark.requires_network
     def test_snapshot_destroy_restore_workflow(
@@ -31,6 +34,9 @@ class TestSnapshotDestroyRestore:
         unique_key_name: str,
         unique_network_name: str,
     ) -> None:
+        # Rationale: Needs a real VM, network, and SSH key to exercise the
+        # full snapshot→destroy→restore workflow. A key or volume fixture
+        # alone cannot test snapshot/load operations.
         vm_name = unique_vm_name
         key_name = unique_key_name
         network_name = unique_network_name

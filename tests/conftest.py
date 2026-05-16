@@ -1,11 +1,12 @@
 import os
 import shutil
 import subprocess
-
 import warnings
 from pathlib import Path
 
 import pytest
+
+from tests.helpers.paths import make_test_paths
 
 # Suppress harmless ResourceWarning from mock objects holding sqlite3.Connection
 # references at GC time. The connections are properly closed by Database.connect()
@@ -15,8 +16,6 @@ warnings.filterwarnings(
     message="unclosed database",
     category=ResourceWarning,
 )
-
-from tests.helpers.paths import make_test_paths
 
 
 @pytest.fixture(autouse=True)

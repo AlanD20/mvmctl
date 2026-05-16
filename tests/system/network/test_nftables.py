@@ -121,6 +121,7 @@ class TestNFTablesFirewallBackend:
     """End-to-end verification of nftables firewall backend."""
 
     def test_nftables_end_to_end(
+        # Rationale: Needs a real VM (30-120s). Full nftables lifecycle: set backend, create resources, SSH, verify rules, cleanup.
         self,
         mvm_binary: str,
         unique_vm_name: str,
@@ -443,6 +444,7 @@ class TestAtomicRuleSync:
     ]
 
     def test_conntrack_rule_present_after_sync(
+        # Rationale: Uses module_network fixture. Verifies conntrack rules in MVM-FORWARD and MVM-NOCLOUDNET-INPUT.
         self, mvm_binary: str, module_network: str
     ) -> None:
         """Verify conntrack established/related accept rule exists after sync."""
@@ -461,6 +463,7 @@ class TestAtomicRuleSync:
         )
 
     def test_sync_idempotent_no_rule_duplication(
+        # Rationale: Uses module_network fixture. Verifies nftables rule count is stable across syncs.
         self, mvm_binary: str, module_network: str
     ) -> None:
         """Sync twice — nftables rule count must not increase.
@@ -484,6 +487,7 @@ class TestAtomicRuleSync:
         )
 
     def test_sync_preserves_masquerade_rule(
+        # Rationale: Uses module_network fixture. Verifies MASQUERADE rule persists and bridge is referenced in FORWARD.
         self, mvm_binary: str, module_network: str
     ) -> None:
         """MASQUERADE rule in MVM-POSTROUTING persists after sync."""

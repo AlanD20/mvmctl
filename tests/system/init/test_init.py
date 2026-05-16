@@ -24,6 +24,9 @@ class TestInitWizard:
         This should succeed without sudo because --skip-host avoids
         the privileged host-init step.
         """
+        # Rationale: Only needs CLI invocation with --skip-host flag.
+        # No expensive resources needed — testing the init wizard's
+        # non-interactive path with host setup skipped.
         result = _run_mvm(
             mvm_binary,
             "init",
@@ -44,6 +47,8 @@ class TestInitWizard:
         Verifies that init is safe to run when everything is already
         set up (idempotent).
         """
+        # Rationale: Only needs CLI invocation. Verifies idempotency
+        # of the init wizard — no expensive resources needed.
         args = ("init", "--non-interactive", "--skip-host")
 
         first = _run_mvm(mvm_binary, *args, check=False)
@@ -67,6 +72,8 @@ class TestInitWizard:
         non-interactive mode.  The CLI should exit cleanly
         with a useful error message rather than hanging.
         """
+        # Rationale: Only needs CLI invocation with intentional missing
+        # --skip-host to verify graceful error handling. No resources needed.
         result = _run_mvm(
             mvm_binary,
             "init",
@@ -94,12 +101,16 @@ class TestRootFlags:
 
     def test_version_flag(self, mvm_binary):
         """``mvm --version`` should print version and exit."""
+        # Rationale: Only needs CLI invocation. No resources needed —
+        # testing that the --version flag returns a non-empty string.
         result = _run_mvm(mvm_binary, "--version", check=False)
         assert result.returncode == 0
         assert result.stdout.strip(), "Expected version string in output"
 
     def test_verbose_flag(self, mvm_binary):
         """``mvm --verbose`` should enable verbose logging output."""
+        # Rationale: Only needs CLI invocation with --verbose flag.
+        # No resources needed — testing that verbose mode doesn't break config get.
         result = _run_mvm(
             mvm_binary,
             "--verbose",
@@ -114,6 +125,8 @@ class TestRootFlags:
 
     def test_debug_flag(self, mvm_binary):
         """``mvm --debug`` should enable debug-level logging."""
+        # Rationale: Only needs CLI invocation with --debug flag.
+        # No resources needed — testing that debug mode doesn't break config get.
         result = _run_mvm(
             mvm_binary,
             "--debug",

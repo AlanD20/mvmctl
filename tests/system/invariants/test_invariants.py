@@ -6,6 +6,7 @@ test_default_invariants.py, test_cli_consistency.py
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -176,6 +177,7 @@ class TestInvariants:
     pytestmark = [pytest.mark.system, pytest.mark.domain_leak]
 
     def test_no_dangling_volume_references(self, mvm_binary: str) -> None:
+        # Rationale: Only needs ls --json for volume and VM (free). Verifies referential integrity.
         """Every volume.vm_id must correspond to an existing VM."""
         vol_result = _run_mvm(mvm_binary, "volume", "ls", "--json")
         volumes: list[dict[str, Any]] = json.loads(vol_result.stdout)
@@ -194,6 +196,7 @@ class TestInvariants:
 
     @pytest.mark.requires_kvm
     def test_no_stale_firecracker_processes(self, mvm_binary: str) -> None:
+        # Rationale: Needs running VMs (requires_kvm). Verifies VM process invariant.
         """VM in 'running' state must have live firecracker process.
 
         VMs whose processes have exited naturally (e.g. from a previous
@@ -210,6 +213,7 @@ class TestInvariants:
                     continue
 
     def test_attached_volume_not_available(self, mvm_binary: str) -> None:
+        # Rationale: Only needs ls --json (free). Verifies volume status invariant.
         """Volume in 'attached' state must not be 'available'."""
         result = _run_mvm(mvm_binary, "volume", "ls", "--json")
         volumes: list[dict[str, Any]] = json.loads(result.stdout)
@@ -231,6 +235,7 @@ class TestInvariants:
                 )
 
     def test_at_most_one_default_per_domain(self, mvm_binary: str) -> None:
+        # Rationale: Needs ls --json across all resource types (free). Verifies default uniqueness.
         """Cross-domain default uniqueness — verify via ls --json for each type."""
         # Setup: ensure at most 1 default per binary name before checking invariants.
         # Service binaries (mvm-console-relay, mvm-provision, mvm-nocloud-server) are
@@ -310,6 +315,7 @@ class TestInvariants:
 
     @pytest.mark.requires_kvm
     def test_image_in_use_by_vm(
+        # Rationale: Needs a real VM (30-120s). Verifies image referenced by VM exists in image ls.
         self, mvm_binary: str, unique_vm_name: str, unique_network_name: str
     ) -> None:
         """VM references image_id — verify the image exists in image ls."""
@@ -359,6 +365,7 @@ class TestInvariants:
 
     @pytest.mark.requires_kvm
     def test_kernel_in_use_by_vm(
+        # Rationale: Needs a real VM (30-120s). Verifies kernel referenced by VM exists in kernel ls.
         self, mvm_binary: str, unique_vm_name: str, unique_network_name: str
     ) -> None:
         """VM references kernel_id — verify the kernel exists in kernel ls."""
@@ -408,6 +415,7 @@ class TestInvariants:
 
     @pytest.mark.requires_kvm
     def test_network_in_use_by_vm(
+        # Rationale: Needs a real VM (30-120s). Verifies network referenced by VM exists in network ls.
         self, mvm_binary: str, unique_vm_name: str, unique_network_name: str
     ) -> None:
         """VM references network_id — verify the network exists."""
@@ -456,6 +464,7 @@ class TestInvariants:
             _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
     def test_default_resource_is_present(self, mvm_binary: str) -> None:
+        # Rationale: Only needs ls --json (free). Verifies default resources exist on disk.
         """Default resource must exist and be present on disk."""
         img_result = _run_mvm(mvm_binary, "image", "ls", "--json")
         images: list[dict[str, Any]] = json.loads(img_result.stdout)
@@ -502,6 +511,7 @@ class TestJsonConsistency:
     pytestmark = [pytest.mark.system, pytest.mark.domain_json]
 
     def test_all_ls_json_have_common_fields(self, mvm_binary: str) -> None:
+        # Rationale: Only needs ls --json across resource types (free). Verifies JSON field conventions.
         """Every resource ls --json output contains id, created_at, no camelCase."""
         for rt in RESOURCE_TYPES:
             resource = rt["cmd"]
@@ -520,6 +530,7 @@ class TestJsonConsistency:
                 )
 
     def test_all_inspect_json_have_common_fields(self, mvm_binary: str) -> None:
+        # Rationale: Needs existing resources. Verifies inspect JSON field conventions.
         """Every resource inspect --json output contains id, created_at, no camelCase."""
         for rt in RESOURCE_TYPES:
             resource = rt["cmd"]
@@ -544,6 +555,7 @@ class TestJsonConsistency:
                 )
 
     def test_ls_json_status_field_is_consistent(self, mvm_binary: str) -> None:
+        # Rationale: Only needs ls --json (free). Verifies field type consistency.
         """Status field should be a string, never a number or boolean.
 
         Also checks that network's ``bridge_active`` is a boolean.
@@ -568,6 +580,7 @@ class TestJsonConsistency:
                 )
 
     def test_ls_json_id_field_is_full_length(self, mvm_binary: str) -> None:
+        # Rationale: Only needs ls --json (free). Verifies ID is full 64-char hash.
         """ID should be full 64-char SHA256, not truncated."""
         for resource in RESOURCES_WITH_ID:
             items = _ls_json(mvm_binary, resource)
@@ -579,6 +592,7 @@ class TestJsonConsistency:
                 )
 
     def test_timestamp_format_consistency(self, mvm_binary: str) -> None:
+        # Rationale: Only needs ls --json (free). Verifies ISO 8601 format.
         """created_at should be consistent ISO 8601 format across resources."""
         for resource in RESOURCES_WITH_TIMESTAMPS:
             items = _ls_json(mvm_binary, resource)
@@ -599,6 +613,7 @@ class TestJsonConsistency:
                     )
 
     def test_field_name_snake_case_consistency(self, mvm_binary: str) -> None:
+        # Rationale: Only needs ls --json (free). Verifies snake_case naming.
         """All JSON field names must be snake_case, not camelCase or kebab-case."""
         for resource in RESOURCES_SNAKE_CASE:
             items = _ls_json(mvm_binary, resource)
@@ -633,6 +648,7 @@ class TestVolumeVMConsistency:
     @pytest.mark.requires_network
     @pytest.mark.slow
     def test_volume_shows_attached_vm_in_inspect(
+        # Rationale: Needs a real VM (30-120s). Verifies volume-to-VM cross-reference.
         self,
         mvm_binary: str,
         unique_vm_name: str,
@@ -708,6 +724,7 @@ class TestVolumeVMConsistency:
     @pytest.mark.requires_network
     @pytest.mark.slow
     def test_vm_inspect_shows_attached_volumes(
+        # Rationale: Needs a real VM (30-120s). Verifies VM-to-volume cross-reference.
         self,
         mvm_binary: str,
         unique_vm_name: str,
@@ -775,6 +792,7 @@ class TestVolumeVMConsistency:
     @pytest.mark.requires_network
     @pytest.mark.slow
     def test_vm_create_volume_by_id_prefix(
+        # Rationale: Needs a real VM (30-120s). Tests volume-by-ID-prefix at VM creation.
         self,
         mvm_binary: str,
         unique_vm_name: str,
@@ -847,6 +865,7 @@ class TestVolumeVMConsistency:
     @pytest.mark.requires_network
     @pytest.mark.slow
     def test_vm_create_volume_by_name(
+        # Rationale: Needs a real VM (30-120s). Tests volume-by-name at VM creation.
         self,
         mvm_binary: str,
         unique_vm_name: str,
@@ -913,6 +932,7 @@ class TestVolumeVMConsistency:
     @pytest.mark.requires_network
     @pytest.mark.slow
     def test_vm_rm_releases_volume(
+        # Rationale: Needs a real VM (30-120s). Verifies volume returns to available after VM rm.
         self,
         mvm_binary: str,
         unique_vm_name: str,
@@ -996,6 +1016,7 @@ class TestNetworkVMConsistency:
     @pytest.mark.requires_network
     @pytest.mark.slow
     def test_network_shows_attached_vm(
+        # Rationale: Needs a real VM (30-120s). Verifies network-to-VM cross-reference.
         self,
         mvm_binary: str,
         unique_vm_name: str,
@@ -1056,6 +1077,7 @@ class TestNetworkVMConsistency:
     @pytest.mark.requires_network
     @pytest.mark.slow
     def test_network_rm_rejects_active_vms(
+        # Rationale: Needs a real VM (30-120s). Tests network rm rejection with active VMs.
         self,
         mvm_binary: str,
         unique_vm_name: str,
@@ -1128,6 +1150,7 @@ class TestAtMostOneDefaultImage:
     ]
 
     def test_at_most_one_default_image(self, mvm_binary) -> None:
+        # Rationale: Needs image pull (slow, serial). Verifies exactly one image is default.
         """Pull two images with --default and verify exactly one default at a time."""
         _ensure_alpine_image(mvm_binary)
         result = _run_mvm(
@@ -1194,6 +1217,7 @@ class TestAtMostOneDefaultKernel:
     ]
 
     def test_at_most_one_default_kernel(self, mvm_binary) -> None:
+        # Rationale: Needs at least 2 present kernels (serial). Verifies exactly one kernel is default.
         """Set different kernels as default and verify exactly one default."""
         present = _present_kernels(mvm_binary)
         if len(present) < 2:
@@ -1285,6 +1309,7 @@ class TestAtMostOneDefaultBinary:
     ]
 
     def test_at_most_one_default_binary(self, mvm_binary) -> None:
+        # Rationale: Needs at least 2 present binaries (serial). Verifies exactly one binary is default per name.
         """Set different binaries as default and verify exactly one default."""
         result = _run_mvm(mvm_binary, "bin", "ls", "--json")
         binaries = json.loads(result.stdout)
@@ -1591,6 +1616,7 @@ class TestAtMostOneDefaultNetwork:
     ]
 
     def test_at_most_one_default_network(self, mvm_binary) -> None:
+        # Rationale: Needs real networks (serial, requires_network). Verifies exactly one network is default.
         """Create two networks, set each as default, verify exactly one default."""
         net_a_name = f"sys-inv-net-a-{uuid.uuid4().hex[:6]}"
         net_b_name = f"sys-inv-net-b-{uuid.uuid4().hex[:6]}"
@@ -1674,6 +1700,7 @@ class TestVolumeTransitionsToAvailableAfterVmRm:
     ]
 
     def test_volume_transitions_to_available_after_vm_rm(
+        # Rationale: Needs a real VM (30-120s). Verifies volume status invariant after VM removal.
         self,
         mvm_binary,
         unique_vm_name,
@@ -1788,6 +1815,7 @@ class TestFlagNaming:
     pytestmark = [pytest.mark.system, pytest.mark.domain_consistency]
 
     def test_force_flag_used_consistently(self, mvm_binary) -> None:
+        # Rationale: Only needs --help output (free). No resources needed.
         """``--force`` (not ``--overwrite``) should be used in add/create/export."""
         add_help = _run_mvm(mvm_binary, "key", "add", "--help")
         assert "--force" in add_help.stdout or "-f" in add_help.stdout
@@ -1802,6 +1830,7 @@ class TestFlagNaming:
         assert "--overwrite" not in export_help.stdout
 
     def test_default_flag_used_in_pull_commands(self, mvm_binary) -> None:
+        # Rationale: Only needs --help output (free). No resources needed.
         """Pull commands use ``--default`` (was ``--set-default``)."""
         result = _run_mvm(mvm_binary, "image", "pull", "--help")
         assert "--default" in result.stdout
@@ -1816,6 +1845,7 @@ class TestFlagNaming:
         assert "--set-default" not in result.stdout
 
     def test_default_flag_in_key_create(self, mvm_binary) -> None:
+        # Rationale: Only needs --help output (free). No resources needed.
         """``key create`` uses ``--default``."""
         result = _run_mvm(mvm_binary, "key", "create", "--help")
         assert "--default" in result.stdout
@@ -1827,6 +1857,7 @@ class TestJsonOutputConsistency:
     pytestmark = [pytest.mark.system, pytest.mark.domain_consistency]
 
     def test_common_field_names_across_resources(self, mvm_binary) -> None:
+        # Rationale: Only needs ls --json across resources (free). Verifies field name consistency.
         """Field names like ``id``, ``name``, ``created_at`` should be consistent."""
         result = _run_mvm(mvm_binary, "vm", "ls", "--json", check=False)
         if result.returncode == 0:

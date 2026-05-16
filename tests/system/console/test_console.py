@@ -13,7 +13,7 @@ pytestmark = [
     pytest.mark.system,
     pytest.mark.requires_kvm,
     pytest.mark.slow,
-    pytest.mark.domain_vm,
+    pytest.mark.domain_console,
 ]
 
 
@@ -22,6 +22,8 @@ class TestConsoleState:
 
     def test_console_state(self, mvm_binary, module_vm):
         """Show console relay state for a running VM."""
+        # Rationale: Needs a running VM (module_vm) because console relay
+        # state is only meaningful when a VM process is active.
         result = _run_mvm(
             mvm_binary,
             "console",
@@ -38,6 +40,8 @@ class TestConsoleState:
 
     def test_console_state_by_name_flag(self, mvm_binary, module_vm):
         """Show console relay state using VM name as positional arg."""
+        # Rationale: Needs a running VM (module_vm) to validate console
+        # state by name resolution.
         result = _run_mvm(
             mvm_binary,
             "console",
@@ -54,6 +58,8 @@ class TestConsoleState:
 
     def test_console_state_by_ip(self, mvm_binary, module_vm):
         """Show console relay state using IP as positional arg."""
+        # Rationale: Needs a running VM with an IP (module_vm) to test
+        # console state resolution by IP address.
         ip = module_vm.get("ipv4")
         if not ip:
             pytest.skip("VM has no IPv4 address assigned")
@@ -81,6 +87,8 @@ class TestConsoleKill:
         The relay may not be running if no one has attached yet,
         so we accept either success or the expected error message.
         """
+        # Rationale: Needs a running VM (module_vm) because console relay
+        # kill only applies to an active VM process.
         result = _run_mvm(
             mvm_binary,
             "console",
@@ -106,6 +114,9 @@ class TestConsoleOnStoppedVM:
         self, mvm_binary, unique_vm_name, unique_network_name
     ):
         """Console requires running VM — stopped should fail."""
+        # Rationale: Needs a VM (even stopped) to verify the console
+        # command correctly rejects non-running VMs. VM and network are
+        # created and cleaned up within this test.
         vm_name = unique_vm_name
         net_name = unique_network_name
         try:

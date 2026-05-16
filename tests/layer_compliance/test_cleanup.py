@@ -1,5 +1,7 @@
 """Tests for pytest temp directory cleanup behavior."""
 
+from __future__ import annotations
+
 import os
 import shutil
 import tempfile

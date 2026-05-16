@@ -6,6 +6,8 @@ This test measures cold-start import and initialization time. Modules can be
 exempted by adding them to STARTUP_ALLOWLIST with a documented justification.
 """
 
+from __future__ import annotations
+
 import os
 import subprocess
 import sys

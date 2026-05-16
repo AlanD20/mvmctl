@@ -672,7 +672,7 @@ class TestImageImportExtended:
 
     def test_import_auto_detect_fails(self, mocker, tmp_path):
         """Should fail when format cannot be auto-detected."""
-        mock = mocker.patch("mvmctl.cli.image.ImageOperation")
+        mocker.patch("mvmctl.cli.image.ImageOperation")
         source = tmp_path / "image.unknown_ext"
         source.write_bytes(b"data")
         result = runner.invoke(app, ["image", "import", "Test OS", str(source)])

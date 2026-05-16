@@ -262,7 +262,6 @@ def _ensure_services_binary(binary: str) -> None:
                 _print_prep(
                     "Text file busy persists, trying rename fallback..."
                 )
-                import tempfile as _tempfile
 
                 _tmp_dest = dest.with_suffix(".tmp.copy")
                 shutil.copy2(str(services_src), str(_tmp_dest))
@@ -304,9 +303,9 @@ def _ensure_services_binary(binary: str) -> None:
     # Register all service binaries directly in the DB since there is
     # no CLI command to do so.  This mirrors _restore_service_binaries()
     # in tests/system/cache/test_cache.py.
-    import sqlite3 as _sqlite3
-    import hashlib as _hashlib
     import datetime as _datetime
+    import hashlib as _hashlib
+    import sqlite3 as _sqlite3
 
     db_path = Path.home() / ".cache" / "mvmctl" / "mvmdb.db"
     _service_entries = [

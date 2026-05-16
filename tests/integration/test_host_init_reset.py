@@ -16,7 +16,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from mvmctl.api import HostOperation
-from mvmctl.core.host._service import HostService
 from mvmctl.models.host import HostStateChangeItem, HostStateItem
 from mvmctl.models.result import OperationResult
 

@@ -6,7 +6,7 @@ import pytest
 
 from tests.system.conftest import _run_mvm, wait_for_ssh
 
-pytestmark = [pytest.mark.system, pytest.mark.domain_vm]
+pytestmark = [pytest.mark.system, pytest.mark.domain_ssh]
 
 
 class TestSSHConnect:
@@ -16,6 +16,8 @@ class TestSSHConnect:
     @pytest.mark.slow
     def test_ssh_command_execution(self, mvm_binary, module_vm, timing_targets):
         """Execute a command via SSH on a running VM using name as positional arg."""
+        # Rationale: Needs a running VM (module_vm) to SSH into and execute
+        # commands against. SSH connectivity requires a real VM process.
         vm_info = module_vm
         ssh_timeout = timing_targets["alpine:3.21"]
         ssh_available = wait_for_ssh(
@@ -38,6 +40,8 @@ class TestSSHConnect:
 
     def test_ssh_nonexistent_vm(self, mvm_binary):
         """SSH to nonexistent VM should fail gracefully."""
+        # Rationale: No resources needed — testing CLI validation by
+        # attempting SSH to a name that cannot exist.
         result = _run_mvm(
             mvm_binary,
             "ssh",
@@ -58,6 +62,9 @@ class TestSSHConnect:
         for the default ConnectTimeout. With --timeout 2, it should fail
         in under 5 seconds.
         """
+        # Rationale: No resources needed — testing CLI timeout flag by
+        # attempting SSH to a nonexistent name. The --timeout flag is
+        # a CLI-level concern, no VM needed.
         import time as _time
 
         start = _time.monotonic()
@@ -85,6 +92,8 @@ class TestSSHConnect:
     @pytest.mark.slow
     def test_ssh_with_ip_flag(self, mvm_binary, module_vm, timing_targets):
         """Connect via IP as positional arg instead of VM name."""
+        # Rationale: Needs a running VM with an IP address (module_vm)
+        # to test SSH by IP resolution. Real VM required.
         vm_info = module_vm
         ssh_timeout = timing_targets["alpine:3.21"]
         ssh_available = wait_for_ssh(
@@ -109,6 +118,8 @@ class TestSSHConnect:
     @pytest.mark.slow
     def test_ssh_with_user_flag(self, mvm_binary, module_vm, timing_targets):
         """SSH with explicit --user flag."""
+        # Rationale: Needs a running VM (module_vm) to test the --user flag
+        # for SSH authentication. Real VM process required.
         vm_info = module_vm
         ssh_timeout = timing_targets["alpine:3.21"]
         wait_for_ssh(mvm_binary, vm_info["name"], "root", ssh_timeout)
@@ -134,6 +145,8 @@ class TestSSHConnect:
         self, mvm_binary, module_vm, timing_targets, tmp_path
     ):
         """SSH with explicit --key pointing to a private key file."""
+        # Rationale: Needs a running VM (module_vm) to test the --key flag
+        # for SSH key file path resolution. Real VM required.
         import subprocess as _subprocess
 
         vm_info = module_vm

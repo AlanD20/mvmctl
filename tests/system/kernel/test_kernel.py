@@ -21,6 +21,7 @@ class TestKernelLifecycle:
 
     def test_kernel_list_empty(self, mvm_binary):
         """List kernels when none are cached."""
+        # Rationale: Only needs kernel ls --json (free). No resources needed since empty state is valid.
         result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
         data: list[dict[str, Any]] = json.loads(result.stdout)
         assert isinstance(data, list)
@@ -41,11 +42,13 @@ class TestKernelLifecycle:
     @pytest.mark.serial
     def test_kernel_pull(self, mvm_binary):
         """Pull official kernel."""
+        # Rationale: Needs an actual kernel download to test pull. Marked kernel_build because this is slow and may require build tools.
         result = _run_mvm(mvm_binary, "kernel", "pull", "--type", "official")
         assert result.returncode == 0
 
     def test_kernel_list_json(self, mvm_binary):
         """List kernels in JSON format."""
+        # Rationale: Only needs kernel ls --json parsing (free). Verifies JSON field structure.
         result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
         data: list[dict[str, Any]] = json.loads(result.stdout)
         assert isinstance(data, list)
@@ -67,6 +70,7 @@ class TestKernelLifecycle:
     @pytest.mark.serial
     def test_kernel_set_default(self, mvm_binary):
         """Set kernel as default (uses the one pulled in test_kernel_pull)."""
+        # Rationale: Needs a present kernel in the DB. Uses existing kernel from pull test — serial to avoid conflicts.
         result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
         kernels: list[dict[str, Any]] = json.loads(result.stdout)
         present = [k for k in kernels if k.get("is_present")]
@@ -82,6 +86,7 @@ class TestKernelInspect:
 
     def test_kernel_inspect_table(self, mvm_binary):
         """Inspect a kernel in table format."""
+        # Rationale: Needs a present kernel to inspect. Uses ls --json to find one — no additional resources needed.
         _ensure_kernel(mvm_binary)
         kernels: list[dict[str, Any]] = json.loads(
             _run_mvm(mvm_binary, "kernel", "ls", "--json").stdout
@@ -96,6 +101,7 @@ class TestKernelInspect:
 
     def test_kernel_inspect_json(self, mvm_binary):
         """Inspect a kernel with --json output."""
+        # Rationale: Needs a present kernel to inspect. Verifies JSON field completeness.
         _ensure_kernel(mvm_binary)
         kernels: list[dict[str, Any]] = json.loads(
             _run_mvm(mvm_binary, "kernel", "ls", "--json").stdout
@@ -115,6 +121,7 @@ class TestKernelInspect:
 
     def test_kernel_inspect_tree(self, mvm_binary):
         """Inspect a kernel with --tree output."""
+        # Rationale: Needs a present kernel. Verifies --tree output format.
         _ensure_kernel(mvm_binary)
         kernels: list[dict[str, Any]] = json.loads(
             _run_mvm(mvm_binary, "kernel", "ls", "--json").stdout
@@ -133,6 +140,7 @@ class TestKernelInspect:
 
     def test_kernel_inspect_nonexistent_fails(self, mvm_binary):
         """Inspecting a nonexistent kernel should fail."""
+        # Rationale: No resources needed — error path tests require no existing resources.
         result = _run_mvm(
             mvm_binary, "kernel", "inspect", "000000", check=False
         )
@@ -142,10 +150,16 @@ class TestKernelInspect:
 class TestKernelPullWithVersion:
     """Test kernel pull with the --version flag."""
 
-    pytestmark = [pytest.mark.slow, pytest.mark.serial]
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.slow,
+        pytest.mark.serial,
+        pytest.mark.domain_kernel,
+    ]
 
     def test_kernel_pull_with_version(self, mvm_binary):
         """Pull a firecracker kernel with --version flag."""
+        # Rationale: Needs an actual kernel download (slow, serial). Tests --version flag on pull.
         result = _run_mvm(
             mvm_binary,
             "kernel",
@@ -170,6 +184,7 @@ class TestKernelPullWithVersion:
 
     def test_kernel_pull_with_specific_version(self, mvm_binary):
         """Pull a firecracker kernel with a specific version (not 'latest')."""
+        # Rationale: Needs a kernel download. Tests specific version (6.1) not just "latest".
         result = _run_mvm(
             mvm_binary,
             "kernel",
@@ -221,6 +236,7 @@ class TestKernelBuild:
 
     def test_kernel_build_with_custom_config(self, mvm_binary, tmp_path):
         """Build official kernel with custom config fragment."""
+        # Rationale: Needs full kernel build from source (very slow, 30min). Tests custom config fragment.
         config_fragment = tmp_path / "custom-fragment.conf"
         config_fragment.write_text("CONFIG_NET=y\nCONFIG_INET=y\n")
 
@@ -261,6 +277,7 @@ class TestKernelBuild:
 
     def test_kernel_clean_rebuild(self, mvm_binary):
         """Build official kernel with clean rebuild."""
+        # Rationale: Needs full kernel build. Tests --clean-build flag.
         result = _run_mvm(
             mvm_binary,
             "kernel",
@@ -298,11 +315,17 @@ class TestKernelBuild:
 class TestKernelRemoveAndPull:
     """Test kernel removal and pull with set-default."""
 
-    pytestmark = [pytest.mark.slow, pytest.mark.serial]
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.slow,
+        pytest.mark.serial,
+        pytest.mark.domain_kernel,
+    ]
 
     @pytest.mark.kernel_build
     def test_kernel_pull_with_set_default(self, mvm_binary):
         """Pull official kernel and set as default in one command."""
+        # Rationale: Needs a kernel pull. Tests --default flag combined with pull.
         result = _run_mvm(
             mvm_binary, "kernel", "pull", "--type", "official", "--default"
         )
@@ -311,6 +334,7 @@ class TestKernelRemoveAndPull:
     @pytest.mark.kernel_build
     def test_kernel_remove(self, mvm_binary):
         """Fetch a kernel then remove it."""
+        # Rationale: Needs a present kernel to remove. Tests destructive rm operation.
         result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
         existing: list[dict[str, Any]] = json.loads(result.stdout)
         present = [k for k in existing if k.get("is_present")]
@@ -352,11 +376,17 @@ class TestKernelRemoveAndPull:
 class TestKernelRemoveForce:
     """Test kernel removal with --force flag."""
 
-    pytestmark = [pytest.mark.slow, pytest.mark.serial]
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.slow,
+        pytest.mark.serial,
+        pytest.mark.domain_kernel,
+    ]
 
     @pytest.mark.kernel_build
     def test_kernel_rm_with_force(self, mvm_binary):
         """Remove a kernel using --force even if VMs reference it."""
+        # Rationale: Needs a present kernel. Tests --force flag on rm.
         result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
         kernels: list[dict[str, Any]] = json.loads(result.stdout)
 
@@ -417,6 +447,7 @@ class TestKernelStoppedVMDeletion:
     ]
 
     def test_delete_kernel_used_by_stopped_vm_does_not_error(
+        # Rationale: Needs a real VM (30-120s) because kernel dependency on stopped VMs only applies when VMs exist.
         self, mvm_binary: str, unique_vm_name: str, created_network: str
     ) -> None:
         """Kernel rm allows deleting kernels referenced by stopped VMs (no error)."""

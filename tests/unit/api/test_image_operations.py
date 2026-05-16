@@ -17,7 +17,7 @@ import pytest
 from mvmctl.api.image_operations import ImageOperation
 from mvmctl.api.inputs._image_input import ImageInput
 from mvmctl.exceptions import ImageError
-from mvmctl.models import ImageItem, ImageSpec, ImageVersion
+from mvmctl.models import ImageItem, ImageVersion
 
 
 def _make_image(

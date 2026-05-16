@@ -158,7 +158,7 @@ class TestVolumeRequest:
             request = VolumeRequest(inputs=VolumeInput(identifiers=["v"]))
             assert request._db is not None
             # Should resolve with no errors
-            result = request.resolve()
+            request.resolve()
 
     def test_ensure_validate_with_none_result_raises(self):
         """Calling ensure_validate directly with _result=None should raise."""

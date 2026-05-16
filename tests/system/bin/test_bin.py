@@ -19,6 +19,8 @@ class TestBinLifecycle:
 
     def test_bin_list_cached(self, mvm_binary):
         """List cached firecracker versions."""
+        # Rationale: Only needs JSON output from bin ls. No expensive
+        # resources needed — reads existing cache state.
         result = _run_mvm(mvm_binary, "bin", "ls", "--json")
         data: list[dict[str, Any]] = json.loads(result.stdout)
         assert isinstance(data, list)
@@ -39,6 +41,8 @@ class TestBinLifecycle:
 
     def test_bin_list_json(self, mvm_binary):
         """List binaries in JSON format."""
+        # Rationale: Only needs JSON output. No resources needed —
+        # validates structural integrity of the JSON response.
         result = _run_mvm(mvm_binary, "bin", "ls", "--json")
         data: list[dict[str, Any]] = json.loads(result.stdout)
         assert isinstance(data, list)
@@ -63,6 +67,9 @@ class TestBinLifecycle:
         Validates structural invariants: every entry must have non-empty version and id,
         and is_present must be a bool. This assertion holds regardless of cache state.
         """
+        # Rationale: Only needs JSON output. No resources needed —
+        # validates structural invariants of the binary listing regardless
+        # of cache state.
         result = _run_mvm(mvm_binary, "bin", "ls", "--json")
         data: list[dict[str, Any]] = json.loads(result.stdout)
         assert isinstance(data, list)
@@ -85,6 +92,8 @@ class TestBinLifecycle:
         the empty-cache edge case. The serial marker prevents race
         conditions with other cache-modifying tests.
         """
+        # Rationale: Only needs JSON output. No expensive resources —
+        # validates the empty-cache edge case for binary listing format.
         result = _run_mvm(mvm_binary, "bin", "ls", "--json")
         assert result.returncode == 0, f"bin ls --json failed: {result.stderr}"
         data = json.loads(result.stdout)
@@ -121,6 +130,8 @@ class TestBinaryPullAdvanced:
 
     def test_bin_pull_force(self, mvm_binary):
         """Pull a binary with --force to re-download an already cached version."""
+        # Rationale: Pulls a remote binary with --force. Needs remote access
+        # to find an available version, but no local VM/network resources.
         result = _run_mvm(mvm_binary, "bin", "ls", "--remote", check=False)
         if result.returncode != 0:
             pytest.skip(f"Remote listing failed (network?): {result.stderr}")
@@ -138,6 +149,8 @@ class TestBinaryPullAdvanced:
 
     def test_bin_pull_set_default(self, mvm_binary):
         """Pull a binary and set it as default atomically."""
+        # Rationale: Pulls a remote binary with --default flag. Needs remote
+        # access to list versions, no local VM/network resources needed.
         result = _run_mvm(mvm_binary, "bin", "ls", "--remote", check=False)
         if result.returncode != 0:
             pytest.skip(f"Remote listing failed (network?): {result.stderr}")
@@ -156,9 +169,7 @@ class TestBinaryPullAdvanced:
             check=False,
         )
         if result.returncode != 0:
-            pytest.skip(
-                f"bin pull {target} --default failed: {result.stderr}"
-            )
+            pytest.skip(f"bin pull {target} --default failed: {result.stderr}")
         assert result.returncode == 0
 
 
@@ -174,6 +185,8 @@ class TestBinaryPullAndLifecycle:
     @pytest.mark.slow
     def test_bin_pull_and_set_default(self, mvm_binary):
         """Pull a specific binary version and set as default."""
+        # Rationale: Needs remote access to list and pull binaries.
+        # Modifies local cache and default state — marked serial.
         result = _run_mvm(mvm_binary, "bin", "ls", "--remote", check=False)
         if result.returncode != 0:
             pytest.skip(f"Remote listing failed (network?): {result.stderr}")
@@ -187,6 +200,7 @@ class TestBinaryPullAndLifecycle:
         _cur_def = _run_mvm(mvm_binary, "bin", "ls", "--json", check=False)
         if _cur_def.returncode == 0 and _cur_def.stdout:
             import json as _json
+
             for _b in _json.loads(_cur_def.stdout):
                 if _b.get("is_default"):
                     current_default = _b.get("version")
@@ -218,32 +232,10 @@ class TestBinaryPullAndLifecycle:
                 check=False,
             )
 
-    @pytest.mark.slow
-    def test_bin_remove_by_version(self, mvm_binary):
-        """Fetch a specific version and remove by version."""
-        result = _run_mvm(mvm_binary, "bin", "ls", "--remote", check=False)
-        if result.returncode != 0:
-            pytest.skip(f"Remote listing failed (network?): {result.stderr}")
-        versions = re.findall(r"\d+\.\d+\.\d+", result.stdout)
-        if not versions:
-            pytest.skip("No remote versions available")
-
-        target = versions[0] if len(versions) > 1 else versions[-1]
-
-        cached = _run_mvm(mvm_binary, "bin", "ls", "--json")
-        cached_versions = {v.get("version") for v in json.loads(cached.stdout)}
-        if target not in cached_versions:
-            _run_mvm(mvm_binary, "bin", "pull", target, check=False)
-
-        result = _run_mvm(
-            mvm_binary, "bin", "rm", "--version", target, "--force", check=False
-        )
-        assert result.returncode == 0, (
-            f"bin rm --version {target} failed: {result.stderr}"
-        )
-
     def test_bin_default(self, mvm_binary):
         """Set a cached binary as default using bin default <id>."""
+        # Rationale: Needs cached binaries (from previous pulls or pre-existing).
+        # Modifies default state — marked serial. No VM/network resources.
         result = _run_mvm(mvm_binary, "bin", "ls", "--json")
         binaries = json.loads(result.stdout)
 
@@ -262,9 +254,7 @@ class TestBinaryPullAndLifecycle:
                 mvm_binary, "bin", "ls", "--remote", check=False
             )
             if remote_result.returncode == 0:
-                versions = re.findall(
-                    r"\d+\.\d+\.\d+", remote_result.stdout
-                )
+                versions = re.findall(r"\d+\.\d+\.\d+", remote_result.stdout)
                 if versions:
                     default_version = next(
                         (
@@ -311,8 +301,36 @@ class TestBinaryPullAndLifecycle:
                 f"{result.stderr}"
             )
 
+    @pytest.mark.slow
+    def test_bin_remove_by_version(self, mvm_binary):
+        """Fetch a specific version and remove by version."""
+        # Rationale: Needs remote access to find a version to remove.
+        # Destructive — removes a binary from the cache.
+        result = _run_mvm(mvm_binary, "bin", "ls", "--remote", check=False)
+        if result.returncode != 0:
+            pytest.skip(f"Remote listing failed (network?): {result.stderr}")
+        versions = re.findall(r"\d+\.\d+\.\d+", result.stdout)
+        if not versions:
+            pytest.skip("No remote versions available")
+
+        target = versions[0] if len(versions) > 1 else versions[-1]
+
+        cached = _run_mvm(mvm_binary, "bin", "ls", "--json")
+        cached_versions = {v.get("version") for v in json.loads(cached.stdout)}
+        if target not in cached_versions:
+            _run_mvm(mvm_binary, "bin", "pull", target, check=False)
+
+        result = _run_mvm(
+            mvm_binary, "bin", "rm", "--version", target, "--force", check=False
+        )
+        assert result.returncode == 0, (
+            f"bin rm --version {target} failed: {result.stderr}"
+        )
+
     def test_bin_rm_by_id(self, mvm_binary):
         """Remove a cached binary by its 6-character ID prefix."""
+        # Rationale: Needs cached binaries to find one to remove.
+        # Destructive — removes a binary from the cache. No VM/network.
         result = _run_mvm(mvm_binary, "bin", "ls", "--json")
         binaries = json.loads(result.stdout)
 
@@ -383,6 +401,8 @@ class TestBinaryEdges:
 
     def test_bin_ls_remote_works(self, mvm_binary):
         """Remote binary listing should work."""
+        # Rationale: Only needs remote listing access. No local resources
+        # needed — tests that the --remote flag returns valid data.
         result = _run_mvm(
             mvm_binary, "bin", "ls", "--remote", "--json", check=False
         )
@@ -393,6 +413,8 @@ class TestBinaryEdges:
 
     def test_bin_ls_remote_with_limit(self, mvm_binary):
         """Remote listing with --limit flag should work (limit is display-only in JSON)."""
+        # Rationale: Only needs remote listing access. No local resources
+        # — tests the --limit flag on remote listing JSON output.
         result = _run_mvm(
             mvm_binary,
             "bin",
@@ -411,6 +433,8 @@ class TestBinaryEdges:
 
     def test_pull_nonexistent_version_fails(self, mvm_binary):
         """Pulling a nonexistent version via --version should fail gracefully."""
+        # Rationale: No resources needed — testing CLI validation for
+        # nonexistent version. Error handling doesn't require real resources.
         result = _run_mvm(
             mvm_binary,
             "bin",
@@ -429,6 +453,8 @@ class TestBinaryEdges:
 
     def test_set_default_nonexistent_binary_fails(self, mvm_binary):
         """Setting default to nonexistent binary should fail."""
+        # Rationale: No resources needed — testing CLI validation for
+        # nonexistent binary ID. Error path testing only.
         result = _run_mvm(
             mvm_binary,
             "bin",
@@ -442,6 +468,8 @@ class TestBinaryEdges:
 
     def test_remove_nonexistent_binary_fails(self, mvm_binary):
         """Removing nonexistent binary should fail gracefully."""
+        # Rationale: No resources needed — testing CLI validation for
+        # nonexistent binary removal. Error path testing only.
         result = _run_mvm(
             mvm_binary, "bin", "rm", "totally-nonexistent-binary", check=False
         )
@@ -456,6 +484,8 @@ class TestBinaryEdges:
         Finds a remotely-available version that is not yet cached locally,
         pulls it with no extra flags, and verifies it appears in the listing.
         """
+        # Rationale: Needs remote access to list and pull binaries.
+        # Modifies local cache (adds a binary). No VM/network resources.
         result = _run_mvm(mvm_binary, "bin", "ls", "--remote", check=False)
         if result.returncode != 0:
             pytest.skip(f"Remote listing failed (network?): {result.stderr}")
@@ -489,6 +519,8 @@ class TestBinaryEdges:
 
     def test_bin_rm_version_nonexistent(self, mvm_binary):
         """Removing a nonexistent version via --version should fail."""
+        # Rationale: No resources needed — testing CLI validation for
+        # nonexistent version removal in error path.
         result = _run_mvm(
             mvm_binary, "bin", "rm", "--version", "999.999.999", check=False
         )
@@ -581,16 +613,25 @@ class TestBinaryEdges:
 class TestBinaryStoppedVMDeletion:
     """Test binary deletion behavior with stopped VM references."""
 
-    pytestmark = [pytest.mark.requires_kvm, pytest.mark.serial]
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.serial,
+        pytest.mark.domain_bin,
+    ]
 
     def test_delete_binary_used_by_stopped_vm_does_not_error(
         self, mvm_binary: str, unique_vm_name: str, module_network: str
     ) -> None:
         """Binary rm allows deleting binaries referenced by stopped VMs."""
+        # Rationale: Needs a real VM (unique_vm_name) to test that binary
+        # removal doesn't fail when the binary is used by a stopped VM.
+        # Requires KVM and network for VM creation.
         vm_name = unique_vm_name
 
         # Ensure VM deps (kernel, image, firecracker binary, service binaries) are available
         from tests.system.conftest import ensure_vm_deps as _ensure_vm_deps
+
         _ensure_vm_deps(mvm_binary)
 
         try:

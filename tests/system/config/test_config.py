@@ -19,6 +19,8 @@ class TestConfigLifecycle:
 
     def test_config_get_existing(self, mvm_binary):
         """Get an existing config value."""
+        # Rationale: Only needs CLI invocation. No resources needed —
+        # testing config get on a known key. Read-only operation.
         result = _run_mvm(
             mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
         )
@@ -41,38 +43,65 @@ class TestConfigLifecycle:
     @pytest.mark.serial
     def test_config_set_and_get(self, mvm_binary):
         """Set a config value and read it back."""
-        result = _run_mvm(
-            mvm_binary, "config", "set", "defaults.vm", "vcpu_count", "4"
-        )
-        assert result.returncode == 0
+        # Rationale: Only needs CLI invocation. No resources needed —
+        # testing config set/get round-trip. Modifies shared config state
+        # so marked serial with cleanup in finally.
+        try:
+            result = _run_mvm(
+                mvm_binary, "config", "set", "defaults.vm", "vcpu_count", "4"
+            )
+            assert result.returncode == 0
 
-        result = _run_mvm(
-            mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
-        )
-        assert result.returncode == 0
-        assert "4" in result.stdout
-
-        # Cleanup: reset back to default
-        _run_mvm(mvm_binary, "config", "reset", "defaults.vm", "vcpu_count")
+            result = _run_mvm(
+                mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
+            )
+            assert result.returncode == 0
+            assert "4" in result.stdout
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "config",
+                "reset",
+                "defaults.vm",
+                "vcpu_count",
+                check=False,
+            )
 
     @pytest.mark.serial
     def test_config_reset(self, mvm_binary):
         """Reset a config value to its default."""
-        _run_mvm(mvm_binary, "config", "set", "defaults.vm", "vcpu_count", "4")
+        # Rationale: Only needs CLI invocation. No resources needed —
+        # testing config set then reset. Modifies shared config state
+        # so marked serial with cleanup in finally.
+        try:
+            _run_mvm(
+                mvm_binary, "config", "set", "defaults.vm", "vcpu_count", "4"
+            )
 
-        result = _run_mvm(
-            mvm_binary, "config", "reset", "defaults.vm", "vcpu_count"
-        )
-        assert result.returncode == 0
+            result = _run_mvm(
+                mvm_binary, "config", "reset", "defaults.vm", "vcpu_count"
+            )
+            assert result.returncode == 0
 
-        result = _run_mvm(
-            mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
-        )
-        assert result.returncode == 0
-        assert "4" not in result.stdout
+            result = _run_mvm(
+                mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
+            )
+            assert result.returncode == 0
+            assert "4" not in result.stdout
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "config",
+                "reset",
+                "defaults.vm",
+                "vcpu_count",
+                check=False,
+            )
 
     def test_config_list(self, mvm_binary):
         """List all overridable settings."""
+        # Rationale: Only needs CLI invocation. Read-only operation
+        # that lists config categories — no resources needed.
         result = _run_mvm(mvm_binary, "config", "list")
         assert result.returncode == 0
         assert result.stdout.strip()
@@ -81,23 +110,37 @@ class TestConfigLifecycle:
     @pytest.mark.serial
     def test_config_reset_all(self, mvm_binary):
         """Reset all config overrides globally."""
-        # First set a value so there is something to reset
-        _run_mvm(mvm_binary, "config", "set", "defaults.vm", "vcpu_count", "6")
+        # Rationale: Only needs CLI invocation. No resources needed —
+        # testing config set then reset --all. Modifies shared config state
+        # so marked serial with cleanup in finally.
+        try:
+            # First set a value so there is something to reset
+            _run_mvm(
+                mvm_binary, "config", "set", "defaults.vm", "vcpu_count", "6"
+            )
 
-        # Reset all
-        result = _run_mvm(mvm_binary, "config", "reset", "--all")
-        assert result.returncode == 0
+            # Reset all
+            result = _run_mvm(mvm_binary, "config", "reset", "--all")
+            assert result.returncode == 0
 
-        # Verify the value is no longer the custom one
-        result = _run_mvm(
-            mvm_binary,
-            "config",
-            "get",
-            "defaults.vm",
-            "vcpu_count",
-        )
-        assert result.returncode == 0
-        assert "6" not in result.stdout
+            # Verify the value is no longer the custom one
+            result = _run_mvm(
+                mvm_binary,
+                "config",
+                "get",
+                "defaults.vm",
+                "vcpu_count",
+            )
+            assert result.returncode == 0
+            assert "6" not in result.stdout
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "config",
+                "reset",
+                "--all",
+                check=False,
+            )
 
 
 # ============================================================================
@@ -112,6 +155,8 @@ class TestConfigEdgeCases:
 
     def test_config_get_category_only(self, mvm_binary):
         """``config get defaults.vm`` (no key) should return multiple keys."""
+        # Rationale: Only needs CLI invocation. Read-only operation —
+        # testing config get with category-only argument. No resources needed.
         result = _run_mvm(mvm_binary, "config", "get", "defaults.vm")
         assert result.returncode == 0
         assert "vcpu_count" in result.stdout
@@ -121,30 +166,48 @@ class TestConfigEdgeCases:
     @pytest.mark.serial
     def test_config_reset_category_only(self, mvm_binary):
         """``config reset defaults.vm`` (no key) should reset all keys in category."""
-        _run_mvm(mvm_binary, "config", "set", "defaults.vm", "vcpu_count", "6")
+        # Rationale: Only needs CLI invocation. No resources needed —
+        # testing config set then category-level reset. Modifies shared
+        # config state so marked serial with cleanup in finally.
+        try:
+            _run_mvm(
+                mvm_binary, "config", "set", "defaults.vm", "vcpu_count", "6"
+            )
 
-        result = _run_mvm(
-            mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
-        )
-        assert "6" in result.stdout
+            result = _run_mvm(
+                mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
+            )
+            assert "6" in result.stdout
 
-        result = _run_mvm(mvm_binary, "config", "reset", "defaults.vm")
-        assert result.returncode == 0
-        assert "override(s)" in result.stdout
+            result = _run_mvm(mvm_binary, "config", "reset", "defaults.vm")
+            assert result.returncode == 0
+            assert "override(s)" in result.stdout
 
-        result = _run_mvm(
-            mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
-        )
-        assert "6" not in result.stdout
+            result = _run_mvm(
+                mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
+            )
+            assert "6" not in result.stdout
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "config",
+                "reset",
+                "defaults.vm",
+                check=False,
+            )
 
     def test_config_reset_no_args(self, mvm_binary):
         """``config reset`` with no args should print guidance (exit 0)."""
+        # Rationale: Only needs CLI invocation. Read-only operation
+        # testing CLI guidance when no arguments provided.
         result = _run_mvm(mvm_binary, "config", "reset")
         assert result.returncode == 0
         assert "Provide a category" in result.stdout
 
     def test_config_set_invalid_category(self, mvm_binary):
         """``config set`` with invalid category should fail."""
+        # Rationale: Only needs CLI invocation. Testing validation error
+        # for invalid category path — no resources needed.
         result = _run_mvm(
             mvm_binary,
             "config",
@@ -164,6 +227,8 @@ class TestConfigEdgeCasesExtended:
 
     def test_config_get_nonexistent_key(self, mvm_binary):
         """``config get`` with nonexistent key should return guidance."""
+        # Rationale: Only needs CLI invocation. Testing resilience for
+        # nonexistent key lookups — no resources needed.
         result = _run_mvm(
             mvm_binary,
             "config",
@@ -176,6 +241,8 @@ class TestConfigEdgeCasesExtended:
 
     def test_config_set_invalid_value_type(self, mvm_binary):
         """``config set`` with an invalid value type (string for int) should fail."""
+        # Rationale: Only needs CLI invocation. Testing input validation
+        # for invalid value types — no resources needed.
         result = _run_mvm(
             mvm_binary,
             "config",
@@ -199,24 +266,38 @@ class TestConfigEdgeCasesResetAllAfterSet:
 
     def test_config_reset_all_with_multiple_overrides(self, mvm_binary):
         """Set multiple config overrides, then reset --all, verify all gone."""
-        _run_mvm(mvm_binary, "config", "set", "defaults.vm", "vcpu_count", "8")
-        _run_mvm(
-            mvm_binary,
-            "config",
-            "set",
-            "defaults.vm",
-            "mem_size_mib",
-            "2048",
-        )
+        # Rationale: Only needs CLI invocation. No resources needed —
+        # testing multiple overrides then reset --all. Modifies shared
+        # config state so marked serial with cleanup in finally.
+        try:
+            _run_mvm(
+                mvm_binary, "config", "set", "defaults.vm", "vcpu_count", "8"
+            )
+            _run_mvm(
+                mvm_binary,
+                "config",
+                "set",
+                "defaults.vm",
+                "mem_size_mib",
+                "2048",
+            )
 
-        result = _run_mvm(
-            mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
-        )
-        assert "8" in result.stdout
+            result = _run_mvm(
+                mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
+            )
+            assert "8" in result.stdout
 
-        _run_mvm(mvm_binary, "config", "reset", "--all")
+            _run_mvm(mvm_binary, "config", "reset", "--all")
 
-        result = _run_mvm(
-            mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
-        )
-        assert "8" not in result.stdout
+            result = _run_mvm(
+                mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
+            )
+            assert "8" not in result.stdout
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "config",
+                "reset",
+                "--all",
+                check=False,
+            )

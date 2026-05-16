@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from mvmctl.core.cache._service import CacheService
 
 

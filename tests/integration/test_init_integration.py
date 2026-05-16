@@ -262,7 +262,6 @@ class TestInitWizard:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """run(download_version='1.16.0') fetches the requested binary version."""
-        from mvmctl.core.host._service import HostService
 
         # Clear pre-seeded binaries so the download path is exercised
         db = Database()

@@ -91,17 +91,23 @@ class TestVMLogs:
 
     def test_logs_boot_output(self, mvm_binary, logs_vm):
         """Show boot log for a running VM."""
+        # Rationale: Needs a running VM (logs_vm) because boot logs are
+        # only available from an active VM process.
         result = _run_mvm(mvm_binary, "logs", logs_vm["name"])
         assert result.returncode == 0
         assert result.stdout.strip()
 
     def test_logs_os_output(self, mvm_binary, logs_vm):
         """Show Firecracker OS log for a running VM."""
+        # Rationale: Needs a running VM (logs_vm) because OS-level
+        # Firecracker logs require an active VM process.
         result = _run_mvm(mvm_binary, "logs", logs_vm["name"], "--os")
         assert result.returncode == 0
 
     def test_logs_follow_runs(self, mvm_binary, logs_vm):
         """Follow log output for a brief period."""
+        # Rationale: Needs a running VM (logs_vm) because --follow
+        # streams live logs from an active VM process.
         cmd = [*shlex.split(mvm_binary), "logs", logs_vm["name"], "--follow"]
         try:
             result = subprocess.run(
@@ -117,6 +123,8 @@ class TestVMLogs:
 
     def test_logs_os_follow(self, mvm_binary, logs_vm):
         """Combined --os --follow flags should not crash."""
+        # Rationale: Needs a running VM (logs_vm) to test combined
+        # --os --follow flags in real log streaming scenario.
         cmd = [
             *shlex.split(mvm_binary),
             "logs",
@@ -138,6 +146,8 @@ class TestVMLogs:
 
     def test_logs_on_nonexistent_vm_fails(self, mvm_binary):
         """Logs on nonexistent VM should give clear error."""
+        # Rationale: No resources needed — testing CLI validation for
+        # nonexistent VM name. Error handling doesn't require a real VM.
         result = _run_mvm(
             mvm_binary,
             "logs",
@@ -152,6 +162,9 @@ class TestVMLogs:
         self, mvm_binary, unique_vm_name, created_network
     ):
         """--lines flag should limit output to N lines."""
+        # Rationale: Needs a real VM because --lines flag operates on
+        # actual log output from a running VM. Network fixture required
+        # for VM creation.
         vm_name = unique_vm_name
         try:
             ensure_vm_deps(mvm_binary)
@@ -181,6 +194,8 @@ class TestVMLogs:
         self, mvm_binary, unique_vm_name, created_network
     ):
         """Logs by IP should only work for running VMs."""
+        # Rationale: Needs a real VM to stop and then verify logs by IP
+        # fails for stopped VMs. Network fixture required for VM creation.
         vm_name = unique_vm_name
         try:
             ensure_vm_deps(mvm_binary)
