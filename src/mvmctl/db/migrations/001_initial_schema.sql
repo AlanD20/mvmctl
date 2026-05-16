@@ -286,7 +286,7 @@ CREATE TABLE IF NOT EXISTS nftables_rules (
     -- Rule Location
     chain TEXT NOT NULL CHECK(chain LIKE 'MVM-%'),       -- Only MVM-* chains (same as iptables)
     rule_type TEXT NOT NULL CHECK(rule_type IN ('masquerade', 'forward_in', 'forward_out', 'nocloudnet_input')),
-    table_name TEXT NOT NULL CHECK(table_name IN ('filter')),
+    table_name TEXT NOT NULL CHECK(table_name IN ('filter', 'nat')),
 
     -- Rule Parameters
     protocol TEXT NOT NULL CHECK(protocol IN ('tcp', 'udp', 'icmp', 'all')),

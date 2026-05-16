@@ -28,7 +28,7 @@ from mvmctl.constants import (
     FIRECRACKER_GITHUB_RELEASES_API_URL as _GITHUB_RELEASES_URL,
 )
 from mvmctl.core.binary._repository import BinaryRepository
-from mvmctl.exceptions import BinaryError
+from mvmctl.exceptions import BinaryError, HttpDownloadError
 from mvmctl.models import BinaryItem
 from mvmctl.utils.common import CacheUtils
 from mvmctl.utils.crypto import HashGenerator
@@ -89,9 +89,24 @@ class BinaryService:
 
         try:
             json_data = HttpDownload.read_json_content(url, use_cache=True)
-        except Exception as exc:
+        except HttpDownloadError as exc:
+            msg = str(exc)
+            if "403" in msg and "rate limit" in msg.lower():
+                raise BinaryError(
+                    "Failed to fetch Firecracker releases from GitHub: "
+                    "rate limit exceeded (HTTP 403). "
+                    "Either wait for the rate limit to reset, or set a "
+                    "GitHub token via the GITHUB_TOKEN environment variable "
+                    "to increase your rate limit."
+                ) from exc
+            if "401" in msg:
+                raise BinaryError(
+                    "Failed to fetch Firecracker releases from GitHub: "
+                    "authentication failed (HTTP 401). "
+                    "Set a valid GitHub token via GITHUB_TOKEN."
+                ) from exc
             raise BinaryError(
-                f"Failed to fetch releases from GitHub: {exc}"
+                f"Failed to fetch Firecracker releases from GitHub: {exc}"
             ) from exc
 
         if not isinstance(json_data, list):
@@ -408,7 +423,13 @@ class BinaryService:
             link_path.unlink(missing_ok=True)
             link_path.symlink_to(combined_name)
 
-        # Step 3: Create DB entries only if the combined binary is available.
+        # Step 3: Clean existing service binary DB entries before inserting new ones.
+        # Prevents duplicates when ``mvm init`` is re-run (old entries with
+        # different hashes accumulate otherwise).
+        for name in SERVICE_BINARY_NAMES:
+            self._repo.delete_by_name(name)
+
+        # Step 4: Create DB entries only if the combined binary is available.
         # In dev mode without a prior build, the binary may not exist at the
         # cache path — services fall back to sys.executable -m ... in that case.
         if not combined_dest.exists():

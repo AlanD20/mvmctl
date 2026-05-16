@@ -334,10 +334,10 @@ mvmctl supports two firewall backends for NAT, forwarding rules, and nocloud-net
 
 | Backend | Default | Files |
 |---------|---------|-------|
-| **nftables** | Yes (setting `firewall_backend: nftables`) | `core/_shared/_nftables_tracker/` (tracker, repository, resolver) |
-| **iptables** | Fallback | `core/_shared/_iptables_tracker/` (tracker, repository, resolver) |
+| **nftables** | **Yes** (`firewall_backend: nftables`) | `core/_shared/_nftables_tracker/` (tracker, repository, resolver) |
+| **iptables** | Opt-in (`firewall_backend: iptables`) | `core/_shared/_iptables_tracker/` (tracker, repository, resolver) |
 
-A unified `FirewallTracker` in `core/_shared/_firewall_tracker.py` delegates to the active backend. The backend is selected via the `firewall_backend` setting. When nftables NAT is unavailable (kernel module `nft_chain_nat` missing), mvmctl falls back to iptables automatically during `mvm host init`.
+A unified `FirewallTracker` in `core/_shared/_firewall_tracker.py` delegates to the active backend, selected via the `firewall_backend` setting. The default is `nftables`. The nftables backend uses non-hook chains with jump rules at position 0 of the system `ip filter`/`ip nat` tables, ensuring `accept` verdicts are terminal within the table — matching the behavior users expect from iptables.
 
 ---
 

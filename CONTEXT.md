@@ -210,7 +210,20 @@ Selection logic (in `VMCreateRequest._resolve_provisioner()` and `ImageOperation
 
 `guestfs_enabled` is NOT a fallback — it overrides. When set to `True`, GuestFS is used even if the faster loop-mount binary is available. Toggle via `mvm init` prompt or `mvm config set settings guestfs_enabled true|false`.
 
-Both backends share `ProvisionerContent` builders (common data: cloud-init templates, fstab content) but have separate code paths, separate dependencies, separate sudoers entries, and separate error hierarchies (`GuestfsError` vs `LoopMountError`). See ADR-0010 for the full architecture rationale.
+Both backends share `ProvisionerContent` builders (common data: cloud-init templates, fstab content) but have separate code paths, separate dependencies, separate sudoers entries, and separate error hierarchies (`GuestfsError` vs `LoopMountError`). See ADR-0006 for the full architecture rationale.
+
+### Firewall Backend (nftables vs iptables — mutual exclusion)
+The same mutual-exclusion pattern applies to firewall rule tracking. Two independent backends exist — **nftables** (default) and **iptables** (legacy) — selected by the `firewall_backend` setting. Exactly one is active per session.
+
+- **nftables** (default, `firewall_backend: "nftables"`): Uses `nft -f -` with atomic batch files. Backend at `core/_shared/_nftables_tracker/`.
+- **iptables** (legacy, any other value): Per-rule `iptables` calls. Backend at `core/_shared/_iptables_tracker/`.
+
+Selection logic (in `FirewallTracker.__init__()`):
+1. Read `firewall_backend` from user settings.
+2. If `"nftables"` → **NFTablesTracker**.
+3. Else → **IPTablesTracker**.
+
+Toggle via `mvm config set settings firewall_backend nftables|iptables`. Both DB tables (`iptables_rules`, `nftables_rules`) persist independently — at runtime, only the active backend's table is queried. The `PRIVILEGED_BINARIES` list in `constants.py` includes both `/usr/sbin/nft` and `/usr/sbin/iptables` so both backends have the right sudoers coverage. See ADR-0010 for the full architecture rationale.
 
 ## Relationships
 

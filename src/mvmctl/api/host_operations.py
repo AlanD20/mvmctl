@@ -281,13 +281,16 @@ class HostOperation:
         net_repo = NetworkRepository()
         net_service = NetworkService(net_repo)
         net_service.ensure_mvm_chains()
+
+        backend = SettingsService.resolve(Database(), "settings", "firewall_backend")
+        chain_setting = f"{backend}_chains"
         chain_change = HostStateChangeItem(
             session_id="",
             init_timestamp="",
-            setting="iptables_chains",
+            setting=chain_setting,
             original_value=None,
             applied_value="MVM chains ensured",
-            mechanism="iptables",
+            mechanism=backend,
             reverted=False,
             change_order=0,
             created_at="",
@@ -330,10 +333,10 @@ class HostOperation:
         except Exception:
             logger.warning("Could not set up default network during host init")
 
-        iptables_change = HostService.save_iptables_rules()
-        if iptables_change:
-            db_changes.append(iptables_change)
-            all_changes.append(iptables_change)
+        fw_change = HostService.save_firewall_rules(backend)
+        if fw_change:
+            db_changes.append(fw_change)
+            all_changes.append(fw_change)
 
         # --- Persist state & finalize ---
         controller = HostController(repo)
@@ -512,14 +515,9 @@ class HostOperation:
                         f"Warning: failed to remove default network: {e}"
                     )
 
-            # Remove MVM chains
-            try:
-                net_service.tracker.teardown()
-                summary.append("Removed MVM firewall chains")
-            except NetworkError as e:
-                summary.append(
-                    f"Warning: failed to remove MVM firewall chains: {e}"
-                )
+            # Remove MVM chains and jump rules from system tables
+            net_service.teardown()
+            summary.append("Removed MVM firewall chains")
 
             if not summary:
                 summary.append(

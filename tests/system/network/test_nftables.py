@@ -48,11 +48,23 @@ def _run_nft(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _nft_chain_output(chain: str) -> str:
-    """Return full text output of ``nft list chain inet mvmctl <chain>``.
+    """Return full text output of ``nft list chain ip <table> <chain>``.
+
+    MVM chains are now created in system tables rather than a separate
+    ``inet mvmctl`` table:
+
+    - ``MVM-FORWARD`` / ``MVM-NOCLOUDNET-INPUT`` → ``ip filter``
+    - ``MVM-POSTROUTING`` → ``ip nat``
 
     Returns empty string if the chain does not exist (nft exits non-zero).
     """
-    result = _run_nft("list", "chain", "inet", "mvmctl", chain)
+    _CHAIN_TABLE: dict[str, str] = {
+        "MVM-FORWARD": "filter",
+        "MVM-POSTROUTING": "nat",
+        "MVM-NOCLOUDNET-INPUT": "filter",
+    }
+    table = _CHAIN_TABLE.get(chain, "filter")
+    result = _run_nft("list", "chain", "ip", table, chain)
     if result.returncode != 0:
         return ""
     return result.stdout

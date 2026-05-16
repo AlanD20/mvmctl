@@ -2,15 +2,12 @@
 """Build mvmctl service and main binaries.
 
 Usage:
-    python scripts/build_services.py                    # Build everything (release, default)
+    python scripts/build_services.py                    # Build everything (release)
     python scripts/build_services.py --services         # Only build service binaries
     python scripts/build_services.py --service <name>   # Build a specific service
     python scripts/build_services.py --mvm              # Only build main binary
-    python scripts/build_services.py --release          # Aggressive build (DEFAULT)
-    python scripts/build_services.py --fast             # Fast compile (no optimization)
 
 Build modes:
-    --fast     Quick compilation, no tree-shaking (~50 MB)
     --release  Aggressive optimization + safe force-includes (~35 MB, DEFAULT)
 
 Prerequisites:
@@ -81,14 +78,8 @@ SERVICE_NAMES: set[str] = {name for name, _ in SERVICES}
 
 # ── Service flag sets ───────────────────────────────────────────────────────
 
-# Fast mode — no optimization, quick compilation.
-SERVICE_FAST_FLAGS: list[str] = [
-    "--onefile",
-    f"--jobs={NPROC}",
-]
-
 # Release mode — aggressive tree-shaking, minimal size.
-SERVICE_RELEASE_FLAGS: list[str] = [
+SERVICE_FLAGS: list[str] = [
     "--onefile",
     "--lto=yes",
     "--enable-plugin=anti-bloat",
@@ -124,10 +115,9 @@ SERVICE_RELEASE_FLAGS: list[str] = [
     f"--jobs={NPROC}",
 ]
 
-# ── Main binary flag sets ───────────────────────────────────────────────────
+# ── Main binary flags ───────────────────────────────────────────────────
 
-# Fast mode — no optimization, includes all force-includes for correctness.
-MAIN_FAST_FLAGS: list[str] = [
+MAIN_FLAGS: list[str] = [
     "--onefile",
     f"--output-dir={PROJECT_DIR / 'dist'}",
     "--output-filename=mvm",
@@ -140,13 +130,6 @@ MAIN_FAST_FLAGS: list[str] = [
     "--include-module=passlib.handlers.sha2_crypt",
     "--include-package=rich._unicode_data",
     "--include-module=jinja2.tests",
-    f"--jobs={NPROC}",
-]
-
-# Release mode — aggressive optimization + safe force-includes so everything
-# works out of the box. This is the DEFAULT build mode.
-MAIN_RELEASE_FLAGS: list[str] = [
-    *MAIN_FAST_FLAGS,
     "--lto=yes",
     "--enable-plugin=anti-bloat",
     "--nofollow-import-to=*.unittest",
@@ -157,13 +140,13 @@ MAIN_RELEASE_FLAGS: list[str] = [
     "--remove-output",
     "--noinclude-default-mode=nofollow",
     "--noinclude-IPython-mode=nofollow",
-    "--noinclude-dask-mode=nofollow",
     "--noinclude-numba-mode=nofollow",
     "--nofollow-import-to=pkg_resources",
     # Avoid --nofollow-import-to=*.tests — fnmatch "*.tests" also matches
     # legitimate runtime modules like jinja2.tests which we force-include.
     "--nofollow-import-to=pytest",
     "--nofollow-import-to=_pytest",
+    f"--jobs={NPROC}",
 ]
 
 
@@ -186,15 +169,13 @@ def _print_last_lines(path: Path, n: int) -> None:
         pass
 
 
-def _run_nuitka(args: list[str], logfile: Path, optimize: bool = False) -> int:
+def _run_nuitka(args: list[str], logfile: Path) -> int:
     """Execute Nuitka with *args* and capture output to *logfile*."""
     logfile.parent.mkdir(parents=True, exist_ok=True)
     cmd = [sys.executable, "-m", "nuitka", *args]
-    env: dict[str, str] | None = None
-    if optimize:
-        env = dict(os.environ)
-        env["CCFLAGS"] = "-Os"
-        env["LDFLAGS"] = "-Os"
+    env: dict[str, str] | None = dict(os.environ)
+    env["CCFLAGS"] = "-Os"
+    env["LDFLAGS"] = "-Os"
     result = subprocess.run(
         cmd,
         stdout=subprocess.PIPE,
@@ -207,7 +188,7 @@ def _run_nuitka(args: list[str], logfile: Path, optimize: bool = False) -> int:
 
 
 # ── Build steps ────────────────────────────────────────────────────────────
-def _build_all_services(optimize: bool) -> bool:
+def _build_all_services() -> bool:
     """Build a single multidist binary with all service entry points."""
     _info("Building all service binaries (multidist)...")
     SERVICES_DIR.mkdir(parents=True, exist_ok=True)
@@ -222,10 +203,10 @@ def _build_all_services(optimize: bool) -> bool:
             link_path.symlink_to(rel_source)
         main_flags.append(f"--main={link_path}")
 
-    flags = list(SERVICE_RELEASE_FLAGS if optimize else SERVICE_FAST_FLAGS)
-    if optimize and _has_static_libpython():
+    flags = list(SERVICE_FLAGS)
+    if _has_static_libpython():
         flags.append("--static-libpython=yes")
-    elif optimize:
+    else:
         _warn(
             "Static libpython not available — using dynamic linking. "
             "For maximum optimization, build with a standard Python "
@@ -238,7 +219,7 @@ def _build_all_services(optimize: bool) -> bool:
         "--output-filename=mvm-services",
         *main_flags,
     ]
-    rc = _run_nuitka(args, logfile, optimize=optimize)
+    rc = _run_nuitka(args, logfile)
 
     # Clean up symlinks
     shutil.rmtree(SYMLINKS_DIR, ignore_errors=True)
@@ -251,13 +232,13 @@ def _build_all_services(optimize: bool) -> bool:
     return False
 
 
-def _build_single_service(name: str, source: str, optimize: bool) -> bool:
+def _build_single_service(name: str, source: str) -> bool:
     """Build a single service binary."""
     _info(f"Building service {name}...")
-    flags = list(SERVICE_RELEASE_FLAGS if optimize else SERVICE_FAST_FLAGS)
-    if optimize and _has_static_libpython():
+    flags = list(SERVICE_FLAGS)
+    if _has_static_libpython():
         flags.append("--static-libpython=yes")
-    elif optimize:
+    else:
         _warn(
             "Static libpython not available — using dynamic linking. "
             "For maximum optimization, build with a standard Python "
@@ -270,7 +251,7 @@ def _build_single_service(name: str, source: str, optimize: bool) -> bool:
         f"--output-filename={name}",
         str(PROJECT_DIR / source),
     ]
-    rc = _run_nuitka(args, logfile, optimize=optimize)
+    rc = _run_nuitka(args, logfile)
     if rc == 0:
         _ok(f"{name} built successfully")
         return True
@@ -279,16 +260,14 @@ def _build_single_service(name: str, source: str, optimize: bool) -> bool:
     return False
 
 
-def build_services(
-    names: list[str] | None = None, optimize: bool = True
-) -> bool:
+def build_services(names: list[str] | None = None) -> bool:
     """Build service binaries.
 
     If *names* is ``None``, build all services as a single multidist binary.
     If *names* is provided, build each named service individually.
     """
     if names is None:
-        return _build_all_services(optimize)
+        return _build_all_services()
 
     success = True
     for name in names:
@@ -299,12 +278,12 @@ def build_services(
         if source is None:
             _fail(f"Unknown service: {name}")
             return False
-        success = _build_single_service(name, source, optimize) and success
+        success = _build_single_service(name, source) and success
 
     return success
 
 
-def build_main(optimize: bool = True) -> bool:
+def build_main() -> bool:
     """Build the main ``mvm`` binary."""
     _info("Building main mvm binary...")
 
@@ -313,14 +292,14 @@ def build_main(optimize: bool = True) -> bool:
         _warn(
             "Combined service binary mvm-services not found — building services first"
         )
-        if not build_services(optimize=optimize):
+        if not build_services():
             return False
 
-    flags = list(MAIN_RELEASE_FLAGS if optimize else MAIN_FAST_FLAGS)
+    flags = list(MAIN_FLAGS)
 
-    if optimize and _has_static_libpython():
+    if _has_static_libpython():
         flags.append("--static-libpython=yes")
-    elif optimize:
+    else:
         _warn(
             "Static libpython not available — using dynamic linking. "
             "For maximum optimization, build with a standard Python "
@@ -331,7 +310,7 @@ def build_main(optimize: bool = True) -> bool:
         *flags,
         str(PROJECT_DIR / "src" / "mvmctl" / "main.py"),
     ]
-    rc = _run_nuitka(args, logfile, optimize=optimize)
+    rc = _run_nuitka(args, logfile)
     if rc == 0:
         _ok("Main binary built at dist/mvm")
         return True
@@ -344,19 +323,6 @@ def build_main(optimize: bool = True) -> bool:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Build mvmctl service and main binaries",
-    )
-
-    # Build modes (mutually exclusive, default is --release)
-    mode_group = parser.add_mutually_exclusive_group()
-    mode_group.add_argument(
-        "--fast",
-        action="store_true",
-        help="Fast compile: minimal Nuitka flags, no tree-shaking",
-    )
-    mode_group.add_argument(
-        "--release",
-        action="store_true",
-        help="Aggressive optimization + safe force-includes (DEFAULT)",
     )
 
     # Target flags (which binaries to build)
@@ -388,9 +354,6 @@ def main() -> None:
                 )
                 sys.exit(1)
 
-    # Compile mode: default is release
-    optimize = not args.fast
-
     # Determine targets: if none specified, build everything
     has_target = args.services or args.service or args.mvm
     build_all_services = args.services or not has_target or args.mvm
@@ -399,18 +362,16 @@ def main() -> None:
     )
     build_main_binary = args.mvm or not has_target
 
-    _info(f"Build mode: {'release' if optimize else 'fast'}")
-
     success = True
     if build_all_services:
-        success = build_services(optimize=optimize) and success
+        success = build_services() and success
     if build_specific_services:
         success = (
-            build_services(names=build_specific_services, optimize=optimize)
+            build_services(names=build_specific_services)
             and success
         )
     if build_main_binary:
-        success = build_main(optimize=optimize) and success
+        success = build_main() and success
 
     sys.exit(0 if success else 1)
 

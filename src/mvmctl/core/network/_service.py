@@ -116,6 +116,15 @@ class NetworkService:
         """
         self._tracker.initialize()
 
+    def teardown(self) -> None:
+        """Remove MVM chains and their jump rules from system tables.
+
+        Delegates to :meth:`FirewallTracker.teardown` which handles
+        both iptables and nftables backends. Best-effort — safe to
+        call multiple times.
+        """
+        self._tracker.teardown()
+
     def detect_iptables_backend_conflict(self) -> tuple[bool, str]:
         """Detect mixed iptables backend conflict."""
         return NetworkUtils.detect_iptables_backend_conflict()

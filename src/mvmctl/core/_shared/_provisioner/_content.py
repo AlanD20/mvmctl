@@ -349,7 +349,6 @@ class ProvisionerContent:
                 "if command -v systemctl >/dev/null 2>&1; then\n"
                 "  for svc in \\\n"
                 "    systemd-timesyncd.service \\\n"
-                "    systemd-resolved.service \\\n"
                 "    systemd-time-wait-sync.service \\\n"
                 "    systemd-firstboot.service \\\n"
                 "    ldconfig.service \\\n"

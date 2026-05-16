@@ -26,7 +26,7 @@ These binaries are required for basic operations like managing VMs, networking, 
 | `mvm-console-relay` | Provisioning | PTY-over-vsock console relay service (symlink to `mvm-services`) | Managed via `mvm init` | Managed via `mvm init` |
 | `mvm-nocloud-server` | Provisioning | NoCloud-net metadata/IPv4 HTTP server (symlink to `mvm-services`) | Managed via `mvm init` | Managed via `mvm init` |
 
-> **Firewall backend**: The `firewall_backend` setting (default: `nftables`) controls whether mvmctl uses `nft` or `iptables` for firewall rules. When nftables NAT is unavailable (kernel module `nft_chain_nat` missing), it falls back to `iptables` automatically during `mvm host init`.
+> **Firewall backend**: The `firewall_backend` setting (default: `nftables`) controls whether mvmctl uses `nft` or `iptables` for firewall rules.
 
 
 ## 2. Image & Cloud-Init Dependencies

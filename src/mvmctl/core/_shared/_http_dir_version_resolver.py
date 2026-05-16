@@ -19,10 +19,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Any
 
-from mvmctl.constants import (
-    CONST_IMAGE_VERSION_LIST_LIMIT,
-    DEFAULT_FIRECRACKER_CI_VERSION,
-)
+from mvmctl.constants import DEFAULT_FIRECRACKER_CI_VERSION
 from mvmctl.utils.http import HttpDownload
 from mvmctl.utils.template import render_template
 
@@ -405,7 +402,7 @@ class HttpDirVersionResolver:
             reverse=True,
         )
 
-        limit = config.get("limit", CONST_IMAGE_VERSION_LIST_LIMIT)
+        limit = config.get("limit", 5)
         result[type_name] = versions[:limit]
 
     @staticmethod
@@ -429,7 +426,7 @@ class HttpDirVersionResolver:
         file_suffix = options.get("file_suffix", "") or ""
         version_name_template = config.get("version_name_template")
         config_name = config.get("name", "") or ""
-        limit = options.get("limit", CONST_IMAGE_VERSION_LIST_LIMIT)
+        limit = options.get("limit", 5)
 
         for discovery in version_discoveries:
             discovery_key = f"{type_name}-{discovery.rstrip('/')}"
@@ -718,7 +715,7 @@ class HttpDirVersionResolver:
             reverse=True,
         )
 
-        limit = config.get("limit", CONST_IMAGE_VERSION_LIST_LIMIT)
+        limit = config.get("limit", 5)
         result[type_name] = s3_versions[:limit]
 
     # ── Utility methods ─────────────────────────────────────────────────

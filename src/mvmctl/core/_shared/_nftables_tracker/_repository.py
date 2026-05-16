@@ -101,7 +101,7 @@ class NFTablesRuleRepository:
                 (
                     rule.chain_name,
                     rule.rule_type.value,
-                    "filter",  # nftables uses a single inet table — no separate nat/filter
+                    rule.table_name.value,
                     rule.protocol.value,
                     rule.source,
                     rule.destination,
@@ -191,7 +191,7 @@ class NFTablesRuleRepository:
                 (
                     chain_name.value,
                     rule_type.value,
-                    "filter",  # nftables uses single inet table
+                    table_name.value,
                     network_id,
                     protocol.value,
                     source,

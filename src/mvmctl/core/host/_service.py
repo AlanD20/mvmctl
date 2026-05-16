@@ -468,8 +468,70 @@ class HostService:
         return changes, next_order
 
     @staticmethod
-    def save_iptables_rules() -> HostStateChangeItem | None:
-        """Save iptables rules to file."""
+    def save_firewall_rules(backend: str) -> HostStateChangeItem | None:
+        """Save firewall rules to a file for reboot persistence.
+
+        For the **nftables** backend: runs ``nft list ruleset`` and saves
+        to ``/etc/nftables.conf``.
+        For the **iptables** backend: runs ``iptables-save`` and saves
+        to ``/etc/iptables/rules.v4``.
+
+        Args:
+            backend: Active firewall backend — ``"nftables"`` or ``"iptables"``.
+
+        """
+        if backend == "nftables":
+            return HostService._save_nftables_ruleset()
+        return HostService._save_iptables_rules()
+
+    @staticmethod
+    def _save_nftables_ruleset() -> HostStateChangeItem | None:
+        """Save nftables ruleset to ``/etc/nftables.conf``."""
+        rules_path = Path("/etc/nftables.conf")
+        try:
+            result = run_cmd(
+                ["nft", "list", "ruleset"],
+                privileged=True,
+            )
+        except ProcessError:
+            logger.warning(
+                "nft not available — firewall rules will not survive reboot."
+            )
+            return None
+        raw = result.stdout
+        if not isinstance(raw, str):
+            return None
+
+        original: str | None = None
+        if rules_path.exists():
+            try:
+                original = rules_path.read_text()
+            except OSError:
+                original = None
+        if original == raw:
+            logger.debug("nftables ruleset already up-to-date in %s", rules_path)
+            return None
+        try:
+            rules_path.parent.mkdir(parents=True, exist_ok=True)
+            rules_path.write_text(raw)
+        except OSError as e:
+            raise HostError(f"Failed to write {rules_path}: {e}") from e
+        logger.info("Persisted nftables ruleset to %s", rules_path)
+        return HostStateChangeItem(
+            session_id="",
+            init_timestamp="",
+            setting="nftables_ruleset",
+            mechanism="nft_save",
+            applied_value=str(rules_path),
+            reverted=False,
+            change_order=0,
+            created_at="",
+            original_value=original,
+        )
+
+    @staticmethod
+    def _save_iptables_rules() -> HostStateChangeItem | None:
+        """Save iptables rules to ``/etc/iptables/rules.v4``."""
         rules_path = Path(IPTABLES_RULES_V4)
         try:
             result = run_cmd(

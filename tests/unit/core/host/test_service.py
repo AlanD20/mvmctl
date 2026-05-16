@@ -721,13 +721,13 @@ class TestEnsureKvmModules:
 
 
 # ===========================================================================
-# save_iptables_rules
+# save_firewall_rules
 # ===========================================================================
 
 
-class TestSaveIptablesRules:
-    def test_save_success(self, tmp_path: Path) -> None:
-        """save_iptables_rules should persist iptables rules and return a change."""
+class TestSaveFirewallRules:
+    def test_save_iptables_success(self, tmp_path: Path) -> None:
+        """save_firewall_rules('iptables') should persist iptables rules and return a change."""
         rules_path = tmp_path / "iptables" / "rules.v4"
         rules_path.parent.mkdir(parents=True)
         with (
@@ -743,7 +743,7 @@ class TestSaveIptablesRules:
             mock_run.return_value = MagicMock(
                 stdout="*filter\n-A INPUT -j ACCEPT\nCOMMIT\n", returncode=0
             )
-            change = HostService.save_iptables_rules()
+            change = HostService.save_firewall_rules("iptables")
             assert change is not None
             assert change.setting == "iptables_rules_v4"
             assert change.mechanism == "iptables_save"
@@ -752,20 +752,20 @@ class TestSaveIptablesRules:
             assert "ACCEPT" in content
 
     def test_save_iptables_save_unavailable(self) -> None:
-        """save_iptables_rules should return None when iptables-save fails."""
+        """save_firewall_rules('iptables') should return None when iptables-save fails."""
         with patch(
             "mvmctl.core.host._service.subprocess.run",
             side_effect=subprocess.CalledProcessError(1, "iptables-save"),
         ):
-            assert HostService.save_iptables_rules() is None
+            assert HostService.save_firewall_rules("iptables") is None
 
     def test_save_iptables_save_not_found(self) -> None:
-        """save_iptables_rules should return None when iptables-save binary is missing."""
+        """save_firewall_rules('iptables') should return None when iptables-save binary is missing."""
         with patch(
             "mvmctl.core.host._service.subprocess.run",
             side_effect=FileNotFoundError("iptables-save"),
         ):
-            assert HostService.save_iptables_rules() is None
+            assert HostService.save_firewall_rules("iptables") is None
 
 
 # ===========================================================================

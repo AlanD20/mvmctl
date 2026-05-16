@@ -233,7 +233,7 @@ already well-optimized. This is only relevant for fallback paths.
 
 **What it is:** Replaces `iptables` commands with `nft` (nftables) commands.
 
-**Status:** ✅ IMPLEMENTED — `core/_shared/_nftables_tracker/` provides a full NFTablesTracker implementation. `core/_shared/_firewall_tracker.py` abstracts both backends. The default `firewall_backend` in config is `"nftables"`.
+**Status:** ✅ IMPLEMENTED — `core/_shared/_nftables_tracker/` provides a full NFTablesTracker implementation. `core/_shared/_firewall_tracker.py` abstracts both backends. The default `firewall_backend` in config is `"iptables"` (i.e. nftables is opt-in).
 
 ### 4.4 Nuitka Compilation Optimization ✅ IMPLEMENTED
 

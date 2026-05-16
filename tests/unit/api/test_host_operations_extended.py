@@ -85,7 +85,7 @@ def _patch_init_common(mocker) -> dict[str, MagicMock]:
         return_value="default",
     )
     mocker.patch(
-        "mvmctl.api.host_operations.HostService.save_iptables_rules",
+        "mvmctl.api.host_operations.HostService.save_firewall_rules",
         return_value=None,
     )
 

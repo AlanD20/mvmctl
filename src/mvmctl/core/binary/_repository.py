@@ -114,6 +114,11 @@ class BinaryRepository:
         with self._db.connect() as conn:
             conn.execute("DELETE FROM binaries WHERE id = ?", (binary_id,))
 
+    def delete_by_name(self, name: str) -> None:
+        """Delete ALL binary rows matching the given name."""
+        with self._db.connect() as conn:
+            conn.execute("DELETE FROM binaries WHERE name = ?", (name,))
+
     def delete_by_name_and_version(self, name: str, version: str) -> None:
         """Delete the binary row matching name AND version."""
         normalized = version.removeprefix("v")

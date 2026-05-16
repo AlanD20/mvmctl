@@ -282,6 +282,7 @@ class TestCachePruneMisc:
 
         result = CacheOperation.prune_misc()
         assert result.item == {
+            "service_binaries": True,
             "appliance": True,
             "warm_images": True,
             "guestfs_state": True,

@@ -3,6 +3,13 @@ Idempotent nftables rule management with database synchronization.
 
 This module provides NFTablesTracker for creating/removing nftables rules
 and synchronizing them with the nftables_rules database table.
+
+Unlike the legacy iptables-based approach, nftables uses non-hook "MVM-*"
+chains inside the system ``ip filter`` and ``ip nat`` tables, with jump rules
+at position 0 of the built-in ``FORWARD`` / ``POSTROUTING`` / ``INPUT``
+chains.  This means ``accept`` verdicts in MVM rules terminate FORWARD
+processing *before* UFW rules are evaluated — mimicking what
+``iptables -I FORWARD 1 -j MVM-FORWARD`` does.
 """
 
 from __future__ import annotations
@@ -26,74 +33,154 @@ from mvmctl.utils._system import run_cmd
 
 logger = logging.getLogger(__name__)
 
-# Name and address family of the nftables table used by mvmctl.
-# Uses ``inet`` family so both IPv4 and IPv6 rules
-# (including filter AND nat) live in a single table.
-_MVM_NFT_FAMILY = "inet"
-_MVM_NFT_TABLE = "mvmctl"
+# Map MVM chain → system nftables table name.
+# MVM-FORWARD and MVM-NOCLOUDNET-INPUT live in ``ip filter``;
+# MVM-POSTROUTING lives in ``ip nat``.
+_CHAIN_TO_TABLE: dict[FirewallChain, str] = {
+    FirewallChain.MVM_FORWARD: "filter",
+    FirewallChain.MVM_POSTROUTING: "nat",
+    FirewallChain.MVM_NOCLOUDNET_INPUT: "filter",
+}
+
+# (nftables family, system table, built-in chain, MVM chain) for jump rules.
+_JUMP_RULES: list[tuple[str, str, str, str]] = [
+    ("ip", "filter", "FORWARD", FirewallChain.MVM_FORWARD.value),
+    ("ip", "nat", "POSTROUTING", FirewallChain.MVM_POSTROUTING.value),
+    ("ip", "filter", "INPUT", FirewallChain.MVM_NOCLOUDNET_INPUT.value),
+]
 
 
 class NFTablesTracker:
     """
     Idempotent nftables rule manager with database synchronization.
 
-    This class handles nft subprocess calls and synchronizes rules
-    with the nftables_rules table.
+    Manages non-hook MVM chains inside the system ``ip filter`` and ``ip nat``
+    tables.  Jump rules at position 0 of the built-in base chains ensure MVM
+    rules are evaluated before any UFW or third-party rules.
     """
 
     def __init__(self, repo: NFTablesRuleRepository) -> None:
         """Initialize NFTablesTracker with repository."""
         self._repo = repo
 
-    # ── Table & Chain Management ──────────────────────────────────────
+    # ── Chain & Jump Rule Management ──────────────────────────────────
+
+    def _chain_exists(self, family: str, table: str, chain: str) -> bool:
+        """Check if a chain exists in a system nftables table."""
+        result = run_cmd(
+            ["nft", "list", "chain", family, table, chain],
+            privileged=True,
+            check=False,
+        )
+        return result.returncode == 0
+
+    def _jump_rule_exists(
+        self, family: str, table: str, builtin_chain: str, target_chain: str
+    ) -> bool:
+        """Check if a jump rule from a built-in chain to an MVM chain exists."""
+        result = run_cmd(
+            ["nft", "list", "chain", family, table, builtin_chain],
+            privileged=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return False
+        return f"jump {target_chain}" in result.stdout
+
+    def _find_jump_rule_handle(
+        self, family: str, table: str, builtin_chain: str, target_chain: str
+    ) -> int | None:
+        """Find the nftables handle for a jump rule in a built-in chain.
+
+        Parses ``nft -a list chain ...`` output and looks for a rule
+        containing ``jump <target_chain>``.
+        """
+        result = run_cmd(
+            ["nft", "-a", "list", "chain", family, table, builtin_chain],
+            privileged=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return None
+        for line in result.stdout.splitlines():
+            stripped = line.strip()
+            if f"jump {target_chain}" in stripped and " # handle " in stripped:
+                handle_str = stripped.split(" # handle ")[-1].strip()
+                try:
+                    return int(handle_str)
+                except ValueError:
+                    continue
+        return None
 
     def initialize(self) -> None:
         """
-        Ensure the mvmctl nftables table and base chains exist.
+        Create non-hook MVM chains in system tables and add jump rules.
 
-        Checks if the table exists via ``nft list tables``. If not found,
-        creates the table with base chains:
-        - MVM-FORWARD (filter, forward hook)
-        - MVM-POSTROUTING (nat, postrouting hook)
-        - MVM-NOCLOUDNET-INPUT (filter, input hook)
+        Creates the three MVM chains (MVM-FORWARD, MVM-POSTROUTING,
+        MVM-NOCLOUDNET-INPUT) in the appropriate system table, then inserts
+        jump rules at position 0 of the built-in base chains.
+
+        All operations are idempotent — already-existing chains and jump
+        rules are silently skipped.
         """
-        if self._table_exists():
-            logger.debug("nftables table %s already exists", _MVM_NFT_TABLE)
-            return
+        # ── Create chains in system tables ────────────────────────────
+        for chain, table in _CHAIN_TO_TABLE.items():
+            if self._chain_exists("ip", table, chain.value):
+                logger.debug(
+                    "Chain %s already exists in ip/%s", chain.value, table
+                )
+                continue
+            try:
+                run_cmd(
+                    ["nft", "add", "chain", "ip", table, chain.value],
+                    privileged=True,
+                )
+                logger.info("Created chain %s in ip/%s", chain.value, table)
+            except ProcessError as e:
+                raise RuntimeError(
+                    f"Failed to create nftables chain {chain.value} "
+                    f"in ip/{table}: {e}"
+                ) from e
 
-        nft_script = (
-            f"add table {_MVM_NFT_FAMILY} {_MVM_NFT_TABLE}\n"
-            f"add chain {_MVM_NFT_FAMILY} {_MVM_NFT_TABLE} {FirewallChain.MVM_FORWARD.value} {{ type filter hook forward priority 0; policy accept; }}\n"
-            f"add chain {_MVM_NFT_FAMILY} {_MVM_NFT_TABLE} {FirewallChain.MVM_POSTROUTING.value} {{ type nat hook postrouting priority srcnat; policy accept; }}\n"
-            f"add chain {_MVM_NFT_FAMILY} {_MVM_NFT_TABLE} {FirewallChain.MVM_NOCLOUDNET_INPUT.value} {{ type filter hook input priority 0; policy accept; }}\n"
-        )
-        try:
-            run_cmd(
-                ["nft", "-f", "-"],
-                privileged=True,
-                input=nft_script,
-            )
-            logger.info(
-                "Created nftables table %s with base chains", _MVM_NFT_TABLE
-            )
-        except ProcessError as e:
-            raise RuntimeError(
-                f"Failed to initialize nftables table {_MVM_NFT_TABLE}: {e}"
-            ) from e
-
-    def _table_exists(self) -> bool:
-        """Check if the mvmctl nftables table exists."""
-        try:
-            result = run_cmd(
-                ["nft", "list", "tables"],
-                privileged=True,
-            )
-            for line in result.stdout.splitlines():
-                if f"table {_MVM_NFT_FAMILY} {_MVM_NFT_TABLE}" in line:
-                    return True
-            return False
-        except ProcessError:
-            return False
+        # ── Insert jump rules at position 0 of built-in chains ────────
+        for family, table, builtin_chain, target_chain in _JUMP_RULES:
+            if self._jump_rule_exists(
+                family, table, builtin_chain, target_chain
+            ):
+                logger.debug(
+                    "Jump rule %s → %s already exists in %s/%s",
+                    builtin_chain,
+                    target_chain,
+                    family,
+                    table,
+                )
+                continue
+            try:
+                run_cmd(
+                    [
+                        "nft",
+                        "insert",
+                        "rule",
+                        family,
+                        table,
+                        builtin_chain,
+                        "jump",
+                        target_chain,
+                    ],
+                    privileged=True,
+                )
+                logger.info(
+                    "Inserted jump rule %s → %s in %s/%s",
+                    builtin_chain,
+                    target_chain,
+                    family,
+                    table,
+                )
+            except ProcessError as e:
+                raise RuntimeError(
+                    f"Failed to insert jump rule {builtin_chain} → "
+                    f"{target_chain} in {family}/{table}: {e}"
+                ) from e
 
     def ensure_chain(
         self,
@@ -103,78 +190,56 @@ class NFTablesTracker:
         position: int = 1,
     ) -> bool:
         """
-        Ensure a custom chain exists in the mvmctl table.
+        Ensure a custom MVM chain exists in the system nftables table.
 
-        For nftables, the base hook chains (FORWARD, POSTROUTING, INPUT)
-        and their jump rules to MVM chains are set up once by
-        :meth:`initialize`.  This method only creates the custom chain
-        if missing — the ``auto_jump_from`` and ``position`` parameters
-        are accepted for signature compatibility with ``IPTablesTracker``
-        but are ignored.
+        Creates the chain as a non-hook chain in the system table
+        (``ip filter`` or ``ip nat`` depending on *table*).  The
+        ``auto_jump_from`` and ``position`` parameters are accepted for
+        signature compatibility with ``IPTablesTracker`` but are not
+        needed — jump rules are managed by :meth:`initialize`.
 
         Args:
             chain_name: Name of the chain to create (enum value).
-            table: Ignored (nftables uses a single ``inet`` table).
-            auto_jump_from: Ignored (jump rules are set up in ``initialize``).
+            table: System table to create the chain in (``filter`` or ``nat``).
+            auto_jump_from: Ignored (jump rules managed by initialize).
             position: Ignored.
 
         Returns:
             True if the chain was created, False if it already existed.
-
         """
-        cmd_check = [
-            "nft",
-            "list",
-            "chain",
-            _MVM_NFT_FAMILY,
-            _MVM_NFT_TABLE,
-            chain_name,
-        ]
-        result = run_cmd(
-            cmd_check,
-            privileged=True,
-            check=False,
-        )
-        if result.returncode == 0:
+        if self._chain_exists("ip", table.value, chain_name.value):
             logger.debug(
-                "Chain %s already exists in %s/%s",
-                chain_name,
-                _MVM_NFT_TABLE,
-                table,
+                "Chain %s already exists in ip/%s",
+                chain_name.value,
+                table.value,
             )
             return False
 
         try:
             run_cmd(
-                [
-                    "nft",
-                    "add",
-                    "chain",
-                    _MVM_NFT_FAMILY,
-                    _MVM_NFT_TABLE,
-                    chain_name,
-                ],
+                ["nft", "add", "chain", "ip", table.value, chain_name.value],
                 privileged=True,
             )
             logger.debug(
-                "Created chain %s in %s/%s",
-                chain_name,
-                _MVM_NFT_FAMILY,
-                _MVM_NFT_TABLE,
+                "Created chain %s in ip/%s",
+                chain_name.value,
+                table.value,
             )
             return True
         except ProcessError as e:
             raise RuntimeError(
-                f"Failed to create chain {chain_name}: {e}"
+                f"Failed to create chain {chain_name.value}: {e}"
             ) from e
 
     # ── Handle helpers ──────────────────────────────────────────────────
 
-    def _list_chain_rules(self, chain: FirewallChain) -> list[tuple[int, str]]:
+    def _list_chain_rules(
+        self, chain: FirewallChain, table: str = "filter"
+    ) -> list[tuple[int, str]]:
         """List all rules in an nftables chain with their handles.
 
         Returns list of ``(handle, rule_text)`` tuples parsed from
-        ``nft -a list chain ...`` output.
+        ``nft -a list chain ip <table> <chain>`` output.
         """
         result = run_cmd(
             [
@@ -182,8 +247,8 @@ class NFTablesTracker:
                 "-a",
                 "list",
                 "chain",
-                _MVM_NFT_FAMILY,
-                _MVM_NFT_TABLE,
+                "ip",
+                table,
                 chain.value,
             ],
             privileged=True,
@@ -221,10 +286,11 @@ class NFTablesTracker:
         """
         nft_expr = self._rule_to_nft_expr(rule)
         # Build the expected rule text (without handle)
-        # nft -a output format: \t\t<rule_text> # handle N
         expected = " ".join(nft_expr)
 
-        for handle, rule_text in self._list_chain_rules(rule.chain_name):
+        for handle, rule_text in self._list_chain_rules(
+            rule.chain_name, rule.table_name.value
+        ):
             if expected in rule_text:
                 return handle
         return None
@@ -243,7 +309,6 @@ class NFTablesTracker:
 
         Returns:
             FirewallRuleResult with success status and rule metadata.
-
         """
         nft_expr = self._rule_to_nft_expr(rule)
 
@@ -267,13 +332,13 @@ class NFTablesTracker:
                 self._repo.update_verified_at(existing_db_rule.id)
             return FirewallRuleResult(success=True, rule=existing_db_rule)
 
-        # Add rule
+        # Add rule in the system table indicated by rule.table_name
         add_cmd = [
             "nft",
             "add",
             "rule",
-            _MVM_NFT_FAMILY,
-            _MVM_NFT_TABLE,
+            "ip",
+            rule.table_name.value,
             rule.chain_name.value,
         ]
         add_cmd.extend(nft_expr)
@@ -314,7 +379,6 @@ class NFTablesTracker:
 
         Returns:
             FirewallRuleResult with success status.
-
         """
         # Try to find the rule in the database first
         db_rule = rule
@@ -346,8 +410,8 @@ class NFTablesTracker:
             "nft",
             "delete",
             "rule",
-            _MVM_NFT_FAMILY,
-            _MVM_NFT_TABLE,
+            "ip",
+            db_rule.table_name.value,
             db_rule.chain_name.value,
             "handle",
             str(handle),
@@ -384,15 +448,16 @@ class NFTablesTracker:
         """
         Ensure multiple rules exist in nftables and database in a single ``nft -f -`` call.
 
-        Generates one ``add rule`` statement per rule, pipes the full script
-        to ``nft -f -``, and inserts all new rules into the database after success.
+        Generates one ``add rule`` statement per rule (targeting the
+        appropriate system table based on each rule's ``table_name``),
+        pipes the full script to ``nft -f -``, and inserts all new rules
+        into the database after success.
 
         Args:
             rules: List of FirewallRule to ensure.
 
         Returns:
             FirewallRuleResult indicating batch success/failure.
-
         """
         lines: list[str] = []
         new_rules: list[FirewallRule] = []
@@ -417,7 +482,7 @@ class NFTablesTracker:
 
             nft_expr = self._rule_to_nft_expr(rule)
             add_stmt = (
-                f"add rule {_MVM_NFT_FAMILY} {_MVM_NFT_TABLE} "
+                f"add rule ip {rule.table_name.value} "
                 f"{rule.chain_name.value} {' '.join(nft_expr)}"
             )
             lines.append(add_stmt)
@@ -483,8 +548,8 @@ class NFTablesTracker:
                 "nft",
                 "delete",
                 "rule",
-                _MVM_NFT_FAMILY,
-                _MVM_NFT_TABLE,
+                "ip",
+                rule.table_name.value,
                 rule.chain_name.value,
                 "handle",
                 str(handle),
@@ -509,17 +574,54 @@ class NFTablesTracker:
         return FirewallRuleResult(success=True)
 
     def teardown(self) -> None:
-        """Delete the entire mvmctl nftables table and all its contents.
+        """
+        Remove MVM jump rules and chains from system tables.
 
-        Best-effort — uses ``check=False`` so that an already-missing table
-        is handled silently.
+        Best-effort — uses ``check=False`` so that already-removed chains
+        or rules are handled silently.
+
+        Steps:
+        1. Find and delete jump rules from built-in chains (FORWARD,
+           POSTROUTING, INPUT) by handle.
+        2. Flush the MVM chain (remove all rules inside it).
+        3. Delete the MVM chain itself.
+
         Always returns ``None``.
         """
-        run_cmd(
-            ["nft", "delete", "table", _MVM_NFT_FAMILY, _MVM_NFT_TABLE],
-            privileged=True,
-            check=False,
-        )
+        for family, table, builtin_chain, target_chain in _JUMP_RULES:
+            # 1. Remove jump rule from built-in chain
+            handle = self._find_jump_rule_handle(
+                family, table, builtin_chain, target_chain
+            )
+            if handle is not None:
+                run_cmd(
+                    [
+                        "nft",
+                        "delete",
+                        "rule",
+                        family,
+                        table,
+                        builtin_chain,
+                        "handle",
+                        str(handle),
+                    ],
+                    privileged=True,
+                    check=False,
+                )
+
+            # 2. Flush the MVM chain (empty it before delete)
+            run_cmd(
+                ["nft", "flush", "chain", family, table, target_chain],
+                privileged=True,
+                check=False,
+            )
+
+            # 3. Delete the MVM chain
+            run_cmd(
+                ["nft", "delete", "chain", family, table, target_chain],
+                privileged=True,
+                check=False,
+            )
 
     def flush_chain(
         self,
@@ -527,15 +629,14 @@ class NFTablesTracker:
         table_name: FirewallTable = FirewallTable.FILTER,
     ) -> bool:
         """
-        Flush all rules from an nftables chain and mark them deleted in DB.
+        Flush all rules from an MVM chain and mark them deleted in DB.
 
         Args:
             chain: Chain to flush.
-            table_name: Table name. Default is filter.
+            table_name: System table containing the chain (``filter`` or ``nat``).
 
         Returns:
             True if flushed, False if chain does not exist.
-
         """
         chain_name = chain.value
 
@@ -545,8 +646,8 @@ class NFTablesTracker:
                     "nft",
                     "flush",
                     "chain",
-                    _MVM_NFT_FAMILY,
-                    _MVM_NFT_TABLE,
+                    "ip",
+                    table_name.value,
                     chain_name,
                 ],
                 privileged=True,
@@ -577,7 +678,6 @@ class NFTablesTracker:
 
         Returns:
             List of string arguments suitable for ``nft add rule ...``.
-
         """
         expr: list[str] = []
 
