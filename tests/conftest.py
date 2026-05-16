@@ -76,14 +76,6 @@ def _isolate_iptables_rules(
         check=False,
     )
 
-    fake_rules = str(tmp_path / "iptables" / "rules.v4")
-    try:
-        monkeypatch.setattr(
-            "mvmctl.constants.IPTABLES_RULES_V4", fake_rules, raising=False
-        )
-    except ImportError:
-        pass
-
 
 @pytest.fixture(autouse=True)
 def _mock_sudo_cache() -> None:

@@ -410,11 +410,22 @@ class TestBinaryEdges:
         assert len(data) >= 1, f"Expected at least one binary, got {len(data)}"
 
     def test_pull_nonexistent_version_fails(self, mvm_binary):
-        """Pulling a nonexistent version should fail gracefully."""
-        result = _run_mvm(mvm_binary, "bin", "pull", "999.999.999", check=False)
-        assert result.returncode != 0
+        """Pulling a nonexistent version via --version should fail gracefully."""
+        result = _run_mvm(
+            mvm_binary,
+            "bin",
+            "pull",
+            "firecracker",
+            "--version",
+            "999.999.999",
+            check=False,
+        )
+        assert result.returncode != 0, (
+            f"Expected failure for nonexistent version, "
+            f"got rc={result.returncode}: {result.stdout[:200]}"
+        )
         combined = (result.stdout + result.stderr).lower()
-        assert any(s in combined for s in ["checksum", "required"])
+        assert any(s in combined for s in ["not found", "no remote"])
 
     def test_set_default_nonexistent_binary_fails(self, mvm_binary):
         """Setting default to nonexistent binary should fail."""
@@ -587,7 +598,6 @@ class TestBinaryStoppedVMDeletion:
                 mvm_binary,
                 "vm",
                 "create",
-                "--name",
                 vm_name,
                 "--network",
                 module_network,

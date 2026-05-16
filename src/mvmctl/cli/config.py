@@ -12,6 +12,10 @@ if TYPE_CHECKING:
     from mvmctl.api.config_operations import ConfigOperation
 else:
     ConfigOperation = _ConfigOperation
+from mvmctl.cli._completion import (
+    _complete_config_categories,
+    _complete_config_keys,
+)
 from mvmctl.utils._io import print_error, print_info, print_success
 from mvmctl.utils.cli import handle_errors
 
@@ -27,10 +31,14 @@ config_app = typer.Typer(
 @handle_errors
 def config_get(
     category: str = typer.Argument(
-        ..., help="Setting category (e.g. defaults.vm)"
+        ...,
+        help="Setting category (e.g. defaults.vm)",
+        autocompletion=_complete_config_categories,
     ),
     key: str | None = typer.Argument(
-        None, help="Setting key (e.g. vcpu_count)"
+        None,
+        help="Setting key (e.g. vcpu_count)",
+        autocompletion=_complete_config_keys,
     ),
 ) -> None:
     """Get a config value."""
@@ -56,9 +64,15 @@ def config_get(
 @handle_errors
 def config_set(
     category: str = typer.Argument(
-        ..., help="Setting category (e.g. defaults.vm)"
+        ...,
+        help="Setting category (e.g. defaults.vm)",
+        autocompletion=_complete_config_categories,
     ),
-    key: str = typer.Argument(..., help="Setting key (e.g. vcpu_count)"),
+    key: str = typer.Argument(
+        ...,
+        help="Setting key (e.g. vcpu_count)",
+        autocompletion=_complete_config_keys,
+    ),
     value: str = typer.Argument(..., help="New value"),
 ) -> None:
     """Set a config value."""
@@ -79,7 +93,7 @@ def config_reset(
         None, help="Setting key (e.g. vcpu_count)"
     ),
     all_overrides: bool = typer.Option(
-        False, "--all", help="Reset all overrides globally"
+        False, "--all", "-a", help="Reset all overrides globally"
     ),
 ) -> None:
     """Reset a config value to its default."""
@@ -88,14 +102,14 @@ def config_reset(
         if result.is_error:
             print_error(result.message)
             raise typer.Exit(code=1)
-        print_success(f"Reset {result.item} override(s) globally")
+        print_success(f"Reset: {result.item} override(s) globally")
     elif category is not None and key is not None:
         result = ConfigOperation.reset(category, key)
         if result.is_error:
             print_error(result.message)
             raise typer.Exit(code=1)
         if result.item and result.item > 0:
-            print_success(f"Reset {category}.{key} to default")
+            print_success(f"Reset: {category}.{key}")
         else:
             print_info(f"{category}.{key} was already at default")
     elif category is not None:
@@ -103,7 +117,7 @@ def config_reset(
         if result.is_error:
             print_error(result.message)
             raise typer.Exit(code=1)
-        print_success(f"Reset {result.item} override(s) in {category}")
+        print_success(f"Reset: {result.item} override(s) in {category}")
     else:
         print_info("Provide a category, category and key, or use --all")
 

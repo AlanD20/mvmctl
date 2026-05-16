@@ -103,7 +103,7 @@ class ConsoleOperation:
                 item=False,
             )
 
-        killed = resolved.relay.terminate()
+        killed = resolved.relay.stop(force=True)
         AuditLog.log("console.kill", changes={"name": identifier})
 
         if killed:

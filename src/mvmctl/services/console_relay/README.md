@@ -40,11 +40,11 @@ manager = ConsoleRelayManager(
 pty_controller_fd = 10  # From Firecracker PTY
 socket_path, pid = manager.start(pty_controller_fd)
 
-# Later: stop gracefully
+# Stop gracefully (SIGTERM → wait → SIGKILL escalation)
 manager.stop()
 
-# Or: force terminate
-manager.terminate()
+# Or: force stop (SIGTERM + immediate cleanup)
+manager.stop(force=True)
 ```
 
 ### Client Side (Connecting to Relay)

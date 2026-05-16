@@ -307,32 +307,33 @@ class TestBinaryListLocal:
         mocker.patch("mvmctl.api.binary_operations.Database")
         mocker.patch("mvmctl.api.binary_operations.BinaryRepository")
         mock_service = MagicMock()
-        mock_service.list_local.return_value = [_make_bin()]
+        mock_service.list_all.return_value = [_make_bin()]
         mocker.patch(
             "mvmctl.api.binary_operations.BinaryService",
             return_value=mock_service,
         )
-        assert len(BinaryOperation.list_local()) == 1
+        assert len(BinaryOperation.list_all()) == 1
 
     def test_list_local_empty(self, mocker):
         mocker.patch("mvmctl.api.binary_operations.Database")
         mocker.patch("mvmctl.api.binary_operations.BinaryRepository")
         mock_service = MagicMock()
-        mock_service.list_local.return_value = []
+        mock_service.list_all.return_value = []
         mocker.patch(
             "mvmctl.api.binary_operations.BinaryService",
             return_value=mock_service,
         )
-        assert BinaryOperation.list_local() == []
+        assert BinaryOperation.list_all() == []
 
 
 class TestBinaryListRemote:
     def test_list_remote_with_limit(self, mocker):
+        mocker.patch("mvmctl.api.binary_operations.Database")
         mocker.patch(
             "mvmctl.api.binary_operations.BinaryService.list_remote",
             return_value=["1.15.0", "1.14.0"],
         )
-        result = BinaryOperation.list_remote(limit=2)
+        result = BinaryOperation.list_all(remote=True, limit=2)
         assert len(result) == 2
 
     def test_list_remote_default_limit(self, mocker):
@@ -345,7 +346,7 @@ class TestBinaryListRemote:
             "mvmctl.api.binary_operations.BinaryService.list_remote",
             return_value=[f"1.{i}.0" for i in range(10)],
         )
-        result = BinaryOperation.list_remote()
+        result = BinaryOperation.list_all(remote=True)
         assert len(result) == 10
 
 
@@ -384,7 +385,7 @@ class TestBinaryEnsureDefault:
         mocker.patch("mvmctl.api.binary_operations.Database")
         mocker.patch("mvmctl.api.binary_operations.BinaryRepository")
         mock_service = MagicMock()
-        mock_service.list_local.return_value = []
+        mock_service.list_all.return_value = []
         mocker.patch(
             "mvmctl.api.binary_operations.BinaryService",
             return_value=mock_service,
@@ -397,7 +398,7 @@ class TestBinaryEnsureDefault:
         mocker.patch("mvmctl.api.binary_operations.Database")
         mocker.patch("mvmctl.api.binary_operations.BinaryRepository")
         mock_service = MagicMock()
-        mock_service.list_local.return_value = [_make_bin(), default]
+        mock_service.list_all.return_value = [_make_bin(), default]
         mock_service.get_default_firecracker.return_value = default
         mocker.patch(
             "mvmctl.api.binary_operations.BinaryService",
@@ -417,7 +418,7 @@ class TestBinaryEnsureDefault:
         mock_service = MagicMock()
         old = _make_bin(version="1.14.0", name="firecracker")
         new = _make_bin(version="1.15.0", name="firecracker")
-        mock_service.list_local.return_value = [old, new]
+        mock_service.list_all.return_value = [old, new]
         mock_service.get_default_firecracker.return_value = None
         mocker.patch(
             "mvmctl.api.binary_operations.BinaryService",

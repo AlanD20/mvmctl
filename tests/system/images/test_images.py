@@ -54,7 +54,7 @@ class TestImagePull:
         result = _run_mvm(mvm_binary, "image", "pull", *image_args, timeout=120)
         assert result.returncode == 0
         assert (
-            "pulled successfully" in result.stdout.lower()
+            "pulled" in result.stdout.lower()
             or "already" in result.stdout.lower()
         )
 
@@ -873,7 +873,7 @@ class TestImagePullSkipOptimization:
             "--force",
             timeout=60,
         )
-        assert "pulled successfully" in result.stdout.lower()
+        assert "pulled" in result.stdout.lower()
 
 
 class TestImageImportSetDefault:
@@ -1305,7 +1305,6 @@ class TestImageImportCreateVM:
                         mvm_binary,
                         "vm",
                         "create",
-                        "--name",
                         vm_name,
                         "--image",
                         imported_prefix,
@@ -1449,7 +1448,6 @@ class TestImageImportCreateVM:
                         mvm_binary,
                         "vm",
                         "create",
-                        "--name",
                         vm_name,
                         "--image",
                         imported_prefix,
@@ -1535,7 +1533,6 @@ class TestImageDependencyDeletion:
                     mvm_binary,
                     "vm",
                     "create",
-                    "--name",
                     vm_name,
                     "--image",
                     "alpine:3.21",
@@ -1607,7 +1604,6 @@ class TestImageDependencyDeletion:
                     mvm_binary,
                     "vm",
                     "create",
-                    "--name",
                     vm_name,
                     "--image",
                     "alpine:3.21",

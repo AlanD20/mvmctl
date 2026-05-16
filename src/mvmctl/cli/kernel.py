@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import typer
 from rich.console import Console
@@ -12,17 +12,18 @@ from rich.console import Console
 from mvmctl.api import KernelInput as _KernelInput
 from mvmctl.api import KernelOperation as _KernelOperation
 from mvmctl.api import KernelPullInput as _KernelPullInput
+from mvmctl.core._shared._http_dir_version_resolver import VersionInfo
 
 if TYPE_CHECKING:
     from mvmctl.api.inputs._kernel_input import KernelInput
     from mvmctl.api.inputs._kernel_pull_input import KernelPullInput
     from mvmctl.api.kernel_operations import KernelOperation
-    from mvmctl.core._shared._http_dir_version_resolver import VersionInfo
 else:
     KernelOperation = _KernelOperation
     KernelPullInput = _KernelPullInput
     KernelInput = _KernelInput
 from mvmctl.cli._completion import _complete_kernel_ids
+from mvmctl.models import KernelItem
 from mvmctl.models.result import OperationResult, ProgressEvent
 from mvmctl.utils._io import (
     print_error,
@@ -36,9 +37,6 @@ from mvmctl.utils._io import (
 from mvmctl.utils.cli import CliUtils, handle_errors
 from mvmctl.utils.common import CommonUtils
 from mvmctl.utils.crypto import HashGenerator
-
-if TYPE_CHECKING:
-    from mvmctl.models import KernelItem
 
 kernel_app = typer.Typer(
     help="Kernel management",
@@ -69,10 +67,16 @@ def kernel_ls(
     """List cached kernels (or available remote kernels with --remote)."""
     if remote:
         with Console().status("Fetching remote kernel versions"):
-            versions = KernelOperation.list_remote(no_cache=no_cache)
+            versions = cast(
+                list[VersionInfo],
+                KernelOperation.list_all(remote=True, no_cache=no_cache),
+            )
         _list_remote_kernels(versions, json_output=json_output)
     else:
-        kernels: list[KernelItem] = KernelOperation.list_all()
+        kernels = cast(
+            list[KernelItem],
+            KernelOperation.list_all(),
+        )
 
         if json_output:
             data = [KernelOperation._kernel_to_dict(k) for k in kernels]
@@ -197,8 +201,8 @@ def _print_kernel_details(info: KernelItem) -> None:
     print_key_value("Version", info.version)
     print_key_value("Arch", info.arch)
     print_key_value("Type", info.type)
-    print_key_value("Default", "Yes" if info.is_default else "No")
-    print_key_value("Present", "Yes" if info.is_present else "No")
+    print_key_value("Default", "True" if info.is_default else "False")
+    print_key_value("Present", "True" if info.is_present else "False")
     print_key_value("Path", info.path)
     print_key_value(
         "Created", CommonUtils.human_readable_datetime(info.created_at)
@@ -220,8 +224,8 @@ def _print_kernel_details_tree(info: KernelItem) -> None:
         f"├── Version:     {info.version}",
         f"├── Arch:        {info.arch}",
         f"├── Type:        {info.type}",
-        f"├── Default:     {'Yes' if info.is_default else 'No'}",
-        f"├── Present:     {'Yes' if info.is_present else 'No'}",
+        f"├── Default:     {'True' if info.is_default else 'False'}",
+        f"├── Present:     {'True' if info.is_present else 'False'}",
         f"├── Path:        {info.path}",
         f"├── Created:     {CommonUtils.human_readable_datetime(info.created_at)}",
         f"└── Updated:     {CommonUtils.human_readable_datetime(info.updated_at)}",
@@ -237,6 +241,7 @@ def kernel_pull(
         None,
         help="Shorthand: type:version (e.g. official:6.19.9). "
         "Use '--type' and '--version' options for explicit control.",
+        autocompletion=_complete_kernel_ids,
     ),
     kernel_type: str | None = typer.Option(
         None, "--type", help="Kernel type: firecracker or official"
@@ -321,12 +326,12 @@ def kernel_pull(
             raise typer.Exit(code=0)
         if result.item:
             print_success(
-                f"Kernel '{result.item.name}' pulled successfully "
+                f"Pulled: {result.item.name} "
                 f"(ID: {HashGenerator.shorten(result.item.id)})"
             )
     else:
         # Fallback for unexpected non-OperationResult returns
-        print_success("Kernel pull completed")
+        print_success("Pull completed")
 
 
 @kernel_app.command(
@@ -351,7 +356,7 @@ def kernel_set_default(
         print_error(result.message)
         raise typer.Exit(code=1)
 
-    print_success(result.message or f"Default kernel set to {kernel_id}")
+    print_success(result.message or f"Default kernel set to: {kernel_id}")
 
 
 @kernel_app.command(
@@ -381,9 +386,9 @@ def kernel_rm(
 
     for item_result in batch_result.items:
         if item_result.is_ok:
-            print_success(item_result.message or "Kernel removed")
+            print_success(item_result.message or "Removed")
         else:
-            print_error(item_result.message or "Failed to remove kernel")
+            print_error(item_result.message or "Remove failed")
 
     if batch_result.has_any_error:
         raise typer.Exit(code=1)

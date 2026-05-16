@@ -58,11 +58,13 @@ class TestListRemoteVersions:
 
     def test_list_remote_network_error(self) -> None:
         """list_remote raises BinaryError on network failure."""
+        from mvmctl.exceptions import HttpDownloadError
+
         with patch(
             "mvmctl.utils.http.HttpDownload.read_json_content",
-            side_effect=OSError("connection error"),
+            side_effect=HttpDownloadError("connection error"),
         ):
-            with pytest.raises(BinaryError, match="Failed to fetch releases"):
+            with pytest.raises(BinaryError, match="GitHub"):
                 BinaryService.list_remote(limit=5)
 
     def test_list_remote_sorts_by_version(self) -> None:
@@ -101,11 +103,6 @@ class TestDownloadFirecracker:
         expected_sha = hashlib.sha256(tarball_data).hexdigest()
 
         with (
-            patch.object(
-                BinaryService,
-                "_semver_key",
-                side_effect=lambda v: tuple(int(x) for x in v.split(".")),
-            ),
             patch(
                 "mvmctl.utils.http.HttpDownload.read_raw_content",
                 return_value=f"{expected_sha}  firecracker-v1.5.0-x86_64.tgz\n",
@@ -144,17 +141,17 @@ class TestDownloadFirecracker:
                 BinaryService.download_firecracker("1.5.0", tmp_path)
 
 
-class TestListLocal:
-    """Tests for BinaryService.list_local()."""
+class TestListAll:
+    """Tests for BinaryService.list_all()."""
 
-    def test_list_local_empty(self, db: Database) -> None:
-        """list_local returns empty list when no binaries."""
+    def test_list_all_empty(self, db: Database) -> None:
+        """list_all returns empty list when no binaries."""
         repo = BinaryRepository(db)
         service = BinaryService(repo)
-        assert service.list_local() == []
+        assert service.list_all() == []
 
-    def test_list_local_with_verify(self, db: Database) -> None:
-        """list_local with verify=True checks filesystem."""
+    def test_list_all_verify_true(self, db: Database) -> None:
+        """list_all with verify=True checks filesystem."""
         from datetime import UTC, datetime
 
         now = datetime.now(tz=UTC).isoformat()
@@ -174,13 +171,13 @@ class TestListLocal:
         repo.upsert(binary)
         service = BinaryService(repo)
         # File doesn't exist, so is_present should be updated to 0
-        # (but list_local still returns the binary since it's not soft-deleted)
-        results = service.list_local(verify=True)
+        # (but list_all still returns the binary since it's not soft-deleted)
+        results = service.list_all(verify=True)
         assert len(results) == 1
         assert results[0].is_present is False or results[0].is_present == 0
 
-    def test_list_local_no_verify(self, db: Database) -> None:
-        """list_local with verify=False returns DB records as-is."""
+    def test_list_all_no_verify(self, db: Database) -> None:
+        """list_all with verify=False returns DB records as-is."""
         from datetime import UTC, datetime
 
         now = datetime.now(tz=UTC).isoformat()
@@ -199,7 +196,7 @@ class TestListLocal:
         )
         repo.upsert(binary)
         service = BinaryService(repo)
-        results = service.list_local(verify=False)
+        results = service.list_all(verify=False)
         assert len(results) == 1
 
 
@@ -253,14 +250,18 @@ class TestNormalizeVersion:
 
 
 class TestSemverKey:
-    """Tests for BinaryService._semver_key()."""
+    """Tests for VersionResolver.semver_key()."""
 
     def test_semver_key_normal(self) -> None:
-        key = BinaryService._semver_key("1.15.0")
+        from mvmctl.core._shared import VersionResolver
+
+        key = VersionResolver.semver_key("1.15.0")
         assert key == (1, 15, 0)
 
     def test_semver_key_fallback(self) -> None:
-        key = BinaryService._semver_key("invalid")
+        from mvmctl.core._shared import VersionResolver
+
+        key = VersionResolver.semver_key("invalid")
         assert key == (0,)
 
 

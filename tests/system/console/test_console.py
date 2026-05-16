@@ -96,7 +96,7 @@ class TestConsoleKill:
             )
         else:
             combined = result.stdout + result.stderr
-            assert "No console relay" in combined
+            assert "not running" in combined
 
 
 class TestConsoleOnStoppedVM:
@@ -124,7 +124,6 @@ class TestConsoleOnStoppedVM:
                 mvm_binary,
                 "vm",
                 "create",
-                "--name",
                 vm_name,
                 "--image",
                 "alpine:3.21",

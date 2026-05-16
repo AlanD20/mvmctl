@@ -2,13 +2,10 @@
 """Build mvmctl service and main binaries.
 
 Usage:
-    python scripts/build_services.py                    # Build everything (release)
+    python scripts/build_services.py                    # Build everything (default)
     python scripts/build_services.py --services         # Only build service binaries
     python scripts/build_services.py --service <name>   # Build a specific service
     python scripts/build_services.py --mvm              # Only build main binary
-
-Build modes:
-    --release  Aggressive optimization + safe force-includes (~35 MB, DEFAULT)
 
 Prerequisites:
     uv sync --group dev --group build

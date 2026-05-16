@@ -155,6 +155,29 @@ class VMResolver:
                 results[vm.kernel_id].append(vm)
         return results
 
+    def by_volume_id_batch(
+        self, volume_ids: list[str]
+    ) -> dict[str, list[VMInstanceItem]]:
+        """Batch-resolve VMs by volume IDs (JSON array match).
+
+        Args:
+            volume_ids: List of volume IDs to find VMs for.
+
+        Returns:
+            Dict mapping each volume ID to its list of referencing VMs.
+
+        """
+        vms = self._repo.find_by_volume_ids_batch(volume_ids)
+        results: dict[str, list[VMInstanceItem]] = {
+            vid: [] for vid in volume_ids
+        }
+        for vm in vms:
+            if vm.volume_ids:
+                for vid in vm.volume_ids:
+                    if vid in results:
+                        results[vid].append(vm)
+        return results
+
     def by_binary_id_batch(
         self, binary_ids: list[str]
     ) -> dict[str, list[VMInstanceItem]]:

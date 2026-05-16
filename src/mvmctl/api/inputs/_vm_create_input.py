@@ -728,7 +728,7 @@ class VMCreateRequest:
             Tuple of (resolved VolumeItems, drive configs for Firecracker).
 
         Raises:
-            VolumeCreateError: If any volume cannot be resolved or is unavailable.
+            VolumeError: If any volume cannot be resolved or is unavailable.
 
         """
         if not self._inputs.volumes:
@@ -736,9 +736,9 @@ class VMCreateRequest:
 
         result = self._volume_resolver.resolve_many(self._inputs.volumes)
         if result.errors and not result.items:
-            from mvmctl.exceptions import VolumeCreateError
+            from mvmctl.exceptions import VolumeError
 
-            raise VolumeCreateError(result.errors[0])
+            raise VolumeError(result.errors[0])
 
         return result.items
 

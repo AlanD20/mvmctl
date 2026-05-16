@@ -32,6 +32,13 @@ class KeyRepository:
             ).fetchall()
         return [SSHKeyItem(**dict(row)) for row in rows]
 
+    @_graceful_read(default=0)
+    def count(self) -> int:
+        """Return total count of all SSH keys."""
+        with self._db.connect() as conn:
+            result = conn.execute("SELECT COUNT(*) FROM ssh_keys").fetchone()
+        return result[0] if result else 0
+
     @_graceful_read(factory=list)
     def list_all(self) -> list[SSHKeyItem]:
         """Return all SSH keys."""

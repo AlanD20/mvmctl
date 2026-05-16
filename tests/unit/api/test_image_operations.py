@@ -51,17 +51,17 @@ def _make_image(
 
 
 class TestImageOperationList:
-    """Tests for ImageOperation.list_()."""
+    """Tests for ImageOperation.list_all()."""
 
     def test_list_all_no_inputs(self, mocker):
-        """list_() with no inputs returns all local images via ImageService."""
+        """list_all() with no inputs returns all local images via ImageService."""
         mock_images = [
             _make_image("ubuntu-24.04"),
             _make_image("debian-12"),
         ]
         mock_repo = MagicMock()
         mock_service = MagicMock()
-        mock_service.list_local.return_value = mock_images
+        mock_service.list_all.return_value = mock_images
         mocker.patch(
             "mvmctl.api.image_operations.Database",
         )
@@ -73,12 +73,12 @@ class TestImageOperationList:
             "mvmctl.core.image._service.ImageService", return_value=mock_service
         )
 
-        result = ImageOperation.list_()
+        result = ImageOperation.list_all()
         assert len(result) == 2
-        mock_service.list_local.assert_called_once()
+        mock_service.list_all.assert_called_once()
 
     def test_list_all_with_identifiers(self, mocker):
-        """list_() with ImageInput uses resolver to filter by identifiers."""
+        """list_all() with ImageInput uses resolver to filter by identifiers."""
         mock_image = _make_image("ubuntu-24.04")
         mock_resolved = MagicMock()
         mock_resolved.items = [mock_image]
@@ -95,16 +95,16 @@ class TestImageOperationList:
             return_value=mock_resolver,
         )
 
-        result = ImageOperation.list_(ImageInput(id=["ubuntu-24.04"]))
+        result = ImageOperation.list_all(ImageInput(id=["ubuntu-24.04"]))
         assert len(result) == 1
         assert result[0].type == "ubuntu-24.04"
         mock_resolver.resolve_many.assert_called_once_with(["ubuntu-24.04"])
 
     def test_list_empty(self, mocker):
-        """list_() returns empty list when no images exist."""
+        """list_all() returns empty list when no images exist."""
         mock_repo = MagicMock()
         mock_service = MagicMock()
-        mock_service.list_local.return_value = []
+        mock_service.list_all.return_value = []
         mocker.patch("mvmctl.api.image_operations.Database")
         mocker.patch(
             "mvmctl.api.image_operations.ImageRepository",
@@ -114,11 +114,11 @@ class TestImageOperationList:
             "mvmctl.core.image._service.ImageService", return_value=mock_service
         )
 
-        result = ImageOperation.list_()
+        result = ImageOperation.list_all()
         assert result == []
 
     def test_list_remote(self, mocker):
-        """list_(remote=True) returns ImageVersion list from HttpDirVersionResolver."""
+        """list_all(remote=True) returns ImageVersion list from HttpDirVersionResolver."""
         mock_versions = [
             ImageVersion(
                 version="24.04",
@@ -152,13 +152,13 @@ class TestImageOperationList:
             return_value={"ubuntu": mock_versions},
         )
 
-        result = ImageOperation.list_(remote=True)
+        result = ImageOperation.list_all(remote=True)
         assert len(result) == 1
         assert result[0].type == "ubuntu"
         assert result[0].version == "24.04"
 
     def test_list_remote_resolves_sizes(self, mocker):
-        """list_(remote=True) delegates to HttpDirVersionResolver with ci_version."""
+        """list_all(remote=True) delegates to HttpDirVersionResolver with ci_version."""
         mock_versions = [
             ImageVersion(
                 version="24.04",
@@ -195,7 +195,7 @@ class TestImageOperationList:
             return_value={"ubuntu": mock_versions},
         )
 
-        ImageOperation.list_(remote=True)
+        ImageOperation.list_all(remote=True)
         mock_resolver.assert_called_once()
         assert mock_resolver.call_args[1]["ci_version"] == "v1.10"
 

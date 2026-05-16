@@ -67,47 +67,20 @@ Then re-run: `mvm host init`
 
 ---
 
-## iptables rules lost after reboot
+## Firewall rules lost after reboot
 
-**Problem:** After a reboot, VMs can't reach the network, or `mvm host init` shows iptables chains missing.
+**Problem:** After a reboot, VMs can't reach the network, or firewall chains are missing.
 
-**Cause:** `mvm host init` saves iptables rules to `/etc/iptables/rules.v4`, but **does not install** an auto-restore service. The rules are only restored at boot if a system package like `iptables-persistent` (Debian/Ubuntu) or `iptables-services` (RHEL/Fedora/Arch) is installed and reading that file.
+**Cause:** `mvm` does not persist firewall rules to system files (`/etc/nftables.conf`, `/etc/iptables/rules.v4`). Firewall rules are managed dynamically and must be reloaded after a reboot.
 
 **Solution:**
 
-Check if rules survive a reboot:
+Run `mvm network sync` after every reboot to reload all mvm firewall rules from the database:
 ```bash
-# After reboot: check if MVM chains exist
-sudo iptables -L MVM-FORWARD -n
-# If this shows an error, the rules were not restored
+mvm network sync
 ```
 
-Install the appropriate persistence package for your distro:
-
-```bash
-# Debian / Ubuntu
-sudo apt install iptables-persistent
-# This auto-loads /etc/iptables/rules.v4 on boot
-
-# Arch Linux
-sudo pacman -S iptables-nft
-sudo systemctl enable iptables.service
-
-# Fedora / RHEL
-sudo dnf install iptables-services
-sudo systemctl enable iptables.service
-```
-
-Then re-run to save a fresh snapshot:
-```bash
-mvm host init
-```
-
-If rules are partially corrupted, you can clean and re-init:
-```bash
-mvm host clean
-mvm host init
-```
+This restores all NAT, forwarding, and nocloud-net rules to the active firewall backend (nftables or iptables).
 
 ---
 
@@ -261,7 +234,6 @@ It does **NOT** touch:
 - The `mvm` system group or your user membership
 - The sudoers drop-in file
 - Sysctl `ip_forward` setting
-- The iptables rules file
 
 Run `mvm host init` afterwards to recreate the default network.
 
@@ -276,7 +248,6 @@ Does everything `clean` does, **plus**:
 - Removes your user from the `mvm` group
 - Deletes the `mvm` system group
 - Restores `net.ipv4.ip_forward` to its original value
-- Removes the iptables rules file
 
 After reset, run `mvm host init` from scratch to set everything up again.
 

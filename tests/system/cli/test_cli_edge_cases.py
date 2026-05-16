@@ -62,7 +62,6 @@ class TestCacheEdgeCases:
                 mvm_binary,
                 "vm",
                 "create",
-                "--name",
                 vm_name,
                 "--image",
                 "alpine:3.21",
@@ -198,7 +197,6 @@ class TestVMStateTransitionErrors:
                 mvm_binary,
                 "vm",
                 "create",
-                "--name",
                 name1,
                 "--image",
                 "alpine:3.21",
@@ -209,7 +207,6 @@ class TestVMStateTransitionErrors:
                 mvm_binary,
                 "vm",
                 "create",
-                "--name",
                 name2,
                 "--image",
                 "alpine:3.21",
@@ -274,7 +271,7 @@ class TestImageAdvancedFlags:
                 pytest.skip(
                     f"Pull with --disable-detector failed: {result.stderr.strip()}"
                 )
-            assert "pulled successfully" in result.stdout.lower()
+            assert "pulled" in result.stdout.lower()
         except subprocess.TimeoutExpired:
             pytest.skip(
                 "Pull with --disable-detector --force timed out (>60s download)"
@@ -332,7 +329,6 @@ class TestVMCloudInitModes:
                 mvm_binary,
                 "vm",
                 "create",
-                "--name",
                 vm_name,
                 "--image",
                 "alpine:3.21",
@@ -372,7 +368,6 @@ class TestVMCloudInitModes:
                 mvm_binary,
                 "vm",
                 "create",
-                "--name",
                 vm_name,
                 "--image",
                 "alpine:3.21",
@@ -412,7 +407,6 @@ class TestVMCloudInitModes:
                 mvm_binary,
                 "vm",
                 "create",
-                "--name",
                 vm_name,
                 "--image",
                 "alpine:3.21",
@@ -463,7 +457,6 @@ class TestVMNocloudNetPort:
                 mvm_binary,
                 "vm",
                 "create",
-                "--name",
                 vm_name,
                 "--image",
                 "alpine:3.21",
@@ -539,7 +532,7 @@ class TestImagePullAdvancedFlags:
                 check=False,
             )
             if result.returncode == 0:
-                assert "pulled successfully" in result.stdout.lower()
+                assert "pulled" in result.stdout.lower()
             else:
                 pytest.skip(
                     f"Pull {selector} --version {version} failed: "
@@ -565,7 +558,7 @@ class TestImagePullAdvancedFlags:
                 check=False,
             )
             if result.returncode == 0:
-                assert "pulled successfully" in result.stdout.lower()
+                assert "pulled" in result.stdout.lower()
             else:
                 pytest.skip(f"Pull with --arch failed: {result.stderr.strip()}")
         except subprocess.TimeoutExpired:
@@ -615,19 +608,22 @@ class TestImagePullWithTypeFlag:
 
     def test_image_pull_with_explicit_type(self, mvm_binary):
         """Pull an image with --type flag matching the positional selector."""
-        result = _run_mvm(
-            mvm_binary,
-            "image",
-            "pull",
-            "alpine:3.21",
-            "--type",
-            "alpine",
-            "--force",
-            timeout=60,
-            check=False,
-        )
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "image",
+                "pull",
+                "alpine:3.21",
+                "--type",
+                "alpine",
+                "--force",
+                timeout=120,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            pytest.skip("Pull with --type timed out (>120s)")
         if result.returncode == 0:
-            assert "pulled successfully" in result.stdout.lower()
+            assert "pulled" in result.stdout.lower()
         elif (
             "timed out" in (result.stdout + result.stderr).lower()
             or result.returncode == -15

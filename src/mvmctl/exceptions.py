@@ -52,8 +52,8 @@ class VolumeNotFoundError(MVMError):
     """Raised when a volume cannot be found."""
 
 
-class VolumeCreateError(MVMError):
-    """Raised when volume creation fails."""
+class VolumeError(MVMError):
+    """Raised when a volume operation fails."""
 
 
 class ImageAcquireError(MVMError):

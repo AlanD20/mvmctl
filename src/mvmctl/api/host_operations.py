@@ -282,7 +282,9 @@ class HostOperation:
         net_service = NetworkService(net_repo)
         net_service.ensure_mvm_chains()
 
-        backend = SettingsService.resolve(Database(), "settings", "firewall_backend")
+        backend = SettingsService.resolve(
+            Database(), "settings", "firewall_backend"
+        )
         chain_setting = f"{backend}_chains"
         chain_change = HostStateChangeItem(
             session_id="",
@@ -332,11 +334,6 @@ class HostOperation:
                     all_changes.append(net_change)
         except Exception:
             logger.warning("Could not set up default network during host init")
-
-        fw_change = HostService.save_firewall_rules(backend)
-        if fw_change:
-            db_changes.append(fw_change)
-            all_changes.append(fw_change)
 
         # --- Persist state & finalize ---
         controller = HostController(repo)

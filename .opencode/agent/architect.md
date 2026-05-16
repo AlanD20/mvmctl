@@ -940,20 +940,11 @@ The project uses `scripts/build_services.py` to compile standalone binaries via 
 ### Usage
 
 ```
-python scripts/build_services.py                    # Build everything (default: --release)
+python scripts/build_services.py                    # Build everything (default)
 python scripts/build_services.py --services         # Build all service binaries only
 python scripts/build_services.py --service <name>   # Build a specific service (e.g. mvm-console-relay)
 python scripts/build_services.py --mvm              # Build main mvm binary only
-python scripts/build_services.py --release          # Aggressive optimization (LTO, anti-bloat, --deployment, DEFAULT)
-python scripts/build_services.py --fast             # Fast compile — minimal Nuitka flags
 ```
-
-### Build modes
-
-| Mode | Flags | Use case |
-|------|-------|----------|
-| `--fast` | `--onefile`, `--jobs=N` | Development iteration, quick CI |
-| `--release` (default) | `--lto=yes`, anti-bloat, no-docstrings, no-asserts, `-Os`, `--deployment`, etc. | Release builds, smallest binary |
 
 ### Key architectural decisions
 

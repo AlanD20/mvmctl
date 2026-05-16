@@ -52,13 +52,13 @@ class TestImageLs:
 
     @patch("mvmctl.cli.image.ImageOperation")
     def test_ls_empty(self, mock_img_op):
-        mock_img_op.list_.return_value = []
+        mock_img_op.list_all.return_value = []
         result = runner.invoke(app, ["image", "ls"])
         assert result.exit_code == 0
 
     @patch("mvmctl.cli.image.ImageOperation")
     def test_ls_with_images(self, mock_img_op):
-        mock_img_op.list_.return_value = [
+        mock_img_op.list_all.return_value = [
             _make_image("Ubuntu 24.04"),
             _make_image(
                 "Debian 12", "debian-12", image_id="img-debian-12-" + "x" * 55
@@ -70,7 +70,7 @@ class TestImageLs:
 
     @patch("mvmctl.cli.image.ImageOperation")
     def test_ls_json(self, mock_img_op):
-        mock_img_op.list_.return_value = [_make_image("Ubuntu 24.04")]
+        mock_img_op.list_all.return_value = [_make_image("Ubuntu 24.04")]
         result = runner.invoke(app, ["image", "ls", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -80,7 +80,7 @@ class TestImageLs:
     def test_ls_remote(self, mock_img_op):
         from mvmctl.models.image import ImageVersion
 
-        mock_img_op.list_.return_value = [
+        mock_img_op.list_all.return_value = [
             ImageVersion(
                 version="24.04",
                 codename="Noble",
@@ -121,7 +121,7 @@ class TestImagePull:
             ],
         )
         assert result.exit_code == 0
-        assert "pulled successfully" in result.output
+        assert "Pulled" in result.output
 
     @patch("mvmctl.cli.image.ImageOperation")
     def test_pull_with_force(self, mock_img_op, tmp_path):
@@ -373,7 +373,7 @@ class TestImageLsExtended:
         mock = mocker.patch("mvmctl.cli.image.ImageOperation")
         from mvmctl.models.image import ImageVersion
 
-        mock.list_.return_value = [
+        mock.list_all.return_value = [
             ImageVersion(
                 version="24.04",
                 codename="Noble",
@@ -396,7 +396,7 @@ class TestImageLsExtended:
         mock = mocker.patch("mvmctl.cli.image.ImageOperation")
         from mvmctl.models.image import ImageVersion
 
-        mock.list_.return_value = [
+        mock.list_all.return_value = [
             ImageVersion(
                 version="24.04",
                 codename="Noble",
@@ -415,7 +415,7 @@ class TestImageLsExtended:
     def test_ls_error(self, mocker):
         """Should handle API error."""
         mock = mocker.patch("mvmctl.cli.image.ImageOperation")
-        mock.list_.side_effect = MVMError("Database connection failed")
+        mock.list_all.side_effect = MVMError("Database connection failed")
         result = runner.invoke(app, ["image", "ls"])
         assert result.exit_code == 1
         assert "Database connection failed" in result.output
@@ -505,7 +505,7 @@ class TestImagePullExtended:
         )
         result = runner.invoke(app, ["image", "pull", "nonexistent"])
         assert result.exit_code == 1
-        assert "Failed to download" in result.output
+        assert "Download failed" in result.output
 
 
 class TestImageSetDefaultExtended:
@@ -532,7 +532,7 @@ class TestImageSetDefaultExtended:
         )
         result = runner.invoke(app, ["image", "default", "badid"])
         assert result.exit_code == 1
-        assert "Failed to set default image" in result.output
+        assert "Set default failed" in result.output
 
 
 class TestImageRemoveExtended:
@@ -704,7 +704,7 @@ class TestImageImportExtended:
         source.write_bytes(b"data")
         result = runner.invoke(app, ["image", "import", "Test OS", str(source)])
         assert result.exit_code == 1
-        assert "Failed to import image" in result.output
+        assert "Import failed" in result.output
 
     def test_import_set_default(self, mocker, tmp_path):
         """Should confirm default image when --default."""

@@ -358,38 +358,35 @@ class BinaryOperation:
         return resolved.binaries
 
     @staticmethod
-    def list_local() -> list[BinaryItem]:
+    def list_all(
+        remote: bool = False, limit: int | None = None
+    ) -> list[BinaryItem] | list[str]:
         """
-        List all locally installed binaries.
+        List binaries.
+
+        Args:
+            remote: If True, return available remote versions.
+                    If False (default), return locally installed binaries.
+            limit: Maximum number of remote versions to return.
+                   Only relevant when ``remote=True``.
 
         Returns:
-            list[BinaryItem] from database query with filesystem sync.
+            list[BinaryItem] (local) or list[str] (remote).
 
         """
+        if remote:
+            if limit is None:
+                limit = int(
+                    SettingsService.resolve(
+                        Database(), "defaults.binary", "remote_version_limit"
+                    )
+                )
+            return BinaryService.list_remote(limit=limit)
+
         db = Database()
         repo = BinaryRepository(db)
         service = BinaryService(repo)
-        return service.list_local()
-
-    @staticmethod
-    def list_remote(limit: int | None = None) -> list[str]:
-        """
-        List available remote versions.
-
-        Args:
-            limit: Maximum number of versions to return.
-
-        Returns:
-            list[str] of version strings.
-
-        """
-        if limit is None:
-            limit = int(
-                SettingsService.resolve(
-                    Database(), "defaults.binary", "remote_version_limit"
-                )
-            )
-        return BinaryService.list_remote(limit=limit)
+        return service.list_all()
 
     @staticmethod
     def set_default(inputs: BinaryInput) -> OperationResult[BinaryItem]:
@@ -457,7 +454,7 @@ class BinaryOperation:
             repo = BinaryRepository(db)
             service = BinaryService(repo)
 
-            local = service.list_local()
+            local = service.list_all()
             if not local:
                 return OperationResult(
                     status="success",

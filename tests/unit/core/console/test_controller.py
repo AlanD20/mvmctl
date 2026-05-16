@@ -156,17 +156,17 @@ class TestConsoleController:
             controller.cleanup()
             mock_stop.assert_called_once()
 
-    def test_terminate_delegates_to_manager(
+    def test_stop_force_delegates_to_manager_stop(
         self, vm_id: str, vm_dir: Path
     ) -> None:
-        """terminate delegates to manager.terminate()."""
+        """stop(force=True) delegates to manager.stop(force=True)."""
         controller = ConsoleController(vm_id, vm_dir)
         with patch.object(
-            controller.manager, "terminate", return_value=True
-        ) as mock_term:
-            result = controller.terminate()
+            controller.manager, "stop", return_value=True
+        ) as mock_stop:
+            result = controller.stop(force=True)
             assert result is True
-            mock_term.assert_called_once()
+            mock_stop.assert_called_once_with(force=True)
 
     def test_is_running_delegates_to_manager(
         self, vm_id: str, vm_dir: Path

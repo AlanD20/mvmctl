@@ -33,8 +33,8 @@ Before tagging, verify the build locally:
 
 ```bash
 uv sync --group dev --group build
-python scripts/build_services.py --release  # Release build — Nuitka with LTO, tree-shaking, minimal size
-python scripts/build_services.py --fast     # Fast build — minimal flags, no optimization (~50 MB)
+python scripts/build_services.py            # Build everything (release mode, default)
+python scripts/build_services.py --mvm     # Main binary only
 ```
 
 Output: `dist/mvm` (main binary) and `dist/services/mvm-services` (multidist services binary).

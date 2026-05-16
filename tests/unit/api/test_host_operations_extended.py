@@ -84,11 +84,6 @@ def _patch_init_common(mocker) -> dict[str, MagicMock]:
         "mvmctl.api.host_operations.SettingsService.resolve",
         return_value="default",
     )
-    mocker.patch(
-        "mvmctl.api.host_operations.HostService.save_firewall_rules",
-        return_value=None,
-    )
-
     mock_repo = MagicMock()
     mock_repo.list_changes.return_value = []
     mocker.patch(
@@ -560,11 +555,11 @@ class TestHostOperationCleanExtended:
         )
         result = HostOperation.clean(Path("/tmp"))
         assert result.status == "success"
-        mock_net_svc.tracker.teardown.assert_called_once()
+        mock_net_svc.teardown.assert_called_once()
 
     def test_clean_mvm_chains_error_handled(self, mocker):
         mock_net_svc = MagicMock()
-        mock_net_svc.tracker.teardown.side_effect = NetworkError("chains error")
+        mock_net_svc.teardown.side_effect = NetworkError("chains error")
         mocker.patch(
             "mvmctl.api.host_operations.NetworkService",
             return_value=mock_net_svc,

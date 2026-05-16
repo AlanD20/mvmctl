@@ -83,6 +83,15 @@ class ImageRepository:
             return None
         return ImageItem(**dict(row))
 
+    @_graceful_read(default=0)
+    def count(self) -> int:
+        """Return total count of all non-deleted images."""
+        with self._db.connect() as conn:
+            result = conn.execute(
+                "SELECT COUNT(*) FROM images WHERE deleted_at IS NULL"
+            ).fetchone()
+        return result[0] if result else 0
+
     @_graceful_read(factory=list)
     def list_all(self) -> list[ImageItem]:
         """Return all images."""

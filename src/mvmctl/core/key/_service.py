@@ -176,7 +176,7 @@ class KeyService:
         self._repo.clear_defaults()
         logger.info("Cleared default SSH keys")
 
-    def list_keys(
+    def list_all(
         self, keys_dir: Path, *, verify: bool = True
     ) -> list[SSHKeyItem]:
         """

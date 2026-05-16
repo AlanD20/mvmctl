@@ -234,7 +234,7 @@ class TestAddKey:
 
         # Remove the file to trigger is_present update
         (keys_dir / "mykey.pub").unlink()
-        results = service.list_keys(keys_dir, verify=True)
+        results = service.list_all(keys_dir, verify=True)
         assert len(results) == 1  # Still returned, but is_present is 0
         assert results[0].is_present is False or results[0].is_present == 0
 

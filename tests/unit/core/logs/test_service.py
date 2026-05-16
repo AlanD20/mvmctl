@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from mvmctl.core.logs._service import LogService
-from mvmctl.exceptions import MVMError, VMNotFoundError
+from mvmctl.exceptions import LogsError, MVMError
 
 
 class TestGetLogPath:
@@ -64,11 +64,11 @@ class TestGetLogPath:
         assert result == log_file
 
     def test_get_log_path_missing_vm(self, tmp_path: Path) -> None:
-        """get_log_path raises VMNotFoundError when VM directory missing."""
+        """get_log_path raises LogsError when VM directory missing."""
         nonexistent = tmp_path / "no-such-vm"
 
         with patch_get_vm_dir(nonexistent):
-            with pytest.raises(VMNotFoundError, match="not found"):
+            with pytest.raises(LogsError, match="VM directory not found"):
                 LogService.get_log_path(
                     "b" * 64,
                     "boot",
@@ -77,12 +77,12 @@ class TestGetLogPath:
                 )
 
     def test_get_log_path_missing_file(self, tmp_path: Path) -> None:
-        """get_log_path raises VMNotFoundError when log file is missing."""
+        """get_log_path raises LogsError when log file is missing."""
         vm_dir = tmp_path / "test-vm"
         vm_dir.mkdir()
 
         with patch_get_vm_dir(vm_dir):
-            with pytest.raises(VMNotFoundError, match="Log file not found"):
+            with pytest.raises(LogsError, match="Log file not found"):
                 LogService.get_log_path(
                     "a" * 64,
                     "boot",

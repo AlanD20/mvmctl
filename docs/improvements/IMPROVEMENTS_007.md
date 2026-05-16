@@ -2,7 +2,7 @@
 
 > ## STATUS: Partially outdated
 >
-> The nftables migration is now **implemented**. `core/_shared/_nftables_tracker/` provides a full `NFTablesTracker`. `core/_shared/_firewall_tracker.py` provides the abstract `FirewallTracker` that delegates to either backend. Default `firewall_backend` is `"iptables"` (nftables is opt-in for users without UFW).
+> The nftables migration is now **implemented**. `core/_shared/_nftables_tracker/` provides a full `NFTablesTracker`. `core/_shared/_firewall_tracker.py` provides the abstract `FirewallTracker` that delegates to either backend. Default `firewall_backend` is `"nftables"`. iptables is a legacy fallback when `nft_chain_nat` kernel module is unavailable.
 >
 > The content below (problem analysis, architecture) remains relevant for understanding the migration that was completed.
 >

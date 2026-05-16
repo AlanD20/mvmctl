@@ -215,7 +215,7 @@ class TestStepBinary:
         mock_binary.version = "1.15.0"
 
         mocker.patch(
-            "mvmctl.api.binary_operations.BinaryOperation.list_local",
+            "mvmctl.api.binary_operations.BinaryOperation.list_all",
             return_value=[mock_binary],
         )
 
@@ -236,7 +236,7 @@ class TestStepBinary:
         mock_binary.version = "1.15.0"
 
         mocker.patch(
-            "mvmctl.api.binary_operations.BinaryOperation.list_local",
+            "mvmctl.api.binary_operations.BinaryOperation.list_all",
             return_value=[mock_binary],
         )
 
@@ -261,7 +261,7 @@ class TestStepBinary:
     def test_no_local_uses_download_version(self, mocker):
         """_step_binary() downloads specific version when provided."""
         mocker.patch(
-            "mvmctl.api.binary_operations.BinaryOperation.list_local",
+            "mvmctl.api.binary_operations.BinaryOperation.list_all",
             return_value=[],
         )
         mock_download = mocker.patch.object(
@@ -280,7 +280,7 @@ class TestStepBinary:
     def test_no_local_non_interactive(self, mocker):
         """_step_binary() downloads latest when non-interactive."""
         mocker.patch(
-            "mvmctl.api.binary_operations.BinaryOperation.list_local",
+            "mvmctl.api.binary_operations.BinaryOperation.list_all",
             return_value=[],
         )
         mock_download_latest = mocker.patch.object(
@@ -299,7 +299,7 @@ class TestStepBinary:
     def test_no_local_needs_interaction(self, mocker):
         """_step_binary() returns NeedsInteraction when prompting user."""
         mocker.patch(
-            "mvmctl.api.binary_operations.BinaryOperation.list_local",
+            "mvmctl.api.binary_operations.BinaryOperation.list_all",
             return_value=[],
         )
         mocker.patch.object(

@@ -106,7 +106,7 @@ class TestConsoleKill:
         """kill() returns True when relay is stopped."""
         mock_resolved = mocker.MagicMock()
         mock_resolved.relay.is_running.return_value = True
-        mock_resolved.relay.terminate.return_value = True
+        mock_resolved.relay.stop.return_value = True
 
         mock_request = mocker.MagicMock()
         mock_request.resolve.return_value = mock_resolved
@@ -118,7 +118,7 @@ class TestConsoleKill:
         result = ConsoleOperation.kill("test-vm")
 
         assert result.status == "success"
-        mock_resolved.relay.terminate.assert_called_once()
+        mock_resolved.relay.stop.assert_called_once_with(force=True)
 
     def test_kill_returns_false_when_not_running(self, mocker):
         """kill() returns False when relay is not running."""
@@ -135,4 +135,4 @@ class TestConsoleKill:
         result = ConsoleOperation.kill("test-vm")
 
         assert result.status == "skipped"
-        mock_resolved.relay.terminate.assert_not_called()
+        mock_resolved.relay.stop.assert_not_called()

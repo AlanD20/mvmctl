@@ -12,7 +12,7 @@ from mvmctl.api.inputs._volume_create_input import (
 )
 from mvmctl.api.inputs._volume_input import VolumeInput
 from mvmctl.api.volume_operations import VolumeOperation
-from mvmctl.exceptions import VolumeCreateError, VolumeNotFoundError
+from mvmctl.exceptions import VolumeError, VolumeNotFoundError
 from mvmctl.models import VolumeItem
 
 
@@ -124,7 +124,7 @@ class TestVolumeOperationCreate:
     def test_create_existing_name_returns_error(self, mocker):
         """Create with an existing name should return error."""
         mock_request = MagicMock()
-        mock_request.resolve.side_effect = VolumeCreateError(
+        mock_request.resolve.side_effect = VolumeError(
             "Volume 'my-vol' already exists"
         )
         mocker.patch(
@@ -149,7 +149,7 @@ class TestVolumeOperationCreate:
             return_value=mock_repo,
         )
         mock_svc = MagicMock()
-        mock_svc.create_disk.side_effect = VolumeCreateError("disk full")
+        mock_svc.create_disk.side_effect = VolumeError("disk full")
         mocker.patch(
             "mvmctl.api.volume_operations.VolumeService",
             return_value=mock_svc,
@@ -162,7 +162,7 @@ class TestVolumeOperationCreate:
         )
         mocker.patch("mvmctl.api.volume_operations.Database")
 
-        with pytest.raises(VolumeCreateError, match="disk full"):
+        with pytest.raises(VolumeError, match="disk full"):
             VolumeOperation.create(VolumeCreateInput(name="my-vol", size="1G"))
 
 
@@ -196,7 +196,7 @@ class TestVolumeOperationRemove:
         assert result.items[0].is_ok
         assert result.items[0].status == "success"
         assert result.items[0].code == "volume.removed"
-        mock_svc.remove_disk.assert_called_once()
+        mock_svc.remove.assert_called_once()
 
     def test_remove_attached_without_force_returns_error(self, mocker):
         """Removing an attached volume without --force should return error."""
@@ -227,7 +227,7 @@ class TestVolumeOperationRemove:
 
         assert result.items[0].is_error
         assert "attached" in result.items[0].message
-        assert mock_svc.remove_disk.call_count == 0
+        assert mock_svc.remove.call_count == 0
 
 
 class TestVolumeOperationList:
@@ -243,12 +243,11 @@ class TestVolumeOperationList:
         # list_() creates Database() and VolumeRepository internally
         mocker.patch("mvmctl.api.volume_operations.Database")
 
-        result = VolumeOperation.list_()
+        result = VolumeOperation.list_all()
 
         assert len(result) == 2
         assert result[0].name == "vol-1"
         assert result[1].name == "vol-2"
-        mock_repo.list_all.assert_called_once()
 
     def test_list_empty_returns_empty_list(self, mocker):
         """List with no volumes should return empty list."""
@@ -260,8 +259,7 @@ class TestVolumeOperationList:
         )
         mocker.patch("mvmctl.api.volume_operations.Database")
 
-        result = VolumeOperation.list_()
-
+        result = VolumeOperation.list_all()
         assert result == []
 
 

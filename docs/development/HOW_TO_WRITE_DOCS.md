@@ -12,7 +12,7 @@ Spawn multiple `explore` agents in parallel — each responsible for a group of 
 |-------|-------|
 | Explore 1 | Root docs (CONTEXT.md, AGENTS.md, README.md, CHANGELOG.md) |
 | Explore 2 | `docs/` folder (PROJECT_ARCHITECTURE.md, API.md, REFERENCES.md, TROUBLESHOOTING.md, RUNTIME.md, DEPENDENCIES.md, ASSETS_CONFIGURATIONS.md, custom-kernel.md, RELEASE.md) |
-| Explore 3 | ADR docs (`docs/adr/0001` through `0009`) |
+| Explore 3 | ADR docs (all docs/adr/ files — currently 0001 through 0015) |
 | Explore 4 | Improvement, implementation, development, and optimization docs |
 | Explore 5 | Agent instruction files (`.opencode/agent/*.md`) |
 | Explore 6 | Public site (`mvmctl.com`) — the path is dynamic; ask the user or use the path they provide |

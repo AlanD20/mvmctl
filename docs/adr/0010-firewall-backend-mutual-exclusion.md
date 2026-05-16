@@ -20,7 +20,7 @@ Each backend lives in its own directory under `core/_shared/` with its own track
 
 | Aspect | nftables | iptables |
 |--------|----------|----------|
-| Mechanism | `nft -f -` with atomic batch files | Per-rule `iptables` / `iptables-save` calls |
+| Mechanism | `nft -f -` with atomic batch files | Per-rule iptables calls |
 | Implementation | `NFTablesTracker` → `NFTablesRuleRepository` | `IPTablesTracker` → `IPTablesRuleRepository` |
 | Batch flush | Single atomic `nft -f -` | Individual rule execution |
 | DB table | `nftables_rules` | `iptables_rules` |

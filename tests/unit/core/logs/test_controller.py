@@ -11,7 +11,7 @@ from mvmctl.core._shared import Database
 from mvmctl.core.logs._controller import LogController
 from mvmctl.core.logs._service import LogService
 from mvmctl.core.vm._repository import VMRepository
-from mvmctl.exceptions import VMNotFoundError
+from mvmctl.exceptions import LogsError
 from mvmctl.models import VMInstanceItem, VMStatus
 
 
@@ -289,7 +289,7 @@ class TestLogController:
             vm = repo.get(vm_hash)
             assert vm is not None
             controller = LogController(vm)
-            with pytest.raises(VMNotFoundError, match="Log file not found"):
+            with pytest.raises(LogsError, match="Log file not found"):
                 controller.show(
                     "boot",
                     lines=50,

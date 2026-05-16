@@ -14,7 +14,7 @@ def _complete_remote_image_ids(incomplete: str) -> list[str]:
     try:
         from mvmctl.api import ImageOperation
 
-        images = ImageOperation.list_(remote=True)  # type: ignore[attr-defined]
+        images = ImageOperation.list_all(remote=True)  # type: ignore[attr-defined]
         results: list[str] = []
         for img in images:
             if (
@@ -34,7 +34,7 @@ def _complete_local_image_ids(incomplete: str) -> list[str]:
     try:
         from mvmctl.api import ImageOperation
 
-        images = ImageOperation.list_(remote=False)  # type: ignore[attr-defined]
+        images = ImageOperation.list_all(remote=False)  # type: ignore[attr-defined]
         results: list[str] = []
         for img in images:
             if hasattr(img, "id") and img.id:
@@ -137,7 +137,7 @@ def _complete_binary_versions(incomplete: str) -> list[str]:
     try:
         from mvmctl.api import BinaryOperation
 
-        binaries = BinaryOperation.list_local()  # type: ignore[attr-defined]
+        binaries = BinaryOperation.list_all()  # type: ignore[attr-defined]
         results: list[str] = []
         for b in binaries:
             if (
@@ -188,12 +188,43 @@ def _complete_key_names(incomplete: str) -> list[str]:
         return []
 
 
+def _complete_cache_resources(incomplete: str) -> list[str]:
+    """Complete with cache resource names."""
+    resources = ["vm", "network", "image", "kernel", "binary", "misc"]
+    return [r for r in resources if r.startswith(incomplete)]
+
+
+def _complete_config_categories(incomplete: str) -> list[str]:
+    """Complete with config category names."""
+    try:
+        from mvmctl.constants import OVERRIDABLE_DEFAULTS
+
+        return [c for c in OVERRIDABLE_DEFAULTS if c.startswith(incomplete)]
+    except Exception:
+        return []
+
+
+def _complete_config_keys(incomplete: str) -> list[str]:
+    """Complete with config key names from all categories."""
+    try:
+        from mvmctl.constants import OVERRIDABLE_DEFAULTS
+
+        keys: list[str] = []
+        for category_keys in OVERRIDABLE_DEFAULTS.values():
+            for key in category_keys:
+                if key.startswith(incomplete) and key not in keys:
+                    keys.append(key)
+        return keys
+    except Exception:
+        return []
+
+
 def _complete_volume_names(incomplete: str) -> list[str]:
     """Complete with volume names and short IDs."""
     try:
         from mvmctl.api import VolumeInput, VolumeOperation
 
-        volumes = VolumeOperation.list_(VolumeInput())  # type: ignore[attr-defined, operator]
+        volumes = VolumeOperation.list_all(VolumeInput())  # type: ignore[attr-defined, operator]
         results: list[str] = []
         for v in volumes:
             if (

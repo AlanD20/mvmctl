@@ -209,7 +209,8 @@ class TestBuildSshOps:
             "chmod 440 /etc/sudoers.d/testuser" in cmd
             for cmd in chroot_commands
         )
-        assert any(cmd.startswith("ssh-keygen") for cmd in chroot_commands)
+        # ssh-keygen is added at image build time (build_deblob_ops), not in
+        # build_ssh_ops
 
     def test_root_user_omits_useradd_and_sudoers(self) -> None:
         """Root user should NOT include useradd or sudoers ChrootOps."""
@@ -221,7 +222,8 @@ class TestBuildSshOps:
 
         assert not any("useradd" in cmd for cmd in chroot_commands)
         assert not any("sudoers" in cmd for cmd in chroot_commands)
-        assert any(cmd.startswith("ssh-keygen") for cmd in chroot_commands)
+        # ssh-keygen is added at image build time (build_deblob_ops), not in
+        # build_ssh_ops
 
     def test_includes_authorized_keys_file_op(self) -> None:
         """Should include FileOp for authorized_keys."""
@@ -235,23 +237,11 @@ class TestBuildSshOps:
         assert auth_file is not None
         assert auth_file.mode == 0o600
 
-    def test_includes_ssh_config_file_op(self) -> None:
-        """Should include FileOp for sshd_config.d/mvm.conf."""
-        ops = ProvisionerContent.build_ssh_ops(
-            "testuser", ["ssh-ed25519 AAA... key1"]
-        )
-        file_ops = [op for op in ops if isinstance(op, FileOp)]
-        assert any("sshd_config.d/mvm.conf" in op.path for op in file_ops)
+    # sshd_config.d/mvm.conf is added at image build time (build_deblob_ops),
+    # not in build_ssh_ops
 
-    def test_includes_first_boot_scripts(self) -> None:
-        """Should include FileOps for first-boot installer and service."""
-        ops = ProvisionerContent.build_ssh_ops(
-            "testuser", ["ssh-ed25519 AAA... key1"]
-        )
-        file_ops = [op for op in ops if isinstance(op, FileOp)]
-        paths = [op.path for op in file_ops]
-        assert "/usr/local/bin/first-boot-ssh-installer.sh" in paths
-        assert "/etc/systemd/system/first-boot-ssh-installer.service" in paths
+    # First-boot scripts are added at image build time (build_deblob_ops),
+    # not in build_ssh_ops
 
     def test_root_user_authorized_keys_in_root_home(self) -> None:
         """Root user's authorized_keys should be in /root/.ssh/."""

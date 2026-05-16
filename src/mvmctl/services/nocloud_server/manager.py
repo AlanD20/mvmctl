@@ -357,7 +357,7 @@ class NoCloudNetServerManager:
             self._send_signal(self._pid, signal.SIGTERM)
             self._cleanup_file()
             self._pid = None
-            logger.info("Stopped NoCloud-net server for %s", self._name)
+            logger.info("Terminated NoCloud-net server for %s", self._name)
             return True
 
     def terminate(self) -> bool:

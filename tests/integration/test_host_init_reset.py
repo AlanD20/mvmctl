@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from mvmctl.api import HostOperation
+from mvmctl.core.host._service import HostService
 from mvmctl.models.host import HostStateChangeItem, HostStateItem
 from mvmctl.models.result import OperationResult
 
@@ -199,15 +200,9 @@ def _mock_host_system_deps(
         "mvmctl.core.host._service.SYSCTL_CONF",
         tmp_path / "sysctl.d" / "mvmctl.conf",
     )
-    monkeypatch.setattr(
-        "mvmctl.core.host._service.IPTABLES_RULES_V4",
-        str(tmp_path / "iptables" / "rules.v4"),
-    )
-
     # Ensure directories exist so file writes succeed
     (tmp_path / "sudoers.d").mkdir(parents=True, exist_ok=True)
     (tmp_path / "sysctl.d").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "iptables").mkdir(parents=True, exist_ok=True)
 
     # Ensure DB schema is present
     from mvmctl.core._shared import Database

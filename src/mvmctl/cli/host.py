@@ -85,10 +85,8 @@ def _abort_if_vms_running(action: str) -> None:
         return
     if running:
         names = ", ".join(v.name for v in running)
-        print_error(
-            f"Cannot {action}: {len(running)} VM(s) still running: {names}"
-        )
-        print_error("Stop all VMs first with: mvm vm stop <name>")
+        print_error(f"{action} blocked: VMs still running: {names}")
+        print_error("Stop all VMs first: mvm vm stop <name>")
         raise typer.Exit(code=1)
 
 
@@ -143,7 +141,7 @@ def host_init() -> None:
     except HostError as e:
         # Keep HostError handling for errors from sub-calls within init
         # (e.g., NetworkOperation called internally)
-        print_error(f"Host initialization error: {e}")
+        print_error(f"Host init failed: {e}")
         raise typer.Exit(code=1) from e
 
     if isinstance(result, NeedsInteraction):
@@ -207,13 +205,13 @@ def host_init() -> None:
             print_info("Host already configured — nothing to do.")
         else:
             print_success(
-                f"Host initialized ({applied_changes} change(s) applied)."
+                f"Initialized: host ({applied_changes} change(s) applied)"
             )
 
         was_user_added = result.metadata.get("user_added_to_group", False)
         if was_user_added:
             print_warning(
-                "ACTION REQUIRED: Log out and back in for group membership to take effect."
+                "Log out and back in for group membership to take effect"
             )
             print_info(f"Or run immediately: newgrp {MVM_UNIX_GROUP}")
     elif result.status == "skipped":
@@ -305,7 +303,9 @@ def host_clean(
             f"Sysctl settings, sudoers, and the '{MVM_UNIX_GROUP}' group will NOT be affected."
         )
         print_info("")
-        typer.confirm("Proceed with host clean?", abort=True)
+        if not typer.confirm("Proceed with host clean?"):
+            print_info("Aborted")
+            raise typer.Exit(code=0)
 
     cache_dir = CacheUtils.get_cache_dir()
     result = HostOperation.clean(cache_dir)
@@ -318,7 +318,8 @@ def host_clean(
     if summary:
         for item in summary:
             if item.startswith("Warning:"):
-                print_warning(f"  {item}")
+                remainder = item[len("Warning:") :].strip()
+                print_warning(f"  {remainder}")
             else:
                 print_info(f"  {item}")
 
@@ -357,7 +358,9 @@ def host_reset(
             "This is a full rollback to pre-init state."
         )
         print_info("")
-        typer.confirm("Proceed with host reset?", abort=True)
+        if not typer.confirm("Proceed with host reset?"):
+            print_info("Aborted")
+            raise typer.Exit(code=0)
 
     cache_dir = CacheUtils.get_cache_dir()
     result = HostOperation.reset(cache_dir)
@@ -370,7 +373,8 @@ def host_reset(
     if summary:
         for item in summary:
             if item.startswith("Warning:"):
-                print_warning(f"  {item}")
+                remainder = item[len("Warning:") :].strip()
+                print_warning(f"  {remainder}")
             else:
                 print_info(f"  {item}")
 

@@ -9,7 +9,7 @@ from typing import Any
 
 from mvmctl.core.volume._repository import VolumeRepository
 from mvmctl.core.volume._resolver import VolumeResolver
-from mvmctl.exceptions import ProcessError, VolumeCreateError
+from mvmctl.exceptions import ProcessError, VolumeError
 from mvmctl.models import DriveConfig, VolumeItem, VolumeStatus
 from mvmctl.utils._system import run_cmd
 
@@ -39,7 +39,7 @@ class VolumeService:
             The persisted VolumeItem.
 
         Raises:
-            VolumeCreateError: If the disk creation fails.
+            VolumeError: If the disk creation fails.
 
         """
         disk_path = Path(volume.path)
@@ -51,7 +51,7 @@ class VolumeService:
                     ["fallocate", "-l", str(volume.size_bytes), str(disk_path)],
                 )
             except ProcessError as e:
-                raise VolumeCreateError(f"fallocate failed: {e}") from e
+                raise VolumeError(f"fallocate failed: {e}") from e
         elif volume.format == "qcow2":
             try:
                 run_cmd(
@@ -65,14 +65,14 @@ class VolumeService:
                     ],
                 )
             except ProcessError as e:
-                raise VolumeCreateError(f"qemu-img create failed: {e}") from e
+                raise VolumeError(f"qemu-img create failed: {e}") from e
         else:
-            raise VolumeCreateError(f"Unsupported format: {volume.format}")
+            raise VolumeError(f"Unsupported format: {volume.format}")
 
         self._repo.upsert(volume)
         return volume
 
-    def remove_disk(self, volume: VolumeItem) -> None:
+    def remove(self, volume: VolumeItem) -> None:
         """Remove a disk file and its DB record.
 
         Args:
@@ -100,14 +100,14 @@ class VolumeService:
             The updated VolumeItem with new size and timestamp.
 
         Raises:
-            VolumeCreateError: If the resize fails.
+            VolumeError: If the resize fails.
 
         """
         from datetime import UTC, datetime
 
         disk_path = Path(volume.path)
         if not disk_path.exists():
-            raise VolumeCreateError(f"Disk file not found: {disk_path}")
+            raise VolumeError(f"Disk file not found: {disk_path}")
 
         if volume.format == "raw":
             try:
@@ -115,7 +115,7 @@ class VolumeService:
                     ["fallocate", "-l", str(new_size_bytes), str(disk_path)],
                 )
             except ProcessError as e:
-                raise VolumeCreateError(f"fallocate resize failed: {e}") from e
+                raise VolumeError(f"fallocate resize failed: {e}") from e
         elif volume.format == "qcow2":
             try:
                 run_cmd(
@@ -127,9 +127,9 @@ class VolumeService:
                     ],
                 )
             except ProcessError as e:
-                raise VolumeCreateError(f"qemu-img resize failed: {e}") from e
+                raise VolumeError(f"qemu-img resize failed: {e}") from e
         else:
-            raise VolumeCreateError(f"Unsupported format: {volume.format}")
+            raise VolumeError(f"Unsupported format: {volume.format}")
 
         # Update and persist DB record
         volume.size_bytes = new_size_bytes
@@ -148,18 +148,18 @@ class VolumeService:
             Dictionary with disk information parsed from qemu-img JSON output.
 
         Raises:
-            VolumeCreateError: If qemu-img is not found or fails.
+            VolumeError: If qemu-img is not found or fails.
 
         """
         if not path.exists():
-            raise VolumeCreateError(f"Disk file not found: {path}")
+            raise VolumeError(f"Disk file not found: {path}")
 
         try:
             result = run_cmd(
                 ["qemu-img", "info", "--output=json", str(path)],
             )
         except ProcessError as e:
-            raise VolumeCreateError(f"qemu-img info failed: {e}") from e
+            raise VolumeError(f"qemu-img info failed: {e}") from e
 
         data: dict[str, Any] = json.loads(result.stdout)
         return data
@@ -178,7 +178,7 @@ class VolumeService:
             List of drive config dicts (drive_id, path_on_host, etc.).
 
         Raises:
-            VolumeCreateError: If any volume is not available.
+            VolumeError: If any volume is not available.
 
         """
         drives: list[DriveConfig] = []
@@ -187,7 +187,7 @@ class VolumeService:
                 VolumeStatus.AVAILABLE,
                 VolumeStatus.ATTACHED,
             ):
-                raise VolumeCreateError(
+                raise VolumeError(
                     f"Volume '{vol.name}' is not available "
                     f"(status: {vol.status})"
                 )

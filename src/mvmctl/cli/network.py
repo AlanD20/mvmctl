@@ -86,7 +86,7 @@ def network_ls(
                 name_col,
                 n.subnet,
                 n.bridge,
-                "yes" if n.nat_enabled else "no",
+                "True" if n.nat_enabled else "False",
                 str(vm_count),
                 CommonUtils.human_readable_datetime(n.created_at),
             ]
@@ -124,7 +124,7 @@ def network_set_default(
     if result.status in ("error", "failure"):
         print_error(result.message)
         raise typer.Exit(code=1)
-    print_success(f"Default network set to '{name}'")
+    print_success(f"Default network set to: {name}")
 
 
 def _resolve_user_nat_gateways() -> str:
@@ -228,11 +228,11 @@ def network_create(
         print_error(result.message)
         raise typer.Exit(code=1)
 
-    print_success(f"Network '{config.name}' created")
+    print_success(f"Created: {config.name}")
     print_info(f"  SUBNET:    {config.subnet}")
     print_info(f"  IPv4 Gateway: {config.ipv4_gateway}")
     print_info(f"  Bridge:  {config.bridge}")
-    print_info(f"  NAT:     {'enabled' if config.nat_enabled else 'disabled'}")
+    print_info(f"  NAT:     {'True' if config.nat_enabled else 'False'}")
     if config.nat_gateways:
         print_info(f"  NAT gateways: {', '.join(config.nat_gateways_list)}")
 
@@ -265,7 +265,7 @@ def network_rm(
         print_error(result.message)
         raise typer.Exit(code=1)
     for name in effective_names:
-        print_success(f"Network '{name}' removed")
+        print_success(f"Removed: {name}")
 
 
 @network_app.command(
@@ -305,14 +305,14 @@ def network_inspect(
     print_key_value("Subnet", info.subnet or "-")
     print_key_value("IPv4 Gateway", info.ipv4_gateway or "-")
     print_key_value("Bridge", info.bridge)
-    print_key_value("NAT", "enabled" if info.nat_enabled else "disabled")
+    print_key_value("NAT", "True" if info.nat_enabled else "False")
     print_key_value(
         "Created", CommonUtils.human_readable_datetime(info.created_at)
     )
 
     print_section_header("RESOURCES")
     leases: list[NetworkLeaseItem] = info.leases or []
-    print_key_value("Bridge Active", "yes" if info.bridge_active else "no")
+    print_key_value("Bridge Active", "True" if info.bridge_active else "False")
     print_key_value("Leases", f"{len(leases)} assigned")
 
     # Show NAT config if enabled
@@ -342,7 +342,9 @@ def network_inspect(
 def network_sync(
     ctx: typer.Context,
     identifier: str | None = typer.Argument(
-        None, help="Network name or ID (omit for all)"
+        None,
+        help="Network name or ID (omit for all)",
+        autocompletion=_complete_network_names,
     ),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
@@ -400,10 +402,10 @@ def _print_network_details_tree(info: NetworkItem) -> None:
         f"├── Subnet:       {info.subnet or '-'}",
         f"├── IPv4 Gateway: {info.ipv4_gateway or '-'}",
         f"├── Bridge:       {info.bridge}",
-        f"├── NAT:          {'enabled' if info.nat_enabled else 'disabled'}",
-        f"├── Default:      {'Yes' if info.is_default else 'No'}",
-        f"├── Present:      {'Yes' if info.is_present else 'No'}",
-        f"├── Bridge Active: {'yes' if info.bridge_active else 'no'}",
+        f"├── NAT:          {'True' if info.nat_enabled else 'False'}",
+        f"├── Default:      {'True' if info.is_default else 'False'}",
+        f"├── Present:      {'True' if info.is_present else 'False'}",
+        f"├── Bridge Active: {'True' if info.bridge_active else 'False'}",
         f"├── Created:      {CommonUtils.human_readable_datetime(info.created_at)}",
     ]
 

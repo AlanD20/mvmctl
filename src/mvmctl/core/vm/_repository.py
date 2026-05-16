@@ -218,6 +218,64 @@ class VMRepository:
         return [VMInstanceItem(**dict(row)) for row in rows]
 
     @_graceful_read(factory=list)
+    def find_by_volume_id(self, volume_id: str) -> list[VMInstanceItem]:
+        """Return all VMs whose volume_ids contain the given volume ID.
+
+        Args:
+            volume_id: The volume ID to search for in VM volume_ids lists.
+
+        Returns:
+            List of VMInstanceItem records that reference this volume.
+
+        """
+        with self._db.connect() as conn:
+            # Use LIKE with JSON-quoted ID to match inside the JSON array
+            rows = conn.execute(
+                "SELECT * FROM vm_instances WHERE volume_ids LIKE ?",
+                (f'%"{volume_id}"%',),
+            ).fetchall()
+        return [VMInstanceItem(**dict(row)) for row in rows]
+
+    @_graceful_read(factory=list)
+    def find_by_volume_ids_batch(
+        self, volume_ids: list[str]
+    ) -> list[VMInstanceItem]:
+        """Return all VMs whose volume_ids contain any of the given volume IDs.
+
+        Args:
+            volume_ids: List of volume IDs to search for.
+
+        Returns:
+            List of VMInstanceItem records that reference any of the given volumes.
+
+        """
+        with self._db.connect() as conn:
+            patterns = [f'%"{vid}"%' for vid in volume_ids]
+            rows = conn.execute(
+                f"SELECT DISTINCT vm_instances.* FROM vm_instances "
+                f"WHERE {' OR '.join('volume_ids LIKE ?' for _ in volume_ids)}",
+                patterns,
+            ).fetchall()
+        return [VMInstanceItem(**dict(row)) for row in rows]
+
+    def find_by_ssh_key_id(self, key_id: str) -> list[VMInstanceItem]:
+        """Return all VMs whose ssh_keys contain the given key ID.
+
+        Args:
+            key_id: The SSH key ID (fingerprint) to search for.
+
+        Returns:
+            List of VMInstanceItem records that reference this key.
+
+        """
+        with self._db.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM vm_instances WHERE ssh_keys LIKE ?",
+                (f'%"{key_id}"%',),
+            ).fetchall()
+        return [VMInstanceItem(**dict(row)) for row in rows]
+
+    @_graceful_read(factory=list)
     def list_excluding_statuses(
         self, excluded_statuses: VMStatus | list[VMStatus]
     ) -> list[VMInstanceItem]:

@@ -18,7 +18,7 @@ from mvmctl.api.inputs._volume_input import (
     VolumeRequest,
 )
 from mvmctl.core.volume._repository import VolumeRepository
-from mvmctl.exceptions import VolumeCreateError, VolumeNotFoundError
+from mvmctl.exceptions import VolumeError, VolumeNotFoundError
 from mvmctl.models import VolumeItem
 
 
@@ -222,7 +222,7 @@ class TestVolumeCreateRequest:
             inputs=VolumeCreateInput(name="my-vol", size="1G", format="vmdk"),
             db=MagicMock(),
         )
-        with pytest.raises(VolumeCreateError, match="Unsupported format"):
+        with pytest.raises(VolumeError, match="Unsupported format"):
             request.resolve()
 
     def test_ensure_validate_before_resolve_raises(self):
@@ -231,7 +231,7 @@ class TestVolumeCreateRequest:
             inputs=VolumeCreateInput(name="my-vol", size="1G"),
         )
         with pytest.raises(
-            VolumeCreateError, match="Failed to resolve necessary dependencies"
+            VolumeError, match="Failed to resolve necessary dependencies"
         ):
             request.ensure_validate()
 

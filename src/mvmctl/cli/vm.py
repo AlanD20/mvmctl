@@ -26,6 +26,7 @@ else:
 from mvmctl.cli._completion import _complete_vm_names
 from mvmctl.utils._io import (
     print_error,
+    print_info,
     print_inspect_header,
     print_key_value,
     print_section_header,
@@ -89,16 +90,16 @@ def vm_ls(
         )
     print_table(
         columns=[
-            "NAME",
-            "STATUS",
-            "EXIT",
-            "IPV4",
-            "VCPUS",
-            "MEM(MiB)",
-            "DISK(MiB)",
-            "IMAGE",
-            "KERNEL",
-            "CREATED",
+            "Name",
+            "Status",
+            "Exit",
+            "IPv4",
+            "vCPUs",
+            "Mem(MiB)",
+            "Disk(MiB)",
+            "Image",
+            "Kernel",
+            "Created",
         ],
         rows=rows,
     )
@@ -133,15 +134,15 @@ def vm_ps() -> None:
         )
     print_table(
         columns=[
-            "NAME",
-            "STATUS",
-            "IPV4",
-            "VCPUS",
-            "MEM(MiB)",
-            "DISK(MiB)",
-            "IMAGE",
-            "KERNEL",
-            "CREATED",
+            "Name",
+            "Status",
+            "IPv4",
+            "vCPUs",
+            "Mem(MiB)",
+            "Disk(MiB)",
+            "Image",
+            "Kernel",
+            "Created",
         ],
         rows=rows,
     )
@@ -150,7 +151,7 @@ def vm_ps() -> None:
 @vm_app.command(name="create")
 @handle_errors
 def vm_create(
-    name: str = typer.Option(..., "--name", "-n", help="VM name"),
+    name: str = typer.Argument(..., help="VM name"),
     image: str | None = typer.Option(
         None,
         "--image",
@@ -277,10 +278,11 @@ def vm_create(
 ) -> None:
     """Create and start a new Firecracker VM."""
     if skip_cleanup:
-        typer.confirm(
+        if not typer.confirm(
             "--skip-cleanup is set: if creation fails, resources will be left behind and must be cleaned manually. Continue?",
-            abort=True,
-        )
+        ):
+            print_info("Aborted")
+            raise typer.Exit(code=0)
 
     effective_ssh_keys = ssh_key.split(",") if ssh_key is not None else []
 
@@ -341,12 +343,12 @@ def vm_create(
         raise typer.Exit(code=1)
 
     if result.item is None:
-        print_error("Unexpected error: no VMs returned")
+        print_error("No VMs returned")
         raise typer.Exit(code=1)
 
     vms = result.item
     names = [vm.name for vm in vms]
-    print_success(f"Created {len(vms)} VM(s): {', '.join(names)}")
+    print_success(f"Created: {', '.join(names)}")
 
 
 @vm_app.command(name="rm")
@@ -367,12 +369,13 @@ def vm_rm(
         for r in result.items:
             if r.is_ok:
                 if r.item:
-                    print_success(f"Removed VM '{r.item.name}'")
+                    print_success(f"Removed: {r.item.name}")
             else:
                 item_name = r.item.name if r.item else "unknown"
-                print_error(r.message or f"Failed to remove VM '{item_name}'")
+                print_error(r.message or f"Remove failed: {item_name}")
         raise typer.Exit(code=1)
-    print_success("VMs removed")
+    names = [r.item.name for r in result.items if r.item]
+    print_success(f"Removed: {', '.join(names)}")
 
 
 @vm_app.command(name="start")
@@ -389,9 +392,9 @@ def vm_start(
     if result.has_any_error:
         for r in result.items:
             if not r.is_ok:
-                print_error(r.message or f"Failed to start VM '{identifier}'")
+                print_error(r.message or f"Start failed: {identifier}")
         raise typer.Exit(code=1)
-    print_success(f"VM '{identifier}' started")
+    print_success(f"Started: {identifier}")
 
 
 @vm_app.command(name="stop")
@@ -409,9 +412,9 @@ def vm_stop(
     if result.has_any_error:
         for r in result.items:
             if not r.is_ok:
-                print_error(r.message or f"Failed to stop VM '{identifier}'")
+                print_error(r.message or f"Stop failed: {identifier}")
         raise typer.Exit(code=1)
-    print_success(f"VM '{identifier}' stopped")
+    print_success(f"Stopped: {identifier}")
 
 
 @vm_app.command(name="reboot")
@@ -429,9 +432,9 @@ def vm_reboot(
     if result.has_any_error:
         for r in result.items:
             if not r.is_ok:
-                print_error(r.message or f"Failed to reboot VM '{identifier}'")
+                print_error(r.message or f"Reboot failed: {identifier}")
         raise typer.Exit(code=1)
-    print_success(f"VM '{identifier}' rebooted")
+    print_success(f"Rebooted: {identifier}")
 
 
 @vm_app.command(name="pause")
@@ -448,9 +451,9 @@ def vm_pause(
     if result.has_any_error:
         for r in result.items:
             if not r.is_ok:
-                print_error(r.message or f"Failed to pause VM '{identifier}'")
+                print_error(r.message or f"Pause failed: {identifier}")
         raise typer.Exit(code=1)
-    print_success(f"VM '{identifier}' paused")
+    print_success(f"Paused: {identifier}")
 
 
 @vm_app.command(name="resume")
@@ -467,9 +470,9 @@ def vm_resume(
     if result.has_any_error:
         for r in result.items:
             if not r.is_ok:
-                print_error(r.message or f"Failed to resume VM '{identifier}'")
+                print_error(r.message or f"Resume failed: {identifier}")
         raise typer.Exit(code=1)
-    print_success(f"VM '{identifier}' resumed")
+    print_success(f"Resumed: {identifier}")
 
 
 @vm_app.command(name="snapshot")
@@ -490,7 +493,7 @@ def vm_snapshot(
     if result.is_error:
         print_error(result.message)
         raise typer.Exit(code=1)
-    print_success(result.message or f"VM '{identifier}' snapshot saved")
+    print_success(result.message or f"Snapshot saved: {identifier}")
 
 
 @vm_app.command(name="load")
@@ -514,7 +517,7 @@ def vm_load(
         state_file,
         resume_after=resume,
     )
-    print_success(f"VM '{identifier}' snapshot loaded")
+    print_success(f"Snapshot loaded: {identifier}")
 
 
 @vm_app.command(name="inspect")
@@ -587,23 +590,19 @@ def vm_inspect(
     print_key_value("Serial", info["serial_output_path"] or "-")
 
     print_section_header("CONSOLE")
-    print_key_value("Relay Running", "yes" if info["relay_running"] else "no")
+    print_key_value(
+        "Relay Running", "True" if info["relay_running"] else "False"
+    )
     print_key_value(
         "Relay PID", str(info["relay_pid"]) if info["relay_pid"] else "-"
     )
     print_key_value("Relay Socket", info["relay_socket_path"] or "-")
 
     print_section_header("FEATURES")
-    print_key_value("PCI", "enabled" if info["enable_pci"] else "disabled")
-    print_key_value(
-        "Console", "enabled" if info["enable_console"] else "disabled"
-    )
-    print_key_value(
-        "Logging", "enabled" if info["enable_logging"] else "disabled"
-    )
-    print_key_value(
-        "Metrics", "enabled" if info["enable_metrics"] else "disabled"
-    )
+    print_key_value("PCI", "True" if info["enable_pci"] else "False")
+    print_key_value("Console", "True" if info["enable_console"] else "False")
+    print_key_value("Logging", "True" if info["enable_logging"] else "False")
+    print_key_value("Metrics", "True" if info["enable_metrics"] else "False")
     print_key_value("Cloud-init", info["cloud_init_mode"])
 
 
@@ -666,7 +665,7 @@ def _print_vm_inspect_tree(info: dict[str, Any]) -> None:
 
     tree_lines.append("└── Console")
     tree_lines.append(
-        f"    ├── Relay Running:  {'yes' if console['relay_running'] else 'no'}"
+        f"    ├── Relay Running:  {'True' if console['relay_running'] else 'False'}"
     )
     tree_lines.append(
         f"    ├── Relay PID:      {console['relay_pid'] if console['relay_pid'] is not None else '-'}"
@@ -702,7 +701,7 @@ def vm_export(
 
     if output is not None:
         output.write_text(json_output)
-        print_success(f"Exported VM config to {output}")
+        print_success(f"Exported: {output}")
     else:
         typer.echo(json_output)
 
@@ -722,7 +721,7 @@ def vm_import(
         VMImportInput(config_path=config_path, name_override=name)
     )
     if isinstance(result, NeedsInteraction):
-        print_error("Cannot import VM: privileges required")
+        print_error("Import requires privileges")
         raise typer.Exit(code=1)
     if result.status == "success":
         print_success(result.message)

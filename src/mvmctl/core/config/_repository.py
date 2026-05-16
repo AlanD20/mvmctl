@@ -76,6 +76,15 @@ class SettingsRepository:
             cursor = conn.execute("DELETE FROM user_settings")
             return cursor.rowcount
 
+    @_graceful_read(default=0)
+    def count(self) -> int:
+        """Return total count of all user settings."""
+        with self._db.connect() as conn:
+            result = conn.execute(
+                "SELECT COUNT(*) FROM user_settings"
+            ).fetchone()
+        return result[0] if result else 0
+
     @_graceful_read(factory=dict)
     def list_by_category(
         self, category: str | None = None

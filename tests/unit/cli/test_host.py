@@ -175,7 +175,7 @@ class TestHostClean:
         mock_host_op.get_running_vms.return_value = [mock_vm]
         result = runner.invoke(app, ["host", "clean", "--force"])
         assert result.exit_code == 1
-        assert "Cannot clean" in result.output
+        assert "blocked" in result.output
 
     @patch("mvmctl.cli.host.HostOperation")
     def test_clean_api_error(self, mock_host_op):
@@ -211,7 +211,7 @@ class TestHostReset:
         mock_host_op.get_running_vms.return_value = [mock_vm]
         result = runner.invoke(app, ["host", "reset", "--force"])
         assert result.exit_code == 1
-        assert "Cannot reset" in result.output
+        assert "blocked" in result.output
 
     @patch("mvmctl.cli.host.HostOperation")
     def test_reset_api_error(self, mock_host_op):
@@ -270,7 +270,7 @@ class TestHostInitPrivilege:
         mock_host_op.init.side_effect = HostError("KVM not available")
         result = runner.invoke(app, ["host", "init"])
         assert result.exit_code == 1
-        assert "Host initialization error" in result.output
+        assert "Host init failed" in result.output
 
 
 class TestHostInitNeedsInteraction:
@@ -348,7 +348,7 @@ class TestHostInitEdgeCases:
         )
         result = runner.invoke(app, ["host", "init"])
         assert result.exit_code == 0
-        assert "ACTION REQUIRED" in result.output
+        assert "Log out and back in" in result.output
 
     @patch("mvmctl.cli.host.HostOperation")
     def test_init_failure_status(self, mock_host_op):
@@ -427,13 +427,14 @@ class TestHostCleanEdgeCases:
         )
         result = runner.invoke(app, ["host", "clean", "--force"])
         assert result.exit_code == 0
-        assert "Warning:" in result.output
+        assert "bridge still in use" in result.output
 
     @patch("mvmctl.cli.host.HostOperation")
     def test_clean_confirmation_aborted(self, mock_host_op):
         mock_host_op.get_running_vms.return_value = []
         result = runner.invoke(app, ["host", "clean"], input="n\n")
-        assert result.exit_code != 0
+        assert result.exit_code == 0
+        assert "Aborted" in result.output
 
     @patch("mvmctl.cli.host.HostOperation")
     def test_clean_no_summary_items(self, mock_host_op):
@@ -480,13 +481,14 @@ class TestHostResetEdgeCases:
         )
         result = runner.invoke(app, ["host", "reset", "--force"])
         assert result.exit_code == 0
-        assert "Warning:" in result.output
+        assert "iptables rules may remain" in result.output
 
     @patch("mvmctl.cli.host.HostOperation")
     def test_reset_confirmation_aborted(self, mock_host_op):
         mock_host_op.get_running_vms.return_value = []
         result = runner.invoke(app, ["host", "reset"], input="n\n")
-        assert result.exit_code != 0
+        assert result.exit_code == 0
+        assert "Aborted" in result.output
 
     @patch("mvmctl.cli.host.HostOperation")
     def test_reset_no_summary_items(self, mock_host_op):

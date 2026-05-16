@@ -84,7 +84,7 @@ def image_ls(
     """List cached images (or available remote images with --remote)."""
     if remote:
         with Console().status("Fetching remote images"):
-            result = ImageOperation.list_(
+            result = ImageOperation.list_all(
                 remote=True,
                 no_cache=no_cache,
                 type_filter=type_filter,
@@ -93,7 +93,7 @@ def image_ls(
             cast(list[ImageVersion], result), json_output=json_output
         )
     else:
-        result = ImageOperation.list_(remote=False)
+        result = ImageOperation.list_all(remote=False)
         _list_local_images(
             cast(list[ImageItem], result), json_output=json_output
         )
@@ -298,16 +298,12 @@ def image_pull(
         raise typer.Exit(code=0)
 
     if result.is_error:
-        print_error(
-            result.message or f"Failed to download image '{image_selector}'"
-        )
+        print_error(result.message or f"Download failed: {image_selector}")
         raise typer.Exit(code=1)
 
     assert result.item is not None
     short_id = HashGenerator.shorten(result.item.id)
-    print_success(
-        f"Image '{result.item.name}' pulled successfully (ID: {short_id})"
-    )
+    print_success(f"Pulled: {result.item.name} (ID: {short_id})")
     if set_default:
         print_success(f"Default image set to: {image_selector}")
 
@@ -326,7 +322,7 @@ def image_set_default(
     """Set the default image for VM creation."""
     result = ImageOperation.set_default(ImageInput(id=[prefix]))
     if result.is_error:
-        print_error(result.message or f"Failed to set default image: {prefix}")
+        print_error(result.message or f"Set default failed: {prefix}")
         raise typer.Exit(code=1)
     print_success(f"Default image set to: {prefix}")
 
@@ -363,9 +359,9 @@ def image_rm(
     for r in result.items:
         item_id = HashGenerator.shorten(r.item.id) if r.item else "unknown"
         if r.is_ok:
-            print_success(f"Removed image: {item_id}")
+            print_success(f"Removed: {item_id}")
         else:
-            print_error(r.message or f"Failed to remove image: {item_id}")
+            print_error(r.message or f"Remove failed: {item_id}")
 
 
 @image_app.command(name="inspect")
@@ -411,7 +407,7 @@ def _print_image_details(info: ImageItem) -> None:
     print_key_value("Name", info.name)
     print_key_value("Type", type_)
     print_key_value("Arch", info.arch)
-    print_key_value("Default", "Yes" if info.is_default else "No")
+    print_key_value("Default", "True" if info.is_default else "False")
     print_key_value(
         "Pulled", CommonUtils.human_readable_datetime(info.pulled_at)
     )
@@ -472,7 +468,7 @@ def _print_image_details_tree(info: ImageItem) -> None:
         f"├── Name:        {info.name}",
         f"├── Type:        {type_}",
         f"├── Arch:        {info.arch}",
-        f"├── Default:     {'Yes' if info.is_default else 'No'}",
+        f"├── Default:     {'True' if info.is_default else 'False'}",
         f"├── Pulled:      {CommonUtils.human_readable_datetime(info.pulled_at)}",
         f"├── Created:     {CommonUtils.human_readable_datetime(info.created_at)}",
         f"├── Updated:     {CommonUtils.human_readable_datetime(info.updated_at)}",
@@ -598,12 +594,12 @@ def image_import(
         result = ImageOperation.import_(spec, on_progress=_on_progress)
 
     if result.is_error:
-        print_error(result.message or f"Failed to import image '{name}'")
+        print_error(result.message or f"Import failed: {name}")
         raise typer.Exit(code=1)
 
     assert result.item is not None
     short_id = HashGenerator.shorten(result.item.id)
-    print_success(f"Image imported: {result.item.path}")
+    print_success(f"Imported: {result.item.path}")
     print_info(f"  Name: {name}")
     print_info(f"  ID:   {short_id}")
 
@@ -624,6 +620,7 @@ def image_warm(
     all: bool = typer.Option(
         False,
         "--all",
+        "-a",
         help="Warm all cached images.",
     ),
 ) -> None:
@@ -662,13 +659,13 @@ def image_warm(
                 ImageInput(id=[image_id]), on_progress=_on_progress
             )
     if result.is_error:
-        print_error(result.message or "Failed to warm image(s)")
+        print_error(result.message or "Warm failed")
         raise typer.Exit(code=1)
 
     for path in result.item or []:
         size_str = CommonUtils.format_bytes_human_readable(path.stat().st_size)
         display_name = image_id or "all images"
-        print_success(f"Image warmed successfully: {display_name}")
+        print_success(f"Warmed: {display_name}")
         print_info(f"  Path: {path}")
         print_info(f"  Size: {size_str}")
-    print_info("  Ready for fast VM creation!")
+    print_info("  Ready for fast VM creation")

@@ -101,11 +101,11 @@ def key_add(
     """Add an existing public key to the cache."""
     result = KeyOperation.add(name=name, pub_key_path=path, overwrite=force)
     if result.is_error:
-        print_error(result.message or f"Failed to add key '{name}'")
+        print_error(result.message or f"Add failed: {name}")
         raise typer.Exit(code=1)
     assert result.item is not None
     print_success(
-        f"Key '{result.item.name}' added (ID: {HashGenerator.shorten(result.item.id)})"
+        f"Added: {result.item.name} (ID: {HashGenerator.shorten(result.item.id)})"
     )
 
 
@@ -149,11 +149,11 @@ def key_create(
     )
     result = KeyOperation.create(inputs)
     if result.is_error:
-        print_error(result.message or f"Failed to create key '{name}'")
+        print_error(result.message or f"Create failed: {name}")
         raise typer.Exit(code=1)
     assert result.item is not None
     print_success(
-        f"Key '{result.item.name}' created (ID: {result.item.fingerprint})"
+        f"Created: {result.item.name} (ID: {result.item.fingerprint})"
     )
 
 
@@ -167,6 +167,9 @@ def key_rm(
     names: list[str] = typer.Argument(
         None, help="Key name(s) to remove", autocompletion=_complete_key_names
     ),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Force removal even if key is in use"
+    ),
 ) -> None:
     """Remove one or more SSH keys."""
     effective_names: list[str] = list(names) if names else []
@@ -175,13 +178,13 @@ def key_rm(
         raise typer.Exit(code=1)
 
     inputs = KeyInput(name=effective_names)
-    result = KeyOperation.remove(inputs)
+    result = KeyOperation.remove(inputs, force=force)
     for r in result.items:
         item_name = r.item.name if r.item else "unknown"
         if r.is_ok:
-            print_success(f"Removed key: {item_name}")
+            print_success(f"Removed: {item_name}")
         else:
-            print_error(r.message or f"Failed to remove key: {item_name}")
+            print_error(r.message or f"Remove failed: {item_name}")
 
 
 @key_app.command(
@@ -224,8 +227,8 @@ def key_inspect(
     if key_item.private_key_path:
         print_key_value("Private Key", key_item.private_key_path)
     print_section_header("STATUS")
-    print_key_value("Default", "yes" if key_item.is_default else "no")
-    print_key_value("Present", "yes" if key_item.is_present else "no")
+    print_key_value("Default", "True" if key_item.is_default else "False")
+    print_key_value("Present", "True" if key_item.is_present else "False")
     print_key_value(
         "Created", CommonUtils.human_readable_datetime(key_item.created_at)
     )
@@ -251,11 +254,11 @@ def key_export(
     inputs = KeyInput(name=[name])
     result = KeyOperation.export(inputs, destination=out, overwrite=force)
     if result.is_error:
-        print_error(result.message or f"Failed to export key '{name}'")
+        print_error(result.message or f"Export failed: {name}")
         raise typer.Exit(code=1)
     assert result.item is not None
     private_path, public_path = result.item
-    print_success(f"Exported private key to {private_path}")
+    print_success(f"Exported: {private_path}")
     print_info(f"Exported public key to {public_path}")
 
 
@@ -273,9 +276,9 @@ def key_set_default(
     if clear:
         clear_result = KeyOperation.clear_defaults()
         if clear_result.is_error:
-            print_error(clear_result.message or "Failed to clear default keys")
+            print_error(clear_result.message or "Clear defaults failed")
             raise typer.Exit(code=1)
-        print_success("Cleared all default keys")
+        print_success("Cleared: all default keys")
         return
 
     effective_names: list[str] = list(names) if names else []
@@ -286,7 +289,7 @@ def key_set_default(
     inputs = KeyInput(name=effective_names)
     set_result = KeyOperation.set_default(inputs)
     if set_result.is_error:
-        print_error(set_result.message or "Failed to set default key(s)")
+        print_error(set_result.message or "Set default failed")
         raise typer.Exit(code=1)
     print_success(f"Default key(s) set: {', '.join(effective_names)}")
 
@@ -305,8 +308,12 @@ def _print_key_details_tree(info: SSHKeyItem) -> None:
     ]
     if info.private_key_path:
         tree_lines.append(f"├── Private Key:  {info.private_key_path}")
-    tree_lines.append(f"├── Default:      {'yes' if info.is_default else 'no'}")
-    tree_lines.append(f"├── Present:      {'yes' if info.is_present else 'no'}")
+    tree_lines.append(
+        f"├── Default:      {'True' if info.is_default else 'False'}"
+    )
+    tree_lines.append(
+        f"├── Present:      {'True' if info.is_present else 'False'}"
+    )
     tree_lines.append(
         f"├── Created:      {CommonUtils.human_readable_datetime(info.created_at)}"
     )

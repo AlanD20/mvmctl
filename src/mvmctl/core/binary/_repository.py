@@ -146,6 +146,15 @@ class BinaryRepository:
             )
             conn.execute("COMMIT")
 
+    @_graceful_read(default=0)
+    def count(self) -> int:
+        """Return total count of all non-deleted binaries."""
+        with self._db.connect() as conn:
+            result = conn.execute(
+                "SELECT COUNT(*) FROM binaries WHERE deleted_at IS NULL"
+            ).fetchone()
+        return result[0] if result else 0
+
     @_graceful_read(default=None)
     def get_default(self, name: str) -> BinaryItem | None:
         """Return the default binary entry for a given name, or None."""

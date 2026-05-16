@@ -41,6 +41,15 @@ class KernelRepository:
             ).fetchall()
         return [KernelItem(**dict(row)) for row in rows]
 
+    @_graceful_read(default=0)
+    def count(self) -> int:
+        """Return total count of all non-deleted kernels."""
+        with self._db.connect() as conn:
+            result = conn.execute(
+                "SELECT COUNT(*) FROM kernels WHERE deleted_at IS NULL"
+            ).fetchone()
+        return result[0] if result else 0
+
     @_graceful_read(factory=list)
     def list_all(self) -> list[KernelItem]:
         """Return all non-deleted kernels."""

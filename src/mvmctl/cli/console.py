@@ -76,14 +76,12 @@ def _kill_console_relay(identifier: str) -> None:
     result = ConsoleOperation.kill(identifier)
 
     if result.status == "success":
-        print_success(f"Console relay stopped for '{identifier}'")
+        print_success(f"Stopped: {identifier}")
     elif result.status == "skipped":
-        print_error(f"No console relay running for '{identifier}'")
+        print_error(f"Console relay not running: {identifier}")
         raise typer.Exit(1)
     else:
-        print_error(
-            result.message or f"Failed to stop console relay for '{identifier}'"
-        )
+        print_error(result.message or f"Stop failed: {identifier}")
         raise typer.Exit(1)
 
 
@@ -96,7 +94,7 @@ def _attach_to_console(identifier: str) -> None:
 
     sock = _connect_socket(attach_info.socket_path)
     if sock is None:
-        print_error("Failed to connect to console relay")
+        print_error("Console relay connection failed")
         raise typer.Exit(1)
 
     old_tty = None
@@ -127,7 +125,7 @@ def _connect_socket(socket_path: str) -> socket.socket | None:
         sock.setblocking(False)
         return sock
     except (OSError, ConnectionRefusedError, FileNotFoundError) as e:
-        print_error(f"Failed to connect to console relay: {e}")
+        print_error(f"Console relay connection failed: {e}")
         return None
 
 

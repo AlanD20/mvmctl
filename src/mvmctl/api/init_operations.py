@@ -6,12 +6,13 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from mvmctl.api.cache_operations import CacheOperation
 from mvmctl.api.host_operations import HostOperation
 from mvmctl.core._shared import Database
 from mvmctl.exceptions import BinaryError
+from mvmctl.models import BinaryItem
 from mvmctl.models.result import (
     NeedsInteraction,
     OperationResult,
@@ -203,7 +204,7 @@ class InitOperation:
         """
         from mvmctl.api.binary_operations import BinaryOperation
 
-        local = BinaryOperation.list_local()
+        local = cast(list[BinaryItem], BinaryOperation.list_all())
         fc_binaries = [b for b in local if b.name in ("firecracker", "jailer")]
         if fc_binaries:
             active = [v for v in fc_binaries if v.is_default]
@@ -259,7 +260,10 @@ class InitOperation:
         from mvmctl.api.inputs._binary_pull_input import BinaryPullInput
 
         try:
-            versions = BinaryOperation.list_remote(limit=1)
+            versions = cast(
+                list[str],
+                BinaryOperation.list_all(remote=True, limit=1),
+            )
             if not versions:
                 return InitStepResult(
                     "binary", False, "No remote versions found"
@@ -289,7 +293,10 @@ class InitOperation:
         from mvmctl.api.binary_operations import BinaryOperation
 
         try:
-            versions = BinaryOperation.list_remote(limit=5)
+            versions = cast(
+                list[str],
+                BinaryOperation.list_all(remote=True, limit=5),
+            )
         except BinaryError:
             versions = []
 

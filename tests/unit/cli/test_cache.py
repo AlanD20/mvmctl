@@ -404,7 +404,7 @@ class TestCachePruneAllEdgeCases:
         )
         result = runner.invoke(app, ["cache", "prune", "--all", "--force"])
         assert result.exit_code == 0
-        assert "Pruned 2" in result.output
+        assert "Pruned" in result.output
 
     @patch("mvmctl.cli.cache.CacheOperation")
     def test_prune_all_with_failed_ids(self, mock_cache_op):

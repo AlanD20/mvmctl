@@ -54,6 +54,15 @@ class NetworkRepository:
             ).fetchall()
         return [NetworkItem(**dict(row)) for row in rows]
 
+    @_graceful_read(default=0)
+    def count(self) -> int:
+        """Return total count of all non-deleted networks."""
+        with self._db.connect() as conn:
+            result = conn.execute(
+                "SELECT COUNT(*) FROM networks WHERE deleted_at IS NULL"
+            ).fetchone()
+        return result[0] if result else 0
+
     @_graceful_read(factory=list)
     def list_all(self) -> list[NetworkItem]:
         """Return all non-deleted networks."""
@@ -245,6 +254,15 @@ class LeaseRepository:
         """Release all IP leases held by a VM."""
         with self._db.connect() as conn:
             conn.execute("DELETE FROM network_leases WHERE vm_id = ?", (vm_id,))
+
+    @_graceful_read(default=0)
+    def count(self) -> int:
+        """Return total count of all leases."""
+        with self._db.connect() as conn:
+            result = conn.execute(
+                "SELECT COUNT(*) FROM network_leases"
+            ).fetchone()
+        return result[0] if result else 0
 
     @_graceful_read(default=0)
     def count_available(self, network_id: str) -> int:

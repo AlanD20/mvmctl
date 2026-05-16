@@ -7,7 +7,7 @@ from pathlib import Path
 
 from mvmctl.core._shared import Database
 from mvmctl.core.volume._repository import VolumeRepository
-from mvmctl.exceptions import VolumeCreateError
+from mvmctl.exceptions import VolumeError
 from mvmctl.utils._disk import DiskUtils
 from mvmctl.utils._validators import VolumeValidator
 from mvmctl.utils.common import CacheUtils
@@ -62,7 +62,7 @@ class VolumeCreateRequest:
 
         fmt = self._inputs.format if self._inputs.format is not None else "raw"
         if fmt not in ("raw", "qcow2"):
-            raise VolumeCreateError(
+            raise VolumeError(
                 f"Unsupported format: {fmt}. Use 'raw' or 'qcow2'."
             )
 
@@ -82,7 +82,7 @@ class VolumeCreateRequest:
     def ensure_validate(self) -> None:
         """Validate resolved creation inputs."""
         if self._result is None:
-            raise VolumeCreateError(
+            raise VolumeError(
                 "Failed to resolve necessary dependencies to validate"
             )
 
@@ -91,6 +91,4 @@ class VolumeCreateRequest:
         # Check for existing volume with same name
         existing = self._volume_repo.get_by_name(self._result.name)
         if existing is not None:
-            raise VolumeCreateError(
-                f"Volume '{self._result.name}' already exists"
-            )
+            raise VolumeError(f"Volume '{self._result.name}' already exists")

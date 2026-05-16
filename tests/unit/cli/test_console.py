@@ -59,7 +59,7 @@ class TestConsoleKill:
         )
         result = runner.invoke(app, ["console", "testvm", "--kill"])
         assert result.exit_code == 1
-        assert "No console relay" in result.output
+        assert "Console relay not running" in result.output
 
     @patch("mvmctl.cli.console.ConsoleOperation")
     def test_console_kill_not_found(self, mock_console_op):
@@ -193,7 +193,7 @@ class TestConsoleAttachErrorPaths:
         with patch("mvmctl.cli.console._connect_socket", return_value=None):
             result = runner.invoke(app, ["console", "testvm"])
         assert result.exit_code == 1
-        assert "Failed to connect" in result.output
+        assert "Console relay connection failed" in result.output
 
 
 class TestConsoleSocketFunctions:

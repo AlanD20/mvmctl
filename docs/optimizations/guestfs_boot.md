@@ -1,6 +1,6 @@
 # libguestfs Boot Time Optimizations
 
-> **STATUS: Partially outdated** — Items #8 and #9 marked ⏳ PENDING in the original doc are now implemented.
+> **STATUS: Current — all optimizations implemented.** All 10 optimization items are ✅ IMPLEMENTED.
 >
 > Implementation location: `src/mvmctl/core/_shared/_guestfs/_base.py`
 >

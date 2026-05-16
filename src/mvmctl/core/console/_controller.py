@@ -157,19 +157,18 @@ class ConsoleController:
         self.close_pty()
         self.close_client_fd()
 
-    def stop(self) -> None:
-        """Stop the console relay gracefully."""
-        self._manager.stop()
-
-    def terminate(self) -> bool:
+    def stop(self, force: bool = False) -> bool:
         """
-        Forcefully terminate the relay.
+        Stop the console relay.
+
+        Args:
+            force: If True, skip graceful shutdown and terminate immediately.
 
         Returns:
-            True if terminated, False if not running
+            True if stopped, False if not running.
 
         """
-        return self._manager.terminate()
+        return self._manager.stop(force=force)
 
     def is_running(self) -> bool:
         """Check if relay is running."""

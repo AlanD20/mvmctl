@@ -126,7 +126,6 @@ class TestVMCreate:
             [
                 "vm",
                 "create",
-                "--name",
                 "newvm",
                 "--image",
                 "ubuntu-24.04",
@@ -137,7 +136,7 @@ class TestVMCreate:
 
     @patch("mvmctl.cli.vm.VMOperation")
     def test_create_missing_name(self, mock_vm_op):
-        """Missing --name should fail."""
+        """Missing NAME argument should fail."""
         result = runner.invoke(app, ["vm", "create", "--image", "ubuntu-24.04"])
         assert result.exit_code != 0
 
@@ -149,7 +148,6 @@ class TestVMCreate:
             [
                 "vm",
                 "create",
-                "--name",
                 "existing",
                 "--image",
                 "ubuntu-24.04",
@@ -738,7 +736,6 @@ class TestVMCreateEdgeCases:
             [
                 "vm",
                 "create",
-                "--name",
                 "testvm",
                 "--image",
                 "ubuntu-24.04",
@@ -761,7 +758,6 @@ class TestVMCreateEdgeCases:
             [
                 "vm",
                 "create",
-                "--name",
                 "testvm",
                 "--image",
                 "ubuntu-24.04",
@@ -784,7 +780,6 @@ class TestVMCreateEdgeCases:
             [
                 "vm",
                 "create",
-                "--name",
                 "fullvm",
                 "--image",
                 "ubuntu-24.04",
@@ -1075,7 +1070,7 @@ class TestVMImportEdgeCases:
         config.write_text('{"name": "myvm"}')
         result = runner.invoke(app, ["vm", "import", str(config)])
         assert result.exit_code == 1
-        assert "privileges required" in result.output.lower()
+        assert "import requires privileges" in result.output.lower()
 
     @patch("mvmctl.cli.vm.VMOperation")
     def test_import_error_status(self, mock_vm_op, tmp_path):

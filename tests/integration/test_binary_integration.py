@@ -147,9 +147,9 @@ class TestBinaryPull(_BinaryTestBase):
 class TestBinaryListAndGet(_BinaryTestBase):
     """Test binary listing and retrieval operations."""
 
-    def test_list_local_returns_seeded_binary(self) -> None:
-        """list_local returns the pre-seeded firecracker binary."""
-        binaries = BinaryOperation.list_local()
+    def test_list_all_returns_seeded_binary(self) -> None:
+        """list_all returns the pre-seeded firecracker binary."""
+        binaries = BinaryOperation.list_all()
 
         assert len(binaries) >= 1
         names = [b.name for b in binaries]
@@ -162,7 +162,7 @@ class TestBinaryListAndGet(_BinaryTestBase):
     def test_get_by_name_and_version(self) -> None:
         """Get binary by name and version returns the correct binary."""
         result = BinaryOperation.get(
-            BinaryInput(names=["firecracker"], version="1.15.0")
+            BinaryInput(identifiers=["firecracker"], version="1.15.0")
         )
 
         assert len(result) == 1
@@ -174,7 +174,7 @@ class TestBinaryListAndGet(_BinaryTestBase):
         """Getting a nonexistent binary raises BinaryNotFoundError."""
         with pytest.raises(BinaryNotFoundError):
             BinaryOperation.get(
-                BinaryInput(names=["nonexistent"], version="99.99.99")
+                BinaryInput(identifiers=["nonexistent"], version="99.99.99")
             )
 
 
@@ -193,25 +193,25 @@ class TestBinaryDefault(_BinaryTestBase):
 
         # The newly pulled binary should not be default yet
         binaries = BinaryOperation.get(
-            BinaryInput(names=["firecracker"], version="1.16.0")
+            BinaryInput(identifiers=["firecracker"], version="1.16.0")
         )
         assert len(binaries) == 1
         assert not binaries[0].is_default
 
         # Set it as default
         BinaryOperation.set_default(
-            BinaryInput(names=["firecracker"], version="1.16.0")
+            BinaryInput(identifiers=["firecracker"], version="1.16.0")
         )
 
         # Verify it is now default
         binaries = BinaryOperation.get(
-            BinaryInput(names=["firecracker"], version="1.16.0")
+            BinaryInput(identifiers=["firecracker"], version="1.16.0")
         )
         assert binaries[0].is_default
 
         # Verify the old default is no longer default
         old = BinaryOperation.get(
-            BinaryInput(names=["firecracker"], version="1.15.0")
+            BinaryInput(identifiers=["firecracker"], version="1.15.0")
         )
         assert not old[0].is_default
 
@@ -240,7 +240,7 @@ class TestBinaryRemove(_BinaryTestBase):
 
         # Verify it exists
         binaries = BinaryOperation.get(
-            BinaryInput(names=["firecracker"], version="1.16.0")
+            BinaryInput(identifiers=["firecracker"], version="1.16.0")
         )
         assert len(binaries) == 1
         path = binaries[0].resolved_path
@@ -248,11 +248,11 @@ class TestBinaryRemove(_BinaryTestBase):
 
         # Remove it
         BinaryOperation.remove(
-            BinaryInput(names=["firecracker"], version="1.16.0")
+            BinaryInput(identifiers=["firecracker"], version="1.16.0")
         )
 
         # Verify it's gone from the list
-        all_binaries = BinaryOperation.list_local()
+        all_binaries = BinaryOperation.list_all()
         fc_116 = [
             b
             for b in all_binaries
@@ -267,7 +267,7 @@ class TestBinaryRemove(_BinaryTestBase):
         """Removing a nonexistent binary raises BinaryNotFoundError."""
         with pytest.raises(BinaryNotFoundError):
             BinaryOperation.remove(
-                BinaryInput(names=["nonexistent"], version="99.99.99")
+                BinaryInput(identifiers=["nonexistent"], version="99.99.99")
             )
 
     def test_remove_by_version(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -276,7 +276,7 @@ class TestBinaryRemove(_BinaryTestBase):
         BinaryOperation.pull(BinaryPullInput(version="1.16.0"))
 
         # Verify both exist before removal
-        binaries = BinaryOperation.list_local()
+        binaries = BinaryOperation.list_all()
         fc_116 = [
             b
             for b in binaries
@@ -292,7 +292,7 @@ class TestBinaryRemove(_BinaryTestBase):
         BinaryOperation.remove_by_version("1.16.0")
 
         # Verify both are gone
-        binaries_after = BinaryOperation.list_local()
+        binaries_after = BinaryOperation.list_all()
         fc_116_after = [
             b
             for b in binaries_after

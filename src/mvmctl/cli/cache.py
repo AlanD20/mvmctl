@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 else:
     CacheOperation = _CacheOperation
 
+from mvmctl.cli._completion import _complete_cache_resources
 from mvmctl.models.result import ProgressEvent
 from mvmctl.utils._io import (
     print_error,
@@ -69,6 +70,7 @@ def cache_prune(
             "Resource to prune: vm, network, image, kernel, binary, misc. "
             "Omit to prune all types."
         ),
+        autocompletion=_complete_cache_resources,
     ),
     all_resources: bool = typer.Option(
         False,
@@ -126,9 +128,7 @@ def cache_prune(
                     f"[DRY RUN] Would prune {len(removed)} VM(s): {', '.join(removed)}"
                 )
             else:
-                print_success(
-                    f"Pruned {len(removed)} VM(s): {', '.join(removed)}"
-                )
+                print_success(f"Pruned: {', '.join(removed)}")
         else:
             print_info("No VMs to prune")
 
@@ -151,9 +151,7 @@ def cache_prune(
                     f"[DRY RUN] Would prune {len(removed)} network(s): {', '.join(removed)}"
                 )
             else:
-                print_success(
-                    f"Pruned {len(removed)} network(s): {', '.join(removed)}"
-                )
+                print_success(f"Pruned: {', '.join(removed)}")
         else:
             print_info("No networks to prune")
 
@@ -176,9 +174,7 @@ def cache_prune(
                     f"[DRY RUN] Would prune {len(removed)} image(s): {', '.join(removed)}"
                 )
             else:
-                print_success(
-                    f"Pruned {len(removed)} image(s): {', '.join(removed)}"
-                )
+                print_success(f"Pruned: {', '.join(removed)}")
         else:
             print_info("No images to prune")
 
@@ -201,9 +197,7 @@ def cache_prune(
                     f"[DRY RUN] Would prune {len(removed)} kernel(s): {', '.join(removed)}"
                 )
             else:
-                print_success(
-                    f"Pruned {len(removed)} kernel(s): {', '.join(removed)}"
-                )
+                print_success(f"Pruned: {', '.join(removed)}")
         else:
             print_info("No kernels to prune")
 
@@ -223,12 +217,10 @@ def cache_prune(
         if removed:
             if dry_run:
                 print_info(
-                    f"[DRY RUN] Would prune {len(removed)} binary(s): {', '.join(removed)}"
+                    f"[DRY RUN] Would prune {len(removed)} binaries: {', '.join(removed)}"
                 )
             else:
-                print_success(
-                    f"Pruned {len(removed)} binary(s): {', '.join(removed)}"
-                )
+                print_success(f"Pruned: {', '.join(removed)}")
         else:
             print_info("No binaries to prune")
 
@@ -249,12 +241,12 @@ def cache_prune(
             if dry_run:
                 print_info("[DRY RUN] Would remove appliance folder")
             else:
-                print_success("Removed appliance folder")
+                print_success("Removed: appliance folder")
         if misc_result.get("warm_images"):
             if dry_run:
                 print_info("[DRY RUN] Would remove warm images (ready pool)")
             else:
-                print_success("Removed warm images (ready pool)")
+                print_success("Removed: warm images (ready pool)")
         if not misc_result.get("appliance") and not misc_result.get(
             "warm_images"
         ):
@@ -310,7 +302,7 @@ def cache_prune(
                     f"[DRY RUN] Would prune {len(prune_item.pruned_ids)} item(s)"
                 )
             else:
-                print_success(f"Pruned {len(prune_item.pruned_ids)} item(s)")
+                print_success("Pruned")
 
         if prune_item and prune_item.failed_ids:
             print_warning(
@@ -396,7 +388,7 @@ def cache_clean(
                     f"[DRY RUN] Would prune {len(prune.pruned_ids)} item(s)"
                 )
             else:
-                print_success(f"Pruned {len(prune.pruned_ids)} item(s)")
+                print_success("Pruned")
 
         if prune.failed_ids:
             print_warning(
@@ -415,7 +407,7 @@ def cache_clean(
                     f"[DRY RUN] Would remove cache directory: {result.cache_dir}"
                 )
             else:
-                print_success(f"Removed cache directory: {result.cache_dir}")
+                print_success(f"Removed: {result.cache_dir}")
         else:
             print_info("Cache directory was already empty")
 

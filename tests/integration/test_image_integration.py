@@ -157,7 +157,7 @@ class TestImageList:
             )
         )
 
-        images = ImageOperation.list_()
+        images = ImageOperation.list_all()
         images = cast(list[ImageItem], images)
         slugs = [img.type for img in images]
         assert "list-test" in slugs
@@ -178,14 +178,14 @@ class TestImageList:
             )
         )
 
-        images = ImageOperation.list_(ImageInput(id=["filter-test"]))
+        images = ImageOperation.list_all(ImageInput(id=["filter-test"]))
         images = cast(list[ImageItem], images)
         assert len(images) == 1
         assert images[0].type == "filter-test"
 
     def test_list_images_empty_when_no_match(self) -> None:
         """list_ with non-matching identifier returns empty list."""
-        images = ImageOperation.list_(ImageInput(id=["no-such-image"]))
+        images = ImageOperation.list_all(ImageInput(id=["no-such-image"]))
         assert images == []
 
 

@@ -517,7 +517,7 @@ class TestKeyRunningVMDependency:
         unique_key_name,
         created_network,
     ):
-        """SSH key used by a running VM — documents current behavior."""
+        """SSH key used by a running VM: rm without --force is rejected, with --force succeeds."""
         vm_name = unique_vm_name
         key_name = unique_key_name
         network_name = created_network
@@ -537,7 +537,6 @@ class TestKeyRunningVMDependency:
                     mvm_binary,
                     "vm",
                     "create",
-                    "--name",
                     vm_name,
                     "--image",
                     "alpine:3.21",
@@ -555,13 +554,33 @@ class TestKeyRunningVMDependency:
                 raise
             _run_mvm(mvm_binary, "vm", "start", vm_name)
 
-            _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+            # rm without --force prints error (but returns 0) when key is in use
+            result = _run_mvm(
+                mvm_binary, "key", "rm", key_name, check=False
+            )
+            assert "used by VM" in (result.stdout + result.stderr), (
+                "rm without --force should report key is in use"
+            )
 
-            key_ls = _run_mvm(mvm_binary, "key", "ls", "--json", check=False)
-            if key_ls.returncode == 0 and key_ls.stdout.strip():
-                keys_after = json.loads(key_ls.stdout)
-                key_names = [k.get("name") for k in keys_after]
-                assert key_name not in key_names
+            key_ls = _run_mvm(mvm_binary, "key", "ls", "--json")
+            keys_after = json.loads(key_ls.stdout)
+            key_names = [k.get("name") for k in keys_after]
+            assert key_name in key_names, (
+                "Key should still be present after rejected rm"
+            )
+
+            # rm with --force should succeed
+            result = _run_mvm(
+                mvm_binary, "key", "rm", key_name, "--force"
+            )
+            assert result.returncode == 0
+
+            key_ls = _run_mvm(mvm_binary, "key", "ls", "--json")
+            keys_after = json.loads(key_ls.stdout)
+            key_names = [k.get("name") for k in keys_after]
+            assert key_name not in key_names, (
+                "Key should be gone after --force rm"
+            )
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
             _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
@@ -624,7 +643,6 @@ class TestKeyDefaults:
                     mvm_binary,
                     "vm",
                     "create",
-                    "--name",
                     vm_name,
                     "--image",
                     "alpine:3.21",

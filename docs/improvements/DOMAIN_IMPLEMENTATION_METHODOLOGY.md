@@ -6,7 +6,7 @@
 > For verification, see the 15 core domains in `src/mvmctl/core/` (list below).
 >
 > **Verification (2026-05-15):**
-> - `from __future__ import annotations` present in 193 of 195 `.py` files under `src/mvmctl/` (2 `_defaults.py` files are exempt — no code paths execute before imports)
+> - `from __future__ import annotations` present in 194 of 196 `.py` files under `src/mvmctl/` (2 `_defaults.py` files are exempt — no code paths execute before imports)
 > - Core domains follow the Controller/Service/Repository/Resolver pattern where applicable; lighter domains use only the classes they need
 > - API layer has `*Operations` classes for all 15 domains, with `inputs/` directory containing 20 Input/Request files
 > - Core domains return `*Item` dataclasses only

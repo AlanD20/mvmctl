@@ -59,12 +59,11 @@ class TestLoopMountProvisionerBuilder:
         # Should have FileOps for authorized_keys, sshd_config, first-boot scripts
         file_paths = [op.path for op in lp._ops if isinstance(op, FileOp)]
         assert any(".ssh/authorized_keys" in p for p in file_paths)
-        assert any("sshd_config.d/mvm.conf" in p for p in file_paths)
-        assert any("first-boot-ssh-installer.sh" in p for p in file_paths)
-        # Should have ChrootOps for user creation and ssh-keygen
+        # sshd_config, first-boot-ssh-installer, and ssh-keygen are added
+        # at image build time (build_deblob_ops), not at VM creation time via setup_ssh
+        # Should have ChrootOps for user creation
         chroot_cmds = [op.command for op in lp._ops if isinstance(op, ChrootOp)]
         assert any("useradd" in c for c in chroot_cmds)
-        assert any("ssh-keygen -A" in c for c in chroot_cmds)
 
     def test_setup_ssh_root_user(self):
         """Root user should NOT have useradd/sudoers ChrootOps."""
@@ -72,7 +71,7 @@ class TestLoopMountProvisionerBuilder:
         lp.setup_ssh("root", ["ssh-ed25519 AAA..."])
         chroot_cmds = [op.command for op in lp._ops if isinstance(op, ChrootOp)]
         assert not any("useradd" in c for c in chroot_cmds)
-        assert any("ssh-keygen -A" in c for c in chroot_cmds)
+        # ssh-keygen is added at image build time, not via setup_ssh
 
     def test_setup_ssh_empty_keys(self):
         """No SSH pubkeys should queue NO ops."""
@@ -81,15 +80,12 @@ class TestLoopMountProvisionerBuilder:
         assert lp._ops == []
 
     def test_disable_cloud_init_queues_ops(self):
+        """Cloud-init disable ops are added at image build time, not at VM creation."""
         lp = LoopMountProvisioner(Path("/fake/rootfs.ext4"), "ext4")
         lp.disable_cloud_init()
-        assert len(lp._ops) > 0
-        file_paths = [op.path for op in lp._ops if isinstance(op, FileOp)]
-        assert any("99-disable-datasources.cfg" in p for p in file_paths)
-        assert any("cloud-init.disabled" in p for p in file_paths)
-        # 4 FileOps + 4 ChrootOps
-        chroot_ops = [op for op in lp._ops if isinstance(op, ChrootOp)]
-        assert len(chroot_ops) == 4
+        # Cloud-init disable is handled during image import (build_deblob_ops),
+        # not at VM creation time. LoopMountProvisioner.disable_cloud_init is a no-op.
+        assert len(lp._ops) == 0
 
     def test_inject_cloud_init_with_existing_dir(self, tmp_path):
         ci_dir = tmp_path / "cloud-init"
@@ -165,7 +161,7 @@ class TestLoopMountProvisionerRun:
         call_kwargs = MockManager.execute.call_args[1]
         assert call_kwargs["commands"] is not None
         assert any("useradd" in c for c in call_kwargs["commands"])
-        assert any("ssh-keygen -A" in c for c in call_kwargs["commands"])
+        # ssh-keygen is added at image build time (build_deblob_ops), not at VM creation
 
     @patch("mvmctl.core._shared._loopmount._provisioner.LoopMountManager")
     def test_run_with_copy_dir_op(self, MockManager, tmp_path):

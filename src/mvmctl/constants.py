@@ -217,7 +217,6 @@ DETECTOR_SCORES: Final[dict[str, float]] = {
 # 6. Network & iptables
 # ===========================================================================
 
-IPTABLES_RULES_V4: Final[str] = "/etc/iptables/rules.v4"
 CONST_IPTABLES_MAX_COMMENT_LEN: Final[int] = 240
 
 

@@ -440,7 +440,6 @@ def _create_minimal_vm_core(
     cmd: list[str] = [
         "vm",
         "create",
-        "--name",
         vm_name,
         "--image",
         "alpine:3.21",

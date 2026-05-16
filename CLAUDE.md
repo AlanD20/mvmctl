@@ -58,7 +58,7 @@ packaging/           # Distribution packaging configs (.deb, .rpm, PKGBUILD)
 scripts/             # Build & release helper scripts (build_services.py, profile_test_memory.py, run_tests.py, setup-test-environment.py)
 tests/               # 164 test_*.py files + 2 helpers (166 Python files total) across 5 top-level directories (119 unit + 18 integration + 20 system + 7 layer_compliance + 2 helpers)
 docs/                # Project documentation
-  ├── adr/           # 11 ADR files (10 unique ADR numbers: 0001-0010)
+  ├── adr/           # 17 ADR files (15 unique ADR numbers: 0001-0015)
   ├── analyses/      # Technical analyses
   ├── development/   # Development guides
   ├── implementations/ # Implementation plans

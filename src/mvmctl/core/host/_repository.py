@@ -17,6 +17,15 @@ class HostRepository:
         """Return the database instance."""
         return self._db
 
+    @_graceful_read(default=0)
+    def count(self) -> int:
+        """Return total count of all host state changes."""
+        with self._db.connect() as conn:
+            result = conn.execute(
+                "SELECT COUNT(*) FROM host_state_changes"
+            ).fetchone()
+        return result[0] if result else 0
+
     @_graceful_read(default=None)
     def get_state(self) -> HostStateItem | None:
         """Return the singleton host state row, or None if not yet initialized."""

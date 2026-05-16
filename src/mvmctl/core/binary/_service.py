@@ -46,11 +46,14 @@ class BinaryService:
     def __init__(self, repo: BinaryRepository) -> None:
         self._repo = repo
 
-    def list_local(self, verify: bool = True) -> list[BinaryItem]:
+    def list_all(
+        self, remote: bool = False, verify: bool = True
+    ) -> list[BinaryItem]:
         """
         List all binaries, syncing is_present flag with filesystem.
 
         Args:
+            remote: If True, return remote versions. Not supported at service level.
             verify: If True (default), check filesystem and update DB.
                    If False, return DB records as-is.
 

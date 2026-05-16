@@ -402,20 +402,33 @@ class KernelOperation:
         return BatchResult(items=items)
 
     @staticmethod
-    def list_all() -> list[KernelItem]:
+    def list_all(
+        remote: bool = False,
+        *,
+        no_cache: bool = False,
+    ) -> list[KernelItem] | list[VersionInfo]:
         """
-        List all kernels, syncing is_present with filesystem.
+        List kernels.
+
+        Args:
+            remote: If True, return available remote kernel versions.
+                    If False (default), return locally cached kernels.
+            no_cache: If True, bypass cached version listings and fetch
+                      live from upstream. Only relevant when ``remote=True``.
 
         Returns:
-            List of all KernelItem records.
+            List of KernelItem (local) or VersionInfo (remote).
 
         """
+        if remote:
+            return KernelOperation._list_remote(no_cache=no_cache)
+
         db = Database()
         repo = KernelRepository(db)
         return KernelService(repo).list_all()
 
     @staticmethod
-    def list_remote(
+    def _list_remote(
         *,
         no_cache: bool = False,
     ) -> list[VersionInfo]:

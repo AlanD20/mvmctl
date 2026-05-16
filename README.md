@@ -191,7 +191,7 @@ Produces a standalone single-file binary -- no Python runtime required on the ta
 git clone https://github.com/AlanD20/mvmctl
 cd mvmctl
 uv sync --group dev --group build
-python scripts/build_services.py      # Build everything (fast mode)
+python scripts/build_services.py      # Build everything (default mode)
 # Or just the main binary:
 python scripts/build_services.py --mvm
 # Output: dist/mvm

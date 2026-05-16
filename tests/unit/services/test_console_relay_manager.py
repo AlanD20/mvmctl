@@ -266,7 +266,7 @@ class TestStop:
         result = manager.stop()
 
         assert result is True
-        mock_kill.assert_called_with(12345, signal.SIGTERM)
+        mock_kill.assert_any_call(12345, signal.SIGTERM)
 
     @patch("mvmctl.services.console_relay.manager.os.kill")
     def test_stop_clears_pid(
@@ -329,46 +329,46 @@ class TestStop:
 
 
 # ---------------------------------------------------------------------------
-# terminate
+# stop (graceful / force=False) — replaces old terminate()
 # ---------------------------------------------------------------------------
 
 
-class TestTerminate:
-    """Tests for terminate()."""
+class TestStopGraceful:
+    """Tests for stop(force=False) — graceful SIGTERM → wait → SIGKILL escalation."""
 
     @patch("mvmctl.services.console_relay.manager.os.kill")
-    def test_terminate_sends_sigterm(
+    def test_stop_graceful_sends_sigterm(
         self, mock_kill: MagicMock, manager: ConsoleRelayManager
     ) -> None:
         manager._pid = 12345
         mock_kill.return_value = None
-        manager.terminate()
+        manager.stop()
         mock_kill.assert_any_call(12345, signal.SIGTERM)
 
     @patch("mvmctl.services.console_relay.manager.os.kill")
-    def test_terminate_sends_sigkill_if_no_response(
+    def test_stop_graceful_sends_sigkill_if_no_response(
         self, mock_kill: MagicMock, manager: ConsoleRelayManager
     ) -> None:
         manager._pid = 12345
         # First SIGTERM succeeds, sig 0 (check) always returns alive
         mock_kill.side_effect = [None] * 50 + [ProcessLookupError()]
-        manager.terminate()
+        manager.stop()
         # Should have sent SIGKILL at least once
         mock_kill.assert_any_call(12345, signal.SIGKILL)
 
-    def test_terminate_returns_false_when_not_running(
+    def test_stop_returns_false_when_not_running(
         self, manager: ConsoleRelayManager
     ) -> None:
-        result = manager.terminate()
+        result = manager.stop()
         assert result is False
 
     @patch("mvmctl.services.console_relay.manager.os.kill")
-    def test_terminate_clears_pid(
+    def test_stop_graceful_clears_pid(
         self, mock_kill: MagicMock, manager: ConsoleRelayManager
     ) -> None:
         manager._pid = 12345
         mock_kill.return_value = None
-        manager.terminate()
+        manager.stop()
         assert manager._pid is None
 
 

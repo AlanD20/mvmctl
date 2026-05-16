@@ -9,7 +9,7 @@ import pytest
 
 from mvmctl.core.volume._repository import VolumeRepository
 from mvmctl.core.volume._service import VolumeService
-from mvmctl.exceptions import ProcessError, VolumeCreateError
+from mvmctl.exceptions import ProcessError, VolumeError
 from mvmctl.models import VolumeItem, VolumeStatus
 
 
@@ -94,7 +94,7 @@ class TestVolumeServiceCreateDisk:
     def test_create_raw_raises_on_failure(
         self, service: VolumeService, tmp_path: Path
     ):
-        """Disk creation failure should raise VolumeCreateError."""
+        """Disk creation failure should raise VolumeError."""
         path = tmp_path / "test.raw"
         vol = _make_volume(path=str(path), size_bytes=1073741824)
         with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
@@ -102,41 +102,41 @@ class TestVolumeServiceCreateDisk:
                 "Command failed (exit 1): fallocate"
             )
 
-            with pytest.raises(VolumeCreateError, match="fallocate failed"):
+            with pytest.raises(VolumeError, match="fallocate failed"):
                 service.create_disk(vol)
 
     def test_create_unsupported_format_raises(
         self, service: VolumeService, tmp_path: Path
     ):
-        """Unsupported format should raise VolumeCreateError."""
+        """Unsupported format should raise VolumeError."""
         path = tmp_path / "test.vmdk"
         vol = _make_volume(path=str(path), size_bytes=1073741824, fmt="vmdk")
-        with pytest.raises(VolumeCreateError, match="Unsupported format"):
+        with pytest.raises(VolumeError, match="Unsupported format"):
             service.create_disk(vol)
 
     def test_create_raw_fallocate_not_found(
         self, service: VolumeService, tmp_path: Path
     ):
-        """Missing fallocate binary should raise VolumeCreateError."""
+        """Missing fallocate binary should raise VolumeError."""
         path = tmp_path / "test.raw"
         vol = _make_volume(path=str(path), size_bytes=1073741824)
         with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
             mock_run.side_effect = ProcessError("Command not found: fallocate")
 
-            with pytest.raises(VolumeCreateError, match="fallocate failed"):
+            with pytest.raises(VolumeError, match="fallocate failed"):
                 service.create_disk(vol)
 
     def test_create_qcow2_qemu_img_not_found(
         self, service: VolumeService, tmp_path: Path
     ):
-        """Missing qemu-img binary should raise VolumeCreateError."""
+        """Missing qemu-img binary should raise VolumeError."""
         path = tmp_path / "test.qcow2"
         vol = _make_volume(path=str(path), size_bytes=1073741824, fmt="qcow2")
         with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
             mock_run.side_effect = ProcessError("Command not found: qemu-img")
 
             with pytest.raises(
-                VolumeCreateError, match="qemu-img create failed"
+                VolumeError, match="qemu-img create failed"
             ):
                 service.create_disk(vol)
 
@@ -153,36 +153,36 @@ class TestVolumeServiceCreateDisk:
         service._repo.upsert.assert_called_once_with(vol)
 
 
-class TestVolumeServiceRemoveDisk:
-    def test_remove_existing_disk_calls_unlink(
+class TestVolumeServiceRemove:
+    def test_remove_existing_calls_unlink(
         self, service: VolumeService, tmp_path: Path
     ):
-        """remove_disk should delete DB record and unlink the file."""
+        """remove should delete DB record and unlink the file."""
         path = tmp_path / "test.raw"
         path.write_text("fake disk content")
         vol = _make_volume(path=str(path))
 
-        service.remove_disk(vol)
+        service.remove(vol)
 
         assert not path.exists()
         service._repo.delete.assert_called_once_with(vol.id)
 
-    def test_remove_nonexistent_disk_does_not_raise(
+    def test_remove_nonexistent_does_not_raise(
         self, service: VolumeService, tmp_path: Path
     ):
-        """remove_disk should silently handle missing files."""
+        """remove should silently handle missing files."""
         path = tmp_path / "nonexistent.raw"
         vol = _make_volume(path=str(path))
-        service.remove_disk(vol)  # Should not raise
+        service.remove(vol)  # Should not raise
 
-    def test_remove_disk_calls_delete_and_unlink(
+    def test_remove_calls_delete_and_unlink(
         self, service: VolumeService, tmp_path: Path
     ):
-        """remove_disk should call delete and unlink."""
+        """remove should call delete and unlink."""
         path = tmp_path / "test.raw"
         path.write_text("content")
         vol = _make_volume(path=str(path))
-        service.remove_disk(vol)
+        service.remove(vol)
         service._repo.delete.assert_called_once_with(vol.id)
         assert not path.exists()
 
@@ -230,26 +230,26 @@ class TestVolumeServiceResizeDisk:
     def test_resize_nonexistent_file_raises(
         self, service: VolumeService, tmp_path: Path
     ):
-        """Resizing a non-existent file should raise VolumeCreateError."""
+        """Resizing a non-existent file should raise VolumeError."""
         path = tmp_path / "nonexistent.raw"
         vol = _make_volume(path=str(path))
-        with pytest.raises(VolumeCreateError, match="Disk file not found"):
+        with pytest.raises(VolumeError, match="Disk file not found"):
             service.resize_disk(vol, 2147483648)
 
     def test_resize_unsupported_format_raises(
         self, service: VolumeService, tmp_path: Path
     ):
-        """Unsupported resize format should raise VolumeCreateError."""
+        """Unsupported resize format should raise VolumeError."""
         path = tmp_path / "test.raw"
         path.write_text("fake")
         vol = _make_volume(path=str(path), fmt="vmdk")
-        with pytest.raises(VolumeCreateError, match="Unsupported format"):
+        with pytest.raises(VolumeError, match="Unsupported format"):
             service.resize_disk(vol, 2147483648)
 
     def test_resize_raw_failure_raises(
         self, service: VolumeService, tmp_path: Path
     ):
-        """fallocate resize failure should raise VolumeCreateError."""
+        """fallocate resize failure should raise VolumeError."""
         path = tmp_path / "test.raw"
         path.write_text("fake")
         vol = _make_volume(path=str(path), fmt="raw")
@@ -259,7 +259,7 @@ class TestVolumeServiceResizeDisk:
             )
 
             with pytest.raises(
-                VolumeCreateError, match="fallocate resize failed"
+                VolumeError, match="fallocate resize failed"
             ):
                 service.resize_disk(vol, 2147483648)
 
@@ -305,15 +305,15 @@ class TestVolumeServiceGetDiskInfo:
     def test_get_disk_info_nonexistent_raises(
         self, service: VolumeService, tmp_path: Path
     ):
-        """get_disk_info on non-existent file should raise VolumeCreateError."""
+        """get_disk_info on non-existent file should raise VolumeError."""
         path = tmp_path / "nonexistent.raw"
-        with pytest.raises(VolumeCreateError, match="Disk file not found"):
+        with pytest.raises(VolumeError, match="Disk file not found"):
             service.get_disk_info(path)
 
     def test_get_disk_info_failure_raises(
         self, service: VolumeService, tmp_path: Path
     ):
-        """qemu-img info failure should raise VolumeCreateError."""
+        """qemu-img info failure should raise VolumeError."""
         path = tmp_path / "test.raw"
         path.write_text("fake")
         with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
@@ -321,19 +321,19 @@ class TestVolumeServiceGetDiskInfo:
                 "Command failed (exit 1): qemu-img"
             )
 
-            with pytest.raises(VolumeCreateError, match="qemu-img info failed"):
+            with pytest.raises(VolumeError, match="qemu-img info failed"):
                 service.get_disk_info(path)
 
     def test_get_disk_info_qemu_img_not_found(
         self, service: VolumeService, tmp_path: Path
     ):
-        """Missing qemu-img binary should raise VolumeCreateError."""
+        """Missing qemu-img binary should raise VolumeError."""
         path = tmp_path / "test.raw"
         path.write_text("fake")
         with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
             mock_run.side_effect = ProcessError("Command not found: qemu-img")
 
-            with pytest.raises(VolumeCreateError, match="qemu-img info failed"):
+            with pytest.raises(VolumeError, match="qemu-img info failed"):
                 service.get_disk_info(path)
 
 
@@ -343,7 +343,7 @@ class TestVolumeServiceCreateDiskMissingBranches:
     def test_create_qcow2_called_process_error(
         self, service: VolumeService, tmp_path: Path
     ):
-        """qcow2 creation failure should raise VolumeCreateError."""
+        """qcow2 creation failure should raise VolumeError."""
         path = tmp_path / "test.qcow2"
         vol = _make_volume(path=str(path), size_bytes=1073741824, fmt="qcow2")
         with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
@@ -351,7 +351,7 @@ class TestVolumeServiceCreateDiskMissingBranches:
                 "Command failed (exit 1): qemu-img"
             )
             with pytest.raises(
-                VolumeCreateError, match="qemu-img create failed"
+                VolumeError, match="qemu-img create failed"
             ):
                 service.create_disk(vol)
 
@@ -362,21 +362,21 @@ class TestVolumeServiceResizeDiskMissingBranches:
     def test_resize_raw_fallocate_not_found(
         self, service: VolumeService, tmp_path: Path
     ):
-        """Missing fallocate should raise VolumeCreateError on raw resize."""
+        """Missing fallocate should raise VolumeError on raw resize."""
         path = tmp_path / "test.raw"
         path.write_text("fake")
         vol = _make_volume(path=str(path), fmt="raw")
         with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
             mock_run.side_effect = ProcessError("Command not found: fallocate")
             with pytest.raises(
-                VolumeCreateError, match="fallocate resize failed"
+                VolumeError, match="fallocate resize failed"
             ):
                 service.resize_disk(vol, 2147483648)
 
     def test_resize_qcow2_called_process_error(
         self, service: VolumeService, tmp_path: Path
     ):
-        """qemu-img resize failure should raise VolumeCreateError."""
+        """qemu-img resize failure should raise VolumeError."""
         path = tmp_path / "test.qcow2"
         path.write_text("fake")
         vol = _make_volume(path=str(path), fmt="qcow2")
@@ -385,32 +385,32 @@ class TestVolumeServiceResizeDiskMissingBranches:
                 "Command failed (exit 1): qemu-img"
             )
             with pytest.raises(
-                VolumeCreateError, match="qemu-img resize failed"
+                VolumeError, match="qemu-img resize failed"
             ):
                 service.resize_disk(vol, 2147483648)
 
     def test_resize_qcow2_qemu_img_not_found(
         self, service: VolumeService, tmp_path: Path
     ):
-        """Missing qemu-img should raise VolumeCreateError on qcow2 resize."""
+        """Missing qemu-img should raise VolumeError on qcow2 resize."""
         path = tmp_path / "test.qcow2"
         path.write_text("fake")
         vol = _make_volume(path=str(path), fmt="qcow2")
         with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
             mock_run.side_effect = ProcessError("Command not found: qemu-img")
             with pytest.raises(
-                VolumeCreateError, match="qemu-img resize failed"
+                VolumeError, match="qemu-img resize failed"
             ):
                 service.resize_disk(vol, 2147483648)
 
     def test_resize_unsupported_format_raises_on_resize(
         self, service: VolumeService, tmp_path: Path
     ):
-        """Unsupported resize format should raise VolumeCreateError."""
+        """Unsupported resize format should raise VolumeError."""
         path = tmp_path / "test.vmdk"
         path.write_text("fake")
         vol = _make_volume(path=str(path), fmt="vmdk")
-        with pytest.raises(VolumeCreateError, match="Unsupported format"):
+        with pytest.raises(VolumeError, match="Unsupported format"):
             service.resize_disk(vol, 2147483648)
 
 

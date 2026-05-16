@@ -41,7 +41,7 @@ class TestKeyOperationListAll:
         """list_all() returns SSHKeyItem list from key service."""
         mock_keys = [_make_key("key1"), _make_key("key2")]
         mock_service = mocker.MagicMock()
-        mock_service.list_keys.return_value = mock_keys
+        mock_service.list_all.return_value = mock_keys
         # Patch at the point of use
         mocker.patch(
             "mvmctl.api.key_operations.KeyService",
@@ -55,12 +55,12 @@ class TestKeyOperationListAll:
 
         result = KeyOperation.list_all()
         assert len(result) == 2
-        mock_service.list_keys.assert_called_once_with(Path("/keys"))
+        mock_service.list_all.assert_called_once_with(Path("/keys"))
 
     def test_empty_list(self, mocker):
         """list_all() returns empty list when no keys exist."""
         mock_service = mocker.MagicMock()
-        mock_service.list_keys.return_value = []
+        mock_service.list_all.return_value = []
         mocker.patch(
             "mvmctl.api.key_operations.KeyService",
             return_value=mock_service,

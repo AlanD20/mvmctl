@@ -15,7 +15,7 @@ from mvmctl.api.inputs._volume_input import VolumeInput, VolumeRequest
 from mvmctl.core._shared import Database
 from mvmctl.core.volume._repository import VolumeRepository
 from mvmctl.core.volume._service import VolumeService
-from mvmctl.exceptions import VolumeCreateError, VolumeNotFoundError
+from mvmctl.exceptions import VolumeError, VolumeNotFoundError
 from mvmctl.models import VolumeItem, VolumeStatus
 from mvmctl.models.result import BatchResult, OperationResult
 from mvmctl.utils._disk import DiskUtils
@@ -52,7 +52,7 @@ class VolumeOperation:
         request = VolumeCreateRequest(inputs=inputs, db=db)
         try:
             resolved = request.resolve()
-        except VolumeCreateError as e:
+        except VolumeError as e:
             return OperationResult(
                 status="error",
                 code="volume.already_exists",
@@ -143,12 +143,12 @@ class VolumeOperation:
         for volume in resolved.volumes:
             try:
                 if volume.status == VolumeStatus.ATTACHED and not force:
-                    raise VolumeCreateError(
+                    raise VolumeError(
                         f"Volume '{volume.name}' is attached to a VM. "
                         "Use --force to remove anyway."
                     )
 
-                VolumeService(repo).remove_disk(volume)
+                VolumeService(repo).remove(volume)
 
                 AuditLog.log("volume.remove", changes={"name": volume.name})
 
@@ -174,7 +174,7 @@ class VolumeOperation:
         return BatchResult(items=results)
 
     @staticmethod
-    def list_() -> list[VolumeItem]:
+    def list_all() -> list[VolumeItem]:
         """List all volumes.
 
         Returns:

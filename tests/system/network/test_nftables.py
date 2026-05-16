@@ -239,7 +239,6 @@ class TestNFTablesFirewallBackend:
                 mvm_binary,
                 "vm",
                 "create",
-                "--name",
                 vm_name,
                 "--image",
                 "alpine:3.21",

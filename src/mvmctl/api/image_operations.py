@@ -495,7 +495,7 @@ class ImageOperation:
         return BatchResult(items=items)
 
     @staticmethod
-    def list_(
+    def list_all(
         inputs: ImageInput | None = None,
         *,
         remote: bool = False,
@@ -585,7 +585,7 @@ class ImageOperation:
             from mvmctl.core.image._service import ImageService
 
             image_service = ImageService(repo)
-            return image_service.list_local()
+            return image_service.list_all()
 
         # Filter by identifiers if provided
         resolver = ImageResolver(repo)

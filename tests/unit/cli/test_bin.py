@@ -40,13 +40,13 @@ class TestBinLs:
 
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_ls_empty(self, mock_bin_op):
-        mock_bin_op.list_local.return_value = []
+        mock_bin_op.list_all.return_value = []
         result = runner.invoke(app, ["bin", "ls"])
         assert result.exit_code == 0
 
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_ls_with_local(self, mock_bin_op):
-        mock_bin_op.list_local.return_value = [
+        mock_bin_op.list_all.return_value = [
             _make_binary("firecracker", "1.15.0", is_default=True),
             _make_binary("jailer", "1.15.0"),
         ]
@@ -56,7 +56,7 @@ class TestBinLs:
 
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_ls_json(self, mock_bin_op):
-        mock_bin_op.list_local.return_value = [
+        mock_bin_op.list_all.return_value = [
             _make_binary("firecracker", "1.15.0"),
         ]
         result = runner.invoke(app, ["bin", "ls", "--json"])
@@ -66,26 +66,30 @@ class TestBinLs:
 
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_ls_with_remote(self, mock_bin_op):
-        mock_bin_op.list_local.return_value = [
-            _make_binary("firecracker", "1.15.0")
-        ]
-        mock_bin_op.list_remote.return_value = ["1.16.0", "1.15.0", "1.14.0"]
+        mock_bin_op.list_all.side_effect = lambda *a, **kw: (
+            ["1.16.0", "1.15.0", "1.14.0"] if kw.get("remote")
+            else [_make_binary("firecracker", "1.15.0")]
+        )
         result = runner.invoke(app, ["bin", "ls", "--remote"])
         assert result.exit_code == 0
         assert "1.16.0" in result.output
 
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_ls_remote_with_limit(self, mock_bin_op):
-        mock_bin_op.list_local.return_value = []
-        mock_bin_op.list_remote.return_value = ["1.16.0"]
+        mock_bin_op.list_all.side_effect = lambda *a, **kw: (
+            ["1.16.0"] if kw.get("remote")
+            else []
+        )
         result = runner.invoke(app, ["bin", "ls", "--remote", "--limit", "5"])
         assert result.exit_code == 0
-        mock_bin_op.list_remote.assert_called_once_with(limit=5)
+        mock_bin_op.list_all.assert_called_with(remote=True, limit=5)
 
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_ls_remote_error(self, mock_bin_op):
-        mock_bin_op.list_local.return_value = []
-        mock_bin_op.list_remote.side_effect = MVMError("network fail")
+        mock_bin_op.list_all.side_effect = lambda *a, **kw: (
+            [] if not kw.get("remote")
+            else (_ for _ in ()).throw(MVMError("network fail"))
+        )
         result = runner.invoke(app, ["bin", "ls", "--remote"])
         assert result.exit_code == 1
 
@@ -222,7 +226,7 @@ class TestBinLsExtras:
 
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_ls_local_with_default_marker(self, mock_bin_op):
-        mock_bin_op.list_local.return_value = [
+        mock_bin_op.list_all.return_value = [
             _make_binary("firecracker", "1.15.0", is_default=True),
             _make_binary("jailer", "1.14.0"),
         ]
@@ -234,7 +238,7 @@ class TestBinLsExtras:
 
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_ls_json_empty(self, mock_bin_op):
-        mock_bin_op.list_local.return_value = []
+        mock_bin_op.list_all.return_value = []
         result = runner.invoke(app, ["bin", "ls", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -242,8 +246,10 @@ class TestBinLsExtras:
 
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_ls_remote_no_locals(self, mock_bin_op):
-        mock_bin_op.list_local.return_value = []
-        mock_bin_op.list_remote.return_value = ["1.16.0", "1.15.0"]
+        mock_bin_op.list_all.side_effect = lambda *a, **kw: (
+            ["1.16.0", "1.15.0"] if kw.get("remote")
+            else []
+        )
         result = runner.invoke(app, ["bin", "ls", "--remote"])
         assert result.exit_code == 0
         assert "1.16.0" in result.output
@@ -251,10 +257,10 @@ class TestBinLsExtras:
 
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_ls_remote_with_cached_marker(self, mock_bin_op):
-        mock_bin_op.list_local.return_value = [
-            _make_binary("firecracker", "1.15.0"),
-        ]
-        mock_bin_op.list_remote.return_value = ["1.16.0", "1.15.0"]
+        mock_bin_op.list_all.side_effect = lambda *a, **kw: (
+            ["1.16.0", "1.15.0"] if kw.get("remote")
+            else [_make_binary("firecracker", "1.15.0")]
+        )
         result = runner.invoke(app, ["bin", "ls", "--remote"])
         assert result.exit_code == 0
         assert "✓" in result.output

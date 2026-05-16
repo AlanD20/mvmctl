@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import typer
+from rich.console import Console
 
 from mvmctl.api import BinaryInput as _BinaryInput
 from mvmctl.api import BinaryOperation as _BinaryOperation
 from mvmctl.api import BinaryPullInput as _BinaryPullInput
 from mvmctl.core._shared import VersionError, VersionResolver
+from mvmctl.models import BinaryItem
 
 if TYPE_CHECKING:
     from mvmctl.api.binary_operations import BinaryOperation
@@ -20,8 +22,6 @@ else:
     BinaryOperation = _BinaryOperation
     BinaryPullInput = _BinaryPullInput
     BinaryInput = _BinaryInput
-from rich.console import Console
-
 from mvmctl.cli._completion import _complete_binary_versions
 from mvmctl.models.result import OperationResult
 from mvmctl.utils._io import (
@@ -33,9 +33,6 @@ from mvmctl.utils._io import (
 )
 from mvmctl.utils.cli import handle_errors
 from mvmctl.utils.crypto import HashGenerator
-
-if TYPE_CHECKING:
-    from mvmctl.models import BinaryItem
 
 bin_app = typer.Typer(
     help="Binary management",
@@ -62,7 +59,7 @@ def bin_ls(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """List local (and optionally remote) Firecracker versions."""
-    local = BinaryOperation.list_local()
+    local = cast(list[BinaryItem], BinaryOperation.list_all())
     local_versions = {b.version for b in local if b.name == "firecracker"}
 
     if json_output:
@@ -88,7 +85,10 @@ def bin_ls(
 
     if remote:
         with Console().status("Fetching remote versions"):
-            remote_versions = BinaryOperation.list_remote(limit=limit)
+            remote_versions = cast(
+                list[str],
+                BinaryOperation.list_all(remote=True, limit=limit),
+            )
 
         for ver in remote_versions:
             cached = "✓" if ver in local_versions else " "
@@ -118,7 +118,11 @@ def bin_ls(
 @bin_app.command(name="pull")
 @handle_errors
 def bin_pull(
-    name: str = typer.Argument(..., help="Binary name (e.g. firecracker)"),
+    name: str = typer.Argument(
+        ...,
+        help="Binary name (e.g. firecracker)",
+        autocompletion=_complete_binary_versions,
+    ),
     version: str | None = typer.Option(
         None,
         "--version",
@@ -141,7 +145,10 @@ def bin_pull(
     from mvmctl.exceptions import BinaryNotFoundError
 
     # Resolve version from remote
-    remote_versions = BinaryOperation.list_remote(limit=20)
+    remote_versions = cast(
+        list[str],
+        BinaryOperation.list_all(remote=True, limit=20),
+    )
     if not remote_versions:
         print_error("No remote Firecracker versions found")
         raise typer.Exit(code=1)
@@ -203,12 +210,12 @@ def bin_pull(
     for binary in binaries:
         short_id = HashGenerator.shorten(binary.id)
         print_success(
-            f"Downloaded {binary.name} v{binary.version}: {binary.resolved_path}"
+            f"Downloaded: {binary.name} v{binary.version}: {binary.resolved_path}"
         )
         print_info(f"  ID: {short_id}")
 
     if set_default:
-        print_success(f"Default binary set to v{normalized}")
+        print_success(f"Default binary set to: v{normalized}")
 
     raise typer.Exit(code=0)
 
@@ -239,7 +246,7 @@ def bin_rm(
         if result.is_error:
             print_error(result.message)
             raise typer.Exit(code=1)
-        print_success(f"Removed binaries for v{version}")
+        print_success(f"Removed: v{version}")
         raise typer.Exit(code=0)
 
     effective_ids: list[str] = list(identifiers) if identifiers else []
@@ -252,9 +259,9 @@ def bin_rm(
 
     for item_result in batch_result.items:
         if item_result.is_ok:
-            print_success(item_result.message or "Removed binary")
+            print_success(item_result.message or "Removed")
         else:
-            print_error(item_result.message or "Failed to remove binary")
+            print_error(item_result.message or "Remove failed")
 
     if batch_result.has_any_error:
         raise typer.Exit(code=1)

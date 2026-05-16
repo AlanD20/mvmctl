@@ -90,9 +90,9 @@ def volume_rm(
     for r in result.items:
         item_name = r.item.name if r.item else "unknown"
         if r.is_ok:
-            print_success(f"Removed volume: {item_name}")
+            print_success(f"Removed: {item_name}")
         else:
-            print_error(r.message or f"Failed to remove volume: {item_name}")
+            print_error(r.message or f"Remove failed: {item_name}")
     if result.has_any_error:
         raise typer.Exit(code=1)
 
@@ -103,7 +103,7 @@ def volume_ls(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """List all volumes."""
-    volumes = VolumeOperation.list_()
+    volumes = VolumeOperation.list_all()
 
     if json_output:
         data: list[dict[str, Any]] = []
@@ -138,7 +138,7 @@ def volume_ls(
         )
 
     print_table(
-        columns=["ID", "NAME", "FORMAT", "SIZE", "STATUS", "VM", "CREATED"],
+        columns=["ID", "Name", "Format", "Size", "Status", "VM", "Created"],
         rows=rows,
     )
 

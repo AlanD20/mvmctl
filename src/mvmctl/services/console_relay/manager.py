@@ -231,24 +231,21 @@ class ConsoleRelayManager:
             except OSError:
                 pass
 
-    def stop(self) -> bool:
+    def stop(self, force: bool = False) -> bool:
         with self._thread_lock:
             pid = self.pid
             if pid is None:
                 return False
 
-            self._send_signal(pid, signal.SIGTERM)
-            self._cleanup_files()
-            self._pid = None
-            logger.info("Stopped console relay for %s", self._name)
-            return True
+            if force:
+                # Abrupt: SIGTERM once, clean up immediately
+                self._send_signal(pid, signal.SIGTERM)
+                self._cleanup_files()
+                self._pid = None
+                logger.info("Terminated console relay for %s", self._name)
+                return True
 
-    def terminate(self) -> bool:
-        with self._thread_lock:
-            pid = self.pid
-            if pid is None:
-                return False
-
+            # Graceful: SIGTERM → wait → SIGKILL escalation
             if not self._send_signal(pid, signal.SIGTERM):
                 self._cleanup_files()
                 self._pid = None

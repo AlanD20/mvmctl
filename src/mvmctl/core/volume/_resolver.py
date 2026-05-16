@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+from mvmctl.core._shared import RelationEnricher, RelationSpec
 from mvmctl.core.volume._repository import VolumeRepository
 from mvmctl.exceptions import VolumeNotFoundError
 from mvmctl.models import VolumeItem
@@ -25,11 +26,31 @@ class VolumeResolveResult:
 class VolumeResolver:
     """Resolver for volume resources."""
 
+    RELATIONS: dict[str, RelationSpec] = {
+        "vm": RelationSpec(
+            fk_field="id",
+            resolver="vm",
+            method="find_by_volume_ids",
+            relation_name="vms",
+            is_reverse=True,
+            batch_method="by_volume_id_batch",
+        ),
+    }
+
     def __init__(
         self,
         repo: VolumeRepository | None = None,
+        *,
+        include: list[str] | None = None,
     ) -> None:
         self._repo = repo if repo is not None else VolumeRepository()
+        self._include = include
+
+    def enrich(self, volumes: list[VolumeItem]) -> list[VolumeItem]:
+        """Enrich volumes with relations if include is set."""
+        if self._include and volumes:
+            RelationEnricher().enrich(volumes, self._include, self.RELATIONS)
+        return volumes
 
     def by_id(self, volume_id: str) -> VolumeItem:
         """Resolve by full ID or prefix."""
@@ -38,14 +59,14 @@ class VolumeResolver:
             raise VolumeNotFoundError(f"Volume not found: {volume_id!r}")
         if len(matches) > 1:
             raise VolumeNotFoundError(f"Volume ID is ambiguous: {volume_id!r}")
-        return matches[0]
+        return self.enrich(matches)[0]
 
     def by_name(self, name: str) -> VolumeItem:
         """Resolve by name."""
         db_volume = self._repo.get_by_name(name)
         if db_volume is None:
             raise VolumeNotFoundError(f"Volume not found by name: {name!r}")
-        return db_volume
+        return self.enrich([db_volume])[0]
 
     def resolve(self, value: str) -> VolumeItem:
         """Resolve volume by name, then by ID prefix."""
@@ -75,6 +96,8 @@ class VolumeResolver:
                     items.append(item)
             except Exception as e:
                 errors.append(f"{identifier}: {e}")
+
+        items = self.enrich(items)
 
         exit_code = 1 if errors and not items else 0
         return VolumeResolveResult(

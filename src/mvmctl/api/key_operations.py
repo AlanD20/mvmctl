@@ -39,7 +39,7 @@ class KeyOperation:
         repo = KeyRepository(db)
         service = KeyService(repo)
         keys_dir = CacheUtils.get_keys_dir()
-        return service.list_keys(keys_dir)
+        return service.list_all(keys_dir)
 
     @staticmethod
     def get(inputs: KeyInput) -> SSHKeyItem:
@@ -153,8 +153,21 @@ class KeyOperation:
         )
 
     @staticmethod
-    def remove(inputs: KeyInput) -> BatchResult[SSHKeyItem]:
-        """Remove keys by name or ID."""
+    def remove(
+        inputs: KeyInput, force: bool = False
+    ) -> BatchResult[SSHKeyItem]:
+        """Remove keys by name or ID.
+
+        Args:
+            inputs: KeyInput with name identifiers to remove.
+            force: If True, remove even if the key is referenced by VMs.
+
+        Returns:
+            BatchResult with per-key OperationResult items.
+
+        """
+        from mvmctl.core.vm._repository import VMRepository
+
         db = Database()
         repo = KeyRepository(db)
 
@@ -162,9 +175,21 @@ class KeyOperation:
         resolved = request.resolve()
         keys_dir = CacheUtils.get_keys_dir()
 
+        # Check if any VMs reference the keys being removed
+        vm_repo = VMRepository(db)
+
         results: list[OperationResult[SSHKeyItem]] = []
         for key in resolved.keys:
             try:
+                referencing_vms = vm_repo.find_by_ssh_key_id(key.id)
+
+                if referencing_vms and not force:
+                    names = ", ".join(vm.name for vm in referencing_vms)
+                    raise MVMKeyError(
+                        f"Key '{key.name}' is used by VM(s): {names}. "
+                        "Use --force to remove anyway."
+                    )
+
                 # File cleanup is done at the API layer before DB deletion
                 pub_file = keys_dir / f"{key.name}.pub"
                 priv_file = keys_dir / key.name
