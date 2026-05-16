@@ -88,7 +88,8 @@ image_types:
     download_url: "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-{arch}-cloudimg.qcow2"
     sha256_url: "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-{arch}-cloudimg.qcow2.SHA256"
     format: qcow2
-    options: {}
+    options:
+      convert_to: ext4
   - type: firecracker
     name: "Firecracker CI Ubuntu"
     resolver: firecracker-s3

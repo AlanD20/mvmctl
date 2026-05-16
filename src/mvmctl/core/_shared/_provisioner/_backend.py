@@ -460,6 +460,21 @@ class _LoopMountBackend:
         """Queue raw operation objects for execution."""
         self._lp._ops.extend(ops)
 
+    def convert_to(self, target_fs: str) -> None:
+        """Convert the image filesystem to *target_fs* via loop-mount.
+
+        Delegates to ``LoopMountProvisioner.convert_to()`` which calls the
+        ``mvm-provision`` binary directly (bypassing the regular ops flow).
+        The image file is replaced in-place.
+        """
+        from mvmctl.exceptions import LoopMountError
+
+        try:
+            self._lp.convert_to(target_fs)
+        except (LoopMountError, OSError, RuntimeError) as exc:
+            logger.error("Filesystem conversion failed: %s", exc)
+            raise
+
     def run(self) -> None:
         """Execute all queued operations."""
         self._lp.run()
@@ -581,6 +596,15 @@ class _GuestfsBackend:
     def shrink(self) -> None:
         """Queue shrink-to-minimum operation."""
         self._gp.shrink()
+
+    def convert_to(self, target_fs: str) -> None:
+        """Convert the image filesystem to *target_fs* via guestfs.
+
+        Delegates to ``GuestfsProvisioner.convert_to()`` which opens a
+        fresh guestfs session, creates a new ext4 image, copies all
+        files, and replaces the original.
+        """
+        self._gp.convert_to(target_fs)
 
     def run(self) -> None:
         """Execute all queued operations."""

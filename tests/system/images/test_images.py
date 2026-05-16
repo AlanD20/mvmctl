@@ -877,7 +877,7 @@ class TestImagePullSkipOptimization:
 
 
 class TestImageImportSetDefault:
-    """Test image import with --set-default flag."""
+    """Test image import with --default flag."""
 
     pytestmark = [
         pytest.mark.system,
@@ -889,7 +889,7 @@ class TestImageImportSetDefault:
     def test_image_import_with_set_default(
         self, mvm_binary, tmp_path, system_cache_dir
     ):
-        """Import a local image file with --set-default flag."""
+        """Import a local image file with --default flag."""
         import shutil
 
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
@@ -950,7 +950,7 @@ class TestImageImportSetDefault:
             )
             if result.returncode != 0:
                 pytest.skip(
-                    f"Import with --set-default failed: {result.stderr.strip()}"
+                    f"Import with --default failed: {result.stderr.strip()}"
                 )
             assert "default" in result.stdout.lower()
 

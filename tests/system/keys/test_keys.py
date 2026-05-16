@@ -246,7 +246,7 @@ class TestKeyLifecycle:
                 unique_key_name,
                 "--algorithm",
                 "ed25519",
-                "--set-default",
+                "--default",
             )
 
             _run_mvm(mvm_binary, "key", "rm", unique_key_name)
@@ -356,7 +356,7 @@ class TestKeyCreateAdvanced:
 
     @pytest.mark.serial
     def test_key_create_with_set_default(self, mvm_binary, unique_key_name):
-        """Create key with --set-default and verify is_default in ls --json."""
+        """Create key with --default and verify is_default in ls --json."""
         result = _run_mvm(
             mvm_binary,
             "key",
@@ -364,7 +364,7 @@ class TestKeyCreateAdvanced:
             unique_key_name,
             "--algorithm",
             "ed25519",
-            "--set-default",
+            "--default",
         )
         assert result.returncode == 0
 

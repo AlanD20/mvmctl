@@ -19,7 +19,7 @@ import signal
 import subprocess
 import sys
 import tempfile
-from typing import Any
+from typing import Any, Callable
 
 _LINUX_FS_TYPES = frozenset({"ext2", "ext3", "ext4", "btrfs"})
 
@@ -54,6 +54,8 @@ class Provisioner:
         self._action: str = ops.get("action", "provision")
         self._debug: bool = ops.get("debug", False)
 
+        self._target_fs: str = ops.get("target_fs", "ext4")
+
         raw_ops: Any = ops.get("operations", {})
         self._operations: dict[str, Any] = (
             raw_ops if isinstance(raw_ops, dict) else {}
@@ -83,6 +85,25 @@ class Provisioner:
                 f"[{ts}] [PID={os.getpid()}] [step={self._current_step}] {msg}\n"
             )
 
+    def _run_action(
+        self, action_method: Callable[[], dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Execute an action method with cleanup and error wrapping.
+
+        Wraps the call in try/except/finally to return a consistent
+        result dict on success or error, always running cleanup.
+        """
+        try:
+            return action_method()
+        except Exception as exc:
+            return {
+                "status": "error",
+                "error": str(exc),
+                "step": self._current_step,
+            }
+        finally:
+            self._cleanup()
+
     # ── Public API ──────────────────────────────────────────────────────
 
     def run(self) -> dict[str, Any]:
@@ -95,23 +116,20 @@ class Provisioner:
         When ``self._action == "detect_os"``, returns ``status`` and
         ``os_type`` instead.
 
+        When ``self._action == "convert_fs"``, returns ``status``,
+        ``new_fs_type``, and ``new_size_bytes`` instead.
+
         Cleanup (umount, detach loop) always runs via ``finally``.
         """
         self._current_step = "parse"
 
         # Short-circuit for detect_os action
         if self._action == "detect_os":
-            try:
-                result = self.detect_os()
-            except Exception as exc:
-                result = {
-                    "status": "error",
-                    "error": str(exc),
-                    "step": self._current_step,
-                }
-            finally:
-                self._cleanup()
-            return result
+            return self._run_action(self.detect_os)
+
+        # Short-circuit for convert_fs action
+        if self._action == "convert_fs":
+            return self._run_action(lambda: self.convert_fs(self._target_fs))
 
         files_written = 0
         commands_run = 0
@@ -271,6 +289,114 @@ class Provisioner:
             }
 
         return {"status": "ok", "os_type": os_type}
+
+    # ── Filesystem conversion ───────────────────────────────────────────
+
+    def convert_fs(self, target_fs: str) -> dict[str, Any]:
+        """Convert the image filesystem to *target_fs*.
+
+        Mounts the image, calculates the data size, creates a new sparse
+        target filesystem populated with all files, then replaces the
+        original.  Cleanup runs in the caller's ``finally`` block.
+
+        Args:
+            target_fs: Target filesystem type (only ``"ext4"`` is
+                currently implemented).
+
+        Returns:
+            A dict with ``status``, ``new_fs_type``, and ``new_size_bytes``
+            on success, or ``status``, ``error``, and ``step`` on failure.
+
+        Raises:
+            ValueError: If *target_fs* is not yet supported.
+
+        """
+        if target_fs != "ext4":
+            raise ValueError(
+                f"Unsupported target filesystem: {target_fs!r}. "
+                "Only 'ext4' is supported."
+            )
+
+        self._current_step = "loop"
+        self._setup_loop()
+
+        self._current_step = "partition"
+        self._find_root_partition()
+
+        self._current_step = "detect_fs"
+        self._detect_fs_type()
+
+        self._current_step = "mount"
+        self._mount_point = tempfile.mkdtemp(prefix="mvm-provision-")
+        self._mount()
+
+        # Get actual data size from the mounted filesystem
+        self._current_step = "du"
+        du_result = subprocess.run(
+            ["du", "-sb", self._mount_point],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if du_result.returncode != 0:
+            raise RuntimeError(
+                f"du failed for {self._mount_point}: {du_result.stderr}"
+            )
+        data_bytes = int(du_result.stdout.split()[0])
+
+        # Calculate ext4 size: data + 150 MiB buffer, rounded up to next MiB
+        # 150 MiB = ext4 journal (128 MiB default) + inode table + block group
+        # descriptors + 5 % reserved blocks.  See CONST_ROOTFS_MIN_HEADROOM_BYTES
+        # in constants.py for the canonical definition.
+        _HEADROOM = 150 * 1024 * 1024
+        _MEBI = 1024 * 1024
+        size_bytes = data_bytes + _HEADROOM
+        size_bytes = ((size_bytes + _MEBI - 1) // _MEBI) * _MEBI
+        size_mib = size_bytes // _MEBI
+
+        output_path = self._image + ".ext4"
+
+        # Create sparse output file
+        self._current_step = "truncate"
+        subprocess.run(
+            ["truncate", "-s", f"{size_mib}M", output_path],
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+
+        # Create ext4 filesystem populated with data from the mount point.
+        # capture_output=True prevents mkfs progress output from leaking
+        # into the JSON response on stdout.
+        self._current_step = "mkfs"
+        subprocess.run(
+            [
+                "mkfs.ext4",
+                "-d",
+                self._mount_point,
+                "-L",
+                "rootfs",
+                "-F",
+                output_path,
+            ],
+            capture_output=True,
+            check=True,
+            timeout=300,
+        )
+
+        # Cleanup (unmount + detach) before replacing the file
+        self._cleanup()
+
+        # Replace original with the new ext4 file
+        self._current_step = "replace"
+        os.remove(self._image)
+        os.rename(output_path, self._image)
+
+        return {
+            "status": "ok",
+            "new_fs_type": target_fs,
+            "new_size_bytes": size_bytes,
+        }
 
     # ── Signal handling ─────────────────────────────────────────────────
 
@@ -900,8 +1026,10 @@ class Provisioner:
         """Unmount and detach loop device. Always runs on finally."""
         if self._mount_point is not None:
             self._cleanup_mount(self._mount_point)
+            self._mount_point = None
         if self._loop_dev is not None:
             self._detach_loop()
+            self._loop_dev = None
 
 
 # ── Entry point ──────────────────────────────────────────────────────────

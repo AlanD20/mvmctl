@@ -157,7 +157,7 @@ class TestBinaryPullAdvanced:
         )
         if result.returncode != 0:
             pytest.skip(
-                f"bin pull {target} --set-default failed: {result.stderr}"
+                f"bin pull {target} --default failed: {result.stderr}"
             )
         assert result.returncode == 0
 

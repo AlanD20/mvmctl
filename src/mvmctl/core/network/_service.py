@@ -1002,5 +1002,26 @@ class NetworkService:
 
         return orphaned
 
+    @staticmethod
+    def flush_arp(bridge: str) -> None:
+        """Flush ARP cache for the given bridge interface.
+
+        When a VM is removed and a new VM is assigned the same IP, the
+        host's ARP cache still maps that IP to the old (deleted) TAP
+        device.  Subsequent SSH connections hit TCP timeouts on the
+        stale entry before re-ARping, inflating perceived boot time.
+
+        Call this after the TAP is created and attached, before spawning
+        Firecracker, so the ARP cache is clean when the first packet
+        arrives.
+        """
+        from mvmctl.utils._system import run_cmd
+
+        run_cmd(
+            ["ip", "neigh", "flush", "dev", bridge],
+            privileged=True,
+            check=False,
+        )
+
 
 __all__ = ["NetworkService"]

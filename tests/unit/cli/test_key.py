@@ -174,7 +174,7 @@ class TestKeyCreate:
                 "ed25519",
                 "--comment",
                 "my comment",
-                "--set-default",
+                "--default",
             ],
         )
         assert result.exit_code == 0

@@ -372,6 +372,106 @@ class LoopMountManager:
             return False
 
     # ------------------------------------------------------------------
+    # Filesystem conversion
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def convert_fs(
+        image_path: str,
+        output_path: str,
+        target_fs: str = "ext4",
+        *,
+        timeout: int = LOOP_MOUNT_TIMEOUT,
+    ) -> dict[str, Any]:
+        """Convert the filesystem in an image to a different type.
+
+        Builds a JSON payload with ``action: "convert_fs"`` and runs the
+        ``mvm-provision`` binary (or dev fallback).  The binary mounts the
+        image, creates a new filesystem of the target type populated with
+        all files, then replaces the original.
+
+        Args:
+            image_path: Path to the image file to convert.
+            output_path: Temporary path for the converted output.
+            target_fs: Target filesystem type (default ``"ext4"``).
+            timeout: Maximum time in seconds for the operation.
+
+        Returns:
+            Parsed JSON response dict with ``status``, ``new_fs_type``,
+            and ``new_size_bytes`` on success.
+
+        Raises:
+            LoopMountError: If the binary returns an error.
+            LoopMountTimeoutError: If the binary times out.
+
+        """
+        binary = LoopMountManager._resolve_binary_path()
+        if binary is not None:
+            cmd = [str(binary)]
+        else:
+            cmd = [sys.executable, str(_DEV_PROCESS_PATH)]
+
+        payload: dict[str, object] = {
+            "image": image_path,
+            "action": "convert_fs",
+            "output": output_path,
+            "target_fs": target_fs,
+        }
+
+        payload_bytes = json.dumps(payload).encode("utf-8")
+
+        logger.debug(
+            "Running fs conversion: image=%s output=%s", image_path, output_path
+        )
+
+        try:
+            proc = run_cmd(
+                cmd,
+                input=payload_bytes.decode("utf-8"),
+                timeout=timeout,
+                check=False,
+                privileged=True,
+            )
+        except ProcessError as e:
+            if "timed out" in str(e):
+                raise LoopMountTimeoutError(
+                    f"Filesystem conversion timed out after {timeout}s for {image_path}"
+                ) from None
+            raise ProcessError(f"Failed to run fs conversion: {e}") from e
+
+        if proc.returncode != 0:
+            error_msg = LoopMountManager._extract_error(proc)
+            logger.debug(
+                "FS conversion exited with code %d: %s (image=%s)",
+                proc.returncode,
+                error_msg,
+                image_path,
+            )
+            raise LoopMountError(f"Filesystem conversion failed: {error_msg}")
+
+        try:
+            raw_stdout: str | bytes = proc.stdout
+            if isinstance(raw_stdout, bytes):
+                raw_stdout = raw_stdout.decode("utf-8", errors="replace")
+            parsed: Any = json.loads(raw_stdout)
+        except (json.JSONDecodeError, ValueError) as e:
+            raise LoopMountError(f"Failed to parse conversion response: {e}")
+
+        if not isinstance(parsed, dict):
+            raise LoopMountError(
+                f"Conversion response is not a dict: {type(parsed).__name__}"
+            )
+
+        status: object = parsed.get("status", "")
+        if status == "error":
+            raise LoopMountError(
+                f"Filesystem conversion error: {parsed.get('error', 'unknown')} "
+                f"(step: {parsed.get('step', 'unknown')})"
+            )
+
+        return parsed
+
+    # ------------------------------------------------------------------
     # Availability check
     # ------------------------------------------------------------------
 

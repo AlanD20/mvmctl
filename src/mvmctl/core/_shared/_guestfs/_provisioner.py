@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any, Self
 
@@ -121,6 +122,136 @@ class GuestfsProvisioner:
         """Queue fstab fix for Firecracker (PARTUUID → /dev/vda)."""
         self._ops.append("fix_fstab")
         return self
+
+    # =====================================================================
+    # Filesystem conversion (independent — not an _op)
+    # =====================================================================
+
+    def convert_to(self, target_fs: str) -> None:
+        """Convert the image filesystem to *target_fs* using guestfs.
+
+        Opens a fresh guestfs session with both drives, copies all files
+        via ``tar --one-file-system`` (preserves attributes, auto-skips
+        cross-device mount points), then replaces the original.
+
+        Args:
+            target_fs: Target filesystem type (e.g. ``"ext4"``).
+
+        """
+
+        import importlib as _importlib
+
+        from mvmctl.utils._system import run_cmd as _run_cmd
+
+        # Output path: same directory, .ext4 suffix
+        output_path = self._rootfs_path.with_suffix(".ext4")
+
+        from mvmctl.constants import CONST_ROOTFS_MIN_HEADROOM_BYTES
+
+        _MEBI = 1024 * 1024
+
+        # Size: source partition size + 150 MiB headroom for ext4 overhead,
+        # rounded up to next MiB boundary.
+        data_size = self._rootfs_path.stat().st_size
+        size_bytes = data_size + CONST_ROOTFS_MIN_HEADROOM_BYTES
+        size_bytes = ((size_bytes + _MEBI - 1) // _MEBI) * _MEBI
+        size_mib = size_bytes // _MEBI
+
+        # Create sparse output file
+        _run_cmd(["truncate", "-s", f"{size_mib}M", str(output_path)])
+
+        # Fresh guestfs session with two drives
+        guestfs_mod = _importlib.import_module("guestfs")
+        g = guestfs_mod.GuestFS(python_return_dict=True)
+
+        # Mirror environment setup from OptimizedGuestfs._setup_environment
+        if hasattr(g, "set_recovery_proc"):
+            g.set_recovery_proc(False)
+        if hasattr(g, "set_autosync"):
+            g.set_autosync(False)
+        if hasattr(g, "set_network"):
+            g.set_network(False)
+        if hasattr(g, "set_smp"):
+            g.set_smp(1)
+        if hasattr(g, "set_memsize"):
+            g.set_memsize(256)
+        if hasattr(g, "set_backend"):
+            g.set_backend("direct")
+
+        orig_env: dict[str, str | None] = {
+            "LIBGUESTFS_BACKEND": os.environ.get("LIBGUESTFS_BACKEND"),
+            "QEMU_LOCKING": os.environ.get("QEMU_LOCKING"),
+        }
+        os.environ["LIBGUESTFS_BACKEND"] = "direct"
+        os.environ["QEMU_LOCKING"] = "off"
+
+        try:
+            # Source drive added FIRST (/dev/sda), target drive SECOND (/dev/sdb).
+            # Mount source at /, then mount target at /ext4 under the source.
+            # Use tar --one-file-system to copy: it does NOT descend into
+            # mount points on a different filesystem, so /ext4 (on /dev/sdb)
+            # is automatically skipped — no infinite recursion.
+            g.add_drive_opts(
+                str(self._rootfs_path),
+                format="raw",
+                readonly=True,
+            )
+            g.add_drive_opts(
+                str(output_path),
+                format="raw",
+                readonly=False,
+            )
+
+            g.launch()
+
+            # Detect and mount the source filesystem
+            filesystems: dict[str, str] = g.list_filesystems()
+            root_dev: str | None = None
+            for candidate in ["/dev/sda", "/dev/sda1", "/dev/vda", "/dev/vda1"]:
+                if candidate in filesystems:
+                    root_dev = candidate
+                    break
+            if root_dev is None and filesystems:
+                root_dev = str(list(filesystems.keys())[0])
+            if root_dev is None:
+                raise RuntimeError(
+                    f"No filesystem found in {self._rootfs_path}"
+                )
+
+            g.mount(root_dev, "/")
+
+            # Create target filesystem and mount at /ext4
+            g.mkfs(target_fs, "/dev/sdb")
+            g.mkdir_p("/ext4")
+            g.mount("/dev/sdb", "/ext4")
+
+            # Copy all files preserving attributes.
+            # tar --one-file-system does NOT descend into mount points on
+            # a different filesystem, so /ext4 (on /dev/sdb) is automatically
+            # skipped.  Virtual filesystems (/sys, /proc) from the appliance
+            # overlay are also skipped, avoiding I/O errors.
+            g.sh("tar cf - --one-file-system / | tar xf - -C /ext4")
+
+            # Cleanup mounts inside guestfs
+            g.umount("/ext4")
+            g.umount("/")
+            g.shutdown()
+        except Exception:
+            output_path.unlink(missing_ok=True)
+            raise
+        finally:
+            try:
+                g.close()
+            except Exception:
+                pass
+            for key, value in orig_env.items():
+                if value is not None:
+                    os.environ[key] = value
+                elif key in os.environ:
+                    del os.environ[key]
+
+        # Replace original with the new ext4 file
+        output_path.rename(self._rootfs_path)
 
     # =====================================================================
     # Execution — single guestfs session for all queued operations
@@ -297,6 +428,11 @@ class GuestfsProvisioner:
                         if isinstance(op.data, bytes)
                         else str(op.data)
                     )
+                    # Ensure parent directory exists before writing
+                    if "/" in op.path:
+                        parent = op.path.rsplit("/", 1)[0]
+                        if parent:
+                            handle.mkdir_p(parent)
                     handle.write(op.path, data_str)
 
     @staticmethod
@@ -320,6 +456,11 @@ class GuestfsProvisioner:
                         if isinstance(op.data, bytes)
                         else str(op.data)
                     )
+                    # Ensure parent directory exists before writing
+                    if "/" in op.path:
+                        parent = op.path.rsplit("/", 1)[0]
+                        if parent:
+                            handle.mkdir_p(parent)
                     handle.write(op.path, data_str)
 
     @staticmethod

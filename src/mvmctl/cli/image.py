@@ -616,10 +616,15 @@ def image_import(
 @image_app.command(name="warm")
 @handle_errors
 def image_warm(
-    image_id: str = typer.Argument(
-        ...,
+    image_id: str | None = typer.Argument(
+        None,
         help="Image ID, hash prefix, or OS slug to warm (e.g., 'ubuntu-24.04', 'abc123')",
         autocompletion=_complete_local_image_ids,
+    ),
+    all: bool = typer.Option(
+        False,
+        "--all",
+        help="Warm all cached images.",
     ),
 ) -> None:
     """
@@ -636,7 +641,13 @@ def image_warm(
         # Warm by image ID prefix:
         mvm image warm abc123
 
+        # Warm all cached images:
+        mvm image warm --all
+
     """
+    if not image_id:
+        all = True
+
     console = Console()
     with console.status("", spinner="dots") as status:
 
@@ -644,16 +655,20 @@ def image_warm(
             if event.message:
                 status.update(event.message)
 
-        result = ImageOperation.warm(
-            ImageInput(id=[image_id]), on_progress=_on_progress
-        )
+        if all:
+            result = ImageOperation.warm(all=True, on_progress=_on_progress)
+        else:
+            result = ImageOperation.warm(
+                ImageInput(id=[image_id]), on_progress=_on_progress
+            )
     if result.is_error:
-        print_error(result.message or f"Failed to warm image '{image_id}'")
+        print_error(result.message or "Failed to warm image(s)")
         raise typer.Exit(code=1)
 
     for path in result.item or []:
         size_str = CommonUtils.format_bytes_human_readable(path.stat().st_size)
-        print_success(f"Image warmed successfully: {image_id}")
+        display_name = image_id or "all images"
+        print_success(f"Image warmed successfully: {display_name}")
         print_info(f"  Path: {path}")
         print_info(f"  Size: {size_str}")
     print_info("  Ready for fast VM creation!")

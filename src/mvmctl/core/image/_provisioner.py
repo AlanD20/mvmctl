@@ -50,6 +50,7 @@ class ImageProvisioner:
         self._fs_type = fs_type
         self._deblob = False
         self._shrink = False
+        self._convert_to: str | None = None
 
     # -- builder methods (declarative) ------------------------------------
 
@@ -75,14 +76,28 @@ class ImageProvisioner:
         """Mark that filesystem shrink should run."""
         self._shrink = True
 
+    def convert_to(self, target_fs: str) -> None:
+        """Mark that filesystem conversion should run as Phase 0.
+
+        Useful for converting btrfs images to ext4 before deblob/shrink.
+        The conversion runs **first** (Phase 0) so that all subsequent
+        operations see the converted filesystem.
+        """
+        self._convert_to = target_fs
+
     # -- execution ---------------------------------------------------------
 
     def run(self) -> bool:
         """Execute queued operations with the selected backend.
 
-        Runs deblob and shrink as **separate backend sessions** so that a
-        shrink failure (e.g. filesystem already at minimum size) does not
-        prevent the deblob step from being applied.
+        Phases run in order — conversion (Phase 0), deblob (Phase 1),
+        shrink (Phase 2).  Each phase uses a **fresh backend session** so a
+        failure in one phase never leaks into the next.
+
+        * Phase 0: filesystem conversion (e.g. btrfs → ext4).  Runs first
+          so that deblob and shrink see the converted filesystem.
+        * Phase 1: deblob + fstab fix.
+        * Phase 2: filesystem shrink (ext-family only).
 
         Returns:
             True if at least one phase ran successfully, False if all
@@ -93,6 +108,32 @@ class ImageProvisioner:
 
         deblob_ok = False
         shrink_ok = False
+        convert_ok = False
+
+        # Phase 0: filesystem conversion (e.g. btrfs → ext4)
+        # Runs first so that deblob and shrink operate on the converted fs.
+        if self._convert_to is not None:
+            backend = ProvisionerBackend.get_image(
+                self._image_path,
+                provisioner_type=self._provisioner_type,
+                fs_type=self._fs_type,
+            )
+            try:
+                backend.convert_to(self._convert_to)
+                self._fs_type = self._convert_to
+                convert_ok = True
+                logger.info(
+                    "Filesystem converted: %s → %s",
+                    self._fs_type,
+                    self._convert_to,
+                )
+            except (LoopMountError, OSError, RuntimeError) as exc:
+                logger.warning(
+                    "Filesystem conversion skipped: %s. "
+                    "Build the provisioner binary with 'python scripts/build_services.py' "
+                    "or enable libguestfs to enable fs conversion.",
+                    exc,
+                )
 
         # Phase 1: deblob + fstab fix (fresh backend — no state leakage)
         if self._deblob:
@@ -129,4 +170,4 @@ class ImageProvisioner:
                     "Shrink skipped (image may already be minimal): %s", exc
                 )
 
-        return deblob_ok or shrink_ok
+        return convert_ok or deblob_ok or shrink_ok

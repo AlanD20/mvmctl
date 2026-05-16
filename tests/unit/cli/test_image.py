@@ -450,7 +450,7 @@ class TestImagePullExtended:
         assert "Network timeout" in result.output
 
     def test_pull_with_set_default(self, mocker):
-        """Should confirm default image when --set-default."""
+        """Should confirm default image when --default."""
         mock = mocker.patch("mvmctl.cli.image.ImageOperation")
         img = _make_image("Ubuntu 24.04")
         mock.pull.return_value = OperationResult(
@@ -707,7 +707,7 @@ class TestImageImportExtended:
         assert "Failed to import image" in result.output
 
     def test_import_set_default(self, mocker, tmp_path):
-        """Should confirm default image when --set-default."""
+        """Should confirm default image when --default."""
         mock = mocker.patch("mvmctl.cli.image.ImageOperation")
         img = _make_image("Imported OS", "imported-os")
         mock.import_.return_value = OperationResult(

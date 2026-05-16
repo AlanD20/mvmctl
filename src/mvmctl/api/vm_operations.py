@@ -367,6 +367,7 @@ class VMCreateContext:
                 )
 
             self.mark_created("network_tap")
+            net_service.flush_arp(self.resolved.network.bridge)
 
         if self._on_progress is not None:
             self._on_progress(

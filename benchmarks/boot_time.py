@@ -46,20 +46,12 @@ class ImageBenchConfig:
 
 
 IMAGES: list[ImageBenchConfig] = [
-    ImageBenchConfig(name="alpine", threshold_s=5, kernel="official:6.19.9"),
-    ImageBenchConfig(
-        name="ubuntu:24.04", threshold_s=5, kernel="official:6.19.9"
-    ),
-    ImageBenchConfig(
-        name="ubuntu-minimal:24.04",
-        threshold_s=5,
-        kernel="official:6.19.9",
-    ),
-    ImageBenchConfig(name="archlinux", threshold_s=5, kernel="official:6.19.9"),
-    ImageBenchConfig(name="debian:12", threshold_s=5, kernel="official:6.19.9"),
-    ImageBenchConfig(
-        name="firecracker", threshold_s=5, kernel="official:6.19.9"
-    ),
+    ImageBenchConfig(name="alpine", threshold_s=5),
+    ImageBenchConfig(name="ubuntu:24.04", threshold_s=5),
+    ImageBenchConfig(name="ubuntu-minimal:24.04", threshold_s=5),
+    ImageBenchConfig(name="archlinux", threshold_s=5, kernel="official:7.0.7"),
+    ImageBenchConfig(name="debian:12", threshold_s=5),
+    ImageBenchConfig(name="firecracker", threshold_s=5),
 ]
 
 # Wall-clock timeout for the ssh subprocess (seconds).  Lower = more

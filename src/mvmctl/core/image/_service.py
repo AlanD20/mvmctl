@@ -284,6 +284,23 @@ class ImageService:
                 f"Image processing failed: output file not created at {image_path}"
             )
 
+        # ── Filesystem conversion (btrfs → ext4) ──────────────────────
+        # Run conversion as a separate ImageProvisioner session so that
+        # the subsequent deblob/shrink phases see the new filesystem type.
+        if fs_type == "btrfs":
+            logger.info("Converting filesystem from btrfs to ext4...")
+            from mvmctl.core.image._provisioner import ImageProvisioner
+
+            cp = ImageProvisioner(
+                image_path=image_path,
+                provisioner_type=provisioner_type,
+                fs_type=fs_type,
+            )
+            cp.convert_to("ext4")
+            cp.run()
+            fs_type = "ext4"
+            logger.info("Filesystem conversion completed: btrfs → ext4")
+
         # ── Shrink + deblob via ImageProvisioner ──────────────────────
         from mvmctl.core.image._provisioner import ImageProvisioner
 
@@ -295,18 +312,14 @@ class ImageService:
             fs_type=fs_type,
         )
 
-        # Skip shrink/deblob for filesystems that e2fsck can't handle
-        # (squashfs, btrfs, xfs, etc. — see _FS_CAN_SHRINK constant)
-        if fs_type not in _FS_CAN_SHRINK:
-            logger.info(
-                "Skipping shrink/deblob for %s image (already optimized)",
-                fs_type,
-            )
-            optimized = True
-        else:
-            p.deblob()
+        # Deblob runs on any writable filesystem (chroot ops + file writes).
+        # Squashfs/read-only will fail gracefully — ImageProvisioner catches
+        # LoopMountError/OSError and logs a warning.
+        # Shrink only for ext-family filesystems (needs e2fsck/resize2fs).
+        p.deblob()
+        if fs_type in _FS_CAN_SHRINK:
             p.shrink()
-            optimized = p.run()
+        optimized = p.run()
         if warnings is not None and not optimized:
             warnings.append(
                 "Image optimization skipped: no provisioner backend available. "

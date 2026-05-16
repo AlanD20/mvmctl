@@ -704,8 +704,9 @@ class ImageOperation:
 
     @staticmethod
     def warm(
-        inputs: ImageInput,
+        inputs: ImageInput | None = None,
         *,
+        all: bool = False,
         on_progress: Callable[[ProgressEvent], None] | None = None,
     ) -> OperationResult[list[Path]]:
         """
@@ -715,19 +716,26 @@ class ImageOperation:
         so VM creation can use fast copy instead of waiting for decompression.
 
         Args:
-            inputs: ImageInput with id_prefix or type identifiers.
+            inputs: ImageInput with id_prefix or type identifiers. Ignored when ``all=True``.
+            all: If True, warm all cached images. Ignores ``inputs``.
             on_progress: Optional callback for progress events.
 
         Returns:
             OperationResult with list of paths to the warmed images.
 
         """
-        from mvmctl.api.inputs._image_input import ImageRequest
         from mvmctl.core.image._service import ImageService
 
         db = Database()
         repo = ImageRepository(db)
-        images = ImageRequest(inputs=inputs, db=db).resolve().images
+
+        if all:
+            images = repo.list_all()
+        else:
+            from mvmctl.api.inputs._image_input import ImageRequest
+
+            assert inputs is not None
+            images = ImageRequest(inputs=inputs, db=db).resolve().images
 
         if on_progress is not None:
             on_progress(

@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import logging
 from pathlib import Path
+from typing import Any
 
 from mvmctl.core._shared._loopmount._manager import LoopMountManager
 from mvmctl.core._shared._provisioner._content import (
@@ -66,14 +67,43 @@ class LoopMountProvisioner:
         self._ops.extend(ProvisionerContent.build_ssh_ops(user, ssh_pubkeys))
 
     def disable_cloud_init(self) -> None:
-        """Queue cloud-init datasource blocking + service masking."""
-        self._ops.extend(ProvisionerContent.build_cloud_init_disable_ops())
+        """Cloud-init is disabled at image import time via ``build_deblob_ops()``.
+        No-op at VM creation time.
+        """
 
     def inject_cloud_init(self, cloud_init_dir: Path) -> None:
         """Queue cloud-init seed directory injection."""
         self._ops.extend(
             ProvisionerContent.build_cloud_init_inject_ops(cloud_init_dir)
         )
+
+    # -- filesystem conversion --------------------------------------------
+
+    def convert_to(self, target_fs: str) -> dict[str, Any]:
+        """Convert the image to a different filesystem type in-place.
+
+        This is an **independent** action — it bypasses the regular
+        provisioning ops flow and calls ``LoopMountManager.convert_fs``
+        directly.  The image file is replaced on disk with the converted
+        version.
+
+        Args:
+            target_fs: Target filesystem type (e.g. ``"ext4"``). Only
+                ``"ext4"`` is currently implemented in the binary.
+
+        Returns:
+            Result dict from the manager: ``status``, ``new_fs_type``,
+            ``new_size_bytes``.
+
+        """
+        output_path = str(self._rootfs_path) + ".ext4"
+        result = LoopMountManager.convert_fs(
+            image_path=str(self._rootfs_path),
+            output_path=output_path,
+            target_fs=target_fs,
+        )
+        # The binary renames output → input, so rootfs_path stays valid
+        return result
 
     # -- execution ---------------------------------------------------------
 

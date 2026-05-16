@@ -190,7 +190,17 @@ class CacheOperation:
             ``"warm_images"``, ``"guestfs_state"``, and
             ``"stale_provision_mounts"`` indicating whether each was removed.
         """
+        # Clean service binaries (mvm-services + all symlinks)
+        bin_dir = CacheUtils.get_bin_dir()
+        service_binaries_cleaned = False
+        if bin_dir.exists() and not dry_run:
+            import shutil
+
+            shutil.rmtree(bin_dir, ignore_errors=True)
+            service_binaries_cleaned = True
+
         result = {
+            "service_binaries": service_binaries_cleaned,
             "appliance": GuestfsService.prune_appliance(dry_run),
             "warm_images": CacheService.prune_warm_images(dry_run),
             "guestfs_state": GuestfsService.clean_stale_guestfs_state(),

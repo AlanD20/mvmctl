@@ -227,34 +227,6 @@ class ProvisionerContent:
                 gid=0,
             )
         )
-        ops.append(
-            FileOp(
-                path="/etc/ssh/sshd_config.d/mvm.conf",
-                data=cls.sshd_config(user).encode("utf-8"),
-                mode=0o644,
-                uid=0,
-                gid=0,
-            )
-        )
-        ops.append(
-            FileOp(
-                path="/usr/local/bin/first-boot-ssh-installer.sh",
-                data=cls.first_boot_installer().encode("utf-8"),
-                mode=0o755,
-                uid=0,
-                gid=0,
-            )
-        )
-        ops.append(
-            FileOp(
-                path="/etc/systemd/system/first-boot-ssh-installer.service",
-                data=cls.first_boot_service().encode("utf-8"),
-                mode=0o644,
-                uid=0,
-                gid=0,
-            )
-        )
-
         if user != "root":
             ops.append(ChrootOp(f"useradd -m {user}"))
             ops.append(ChrootOp("mkdir -p /etc/sudoers.d"))
@@ -266,15 +238,6 @@ class ProvisionerContent:
             )
             ops.append(ChrootOp(f"chmod 440 /etc/sudoers.d/{user}"))
 
-        ops.append(ChrootOp("ssh-keygen -A"))
-        ops.append(
-            ChrootOp(
-                "if [ -d /run/systemd/system ] || [ -d /usr/lib/systemd ]; then "
-                "  systemctl enable sshd 2>/dev/null || "
-                "systemctl enable ssh 2>/dev/null || true; "
-                "fi"
-            )
-        )
         return ops
 
     @classmethod
@@ -351,7 +314,10 @@ class ProvisionerContent:
 
     @classmethod
     def build_deblob_ops(cls, os_type: str) -> list[Operation]:
-        """Generate OS cache cleanup and fstab fix operations.
+        """Generate OS cache cleanup, SSH config, and cloud-init disable operations.
+
+        These operations run once at image import time — they are identical
+        for every VM from the same image.
 
         Args:
             os_type: Detected OS identifier (e.g. ``"ubuntu"``, ``"alpine"``,
@@ -359,7 +325,6 @@ class ProvisionerContent:
 
         Returns:
             List of FileOp/ChrootOp operations for OS cleanup.
-
         """
         ops: list[Operation] = []
 
@@ -391,9 +356,69 @@ class ProvisionerContent:
                 "    modprobe@drm.service \\\n"
                 "    modprobe@efi_pstore.service \\\n"
                 "    sys-kernel-debug.mount \\\n"
+                "    pollinate.service \\\n"
+                "    snapd.service \\\n"
+                "    snapd.socket \\\n"
+                "    systemd-udev-settle.service \\\n"
+                "    unattended-upgrades.service \\\n"
+                "    packagekit.service \\\n"
+                "    man-db.timer \\\n"
+                "    whoopsie.service \\\n"
+                "    apport.service \\\n"
+                "    udisks2.service \\\n"
+                "    console-setup.service \\\n"
+                "    keyboard-setup.service \\\n"
+                "    motd-news.service \\\n"
+                "    fstrim.timer \\\n"
+                "    logrotate.timer \\\n"
+                "    multipathd.service \\\n"
+                "    accounts-daemon.service \\\n"
+                "    systemd-userdbd.service \\\n"
+                "    systemd-nsresourced.service \\\n"
+                "    systemd-pcrphase.service \\\n"
+                "    systemd-pcrphase-initrd.service \\\n"
+                "    systemd-pcrphase-sysinit.service \\\n"
                 "    systemd-boot-update.service; do\n"
                 '    ln -sf /dev/null "/etc/systemd/system/$svc" 2>/dev/null || true\n'
                 "  done\n"
+                "fi"
+            )
+        )
+
+        # ── SSH daemon configuration (identical for every VM from this image) ──
+        ops.append(
+            FileOp(
+                path="/etc/ssh/sshd_config.d/mvm.conf",
+                data=cls.sshd_config("root").encode("utf-8"),
+                mode=0o644,
+                uid=0,
+                gid=0,
+            )
+        )
+        ops.append(
+            FileOp(
+                path="/usr/local/bin/first-boot-ssh-installer.sh",
+                data=cls.first_boot_installer().encode("utf-8"),
+                mode=0o755,
+                uid=0,
+                gid=0,
+            )
+        )
+        ops.append(
+            FileOp(
+                path="/etc/systemd/system/first-boot-ssh-installer.service",
+                data=cls.first_boot_service().encode("utf-8"),
+                mode=0o644,
+                uid=0,
+                gid=0,
+            )
+        )
+        ops.append(ChrootOp("ssh-keygen -A"))
+        ops.append(
+            ChrootOp(
+                "if command -v systemctl >/dev/null 2>&1; then\n"
+                "  systemctl enable sshd 2>/dev/null || "
+                "systemctl enable ssh 2>/dev/null || true;\n"
                 "fi"
             )
         )
@@ -555,6 +580,63 @@ class ProvisionerContent:
         else:
             # Generic: clear all cache dirs
             ops.append(ChrootOp("rm -rf /var/cache/* 2>/dev/null || true"))
+
+        # ── Cloud-init disable (all distros) ──────────────────────────────
+        ops.append(
+            FileOp(
+                path="/etc/cloud/cloud.cfg.d/99-disable-datasources.cfg",
+                data=cls.CLOUD_INIT_DISABLE_DATASOURCE,
+                mode=0o644,
+                uid=0,
+                gid=0,
+            )
+        )
+        ops.append(
+            FileOp(
+                path="/etc/cloud/cloud-init.disabled",
+                data=cls.CLOUD_INIT_DISABLED_MARKER,
+                mode=0o644,
+                uid=0,
+                gid=0,
+            )
+        )
+        ops.append(
+            FileOp(
+                path=(
+                    "/etc/systemd/system/snapd.seeded.service.d/override.conf"
+                ),
+                data=cls.SNAPD_OVERRIDE,
+                mode=0o644,
+                uid=0,
+                gid=0,
+            )
+        )
+        ops.append(
+            FileOp(
+                path=(
+                    "/etc/systemd/system/"
+                    "systemd-networkd-wait-online.service.d/override.conf"
+                ),
+                data=cls.NETWORKD_WAIT_OVERRIDE,
+                mode=0o644,
+                uid=0,
+                gid=0,
+            )
+        )
+        ops.append(
+            ChrootOp(
+                "if command -v systemctl >/dev/null 2>&1; then\n"
+                "  for svc in \\\n"
+                "    cloud-init.service \\\n"
+                "    cloud-init-local.service \\\n"
+                "    cloud-config.service \\\n"
+                "    cloud-final.service; do\n"
+                '    ln -sf /dev/null "/etc/systemd/system/$svc" '
+                "2>/dev/null || true\n"
+                "  done\n"
+                "fi"
+            )
+        )
 
         ops.append(ChrootOp("rm -rf /var/lib/apt/lists/* 2>/dev/null || true"))
 

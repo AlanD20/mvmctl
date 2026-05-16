@@ -42,7 +42,7 @@ OVERRIDABLE_DEFAULTS: Final[dict[str, dict[str, Any]]] = {
         "enable_metrics": False,
         "enable_console": True,
         "lsm_flags": "landlock,lockdown,yama,integrity,selinux,bpf",
-        "boot_args": "console=ttyS0 reboot=k panic=1 net.ifnames=0 rw rootwait quiet loglevel=3",
+        "boot_args": "console=ttyS0 reboot=k panic=1 net.ifnames=0 rw rootwait quiet loglevel=3 no_timer_check clocksource=kvm-clock systemd.show_status=false",
         "guest_mac_prefix": "02:FC",
     },
     "defaults.network": {
@@ -185,6 +185,7 @@ CONST_SHRINK_SAFETY_MARGIN: Final[float] = 1.01
 CONST_RATIO_MIN: Final[float] = 1.0
 CONST_MIN_ROOTFS_SIZE_MIB: Final[int] = 128
 CONST_ROOTFS_HEADROOM_FACTOR: Final[float] = 1.25
+CONST_ROOTFS_MIN_HEADROOM_BYTES: Final[int] = 150 * 1024 * 1024  # ext4 journal + metadata
 CONST_PERCENT: Final[int] = 100
 MIN_ROOT_SIZE_MB: Final[int] = 500
 SIZE_TOO_SMALL_MB: Final[int] = 100

@@ -122,7 +122,7 @@ def key_create(
     comment: str | None = typer.Option(None, "--comment", help="Key comment"),
     out: Path | None = typer.Option(None, "--out", help="Output directory"),
     set_default: bool = typer.Option(
-        False, "--set-default", help="Set as default key"
+        False, "--default", help="Set as default key"
     ),
     force: bool = typer.Option(
         False, "--force", "-f", help="Overwrite existing key"

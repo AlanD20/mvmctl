@@ -1826,10 +1826,10 @@ class TestFlagNaming:
         assert "--default" in result.stdout
         assert "--set-default" not in result.stdout
 
-    def test_set_default_flag_in_key_create(self, mvm_binary) -> None:
-        """``key create`` intentionally kept ``--set-default``."""
+    def test_default_flag_in_key_create(self, mvm_binary) -> None:
+        """``key create`` uses ``--default``."""
         result = _run_mvm(mvm_binary, "key", "create", "--help")
-        assert "--set-default" in result.stdout
+        assert "--default" in result.stdout
 
 
 class TestJsonOutputConsistency:

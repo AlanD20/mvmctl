@@ -71,6 +71,13 @@ class KernelResolver:
             )
         return self.enrich([kernel])[0]
 
+    def by_type(self, type_str: str) -> KernelItem:
+        """Resolve by kernel type name."""
+        kernel = self._repo.get_by_type(type_str)
+        if kernel is None:
+            raise KernelNotFoundError(f"Kernel not found: type={type_str!r}")
+        return self.enrich([kernel])[0]
+
     def get_default(self) -> KernelItem | None:
         """Resolve the default kernel, or None if not set."""
         kernel = self._repo.get_default()
@@ -86,6 +93,11 @@ class KernelResolver:
 
         try:
             return self.by_id(value)
+        except KernelNotFoundError:
+            pass
+
+        try:
+            return self.by_type(value)
         except KernelNotFoundError:
             pass
 
