@@ -137,7 +137,6 @@ omit = [
 [dependency-groups]
 dev = [
     "mypy>=1.19,<2",
-    "pip-audit>=2.8",
     "pyright>=1.1.409",
     "pytest>=9,<10",
     "pytest-cov>=7,<8",

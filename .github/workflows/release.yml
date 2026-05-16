@@ -12,22 +12,22 @@ permissions:
 jobs:
   test:
     name: Test with Coverage Gate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v8
         with:
-          version: "0.4.x"
+          enable-cache: true
 
       - name: Set up Python 3.13
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
       - name: Install dependencies
-        run: uv sync --group dev
+        run: uv sync --locked --group dev
 
       - name: Run tests with coverage gate
         run: uv run scripts/run_tests.py --pytest-extra "--cov=src/mvmctl --cov-report=term-missing --cov-fail-under=79"
@@ -42,15 +42,15 @@ jobs:
         os: [ubuntu-24.04]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v8
         with:
-          version: "0.4.x"
+          enable-cache: true
 
       - name: Set up Python 3.13
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
@@ -60,7 +60,7 @@ jobs:
           sudo apt-get install -y build-essential patchelf ccache
 
       - name: Install dependencies
-        run: uv sync --group dev --group build
+        run: uv sync --locked --group dev --group build
 
       - name: Run tests
         run: uv run scripts/run_tests.py
@@ -80,7 +80,7 @@ jobs:
           cat mvm.sha256
 
       - name: Upload binary as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mvm-linux-${{ matrix.os }}
           path: |
@@ -101,10 +101,10 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download binary artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: mvm-linux-ubuntu-24.04
           path: dist
@@ -127,7 +127,7 @@ jobs:
           mv *.deb dist/
 
       - name: Upload .deb artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mvmctl-deb
           path: dist/*.deb
@@ -139,14 +139,14 @@ jobs:
     container: fedora:latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install RPM build tools
         run: |
           dnf install -y rpm-build rpmdevtools gzip
 
       - name: Download binary artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: mvm-linux-ubuntu-24.04
           path: dist
@@ -162,7 +162,7 @@ jobs:
           cp ~/rpmbuild/RPMS/x86_64/*.rpm dist/
 
       - name: Upload .rpm artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mvmctl-rpm
           path: dist/*.rpm
@@ -173,10 +173,10 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download binary artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: mvm-linux-ubuntu-24.04
           path: dist
@@ -191,7 +191,7 @@ jobs:
           # We'll let makepkg compute the checksum during build on Arch
 
       - name: Upload PKGBUILD artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mvmctl-pkgbuild
           path: |
@@ -205,20 +205,20 @@ jobs:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v8
         with:
-          version: "0.4.x"
+          enable-cache: true
 
       - name: Set up Python 3.13
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
       - name: Install dependencies
-        run: uv sync --group dev
+        run: uv sync --locked --group dev
 
       - name: Build wheel and sdist
         run: uv build
@@ -236,7 +236,7 @@ jobs:
 
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: artifacts
           pattern: mvmctl-*

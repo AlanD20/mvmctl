@@ -6,7 +6,19 @@ pkgdesc="MicroVM Manager - Container speed, VM isolation"
 arch=('x86_64')
 url="https://github.com/AlanD20/mvmctl"
 license=('MIT')
-depends=('iproute2' 'iptables' 'qemu' 'libguestfs' 'xorriso' 'openssh')
+depends=(
+  'iproute2' 'nftables' 'iptables'          # networking
+  'qemu-img'                                # image conversion
+  'openssh'                                  # ssh-keygen
+  'e2fsprogs' 'util-linux'                   # filesystem tools
+  'kmod'                                     # modprobe, lsmod
+  'sudo' 'shadow'                            # privilege management
+  'tar'                                      # archive extraction
+)
+optdepends=(
+  'cloud-image-utils: cloud-init ISO mode (--cloud-init-mode iso)'
+  'python-libguestfs: alternative rootfs provisioning backend (slower, more capable)'
+)
 makedepends=()
 provides=('mvmctl')
 conflicts=('mvmctl')
@@ -17,7 +29,7 @@ sha256sums=('SKIP' 'SKIP')
 package() {
     # Install binary
     install -Dm755 "${srcdir}/mvm-${pkgver}" "${pkgdir}/usr/bin/mvm"
-    
+
     # Install man page
     install -Dm644 "${srcdir}/mvm.1-${pkgver}" "${pkgdir}/usr/share/man/man1/mvm.1"
     gzip -9 "${pkgdir}/usr/share/man/man1/mvm.1"

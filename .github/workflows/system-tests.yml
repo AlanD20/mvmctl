@@ -7,10 +7,12 @@ jobs:
   system-tests:
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v8
+        with:
+          enable-cache: true
       - name: Install dependencies
-        run: uv sync --group dev
+        run: uv sync --locked --group dev
       - name: Run system tests
         run: uv run scripts/run_tests.py --system

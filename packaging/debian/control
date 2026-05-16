@@ -2,14 +2,27 @@ Source: mvmctl
 Section: utils
 Priority: optional
 Maintainer: AlanD20 <aland20@pm.me>
-Build-Depends: debhelper (>= 12)
-Standards-Version: 4.4.1
+Build-Depends: debhelper (>= 13)
+Standards-Version: 4.7.4.1
 Homepage: https://github.com/AlanD20/mvmctl
 
 Package: mvmctl
 Architecture: amd64
-Depends: ${shlibs:Depends}, ${misc:Depends}, iproute2, iptables, qemu-utils, libguestfs-tools | guestfs-tools, xorriso | genisoimage
-Recommends: openssh-client
+Depends: ${shlibs:Depends}, ${misc:Depends},
+ iproute2,
+ iptables,
+ nftables,
+ qemu-utils,
+ openssh-client,
+ e2fsprogs,
+ util-linux,
+ passwd,
+ sudo,
+ procps,
+ kmod,
+ tar
+Recommends: cloud-image-utils,
+ libguestfs-tools | guestfs-tools
 Description: MicroVM Manager - Container speed, VM isolation
  mvmctl is a production-grade CLI for managing microVMs on Linux.
  It handles VM lifecycle: downloading kernels/images, networking, VM creation,

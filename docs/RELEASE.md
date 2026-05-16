@@ -1,158 +1,203 @@
 # Release Process
 
-This document covers how to release a new version of mvmctl.
+This document covers how to release a new version of mvmctl from start to finish.
+
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [Step 1: Bump the Version](#step-1-bump-the-version)
+- [Step 2: Build and Verify Locally](#step-2-build-and-verify-locally)
+- [Step 3: Commit and Push](#step-3-commit-and-push)
+- [Step 4: Tag and Push the Tag](#step-4-tag-and-push-the-tag)
+- [Step 5: CI Pipeline](#step-5-ci-pipeline)
+- [Step 6: Verify the Release](#step-6-verify-the-release)
+- [Step 7: Install the Man Page](#step-7-install-the-man-page)
+- [Issuing a Hotfix](#issuing-a-hotfix)
+- [Yanking a Bad Release](#yanking-a-bad-release)
+- [Appendix: Dynamic Import Handling](#appendix-dynamic-import-handling)
+
+---
 
 ## Prerequisites
 
 - **Python 3.13+** — local development and building
-- **Linux (KVM-capable host)** — integration tests and valid binary
+- **Linux (KVM-capable host)** — tests and valid binary
 - **git** — tagging and pushing
 - **uv** — dependency management (see [uv docs](https://docs.astral.sh/uv/))
 
-## Bumping the Version
+---
 
-Use the automated bump script:
+## Step 1: Build and Verify Locally with Tests
+
+Before bumping any versions, verify the codebase is green:
 
 ```bash
-./bump-version.py 0.1.0              # Bump to 0.1.0
-./bump-version.py 0.1.0 --dry-run    # Preview changes only
-./bump-version.py 0.1.0 --commit     # Bump and auto-commit
-./bump-version.py 0.1.0 --aur        # Also update AUR PKGBUILD checksums
+uv sync --group dev
+uv run ruff check src/
+uv run mypy src/
+uv run scripts/run_tests.py --ci        # All tests + 80% coverage gate
 ```
 
-Files updated: `pyproject.toml`, `src/mvmctl/__init__.py`, `packaging/PKGBUILD`, `packaging/mvmctl.spec`, `packaging/debian/changelog`, `docs/mvm.1`, `CHANGELOG.md`
+Then verify the binary compiles:
+
+```bash
+uv sync --group dev --group build
+python scripts/build_services.py        # Build everything (default)
+```
+
+Output: `dist/mvm` (main binary) and `dist/services/mvm-services` (multidist services binary).
+
+Verify the binary runs:
+```bash
+./dist/mvm --version
+./dist/mvm --help
+```
+
+Do not proceed until linting, type checks, tests, and the build all pass.
+
+---
+
+## Step 2: Bump the Version
+
+Run the automated bump script:
+
+```bash
+./bump-version.py 0.2.0              # Bump to 0.2.0
+./bump-version.py 0.2.0 --dry-run    # Preview changes only
+./bump-version.py 0.2.0 --commit     # Bump and auto-commit
+```
+
+Files updated: `pyproject.toml`, `src/mvmctl/__init__.py`, `packaging/PKGBUILD`,
+`packaging/mvmctl.spec`, `packaging/debian/changelog`, `docs/mvm.1`, `CHANGELOG.md`
 
 This project uses **semantic versioning** (MAJOR.MINOR.PATCH):
 - **MAJOR** — incompatible API or CLI changes
 - **MINOR** — new functionality, backward-compatible
 - **PATCH** — backward-compatible bug fixes
 
-## Build Verification
+---
 
-Before tagging, verify the build locally:
+## Step 2: Build and Verify Locally
+
+Before tagging, verify the build compiles and runs:
 
 ```bash
 uv sync --group dev --group build
-python scripts/build_services.py            # Build everything (release mode, default)
-python scripts/build_services.py --mvm     # Main binary only
+python scripts/build_services.py            # Build everything (default)
 ```
 
 Output: `dist/mvm` (main binary) and `dist/services/mvm-services` (multidist services binary).
 
 Verify the binary:
-
 ```bash
 ./dist/mvm --version
 ./dist/mvm --help
 ```
 
-## Tag and Push
+---
+
+## Step 3: Commit and Push
+
+If you used `--commit` in step 2, skip to step 4. Otherwise:
+
+```bash
+git add pyproject.toml src/mvmctl/__init__.py CHANGELOG.md docs/mvm.1 \
+       packaging/PKGBUILD packaging/mvmctl.spec packaging/debian/changelog
+git commit -m "chore: bump version to 0.2.0"
+git push origin main
+```
+
+Wait for CI (`ci.yml`) to pass on this commit — it runs all tests with an 80% coverage
+gate. Do not tag until CI is green.
+
+---
+
+## Step 4: Tag and Push the Tag
 
 ```bash
 # Create an annotated tag
-git tag -a v0.1.0 -m "Release v0.1.0"
+git tag -a v0.2.0 -m "Release v0.2.0"
 
 # Push the tag (triggers release.yml workflow)
-git push origin v0.1.0
+git push origin v0.2.0
 ```
 
-> **Test gate**: The `ci.yml` workflow runs `pytest` with an 80% coverage minimum on every push and PR to `main`. Always verify CI is green on the version-bump commit before tagging. Pushing a tag that matches `v*` triggers `release.yml`.
+Pushing a tag matching `v*.*.*` triggers the release workflow.
 
-## What the CI Pipeline Does (`.github/workflows/release.yml`)
+---
 
-Triggered on tag push `v*.*.*`:
+## Step 5: CI Pipeline
+
+The `.github/workflows/release.yml` workflow runs automatically when the tag is pushed:
 
 | Job | Description |
 |-----|-------------|
-| **test** | Runs all tests with 80% coverage gate |
-| **build** | Builds Nuitka binary on `ubuntu-24.04`, generates SHA256, uploads as artifact |
-| **build-deb** | Builds `.deb` package via `dpkg-buildpackage` (needs build) |
-| **build-rpm** | Builds `.rpm` in Fedora container (needs build) |
-| **build-arch** | Creates Arch PKGBUILD files (needs build) |
-| **publish-pypi** | Publishes wheel + sdist to PyPI via trusted publishing (needs all prior) |
+| **test** | All tests with 80% coverage gate |
+| **build** | Nuitka binary on `ubuntu-24.04`, SHA256 checksum, uploaded as artifact |
+| **build-deb** | `.deb` package via `dpkg-buildpackage` |
+| **build-rpm** | `.rpm` in Fedora container |
+| **build-arch** | Arch PKGBUILD files |
+| **publish-pypi** | Wheel + sdist to PyPI via trusted publishing (waits for all prior) |
 | **upload-packages-to-release** | Uploads all packages to the GitHub release |
 
-## Packaging Formats
+The full run typically takes 5-10 minutes.
 
-| Format | Location | Dependencies |
-|--------|----------|-------------|
-| `.deb` | `packaging/debian/` | `iproute2, iptables, qemu-utils, libguestfs-tools | guestfs-tools, xorriso | genisoimage` |
-| `.rpm` | `packaging/mvmctl.spec` | `iproute, iptables, qemu-img, libguestfs, xorriso, openssh-clients` |
-| Arch Linux | `packaging/PKGBUILD` | `iproute2, iptables, qemu, libguestfs, xorriso, openssh` |
-| PyPI | via trusted publishing | Python package (wheel + sdist) |
+---
 
-## Verifying a Release
+## Step 6: Verify the Release
 
-After the workflow completes (typically 5-10 minutes):
+### Download and check the binary
 
 ```bash
-# Download the binary
-curl -L -o mvm https://github.com/AlanD20/mvmctl/releases/download/v0.1.0/mvm
+curl -L -o mvm https://github.com/AlanD20/mvmctl/releases/download/v0.2.0/mvm
 chmod +x mvm
-
-# Verify checksum
 sha256sum -c mvm.sha256
-
-# Check version
 ./mvm --version
-# Expected: mvm 0.1.0
+# Expected: mvm 0.2.0
 ```
 
-### PyPI verification
+### Check PyPI
 
 ```bash
-uv tool install mvmctl==0.1.0
+uv tool install mvmctl==0.2.0
 mvm --version
-# Expected: mvm 0.1.0
+# Expected: mvm 0.2.0
 ```
 
-### GitHub release page
+### Check GitHub release page
 
 Visit the releases page and confirm:
 - Release notes are present and accurate
 - The `mvm` binary and `mvm.sha256` checksum are attached
+- `.deb`, `.rpm`, and Arch PKGBUILD are attached
 
-## Issuing a Hotfix
+---
 
-```bash
-# Branch from the release tag
-git checkout -b hotfix/v0.1.1 v0.1.0
+## Step 7: Update Downstream Packages
 
-# Make the fix, then bump version
-./bump-version.py 0.1.1 --commit
+After the release is published, update distribution packaging that requires hardcoded checksums.
 
-# Tag and push
-git push origin hotfix/v0.1.1
-git tag -a v0.1.1 -m "Release v0.1.1 (hotfix)"
-git push origin v0.1.1
-```
-
-Then open a PR to merge the hotfix branch back into `main`.
-
-## Yanking a Bad Release
-
-### Yank from PyPI
+### AUR PKGBUILD
 
 ```bash
-uv tool install twine
-twine yank mvmctl 0.1.0
+python scripts/post-release.py --aur           # Auto-detects version from latest git tag
+python scripts/post-release.py --aur --dry-run # Preview only
 ```
 
-### Mark or delete the GitHub release
+This downloads the released `mvm` binary and man page from GitHub, computes SHA256 checksums,
+updates `packaging/PKGBUILD`, and regenerates `packaging/.SRCINFO`.
+
+Then push the updated PKGBUILD to AUR:
 
 ```bash
-# Mark as pre-release
-gh release edit v0.1.0 --prerelease
-
-# Or delete entirely
-gh release delete v0.1.0 --yes
-git tag -d v0.1.0
-git push origin :refs/tags/v0.1.0
+cd packaging
+git commit -am "aur: update to v0.2.0"
+git push aur master
 ```
 
-After yanking, immediately publish a new patch release with the fix.
+---
 
-## Man Page Installation
+## Step 8: Install the Man Page
 
 ```bash
 sudo cp docs/mvm.1 /usr/local/share/man/man1/
@@ -160,9 +205,57 @@ sudo mandb
 man mvm
 ```
 
+---
+
+## Issuing a Hotfix
+
+```bash
+# Branch from the release tag
+git checkout -b hotfix/v0.2.1 v0.2.0
+
+# Make the fix, then bump version
+./bump-version.py 0.2.1 --commit
+
+# Tag and push
+git push origin hotfix/v0.2.1
+git tag -a v0.2.1 -m "Release v0.2.1 (hotfix)"
+git push origin v0.2.1
+```
+
+Then open a PR to merge the hotfix branch back into `main`.
+
+---
+
+## Yanking a Bad Release
+
+### Yank from PyPI
+
+```bash
+uv tool install twine
+twine yank mvmctl 0.2.0
+```
+
+### Mark or delete the GitHub release
+
+```bash
+# Mark as pre-release
+gh release edit v0.2.0 --prerelease
+
+# Or delete entirely
+gh release delete v0.2.0 --yes
+git tag -d v0.2.0
+git push origin :refs/tags/v0.2.0
+```
+
+After yanking, immediately publish a new patch release with the fix.
+
+---
+
 ## Appendix: Dynamic Import Handling
 
-Nuitka performs static analysis to detect dependencies. Modules using dynamic registries (e.g., `passlib`) or runtime lookups (e.g., `rich._unicode_data`, `jinja2.tests`) must be force-included:
+Nuitka performs static analysis to detect dependencies. Modules using dynamic registries
+(e.g., `passlib`) or runtime lookups (e.g., `rich._unicode_data`, `jinja2.tests`) must be
+force-included:
 
 | Module | Nuitka Flag |
 |--------|-------------|

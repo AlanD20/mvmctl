@@ -5,7 +5,6 @@ Usage:
     python scripts/build_services.py                    # Build everything (default)
     python scripts/build_services.py --services         # Only build service binaries
     python scripts/build_services.py --service <name>   # Build a specific service
-    python scripts/build_services.py --mvm              # Only build main binary
 
 Prerequisites:
     uv sync --group dev --group build
@@ -334,11 +333,6 @@ def main() -> None:
         metavar="NAME",
         help="Build a specific service by name",
     )
-    parser.add_argument(
-        "--mvm",
-        action="store_true",
-        help="Build the main mvm binary",
-    )
     args = parser.parse_args()
 
     # Validate service names
@@ -352,12 +346,12 @@ def main() -> None:
                 sys.exit(1)
 
     # Determine targets: if none specified, build everything
-    has_target = args.services or args.service or args.mvm
-    build_all_services = args.services or not has_target or args.mvm
+    has_target = args.services or args.service
+    build_all_services = args.services or not has_target
     build_specific_services = (
         args.service if (args.service and not build_all_services) else []
     )
-    build_main_binary = args.mvm or not has_target
+    build_main_binary = not has_target
 
     success = True
     if build_all_services:
