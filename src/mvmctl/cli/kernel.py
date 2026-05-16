@@ -9,12 +9,14 @@ from typing import TYPE_CHECKING, Any, cast
 import typer
 from rich.console import Console
 
+from mvmctl.api import KernelImportInput as _KernelImportInput
 from mvmctl.api import KernelInput as _KernelInput
 from mvmctl.api import KernelOperation as _KernelOperation
 from mvmctl.api import KernelPullInput as _KernelPullInput
 from mvmctl.core._shared._http_dir_version_resolver import VersionInfo
 
 if TYPE_CHECKING:
+    from mvmctl.api.inputs._kernel_import_input import KernelImportInput
     from mvmctl.api.inputs._kernel_input import KernelInput
     from mvmctl.api.inputs._kernel_pull_input import KernelPullInput
     from mvmctl.api.kernel_operations import KernelOperation
@@ -22,6 +24,7 @@ else:
     KernelOperation = _KernelOperation
     KernelPullInput = _KernelPullInput
     KernelInput = _KernelInput
+    KernelImportInput = _KernelImportInput
 from mvmctl.cli._completion import _complete_kernel_ids
 from mvmctl.models import KernelItem
 from mvmctl.models.result import OperationResult, ProgressEvent
@@ -392,6 +395,69 @@ def kernel_rm(
 
     if batch_result.has_any_error:
         raise typer.Exit(code=1)
+
+
+@kernel_app.command(name="import")
+@handle_errors
+def kernel_import(
+    name: str = typer.Argument(
+        ...,
+        help="User-assigned name for this kernel entry",
+    ),
+    path: Path = typer.Argument(
+        ...,
+        help="Path to vmlinux file",
+        exists=True,
+        readable=True,
+    ),
+    version: str | None = typer.Option(
+        None,
+        "--version",
+        help="Override auto-detected kernel version",
+    ),
+    arch: str | None = typer.Option(
+        None,
+        "--arch",
+        help="Kernel architecture (default: auto-detected from filename or platform)",
+    ),
+    set_default: bool = typer.Option(
+        False, "--default", "-d", help="Set as default after import"
+    ),
+) -> None:
+    """Register a vmlinux file as a kernel in the database.
+
+    Examples:
+
+        mvm kernel import my-kernel ./vmlinux-6.1-x86_64
+
+        mvm kernel import my-kernel ./vmlinux-custom --version 6.1 --arch x86_64 --default
+    """
+    if not path.exists():
+        print_error(f"Source file not found: {path}")
+        raise typer.Exit(code=1)
+
+    inputs = KernelImportInput(
+        name=name,
+        path=path,
+        version=version,
+        arch=arch,
+        set_default=set_default,
+    )
+    result = KernelOperation.import_(inputs)
+
+    if result.is_error:
+        print_error(result.message or f"Import failed: {name}")
+        raise typer.Exit(code=1)
+
+    assert result.item is not None
+    short_id = HashGenerator.shorten(result.item.id)
+    print_success(f"Imported: {result.item.name}")
+    print_info(f"  ID:   {short_id}")
+
+    if set_default:
+        print_success(f"Default kernel set to: {name}")
+
+    raise typer.Exit(code=0)
 
 
 __all__ = ["kernel_app"]

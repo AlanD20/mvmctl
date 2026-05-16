@@ -8,6 +8,10 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
+from mvmctl.api.inputs._kernel_import_input import (
+    KernelImportInput,
+    KernelImportRequest,
+)
 from mvmctl.api.inputs._kernel_input import KernelInput
 from mvmctl.api.inputs._kernel_pull_input import (
     KernelPullInput,
@@ -605,6 +609,65 @@ class KernelOperation:
             return OperationResult(
                 status="error",
                 code="kernel.default_set_failed",
+                message=str(e),
+                exception=e,
+            )
+
+    @staticmethod
+    def import_(
+        inputs: KernelImportInput,
+    ) -> OperationResult[KernelItem]:
+        """
+        Import a local vmlinux file as a kernel in the database.
+
+        Auto-detects version and architecture from the filename when not
+        explicitly provided, copies the file to the kernels cache directory,
+        generates a content-addressed ID, creates a ``KernelItem`` with
+        type ``"custom"``, and persists it to the database.
+
+        Args:
+            inputs: KernelImportInput with name, path, version, arch, etc.
+
+        Returns:
+            OperationResult with the imported KernelItem on success.
+
+        """
+        db = Database()
+        repo = KernelRepository(db)
+
+        try:
+            # Resolve and validate inputs via the standard Request pattern
+            request = KernelImportRequest(inputs=inputs, db=db)
+            resolved = request.resolve()
+
+            service = KernelService(repo)
+            kernel_item = service.import_kernel(
+                name=resolved.name,
+                source_path=resolved.path,
+                version=resolved.version,
+                arch=resolved.arch,
+                set_default=resolved.set_default,
+            )
+
+            AuditLog.log(
+                "kernel.import",
+                changes={
+                    "name": kernel_item.name,
+                    "version": kernel_item.version,
+                    "arch": kernel_item.arch,
+                },
+            )
+
+            return OperationResult(
+                status="success",
+                code="kernel.imported",
+                message=f"Kernel imported: {kernel_item.name}",
+                item=kernel_item,
+            )
+        except KernelError as e:
+            return OperationResult(
+                status="error",
+                code="kernel.import_failed",
                 message=str(e),
                 exception=e,
             )

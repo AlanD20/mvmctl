@@ -11,6 +11,7 @@ import subprocess
 import tarfile
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,8 @@ from mvmctl.exceptions import (
 )
 from mvmctl.models import KernelItem, KernelPullResult, KernelSpec
 from mvmctl.utils._system import run_cmd
+from mvmctl.utils.common import CacheUtils
+from mvmctl.utils.crypto import HashGenerator
 from mvmctl.utils.http import HttpDownload
 from mvmctl.utils.template import render_optional_template, render_template
 from mvmctl.utils.yaml import (
@@ -1408,3 +1411,80 @@ class KernelService:
             warnings=warnings,
             info_messages=info_messages,
         )
+
+    def import_kernel(
+        self,
+        name: str,
+        source_path: Path,
+        version: str,
+        arch: str,
+        set_default: bool = False,
+    ) -> KernelItem:
+        """Import a local vmlinux file as a kernel in the database.
+
+        Copies the file to the kernels cache directory, generates a content-
+        addressed SHA256 ID, creates a ``KernelItem`` with type ``"custom"``,
+        and persists it via upsert.
+
+        Args:
+            name: User-assigned base name for this kernel entry.
+            source_path: Path to the vmlinux file on disk.
+            version: Kernel version string (already resolved from filename
+                or user override by the caller).
+            arch: Kernel architecture (already resolved from filename or
+                user override by the caller).
+            set_default: Whether to set as the default kernel after import.
+
+        Returns:
+            The created KernelItem.
+
+        Raises:
+            KernelError: If the source file cannot be read or copied.
+
+        """
+        resolved_path = source_path.expanduser().resolve()
+
+        # Copy file to kernels cache directory
+        dest_filename = f"{name}-{version}-{arch}"
+        kernels_dir = CacheUtils.get_kernels_dir()
+        dest_path = kernels_dir / dest_filename
+
+        try:
+            shutil.copy2(str(resolved_path), str(dest_path))
+        except OSError as e:
+            raise KernelError(
+                f"Failed to copy kernel file to {dest_path}: {e}"
+            ) from e
+        dest_path.chmod(CONST_FILE_PERMS_EXECUTABLE)
+
+        # Generate content-addressed ID
+        timestamp = datetime.now(tz=UTC).isoformat()
+        kernel_id = HashGenerator.kernel(dest_path, version, arch, timestamp)
+
+        # Build KernelItem
+        kernel_item = KernelItem(
+            id=kernel_id,
+            name=f"{name} {version}",
+            base_name=name,
+            version=version,
+            arch=arch,
+            type="custom",
+            path=dest_filename,
+            is_default=set_default,
+            is_present=True,
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+
+        self._repo.upsert(kernel_item)
+        if set_default:
+            self._repo.set_default(kernel_item.id)
+
+        logger.info(
+            "Imported kernel: %s (version=%s, arch=%s, id=%s)",
+            kernel_item.name,
+            version,
+            arch,
+            HashGenerator.shorten(kernel_item.id),
+        )
+        return kernel_item

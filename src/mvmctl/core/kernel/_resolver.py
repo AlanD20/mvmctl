@@ -87,6 +87,13 @@ class KernelResolver:
 
     def resolve(self, value: str) -> KernelItem:
         """Resolve kernel by ID prefix, ``type:version`` (e.g. ``official:6.19.9``), or file path."""
+        # Fast-path: absolute path -> skip DB queries entirely.
+        if value.startswith("/"):
+            path = Path(value).expanduser()
+            if path.exists():
+                return self._item_from_path(path)
+            raise KernelNotFoundError(f"Kernel not found at path: {value!r}")
+
         prefix, rest = VersionResolver.parse_selector(value)
         if prefix is not None:
             return self.by_version_type(rest, prefix)
@@ -112,15 +119,18 @@ class KernelResolver:
     def _item_from_path(path: Path) -> KernelItem:
         """Construct a KernelItem from an existing file path.
 
-        The resulting item is ephemeral — it is not stored in the DB but
-        carries the absolute path so the VM creation pipeline can use it.
+        DEPRECATED — this is a legacy fallback for VMs that were created
+        with a path-based kernel before the ``kernel import`` command
+        existed. It creates an ephemeral item (not stored in the DB) so
+        existing VMs can still restart. Use ``kernel import`` to register
+        kernels in the database instead.
         """
         resolved = path.expanduser().resolve()
         name = resolved.name
         now = datetime.now(UTC).isoformat()
 
         return KernelItem(
-            id=name,
+            id=str(resolved),
             name=name,
             base_name=name,
             version="unknown",

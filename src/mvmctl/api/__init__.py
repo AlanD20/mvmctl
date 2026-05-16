@@ -45,7 +45,10 @@ __all__ = [
     "ImagePullInput",
     "ImageImportInput",
     "ImageInput",
+    "KernelImportInput",
+    "KernelImportRequest",
     "KernelPullInput",
+    "ResolvedKernelImportInput",
     "KernelInput",
     "KeyCreateInput",
     "KeyInput",
@@ -113,11 +116,23 @@ _LAZY_MAP: dict[str, tuple[str, str]] = {
         "ImageImportInput",
     ),
     "ImageInput": ("mvmctl.api.inputs._image_input", "ImageInput"),
+    "KernelImportInput": (
+        "mvmctl.api.inputs._kernel_import_input",
+        "KernelImportInput",
+    ),
+    "KernelImportRequest": (
+        "mvmctl.api.inputs._kernel_import_input",
+        "KernelImportRequest",
+    ),
     "KernelPullInput": (
         "mvmctl.api.inputs._kernel_pull_input",
         "KernelPullInput",
     ),
     "KernelInput": ("mvmctl.api.inputs._kernel_input", "KernelInput"),
+    "ResolvedKernelImportInput": (
+        "mvmctl.api.inputs._kernel_import_input",
+        "ResolvedKernelImportInput",
+    ),
     "KeyCreateInput": (
         "mvmctl.api.inputs._key_create_input",
         "KeyCreateInput",

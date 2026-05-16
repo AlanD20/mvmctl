@@ -1,24 +1,22 @@
-# Building a Custom Kernel for Firecracker
+# Kernel Management
 
-This guide covers how to build a custom Linux kernel optimised for Firecracker microVMs,
-either from the pre-configured Firecracker CI kernel or from upstream kernel sources.
+This guide covers how to obtain, build, import, and manage kernels for use with
+mvmctl and Firecracker microVMs.
 
 ---
 
 ## Overview
 
-Firecracker requires a kernel that is:
+Firecracker requires an **uncompressed ELF binary** (`vmlinux`) — not the compressed
+`vmlinuz` used by traditional bootloaders. The kernel must be small and fast to boot.
 
-- An **uncompressed ELF binary** (`vmlinux`) on x86_64
-- Built with a Firecracker-compatible configuration (minimal, no PCI/ACPI by default)
-- Small enough to start in under 125ms (the default SLA target)
-
-`mvm` supports two workflows:
+`mvm` supports three workflows:
 
 | Workflow | Command | Time | Use when |
 |----------|---------|------|----------|
 | **Firecracker CI kernel** | `mvm kernel pull --type firecracker` | ~30s (download only) | Production use, fastest start times |
 | **Official upstream kernel** | `mvm kernel pull --type official` | 10-30 min (compile) | Custom configs, latest features, debugging |
+| **Import custom kernel** | `mvm kernel import <name> <path>` | instant (file copy) | Pre-built or third-party vmlinux files |
 
 ---
 
@@ -203,27 +201,55 @@ settings are collected and returned as warnings in the final result:
 Required kernel settings missing: CONFIG_VIRTIO_BLK, CONFIG_VIRTIO_NET
 ```
 
-**Code reference:** `KernelConfigResult` — returned by `KernelService.prepare_kernel_config()` — contains `success`, `warnings`, and `info_messages` fields
+---
+
+## Workflow C: Importing a Custom Kernel
+
+Register a pre-built vmlinux file you already have (from a custom build, third-party source, or another machine) into the kernel cache and database. This makes it visible in `mvm kernel ls` and usable with any VM — including across stop/restart cycles.
+
+```bash
+# Import a vmlinux file with auto-detected version and arch from filename
+mvm kernel import my-custom-kernel ~/kernels/vmlinux-6.1-x86_64
+
+# Override auto-detected values explicitly
+mvm kernel import my-custom-kernel ~/kernels/vmlinux-custom \
+  --version 6.1 \
+  --arch arm64
+
+# Set as default immediately
+mvm kernel import my-custom-kernel ~/kernels/vmlinux-custom \
+  --version 6.1 \
+  --default
+
+# Use the imported kernel with a VM
+mvm kernel ls                           # Show ID prefix
+mvm vm create myvm --image ubuntu:24.04 --kernel <id>
+```
+
+The kernel is copied to `~/.cache/mvmctl/kernels/`, registered in the database with `type: custom`, and a content-addressed SHA256 ID is generated from the file contents. You can stop and restart VMs using this kernel.
 
 ---
 
 ## Managing Multiple Kernels
 
 ```bash
-# List all cached kernels
+# List all cached kernels (including imported ones)
 mvm kernel ls
 
 # List remote kernel versions available for download
 mvm kernel ls --remote
 
 # Set a kernel as default for vm create
-mvm kernel default vmlinux-firecracker-1.12-x86_64
+mvm kernel default <id>    # Use the ID prefix from 'mvm kernel ls'
 
 # Remove a kernel
-mvm kernel rm vmlinux-firecracker-1.10-x86_64
+mvm kernel rm <id>         # Use the ID prefix from 'mvm kernel ls'
+
+# Import a pre-built vmlinux file
+mvm kernel import my-custom ~/vmlinux-6.1-x86_64 --default
 ```
 
-The `Def` column in `mvm kernel ls` shows the active default kernel.
+The `Def` column in `mvm kernel ls` shows the active default kernel. Imported kernels show `type: custom` in the listing.
 
 ---
 
@@ -231,12 +257,15 @@ The `Def` column in `mvm kernel ls` shows the active default kernel.
 
 ```bash
 # Use the default kernel (set via mvm kernel default)
-mvm vm create -n myvm --image ubuntu:24.04
+mvm vm create myvm --image ubuntu:24.04
 
-# Use a specific kernel by path
-mvm vm create -n myvm \
-  --image ubuntu:24.04 \
-  --kernel ~/.cache/mvmctl/kernels/vmlinux-custom
+# Use a specific kernel by ID prefix
+mvm kernel import my-custom ~/vmlinux-6.1-arm64
+mvm vm create myvm --image ubuntu:24.04 --kernel <id>
+
+# You can also pass a direct path to --kernel
+# (but the kernel won't survive VM stop/restart — use import instead)
+mvm vm create myvm --image ubuntu:24.04 --kernel /path/to/vmlinux
 ```
 
 ---
