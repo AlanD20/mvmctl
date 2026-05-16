@@ -401,3 +401,103 @@ class TestNFTablesFirewallBackend:
                     "firewall_backend",
                     check=False,
                 )
+
+
+@pytest.fixture(scope="class")
+def _nftables_env(mvm_binary: str):
+    """Set firewall backend to nftables and restore on class teardown."""
+    orig_result = _run_mvm(
+        mvm_binary, "config", "get", "settings", "firewall_backend", check=False,
+    )
+    orig_fw = "iptables"
+    if orig_result.returncode == 0 and orig_result.stdout.strip():
+        for line in orig_result.stdout.splitlines():
+            if "=" in line:
+                orig_fw = line.split("=", 1)[1].strip()
+                break
+    _run_mvm(
+        mvm_binary, "config", "set", "settings", "firewall_backend", "nftables",
+    )
+    yield orig_fw
+    _run_mvm(
+        mvm_binary, "config", "set", "settings", "firewall_backend", orig_fw,
+        check=False,
+    )
+
+
+@pytest.mark.usefixtures("_nftables_env")
+class TestAtomicRuleSync:
+    """Test nftables atomic rule replacement (flush + add via nft -f -).
+
+    Verifies that batch_ensure_rules does not duplicate rules when run
+    multiple times and that the conntrack established/related accept rule
+    is always present as the first rule in MVM-FORWARD and
+    MVM-NOCLOUDNET-INPUT.
+    """
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_network,
+        pytest.mark.serial,
+        pytest.mark.domain_network,
+    ]
+
+    def test_conntrack_rule_present_after_sync(
+        self, mvm_binary: str, module_network: str
+    ) -> None:
+        """Verify conntrack established/related accept rule exists after sync."""
+        _run_mvm(mvm_binary, "network", "sync")
+
+        # Option C: check MVM-FORWARD chain
+        output = _nft_chain_output("MVM-FORWARD")
+        assert "ct state established,related accept" in output, (
+            f"Missing conntrack rule in MVM-FORWARD after sync:\n{output}"
+        )
+
+        # Option C: check MVM-NOCLOUDNET-INPUT chain
+        nocloud_output = _nft_chain_output("MVM-NOCLOUDNET-INPUT")
+        assert "ct state established,related accept" in nocloud_output, (
+            f"Missing conntrack rule in MVM-NOCLOUDNET-INPUT:\n{nocloud_output}"
+        )
+
+    def test_sync_idempotent_no_rule_duplication(
+        self, mvm_binary: str, module_network: str
+    ) -> None:
+        """Sync twice — nftables rule count must not increase.
+
+        batch_ensure_rules flushes MVM chains and re-adds all rules
+        atomically via nft -f -. Running it twice should produce
+        exactly the same set of rules (no duplicates).
+        """
+        # First sync — establish baseline
+        _run_mvm(mvm_binary, "network", "sync")
+        count_first = _nft_chain_rule_count("MVM-FORWARD")
+
+        # Second sync — should not add duplicates
+        _run_mvm(mvm_binary, "network", "sync")
+        count_second = _nft_chain_rule_count("MVM-FORWARD")
+
+        assert count_second == count_first, (
+            f"nftables rule count changed after second sync: "
+            f"{count_first} -> {count_second}. "
+            f"batch_ensure_rules flush+add should be idempotent."
+        )
+
+    def test_sync_preserves_masquerade_rule(
+        self, mvm_binary: str, module_network: str
+    ) -> None:
+        """MASQUERADE rule in MVM-POSTROUTING persists after sync."""
+        _run_mvm(mvm_binary, "network", "sync")
+
+        # Option C: verify MASQUERADE rule in POSTROUTING
+        assert _nft_has_rule_with("MVM-POSTROUTING", "masquerade"), (
+            "MASQUERADE rule missing in MVM-POSTROUTING after sync"
+        )
+
+        # Also verify the bridge is referenced in FORWARD
+        inspect = _run_mvm(mvm_binary, "network", "inspect", module_network, "--json")
+        net_data = json.loads(inspect.stdout)
+        bridge = net_data["bridge"]
+        assert _nft_has_rule_with("MVM-FORWARD", bridge, "accept"), (
+            f"Bridge {bridge} accept rule missing in MVM-FORWARD after sync"
+        )

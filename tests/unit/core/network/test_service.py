@@ -1038,18 +1038,25 @@ class TestNetworkServiceDetectIptablesBackend:
 
 
 class TestNetworkServiceSyncIptables:
-    """Tests for sync_iptables_rules() and _count_orphaned_rules()."""
+    """Tests for sync_iptables_rules().
+
+    Orphan detection is now handled by backend trackers
+    (IPTablesTracker.count_orphaned_rules / NFTablesTracker.count_orphaned_rules
+    via FirewallTracker.count_orphaned_rules delegation).
+    """
 
     def test_sync_iptables_verifies_existing_rules(
         self, repo: NetworkRepository, default_network, mocker
     ) -> None:
-        """sync_iptables_rules() verifies existing DB rules."""
+        """sync_iptables_rules() verifies existing DB rules using batch mode."""
         mocker.patch(
             "mvmctl.core._shared._firewall_tracker.FirewallTracker.ensure_rule",
             return_value=MagicMock(success=True, command_executed=None),
         )
         mocker.patch.object(
-            NetworkService, "_count_orphaned_rules", return_value=0
+            default_network,  # type: ignore[arg-type]
+            "nat_enabled",
+            False,
         )
 
         # Insert a DB rule
@@ -1082,6 +1089,14 @@ class TestNetworkServiceSyncIptables:
             comment_tag="mvm:test:sync",
         )
         service = NetworkService(repo)
+
+        # Mock tracker.batch() context manager
+        mocker.patch.object(service._tracker, "batch")
+        # Mock tracker.count_orphaned_rules (delegates to backend)
+        mocker.patch.object(
+            service._tracker, "count_orphaned_rules", return_value=0
+        )
+
         service._tracker.repo.insert(db_rule)
 
         result = service.sync_iptables_rules(default_network)
@@ -1089,19 +1104,22 @@ class TestNetworkServiceSyncIptables:
         assert result["verified"] >= 1
         assert result["added"] == 0
         assert result["orphaned"] == 0
+        # Verify batch was used
+        service._tracker.batch.assert_called_once()
+        # Verify orphan detection now delegates to tracker
+        service._tracker.count_orphaned_rules.assert_called_once_with(
+            default_network
+        )
 
     def test_sync_iptables_adds_missing_rules(
         self, repo: NetworkRepository, default_network, mocker
     ) -> None:
-        """sync_iptables_rules() adds rules that need to be created."""
+        """sync_iptables_rules() adds rules that need to be created using batch mode."""
         mocker.patch(
             "mvmctl.core._shared._firewall_tracker.FirewallTracker.ensure_rule",
             return_value=MagicMock(
                 success=True, command_executed=["iptables", "-A"]
             ),
-        )
-        mocker.patch.object(
-            NetworkService, "_count_orphaned_rules", return_value=0
         )
 
         from mvmctl.models import (
@@ -1133,111 +1151,24 @@ class TestNetworkServiceSyncIptables:
             comment_tag="mvm:test:add",
         )
         service = NetworkService(repo)
+
+        # Mock tracker.batch() context manager and count_orphaned_rules
+        mocker.patch.object(service._tracker, "batch")
+        mocker.patch.object(
+            service._tracker, "count_orphaned_rules", return_value=0
+        )
+
         service._tracker.repo.insert(db_rule)
 
         result = service.sync_iptables_rules(default_network)
 
         assert result["added"] >= 1
         assert result["verified"] == 0
-
-    def test_count_orphaned_rules_no_iptables_save(
-        self, repo: NetworkRepository, default_network, mocker
-    ) -> None:
-        """_count_orphaned_rules() returns 0 when iptables-save fails."""
-        mocker.patch(
-            "subprocess.run",
-            side_effect=subprocess.CalledProcessError(1, ["iptables-save"]),
+        # Verify batch was used
+        service._tracker.batch.assert_called_once()
+        service._tracker.count_orphaned_rules.assert_called_once_with(
+            default_network
         )
-
-        service = NetworkService(repo)
-        count = service._count_orphaned_rules(default_network, [])
-
-        assert count == 0
-
-    def test_count_orphaned_rules_no_iptables_save_binary(
-        self, repo: NetworkRepository, default_network, mocker
-    ) -> None:
-        """_count_orphaned_rules() returns 0 when iptables-save not found."""
-        mocker.patch(
-            "subprocess.run",
-            side_effect=FileNotFoundError("iptables-save not found"),
-        )
-
-        service = NetworkService(repo)
-        count = service._count_orphaned_rules(default_network, [])
-
-        assert count == 0
-
-    def test_count_orphaned_rules_detects_orphans(
-        self, repo: NetworkRepository, default_network, mocker
-    ) -> None:
-        """_count_orphaned_rules() counts rules in iptables-save without DB match."""
-        iptables_save_output = (
-            "*filter\n"
-            "-A MVM-FORWARD -s 10.0.0.0/24 -j ACCEPT -m comment --comment mvm:forward_in:test-net:orphaned\n"
-            "-A MVM-FORWARD -s 10.0.0.0/24 -j ACCEPT -m comment --comment mvm:forward_in:test-net:existing\n"
-            "COMMIT\n"
-        )
-        mocker.patch(
-            "subprocess.run",
-            return_value=MagicMock(
-                returncode=0, stdout=iptables_save_output, stderr=""
-            ),
-        )
-
-        from mvmctl.models import (
-            FirewallChain,
-            FirewallProtocol,
-            FirewallRule,
-            FirewallRuleType,
-            FirewallTable,
-            FirewallTarget,
-            FirewallWildcard,
-        )
-
-        existing_rule = FirewallRule(
-            table_name=FirewallTable.FILTER,
-            chain_name=FirewallChain.MVM_FORWARD,
-            rule_type=FirewallRuleType.FORWARD_IN,
-            protocol=FirewallProtocol.ALL,
-            source=FirewallWildcard.ANY_CIDR,
-            destination=FirewallWildcard.ANY_CIDR,
-            in_interface=FirewallWildcard.ANY_INTERFACE,
-            out_interface=FirewallWildcard.ANY_INTERFACE,
-            target=FirewallTarget.ACCEPT,
-            sport=0,
-            dport=0,
-            network_id="test-net",
-            is_active=True,
-            comment_tag="mvm:forward_in:test-net:existing",
-        )
-
-        service = NetworkService(repo)
-        count = service._count_orphaned_rules(default_network, [existing_rule])
-
-        assert count == 1
-
-    def test_count_orphaned_rules_skips_non_mvm_lines(
-        self, repo: NetworkRepository, default_network, mocker
-    ) -> None:
-        """_count_orphaned_rules() ignores non-MVM prefix lines."""
-        iptables_save_output = (
-            "*filter\n"
-            "-A INPUT -s 10.0.0.0/24 -j ACCEPT\n"
-            "-A FORWARD -s 10.0.0.0/24 -j ACCEPT\n"
-            "COMMIT\n"
-        )
-        mocker.patch(
-            "subprocess.run",
-            return_value=MagicMock(
-                returncode=0, stdout=iptables_save_output, stderr=""
-            ),
-        )
-
-        service = NetworkService(repo)
-        count = service._count_orphaned_rules(default_network, [])
-
-        assert count == 0
 
 
 class TestNetworkServiceReconcileEdgeCases:

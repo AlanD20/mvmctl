@@ -63,6 +63,7 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = """
     -n auto
+    --dist loadscope
     --cov=src/mvmctl
     --cov-branch
     --cov-report=term-missing

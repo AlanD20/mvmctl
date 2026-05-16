@@ -33,7 +33,12 @@ if TYPE_CHECKING:
     from mvmctl.core._shared._nftables_tracker._repository import (
         NFTablesRuleRepository,
     )
-    from mvmctl.models import FirewallChain, FirewallRule, FirewallTable
+    from mvmctl.models import (
+        FirewallChain,
+        FirewallRule,
+        FirewallTable,
+        NetworkItem,
+    )
     from mvmctl.models.network import FirewallRuleResult
 
 logger = logging.getLogger(__name__)
@@ -142,6 +147,10 @@ class FirewallTracker:
         rules: list[FirewallRule],
     ) -> FirewallRuleResult:
         return self._backend.batch_remove_rules(rules)
+
+    def count_orphaned_rules(self, network: NetworkItem) -> int:
+        """Delegate orphan counting to the active backend."""
+        return self._backend.count_orphaned_rules(network)
 
     # -- chain lifecycle ---------------------------------------------------
 

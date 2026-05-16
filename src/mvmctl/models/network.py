@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, IntEnum, StrEnum
 from typing import TYPE_CHECKING
 
 from mvmctl.constants import (
@@ -17,14 +17,14 @@ if TYPE_CHECKING:
     from mvmctl.models.vm import VMInstanceItem
 
 
-class FirewallBackendType(str, Enum):
+class FirewallBackendType(StrEnum):
     """Firewall backend type — iptables or nftables."""
 
     IPTABLES = "iptables"
     NFTABLES = "nftables"
 
 
-class FirewallTable(str, Enum):
+class FirewallTable(StrEnum):
     FILTER = "filter"
     NAT = "nat"
     MANGLE = "mangle"
@@ -32,27 +32,27 @@ class FirewallTable(str, Enum):
     SECURITY = "security"
 
 
-class FirewallChain(str, Enum):
+class FirewallChain(StrEnum):
     MVM_FORWARD = MVM_FORWARD_CHAIN
     MVM_POSTROUTING = MVM_POSTROUTING_CHAIN
     MVM_NOCLOUDNET_INPUT = MVM_NOCLOUD_NET_INPUT_CHAIN
 
 
-class FirewallRuleType(str, Enum):
+class FirewallRuleType(StrEnum):
     MASQUERADE = "masquerade"
     FORWARD_IN = "forward_in"
     FORWARD_OUT = "forward_out"
     NOCLOUDNET_INPUT = "nocloudnet_input"
 
 
-class FirewallProtocol(str, Enum):
+class FirewallProtocol(StrEnum):
     TCP = "tcp"
     UDP = "udp"
     ICMP = "icmp"
     ALL = "all"
 
 
-class FirewallTarget(str, Enum):
+class FirewallTarget(StrEnum):
     ACCEPT = "ACCEPT"
     DROP = "DROP"
     REJECT = "REJECT"
@@ -61,12 +61,12 @@ class FirewallTarget(str, Enum):
     MARK = "MARK"
 
 
-class FirewallWildcard(str, Enum):
+class FirewallWildcard(StrEnum):
     ANY_CIDR = "0.0.0.0/0"
     ANY_INTERFACE = "*"
 
 
-class FirewallPort(int, Enum):
+class FirewallPort(IntEnum):
     ANY = 0
 
 

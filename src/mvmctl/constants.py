@@ -241,6 +241,7 @@ SERVICE_BINARY_NAMES: Final[list[str]] = [
 PRIVILEGED_BINARIES: Final[dict[str, str]] = {
     "/usr/sbin/ip": "iproute2",
     "/usr/sbin/iptables": "iptables",
+    "/usr/sbin/iptables-restore": "iptables",
     "/usr/sbin/iptables-save": "iptables",
     "/usr/sbin/nft": "nftables",
     "/usr/sbin/sysctl": "procps",

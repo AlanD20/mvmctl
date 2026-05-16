@@ -15,6 +15,7 @@ processing *before* UFW rules are evaluated — mimicking what
 from __future__ import annotations
 
 import logging
+import re
 
 from mvmctl.core._shared._nftables_tracker._repository import (
     NFTablesRuleRepository,
@@ -27,6 +28,7 @@ from mvmctl.models import (
     FirewallRule,
     FirewallTable,
     FirewallWildcard,
+    NetworkItem,
 )
 from mvmctl.models.network import FirewallRuleResult
 from mvmctl.utils._system import run_cmd
@@ -446,12 +448,13 @@ class NFTablesTracker:
         rules: list[FirewallRule],
     ) -> FirewallRuleResult:
         """
-        Ensure multiple rules exist in nftables and database in a single ``nft -f -`` call.
+        Ensure multiple rules atomically via ``nft -f -``.
 
-        Generates one ``add rule`` statement per rule (targeting the
-        appropriate system table based on each rule's ``table_name``),
-        pipes the full script to ``nft -f -``, and inserts all new rules
-        into the database after success.
+        Flushes only MVM custom chains (NOT the entire table/ruleset),
+        adds a conntrack ``established,related accept`` rule as the first
+        rule in MVM-FORWARD and MVM-NOCLOUDNET-INPUT to preserve
+        established connections during the atomic swap, then applies
+        all provided rules in a single privileged subprocess call.
 
         Args:
             rules: List of FirewallRule to ensure.
@@ -460,10 +463,59 @@ class NFTablesTracker:
             FirewallRuleResult indicating batch success/failure.
         """
         lines: list[str] = []
-        new_rules: list[FirewallRule] = []
 
+        # 1. Flush only our MVM custom chains — NOT the entire table/ruleset
+        for chain, table in _CHAIN_TO_TABLE.items():
+            lines.append(f"flush chain ip {table} {chain.value}")
+        lines.append("")
+
+        # 2. Conntrack rule first — preserves established connections
+        for chain, table in _CHAIN_TO_TABLE.items():
+            if table == "filter":
+                lines.append(
+                    f"add rule ip {table} {chain.value} "
+                    f"ct state established,related accept"
+                )
+        lines.append("")
+
+        # 2. Conntrack rule first — preserves established connections
+        lines.append(
+            f"add rule ip filter {FirewallChain.MVM_FORWARD.value} "
+            f"ct state established,related accept"
+        )
+        lines.append(
+            f"add rule ip filter "
+            f"{FirewallChain.MVM_NOCLOUDNET_INPUT.value} "
+            f"ct state established,related accept"
+        )
+        lines.append("")
+
+        # 3. Add all DB rules
+        new_rules: list[FirewallRule] = []
         for rule in rules:
-            # Skip rules already in the database
+            nft_expr = self._rule_to_nft_expr(rule)
+            lines.append(
+                f"add rule ip {rule.table_name.value} "
+                f"{rule.chain_name.value} {' '.join(nft_expr)}"
+            )
+            new_rules.append(rule)
+
+        nft_script = "\n".join(lines) + "\n"
+
+        try:
+            run_cmd(
+                ["nft", "-f", "-"],
+                privileged=True,
+                input=nft_script,
+            )
+        except ProcessError as e:
+            return FirewallRuleResult(
+                success=False,
+                error_message=str(e),
+            )
+
+        # Update verified_at for existing rules (insert if new)
+        for rule in new_rules:
             existing = self._repo.find_by_attributes(
                 table_name=rule.table_name,
                 chain_name=rule.chain_name,
@@ -477,41 +529,11 @@ class NFTablesTracker:
                 sport=rule.sport,
                 dport=rule.dport,
             )
-            if existing:
-                continue
+            if existing is not None and existing.id is not None:
+                self._repo.update_verified_at(existing.id)
+            else:
+                self._repo.insert(rule)
 
-            nft_expr = self._rule_to_nft_expr(rule)
-            add_stmt = (
-                f"add rule ip {rule.table_name.value} "
-                f"{rule.chain_name.value} {' '.join(nft_expr)}"
-            )
-            lines.append(add_stmt)
-            new_rules.append(rule)
-
-        if not lines:
-            return FirewallRuleResult(success=True)
-
-        nft_script = "\n".join(lines) + "\n"
-
-        try:
-            run_cmd(
-                ["nft", "-f", "-"],
-                privileged=True,
-                input=nft_script,
-            )
-        except ProcessError as e:
-            return FirewallRuleResult(
-                success=False,
-                error_message=f"Batch nftables rule creation failed: {e}",
-                command_executed=nft_script,
-            )
-
-        inserted: list[FirewallRule] = []
-        for rule in new_rules:
-            recorded = self._repo.insert(rule)
-            inserted.append(recorded)
-
-        logger.info("Batch-inserted %d nftables rules", len(inserted))
         return FirewallRuleResult(success=True)
 
     def batch_remove_rules(
@@ -572,6 +594,51 @@ class NFTablesTracker:
 
         logger.info("Removed %d nftables rules", len(rules))
         return FirewallRuleResult(success=True)
+
+    def count_orphaned_rules(self, network: NetworkItem) -> int:
+        """Count host nftables rules for this network with no matching DB record.
+
+        Scans active MVM chains via ``nft -a`` for rules whose ``comment``
+        references the given network but has no corresponding active record
+        in the database.
+
+        Args:
+            network: The network to check orphaned rules for.
+
+        Returns:
+            Number of orphaned rules detected.
+        """
+        db_rules = self._repo.get_by_network_id(network.id, active_only=True)
+        db_comments = {r.comment_tag for r in db_rules if r.comment_tag}
+
+        chain_mapping: list[tuple[FirewallChain, str]] = [
+            (FirewallChain.MVM_FORWARD, "filter"),
+            (FirewallChain.MVM_POSTROUTING, "nat"),
+            (FirewallChain.MVM_NOCLOUDNET_INPUT, "filter"),
+        ]
+
+        orphaned = 0
+        for chain, table in chain_mapping:
+            try:
+                rules = self._list_chain_rules(chain, table)
+            except ProcessError:
+                continue
+
+            for _handle, rule_text in rules:
+                match = re.search(r'comment\s+"([^"]+)"', rule_text)
+                if not match:
+                    continue
+                comment = match.group(1)
+
+                if network.name in comment and comment not in db_comments:
+                    orphaned += 1
+                    logger.warning(
+                        "Orphaned nftables rule on host for network %s: %s",
+                        network.name,
+                        rule_text,
+                    )
+
+        return orphaned
 
     def teardown(self) -> None:
         """

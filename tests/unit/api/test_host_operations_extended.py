@@ -117,7 +117,7 @@ def _patch_init_common(mocker) -> dict[str, MagicMock]:
     mock_net_op_restore.is_ok = True
     mock_net_op_restore.item = None
     mocker.patch(
-        "mvmctl.api.network_operations.NetworkOperation.restore",
+        "mvmctl.api.network_operations.NetworkOperation.sync",
         return_value=mock_net_op_restore,
     )
     deps["net_restore"] = mock_net_op_restore
@@ -301,7 +301,7 @@ class TestHostOperationInitExtended:
         _patch_init_common(mocker)
         mocker.patch("mvmctl.api.host_operations.os.getuid", return_value=0)
         mocker.patch(
-            "mvmctl.api.network_operations.NetworkOperation.restore",
+            "mvmctl.api.network_operations.NetworkOperation.sync",
             side_effect=Exception("network error"),
         )
         mock_logger = mocker.patch("mvmctl.api.host_operations.logger.warning")

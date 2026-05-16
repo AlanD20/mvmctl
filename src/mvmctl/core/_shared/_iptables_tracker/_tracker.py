@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import shlex
-from enum import Enum
+from enum import StrEnum
 
 from mvmctl.constants import CONST_IPTABLES_MAX_COMMENT_LEN
 from mvmctl.exceptions import IPTablesTrackerError, ProcessError
@@ -21,6 +21,7 @@ from mvmctl.models import (
     FirewallRuleType,
     FirewallTable,
     FirewallWildcard,
+    NetworkItem,
 )
 from mvmctl.models.network import FirewallRuleResult
 from mvmctl.utils._system import run_cmd
@@ -29,6 +30,15 @@ from mvmctl.utils.network import NetworkUtils
 from ._repository import IPTablesRuleRepository
 
 logger = logging.getLogger(__name__)
+
+# Map MVM chain → iptables table name.
+# MVM-FORWARD and MVM-NOCLOUDNET-INPUT live in the filter table;
+# MVM-POSTROUTING lives in the nat table.
+_CHAIN_TO_TABLE: dict[FirewallChain, str] = {
+    FirewallChain.MVM_FORWARD: "filter",
+    FirewallChain.MVM_POSTROUTING: "nat",
+    FirewallChain.MVM_NOCLOUDNET_INPUT: "filter",
+}
 
 
 class IPTablesTracker:
@@ -55,7 +65,7 @@ class IPTablesTracker:
     COMMENT_PREFIX = "mvm"
     MAX_COMMENT_LEN = CONST_IPTABLES_MAX_COMMENT_LEN
 
-    class RuleAction(str, Enum):
+    class RuleAction(StrEnum):
         """iptables action types for command building."""
 
         CHECK = "-C"
@@ -433,16 +443,126 @@ class IPTablesTracker:
     def batch_ensure_rules(
         self, rules: list[FirewallRule]
     ) -> FirewallRuleResult:
-        """Add multiple rules, one at a time.
+        """Add multiple rules atomically using ``iptables-restore`` per table.
 
-        For ``iptables``, each rule is handled individually (no batch
-        optimisation).  The method exists for interface compatibility with
-        ``NFTablesTracker.batch_ensure_rules()`` which applies all rules
-        atomically via ``nft -f -``.
+        Groups rules by table (filter vs nat), builds ``iptables-restore``
+        format input that flushes only MVM custom chains and installs all
+        rules in a single subprocess call per table.  The conntrack
+        ``ESTABLISHED,RELATED`` accept rule is always added as the first
+        rule in filter chains to preserve established connections during
+        the atomic swap.
         """
-        for rule in rules:
-            self.ensure_rule(rule)
+        filter_rules = [
+            r for r in rules if r.table_name == FirewallTable.FILTER
+        ]
+        nat_rules = [r for r in rules if r.table_name == FirewallTable.NAT]
+
+        try:
+            if filter_rules:
+                restore_input = self._build_restore_input(
+                    filter_rules, "filter"
+                )
+                run_cmd(
+                    ["iptables-restore"],
+                    input=restore_input,
+                    privileged=True,
+                )
+
+            if nat_rules:
+                restore_input = self._build_restore_input(nat_rules, "nat")
+                run_cmd(
+                    ["iptables-restore"],
+                    input=restore_input,
+                    privileged=True,
+                )
+        except ProcessError as e:
+            return FirewallRuleResult(
+                success=False,
+                error_message=str(e),
+            )
+
         return FirewallRuleResult(success=True)
+
+    def _build_restore_line(self, rule: FirewallRule) -> str:
+        """Build a single iptables-restore format line from a FirewallRule.
+
+        Produces ``-A CHAIN ...`` lines suitable for inclusion in an
+        ``iptables-restore`` input stream.
+        """
+        parts = ["-A", rule.chain_name]
+
+        if rule.protocol != FirewallProtocol.ALL:
+            parts.extend(["-p", rule.protocol.value])
+
+        if rule.source != FirewallWildcard.ANY_CIDR:
+            parts.extend(["-s", rule.source])
+
+        if rule.destination != FirewallWildcard.ANY_CIDR:
+            parts.extend(["-d", rule.destination])
+
+        if rule.in_interface != FirewallWildcard.ANY_INTERFACE:
+            parts.extend(["-i", rule.in_interface])
+
+        if rule.out_interface != FirewallWildcard.ANY_INTERFACE:
+            parts.extend(["-o", rule.out_interface])
+
+        if rule.sport != FirewallPort.ANY:
+            parts.extend(["--sport", str(rule.sport)])
+
+        if rule.dport != FirewallPort.ANY:
+            parts.extend(["--dport", str(rule.dport)])
+
+        parts.extend(["-j", rule.target.value])
+
+        if rule.comment_tag:
+            parts.extend(["-m", "comment", "--comment", rule.comment_tag])
+
+        return " ".join(parts)
+
+    def _build_restore_input(
+        self, rules: list[FirewallRule], table: str
+    ) -> str:
+        """Build full iptables-restore format input for a single table.
+
+        1. ``*{table}`` header
+        2. Define MVM custom chains with zero counters
+        3. Flush only MVM chains (not the entire table)
+        4. Add conntrack ``ESTABLISHED,RELATED`` accept as first rule in
+           filter chains
+        5. Append all DB rules
+        6. ``COMMIT``
+
+        Args:
+            rules: Firewall rules for this table (all same *table*).
+            table: Table name (``"filter"`` or ``"nat"``).
+
+        Returns:
+            Complete ``iptables-restore`` input string.
+        """
+        lines: list[str] = [f"*{table}"]
+
+        # Define and flush MVM chains that belong to this table
+        for chain, chain_table in _CHAIN_TO_TABLE.items():
+            if chain_table != table:
+                continue
+            lines.append(f":{chain.value} - [0:0]")
+            lines.append(f"-F {chain.value}")
+
+            # Conntrack rule first for filter chains — preserves established connections
+            if table == "filter":
+                lines.append(
+                    f"-A {chain.value} "
+                    f"-m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
+                )
+
+        # Append all DB rules
+        for rule in rules:
+            lines.append(self._build_restore_line(rule))
+
+        lines.append("COMMIT")
+        lines.append("")
+
+        return "\n".join(lines)
 
     def batch_remove_rules(
         self, rules: list[FirewallRule]
@@ -455,6 +575,54 @@ class IPTablesTracker:
         for rule in rules:
             self.remove_rule(rule)
         return FirewallRuleResult(success=True)
+
+    def count_orphaned_rules(self, network: NetworkItem) -> int:
+        """Count host iptables rules for this network with no matching DB record.
+
+        Scans ``iptables-save`` output for ``-A MVM-*`` rules whose ``--comment``
+        tag references the given network but has no corresponding active record
+        in the database.
+
+        Args:
+            network: The network to check orphaned rules for.
+
+        Returns:
+            Number of orphaned rules detected.
+        """
+        db_rules = self._repo.get_by_network_id(network.id, active_only=True)
+        db_comments = {r.comment_tag for r in db_rules if r.comment_tag}
+
+        try:
+            result = run_cmd(
+                ["iptables-save"],
+                privileged=True,
+            )
+        except ProcessError:
+            return 0
+
+        orphaned = 0
+        for line in result.stdout.splitlines():
+            if not line.startswith("-A MVM-"):
+                continue
+            parts = shlex.split(line)
+            comment: str | None = None
+            for i, part in enumerate(parts):
+                if part == "--comment" and i + 1 < len(parts):
+                    comment = parts[i + 1]
+                    break
+            if (
+                comment
+                and network.name in comment
+                and comment not in db_comments
+            ):
+                orphaned += 1
+                logger.warning(
+                    "Orphaned iptables rule on host for network %s: %s",
+                    network.name,
+                    line,
+                )
+
+        return orphaned
 
     def ensure_chain(
         self,

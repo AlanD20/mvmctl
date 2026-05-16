@@ -39,6 +39,95 @@ def _compute_bridge_name(name: str) -> str:
     return f"{prefix}{name_truncated}-{short_hash}"
 
 
+def _get_firewall_backend(mvm_binary: str) -> str:
+    """Determine the current firewall backend (nftables or iptables)."""
+    backend_result = _run_mvm(
+        mvm_binary, "config", "get", "settings", "firewall_backend", check=False,
+    )
+    if backend_result.returncode == 0 and backend_result.stdout.strip():
+        stdout_clean = backend_result.stdout.strip()
+        if "=" in stdout_clean:
+            raw = stdout_clean.split("=")[-1].strip()
+            if raw and raw != "(default)":
+                return raw
+    return "nftables"
+
+
+def _assert_bridge_exists(bridge: str) -> None:
+    """Assert a bridge interface exists via ip link show."""
+    result = subprocess.run(
+        ["ip", "link", "show", bridge],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, (
+        f"Bridge '{bridge}' should exist:\n{result.stderr}"
+    )
+
+
+def _assert_firewall_rules_contain_bridge(
+    bridge: str, backend: str,
+) -> None:
+    """Assert the active firewall has rules referencing the bridge."""
+    if backend == "nftables":
+        result = subprocess.run(
+            ["sudo", "nft", "list", "chain", "ip", "filter", "MVM-FORWARD"],
+            capture_output=True, text=True, check=False,
+        )
+        assert result.returncode == 0, (
+            f"nft list MVM-FORWARD failed: {result.stderr}"
+        )
+        assert bridge in result.stdout, (
+            f"Bridge '{bridge}' not found in nftables MVM-FORWARD:\n"
+            f"{result.stdout}"
+        )
+    else:
+        result = subprocess.run(
+            ["sudo", "iptables", "-t", "nat", "-L"],
+            capture_output=True, text=True, check=False,
+        )
+        assert result.returncode == 0
+        assert bridge in result.stdout, (
+            f"Bridge '{bridge}' not found in iptables nat table:\n"
+            f"{result.stdout}"
+        )
+
+
+def _count_firewall_rules(backend: str, chain: str = "MVM-FORWARD") -> int:
+    """Count rules in a firewall chain (nftables or iptables)."""
+    if backend == "nftables":
+        result = subprocess.run(
+            ["sudo", "nft", "list", "chain", "ip", "filter", chain],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode != 0:
+            return 0
+        count = 0
+        for line in result.stdout.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith("table "):
+                continue
+            if stripped.startswith("chain "):
+                continue
+            if stripped.startswith("type "):
+                continue
+            if stripped in ("{", "}"):
+                continue
+            count += 1
+        return count
+    else:
+        result = subprocess.run(
+            ["sudo", "iptables", "-L", chain, "-n"],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode != 0:
+            return 0
+        lines = [l for l in result.stdout.splitlines() if l.strip()]
+        # Subtract chain header row and column header row
+        return max(0, len(lines) - 2)
+
+
 class TestNetworkLifecycle:
     """Test network CRUD operations."""
 
@@ -578,49 +667,6 @@ class TestNetworkLifecycle:
             _run_mvm(mvm_binary, "network", "rm", net_a, check=False)
 
 
-class TestNetworkSync:
-    """Test mvm network sync command."""
-
-    def test_network_sync_all(self, mvm_binary, module_network):
-        """Sync all networks."""
-        result = _run_mvm(mvm_binary, "network", "sync", check=False)
-        assert result.returncode == 0
-
-    def test_network_sync_specific(self, mvm_binary, module_network):
-        """Sync a specific network by name."""
-        result = _run_mvm(
-            mvm_binary, "network", "sync", module_network, check=False
-        )
-        assert result.returncode == 0
-
-    def test_network_sync_json(self, mvm_binary, module_network):
-        """Sync with JSON output."""
-        result = _run_mvm(mvm_binary, "network", "sync", "--json", check=False)
-        assert result.returncode == 0
-        data: list[dict[str, Any]] = json.loads(result.stdout)
-        assert isinstance(data, dict)
-
-    def test_network_sync_on_nonexistent_network(self, mvm_binary):
-        """Syncing a network that doesn't exist should fail gracefully."""
-        result = _run_mvm(
-            mvm_binary,
-            "network",
-            "sync",
-            "totally-nonexistent-network",
-            check=False,
-        )
-        assert result.returncode != 0
-        combined = (result.stdout + result.stderr).lower()
-        assert any(s in combined for s in ["not found", "no such"])
-
-        ls_result = _run_mvm(mvm_binary, "network", "ls", "--json", check=False)
-        if ls_result.returncode == 0 and ls_result.stdout.strip():
-            networks = json.loads(ls_result.stdout)
-            assert not any(
-                n.get("name") == "totally-nonexistent-network" for n in networks
-            )
-
-
 class TestNetworkAdvancedCreate:
     """Test advanced network creation options."""
 
@@ -880,4 +926,315 @@ class TestNetworkVMDependency:
                 assert any(v["name"] == vm_name for v in vms)
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
+
+
+class TestNetworkSync:
+    """Test mvm network sync with atomicity and Option C verification."""
+
+    def test_network_sync_all(self, mvm_binary, module_network):
+        """Sync all networks — verifies bridge and firewall rules persist."""
+        backend = _get_firewall_backend(mvm_binary)
+        bridge = _compute_bridge_name(module_network)
+
+        result = _run_mvm(mvm_binary, "network", "sync", check=False)
+        assert result.returncode == 0, f"sync failed: {result.stderr}"
+
+        # Option C: bridge exists
+        _assert_bridge_exists(bridge)
+
+        # Option C: bridge has an IP address
+        ip_result = subprocess.run(
+            ["ip", "addr", "show", bridge],
+            capture_output=True, text=True, check=False,
+        )
+        assert ip_result.returncode == 0
+        assert "inet " in ip_result.stdout, (
+            f"Bridge {bridge} has no IP after sync:\n{ip_result.stdout}"
+        )
+
+        # Option C: firewall rules reference the bridge
+        _assert_firewall_rules_contain_bridge(bridge, backend)
+
+    def test_network_sync_specific(self, mvm_binary, module_network):
+        """Sync a specific network by name."""
+        backend = _get_firewall_backend(mvm_binary)
+        bridge = _compute_bridge_name(module_network)
+
+        result = _run_mvm(
+            mvm_binary, "network", "sync", module_network, check=False
+        )
+        assert result.returncode == 0, (
+            f"sync {module_network} failed: {result.stderr}"
+        )
+
+        # Option C: bridge and rules
+        _assert_bridge_exists(bridge)
+        _assert_firewall_rules_contain_bridge(bridge, backend)
+
+    def test_network_sync_json(self, mvm_binary, module_network):
+        """Sync with JSON output — verify result structure has per-network stats."""
+        result = _run_mvm(mvm_binary, "network", "sync", "--json", check=False)
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert isinstance(data, dict), f"Expected dict, got {type(data)}"
+        assert len(data) > 0, "Expected at least one network in sync results"
+        for net_id, stats in data.items():
+            assert isinstance(stats, dict), f"Expected dict for network {net_id}"
+            assert "added" in stats, f"Missing 'added' in {net_id}"
+            assert "verified" in stats, f"Missing 'verified' in {net_id}"
+            assert "orphaned" in stats, f"Missing 'orphaned' in {net_id}"
+
+    @pytest.mark.serial
+    def test_network_sync_idempotent(self, mvm_binary, module_network):
+        """Sync twice — verify no rule duplication (atomicity check).
+
+        batch_ensure_rules flushes MVM chains and re-adds all rules.
+        Running sync twice must produce the same rule count.
+        """
+        backend = _get_firewall_backend(mvm_binary)
+
+        # First sync — establish baseline
+        _run_mvm(mvm_binary, "network", "sync")
+        count_after_first = _count_firewall_rules(backend)
+
+        # Second sync — should not add duplicates
+        _run_mvm(mvm_binary, "network", "sync")
+        count_after_second = _count_firewall_rules(backend)
+
+        # Option C: rule count must not change
+        assert count_after_second == count_after_first, (
+            f"Rule count changed after second sync: "
+            f"{count_after_first} -> {count_after_second}. "
+            f"batch_ensure_rules flush+add should be idempotent."
+        )
+
+    @pytest.mark.serial
+    def test_network_sync_conntrack_rule(self, mvm_binary, module_network):
+        """Sync ensures conntrack established/related accept rule exists."""
+        backend = _get_firewall_backend(mvm_binary)
+
+        _run_mvm(mvm_binary, "network", "sync")
+
+        if backend == "nftables":
+            result = subprocess.run(
+                ["sudo", "nft", "list", "chain", "ip", "filter", "MVM-FORWARD"],
+                capture_output=True, text=True, check=False,
+            )
+            assert result.returncode == 0
+            assert "established,related accept" in result.stdout, (
+                "Missing conntrack established/related accept in MVM-FORWARD:\n"
+                f"{result.stdout}"
+            )
+        else:
+            result = subprocess.run(
+                ["sudo", "iptables", "-L", "MVM-FORWARD", "-n"],
+                capture_output=True, text=True, check=False,
+            )
+            assert result.returncode == 0
+            assert "ESTABLISHED" in result.stdout.upper(), (
+                "Missing ESTABLISHED,RELATED accept in MVM-FORWARD:\n"
+                f"{result.stdout}"
+            )
+
+    def test_network_sync_on_nonexistent_network(self, mvm_binary):
+        """Syncing a network that doesn't exist should fail gracefully."""
+        result = _run_mvm(
+            mvm_binary,
+            "network",
+            "sync",
+            "totally-nonexistent-network",
+            check=False,
+        )
+        assert result.returncode != 0
+        combined = (result.stdout + result.stderr).lower()
+        assert any(s in combined for s in ["not found", "no such"])
+
+        ls_result = _run_mvm(mvm_binary, "network", "ls", "--json", check=False)
+        if ls_result.returncode == 0 and ls_result.stdout.strip():
+            networks = json.loads(ls_result.stdout)
+            assert not any(
+                n.get("name") == "totally-nonexistent-network" for n in networks
+            )
+
+
+class TestNetworkSyncAfterReboot:
+    """Test that ``network sync`` recreates missing infrastructure (merged restore logic).
+
+    Simulates a reboot-like scenario:
+    1. Creates a network (bridge + NAT + iptables/nftables rules)
+    2. Deletes the bridge directly via ``ip link delete``
+    3. Runs ``mvm network sync``
+    4. Verifies bridge, IP address, and firewall rules are restored
+    """
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_network,
+        pytest.mark.serial,
+        pytest.mark.domain_network,
+    ]
+
+    def test_sync_recreates_bridge_and_nat(
+        self, mvm_binary, unique_network_name
+    ) -> None:
+        """Bridge, IP, and firewall rules are recreated after bridge deletion."""
+        net_name = unique_network_name
+        subnet = _unique_subnet(net_name)
+        bridge = _compute_bridge_name(net_name)
+
+        # 1. Create the network
+        try:
+            _run_mvm(
+                mvm_binary,
+                "network",
+                "create",
+                net_name,
+                "--subnet",
+                subnet,
+                "--non-interactive",
+            )
+
+            # Verify bridge exists before removal
+            result = subprocess.run(
+                ["ip", "link", "show", bridge],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert result.returncode == 0, (
+                f"Bridge {bridge} should exist after creation: {result.stderr}"
+            )
+
+            # 2. Delete the bridge (simulates reboot / accidental removal)
+            result = subprocess.run(
+                ["sudo", "ip", "link", "delete", bridge],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert result.returncode == 0, (
+                f"Failed to delete bridge {bridge}: {result.stderr}"
+            )
+
+            # Verify bridge is really gone
+            result = subprocess.run(
+                ["ip", "link", "show", bridge],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert result.returncode != 0, (
+                f"Bridge {bridge} should no longer exist"
+            )
+
+            # 3. Run sync — should recreate the bridge and re-add firewall rules
+            sync_result = _run_mvm(
+                mvm_binary, "network", "sync", check=False
+            )
+            assert sync_result.returncode == 0, (
+                f"network sync failed: {sync_result.stderr}"
+            )
+
+            # 4. Verify the bridge was recreated
+            result = subprocess.run(
+                ["ip", "link", "show", bridge],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert result.returncode == 0, (
+                f"Bridge {bridge} was not recreated after sync"
+            )
+
+            # 5. Verify bridge has an IP address assigned
+            result = subprocess.run(
+                ["ip", "addr", "show", bridge],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert result.returncode == 0
+            gateway_ip = subnet.replace(".0/24", ".1")
+            assert gateway_ip in result.stdout, (
+                f"Bridge {bridge} missing IP {gateway_ip} after sync:\n"
+                f"{result.stdout}"
+            )
+
+            # 6. Verify firewall rules exist by checking the active backend
+            backend_result = _run_mvm(
+                mvm_binary,
+                "config",
+                "get",
+                "settings",
+                "firewall_backend",
+                check=False,
+            )
+            backend = "nftables"
+            if backend_result.returncode == 0 and backend_result.stdout.strip():
+                stdout_clean = backend_result.stdout.strip()
+                if "=" in stdout_clean:
+                    raw = stdout_clean.split("=")[-1].strip()
+                    if raw and raw != "(default)":
+                        backend = raw
+
+            if backend == "nftables":
+                # Check MVM-FORWARD chain references the bridge
+                result = subprocess.run(
+                    [
+                        "sudo",
+                        "nft",
+                        "list",
+                        "chain",
+                        "ip",
+                        "filter",
+                        "MVM-FORWARD",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                assert result.returncode == 0, (
+                    f"nft list chain failed: {result.stderr}"
+                )
+                assert bridge in result.stdout, (
+                    f"Bridge {bridge} not found in nftables MVM-FORWARD "
+                    f"chain after sync:\n{result.stdout}"
+                )
+                # Also check MASQUERADE in NAT table
+                result = subprocess.run(
+                    [
+                        "sudo",
+                        "nft",
+                        "list",
+                        "chain",
+                        "ip",
+                        "nat",
+                        "MVM-POSTROUTING",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if result.returncode == 0:
+                    assert "masquerade" in result.stdout, (
+                        f"MASQUERADE rule missing in MVM-POSTROUTING after sync:\n"
+                        f"{result.stdout}"
+                    )
+            else:
+                # iptables backend: check NAT table
+                result = subprocess.run(
+                    ["sudo", "iptables", "-t", "nat", "-L", "MVM-POSTROUTING"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                assert result.returncode == 0
+                assert bridge in result.stdout, (
+                    f"Bridge {bridge} not found in iptables MVM-POSTROUTING "
+                    f"chain after sync:\n{result.stdout}"
+                )
+
+        finally:
+            # Cleanup
             _run_mvm(mvm_binary, "network", "rm", net_name, check=False)

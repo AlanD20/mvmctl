@@ -615,8 +615,12 @@ class NetworkOperation:
         """
         Sync iptables rules for one or all networks.
 
-        First reconciles bridge state (DB vs kernel), then ensures all active
+        First restores any missing bridges and NAT rules (post-reboot recovery),
+        then reconciles bridge state (DB vs kernel), then ensures all active
         DB rules exist in host iptables and detects orphaned host rules.
+
+        Merges the legacy ``restore()`` logic — callers only need ``sync()``
+        for both post-reboot recovery and routine rule sync.
 
         Args:
             network_id: Specific network ID to sync, or None for all networks.
@@ -644,7 +648,22 @@ class NetworkOperation:
             else:
                 networks = repo.list_all()
 
-            # Step 1: Reconcile bridge state (DB vs kernel)
+            # Step 1: Restore missing bridges (post-reboot recovery)
+            for network in networks:
+                if not NetworkUtils.bridge_exists(network.bridge):
+                    bridge_addr = NetworkUtils.compute_bridge_address(
+                        network.ipv4_gateway, network.subnet
+                    )
+                    service.ensure_bridge(network.bridge, bridge_addr)
+                    if network.nat_enabled:
+                        service.ensure_nat(
+                            network.bridge,
+                            network.nat_gateways_list,
+                            subnet=network.subnet,
+                            network_id=network.id,
+                        )
+
+            # Step 2: Reconcile bridge state (DB vs kernel)
             bridges_reconciled = 0
             for network in networks:
                 bridge_active = NetworkUtils.bridge_exists(network.bridge)
@@ -652,7 +671,7 @@ class NetworkOperation:
                     repo.update_bridge_active(network.id, bridge_active)
                     bridges_reconciled += 1
 
-            # Step 2: Sync iptables rules
+            # Step 3: Sync firewall rules
             results: dict[str, dict[str, int]] = {}
             for network in networks:
                 result = service.sync_iptables_rules(network)
@@ -674,60 +693,4 @@ class NetworkOperation:
                 "network_count": len(results),
                 "bridges_reconciled": bridges_reconciled,
             },
-        )
-
-    @staticmethod
-    def restore() -> OperationResult[list[str]]:
-        """
-        Restore all networks from DB after reboot.
-
-        Returns:
-            OperationResult wrapping a list of status messages for each restored network.
-
-        """
-        db = Database()
-        repo = NetworkRepository(db)
-        service = NetworkService(repo)
-
-        try:
-            networks = repo.list_all()
-        except NetworkError as e:
-            return OperationResult(
-                status="error",
-                code="network.restore_failed",
-                message=str(e),
-                exception=e,
-            )
-
-        restored: list[str] = []
-
-        for network in networks:
-            try:
-                bridge_addr = NetworkUtils.compute_bridge_address(
-                    network.ipv4_gateway, network.subnet
-                )
-                service.ensure_bridge(network.bridge, bridge_addr)
-                if network.nat_enabled:
-                    service.ensure_nat(
-                        network.bridge,
-                        network.nat_gateways_list,
-                        subnet=network.subnet,
-                        network_id=network.id,
-                    )
-                repo.update_bridge_active(network.id, True)
-                restored.append(f"Restored network '{network.name}'")
-            except NetworkError as e:
-                logger.warning(
-                    "Failed to restore network '%s': %s", network.name, e
-                )
-                restored.append(
-                    f"Failed to restore network '{network.name}': {e}"
-                )
-
-        return OperationResult(
-            status="success",
-            code="network.restored",
-            item=restored,
-            message=f"Restored {len([m for m in restored if m.startswith('Restored')])} network(s)",
-            metadata={"total": len(restored)},
         )

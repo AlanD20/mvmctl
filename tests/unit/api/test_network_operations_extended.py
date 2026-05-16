@@ -855,6 +855,8 @@ class TestNetworkOperationSync:
     """Tests for NetworkOperation.sync()."""
 
     def test_sync_all_networks(self, mocker):
+        """Sync all networks when bridges already exist — ensures no
+        extraneous ensure_bridge/ensure_nat calls."""
         mock_nets = [_make_network("a"), _make_network("b")]
         mock_repo = MagicMock()
         mock_repo.list_all.return_value = mock_nets
@@ -881,8 +883,13 @@ class TestNetworkOperationSync:
         result = NetworkOperation.sync()
         assert result.status == "success"
         assert result.code == "network.synced"
+        # When bridge already exists, ensure_bridge/ensure_nat should NOT be called
+        # (the sync implementation checks bridge_exists before recreating)
+        mock_service.ensure_bridge.assert_not_called()
+        mock_service.ensure_nat.assert_not_called()
 
     def test_sync_specific_network(self, mocker):
+        """Sync a specific network by ID when bridges exist."""
         mock_net = _make_network("test")
         mock_repo = MagicMock()
         mock_repo.get.return_value = mock_net
@@ -909,8 +916,11 @@ class TestNetworkOperationSync:
         result = NetworkOperation.sync(network_id="net-abc")
         assert result.status == "success"
         mock_repo.get.assert_called_once_with("net-abc")
+        mock_service.ensure_bridge.assert_not_called()
+        mock_service.ensure_nat.assert_not_called()
 
     def test_sync_network_not_found(self, mocker):
+        """Syncing a non-existent network returns error."""
         mock_repo = MagicMock()
         mock_repo.get.return_value = None
         mocker.patch(
@@ -927,6 +937,7 @@ class TestNetworkOperationSync:
         assert result.status == "error"
 
     def test_sync_bridge_reconciliation(self, mocker):
+        """Sync updates bridge_active flag when bridge state differs from DB."""
         mock_net = _make_network("test", bridge_active=False)
         mock_repo = MagicMock()
         mock_repo.list_all.return_value = [mock_net]
@@ -954,8 +965,56 @@ class TestNetworkOperationSync:
         assert result.status == "success"
         mock_repo.update_bridge_active.assert_called_once()
         assert result.metadata["bridges_reconciled"] == 1
+        mock_service.ensure_bridge.assert_not_called()
+        mock_service.ensure_nat.assert_not_called()
+
+    def test_sync_bridge_missing_recreates_bridge_and_nat(self, mocker):
+        """Sync recreates bridges and NAT when bridge is missing (e.g., reboot).
+        Verifies the merged restore logic: ensure_bridge + ensure_nat are called
+        for networks whose bridges don't exist."""
+        mock_nets = [
+            _make_network("a", nat_enabled=True, bridge_active=False),
+            _make_network("b", nat_enabled=False, bridge_active=False),
+        ]
+        mock_repo = MagicMock()
+        mock_repo.list_all.return_value = mock_nets
+        mocker.patch(
+            "mvmctl.api.network_operations.NetworkRepository",
+            return_value=mock_repo,
+        )
+        mocker.patch("mvmctl.api.network_operations.Database")
+        mocker.patch(
+            "mvmctl.api.network_operations.NetworkUtils.compute_bridge_address",
+            return_value="172.16.0.1/24",
+        )
+
+        mock_service = MagicMock()
+        mock_service.sync_iptables_rules.return_value = {
+            "added": 0,
+            "verified": 0,
+            "orphaned": 0,
+        }
+        mocker.patch(
+            "mvmctl.api.network_operations.NetworkService",
+            return_value=mock_service,
+        )
+        # Bridge does NOT exist for any network — simulates reboot scenario
+        mocker.patch(
+            "mvmctl.api.network_operations.NetworkUtils.bridge_exists",
+            return_value=False,
+        )
+
+        result = NetworkOperation.sync()
+        assert result.status == "success"
+        # ensure_bridge should be called for each network (both bridges missing)
+        assert mock_service.ensure_bridge.call_count == 2
+        # ensure_nat should be called only for network "a" (nat_enabled=True)
+        mock_service.ensure_nat.assert_called_once()
+        # Bridge reconciliation updates bridge_active to False (no change since already False)
+        mock_repo.update_bridge_active.assert_not_called()
 
     def test_sync_network_error(self, mocker):
+        """Sync returns error when repo.list_all raises."""
         mock_repo = MagicMock()
         mock_repo.list_all.side_effect = NetworkError("DB error")
         mocker.patch(
@@ -970,72 +1029,6 @@ class TestNetworkOperationSync:
 
         result = NetworkOperation.sync()
         assert result.status == "error"
-
-
-class TestNetworkOperationRestore:
-    """Tests for NetworkOperation.restore()."""
-
-    def test_restore_all_networks(self, mocker):
-        mock_nets = [_make_network("a"), _make_network("b", nat_enabled=False)]
-        mock_repo = MagicMock()
-        mock_repo.list_all.return_value = mock_nets
-        mocker.patch(
-            "mvmctl.api.network_operations.NetworkRepository",
-            return_value=mock_repo,
-        )
-        mocker.patch("mvmctl.api.network_operations.Database")
-        mocker.patch(
-            "mvmctl.api.network_operations.NetworkUtils.compute_bridge_address",
-            return_value="172.16.0.1/24",
-        )
-        mock_service = MagicMock()
-        mocker.patch(
-            "mvmctl.api.network_operations.NetworkService",
-            return_value=mock_service,
-        )
-
-        result = NetworkOperation.restore()
-        assert result.status == "success"
-        assert result.code == "network.restored"
-
-    def test_restore_list_failure(self, mocker):
-        mock_repo = MagicMock()
-        mock_repo.list_all.side_effect = NetworkError("DB error")
-        mocker.patch(
-            "mvmctl.api.network_operations.NetworkRepository",
-            return_value=mock_repo,
-        )
-        mocker.patch("mvmctl.api.network_operations.Database")
-        mocker.patch(
-            "mvmctl.core.config._service.SettingsService.resolve",
-            return_value="iptables",
-        )
-
-        result = NetworkOperation.restore()
-        assert result.status == "error"
-        assert result.code == "network.restore_failed"
-
-    def test_restore_individual_network_failure_handled(self, mocker):
-        mock_net = _make_network("a")
-        mock_repo = MagicMock()
-        mock_repo.list_all.return_value = [mock_net]
-        mocker.patch(
-            "mvmctl.api.network_operations.NetworkRepository",
-            return_value=mock_repo,
-        )
-        mocker.patch("mvmctl.api.network_operations.Database")
-        mocker.patch(
-            "mvmctl.core.config._service.SettingsService.resolve",
-            return_value="iptables",
-        )
-        mocker.patch(
-            "mvmctl.api.network_operations.NetworkUtils.compute_bridge_address",
-            side_effect=NetworkError("bad address"),
-        )
-
-        result = NetworkOperation.restore()
-        assert result.status == "success"
-        assert any("Failed to restore" in m for m in result.item)
 
 
 class TestNetworkOperationHelpers:

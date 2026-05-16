@@ -304,7 +304,7 @@ class HostOperation:
         from mvmctl.api.network_operations import NetworkOperation
 
         try:
-            restored_result = NetworkOperation.restore()
+            restored_result = NetworkOperation.sync()
             if restored_result.is_ok and not restored_result.item:
                 default_result = NetworkOperation.create_default_network()
                 if default_result.is_error:

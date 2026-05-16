@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import shlex
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -927,7 +926,9 @@ class NetworkService:
         Sync iptables rules for a network between DB and host.
 
         Ensures all active DB rules exist in host iptables, and detects
-        orphaned host rules that are not tracked in the DB.
+        orphaned host rules that are not tracked in the DB.  Uses the
+        firewall tracker's batch mode to queue ``ensure_rule`` calls and
+        flush atomically (nftables) or individually (iptables).
 
         Args:
             network: The NetworkItem to sync rules for.
@@ -943,73 +944,18 @@ class NetworkService:
         added = 0
         verified = 0
 
-        for rule in db_rules:
-            result = self._tracker.ensure_rule(rule)
-            if result.success:
-                if result.command_executed is None:
-                    verified += 1
-                else:
-                    added += 1
+        with self._tracker.batch():
+            for rule in db_rules:
+                result = self._tracker.ensure_rule(rule)
+                if result.success:
+                    if result.command_executed is None:
+                        verified += 1
+                    else:
+                        added += 1
 
-        orphaned = self._count_orphaned_rules(network, db_rules)
+        orphaned = self._tracker.count_orphaned_rules(network)
 
         return {"added": added, "verified": verified, "orphaned": orphaned}
-
-    def _count_orphaned_rules(
-        self,
-        network: NetworkItem,
-        db_rules: list[FirewallRule],
-    ) -> int:
-        """
-        Count host iptables rules that don't match any active DB rule.
-
-        Scans iptables-save output for MVM chain rules that reference
-        this network but have no corresponding active DB record.
-
-        Args:
-            network: The NetworkItem to check orphaned rules for.
-            db_rules: List of active DB rules for this network.
-
-        Returns:
-            Number of orphaned rules detected.
-
-        """
-        try:
-            result = run_cmd(
-                ["iptables-save"],
-                privileged=True,
-            )
-        except ProcessError:
-            return 0
-
-        db_comments = {r.comment_tag for r in db_rules if r.comment_tag}
-
-        orphaned = 0
-
-        for line in result.stdout.splitlines():
-            if not line.startswith("-A MVM-"):
-                continue
-
-            parts = shlex.split(line)
-            comment = None
-            for i, part in enumerate(parts):
-                if part == "--comment" and i + 1 < len(parts):
-                    comment = parts[i + 1]
-                    break
-
-            if (
-                comment
-                and network.name in comment
-                and comment not in db_comments
-            ):
-                orphaned += 1
-                logger.warning(
-                    "Orphaned iptables rule on host for network %s: %s",
-                    network.name,
-                    line,
-                )
-
-        return orphaned
 
     @staticmethod
     def flush_arp(bridge: str) -> None:
