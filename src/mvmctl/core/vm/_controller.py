@@ -13,7 +13,7 @@ from pathlib import Path
 from mvmctl.core.vm._firecracker import FirecrackerClient
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.exceptions import MVMError, VMStateError
-from mvmctl.models import VMInstanceItem, VMStatus
+from mvmctl.models import DriveConfig, VMInstanceItem, VMStatus
 from mvmctl.models.volume import VolumeItem
 from mvmctl.utils._system import ProcessSignalHandler
 
@@ -366,7 +366,7 @@ class VMController:
         """
         from mvmctl.core.vm._firecracker import FirecrackerConfigManager
 
-        drive_config = {
+        drive_config: DriveConfig = {
             "drive_id": vol.id,
             "path_on_host": vol.path,
             "is_root_device": False,

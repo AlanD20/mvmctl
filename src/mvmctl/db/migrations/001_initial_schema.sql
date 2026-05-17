@@ -173,7 +173,25 @@ CREATE TABLE host_state (
     sudoers_configured INTEGER DEFAULT 0 NOT NULL,  -- Boolean: 0 or 1
     default_network_created INTEGER DEFAULT 0 NOT NULL,  -- Boolean: 0 or 1
     initialized_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+
+    -- Capacity detection (populated by host info --refresh or host init)
+    hostname TEXT,
+    cpu_model TEXT,
+    cpu_vendor TEXT,
+    cpu_cores INTEGER,
+    cpu_architecture TEXT,
+    numa_nodes INTEGER DEFAULT 1,
+    memory_total_mib INTEGER,
+    storage_total_bytes INTEGER,
+    kernel_version TEXT,
+    os_release TEXT,
+    pid_max INTEGER,
+    fd_max INTEGER,
+    conntrack_max INTEGER,
+    tap_devices_max INTEGER,
+    ip_local_port_range TEXT,
+    detected_at TIMESTAMP
 );
 
 -- HOST_STATE_CHANGES: Tracks host configuration changes for mvm host reset

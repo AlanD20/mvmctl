@@ -1986,8 +1986,8 @@ class VMOperation:
             except Exception as exc:
                 logger.warning("Hotplug failed for drive '%s': %s", vol.id, exc)
 
-        controller = VolumeController(vol, vol_repo)
-        controller.attach(vm.id)
+        vol_controller = VolumeController(vol, vol_repo)
+        vol_controller.attach(vm.id)
 
         # Update VM's volume_ids to persist the attachment for next start.
         # Firecracker has no hot-plug — drives are configured on spawn, so
@@ -2102,8 +2102,8 @@ class VMOperation:
                     exc,
                 )
 
-        controller = VolumeController(vol, vol_repo)
-        controller.detach()
+        vol_controller = VolumeController(vol, vol_repo)
+        vol_controller.detach()
 
         # Update VM's volume_ids to persist the detachment for next start.
         vm_volume_ids = list(vm.volume_ids) if vm.volume_ids else []

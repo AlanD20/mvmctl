@@ -8,12 +8,14 @@ from mvmctl.utils._lazy_import import resolve_lazy
 
 if TYPE_CHECKING:
     from mvmctl.core.host._controller import HostController
+    from mvmctl.core.host._detector import HostDetector
     from mvmctl.core.host._helper import HostPrivilegeHelper
     from mvmctl.core.host._repository import HostRepository
     from mvmctl.core.host._service import HostService
 
 __all__ = [
     "HostController",
+    "HostDetector",
     "HostPrivilegeHelper",
     "HostRepository",
     "HostService",
@@ -21,6 +23,7 @@ __all__ = [
 
 _LAZY_MAP = {
     "HostController": ("mvmctl.core.host._controller", "HostController"),
+    "HostDetector": ("mvmctl.core.host._detector", "HostDetector"),
     "HostPrivilegeHelper": ("mvmctl.core.host._helper", "HostPrivilegeHelper"),
     "HostRepository": ("mvmctl.core.host._repository", "HostRepository"),
     "HostService": ("mvmctl.core.host._service", "HostService"),

@@ -24,7 +24,13 @@ if TYPE_CHECKING:
         CloudInitStatus,
     )
     from mvmctl.models.firecracker import DriveConfig, FirecrackerConfig
-    from mvmctl.models.host import HostStateChangeItem, HostStateItem
+    from mvmctl.models.host import (
+        HostHardware,
+        HostLimits,
+        HostResources,
+        HostStateChangeItem,
+        HostStateItem,
+    )
     from mvmctl.models.image import ImageItem, ImageSpec, ImageVersion
     from mvmctl.models.kernel import KernelItem, KernelPullResult, KernelSpec
     from mvmctl.models.key import SSHKeyItem
@@ -61,6 +67,9 @@ __all__ = [
     "ConsoleState",
     "DriveConfig",
     "FirecrackerConfig",
+    "HostHardware",
+    "HostLimits",
+    "HostResources",
     "HostStateChangeItem",
     "HostStateItem",
     "FirewallBackendType",
@@ -102,6 +111,9 @@ _LAZY_MAP = {
     "CloudInitStatus": ("mvmctl.models.cloudinit", "CloudInitStatus"),
     "DriveConfig": ("mvmctl.models.firecracker", "DriveConfig"),
     "FirecrackerConfig": ("mvmctl.models.firecracker", "FirecrackerConfig"),
+    "HostHardware": ("mvmctl.models.host", "HostHardware"),
+    "HostLimits": ("mvmctl.models.host", "HostLimits"),
+    "HostResources": ("mvmctl.models.host", "HostResources"),
     "HostStateChangeItem": ("mvmctl.models.host", "HostStateChangeItem"),
     "HostStateItem": ("mvmctl.models.host", "HostStateItem"),
     "ImageItem": ("mvmctl.models.image", "ImageItem"),

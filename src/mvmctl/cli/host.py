@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import typer
 
@@ -282,6 +282,138 @@ def host_ls(
         ],
     ]
     print_table(columns=["Check", "Status", "Detail"], rows=rows)
+
+
+@host_app.command(name="info")
+@handle_errors
+def host_info(
+    refresh: bool = typer.Option(
+        False, "--refresh", help="Re-detect host hardware and limits"
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """Show host hardware, limits, and VM capacity projection.
+
+    Displays detected CPU, memory, storage, kernel limits, current resource
+    usage, and a recommended maximum VM count based on available resources.
+
+    Use --refresh to re-detect hardware and limits before displaying.
+    """
+    if refresh:
+        result = HostOperation.refresh_capacity()
+    else:
+        result = HostOperation.info()
+
+    if result.is_error:
+        print_error(result.message)
+        raise typer.Exit(code=1)
+
+    item = result.item
+    if item is None:
+        print_error("No host info available.")
+        raise typer.Exit(code=1)
+
+    if json_output:
+        typer.echo(json.dumps(item, indent=2, default=str))
+    else:
+        _print_info_human(item)
+
+
+def _print_info_human(info: dict[str, Any]) -> None:
+    """Print host info in human-readable format."""
+    typer.echo("Host:")
+    typer.echo(f"  Hostname:           {info.get('hostname', 'N/A')}")
+    typer.echo(f"  Detected at:        {info.get('detected_at', 'N/A')}")
+
+    os_info = info.get("os", {})
+    typer.echo("OS:")
+    typer.echo(f"  Kernel:             {os_info.get('kernel', 'N/A')}")
+    typer.echo(f"  Release:            {os_info.get('release', 'N/A')}")
+
+    cpu_info = info.get("cpu", {})
+    typer.echo("CPU:")
+    typer.echo(f"  Model:              {cpu_info.get('model', 'N/A')}")
+    typer.echo(f"  Vendor:             {cpu_info.get('vendor', 'N/A')}")
+    typer.echo(f"  Cores:              {cpu_info.get('cores', 'N/A')}")
+    typer.echo(f"  Architecture:       {cpu_info.get('architecture', 'N/A')}")
+    typer.echo(f"  NUMA nodes:         {cpu_info.get('numa_nodes', 'N/A')}")
+
+    mem_info = info.get("memory", {})
+    typer.echo("Memory:")
+    total_mib = mem_info.get("total_mib", 0)
+    avail_mib = mem_info.get("available_mib", 0)
+    if isinstance(total_mib, (int, float)) and isinstance(
+        avail_mib, (int, float)
+    ):
+        typer.echo(f"  Total:              {total_mib:,} MiB")
+        typer.echo(f"  Available:          {avail_mib:,} MiB")
+        if total_mib > 0:
+            pct = int((total_mib - avail_mib) / total_mib * 100)
+            typer.echo(f"  Used:               {pct}%")
+
+    storage_info = info.get("storage", {})
+    typer.echo("Storage:")
+    total_bytes = storage_info.get("total_bytes", 0)
+    free_bytes = storage_info.get("free_bytes", 0)
+    if isinstance(total_bytes, (int, float)) and isinstance(
+        free_bytes, (int, float)
+    ):
+        typer.echo(
+            f"  Total:              {CommonUtils.format_bytes_human_readable(int(total_bytes))}"
+        )
+        typer.echo(
+            f"  Free:               {CommonUtils.format_bytes_human_readable(int(free_bytes))}"
+        )
+
+    limits_info = info.get("limits", {})
+    typer.echo("Limits:")
+    typer.echo(f"  PID max:            {limits_info.get('pid_max', 'N/A'):,}")
+    typer.echo(f"  FD max:             {limits_info.get('fd_max', 'N/A'):,}")
+    port_range = limits_info.get("ip_local_port_range", [])
+    if isinstance(port_range, list) and len(port_range) == 2:
+        typer.echo(f"  Ephemeral ports:    {port_range[0]}-{port_range[1]}")
+    cmax = limits_info.get("conntrack_max", 0)
+    tmax = limits_info.get("tap_devices_max", 0)
+    typer.echo(
+        f"  Conntrack max:      {cmax:,}"
+        if cmax
+        else "  Conntrack:          N/A (module not loaded)"
+    )
+    typer.echo(
+        f"  TAP max devices:    {tmax:,}"
+        if tmax
+        else "  TAP devices:        Unlimited"
+    )
+
+    cap_info = info.get("capacity", {})
+    current = cap_info.get("current", {})
+    typer.echo("Capacity:")
+    typer.echo(f"  PIDs in use:        {current.get('pids', 0):,}")
+    typer.echo(f"  FDs in use:         {current.get('fds', 0):,}")
+    typer.echo(f"  Conntrack in use:   {current.get('conntrack', 0):,}")
+    typer.echo(f"  TAP devices used:   {current.get('tap_devices', 0)}")
+    typer.echo(f"  ARP entries:        {current.get('arp_entries', 0)}")
+    rec_vms = cap_info.get("recommended_max_vms", "N/A")
+    lim_res = cap_info.get("limiting_resource")
+    if lim_res:
+        typer.echo(f"  Recommended VMs:    {rec_vms}  (bottleneck: {lim_res})")
+    else:
+        typer.echo(f"  Recommended VMs:    {rec_vms}")
+
+    setup_info = info.get("setup", {})
+    typer.echo("Setup:")
+    initialized = setup_info.get("initialized", False)
+    typer.echo(f"  Initialized:        {'Yes' if initialized else 'No'}")
+    if initialized:
+        init_at = setup_info.get("initialized_at", "")
+        if init_at:
+            try:
+                from mvmctl.utils.common import CommonUtils as _CommonUtils
+
+                human = _CommonUtils.human_readable_datetime(init_at)
+                typer.echo(f"  Initialized at:     {human}")
+            except Exception:
+                typer.echo(f"  Initialized at:     {init_at}")
 
 
 @host_app.command(name="clean")

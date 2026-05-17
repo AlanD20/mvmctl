@@ -218,6 +218,7 @@ DETECTOR_SCORES: Final[dict[str, float]] = {
 # ===========================================================================
 
 CONST_IPTABLES_MAX_COMMENT_LEN: Final[int] = 240
+DEFAULT_IP_LOCAL_PORT_RANGE: Final[tuple[int, int]] = (32768, 60999)
 
 
 # ===========================================================================

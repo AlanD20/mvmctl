@@ -13,6 +13,208 @@ from tests.system.conftest import _run_mvm
 pytestmark = [pytest.mark.system, pytest.mark.domain_host]
 
 
+class TestHostInfo:
+    """Test host info command (read-only, non-destructive)."""
+
+    def test_host_info_basic(self, mvm_binary):
+        """Show host info in human-readable format."""
+        # Rationale: L1 verification for human-readable output. Verifies that
+        # all major sections (Host, CPU, Memory, Limits, Capacity) are present
+        # in the output. No expensive resources needed.
+        result = _run_mvm(mvm_binary, "host", "info", check=False)
+        if result.returncode != 0:
+            # Skip-reason: Host state is unknown when mvm host init has not
+            # been run. Running "mvm host init" first would make this test
+            # unconditionally runnable.
+            combined = (result.stdout + result.stderr).lower()
+            assert "not yet detected" in combined or "init" in combined, (
+                f"Unexpected output for uninitialized host: {combined}"
+            )
+            pytest.skip("Host not initialized (run 'mvm host init' first)")
+        # L1: Verify stdout contains expected section headers
+        stdout = result.stdout
+        assert "Host:" in stdout, (
+            f"host info missing 'Host:' section:\n{stdout}"
+        )
+        assert "CPU:" in stdout, f"host info missing 'CPU:' section:\n{stdout}"
+        assert "Memory:" in stdout, (
+            f"host info missing 'Memory:' section:\n{stdout}"
+        )
+        assert "Limits:" in stdout, (
+            f"host info missing 'Limits:' section:\n{stdout}"
+        )
+        assert "Capacity:" in stdout, (
+            f"host info missing 'Capacity:' section:\n{stdout}"
+        )
+
+    def test_host_info_json(self, mvm_binary):
+        """Show host info in JSON format with expected structure."""
+        # Rationale: L2 verification for --json output. Verifies top-level keys
+        # and nested field presence in cpu, capacity, and limits sections.
+        # No expensive resources needed.
+        result = _run_mvm(mvm_binary, "host", "info", "--json", check=False)
+        if result.returncode != 0:
+            # Skip-reason: Host state is unknown when mvm host init has not
+            # been run. Running "mvm host init" first would make this test
+            # unconditionally runnable.
+            combined = (result.stdout + result.stderr).lower()
+            assert "not yet detected" in combined or "init" in combined, (
+                f"Unexpected output for uninitialized host: {combined}"
+            )
+            pytest.skip("Host not initialized (run 'mvm host init' first)")
+        data = json.loads(result.stdout)
+        # Assert top-level keys
+        assert "hostname" in data, (
+            f"host info --json missing 'hostname': {list(data.keys())}"
+        )
+        assert "os" in data, (
+            f"host info --json missing 'os': {list(data.keys())}"
+        )
+        assert "cpu" in data, (
+            f"host info --json missing 'cpu': {list(data.keys())}"
+        )
+        assert "memory" in data, (
+            f"host info --json missing 'memory': {list(data.keys())}"
+        )
+        assert "storage" in data, (
+            f"host info --json missing 'storage': {list(data.keys())}"
+        )
+        assert "limits" in data, (
+            f"host info --json missing 'limits': {list(data.keys())}"
+        )
+        assert "capacity" in data, (
+            f"host info --json missing 'capacity': {list(data.keys())}"
+        )
+        assert "setup" in data, (
+            f"host info --json missing 'setup': {list(data.keys())}"
+        )
+        # Assert cpu nested keys
+        cpu = data["cpu"]
+        assert "model" in cpu, f"cpu missing 'model': {list(cpu.keys())}"
+        assert "vendor" in cpu, f"cpu missing 'vendor': {list(cpu.keys())}"
+        assert "cores" in cpu, f"cpu missing 'cores': {list(cpu.keys())}"
+        assert "architecture" in cpu, (
+            f"cpu missing 'architecture': {list(cpu.keys())}"
+        )
+        assert "numa_nodes" in cpu, (
+            f"cpu missing 'numa_nodes': {list(cpu.keys())}"
+        )
+        # Assert capacity nested keys
+        cap = data["capacity"]
+        assert "recommended_max_vms" in cap, (
+            f"capacity missing 'recommended_max_vms': {list(cap.keys())}"
+        )
+        assert "limiting_resource" in cap, (
+            f"capacity missing 'limiting_resource': {list(cap.keys())}"
+        )
+        # Assert limits nested keys
+        limits = data["limits"]
+        assert "pid_max" in limits, (
+            f"limits missing 'pid_max': {list(limits.keys())}"
+        )
+        assert "fd_max" in limits, (
+            f"limits missing 'fd_max': {list(limits.keys())}"
+        )
+        assert "conntrack_max" in limits, (
+            f"limits missing 'conntrack_max': {list(limits.keys())}"
+        )
+        assert "tap_devices_max" in limits, (
+            f"limits missing 'tap_devices_max': {list(limits.keys())}"
+        )
+
+    def test_host_info_refresh_json(self, mvm_binary):
+        """Re-detect host info and verify JSON output has meaningful values."""
+        # Rationale: L2 verification for --refresh --json path. Ensures the
+        # re-detection produces realistic values: non-empty cpu model, positive
+        # memory, integer recommended_max_vms, and a populated detected_at.
+        result = _run_mvm(
+            mvm_binary, "host", "info", "--refresh", "--json", check=False
+        )
+        if result.returncode != 0:
+            # Skip-reason: Host state is unknown when mvm host init has not
+            # been run. Running "mvm host init" first would make this test
+            # unconditionally runnable.
+            combined = (result.stdout + result.stderr).lower()
+            assert "not yet detected" in combined or "init" in combined, (
+                f"Unexpected output for uninitialized host: {combined}"
+            )
+            pytest.skip("Host not initialized (run 'mvm host init' first)")
+        data = json.loads(result.stdout)
+        # Assert cpu.model is a non-empty string
+        assert isinstance(data.get("cpu", {}).get("model"), str), (
+            f"cpu.model must be a string: {data.get('cpu', {})}"
+        )
+        assert len(data["cpu"]["model"]) > 0, "cpu.model must not be empty"
+        # Assert memory.total_mib > 0
+        assert data.get("memory", {}).get("total_mib", 0) > 0, (
+            f"memory.total_mib must be > 0: {data.get('memory', {})}"
+        )
+        # Assert capacity.recommended_max_vms is int >= 0
+        rec_vms = data.get("capacity", {}).get("recommended_max_vms", -1)
+        assert isinstance(rec_vms, int), (
+            f"recommended_max_vms must be int: {type(rec_vms)}"
+        )
+        assert rec_vms >= 0, f"recommended_max_vms must be >= 0: {rec_vms}"
+        # Assert detected_at is present and non-empty
+        assert "detected_at" in data, "host info missing 'detected_at'"
+        assert isinstance(data["detected_at"], str), (
+            "detected_at must be a string"
+        )
+        assert len(data["detected_at"]) > 0, "detected_at must not be empty"
+
+    def test_host_info_json_field_types(self, mvm_binary):
+        """Verify JSON field types are correct after --refresh."""
+        # Rationale: Guard against silent type changes in JSON output. Type
+        # changes (int -> str, bool -> int) can break downstream consumers
+        # without any error from the JSON parser. This test locks in the
+        # expected types for every numeric and boolean field.
+        result = _run_mvm(
+            mvm_binary, "host", "info", "--refresh", "--json", check=False
+        )
+        if result.returncode != 0:
+            # Skip-reason: Host state is unknown when mvm host init has not
+            # been run. Running "mvm host init" first would make this test
+            # unconditionally runnable.
+            combined = (result.stdout + result.stderr).lower()
+            assert "not yet detected" in combined or "init" in combined, (
+                f"Unexpected output for uninitialized host: {combined}"
+            )
+            pytest.skip("Host not initialized (run 'mvm host init' first)")
+        data = json.loads(result.stdout)
+        # cpu field types
+        assert isinstance(data["cpu"]["cores"], int), (
+            f"cpu.cores must be int: {type(data['cpu']['cores'])}"
+        )
+        assert isinstance(data["cpu"]["numa_nodes"], int), (
+            f"cpu.numa_nodes must be int: {type(data['cpu']['numa_nodes'])}"
+        )
+        # memory field types
+        assert isinstance(data["memory"]["total_mib"], int), (
+            f"memory.total_mib must be int: {type(data['memory']['total_mib'])}"
+        )
+        assert isinstance(data["memory"]["available_mib"], int), (
+            f"memory.available_mib must be int: {type(data['memory']['available_mib'])}"
+        )
+        # limits field types
+        assert isinstance(data["limits"]["pid_max"], int), (
+            f"limits.pid_max must be int: {type(data['limits']['pid_max'])}"
+        )
+        assert isinstance(data["limits"]["fd_max"], int), (
+            f"limits.fd_max must be int: {type(data['limits']['fd_max'])}"
+        )
+        # capacity field types
+        assert isinstance(data["capacity"]["recommended_max_vms"], int), (
+            f"capacity.recommended_max_vms must be int: "
+            f"{type(data['capacity']['recommended_max_vms'])}"
+        )
+        # setup field types (if present)
+        setup = data.get("setup", {})
+        if "initialized" in setup:
+            assert isinstance(setup["initialized"], bool), (
+                f"setup.initialized must be bool: {type(setup['initialized'])}"
+            )
+
+
 class TestHostStatus:
     """Test host status and inspection operations (non-destructive)."""
 

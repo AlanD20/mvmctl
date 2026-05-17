@@ -22,9 +22,10 @@ from mvmctl.constants import (
     REQUIRED_BINARIES,
     SUDOERS_DROP_IN_PATH,
 )
+from mvmctl.core.host._detector import HostDetector
 from mvmctl.core.host._repository import HostRepository
 from mvmctl.exceptions import HostError, ProcessError
-from mvmctl.models import HostStateChangeItem
+from mvmctl.models import HostHardware, HostLimits, HostStateChangeItem
 from mvmctl.utils._system import run_cmd
 
 logger = logging.getLogger(__name__)
@@ -464,6 +465,46 @@ class HostService:
                 except HostError:
                     continue
         return changes, next_order
+
+    @staticmethod
+    def detect_and_save_capacity(
+        repo: HostRepository,
+    ) -> tuple[HostHardware, HostLimits]:
+        """Detect host hardware and limits and persist to database.
+
+        Returns:
+            Tuple of (HostHardware, HostLimits) detection results.
+
+        """
+        hardware = HostDetector.detect_hardware()
+        limits = HostDetector.detect_limits()
+        detected_at = datetime.now(UTC).isoformat()
+        repo.save_capacity(
+            hostname=hardware.hostname,
+            cpu_model=hardware.cpu_model,
+            cpu_vendor=hardware.cpu_vendor,
+            cpu_cores=hardware.cpu_cores,
+            cpu_architecture=hardware.cpu_architecture,
+            numa_nodes=hardware.numa_nodes,
+            memory_total_mib=hardware.memory_total_mib,
+            storage_total_bytes=hardware.storage_total_bytes,
+            kernel_version=hardware.kernel_version,
+            os_release=hardware.os_release,
+            pid_max=limits.pid_max,
+            fd_max=limits.fd_max,
+            conntrack_max=limits.conntrack_max,
+            tap_devices_max=limits.tap_devices_max,
+            ip_local_port_range=limits.ip_local_port_range,
+            detected_at=detected_at,
+        )
+        logger.info(
+            "Host capacity detected: %s, %s, %d cores, %d MiB RAM",
+            hardware.hostname,
+            hardware.cpu_model,
+            hardware.cpu_cores,
+            hardware.memory_total_mib,
+        )
+        return hardware, limits
 
     def restore_state(self) -> list[HostStateChangeItem]:
         """Revert host changes recorded in the database."""

@@ -93,6 +93,88 @@ class HostRepository:
                 """
             )
 
+    def save_capacity(
+        self,
+        hostname: str,
+        cpu_model: str,
+        cpu_vendor: str,
+        cpu_cores: int,
+        cpu_architecture: str,
+        numa_nodes: int,
+        memory_total_mib: int,
+        storage_total_bytes: int,
+        kernel_version: str,
+        os_release: str,
+        pid_max: int,
+        fd_max: int,
+        conntrack_max: int,
+        tap_devices_max: int,
+        ip_local_port_range: tuple[int, int],
+        detected_at: str,
+    ) -> None:
+        """Upsert host capacity detection results into host_state row id=1.
+
+        Updates capacity columns while preserving existing init-state columns.
+        If the row doesn't exist yet (pre-init detection), it is inserted.
+        """
+        port_range_str = f"{ip_local_port_range[0]},{ip_local_port_range[1]}"
+        with self._db.connect() as conn:
+            conn.execute("BEGIN")
+            try:
+                # Ensure row exists (singleton id=1)
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO host_state
+                    (id, initialized, initialized_at, updated_at)
+                    VALUES (1, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """
+                )
+                conn.execute(
+                    """
+                    UPDATE host_state SET
+                        hostname = ?,
+                        cpu_model = ?,
+                        cpu_vendor = ?,
+                        cpu_cores = ?,
+                        cpu_architecture = ?,
+                        numa_nodes = ?,
+                        memory_total_mib = ?,
+                        storage_total_bytes = ?,
+                        kernel_version = ?,
+                        os_release = ?,
+                        pid_max = ?,
+                        fd_max = ?,
+                        conntrack_max = ?,
+                        tap_devices_max = ?,
+                        ip_local_port_range = ?,
+                        detected_at = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = 1
+                    """,
+                    (
+                        hostname,
+                        cpu_model,
+                        cpu_vendor,
+                        cpu_cores,
+                        cpu_architecture,
+                        numa_nodes,
+                        memory_total_mib,
+                        storage_total_bytes,
+                        kernel_version,
+                        os_release,
+                        pid_max,
+                        fd_max,
+                        conntrack_max,
+                        tap_devices_max,
+                        port_range_str,
+                        detected_at,
+                    ),
+                )
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+
     def add_change(self, change: HostStateChangeItem) -> None:
         """Record a host configuration change made during mvm host init."""
         with self._db.connect() as conn:

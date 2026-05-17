@@ -516,6 +516,10 @@ Every scenario includes:
 | `host clean` blocked by running VM | Returns non-zero, mentions running | L1 | No | No |
 | `host reset --force` | Exits 0 | L1 | If no sudo access | Yes |
 | `host reset` blocked by running VM | Returns non-zero, mentions running | L1 | No | No |
+| `host info` | Human-readable output with Host, OS, CPU, Memory, Storage, Limits, Capacity, Setup sections | L1 | If not initialized | No |
+| `host info --json` | JSON with cpu.model, cpu.vendor, memory, limits.tap_devices, capacity.recommended_max_vms, setup | L2 | If not initialized | No |
+| `host info --refresh` | Re-detects and shows updated data | L1 | If not initialized | No |
+| `host info --refresh --json` | JSON with refreshed detected_at field | L2 | If not initialized | No |
 
 ### 4.15 `mvm cache`
 
