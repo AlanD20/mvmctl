@@ -274,7 +274,6 @@ REQUIRED_BINARIES: Final[list[str]] = [
     "groupdel",
     "visudo",
 ]
-ISO_BINARIES: Final[list[str]] = ["cloud-localds"]
 CONST_MIN_BINARY_SIZE_BYTES: Final[int] = 512
 
 # --- Libguestfs ---

@@ -16,7 +16,6 @@ from mvmctl.constants import (
     DEFAULT_SUDOERS_DIR,
     DEFAULT_SYSCTL_CONF_DIR,
     DEFAULT_SYSCTL_CONF_PATH,
-    ISO_BINARIES,
     PRIVILEGED_BINARIES,
     PROJECT_NAME,
     REQUIRED_BINARIES,
@@ -91,10 +90,6 @@ class HostService:
         for name in REQUIRED_BINARIES:
             if not shutil.which(name):
                 missing.append(name)
-        if ISO_BINARIES:
-            has_iso = any(shutil.which(b) for b in ISO_BINARIES)
-            if not has_iso:
-                missing.append(" or ".join(ISO_BINARIES))
         return missing
 
     @staticmethod
@@ -424,6 +419,16 @@ class HostService:
                 vendor_modules.append(mod)
 
         if not vendor_modules:
+            # When CONFIG_MODULES=n, KVM may be built directly into the
+            # kernel with no loadable modules.  In that case lsmod and
+            # modprobe --dry-run both report nothing, but /dev/kvm is
+            # still fully functional.  Fall back to checking device access.
+            if HostService.check_kvm_access():
+                logger.warning(
+                    "KVM appears to be built into the kernel "
+                    "(no modules to manage) — /dev/kvm is accessible"
+                )
+                return changes, next_order
             raise HostError(
                 "No KVM vendor modules available. Ensure virtualization is "
                 "enabled in BIOS and KVM kernel modules are installed."

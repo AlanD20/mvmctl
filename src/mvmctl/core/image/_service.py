@@ -576,6 +576,13 @@ class ImageService:
         image_types_config: list[dict[str, Any]] = cls.load_image_types_config()
         type_config_map = {cfg["type"]: cfg for cfg in image_types_config}
 
+        # ── "latest" alias → None (select latest from directory listing) ──
+        # The string "latest" is not a real version number or codename.
+        # Treat it the same as `version=None` so Phase 2 fetches the
+        # directory listing and picks the most recent version.
+        if version is not None and version.lower() == "latest":
+            version = None
+
         # ── Phase 1a: fast-path — construct from type config when version is explicit ──
         # When the user provides an explicit version and the type has a matching
         # image_types config with URL templates, build the ImageSpec directly
@@ -1170,18 +1177,23 @@ class ImageService:
         arch_mapping = options.get("arch_mapping", {}) or {}
         resolved_arch = arch_mapping.get(arch, arch)
 
+        # ── Codename alias resolution (must happen before version_prefix) ──
+        # The caller may pass a codename alias (e.g. "noble" for 24.04).
+        if resolver == "http-dir":
+            codename_mapping = options.get("codename_mapping", {}) or {}
+            if codename_mapping and version in codename_mapping:
+                version = codename_mapping[version]
+
         # ── Version prefix (e.g. "v" for Alpine directory naming) ────────
         version_prefix = options.get("version_prefix")
         template_version = (
             version_prefix + version if version_prefix else version
         )
 
-        # ── Codename resolution ──────────────────────────────────────────
+        # ── Codename (reverse lookup) ──────────────────────────────────
         codename: str = version  # fallback when no codename_mapping
         if resolver == "http-dir":
-            codename_mapping = options.get("codename_mapping", {}) or {}
             if codename_mapping:
-                # Reverse mapping: version → codename
                 reverse_map = {v: k for k, v in codename_mapping.items()}
                 codename = reverse_map.get(version, version)
 

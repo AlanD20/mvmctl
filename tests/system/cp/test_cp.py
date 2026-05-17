@@ -64,8 +64,11 @@ class TestCpHostToVm:
     """Copy files/directories from host to a running VM.
 
     All tests create a temp file or directory on the host, run
-    ``mvm cp <src> <vm>:/tmp/<name>``, then verify the payload
+    ``mvm cp <src> <vm>:/tmp/``, then verify the payload
     exists inside the guest via ``mvm ssh --cmd``.
+
+    With tar-over-SSH, the destination is always a directory and
+    files preserve their original filename (tar cannot rename).
     """
 
     @pytest.mark.requires_kvm
@@ -79,13 +82,11 @@ class TestCpHostToVm:
     ) -> None:
         """Copy a single file from host to VM — verify on guest via SSH.
 
-        Rationale: Verifies a single file transfer from host to VM reaches
-        the guest filesystem. A regression where the file silently fails to
-        transfer would not be caught by returncode-only checks.
+        Destination uses a directory path (``/tmp/``) — the file lands
+        with its original name. This verifies tar-over-SSH semantics
+        where the destination is always a directory and the filename
+        is preserved from the source.
         """
-        # Rationale: Needs a running VM with SSH (created_vm) to verify
-        # file existence inside the guest. L3 verification requires
-        # guest-side assertion.
         vm_info = created_vm
         if not _wait_for_vm_ssh(mvm_binary, vm_info):
             pytest.skip("SSH not available on VM — cannot verify file transfer")
@@ -94,39 +95,40 @@ class TestCpHostToVm:
         test_file = tmp_path / f"test_file_{uuid.uuid4().hex[:8]}.txt"
         test_content = f"hello from host at {uuid.uuid4().hex}"
         test_file.write_text(test_content)
-        remote_path = f"/tmp/{test_file.name}"
+        remote_dir = "/tmp/"
+        remote_file = f"/tmp/{test_file.name}"
 
         try:
-            # Copy host → VM
+            # Copy host → VM (destination is a directory — tar preserves filename)
             result = _run_mvm(
                 mvm_binary,
                 "cp",
                 str(test_file),
-                f"{vm_info['name']}:{remote_path}",
+                f"{vm_info['name']}:{remote_dir}",
                 timeout=30,
             )
             assert result.returncode == 0, (
                 f"cp failed: stdout={result.stdout} stderr={result.stderr}"
             )
 
-            # L3: Verify file exists inside the VM via SSH
+            # L3: Verify file exists inside the VM via SSH (original filename)
             ssh_result = _ssh_cmd(
                 mvm_binary,
                 vm_info["name"],
-                f"test -f '{remote_path}' && echo EXISTS",
+                f"test -f '{remote_file}' && echo EXISTS",
             )
             assert ssh_result.returncode == 0, (
                 f"SSH check failed: {ssh_result.stderr}"
             )
             assert "EXISTS" in ssh_result.stdout, (
-                f"File {remote_path} not found on VM: {ssh_result.stdout}"
+                f"File {remote_file} not found on VM: {ssh_result.stdout}"
             )
 
             # Also verify file content matches
             content_result = _ssh_cmd(
                 mvm_binary,
                 vm_info["name"],
-                f"cat '{remote_path}'",
+                f"cat '{remote_file}'",
             )
             assert content_result.returncode == 0, (
                 f"SSH cat failed: {content_result.stderr}"
@@ -137,7 +139,7 @@ class TestCpHostToVm:
             )
         finally:
             # Cleanup: remove the temp file from VM
-            _ssh_cmd(mvm_binary, vm_info["name"], f"rm -f '{remote_path}'")
+            _ssh_cmd(mvm_binary, vm_info["name"], f"rm -f '{remote_file}'")
 
     @pytest.mark.requires_kvm
     @pytest.mark.slow
@@ -250,6 +252,10 @@ class TestCpVmToHost:
     ) -> None:
         """Round-trip a file: host→VM→host, verify content integrity.
 
+        With tar-over-SSH, the upload destination is a directory (``/tmp/``)
+        and the download extracts with the original filename. This test
+        verifies that both directions preserve content correctly.
+
         Rationale: Full round-trip verification of file integrity across
         both directions. A regression in tar pipe or SSH encoding that
         corrupts data would only be caught by reading back the transferred
@@ -264,41 +270,47 @@ class TestCpVmToHost:
         src_file = tmp_path / "original.txt"
         src_file.write_text(original_content)
 
-        remote_path = f"/tmp/roundtrip_{uuid.uuid4().hex[:8]}.txt"
-        dest_file = tmp_path / "downloaded.txt"
+        remote_dir = "/tmp/"
+        remote_file = f"/tmp/{src_file.name}"
+        # Destination for download: a non-existent path whose parent
+        # directory is the extraction target.  Tar extracts the original
+        # filename, so the file lands at ``<parent>/<original_name>``.
+        download_dest = tmp_path / "placeholder"
 
         try:
-            # Step 1: Copy host → VM
+            # Step 1: Copy host → VM (tar preserves original filename)
             upload = _run_mvm(
                 mvm_binary,
                 "cp",
                 str(src_file),
-                f"{vm_info['name']}:{remote_path}",
+                f"{vm_info['name']}:{remote_dir}",
                 timeout=30,
             )
             assert upload.returncode == 0, (
                 f"Upload failed: stdout={upload.stdout} stderr={upload.stderr}"
             )
 
-            # Step 2: Copy VM → host
+            # Step 2: Copy VM → host (tar extracts original filename)
             download = _run_mvm(
                 mvm_binary,
                 "cp",
-                f"{vm_info['name']}:{remote_path}",
-                str(dest_file),
+                f"{vm_info['name']}:{remote_file}",
+                str(download_dest),
                 timeout=30,
             )
             assert download.returncode == 0, (
                 f"Download failed: stdout={download.stdout} stderr={download.stderr}"
             )
 
-            # Step 3: L3 — Verify file exists on host filesystem
-            assert dest_file.exists(), (
-                f"Downloaded file not found at {dest_file}"
+            # Step 3: L3 — Verify file exists on host with ORIGINAL filename
+            expected = tmp_path / src_file.name
+            assert expected.exists(), (
+                f"Extracted file not found at {expected} (tar preserves "
+                f"original filename)"
             )
 
             # Step 4: L3 — Verify content integrity
-            downloaded_content = dest_file.read_text()
+            downloaded_content = expected.read_text()
             assert downloaded_content.strip() == original_content, (
                 f"Content mismatch after round-trip: "
                 f"expected {original_content!r}, "
@@ -306,7 +318,7 @@ class TestCpVmToHost:
             )
         finally:
             # Cleanup: remove the remote file
-            _ssh_cmd(mvm_binary, vm_info["name"], f"rm -f '{remote_path}'")
+            _ssh_cmd(mvm_binary, vm_info["name"], f"rm -f '{remote_file}'")
 
 
 # ============================================================================
@@ -355,7 +367,11 @@ class TestCpEdgeCases:
         created_vm: dict[str, Any],
         tmp_path: Path,
     ) -> None:
-        """Copy without ``--force`` when destination exists — should fail.
+        """Copy without ``--force`` when destination file exists — should fail.
+
+        With tar-over-SSH, both uploads target the same directory and the
+        same source filename. The second transfer fails because
+        ``tar --keep-old-files`` refuses to overwrite the existing file.
 
         Rationale: Safety check — prevents accidental overwrites.
         Users must explicitly opt in with ``--force``.
@@ -369,27 +385,29 @@ class TestCpEdgeCases:
         # Create a temp file
         src_file = tmp_path / f"src_{uuid.uuid4().hex[:8]}.txt"
         src_file.write_text("original content")
-        remote_path = f"/tmp/no_force_test_{uuid.uuid4().hex[:8]}"
+        remote_dir = "/tmp/"
+        remote_file = f"/tmp/{src_file.name}"
 
         try:
-            # First copy should succeed
+            # First copy should succeed (file doesn't exist yet)
             first = _run_mvm(
                 mvm_binary,
                 "cp",
                 str(src_file),
-                f"{vm_info['name']}:{remote_path}",
+                f"{vm_info['name']}:{remote_dir}",
                 timeout=30,
             )
             assert first.returncode == 0, (
                 f"First copy failed: stdout={first.stdout} stderr={first.stderr}"
             )
 
-            # Second copy without --force should fail
+            # Second copy without --force should fail (tar --keep-old-files
+            # prevents overwriting the same filename in the same directory)
             second = _run_mvm(
                 mvm_binary,
                 "cp",
                 str(src_file),
-                f"{vm_info['name']}:{remote_path}",
+                f"{vm_info['name']}:{remote_dir}",
                 check=False,
                 timeout=30,
             )
@@ -406,7 +424,7 @@ class TestCpEdgeCases:
                 f"got: stderr={second.stderr}"
             )
         finally:
-            _ssh_cmd(mvm_binary, vm_info["name"], f"rm -f '{remote_path}'")
+            _ssh_cmd(mvm_binary, vm_info["name"], f"rm -f '{remote_file}'")
 
     @pytest.mark.requires_kvm
     @pytest.mark.slow
@@ -419,6 +437,12 @@ class TestCpEdgeCases:
     ) -> None:
         """Copy with ``--force`` overwrites existing destination.
 
+        With tar-over-SSH, the destination is a directory so both
+        transfers use the same local filename. The first transfer
+        creates ``/tmp/file_for_force.txt``. The local file is
+        recreated with different content and transferred again with
+        ``--force``, which should overwrite the remote file.
+
         Rationale: ``--force`` must actually overwrite the destination
         with new content. A regression where ``--force`` silently
         fails to overwrite would cause users to think the transfer
@@ -430,20 +454,18 @@ class TestCpEdgeCases:
                 "SSH not available on VM — cannot verify force overwrite"
             )
 
-        remote_path = f"/tmp/force_test_{uuid.uuid4().hex[:8]}"
-        file_a = tmp_path / "file_a.txt"
-        file_b = tmp_path / "file_b.txt"
-
-        file_a.write_text("AAAA_original")
-        file_b.write_text("BBBB_overwritten")
+        remote_dir = "/tmp/"
+        remote_file = "/tmp/file_for_force.txt"
+        src_file = tmp_path / "file_for_force.txt"
 
         try:
-            # Copy file A to VM (first time — should succeed)
+            # Write original content and copy to VM
+            src_file.write_text("AAAA_original")
             first = _run_mvm(
                 mvm_binary,
                 "cp",
-                str(file_a),
-                f"{vm_info['name']}:{remote_path}",
+                str(src_file),
+                f"{vm_info['name']}:{remote_dir}",
                 timeout=30,
             )
             assert first.returncode == 0, (
@@ -452,19 +474,22 @@ class TestCpEdgeCases:
 
             # Verify original content
             orig_check = _ssh_cmd(
-                mvm_binary, vm_info["name"], f"cat '{remote_path}'"
+                mvm_binary, vm_info["name"], f"cat '{remote_file}'"
             )
             assert orig_check.returncode == 0
             assert "AAAA" in orig_check.stdout, (
                 f"Expected 'AAAA' in original file, got: {orig_check.stdout}"
             )
 
-            # Copy file B with --force — should overwrite
+            # Recreate the same local file with new content
+            src_file.write_text("BBBB_overwritten")
+
+            # Copy with --force — should overwrite the remote file
             overwrite = _run_mvm(
                 mvm_binary,
                 "cp",
-                str(file_b),
-                f"{vm_info['name']}:{remote_path}",
+                str(src_file),
+                f"{vm_info['name']}:{remote_dir}",
                 "--force",
                 timeout=30,
             )
@@ -472,9 +497,9 @@ class TestCpEdgeCases:
                 f"Force copy failed: stdout={overwrite.stdout} stderr={overwrite.stderr}"
             )
 
-            # L3: Verify content changed to file B's content
+            # L3: Verify content changed to the new content
             final_check = _ssh_cmd(
-                mvm_binary, vm_info["name"], f"cat '{remote_path}'"
+                mvm_binary, vm_info["name"], f"cat '{remote_file}'"
             )
             assert final_check.returncode == 0, (
                 f"SSH cat failed after force overwrite: {final_check.stderr}"
@@ -488,4 +513,4 @@ class TestCpEdgeCases:
                 f"got: {final_check.stdout}"
             )
         finally:
-            _ssh_cmd(mvm_binary, vm_info["name"], f"rm -f '{remote_path}'")
+            _ssh_cmd(mvm_binary, vm_info["name"], f"rm -f '{remote_file}'")

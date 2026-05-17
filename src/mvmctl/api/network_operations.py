@@ -209,6 +209,18 @@ class NetworkOperation:
             )
 
         AuditLog.log("network.create", changes={"name": resolved.name})
+
+        if inputs.set_default:
+            try:
+                repo.set_default(updated_item.id)
+            except Exception:
+                logger.warning(
+                    "Failed to set network '%s' as default: %s",
+                    resolved.name,
+                    "unexpected error",
+                    exc_info=True,
+                )
+
         return OperationResult(
             status="success",
             code="network.created",

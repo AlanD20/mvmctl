@@ -31,6 +31,7 @@ class NetworkCreateInput:
     ipv4_gateway: str | None = None
     nat_enabled: bool = True
     nat_gateways: list[str] = field(default_factory=list)
+    set_default: bool = False
 
 
 @dataclass(frozen=True)

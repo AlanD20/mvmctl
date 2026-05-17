@@ -19,6 +19,7 @@ def _make_volume(
     fmt: str = "raw",
     status: str = "available",
     path: str | None = None,
+    is_read_only: bool = False,
 ) -> VolumeItem:
     vid = f"{name}-id-" + "x" * 55
     return VolumeItem(
@@ -31,6 +32,7 @@ def _make_volume(
         vm_id=None,
         created_at="2026-01-01T00:00:00+00:00",
         updated_at="2026-01-01T00:00:00+00:00",
+        is_read_only=is_read_only,
     )
 
 
@@ -454,6 +456,28 @@ class TestVolumeServiceVolumesToDrives:
         assert result[0]["path_on_host"] == "/volumes/vol-a.raw"
         assert result[1]["drive_id"] == "vol-2"
         assert result[1]["path_on_host"] == "/volumes/vol-b.raw"
+
+    def test_volumes_to_drives_read_only(self):
+        """volumes_to_drives with is_read_only=True should set is_read_only in DriveConfig."""
+        vol = _make_volume(
+            name="ro-vol",
+            path="/volumes/ro-vol.raw",
+            is_read_only=True,
+        )
+
+        result = VolumeService.volumes_to_drives([vol])
+
+        assert len(result) == 1
+        assert result[0]["is_read_only"] is True
+
+    def test_volumes_to_drives_writable_default(self):
+        """volumes_to_drives with default is_read_only should set is_read_only=False."""
+        vol = _make_volume(name="rw-vol", path="/volumes/rw-vol.raw")
+
+        result = VolumeService.volumes_to_drives([vol])
+
+        assert len(result) == 1
+        assert result[0]["is_read_only"] is False
 
 
 class TestVolumeServiceSetVolumesState:

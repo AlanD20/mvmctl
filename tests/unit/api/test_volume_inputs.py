@@ -187,6 +187,18 @@ class TestVolumeCreateInput:
         inp = VolumeCreateInput(name="my-vol", size="1G", format="qcow2")
         assert inp.format == "qcow2"
 
+    def test_with_read_only_true(self):
+        """VolumeCreateInput stores read_only=True."""
+        inp = VolumeCreateInput(
+            name="my-vol", size="1G", format="raw", read_only=True
+        )
+        assert inp.read_only is True
+
+    def test_with_read_only_default(self):
+        """VolumeCreateInput defaults read_only to None."""
+        inp = VolumeCreateInput(name="my-vol", size="1G")
+        assert inp.read_only is None
+
 
 class TestVolumeCreateRequest:
     def test_resolve_raw_default(self):
@@ -215,6 +227,28 @@ class TestVolumeCreateRequest:
         assert resolved.format == "qcow2"
         assert resolved.path.name == "my-vol.qcow2"
         assert resolved.size_bytes == 10737418240
+
+    def test_resolve_read_only_true(self):
+        """VolumeCreateRequest should pass through read_only=True."""
+        request = VolumeCreateRequest(
+            inputs=VolumeCreateInput(
+                name="my-vol", size="1G", read_only=True
+            ),
+            db=MagicMock(),
+        )
+        with patch.object(VolumeRepository, "get_by_name", return_value=None):
+            resolved = request.resolve()
+        assert resolved.is_read_only is True
+
+    def test_resolve_read_only_default(self):
+        """VolumeCreateRequest should resolve read_only=None to False."""
+        request = VolumeCreateRequest(
+            inputs=VolumeCreateInput(name="my-vol", size="1G"),
+            db=MagicMock(),
+        )
+        with patch.object(VolumeRepository, "get_by_name", return_value=None):
+            resolved = request.resolve()
+        assert resolved.is_read_only is False
 
     def test_resolve_unsupported_format_raises(self):
         """VolumeCreateRequest should raise for unsupported format."""

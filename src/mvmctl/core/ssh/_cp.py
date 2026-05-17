@@ -30,7 +30,6 @@ class CPService:
 
     CREATE_FLAGS: list[str] = ["--sparse", "--xattrs", "--acls"]
     EXTRACT_FLAGS: list[str] = [
-        "--no-overwrite-dir",
         "--keep-old-files",
         "--delay-directory-restore",
         "--preserve-permissions",
@@ -97,14 +96,14 @@ class CPService:
     def _build_source_tar(path: str, is_directory: bool) -> list[str]:
         """Build the tar create command list for a local path."""
         if is_directory:
-            return ["tar", *CPService.CREATE_FLAGS, "cf", "-", "-C", path, "."]
+            return ["tar", "cf", "-", *CPService.CREATE_FLAGS, "-C", path, "."]
         parent = os.path.dirname(path) or "."
         base = os.path.basename(path)
         return [
             "tar",
-            *CPService.CREATE_FLAGS,
             "cf",
             "-",
+            *CPService.CREATE_FLAGS,
             "-C",
             parent,
             base,
@@ -117,23 +116,21 @@ class CPService:
         Returns a shell-safe string suitable for passing as a single
         argument to ``ssh <opts> "<command>"``.
         """
+        flags = " ".join(shlex.quote(f) for f in CPService.CREATE_FLAGS)
         if is_directory:
-            return f"tar {' '.join(shlex.quote(f) for f in CPService.CREATE_FLAGS)} cf - -C {shlex.quote(path)} ."
+            return f"tar cf - {flags} -C {shlex.quote(path)} ."
         parent = os.path.dirname(path) or "."
         base = os.path.basename(path)
-        return (
-            f"tar {' '.join(shlex.quote(f) for f in CPService.CREATE_FLAGS)}"
-            f" cf - -C {shlex.quote(parent)} {shlex.quote(base)}"
-        )
+        return f"tar cf - {flags} -C {shlex.quote(parent)} {shlex.quote(base)}"
 
     @staticmethod
     def _build_dest_tar(dst_path: str) -> list[str]:
         """Build the tar extract command list for a local destination."""
         return [
             "tar",
-            *CPService.EXTRACT_FLAGS,
             "xf",
             "-",
+            *CPService.EXTRACT_FLAGS,
             "-C",
             dst_path,
         ]
@@ -142,7 +139,7 @@ class CPService:
     def _build_remote_dest_tar(dst_path: str) -> str:
         """Build the tar extract shell command string for a remote path."""
         flags = " ".join(shlex.quote(f) for f in CPService.EXTRACT_FLAGS)
-        return f"tar {flags} xf - -C {shlex.quote(dst_path)}"
+        return f"tar xf - {flags} -C {shlex.quote(dst_path)}"
 
     # ── SSH command prefix ──────────────────────────────────────────
 

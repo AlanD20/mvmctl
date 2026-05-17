@@ -565,6 +565,7 @@ class BinaryService:
             dev_src = Path("dist/services") / combined_name
             if dev_src.exists():
                 combined_dest.parent.mkdir(parents=True, exist_ok=True)
+                combined_dest.unlink(missing_ok=True)
                 shutil.copy2(str(dev_src), str(combined_dest))
                 combined_dest.chmod(CONST_FILE_PERMS_EXECUTABLE)
                 logger.info(

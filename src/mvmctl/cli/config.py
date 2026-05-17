@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import typer
+from rich.markup import escape
 
 from mvmctl.api import ConfigOperation as _ConfigOperation
 
@@ -128,7 +129,7 @@ def config_list() -> None:
     """List all overridable settings and their current values."""
     settings = ConfigOperation.list_all()
     for category, keys in settings.items():
-        mvm_cli.info(f"\n[{category}]")
+        mvm_cli.info(escape(f"\n[{category}]"))
         for key, info in keys.items():
             override = info["override"]
             if override is not None:

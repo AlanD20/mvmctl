@@ -9,7 +9,7 @@ from typing import Any
 from mvmctl.api.inputs._cp_input import CPInput, CPRequest
 from mvmctl.core._shared import Database
 from mvmctl.core.ssh._cp import CPService
-from mvmctl.exceptions import CPError
+from mvmctl.exceptions import CPDestinationNotDirectoryError, CPError
 from mvmctl.models.result import OperationResult
 from mvmctl.utils.auditlog import AuditLog
 
@@ -53,6 +53,20 @@ class CPOperation:
                     "force": inputs.force,
                 },
             )
+
+            # Validate destination is a directory (tar-pipe can't rename files)
+            if (
+                resolved.direction == "host_to_vm"
+                and resolved.dst_info is not None
+            ):
+                dst_path = resolved.dst_info.remote_path
+                if dst_path and not dst_path.endswith("/"):
+                    raise CPDestinationNotDirectoryError(
+                        f"Destination path must be a directory (end with /). "
+                        f"Got: '{dst_path}'. "
+                        f"Use 'vm_name:/dest/dir/' to copy into a directory.",
+                        code="cp.destination_not_directory",
+                    )
 
             total_bytes: int = 0
             result_message: str = ""

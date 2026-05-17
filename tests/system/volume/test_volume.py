@@ -207,6 +207,99 @@ class TestVolumeLifecycle:
         finally:
             _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
 
+    # ── Read-only flag tests ─────────────────────────────────────────────
+
+    def test_volume_create_read_only(
+        self, mvm_binary: str, unique_key_name: str
+    ) -> None:
+        # Rationale: Needs a real volume (1-3s). Verifies --read-only flag
+        # produces a read-only volume via JSON ls --json inspection.
+        """Create a volume with --read-only and verify is_read_only via ls --json."""
+        vol_name = f"sys-vol-ro-{unique_key_name}"
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "volume",
+                "create",
+                vol_name,
+                "512M",
+                "--read-only",
+            )
+            assert result.returncode == 0
+            assert "ro" in result.stdout
+
+            ls_result = _run_mvm(mvm_binary, "volume", "ls", "--json")
+            volumes = json.loads(ls_result.stdout)
+            matching = [v for v in volumes if v["name"] == vol_name]
+            assert len(matching) == 1
+            assert matching[0]["is_read_only"] is True
+        finally:
+            _run_mvm(mvm_binary, "volume", "rm", vol_name, "--force", check=False)
+
+    def test_volume_create_readonly_alias(
+        self, mvm_binary: str, unique_key_name: str
+    ) -> None:
+        # Rationale: Needs a real volume (1-3s). Tests the --readonly alias
+        # flag and the `mvm vol` alias for the volume command.
+        """Create a volume using `mvm vol` with --readonly alias and verify via inspect."""
+        vol_name = f"sys-vol-roa-{unique_key_name}"
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "vol",
+                "create",
+                vol_name,
+                "512M",
+                "--readonly",
+            )
+            assert result.returncode == 0
+            assert "ro" in result.stdout
+
+            inspect = _run_mvm(
+                mvm_binary, "vol", "inspect", vol_name, "--json"
+            )
+            data = json.loads(inspect.stdout)
+            assert data["volume"]["is_read_only"] is True
+        finally:
+            _run_mvm(mvm_binary, "vol", "rm", vol_name, "--force", check=False)
+
+    def test_volume_list_json_read_only(
+        self, mvm_binary: str, unique_key_name: str
+    ) -> None:
+        # Rationale: Needs two real volumes (2-6s). Verifies both writable
+        # (default) and read-only (explicit) appear correctly in JSON output.
+        """Create one writable and one read-only volume, verify is_read_only in ls --json."""
+        vol_rw = f"sys-vol-rw-{unique_key_name}"
+        vol_ro = f"sys-vol-rolist-{unique_key_name}"
+        try:
+            _run_mvm(mvm_binary, "volume", "create", vol_rw, "512M")
+            _run_mvm(
+                mvm_binary,
+                "volume",
+                "create",
+                vol_ro,
+                "256M",
+                "--read-only",
+            )
+
+            ls_result = _run_mvm(mvm_binary, "volume", "ls", "--json")
+            volumes = json.loads(ls_result.stdout)
+
+            rw_match = [v for v in volumes if v["name"] == vol_rw]
+            assert len(rw_match) == 1
+            assert rw_match[0]["is_read_only"] is False
+
+            ro_match = [v for v in volumes if v["name"] == vol_ro]
+            assert len(ro_match) == 1
+            assert ro_match[0]["is_read_only"] is True
+        finally:
+            _run_mvm(
+                mvm_binary, "volume", "rm", vol_rw, "--force", check=False
+            )
+            _run_mvm(
+                mvm_binary, "volume", "rm", vol_ro, "--force", check=False
+            )
+
     def test_volume_duplicate_name_rejected(
         self, mvm_binary: str, unique_key_name: str
     ) -> None:

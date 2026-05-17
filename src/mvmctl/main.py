@@ -152,6 +152,9 @@ _COMMAND_SPECS: dict[str, _LazyCommandSpec] = {
     "network": _LazyCommandSpec(
         "mvmctl.cli.network", "network_app", "Network management"
     ),
+    "net": _LazyCommandSpec(
+        "mvmctl.cli.network", "network_app", "Network management"
+    ),
     "key": _LazyCommandSpec("mvmctl.cli.key", "key_app", "SSH key management"),
     "config": _LazyCommandSpec(
         "mvmctl.cli.config", "config_app", "Configuration commands"
@@ -163,6 +166,9 @@ _COMMAND_SPECS: dict[str, _LazyCommandSpec] = {
         "mvmctl.cli.kernel", "kernel_app", "Kernel management"
     ),
     "image": _LazyCommandSpec(
+        "mvmctl.cli.image", "image_app", "Image management"
+    ),
+    "img": _LazyCommandSpec(
         "mvmctl.cli.image", "image_app", "Image management"
     ),
     "bin": _LazyCommandSpec("mvmctl.cli.bin", "bin_app", "Binary management"),
@@ -197,7 +203,9 @@ _COMMAND_ORDER = [
     "cp",
     "kernel",
     "image",
+    "img",
     "network",
+    "net",
     "vm",
     "volume",
     "vol",

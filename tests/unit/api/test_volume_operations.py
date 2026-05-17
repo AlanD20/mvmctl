@@ -58,6 +58,7 @@ class TestVolumeOperationCreate:
         mock_resolved.size_bytes = 1073741824
         mock_resolved.format = "raw"
         mock_resolved.path = Path("/volumes/my-vol.raw")
+        mock_resolved.is_read_only = False
         mock_request = MagicMock()
         mock_request.resolve.return_value = mock_resolved
         mocker.patch(
@@ -78,8 +79,52 @@ class TestVolumeOperationCreate:
         assert result.code == "volume.created"
         assert result.item is not None
         assert result.item.name == "my-vol"
+        # Default is_read_only should be False
+        assert result.item.is_read_only is False
         # Service should have been called to create the disk
         mock_svc.create_disk.assert_called_once()
+
+    def test_create_with_read_only_true(self, mocker):
+        """Create with read_only=True should produce is_read_only=True on VolumeItem."""
+        mock_repo = MagicMock()
+        mock_repo.get_by_name.return_value = None
+        mocker.patch(
+            "mvmctl.api.volume_operations.VolumeRepository",
+            return_value=mock_repo,
+        )
+        mock_svc = MagicMock()
+        mocker.patch(
+            "mvmctl.api.volume_operations.VolumeService",
+            return_value=mock_svc,
+        )
+        mock_resolved = MagicMock()
+        mock_resolved.name = "my-vol"
+        mock_resolved.size_bytes = 1073741824
+        mock_resolved.format = "raw"
+        mock_resolved.path = Path("/volumes/my-vol.raw")
+        mock_resolved.is_read_only = True
+        mock_request = MagicMock()
+        mock_request.resolve.return_value = mock_resolved
+        mocker.patch(
+            "mvmctl.api.volume_operations.VolumeCreateRequest",
+            return_value=mock_request,
+        )
+        mocker.patch("mvmctl.api.volume_operations.Database")
+        mocker.patch(
+            "mvmctl.api.volume_operations.HashGenerator.volume",
+            return_value="vol-hash-" + "x" * 55,
+        )
+
+        result = VolumeOperation.create(
+            VolumeCreateInput(name="my-vol", size="1G", read_only=True)
+        )
+
+        assert result.status == "success"
+        assert result.item.is_read_only is True
+        mock_svc.create_disk.assert_called_once()
+        # Verify the VolumeItem passed to create_disk has is_read_only=True
+        created_vol: VolumeItem = mock_svc.create_disk.call_args[0][0]
+        assert created_vol.is_read_only is True
 
     def test_create_with_qcow2_format(self, mocker):
         """Create with format=qcow2 should pass format to service."""

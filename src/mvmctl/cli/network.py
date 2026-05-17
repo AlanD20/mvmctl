@@ -172,6 +172,9 @@ def network_create(
         "--non-interactive",
         help="Skip interactive prompts (auto-detect NAT interfaces)",
     ),
+    set_default: bool = typer.Option(
+        False, "--default", "-d", help="Set as default network"
+    ),
 ) -> None:
     """Create a named network."""
     name = mvm_cli.check_name_arg(ctx, name)
@@ -195,6 +198,7 @@ def network_create(
         ipv4_gateway=ipv4_gateway,
         nat_enabled=not no_nat,
         nat_gateways=nat_gateways_list,
+        set_default=set_default,
     )
     result = NetworkOperation.create(create_input)
     if isinstance(result, OperationResult):
@@ -220,6 +224,9 @@ def network_create(
     mvm_cli.info(f"  NAT:     {'True' if config.nat_enabled else 'False'}")
     if config.nat_gateways:
         mvm_cli.info(f"  NAT gateways: {', '.join(config.nat_gateways_list)}")
+
+    if set_default:
+        mvm_cli.success(f"Default network set to: {config.name}")
 
 
 @network_app.command(

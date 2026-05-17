@@ -273,6 +273,10 @@ class CPDestinationExistsError(CPError):
     """Destination file exists and --force not set."""
 
 
+class CPDestinationNotDirectoryError(CPError):
+    """Destination path must end with / (tar-pipe can't rename files)."""
+
+
 class MVMKeyError(MVMError):
     """SSH key management failure."""
 
