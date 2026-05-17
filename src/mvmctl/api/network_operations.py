@@ -186,13 +186,18 @@ class NetworkOperation:
                     subnet=resolved.subnet,
                     network_id=network_id,
                 )
-        except NetworkError:
+        except NetworkError as e:
             # If infrastructure setup fails, clean up DB record
+            logger.error(
+                "Network infrastructure setup failed for '%s': %s",
+                resolved.name,
+                e,
+            )
             repo.delete(network_id)
             return OperationResult(
                 status="error",
                 code="network.create_failed",
-                message=f"Failed to create network '{resolved.name}': infrastructure setup failed",
+                message=f"Failed to create network '{resolved.name}': {e}",
             )
 
         # Update bridge_active status

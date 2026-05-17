@@ -36,7 +36,12 @@ if TYPE_CHECKING:
         HostStateItem,
     )
     from mvmctl.models.image import ImageItem, ImageSpec, ImageVersion
-    from mvmctl.models.kernel import KernelItem, KernelPullResult, KernelSpec
+    from mvmctl.models.kernel import (
+        KernelFeature,
+        KernelItem,
+        KernelPullResult,
+        KernelSpec,
+    )
     from mvmctl.models.key import SSHKeyItem
     from mvmctl.models.network import (
         FirewallBackendType,
@@ -88,6 +93,7 @@ __all__ = [
     "ImageItem",
     "ImageSpec",
     "ImageVersion",
+    "KernelFeature",
     "KernelPullResult",
     "KernelItem",
     "KernelSpec",
@@ -125,6 +131,7 @@ _LAZY_MAP = {
     "ImageItem": ("mvmctl.models.image", "ImageItem"),
     "ImageSpec": ("mvmctl.models.image", "ImageSpec"),
     "ImageVersion": ("mvmctl.models.image", "ImageVersion"),
+    "KernelFeature": ("mvmctl.models.kernel", "KernelFeature"),
     "KernelItem": ("mvmctl.models.kernel", "KernelItem"),
     "KernelPullResult": ("mvmctl.models.kernel", "KernelPullResult"),
     "KernelSpec": ("mvmctl.models.kernel", "KernelSpec"),

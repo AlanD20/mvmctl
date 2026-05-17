@@ -85,6 +85,15 @@ class KernelPullResult:
 
 
 @dataclass
+class KernelFeature:
+    """A named feature group of kernel config options, loaded from kernels.yaml."""
+
+    desc: str
+    configs: list[str]
+    requires: list[str] = field(default_factory=list)
+
+
+@dataclass
 class KernelSpec:
     """Specification for building or fetching a kernel, loaded from kernels.yaml."""
 
@@ -109,3 +118,58 @@ class KernelSpec:
     options: dict[str, object] | None = None
     file_pattern: str | None = None
     file_suffix: str | None = None
+    features: dict[str, KernelFeature] = field(default_factory=dict)
+
+    def with_enabled_features(self, feature_names: list[str]) -> KernelSpec:
+        """Return a shallow copy with feature configs merged into enabled_configs/required_settings.
+
+        Unknown feature names are silently skipped.  Duplicates are removed
+        while preserving the original insertion order.
+        """
+        extra_configs: list[str] = []
+        extra_requires: list[str] = []
+        for name in feature_names:
+            feature = self.features.get(name)
+            if feature is None:
+                continue
+            extra_configs.extend(feature.configs)
+            extra_requires.extend(feature.requires)
+
+        seen_configs = set(self.enabled_configs)
+        merged_configs = list(self.enabled_configs)
+        for c in extra_configs:
+            if c not in seen_configs:
+                seen_configs.add(c)
+                merged_configs.append(c)
+
+        seen_requires = set(self.required_settings)
+        merged_requires = list(self.required_settings)
+        for r in extra_requires:
+            if r not in seen_requires:
+                seen_requires.add(r)
+                merged_requires.append(r)
+
+        return KernelSpec(
+            name=self.name,
+            kernel_type=self.kernel_type,
+            version=self.version,
+            source=self.source,
+            output_name=self.output_name,
+            build_dir=self.build_dir,
+            list_url_template=self.list_url_template,
+            config_url_template=self.config_url_template,
+            sha256=self.sha256,
+            sha256_url=self.sha256_url,
+            config_fragments=self.config_fragments,
+            parallel_jobs=self.parallel_jobs,
+            enabled_configs=merged_configs,
+            disabled_configs=self.disabled_configs,
+            set_val_configs=self.set_val_configs,
+            required_settings=merged_requires,
+            resolver=self.resolver,
+            versions_url=self.versions_url,
+            options=self.options,
+            file_pattern=self.file_pattern,
+            file_suffix=self.file_suffix,
+            features=self.features,
+        )

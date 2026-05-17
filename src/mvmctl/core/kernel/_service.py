@@ -38,7 +38,12 @@ from mvmctl.exceptions import (
     MVMError,
     ProcessError,
 )
-from mvmctl.models import KernelItem, KernelPullResult, KernelSpec
+from mvmctl.models import (
+    KernelFeature,
+    KernelItem,
+    KernelPullResult,
+    KernelSpec,
+)
 from mvmctl.utils._system import run_cmd
 from mvmctl.utils.common import CacheUtils
 from mvmctl.utils.crypto import HashGenerator
@@ -206,6 +211,22 @@ class KernelService:
                 opts: dict[str, Any] = (
                     opts_raw if isinstance(opts_raw, dict) else {}
                 )
+                # Parse optional feature groups
+                features_raw = raw.get("features")
+                features: dict[str, KernelFeature] = {}
+                if isinstance(features_raw, dict):
+                    for feat_name, feat_raw_any in features_raw.items():
+                        if not isinstance(feat_name, str) or not isinstance(
+                            feat_raw_any, dict
+                        ):
+                            continue
+                        feat_raw: dict[str, Any] = feat_raw_any
+                        features[feat_name] = KernelFeature(
+                            desc=require_str(feat_raw, "desc"),
+                            configs=require_str_list(feat_raw, "configs"),
+                            requires=require_str_list(feat_raw, "requires"),
+                        )
+
                 specs[spec_name] = KernelSpec(
                     name=spec_name,
                     kernel_type=require_str(raw, "type"),
@@ -232,6 +253,7 @@ class KernelService:
                     options=opts if opts else None,
                     file_pattern=optional_str(opts, "file_pattern"),
                     file_suffix=optional_str(opts, "file_suffix"),
+                    features=features,
                 )
             except ValueError as exc:
                 raise KernelError(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from mvmctl.core._shared import Database
@@ -38,6 +38,7 @@ class KernelPullInput:
     clean_build: bool = False
     kernel_config: Path | None = None
     set_default: bool = False
+    features: str = ""
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,7 @@ class ResolvedKernelPullRequest:
     set_default: bool
     kernel_config: Path | None
     version: str | None = None
+    features: list[str] = field(default_factory=list)
 
 
 class KernelPullRequest:
@@ -118,6 +120,21 @@ class KernelPullRequest:
                 self._db, "defaults.kernel", "build_jobs"
             )
 
+        # Resolve features from comma-separated input string
+        features_raw = (self._inputs.features or "").strip()
+        features_list: list[str] = (
+            [f.strip() for f in features_raw.split(",") if f.strip()]
+            if features_raw
+            else []
+        )
+
+        # Auto-include "kvm" when defaults.vm.nested_virt is enabled
+        nested_virt = bool(
+            SettingsService.resolve(self._db, "defaults.vm", "nested_virt")
+        )
+        if nested_virt and "kvm" not in features_list:
+            features_list.insert(0, "kvm")
+
         self._result = ResolvedKernelPullRequest(
             kernel_type=self._inputs.kernel_type,
             version=version,
@@ -128,6 +145,7 @@ class KernelPullRequest:
             clean_build=self._inputs.clean_build,
             kernel_config=self._inputs.kernel_config,
             set_default=self._inputs.set_default,
+            features=features_list,
         )
 
         # Validate

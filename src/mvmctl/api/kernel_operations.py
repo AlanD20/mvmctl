@@ -189,6 +189,10 @@ class KernelOperation:
                 )
             spec = specs[0]
 
+            # Merge feature configs into the spec before building
+            if resolved.features:
+                spec = spec.with_enabled_features(resolved.features)
+
             kernel_service = KernelService(repo)
             fetch_result: KernelPullResult
 

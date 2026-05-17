@@ -207,6 +207,11 @@ def kernel_pull(
         "--config",
         help="Custom kernel config file to apply as a fragment",
     ),
+    features: str | None = typer.Option(
+        None,
+        "--features",
+        help="Comma-separated kernel features (kvm, nftables)",
+    ),
 ) -> None:
     """Pull or build a kernel.
 
@@ -244,6 +249,7 @@ def kernel_pull(
         clean_build=clean_build,
         kernel_config=kernel_config,
         set_default=set_default,
+        features=features or "",
     )
     console = Console()
     with console.status("", spinner="dots") as status:

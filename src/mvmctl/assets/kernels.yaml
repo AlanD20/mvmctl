@@ -38,11 +38,6 @@ kernel-official:
     # KVM guest optimisations
     - CONFIG_KVM_GUEST
     - CONFIG_PARAVIRT
-    # Nested virtualization (KVM host support for running VMs inside the guest)
-    - CONFIG_VIRTUALIZATION
-    - CONFIG_KVM
-    - CONFIG_KVM_INTEL
-    - CONFIG_KVM_AMD
     # Security / BPF / cgroups
     - CONFIG_SECURITY_LANDLOCK
     - CONFIG_BPF_SYSCALL
@@ -63,10 +58,25 @@ kernel-official:
     - CONFIG_VIRTIO_NET=y
     - CONFIG_SERIAL_8250_CONSOLE=y
     - CONFIG_KVM_GUEST=y
-    - CONFIG_VIRTUALIZATION=y
-    - CONFIG_KVM=y
-    - CONFIG_KVM_INTEL=y
-    - CONFIG_KVM_AMD=y
+  features:
+    kvm:
+      desc: "Nested KVM virtualization (host modules)"
+      configs:
+        - CONFIG_VIRTUALIZATION
+        - CONFIG_KVM
+        - CONFIG_KVM_INTEL
+        - CONFIG_KVM_AMD
+      requires:
+        - CONFIG_VIRTUALIZATION=y
+        - CONFIG_KVM=y
+        - CONFIG_KVM_INTEL=y
+        - CONFIG_KVM_AMD=y
+    nftables:
+      desc: "nftables NAT firewall backend"
+      configs:
+        - CONFIG_NFT_CHAIN_NAT
+        - CONFIG_NF_TABLES_INET
+        - CONFIG_NF_NAT_MASQUERADE
   options:
     version_discoveries:
       - "v6.x"
