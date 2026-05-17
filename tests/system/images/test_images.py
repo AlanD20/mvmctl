@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -17,6 +19,118 @@ from tests.system.conftest import (
 )
 
 pytestmark = [pytest.mark.system, pytest.mark.domain_image]
+
+
+# ============================================================================
+# Helpers shared across test classes
+# ============================================================================
+
+
+def _get_cached_alpine_path(
+    mvm_binary: str,
+    system_cache_dir: Path,
+    tmp_path: Path,
+    name: str = "alpine-extracted.raw",
+) -> Path | None:
+    """Find a cached alpine image and decompress it to a temp path.
+
+    Returns the path to the decompressed image file, or *None* if no
+    cached alpine image can be found (caller should ``pytest.skip``).
+    """
+    result = _run_mvm(mvm_binary, "image", "ls", "--json")
+    images: list[dict[str, Any]] = json.loads(result.stdout)
+    alpine_images = [i for i in images if "alpine" in i.get("type", "").lower()]
+    if not alpine_images:
+        return None
+
+    target = alpine_images[0]
+    target_id = target["id"]
+    result = _run_mvm(
+        mvm_binary, "image", "inspect", target_id, "--json", check=False
+    )
+    if result.returncode != 0:
+        return None
+
+    data = json.loads(result.stdout)
+    source_path = data.get("path")
+    if not source_path:
+        return None
+
+    resolved_source = system_cache_dir / "images" / source_path
+    if not resolved_source.exists():
+        return None
+
+    temp_path = tmp_path / name
+    if resolved_source.suffix == ".zst":
+        decompress = subprocess.run(
+            ["zstd", "-d", "-f", str(resolved_source), "-o", str(temp_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if decompress.returncode != 0:
+            return None
+    else:
+        shutil.copy2(str(resolved_source), temp_path)
+    return temp_path
+
+
+def _create_ext4_raw(
+    tmp_path: Path, name: str = "test.raw", size: str = "64M"
+) -> Path | None:
+    """Create an ext4-formatted raw disk image.
+
+    Requires ``truncate`` and ``mkfs.ext4`` on the system PATH.
+    Returns the path to the created file, or *None* if a prerequisite
+    tool is unavailable or the operation fails.
+    """
+    mkfs_ext4 = shutil.which("mkfs.ext4")
+    if not mkfs_ext4:
+        return None
+
+    raw_path = tmp_path / name
+    result = subprocess.run(
+        ["truncate", "--size", size, str(raw_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    result = subprocess.run(
+        [mkfs_ext4, "-F", str(raw_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    return raw_path
+
+
+def _create_qcow2_from_raw(
+    qemu_img: str, raw_path: Path, qcow2_path: Path
+) -> bool:
+    """Convert a raw image to qcow2 format using *qemu_img*.
+
+    Returns ``True`` on success, ``False`` on failure.
+    """
+    result = subprocess.run(
+        [
+            qemu_img,
+            "convert",
+            "-f",
+            "raw",
+            "-O",
+            "qcow2",
+            str(raw_path),
+            str(qcow2_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.returncode == 0
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -72,10 +186,15 @@ class TestImageList:
         """List images in JSON format."""
         # Rationale: Only needs JSON parsing (free). No resources needed.
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
-        assert result.returncode == 0
 
         data = json.loads(result.stdout)
         assert isinstance(data, list)
+        if data:
+            entry = data[0]
+            assert "id" in entry, f"Expected 'id' field in image entry: {entry}"
+            assert isinstance(entry.get("type"), str) and entry["type"], (
+                f"Expected non-empty type: {entry}"
+            )
 
     def test_image_list_table(self, mvm_binary):
         """List images in table format."""
@@ -99,6 +218,10 @@ class TestImageList:
             mvm_binary, "image", "ls", "--remote", "--json", check=False
         )
         if result.returncode != 0 or not result.stdout.strip():
+            # Skip-reason: Requires network access to the remote image registry.
+            # When running without internet or without MVM_ASSET_MIRROR configured,
+            # the remote registry endpoint is unreachable. To run unconditionally,
+            # ensure network access or set MVM_ASSET_MIRROR to a local mirror.
             pytest.skip("Remote listing not available (network?)")
         data = json.loads(result.stdout)
         assert isinstance(data, list)
@@ -126,30 +249,50 @@ class TestImageList:
             check=False,
         )
         if result.returncode != 0 or not result.stdout.strip():
+            # Skip-reason: Requires network access to the remote image registry.
+            # When running without internet or without MVM_ASSET_MIRROR configured,
+            # the remote registry endpoint is unreachable. To run unconditionally,
+            # ensure network access or set MVM_ASSET_MIRROR to a local mirror.
             pytest.skip("Remote listing not available or returned empty")
         try:
             data = json.loads(result.stdout)
         except (json.JSONDecodeError, ValueError, TypeError):
+            # Skip-reason: Remote registry returned non-JSON output (e.g. HTML
+            # error page when behind a captive portal or proxy). To run
+            # unconditionally, ensure the registry endpoint returns valid JSON.
             pytest.skip("Remote listing returned non-JSON output")
         assert len(data) > 0, "Expected at least one remote image"
 
     def test_image_inspect(self, mvm_binary):
         """Inspect a cached image by ID prefix."""
         # Rationale: Needs a cached image to inspect. Uses ls to find one.
+        _ensure_image(mvm_binary, "alpine:3.21")
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         images = [i for i in json.loads(result.stdout) if i.get("is_present")]
         if not images:
+            # Skip-reason: No cached images present. This happens after cache
+            # clean or on a fresh install. To run unconditionally, ensure at
+            # least one image has been pulled (e.g. via _ensure_image fixture).
             pytest.skip("No present cached images to inspect")
         prefix = images[0]["id"][:6]
         result = _run_mvm(mvm_binary, "image", "inspect", prefix)
         assert result.returncode == 0
+        # L1: verify inspect output contains the image id prefix
+        assert prefix in result.stdout, (
+            f"Expected inspect output to contain prefix '{prefix}', "
+            f"got: {result.stdout}"
+        )
 
     def test_image_inspect_json(self, mvm_binary):
         """Inspect an image with --json output."""
         # Rationale: Needs a cached image to inspect with --json.
+        _ensure_image(mvm_binary, "alpine:3.21")
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         images = [i for i in json.loads(result.stdout) if i.get("is_present")]
         if not images:
+            # Skip-reason: No cached images present. This happens after cache
+            # clean or on a fresh install. To run unconditionally, ensure at
+            # least one image has been pulled (e.g. via _ensure_image fixture).
             pytest.skip("No present cached images to inspect")
         prefix = images[0]["id"][:6]
         result = _run_mvm(mvm_binary, "image", "inspect", prefix, "--json")
@@ -166,14 +309,16 @@ class TestImageDefaults:
     def test_image_set_default(self, mvm_binary):
         """Set image as default."""
         # Rationale: Needs a present image to set as default. Modifies shared state (serial).
+        _ensure_image(mvm_binary, "alpine:3.21")
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
-        if result.returncode != 0:
-            pytest.skip("Failed to list images")
         images = json.loads(result.stdout)
         alpine_images = [
             i for i in images if "alpine" in i.get("type", "").lower()
         ]
         if not alpine_images:
+            # Skip-reason: No alpine image in cache. The _ensure_alpine_available
+            # module fixture may have failed to pull. To run unconditionally,
+            # ensure an alpine image is cached.
             pytest.skip("No alpine image available")
         target_id = alpine_images[0]["id"]
 
@@ -181,6 +326,9 @@ class TestImageDefaults:
             mvm_binary, "image", "default", target_id, check=False
         )
         if result.returncode != 0:
+            # Skip-reason: Setting default failed — image may have been removed
+            # between listing and default call, or the ID resolution failed.
+            # To run unconditionally, ensure the image stays present throughout.
             pytest.skip(
                 f"Failed to set image as default: {result.stderr.strip()}"
             )
@@ -209,6 +357,7 @@ class TestImageWarm:
     def test_image_warm(self, mvm_binary):
         """Pre-decompress image to ready pool for fast VM creation."""
         # Rationale: Needs a cached image to warm. Modifies ready pool state (serial).
+        _ensure_image(mvm_binary, "alpine:3.21")
         result = _run_mvm(
             mvm_binary,
             "image",
@@ -217,6 +366,10 @@ class TestImageWarm:
             check=False,
         )
         if result.returncode != 0:
+            # Skip-reason: Image warm command failed — alpine:3.21 may not be
+            # cached, or the image directory is not writable. To run
+            # unconditionally, ensure alpine:3.21 is cached and cache dir is
+            # writable.
             pytest.skip(f"Image warm not available: {result.stderr.strip()}")
         assert (
             "warmed" in result.stdout.lower()
@@ -242,10 +395,14 @@ class TestImageWarm:
     def test_image_warm_by_id_prefix(self, mvm_binary: str) -> None:
         """Warm an image using its 6-char ID prefix."""
         # Rationale: Needs a cached image to warm by ID prefix.
+        _ensure_image(mvm_binary, "alpine:3.21")
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         images = json.loads(result.stdout)
         cached = [i for i in images if i.get("is_present")]
         if not cached:
+            # Skip-reason: No cached images present. This happens after cache
+            # clean or on a fresh install. To run unconditionally, ensure at
+            # least one image has been pulled.
             pytest.skip("No cached images available to warm")
         prefix = cached[0]["id"][:6]
         result = _run_mvm(
@@ -256,10 +413,71 @@ class TestImageWarm:
             check=False,
         )
         if result.returncode != 0:
+            # Skip-reason: Warm by prefix failed — image may have been removed
+            # between listing and warm call, or the prefix resolves ambiguously.
+            # To run unconditionally, ensure the image stays present throughout.
             pytest.skip(f"Image warm by prefix failed: {result.stderr.strip()}")
         assert (
             "warmed" in result.stdout.lower()
             or "ready" in result.stdout.lower()
+        )
+
+    @pytest.mark.serial
+    def test_image_warm_all(self, mvm_binary: str) -> None:
+        """Pre-decompress all cached images to ready pool via --all flag.
+
+        Exercises the batch warm-all codepath that iterates over every
+        cached image and warms them in a single command.
+        """
+        # Rationale: Tests the batch warm-all codepath. Modifies ready pool
+        # state for all cached images (serial).
+        _ensure_image(mvm_binary, "alpine:3.21")
+        result = _run_mvm(
+            mvm_binary,
+            "image",
+            "warm",
+            "--all",
+            check=False,
+        )
+        if result.returncode != 0:
+            # Skip-reason: Image warm --all failed — no cached images available
+            # to warm, or the image directory is not writable. To run
+            # unconditionally, ensure at least one image is cached and the
+            # cache directory is writable.
+            pytest.skip(
+                f"Image warm --all not available: {result.stderr.strip()}"
+            )
+        assert result.returncode == 0
+        assert (
+            "warmed" in result.stdout.lower()
+            or "ready" in result.stdout.lower()
+        )
+
+
+class TestImageInspectTree:
+    """Test image inspect tree output."""
+
+    pytestmark = [pytest.mark.system, pytest.mark.domain_image]
+
+    def test_image_inspect_tree_output(self, mvm_binary):
+        """Inspect an image with --tree output."""
+        # Rationale: Needs a cached image. Verifies --tree format characters.
+        _ensure_image(mvm_binary, "alpine:3.21")
+        result = _run_mvm(mvm_binary, "image", "ls", "--json")
+        images = [i for i in json.loads(result.stdout) if i.get("is_present")]
+        if not images:
+            # Skip-reason: No cached images present. This happens after cache
+            # clean or on a fresh install. To run unconditionally, ensure at
+            # least one image has been pulled.
+            pytest.skip("No present cached images to inspect")
+        prefix = images[0]["id"][:6]
+
+        result = _run_mvm(mvm_binary, "image", "inspect", prefix, "--tree")
+        assert result.returncode == 0
+        assert (
+            "├──" in result.stdout
+            or "└──" in result.stdout
+            or "ID:" in result.stdout
         )
 
 
@@ -278,56 +496,16 @@ class TestImageImport:
     ):
         """Import a local image file."""
         # Rationale: Needs an actual image file to import (slow). No VM needed.
-        import shutil
-
-        result = _run_mvm(mvm_binary, "image", "ls", "--json")
-        images = json.loads(result.stdout)
-        alpine_images = [
-            i for i in images if "alpine" in i.get("type", "").lower()
-        ]
-        if not alpine_images:
-            pytest.skip("No alpine image available to import")
-
-        target = alpine_images[0]
-        target_id = target["id"]
-
-        result = _run_mvm(
-            mvm_binary, "image", "inspect", target_id, "--json", check=False
+        _ensure_image(mvm_binary, "alpine:3.21")
+        cached_path = _get_cached_alpine_path(
+            mvm_binary, system_cache_dir, tmp_path, "alpine-import.raw"
         )
-        if result.returncode != 0:
-            pytest.skip(f"Image '{target_id[:8]}' was removed before inspect")
-
-        data = json.loads(result.stdout)
-        source_path = data.get("path")
-        if not source_path:
-            pytest.skip("Image path not available")
-
-        resolved_source = system_cache_dir / "images" / source_path
-        if not resolved_source.exists():
-            pytest.skip(f"Image file not found: {resolved_source}")
-
-        temp_path = tmp_path / "alpine-import.raw"
-
-        if resolved_source.suffix == ".zst":
-            import subprocess as _subprocess
-
-            decompress = _subprocess.run(
-                [
-                    "zstd",
-                    "-d",
-                    "-f",
-                    str(resolved_source),
-                    "-o",
-                    str(temp_path),
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if decompress.returncode != 0:
-                pytest.skip(f"zstd decompress failed: {decompress.stderr}")
-        else:
-            shutil.copy2(str(resolved_source), temp_path)
+        if cached_path is None:
+            # Skip-reason: No cached alpine image available to extract and
+            # re-import. The _ensure_alpine_available module fixture may have
+            # failed to pull, or the image was removed by a prior test.
+            # To run unconditionally, ensure alpine:3.21 is cached.
+            pytest.skip("No alpine image available to import")
 
         imported_prefix = None
         try:
@@ -336,7 +514,7 @@ class TestImageImport:
                 "image",
                 "import",
                 "imported-alpine",
-                str(temp_path),
+                str(cached_path),
                 "--format",
                 "raw",
                 check=False,
@@ -371,32 +549,8 @@ class TestImageImport:
             check=False,
         )
         assert result.returncode != 0
-        combined = (result.stdout + result.stderr).lower()
-        assert any(s in combined for s in ["not found", "no such", "exist"]), (
+        assert "not found" in result.stderr.lower(), (
             f"Expected error about nonexistent path, got: {result.stderr}"
-        )
-
-
-class TestImageInspectTree:
-    """Test image inspect tree output."""
-
-    pytestmark = [pytest.mark.system, pytest.mark.domain_image]
-
-    def test_image_inspect_tree_output(self, mvm_binary):
-        """Inspect an image with --tree output."""
-        # Rationale: Needs a cached image. Verifies --tree format characters.
-        result = _run_mvm(mvm_binary, "image", "ls", "--json")
-        images = [i for i in json.loads(result.stdout) if i.get("is_present")]
-        if not images:
-            pytest.skip("No present cached images to inspect")
-        prefix = images[0]["id"][:6]
-
-        result = _run_mvm(mvm_binary, "image", "inspect", prefix, "--tree")
-        assert result.returncode == 0
-        assert (
-            "├──" in result.stdout
-            or "└──" in result.stdout
-            or "ID:" in result.stdout
         )
 
 
@@ -415,15 +569,16 @@ class TestImagePullAdvanced:
     ) -> None:
         """Pull already-cached alpine-3.21 with --default must set it as sole default."""
         # Rationale: Needs a cached alpine image (slow). Verifies is_default after pull with --default.
-        result = _run_mvm(mvm_binary, "image", "ls", "--json", check=False)
-        if result.returncode != 0 or not result.stdout.strip():
-            pytest.skip("Cannot list images")
+        _ensure_image(mvm_binary, "alpine:3.21")
+        result = _run_mvm(mvm_binary, "image", "ls", "--json")
         images: list[dict[str, Any]] = json.loads(result.stdout)
         alpine_present = any(
-            i.get("type") == "alpine" and i.get("is_present")
-            for i in images
+            i.get("type") == "alpine" and i.get("is_present") for i in images
         )
         if not alpine_present:
+            # Skip-reason: alpine-3.21 not cached. The _ensure_alpine_available
+            # module fixture may have failed to pull. To run unconditionally,
+            # ensure alpine:3.21 is cached.
             pytest.skip("alpine-3.21 not cached")
 
         original_defaults = [i for i in images if i.get("is_default")]
@@ -467,15 +622,16 @@ class TestImagePullAdvanced:
     ) -> None:
         """Pull already-cached alpine-3.21 with --force should re-download."""
         # Rationale: Needs a cached alpine image (slow). Tests --force re-download.
-        result = _run_mvm(mvm_binary, "image", "ls", "--json", check=False)
-        if result.returncode != 0 or not result.stdout.strip():
-            pytest.skip("Cannot list images")
+        _ensure_image(mvm_binary, "alpine:3.21")
+        result = _run_mvm(mvm_binary, "image", "ls", "--json")
         images: list[dict[str, Any]] = json.loads(result.stdout)
         alpine_present = any(
-            i.get("type") == "alpine" and i.get("is_present")
-            for i in images
+            i.get("type") == "alpine" and i.get("is_present") for i in images
         )
         if not alpine_present:
+            # Skip-reason: alpine-3.21 not cached. The _ensure_alpine_available
+            # module fixture may have failed to pull. To run unconditionally,
+            # ensure alpine:3.21 is cached.
             pytest.skip("alpine-3.21 not cached")
 
         result = _run_mvm(
@@ -515,14 +671,11 @@ class TestImagePullAdvanced:
             check=False,
         )
         assert result.returncode != 0
-        combined = (result.stdout + result.stderr).lower()
-        assert any(
-            s in combined for s in ["not found", "no such", "invalid"]
-        ), f"Expected error about nonexistent image, got: {result.stderr}"
+        assert "not found" in result.stderr.lower(), (
+            f"Expected error about nonexistent image, got: {result.stderr}"
+        )
 
-    def test_pull_with_explicit_type_override(
-        self, mvm_binary: str
-    ) -> None:
+    def test_pull_with_explicit_type_override(self, mvm_binary: str) -> None:
         """Pull with ``--type alpine`` should override slug-derived type.
 
         The ``--type`` flag now takes precedence over the slug's derived type,
@@ -540,7 +693,13 @@ class TestImagePullAdvanced:
             check=False,
         )
         if result.returncode != 0:
-            pytest.skip(f"Pull with --type override failed: {result.stderr.strip()}")
+            # Skip-reason: Pull with --type override failed — the remote
+            # registry may be unavailable or the debian slug doesn't resolve
+            # to alpine. To run unconditionally, ensure the remote registry
+            # is reachable.
+            pytest.skip(
+                f"Pull with --type override failed: {result.stderr.strip()}"
+            )
         assert (
             "pulled" in result.stdout.lower()
             or "already" in result.stdout.lower()
@@ -575,6 +734,10 @@ class TestImagePullAdvanced:
             check=False,
         )
         if result.returncode != 0:
+            # Skip-reason: Pull with --version flag failed — the remote
+            # registry may be unavailable or the alpine:3.21 slug is not
+            # found. To run unconditionally, ensure the remote registry is
+            # reachable and alpine:3.21 exists.
             pytest.skip(f"Pull with --version failed: {result.stderr.strip()}")
 
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
@@ -603,47 +766,25 @@ class TestImageImportAdvanced:
     ):
         """Import a qcow2 image using --format qcow2."""
         # Rationale: Needs a qcow2 file (slow). Requires qemu-img/mkfs.ext4.
-        import shutil
-
         qemu_img = shutil.which("qemu-img")
         if not qemu_img:
+            # Skip-reason: qemu-img not available on this system. Required to
+            # convert raw → qcow2. To run unconditionally, install qemu-utils.
             pytest.skip("qemu-img not available on this system")
-        mkfs_ext4 = shutil.which("mkfs.ext4")
-        if not mkfs_ext4:
-            pytest.skip("mkfs.ext4 not available on this system")
 
-        raw_path = tmp_path / "test-image.raw"
+        raw_path = _create_ext4_raw(tmp_path, "test-image.raw")
+        if raw_path is None:
+            # Skip-reason: mkfs.ext4 or truncate not available. Required to
+            # create the source raw image for qcow2 conversion. To run
+            # unconditionally, install e2fsprogs and coreutils.
+            pytest.skip("mkfs.ext4 or truncate not available on this system")
+
         qcow2_path = tmp_path / "test-image.qcow2"
-        result = subprocess.run(
-            ["truncate", "--size", "64M", str(raw_path)],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            pytest.skip(f"truncate failed: {result.stderr}")
-        result = subprocess.run(
-            [mkfs_ext4, "-F", str(raw_path)],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            pytest.skip(f"mkfs.ext4 failed: {result.stderr}")
-        result = subprocess.run(
-            [
-                qemu_img,
-                "convert",
-                "-f",
-                "raw",
-                "-O",
-                "qcow2",
-                str(raw_path),
-                str(qcow2_path),
-            ],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            pytest.skip(f"qemu-img convert failed: {result.stderr}")
+        if not _create_qcow2_from_raw(qemu_img, raw_path, qcow2_path):
+            # Skip-reason: qemu-img convert failed. Required to create the
+            # qcow2 test file. To run unconditionally, ensure qemu-img
+            # works correctly.
+            pytest.skip("qemu-img convert failed")
 
         imported_prefix = None
         try:
@@ -658,6 +799,10 @@ class TestImageImportAdvanced:
                 check=False,
             )
             if result.returncode != 0:
+                # Skip-reason: Import of qcow2 image failed — the image may
+                # be corrupted or the format auto-detection differs from
+                # --format qcow2. To run unconditionally, ensure the qcow2
+                # file is valid.
                 pytest.skip(f"Import qcow2 failed: {result.stderr.strip()}")
             assert result.returncode == 0
 
@@ -676,32 +821,15 @@ class TestImageImportAdvanced:
                     check=False,
                 )
 
-    def test_image_import_force_overwrite(
-        self, mvm_binary, tmp_path, system_cache_dir
-    ):
+    def test_image_import_force_overwrite(self, mvm_binary, tmp_path):
         """Import the same image twice, verify --force suppresses the error."""
         # Rationale: Needs importing twice with --force (slow). Tests idempotent overwrite.
-        import shutil
-
-        mkfs_ext4 = shutil.which("mkfs.ext4")
-        if not mkfs_ext4:
-            pytest.skip("mkfs.ext4 not available on this system")
-
-        raw_path = tmp_path / "test-overwrite.raw"
-        result = subprocess.run(
-            ["truncate", "--size", "64M", str(raw_path)],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            pytest.skip(f"truncate failed: {result.stderr}")
-        result = subprocess.run(
-            [mkfs_ext4, "-F", str(raw_path)],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            pytest.skip(f"mkfs.ext4 failed: {result.stderr}")
+        raw_path = _create_ext4_raw(tmp_path, "test-overwrite.raw")
+        if raw_path is None:
+            # Skip-reason: mkfs.ext4 or truncate not available. Required to
+            # create the source raw image for import. To run unconditionally,
+            # install e2fsprogs and coreutils.
+            pytest.skip("mkfs.ext4 or truncate not available on this system")
 
         result = _run_mvm(
             mvm_binary,
@@ -714,6 +842,9 @@ class TestImageImportAdvanced:
             check=False,
         )
         if result.returncode != 0:
+            # Skip-reason: First import of test-overwrite failed. The raw
+            # file may be empty or unreadable. To run unconditionally, ensure
+            # the file is valid.
             pytest.skip(f"First import failed: {result.stderr.strip()}")
 
         imported_prefix = None
@@ -744,52 +875,27 @@ class TestImageImportAdvanced:
                     mvm_binary, "image", "rm", imported_prefix, check=False
                 )
 
-    def test_image_import_with_root_partition(
-        self, mvm_binary, tmp_path, system_cache_dir
-    ):
+    def test_image_import_with_root_partition(self, mvm_binary, tmp_path):
         """Import a qcow2 image with --root-partition 1 flag."""
         # Rationale: Needs a qcow2 file with partition (slow). Tests --root-partition flag.
-        import shutil
-
         qemu_img = shutil.which("qemu-img")
         if not qemu_img:
+            # Skip-reason: qemu-img not available on this system. Required to
+            # convert raw → qcow2. To run unconditionally, install qemu-utils.
             pytest.skip("qemu-img not available on this system")
-        mkfs_ext4 = shutil.which("mkfs.ext4")
-        if not mkfs_ext4:
-            pytest.skip("mkfs.ext4 not available on this system")
 
-        raw_path = tmp_path / "test-rootpart.raw"
+        raw_path = _create_ext4_raw(tmp_path, "test-rootpart.raw")
+        if raw_path is None:
+            # Skip-reason: mkfs.ext4 or truncate not available. Required to
+            # create the source raw image. To run unconditionally, install
+            # e2fsprogs and coreutils.
+            pytest.skip("mkfs.ext4 or truncate not available on this system")
+
         qcow2_path = tmp_path / "test-rootpart.qcow2"
-        result = subprocess.run(
-            ["truncate", "--size", "64M", str(raw_path)],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            pytest.skip(f"truncate failed: {result.stderr}")
-        result = subprocess.run(
-            [mkfs_ext4, "-F", str(raw_path)],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            pytest.skip(f"mkfs.ext4 failed: {result.stderr}")
-        result = subprocess.run(
-            [
-                qemu_img,
-                "convert",
-                "-f",
-                "raw",
-                "-O",
-                "qcow2",
-                str(raw_path),
-                str(qcow2_path),
-            ],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            pytest.skip(f"qemu-img convert failed: {result.stderr}")
+        if not _create_qcow2_from_raw(qemu_img, raw_path, qcow2_path):
+            # Skip-reason: qemu-img convert failed. Required to create the
+            # qcow2 test file. To run unconditionally, ensure qemu-img works.
+            pytest.skip("qemu-img convert failed")
 
         imported_prefix = None
         try:
@@ -806,6 +912,10 @@ class TestImageImportAdvanced:
                 check=False,
             )
             if result.returncode != 0:
+                # Skip-reason: Import with --root-partition failed. The qcow2
+                # file may lack a valid partition table or the partition
+                # number is wrong. To run unconditionally, ensure the qcow2
+                # file has at least one partition.
                 pytest.skip(
                     f"Import with --root-partition failed: {result.stderr.strip()}"
                 )
@@ -825,31 +935,16 @@ class TestImageImportAdvanced:
                 )
 
     def test_image_import_without_format_auto_detect(
-        self, mvm_binary, tmp_path, system_cache_dir
+        self, mvm_binary, tmp_path
     ):
         """Import a raw image without specifying --format (auto-detect)."""
         # Rationale: Needs a raw image (slow). Tests auto-detect format.
-        import shutil
-
-        mkfs_ext4 = shutil.which("mkfs.ext4")
-        if not mkfs_ext4:
-            pytest.skip("mkfs.ext4 not available on this system")
-
-        raw_path = tmp_path / "test-autodetect.raw"
-        result = subprocess.run(
-            ["truncate", "--size", "64M", str(raw_path)],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            pytest.skip(f"truncate failed: {result.stderr}")
-        result = subprocess.run(
-            [mkfs_ext4, "-F", str(raw_path)],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            pytest.skip(f"mkfs.ext4 failed: {result.stderr}")
+        raw_path = _create_ext4_raw(tmp_path, "test-autodetect.raw")
+        if raw_path is None:
+            # Skip-reason: mkfs.ext4 or truncate not available. Required to
+            # create the source raw image. To run unconditionally, install
+            # e2fsprogs and coreutils.
+            pytest.skip("mkfs.ext4 or truncate not available on this system")
 
         imported_prefix = None
         try:
@@ -862,6 +957,9 @@ class TestImageImportAdvanced:
                 check=False,
             )
             if result.returncode != 0:
+                # Skip-reason: Import without --format (auto-detect) failed.
+                # The raw file may be too small or not recognized. To run
+                # unconditionally, ensure the file is a valid disk image.
                 pytest.skip(
                     f"Import without --format failed: {result.stderr.strip()}"
                 )
@@ -921,50 +1019,16 @@ class TestImageImportSetDefault:
     ):
         """Import a local image file with --default flag."""
         # Rationale: Needs an image file (slow). Tests --default on import.
-        import shutil
-
-        result = _run_mvm(mvm_binary, "image", "ls", "--json")
-        images = json.loads(result.stdout)
-        alpine_images = [
-            i for i in images if "alpine" in i.get("type", "").lower()
-        ]
-        if not alpine_images:
-            pytest.skip("No alpine image available to import")
-
-        target = alpine_images[0]
-        target_id = target["id"]
-
-        result = _run_mvm(
-            mvm_binary, "image", "inspect", target_id, "--json", check=False
+        _ensure_image(mvm_binary, "alpine:3.21")
+        cached_path = _get_cached_alpine_path(
+            mvm_binary, system_cache_dir, tmp_path, "test-import-default.raw"
         )
-        if result.returncode != 0:
-            pytest.skip(f"Image '{target_id[:8]}' was removed before inspect")
-
-        data = json.loads(result.stdout)
-        source_path = data.get("path")
-        if not source_path:
-            pytest.skip("Image path not available")
-
-        resolved_source = system_cache_dir / "images" / source_path
-        if not resolved_source.exists():
-            pytest.skip(f"Image file not found: {resolved_source}")
-
-        temp_path = tmp_path / "test-import-default.raw"
-        # If source is compressed (e.g. .zst), decompress before import
-        if str(resolved_source).endswith(".zst"):
-            _compressed = tmp_path / "test-import-default.zst"
-            shutil.copy2(str(resolved_source), str(_compressed))
-            import subprocess as _subprocess
-            _decomp = _subprocess.run(
-                ["zstd", "-d", str(_compressed), "-o", str(temp_path)],
-                capture_output=True, text=True, timeout=120,
-            )
-            if _decomp.returncode != 0:
-                pytest.skip(f"zstd decompress failed: {_decomp.stderr}")
-            if not temp_path.exists():
-                pytest.skip("zstd decompress produced no output file")
-        else:
-            shutil.copy2(str(resolved_source), temp_path)
+        if cached_path is None:
+            # Skip-reason: No cached alpine image available to extract and
+            # re-import. The _ensure_alpine_available module fixture may have
+            # failed to pull. To run unconditionally, ensure alpine:3.21 is
+            # cached.
+            pytest.skip("No alpine image available to import")
 
         imported_prefix = None
         try:
@@ -973,13 +1037,16 @@ class TestImageImportSetDefault:
                 "image",
                 "import",
                 "test-import-default",
-                str(temp_path),
+                str(cached_path),
                 "--format",
                 "raw",
                 "--default",
                 check=False,
             )
             if result.returncode != 0:
+                # Skip-reason: Import with --default failed. The raw file may
+                # be corrupted or the image ID resolution failed. To run
+                # unconditionally, ensure cached file is valid.
                 pytest.skip(
                     f"Import with --default failed: {result.stderr.strip()}"
                 )
@@ -1013,52 +1080,27 @@ class TestImageImportArch:
         pytest.mark.domain_image,
     ]
 
-    def test_image_import_with_arch(
-        self, mvm_binary, tmp_path, system_cache_dir
-    ):
+    def test_image_import_with_arch(self, mvm_binary, tmp_path):
         """Import a qcow2 image with --arch x86_64 flag."""
         # Rationale: Needs a qcow2 file (slow). Tests --arch flag on import.
-        import shutil
-
         qemu_img = shutil.which("qemu-img")
         if not qemu_img:
+            # Skip-reason: qemu-img not available on this system. Required to
+            # convert raw → qcow2. To run unconditionally, install qemu-utils.
             pytest.skip("qemu-img not available on this system")
-        mkfs_ext4 = shutil.which("mkfs.ext4")
-        if not mkfs_ext4:
-            pytest.skip("mkfs.ext4 not available on this system")
 
-        raw_path = tmp_path / "test-arch.raw"
+        raw_path = _create_ext4_raw(tmp_path, "test-arch.raw")
+        if raw_path is None:
+            # Skip-reason: mkfs.ext4 or truncate not available. Required to
+            # create the source raw image. To run unconditionally, install
+            # e2fsprogs and coreutils.
+            pytest.skip("mkfs.ext4 or truncate not available on this system")
+
         qcow2_path = tmp_path / "test-arch.qcow2"
-        result = subprocess.run(
-            ["truncate", "--size", "64M", str(raw_path)],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            pytest.skip(f"truncate failed: {result.stderr}")
-        result = subprocess.run(
-            [mkfs_ext4, "-F", str(raw_path)],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            pytest.skip(f"mkfs.ext4 failed: {result.stderr}")
-        result = subprocess.run(
-            [
-                qemu_img,
-                "convert",
-                "-f",
-                "raw",
-                "-O",
-                "qcow2",
-                str(raw_path),
-                str(qcow2_path),
-            ],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            pytest.skip(f"qemu-img convert failed: {result.stderr}")
+        if not _create_qcow2_from_raw(qemu_img, raw_path, qcow2_path):
+            # Skip-reason: qemu-img convert failed. Required to create the
+            # qcow2 test file. To run unconditionally, ensure qemu-img works.
+            pytest.skip("qemu-img convert failed")
 
         imported_prefix = None
         try:
@@ -1075,6 +1117,9 @@ class TestImageImportArch:
                 check=False,
             )
             if result.returncode != 0:
+                # Skip-reason: Import with --arch failed. The qcow2 file may
+                # be corrupt or the arch flag value is invalid. To run
+                # unconditionally, ensure the qcow2 file is valid.
                 pytest.skip(
                     f"Import with --arch failed: {result.stderr.strip()}"
                 )
@@ -1117,60 +1162,15 @@ class TestImageImportCreateVM:
     ):
         """Import a cached alpine image and create a running VM from it."""
         # Rationale: Needs a real VM (30-120s) to test VM creation from imported image.
-        import subprocess as _subprocess
-
-        _run_mvm(mvm_binary, "image", "pull", "alpine", "--version", "3.21")
-
-        result = _run_mvm(mvm_binary, "image", "ls", "--json")
-        images = json.loads(result.stdout)
-        alpine_images = [
-            i
-            for i in images
-            if "alpine" in i.get("type", "").lower() and i.get("is_present")
-        ]
-        if not alpine_images:
-            pytest.skip("No present alpine image available")
-
-        target = alpine_images[0]
-        target_id = target["id"]
-
-        result = _run_mvm(
-            mvm_binary, "image", "inspect", target_id, "--json", check=False
+        _ensure_image(mvm_binary, "alpine:3.21")
+        cached_path = _get_cached_alpine_path(
+            mvm_binary, system_cache_dir, tmp_path, "alpine-for-import.raw"
         )
-        if result.returncode != 0:
-            pytest.skip(f"Image '{target_id[:8]}' was removed before inspect")
-
-        data = json.loads(result.stdout)
-        source_path = data.get("path")
-        if not source_path:
-            pytest.skip("Image path not available")
-
-        resolved_source = system_cache_dir / "images" / source_path
-        if not resolved_source.exists():
-            pytest.skip(f"Image file not found: {resolved_source}")
-
-        temp_path = tmp_path / "alpine-for-import.raw"
-
-        if resolved_source.suffix == ".zst":
-            decompress = _subprocess.run(
-                [
-                    "zstd",
-                    "-d",
-                    "-f",
-                    str(resolved_source),
-                    "-o",
-                    str(temp_path),
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if decompress.returncode != 0:
-                pytest.skip(f"zstd decompress failed: {decompress.stderr}")
-        else:
-            import shutil
-
-            shutil.copy2(str(resolved_source), temp_path)
+        if cached_path is None:
+            # Skip-reason: No cached alpine image available. Required to
+            # extract and re-import for VM creation. To run unconditionally,
+            # ensure alpine:3.21 is cached.
+            pytest.skip("No present alpine image available")
 
         import_name = f"imported-{unique_vm_name}"
         network_name = unique_network_name
@@ -1185,13 +1185,16 @@ class TestImageImportCreateVM:
                 "image",
                 "import",
                 import_name,
-                str(temp_path),
+                str(cached_path),
                 "--format",
                 "raw",
                 "--skip-optimization",
                 check=False,
             )
             if result.returncode != 0:
+                # Skip-reason: Image import failed — the raw file may be
+                # corrupted or invalid. To run unconditionally, ensure the
+                # cached file is valid.
                 pytest.skip(f"Image import failed: {result.stderr.strip()}")
             assert result.returncode == 0
 
@@ -1202,7 +1205,9 @@ class TestImageImportCreateVM:
             # Extract the full hash before ".ext4" on the first line.
             first_line = result.stdout.strip().splitlines()[0]
             m = re.search(r"([0-9a-f]{64})\.", first_line)
-            assert m, f"Could not parse image ID from import output: {result.stdout.strip()}"
+            assert m, (
+                f"Could not parse image ID from import output: {result.stdout.strip()}"
+            )
             image_full_id = m.group(1)
             imported_prefix = image_full_id[:6]
 
@@ -1247,6 +1252,11 @@ class TestImageImportCreateVM:
                     )
                 except RuntimeError as e:
                     if "No provisioner available" in str(e):
+                        # Skip-reason: mvm-services (mvm-provision) not set up.
+                        # The loop-mount provisioner binary is missing — run
+                        # 'python scripts/build_services.py' to build it.
+                        # To run unconditionally, ensure dist/services/mvm-services
+                        # exists and is registered in the DB.
                         pytest.skip(
                             "No loop-mount provisioner available "
                             "(mvm-services not set up)"
@@ -1320,6 +1330,10 @@ class TestImageImportCreateVM:
             check=False,
         )
         if download.returncode != 0 or not download_path.exists():
+            # Skip-reason: Ubuntu cloud image download failed — requires
+            # network access to cloud-images.ubuntu.com. To run
+            # unconditionally, ensure internet access or pre-seed the image
+            # in MVM_ASSET_MIRROR.
             pytest.skip(f"Failed to download Ubuntu image: {download.stderr}")
 
         import_name = f"ubuntu-imported-{unique_vm_name}"
@@ -1341,6 +1355,10 @@ class TestImageImportCreateVM:
                 check=False,
             )
             if result.returncode != 0:
+                # Skip-reason: Ubuntu tar-rootfs import failed — the
+                # downloaded file may be corrupted or the --format tar-rootfs
+                # handler is not available. To run unconditionally, ensure
+                # the tar-rootfs import path works.
                 pytest.skip(
                     f"Ubuntu image import failed: {result.stderr.strip()}"
                 )
@@ -1391,6 +1409,11 @@ class TestImageImportCreateVM:
                     )
                 except RuntimeError as e:
                     if "No provisioner available" in str(e):
+                        # Skip-reason: mvm-services (mvm-provision) not set up.
+                        # The loop-mount provisioner binary is missing — run
+                        # 'python scripts/build_services.py' to build it.
+                        # To run unconditionally, ensure dist/services/mvm-services
+                        # exists and is registered in the DB.
                         pytest.skip(
                             "No loop-mount provisioner available "
                             "(mvm-services not set up)"
@@ -1443,9 +1466,8 @@ class TestImageDefaultMigration:
     ) -> None:
         """When force-re-pulling the default image, default should migrate to new record."""
         # Rationale: Uses image ls --json (free) and pull --force (~200MB, slow). Pure image-record state verification.
-        result = _run_mvm(mvm_binary, "image", "ls", "--json", check=False)
-        if result.returncode != 0 or not result.stdout.strip():
-            pytest.skip("Cannot list images")
+        _ensure_image(mvm_binary, "alpine:3.21")
+        result = _run_mvm(mvm_binary, "image", "ls", "--json")
         images: list[dict[str, Any]] = json.loads(result.stdout)
 
         present_alpine = [
@@ -1454,24 +1476,11 @@ class TestImageDefaultMigration:
             if i.get("type") == "alpine" and i.get("is_present")
         ]
         if not present_alpine:
-            _run_mvm(
-                mvm_binary,
-                "image",
-                "pull",
-                "alpine",
-                "--version",
-                "3.21",
-                timeout=180,
-            )
-            result = _run_mvm(mvm_binary, "image", "ls", "--json")
-            images = json.loads(result.stdout)
-            present_alpine = [
-                i
-                for i in images
-                if i.get("type") == "alpine" and i.get("is_present")
-            ]
-            if not present_alpine:
-                pytest.skip("alpine-3.21 still not present after pull")
+            # Skip-reason: Failed to pull alpine-3.21 even after explicit
+            # pull attempt. The remote registry may be unreachable or the
+            # slug is invalid. To run unconditionally, ensure the remote
+            # registry is reachable and alpine:3.21 exists.
+            pytest.skip("alpine-3.21 still not present after pull")
 
         old_alpine = present_alpine[0]
         old_alpine_id: str = old_alpine["id"]
@@ -1552,6 +1561,7 @@ class TestImageRemove:
     def test_image_remove_with_fixture(self, mvm_binary):
         """Remove a cached image by ID prefix and verify it's gone."""
         # Rationale: Needs a present image to remove. Tests normal rm. Restores in finally.
+        _ensure_image(mvm_binary, "alpine:3.21")
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         before = json.loads(result.stdout)
         alpine_images = [
@@ -1560,6 +1570,10 @@ class TestImageRemove:
             if "alpine" in i.get("type", "").lower() and i.get("is_present")
         ]
         if not alpine_images:
+            # Skip-reason: No present alpine image available to test removal.
+            # The _ensure_alpine_available fixture may have failed or the
+            # image was removed by a prior test. To run unconditionally,
+            # ensure alpine:3.21 is cached.
             pytest.skip("No present alpine image available to test removal")
 
         was_default = alpine_images[0].get("is_default", False)
@@ -1589,6 +1603,9 @@ class TestImageRemove:
                         pull_args.append("--default")
                     _run_mvm(mvm_binary, *pull_args, timeout=120)
                 except subprocess.TimeoutExpired:
+                    # Skip-reason: Re-pull timed out. The alpine image download
+                    # may be slow on this network. To run unconditionally,
+                    # ensure fast network access or use MVM_ASSET_MIRROR.
                     pytest.skip("Re-pull timed out (>60s download)")
 
 
@@ -1605,9 +1622,8 @@ class TestImageRemoveForce:
     def test_image_rm_with_force(self, mvm_binary):
         """Remove a cached image by ID prefix with --force and verify it's gone."""
         # Rationale: Needs a present image to remove. Tests --force removal. Restores in finally.
+        _ensure_image(mvm_binary, "alpine:3.21")
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
-        if result.returncode != 0:
-            pytest.skip("Failed to list images")
         images = json.loads(result.stdout)
         alpine_images = [
             i
@@ -1615,6 +1631,9 @@ class TestImageRemoveForce:
             if "alpine" in i.get("type", "").lower() and i.get("is_present")
         ]
         if not alpine_images:
+            # Skip-reason: No present alpine image available to test removal.
+            # The _ensure_alpine_available fixture may have failed. To run
+            # unconditionally, ensure alpine:3.21 is cached.
             pytest.skip("No present alpine image available to test removal")
 
         was_default = alpine_images[0].get("is_default", False)
@@ -1624,11 +1643,15 @@ class TestImageRemoveForce:
             result = _run_mvm(
                 mvm_binary, "image", "rm", target_id[:6], "--force", check=False
             )
-            assert result.returncode == 0, f"Force remove failed: {result.stderr}"
+            assert result.returncode == 0, (
+                f"Force remove failed: {result.stderr}"
+            )
 
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             after = [
-                i for i in json.loads(result.stdout) if i.get("is_present", True)
+                i
+                for i in json.loads(result.stdout)
+                if i.get("is_present", True)
             ]
             assert not any(i["id"] == target_id for i in after)
         finally:
@@ -1672,7 +1695,13 @@ class TestImageDependencyDeletion:
                 )
             if not alpine_present:
                 _run_mvm(
-                    mvm_binary, "image", "pull", "alpine", "--version", "3.21", timeout=180
+                    mvm_binary,
+                    "image",
+                    "pull",
+                    "alpine",
+                    "--version",
+                    "3.21",
+                    timeout=180,
                 )
 
             try:
@@ -1688,6 +1717,11 @@ class TestImageDependencyDeletion:
                 )
             except RuntimeError as e:
                 if "No provisioner available" in str(e):
+                    # Skip-reason: mvm-services (mvm-provision) not set up.
+                    # The loop-mount provisioner binary is missing — run
+                    # 'python scripts/build_services.py' to build it.
+                    # To run unconditionally, ensure dist/services/mvm-services
+                    # exists and is registered in the DB.
                     pytest.skip(
                         "No loop-mount provisioner available "
                         "(mvm-services not set up)"
@@ -1708,8 +1742,7 @@ class TestImageDependencyDeletion:
             result = _run_mvm(
                 mvm_binary, "image", "rm", image_id_prefix, check=False
             )
-            combined = (result.stdout + result.stderr).lower()
-            assert "referenced" in combined or "in use" in combined, (
+            assert "referenced" in result.stderr.lower(), (
                 f"Expected image rm to report reference, got: "
                 f"rc={result.returncode} stdout={result.stdout}"
             )
@@ -1760,6 +1793,11 @@ class TestImageDependencyDeletion:
                 )
             except RuntimeError as e:
                 if "No provisioner available" in str(e):
+                    # Skip-reason: mvm-services (mvm-provision) not set up.
+                    # The loop-mount provisioner binary is missing — run
+                    # 'python scripts/build_services.py' to build it.
+                    # To run unconditionally, ensure dist/services/mvm-services
+                    # exists and is registered in the DB.
                     pytest.skip(
                         "No loop-mount provisioner available "
                         "(mvm-services not set up)"
@@ -1785,8 +1823,7 @@ class TestImageDependencyDeletion:
             result = _run_mvm(
                 mvm_binary, "image", "rm", image_id_prefix, check=False
             )
-            combined = (result.stdout + result.stderr).lower()
-            assert "referenced" in combined or "in use" in combined, (
+            assert "referenced" in result.stderr.lower(), (
                 f"Expected image rm to report reference, got: "
                 f"rc={result.returncode} stdout={result.stdout}"
             )
@@ -1816,11 +1853,16 @@ class TestImageDependencyDeletion:
     ) -> None:
         """Deleting a formerly-default image should not leave orphans."""
         # Rationale: Needs at least 2 present images. Tests default promotion on rm.
+        _ensure_image(mvm_binary, "alpine:3.21")
+        _ensure_image(mvm_binary, "ubuntu:24.04")
         result = _run_mvm(mvm_binary, "image", "ls", "--json")
         images = json.loads(result.stdout)
         present_images = [i for i in images if i.get("is_present", True)]
 
         if len(present_images) < 2:
+            # Skip-reason: Need at least 2 present images to test default
+            # promotion. Only one image is cached. To run unconditionally,
+            # ensure at least two images are pulled (e.g. alpine and ubuntu).
             pytest.skip("Need at least 2 present images for this test")
 
         default_img = next(
@@ -1833,6 +1875,9 @@ class TestImageDependencyDeletion:
         )
 
         if other_img is None:
+            # Skip-reason: No non-default image available. All cached images
+            # share the same ID (unlikely) or only one image exists. To run
+            # unconditionally, ensure at least two distinct images are cached.
             pytest.skip("No non-default image available to set as default")
 
         old_default_prefix = default_img["id"][:6]

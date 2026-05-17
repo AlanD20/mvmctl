@@ -87,6 +87,7 @@ BUILT_BINARY = REPO_DIR / "dist" / "mvm"
 
 REPORTS_DIR = REPO_DIR / ".reports"
 RESULTS_FILE = REPO_DIR / ".reports" / "system-test-results-latest.txt"
+JUNIT_DIR = REPO_DIR / ".reports" / "junit"
 
 # Cached check for pytest-xdist availability
 _XDIST_AVAILABLE: bool | None = None
@@ -166,7 +167,16 @@ def ensure_mirror_seeded(mirror: Path) -> None:
             "--default",
         ],
         ["uv", "run", "mvm", "image", "pull", "alpine", "--version", "3.21"],
-        ["uv", "run", "mvm", "image", "pull", "ubuntu-minimal", "--version", "24.04"],
+        [
+            "uv",
+            "run",
+            "mvm",
+            "image",
+            "pull",
+            "ubuntu-minimal",
+            "--version",
+            "24.04",
+        ],
         ["uv", "run", "mvm", "bin", "pull", "1.15.1", "--default"],
     ]
     for cmd in seed_cmds:
@@ -275,6 +285,7 @@ def run_test_file(
     mirror: Path | None,
     use_mirror: bool,
     extra_args: list[str] | None = None,
+    junit_dir: Path | None = None,
 ) -> str:
     """Run a single system test file. Returns PASS, FAIL, or SKIP."""
     env = {**os.environ, "MVM_BINARY": binary, "NO_COLOR": "1"}
@@ -293,6 +304,10 @@ def run_test_file(
         "0",
         "-rs",
     ]
+    if junit_dir:
+        junit_dir.mkdir(parents=True, exist_ok=True)
+        junit_file = junit_dir / f"{test_file.stem}.xml"
+        pytest_cmd.extend(["--junit-xml", str(junit_file)])
     if extra_args:
         pytest_cmd.extend(extra_args)
 
@@ -346,7 +361,9 @@ def run_test_file(
             print(f"         ... and {len(fail_lines) - 5} more")
     if status == "FAIL":
         # Show full failure context — assertion errors and traceback lines
-        detail = [l for l in lines if l.startswith("E   ") or "AssertionError" in l]
+        detail = [
+            l for l in lines if l.startswith("E   ") or "AssertionError" in l
+        ]
         if detail:
             print("       ── failure detail ──")
             for dl in detail[:30]:
@@ -506,16 +523,18 @@ def _run_system_tests(
     # Filter to previously failed tests BEFORE clearing results
     if args.failed_only:
         prev_results = parse_results(RESULTS_FILE)
-        failed = [n for n, s in prev_results.items() if s == "FAIL"]
-        test_files = [f for f in test_files if f.name in failed]
+        failed_names = [n for n, s in prev_results.items() if s == "FAIL"]
+        test_files = [f for f in test_files if f.name in failed_names]
         if not test_files:
             _ok("No previously failed tests.")
             return 0
         _info(f"Re-running {len(test_files)} previously failed test(s)")
 
-    # Fresh results file for this run
+    # Fresh results file and junit dir for this run
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     RESULTS_FILE.write_text("")
+    shutil.rmtree(JUNIT_DIR, ignore_errors=True)
+    JUNIT_DIR.mkdir(parents=True, exist_ok=True)
 
     # Run each file
     total_estimate = _fmt_duration(len(test_files) * 60)
@@ -540,6 +559,7 @@ def _run_system_tests(
             mirror,
             use_mirror=mirror is not None,
             extra_args=extra_args,
+            junit_dir=JUNIT_DIR,
         )
         append_result(RESULTS_FILE, name, status)
         if status == "PASS":
@@ -559,6 +579,34 @@ def _run_system_tests(
 
     # Archive with timestamp for history
     copy_results_with_timestamp(RESULTS_FILE)
+
+    # Skip ratio check after all system test files complete
+    if args.skip_ratio_check and test_files:
+        _info("Running skip ratio check...")
+        check_script = REPO_DIR / "scripts" / "check_skip_ratio.py"
+        check_result = subprocess.run(
+            [
+                sys.executable,
+                str(check_script),
+                "--junit-xml",
+                str(JUNIT_DIR),
+                "--verbose",
+            ],
+            cwd=REPO_DIR,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        # Print check output regardless
+        print(check_result.stdout)
+        if check_result.stderr:
+            print(check_result.stderr, file=sys.stderr)
+
+        if check_result.returncode != 0:
+            _fail(
+                "Skip ratio check failed: one or more test files exceed the skip threshold."
+            )
+            failed += 1
 
     return failed
 
@@ -703,6 +751,16 @@ def main() -> None:
         help="Run a specific test file (absolute path or relative to repo root)",
     )
 
+    # Skip ratio check flag (applies to system tests)
+    parser.add_argument(
+        "--skip-ratio-check",
+        "--no-skip-ratio-check",
+        dest="skip_ratio_check",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable/disable skip ratio check after system tests (default: enabled)",
+    )
+
     # System-only flags (unchanged)
     parser.add_argument(
         "--bin",
@@ -742,7 +800,7 @@ def main() -> None:
         "--pytest-extra",
         dest="pytest_extra",
         default=None,
-        help="Extra flags to pass through to pytest (e.g. --pytest-extra \"-x --timeout=60\")",
+        help='Extra flags to pass through to pytest (e.g. --pytest-extra "-x --timeout=60")',
     )
 
     args = parser.parse_args()

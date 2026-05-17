@@ -37,9 +37,9 @@ class TestInitWizard:
 
         assert result.returncode == 0
         output = result.stdout + result.stderr
-        assert any(
-            phrase in output for phrase in ("all set", "ready", "Setup Wizard")
-        ), f"Output missing expected phrases:\n{output}"
+        assert "all set" in output, (
+            f"Output missing expected success message:\n{output}"
+        )
 
     def test_init_idempotent(self, mvm_binary):
         """Run init twice — both invocations should succeed.
@@ -57,6 +57,8 @@ class TestInitWizard:
             f"stdout: {first.stdout}\n"
             f"stderr: {first.stderr}"
         )
+        first_output = (first.stdout + first.stderr).strip()
+        assert first_output, "First init produced no output"
 
         second = _run_mvm(mvm_binary, *args, check=False)
         assert second.returncode == 0, (
@@ -64,6 +66,8 @@ class TestInitWizard:
             f"stdout: {second.stdout}\n"
             f"stderr: {second.stderr}"
         )
+        second_output = (second.stdout + second.stderr).strip()
+        assert second_output, "Second init (idempotent) produced no output"
 
     def test_init_abort_on_sudo_needed(self, mvm_binary):
         """Run init without --skip-host non-interactively.
@@ -90,10 +94,9 @@ class TestInitWizard:
 
         output = result.stdout + result.stderr
         lower = output.lower()
-        assert any(
-            keyword in lower
-            for keyword in ("sudo", "root", "host init", "privilege")
-        ), f"Missing error guidance in output:\n{output}"
+        assert "sudo" in lower, (
+            f"Missing sudo/privilege guidance in output:\n{output}"
+        )
 
 
 class TestRootFlags:

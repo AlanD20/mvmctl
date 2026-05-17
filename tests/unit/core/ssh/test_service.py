@@ -23,6 +23,10 @@ class TestSSHServiceBuildCommand:
             "UserKnownHostsFile=/dev/null",
             "-o",
             "BatchMode=yes",
+            "-o",
+            "ServerAliveInterval=2",
+            "-o",
+            "ServerAliveCountMax=3",
             "root@10.20.0.2",
         ]
 

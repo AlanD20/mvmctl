@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from typing import Generator
 
 import pytest
 
@@ -16,11 +17,112 @@ pytestmark = [
 ]
 
 
-class TestVolumeLifecycle:
-    """Volume CRUD operations and standard edge cases."""
+# ============================================================================
+# Module-scoped fixture — shared volume for read-only tests
+# ============================================================================
 
-    def test_volume_create(self, mvm_binary, unique_key_name):
-        # Rationale: Needs a real volume (1-3s). Verifies size and status via inspect --json.
+
+@pytest.fixture(scope="module")
+def shared_volume(mvm_binary: str) -> Generator[str, None, None]:
+    """Module-scoped volume for read-only (ls, inspect) tests.
+
+    Creating a new volume per read-only test wastes ~3s each.  A single
+    module-scoped volume serves all read-only assertions in the class.
+    """
+    name = f"sys-modvol-{uuid.uuid4().hex[:6]}"
+    _run_mvm(mvm_binary, "volume", "create", name, "512M")
+    try:
+        yield name
+    finally:
+        _run_mvm(mvm_binary, "volume", "rm", name, "--force", check=False)
+
+
+# ============================================================================
+# TestVolumeLifecycle — read-only tests FIRST, create/modify in middle,
+# remove/destructive tests LAST
+# ============================================================================
+
+
+class TestVolumeLifecycle:
+    """Volume CRUD operations and standard edge cases — grouped by operation type.
+
+    Order within this class:
+        1. Read-only / listing / inspection
+        2. Create (various formats, edge cases)
+        3. Error paths (bad input, nonexistent)
+        4. Modify operations (resize)
+        5. Remove / destructive operations (last)
+    """
+
+    # ── 1. Read-only: listing and inspection ──────────────────────────────
+
+    def test_volume_ls_empty(self, mvm_binary: str) -> None:
+        # Rationale: Verifies ls succeeds with empty output (headers present,
+        # no rows).  A crash on empty DB would escape silently with only an
+        # L0 returncode check.
+        """Listing volumes when none exist should succeed with empty output."""
+        result = _run_mvm(mvm_binary, "volume", "ls")
+        assert result.returncode == 0
+        # L1: output should at least contain the table header
+        assert (
+            "name" in result.stdout.lower()
+            or "volume" in result.stdout.lower()
+            or result.stdout.strip() == ""
+        )
+
+    def test_volume_list(self, mvm_binary: str, shared_volume: str) -> None:
+        # Rationale: Needs a shared volume (~3s for the whole module) to
+        # verify ls output contains the volume name — proves DB persistence
+        # without creating a volume per test.
+        """List volumes — should include the shared volume."""
+        result = _run_mvm(mvm_binary, "volume", "ls")
+        assert result.returncode == 0
+        assert shared_volume in result.stdout
+
+    def test_volume_list_json(
+        self, mvm_binary: str, shared_volume: str
+    ) -> None:
+        # Rationale: Needs a shared volume. JSON parsing catches structural
+        # regressions that plain-text output checks miss.
+        """List volumes in JSON format — verify field structure."""
+        result = _run_mvm(mvm_binary, "volume", "ls", "--json")
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert isinstance(data, list)
+        assert any(v["name"] == shared_volume for v in data)
+
+    def test_volume_inspect(self, mvm_binary: str, shared_volume: str) -> None:
+        # Rationale: Needs a shared volume. L1 verification that inspect
+        # returns the volume name — proves the DB lookup by name works.
+        """Inspect a volume — name should appear in output."""
+        result = _run_mvm(mvm_binary, "volume", "inspect", shared_volume)
+        assert result.returncode == 0
+        assert shared_volume in result.stdout
+
+    def test_volume_inspect_json(
+        self, mvm_binary: str, shared_volume: str
+    ) -> None:
+        # Rationale: Needs a shared volume. L2 verification of all expected
+        # fields — catches missing fields that would break tooling.
+        """Inspect a volume with --json and verify parsed fields."""
+        result = _run_mvm(
+            mvm_binary, "volume", "inspect", shared_volume, "--json"
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert "name" in data
+        assert "size_bytes" in data
+        assert "format" in data
+        assert "status" in data
+        assert "path" in data
+        assert data["name"] == shared_volume
+
+    # ── 2. Create operations ─────────────────────────────────────────────
+
+    def test_volume_create(self, mvm_binary: str, unique_key_name: str) -> None:
+        # Rationale: Needs a real volume (1-3s). Verifies size and status via
+        # inspect --json. Catches silent create failures where the volume
+        # appears in ls but has wrong metadata.
         """Create a volume and verify size/status via inspect --json."""
         vol_name = f"sys-vol-{unique_key_name}"
         try:
@@ -43,8 +145,12 @@ class TestVolumeLifecycle:
         finally:
             _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
 
-    def test_volume_create_with_format_qcow2(self, mvm_binary, unique_key_name):
-        # Rationale: Needs a real volume (1-3s). Tests --format qcow2.
+    def test_volume_create_with_format_qcow2(
+        self, mvm_binary: str, unique_key_name: str
+    ) -> None:
+        # Rationale: Needs a real volume (1-3s). Tests --format qcow2 and
+        # verifies format field — regression where --format is ignored
+        # would silently create raw volumes instead.
         """Create a volume with --format qcow2 and verify format via inspect --json."""
         vol_name = f"sys-vol-qcow2-{unique_key_name}"
         try:
@@ -70,8 +176,12 @@ class TestVolumeLifecycle:
         finally:
             _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
 
-    def test_volume_create_with_format_raw(self, mvm_binary, unique_key_name):
-        # Rationale: Needs a real volume (1-3s). Tests --format raw.
+    def test_volume_create_with_format_raw(
+        self, mvm_binary: str, unique_key_name: str
+    ) -> None:
+        # Rationale: Needs a real volume (1-3s). Tests --format raw (the
+        # default) explicitly — catches regression where format is
+        # misidentified or default changes.
         """Create a volume with --format raw and verify format via inspect --json."""
         vol_name = f"sys-vol-raw-{unique_key_name}"
         try:
@@ -97,8 +207,11 @@ class TestVolumeLifecycle:
         finally:
             _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
 
-    def test_volume_duplicate_name_rejected(self, mvm_binary, unique_key_name):
-        # Rationale: Needs a real volume. Tests duplicate name rejection.
+    def test_volume_duplicate_name_rejected(
+        self, mvm_binary: str, unique_key_name: str
+    ) -> None:
+        # Rationale: Needs a real volume. Tests that creating a second volume
+        # with the same name is rejected — silent overwrite would lose data.
         """Creating a volume with duplicate name should be rejected."""
         vol_name = f"sys-vol-dup-{unique_key_name}"
         try:
@@ -112,7 +225,8 @@ class TestVolumeLifecycle:
                 check=False,
             )
             assert result.returncode != 0
-            assert "already exists" in result.stdout.lower()
+            combined = (result.stdout + result.stderr).lower()
+            assert "already exists" in combined
 
             ls_result = _run_mvm(mvm_binary, "volume", "ls", "--json")
             volumes = json.loads(ls_result.stdout)
@@ -121,104 +235,114 @@ class TestVolumeLifecycle:
         finally:
             _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
 
-    def test_volume_list(self, mvm_binary, unique_key_name):
-        # Rationale: Needs a real volume. Verifies listing shows created volume.
-        """List volumes — should include newly created volume."""
-        vol_name = f"sys-vol-list-{unique_key_name}"
-        try:
-            _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
+    # ── 3. Error paths (no side effects) ─────────────────────────────────
 
-            result = _run_mvm(mvm_binary, "volume", "ls")
-            assert result.returncode == 0
-            assert vol_name in result.stdout
-        finally:
-            _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
-
-    def test_volume_list_json(self, mvm_binary, unique_key_name):
-        # Rationale: Needs a real volume. Verifies JSON listing format.
-        """List volumes in JSON format."""
-        vol_name = f"sys-vol-json-{unique_key_name}"
-        try:
-            _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
-
-            result = _run_mvm(mvm_binary, "volume", "ls", "--json")
-            assert result.returncode == 0
-            data = json.loads(result.stdout)
-            assert isinstance(data, list)
-            assert any(v["name"] == vol_name for v in data)
-        finally:
-            _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
-
-    def test_volume_inspect(self, mvm_binary, unique_key_name):
-        # Rationale: Needs a real volume. Verifies inspect output.
-        """Inspect a volume and verify fields."""
-        vol_name = f"sys-vol-inspect-{unique_key_name}"
-        try:
-            _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
-
-            result = _run_mvm(mvm_binary, "volume", "inspect", vol_name)
-            assert result.returncode == 0
-            assert vol_name in result.stdout
-        finally:
-            _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
-
-    def test_volume_inspect_json(self, mvm_binary, unique_key_name):
-        # Rationale: Needs a real volume. Verifies --json field completeness.
-        """Inspect a volume with --json and verify parsed fields."""
-        vol_name = f"sys-vol-ijson-{unique_key_name}"
-        try:
-            _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
-
-            result = _run_mvm(
-                mvm_binary, "volume", "inspect", vol_name, "--json"
-            )
-            assert result.returncode == 0
-            data = json.loads(result.stdout)
-            assert "name" in data
-            assert "size_bytes" in data
-            assert "format" in data
-            assert "status" in data
-            assert "path" in data
-        finally:
-            _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
-
-    def test_volume_remove(self, mvm_binary, unique_key_name):
-        # Rationale: Needs a real volume. Tests normal rm and verifies gone.
-        """Create and remove a volume, verify it's gone via ls --json."""
-        vol_name = f"sys-vol-rm-{unique_key_name}"
-        _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
-
-        result = _run_mvm(mvm_binary, "volume", "rm", vol_name)
-        assert result.returncode == 0
-
-        result = _run_mvm(mvm_binary, "volume", "ls", "--json")
-        volumes = json.loads(result.stdout)
-        assert not any(v["name"] == vol_name for v in volumes)
-
-    def test_volume_remove_nonexistent(self, mvm_binary):
-        # Rationale: No resources needed -- error path for nonexistent volume.
-        """Removing a nonexistent volume should give clear error, not crash."""
+    def test_volume_create_invalid_size_fails(self, mvm_binary: str) -> None:
+        # Rationale: No resources needed — error path for invalid size.
+        # Verifies the CLI rejects non-numeric size strings.
+        """Creating a volume with invalid size should be rejected."""
         result = _run_mvm(
             mvm_binary,
             "volume",
-            "rm",
-            "nonexistent-volume-name-that-will-not-exist",
+            "create",
+            "invalid-size-vol",
+            "abc",
+            check=False,
+        )
+        assert result.returncode != 0
+
+        ls_result = _run_mvm(mvm_binary, "volume", "ls", "--json", check=False)
+        if ls_result.returncode == 0:
+            volumes = json.loads(ls_result.stdout)
+            assert not any(v["name"] == "invalid-size-vol" for v in volumes)
+
+    def test_volume_create_invalid_format_fails(
+        self, mvm_binary: str, unique_key_name: str
+    ) -> None:
+        # Rationale: No resources needed — error path for invalid format.
+        """Creating a volume with invalid --format should be rejected."""
+        vol_name = f"sys-vol-badfmt-{unique_key_name}"
+        result = _run_mvm(
+            mvm_binary,
+            "volume",
+            "create",
+            vol_name,
+            "512M",
+            "--format",
+            "vmdk",
+            check=False,
+        )
+        assert result.returncode != 0
+
+        ls_result = _run_mvm(mvm_binary, "volume", "ls", "--json", check=False)
+        if ls_result.returncode == 0:
+            volumes = json.loads(ls_result.stdout)
+            assert not any(v["name"] == vol_name for v in volumes)
+
+    def test_volume_inspect_nonexistent_fails(self, mvm_binary: str) -> None:
+        # Rationale: No resources needed — error path for nonexistent volume.
+        """Inspecting a nonexistent volume should fail."""
+        result = _run_mvm(
+            mvm_binary,
+            "volume",
+            "inspect",
+            "nonexistent-volume-abc",
+            check=False,
+        )
+        assert result.returncode != 0
+
+    def test_volume_resize_nonexistent_fails(self, mvm_binary: str) -> None:
+        # Rationale: No resources needed — error path for nonexistent volume resize.
+        """Resizing a nonexistent volume should fail."""
+        result = _run_mvm(
+            mvm_binary,
+            "volume",
+            "resize",
+            "nonexistent-volume-def",
+            "1G",
+            check=False,
+        )
+        assert result.returncode != 0
+
+    def test_negative_volume_size(self, mvm_binary: str) -> None:
+        # Rationale: No resources needed — error path for negative size.
+        """A volume with negative size should be rejected."""
+        vol_name = f"sys-neg-{uuid.uuid4().hex[:6]}"
+        result = _run_mvm(
+            mvm_binary,
+            "volume",
+            "create",
+            vol_name,
+            "--",
+            "-1M",
             check=False,
         )
         assert result.returncode != 0
         combined = (result.stdout + result.stderr).lower()
-        assert any(s in combined for s in ["not found", "nonexistent"])
+        assert "invalid" in combined or "negative" in combined
 
-        result_vol = _run_mvm(mvm_binary, "volume", "ls", "--json", check=False)
-        if result_vol.returncode == 0:
-            vols_after = json.loads(result_vol.stdout)
-            assert not any(
-                v["name"] == "nonexistent-volume-name-that-will-not-exist"
-                for v in vols_after
-            )
+    def test_zero_size_volume(self, mvm_binary: str) -> None:
+        # Rationale: No resources needed — error path for zero size.
+        """A volume with zero size should be rejected."""
+        vol_name = f"sys-zero-{uuid.uuid4().hex[:6]}"
+        result = _run_mvm(
+            mvm_binary,
+            "volume",
+            "create",
+            vol_name,
+            "0M",
+            check=False,
+        )
+        assert result.returncode != 0
+        combined = (result.stdout + result.stderr).lower()
+        assert "invalid" in combined or "must be" in combined
 
-    def test_volume_resize(self, mvm_binary, unique_key_name):
-        # Rationale: Needs a real volume (1-3s). Tests resize and verifies new size.
+    # ── 4. Modify operations (resize) ────────────────────────────────────
+
+    def test_volume_resize(self, mvm_binary: str, unique_key_name: str) -> None:
+        # Rationale: Needs a real volume (1-3s). Tests resize and verifies
+        # new size via inspect --json — catches resize that silently fails
+        # but reports success.
         """Create a volume and resize it, verify new size via inspect --json."""
         vol_name = f"sys-vol-resize-{unique_key_name}"
         try:
@@ -239,144 +363,12 @@ class TestVolumeLifecycle:
         finally:
             _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
 
-    def test_volume_rm_with_force(self, mvm_binary, unique_key_name):
-        # Rationale: Needs a real volume. Tests --force removal. Cleanup in finally.
-        """Remove a volume with --force and verify it's gone via ls --json."""
-        # Rationale: Needs a real volume (1-3s) because we're testing the
-        # --force removal behavior. No VM needed since volume-only operation.
-        vol_name = f"sys-vol-frc-{unique_key_name}"
-        try:
-            _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
-            result = _run_mvm(mvm_binary, "volume", "rm", vol_name, "--force")
-            assert result.returncode == 0
-        finally:
-            _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
-
-        result = _run_mvm(mvm_binary, "volume", "ls", "--json")
-        volumes = json.loads(result.stdout)
-        assert not any(v["name"] == vol_name for v in volumes)
-
-    def test_volume_ls_empty(self, mvm_binary):
-        # Rationale: No resources needed -- verifies ls succeeds with no volumes.
-        """Listing volumes when none exist should succeed with empty output."""
-        result = _run_mvm(mvm_binary, "volume", "ls")
-        assert result.returncode == 0
-
-    def test_volume_create_invalid_size_fails(self, mvm_binary):
-        # Rationale: No resources needed -- error path for invalid size.
-        """Creating a volume with invalid size should be rejected."""
-        result = _run_mvm(
-            mvm_binary,
-            "volume",
-            "create",
-            "invalid-size-vol",
-            "abc",
-            check=False,
-        )
-        assert result.returncode != 0
-
-        ls_result = _run_mvm(mvm_binary, "volume", "ls", "--json", check=False)
-        if ls_result.returncode == 0:
-            volumes = json.loads(ls_result.stdout)
-            assert not any(v["name"] == "invalid-size-vol" for v in volumes)
-
-    def test_volume_create_invalid_format_fails(
-        # Rationale: No resources needed -- error path for invalid format.
-        self, mvm_binary, unique_key_name
-    ):
-        """Creating a volume with invalid --format should be rejected."""
-        vol_name = f"sys-vol-badfmt-{unique_key_name}"
-        result = _run_mvm(
-            mvm_binary,
-            "volume",
-            "create",
-            vol_name,
-            "512M",
-            "--format",
-            "vmdk",
-            check=False,
-        )
-        assert result.returncode != 0
-
-        ls_result = _run_mvm(mvm_binary, "volume", "ls", "--json", check=False)
-        if ls_result.returncode == 0:
-            volumes = json.loads(ls_result.stdout)
-            assert not any(v["name"] == vol_name for v in volumes)
-
-    def test_volume_inspect_nonexistent_fails(self, mvm_binary):
-        # Rationale: No resources needed -- error path for nonexistent volume.
-        """Inspecting a nonexistent volume should fail."""
-        result = _run_mvm(
-            mvm_binary,
-            "volume",
-            "inspect",
-            "nonexistent-volume-abc",
-            check=False,
-        )
-        assert result.returncode != 0
-
-    def test_volume_resize_nonexistent_fails(self, mvm_binary):
-        # Rationale: No resources needed -- error path for nonexistent volume resize.
-        """Resizing a nonexistent volume should fail."""
-        result = _run_mvm(
-            mvm_binary,
-            "volume",
-            "resize",
-            "nonexistent-volume-def",
-            "1G",
-            check=False,
-        )
-        assert result.returncode != 0
-
-    def test_volume_remove_multiple(self, mvm_binary, unique_key_name):
-        # Rationale: Needs two real volumes. Tests multi-rm.
-        """Remove two volumes at once and verify both gone via ls --json."""
-        vol1 = f"sys-vol-mrm1-{unique_key_name}"
-        vol2 = f"sys-vol-mrm2-{unique_key_name}"
-        try:
-            _run_mvm(mvm_binary, "volume", "create", vol1, "512M")
-            _run_mvm(mvm_binary, "volume", "create", vol2, "256M")
-
-            result = _run_mvm(mvm_binary, "volume", "rm", vol1, vol2)
-            assert result.returncode == 0
-
-            result = _run_mvm(mvm_binary, "volume", "ls", "--json")
-            volumes = json.loads(result.stdout)
-            assert not any(v["name"] == vol1 for v in volumes)
-            assert not any(v["name"] == vol2 for v in volumes)
-        finally:
-            _run_mvm(mvm_binary, "volume", "rm", vol1, vol2, check=False)
-
-    def test_volume_remove_partial_failure(self, mvm_binary, unique_key_name):
-        # Rationale: Needs a real volume. Tests partial failure: one exists, one nonexistent.
-        """Remove one existing volume and one nonexistent — existing should still be removed."""
-        vol_name = f"sys-vol-partial-{unique_key_name}"
-        nonexistent = "nonexistent-volume-partial-test"
-        try:
-            _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
-
-            result = _run_mvm(
-                mvm_binary,
-                "volume",
-                "rm",
-                vol_name,
-                nonexistent,
-                check=False,
-            )
-            assert result.returncode != 0
-            combined = (result.stdout + result.stderr).lower()
-            assert nonexistent in combined
-
-            result = _run_mvm(mvm_binary, "volume", "ls", "--json")
-            volumes = json.loads(result.stdout)
-            assert not any(v["name"] == vol_name for v in volumes)
-        finally:
-            _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
-
     def test_volume_resize_shrink_documents_behavior(
-        # Rationale: Only needs a volume (1-3s). Documents shrink acceptance/rejection.
         self, mvm_binary: str, unique_key_name: str
     ) -> None:
+        # Rationale: Only needs a volume (1-3s). Documents whether shrink
+        # is accepted or rejected — volume-level resize behavior is
+        # independent of attachment state.
         """Resize a volume down — documents whether shrink is accepted or rejected.
 
         Rationale: Only needs a volume (cheap, 1-3s). No VM required since
@@ -418,21 +410,128 @@ class TestVolumeLifecycle:
                 mvm_binary, "volume", "rm", vol_name, "--force", check=False
             )
 
+    # ── 5. Remove / destructive operations ──────────────────────────────
+
+    def test_volume_remove(self, mvm_binary: str, unique_key_name: str) -> None:
+        # Rationale: Needs a real volume. Tests normal rm and verifies gone
+        # via ls --json — catches rm that reports success but leaves stale
+        # DB records.
+        """Create and remove a volume, verify it's gone via ls --json."""
+        vol_name = f"sys-vol-rm-{unique_key_name}"
+        _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
+
+        result = _run_mvm(mvm_binary, "volume", "rm", vol_name)
+        assert result.returncode == 0
+
+        result = _run_mvm(mvm_binary, "volume", "ls", "--json")
+        volumes = json.loads(result.stdout)
+        assert not any(v["name"] == vol_name for v in volumes)
+
+    def test_volume_rm_with_force(
+        self, mvm_binary: str, unique_key_name: str
+    ) -> None:
+        # Rationale: Needs a real volume. Tests --force removal and verifies
+        # gone via ls --json — force path differs from normal rm.
+        """Remove a volume with --force and verify it's gone via ls --json."""
+        vol_name = f"sys-vol-frc-{unique_key_name}"
+        try:
+            _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
+            result = _run_mvm(mvm_binary, "volume", "rm", vol_name, "--force")
+            assert result.returncode == 0
+        finally:
+            _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
+
+        result = _run_mvm(mvm_binary, "volume", "ls", "--json")
+        volumes = json.loads(result.stdout)
+        assert not any(v["name"] == vol_name for v in volumes)
+
+    def test_volume_remove_nonexistent(self, mvm_binary: str) -> None:
+        # Rationale: No resources needed — error path for nonexistent volume.
+        """Removing a nonexistent volume should give clear error, not crash."""
+        result = _run_mvm(
+            mvm_binary,
+            "volume",
+            "rm",
+            "nonexistent-volume-name-that-will-not-exist",
+            check=False,
+        )
+        assert result.returncode != 0
+        combined = (result.stdout + result.stderr).lower()
+        assert "not found" in combined
+
+        result_vol = _run_mvm(mvm_binary, "volume", "ls", "--json", check=False)
+        if result_vol.returncode == 0:
+            vols_after = json.loads(result_vol.stdout)
+            assert not any(
+                v["name"] == "nonexistent-volume-name-that-will-not-exist"
+                for v in vols_after
+            )
+
+    def test_volume_remove_multiple(
+        self, mvm_binary: str, unique_key_name: str
+    ) -> None:
+        # Rationale: Needs two real volumes. Tests multi-rm and verifies
+        # both gone — catches multi-rm that only removes the first.
+        """Remove two volumes at once and verify both gone via ls --json."""
+        vol1 = f"sys-vol-mrm1-{unique_key_name}"
+        vol2 = f"sys-vol-mrm2-{unique_key_name}"
+        try:
+            _run_mvm(mvm_binary, "volume", "create", vol1, "512M")
+            _run_mvm(mvm_binary, "volume", "create", vol2, "256M")
+
+            result = _run_mvm(mvm_binary, "volume", "rm", vol1, vol2)
+            assert result.returncode == 0
+
+            result = _run_mvm(mvm_binary, "volume", "ls", "--json")
+            volumes = json.loads(result.stdout)
+            assert not any(v["name"] == vol1 for v in volumes)
+            assert not any(v["name"] == vol2 for v in volumes)
+        finally:
+            _run_mvm(mvm_binary, "volume", "rm", vol1, vol2, check=False)
+
+    def test_volume_remove_partial_failure(
+        self, mvm_binary: str, unique_key_name: str
+    ) -> None:
+        # Rationale: Needs a real volume. Tests partial failure: one exists,
+        # one nonexistent — the existing volume should still be removed.
+        """Remove one existing volume and one nonexistent — existing should still be removed."""
+        vol_name = f"sys-vol-partial-{unique_key_name}"
+        nonexistent = "nonexistent-volume-partial-test"
+        try:
+            _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
+
+            result = _run_mvm(
+                mvm_binary,
+                "volume",
+                "rm",
+                vol_name,
+                nonexistent,
+                check=False,
+            )
+            assert result.returncode != 0
+            combined = (result.stdout + result.stderr).lower()
+            assert nonexistent in combined
+
+            result = _run_mvm(mvm_binary, "volume", "ls", "--json")
+            volumes = json.loads(result.stdout)
+            assert not any(v["name"] == vol_name for v in volumes)
+        finally:
+            _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
+
+    # ── 6. Advanced: invariants across attach/detach ─────────────────────
+
     @pytest.mark.requires_kvm
     def test_volume_invariants_available_attached_cycle(
-        # Rationale: Needs a real VM (30-120s) because attachment invariants require a stopped VM to attach/detach.
         self,
         mvm_binary: str,
         unique_vm_name: str,
         unique_key_name: str,
         unique_network_name: str,
     ) -> None:
-        """Verify volume invariants: vm_id and path correctness.
-
-        Rationale: Needs a real VM (30-120s) because attachment invariants
-        require a stopped VM to attach/detach the volume. A volume-only test
-        cannot verify vm_id transitions or disk path existence.
-        """
+        # Rationale: Needs a real VM (30-120s) because attachment invariants
+        # require a stopped VM to attach/detach the volume. A volume-only
+        # test cannot verify vm_id transitions or disk path existence.
+        """Verify volume invariants: vm_id and path correctness."""
         vm_name = unique_vm_name
         vol_name = f"sys-vol-inv-{unique_key_name}"
         net_name = unique_network_name
@@ -510,70 +609,6 @@ class TestVolumeLifecycle:
             )
             _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
-    # ──────────────────────────────────────────────────────────────────
-    # Resource exhaustion / input validation edge cases
-    # ──────────────────────────────────────────────────────────────────
-
-    def test_negative_volume_size(self, mvm_binary: str) -> None:
-        # Rationale: No resources needed -- error path for negative size.
-        """A volume with negative size should be rejected."""
-        vol_name = f"sys-neg-{uuid.uuid4().hex[:6]}"
-        result = _run_mvm(
-            mvm_binary,
-            "volume",
-            "create",
-            vol_name,
-            "--",
-            "-1M",
-            check=False,
-        )
-        assert result.returncode != 0
-        combined = (result.stdout + result.stderr).lower()
-        assert any(s in combined for s in ["invalid", "negative", "positive"])
-
-    def test_zero_size_volume(self, mvm_binary: str) -> None:
-        # Rationale: No resources needed -- error path for zero size.
-        """A volume with zero size should be rejected."""
-        vol_name = f"sys-zero-{uuid.uuid4().hex[:6]}"
-        result = _run_mvm(
-            mvm_binary,
-            "volume",
-            "create",
-            vol_name,
-            "0M",
-            check=False,
-        )
-        assert result.returncode != 0
-        combined = (result.stdout + result.stderr).lower()
-        assert any(s in combined for s in ["invalid", "zero", "must be"])
-
-    def test_duplicate_volume_name(self, mvm_binary: str) -> None:
-        # Rationale: Needs a real volume. Tests duplicate name rejection.
-        """Creating a volume with a name that already exists should be rejected."""
-        vol_name = f"sys-dupe-vol-{uuid.uuid4().hex[:6]}"
-        try:
-            _run_mvm(mvm_binary, "volume", "create", vol_name, "512M")
-            result = _run_mvm(
-                mvm_binary,
-                "volume",
-                "create",
-                vol_name,
-                "512M",
-                check=False,
-            )
-            assert result.returncode != 0
-            combined = (result.stdout + result.stderr).lower()
-            assert any(s in combined for s in ["already exists", "duplicate"])
-        finally:
-            _run_mvm(
-                mvm_binary,
-                "volume",
-                "rm",
-                vol_name,
-                "--force",
-                check=False,
-            )
-
 
 class TestVolumeAttachDetach:
     """Volume attach/detach lifecycle with VMs — requires KVM and network."""
@@ -590,9 +625,14 @@ class TestVolumeAttachDetach:
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network
     def test_attach_detach_then_stop_start(
-        # Rationale: Needs a real VM (30-120s). Full lifecycle: create, stop, detach, re-attach, start.
-        self, mvm_binary, unique_vm_name, unique_key_name, unique_network_name
-    ):
+        self,
+        mvm_binary: str,
+        unique_vm_name: str,
+        unique_key_name: str,
+        unique_network_name: str,
+    ) -> None:
+        # Rationale: Needs a real VM (30-120s). Full lifecycle: create,
+        # stop, detach, re-attach, start.
         """Create VM with volume, stop, detach, re-attach, start — full lifecycle."""
         vm_name = unique_vm_name
         key_name = unique_key_name
@@ -676,9 +716,14 @@ class TestVolumeAttachDetach:
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network
     def test_attach_volume_to_stopped_then_start(
-        # Rationale: Needs a real VM (30-120s). Tests attach-to-stopped then start (Bug #7 scenario).
-        self, mvm_binary, unique_vm_name, unique_key_name, unique_network_name
-    ):
+        self,
+        mvm_binary: str,
+        unique_vm_name: str,
+        unique_key_name: str,
+        unique_network_name: str,
+    ) -> None:
+        # Rationale: Needs a real VM (30-120s). Tests attach-to-stopped
+        # then start (Bug #7 scenario).
         """Attach volume to a stopped VM then start it — Bug #7 scenario."""
         vm_name = unique_vm_name
         key_name = unique_key_name
@@ -752,9 +797,14 @@ class TestVolumeAttachDetach:
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network
     def test_attach_detach_attach_same_volume(
-        # Rationale: Needs a real VM (30-120s). Tests detach, verify available, re-attach, verify attached.
-        self, mvm_binary, unique_vm_name, unique_key_name, unique_network_name
-    ):
+        self,
+        mvm_binary: str,
+        unique_vm_name: str,
+        unique_key_name: str,
+        unique_network_name: str,
+    ) -> None:
+        # Rationale: Needs a real VM (30-120s). Tests detach, verify
+        # available, re-attach, verify attached.
         """Detach volume, verify available, re-attach, verify attached."""
         vm_name = unique_vm_name
         key_name = unique_key_name
@@ -843,19 +893,15 @@ class TestVolumeCrossVM:
 
     @pytest.mark.requires_kvm
     def test_cross_vm_volume_attach_rejected(
-        # Rationale: Needs TWO real VMs (30-120s each). Cross-VM exclusivity requires a second VM for conflict.
         self,
         mvm_binary: str,
         unique_vm_name: str,
         unique_key_name: str,
         unique_network_name: str,
     ) -> None:
-        """Attaching an already-attached volume to a different VM must fail.
-
-        Rationale: Needs TWO real VMs (30-120s each) because the business
-        rule is about cross-VM exclusivity — a single VM cannot reproduce
-        the conflict. One volume (1-3s) is the minimum viable cost.
-        """
+        # Rationale: Needs TWO real VMs (30-120s each). Cross-VM exclusivity
+        # requires a second VM for conflict.
+        """Attaching an already-attached volume to a different VM must fail."""
         vm_a = unique_vm_name
         vm_b = f"sys-vm-b-{uuid.uuid4().hex[:6]}"
         vol_name = f"sys-xvm-vol-{unique_key_name}"
@@ -959,13 +1005,14 @@ class TestVolumeRunningVMDependency:
     @pytest.mark.requires_network
     @pytest.mark.slow
     def test_delete_volume_used_by_running_vm_fails(
-        # Rationale: Needs a real VM with volume (30-120s). Tests rm rejection when VM is running.
         self,
-        mvm_binary,
-        unique_vm_name,
-        unique_key_name,
-        unique_network_name,
-    ):
+        mvm_binary: str,
+        unique_vm_name: str,
+        unique_key_name: str,
+        unique_network_name: str,
+    ) -> None:
+        # Rationale: Needs a real VM with volume (30-120s). Tests rm
+        # rejection when VM is running.
         """Deleting a volume attached to a running VM should be rejected."""
         vm_name = unique_vm_name
         key_name = unique_key_name
@@ -1023,10 +1070,7 @@ class TestVolumeRunningVMDependency:
             )
             assert result.returncode != 0
             error_text = (result.stdout + result.stderr).lower()
-            assert any(
-                phrase in error_text
-                for phrase in ["in use", "attached", "cannot"]
-            )
+            assert "in use" in error_text or "attached" in error_text
 
             vol_ls = _run_mvm(mvm_binary, "volume", "ls", "--json", check=False)
             if vol_ls.returncode == 0 and vol_ls.stdout.strip():
@@ -1050,13 +1094,14 @@ class TestVolumeRunningVMDependency:
     @pytest.mark.requires_network
     @pytest.mark.slow
     def test_delete_volume_used_by_running_vm_with_force_succeeds(
-        # Rationale: Needs a real VM with volume (30-120s). Tests --force allows rm despite running VM.
         self,
-        mvm_binary,
-        unique_vm_name,
-        unique_key_name,
-        unique_network_name,
-    ):
+        mvm_binary: str,
+        unique_vm_name: str,
+        unique_key_name: str,
+        unique_network_name: str,
+    ) -> None:
+        # Rationale: Needs a real VM with volume (30-120s). Tests --force
+        # allows rm despite running VM.
         """--force allows deleting a volume even when attached to a running VM."""
         vm_name = unique_vm_name
         key_name = unique_key_name
@@ -1137,13 +1182,14 @@ class TestVolumeRunningVMDependency:
     @pytest.mark.requires_network
     @pytest.mark.slow
     def test_resize_volume_attached_to_running_vm_succeeds(
-        # Rationale: Needs a real VM with volume (30-120s). Tests resize while attached to running VM.
         self,
-        mvm_binary,
-        unique_vm_name,
-        unique_key_name,
-        unique_network_name,
-    ):
+        mvm_binary: str,
+        unique_vm_name: str,
+        unique_key_name: str,
+        unique_network_name: str,
+    ) -> None:
+        # Rationale: Needs a real VM with volume (30-120s). Tests resize
+        # while attached to running VM.
         """Resizing a volume attached to a running VM should succeed."""
         vm_name = unique_vm_name
         key_name = unique_key_name
@@ -1253,9 +1299,13 @@ class TestVolumeNegativeFailure:
 
     @pytest.mark.requires_kvm
     def test_attach_nonexistent_volume_to_vm_fails(
-        # Rationale: Needs a real VM (30-120s). Tests error path for nonexistent volume attach.
-        self, mvm_binary, unique_vm_name, unique_network_name
-    ):
+        self,
+        mvm_binary: str,
+        unique_vm_name: str,
+        unique_network_name: str,
+    ) -> None:
+        # Rationale: Needs a real VM (30-120s). Tests error path for
+        # nonexistent volume attach.
         """Attaching a nonexistent volume should give clear error."""
         vm_name = unique_vm_name
         net_name = unique_network_name
@@ -1292,7 +1342,7 @@ class TestVolumeNegativeFailure:
             )
             assert result.returncode != 0
             combined = (result.stdout + result.stderr).lower()
-            assert any(s in combined for s in ["not found", "no such"])
+            assert "not found" in combined
 
             result_ins = _run_mvm(
                 mvm_binary,
@@ -1315,9 +1365,13 @@ class TestVolumeNegativeFailure:
 
     @pytest.mark.requires_kvm
     def test_detach_nonexistent_volume_from_vm_fails(
-        # Rationale: Needs a real VM (30-120s). Tests error path for nonexistent volume detach.
-        self, mvm_binary, unique_vm_name, unique_network_name
-    ):
+        self,
+        mvm_binary: str,
+        unique_vm_name: str,
+        unique_network_name: str,
+    ) -> None:
+        # Rationale: Needs a real VM (30-120s). Tests error path for
+        # nonexistent volume detach.
         """Detaching a nonexistent volume should give clear error."""
         vm_name = unique_vm_name
         net_name = unique_network_name
@@ -1354,7 +1408,7 @@ class TestVolumeNegativeFailure:
             )
             assert result.returncode != 0
             combined = (result.stdout + result.stderr).lower()
-            assert any(s in combined for s in ["not found", "not attached"])
+            assert "not found" in combined
 
             result_vol = _run_mvm(
                 mvm_binary, "volume", "ls", "--json", check=False

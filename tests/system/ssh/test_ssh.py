@@ -183,11 +183,11 @@ class TestSSHConnect:
         # but the SSH connection itself should attempt and fail gracefully.
         # This tests that --key is accepted as a valid file path and that
         # SSH uses it (even if auth fails).
-        if result.returncode != 0:
-            assert (
-                "Permission denied" in result.stderr
-                or "authentication" in result.stderr.lower()
-                or "key" in result.stderr.lower()
-            )
-        else:
-            assert "root" in result.stdout
+        assert result.returncode != 0, (
+            f"SSH with unauthorized key should fail, got rc={result.returncode} "
+            f"stdout: {result.stdout} stderr: {result.stderr}"
+        )
+        assert "Permission denied" in result.stderr, (
+            f"Expected 'Permission denied' for unauthorized key, "
+            f"got stderr: {result.stderr}"
+        )

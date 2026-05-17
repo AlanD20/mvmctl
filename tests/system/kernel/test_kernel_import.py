@@ -43,6 +43,9 @@ def _get_firecracker_kernel_path(mvm_binary: str) -> str:
         for k in kernels
         if k.get("type") == "firecracker" and k.get("is_present")
     ]
+    # Skip-reason: Requires a present firecracker kernel in cache to use as
+    # the import source. _ensure_kernel() attempts to pull one but may fail
+    # in air-gapped environments without MVM_ASSET_MIRROR.
     if not firecracker:
         pytest.skip("No present firecracker kernel to import from")
 
@@ -59,6 +62,10 @@ def _get_firecracker_kernel_path(mvm_binary: str) -> str:
         resolved = KERNEL_CACHE_DIR / path
         if resolved.exists():
             return str(resolved)
+        # Skip-reason: The firecracker kernel file reported by inspect --json
+        # does not exist on disk. This can happen if the kernel was pulled in a
+        # previous session and the cache was cleaned (cache clean --force) but
+        # the DB record was not removed.
         pytest.skip(
             f"Firecracker kernel path does not exist: {path} (resolved: {resolved})"
         )
@@ -532,10 +539,9 @@ class TestKernelImportError:
             "Expected kernel import of nonexistent path to fail"
         )
         combined = (result.stdout + result.stderr).lower()
-        assert any(
-            s in combined
-            for s in ["not found", "does not exist", "no such file"]
-        ), f"Expected error message about missing file, got: {combined}"
+        assert "not found" in combined, (
+            f"Expected error mentioning 'not found', got: {combined}"
+        )
 
     def test_import_empty_name_fails(self, mvm_binary: str) -> None:
         # Rationale: Only needs CLI validation — no real kernel creation needed
@@ -680,6 +686,9 @@ class TestKernelImportCleanup:
         all_kernels = json.loads(result.stdout) if result.stdout else []
         custom = [k for k in all_kernels if k.get("type") == "custom"]
 
+        # Skip-reason: No custom (imported) kernels exist to clean up.
+        # This is normal after a fresh run — the test expects to pass when
+        # there is nothing to clean, which verifies idempotent cleanup.
         if not custom:
             pytest.skip("No custom (imported) kernels to clean up")
 

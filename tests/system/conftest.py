@@ -208,7 +208,8 @@ def _ensure_binary(binary: str) -> None:
         )
     if not has:
         _pull_asset(
-            binary, ["bin", "pull", "1.15.1", "--default"], "firecracker binary"
+            binary, ["bin", "pull", "firecracker", "--version", "1.15.1", "--default"],
+            "firecracker binary",
         )
 
 

@@ -22,6 +22,9 @@ class TestHostStatus:
         # resources needed — testing structural field types in JSON response.
         result = _run_mvm(mvm_binary, "host", "ls", "--json", check=False)
         if result.returncode != 0:
+            # Skip-reason: Host state is unknown when mvm host init has not
+            # been run. Running "mvm host init" first would make this test
+            # unconditionally runnable.
             pytest.skip("Host not initialized (run 'mvm host init' first)")
         data = json.loads(result.stdout)
         assert isinstance(data.get("kvm_accessible"), bool), (
@@ -37,6 +40,9 @@ class TestHostStatus:
         # field presence in JSON response.
         result = _run_mvm(mvm_binary, "host", "ls", "--json", check=False)
         if result.returncode != 0:
+            # Skip-reason: Host state is unknown when mvm host init has not
+            # been run. Running "mvm host init" first would make this test
+            # unconditionally runnable.
             pytest.skip("Host not initialized (run 'mvm host init' first)")
         data = json.loads(result.stdout)
         assert "kvm_accessible" in data
@@ -66,10 +72,9 @@ class TestHostStatus:
             )
         else:
             combined = (result.stdout + result.stderr).lower()
-            assert any(
-                s in combined
-                for s in ["error", "not initialized", "not found", "no such"]
-            ), f"Unexpected output for uninitialized host: {combined}"
+            assert "not initialized" in combined, (
+                f"Unexpected output for uninitialized host: {combined}"
+            )
 
 
 class TestHostCleanSafety:
@@ -110,12 +115,7 @@ class TestHostCleanSafety:
                 check=False,
             )
             assert result.returncode != 0
-            output = (result.stdout + result.stderr).lower()
-            assert (
-                "running" in output
-                or "cannot clean" in output
-                or "stop" in output
-            )
+            assert "running" in result.stderr.lower()
         finally:
             _run_mvm(
                 mvm_binary,
@@ -165,12 +165,7 @@ class TestHostResetSafety:
                 check=False,
             )
             assert result.returncode != 0
-            output = (result.stdout + result.stderr).lower()
-            assert (
-                "running" in output
-                or "cannot reset" in output
-                or "stop" in output
-            )
+            assert "running" in result.stderr.lower()
         finally:
             _run_mvm(
                 mvm_binary,
@@ -203,10 +198,16 @@ class TestHostCleanDestructive:
         # host initialization to be meaningful.
         check = _run_mvm(mvm_binary, "host", "ls", "--json", check=False)
         if check.returncode != 0:
+            # Skip-reason: Without a fully initialized host, host clean
+            # is a no-op. Running "mvm host init" first would make this
+            # test unconditionally runnable.
             pytest.skip("Host not initialized — cannot test host clean")
 
         mvm_bin = Path.home() / ".local" / "bin" / "mvm"
         if not mvm_bin.exists():
+            # Skip-reason: Sudo execution requires the built binary at
+            # ~/.local/bin/mvm. Run "cp dist/mvm ~/.local/bin/mvm" and
+            # "python scripts/build_services.py" to enable this test.
             pytest.skip("mvm binary not at ~/.local/bin/mvm — cannot run sudo")
 
         # Remove any running VMs first (left by earlier tests in this file)
@@ -225,4 +226,50 @@ class TestHostCleanDestructive:
         )
         assert result.returncode == 0, (
             f"host clean --force failed: {result.stderr}"
+        )
+        # L1: Verify stdout contains human-readable output about the clean
+        assert len(result.stdout.strip()) > 0, (
+            f"host clean --force produced no stdout: stderr={result.stderr}"
+        )
+
+    def test_host_reset_force(self, mvm_binary):
+        """Execute host reset --force and verify it exits successfully."""
+        # Rationale: Verifies the full host reset path — a destructive
+        # operation that removes all mvm-created state (VMs, networks,
+        # images, config, DB). This is the most thorough host reset
+        # test and requires real host initialization to be meaningful.
+        check = _run_mvm(mvm_binary, "host", "ls", "--json", check=False)
+        if check.returncode != 0:
+            # Skip-reason: Without a fully initialized host, host reset
+            # is a no-op. Running "mvm host init" first would make this
+            # test unconditionally runnable.
+            pytest.skip("Host not initialized — cannot test host reset")
+
+        mvm_bin = Path.home() / ".local" / "bin" / "mvm"
+        if not mvm_bin.exists():
+            # Skip-reason: Sudo execution requires the built binary at
+            # ~/.local/bin/mvm. Run "cp dist/mvm ~/.local/bin/mvm" and
+            # "python scripts/build_services.py" to enable this test.
+            pytest.skip("mvm binary not at ~/.local/bin/mvm — cannot run sudo")
+
+        # Remove any running VMs first (left by earlier tests in this file)
+        vms = json.loads(
+            _run_mvm(mvm_binary, "vm", "ls", "--json", check=False).stdout
+            or "[]"
+        )
+        for vm in vms:
+            _run_mvm(mvm_binary, "vm", "rm", vm["name"], "--force", check=False)
+
+        result = subprocess.run(
+            ["sudo", str(mvm_bin), "host", "reset", "--force"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, (
+            f"host reset --force failed: {result.stderr}"
+        )
+        # L1: Verify stdout contains human-readable output about the reset
+        assert len(result.stdout.strip()) > 0, (
+            f"host reset --force produced no stdout: stderr={result.stderr}"
         )

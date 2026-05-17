@@ -36,6 +36,43 @@ pytestmark = [
 ]
 
 
+def _check_native_nftables() -> bool:
+    """Return True if the system supports native nftables (not iptables-nft)."""
+    import subprocess as _subprocess
+
+    result = _subprocess.run(
+        [
+            "sudo",
+            "-n",
+            "nft",
+            "-c",
+            "add",
+            "rule",
+            "ip",
+            "filter",
+            "FORWARD",
+            "accept",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    return result.returncode == 0
+
+
+if not _check_native_nftables():
+    # Skip-reason: This module requires native nftables (not iptables-nft
+    # compatibility layer). The _check_native_nftables() helper tests whether
+    # ``nft -c`` succeeds for an ``ip filter FORWARD`` rule — if it fails,
+    # the system only supports iptables-nft which lacks direct nft rule
+    # verification. To run unconditionally, the test would need to parse
+    # compatibility-layer output or switch to iptables-equivalent assertions.
+    pytest.skip(
+        "Native nftables not available (system uses iptables-nft)",
+        allow_module_level=True,
+    )
+
+
 # ============================================================================
 # Helpers
 # ============================================================================
@@ -408,7 +445,12 @@ class TestNFTablesFirewallBackend:
 def _nftables_env(mvm_binary: str):
     """Set firewall backend to nftables and restore on class teardown."""
     orig_result = _run_mvm(
-        mvm_binary, "config", "get", "settings", "firewall_backend", check=False,
+        mvm_binary,
+        "config",
+        "get",
+        "settings",
+        "firewall_backend",
+        check=False,
     )
     orig_fw = "iptables"
     if orig_result.returncode == 0 and orig_result.stdout.strip():
@@ -417,11 +459,21 @@ def _nftables_env(mvm_binary: str):
                 orig_fw = line.split("=", 1)[1].strip()
                 break
     _run_mvm(
-        mvm_binary, "config", "set", "settings", "firewall_backend", "nftables",
+        mvm_binary,
+        "config",
+        "set",
+        "settings",
+        "firewall_backend",
+        "nftables",
     )
     yield orig_fw
     _run_mvm(
-        mvm_binary, "config", "set", "settings", "firewall_backend", orig_fw,
+        mvm_binary,
+        "config",
+        "set",
+        "settings",
+        "firewall_backend",
+        orig_fw,
         check=False,
     )
 
@@ -445,7 +497,9 @@ class TestAtomicRuleSync:
 
     def test_conntrack_rule_present_after_sync(
         # Rationale: Uses module_network fixture. Verifies conntrack rules in MVM-FORWARD and MVM-NOCLOUDNET-INPUT.
-        self, mvm_binary: str, module_network: str
+        self,
+        mvm_binary: str,
+        module_network: str,
     ) -> None:
         """Verify conntrack established/related accept rule exists after sync."""
         _run_mvm(mvm_binary, "network", "sync")
@@ -464,7 +518,9 @@ class TestAtomicRuleSync:
 
     def test_sync_idempotent_no_rule_duplication(
         # Rationale: Uses module_network fixture. Verifies nftables rule count is stable across syncs.
-        self, mvm_binary: str, module_network: str
+        self,
+        mvm_binary: str,
+        module_network: str,
     ) -> None:
         """Sync twice — nftables rule count must not increase.
 
@@ -488,7 +544,9 @@ class TestAtomicRuleSync:
 
     def test_sync_preserves_masquerade_rule(
         # Rationale: Uses module_network fixture. Verifies MASQUERADE rule persists and bridge is referenced in FORWARD.
-        self, mvm_binary: str, module_network: str
+        self,
+        mvm_binary: str,
+        module_network: str,
     ) -> None:
         """MASQUERADE rule in MVM-POSTROUTING persists after sync."""
         _run_mvm(mvm_binary, "network", "sync")
@@ -499,7 +557,9 @@ class TestAtomicRuleSync:
         )
 
         # Also verify the bridge is referenced in FORWARD
-        inspect = _run_mvm(mvm_binary, "network", "inspect", module_network, "--json")
+        inspect = _run_mvm(
+            mvm_binary, "network", "inspect", module_network, "--json"
+        )
         net_data = json.loads(inspect.stdout)
         bridge = net_data["bridge"]
         assert _nft_has_rule_with("MVM-FORWARD", bridge, "accept"), (

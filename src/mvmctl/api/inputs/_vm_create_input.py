@@ -693,11 +693,55 @@ class VMCreateRequest:
         return network
 
     def _resolve_binary(self) -> BinaryItem:
-        """Resolve firecracker binary to path and ID."""
+        """Resolve firecracker binary to path and ID.
+
+        Resolution order:
+        1. ``binary_id`` (from DB, e.g. ``mvm bin default``).
+        2. ``firecracker_bin`` (raw filesystem path, e.g. ``--firecracker-bin``).
+        3. Default binary from ``BinaryService.get_default_firecracker()``.
+        """
 
         fc_binary: BinaryItem | None
+
         if self._inputs.binary_id is not None:
             fc_binary = self._binary_resolver.resolve(self._inputs.binary_id)
+
+        elif self._inputs.firecracker_bin is not None:
+            bin_path = Path(self._inputs.firecracker_bin)
+            if not bin_path.exists() or not os.access(bin_path, os.X_OK):
+                raise BinaryNotFoundError(
+                    f"Firecracker binary not found at {bin_path}. "
+                    "Use 'mvm bin pull <version>' or provide a valid path."
+                )
+
+            # Extract version from filename.
+            # firecracker-v1.15.1  ->  "1.15.1"
+            # firecracker-dev-abc  ->  "dev-abc"
+            # fallback             ->  "custom-{path_hash}"
+            stem = bin_path.name
+            if stem.startswith("firecracker-v"):
+                version = stem[len("firecracker-v") :]
+            elif stem.startswith("firecracker-"):
+                version = stem[len("firecracker-") :]
+            else:
+                from hashlib import sha256
+
+                version = (
+                    f"custom-{sha256(str(bin_path).encode()).hexdigest()[:12]}"
+                )
+
+            binary_item = BinaryService._create_binary_item(
+                "firecracker", version, bin_path
+            )
+
+            # Upsert so the binary is visible in ``mvm bin ls``.
+            binary_repo = BinaryRepository(self._db)
+            existing = binary_repo.get(binary_item.id)
+            if existing is None:
+                binary_repo.upsert(binary_item)
+
+            fc_binary = binary_item
+
         else:
             binary_service = BinaryService(BinaryRepository(self._db))
             fc_binary = binary_service.get_default_firecracker()

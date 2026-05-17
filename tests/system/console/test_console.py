@@ -31,11 +31,8 @@ class TestConsoleState:
             "--state",
         )
         assert result.returncode == 0
-        combined = result.stdout + result.stderr
-        assert (
-            "Console" in combined
-            or "running" in combined
-            or "stopped" in combined
+        assert "relay" in result.stdout.lower(), (
+            f"Expected console relay state output, got: {result.stdout}"
         )
 
     def test_console_state_by_name_flag(self, mvm_binary, module_vm):
@@ -49,11 +46,8 @@ class TestConsoleState:
             "--state",
         )
         assert result.returncode == 0
-        combined = result.stdout + result.stderr
-        assert (
-            "Console" in combined
-            or "running" in combined
-            or "stopped" in combined
+        assert "relay" in result.stdout.lower(), (
+            f"Expected console relay state output, got: {result.stdout}"
         )
 
     def test_console_state_by_ip(self, mvm_binary, module_vm):
@@ -62,6 +56,8 @@ class TestConsoleState:
         # console state resolution by IP address.
         ip = module_vm.get("ipv4")
         if not ip:
+            # Skip-reason: VM was created without DHCP lease or network.
+            # Console state by IP requires a known IPv4 address.
             pytest.skip("VM has no IPv4 address assigned")
         result = _run_mvm(
             mvm_binary,
@@ -70,11 +66,8 @@ class TestConsoleState:
             "--state",
         )
         assert result.returncode == 0
-        combined = result.stdout + result.stderr
-        assert (
-            "Console" in combined
-            or "running" in combined
-            or "stopped" in combined
+        assert "relay" in result.stdout.lower(), (
+            f"Expected console relay state output, got: {result.stdout}"
         )
 
 
@@ -98,9 +91,8 @@ class TestConsoleKill:
         )
 
         if result.returncode == 0:
-            assert (
-                "stopped" in result.stdout
-                or "killed" in (result.stdout + result.stderr).lower()
+            assert "stopped" in result.stdout, (
+                f"Expected 'stopped' in console kill output, got: {result.stdout}"
             )
         else:
             combined = result.stdout + result.stderr

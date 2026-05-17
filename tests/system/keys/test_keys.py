@@ -13,8 +13,209 @@ from tests.system.conftest import _run_mvm, ensure_vm_deps
 pytestmark = [pytest.mark.system, pytest.mark.domain_key]
 
 
+# ============================================================================
+# Read-only classes (no resources created within tests)
+# ============================================================================
+
+
+class TestKeyInspectTree:
+    """Test SSH key inspect with tree output format."""
+
+    def test_key_inspect_tree(self, mvm_binary, created_key):
+        """Inspect key with tree-style output."""
+        # Rationale: Uses created_key fixture. Read-only — tests the
+        # --tree output format for key inspect.
+        result = _run_mvm(mvm_binary, "key", "inspect", created_key, "--tree")
+        assert result.returncode == 0
+        assert "├──" in result.stdout or "└──" in result.stdout
+
+
+class TestKeyExportForce:
+    """Test SSH key export with --force overwrite behavior."""
+
+    def test_key_export_force(self, mvm_binary, created_key, tmp_path):
+        """Export key, reject overwrite, accept with --force."""
+        # Rationale: Uses created_key + tmp_path. Tests export,
+        # overwrite rejection, and --force overwrite. No VM.
+        result = _run_mvm(
+            mvm_binary,
+            "key",
+            "export",
+            created_key,
+            "--out",
+            str(tmp_path),
+        )
+        assert result.returncode == 0
+        assert any(tmp_path.iterdir()), (
+            "Export directory should contain key files"
+        )
+
+        result = _run_mvm(
+            mvm_binary,
+            "key",
+            "export",
+            created_key,
+            "--out",
+            str(tmp_path),
+            check=False,
+        )
+        assert result.returncode != 0
+
+        result = _run_mvm(
+            mvm_binary,
+            "key",
+            "export",
+            created_key,
+            "--out",
+            str(tmp_path),
+            "--force",
+        )
+        assert result.returncode == 0
+        assert any(tmp_path.iterdir()), (
+            "Export directory should contain key files after --force"
+        )
+
+
+# ============================================================================
+# Mixed class: read-only tests first, then state-modifying, then destructive
+# ============================================================================
+
+
 class TestKeyLifecycle:
-    """Test SSH key CRUD operations."""
+    """Test SSH key CRUD operations — read-only first, destructive last."""
+
+    # ------------------------------------------------------------------
+    # Read-only tests (use created_key fixture, no mutation)
+    # ------------------------------------------------------------------
+
+    def test_key_listing(self, mvm_binary, created_key):
+        """List keys and verify created key appears."""
+        # Rationale: Uses created_key fixture (already exists via conftest).
+        # Read-only — no resources created within test.
+        result = _run_mvm(mvm_binary, "key", "ls")
+        assert result.returncode == 0
+        assert created_key in result.stdout
+
+        result = _run_mvm(mvm_binary, "key", "ls", "--json")
+        data = json.loads(result.stdout)
+        assert any(k["name"] == created_key for k in data)
+
+    def test_duplicate_key_rejection(self, mvm_binary, created_key):
+        """Reject duplicate key name."""
+        # Rationale: Uses created_key fixture. Read-only — tests
+        # error handling for duplicate key creation.
+        result = _run_mvm(
+            mvm_binary,
+            "key",
+            "create",
+            created_key,
+            "--algorithm",
+            "ed25519",
+            check=False,
+        )
+        assert result.returncode != 0
+        assert "already exists" in (result.stdout + result.stderr).lower()
+
+    def test_key_show(self, mvm_binary, created_key):
+        """Inspect key details (table output)."""
+        # Rationale: Uses created_key fixture. Read-only — tests
+        # key inspect with table output format.
+        result = _run_mvm(mvm_binary, "key", "inspect", created_key)
+        assert result.returncode == 0
+        assert created_key in result.stdout
+
+    def test_key_remove_nonexistent(self, mvm_binary):
+        """Removing a non-existent key should fail and not create artifacts."""
+        # Rationale: No resources needed — testing error path for
+        # removal of a nonexistent key name.
+        result = _run_mvm(
+            mvm_binary,
+            "key",
+            "rm",
+            "nonexistent-key-name-xyz",
+            check=False,
+        )
+        assert result.returncode != 0
+        assert "not found" in (result.stdout + result.stderr).lower()
+
+        result = _run_mvm(mvm_binary, "key", "ls", "--json", check=False)
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            assert not any(
+                k["name"] == "nonexistent-key-name-xyz" for k in data
+            )
+
+    def test_key_inspect_json(self, mvm_binary, created_key):
+        """Inspect key with JSON output."""
+        # Rationale: Uses created_key fixture. Read-only — validates
+        # JSON output structure for key inspect.
+        result = _run_mvm(mvm_binary, "key", "inspect", created_key, "--json")
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert "name" in data
+
+    def test_key_export(self, mvm_binary, created_key, tmp_path):
+        """Export a key to a file and verify files exist on disk."""
+        # Rationale: Uses created_key + tmp_path (cheapest fixtures).
+        # Read-only with filesystem assertion on export output.
+        result = _run_mvm(
+            mvm_binary,
+            "key",
+            "export",
+            created_key,
+            "--out",
+            str(tmp_path),
+        )
+        assert result.returncode == 0
+        assert any(tmp_path.iterdir()), (
+            "Export directory should contain key files"
+        )
+
+    def test_key_list_json(self, mvm_binary, created_key):
+        """List keys in JSON format."""
+        # Rationale: Uses created_key fixture. Read-only — validates
+        # JSON list structure for key listing.
+        result = _run_mvm(mvm_binary, "key", "ls", "--json")
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert isinstance(data, list)
+        assert any(k["name"] == created_key for k in data)
+
+    # ------------------------------------------------------------------
+    # Serial state-modifying tests (modify shared default state)
+    # ------------------------------------------------------------------
+
+    @pytest.mark.serial
+    def test_key_set_default(self, mvm_binary, created_key):
+        """Set key as default and verify is_default in ls --json."""
+        # Rationale: Uses created_key fixture. Modifies shared default
+        # state — marked serial. No VM needed.
+        result = _run_mvm(mvm_binary, "key", "default", created_key)
+        assert result.returncode == 0
+
+        result = _run_mvm(mvm_binary, "key", "ls", "--json")
+        data = json.loads(result.stdout)
+        key_entry = next((k for k in data if k["name"] == created_key), None)
+        assert key_entry is not None
+        assert key_entry.get("is_default")
+
+    @pytest.mark.serial
+    def test_key_set_default_clear(self, mvm_binary, created_key):
+        """Set key as default then clear the default."""
+        # Rationale: Uses created_key fixture. Modifies shared default
+        # state — marked serial. No VM needed.
+        _run_mvm(mvm_binary, "key", "default", created_key)
+        _run_mvm(mvm_binary, "key", "default", "--clear")
+
+        result = _run_mvm(mvm_binary, "key", "ls", "--json")
+        data = json.loads(result.stdout)
+        key_entry = next((k for k in data if k["name"] == created_key), None)
+        assert key_entry is not None
+        assert not key_entry.get("is_default")
+
+    # ------------------------------------------------------------------
+    # Destructive tests (create resources that are cleaned up)
+    # ------------------------------------------------------------------
 
     def test_key_create_ed25519(self, mvm_binary, unique_key_name):
         """Create ed25519 SSH key and verify via ls --json."""
@@ -60,55 +261,27 @@ class TestKeyLifecycle:
         finally:
             _run_mvm(mvm_binary, "key", "rm", unique_key_name, check=False)
 
-    def test_key_listing(self, mvm_binary, created_key):
-        """List keys and verify created key appears."""
-        # Rationale: Uses created_key fixture (already exists via conftest).
-        # Read-only — no resources created within test.
-        result = _run_mvm(mvm_binary, "key", "ls")
-        assert result.returncode == 0
-        assert created_key in result.stdout
+    def test_key_create_ecdsa(self, mvm_binary, unique_key_name):
+        """Create ECDSA SSH key and verify via ls --json."""
+        # Rationale: Uses unique_key_name (cheapest fixture) to create
+        # an ECDSA key and verify via ls --json. No VM needed.
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "key",
+                "create",
+                unique_key_name,
+                "--algorithm",
+                "ecdsa",
+            )
+            assert result.returncode == 0
+            assert unique_key_name in result.stdout
 
-        result = _run_mvm(mvm_binary, "key", "ls", "--json")
-        data = json.loads(result.stdout)
-        assert any(k["name"] == created_key for k in data)
-
-    @pytest.mark.serial
-    def test_key_set_default(self, mvm_binary, created_key):
-        """Set key as default and verify is_default in ls --json."""
-        # Rationale: Uses created_key fixture. Modifies shared default
-        # state — marked serial. No VM needed.
-        result = _run_mvm(mvm_binary, "key", "default", created_key)
-        assert result.returncode == 0
-
-        result = _run_mvm(mvm_binary, "key", "ls", "--json")
-        data = json.loads(result.stdout)
-        key_entry = next((k for k in data if k["name"] == created_key), None)
-        assert key_entry is not None
-        assert key_entry.get("is_default")
-
-    def test_duplicate_key_rejection(self, mvm_binary, created_key):
-        """Reject duplicate key name."""
-        # Rationale: Uses created_key fixture. Read-only — tests
-        # error handling for duplicate key creation.
-        result = _run_mvm(
-            mvm_binary,
-            "key",
-            "create",
-            created_key,
-            "--algorithm",
-            "ed25519",
-            check=False,
-        )
-        assert result.returncode != 0
-        assert "already exists" in (result.stdout + result.stderr).lower()
-
-    def test_key_show(self, mvm_binary, created_key):
-        """Inspect key details (table output)."""
-        # Rationale: Uses created_key fixture. Read-only — tests
-        # key inspect with table output format.
-        result = _run_mvm(mvm_binary, "key", "inspect", created_key)
-        assert result.returncode == 0
-        assert created_key in result.stdout
+            result = _run_mvm(mvm_binary, "key", "ls", "--json")
+            data = json.loads(result.stdout)
+            assert any(k["name"] == unique_key_name for k in data)
+        finally:
+            _run_mvm(mvm_binary, "key", "rm", unique_key_name, check=False)
 
     def test_key_add_existing(self, mvm_binary, unique_key_name, tmp_path):
         """Import an existing SSH public key and verify via ls --json."""
@@ -135,97 +308,6 @@ class TestKeyLifecycle:
                 "add",
                 unique_key_name,
                 str(key_path) + ".pub",
-            )
-            assert result.returncode == 0
-            assert unique_key_name in result.stdout
-
-            result = _run_mvm(mvm_binary, "key", "ls", "--json")
-            data = json.loads(result.stdout)
-            assert any(k["name"] == unique_key_name for k in data)
-        finally:
-            _run_mvm(mvm_binary, "key", "rm", unique_key_name, check=False)
-
-    def test_key_remove_nonexistent(self, mvm_binary):
-        """Removing a non-existent key should fail and not create artifacts."""
-        # Rationale: No resources needed — testing error path for
-        # removal of a nonexistent key name.
-        result = _run_mvm(
-            mvm_binary,
-            "key",
-            "rm",
-            "nonexistent-key-name-xyz",
-            check=False,
-        )
-        assert result.returncode != 0
-        assert "not found" in (result.stdout + result.stderr).lower()
-
-        result = _run_mvm(mvm_binary, "key", "ls", "--json", check=False)
-        if result.returncode == 0:
-            data = json.loads(result.stdout)
-            assert not any(
-                k["name"] == "nonexistent-key-name-xyz" for k in data
-            )
-
-    def test_key_inspect_json(self, mvm_binary, created_key):
-        """Inspect key with JSON output."""
-        # Rationale: Uses created_key fixture. Read-only — validates
-        # JSON output structure for key inspect.
-        result = _run_mvm(mvm_binary, "key", "inspect", created_key, "--json")
-        assert result.returncode == 0
-        data = json.loads(result.stdout)
-        assert "name" in data
-
-    @pytest.mark.serial
-    def test_key_set_default_clear(self, mvm_binary, created_key):
-        """Set key as default then clear the default."""
-        # Rationale: Uses created_key fixture. Modifies shared default
-        # state — marked serial. No VM needed.
-        _run_mvm(mvm_binary, "key", "default", created_key)
-        _run_mvm(mvm_binary, "key", "default", "--clear")
-
-        result = _run_mvm(mvm_binary, "key", "ls", "--json")
-        data = json.loads(result.stdout)
-        key_entry = next((k for k in data if k["name"] == created_key), None)
-        assert key_entry is not None
-        assert not key_entry.get("is_default")
-
-    def test_key_export(self, mvm_binary, created_key, tmp_path):
-        """Export a key to a file and verify files exist on disk."""
-        # Rationale: Uses created_key + tmp_path (cheapest fixtures).
-        # Read-only with filesystem assertion on export output.
-        result = _run_mvm(
-            mvm_binary,
-            "key",
-            "export",
-            created_key,
-            "--out",
-            str(tmp_path),
-        )
-        assert result.returncode == 0
-        assert any(tmp_path.iterdir()), (
-            "Export directory should contain key files"
-        )
-
-    def test_key_list_json(self, mvm_binary, created_key):
-        """List keys in JSON format."""
-        # Rationale: Uses created_key fixture. Read-only — validates
-        # JSON list structure for key listing.
-        result = _run_mvm(mvm_binary, "key", "ls", "--json")
-        assert result.returncode == 0
-        data = json.loads(result.stdout)
-        assert isinstance(data, list)
-        assert any(k["name"] == created_key for k in data)
-
-    def test_key_create_ecdsa(self, mvm_binary, unique_key_name):
-        """Create ECDSA SSH key and verify via ls --json."""
-        try:
-            result = _run_mvm(
-                mvm_binary,
-                "key",
-                "create",
-                unique_key_name,
-                "--algorithm",
-                "ecdsa",
             )
             assert result.returncode == 0
             assert unique_key_name in result.stdout
@@ -310,6 +392,11 @@ class TestKeyLifecycle:
         finally:
             _run_mvm(mvm_binary, "key", "rm", key1, check=False)
             _run_mvm(mvm_binary, "key", "rm", key2, check=False)
+
+
+# ============================================================================
+# Destructive classes (create/modify key resources)
+# ============================================================================
 
 
 class TestKeyCreateAdvanced:
@@ -451,18 +538,6 @@ class TestKeyCreateAdvanced:
             _run_mvm(mvm_binary, "key", "rm", unique_key_name, check=False)
 
 
-class TestKeyInspectTree:
-    """Test SSH key inspect with tree output format."""
-
-    def test_key_inspect_tree(self, mvm_binary, created_key):
-        """Inspect key with tree-style output."""
-        # Rationale: Uses created_key fixture. Read-only — tests the
-        # --tree output format for key inspect.
-        result = _run_mvm(mvm_binary, "key", "inspect", created_key, "--tree")
-        assert result.returncode == 0
-        assert "├──" in result.stdout or "└──" in result.stdout
-
-
 class TestKeyAddOverwrite:
     """Test SSH key add with overwrite behavior."""
 
@@ -507,47 +582,14 @@ class TestKeyAddOverwrite:
         )
         assert result.returncode == 0
 
+        # Verify the key still exists in listing after --force overwrite
+        ls_result = _run_mvm(mvm_binary, "key", "ls", "--json")
+        data = json.loads(ls_result.stdout)
+        assert any(k["name"] == key_name for k in data), (
+            "Key should still be listed after --force overwrite"
+        )
+
         _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
-
-
-class TestKeyExportForce:
-    """Test SSH key export with --force overwrite behavior."""
-
-    def test_key_export_force(self, mvm_binary, created_key, tmp_path):
-        """Export key, reject overwrite, accept with --force."""
-        # Rationale: Uses created_key + tmp_path. Tests export,
-        # overwrite rejection, and --force overwrite. No VM.
-        result = _run_mvm(
-            mvm_binary,
-            "key",
-            "export",
-            created_key,
-            "--out",
-            str(tmp_path),
-        )
-        assert result.returncode == 0
-
-        result = _run_mvm(
-            mvm_binary,
-            "key",
-            "export",
-            created_key,
-            "--out",
-            str(tmp_path),
-            check=False,
-        )
-        assert result.returncode != 0
-
-        result = _run_mvm(
-            mvm_binary,
-            "key",
-            "export",
-            created_key,
-            "--out",
-            str(tmp_path),
-            "--force",
-        )
-        assert result.returncode == 0
 
 
 class TestKeyRunningVMDependency:
@@ -595,6 +637,9 @@ class TestKeyRunningVMDependency:
                     key_name,
                 )
             except RuntimeError as e:
+                # Skip-reason: No loop-mount provisioner means VM provisioning
+                # is impossible without the mvm-services binaries being built
+                # and registered. Run `python scripts/build_services.py` first.
                 if "No provisioner available" in str(e):
                     pytest.skip(
                         "No loop-mount provisioner available "
@@ -697,6 +742,9 @@ class TestKeyDefaults:
                     f"{key1},{key2}",
                 )
             except RuntimeError as e:
+                # Skip-reason: No loop-mount provisioner means VM provisioning
+                # is impossible without the mvm-services binaries being built
+                # and registered. Run `python scripts/build_services.py` first.
                 if "No provisioner available" in str(e):
                     pytest.skip(
                         "No loop-mount provisioner available "

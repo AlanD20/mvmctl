@@ -110,6 +110,72 @@ class TestCachePruneDryRun:
         assert any(n["name"] == network_name for n in networks)
 
 
+class TestCachePruneEdgeCases:
+    """Test edge cases for cache prune command."""
+
+    def test_cache_prune_with_nonexistent_category(self, mvm_binary):
+        """Pruning a nonexistent category should fail."""
+        # Rationale: No resources needed — testing CLI validation for
+        # nonexistent resource category.
+        result = _run_mvm(
+            mvm_binary,
+            "cache",
+            "prune",
+            "nonexistent-category",
+            "--dry-run",
+            check=False,
+        )
+        assert result.returncode != 0
+
+    def test_cache_prune_nonexistent_category_flag(self, mvm_binary):
+        """cache prune with an unknown flag should fail."""
+        # Rationale: No resources needed — testing CLI validation for
+        # unknown flag in prune command.
+        result = _run_mvm(
+            mvm_binary, "cache", "prune", "--nonexistent-category", check=False
+        )
+        assert result.returncode != 0
+        combined = (result.stdout + result.stderr).lower()
+        assert "nonexistent-category" in combined
+
+    def test_cache_prune_without_category_or_all_fails(self, mvm_binary):
+        """cache prune without resource and --all should fail with guidance."""
+        # Rationale: No resources needed — testing CLI error guidance
+        # when no arguments are provided.
+        result = _run_mvm(mvm_binary, "cache", "prune", check=False)
+        assert result.returncode != 0
+        combined = (result.stdout + result.stderr).lower()
+        assert "--all" in combined
+
+    @pytest.mark.serial
+    def test_cache_prune_default_image_skipped_or_warns(self, mvm_binary):
+        """Pruning images should skip the default image or warn."""
+        # Rationale: Only needs image listing. Tests that the default
+        # image is preserved during prune — no VM needed.
+        ls_result = _run_mvm(mvm_binary, "image", "ls", "--json")
+        images: list[dict[str, Any]] = json.loads(ls_result.stdout)
+        default_image = next(
+            (img for img in images if img.get("is_default")), None
+        )
+
+        result = _run_mvm(mvm_binary, "cache", "prune", "image", "--force")
+        assert result.returncode == 0
+
+        if default_image:
+            ls_after = _run_mvm(mvm_binary, "image", "ls", "--json")
+            images_after: list[dict[str, Any]] = json.loads(ls_after.stdout)
+            default_after = next(
+                (img for img in images_after if img.get("is_default")), None
+            )
+            assert default_after is not None
+        else:
+            # No default image: prune may remove non-default images
+            # (output will mention pruned count) or find nothing to remove
+            ls_after = _run_mvm(mvm_binary, "image", "ls", "--json")
+            images_after = json.loads(ls_after.stdout)
+            assert result.returncode == 0
+
+
 class TestCacheClean:
     """Test cache clean command."""
 
@@ -153,7 +219,7 @@ class TestCacheClean:
             result = _run_mvm(mvm_binary, "cache", "clean", check=False)
             assert result.returncode != 0
             combined = (result.stdout + result.stderr).lower()
-            assert any(s in combined for s in ["in use", "running", "cannot"])
+            assert "in use" in combined
 
             result_vm = _run_mvm(mvm_binary, "vm", "ls", "--json", check=False)
             if result_vm.returncode == 0:
@@ -195,74 +261,15 @@ class TestCachePruneActual:
             mvm_binary, "cache", "prune", "misc", "--force", check=False
         )
         if result.returncode != 0:
+            # Skip-reason: Misc prune may fail in some environments
+            # (e.g., no temp files to prune, or they were already pruned).
+            # Rather than fail the test, skip and document the condition.
             pytest.skip(f"Misc prune with --force failed: {result.stderr}")
         assert result.returncode == 0
 
-
-class TestCachePruneEdgeCases:
-    """Test edge cases for cache prune command."""
-
-    def test_cache_prune_with_nonexistent_category(self, mvm_binary):
-        """Pruning a nonexistent category should fail."""
-        # Rationale: No resources needed — testing CLI validation for
-        # nonexistent resource category.
-        result = _run_mvm(
-            mvm_binary,
-            "cache",
-            "prune",
-            "nonexistent-category",
-            "--dry-run",
-            check=False,
-        )
-        assert result.returncode != 0
-
-    def test_cache_prune_nonexistent_category_flag(self, mvm_binary):
-        """cache prune with an unknown flag should fail."""
-        # Rationale: No resources needed — testing CLI validation for
-        # unknown flag in prune command.
-        result = _run_mvm(
-            mvm_binary, "cache", "prune", "--nonexistent-category", check=False
-        )
-        assert result.returncode != 0
-        combined = (result.stdout + result.stderr).lower()
-        assert any(s in combined for s in ["invalid", "unknown", "category"])
-
-    def test_cache_prune_without_category_or_all_fails(self, mvm_binary):
-        """cache prune without resource and --all should fail with guidance."""
-        # Rationale: No resources needed — testing CLI error guidance
-        # when no arguments are provided.
-        result = _run_mvm(mvm_binary, "cache", "prune", check=False)
-        assert result.returncode != 0
-        combined = (result.stdout + result.stderr).lower()
-        assert any(s in combined for s in ["category", "specify", "--all"])
-
-    @pytest.mark.serial
-    def test_cache_prune_default_image_skipped_or_warns(self, mvm_binary):
-        """Pruning images should skip the default image or warn."""
-        # Rationale: Only needs image listing. Tests that the default
-        # image is preserved during prune — no VM needed.
-        ls_result = _run_mvm(mvm_binary, "image", "ls", "--json")
-        images: list[dict[str, Any]] = json.loads(ls_result.stdout)
-        default_image = next(
-            (img for img in images if img.get("is_default")), None
-        )
-
-        result = _run_mvm(mvm_binary, "cache", "prune", "image", "--force")
-        assert result.returncode == 0
-
-        if default_image:
-            ls_after = _run_mvm(mvm_binary, "image", "ls", "--json")
-            images_after: list[dict[str, Any]] = json.loads(ls_after.stdout)
-            default_after = next(
-                (img for img in images_after if img.get("is_default")), None
-            )
-            assert default_after is not None
-        else:
-            # No default image: prune may remove non-default images
-            # (output will mention pruned count) or find nothing to remove
-            ls_after = _run_mvm(mvm_binary, "image", "ls", "--json")
-            images_after = json.loads(ls_after.stdout)
-            assert result.returncode == 0
+        # L1: Verify the cache is still functional after prune
+        init_result = _run_mvm(mvm_binary, "cache", "init")
+        assert init_result.returncode == 0
 
 
 # ── Module-level helpers ──────────────────────────────────────────────────
@@ -433,6 +440,9 @@ class TestCachePruneNonDryRun:
                 if not k.get("is_default") and k.get("is_present")
             ]
             if not non_default:
+                # Skip-reason: No non-default kernel available to prune and
+                # could not pull one from remote. This happens when network
+                # is unavailable or the remote registry is unreachable.
                 pytest.skip(
                     "Could not pull a second kernel to create a non-default entry"
                 )
@@ -522,6 +532,9 @@ class TestCachePruneNonDryRun:
                         and b.get("name") in ("firecracker",)
                     ]
             if not non_default:
+                # Skip-reason: No non-default firecracker binary available
+                # to prune (only one version cached) and could not pull a
+                # second version from remote (network may be unavailable).
                 pytest.skip("No non-default present binary available to prune")
 
         bin_dir = Path.home() / ".cache" / "mvmctl" / "bin"
@@ -595,6 +608,9 @@ class TestCachePruneNonDryRun:
             images = json.loads(img_result.stdout)
 
         if not images:
+            # Skip-reason: No images in cache to prune. This happens when
+            # images have already been pruned or never pulled. An image
+            # pull would be needed first (requires network access).
             pytest.skip("No images available to prune")
 
         result = _run_mvm(

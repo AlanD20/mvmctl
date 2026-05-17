@@ -40,6 +40,15 @@ class TestConfigLifecycle:
                 f"Unexpected value format: {value_str}"
             )
 
+    def test_config_list(self, mvm_binary):
+        """List all overridable settings."""
+        # Rationale: Only needs CLI invocation. Read-only operation
+        # that lists config categories — no resources needed.
+        result = _run_mvm(mvm_binary, "config", "list")
+        assert result.returncode == 0
+        assert result.stdout.strip()
+        assert "[defaults.vm]" in result.stdout
+
     @pytest.mark.serial
     def test_config_set_and_get(self, mvm_binary):
         """Set a config value and read it back."""
@@ -98,15 +107,6 @@ class TestConfigLifecycle:
                 check=False,
             )
 
-    def test_config_list(self, mvm_binary):
-        """List all overridable settings."""
-        # Rationale: Only needs CLI invocation. Read-only operation
-        # that lists config categories — no resources needed.
-        result = _run_mvm(mvm_binary, "config", "list")
-        assert result.returncode == 0
-        assert result.stdout.strip()
-        assert "[defaults.vm]" in result.stdout
-
     @pytest.mark.serial
     def test_config_reset_all(self, mvm_binary):
         """Reset all config overrides globally."""
@@ -163,6 +163,29 @@ class TestConfigEdgeCases:
         assert "mem_size_mib" in result.stdout
         assert "boot_args" in result.stdout
 
+    def test_config_reset_no_args(self, mvm_binary):
+        """``config reset`` with no args should print guidance (exit 0)."""
+        # Rationale: Only needs CLI invocation. Read-only operation
+        # testing CLI guidance when no arguments provided.
+        result = _run_mvm(mvm_binary, "config", "reset")
+        assert result.returncode == 0
+        assert "Provide a category" in result.stdout
+
+    def test_config_set_invalid_category(self, mvm_binary):
+        """``config set`` with invalid category should fail."""
+        # Rationale: Only needs CLI invocation. Testing validation error
+        # for invalid category path — no resources needed.
+        result = _run_mvm(
+            mvm_binary,
+            "config",
+            "set",
+            "nonexistent.cat",
+            "some_key",
+            "some_value",
+            check=False,
+        )
+        assert result.returncode != 0
+
     @pytest.mark.serial
     def test_config_reset_category_only(self, mvm_binary):
         """``config reset defaults.vm`` (no key) should reset all keys in category."""
@@ -196,29 +219,6 @@ class TestConfigEdgeCases:
                 check=False,
             )
 
-    def test_config_reset_no_args(self, mvm_binary):
-        """``config reset`` with no args should print guidance (exit 0)."""
-        # Rationale: Only needs CLI invocation. Read-only operation
-        # testing CLI guidance when no arguments provided.
-        result = _run_mvm(mvm_binary, "config", "reset")
-        assert result.returncode == 0
-        assert "Provide a category" in result.stdout
-
-    def test_config_set_invalid_category(self, mvm_binary):
-        """``config set`` with invalid category should fail."""
-        # Rationale: Only needs CLI invocation. Testing validation error
-        # for invalid category path — no resources needed.
-        result = _run_mvm(
-            mvm_binary,
-            "config",
-            "set",
-            "nonexistent.cat",
-            "some_key",
-            "some_value",
-            check=False,
-        )
-        assert result.returncode != 0
-
 
 class TestConfigEdgeCasesExtended:
     """Additional config command edge cases."""
@@ -238,6 +238,7 @@ class TestConfigEdgeCasesExtended:
             check=False,
         )
         assert result.returncode == 0
+        assert "nonexistent_key_xyz" in result.stdout
 
     def test_config_set_invalid_value_type(self, mvm_binary):
         """``config set`` with an invalid value type (string for int) should fail."""

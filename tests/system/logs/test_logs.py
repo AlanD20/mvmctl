@@ -6,6 +6,7 @@ import json
 import os
 import shlex
 import subprocess
+import time
 import uuid
 from typing import Any, Generator
 
@@ -86,6 +87,71 @@ def logs_vm(mvm_binary: str) -> Generator[dict[str, Any], None, None]:
         _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
 
 
+class TestLogsBasic:
+    """Basic log output tests using module_vm fixture (read-only, L1)."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.domain_logs,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+    ]
+
+    def _start_if_needed(self, mvm_binary: str, vm_name: str) -> None:
+        """Start VM if not already running, then wait briefly for logs."""
+        vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+        entry = next((v for v in vms if v["name"] == vm_name), None)
+        if entry and entry.get("state") != "Running":
+            _run_mvm(mvm_binary, "vm", "start", vm_name)
+            # Give Firecracker time to boot and write initial log lines
+            time.sleep(2)
+
+    def test_logs_basic_output(
+        self, mvm_binary: str, module_vm: dict[str, Any]
+    ) -> None:
+        """Read boot log from a running VM via ``mvm logs <vm>``."""
+        # Rationale: Needs a real running VM (module_vm) because boot
+        # logs are produced by the Firecracker process during VM runtime.
+        # A stopped VM has no log content to read.
+        self._start_if_needed(mvm_binary, module_vm["name"])
+        result = _run_mvm(mvm_binary, "logs", module_vm["name"])
+        assert result.returncode == 0
+        assert result.stdout.strip(), (
+            "Expected non-empty boot log from running VM"
+        )
+
+    def test_logs_os_flag(
+        self, mvm_binary: str, module_vm: dict[str, Any]
+    ) -> None:
+        """Read Firecracker OS log via ``mvm logs <vm> --os``."""
+        # Rationale: Needs a running VM because OS-level Firecracker
+        # logs are generated during VM runtime, not at rest.
+        self._start_if_needed(mvm_binary, module_vm["name"])
+        result = _run_mvm(mvm_binary, "logs", module_vm["name"], "--os")
+        assert result.returncode == 0
+        assert result.stdout.strip(), (
+            "Expected non-empty OS log from running VM"
+        )
+
+    def test_logs_lines_flag(
+        self, mvm_binary: str, module_vm: dict[str, Any]
+    ) -> None:
+        """Verify ``--lines N`` flag limits output to at most N lines."""
+        # Rationale: Needs a running VM because --lines operates on
+        # actual Firecracker log output from an active VM process.
+        # Requires module_vm for module-scoped shared VM creation.
+        self._start_if_needed(mvm_binary, module_vm["name"])
+        result = _run_mvm(mvm_binary, "logs", module_vm["name"], "--lines", "5")
+        assert result.returncode == 0
+        assert result.stdout.strip(), (
+            "Expected non-empty log output with --lines 5"
+        )
+        lines = result.stdout.splitlines()
+        assert len(lines) <= 5, (
+            f"Expected at most 5 lines with --lines 5, got {len(lines)}"
+        )
+
+
 class TestVMLogs:
     """Test VM log viewing operations."""
 
@@ -102,7 +168,10 @@ class TestVMLogs:
         # Rationale: Needs a running VM (logs_vm) because OS-level
         # Firecracker logs require an active VM process.
         result = _run_mvm(mvm_binary, "logs", logs_vm["name"], "--os")
-        assert result.returncode == 0
+        assert result.returncode == 0, f"logs --os failed: {result.stderr}"
+        assert result.stdout.strip(), (
+            "Expected OS log output from running VM, got empty stdout"
+        )
 
     def test_logs_follow_runs(self, mvm_binary, logs_vm):
         """Follow log output for a brief period."""
@@ -117,8 +186,14 @@ class TestVMLogs:
                 timeout=2,
                 env={**os.environ, "NO_COLOR": "1"},
             )
-            assert result.returncode == 0
+            assert result.returncode == 0, (
+                f"logs --follow completed with error: {result.stderr}"
+            )
+            # L1: if command completed within timeout, verify output
+            assert result.stdout.strip(), "Expected log output from --follow"
         except subprocess.TimeoutExpired:
+            # Timeout expected — --follow is an infinite streaming command.
+            # Test verifies the command doesn't crash or hang.
             pass
 
     def test_logs_os_follow(self, mvm_binary, logs_vm):
@@ -140,8 +215,16 @@ class TestVMLogs:
                 timeout=2,
                 env={**os.environ, "NO_COLOR": "1"},
             )
-            assert result.returncode == 0
+            assert result.returncode == 0, (
+                f"logs --os --follow completed with error: {result.stderr}"
+            )
+            # L1: if command completed within timeout, verify output
+            assert result.stdout.strip(), (
+                "Expected log output from --os --follow"
+            )
         except subprocess.TimeoutExpired:
+            # Timeout expected — --follow is an infinite streaming command.
+            # Test verifies --os --follow doesn't crash.
             pass
 
     def test_logs_on_nonexistent_vm_fails(self, mvm_binary):
@@ -154,9 +237,15 @@ class TestVMLogs:
             "nonexistent-vm-name-12345",
             check=False,
         )
-        assert result.returncode != 0
+        assert result.returncode != 0, (
+            f"Expected non-zero for nonexistent VM, "
+            f"got rc={result.returncode}: {result.stderr}"
+        )
         combined = (result.stdout + result.stderr).lower()
-        assert any(s in combined for s in ["not found", "no such"])
+        assert "not found" in combined, (
+            f"Expected 'not found' error for nonexistent VM, "
+            f"got stdout: {result.stdout} stderr: {result.stderr}"
+        )
 
     def test_logs_with_lines_limit(
         self, mvm_binary, unique_vm_name, created_network
@@ -215,6 +304,9 @@ class TestVMLogs:
             vm_entry = next((v for v in vms if v.get("name") == vm_name), None)
             vm_ip: str | None = vm_entry.get("ipv4") if vm_entry else None
             if not vm_ip:
+                # Skip-reason: VM was stopped and may not have an IP address
+                # (DHCP lease may be released on stop). Logs by IP resolution
+                # is untestable without an IP.
                 pytest.skip("VM has no IPv4 address assigned")
 
             _run_mvm(mvm_binary, "vm", "stop", vm_name, "--force")
