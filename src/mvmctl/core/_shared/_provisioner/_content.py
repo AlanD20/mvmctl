@@ -450,8 +450,17 @@ class ProvisionerContent:
             ops.append(ChrootOp("rm -rf /var/cache/apk/* 2>/dev/null || true"))
             ops.append(
                 ChrootOp(
-                    "grep -qxF 'denyinterfaces eth0' /etc/dhcpcd.conf "
-                    "2>/dev/null || echo 'denyinterfaces eth0' >> /etc/dhcpcd.conf"
+                    # Prevent dhcpcd from managing eth0 (defensive — the
+                    # iface change below is the primary fix, but denyinterfaces
+                    # ensures dhcpcd won't touch it even if started manually).
+                    "grep -qs '^denyinterfaces eth0' /etc/dhcpcd.conf "
+                    "2>/dev/null || echo 'denyinterfaces eth0' >> /etc/dhcpcd.conf; "
+                    # MicroVM has no DHCP server — the kernel ip= parameter
+                    # already provides a static IP. Setting eth0 to manual
+                    # prevents dhcpcd from starting and timing out, which
+                    # adds ~15-20s to every Alpine boot.
+                    "sed -i 's/iface eth0 inet dhcp/iface eth0 inet manual/' "
+                    "/etc/network/interfaces"
                 )
             )
             # MicroVM boot optimizations: pre-enable SSH

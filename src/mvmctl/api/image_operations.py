@@ -170,8 +170,12 @@ class ImageOperation:
         # Single query for both early-return check and cleanup
         existing_image = repo.get_by_type(spec.type)
 
-        # Early return if image exists and not forcing re-fetch
-        if not resolved.force and existing_image is not None:
+        # Early return if image exists with matching version and not forcing
+        if (
+            not resolved.force
+            and existing_image is not None
+            and existing_image.version == spec.version
+        ):
             # Verify file exists on disk
             images_dir = CacheUtils.get_images_dir()
             resolved_path = images_dir / existing_image.path

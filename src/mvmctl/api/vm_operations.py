@@ -768,6 +768,7 @@ class VMCreateContext:
             network_id=self._vm.network.id,
             subnet=self._vm.network.subnet,
         )
+        net_service.flush_arp(self._vm.network.bridge)
 
         # ── Build config and spawn ──
         fc_config = self.build_firecracker_config()
@@ -775,9 +776,36 @@ class VMCreateContext:
             raise VMCreateError("Firecracker config is not set in context")
         fc_config.snapshot_mode = self._snapshot_mode
 
+        # Console relay setup (before spawn)
+        with timed("console_setup", self._vm.name, self._vm.id):
+            if self._vm.enable_console:
+                self.relay = ConsoleController(
+                    vm_id=self._vm.id,
+                    vm_dir=self._vm.vm_dir,
+                    vm_name=self._vm.name,
+                )
+                self.relay.create_pty()
+
+        fc_config.relay_enabled = self.relay is not None
+        fc_config.relay_client_fd = (
+            self.relay.client_fd if self.relay is not None else None
+        )
+
         spawner = FirecrackerSpawner(fc_config)
         spawner.write_to_file()
         spawner.spawn()
+
+        # Start console relay after spawn
+        if self._vm.enable_console and self.relay is not None:
+            self.relay.close_client_fd()
+            self.relay.start()
+            self.mark_created("console_relay")
+            logger.info(
+                "Console relay started for VM '%s' (socket: %s, pid: %d)",
+                self._vm.name,
+                self.relay.socket_path,
+                self.relay.pid,
+            )
 
         if spawner.pid is None:
             raise MVMError("Failed to spawn Firecracker process")

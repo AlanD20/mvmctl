@@ -624,6 +624,28 @@ mvm volume rm <volume-name> --force
 
 ---
 
+## VM boots slowly (SSH takes longer than 6-7 seconds)
+
+If a VM takes significantly longer than expected to become reachable via SSH (more than 6-7 seconds from `mvm vm start`), the image may be using a DHCP client that our provisioning did not successfully disable.
+
+MicroVM bridges have no DHCP server — the kernel `ip=` boot parameter provides a static IP. Some cloud images configure their network interface to use DHCP by default, and the DHCP client (dhcpcd, dhclient, systemd-networkd) waits for a lease that never arrives, falling through to IPv4LL after a timeout. This adds 10-20 seconds to boot.
+
+The Alpine provisioner handles this by:
+1. Setting `iface eth0 inet manual` in `/etc/network/interfaces`
+2. Adding `denyinterfaces eth0` to `/etc/dhcpcd.conf`
+
+If a different image (not Alpine) exhibits slow boot, check whether the image uses `dhcpcd`, `dhclient`, or `systemd-networkd` and disable DHCP on the primary network interface. Open a PR to add provisioning support for that image type.
+
+```bash
+# Check if the VM's network interface is using DHCP
+mvm ssh <vm-name> --cmd "cat /etc/network/interfaces 2>/dev/null || cat /etc/netplan/*.yaml 2>/dev/null || echo 'check systemd-networkd'"
+
+# Check if dhcpcd is running and slowing boot
+mvm ssh <vm-name> --cmd "ps aux | grep dhcpcd | grep -v grep"
+```
+
+---
+
 ## Debug mode
 
 For more detailed error output, use the built-in CLI flags or the environment variable:

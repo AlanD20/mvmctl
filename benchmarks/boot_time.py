@@ -153,7 +153,6 @@ def bench_image(cfg: ImageBenchConfig, *, kernel_id: str | None = None, skip_deb
         cmd = [
             "vm",
             "create",
-            "-n",
             vm_name,
             "--image",
             cfg.name,

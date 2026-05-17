@@ -13,8 +13,49 @@ from mvmctl.utils.common import CacheUtils
 logger = logging.getLogger(__name__)
 
 
+_KNOWN_MVM_COMMS: frozenset[str] = frozenset(
+    {
+        "firecracker",
+        "mvm-console-relay",
+        "mvm-nocloud-server",
+        "mvm-provision",
+        "mvm-services",
+    }
+)
+
+
 class CacheService:
     """Stateless cache cleanup — domain-agnostic infrastructure operations."""
+
+    @staticmethod
+    def scan_orphan_processes() -> list[dict[str, int | str]]:
+        """Scan /proc for mvmctl-managed processes still running after a clean attempt.
+
+        Checks for Firecracker microVM processes and mvmctl service processes
+        (console relay, nocloud server, loop-mount provisioner) that may have
+        survived the prune_all kill attempt.
+
+        Returns:
+            List of dicts with ``"pid"`` (int) and ``"comm"`` (str) for each
+            orphan process found.  Empty list if none found or /proc is
+            inaccessible.
+        """
+        orphans: list[dict[str, int | str]] = []
+        try:
+            for entry in Path("/proc").iterdir():
+                if not entry.name.isdigit():
+                    continue
+                try:
+                    comm = (entry / "comm").read_text().strip()
+                    if comm in _KNOWN_MVM_COMMS:
+                        orphans.append({"pid": int(entry.name), "comm": comm})
+                except (OSError, PermissionError, ValueError):
+                    continue
+        except PermissionError:
+            logger.warning(
+                "Cannot scan /proc for orphan processes (permission denied)"
+            )
+        return orphans
 
     @staticmethod
     def clean_stale_guestfs_state() -> bool:

@@ -642,9 +642,6 @@ def image_warm(
         mvm image warm --all
 
     """
-    if not image_id:
-        all = True
-
     console = Console()
     with console.status("", spinner="dots") as status:
 
@@ -652,12 +649,12 @@ def image_warm(
             if event.message:
                 status.update(event.message)
 
-        if all:
-            result = ImageOperation.warm(all=True, on_progress=_on_progress)
-        else:
+        if image_id is not None:
             result = ImageOperation.warm(
                 ImageInput(id=[image_id]), on_progress=_on_progress
             )
+        else:
+            result = ImageOperation.warm(all=True, on_progress=_on_progress)
     if result.is_error:
         print_error(result.message or "Warm failed")
         raise typer.Exit(code=1)

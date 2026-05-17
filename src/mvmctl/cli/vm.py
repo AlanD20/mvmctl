@@ -12,6 +12,7 @@ from rich.console import Console
 from mvmctl.api import VMCreateInput as _VMCreateInput
 from mvmctl.api import VMInput as _VMInput
 from mvmctl.api import VMOperation as _VMOperation
+from mvmctl.cli._completion import _complete_vm_names
 from mvmctl.models import VMStatus
 from mvmctl.models.result import NeedsInteraction, ProgressEvent
 
@@ -23,7 +24,6 @@ else:
     VMOperation = _VMOperation
     VMInput = _VMInput
     VMCreateInput = _VMCreateInput
-from mvmctl.cli._completion import _complete_vm_names
 from mvmctl.utils._io import (
     print_error,
     print_info,
@@ -34,6 +34,7 @@ from mvmctl.utils._io import (
     print_table,
 )
 from mvmctl.utils.cli import handle_errors
+from mvmctl.utils.common import CommonUtils
 from mvmctl.utils.crypto import HashGenerator
 
 if TYPE_CHECKING:
@@ -85,7 +86,7 @@ def vm_ls(
                 str(vm.disk_size_mib),
                 HashGenerator.shorten(vm.image_id),
                 HashGenerator.shorten(vm.kernel_id),
-                vm.created_at,
+                CommonUtils.human_readable_datetime(vm.created_at),
             ]
         )
     print_table(
@@ -129,7 +130,7 @@ def vm_ps() -> None:
                 str(vm.disk_size_mib),
                 HashGenerator.shorten(vm.image_id),
                 HashGenerator.shorten(vm.kernel_id),
-                vm.created_at,
+                CommonUtils.human_readable_datetime(vm.created_at),
             ]
         )
     print_table(

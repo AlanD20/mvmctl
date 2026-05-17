@@ -83,6 +83,30 @@ class IPTablesRuleRepository:
                 ).fetchall()
         return [self._row_to_item(row) for row in rows]
 
+    def get_by_network_id_and_interface(
+        self, network_id: str, interface: str, active_only: bool = True
+    ) -> list[FirewallRule]:
+        """Get all active rules for a network that reference a given interface.
+
+        Matches against both ``in_interface`` and ``out_interface`` columns.
+        """
+        with self._db.connect() as conn:
+            if active_only:
+                rows = conn.execute(
+                    "SELECT * FROM iptables_rules "
+                    "WHERE network_id = ? AND is_active = 1 "
+                    "AND (in_interface = ? OR out_interface = ?)",
+                    (network_id, interface, interface),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM iptables_rules "
+                    "WHERE network_id = ? "
+                    "AND (in_interface = ? OR out_interface = ?)",
+                    (network_id, interface, interface),
+                ).fetchall()
+        return [self._row_to_item(row) for row in rows]
+
     def get_by_table_chain_name(
         self, table_name: str, chain_name: str, active_only: bool = True
     ) -> list[FirewallRule]:

@@ -20,7 +20,6 @@ from mvmctl.utils.common import CacheUtils
 
 logger = logging.getLogger(__name__)
 
-
 class CacheOperation:
     """Cache management orchestration."""
 
@@ -292,18 +291,27 @@ class CacheOperation:
         """Completely clean all cache — host, prune everything, remove cache dir.
 
         This is the "nuclear option" for cache cleanup. It:
-        1. Cleans host networking (TAPs, bridges, iptables chains)
-        2. Prunes all resources (VMs, networks, images, kernels, binaries, misc)
+        1. Prunes all resources (VMs, networks, images, kernels, binaries, misc)
+        2. Cleans host networking (TAPs, bridges, iptables chains)
         3. Removes the entire cache directory at ~/.cache/mvmctl
+
+        **Safety guarantee:** If any VM processes (Firecracker or mvmctl service
+        processes) survive the prune step — because they could not be killed or
+        because the kill silently failed — the cache directory is **NOT** deleted
+        and host networking is **NOT** cleaned.  This prevents orphan VMs from
+        running without network connectivity or DB state.
 
         Args:
             dry_run: If True, only report what would be removed.
 
         Returns:
             OperationResult with item CleanResult containing prune details
-            and cache dir removal status.
+            and cache dir removal status.  Returns a ``"error"`` result with
+            code ``"cache.clean_failed"`` when processes survive the prune.
         """
         from mvmctl.api.host_operations import HostOperation
+
+        cache_dir = CacheUtils.get_cache_dir()
 
         # Step 1: Prune all cached resources
         prune_op_result = CacheOperation.prune_all(
@@ -311,12 +319,47 @@ class CacheOperation:
         )
         prune_result = prune_op_result.item
 
+        # Step 1b: Abort if any VMs failed to prune or orphan processes remain.
+        # This prevents orphaning VMs whose Firecracker/service processes
+        # survived the kill attempt but whose DB record / network will be
+        # deleted by subsequent steps.
+        if not dry_run and prune_result:
+            failed_vms = list(prune_result.failed_ids)
+            orphan_processes = CacheService.scan_orphan_processes()
+
+            if failed_vms or orphan_processes:
+                messages: list[str] = []
+                if failed_vms:
+                    messages.append(
+                        f"Failed to remove {len(failed_vms)} VM(s): "
+                        f"{', '.join(failed_vms)}"
+                    )
+                if orphan_processes:
+                    pids = [str(p["pid"]) for p in orphan_processes]
+                    names = sorted({str(p["comm"]) for p in orphan_processes})
+                    messages.append(
+                        f"Orphan process(es) still running (PID(s) "
+                        f"{', '.join(pids)}: {', '.join(names)}). "
+                        f"Kill them manually and re-run ``mvm clean``."
+                    )
+
+                result = CleanResult(
+                    prune_result=prune_result,
+                    cache_dir_removed=False,
+                    cache_dir=str(cache_dir),
+                )
+                return OperationResult(
+                    status="error",
+                    code="cache.clean_failed",
+                    message="; ".join(messages),
+                    item=result,
+                )
+
         # Step 2: Clean host networking (while DB still exists in cache dir)
         if not dry_run:
-            HostOperation.clean(CacheUtils.get_cache_dir())
+            HostOperation.clean(cache_dir)
 
         # Step 3: Remove the cache directory itself
-        cache_dir = CacheUtils.get_cache_dir()
         cache_dir_removed = False
         if cache_dir.exists():
             if not dry_run:

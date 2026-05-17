@@ -789,15 +789,19 @@ class NetworkService:
         self, tap: str, bridge: str | None = None, *, network_id: str
     ) -> None:
         """
-        Remove a TAP device and its iptables forwarding rules.
+        Remove a TAP device and its FORWARD rules.
 
         Idempotent operation - safe to call multiple times.
         If TAP doesn't exist, does nothing.
 
+        Looks up the actual FORWARD rules from the DB by network ID and
+        TAP interface, then removes them with their stored attributes —
+        avoiding expression mismatches with wildcard-vs-specific-subnet.
+
         Args:
             tap: TAP device name to remove.
             bridge: Bridge name the TAP is attached to. If None, attempts to detect.
-            network_id: Network UUID for iptables rule tracking.
+            network_id: Network UUID for rule lookup.
 
         """
         if not NetworkUtils.tap_exists(tap):
@@ -813,47 +817,22 @@ class NetworkService:
                 tap,
             )
         else:
-            rules_to_remove: list[FirewallRule] = [
-                FirewallRule(
-                    table_name=FirewallTable.FILTER,
-                    chain_name=FirewallChain.MVM_FORWARD,
-                    rule_type=FirewallRuleType.FORWARD_OUT,
-                    target=FirewallTarget.ACCEPT,
-                    network_id=network_id,
-                    protocol=FirewallProtocol.ALL,
-                    source=FirewallWildcard.ANY_CIDR,
-                    destination=FirewallWildcard.ANY_CIDR,
-                    in_interface=effective_bridge,
-                    out_interface=tap,
-                    sport=FirewallPort.ANY,
-                    dport=FirewallPort.ANY,
-                    is_active=True,
-                    network_name=effective_bridge,
-                ),
-                FirewallRule(
-                    table_name=FirewallTable.FILTER,
-                    chain_name=FirewallChain.MVM_FORWARD,
-                    rule_type=FirewallRuleType.FORWARD_IN,
-                    target=FirewallTarget.ACCEPT,
-                    network_id=network_id,
-                    protocol=FirewallProtocol.ALL,
-                    source=FirewallWildcard.ANY_CIDR,
-                    destination=FirewallWildcard.ANY_CIDR,
-                    in_interface=tap,
-                    out_interface=effective_bridge,
-                    sport=FirewallPort.ANY,
-                    dport=FirewallPort.ANY,
-                    is_active=True,
-                    network_name=effective_bridge,
-                ),
-            ]
-            result = self._tracker.batch_remove_rules(rules_to_remove)
-            if not result.success:
-                logger.warning(
-                    "Failed to remove FORWARD rules for TAP %s: %s",
-                    tap,
-                    result.error_message,
-                )
+            # Look up the actual rules from DB by network_id + tap interface
+            # to get the exact attributes (subnet, etc.) that were stored
+            # when the rules were created by ensure_tap()
+            db_rules = self._tracker.repo.get_by_network_id_and_interface(
+                network_id, tap
+            )
+            rules_to_remove: list[FirewallRule] = list(db_rules)
+
+            if rules_to_remove:
+                result = self._tracker.batch_remove_rules(rules_to_remove)
+                if not result.success:
+                    logger.warning(
+                        "Failed to remove FORWARD rules for TAP %s: %s",
+                        tap,
+                        result.error_message,
+                    )
 
         NetworkService.remove_raw_tap(tap)
 

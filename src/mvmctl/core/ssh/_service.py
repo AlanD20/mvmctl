@@ -57,6 +57,10 @@ class SSHService:
             "UserKnownHostsFile=/dev/null",
             "-o",
             "BatchMode=yes",
+            "-o",
+            "ServerAliveInterval=2",
+            "-o",
+            "ServerAliveCountMax=3",
         ]
 
         if self._timeout is not None:

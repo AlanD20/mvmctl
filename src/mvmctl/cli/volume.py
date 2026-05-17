@@ -186,8 +186,27 @@ def volume_inspect(
     disk_info = info.get("disk_info", {})
     if disk_info:
         print_section_header("DISK INFO")
-        for key, value in disk_info.items():
-            print_key_value(key, str(value))
+        if "virtual-size" in disk_info:
+            print_key_value(
+                "Virtual size",
+                CommonUtils.format_bytes_human_readable(
+                    disk_info["virtual-size"]
+                ),
+            )
+        if "actual-size" in disk_info:
+            print_key_value(
+                "Actual size",
+                CommonUtils.format_bytes_human_readable(
+                    disk_info["actual-size"]
+                ),
+            )
+        if "format" in disk_info:
+            print_key_value("Format", disk_info["format"])
+        if "dirty-flag" in disk_info:
+            print_key_value("Dirty flag", str(disk_info["dirty-flag"]))
+        children = disk_info.get("children", [])
+        if children:
+            print_key_value("Children", str(len(children)))
 
 
 @volume_app.command(name="resize")

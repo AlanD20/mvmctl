@@ -564,6 +564,9 @@ class NFTablesTracker:
                     f"in={rule.in_interface} out={rule.out_interface}"
                 )
                 logger.warning("batch_remove_rules: %s", last_error)
+                # Already gone from kernel — clean up DB entry too
+                if rule.id is not None:
+                    self._repo.mark_deleted(rule.id)
                 continue
 
             del_cmd = [
