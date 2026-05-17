@@ -87,6 +87,7 @@ from mvmctl.utils.common import CacheUtils, CommonUtils
 from mvmctl.utils.crypto import HashGenerator
 from mvmctl.utils.network import NetworkUtils
 from mvmctl.utils.timinglog import timed
+from mvmctl.utils.version import VersionGate
 
 logger = logging.getLogger(__name__)
 
@@ -575,7 +576,7 @@ class VMCreateContext:
             image_fs_type=self.resolved.image.fs_type,
             boot_args=self.resolved.boot_args,
             lsm_flags=self.resolved.lsm_flags,
-            enable_pci=self.resolved.enable_pci,
+            pci_enabled=self.resolved.pci_enabled,
             enable_console=self.resolved.enable_console,
             enable_logging=self.resolved.enable_logging,
             enable_metrics=self.resolved.enable_metrics,
@@ -634,7 +635,7 @@ class VMCreateContext:
             api_socket_path=self.fc_manager.api_socket_path.name,
             rootfs_path=self.rootfs_path.name,
             rootfs_suffix=self.resolved.image.fs_type,
-            enable_pci=self.resolved.enable_pci,
+            pci_enabled=self.resolved.pci_enabled,
             enable_logging=self.resolved.enable_logging,
             enable_metrics=self.resolved.enable_metrics,
             enable_console=self.resolved.enable_console,
@@ -1212,7 +1213,7 @@ class VMOperation:
                 "cloud_init_mode": vm.cloud_init_mode,
                 "rootfs_path": vm.rootfs_path,
                 "rootfs_suffix": vm.rootfs_suffix,
-                "enable_pci": vm.enable_pci,
+                "pci_enabled": vm.pci_enabled,
                 "enable_logging": vm.enable_logging,
                 "enable_metrics": vm.enable_metrics,
                 "enable_console": vm.enable_console,
@@ -1366,7 +1367,7 @@ class VMOperation:
             "cloud_init_mode": vm.cloud_init_mode,
             "nocloud_net_port": vm.nocloud_net_port,
             "nocloud_net_pid": vm.nocloud_net_pid,
-            "enable_pci": vm.enable_pci,
+            "pci_enabled": vm.pci_enabled,
             "enable_console": vm.enable_console,
             "enable_logging": vm.enable_logging,
             "enable_metrics": vm.enable_metrics,
@@ -1801,7 +1802,7 @@ class VMOperation:
                 enable_console=vm.enable_console,
             ),
             firecracker=VMExportFirecrackerConfig(
-                enable_pci=vm.enable_pci,
+                pci_enabled=vm.pci_enabled,
                 lsm_flags=vm.lsm_flags,
             ),
             cloud_init=VMExportCloudInitConfig(
@@ -1924,12 +1925,13 @@ class VMOperation:
             raise VMNotFoundError("Expected exactly one VM identifier")
         vm = resolved_vm.vms[0]
 
-        if vm.status != VMStatus.STOPPED:
-            raise VMCreateError(
-                f"Cannot attach volume to VM '{vm.name}': "
-                f"VM is in '{vm.status}' state, must be 'stopped'. "
-                "Stop the VM first, then attach the volume, then start the VM again."
-            )
+        # HOTPLUG: temporarily disabled guard — hotplug requires running VM
+        # if vm.status != VMStatus.STOPPED:
+        #     raise VMCreateError(
+        #         f"Cannot attach volume to VM '{vm.name}': "
+        #         f"VM is in '{vm.status}' state, must be 'stopped'. "
+        #         "Stop the VM first, then attach the volume, then start the VM again."
+        #     )
 
         vol_repo = VolumeRepository(db)
         vol_resolver = VolumeResolver(vol_repo)
@@ -1937,6 +1939,24 @@ class VMOperation:
 
         if vol.status != VolumeStatus.AVAILABLE:
             raise VMCreateError(f"Volume '{volume_name}' is not available")
+
+        # Hotplug the drive on a running VM.
+        if vm.status == VMStatus.RUNNING:
+            # Version gate: hotplug requires Firecracker v1.16+
+            binary_item = BinaryRepository(db).get(vm.binary_id)
+            VersionGate.require(
+                "firecracker",
+                binary_item.version if binary_item else None,
+                "1.16",
+            )
+
+            from mvmctl.core.vm._controller import VMController
+
+            try:
+                controller = VMController(entity=vm, repo=VMRepository(db))
+                controller.attach_volume(vol)
+            except Exception as exc:
+                logger.warning("Hotplug failed for drive '%s': %s", vol.id, exc)
 
         controller = VolumeController(vol, vol_repo)
         controller.attach(vm.id)
@@ -1970,16 +1990,89 @@ class VMOperation:
             raise VMNotFoundError("Expected exactly one VM identifier")
         vm = resolved_vm.vms[0]
 
-        if vm.status != VMStatus.STOPPED:
-            raise VMCreateError(
-                f"Cannot detach volume from VM '{vm.name}': "
-                f"VM is in '{vm.status}' state, must be 'stopped'. "
-                "Stop the VM first, then detach the volume, then start the VM again."
-            )
+        # HOTPLUG: temporarily disabled guard — hot-unplug requires running VM
+        # if vm.status != VMStatus.STOPPED:
+        #     raise VMCreateError(
+        #         f"Cannot detach volume from VM '{vm.name}': "
+        #         f"VM is in '{vm.status}' state, must be 'stopped'. "
+        #         "Stop the VM first, then detach the volume, then start the VM again."
+        #     )
 
         vol_repo = VolumeRepository(db)
         vol_resolver = VolumeResolver(vol_repo)
         vol = vol_resolver.resolve(volume_name)
+
+        # Hot-unplug the drive from a running VM.
+        if vm.status == VMStatus.RUNNING:
+            # Version gate: hot-unplug requires Firecracker v1.16+
+            binary_item = BinaryRepository(db).get(vm.binary_id)
+            VersionGate.require(
+                "firecracker",
+                binary_item.version if binary_item else None,
+                "1.16",
+            )
+
+            from mvmctl.core.key._resolver import KeyResolver
+            from mvmctl.core.ssh._service import SSHService
+
+            # Step 1: SSH into guest and remove the PCI device.
+            if vm.ssh_keys and vm.ipv4:
+                try:
+                    key_resolver = KeyResolver()
+                    ssh_key = key_resolver.by_id(vm.ssh_keys[0])
+                    key_path = (
+                        Path(ssh_key.private_key_path)
+                        if ssh_key.private_key_path
+                        else None
+                    )
+                    ssh_user = vm.ssh_user or "root"
+
+                    ssh = SSHService(
+                        ip=vm.ipv4,
+                        user=ssh_user,
+                        key_path=key_path,
+                        timeout=10,
+                    )
+                    # Find the last Virtio block device BDF (the hotplugged one)
+                    # and remove it. Using tail -1 to skip the root device.
+                    cmd = ssh.build_command(
+                        "lspci -D | grep 'Virtio.*block' | tail -1 | awk '{print $1}'"
+                    )
+                    result = run_cmd(cmd, capture=True, check=False, timeout=10)
+                    bdf = (
+                        result.stdout.strip() if result.returncode == 0 else ""
+                    )
+                    if bdf:
+                        remove_cmd = ssh.build_command(
+                            f"echo 1 > /sys/bus/pci/devices/{bdf}/remove"
+                        )
+                        run_cmd(
+                            remove_cmd, capture=False, check=False, timeout=10
+                        )
+                        logger.info(
+                            "Removed PCI device %s from guest for drive '%s'",
+                            bdf,
+                            vol.id,
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "SSH PCI removal for drive '%s' failed: %s",
+                        vol.id,
+                        exc,
+                    )
+
+            # Step 2: Call Firecracker API to delete the drive.
+            from mvmctl.core.vm._controller import VMController
+
+            try:
+                controller = VMController(entity=vm, repo=VMRepository(db))
+                controller.detach_volume(vol)
+            except Exception as exc:
+                logger.warning(
+                    "Firecracker delete_drive failed for '%s': %s",
+                    vol.id,
+                    exc,
+                )
 
         controller = VolumeController(vol, vol_repo)
         controller.detach()

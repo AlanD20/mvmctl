@@ -37,7 +37,7 @@ OVERRIDABLE_DEFAULTS: Final[dict[str, dict[str, Any]]] = {
         "root_gid": 0,
         "user_uid": 1000,
         "user_gid": 1000,
-        "enable_pci": False,
+        "pci_enabled": True,
         "enable_logging": True,
         "enable_metrics": False,
         "enable_console": True,

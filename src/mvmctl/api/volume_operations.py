@@ -148,6 +148,34 @@ class VolumeOperation:
                         "Use --force to remove anyway."
                     )
 
+                # When force-removing an attached volume, clean up the
+                # VM's volume_ids reference, hot-unplug if running, and
+                # update config on disk.
+                if (
+                    volume.status == VolumeStatus.ATTACHED
+                    and force
+                    and volume.vm_id
+                ):
+                    from mvmctl.core.vm._controller import VMController
+                    from mvmctl.core.vm._repository import VMRepository
+
+                    vm_repo = VMRepository(db)
+                    vm = vm_repo.get(volume.vm_id)
+                    if (
+                        vm is not None
+                        and vm.volume_ids
+                        and volume.id in vm.volume_ids
+                    ):
+                        vm.volume_ids.remove(volume.id)
+                        vm_repo.upsert(vm)
+                        # Best-effort: hot-unplug if running, always update
+                        # config on disk
+                        try:
+                            ctrl = VMController(entity=vm, repo=vm_repo)
+                            ctrl.detach_volume(volume)
+                        except Exception:
+                            pass
+
                 VolumeService(repo).remove(volume)
 
                 AuditLog.log("volume.remove", changes={"name": volume.name})

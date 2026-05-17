@@ -13,10 +13,12 @@ __all__ = [
     "fs",
     "http",
     "TimingLog",
+    "VersionGate",
 ]
 
 _LAZY_MAP: dict[str, tuple[str, str]] = {
     "TimingLog": ("mvmctl.utils.timinglog", "TimingLog"),
+    "VersionGate": ("mvmctl.utils.version", "VersionGate"),
 }
 
 

@@ -111,7 +111,7 @@ class VMExportFirecrackerConfig:
     """Firecracker feature flags."""
 
     enable_api_socket: bool | None = None
-    enable_pci: bool | None = None
+    pci_enabled: bool | None = None
     lsm_flags: str | None = None
 
 

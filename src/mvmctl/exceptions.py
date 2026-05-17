@@ -253,6 +253,10 @@ class VersionError(MVMError):
     """Raised when version resolution fails (no match found)."""
 
 
+class VersionGateError(MVMError):
+    """Binary version does not meet minimum requirement."""
+
+
 class SSHError(MVMError):
     """SSH connection or configuration failure."""
 

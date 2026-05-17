@@ -193,7 +193,7 @@ class VolumeService:
                 )
             drives.append(
                 {
-                    "drive_id": f"vol-{len(drives) + 1}",
+                    "drive_id": vol.id,
                     "path_on_host": vol.path,
                     "is_root_device": False,
                     "is_read_only": False,

@@ -9,7 +9,7 @@ import subprocess
 import time
 from collections.abc import Collection
 from pathlib import Path
-from typing import Any, NotRequired, TextIO, TypedDict, override
+from typing import Any, NotRequired, TextIO, TypedDict, cast, override
 
 from mvmctl.constants import (
     CONST_HTTP_STATUS_NO_CONTENT,
@@ -174,6 +174,8 @@ class FirecrackerSpawner:
             "--api-sock",
             str(self._api_socket_path),
         ]
+        if self._config.pci_enabled:
+            fc_cmd.append("--enable-pci")
         if not snapshot_mode:
             fc_cmd.extend(["--config-file", str(self._config_path)])
 
@@ -312,7 +314,12 @@ class FirecrackerSpawner:
         if self._config.boot_args is not None:
             boot_args = self._parse_boot_args_to_dict(self._config.boot_args)
 
-        if not self._config.enable_pci:
+        # When console is enabled (user didn't pass --no-console), ensure
+        # the kernel serial console is configured even with custom boot args.
+        if self._config.enable_console and "console" not in boot_args:
+            self._set_boot_arg(boot_args, "console", "ttyS0")
+
+        if not self._config.pci_enabled:
             self._set_boot_arg(boot_args, "pci", "off")
 
         # Use static kernel ip= parameter for early network bringup
@@ -328,6 +335,13 @@ class FirecrackerSpawner:
 
         if self._config.lsm_flags:
             self._set_boot_arg(boot_args, "lsm", self._config.lsm_flags)
+
+        if self._config.pci_enabled and not self._config.image_fs_uuid:
+            raise FirecrackerConfigError(
+                "PCI transport enabled but no filesystem UUID available for "
+                "root device identification. Use an image with a known "
+                "filesystem UUID, or pass --no-pci to disable PCI transport."
+            )
 
         if self._config.image_fs_uuid:
             self._set_boot_arg(
@@ -511,6 +525,80 @@ class FirecrackerSpawner:
 
         except OSError as exc:
             logger.warning("Failed to close filepointer(s): %s", exc)
+
+
+class FirecrackerConfigManager:
+    """Read and modify Firecracker config JSON files on disk.
+
+    Provides a clean interface for adding and removing drive entries
+    from a Firecracker VM config file without manual JSON manipulation.
+    Uses lazy loading — the config file is not read until first access.
+    """
+
+    def __init__(self, config_path: Path) -> None:
+        self._config_path = Path(config_path)
+        self._config: FirecrackerConfigDict | None = None
+
+    def _load(self) -> FirecrackerConfigDict:
+        """Load config from disk and cache it in ``self._config``.
+
+        Returns an empty config with ``"drives": []`` if the file does
+        not exist (e.g. VM not yet spawned).
+        """
+        if self._config is not None:
+            return self._config
+        try:
+            with open(self._config_path) as f:
+                loaded = cast(FirecrackerConfigDict, json.load(f))
+        except FileNotFoundError:
+            loaded = cast(FirecrackerConfigDict, {"drives": []})
+        self._config = loaded
+        return loaded
+
+    def _save(self) -> None:
+        """Write the current config back to disk with indentation."""
+        assert self._config is not None
+        self._config_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self._config_path, "w") as f:
+            json.dump(self._config, f, indent=2)
+
+    def remove_drive(self, drive_id: str) -> bool:
+        """Remove a drive entry by ``drive_id`` from the config file.
+
+        Args:
+            drive_id: The ``drive_id`` value to match against.
+
+        Returns:
+            ``True`` if a drive was actually removed, ``False`` if no
+            matching drive was found.
+
+        """
+        config = self._load()
+        drives = config.get("drives", [])
+        before = len(drives)
+        config["drives"] = [d for d in drives if d.get("drive_id") != drive_id]
+        if len(config["drives"]) < before:
+            self._save()
+            return True
+        return False
+
+    def add_drive(self, drive_config: DriveConfig) -> None:
+        """Add or update a drive entry in the config file.
+
+        If a drive with the same ``drive_id`` already exists, it is
+        replaced. Otherwise the new drive is appended.
+        """
+        config = self._load()
+        drives = config.get("drives", [])
+        drive_id = drive_config["drive_id"]
+        for i, existing in enumerate(drives):
+            if existing.get("drive_id") == drive_id:
+                drives[i] = drive_config
+                break
+        else:
+            drives.append(drive_config)
+        config["drives"] = drives
+        self._save()
 
 
 class InstanceInfo(TypedDict):
@@ -874,6 +962,27 @@ class FirecrackerClient:
             CONST_HTTP_STATUS_NO_CONTENT,
         ):
             msg = f"Failed to detach drive: {status}"
+            if data:
+                msg += f" Response: {data}"
+            raise FirecrackerClientError(msg)
+
+    def delete_drive(self, drive_id: str) -> None:
+        """Remove a drive from a running VM via DELETE /drives/{drive_id}.
+
+        Follows the Firecracker API contract for hot-unplug — the drive is
+        removed from the VM's device model without requiring a VM stop/start
+        cycle.
+
+        Args:
+            drive_id: The ID of the drive to remove.
+
+        Raises:
+            FirecrackerClientError: If the API request fails.
+
+        """
+        status, data = self._request("DELETE", f"/drives/{drive_id}")
+        if status != CONST_HTTP_STATUS_NO_CONTENT:
+            msg = f"Failed to delete drive: {status}"
             if data:
                 msg += f" Response: {data}"
             raise FirecrackerClientError(msg)

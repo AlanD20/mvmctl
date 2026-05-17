@@ -58,7 +58,7 @@ class FirecrackerConfig:
     lsm_flags: str | None
 
     # Feature flags
-    enable_pci: bool
+    pci_enabled: bool
     enable_console: bool
     enable_logging: bool
     enable_metrics: bool

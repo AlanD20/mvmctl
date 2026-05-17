@@ -212,10 +212,10 @@ def vm_create(
         "--user",
         help="Default SSH user for cloud-init (default: from user config)",
     ),
-    enable_pci: bool | None = typer.Option(
-        None,
-        "--enable-pci/--no-enable-pci",
-        help="Enable PCI device support (default: from user config)",
+    no_pci: bool = typer.Option(
+        False,
+        "--no-pci",
+        help="Disable PCI transport (default: enabled). Required for hotplug support.",
     ),
     no_console: bool = typer.Option(
         False,
@@ -311,7 +311,7 @@ def vm_create(
                 mem_size_mib=mem,
                 ssh_keys=effective_ssh_keys,
                 user=user,
-                enable_pci=enable_pci,
+                pci_enabled=not no_pci,
                 enable_console=not no_console if no_console else None,
                 enable_logging=enable_logging,
                 enable_metrics=enable_metrics,
@@ -599,7 +599,7 @@ def vm_inspect(
     print_key_value("Relay Socket", info["relay_socket_path"] or "-")
 
     print_section_header("FEATURES")
-    print_key_value("PCI", "True" if info["enable_pci"] else "False")
+    print_key_value("PCI", "True" if info["pci_enabled"] else "False")
     print_key_value("Console", "True" if info["enable_console"] else "False")
     print_key_value("Logging", "True" if info["enable_logging"] else "False")
     print_key_value("Metrics", "True" if info["enable_metrics"] else "False")

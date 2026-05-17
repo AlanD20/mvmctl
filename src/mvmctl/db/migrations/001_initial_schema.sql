@@ -146,7 +146,7 @@ CREATE TABLE vm_instances (
     disk_size_mib INTEGER NOT NULL,
     rootfs_path TEXT NOT NULL,
     rootfs_suffix TEXT NOT NULL,
-    enable_pci INTEGER NOT NULL,  -- Boolean: 0 or 1
+    pci_enabled INTEGER NOT NULL,  -- Boolean: 0 or 1
     lsm_flags TEXT NULL,
     enable_logging INTEGER NOT NULL,  -- Boolean: 0 or 1
     enable_metrics INTEGER NOT NULL,  -- Boolean: 0 or 1

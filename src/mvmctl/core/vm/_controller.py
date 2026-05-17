@@ -14,6 +14,7 @@ from mvmctl.core.vm._firecracker import FirecrackerClient
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.exceptions import MVMError, VMStateError
 from mvmctl.models import VMInstanceItem, VMStatus
+from mvmctl.models.volume import VolumeItem
 from mvmctl.utils._system import ProcessSignalHandler
 
 logger = logging.getLogger(__name__)
@@ -355,6 +356,67 @@ class VMController:
             self._vm.status = new_status
         finally:
             client.close()
+
+    def attach_volume(self, vol: VolumeItem) -> None:
+        """Hotplug a drive into the running VM and persist to config.
+
+        Args:
+            vol: The volume to attach.
+
+        """
+        from mvmctl.core.vm._firecracker import FirecrackerConfigManager
+
+        drive_config = {
+            "drive_id": vol.id,
+            "path_on_host": vol.path,
+            "is_root_device": False,
+            "is_read_only": False,
+            "cache_type": "Unsafe",
+            "io_engine": "Sync",
+        }
+        # Hotplug into the running Firecracker process
+        sock_path = self._vm.vm_dir / self._vm.api_socket_path
+        client = FirecrackerClient(sock_path)
+        try:
+            client.put_drive(drive_config)
+        finally:
+            client.close()
+        # Persist to the Firecracker config JSON so it survives reboot
+        config_mgr = FirecrackerConfigManager(
+            self._vm.vm_dir / self._vm.config_path
+        )
+        config_mgr.add_drive(drive_config)
+        logger.info(
+            "Attached volume '%s' to VM '%s'",
+            vol.id,
+            self._vm.name,
+        )
+
+    def detach_volume(self, vol: VolumeItem) -> None:
+        """Remove a drive from a running VM and update config.
+
+        Args:
+            vol: The volume to detach.
+
+        """
+        from mvmctl.core.vm._firecracker import FirecrackerConfigManager
+
+        # Call Firecracker API to delete the drive
+        sock_path = self._vm.vm_dir / self._vm.api_socket_path
+        client = FirecrackerClient(sock_path)
+        try:
+            client.delete_drive(vol.id)
+        finally:
+            client.close()
+        # Update Firecracker config JSON on disk
+        FirecrackerConfigManager(
+            self._vm.vm_dir / self._vm.config_path
+        ).remove_drive(vol.id)
+        logger.info(
+            "Detached volume '%s' from VM '%s'",
+            vol.id,
+            self._vm.name,
+        )
 
 
 __all__ = ["VMController"]

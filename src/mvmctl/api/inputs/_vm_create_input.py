@@ -73,7 +73,7 @@ class VMCreateInput:
     vcpu_count: int | None = None
     mem_size_mib: int | None = None
     user: str | None = None
-    enable_pci: bool | None = None
+    pci_enabled: bool | None = None
     enable_console: bool | None = None
     enable_logging: bool | None = None
     enable_metrics: bool | None = None
@@ -123,7 +123,7 @@ class ResolvedVMCreateInput:
     network_prefix_len: int
     cloud_init_mode: CloudInitMode
     skip_ci_network_config: bool
-    enable_pci: bool
+    pci_enabled: bool
     enable_console: bool
     enable_logging: bool
     enable_metrics: bool
@@ -277,7 +277,7 @@ class VMCreateRequest:
             if vm.cloud_init_mode
             else CloudInitMode.OFF,
             skip_ci_network_config=False,
-            enable_pci=vm.enable_pci,
+            pci_enabled=vm.pci_enabled,
             enable_console=vm.enable_console,
             enable_logging=vm.enable_logging,
             enable_metrics=vm.enable_metrics,
@@ -424,9 +424,9 @@ class VMCreateRequest:
             kernel=kernel,
             binary=fc_binary,
             cloud_init_mode=ci_mode_result.mode,
-            enable_pci=self._inputs.enable_pci
-            if self._inputs.enable_pci is not None
-            else self._resolve_setting("defaults.vm", "enable_pci"),
+            pci_enabled=self._inputs.pci_enabled
+            if self._inputs.pci_enabled is not None
+            else self._resolve_setting("defaults.vm", "pci_enabled"),
             enable_console=self._inputs.enable_console
             if self._inputs.enable_console is not None
             else self._resolve_setting("defaults.vm", "enable_console"),

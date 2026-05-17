@@ -643,19 +643,25 @@ class ProvisionerContent:
 
     @classmethod
     def build_fix_fstab_ops(cls) -> list[Operation]:
-        """Generate operation to fix /etc/fstab for Firecracker (PARTUUID → /dev/vda).
+        """Generate operation to fix /etc/fstab for Firecracker.
 
         For superfloppy images (raw ext4/btrfs without partition table),
         systemd must not wait for non-existent partitions like /boot/efi
         or /dev/vda1 — that causes a 90-second timeout and emergency mode.
+
+        PARTUUID and UUID entries are commented out (not replaced) because
+        device names change under PCI transport. The kernel finds the root
+        filesystem via root=UUID= or root=PARTUUID= in boot args instead.
         """
         return [
             ChrootOp(
                 "if [ -f /etc/fstab ]; then "
-                # Replace PARTUUID root entries with /dev/vda (superfloppy safe)
-                "sed -i 's/^PARTUUID=[^[:space:]]*/\\/dev\\/vda/' /etc/fstab; "
-                # Replace UUID root entries with /dev/vda
-                "sed -i 's/^UUID=[^[:space:]]*/\\/dev\\/vda/' /etc/fstab; "
+                # Comment out PARTUUID entries — can't rely on them under PCI
+                # transport where device names change. Kernel finds root via
+                # root=UUID= or root=PARTUUID= in boot args instead.
+                "sed -i '/^PARTUUID=/s/^/#/' /etc/fstab; "
+                # Comment out UUID entries — same reasoning as PARTUUID
+                "sed -i '/^UUID=/s/^/#/' /etc/fstab; "
                 # Add noatime to root mount options for reduced metadata writes
                 "sed -i '/^\\/dev\\/vda\\s/ s/defaults/noatime,defaults/' /etc/fstab; "
                 # Comment out any remaining PARTUUID lines (non-root partitions)

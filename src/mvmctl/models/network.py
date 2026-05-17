@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum, IntEnum, StrEnum
+from enum import IntEnum, StrEnum
 from typing import TYPE_CHECKING
 
 from mvmctl.constants import (

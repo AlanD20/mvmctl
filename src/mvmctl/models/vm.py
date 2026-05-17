@@ -51,7 +51,7 @@ class VMInstanceItem:
     disk_size_mib: int
     rootfs_path: str
     rootfs_suffix: str
-    enable_pci: bool
+    pci_enabled: bool
     enable_logging: bool
     enable_metrics: bool
     enable_console: bool
@@ -83,7 +83,7 @@ class VMInstanceItem:
         CommonUtils.coerce_bool_fields(
             self,
             {
-                "enable_pci",
+                "pci_enabled",
                 "enable_logging",
                 "enable_metrics",
                 "enable_console",

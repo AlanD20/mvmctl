@@ -88,7 +88,7 @@ class VMImportRequest:
             network_name=network_name,
             requested_guest_ip=export_config.network.ip,
             requested_guest_mac=export_config.network.mac,
-            enable_pci=export_config.firecracker.enable_pci,
+            pci_enabled=export_config.firecracker.pci_enabled,
             enable_console=export_config.boot.enable_console,
             lsm_flags=export_config.firecracker.lsm_flags,
             boot_args=export_config.boot.args,
