@@ -51,6 +51,26 @@ _JUMP_RULES: list[tuple[str, str, str, str]] = [
     ("ip", "filter", "INPUT", FirewallChain.MVM_NOCLOUDNET_INPUT.value),
 ]
 
+# Built-in base chains that the MVM chains hook into via jump rules.
+# Keyed by ``(family, table, chain_name)`` → nftables hook definition.
+_BASE_CHAINS: dict[tuple[str, str, str], str] = {
+    (
+        "ip",
+        "filter",
+        "FORWARD",
+    ): "type filter hook forward priority filter; policy accept;",
+    (
+        "ip",
+        "filter",
+        "INPUT",
+    ): "type filter hook input priority filter; policy accept;",
+    (
+        "ip",
+        "nat",
+        "POSTROUTING",
+    ): "type nat hook postrouting priority srcnat; policy accept;",
+}
+
 
 class NFTablesTracker:
     """
@@ -125,6 +145,14 @@ class NFTablesTracker:
         All operations are idempotent — already-existing chains and jump
         rules are silently skipped.
         """
+        # ── Ensure system tables exist (idempotent) ──────────────────
+        for table in set(_CHAIN_TO_TABLE.values()):
+            run_cmd(
+                ["nft", "add", "table", "ip", table],
+                privileged=True,
+                check=False,
+            )
+
         # ── Create chains in system tables ────────────────────────────
         for chain, table in _CHAIN_TO_TABLE.items():
             if self._chain_exists("ip", table, chain.value):
@@ -142,6 +170,36 @@ class NFTablesTracker:
                 raise RuntimeError(
                     f"Failed to create nftables chain {chain.value} "
                     f"in ip/{table}: {e}"
+                ) from e
+
+        # ── Ensure built-in base chains exist (FORWARD, INPUT, POSTROUTING)
+        # Native nftables tables don't come with these automatically.
+        for (family, table, chain), hook_def in _BASE_CHAINS.items():
+            if self._chain_exists(family, table, chain):
+                continue
+            try:
+                run_cmd(
+                    [
+                        "nft",
+                        "add",
+                        "chain",
+                        family,
+                        table,
+                        chain,
+                        hook_def,
+                    ],
+                    privileged=True,
+                )
+                logger.info(
+                    "Created built-in chain %s in %s/%s",
+                    chain,
+                    family,
+                    table,
+                )
+            except ProcessError as e:
+                raise RuntimeError(
+                    f"Failed to create built-in chain {chain} "
+                    f"in {family}/{table}: {e}"
                 ) from e
 
         # ── Insert jump rules at position 0 of built-in chains ────────
@@ -216,6 +274,13 @@ class NFTablesTracker:
                 table.value,
             )
             return False
+
+        # Ensure the table exists before adding a chain to it.
+        run_cmd(
+            ["nft", "add", "table", "ip", table.value],
+            privileged=True,
+            check=False,
+        )
 
         try:
             run_cmd(

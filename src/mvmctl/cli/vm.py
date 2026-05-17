@@ -352,6 +352,8 @@ def vm_create(
     vms = result.item
     names = [vm.name for vm in vms]
     mvm_cli.success(f"Created: {', '.join(names)}")
+    if nested_virt:
+        mvm_cli.info("Nested virtualization: enabled")
 
 
 @vm_app.command(name="rm")

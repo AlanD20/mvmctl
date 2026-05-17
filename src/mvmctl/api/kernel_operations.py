@@ -336,6 +336,9 @@ class KernelOperation:
                 code="kernel.pulled",
                 message=f"Kernel '{kernel_item.name}' pulled successfully",
                 item=kernel_item,
+                metadata={
+                    "features": resolved.features,
+                },
             )
         except KernelError as e:
             return OperationResult(

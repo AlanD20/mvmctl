@@ -557,7 +557,7 @@ class IPTablesTracker:
 
         parts.extend(["-j", rule.target.value])
 
-        if rule.comment_tag:
+        if rule.comment_tag and self._xtcomment_available:
             parts.extend(["-m", "comment", "--comment", rule.comment_tag])
 
         return " ".join(parts)

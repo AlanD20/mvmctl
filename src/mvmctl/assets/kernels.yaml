@@ -74,9 +74,16 @@ kernel-official:
     nftables:
       desc: "nftables NAT firewall backend"
       configs:
-        - CONFIG_NFT_CHAIN_NAT
+        - CONFIG_NFT_NAT
         - CONFIG_NF_TABLES_INET
         - CONFIG_NF_NAT_MASQUERADE
+        - CONFIG_NFT_MASQ
+    tuntap:
+      desc: "TUN/TAP device support (required for VM networking)"
+      configs:
+        - CONFIG_TUN
+      requires:
+        - CONFIG_TUN=y
   options:
     version_discoveries:
       - "v6.x"

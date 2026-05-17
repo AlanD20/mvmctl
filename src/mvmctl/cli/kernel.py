@@ -273,6 +273,11 @@ def kernel_pull(
                 f"Pulled: {result.item.name} "
                 f"(ID: {mvm_cli.format_id(result.item.id)})"
             )
+            resolved_features = (result.metadata or {}).get("features", [])
+            if resolved_features:
+                mvm_cli.info(
+                    "Enabled features: " + ", ".join(resolved_features)
+                )
     else:
         # Fallback for unexpected non-OperationResult returns
         mvm_cli.success("Pull completed")
