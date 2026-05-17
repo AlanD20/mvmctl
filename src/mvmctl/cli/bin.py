@@ -120,13 +120,19 @@ def bin_ls(
 def bin_pull(
     name: str = typer.Argument(
         ...,
-        help="Binary name (e.g. firecracker)",
+        help="Binary name (only 'firecracker' is supported)",
         autocompletion=_complete_binary_versions,
     ),
     version: str | None = typer.Option(
         None,
         "--version",
         help="Version to download (e.g. 1.15.0, latest)",
+    ),
+    git_ref: str | None = typer.Option(
+        None,
+        "--git-ref",
+        help="Git ref (branch/tag/commit) to build from source. "
+        "Mutually exclusive with --version.",
     ),
     set_default: bool = typer.Option(
         False,
@@ -141,9 +147,67 @@ def bin_pull(
         help="Re-download even if version already exists",
     ),
 ) -> None:
-    """Download a Firecracker version."""
+    """Download a Firecracker version or build from source."""
     from mvmctl.exceptions import BinaryNotFoundError
 
+    # Only firecracker is supported for download/build
+    if name.lower() != "firecracker":
+        print_error(
+            f"Unsupported binary: '{name}'. "
+            "Only 'firecracker' is supported for download or build."
+        )
+        raise typer.Exit(code=1)
+
+    # --git-ref and --version are mutually exclusive
+    if git_ref and version:
+        print_error(
+            "--git-ref and --version are mutually exclusive. "
+            "Use --git-ref to build from source, or --version to download a release."
+        )
+        raise typer.Exit(code=1)
+
+    # ---- Git build path ----
+    if git_ref:
+        print_info(
+            f"Building Firecracker from ref '{git_ref}' via Docker-based devtool..."
+        )
+        print_info("  Phase 1: Cloning/updating Firecracker source (git)")
+        print_info("  Phase 2: Building release binary (5-15 min via Docker)")
+        print_info("  The build output will appear below once it starts:\n")
+
+        inputs = BinaryPullInput(
+            version="",
+            name=name,
+            git_ref=git_ref,
+            set_default=set_default,
+            download_override=False,
+        )
+        result: OperationResult[list[BinaryItem]] = BinaryOperation.pull(inputs)  # type: ignore[assignment]
+
+        print_info("")  # spacing after build output
+
+        if result.is_error:
+            print_error(result.message)
+            raise typer.Exit(code=1)
+
+        binaries = result.item or []
+        for binary in binaries:
+            short_id = HashGenerator.shorten(binary.id)
+            print_success(
+                f"Built: {binary.name} {binary.version}: {binary.resolved_path}"
+            )
+            print_info(f"  ID: {short_id}")
+
+        if set_default:
+            print_success(
+                f"Default binary set to: {binaries[0].version}"
+                if binaries
+                else ""
+            )
+
+        raise typer.Exit(code=0)
+
+    # ---- Release download path ----
     # Resolve version from remote
     remote_versions = cast(
         list[str],
@@ -189,10 +253,11 @@ def bin_pull(
 
     inputs = BinaryPullInput(
         version=normalized,
+        name=name,
         set_default=set_default,
         download_override=download_override,
     )
-    result: OperationResult[list[BinaryItem]] = BinaryOperation.pull(inputs)  # type: ignore[assignment]
+    result = BinaryOperation.pull(inputs)  # type: ignore[assignment]
 
     if result.is_error:
         print_error(result.message)

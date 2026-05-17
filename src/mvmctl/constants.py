@@ -339,6 +339,9 @@ FIRECRACKER_GITHUB_RELEASES_API_URL: Final[str] = (
 FIRECRACKER_GITHUB_DOWNLOAD_URL: Final[str] = (
     "https://github.com/firecracker-microvm/firecracker/releases/download"
 )
+FIRECRACKER_GIT_REPO_URL: Final[str] = (
+    "https://github.com/firecracker-microvm/firecracker.git"
+)
 
 
 # ===========================================================================

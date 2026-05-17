@@ -22,6 +22,9 @@ from mvmctl.constants import (
     SERVICE_BINARY_NAMES,
 )
 from mvmctl.constants import (
+    FIRECRACKER_GIT_REPO_URL as _GIT_REPO_URL,
+)
+from mvmctl.constants import (
     FIRECRACKER_GITHUB_DOWNLOAD_URL as _GITHUB_DOWNLOAD_URL,
 )
 from mvmctl.constants import (
@@ -29,7 +32,7 @@ from mvmctl.constants import (
 )
 from mvmctl.core._shared import VersionResolver
 from mvmctl.core.binary._repository import BinaryRepository
-from mvmctl.exceptions import BinaryError, HttpDownloadError
+from mvmctl.exceptions import BinaryError, HttpDownloadError, ProcessError
 from mvmctl.models import BinaryItem
 from mvmctl.utils.common import CacheUtils
 from mvmctl.utils.crypto import HashGenerator
@@ -235,6 +238,177 @@ class BinaryService:
             ),
             BinaryService._create_binary_item(
                 "jailer", normalized_version, jl_dest
+            ),
+        ]
+
+    @staticmethod
+    def build_from_source(git_ref: str, bin_dir: Path) -> list[BinaryItem]:
+        """
+        Build Firecracker from source using Docker-based devtool.
+
+        Clones (or updates) the Firecracker repo, checks out the specified
+        git ref, runs ``tools/devtool build --release``, and copies the
+        resulting ``firecracker`` and ``jailer`` binaries to ``bin_dir``.
+
+        Args:
+            git_ref: Git ref (branch, tag, or commit) to build.
+            bin_dir: Directory to store the built binaries.
+
+        Returns:
+            list[BinaryItem] with 2 items (firecracker and jailer).
+
+        Raises:
+            BinaryError: If git is not available, checkout fails,
+                the build fails, or expected binaries are missing.
+
+        """
+        from mvmctl.utils._system import run_cmd
+
+        # Check that git is available
+        if not shutil.which("git"):
+            raise BinaryError(
+                "Git is required to build from source. "
+                "Install git (e.g., 'apt install git' or 'brew install git') "
+                "and try again."
+            )
+
+        src_dir = CacheUtils.get_cache_dir() / "firecracker-src"
+
+        # Clone or update the repository
+        if not src_dir.exists():
+            logger.info(
+                "Cloning Firecracker repository (this may take a while)..."
+            )
+            try:
+                run_cmd(
+                    ["git", "clone", _GIT_REPO_URL, str(src_dir)],
+                    timeout=120,
+                    capture=False,
+                )
+            except ProcessError as e:
+                raise BinaryError(
+                    f"Failed to clone Firecracker repository: {e}"
+                ) from e
+        else:
+            logger.info("Updating existing Firecracker repository...")
+            try:
+                run_cmd(
+                    ["git", "fetch", "origin"],
+                    cwd=str(src_dir),
+                    timeout=60,
+                    capture=False,
+                )
+            except ProcessError as e:
+                raise BinaryError(
+                    f"Failed to update Firecracker repository: {e}"
+                ) from e
+
+        # Checkout the requested ref
+        try:
+            run_cmd(
+                ["git", "checkout", git_ref],
+                cwd=str(src_dir),
+                timeout=30,
+                capture=False,
+            )
+        except ProcessError as e:
+            raise BinaryError(
+                f"Failed to checkout git ref '{git_ref}': {e}"
+            ) from e
+
+        # Resolve short commit hash for the version string
+        try:
+            result = run_cmd(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=str(src_dir),
+                capture=True,
+                timeout=10,
+            )
+            short_hash = result.stdout.strip()
+        except ProcessError as e:
+            raise BinaryError(f"Failed to get commit hash: {e}") from e
+
+        version = f"dev-{short_hash}"
+        logger.info(
+            "Building Firecracker from ref '%s' (commit %s) — this may take "
+            "several minutes...",
+            git_ref,
+            short_hash,
+        )
+
+        # Run the build with live output so the user can see Rust compilation
+        # progress. Use check=False so we can provide a detailed error on
+        # failure instead of a bare CalledProcessError.
+        try:
+            result = run_cmd(
+                ["tools/devtool", "build", "--release"],
+                cwd=str(src_dir),
+                timeout=1800,
+                check=False,
+                capture=False,
+            )
+        except ProcessError as e:
+            raise BinaryError(f"Build process failed: {e}") from e
+
+        if result.returncode != 0:
+            stderr = (result.stderr or "").strip()[:500]
+            raise BinaryError(
+                f"Firecracker build failed (exit {result.returncode}) "
+                f"for ref '{git_ref}'. "
+                f"Check the output above or run 'tools/devtool build --release' "
+                f"manually in {src_dir}. "
+                + (f"Stderr: {stderr}" if stderr else "")
+            )
+
+        # Locate the built binaries
+        build_output = (
+            src_dir
+            / "build"
+            / "cargo_target"
+            / "x86_64-unknown-linux-musl"
+            / "release"
+        )
+        fc_src = build_output / "firecracker"
+        jl_src = build_output / "jailer"
+
+        missing: list[str] = []
+        if not fc_src.exists():
+            missing.append("firecracker")
+        if not jl_src.exists():
+            missing.append("jailer")
+        if missing:
+            raise BinaryError(
+                f"Build completed but expected binaries not found: "
+                f"{', '.join(missing)}. "
+                f"Expected location: {build_output}"
+            )
+
+        # Copy to bin_dir with dev version naming
+        fc_dest = bin_dir / f"firecracker-{version}"
+        jl_dest = bin_dir / f"jailer-{version}"
+
+        shutil.copy2(str(fc_src), str(fc_dest))
+        fc_dest.chmod(
+            fc_dest.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+        )
+
+        shutil.copy2(str(jl_src), str(jl_dest))
+        jl_dest.chmod(
+            jl_dest.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+        )
+
+        logger.info(
+            "Built Firecracker %s from ref '%s'",
+            version,
+            git_ref,
+        )
+
+        return [
+            BinaryService._create_binary_item(
+                "firecracker", version, fc_dest, resolve_ci_version=False
+            ),
+            BinaryService._create_binary_item(
+                "jailer", version, jl_dest, resolve_ci_version=False
             ),
         ]
 

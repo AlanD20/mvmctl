@@ -134,6 +134,45 @@ class BinaryOperation:
             request = BinaryPullRequest(inputs=inputs, db=db)
             resolved = request.resolve()
 
+            # ---- Git build path (parallel to release download) ----
+            if resolved.git_ref:
+                binaries = BinaryService.build_from_source(
+                    git_ref=resolved.git_ref,
+                    bin_dir=resolved.bin_dir,
+                )
+
+                no_default = repo.get_default("firecracker") is None
+                should_set_default = resolved.set_default or no_default
+
+                for binary in binaries:
+                    repo.upsert(binary)
+                    if should_set_default:
+                        repo.set_default(
+                            name=binary.name,
+                            version=binary.version,
+                            path=binary.path,
+                        )
+
+                version_str = binaries[0].version if binaries else ""
+                AuditLog.log(
+                    "binary.pull",
+                    changes={
+                        "git_ref": resolved.git_ref,
+                        "version": version_str,
+                    },
+                )
+
+                return OperationResult(
+                    status="success",
+                    code="binary.built_from_source",
+                    message=(
+                        f"Built Firecracker {version_str} "
+                        f"from ref '{resolved.git_ref}'"
+                    ),
+                    item=binaries,
+                )
+
+            # ---- Release download path ----
             # Check if version already exists
             normalized = resolved.version.removeprefix("v")
             fc_exists = repo.get_by_name_and_version("firecracker", normalized)
