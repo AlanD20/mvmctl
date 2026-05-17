@@ -977,7 +977,26 @@ class ImageService:
                 else:
                     raw_size_mb = int(minimum_rootfs_mib)
 
-                logger.info("Creating ext4 image (%d MiB)...", raw_size_mb)
+                logger.info(
+                    "Creating ext4 image (%d MiB) at %s...",
+                    raw_size_mb,
+                    output_path,
+                )
+
+                # Check available space on the output filesystem before
+                # touching the disk — sparse truncate will succeed but
+                # mkfs.ext4 will fail with a cryptic ENOSPC.
+                import shutil
+
+                output_stat = shutil.disk_usage(output_path.parent)
+                needed_bytes = raw_size_mb * 1024 * 1024
+                if output_stat.free < needed_bytes:
+                    raise ImageError(
+                        f"Not enough free space on {output_path.parent} "
+                        f"to create the ext4 image: need {raw_size_mb} MiB, "
+                        f"only {output_stat.free // (1024 * 1024)} MiB available. "
+                        f"Free up space or set MVM_CACHE_DIR to a larger filesystem."
+                    )
 
                 run_cmd(
                     ["truncate", "-s", f"{raw_size_mb}M", str(output_path)],
@@ -994,9 +1013,19 @@ class ImageService:
             logger.info("Created %s (total: %.2fs)", output_path.name, t6 - t0)
             return True
 
-        except ProcessError as e:
-            logger.error("Failed to create ext4 image: %s", e)
-            raise ImageError(f"Failed to create ext4 image: {e}") from e
+        except (ProcessError, ImageError) as e:
+            msg = str(e)
+            if "No space left on device" in msg or "ENOSPC" in msg:
+                logger.error(
+                    "Disk full while creating ext4 image. "
+                    "Output directory: %s (needs ~%d MiB). "
+                    "Set MVM_CACHE_DIR to a larger filesystem or free up space.",
+                    output_path.parent,
+                    raw_size_mb,
+                )
+            else:
+                logger.error("Failed to create ext4 image: %s", msg)
+            raise ImageError(f"Failed to create ext4 image: {msg}") from e
 
     def detect_filesystem_type(self, image_path: Path) -> str | None:
         """Detect filesystem type using blkid."""

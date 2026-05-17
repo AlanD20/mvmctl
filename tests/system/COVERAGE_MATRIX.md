@@ -401,6 +401,10 @@ removed, or when test coverage changes.
 | `cp <src> <dst>` nonexistent source | ⚡ Shallow | `test_cp.py` | `TestCpEdgeCases` | L1: "not found" in error |
 | `cp <src> <dst>` with `--force` | ✅ Deep | `test_cp.py` | `TestCpEdgeCases` | L3: content changed after overwrite, verified via SSH |
 | `cp <src> <dst>` no `--force` dest exists | ⚡ Shallow | `test_cp.py` | `TestCpEdgeCases` | L1: non-zero exit, error mentions exists/force |
+| `cp <src> <dst>` (multi-source, two files) | ✅ Deep | `test_cp.py` | `TestCpMultiSource` | L3: both files exist on VM with correct content via SSH |
+| `cp <src> <dst>` (multi-source, file+dir) | ✅ Deep | `test_cp.py` | `TestCpMultiSource` | L3: file and directory (with nested content) exist on VM via SSH |
+| `cp <src> <dst>` (multi-source, single arg) | ✅ Deep | `test_cp.py` | `TestCpMultiSource` | L3: file transferred correctly via SSH — backward compat with multi-source path |
+| `cp <src> <src> <local-dest>` (multi-source rejects non-VM) | ⚡ Shallow | `test_cp.py` | `TestCpMultiSource` | L1: non-zero exit, error mentions multi-source requires VM dest |
 | `cp vm1:/src vm2:/dst` (VM→VM) | 🔴 Missing | — | — | L3: file on VM2 via SSH |
 
 ---
@@ -424,14 +428,14 @@ removed, or when test coverage changes.
 | logs | 4 | 0 | 4 | 0 | 0 |
 | host | 9 | 0 | 8 | 0 | 1 |
 | cache | 7 | 0 | 6 | 0 | 1 |
-| cp | 8 | 4 | 2 | 2 | 0 |
-| **Total** | **257** | **35** | **183** | **2** | **37** |
+| cp | 12 | 7 | 3 | 2 | 0 |
+| **Total** | **261** | **38** | **184** | **2** | **37** |
 
 **Coverage health:**
-- ✅ Deep (L3): 35/257 = 13.6% (↑ from 12.4%)
-- ⚡ Shallow (L0-L2): 183/257 = 71.2%
-- 🔴 Missing: 2/257 = **0.8%**
-- ⏭️ Skip-prone: 37/257 = 14.4%
+- ✅ Deep (L3): 38/261 = 14.6% (↑ from 13.6%)
+- ⚡ Shallow (L0-L2): 184/261 = 70.5%
+- 🔴 Missing: 2/261 = **0.8%**
+- ⏭️ Skip-prone: 37/261 = 14.2%
 
 **Structural improvements made (this refactoring):**
 - ✅ VM config tests: 21 per-test networks → 1 module-scoped fixture (saves ~10 min per run)

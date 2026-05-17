@@ -514,3 +514,333 @@ class TestCpEdgeCases:
             )
         finally:
             _ssh_cmd(mvm_binary, vm_info["name"], f"rm -f '{remote_file}'")
+
+
+# ============================================================================
+# Multi-source copy tests (L3: verify multiple sources in one command)
+# ============================================================================
+
+
+class TestCpMultiSource:
+    """Copy multiple files/directories from host to a VM in one ``mvm cp`` command.
+
+    The multi-source feature allows ``mvm cp file1.txt file2.txt vm:/dst/``
+    to send multiple sources in a single invocation, rather than requiring
+    repeated single-file commands. These tests verify that every source
+    is transferred to the guest and that backward compatibility (single
+    source) is preserved.
+
+    Tests use ``created_vm`` for a running VM with SSH key injected, then
+    verify file transfers via ``mvm ssh --cmd``.
+    """
+
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    @pytest.mark.serial
+    def test_cp_multi_source_two_files(
+        self,
+        mvm_binary: str,
+        created_vm: dict[str, Any],
+        tmp_path: Path,
+    ) -> None:
+        """Copy two local files to a VM in one command — both must land.
+
+        L3: Verify both files exist inside the guest via SSH and that
+        their contents match the originals.
+
+        Rationale: The multi-source code path must handle multiple file
+        arguments correctly. A regression where only the first file is
+        transferred (or the second silently overwrites the first) would
+        not be caught by L1/L2 checks.
+        """
+        vm_info = created_vm
+        if not _wait_for_vm_ssh(mvm_binary, vm_info):
+            pytest.skip(
+                "SSH not available on VM — cannot verify multi-source transfer"
+            )
+
+        # Create two temp files with different content
+        file1 = tmp_path / f"multi_a_{uuid.uuid4().hex[:8]}.txt"
+        file2 = tmp_path / f"multi_b_{uuid.uuid4().hex[:8]}.txt"
+        content1 = f"content-a-{uuid.uuid4().hex}"
+        content2 = f"content-b-{uuid.uuid4().hex}"
+        file1.write_text(content1)
+        file2.write_text(content2)
+
+        remote_dir = "/tmp/"
+        remote_file1 = f"{remote_dir}{file1.name}"
+        remote_file2 = f"{remote_dir}{file2.name}"
+
+        try:
+            # Copy both files in one command
+            result = _run_mvm(
+                mvm_binary,
+                "cp",
+                str(file1),
+                str(file2),
+                f"{vm_info['name']}:{remote_dir}",
+                timeout=30,
+            )
+            assert result.returncode == 0, (
+                f"multi-source cp failed: stdout={result.stdout} "
+                f"stderr={result.stderr}"
+            )
+
+            # L3: Verify file1 exists on VM
+            check1 = _ssh_cmd(
+                mvm_binary,
+                vm_info["name"],
+                f"test -f '{remote_file1}' && echo F1_OK",
+            )
+            assert check1.returncode == 0 and "F1_OK" in check1.stdout, (
+                f"File {remote_file1} not found on VM"
+            )
+
+            # L3: Verify file2 exists on VM
+            check2 = _ssh_cmd(
+                mvm_binary,
+                vm_info["name"],
+                f"test -f '{remote_file2}' && echo F2_OK",
+            )
+            assert check2.returncode == 0 and "F2_OK" in check2.stdout, (
+                f"File {remote_file2} not found on VM"
+            )
+
+            # L3: Verify content of file1 matches
+            cat1 = _ssh_cmd(
+                mvm_binary, vm_info["name"], f"cat '{remote_file1}'"
+            )
+            assert cat1.returncode == 0 and cat1.stdout.strip() == content1, (
+                f"Content mismatch for {remote_file1}: "
+                f"expected {content1!r}, got {cat1.stdout.strip()!r}"
+            )
+
+            # L3: Verify content of file2 matches
+            cat2 = _ssh_cmd(
+                mvm_binary, vm_info["name"], f"cat '{remote_file2}'"
+            )
+            assert cat2.returncode == 0 and cat2.stdout.strip() == content2, (
+                f"Content mismatch for {remote_file2}: "
+                f"expected {content2!r}, got {cat2.stdout.strip()!r}"
+            )
+        finally:
+            # Cleanup: remove both files from VM
+            _ssh_cmd(mvm_binary, vm_info["name"], f"rm -f '{remote_file1}'")
+            _ssh_cmd(mvm_binary, vm_info["name"], f"rm -f '{remote_file2}'")
+
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    @pytest.mark.serial
+    def test_cp_multi_source_file_and_dir(
+        self,
+        mvm_binary: str,
+        created_vm: dict[str, Any],
+        tmp_path: Path,
+    ) -> None:
+        """Copy one file and one directory in a single ``mvm cp`` command.
+
+        L3: Verify both the file and the directory (with nested content)
+        exist on the VM via SSH.
+
+        Rationale: Mixing file and directory sources exercises the most
+        complex path in the multi-source handler. A regression where
+        tar flags conflict between file and directory arguments would
+        cause one source to silently fail.
+        """
+        vm_info = created_vm
+        if not _wait_for_vm_ssh(mvm_binary, vm_info):
+            pytest.skip(
+                "SSH not available on VM — cannot verify mixed-source transfer"
+            )
+
+        # Create one file
+        src_file = tmp_path / f"mix_file_{uuid.uuid4().hex[:8]}.txt"
+        src_file.write_text("mixed-source file content")
+
+        # Create one directory with nested content
+        dir_name = f"mix_dir_{uuid.uuid4().hex[:8]}"
+        src_dir = tmp_path / dir_name
+        src_dir.mkdir()
+        nested = src_dir / "nested"
+        nested.mkdir()
+        nested_file = nested / "deep.txt"
+        nested_file.write_text("nested content")
+
+        remote_parent = "/tmp"
+        remote_file = f"{remote_parent}/{src_file.name}"
+        remote_dir_path = f"{remote_parent}/{dir_name}"
+
+        try:
+            # Copy both file and directory in one command
+            result = _run_mvm(
+                mvm_binary,
+                "cp",
+                str(src_file),
+                str(src_dir),
+                f"{vm_info['name']}:{remote_parent}/",
+                timeout=30,
+            )
+            assert result.returncode == 0, (
+                f"mixed-source cp failed: stdout={result.stdout} "
+                f"stderr={result.stderr}"
+            )
+
+            # L3: Verify the file exists
+            f_check = _ssh_cmd(
+                mvm_binary,
+                vm_info["name"],
+                f"test -f '{remote_file}' && echo FILE_OK",
+            )
+            assert f_check.returncode == 0 and "FILE_OK" in f_check.stdout, (
+                f"File {remote_file} not found on VM"
+            )
+
+            # L3: Verify the directory exists
+            d_check = _ssh_cmd(
+                mvm_binary,
+                vm_info["name"],
+                f"test -d '{remote_dir_path}' && echo DIR_OK",
+            )
+            assert d_check.returncode == 0 and "DIR_OK" in d_check.stdout, (
+                f"Directory {remote_dir_path} not found on VM"
+            )
+
+            # L3: Verify the nested file exists inside the transferred dir
+            deep_check = _ssh_cmd(
+                mvm_binary,
+                vm_info["name"],
+                f"test -f '{remote_dir_path}/nested/deep.txt' && echo DEEP_OK",
+            )
+            assert (
+                deep_check.returncode == 0 and "DEEP_OK" in deep_check.stdout
+            ), "nested/deep.txt not found in transferred directory"
+        finally:
+            # Cleanup: remove file and directory from VM
+            _ssh_cmd(mvm_binary, vm_info["name"], f"rm -f '{remote_file}'")
+            _ssh_cmd(
+                mvm_binary,
+                vm_info["name"],
+                f"rm -rf '{remote_dir_path}'",
+            )
+
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    @pytest.mark.serial
+    def test_cp_multi_source_single_arg(
+        self,
+        mvm_binary: str,
+        created_vm: dict[str, Any],
+        tmp_path: Path,
+    ) -> None:
+        """Single source still works when passed through the multi-source path.
+
+        L3: Verify the file was transferred successfully via SSH.
+
+        Rationale: When the multi-source code path is active, a single
+        argument must still work (backward compatibility). A regression
+        where the multi-source handler treats one element as a list
+        accidentally (e.g. iterating over characters of a string) would
+        break the most common use case.
+        """
+        vm_info = created_vm
+        if not _wait_for_vm_ssh(mvm_binary, vm_info):
+            pytest.skip(
+                "SSH not available on VM — cannot verify single-arg multi-source"
+            )
+
+        src_file = tmp_path / f"single_{uuid.uuid4().hex[:8]}.txt"
+        src_file.write_text("single arg via multi-source")
+        remote_dir = "/tmp/"
+        remote_file = f"{remote_dir}{src_file.name}"
+
+        try:
+            # Copy one file using the same syntax (single source)
+            result = _run_mvm(
+                mvm_binary,
+                "cp",
+                str(src_file),
+                f"{vm_info['name']}:{remote_dir}",
+                timeout=30,
+            )
+            assert result.returncode == 0, (
+                f"single-arg cp failed: stdout={result.stdout} "
+                f"stderr={result.stderr}"
+            )
+
+            # L3: Verify file exists on VM
+            check = _ssh_cmd(
+                mvm_binary,
+                vm_info["name"],
+                f"test -f '{remote_file}' && echo EXISTS",
+            )
+            assert check.returncode == 0 and "EXISTS" in check.stdout, (
+                f"File {remote_file} not found on VM"
+            )
+
+            # L3: Verify content matches
+            cat_check = _ssh_cmd(
+                mvm_binary,
+                vm_info["name"],
+                f"cat '{remote_file}'",
+            )
+            assert (
+                cat_check.returncode == 0
+                and cat_check.stdout.strip() == "single arg via multi-source"
+            ), f"Content mismatch: got {cat_check.stdout.strip()!r}"
+        finally:
+            _ssh_cmd(mvm_binary, vm_info["name"], f"rm -f '{remote_file}'")
+
+    @pytest.mark.serial
+    def test_cp_multi_source_rejects_non_vm_dest(
+        self,
+        mvm_binary: str,
+        tmp_path: Path,
+    ) -> None:
+        """Multi-source to a local destination should fail.
+
+        L1: Verify non-zero exit with clear error message about
+        multi-source requiring VM destination.
+
+        Rationale: When multiple sources are specified, the destination
+        must be a VM path (``vm_name:/path``). A local destination is
+        ambiguous (which source is the destination?). The CLI must
+        reject this with a clear error rather than silently behaving
+        incorrectly.
+        """
+        # Create two source files
+        file1 = tmp_path / "src_a.txt"
+        file2 = tmp_path / "src_b.txt"
+        file1.write_text("aaa")
+        file2.write_text("bbb")
+
+        local_dest = tmp_path / "local_dest"
+
+        result = _run_mvm(
+            mvm_binary,
+            "cp",
+            str(file1),
+            str(file2),
+            str(local_dest),
+            check=False,
+            timeout=10,
+        )
+        assert result.returncode != 0, (
+            f"Expected non-zero exit for multi-source with local dest, "
+            f"got rc={result.returncode}: stdout={result.stdout} "
+            f"stderr={result.stderr}"
+        )
+        error_msg = (result.stderr + " " + result.stdout).lower()
+        assert any(
+            keyword in error_msg
+            for keyword in [
+                "requires",
+                "destination",
+                "vm",
+                "remote",
+                "multi",
+                "multiple",
+            ]
+        ), (
+            f"Expected error mentioning multi-source requires VM dest, "
+            f"got: stderr={result.stderr}"
+        )

@@ -196,12 +196,21 @@ class ImageOperation:
         )
         image_service = ImageService(repo)
 
-        # ORCHESTRATION: download → extract → optimize
+        # Use a temp work directory for download + extract + compress.
+        # Intermediate files (tar, ext4) live here; only the final
+        # compressed result is moved to the images cache dir.
+        import shutil
+        import tempfile as _tempfile
+
+        work_dir = Path(_tempfile.mkdtemp(dir=CacheUtils.get_temp_dir()))
         try:
+            # ORCHESTRATION: download → extract → optimize
+            # All intermediate work uses the temp work_dir.
+            # Everything below is inside this try so finally always cleans up.
             download_path = image_service.download_image(
                 spec,
                 image_id,
-                resolved.output_dir,
+                work_dir,
                 resolved.force,
                 resolved_ci_version,
                 progress_callback=OperationUtils.download_progress_bridge(
@@ -221,7 +230,7 @@ class ImageOperation:
             extracted_path = image_service.extract_image(
                 download_path,
                 image_id,
-                resolved.output_dir,
+                work_dir,
                 spec.format,
                 partition=resolved.partition,
                 disabled_detectors=resolved.disabled_detectors,
@@ -245,6 +254,19 @@ class ImageOperation:
                 provisioner_type=provisioner_type,
                 warnings=opt_warnings,
             )
+
+            # Move the final compressed result from work dir to cache dir
+            compressed_name = image_item.path
+            compressed_src = work_dir / compressed_name
+            compressed_dst = resolved.output_dir / compressed_name
+            compressed_dst.parent.mkdir(parents=True, exist_ok=True)
+            if compressed_src.exists():
+                if compressed_dst.exists():
+                    compressed_dst.unlink()
+                shutil.move(str(compressed_src), str(compressed_dst))
+                # Update ImageItem path to match final location
+                image_item.path = compressed_name
+
             if on_progress is not None:
                 on_progress(
                     ProgressEvent(
@@ -255,6 +277,39 @@ class ImageOperation:
                 )
 
             download_path.unlink(missing_ok=True)
+
+            repo.upsert(image_item)
+            if resolved.set_default:
+                repo.set_default(image_item.id)
+            elif existing_image is not None and existing_image.is_default:
+                repo.set_default(image_item.id)
+
+            # Clean up old image files if the ID changed after successful upsert.
+            # Also soft-delete the old DB record so it won't be returned by
+            # future queries (the file is gone but the DB still has is_present=1).
+            if (
+                existing_image is not None
+                and existing_image.id != image_item.id
+            ):
+                removed = image_service.remove_many_paths([existing_image])
+                repo.soft_delete(existing_image.id)
+                if removed:
+                    logger.info(
+                        "Cleaned up %d old image file(s) for %s",
+                        len(removed),
+                        spec.type,
+                    )
+
+            msg = "Image pulled successfully"
+            if opt_warnings:
+                msg += f" ({'; '.join(opt_warnings)})"
+
+            return OperationResult(
+                status="success",
+                code="image.acquired",
+                item=image_item,
+                message=msg,
+            )
         except (RootPartitionDetectionError, TieDetectedError) as e:
             return OperationResult(
                 status="error",
@@ -262,36 +317,8 @@ class ImageOperation:
                 message=str(e),
                 exception=e,
             )
-
-        repo.upsert(image_item)
-        if resolved.set_default:
-            repo.set_default(image_item.id)
-        elif existing_image is not None and existing_image.is_default:
-            repo.set_default(image_item.id)
-
-        # Clean up old image files if the ID changed after successful upsert.
-        # Also soft-delete the old DB record so it won't be returned by
-        # future queries (the file is gone but the DB still has is_present=1).
-        if existing_image is not None and existing_image.id != image_item.id:
-            removed = image_service.remove_many_paths([existing_image])
-            repo.soft_delete(existing_image.id)
-            if removed:
-                logger.info(
-                    "Cleaned up %d old image file(s) for %s",
-                    len(removed),
-                    spec.type,
-                )
-
-        msg = "Image pulled successfully"
-        if opt_warnings:
-            msg += f" ({'; '.join(opt_warnings)})"
-
-        return OperationResult(
-            status="success",
-            code="image.acquired",
-            item=image_item,
-            message=msg,
-        )
+        finally:
+            shutil.rmtree(work_dir, ignore_errors=True)
 
     @staticmethod
     def import_(

@@ -38,6 +38,10 @@ if TYPE_CHECKING:
     import typer
     import typer.models
 
+    from mvmctl.api.host_operations import HostOperation
+else:
+    from mvmctl.api import HostOperation
+
 # Lazy imports from constants to avoid heavy import-time work
 # (package metadata resolution)
 
@@ -292,7 +296,7 @@ class LazyMVMGroup(click.Group):
         console = mvm_cli._console
 
         # Usage line
-        usage = f"[bold]Usage:[/] {ctx.get_usage().strip()}"
+        usage = f"[bold]{ctx.get_usage().strip()}[/]"
         console.print(usage)
 
         # Description
@@ -357,13 +361,24 @@ def app(ctx: click.Context, verbose: bool, debug: bool) -> None:
         ctx.command.format_help(ctx, click.HelpFormatter())
         ctx.exit()
 
-    if ctx.invoked_subcommand in {"help", "version", "init"}:
+    if ctx.invoked_subcommand in {"help", "version", "init", "completion"}:
         return
 
     _warn_if_running_as_root()
     from mvmctl.utils._io import setup_logging
 
     setup_logging(verbose=verbose, debug=debug)
+
+    # Fail fast if host has not been initialized.
+    # Every command except help/version/init/completion depends on the
+    # database being set up by `mvm init` (or `sudo mvm host init`).
+    if not HostOperation.is_initialized():
+        click.echo(
+            f"Error: '{_get_cli_name()} {ctx.invoked_subcommand}' requires "
+            f"initialization. Run '{_get_cli_name()} init' first.",
+            err=True,
+        )
+        ctx.exit(1)
 
 
 @click.command(name="completion", help="Print shell completion script")

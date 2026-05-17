@@ -72,9 +72,23 @@ class IPTablesTracker:
         APPEND = "-A"
         DELETE = "-D"
 
-    def __init__(self, repo: IPTablesRuleRepository) -> None:
-        """Initialize IPTablesTracker with optional database instance."""
+    def __init__(
+        self,
+        repo: IPTablesRuleRepository,
+        xtcomment_available: bool = True,
+    ) -> None:
+        """Initialize IPTablesTracker.
+
+        Args:
+            repo: Repository for iptables rule persistence.
+            xtcomment_available: Whether the kernel supports the
+                ``comment`` match module (xt_comment).  Set by the
+                caller (FirewallTracker) from the
+                ``settings.iptables_xtcomment`` override.
+
+        """
         self._repo = repo
+        self._xtcomment_available = xtcomment_available
 
     def initialize(self) -> None:
         """Ensure MVM iptables chains exist with jump rules from standard chains.
@@ -96,6 +110,35 @@ class IPTablesTracker:
                 auto_jump_from=jump_from,
                 position=1,
             )
+
+    @staticmethod
+    def check_comment_available() -> bool:
+        """Probe whether the kernel supports the iptables ``comment`` match module.
+
+        Runs ``iptables -C INPUT -m comment --comment mvmctl-probe -j ACCEPT``
+        and checks the exit code.  Exit 0 means the module is available;
+        anything else (exit 4, ``Revision 0 not supported``) means it isn't.
+
+        Returns:
+            True if ``-m comment`` works, False otherwise.
+
+        """
+        probe = run_cmd(
+            [
+                "iptables",
+                "-C",
+                "INPUT",
+                "-m",
+                "comment",
+                "--comment",
+                "mvmctl-probe",
+                "-j",
+                "ACCEPT",
+            ],
+            privileged=True,
+            check=False,
+        )
+        return probe.returncode == 0
 
     def ensure_rule(
         self, rule: FirewallRule, *, context: str = ""
@@ -420,7 +463,7 @@ class IPTablesTracker:
 
         args.extend(["-j", rule.target.value])
 
-        if rule.comment_tag:
+        if rule.comment_tag and self._xtcomment_available:
             args.extend(["-m", "comment", "--comment", rule.comment_tag])
 
         return args

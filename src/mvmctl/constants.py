@@ -88,6 +88,9 @@ OVERRIDABLE_DEFAULTS: Final[dict[str, dict[str, Any]]] = {
         "guestfs_enabled": False,
         "firewall_backend": "nftables",
     },
+    "settings.firewall": {
+        "iptables_xtcomment": True,
+    },
 }
 
 

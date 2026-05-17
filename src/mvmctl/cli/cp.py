@@ -33,13 +33,12 @@ cp_app = typer.Typer(
 @handle_errors
 def cp(
     ctx: typer.Context,
-    src: str = typer.Argument(
+    args: list[str] = typer.Argument(
         ...,
-        help="Source path (local/path or vm_name:/remote/path)",
-    ),
-    dst: str = typer.Argument(
-        ...,
-        help="Destination path (local/path or vm_name:/remote/path)",
+        help="Source path(s) and destination. "
+        "Use vm_name:/path for VM paths. "
+        "Multiple sources allowed for host→VM copies. "
+        "The last argument is always the destination.",
     ),
     user: str | None = typer.Option(
         None,
@@ -65,8 +64,12 @@ def cp(
 
     Usage:
 
-        # Copy local file to VM
+        # Copy local files to VM
         mvm cp ./myfile.txt my-vm:/root/
+
+        # Copy multiple local files to VM
+        mvm cp file1.txt file2.txt file3.txt my-vm:/dst/
+        mvm cp *.txt my-vm:/dst/         # Shell glob expands to multiple files
 
         # Copy file from VM to local
         mvm cp my-vm:/var/log/syslog ./syslog
@@ -77,8 +80,19 @@ def cp(
     Path format: use ``vm_name:/remote/path`` for VM paths,
     plain ``/local/path`` for local paths.
 
+    The last positional argument is always the destination. Everything
+    before it is a source. Multiple sources only work for host → VM.
+
     """
-    inputs = CPInput(src=src, dst=dst, user=user, key=key, force=force)
+    if len(args) < 2:
+        mvm_cli.error(
+            "At least two arguments required: one or more sources and a destination"
+        )
+        raise typer.Exit(code=1)
+
+    *sources, dst = args
+
+    inputs = CPInput(sources=sources, dst=dst, user=user, key=key, force=force)
 
     progress = Progress(
         SpinnerColumn(),

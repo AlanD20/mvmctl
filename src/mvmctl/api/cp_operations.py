@@ -48,7 +48,7 @@ class CPOperation:
                 "cp.copy",
                 changes={
                     "direction": resolved.direction,
-                    "src": inputs.src,
+                    "sources": ", ".join(inputs.sources),
                     "dst": inputs.dst,
                     "force": inputs.force,
                 },
@@ -72,14 +72,14 @@ class CPOperation:
             result_message: str = ""
 
             if resolved.direction == "host_to_vm":
-                if resolved.dst_info is None or resolved.local_path is None:
+                if resolved.dst_info is None or resolved.local_paths is None:
                     raise CPError(
                         "Internal error: destination VM info not available",
                         code="cp.resolve_failed",
                     )
 
                 total_bytes, result_message = CPService.copy_host_to_vm(
-                    local_path=resolved.local_path,
+                    local_paths=resolved.local_paths,
                     vm_ip=resolved.dst_info.ip,
                     vm_user=resolved.dst_info.user,
                     vm_key_path=resolved.dst_info.key_path,
@@ -89,7 +89,7 @@ class CPOperation:
                 )
 
             elif resolved.direction == "vm_to_host":
-                if resolved.src_info is None or resolved.local_path is None:
+                if resolved.src_info is None or resolved.local_paths is None:
                     raise CPError(
                         "Internal error: source VM info not available",
                         code="cp.resolve_failed",
@@ -100,7 +100,7 @@ class CPOperation:
                     vm_user=resolved.src_info.user,
                     vm_key_path=resolved.src_info.key_path,
                     remote_path=resolved.src_info.remote_path,
-                    local_dst=resolved.local_path,
+                    local_dst=resolved.local_paths[0],
                     force=resolved.force,
                     on_progress=on_progress,
                 )

@@ -36,6 +36,7 @@ _PRETTIFY_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bVms?\b"), "VM"),
     (re.compile(r"\bCpus?\b"), "CPU"),
     (re.compile(r"\bKvm\b"), "KVM"),
+    (re.compile(r"\bOs\b"), "OS"),
     (re.compile(r"\bPci\b"), "PCI"),
     (re.compile(r"\bTmpfs\b"), "TMPFS"),
     (re.compile(r"\bFs\b"), "FS"),
@@ -152,7 +153,7 @@ class MVMCli:
                         )
                         tree.add(f"{pretty}: {items_str}")
                 else:
-                    display = str(value) if value is not None else "-"
+                    display = self._format_leaf_value(key, value)
                     tree.add(f"{pretty}: {display}")
         elif isinstance(data, list):
             for i, item in enumerate(data):
@@ -161,6 +162,22 @@ class MVMCli:
                     self._build_tree(item, branch)
                 else:
                     tree.add(str(item))
+
+    # ── Leaf value formatting for tree display ──────────────────────
+
+    @staticmethod
+    def _format_leaf_value(key: str, value: Any) -> str:
+        """Format a leaf value for tree display.
+
+        Auto-converts ``*_at`` timestamp suffixes from ISO to human-readable.
+        """
+        if value is None:
+            return "-"
+        if isinstance(value, str) and key.endswith("_at"):
+            formatted = MVMCli.format_timestamp(value, "full")
+            if formatted != value:
+                return formatted
+        return str(value)
 
     # ── Static format methods ────────────────────────────────────────
 

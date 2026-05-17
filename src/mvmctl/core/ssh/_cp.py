@@ -19,6 +19,17 @@ logger = logging.getLogger(__name__)
 
 _PIPE_CHUNK_SIZE: int = 65536
 
+# GNU tar extras — only used when GNU tar is detected on the remote end
+_GNU_EXTRACT_EXTRAS: list[str] = [
+    "-p",
+    "--same-owner",
+    "--delay-directory-restore",
+]
+_GNU_CREATE_EXTRAS: list[str] = ["--xattrs", "--acls"]
+
+# Tar capability cache: "user@host" → is_gnu: bool, "local" → host tar
+_tar_cache: dict[str, bool] = {}
+
 
 class CPService:
     """Stateless tar-over-SSH file copy service.
@@ -27,17 +38,6 @@ class CPService:
     host and VM(s) using SSH, requiring only ``tar`` (POSIX-mandated)
     on the guest.
     """
-
-    CREATE_FLAGS: list[str] = ["--sparse", "--xattrs", "--acls"]
-    EXTRACT_FLAGS: list[str] = [
-        "--keep-old-files",
-        "--delay-directory-restore",
-        "--preserve-permissions",
-        "--same-owner",
-        "--sparse",
-        "--xattrs",
-        "--acls",
-    ]
 
     # ── Path parsing ────────────────────────────────────────────────
 
@@ -90,56 +90,127 @@ class CPService:
         size = int(lines[1].strip()) if len(lines) > 1 else 0
         return (path_type, size)
 
+    # ── Tar capability probing ─────────────────────────────────────
+
+    @staticmethod
+    def _probe_remote_tar(ssh_prefix: list[str]) -> bool:
+        """Probe remote tar and return True if it's GNU tar.
+
+        Results are cached per host to avoid repeated SSH calls.
+        """
+        target = ssh_prefix[-1] if ssh_prefix else "unknown"
+        if target in _tar_cache:
+            return _tar_cache[target]
+        try:
+            probe_cmd = "tar --version 2>/dev/null | head -1"
+            cmd = [*ssh_prefix, probe_cmd]
+            result = run_cmd(cmd, capture=True, check=True)
+            is_gnu = "GNU tar" in result.stdout
+        except Exception:
+            is_gnu = False
+        _tar_cache[target] = is_gnu
+        return is_gnu
+
+    @staticmethod
+    def _is_local_tar_gnu() -> bool:
+        """Check if local tar is GNU tar. Result cached."""
+        if "local" in _tar_cache:
+            return _tar_cache["local"]
+        try:
+            result = run_cmd(["tar", "--version"], capture=True, check=True)
+            is_gnu = "GNU tar" in result.stdout
+        except Exception:
+            is_gnu = False
+        _tar_cache["local"] = is_gnu
+        return is_gnu
+
     # ── Tar command builders ────────────────────────────────────────
 
     @staticmethod
-    def _build_source_tar(path: str, is_directory: bool) -> list[str]:
+    def _build_source_tar(
+        path: str, is_directory: bool, gnu_extras: bool = False
+    ) -> list[str]:
         """Build the tar create command list for a local path."""
+        extra = _GNU_CREATE_EXTRAS if gnu_extras else []
         if is_directory:
-            return ["tar", "cf", "-", *CPService.CREATE_FLAGS, "-C", path, "."]
+            return ["tar", "cf", "-", *extra, "-C", path, "."]
         parent = os.path.dirname(path) or "."
         base = os.path.basename(path)
         return [
             "tar",
             "cf",
             "-",
-            *CPService.CREATE_FLAGS,
+            *extra,
             "-C",
             parent,
             base,
         ]
 
     @staticmethod
-    def _build_remote_source_tar(path: str, is_directory: bool) -> str:
+    def _build_remote_source_tar(
+        path: str, is_directory: bool, gnu_extras: bool = False
+    ) -> str:
         """Build the tar create shell command string for a remote path.
 
         Returns a shell-safe string suitable for passing as a single
         argument to ``ssh <opts> "<command>"``.
         """
-        flags = " ".join(shlex.quote(f) for f in CPService.CREATE_FLAGS)
+        extra_flags = " ".join(
+            shlex.quote(f) for f in (_GNU_CREATE_EXTRAS if gnu_extras else [])
+        )
         if is_directory:
-            return f"tar cf - {flags} -C {shlex.quote(path)} ."
+            return f"tar cf - {extra_flags} -C {shlex.quote(path)} ."
         parent = os.path.dirname(path) or "."
         base = os.path.basename(path)
-        return f"tar cf - {flags} -C {shlex.quote(parent)} {shlex.quote(base)}"
+        return f"tar cf - {extra_flags} -C {shlex.quote(parent)} {shlex.quote(base)}"
 
     @staticmethod
-    def _build_dest_tar(dst_path: str) -> list[str]:
-        """Build the tar extract command list for a local destination."""
-        return [
-            "tar",
-            "xf",
-            "-",
-            *CPService.EXTRACT_FLAGS,
-            "-C",
-            dst_path,
-        ]
+    def _build_multi_source_tar(
+        paths: list[str], gnu_extras: bool = False
+    ) -> list[str]:
+        """Build tar create command for multiple local paths.
+
+        Uses repeated ``-C <parent> <base>`` pairs so each file keeps
+        only its basename in the archive (no full path structure).
+        Both GNU tar and BusyBox tar support multiple ``-C`` options.
+        """
+        extra = _GNU_CREATE_EXTRAS if gnu_extras else []
+        cmd: list[str] = ["tar", "cf", "-", *extra]
+        for path in paths:
+            parent = os.path.dirname(path) or "."
+            base = os.path.basename(path)
+            cmd.extend(["-C", parent, base])
+        return cmd
 
     @staticmethod
-    def _build_remote_dest_tar(dst_path: str) -> str:
-        """Build the tar extract shell command string for a remote path."""
-        flags = " ".join(shlex.quote(f) for f in CPService.EXTRACT_FLAGS)
-        return f"tar xf - {flags} -C {shlex.quote(dst_path)}"
+    def _build_dest_tar(
+        dst_path: str, gnu_extras: bool = False, *, no_overwrite: bool = True
+    ) -> list[str]:
+        """Build the tar extract command list for a local destination.
+
+        When ``no_overwrite=True`` (default), the ``-k`` (keep-old-files)
+        flag is included. Pass ``no_overwrite=False`` to allow overwriting.
+        """
+        flags: list[str] = ["-k"] if no_overwrite else []
+        extra: list[str] = _GNU_EXTRACT_EXTRAS if gnu_extras else []
+        return ["tar", "xf", "-", *flags, *extra, "-C", dst_path]
+
+    @staticmethod
+    def _build_remote_dest_tar(
+        dst_path: str, gnu_extras: bool = False, *, no_overwrite: bool = True
+    ) -> str:
+        """Build the tar extract shell command string for a remote path.
+
+        When ``no_overwrite=True`` (default), the ``-k`` (keep-old-files)
+        flag is included. Pass ``no_overwrite=False`` to allow overwriting.
+        """
+        parts: list[str] = []
+        if no_overwrite:
+            parts.append("-k")
+        if gnu_extras:
+            parts.extend(_GNU_EXTRACT_EXTRAS)
+        parts.extend(["-C", shlex.quote(dst_path)])
+        return f"tar xf - {' '.join(parts)}"
 
     # ── SSH command prefix ──────────────────────────────────────────
 
@@ -251,7 +322,7 @@ class CPService:
 
     @staticmethod
     def copy_host_to_vm(
-        local_path: str,
+        local_paths: list[str],
         vm_ip: str,
         vm_user: str,
         vm_key_path: str | None,
@@ -259,38 +330,117 @@ class CPService:
         force: bool = False,
         on_progress: Callable[[int], None] | None = None,
     ) -> tuple[int, str]:
-        """Copy a file or directory from the host to a VM.
+        """Copy files or directories from the host to a VM.
+
+        Accepts one or more local paths. Multi-source copies archive
+        each file with only its basename (parent-directory stripped).
 
         Returns:
             ``(total_bytes, message)``.
 
         Raises:
-            CPSourceNotFoundError: If the local path does not exist.
+            CPSourceNotFoundError: If any local path does not exist.
             CPDestinationExistsError: If the remote destination exists
                 and ``force`` is False (best-effort via tar flags).
             CPError: On other copy failures.
 
         """
-        if not os.path.isfile(local_path) and not os.path.isdir(local_path):
-            raise CPSourceNotFoundError(
-                f"Local path not found: {local_path}",
-                code="cp.source_not_found",
+        # Validate all paths exist
+        for p in local_paths:
+            if not os.path.isfile(p) and not os.path.isdir(p):
+                raise CPSourceNotFoundError(
+                    f"Local path not found: {p}",
+                    code="cp.source_not_found",
+                )
+
+        ssh_prefix = CPService._build_ssh_prefix(vm_ip, vm_user, vm_key_path)
+        remote_gnu = CPService._probe_remote_tar(ssh_prefix)
+        local_gnu = CPService._is_local_tar_gnu()
+
+        is_multi = len(local_paths) > 1
+
+        if is_multi:
+            # ── Multi-source copy ────────────────────────────────
+            total_size = 0
+            for p in local_paths:
+                if os.path.isdir(p):
+                    total_size += CPService._get_directory_size(p)
+                else:
+                    total_size += os.path.getsize(p)
+
+            if on_progress:
+                src_cmd = CPService._build_multi_source_tar(
+                    local_paths, gnu_extras=local_gnu
+                )
+                dest_remote_cmd = CPService._build_remote_dest_tar(
+                    remote_dst, gnu_extras=remote_gnu, no_overwrite=not force
+                )
+                dest_cmd = [*ssh_prefix, dest_remote_cmd]
+                CPService._pipe_with_progress(
+                    src_cmd, dest_cmd, total_size, on_progress
+                )
+            else:
+                src_tar_str = " ".join(
+                    shlex.quote(a)
+                    for a in CPService._build_multi_source_tar(
+                        local_paths, gnu_extras=local_gnu
+                    )
+                )
+                dest_tar_str = CPService._build_remote_dest_tar(
+                    remote_dst, gnu_extras=remote_gnu, no_overwrite=not force
+                )
+                ssh_opts_str = " ".join(shlex.quote(a) for a in ssh_prefix)
+                pipe_cmd = (
+                    f"set -o pipefail && {src_tar_str}"
+                    f" | {ssh_opts_str} {shlex.quote(dest_tar_str)}"
+                )
+                result = run_cmd(
+                    ["bash", "-c", pipe_cmd], capture=True, check=False
+                )
+                if result.returncode != 0:
+                    stderr = (result.stderr or "").strip()
+                    if stderr and (
+                        "Cannot open" in stderr or "Exists" in stderr
+                    ):
+                        raise CPDestinationExistsError(
+                            f"Destination exists: {stderr}",
+                            code="cp.destination_exists",
+                        )
+                    raise CPError(
+                        f"Copy failed (exit {result.returncode}): {stderr}",
+                        code="cp.copy_failed",
+                    )
+
+            logger.info(
+                "Copied %d items → %s@%s:%s (%d bytes)",
+                len(local_paths),
+                vm_user,
+                vm_ip,
+                remote_dst,
+                total_size,
+            )
+            return (
+                total_size,
+                f"Copied {len(local_paths)} items to {vm_ip}:{remote_dst}",
             )
 
+        # ── Single-source copy (existing behavior) ────────────────
+        local_path = local_paths[0]
         is_directory = os.path.isdir(local_path)
-        total_size: int
-        if is_directory:
-            total_size = CPService._get_directory_size(local_path)
-        else:
-            total_size = os.path.getsize(local_path)
-
+        total_size = (
+            CPService._get_directory_size(local_path)
+            if is_directory
+            else os.path.getsize(local_path)
+        )
         basename = os.path.basename(local_path) or local_path
-        ssh_prefix = CPService._build_ssh_prefix(vm_ip, vm_user, vm_key_path)
 
-        # Build the tar pipe
         if on_progress:
-            src_cmd = CPService._build_source_tar(local_path, is_directory)
-            dest_remote_cmd = CPService._build_remote_dest_tar(remote_dst)
+            src_cmd = CPService._build_source_tar(
+                local_path, is_directory, gnu_extras=local_gnu
+            )
+            dest_remote_cmd = CPService._build_remote_dest_tar(
+                remote_dst, gnu_extras=remote_gnu, no_overwrite=not force
+            )
             dest_cmd = [*ssh_prefix, dest_remote_cmd]
             CPService._pipe_with_progress(
                 src_cmd, dest_cmd, total_size, on_progress
@@ -298,11 +448,18 @@ class CPService:
         else:
             src_tar_str = " ".join(
                 shlex.quote(a)
-                for a in CPService._build_source_tar(local_path, is_directory)
+                for a in CPService._build_source_tar(
+                    local_path, is_directory, gnu_extras=local_gnu
+                )
             )
-            dest_tar_str = CPService._build_remote_dest_tar(remote_dst)
+            dest_tar_str = CPService._build_remote_dest_tar(
+                remote_dst, gnu_extras=remote_gnu, no_overwrite=not force
+            )
             ssh_opts_str = " ".join(shlex.quote(a) for a in ssh_prefix)
-            pipe_cmd = f"set -o pipefail && {src_tar_str} | {ssh_opts_str} {shlex.quote(dest_tar_str)}"
+            pipe_cmd = (
+                f"set -o pipefail && {src_tar_str}"
+                f" | {ssh_opts_str} {shlex.quote(dest_tar_str)}"
+            )
             result = run_cmd(
                 ["bash", "-c", pipe_cmd], capture=True, check=False
             )
@@ -351,6 +508,8 @@ class CPService:
 
         """
         ssh_prefix = CPService._build_ssh_prefix(vm_ip, vm_user, vm_key_path)
+        remote_gnu = CPService._probe_remote_tar(ssh_prefix)
+        local_gnu = CPService._is_local_tar_gnu()
 
         # Probe remote path to determine type and size
         path_type, total_size = CPService._probe_remote_path(
@@ -380,16 +539,20 @@ class CPService:
         # Build the tar pipe
         basename = os.path.basename(remote_path.rstrip("/"))
         remote_tar_cmd = CPService._build_remote_source_tar(
-            remote_path, is_directory
+            remote_path, is_directory, gnu_extras=remote_gnu
         )
 
         if on_progress:
             src_cmd = [*ssh_prefix, remote_tar_cmd]
             if is_directory:
-                dest_cmd = CPService._build_dest_tar(dst_path_obj)
+                dest_cmd = CPService._build_dest_tar(
+                    dst_path_obj, gnu_extras=local_gnu, no_overwrite=not force
+                )
             else:
                 dest_parent = os.path.dirname(dst_path_obj) or "."
-                dest_cmd = CPService._build_dest_tar(dest_parent)
+                dest_cmd = CPService._build_dest_tar(
+                    dest_parent, gnu_extras=local_gnu, no_overwrite=not force
+                )
             CPService._pipe_with_progress(
                 src_cmd, dest_cmd, total_size, on_progress
             )
@@ -400,7 +563,9 @@ class CPService:
                 for a in CPService._build_dest_tar(
                     dst_path_obj
                     if is_directory
-                    else (os.path.dirname(dst_path_obj) or ".")
+                    else (os.path.dirname(dst_path_obj) or "."),
+                    gnu_extras=local_gnu,
+                    no_overwrite=not force,
                 )
             )
             pipe_cmd = (
@@ -451,6 +616,8 @@ class CPService:
         dst_ssh_prefix = CPService._build_ssh_prefix(
             dst_ip, dst_user, dst_key_path
         )
+        src_gnu = CPService._probe_remote_tar(src_ssh_prefix)
+        dst_gnu = CPService._probe_remote_tar(dst_ssh_prefix)
 
         # Probe source
         path_type, total_size = CPService._probe_remote_path(
@@ -460,9 +627,11 @@ class CPService:
 
         basename = os.path.basename(src_path.rstrip("/"))
         remote_src_tar = CPService._build_remote_source_tar(
-            src_path, is_directory
+            src_path, is_directory, gnu_extras=src_gnu
         )
-        remote_dst_tar = CPService._build_remote_dest_tar(dst_path)
+        remote_dst_tar = CPService._build_remote_dest_tar(
+            dst_path, gnu_extras=dst_gnu, no_overwrite=not force
+        )
 
         if on_progress:
             src_cmd = [*src_ssh_prefix, remote_src_tar]

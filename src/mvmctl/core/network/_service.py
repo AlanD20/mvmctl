@@ -937,6 +937,48 @@ class NetworkService:
         return {"added": added, "verified": verified, "orphaned": orphaned}
 
     @staticmethod
+    def cleanup_orphaned_bridges(
+        db_networks: list[NetworkItem],
+    ) -> int:
+        """Remove bridges on the host that have no corresponding DB network.
+
+        Scans all host bridges with the ``mvm-`` prefix, cross-references
+        against the bridge names of known DB networks, and removes any
+        orphan — first detaching slave TAPs, then deleting the bridge
+        itself.
+
+        Args:
+            db_networks: List of NetworkItem records currently in the DB.
+
+        Returns:
+            Number of orphaned bridges removed.
+
+        """
+        from mvmctl.utils.network import NetworkUtils
+
+        db_bridge_names = {n.bridge for n in db_networks}
+        host_bridges = NetworkUtils.get_bridges()
+        count = 0
+        for bridge in host_bridges:
+            if not bridge.startswith("mvm-"):
+                continue
+            if bridge in db_bridge_names:
+                continue
+            try:
+                for tap in NetworkUtils.get_bridge_slaves(bridge):
+                    NetworkService.remove_raw_tap(tap)
+                NetworkService.remove_raw_bridge(bridge)
+                count += 1
+                logger.info("Removed orphaned bridge: %s", bridge)
+            except NetworkError as e:
+                logger.warning(
+                    "Failed to remove orphaned bridge '%s': %s",
+                    bridge,
+                    e,
+                )
+        return count
+
+    @staticmethod
     def flush_arp(bridge: str) -> None:
         """Flush ARP cache for the given bridge interface.
 

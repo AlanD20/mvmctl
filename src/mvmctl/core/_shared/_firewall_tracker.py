@@ -80,7 +80,17 @@ class FirewallTracker:
             self._backend = NFTablesTracker(repo=self._fw_repo)
         else:
             self._fw_repo = IPTablesRuleRepository(self._db)
-            self._backend = IPTablesTracker(repo=self._fw_repo)
+            xtcomment_avail = bool(
+                SettingsService.resolve(
+                    self._db,
+                    "settings.firewall",
+                    "iptables_xtcomment",
+                )
+            )
+            self._backend = IPTablesTracker(
+                repo=self._fw_repo,
+                xtcomment_available=xtcomment_avail,
+            )
 
     # -- batch context ------------------------------------------------------
 

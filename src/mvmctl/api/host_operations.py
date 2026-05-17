@@ -167,25 +167,53 @@ class HostOperation:
 
         HostService.validate_sudoers_binaries()
 
-        # --- Nftables availability check ---
-        # nftables is the default firewall backend.  If the kernel does
-        # not support nftables NAT (nft_chain_nat), fall back to iptables.
-        _nft_available = NetworkService.check_nftables_available()
+        # --- Firewall backend check ---
+        # nftables is the default.  If the user already has iptables set
+        # (e.g. from a prior init or explicit override), skip the expensive
+        # nftables availability test.
+        from mvmctl.core.config._repository import SettingsRepository
 
-        if not _nft_available:
-            logger.warning(
-                "nftables NAT not available (kernel module nft_chain_nat missing). "
-                "Falling back to iptables backend. "
-                "To use nftables, rebuild kernel with CONFIG_NFT_CHAIN_NAT=y."
-            )
-            try:
-                from mvmctl.core.config._repository import SettingsRepository
+        db = Database()
+        settings_svc = SettingsService(SettingsRepository(db))
+        current_backend = settings_svc.resolve(
+            db, "settings", "firewall_backend"
+        )
+        if current_backend != "iptables":
+            _nft_available = NetworkService.check_nftables_available()
 
-                SettingsService(SettingsRepository(Database())).set(
-                    "settings", "firewall_backend", "iptables"
+            if not _nft_available:
+                logger.warning(
+                    "nftables NAT not available "
+                    "(kernel module nft_chain_nat missing). "
+                    "Falling back to iptables backend. "
+                    "To use nftables, rebuild kernel with "
+                    "--features nftables"
                 )
-            except Exception:
-                pass
+                try:
+                    settings_svc.set("settings", "firewall_backend", "iptables")
+                    current_backend = "iptables"
+                except Exception:
+                    pass
+
+        # --- iptables comment module check ---
+        # The xt_comment kernel module is required for ``-m comment``
+        # in iptables rules.  If it's missing, disable comments.
+        if current_backend == "iptables":
+            from mvmctl.core._shared._iptables_tracker._tracker import (
+                IPTablesTracker,
+            )
+
+            if not IPTablesTracker.check_comment_available():
+                logger.info(
+                    "iptables comment module (xt_comment) not available; "
+                    "rule comments will be skipped"
+                )
+                try:
+                    settings_svc.set(
+                        "settings.firewall", "iptables_xtcomment", False
+                    )
+                except Exception:
+                    pass
 
         if not HostService.check_cloud_localds():
             logger.warning(
@@ -812,6 +840,20 @@ class HostOperation:
     def get_running_vms() -> list[VMInstanceItem]:
         """Get list of currently running VMs."""
         return VMRepository().list_by_status(VMStatus.RUNNING)
+
+    @staticmethod
+    def is_initialized() -> bool:
+        """Check whether the host has been initialized via ``mvm init``.
+
+        Returns:
+            True if the host_state row exists and ``initialized`` is 1.
+
+        """
+        from mvmctl.core._shared import Database
+        from mvmctl.core.host._repository import HostRepository
+
+        state = HostRepository(Database()).get_state()
+        return state is not None and bool(state.initialized)
 
 
 __all__ = ["HostOperation"]

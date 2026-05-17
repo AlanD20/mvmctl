@@ -559,6 +559,15 @@ Every scenario includes:
 | `cp <src> <dst>` without `--force` when dest exists | Non-zero exit, error mentions "force" or "exists" | L1 | No | No |
 | `cp vm1:/src vm2:/dst` (VM→VM) | File exists on VM2 after copy | L3 | If SSH unavailable on either VM | Yes |
 
+#### 4.17.2 Multi-source copy
+
+| Command | Required Scenarios | Min Depth | Skip OK? | Destructive? |
+|---------|-------------------|-----------|----------|--------------|
+| `cp <src1> <src2> <vm>:/dst/` (two files) | Both files exist on VM with correct content via SSH | L3 | If SSH unavailable | Yes |
+| `cp <src> <dir> <vm>:/dst/` (file + directory) | File and directory (with nested content) exist on VM via SSH | L3 | If SSH unavailable | Yes |
+| `cp <src> <vm>:/dst/` (single source, multi-source code path) | Backward compatibility — file transferred correctly via SSH | L3 | If SSH unavailable | Yes |
+| `cp <src1> <src2> <local-dest>` (rejects non-VM dest) | Non-zero exit, error mentions multi-source requires VM destination | L1 | No | No |
+
 ---
 
 ## 5. Test Writing Rules

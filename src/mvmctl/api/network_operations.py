@@ -719,6 +719,9 @@ class NetworkOperation:
             for network in networks:
                 result = service.sync_iptables_rules(network)
                 results[network.id] = result
+
+            # Step 4: Clean up orphaned infrastructure
+            orphaned_bridge_count = service.cleanup_orphaned_bridges(networks)
         except NetworkError as e:
             return OperationResult(
                 status="error",
@@ -735,5 +738,6 @@ class NetworkOperation:
             metadata={
                 "network_count": len(results),
                 "bridges_reconciled": bridges_reconciled,
+                "orphaned_bridges_removed": orphaned_bridge_count,
             },
         )

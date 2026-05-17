@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 class CPInput:
     """Raw copy identifiers from CLI."""
 
-    src: str
+    sources: list[str]
     dst: str
     user: str | None = None
     key: str | None = None
@@ -49,7 +49,7 @@ class ResolvedCPInput:
     """Fully resolved copy parameters."""
 
     direction: str  # "host_to_vm" | "vm_to_host" | "vm_to_vm"
-    local_path: str | None = None
+    local_paths: list[str] | None = None
     src_info: ResolvedCPInfo | None = None
     dst_info: ResolvedCPInfo | None = None
     force: bool = False
@@ -64,58 +64,87 @@ class CPRequest:
 
     def resolve(self) -> ResolvedCPInput:
         """Resolve all inputs to explicit values."""
-        # Parse source and destination paths
-        src_vm, src_path = CPService._parse_vm_path(self._inputs.src)
+        sources = self._inputs.sources
         dst_vm, dst_path = CPService._parse_vm_path(self._inputs.dst)
-
-        # Determine direction
-        if src_vm and dst_vm:
-            direction = "vm_to_vm"
-        elif src_vm:
-            direction = "vm_to_host"
-        elif dst_vm:
-            direction = "host_to_vm"
-        else:
-            raise CPError(
-                "At least one path must reference a VM (use vm_name:/path format)",
-                code="cp.no_vm_specified",
-            )
 
         src_info: ResolvedCPInfo | None = None
         dst_info: ResolvedCPInfo | None = None
-        local_path: str | None = None
+        local_paths: list[str] | None = None
+        direction: str
 
-        if direction == "host_to_vm":
-            # src is local, dst is VM
-            local_path = src_path
+        if len(sources) > 1:
+            # Multi-source only works for host → VM
+            if dst_vm is None:
+                raise CPError(
+                    "Multiple sources require a VM destination "
+                    "(use vm_name:/path format)",
+                    code="cp.multi_source_no_vm_destination",
+                )
+            direction = "host_to_vm"
+            local_paths = sources
             if dst_vm is None:
                 raise CPError(
                     "Internal error: destination VM not resolved",
                     code="cp.resolve_failed",
                 )
             dst_info = self._resolve_vm_side(dst_vm, dst_path, is_source=False)
-        elif direction == "vm_to_host":
-            # src is VM, dst is local
-            if src_vm is None:
+        else:
+            # Single source — determine direction by parsing source
+            src_path = sources[0]
+            src_vm, src_remote_path = CPService._parse_vm_path(src_path)
+
+            if src_vm and dst_vm:
+                direction = "vm_to_vm"
+            elif src_vm:
+                direction = "vm_to_host"
+            elif dst_vm:
+                direction = "host_to_vm"
+            else:
                 raise CPError(
-                    "Internal error: source VM not resolved",
-                    code="cp.resolve_failed",
+                    "At least one path must reference a VM "
+                    "(use vm_name:/path format)",
+                    code="cp.no_vm_specified",
                 )
-            src_info = self._resolve_vm_side(src_vm, src_path, is_source=True)
-            local_path = dst_path
-        elif direction == "vm_to_vm":
-            # both are VMs
-            if src_vm is None or dst_vm is None:
-                raise CPError(
-                    "Internal error: source or destination VM not resolved",
-                    code="cp.resolve_failed",
+
+            if direction == "host_to_vm":
+                # src is local, dst is VM
+                local_paths = [src_path]
+                if dst_vm is None:
+                    raise CPError(
+                        "Internal error: destination VM not resolved",
+                        code="cp.resolve_failed",
+                    )
+                dst_info = self._resolve_vm_side(
+                    dst_vm, dst_path, is_source=False
                 )
-            src_info = self._resolve_vm_side(src_vm, src_path, is_source=True)
-            dst_info = self._resolve_vm_side(dst_vm, dst_path, is_source=False)
+            elif direction == "vm_to_host":
+                # src is VM, dst is local
+                if src_vm is None:
+                    raise CPError(
+                        "Internal error: source VM not resolved",
+                        code="cp.resolve_failed",
+                    )
+                src_info = self._resolve_vm_side(
+                    src_vm, src_remote_path, is_source=True
+                )
+                local_paths = [dst_path]
+            elif direction == "vm_to_vm":
+                # both are VMs
+                if src_vm is None or dst_vm is None:
+                    raise CPError(
+                        "Internal error: source or destination VM not resolved",
+                        code="cp.resolve_failed",
+                    )
+                src_info = self._resolve_vm_side(
+                    src_vm, src_remote_path, is_source=True
+                )
+                dst_info = self._resolve_vm_side(
+                    dst_vm, dst_path, is_source=False
+                )
 
         return ResolvedCPInput(
             direction=direction,
-            local_path=local_path,
+            local_paths=local_paths,
             src_info=src_info,
             dst_info=dst_info,
             force=self._inputs.force,
