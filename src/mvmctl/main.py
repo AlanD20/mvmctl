@@ -179,6 +179,9 @@ _COMMAND_SPECS: dict[str, _LazyCommandSpec] = {
     "volume": _LazyCommandSpec(
         "mvmctl.cli.volume", "volume_app", "Volume management"
     ),
+    "vol": _LazyCommandSpec(
+        "mvmctl.cli.volume", "volume_app", "Volume management"
+    ),
 }
 
 _STATIC_COMMAND_HELP: dict[str, str] = {
@@ -197,6 +200,7 @@ _COMMAND_ORDER = [
     "network",
     "vm",
     "volume",
+    "vol",
     "key",
     "ssh",
     "console",

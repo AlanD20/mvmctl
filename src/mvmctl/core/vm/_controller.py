@@ -374,7 +374,7 @@ class VMController:
             "drive_id": vol.id,
             "path_on_host": vol.path,
             "is_root_device": False,
-            "is_read_only": False,
+            "is_read_only": vol.is_read_only,
             "cache_type": "Unsafe",
             "io_engine": "Sync",
         }

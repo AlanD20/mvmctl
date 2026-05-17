@@ -26,6 +26,7 @@ class VolumeCreateInput:
     name: str
     size: str
     format: str | None = None  # 'raw' or 'qcow2', default resolved in request
+    read_only: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ class ResolvedVolumeCreateInput:
     size_bytes: int
     format: str
     path: Path
+    is_read_only: bool = False
 
 
 class VolumeCreateRequest:
@@ -68,11 +70,18 @@ class VolumeCreateRequest:
 
         path = CacheUtils.get_volumes_dir() / f"{self._inputs.name}.{fmt}"
 
+        is_read_only = (
+            self._inputs.read_only
+            if self._inputs.read_only is not None
+            else False
+        )
+
         self._result = ResolvedVolumeCreateInput(
             name=self._inputs.name,
             size_bytes=size_bytes,
             format=fmt,
             path=path,
+            is_read_only=is_read_only,
         )
 
         self.ensure_validate()

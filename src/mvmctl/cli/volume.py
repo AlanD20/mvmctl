@@ -42,10 +42,19 @@ def volume_create(
     format: str | None = typer.Option(
         None, "--format", help="Disk format: raw or qcow2 (default: raw)"
     ),
+    read_only: bool | None = typer.Option(
+        None,
+        "--read-only",
+        "--readonly",
+        help="Mount volume as read-only (default: writable)",
+        is_flag=True,
+    ),
 ) -> None:
     """Create a new persistent volume."""
     result = VolumeOperation.create(
-        VolumeCreateInput(name=name, size=size, format=format)
+        VolumeCreateInput(
+            name=name, size=size, format=format, read_only=read_only
+        )
     )
     if result.is_error:
         mvm_cli.error(result.message)
@@ -53,6 +62,7 @@ def volume_create(
     mvm_cli.success(result.message)
     if result.item:
         mvm_cli.key_value("ID", mvm_cli.format_id(result.item.id))
+        mvm_cli.key_value("Mode", "ro" if result.item.is_read_only else "rw")
         mvm_cli.key_value("Format", result.item.format)
         mvm_cli.key_value(
             "Size",
@@ -104,6 +114,7 @@ def volume_ls(
                     "size": vol.size_bytes,
                     "size_bytes": vol.size_bytes,
                     "format": vol.format,
+                    "is_read_only": vol.is_read_only,
                     "status": vol.status,
                     "vm_id": vol.vm_id,
                     "created_at": vol.created_at,
@@ -119,6 +130,7 @@ def volume_ls(
                 mvm_cli.format_id(vol.id),
                 vol.name,
                 vol.format,
+                "ro" if vol.is_read_only else "rw",
                 mvm_cli.format_size(vol.size_bytes),
                 vol.status,
                 vol.vm_id or "-",
@@ -127,7 +139,16 @@ def volume_ls(
         )
 
     mvm_cli.table(
-        columns=["ID", "Name", "Format", "Size", "Status", "VM", "Created"],
+        columns=[
+            "ID",
+            "Name",
+            "Format",
+            "Mode",
+            "Size",
+            "Status",
+            "VM",
+            "Created",
+        ],
         rows=rows,
     )
 

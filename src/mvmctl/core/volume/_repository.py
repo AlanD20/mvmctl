@@ -64,13 +64,14 @@ class VolumeRepository:
             conn.execute(
                 """
                 INSERT INTO volumes (
-                    id, name, size_bytes, format, path, status, vm_id,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    id, name, size_bytes, format, is_read_only, path, status,
+                    vm_id, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     size_bytes = excluded.size_bytes,
                     format = excluded.format,
+                    is_read_only = excluded.is_read_only,
                     path = excluded.path,
                     status = excluded.status,
                     vm_id = excluded.vm_id,
@@ -81,6 +82,7 @@ class VolumeRepository:
                     volume.name,
                     volume.size_bytes,
                     volume.format,
+                    volume.is_read_only,
                     volume.path,
                     volume.status,
                     volume.vm_id,
