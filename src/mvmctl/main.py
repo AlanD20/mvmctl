@@ -166,6 +166,9 @@ _COMMAND_SPECS: dict[str, _LazyCommandSpec] = {
         "mvmctl.cli.image", "image_app", "Image management"
     ),
     "bin": _LazyCommandSpec("mvmctl.cli.bin", "bin_app", "Binary management"),
+    "cp": _LazyCommandSpec(
+        "mvmctl.cli.cp", "cp_app", "Copy files between host and microVMs"
+    ),
     "cache": _LazyCommandSpec(
         "mvmctl.cli.cache", "cache_app", "Cache management"
     ),
@@ -188,6 +191,7 @@ _STATIC_COMMAND_HELP: dict[str, str] = {
 _COMMAND_ORDER = [
     "init",
     "bin",
+    "cp",
     "kernel",
     "image",
     "network",

@@ -7,11 +7,16 @@ from typing import TYPE_CHECKING
 from mvmctl.utils._lazy_import import resolve_lazy
 
 if TYPE_CHECKING:
+    from mvmctl.core.ssh._cp import CPService
     from mvmctl.core.ssh._service import SSHService
 
-__all__ = ["SSHService"]
+__all__ = [
+    "CPService",
+    "SSHService",
+]
 
 _LAZY_MAP = {
+    "CPService": ("mvmctl.core.ssh._cp", "CPService"),
     "SSHService": ("mvmctl.core.ssh._service", "SSHService"),
 }
 

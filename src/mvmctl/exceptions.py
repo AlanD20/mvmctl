@@ -261,6 +261,18 @@ class SSHError(MVMError):
     """SSH connection or configuration failure."""
 
 
+class CPError(SSHError):
+    """File copy operation failure."""
+
+
+class CPSourceNotFoundError(CPError):
+    """Source path does not exist."""
+
+
+class CPDestinationExistsError(CPError):
+    """Destination file exists and --force not set."""
+
+
 class MVMKeyError(MVMError):
     """SSH key management failure."""
 

@@ -25,6 +25,7 @@ __all__ = [
     "ConfigOperation",
     "ConsoleConnectionInfo",
     "ConsoleOperation",
+    "CPOperation",
     "HostOperation",
     "ImageOperation",
     "InitOperation",
@@ -42,6 +43,7 @@ __all__ = [
     "BinaryInput",
     "ConsoleInput",
     "ConsoleRequest",
+    "CPInput",
     "ImagePullInput",
     "ImageImportInput",
     "ImageInput",
@@ -79,6 +81,7 @@ _LAZY_MAP: dict[str, tuple[str, str]] = {
     "BinaryOperation": ("mvmctl.api.binary_operations", "BinaryOperation"),
     "CacheOperation": ("mvmctl.api.cache_operations", "CacheOperation"),
     "ConfigOperation": ("mvmctl.api.config_operations", "ConfigOperation"),
+    "CPOperation": ("mvmctl.api.cp_operations", "CPOperation"),
     "ConsoleConnectionInfo": (
         "mvmctl.api.console_operations",
         "ConsoleConnectionInfo",
@@ -107,6 +110,7 @@ _LAZY_MAP: dict[str, tuple[str, str]] = {
     "BinaryInput": ("mvmctl.api.inputs._binary_input", "BinaryInput"),
     "ConsoleInput": ("mvmctl.api.inputs._console_input", "ConsoleInput"),
     "ConsoleRequest": ("mvmctl.api.inputs._console_input", "ConsoleRequest"),
+    "CPInput": ("mvmctl.api.inputs._cp_input", "CPInput"),
     "ImagePullInput": (
         "mvmctl.api.inputs._image_acquire_input",
         "ImagePullInput",

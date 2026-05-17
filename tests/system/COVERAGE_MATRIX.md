@@ -390,6 +390,21 @@ removed, or when test coverage changes.
 
 ---
 
+## `mvm cp`
+
+| Command/Flag | Status | Test File | Test Class(es) | Notes |
+|---|---|---|---|---|
+| `cp <src> <dst>` (host→VM, file) | ✅ Deep | `test_cp.py` | `TestCpHostToVm` | L3: file exists on VM via SSH, content verified |
+| `cp <src> <dst>` (host→VM, dir) | ✅ Deep | `test_cp.py` | `TestCpHostToVm` | L3: dir + nested files exist on VM via SSH |
+| `cp <src> <dst>` (VM→host, file) | ✅ Deep | `test_cp.py` | `TestCpVmToHost` | L3: file exists on host, content matches round-trip |
+| `cp <src> <dst>` (VM→host, dir) | 🔴 Missing | — | — | L3: dir exists on host |
+| `cp <src> <dst>` nonexistent source | ⚡ Shallow | `test_cp.py` | `TestCpEdgeCases` | L1: "not found" in error |
+| `cp <src> <dst>` with `--force` | ✅ Deep | `test_cp.py` | `TestCpEdgeCases` | L3: content changed after overwrite, verified via SSH |
+| `cp <src> <dst>` no `--force` dest exists | ⚡ Shallow | `test_cp.py` | `TestCpEdgeCases` | L1: non-zero exit, error mentions exists/force |
+| `cp vm1:/src vm2:/dst` (VM→VM) | 🔴 Missing | — | — | L3: file on VM2 via SSH |
+
+---
+
 ## Summary Statistics
 
 | Category | Total Scenarios | ✅ Deep | ⚡ Shallow | 🔴 Missing | ⏭️ Skip |
@@ -409,13 +424,14 @@ removed, or when test coverage changes.
 | logs | 4 | 0 | 4 | 0 | 0 |
 | host | 9 | 0 | 8 | 0 | 1 |
 | cache | 7 | 0 | 6 | 0 | 1 |
-| **Total** | **249** | **31** | **181** | **0** | **37** |
+| cp | 8 | 4 | 2 | 2 | 0 |
+| **Total** | **257** | **35** | **183** | **2** | **37** |
 
 **Coverage health:**
-- ✅ Deep (L3): 31/249 = 12.4% (↑ from 11.4%)
-- ⚡ Shallow (L0-L2): 181/249 = 72.7%
-- 🔴 Missing: 0/249 = **0%**
-- ⏭️ Skip-prone: 37/249 = 14.9%
+- ✅ Deep (L3): 35/257 = 13.6% (↑ from 12.4%)
+- ⚡ Shallow (L0-L2): 183/257 = 71.2%
+- 🔴 Missing: 2/257 = **0.8%**
+- ⏭️ Skip-prone: 37/257 = 14.4%
 
 **Structural improvements made (this refactoring):**
 - ✅ VM config tests: 21 per-test networks → 1 module-scoped fixture (saves ~10 min per run)
@@ -463,4 +479,4 @@ To run the full system test suite with zero skips, the dedicated test machine mu
 - **Developer machine** (missing deps): Tests skip gracefully with clear `# Skip-reason:` explaining what to install.
 - **CI gate** (`scripts/check_skip_ratio.py`): Enforces ≤10% skip per file. On dedicated machines this passes. On developer machines, use `--no-skip-ratio-check`.
 
-**All 249 scenarios have test coverage.** Zero missing. All refactored to follow the same standards.
+**All 257 scenarios have test coverage.** 2 are 🔴 Missing (VM→host dir, VM→VM). All refactored to follow the same standards.

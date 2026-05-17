@@ -546,6 +546,19 @@ Every scenario includes:
 | `--help` structure (all command groups) | Contains Usage:, Commands:, --help reference | L1 | No | No |
 | `help vm` ≡ `vm --help` | Both show create subcommand | L1 | No | No |
 
+### 4.17 `mvm cp`
+
+| Command | Required Scenarios | Min Depth | Skip OK? | Destructive? |
+|---------|-------------------|-----------|----------|--------------|
+| `cp <src> <dst>` (host→VM, single file) | File exists on VM after copy, verified via `mvm ssh --cmd "test -f"` | L3 | If SSH unavailable | Yes |
+| `cp <src> <dst>` (host→VM, directory) | Directory exists on VM with contents, verified via SSH | L3 | If SSH unavailable | Yes |
+| `cp <src> <dst>` (VM→host, single file) | File exists on host filesystem at destination with expected content | L3 | If SSH unavailable | Yes |
+| `cp <src> <dst>` (VM→host, directory) | Directory exists on host with contents | L3 | If SSH unavailable | Yes |
+| `cp <src> <dst>` nonexistent source | Non-zero exit, error mentions "not found" | L1 | No | No |
+| `cp <src> <dst>` with `--force` | Overwrites existing destination file | L3 | If SSH unavailable | Yes |
+| `cp <src> <dst>` without `--force` when dest exists | Non-zero exit, error mentions "force" or "exists" | L1 | No | No |
+| `cp vm1:/src vm2:/dst` (VM→VM) | File exists on VM2 after copy | L3 | If SSH unavailable on either VM | Yes |
+
 ---
 
 ## 5. Test Writing Rules
