@@ -9,6 +9,57 @@ from typing import NotRequired, TypedDict
 from mvmctl.models.cloudinit import CloudInitMode
 
 
+class CpuidRegisterModifier(TypedDict):
+    """Modifier for a specific CPUID register within a leaf (x86_64)."""
+
+    register: str  # eax, ebx, ecx, edx
+    bitmap: str  # 32-char bitmap string: 0=clear, 1=set, x=ignore
+
+
+class CpuidLeafModifier(TypedDict):
+    """Modifier for a CPUID leaf and subleaf (x86_64)."""
+
+    leaf: str  # hex, binary, or decimal string (e.g. "0x1", "0b1", "1")
+    subleaf: str  # hex, binary, or decimal string
+    flags: int  # KVM feature flags
+    modifiers: list[CpuidRegisterModifier]
+
+
+class MsrModifier(TypedDict):
+    """Modifier for a model specific register (x86_64)."""
+
+    addr: str  # MSR address (e.g. "0x10a")
+    bitmap: str  # 64-char bitmap string
+
+
+class ArmRegisterModifier(TypedDict):
+    """Modifier for an ARM register (aarch64)."""
+
+    addr: str  # 64-bit register address
+    bitmap: str  # 128-char bitmap string
+
+
+class VcpuFeatures(TypedDict):
+    """vCPU feature modifier (aarch64)."""
+
+    index: int  # Index in kvm_vcpu_init.features array
+    bitmap: str  # 32-char bitmap string
+
+
+class CpuConfig(TypedDict, total=False):
+    """Firecracker CPU configuration — maps to PUT /cpu-config.
+
+    All fields are optional (total=False) since a CPU config may only
+    specify the subset of features being modified.
+    """
+
+    kvm_capabilities: list[str]  # KVM capability codes (e.g. ["56", "171"])
+    cpuid_modifiers: list[CpuidLeafModifier]  # x86_64 only
+    msr_modifiers: list[MsrModifier]  # x86_64 only
+    reg_modifiers: list[ArmRegisterModifier]  # aarch64 only
+    vcpu_features: list[VcpuFeatures]  # aarch64 only
+
+
 class DriveConfig(TypedDict):
     drive_id: str
     path_on_host: str
@@ -59,6 +110,7 @@ class FirecrackerConfig:
 
     # Feature flags
     pci_enabled: bool
+    nested_virt: bool
     enable_console: bool
     enable_logging: bool
     enable_metrics: bool
@@ -76,6 +128,11 @@ class FirecrackerConfig:
     cloud_init_mode: CloudInitMode | None
     cloud_init_iso_path: Path | None
     cloud_init_nocloud_url: str | None
+
+    # CPU config (nested virt / custom template)
+    cpu_config: CpuConfig | None = None
+    cpu_vendor: str | None = None
+    cpu_architecture: str | None = None
 
     # Extra drives (volumes)
     extra_drives: list[DriveConfig] = field(default_factory=list)

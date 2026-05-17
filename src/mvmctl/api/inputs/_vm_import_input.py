@@ -8,9 +8,12 @@ ResolvedVMCreateInput ready for VM creation.
 
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from mvmctl.api.inputs._vm_create_input import (
     ResolvedVMCreateInput,
@@ -41,6 +44,8 @@ from mvmctl.exceptions import (
 )
 from mvmctl.utils.common import CacheUtils
 from mvmctl.utils.crypto import HashGenerator
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -75,12 +80,23 @@ class VMImportRequest:
         binary_id = self._resolve_binary(export_config.binary)
         network_name = self._resolve_network(export_config.network)
 
+        # Parse cpu_config from export JSON string (if present)
+        cpu_config: dict[str, Any] | None = None
+        if export_config.firecracker.cpu_config is not None:
+            try:
+                cpu_config = json.loads(export_config.firecracker.cpu_config)
+            except json.JSONDecodeError:
+                logger.warning(
+                    "Failed to parse cpu_config from import file: %s",
+                    export_config.firecracker.cpu_config,
+                )
+
         # Build VMCreateInput with resolved values
         create_input = VMCreateInput(
             name=self._inputs.name_override or export_config.name,
             ssh_keys=[],
             vcpu_count=export_config.compute.vcpus,
-            mem_size_mib=export_config.compute.mem,
+            mem_size_mib=str(export_config.compute.mem),
             disk_size=export_config.image.disk_size,
             image=image_slug,
             kernel_id=kernel_id,
@@ -95,6 +111,8 @@ class VMImportRequest:
             cloud_init_mode=export_config.cloud_init.mode,
             nocloud_net_port=export_config.cloud_init.nocloud_net_port,
             user=export_config.cloud_init.user,
+            nested_virt=export_config.firecracker.nested_virt,
+            cpu_config=cpu_config,
         )
 
         # Delegate to VMCreateRequest for full resolution

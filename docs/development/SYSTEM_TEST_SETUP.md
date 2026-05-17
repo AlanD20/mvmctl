@@ -254,13 +254,28 @@ The system test suite can run inside a Firecracker microVM that itself has
 nested KVM enabled. This is useful for CI/CD isolation or testing in
 ephemeral environments.
 
+mvmctl supports nested virtualization via the `--nested-virt` flag on
+`mvm vm create`. When enabled, it:
+
+- Sends a `cpu-config` to Firecracker with `kvm_capabilities: []` (preserving
+  all default KVM capabilities including nested virt)
+- Adds `kvm-intel.nested=1` or `kvm-amd.nested=1` to the guest kernel boot args
+  (auto-detected from `host_state.cpu_vendor`)
+- Forces `pci_enabled=true` (required for nested virt)
+- Supports custom CPU templates via `--cpu-template PATH` which are deep-merged
+  with the nested_virt base configuration
+
+The global default is controlled by `defaults.vm.nested_virt = false` in the
+mvmctl config system (settable via `mvm config set defaults.vm nested_virt true`).
+
 ### 6.1 Prerequisites
 
 | Requirement | Detail |
 |---|---|
 | Host CPU | Must support VMX (Intel) or SVM (AMD) — `egrep -c '(vmx\|svm)' /proc/cpuinfo` > 0 |
 | Host kernel | Must have `kvm_intel.nested=1` or `kvm_amd.nested=1` — check with `cat /sys/module/kvm_intel/parameters/nested` → should print `Y` |
-| Firecracker version | ≥ 1.15.0 with KVM capability support |
+| Firecracker version | ≥ 1.5.0 (kvm_capabilities added in v1.5.0; we use v1.15.1) |
+| Guest kernel | Must have `CONFIG_KVM_INTEL` or `CONFIG_KVM_AMD` built in (our firecracker kernel includes these) |
 | Guest resources | At minimum 4 vCPUs and 4 GB RAM to run VMs inside the guest |
 
 ### 6.2 Enable Nested Virtualization on the Host
@@ -290,8 +305,9 @@ Use an Ubuntu or Alpine image with development tools pre-installed.
 # 1. Create a network for the test runner VM
 mvm network create testrunner-net --subnet 10.77.0.0/24
 
-# 2. Create the test runner VM with enough resources
+# 2. Create the test runner VM with ENOUGH resources and nested virt enabled
 #    --vcpus 4, --mem 4096 to give the guest room to spawn nested VMs
+#    --nested-virt enables KVM passthrough and adds kvm-intel.nested=1 to boot args
 mvm vm create testrunner \
   --image ubuntu:24.04 \
   --network testrunner-net \
@@ -299,7 +315,7 @@ mvm vm create testrunner \
   --mem 4096 \
   --disk-size 20G \
   --ssh-key my-key \
-  --user-data setup-test-runner.yaml
+  --nested-virt
 
 # 3. Provision inside the guest
 mvm ssh testrunner -u ubuntu --cmd "
@@ -313,24 +329,40 @@ mvm ssh testrunner -u ubuntu --cmd "
 mvm ssh testrunner -u ubuntu --cmd "git clone <repo-url> && cd mvmctl && uv sync --group dev"
 ```
 
+To verify nested virtualization is working inside the Firecracker VM:
+
+```bash
+# Inside the guest, verify /dev/kvm is accessible
+test -c /dev/kvm && echo "KVM available"
+
+# Check the nested virt kernel param took effect
+cat /sys/module/kvm_intel/parameters/nested   # should print Y
+
+# Check CPU flags include vmx/svm
+grep -o 'vmx\|svm' /proc/cpuinfo | sort -u   # should show vmx or svm
+```
+
 #### Via Firecracker directly (advanced)
 
 ```bash
 # Boot a Firecracker guest with nested KVM enabled.
 # The guest kernel must be booted with kvm-intel.nested=1
-# or the KVM capabilities must be set in the Firecracker machine config.
+# and the KVM capabilities must be set via PUT /cpu-config (NOT machine-config).
 
-# Example machine config snippet (sent via PUT /machine-config):
+# The cpu-config endpoint accepts:
 # {
-#   "vcpu_count": 4,
-#   "mem_size_mib": 4096,
-#   "kvm_capabilities": []
+#   "kvm_capabilities": []     # preserve all default KVM capabilities
 # }
 #
-# An empty kvm_capabilities list gives the guest full KVM access
-# (including nested virtualization). Firecracker's default is to
-# restrict certain capabilities; explicitly setting the list to
-# empty grants all available KVM features to the guest.
+# An empty kvm_capabilities list means "do not remove any capabilities
+# from Firecracker's default check list". It does NOT grant full KVM
+# access — Firecracker's default capabilities already cover the essentials.
+# For nested virtualization, the guest kernel additionally needs:
+# - kvm-intel.nested=1 on the kernel cmdline (Intel)
+# - kvm-amd.nested=1 on the kernel cmdline (AMD)
+#
+# mvmctl handles both the cpu-config and the boot args automatically
+# when --nested-virt is used. This section is for manual/advanced use only.
 ```
 
 ### 6.4 Inside the Guest: Setup

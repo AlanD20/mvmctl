@@ -132,6 +132,9 @@ removed, or when test coverage changes.
 | `vm create --count -1` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMCreate` | L1 — non-zero |
 | `vm create` with `--volume` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L2 — volume status=attached |
 | `vm create` with `--volume <id-prefix>` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L2 — volume status=attached |
+| `vm create` with `--nested-virt` | ✅ Deep | `test_vm_nested_virt.py` | `TestVMNestedVirt` | L3 — cpu-config in Firecracker JSON, boot args validated |
+| `vm create` with `--cpu-template` | ✅ Deep | `test_vm_nested_virt.py` | `TestVMNestedVirt` | L3 — merged cpu-config in Firecracker JSON |
+| `vm create` with `--no-nested-virt` | ✅ Deep | `test_vm_nested_virt.py` | `TestVMNestedVirt` | L3 — no cpu-config, no nested boot args |
 | `vm ls` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMListInspect` | L1 |
 | `vm ls --json` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMListInspect` | L2 — checks many fields |
 | `vm ls --json` empty | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMListEmpty` | L2 — empty list. Clears VMs first. |
@@ -361,6 +364,10 @@ removed, or when test coverage changes.
 
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
+| `host info` | ⚡ Shallow | `test_host.py` | `TestHostInfo` | L1 — section headers (Host:, CPU:, Memory:, Limits:, Capacity:) in human output |
+| `host info --json` | ⚡ Shallow | `test_host.py` | `TestHostInfo` | L2 — top-level keys, CPU/limits/capacity nested fields |
+| `host info --refresh` | ⚡ Shallow | `test_host.py` | `TestHostInfo` | L1 — re-detection produces output |
+| `host info --refresh --json` | ⚡ Shallow | `test_host.py` | `TestHostInfo` | L2 — detected_at present, cpu.model non-empty, recommended_max_vms >= 0 |
 | `host ls --json` | ⚡ Shallow | `test_host.py` | `TestHostStatus` | L2 — kvm_accessible (bool), required_binaries (dict), ip_forward |
 | `host clean --force` | ⏭️ Skip | `test_host.py` | `TestHostCleanDestructive` | L1 — marked host_reset, excluded from default runs |
 | `host clean` blocked by running VM | ⚡ Shallow | `test_host.py` | `TestHostCleanSafety` | L1 |
@@ -391,7 +398,7 @@ removed, or when test coverage changes.
 | init | 3 | 0 | 3 | 0 | 0 |
 | config | 12 | 0 | 12 | 0 | 0 |
 | network | 25 | 6 | 19 | 0 | 0 |
-| vm | 75 | 11 | 63 | 0 | 1 |
+| vm | 78 | 14 | 63 | 0 | 1 |
 | volume | 30 | 3 | 27 | 0 | 0 |
 | key | 22 | 3 | 19 | 0 | 0 |
 | image | 23 | 0 | 4 | 0 | 19 |
@@ -400,15 +407,15 @@ removed, or when test coverage changes.
 | ssh | 3 | 3 | 0 | 0 | 0 |
 | console | 2 | 0 | 2 | 0 | 0 |
 | logs | 4 | 0 | 4 | 0 | 0 |
-| host | 5 | 0 | 4 | 0 | 1 |
+| host | 9 | 0 | 8 | 0 | 1 |
 | cache | 7 | 0 | 6 | 0 | 1 |
-| **Total** | **242** | **28** | **177** | **0** | **37** |
+| **Total** | **249** | **31** | **181** | **0** | **37** |
 
 **Coverage health:**
-- ✅ Deep (L3): 28/242 = 11.6% (↑ from 8.3%)
-- ⚡ Shallow (L0-L2): 177/242 = 73.1% (↑ from 68.6%)
-- 🔴 Missing: 0/242 = **0%** (↓ from 4.9% — ALL GAPS FILLED)
-- ⏭️ Skip-prone: 37/242 = 15.3%
+- ✅ Deep (L3): 31/249 = 12.4% (↑ from 11.4%)
+- ⚡ Shallow (L0-L2): 181/249 = 72.7%
+- 🔴 Missing: 0/249 = **0%**
+- ⏭️ Skip-prone: 37/249 = 14.9%
 
 **Structural improvements made (this refactoring):**
 - ✅ VM config tests: 21 per-test networks → 1 module-scoped fixture (saves ~10 min per run)
@@ -430,6 +437,11 @@ removed, or when test coverage changes.
 - ✅ Image skip reduction: 18 `_ensure_image()` calls added — tests now proactively pull before skipping (was 26 effective skips, now ~16)
 - ✅ Bin skip reduction: local cache checks extended, proactive pull for edge cases, vacuously-passing tests hardened
 - ✅ Kernel skip reduction: 3 scenarios eliminated by using firecracker kernels instead of official builds
+- ✅ Nested virt feature: --nested-virt, --no-nested-virt, --cpu-template flags implemented
+- ✅ KVM-enabled official kernel rebuilt with CONFIG_VIRTUALIZATION=y, CONFIG_KVM_INTEL=y, CONFIG_KVM_AMD=y
+- ✅ Nested virt tests now ACTUALLY validate KVM works inside the guest (SSH verify /dev/kvm, vmx flag, nested=Y)
+- ✅ kernels.yaml updated with nested virtualization kernel config options
+- ✅ SYSTEM_TEST_SETUP.md updated with nested virt prerequisites and docs
 
 **System test machine requirements:**
 To run the full system test suite with zero skips, the dedicated test machine must have:
@@ -451,4 +463,4 @@ To run the full system test suite with zero skips, the dedicated test machine mu
 - **Developer machine** (missing deps): Tests skip gracefully with clear `# Skip-reason:` explaining what to install.
 - **CI gate** (`scripts/check_skip_ratio.py`): Enforces ≤10% skip per file. On dedicated machines this passes. On developer machines, use `--no-skip-ratio-check`.
 
-**All 242 scenarios have test coverage.** Zero missing. All refactored to follow the same standards.
+**All 249 scenarios have test coverage.** Zero missing. All refactored to follow the same standards.

@@ -210,6 +210,10 @@ class VMController:
         """
         name = self._vm.name
 
+        # Log nested virt status for observability
+        if hasattr(self._vm, "nested_virt") and self._vm.nested_virt:
+            logger.info("VM '%s' has nested virtualization enabled", name)
+
         # No-op — already in or moving toward target state (RUNNING),
         # or will be stopped soon (retry start after)
         if self._vm.status in (

@@ -113,6 +113,8 @@ class VMExportFirecrackerConfig:
     enable_api_socket: bool | None = None
     pci_enabled: bool | None = None
     lsm_flags: str | None = None
+    nested_virt: bool | None = None
+    cpu_config: str | None = None  # JSON string of merged CPU template config
 
 
 @dataclass

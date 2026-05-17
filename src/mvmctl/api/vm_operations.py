@@ -10,6 +10,7 @@ It combines:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
@@ -47,6 +48,7 @@ from mvmctl.core.cloudinit._provisioner import (
 from mvmctl.core.config._service import SettingsService
 from mvmctl.core.console._controller import ConsoleController
 from mvmctl.core.host._helper import HostPrivilegeHelper
+from mvmctl.core.host._repository import HostRepository
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.core.image._service import ImageService
 from mvmctl.core.kernel._repository import KernelRepository
@@ -560,6 +562,12 @@ class VMCreateContext:
         if self.resolved is None:
             return None
 
+        # Resolve CPU vendor from the host database for nested virt detection
+        host_repo = HostRepository()
+        host_state = host_repo.get_state()
+        cpu_vendor = host_state.cpu_vendor if host_state else None
+        cpu_architecture = host_state.cpu_architecture if host_state else None
+
         return FirecrackerConfig(
             vm_dir=self.vm_dir,
             rootfs_path=self.rootfs_path,
@@ -577,6 +585,10 @@ class VMCreateContext:
             boot_args=self.resolved.boot_args,
             lsm_flags=self.resolved.lsm_flags,
             pci_enabled=self.resolved.pci_enabled,
+            nested_virt=self.resolved.nested_virt,
+            cpu_vendor=cpu_vendor,
+            cpu_architecture=cpu_architecture,
+            cpu_config=self.resolved.cpu_config,
             enable_console=self.resolved.enable_console,
             enable_logging=self.resolved.enable_logging,
             enable_metrics=self.resolved.enable_metrics,
@@ -636,6 +648,7 @@ class VMCreateContext:
             rootfs_path=self.rootfs_path.name,
             rootfs_suffix=self.resolved.image.fs_type,
             pci_enabled=self.resolved.pci_enabled,
+            nested_virt=self.resolved.nested_virt,
             enable_logging=self.resolved.enable_logging,
             enable_metrics=self.resolved.enable_metrics,
             enable_console=self.resolved.enable_console,
@@ -648,6 +661,10 @@ class VMCreateContext:
             ssh_keys=[k.id for k in self.resolved.ssh_keys],
             ssh_user=self.resolved.user,
         )
+
+        # Set cpu_config from resolved input (stored as JSON in DB)
+        if self.resolved.cpu_config is not None:
+            vm_instance.cpu_config = self.resolved.cpu_config
 
         if (
             self.cloud_init_result
@@ -1832,6 +1849,10 @@ class VMOperation:
             firecracker=VMExportFirecrackerConfig(
                 pci_enabled=vm.pci_enabled,
                 lsm_flags=vm.lsm_flags,
+                nested_virt=vm.nested_virt,
+                cpu_config=json.dumps(vm.cpu_config)
+                if isinstance(vm.cpu_config, dict)
+                else vm.cpu_config,
             ),
             cloud_init=VMExportCloudInitConfig(
                 mode=vm.cloud_init_mode or "inject",

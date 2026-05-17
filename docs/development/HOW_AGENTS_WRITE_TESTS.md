@@ -343,6 +343,9 @@ Every scenario includes:
 | DNS resolution inside VM | getent hosts google.com resolves | L3 | If DNS unavailable: skip with /etc/resolv.conf diagnostic | No |
 | Config precedence: CLI flag overrides config default | vcpus=2 with --vcpus overrides config=4 | L2 | No | Yes |
 | `--enable-logging`: log file exists on disk | Log file in vm_dir non-empty | L3 | No | Yes |
+| `vm create` with `--nested-virt` | cpu-config in Firecracker JSON, boot args contain kvm-intel.nested=1 or kvm-amd.nested=1, pci_enabled=true | L3 | If host doesn't support nested virt | Yes |
+| `vm create` with `--no-nested-virt` | No cpu-config in Firecracker JSON, no nested boot args | L3 | No | Yes |
+| `vm create` with `--cpu-template <path>` | cpu-config contains user's merged template plus nested_virt base kvm_capabilities if --nested-virt also set | L3 | If file doesn't exist | Yes |
 
 ### 4.6 `mvm volume`
 
@@ -689,6 +692,7 @@ def test_create_with_enable_logging(self, ...):
 - ❌ Add `slow` marker to tests that run in <5 seconds
 - ❌ Run the full system test suite as validation — CI handles execution.
   The self-check below is for the developer's local verification only.
+- ❌ Forget to update `tests/system/COVERAGE_MATRIX.md` when adding or modifying tests — both the per-domain entries AND the summary statistics must be updated before submitting.
 - ❌ Import from `mvmctl.*` — tests are black-box subprocess only
 
 ---
@@ -698,6 +702,7 @@ def test_create_with_enable_logging(self, ...):
 ```
 [ ] Did I check the scenario catalog for this domain?
 [ ] Is every CLI flag in the command covered by a scenario?
+[ ] Did I update `tests/system/COVERAGE_MATRIX.md` with the new entries AND recalculate summary statistics?
 [ ] Did I achieve the minimum verification depth (L2 or L3)?
 [ ] Is every pytest.skip() justified with a skip-reason comment?
 [ ] Did I avoid the forbidden assertion pattern?

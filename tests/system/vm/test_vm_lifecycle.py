@@ -795,6 +795,41 @@ class TestVMConfigOptions:
         )
         assert result.returncode != 0
 
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    def test_create_with_memory_human_readable(
+        # Rationale: Verifies --mem accepts human-readable size strings (e.g., "1G")
+        # in addition to raw MiB integers. A regression where "1G" is not parsed
+        # correctly (resulting in 1 MiB instead of 1024 MiB) would cause the VM
+        # to boot with severely under-allocated memory.
+        self,
+        mvm_binary,
+        unique_vm_name,
+        config_options_network,
+    ):
+        """Create VM with human-readable --mem (1G = 1024 MiB)."""
+        net_name = config_options_network
+        try:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                unique_vm_name,
+                "--image",
+                "alpine:3.21",
+                "--mem",
+                "1G",
+                "--network",
+                net_name,
+            )
+            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
+            vm = next(v for v in vms if v["name"] == unique_vm_name)
+            assert vm["mem_size_mib"] == 1024
+        finally:
+            _run_mvm(
+                mvm_binary, "vm", "rm", unique_vm_name, "--force", check=False
+            )
+
     # ── Config options: Disk size ───────────────────────────────────
 
     def test_create_with_disk_size(

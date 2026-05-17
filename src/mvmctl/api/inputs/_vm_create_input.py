@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import logging
 import os
 from dataclasses import dataclass, field
@@ -44,6 +45,7 @@ from mvmctl.exceptions import (
 from mvmctl.models import (
     BinaryItem,
     CloudInitMode,
+    CpuConfig,
     DriveConfig,
     ImageItem,
     KernelItem,
@@ -55,6 +57,7 @@ from mvmctl.models import (
 )
 from mvmctl.utils._disk import DiskUtils
 from mvmctl.utils._validators import NetworkValidator, VMValidator
+from mvmctl.utils.common import CommonUtils
 
 logger = logging.getLogger(__name__)
 
@@ -71,9 +74,14 @@ class VMCreateInput:
 
     # Optional fields with CLI-layer defaults resolved in VMCreateRequest
     vcpu_count: int | None = None
-    mem_size_mib: int | None = None
+    mem_size_mib: str | None = None
     user: str | None = None
     pci_enabled: bool | None = None
+    nested_virt: bool | None = None
+    cpu_template: Path | None = None
+    cpu_config: CpuConfig | None = (
+        None  # Pre-resolved CPU config (from import)
+    )
     enable_console: bool | None = None
     enable_logging: bool | None = None
     enable_metrics: bool | None = None
@@ -124,6 +132,7 @@ class ResolvedVMCreateInput:
     cloud_init_mode: CloudInitMode
     skip_ci_network_config: bool
     pci_enabled: bool
+    nested_virt: bool
     enable_console: bool
     enable_logging: bool
     enable_metrics: bool
@@ -158,6 +167,7 @@ class ResolvedVMCreateInput:
     nocloud_net_port: int | None = None
     custom_user_data_path: Path | None = None
     cloud_init_iso_path: Path | None = None
+    cpu_config: CpuConfig | None = None
 
     boot_args: str | None = None
     ssh_keys: list[SSHKeyItem] = field(default_factory=list)
@@ -241,6 +251,11 @@ class VMCreateRequest:
         ipv4_net = ipaddress.IPv4Network(vm.network.subnet, strict=False)
         extra_drives = VolumeService.volumes_to_drives(vm.volumes)
 
+        # Deserialize cpu_config if it's a JSON string from DB
+        cpu_config = vm.cpu_config
+        if isinstance(cpu_config, str):
+            cpu_config = json.loads(cpu_config)
+
         return ResolvedVMCreateInput(
             name=vm.name,
             vm_id=vm.id,
@@ -278,6 +293,8 @@ class VMCreateRequest:
             else CloudInitMode.OFF,
             skip_ci_network_config=False,
             pci_enabled=vm.pci_enabled,
+            nested_virt=vm.nested_virt,
+            cpu_config=cpu_config,
             enable_console=vm.enable_console,
             enable_logging=vm.enable_logging,
             enable_metrics=vm.enable_metrics,
@@ -395,8 +412,63 @@ class VMCreateRequest:
 
         rootfs_disk_size_bytes = rootfs_disk_size_mib * CONST_MEBIBYTE_BYTES
 
+        # ── Resolve mem_size_mib: human-readable (512M, 1G) or raw MiB ints ──
+        if self._inputs.mem_size_mib is not None:
+            mem_str = self._inputs.mem_size_mib.strip()
+            try:
+                mem_mib = int(mem_str)
+            except ValueError:
+                mem_mib = (
+                    DiskUtils.parse_disk_size_to_bytes(mem_str)
+                    // CONST_MEBIBYTE_BYTES
+                )
+        else:
+            mem_mib = self._resolve_setting("defaults.vm", "mem_size_mib")
+
         ci_mode_result = self._resolve_cloud_init_mode()
         provisioner = self._resolve_provisioner()
+
+        # ── Resolve nested_virt and cpu_config ──────────────────────────
+        nested_virt = self._inputs.nested_virt
+        if nested_virt is None:
+            nested_virt = bool(
+                self._resolve_setting("defaults.vm", "nested_virt")
+            )
+        else:
+            nested_virt = bool(nested_virt)
+
+        # Resolve CPU config: from cpu_template (CLI) or cpu_config (import)
+        cpu_config: dict[str, Any] | None = self._inputs.cpu_config
+        if self._inputs.cpu_template is not None:
+            if cpu_config is not None:
+                raise VMCreateError(
+                    "Cannot specify both --cpu-template and a pre-resolved cpu_config"
+                )
+            try:
+                cpu_config = json.loads(self._inputs.cpu_template.read_text())
+            except json.JSONDecodeError as e:
+                raise VMCreateError(f"Invalid CPU template JSON: {e}") from e
+            if not isinstance(cpu_config, dict):
+                raise VMCreateError("CPU template must be a JSON object")
+
+        # Merge with nested virt base if nested_virt is enabled
+        if nested_virt:
+            base: dict[str, Any] = {"kvm_capabilities": []}
+            if cpu_config is not None:
+                cpu_config = CommonUtils.deep_merge_dict(base, cpu_config)
+            else:
+                cpu_config = base
+
+        # Nested virt forces PCI on
+        pci_enabled = self._inputs.pci_enabled
+        if pci_enabled is not None:
+            pci_enabled = bool(pci_enabled)
+        else:
+            pci_enabled = bool(
+                self._resolve_setting("defaults.vm", "pci_enabled")
+            )
+        if nested_virt:
+            pci_enabled = True
 
         self._result = ResolvedVMCreateInput(
             name=self._inputs.name,
@@ -405,9 +477,7 @@ class VMCreateRequest:
             vcpu_count=self._inputs.vcpu_count
             if self._inputs.vcpu_count is not None
             else self._resolve_setting("defaults.vm", "vcpu_count"),
-            mem_size_mib=self._inputs.mem_size_mib
-            if self._inputs.mem_size_mib is not None
-            else self._resolve_setting("defaults.vm", "mem_size_mib"),
+            mem_size_mib=mem_mib,
             user=self._inputs.user
             if self._inputs.user is not None
             else self._resolve_setting("defaults.vm", "ssh_user"),
@@ -424,9 +494,9 @@ class VMCreateRequest:
             kernel=kernel,
             binary=fc_binary,
             cloud_init_mode=ci_mode_result.mode,
-            pci_enabled=self._inputs.pci_enabled
-            if self._inputs.pci_enabled is not None
-            else self._resolve_setting("defaults.vm", "pci_enabled"),
+            pci_enabled=pci_enabled,
+            nested_virt=nested_virt,
+            cpu_config=cpu_config,
             enable_console=self._inputs.enable_console
             if self._inputs.enable_console is not None
             else self._resolve_setting("defaults.vm", "enable_console"),

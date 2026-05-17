@@ -169,11 +169,11 @@ def vm_create(
         "--cpus",
         help="Number of vCPUs (default: from user config)",
     ),
-    mem: int | None = typer.Option(
+    mem: str | None = typer.Option(
         None,
         "--mem",
         "--memory",
-        help="Memory in MiB (default: from user config)",
+        help="Memory in MiB or GiB (e.g. 512M, 1G, 4096). Default: from user config",
     ),
     disk_size: str | None = typer.Option(
         None,
@@ -217,6 +217,18 @@ def vm_create(
         False,
         "--no-pci",
         help="Disable PCI transport (default: enabled). Required for hotplug support.",
+    ),
+    nested_virt: bool | None = typer.Option(
+        None,
+        "--nested-virt/--no-nested-virt",
+        help="Enable nested virtualization (requires PCI, adds kvm-intel/amd.nested=1 boot arg)",
+    ),
+    cpu_template: Path | None = typer.Option(
+        None,
+        "--cpu-template",
+        help="Path to CPU template JSON file (merged with nested-virt config if both set)",
+        exists=True,
+        dir_okay=False,
     ),
     no_console: bool = typer.Option(
         False,
@@ -313,6 +325,8 @@ def vm_create(
                 ssh_keys=effective_ssh_keys,
                 user=user,
                 pci_enabled=not no_pci,
+                nested_virt=nested_virt,
+                cpu_template=cpu_template,
                 enable_console=not no_console if no_console else None,
                 enable_logging=enable_logging,
                 enable_metrics=enable_metrics,

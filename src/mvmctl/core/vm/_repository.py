@@ -307,11 +307,12 @@ class VMRepository:
                     relay_socket_path, config_path, cloud_init_mode,
                     nocloud_net_port, nocloud_net_pid, relay_pid,
                     exit_code, vcpu_count, mem_size_mib, disk_size_mib,
-                    rootfs_path, rootfs_suffix, pci_enabled, enable_logging,
-                    enable_metrics, enable_console, ssh_keys, ssh_user,
+                    rootfs_path, rootfs_suffix, pci_enabled, nested_virt,
+                    enable_logging, enable_metrics, enable_console,
+                    ssh_keys, ssh_user,
                     created_at, updated_at,
-                    log_path, serial_output_path, lsm_flags, boot_args, volume_ids
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    log_path, serial_output_path, lsm_flags, boot_args, volume_ids, cpu_config
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     status = excluded.status,
@@ -338,6 +339,7 @@ class VMRepository:
                     rootfs_path = excluded.rootfs_path,
                     rootfs_suffix = excluded.rootfs_suffix,
                     pci_enabled = excluded.pci_enabled,
+                    nested_virt = excluded.nested_virt,
                     enable_logging = excluded.enable_logging,
                     enable_metrics = excluded.enable_metrics,
                     enable_console = excluded.enable_console,
@@ -348,6 +350,7 @@ class VMRepository:
                     lsm_flags = excluded.lsm_flags,
                     boot_args = excluded.boot_args,
                     volume_ids = excluded.volume_ids,
+                    cpu_config = excluded.cpu_config,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -377,6 +380,7 @@ class VMRepository:
                     vm.rootfs_path,
                     vm.rootfs_suffix,
                     vm.pci_enabled,
+                    vm.nested_virt,
                     vm.enable_logging,
                     vm.enable_metrics,
                     vm.enable_console,
@@ -392,6 +396,9 @@ class VMRepository:
                     vm.boot_args,
                     json.dumps(vm.volume_ids)
                     if vm.volume_ids is not None
+                    else None,
+                    json.dumps(vm.cpu_config)
+                    if vm.cpu_config is not None
                     else None,
                 ),
             )

@@ -24,7 +24,12 @@ from mvmctl.exceptions import (
     FirecrackerSpawnError,
     SocketNotFoundError,
 )
-from mvmctl.models import CloudInitMode, DriveConfig, FirecrackerConfig
+from mvmctl.models import (
+    CloudInitMode,
+    CpuConfig,
+    DriveConfig,
+    FirecrackerConfig,
+)
 from mvmctl.utils.fs import FsUtils
 
 logger = logging.getLogger(__name__)
@@ -232,6 +237,10 @@ class FirecrackerSpawner:
         self._close_filepointers()
 
     def generate(self) -> FirecrackerConfigDict:
+        # Nested virt requires PCI — force it on
+        if self._config.nested_virt:
+            self._config.pci_enabled = True
+
         # Build as regular dict to allow dynamic optional keys
         config: dict[str, Any] = {
             "boot-source": BootSourceConfig(
@@ -253,6 +262,11 @@ class FirecrackerSpawner:
 
         if self._config.enable_metrics:
             config["metrics"] = self._build_metrics_config()
+
+        # CPU config (nested virt or custom template)
+        cpu_config = self._build_cpu_config()
+        if cpu_config is not None:
+            config["cpu-config"] = cpu_config
 
         return config  # type: ignore[return-value]
 
@@ -307,6 +321,23 @@ class FirecrackerSpawner:
 
         return metric
 
+    def _build_cpu_config(self) -> CpuConfig | None:
+        """Build the ``cpu-config`` section for the Firecracker config.
+
+        Returns a dict suitable for the ``cpu-config`` key when nested virt
+        is enabled or a custom CPU template was provided. Returns ``None``
+        when no CPU configuration is needed.
+
+        The ``cpu_config`` from ``self._config`` is already merged at create
+        time (see ``VMCreateRequest.resolve()``). This method only decides
+        whether to include it in the output.
+        """
+        if self._config.cpu_config is not None:
+            return self._config.cpu_config
+        if self._config.nested_virt:
+            return {"kvm_capabilities": []}
+        return None
+
     def _build_boot_args(self) -> str:
 
         boot_args = {}
@@ -335,6 +366,26 @@ class FirecrackerSpawner:
 
         if self._config.lsm_flags:
             self._set_boot_arg(boot_args, "lsm", self._config.lsm_flags)
+
+        # Nested virtualization: add kernel parameter for Intel/AMD
+        if self._config.nested_virt and self._config.cpu_vendor:
+            cpu_vendor_lower = self._config.cpu_vendor.lower()
+            cpu_arch_lower = (
+                self._config.cpu_architecture.lower()
+                if self._config.cpu_architecture
+                else ""
+            )
+            # ARM/aarch64 doesn't use kvm-intel/kvm-amd module params
+            # for nested virtualization — skip x86-specific boot args
+            if "arm" in cpu_arch_lower or "aarch64" in cpu_arch_lower:
+                pass
+            # AMD and Hygon (AMD-compatible Chinese vendor) use kvm-amd
+            elif "amd" in cpu_vendor_lower or "hygon" in cpu_vendor_lower:
+                self._set_boot_arg(boot_args, "kvm-amd.nested", "1")
+            # Intel, Zhaoxin, Centaur/VIA, and all other x86 vendors
+            # use Intel VT-x compatible virtualization with kvm-intel
+            else:
+                self._set_boot_arg(boot_args, "kvm-intel.nested", "1")
 
         if self._config.pci_enabled and not self._config.image_fs_uuid:
             raise FirecrackerConfigError(

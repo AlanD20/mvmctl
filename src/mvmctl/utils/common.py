@@ -555,6 +555,46 @@ class CommonUtils:
         return value
 
     @staticmethod
+    def deep_merge_dict(
+        base: dict[str, Any], override: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Recursively deep-merge override into base, returning a new dict.
+
+        Merge rules:
+        - For each key in *override*: if the value is a dict and *base* also
+          has a dict for that key, recurse into both.
+        - If either side is not a dict, the *override* value wins.
+        - Lists: the *override* value wins entirely (standard override).
+          If list merging is needed (e.g. union for kvm_capabilities),
+          do it explicitly at the call site after the merge.
+
+        Args:
+            base: Base dictionary to merge into.
+            override: Override dictionary whose values take precedence.
+
+        Returns:
+            New merged dictionary (neither input is mutated).
+
+        Example:
+            >>> deep_merge_dict({"a": {"b": 1}}, {"a": {"c": 2}})
+            {"a": {"b": 1, "c": 2}}
+
+        """
+        result = base.copy()
+        for key, override_val in override.items():
+            if (
+                key in result
+                and isinstance(result[key], dict)
+                and isinstance(override_val, dict)
+            ):
+                result[key] = CommonUtils.deep_merge_dict(
+                    result[key], override_val
+                )
+            else:
+                result[key] = override_val
+        return result
+
+    @staticmethod
     def safe_int(value: object, default: int = 0) -> int:
         """
         Safely extract an integer from a value.

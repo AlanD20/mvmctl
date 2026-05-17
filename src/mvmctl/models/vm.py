@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from mvmctl.models.binary import BinaryItem
+from mvmctl.models.firecracker import CpuConfig
 from mvmctl.models.image import ImageItem
 from mvmctl.models.kernel import KernelItem
 from mvmctl.models.network import NetworkItem
@@ -52,6 +53,7 @@ class VMInstanceItem:
     rootfs_path: str
     rootfs_suffix: str
     pci_enabled: bool
+    nested_virt: bool
     enable_logging: bool
     enable_metrics: bool
     enable_console: bool
@@ -73,17 +75,21 @@ class VMInstanceItem:
     )  # SSH key fingerprints stored in VM
     ssh_user: str | None = None  # SSH user for this VM
     volume_ids: list[str] | None = None  # Attached volume IDs
+    cpu_config: CpuConfig | None = None  # JSON: merged CPU template config
 
     def __post_init__(self) -> None:
-        """Deserialize ssh_keys and volume_ids from JSON strings when loading from DB."""
+        """Deserialize ssh_keys, volume_ids, and cpu_config from JSON strings when loading from DB."""
         if isinstance(self.ssh_keys, str):
             self.ssh_keys = json.loads(self.ssh_keys)
         if isinstance(self.volume_ids, str):
             self.volume_ids = json.loads(self.volume_ids)
+        if isinstance(self.cpu_config, str):
+            self.cpu_config = json.loads(self.cpu_config)
         CommonUtils.coerce_bool_fields(
             self,
             {
                 "pci_enabled",
+                "nested_virt",
                 "enable_logging",
                 "enable_metrics",
                 "enable_console",

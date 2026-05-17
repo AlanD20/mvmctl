@@ -23,7 +23,11 @@ if TYPE_CHECKING:
         CloudInitMode,
         CloudInitStatus,
     )
-    from mvmctl.models.firecracker import DriveConfig, FirecrackerConfig
+    from mvmctl.models.firecracker import (
+        CpuConfig,
+        DriveConfig,
+        FirecrackerConfig,
+    )
     from mvmctl.models.host import (
         HostHardware,
         HostLimits,
@@ -91,6 +95,7 @@ __all__ = [
     "NetworkLeaseItem",
     "ProvisionerType",
     "CleanResult",
+    "CpuConfig",
     "PruneAllResult",
     "SSHKeyItem",
     "VolumeItem",
@@ -109,6 +114,7 @@ _LAZY_MAP = {
     "PruneAllResult": ("mvmctl.models.cache", "PruneAllResult"),
     "CloudInitMode": ("mvmctl.models.cloudinit", "CloudInitMode"),
     "CloudInitStatus": ("mvmctl.models.cloudinit", "CloudInitStatus"),
+    "CpuConfig": ("mvmctl.models.firecracker", "CpuConfig"),
     "DriveConfig": ("mvmctl.models.firecracker", "DriveConfig"),
     "FirecrackerConfig": ("mvmctl.models.firecracker", "FirecrackerConfig"),
     "HostHardware": ("mvmctl.models.host", "HostHardware"),

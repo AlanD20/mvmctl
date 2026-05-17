@@ -38,6 +38,7 @@ OVERRIDABLE_DEFAULTS: Final[dict[str, dict[str, Any]]] = {
         "user_uid": 1000,
         "user_gid": 1000,
         "pci_enabled": True,
+        "nested_virt": False,
         "enable_logging": True,
         "enable_metrics": False,
         "enable_console": True,
