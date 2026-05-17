@@ -240,14 +240,36 @@ class KeyOperation:
         }
 
     @staticmethod
-    def inspect(
-        inputs: KeyInput, is_json: bool = False
-    ) -> SSHKeyItem | dict[str, Any]:
-        """Inspect a key with full details."""
+    def inspect(inputs: KeyInput) -> dict[str, Any]:
+        """Inspect a key with full details.
+
+        Args:
+            inputs: KeyInput with name identifiers.
+
+        Returns:
+            Grouped dict representation of the key.
+
+        """
         key_item = KeyOperation.get(inputs)
-        if is_json:
-            return KeyOperation._key_to_dict(key_item)
-        return key_item
+        return {
+            "key": {
+                "id": key_item.id,
+                "name": key_item.name,
+                "fingerprint": key_item.fingerprint,
+                "algorithm": key_item.algorithm,
+                "comment": key_item.comment,
+                "is_default": key_item.is_default,
+                "is_present": key_item.is_present,
+            },
+            "files": {
+                "public_key_path": key_item.public_key_path,
+                "private_key_path": key_item.private_key_path,
+            },
+            "timestamps": {
+                "created_at": key_item.created_at,
+                "updated_at": key_item.updated_at,
+            },
+        }
 
     @staticmethod
     def export(

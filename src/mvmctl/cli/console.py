@@ -14,13 +14,11 @@ from mvmctl.api.console_operations import ConsoleOperation
 from mvmctl.cli._completion import _complete_vm_names
 from mvmctl.constants import CONST_CONSOLE_SOCKET_TIMEOUT_S
 from mvmctl.exceptions import MVMError
-from mvmctl.utils._io import print_error, print_info, print_success
-from mvmctl.utils.cli import handle_errors
+from mvmctl.utils.cli import handle_errors, mvm_cli
 
 console_app = typer.Typer(
     help="VM console access",
     no_args_is_help=True,
-    rich_markup_mode=None,
     add_completion=False,
     context_settings={"allow_interspersed_args": True},
 )
@@ -64,11 +62,11 @@ def _show_console_state(identifier: str) -> None:
     state_dict = ConsoleOperation.get_state(identifier)
 
     status = "running" if state_dict["running"] else "stopped"
-    print_info(f"Console for '{identifier}': {status}")
+    mvm_cli.info(f"Console for '{identifier}': {status}")
     if state_dict["pid"]:
-        print_info(f"  PID: {state_dict['pid']}")
+        mvm_cli.info(f"  PID: {state_dict['pid']}")
     if state_dict["socket_path"]:
-        print_info(f"  Socket: {state_dict['socket_path']}")
+        mvm_cli.info(f"  Socket: {state_dict['socket_path']}")
 
 
 def _kill_console_relay(identifier: str) -> None:
@@ -76,12 +74,12 @@ def _kill_console_relay(identifier: str) -> None:
     result = ConsoleOperation.kill(identifier)
 
     if result.status == "success":
-        print_success(f"Stopped: {identifier}")
+        mvm_cli.success(f"Stopped: {identifier}")
     elif result.status == "skipped":
-        print_error(f"Console relay not running: {identifier}")
+        mvm_cli.error(f"Console relay not running: {identifier}")
         raise typer.Exit(1)
     else:
-        print_error(result.message or f"Stop failed: {identifier}")
+        mvm_cli.error(result.message or f"Stop failed: {identifier}")
         raise typer.Exit(1)
 
 
@@ -89,12 +87,12 @@ def _attach_to_console(identifier: str) -> None:
     """Attach to VM console interactively."""
     attach_info = ConsoleOperation.get_connection_info(identifier)
 
-    print_info(f"Attaching to console of '{attach_info.vm_name}'...")
-    print_info("Press Ctrl+X then D to detach")
+    mvm_cli.info(f"Attaching to console of '{attach_info.vm_name}'...")
+    mvm_cli.info("Press Ctrl+X then D to detach")
 
     sock = _connect_socket(attach_info.socket_path)
     if sock is None:
-        print_error("Console relay connection failed")
+        mvm_cli.error("Console relay connection failed")
         raise typer.Exit(1)
 
     old_tty = None
@@ -102,11 +100,11 @@ def _attach_to_console(identifier: str) -> None:
         old_tty = termios.tcgetattr(sys.stdin)
         tty.setraw(sys.stdin.fileno())
         _interact(sock)
-        print_info("\nDetached from console")
+        mvm_cli.info("\nDetached from console")
     except KeyboardInterrupt:
         pass
     except MVMError as e:
-        print_error(str(e))
+        mvm_cli.error(str(e))
     finally:
         if old_tty is not None:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_tty)
@@ -125,7 +123,7 @@ def _connect_socket(socket_path: str) -> socket.socket | None:
         sock.setblocking(False)
         return sock
     except (OSError, ConnectionRefusedError, FileNotFoundError) as e:
-        print_error(f"Console relay connection failed: {e}")
+        mvm_cli.error(f"Console relay connection failed: {e}")
         return None
 
 

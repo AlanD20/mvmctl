@@ -17,13 +17,11 @@ else:
     SSHOperation = _SSHOperation
     SSHInput = _SSHInput
 from mvmctl.cli._completion import _complete_vm_names
-from mvmctl.utils._io import print_error
-from mvmctl.utils.cli import handle_errors
+from mvmctl.utils.cli import handle_errors, mvm_cli
 
 ssh_app = typer.Typer(
     help="VM SSH access",
     no_args_is_help=True,
-    rich_markup_mode=None,
     add_completion=False,
     context_settings={"allow_interspersed_args": True},
 )
@@ -69,6 +67,6 @@ def ssh_connect(
     )
     result = SSHOperation.connect(inputs)
     if result.is_error:
-        print_error(result.message)
+        mvm_cli.error(result.message)
         raise typer.Exit(code=1)
     raise typer.Exit(code=0)

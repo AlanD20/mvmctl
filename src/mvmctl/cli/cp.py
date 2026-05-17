@@ -13,7 +13,7 @@ from rich.progress import (
     TransferSpeedColumn,
 )
 
-from mvmctl.utils.cli import handle_errors
+from mvmctl.utils.cli import handle_errors, mvm_cli
 
 if TYPE_CHECKING:
     from mvmctl.api.cp_operations import CPOperation
@@ -100,10 +100,11 @@ def cp(
 
     if result.is_ok and result.item:
         msg = result.item.get("message", result.message)
-        typer.echo(msg)
+        mvm_cli.success(msg)
         raise typer.Exit()
     elif result.is_ok:
-        typer.echo(result.message)
+        mvm_cli.success(result.message)
         raise typer.Exit()
     else:
+        mvm_cli.error(result.message or "Copy failed")
         raise typer.Exit(code=1)

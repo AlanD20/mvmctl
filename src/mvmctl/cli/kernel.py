@@ -28,23 +28,11 @@ else:
 from mvmctl.cli._completion import _complete_kernel_ids
 from mvmctl.models import KernelItem
 from mvmctl.models.result import OperationResult, ProgressEvent
-from mvmctl.utils._io import (
-    print_error,
-    print_info,
-    print_inspect_header,
-    print_key_value,
-    print_section_header,
-    print_success,
-    print_table,
-)
-from mvmctl.utils.cli import CliUtils, handle_errors
-from mvmctl.utils.common import CommonUtils
-from mvmctl.utils.crypto import HashGenerator
+from mvmctl.utils.cli import handle_errors, mvm_cli
 
 kernel_app = typer.Typer(
     help="Kernel management",
     no_args_is_help=True,
-    rich_markup_mode=None,
     add_completion=False,
 )
 
@@ -88,23 +76,20 @@ def kernel_ls(
 
         rows: list[list[str]] = []
         for k in kernels:
-            is_default = k.is_default
-            name_col = CommonUtils._get_combined_marker(
-                is_default, not k.is_present
-            )
             rows.append(
                 [
-                    HashGenerator.shorten(k.id),
-                    f"{name_col}{k.base_name}",
+                    mvm_cli.format_marker(k.is_default),
+                    mvm_cli.format_id(k.id),
+                    mvm_cli.format_name(k.base_name, not k.is_present),
                     k.version,
                     k.arch,
                     k.type,
-                    CommonUtils.human_readable_datetime(k.created_at),
+                    mvm_cli.format_timestamp(k.created_at),
                 ]
             )
 
-        print_table(
-            columns=["ID", "Name", "Version", "Arch", "Type", "Added"],
+        mvm_cli.table(
+            columns=["", "ID", "Name", "Version", "Arch", "Type", "Added"],
             rows=rows,
         )
 
@@ -157,10 +142,10 @@ def _list_remote_kernels(
             rows.append([f"{prefix}{v.version}", display])
 
     if not rows:
-        print_info("No remote kernels available.")
+        mvm_cli.info("No remote kernels available.")
         return
 
-    print_table(
+    mvm_cli.table(
         columns=["Type / Version", "Description"],
         rows=rows,
     )
@@ -175,66 +160,16 @@ def kernel_inspect(
         autocompletion=_complete_kernel_ids,
     ),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-    tree: bool = typer.Option(False, "--tree", help="Output in tree format"),
 ) -> None:
     """Show detailed information about a kernel."""
-    info = KernelOperation.inspect(
-        KernelInput(id=[prefix]), is_json=json_output
-    )
+    info = KernelOperation.inspect(KernelInput(id=[prefix]))
 
-    if isinstance(info, dict):
+    if json_output:
         typer.echo(json.dumps(info, indent=2, default=str))
         return
 
-    if tree:
-        _print_kernel_details_tree(info)
-    else:
-        _print_kernel_details(info)
-
-
-def _print_kernel_details(info: KernelItem) -> None:
-    """Print kernel details in human-readable format."""
-    missing_marker = " (missing)" if not info.is_present else ""
-    print_inspect_header(f"Kernel: {info.name}{missing_marker}")
-
-    print_section_header("BASIC INFO")
-    print_key_value("ID", info.id)
-    print_key_value("Name", info.name)
-    print_key_value("Base Name", info.base_name)
-    print_key_value("Version", info.version)
-    print_key_value("Arch", info.arch)
-    print_key_value("Type", info.type)
-    print_key_value("Default", "True" if info.is_default else "False")
-    print_key_value("Present", "True" if info.is_present else "False")
-    print_key_value("Path", info.path)
-    print_key_value(
-        "Created", CommonUtils.human_readable_datetime(info.created_at)
-    )
-    print_key_value(
-        "Updated", CommonUtils.human_readable_datetime(info.updated_at)
-    )
-
-
-def _print_kernel_details_tree(info: KernelItem) -> None:
-    """Print kernel details in tree format."""
-    missing_marker = " (missing)" if not info.is_present else ""
-    print(f"{info.name}{missing_marker}")
-
-    tree_lines = [
-        f"├── ID:          {info.id}",
-        f"├── Name:        {info.name}",
-        f"├── Base Name:   {info.base_name}",
-        f"├── Version:     {info.version}",
-        f"├── Arch:        {info.arch}",
-        f"├── Type:        {info.type}",
-        f"├── Default:     {'True' if info.is_default else 'False'}",
-        f"├── Present:     {'True' if info.is_present else 'False'}",
-        f"├── Path:        {info.path}",
-        f"├── Created:     {CommonUtils.human_readable_datetime(info.created_at)}",
-        f"└── Updated:     {CommonUtils.human_readable_datetime(info.updated_at)}",
-    ]
-    for line in tree_lines:
-        print(line)
+    name = info.get("kernel", {}).get("name", prefix)
+    mvm_cli.print_dict_tree(info, title=f"Kernel: {name}")
 
 
 @kernel_app.command(name="pull")
@@ -293,7 +228,7 @@ def kernel_pull(
             effective_type = kernel_selector
 
     if effective_type is None:
-        print_error(
+        mvm_cli.error(
             "Kernel type is required. "
             "Use 'mvm kernel pull --type official' or "
             "'mvm kernel pull official:6.19.9'"
@@ -320,21 +255,21 @@ def kernel_pull(
         result = KernelOperation.pull(inputs, on_progress=_on_progress)
     if isinstance(result, OperationResult):
         if result.is_error:
-            print_error(result.message)
+            mvm_cli.error(result.message)
             raise typer.Exit(code=1)
         if result.status == "skipped":
-            print_info(result.message)
+            mvm_cli.info(result.message)
             if result.item:
-                print_info(f"  ID: {HashGenerator.shorten(result.item.id)}")
+                mvm_cli.info(f"  ID: {mvm_cli.format_id(result.item.id)}")
             raise typer.Exit(code=0)
         if result.item:
-            print_success(
+            mvm_cli.success(
                 f"Pulled: {result.item.name} "
-                f"(ID: {HashGenerator.shorten(result.item.id)})"
+                f"(ID: {mvm_cli.format_id(result.item.id)})"
             )
     else:
         # Fallback for unexpected non-OperationResult returns
-        print_success("Pull completed")
+        mvm_cli.success("Pull completed")
 
 
 @kernel_app.command(
@@ -351,15 +286,15 @@ def kernel_set_default(
     ),
 ) -> None:
     """Set a kernel as the default."""
-    kernel_id = CliUtils.check_name_arg(ctx, kernel_id)
+    kernel_id = mvm_cli.check_name_arg(ctx, kernel_id)
     inputs = KernelInput(id=[kernel_id])
     result = KernelOperation.set_default(inputs)
 
     if result.is_error:
-        print_error(result.message)
+        mvm_cli.error(result.message)
         raise typer.Exit(code=1)
 
-    print_success(result.message or f"Default kernel set to: {kernel_id}")
+    mvm_cli.success(result.message or f"Default kernel set to: {kernel_id}")
 
 
 @kernel_app.command(
@@ -381,7 +316,7 @@ def kernel_rm(
     """Remove one or more kernels."""
     effective_ids: list[str] = list(identifiers) if identifiers else []
     if not effective_ids:
-        print_error("Provide at least one kernel ID or name")
+        mvm_cli.error("Provide at least one kernel ID or name")
         raise typer.Exit(code=1)
 
     inputs = KernelInput(id=effective_ids, force=force)
@@ -389,9 +324,9 @@ def kernel_rm(
 
     for item_result in batch_result.items:
         if item_result.is_ok:
-            print_success(item_result.message or "Removed")
+            mvm_cli.success(item_result.message or "Removed")
         else:
-            print_error(item_result.message or "Remove failed")
+            mvm_cli.error(item_result.message or "Remove failed")
 
     if batch_result.has_any_error:
         raise typer.Exit(code=1)
@@ -433,7 +368,7 @@ def kernel_import(
         mvm kernel import my-kernel ./vmlinux-custom --version 6.1 --arch x86_64 --default
     """
     if not path.exists():
-        print_error(f"Source file not found: {path}")
+        mvm_cli.error(f"Source file not found: {path}")
         raise typer.Exit(code=1)
 
     inputs = KernelImportInput(
@@ -446,16 +381,16 @@ def kernel_import(
     result = KernelOperation.import_(inputs)
 
     if result.is_error:
-        print_error(result.message or f"Import failed: {name}")
+        mvm_cli.error(result.message or f"Import failed: {name}")
         raise typer.Exit(code=1)
 
     assert result.item is not None
-    short_id = HashGenerator.shorten(result.item.id)
-    print_success(f"Imported: {result.item.name}")
-    print_info(f"  ID:   {short_id}")
+    short_id = mvm_cli.format_id(result.item.id)
+    mvm_cli.success(f"Imported: {result.item.name}")
+    mvm_cli.info(f"  ID:   {short_id}")
 
     if set_default:
-        print_success(f"Default kernel set to: {name}")
+        mvm_cli.success(f"Default kernel set to: {name}")
 
     raise typer.Exit(code=0)
 

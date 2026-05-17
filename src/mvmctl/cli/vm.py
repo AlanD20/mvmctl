@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import typer
 from rich.console import Console
@@ -24,18 +24,7 @@ else:
     VMOperation = _VMOperation
     VMInput = _VMInput
     VMCreateInput = _VMCreateInput
-from mvmctl.utils._io import (
-    print_error,
-    print_info,
-    print_inspect_header,
-    print_key_value,
-    print_section_header,
-    print_success,
-    print_table,
-)
-from mvmctl.utils.cli import handle_errors
-from mvmctl.utils.common import CommonUtils
-from mvmctl.utils.crypto import HashGenerator
+from mvmctl.utils.cli import handle_errors, mvm_cli
 
 if TYPE_CHECKING:
     from mvmctl.models import VMInstanceItem
@@ -44,7 +33,6 @@ if TYPE_CHECKING:
 vm_app = typer.Typer(
     help="VM lifecycle management",
     no_args_is_help=True,
-    rich_markup_mode=None,
     add_completion=False,
 )
 
@@ -84,12 +72,12 @@ def vm_ls(
                 str(vm.vcpu_count),
                 str(vm.mem_size_mib),
                 str(vm.disk_size_mib),
-                HashGenerator.shorten(vm.image_id),
-                HashGenerator.shorten(vm.kernel_id),
-                CommonUtils.human_readable_datetime(vm.created_at),
+                mvm_cli.format_id(vm.image_id),
+                mvm_cli.format_id(vm.kernel_id),
+                mvm_cli.format_timestamp(vm.created_at),
             ]
         )
-    print_table(
+    mvm_cli.table(
         columns=[
             "Name",
             "Status",
@@ -115,7 +103,7 @@ def vm_ps() -> None:
     )
 
     if not active_vms:
-        print_success("No active VMs")
+        mvm_cli.success("No active VMs")
         return
 
     rows = []
@@ -128,12 +116,12 @@ def vm_ps() -> None:
                 str(vm.vcpu_count),
                 str(vm.mem_size_mib),
                 str(vm.disk_size_mib),
-                HashGenerator.shorten(vm.image_id),
-                HashGenerator.shorten(vm.kernel_id),
-                CommonUtils.human_readable_datetime(vm.created_at),
+                mvm_cli.format_id(vm.image_id),
+                mvm_cli.format_id(vm.kernel_id),
+                mvm_cli.format_timestamp(vm.created_at),
             ]
         )
-    print_table(
+    mvm_cli.table(
         columns=[
             "Name",
             "Status",
@@ -294,7 +282,7 @@ def vm_create(
         if not typer.confirm(
             "--skip-cleanup is set: if creation fails, resources will be left behind and must be cleaned manually. Continue?",
         ):
-            print_info("Aborted")
+            mvm_cli.info("Aborted")
             raise typer.Exit(code=0)
 
     effective_ssh_keys = ssh_key.split(",") if ssh_key is not None else []
@@ -303,7 +291,7 @@ def vm_create(
     # to multiple VMs.
     effective_count = count or 1
     if effective_count > 1 and volume:
-        print_error(
+        mvm_cli.error(
             "Cannot use --count with --volume: a volume can only be "
             "attached to a single VM. Create VMs individually with --volume."
         )
@@ -351,19 +339,19 @@ def vm_create(
             on_progress=_on_progress,
         )
     if isinstance(result, NeedsInteraction):
-        print_error(result.message)
+        mvm_cli.error(result.message)
         raise typer.Exit(code=1)
     if result.is_error:
-        print_error(result.message)
+        mvm_cli.error(result.message)
         raise typer.Exit(code=1)
 
     if result.item is None:
-        print_error("No VMs returned")
+        mvm_cli.error("No VMs returned")
         raise typer.Exit(code=1)
 
     vms = result.item
     names = [vm.name for vm in vms]
-    print_success(f"Created: {', '.join(names)}")
+    mvm_cli.success(f"Created: {', '.join(names)}")
 
 
 @vm_app.command(name="rm")
@@ -384,13 +372,13 @@ def vm_rm(
         for r in result.items:
             if r.is_ok:
                 if r.item:
-                    print_success(f"Removed: {r.item.name}")
+                    mvm_cli.success(f"Removed: {r.item.name}")
             else:
                 item_name = r.item.name if r.item else "unknown"
-                print_error(r.message or f"Remove failed: {item_name}")
+                mvm_cli.error(r.message or f"Remove failed: {item_name}")
         raise typer.Exit(code=1)
     names = [r.item.name for r in result.items if r.item]
-    print_success(f"Removed: {', '.join(names)}")
+    mvm_cli.success(f"Removed: {', '.join(names)}")
 
 
 @vm_app.command(name="start")
@@ -407,9 +395,9 @@ def vm_start(
     if result.has_any_error:
         for r in result.items:
             if not r.is_ok:
-                print_error(r.message or f"Start failed: {identifier}")
+                mvm_cli.error(r.message or f"Start failed: {identifier}")
         raise typer.Exit(code=1)
-    print_success(f"Started: {identifier}")
+    mvm_cli.success(f"Started: {identifier}")
 
 
 @vm_app.command(name="stop")
@@ -427,9 +415,9 @@ def vm_stop(
     if result.has_any_error:
         for r in result.items:
             if not r.is_ok:
-                print_error(r.message or f"Stop failed: {identifier}")
+                mvm_cli.error(r.message or f"Stop failed: {identifier}")
         raise typer.Exit(code=1)
-    print_success(f"Stopped: {identifier}")
+    mvm_cli.success(f"Stopped: {identifier}")
 
 
 @vm_app.command(name="reboot")
@@ -447,9 +435,9 @@ def vm_reboot(
     if result.has_any_error:
         for r in result.items:
             if not r.is_ok:
-                print_error(r.message or f"Reboot failed: {identifier}")
+                mvm_cli.error(r.message or f"Reboot failed: {identifier}")
         raise typer.Exit(code=1)
-    print_success(f"Rebooted: {identifier}")
+    mvm_cli.success(f"Rebooted: {identifier}")
 
 
 @vm_app.command(name="pause")
@@ -466,9 +454,9 @@ def vm_pause(
     if result.has_any_error:
         for r in result.items:
             if not r.is_ok:
-                print_error(r.message or f"Pause failed: {identifier}")
+                mvm_cli.error(r.message or f"Pause failed: {identifier}")
         raise typer.Exit(code=1)
-    print_success(f"Paused: {identifier}")
+    mvm_cli.success(f"Paused: {identifier}")
 
 
 @vm_app.command(name="resume")
@@ -485,9 +473,9 @@ def vm_resume(
     if result.has_any_error:
         for r in result.items:
             if not r.is_ok:
-                print_error(r.message or f"Resume failed: {identifier}")
+                mvm_cli.error(r.message or f"Resume failed: {identifier}")
         raise typer.Exit(code=1)
-    print_success(f"Resumed: {identifier}")
+    mvm_cli.success(f"Resumed: {identifier}")
 
 
 @vm_app.command(name="snapshot")
@@ -506,9 +494,9 @@ def vm_snapshot(
         VMInput(identifiers=[identifier]), mem_file, state_file
     )
     if result.is_error:
-        print_error(result.message)
+        mvm_cli.error(result.message)
         raise typer.Exit(code=1)
-    print_success(result.message or f"Snapshot saved: {identifier}")
+    mvm_cli.success(result.message or f"Snapshot saved: {identifier}")
 
 
 @vm_app.command(name="load")
@@ -532,7 +520,7 @@ def vm_load(
         state_file,
         resume_after=resume,
     )
-    print_success(f"Snapshot loaded: {identifier}")
+    mvm_cli.success(f"Snapshot loaded: {identifier}")
 
 
 @vm_app.command(name="inspect")
@@ -544,153 +532,16 @@ def vm_inspect(
         autocompletion=_complete_vm_names,
     ),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-    tree: bool = typer.Option(False, "--tree", help="Output in tree format"),
 ) -> None:
     """Show detailed information about a VM."""
-    info = VMOperation.inspect(VMInput(identifiers=[identifier]), tree=tree)
+    info = VMOperation.inspect(VMInput(identifiers=[identifier]))
 
     if json_output:
         typer.echo(json.dumps(info, indent=2, default=str))
         return
 
-    if tree:
-        _print_vm_inspect_tree(info)
-        return
-
-    print_inspect_header(f"VM: {info['name']}", info["status"])
-
-    print_section_header("BASIC INFO")
-    print_key_value("Name", info["name"])
-    print_key_value("ID", info["id"])
-    print_key_value("Status", info["status"])
-    print_key_value("PID", str(info["pid"]) if info["pid"] else "-")
-    print_key_value(
-        "Exit Code",
-        str(info["exit_code"]) if info["exit_code"] is not None else "-",
-    )
-    print_key_value("Created", info["created_at"])
-
-    print_section_header("RESOURCES")
-    print_key_value("vCPUs", str(info["vcpus"]))
-    print_key_value("Memory", f"{info['mem_mib']} MiB")
-    print_key_value("Disk", f"{info['disk_mib']} MiB")
-
-    print_section_header("NETWORK")
-    print_key_value("IPv4", info["ipv4"] or "-")
-    print_key_value("MAC", info["mac"] or "-")
-    print_key_value("TAP", info["tap_device"] or "-")
-    print_key_value(
-        "Network",
-        info["network_name"] or HashGenerator.shorten(info["network_id"]),
-    )
-
-    print_section_header("ASSETS")
-    print_key_value(
-        "Image", info["image_name"] or HashGenerator.shorten(info["image_id"])
-    )
-    print_key_value(
-        "Kernel",
-        info["kernel_version"] or HashGenerator.shorten(info["kernel_id"]),
-    )
-    print_key_value(
-        "Binary",
-        info["binary_name"] or HashGenerator.shorten(info["binary_id"]),
-    )
-
-    print_section_header("FILESYSTEM")
-    print_key_value("VM Dir", info["vm_dir"])
-    print_key_value("Rootfs", info["rootfs_path"])
-    print_key_value("Config", info["config_path"] or "-")
-    print_key_value("Log", info["log_path"] or "-")
-    print_key_value("Serial", info["serial_output_path"] or "-")
-
-    print_section_header("CONSOLE")
-    print_key_value(
-        "Relay Running", "True" if info["relay_running"] else "False"
-    )
-    print_key_value(
-        "Relay PID", str(info["relay_pid"]) if info["relay_pid"] else "-"
-    )
-    print_key_value("Relay Socket", info["relay_socket_path"] or "-")
-
-    print_section_header("FEATURES")
-    print_key_value("PCI", "True" if info["pci_enabled"] else "False")
-    print_key_value("Console", "True" if info["enable_console"] else "False")
-    print_key_value("Logging", "True" if info["enable_logging"] else "False")
-    print_key_value("Metrics", "True" if info["enable_metrics"] else "False")
-    print_key_value("Cloud-init", info["cloud_init_mode"])
-
-
-def _print_vm_inspect_tree(info: dict[str, Any]) -> None:
-    """Print VM inspection info in tree format.
-
-    API returns nested dict when tree=True:
-        info['vm']         -> name, id, status, pid, exit_code
-        info['resources']  -> vcpus, mem, disk
-        info['networking'] -> ipv4, mac, network_name, tap_device
-        info['assets']     -> image_name, kernel_version, binary_name
-        info['filesystem'] -> vm_dir, rootfs_path, config_path, log_path, serial_output_path
-        info['console']    -> relay_running, relay_pid, relay_socket_path
-    """
-    vm = info["vm"]
-    resources = info["resources"]
-    networking = info["networking"]
-    assets = info["assets"]
-    fs = info["filesystem"]
-    console = info["console"]
-
-    print(f"{vm['name']}")
-
-    tree_lines: list[str] = []
-    tree_lines.append("├── VM")
-    tree_lines.append(f"│   ├── Name:       {vm['name']}")
-    tree_lines.append(f"│   ├── ID:         {vm['id']}")
-    tree_lines.append(f"│   ├── Status:     {vm['status']}")
-    tree_lines.append(
-        f"│   ├── PID:        {vm['pid'] if vm['pid'] is not None else '-'}"
-    )
-    tree_lines.append(
-        f"│   └── Exit Code:  {vm['exit_code'] if vm['exit_code'] is not None else '-'}"
-    )
-
-    tree_lines.append("├── Resources")
-    tree_lines.append(f"│   ├── vCPUs:      {resources['vcpus']}")
-    tree_lines.append(f"│   ├── Memory:     {resources['mem']} MiB")
-    tree_lines.append(f"│   └── Disk:       {resources['disk']} MiB")
-
-    tree_lines.append("├── Networking")
-    tree_lines.append(f"│   ├── IPv4:       {networking['ipv4'] or '-'}")
-    tree_lines.append(f"│   ├── MAC:        {networking['mac'] or '-'}")
-    tree_lines.append(
-        f"│   ├── Network:    {networking['network_name'] or '-'}"
-    )
-    tree_lines.append(f"│   └── TAP:        {networking['tap_device'] or '-'}")
-
-    tree_lines.append("├── Assets")
-    tree_lines.append(f"│   ├── Image:      {assets['image_name'] or '-'}")
-    tree_lines.append(f"│   ├── Kernel:     {assets['kernel_version'] or '-'}")
-    tree_lines.append(f"│   └── Binary:     {assets['binary_name'] or '-'}")
-
-    tree_lines.append("├── Filesystem")
-    tree_lines.append(f"│   ├── VM Dir:     {fs['vm_dir']}")
-    tree_lines.append(f"│   ├── Rootfs:     {fs['rootfs_path']}")
-    tree_lines.append(f"│   ├── Config:     {fs['config_path'] or '-'}")
-    tree_lines.append(f"│   ├── Log:        {fs['log_path'] or '-'}")
-    tree_lines.append(f"│   └── Serial:     {fs['serial_output_path'] or '-'}")
-
-    tree_lines.append("└── Console")
-    tree_lines.append(
-        f"    ├── Relay Running:  {'True' if console['relay_running'] else 'False'}"
-    )
-    tree_lines.append(
-        f"    ├── Relay PID:      {console['relay_pid'] if console['relay_pid'] is not None else '-'}"
-    )
-    tree_lines.append(
-        f"    └── Relay Socket:   {console['relay_socket_path'] or '-'}"
-    )
-
-    for line in tree_lines:
-        print(line)
+    vm_name = info.get("vm", {}).get("name", identifier)
+    mvm_cli.print_dict_tree(info, title=f"VM: {vm_name}")
 
 
 @vm_app.command(name="export")
@@ -716,7 +567,7 @@ def vm_export(
 
     if output is not None:
         output.write_text(json_output)
-        print_success(f"Exported: {output}")
+        mvm_cli.success(f"Exported: {output}")
     else:
         typer.echo(json_output)
 
@@ -736,12 +587,12 @@ def vm_import(
         VMImportInput(config_path=config_path, name_override=name)
     )
     if isinstance(result, NeedsInteraction):
-        print_error("Import requires privileges")
+        mvm_cli.error("Import requires privileges")
         raise typer.Exit(code=1)
     if result.status == "success":
-        print_success(result.message)
+        mvm_cli.success(result.message)
     elif result.status in ("error", "failure"):
-        print_error(result.message)
+        mvm_cli.error(result.message)
         raise typer.Exit(code=1)
 
 
@@ -760,9 +611,9 @@ def vm_attach_volume(
         VMInput(identifiers=[identifier]), volume_name
     )
     if result.is_error:
-        print_error(result.message)
+        mvm_cli.error(result.message)
         raise typer.Exit(code=1)
-    print_success(result.message)
+    mvm_cli.success(result.message)
 
 
 @vm_app.command(name="detach-volume")
@@ -780,6 +631,6 @@ def vm_detach_volume(
         VMInput(identifiers=[identifier]), volume_name
     )
     if result.is_error:
-        print_error(result.message)
+        mvm_cli.error(result.message)
         raise typer.Exit(code=1)
-    print_success(result.message)
+    mvm_cli.success(result.message)

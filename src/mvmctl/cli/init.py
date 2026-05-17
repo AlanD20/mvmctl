@@ -25,15 +25,13 @@ else:
 
 from mvmctl.constants import CLI_NAME, MVM_UNIX_GROUP, SUDOERS_DROP_IN_PATH
 from mvmctl.models.result import ProgressEvent
-from mvmctl.utils._io import print_info, print_success, print_warning
 from mvmctl.utils._system import run_cmd
-from mvmctl.utils.cli import handle_errors
+from mvmctl.utils.cli import handle_errors, mvm_cli
 
 init_app = typer.Typer(
     name="init",
     help=f"Initialize {CLI_NAME}",
     invoke_without_command=True,
-    rich_markup_mode=None,
     add_completion=False,
 )
 
@@ -64,8 +62,8 @@ def _run_with_sudo() -> subprocess.CompletedProcess[str]:
         if key in os.environ:
             env_assignments.append(f"{key}={os.environ[key]}")
 
-    print_info("")
-    print_info("Running host init with sudo...")
+    mvm_cli.info("")
+    mvm_cli.info("Running host init with sudo...")
     return run_cmd(
         ["sudo", "env", *env_assignments, mvm_bin, "host", "init"],
         check=False,
@@ -188,20 +186,20 @@ def _handle_interactive_flow(
                 host_state_before["group_exists"]
                 and host_state_before["user_in_group"]
             ):
-                print_warning("group active, but not in this session")
-                print_info(f"run:  newgrp {MVM_UNIX_GROUP}")
+                mvm_cli.warning("group active, but not in this session")
+                mvm_cli.info(f"run:  newgrp {MVM_UNIX_GROUP}")
             elif host_state_before["group_exists"]:
-                print_warning("sudoers file is missing")
-                print_info(f"run:  sudo {CLI_NAME} host init")
+                mvm_cli.warning("sudoers file is missing")
+                mvm_cli.info(f"run:  sudo {CLI_NAME} host init")
             else:
-                print_warning("this requires sudo once")
-                print_info(
+                mvm_cli.warning("this requires sudo once")
+                mvm_cli.info(
                     f"creates the {MVM_UNIX_GROUP} group and sudoers drop-in for "
                     "passwordless sudo on future runs"
                 )
 
             if non_interactive:
-                print_warning(
+                mvm_cli.warning(
                     f"Host init requires root privileges. Run: sudo {CLI_NAME} host init"
                 )
                 break
@@ -211,7 +209,7 @@ def _handle_interactive_flow(
             ):
                 proc = _run_with_sudo()
                 if proc.returncode != 0:
-                    print_warning(
+                    mvm_cli.warning(
                         f"host init failed. Run 'sudo {CLI_NAME} host init' manually."
                     )
                     break
@@ -228,7 +226,7 @@ def _handle_interactive_flow(
                 # the wizard summary reflects actual changes
                 continue
             else:
-                print_info(
+                mvm_cli.info(
                     f"skipped. Run 'sudo {CLI_NAME} host init' manually when ready."
                 )
                 break
@@ -237,24 +235,24 @@ def _handle_interactive_flow(
         if interaction.code == "binary.confirm_download":
             latest = interaction.context.get("latest_version", "")
             if not latest:
-                print_warning(
+                mvm_cli.warning(
                     "no Firecracker binary found and no remote versions available."
                 )
                 break
 
-            print_info(f"latest available: v{latest}")
+            mvm_cli.info(f"latest available: v{latest}")
 
             if non_interactive or typer.confirm(
                 f"Download v{latest}?", default=True
             ):
-                print_info("")
-                print_info(f"downloading Firecracker v{latest} ...")
+                mvm_cli.info("")
+                mvm_cli.info(f"downloading Firecracker v{latest} ...")
                 download_version = latest
                 # Don't wrap download in spinner — BinaryOperation.pull
                 # has its own ASCIIProgressBar.
                 continue  # Re-run with download_version set
             else:
-                print_info(
+                mvm_cli.info(
                     f"skipped. Run '{CLI_NAME} bin pull <version>' manually."
                 )
                 break
@@ -271,7 +269,7 @@ def _handle_interactive_flow(
             continue  # Re-run with guestfs_enabled set
 
         # Unknown interaction — stop
-        print_warning(f"unhandled interaction: {interaction.code}")
+        mvm_cli.warning(f"unhandled interaction: {interaction.code}")
         break
 
     return result
@@ -288,9 +286,9 @@ def init_run(
     ),
 ) -> None:
     f"""Initialize {CLI_NAME} host, network, and binary — run this to get started."""
-    print_info("")
-    print_info(f"{CLI_NAME} init — first-time setup")
-    print_info("─" * 40)
+    mvm_cli.info("")
+    mvm_cli.info(f"{CLI_NAME} init — first-time setup")
+    mvm_cli.info("─" * 40)
 
     result = _handle_interactive_flow(
         skip_host=skip_host,
@@ -306,28 +304,28 @@ def init_run(
         "cache": "cache directories",
         "binary": "firecracker binary",
     }
-    print_info("")
+    mvm_cli.info("")
     for step in result.steps:
         label = step_labels.get(step.step, step.step)
         if step.success:
             if step.message:
-                print_success(f"{label}  ({step.message})")
+                mvm_cli.success(f"{label}  ({step.message})")
             else:
-                print_success(label)
+                mvm_cli.success(label)
         else:
-            print_warning(f"{label} — {step.message}")
+            mvm_cli.warning(f"{label} — {step.message}")
 
     # Missing steps (if any were skipped due to early return)
     present = {s.step for s in result.steps}
     for key, label in step_labels.items():
         if key not in present:
-            print_warning(f"{label} — not checked")
+            mvm_cli.warning(f"{label} — not checked")
 
-    print_info("")
+    mvm_cli.info("")
     if result.host_ready:
-        print_success("all set")
+        mvm_cli.success("all set")
     else:
-        print_warning(f"setup incomplete — run '{CLI_NAME} init' again")
+        mvm_cli.warning(f"setup incomplete — run '{CLI_NAME} init' again")
         raise typer.Exit(code=1)
 
 

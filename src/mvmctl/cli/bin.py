@@ -24,20 +24,11 @@ else:
     BinaryInput = _BinaryInput
 from mvmctl.cli._completion import _complete_binary_versions
 from mvmctl.models.result import OperationResult
-from mvmctl.utils._io import (
-    print_error,
-    print_info,
-    print_success,
-    print_table,
-    print_warning,
-)
-from mvmctl.utils.cli import handle_errors
-from mvmctl.utils.crypto import HashGenerator
+from mvmctl.utils.cli import handle_errors, mvm_cli
 
 bin_app = typer.Typer(
     help="Binary management",
     no_args_is_help=True,
-    rich_markup_mode=None,
     add_completion=False,
 )
 
@@ -94,22 +85,22 @@ def bin_ls(
             cached = "✓" if ver in local_versions else " "
             rows.append([cached, ver])
 
-        print_table(columns=["Downloaded", "Version"], rows=rows)
+        mvm_cli.table(columns=["Downloaded", "Version"], rows=rows)
         raise typer.Exit(code=0)
 
     for b in local:
-        short_id = HashGenerator.shorten(b.id)
-        marker = "* " if b.is_default else "  "
+        short_id = mvm_cli.format_id(b.id)
         rows.append(
             [
-                marker + short_id,
+                mvm_cli.format_marker(b.is_default),
+                short_id,
                 b.name,
                 b.version,
             ]
         )
 
-    print_table(
-        columns=["ID", "Name", "Version"],
+    mvm_cli.table(
+        columns=["", "ID", "Name", "Version"],
         rows=rows,
     )
     raise typer.Exit(code=0)
@@ -152,7 +143,7 @@ def bin_pull(
 
     # Only firecracker is supported for download/build
     if name.lower() != "firecracker":
-        print_error(
+        mvm_cli.error(
             f"Unsupported binary: '{name}'. "
             "Only 'firecracker' is supported for download or build."
         )
@@ -160,7 +151,7 @@ def bin_pull(
 
     # --git-ref and --version are mutually exclusive
     if git_ref and version:
-        print_error(
+        mvm_cli.error(
             "--git-ref and --version are mutually exclusive. "
             "Use --git-ref to build from source, or --version to download a release."
         )
@@ -168,12 +159,12 @@ def bin_pull(
 
     # ---- Git build path ----
     if git_ref:
-        print_info(
+        mvm_cli.info(
             f"Building Firecracker from ref '{git_ref}' via Docker-based devtool..."
         )
-        print_info("  Phase 1: Cloning/updating Firecracker source (git)")
-        print_info("  Phase 2: Building release binary (5-15 min via Docker)")
-        print_info("  The build output will appear below once it starts:\n")
+        mvm_cli.info("  Phase 1: Cloning/updating Firecracker source (git)")
+        mvm_cli.info("  Phase 2: Building release binary (5-15 min via Docker)")
+        mvm_cli.info("  The build output will appear below once it starts:\n")
 
         inputs = BinaryPullInput(
             version="",
@@ -184,22 +175,22 @@ def bin_pull(
         )
         result: OperationResult[list[BinaryItem]] = BinaryOperation.pull(inputs)  # type: ignore[assignment]
 
-        print_info("")  # spacing after build output
+        mvm_cli.info("")  # spacing after build output
 
         if result.is_error:
-            print_error(result.message)
+            mvm_cli.error(result.message)
             raise typer.Exit(code=1)
 
         binaries = result.item or []
         for binary in binaries:
-            short_id = HashGenerator.shorten(binary.id)
-            print_success(
+            short_id = mvm_cli.format_id(binary.id)
+            mvm_cli.success(
                 f"Built: {binary.name} {binary.version}: {binary.resolved_path}"
             )
-            print_info(f"  ID: {short_id}")
+            mvm_cli.info(f"  ID: {short_id}")
 
         if set_default:
-            print_success(
+            mvm_cli.success(
                 f"Default binary set to: {binaries[0].version}"
                 if binaries
                 else ""
@@ -214,7 +205,7 @@ def bin_pull(
         BinaryOperation.list_all(remote=True, limit=20),
     )
     if not remote_versions:
-        print_error("No remote Firecracker versions found")
+        mvm_cli.error("No remote Firecracker versions found")
         raise typer.Exit(code=1)
 
     if version is not None:
@@ -222,7 +213,7 @@ def bin_pull(
         try:
             resolved_version = VersionResolver.resolve(remote_versions, spec)
         except VersionError:
-            print_error(
+            mvm_cli.error(
                 f"Version '{version}' not found in remote versions. "
                 f"Available: {', '.join(remote_versions[:10])}"
             )
@@ -245,9 +236,9 @@ def bin_pull(
     download_override = force
 
     if already_exists and not force:
-        print_warning(f"Binary v{normalized} already exists.")
+        mvm_cli.warning(f"Binary v{normalized} already exists.")
         if not typer.confirm("Re-download?", default=False):
-            print_info("Aborted")
+            mvm_cli.info("Aborted")
             raise typer.Exit(code=0)
         download_override = True
 
@@ -260,27 +251,27 @@ def bin_pull(
     result = BinaryOperation.pull(inputs)  # type: ignore[assignment]
 
     if result.is_error:
-        print_error(result.message)
+        mvm_cli.error(result.message)
         raise typer.Exit(code=1)
 
     if result.status == "skipped":
-        print_info(result.message)
+        mvm_cli.info(result.message)
         binaries = result.item or []
         for binary in binaries:
-            short_id = HashGenerator.shorten(binary.id)
-            print_info(f"  {binary.name} v{binary.version}: {short_id}")
+            short_id = mvm_cli.format_id(binary.id)
+            mvm_cli.info(f"  {binary.name} v{binary.version}: {short_id}")
         raise typer.Exit(code=0)
 
     binaries = result.item or []
     for binary in binaries:
-        short_id = HashGenerator.shorten(binary.id)
-        print_success(
+        short_id = mvm_cli.format_id(binary.id)
+        mvm_cli.success(
             f"Downloaded: {binary.name} v{binary.version}: {binary.resolved_path}"
         )
-        print_info(f"  ID: {short_id}")
+        mvm_cli.info(f"  ID: {short_id}")
 
     if set_default:
-        print_success(f"Default binary set to: v{normalized}")
+        mvm_cli.success(f"Default binary set to: v{normalized}")
 
     raise typer.Exit(code=0)
 
@@ -309,14 +300,16 @@ def bin_rm(
     if version is not None:
         result = BinaryOperation.remove_by_version(version, force=force)
         if result.is_error:
-            print_error(result.message)
+            mvm_cli.error(result.message)
             raise typer.Exit(code=1)
-        print_success(f"Removed: v{version}")
+        mvm_cli.success(f"Removed: v{version}")
         raise typer.Exit(code=0)
 
     effective_ids: list[str] = list(identifiers) if identifiers else []
     if not effective_ids:
-        print_error("Provide at least one binary ID to remove or use --version")
+        mvm_cli.error(
+            "Provide at least one binary ID to remove or use --version"
+        )
         raise typer.Exit(code=1)
 
     inputs = BinaryInput(identifiers=effective_ids)
@@ -324,9 +317,9 @@ def bin_rm(
 
     for item_result in batch_result.items:
         if item_result.is_ok:
-            print_success(item_result.message or "Removed")
+            mvm_cli.success(item_result.message or "Removed")
         else:
-            print_error(item_result.message or "Remove failed")
+            mvm_cli.error(item_result.message or "Remove failed")
 
     if batch_result.has_any_error:
         raise typer.Exit(code=1)
@@ -346,10 +339,10 @@ def bin_default(
     result = BinaryOperation.set_default(inputs)
 
     if result.is_error:
-        print_error(result.message)
+        mvm_cli.error(result.message)
         raise typer.Exit(code=1)
 
-    print_success(result.message or f"Default binary set to: {identifier}")
+    mvm_cli.success(result.message or f"Default binary set to: {identifier}")
     raise typer.Exit(code=0)
 
 

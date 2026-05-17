@@ -242,7 +242,7 @@ class VolumeOperation:
             inputs: VolumeInput with name or id identifiers.
 
         Returns:
-            Dictionary with volume metadata and disk information.
+            Grouped dictionary with volume metadata and disk information.
 
         """
         volume_item = VolumeOperation.get(inputs)
@@ -258,17 +258,23 @@ class VolumeOperation:
             vm_name = vm.name if vm is not None else None
 
         return {
-            "id": volume_item.id,
-            "name": volume_item.name,
-            "size_bytes": volume_item.size_bytes,
-            "format": volume_item.format,
-            "path": volume_item.path,
-            "status": volume_item.status,
-            "vm_id": volume_item.vm_id,
-            "vm_name": vm_name,
-            "created_at": volume_item.created_at,
-            "updated_at": volume_item.updated_at,
+            "volume": {
+                "id": volume_item.id,
+                "name": volume_item.name,
+                "size_bytes": volume_item.size_bytes,
+                "format": volume_item.format,
+                "path": volume_item.path,
+                "status": volume_item.status,
+            },
+            "attachment": {
+                "vm_id": volume_item.vm_id,
+                "vm_name": vm_name,
+            },
             "disk_info": disk_info,
+            "timestamps": {
+                "created_at": volume_item.created_at,
+                "updated_at": volume_item.updated_at,
+            },
         }
 
     @staticmethod

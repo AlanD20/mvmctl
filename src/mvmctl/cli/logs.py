@@ -12,7 +12,6 @@ from mvmctl.utils.cli import handle_errors
 logs_app = typer.Typer(
     help="VM log management",
     no_args_is_help=True,
-    rich_markup_mode=None,
     add_completion=False,
     context_settings={"allow_interspersed_args": True},
 )

@@ -227,9 +227,9 @@ def _warn_if_running_as_root() -> None:
     if os.environ.get(_get_env_var("ESCALATED")):
         return
 
-    from mvmctl.utils._io import print_warning
+    from mvmctl.utils.cli import mvm_cli
 
-    print_warning(
+    mvm_cli.warning(
         f"Warning: running as root. Consider using the '{_get_cli_name()}' group instead "
         f"(set up via 'sudo {_get_cli_name()} host init')."
     )
@@ -267,17 +267,53 @@ class LazyMVMGroup(click.Group):
 
         return get_typer_command(command)
 
-    def format_commands(
+    def format_help(
         self, ctx: click.Context, formatter: click.HelpFormatter
     ) -> None:
-        rows = [
-            (command_name, _STATIC_COMMAND_HELP[command_name])
-            for command_name in self.list_commands(ctx)
-            if command_name in _STATIC_COMMAND_HELP
+        """Render root group help with Rich elements instead of Click's plain text."""
+        from rich import box
+        from rich.panel import Panel
+        from rich.table import Table
+
+        from mvmctl.utils.cli import mvm_cli
+
+        console = mvm_cli._console
+
+        # Usage line
+        usage = f"[bold]Usage:[/] {ctx.get_usage().strip()}"
+        console.print(usage)
+
+        # Description
+        if self.help:
+            console.print(f"\n  {self.help}\n")
+
+        # Options panel
+        params = self.get_params(ctx)
+        visible_params = [p for p in params if p.opts]
+        if visible_params:
+            opt_table = Table(box=box.SIMPLE, show_header=False)
+            opt_table.add_column("Option", style="cyan", no_wrap=True)
+            opt_table.add_column("Description")
+            for param in visible_params:
+                opt_table.add_row(
+                    param.opts[0], getattr(param, "help", "") or ""
+                )
+            console.print(Panel(opt_table, title="[bold]Options[/]"))
+
+        # Commands panel
+        cmd_names = self.list_commands(ctx)
+        visible_cmds = [
+            (name, _STATIC_COMMAND_HELP.get(name, ""))
+            for name in cmd_names
+            if name in _STATIC_COMMAND_HELP
         ]
-        if rows:
-            with formatter.section("Commands"):
-                formatter.write_dl(rows)
+        if visible_cmds:
+            cmd_table = Table(box=box.SIMPLE, show_header=False)
+            cmd_table.add_column("Command", style="cyan", no_wrap=True)
+            cmd_table.add_column("Description")
+            for cmd_name, desc in visible_cmds:
+                cmd_table.add_row(cmd_name, desc)
+            console.print(Panel(cmd_table, title="[bold]Commands[/]"))
 
 
 @click.group(
@@ -306,7 +342,7 @@ def app(ctx: click.Context, verbose: bool, debug: bool) -> None:
     set_debug_mode(debug)
 
     if ctx.invoked_subcommand is None:
-        click.echo(ctx.get_help())
+        ctx.command.format_help(ctx, click.HelpFormatter())
         ctx.exit()
 
     if ctx.invoked_subcommand in {"help", "version", "init"}:
@@ -363,7 +399,8 @@ def version_cmd() -> None:
 @click.pass_context
 def help_cmd(ctx: click.Context, args: tuple[str, ...]) -> None:
     if not args:
-        click.echo(ctx.find_root().get_help())
+        root = ctx.find_root()
+        root.command.format_help(root, click.HelpFormatter())
         ctx.exit()
 
     root = ctx.find_root()

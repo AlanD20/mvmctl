@@ -36,26 +36,11 @@ else:
     ImagePullInput = _ImagePullInput
     ImageImportInput = _ImageImportInput
     ImageInput = _ImageInput
-from mvmctl.utils._io import (
-    print_error,
-    print_info,
-    print_inspect_header,
-    print_key_value,
-    print_section_header,
-    print_success,
-    print_table,
-)
-from mvmctl.utils.cli import handle_errors
-from mvmctl.utils.common import CommonUtils
-from mvmctl.utils.crypto import HashGenerator
-
-if TYPE_CHECKING:
-    pass
+from mvmctl.utils.cli import handle_errors, mvm_cli
 
 image_app = typer.Typer(
     help="Image management",
     no_args_is_help=True,
-    rich_markup_mode=None,
     add_completion=False,
 )
 
@@ -147,10 +132,10 @@ def _list_remote_images(
             rows.append([f"{prefix}{v.version}", display])
 
     if not rows:
-        print_info("No remote images available.")
+        mvm_cli.info("No remote images available.")
         return
 
-    print_table(
+    mvm_cli.table(
         columns=["Type / Version", "Description"],
         rows=rows,
     )
@@ -187,29 +172,25 @@ def _list_local_images(images: list[ImageItem], *, json_output: bool) -> None:
 
     rows: list[list[str]] = []
     for img in images:
-        display_id = CommonUtils._get_combined_marker(
-            img.is_default, not img.is_present
-        ) + HashGenerator.shorten(img.id)
         size = img.compressed_size or 0
         added = (
-            CommonUtils.human_readable_datetime(img.pulled_at)
-            if img.pulled_at
-            else "-"
+            mvm_cli.format_timestamp(img.pulled_at) if img.pulled_at else "-"
         )
         rows.append(
             [
-                display_id,
-                img.name,
+                mvm_cli.format_marker(img.is_default),
+                mvm_cli.format_id(img.id),
+                mvm_cli.format_name(img.name, not img.is_present),
                 img.fs_type,
-                CommonUtils.format_bytes_human_readable(size)
+                mvm_cli.format_size(size)
                 if size > 0
                 else "-",
                 added,
             ]
         )
 
-    print_table(
-        columns=["ID", "OS Name", "FS Type", "Size", "Added"],
+    mvm_cli.table(
+        columns=["", "ID", "OS Name", "FS Type", "Size", "Added"],
         rows=rows,
     )
 
@@ -294,18 +275,18 @@ def image_pull(
         result = ImageOperation.pull(pull_input, on_progress=_on_progress)
 
     if isinstance(result, NeedsInteraction):
-        print_info(result.message)
+        mvm_cli.info(result.message)
         raise typer.Exit(code=0)
 
     if result.is_error:
-        print_error(result.message or f"Download failed: {image_selector}")
+        mvm_cli.error(result.message or f"Download failed: {image_selector}")
         raise typer.Exit(code=1)
 
     assert result.item is not None
-    short_id = HashGenerator.shorten(result.item.id)
-    print_success(f"Pulled: {result.item.name} (ID: {short_id})")
+    short_id = mvm_cli.format_id(result.item.id)
+    mvm_cli.success(f"Pulled: {result.item.name} (ID: {short_id})")
     if set_default:
-        print_success(f"Default image set to: {image_selector}")
+        mvm_cli.success(f"Default image set to: {image_selector}")
 
     raise typer.Exit(code=0)
 
@@ -322,9 +303,9 @@ def image_set_default(
     """Set the default image for VM creation."""
     result = ImageOperation.set_default(ImageInput(id=[prefix]))
     if result.is_error:
-        print_error(result.message or f"Set default failed: {prefix}")
+        mvm_cli.error(result.message or f"Set default failed: {prefix}")
         raise typer.Exit(code=1)
-    print_success(f"Default image set to: {prefix}")
+    mvm_cli.success(f"Default image set to: {prefix}")
 
 
 @image_app.command(
@@ -352,16 +333,16 @@ def image_rm(
     """
     effective_ids: list[str] = list(prefixes) if prefixes else []
     if not effective_ids:
-        print_error("Provide at least one image ID prefix")
+        mvm_cli.error("Provide at least one image ID prefix")
         raise typer.Exit(code=1)
 
     result = ImageOperation.remove(ImageInput(id=effective_ids), force)
     for r in result.items:
-        item_id = HashGenerator.shorten(r.item.id) if r.item else "unknown"
+        item_id = mvm_cli.format_id(r.item.id) if r.item else "unknown"
         if r.is_ok:
-            print_success(f"Removed: {item_id}")
+            mvm_cli.success(f"Removed: {item_id}")
         else:
-            print_error(r.message or f"Remove failed: {item_id}")
+            mvm_cli.error(r.message or f"Remove failed: {item_id}")
 
 
 @image_app.command(name="inspect")
@@ -373,7 +354,6 @@ def image_inspect(
         autocompletion=_complete_local_image_ids,
     ),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-    tree: bool = typer.Option(False, "--tree", help="Output in tree format"),
 ) -> None:
     """
     Show detailed information about an image.
@@ -381,128 +361,16 @@ def image_inspect(
     Examples:
         mvm image inspect abc123
         mvm image inspect abc123 --json
-        mvm image inspect abc123 --tree
 
     """
-    info = ImageOperation.inspect(ImageInput(id=[prefix]), is_json=json_output)
+    info = ImageOperation.inspect(ImageInput(id=[prefix]))
 
-    if isinstance(info, dict):
+    if json_output:
         typer.echo(json.dumps(info, indent=2, default=str))
         return
 
-    if tree:
-        _print_image_details_tree(info)
-    else:
-        _print_image_details(info)
-
-
-def _print_image_details(info: ImageItem) -> None:
-    type_ = info.type
-    missing_marker = " (missing)" if not info.is_present else ""
-
-    print_inspect_header(f"Image: {type_}{missing_marker}")
-
-    print_section_header("BASIC INFO")
-    print_key_value("ID", info.id)
-    print_key_value("Name", info.name)
-    print_key_value("Type", type_)
-    print_key_value("Arch", info.arch)
-    print_key_value("Default", "True" if info.is_default else "False")
-    print_key_value(
-        "Pulled", CommonUtils.human_readable_datetime(info.pulled_at)
-    )
-    print_key_value(
-        "Created", CommonUtils.human_readable_datetime(info.created_at)
-    )
-    print_key_value(
-        "Updated", CommonUtils.human_readable_datetime(info.updated_at)
-    )
-
-    print_section_header("STORAGE")
-    print_key_value("Filename", info.path)
-    print_key_value("FS Type", info.fs_type)
-    print_key_value("FS UUID", info.fs_uuid or "-")
-    print_key_value(
-        "File Size",
-        CommonUtils.format_bytes_human_readable(info.compressed_size)
-        if info.compressed_size
-        else "-",
-    )
-
-    print_section_header("COMPRESSION")
-    print_key_value("Format", info.compressed_format or "-")
-    print_key_value(
-        "Original",
-        CommonUtils.format_bytes_human_readable(info.original_size)
-        if info.original_size
-        else "-",
-    )
-    print_key_value(
-        "Compressed",
-        CommonUtils.format_bytes_human_readable(info.compressed_size)
-        if info.compressed_size
-        else "-",
-    )
-    print_key_value(
-        "Ratio",
-        f"{info.compression_ratio:.2f}x" if info.compression_ratio else "-",
-    )
-
-    print_section_header("VM REQUIREMENTS")
-    print_key_value(
-        "Minimum Disk",
-        f"{info.minimum_rootfs_size_mib} MiB"
-        if info.minimum_rootfs_size_mib
-        else "-",
-    )
-
-
-def _print_image_details_tree(info: ImageItem) -> None:
-    type_ = info.type
-    missing_marker = " (missing)" if not info.is_present else ""
-
-    print(f"{type_}{missing_marker}")
-
-    tree_lines = [
-        f"├── ID:          {info.id}",
-        f"├── Name:        {info.name}",
-        f"├── Type:        {type_}",
-        f"├── Arch:        {info.arch}",
-        f"├── Default:     {'True' if info.is_default else 'False'}",
-        f"├── Pulled:      {CommonUtils.human_readable_datetime(info.pulled_at)}",
-        f"├── Created:     {CommonUtils.human_readable_datetime(info.created_at)}",
-        f"├── Updated:     {CommonUtils.human_readable_datetime(info.updated_at)}",
-    ]
-
-    tree_lines.append("├── Storage")
-    tree_lines.append(f"│   ├── Filename:  {info.path}")
-    tree_lines.append(f"│   ├── FS Type:   {info.fs_type}")
-    tree_lines.append(f"│   ├── FS UUID:   {info.fs_uuid or '-'}")
-    tree_lines.append(
-        f"│   └── File Size: {CommonUtils.format_bytes_human_readable(info.compressed_size) if info.compressed_size else '-'}"
-    )
-
-    tree_lines.append("├── Compression")
-    tree_lines.append(f"│   ├── Format:    {info.compressed_format or '-'}")
-    tree_lines.append(
-        f"│   ├── Original:  {CommonUtils.format_bytes_human_readable(info.original_size) if info.original_size else '-'}"
-    )
-    tree_lines.append(
-        f"│   ├── Compressed: {CommonUtils.format_bytes_human_readable(info.compressed_size) if info.compressed_size else '-'}"
-    )
-    tree_lines.append(
-        f"│   └── Ratio:     {f'{info.compression_ratio:.2f}x' if info.compression_ratio else '-'}"
-    )
-
-    tree_lines.append("└── VM Requirements")
-    tree_lines.append(
-        f"    └── Minimum Disk: {info.minimum_rootfs_size_mib} MiB"
-        if info.minimum_rootfs_size_mib
-        else "    └── Minimum Disk: -"
-    )
-
-    for line in tree_lines:
-        print(line)
+    name = info.get("image", {}).get("name", prefix)
+    mvm_cli.print_dict_tree(info, title=f"Image: {name}")
 
 
 @image_app.command(name="import")
@@ -545,7 +413,7 @@ def image_import(
     """Import a local image file (qcow2, raw, tar-rootfs). The first argument is a display name."""
 
     if not source_path.exists():
-        print_error(f"Source file not found: {source_path}")
+        mvm_cli.error(f"Source file not found: {source_path}")
         raise typer.Exit(code=1)
 
     disabled_detectors = (
@@ -566,7 +434,7 @@ def image_import(
         )
 
     if format is None:
-        print_error(
+        mvm_cli.error(
             f"Cannot auto-detect format from '{source_path.name}'. "
             "Use --format qcow2|raw|tar-rootfs."
         )
@@ -594,17 +462,17 @@ def image_import(
         result = ImageOperation.import_(spec, on_progress=_on_progress)
 
     if result.is_error:
-        print_error(result.message or f"Import failed: {name}")
+        mvm_cli.error(result.message or f"Import failed: {name}")
         raise typer.Exit(code=1)
 
     assert result.item is not None
-    short_id = HashGenerator.shorten(result.item.id)
-    print_success(f"Imported: {result.item.path}")
-    print_info(f"  Name: {name}")
-    print_info(f"  ID:   {short_id}")
+    short_id = mvm_cli.format_id(result.item.id)
+    mvm_cli.success(f"Imported: {result.item.path}")
+    mvm_cli.info(f"  Name: {name}")
+    mvm_cli.info(f"  ID:   {short_id}")
 
     if set_default:
-        print_success(f"Default image set to: {name}")
+        mvm_cli.success(f"Default image set to: {name}")
 
     raise typer.Exit(code=0)
 
@@ -656,13 +524,13 @@ def image_warm(
         else:
             result = ImageOperation.warm(all=True, on_progress=_on_progress)
     if result.is_error:
-        print_error(result.message or "Warm failed")
+        mvm_cli.error(result.message or "Warm failed")
         raise typer.Exit(code=1)
 
     for path in result.item or []:
-        size_str = CommonUtils.format_bytes_human_readable(path.stat().st_size)
+        size_str = mvm_cli.format_size(path.stat().st_size)
         display_name = image_id or "all images"
-        print_success(f"Warmed: {display_name}")
-        print_info(f"  Path: {path}")
-        print_info(f"  Size: {size_str}")
-    print_info("  Ready for fast VM creation")
+        mvm_cli.success(f"Warmed: {display_name}")
+        mvm_cli.info(f"  Path: {path}")
+        mvm_cli.info(f"  Size: {size_str}")
+    mvm_cli.info("  Ready for fast VM creation")

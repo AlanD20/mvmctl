@@ -22,27 +22,15 @@ else:
     NetworkCreateInput = _NetworkCreateInput
 from mvmctl.cli._completion import _complete_network_names
 from mvmctl.models.result import OperationResult
-from mvmctl.utils._io import (
-    print_error,
-    print_info,
-    print_inspect_header,
-    print_key_value,
-    print_section_header,
-    print_success,
-    print_table,
-)
-from mvmctl.utils.cli import CliUtils, handle_errors
-from mvmctl.utils.common import CommonUtils
-from mvmctl.utils.crypto import HashGenerator
+from mvmctl.utils.cli import handle_errors, mvm_cli
 from mvmctl.utils.network import NetworkUtils
 
 if TYPE_CHECKING:
-    from mvmctl.models import NetworkItem, NetworkLeaseItem
+    from mvmctl.models import NetworkItem
 
 network_app = typer.Typer(
     help="Network management",
     no_args_is_help=True,
-    rich_markup_mode=None,
     add_completion=False,
 )
 
@@ -74,25 +62,22 @@ def network_ls(
 
     rows = []
     for n in networks:
-        is_default = n.is_default
-        name_col = (
-            CommonUtils._get_combined_marker(is_default, not n.is_present)
-            + n.name
-        )
         vm_count = len(n.leases) if n.leases else 0
         rows.append(
             [
-                HashGenerator.shorten(n.id),
-                name_col,
+                mvm_cli.format_marker(n.is_default),
+                mvm_cli.format_id(n.id),
+                mvm_cli.format_name(n.name, not n.is_present),
                 n.subnet,
                 n.bridge,
                 "True" if n.nat_enabled else "False",
                 str(vm_count),
-                CommonUtils.human_readable_datetime(n.created_at),
+                mvm_cli.format_timestamp(n.created_at),
             ]
         )
-    print_table(
+    mvm_cli.table(
         columns=[
+            "",
             "ID",
             "Name",
             "Network",
@@ -119,26 +104,26 @@ def network_set_default(
     ),
 ) -> None:
     """Set a network as the default for VM creation."""
-    name = CliUtils.check_name_arg(ctx, name)
+    name = mvm_cli.check_name_arg(ctx, name)
     result = NetworkOperation.set_default(NetworkInput(name=[name]))
     if result.status in ("error", "failure"):
-        print_error(result.message)
+        mvm_cli.error(result.message)
         raise typer.Exit(code=1)
-    print_success(f"Default network set to: {name}")
+    mvm_cli.success(f"Default network set to: {name}")
 
 
 def _resolve_user_nat_gateways() -> str:
     """Interactive prompt for NAT gateway selection — CLI-only, no business logic."""
     interfaces = NetworkUtils.get_physical_interfaces()
     if not interfaces:
-        print_error("No network interfaces found")
+        mvm_cli.error("No network interfaces found")
         raise typer.Exit(code=1)
     if len(interfaces) == 1:
         return interfaces[0]
 
-    print_info("Select interface(s) for NAT (internet access):")
+    mvm_cli.info("Select interface(s) for NAT (internet access):")
     for i, iface in enumerate(interfaces, 1):
-        print_info(f"  [{i}] {iface}")
+        mvm_cli.info(f"  [{i}] {iface}")
     selected = Prompt.ask(
         "Select interface number(s) [comma-separated]", default="1"
     )
@@ -150,10 +135,10 @@ def _resolve_user_nat_gateways() -> str:
             if 1 <= idx <= len(interfaces)
         ]
     except ValueError:
-        print_error(f"Invalid interface selection: {selected}")
+        mvm_cli.error(f"Invalid interface selection: {selected}")
         raise typer.Exit(code=1)
     if not selected_interfaces:
-        print_error("No valid interface indices selected")
+        mvm_cli.error("No valid interface indices selected")
         raise typer.Exit(code=1)
     return ",".join(selected_interfaces)
 
@@ -189,10 +174,10 @@ def network_create(
     ),
 ) -> None:
     """Create a named network."""
-    name = CliUtils.check_name_arg(ctx, name)
+    name = mvm_cli.check_name_arg(ctx, name)
 
     if subnet is None:
-        print_error("Missing required option '--subnet'")
+        mvm_cli.error("Missing required option '--subnet'")
         raise typer.Exit(code=1)
 
     if nat_gateways is None and not no_nat and not non_interactive:
@@ -214,27 +199,27 @@ def network_create(
     result = NetworkOperation.create(create_input)
     if isinstance(result, OperationResult):
         if result.status in ("error", "failure"):
-            print_error(result.message)
+            mvm_cli.error(result.message)
             raise typer.Exit(code=1)
         if result.status == "skipped":
-            print_info(result.message)
+            mvm_cli.info(result.message)
             raise typer.Exit(code=0)
         config = result.item
         if config is None:
-            print_error("Network created but no item returned")
+            mvm_cli.error("Network created but no item returned")
             raise typer.Exit(code=1)
     else:
         # NeedsInteraction — not expected for network creation
-        print_error(result.message)
+        mvm_cli.error(result.message)
         raise typer.Exit(code=1)
 
-    print_success(f"Created: {config.name}")
-    print_info(f"  SUBNET:    {config.subnet}")
-    print_info(f"  IPv4 Gateway: {config.ipv4_gateway}")
-    print_info(f"  Bridge:  {config.bridge}")
-    print_info(f"  NAT:     {'True' if config.nat_enabled else 'False'}")
+    mvm_cli.success(f"Created: {config.name}")
+    mvm_cli.info(f"  SUBNET:    {config.subnet}")
+    mvm_cli.info(f"  IPv4 Gateway: {config.ipv4_gateway}")
+    mvm_cli.info(f"  Bridge:  {config.bridge}")
+    mvm_cli.info(f"  NAT:     {'True' if config.nat_enabled else 'False'}")
     if config.nat_gateways:
-        print_info(f"  NAT gateways: {', '.join(config.nat_gateways_list)}")
+        mvm_cli.info(f"  NAT gateways: {', '.join(config.nat_gateways_list)}")
 
 
 @network_app.command(
@@ -255,17 +240,17 @@ def network_rm(
     """Remove one or more networks by name."""
     effective_names = list(names) if names else []
     if not effective_names:
-        print_error("Provide at least one network name")
+        mvm_cli.error("Provide at least one network name")
         raise typer.Exit(code=1)
 
     result = NetworkOperation.remove(
         NetworkInput(name=effective_names), force=force
     )
     if result.status in ("error", "failure"):
-        print_error(result.message)
+        mvm_cli.error(result.message)
         raise typer.Exit(code=1)
     for name in effective_names:
-        print_success(f"Removed: {name}")
+        mvm_cli.success(f"Removed: {name}")
 
 
 @network_app.command(
@@ -284,54 +269,15 @@ def network_inspect(
     tree: bool = typer.Option(False, "--tree", help="Output in tree format"),
 ) -> None:
     """Show detailed information about a network."""
-    name = CliUtils.check_name_arg(ctx, name)
-    info = NetworkOperation.inspect(
-        NetworkInput(name=[name]), is_json=json_output
-    )
+    name = mvm_cli.check_name_arg(ctx, name)
+    info = NetworkOperation.inspect(NetworkInput(name=[name]))
 
-    if isinstance(info, dict):
+    if json_output:
         typer.echo(json.dumps(info, indent=2, default=str))
         return
 
-    if tree:
-        _print_network_details_tree(info)
-        return
-
-    status = "active" if info.bridge_active else "inactive"
-    print_inspect_header(f"Network: {info.name}", status)
-
-    print_section_header("BASIC INFO")
-    print_key_value("Name", info.name)
-    print_key_value("Subnet", info.subnet or "-")
-    print_key_value("IPv4 Gateway", info.ipv4_gateway or "-")
-    print_key_value("Bridge", info.bridge)
-    print_key_value("NAT", "True" if info.nat_enabled else "False")
-    print_key_value(
-        "Created", CommonUtils.human_readable_datetime(info.created_at)
-    )
-
-    print_section_header("RESOURCES")
-    leases: list[NetworkLeaseItem] = info.leases or []
-    print_key_value("Bridge Active", "True" if info.bridge_active else "False")
-    print_key_value("Leases", f"{len(leases)} assigned")
-
-    # Show NAT config if enabled
-    if info.nat_enabled:
-        nat_gateways: list[str] = info.nat_gateways_list or []
-        print_section_header("NAT CONFIG")
-        print_key_value(
-            "NAT Gateways", ", ".join(nat_gateways) if nat_gateways else "-"
-        )
-
-    # Show VMs if any
-    if leases:
-        print_section_header("VMS")
-        for lease in leases:
-            if lease.vm_id:
-                label = f"{lease.vm_id}"
-                print_key_value(
-                    label, lease.ipv4 or "-", indent=2, key_width=28
-                )
+    net_name = info.get("network", {}).get("name", name)
+    mvm_cli.print_dict_tree(info, title=f"Network: {net_name}")
 
 
 @network_app.command(
@@ -356,11 +302,11 @@ def network_sync(
 
     sync_result = NetworkOperation.sync(network_id)
     if sync_result.status in ("error", "failure"):
-        print_error(sync_result.message)
+        mvm_cli.error(sync_result.message)
         raise typer.Exit(code=1)
     results = sync_result.item
     if results is None:
-        print_error("Sync returned no results")
+        mvm_cli.error("Sync returned no results")
         raise typer.Exit(code=1)
 
     if json_output:
@@ -373,7 +319,7 @@ def network_sync(
 
     rows = []
     for nid, counts in results.items():
-        short_id = HashGenerator.shorten(nid)
+        short_id = mvm_cli.format_id(nid)
         name = name_map.get(nid, nid[:8])
         rows.append(
             [
@@ -385,39 +331,7 @@ def network_sync(
             ]
         )
 
-    print_table(
+    mvm_cli.table(
         columns=["ID", "Name", "Verified", "Added", "Orphaned"],
         rows=rows,
     )
-
-
-def _print_network_details_tree(info: NetworkItem) -> None:
-    """Print network details in tree format."""
-    status = "active" if info.bridge_active else "inactive"
-    print(f"{info.name} ({status})")
-
-    tree_lines: list[str] = [
-        f"├── ID:           {info.id}",
-        f"├── Name:         {info.name}",
-        f"├── Subnet:       {info.subnet or '-'}",
-        f"├── IPv4 Gateway: {info.ipv4_gateway or '-'}",
-        f"├── Bridge:       {info.bridge}",
-        f"├── NAT:          {'True' if info.nat_enabled else 'False'}",
-        f"├── Default:      {'True' if info.is_default else 'False'}",
-        f"├── Present:      {'True' if info.is_present else 'False'}",
-        f"├── Bridge Active: {'True' if info.bridge_active else 'False'}",
-        f"├── Created:      {CommonUtils.human_readable_datetime(info.created_at)}",
-    ]
-
-    leases = info.leases or []
-    if leases:
-        tree_lines.append("├── Leases")
-        for i, lease in enumerate(leases):
-            prefix = "│" if i < len(leases) - 1 else " "
-            tree_lines.append(f"{prefix}   ├── VM:    {lease.vm_id or '-'}")
-            tree_lines.append(f"{prefix}   └── IPv4:  {lease.ipv4 or '-'}")
-    else:
-        tree_lines.append("└── Leases:     0 assigned")
-
-    for line in tree_lines:
-        print(line)

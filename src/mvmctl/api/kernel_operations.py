@@ -549,24 +549,37 @@ class KernelOperation:
         }
 
     @staticmethod
-    def inspect(
-        inputs: KernelInput, is_json: bool = False
-    ) -> KernelItem | dict[str, Any]:
+    def inspect(inputs: KernelInput) -> dict[str, Any]:
         """
         Inspect a kernel with full details.
 
         Args:
             inputs: KernelInput with id/name identifiers.
-            is_json: If True, return a dict suitable for JSON serialization.
 
         Returns:
-            KernelItem or dict representation depending on is_json.
+            Grouped dict representation of the kernel.
 
         """
         kernel_item = KernelOperation.get(inputs)
-        if is_json:
-            return KernelOperation._kernel_to_dict(kernel_item)
-        return kernel_item
+        return {
+            "kernel": {
+                "id": kernel_item.id,
+                "name": kernel_item.name,
+                "base_name": kernel_item.base_name,
+                "version": kernel_item.version,
+                "arch": kernel_item.arch,
+                "type": kernel_item.type,
+                "is_default": kernel_item.is_default,
+                "is_present": kernel_item.is_present,
+            },
+            "storage": {
+                "path": kernel_item.path,
+            },
+            "timestamps": {
+                "created_at": kernel_item.created_at,
+                "updated_at": kernel_item.updated_at,
+            },
+        }
 
     @staticmethod
     def set_default(inputs: KernelInput) -> OperationResult[KernelItem]:

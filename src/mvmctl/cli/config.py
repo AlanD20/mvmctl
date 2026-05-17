@@ -16,13 +16,11 @@ from mvmctl.cli._completion import (
     _complete_config_categories,
     _complete_config_keys,
 )
-from mvmctl.utils._io import print_error, print_info, print_success
-from mvmctl.utils.cli import handle_errors
+from mvmctl.utils.cli import handle_errors, mvm_cli
 
 config_app = typer.Typer(
     help="Configuration management",
     no_args_is_help=True,
-    rich_markup_mode=None,
     add_completion=False,
 )
 
@@ -49,15 +47,17 @@ def config_get(
             default = info.get("default")
             typ = info.get("type")
             if override is not None:
-                print_info(
+                mvm_cli.info(
                     f"{k} = {override} (override: {override}, type: {typ})"
                 )
             else:
-                print_info(f"{k} = {default} (default: {default}, type: {typ})")
+                mvm_cli.info(
+                    f"{k} = {default} (default: {default}, type: {typ})"
+                )
     elif value is not None:
-        print_info(f"{category}.{key} = {value}")
+        mvm_cli.info(f"{category}.{key} = {value}")
     else:
-        print_info(f"{category}.{key} = (default)")
+        mvm_cli.info(f"{category}.{key} = (default)")
 
 
 @config_app.command(name="set")
@@ -78,9 +78,9 @@ def config_set(
     """Set a config value."""
     result = ConfigOperation.set(category, key, value)
     if result.is_error:
-        print_error(result.message)
+        mvm_cli.error(result.message)
         raise typer.Exit(code=1)
-    print_success(result.message)
+    mvm_cli.success(result.message)
 
 
 @config_app.command(name="reset")
@@ -100,26 +100,26 @@ def config_reset(
     if all_overrides:
         result = ConfigOperation.reset(all_overrides=True)
         if result.is_error:
-            print_error(result.message)
+            mvm_cli.error(result.message)
             raise typer.Exit(code=1)
-        print_success(f"Reset: {result.item} override(s) globally")
+        mvm_cli.success(f"Reset: {result.item} override(s) globally")
     elif category is not None and key is not None:
         result = ConfigOperation.reset(category, key)
         if result.is_error:
-            print_error(result.message)
+            mvm_cli.error(result.message)
             raise typer.Exit(code=1)
         if result.item and result.item > 0:
-            print_success(f"Reset: {category}.{key}")
+            mvm_cli.success(f"Reset: {category}.{key}")
         else:
-            print_info(f"{category}.{key} was already at default")
+            mvm_cli.info(f"{category}.{key} was already at default")
     elif category is not None:
         result = ConfigOperation.reset(category, key=None)
         if result.is_error:
-            print_error(result.message)
+            mvm_cli.error(result.message)
             raise typer.Exit(code=1)
-        print_success(f"Reset: {result.item} override(s) in {category}")
+        mvm_cli.success(f"Reset: {result.item} override(s) in {category}")
     else:
-        print_info("Provide a category, category and key, or use --all")
+        mvm_cli.info("Provide a category, category and key, or use --all")
 
 
 @config_app.command(name="list")
@@ -128,10 +128,10 @@ def config_list() -> None:
     """List all overridable settings and their current values."""
     settings = ConfigOperation.list_all()
     for category, keys in settings.items():
-        print_info(f"\n[{category}]")
+        mvm_cli.info(f"\n[{category}]")
         for key, info in keys.items():
             override = info["override"]
             if override is not None:
-                print_info(f"  {key} = {override} (type: {info['type']})")
+                mvm_cli.info(f"  {key} = {override} (type: {info['type']})")
             else:
-                print_info(f"  {key} = (default, type: {info['type']})")
+                mvm_cli.info(f"  {key} = (default, type: {info['type']})")

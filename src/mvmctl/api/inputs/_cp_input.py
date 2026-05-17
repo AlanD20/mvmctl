@@ -89,18 +89,27 @@ class CPRequest:
             # src is local, dst is VM
             local_path = src_path
             if dst_vm is None:
-                raise CPError("Internal error: destination VM not resolved", code="cp.resolve_failed")
+                raise CPError(
+                    "Internal error: destination VM not resolved",
+                    code="cp.resolve_failed",
+                )
             dst_info = self._resolve_vm_side(dst_vm, dst_path, is_source=False)
         elif direction == "vm_to_host":
             # src is VM, dst is local
             if src_vm is None:
-                raise CPError("Internal error: source VM not resolved", code="cp.resolve_failed")
+                raise CPError(
+                    "Internal error: source VM not resolved",
+                    code="cp.resolve_failed",
+                )
             src_info = self._resolve_vm_side(src_vm, src_path, is_source=True)
             local_path = dst_path
         elif direction == "vm_to_vm":
             # both are VMs
             if src_vm is None or dst_vm is None:
-                raise CPError("Internal error: source or destination VM not resolved", code="cp.resolve_failed")
+                raise CPError(
+                    "Internal error: source or destination VM not resolved",
+                    code="cp.resolve_failed",
+                )
             src_info = self._resolve_vm_side(src_vm, src_path, is_source=True)
             dst_info = self._resolve_vm_side(dst_vm, dst_path, is_source=False)
 

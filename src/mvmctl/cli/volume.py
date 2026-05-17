@@ -11,17 +11,7 @@ from mvmctl.api import VolumeCreateInput as _VolumeCreateInput
 from mvmctl.api import VolumeInput as _VolumeInput
 from mvmctl.api import VolumeOperation as _VolumeOperation
 from mvmctl.cli._completion import _complete_volume_names
-from mvmctl.utils._io import (
-    print_error,
-    print_inspect_header,
-    print_key_value,
-    print_section_header,
-    print_success,
-    print_table,
-)
-from mvmctl.utils.cli import handle_errors
-from mvmctl.utils.common import CommonUtils
-from mvmctl.utils.crypto import HashGenerator
+from mvmctl.utils.cli import handle_errors, mvm_cli
 
 if TYPE_CHECKING:
     from mvmctl.api.inputs._volume_create_input import VolumeCreateInput
@@ -35,7 +25,6 @@ else:
 volume_app = typer.Typer(
     help="Volume management",
     no_args_is_help=True,
-    rich_markup_mode=None,
     add_completion=False,
 )
 
@@ -59,15 +48,15 @@ def volume_create(
         VolumeCreateInput(name=name, size=size, format=format)
     )
     if result.is_error:
-        print_error(result.message)
+        mvm_cli.error(result.message)
         raise typer.Exit(code=1)
-    print_success(result.message)
+    mvm_cli.success(result.message)
     if result.item:
-        print_key_value("ID", HashGenerator.shorten(result.item.id))
-        print_key_value("Format", result.item.format)
-        print_key_value(
+        mvm_cli.key_value("ID", mvm_cli.format_id(result.item.id))
+        mvm_cli.key_value("Format", result.item.format)
+        mvm_cli.key_value(
             "Size",
-            CommonUtils.format_bytes_human_readable(result.item.size_bytes),
+            mvm_cli.format_size(result.item.size_bytes),
         )
 
 
@@ -90,9 +79,9 @@ def volume_rm(
     for r in result.items:
         item_name = r.item.name if r.item else "unknown"
         if r.is_ok:
-            print_success(f"Removed: {item_name}")
+            mvm_cli.success(f"Removed: {item_name}")
         else:
-            print_error(r.message or f"Remove failed: {item_name}")
+            mvm_cli.error(r.message or f"Remove failed: {item_name}")
     if result.has_any_error:
         raise typer.Exit(code=1)
 
@@ -127,17 +116,17 @@ def volume_ls(
     for vol in volumes:
         rows.append(
             [
-                HashGenerator.shorten(vol.id),
+                mvm_cli.format_id(vol.id),
                 vol.name,
                 vol.format,
-                CommonUtils.format_bytes_human_readable(vol.size_bytes),
+                mvm_cli.format_size(vol.size_bytes),
                 vol.status,
                 vol.vm_id or "-",
-                CommonUtils.human_readable_datetime(vol.created_at),
+                mvm_cli.format_timestamp(vol.created_at),
             ]
         )
 
-    print_table(
+    mvm_cli.table(
         columns=["ID", "Name", "Format", "Size", "Status", "VM", "Created"],
         rows=rows,
     )
@@ -160,53 +149,7 @@ def volume_inspect(
         typer.echo(json.dumps(info, indent=2, default=str))
         return
 
-    print_inspect_header(f"Volume: {info['name']}")
-
-    print_section_header("BASIC INFO")
-    print_key_value("ID", info["id"])
-    print_key_value("Name", info["name"])
-    print_key_value("Status", info["status"])
-    print_key_value("Format", info["format"])
-    print_key_value(
-        "Size", CommonUtils.format_bytes_human_readable(info["size_bytes"])
-    )
-    print_key_value(
-        "Created", CommonUtils.human_readable_datetime(info["created_at"])
-    )
-    print_key_value(
-        "Updated", CommonUtils.human_readable_datetime(info["updated_at"])
-    )
-
-    print_section_header("STORAGE")
-    print_key_value("Path", info["path"])
-    print_key_value("VM ID", info["vm_id"] or "-")
-    if info.get("vm_name"):
-        print_key_value("VM Name", info["vm_name"])
-
-    disk_info = info.get("disk_info", {})
-    if disk_info:
-        print_section_header("DISK INFO")
-        if "virtual-size" in disk_info:
-            print_key_value(
-                "Virtual size",
-                CommonUtils.format_bytes_human_readable(
-                    disk_info["virtual-size"]
-                ),
-            )
-        if "actual-size" in disk_info:
-            print_key_value(
-                "Actual size",
-                CommonUtils.format_bytes_human_readable(
-                    disk_info["actual-size"]
-                ),
-            )
-        if "format" in disk_info:
-            print_key_value("Format", disk_info["format"])
-        if "dirty-flag" in disk_info:
-            print_key_value("Dirty flag", str(disk_info["dirty-flag"]))
-        children = disk_info.get("children", [])
-        if children:
-            print_key_value("Children", str(len(children)))
+    mvm_cli.print_dict_tree(info, title=f"Volume: {info['volume']['name']}")
 
 
 @volume_app.command(name="resize")
@@ -224,6 +167,6 @@ def volume_resize(
         VolumeCreateInput(name=identifier, size=size)
     )
     if result.is_error:
-        print_error(result.message)
+        mvm_cli.error(result.message)
         raise typer.Exit(code=1)
-    print_success(result.message)
+    mvm_cli.success(result.message)

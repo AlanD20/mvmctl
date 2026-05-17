@@ -407,18 +407,15 @@ class NetworkOperation:
         return [NetworkOperation._network_to_dict(n) for n in networks]
 
     @staticmethod
-    def inspect(
-        inputs: NetworkInput, is_json: bool = False
-    ) -> NetworkItem | dict[str, Any]:
+    def inspect(inputs: NetworkInput) -> dict[str, Any]:
         """
         Inspect a network with enriched data (leases, bridge state).
 
         Args:
             inputs: NetworkInput with name/id identifiers.
-            is_json: If True, return a dict suitable for JSON serialization.
 
         Returns:
-            NetworkItem or dict representation depending on is_json.
+            Grouped dict representation of the network.
 
         """
         from mvmctl.api.inputs._network_input import NetworkRequest
@@ -449,9 +446,38 @@ class NetworkOperation:
                 f"Network '{network.name}' not found after update"
             )
 
-        if is_json:
-            return NetworkOperation._network_to_dict(updated)
-        return updated
+        return {
+            "network": {
+                "id": updated.id,
+                "name": updated.name,
+                "subnet": updated.subnet,
+                "bridge": updated.bridge,
+                "ipv4_gateway": updated.ipv4_gateway,
+                "is_default": updated.is_default,
+                "is_present": updated.is_present,
+                "created_at": updated.created_at,
+                "updated_at": updated.updated_at,
+            },
+            "status": {
+                "bridge_active": updated.bridge_active,
+                "is_present": updated.is_present,
+                "is_default": updated.is_default,
+            },
+            "nat": {
+                "nat_enabled": updated.nat_enabled,
+                "nat_gateways": updated.nat_gateways_list or [],
+            },
+            "leases": [
+                {
+                    "id": lease.id,
+                    "vm_id": lease.vm_id,
+                    "ipv4": lease.ipv4,
+                    "leased_at": lease.leased_at,
+                    "expires_at": lease.expires_at,
+                }
+                for lease in (updated.leases or [])
+            ],
+        }
 
     @staticmethod
     def set_default(inputs: NetworkInput) -> OperationResult[NetworkItem]:

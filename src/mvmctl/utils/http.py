@@ -523,10 +523,10 @@ class HttpDownload:
             else:
                 import sys
 
-                from mvmctl.utils._io import print_warning
+                from mvmctl.utils.cli import mvm_cli
 
-                print_warning(f"Warning: No checksum available for {url}")
-                print_warning(
+                mvm_cli.warning(f"Warning: No checksum available for {url}")
+                mvm_cli.warning(
                     "Integrity cannot be verified. This is a potential security risk."
                 )
                 if not sys.stdin.isatty():

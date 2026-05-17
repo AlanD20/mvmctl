@@ -652,24 +652,47 @@ class ImageOperation:
         }
 
     @staticmethod
-    def inspect(
-        inputs: ImageInput, is_json: bool = False
-    ) -> ImageItem | dict[str, Any]:
+    def inspect(inputs: ImageInput) -> dict[str, Any]:
         """
         Inspect an image with enriched data.
 
         Args:
             inputs: ImageInput with id_prefix or type identifiers.
-            is_json: If True, return a dict suitable for JSON serialization.
 
         Returns:
-            ImageItem or dict representation depending on is_json.
+            Grouped dict representation of the image.
 
         """
         image_item = ImageOperation.get(inputs)
-        if is_json:
-            return ImageOperation._image_to_dict(image_item)
-        return image_item
+        return {
+            "image": {
+                "id": image_item.id,
+                "name": image_item.name,
+                "type": image_item.type,
+                "arch": image_item.arch,
+                "is_default": image_item.is_default,
+                "is_present": image_item.is_present,
+            },
+            "storage": {
+                "path": image_item.path,
+                "fs_type": image_item.fs_type,
+                "fs_uuid": image_item.fs_uuid,
+                "compressed_size": image_item.compressed_size,
+                "original_size": image_item.original_size,
+            },
+            "compression": {
+                "format": image_item.compressed_format,
+                "ratio": image_item.compression_ratio,
+            },
+            "requirements": {
+                "minimum_rootfs_size_mib": image_item.minimum_rootfs_size_mib,
+            },
+            "timestamps": {
+                "pulled_at": image_item.pulled_at,
+                "created_at": image_item.created_at,
+                "updated_at": image_item.updated_at,
+            },
+        }
 
     @staticmethod
     def set_default(

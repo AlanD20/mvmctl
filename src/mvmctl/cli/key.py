@@ -21,26 +21,11 @@ else:
     KeyInput = _KeyInput
     KeyCreateInput = _KeyCreateInput
 from mvmctl.cli._completion import _complete_key_names
-from mvmctl.utils._io import (
-    print_error,
-    print_info,
-    print_inspect_header,
-    print_key_value,
-    print_section_header,
-    print_success,
-    print_table,
-)
-from mvmctl.utils.cli import CliUtils, handle_errors
-from mvmctl.utils.common import CommonUtils
-from mvmctl.utils.crypto import HashGenerator
-
-if TYPE_CHECKING:
-    from mvmctl.models import SSHKeyItem
+from mvmctl.utils.cli import handle_errors, mvm_cli
 
 key_app = typer.Typer(
     help="SSH key management",
     no_args_is_help=True,
-    rich_markup_mode=None,
     add_completion=False,
 )
 
@@ -64,7 +49,7 @@ def key_ls(
         return
 
     if not keys:
-        print_info(
+        mvm_cli.info(
             "No keys found. Use 'mvm key create <name>' or "
             "'mvm key add <name> <path>' to add one."
         )
@@ -72,19 +57,18 @@ def key_ls(
 
     rows: list[list[str]] = []
     for k in keys:
-        is_default = k.is_default
-        marker = CommonUtils._get_combined_marker(is_default, not k.is_present)
         rows.append(
             [
                 k.fingerprint,
-                f"{marker}{k.name}",
+                mvm_cli.format_marker(k.is_default),
+                mvm_cli.format_name(k.name, not k.is_present),
                 k.algorithm,
-                CommonUtils.human_readable_datetime(k.created_at),
+                mvm_cli.format_timestamp(k.created_at),
             ]
         )
 
-    print_table(
-        columns=["Fingerprint", "Name", "Algorithm", "Added"],
+    mvm_cli.table(
+        columns=["Fingerprint", "", "Name", "Algorithm", "Added"],
         rows=rows,
     )
 
@@ -101,11 +85,11 @@ def key_add(
     """Add an existing public key to the cache."""
     result = KeyOperation.add(name=name, pub_key_path=path, overwrite=force)
     if result.is_error:
-        print_error(result.message or f"Add failed: {name}")
+        mvm_cli.error(result.message or f"Add failed: {name}")
         raise typer.Exit(code=1)
     assert result.item is not None
-    print_success(
-        f"Added: {result.item.name} (ID: {HashGenerator.shorten(result.item.id)})"
+    mvm_cli.success(
+        f"Added: {result.item.name} (ID: {mvm_cli.format_id(result.item.id)})"
     )
 
 
@@ -130,10 +114,10 @@ def key_create(
 ) -> None:
     """Generate a new SSH keypair."""
     if algorithm is None:
-        print_info("Select algorithm:")
-        print_info("  1. ed25519")
-        print_info("  2. rsa")
-        print_info("  3. ecdsa")
+        mvm_cli.info("Select algorithm:")
+        mvm_cli.info("  1. ed25519")
+        mvm_cli.info("  2. rsa")
+        mvm_cli.info("  3. ecdsa")
         choice = typer.prompt("Enter number", default="1")
         algo_map = {"1": "ed25519", "2": "rsa", "3": "ecdsa"}
         algorithm = algo_map.get(choice.strip(), "ed25519")
@@ -149,10 +133,10 @@ def key_create(
     )
     result = KeyOperation.create(inputs)
     if result.is_error:
-        print_error(result.message or f"Create failed: {name}")
+        mvm_cli.error(result.message or f"Create failed: {name}")
         raise typer.Exit(code=1)
     assert result.item is not None
-    print_success(
+    mvm_cli.success(
         f"Created: {result.item.name} (ID: {result.item.fingerprint})"
     )
 
@@ -174,7 +158,7 @@ def key_rm(
     """Remove one or more SSH keys."""
     effective_names: list[str] = list(names) if names else []
     if not effective_names:
-        print_error("Provide at least one key name to remove")
+        mvm_cli.error("Provide at least one key name to remove")
         raise typer.Exit(code=1)
 
     inputs = KeyInput(name=effective_names)
@@ -182,9 +166,9 @@ def key_rm(
     for r in result.items:
         item_name = r.item.name if r.item else "unknown"
         if r.is_ok:
-            print_success(f"Removed: {item_name}")
+            mvm_cli.success(f"Removed: {item_name}")
         else:
-            print_error(r.message or f"Remove failed: {item_name}")
+            mvm_cli.error(r.message or f"Remove failed: {item_name}")
 
 
 @key_app.command(
@@ -198,43 +182,19 @@ def key_inspect(
         None, help="Key name or ID", autocompletion=_complete_key_names
     ),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-    tree: bool = typer.Option(False, "--tree", help="Output in tree format"),
 ) -> None:
     """Inspect an SSH key."""
-    name = CliUtils.check_name_arg(ctx, name)
+    name = mvm_cli.check_name_arg(ctx, name)
     inputs = KeyInput(name=[name])
 
+    info = KeyOperation.inspect(inputs)
+
     if json_output:
-        result = KeyOperation.inspect(inputs, is_json=True)
-        typer.echo(json.dumps(result, indent=2, default=str))
+        typer.echo(json.dumps(info, indent=2, default=str))
         return
 
-    key_item = KeyOperation.get(inputs)
-
-    if tree:
-        _print_key_details_tree(key_item)
-        return
-
-    print_inspect_header(f"Key: {key_item.name}")
-    print_section_header("BASIC INFO")
-    print_key_value("ID", HashGenerator.shorten(key_item.id))
-    print_key_value("Name", key_item.name)
-    print_key_value("Fingerprint", key_item.fingerprint)
-    print_key_value("Algorithm", key_item.algorithm)
-    print_key_value("Comment", key_item.comment)
-    print_section_header("FILES")
-    print_key_value("Public Key", key_item.public_key_path)
-    if key_item.private_key_path:
-        print_key_value("Private Key", key_item.private_key_path)
-    print_section_header("STATUS")
-    print_key_value("Default", "True" if key_item.is_default else "False")
-    print_key_value("Present", "True" if key_item.is_present else "False")
-    print_key_value(
-        "Created", CommonUtils.human_readable_datetime(key_item.created_at)
-    )
-    print_key_value(
-        "Updated", CommonUtils.human_readable_datetime(key_item.updated_at)
-    )
+    key_name = info.get("key", {}).get("name", name)
+    mvm_cli.print_dict_tree(info, title=f"Key: {key_name}")
 
 
 @key_app.command(name="export")
@@ -250,16 +210,16 @@ def key_export(
     ),
 ) -> None:
     """Export a keypair to a directory."""
-    name = CliUtils.check_name_arg(ctx, name)
+    name = mvm_cli.check_name_arg(ctx, name)
     inputs = KeyInput(name=[name])
     result = KeyOperation.export(inputs, destination=out, overwrite=force)
     if result.is_error:
-        print_error(result.message or f"Export failed: {name}")
+        mvm_cli.error(result.message or f"Export failed: {name}")
         raise typer.Exit(code=1)
     assert result.item is not None
     private_path, public_path = result.item
-    print_success(f"Exported: {private_path}")
-    print_info(f"Exported public key to {public_path}")
+    mvm_cli.success(f"Exported: {private_path}")
+    mvm_cli.info(f"Exported public key to {public_path}")
 
 
 @key_app.command(name="default")
@@ -276,53 +236,22 @@ def key_set_default(
     if clear:
         clear_result = KeyOperation.clear_defaults()
         if clear_result.is_error:
-            print_error(clear_result.message or "Clear defaults failed")
+            mvm_cli.error(clear_result.message or "Clear defaults failed")
             raise typer.Exit(code=1)
-        print_success("Cleared: all default keys")
+        mvm_cli.success("Cleared: all default keys")
         return
 
     effective_names: list[str] = list(names) if names else []
     if not effective_names:
-        print_error("Provide at least one key name or use --clear")
+        mvm_cli.error("Provide at least one key name or use --clear")
         raise typer.Exit(code=1)
 
     inputs = KeyInput(name=effective_names)
     set_result = KeyOperation.set_default(inputs)
     if set_result.is_error:
-        print_error(set_result.message or "Set default failed")
+        mvm_cli.error(set_result.message or "Set default failed")
         raise typer.Exit(code=1)
-    print_success(f"Default key(s) set: {', '.join(effective_names)}")
-
-
-def _print_key_details_tree(info: SSHKeyItem) -> None:
-    """Print key details in tree format."""
-    print(f"{info.name}")
-
-    tree_lines = [
-        f"├── ID:           {HashGenerator.shorten(info.id)}",
-        f"├── Name:         {info.name}",
-        f"├── Fingerprint:  {info.fingerprint}",
-        f"├── Algorithm:    {info.algorithm}",
-        f"├── Comment:      {info.comment}",
-        f"├── Public Key:   {info.public_key_path}",
-    ]
-    if info.private_key_path:
-        tree_lines.append(f"├── Private Key:  {info.private_key_path}")
-    tree_lines.append(
-        f"├── Default:      {'True' if info.is_default else 'False'}"
-    )
-    tree_lines.append(
-        f"├── Present:      {'True' if info.is_present else 'False'}"
-    )
-    tree_lines.append(
-        f"├── Created:      {CommonUtils.human_readable_datetime(info.created_at)}"
-    )
-    tree_lines.append(
-        f"└── Updated:      {CommonUtils.human_readable_datetime(info.updated_at)}"
-    )
-
-    for line in tree_lines:
-        print(line)
+    mvm_cli.success(f"Default key(s) set: {', '.join(effective_names)}")
 
 
 __all__ = ["key_app"]

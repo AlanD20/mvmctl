@@ -1288,8 +1288,8 @@ class VMOperation:
         return resolved.vms[0]
 
     @staticmethod
-    def inspect(inputs: VMInput, tree: bool = False) -> dict[str, Any]:
-        """Inspect a VM with enriched data and optional tree output."""
+    def inspect(inputs: VMInput) -> dict[str, Any]:
+        """Inspect a VM with enriched data and grouped dict output."""
         db = Database()
         resolved = VMRequest(inputs=inputs, db=db).resolve()
         if len(resolved.vms) != 1:
@@ -1333,101 +1333,59 @@ class VMOperation:
             vm_dir / vm.serial_output_path if vm.serial_output_path else None
         )
 
-        if tree:
-            return {
-                "vm": {
-                    "name": vm.name,
-                    "id": vm.id,
-                    "status": vm.status,
-                    "pid": vm.pid,
-                    "exit_code": vm.exit_code,
-                    "ssh_keys": vm.ssh_keys,
-                    "ssh_user": vm.ssh_user,
-                },
-                "resources": {
-                    "vcpus": vm.vcpu_count,
-                    "mem": vm.mem_size_mib,
-                    "disk": vm.disk_size_mib,
-                },
-                "networking": {
-                    "ipv4": vm.ipv4,
-                    "mac": vm.mac,
-                    "network_name": network.name if network else None,
-                    "tap_device": vm.tap_device,
-                },
-                "assets": {
-                    "image_name": image.name if image else None,
-                    "kernel_version": kernel.version if kernel else None,
-                    "binary_name": binary.name if binary else None,
-                },
-                "filesystem": {
-                    "vm_dir": str(vm_dir),
-                    "rootfs_path": str(rootfs_path),
-                    "config_path": str(config_path) if config_path else None,
-                    "log_path": str(log_path) if log_path else None,
-                    "serial_output_path": str(serial_output_path)
-                    if serial_output_path
-                    else None,
-                },
-                "console": {
-                    "relay_running": relay_running,
-                    "relay_pid": relay_pid,
-                    "relay_socket_path": relay_socket_path,
-                },
-                "volumes": [
-                    {
-                        "id": v.id,
-                        "name": v.name,
-                        "size": v.size_bytes,
-                        "format": v.format,
-                        "status": v.status,
-                    }
-                    for v in (vm.volumes or [])
-                ],
-            }
-
-        # Flat mode — enriched dict
         return {
-            "id": vm.id,
-            "name": vm.name,
-            "status": vm.status,
-            "ipv4": vm.ipv4,
-            "mac": vm.mac,
-            "vcpus": vm.vcpu_count,
-            "mem_mib": vm.mem_size_mib,
-            "disk_mib": vm.disk_size_mib,
-            "image_id": vm.image_id,
-            "image_name": image.name if image else None,
-            "kernel_id": vm.kernel_id,
-            "kernel_version": kernel.version if kernel else None,
-            "network_id": vm.network_id,
-            "network_name": network.name if network else None,
-            "binary_id": vm.binary_id,
-            "binary_name": binary.name if binary else None,
-            "tap_device": vm.tap_device,
-            "pid": vm.pid,
-            "exit_code": vm.exit_code,
-            "created_at": vm.created_at,
-            "updated_at": vm.updated_at,
-            "cloud_init_mode": vm.cloud_init_mode,
-            "nocloud_net_port": vm.nocloud_net_port,
-            "nocloud_net_pid": vm.nocloud_net_pid,
-            "pci_enabled": vm.pci_enabled,
-            "enable_console": vm.enable_console,
-            "enable_logging": vm.enable_logging,
-            "enable_metrics": vm.enable_metrics,
-            "vm_dir": str(vm_dir),
-            "rootfs_path": str(rootfs_path),
-            "config_path": str(config_path) if config_path else None,
-            "log_path": str(log_path) if log_path else None,
-            "serial_output_path": str(serial_output_path)
-            if serial_output_path
-            else None,
-            "relay_running": relay_running,
-            "relay_pid": relay_pid,
-            "relay_socket_path": relay_socket_path,
-            "ssh_keys": vm.ssh_keys,
-            "ssh_user": vm.ssh_user,
+            "vm": {
+                "name": vm.name,
+                "id": vm.id,
+                "status": vm.status,
+                "pid": vm.pid,
+                "exit_code": vm.exit_code,
+                "ssh_keys": vm.ssh_keys,
+                "ssh_user": vm.ssh_user,
+                "cloud_init_mode": vm.cloud_init_mode,
+                "nocloud_net_port": vm.nocloud_net_port,
+                "nocloud_net_pid": vm.nocloud_net_pid,
+                "pci_enabled": vm.pci_enabled,
+                "enable_console": vm.enable_console,
+                "enable_logging": vm.enable_logging,
+                "enable_metrics": vm.enable_metrics,
+                "created_at": vm.created_at,
+                "updated_at": vm.updated_at,
+            },
+            "resources": {
+                "vcpus": vm.vcpu_count,
+                "mem": vm.mem_size_mib,
+                "disk": vm.disk_size_mib,
+            },
+            "networking": {
+                "ipv4": vm.ipv4,
+                "mac": vm.mac,
+                "network_id": vm.network_id,
+                "network_name": network.name if network else None,
+                "tap_device": vm.tap_device,
+            },
+            "assets": {
+                "image_id": vm.image_id,
+                "image_name": image.name if image else None,
+                "kernel_id": vm.kernel_id,
+                "kernel_version": kernel.version if kernel else None,
+                "binary_id": vm.binary_id,
+                "binary_name": binary.name if binary else None,
+            },
+            "filesystem": {
+                "vm_dir": str(vm_dir),
+                "rootfs_path": str(rootfs_path),
+                "config_path": str(config_path) if config_path else None,
+                "log_path": str(log_path) if log_path else None,
+                "serial_output_path": str(serial_output_path)
+                if serial_output_path
+                else None,
+            },
+            "console": {
+                "relay_running": relay_running,
+                "relay_pid": relay_pid,
+                "relay_socket_path": relay_socket_path,
+            },
             "volumes": [
                 {
                     "id": v.id,

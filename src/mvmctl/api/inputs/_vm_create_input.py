@@ -79,9 +79,7 @@ class VMCreateInput:
     pci_enabled: bool | None = None
     nested_virt: bool | None = None
     cpu_template: Path | None = None
-    cpu_config: CpuConfig | None = (
-        None  # Pre-resolved CPU config (from import)
-    )
+    cpu_config: CpuConfig | None = None  # Pre-resolved CPU config (from import)
     enable_console: bool | None = None
     enable_logging: bool | None = None
     enable_metrics: bool | None = None

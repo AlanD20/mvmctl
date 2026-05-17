@@ -59,7 +59,10 @@ class CPOperation:
 
             if resolved.direction == "host_to_vm":
                 if resolved.dst_info is None or resolved.local_path is None:
-                    raise CPError("Internal error: destination VM info not available", code="cp.resolve_failed")
+                    raise CPError(
+                        "Internal error: destination VM info not available",
+                        code="cp.resolve_failed",
+                    )
 
                 total_bytes, result_message = CPService.copy_host_to_vm(
                     local_path=resolved.local_path,
@@ -73,7 +76,10 @@ class CPOperation:
 
             elif resolved.direction == "vm_to_host":
                 if resolved.src_info is None or resolved.local_path is None:
-                    raise CPError("Internal error: source VM info not available", code="cp.resolve_failed")
+                    raise CPError(
+                        "Internal error: source VM info not available",
+                        code="cp.resolve_failed",
+                    )
 
                 total_bytes, result_message = CPService.copy_vm_to_host(
                     vm_ip=resolved.src_info.ip,
@@ -87,7 +93,10 @@ class CPOperation:
 
             elif resolved.direction == "vm_to_vm":
                 if resolved.src_info is None or resolved.dst_info is None:
-                    raise CPError("Internal error: source or destination VM info not available", code="cp.resolve_failed")
+                    raise CPError(
+                        "Internal error: source or destination VM info not available",
+                        code="cp.resolve_failed",
+                    )
 
                 total_bytes, result_message = CPService.copy_vm_to_vm(
                     src_ip=resolved.src_info.ip,
