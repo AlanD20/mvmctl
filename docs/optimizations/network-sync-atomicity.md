@@ -12,12 +12,12 @@ This is important because firewall rule persistence to system files (iptables-sa
 
 ## How It Works — Three Phases
 
-`NetworkOperation.sync()` at `src/mvmctl/api/network_operations.py:612` orchestrates three phases for each network:
+`NetworkOperation.sync()` in `src/mvmctl/api/network_operations.py` orchestrates three phases for each network:
 
 ### Phase 1: Bridge Restoration (Post-Reboot Recovery)
 
 ```
-network_operations.py:652-664
+NetworkOperation.sync() → bridge restoration phase
 ```
 
 For each network, if the bridge interface does not exist on the host, it is recreated with its correct IP address, and NAT rules are re-applied. This handles the common case where a host reboot destroys all kernel networking state but leaves the database intact.

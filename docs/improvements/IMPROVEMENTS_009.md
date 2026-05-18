@@ -1,12 +1,12 @@
 # Daemonless Production Readiness — Host Capacity Detection, Events & Admission Control
 
-> **STATUS: Design Document — not implemented.** All improvements work identically in both daemonless and daemon modes.
-
+> **STATUS: Design Document — partially implemented.** All improvements work identically in both daemonless and daemon modes.
+>
 > | Section | Status |
 > |---------|--------|
-> | Host capacity detection (`mvm host info`) | ❌ Not implemented |
-> | HostDetector utility module | ❌ Not implemented |
-> | host_state schema extension | ❌ Not implemented |
+> | Host capacity detection (`mvm host info`) | ✅ Implemented at `cli/host.py:279` backed by `HostOperation.info()` |
+> | HostDetector utility module | ✅ Implemented at `core/host/_detector.py` |
+> | host_state schema extension | ✅ Implemented — `host_state` schema includes all capacity columns |
 > | Resource accounting table + admission control | ❌ Not implemented |
 > | Event log table + `mvm events` command | ❌ Not implemented |
 > | Rate-limited VM creation | ❌ Not implemented |
@@ -14,7 +14,12 @@
 > | sysctl tuning in `mvm host init` | ❌ Not implemented |
 > | WAL checkpointing + backup rotation | ❌ Not implemented |
 >
-> **What DOES exist (building blocks):**
+> **What IS implemented (status detail):**
+> - Host capacity detection (`mvm host info`) — ✅ Completed. CLI command at `cli/host.py:279`, API orchestration via `HostOperation.info()` / `HostOperation.refresh_capacity()`, core detection via `HostDetector` at `core/host/_detector.py`.
+> - HostDetector — ✅ Completed at `core/host/_detector.py` (no subprocess calls, reads /proc + stdlib). Three static methods: `detect_hardware()`, `detect_limits()`, `detect_resources()`. Returns `HostHardware`, `HostLimits`, `HostResources` dataclasses from `models/host.py`.
+> - `host_state` schema — ✅ Completed. Extended with CPU, memory, storage, limits columns. Populated on `mvm host init` and `mvm host info --refresh`.
+>
+> **What DOES exist (building blocks, additional context):**
 > - SQLite with WAL mode, busy_timeout, foreign keys ✅
 > - Database migration system + snapshot/rollback ✅
 > - PID-based VM state tracking ✅
@@ -22,7 +27,7 @@
 > - Operation class structure with clean separation ✅
 > - Existing `HostOperation`, `HostService`, `HostStateItem` ✅
 >
-> **Last verified:** 2026-05-17
+> **Last verified:** 2026-05-18
 
 ---
 
@@ -185,7 +190,7 @@ The result is labeled: "Assumes ~512 MiB guest RAM per VM. Actual capacity depen
 
 ### 2.6 HostDetector Utility Module
 
-**Location:** `src/mvmctl/utils/_host_detector.py`
+**Location:** `src/mvmctl/core/host/_detector.py`
 
 ```python
 @dataclass
@@ -239,7 +244,7 @@ class HostDetector:
                          limits: HostLimits) -> HostResources: ...
 ```
 
-File follows the project's existing `utils/_xxx.py` pattern (see `_system.py`, `_disk.py`, `_io.py`). Uses only `pathlib`, `re`, `os`, `socket`, `platform`, `shutil`. Not imported eagerly — consumed via lazy import through `mvmctl.utils`.
+File follows the project's `core/{domain}/_detector.py` pattern (part of the host domain in `core/host/`). Uses only `pathlib`, `re`, `os`, `socket`, `platform`, `shutil`. Not imported eagerly — consumed via lazy import through `mvmctl.core.host`.
 
 ### 2.7 `host_state` Schema Extension
 
@@ -602,7 +607,7 @@ def daemon_main():
 
 | Step | Files | Effort |
 |------|-------|--------|
-| Create `src/mvmctl/utils/_host_detector.py` | New file | 1 day |
+| Create `src/mvmctl/core/host/_detector.py` | New file | 1 day |
 | Extend `host_state` schema + `HostStateItem` | `db/migrations/001_initial_schema.sql`, `models/host.py` | 0.5 day |
 | Add `mvm host info` CLI command | `cli/host.py` | 0.5 day |
 | Add `--json` output formatter | `cli/host.py` | 0.5 day |

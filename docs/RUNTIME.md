@@ -31,7 +31,7 @@ Provisioning backends handle root filesystem operations: resizing, SSH key injec
   VMProvisioner → ProvisionerBackend.get_vm() → _LoopMountBackend → LoopMountProvisioner → LoopMountManager → mvm-provision binary (subprocess via sudo -n)
   ```
 - **Speed:** ~200ms per VM (full provisioning: SSH keys, DNS, hostname, resize)
-- **Dependencies:** `losetup`, `mount`, `umount`, `blkid`, `chroot`, `resize2fs`, `e2fsck`, `tune2fs`, `btrfs` (stdlib-only Python in the compiled binary)
+- **Dependencies:** `losetup`, `mount`, `umount`, `blkid`, `blockdev`, `chroot`, `resize2fs`, `e2fsck`, `tune2fs`, `fstrim`, `btrfs` (stdlib-only Python in the compiled binary)
 - **Sudo:** Requires passwordless sudo for `mvm-provision` (via `mvm host init`)
 - **Communication:** JSON operation list on stdin, JSON results on stdout
 - **Capabilities:**

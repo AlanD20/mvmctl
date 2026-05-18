@@ -107,9 +107,9 @@ with ConsoleRelayClient(socket_path) as client:
    PID/socket files                   PTY ◄──► Socket
 ```
 
-- **Manager** (parent process): Handles lifecycle, monitors health
-- **Process** (subprocess): Bidirectional relay loop
-- Only ONE client can connect to socket at a time
+- **Manager** (parent process): Handles lifecycle, monitors health. Uses `subprocess.Popen()` with `pass_fds=[pty_controller_fd]` to pass the PTY file descriptor to the child — a deliberate exception from the usual `run_cmd()` convention.
+- **Process** (subprocess): Bidirectional relay loop. Two modes: compiled binary (`mvm-console-relay`) or Python fallback (`python -m mvmctl.services.console_relay.process`).
+- Only ONE client can connect to the socket at a time; additional clients are queued (backlog=1) and served FIFO when the current client disconnects.
 
 ### Data Flow
 
@@ -122,13 +122,18 @@ with ConsoleRelayClient(socket_path) as client:
 
 ## Configuration
 
-All timeouts and filenames are configurable via `_defaults.py`:
+Settings are split across two files:
+
+### `_defaults.py` — Service-specific settings
 
 ```python
 # Timing
 CONST_CONSOLE_KILL_TIMEOUT_S = 2.0      # Seconds before SIGKILL
 CONST_CONSOLE_SELECT_TIMEOUT_S = 0.1    # Select loop timeout
 CONST_CONSOLE_READ_BUFFER_SIZE = 4096   # Read buffer size
+
+# Socket
+CONST_CONSOLE_SOCKET_BACKLOG = 1        # Max pending connections (queued, not rejected)
 
 # Files (customizable per-manager)
 DEFAULT_CONSOLE_PID_FILENAME = "console.pid"
@@ -137,6 +142,12 @@ DEFAULT_CONSOLE_LOG_FILENAME = "firecracker.console.log"
 
 # Client
 CONST_CONSOLE_DETACH_SEQUENCE = b"\x18d"  # Ctrl+X, then 'd'
+```
+
+### `constants.py` — Global socket timeout
+
+```python
+CONST_CONSOLE_SOCKET_TIMEOUT_S = 2.0    # CLI socket connect timeout
 ```
 
 ## Exceptions
@@ -160,4 +171,6 @@ CONST_CONSOLE_DETACH_SEQUENCE = b"\x18d"  # Ctrl+X, then 'd'
 - Console output is **always** logged to `firecracker.console.log`
 - Socket is Unix domain (not TCP) for security
 - Relay auto-cleans PID/socket files on exit
-- Single client at a time - others will be rejected
+- Single client at a time — additional clients are queued (backlog=1) and served FIFO when the current client disconnects
+- The manager spawns the relay process with `subprocess.Popen()` and `pass_fds=[pty_controller_fd]` (a legitimate exception to the `run_cmd()` convention, needed for passing PTY file descriptors to child processes)
+- The relay supports two modes: compiled binary (`mvm-console-relay`) and Python fallback (`python -m mvmctl.services.console_relay.process`)

@@ -1,23 +1,25 @@
 # `mvm cp` — Tar-Over-SSH File Copy for MicroVMs
 
-> **STATUS: Design Document — not implemented.**
-
+> **STATUS: IMPLEMENTED — all features completed.**
+>
 > | Section | Status |
 > |---------|--------|
-> | CLI command (`mvm cp`) | ❌ Not implemented |
-> | API layer (`CPOperation`) | ❌ Not implemented |
-> | Input classes (`CPInput`/`CPRequest`/`ResolvedCPInput`) | ❌ Not implemented |
-> | Core service (`CPService` in `core/ssh/_cp.py`) | ❌ Not implemented |
-> | Exception hierarchy (under SSHError) | ❌ Not implemented |
-> | main.py registration | ❌ Not implemented |
+> | CLI command (`mvm cp`) | ✅ Implemented at `cli/cp.py` — Typer app with `--user`, `--key`, `--force`, Rich progress bar |
+> | API layer (`CPOperation`) | ✅ Implemented at `api/cp_operations.py` — `CPOperation.copy()` with host→VM, VM→host, VM→VM |
+> | Input classes (`CPInput`/`CPRequest`/`ResolvedCPInput`) | ✅ Implemented at `api/inputs/_cp_input.py` — `CPInput`, `CPRequest`, `ResolvedCPInput`, `ResolvedCPInfo` |
+> | Core service (`CPService` in `core/ssh/_cp.py`) | ✅ Implemented — full tar-over-SSH with progress, GNU/BusyBox tar detection |
+> | Exception hierarchy (under SSHError) | ✅ Implemented — `CPError`, `CPSourceNotFoundError`, `CPDestinationExistsError`, `CPDestinationNotDirectoryError` |
+> | main.py registration | ✅ Registered in `_COMMAND_SPECS` and `_COMMAND_ORDER` |
 >
-> **What DOES exist (building blocks):**
-> - SSH resolution via `SSHInput` + `SSHRequest` (reused for VM discovery) ✅
-> - `run_cmd()` / `stream_cmd()` for subprocess execution ✅
-> - `ASCIIProgressBar` in `utils/progress.py` ✅
-> - `tar` is POSIX-mandated — guaranteed in every Linux VM ✅
+> **Additional implementation notes:**
+> - `CPDestinationNotDirectoryError` — an extra exception beyond the original plan, raised when destination path does not end with `/` (tar-pipe cannot rename files)
+> - GNU tar extras (`--xattrs`, `--acls`, `--delay-directory-restore`) are auto-detected per host with caching
+> - SSH connection uses same hardening as other SSH commands (no StrictHostKeyChecking, batch mode, keepalive)
+> - Progress bar is Rich-based (SpinnerColumn + BarColumn + TransferSpeedColumn)
+> - Multi-source copy (e.g. `mvm cp file1.txt file2.txt dir/ my-vm:/dst/`) is fully supported
+> - Registered in `core/ssh/__init__.py`, `api/__init__.py`, and `main.py` lazy import maps
 >
-> **Last verified:** 2026-05-17
+> **Last verified:** 2026-05-18
 
 ---
 
@@ -363,6 +365,9 @@ class CPSourceNotFoundError(CPError): # new
 
 class CPDestinationExistsError(CPError): # new
     """Destination file exists and --force not set."""
+
+class CPDestinationNotDirectoryError(CPError): # new (added beyond original plan)
+    """Destination path must end with / (tar-pipe can't rename files)."""
 ```
 
 ## 9. Implementation Roadmap

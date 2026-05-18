@@ -70,7 +70,8 @@ Run the automated bump script:
 ```
 
 Files updated: `pyproject.toml`, `src/mvmctl/__init__.py`, `packaging/PKGBUILD`,
-`packaging/mvmctl.spec`, `packaging/debian/changelog`, `docs/mvm.1`, `CHANGELOG.md`
+`packaging/mvmctl.spec`, `packaging/debian/changelog`, `packaging/debian/control`,
+`docs/mvm.1`, `CHANGELOG.md`
 
 This project uses **semantic versioning** (MAJOR.MINOR.PATCH):
 - **MAJOR** — incompatible API or CLI changes
@@ -103,7 +104,7 @@ If you used `--commit` in step 2, skip to step 5. Otherwise:
 
 ```bash
 git add pyproject.toml src/mvmctl/__init__.py CHANGELOG.md docs/mvm.1 \
-       packaging/PKGBUILD packaging/mvmctl.spec packaging/debian/changelog
+       packaging/PKGBUILD packaging/mvmctl.spec packaging/debian/changelog packaging/debian/control
 git commit -m "chore: bump version to 0.2.0"
 git push origin main
 ```
@@ -133,7 +134,7 @@ The `.github/workflows/release.yml` workflow runs automatically when the tag is 
 
 | Job | Description |
 |-----|-------------|
-| **test** | All tests with 79% coverage gate |
+| **test** | All tests with 80% coverage gate |
 | **build** | Nuitka binary on `ubuntu-24.04`, SHA256 checksum, uploaded as artifact |
 | **build-deb** | `.deb` package via `dpkg-buildpackage` |
 | **build-rpm** | `.rpm` in Fedora container |

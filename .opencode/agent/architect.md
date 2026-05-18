@@ -891,6 +891,10 @@ MVMError                              # Root — carries optional code field
 ├── ConsoleError                      # Console/PTY operation failure
 ├── LogsError                         # Log read/tail failure
 ├── SSHError                          # SSH connection failure
+│   ├── CPError                       # File copy operation failure
+│   │   ├── CPSourceNotFoundError     # Source path does not exist
+│   │   ├── CPDestinationExistsError  # Destination file exists and --force not set
+│   │   └── CPDestinationNotDirectoryError  # Destination path must end with /
 ├── MVMKeyError                       # SSH key management
 │   ├── KeyExportError                # Export failure
 │   ├── KeyDependencyError            # ssh-keygen missing
@@ -910,6 +914,7 @@ MVMError                              # Root — carries optional code field
 ├── ImageAcquireError                 # Image fetch/import failure (direct child)
 ├── IPTablesTrackerError              # IPTables action failure (direct child)
 ├── VersionError                      # Version resolution failure
+├── VersionGateError                  # Binary version does not meet minimum requirement
 ├── AssetNotFoundError                # Asset not found locally/remotely
 ├── BundledAssetError                 # Bundled package asset failure
 │   └── BundledAssetNotFoundError     # Bundled file not found

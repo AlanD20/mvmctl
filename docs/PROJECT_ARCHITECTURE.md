@@ -46,6 +46,7 @@ src/mvmctl/
 │   ├── cache_operations.py                 # CacheOperation
 │   ├── config_operations.py                # ConfigOperation
 │   ├── console_operations.py               # ConsoleOperation
+│   ├── cp_operations.py                    # CPOperation — file copy via tar-over-SSH
 │   ├── init_operations.py                  # InitOperation
 │   ├── logs_operations.py                  # LogOperation
 │   ├── ssh_operations.py                   # SSHOperation
@@ -114,6 +115,7 @@ src/mvmctl/
 │   │   ├── _controller.py                   # HostController
 │   │   ├── _service.py                      # HostService
 │   │   ├── _repository.py                   # HostRepository
+│   │   ├── _detector.py                     # HostDetector (host capability detection)
 │   │   └── _helper.py                       # HostPrivilegeHelper
 │   ├── cache/                               # Cache management
 │   │   └── _service.py
@@ -186,6 +188,7 @@ src/mvmctl/
 │   ├── cache.py
 │   ├── config.py
 │   ├── console.py
+│   ├── cp.py
 │   ├── init.py
 │   ├── logs.py
 │   ├── ssh.py
@@ -258,6 +261,8 @@ src/mvmctl/
 │   ├── operation_utils.py
 │   ├── progress.py
 │   ├── template.py
+│   ├── timinglog.py
+│   ├── version.py
 │   └── yaml.py
 │
 └── py.typed                                 # PEP 561 marker — declares the package supports strict typing
@@ -583,6 +588,7 @@ vcpus: Optional[int] = typer.Option(None, "--vcpus", help="Number of vCPUs")
 | `mvm host init` | host + network | Host setup requires network initialization |
 | `mvm volume create` | volume | Single domain operation |
 | `mvm vm attach-volume` | vm + volume | Attaching a volume requires vm and volume domains |
+| `mvm cp` | ssh | File copy between host and VM uses SSH/tar — resolves VM identifiers via the ssh domain |
 
 ## File Placement Rules
 

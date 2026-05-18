@@ -38,7 +38,7 @@ The project strictly adheres to a three-layer architecture: **CLI → API → Co
 - **`api/`**: Stable public Python API boundary. Performs privilege checks, resolves DB-backed defaults when CLI passes `None`, and orchestrates multiple core domains (the ONLY layer that imports across domains).
 - **`core/`**: Isolated domain logic in subdirectories (e.g., `vm/`, `network/`, `host/`). Data-heavy domains follow a Controller, Service, Repository, and Resolver pattern. Simpler domains (cache, cloudinit, config, console, logs) may have fewer files. No cross-domain imports. No defaults. Returns data or raises typed exceptions (`MVMError`).
 - **`models/`**: Pure `@dataclass` objects containing domain data (e.g., `VMInstanceItem`, `FirecrackerConfig`, `ImageSpec`). No side effects.
-- **`utils/`**: Shared helpers (_disk, _io, _lazy_import, _system, _validators, auditlog, cli, common, crypto, fs, http, network, operation_utils, progress, template, timinglog, yaml) with no domain knowledge.
+- **`utils/`**: Shared helpers (_disk, _io, _lazy_import, _system, _validators, auditlog, cli, common, crypto, fs, http, network, operation_utils, progress, template, timinglog, version, yaml) with no domain knowledge.
 - **`db/`**: SQLite database with migration system (`migrations/001_initial_schema.sql`) for persistent state (VMs, networks, images, kernels, binaries, keys, host state, iptables rules, IP leases, volumes).
 - **`services/`**: Runtime subprocess services — `console_relay/` (PTY-to-vsock bridge), `nocloud_server/` (HTTP cloud-init datasource), and `loopmount/` (rootfs provisioning binary).
 

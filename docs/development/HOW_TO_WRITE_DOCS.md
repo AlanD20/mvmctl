@@ -45,10 +45,10 @@ When an agent is asked to audit and update all documentation, follow this exact 
 
 ### 1. Start with parallel exploration
 
-Spawn multiple `explore` agents in parallel — each responsible for a group of docs. Divide the work by doc category:
+Spawn multiple subagent instances (e.g., using the task system) for parallel exploration — each responsible for a group of docs. These are ephemeral research tasks, not separately defined agent instruction files. Divide the work by doc category:
 
-| Agent | Scope |
-|-------|-------|
+| Subagent | Scope |
+|----------|-------|
 | Explore 1 | Root docs (CONTEXT.md, AGENTS.md, README.md, CHANGELOG.md) |
 | Explore 2 | `docs/` folder (PROJECT_ARCHITECTURE.md, API.md, REFERENCES.md, TROUBLESHOOTING.md, RUNTIME.md, DEPENDENCIES.md, ASSETS_CONFIGURATIONS.md, KERNEL.md, RELEASE.md) |
 | Explore 3 | ADR docs (all docs/adr/ files — currently 0001 through 0015) |
@@ -56,7 +56,7 @@ Spawn multiple `explore` agents in parallel — each responsible for a group of 
 | Explore 5 | Agent instruction files (`.opencode/agent/*.md`) |
 | Explore 6 | Public site (`mvmctl.com`) — the path is dynamic; ask the user or use the path they provide |
 
-Each explore agent must:
+Each explore subagent instance must:
 1. Read ALL the doc files in its scope
 2. Read the relevant source code files to verify every claim
 3. Return a comprehensive per-file report listing: accurate claims, outdated/wrong claims, missing content, content to remove

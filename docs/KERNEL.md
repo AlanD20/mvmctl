@@ -112,6 +112,24 @@ mvm kernel pull --type official --keep-build-dir
 | 8. Copy & metadata | Copies `vmlinux` to kernels cache and saves metadata JSON |
 | 9. Cleanup | Removes the build directory (unless `--keep-build-dir`) |
 
+### Kernel features
+
+`mvm kernel pull` supports enabling feature groups via `--features`:
+
+```bash
+# Enable KVM paravirtualization features
+mvm kernel pull --type official --features kvm
+
+# Enable multiple features (comma-separated)
+mvm kernel pull --type official --features kvm,nftables
+```
+
+Supported feature names:
+- `kvm` — Enable KVM paravirtualization options (required for Firecracker)
+- `nftables` — Enable nftables kernel support (required for nftables firewall backend)
+
+The `--type firecracker` kernel automatically includes the `kvm` feature when the VM has nested virtualization enabled.
+
 ### Custom kernel config overlay
 
 To apply your own kernel config on top of Firecracker's defaults:

@@ -12,7 +12,8 @@ Establishes a consistent format for all user-facing messages across the CLI, eli
 | **Success (entity action)** | `"✓ Action: value"` | `"✓ Started: vm1"` |
 | **Success (multiple entities)** | `"✓ Action: val1, val2"` | `"✓ Created: vm1, vm2"` |
 | **Success (non-entity)** | Short sentence, no period | `"✓ Host initialized (3 change(s) applied)"` |
-| **Error** | `"✗ Message"` (no `Error:` title — the prefix IS the indicator) | `"✗ Start failed: vm1"` |
+| **Error** | `"✗ Error: Message"` (prefixed with `Error:` after the `✗` indicator) | `"✗ Error: Start failed: vm1"` |
+| **Error (unexpected)** | `"⚠ Unexpected Error: Message"` (yellow, for bugs or system-level failures) | `"⚠ Unexpected Error: ConnectionError: Failed to connect to socket"` |
 | **Warning** | `"! Message"` (no `Warning:` title) | `"! Binary v1.15.1 already exists"` |
 | **Info** | `"  Message"` (2-space indent) | `"  No active VMs"` |
 | **User cancellation** | `"  Aborted"` | `"  Aborted"` |
@@ -30,10 +31,15 @@ Format: `"✓ Action: identifier(s)"`
 
 ### Error messages
 
-Format: `"✗ Message"` — the `✗` prefix IS the error indicator. Do NOT include `"Error:"` or `"Failed to"` in the message text.
+Format: `"✗ Error: Message"` — the `✗ Error:` prefix replaces any manual `"Error:"` text in the message. Do NOT include `"Error:"` or `"Failed to"` in the message text itself.
 
-- `"✗ Start failed: vm1"` (not `"✗ Error: Failed to start VM 'vm1'"`)
-- `"✗ Host init failed: db locked"` (not `"✗ Error: Host initialization error: db locked"`)
+- `"✗ Error: Start failed: vm1"` (not `"✗ Error: Failed to start VM 'vm1'"`)
+- `"✗ Error: Host init failed: db locked"` (not `"✗ Error: Host initialization error: db locked"`)
+
+**Unexpected errors** (bugs, system-level failures, unhandled exceptions) use a separate format:
+- `"⚠ Unexpected Error: {ExceptionType}: {message}"` — yellow, used for unhandled exceptions caught by the `handle_errors` decorator.
+
+The `MVMCli.error(is_unexpected=True)` method in `src/mvmctl/utils/cli.py` controls which format is used. The CLI command error handler (`handle_errors` decorator) routes known `MVMError` subclasses to the regular error format and unexpected `Exception` instances to the unexpected format.
 
 ### Boolean values in inspect output
 

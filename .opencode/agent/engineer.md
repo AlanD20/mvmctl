@@ -403,6 +403,10 @@ MVMError                              # Root — carries optional code field
 ├── ConsoleError                      # Console errors
 ├── LogsError                         # Log read/tail errors
 ├── SSHError                          # SSH errors
+│   ├── CPError                       # File copy operation failure
+│   │   ├── CPSourceNotFoundError     # Source path does not exist
+│   │   ├── CPDestinationExistsError  # Destination file exists and --force not set
+│   │   └── CPDestinationNotDirectoryError  # Destination path must end with /
 ├── MVMKeyError                       # SSH key management errors
 │   ├── KeyExportError                # Export failure
 │   ├── KeyDependencyError            # ssh-keygen missing
@@ -425,6 +429,7 @@ MVMError                              # Root — carries optional code field
 ├── ImageAcquireError                 # Image fetch/import failure
 ├── IPTablesTrackerError              # IPTables action failure
 ├── VersionError                      # Version resolution failure
+├── VersionGateError                  # Binary version does not meet minimum requirement
 ├── VolumeError                       # Volume creation failure
 ├── VolumeNotFoundError               # Volume not found
 ├── ImageNotFoundError                # Image not found
@@ -523,6 +528,24 @@ subprocess.run(["iptables", ...], check=True)  # NEVER
 ```
 
 The centralized runner (`run_cmd`) provides: consistent logging of every command, privilege escalation via `require_mvm_group_membership()` + sudo prepending on the ``privileged=True`` flag, timeout enforcement, and uniform error handling.
+
+### EXCEPTION — subprocess.Popen with pass_fds
+
+There is ONE legitimate exception to the "no raw subprocess" rule: the console relay manager (`src/mvmctl/services/console_relay/manager.py`) uses `subprocess.Popen()` directly because it needs the `pass_fds=[pty_controller_fd]` argument to pass a PTY file descriptor to the child relay process. The `run_cmd()` / `stream_cmd()` helpers do not support `pass_fds`.
+
+```python
+# ✅ Legitimate exception — run_cmd() does not support pass_fds
+proc = subprocess.Popen(
+    relay_cmd,
+    stdin=subprocess.DEVNULL,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+    start_new_session=True,
+    pass_fds=[pty_controller_fd],
+)
+```
+
+Only use raw `subprocess.Popen()` when `pass_fds` is required. All other subprocess invocations MUST go through `run_cmd()` / `stream_cmd()`.
 
 ---
 

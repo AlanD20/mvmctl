@@ -166,7 +166,7 @@ Mandatory for any domain that has public CLI commands or API endpoints. No short
 *Example: `VMInput` (raw name/id/IP/MAC) -> `VMRequest(db).resolve()` (resolves to DB records, validates) -> `ResolvedVMInput` (frozen, all fields explicit, `vms: list[VMInstanceItem]`).*
 
 ### SQLite schema overview
-12 tables in `migrations/001_initial_schema.sql`: `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_leases`, `vm_instances`, `host_state`, `host_state_changes`, `iptables_rules`, `nftables_rules`, `ssh_keys`, `user_settings`. Five tables (`images`, `kernels`, `binaries`, `networks`, `ssh_keys`) have `is_default INTEGER` for default tracking. Foreign keys link VMs to assets and networks. Key constraints: `networks(name)` UNIQUE, `vm_instances(name)` UNIQUE, `ssh_keys(name)` UNIQUE, `volumes(name)` UNIQUE, `network_leases(network_id, ipv4)` UNIQUE composite. Foreign keys enabled via `PRAGMA foreign_keys = ON`.
+13 tables in `migrations/001_initial_schema.sql` (note: the migration's description comment at line 3 incorrectly says "10 tables" — it was written before `ssh_keys`, `user_settings`, and `nftables_rules` were added): `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_leases`, `vm_instances`, `host_state`, `host_state_changes`, `iptables_rules`, `nftables_rules`, `ssh_keys`, `user_settings`. Five tables (`images`, `kernels`, `binaries`, `networks`, `ssh_keys`) have `is_default INTEGER` for default tracking. Foreign keys link VMs to assets and networks. Key constraints: `networks(name)` UNIQUE, `vm_instances(name)` UNIQUE, `ssh_keys(name)` UNIQUE, `volumes(name)` UNIQUE, `network_leases(network_id, ipv4)` UNIQUE composite. Foreign keys enabled via `PRAGMA foreign_keys = ON`.
 
 **Portable reference fields** (used for export/import across environments -- never internal SHA256 IDs):
 - Images: `(os_slug, arch)` -- unique identifier across environments
@@ -196,6 +196,8 @@ The `mvm` CLI is the ONLY supported interface for all mvmctl operations. Do NOT 
 - **Keys**: Use `mvm key create/add/export`. Placing key files manually bypasses the database and cloud-init injection pipeline.
 - **Networks**: Use `mvm network create/rm/sync`. Running `ip`/`iptables` manually bypasses the firewall tracker and the network lease database.
 - **Volumes**: Use `mvm volume create/rm/resize`. Running `qemu-img`/`truncate` manually bypasses the volume database and the VM attachment tracker.
+
+**CLI aliases:** Three commands have shorter aliases for faster typing: `mvm net` is an alias for `mvm network`, `mvm img` is an alias for `mvm image`, and `mvm vol` is an alias for `mvm volume`. These are registered in the root CLI group and resolve to the same Typer sub-app.
 
 ### Provisioner Backend (LoopMount vs GuestFS — mutual exclusion)
 The project has TWO independent rootfs provisioning backends. They are **mutually exclusive** — a single VM or image operation uses exactly ONE backend, never a combination. The `guestfs_enabled` user setting is a **toggle selector**, not a preference.
@@ -299,7 +301,12 @@ MVMError                                     # Root -- carries optional code str
 ├── BinaryError                              # Binary management failure
 │   └── BinaryAlreadyExistsError             # Version already exists
 ├── VersionError                             # Version resolution failure
+├── VersionGateError                         # Binary version does not meet minimum requirement
 ├── SSHError                                 # SSH connection/config failure
+│   └── CPError                              # File copy operation failure
+│       ├── CPSourceNotFoundError            # Source path does not exist
+│       ├── CPDestinationExistsError         # Destination file exists and --force not set
+│       └── CPDestinationNotDirectoryError   # Destination path must end with /
 ├── MVMKeyError                              # SSH key management failure
 │   ├── KeyExportError                       # SSH key export failure
 │   ├── KeyDependencyError                   # ssh-keygen missing

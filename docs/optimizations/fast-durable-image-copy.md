@@ -1,8 +1,8 @@
 # Fast Durable Image Copy for microVMs
 
-> **STATUS: Current — fully accurate.** All optimizations (reflink, sparse, fdatasync) confirmed in `materialize_to()` at `src/mvmctl/core/image/_service.py:450`.
+> **STATUS: Current — fully accurate.** All optimizations (reflink, sparse, fdatasync) confirmed in `materialize_to()` in `src/mvmctl/core/image/_service.py`.
 >
-> **Note:** Line numbers in code references below match the current file.
+> **Note:** Code references below reference function/class names rather than line numbers to avoid drift.
 
 ## Overview
 

@@ -415,6 +415,7 @@ All files are under `src/mvmctl/api/`:
 | **Cache** | `cache_operations.py` | `OperationResult` | `on_progress` (init only) |
 | **Config** | `config_operations.py` | `OperationResult` | N/A |
 | **SSH** | `ssh_operations.py` | `OperationResult` | N/A |
+| **CP** | `cp_operations.py` | `OperationResult[dict[str, Any]]` | `on_progress` (bytes-chunk callback) |
 | **Console** | `console_operations.py` | `OperationResult` | N/A |
 | **Logs** | `logs_operations.py` | `OperationResult` | N/A |
 | **Init** | `init_operations.py` | `InitResult` (wizard-specific) with `NeedsInteraction` | `on_progress` threaded to cache |

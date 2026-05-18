@@ -55,10 +55,10 @@ src/mvmctl/
 ├── services/        # Runtime subprocess services (console_relay, nocloud_server, loopmount)
 stubs/               # Type stubs for external dependencies (guestfs.pyi, psutil.pyi)
 packaging/           # Distribution packaging configs (.deb, .rpm, PKGBUILD)
-scripts/             # Build & release helper scripts (build_services.py, profile_test_memory.py, run_tests.py, setup-test-environment.py)
-tests/               # 229 Python files across 5 top-level directories + root + helpers (139 unit + 20 integration + 58 system + 8 layer_compliance + 2 root + 2 helpers)
+scripts/             # Build & release helper scripts (build_services.py, profile_test_memory.py, run_tests.py, setup-test-environment.py, post-release.py, check_skip_ratio.py, check_skip_ratio_verify.py)
+tests/               # 235 Python files across 5 top-level directories + root + helpers (139 unit + 20 integration + 64 system + 8 layer_compliance + 2 root + 2 helpers)
 docs/                # Project documentation
-  ├── adr/           # 17 ADR files (15 unique ADR numbers: 0001-0015)
+  ├── adr/           # 19 ADR files (17 unique ADR numbers: 0001-0017)
   ├── analyses/      # Technical analyses
   ├── development/   # Development guides
   ├── implementations/ # Implementation plans
@@ -83,6 +83,7 @@ User → mvm → main.py → cli/*.py → api/*.py → core/*.py → models/ + u
 | Network setup | `src/mvmctl/core/network/` (domain logic) + `src/mvmctl/api/network_operations.py` (orchestration) |
 | Volume management | `src/mvmctl/core/volume/` (domain logic) + `src/mvmctl/api/volume_operations.py` (orchestration) |
 | Host init / privilege | `src/mvmctl/core/host/` (domain logic) + `src/mvmctl/api/host_operations.py` (orchestration) |
+| File copy (cp) | `src/mvmctl/cli/cp.py` + `src/mvmctl/api/cp_operations.py` (orchestration via SSH) |
 | Privilege checks | `src/mvmctl/core/host/_helper.py` (HostPrivilegeHelper) |
 | Asset management | `src/mvmctl/core/_shared/_asset_manager.py` |
 | CLI commands | `src/mvmctl/cli/` (thin Typer commands, registered in `main.py:_COMMAND_SPECS`) |

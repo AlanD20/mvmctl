@@ -646,6 +646,58 @@ mvm ssh <vm-name> --cmd "ps aux | grep dhcpcd | grep -v grep"
 
 ---
 
+## `mvm cp` errors
+
+### CPError: Source path does not exist (`CPSourceNotFoundError`)
+
+**Symptom:** File copy fails with "Source path does not exist".
+
+**Solution:**
+- Verify the source file or directory exists on the local filesystem or VM
+- For VM paths, check that `vm_name:/path` uses the correct VM name and path
+- Use absolute paths to avoid ambiguity
+
+### CPError: Destination file exists (`CPDestinationExistsError`)
+
+**Symptom:** Copy fails with "Destination file exists" when the target already has a file.
+
+**Solution:**
+```bash
+# Use --force to overwrite
+mvm cp --force ./myfile.txt my-vm:/root/
+
+# Or remove the existing file first
+mvm ssh my-vm --cmd "rm /root/myfile.txt"
+```
+
+### CPError: Destination path must be a directory (`CPDestinationNotDirectoryError`)
+
+**Symptom:** Host → VM copy fails with "Destination path must be a directory".
+
+**Solution:**
+Ensure the destination ends with `/` for host → VM copies:
+```bash
+# ✅ Correct — destination ends with /
+mvm cp ./myfile.txt my-vm:/root/
+
+# ❌ Wrong
+mvm cp ./myfile.txt my-vm:/root/myfile.txt
+```
+
+> The tar-pipe protocol used by `mvm cp` writes into a directory and cannot rename
+> the output file. Always use a directory destination (ending with `/`) for host → VM copies.
+
+### CPError: VM not found or has no IP
+
+**Symptom:** Copy fails with "Could not resolve VM" or "VM has no IP address".
+
+**Solution:**
+- Verify the VM name is correct: `mvm vm ls`
+- Check the VM is running and has an IP assigned: `mvm vm inspect <name>`
+- The VM must be in RUNNING state with a valid IP for file copy to work
+
+---
+
 ## Debug mode
 
 For more detailed error output, use the built-in CLI flags or the environment variable:

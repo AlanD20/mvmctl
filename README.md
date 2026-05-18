@@ -132,16 +132,23 @@ mvm vm rm myvm
 
 ## Essential Commands
 
+> **Shortcuts:** `net` is an alias for `network`, `img` for `image`, and `vol` for `volume`.
+> E.g. `mvm net ls`, `mvm img pull ubuntu:24.04`, `mvm vol ls`.
+
 ### VM Lifecycle
 
 ```bash
-mvm vm create myvm --image ubuntu:24.04   # Create and start a VM
-mvm vm create cluster --count 3 --atomic   # Batch-create 3 VMs
-mvm vm ls                                         # List all VMs
-mvm vm ps                                         # List running VMs (active processes)
-mvm ssh myvm                                      # SSH into a VM
-mvm console myvm                                  # Console access (no SSH)
-mvm vm rm myvm -f                                   # Remove a VM
+mvm vm create myvm --image ubuntu:24.04       # Create and start a VM
+mvm vm create cluster --count 3 --atomic      # Batch-create 3 VMs
+mvm vm ls                                     # List all VMs
+mvm vm ps                                     # List running VMs (active processes)
+mvm ssh myvm                                  # SSH into a VM
+mvm console myvm                              # Console access (no SSH)
+mvm cp ./file.txt my-vm:/root/                # Copy files to/from a VM
+mvm vm rm myvm -f                             # Remove a VM
+```
+
+Also includes: `mvm vm start`, `stop`, `reboot`, `pause`, `resume`, `snapshot`, `load`, `inspect`, `export`, `import`, `attach-volume`, `detach-volume`.
 
 ### Network Management
 

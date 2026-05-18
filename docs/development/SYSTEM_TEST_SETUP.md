@@ -114,7 +114,7 @@ uv sync --group dev --group build
 python scripts/build_services.py
 
 # Build the onefile mvm binary (required for host clean/reset tests)
-uv run scripts/build_release.py --binary-only
+python scripts/build_services.py
 cp dist/mvm ~/.local/bin/mvm
 ```
 
@@ -142,7 +142,7 @@ groups
 ```bash
 # Initialize mvmctl (creates DB, caches, iptables chains)
 # Use the built binary for proper sudo handling:
-sudo ~/.local/bin/mvm host init
+sudo ~/.local/bin/mvm init
 
 # Verify initialization:
 mvm host ls --json

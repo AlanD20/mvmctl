@@ -66,8 +66,13 @@ mvmctl/
 ├── tests/
 │   ├── unit/                # Unit tests — 119 files
 │   ├── integration/         # Workflow tests — 18 files
-│   ├── system/              # Full-stack tests — 20 files (KVM/root not required)
-│   └── layer_compliance/    # Architecture constraint verification — 7 files
+│   ├── system/              # Full-stack tests — 24 files (KVM/root not required)
+│   │   ├── bin/, cache/, cli/, config/, console/
+│   │   ├── cp/, full_journeys/, host/, images/, init/
+│   │   ├── invariants/, kernel/, keys/, logs/, network/
+│   │   ├── ssh/, vm/ (lifecycle, nested_virt, snapshot_load),
+│   │   ├── volume/ (volume, volume_hotplug), zzz_destructive/
+│   └── layer_compliance/    # Architecture constraint verification — 8 files
 ├── pyproject.toml
 └── README.md
 ```
@@ -407,11 +412,14 @@ task unlink-guestfs
 The project ships a self-contained single-file binary built with Nuitka for high performance. Use the build script:
 
 ```bash
-python scripts/build_services.py --fast     # Development build (~50 MB)
-python scripts/build_services.py --release  # Production build (~35 MB, default)
+python scripts/build_services.py                    # Build everything (default)
+python scripts/build_services.py --services         # Build all service binaries only
+python scripts/build_services.py --service <name>   # Build a specific service binary
 ./dist/mvm --version
 ./dist/mvm --help
 ```
+
+The build script always uses the same release-quality settings (LTO, anti-bloat, deployment mode) regardless of which flags are passed — the flags only control **what** to build, not **how**.
 
 The GitHub Actions `release.yml` workflow runs Nuitka automatically on every tagged release and uploads the binary as a release asset.
 

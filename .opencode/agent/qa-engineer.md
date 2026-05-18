@@ -218,17 +218,18 @@ tests/system/
 ├── cli/                 # CLI-wide edge cases (test_cli_edge_cases.py)
 ├── config/              # Configuration commands (test_config.py)
 ├── console/             # Console access (test_console.py)
+├── cp/                  # File copy tests (test_cp.py)
 ├── full_journeys/       # Cross-domain end-to-end workflows (test_full_journeys.py)
 ├── host/                # Host configuration (test_host.py)
 ├── images/              # Image management (test_images.py)
 ├── init/                # Init wizard (test_init.py)
 ├── invariants/          # Cross-cutting concerns (test_invariants.py)
-├── kernel/              # Kernel management (test_kernel.py)
+├── kernel/              # Kernel management (test_kernel.py, test_kernel_import.py)
 ├── keys/                # SSH key management (test_keys.py)
 ├── logs/                # VM log viewing (test_logs.py)
 ├── network/             # Network management (test_network.py, test_nftables.py)
 ├── ssh/                 # SSH access (test_ssh.py)
-├── vm/                  # VM lifecycle (test_vm_lifecycle.py, test_vm_snapshot_load.py)
+├── vm/                  # VM lifecycle (test_vm_lifecycle.py, test_vm_nested_virt.py, test_vm_snapshot_load.py)
 ├── volume/              # Volume management (test_volume.py)
 └── zzz_destructive/     # Destructive cleanup (test_zzz_destructive.py) — runs LAST
 ```
@@ -262,6 +263,7 @@ TestVMCloudInit           — cloud-init modes, user-data, nocloud-net-port
 ```
 
 Tests for `vm snapshot` and `vm load` go in `tests/system/vm/test_vm_snapshot_load.py`.
+Tests for nested virtualization features go in `tests/system/vm/test_vm_nested_virt.py`.
 Tests for the `logs` CLI command go in `tests/system/logs/test_logs.py`.
 Tests for `console` CLI commands go in `tests/system/console/test_console.py`.
 These follow the same class naming convention.
@@ -440,6 +442,7 @@ Run tests in dependency order to surface failures early:
 4. `tests/system/init/test_init.py` — init wizard
 5. `tests/system/host/test_host.py` — host status checks, host clean/reset safety
 6. `tests/system/kernel/test_kernel.py` — kernel list/inspect/remove
+7. `tests/system/kernel/test_kernel_import.py` — kernel import
 
 **Phase 2 — Network-dependent (needs real bridges):**
 7. `tests/system/network/test_network.py` — network CRUD
@@ -447,13 +450,16 @@ Run tests in dependency order to surface failures early:
 
 **Phase 3 — KVM-dependent (needs real VMs):**
 9. `tests/system/images/test_images.py` — image pull/list/inspect
-10. `tests/system/console/test_console.py` — console state/kill
-11. `tests/system/logs/test_logs.py` — log streaming
-12. `tests/system/ssh/test_ssh.py` — SSH into running VM
-13. `tests/system/vm/test_vm_lifecycle.py` — full lifecycle
-14. `tests/system/vm/test_vm_snapshot_load.py` — snapshot/load
-15. `tests/system/full_journeys/test_full_journeys.py` — end-to-end, concurrency, stress
-16. `tests/system/cli/test_cli_edge_cases.py` — CLI-wide edge cases
+10. `tests/system/volume/test_volume.py` — volume lifecycle
+11. `tests/system/console/test_console.py` — console state/kill
+12. `tests/system/logs/test_logs.py` — log streaming
+13. `tests/system/ssh/test_ssh.py` — SSH into running VM
+14. `tests/system/cp/test_cp.py` — file copy (depends on SSH + running VM)
+15. `tests/system/vm/test_vm_lifecycle.py` — full lifecycle
+16. `tests/system/vm/test_vm_nested_virt.py` — nested virtualization
+17. `tests/system/vm/test_vm_snapshot_load.py` — snapshot/load
+18. `tests/system/full_journeys/test_full_journeys.py` — end-to-end, concurrency, stress
+19. `tests/system/cli/test_cli_edge_cases.py` — CLI-wide edge cases
 
 For each file: run, fix failures, re-run, move on only when ALL tests pass.
 

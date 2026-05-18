@@ -258,6 +258,7 @@ kernel-firecracker:
 | `options.file_pattern` | Filename prefix pattern for matching tarball entries (e.g. `linux-`). |
 | `options.file_suffix` | Filename suffix for matching tarball entries (e.g. `.tar.xz`). |
 | `options.s3_version_pattern` | Regex pattern for extracting version strings from S3 listing keys (`firecracker-s3` resolver only). |
+| `features` | `dict[str, KernelFeature]` | Named feature groups of kernel config options, loaded from the `features` key in `kernels.yaml`. Each feature has `desc`, `configs` (list of CONFIG options to enable), and `requires` (list of required settings). Activatable via `--features` on `mvm kernel pull`. |
 
 ---
 
@@ -390,6 +391,7 @@ the constants relevant to asset management.
 | `HTTP_TIMEOUT_SHA256_SIDECAR_S` (standalone constant) | `constants.py` (HTTP / download) | Timeout for SHA-256 sidecar checksum fetch |
 | `FIRECRACKER_GITHUB_RELEASES_API_URL` (standalone constant) | `constants.py` (HTTP / download) | GitHub API endpoint for Firecracker releases |
 | `FIRECRACKER_GITHUB_DOWNLOAD_URL` (standalone constant) | `constants.py` (HTTP / download) | Base URL for Firecracker release assets |
+| `get_default("settings.firewall", "iptables_xtcomment")` | `settings.firewall.iptables_xtcomment` | Enable xt_comment extension for iptables rule comments (default: `True`) |
 
 > **Note:** The kernel config lists (`enabled_configs`, `disabled_configs`, `set_val_configs`,
 > `required_settings`) are defined per-kernel in `kernels.yaml`, not as module-level constants.

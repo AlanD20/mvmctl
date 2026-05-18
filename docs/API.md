@@ -64,6 +64,7 @@ from mvmctl.api import (
     ConfigOperation,
     LogOperation,
     VolumeOperation,
+    CPOperation,
     # Input classes
     VMCreateInput,
     VMInput,
@@ -83,6 +84,7 @@ from mvmctl.api import (
     SSHInput,
     ConsoleInput,
     ConsoleRequest,
+    CPInput,
     LogInput,
     VolumeCreateInput,
     VolumeInput,
@@ -142,6 +144,7 @@ if TYPE_CHECKING:
 | `SSHOperation` | SSH connection to VMs |
 | `InitOperation` | Onboarding wizard: database, host, cache, binary setup |
 | `ConsoleOperation` | Console relay: get connection info, get state, kill |
+| `CPOperation` | File copy: copy files between host and microVMs using tar-over-SSH |
 | `ConfigOperation` | User settings: get, set, reset, list all config overrides |
 | `LogOperation` | VM log streaming and retrieval |
 | `VolumeOperation` | Persistent data disk management: create, remove, list, get, inspect, resize |
@@ -193,7 +196,8 @@ Runtime state for a registered VM.
 | `disk_size_mib` | `int` | Root filesystem size in MiB |
 | `rootfs_path` | `str` | Path to rootfs image |
 | `rootfs_suffix` | `str` | Root filesystem suffix (e.g. `ext4`) |
-| `enable_pci` | `bool` | PCI device support enabled |
+| `pci_enabled` | `bool` | PCI device support enabled |
+| `nested_virt` | `bool` | Nested virtualization enabled |
 | `enable_logging` | `bool` | Logging enabled |
 | `enable_metrics` | `bool` | Metrics enabled |
 | `enable_console` | `bool` | Serial console enabled |
@@ -212,6 +216,7 @@ Runtime state for a registered VM.
 | `ssh_keys` | `list[str]` | SSH key IDs (hashes) injected into the guest |
 | `ssh_user` | `str \| None` | SSH username for this VM |
 | `volume_ids` | `list[str] \| None` | Attached volume IDs |
+| `cpu_config` | `CpuConfig \| None` | Merged CPU template configuration |
 
 **Resolved relations** (populated on request):
 
@@ -558,6 +563,7 @@ Persistent data disk attachable to VMs — maps to the `volumes` table.
 | `vm_id` | `str \| None` | VM ID this volume is attached to, or `None` |
 | `created_at` | `str` | ISO 8601 creation timestamp |
 | `updated_at` | `str` | ISO 8601 update timestamp |
+| `is_read_only` | `bool` | Whether the volume is mounted read-only |
 
 ---
 
@@ -611,6 +617,11 @@ MVMError
 ├── BinaryError               — Firecracker/jailer binary management failure
 │   └── BinaryAlreadyExistsError
 ├── SSHError                  — SSH connection or configuration failure
+│   ├── CPError               — File copy operation failure
+│   │   ├── CPSourceNotFoundError       — Source path does not exist
+│   │   ├── CPDestinationExistsError    — Destination file exists and --force not set
+│   │   └── CPDestinationNotDirectoryError — Destination path must end with /
+├── VersionGateError          — Binary version does not meet minimum requirement
 ├── MVMKeyError               — SSH key management failure
 │   ├── KeyExportError
 │   ├── KeyDependencyError
@@ -689,7 +700,7 @@ process, and registers the VM in the database.
 | `inputs.vcpu_count` | `int \| None` | `None` | Number of vCPUs |
 | `inputs.mem_size_mib` | `int \| None` | `None` | Memory in MiB |
 | `inputs.user` | `str \| None` | `None` | SSH user for cloud-init |
-| `inputs.enable_pci` | `bool \| None` | `None` | Enable PCI device support |
+| `inputs.pci_enabled` | `bool \| None` | `None` | Enable PCI device support |
 | `inputs.enable_console` | `bool \| None` | `None` | Enable serial console |
 | `inputs.enable_logging` | `bool \| None` | `None` | Enable logging |
 | `inputs.enable_metrics` | `bool \| None` | `None` | Enable metrics |
@@ -783,16 +794,13 @@ Look up a single VM by name, ID, IP, or MAC.
 
 ---
 
-#### `VMOperation.inspect(inputs: VMInput, tree: bool = False) -> dict[str, Any]`
+#### `VMOperation.inspect(inputs: VMInput) -> dict[str, Any]`
 
-Return full details for a VM as a dictionary. When `tree=True`, returns nested
-groupings (vm, resources, networking, assets, filesystem, console). When `tree=False`
-(default), returns a flat dictionary with all fields.
+Return full details for a VM as a dictionary with enriched data.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `inputs` | `VMInput` | — | Must resolve to exactly one VM |
-| `tree` | `bool` | `False` | Use nested grouping for display |
 
 ---
 
@@ -893,7 +901,7 @@ Prune VMs based on status. By default, prunes all VMs EXCEPT those in RUNNING or
 
 #### `VMOperation.attach_volume(vm_inputs: VMInput, volume_name: str) -> OperationResult[VMInstanceItem]`
 
-Attach a volume to a VM (VM must be stopped).
+Attach a volume. VM may be running (hotplug requires Firecracker v1.16+) or stopped.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -904,7 +912,7 @@ Attach a volume to a VM (VM must be stopped).
 
 #### `VMOperation.detach_volume(vm_inputs: VMInput, volume_name: str) -> OperationResult[VMInstanceItem]`
 
-Detach a volume from a VM (VM must be stopped).
+Detach a volume. VM may be running (hot-unplug requires Firecracker v1.16+) or stopped.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -972,16 +980,15 @@ Get a single network by name or ID.
 
 ---
 
-#### `NetworkOperation.inspect(inputs: NetworkInput, is_json: bool = False) -> NetworkItem | dict[str, Any]`
+#### `NetworkOperation.inspect(inputs: NetworkInput) -> dict[str, Any]`
 
-Return full details for a network, including live bridge status, leases, and iptables rules.
+Return full details for a network as a dictionary, including live bridge status, leases, and iptables rules.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `inputs` | `NetworkInput` | — | Network identifiers |
-| `is_json` | `bool` | `False` | Return a JSON-serializable dict |
 
-**Returns:** `NetworkItem` or `dict` depending on `is_json`.
+**Returns:** Full network details as a dictionary.
 
 ---
 
@@ -1127,7 +1134,7 @@ Set an image as the default.
 
 ---
 
-#### `ImageOperation.inspect(inputs: ImageInput, is_json: bool = False) -> ImageItem | dict[str, Any]`
+#### `ImageOperation.inspect(inputs: ImageInput) -> dict[str, Any]`
 
 Inspect an image with full details.
 
@@ -1173,6 +1180,7 @@ When calling the API directly, pass explicit `kernel_type` and `version`.
 | `inputs.clean_build` | `bool` | `False` | Clean before building |
 | `inputs.kernel_config` | `Path \| None` | `None` | Kernel config overlay |
 | `inputs.set_default` | `bool` | `False` | Set as default |
+| `inputs.features` | `str` | `""` | Comma-separated kernel features (e.g. `"kvm,nftables"`) |
 | `on_progress` | `Callable \| None` | `None` | Callback for progress events |
 
 **Returns:** The created `KernelItem`.
@@ -1211,7 +1219,7 @@ Get a single kernel by ID or name.
 
 ---
 
-#### `KernelOperation.inspect(inputs: KernelInput, is_json: bool = False) -> KernelItem | dict[str, Any]`
+#### `KernelOperation.inspect(inputs: KernelInput) -> dict[str, Any]`
 
 Inspect a kernel with full details.
 
@@ -1277,7 +1285,7 @@ Remove keys from the cache registry and delete their key files.
 
 ---
 
-#### `KeyOperation.inspect(inputs: KeyInput, is_json: bool = False) -> SSHKeyItem | dict[str, Any]`
+#### `KeyOperation.inspect(inputs: KeyInput) -> dict[str, Any]`
 
 Inspect a key with full details.
 
@@ -1539,6 +1547,30 @@ Open an interactive SSH session into a VM, or execute a command.
 | `inputs.timeout` | `int \| None` | `None` | SSH connection timeout in seconds |
 
 **Returns:** Exit code from the SSH session.
+
+---
+
+### `CPOperation`
+
+All methods are `@staticmethod`. File copy between host and microVMs using tar-over-SSH.
+
+#### `CPOperation.copy(inputs: CPInput, *, on_progress: Callable[[int], None] | None = None) -> OperationResult[dict[str, Any]]`
+
+Copy files between host and microVMs. Supports host → VM, VM → host, and VM → VM
+copying using tar-over-SSH. Progress is reported via the optional `on_progress` callback.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `inputs.sources` | `list[str]` | — | Source path(s); use `vm_name:/path` for VM paths |
+| `inputs.dst` | `str` | — | Destination path; use `vm_name:/path/` for VM paths |
+| `inputs.user` | `str \| None` | `None` | SSH user for VM connections |
+| `inputs.key` | `str \| None` | `None` | SSH private key path or registered key name |
+| `inputs.force` | `bool` | `False` | Overwrite existing destination files |
+| `on_progress` | `Callable \| None` | `None` | Callback receiving bytes read per chunk |
+
+**Returns:** `OperationResult[dict[str, Any]]` with `"bytes"` (total transferred) and `"message"` in the item dict.
+
+**Raises:** `CPError`, `CPSourceNotFoundError`, `CPDestinationExistsError`, `CPDestinationNotDirectoryError`.
 
 ---
 

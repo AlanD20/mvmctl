@@ -5,10 +5,10 @@
 > All architectural rules, patterns, and layer definitions documented below match the actual implementation.
 > For verification, see the 15 core domains in `src/mvmctl/core/` (list below).
 >
-> **Verification (2026-05-15):**
-> - `from __future__ import annotations` present in 195 of 197 `.py` files under `src/mvmctl/` (2 `_defaults.py` files are exempt — no code paths execute before imports)
+> **Verification (2026-05-18):**
+> - `from __future__ import annotations` present in 201 of 203 `.py` files under `src/mvmctl/` (2 `_defaults.py` files under `services/` are exempt — no code paths execute before imports)
 > - Core domains follow the Controller/Service/Repository/Resolver pattern where applicable; lighter domains use only the classes they need
-> - API layer has `*Operations` classes for all 15 domains, with `inputs/` directory containing 21 Input/Request files
+> - API layer has `*Operations` classes for all 15 domains, with `inputs/` directory containing 22 Input/Request files
 > - Core domains return `*Item` dataclasses only
 > - Controllers are stateful, single-entity; Services are stateless infrastructure
 > - Operations are `@staticmethod` orchestrators in API layer
@@ -42,7 +42,7 @@ Never mix domain implementations. Each domain (network, image, kernel, binary, e
 10. `key/` — SSH key generation and management
 11. `logs/` — VM log file management
 12. `network/` — Bridge, TAP, NAT, iptables, lease management
-13. `ssh/` — SSH client connectivity
+13. `ssh/` — SSH client connectivity (including `cp/` — tar-over-SSH file copy subdomain)
 14. `vm/` — VM lifecycle (create, start, stop, pause, resume, snapshot)
 15. `volume/` — Persistent data disk management
 
@@ -212,7 +212,7 @@ class NetworkOperation:
 
 Operation methods are `@staticmethod` — they take Input classes as arguments, create Request/Resolved internally, and orchestrate across multiple core modules.
 
-**Verified:** All 14 API operations files follow this pattern.
+**Verified:** All 15 API operations files follow this pattern.
 
 ### Rule 6: Validation Goes in Request Classes, Not Service ✅ IMPLEMENTED
 
@@ -544,6 +544,7 @@ class VMRepository:
 - **Updated:** 2026-04-30 — Fixed VMService pattern (actual bulk operations coordinator), Repository pattern types (VMInstanceItem, list_all, count_by_status), and standardized Resolved naming convention (Resolved*Input)
 - **Updated:** 2026-05-13 — Added implementation status banner, verified all rules against actual codebase, confirmed 15 domains, 14 operation classes, 21 input files, `from __future__ import annotations` compliance
 - **Updated:** 2026-05-15 — Corrected input file count (21, not 22) and annotations coverage (195/197 files)
+- **Updated:** 2026-05-18 — Updated annotations coverage (201/203 files), operation classes (15 with CPOperation), input files (22 with _cp_input.py), and added `cp` subdomain under ssh
 - **Purpose:** Generic domain implementation methodology for mvmctl (verified — reflects current codebase)
 - **Reference Domain:** network (first application — now ALL 15 domains follow this pattern)
-- **Implemented Domains:** network, key, binary, kernel, image, host, config, cache, SSH, console, logs, **volume**, **VM** (reference)
+- **Implemented Domains:** network, key, binary, kernel, image, host, config, cache, SSH (incl. cp), console, logs, **volume**, **VM** (reference)

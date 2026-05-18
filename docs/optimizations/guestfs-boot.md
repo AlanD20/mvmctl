@@ -12,7 +12,7 @@ This document describes the boot-time optimizations for the fallback libguestfs 
 
 ## Applied Optimizations ✅ IMPLEMENTED
 
-These optimizations are applied via the `GuestfsHandler` class in `src/mvmctl/core/_shared/_guestfs/_base.py`:
+These optimizations are applied via the `OptimizedGuestfs` class in `src/mvmctl/core/_shared/_guestfs/_base.py`:
 
 ### 1. Direct Backend (Environment Variable) ✅ IMPLEMENTED
 

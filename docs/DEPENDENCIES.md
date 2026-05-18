@@ -36,6 +36,18 @@ checks for them automatically.
 | `ssh-keygen` | Generating SSH keypairs for microVMs | `openssh-client` | `openssh` |
 | `tar` | Extracting rootfs from tarballs | `tar` | `tar` |
 
+**Python libraries (bundled into compiled binary; included via `uv sync` when running from source):**
+
+| Library | Purpose |
+|---------|---------|
+| `typer-slim` | CLI framework (lightweight, without Rich/Markdown deps) |
+| `rich` | Console output formatting (progress bars, tables, syntax highlighting) |
+| `pyyaml` | YAML config parsing for bundled assets (images.yaml, kernels.yaml) |
+| `jinja2` | Template rendering for cloud-init and Firecracker config generation |
+| `zstandard` | Zstandard compression/decompression of images |
+| `passlib` | Password hashing (bcrypt scheme support) |
+| `bcrypt` | BCrypt password hashing for cloud-init user data |
+
 ---
 
 ## B. Firewall Backend (Choose One)
@@ -114,6 +126,7 @@ The `mvm-provision` binary is a symlink to the combined `mvm-services` multidist
 | `resize2fs` | Growing and shrinking ext4 filesystems | `e2fsprogs` | `e2fsprogs` |
 | `tune2fs` | Reading ext4 block count for shrink calculation | `e2fsprogs` | `e2fsprogs` |
 | `btrfs` | Growing and shrinking btrfs filesystems | `btrfs-progs` | `btrfs-progs` |
+| `fstrim` | Discard unused blocks before shrink | `util-linux` | `util-linux` |
 | `chroot` | Running commands inside the mounted rootfs | `coreutils` | `coreutils` |
 
 > Most binaries (`util-linux`, `e2fsprogs`) are already required by the image pipeline (§C).
@@ -200,7 +213,7 @@ Only needed for `mvm kernel pull --type official --clean-build`.
 | `mvm kernel pull --type firecracker` | (internal Python logic — download only) |
 | `mvm key` | `create` → `ssh-keygen`; `add/ls/rm/inspect/export/default` → internal only |
 | `mvm bin` | `pull/ls/rm/default` → internal only (downloads from GitHub API) |
-| `mvm vm create` | `firecracker` + `jailer`, `ip`, `iptables`/`nft`, `mvm-provision`, `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `chroot` (+ `btrfs` for btrfs images) |
+| `mvm vm create` | `firecracker` + `jailer`, `ip`, `iptables`/`nft`, `mvm-provision`, `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `fstrim`, `chroot` (+ `btrfs` for btrfs images) |
 | `mvm vm start/stop/reboot/pause/resume` | `firecracker`, `ip`, `iptables`/`nft` |
 | `mvm vm rm` | `firecracker`, `ip`, `iptables`/`nft` |
 | `mvm vm snapshot/load` | internal (Firecracker API via Unix socket) |

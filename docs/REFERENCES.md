@@ -49,6 +49,7 @@ Host configuration. One-time, machine-global setup.
 |---------|-------|-------------|
 | `mvm host init` | --- | Apply host configuration changes. Idempotent. Creates mvm group, sudoers drop-in, enables IP forwarding, creates default network. |
 | `mvm host ls` | `--json` | Show current host configuration state vs expected |
+| `mvm host info` | `--refresh, --json` | Show host hardware, limits, and VM capacity projection |
 | `mvm host clean` | `-f, --force` | Remove all networking config (bridges, TAPs, iptables). Does not touch sysctl/group. |
 | `mvm host reset` | `-f, --force` | Full rollback: remove networking, revert sysctl, remove sudoers... |
 
@@ -80,6 +81,7 @@ Kernel management.
 | `--keep-build-dir` | Keep build directory (official only) | false |
 | `--clean-build` | Bypass cache and force clean build (official only) | false |
 | `--config PATH` | Custom kernel config fragment file | --- |
+| `--features TEXT` | Comma-separated kernel features (e.g. `kvm`, `nftables`) | --- |
 
 > **Note:** Use `mvm kernel ls -r` or `mvm kernel ls --remote` to list available versions from upstream.
 
@@ -182,6 +184,8 @@ VM lifecycle management.
 | `--nocloud-net-port N` | Port for nocloud-net HTTP server (0=auto) | auto-assign |
 | `--user-data PATH` | Path to custom cloud-init user-data file | --- |
 | `--enable-pci/--no-enable-pci` | Enable PCI device support | from config |
+| `--nested-virt/--no-nested-virt` | Enable nested virtualization (requires PCI) | from config |
+| `--cpu-template PATH` | Path to CPU template JSON file (merged with nested-virt config) | --- |
 | `--enable-logging/--no-enable-logging` | Enable Firecracker logging | from config |
 | `--enable-metrics/--no-enable-metrics` | Enable Firecracker metrics | from config |
 | `--lsm-flags FLAGS` | Linux Security Module kernel cmdline flags | from config |
@@ -219,7 +223,7 @@ Named network management.
 
 | Command | Flags | Description |
 |---------|-------|-------------|
-| `mvm network create` | `[NAME]`, `--subnet`, `--ipv4-gateway`, `--no-nat`, `--nat-gateways`, `--non-interactive` | Create a named bridge network |
+| `mvm network create` | `[NAME]`, `--subnet`, `--ipv4-gateway`, `--no-nat`, `--nat-gateways`, `--non-interactive`, `--default, -d` | Create a named bridge network |
 | `mvm network rm` | `[NAMES]...`, `-f, --force` | Remove one or more networks by name |
 | `mvm network ls` | `--json` | List all networks |
 | `mvm network inspect` | `[NAME]`, `--json`, `--tree` | Show network details and IP leases |
@@ -321,6 +325,42 @@ VM SSH access.
 
 ---
 
+### `mvm cp`
+
+Copy files between host and microVMs using tar-over-SSH.
+
+| Command | Description |
+|---------|-------------|
+| `mvm cp [OPTIONS] SOURCE... DESTINATION` | Copy files between host and microVMs |
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `SOURCE...` | Source path(s); use `vm_name:/path` for VM paths (positional, at least 2 args) | --- |
+| `DESTINATION` | Destination path; last positional arg (positional) | --- |
+| `--user, -u TEXT` | SSH user for VM connections | from config |
+| `--key PATH` | SSH private key path or registered key name | auto-detected |
+| `--force, -f` | Overwrite existing destination files | false |
+
+**Examples:**
+```
+# Copy local files to VM
+mvm cp ./myfile.txt my-vm:/root/
+
+# Copy multiple local files to VM
+mvm cp file1.txt file2.txt my-vm:/dst/
+
+# Copy file from VM to local
+mvm cp my-vm:/var/log/syslog ./syslog
+
+# Copy between VMs
+mvm cp vm1:/data/file.txt vm2:/data/
+```
+
+> **Note:** Destination must be a directory (end with `/`) for host → VM copies.
+> Multiple sources are only supported for host → VM direction.
+
+---
+
 ### `mvm volume`
 
 Persistent data disk management. Create, remove, list, inspect, and resize volumes.
@@ -340,6 +380,7 @@ Persistent data disk management. Create, remove, list, inspect, and resize volum
 | `NAME` | Volume name **(required)** | --- |
 | `SIZE` | Volume size, e.g. `10G`, `512M` **(required)** | --- |
 | `--format FORMAT` | Disk format: `raw` or `qcow2` | `raw` |
+| `--read-only` | Mount volume as read-only | writable |
 
 **`volume rm` flags:**
 
