@@ -182,9 +182,7 @@ def _list_local_images(images: list[ImageItem], *, json_output: bool) -> None:
                 mvm_cli.format_id(img.id),
                 mvm_cli.format_name(img.name, not img.is_present),
                 img.fs_type,
-                mvm_cli.format_size(size)
-                if size > 0
-                else "-",
+                mvm_cli.format_size(size) if size > 0 else "-",
                 added,
             ]
         )

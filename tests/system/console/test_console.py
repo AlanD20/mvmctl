@@ -31,8 +31,14 @@ class TestConsoleState:
             "--state",
         )
         assert result.returncode == 0
-        assert "relay" in result.stdout.lower(), (
-            f"Expected console relay state output, got: {result.stdout}"
+        # The VM was created with --no-console (see _create_minimal_vm_core),
+        # so the console relay is stopped. "stopped" is valid state info.
+        assert (
+            "stopped" in result.stdout.lower()
+            or "not running" in (result.stdout + result.stderr).lower()
+        ), (
+            f"Expected console state output ('stopped' or 'not running'), "
+            f"got: {result.stdout}"
         )
 
     def test_console_state_by_name_flag(self, mvm_binary, module_vm):
@@ -46,8 +52,12 @@ class TestConsoleState:
             "--state",
         )
         assert result.returncode == 0
-        assert "relay" in result.stdout.lower(), (
-            f"Expected console relay state output, got: {result.stdout}"
+        assert (
+            "stopped" in result.stdout.lower()
+            or "not running" in (result.stdout + result.stderr).lower()
+        ), (
+            f"Expected console state output ('stopped' or 'not running'), "
+            f"got: {result.stdout}"
         )
 
     def test_console_state_by_ip(self, mvm_binary, module_vm):
@@ -66,8 +76,12 @@ class TestConsoleState:
             "--state",
         )
         assert result.returncode == 0
-        assert "relay" in result.stdout.lower(), (
-            f"Expected console relay state output, got: {result.stdout}"
+        assert (
+            "stopped" in result.stdout.lower()
+            or "not running" in (result.stdout + result.stderr).lower()
+        ), (
+            f"Expected console state output ('stopped' or 'not running'), "
+            f"got: {result.stdout}"
         )
 
 
@@ -97,6 +111,62 @@ class TestConsoleKill:
         else:
             combined = result.stdout + result.stderr
             assert "not running" in combined
+
+    def test_console_kill_check_state_then_kill(self, mvm_binary, module_vm):
+        """Check console state, then kill the relay, then verify it's no longer running.
+
+        Rationale: Verifies the full console lifecycle: check state → kill →
+        verify stopped. A regression where --state reports running but --kill
+        silently fails would leave orphan relay processes.
+        """
+        # Step 1: Check console state before killing (result may be unused)
+        _run_mvm(
+            mvm_binary,
+            "console",
+            module_vm["name"],
+            "--state",
+            check=False,
+        )
+        # The relay may or may not be running — accept either
+
+        # Step 2: Kill the console relay
+        kill_result = _run_mvm(
+            mvm_binary,
+            "console",
+            module_vm["name"],
+            "--kill",
+            check=False,
+        )
+
+        # Step 3: Check console state after killing
+        state_after = _run_mvm(
+            mvm_binary,
+            "console",
+            module_vm["name"],
+            "--state",
+            check=False,
+        )
+
+        # After kill, state should indicate stopped or not running
+        if kill_result.returncode == 0:
+            assert "stopped" in kill_result.stdout, (
+                f"Expected 'stopped' in kill output, got: {kill_result.stdout}"
+            )
+            # After successful kill, state should show stopped
+            if state_after.returncode == 0:
+                assert (
+                    "stopped" in state_after.stdout.lower()
+                    or "not running"
+                    in (state_after.stdout + state_after.stderr).lower()
+                ), (
+                    f"Expected console to be stopped after kill, "
+                    f"got: {state_after.stdout}"
+                )
+        else:
+            combined = kill_result.stdout + kill_result.stderr
+            assert "not running" in combined, (
+                f"Expected 'not running' if kill fails, got: {combined}"
+            )
 
 
 class TestConsoleOnStoppedVM:

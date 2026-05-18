@@ -65,6 +65,7 @@ def vm_ls(
     for vm in vms:
         rows.append(
             [
+                mvm_cli.format_id(vm.id),
                 vm.name,
                 vm.status,
                 str(vm.exit_code) if vm.exit_code is not None else "-",
@@ -79,6 +80,7 @@ def vm_ls(
         )
     mvm_cli.table(
         columns=[
+            "ID",
             "Name",
             "Status",
             "Exit",

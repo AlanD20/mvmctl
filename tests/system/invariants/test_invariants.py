@@ -371,7 +371,7 @@ class TestInvariants:
             img_result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images: list[dict[str, Any]] = json.loads(img_result.stdout)
 
-            vm_image_id = vm_info.get("image_id")
+            vm_image_id = vm_info.get("assets", {}).get("image_id")
             image_ids: set[str] = {i["id"] for i in images if i.get("id")}
             assert vm_image_id in image_ids, (
                 f"VM '{vm_name}' references image_id '{vm_image_id}' "
@@ -424,7 +424,7 @@ class TestInvariants:
             kernel_result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
             kernels: list[dict[str, Any]] = json.loads(kernel_result.stdout)
 
-            vm_kernel_id = vm_info.get("kernel_id")
+            vm_kernel_id = vm_info.get("assets", {}).get("kernel_id")
             kernel_ids: set[str] = {k["id"] for k in kernels if k.get("id")}
             assert vm_kernel_id in kernel_ids, (
                 f"VM '{vm_name}' references kernel_id '{vm_kernel_id}' "
@@ -477,7 +477,7 @@ class TestInvariants:
             net_result = _run_mvm(mvm_binary, "network", "ls", "--json")
             networks: list[dict[str, Any]] = json.loads(net_result.stdout)
 
-            vm_network_id = vm_info.get("network_id")
+            vm_network_id = vm_info.get("networking", {}).get("network_id")
             network_ids: set[str] = {n["id"] for n in networks if n.get("id")}
             assert vm_network_id in network_ids, (
                 f"VM '{vm_name}' references network_id '{vm_network_id}' "
@@ -1962,7 +1962,7 @@ class TestCacheCleanSafety:
             # Verify the Firecracker process is actually running
             vm_result = _run_mvm(mvm_binary, "vm", "inspect", vm_name, "--json")
             vm_data = json.loads(vm_result.stdout)
-            vm_pid: int | None = vm_data.get("pid")
+            vm_pid: int | None = vm_data.get("vm", {}).get("pid")
             assert vm_pid is not None and os.path.exists(f"/proc/{vm_pid}"), (
                 f"Expected Firecracker PID {vm_pid} to be running before clean"
             )
@@ -2041,7 +2041,9 @@ class TestCacheCleanSafety:
             # Verify it started
             vm_result = _run_mvm(mvm_binary, "vm", "inspect", vm_name, "--json")
             vm_data = json.loads(vm_result.stdout)
-            assert vm_data.get("pid") is not None, "Expected PID after VM start"
+            assert vm_data.get("vm", {}).get("pid") is not None, (
+                "Expected PID after VM start"
+            )
 
             # Now stop the VM
             _run_mvm(mvm_binary, "vm", "stop", vm_name, "--force")
@@ -2049,11 +2051,13 @@ class TestCacheCleanSafety:
             # Verify it stopped
             vm_result = _run_mvm(mvm_binary, "vm", "inspect", vm_name, "--json")
             vm_data = json.loads(vm_result.stdout)
-            assert vm_data.get("pid") is None or vm_data.get("status") in (
+            assert vm_data.get("vm", {}).get("pid") is None or vm_data.get(
+                "vm", {}
+            ).get("status") in (
                 "stopped",
                 "created",
             ), (
-                f"Expected VM stopped, got status={vm_data.get('status')} pid={vm_data.get('pid')}"
+                f"Expected VM stopped, got status={vm_data.get('vm', {}).get('status')} pid={vm_data.get('vm', {}).get('pid')}"
             )
 
             # Run cache clean --force — should succeed

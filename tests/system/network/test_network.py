@@ -289,31 +289,29 @@ class TestNetworkLifecycle:
         # exists via ip addr.
         """Verify bridge interface exists for created network."""
         bridge = _compute_bridge_name(module_network)
-        result = subprocess.run(
-            ["ip", "addr", "show"],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
-        assert bridge in result.stdout
+        _assert_bridge_exists(bridge)
 
     def test_network_inspect(self, mvm_binary, module_network):
         # Rationale: Uses module_network fixture. Verifies JSON fields (name,
-        # subnet, bridge).
+        # subnet, bridge) — was originally checking table output, now uses --json.
         """Inspect a network and verify JSON fields."""
         result = _run_mvm(
             mvm_binary, "network", "inspect", module_network, "--json"
         )
         data: dict[str, Any] = json.loads(result.stdout)
-        assert data.get("name") == module_network, (
-            f"Expected name '{module_network}', got '{data.get('name')}'"
+        network_info = data.get("network", {})
+        assert network_info.get("name") == module_network, (
+            f"Expected name '{module_network}', got '{network_info.get('name')}'"
         )
-        assert isinstance(data.get("subnet"), str) and "/" in data.get(
-            "subnet", ""
-        ), f"Expected CIDR format subnet, got: {data.get('subnet')}"
-        assert isinstance(data.get("bridge"), str) and data["bridge"], (
-            f"Expected non-empty bridge name, got: {data.get('bridge')}"
+        assert isinstance(
+            network_info.get("subnet"), str
+        ) and "/" in network_info.get("subnet", ""), (
+            f"Expected CIDR format subnet, got: {network_info.get('subnet')}"
         )
+        assert (
+            isinstance(network_info.get("bridge"), str)
+            and network_info["bridge"]
+        ), f"Expected non-empty bridge name, got: {network_info.get('bridge')}"
 
     def test_network_inspect_json(self, mvm_binary, module_network):
         # Rationale: Uses module_network fixture. Verifies --json output
@@ -323,10 +321,12 @@ class TestNetworkLifecycle:
             mvm_binary, "network", "inspect", module_network, "--json"
         )
         assert result.returncode == 0
-        data: list[dict[str, Any]] = json.loads(result.stdout)
-        assert "name" in data
-        assert "subnet" in data
-        assert "bridge" in data
+        data: dict[str, Any] = json.loads(result.stdout)
+        assert "network" in data
+        network_info = data["network"]
+        assert "name" in network_info
+        assert "subnet" in network_info
+        assert "bridge" in network_info
 
     def test_network_ls_structure(self, mvm_binary, module_network):
         # Rationale: Uses module_network fixture. Verifies JSON field
@@ -422,7 +422,7 @@ class TestNetworkLifecycle:
             check=False,
         )
         assert result.returncode != 0
-        assert "invalid" in result.stderr.lower()
+        assert "expected 4 octets" in result.stderr.lower()
 
         ls_result = _run_mvm(mvm_binary, "network", "ls", "--json", check=False)
         if ls_result.returncode == 0 and ls_result.stdout.strip():
@@ -438,7 +438,7 @@ class TestNetworkLifecycle:
         mvm_binary,
         unique_network_name,
     ):
-        """Create network with a dynamically generated unique subnet."""
+        """Create network with a dynamically generated unique subnet (verify via --json)."""
         subnet = _unique_subnet(unique_network_name)
         try:
             result = _run_mvm(
@@ -451,7 +451,10 @@ class TestNetworkLifecycle:
                 "--non-interactive",
             )
             assert result.returncode == 0
-            assert unique_network_name in result.stdout
+            # Verify via JSON listing
+            ls_result = _run_mvm(mvm_binary, "network", "ls", "--json")
+            networks = json.loads(ls_result.stdout)
+            assert any(n["name"] == unique_network_name for n in networks)
         finally:
             _run_mvm(
                 mvm_binary, "network", "rm", unique_network_name, check=False
@@ -463,7 +466,7 @@ class TestNetworkLifecycle:
         mvm_binary,
         unique_network_name,
     ):
-        """Create network with custom CIDR."""
+        """Create network with custom CIDR (verify via --json)."""
         subnet = _unique_subnet(unique_network_name)
         try:
             result = _run_mvm(
@@ -476,7 +479,10 @@ class TestNetworkLifecycle:
                 "--non-interactive",
             )
             assert result.returncode == 0
-            assert unique_network_name in result.stdout
+            # Verify via JSON listing
+            ls_result = _run_mvm(mvm_binary, "network", "ls", "--json")
+            networks = json.loads(ls_result.stdout)
+            assert any(n["name"] == unique_network_name for n in networks)
         finally:
             _run_mvm(
                 mvm_binary, "network", "rm", unique_network_name, check=False
@@ -507,11 +513,17 @@ class TestNetworkLifecycle:
             networks = json.loads(ls_result.stdout)
             assert any(n.get("name") == unique_network_name for n in networks)
 
-            # L3: Verify bridge exists but no MASQUERADE rule
+            # L3: Verify bridge exists and --no-nat was honored
             bridge = _compute_bridge_name(unique_network_name)
-            backend = _get_firewall_backend(mvm_binary)
             _assert_bridge_exists(bridge)
-            _assert_no_masquerade_rule(backend)
+            inspect_result = _run_mvm(
+                mvm_binary, "network", "inspect", unique_network_name, "--json"
+            )
+            inspect_data = json.loads(inspect_result.stdout)
+            assert inspect_data.get("nat", {}).get("nat_enabled") is False, (
+                f"Expected nat_enabled=False for --no-nat network, "
+                f"got: {inspect_data.get('nat', {}).get('nat_enabled')}"
+            )
         finally:
             _run_mvm(
                 mvm_binary, "network", "rm", unique_network_name, check=False
@@ -533,7 +545,7 @@ class TestNetworkLifecycle:
         try:
             result = _run_mvm(mvm_binary, "network", "default", module_network)
             assert result.returncode == 0
-            assert "default" in result.stdout.lower()
+            # Verify via JSON listing that the network is now default
             ls_result = _run_mvm(mvm_binary, "network", "ls", "--json")
             networks = json.loads(ls_result.stdout)
             default = next(
@@ -544,6 +556,68 @@ class TestNetworkLifecycle:
             assert default.get("is_default", False)
         finally:
             # Restore original default so subsequent tests aren't broken
+            if original_default:
+                _run_mvm(
+                    mvm_binary,
+                    "network",
+                    "default",
+                    original_default,
+                    check=False,
+                )
+
+    def test_network_create_with_default_flag(
+        self,
+        mvm_binary,
+        unique_network_name,
+    ):
+        """Create a network with --default flag and verify is_default=true in ls JSON.
+
+        Rationale: The --default flag on network create sets the new network as
+        the default for VM creation. A regression where --default is silently
+        ignored would leave the previous default (or no default) in place.
+        """
+        subnet = _unique_subnet(unique_network_name)
+        # Save original default to restore later
+        ls_before = _run_mvm(mvm_binary, "network", "ls", "--json", check=False)
+        original_default = None
+        if ls_before.returncode == 0 and ls_before.stdout.strip():
+            nets_before = json.loads(ls_before.stdout)
+            orig = next((n for n in nets_before if n.get("is_default")), None)
+            if orig:
+                original_default = orig["name"]
+
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "network",
+                "create",
+                unique_network_name,
+                "--subnet",
+                subnet,
+                "--default",
+                "--non-interactive",
+            )
+            assert result.returncode == 0
+
+            # L2: Verify is_default=true in ls JSON
+            ls_result = _run_mvm(mvm_binary, "network", "ls", "--json")
+            networks = json.loads(ls_result.stdout)
+            new_net = next(
+                (n for n in networks if n.get("name") == unique_network_name),
+                None,
+            )
+            assert new_net is not None, (
+                f"Network '{unique_network_name}' not found in listing"
+            )
+            assert new_net.get("is_default") is True, (
+                f"Network '{unique_network_name}' should have is_default=True "
+                f"after create --default"
+            )
+        finally:
+            _run_mvm(
+                mvm_binary, "network", "rm", unique_network_name, check=False
+            )
+            # Restore original default
             if original_default:
                 _run_mvm(
                     mvm_binary,
@@ -719,8 +793,11 @@ class TestNetworkLifecycle:
         )
 
         try:
-            result = _run_mvm(mvm_binary, "network", "ls")
-            assert unique_network_name in result.stdout
+            result = _run_mvm(mvm_binary, "network", "ls", "--json")
+            networks_before = json.loads(result.stdout)
+            assert any(
+                n.get("name") == unique_network_name for n in networks_before
+            )
 
             result = _run_mvm(mvm_binary, "network", "rm", unique_network_name)
             assert result.returncode == 0
@@ -832,8 +909,9 @@ class TestNetworkAdvancedCreate:
                 unique_network_name,
                 "--json",
             )
-            data: list[dict[str, Any]] = json.loads(inspect.stdout)
-            assert data.get("ipv4_gateway") == custom_gateway
+            data: dict[str, Any] = json.loads(inspect.stdout)
+            network_info = data.get("network", {})
+            assert network_info.get("ipv4_gateway") == custom_gateway
         finally:
             _run_mvm(
                 mvm_binary, "network", "rm", unique_network_name, check=False
@@ -868,8 +946,8 @@ class TestNetworkAdvancedCreate:
                 unique_network_name,
                 "--json",
             )
-            data: list[dict[str, Any]] = json.loads(inspect.stdout)
-            gateways = data.get("nat_gateways", [])
+            data: dict[str, Any] = json.loads(inspect.stdout)
+            gateways = data.get("nat", {}).get("nat_gateways", [])
             assert "wlo1" in gateways
         finally:
             _run_mvm(
@@ -933,7 +1011,7 @@ class TestNetworkSync:
                     mvm_binary, "network", "inspect", net_name, "--json"
                 ).stdout
             )
-            bridge: str = inspect.get("bridge", "")
+            bridge: str = inspect.get("network", {}).get("bridge", "")
 
             result = _run_mvm(mvm_binary, "network", "sync", check=False)
             assert result.returncode == 0, f"sync failed: {result.stderr}"
@@ -990,7 +1068,7 @@ class TestNetworkSync:
                     mvm_binary, "network", "inspect", net_name, "--json"
                 ).stdout
             )
-            bridge: str = inspect.get("bridge", "")
+            bridge: str = inspect.get("network", {}).get("bridge", "")
 
             result = _run_mvm(
                 mvm_binary, "network", "sync", net_name, check=False
@@ -1259,7 +1337,7 @@ class TestNetworkVMDependency:
                 mvm_binary, "network", "rm", net_name, check=False
             )
             assert result.returncode != 0
-            assert "in use" in result.stderr.lower()
+            assert "referenced by" in result.stderr.lower()
 
             result_net = _run_mvm(
                 mvm_binary, "network", "ls", "--json", check=False

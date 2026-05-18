@@ -239,7 +239,9 @@ class TestNFTablesFirewallBackend:
                 "--json",
             )
             net_data: dict[str, Any] = json.loads(inspect_result.stdout)
-            bridge = net_data["bridge"]
+            bridge = net_data.get("network", net_data).get(
+                "bridge", net_data.get("bridge", "")
+            )
             assert isinstance(bridge, str) and bridge, (
                 f"Expected non-empty bridge name, got: {bridge}"
             )

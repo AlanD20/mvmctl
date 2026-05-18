@@ -89,14 +89,11 @@ class TestKeyLifecycle:
     # ------------------------------------------------------------------
 
     def test_key_listing(self, mvm_binary, created_key):
-        """List keys and verify created key appears."""
+        """List keys and verify created key appears (via --json)."""
         # Rationale: Uses created_key fixture (already exists via conftest).
         # Read-only — no resources created within test.
-        result = _run_mvm(mvm_binary, "key", "ls")
-        assert result.returncode == 0
-        assert created_key in result.stdout
-
         result = _run_mvm(mvm_binary, "key", "ls", "--json")
+        assert result.returncode == 0
         data = json.loads(result.stdout)
         assert any(k["name"] == created_key for k in data)
 
@@ -117,12 +114,13 @@ class TestKeyLifecycle:
         assert "already exists" in (result.stdout + result.stderr).lower()
 
     def test_key_show(self, mvm_binary, created_key):
-        """Inspect key details (table output)."""
+        """Inspect key details (verify via --json)."""
         # Rationale: Uses created_key fixture. Read-only — tests
-        # key inspect with table output format.
-        result = _run_mvm(mvm_binary, "key", "inspect", created_key)
+        # key inspect with JSON output format.
+        result = _run_mvm(mvm_binary, "key", "inspect", created_key, "--json")
         assert result.returncode == 0
-        assert created_key in result.stdout
+        data = json.loads(result.stdout)
+        assert data.get("key", {}).get("name") == created_key
 
     def test_key_remove_nonexistent(self, mvm_binary):
         """Removing a non-existent key should fail and not create artifacts."""
@@ -152,7 +150,7 @@ class TestKeyLifecycle:
         result = _run_mvm(mvm_binary, "key", "inspect", created_key, "--json")
         assert result.returncode == 0
         data = json.loads(result.stdout)
-        assert "name" in data
+        assert "name" in data.get("key", {})
 
     def test_key_export(self, mvm_binary, created_key, tmp_path):
         """Export a key to a file and verify files exist on disk."""
@@ -231,7 +229,6 @@ class TestKeyLifecycle:
                 "ed25519",
             )
             assert result.returncode == 0
-            assert unique_key_name in result.stdout
 
             result = _run_mvm(mvm_binary, "key", "ls", "--json")
             data = json.loads(result.stdout)
@@ -253,7 +250,6 @@ class TestKeyLifecycle:
                 "rsa",
             )
             assert result.returncode == 0
-            assert unique_key_name in result.stdout
 
             result = _run_mvm(mvm_binary, "key", "ls", "--json")
             data = json.loads(result.stdout)
@@ -275,7 +271,6 @@ class TestKeyLifecycle:
                 "ecdsa",
             )
             assert result.returncode == 0
-            assert unique_key_name in result.stdout
 
             result = _run_mvm(mvm_binary, "key", "ls", "--json")
             data = json.loads(result.stdout)
@@ -310,7 +305,6 @@ class TestKeyLifecycle:
                 str(key_path) + ".pub",
             )
             assert result.returncode == 0
-            assert unique_key_name in result.stdout
 
             result = _run_mvm(mvm_binary, "key", "ls", "--json")
             data = json.loads(result.stdout)
@@ -451,7 +445,7 @@ class TestKeyCreateAdvanced:
                 "--json",
             )
             data = json.loads(result.stdout)
-            assert data.get("comment") == comment
+            assert data.get("key", {}).get("comment") == comment
         finally:
             _run_mvm(mvm_binary, "key", "rm", unique_key_name, check=False)
 
@@ -564,7 +558,13 @@ class TestKeyAddOverwrite:
 
         result = _run_mvm(mvm_binary, "key", "add", key_name, pub_key_path)
         assert result.returncode == 0
-        assert key_name in result.stdout
+
+        # Verify the key appears in JSON listing
+        ls_result = _run_mvm(mvm_binary, "key", "ls", "--json")
+        data = json.loads(ls_result.stdout)
+        assert any(k["name"] == key_name for k in data), (
+            f"Key '{key_name}' not found in ls --json after add"
+        )
 
         result = _run_mvm(
             mvm_binary, "key", "add", key_name, pub_key_path, check=False
@@ -754,11 +754,10 @@ class TestKeyDefaults:
 
             result = _run_mvm(mvm_binary, "vm", "inspect", vm_name, "--json")
             data = json.loads(result.stdout)
-            assert data.get("ssh_keys") is not None
+            ssh_keys = data.get("vm", {}).get("ssh_keys")
+            assert ssh_keys is not None
             for kid in key_ids:
-                assert kid in data["ssh_keys"], (
-                    f"VM should contain key ID {kid}"
-                )
+                assert kid in ssh_keys, f"VM should contain key ID {kid}"
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
             _run_mvm(mvm_binary, "key", "rm", key1, check=False)

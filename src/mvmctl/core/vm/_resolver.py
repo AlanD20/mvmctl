@@ -226,7 +226,7 @@ class VMResolver:
                     resolved_vm_ids.add(item.id)
                     items.append(item)
             except Exception as e:
-                errors.append(f"{identifier}: {e}")
+                errors.append(str(e))
 
         items = self._enrich(items)
 

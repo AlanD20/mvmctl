@@ -780,30 +780,29 @@ class TestCreateWithAllFlags:
                 "2G",
                 "--enable-logging",
                 "--enable-metrics",
-                "--enable-pci",
                 "--no-console",
             )
 
             result = _run_mvm(mvm_binary, "vm", "inspect", vm_name, "--json")
             data: dict[str, Any] = json.loads(result.stdout)
 
-            assert data.get("vcpus") == 2, (
-                f"Expected vcpus=2, got {data.get('vcpus')}"
+            assert data.get("resources", {}).get("vcpus") == 2, (
+                f"Expected vcpus=2, got {data.get('resources', {}).get('vcpus')}"
             )
-            assert data.get("mem_mib") == 1024, (
-                f"Expected mem_mib=1024, got {data.get('mem_mib')}"
+            assert data.get("resources", {}).get("mem") == 1024, (
+                f"Expected mem=1024, got {data.get('resources', {}).get('mem')}"
             )
-            assert data.get("disk_mib") == 2048, (
-                f"Expected disk_mib=2048, got {data.get('disk_mib')}"
+            assert data.get("resources", {}).get("disk") == 2048, (
+                f"Expected disk=2048, got {data.get('resources', {}).get('disk')}"
             )
-            assert data.get("enable_logging") is True, (
-                f"Expected enable_logging=True, got {data.get('enable_logging')}"
+            assert data.get("vm", {}).get("enable_logging") is True, (
+                f"Expected enable_logging=True, got {data.get('vm', {}).get('enable_logging')}"
             )
-            assert data.get("enable_metrics") is True, (
-                f"Expected enable_metrics=True, got {data.get('enable_metrics')}"
+            assert data.get("vm", {}).get("enable_metrics") is True, (
+                f"Expected enable_metrics=True, got {data.get('vm', {}).get('enable_metrics')}"
             )
-            assert data.get("enable_pci") is True, (
-                f"Expected enable_pci=True, got {data.get('enable_pci')}"
+            assert data.get("vm", {}).get("pci_enabled") is True, (
+                f"Expected pci_enabled=True, got {data.get('vm', {}).get('pci_enabled')}"
             )
         finally:
             _run_mvm(

@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from tests.system.conftest import _run_mvm, wait_for_ssh
+from tests.system.conftest import _run_mvm, _unique_subnet, wait_for_ssh
 
 pytestmark = [
     pytest.mark.system,
@@ -229,6 +229,132 @@ class TestCpHostToVm:
                 f"rm -rf '{remote_dir_path}'",
             )
 
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    @pytest.mark.serial
+    def test_cp_with_user_flag(
+        self,
+        mvm_binary: str,
+        created_vm: dict[str, Any],
+        tmp_path: Path,
+    ) -> None:
+        """Copy a file to VM with --user flag.
+
+        Rationale: The --user flag on cp allows specifying an SSH user for
+        the connection. A regression where --user is silently ignored would
+        cause the copy to use the wrong SSH user, potentially failing to
+        authenticate.
+        """
+        vm_info = created_vm
+        if not _wait_for_vm_ssh(mvm_binary, vm_info):
+            pytest.skip("SSH not available on VM — cannot verify cp --user")
+
+        test_file = tmp_path / f"user_flag_{uuid.uuid4().hex[:8]}.txt"
+        test_file.write_text("cp with --user flag test")
+        remote_dir = "/tmp/"
+
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "cp",
+                str(test_file),
+                f"{vm_info['name']}:{remote_dir}",
+                "--user",
+                "root",
+                timeout=30,
+            )
+            assert result.returncode == 0, (
+                f"cp with --user failed: stdout={result.stdout} stderr={result.stderr}"
+            )
+
+            # L3: Verify file exists on VM via SSH
+            remote_file = f"{remote_dir}{test_file.name}"
+            check = _ssh_cmd(
+                mvm_binary,
+                vm_info["name"],
+                f"test -f '{remote_file}' && echo EXISTS",
+            )
+            assert check.returncode == 0 and "EXISTS" in check.stdout, (
+                f"File {remote_file} not found on VM after cp with --user"
+            )
+        finally:
+            _ssh_cmd(mvm_binary, vm_info["name"], f"rm -f '{remote_file}'")
+
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    @pytest.mark.serial
+    def test_cp_with_key_flag(
+        self,
+        mvm_binary: str,
+        created_vm: dict[str, Any],
+        tmp_path: Path,
+    ) -> None:
+        """Copy a file to VM with --key flag specifying a named key.
+
+        Rationale: The --key flag on cp accepts a named key (from key cache).
+        A regression where --key is silently ignored would cause the copy
+        to use the default key, potentially failing if the default key is
+        not authorized on the VM.
+        """
+        import uuid as _uuid
+
+        vm_info = created_vm
+        if not _wait_for_vm_ssh(mvm_binary, vm_info):
+            pytest.skip("SSH not available on VM — cannot verify cp --key")
+
+        # The created_vm was created with a key named sys-vmkey-*.
+        # Use the --key flag to specify that same key by name.
+        key_name = f"sys-cp-key-{_uuid.uuid4().hex[:6]}"
+        try:
+            _run_mvm(
+                mvm_binary, "key", "create", key_name, "--algorithm", "ed25519"
+            )
+
+            test_file = tmp_path / f"key_flag_{_uuid.uuid4().hex[:8]}.txt"
+            test_file.write_text("cp with --key flag test")
+            remote_dir = "/tmp/"
+
+            result = _run_mvm(
+                mvm_binary,
+                "cp",
+                str(test_file),
+                f"{vm_info['name']}:{remote_dir}",
+                "--key",
+                key_name,
+                timeout=30,
+                check=False,
+            )
+            # The key may not be authorized on the VM (created_vm uses a
+            # different key). We accept either success or a non-fatal error
+            # (Permission denied or similar) — the important thing is that
+            # --key was accepted as a valid named key argument.
+            if result.returncode != 0:
+                combined = (result.stdout + result.stderr).lower()
+                assert any(
+                    w in combined
+                    for w in [
+                        "permission denied",
+                        "not found",
+                        "could be resolved",
+                    ]
+                ), (
+                    f"Unexpected error with cp --key: "
+                    f"stdout={result.stdout} stderr={result.stderr}"
+                )
+            else:
+                # L3: If the copy succeeded, verify file exists on VM
+                remote_file = f"{remote_dir}{test_file.name}"
+                check = _ssh_cmd(
+                    mvm_binary,
+                    vm_info["name"],
+                    f"test -f '{remote_file}' && echo EXISTS",
+                )
+                assert check.returncode == 0 and "EXISTS" in check.stdout, (
+                    f"File {remote_file} not found on VM after cp with --key"
+                )
+        finally:
+            _run_mvm(mvm_binary, "key", "rm", key_name, "--force", check=False)
+
 
 # ============================================================================
 # VM → Host copy tests (L3: verify file exists on host filesystem)
@@ -319,6 +445,95 @@ class TestCpVmToHost:
         finally:
             # Cleanup: remove the remote file
             _ssh_cmd(mvm_binary, vm_info["name"], f"rm -f '{remote_file}'")
+
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    @pytest.mark.serial
+    def test_cp_directory_vm_to_host(
+        self,
+        mvm_binary: str,
+        created_vm: dict[str, Any],
+        tmp_path: Path,
+    ) -> None:
+        """Copy a directory from VM to host — verify dir exists on host with contents.
+
+        Rationale: Tar handles directory extraction on the host side. A regression
+        where VM→host directory copy flattens the structure or drops files would
+        not be caught by file-only tests.
+        """
+        vm_info = created_vm
+        if not _wait_for_vm_ssh(mvm_binary, vm_info):
+            pytest.skip(
+                "SSH not available on VM — cannot verify directory download"
+            )
+
+        # Create a directory on the VM first by uploading one
+        dir_name = f"download_dir_{uuid.uuid4().hex[:8]}"
+        test_dir = tmp_path / dir_name
+        test_dir.mkdir()
+        nested = test_dir / "nested"
+        nested.mkdir()
+        file1 = test_dir / "file1.txt"
+        file1.write_text("download content1")
+        file2 = nested / "file2.txt"
+        file2.write_text("download content2")
+
+        remote_parent = "/tmp"
+        remote_dir_path = f"{remote_parent}/{dir_name}"
+        download_dest = tmp_path / "downloaded_dir"
+
+        try:
+            # Step 1: Upload the directory to VM
+            upload = _run_mvm(
+                mvm_binary,
+                "cp",
+                str(test_dir),
+                f"{vm_info['name']}:{remote_parent}/",
+                timeout=30,
+            )
+            assert upload.returncode == 0, (
+                f"Upload for directory download test failed: "
+                f"stdout={upload.stdout} stderr={upload.stderr}"
+            )
+
+            # Step 2: Download the directory from VM to host
+            download = _run_mvm(
+                mvm_binary,
+                "cp",
+                f"{vm_info['name']}:{remote_dir_path}",
+                str(download_dest),
+                timeout=30,
+            )
+            assert download.returncode == 0, (
+                f"Directory download failed: "
+                f"stdout={download.stdout} stderr={download.stderr}"
+            )
+
+            # Step 3: L3 — Verify the downloaded directory exists on host
+            # Tar preserves the original directory name, so the extracted
+            # content should be at download_dest's parent with the original name.
+            extracted_dir = download_dest.parent / dir_name
+            assert extracted_dir.is_dir(), (
+                f"Downloaded directory not found at {extracted_dir}"
+            )
+
+            # Verify files exist
+            assert (extracted_dir / "file1.txt").exists(), (
+                "file1.txt not found in downloaded directory"
+            )
+            assert (extracted_dir / "nested" / "file2.txt").exists(), (
+                "nested/file2.txt not found in downloaded directory"
+            )
+
+            # Verify content
+            downloaded_content1 = (extracted_dir / "file1.txt").read_text()
+            assert downloaded_content1.strip() == "download content1", (
+                f"Content mismatch for file1.txt: "
+                f"expected 'download content1', got {downloaded_content1.strip()!r}"
+            )
+        finally:
+            # Cleanup remote directory
+            _ssh_cmd(mvm_binary, vm_info["name"], f"rm -rf '{remote_dir_path}'")
 
 
 # ============================================================================
@@ -844,3 +1059,139 @@ class TestCpMultiSource:
             f"Expected error mentioning multi-source requires VM dest, "
             f"got: stderr={result.stderr}"
         )
+
+
+# ============================================================================
+# VM → VM copy tests (L3: verify file on destination VM)
+# ============================================================================
+
+
+class TestCpVmToVm:
+    """Copy a file from one VM to another VM.
+
+    Tests that ``mvm cp vm1:/path vm2:/path`` transfers files correctly
+    between two microVMs. Requires two running VMs with SSH access.
+    """
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+        pytest.mark.serial,
+        pytest.mark.domain_cp,
+    ]
+
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    @pytest.mark.serial
+    def test_cp_file_vm_to_vm(
+        self,
+        mvm_binary: str,
+        unique_vm_name: str,
+        unique_key_name: str,
+        unique_network_name: str,
+        tmp_path: Path,
+    ) -> None:
+        """Copy a file from one VM to another — verify on destination via SSH.
+
+        Rationale: VM→VM copy is a complex path that connects to VM1,
+        reads a file via tar, then connects to VM2 and writes it. A
+        regression where the intermediate pipe between the two SSH
+        connections breaks would cause silent data loss.
+        """
+        import uuid as _uuid
+
+        from tests.system.conftest import (
+            _cleanup_vm_resources as _cleanup_vm,
+        )
+        from tests.system.conftest import (
+            _create_minimal_vm_core as _create_vm,
+        )
+
+        key_name = unique_key_name
+        net_name = unique_network_name
+        subnet = _unique_subnet(net_name)
+        vm_a = f"{unique_vm_name}-a"
+        vm_b = f"{unique_vm_name}-b"
+
+        _run_mvm(
+            mvm_binary, "key", "create", key_name, "--algorithm", "ed25519"
+        )
+        _run_mvm(
+            mvm_binary,
+            "network",
+            "create",
+            net_name,
+            "--subnet",
+            subnet,
+            "--non-interactive",
+        )
+
+        try:
+            # Create two VMs
+            _create_vm(mvm_binary, vm_a, net_name, ssh_key_name=key_name)
+            _create_vm(mvm_binary, vm_b, net_name, ssh_key_name=key_name)
+
+            # Wait for SSH on both VMs
+            from tests.system.conftest import ensure_vm_deps as _ensure_vm_deps
+
+            _ensure_vm_deps(mvm_binary)
+
+            timeout = 20.0
+            ssh_a = wait_for_ssh(mvm_binary, vm_a, "root", timeout)
+            ssh_b = wait_for_ssh(mvm_binary, vm_b, "root", timeout)
+            if not ssh_a or not ssh_b:
+                # Skip-reason: SSH not available on one or both VMs.
+                # VM→VM copy requires SSH connectivity to both source
+                # and destination VMs.
+                pytest.skip(
+                    "SSH not available on both VMs — cannot verify VM→VM copy"
+                )
+
+            # Create a test file on VM A
+            test_content = f"vm-to-vm test {_uuid.uuid4().hex}"
+            src_file = f"/tmp/vm_to_vm_test_{_uuid.uuid4().hex[:8]}.txt"
+            _ssh_cmd(mvm_binary, vm_a, f"echo '{test_content}' > '{src_file}'")
+
+            # Copy VM A → VM B
+            dest_path = "/tmp/"
+            result = _run_mvm(
+                mvm_binary,
+                "cp",
+                f"{vm_a}:{src_file}",
+                f"{vm_b}:{dest_path}",
+                timeout=30,
+            )
+            assert result.returncode == 0, (
+                f"VM→VM cp failed: stdout={result.stdout} stderr={result.stderr}"
+            )
+
+            # L3: Verify file exists on VM B via SSH
+            dest_file = f"{dest_path}{src_file.split('/')[-1]}"
+            check = _ssh_cmd(
+                mvm_binary,
+                vm_b,
+                f"test -f '{dest_file}' && echo VM2_EXISTS",
+            )
+            assert check.returncode == 0 and "VM2_EXISTS" in check.stdout, (
+                f"File {dest_file} not found on VM B after VM→VM copy"
+            )
+
+            # L3: Verify content matches
+            content_check = _ssh_cmd(
+                mvm_binary,
+                vm_b,
+                f"cat '{dest_file}'",
+            )
+            assert content_check.returncode == 0, (
+                f"SSH cat on VM B failed: {content_check.stderr}"
+            )
+            assert test_content in content_check.stdout, (
+                f"Content mismatch on VM B: expected '{test_content}', "
+                f"got '{content_check.stdout.strip()}'"
+            )
+
+        finally:
+            _cleanup_vm(mvm_binary, vm_a, net_name, key_name)
+            _cleanup_vm(mvm_binary, vm_b, net_name, key_name)
+            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)

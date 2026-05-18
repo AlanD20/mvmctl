@@ -67,7 +67,8 @@ class TestBinLs:
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_ls_with_remote(self, mock_bin_op):
         mock_bin_op.list_all.side_effect = lambda *a, **kw: (
-            ["1.16.0", "1.15.0", "1.14.0"] if kw.get("remote")
+            ["1.16.0", "1.15.0", "1.14.0"]
+            if kw.get("remote")
             else [_make_binary("firecracker", "1.15.0")]
         )
         result = runner.invoke(app, ["bin", "ls", "--remote"])
@@ -77,8 +78,7 @@ class TestBinLs:
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_ls_remote_with_limit(self, mock_bin_op):
         mock_bin_op.list_all.side_effect = lambda *a, **kw: (
-            ["1.16.0"] if kw.get("remote")
-            else []
+            ["1.16.0"] if kw.get("remote") else []
         )
         result = runner.invoke(app, ["bin", "ls", "--remote", "--limit", "5"])
         assert result.exit_code == 0
@@ -87,7 +87,8 @@ class TestBinLs:
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_ls_remote_error(self, mock_bin_op):
         mock_bin_op.list_all.side_effect = lambda *a, **kw: (
-            [] if not kw.get("remote")
+            []
+            if not kw.get("remote")
             else (_ for _ in ()).throw(MVMError("network fail"))
         )
         result = runner.invoke(app, ["bin", "ls", "--remote"])
@@ -247,8 +248,7 @@ class TestBinLsExtras:
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_ls_remote_no_locals(self, mock_bin_op):
         mock_bin_op.list_all.side_effect = lambda *a, **kw: (
-            ["1.16.0", "1.15.0"] if kw.get("remote")
-            else []
+            ["1.16.0", "1.15.0"] if kw.get("remote") else []
         )
         result = runner.invoke(app, ["bin", "ls", "--remote"])
         assert result.exit_code == 0
@@ -258,7 +258,8 @@ class TestBinLsExtras:
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_ls_remote_with_cached_marker(self, mock_bin_op):
         mock_bin_op.list_all.side_effect = lambda *a, **kw: (
-            ["1.16.0", "1.15.0"] if kw.get("remote")
+            ["1.16.0", "1.15.0"]
+            if kw.get("remote")
             else [_make_binary("firecracker", "1.15.0")]
         )
         result = runner.invoke(app, ["bin", "ls", "--remote"])

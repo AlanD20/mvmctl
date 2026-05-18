@@ -112,7 +112,7 @@ class VMImportRequest:
             nocloud_net_port=export_config.cloud_init.nocloud_net_port,
             user=export_config.cloud_init.user,
             nested_virt=export_config.firecracker.nested_virt,
-            cpu_config=cpu_config,
+            cpu_config=cpu_config,  # type: ignore[arg-type]
         )
 
         # Delegate to VMCreateRequest for full resolution

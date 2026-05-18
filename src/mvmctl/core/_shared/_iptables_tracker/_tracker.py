@@ -486,14 +486,18 @@ class IPTablesTracker:
     def batch_ensure_rules(
         self, rules: list[FirewallRule]
     ) -> FirewallRuleResult:
-        """Add multiple rules atomically using ``iptables-restore`` per table.
+        """Add multiple rules atomically using ``iptables-restore -n`` per table.
 
-        Groups rules by table (filter vs nat), builds ``iptables-restore``
-        format input that flushes only MVM custom chains and installs all
-        rules in a single subprocess call per table.  The conntrack
-        ``ESTABLISHED,RELATED`` accept rule is always added as the first
-        rule in filter chains to preserve established connections during
-        the atomic swap.
+        Groups rules by table (filter vs nat), builds ``iptables-restore -n``
+        (noflush) format input that flushes only MVM custom chains and
+        installs all rules in a single subprocess call per table. The
+        ``-n`` flag is CRITICAL — without it, ``iptables-restore`` wipes
+        ALL non-MVM chains (Docker, UFW, Tailscale, etc.) from the table
+        before applying the input.
+
+        The conntrack ``ESTABLISHED,RELATED`` accept rule is always added as
+        the first rule in filter chains to preserve established connections
+        during the atomic swap.
         """
         filter_rules = [
             r for r in rules if r.table_name == FirewallTable.FILTER
@@ -506,7 +510,7 @@ class IPTablesTracker:
                     filter_rules, "filter"
                 )
                 run_cmd(
-                    ["iptables-restore"],
+                    ["iptables-restore", "-n"],
                     input=restore_input,
                     privileged=True,
                 )
@@ -514,7 +518,7 @@ class IPTablesTracker:
             if nat_rules:
                 restore_input = self._build_restore_input(nat_rules, "nat")
                 run_cmd(
-                    ["iptables-restore"],
+                    ["iptables-restore", "-n"],
                     input=restore_input,
                     privileged=True,
                 )
@@ -569,7 +573,7 @@ class IPTablesTracker:
 
         1. ``*{table}`` header
         2. Define MVM custom chains with zero counters
-        3. Flush only MVM chains (not the entire table)
+        3. Flush only MVM chains (safe because caller always uses ``-n``)
         4. Add conntrack ``ESTABLISHED,RELATED`` accept as first rule in
            filter chains
         5. Append all DB rules

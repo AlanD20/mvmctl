@@ -80,7 +80,7 @@ class TestSnapshotDestroyRestore:
 
             result = _run_mvm(mvm_binary, "vm", "inspect", vm_name, "--json")
             data: dict[str, Any] = json.loads(result.stdout)
-            vm_dir = Path(str(data["vm_dir"]))
+            vm_dir = Path(str(data.get("filesystem", {}).get("vm_dir", "")))
             mem_file = str(vm_dir / "mem.snap")
             state_file = str(vm_dir / "state.snap")
 
@@ -304,13 +304,116 @@ class TestVMSnapshot:
                 str(state_file),
             )
             assert result.returncode == 0
-            # L2: Verify VM is running after load
+            # L2: Verify VM is paused after load (without --resume flag)
             result = _run_mvm(mvm_binary, "vm", "ls", "--json")
             vms = json.loads(result.stdout)
             vm_entry = next((v for v in vms if v["name"] == vm_name), None)
             assert vm_entry is not None, f"VM '{vm_name}' not found after load"
+            assert vm_entry["status"] == "paused", (
+                f"Expected status 'paused' (load without --resume), "
+                f"got '{vm_entry.get('status')}'"
+            )
+        finally:
+            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+            _run_mvm(
+                mvm_binary,
+                "network",
+                "rm",
+                network_name,
+                "--force",
+                check=False,
+            )
+            _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+
+    def test_load_with_resume_flag(
+        self,
+        mvm_binary: str,
+        unique_vm_name: str,
+        unique_key_name: str,
+        unique_network_name: str,
+        tmp_path,
+    ) -> None:
+        """Snapshot a VM, stop it, then load with --resume and verify it is running.
+
+        Rationale: The --resume flag on vm load tells Firecracker to resume the
+        VM immediately after loading the snapshot. A regression where --resume
+        is silently ignored would leave the VM in a paused state after load.
+        """
+        vm_name = unique_vm_name
+        key_name = unique_key_name
+        network_name = unique_network_name
+        subnet = _unique_subnet(network_name)
+
+        try:
+            _run_mvm(
+                mvm_binary,
+                "network",
+                "create",
+                network_name,
+                "--subnet",
+                subnet,
+                "--non-interactive",
+            )
+            _run_mvm(
+                mvm_binary,
+                "key",
+                "create",
+                key_name,
+                "--algorithm",
+                "ed25519",
+            )
+            ensure_vm_deps(mvm_binary)
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "create",
+                vm_name,
+                "--image",
+                "alpine:3.21",
+                "--network",
+                network_name,
+                "--ssh-key",
+                key_name,
+            )
+            _run_mvm(mvm_binary, "vm", "pause", vm_name)
+
+            mem_file = tmp_path / "mem_resume.snap"
+            state_file = tmp_path / "state_resume.snap"
+
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "snapshot",
+                vm_name,
+                str(mem_file),
+                str(state_file),
+            )
+            _run_mvm(mvm_binary, "vm", "stop", vm_name)
+
+            # Load with --resume flag
+            result = _run_mvm(
+                mvm_binary,
+                "vm",
+                "load",
+                vm_name,
+                str(mem_file),
+                str(state_file),
+                "--resume",
+            )
+            assert result.returncode == 0, (
+                f"vm load --resume failed: {result.stderr}"
+            )
+
+            # L2: Verify VM is running after load with --resume
+            result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+            vms = json.loads(result.stdout)
+            vm_entry = next((v for v in vms if v["name"] == vm_name), None)
+            assert vm_entry is not None, (
+                f"VM '{vm_name}' not found after load --resume"
+            )
             assert vm_entry["status"] == "running", (
-                f"Expected status 'running', got '{vm_entry.get('status')}'"
+                f"Expected status 'running' after --resume, "
+                f"got '{vm_entry.get('status')}'"
             )
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)

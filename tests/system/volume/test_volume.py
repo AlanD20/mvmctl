@@ -75,9 +75,10 @@ class TestVolumeLifecycle:
         # verify ls output contains the volume name — proves DB persistence
         # without creating a volume per test.
         """List volumes — should include the shared volume."""
-        result = _run_mvm(mvm_binary, "volume", "ls")
+        result = _run_mvm(mvm_binary, "volume", "ls", "--json")
         assert result.returncode == 0
-        assert shared_volume in result.stdout
+        data = json.loads(result.stdout)
+        assert any(v["name"] == shared_volume for v in data)
 
     def test_volume_list_json(
         self, mvm_binary: str, shared_volume: str
@@ -94,10 +95,13 @@ class TestVolumeLifecycle:
     def test_volume_inspect(self, mvm_binary: str, shared_volume: str) -> None:
         # Rationale: Needs a shared volume. L1 verification that inspect
         # returns the volume name — proves the DB lookup by name works.
-        """Inspect a volume — name should appear in output."""
-        result = _run_mvm(mvm_binary, "volume", "inspect", shared_volume)
+        """Inspect a volume — verify name via --json."""
+        result = _run_mvm(
+            mvm_binary, "volume", "inspect", shared_volume, "--json"
+        )
         assert result.returncode == 0
-        assert shared_volume in result.stdout
+        data = json.loads(result.stdout)
+        assert data.get("volume", {}).get("name") == shared_volume
 
     def test_volume_inspect_json(
         self, mvm_binary: str, shared_volume: str
@@ -110,12 +114,13 @@ class TestVolumeLifecycle:
         )
         assert result.returncode == 0
         data = json.loads(result.stdout)
-        assert "name" in data
-        assert "size_bytes" in data
-        assert "format" in data
-        assert "status" in data
-        assert "path" in data
-        assert data["name"] == shared_volume
+        assert "volume" in data
+        assert "name" in data["volume"]
+        assert "size_bytes" in data["volume"]
+        assert "format" in data["volume"]
+        assert "status" in data["volume"]
+        assert "path" in data["volume"]
+        assert data["volume"]["name"] == shared_volume
 
     # ── 2. Create operations ─────────────────────────────────────────────
 
@@ -134,14 +139,14 @@ class TestVolumeLifecycle:
                 "512M",
             )
             assert result.returncode == 0
-            assert vol_name in result.stdout
 
             inspect = _run_mvm(
                 mvm_binary, "volume", "inspect", vol_name, "--json"
             )
             data = json.loads(inspect.stdout)
-            assert data["size_bytes"] == 512 * 1024 * 1024
-            assert data["status"] == "available"
+            assert data["volume"]["name"] == vol_name
+            assert data["volume"]["size_bytes"] == 512 * 1024 * 1024
+            assert data["volume"]["status"] == "available"
         finally:
             _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
 
@@ -164,15 +169,15 @@ class TestVolumeLifecycle:
                 "qcow2",
             )
             assert result.returncode == 0
-            assert vol_name in result.stdout
 
             inspect = _run_mvm(
                 mvm_binary, "volume", "inspect", vol_name, "--json"
             )
             data = json.loads(inspect.stdout)
-            assert data["format"] == "qcow2"
-            assert data["size_bytes"] == 512 * 1024 * 1024
-            assert data["status"] == "available"
+            assert data["volume"]["name"] == vol_name
+            assert data["volume"]["format"] == "qcow2"
+            assert data["volume"]["size_bytes"] == 512 * 1024 * 1024
+            assert data["volume"]["status"] == "available"
         finally:
             _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
 
@@ -195,15 +200,15 @@ class TestVolumeLifecycle:
                 "raw",
             )
             assert result.returncode == 0
-            assert vol_name in result.stdout
 
             inspect = _run_mvm(
                 mvm_binary, "volume", "inspect", vol_name, "--json"
             )
             data = json.loads(inspect.stdout)
-            assert data["format"] == "raw"
-            assert data["size_bytes"] == 512 * 1024 * 1024
-            assert data["status"] == "available"
+            assert data["volume"]["name"] == vol_name
+            assert data["volume"]["format"] == "raw"
+            assert data["volume"]["size_bytes"] == 512 * 1024 * 1024
+            assert data["volume"]["status"] == "available"
         finally:
             _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
 
@@ -226,7 +231,6 @@ class TestVolumeLifecycle:
                 "--read-only",
             )
             assert result.returncode == 0
-            assert "ro" in result.stdout
 
             ls_result = _run_mvm(mvm_binary, "volume", "ls", "--json")
             volumes = json.loads(ls_result.stdout)
@@ -234,7 +238,9 @@ class TestVolumeLifecycle:
             assert len(matching) == 1
             assert matching[0]["is_read_only"] is True
         finally:
-            _run_mvm(mvm_binary, "volume", "rm", vol_name, "--force", check=False)
+            _run_mvm(
+                mvm_binary, "volume", "rm", vol_name, "--force", check=False
+            )
 
     def test_volume_create_readonly_alias(
         self, mvm_binary: str, unique_key_name: str
@@ -253,12 +259,10 @@ class TestVolumeLifecycle:
                 "--readonly",
             )
             assert result.returncode == 0
-            assert "ro" in result.stdout
 
-            inspect = _run_mvm(
-                mvm_binary, "vol", "inspect", vol_name, "--json"
-            )
+            inspect = _run_mvm(mvm_binary, "vol", "inspect", vol_name, "--json")
             data = json.loads(inspect.stdout)
+            assert data["volume"]["name"] == vol_name
             assert data["volume"]["is_read_only"] is True
         finally:
             _run_mvm(mvm_binary, "vol", "rm", vol_name, "--force", check=False)
@@ -293,12 +297,8 @@ class TestVolumeLifecycle:
             assert len(ro_match) == 1
             assert ro_match[0]["is_read_only"] is True
         finally:
-            _run_mvm(
-                mvm_binary, "volume", "rm", vol_rw, "--force", check=False
-            )
-            _run_mvm(
-                mvm_binary, "volume", "rm", vol_ro, "--force", check=False
-            )
+            _run_mvm(mvm_binary, "volume", "rm", vol_rw, "--force", check=False)
+            _run_mvm(mvm_binary, "volume", "rm", vol_ro, "--force", check=False)
 
     def test_volume_duplicate_name_rejected(
         self, mvm_binary: str, unique_key_name: str
@@ -452,7 +452,7 @@ class TestVolumeLifecycle:
                 "--json",
             )
             data = json.loads(inspect.stdout)
-            assert data["size_bytes"] == 1024 * 1024 * 1024
+            assert data["volume"]["size_bytes"] == 1024 * 1024 * 1024
         finally:
             _run_mvm(mvm_binary, "volume", "rm", vol_name, check=False)
 
@@ -475,8 +475,8 @@ class TestVolumeLifecycle:
                 mvm_binary, "volume", "inspect", vol_name, "--json"
             )
             data = json.loads(inspect.stdout)
-            assert data["size_bytes"] == 1024 * 1024 * 1024
-            assert data["status"] == "available"
+            assert data["volume"]["size_bytes"] == 1024 * 1024 * 1024
+            assert data["volume"]["status"] == "available"
 
             result = _run_mvm(
                 mvm_binary,
@@ -494,10 +494,10 @@ class TestVolumeLifecycle:
 
             if result.returncode == 0:
                 # Backend allowed shrink — verify size matches target
-                assert data_after["size_bytes"] == 512 * 1024 * 1024
+                assert data_after["volume"]["size_bytes"] == 512 * 1024 * 1024
             else:
                 # Backend rejected shrink — verify size unchanged
-                assert data_after["size_bytes"] == 1024 * 1024 * 1024
+                assert data_after["volume"]["size_bytes"] == 1024 * 1024 * 1024
         finally:
             _run_mvm(
                 mvm_binary, "volume", "rm", vol_name, "--force", check=False
@@ -647,10 +647,10 @@ class TestVolumeLifecycle:
                 mvm_binary, "volume", "inspect", vol_name, "--json"
             )
             data = json.loads(inspect.stdout)
-            assert data["status"] == "available"
-            assert data.get("vm_id") is None
-            assert os.path.exists(data["path"]), (
-                f"Volume path {data['path']} does not exist on disk"
+            assert data["volume"]["status"] == "available"
+            assert data.get("attachment", {}).get("vm_id") is None
+            assert os.path.exists(data["volume"]["path"]), (
+                f"Volume path {data['volume']['path']} does not exist on disk"
             )
 
             ensure_vm_deps(mvm_binary)
@@ -672,8 +672,8 @@ class TestVolumeLifecycle:
                 mvm_binary, "volume", "inspect", vol_name, "--json"
             )
             data = json.loads(inspect.stdout)
-            assert data["status"] == "attached"
-            assert data.get("vm_id") is not None
+            assert data["volume"]["status"] == "attached"
+            assert data.get("attachment", {}).get("vm_id") is not None
 
             vm_ls = _run_mvm(mvm_binary, "vm", "ls", "--json")
             vm_entries = json.loads(vm_ls.stdout)
@@ -681,7 +681,7 @@ class TestVolumeLifecycle:
                 (v for v in vm_entries if v["name"] == vm_name), None
             )
             assert vm_info is not None
-            assert data["vm_id"] == vm_info["id"]
+            assert data["attachment"]["vm_id"] == vm_info["id"]
 
             _run_mvm(mvm_binary, "vm", "detach-volume", vm_name, vol_name)
 
@@ -690,10 +690,10 @@ class TestVolumeLifecycle:
                 mvm_binary, "volume", "inspect", vol_name, "--json"
             )
             data = json.loads(inspect.stdout)
-            assert data["status"] == "available"
-            assert data.get("vm_id") is None
-            assert os.path.exists(data["path"]), (
-                f"Volume path {data['path']} disappeared after detach"
+            assert data["volume"]["status"] == "available"
+            assert data.get("attachment", {}).get("vm_id") is None
+            assert os.path.exists(data["volume"]["path"]), (
+                f"Volume path {data['volume']['path']} disappeared after detach"
             )
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
@@ -776,7 +776,7 @@ class TestVolumeAttachDetach:
                 mvm_binary, "volume", "inspect", vol_name, "--json"
             )
             vol_data = json.loads(vol_result.stdout)
-            assert vol_data.get("status") == "available"
+            assert vol_data.get("volume", {}).get("status") == "available"
 
             _run_mvm(mvm_binary, "vm", "attach-volume", vm_name, vol_name)
 
@@ -784,7 +784,7 @@ class TestVolumeAttachDetach:
                 mvm_binary, "volume", "inspect", vol_name, "--json"
             )
             vol_data = json.loads(vol_result.stdout)
-            assert vol_data.get("status") == "attached"
+            assert vol_data.get("volume", {}).get("status") == "attached"
 
             _run_mvm(mvm_binary, "vm", "start", vm_name)
 
@@ -865,7 +865,7 @@ class TestVolumeAttachDetach:
                 mvm_binary, "volume", "inspect", vol_name, "--json"
             )
             vol_data = json.loads(vol_result.stdout)
-            assert vol_data.get("status") == "attached"
+            assert vol_data.get("volume", {}).get("status") == "attached"
 
             _run_mvm(mvm_binary, "vm", "start", vm_name)
 
@@ -948,7 +948,7 @@ class TestVolumeAttachDetach:
                 mvm_binary, "volume", "inspect", vol_name, "--json"
             )
             vol_data = json.loads(vol_result.stdout)
-            assert vol_data.get("status") == "available"
+            assert vol_data.get("volume", {}).get("status") == "available"
 
             _run_mvm(mvm_binary, "vm", "attach-volume", vm_name, vol_name)
 
@@ -956,7 +956,7 @@ class TestVolumeAttachDetach:
                 mvm_binary, "volume", "inspect", vol_name, "--json"
             )
             vol_data = json.loads(vol_result.stdout)
-            assert vol_data.get("status") == "attached"
+            assert vol_data.get("volume", {}).get("status") == "attached"
 
             _run_mvm(mvm_binary, "vm", "start", vm_name)
         finally:
@@ -1043,14 +1043,14 @@ class TestVolumeCrossVM:
                 mvm_binary, "volume", "inspect", vol_name, "--json"
             )
             vol_data = json.loads(vol_result.stdout)
-            assert vol_data["status"] == "attached"
-            assert vol_data.get("vm_id") is not None
+            assert vol_data["volume"]["status"] == "attached"
+            assert vol_data.get("attachment", {}).get("vm_id") is not None
 
             vm_ls = _run_mvm(mvm_binary, "vm", "ls", "--json")
             vm_entries = json.loads(vm_ls.stdout)
             vm_a_info = next((v for v in vm_entries if v["name"] == vm_a), None)
             assert vm_a_info is not None
-            assert vol_data["vm_id"] == vm_a_info["id"]
+            assert vol_data["attachment"]["vm_id"] == vm_a_info["id"]
 
             result = _run_mvm(
                 mvm_binary,
@@ -1066,8 +1066,10 @@ class TestVolumeCrossVM:
                 mvm_binary, "volume", "inspect", vol_name, "--json"
             )
             vol_data = json.loads(vol_result.stdout)
-            assert vol_data["status"] == "attached"
-            assert vol_data.get("vm_id") == vm_a_info["id"]
+            assert vol_data["volume"]["status"] == "attached"
+            assert (
+                vol_data.get("attachment", {}).get("vm_id") == vm_a_info["id"]
+            )
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_a, "--force", check=False)
             _run_mvm(mvm_binary, "vm", "rm", vm_b, "--force", check=False)

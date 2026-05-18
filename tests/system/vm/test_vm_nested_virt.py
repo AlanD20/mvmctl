@@ -45,7 +45,7 @@ def _read_firecracker_config(mvm_binary: str, vm_name: str) -> dict:
     """
     inspect = _run_mvm(mvm_binary, "vm", "inspect", vm_name, "--json")
     data = json.loads(inspect.stdout)
-    vm_dir = Path(data["vm_dir"])
+    vm_dir = Path(data.get("filesystem", {}).get("vm_dir", ""))
     config_path = vm_dir / "firecracker.json"
     assert config_path.exists(), (
         f"Firecracker config not found at {config_path}"

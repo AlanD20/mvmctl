@@ -216,19 +216,29 @@ class TestCacheClean:
             )
             _run_mvm(mvm_binary, "vm", "start", vm_name)
 
-            result = _run_mvm(mvm_binary, "cache", "clean", check=False)
-            assert result.returncode != 0
-            combined = (result.stdout + result.stderr).lower()
-            assert "in use" in combined
+            # Verify cache clean warns before proceeding. We pipe "N\n" to
+            # stdin to decline the confirmation, so clean does NOT execute but
+            # the warning text about running VMs is still emitted.
+            import shlex
+            import subprocess as _subprocess
 
+            cmd = shlex.split(mvm_binary) + ["cache", "clean"]
+            result = _subprocess.run(
+                cmd,
+                input="N\n",
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env={**os.environ, "NO_COLOR": "1"},
+            )
+            combined = (result.stdout + result.stderr).lower()
+            assert "running" in combined or "starting" in combined
+
+            # Verify the VM is unaffected (not cleaned)
             result_vm = _run_mvm(mvm_binary, "vm", "ls", "--json", check=False)
             if result_vm.returncode == 0:
                 vms: list[dict[str, Any]] = json.loads(result_vm.stdout)
                 assert any(v["name"] == vm_name for v in vms)
-
-            cache_dir = os.environ.get("MVM_CACHE_DIR", "")
-            if cache_dir:
-                assert os.path.isdir(cache_dir)
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
 
@@ -420,18 +430,23 @@ class TestCachePruneNonDryRun:
             from tests.system.conftest import _ensure_kernel as _ensure_kern
 
             _ensure_kern(mvm_binary)
-            # Pull an official kernel (different type) to have a non-default entry
-            _run_mvm(
+            # Try pulling a different firecracker version kernel to create a non-default entry
+            pull_result = _run_mvm(
                 mvm_binary,
                 "kernel",
                 "pull",
                 "--type",
-                "official",
-                "--version",
-                "6.19.9",
+                "firecracker",
                 timeout=120,
                 check=False,
             )
+            if pull_result.returncode != 0:
+                # Skip-reason: Could not pull a second kernel from remote.
+                # This happens when network is unavailable or the registry
+                # is unreachable.
+                pytest.skip(
+                    "Could not pull a second kernel (network unavailable?)"
+                )
             kernel_result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
             kernels = json.loads(kernel_result.stdout)
             non_default = [
@@ -440,12 +455,9 @@ class TestCachePruneNonDryRun:
                 if not k.get("is_default") and k.get("is_present")
             ]
             if not non_default:
-                # Skip-reason: No non-default kernel available to prune and
-                # could not pull one from remote. This happens when network
-                # is unavailable or the remote registry is unreachable.
-                pytest.skip(
-                    "Could not pull a second kernel to create a non-default entry"
-                )
+                # Skip-reason: Could not create a non-default kernel entry
+                # even after pulling. This is an unexpected state.
+                pytest.skip("No non-default kernel entry after pull")
 
         target = non_default[0]
         target_id = target["id"]

@@ -231,9 +231,7 @@ class TestVolumeCreateRequest:
     def test_resolve_read_only_true(self):
         """VolumeCreateRequest should pass through read_only=True."""
         request = VolumeCreateRequest(
-            inputs=VolumeCreateInput(
-                name="my-vol", size="1G", read_only=True
-            ),
+            inputs=VolumeCreateInput(name="my-vol", size="1G", read_only=True),
             db=MagicMock(),
         )
         with patch.object(VolumeRepository, "get_by_name", return_value=None):

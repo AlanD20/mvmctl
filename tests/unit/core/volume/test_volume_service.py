@@ -137,9 +137,7 @@ class TestVolumeServiceCreateDisk:
         with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
             mock_run.side_effect = ProcessError("Command not found: qemu-img")
 
-            with pytest.raises(
-                VolumeError, match="qemu-img create failed"
-            ):
+            with pytest.raises(VolumeError, match="qemu-img create failed"):
                 service.create_disk(vol)
 
     def test_create_disk_upserts_and_returns_volume(
@@ -260,9 +258,7 @@ class TestVolumeServiceResizeDisk:
                 "Command failed (exit 1): fallocate"
             )
 
-            with pytest.raises(
-                VolumeError, match="fallocate resize failed"
-            ):
+            with pytest.raises(VolumeError, match="fallocate resize failed"):
                 service.resize_disk(vol, 2147483648)
 
 
@@ -352,9 +348,7 @@ class TestVolumeServiceCreateDiskMissingBranches:
             mock_run.side_effect = ProcessError(
                 "Command failed (exit 1): qemu-img"
             )
-            with pytest.raises(
-                VolumeError, match="qemu-img create failed"
-            ):
+            with pytest.raises(VolumeError, match="qemu-img create failed"):
                 service.create_disk(vol)
 
 
@@ -370,9 +364,7 @@ class TestVolumeServiceResizeDiskMissingBranches:
         vol = _make_volume(path=str(path), fmt="raw")
         with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
             mock_run.side_effect = ProcessError("Command not found: fallocate")
-            with pytest.raises(
-                VolumeError, match="fallocate resize failed"
-            ):
+            with pytest.raises(VolumeError, match="fallocate resize failed"):
                 service.resize_disk(vol, 2147483648)
 
     def test_resize_qcow2_called_process_error(
@@ -386,9 +378,7 @@ class TestVolumeServiceResizeDiskMissingBranches:
             mock_run.side_effect = ProcessError(
                 "Command failed (exit 1): qemu-img"
             )
-            with pytest.raises(
-                VolumeError, match="qemu-img resize failed"
-            ):
+            with pytest.raises(VolumeError, match="qemu-img resize failed"):
                 service.resize_disk(vol, 2147483648)
 
     def test_resize_qcow2_qemu_img_not_found(
@@ -400,9 +390,7 @@ class TestVolumeServiceResizeDiskMissingBranches:
         vol = _make_volume(path=str(path), fmt="qcow2")
         with patch("mvmctl.core.volume._service.run_cmd") as mock_run:
             mock_run.side_effect = ProcessError("Command not found: qemu-img")
-            with pytest.raises(
-                VolumeError, match="qemu-img resize failed"
-            ):
+            with pytest.raises(VolumeError, match="qemu-img resize failed"):
                 service.resize_disk(vol, 2147483648)
 
     def test_resize_unsupported_format_raises_on_resize(

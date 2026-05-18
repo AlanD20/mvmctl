@@ -436,7 +436,7 @@ class VMCreateRequest:
             nested_virt = bool(nested_virt)
 
         # Resolve CPU config: from cpu_template (CLI) or cpu_config (import)
-        cpu_config: dict[str, Any] | None = self._inputs.cpu_config
+        cpu_config: dict[str, Any] | None = self._inputs.cpu_config  # type: ignore[assignment]
         if self._inputs.cpu_template is not None:
             if cpu_config is not None:
                 raise VMCreateError(
@@ -494,7 +494,7 @@ class VMCreateRequest:
             cloud_init_mode=ci_mode_result.mode,
             pci_enabled=pci_enabled,
             nested_virt=nested_virt,
-            cpu_config=cpu_config,
+            cpu_config=cpu_config,  # type: ignore[arg-type]
             enable_console=self._inputs.enable_console
             if self._inputs.enable_console is not None
             else self._resolve_setting("defaults.vm", "enable_console"),

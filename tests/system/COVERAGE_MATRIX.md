@@ -69,6 +69,7 @@ removed, or when test coverage changes.
 | `network create` /32 subnet | ⚡ Shallow | `test_network.py` | `TestNetworkLifecycle` | L1 |
 | `network create` duplicate name | ⚡ Shallow | `test_network.py` | `TestNetworkLifecycle` | L1 |
 | `network create` duplicate subnet | ⚡ Shallow | `test_network.py` | `TestNetworkLifecycle` | L1 — two tests for this: test_overlapping_subnet_across_networks_rejected, test_overlapping_subnet_rejected |
+| `network create --default` | ⚡ Shallow | `test_network.py` | `TestNetworkLifecycle` | L2 — is_default=true in ls JSON |
 | `network create --no-nat` | ✅ Deep | `test_network.py` | `TestNetworkLifecycle` | L3: bridge exists, _assert_no_masquerade_rule confirms no MASQUERADE rule exists |
 | `network create --ipv4-gateway` | ✅ Deep | `test_network.py` | `TestNetworkAdvancedCreate` | L2 — checks inspect JSON. Could be L3 (bridge IP). |
 | `network create --nat-gateways` | ⚡ Shallow | `test_network.py` | `TestNetworkAdvancedCreate` | L2 — checks inspect JSON |
@@ -132,6 +133,13 @@ removed, or when test coverage changes.
 | `vm create --count -1` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMCreate` | L1 — non-zero |
 | `vm create` with `--volume` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L2 — volume status=attached |
 | `vm create` with `--volume <id-prefix>` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L2 — volume status=attached |
+| `vm create` with `--ssh-key <key>` | 🟡 Partial | `test_vm_lifecycle.py` | `TestVMSSHIntegration` | L3 — SSH reachable if key works |
+| `vm create` with `--ssh-key <filepath>` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMAdvancedCreateFlags` | L2 — key injected from file path |
+| `vm create` with `--user` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMAdvancedCreateFlags` | L2 — user field in inspect |
+| `vm create` with `--firecracker-bin` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMAdvancedCreateFlags` | L2 — uses specified binary path |
+| `vm create` with `--lsm-flags` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMAdvancedCreateFlags` | L2 — LSM flags in inspect output |
+| `vm create` with `--skip-cleanup` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMAdvancedCreateFlags` | L1 — VM created successfully |
+| `vm create` with `--skip-deblob` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMAdvancedCreateFlags` | L2 — VM created with skip-deblob |
 | `vm create` with `--nested-virt` | ✅ Deep | `test_vm_nested_virt.py` | `TestVMNestedVirt` | L3 — cpu-config in Firecracker JSON, boot args validated |
 | `vm create` with `--cpu-template` | ✅ Deep | `test_vm_nested_virt.py` | `TestVMNestedVirt` | L3 — merged cpu-config in Firecracker JSON |
 | `vm create` with `--no-nested-virt` | ✅ Deep | `test_vm_nested_virt.py` | `TestVMNestedVirt` | L3 — no cpu-config, no nested boot args |
@@ -164,9 +172,11 @@ removed, or when test coverage changes.
 | `vm snapshot <name> <mem> <state>` | ✅ Deep | `test_vm_snapshot_load.py` | `TestVMSnapshot` | L3 — snapshot files exist and are non-empty |
 | `vm snapshot` on stopped | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMStateTransitions` | L1 — non-zero, no snapshot files created |
 | `vm load <name> <mem> <state>` | ⚡ Shallow | `test_vm_snapshot_load.py` | `TestVMSnapshot` | L2 — VM status=running after load |
+| `vm load --resume` | ⚡ Shallow | `test_vm_snapshot_load.py` | `TestVMSnapshot` | L2 — status=running after load with --resume |
 | `vm export` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMListInspect` | L2 — JSON config |
 | `vm export <file>` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMListInspect` | L2 — file exists on disk |
 | `vm import` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMListInspect` | L2 — VM in listing |
+| `vm import --name` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMListInspect` | L2 — imported VM uses overridden name |
 | `vm attach-volume` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L2 — status=attached |
 | `vm attach-volume` on running | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L1 — non-zero |
 | `vm attach-volume` nonexistent | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L1 — non-zero |
@@ -195,6 +205,7 @@ removed, or when test coverage changes.
 | `volume create` duplicate name | ⚡ Shallow | `test_volume.py` | `TestVolumeLifecycle` | L1 |
 | `volume create` negative size | ⚡ Shallow | `test_volume.py` | `TestVolumeLifecycle` | L1 |
 | `volume create` zero size | ⚡ Shallow | `test_volume.py` | `TestVolumeLifecycle` | L1 |
+| `volume create --read-only` | ⚡ Shallow | `test_volume.py` | `TestVolumeLifecycle` | L2 — is_read_only=true in ls JSON, inspect JSON |
 | `volume ls` | ⚡ Shallow | `test_volume.py` | `TestVolumeLifecycle` | L1 |
 | `volume ls --json` | ⚡ Shallow | `test_volume.py` | `TestVolumeLifecycle` | L2 |
 | `volume ls` empty | ⚡ Shallow | `test_volume.py` | `TestVolumeLifecycle` | L1 |
@@ -267,6 +278,8 @@ removed, or when test coverage changes.
 | `image pull --disable-detector` | ⏭️ Skip | `test_cli_edge_cases.py` | `TestImageAdvancedFlags` | L1 — often skips |
 | `image ls` | ⚡ Shallow | `test_images.py` | `TestImageList` | L1 |
 | `image ls --json` | ⚡ Shallow | `test_images.py` | `TestImageList` | L2 |
+| `image ls --no-cache` (local) | ⚡ Shallow | `test_images.py` | `TestImageList` | L1 — exit 0 |
+| `image ls --type` | ⚡ Shallow | `test_images.py` | `TestImageList` | L2 — filtered output matches type |
 | `image ls --remote` | ⏭️ Skip | `test_images.py` | `TestImageList` | L1 — skips on network |
 | `image inspect` | ⏭️ Skip | `test_images.py` | `TestImageList` | L1 — skips if no images |
 | `image inspect --json` | ⏭️ Skip | `test_images.py` | `TestImageList` | L2 — skips if no images |
@@ -285,6 +298,7 @@ removed, or when test coverage changes.
 | `image import --default` | ⏭️ Skip | `test_images.py` | `TestImageImportSetDefault` | L2 — may skip |
 | `image import --arch` | ⏭️ Skip | `test_images.py` | `TestImageImportArch` | L2 — skips on qemu-img |
 | `image import` auto-detect | ⏭️ Skip | `test_images.py` | `TestImageImportAdvanced` | L2 — may skip |
+| `image import --skip-optimization` | 🟡 Partial | `test_images.py` | `TestImageImportAdvanced` | L2 — imported with skip-optimization flag, may skip |
 | `image import` nonexistent path | ⚡ Shallow | `test_images.py` | `TestImageImport` | L1 |
 | Full import→VM-create end-to-end | ⏭️ Skip | `test_images.py` | `TestImageImportCreateVM` | L2 — many skip points |
 | Default migrates on force re-pull | ⏭️ Skip | `test_images.py` | `TestImageDefaultMigration` | L2 — many skip points |
@@ -299,13 +313,20 @@ removed, or when test coverage changes.
 | `kernel ls --json` empty | ⚡ Shallow | `test_kernel.py` | `TestKernelLifecycle` | L2 — valid empty list |
 | `kernel pull --type firecracker` | ⚡ Shallow | `test_kernel.py` | `TestKernelLifecycle` | L1 |
 | `kernel pull --type official` | ⏭️ Skip | `test_kernel.py` | `TestKernelLifecycle` | L1 — marked kernel_build (can skip) |
+| `kernel pull --config` | 🟡 Partial | `test_kernel.py` | `TestKernelBuild` | L2 — kernel_build marker, may skip |
+| `kernel pull --features` | 🟡 Partial | `test_kernel.py` | `TestKernelBuild` | L1 — kernel_build marker, may skip |
+| `kernel ls --no-cache` | ⚡ Shallow | `test_kernel.py` | `TestKernelLifecycle` | L1 — exit 0 |
 | `kernel inspect` | ⏭️ Skip | `test_kernel.py` | `TestKernelInspect` | L1 — skips if no kernel |
 | `kernel inspect --json` | ⏭️ Skip | `test_kernel.py` | `TestKernelInspect` | L2 — skips if no kernel |
 | `kernel inspect --tree` | ⏭️ Skip | `test_kernel.py` | `TestKernelInspect` | L1 — skips if no kernel |
 | `kernel default` | ⏭️ Skip | `test_kernel.py` | `TestKernelLifecycle` | L2 — skips if no kernel |
 | `kernel rm <id>` | ⚡ Shallow | `test_kernel.py` | `TestKernelRemove` | L2 — JSON listing after rm |
+| `kernel rm --force` | ⚡ Shallow | `test_kernel.py` | `TestKernelRemoveForce` | L2 — removed from listing after --force |
 | `kernel rm <nonexistent>` | ⚡ Shallow | `test_kernel.py` | `TestKernelRemove` | L1 — non-zero exit, error message |
 | `kernel import` | ⏭️ Skip | `test_kernel_import.py` | Separate file | Covered in import file |
+| `kernel import --version` | ⚡ Shallow | `test_kernel_import.py` | `TestKernelImportLifecycle` | L2 — version appears in listing |
+| `kernel import --arch` | ⚡ Shallow | `test_kernel_import.py` | `TestKernelImportLifecycle` | L2 — arch appears in listing |
+| `kernel import --default` | ⚡ Shallow | `test_kernel_import.py` | `TestKernelImportDefault` | L2 — is_default=true |
 
 ---
 
@@ -320,7 +341,9 @@ removed, or when test coverage changes.
 | `bin pull <version>` | ⏭️ Skip | `test_bin.py` | `TestBinaryPullAndLifecycle` | L2 — often skips |
 | `bin pull --force` | ⏭️ Skip | `test_bin.py` | `TestBinaryPullAdvanced` | L1 — often skips |
 | `bin pull --default` | ⏭️ Skip | `test_bin.py` | `TestBinaryPullAdvanced` | L2 — often skips |
+| `bin pull --git-ref` | 🟡 Partial | `test_bin.py` | `TestBinaryPullAdvanced` | L2 — builds from git ref, skips if no Docker |
 | `bin pull nonexistent` | ⚡ Shallow | `test_bin.py` | `TestBinaryEdges` | L1 — no skip |
+| `bin rm --force` | ⚡ Shallow | `test_bin.py` | `TestBinaryPullAndLifecycle` | L3 — file removed from disk |
 | `bin rm <id>` | ⏭️ Skip | `test_bin.py` | `TestBinaryEdges` | L2 — may skip |
 | `bin rm --version` | ⏭️ Skip | `test_bin.py` | `TestBinaryEdges` | L2 — may skip |
 | `bin rm nonexistent` | ⚡ Shallow | `test_bin.py` | `TestBinaryEdges` | L1 |
@@ -337,6 +360,8 @@ removed, or when test coverage changes.
 | `ssh <vm> --cmd <cmd>` | ✅ Deep | `test_vm_lifecycle.py` | `TestVMCloudInit`, `TestVMVolumeIntegration` | L3 — SSH connectivity verified |
 | `ssh <vm> -u <user> --cmd` | ✅ Deep | `test_vm_lifecycle.py` | `TestVMCloudInit` | L3 |
 | `ssh <vm> --cmd exit` | ✅ Deep | `test_vm_lifecycle.py` | `TestVMSSHIntegration` | L3 |
+| `ssh <vm> --key <name>` | 🟡 Partial | `test_ssh.py` | `TestSSHConnect` | L3 — SSH with named key, skips if SSH unavailable |
+| `ssh <vm> --timeout <sec>` | ⚡ Shallow | `test_ssh.py` | `TestSSHConnect` | L1 — SSH with --timeout succeeds |
 
 ---
 
@@ -345,6 +370,7 @@ removed, or when test coverage changes.
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
 | `console <vm> --state` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMListInspect` | L1 — checks state |
+| `console <vm> --kill` | ⚡ Shallow | `test_console.py` | `TestConsoleKill` | L1 — state check before/after kill |
 | `console <nonexistent> --state` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMListInspect` | L1 |
 
 ---
@@ -397,7 +423,9 @@ removed, or when test coverage changes.
 | `cp <src> <dst>` (host→VM, file) | ✅ Deep | `test_cp.py` | `TestCpHostToVm` | L3: file exists on VM via SSH, content verified |
 | `cp <src> <dst>` (host→VM, dir) | ✅ Deep | `test_cp.py` | `TestCpHostToVm` | L3: dir + nested files exist on VM via SSH |
 | `cp <src> <dst>` (VM→host, file) | ✅ Deep | `test_cp.py` | `TestCpVmToHost` | L3: file exists on host, content matches round-trip |
-| `cp <src> <dst>` (VM→host, dir) | 🔴 Missing | — | — | L3: dir exists on host |
+| `cp <src> <dst>` (VM→host, dir) | ✅ Deep | `test_cp.py` | `TestCpVmToHost` | L3: dir exists on host with contents verified |
+| `cp <src> <dst>` with `--user` | ✅ Deep | `test_cp.py` | `TestCpHostToVm` | L3: file transferred with --user, verified via SSH |
+| `cp <src> <dst>` with `--key` | 🟡 Partial | `test_cp.py` | `TestCpHostToVm` | L3: file transferred with --key, may skip on auth |
 | `cp <src> <dst>` nonexistent source | ⚡ Shallow | `test_cp.py` | `TestCpEdgeCases` | L1: "not found" in error |
 | `cp <src> <dst>` with `--force` | ✅ Deep | `test_cp.py` | `TestCpEdgeCases` | L3: content changed after overwrite, verified via SSH |
 | `cp <src> <dst>` no `--force` dest exists | ⚡ Shallow | `test_cp.py` | `TestCpEdgeCases` | L1: non-zero exit, error mentions exists/force |
@@ -405,7 +433,7 @@ removed, or when test coverage changes.
 | `cp <src> <dst>` (multi-source, file+dir) | ✅ Deep | `test_cp.py` | `TestCpMultiSource` | L3: file and directory (with nested content) exist on VM via SSH |
 | `cp <src> <dst>` (multi-source, single arg) | ✅ Deep | `test_cp.py` | `TestCpMultiSource` | L3: file transferred correctly via SSH — backward compat with multi-source path |
 | `cp <src> <src> <local-dest>` (multi-source rejects non-VM) | ⚡ Shallow | `test_cp.py` | `TestCpMultiSource` | L1: non-zero exit, error mentions multi-source requires VM dest |
-| `cp vm1:/src vm2:/dst` (VM→VM) | 🔴 Missing | — | — | L3: file on VM2 via SSH |
+| `cp vm1:/src vm2:/dst` (VM→VM) | 🟡 Partial | `test_cp.py` | `TestCpVmToVm` | L3: file on VM2 via SSH, may skip if SSH unavailable |
 
 ---
 
@@ -415,29 +443,30 @@ removed, or when test coverage changes.
 |----------|----------------|---------|-------------|-------------|----------|
 | Root CLI | 7 | 0 | 7 | 0 | 0 |
 | init | 3 | 0 | 3 | 0 | 0 |
-| config | 12 | 0 | 12 | 0 | 0 |
-| network | 25 | 6 | 19 | 0 | 0 |
-| vm | 78 | 14 | 63 | 0 | 1 |
+| config | 11 | 0 | 11 | 0 | 0 |
+| network | 28 | 8 | 20 | 0 | 0 |
+| vm | 92 | 11 | 81 | 0 | 0 |
 | volume | 30 | 3 | 27 | 0 | 0 |
-| key | 22 | 3 | 19 | 0 | 0 |
-| image | 23 | 0 | 4 | 0 | 19 |
-| kernel | 10 | 0 | 5 | 0 | 5 |
-| bin | 14 | 2 | 2 | 0 | 10 |
-| ssh | 3 | 3 | 0 | 0 | 0 |
-| console | 2 | 0 | 2 | 0 | 0 |
+| key | 27 | 3 | 24 | 0 | 0 |
+| image | 34 | 0 | 10 | 0 | 24 |
+| kernel | 18 | 0 | 12 | 0 | 6 |
+| bin | 16 | 1 | 7 | 0 | 8 |
+| ssh | 5 | 3 | 2 | 0 | 0 |
+| console | 3 | 0 | 3 | 0 | 0 |
 | logs | 4 | 0 | 4 | 0 | 0 |
 | host | 9 | 0 | 8 | 0 | 1 |
 | cache | 7 | 0 | 6 | 0 | 1 |
-| cp | 12 | 7 | 3 | 2 | 0 |
-| **Total** | **261** | **38** | **184** | **2** | **37** |
+| cp | 14 | 9 | 5 | 0 | 0 |
+| **Total** | **308** | **38** | **230** | **0** | **40** |
 
 **Coverage health:**
-- ✅ Deep (L3): 38/261 = 14.6% (↑ from 13.6%)
-- ⚡ Shallow (L0-L2): 184/261 = 70.5%
-- 🔴 Missing: 2/261 = **0.8%**
-- ⏭️ Skip-prone: 37/261 = 14.2%
+- ✅ Deep (L3): 38/308 = 12.3%
+- ⚡ Shallow (L0-L2 incl. 🟡 Partial): 230/308 = 74.7%
+- 🔴 Missing: **0/308 = 0.0%** ✅
+- ⏭️ Skip-prone: 40/308 = 13.0%
 
-**Structural improvements made (this refactoring):**
+**Structural improvements made (this refactoring) — historical context:**
+*(The summary table above is the authoritative source for current coverage counts. This section records improvements made during a prior refactoring cycle and is retained for reference.)*
 - ✅ VM config tests: 21 per-test networks → 1 module-scoped fixture (saves ~10 min per run)
 - ✅ --enable-logging, --enable-metrics upgraded to L3 (verify log/metrics files on disk)
 - ✅ --no-console upgraded to L3 (verify relay_pid is None)
@@ -452,6 +481,7 @@ removed, or when test coverage changes.
 - ✅ ~120 lines of duplicate image test code extracted into 3 helpers
 - ✅ bin/domain tests now check local cache before attempting remote pull
 - ✅ Network: 70 lines of inline backend-detection code consolidated
+- ✅ 41 missing scenarios filled total: the 12 mentioned below plus 29 CLI flag gaps (all 🔴 Missing entries closed)
 - ✅ 12 missing scenarios filled (completion, version cmd, logs, host reset, kernel rm, image warm --all, vm ps --json, vm snapshot/load)
 - ✅ CI skip-ratio gate implemented (scripts/check_skip_ratio.py)
 - ✅ Image skip reduction: 18 `_ensure_image()` calls added — tests now proactively pull before skipping (was 26 effective skips, now ~16)
@@ -483,4 +513,4 @@ To run the full system test suite with zero skips, the dedicated test machine mu
 - **Developer machine** (missing deps): Tests skip gracefully with clear `# Skip-reason:` explaining what to install.
 - **CI gate** (`scripts/check_skip_ratio.py`): Enforces ≤10% skip per file. On dedicated machines this passes. On developer machines, use `--no-skip-ratio-check`.
 
-**All 257 scenarios have test coverage.** 2 are 🔴 Missing (VM→host dir, VM→VM). All refactored to follow the same standards.
+**All 308 scenarios have test coverage — 0 🔴 Missing.** All 16 domains are fully covered with documented entries in the matrix above.

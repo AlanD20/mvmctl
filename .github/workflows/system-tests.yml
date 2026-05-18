@@ -5,7 +5,7 @@ on:
 
 jobs:
   system-tests:
-    runs-on: self-hosted
+    runs-on: kvm-runner
     steps:
       - uses: actions/checkout@v6
       - name: Install uv

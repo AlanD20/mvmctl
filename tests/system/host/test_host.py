@@ -31,20 +31,24 @@ class TestHostInfo:
                 f"Unexpected output for uninitialized host: {combined}"
             )
             pytest.skip("Host not initialized (run 'mvm host init' first)")
-        # L1: Verify stdout contains expected section headers
+        # L1: Verify stdout contains expected section headers in tree format
         stdout = result.stdout
-        assert "Host:" in stdout, (
-            f"host info missing 'Host:' section:\n{stdout}"
+        assert "Host Info" in stdout, (
+            f"host info missing title 'Host Info':\n{stdout}"
         )
-        assert "CPU:" in stdout, f"host info missing 'CPU:' section:\n{stdout}"
-        assert "Memory:" in stdout, (
-            f"host info missing 'Memory:' section:\n{stdout}"
+        assert "Hostname" in stdout, (
+            f"host info missing 'Hostname' section:\n{stdout}"
         )
-        assert "Limits:" in stdout, (
-            f"host info missing 'Limits:' section:\n{stdout}"
+        assert "CPU" in stdout, f"host info missing 'CPU' section:\n{stdout}"
+        assert "Memory" in stdout or "memory" in stdout.lower(), (
+            f"host info missing 'Memory' section:\n{stdout}"
         )
-        assert "Capacity:" in stdout, (
-            f"host info missing 'Capacity:' section:\n{stdout}"
+        # The title uses different case for 'Limits' vs 'limits' depending on format
+        assert "imits" in stdout.lower(), (
+            f"host info missing 'Limits' section:\n{stdout}"
+        )
+        assert "apacity" in stdout.lower(), (
+            f"host info missing 'Capacity' section:\n{stdout}"
         )
 
     def test_host_info_json(self, mvm_binary):

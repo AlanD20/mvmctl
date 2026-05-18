@@ -26,11 +26,6 @@ if TYPE_CHECKING:
         HttpDirVersionResolver,
         VersionInfo,
     )
-    from mvmctl.core._shared._iptables_tracker import (
-        IPTablesRuleRepository,
-        IPTablesRuleResolver,
-        IPTablesTracker,
-    )
     from mvmctl.core._shared._parallel import ParallelExecutor
     from mvmctl.core._shared._resolver_registry import get as get_resolver
     from mvmctl.core._shared._resolver_registry import register
@@ -47,9 +42,6 @@ __all__ = [
     "FirewallTracker",
     "get_resolver",
     "HttpDirVersionResolver",
-    "IPTablesRuleRepository",
-    "IPTablesRuleResolver",
-    "IPTablesTracker",
     "ParallelExecutor",
     "register",
     "RelationEnricher",
@@ -70,18 +62,6 @@ _LAZY_MAP = {
     ),
     "RelationEnricher": ("mvmctl.core._shared._enrichment", "RelationEnricher"),
     "RelationSpec": ("mvmctl.core._shared._enrichment", "RelationSpec"),
-    "IPTablesRuleRepository": (
-        "mvmctl.core._shared._iptables_tracker._repository",
-        "IPTablesRuleRepository",
-    ),
-    "IPTablesRuleResolver": (
-        "mvmctl.core._shared._iptables_tracker._resolver",
-        "IPTablesRuleResolver",
-    ),
-    "IPTablesTracker": (
-        "mvmctl.core._shared._iptables_tracker._tracker",
-        "IPTablesTracker",
-    ),
     "HttpDirVersionResolver": (
         "mvmctl.core._shared._http_dir_version_resolver",
         "HttpDirVersionResolver",

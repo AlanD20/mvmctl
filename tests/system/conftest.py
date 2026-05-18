@@ -208,7 +208,8 @@ def _ensure_binary(binary: str) -> None:
         )
     if not has:
         _pull_asset(
-            binary, ["bin", "pull", "firecracker", "--version", "1.15.1", "--default"],
+            binary,
+            ["bin", "pull", "firecracker", "--version", "1.15.1", "--default"],
             "firecracker binary",
         )
 
@@ -294,7 +295,11 @@ def _ensure_services_binary(binary: str) -> None:
     dest.chmod(0o755)
 
     # Create symlinks so the service binaries are findable by name
-    for _link_name in ("mvm-provision", "mvm-console-relay", "mvm-nocloud-server"):
+    for _link_name in (
+        "mvm-provision",
+        "mvm-console-relay",
+        "mvm-nocloud-server",
+    ):
         _link_path = bin_dir / _link_name
         _link_path.unlink(missing_ok=True)
         _link_path.symlink_to(dest.name)

@@ -234,17 +234,13 @@ class VMCreateContext:
                 self.cloud_init_result.nocloud_net_manager.stop()
 
                 # Remove all rules created by cloud-init, currently only nocloud-net
-                # creates rule.
-                from mvmctl.core._shared import IPTablesTracker
-                from mvmctl.core._shared._iptables_tracker._repository import (
-                    IPTablesRuleRepository,
-                )
+                # creates rule. Must go through FirewallTracker to respect the
+                # configured backend (nftables vs iptables).
+                from mvmctl.core._shared import FirewallTracker
 
-                iptables_tracker = IPTablesTracker(
-                    IPTablesRuleRepository(self._db)
-                )
+                fw_tracker = FirewallTracker(self._db)
                 for rule in self.cloud_init_result.nocloud_net_rules:
-                    iptables_tracker.remove_rule(rule)
+                    fw_tracker.remove_rule(rule)
             except Exception as exc:
                 logger.warning(
                     "Failed to stop nocloud server during cleanup: %s", exc

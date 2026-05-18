@@ -174,8 +174,12 @@ class NFTablesTracker:
 
         # ── Ensure built-in base chains exist (FORWARD, INPUT, POSTROUTING)
         # Native nftables tables don't come with these automatically.
-        for (family, table, chain), hook_def in _BASE_CHAINS.items():
-            if self._chain_exists(family, table, chain):
+        for (
+            family,
+            table,
+            builtin_chain_name,
+        ), hook_def in _BASE_CHAINS.items():
+            if self._chain_exists(family, table, builtin_chain_name):
                 continue
             try:
                 run_cmd(
@@ -185,20 +189,20 @@ class NFTablesTracker:
                         "chain",
                         family,
                         table,
-                        chain,
+                        builtin_chain_name,
                         hook_def,
                     ],
                     privileged=True,
                 )
                 logger.info(
                     "Created built-in chain %s in %s/%s",
-                    chain,
+                    builtin_chain_name,
                     family,
                     table,
                 )
             except ProcessError as e:
                 raise RuntimeError(
-                    f"Failed to create built-in chain {chain} "
+                    f"Failed to create built-in chain {builtin_chain_name} "
                     f"in {family}/{table}: {e}"
                 ) from e
 

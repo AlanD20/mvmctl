@@ -1,4 +1,4 @@
-"""Tests for utils/cli.py — CLI utilities (handle_errors decorator, CliUtils)."""
+"""Tests for utils/cli.py — CLI utilities (handle_errors decorator, MVMCli)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import typer
 from typer.testing import CliRunner as TyperCliRunner
 
 from mvmctl.exceptions import MVMError, PrivilegeError, format_exception_debug
-from mvmctl.utils.cli import CliUtils, _print_error, handle_errors
+from mvmctl.utils.cli import MVMCli, handle_errors
 
 # <leave rest untouched>
 
@@ -124,30 +124,30 @@ class TestHandleErrors:
 
 
 # ---------------------------------------------------------------------------
-# CliUtils
+# MVMCli
 # ---------------------------------------------------------------------------
 
 
-class TestCliUtilsCheckNameArg:
-    """Tests for CliUtils.check_name_arg()."""
+class TestMVMCliCheckNameArg:
+    """Tests for MVMCli.check_name_arg()."""
 
     def test_valid_name_returns_name(self):
         """Should return the name when valid."""
         ctx = MagicMock()
-        result = CliUtils.check_name_arg(ctx, "my-vm")
+        result = MVMCli.check_name_arg(ctx, "my-vm")
         assert result == "my-vm"
 
     def test_none_shows_help(self):
         """Should show help and exit when name is None."""
         ctx = MagicMock()
         with pytest.raises(typer.Exit):
-            CliUtils.check_name_arg(ctx, None)
+            MVMCli.check_name_arg(ctx, None)
 
     def test_help_shows_help(self):
         """Should show help and exit when name is 'help'."""
         ctx = MagicMock()
         with pytest.raises(typer.Exit):
-            CliUtils.check_name_arg(ctx, "help")
+            MVMCli.check_name_arg(ctx, "help")
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +233,7 @@ class TestHandleErrorsAdditional:
             _cmd()
         assert exc_info.value.exit_code == 1
         captured = capsys.readouterr()
-        assert "permission denied" in captured.out
+        assert "permission denied" in captured.err
 
     def test_privilege_error_with_details(self, capsys):
         """PrivilegeError with details should print details and suggestions."""
@@ -255,7 +255,7 @@ class TestHandleErrorsAdditional:
             _cmd()
         assert exc_info.value.exit_code == 1
         captured = capsys.readouterr()
-        assert "User not in mvm group" in captured.out
+        assert "User not in mvm group" in captured.err
         assert "sudo usermod" in captured.out
 
     def test_privilege_error_with_details_no_message(self, capsys):
@@ -304,22 +304,24 @@ class TestHandleErrorsAdditional:
         assert "unexpected runtime error" in str(args)
 
 
-class TestPrintError:
-    """Tests for _print_error()."""
+class TestMVMCliError:
+    """Tests for MVMCli.error()."""
 
-    def test_print_error_normal(self, mocker):
+    def test_error_normal(self, mocker):
         """Normal error should use red color and 'Error' title."""
-        mock_console = mocker.patch("mvmctl.utils.cli._err_console")
-        _print_error("test error")
+        cli = MVMCli()
+        mock_console = mocker.patch.object(cli, "_err_console")
+        cli.error("test error")
         mock_console.print.assert_called_once()
         call_arg = mock_console.print.call_args[0][0]
         assert "Error" in call_arg
         assert "test error" in call_arg
 
-    def test_print_error_unexpected(self, mocker):
+    def test_error_unexpected(self, mocker):
         """Unexpected error should use yellow and 'Unexpected Error'."""
-        mock_console = mocker.patch("mvmctl.utils.cli._err_console")
-        _print_error("unexpected", is_unexpected=True)
+        cli = MVMCli()
+        mock_console = mocker.patch.object(cli, "_err_console")
+        cli.error("unexpected", is_unexpected=True)
         mock_console.print.assert_called_once()
         call_arg = mock_console.print.call_args[0][0]
         assert "Unexpected Error" in call_arg

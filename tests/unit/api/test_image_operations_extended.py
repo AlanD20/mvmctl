@@ -151,9 +151,7 @@ class TestImageOperationPull:
             return_value=mock_images_dir,
         )
 
-        result = ImageOperation.pull(
-            ImagePullInput(type="ubuntu-24.04")
-        )
+        result = ImageOperation.pull(ImagePullInput(type="ubuntu-24.04"))
         assert result.status == "skipped"
         assert result.code == "image.already_present"
         assert result.item is existing
@@ -187,9 +185,7 @@ class TestImageOperationPull:
         new_item = _make_image(type="ubuntu-24.04")
         deps["image_svc"].optimize_image.return_value = new_item
 
-        result = ImageOperation.pull(
-            ImagePullInput(type="ubuntu-24.04")
-        )
+        result = ImageOperation.pull(ImagePullInput(type="ubuntu-24.04"))
         assert result.status == "success"
         assert result.code == "image.acquired"
         deps["image_svc"].download_image.assert_called_once()
@@ -221,9 +217,7 @@ class TestImageOperationPull:
             "no root partition"
         )
 
-        result = ImageOperation.pull(
-            ImagePullInput(type="ubuntu-24.04")
-        )
+        result = ImageOperation.pull(ImagePullInput(type="ubuntu-24.04"))
         assert result.status == "error"
         assert result.code == "image.acquire_failed"
 
@@ -236,9 +230,7 @@ class TestImageOperationPull:
             "multiple partitions"
         )
 
-        result = ImageOperation.pull(
-            ImagePullInput(type="ubuntu-24.04")
-        )
+        result = ImageOperation.pull(ImagePullInput(type="ubuntu-24.04"))
         assert result.status == "error"
 
     def test_pull_cleans_up_old_image(self, mocker):
@@ -255,9 +247,7 @@ class TestImageOperationPull:
         deps["image_svc"].optimize_image.return_value = new_item
         deps["image_svc"].remove_many_paths.return_value = ["old-file"]
 
-        ImageOperation.pull(
-            ImagePullInput(type="ubuntu-24.04", force=True)
-        )
+        ImageOperation.pull(ImagePullInput(type="ubuntu-24.04", force=True))
         deps["image_svc"].remove_many_paths.assert_called_once_with([existing])
 
     def test_pull_with_default_firecracker_ci_version(self, mocker):
@@ -272,9 +262,7 @@ class TestImageOperationPull:
         deps["image_svc"].extract_image.return_value = Path("/tmp/ext.ext4")
         deps["image_svc"].optimize_image.return_value = _make_image()
 
-        ImageOperation.pull(
-            ImagePullInput(type="ubuntu-24.04")
-        )
+        ImageOperation.pull(ImagePullInput(type="ubuntu-24.04"))
         call_args = deps["image_svc"].download_image.call_args
         assert call_args is not None
         assert call_args[0][4] == "v1.11"
@@ -296,9 +284,7 @@ class TestImageOperationPull:
         )
 
         with pytest.raises(ImageError, match="Failed to resolve output_dir"):
-            ImageOperation.pull(
-                ImagePullInput(type="ubuntu-24.04")
-            )
+            ImageOperation.pull(ImagePullInput(type="ubuntu-24.04"))
 
 
 class TestImageOperationImport:
@@ -575,11 +561,11 @@ class TestImageOperationHelpersExtended:
         spec = MagicMock(id="missing")
         spec.type = "missing"
         spec.version = "1.0"
-        result = ImageOperation.find_existing_image(
-            spec, images_dir, mock_repo
-        )
+        result = ImageOperation.find_existing_image(spec, images_dir, mock_repo)
         assert result is None
-        mock_repo.get_by_version_and_type.assert_called_once_with("1.0", "missing")
+        mock_repo.get_by_version_and_type.assert_called_once_with(
+            "1.0", "missing"
+        )
 
     def test_find_existing_image_returns_none_when_no_path(self, mocker):
         item = _make_image("test", path="")
@@ -589,9 +575,7 @@ class TestImageOperationHelpersExtended:
 
         spec = MagicMock(id="test")
         spec.type = "test"
-        result = ImageOperation.find_existing_image(
-            spec, images_dir, mock_repo
-        )
+        result = ImageOperation.find_existing_image(spec, images_dir, mock_repo)
         assert result is None
 
     def test_pull_image_with_no_ci_version(self, mocker):
@@ -602,7 +586,5 @@ class TestImageOperationHelpersExtended:
         deps["image_svc"].extract_image.return_value = Path("/tmp/ext.ext4")
         deps["image_svc"].optimize_image.return_value = _make_image()
 
-        result = ImageOperation.pull(
-            ImagePullInput(type="ubuntu-24.04")
-        )
+        result = ImageOperation.pull(ImagePullInput(type="ubuntu-24.04"))
         assert result.status == "success"

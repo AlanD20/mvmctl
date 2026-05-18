@@ -140,8 +140,8 @@ class TestHelpOutputConsistentFormat:
         help_text = result.stdout
 
         assert "Usage:" in help_text, f"'{cmd_group} --help' missing 'Usage:'"
-        assert "Commands:" in help_text, (
-            f"'{cmd_group} --help' missing 'Commands:'"
+        assert "Commands" in help_text, (
+            f"'{cmd_group} --help' missing 'Commands'"
         )
         assert "--help" in help_text, (
             f"'{cmd_group} --help' missing '--help' reference"
@@ -336,7 +336,9 @@ class TestNetworkEdgeCases:
             check=False,
         )
         assert result.returncode != 0
-        assert "Missing required option '--subnet'" in result.stdout
+        assert "Missing required option '--subnet'" in (
+            result.stdout + result.stderr
+        )
 
     def test_network_set_default_nonexistent(self, mvm_binary):
         """``network set-default`` with nonexistent name should fail."""
@@ -1126,7 +1128,7 @@ class TestCacheEdgeCases:
         # missing arguments. Non-destructive.
         result = _run_mvm(mvm_binary, "cache", "prune", check=False)
         assert result.returncode != 0
-        assert "No resource specified" in result.stdout
+        assert "No resource specified" in (result.stdout + result.stderr)
 
     @pytest.mark.requires_kvm
     @pytest.mark.slow

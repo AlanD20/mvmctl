@@ -547,6 +547,47 @@ class TestBinaryPullAdvanced:
             f"Defaults: {[(e['version'], e['is_default']) for e in entries if e.get('name') == 'firecracker']}"
         )
 
+    @pytest.mark.serial
+    def test_bin_pull_git_ref(self, mvm_binary: str) -> None:
+        """Pull a Firecracker binary from a git ref (build from source via Docker).
+
+        Rationale: --git-ref builds Firecracker from source at a specific
+        branch/tag/commit. This requires Docker and network access.
+        Skipped gracefully when Docker is unavailable.
+        """
+        import shutil as _shutil
+
+        docker_path = _shutil.which("docker")
+        if not docker_path:
+            # Skip-reason: Docker is required to build Firecracker from source
+            # via --git-ref. Install Docker to run this test.
+            pytest.skip("Docker not available on this system")
+
+        result = _run_mvm(
+            mvm_binary,
+            "bin",
+            "pull",
+            "firecracker",
+            "--git-ref",
+            "v1.15.1",
+            check=False,
+            timeout=600,
+        )
+        if result.returncode != 0:
+            # Skip-reason: Build from git ref failed. This can happen when
+            # Docker is not running, network is unavailable, or the build
+            # takes longer than the timeout. The --git-ref feature requires
+            # a working Docker setup with internet access.
+            pytest.skip(
+                f"bin pull --git-ref failed (Docker build issue): "
+                f"{result.stderr[:200]}"
+            )
+        # L1: Verify success message mentions the binary
+        assert (
+            "built" in result.stdout.lower()
+            or "firecracker" in result.stdout.lower()
+        ), f"Expected build success message, got: {result.stdout[:200]}"
+
 
 # ============================================================================
 # Pull, set-default, and remove (includes rm — last destructive section)
