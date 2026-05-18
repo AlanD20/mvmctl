@@ -104,33 +104,36 @@ class TestBinPull:
 
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_pull_success(self, mock_bin_op):
+        mock_bin_op.list_all.return_value = ["1.16.0", "1.15.0", "1.14.0"]
         mock_bin_op.get.return_value = None  # Not already downloaded
         mock_bin_op.pull.return_value = OperationResult(
             status="success",
             code="binary.downloaded",
             item=[_make_binary("firecracker", "1.15.0")],
         )
-        result = runner.invoke(app, ["bin", "pull", "1.15.0"])
+        result = runner.invoke(app, ["bin", "pull", "firecracker", "--version", "1.15.0"])
         assert result.exit_code == 0
         assert "Downloaded" in result.output
 
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_pull_with_set_default(self, mock_bin_op):
+        mock_bin_op.list_all.return_value = ["1.16.0", "1.15.0", "1.14.0"]
         mock_bin_op.get.return_value = None
         mock_bin_op.pull.return_value = OperationResult(
             status="success",
             code="binary.downloaded",
             item=[_make_binary("firecracker", "1.15.0")],
         )
-        result = runner.invoke(app, ["bin", "pull", "1.15.0", "--default"])
+        result = runner.invoke(app, ["bin", "pull", "firecracker", "--version", "1.15.0", "--default"])
         assert result.exit_code == 0
         assert "Default binary set" in result.output
 
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_pull_error(self, mock_bin_op):
+        mock_bin_op.list_all.return_value = ["1.16.0", "1.15.0", "1.14.0", "1.5.0"]
         mock_bin_op.get.return_value = None
         mock_bin_op.pull.side_effect = MVMError("download failed")
-        result = runner.invoke(app, ["bin", "pull", "1.5.0"])
+        result = runner.invoke(app, ["bin", "pull", "firecracker", "--version", "1.5.0"])
         assert result.exit_code == 1
 
     def test_pull_help(self):
@@ -272,37 +275,41 @@ class TestBinPullExtras:
 
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_pull_already_exists_decline(self, mock_bin_op):
+        mock_bin_op.list_all.return_value = ["1.16.0", "1.15.0", "1.14.0"]
         mock_bin_op.get.return_value = [_make_binary("firecracker", "1.15.0")]
-        result = runner.invoke(app, ["bin", "pull", "1.15.0"], input="n\n")
+        result = runner.invoke(app, ["bin", "pull", "firecracker", "--version", "1.15.0"], input="n\n")
         assert result.exit_code == 0
         assert "Aborted" in result.output
 
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_pull_already_exists_accept(self, mock_bin_op):
+        mock_bin_op.list_all.return_value = ["1.16.0", "1.15.0", "1.14.0"]
         mock_bin_op.get.return_value = [_make_binary("firecracker", "1.15.0")]
         mock_bin_op.pull.return_value = OperationResult(
             status="success",
             code="binary.downloaded",
             item=[_make_binary("firecracker", "1.15.0")],
         )
-        result = runner.invoke(app, ["bin", "pull", "1.15.0"], input="y\n")
+        result = runner.invoke(app, ["bin", "pull", "firecracker", "--version", "1.15.0"], input="y\n")
         assert result.exit_code == 0
         assert "Downloaded" in result.output
 
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_pull_force_skip_confirm(self, mock_bin_op):
+        mock_bin_op.list_all.return_value = ["1.16.0", "1.15.0", "1.14.0"]
         mock_bin_op.get.return_value = [_make_binary("firecracker", "1.15.0")]
         mock_bin_op.pull.return_value = OperationResult(
             status="success",
             code="binary.downloaded",
             item=[_make_binary("firecracker", "1.15.0")],
         )
-        result = runner.invoke(app, ["bin", "pull", "1.15.0", "--force"])
+        result = runner.invoke(app, ["bin", "pull", "firecracker", "--version", "1.15.0", "--force"])
         assert result.exit_code == 0
         assert "Downloaded" in result.output
 
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_pull_skipped_status(self, mock_bin_op):
+        mock_bin_op.list_all.return_value = ["1.16.0", "1.15.0", "1.14.0"]
         mock_bin_op.get.return_value = None
         mock_bin_op.pull.return_value = OperationResult(
             status="skipped",
@@ -310,31 +317,33 @@ class TestBinPullExtras:
             message="Already present",
             item=[_make_binary("firecracker", "1.15.0")],
         )
-        result = runner.invoke(app, ["bin", "pull", "1.15.0"])
+        result = runner.invoke(app, ["bin", "pull", "firecracker", "--version", "1.15.0"])
         assert result.exit_code == 0
         assert "Already present" in result.output
 
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_pull_error_status(self, mock_bin_op):
+        mock_bin_op.list_all.return_value = ["1.16.0", "1.15.0", "1.14.0", "1.5.0"]
         mock_bin_op.get.return_value = None
         mock_bin_op.pull.return_value = OperationResult(
             status="error",
             code="binary.fetch_failed",
             message="Network error",
         )
-        result = runner.invoke(app, ["bin", "pull", "1.5.0"])
+        result = runner.invoke(app, ["bin", "pull", "firecracker", "--version", "1.5.0"])
         assert result.exit_code == 1
         assert "Network error" in result.output
 
     @patch("mvmctl.cli.bin.BinaryOperation")
     def test_pull_with_v_prefix(self, mock_bin_op):
+        mock_bin_op.list_all.return_value = ["1.16.0", "1.15.0", "1.14.0"]
         mock_bin_op.get.return_value = None
         mock_bin_op.pull.return_value = OperationResult(
             status="success",
             code="binary.downloaded",
             item=[_make_binary("firecracker", "1.15.0")],
         )
-        result = runner.invoke(app, ["bin", "pull", "v1.15.0"])
+        result = runner.invoke(app, ["bin", "pull", "firecracker", "--version", "v1.15.0"])
         assert result.exit_code == 0
         assert "Downloaded" in result.output
 

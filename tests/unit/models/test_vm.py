@@ -76,7 +76,8 @@ class TestVMInstanceItem:
             "disk_size_mib": 2048,
             "rootfs_path": "/cache/vms/test-vm/rootfs.ext4",
             "rootfs_suffix": ".ext4",
-            "enable_pci": False,
+            "pci_enabled": False,
+            "nested_virt": False,
             "enable_logging": True,
             "enable_metrics": False,
             "enable_console": True,
@@ -108,7 +109,7 @@ class TestVMInstanceItem:
         assert hasattr(vm, "disk_size_mib")
         assert hasattr(vm, "rootfs_path")
         assert hasattr(vm, "rootfs_suffix")
-        assert hasattr(vm, "enable_pci")
+        assert hasattr(vm, "pci_enabled")
         assert hasattr(vm, "enable_logging")
         assert hasattr(vm, "enable_metrics")
         assert hasattr(vm, "enable_console")

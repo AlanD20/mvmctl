@@ -303,16 +303,16 @@ class TestMainRootWarning:
         """Should skip warning when MVM_ESCALATED is set."""
         monkeypatch.setenv("MVM_ESCALATED", "1")
         mocker.patch("mvmctl.main.os.getuid", return_value=0)
-        mock_print_warning = mocker.patch("mvmctl.utils._io.print_warning")
+        mock_cli = mocker.patch("mvmctl.utils.cli.mvm_cli")
         main_module._warn_if_running_as_root()
-        mock_print_warning.assert_not_called()
+        mock_cli.warning.assert_not_called()
 
     def test_warn_if_running_as_root_not_root(self, mocker):
         """Should skip warning when not running as root."""
         mocker.patch("mvmctl.main.os.getuid", return_value=1000)
-        mock_print_warning = mocker.patch("mvmctl.utils._io.print_warning")
+        mock_cli = mocker.patch("mvmctl.utils.cli.mvm_cli")
         main_module._warn_if_running_as_root()
-        mock_print_warning.assert_not_called()
+        mock_cli.warning.assert_not_called()
 
 
 class TestMainVersionExtended:

@@ -133,7 +133,8 @@ def _insert_vm(
         "disk_size_mib": 2048,
         "rootfs_path": "rootfs.ext4",
         "rootfs_suffix": "ext4",
-        "enable_pci": 0,
+        "pci_enabled": 0,
+        "nested_virt": 0,
         "lsm_flags": None,
         "enable_logging": 1,
         "enable_metrics": 0,
@@ -158,7 +159,8 @@ def _insert_vm(
     vm_data = dict(data)
     # Convert int 0/1 back to bool for boolean fields
     for bool_field in (
-        "enable_pci",
+        "pci_enabled",
+        "nested_virt",
         "enable_logging",
         "enable_metrics",
         "enable_console",
@@ -471,7 +473,8 @@ class TestUpsert:
             "disk_size_mib": 1024,
             "rootfs_path": "rootfs.ext4",
             "rootfs_suffix": "ext4",
-            "enable_pci": False,
+            "pci_enabled": False,
+            "nested_virt": False,
             "enable_logging": True,
             "enable_metrics": False,
             "enable_console": False,

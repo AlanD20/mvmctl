@@ -419,7 +419,7 @@ class TestVolumeServiceVolumesToDrives:
         result = VolumeService.volumes_to_drives([vol])
 
         assert len(result) == 1
-        assert result[0]["drive_id"] == "vol-1"
+        assert result[0]["drive_id"] == vol.id
         assert result[0]["path_on_host"] == "/volumes/my-vol.raw"
         assert result[0]["is_root_device"] is False
 
@@ -429,20 +429,20 @@ class TestVolumeServiceVolumesToDrives:
 
         result = VolumeService.volumes_to_drives([vol])
         assert len(result) == 1
-        assert result[0]["drive_id"] == "vol-1"
+        assert result[0]["drive_id"] == vol.id
         assert result[0]["path_on_host"] == vol.path
 
     def test_volumes_to_drives_multiple(self):
-        """volumes_to_drives with multiple volumes should assign sequential IDs."""
+        """volumes_to_drives with multiple volumes should use volume IDs as drive_ids."""
         vol1 = _make_volume(name="vol-a", path="/volumes/vol-a.raw")
         vol2 = _make_volume(name="vol-b", path="/volumes/vol-b.raw")
 
         result = VolumeService.volumes_to_drives([vol1, vol2])
 
         assert len(result) == 2
-        assert result[0]["drive_id"] == "vol-1"
+        assert result[0]["drive_id"] == vol1.id
         assert result[0]["path_on_host"] == "/volumes/vol-a.raw"
-        assert result[1]["drive_id"] == "vol-2"
+        assert result[1]["drive_id"] == vol2.id
         assert result[1]["path_on_host"] == "/volumes/vol-b.raw"
 
     def test_volumes_to_drives_read_only(self):

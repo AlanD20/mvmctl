@@ -176,7 +176,30 @@ class TestNetworkInspect:
 
     @patch("mvmctl.cli.network.NetworkOperation")
     def test_inspect_success(self, mock_net_op):
-        mock_net_op.inspect.return_value = _make_network("testnet")
+        net = _make_network("testnet")
+        mock_net_op.inspect.return_value = {
+            "network": {
+                "id": net.id,
+                "name": net.name,
+                "subnet": net.subnet,
+                "bridge": net.bridge,
+                "ipv4_gateway": net.ipv4_gateway,
+                "is_default": net.is_default,
+                "is_present": net.is_present,
+                "created_at": net.created_at,
+                "updated_at": net.updated_at,
+            },
+            "status": {
+                "bridge_active": net.bridge_active,
+                "is_present": net.is_present,
+                "is_default": net.is_default,
+            },
+            "nat": {
+                "nat_enabled": net.nat_enabled,
+                "nat_gateways": [],
+            },
+            "leases": [],
+        }
         result = runner.invoke(app, ["network", "inspect", "testnet"])
         assert result.exit_code == 0
         assert "testnet" in result.output

@@ -288,7 +288,7 @@ class TestKernelInspect:
             return_value=mock_request,
         )
         result = KernelOperation.inspect(MagicMock(identifiers=["kern-001"]))
-        assert isinstance(result, KernelItem)
+        assert isinstance(result, dict)
 
     def test_inspect_json(self, mocker):
         kern = _make_kernel()
@@ -300,10 +300,10 @@ class TestKernelInspect:
             return_value=mock_request,
         )
         result = KernelOperation.inspect(
-            MagicMock(identifiers=["kern-001"]), is_json=True
+            MagicMock(identifiers=["kern-001"])
         )
         assert isinstance(result, dict)
-        assert result["id"] == "kern-001"
+        assert result["kernel"]["id"] == "kern-001"
 
 
 class TestKernelSetDefault:

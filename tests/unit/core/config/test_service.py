@@ -58,8 +58,8 @@ class TestSettingsServiceGet:
         self, service: SettingsService
     ) -> None:
         """get() coerces string values to the expected bool type."""
-        service.set("defaults.vm", "enable_pci", True)
-        result = service.get("defaults.vm", "enable_pci")
+        service.set("defaults.vm", "pci_enabled", True)
+        result = service.get("defaults.vm", "pci_enabled")
         assert result is True
         assert isinstance(result, bool)
 
@@ -74,8 +74,8 @@ class TestSettingsServiceGet:
         self, service: SettingsService
     ) -> None:
         """get() returns False correctly for bool keys."""
-        service.set("defaults.vm", "enable_pci", False)
-        result = service.get("defaults.vm", "enable_pci")
+        service.set("defaults.vm", "pci_enabled", False)
+        result = service.get("defaults.vm", "pci_enabled")
         assert result is False
 
     def test_get_string_value(self, service: SettingsService) -> None:
@@ -121,8 +121,8 @@ class TestSettingsServiceSet:
 
     def test_set_bool_value(self, service: SettingsService) -> None:
         """set() stores bool values correctly."""
-        service.set("defaults.vm", "enable_pci", True)
-        assert service.get("defaults.vm", "enable_pci") is True
+        service.set("defaults.vm", "pci_enabled", True)
+        assert service.get("defaults.vm", "pci_enabled") is True
 
     def test_set_int_value(self, service: SettingsService) -> None:
         """set() stores int values correctly."""
@@ -206,25 +206,25 @@ class TestSettingsServiceTypeCoercion:
 
     def test_coerce_string_to_bool_true(self, service: SettingsService) -> None:
         """Setting a bool key with 'true' string coerces to True."""
-        service.set("defaults.vm", "enable_pci", "true")
-        assert service.get("defaults.vm", "enable_pci") is True
+        service.set("defaults.vm", "pci_enabled", "true")
+        assert service.get("defaults.vm", "pci_enabled") is True
 
     def test_coerce_string_to_bool_false(
         self, service: SettingsService
     ) -> None:
         """Setting a bool key with 'false' string coerces to False."""
-        service.set("defaults.vm", "enable_pci", "false")
-        assert service.get("defaults.vm", "enable_pci") is False
+        service.set("defaults.vm", "pci_enabled", "false")
+        assert service.get("defaults.vm", "pci_enabled") is False
 
     def test_coerce_string_to_bool_yes(self, service: SettingsService) -> None:
         """Setting a bool key with 'yes' string coerces to True."""
-        service.set("defaults.vm", "enable_pci", "yes")
-        assert service.get("defaults.vm", "enable_pci") is True
+        service.set("defaults.vm", "pci_enabled", "yes")
+        assert service.get("defaults.vm", "pci_enabled") is True
 
     def test_coerce_string_to_bool_one(self, service: SettingsService) -> None:
         """Setting a bool key with '1' string coerces to True."""
-        service.set("defaults.vm", "enable_pci", "1")
-        assert service.get("defaults.vm", "enable_pci") is True
+        service.set("defaults.vm", "pci_enabled", "1")
+        assert service.get("defaults.vm", "pci_enabled") is True
 
     def test_coerce_int_preserved(self, service: SettingsService) -> None:
         """Setting an int key with an int value keeps it as int."""
@@ -233,8 +233,8 @@ class TestSettingsServiceTypeCoercion:
 
     def test_coerce_bool_preserved(self, service: SettingsService) -> None:
         """Setting a bool key with a bool value keeps it as bool."""
-        service.set("defaults.vm", "enable_pci", True)
-        assert isinstance(service.get("defaults.vm", "enable_pci"), bool)
+        service.set("defaults.vm", "pci_enabled", True)
+        assert isinstance(service.get("defaults.vm", "pci_enabled"), bool)
 
 
 class TestSettingsServiceList:
@@ -380,5 +380,5 @@ class TestSettingsServiceEdgeCases:
         assert result is int
         result = service._get_expected_type("defaults.vm", "ssh_user")
         assert result is str
-        result = service._get_expected_type("defaults.vm", "enable_pci")
+        result = service._get_expected_type("defaults.vm", "pci_enabled")
         assert result is bool

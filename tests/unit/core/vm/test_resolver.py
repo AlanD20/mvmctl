@@ -116,7 +116,8 @@ def _insert_vm(db: Database, **overrides: object) -> VMInstanceItem:
         "disk_size_mib": 2048,
         "rootfs_path": "rootfs.ext4",
         "rootfs_suffix": "ext4",
-        "enable_pci": 0,
+        "pci_enabled": 0,
+        "nested_virt": 0,
         "enable_logging": 1,
         "enable_metrics": 0,
         "enable_console": 1,
@@ -126,7 +127,8 @@ def _insert_vm(db: Database, **overrides: object) -> VMInstanceItem:
     data.update(overrides)
     # Convert bools to ints for SQLite
     for bool_field in (
-        "enable_pci",
+        "pci_enabled",
+        "nested_virt",
         "enable_logging",
         "enable_metrics",
         "enable_console",
@@ -151,7 +153,8 @@ def _row_to_vm(data: dict[str, object]) -> VMInstanceItem:
     """Convert raw data dict to VMInstanceItem, handling bool fields."""
     vm_data = dict(data)
     for bool_field in (
-        "enable_pci",
+        "pci_enabled",
+        "nested_virt",
         "enable_logging",
         "enable_metrics",
         "enable_console",

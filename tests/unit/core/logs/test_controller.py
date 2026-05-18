@@ -162,7 +162,7 @@ def _seed_vm(db: Database, name: str, vm_id: str, vm_dir: Path) -> str:
                 id, name, status, vcpu_count, mem_size_mib, disk_size_mib,
                 pid, ipv4, mac, network_id, tap_device, image_id, kernel_id,
                 binary_id, api_socket_path, config_path, cloud_init_mode,
-                rootfs_path, rootfs_suffix, enable_pci, enable_logging,
+                rootfs_path, rootfs_suffix, pci_enabled, enable_logging,
                 enable_metrics, enable_console, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
@@ -387,7 +387,8 @@ class TestLogController:
             disk_size_mib=2048,
             rootfs_path="/tmp/rootfs.ext4",
             rootfs_suffix=".ext4",
-            enable_pci=False,
+            pci_enabled=False,
+            nested_virt=False,
             enable_logging=False,
             enable_metrics=False,
             enable_console=False,

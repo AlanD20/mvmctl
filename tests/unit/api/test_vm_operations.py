@@ -42,7 +42,8 @@ def _make_vm(
         api_socket_path="fc.socket",
         rootfs_path="rootfs.ext4",
         rootfs_suffix="ext4",
-        enable_pci=False,
+        pci_enabled=False,
+        nested_virt=False,
         enable_logging=True,
         enable_metrics=False,
         enable_console=False,
@@ -498,11 +499,11 @@ class TestVMOperationInspect:
 
         result = VMOperation.inspect(VMInput(identifiers=["test-vm"]))
         assert isinstance(result, dict)
-        assert result["name"] == "test-vm"
-        assert result["status"] == VMStatus.RUNNING
+        assert result["vm"]["name"] == "test-vm"
+        assert result["vm"]["status"] == VMStatus.RUNNING
 
-    def test_inspect_tree_mode(self, mocker):
-        """inspect() returns tree dict when tree=True."""
+    def test_inspect_returns_grouped_dict(self, mocker):
+        """inspect() returns grouped dict with all sections."""
         mock_vm = _make_vm("test-vm")
         mock_resolved = mocker.MagicMock()
         mock_resolved.vms = [mock_vm]
@@ -531,9 +532,7 @@ class TestVMOperationInspect:
             return_value=Path("/fake/vm_dir"),
         )
 
-        result = VMOperation.inspect(
-            VMInput(identifiers=["test-vm"]), tree=True
-        )
+        result = VMOperation.inspect(VMInput(identifiers=["test-vm"]))
         assert "vm" in result
         assert "resources" in result
         assert "networking" in result

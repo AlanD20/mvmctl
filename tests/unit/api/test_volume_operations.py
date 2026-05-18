@@ -438,8 +438,9 @@ class TestVolumeOperationInspect:
 
         result = VolumeOperation.inspect(VolumeInput(identifiers=["test-vol"]))
 
-        assert result["name"] == "test-vol"
-        assert result["id"] == vol.id
+        assert isinstance(result, dict)
+        assert result["volume"]["name"] == "test-vol"
+        assert result["volume"]["id"] == vol.id
         assert result["disk_info"]["format"] == "raw"
         assert result["disk_info"]["virtual-size"] == 1073741824
         mock_svc.get_disk_info.assert_called_once()

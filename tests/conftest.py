@@ -183,9 +183,24 @@ def _setup_database(request, isolate_config_and_cache) -> None:  # type: ignore[
     if request.node.get_closest_marker("system"):
         return
 
+    from datetime import datetime, timezone
+
     from mvmctl.core._shared._db import Database
 
     Database().migrate()
+
+    # Ensure host_state exists with initialized=1 so CLI tests don't
+    # fail the is_initialized() check in main.py's root app callback.
+    db = Database()
+    with db.connect() as conn:
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "INSERT OR IGNORE INTO host_state "
+            "(id, initialized, mvm_group_created, sudoers_configured, "
+            " default_network_created, initialized_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (1, 1, 1, 1, 1, now, now),
+        )
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:

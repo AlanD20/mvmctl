@@ -41,7 +41,8 @@ def _make_vm(
         api_socket_path="fc.socket",
         rootfs_path="rootfs.ext4",
         rootfs_suffix=".ext4",
-        enable_pci=False,
+        pci_enabled=False,
+        nested_virt=False,
         enable_logging=True,
         enable_metrics=False,
         enable_console=False,
@@ -103,11 +104,11 @@ class TestVMPs:
     @patch("mvmctl.cli.vm.VMOperation")
     def test_ps_with_vms(self, mock_vm_op):
         mock_vm_op.list_all.return_value = [
-            _make_vm("running-vm", "running"),
+            _make_vm("vm1", "running"),
         ]
         result = runner.invoke(app, ["vm", "ps"])
         assert result.exit_code == 0
-        assert "running-vm" in result.output
+        assert "vm1" in result.output
 
 
 class TestVMCreate:
@@ -567,7 +568,7 @@ class TestVMInspect:
             "relay_running": False,
             "relay_pid": None,
             "relay_socket_path": None,
-            "enable_pci": False,
+            "pci_enabled": False,
             "enable_console": False,
             "enable_logging": True,
             "enable_metrics": False,
@@ -799,7 +800,7 @@ class TestVMCreateEdgeCases:
                 "02:FC:00:00:00:02",
                 "--user",
                 "admin",
-                "--no-enable-pci",
+                "--no-pci",
                 "--enable-logging",
                 "--no-enable-metrics",
                 "--no-console",
@@ -950,7 +951,7 @@ class TestVMLoadEdgeCases:
 
 
 class TestVMInspectTree:
-    """Tests for 'vm inspect --tree' format."""
+    """Tests for 'vm inspect' (tree format is the default)."""
 
     @patch("mvmctl.cli.vm.VMOperation")
     def test_inspect_tree(self, mock_vm_op):
@@ -987,7 +988,7 @@ class TestVMInspectTree:
                 "relay_socket_path": None,
             },
         }
-        result = runner.invoke(app, ["vm", "inspect", "myvm", "--tree"])
+        result = runner.invoke(app, ["vm", "inspect", "myvm"])
         assert result.exit_code == 0
         assert "Resources" in result.output
         assert "Networking" in result.output
@@ -1027,7 +1028,7 @@ class TestVMInspectTree:
                 "relay_socket_path": None,
             },
         }
-        result = runner.invoke(app, ["vm", "inspect", "nullvm", "--tree"])
+        result = runner.invoke(app, ["vm", "inspect", "nullvm"])
         assert result.exit_code == 0
         assert "nullvm" in result.output
 

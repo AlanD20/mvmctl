@@ -51,8 +51,8 @@ class TestSettingsRepositoryGet:
 
     def test_get_bool_value(self, repo: SettingsRepository) -> None:
         """get() returns boolean values correctly."""
-        repo.set("defaults.vm", "enable_pci", True)
-        result = repo.get("defaults.vm", "enable_pci")
+        repo.set("defaults.vm", "pci_enabled", True)
+        result = repo.get("defaults.vm", "pci_enabled")
         assert result is True
         assert isinstance(result, bool)
 
@@ -110,8 +110,8 @@ class TestSettingsRepositorySet:
 
     def test_set_bool_false(self, repo: SettingsRepository) -> None:
         """set() stores False boolean correctly."""
-        repo.set("defaults.vm", "enable_pci", False)
-        result = repo.get("defaults.vm", "enable_pci")
+        repo.set("defaults.vm", "pci_enabled", False)
+        result = repo.get("defaults.vm", "pci_enabled")
         assert result is False
 
     def test_set_none_value(self, repo: SettingsRepository) -> None:

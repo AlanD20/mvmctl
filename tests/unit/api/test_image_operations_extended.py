@@ -97,13 +97,14 @@ def _setup_pull_mocks(
     deps["request"] = mock_request
     deps["resolved"] = mock_resolved
 
-    mock_spec = MagicMock(spec=ImageSpec)
+    mock_spec = MagicMock()
     mock_spec.id = spec_id
-    mock_spec.source = "https://example.com/img.qcow2"
-    mocker.patch(
-        "mvmctl.core.image._service.ImageService.get_specs_for",
-        return_value=[mock_spec],
+    mock_spec.type = spec_id
+    mock_spec.version = (
+        existing_image.version if existing_image and existing_image.version else ""
     )
+    mock_spec.source = "https://example.com/img.qcow2"
+    mock_spec.format = "qcow2"
     deps["spec"] = mock_spec
 
     mock_binary_repo = MagicMock()
@@ -125,10 +126,11 @@ def _setup_pull_mocks(
     )
 
     mock_image_svc = MagicMock()
-    mocker.patch(
+    mock_image_cls = mocker.patch(
         "mvmctl.core.image._service.ImageService",
         return_value=mock_image_svc,
     )
+    mock_image_cls.get_specs_for.return_value = [mock_spec]
     deps["image_svc"] = mock_image_svc
 
     deps["db"] = mock_db

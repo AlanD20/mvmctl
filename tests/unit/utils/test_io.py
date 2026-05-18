@@ -1,4 +1,4 @@
-"""Tests for utils/_io.py — Console output and logging utilities."""
+"""Tests for utils/_io.py and utils/cli.py — Logging and CLI display utilities."""
 
 from __future__ import annotations
 
@@ -7,262 +7,221 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from mvmctl.utils._io import (
-    _PlainConsole,
-    _strip_markup,
-    get_combined_marker,
-    get_logger,
-    get_state_marker,
-    log_exception,
-    print_error,
-    print_info,
-    print_inspect_header,
-    print_key_value,
-    print_section_header,
-    print_success,
-    print_table,
-    print_warning,
-    setup_logging,
-)
+from rich.table import Table
+from rich.tree import Tree
+
+from mvmctl.utils._io import get_logger, log_exception, setup_logging
+from mvmctl.utils.cli import MVMCli
+
+# ==================== MVMCli Display Tests ====================
 
 
-class TestStripMarkup:
-    """Tests for _strip_markup()."""
+class TestMVMCliDisplayMethods:
+    """Tests for MVMCli display methods — error, success, warning, info."""
 
-    def test_removes_color_tags(self):
-        result = _strip_markup("[green]hello[/green]")
-        assert result == "hello"
-
-    def test_removes_bold_and_dim(self):
-        result = _strip_markup("[bold]bold[/bold] and [dim]dim[/dim]")
-        assert result == "bold and dim"
-
-    def test_removes_link_tags(self):
-        result = _strip_markup("[link=https://example.com]click[/link]")
-        assert result == "click"
-
-    def test_removes_tag_with_attributes(self):
-        result = _strip_markup('[style color="red"]red text[/style]')
-        assert result == "red text"
-
-    def test_removes_nested_markup(self):
-        result = _strip_markup("[bold][green]nested[/green][/bold]")
-        assert result == "nested"
-
-    def test_no_markup_unchanged(self):
-        result = _strip_markup("plain text with no markup")
-        assert result == "plain text with no markup"
-
-    def test_removes_multiple_tags(self):
-        result = _strip_markup(
-            "[bold][red]ERROR:[/red][/bold] something [blue]failed[/blue]"
+    def test_error(self, mocker):
+        cli = MVMCli()
+        mock_console = mocker.patch.object(cli, "_err_console")
+        cli.error("something went wrong")
+        mock_console.print.assert_called_once_with(
+            "[red]\u2717 Error:[/] something went wrong"
         )
-        assert result == "ERROR: something failed"
+
+    def test_error_unexpected(self, mocker):
+        cli = MVMCli()
+        mock_console = mocker.patch.object(cli, "_err_console")
+        cli.error("unexpected failure", is_unexpected=True)
+        mock_console.print.assert_called_once_with(
+            "[yellow]\u26a0 Unexpected Error:[/] unexpected failure"
+        )
+
+    def test_success(self, mocker):
+        cli = MVMCli()
+        mock_console = mocker.patch.object(cli, "_console")
+        cli.success("task completed")
+        mock_console.print.assert_called_once_with(
+            "[green]\u2713 task completed[/]"
+        )
+
+    def test_warning(self, mocker):
+        cli = MVMCli()
+        mock_console = mocker.patch.object(cli, "_err_console")
+        cli.warning("caution advised")
+        mock_console.print.assert_called_once_with(
+            "[yellow]! caution advised[/]"
+        )
+
+    def test_info(self, mocker):
+        cli = MVMCli()
+        mock_console = mocker.patch.object(cli, "_console")
+        cli.info("informational message")
+        mock_console.print.assert_called_once_with(
+            "[dim]  informational message[/]"
+        )
 
 
-class TestPlainConsole:
-    """Tests for _PlainConsole."""
+class TestMVMCliSectionHeader:
+    """Tests for MVMCli.section_header()."""
 
-    def test_print_strips_markup(self, capsys):
-        console = _PlainConsole()
-        console.print("[green]hello[/green]")
-        captured = capsys.readouterr()
-        assert captured.out.strip() == "hello"
+    def test_prints_header_with_newline_markup(self, mocker):
+        cli = MVMCli()
+        mock_console = mocker.patch.object(cli, "_console")
+        cli.section_header("BASIC INFO")
+        mock_console.print.assert_called_once_with("\n[bold]BASIC INFO[/]")
 
-    def test_print_joins_multiple_args(self, capsys):
-        console = _PlainConsole()
-        console.print("hello", "world")
-        captured = capsys.readouterr()
-        assert captured.out.strip() == "hello world"
-
-    def test_print_discards_rich_kwargs(self, capsys):
-        console = _PlainConsole()
-        console.print("plain", markup=True, highlight=False, style="bold")
-        captured = capsys.readouterr()
-        assert captured.out.strip() == "plain"
-
-    def test_getattr_returns_noop_callable(self):
-        console = _PlainConsole()
-        noop = console.status
-        assert callable(noop)
-        noop()
-        noop("test", key="value")
-
-    def test_getattr_returns_noop_for_any_attribute(self):
-        console = _PlainConsole()
-        for attr in ("rule", "progress", "live", "columns"):
-            noop = getattr(console, attr)
-            assert callable(noop)
-            noop()
+    def test_multiple_headers(self, mocker):
+        cli = MVMCli()
+        mock_console = mocker.patch.object(cli, "_console")
+        cli.section_header("FIRST")
+        cli.section_header("SECOND")
+        assert mock_console.print.call_count == 2
+        mock_console.print.assert_any_call("\n[bold]FIRST[/]")
+        mock_console.print.assert_any_call("\n[bold]SECOND[/]")
 
 
-class TestPrintTable:
-    """Tests for print_table()."""
+class TestMVMCliInspectHeader:
+    """Tests for MVMCli.inspect_header()."""
 
-    def test_with_title(self, capsys):
-        print_table(
+    def test_with_subtitle(self, mocker):
+        cli = MVMCli()
+        mock_console = mocker.patch.object(cli, "_console")
+        cli.inspect_header("my-vm", "running")
+        assert mock_console.print.call_count == 2
+        mock_console.print.assert_any_call("\n[bold]my-vm (running)[/]")
+        mock_console.print.assert_any_call("=" * len("my-vm (running)"))
+
+    def test_without_subtitle(self, mocker):
+        cli = MVMCli()
+        mock_console = mocker.patch.object(cli, "_console")
+        cli.inspect_header("my-vm")
+        assert mock_console.print.call_count == 2
+        mock_console.print.assert_any_call("\n[bold]my-vm[/]")
+        mock_console.print.assert_any_call("=" * len("my-vm"))
+
+
+class TestMVMCliKeyValue:
+    """Tests for MVMCli.key_value()."""
+
+    def test_default_format(self, mocker):
+        cli = MVMCli()
+        mock_console = mocker.patch.object(cli, "_console")
+        cli.key_value("Name", "my-vm")
+        mock_console.print.assert_called_once_with("  Name:        my-vm")
+
+    def test_custom_indent(self, mocker):
+        cli = MVMCli()
+        mock_console = mocker.patch.object(cli, "_console")
+        cli.key_value("Name", "my-vm", indent=4)
+        mock_console.print.assert_called_once_with("    Name:        my-vm")
+
+    def test_custom_key_width(self, mocker):
+        cli = MVMCli()
+        mock_console = mocker.patch.object(cli, "_console")
+        cli.key_value("Name", "my-vm", key_width=20)
+        mock_console.print.assert_called_once_with(
+            "  Name:                my-vm"
+        )
+
+    def test_long_value(self, mocker):
+        cli = MVMCli()
+        mock_console = mocker.patch.object(cli, "_console")
+        cli.key_value("Description", "a very long description text")
+        # "Description:" is exactly 12 chars, so no extra padding beyond key_width=12
+        mock_console.print.assert_called_once_with(
+            "  Description: a very long description text"
+        )
+
+
+class TestMVMCliTable:
+    """Tests for MVMCli.table()."""
+
+    def test_with_title(self, mocker):
+        cli = MVMCli()
+        mock_console = mocker.patch.object(cli, "_console")
+        cli.table(
             columns=["Name", "Age"],
             rows=[["Alice", "30"], ["Bob", "25"]],
             title="People",
         )
-        captured = capsys.readouterr()
-        lines = captured.out.splitlines()
-        assert lines[0] == "People"
-        assert lines[1] == "------"
-        assert "Alice" in lines[4]
-        assert "Bob" in lines[5]
+        mock_console.print.assert_called_once()
+        table = mock_console.print.call_args[0][0]
+        assert isinstance(table, Table)
+        assert table.title == "People"
+        assert table.columns[0].header == "Name"
+        assert table.columns[1].header == "Age"
+        assert len(table.rows) == 2
 
-    def test_without_title(self, capsys):
-        print_table(
+    def test_without_title(self, mocker):
+        cli = MVMCli()
+        mock_console = mocker.patch.object(cli, "_console")
+        cli.table(
             columns=["Name", "Age"],
             rows=[["Alice", "30"]],
         )
-        captured = capsys.readouterr()
-        assert captured.out.startswith("Name")
-        assert "Age" in captured.out
+        table = mock_console.print.call_args[0][0]
+        assert isinstance(table, Table)
+        assert table.title is None
+        assert table.columns[0].header == "Name"
 
-    def test_rows_with_fewer_cells_than_columns(self, capsys):
-        print_table(
-            columns=["Name", "Age", "City"],
-            rows=[["Alice", "30"]],
-        )
-        captured = capsys.readouterr()
-        lines = captured.out.splitlines()
-        assert "Alice" in captured.out
-        assert "30" in captured.out
-        assert "City" in lines[0]
-
-    def test_column_widths_padded_correctly(self, capsys):
-        print_table(
+    def test_column_headers_are_set(self, mocker):
+        cli = MVMCli()
+        mock_console = mocker.patch.object(cli, "_console")
+        cli.table(
             columns=["Short", "VeryLongColumnName"],
             rows=[["A", "B"]],
         )
-        captured = capsys.readouterr()
-        lines = captured.out.splitlines()
-        assert "VeryLongColumnName" in lines[0]
+        table = mock_console.print.call_args[0][0]
+        assert isinstance(table, Table)
+        assert table.columns[0].header == "Short"
+        assert table.columns[1].header == "VeryLongColumnName"
+
+    def test_empty_rows(self, mocker):
+        cli = MVMCli()
+        mock_console = mocker.patch.object(cli, "_console")
+        cli.table(
+            columns=["Name", "Age"],
+            rows=[],
+        )
+        table = mock_console.print.call_args[0][0]
+        assert isinstance(table, Table)
+        assert len(table.rows) == 0
 
 
-class TestPrintHelpers:
-    """Tests for print_error, print_success, print_warning, print_info."""
+class TestMVMCliPrintDictTree:
+    """Tests for MVMCli.print_dict_tree()."""
 
-    def test_print_error(self, capsys):
-        print_error("something went wrong")
-        captured = capsys.readouterr()
-        assert captured.out.strip() == "Error: something went wrong"
+    def test_simple_dict(self, mocker):
+        cli = MVMCli()
+        mock_console = mocker.patch.object(cli, "_console")
+        cli.print_dict_tree({"name": "test-vm", "state": "running"}, title="VM")
+        mock_console.print.assert_called_once()
+        tree = mock_console.print.call_args[0][0]
+        assert isinstance(tree, Tree)
+        assert tree.label == "VM"
 
-    def test_print_success(self, capsys):
-        print_success("task completed")
-        captured = capsys.readouterr()
-        assert captured.out.strip() == "\u2713 task completed"
+    def test_nested_dict(self, mocker):
+        cli = MVMCli()
+        mock_console = mocker.patch.object(cli, "_console")
+        cli.print_dict_tree(
+            {"metadata": {"created": "2024-01-01", "version": 2}},
+        )
+        mock_console.print.assert_called_once()
+        tree = mock_console.print.call_args[0][0]
+        assert isinstance(tree, Tree)
 
-    def test_print_warning(self, capsys):
-        print_warning("caution advised")
-        captured = capsys.readouterr()
-        assert captured.out.strip() == "! caution advised"
+    def test_empty_data_prints_nothing(self, mocker):
+        cli = MVMCli()
+        mock_console = mocker.patch.object(cli, "_console")
+        cli.print_dict_tree({})
+        mock_console.print.assert_not_called()
 
-    def test_print_info(self, capsys):
-        print_info("informational message")
-        captured = capsys.readouterr()
-        # print_info uses two leading spaces, strip() removes them
-        assert "informational message" in captured.out
-        assert captured.out.startswith("  ")
-
-
-class TestPrintSectionHeader:
-    """Tests for print_section_header()."""
-
-    def test_prints_with_newline_prefix(self, capsys):
-        print_section_header("BASIC INFO")
-        captured = capsys.readouterr()
-        assert captured.out == "\nBASIC INFO\n"
-
-    def test_multiple_headers(self, capsys):
-        print_section_header("FIRST")
-        print_section_header("SECOND")
-        captured = capsys.readouterr()
-        assert captured.out == "\nFIRST\n\nSECOND\n"
-
-
-class TestPrintKeyValue:
-    """Tests for print_key_value()."""
-
-    def test_default_format(self, capsys):
-        print_key_value("Name", "my-vm")
-        captured = capsys.readouterr()
-        # indent=2, key_width=12: '  ' + 'Name:' padded to 12 + ' ' + 'my-vm'
-        # 'Name:' is 5 chars, padded to 12 = 7 spaces padding + 1 separator space = 8
-        assert captured.out == "  Name:        my-vm\n"
-
-    def test_custom_indent(self, capsys):
-        print_key_value("Name", "my-vm", indent=4)
-        captured = capsys.readouterr()
-        assert captured.out == "    Name:        my-vm\n"
-
-    def test_custom_key_width(self, capsys):
-        print_key_value("Name", "my-vm", key_width=20)
-        captured = capsys.readouterr()
-        # indent=2, key_width=20: '  ' + 'Name:' padded to 20 + ' ' + 'my-vm'
-        # 'Name:' is 5 chars, padded to 20 = 15 spaces padding + 1 separator space = 16
-        assert captured.out == "  Name:                my-vm\n"
-
-    def test_custom_indent_and_key_width(self, capsys):
-        print_key_value("Key", "value", indent=6, key_width=8)
-        captured = capsys.readouterr()
-        # 'Key:' is 4 chars, padded to 8 = 4 spaces padding + 1 separator space = 5
-        assert captured.out == "      Key:     value\n"
-
-    def test_long_value(self, capsys):
-        print_key_value("Description", "a very long description text")
-        captured = capsys.readouterr()
-        assert "a very long description text" in captured.out
-
-
-class TestPrintInspectHeader:
-    """Tests for print_inspect_header()."""
-
-    def test_with_subtitle(self, capsys):
-        print_inspect_header("my-vm", "running")
-        captured = capsys.readouterr()
-        # Output: '\nmy-vm (running)\n==================\n'
-        lines = captured.out.splitlines()
-        assert lines[0] == ""
-        assert lines[1] == "my-vm (running)"
-        assert lines[2] == "=" * len("my-vm (running)")
-
-    def test_without_subtitle(self, capsys):
-        print_inspect_header("my-vm")
-        captured = capsys.readouterr()
-        # Output: '\nmy-vm\n=====\n'
-        lines = captured.out.splitlines()
-        assert lines[0] == ""
-        assert lines[1] == "my-vm"
-        assert lines[2] == "=" * len("my-vm")
-
-
-class TestGetStateMarker:
-    """Tests for get_state_marker()."""
-
-    def test_missing_returns_X_with_space(self):
-        assert get_state_marker(True) == "X "
-
-    def test_not_missing_returns_two_spaces(self):
-        assert get_state_marker(False) == "  "
-
-
-class TestGetCombinedMarker:
-    """Tests for get_combined_marker()."""
-
-    def test_default_and_missing(self):
-        assert get_combined_marker(True, True) == "*X "
-
-    def test_missing_only(self):
-        assert get_combined_marker(False, True) == " X "
-
-    def test_default_only(self):
-        assert get_combined_marker(True, False) == "*  "
-
-    def test_neither(self):
-        assert get_combined_marker(False, False) == "   "
+    def test_list_data(self, mocker):
+        cli = MVMCli()
+        mock_console = mocker.patch.object(cli, "_console")
+        cli.print_dict_tree([{"id": "1"}, {"id": "2"}])
+        mock_console.print.assert_called_once()
+        tree = mock_console.print.call_args[0][0]
+        assert isinstance(tree, Tree)
 
 
 # ---------------------------------------------------------------------------

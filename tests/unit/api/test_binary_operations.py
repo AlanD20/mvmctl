@@ -43,6 +43,7 @@ class TestBinaryPull:
         mock_request = MagicMock()
         resolved = MagicMock(
             version="1.15.0",
+            git_ref=None,
             set_as_default=False,
             download_override=False,
             bin_dir=MagicMock(),
@@ -78,7 +79,10 @@ class TestBinaryPull:
         )
         mock_request = MagicMock()
         resolved = MagicMock(
-            version="1.15.0", set_as_default=False, download_override=False
+            version="1.15.0",
+            git_ref=None,
+            set_as_default=False,
+            download_override=False,
         )
         mock_request.resolve.return_value = resolved
         mocker.patch(
@@ -106,6 +110,7 @@ class TestBinaryPull:
         mock_request = MagicMock()
         resolved = MagicMock(
             version="1.15.0",
+            git_ref=None,
             set_as_default=False,
             download_override=False,
             bin_dir=MagicMock(),
@@ -139,6 +144,7 @@ class TestBinaryPull:
         mock_request = MagicMock()
         resolved = MagicMock(
             version="1.15.0",
+            git_ref=None,
             set_as_default=False,
             download_override=True,
             bin_dir=MagicMock(),

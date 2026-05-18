@@ -237,9 +237,31 @@ class TestKeyRemove:
 class TestKeyInspect:
     """Tests for 'key inspect' command."""
 
+    def _key_inspect_dict(self, key):
+        return {
+            "key": {
+                "id": key.id,
+                "name": key.name,
+                "fingerprint": key.fingerprint,
+                "algorithm": key.algorithm,
+                "comment": key.comment,
+                "is_default": key.is_default,
+                "is_present": key.is_present,
+            },
+            "files": {
+                "public_key_path": key.public_key_path,
+                "private_key_path": key.private_key_path,
+            },
+            "timestamps": {
+                "created_at": key.created_at,
+                "updated_at": key.updated_at,
+            },
+        }
+
     @patch("mvmctl.cli.key.KeyOperation")
     def test_inspect_success(self, mock_key_op):
-        mock_key_op.get.return_value = _make_key("testkey")
+        key = _make_key("testkey")
+        mock_key_op.inspect.return_value = self._key_inspect_dict(key)
         result = runner.invoke(app, ["key", "inspect", "testkey"])
         assert result.exit_code == 0
         assert "testkey" in result.output
@@ -258,7 +280,7 @@ class TestKeyInspect:
 
     @patch("mvmctl.cli.key.KeyOperation")
     def test_inspect_not_found(self, mock_key_op):
-        mock_key_op.get.side_effect = MVMKeyError("not found")
+        mock_key_op.inspect.side_effect = MVMKeyError("not found")
         result = runner.invoke(app, ["key", "inspect", "nonexistent"])
         assert result.exit_code == 1
 

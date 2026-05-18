@@ -238,10 +238,10 @@ class TestImageGet:
 class TestImageInspect:
     """Test image inspect through the real API."""
 
-    def test_inspect_returns_image_item(
+    def test_inspect_returns_dict(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """inspect without is_json returns an ImageItem."""
+        """inspect returns a grouped dict representation."""
         _setup_mocks(monkeypatch)
         fake_path = tmp_path / "inspect-test.raw"
         _create_fake_raw_image(fake_path)
@@ -254,14 +254,17 @@ class TestImageInspect:
             )
         )
 
-        image = ImageOperation.inspect(ImageInput(id=["inspect-test"]))
-        assert isinstance(image, ImageItem)
-        assert image.type == "inspect-test"
+        result = ImageOperation.inspect(ImageInput(id=["inspect-test"]))
+        assert isinstance(result, dict)
+        assert result["image"]["type"] == "inspect-test"
+        assert result["image"]["name"] == "inspect-test"
+        assert "id" in result["image"]
+        assert result["storage"]["fs_type"] == "ext4"
 
-    def test_inspect_returns_dict_when_json(
+    def test_inspect_returns_grouped_dict(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """inspect with is_json=True returns a dict."""
+        """inspect always returns a grouped dict with image/storage/compression/requirements/timestamps."""
         _setup_mocks(monkeypatch)
         fake_path = tmp_path / "inspect-json.raw"
         _create_fake_raw_image(fake_path)
@@ -275,13 +278,13 @@ class TestImageInspect:
         )
 
         result = ImageOperation.inspect(
-            ImageInput(id=["inspect-json"]), is_json=True
+            ImageInput(id=["inspect-json"]),
         )
         assert isinstance(result, dict)
-        assert result["type"] == "inspect-json"
-        assert result["name"] == "inspect-json"
-        assert "id" in result
-        assert "fs_type" in result
+        assert result["image"]["type"] == "inspect-json"
+        assert result["image"]["name"] == "inspect-json"
+        assert "id" in result["image"]
+        assert result["storage"]["fs_type"] == "ext4"
 
 
 class TestImageSetDefault:

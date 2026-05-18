@@ -460,7 +460,7 @@ class TestVMInspect:
         }
 
     def test_inspect_vm(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Create a VM and inspect it, verifying all flat-mode fields."""
+        """Create a VM and inspect it, verifying all grouped fields."""
         self._setup_mocks(monkeypatch)
         VMOperation.create(
             VMCreateInput(name="inspect-vm", ssh_keys=[], enable_console=False)
@@ -468,35 +468,35 @@ class TestVMInspect:
         vm = VMOperation.get(VMInput(identifiers=["inspect-vm"]))
         result = VMOperation.inspect(VMInput(identifiers=["inspect-vm"]))
 
-        assert result["id"] == vm.id
-        assert result["name"] == "inspect-vm"
-        assert result["status"] == VMStatus.RUNNING
-        assert result["vcpus"] == vm.vcpu_count
-        assert result["mem_mib"] == vm.mem_size_mib
-        assert result["image_id"] == vm.image_id
-        assert result["image_name"] is not None
-        assert result["kernel_id"] == vm.kernel_id
-        assert result["kernel_version"] is not None
-        assert result["network_id"] == vm.network_id
-        assert result["network_name"] is not None
-        assert result["binary_id"] == vm.binary_id
-        assert result["binary_name"] is not None
-        assert result["vm_dir"] is not None
-        assert result["rootfs_path"] is not None
-        assert result["config_path"] is not None
-        assert result["relay_running"] is False
-        assert result["relay_pid"] is None
-        assert result["tap_device"] == vm.tap_device
-        assert result["ipv4"] == vm.ipv4
-        assert result["mac"] == vm.mac
+        assert result["vm"]["id"] == vm.id
+        assert result["vm"]["name"] == "inspect-vm"
+        assert result["vm"]["status"] == VMStatus.RUNNING
+        assert result["resources"]["vcpus"] == vm.vcpu_count
+        assert result["resources"]["mem"] == vm.mem_size_mib
+        assert result["assets"]["image_id"] == vm.image_id
+        assert result["assets"]["image_name"] is not None
+        assert result["assets"]["kernel_id"] == vm.kernel_id
+        assert result["assets"]["kernel_version"] is not None
+        assert result["networking"]["network_id"] == vm.network_id
+        assert result["networking"]["network_name"] is not None
+        assert result["assets"]["binary_id"] == vm.binary_id
+        assert result["assets"]["binary_name"] is not None
+        assert result["filesystem"]["vm_dir"] is not None
+        assert result["filesystem"]["rootfs_path"] is not None
+        assert result["filesystem"]["config_path"] is not None
+        assert result["console"]["relay_running"] is False
+        assert result["console"]["relay_pid"] is None
+        assert result["networking"]["tap_device"] == vm.tap_device
+        assert result["networking"]["ipv4"] == vm.ipv4
+        assert result["networking"]["mac"] == vm.mac
 
     def test_inspect_nonexistent_vm(self) -> None:
         """Inspecting a non-existent VM raises VMNotFoundError."""
         with pytest.raises(VMNotFoundError):
             VMOperation.inspect(VMInput(identifiers=["no-such-vm"]))
 
-    def test_inspect_vm_tree(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Inspect with tree=True returns enriched tree data."""
+    def test_inspect_vm_grouped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Inspect returns enriched grouped data."""
         self._setup_mocks(monkeypatch)
         VMOperation.create(
             VMCreateInput(
@@ -504,7 +504,7 @@ class TestVMInspect:
             )
         )
         result = VMOperation.inspect(
-            VMInput(identifiers=["inspect-tree-vm"]), tree=True
+            VMInput(identifiers=["inspect-tree-vm"]),
         )
 
         assert "vm" in result
@@ -705,16 +705,26 @@ class TestVMCreateExplicit:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Create VM with custom vcpu_count and mem_size_mib."""
-        self._setup_mocks(monkeypatch)
-        VMOperation.create(
+        mocks = self._setup_mocks(monkeypatch)
+        mocks["provisioner"].resize.return_value = mocks["provisioner"]
+        mocks["provisioner"].set_hostname.return_value = mocks["provisioner"]
+        mocks["provisioner"].inject_dns.return_value = mocks["provisioner"]
+        mocks["provisioner"].setup_ssh.return_value = mocks["provisioner"]
+        mocks["provisioner"].disable_cloud_init.return_value = mocks[
+            "provisioner"
+        ]
+        mocks["provisioner"].run.return_value = None
+
+        result = VMOperation.create(
             VMCreateInput(
                 name="custom-cpu-mem-vm",
                 ssh_keys=[],
                 enable_console=False,
                 vcpu_count=4,
-                mem_size_mib=512,
+                mem_size_mib="512",
             )
         )
+        assert result.status == "success", f"VM create failed: {result.message}"
 
         vm = VMOperation.get(VMInput(identifiers=["custom-cpu-mem-vm"]))
         assert vm.vcpu_count == 4

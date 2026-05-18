@@ -257,25 +257,18 @@ class TestImageOperationGet:
 class TestImageOperationInspect:
     """Tests for ImageOperation.inspect()."""
 
-    def test_inspect_returns_item(self, mocker):
-        """inspect() with is_json=False returns ImageItem."""
+    def test_inspect_returns_dict(self, mocker):
+        """inspect() returns grouped dict representation."""
         mock_image = _make_image("ubuntu-24.04")
         mocker.patch.object(ImageOperation, "get", return_value=mock_image)
 
         result = ImageOperation.inspect(ImageInput(type=["ubuntu-24.04"]))
-        assert isinstance(result, ImageItem)
-        assert result.type == "ubuntu-24.04"
-
-    def test_inspect_returns_dict(self, mocker):
-        """inspect() with is_json=True returns dict representation."""
-        mock_image = _make_image("ubuntu-24.04")
-        mocker.patch.object(ImageOperation, "get", return_value=mock_image)
-
-        result = ImageOperation.inspect(
-            ImageInput(type=["ubuntu-24.04"]), is_json=True
-        )
         assert isinstance(result, dict)
-        assert result["type"] == "ubuntu-24.04"
+        assert result["image"]["type"] == "ubuntu-24.04"
+        assert "storage" in result
+        assert "compression" in result
+        assert "requirements" in result
+        assert "timestamps" in result
 
     def test_inspect_calls_get(self, mocker):
         """inspect() delegates to get()."""

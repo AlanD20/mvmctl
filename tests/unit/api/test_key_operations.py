@@ -292,8 +292,8 @@ class TestKeyOperationSetDefault:
 class TestKeyOperationInspect:
     """Tests for KeyOperation.inspect()."""
 
-    def test_inspect_returns_key_item(self, mocker):
-        """inspect() returns SSHKeyItem when is_json=False."""
+    def test_inspect_returns_dict(self, mocker):
+        """inspect() returns grouped dict."""
         mock_key = _make_key("inspect-me")
         mock_request = mocker.MagicMock()
         mock_request.resolve.return_value = mocker.MagicMock(keys=[mock_key])
@@ -303,29 +303,15 @@ class TestKeyOperationInspect:
         )
 
         result = KeyOperation.inspect(
-            KeyInput(name=["inspect-me"]), is_json=False
-        )
-
-        assert result is mock_key
-
-    def test_inspect_json(self, mocker):
-        """inspect() returns dict when is_json=True."""
-        mock_key = _make_key("inspect-me")
-        mock_request = mocker.MagicMock()
-        mock_request.resolve.return_value = mocker.MagicMock(keys=[mock_key])
-        mocker.patch(
-            "mvmctl.api.key_operations.KeyRequest",
-            return_value=mock_request,
-        )
-
-        result = KeyOperation.inspect(
-            KeyInput(name=["inspect-me"]), is_json=True
+            KeyInput(name=["inspect-me"])
         )
 
         assert isinstance(result, dict)
-        assert result["name"] == "inspect-me"
-        assert result["fingerprint"] == "SHA256:abc123"
-        assert result["is_default"] is False
+        assert result["key"]["name"] == "inspect-me"
+        assert result["key"]["fingerprint"] == "SHA256:abc123"
+        assert result["key"]["is_default"] is False
+        assert "files" in result
+        assert "timestamps" in result
 
     def test_inspect_json_with_default(self, mocker):
         """inspect() json output includes is_default."""
@@ -338,10 +324,11 @@ class TestKeyOperationInspect:
         )
 
         result = KeyOperation.inspect(
-            KeyInput(name=["default-key"]), is_json=True
+            KeyInput(name=["default-key"])
         )
 
-        assert result["is_default"] is True
+        assert isinstance(result, dict)
+        assert result["key"]["is_default"] is True
 
 
 class TestKeyOperationExport:

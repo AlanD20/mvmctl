@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from mvmctl.exceptions import HostError
@@ -13,6 +14,12 @@ from mvmctl.models import HostStateChangeItem, HostStateItem
 from mvmctl.models.result import NeedsInteraction, OperationResult
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def _mock_host_initialized():
+    with patch("mvmctl.main.HostOperation.is_initialized", return_value=True):
+        yield
 
 
 def _make_state(initialized: bool = True) -> HostStateItem:

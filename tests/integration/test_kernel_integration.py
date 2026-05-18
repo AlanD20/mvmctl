@@ -124,27 +124,17 @@ class TestKernelListAndGet:
 class TestKernelInspect:
     """Test kernel inspection through the real API."""
 
-    def test_inspect_returns_kernel_item(self) -> None:
-        """inspect() returns a KernelItem by default."""
+    def test_inspect_returns_grouped_dict(self) -> None:
+        """inspect() returns a grouped dict."""
         result = KernelOperation.inspect(KernelInput(id=["a" * 64]))
-        assert isinstance(result, KernelItem)
-        assert result.name == "vmlinux"
-        assert result.version == "6.1.0"
-        assert result.is_default
-
-    def test_inspect_returns_dict_when_json(self) -> None:
-        """inspect(is_json=True) returns a dict representation."""
-        result = KernelOperation.inspect(
-            KernelInput(id=["a" * 64]), is_json=True
-        )
         assert isinstance(result, dict)
-        assert result["name"] == "vmlinux"
-        assert result["version"] == "6.1.0"
-        assert result["is_default"]
-        assert "id" in result
-        assert "base_name" in result
-        assert "arch" in result
-        assert "type" in result
+        assert result["kernel"]["name"] == "vmlinux"
+        assert result["kernel"]["version"] == "6.1.0"
+        assert result["kernel"]["is_default"]
+        assert "id" in result["kernel"]
+        assert "base_name" in result["kernel"]
+        assert "arch" in result["kernel"]
+        assert "type" in result["kernel"]
 
 
 # ======================================================================
@@ -252,7 +242,8 @@ class TestKernelRemove:
                 disk_size_mib=1024,
                 rootfs_path="/tmp/test.ext4",
                 rootfs_suffix="ext4",
-                enable_pci=False,
+                pci_enabled=False,
+                nested_virt=False,
                 enable_logging=False,
                 enable_metrics=False,
                 enable_console=False,

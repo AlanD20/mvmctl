@@ -338,24 +338,24 @@ class TestKeyEdgeCases:
         names = [k.name for k in keys]
         assert "added-key" in names
 
-    def test_inspect_with_json(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """inspect with is_json=True returns a dict with correct fields."""
+    def test_inspect_returns_grouped_dict(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """inspect returns a grouped dict with correct fields."""
         _setup_ssh_keygen_mock(monkeypatch)
 
         created = KeyOperation.create(KeyCreateInput(name="inspect-json"))
         result = KeyOperation.inspect(
-            KeyInput(name=["inspect-json"]), is_json=True
+            KeyInput(name=["inspect-json"]),
         )
 
         assert isinstance(result, dict)
-        assert result["name"] == "inspect-json"
-        assert result["id"] == created.item.id
-        assert result["algorithm"] == "ssh-ed25519"
-        assert result["fingerprint"] == created.item.fingerprint
-        assert not result["is_default"]
-        assert "public_key_path" in result
-        assert "private_key_path" in result
-        assert "created_at" in result
+        assert result["key"]["name"] == "inspect-json"
+        assert result["key"]["id"] == created.item.id
+        assert result["key"]["algorithm"] == "ssh-ed25519"
+        assert result["key"]["fingerprint"] == created.item.fingerprint
+        assert not result["key"]["is_default"]
+        assert "public_key_path" in result["files"]
+        assert "private_key_path" in result["files"]
+        assert "created_at" in result["timestamps"]
 
     def test_inspect_nonexistent_raises_key_not_found(self) -> None:
         """Inspecting a non-existent key raises KeyNotFoundError."""

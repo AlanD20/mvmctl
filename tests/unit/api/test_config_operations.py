@@ -42,8 +42,8 @@ class TestConfigOperationGet:
 
     def test_get_returns_coerced_value(self) -> None:
         """get() returns values with proper type coercion."""
-        ConfigOperation.set("defaults.vm", "enable_pci", True)
-        result = ConfigOperation.get("defaults.vm", "enable_pci")
+        ConfigOperation.set("defaults.vm", "pci_enabled", True)
+        result = ConfigOperation.get("defaults.vm", "pci_enabled")
         assert result is True
         assert isinstance(result, bool)
 
@@ -65,8 +65,8 @@ class TestConfigOperationSet:
 
     def test_set_and_get_bool(self) -> None:
         """Setting a bool value and retrieving works."""
-        ConfigOperation.set("defaults.vm", "enable_pci", True)
-        result = ConfigOperation.get("defaults.vm", "enable_pci")
+        ConfigOperation.set("defaults.vm", "pci_enabled", True)
+        result = ConfigOperation.get("defaults.vm", "pci_enabled")
         assert result is True
 
     def test_set_overwrites_existing(self) -> None:
@@ -192,14 +192,14 @@ class TestConfigOperationFullWorkflow:
 
     def test_type_coercion_through_api(self) -> None:
         """Type coercion works through the API layer."""
-        ConfigOperation.set("defaults.vm", "enable_pci", "true")
-        result = ConfigOperation.get("defaults.vm", "enable_pci")
+        ConfigOperation.set("defaults.vm", "pci_enabled", "true")
+        result = ConfigOperation.get("defaults.vm", "pci_enabled")
         assert result is True
 
     def test_bool_false_persists(self) -> None:
         """False boolean values persist correctly."""
-        ConfigOperation.set("defaults.vm", "enable_pci", False)
-        result = ConfigOperation.get("defaults.vm", "enable_pci")
+        ConfigOperation.set("defaults.vm", "pci_enabled", False)
+        result = ConfigOperation.get("defaults.vm", "pci_enabled")
         assert result is False
 
     def test_integer_zero_persists(self) -> None:

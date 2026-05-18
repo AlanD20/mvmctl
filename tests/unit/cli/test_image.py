@@ -47,6 +47,39 @@ def _make_image(
     )
 
 
+def _make_inspect_dict(img: ImageItem) -> dict:
+    """Build inspect dict matching ImageOperation.inspect() output format."""
+    return {
+        "image": {
+            "id": img.id,
+            "name": img.name,
+            "type": img.type,
+            "arch": img.arch,
+            "is_default": img.is_default,
+            "is_present": img.is_present,
+        },
+        "storage": {
+            "path": img.path,
+            "fs_type": img.fs_type,
+            "fs_uuid": img.fs_uuid,
+            "compressed_size": img.compressed_size,
+            "original_size": img.original_size,
+        },
+        "compression": {
+            "format": img.compressed_format,
+            "ratio": img.compression_ratio,
+        },
+        "requirements": {
+            "minimum_rootfs_size_mib": img.minimum_rootfs_size_mib,
+        },
+        "timestamps": {
+            "pulled_at": img.pulled_at,
+            "created_at": img.created_at,
+            "updated_at": img.updated_at,
+        },
+    }
+
+
 class TestImageLs:
     """Tests for 'image ls' command."""
 
@@ -303,7 +336,8 @@ class TestImageInspect:
 
     @patch("mvmctl.cli.image.ImageOperation")
     def test_inspect_success(self, mock_img_op):
-        mock_img_op.inspect.return_value = _make_image("Ubuntu 24.04")
+        img = _make_image("Ubuntu 24.04")
+        mock_img_op.inspect.return_value = _make_inspect_dict(img)
         result = runner.invoke(app, ["image", "inspect", "abc123"])
         assert result.exit_code == 0
         assert "Ubuntu 24.04" in result.output
@@ -591,30 +625,28 @@ class TestImageInspectExtended:
         """Should render tree format output."""
         mock = mocker.patch("mvmctl.cli.image.ImageOperation")
         img = _make_image("Ubuntu 24.04")
-        mock.inspect.return_value = img
-        result = runner.invoke(app, ["image", "inspect", "abc123", "--tree"])
+        mock.inspect.return_value = _make_inspect_dict(img)
+        result = runner.invoke(app, ["image", "inspect", "abc123"])
         assert result.exit_code == 0
         assert "Ubuntu 24.04" in result.output
 
     def test_inspect_missing_image_marker(self, mocker):
         """Should show '(missing)' for images not on disk."""
         mock = mocker.patch("mvmctl.cli.image.ImageOperation")
-        mock.inspect.return_value = _make_image(
-            "Ubuntu 24.04", is_present=False
-        )
+        img = _make_image("Ubuntu 24.04", is_present=False)
+        mock.inspect.return_value = _make_inspect_dict(img)
         result = runner.invoke(app, ["image", "inspect", "abc123"])
         assert result.exit_code == 0
-        assert "(missing)" in result.output
+        assert "Is Present: False" in result.output
 
     def test_inspect_tree_missing(self, mocker):
-        """Should show missing marker in tree format."""
+        """Output shows is_present=False for missing images."""
         mock = mocker.patch("mvmctl.cli.image.ImageOperation")
-        mock.inspect.return_value = _make_image(
-            "Ubuntu 24.04", is_present=False
-        )
-        result = runner.invoke(app, ["image", "inspect", "abc123", "--tree"])
+        img = _make_image("Ubuntu 24.04", is_present=False)
+        mock.inspect.return_value = _make_inspect_dict(img)
+        result = runner.invoke(app, ["image", "inspect", "abc123"])
         assert result.exit_code == 0
-        assert "(missing)" in result.output
+        assert "Is Present: False" in result.output
 
     def test_inspect_dict_json(self, mocker):
         """Should handle dict return with --json."""
@@ -633,7 +665,7 @@ class TestImageInspectExtended:
         mock = mocker.patch("mvmctl.cli.image.ImageOperation")
         img = _make_image("Ubuntu 24.04")
         img.fs_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-        mock.inspect.return_value = img
+        mock.inspect.return_value = _make_inspect_dict(img)
         result = runner.invoke(app, ["image", "inspect", "abc123"])
         assert result.exit_code == 0
         assert "a1b2c3d4" in result.output
@@ -648,7 +680,7 @@ class TestImageInspectExtended:
         img.compression_ratio = None
         img.compressed_format = None
         img.original_size = 0
-        mock.inspect.return_value = img
+        mock.inspect.return_value = _make_inspect_dict(img)
         result = runner.invoke(app, ["image", "inspect", "abc123"])
         assert result.exit_code == 0
         assert "-" in result.output
@@ -661,8 +693,8 @@ class TestImageInspectExtended:
         img.compression_ratio = None
         img.compressed_format = None
         img.original_size = 0
-        mock.inspect.return_value = img
-        result = runner.invoke(app, ["image", "inspect", "abc123", "--tree"])
+        mock.inspect.return_value = _make_inspect_dict(img)
+        result = runner.invoke(app, ["image", "inspect", "abc123"])
         assert result.exit_code == 0
         assert "-" in result.output
 

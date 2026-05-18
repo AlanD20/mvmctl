@@ -211,7 +211,9 @@ class TestColumnStructure:
         "disk_size_mib": "INTEGER",
         "rootfs_path": "TEXT",
         "rootfs_suffix": "TEXT",
-        "enable_pci": "INTEGER",
+        "pci_enabled": "INTEGER",
+        "nested_virt": "INTEGER",
+        "cpu_config": "TEXT",
         "lsm_flags": "TEXT",
         "enable_logging": "INTEGER",
         "enable_metrics": "INTEGER",
@@ -232,6 +234,22 @@ class TestColumnStructure:
         "default_network_created": "INTEGER",
         "initialized_at": "TIMESTAMP",
         "updated_at": "TIMESTAMP",
+        "hostname": "TEXT",
+        "cpu_model": "TEXT",
+        "cpu_vendor": "TEXT",
+        "cpu_cores": "INTEGER",
+        "cpu_architecture": "TEXT",
+        "numa_nodes": "INTEGER",
+        "memory_total_mib": "INTEGER",
+        "storage_total_bytes": "INTEGER",
+        "kernel_version": "TEXT",
+        "os_release": "TEXT",
+        "pid_max": "INTEGER",
+        "fd_max": "INTEGER",
+        "conntrack_max": "INTEGER",
+        "tap_devices_max": "INTEGER",
+        "ip_local_port_range": "TEXT",
+        "detected_at": "TIMESTAMP",
     }
 
     HOST_STATE_CHANGES_COLUMNS = {
@@ -448,7 +466,7 @@ class TestConstraints:
             "network_id, tap_device, image_id, kernel_id, binary_id, "
             "api_socket_path, config_path, cloud_init_mode, "
             "vcpu_count, mem_size_mib, disk_size_mib, rootfs_path, rootfs_suffix, "
-            "enable_pci, enable_logging, enable_metrics, enable_console, "
+            "pci_enabled, enable_logging, enable_metrics, enable_console, "
             "ssh_keys, ssh_user, "
             "created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
@@ -488,7 +506,7 @@ class TestConstraints:
                 "network_id, tap_device, image_id, kernel_id, binary_id, "
                 "api_socket_path, config_path, cloud_init_mode, "
                 "vcpu_count, mem_size_mib, disk_size_mib, rootfs_path, rootfs_suffix, "
-                "enable_pci, enable_logging, enable_metrics, enable_console, "
+                "pci_enabled, enable_logging, enable_metrics, enable_console, "
                 "ssh_keys, ssh_user, "
                 "created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
@@ -603,7 +621,7 @@ class TestConstraints:
                 "network_id, tap_device, image_id, kernel_id, binary_id, "
                 "api_socket_path, config_path, cloud_init_mode, "
                 "vcpu_count, mem_size_mib, disk_size_mib, rootfs_path, rootfs_suffix, "
-                "enable_pci, enable_logging, enable_metrics, enable_console, "
+                "pci_enabled, enable_logging, enable_metrics, enable_console, "
                 "ssh_keys, ssh_user, "
                 "created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
@@ -684,7 +702,7 @@ class TestConstraints:
                 "network_id, tap_device, image_id, kernel_id, binary_id, "
                 "api_socket_path, config_path, cloud_init_mode, "
                 "vcpu_count, mem_size_mib, disk_size_mib, rootfs_path, rootfs_suffix, "
-                "enable_pci, enable_logging, enable_metrics, enable_console, "
+                "pci_enabled, enable_logging, enable_metrics, enable_console, "
                 "ssh_keys, ssh_user, "
                 "created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "

@@ -12,13 +12,19 @@ from mvmctl.models import HostStateChangeItem, HostStateItem
 
 
 @pytest.fixture
-def repo() -> HostRepository:
-    return HostRepository()
+def repo(tmp_path) -> HostRepository:
+    db_path = tmp_path / "test.db"
+    db = Database(db_path)
+    db.migrate()
+    return HostRepository(db)
 
 
 @pytest.fixture
-def db() -> Database:
-    return Database()
+def db(tmp_path) -> Database:
+    db_path = tmp_path / "test.db"
+    db = Database(db_path)
+    db.migrate()
+    return db
 
 
 class TestHostRepository:

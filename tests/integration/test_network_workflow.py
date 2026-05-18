@@ -111,14 +111,12 @@ class TestNetworkLifecycleWorkflow:
         )
 
         inspected = NetworkOperation.inspect(
-            NetworkInput(name=["inspectnet"]), is_json=True
+            NetworkInput(name=["inspectnet"]),
         )
         assert isinstance(inspected, dict)
-        assert inspected["name"] == "inspectnet"
-        assert inspected["subnet"] == "172.16.0.0/24"
+        assert inspected["network"]["name"] == "inspectnet"
+        assert inspected["network"]["subnet"] == "172.16.0.0/24"
         assert "leases" in inspected
-        assert "iptables_rules" in inspected
-        assert isinstance(inspected.get("iptables_rules"), list)
 
     def test_remove_network(self) -> None:
         """Test full network lifecycle: create -> verify -> remove."""

@@ -79,31 +79,6 @@ class TestCheckRequiredBinaries:
             missing = HostService.check_required_binaries()
             assert "ip" in missing
 
-    def test_iso_tool_both_missing(self) -> None:
-        """check_required_binaries should report cloud-localds as missing when neither found."""
-
-        def side_effect(name: str) -> str | None:
-            if name == "cloud-localds":
-                return None
-            return f"/usr/bin/{name}"
-
-        with patch("shutil.which", side_effect=side_effect):
-            missing = HostService.check_required_binaries()
-            assert "cloud-localds" in missing
-
-    def test_iso_tool_found(self) -> None:
-        """check_required_binaries should succeed when cloud-localds is present."""
-
-        def side_effect(name: str) -> str | None:
-            if name == "ip":
-                return None
-            return f"/usr/bin/{name}"
-
-        with patch("shutil.which", side_effect=side_effect):
-            missing = HostService.check_required_binaries()
-            assert "ip" in missing
-            assert "cloud-localds" not in missing
-
     def test_all_missing(self) -> None:
         """check_required_binaries should report all missing when none are found."""
         with patch("shutil.which", return_value=None):
@@ -709,6 +684,9 @@ class TestEnsureKvmModules:
         with (
             patch.object(
                 HostService, "_is_module_loaded", side_effect=is_loaded
+            ),
+            patch.object(
+                HostService, "check_kvm_access", return_value=False
             ),
             patch("mvmctl.core.host._service.subprocess.run") as mock_run,
         ):

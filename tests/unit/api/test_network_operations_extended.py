@@ -477,8 +477,11 @@ class TestNetworkOperationInspect:
         )
 
         result = NetworkOperation.inspect(NetworkInput(name=["testnet"]))
-        assert isinstance(result, NetworkItem)
-        assert result.name == "testnet"
+        assert isinstance(result, dict)
+        assert result["network"]["name"] == "testnet"
+        assert "status" in result
+        assert "nat" in result
+        assert "leases" in result
 
     def test_inspect_returns_json_dict(self, mocker):
         mock_item = _make_network()
@@ -503,10 +506,10 @@ class TestNetworkOperationInspect:
         )
 
         result = NetworkOperation.inspect(
-            NetworkInput(name=["testnet"]), is_json=True
+            NetworkInput(name=["testnet"])
         )
         assert isinstance(result, dict)
-        assert result["name"] == "testnet"
+        assert result["network"]["name"] == "testnet"
 
     def test_inspect_updates_bridge_active(self, mocker):
         mock_item = _make_network(bridge_active=False)

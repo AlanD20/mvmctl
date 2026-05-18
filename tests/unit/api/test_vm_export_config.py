@@ -179,13 +179,13 @@ class TestVMExportConfigFromDict:
                 "name": "fc-vm",
                 "firecracker": {
                     "enable_api_socket": True,
-                    "enable_pci": False,
+                    "pci_enabled": False,
                     "lsm_flags": "landlock,selinux",
                 },
             }
         )
         assert cfg.firecracker.enable_api_socket is True
-        assert cfg.firecracker.enable_pci is False
+        assert cfg.firecracker.pci_enabled is False
         assert cfg.firecracker.lsm_flags == "landlock,selinux"
 
     def test_from_dict_cloud_init_config(self) -> None:
@@ -233,7 +233,7 @@ class TestVMExportConfigRoundtrip:
             ),
             boot=VMExportBootConfig(args="console=ttyS0", enable_console=True),
             firecracker=VMExportFirecrackerConfig(
-                enable_api_socket=True, enable_pci=False
+                enable_api_socket=True, pci_enabled=False
             ),
             cloud_init=VMExportCloudInitConfig(mode="inject", user="root"),
         )
@@ -292,7 +292,7 @@ class TestVMExportConfigRoundtrip:
             ),
             firecracker=VMExportFirecrackerConfig(
                 enable_api_socket=False,
-                enable_pci=True,
+                pci_enabled=True,
                 lsm_flags="apparmor",
             ),
             cloud_init=VMExportCloudInitConfig(
@@ -487,7 +487,7 @@ class TestSubConfigDataclasses:
         """VMExportFirecrackerConfig defaults."""
         c = VMExportFirecrackerConfig()
         assert c.enable_api_socket is None
-        assert c.enable_pci is None
+        assert c.pci_enabled is None
         assert c.lsm_flags is None
 
     def test_cloud_init_config_defaults(self) -> None:

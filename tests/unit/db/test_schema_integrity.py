@@ -101,7 +101,7 @@ def _insert_vm(
         "network_id, tap_device, image_id, kernel_id, binary_id, "
         "api_socket_path, config_path, cloud_init_mode, "
         "vcpu_count, mem_size_mib, disk_size_mib, rootfs_path, rootfs_suffix, "
-        "enable_pci, enable_logging, enable_metrics, enable_console, "
+        "pci_enabled, enable_logging, enable_metrics, enable_console, "
         "created_at, updated_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
         "?, ?, ?, ?, ?, ?, ?, ?, ?, "
