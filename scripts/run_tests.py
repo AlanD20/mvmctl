@@ -77,12 +77,20 @@ import sys
 import time
 from pathlib import Path
 
-REPO_DIR = Path(__file__).resolve().parent.parent
+from common import (
+    DEFAULT_MIRROR,
+    PROJECT_ROOT,
+    print_fail,
+    print_info,
+    print_success,
+    print_warn,
+)
+
+REPO_DIR = PROJECT_ROOT
 SYSTEM_TEST_DIR = REPO_DIR / "tests" / "system"
 UNIT_TEST_DIR = REPO_DIR / "tests" / "unit"
 INTEGRATION_TEST_DIR = REPO_DIR / "tests" / "integration"
 COMPLIANCE_TEST_DIR = REPO_DIR / "tests" / "layer_compliance"
-DEFAULT_MIRROR = Path.home() / ".cache" / "mvm-asset-mirror"
 BUILT_BINARY = REPO_DIR / "dist" / "mvm"
 
 REPORTS_DIR = REPO_DIR / ".reports"
@@ -91,22 +99,6 @@ JUNIT_DIR = REPO_DIR / ".reports" / "junit"
 
 # Cached check for pytest-xdist availability
 _XDIST_AVAILABLE: bool | None = None
-
-
-def _info(msg: str) -> None:
-    print(f"[info] {msg}")
-
-
-def _ok(msg: str) -> None:
-    print(f"[ ok ] {msg}")
-
-
-def _fail(msg: str) -> None:
-    print(f"[fail] {msg}")
-
-
-def _warn(msg: str) -> None:
-    print(f"[warn] {msg}")
 
 
 def _fmt_duration(seconds: int) -> str:
@@ -128,10 +120,10 @@ def is_built_binary(binary: str) -> bool:
 def build_binary() -> str:
     """Build dist/mvm with --release and return the path."""
     if BUILT_BINARY.exists():
-        _ok(f"Binary already built at {BUILT_BINARY}")
+        print_success(f"Binary already built at {BUILT_BINARY}")
         return str(BUILT_BINARY)
 
-    _info("Building dist/mvm with --release ...")
+    print_info("Building dist/mvm with --release ...")
     build_script = REPO_DIR / "scripts" / "build_services.py"
     result = subprocess.run(
         [sys.executable, str(build_script), "--release"],
@@ -143,17 +135,17 @@ def build_binary() -> str:
     if result.returncode != 0:
         print(result.stderr, file=sys.stderr)
         sys.exit(1)
-    _ok(f"Binary built at {BUILT_BINARY}")
+    print_success(f"Binary built at {BUILT_BINARY}")
     return str(BUILT_BINARY)
 
 
 def ensure_mirror_seeded(mirror: Path) -> None:
     """Seed the asset mirror if empty."""
     if mirror.is_dir() and any(mirror.iterdir()):
-        _ok(f"Mirror already seeded at {mirror}")
+        print_success(f"Mirror already seeded at {mirror}")
         return
 
-    _info("Seeding asset mirror (one-time download)...")
+    print_info("Seeding asset mirror (one-time download)...")
     env = {**os.environ, "MVM_ASSET_MIRROR": str(mirror)}
     seed_cmds = [
         [
@@ -189,10 +181,10 @@ def ensure_mirror_seeded(mirror: Path) -> None:
             timeout=1800,
         )
         if result.returncode != 0:
-            _warn(
+            print_warn(
                 f"Seed command failed: {' '.join(cmd)}: {result.stderr.strip()}"
             )
-    _ok(f"Mirror seeded at {mirror}")
+    print_success(f"Mirror seeded at {mirror}")
 
 
 def get_test_files(domain: str | None = None) -> list[Path]:
@@ -204,7 +196,7 @@ def get_test_files(domain: str | None = None) -> list[Path]:
     if domain:
         domain_dir = SYSTEM_TEST_DIR / domain
         if not domain_dir.is_dir():
-            _fail(f"Unknown domain: {domain}")
+            print_fail(f"Unknown domain: {domain}")
             sys.exit(1)
         return sorted(domain_dir.glob("test_*.py"))
     return sorted(SYSTEM_TEST_DIR.rglob("test_*.py"))
@@ -276,7 +268,7 @@ def copy_results_with_timestamp(results_file: Path) -> None:
     ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     archived = results_file.parent / f"system-test-results-{ts}.txt"
     shutil.copy2(results_file, archived)
-    _info(f"Results archived: {archived.name}")
+    print_info(f"Results archived: {archived.name}")
 
 
 def run_test_file(
@@ -427,7 +419,7 @@ def _run_pytest_level(
     if extra_args:
         cmd.extend(extra_args)
 
-    _info(f"Running {label} tests ...")
+    print_info(f"Running {label} tests ...")
     start = time.monotonic()
     result = subprocess.run(
         cmd,
@@ -510,7 +502,7 @@ def _run_system_tests(
     else:
         binary = "uv run mvm"
 
-    _info(f"Using binary: {binary}")
+    print_info(f"Using binary: {binary}")
 
     mirror = None if args.no_mirror else DEFAULT_MIRROR
 
@@ -526,9 +518,9 @@ def _run_system_tests(
         failed_names = [n for n, s in prev_results.items() if s == "FAIL"]
         test_files = [f for f in test_files if f.name in failed_names]
         if not test_files:
-            _ok("No previously failed tests.")
+            print_success("No previously failed tests.")
             return 0
-        _info(f"Re-running {len(test_files)} previously failed test(s)")
+        print_info(f"Re-running {len(test_files)} previously failed test(s)")
 
     # Fresh results file and junit dir for this run
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -538,7 +530,7 @@ def _run_system_tests(
 
     # Run each file
     total_estimate = _fmt_duration(len(test_files) * 60)
-    _info(
+    print_info(
         f"Running {len(test_files)} file(s) one by one (est. {total_estimate})..."
     )
     print()
@@ -582,7 +574,7 @@ def _run_system_tests(
 
     # Skip ratio check after all system test files complete
     if args.skip_ratio_check and test_files:
-        _info("Running skip ratio check...")
+        print_info("Running skip ratio check...")
         check_script = REPO_DIR / "scripts" / "check_skip_ratio.py"
         check_result = subprocess.run(
             [
@@ -603,7 +595,7 @@ def _run_system_tests(
             print(check_result.stderr, file=sys.stderr)
 
         if check_result.returncode != 0:
-            _fail(
+            print_fail(
                 "Skip ratio check failed: one or more test files exceed the skip threshold."
             )
             failed += 1
@@ -628,10 +620,10 @@ def _run_single_system_test(
     else:
         binary = "uv run mvm"
 
-    _info(f"Using binary: {binary}")
+    print_info(f"Using binary: {binary}")
     mirror = None if args.no_mirror else DEFAULT_MIRROR
 
-    _info(f"Running system test: {test_file.name}")
+    print_info(f"Running system test: {test_file.name}")
     start = time.monotonic()
     status = run_test_file(
         test_file,
@@ -644,7 +636,7 @@ def _run_single_system_test(
 
     if status == "PASS":
         return 0
-    _fail(f"System test failed: {test_file.name} ({_fmt_duration(elapsed)})")
+    print_fail(f"System test failed: {test_file.name} ({_fmt_duration(elapsed)})")
     return 1
 
 
@@ -704,7 +696,7 @@ def _run_levels(
             if sys_failures > 0:
                 failures += sys_failures
                 print()
-                _fail(f"{sys_failures} system test file(s) failed")
+                print_fail(f"{sys_failures} system test file(s) failed")
                 return failures
 
     return failures
@@ -865,7 +857,7 @@ def main() -> None:
     total_failures = _run_levels(args, levels, test_file=test_file)
 
     if total_failures == 0:
-        _ok("All tests passed")
+        print_success("All tests passed")
     else:
         sys.exit(total_failures)
 

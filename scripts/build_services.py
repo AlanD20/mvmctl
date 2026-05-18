@@ -19,47 +19,17 @@ import sys
 import sysconfig
 from pathlib import Path
 
-# ── Colors ──────────────────────────────────────────────────────────────────
-try:
-    from rich.console import Console
-
-    _console = Console()
-
-    def _info(msg: str) -> None:
-        _console.print(f"[cyan][build][/] {msg}")
-
-    def _ok(msg: str) -> None:
-        _console.print(f"[green][  ok][/] {msg}")
-
-    def _fail(msg: str) -> None:
-        _console.print(f"[red][fail][/] {msg}")
-
-    def _warn(msg: str) -> None:
-        _console.print(f"[yellow][warn][/] {msg}")
-
-except ImportError:
-    _RED = "\033[0;31m"
-    _GREEN = "\033[0;32m"
-    _YELLOW = "\033[1;33m"
-    _CYAN = "\033[0;36m"
-    _NC = "\033[0m"
-
-    def _info(msg: str) -> None:
-        print(f"{_CYAN}[build]{_NC} {msg}")
-
-    def _ok(msg: str) -> None:
-        print(f"{_GREEN}[  ok]{_NC} {msg}")
-
-    def _fail(msg: str) -> None:
-        print(f"{_RED}[fail]{_NC} {msg}")
-
-    def _warn(msg: str) -> None:
-        print(f"{_YELLOW}[warn]{_NC} {msg}")
-
+from common import (
+    PROJECT_ROOT as PROJECT_DIR,
+)
+from common import (
+    print_fail,
+    print_info,
+    print_success,
+    print_warn,
+)
 
 # ── Constants ───────────────────────────────────────────────────────────────
-SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_DIR = SCRIPT_DIR.parent
 SERVICES_DIR = PROJECT_DIR / "dist" / "services"
 SYMLINKS_DIR = PROJECT_DIR / "build" / "symlinks"
 NPROC = os.cpu_count() or 1
@@ -186,7 +156,7 @@ def _run_nuitka(args: list[str], logfile: Path) -> int:
 # ── Build steps ────────────────────────────────────────────────────────────
 def _build_all_services() -> bool:
     """Build a single multidist binary with all service entry points."""
-    _info("Building all service binaries (multidist)...")
+    print_info("Building all service binaries (multidist)...")
     SERVICES_DIR.mkdir(parents=True, exist_ok=True)
 
     # Create temp symlinks with unique names
@@ -203,7 +173,7 @@ def _build_all_services() -> bool:
     if _has_static_libpython():
         flags.append("--static-libpython=yes")
     else:
-        _warn(
+        print_warn(
             "Static libpython not available — using dynamic linking. "
             "For maximum optimization, build with a standard Python "
             "(e.g. pyenv/system Python) instead of a standalone distribution."
@@ -221,21 +191,21 @@ def _build_all_services() -> bool:
     shutil.rmtree(SYMLINKS_DIR, ignore_errors=True)
 
     if rc == 0:
-        _ok("mvm-services built successfully")
+        print_success("mvm-services built successfully")
         return True
-    _fail(f"mvm-services build failed (see {logfile})")
+    print_fail(f"mvm-services build failed (see {logfile})")
     _print_last_lines(logfile, 20)
     return False
 
 
 def _build_single_service(name: str, source: str) -> bool:
     """Build a single service binary."""
-    _info(f"Building service {name}...")
+    print_info(f"Building service {name}...")
     flags = list(SERVICE_FLAGS)
     if _has_static_libpython():
         flags.append("--static-libpython=yes")
     else:
-        _warn(
+        print_warn(
             "Static libpython not available — using dynamic linking. "
             "For maximum optimization, build with a standard Python "
             "(e.g. pyenv/system Python) instead of a standalone distribution."
@@ -249,9 +219,9 @@ def _build_single_service(name: str, source: str) -> bool:
     ]
     rc = _run_nuitka(args, logfile)
     if rc == 0:
-        _ok(f"{name} built successfully")
+        print_success(f"{name} built successfully")
         return True
-    _fail(f"{name} build failed (see {logfile})")
+    print_fail(f"{name} build failed (see {logfile})")
     _print_last_lines(logfile, 20)
     return False
 
@@ -272,7 +242,7 @@ def build_services(names: list[str] | None = None) -> bool:
             None,
         )
         if source is None:
-            _fail(f"Unknown service: {name}")
+            print_fail(f"Unknown service: {name}")
             return False
         success = _build_single_service(name, source) and success
 
@@ -281,11 +251,11 @@ def build_services(names: list[str] | None = None) -> bool:
 
 def build_main() -> bool:
     """Build the main ``mvm`` binary."""
-    _info("Building main mvm binary...")
+    print_info("Building main mvm binary...")
 
     # Ensure combined service binary exists before building main
     if not (SERVICES_DIR / "mvm-services").exists():
-        _warn(
+        print_warn(
             "Combined service binary mvm-services not found — building services first"
         )
         if not build_services():
@@ -296,7 +266,7 @@ def build_main() -> bool:
     if _has_static_libpython():
         flags.append("--static-libpython=yes")
     else:
-        _warn(
+        print_warn(
             "Static libpython not available — using dynamic linking. "
             "For maximum optimization, build with a standard Python "
             "(e.g. pyenv/system Python) instead of a standalone distribution."
@@ -308,9 +278,9 @@ def build_main() -> bool:
     ]
     rc = _run_nuitka(args, logfile)
     if rc == 0:
-        _ok("Main binary built at dist/mvm")
+        print_success("Main binary built at dist/mvm")
         return True
-    _fail(f"Main binary build failed (see {logfile})")
+    print_fail(f"Main binary build failed (see {logfile})")
     _print_last_lines(logfile, 30)
     return False
 
@@ -339,7 +309,7 @@ def main() -> None:
     if args.service:
         for name in args.service:
             if name not in SERVICE_NAMES:
-                _fail(
+                print_fail(
                     f"Unknown service: {name!r}. "
                     f"Valid: {', '.join(sorted(SERVICE_NAMES))}"
                 )
@@ -357,10 +327,7 @@ def main() -> None:
     if build_all_services:
         success = build_services() and success
     if build_specific_services:
-        success = (
-            build_services(names=build_specific_services)
-            and success
-        )
+        success = build_services(names=build_specific_services) and success
     if build_main_binary:
         success = build_main() and success
 

@@ -28,19 +28,21 @@ import textwrap
 from pathlib import Path
 from typing import Optional
 
+from common import (
+    BOLD,
+    PROJECT_ROOT,
+    RESET,
+    SCRIPT_DIR,
+    print_banner,
+    print_fail,
+    print_info,
+    print_success,
+    print_warn,
+)
+
 logger = logging.getLogger(__name__)
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parent
 LOG_FILE = SCRIPT_DIR / "setup-test-environment.log"
-
-RED = "\033[91m"
-GREEN = "\033[92m"
-YELLOW = "\033[93m"
-BLUE = "\033[94m"
-CYAN = "\033[96m"
-BOLD = "\033[1m"
-RESET = "\033[0m"
 
 UBUNTU_DEBIAN_PACKAGES = [
     # Core networking and system
@@ -114,32 +116,6 @@ RECOMMENDED_CPU_CORES = 4
 VM_MEM_MIB = 128
 
 
-def print_header(text: str) -> None:
-    print(f"\n{BOLD}{CYAN}{'=' * 60}{RESET}")
-    print(f"{BOLD}{CYAN}  {text}{RESET}")
-    print(f"{BOLD}{CYAN}{'=' * 60}{RESET}\n")
-
-
-def print_step(text: str) -> None:
-    print(f"  {BLUE}▸{RESET} {text}")
-
-
-def print_success(text: str) -> None:
-    print(f"  {GREEN}✓{RESET} {text}")
-
-
-def print_warning(text: str) -> None:
-    print(f"  {YELLOW}⚠{RESET} {text}")
-
-
-def print_error(text: str) -> None:
-    print(f"  {RED}✗{RESET} {text}")
-
-
-def print_info(text: str) -> None:
-    print(f"  {text}")
-
-
 def run_cmd(
     cmd: list[str],
     *,
@@ -167,14 +143,14 @@ def run_cmd(
             if e.stderr:
                 msg += f"\n  stderr: {e.stderr.strip()}"
             logger.error(msg)
-            print_error(msg)
+            print_fail(msg)
             sys.exit(1)
         return e  # type: ignore[return-value]
     except FileNotFoundError:
         if check:
             msg = f"Command not found: {full_cmd[0]}"
             logger.error(msg)
-            print_error(msg)
+            print_fail(msg)
             sys.exit(1)
         raise
 
@@ -194,7 +170,7 @@ def detect_os() -> str:
     return "unknown"
 
 
-def get_ram_info() -> tuple[float, float]:
+def get_ram_print_info() -> tuple[float, float]:
     meminfo = Path("/proc/meminfo").read_text()
     total_kb = 0
     available_kb = 0
@@ -206,14 +182,14 @@ def get_ram_info() -> tuple[float, float]:
     return available_kb / 1_048_576, total_kb / 1_048_576
 
 
-def get_disk_info(path: str = "/") -> tuple[float, float]:
+def get_disk_print_info(path: str = "/") -> tuple[float, float]:
     stat = os.statvfs(path)
     total_gb = (stat.f_blocks * stat.f_frsize) / 1_073_741_824
     available_gb = (stat.f_bavail * stat.f_frsize) / 1_073_741_824
     return available_gb, total_gb
 
 
-def get_cpu_info() -> tuple[int, str]:
+def get_cpu_print_info() -> tuple[int, str]:
     cores = os.cpu_count() or 0
     model = "Unknown CPU"
     try:
@@ -269,14 +245,14 @@ def is_uv_installed() -> bool:
 
 
 def install_uv() -> None:
-    print_step("Installing uv...")
+    print_info("Installing uv...")
     run_cmd(
         ["curl", "-LsSf", "https://astral.sh/uv/install.sh", "|", "sh"],
         description="Install uv",
         check=False,
     )
     if not is_uv_installed():
-        print_step("Falling back to pip install for uv...")
+        print_info("Falling back to pip install for uv...")
         run_cmd(
             ["pip3", "install", "uv"],
             description="Install uv via pip",
@@ -284,49 +260,47 @@ def install_uv() -> None:
     if is_uv_installed():
         print_success("uv installed successfully")
     else:
-        print_warning(
-            "uv installation may have failed — please install manually"
-        )
+        print_warn("uv installation may have failed — please install manually")
 
 
 def setup_packages(os_family: str) -> None:
-    print_header("Installing System Packages")
+    print_banner("Installing System Packages")
 
     if os_family == "ubuntu-debian":
-        print_step("Updating package lists...")
+        print_info("Updating package lists...")
         run_cmd(["apt-get", "update"], sudo=True, description="apt-get update")
-        print_step("Installing Ubuntu/Debian packages...")
+        print_info("Installing Ubuntu/Debian packages...")
         run_cmd(
             ["apt-get", "install", "-y"] + UBUNTU_DEBIAN_PACKAGES,
             sudo=True,
             description="Install Ubuntu/Debian packages",
         )
     elif os_family == "arch":
-        print_step("Installing Arch Linux packages...")
+        print_info("Installing Arch Linux packages...")
         run_cmd(
             ["pacman", "-S", "--needed", "--noconfirm"] + ARCH_PACKAGES,
             sudo=True,
             description="Install Arch packages",
         )
     else:
-        print_error(f"Unsupported OS family: {os_family}")
+        print_fail(f"Unsupported OS family: {os_family}")
         sys.exit(1)
 
     print_success("System packages installed")
 
 
 def setup_kvm(os_family: str) -> None:
-    print_header("Configuring KVM & Nested Virtualization")
+    print_banner("Configuring KVM & Nested Virtualization")
 
     has_kvm, vendor = check_kvm_support()
     if has_kvm:
         print_success(f"CPU supports {vendor}")
     else:
-        print_warning("CPU does not appear to support hardware virtualization")
+        print_warn("CPU does not appear to support hardware virtualization")
         print_info("  VMs will not work without KVM support")
         print_info("  Ensure virtualization is enabled in BIOS/UEFI")
 
-    print_step("Loading KVM kernel modules...")
+    print_info("Loading KVM kernel modules...")
     run_cmd(["modprobe", "kvm"], sudo=True, description="Load kvm module")
     print_success("kvm module loaded")
 
@@ -334,7 +308,7 @@ def setup_kvm(os_family: str) -> None:
     is_amd = Path("/sys/module/kvm_amd").exists()
 
     if is_intel:
-        print_step("Detected Intel CPU — configuring kvm_intel...")
+        print_info("Detected Intel CPU — configuring kvm_intel...")
         nested_conf = Path("/etc/modprobe.d/kvm-intel.conf")
         nested_content = "options kvm_intel nested=1\n"
         if (
@@ -350,7 +324,7 @@ def setup_kvm(os_family: str) -> None:
                 sudo=True,
                 description="Enable nested virtualization for Intel",
             )
-            print_step("Reloading kvm_intel module...")
+            print_info("Reloading kvm_intel module...")
             run_cmd(["modprobe", "-r", "kvm_intel"], sudo=True, check=False)
             run_cmd(
                 ["modprobe", "kvm_intel"],
@@ -361,11 +335,11 @@ def setup_kvm(os_family: str) -> None:
         if check_nested_virt_intel():
             print_success("Nested virtualization enabled for Intel")
         else:
-            print_warning(
+            print_warn(
                 "Could not verify nested virtualization — check BIOS settings"
             )
     elif is_amd:
-        print_step("Detected AMD CPU — configuring kvm_amd...")
+        print_info("Detected AMD CPU — configuring kvm_amd...")
         nested_conf = Path("/etc/modprobe.d/kvm-amd.conf")
         nested_content = "options kvm_amd nested=1\n"
         if (
@@ -389,15 +363,15 @@ def setup_kvm(os_family: str) -> None:
         if check_nested_virt_amd():
             print_success("Nested virtualization enabled for AMD")
         else:
-            print_warning(
+            print_warn(
                 "Could not verify nested virtualization — check BIOS settings"
             )
     else:
-        print_warning("No KVM vendor module detected")
+        print_warn("No KVM vendor module detected")
 
     current_user = os.environ.get("SUDO_USER") or os.environ.get("USER")
     if current_user:
-        print_step(f"Adding user '{current_user}' to kvm group...")
+        print_info(f"Adding user '{current_user}' to kvm group...")
         run_cmd(
             ["usermod", "-aG", "kvm", current_user],
             sudo=True,
@@ -411,25 +385,25 @@ def setup_kvm(os_family: str) -> None:
         if os.access(kvm_path, os.R_OK | os.W_OK):
             print_success("/dev/kvm is accessible")
         else:
-            print_warning(
+            print_warn(
                 "/dev/kvm exists but may not be accessible — try logging out and back in"
             )
     else:
-        print_error("/dev/kvm not found — KVM is not available")
+        print_fail("/dev/kvm not found — KVM is not available")
 
 
 def setup_mvmctl(
     os_family: str,
     repo_path: Optional[str] = None,
 ) -> Path:
-    print_header("Setting Up mvmctl")
+    print_banner("Setting Up mvmctl")
 
     target_dir: Path
 
     if repo_path:
         target_dir = Path(repo_path).resolve()
         if not target_dir.exists():
-            print_error(f"Repository path does not exist: {target_dir}")
+            print_fail(f"Repository path does not exist: {target_dir}")
             sys.exit(1)
         print_success(f"Using existing clone at {target_dir}")
     else:
@@ -437,7 +411,7 @@ def setup_mvmctl(
         if (target_dir / "pyproject.toml").exists():
             print_success(f"Using existing clone at {target_dir}")
         else:
-            print_step("Cloning mvmctl repository...")
+            print_info("Cloning mvmctl repository...")
             run_cmd(
                 [
                     "git",
@@ -452,7 +426,7 @@ def setup_mvmctl(
     if not is_uv_installed():
         install_uv()
 
-    print_step("Installing Python dependencies with uv...")
+    print_info("Installing Python dependencies with uv...")
     run_cmd(
         ["uv", "sync", "--group", "dev"],
         workdir=str(target_dir),
@@ -460,7 +434,7 @@ def setup_mvmctl(
     )
     print_success("Dependencies installed")
 
-    print_step("Running mvm host init...")
+    print_info("Running mvm host init...")
     run_cmd(
         ["uv", "run", "mvm", "host", "init"],
         sudo=True,
@@ -473,10 +447,10 @@ def setup_mvmctl(
 
 
 def download_assets(target_dir: Path) -> None:
-    print_header("Pre-downloading Test Assets")
+    print_banner("Pre-downloading Test Assets")
 
     for image in TEST_IMAGES:
-        print_step(f"Downloading image: {image}...")
+        print_info(f"Downloading image: {image}...")
         result = run_cmd(
             ["uv", "run", "mvm", "image", "pull", image],
             workdir=str(target_dir),
@@ -486,11 +460,11 @@ def download_assets(target_dir: Path) -> None:
         if result.returncode == 0:
             print_success(f"Image downloaded: {image}")
         else:
-            print_warning(
+            print_warn(
                 f"Failed to download image: {image} (will be fetched on-demand during tests)"
             )
 
-    print_step("Downloading Firecracker kernel...")
+    print_info("Downloading Firecracker kernel...")
     result = run_cmd(
         [
             "uv",
@@ -509,9 +483,9 @@ def download_assets(target_dir: Path) -> None:
     if result.returncode == 0:
         print_success("Kernel downloaded")
     else:
-        print_warning("Failed to download kernel — will be fetched on-demand")
+        print_warn("Failed to download kernel — will be fetched on-demand")
 
-    print_step("Downloading Firecracker binary...")
+    print_info("Downloading Firecracker binary...")
     result = run_cmd(
         ["uv", "run", "mvm", "bin", "pull", "1.15.1", "--default"],
         workdir=str(target_dir),
@@ -521,17 +495,17 @@ def download_assets(target_dir: Path) -> None:
     if result.returncode == 0:
         print_success("Firecracker binary downloaded")
     else:
-        print_warning(
+        print_warn(
             "Failed to download Firecracker binary — will be fetched on-demand"
         )
 
 
 def validate_resources() -> dict:
-    print_header("Validating System Resources")
+    print_banner("Validating System Resources")
 
-    avail_ram, total_ram = get_ram_info()
-    avail_disk, total_disk = get_disk_info()
-    cpu_cores, cpu_model = get_cpu_info()
+    avail_ram, total_ram = get_ram_print_info()
+    avail_disk, total_disk = get_disk_print_info()
+    cpu_cores, cpu_model = get_cpu_print_info()
 
     info = {
         "ram_available_gb": avail_ram,
@@ -543,11 +517,11 @@ def validate_resources() -> dict:
     }
 
     if avail_ram < MIN_RAM_GB:
-        print_error(
+        print_fail(
             f"RAM: {avail_ram:.1f} GiB available (minimum {MIN_RAM_GB} GiB required)"
         )
     elif avail_ram < RECOMMENDED_RAM_GB:
-        print_warning(
+        print_warn(
             f"RAM: {avail_ram:.1f} GiB available (recommended {RECOMMENDED_RAM_GB} GiB)"
         )
     else:
@@ -556,7 +530,7 @@ def validate_resources() -> dict:
         )
 
     if avail_disk < MIN_DISK_GB:
-        print_error(
+        print_fail(
             f"Disk: {avail_disk:.0f} GiB available (minimum {MIN_DISK_GB} GiB required)"
         )
     else:
@@ -565,7 +539,7 @@ def validate_resources() -> dict:
         )
 
     if cpu_cores < RECOMMENDED_CPU_CORES:
-        print_warning(
+        print_warn(
             f"CPU: {cpu_cores} cores (recommended {RECOMMENDED_CPU_CORES}+)"
         )
     else:
@@ -591,11 +565,11 @@ def validate_resources() -> dict:
 
 
 def run_tests(target_dir: Path, binary_mode: bool = False) -> None:
-    print_header("Running System Integration Tests")
+    print_banner("Running System Integration Tests")
 
     if binary_mode:
-        print_step("Running tests in binary mode...")
-        print_warning("Binary mode requires a compiled binary in dist/mvm")
+        print_info("Running tests in binary mode...")
+        print_warn("Binary mode requires a compiled binary in dist/mvm")
         print_info("  Ensure you have built the binary first:")
         print_info("    uv sync --group build")
         print_info(
@@ -605,11 +579,11 @@ def run_tests(target_dir: Path, binary_mode: bool = False) -> None:
 
         binary_path = target_dir / "dist" / "mvm"
         if not binary_path.exists():
-            print_error(f"Binary not found at {binary_path}")
+            print_fail(f"Binary not found at {binary_path}")
             print_info("  Build the binary first, then re-run with --binary")
             return
 
-        print_step("Running tests against compiled binary...")
+        print_info("Running tests against compiled binary...")
         env = os.environ.copy()
         env["MVM_BINARY"] = str(binary_path)
         result = subprocess.run(
@@ -619,7 +593,7 @@ def run_tests(target_dir: Path, binary_mode: bool = False) -> None:
             check=False,
         )
     else:
-        print_step("Running tests in source mode...")
+        print_info("Running tests in source mode...")
         result = subprocess.run(
             ["uv", "run", "pytest", "tests/", "-v", "--tb=short"],
             cwd=target_dir,
@@ -629,25 +603,25 @@ def run_tests(target_dir: Path, binary_mode: bool = False) -> None:
     if result.returncode == 0:
         print_success("All tests passed!")
     else:
-        print_warning(f"Tests completed with exit code {result.returncode}")
+        print_warn(f"Tests completed with exit code {result.returncode}")
         print_info("  Review the output above for failures")
 
 
 def cleanup(uninstall_packages: bool = False) -> None:
-    print_header("Cleaning Up mvmctl Installation")
+    print_banner("Cleaning Up mvmctl Installation")
 
     cache_dir = Path.home() / ".cache" / "mvmctl"
     config_dir = Path.home() / ".config" / "mvmctl"
 
     if cache_dir.exists():
-        print_step(f"Removing cache directory: {cache_dir}")
+        print_info(f"Removing cache directory: {cache_dir}")
         shutil.rmtree(cache_dir)
         print_success("Cache removed")
     else:
         print_info("Cache directory does not exist — skipping")
 
     if config_dir.exists():
-        print_step(f"Removing config directory: {config_dir}")
+        print_info(f"Removing config directory: {config_dir}")
         shutil.rmtree(config_dir)
         print_success("Config removed")
     else:
@@ -655,7 +629,7 @@ def cleanup(uninstall_packages: bool = False) -> None:
 
     tmp_mvm = Path("/tmp/mvm")
     if tmp_mvm.exists():
-        print_step(f"Removing temporary mvm directory: {tmp_mvm}")
+        print_info(f"Removing temporary mvm directory: {tmp_mvm}")
         run_cmd(
             ["rm", "-rf", str(tmp_mvm)],
             sudo=True,
@@ -665,12 +639,12 @@ def cleanup(uninstall_packages: bool = False) -> None:
 
     vms_dir = cache_dir / "vms"
     if vms_dir.exists():
-        print_step("Removing VM state files...")
+        print_info("Removing VM state files...")
         shutil.rmtree(vms_dir)
         print_success("VM state removed")
 
     if uninstall_packages:
-        print_step("Uninstalling system packages...")
+        print_info("Uninstalling system packages...")
         os_family = detect_os()
         if os_family == "ubuntu-debian":
             run_cmd(
@@ -752,23 +726,23 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     setup_logging()
-    logger.info("Starting mvmctl test environment setup")
+    logger.print_info("Starting mvmctl test environment setup")
 
     if args.cleanup:
         cleanup(uninstall_packages=args.uninstall_packages)
         return 0
 
     if os.geteuid() != 0:
-        print_error("This script must be run as root (use sudo)")
+        print_fail("This script must be run as root (use sudo)")
         return 1
 
     os_family = detect_os()
     if os_family == "unknown":
-        print_error("Could not detect Linux distribution")
+        print_fail("Could not detect Linux distribution")
         print_info("  Supported: Ubuntu, Debian, Arch Linux")
         return 1
 
-    print_header("mvmctl Test Environment Setup")
+    print_banner("mvmctl Test Environment Setup")
     print_info(f"  Detected OS: {os_family}")
     print_info(f"  Log file: {LOG_FILE}")
     print_info("")
@@ -782,7 +756,7 @@ def main() -> int:
     if not args.skip_assets:
         download_assets(target_dir)
     else:
-        print_header("Skipping Asset Download (--skip-assets)")
+        print_banner("Skipping Asset Download (--skip-assets)")
         print_info("  Assets will be downloaded on-demand during tests")
 
     validate_resources()
@@ -790,7 +764,7 @@ def main() -> int:
     if args.run_tests:
         run_tests(target_dir, binary_mode=args.binary)
 
-    print_header("Setup Complete")
+    print_banner("Setup Complete")
     print_success("Your system is ready for mvmctl system integration tests!")
     print_info("")
     print_info(f"  Project directory: {target_dir}")
@@ -803,7 +777,7 @@ def main() -> int:
     print_info(f"  Log file: {LOG_FILE}")
     print_info("")
 
-    logger.info("Setup completed successfully")
+    logger.print_info("Setup completed successfully")
     return 0
 
 
