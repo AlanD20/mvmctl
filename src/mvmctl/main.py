@@ -107,7 +107,7 @@ def _get_git_version_info() -> str | None:
 def _get_version() -> str:
     # Build-time version baked in by build_services.py (takes priority)
     try:
-        from mvmctl._build_version import BUILD_VERSION  # type: ignore[import-not-found]
+        from mvmctl._build_version import BUILD_VERSION  # type: ignore[import-not-found]  # noqa: I001
 
         return BUILD_VERSION  # type: ignore[no-any-return]
     except (ImportError, ModuleNotFoundError):
@@ -390,7 +390,7 @@ def version_cmd() -> None:
 def help_cmd(ctx: click.Context, args: tuple[str, ...]) -> None:
     if not args:
         root = ctx.find_root()
-        root.command.format_help(root, click.HelpFormatter())
+        click.echo(root.command.get_help(root))
         ctx.exit()
 
     root = ctx.find_root()

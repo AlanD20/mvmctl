@@ -20,7 +20,6 @@ from mvmctl.constants import (
     PRIVILEGED_BINARIES,
     REQUIRED_BINARIES,
     _resolve_project_name,
-    env_var,
 )
 
 
@@ -57,8 +56,10 @@ class TestProjectIdentity:
         assert CLI_NAME == "mvmctl" or CLI_NAME == "mvm"
 
     def test_env_var(self):
-        assert env_var("CACHE_DIR").endswith("_CACHE_DIR")
-        assert env_var("LOG_LEVEL").endswith("_LOG_LEVEL")
+        from mvmctl.utils.common import env
+
+        assert env.key("CACHE_DIR").endswith("_CACHE_DIR")
+        assert env.key("LOG_LEVEL").endswith("_LOG_LEVEL")
 
     def test_mvm_db_filename(self):
         assert MVM_DB_FILENAME == "mvmdb.db"

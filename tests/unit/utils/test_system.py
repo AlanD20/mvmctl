@@ -410,11 +410,13 @@ class TestRequireMvmGroupMembership:
     @patch("mvmctl.utils._system._MVM_GROUP_VERIFIED", False)
     @patch("grp.getgrnam", side_effect=KeyError("mvm"))
     @patch("pwd.getpwnam")
-    def test_missing_group_raises(self, mock_pwd_unused, mock_grp_unused):
-        from mvmctl.exceptions import PrivilegeError
-
-        with pytest.raises(PrivilegeError, match="Group.*does not exist"):
-            require_mvm_group_membership()
+    @patch("mvmctl.utils._system.logger")
+    def test_missing_group_warns(self, mock_logger, mock_pwd_unused, mock_grp_unused):
+        require_mvm_group_membership()
+        mock_logger.warning.assert_called_once()
+        warning_msg = mock_logger.warning.call_args[0][0]
+        assert "Group" in warning_msg
+        assert "does not exist" in warning_msg
 
 
 # ==============================================================================
@@ -1174,29 +1176,31 @@ class TestRequireMvmGroupMembershipNew:
 
     @patch("grp.getgrnam")
     @patch("pwd.getpwuid")
-    def test_user_not_in_group_raises(self, mock_pwd, mock_grp):
-        from mvmctl.exceptions import PrivilegeError
+    @patch("mvmctl.utils._system.logger")
+    def test_user_not_in_group_warns(self, mock_logger, mock_pwd, mock_grp):
         from mvmctl.utils._system import require_mvm_group_membership
 
         mock_grp.return_value = MagicMock(gr_gid=1001, gr_mem=["otheruser"])
         mock_pwd.return_value = MagicMock(pw_name="testuser", pw_gid=1000)
-        with pytest.raises(PrivilegeError, match="is not in the"):
-            require_mvm_group_membership()
+        require_mvm_group_membership()
+        mock_logger.warning.assert_called_once()
+        warning_msg = mock_logger.warning.call_args[0][0]
+        assert "is not in the" in warning_msg
 
     @patch("grp.getgrnam")
     @patch("pwd.getpwuid")
     @patch("mvmctl.utils._system.os.getgroups", return_value=[1000, 1002])
     @patch("mvmctl.utils._system.os.getgid", return_value=1000)
     @patch("mvmctl.utils._system.os.getegid", return_value=1000)
-    def test_process_gid_not_active_raises(
-        self, mock_egid, mock_gid, mock_groups, mock_pwd, mock_grp
+    @patch("mvmctl.utils._system.logger")
+    def test_process_gid_not_active_warns(
+        self, mock_logger, mock_egid, mock_gid, mock_groups, mock_pwd, mock_grp
     ):
-        from mvmctl.exceptions import PrivilegeError
         from mvmctl.utils._system import require_mvm_group_membership
 
         mock_grp.return_value = MagicMock(gr_gid=1001, gr_mem=["testuser"])
         mock_pwd.return_value = MagicMock(pw_name="testuser", pw_gid=1000)
-        with pytest.raises(
-            PrivilegeError, match="does not have the group active"
-        ):
-            require_mvm_group_membership()
+        require_mvm_group_membership()
+        mock_logger.warning.assert_called_once()
+        warning_msg = mock_logger.warning.call_args[0][0]
+        assert "does not have the group active" in warning_msg

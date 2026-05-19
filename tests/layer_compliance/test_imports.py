@@ -20,7 +20,15 @@ API_DIR = PROJECT_ROOT / "api"
 CORE_DIR = PROJECT_ROOT / "core"
 SERVICES_DIR = PROJECT_ROOT / "services"
 
-ALLOWED_CORE_SUBMODULES = {"models", "exceptions", "constants"}
+ALLOWED_CORE_SUBMODULES = {
+    "models",
+    "exceptions",
+    "constants",
+    # CLI files import _shared for privilege helpers and version resolution.
+    # These are cross-cutting infrastructure concerns, not domain services.
+    # See: src/mvmctl/cli/bin.py, src/mvmctl/cli/kernel.py
+    "_shared",
+}
 
 
 def _get_python_files(directory: Path) -> list[Path]:

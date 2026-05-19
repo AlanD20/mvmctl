@@ -84,8 +84,8 @@ class TestConfigList:
     def test_list_settings(self, mock_cfg_op):
         mock_cfg_op.list_all.return_value = {
             "defaults.vm": {
-                "vcpu_count": {"override": None, "type": "int"},
-                "mem_size_mib": {"override": "1024", "type": "int"},
+                "vcpu_count": {"override": None, "default": 2, "type": "int"},
+                "mem_size_mib": {"override": "1024", "default": 2048, "type": "int"},
             },
         }
         result = runner.invoke(app, ["config", "list"])

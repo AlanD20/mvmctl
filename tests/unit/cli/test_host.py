@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -17,8 +18,11 @@ runner = CliRunner()
 
 
 @pytest.fixture(autouse=True)
-def _mock_host_initialized():
-    with patch("mvmctl.main.HostOperation.is_initialized", return_value=True):
+def _mock_db_exists():
+    with patch(
+        "mvmctl.utils.common.CacheUtils.get_mvm_db_path",
+        return_value=Path("/tmp/.mvmctl-test/mvmctl.db"),
+    ), patch("pathlib.Path.exists", return_value=True):
         yield
 
 

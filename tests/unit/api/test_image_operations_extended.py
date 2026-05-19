@@ -144,14 +144,7 @@ class TestImageOperationPull:
         existing = _make_image(type="ubuntu-24.04")
         _setup_pull_mocks(mocker, existing_image=existing, force=False)
 
-        mock_path = MagicMock()
-        mock_path.exists.return_value = True
-        mock_images_dir = MagicMock()
-        mock_images_dir.__truediv__.return_value = mock_path
-        mocker.patch(
-            "mvmctl.api.image_operations.CacheUtils.get_images_dir",
-            return_value=mock_images_dir,
-        )
+        mocker.patch("pathlib.Path.exists", return_value=True)
 
         result = ImageOperation.pull(ImagePullInput(type="ubuntu-24.04"))
         assert result.status == "skipped"
@@ -348,14 +341,7 @@ class TestImageOperationImport:
         existing = _make_image(type="custom-image")
         self._setup_import_mocks(mocker, existing_image=existing, force=False)
 
-        mock_path = MagicMock()
-        mock_path.exists.return_value = True
-        mock_images_dir = MagicMock()
-        mock_images_dir.__truediv__.return_value = mock_path
-        mocker.patch(
-            "mvmctl.api.image_operations.CacheUtils.get_images_dir",
-            return_value=mock_images_dir,
-        )
+        mocker.patch("pathlib.Path.exists", return_value=True)
 
         result = ImageOperation.import_(
             ImageImportInput(

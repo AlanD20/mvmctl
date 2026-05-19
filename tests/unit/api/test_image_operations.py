@@ -554,16 +554,13 @@ class TestImageOperationHelpers:
         """find_existing_image() returns item when found in repo and on disk."""
         mock_repo = MagicMock()
         mock_repo.get_by_type.return_value = _make_image(
-            "ubuntu-24.04", path="images/ubuntu-24.04.ext4"
+            "ubuntu-24.04", path="/home/user/cache/images/ubuntu-24.04.ext4"
         )
-        images_dir = MagicMock()
-        candidate = MagicMock()
-        candidate.exists.return_value = True
-        images_dir.__truediv__.return_value = candidate
+        mocker.patch("pathlib.Path.exists", return_value=True)
 
         spec = MagicMock(id="ubuntu-24.04")
         spec.type = "ubuntu-24.04"
-        result = ImageOperation.find_existing_image(spec, images_dir, mock_repo)
+        result = ImageOperation.find_existing_image(spec, MagicMock(), mock_repo)
         assert result is not None
         assert result.type == "ubuntu-24.04"
         mock_repo.get_by_type.assert_called_once_with("ubuntu-24.04")
@@ -603,17 +600,14 @@ class TestImageOperationHelpers:
         mock_repo = MagicMock()
         mock_repo.get_by_type.return_value = None
         mock_repo.get_by_version_and_type.return_value = _make_image(
-            "ubuntu-24.04", path="images/ubuntu-24.04.ext4"
+            "ubuntu-24.04", path="/home/user/cache/images/ubuntu-24.04.ext4"
         )
-        images_dir = MagicMock()
-        candidate = MagicMock()
-        candidate.exists.return_value = True
-        images_dir.__truediv__.return_value = candidate
+        mocker.patch("pathlib.Path.exists", return_value=True)
 
         spec = MagicMock(id="ubuntu-24.04")
         spec.type = "ubuntu-24.04"
         spec.version = "latest"
-        result = ImageOperation.find_existing_image(spec, images_dir, mock_repo)
+        result = ImageOperation.find_existing_image(spec, MagicMock(), mock_repo)
         assert result is not None
         assert result.type == "ubuntu-24.04"
         mock_repo.get_by_version_and_type.assert_called_once_with(

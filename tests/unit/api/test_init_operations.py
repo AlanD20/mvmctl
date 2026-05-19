@@ -354,6 +354,9 @@ class TestRun:
                 InitStepResult("guestfs", True, "libguestfs disabled"),
                 None,
             ),
+            "_step_network_setup": InitStepResult(
+                "network_setup", True, "Default network ready"
+            ),
             "_step_cache": InitStepResult("cache", True, "Ready"),
             "_step_binary": (
                 InitStepResult("binary", True, "Ready"),
@@ -373,7 +376,7 @@ class TestRun:
         assert isinstance(result, InitResult)
         assert result.host_ready is True
         assert result.needs_interaction is None
-        assert len(result.steps) == 6
+        assert len(result.steps) == 7
 
     def test_stops_at_host_interaction(self, mocker):
         """run() stops early when host step needs interaction."""
@@ -414,7 +417,7 @@ class TestRun:
 
         assert result.needs_interaction is not None
         assert result.host_ready is False
-        assert len(result.steps) == 6
+        assert len(result.steps) == 7
 
     def test_stops_at_guestfs_interaction(self, mocker):
         """run() stops early when guestfs step needs interaction."""

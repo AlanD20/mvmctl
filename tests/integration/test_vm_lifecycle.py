@@ -567,13 +567,14 @@ class TestVMCreateExplicit:
         db = Database()
         repo = ImageRepository(db)
         image_id = "e" * 64
+        images_dir = CacheUtils.get_images_dir()
         repo.upsert(
             ImageItem(
                 id=image_id,
                 type="debian-12",
                 name="Debian 12",
                 arch="x86_64",
-                path="debian-12.ext4",
+                path=str(images_dir / "debian-12.ext4"),
                 fs_type="ext4",
                 minimum_rootfs_size_mib=10,
                 original_size=10485760,
@@ -585,7 +586,6 @@ class TestVMCreateExplicit:
                 fs_uuid="87654321-4321-4321-4321-cba987654321",
             )
         )
-        images_dir = CacheUtils.get_images_dir()
         (images_dir / "debian-12.ext4").write_text("fake debian image")
         warm_dir = CacheUtils.get_warm_image_dir()
         (warm_dir / f"{image_id}.ext4").write_bytes(
@@ -602,6 +602,7 @@ class TestVMCreateExplicit:
         db = Database()
         repo = KernelRepository(db)
         kernel_id = "f" * 64
+        kernels_dir = CacheUtils.get_kernels_dir()
         repo.upsert(
             KernelItem(
                 id=kernel_id,
@@ -610,14 +611,13 @@ class TestVMCreateExplicit:
                 version="6.6.0",
                 arch="x86_64",
                 type="official",
-                path="vmlinux-custom",
+                path=str(kernels_dir / "vmlinux-custom"),
                 is_default=False,
                 is_present=True,
                 created_at="2026-01-01T00:00:00+00:00",
                 updated_at="2026-01-01T00:00:00+00:00",
             )
         )
-        kernels_dir = CacheUtils.get_kernels_dir()
         (kernels_dir / "vmlinux-custom").write_text("fake custom kernel")
         return kernel_id
 
@@ -630,6 +630,7 @@ class TestVMCreateExplicit:
         db = Database()
         repo = BinaryRepository(db)
         binary_id = "g" * 64
+        bin_dir = CacheUtils.get_bin_dir()
         repo.upsert(
             BinaryItem(
                 id=binary_id,
@@ -637,14 +638,13 @@ class TestVMCreateExplicit:
                 version="1.16.0",
                 full_version="v1.16.0",
                 ci_version="v1.16",
-                path="firecracker-custom",
+                path=str(bin_dir / "firecracker-custom"),
                 is_default=False,
                 is_present=True,
                 created_at="2026-01-01T00:00:00+00:00",
                 updated_at="2026-01-01T00:00:00+00:00",
             )
         )
-        bin_dir = CacheUtils.get_bin_dir()
         fc_file = bin_dir / "firecracker-custom"
         fc_file.write_text("fake custom firecracker")
         fc_file.chmod(0o755)

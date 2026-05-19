@@ -335,6 +335,7 @@ def _mock_path_exists(monkeypatch: pytest.MonkeyPatch) -> None:
 def _seed_test_image(repo, image_id: str = "b" * 64) -> None:
     """Seed a minimal test image into the repository."""
     from mvmctl.models.image import ImageItem
+    from mvmctl.utils.common import CacheUtils
 
     repo.upsert(
         ImageItem(
@@ -342,7 +343,7 @@ def _seed_test_image(repo, image_id: str = "b" * 64) -> None:
             type="ubuntu-24.04",
             name="Ubuntu 24.04",
             arch="x86_64",
-            path="ubuntu-24.04.ext4",
+            path=str(CacheUtils.get_images_dir() / "ubuntu-24.04.ext4"),
             fs_type="ext4",
             minimum_rootfs_size_mib=10,
             original_size=10485760,
@@ -360,6 +361,7 @@ def _seed_test_image(repo, image_id: str = "b" * 64) -> None:
 def _seed_test_kernel(repo, kernel_id: str = "a" * 64) -> None:
     """Seed a minimal test kernel into the repository."""
     from mvmctl.models.kernel import KernelItem
+    from mvmctl.utils.common import CacheUtils
 
     repo.upsert(
         KernelItem(
@@ -369,7 +371,7 @@ def _seed_test_kernel(repo, kernel_id: str = "a" * 64) -> None:
             version="6.1.0",
             arch="x86_64",
             type="official",
-            path="vmlinux",
+            path=str(CacheUtils.get_kernels_dir() / "vmlinux"),
             is_default=True,
             is_present=True,
             created_at="2026-01-01T00:00:00+00:00",
@@ -405,6 +407,7 @@ def _seed_test_network(repo, network_id: str = "c" * 64) -> None:
 def _seed_test_binary(repo, binary_id: str = "d" * 64) -> None:
     """Seed a minimal test firecracker binary into the repository."""
     from mvmctl.models.binary import BinaryItem
+    from mvmctl.utils.common import CacheUtils
 
     repo.upsert(
         BinaryItem(
@@ -413,7 +416,7 @@ def _seed_test_binary(repo, binary_id: str = "d" * 64) -> None:
             version="1.15.0",
             full_version="v1.15.0",
             ci_version="v1.15",
-            path="firecracker",
+            path=str(CacheUtils.get_bin_dir() / "firecracker"),
             is_default=True,
             is_present=True,
             created_at="2026-01-01T00:00:00+00:00",

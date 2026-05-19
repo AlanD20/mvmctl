@@ -8,6 +8,7 @@ requires-python = ">=3.13"
 dependencies = [
     "typer-slim>=0.12,<0.16",  # Lightweight version without Rich/Markdown deps
     "rich>=13,<15",  # Keep for console output, but not via typer
+    "rich-click>=1.9.7",  # Rich-formatted CLI help output
     "pyyaml>=6,<7",
     "jinja2>=3.1,<4",
     "zstandard>=0.21.0",
@@ -55,6 +56,10 @@ module = ["guestfs"]
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 disable_error_code = ["no-untyped-def", "type-arg"]
+
+[[tool.mypy.overrides]]
+module = ["rich_click"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -510,9 +510,10 @@ class TestVMCreateRequestCountValidation:
 
         mock_binary = MagicMock()
         mock_binary.id = "bin-id"
+        mock_binary.path = "/usr/bin/true"
         mock_binary.resolved_path = MagicMock()
         mock_binary.resolved_path.exists.return_value = True
-        mock_binary.resolved_path.__fspath__ = lambda: "/fake/bin"
+        mock_binary.resolved_path.__fspath__ = lambda: "/usr/bin/true"
         mock_binary_resolver = MagicMock()
         mock_binary_resolver.resolve.return_value = mock_binary
         mocker.patch(

@@ -399,7 +399,7 @@ def _resolve_cli_name() -> str:
 def _resolve_version() -> str:
     # Build-time version baked in by build_services.py (takes priority)
     try:
-        from mvmctl._build_version import BUILD_VERSION  # type: ignore[import-not-found]
+        from mvmctl._build_version import BUILD_VERSION  # type: ignore[import-not-found]  # noqa: I001
 
         return BUILD_VERSION  # type: ignore[no-any-return]
     except (ImportError, ModuleNotFoundError):

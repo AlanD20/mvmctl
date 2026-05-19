@@ -18,6 +18,7 @@ import pytest
 
 from mvmctl.api import BinaryInput, BinaryOperation, BinaryPullInput
 from mvmctl.exceptions import BinaryNotFoundError
+from mvmctl.utils.common import CacheUtils
 
 # ======================================================================
 # Shared helpers
@@ -86,13 +87,13 @@ class TestBinaryPull(_BinaryTestBase):
         fc = next(b for b in result.item if b.name == "firecracker")
         assert fc.version == "1.16.0"
         assert fc.full_version == "v1.16.0"
-        assert fc.resolved_path.exists()
-        assert fc.resolved_path.name == "firecracker-v1.16.0"
+        assert Path(fc.path).exists()
+        assert Path(fc.path).name == "firecracker-v1.16.0"
 
         jl = next(b for b in result.item if b.name == "jailer")
         assert jl.version == "1.16.0"
-        assert jl.resolved_path.exists()
-        assert jl.resolved_path.name == "jailer-v1.16.0"
+        assert Path(jl.path).exists()
+        assert Path(jl.path).name == "jailer-v1.16.0"
 
     def test_pull_existing_version_no_override(self) -> None:
         """Pulling an existing version without override returns existing DB entries."""
@@ -100,9 +101,15 @@ class TestBinaryPull(_BinaryTestBase):
         from mvmctl.core._shared import Database
         from mvmctl.core.binary._repository import BinaryRepository
         from mvmctl.models.binary import BinaryItem
+        from mvmctl.utils.common import CacheUtils
 
         db = Database()
         repo = BinaryRepository(db)
+        bin_dir = CacheUtils.get_bin_dir()
+        # Create jailer file on disk so it can be found
+        jailer_path = bin_dir / "jailer"
+        jailer_path.write_text("fake jailer")
+        jailer_path.chmod(0o755)
         repo.upsert(
             BinaryItem(
                 id="e" * 64,
@@ -110,7 +117,7 @@ class TestBinaryPull(_BinaryTestBase):
                 version="1.15.0",
                 full_version="v1.15.0",
                 ci_version="v1.15",
-                path="jailer",
+                path=str(jailer_path),
                 is_default=True,
                 is_present=True,
                 created_at="2026-01-01T00:00:00+00:00",
@@ -127,11 +134,12 @@ class TestBinaryPull(_BinaryTestBase):
         fc = next(b for b in result.item if b.name == "firecracker")
         assert fc.version == "1.15.0"
         assert fc.name == "firecracker"
-        assert fc.path == "firecracker"
+        assert Path(fc.path).exists()
+        assert Path(fc.path).name == "firecracker"
 
         jl = next(b for b in result.item if b.name == "jailer")
         assert jl.version == "1.15.0"
-        assert jl.path == "jailer"
+        assert Path(jl.path).exists()
 
     def test_pull_invalid_version(self) -> None:
         """Pulling with an invalid version format returns error status."""
@@ -243,7 +251,7 @@ class TestBinaryRemove(_BinaryTestBase):
             BinaryInput(identifiers=["firecracker"], version="1.16.0")
         )
         assert len(binaries) == 1
-        path = binaries[0].resolved_path
+        path = Path(binaries[0].path)
         assert path.exists()
 
         # Remove it

@@ -280,11 +280,14 @@ class TestHostOperationInitExtended:
         assert result.status == "success"
 
     def test_init_default_network_creation_fails_gracefully(self, mocker):
-        deps = _patch_init_common(mocker)
-        mocker.patch("mvmctl.api.host_operations.os.getuid", return_value=0)
-        mock_restore_op = deps["net_restore"]
-        mock_restore_op.is_ok = True
-        mock_restore_op.item = None
+        mocker.patch("mvmctl.api.host_operations.Database")
+        mock_sync_result = MagicMock()
+        mock_sync_result.is_ok = True
+        mock_sync_result.item = None
+        mocker.patch(
+            "mvmctl.api.network_operations.NetworkOperation.sync",
+            return_value=mock_sync_result,
+        )
         mock_default_op = _make_op_result(
             "error", "network.default_created_failed"
         )
@@ -293,20 +296,19 @@ class TestHostOperationInitExtended:
             return_value=mock_default_op,
         )
         mock_logger = mocker.patch("mvmctl.api.host_operations.logger.warning")
-        result = HostOperation.init(Path("/tmp"))
-        assert result.status == "success"
+        result = HostOperation.network_setup()
+        assert result.status == "error"
         mock_logger.assert_called_once()
 
     def test_init_restore_raises_exception_handled(self, mocker):
-        _patch_init_common(mocker)
-        mocker.patch("mvmctl.api.host_operations.os.getuid", return_value=0)
+        mocker.patch("mvmctl.api.host_operations.Database")
         mocker.patch(
             "mvmctl.api.network_operations.NetworkOperation.sync",
-            side_effect=Exception("network error"),
+            side_effect=Exception("sync failed"),
         )
         mock_logger = mocker.patch("mvmctl.api.host_operations.logger.warning")
-        result = HostOperation.init(Path("/tmp"))
-        assert result.status == "success"
+        result = HostOperation.network_setup()
+        assert result.status == "error"
         mock_logger.assert_called_once()
 
     def test_init_recording_failures_handled_gracefully(self, mocker):
