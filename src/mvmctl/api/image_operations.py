@@ -353,6 +353,26 @@ class ImageOperation:
         if not resolved.arch:
             raise ImageAcquireError("Failed to resolve format")
 
+        # Detect actual format via magic bytes and warn on mismatch
+        import_warnings: list[str] = []
+        if (
+            resolved.source_path
+            and resolved.source_path.exists()
+            and resolved.format
+        ):
+            detected = ImageService.detect_image_format(resolved.source_path)
+            if detected:
+                logger.info(
+                    "Detected image format: %s (declared: %s)",
+                    detected,
+                    resolved.format,
+                )
+                if detected != resolved.format:
+                    import_warnings.append(
+                        f"Declared format '{resolved.format}' does not match "
+                        f"detected format '{detected}' for {resolved.source_path.name}"
+                    )
+
         # Build temporary spec for processing pipeline
         spec = ImageSpec(
             type=resolved.type,
@@ -377,7 +397,6 @@ class ImageOperation:
                     status="skipped",
                     code="image.already_present",
                     item=existing_image,
-                    warnings=resolved.warnings,
                 )
 
         # Generate image ID
@@ -388,7 +407,6 @@ class ImageOperation:
         image_service = ImageService(repo)
 
         # ORCHESTRATION: extract → optimize
-        import_warnings: list[str] = []
         try:
             if on_progress is not None:
                 on_progress(
@@ -469,7 +487,7 @@ class ImageOperation:
             code="image.imported",
             item=image_item,
             message=import_msg,
-            warnings=resolved.warnings,
+            warnings=import_warnings,
         )
 
     @staticmethod

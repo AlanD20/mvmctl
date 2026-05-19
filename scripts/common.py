@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -142,8 +143,12 @@ def run_mvm(
 ) -> bool:
     """Run an mvm subcommand, streaming stdout/stderr to the terminal.
 
-    Sets ``MVM_ASSET_MIRROR`` automatically.  Prints progress/report
-    lines via :func:`info`, :func:`ok`, and :func:`fail`.
+    Sets ``MVM_ASSET_MIRROR`` in the subprocess environment.
+    For sudo commands uses ``sudo -E`` so the user's ``PATH`` (and thus
+    ``uv``) is preserved.
+
+    Prints progress/report lines via :func:`print_info`,
+    :func:`print_success`, and :func:`print_fail`.
 
     Returns True on exit code 0, False otherwise.
     """
@@ -154,18 +159,19 @@ def run_mvm(
     mirror_val = str(DEFAULT_MIRROR)
     DEFAULT_MIRROR.mkdir(parents=True, exist_ok=True)
 
+    env = os.environ.copy()
+    env["MVM_ASSET_MIRROR"] = mirror_val
+
     if sudo:
-        cmd = (
-            ["sudo", "env", f"MVM_ASSET_MIRROR={mirror_val}"]
-            + mvm_cmd.split()
-            + args
-        )
+        # Resolve executable to full path so sudo can find it
+        # (uv is often in a user-local path like ~/.pyenv/shims/)
+        cmd_parts = mvm_cmd.split()
+        exe_path = shutil.which(cmd_parts[0])
+        if exe_path:
+            cmd_parts[0] = exe_path
+        cmd = ["sudo", "-E"] + cmd_parts + args
     else:
         cmd = mvm_cmd.split() + args
-
-    env = os.environ.copy()
-    if not sudo:
-        env["MVM_ASSET_MIRROR"] = mirror_val
 
     start = time.monotonic()
     try:
@@ -181,6 +187,37 @@ def run_mvm(
 
     print_fail(f"Failed (exit {result.returncode}, {elapsed}s)")
     return False
+
+
+# ---------------------------------------------------------------------------
+# Timer
+# ---------------------------------------------------------------------------
+
+
+class Timer:
+    """Simple elapsed-time tracker for build steps and long operations.
+
+    Usage::
+
+        timer = Timer()
+        do_work()
+        print(f"Done in {timer.elapsed}s")
+        timer.reset()
+        do_more_work()
+        print(f"Second phase: {timer.elapsed}s")
+    """
+
+    def __init__(self) -> None:
+        self._start: float = time.monotonic()
+
+    @property
+    def elapsed(self) -> int:
+        """Seconds since the timer was created or last reset."""
+        return int(time.monotonic() - self._start)
+
+    def reset(self) -> None:
+        """Reset the timer back to zero."""
+        self._start = time.monotonic()
 
 
 # ---------------------------------------------------------------------------

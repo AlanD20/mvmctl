@@ -6,6 +6,7 @@ import ipaddress
 import re
 from typing import Any
 
+from mvmctl.constants import CLI_NAME
 from mvmctl.exceptions import MVMError
 from mvmctl.utils.common import CommonUtils
 from mvmctl.utils.network import NetworkUtils
@@ -87,6 +88,13 @@ class NetworkValidator:
         if name.lower() in NetworkValidator.RESERVED_INTERFACES:
             raise MVMError(
                 f"Invalid network name '{name}': '{name}' is a reserved interface name"
+            )
+
+        # Network names must not start with CLI_NAME- prefix (reserved for bridges)
+        if name.startswith(f"{CLI_NAME}-"):
+            raise MVMError(
+                f"Invalid network name '{name}': cannot start with '{CLI_NAME}-' "
+                f"(reserved for bridge names)"
             )
 
         return name

@@ -12,8 +12,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import click
+import rich_click
 
 from mvmctl.utils._system import run_cmd
+from mvmctl.utils.common import env
 
 
 def _setup_signal_handlers() -> None:
@@ -38,10 +40,6 @@ if TYPE_CHECKING:
     import typer
     import typer.models
 
-    from mvmctl.api.host_operations import HostOperation
-else:
-    from mvmctl.api import HostOperation
-
 # Lazy imports from constants to avoid heavy import-time work
 # (package metadata resolution)
 
@@ -58,13 +56,6 @@ def _get_cli_name() -> str:
     from mvmctl.constants import CLI_NAME
 
     return str(CLI_NAME)
-
-
-def _get_env_var(suffix: str) -> str:
-    """Get env var name lazily to avoid import-time overhead."""
-    from mvmctl.constants import env_var
-
-    return env_var(suffix)
 
 
 def _get_git_version_info() -> str | None:
@@ -114,6 +105,14 @@ def _get_git_version_info() -> str | None:
 
 
 def _get_version() -> str:
+    # Build-time version baked in by build_services.py (takes priority)
+    try:
+        from mvmctl._build_version import BUILD_VERSION  # type: ignore[import-not-found]
+
+        return BUILD_VERSION  # type: ignore[no-any-return]
+    except (ImportError, ModuleNotFoundError):
+        pass
+
     bootstrap_name = _get_bootstrap_name()
     try:
         import importlib.metadata as _meta
@@ -240,7 +239,7 @@ def _warn_if_running_as_root() -> None:
         return
     # Suppress when configure already prompted the user and escalated on their
     # behalf — they accepted, so the warning is noise.
-    if os.environ.get(_get_env_var("ESCALATED")):
+    if env.get("ESCALATED"):
         return
 
     from mvmctl.utils.cli import mvm_cli
@@ -251,7 +250,7 @@ def _warn_if_running_as_root() -> None:
     )
 
 
-class LazyMVMGroup(click.Group):
+class LazyMVMGroup(rich_click.RichGroup):
     _add_completion: bool = False
     registered_callback: typer.models.TyperInfo | None = None
     registered_commands: list[typer.models.CommandInfo] | None = None
@@ -281,55 +280,9 @@ class LazyMVMGroup(click.Group):
 
         from typer.main import get_command as get_typer_command
 
-        return get_typer_command(command)
-
-    def format_help(
-        self, ctx: click.Context, formatter: click.HelpFormatter
-    ) -> None:
-        """Render root group help with Rich elements instead of Click's plain text."""
-        from rich import box
-        from rich.panel import Panel
-        from rich.table import Table
-
-        from mvmctl.utils.cli import mvm_cli
-
-        console = mvm_cli._console
-
-        # Usage line
-        usage = f"[bold]{ctx.get_usage().strip()}[/]"
-        console.print(usage)
-
-        # Description
-        if self.help:
-            console.print(f"\n  {self.help}\n")
-
-        # Options panel
-        params = self.get_params(ctx)
-        visible_params = [p for p in params if p.opts]
-        if visible_params:
-            opt_table = Table(box=box.SIMPLE, show_header=False)
-            opt_table.add_column("Option", style="cyan", no_wrap=True)
-            opt_table.add_column("Description")
-            for param in visible_params:
-                opt_table.add_row(
-                    param.opts[0], getattr(param, "help", "") or ""
-                )
-            console.print(Panel(opt_table, title="[bold]Options[/]"))
-
-        # Commands panel
-        cmd_names = self.list_commands(ctx)
-        visible_cmds = [
-            (name, _STATIC_COMMAND_HELP.get(name, ""))
-            for name in cmd_names
-            if name in _STATIC_COMMAND_HELP
-        ]
-        if visible_cmds:
-            cmd_table = Table(box=box.SIMPLE, show_header=False)
-            cmd_table.add_column("Command", style="cyan", no_wrap=True)
-            cmd_table.add_column("Description")
-            for cmd_name, desc in visible_cmds:
-                cmd_table.add_row(cmd_name, desc)
-            console.print(Panel(cmd_table, title="[bold]Commands[/]"))
+        click_cmd = get_typer_command(command)
+        click_cmd.name = cmd_name
+        return click_cmd
 
 
 @click.group(
@@ -361,7 +314,14 @@ def app(ctx: click.Context, verbose: bool, debug: bool) -> None:
         ctx.command.format_help(ctx, click.HelpFormatter())
         ctx.exit()
 
-    if ctx.invoked_subcommand in {"help", "version", "init", "completion"}:
+    if ctx.invoked_subcommand in {
+        "help",
+        "version",
+        "init",
+        "completion",
+        "host",
+        "cache",
+    }:
         return
 
     _warn_if_running_as_root()
@@ -369,10 +329,13 @@ def app(ctx: click.Context, verbose: bool, debug: bool) -> None:
 
     setup_logging(verbose=verbose, debug=debug)
 
-    # Fail fast if host has not been initialized.
-    # Every command except help/version/init/completion depends on the
-    # database being set up by `mvm init` (or `sudo mvm host init`).
-    if not HostOperation.is_initialized():
+    # Check that the database exists before allowing commands that
+    # depend on it.  We check the file rather than ``is_initialized()``
+    # so that ``host init`` and ``cache clean`` (which handle their own
+    # preconditions and may need to run mid-init) are not blocked.
+    from mvmctl.utils.common import CacheUtils
+
+    if not CacheUtils.get_mvm_db_path().exists():
         click.echo(
             f"Error: '{_get_cli_name()} {ctx.invoked_subcommand}' requires "
             f"initialization. Run '{_get_cli_name()} init' first.",
@@ -400,7 +363,7 @@ def completion_cmd(ctx: click.Context, shell: str) -> None:
         "fish": FishComplete,
     }[shell]
     complete = complete_cls(
-        root.command, {}, _get_cli_name(), _get_env_var("COMPLETE")
+        root.command, {}, _get_cli_name(), env.key("COMPLETE")
     )
     click.echo(complete.source())
 

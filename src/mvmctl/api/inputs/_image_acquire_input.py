@@ -169,6 +169,7 @@ class ImageAcquireRequest:
         )
 
         self.ensure_validate()
+        self.ensure_validate_import()
         return self._result
 
     def ensure_validate(self) -> None:
@@ -195,7 +196,7 @@ class ImageAcquireRequest:
             raise ImageAcquireError("Partition cannot be less than 1")
 
     def ensure_validate_import(self) -> None:
-
+        """Validate import-specific fields."""
         if self._result is None:
             raise ImageAcquireError(
                 "Failed to resolve necessary dependencies to validate"

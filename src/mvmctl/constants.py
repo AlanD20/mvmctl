@@ -179,6 +179,13 @@ IMAGE_IMPORT_FORMAT_MAP: Final[dict[str, str]] = {
     ".qcow2": "qcow2",
     ".raw": "raw",
     ".img": "raw",
+    ".ext4": "raw",
+    ".ext3": "raw",
+    ".ext2": "raw",
+    ".btrfs": "raw",
+    ".xfs": "raw",
+    ".vhd": "vhd",
+    ".vhdx": "vhdx",
     ".tar": "tar-rootfs",
     ".tar.gz": "tar-rootfs",
     ".tar.xz": "tar-rootfs",
@@ -390,6 +397,14 @@ def _resolve_cli_name() -> str:
 
 
 def _resolve_version() -> str:
+    # Build-time version baked in by build_services.py (takes priority)
+    try:
+        from mvmctl._build_version import BUILD_VERSION  # type: ignore[import-not-found]
+
+        return BUILD_VERSION  # type: ignore[no-any-return]
+    except (ImportError, ModuleNotFoundError):
+        pass
+
     import importlib.metadata as _meta
 
     try:
@@ -404,20 +419,6 @@ MVM_UNIX_GROUP: str = CLI_NAME
 MVM_FORWARD_CHAIN: str = f"{CLI_NAME.upper()}-FORWARD"
 MVM_POSTROUTING_CHAIN: str = f"{CLI_NAME.upper()}-POSTROUTING"
 MVM_NOCLOUD_NET_INPUT_CHAIN: str = f"{CLI_NAME.upper()}-NOCLOUDNET-INPUT"
-
-
-def env_var(suffix: str) -> str:
-    """
-    Return the environment variable name for the given suffix.
-
-    Args:
-        suffix: The variable suffix to append after the CLI name prefix.
-
-    Returns:
-        Full environment variable name in uppercase.
-
-    """
-    return f"{CLI_NAME.upper()}_{suffix}"
 
 
 def __getattr__(name: str) -> Any:

@@ -68,6 +68,9 @@ linux-*/
 # VM runtime dirs (env/ used by PoC bash scripts)
 env/
 
+# Build-time generated version file
+_build_version.py
+
 # Misc binary/image artifacts
 *.iso
 *.metrics

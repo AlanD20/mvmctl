@@ -7,7 +7,7 @@ import os
 import re
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, overload
 
 from mvmctl.constants import CLI_NAME, CONST_DIR_PERMS_CACHE, DEBUG_MODE
 from mvmctl.exceptions import MVMError
@@ -97,6 +97,14 @@ class env:
     def key(suffix: str) -> str:
         """Return the full env var name (e.g. ``CACHE_DIR`` → ``MVM_CACHE_DIR``)."""
         return f"{env._prefix}{suffix}"
+
+    @staticmethod
+    @overload
+    def get(suffix: str) -> str | None: ...
+
+    @staticmethod
+    @overload
+    def get(suffix: str, default: str) -> str: ...
 
     @staticmethod
     def get(suffix: str, default: str | None = None) -> str | None:

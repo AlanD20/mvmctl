@@ -210,7 +210,7 @@ def kernel_pull(
     features: str | None = typer.Option(
         None,
         "--features",
-        help="Comma-separated kernel features (kvm, nftables)",
+        help="Comma-separated kernel features (kvm, nftables, tuntap)",
     ),
 ) -> None:
     """Pull or build a kernel.
