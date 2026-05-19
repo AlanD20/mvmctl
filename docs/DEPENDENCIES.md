@@ -219,8 +219,6 @@ Only needed for `mvm kernel pull --type official --clean-build`.
 | `mvm vm snapshot/load` | internal (Firecracker API via Unix socket) |
 | `mvm vm attach-volume` / `detach-volume` | `firecracker` |
 | `mvm volume` | `ls/inspect` → internal; `create/rm/resize` → `qemu-img` |
-| `mvm kernel pull --type firecracker` | internal (HTTP download) |
-| `mvm kernel pull --type official` | `make`, `gcc`, `ld`, `flex`, `bison`, `bc`, `pahole`, `git`, `curl`, `pkg-config` |
 | `mvm kernel import/ls/rm/default/inspect` | internal only |
 | `mvm cache init/prune/clean` | internal (filesystem + DB operations) |
 | `mvm config get/set/reset/list` | internal (DB operations) |

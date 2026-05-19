@@ -113,7 +113,7 @@ CLI → VMCreateInput → VMOperation.create(input) → VMCreateRequest(input, d
 #### File Organization ✅ VERIFIED
 
 ```
-api/inputs/ (21 files)
+api/inputs/ (22 files)
 ├── _vm_input.py              # VMInput, VMRequest, ResolvedVMInput
 ├── _vm_create_input.py       # VMCreateInput, VMCreateRequest, ResolvedVMCreateInput
 ├── _network_input.py         # NetworkInput, NetworkRequest, ResolvedNetworkInput
@@ -128,13 +128,17 @@ api/inputs/ (21 files)
 ├── _binary_pull_input.py     # BinaryPullInput, BinaryPullRequest, ResolvedBinaryPullInput
 ├── _kernel_input.py          # KernelInput, KernelRequest, ResolvedKernelInput
 ├── _kernel_pull_input.py     # KernelPullInput, KernelPullRequest, ResolvedKernelPullInput
+├── _kernel_import_input.py   # KernelImportInput, KernelImportRequest, ResolvedKernelImportInput
 ├── _config_input.py          # ConfigInput, ConfigRequest, ResolvedConfigInput
 ├── _console_input.py         # ConsoleInput, ConsoleRequest, ResolvedConsoleInput
+├── _cp_input.py              # CPInput, CPRequest, ResolvedCPInput
 ├── _logs_input.py            # LogsInput, LogsRequest, ResolvedLogsInput
 ├── _ssh_input.py             # SSHInput, SSHRequest, ResolvedSSHInput
 ├── _vm_export_config.py      # VMExportConfigInput, VMExportConfigRequest
 └── _vm_import_input.py       # VMImportInput, VMImportRequest
 ```
+
+> **Note:** `_cp_input.py` and `_kernel_import_input.py` exist on disk but are **not** registered in `api/inputs/__init__.py`'s `_LAZY_MAP` or `TYPE_CHECKING` block. They are not importable via `from mvmctl.api.inputs import CPInput` without an explicit direct import from their private module. This should be addressed if these modules need public API surface exposure — but if they are only consumed internally by their respective operation classes via direct module paths, this is by design.
 
 #### Reference Implementation
 

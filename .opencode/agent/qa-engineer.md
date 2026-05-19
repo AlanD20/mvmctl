@@ -230,14 +230,20 @@ tests/system/
 ├── network/             # Network management (test_network.py, test_nftables.py)
 ├── ssh/                 # SSH access (test_ssh.py)
 ├── vm/                  # VM lifecycle (test_vm_lifecycle.py, test_vm_nested_virt.py, test_vm_snapshot_load.py)
-├── volume/              # Volume management (test_volume.py)
+├── volume/              # Volume management (test_volume.py, test_volume_hotplug.py)
 └── zzz_destructive/     # Destructive cleanup (test_zzz_destructive.py) — runs LAST
 ```
 
-Each subdirectory contains:
+Most subdirectories contain:
 - **`test_<domain>.py`** — The main test file
 - **`conftest.py`** — Domain-specific fixtures
 - **`__init__.py`** — Package marker
+
+Some domains span multiple test files. For example:
+- **`kernel/`** has `test_kernel.py` AND `test_kernel_import.py`
+- **`network/`** has `test_network.py` AND `test_nftables.py`
+- **`volume/`** has `test_volume.py` AND `test_volume_hotplug.py`
+- **`vm/`** has `test_vm_lifecycle.py`, `test_vm_nested_virt.py`, AND `test_vm_snapshot_load.py`
 
 The root `tests/system/conftest.py` provides session-scoped `mvm_binary` and function-scoped unique name fixtures (`unique_vm_name`, `unique_key_name`, `unique_network_name`, etc.).
 
@@ -248,18 +254,19 @@ NOT one monolithic class. Run `grep "^class " tests/system/vm/test_vm_lifecycle.
 to see the current state. The target class structure is:
 
 ```
-TestVMListEmpty           — ls --json with no VMs returns empty list
-TestVMCreate              — all create variants (per image, with flags)
-TestVMConfigOptions       — vcpus, mem, disk-size, boot-args, pci, logging, metrics
-TestVMStateTransitions    — start/stop/reboot/pause/resume + edge cases
-TestVMVolumeIntegration   — attach/detach/create-with-volume/rm-releases-volume
-TestVMListInspect         — ls/json, inspect/json/tree, export, import
-TestVMRemove              — rm, rm multiple, rm nonexistent, rm --force
-TestVMSnapshot            — snapshot creation and load
-TestVMConcurrency         — parallel vm operations
-TestVMNetworkIntegration  — static IP, custom MAC, named network
-TestVMSSHIntegration      — SSH into created VMs with key
-TestVMCloudInit           — cloud-init modes, user-data, nocloud-net-port
+TestVMListEmpty              — ls --json with no VMs returns empty list
+TestVMAdvancedCreateFlags   — advanced create flags (name, source, JSON)
+TestVMListInspect           — ls/json, inspect/json/tree, export, import
+TestVMSSHIntegration        — SSH into created VMs with key
+TestVMConfigOptions         — vcpus, mem, disk-size, boot-args, pci, logging, metrics
+TestVMStateTransitions      — start/stop/reboot/pause/resume + edge cases
+TestVMNetworkIntegration    — static IP, custom MAC, named network
+TestVMCloudInit             — cloud-init modes, user-data, nocloud-net-port
+TestVMVolumeIntegration     — attach/detach/create-with-volume/rm-releases-volume
+TestVMCreate                — all create variants (per image, with flags)
+TestVMSnapshot              — snapshot creation and load
+TestVMConcurrency           — parallel vm operations
+TestVMRemove                — rm, rm multiple, rm nonexistent, rm --force
 ```
 
 Tests for `vm snapshot` and `vm load` go in `tests/system/vm/test_vm_snapshot_load.py`.
@@ -445,21 +452,22 @@ Run tests in dependency order to surface failures early:
 7. `tests/system/kernel/test_kernel_import.py` — kernel import
 
 **Phase 2 — Network-dependent (needs real bridges):**
-7. `tests/system/network/test_network.py` — network CRUD
-8. `tests/system/network/test_nftables.py` — nftables backend
+8. `tests/system/network/test_network.py` — network CRUD
+9. `tests/system/network/test_nftables.py` — nftables backend
 
 **Phase 3 — KVM-dependent (needs real VMs):**
-9. `tests/system/images/test_images.py` — image pull/list/inspect
-10. `tests/system/volume/test_volume.py` — volume lifecycle
-11. `tests/system/console/test_console.py` — console state/kill
-12. `tests/system/logs/test_logs.py` — log streaming
-13. `tests/system/ssh/test_ssh.py` — SSH into running VM
-14. `tests/system/cp/test_cp.py` — file copy (depends on SSH + running VM)
-15. `tests/system/vm/test_vm_lifecycle.py` — full lifecycle
-16. `tests/system/vm/test_vm_nested_virt.py` — nested virtualization
-17. `tests/system/vm/test_vm_snapshot_load.py` — snapshot/load
-18. `tests/system/full_journeys/test_full_journeys.py` — end-to-end, concurrency, stress
-19. `tests/system/cli/test_cli_edge_cases.py` — CLI-wide edge cases
+10. `tests/system/images/test_images.py` — image pull/list/inspect
+11. `tests/system/volume/test_volume.py` — volume lifecycle
+12. `tests/system/volume/test_volume_hotplug.py` — volume hotplug
+13. `tests/system/console/test_console.py` — console state/kill
+14. `tests/system/logs/test_logs.py` — log streaming
+15. `tests/system/ssh/test_ssh.py` — SSH into running VM
+16. `tests/system/cp/test_cp.py` — file copy (depends on SSH + running VM)
+17. `tests/system/vm/test_vm_lifecycle.py` — full lifecycle
+18. `tests/system/vm/test_vm_nested_virt.py` — nested virtualization
+19. `tests/system/vm/test_vm_snapshot_load.py` — snapshot/load
+20. `tests/system/full_journeys/test_full_journeys.py` — end-to-end, concurrency, stress
+21. `tests/system/cli/test_cli_edge_cases.py` — CLI-wide edge cases
 
 For each file: run, fix failures, re-run, move on only when ALL tests pass.
 

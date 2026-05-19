@@ -531,7 +531,16 @@ The centralized runner (`run_cmd`) provides: consistent logging of every command
 
 ### EXCEPTION — subprocess.Popen with pass_fds
 
-There is ONE legitimate exception to the "no raw subprocess" rule: the console relay manager (`src/mvmctl/services/console_relay/manager.py`) uses `subprocess.Popen()` directly because it needs the `pass_fds=[pty_controller_fd]` argument to pass a PTY file descriptor to the child relay process. The `run_cmd()` / `stream_cmd()` helpers do not support `pass_fds`.
+There are several legitimate exceptions to the "no raw subprocess" rule. The `run_cmd()` / `stream_cmd()` helpers do not support `pass_fds`, piping between two processes, or real-time log streaming. The known locations that use `subprocess.Popen()` directly are:
+
+1. **`services/console_relay/manager.py`** — Console relay spawn; needs `pass_fds=[pty_controller_fd]` to pass a PTY fd to the child process.
+2. **`core/vm/_firecracker.py`** — Firecracker VM spawn; needs `pass_fds` (serial output, log fds) and `start_new_session=True`.
+3. **`core/ssh/_cp.py`** — Tar-pipe file copy between two processes; pipes `src_proc.stdout` directly into `dest_proc.stdin` via `subprocess.PIPE`.
+4. **`core/kernel/_service.py`** — Kernel build subprocess; streams build output to a log file while allowing real-time monitoring.
+5. **`services/nocloud_server/manager.py`** — Nocloud server spawn; daemonizes with `start_new_session=True` and `stdin/out/err=DEVNULL`.
+6. **`services/loopmount/process.py`** — Loop-mount provisioning process; needs long-running process management outside `run_cmd()`.
+
+Additionally, `utils/_system.py` itself uses `subprocess.Popen()` internally — that is the implementation of `stream_cmd()`, not a bypass of it.
 
 ```python
 # ✅ Legitimate exception — run_cmd() does not support pass_fds
@@ -545,7 +554,7 @@ proc = subprocess.Popen(
 )
 ```
 
-Only use raw `subprocess.Popen()` when `pass_fds` is required. All other subprocess invocations MUST go through `run_cmd()` / `stream_cmd()`.
+Only use raw `subprocess.Popen()` when `run_cmd()` / `stream_cmd()` cannot fulfill the requirement (`pass_fds`, inter-process piping, real-time log streaming). All other subprocess invocations MUST go through `run_cmd()` / `stream_cmd()`.
 
 ---
 

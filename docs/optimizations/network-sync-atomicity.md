@@ -85,9 +85,11 @@ run_cmd(["nft", "-f", "-"], privileged=True, input=nft_script)
 
 **Why this is atomic:** `nft -f -` is implemented as a single Netlink transaction. The kernel either applies all rules or rejects the entire batch. There is no window where only half the rules are active. This is the same mechanism `nftables` itself uses for `nft -f` file-based rule loading.
 
-**No flush needed:** The batch is additive — it only inserts `add rule` statements for rules missing from the kernel. Existing rules are left untouched. This means:
-- MVM custom chains (MVM-FORWARD, MVM-POSTROUTING, MVM-NOCLOUDNET-INPUT) are **never flushed** during sync.
-- Only the system's built-in chains (FORWARD, POSTROUTING, INPUT) contain jump rules at position 0 — those are managed by `NFTablesTracker.initialize()` and are never touched during sync.
+**Replacement-style, not additive:** The batch flushes MVM custom chains then re-adds all rules from the database within a single atomic `nft -f -` transaction. This ensures that stale/orphaned rules within MVM chains are always removed. The flush targets only MVM custom chains — not the system's built-in chains (FORWARD, POSTROUTING, INPUT):
+- MVM custom chains (MVM-FORWARD, MVM-POSTROUTING, MVM-NOCLOUDNET-INPUT) are **flushed and rebuilt** from the database every sync. See `batch_ensure_rules()` at `src/mvmctl/core/_shared/_nftables_tracker/_tracker.py` lines 536-538: `flush chain ip {table} {chain.value}` for each MVM chain.
+- The system's built-in chains (FORWARD, POSTROUTING, INPUT) are **never flushed** — their jump-to-MVM-chain rules at position 0 are managed by `NFTablesTracker.initialize()` and never touched during sync.
+- A conntrack `established,related accept` rule is inserted as the first rule in MVM-FORWARD and MVM-NOCLOUDNET-INPUT (lines 550-559) to preserve established connections during the atomic swap.
+- The net effect is like `iptables-restore`'s per-table atomic swap — flush the custom chains, then apply all rules in one Netlink transaction. There is no window where only half the rules are active.
 
 ### iptables (legacy) — Atomic Batch via `iptables-restore`
 
@@ -139,13 +141,14 @@ This means:
 - **Removing rules (not done by sync) would not interrupt existing flows** either — conntrack bypasses filter rules for established connections.
 - **NAT mappings** are stored in conntrack entries, not re-evaluated on subsequent packets. Existing masquerade sessions continue uninterrupted even if the MASQUERADE rule were removed.
 
-### Additive-Only Design
+### Replacement-Style Design (MVM Chains Only)
 
-The sync is **strictly additive** — it ensures that every rule in the database is present in the kernel. It never deletes or modifies existing kernel rules. This is the key design choice that makes the operation safe to run while VMs are active:
+The sync uses a **replacement-style** approach within MVM custom chains — MVM chains are flushed and rebuilt from the database in a single atomic transaction. This ensures MVM rules always match the database exactly, including removing stale rules. The key safety properties are:
 
-- Existing traffic continues to pass through rules that were already in place.
-- New traffic benefits from rules that were missing (e.g., after a reboot).
-- Orphaned host rules (present in kernel but absent from DB) are detected and reported but **not removed**, guaranteeing zero disruption.
+- **MVM custom chains** (MVM-FORWARD, MVM-POSTROUTING, MVM-NOCLOUDNET-INPUT) are flushed and all active DB rules are re-added atomically.
+- **Built-in chains** (FORWARD, POSTROUTING, INPUT) are never touched — their jump-to-MVM-chain rules survive untouched.
+- **Conntrack accept rule** is inserted at position 0 of filter MVM chains, preserving established connections through the atomic swap (both backends).
+- **Orphaned host rules** (present in kernel but absent from DB) within MVM chains are **automatically removed** by the flush-and-rebuild cycle. Orphans detected outside MVM chains (in built-in chains) are reported but **not removed**, guaranteeing zero disruption to third-party firewall rules.
 
 ### Chains Structure
 
@@ -155,7 +158,7 @@ Built-in chains (never flushed):
   POSTROUTING ──[jump 0]──> MVM-POSTROUTING
   INPUT ──[jump 0]──> MVM-NOCLOUDNET-INPUT
 
-MVM custom chains (add rules here during sync):
+MVM custom chains (flushed and rebuilt from DB during sync):
   MVM-FORWARD          (ip filter) — FORWARD accept rules per TAP/NAT
   MVM-POSTROUTING      (ip nat)    — MASQUERADE rules per gateway
   MVM-NOCLOUDNET-INPUT (ip filter) — nocloud-net accept rules

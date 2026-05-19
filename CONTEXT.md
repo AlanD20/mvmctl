@@ -5,7 +5,7 @@ MicroVM Manager -- a speed-first CLI for managing Firecracker microVMs. Provides
 ## Language
 
 ### Domain
-A business capability with isolated logic. Each domain (vm, network, image, kernel, binary, key, host, config, cache, volume, console, logs, cloudinit, ssh) lives in `core/{domain}/`. Data-heavy domains follow the Controller / Service / Repository / Resolver pattern; simpler domains may have fewer files (e.g., `cache/` and `ssh/` have only a Service, `console/` has only a Controller) -- see the domain table in the [Domain Structure](#domain) section for the exact composition of each domain. Domains do NOT import other domains.
+A business capability with isolated logic. Each domain (vm, network, image, kernel, binary, key, host, config, cache, volume, console, logs, cloudinit, ssh) lives in `core/{domain}/`. Data-heavy domains follow the Controller / Service / Repository / Resolver pattern; simpler domains may have fewer files (e.g., `cache/` has only a Service, `ssh/` has a Service and a file-copy module, `console/` has only a Controller) -- see the domain table in the [Domain Structure](#domain) section for the exact composition of each domain. Domains do NOT import other domains.
 _Avoid_: Module, component, service (overloaded terms)
 
 ### Intra-domain orchestration
@@ -238,7 +238,7 @@ Toggle via `mvm config set settings firewall_backend nftables|iptables`. Both DB
 - **Invariant guards** may appear in **Service** when the guard prevents system damage
 
 ### Exception hierarchy
-A 3-level hierarchy: `MVMError` (root) -> `{Domain}Error` (domain category) -> `{Domain}{Specific}Error` (specific issue). Every exception carries an optional `code` string for fine-grained programmatic branching in the API layer. The `code` enables auto-detection/auto-handling without parsing message text.
+A mostly 3-level hierarchy: `MVMError` (root) -> `{Domain}Error` (domain category) -> `{Domain}{Specific}Error` (specific issue). However, several `*NotFoundError` classes are direct children of `MVMError` rather than their respective `{Domain}Error`: `BinaryNotFoundError`, `KernelNotFoundError`, `NetworkNotFoundError`, `KeyNotFoundError`, `ImageNotFoundError`, and `VolumeNotFoundError` all inherit directly from `MVMError`. Only `VMNotFoundError` follows the 3-level pattern (child of `VMError`). Every exception carries an optional `code` string for fine-grained programmatic branching in the API layer. The `code` enables auto-detection/auto-handling without parsing message text.
 
 The `MVMError` base class has an optional `code: str | None` parameter:
 ```python
@@ -365,7 +365,7 @@ host.init.sudoers_failed      # PrivilegeError (child of HostError)
 - **Explicit typing**: All function signatures must have explicit types. No `Any`, no implicit `Optional`. Use `from __future__ import annotations`.
 - **`from __future__ import annotations`**: Required as the first import (after file docstring) in EVERY `.py` file under `src/mvmctl/`. Enables PEP 563 postponed evaluation so forward references work without string quotes.
 - **No quoted annotations**: With `from __future__ import annotations`, write types directly: `def get(x: str) -> VMInstanceItem | None` -- no quotes around annotations.
-- **Centralized infrastructure**: Subprocess calls, file I/O, and system interactions must go through shared utility functions (e.g., `NetworkUtils._run_batch()`, `require_mvm_group_membership()`). Every tool invocation must have one canonical path.
+- **Centralized infrastructure**: Subprocess calls, file I/O, and system interactions must go through shared utility functions (e.g., `NetworkUtils._run_batch()`, `require_mvm_group_membership()`). Every tool invocation must have one canonical path. The only exceptions to the "all subprocess through `run_cmd()`/`stream_cmd()`" rule are scenarios that require `subprocess.Popen()` with `pass_fds` or pipe-chaining between two child processes — see the [Subprocess invocation](#subprocess-invocation) section for the full list of documented exceptions.
 - **Docstrings**: Public classes get 1-3 lines. Public methods get docstrings only when behavior is non-obvious. Private methods get no docstrings -- name explains it. Inline comments only for WHY, never for WHAT. The code should be self-explanatory; comments justify counter-intuitive choices.
 
 ### Lazy imports
@@ -401,6 +401,18 @@ subprocess.run(["iptables", ...], check=True)
 ```
 
 The centralized runner provides: consistent logging (`logger.debug` of the command), privilege escalation via `sudo` prepend (when `privileged=True`), timeout enforcement, and uniform error formatting.
+
+**Documented exceptions** — `subprocess.Popen()` used directly (not via `run_cmd()`) in these five scenarios:
+
+| Location | Why `run_cmd()` doesn't work |
+|---|---|
+| `core/vm/_firecracker.py` (Firecracker spawn) | Needs `pass_fds` to pass file descriptors (VM API socket, log fd) to the child process |
+| `services/console_relay/manager.py` (console relay spawn) | Needs `pass_fds=[pty_controller_fd]` to hand a PTY file descriptor to the relay child |
+| `services/nocloud_server/manager.py` (nocloud server spawn) | Detached daemon spawn — `start_new_session=True`, no stdin/stdout/stderr piping, no return value needed |
+| `core/ssh/_cp.py` (tar-pipe transfer) | Pipes two child processes together (tar + ssh) via `subprocess.PIPE` — `write()` loop in the middle reads from one and feeds the other |
+| `core/kernel/_service.py` (kernel build) | Redirects build stdout to a log file while capturing warnings from the same log — uses `subprocess.STDOUT` with a file handle |
+
+All other subprocess invocations MUST go through `run_cmd()` / `stream_cmd()`.
 
 ### Import conventions
 | Layer | Imports from | Example |

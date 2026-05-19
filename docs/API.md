@@ -526,6 +526,22 @@ Host state record (singleton).
 | `default_network_created` | `bool` | Whether the default network was created |
 | `initialized_at` | `str` | ISO 8601 initialization timestamp |
 | `updated_at` | `str` | ISO 8601 update timestamp |
+| `hostname` | `str \| None` | Hostname (populated by `host info --refresh` or `host init`) |
+| `cpu_model` | `str \| None` | CPU model name |
+| `cpu_vendor` | `str \| None` | CPU vendor (e.g. `GenuineIntel`) |
+| `cpu_cores` | `int \| None` | Total CPU cores |
+| `cpu_architecture` | `str \| None` | CPU architecture (e.g. `x86_64`) |
+| `numa_nodes` | `int \| None` | Number of NUMA nodes |
+| `memory_total_mib` | `int \| None` | Total memory in MiB |
+| `storage_total_bytes` | `int \| None` | Total storage in bytes |
+| `kernel_version` | `str \| None` | Kernel version string |
+| `os_release` | `str \| None` | OS release identifier |
+| `pid_max` | `int \| None` | Maximum PID limit |
+| `fd_max` | `int \| None` | Maximum file descriptor limit |
+| `conntrack_max` | `int \| None` | Maximum conntrack entries |
+| `tap_devices_max` | `int \| None` | Maximum TAP devices |
+| `ip_local_port_range` | `str \| None` | IP local port range (e.g. `32768 60999`) |
+| `detected_at` | `str \| None` | ISO 8601 detection timestamp |
 
 #### `HostStateChangeItem`
 
@@ -749,6 +765,7 @@ VMOperation.create(
         image="ubuntu:24.04",
     )
 )
+```
 
 ---
 

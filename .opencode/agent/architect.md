@@ -854,7 +854,9 @@ from mvmctl.core.vm._controller import VMController           # Use lazy __getat
 
 ### Error Handling Conventions
 
-**Exception hierarchy (3-level):** `MVMError` → `{Domain}Error` → `{Domain}{Specific}Error`. Every exception carries an optional `code: str | None` for programmatic branching.
+**Exception hierarchy (mostly 3-level, with exceptions):** `MVMError` → `{Domain}Error` → `{Domain}{Specific}Error`. Every exception carries an optional `code: str | None` for programmatic branching.
+
+Note: Some exceptions break the strict 3-level pattern by being direct `MVMError` children. These include the `*NotFoundError` family (`BinaryNotFoundError`, `KernelNotFoundError`, `NetworkNotFoundError`, `KeyNotFoundError`, `ImageNotFoundError`, `VolumeNotFoundError`) — they are direct `MVMError` children rather than children of their domain's `*Error` class. The one exception is `VMNotFoundError(VMError)`, which IS a proper 3-level child. Other direct `MVMError` children include `VolumeError`, `ImageAcquireError`, `IPTablesTrackerError`, `AssetNotFoundError`, `VersionError`, `VersionGateError`, `RootPartitionDetectionError`, `TieDetectedError`, `DownloadError`, and `HttpDownloadError`.
 
 ```
 MVMError                              # Root — carries optional code field

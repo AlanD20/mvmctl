@@ -66,7 +66,7 @@ Kernel management.
 | `mvm kernel import` | `NAME`, `PATH`, `--version`, `--arch`, `--default, -d` | Register a vmlinux file as a kernel in the database |
 | `mvm kernel default` | `KERNEL_ID` | Set a kernel as the default |
 | `mvm kernel rm` | `[IDENTIFIERS]...`, `-f, --force` | Remove one or more kernels |
-| `mvm kernel inspect` | `PREFIX`, `--json`, `--tree` | Show detailed information about a kernel |
+| `mvm kernel inspect` | `PREFIX`, `--json` | Show detailed information about a kernel |
 
 **`pull` flags:**
 
@@ -99,7 +99,7 @@ Image management.
 | `mvm image default` | `PREFIX` | Set the default image for VM creation |
 | `mvm image rm` | `PREFIXES...`, `--force, -f` | Remove cached images by ID prefix |
 | `mvm image warm` | `IMAGE`, `--all, -a` | Pre-decompress image to ready pool for fast VM creation |
-| `mvm image inspect` | `PREFIX`, `--json`, `--tree` | Show detailed information about an image |
+| `mvm image inspect` | `PREFIX`, `--json` | Show detailed information about an image |
 
 **`pull` flags:**
 
@@ -135,7 +135,7 @@ Firecracker binary management.
 | Command | Flags | Description |
 |---------|-------|-------------|
 | `mvm bin ls` | `-r, --remote, --limit, --json` | List local (and optionally remote) Firecracker versions |
-| `mvm bin pull` | `BINARY_NAME`, `--version`, `--default, -d`, `--force, -f` | Download a Firecracker version by binary name |
+| `mvm bin pull` | `BINARY_NAME`, `--version`, `--git-ref`, `--default, -d`, `--force, -f` | Download a Firecracker version or build from source |
 | `mvm bin default` | `BINARY_ID` | Set a binary as the active default |
 | `mvm bin rm` | `[IDENTIFIERS]...`, `--version`, `-f, --force` | Remove one or more binaries, or use --version to remove a version pair |
 
@@ -156,7 +156,7 @@ VM lifecycle management.
 | `mvm vm rm` | `[NAMES]...`, `-f, --force` | Remove one or more VMs |
 | `mvm vm ls` | `--json` | List all VMs |
 | `mvm vm ps` | --- | List running VMs (active processes) |
-| `mvm vm inspect` | `IDENTIFIER`, `--json`, `--tree` | Show detailed information about a VM |
+| `mvm vm inspect` | `IDENTIFIER`, `--json` | Show detailed information about a VM |
 | `mvm vm snapshot` | `IDENTIFIER`, `MEM_FILE`, `STATE_FILE` | Snapshot VM memory and disk state |
 | `mvm vm load` | `IDENTIFIER`, `MEM_FILE`, `STATE_FILE`, `--resume` | Load VM from snapshot |
 | `mvm vm export` | `IDENTIFIER`, `[OUTPUT]` | Export a VM's configuration to a portable JSON file |
@@ -242,7 +242,7 @@ SSH key management.
 | `mvm key add` | `NAME`, `PATH`, `-f, --force` | Add an existing public key to the cache |
 | `mvm key create` | `NAME`, `--algorithm`, `--bits`, `--comment`, `--out`, `--default, -d`, `-f, --force` | Generate a new SSH keypair |
 | `mvm key rm` | `[NAMES]...`, `-f, --force` | Remove one or more SSH keys |
-| `mvm key inspect` | `[NAME]`, `--json`, `--tree` | Inspect an SSH key |
+| `mvm key inspect` | `[NAME]`, `--json` | Inspect an SSH key |
 | `mvm key default` | `[NAMES]...`, `--clear` | Set default SSH keys, or clear with --clear |
 | `mvm key export` | `[NAME]`, `--out`, `-f, --force` | Export a keypair to a directory |
 

@@ -141,6 +141,7 @@ src/mvmctl/
 │   │   └── _resolver.py                     # VolumeResolver (entity resolution)
 │   ├── ssh/                                 # SSH operations
 │   │   ├── __init__.py
+│   │   ├── _cp.py                           # CP-related SSH operations (file copy)
 │   │   └── _service.py                      # SSHService (stateful — stores connection params as instance state)
 │   └── _shared/                           # Shared infrastructure
 │       ├── __init__.py
