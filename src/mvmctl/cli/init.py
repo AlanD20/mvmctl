@@ -129,6 +129,7 @@ def _compose_host_setup_message(
 
 def _handle_interactive_flow(
     skip_host: bool,
+    skip_network: bool,
     non_interactive: bool,
 ) -> InitResult:
     """Drive the init wizard, handling sudo and download prompts in the CLI."""
@@ -147,6 +148,7 @@ def _handle_interactive_flow(
         if download_version:
             result = InitOperation.run(
                 skip_host=skip_host,
+                skip_network=skip_network,
                 non_interactive=non_interactive,
                 on_progress=None,
                 sudo_completed=sudo_was_completed,
@@ -165,6 +167,7 @@ def _handle_interactive_flow(
 
                 result = InitOperation.run(
                     skip_host=skip_host,
+                    skip_network=skip_network,
                     non_interactive=non_interactive,
                     on_progress=_on_progress,
                     sudo_completed=sudo_was_completed,
@@ -284,6 +287,9 @@ def init_run(
     skip_host: bool = typer.Option(
         False, "--skip-host", help="Skip host init step"
     ),
+    skip_network: bool = typer.Option(
+        False, "--skip-network", help="Skip default network creation"
+    ),
 ) -> None:
     f"""Initialize {CLI_NAME} host, network, and binary — run this to get started."""
     mvm_cli.info("")
@@ -292,17 +298,19 @@ def init_run(
 
     result = _handle_interactive_flow(
         skip_host=skip_host,
+        skip_network=skip_network,
         non_interactive=non_interactive,
     )
 
     # Print step results — compact one-liners
     step_labels = {
-        "local_state": "local state",
-        "service_binaries": "service binaries",
+        "local_state": "Local State",
+        "service_binaries": "Service Binaries",
         "host": f"sudoers / {MVM_UNIX_GROUP} group",
+        "network_setup": "Network Setup (Sync + Default)",
         "guestfs": "libguestfs",
-        "cache": "cache directories",
-        "binary": "firecracker binary",
+        "cache": "Cache Directories",
+        "binary": "Firecracker Binary",
     }
     mvm_cli.info("")
     for step in result.steps:

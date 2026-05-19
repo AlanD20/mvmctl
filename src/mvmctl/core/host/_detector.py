@@ -191,6 +191,9 @@ class HostDetector:
         tap_devices_max = HostDetector._read_int(
             "/sys/module/tun/parameters/max_tap_devices", 0
         )
+        # 0 means unlimited (kernel default when module param not set)
+        if tap_devices_max == 0:
+            tap_devices_max = -1
 
         ip_local_port_range = DEFAULT_IP_LOCAL_PORT_RANGE
         try:

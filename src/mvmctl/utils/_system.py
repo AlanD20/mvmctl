@@ -520,7 +520,11 @@ def stream_cmd(
 
 
 def require_mvm_group_membership() -> None:
-    """Raise PrivilegeError if user is not in the mvm group with active credentials.
+    """Warn if user is not in the mvm group, but do NOT block execution.
+
+    Prints advisory warnings for each missing precondition (group doesn't
+    exist, user not a member, session doesn't have the group active), then
+    lets ``sudo`` handle authentication with its normal password prompt.
 
     Results are cached per-process via a module-level flag since group
     membership is immutable within a process lifetime (os.getgroups()
@@ -533,15 +537,16 @@ def require_mvm_group_membership() -> None:
     import grp
     import pwd
 
-    from mvmctl.exceptions import PrivilegeError
-
     try:
         g = grp.getgrnam(MVM_UNIX_GROUP)
     except KeyError:
-        raise PrivilegeError(
-            f"Group '{MVM_UNIX_GROUP}' does not exist. "
-            f"Run 'sudo mvm host init' to set up privilege management."
+        logger.warning(
+            "Group '%s' does not exist. Run 'sudo mvm host init' to set up "
+            "privilege management and avoid password prompts.",
+            MVM_UNIX_GROUP,
         )
+        _MVM_GROUP_VERIFIED = True
+        return
 
     user_pw = pwd.getpwuid(os.getuid())
     username = user_pw.pw_name
@@ -549,18 +554,23 @@ def require_mvm_group_membership() -> None:
     is_supplementary_member = username in g.gr_mem
     is_primary_group = user_pw.pw_gid == g.gr_gid
     if not (is_supplementary_member or is_primary_group):
-        raise PrivilegeError(
-            f"User '{username}' is not in the '{MVM_UNIX_GROUP}' group. "
-            f"Run 'sudo mvm host init' to configure privileges, "
-            f"then 'newgrp {MVM_UNIX_GROUP}' or log out and back in."
+        logger.warning(
+            "User '%s' is not in the '%s' group. "
+            "Run 'sudo mvm host init' to configure privileges, "
+            "then 'newgrp %s' or log out and back in.",
+            username,
+            MVM_UNIX_GROUP,
+            MVM_UNIX_GROUP,
         )
 
     process_gids = set(os.getgroups()) | {os.getgid(), os.getegid()}
     if g.gr_gid not in process_gids:
-        raise PrivilegeError(
-            f"Your user is in the '{MVM_UNIX_GROUP}' group, but your current session "
-            f"does not have the group active yet. Please log out and log back in, "
-            f"or run: newgrp {MVM_UNIX_GROUP}"
+        logger.warning(
+            "Your user is in the '%s' group, but your current session "
+            "does not have the group active yet. "
+            "Please log out and log back in, or run: newgrp %s",
+            MVM_UNIX_GROUP,
+            MVM_UNIX_GROUP,
         )
 
     _MVM_GROUP_VERIFIED = True

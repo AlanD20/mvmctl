@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import stat
 import sys
@@ -34,7 +35,7 @@ from mvmctl.core._shared import VersionResolver
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.exceptions import BinaryError, HttpDownloadError, ProcessError
 from mvmctl.models import BinaryItem
-from mvmctl.utils.common import CacheUtils
+from mvmctl.utils.common import CacheUtils, env
 from mvmctl.utils.crypto import HashGenerator
 from mvmctl.utils.http import HttpDownload
 
@@ -67,7 +68,7 @@ class BinaryService:
 
         missing_ids: list[str] = []
         for binary in binaries:
-            if not binary.resolved_path.exists():
+            if not Path(binary.path).exists():
                 missing_ids.append(binary.id)
 
         if missing_ids:
@@ -242,9 +243,20 @@ class BinaryService:
         ]
 
     @staticmethod
+    def _mirror_tag(git_ref: str) -> str:
+        """Sanitize a git ref for use as a mirror filename component."""
+        return re.sub(r"[^a-zA-Z0-9._-]", "_", git_ref)
+
+    @staticmethod
     def build_from_source(git_ref: str, bin_dir: Path) -> list[BinaryItem]:
         """
         Build Firecracker from source using Docker-based devtool.
+
+        Checks the local asset mirror (``$MVM_ASSET_MIRROR``) first — if
+        pre-built binaries for *git_ref* are cached, the build is skipped
+        and the cached binaries are copied directly.  After a successful
+        build the result is automatically mirrored so subsequent pulls
+        with the same ref avoid the expensive Docker build.
 
         Clones (or updates) the Firecracker repo, checks out the specified
         git ref, runs ``tools/devtool build --release``, and copies the
@@ -263,6 +275,46 @@ class BinaryService:
 
         """
         from mvmctl.utils._system import run_cmd
+
+        # --- Check local asset mirror for cached build ---
+        mirror_tag = BinaryService._mirror_tag(git_ref)
+        mirror_dir = env.get("ASSET_MIRROR")
+        mirror = Path(mirror_dir) if mirror_dir else None
+        cached_fc = mirror / f"firecracker-{mirror_tag}" if mirror else None
+        cached_jl = mirror / f"jailer-{mirror_tag}" if mirror else None
+        if (
+            mirror is not None
+            and cached_fc is not None
+            and cached_fc.is_file()
+            and cached_jl is not None
+            and cached_jl.is_file()
+        ):
+            version = f"dev-{mirror_tag}"
+            fc_dest = bin_dir / f"firecracker-{version}"
+            jl_dest = bin_dir / f"jailer-{version}"
+            shutil.copy2(cached_fc, fc_dest)
+            fc_dest.chmod(
+                fc_dest.stat().st_mode
+                | stat.S_IXUSR
+                | stat.S_IXGRP
+                | stat.S_IXOTH
+            )
+            shutil.copy2(cached_jl, jl_dest)
+            jl_dest.chmod(
+                jl_dest.stat().st_mode
+                | stat.S_IXUSR
+                | stat.S_IXGRP
+                | stat.S_IXOTH
+            )
+            logger.info("Using mirror cache for git ref '%s'", git_ref)
+            return [
+                BinaryService._create_binary_item(
+                    "firecracker", version, fc_dest, resolve_ci_version=False
+                ),
+                BinaryService._create_binary_item(
+                    "jailer", version, jl_dest, resolve_ci_version=False
+                ),
+            ]
 
         # Check that git is available
         if not shutil.which("git"):
@@ -403,6 +455,18 @@ class BinaryService:
             git_ref,
         )
 
+        # --- Cache built binaries in the local asset mirror ---
+        if mirror is not None:
+            mirror.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.copy2(str(fc_dest), str(cached_fc))
+                shutil.copy2(str(jl_dest), str(cached_jl))
+                logger.info("Cached build in mirror for git ref '%s'", git_ref)
+            except OSError:
+                logger.warning(
+                    "Failed to cache build in mirror for '%s'", git_ref
+                )
+
         return [
             BinaryService._create_binary_item(
                 "firecracker", version, fc_dest, resolve_ci_version=False
@@ -439,7 +503,7 @@ class BinaryService:
             )
 
         # Delete file from disk
-        binary_path = binary.resolved_path
+        binary_path = Path(binary.path)
         if binary_path.exists():
             binary_path.unlink()
 
@@ -610,7 +674,7 @@ class BinaryService:
                 version=mvmctl_version,
                 full_version=mvmctl_version,
                 ci_version=None,
-                path=name,
+                path=str(bin_dir / name),
                 is_default=True,
                 is_present=True,
                 created_at=now,
@@ -699,7 +763,7 @@ class BinaryService:
             version=version,
             full_version=f"v{version}",
             ci_version=ci_ver,
-            path=path.name,
+            path=str(path),
             is_default=False,
             is_present=True,
             created_at=now,

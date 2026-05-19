@@ -51,6 +51,9 @@ class OperationResult(Generic[T]):
     #: Underlying exception, if any (only populated for "failure" status).
     exception: BaseException | None = None
 
+    #: Non-fatal warnings produced during the operation (e.g. format mismatch).
+    warnings: list[str] | None = None
+
     @property
     def is_ok(self) -> bool:
         """True if the operation completed without error."""

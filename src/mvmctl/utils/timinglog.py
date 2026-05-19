@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
 
-from mvmctl.utils.common import CacheUtils
+from mvmctl.utils.common import CacheUtils, env
 
-_TIMING_ENABLED: bool = os.environ.get("MVM_TIMING_ENABLED") is not None
+_TIMING_ENABLED: bool = env.get("TIMING_ENABLED") is not None
 
 
 class TimingLog:

@@ -567,7 +567,7 @@ class VMCreateContext:
         return FirecrackerConfig(
             vm_dir=self.vm_dir,
             rootfs_path=self.rootfs_path,
-            binary_path=str(self.resolved.binary.resolved_path),
+            binary_path=self.resolved.binary.path,
             kernel_path=str(self.resolved.kernel.resolved_path),
             vcpu_count=self.resolved.vcpu_count,
             mem_size_mib=self.resolved.mem_size_mib,

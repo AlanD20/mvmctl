@@ -20,7 +20,7 @@ from mvmctl.exceptions import HostError, PrivilegeError
 from mvmctl.models.result import NeedsInteraction, OperationResult
 from mvmctl.utils._system import run_cmd
 from mvmctl.utils.cli import handle_errors, mvm_cli
-from mvmctl.utils.common import CacheUtils, CommonUtils
+from mvmctl.utils.common import CacheUtils, CommonUtils, env
 from mvmctl.utils.fs import FsUtils
 
 if TYPE_CHECKING:
@@ -141,7 +141,7 @@ def host_init() -> None:
             mvm_cli.warning("Root privileges required for: mvm host init")
             mvm_cli.info("Run with sudo: sudo mvm host init")
             if typer.confirm("Run 'sudo mvm host init' now?", default=False):
-                if os.environ.get("MVM_SUDO_RESTART"):
+                if env.get("SUDO_RESTART"):
                     mvm_cli.error(
                         "Recursive sudo restart detected. Aborting to prevent lockout."
                     )

@@ -177,8 +177,7 @@ class ImageOperation:
             and existing_image.version == spec.version
         ):
             # Verify file exists on disk
-            images_dir = CacheUtils.get_images_dir()
-            resolved_path = images_dir / existing_image.path
+            resolved_path = Path(existing_image.path)
             if resolved_path.exists():
                 logger.info("Image already exists: %s", existing_image.path)
                 if resolved.set_default:
@@ -257,15 +256,14 @@ class ImageOperation:
 
             # Move the final compressed result from work dir to cache dir
             compressed_name = image_item.path
-            compressed_src = work_dir / compressed_name
-            compressed_dst = resolved.output_dir / compressed_name
+            compressed_src = Path(compressed_name)
+            compressed_dst = resolved.output_dir / Path(compressed_name).name
             compressed_dst.parent.mkdir(parents=True, exist_ok=True)
             if compressed_src.exists():
                 if compressed_dst.exists():
                     compressed_dst.unlink()
                 shutil.move(str(compressed_src), str(compressed_dst))
-                # Update ImageItem path to match final location
-                image_item.path = compressed_name
+                image_item.path = str(compressed_dst)
 
             if on_progress is not None:
                 on_progress(
@@ -370,8 +368,7 @@ class ImageOperation:
 
         # Early return if image exists and not forcing re-import
         if not resolved.force and existing_image is not None:
-            images_dir = CacheUtils.get_images_dir()
-            resolved_path = images_dir / existing_image.path
+            resolved_path = Path(existing_image.path)
             if resolved_path.exists():
                 logger.info("Image already exists: %s", existing_image.path)
                 if resolved.set_default:
@@ -380,6 +377,7 @@ class ImageOperation:
                     status="skipped",
                     code="image.already_present",
                     item=existing_image,
+                    warnings=resolved.warnings,
                 )
 
         # Generate image ID
@@ -471,6 +469,7 @@ class ImageOperation:
             code="image.imported",
             item=image_item,
             message=import_msg,
+            warnings=resolved.warnings,
         )
 
     @staticmethod
@@ -869,7 +868,7 @@ class ImageOperation:
             item = repo.get_by_version_and_type(spec.version, spec.type)
 
         if item is not None and item.path:
-            candidate = images_dir / item.path
+            candidate = Path(item.path)
             if candidate.exists():
                 return item
 

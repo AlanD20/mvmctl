@@ -332,41 +332,6 @@ class HostOperation:
         db_changes.append(chain_change)
         all_changes.append(chain_change)
 
-        # --- Default network (first-time init or post-reboot restore) ---
-        from mvmctl.api.network_operations import NetworkOperation
-
-        try:
-            restored_result = NetworkOperation.sync()
-            if restored_result.is_ok and not restored_result.item:
-                default_result = NetworkOperation.create_default_network()
-                if default_result.is_error:
-                    logger.warning(
-                        "Could not create default network: %s",
-                        default_result.message,
-                    )
-                else:
-                    net_change = HostStateChangeItem(
-                        session_id="",
-                        init_timestamp="",
-                        setting="default_network",
-                        original_value=None,
-                        applied_value=str(
-                            SettingsService.resolve(
-                                Database(),
-                                "defaults.network",
-                                "name",
-                            )
-                        ),
-                        mechanism="network_create",
-                        reverted=False,
-                        change_order=0,
-                        created_at="",
-                    )
-                    db_changes.append(net_change)
-                    all_changes.append(net_change)
-        except Exception:
-            logger.warning("Could not set up default network during host init")
-
         # --- Persist state & finalize ---
         controller = HostController(repo)
         try:
@@ -475,6 +440,34 @@ class HostOperation:
         }
 
     @staticmethod
+    def network_setup() -> OperationResult[Any]:
+        """Create the default network if it does not exist yet.
+
+        Idempotent — safe to call multiple times.  Logs a warning (does
+        not raise) on failure so this can be safely called during init.
+        """
+        from mvmctl.api.network_operations import NetworkOperation
+
+        try:
+            restored_result = NetworkOperation.sync()
+            if restored_result.is_ok and not restored_result.item:
+                default_result = NetworkOperation.create_default_network()
+                if default_result.is_error:
+                    logger.warning(
+                        "Could not create default network: %s",
+                        default_result.message,
+                    )
+                    return default_result
+            return OperationResult(
+                status="success", code="network.default_ready"
+            )
+        except Exception:
+            logger.warning("Could not set up default network")
+            return OperationResult(
+                status="error", code="network.default_failed"
+            )
+
+    @staticmethod
     def _hardware_from_state(state: HostStateItem) -> HostHardware | None:
         """Reconstruct HostHardware from stored state, or None if not yet detected."""
         if state.cpu_model is None:
@@ -509,7 +502,9 @@ class HostOperation:
             pid_max=state.pid_max or 0,
             fd_max=state.fd_max or 0,
             conntrack_max=state.conntrack_max or 0,
-            tap_devices_max=state.tap_devices_max or 0,
+            tap_devices_max=state.tap_devices_max
+            if state.tap_devices_max is not None
+            else 0,
             ip_local_port_range=port_range,
         )
 

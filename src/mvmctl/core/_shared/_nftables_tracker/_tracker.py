@@ -58,17 +58,17 @@ _BASE_CHAINS: dict[tuple[str, str, str], str] = {
         "ip",
         "filter",
         "FORWARD",
-    ): "type filter hook forward priority filter; policy accept;",
+    ): "{ type filter hook forward priority filter; policy accept; }",
     (
         "ip",
         "filter",
         "INPUT",
-    ): "type filter hook input priority filter; policy accept;",
+    ): "{ type filter hook input priority filter; policy accept; }",
     (
         "ip",
         "nat",
         "POSTROUTING",
-    ): "type nat hook postrouting priority srcnat; policy accept;",
+    ): "{ type nat hook postrouting priority srcnat; policy accept; }",
 }
 
 
@@ -311,19 +311,25 @@ class NFTablesTracker:
 
         Returns list of ``(handle, rule_text)`` tuples parsed from
         ``nft -a list chain ip <table> <chain>`` output.
+
+        If the chain does not exist (e.g. after a reboot), returns an
+        empty list instead of raising.
         """
-        result = run_cmd(
-            [
-                "nft",
-                "-a",
-                "list",
-                "chain",
-                "ip",
-                table,
-                chain.value,
-            ],
-            privileged=True,
-        )
+        try:
+            result = run_cmd(
+                [
+                    "nft",
+                    "-a",
+                    "list",
+                    "chain",
+                    "ip",
+                    table,
+                    chain.value,
+                ],
+                privileged=True,
+            )
+        except ProcessError:
+            return []
         rules: list[tuple[int, str]] = []
         for line in result.stdout.splitlines():
             stripped = line.strip()

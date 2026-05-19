@@ -196,9 +196,8 @@ class ImageService:
         Tries the stored path first, then known extensions.
         Returns None if no file found.
         """
-        filename = image.path
-        if filename:
-            candidate = images_dir / filename
+        if image.path:
+            candidate = Path(image.path)
             if candidate.exists():
                 return candidate
         for ext in SUPPORTED_IMAGE_EXTENSIONS:
@@ -266,7 +265,7 @@ class ImageService:
                 version=spec.version,
                 name=image_name,
                 arch=spec.arch,
-                path=str(image_path.name),
+                path=str(image_path),
                 fs_type=fs_type,
                 distro=detected_os,
                 minimum_rootfs_size_mib=actual_size // CONST_MEBIBYTE_BYTES,
@@ -390,7 +389,7 @@ class ImageService:
             name=spec.name,
             arch=spec.arch,
             distro=distro,
-            path=str(compressed_path.name),
+            path=str(compressed_path),
             fs_type=fs_type,
             minimum_rootfs_size_mib=minimum_rootfs_size_mib,
             original_size=pre_shrink_size,
@@ -863,11 +862,9 @@ class ImageService:
                 results.append(cached_path)
                 continue
 
-            images_dir = CacheUtils.get_images_dir()
-
             if image.compressed_format is None:
                 # Image is not compressed — copy directly to warm cache
-                source_path = images_dir / image.path
+                source_path = Path(image.path)
                 logger.info(
                     "Copying uncompressed image to cache: %s", cached_path.name
                 )
@@ -877,9 +874,7 @@ class ImageService:
             else:
                 fmt = image.compressed_format
                 suffix = f".{fmt}" if not fmt.startswith(".") else fmt
-                compressed_path = images_dir / Path(image.path).with_suffix(
-                    suffix
-                )
+                compressed_path = Path(image.path).with_suffix(suffix)
 
                 logger.info("Decompressing to cache: %s", cached_path.name)
                 self.decompress(

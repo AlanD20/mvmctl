@@ -29,6 +29,7 @@ from mvmctl.constants import (
     HTTP_USER_AGENT,
 )
 from mvmctl.exceptions import ChecksumMismatchError, HttpDownloadError
+from mvmctl.utils.common import env
 
 __all__ = ["HttpDownload"]
 
@@ -440,7 +441,7 @@ class HttpDownload:
             The full ``Path`` to the mirrored file if it exists, or ``None``
             if the env var is unset or the file is not present in the mirror.
         """
-        mirror_dir = os.environ.get("MVM_ASSET_MIRROR")
+        mirror_dir = env.get("ASSET_MIRROR")
         if not mirror_dir:
             return None
         # Extract filename from URL (last segment after '/', strip query params)
@@ -581,7 +582,7 @@ class HttpDownload:
         # After a successful download, copy the file into the mirror
         # directory (MVM_ASSET_MIRROR) so subsequent runs use a fast local
         # copy instead of re-downloading from the internet.
-        mirror_dir = os.environ.get("MVM_ASSET_MIRROR")
+        mirror_dir = env.get("ASSET_MIRROR")
         if mirror_dir:
             filename = url.rsplit("/", 1)[-1].split("?", 1)[0]
             mirror_path = Path(mirror_dir) / filename

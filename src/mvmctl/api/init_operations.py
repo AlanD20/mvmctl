@@ -45,7 +45,8 @@ class InitOperation:
     """
     Orchestration layer for the mvm init wizard.
 
-    Sequences local-state → host → cache → binary setup in order.
+    Sequences local-state → service-binaries → host → guestfs →
+    default-network → cache → binary setup in order.
     """
 
     @staticmethod
@@ -115,6 +116,38 @@ class InitOperation:
         return InitStepResult("host", False, result.message), None
 
     @staticmethod
+    def _step_network_setup() -> InitStepResult:
+        """Step 5: Reconcile network DB state with infrastructure, then create default.
+
+        Sync phase pushes DB state to infra: creates missing bridges, updates
+        records, and tears down infra that has no corresponding DB entry.
+
+        Create phase ensures a default network record exists in the DB and
+        backs it with real infra (bridge, NAT, iptables chains).
+
+        Runs independently of ``--skip-host`` so the user can configure the
+        default subnet (via ``mvm config set``) before this step executes.
+
+        Privilege escalation is handled internally by the underlying
+        ``run_cmd(privileged=True)`` calls — they now warn instead of
+        blocking if the mvm group is missing, and fall back to password
+        prompt sudo.
+        """
+
+        result = HostOperation.network_setup()
+        success = result.status == "success"
+        return InitStepResult(
+            "network_setup",
+            success,
+            result.message
+            or (
+                "Default network ready"
+                if success
+                else "Failed to create default network"
+            ),
+        )
+
+    @staticmethod
     def _step_guestfs(
         guestfs_enabled: bool | None = None,
     ) -> tuple[InitStepResult, NeedsInteraction | None]:
@@ -174,7 +207,7 @@ class InitOperation:
         *,
         on_progress: Callable[[ProgressEvent], None] | None = None,
     ) -> InitStepResult:
-        """Step 5: Cache directory initialisation."""
+        """Step 6: Cache directory initialisation."""
         try:
             result = CacheOperation.init_all(on_progress=on_progress)
             if result.is_error:
@@ -196,7 +229,7 @@ class InitOperation:
         non_interactive: bool,
         download_version: str | None,
     ) -> tuple[InitStepResult, NeedsInteraction | None]:
-        """Step 6: Firecracker binary availability.
+        """Step 7: Firecracker binary availability.
 
         Returns:
             Tuple of (step_result, needs_interaction). When user confirmation
@@ -346,6 +379,7 @@ class InitOperation:
     @staticmethod
     def run(
         skip_host: bool = False,
+        skip_network: bool = False,
         non_interactive: bool = False,
         *,
         on_progress: Callable[[ProgressEvent], None] | None = None,
@@ -359,6 +393,7 @@ class InitOperation:
 
         Args:
             skip_host: Skip the host privilege-setup step.
+            skip_network: Skip the default-network creation step.
             non_interactive: Use defaults, skip all user prompts.
             on_progress: Optional callback for progress events during
                 long-running steps (e.g., appliance build).
@@ -417,10 +452,20 @@ class InitOperation:
                 needs_interaction=guestfs_interaction,
             )
 
-        # ── Step 5: Cache ───────────────────────────────────────────────────
+        # ── Step 5: Network setup (sync + default) ──────────────────────────
+        if skip_network:
+            steps.append(
+                InitStepResult(
+                    "network_setup", True, "Skipped (--skip-network)"
+                )
+            )
+        else:
+            steps.append(InitOperation._step_network_setup())
+
+        # ── Step 6: Cache ───────────────────────────────────────────────────
         steps.append(InitOperation._step_cache(on_progress=on_progress))
 
-        # ── Step 6: Binary ──────────────────────────────────────────────────
+        # ── Step 7: Binary ──────────────────────────────────────────────────
         binary_result, binary_interaction = InitOperation._step_binary(
             non_interactive=non_interactive,
             download_version=download_version,

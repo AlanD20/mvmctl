@@ -185,7 +185,7 @@ def bin_pull(
         for binary in binaries:
             short_id = mvm_cli.format_id(binary.id)
             mvm_cli.success(
-                f"Built: {binary.name} {binary.version}: {binary.resolved_path}"
+                f"Built: {binary.name} {binary.version}: {binary.path}"
             )
             mvm_cli.info(f"  ID: {short_id}")
 
@@ -266,7 +266,7 @@ def bin_pull(
     for binary in binaries:
         short_id = mvm_cli.format_id(binary.id)
         mvm_cli.success(
-            f"Downloaded: {binary.name} v{binary.version}: {binary.resolved_path}"
+            f"Downloaded: {binary.name} v{binary.version}: {binary.path}"
         )
         mvm_cli.info(f"  ID: {short_id}")
 

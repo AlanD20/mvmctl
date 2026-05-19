@@ -132,7 +132,11 @@ def config_list() -> None:
         mvm_cli.info(escape(f"\n[{category}]"))
         for key, info in keys.items():
             override = info["override"]
+            default = info["default"]
             if override is not None:
-                mvm_cli.info(f"  {key} = {override} (type: {info['type']})")
+                mvm_cli.info(
+                    f"  {key} = {override} "
+                    f"(default: {default}, type: {info['type']})"
+                )
             else:
-                mvm_cli.info(f"  {key} = (default, type: {info['type']})")
+                mvm_cli.info(f"  {key} = {default} (type: {info['type']})")

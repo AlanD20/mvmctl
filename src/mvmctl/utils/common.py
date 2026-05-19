@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from mvmctl.constants import CONST_DIR_PERMS_CACHE, DEBUG_MODE
+from mvmctl.constants import CLI_NAME, CONST_DIR_PERMS_CACHE, DEBUG_MODE
 from mvmctl.exceptions import MVMError
 
 # Shell metacharacters that must be rejected from user input
@@ -79,6 +79,36 @@ def is_debug_mode() -> bool:
     return _debug_mode
 
 
+# ---------------------------------------------------------------------------
+# Environment variable access
+# ---------------------------------------------------------------------------
+
+
+class env:
+    """Centralizes all ``MVM_*`` environment variable access.
+
+    Provides static methods for getting, setting, and constructing
+    environment variable names with the standard CLI prefix.
+    """
+
+    _prefix: str = f"{CLI_NAME.upper()}_"
+
+    @staticmethod
+    def key(suffix: str) -> str:
+        """Return the full env var name (e.g. ``CACHE_DIR`` → ``MVM_CACHE_DIR``)."""
+        return f"{env._prefix}{suffix}"
+
+    @staticmethod
+    def get(suffix: str, default: str | None = None) -> str | None:
+        """Read the environment variable for *suffix*, falling back to *default*."""
+        return os.environ.get(env.key(suffix), default)
+
+    @staticmethod
+    def set(suffix: str, value: str) -> None:
+        """Set the environment variable for *suffix* to *value*."""
+        os.environ[env.key(suffix)] = value
+
+
 def _get_real_home() -> Path:
     """
     Return the real user's home directory.
@@ -111,6 +141,9 @@ class CacheUtils:
         """
         Ensure a directory exists, creating parents if necessary.
 
+        When running under ``sudo`` the directory is chowned to the
+        invoking user so it remains accessible after privileges are dropped.
+
         Args:
             path: Directory path to resolve.
 
@@ -119,6 +152,11 @@ class CacheUtils:
 
         """
         path.mkdir(parents=True, exist_ok=True, mode=CONST_DIR_PERMS_CACHE)
+        # Chown to the real user when running under sudo so that cache
+        # directories are accessible after privileges are dropped.
+        from mvmctl.utils.fs import FsUtils as _FsUtils
+
+        _FsUtils.chown_to_real_user(path)
         return path
 
     @staticmethod
@@ -141,8 +179,7 @@ class CacheUtils:
 
         base = tmp_path if tmp_path is not None else Path(tempfile.gettempdir())
         cache_dir = Path(base / PROJECT_NAME / "ready")
-        cache_dir.mkdir(parents=True, exist_ok=True, mode=CONST_DIR_PERMS_CACHE)
-        return cache_dir
+        return CacheUtils.resolve_dir(cache_dir)
 
     @staticmethod
     def get_cache_dir() -> Path:
@@ -153,12 +190,10 @@ class CacheUtils:
         ~/.cache/<project-name>.  When running under sudo, uses the invoking
         user's home directory so state is shared with the non-root user.
         """
-        import os
-
-        from mvmctl.constants import PROJECT_NAME, env_var
+        from mvmctl.constants import PROJECT_NAME
         from mvmctl.exceptions import MVMError
 
-        override = os.environ.get(env_var("CACHE_DIR"))
+        override = env.get("CACHE_DIR")
         if override:
             resolved = Path(override).resolve()
             home = Path.home().resolve()
@@ -169,7 +204,7 @@ class CacheUtils:
             under_var_tmp = resolved.is_relative_to(var_tmp)
             if not (under_home or under_tmp or under_var_tmp):
                 raise MVMError(
-                    f"Unsafe {env_var('CACHE_DIR')} path '{override}': "
+                    f"Unsafe {env.key('CACHE_DIR')} path '{override}': "
                     f"must be under $HOME ({home}), /tmp, or /var/tmp"
                 )
             return resolved
@@ -183,12 +218,10 @@ class CacheUtils:
         Checks MVM_CONFIG_DIR env var first, then falls back to
         ~/.config/<project-name>.
         """
-        import os
-
-        from mvmctl.constants import PROJECT_NAME, env_var
+        from mvmctl.constants import PROJECT_NAME
         from mvmctl.exceptions import MVMError
 
-        override = os.environ.get(env_var("CONFIG_DIR"))
+        override = env.get("CONFIG_DIR")
         if override:
             resolved = Path(override).resolve()
             home = Path.home().resolve()
@@ -199,7 +232,7 @@ class CacheUtils:
             under_var_tmp = resolved.is_relative_to(var_tmp)
             if not (under_home or under_tmp or under_var_tmp):
                 raise MVMError(
-                    f"Unsafe {env_var('CONFIG_DIR')} path '{override}': "
+                    f"Unsafe {env.key('CONFIG_DIR')} path '{override}': "
                     f"must be under $HOME ({home}), /tmp, or /var/tmp"
                 )
             return resolved
@@ -224,9 +257,9 @@ class CacheUtils:
     @staticmethod
     def get_temp_dir() -> Path:
         """Return the temp directory for microVMs."""
-        from mvmctl.constants import PROJECT_NAME, env_var
+        from mvmctl.constants import PROJECT_NAME
 
-        override = os.environ.get(env_var("TEMP_DIR"))
+        override = env.get("TEMP_DIR")
         result = Path(override) if override else Path("/tmp") / PROJECT_NAME
         result.mkdir(parents=True, exist_ok=True)
         return result
@@ -234,9 +267,7 @@ class CacheUtils:
     @staticmethod
     def get_vms_dir() -> Path:
         """Return the directory that holds VM state and per-VM dirs."""
-        result = CacheUtils.get_cache_dir() / "vms"
-        result.mkdir(parents=True, exist_ok=True, mode=CONST_DIR_PERMS_CACHE)
-        return result
+        return CacheUtils.resolve_dir(CacheUtils.get_cache_dir() / "vms")
 
     @staticmethod
     def get_vm_dir(id: str) -> Path:
@@ -251,44 +282,32 @@ class CacheUtils:
     @staticmethod
     def get_images_dir() -> Path:
         """Return the directory for cached images."""
-        result = CacheUtils.get_cache_dir() / "images"
-        result.mkdir(parents=True, exist_ok=True, mode=CONST_DIR_PERMS_CACHE)
-        return result
+        return CacheUtils.resolve_dir(CacheUtils.get_cache_dir() / "images")
 
     @staticmethod
     def get_kernels_dir() -> Path:
         """Return the directory for cached kernels."""
-        result = CacheUtils.get_cache_dir() / "kernels"
-        result.mkdir(parents=True, exist_ok=True, mode=CONST_DIR_PERMS_CACHE)
-        return result
+        return CacheUtils.resolve_dir(CacheUtils.get_cache_dir() / "kernels")
 
     @staticmethod
     def get_keys_dir() -> Path:
         """Return the directory for SSH key management (in config dir)."""
-        result = CacheUtils.get_config_dir() / "keys"
-        result.mkdir(parents=True, exist_ok=True, mode=CONST_DIR_PERMS_CACHE)
-        return result
+        return CacheUtils.resolve_dir(CacheUtils.get_config_dir() / "keys")
 
     @staticmethod
     def get_volumes_dir() -> Path:
         """Return the directory for persistent volumes."""
-        result = CacheUtils.get_cache_dir() / "volumes"
-        result.mkdir(parents=True, exist_ok=True, mode=CONST_DIR_PERMS_CACHE)
-        return result
+        return CacheUtils.resolve_dir(CacheUtils.get_cache_dir() / "volumes")
 
     @staticmethod
     def get_bin_dir() -> Path:
         """Return the directory for cached Firecracker binaries."""
-        result = CacheUtils.get_cache_dir() / "bin"
-        result.mkdir(parents=True, exist_ok=True, mode=CONST_DIR_PERMS_CACHE)
-        return result
+        return CacheUtils.resolve_dir(CacheUtils.get_cache_dir() / "bin")
 
     @staticmethod
     def get_logs_dir() -> Path:
         """Return the directory for VM and process log files."""
-        result = CacheUtils.get_cache_dir() / "logs"
-        result.mkdir(parents=True, exist_ok=True, mode=CONST_DIR_PERMS_CACHE)
-        return result
+        return CacheUtils.resolve_dir(CacheUtils.get_cache_dir() / "logs")
 
     @staticmethod
     def get_audit_log_path() -> Path:

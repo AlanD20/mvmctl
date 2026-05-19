@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mvmctl.utils.common import CommonUtils
@@ -17,9 +16,8 @@ class BinaryItem:
     """
     Binary record — maps to binaries table.
 
-    The ``path`` field stores a *relative* filename (e.g.
-    ``"firecracker-v1.15.1"``).  Use :attr:`resolved_path` when you need
-    the absolute filesystem location.
+    The ``path`` field stores the absolute filesystem path to the binary
+    (e.g. ``"/home/user/.cache/mvmctl/bin/firecracker-v1.15.1"``).
     """
 
     id: str
@@ -39,10 +37,3 @@ class BinaryItem:
     def __post_init__(self) -> None:
         """Coerce bool fields loaded from SQLite."""
         CommonUtils.coerce_bool_fields(self, {"is_default", "is_present"})
-
-    @property
-    def resolved_path(self) -> Path:
-        """Absolute path resolved against the binaries cache directory."""
-        from mvmctl.utils.common import CacheUtils
-
-        return CacheUtils.get_bin_dir() / self.path

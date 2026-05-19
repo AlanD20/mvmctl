@@ -164,6 +164,7 @@ class SettingsService:
             for key in keys:
                 result[category][key] = {
                     "type": keys[key].__name__,
+                    "default": OVERRIDABLE_DEFAULTS[category][key],
                     "override": overrides.get(category, {}).get(key),
                 }
         return result

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-import os
+
+from mvmctl.utils.common import env
 
 # ==================== Logging utilities ====================
 
@@ -31,7 +32,7 @@ def setup_logging(*, verbose: bool = False, debug: bool = False) -> None:
     elif verbose:
         level = logging.INFO
     else:
-        env_level = os.environ.get("MVM_LOG_LEVEL", "WARNING").upper()
+        env_level = (env.get("LOG_LEVEL", "WARNING")).upper()
         level = getattr(logging, env_level, logging.WARNING)
 
     root = logging.getLogger()

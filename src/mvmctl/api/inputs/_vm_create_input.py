@@ -633,7 +633,7 @@ class VMCreateRequest:
                 f"Kernel not found: {self._result.kernel.resolved_path}"
             )
 
-        fc_bin_path = self._result.binary.resolved_path
+        fc_bin_path = Path(self._result.binary.path)
         if not fc_bin_path.exists() or not os.access(fc_bin_path, os.X_OK):
             raise VMCreateError(f"Firecracker binary not found: {fc_bin_path}")
 
