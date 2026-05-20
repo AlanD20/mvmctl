@@ -229,10 +229,6 @@ class ProcessError(MVMError):
     """Subprocess execution failure."""
 
 
-class AssetNotFoundError(MVMError):
-    """Requested asset (binary, kernel, image) not found locally or remotely."""
-
-
 class BundledAssetError(MVMError):
     """Bundled package asset (templates, configs) access failure."""
 
@@ -294,36 +290,7 @@ class KeyFileError(MVMKeyError):
 
 
 class CloudInitError(MVMError):
-    """
-    Cloud-init ISO creation failure.
-
-    Common messages:
-    - cloud-localds not found. Install cloud-image-utils or cloud-utils package
-    - Failed to create cloud-init ISO: {details}
-    """
-
-
-class CloudInitProvisionError(CloudInitError):
-    """
-    Cloud-init provisioning failure.
-
-    Common messages:
-    - Invalid custom user data
-    """
-
-
-class CloudInitModeError(CloudInitError):
-    """
-    Cloud-init mode failure.
-
-    Common messages:
-    - Failed to resolve cloud-init mode
-    - Custom ISO file not found
-    """
-
-
-class CloudInitOffModeError(CloudInitError):
-    """OFF mode guestfs provisioning failure."""
+    """Cloud-init provisioning failure."""
 
 
 class CloudInitIsoModeError(CloudInitError):
@@ -382,26 +349,8 @@ class GuestfsNotAvailableError(GuestfsError):
     pass
 
 
-class GuestfsLaunchError(GuestfsError):
-    """Raised when guestfs appliance fails to launch."""
-
-    pass
-
-
-class GuestfsMountError(GuestfsError):
-    """Raised when unable to mount rootfs in guestfs."""
-
-    pass
-
-
 class GuestfsWriteError(GuestfsError):
     """Raised when writing files to guestfs fails."""
-
-    pass
-
-
-class GuestfsApplianceError(GuestfsError):
-    """Raised when the libguestfs fixed appliance build fails."""
 
     pass
 
@@ -456,12 +405,6 @@ class TieDetectedError(MVMError):
 
     def __str__(self) -> str:
         return f"{self.message}: {', '.join(self.tied_partitions)}"
-
-
-class DownloadError(MVMError):
-    """Raised when a download operation fails."""
-
-    pass
 
 
 class HttpDownloadError(MVMError):

@@ -193,6 +193,10 @@ class CPService:
         """
         flags: list[str] = ["-k"] if no_overwrite else []
         extra: list[str] = _GNU_EXTRACT_EXTRAS if gnu_extras else []
+        # When extracting as non-root, suppress ownership-change warnings
+        # from tar (SSH copies files owned by root, and local archive
+        # extraction cannot chown to root without privileges).
+        extra.append("--no-same-owner")
         return ["tar", "xf", "-", *flags, *extra, "-C", dst_path]
 
     @staticmethod
@@ -203,10 +207,19 @@ class CPService:
 
         When ``no_overwrite=True`` (default), the ``-k`` (keep-old-files)
         flag is included. Pass ``no_overwrite=False`` to allow overwriting.
+
+        ``dst_path`` must be a **directory** (include trailing ``/`` or
+        use an explicit directory path).  The tar archive will be extracted
+        into that directory.
         """
         parts: list[str] = []
         if no_overwrite:
             parts.append("-k")
+        elif gnu_extras:
+            # GNU tar supports --overwrite; BusyBox tar (Alpine, etc.)
+            # does not, but it also does not need it — it only needs
+            # the absence of -k.
+            parts.append("--overwrite")
         if gnu_extras:
             parts.extend(_GNU_EXTRACT_EXTRAS)
         parts.extend(["-C", shlex.quote(dst_path)])

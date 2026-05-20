@@ -519,18 +519,6 @@ class CommonUtils:
         return names
 
     @staticmethod
-    def _get_combined_marker(is_default: bool, is_missing: bool) -> str:
-        """Get combined default and existence marker."""
-        if is_default and is_missing:
-            return "*X "
-        elif is_missing:
-            return " X "
-        elif is_default:
-            return "*  "
-        else:
-            return "   "
-
-    @staticmethod
     def coerce_bool_fields(instance: object, field_names: set[str]) -> None:
         """Coerce specified fields to Python bool.
 

@@ -13,7 +13,6 @@ from mvmctl.api import KernelImportInput as _KernelImportInput
 from mvmctl.api import KernelInput as _KernelInput
 from mvmctl.api import KernelOperation as _KernelOperation
 from mvmctl.api import KernelPullInput as _KernelPullInput
-from mvmctl.core._shared._http_dir_version_resolver import VersionInfo
 
 if TYPE_CHECKING:
     from mvmctl.api.inputs._kernel_import_input import KernelImportInput
@@ -26,7 +25,7 @@ else:
     KernelInput = _KernelInput
     KernelImportInput = _KernelImportInput
 from mvmctl.cli._completion import _complete_kernel_ids
-from mvmctl.models import KernelItem
+from mvmctl.models import KernelItem, VersionInfo
 from mvmctl.models.result import OperationResult, ProgressEvent
 from mvmctl.utils.cli import handle_errors, mvm_cli
 

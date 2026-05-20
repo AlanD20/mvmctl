@@ -16,30 +16,14 @@ from __future__ import annotations
 import logging
 import re
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
 from typing import Any
 
 from mvmctl.constants import DEFAULT_FIRECRACKER_CI_VERSION
+from mvmctl.models.version import VersionInfo
 from mvmctl.utils.http import HttpDownload
 from mvmctl.utils.template import render_template
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class VersionInfo:
-    """A published version of a resource from an upstream provider.
-
-    Returned by version resolvers to describe an available download.
-    Generic enough for both image and kernel version listings.
-    """
-
-    version: str
-    download_url: str
-    sha256_url: str | None
-    display_name: str
-    type: str
-    format: str
 
 
 class HttpDirVersionResolver:

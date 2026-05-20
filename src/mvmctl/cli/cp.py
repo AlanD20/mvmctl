@@ -1,10 +1,17 @@
-"""CLI — ``mvm cp`` command — copy files between host and microVMs."""
+"""CLI — ``mvm cp`` command — copy files between host and microVMs.
+
+Uses a plain Click command (not a Typer app) because ``mvm cp`` has
+variable-length positional arguments (1+ sources + 1 destination) that
+don't map cleanly to Typer's subcommand model.  Click's ``nargs=-1``
+handles this naturally, and its option parser correctly separates flags
+like ``--user`` / ``--key`` / ``--force`` from positional paths.
+"""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import typer
+import click
 from rich.progress import (
     BarColumn,
     Progress,
@@ -21,42 +28,20 @@ if TYPE_CHECKING:
 else:
     from mvmctl.api import CPInput, CPOperation
 
-cp_app = typer.Typer(
-    name="cp",
-    help="Copy files between host and microVMs",
-    no_args_is_help=True,
-    add_completion=False,
+
+@click.command(name="cp")
+@click.argument("args", nargs=-1, required=True)
+@click.option("--user", "-u", default=None, help="SSH user for VM connections")
+@click.option("--key", default=None, help="SSH private key path or name")
+@click.option(
+    "--force", "-f", is_flag=True, help="Overwrite existing destination files"
 )
-
-
-@cp_app.callback(invoke_without_command=True)
 @handle_errors
-def cp(
-    ctx: typer.Context,
-    args: list[str] = typer.Argument(
-        ...,
-        help="Source path(s) and destination. "
-        "Use vm_name:/path for VM paths. "
-        "Multiple sources allowed for host→VM copies. "
-        "The last argument is always the destination.",
-    ),
-    user: str | None = typer.Option(
-        None,
-        "--user",
-        "-u",
-        help="SSH user for VM connections",
-    ),
-    key: str | None = typer.Option(
-        None,
-        "--key",
-        help="SSH private key path or name",
-    ),
-    force: bool = typer.Option(
-        False,
-        "--force",
-        "-f",
-        help="Overwrite existing destination files",
-    ),
+def cp_app(
+    args: tuple[str, ...],
+    user: str | None,
+    key: str | None,
+    force: bool,
 ) -> None:
     """Copy files between host and microVMs using tar-over-SSH.
 
@@ -82,15 +67,16 @@ def cp(
 
     The last positional argument is always the destination. Everything
     before it is a source. Multiple sources only work for host → VM.
-
     """
-    if len(args) < 2:
+    args_list = list(args)
+
+    if len(args_list) < 2:
         mvm_cli.error(
             "At least two arguments required: one or more sources and a destination"
         )
-        raise typer.Exit(code=1)
+        raise click.Abort()
 
-    *sources, dst = args
+    *sources, dst = args_list
 
     inputs = CPInput(sources=sources, dst=dst, user=user, key=key, force=force)
 
@@ -115,10 +101,10 @@ def cp(
     if result.is_ok and result.item:
         msg = result.item.get("message", result.message)
         mvm_cli.success(msg)
-        raise typer.Exit()
+        return
     elif result.is_ok:
         mvm_cli.success(result.message)
-        raise typer.Exit()
+        return
     else:
         mvm_cli.error(result.message or "Copy failed")
-        raise typer.Exit(code=1)
+        raise SystemExit(1)

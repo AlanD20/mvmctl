@@ -57,6 +57,7 @@ if TYPE_CHECKING:
         NetworkLeaseItem,
     )
     from mvmctl.models.provisioner import ProvisionerType
+    from mvmctl.models.version import VersionInfo
     from mvmctl.models.vm import (
         ConsoleInfo,
         ConsoleState,
@@ -104,6 +105,7 @@ __all__ = [
     "CpuConfig",
     "PruneAllResult",
     "SSHKeyItem",
+    "VersionInfo",
     "VolumeItem",
     "VolumeStatus",
     "VMInspectInfo",
@@ -118,6 +120,7 @@ _LAZY_MAP = {
     "BulkResultItem": ("mvmctl.models.bulk", "BulkResultItem"),
     "CleanResult": ("mvmctl.models.cache", "CleanResult"),
     "PruneAllResult": ("mvmctl.models.cache", "PruneAllResult"),
+    "VersionInfo": ("mvmctl.models.version", "VersionInfo"),
     "CloudInitMode": ("mvmctl.models.cloudinit", "CloudInitMode"),
     "CloudInitStatus": ("mvmctl.models.cloudinit", "CloudInitStatus"),
     "CpuConfig": ("mvmctl.models.firecracker", "CpuConfig"),

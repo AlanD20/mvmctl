@@ -72,7 +72,9 @@ class BinaryPullRequest:
 
         # When git_ref is provided, skip semver version validation —
         # the version will be determined after building from source.
-        if not self._inputs.git_ref:
+        # When version is empty, it means "resolve to latest remote" —
+        # the caller (BinaryOperation.pull) handles resolution.
+        if not self._inputs.git_ref and version:
             # Validate version format (semver-like: x.y.z)
             if not re.match(r"^\d+\.\d+(\.\d+)?$", version):
                 raise BinaryError(
@@ -113,5 +115,5 @@ class BinaryPullRequest:
         if self._result.git_ref:
             return
 
-        if not self._result.version:
-            raise BinaryError("Version cannot be empty")
+        # Version can be empty (means "resolve to latest remote") —
+        # BinaryOperation.pull() handles resolution before download.

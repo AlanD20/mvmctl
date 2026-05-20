@@ -11,7 +11,6 @@ from rich.console import Console
 from mvmctl.api import BinaryInput as _BinaryInput
 from mvmctl.api import BinaryOperation as _BinaryOperation
 from mvmctl.api import BinaryPullInput as _BinaryPullInput
-from mvmctl.core._shared import VersionError, VersionResolver
 from mvmctl.models import BinaryItem
 
 if TYPE_CHECKING:
@@ -139,7 +138,7 @@ def bin_pull(
     ),
 ) -> None:
     """Download a Firecracker version or build from source."""
-    from mvmctl.exceptions import BinaryNotFoundError
+    from mvmctl.exceptions import BinaryAlreadyExistsError
 
     # Only firecracker is supported for download/build
     if name.lower() != "firecracker":
@@ -199,56 +198,29 @@ def bin_pull(
         raise typer.Exit(code=0)
 
     # ---- Release download path ----
-    # Resolve version from remote
-    remote_versions = cast(
-        list[str],
-        BinaryOperation.list_all(remote=True, limit=20),
-    )
-    if not remote_versions:
-        mvm_cli.error("No remote Firecracker versions found")
-        raise typer.Exit(code=1)
-
-    if version is not None:
-        spec = VersionResolver.parse_spec(version)
-        try:
-            resolved_version = VersionResolver.resolve(remote_versions, spec)
-        except VersionError:
-            mvm_cli.error(
-                f"Version '{version}' not found in remote versions. "
-                f"Available: {', '.join(remote_versions[:10])}"
-            )
-            raise typer.Exit(code=1)
-    else:
-        resolved_version = remote_versions[0]
-
-    normalized = resolved_version.removeprefix("v")
-
-    # Check if version already exists (may not exist yet — that's OK)
-    try:
-        already_exists = BinaryOperation.get(
-            BinaryInput(
-                identifiers=["firecracker", "jailer"], version=normalized
-            )
-        )
-    except BinaryNotFoundError:
-        already_exists = []
-
-    download_override = force
-
-    if already_exists and not force:
-        mvm_cli.warning(f"Binary v{normalized} already exists.")
-        if not typer.confirm("Re-download?", default=False):
-            mvm_cli.info("Aborted")
-            raise typer.Exit(code=0)
-        download_override = True
-
+    # Version resolution (including latest-remote fallback) is handled
+    # internally by BinaryOperation.pull().
     inputs = BinaryPullInput(
-        version=normalized,
+        version=version or "",
         name=name,
         set_default=set_default,
-        download_override=download_override,
+        download_override=force,
     )
     result = BinaryOperation.pull(inputs)  # type: ignore[assignment]
+
+    # If binary already exists and --force wasn't set, offer to re-download
+    if (
+        result.is_error
+        and isinstance(result.exception, BinaryAlreadyExistsError)
+        and not force
+    ):
+        mvm_cli.warning(result.message)
+        if typer.confirm("Re-download?", default=False):
+            inputs.download_override = True
+            result = BinaryOperation.pull(inputs)  # type: ignore[assignment]
+        else:
+            mvm_cli.info("Aborted")
+            raise typer.Exit(code=0)
 
     if result.is_error:
         mvm_cli.error(result.message)
@@ -271,7 +243,8 @@ def bin_pull(
         mvm_cli.info(f"  ID: {short_id}")
 
     if set_default:
-        mvm_cli.success(f"Default binary set to: v{normalized}")
+        if binaries:
+            mvm_cli.success(f"Default binary set to: v{binaries[0].version}")
 
     raise typer.Exit(code=0)
 

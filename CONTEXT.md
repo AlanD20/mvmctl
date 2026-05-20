@@ -427,7 +427,9 @@ All other subprocess invocations MUST go through `run_cmd()` / `stream_cmd()`.
 | **Core** | Own sibling modules | `from mvmctl.core.vm._firecracker import FirecrackerClient` |
 | **Utils** | Nothing from core/api/cli | N/A -- leaf nodes |
 
-**Convention (with exceptions):** Prefer importing from the `__init__.py` re-export (`from mvmctl.core.vm import VMController`) rather than the private module (`from mvmctl.core.vm._controller import VMController`). However, API-layer code (`api/`) may import directly from private core modules when the number of imports from a single domain makes the public surface verbose (e.g., `from mvmctl.core.vm._repository import VMRepository`). CLI layer should always go through `mvmctl.api`.
+**Convention (with exceptions):** Prefer importing from the `__init__.py` re-export (`from mvmctl.core.vm import VMController`) rather than the private module (`from mvmctl.core.vm._controller import VMController`). However, API-layer code (`api/`) may import directly from private core modules when the number of imports from a single domain makes the public surface verbose (e.g., `from mvmctl.core.vm._repository import VMRepository`). CLI imports operations and input types from `api/`.
+
+**Data models come from `mvmctl.models`, NOT from `api/`:** A dataclass that represents structured data (not an operation, not a request, not an input) belongs in `mvmctl.models`. The CLI imports data models directly from `mvmctl.models` — they are NOT re-exported through `mvmctl.api`. The API layer re-exports operations (`VMOperation`) and input types (`VMCreateInput`), but NOT data classes. Re-exporting a dataclass through the API layer just to satisfy the "CLI must go through API" rule is cargo-culting — it creates a circular dependency where a simple data holder gets dragged through an orchestration layer for no reason. If the CLI needs a data model's type, it imports from `mvmctl.models` directly.
 
 ## Flagged ambiguities
 
@@ -445,6 +447,7 @@ All other subprocess invocations MUST go through `run_cmd()` / `stream_cmd()`.
 - "What about parallel test safety" -- resolved: every test that modifies shared state (defaults, cache, assets, binaries, kernels) must be marked `pytest.mark.serial` to prevent xdist race conditions.
 - "How do system tests handle sudo operations" -- resolved: `sudo` is allowed for `mvm init`, `mvm host init`, `mvm host clean`, and `mvm host reset`. Use the built binary at `~/.local/bin/mvm` for sudo operations. The QA engineer agent has explicit sudo permission for these four command patterns.
 - "What is the release gate" -- resolved: the release gate is **system tests passing against `dist/mvm`**. Before reporting release ready, the QA engineer must: (1) build `dist/mvm` via `scripts/build_services.py`, (2) copy to `~/.local/bin/mvm`, (3) run all system tests against the binary, (4) report pass/fail status.
+- "Should data models be re-exported through api/ for the CLI" -- resolved: **NO**. Data models (dataclasses) live in `mvmctl.models`. The CLI imports them directly from `mvmctl.models`. The API layer re-exports operations and input types, NOT dataclasses. Re-exporting a dataclass through the API layer to satisfy the "CLI must go through API" rule is cargo-culting and explicitly forbidden. See the "Data models come from mvmctl.models" rule in the Import Conventions section.
 
 ## Test types (three-layer test pyramid)
 

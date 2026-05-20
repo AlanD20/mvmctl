@@ -193,13 +193,6 @@ _COMMAND_SPECS: dict[str, _LazyCommandSpec] = {
     ),
 }
 
-_STATIC_COMMAND_HELP: dict[str, str] = {
-    **{name: spec.help_text for name, spec in _COMMAND_SPECS.items()},
-    "version": "Show the version and exit",
-    "completion": "Print shell completion script",
-    "help": f"Show help for {_get_cli_name()} or a subcommand",
-}
-
 _COMMAND_ORDER = [
     "init",
     "bin",

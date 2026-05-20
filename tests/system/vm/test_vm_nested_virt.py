@@ -209,43 +209,18 @@ class TestVMNestedVirt:
     ]
 
     @pytest.fixture(autouse=True)
-    def _ensure_nested_virt_host_capability(self, mvm_binary: str) -> None:
-        """Skip all nested virt tests if host or Firecracker doesn't support it.
+    def _ensure_nested_virt_host_capability(self) -> None:
+        """Skip all nested virt tests if host doesn't have nested=Y.
 
-        Nested virt requires:
-        1. Host CPU with VMX/SVM + kvm_intel/kvm_amd nested=Y
-        2. Firecracker v1.16+ (the version gate for cpu-config support)
-        3. An official kernel with CONFIG_KVM_INTEL=y or CONFIG_KVM_AMD=y
+        Requires the official kernel built with ``--features kvm`` and
+        ``--nested-virt`` (CONFIG_KVM_INTEL=y for vmx support in guest).
+        The host firmware/bootloader must also expose VMX to the kernel.
         """
         if not _nested_virt_available():
             pytest.skip(
                 "Host does not support nested virtualization "
                 "(kvm_intel/kvm_amd nested=Y not detected)"
             )
-        # Check Firecracker version — v1.15.x doesn't expose vmx in guest
-        r = _run_mvm(
-            mvm_binary, "bin", "ls", "--json", timeout=30
-        )
-        if r.returncode == 0:
-            bins = json.loads(r.stdout)
-            fc = next(
-                (b for b in bins
-                 if b.get("name") == "firecracker" and b.get("is_default")),
-                None,
-            )
-            if fc:
-                version = fc.get("version", "")
-                try:
-                    parts = version.lstrip("v").split(".")[:2]
-                    major, minor = int(parts[0]), int(parts[1])
-                    if major < 1 or (major == 1 and minor < 16):
-                        pytest.skip(
-                            f"Nested virt requires Firecracker v1.16+ "
-                            f"(current: v{version}). "
-                            f"Install a newer Firecracker to enable these tests."
-                        )
-                except (ValueError, IndexError):
-                    pass
 
     def test_nested_virt_kvm_inside_guest(
         self,

@@ -74,6 +74,10 @@ __all__ = [
     "VMExportFirecrackerConfig",
     "VMExportCloudInitConfig",
     "VMExportConfig",
+    # Version types
+    "VersionError",
+    "VersionInfo",
+    "VersionResolver",
 ]
 
 _LAZY_MAP: dict[str, tuple[str, str]] = {
@@ -206,6 +210,16 @@ _LAZY_MAP: dict[str, tuple[str, str]] = {
     "VMExportConfig": (
         "mvmctl.api.inputs._vm_export_config",
         "VMExportConfig",
+    ),
+    # ── Version types ────────────────────────────────────────────
+    "VersionError": ("mvmctl.exceptions", "VersionError"),
+    "VersionInfo": (
+        "mvmctl.models.version",
+        "VersionInfo",
+    ),
+    "VersionResolver": (
+        "mvmctl.core._shared._version_resolver",
+        "VersionResolver",
     ),
 }
 

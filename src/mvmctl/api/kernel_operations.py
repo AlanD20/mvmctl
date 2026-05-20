@@ -19,7 +19,6 @@ from mvmctl.api.inputs._kernel_pull_input import (
 )
 from mvmctl.constants import DEFAULT_FIRECRACKER_CI_VERSION
 from mvmctl.core._shared import Database
-from mvmctl.core._shared._http_dir_version_resolver import VersionInfo
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.binary._service import BinaryService
 from mvmctl.core.config._service import SettingsService
@@ -27,7 +26,7 @@ from mvmctl.core.kernel._controller import KernelController
 from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.core.kernel._service import KernelService
 from mvmctl.exceptions import KernelError
-from mvmctl.models import KernelItem, KernelPullResult
+from mvmctl.models import KernelItem, KernelPullResult, VersionInfo
 from mvmctl.models.result import (
     BatchResult,
     NeedsInteraction,

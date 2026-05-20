@@ -288,7 +288,6 @@ CONST_MIN_BINARY_SIZE_BYTES: Final[int] = 512
 
 # --- Libguestfs ---
 DEFAULT_LIBGUESTFS_SEED_DIR: Final[str] = "/var/lib/cloud/seed/nocloud"
-CONST_GUESTFS_OS_RELEASE_PATH: Final[str] = "/etc/os-release"
 
 # ===========================================================================
 # 8. File permissions & user IDs
@@ -299,17 +298,14 @@ CONST_FILE_PERMS_PUBLIC_KEY: Final[int] = 0o644
 CONST_DIR_PERMS_CACHE: Final[int] = 0o700
 CONST_FILE_PERMS_SHADOW: Final[int] = 0o640
 CONST_FILE_PERMS_SUDOERS: Final[int] = 0o440
-CONST_FILE_PERMS_CONFIG: Final[int] = 0o600
 CONST_FILE_PERMS_DB: Final[int] = 0o640
 CONST_FILE_PERMS_EXECUTABLE: Final[int] = 0o755
-
-# --- /etc/shadow fields ---
 CONST_SHADOW_DAYS_SINCE_EPOCH: Final[int] = 19700
 CONST_SHADOW_MIN_DAYS: Final[int] = 0
 CONST_SHADOW_MAX_DAYS: Final[int] = 99999
 CONST_SHADOW_WARN_DAYS: Final[int] = 7
-
-
+# ===========================================================================
+# 4. SSH key management
 # ===========================================================================
 # 9. Buffer & byte constants
 # ===========================================================================
@@ -317,10 +313,8 @@ CONST_SHADOW_WARN_DAYS: Final[int] = 7
 CONST_BUFFER_SIZE_BYTES: Final[int] = 1024
 CONST_SECTOR_SIZE_BYTES: Final[int] = 512
 CONST_MEBIBYTE_BYTES: Final[int] = 1024 * 1024
-CONST_MEGABYTE_BYTES: Final[int] = 1_000_000
-CONST_DOWNLOAD_CHUNK_SIZE: Final[int] = 1048576
-
-
+# ===========================================================================
+# 8. Image version listing
 # ===========================================================================
 # 10. HTTP / download
 # ===========================================================================
@@ -333,6 +327,7 @@ HTTP_TIMEOUT_SHA256_SIDECAR_S: Final[int] = 15
 CONST_HTTP_TIMEOUT_SECONDS: Final[int] = 300
 
 # --- Retry ---
+CONST_DOWNLOAD_CHUNK_SIZE: Final[int] = 1048576
 CONST_DOWNLOAD_MAX_RETRIES: Final[int] = 3
 CONST_DOWNLOAD_RETRY_DELAY: Final[float] = 1.0
 CONST_DOWNLOAD_RETRY_BACKOFF: Final[float] = 2.0
@@ -360,9 +355,8 @@ FIRECRACKER_GIT_REPO_URL: Final[str] = (
 # ===========================================================================
 
 DEBUG_MODE: Final[bool] = False
-CONST_TIMESTAMP_INITIAL: Final[float] = 0.0
-
-
+# ===========================================================================
+# 11. Network / iptables
 # ===========================================================================
 # 12. Lazy constants & helper functions
 # ===========================================================================

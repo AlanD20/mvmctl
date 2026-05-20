@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     from mvmctl.core._shared._firewall_tracker import FirewallTracker
     from mvmctl.core._shared._http_dir_version_resolver import (
         HttpDirVersionResolver,
-        VersionInfo,
     )
     from mvmctl.core._shared._parallel import ParallelExecutor
     from mvmctl.core._shared._resolver_registry import get as get_resolver
@@ -67,10 +66,7 @@ _LAZY_MAP = {
         "HttpDirVersionResolver",
     ),
     "ParallelExecutor": ("mvmctl.core._shared._parallel", "ParallelExecutor"),
-    "VersionInfo": (
-        "mvmctl.core._shared._http_dir_version_resolver",
-        "VersionInfo",
-    ),
+    "VersionInfo": ("mvmctl.models.version", "VersionInfo"),
     "VersionError": ("mvmctl.exceptions", "VersionError"),
     "VersionResolver": (
         "mvmctl.core._shared._version_resolver",

@@ -25,6 +25,7 @@ from mvmctl.core.binary._resolver import BinaryResolver
 from mvmctl.core.binary._service import BinaryService
 from mvmctl.core.config._service import SettingsService
 from mvmctl.exceptions import (
+    BinaryAlreadyExistsError,
     BinaryError,
     BinaryNotFoundError,
 )
@@ -173,28 +174,27 @@ class BinaryOperation:
                 )
 
             # ---- Release download path ----
-            # Check if version already exists
-            normalized = resolved.version.removeprefix("v")
+            # If no version specified, resolve to latest remote
+            resolved_version = resolved.version
+            if not resolved.git_ref and not resolved_version:
+                remote_versions = BinaryService.list_remote(limit=20)
+                if not remote_versions:
+                    return OperationResult(
+                        status="error",
+                        code="binary.no_remote_versions",
+                        message="No remote Firecracker versions found",
+                    )
+                resolved_version = remote_versions[0]
+
+            normalized = resolved_version.removeprefix("v")
             fc_exists = repo.get_by_name_and_version("firecracker", normalized)
             jl_exists = repo.get_by_name_and_version("jailer", normalized)
             version_exists = fc_exists is not None and jl_exists is not None
 
             if version_exists and not resolved.download_override:
-                # Early exit: return existing binaries without downloading
-                assert fc_exists is not None
-                assert jl_exists is not None
-                if resolved.set_default:
-                    for b in (fc_exists, jl_exists):
-                        repo.set_default(
-                            name=b.name,
-                            version=b.version,
-                            path=b.path,
-                        )
-                return OperationResult(
-                    status="skipped",
-                    code="binary.already_present",
-                    message=f"Binary v{normalized} already present",
-                    item=[fc_exists, jl_exists],
+                raise BinaryAlreadyExistsError(
+                    f"Firecracker v{normalized} already exists. "
+                    "Use --force to re-download."
                 )
 
             # Download (override or first-time)
@@ -202,7 +202,7 @@ class BinaryOperation:
             should_set_default = resolved.set_default or no_default
 
             binaries = BinaryService.download_firecracker(
-                version=resolved.version,
+                version=resolved_version,
                 bin_dir=resolved.bin_dir,
             )
 
@@ -216,7 +216,7 @@ class BinaryOperation:
                         path=binary.path,
                     )
 
-            AuditLog.log("binary.pull", changes={"version": resolved.version})
+            AuditLog.log("binary.pull", changes={"version": resolved_version})
 
             return OperationResult(
                 status="success",

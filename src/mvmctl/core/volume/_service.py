@@ -29,6 +29,15 @@ class VolumeService:
         self._repo = repo
         self._resolver = VolumeResolver(self._repo)
 
+    def list_all(self) -> list[VolumeItem]:
+        """Return all volumes from the database.
+
+        Returns:
+            List of all VolumeItem records.
+
+        """
+        return self._repo.list_all()
+
     def create_disk(self, volume: VolumeItem) -> VolumeItem:
         """Create a disk file and persist the volume record.
 

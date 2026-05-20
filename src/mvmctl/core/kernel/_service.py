@@ -28,7 +28,6 @@ from mvmctl.constants import (
 from mvmctl.core._shared import AssetManager
 from mvmctl.core._shared._http_dir_version_resolver import (
     HttpDirVersionResolver,
-    VersionInfo,
 )
 from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.exceptions import (
@@ -43,6 +42,7 @@ from mvmctl.models import (
     KernelItem,
     KernelPullResult,
     KernelSpec,
+    VersionInfo,
 )
 from mvmctl.utils._system import run_cmd
 from mvmctl.utils.common import CacheUtils
