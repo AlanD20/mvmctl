@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### CLI Commands (15 top-level groups, 65+ subcommands)
 - **`mvm vm`** -- Full VM lifecycle: ls, ps, create, rm, start, stop, reboot, pause, resume, snapshot, load, inspect, export, import, attach-volume, detach-volume
 - **`mvm console`** -- Interactive serial console access via PTY-over-vsock relay with --state and --kill options (attach is default)
-- **`mvm host`** -- Host configuration: init (KVM, modules, sysctl, mvm group, sudoers), ls, clean, reset
+- **`mvm host`** -- Host configuration: init (KVM, modules, sysctl, mvm group, sudoers), info, ls, clean, reset
 - **`mvm network`** -- Named bridge networks with NAT: ls, default, create, rm, inspect, sync
 - **`mvm key`** -- SSH key management: ls, add, create, rm, inspect, export, default
 - **`mvm config`** -- Runtime configuration: get, set, list, reset
@@ -35,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Input -> Request -> Resolved** pipeline for type-safe, validated VM operations
 - **Provisioning backend abstraction** (LoopMount vs Guestfs) with factory pattern
 - **SQLite database** (`db/migrations/` directory) with migration system (`001_initial_schema.sql`) for persistent state: images, kernels, binaries, volumes, networks, network_leases, vm_instances, host_state, host_state_changes, iptables_rules, nftables_rules, ssh_keys, user_settings
-- **Shared utility helpers** (`utils/`): fs, _system, http, network, crypto, template, yaml, _validators, _io, _lazy_import, progress, cli, operation_utils, auditlog, common, _disk, timinglog
+- **Shared utility helpers** (`utils/`): fs, _system, http, network, crypto, template, yaml, _validators, _io, _lazy_import, progress, cli, operation_utils, auditlog, common, _disk, timinglog, version
 - **Relation enrichment** system with batch loading to prevent N+1 queries
 - **Privilege delegation** model via `mvm` unix group and sudoers drop-in (no sudo for normal operations)
 
@@ -104,7 +104,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Ruff** -- Linting and formatting, zero-tolerance for violations
 - **Test suite** -- Unit, integration, system, and layer compliance tests
 - **uv** -- Fast Python package and project management
-- **Build scripts** (`scripts/`): build_services.py, run_tests.py, setup-test-environment.py, profile_test_memory.py, post-release.py, check_skip_ratio.py, check_skip_ratio_verify.py
+- **Build scripts** (`scripts/`): build_services.py, run_tests.py, setup-test-environment.py, profile_test_memory.py, post-release.py, check_skip_ratio.py, check_skip_ratio_verify.py, common.py, fresh_env.py
 
 #### Distribution
 - Standalone Nuitka-compiled binary (zero Python runtime dependency)

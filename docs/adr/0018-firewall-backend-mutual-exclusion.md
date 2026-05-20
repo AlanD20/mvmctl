@@ -1,6 +1,7 @@
-# Firewall Backend Mutual Exclusion — nftables vs iptables
+# 0018 — Firewall Backend Mutual Exclusion — nftables vs iptables
 
 **Status:** accepted
+**Original number:** ADR-0010 (renumbered to 0018 on collision resolution)
 
 The project provides two independent firewall rule tracking backends: **nftables** (default) and **iptables**. These backends are **mutually exclusive** — a single session uses exactly one backend, never a combination. The `firewall_backend` setting acts as a toggle selector.
 

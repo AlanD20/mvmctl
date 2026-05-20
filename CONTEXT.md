@@ -5,7 +5,7 @@ MicroVM Manager -- a speed-first CLI for managing Firecracker microVMs. Provides
 ## Language
 
 ### Domain
-A business capability with isolated logic. Each domain (vm, network, image, kernel, binary, key, host, config, cache, volume, console, logs, cloudinit, ssh) lives in `core/{domain}/`. Data-heavy domains follow the Controller / Service / Repository / Resolver pattern; simpler domains may have fewer files (e.g., `cache/` has only a Service, `ssh/` has a Service and a file-copy module, `console/` has only a Controller) -- see the domain table in the [Domain Structure](#domain) section for the exact composition of each domain. Domains do NOT import other domains.
+A business capability with isolated logic. Each domain (vm, network, image, kernel, binary, key, host, config, cache, volume, console, logs, cloudinit, ssh) lives in `core/{domain}/`. Data-heavy domains follow the Controller / Service / Repository / Resolver pattern; simpler domains may have fewer files (e.g., `cache/` has only a Service, `ssh/` has a Service and a file-copy module, `console/` has only a Controller, `host/` adds a `_detector.py` and `_helper.py`, `config/` has `_constraints.py` instead of a controller, `logs/` has controller + service, `cloudinit/` uses `_manager.py` + `_provisioner.py`). Domains do NOT import other domains.
 _Avoid_: Module, component, service (overloaded terms)
 
 ### Intra-domain orchestration
@@ -166,7 +166,7 @@ Mandatory for any domain that has public CLI commands or API endpoints. No short
 *Example: `VMInput` (raw name/id/IP/MAC) -> `VMRequest(db).resolve()` (resolves to DB records, validates) -> `ResolvedVMInput` (frozen, all fields explicit, `vms: list[VMInstanceItem]`).*
 
 ### SQLite schema overview
-13 tables in `migrations/001_initial_schema.sql` (note: the migration's description comment at line 3 incorrectly says "10 tables" — it was written before `ssh_keys`, `user_settings`, and `nftables_rules` were added): `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_leases`, `vm_instances`, `host_state`, `host_state_changes`, `iptables_rules`, `nftables_rules`, `ssh_keys`, `user_settings`. Five tables (`images`, `kernels`, `binaries`, `networks`, `ssh_keys`) have `is_default INTEGER` for default tracking. Foreign keys link VMs to assets and networks. Key constraints: `networks(name)` UNIQUE, `vm_instances(name)` UNIQUE, `ssh_keys(name)` UNIQUE, `volumes(name)` UNIQUE, `network_leases(network_id, ipv4)` UNIQUE composite. Foreign keys enabled via `PRAGMA foreign_keys = ON`.
+13 tables in `src/mvmctl/db/migrations/001_initial_schema.sql` (note: the migration's description comment at line 3 incorrectly says "10 tables" — it was written before `ssh_keys`, `user_settings`, and `nftables_rules` were added): `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_leases`, `vm_instances`, `host_state`, `host_state_changes`, `iptables_rules`, `nftables_rules`, `ssh_keys`, `user_settings`. Five tables (`images`, `kernels`, `binaries`, `networks`, `ssh_keys`) have `is_default INTEGER` for default tracking. Foreign keys link VMs to assets and networks. Key constraints: `networks(name)` UNIQUE, `vm_instances(name)` UNIQUE, `ssh_keys(name)` UNIQUE, `volumes(name)` UNIQUE, `network_leases(network_id, ipv4)` UNIQUE composite. Foreign keys enabled via `PRAGMA foreign_keys = ON`.
 
 **Portable reference fields** (used for export/import across environments -- never internal SHA256 IDs):
 - Images: `(os_slug, arch)` -- unique identifier across environments
@@ -225,7 +225,7 @@ Selection logic (in `FirewallTracker.__init__()`):
 2. If `"nftables"` → **NFTablesTracker**.
 3. Else → **IPTablesTracker**.
 
-Toggle via `mvm config set settings firewall_backend nftables|iptables`. Both DB tables (`iptables_rules`, `nftables_rules`) persist independently — at runtime, only the active backend's table is queried. The `PRIVILEGED_BINARIES` list in `constants.py` includes both `/usr/sbin/nft` and `/usr/sbin/iptables` so both backends have the right sudoers coverage. See ADR-0010 for the full architecture rationale.
+Toggle via `mvm config set settings firewall_backend nftables|iptables`. Both DB tables (`iptables_rules`, `nftables_rules`) persist independently — at runtime, only the active backend's table is queried. The `PRIVILEGED_BINARIES` list in `constants.py` includes both `/usr/sbin/nft` and `/usr/sbin/iptables` so both backends have the right sudoers coverage. See ADR-0018 for the full architecture rationale.
 
 ## Relationships
 
@@ -402,7 +402,7 @@ subprocess.run(["iptables", ...], check=True)
 
 The centralized runner provides: consistent logging (`logger.debug` of the command), privilege escalation via `sudo` prepend (when `privileged=True`), timeout enforcement, and uniform error formatting.
 
-**Documented exceptions** — `subprocess.Popen()` used directly (not via `run_cmd()`) in these five scenarios:
+**Documented exceptions** — `subprocess.Popen()` used directly (not via `run_cmd()`) in these six scenarios:
 
 | Location | Why `run_cmd()` doesn't work |
 |---|---|
@@ -411,6 +411,7 @@ The centralized runner provides: consistent logging (`logger.debug` of the comma
 | `services/nocloud_server/manager.py` (nocloud server spawn) | Detached daemon spawn — `start_new_session=True`, no stdin/stdout/stderr piping, no return value needed |
 | `core/ssh/_cp.py` (tar-pipe transfer) | Pipes two child processes together (tar + ssh) via `subprocess.PIPE` — `write()` loop in the middle reads from one and feeds the other |
 | `core/kernel/_service.py` (kernel build) | Redirects build stdout to a log file while capturing warnings from the same log — uses `subprocess.STDOUT` with a file handle |
+| `services/loopmount/process.py` (loopmount provision) | Standalone Nuitka binary — no mvmctl imports allowed, cannot use `run_cmd()`. All subprocess calls in this file |
 
 All other subprocess invocations MUST go through `run_cmd()` / `stream_cmd()`.
 

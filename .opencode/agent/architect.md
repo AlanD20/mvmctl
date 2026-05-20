@@ -748,6 +748,8 @@ FORBIDDEN: Do not touch any file outside tests/.
 
 Three-layer architecture: **CLI → API → Core**
 
+Consult `CONTEXT.md` for domain language, patterns, and conventions. Consult `docs/adr/` for Architecture Decision Records that explain hard-to-reverse decisions with real trade-offs.
+
 *(File structure evolves. Discover current layout at runtime with `ls src/mvmctl/`, `glob 'src/mvmctl/core/*/'`, `glob 'src/mvmctl/api/*_operations.py'`, etc.)*
 
 ### Key Architectural Principle: Orchestration in API
@@ -769,6 +771,8 @@ CLI  →  API (orchestrates: calls multiple domains in sequence)  →  Core (iso
 | Cross-domain workflow | `*_operations.py` | Functions importing multiple domains — lives in `api/` |
 | Shared infrastructure | None | No domain knowledge, reusable utilities |
 
+> **Note on domain file structure variance:** The canonical 4-file pattern (Controller/Service/Repository/Resolver) is the ideal, but many domains deviate for practical reasons. See CONTEXT.md for the full list. Key examples: `cloudinit/` uses manager+provisioner (no controller/service), `console/` has controller only, `logs/` has controller+service, `cache/` has service only, `ssh/` has service+cp (no controller), `host/` includes detector+helper, `config/` uses constraints instead of controller, and most domains include extra files (provisioner, lease_service, firecracker client, etc.) beyond the core four.
+
 ### Repository Pattern Rules
 
 1. **SQL-level computation** — Use `SELECT COUNT(*)`, `WHERE column IN (...)` instead of fetching all rows and filtering in Python
@@ -780,7 +784,7 @@ CLI  →  API (orchestrates: calls multiple domains in sequence)  →  Core (iso
 
 | Layer | Purpose | Rules |
 |-------|---------|-------|
-| **CLI** | Argument parsing, output formatting | Imports `api/*` only. NO DB queries. |
+| **CLI** | Argument parsing, output formatting | Primarily imports `mvmctl.api`, but also directly imports `mvmctl.models`, `mvmctl.exceptions`, `mvmctl.models.result`, `mvmctl.cli._completion`, `mvmctl.utils.cli`, and (via TYPE_CHECKING) `mvmctl.core._shared._version_resolver`. NO DB queries. |
 | **API** | Public contract, privilege checks, DB resolution, **ORCHESTRATION** | Imports `core/*` only. Queries DB when CLI passes `None`. **ONLY layer that imports multiple domains.** |
 | **Core** | Business logic, domain isolation | Imports `core/_shared/` only. Repositories use `_shared/_db.py` for DB access. NO cross-domain imports. |
 
@@ -796,7 +800,7 @@ All `__init__.py` files MUST use **lazy imports** (PEP 562 `__getattr__`) via `m
 
 | Layer | Imports from | Example |
 |-------|-------------|---------|
-| **CLI** | `mvmctl.api` (public surface) | `from mvmctl.api import VMOperation, VMCreateInput` |
+| **CLI** | `mvmctl.api` (primary), also `mvmctl.models`, `mvmctl.exceptions`, `mvmctl.models.result`, `mvmctl.cli._completion`, `mvmctl.utils.cli`, `mvmctl.core._shared._version_resolver` (via TYPE_CHECKING) | `from mvmctl.api import VMOperation, VMCreateInput` |
 | **API** | `mvmctl.api.inputs` (public input surface) | `from mvmctl.api.inputs import VMCreateInput, VMCreateRequest` |
 | **API** | `mvmctl.core.{domain}` (public domain surface) | `from mvmctl.core.vm import VMController, VMRepository` |
 | **API** | `mvmctl.core._shared` (public infrastructure) | `from mvmctl.core._shared import Database` |
@@ -955,6 +959,7 @@ The project uses `scripts/build_services.py` to compile standalone binaries via 
 python scripts/build_services.py                    # Build everything (default)
 python scripts/build_services.py --services         # Build all service binaries only
 python scripts/build_services.py --service <name>   # Build a specific service (e.g. mvm-console-relay)
+python scripts/build_services.py --release          # Use clean version from pyproject.toml (no git SHA suffix)
 ```
 
 ### Key architectural decisions

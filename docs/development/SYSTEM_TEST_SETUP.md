@@ -110,10 +110,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # Sync project dependencies
 uv sync --group dev --group build
 
-# Build the mvm-services binary (required for VM provisioning)
-python scripts/build_services.py
-
-# Build the onefile mvm binary (required for host clean/reset tests)
+# Build the mvm-services binary and the onefile mvm binary (required for host clean/reset tests)
 python scripts/build_services.py
 cp dist/mvm ~/.local/bin/mvm
 ```

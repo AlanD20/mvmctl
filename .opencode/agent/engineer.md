@@ -131,7 +131,12 @@ Core (isolated domain logic + shared infrastructure)
 
 ```
 src/mvmctl/
+├── __init__.py       # Package init (lazy imports)
+├── __pyinstaller/    # PyInstaller hooks (fallback only — Nuitka is the build tool)
 ├── main.py           # LazyMVMGroup (click.Group) — lazy-loads sub-apps
+├── constants.py      # Shared constants and defaults
+├── exceptions.py     # MVMError exception hierarchy
+├── py.typed          # PEP 561 marker for typed package
 ├── cli/              # Typer commands — arg parsing, output formatting, default resolution
 ├── api/              # PUBLIC INTERFACE — orchestration across multiple domains
 │   ├── {domain}_operations.py    # Operation classes (static methods)
@@ -162,7 +167,7 @@ src/mvmctl/
 
 ### The Four Standard Files
 
-Every domain has up to four files following this pattern:
+Every domain has up to four files following this pattern (note: many domains deviate — see below for examples):
 
 ```
 core/{domain}/
@@ -253,6 +258,23 @@ class VMResolver:
 - ALL methods call `self._enrich()` before returning when relations are configured.
 - No DB queries directly — delegates to Repository.
 
+### Domain File Structure Variance
+
+The canonical 4-file pattern (Controller/Service/Repository/Resolver) is the ideal, but many domains deviate for practical reasons:
+
+| Domain | Files | Notes |
+|--------|-------|-------|
+| `cloudinit/` | `_manager.py`, `_provisioner.py` | Uses manager+provisioner — no controller/service |
+| `console/` | `_controller.py` | Controller only |
+| `logs/` | `_controller.py`, `_service.py` | Controller+service, no repository |
+| `cache/` | `_service.py` | Service only |
+| `ssh/` | `_service.py`, `_cp.py` | Service+cp (file copy), no controller |
+| `host/` | `_controller.py`, `_detector.py`, `_helper.py`, `_service.py`, `_repository.py` | Includes detector+helper |
+| `config/` | `_constraints.py`, `_service.py`, `_repository.py` | Constraints instead of controller |
+| `image/` | `_controller.py`, `_service.py`, `_repository.py`, `_resolver.py`, `_provisioner.py`, `_version_resolver.py` | Extra provisioner+version resolver |
+| `network/` | `_controller.py`, `_service.py`, `_repository.py`, `_resolver.py`, `_lease_service.py`, `_lease_resolver.py` | Extra lease subdomain files |
+| `vm/` | `_controller.py`, `_service.py`, `_repository.py`, `_resolver.py`, `_firecracker.py`, `_provisioner.py` | Extra firecracker client+provisioner |
+
 ### Operation (API layer) — Cross-domain orchestration
 
 The ONLY place where multiple domains are imported and sequenced:
@@ -280,7 +302,7 @@ class NetworkOperation:
 
 | Layer | Imports from | Example |
 |-------|-------------|---------|
-| **CLI** | `mvmctl.api` (public surface) | `from mvmctl.api import VMOperation, VMCreateInput` |
+| **CLI** | `mvmctl.api` (primary), also `mvmctl.models`, `mvmctl.exceptions`, `mvmctl.models.result`, `mvmctl.cli._completion`, `mvmctl.utils.cli`, `mvmctl.core._shared._version_resolver` (via TYPE_CHECKING) | `from mvmctl.api import VMOperation, VMCreateInput` |
 | **API** | `mvmctl.api.inputs` (public input surface) | `from mvmctl.api.inputs import VMCreateInput, VMCreateRequest` |
 | **API** | `mvmctl.core.{domain}` (public domain surface) | `from mvmctl.core.vm import VMController, VMRepository` |
 | **API** | `mvmctl.core._shared` (public infrastructure surface) | `from mvmctl.core._shared import Database` |
@@ -529,9 +551,9 @@ subprocess.run(["iptables", ...], check=True)  # NEVER
 
 The centralized runner (`run_cmd`) provides: consistent logging of every command, privilege escalation via `require_mvm_group_membership()` + sudo prepending on the ``privileged=True`` flag, timeout enforcement, and uniform error handling.
 
-### EXCEPTION — subprocess.Popen with pass_fds
+### EXCEPTION — subprocess.Popen with pass_fds (six locations)
 
-There are several legitimate exceptions to the "no raw subprocess" rule. The `run_cmd()` / `stream_cmd()` helpers do not support `pass_fds`, piping between two processes, or real-time log streaming. The known locations that use `subprocess.Popen()` directly are:
+There are six legitimate exceptions to the "no raw subprocess" rule. The `run_cmd()` / `stream_cmd()` helpers do not support `pass_fds`, piping between two processes, or real-time log streaming. The known locations that use `subprocess.Popen()` directly are:
 
 1. **`services/console_relay/manager.py`** — Console relay spawn; needs `pass_fds=[pty_controller_fd]` to pass a PTY fd to the child process.
 2. **`core/vm/_firecracker.py`** — Firecracker VM spawn; needs `pass_fds` (serial output, log fds) and `start_new_session=True`.
@@ -622,6 +644,8 @@ The project uses Nuitka to compile standalone binaries:
 - **mvm binary** — Main CLI (includes entire `mvmctl` package).
 - **mvm-services binary** — Multidist binary (console relay, nocloud server, loopmount provisioner via symlink dispatch).
 
+Both `scripts/build_services.py` and `scripts/run_tests.py` import shared infrastructure from `scripts/common.py` (ANSI color codes, path constants, output helpers, timers, etc.).
+
 If you add a dependency that uses **dynamic imports** (plugin systems, registry patterns like `passlib.handlers.*`), inform the user — it may need `--include-module` in `scripts/build_services.py` to prevent tree-shaking.
 
 Build commands:
@@ -629,9 +653,10 @@ Build commands:
 python scripts/build_services.py                    # Build everything (default)
 python scripts/build_services.py --services         # Build all service binaries only
 python scripts/build_services.py --service <name>   # Build a specific service
+python scripts/build_services.py --release          # Use clean version from pyproject.toml (no git SHA suffix)
 ```
 
-The flags control **what** to build (services, mvm, or both), not **how** — the build script always uses the same release-quality settings (LTO, anti-bloat, deployment mode) regardless of which flags are passed.
+The `--release` flag controls version string behavior: without it, the build appends `+git.<short-sha>` to the pyproject.toml version; with it, the clean version is used. Otherwise, the flags control **what** to build (services, mvm, or both), not **how** — the build script always uses the same release-quality settings (LTO, anti-bloat, deployment mode) regardless of which flags are passed.
 
 ---
 

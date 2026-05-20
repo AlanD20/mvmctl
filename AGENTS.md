@@ -81,7 +81,7 @@ Key points:
 - Core domains NEVER import from other core domains. Only `_shared` is allowed.
 - Controller = state management per entity (start/stop/pause/resume). No remove(), no create().
 - Service does NOT validate caller input. Caller validates, receiver trusts.
-- ALL subprocess calls through `run_cmd()` / `stream_cmd()` — no raw `subprocess.run()`. Documented exceptions (see CONTEXT.md "Subprocess invocation" section for full list): console relay (subprocess.Popen with pass_fds), Firecracker spawn (pass_fds), kernel build (subprocess.STDOUT to log file), tar-pipe in cp (two-child pipe chain), and nocloud server spawn (detached daemon).
+- ALL subprocess calls through `run_cmd()` / `stream_cmd()` — no raw `subprocess.run()`. Documented exceptions (see CONTEXT.md "Subprocess invocation" section for full list): console relay (subprocess.Popen with pass_fds), Firecracker spawn (pass_fds), kernel build (subprocess.STDOUT to log file), tar-pipe in cp (two-child pipe chain), nocloud server spawn (detached daemon), and services/loopmount/process.py (standalone Nuitka binary — no mvmctl imports allowed, all subprocess calls go through subprocess.run()/Popen() directly).
 - Lazy imports (PEP 562) in ALL `__init__.py` — no eager imports.
 - `from __future__ import annotations` in every `.py` file under `src/mvmctl/`.
 - The API layer is the SOLE orchestrator of multiple core domains.

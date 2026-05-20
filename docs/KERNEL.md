@@ -127,6 +127,7 @@ mvm kernel pull --type official --features kvm,nftables
 Supported feature names:
 - `kvm` — Enable KVM paravirtualization options (required for Firecracker)
 - `nftables` — Enable nftables kernel support (required for nftables firewall backend)
+- `tuntap` — Enable TUN/TAP networking support (required for Firecracker network connectivity)
 
 The `--type firecracker` kernel automatically includes the `kvm` feature when the VM has nested virtualization enabled.
 

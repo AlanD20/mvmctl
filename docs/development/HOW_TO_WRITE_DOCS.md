@@ -51,7 +51,7 @@ Spawn multiple subagent instances (e.g., using the task system) for parallel exp
 |----------|-------|
 | Explore 1 | Root docs (CONTEXT.md, AGENTS.md, README.md, CHANGELOG.md) |
 | Explore 2 | `docs/` folder (PROJECT_ARCHITECTURE.md, API.md, REFERENCES.md, TROUBLESHOOTING.md, RUNTIME.md, DEPENDENCIES.md, ASSETS_CONFIGURATIONS.md, KERNEL.md, RELEASE.md) |
-| Explore 3 | ADR docs (all docs/adr/ files — currently 0001 through 0015) |
+| Explore 3 | ADR docs (all docs/adr/ files — currently 0001 through 0018, plus superseded 0000) |
 | Explore 4 | Improvement, implementation, development, and optimization docs |
 | Explore 5 | Agent instruction files (`.opencode/agent/*.md`) |
 | Explore 6 | Public site (`mvmctl.com`) — the path is dynamic; ask the user or use the path they provide |

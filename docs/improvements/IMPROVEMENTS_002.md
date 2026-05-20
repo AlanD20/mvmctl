@@ -12,7 +12,7 @@
 ## Implementation Reviews
 
 - [ ] The `mvm config set|get` must modify values coming from constants.py file! any constants defined in the constants.py file, their value can be override by using `mvm config set|get <config_key>` where <config_key> is the variable defined in constants.py but in lowercase. These overrides are done in $MVM_CONFIG_DIR/config.json
-    - **🔶 PARTIAL** — `ConfigOperation` class exists. Commands exist and modify `OVERRIDABLE_DEFAULTS` (~25 settings). **UPDATED:** Stored in SQLite (via `SettingsService` + `SettingsRepository`), NOT config.json. Only `OVERRIDABLE_DEFAULTS` subset, not ALL constants.
+    - **🔶 PARTIAL** — `ConfigOperation` class exists. Commands exist and modify `OVERRIDABLE_DEFAULTS` (49 settings). **UPDATED:** Stored in SQLite (via `SettingsService` + `SettingsRepository`), NOT config.json. Only `OVERRIDABLE_DEFAULTS` subset, not ALL constants.
 
 ## Core
 

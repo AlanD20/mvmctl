@@ -59,7 +59,7 @@ All per-domain tree builders (`_print_vm_inspect_tree`, `_print_network_details_
 
 ### 5. Marker column in listing tables
 
-`get_combined_marker()` is deleted. Tables now have a narrow column at position 0 with an empty header. Content is `mvm_cli.format_marker(is_default)` — `*` or empty. Missing resources show in red via `mvm_cli.format_name(name, is_missing)` which returns `[red]{name}[/]` markup.
+`_get_combined_marker()` was removed from `utils/common.py` (zero callers remaining), replaced by `MVMCli.format_marker()`. Tables now have a narrow column at position 0 with an empty header. Content is `mvm_cli.format_marker(is_default)` — `*` or empty. Missing resources show in red via `mvm_cli.format_name(name, is_missing)` which returns `[red]{name}[/]` markup.
 
 ### 6. Consistent timestamp formatting
 

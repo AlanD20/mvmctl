@@ -141,6 +141,10 @@ tests, and get zero failures with every test verifying ACTUAL business logic. Sp
 ALL system tests verify actual system state at the most thorough practical level.
 A test is INCOMPLETE if any of these paths exist but are not taken:
 
+**Note:** Tests are black-box — they verify the mvm CLI from the outside. All subprocess
+calls use raw `subprocess.run()`, never imports from `mvmctl.utils`. The mvm binary is the
+only interface.
+
 1. **JSON state verification** — After any mutation (create, update, delete), parse
    `* ls --json` or `* inspect --json` and assert specific field values. Returncode-only
    assertions are NEVER acceptable for system tests.
@@ -155,7 +159,7 @@ A test is INCOMPLETE if any of these paths exist but are not taken:
 
 4. **iptables verification** — If the operation modifies network state (network create,
    network rm, network sync), verify iptables rules contain or lack the expected bridge/TAP.
-   Use `run_cmd(["iptables", "-L", ...], privileged=True)` from ``mvmctl.utils._system``.
+   Use `subprocess.run(["iptables", "-L", ...], capture_output=True, text=True)` — raw subprocess, no imports from mvmctl utils.
 
 5. **DB-level verification** — If the operation modifies the database (create/remove
    resource, change defaults, update status), open `~/.cache/mvmctl/mvmdb.db` directly

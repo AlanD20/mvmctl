@@ -65,6 +65,10 @@ from mvmctl.api import (
     LogOperation,
     VolumeOperation,
     CPOperation,
+    # Version types
+    VersionError,
+    VersionInfo,
+    VersionResolver,
     # Input classes
     VMCreateInput,
     VMInput,
@@ -363,6 +367,17 @@ Firewall rule record — used by both iptables and nftables backends.
 | `created_at` | `str \| None` | ISO 8601 creation timestamp |
 | `last_verified_at` | `str \| None` | ISO 8601 last verified timestamp |
 
+#### `FirewallRuleResult`
+
+Result of a firewall rule operation — used by both iptables and nftables trackers.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `success` | `bool` | Whether the rule operation succeeded |
+| `rule` | `FirewallRule \| None` | The firewall rule that was operated on |
+| `error_message` | `str \| None` | Error message if the operation failed |
+| `command_executed` | `str \| None` | The iptables/nftables command that was executed |
+
 ### `mvmctl.models.image`
 
 #### `ImageItem`
@@ -408,6 +423,21 @@ Specification for downloading a VM rootfs image, loaded from bundled YAML.
 | `sha256_url` | `str \| None` | URL to SHA256 checksum file |
 | `list_url_template` | `str \| None` | URL template for listing available versions |
 | `size` | `int \| None` | Raw image size in bytes (remote listing) |
+
+#### `ImageVersion`
+
+A published version of an image type from an upstream provider.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `version` | `str` | Version string (e.g. `"24.04"`) |
+| `codename` | `str \| None` | Release codename (e.g. `"noble"`) |
+| `type` | `str` | Image type identifier (e.g. `ubuntu`) |
+| `download_url` | `str` | Download URL for this version |
+| `sha256_url` | `str \| None` | URL to SHA256 checksum file |
+| `format` | `str` | Source format (`"qcow2"`, `"tar-rootfs"`, or `"raw"`) |
+| `display_name` | `str` | Human-readable display name |
+| `type_name` | `str` | Image type name |
 
 ### `mvmctl.models.kernel`
 
@@ -471,6 +501,16 @@ Specification for building or fetching a kernel, loaded from bundled YAML.
 | `file_pattern` | `str \| None` | Filename prefix pattern for matching tarball entries |
 | `file_suffix` | `str \| None` | Filename suffix for matching tarball entries |
 
+#### `KernelFeature`
+
+A named feature group of kernel config options, loaded from kernels.yaml.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `desc` | `str` | Human-readable feature description |
+| `configs` | `list[str]` | Kernel config options to enable for this feature |
+| `requires` | `list[str]` | Required kernel config settings that must also be enabled |
+
 ### `mvmctl.models.binary`
 
 #### `BinaryItem`
@@ -510,6 +550,80 @@ SSH key record — maps to the `ssh_keys` table.
 | `created_at` | `str` | ISO 8601 creation timestamp |
 | `updated_at` | `str` | ISO 8601 update timestamp |
 | `private_key_path` | `str \| None` | Path to the private key file |
+
+### `mvmctl.models.firecracker`
+
+#### `CpuConfig`
+
+Firecracker CPU configuration — maps to `PUT /cpu-config`. All fields are optional.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `kvm_capabilities` | `list[str]` | KVM capability codes (e.g. `["56", "171"]`) |
+| `cpuid_modifiers` | `list[CpuidLeafModifier]` | CPUID leaf modifiers (x86_64 only) |
+| `msr_modifiers` | `list[MsrModifier]` | MSR register modifiers (x86_64 only) |
+| `reg_modifiers` | `list[ArmRegisterModifier]` | ARM register modifiers (aarch64 only) |
+| `vcpu_features` | `list[VcpuFeatures]` | vCPU feature modifiers (aarch64 only) |
+
+#### `DriveConfig`
+
+Firecracker drive configuration — maps to `PUT /drives`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `drive_id` | `str` | Drive identifier |
+| `path_on_host` | `str` | Path to the drive file on the host |
+| `is_root_device` | `bool` | Whether this is the root device |
+| `is_read_only` | `bool` | Whether the drive is read-only |
+| `partuuid` | `str \| None` | Partition UUID |
+| `cache_type` | `str` | Cache type |
+| `io_engine` | `str` | I/O engine |
+| `rate_limiter` | `object \| None` | Rate limiter configuration |
+| `socket` | `str \| None` | vsock socket path |
+
+#### `FirecrackerConfig`
+
+Explicit configuration for spawning a Firecracker VM. All values are resolved by the API layer before passing to the spawner.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `vm_dir` | `Path` | VM working directory |
+| `rootfs_path` | `Path` | Path to rootfs image |
+| `binary_path` | `str` | Path to Firecracker binary |
+| `kernel_path` | `str` | Path to kernel vmlinux |
+| `vcpu_count` | `int` | Number of vCPUs |
+| `mem_size_mib` | `int` | Memory in MiB |
+| `guest_ip` | `str` | Assigned guest IP address |
+| `guest_mac` | `str` | Assigned guest MAC address |
+| `tap_name` | `str` | Host TAP interface name |
+| `network_gateway` | `str` | Network gateway IP |
+| `network_netmask` | `str` | Network netmask |
+| `image_fs_uuid` | `str \| None` | Image filesystem UUID |
+| `image_fs_type` | `str` | Image filesystem type |
+| `boot_args` | `str \| None` | Override kernel boot arguments |
+| `lsm_flags` | `str \| None` | Linux Security Module flags |
+| `pci_enabled` | `bool` | PCI device support enabled |
+| `nested_virt` | `bool` | Nested virtualization enabled |
+| `enable_console` | `bool` | Serial console enabled |
+| `enable_logging` | `bool` | Logging enabled |
+| `enable_metrics` | `bool` | Metrics enabled |
+| `log_level` | `str` | Firecracker log level |
+| `log_filename` | `str` | Log filename |
+| `serial_output_filename` | `str` | Serial output filename |
+| `metrics_filename` | `str` | Metrics filename |
+| `api_socket_filename` | `str` | API socket filename |
+| `pid_filename` | `str` | PID filename |
+| `config_filename` | `str` | Config filename |
+| `cloud_init_mode` | `CloudInitMode \| None` | Cloud-init mode |
+| `cloud_init_iso_path` | `Path \| None` | Path to cloud-init ISO |
+| `cloud_init_nocloud_url` | `str \| None` | URL for nocloud-net datasource |
+| `cpu_config` | `CpuConfig \| None` | CPU template configuration |
+| `cpu_vendor` | `str \| None` | CPU vendor |
+| `cpu_architecture` | `str \| None` | CPU architecture |
+| `extra_drives` | `list[DriveConfig]` | Extra drives (volumes) |
+| `relay_enabled` | `bool` | Console relay enabled |
+| `relay_client_fd` | `int \| None` | Console relay client file descriptor |
+| `snapshot_mode` | `bool` | Whether running in snapshot restore mode |
 
 ### `mvmctl.models.host`
 
@@ -562,6 +676,51 @@ A single change applied during `host init`.
 | `reverted_at` | `str \| None` | ISO 8601 reversion timestamp |
 | `revert_mechanism` | `str \| None` | How the change was reverted |
 
+#### `HostHardware`
+
+Detected host hardware capabilities.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `hostname` | `str` | System hostname |
+| `cpu_model` | `str` | CPU model name |
+| `cpu_vendor` | `str` | CPU vendor (e.g. `GenuineIntel`) |
+| `cpu_cores` | `int` | Total CPU cores |
+| `cpu_architecture` | `str` | CPU architecture (e.g. `x86_64`) |
+| `numa_nodes` | `int` | Number of NUMA nodes |
+| `memory_total_mib` | `int` | Total memory in MiB |
+| `storage_total_bytes` | `int` | Total storage in bytes |
+| `kernel_version` | `str` | Kernel version string |
+| `os_release` | `str` | OS release identifier |
+
+#### `HostLimits`
+
+Detected host kernel limits.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `pid_max` | `int` | Maximum PID limit |
+| `fd_max` | `int` | Maximum file descriptor limit |
+| `conntrack_max` | `int` | Maximum conntrack entries |
+| `tap_devices_max` | `int` | Maximum TAP devices |
+| `ip_local_port_range` | `tuple[int, int]` | IP local port range (e.g. `(32768, 60999)`) |
+
+#### `HostResources`
+
+Current host resource usage and capacity projection.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `memory_available_mib` | `int` | Available memory in MiB |
+| `tap_devices_used` | `int` | Number of TAP devices currently in use |
+| `pids_current` | `int` | Current number of PIDs |
+| `fd_current` | `int` | Current number of file descriptors |
+| `conntrack_current` | `int` | Current conntrack entries |
+| `arp_current` | `int` | Current ARP table entries |
+| `storage_free_bytes` | `int` | Free storage in bytes |
+| `recommended_max_vms` | `int` | Recommended maximum number of VMs |
+| `limiting_resource` | `str \| None` | Name of the resource that limits VM capacity |
+
 ### `mvmctl.models.volume`
 
 #### `VolumeItem`
@@ -580,6 +739,54 @@ Persistent data disk attachable to VMs — maps to the `volumes` table.
 | `created_at` | `str` | ISO 8601 creation timestamp |
 | `updated_at` | `str` | ISO 8601 update timestamp |
 | `is_read_only` | `bool` | Whether the volume is mounted read-only |
+
+### `mvmctl.models.bulk`
+
+#### `BulkResult`
+
+Aggregated results of a bulk operation on multiple items.
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `items` | `list[BulkResultItem[T]]` | Per-item results |
+| `successes` | `list[T]` | Items that succeeded (property) |
+| `failures` | `list[tuple[T, Exception]]` | Items that failed with exception (property) |
+| `has_errors` | `bool` | Whether any item failed (property) |
+| `success_count` | `int` | Count of successful items (property) |
+| `failure_count` | `int` | Count of failed items (property) |
+| `total` | `int` | Total number of items (property) |
+
+#### `BulkResultItem`
+
+Result of a single item in a bulk operation.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `item` | `T` | The domain object |
+| `error` | `Exception \| None` | Error if the operation failed on this item |
+| `success` | `bool` | Whether this item succeeded (property) |
+
+### `mvmctl.models.cache`
+
+#### `PruneAllResult`
+
+Result of a full cache prune operation across all resource types.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `pruned_ids` | `list[str]` | All identifiers that were successfully pruned |
+| `failed_ids` | `list[str]` | All identifiers that failed to prune |
+| `had_running_vms` | `bool` | Whether any running or starting VMs were present during pruning |
+
+#### `CleanResult`
+
+Result of a complete cache clean operation.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `prune_result` | `PruneAllResult` | Result of the prune_all step |
+| `cache_dir_removed` | `bool` | Whether the cache directory itself was removed |
+| `cache_dir` | `str` | Path to the cache directory that was removed |
 
 ---
 
@@ -1036,14 +1243,6 @@ Convert a list of NetworkItem records to JSON-serializable dicts.
 
 ---
 
-#### `NetworkOperation.restore() -> OperationResult[list[str]]`
-
-Restore all networks from DB after reboot (re-create bridges and NAT rules).
-
-**Returns:** List of status messages for each restored network.
-
----
-
 #### `NetworkOperation.sync(network_id: str | None = None) -> OperationResult[dict[str, dict[str, int]]]`
 
 Sync networks: first reconciles bridge state (DB vs kernel), then ensures all
@@ -1358,6 +1557,7 @@ Download a specific Firecracker/jailer binary version from GitHub releases.
 | `inputs.version` | `str` | — | Semantic version string, e.g. `"1.15.0"` |
 | `inputs.set_default` | `bool` | `False` | Set as default after download |
 | `inputs.download_override` | `bool` | `True` | Re-download even if cached |
+| `inputs.git_ref` | `str \| None` | `None` | Build from a specific git branch/tag/commit |
 
 **Returns:** `OperationResult[list[BinaryItem]]` wrapping the downloaded binaries, or `NeedsInteraction` if sudo is required.
 

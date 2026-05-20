@@ -277,8 +277,7 @@ Every scenario includes:
 | `vm create` with custom `--ip` | ipv4 matches | L2 | No | Yes |
 | `vm create` with custom `--mac` | mac matches | L2 | No | Yes |
 | `vm create` with `--no-console` | enable_console=false | L2 | No | Yes |
-| `vm create` with `--enable-pci` | enable_pci=true | L2 | No | Yes |
-| `vm create` with `--no-enable-pci` | enable_pci=false | L2 | No | Yes |
+| `vm create` with `--no-pci` | pci_enabled=false | L2 | No | Yes |
 | `vm create` with `--enable-logging` | Log file exists on disk | L3 | No | Yes |
 | `vm create` with `--no-enable-logging` | VM runs (succeeds) | L2 | No | Yes |
 | `vm create` with `--enable-metrics` | Metrics file exists on disk | L3 | No | Yes |

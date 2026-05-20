@@ -183,7 +183,7 @@ VM lifecycle management.
 | `--cloud-init-mode MODE` | `inject`, `iso`, `net`, `off` | `off` (no cloud-init) |
 | `--nocloud-net-port N` | Port for nocloud-net HTTP server (0=auto) | auto-assign |
 | `--user-data PATH` | Path to custom cloud-init user-data file | --- |
-| `--enable-pci/--no-enable-pci` | Enable PCI device support | from config |
+| `--no-pci` | Disable PCI device support (opt-out) | from config |
 | `--nested-virt/--no-nested-virt` | Enable nested virtualization (requires PCI) | from config |
 | `--cpu-template PATH` | Path to CPU template JSON file (merged with nested-virt config) | --- |
 | `--enable-logging/--no-enable-logging` | Enable Firecracker logging | from config |

@@ -1,6 +1,6 @@
 # Network Sync Atomicity — Zero-Downtime Firewall Rule Replacement
 
-> **STATUS: Current — corrected.** The iptables backend description was updated to reflect that `IPTablesTracker.batch_ensure_rules()` uses `iptables-restore` for atomic batch per table (not per-rule individual calls). All mechanisms described below are implemented in `src/mvmctl/`. The nftables backend is the default (`settings.firewall_backend: "nftables"`); iptables is the legacy fallback. See also [ADR-0010] (firewall backend mutual exclusion) and the `CONTEXT.md` firewall backend section.
+> **STATUS: Current — corrected.** The iptables backend description was updated to reflect that `IPTablesTracker.batch_ensure_rules()` uses `iptables-restore` for atomic batch per table (not per-rule individual calls). All mechanisms described below are implemented in `src/mvmctl/`. The nftables backend is the default (`settings.firewall_backend: "nftables"`); iptables is the legacy fallback. See also [ADR-0018] (firewall backend mutual exclusion) and the `CONTEXT.md` firewall backend section.
 >
 > **Line numbers** in code references below match the current files at commit time.
 
@@ -200,7 +200,7 @@ Both backends now use atomic batch operations and have comparable subprocess cal
 
 ## Related Documents
 
-- **ADR-0010** — Firewall backend mutual exclusion (iptables vs nftables).
+- **ADR-0018** — Firewall backend mutual exclusion (iptables vs nftables).
 - **CONTEXT.md** — Firewall backend section, domain language, chain naming.
 - **`next-level-optimizations.md` section 4.3** — Original nftables migration design.
 - **`src/mvmctl/core/_shared/_firewall_tracker.py`** — Unified tracker abstraction.

@@ -46,7 +46,7 @@ mvm ssh myvm
   sudo usermod -aG kvm $USER
   # Log out and back in
   ```
-- **Python 3.13+**
+- **Python 3.13+** (required for pip/pipx/source installs only — the prebuilt binary has no Python runtime dependency)
 - **System packages:**
 
   Ubuntu/Debian:
@@ -102,12 +102,18 @@ uv run mvm --help
 
 ## Quick Start
 
-The easiest way to get started is with the interactive setup wizard. `mvm init` handles everything: host configuration, binary downloads, and cache setup. System packages must still be installed separately (see [Prerequisites](#prerequisites) above):
+The easiest way to get started is with the interactive setup wizard. `mvm init` handles host configuration, service binary extraction, and cache setup. System packages must still be installed separately (see [Prerequisites](#prerequisites) above). After that, download a kernel and OS image, create an SSH key, and create your first VM:
 
 ```bash
 # Interactive setup -- guides you through everything
 # Handles privilege escalation automatically when prompted
 mvm init
+
+# Download the Firecracker kernel
+mvm kernel pull --type firecracker
+
+# Download an OS image
+mvm image pull ubuntu:24.04
 
 # Create a key and set it as default in one step
 mvm key create test --default
@@ -138,13 +144,15 @@ mvm vm rm myvm
 ### VM Lifecycle
 
 ```bash
-mvm vm create myvm --image ubuntu:24.04       # Create and start a VM
-mvm vm create cluster --count 3 --atomic      # Batch-create 3 VMs
+mvm vm create myvm --image ubuntu:24.04                 # Create and start a VM
+mvm vm create myvm --image ubuntu:24.04 --nested-virt --cpu-template ./t2.json --volume data  # VM with nested virt, CPU template, and volume
+mvm vm create myvm --image ubuntu:24.04 --skip-deblob --skip-cleanup  # VM with debug flags (skip optimization / cleanup on failure)
+mvm vm create cluster --count 3 --atomic                # Batch-create 3 VMs
 mvm vm ls                                     # List all VMs
 mvm vm ps                                     # List running VMs (active processes)
 mvm ssh myvm                                  # SSH into a VM
 mvm console myvm                              # Console access (no SSH)
-mvm cp ./file.txt my-vm:/root/                # Copy files to/from a VM
+mvm cp ./file.txt myvm:/root/                 # Copy files to/from a VM
 mvm vm rm myvm -f                             # Remove a VM
 ```
 
@@ -157,25 +165,47 @@ mvm network ls                                    # List all networks
 mvm network create my-net --subnet 192.168.100.0/24  # Create a named network
 mvm network rm my-net                             # Remove a network
 mvm network default my-net                        # Set as default for VM creation
+mvm network inspect my-net                        # Inspect network details
 ```
 
 ### Resource Management
 
 ```bash
-mvm volume create data 10G          # Create persistent data disk
-mvm volume ls                       # List volumes
-mvm image pull ubuntu:24.04        # Download an OS image
-mvm image ls                       # List available images
-mvm kernel pull --type firecracker  # Download Firecracker kernel
-mvm bin pull firecracker --version 1.15.0  # Download Firecracker + jailer binaries
-mvm key create mykey --default      # Generate SSH key
+mvm volume create data 10G                   # Create persistent data disk
+mvm volume create data 10G --read-only       # Create read-only persistent data disk
+mvm volume ls                                # List volumes
+mvm volume inspect data                      # Inspect volume details
+mvm volume resize data 20G                   # Resize a volume
+mvm image pull ubuntu:24.04                 # Download an OS image
+mvm image ls                                # List available images
+mvm image inspect ubuntu:24.04              # Inspect image details
+mvm image import ./myimage.qcow2            # Import local image file
+mvm image warm ubuntu:24.04                 # Pre-decompress image to ready pool
+mvm kernel pull --type firecracker           # Download Firecracker kernel
+mvm kernel pull official:6.19.9 --features kvm,nftables --config ./my-fragment.config  # Build official kernel with features
+mvm kernel pull official:6.19.9 --jobs 4 --keep-build-dir --clean-build  # Official kernel build with parallel jobs
+mvm kernel inspect <kernel>                  # Inspect kernel details
+mvm kernel import ./vmlinux                  # Register a vmlinux file
+mvm bin pull firecracker --version 1.15.0               # Download Firecracker + jailer binaries
+mvm bin pull firecracker --git-ref my-branch             # Build from source at a git ref
+mvm bin default firecracker                              # Set default binary
+mvm key create mykey --default              # Generate SSH key
+mvm key add mykey ./id_ed25519.pub          # Add existing public key
+mvm key inspect mykey                       # Inspect key details
+mvm key export mykey ./backup               # Export keypair to directory
 ```
 
 ### System Setup
 
 ```bash
 mvm host init    # One-time host setup (KVM, networking)
+mvm host info    # Show host hardware, limits, VM capacity projection
+mvm host ls      # Show current host configuration state
+mvm host clean   # Remove networking config
+mvm host reset   # Full rollback of all host changes
+mvm cache init   # Initialize all cache resources
 mvm cache prune  # Clean up stale cache
+mvm cache clean  # Nuclear option for cache cleanup
 ```
 
 ### Configuration
@@ -203,7 +233,9 @@ Comprehensive documentation is available in the `docs/` directory:
 | [docs/KERNEL.md](docs/KERNEL.md) | Building kernels for Firecracker (CI and official) |
 | [docs/RELEASE.md](docs/RELEASE.md) | Release process and distribution packages |
 | [docs/API.md](docs/API.md) | Python API reference for programmatic usage |
-
+| [docs/ASSETS_CONFIGURATIONS.md](docs/ASSETS_CONFIGURATIONS.md) | Bundled asset configurations: image specs, kernel specs, and runtime defaults |
+| [docs/PROJECT_ARCHITECTURE.md](docs/PROJECT_ARCHITECTURE.md) | Internal architecture: layers, domains, patterns, and conventions |
+| [docs/RUNTIME.md](docs/RUNTIME.md) | Runtime internals: provisioning backends, service architecture, and firewall backend |
 ---
 
 ## Building from Source

@@ -192,7 +192,7 @@ mvm config reset defaults.vm boot_args
 **4. Socket path too long.** Firecracker uses Unix domain sockets which have a 108-character path limit. Long VM names or deep cache directories can exceed this. Check:
 ```bash
 # See the VM's socket path
-ls -la ~/.cache/mvmctl/vms/*/run/
+ls -la ~/.cache/mvmctl/vms/*/firecracker.api.socket
 # If it looks very long, try a shorter VM name
 ```
 
