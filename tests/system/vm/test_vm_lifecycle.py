@@ -915,21 +915,33 @@ class TestVMListInspect:
         assert running[0].get("status") in ("starting", "running")
 
     def test_ps_json(self, mvm_binary, module_vm):
-        # Rationale: Uses module_vm fixture for read-only inspection. Verifies ls --json produces valid JSON with expected fields for each VM. A regression where ls drops fields or produces malformed JSON would break automation scripts.
-        """Verify VM list via ls --json (ps --json is not available on CLI)."""
-        result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+        # Rationale: Uses module_vm fixture for read-only inspection. Verifies ps --json produces valid JSON with expected fields for each running VM. A regression where ps --json returns empty or malformed output would break automation scripts.
+        """vm ps --json returns running VMs with name, status, pid fields."""
+        result = _run_mvm(mvm_binary, "vm", "ps", "--json")
         assert result.returncode == 0
         entries = json.loads(result.stdout)
         assert isinstance(entries, list), (
             f"Expected list, got {type(entries).__name__}"
         )
         assert len(entries) > 0, (
-            "Expected at least one entry in ls --json output"
+            "Expected at least one entry in ps --json output"
         )
+        # Verify the module VM appears in the running process list
+        running_names = [e.get("name") for e in entries]
+        assert module_vm["name"] in running_names, (
+            f"Module VM '{module_vm['name']}' not found in ps --json: "
+            f"{running_names}"
+        )
+        # Verify key fields on each entry
         for entry in entries:
             assert "name" in entry, f"Missing 'name' in entry: {entry}"
             assert "status" in entry, f"Missing 'status' in entry: {entry}"
             assert "pid" in entry, f"Missing 'pid' in entry: {entry}"
+            # Verify pid is a positive integer for running VMs
+            if entry.get("status") in ("running", "starting"):
+                assert isinstance(entry["pid"], int) and entry["pid"] > 0, (
+                    f"Expected positive PID for running VM, got: {entry}"
+                )
 
     def test_list_empty_nonexistent_name(self, mvm_binary):
         # Rationale: CLI-level validation — no real VM created. Verifies error handling.

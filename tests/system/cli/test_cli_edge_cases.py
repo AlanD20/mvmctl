@@ -313,6 +313,43 @@ class TestHelpSubcommandShowsCorrectly:
 # ============================================================================
 
 
+class TestInitEdgeCases:
+    """Tests for init command edge cases (non-destructive)."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.serial,
+        pytest.mark.domain_init,
+    ]
+
+    def test_init_skip_network(self, mvm_binary):
+        """``init --non-interactive --skip-network`` should succeed (exit 0).
+
+        Rationale: The --skip-network flag skips network setup during init.
+        A regression where --skip-network is silently ignored would cause
+        the init wizard to attempt privileged network operations when the
+        caller explicitly opted out. L1 verification: checks exit 0 and
+        mentions the flag in output.
+        """
+        result = _run_mvm(
+            mvm_binary,
+            "init",
+            "--non-interactive",
+            "--skip-host",
+            "--skip-network",
+            check=False,
+        )
+
+        assert result.returncode == 0, (
+            f"init --skip-network failed: rc={result.returncode} "
+            f"stdout={result.stdout} stderr={result.stderr}"
+        )
+        output = result.stdout + result.stderr
+        assert "all set" in output.lower(), (
+            f"Output missing expected success message:\n{output}"
+        )
+
+
 class TestNetworkEdgeCases:
     """Tests for network command edge cases."""
 
@@ -339,6 +376,45 @@ class TestNetworkEdgeCases:
         assert "Missing required option '--subnet'" in (
             result.stdout + result.stderr
         )
+
+    def test_network_create_non_interactive(
+        self, mvm_binary, unique_network_name
+    ):
+        """``network create`` with --non-interactive flag should succeed.
+
+        Rationale: Without --non-interactive, network create would prompt
+        for confirmation. The --non-interactive flag suppresses this prompt.
+        A regression where --non-interactive is silently ignored would cause
+        automated workflows to hang forever waiting for input.
+        L1 verification: exit 0 and network appears in listing.
+        """
+        net_name = unique_network_name
+        subnet = f"10.{abs(hash(net_name)) % 254 + 1}.0.0/24"
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "network",
+                "create",
+                net_name,
+                "--subnet",
+                subnet,
+                "--non-interactive",
+                check=False,
+            )
+            assert result.returncode == 0, (
+                f"network create --non-interactive failed: {result.stderr}"
+            )
+
+            # L2: verify the network appears in ls --json
+            ls_result = _run_mvm(mvm_binary, "network", "ls", "--json")
+            networks = json.loads(ls_result.stdout)
+            assert any(n.get("name") == net_name for n in networks), (
+                f"Network '{net_name}' not found in ls --json after create"
+            )
+        finally:
+            _run_mvm(
+                mvm_binary, "network", "rm", net_name, "--force", check=False
+            )
 
     def test_network_set_default_nonexistent(self, mvm_binary):
         """``network set-default`` with nonexistent name should fail."""

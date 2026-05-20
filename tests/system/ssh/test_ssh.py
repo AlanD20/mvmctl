@@ -194,6 +194,85 @@ class TestSSHConnect:
 
     @pytest.mark.requires_kvm
     @pytest.mark.slow
+    def test_ssh_with_exported_key_file(
+        self, mvm_binary, created_vm, timing_targets, tmp_path
+    ):
+        """SSH with --key pointing to an exported private key file path.
+
+        Rationale: The --key flag accepts both named keys and file paths.
+        A regression where file path resolution is broken would cause
+        --key /path/to/key to fail even when a valid key file exists.
+        This test uses the created_vm fixture (which already has a key
+        authorized) and exports the key to a file, then SSHes with --key
+        pointing to the exported file path. L3 verification: SSH command
+        succeeds with the exported key file.
+        """
+        vm_info = created_vm
+        ssh_timeout = timing_targets["alpine:3.21"]
+
+        # Export the default key to a temp directory
+        key_export_dir = tmp_path / "ssh-keys"
+        key_export_dir.mkdir(exist_ok=True)
+        _run_mvm(
+            mvm_binary,
+            "key",
+            "export",
+            "sys-vmkey",
+            "--out",
+            str(key_export_dir),
+            check=False,
+        )
+
+        # Find the exported private key file
+        exported_keys = list(key_export_dir.iterdir())
+        private_key_path = None
+        for kf in exported_keys:
+            if kf.name.endswith(".pem") or kf.name.endswith("_rsa"):
+                private_key_path = kf
+                break
+            # Try all non-.pub files (the private key could have any name)
+            if not kf.name.endswith(".pub") and kf.stat().st_size > 0:
+                private_key_path = kf
+                break
+
+        if private_key_path is None or not private_key_path.exists():
+            # Skip-reason: Could not find exported private key file.
+            # The key export may have failed silently or the export
+            # directory is empty. To run unconditionally, ensure
+            # a default key exists and is exportable.
+            pytest.skip("Could not find exported private key file")
+
+        # SSH with --key pointing to the exported key file
+        from tests.system.conftest import wait_for_ssh as _wait_for_ssh
+
+        ssh_available = _wait_for_ssh(
+            mvm_binary, vm_info["name"], "root", ssh_timeout
+        )
+        if not ssh_available:
+            # Skip-reason: SSH not available on VM — cannot verify --key <path>.
+            # This is a transient/environmental issue, not a test failure.
+            pytest.skip("SSH not available on VM")
+
+        result = _run_mvm(
+            mvm_binary,
+            "ssh",
+            vm_info["name"],
+            "--key",
+            str(private_key_path),
+            "--cmd",
+            "whoami",
+            check=False,
+        )
+        assert result.returncode == 0, (
+            f"SSH with exported key file failed: rc={result.returncode} "
+            f"stdout={result.stdout} stderr={result.stderr}"
+        )
+        assert "root" in result.stdout, (
+            f"Expected 'root' in output, got: {result.stdout}"
+        )
+
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
     def test_ssh_with_named_key(
         self, mvm_binary, module_vm, timing_targets, tmp_path
     ):

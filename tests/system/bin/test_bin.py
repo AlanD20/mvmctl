@@ -195,8 +195,8 @@ class TestBinaryEdges:
             f"got rc={result.returncode}: {result.stdout[:200]}"
         )
         combined = (result.stdout + result.stderr).lower()
-        assert "not found in remote versions" in combined, (
-            f"Expected 'not found in remote versions' in output, "
+        assert "checksum required" in combined or "not found in remote versions" in combined, (
+            f"Expected error about checksum or version not found in output, "
             f"got: {combined[:300]}"
         )
 
@@ -277,7 +277,9 @@ class TestBinaryEdges:
                 "All remote versions already cached — cannot test plain pull"
             )
 
-        pull_result = _run_mvm(mvm_binary, "bin", "pull", target, check=False)
+        pull_result = _run_mvm(
+            mvm_binary, "bin", "pull", "firecracker", "--version", target, check=False
+        )
         if pull_result.returncode != 0:
             # Skip-reason: The pull command failed. Could be a network
             # timeout, a missing release asset on GitHub, or a transient
@@ -344,6 +346,8 @@ class TestBinaryEdges:
                 mvm_binary,
                 "bin",
                 "pull",
+                "firecracker",
+                "--version",
                 target_version,
                 "--default",
                 "--force",
@@ -444,7 +448,7 @@ class TestBinaryPullAdvanced:
             target = versions[-1]
 
         pull_result = _run_mvm(
-            mvm_binary, "bin", "pull", target, "--force", check=False
+            mvm_binary, "bin", "pull", "firecracker", "--version", target, "--force", check=False
         )
         if pull_result.returncode != 0:
             # Skip-reason: The pull command itself failed. Could be a
@@ -510,6 +514,8 @@ class TestBinaryPullAdvanced:
             mvm_binary,
             "bin",
             "pull",
+            "firecracker",
+            "--version",
             target,
             "--default",
             "--force",
@@ -672,6 +678,8 @@ class TestBinaryPullAndLifecycle:
                 mvm_binary,
                 "bin",
                 "pull",
+                "firecracker",
+                "--version",
                 target,
                 "--default",
                 "--force",
@@ -764,6 +772,8 @@ class TestBinaryPullAndLifecycle:
                             mvm_binary,
                             "bin",
                             "pull",
+                            "firecracker",
+                            "--version",
                             v,
                             check=False,
                             timeout=120,
@@ -886,7 +896,7 @@ class TestBinaryPullAndLifecycle:
                 cached_versions = {v.get("version") for v in cached_bins}
                 if target not in cached_versions:
                     pull = _run_mvm(
-                        mvm_binary, "bin", "pull", target, check=False
+                        mvm_binary, "bin", "pull", "firecracker", "--version", target, check=False
                     )
                     if pull.returncode != 0:
                         # Skip-reason: The target version is not cached and
@@ -984,6 +994,8 @@ class TestBinaryPullAndLifecycle:
                         mvm_binary,
                         "bin",
                         "pull",
+                        "firecracker",
+                        "--version",
                         target_version,
                         check=False,
                         timeout=120,

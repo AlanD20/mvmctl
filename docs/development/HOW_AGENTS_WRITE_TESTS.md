@@ -218,6 +218,7 @@ Every scenario includes:
 | `init --non-interactive --skip-host` | Returns 0, shows ready/setup message | L1 | No | No |
 | `init --non-interactive` (no skip-host) | Returns non-zero, mentions sudo/privilege | L1 | No | No |
 | `init` idempotent | Two runs both succeed | L1 | No | No |
+| `init --non-interactive --skip-host --skip-network` | Returns 0, mentions success | L1 | No | No |
 
 ### 4.3 `mvm config`
 
@@ -240,6 +241,7 @@ Every scenario includes:
 |---------|-------------------|-----------|----------|--------------|
 | `network create <name> --subnet <cidr>` | Bridge exists, IP assigned, firewall rules present | L3 | No | Yes |
 | `network create` without --subnet | Returns non-zero, missing option error | L1 | No | No |
+| `network create --non-interactive` | Creates network without confirmation prompt | L2 (ls --json) | No | Yes |
 | `network create --subnet <invalid>` | Returns non-zero | L1 | No | No |
 | `network create --subnet /32` | Returns non-zero (too small) | L1 | No | No |
 | `network create` duplicate name | Returns non-zero | L1 | No | No |
@@ -424,6 +426,8 @@ Every scenario includes:
 | `image pull --version <ver>` | Pulls specified version | L2 | If network unavailable | Yes |
 | `image pull nonexistent` | Returns non-zero | L1 | No | No |
 | `image pull` with `--disable-detector` | Succeeds | L1 | If network unavailable | Yes |
+| `image pull` with `--arch` | Pulls image for specified architecture | L1 | If network unavailable | Yes |
+| `image pull` with `--no-cache` | Pulls image bypassing local cache | L1 | If network unavailable | Yes |
 | `image ls` | Table output | L1 | No | No |
 | `image ls --json` | JSON list with is_present, type | L2 | No | No |
 | `image ls --remote` | Lists remote images | L1 | If network unavailable | No |
@@ -456,8 +460,13 @@ Every scenario includes:
 |---------|-------------------|-----------|----------|--------------|
 | `kernel ls --json` | JSON list with id, name, version, type | L2 | No | No |
 | `kernel ls` empty | Valid empty list | L2 | No | No |
+| `kernel ls --remote` | Lists remote kernels available for download | L1 | If network unavailable | No |
 | `kernel pull --type firecracker` | Pull succeeds | L2 | If network unavailable | Yes |
 | `kernel pull --type official` | Pull or build | L1 | If network/build tools unavailable | Yes |
+| `kernel pull --arch` | Pulls kernel for specified architecture | L1 | If network unavailable | Yes |
+| `kernel pull --jobs` | Controls parallel build jobs | L1 | If kernel_build tools unavailable | Yes |
+| `kernel pull --keep-build-dir` | Preserves build directory after build | L1 | If kernel_build tools unavailable | Yes |
+| `kernel pull --clean-build` | Forces clean rebuild from source | L1 | If kernel_build tools unavailable | Yes |
 | `kernel inspect <prefix>` | Name or prefix in output | L1 | If no kernel | No |
 | `kernel inspect <prefix> --json` | Fields present | L2 | If no kernel | No |
 | `kernel inspect <prefix> --tree` | Tree characters | L1 | If no kernel | No |
@@ -492,6 +501,7 @@ Every scenario includes:
 | `ssh <vm> --cmd <cmd>` | Command executes, returns stdout | L3 | No | No |
 | `ssh <vm> -u <user> --cmd <cmd>` | Specifies user | L3 | No | No |
 | `ssh <vm> --cmd exit` (connectivity) | Returns 0 | L1 | No | No |
+| `ssh <vm> --key <path>` (file path) | SSH connection uses specified private key file | L3 | No | No |
 
 ### 4.12 `mvm console`
 
@@ -508,6 +518,7 @@ Every scenario includes:
 | `logs <vm> --os` | Returns OS log | L1 | No | No |
 | `logs <vm> --lines N` | Returns N lines | L1 | No | No |
 | `logs <ip>` | Resolves by IP | L1 | No | No |
+| `logs <vm> --follow` | Streams live log output | L1 | No | No |
 
 ### 4.14 `mvm host`
 

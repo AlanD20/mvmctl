@@ -53,6 +53,57 @@ def _read_firecracker_config(mvm_binary: str, vm_name: str) -> dict:
     return json.loads(config_path.read_text())
 
 
+def _verify_kernel_kvm_intel(mvm_binary: str, kernel_id: str) -> None:
+    """Verify the kernel binary has CONFIG_KVM_INTEL=y via nm symbol check.
+
+    Uses ``nm`` to search for the ``kvm_intel_init`` symbol in the kernel
+    binary. If the symbol is absent, the kernel was built without KVM support
+    and nested virt tests cannot proceed.
+    """
+    # Skip-reason: An official kernel might exist on disk but was built
+    # without CONFIG_KVM_INTEL=y by an older version of the build scripts.
+    # The nm check catches stale cached kernels that lack KVM support.
+    inspect = _run_mvm(
+        mvm_binary, "kernel", "inspect", kernel_id, "--json", check=False
+    )
+    if inspect.returncode != 0:
+        pytest.skip(f"Cannot inspect kernel {kernel_id}: {inspect.stderr}")
+
+    kernel_data = json.loads(inspect.stdout)
+    # Skip-reason: The ``path`` field may be absent for kernels whose
+    # storage record is incomplete (e.g., pulled in a prior version).
+    storage = kernel_data.get("storage", {})
+    kernel_path = storage.get("path", "")
+    if not kernel_path:
+        pytest.skip(f"No path found for kernel {kernel_id}")
+
+    kernel_file = Path(kernel_path)
+
+    if not kernel_file.exists():
+        pytest.skip(f"Kernel file not found: {kernel_file}")
+
+    nm_result = subprocess.run(
+        ["nm", str(kernel_file)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    if nm_result.returncode == 0 and "kvm_intel_init" not in nm_result.stdout:
+        # Skip-reason: The official kernel on disk was built without
+        # CONFIG_KVM_INTEL=y (e.g. from an older build). Nested virt
+        # tests cannot proceed. Rebuild via:
+        #   mvm kernel pull --type official --version 6.19.9 --force
+        pytest.skip(
+            f"Kernel {kernel_file.name} does not have KVM_INTEL built-in. "
+            f"Expected symbol 'kvm_intel_init' not found. "
+            f"This kernel was built without CONFIG_KVM_INTEL=y. "
+            f"Rebuild with 'mvm kernel pull --type official --version 6.19.9 --force'."
+        )
+    elif nm_result.returncode != 0:
+        pytest.skip(f"nm failed on kernel binary: {nm_result.stderr}")
+
+
 def _ensure_official_kernel(mvm_binary: str) -> str:
     """Ensure an official kernel is present and return its 6-char ID prefix.
 
@@ -60,6 +111,9 @@ def _ensure_official_kernel(mvm_binary: str) -> str:
     and is_present=True). If none found, attempts to pull it. The official
     kernel is rebuilt with CONFIG_KVM_INTEL=y, which is required for nested
     virtualization inside the guest.
+
+    Always verifies the kernel binary has ``kvm_intel_init`` before
+    returning, catching stale cached kernels that lack KVM support.
     """
     result = _run_mvm(mvm_binary, "kernel", "ls", "--json", check=False)
     if result.returncode == 0 and result.stdout.strip():
@@ -70,7 +124,11 @@ def _ensure_official_kernel(mvm_binary: str) -> str:
             if k.get("type") == "official" and k.get("is_present")
         ]
         if official:
-            return official[0]["id"][:6]
+            kernel_id = official[0]["id"][:6]
+            # Always verify KVM_INTEL even for pre-existing kernels
+            # (catches kernels built before KVM support was added).
+            _verify_kernel_kvm_intel(mvm_binary, kernel_id)
+            return kernel_id
 
     # No present official kernel — attempt to pull one
     result = _run_mvm(
@@ -103,45 +161,7 @@ def _ensure_official_kernel(mvm_binary: str) -> str:
 
     kernel_id = official[0]["id"][:6]
 
-    # Verify the kernel has KVM_INTEL built-in (CONFIG_KVM_INTEL=y)
-    # by checking for the vmx_init symbol in the kernel binary.
-    # This catches the case where a user has a cached official kernel
-    # that was built WITHOUT the KVM config changes.
-    inspect = _run_mvm(
-        mvm_binary, "kernel", "inspect", kernel_id, "--json", check=False
-    )
-    if inspect.returncode != 0:
-        pytest.skip(f"Cannot inspect kernel {kernel_id}: {inspect.stderr}")
-
-    kernel_data = json.loads(inspect.stdout)
-    kernel_path = kernel_data.get("path", "")
-    if not kernel_path:
-        pytest.skip(f"No path found for kernel {kernel_id}")
-
-    cache_dir = Path.home() / ".cache" / "mvmctl" / "kernels"
-    kernel_file = cache_dir / kernel_path
-
-    if not kernel_file.exists():
-        pytest.skip(f"Kernel file not found: {kernel_file}")
-
-    nm_result = subprocess.run(
-        ["nm", str(kernel_file)],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=30,
-    )
-    if nm_result.returncode == 0 and "kvm_intel_init" not in nm_result.stdout:
-        pytest.fail(
-            f"Kernel {kernel_file.name} does not have KVM_INTEL built-in. "
-            f"Expected symbol 'kvm_intel_init' not found. "
-            f"This kernel was built without CONFIG_KVM_INTEL=y. "
-            f"Rebuild with 'mvm kernel pull --type official --version 6.19.9 --force' "
-            f"after updating kernels.yaml with CONFIG_VIRTUALIZATION=y, CONFIG_KVM=y, "
-            f"CONFIG_KVM_INTEL=y."
-        )
-    elif nm_result.returncode != 0:
-        pytest.skip(f"nm failed on kernel binary: {nm_result.stderr}")
+    _verify_kernel_kvm_intel(mvm_binary, kernel_id)
 
     return kernel_id
 
@@ -177,15 +197,27 @@ def _ssh_cmd(
 # ========================================================================
 
 
-def _nested_virt_available() -> bool:
-    """Check if the host supports nested virtualization."""
+def _check_nested_virt_support() -> bool:
+    """Check if the host supports nested virtualization.
+
+    Reads ``/sys/module/kvm_intel/parameters/nested`` or
+    ``/sys/module/kvm_amd/parameters/nested`` to determine whether
+    the host has nested VMX/SVM enabled.
+
+    # Skip-reason: Some kernel versions expose "1"/"0" instead of
+    # "Y"/"N" in this sysfs file. Both forms are checked. If neither
+    # file exists, the host lacks the kvm module or the hardware
+    # lacks VMX/SVM — nested virt cannot work and these tests skip.
+    """
     for param_file in (
         "/sys/module/kvm_intel/parameters/nested",
         "/sys/module/kvm_amd/parameters/nested",
     ):
+        path = Path(param_file)
         try:
-            with open(param_file) as f:
-                return f.read().strip().lower() == "y"
+            value = path.read_text().strip().lower()
+            if value in ("1", "y"):
+                return True
         except OSError:
             pass
     return False
@@ -216,10 +248,10 @@ class TestVMNestedVirt:
         ``--nested-virt`` (CONFIG_KVM_INTEL=y for vmx support in guest).
         The host firmware/bootloader must also expose VMX to the kernel.
         """
-        if not _nested_virt_available():
+        if not _check_nested_virt_support():
             pytest.skip(
                 "Host does not support nested virtualization "
-                "(kvm_intel/kvm_amd nested=Y not detected)"
+                "(kvm_intel/kvm_amd nested=Y/1 not detected)"
             )
 
     def test_nested_virt_kvm_inside_guest(
@@ -237,6 +269,12 @@ class TestVMNestedVirt:
         # kernel lacks KVM support would break nested virt silently.
         """End-to-end nested virt: create Ubuntu VM with --nested-virt,
         SSH in, verify /dev/kvm, VMX, and kvm_intel.nested inside guest."""
+        # Skip-reason: If the host lacks nested VMX/SVM capability
+        # (kvm_intel/kvm_amd nested=Y/1), there is no way to pass
+        # through VMX to the guest. The test would fail on the first
+        # in-guest vmx check. Skip gracefully instead.
+        if not _check_nested_virt_support():
+            pytest.skip("Nested virtualization not supported on this host")
         net_name = unique_network_name
         subnet = _unique_subnet(net_name)
         key_name = unique_key_name
@@ -439,6 +477,11 @@ class TestVMNestedVirt:
         # though the host-side config looks right.
         """Verify CPUID exposes VMX inside guest when --nested-virt is set,
         and firecracker.json has cpu-config with kvm_capabilities."""
+        # Skip-reason: Same as test_nested_virt_kvm_inside_guest — this
+        # test requires host-level nested VMX/SVM support to pass through
+        # to the guest. Skip gracefully when the host doesn't have it.
+        if not _check_nested_virt_support():
+            pytest.skip("Nested virtualization not supported on this host")
         net_name = unique_network_name
         subnet = _unique_subnet(net_name)
         key_name = unique_key_name

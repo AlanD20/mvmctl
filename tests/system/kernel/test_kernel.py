@@ -88,6 +88,37 @@ class TestKernelLifecycle:
             f"kernel ls --no-cache failed: {result.stderr}"
         )
 
+    @pytest.mark.slow
+    def test_kernel_ls_remote(self, mvm_binary):
+        """List kernels available from the remote registry with --remote flag.
+
+        Rationale: The --remote flag fetches available kernels from the
+        upstream registry rather than local cache. A regression where --remote
+        is silently ignored would return local listings instead of remote ones.
+        L1 verification: command exits successfully and returns data.
+        """
+        # Skip-reason: Requires network access to the remote kernel registry.
+        # When running in air-gapped environments without MVM_ASSET_MIRROR,
+        # the remote registry endpoint is unreachable.
+        result = _run_mvm(
+            mvm_binary,
+            "kernel",
+            "ls",
+            "--remote",
+            "--json",
+            timeout=30,
+            check=False,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            pytest.skip("Remote kernel listing not available (network?)")
+        data = json.loads(result.stdout)
+        assert isinstance(data, list), "Expected a list of remote kernels"
+        assert len(data) > 0, "Expected at least one remote kernel entry"
+        entry = data[0]
+        assert isinstance(entry.get("type"), str) and entry["type"], (
+            f"Expected non-empty type field: {entry}"
+        )
+
     def test_kernel_list_json(self, mvm_binary):
         """List kernels in JSON format."""
         # Rationale: Only needs kernel ls --json parsing (free). Verifies JSON field structure.
@@ -377,6 +408,57 @@ class TestKernelPullWithVersion:
         )
 
 
+class TestKernelPullArch:
+    """Test kernel pull with --arch flag."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.slow,
+        pytest.mark.serial,
+        pytest.mark.domain_kernel,
+    ]
+
+    def test_kernel_pull_with_arch(self, mvm_binary):
+        """Pull a firecracker kernel with --arch x86_64 flag.
+
+        Rationale: The --arch flag filters kernel downloads by architecture.
+        A regression where --arch is silently ignored would download the
+        default arch instead of the specified one. L1 verification: exit 0
+        and kernel appears in listing.
+        """
+        # Skip-reason: Kernel pull requires network access to the remote
+        # asset registry. When running in air-gapped environments without
+        # MVM_ASSET_MIRROR configured, the HTTP download will fail.
+        result = _run_mvm(
+            mvm_binary,
+            "kernel",
+            "pull",
+            "--type",
+            "firecracker",
+            "--arch",
+            "x86_64",
+            check=False,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            pytest.skip(
+                f"Kernel pull with --arch x86_64 failed: {result.stderr.strip()}"
+            )
+
+        # L2: verify the kernel appears in ls --json
+        kernels = json.loads(
+            _run_mvm(mvm_binary, "kernel", "ls", "--json").stdout
+        )
+        firecracker = [
+            k
+            for k in kernels
+            if k.get("type") == "firecracker" and k.get("is_present")
+        ]
+        assert firecracker, (
+            "No firecracker kernel found in listing after pull with --arch"
+        )
+
+
 class TestKernelBuild:
     """Test kernel build from source operations."""
 
@@ -504,6 +586,87 @@ class TestKernelBuild:
             or "already exists" in output_lower
         ), (
             f"Expected features or already-exists mention, got: {result.stdout[:200]}"
+        )
+
+    @pytest.mark.kernel_build
+    def test_kernel_pull_with_jobs_flag(self, mvm_binary):
+        """Pull official kernel with --jobs flag to control parallelism.
+
+        Rationale: --jobs controls the number of parallel make jobs during
+        kernel build. A regression where --jobs is silently ignored would
+        always build with the default parallelism, potentially overloading
+        the host. L1 verification: exit 0 with success message.
+        """
+        result = _run_mvm(
+            mvm_binary,
+            "kernel",
+            "pull",
+            "--type",
+            "official",
+            "--jobs",
+            "2",
+            check=False,
+            timeout=1800,
+        )
+        # Skip-reason: Kernel build from source requires build tools (gcc,
+        # make, kernel headers) which may not be available in all CI
+        # environments. Excluded from default runs via @pytest.mark.kernel_build.
+        if result.returncode != 0:
+            pytest.skip(
+                f"Kernel pull with --jobs failed: {result.stderr.strip()}"
+            )
+        # L1: verify the kernel was registered in the DB
+        kernels = json.loads(
+            _run_mvm(mvm_binary, "kernel", "ls", "--json").stdout
+        )
+        official = [
+            k
+            for k in kernels
+            if k.get("type") == "official" and k.get("is_present")
+        ]
+        assert official, (
+            "No official kernel found in listing after pull with --jobs"
+        )
+
+    @pytest.mark.kernel_build
+    def test_kernel_pull_with_keep_build_dir(self, mvm_binary):
+        """Pull official kernel with --keep-build-dir flag.
+
+        Rationale: --keep-build-dir preserves the kernel build directory
+        after a successful build, useful for debugging or incremental builds.
+        A regression where --keep-build-dir is silently ignored would delete
+        the build directory. L1 verification: exit 0 with success message.
+        """
+        result = _run_mvm(
+            mvm_binary,
+            "kernel",
+            "pull",
+            "--type",
+            "official",
+            "--keep-build-dir",
+            "--jobs",
+            "2",
+            check=False,
+            timeout=1800,
+        )
+        # Skip-reason: Kernel build from source requires build tools (gcc,
+        # make, kernel headers) which may not be available in all CI
+        # environments. Excluded from default runs via @pytest.mark.kernel_build.
+        if result.returncode != 0:
+            pytest.skip(
+                f"Kernel pull with --keep-build-dir failed: {result.stderr.strip()}"
+            )
+        # L1: verify the kernel was registered in the DB
+        kernels = json.loads(
+            _run_mvm(mvm_binary, "kernel", "ls", "--json").stdout
+        )
+        official = [
+            k
+            for k in kernels
+            if k.get("type") == "official" and k.get("is_present")
+        ]
+        assert official, (
+            "No official kernel found in listing after pull with --keep-build-dir"
         )
 
 
