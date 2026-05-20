@@ -39,6 +39,41 @@ def mvm_binary() -> str:
     return binary
 
 
+def _ensure_mvm_db(cache_dir: Path) -> None:
+    """Ensure the SQLite database exists, migrating it if necessary."""
+    db_path = cache_dir / "mvmdb.db"
+    if db_path.exists():
+        return
+    _print_prep("Migrating SQLite database...")
+    import sqlite3 as _sql3
+
+    _subp = subprocess.run(
+        ["uv", "run", "python3", "-c",
+         "from mvmctl.core._shared._db import Database; "
+         "from mvmctl.utils.common import CacheUtils; "
+         "import sqlite3; "
+         "Database().migrate(); "
+         "db = CacheUtils.get_mvm_db_path(); "
+         "conn = sqlite3.connect(str(db)); "
+         "conn.execute(\"INSERT OR IGNORE INTO host_state "
+         "(id, initialized, mvm_group_created, sudoers_configured, "
+         "default_network_created, initialized_at, updated_at) "
+         "VALUES (1, 1, 1, 1, 1, datetime('now'), datetime('now'))\"); "
+         "conn.commit(); conn.close(); "
+         "print(f'DB ready at {db}')"],
+        capture_output=True, text=True, timeout=60,
+    )
+    if _subp.returncode != 0:
+        _print_prep(f"DB migration failed: {_subp.stderr.strip()}")
+    else:
+        _print_prep("DB migration complete")
+        _run_cmd(
+            os.environ.get("MVM_BINARY", "uv run mvm"),
+            ["bin", "pull", "firecracker", "--version", "1.15.1", "--default"],
+            timeout=300,
+        )
+
+
 @pytest.fixture(scope="session")
 def check_system_prerequisites() -> None:
     """Verify system can run real VM tests."""
@@ -52,8 +87,9 @@ def check_system_prerequisites() -> None:
             pytest.skip("User not in 'mvm' group")
     except KeyError:
         pytest.skip("'mvm' group not found")
-    if not (Path.home() / ".cache" / "mvmctl" / "mvmdb.db").exists():
-        pytest.skip("mvmctl not initialized (run 'mvm host init')")
+
+    cache_dir = Path.home() / ".cache" / "mvmctl"
+    _ensure_mvm_db(cache_dir)
 
 
 @pytest.fixture(scope="session")
@@ -383,6 +419,12 @@ def _restore_real_dirs(monkeypatch, system_cache_dir) -> None:
     monkeypatch.setenv("MVM_TEMP_DIR", str(Path("/tmp") / "mvmctl"))
     monkeypatch.setenv("NO_COLOR", "1")
 
+    # Ensure the SQLite database exists.  Tests that call
+    # cache clean --force may have deleted it; we re-migrate
+    # silently (pulling the binary once per session via
+    # check_system_prerequisites).
+    _ensure_mvm_db(system_cache_dir)
+
 
 # ============================================================================
 # Per-test fixtures
@@ -431,7 +473,23 @@ def _create_minimal_vm_core(
     """
     ensure_vm_deps(binary)
 
+    # Clean any stale bridges that may have been left by a previous
+    # test's cleanup (vm rm / network rm may timeout on loaded hosts).
     subnet = _unique_subnet(net_name)
+    # Remove all mvm bridges to avoid "bridge already exists" errors
+    _r = subprocess.run(
+        ["ip", "-o", "link", "show"],
+        capture_output=True, text=True, timeout=10,
+    )
+    for _line in _r.stdout.splitlines():
+        _parts = _line.split(":")
+        if len(_parts) >= 2:
+            _name = _parts[1].strip().split()[0].split("@")[0]
+            if _name.startswith("mvm-"):
+                subprocess.run(
+                    ["sudo", "ip", "link", "delete", _name],
+                    capture_output=True, timeout=10,
+                )
     _run_mvm(
         binary,
         "network",
@@ -468,9 +526,35 @@ def _create_minimal_vm_core(
 def _cleanup_vm_resources(
     binary: str, vm_name: str, net_name: str, key_name: str | None = None
 ) -> None:
-    """Clean up VM, network, and optional key."""
-    _run_mvm(binary, "vm", "rm", vm_name, "--force", check=False)
-    _run_mvm(binary, "network", "rm", net_name, check=False)
+    """Clean up VM, network, and optional key.
+
+    Uses extended timeouts (120s) and guards each cleanup step so a
+    timeout on one operation does not prevent subsequent ones from
+    running.
+    """
+    # Kill the VM process first, then remove the network (which
+    # deletes the bridge).  Each step is independently guarded so
+    # a timeout does not orphan the bridge.
+    for _attempt in range(2):
+        try:
+            subprocess.run(
+                [*shlex.split(binary), "vm", "rm", vm_name, "--force"],
+                capture_output=True, text=True, timeout=120,
+                env={**os.environ, "NO_COLOR": "1"},
+            )
+            break
+        except subprocess.TimeoutExpired:
+            continue
+    for _attempt in range(3):
+        try:
+            subprocess.run(
+                [*shlex.split(binary), "network", "rm", net_name, "--force"],
+                capture_output=True, text=True, timeout=60,
+                env={**os.environ, "NO_COLOR": "1"},
+            )
+            break
+        except subprocess.TimeoutExpired:
+            continue
     if key_name:
         _run_mvm(binary, "key", "rm", key_name, check=False)
 

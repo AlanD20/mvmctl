@@ -684,12 +684,25 @@ class TestCachePruneAll:
                 if cmd_args == ("kernel", "ls", "--json"):
                     # Entries with is_present=False are DB artifacts from
                     # earlier prune operations — they have no file on disk.
-                    # The default kernel may also be preserved by prune --all.
+                    # The default kernel survives prune --all by design
+                    # (product preserves defaults to avoid breaking VM
+                    # creation after a clean/restore).
                     present = [i for i in items if i.get("is_present")]
-                    assert len(present) == 0, (
-                        f"{' '.join(cmd_args)}: unexpected present entries "
-                        f"after cache prune --all: {present}"
-                    )
+                    default = [i for i in present if i.get("is_default")]
+                    if default:
+                        # Only the default kernel survives
+                        assert len(present) == 1, (
+                            f"{' '.join(cmd_args)}: expected only default "
+                            f"to survive prune, got {len(present)} present: {present}"
+                        )
+                        assert present[0]["is_default"], (
+                            f"{' '.join(cmd_args)}: surviving kernel must be the default"
+                        )
+                    else:
+                        assert len(present) == 0, (
+                            f"{' '.join(cmd_args)}: unexpected present entries "
+                            f"after cache prune --all: {present}"
+                        )
                 else:
                     assert len(items) == 0, (
                         f"{' '.join(cmd_args)} should be empty "

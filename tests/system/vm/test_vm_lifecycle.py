@@ -288,7 +288,9 @@ class TestVMAdvancedCreateFlags:
                 (
                     b
                     for b in bins
-                    if b.get("is_default") and b.get("is_present")
+                    if b.get("name") == "firecracker"
+                    and b.get("is_default")
+                    and b.get("is_present")
                 ),
                 None,
             )

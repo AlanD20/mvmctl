@@ -392,25 +392,46 @@ def _run_pytest_level(
     timeout: int = 1200,
     test_file: Path | None = None,
     extra_args: list[str] | None = None,
+    extra_dirs: list[Path] | None = None,
 ) -> bool:
     """Run pytest on a test directory. Returns True if all tests pass.
 
     When *test_file* is provided it overrides *test_dir* and forces serial
     execution (``-n 0``) to avoid xdist issues with a single file.
+
+    *extra_dirs* adds additional test directories to the same pytest
+    invocation (useful for combining unit + integration under a single
+    coverage measurement).
     """
-    target = str(test_file) if test_file else str(test_dir)
+    # Build target list: either a single file, the primary dir, or
+    # primary dir + extra dirs (for combined coverage runs).
+    targets: list[str] = []
+    if test_file:
+        targets.append(str(test_file))
+    elif extra_dirs:
+        targets.append(str(test_dir))
+        targets.extend(str(d) for d in extra_dirs)
+    else:
+        targets.append(str(test_dir))
+
+    # Determine whether the caller explicitly requested coverage.
+    # --no-cov in addopts (from pyproject.toml) is already removed by -o addopts=,
+    # so the only way coverage runs is via --pytest-extra passing --cov=... .
+    has_cov = extra_args and any(a.startswith("--cov") for a in extra_args)
+
     cmd: list[str] = [
         "uv",
         "run",
         "pytest",
-        target,
+        *targets,
         "-q",
         "--no-header",
-        "--no-cov",
         "-rs",
         "-o",
         "addopts=",
     ]
+    if not has_cov:
+        cmd.append("--no-cov")
     if test_file:
         cmd.extend(["-n", "0"])
     elif _check_xdist():
@@ -654,8 +675,31 @@ def _run_levels(
         args.pytest_extra.split() if args.pytest_extra else None
     )
 
+    # When --cov is active, combine unit + integration into a single
+    # invocation so coverage accumulates across both suites.  That way
+    # --cov-fail-under (from --pytest-extra) applies to the combined
+    # total, not to each level individually.
+    has_cov = extra_args and any(a.startswith("--cov") for a in extra_args)
+
     failures = 0
     for level in levels:
+        if level == "unit" and has_cov and "integration" in levels:
+            # Single combined pytest run for unit + integration coverage
+            # (skip the individual unit call below — handled by the
+            # combined path).
+            continue
+        if level == "integration" and has_cov and "unit" in levels:
+            ok = _run_pytest_level(
+                UNIT_TEST_DIR,
+                "unit + integration tests",
+                test_file=None,  # combined dirs, not single file
+                extra_args=extra_args,
+                extra_dirs=[INTEGRATION_TEST_DIR],
+            )
+            if not ok:
+                failures += 1
+                return failures
+            continue
         if level == "unit":
             ok = _run_pytest_level(
                 UNIT_TEST_DIR,

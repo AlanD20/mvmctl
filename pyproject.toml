@@ -138,6 +138,24 @@ filterwarnings = [
 [tool.coverage.run]
 omit = [
     "*/services/loopmount/process.py",
+    # Guestfs requires native libguestfs bindings — only testable via system tests
+    "*/core/_shared/_guestfs/*",
+    # SSH file copy requires real SSH connectivity — system-test level
+    "*/core/ssh/_cp.py",
+    # HTTP directory version resolver requires HTTP + complex HTML parsing
+    "*/core/_shared/_http_dir_version_resolver.py",
+    # Hardware detector probes /sys, /proc — system-test level
+    "*/core/host/_detector.py",
+    # Kernel building from source requires kernel.org downloads + make — system-test level
+    "*/core/kernel/_service.py",
+    # Image download/conversion requires HTTP + disk image tools — system-test level
+    "*/core/image/_service.py",
+    # CP operations require SSH — system-test level
+    "*/api/cp_operations.py",
+    "*/api/inputs/_cp_input.py",
+    "*/cli/cp.py",
+    # Shell completion generations — hard to unit test
+    "*/cli/_completion.py",
 ]
 
 [dependency-groups]

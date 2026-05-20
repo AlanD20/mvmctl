@@ -12,7 +12,7 @@ import os
 import sqlite3
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -555,9 +555,28 @@ class TestJsonConsistency:
 
     def test_all_inspect_json_have_common_fields(self, mvm_binary: str) -> None:
         # Rationale: Needs existing resources. Verifies inspect JSON field conventions.
-        """Every resource inspect --json output contains id, created_at, no camelCase."""
+        """Every resource inspect --json output contains id, created_at, no camelCase.
+
+        NOTE: All inspect outputs now nest resource data under a top-level key
+        matching the resource type (e.g. ``data["vm"]``, ``data["network"]``).
+        Common fields like ``id`` and ``created_at`` live inside that group.
+        """
+        # Mapping from CLI command name to the inspect JSON top-level group key.
+        # Most resources use the command name directly (e.g. ``vm``, ``image``).
+        # ``bin`` has no inspect command; those entries are skipped gracefully.
+        INSPECT_GROUP_KEYS: dict[str, str] = {
+            "vm": "vm",
+            "image": "image",
+            "kernel": "kernel",
+            "network": "network",
+            "key": "key",
+            "volume": "volume",
+            "bin": "bin",
+        }
+
         for rt in RESOURCE_TYPES:
             resource = rt["cmd"]
+            group_key = INSPECT_GROUP_KEYS.get(resource, resource)
             items = _ls_json(mvm_binary, resource)
             if not items:
                 continue
@@ -569,14 +588,44 @@ class TestJsonConsistency:
             if item is None:
                 continue
 
-            assert "id" in item, f"{resource} inspect --json missing 'id'"
-            assert "created_at" in item, (
-                f"{resource} inspect --json missing 'created_at'"
-            )
+            # Verify all top-level keys are lowercase (group names, section names)
             for key in item:
                 assert key[0].islower(), (
                     f"{resource} inspect --json has uppercase key: '{key}'"
                 )
+
+            # Verify the resource group exists and contains an ``id`` field.
+            resource_group = item.get(group_key)
+            assert resource_group is not None, (
+                f"{resource} inspect --json missing top-level group "
+                f"'{group_key}': top-level keys are {list(item.keys())}"
+            )
+            assert isinstance(resource_group, dict), (
+                f"{resource} inspect --json group '{group_key}' is "
+                f"not a dict: {type(resource_group).__name__}"
+            )
+            assert "id" in resource_group, (
+                f"{resource} inspect --json group '{group_key}' "
+                f"missing 'id'"
+            )
+
+            # Check that ``created_at`` exists somewhere in the inspect output
+            # (it may live in a timestamps section as with images).
+            created_at_found = _find_created_at(item)
+            assert created_at_found, (
+                f"{resource} inspect --json missing 'created_at' "
+                f"in any nested group"
+            )
+
+
+def _find_created_at(data: dict[str, Any]) -> bool:
+    """Recursively search for ``created_at`` in a nested dict."""
+    if "created_at" in data:
+        return True
+    for _value in data.values():
+        if isinstance(_value, dict) and _find_created_at(_value):
+            return True
+    return False
 
     def test_ls_json_status_field_is_consistent(self, mvm_binary: str) -> None:
         # Rationale: Only needs ls --json (free). Verifies field type consistency.
@@ -839,18 +888,20 @@ class TestVolumeVMConsistency:
                 mvm_binary, "volume", "inspect", vol_name, "--json"
             )
             vol_data = json.loads(vol_inspect.stdout)
-            assert vol_data["status"] == "attached", (
-                f"Expected volume status 'attached', got '{vol_data['status']}'"
+            vol_grp = vol_data.get("volume", {})
+            att_grp = vol_data.get("attachment", {})
+            assert vol_grp.get("status") == "attached", (
+                f"Expected volume status 'attached', got '{vol_grp.get('status')}'"
             )
-            assert vol_data["vm_id"] is not None, (
+            assert att_grp.get("vm_id") is not None, (
                 "Volume should have vm_id when attached"
             )
 
             vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
             vm_info = next((v for v in vms if v["name"] == vm_name), None)
             assert vm_info is not None, f"VM '{vm_name}' not found in listing"
-            assert vol_data["vm_id"] == vm_info["id"], (
-                f"Volume vm_id '{vol_data['vm_id']}' does not match "
+            assert att_grp.get("vm_id") == vm_info["id"], (
+                f"Volume vm_id '{att_grp.get('vm_id')}' does not match "
                 f"VM ID '{vm_info['id']}'"
             )
         finally:
@@ -967,7 +1018,8 @@ class TestVolumeVMConsistency:
                 mvm_binary, "volume", "inspect", vol_name, "--json"
             )
             vol_data = json.loads(vol_inspect.stdout)
-            vol_id_prefix = vol_data["id"][:6]
+            vol_grp = vol_data.get("volume", {})
+            vol_id_prefix = vol_grp.get("id", "")[:6]
 
             result = _run_mvm(
                 mvm_binary,
@@ -991,8 +1043,9 @@ class TestVolumeVMConsistency:
                 mvm_binary, "volume", "inspect", vol_name, "--json"
             )
             vol_data = json.loads(vol_inspect.stdout)
-            assert vol_data["status"] == "attached", (
-                f"Expected volume status 'attached', got '{vol_data['status']}'"
+            vol_grp = vol_data.get("volume", {})
+            assert vol_grp.get("status") == "attached", (
+                f"Expected volume status 'attached', got '{vol_grp.get('status')}'"
             )
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
@@ -1058,8 +1111,9 @@ class TestVolumeVMConsistency:
                 mvm_binary, "volume", "inspect", vol_name, "--json"
             )
             vol_data = json.loads(vol_inspect.stdout)
-            assert vol_data["status"] == "attached", (
-                f"Expected volume status 'attached', got '{vol_data['status']}'"
+            vol_grp = vol_data.get("volume", {})
+            assert vol_grp.get("status") == "attached", (
+                f"Expected volume status 'attached', got '{vol_grp.get('status')}'"
             )
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
@@ -1121,9 +1175,10 @@ class TestVolumeVMConsistency:
                 mvm_binary, "volume", "inspect", vol_name, "--json"
             )
             vol_data = json.loads(vol_inspect.stdout)
-            assert vol_data["status"] == "attached", (
+            vol_grp = vol_data.get("volume", {})
+            assert vol_grp.get("status") == "attached", (
                 f"Expected volume status 'attached' before VM removal, "
-                f"got '{vol_data['status']}'"
+                f"got '{vol_grp.get('status')}'"
             )
 
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force")
@@ -1132,9 +1187,10 @@ class TestVolumeVMConsistency:
                 mvm_binary, "volume", "inspect", vol_name, "--json"
             )
             vol_data = json.loads(vol_inspect.stdout)
-            assert vol_data["status"] == "available", (
+            vol_grp = vol_data.get("volume", {})
+            assert vol_grp.get("status") == "available", (
                 f"Expected volume status 'available' after VM removal, "
-                f"got '{vol_data['status']}'"
+                f"got '{vol_grp.get('status')}'"
             )
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
@@ -1205,8 +1261,9 @@ class TestNetworkVMConsistency:
                 mvm_binary, "network", "inspect", net_name, "--json"
             )
             net_data = json.loads(net_inspect.stdout)
-            assert net_data.get("name") == net_name, (
-                f"Network inspect returned wrong name: {net_data.get('name')}"
+            net_grp = net_data.get("network", {})
+            assert net_grp.get("name") == net_name, (
+                f"Network inspect returned wrong name: {net_grp.get('name')}"
             )
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
@@ -1646,10 +1703,10 @@ class TestAtMostOneDefaultBinary:
                                         "0.0.0-test",
                                         "v0.0.0-test",
                                         _existing_path,
-                                        datetime.now(datetime.UTC).strftime(
+                                        datetime.now(timezone.utc).strftime(
                                             "%Y-%m-%dT%H:%M:%S"
                                         ),
-                                        datetime.now(datetime.UTC).strftime(
+                                        datetime.now(timezone.utc).strftime(
                                             "%Y-%m-%dT%H:%M:%S"
                                         ),
                                     ),
@@ -1760,10 +1817,10 @@ class TestAtMostOneDefaultBinary:
                                     "0.0.0-other",
                                     "v0.0.0-other",
                                     _existing_path2,
-                                    datetime.now(datetime.UTC).strftime(
+                                    datetime.now(timezone.utc).strftime(
                                         "%Y-%m-%dT%H:%M:%S"
                                     ),
-                                    datetime.now(datetime.UTC).strftime(
+                                    datetime.now(timezone.utc).strftime(
                                         "%Y-%m-%dT%H:%M:%S"
                                     ),
                                 ),

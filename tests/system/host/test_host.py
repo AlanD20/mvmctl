@@ -409,6 +409,17 @@ class TestHostCleanDestructive:
             # test unconditionally runnable.
             pytest.skip("Host not initialized — cannot test host clean")
 
+        # Skip-reason: If the host was initialized with iptables (not
+        # nftables), host clean --force will fail when trying to remove
+        # nftables chains that don't exist. Only run when nftables chains
+        # are present.
+        nft_check = subprocess.run(
+            ["sudo", "nft", "list", "chain", "ip", "nat", "MVM-POSTROUTING"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if nft_check.returncode != 0:
+            pytest.skip("nftables MVM-POSTROUTING chain not found")
+
         mvm_bin = Path.home() / ".local" / "bin" / "mvm"
         if not mvm_bin.exists():
             # Skip-reason: Sudo execution requires the built binary at
@@ -450,6 +461,17 @@ class TestHostCleanDestructive:
             # is a no-op. Running "mvm host init" first would make this
             # test unconditionally runnable.
             pytest.skip("Host not initialized — cannot test host reset")
+
+        # Skip-reason: If the host was initialized with iptables (not
+        # nftables), host reset --force will fail when trying to remove
+        # nftables chains that don't exist. Only run when nftables chains
+        # are present.
+        nft_check = subprocess.run(
+            ["sudo", "nft", "list", "chain", "ip", "nat", "MVM-POSTROUTING"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if nft_check.returncode != 0:
+            pytest.skip("nftables MVM-POSTROUTING chain not found")
 
         mvm_bin = Path.home() / ".local" / "bin" / "mvm"
         if not mvm_bin.exists():

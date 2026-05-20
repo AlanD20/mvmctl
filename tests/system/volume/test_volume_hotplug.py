@@ -108,6 +108,42 @@ def _wait_for_no_vdb(
     return False
 
 
+def _require_firecracker_ge_1_16(mvm_binary: str) -> None:
+    """Skip test if the default Firecracker binary is older than v1.16.
+
+    Hotplug requires Firecracker v1.16+ (version gate in the API layer).
+    This helper is called at the start of every hotplug test to ensure
+    the environment is capable.
+    """
+    result = _run_mvm(
+        mvm_binary, "bin", "ls", "--json", timeout=30
+    )
+    if result.returncode != 0:
+        pytest.skip("Cannot check Firecracker version (bin ls failed)")
+
+    bins = json.loads(result.stdout)
+    fc_default = next(
+        (b for b in bins
+         if b.get("name") == "firecracker" and b.get("is_default")),
+        None,
+    )
+    if fc_default is None:
+        pytest.skip("No default Firecracker binary set")
+    version = fc_default.get("version", "")
+    # Strip leading 'v' and non-numeric suffixes, then parse.
+    clean = version.lstrip("v").split("-")[0].split(".")[:2]
+    try:
+        major, minor = int(clean[0]), int(clean[1])
+    except (ValueError, IndexError):
+        pytest.skip(f"Firecracker version '{version}' is not parseable")
+    if major < 1 or (major == 1 and minor < 16):
+        pytest.skip(
+            f"Hotplug tests require Firecracker v1.16+ "
+            f"(current: v{version}). "
+            f"Install a newer binary with: mvm bin pull firecracker <version>"
+        )
+
+
 # ============================================================================
 # TestVolumeHotplug — hotplug a volume to a running VM
 # ============================================================================
@@ -120,6 +156,11 @@ class TestVolumeHotplug:
     with SSH key injected.  The fixture is function-scoped so each test gets
     an isolated VM (expensive, ~60-120s, but required for hotplug tests).
     """
+
+    @pytest.fixture(autouse=True)
+    def _ensure_firecracker_ge_1_16(self, mvm_binary: str) -> None:
+        """Skip all hotplug tests if Firecracker is too old."""
+        _require_firecracker_ge_1_16(mvm_binary)
 
     def test_hotplug_volume_appears_in_guest(
         self,
@@ -961,6 +1002,11 @@ class TestVolumeHotplugDestructive:
         pytest.mark.requires_kvm,
         pytest.mark.serial,
     ]
+
+    @pytest.fixture(autouse=True)
+    def _ensure_firecracker_ge_1_16(self, mvm_binary: str) -> None:
+        """Skip all hotplug destructive tests if Firecracker is too old."""
+        _require_firecracker_ge_1_16(mvm_binary)
 
     def test_hotplug_force_remove_attached_volume(
         self,

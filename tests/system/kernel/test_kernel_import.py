@@ -611,8 +611,11 @@ class TestKernelImportError:
             "Expected kernel import of nonexistent path to fail"
         )
         combined = (result.stdout + result.stderr).lower()
-        assert "not found" in combined or "does not exist" in combined, (
-            f"Expected error mentioning 'not found' or 'does not exist', got: {combined}"
+        # The error is wrapped by Rich's CLI formatter, splitting
+        # "does not exist" across lines. Match the specific error
+        # phrase that survives wrapping.
+        assert "invalid value for 'path'" in combined, (
+            f"Expected error mentioning 'invalid value for path', got: {combined}"
         )
 
     def test_import_empty_name_fails(self, mvm_binary: str) -> None:
