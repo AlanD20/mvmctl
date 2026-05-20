@@ -215,9 +215,9 @@ def host_init() -> None:
     FsUtils.chown_to_real_user(CacheUtils.get_cache_dir())
 
 
-@host_app.command(name="ls")
+@host_app.command(name="status")
 @handle_errors
-def host_ls(
+def host_status(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """Show current host configuration state vs expected."""
@@ -236,8 +236,15 @@ def host_ls(
     except HostError:
         pass
 
+    # Resource / virtualization checks
+    resources = None
+    try:
+        resources = HostOperation.detect_resources()
+    except Exception:
+        pass
+
     if json_output:
-        data = {
+        data: dict[str, object] = {
             "kvm_accessible": kvm_ok,
             "required_binaries": {"ok": not missing, "missing": missing},
             "ip_forward": {"value": ip_fwd, "ok": fwd_ok},
@@ -250,6 +257,14 @@ def host_ls(
                 else None,
             },
         }
+        if resources is not None:
+            data["virtualization"] = {
+                "modules_loaded": resources.modules_loaded,
+                "nested_virt": resources.modules_loaded.get("kvm_intel", False)
+                or resources.modules_loaded.get("kvm_amd", False),
+                "dev_net_tun": resources.dev_net_tun_accessible,
+                "user_in_kvm_group": resources.user_in_kvm_group,
+            }
         typer.echo(json.dumps(data, indent=2))
         return
 
@@ -273,6 +288,48 @@ def host_ls(
             else "no snapshot",
         ],
     ]
+
+    if resources is not None:
+        rows.append(
+            [
+                "nested virt",
+                "ok"
+                if resources.modules_loaded.get("kvm_intel", False)
+                or resources.modules_loaded.get("kvm_amd", False)
+                else "-",
+                "supported"
+                if (
+                    resources.modules_loaded.get("kvm_intel", False)
+                    or resources.modules_loaded.get("kvm_amd", False)
+                )
+                else "not loaded",
+            ]
+        )
+        kvm_mod = resources.modules_loaded.get("kvm", False)
+        rows.append(
+            [
+                "kvm module",
+                "ok" if kvm_mod else "FAIL",
+                "loaded" if kvm_mod else "not loaded",
+            ]
+        )
+        rows.append(
+            [
+                "/dev/net/tun",
+                "ok" if resources.dev_net_tun_accessible else "FAIL",
+                "accessible"
+                if resources.dev_net_tun_accessible
+                else "not accessible",
+            ]
+        )
+        rows.append(
+            [
+                "user in kvm group",
+                "ok" if resources.user_in_kvm_group else "-",
+                "member" if resources.user_in_kvm_group else "not member",
+            ]
+        )
+
     mvm_cli.table(columns=["Check", "Status", "Detail"], rows=rows)
 
 

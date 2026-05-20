@@ -183,6 +183,27 @@ def _handle_interactive_flow(
 
         # ── Handle sudo escalation ─────────────────────────────────────
         if interaction.code == "privilege.sudo_required":
+            # Run pre-flight probes before prompting for sudo
+            try:
+                from mvmctl.api.host_operations import HostOperation
+
+                probe_result = HostOperation.check_readiness()
+                if probe_result.has_critical:
+                    mvm_cli.warning("Pre-flight checks found issues:")
+                    for check in probe_result.critical:
+                        mvm_cli.warning(f"  {check.name}: {check.message}")
+                    if not typer.confirm(
+                        "Continue with host init? Some features may not work.",
+                        default=False,
+                    ):
+                        mvm_cli.info("Aborted")
+                        raise typer.Exit(code=1)
+                if probe_result.warnings:
+                    for check in probe_result.warnings:
+                        mvm_cli.info(f"  {check.name}: {check.message}")
+            except Exception:
+                pass
+
             host_state_before = _check_host_state()
 
             if (
@@ -201,15 +222,10 @@ def _handle_interactive_flow(
                     "passwordless sudo on future runs"
                 )
 
-            if non_interactive:
-                mvm_cli.warning(
-                    f"Host init requires root privileges. Run: sudo {CLI_NAME} host init"
-                )
-                break
-
-            if typer.confirm(
+            proceed_with_sudo = non_interactive or typer.confirm(
                 f"Run 'sudo {CLI_NAME} host init' now?", default=True
-            ):
+            )
+            if proceed_with_sudo:
                 proc = _run_with_sudo()
                 if proc.returncode != 0:
                     mvm_cli.warning(

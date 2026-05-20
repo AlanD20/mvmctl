@@ -194,7 +194,18 @@ CREATE TABLE host_state (
     conntrack_max INTEGER,
     tap_devices_max INTEGER,
     ip_local_port_range TEXT,
-    detected_at TIMESTAMP
+    detected_at TIMESTAMP,
+
+    -- Virtualization & system detection
+    cpu_has_vmx INTEGER,
+    cpu_hypervisor INTEGER,
+    nested_virt_available INTEGER,
+    ept_available INTEGER,
+    hugepage_count_2mb INTEGER,
+    ksm_disabled INTEGER,
+    cgroup_version INTEGER,
+    swap_total_mib INTEGER,
+    kernel_minimum_met INTEGER
 );
 
 -- HOST_STATE_CHANGES: Tracks host configuration changes for mvm host reset

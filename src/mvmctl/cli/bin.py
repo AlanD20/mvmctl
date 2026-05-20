@@ -197,9 +197,6 @@ def bin_pull(
 
         raise typer.Exit(code=0)
 
-    # ---- Release download path ----
-    # Version resolution (including latest-remote fallback) is handled
-    # internally by BinaryOperation.pull().
     inputs = BinaryPullInput(
         version=version or "",
         name=name,

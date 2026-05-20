@@ -111,6 +111,15 @@ class HostRepository:
         tap_devices_max: int,
         ip_local_port_range: tuple[int, int],
         detected_at: str,
+        cpu_has_vmx: bool = False,
+        cpu_hypervisor: bool = False,
+        nested_virt_available: bool = False,
+        ept_available: bool = False,
+        hugepage_count_2mb: int = 0,
+        ksm_disabled: bool = True,
+        cgroup_version: int = 1,
+        swap_total_mib: int = 0,
+        kernel_minimum_met: bool = False,
     ) -> None:
         """Upsert host capacity detection results into host_state row id=1.
 
@@ -148,6 +157,15 @@ class HostRepository:
                         tap_devices_max = ?,
                         ip_local_port_range = ?,
                         detected_at = ?,
+                        cpu_has_vmx = ?,
+                        cpu_hypervisor = ?,
+                        nested_virt_available = ?,
+                        ept_available = ?,
+                        hugepage_count_2mb = ?,
+                        ksm_disabled = ?,
+                        cgroup_version = ?,
+                        swap_total_mib = ?,
+                        kernel_minimum_met = ?,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = 1
                     """,
@@ -168,6 +186,15 @@ class HostRepository:
                         tap_devices_max,
                         port_range_str,
                         detected_at,
+                        int(cpu_has_vmx),
+                        int(cpu_hypervisor),
+                        int(nested_virt_available),
+                        int(ept_available),
+                        hugepage_count_2mb,
+                        int(ksm_disabled),
+                        cgroup_version,
+                        swap_total_mib,
+                        int(kernel_minimum_met),
                     ),
                 )
                 conn.execute("COMMIT")

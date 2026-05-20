@@ -5,6 +5,7 @@ from __future__ import annotations
 import grp
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -16,6 +17,7 @@ from mvmctl.constants import (
     DEFAULT_SUDOERS_DIR,
     DEFAULT_SYSCTL_CONF_DIR,
     DEFAULT_SYSCTL_CONF_PATH,
+    MIN_KERNEL_VERSION,
     PRIVILEGED_BINARIES,
     PROJECT_NAME,
     REQUIRED_BINARIES,
@@ -96,6 +98,16 @@ class HostService:
     def check_cloud_localds() -> bool:
         """Check if cloud-localds is available."""
         return shutil.which("cloud-localds") is not None
+
+    @staticmethod
+    def check_kernel_version() -> bool:
+        """Check if the running kernel meets the minimum version (5.10)."""
+        release = os.uname().release
+        match = re.match(r"(\d+)\.(\d+)", release)
+        if not match:
+            return False
+        major, minor = int(match.group(1)), int(match.group(2))
+        return (major, minor) >= MIN_KERNEL_VERSION
 
     @staticmethod
     def _group_exists(group_name: str) -> bool:
@@ -501,6 +513,15 @@ class HostService:
             tap_devices_max=limits.tap_devices_max,
             ip_local_port_range=limits.ip_local_port_range,
             detected_at=detected_at,
+            cpu_has_vmx=hardware.cpu_has_vmx,
+            cpu_hypervisor=hardware.cpu_hypervisor,
+            nested_virt_available=limits.nested_virt_available,
+            ept_available=limits.ept_available,
+            hugepage_count_2mb=limits.hugepage_count_2mb,
+            ksm_disabled=limits.ksm_disabled,
+            cgroup_version=limits.cgroup_version,
+            swap_total_mib=limits.swap_total_mib,
+            kernel_minimum_met=limits.kernel_minimum_met,
         )
         logger.info(
             "Host capacity detected: %s, %s, %d cores, %d MiB RAM",

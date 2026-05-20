@@ -142,6 +142,9 @@ CONST_VM_VCPU_MIN: Final[int] = 1
 CONST_VM_VCPU_MAX: Final[int] = 32
 CONST_SIGNAL_EXIT_CODE_BASE: Final[int] = 128
 
+# Minimum kernel version required for Firecracker compatibility.
+MIN_KERNEL_VERSION: Final[tuple[int, int]] = (5, 10)
+
 # --- Defaults ---
 DEFAULT_FIRECRACKER_CI_VERSION: Final[str] = "v1.15"
 
@@ -266,24 +269,34 @@ PRIVILEGED_SERVICE_BINARIES: Final[list[str]] = [
     "mvm-provision",
 ]
 
-REQUIRED_BINARIES: Final[list[str]] = [
+INIT_BINARIES: Final[list[str]] = [
     "ip",
-    "iptables",
-    "nft",
-    "qemu-img",
-    "ssh-keygen",
-    "tar",
-    "mkfs.ext4",
-    "blkid",
-    "sfdisk",
-    "dumpe2fs",
     "modprobe",
     "lsmod",
     "groupadd",
     "usermod",
     "groupdel",
     "visudo",
+    "ssh-keygen",
+    "tar",
 ]
+
+INFRA_BINARIES: Final[list[str]] = [
+    "qemu-img",
+    "mkfs.ext4",
+    "blkid",
+    "sfdisk",
+    "dumpe2fs",
+]
+
+REQUIRED_BINARIES: Final[list[str]] = (
+    INIT_BINARIES
+    + INFRA_BINARIES
+    + [
+        "iptables",
+        "nft",
+    ]
+)
 CONST_MIN_BINARY_SIZE_BYTES: Final[int] = 512
 
 # --- Libguestfs ---

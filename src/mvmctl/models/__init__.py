@@ -34,6 +34,8 @@ if TYPE_CHECKING:
         HostResources,
         HostStateChangeItem,
         HostStateItem,
+        ProbeCheck,
+        ProbeResult,
     )
     from mvmctl.models.image import ImageItem, ImageSpec, ImageVersion
     from mvmctl.models.kernel import (
@@ -82,6 +84,8 @@ __all__ = [
     "HostResources",
     "HostStateChangeItem",
     "HostStateItem",
+    "ProbeCheck",
+    "ProbeResult",
     "FirewallBackendType",
     "FirewallChain",
     "FirewallPort",
@@ -131,6 +135,8 @@ _LAZY_MAP = {
     "HostResources": ("mvmctl.models.host", "HostResources"),
     "HostStateChangeItem": ("mvmctl.models.host", "HostStateChangeItem"),
     "HostStateItem": ("mvmctl.models.host", "HostStateItem"),
+    "ProbeCheck": ("mvmctl.models.host", "ProbeCheck"),
+    "ProbeResult": ("mvmctl.models.host", "ProbeResult"),
     "ImageItem": ("mvmctl.models.image", "ImageItem"),
     "ImageSpec": ("mvmctl.models.image", "ImageSpec"),
     "ImageVersion": ("mvmctl.models.image", "ImageVersion"),

@@ -98,11 +98,32 @@ def vm_ls(
 
 @vm_app.command(name="ps")
 @handle_errors
-def vm_ps() -> None:
+def vm_ps(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
     """List running VMs (active processes)."""
     active_vms = VMOperation.list_all(
         status=[VMStatus.STARTING, VMStatus.RUNNING]
     )
+
+    if json_output:
+        data = [
+            {
+                "name": vm.name,
+                "status": vm.status,
+                "pid": vm.pid,
+                "ipv4": vm.ipv4,
+                "vcpu_count": vm.vcpu_count,
+                "mem_size_mib": vm.mem_size_mib,
+                "disk_size_mib": vm.disk_size_mib,
+                "image_id": vm.image_id,
+                "kernel_id": vm.kernel_id,
+                "created_at": vm.created_at,
+            }
+            for vm in active_vms
+        ]
+        typer.echo(json.dumps(data, indent=2))
+        return
 
     if not active_vms:
         mvm_cli.success("No active VMs")

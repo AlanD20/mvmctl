@@ -67,6 +67,17 @@ from common import (
 )
 
 # ---------------------------------------------------------------------------
+# User-facing names (tweak these to match your naming preference)
+# ---------------------------------------------------------------------------
+
+KEY_NAME = "test"
+VM_NAME = "vm"
+VOLUME_NAME = "vol1"
+NESTED_VM_NAME = "nested-vm"
+IMAGE_SELECTOR = "ubuntu:noble"
+KERNEL_SELECTOR = "official:6.19.9"
+
+# ---------------------------------------------------------------------------
 # Resolver helpers
 # ---------------------------------------------------------------------------
 
@@ -181,15 +192,15 @@ def _build_chain_cmd(kernel_filename: str, image_filename: str) -> str:
         '&& echo "=== [3/8] mvm init (full) ===" '
         "&& mvm init --non-interactive "
         '&& echo "=== [4/8] mvm key create ===" '
-        "&& mvm key create test --default --algorithm ed25519 --force "
+        f"&& mvm key create {KEY_NAME} --default --algorithm ed25519 --force "
         '&& echo "=== [5/8] mvm image import ===" '
-        f"&& mvm image import ubuntu-noble /mnt/{image_filename} --default --force "
+        f"&& mvm image import {IMAGE_SELECTOR} /mnt/{image_filename} --default --force "
         '&& echo "=== [6/8] mvm kernel import ===" '
-        f"&& mvm kernel import official-6.19.9 /mnt/{kernel_filename} --version 6.19.9 --default "
+        f"&& mvm kernel import {KERNEL_SELECTOR} /mnt/{kernel_filename} --version 6.19.9 --default "
         '&& echo "=== [7/8] mvm bin pull ===" '
         "&& MVM_ASSET_MIRROR=/mnt mvm bin pull firecracker --version 1.15.1 --default --force"
         '&& echo "=== [8/8] mvm vm create ===" '
-        "&& mvm vm create nested-fenv --vcpus 2 --mem 512m --nested-virt -s 4g"
+        f"&& mvm vm create {NESTED_VM_NAME} --vcpus 2 --mem 512m --nested-virt -s 4g"
     )
 
 
@@ -213,11 +224,11 @@ def _build_base_steps() -> dict[str, dict[str, Any]]:
             "sudo": True,
         },
         "create_key": {
-            "desc": "Create default ED25519 SSH key",
+            "desc": f"Create default ED25519 SSH key '{KEY_NAME}'",
             "args": [
                 "key",
                 "create",
-                "test",
+                KEY_NAME,
                 "--default",
                 "--algorithm",
                 "ed25519",
@@ -225,16 +236,16 @@ def _build_base_steps() -> dict[str, dict[str, Any]]:
             ],
         },
         "pull_image": {
-            "desc": "Pull default image (ubuntu:noble)",
-            "args": ["image", "pull", "ubuntu:noble", "--default"],
+            "desc": f"Pull default image ({IMAGE_SELECTOR})",
+            "args": ["image", "pull", IMAGE_SELECTOR, "--default"],
             "timeout": 1800,
         },
         "pull_kernel": {
-            "desc": "Pull kernel official:6.19.9 with features",
+            "desc": f"Pull kernel {KERNEL_SELECTOR} with features",
             "args": [
                 "kernel",
                 "pull",
-                "official:6.19.9",
+                KERNEL_SELECTOR,
                 "--default",
                 "--features",
                 "kvm,nftables,tuntap",
@@ -254,11 +265,11 @@ def _build_base_steps() -> dict[str, dict[str, Any]]:
             "timeout": 7200,
         },
         "create_vm": {
-            "desc": "Create VM 'fenv' (6 vcpu, 4G, nested-virt, 8G root)",
+            "desc": f"Create VM '{VM_NAME}' (6 vcpu, 4G, nested-virt, 8G root)",
             "args": [
                 "vm",
                 "create",
-                "fenv",
+                VM_NAME,
                 "--vcpus",
                 "6",
                 "--mem",
@@ -270,30 +281,30 @@ def _build_base_steps() -> dict[str, dict[str, Any]]:
             "timeout": 600,
         },
         "create_volume": {
-            "desc": "Create volume 'vol1' (8g)",
-            "args": ["vol", "create", "vol1", "8g"],
+            "desc": f"Create volume '{VOLUME_NAME}' (8g)",
+            "args": ["vol", "create", VOLUME_NAME, "8g"],
             "timeout": 60,
         },
         "stop_vm": {
-            "desc": "Stop VM 'fenv'",
-            "args": ["vm", "stop", "fenv"],
+            "desc": f"Stop VM '{VM_NAME}'",
+            "args": ["vm", "stop", VM_NAME],
             "timeout": 60,
         },
         "attach_volume": {
-            "desc": "Attach volume 'vol1' to 'fenv'",
-            "args": ["vm", "attach-volume", "fenv", "vol1"],
+            "desc": f"Attach volume '{VOLUME_NAME}' to '{VM_NAME}'",
+            "args": ["vm", "attach-volume", VM_NAME, VOLUME_NAME],
             "timeout": 30,
         },
         "start_vm": {
-            "desc": "Start VM 'fenv'",
-            "args": ["vm", "start", "fenv"],
+            "desc": f"Start VM '{VM_NAME}'",
+            "args": ["vm", "start", VM_NAME],
             "timeout": 120,
         },
         "ssh_setup": {
-            "desc": "SSH into 'fenv', install packages & mount volume",
+            "desc": f"SSH into '{VM_NAME}', install packages & mount volume",
             "args": [
                 "ssh",
-                "fenv",
+                VM_NAME,
                 "--cmd",
                 "apt update && apt install -y "
                 "qemu-utils net-tools "
@@ -306,14 +317,14 @@ def _build_base_steps() -> dict[str, dict[str, Any]]:
         },
         "copy_bin": {
             "desc": "Copy mvm binary into guest",
-            "args": ["cp", "dist/mvm", "fenv:/root/"],
+            "args": ["cp", "dist/mvm", f"{VM_NAME}:/root/"],
             "timeout": 60,
         },
         "install_bin": {
             "desc": "Install mvm binary & create temp dirs inside guest",
             "args": [
                 "ssh",
-                "fenv",
+                VM_NAME,
                 "--cmd",
                 "cp /root/mvm /usr/bin/mvm && mkdir -p /mnt/tmp",
             ],
@@ -336,12 +347,12 @@ def _build_copy_steps(
     return {
         "copy_kernel": {
             "desc": "Copy default kernel binary into guest",
-            "args": ["cp", kernel_path, "fenv:/mnt/"],
+            "args": ["cp", kernel_path, f"{VM_NAME}:/mnt/"],
             "timeout": 120,
         },
         "copy_image": {
             "desc": "Copy default image into guest",
-            "args": ["cp", image_path, "fenv:/mnt/"],
+            "args": ["cp", image_path, f"{VM_NAME}:/mnt/"],
             "timeout": 120,
         },
         "copy_bin_tgz": {
@@ -349,7 +360,7 @@ def _build_copy_steps(
             "args": [
                 "cp",
                 str(DEFAULT_MIRROR / "firecracker-v1.15.1-x86_64.tgz"),
-                "fenv:/mnt/",
+                f"{VM_NAME}:/mnt/",
             ],
             "timeout": 120,
         },
@@ -357,7 +368,7 @@ def _build_copy_steps(
             "desc": "Set up nested VM environment inside guest (8 sub-steps with tracing)",
             "args": [
                 "ssh",
-                "fenv",
+                VM_NAME,
                 "--cmd",
                 chain_cmd,
             ],
@@ -525,10 +536,10 @@ def main() -> int:
     print_success(f"All 18 steps completed in {total_elapsed}s")
     print()
     print_info(
-        "VM 'fenv' is running with volume 'vol1' attached and mounted at /mnt."
+        f"VM '{VM_NAME}' is running with volume '{VOLUME_NAME}' attached and mounted at /mnt."
     )
-    print_info("Connect:  mvm ssh fenv")
-    print_info("Or use:   mvm console fenv")
+    print_info(f"Connect:  mvm ssh {VM_NAME}")
+    print_info(f"Or use:   mvm console {VM_NAME}")
     print_info("Binary:   mvm copied to guest at /root/mvm")
     print_info("Guest env: export MVM_ASSET_MIRROR=/mnt MVM_TEMP_DIR=/mnt/tmp")
     print()

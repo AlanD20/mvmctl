@@ -293,6 +293,18 @@ class CloudInitError(MVMError):
     """Cloud-init provisioning failure."""
 
 
+class CloudInitProvisionError(CloudInitError):
+    """Invalid custom user data."""
+
+
+class CloudInitModeError(CloudInitError):
+    """Mode resolution failure."""
+
+
+class CloudInitOffModeError(CloudInitError):
+    """OFF mode guestfs failure."""
+
+
 class CloudInitIsoModeError(CloudInitError):
     """ISO creation failure."""
 

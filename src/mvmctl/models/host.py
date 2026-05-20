@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from mvmctl.utils.common import CommonUtils
 
@@ -36,6 +36,17 @@ class HostStateItem:
     tap_devices_max: int | None = None
     ip_local_port_range: str | None = None
     detected_at: str | None = None
+
+    # Virtualization detection fields
+    cpu_has_vmx: int | None = None
+    cpu_hypervisor: int | None = None
+    nested_virt_available: int | None = None
+    ept_available: int | None = None
+    hugepage_count_2mb: int | None = None
+    ksm_disabled: int | None = None
+    cgroup_version: int | None = None
+    swap_total_mib: int | None = None
+    kernel_minimum_met: int | None = None
 
     def __post_init__(self) -> None:
         """Coerce bool fields loaded from SQLite."""
@@ -87,6 +98,8 @@ class HostHardware:
     storage_total_bytes: int
     kernel_version: str
     os_release: str
+    cpu_has_vmx: bool = False
+    cpu_hypervisor: bool = False
 
 
 @dataclass
@@ -98,6 +111,13 @@ class HostLimits:
     conntrack_max: int
     tap_devices_max: int
     ip_local_port_range: tuple[int, int]
+    nested_virt_available: bool = False
+    ept_available: bool = False
+    hugepage_count_2mb: int = 0
+    ksm_disabled: bool = True
+    cgroup_version: int = 1
+    swap_total_mib: int = 0
+    kernel_minimum_met: bool = False
 
 
 @dataclass
@@ -113,3 +133,37 @@ class HostResources:
     storage_free_bytes: int
     recommended_max_vms: int
     limiting_resource: str | None
+    modules_loaded: dict[str, bool] = field(default_factory=dict)
+    swap_used_mib: int = 0
+    hugepages_free_2mb: int = 0
+    smt_active: bool = False
+    nftables_available: bool = False
+    iptables_available: bool = False
+    cloud_localds_available: bool = False
+    dev_kvm_status: str = ""
+    user_in_kvm_group: bool = False
+    dev_net_tun_accessible: bool = False
+
+
+@dataclass
+class ProbeCheck:
+    """Result of a single pre-flight probe check."""
+
+    name: str
+    passed: bool
+    message: str
+    details: str | None = None
+
+
+@dataclass
+class ProbeResult:
+    """Aggregated pre-flight probe results."""
+
+    critical: list[ProbeCheck] = field(default_factory=list)
+    warnings: list[ProbeCheck] = field(default_factory=list)
+    info: list[ProbeCheck] = field(default_factory=list)
+
+    @property
+    def has_critical(self) -> bool:
+        """Return True if there are any failed critical checks."""
+        return bool(self.critical)

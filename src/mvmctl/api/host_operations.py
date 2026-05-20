@@ -22,6 +22,7 @@ from mvmctl.core.config._service import SettingsService
 from mvmctl.core.host._controller import HostController
 from mvmctl.core.host._detector import HostDetector
 from mvmctl.core.host._helper import HostPrivilegeHelper
+from mvmctl.core.host._probe import HostProbe
 from mvmctl.core.host._repository import HostRepository
 from mvmctl.core.host._service import HostService
 from mvmctl.core.network._repository import NetworkRepository
@@ -34,6 +35,7 @@ from mvmctl.models import (
     HostResources,
     HostStateChangeItem,
     HostStateItem,
+    ProbeResult,
     VMInstanceItem,
     VMStatus,
 )
@@ -110,67 +112,20 @@ class HostOperation:
         except Exception:
             logger.exception("Failed to extract embedded service binaries")
 
-        # --- System health checks ---
-        if not HostService.check_kvm_access():
-            kvm = Path("/dev/kvm")
-            if not kvm.exists():
-                return OperationResult(
-                    status="error",
-                    code="host.kvm.missing",
-                    message=(
-                        "/dev/kvm does not exist.\n\n"
-                        "KVM kernel modules are not loaded. Run:\n"
-                        "  sudo modprobe kvm\n"
-                        "  sudo modprobe kvm_intel   # or kvm_amd\n\n"
-                        "If modules are missing, install qemu-kvm or linux-modules-extra."
-                    ),
-                )
+        # --- Phase 1: Pre-flight probes ---
+        probe_result = HostProbe.run_all()
+        if probe_result.has_critical:
+            critical_names = ", ".join(c.name for c in probe_result.critical)
             return OperationResult(
                 status="error",
-                code="host.kvm.unreadable",
-                message=(
-                    "/dev/kvm exists but is not readable/writable.\n\n"
-                    "Fix permissions with one of:\n"
-                    "  1. Add your user to the 'kvm' group:\n"
-                    "       sudo usermod -aG kvm $USER && newgrp kvm\n"
-                    "  2. Or run with sudo: sudo mvm host init\n\n"
-                    f"Current permissions: {kvm.stat().st_mode.__format__('o')}"
-                ),
+                code="host.init.probe_failed",
+                message=f"Probe failures: {critical_names}",
+                metadata={
+                    "probe_result": probe_result,
+                },
             )
 
-        has_conflict, diagnosis = (
-            NetworkUtils.detect_iptables_backend_conflict()
-        )
-        if has_conflict:
-            return OperationResult(
-                status="error",
-                code="host.iptables.conflict",
-                message=(
-                    "Mixed iptables backend detected. VM networking may not work correctly.\n"
-                    "See troubleshooting: docs/TROUBLESHOOTING.md#mixed-iptables-backend\n"
-                    f"Diagnosis: {diagnosis}\n\n"
-                    "Remediation:\n"
-                    "  1. Quick fix (clears orphaned legacy rules): sudo iptables-legacy -F\n"
-                    "  2. Reboot host (clears both backends cleanly)\n"
-                    "  3. Configure Docker to use same backend: edit /etc/docker/daemon.json\n\n"
-                    "Then re-run: mvm host init"
-                ),
-            )
-
-        missing = HostService.check_required_binaries()
-        if missing:
-            return OperationResult(
-                status="error",
-                code="host.binaries.missing",
-                message=f"Missing required binaries: {', '.join(missing)}",
-            )
-
-        HostService.validate_sudoers_binaries()
-
-        # --- Firewall backend check ---
-        # nftables is the default.  If the user already has iptables set
-        # (e.g. from a prior init or explicit override), skip the expensive
-        # nftables availability test.
+        # --- iptables comment module check ---
         from mvmctl.core.config._repository import SettingsRepository
 
         db = Database()
@@ -178,26 +133,6 @@ class HostOperation:
         current_backend = settings_svc.resolve(
             db, "settings", "firewall_backend"
         )
-        if current_backend != "iptables":
-            _nft_available = NetworkService.check_nftables_available()
-
-            if not _nft_available:
-                logger.warning(
-                    "nftables NAT not available "
-                    "(kernel module nft_chain_nat missing). "
-                    "Falling back to iptables backend. "
-                    "To use nftables, rebuild kernel with "
-                    "--features nftables"
-                )
-                try:
-                    settings_svc.set("settings", "firewall_backend", "iptables")
-                    current_backend = "iptables"
-                except Exception:
-                    pass
-
-        # --- iptables comment module check ---
-        # The xt_comment kernel module is required for ``-m comment``
-        # in iptables rules.  If it's missing, disable comments.
         if current_backend == "iptables":
             from mvmctl.core._shared._iptables_tracker._tracker import (
                 IPTablesTracker,
@@ -215,145 +150,19 @@ class HostOperation:
                 except Exception:
                     pass
 
-        if not HostService.check_cloud_localds():
-            logger.warning(
-                "cloud-localds not found. Install cloud-image-utils (Debian/Ubuntu) "
-                "or cloud-utils (Arch) package"
-            )
-
-        # --- Privilege setup (group, user, sudoers) ---
-        db_changes: list[HostStateChangeItem] = []
-        all_changes: list[HostStateChangeItem] = []
-
-        group_created = HostService.create_group(MVM_UNIX_GROUP)
-        if group_created:
-            change_item = HostStateChangeItem(
-                session_id="",
-                init_timestamp="",
-                setting=f"group:{MVM_UNIX_GROUP}",
-                original_value=None,
-                applied_value=MVM_UNIX_GROUP,
-                mechanism="groupadd",
-                reverted=False,
-                change_order=0,
-                created_at="",
-            )
-            db_changes.append(change_item)
-            all_changes.append(change_item)
-
-        username = (
-            os.environ.get("SUDO_USER") or pwd.getpwuid(os.getuid()).pw_name
-        )
-        user_added = HostService.add_user_to_group(username, MVM_UNIX_GROUP)
-        if user_added:
-            change_item = HostStateChangeItem(
-                session_id="",
-                init_timestamp="",
-                setting=f"group_member:{username}",
-                original_value=None,
-                applied_value=f"{username}:{MVM_UNIX_GROUP}",
-                mechanism="usermod",
-                reverted=False,
-                change_order=0,
-                created_at="",
-            )
-            db_changes.append(change_item)
-            all_changes.append(change_item)
-
-        # Validate group name format (caller validates, receiver trusts)
-        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,30}", MVM_UNIX_GROUP):
-            raise HostError(f"Invalid group name: {MVM_UNIX_GROUP!r}")
-
-        sudoers_path = Path(SUDOERS_DROP_IN_PATH)
-        sudoers_stale = True
-        try:
-            if sudoers_path.exists():
-                existing = sudoers_path.read_text()
-                expected = HostService._generate_sudoers_content(MVM_UNIX_GROUP)
-                sudoers_stale = existing != expected
-        except (PermissionError, OSError):
-            pass
-        if sudoers_stale:
-            HostService.write_sudoers(sudoers_path, MVM_UNIX_GROUP)
-            change_item = HostStateChangeItem(
-                session_id="",
-                init_timestamp="",
-                setting="sudoers_dropin",
-                original_value=None,
-                applied_value=str(sudoers_path),
-                mechanism="file_create",
-                reverted=False,
-                change_order=0,
-                created_at="",
-            )
-            db_changes.append(change_item)
-            all_changes.append(change_item)
-
-        # --- Network & kernel setup ---
-        change = HostService.enable_ip_forward()
-        if change:
-            db_changes.append(change)
-            all_changes.append(change)
-
-        change = HostService.persist_sysctl()
-        if change:
-            db_changes.append(change)
-            all_changes.append(change)
-
-        # Create repo early so module loads can be recorded with a session ID.
+        # --- Phase 2: Setup host environment ---
         repo = HostRepository()
         repo.initialize_state()
         session_id = str(uuid.uuid4())
 
-        module_changes, next_order = HostService.ensure_kvm_modules(
-            repo=repo, session_id=session_id, change_order_start=0
+        all_changes = HostOperation._setup_host_environment(
+            repo=repo,
+            session_id=session_id,
         )
-        all_changes.extend(module_changes)
 
-        net_repo = NetworkRepository()
-        net_service = NetworkService(net_repo)
-        net_service.ensure_mvm_chains()
-
-        backend = SettingsService.resolve(
-            Database(), "settings", "firewall_backend"
-        )
-        chain_setting = f"{backend}_chains"
-        chain_change = HostStateChangeItem(
-            session_id="",
-            init_timestamp="",
-            setting=chain_setting,
-            original_value=None,
-            applied_value="MVM chains ensured",
-            mechanism=backend,
-            reverted=False,
-            change_order=0,
-            created_at="",
-        )
-        db_changes.append(chain_change)
-        all_changes.append(chain_change)
-
-        # --- Persist state & finalize ---
-        controller = HostController(repo)
-        try:
-            controller.record_changes(
-                db_changes,
-                session_id=session_id,
-                change_order_offset=next_order,
-            )
-        except Exception as e:
-            logger.warning("Could not record host changes to DB: %s", e)
-        if group_created:
-            try:
-                repo.update_component("mvm_group_created", True)
-            except Exception as e:
-                logger.warning("Could not update host state: %s", e)
-        if sudoers_stale:
-            try:
-                repo.update_component("sudoers_configured", True)
-            except Exception as e:
-                logger.warning("Could not update host state: %s", e)
-
+        # --- Finalize ---
         now = datetime.now(UTC).isoformat()
+        controller = HostController(repo)
         try:
             controller.mark_initialized(now)
         except Exception as e:
@@ -362,6 +171,8 @@ class HostOperation:
         FsUtils.chown_to_real_user(cache_dir)
 
         AuditLog.log("host.init", {"changes": len(all_changes)})
+
+        was_user_added = any(c.mechanism == "usermod" for c in all_changes)
 
         if not all_changes:
             return OperationResult(
@@ -376,14 +187,176 @@ class HostOperation:
             message=f"Host initialized ({len(all_changes)} change(s) applied).",
             metadata={
                 "changes": all_changes,
-                "user_added_to_group": user_added,
+                "user_added_to_group": was_user_added,
             },
         )
+
+    @staticmethod
+    def _setup_host_environment(
+        repo: HostRepository,
+        session_id: str,
+    ) -> list[HostStateChangeItem]:
+        """Orchestrate group/sudoers/sysctl/module/chains host setup.
+
+        Sequences calls to HostService for each configuration step and
+        returns all changes made. Runs as root (called from init() after
+        privilege escalation).
+        """
+        all_changes: list[HostStateChangeItem] = []
+        db_changes: list[HostStateChangeItem] = []
+
+        # --- Group setup ---
+        group_created = HostService.create_group(MVM_UNIX_GROUP)
+        if group_created:
+            change = HostStateChangeItem(
+                session_id="",
+                init_timestamp="",
+                setting=f"group:{MVM_UNIX_GROUP}",
+                original_value=None,
+                applied_value=MVM_UNIX_GROUP,
+                mechanism="groupadd",
+                reverted=False,
+                change_order=0,
+                created_at="",
+            )
+            db_changes.append(change)
+            all_changes.append(change)
+
+        username = (
+            os.environ.get("SUDO_USER") or pwd.getpwuid(os.getuid()).pw_name
+        )
+        user_added = HostService.add_user_to_group(username, MVM_UNIX_GROUP)
+        if user_added:
+            change = HostStateChangeItem(
+                session_id="",
+                init_timestamp="",
+                setting=f"group_member:{username}",
+                original_value=None,
+                applied_value=f"{username}:{MVM_UNIX_GROUP}",
+                mechanism="usermod",
+                reverted=False,
+                change_order=0,
+                created_at="",
+            )
+            db_changes.append(change)
+            all_changes.append(change)
+
+        # --- Sudoers setup ---
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,30}", MVM_UNIX_GROUP):
+            raise HostError(f"Invalid group name: {MVM_UNIX_GROUP!r}")
+
+        sudoers_path = Path(SUDOERS_DROP_IN_PATH)
+        sudoers_stale = True
+        try:
+            if sudoers_path.exists():
+                existing = sudoers_path.read_text()
+                expected = HostService._generate_sudoers_content(MVM_UNIX_GROUP)
+                sudoers_stale = existing != expected
+        except (PermissionError, OSError):
+            pass
+        if sudoers_stale:
+            HostService.write_sudoers(sudoers_path, MVM_UNIX_GROUP)
+            change = HostStateChangeItem(
+                session_id="",
+                init_timestamp="",
+                setting="sudoers_dropin",
+                original_value=None,
+                applied_value=str(sudoers_path),
+                mechanism="file_create",
+                reverted=False,
+                change_order=0,
+                created_at="",
+            )
+            db_changes.append(change)
+            all_changes.append(change)
+
+        # --- IP forwarding ---
+        fwd_change = HostService.enable_ip_forward()
+        if fwd_change:
+            db_changes.append(fwd_change)
+            all_changes.append(fwd_change)
+
+        # --- Persist sysctl ---
+        sysctl_change = HostService.persist_sysctl()
+        if sysctl_change:
+            db_changes.append(sysctl_change)
+            all_changes.append(sysctl_change)
+
+        # --- KVM modules ---
+        module_changes, next_order = HostService.ensure_kvm_modules(
+            repo=repo, session_id=session_id, change_order_start=0
+        )
+        all_changes.extend(module_changes)
+
+        # --- Firewall chains ---
+        net_repo = NetworkRepository()
+        net_service = NetworkService(net_repo)
+        net_service.ensure_mvm_chains()
+
+        backend = SettingsService.resolve(
+            Database(), "settings", "firewall_backend"
+        )
+        chain_change = HostStateChangeItem(
+            session_id="",
+            init_timestamp="",
+            setting=f"{backend}_chains",
+            original_value=None,
+            applied_value="MVM chains ensured",
+            mechanism=backend,
+            reverted=False,
+            change_order=0,
+            created_at="",
+        )
+        db_changes.append(chain_change)
+        all_changes.append(chain_change)
+
+        # --- Persist state ---
+        controller = HostController(repo)
+        try:
+            controller.record_changes(
+                db_changes,
+                session_id=session_id,
+                change_order_offset=next_order,
+            )
+        except Exception as e:
+            logger.warning("Could not record host changes to DB: %s", e)
+
+        if group_created:
+            try:
+                repo.update_component("mvm_group_created", True)
+            except Exception as e:
+                logger.warning("Could not update host state: %s", e)
+        if sudoers_stale:
+            try:
+                repo.update_component("sudoers_configured", True)
+            except Exception as e:
+                logger.warning("Could not update host state: %s", e)
+
+        return all_changes
 
     @staticmethod
     def get_state() -> HostStateItem | None:
         """Get current host state snapshot."""
         return HostRepository().get_state()
+
+    @staticmethod
+    def detect_resources() -> HostResources | None:
+        """Detect live host resources from stored hardware/limits, falling back to live detection."""
+        from mvmctl.utils.common import CacheUtils
+
+        state = HostRepository().get_state()
+        if state is not None and state.cpu_model is not None:
+            hardware = HostOperation._hardware_from_state(state)
+            limits = HostOperation._limits_from_state(state)
+        else:
+            # No persisted state — fall back to live detection.
+            hardware = HostDetector.detect_hardware()
+            limits = HostDetector.detect_limits()
+        if hardware is None or limits is None:
+            return None
+        return HostDetector.detect_resources(
+            hardware, limits, CacheUtils.get_cache_dir()
+        )
 
     @staticmethod
     def _build_info_dict(
@@ -407,13 +380,43 @@ class HostOperation:
                 "architecture": hardware.cpu_architecture,
                 "numa_nodes": hardware.numa_nodes,
             },
+            "virtualization": {
+                "cpu_has_vmx": hardware.cpu_has_vmx,
+                "nested_virt_available": limits.nested_virt_available,
+                "ept_available": limits.ept_available,
+                "hypervisor": hardware.cpu_hypervisor,
+                "smt_active": resources.smt_active,
+                "modules": dict(resources.modules_loaded),
+            },
+            "hugepages": {
+                "count_2mb": limits.hugepage_count_2mb,
+                "free_2mb": resources.hugepages_free_2mb,
+            },
+            "dependencies": {
+                "nftables_available": resources.nftables_available,
+                "iptables_available": resources.iptables_available,
+                "cloud_localds_available": resources.cloud_localds_available,
+                "dev_net_tun": resources.dev_net_tun_accessible,
+            },
+            "system": {
+                "cgroup_version": limits.cgroup_version,
+                "ksm_disabled": limits.ksm_disabled,
+                "dev_kvm_status": resources.dev_kvm_status,
+                "user_in_kvm_group": resources.user_in_kvm_group,
+            },
             "memory": {
                 "total_mib": hardware.memory_total_mib,
                 "available_mib": resources.memory_available_mib,
+                "swap_total_mib": limits.swap_total_mib,
+                "swap_used_mib": resources.swap_used_mib,
             },
             "storage": {
                 "total_bytes": hardware.storage_total_bytes,
                 "free_bytes": resources.storage_free_bytes,
+            },
+            "kernel": {
+                "version": hardware.kernel_version,
+                "minimum_version_met": limits.kernel_minimum_met,
             },
             "limits": {
                 "pid_max": limits.pid_max,
@@ -483,6 +486,12 @@ class HostOperation:
             storage_total_bytes=state.storage_total_bytes or 0,
             kernel_version=state.kernel_version or "",
             os_release=state.os_release or "",
+            cpu_has_vmx=bool(state.cpu_has_vmx)
+            if state.cpu_has_vmx is not None
+            else False,
+            cpu_hypervisor=bool(state.cpu_hypervisor)
+            if state.cpu_hypervisor is not None
+            else False,
         )
 
     @staticmethod
@@ -506,6 +515,21 @@ class HostOperation:
             if state.tap_devices_max is not None
             else 0,
             ip_local_port_range=port_range,
+            nested_virt_available=bool(state.nested_virt_available)
+            if state.nested_virt_available is not None
+            else False,
+            ept_available=bool(state.ept_available)
+            if state.ept_available is not None
+            else False,
+            hugepage_count_2mb=state.hugepage_count_2mb or 0,
+            ksm_disabled=bool(state.ksm_disabled)
+            if state.ksm_disabled is not None
+            else True,
+            cgroup_version=state.cgroup_version or 1,
+            swap_total_mib=state.swap_total_mib or 0,
+            kernel_minimum_met=bool(state.kernel_minimum_met)
+            if state.kernel_minimum_met is not None
+            else False,
         )
 
     @staticmethod
@@ -849,6 +873,11 @@ class HostOperation:
 
         state = HostRepository(Database()).get_state()
         return state is not None and bool(state.initialized)
+
+    @staticmethod
+    def check_readiness() -> ProbeResult:
+        """Run pre-flight checks and return structured probe results."""
+        return HostProbe.run_all()
 
 
 __all__ = ["HostOperation"]

@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import grp
 import logging
 import os
 import platform
+import pwd
 import shutil
 import socket
 from pathlib import Path
 
-from mvmctl.constants import DEFAULT_IP_LOCAL_PORT_RANGE
+from mvmctl.constants import DEFAULT_IP_LOCAL_PORT_RANGE, MIN_KERNEL_VERSION
 from mvmctl.models.host import HostHardware, HostLimits, HostResources
 from mvmctl.utils.fs import FsUtils
 
@@ -41,6 +43,18 @@ _VM_RESERVED_MIB = 2048
 _VM_RESERVED_PIDS = 200
 _VM_PIDS_PER_VM = 3
 _VM_CONNTRACK_PER_VM = 64
+
+
+# Kernel modules relevant to VM host operations, checked against /proc/modules.
+_VM_HOST_KERNEL_MODULES: list[str] = [
+    "kvm",
+    "kvm_intel",
+    "kvm_amd",
+    "tun",
+    "bridge",
+    "vhost_vsock",
+    "nft_chain_nat",
+]
 
 
 class HostDetector:
@@ -87,6 +101,8 @@ class HostDetector:
         cpu_model = ""
         cpu_vendor = ""
         cpu_architecture = platform.machine()
+        cpu_has_vmx = False
+        cpu_hypervisor = False
         try:
             text = Path("/proc/cpuinfo").read_text()
             for line in text.splitlines():
@@ -100,6 +116,13 @@ class HostDetector:
                     if line.startswith("CPU part") and not cpu_model:
                         cpu_model = line.split(":", 1)[1].strip()
                 if cpu_model and cpu_vendor:
+                    break
+            # Detect virtualization flags from the first processor flags line
+            for line in text.splitlines():
+                if line.startswith("flags"):
+                    flags = line.split(":", 1)[1].strip().split()
+                    cpu_has_vmx = "vmx" in flags or "svm" in flags
+                    cpu_hypervisor = "hypervisor" in flags
                     break
         except (FileNotFoundError, PermissionError, OSError):
             pass
@@ -178,6 +201,8 @@ class HostDetector:
             storage_total_bytes=storage_total_bytes,
             kernel_version=kernel_version,
             os_release=os_release or "unknown",
+            cpu_has_vmx=cpu_has_vmx,
+            cpu_hypervisor=cpu_hypervisor,
         )
 
     @staticmethod
@@ -208,13 +233,84 @@ class HostDetector:
         except (FileNotFoundError, PermissionError, OSError, ValueError):
             pass
 
+        # --- Virtualization & system detection ---
+        # Nested virtualization: read /sys/module/kvm_intel/parameters/nested
+        # (or kvm_amd equivalent)
+        nested_virt_available = False
+        for nested_path in (
+            "/sys/module/kvm_intel/parameters/nested",
+            "/sys/module/kvm_amd/parameters/nested",
+        ):
+            val = HostDetector._read_int(nested_path, -1)
+            if val == 1:
+                nested_virt_available = True
+                break
+
+        # EPT: Intel only - /sys/module/kvm_intel/parameters/ept
+        ept_available = bool(
+            HostDetector._read_int("/sys/module/kvm_intel/parameters/ept", 0)
+        )
+
+        # Hugepages (2MB): /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
+        hugepage_count_2mb = HostDetector._read_int(
+            "/sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages", 0
+        )
+
+        # KSM: /sys/kernel/mm/ksm/run == 0 means disabled
+        ksm_run = HostDetector._read_int("/sys/kernel/mm/ksm/run", 0)
+        ksm_disabled = ksm_run == 0
+
+        # Cgroup version: v2 if /sys/fs/cgroup/cgroup.controllers exists
+        cgroup_version = (
+            2 if Path("/sys/fs/cgroup/cgroup.controllers").exists() else 1
+        )
+
+        # Swap total from /proc/meminfo
+        swap_total_mib = HostDetector._meminfo_kb_to_mib("SwapTotal")
+
+        # Kernel minimum version check
+        kernel_minimum_met = HostDetector._check_kernel_version()
+
         return HostLimits(
             pid_max=pid_max,
             fd_max=fd_max,
             conntrack_max=conntrack_max,
             tap_devices_max=tap_devices_max,
             ip_local_port_range=ip_local_port_range,
+            nested_virt_available=nested_virt_available,
+            ept_available=ept_available,
+            hugepage_count_2mb=hugepage_count_2mb,
+            ksm_disabled=ksm_disabled,
+            cgroup_version=cgroup_version,
+            swap_total_mib=swap_total_mib,
+            kernel_minimum_met=kernel_minimum_met,
         )
+
+    @staticmethod
+    def _check_kernel_version() -> bool:
+        """Check if the running kernel meets the minimum version (5.10)."""
+        import re
+
+        release = os.uname().release
+        match = re.match(r"(\d+)\.(\d+)", release)
+        if not match:
+            return False
+        major, minor = int(match.group(1)), int(match.group(2))
+        return (major, minor) >= MIN_KERNEL_VERSION
+
+    @staticmethod
+    def _parse_modules() -> dict[str, bool]:
+        """Parse /proc/modules and return a dict of module_name -> loaded."""
+        result: dict[str, bool] = {}
+        try:
+            text = Path("/proc/modules").read_text()
+            for line in text.splitlines():
+                parts = line.strip().split()
+                if parts:
+                    result[parts[0]] = True
+        except (FileNotFoundError, PermissionError, OSError):
+            pass
+        return result
 
     @staticmethod
     def detect_resources(
@@ -317,6 +413,58 @@ class HostDetector:
                 limiting_resource = name
                 break
 
+        # --- Module detection ---
+        modules = HostDetector._parse_modules()
+        modules_loaded: dict[str, bool] = {
+            m: m in modules for m in _VM_HOST_KERNEL_MODULES
+        }
+
+        # Swap used
+        swap_free_mib = HostDetector._meminfo_kb_to_mib("SwapFree")
+        swap_total_mib = HostDetector._meminfo_kb_to_mib("SwapTotal")
+        swap_used_mib = max(0, swap_total_mib - swap_free_mib)
+
+        # Hugepages free
+        hugepages_free_2mb = HostDetector._read_int(
+            "/sys/kernel/mm/hugepages/hugepages-2048kB/free_hugepages", 0
+        )
+
+        # SMT (Hyper-Threading)
+        smt_active = bool(
+            HostDetector._read_int("/sys/devices/system/cpu/smt/active", 0)
+        )
+
+        # Binary availability
+        nftables_available = shutil.which("nft") is not None
+        iptables_available = shutil.which("iptables") is not None
+        cloud_localds_available = shutil.which("cloud-localds") is not None
+
+        # /dev/kvm status
+        kvm_path = Path("/dev/kvm")
+        if not kvm_path.exists():
+            dev_kvm_status = "missing"
+        elif not os.access(kvm_path, os.R_OK | os.W_OK):
+            dev_kvm_status = "no_permission"
+        elif not hardware.cpu_has_vmx:
+            dev_kvm_status = "no_hardware"
+        else:
+            dev_kvm_status = "ok"
+
+        # User in kvm group
+        user_in_kvm_group = False
+        try:
+            kvm_group = grp.getgrnam("kvm")
+            user = pwd.getpwuid(os.getuid()).pw_name
+            user_in_kvm_group = user in kvm_group.gr_mem
+        except (KeyError, ImportError, PermissionError):
+            pass
+
+        # /dev/net/tun accessibility
+        tun_path = Path("/dev/net/tun")
+        dev_net_tun_accessible = tun_path.exists() and os.access(
+            tun_path, os.R_OK | os.W_OK
+        )
+
         return HostResources(
             memory_available_mib=memory_available_mib,
             tap_devices_used=tap_devices_used,
@@ -327,6 +475,16 @@ class HostDetector:
             storage_free_bytes=storage_free_bytes,
             recommended_max_vms=recommended_max_vms,
             limiting_resource=limiting_resource,
+            modules_loaded=modules_loaded,
+            swap_used_mib=swap_used_mib,
+            hugepages_free_2mb=hugepages_free_2mb,
+            smt_active=smt_active,
+            nftables_available=nftables_available,
+            iptables_available=iptables_available,
+            cloud_localds_available=cloud_localds_available,
+            dev_kvm_status=dev_kvm_status,
+            user_in_kvm_group=user_in_kvm_group,
+            dev_net_tun_accessible=dev_net_tun_accessible,
         )
 
 

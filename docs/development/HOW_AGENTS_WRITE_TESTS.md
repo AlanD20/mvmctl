@@ -524,15 +524,17 @@ Every scenario includes:
 
 | Command | Required Scenarios | Min Depth | Skip OK? | Destructive? |
 |---------|-------------------|-----------|----------|--------------|
-| `host ls --json` | JSON with kvm_accessible (bool), required_binaries (dict), ip_forward | L2 | No | No |
+| `host status` | Table output with Check/Status/Detail columns, shows /dev/kvm, required binaries, ip_forward, state snapshot, nested virt, kvm module, /dev/net/tun, user in kvm group rows | L1 | No | No |
+| `host status --json` | JSON with kvm_accessible (bool), required_binaries (dict with ok, missing), ip_forward (dict with value, ok), state_snapshot (dict with exists, timestamp), virtualization.modules_loaded (dict), virtualization.nested_virt (bool), virtualization.dev_net_tun (bool), virtualization.user_in_kvm_group (bool) | L3 | No | No |
+| `host info` | Human-readable tree output with Virtualization, Hugepages, Dependencies, System sections in addition to Host, OS, CPU, Memory, Storage, Kernel, Limits, Capacity, Setup | L1 | If not initialized | No |
+| `host info --json` | JSON with cpu.model, cpu.vendor, cpu.cores, cpu.architecture, cpu.numa_nodes, memory.total_mib, memory.available_mib, memory.swap_total_mib, memory.swap_used_mib, storage.total_bytes, storage.free_bytes, limits.pid_max, limits.fd_max, limits.conntrack_max, limits.tap_devices_max, limits.ip_local_port_range, capacity.recommended_max_vms, capacity.limiting_resource, setup.initialized, setup.initialized_at, virtualization (cpu_has_vmx, nested_virt_available, ept_available, hypervisor, smt_active, modules), hugepages (count_2mb, free_2mb), dependencies (nftables_available, iptables_available, cloud_localds_available, dev_net_tun), system (cgroup_version, ksm_disabled, dev_kvm_status, user_in_kvm_group), kernel (version, minimum_version_met) | L3 | If not initialized | No |
+| `host info --refresh` | Re-detects and shows updated data | L1 | If not initialized | No |
+| `host info --refresh --json` | JSON with refreshed detected_at field plus all new sections (virtualization, hugepages, dependencies, system, extended memory swap, extended kernel minimum_version_met) | L3 | If not initialized | No |
+| `host init` | Probe failure: when system has critical issues (missing KVM, kernel < 5.10), returns non-zero with specific error about probes | L1 | No | No |
 | `host clean --force` | Exits 0 | L1 | If no sudo access | Yes |
 | `host clean` blocked by running VM | Returns non-zero, mentions running | L1 | No | No |
 | `host reset --force` | Exits 0 | L1 | If no sudo access | Yes |
 | `host reset` blocked by running VM | Returns non-zero, mentions running | L1 | No | No |
-| `host info` | Human-readable output with Host, OS, CPU, Memory, Storage, Limits, Capacity, Setup sections | L1 | If not initialized | No |
-| `host info --json` | JSON with cpu.model, cpu.vendor, memory, limits.tap_devices, capacity.recommended_max_vms, setup | L2 | If not initialized | No |
-| `host info --refresh` | Re-detects and shows updated data | L1 | If not initialized | No |
-| `host info --refresh --json` | JSON with refreshed detected_at field | L2 | If not initialized | No |
 
 ### 4.15 `mvm cache`
 

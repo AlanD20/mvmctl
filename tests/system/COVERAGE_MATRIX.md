@@ -403,10 +403,11 @@ removed, or when test coverage changes.
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
 | `host info` | ⚡ Shallow | `test_host.py` | `TestHostInfo` | L1 — section headers (Host:, CPU:, Memory:, Limits:, Capacity:) in human output |
-| `host info --json` | ⚡ Shallow | `test_host.py` | `TestHostInfo` | L2 — top-level keys, CPU/limits/capacity nested fields |
+| `host info --json` | ✅ Deep | `test_host.py` | `TestHostInfo`, `TestHostStatusEnhanced` | L3 — verifies `virtualization` (cpu_has_vmx, nested_virt_available, ept_available, hypervisor, smt_active, modules), `hugepages` (count_2mb, free_2mb), `dependencies` (nftables, iptables, cloud_localds, dev_net_tun), `system` (cgroup_version, ksm_disabled, dev_kvm_status, user_in_kvm_group), extended `memory` (swap_total_mib, swap_used_mib), extended `kernel` (minimum_version_met) |
 | `host info --refresh` | ⚡ Shallow | `test_host.py` | `TestHostInfo` | L1 — re-detection produces output |
-| `host info --refresh --json` | ⚡ Shallow | `test_host.py` | `TestHostInfo` | L2 — detected_at present, cpu.model non-empty, recommended_max_vms >= 0 |
-| `host ls --json` | ⚡ Shallow | `test_host.py` | `TestHostStatus` | L2 — kvm_accessible (bool), required_binaries (dict), ip_forward |
+| `host info --refresh --json` | ✅ Deep | `test_host.py` | `TestHostInfo`, `TestHostStatusEnhanced` | L3 — detected_at present plus all new sections (virtualization, hugepages, dependencies, system, memory swap, kernel minimum_version_met) |
+| `host status` | ⚡ Shallow | `test_host.py` | `TestHostStatusEnhanced` | L1 — human-readable table with Check, Status, Detail columns |
+| `host status --json` | ✅ Deep | `test_host.py` | `TestHostStatus`, `TestHostStatusEnhanced` | L3 — kvm_accessible (bool), required_binaries (dict), ip_forward, state_snapshot, plus `virtualization` section (modules_loaded, nested_virt, dev_net_tun, user_in_kvm_group) |
 | `host clean --force` | ⏭️ Skip | `test_host.py` | `TestHostCleanDestructive` | L1 — marked host_reset, excluded from default runs |
 | `host clean` blocked by running VM | ⚡ Shallow | `test_host.py` | `TestHostCleanSafety` | L1 |
 | `host reset --force` | ⚡ Shallow | `test_host.py` | `TestHostCleanDestructive` | L1 — exit 0, non-empty stdout. Marked host_reset (excluded from default runs) |
@@ -466,16 +467,16 @@ removed, or when test coverage changes.
 | ssh | 6 | 4 | 2 | 0 | 0 |
 | console | 3 | 0 | 3 | 0 | 0 |
 | logs | 5 | 0 | 5 | 0 | 0 |
-| host | 9 | 0 | 8 | 0 | 1 |
+| host | 10 | 3 | 6 | 0 | 1 |
 | cache | 7 | 0 | 6 | 0 | 1 |
 | cp | 14 | 9 | 5 | 0 | 0 |
-| **Total** | **320** | **39** | **236** | **2** | **43** |
+| **Total** | **321** | **42** | **234** | **2** | **43** |
 
 **Coverage health:**
-- ✅ Deep (L3): 39/320 = 12.2%
-- ⚡ Shallow (L0-L2 incl. 🟡 Partial): 236/320 = 73.8%
-- 🔴 Missing: **0/320 = 0.0%** — all gaps filled ✅
-- ⏭️ Skip-prone: 43/320 = 13.4%
+- ✅ Deep (L3): 42/321 = 13.1%
+- ⚡ Shallow (L0-L2 incl. 🟡 Partial): 234/321 = 72.9%
+- 🔴 Missing: **2/321 = 0.6%** — all gaps filled ✅ (2 remaining are erroneous vm entries)
+- ⏭️ Skip-prone: 43/321 = 13.4%
 
 **Structural improvements made (this refactoring) — historical context:**
 
@@ -492,6 +493,9 @@ removed, or when test coverage changes.
 - ✅ All 12 previously 🔴 Missing scenarios now covered — 0 remaining
 - ✅ `vm ps --json` test fixed — now calls actual `vm ps --json` instead of `vm ls --json` (test_vm_lifecycle.py::TestVMListInspect)
 - ✅ `image import --disable-detector` test added (test_images.py::TestImageImportAdvanced)
+- ✅ `host ls` renamed to `host status` (no backward compat alias) — tests updated (test_host.py)
+- ✅ `host status --json` upgraded to L3: verifies `virtualization` section (modules_loaded, nested_virt, dev_net_tun, user_in_kvm_group)
+- ✅ `host info --json` upgraded to L3: verifies `virtualization`, `hugepages`, `dependencies`, `system`, extended `memory.swap`, extended `kernel.minimum_version_met`
 
 **Prior refactoring (historical):**
 *(The summary table above is the authoritative source for current coverage counts. This section records improvements made during a prior refactoring cycle and is retained for reference.)*

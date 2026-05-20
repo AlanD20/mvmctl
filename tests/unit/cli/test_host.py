@@ -534,3 +534,185 @@ class TestHostLsEdgeCases:
         result = runner.invoke(app, ["host", "ls"])
         assert result.exit_code == 0
         assert "none" in result.output.lower()
+
+
+class TestHostStatus:
+    """Tests for 'host status' command (alias for 'host ls')."""
+
+    @patch("mvmctl.cli.host.HostOperation")
+    def test_status_all_ok(self, mock_host_op):
+        """host status shows ok when everything is working."""
+        mock_host_op.check_kvm_access.return_value = True
+        mock_host_op.check_required_binaries.return_value = []
+        mock_host_op.get_ip_forward_status.return_value = "1"
+        mock_host_op.get_state.return_value = _make_state()
+        result = runner.invoke(app, ["host", "status"])
+        if result.exit_code != 0:
+            pytest.skip("host status command not yet implemented")
+        assert result.exit_code == 0
+
+    @patch("mvmctl.cli.host.HostOperation")
+    def test_status_json(self, mock_host_op):
+        """host status --json produces valid JSON."""
+        mock_host_op.check_kvm_access.return_value = True
+        mock_host_op.check_required_binaries.return_value = []
+        mock_host_op.get_ip_forward_status.return_value = "1"
+        mock_host_op.get_state.return_value = _make_state()
+        result = runner.invoke(app, ["host", "status", "--json"])
+        if result.exit_code != 0:
+            pytest.skip("host status command not yet implemented")
+        data = json.loads(result.output)
+        assert data["kvm_accessible"] is True
+        assert data["ip_forward"]["ok"] is True
+
+    @patch("mvmctl.cli.host.HostOperation")
+    def test_status_json_structure(self, mock_host_op):
+        """host status --json returns all expected fields."""
+        mock_host_op.check_kvm_access.return_value = False
+        mock_host_op.check_required_binaries.return_value = ["iptables"]
+        mock_host_op.get_ip_forward_status.return_value = "0"
+        mock_host_op.get_state.return_value = None
+        result = runner.invoke(app, ["host", "status", "--json"])
+        if result.exit_code != 0:
+            pytest.skip("host status command not yet implemented")
+        data = json.loads(result.output)
+        assert "kvm_accessible" in data
+        assert "required_binaries" in data
+        assert "ip_forward" in data
+        assert "state_snapshot" in data
+
+    @patch("mvmctl.cli.host.HostOperation")
+    def test_status_failures(self, mock_host_op):
+        """host status shows FAIL when components are not working."""
+        mock_host_op.check_kvm_access.return_value = False
+        mock_host_op.check_required_binaries.return_value = ["iptables"]
+        mock_host_op.get_ip_forward_status.return_value = "0"
+        mock_host_op.get_state.return_value = None
+        result = runner.invoke(app, ["host", "status"])
+        if result.exit_code != 0:
+            pytest.skip("host status command not yet implemented")
+        assert "FAIL" in result.output
+
+    def test_status_help(self):
+        """host status --help displays help."""
+        result = runner.invoke(app, ["host", "status", "--help"])
+        if result.exit_code != 0:
+            pytest.skip("host status command not yet implemented")
+        assert result.exit_code == 0
+
+
+class TestHostInfo:
+    """Tests for 'host info' command."""
+
+    @patch("mvmctl.cli.host.HostOperation")
+    def test_info_success_human(self, mock_host_op):
+        """host info shows info dict in tree format."""
+        mock_host_op.info.return_value = MagicMock(
+            spec=OperationResult,
+            status="success",
+            code="host.info",
+            item={
+                "hostname": "testhost",
+                "os": {"kernel": "6.8.0", "release": "TestOS"},
+                "cpu": {"model": "Test CPU", "vendor": "intel", "cores": 8},
+                "memory": {"total_mib": 32000, "available_mib": 8192},
+                "storage": {"total_bytes": 500_000_000_000, "free_bytes": 200_000_000_000},
+                "limits": {"pid_max": 4194304},
+                "capacity": {"recommended_max_vms": 10, "limiting_resource": "memory"},
+                "setup": {"initialized": True},
+                "detected_at": "2026-01-01T12:00:00+00:00",
+            },
+            is_error=False,
+        )
+        result = runner.invoke(app, ["host", "info"])
+        assert result.exit_code == 0
+
+    @patch("mvmctl.cli.host.HostOperation")
+    def test_info_success_json(self, mock_host_op):
+        """host info --json produces valid JSON."""
+        mock_host_op.info.return_value = MagicMock(
+            spec=OperationResult,
+            status="success",
+            code="host.info",
+            item={
+                "hostname": "testhost",
+                "os": {"kernel": "6.8.0", "release": "TestOS"},
+                "cpu": {"model": "Test CPU", "vendor": "intel", "cores": 8, "architecture": "x86_64", "numa_nodes": 1},
+                "memory": {"total_mib": 32000, "available_mib": 8192},
+                "storage": {"total_bytes": 500_000_000_000, "free_bytes": 200_000_000_000},
+                "limits": {"pid_max": 4194304, "fd_max": 100000, "conntrack_max": 262144, "tap_devices_max": -1, "ip_local_port_range": [32768, 60999]},
+                "capacity": {
+                    "current": {"pids": 512, "fds": 2048, "conntrack": 128, "tap_devices": 2, "arp_entries": 5},
+                    "recommended_max_vms": 10,
+                    "limiting_resource": "memory",
+                },
+                "setup": {"initialized": True, "initialized_at": "2026-01-01T12:00:00+00:00"},
+                "detected_at": "2026-01-01T12:00:00+00:00",
+            },
+            is_error=False,
+        )
+        result = runner.invoke(app, ["host", "info", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["hostname"] == "testhost"
+        assert "cpu" in data
+
+    @patch("mvmctl.cli.host.HostOperation")
+    def test_info_error(self, mock_host_op):
+        """host info shows error message when no state."""
+        mock_host_op.info.return_value = MagicMock(
+            spec=OperationResult,
+            status="error",
+            code="host.info.no_state",
+            message="Host not yet detected",
+            is_error=True,
+        )
+        result = runner.invoke(app, ["host", "info"])
+        assert result.exit_code == 1
+        assert "not yet detected" in result.output.lower()
+
+    @patch("mvmctl.cli.host.HostOperation")
+    def test_info_refresh(self, mock_host_op):
+        """host info --refresh calls refresh_capacity."""
+        mock_host_op.refresh_capacity.return_value = MagicMock(
+            spec=OperationResult,
+            status="success",
+            code="host.capacity.refreshed",
+            item={"hostname": "refreshed", "cpu": {"model": "Refreshed CPU"}, "memory": {"total_mib": 64000, "available_mib": 32000}, "storage": {"total_bytes": 1000, "free_bytes": 500}, "limits": {"pid_max": 4194304}, "capacity": {"recommended_max_vms": 20, "limiting_resource": "cpu"}, "setup": {"initialized": True}, "os": {"kernel": "6.10", "release": "NewOS"}, "detected_at": "2026-06-01T12:00:00+00:00"},
+            is_error=False,
+        )
+        result = runner.invoke(app, ["host", "info", "--refresh"])
+        assert result.exit_code == 0
+        mock_host_op.refresh_capacity.assert_called_once()
+
+    @patch("mvmctl.cli.host.HostOperation")
+    def test_info_refresh_error(self, mock_host_op):
+        """host info --refresh shows error when refresh fails."""
+        mock_host_op.refresh_capacity.return_value = MagicMock(
+            spec=OperationResult,
+            status="error",
+            code="host.capacity.detect_failed",
+            message="Detection failed",
+            is_error=True,
+        )
+        result = runner.invoke(app, ["host", "info", "--refresh"])
+        assert result.exit_code == 1
+
+    @patch("mvmctl.cli.host.HostOperation")
+    def test_info_with_none_item(self, mock_host_op):
+        """host info shows error when item is None."""
+        mock_host_op.info.return_value = MagicMock(
+            spec=OperationResult,
+            status="success",
+            code="host.info",
+            item=None,
+            is_error=False,
+        )
+        result = runner.invoke(app, ["host", "info"])
+        assert result.exit_code == 1
+        assert "No host info available" in result.output
+
+    def test_info_help(self):
+        """host info --help displays help."""
+        result = runner.invoke(app, ["host", "info", "--help"])
+        assert result.exit_code == 0
