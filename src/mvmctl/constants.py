@@ -84,6 +84,9 @@ OVERRIDABLE_DEFAULTS: Final[dict[str, dict[str, Any]]] = {
     "defaults.binary": {
         "remote_version_limit": 5,
     },
+    "cli": {
+        "listing_style": "short",
+    },
     "settings": {
         "guestfs_enabled": False,
         "firewall_backend": "nftables",

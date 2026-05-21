@@ -51,6 +51,7 @@ if TYPE_CHECKING:
         FirewallPort,
         FirewallProtocol,
         FirewallRule,
+        FirewallRuleResult,
         FirewallRuleType,
         FirewallTable,
         FirewallTarget,
@@ -91,6 +92,7 @@ __all__ = [
     "FirewallPort",
     "FirewallProtocol",
     "FirewallRule",
+    "FirewallRuleResult",
     "FirewallRuleType",
     "FirewallTable",
     "FirewallTarget",
@@ -115,7 +117,6 @@ __all__ = [
     "VMInspectInfo",
     "VMInstanceItem",
     "VMStatus",
-    "VolumeStatus",
 ]
 
 _LAZY_MAP = {

@@ -633,15 +633,15 @@ class VMCreateContext:
             created_at=now.isoformat(),
             updated_at=now.isoformat(),
             status=VMStatus.RUNNING,
-            config_path=self.fc_manager.config_path.name,
+            config_path=str(self.fc_manager.config_path),
             kernel_id=self.resolved.kernel.id,
             image_id=self.resolved.image.id,
             binary_id=self.resolved.binary.id,
             disk_size_mib=self.resolved.disk_size_mib,
             vcpu_count=self.resolved.vcpu_count,
             mem_size_mib=self.resolved.mem_size_mib,
-            api_socket_path=self.fc_manager.api_socket_path.name,
-            rootfs_path=self.rootfs_path.name,
+            api_socket_path=str(self.fc_manager.api_socket_path),
+            rootfs_path=str(self.rootfs_path),
             rootfs_suffix=self.resolved.image.fs_type,
             pci_enabled=self.resolved.pci_enabled,
             nested_virt=self.resolved.nested_virt,
@@ -649,8 +649,8 @@ class VMCreateContext:
             enable_metrics=self.resolved.enable_metrics,
             enable_console=self.resolved.enable_console,
             cloud_init_mode=self.resolved.cloud_init_mode.value,
-            log_path=self.fc_manager.log_path.name,
-            serial_output_path=self.fc_manager.serial_output_path.name,
+            log_path=str(self.fc_manager.log_path),
+            serial_output_path=str(self.fc_manager.serial_output_path),
             exit_code=None,
             lsm_flags=self.resolved.lsm_flags,
             boot_args=self.resolved.boot_args,
@@ -672,7 +672,7 @@ class VMCreateContext:
             vm_instance.nocloud_net_port = self.resolved.nocloud_net_port
 
         if self.relay and self.relay.pid and self.relay.socket_path:
-            vm_instance.relay_socket_path = self.relay.socket_path.name
+            vm_instance.relay_socket_path = str(self.relay.socket_path)
             vm_instance.relay_pid = self.relay.pid
 
         return vm_instance

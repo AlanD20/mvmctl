@@ -269,7 +269,13 @@ class MVMCli:
 
     @staticmethod
     def format_id(id_string: str) -> str:
-        """Return first 6 characters of a hash for display."""
+        """Return first 6 characters of a hash for display.
+
+        Strips ``SHA256:`` prefix if present — all mvmctl IDs are
+        SHA-256 hashes and the algorithm label is redundant for display.
+        """
+        if id_string.startswith("SHA256:"):
+            id_string = id_string[len("SHA256:") :]
         return HashGenerator.shorten(id_string, length=6)
 
     @staticmethod

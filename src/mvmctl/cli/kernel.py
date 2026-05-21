@@ -9,21 +9,29 @@ from typing import TYPE_CHECKING, Any, cast
 import typer
 from rich.console import Console
 
+from mvmctl.api import ConfigOperation as _ConfigOperation
 from mvmctl.api import KernelImportInput as _KernelImportInput
 from mvmctl.api import KernelInput as _KernelInput
 from mvmctl.api import KernelOperation as _KernelOperation
 from mvmctl.api import KernelPullInput as _KernelPullInput
 
 if TYPE_CHECKING:
+    from mvmctl.api.config_operations import ConfigOperation
     from mvmctl.api.inputs._kernel_import_input import KernelImportInput
     from mvmctl.api.inputs._kernel_input import KernelInput
     from mvmctl.api.inputs._kernel_pull_input import KernelPullInput
     from mvmctl.api.kernel_operations import KernelOperation
 else:
+    ConfigOperation = _ConfigOperation
     KernelOperation = _KernelOperation
     KernelPullInput = _KernelPullInput
     KernelInput = _KernelInput
     KernelImportInput = _KernelImportInput
+from mvmctl.cli._common import (
+    ListingColumn,
+    render_listing,
+    resolve_listing_style,
+)
 from mvmctl.cli._completion import _complete_kernel_ids
 from mvmctl.models import KernelItem, VersionInfo
 from mvmctl.models.result import OperationResult, ProgressEvent
@@ -41,6 +49,19 @@ def kernel_callback(ctx: typer.Context) -> None:
     pass
 
 
+_KERNEL_COLUMNS = [
+    ListingColumn("", lambda k: mvm_cli.format_marker(k.is_default)),
+    ListingColumn("ID", lambda k: mvm_cli.format_id(k.id)),
+    ListingColumn(
+        "Name", lambda k: mvm_cli.format_name(k.base_name, not k.is_present)
+    ),
+    ListingColumn("Version", lambda k: k.version),
+    ListingColumn("Type", lambda k: k.type),
+    ListingColumn("Arch", lambda k: k.arch, long_only=True),
+    ListingColumn("Created", lambda k: mvm_cli.format_timestamp(k.created_at)),
+]
+
+
 @kernel_app.command(name="ls")
 @handle_errors
 def kernel_ls(
@@ -52,6 +73,9 @@ def kernel_ls(
         False,
         "--no-cache",
         help="Skip cached version listing and fetch live from upstream",
+    ),
+    long_output: bool = typer.Option(
+        False, "--long", help="Show full listing with all columns"
     ),
 ) -> None:
     """List cached kernels (or available remote kernels with --remote)."""
@@ -73,24 +97,9 @@ def kernel_ls(
             typer.echo(json.dumps(data, indent=2, default=str))
             return
 
-        rows: list[list[str]] = []
-        for k in kernels:
-            rows.append(
-                [
-                    mvm_cli.format_marker(k.is_default),
-                    mvm_cli.format_id(k.id),
-                    mvm_cli.format_name(k.base_name, not k.is_present),
-                    k.version,
-                    k.arch,
-                    k.type,
-                    mvm_cli.format_timestamp(k.created_at),
-                ]
-            )
+        style = resolve_listing_style(long_output)
 
-        mvm_cli.table(
-            columns=["", "ID", "Name", "Version", "Arch", "Type", "Added"],
-            rows=rows,
-        )
+        render_listing(kernels, _KERNEL_COLUMNS, style)
 
 
 def _list_remote_kernels(

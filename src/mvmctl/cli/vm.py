@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import typer
 from rich.console import Console
 
+from mvmctl.api import ConfigOperation as _ConfigOperation
 from mvmctl.api import VMCreateInput as _VMCreateInput
 from mvmctl.api import VMInput as _VMInput
 from mvmctl.api import VMOperation as _VMOperation
@@ -17,13 +18,20 @@ from mvmctl.models import VMStatus
 from mvmctl.models.result import NeedsInteraction, ProgressEvent
 
 if TYPE_CHECKING:
+    from mvmctl.api.config_operations import ConfigOperation
     from mvmctl.api.inputs._vm_create_input import VMCreateInput
     from mvmctl.api.inputs._vm_input import VMInput
     from mvmctl.api.vm_operations import VMOperation
 else:
+    ConfigOperation = _ConfigOperation
     VMOperation = _VMOperation
     VMInput = _VMInput
     VMCreateInput = _VMCreateInput
+from mvmctl.cli._common import (
+    ListingColumn,
+    render_listing,
+    resolve_listing_style,
+)
 from mvmctl.utils.cli import handle_errors, mvm_cli
 
 if TYPE_CHECKING:
@@ -48,10 +56,38 @@ def help_cmd(ctx: typer.Context) -> None:
     raise typer.Exit()
 
 
+_VM_COLUMNS = [
+    ListingColumn("ID", lambda v: mvm_cli.format_id(v.id)),
+    ListingColumn("Name", lambda v: v.name),
+    ListingColumn("Status", lambda v: v.status),
+    ListingColumn(
+        "Exit", lambda v: str(v.exit_code) if v.exit_code is not None else "-"
+    ),
+    ListingColumn("IPv4", lambda v: v.ipv4 or "-"),
+    ListingColumn(
+        "Resources",
+        lambda v: (
+            f"{v.vcpu_count} vCPU / {v.mem_size_mib} MiB / {v.disk_size_mib} MiB"
+        ),
+        long_only=True,
+    ),
+    ListingColumn(
+        "Image", lambda v: mvm_cli.format_id(v.image_id), long_only=True
+    ),
+    ListingColumn(
+        "Kernel", lambda v: mvm_cli.format_id(v.kernel_id), long_only=True
+    ),
+    ListingColumn("Created", lambda v: mvm_cli.format_timestamp(v.created_at)),
+]
+
+
 @vm_app.command(name="ls")
 @handle_errors
 def vm_ls(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    long_output: bool = typer.Option(
+        False, "--long", help="Show full listing with all columns"
+    ),
 ) -> None:
     """List all VMs."""
     vms: list[VMInstanceItem] = VMOperation.list_all()
@@ -61,39 +97,9 @@ def vm_ls(
         typer.echo(json.dumps(data, indent=2))
         return
 
-    rows = []
-    for vm in vms:
-        rows.append(
-            [
-                mvm_cli.format_id(vm.id),
-                vm.name,
-                vm.status,
-                str(vm.exit_code) if vm.exit_code is not None else "-",
-                vm.ipv4 or "-",
-                str(vm.vcpu_count),
-                str(vm.mem_size_mib),
-                str(vm.disk_size_mib),
-                mvm_cli.format_id(vm.image_id),
-                mvm_cli.format_id(vm.kernel_id),
-                mvm_cli.format_timestamp(vm.created_at),
-            ]
-        )
-    mvm_cli.table(
-        columns=[
-            "ID",
-            "Name",
-            "Status",
-            "Exit",
-            "IPv4",
-            "vCPUs",
-            "Mem(MiB)",
-            "Disk(MiB)",
-            "Image",
-            "Kernel",
-            "Created",
-        ],
-        rows=rows,
-    )
+    style = resolve_listing_style(long_output)
+
+    render_listing(vms, _VM_COLUMNS, style)
 
 
 @vm_app.command(name="ps")

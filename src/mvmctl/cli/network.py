@@ -8,18 +8,26 @@ from typing import TYPE_CHECKING
 import typer
 from rich.prompt import Prompt
 
+from mvmctl.api import ConfigOperation as _ConfigOperation
 from mvmctl.api import NetworkCreateInput as _NetworkCreateInput
 from mvmctl.api import NetworkInput as _NetworkInput
 from mvmctl.api import NetworkOperation as _NetworkOperation
 
 if TYPE_CHECKING:
+    from mvmctl.api.config_operations import ConfigOperation
     from mvmctl.api.inputs._network_create_input import NetworkCreateInput
     from mvmctl.api.inputs._network_input import NetworkInput
     from mvmctl.api.network_operations import NetworkOperation
 else:
+    ConfigOperation = _ConfigOperation
     NetworkOperation = _NetworkOperation
     NetworkInput = _NetworkInput
     NetworkCreateInput = _NetworkCreateInput
+from mvmctl.cli._common import (
+    ListingColumn,
+    render_listing,
+    resolve_listing_style,
+)
 from mvmctl.cli._completion import _complete_network_names
 from mvmctl.models.result import OperationResult
 from mvmctl.utils.cli import handle_errors, mvm_cli
@@ -47,10 +55,29 @@ def help_cmd(ctx: typer.Context) -> None:
     raise typer.Exit()
 
 
+_NETWORK_COLUMNS = [
+    ListingColumn("", lambda n: mvm_cli.format_marker(n.is_default)),
+    ListingColumn("ID", lambda n: mvm_cli.format_id(n.id)),
+    ListingColumn(
+        "Name", lambda n: mvm_cli.format_name(n.name, not n.is_present)
+    ),
+    ListingColumn("Subnet", lambda n: n.subnet),
+    ListingColumn("NAT", lambda n: "yes" if n.nat_enabled else "no"),
+    ListingColumn("Bridge", lambda n: n.bridge, long_only=True),
+    ListingColumn(
+        "VMs", lambda n: str(len(n.leases) if n.leases else 0), long_only=True
+    ),
+    ListingColumn("Created", lambda n: mvm_cli.format_timestamp(n.created_at)),
+]
+
+
 @network_app.command(name="ls")
 @handle_errors
 def network_ls(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    long_output: bool = typer.Option(
+        False, "--long", help="Show full listing with all columns"
+    ),
 ) -> None:
     """List all networks."""
     networks: list[NetworkItem] = NetworkOperation.list_all()
@@ -60,34 +87,9 @@ def network_ls(
         typer.echo(json.dumps(data, indent=2, default=str))
         return
 
-    rows = []
-    for n in networks:
-        vm_count = len(n.leases) if n.leases else 0
-        rows.append(
-            [
-                mvm_cli.format_marker(n.is_default),
-                mvm_cli.format_id(n.id),
-                mvm_cli.format_name(n.name, not n.is_present),
-                n.subnet,
-                n.bridge,
-                "True" if n.nat_enabled else "False",
-                str(vm_count),
-                mvm_cli.format_timestamp(n.created_at),
-            ]
-        )
-    mvm_cli.table(
-        columns=[
-            "",
-            "ID",
-            "Name",
-            "Network",
-            "Bridge",
-            "NAT",
-            "VMs",
-            "Created",
-        ],
-        rows=rows,
-    )
+    style = resolve_listing_style(long_output)
+
+    render_listing(networks, _NETWORK_COLUMNS, style)
 
 
 @network_app.command(

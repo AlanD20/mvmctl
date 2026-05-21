@@ -51,6 +51,13 @@ class ConfigRequest:
             if not category:
                 raise ConfigError("Category is required for get operation")
             # key is optional for category-level get
+            if key is not None:
+                cat_settings = OVERRIDABLE_SETTINGS.get(category)
+                if cat_settings is None or key not in cat_settings:
+                    raise ConfigError(
+                        f"'{category}.{key}' is not a valid setting key. "
+                        f"Use 'mvm config ls' to see valid keys."
+                    )
 
         elif self._inputs.action == "set":
             if not category or not key:
@@ -65,7 +72,7 @@ class ConfigRequest:
             if cat_settings is None or key not in cat_settings:
                 raise ConfigError(
                     f"'{category}.{key}' is not an overridable setting. "
-                    f"Use 'mvm config list' to see valid keys."
+                    f"Use 'mvm config ls' to see valid keys."
                 )
 
         elif self._inputs.action == "reset":

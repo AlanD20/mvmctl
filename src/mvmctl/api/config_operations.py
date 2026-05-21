@@ -6,6 +6,7 @@ from typing import Any
 
 from mvmctl.api.inputs._config_input import ConfigInput, ConfigRequest
 from mvmctl.core._shared import Database
+from mvmctl.exceptions import ConfigError
 from mvmctl.models.result import OperationResult
 from mvmctl.utils.auditlog import AuditLog
 
@@ -18,7 +19,8 @@ class ConfigOperation:
         category: str, key: str | None = None
     ) -> Any | dict[str, Any] | None:
         """
-        Get a config value.
+        Get a config value — returns the effective value (override if set,
+        else the built-in default).
 
         Args:
             category: Setting category (e.g. 'defaults.vm').
@@ -26,17 +28,24 @@ class ConfigOperation:
                 in the category.
 
         Returns:
-            The current override value, a dict of category keys when key is
-            None, or None if not set.
+            The effective value (override or built-in default), a dict of
+            category keys when key is None, or None if not set.
 
         """
+        db = Database()
         inputs = ConfigInput(action="get", category=category, key=key)
-        resolved = ConfigRequest(inputs=inputs, db=Database()).resolve()
-        assert resolved.category is not None
+        resolved = ConfigRequest(inputs=inputs, db=db).resolve()
+        cat = resolved.category
+        if cat is None:
+            raise ConfigError(
+                "Category is required for config get operation.",
+                code="config.get.missing_category",
+            )
         if resolved.key is None:
-            return resolved.service.list_by_category(resolved.category)
-        value = resolved.service.get(resolved.category, resolved.key)
-        return value
+            return resolved.service.list_by_category(cat)
+        from mvmctl.core.config._service import SettingsService
+
+        return SettingsService.resolve(db, cat, resolved.key)
 
     @staticmethod
     def set(category: str, key: str, value: Any) -> OperationResult[None]:

@@ -8,18 +8,26 @@ from typing import TYPE_CHECKING
 
 import typer
 
+from mvmctl.api import ConfigOperation as _ConfigOperation
 from mvmctl.api import KeyCreateInput as _KeyCreateInput
 from mvmctl.api import KeyInput as _KeyInput
 from mvmctl.api import KeyOperation as _KeyOperation
 
 if TYPE_CHECKING:
+    from mvmctl.api.config_operations import ConfigOperation
     from mvmctl.api.inputs._key_create_input import KeyCreateInput
     from mvmctl.api.inputs._key_input import KeyInput
     from mvmctl.api.key_operations import KeyOperation
 else:
+    ConfigOperation = _ConfigOperation
     KeyOperation = _KeyOperation
     KeyInput = _KeyInput
     KeyCreateInput = _KeyCreateInput
+from mvmctl.cli._common import (
+    ListingColumn,
+    render_listing,
+    resolve_listing_style,
+)
 from mvmctl.cli._completion import _complete_key_names
 from mvmctl.utils.cli import handle_errors, mvm_cli
 
@@ -35,10 +43,25 @@ def key_callback(ctx: typer.Context) -> None:  # noqa: ARG001
     pass
 
 
+_KEY_COLUMNS = [
+    ListingColumn("", lambda k: mvm_cli.format_marker(k.is_default)),
+    ListingColumn("ID", lambda k: mvm_cli.format_id(k.id)),
+    ListingColumn(
+        "Name", lambda k: mvm_cli.format_name(k.name, not k.is_present)
+    ),
+    ListingColumn("Algorithm", lambda k: k.algorithm),
+    ListingColumn("Fingerprint", lambda k: k.fingerprint, long_only=True),
+    ListingColumn("Created", lambda k: mvm_cli.format_timestamp(k.created_at)),
+]
+
+
 @key_app.command(name="ls")
 @handle_errors
 def key_ls(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    long_output: bool = typer.Option(
+        False, "--long", help="Show full listing with all columns"
+    ),
 ) -> None:
     """List all SSH keys."""
     keys = KeyOperation.list_all()
@@ -55,22 +78,9 @@ def key_ls(
         )
         return
 
-    rows: list[list[str]] = []
-    for k in keys:
-        rows.append(
-            [
-                k.fingerprint,
-                mvm_cli.format_marker(k.is_default),
-                mvm_cli.format_name(k.name, not k.is_present),
-                k.algorithm,
-                mvm_cli.format_timestamp(k.created_at),
-            ]
-        )
+    style = resolve_listing_style(long_output)
 
-    mvm_cli.table(
-        columns=["Fingerprint", "", "Name", "Algorithm", "Added"],
-        rows=rows,
-    )
+    render_listing(keys, _KEY_COLUMNS, style)
 
 
 @key_app.command(name="add")

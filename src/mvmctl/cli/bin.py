@@ -11,16 +11,24 @@ from rich.console import Console
 from mvmctl.api import BinaryInput as _BinaryInput
 from mvmctl.api import BinaryOperation as _BinaryOperation
 from mvmctl.api import BinaryPullInput as _BinaryPullInput
+from mvmctl.api import ConfigOperation as _ConfigOperation
 from mvmctl.models import BinaryItem
 
 if TYPE_CHECKING:
     from mvmctl.api.binary_operations import BinaryOperation
+    from mvmctl.api.config_operations import ConfigOperation
     from mvmctl.api.inputs._binary_input import BinaryInput
     from mvmctl.api.inputs._binary_pull_input import BinaryPullInput
 else:
     BinaryOperation = _BinaryOperation
     BinaryPullInput = _BinaryPullInput
     BinaryInput = _BinaryInput
+    ConfigOperation = _ConfigOperation
+from mvmctl.cli._common import (
+    ListingColumn,
+    render_listing,
+    resolve_listing_style,
+)
 from mvmctl.cli._completion import _complete_binary_versions
 from mvmctl.models.result import OperationResult
 from mvmctl.utils.cli import handle_errors, mvm_cli
@@ -37,6 +45,18 @@ def bin_callback(ctx: typer.Context) -> None:
     pass
 
 
+_BIN_COLUMNS = [
+    ListingColumn("", lambda b: mvm_cli.format_marker(b.is_default)),
+    ListingColumn("ID", lambda b: mvm_cli.format_id(b.id)),
+    ListingColumn("Name", lambda b: b.name),
+    ListingColumn("Version", lambda b: b.version),
+    ListingColumn(
+        "Full Version", lambda b: b.full_version or "-", long_only=True
+    ),
+    ListingColumn("Created", lambda b: mvm_cli.format_timestamp(b.created_at)),
+]
+
+
 @bin_app.command(name="ls")
 @handle_errors
 def bin_ls(
@@ -47,6 +67,9 @@ def bin_ls(
         None, "--limit", help="Max remote versions to show"
     ),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    long_output: bool = typer.Option(
+        False, "--long", help="Show full listing with all columns"
+    ),
 ) -> None:
     """List local (and optionally remote) Firecracker versions."""
     local = cast(list[BinaryItem], BinaryOperation.list_all())
@@ -87,21 +110,9 @@ def bin_ls(
         mvm_cli.table(columns=["Downloaded", "Version"], rows=rows)
         raise typer.Exit(code=0)
 
-    for b in local:
-        short_id = mvm_cli.format_id(b.id)
-        rows.append(
-            [
-                mvm_cli.format_marker(b.is_default),
-                short_id,
-                b.name,
-                b.version,
-            ]
-        )
+    style = resolve_listing_style(long_output)
 
-    mvm_cli.table(
-        columns=["", "ID", "Name", "Version"],
-        rows=rows,
-    )
+    render_listing(local, _BIN_COLUMNS, style)
     raise typer.Exit(code=0)
 
 

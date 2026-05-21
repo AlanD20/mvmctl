@@ -123,9 +123,9 @@ def config_reset(
         mvm_cli.info("Provide a category, category and key, or use --all")
 
 
-@config_app.command(name="list")
+@config_app.command(name="ls")
 @handle_errors
-def config_list() -> None:
+def config_ls() -> None:
     """List all overridable settings and their current values."""
     settings = ConfigOperation.list_all()
     for category, keys in settings.items():

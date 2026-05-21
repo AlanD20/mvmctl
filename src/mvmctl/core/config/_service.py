@@ -52,7 +52,7 @@ class SettingsService:
         if expected_type is None:
             raise ConfigError(
                 f"'{category}.{key}' is not an overridable setting. "
-                f"Use 'mvm config list' to see valid keys."
+                f"Use 'mvm config ls' to see valid keys."
             )
         coerced = CommonUtils.coerce(value, expected_type)
 
@@ -128,7 +128,7 @@ class SettingsService:
         if category not in OVERRIDABLE_SETTINGS:
             raise ConfigError(
                 f"'{category}' is not a valid setting category. "
-                f"Use 'mvm config list' to see valid categories."
+                f"Use 'mvm config ls' to see valid categories."
             )
         overrides = self._repo.list_by_category(category)
         result: dict[str, dict[str, Any]] = {}
@@ -147,7 +147,7 @@ class SettingsService:
         if category not in OVERRIDABLE_SETTINGS:
             raise ConfigError(
                 f"'{category}' is not a valid setting category. "
-                f"Use 'mvm config list' to see valid categories."
+                f"Use 'mvm config ls' to see valid categories."
             )
         return self._repo.delete_by_category(category)
 

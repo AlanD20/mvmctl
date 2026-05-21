@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import typer
 
+from mvmctl.api import ConfigOperation as _ConfigOperation
 from mvmctl.api import VolumeCreateInput as _VolumeCreateInput
 from mvmctl.api import VolumeInput as _VolumeInput
 from mvmctl.api import VolumeOperation as _VolumeOperation
@@ -14,13 +15,20 @@ from mvmctl.cli._completion import _complete_volume_names
 from mvmctl.utils.cli import handle_errors, mvm_cli
 
 if TYPE_CHECKING:
+    from mvmctl.api.config_operations import ConfigOperation
     from mvmctl.api.inputs._volume_create_input import VolumeCreateInput
     from mvmctl.api.inputs._volume_input import VolumeInput
     from mvmctl.api.volume_operations import VolumeOperation
 else:
+    ConfigOperation = _ConfigOperation
     VolumeOperation = _VolumeOperation
     VolumeInput = _VolumeInput
     VolumeCreateInput = _VolumeCreateInput
+from mvmctl.cli._common import (
+    ListingColumn,
+    render_listing,
+    resolve_listing_style,
+)
 
 volume_app = typer.Typer(
     help="Volume management",
@@ -96,10 +104,24 @@ def volume_rm(
         raise typer.Exit(code=1)
 
 
+_VOLUME_COLUMNS = [
+    ListingColumn("ID", lambda v: mvm_cli.format_id(v.id)),
+    ListingColumn("Name", lambda v: v.name),
+    ListingColumn("Size", lambda v: mvm_cli.format_size(v.size_bytes)),
+    ListingColumn("Status", lambda v: v.status),
+    ListingColumn("Format", lambda v: v.format, long_only=True),
+    ListingColumn("Attached To", lambda v: v.vm_id or "-", long_only=True),
+    ListingColumn("Created", lambda v: mvm_cli.format_timestamp(v.created_at)),
+]
+
+
 @volume_app.command(name="ls")
 @handle_errors
 def volume_ls(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    long_output: bool = typer.Option(
+        False, "--long", help="Show full listing with all columns"
+    ),
 ) -> None:
     """List all volumes."""
     volumes = VolumeOperation.list_all()
@@ -123,34 +145,9 @@ def volume_ls(
         typer.echo(json.dumps(data, indent=2))
         return
 
-    rows: list[list[str]] = []
-    for vol in volumes:
-        rows.append(
-            [
-                mvm_cli.format_id(vol.id),
-                vol.name,
-                vol.format,
-                "ro" if vol.is_read_only else "rw",
-                mvm_cli.format_size(vol.size_bytes),
-                vol.status,
-                vol.vm_id or "-",
-                mvm_cli.format_timestamp(vol.created_at),
-            ]
-        )
+    style = resolve_listing_style(long_output)
 
-    mvm_cli.table(
-        columns=[
-            "ID",
-            "Name",
-            "Format",
-            "Mode",
-            "Size",
-            "Status",
-            "VM",
-            "Created",
-        ],
-        rows=rows,
-    )
+    render_listing(volumes, _VOLUME_COLUMNS, style)
 
 
 @volume_app.command(name="inspect")

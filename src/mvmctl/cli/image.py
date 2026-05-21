@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, cast
 import typer
 from rich.console import Console
 
+from mvmctl.api import ConfigOperation as _ConfigOperation
 from mvmctl.api import ImageImportInput as _ImageImportInput
 from mvmctl.api import ImageInput as _ImageInput
 from mvmctl.api import ImageOperation as _ImageOperation
@@ -25,6 +26,7 @@ from mvmctl.models.result import (
 )
 
 if TYPE_CHECKING:
+    from mvmctl.api.config_operations import ConfigOperation
     from mvmctl.api.image_operations import ImageOperation
     from mvmctl.api.inputs._image_acquire_input import (
         ImageImportInput,
@@ -32,10 +34,16 @@ if TYPE_CHECKING:
     )
     from mvmctl.api.inputs._image_input import ImageInput
 else:
+    ConfigOperation = _ConfigOperation
     ImageOperation = _ImageOperation
     ImagePullInput = _ImagePullInput
     ImageImportInput = _ImageImportInput
     ImageInput = _ImageInput
+from mvmctl.cli._common import (
+    ListingColumn,
+    render_listing,
+    resolve_listing_style,
+)
 from mvmctl.utils.cli import handle_errors, mvm_cli
 
 image_app = typer.Typer(
@@ -48,6 +56,26 @@ image_app = typer.Typer(
 @image_app.callback()
 def image_callback(ctx: typer.Context) -> None:
     pass
+
+
+_IMAGE_COLUMNS = [
+    ListingColumn("", lambda i: mvm_cli.format_marker(i.is_default)),
+    ListingColumn("ID", lambda i: mvm_cli.format_id(i.id)),
+    ListingColumn(
+        "Name", lambda i: mvm_cli.format_name(i.name, not i.is_present)
+    ),
+    ListingColumn("Type", lambda i: i.type),
+    ListingColumn("Arch", lambda i: i.arch, long_only=True),
+    ListingColumn("FS Type", lambda i: i.fs_type, long_only=True),
+    ListingColumn(
+        "Size",
+        lambda i: (
+            mvm_cli.format_size(i.compressed_size) if i.compressed_size else "-"
+        ),
+        long_only=True,
+    ),
+    ListingColumn("Created", lambda i: mvm_cli.format_timestamp(i.created_at)),
+]
 
 
 @image_app.command(name="ls")
@@ -65,6 +93,9 @@ def image_ls(
     type_filter: str | None = typer.Option(
         None, "--type", help="Filter by image type (e.g. ubuntu, alpine)"
     ),
+    long_output: bool = typer.Option(
+        False, "--long", help="Show full listing with all columns"
+    ),
 ) -> None:
     """List cached images (or available remote images with --remote)."""
     if remote:
@@ -80,7 +111,9 @@ def image_ls(
     else:
         result = ImageOperation.list_all(remote=False)
         _list_local_images(
-            cast(list[ImageItem], result), json_output=json_output
+            cast(list[ImageItem], result),
+            json_output=json_output,
+            long_output=long_output,
         )
 
 
@@ -141,7 +174,9 @@ def _list_remote_images(
     )
 
 
-def _list_local_images(images: list[ImageItem], *, json_output: bool) -> None:
+def _list_local_images(
+    images: list[ImageItem], *, json_output: bool, long_output: bool = False
+) -> None:
     """Render locally cached images."""
     if json_output:
         data: list[dict[str, Any]] = []
@@ -170,27 +205,9 @@ def _list_local_images(images: list[ImageItem], *, json_output: bool) -> None:
         typer.echo(json.dumps(data, indent=2))
         return
 
-    rows: list[list[str]] = []
-    for img in images:
-        size = img.compressed_size or 0
-        added = (
-            mvm_cli.format_timestamp(img.pulled_at) if img.pulled_at else "-"
-        )
-        rows.append(
-            [
-                mvm_cli.format_marker(img.is_default),
-                mvm_cli.format_id(img.id),
-                mvm_cli.format_name(img.name, not img.is_present),
-                img.fs_type,
-                mvm_cli.format_size(size) if size > 0 else "-",
-                added,
-            ]
-        )
+    style = resolve_listing_style(long_output)
 
-    mvm_cli.table(
-        columns=["", "ID", "OS Name", "FS Type", "Size", "Added"],
-        rows=rows,
-    )
+    render_listing(images, _IMAGE_COLUMNS, style)
 
 
 @image_app.command(name="pull")
