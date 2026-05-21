@@ -116,7 +116,8 @@ src/mvmctl/
 │   │   ├── _service.py                      # HostService
 │   │   ├── _repository.py                   # HostRepository
 │   │   ├── _detector.py                     # HostDetector (host capability detection)
-│   │   └── _helper.py                       # HostPrivilegeHelper
+│   │   ├── _helper.py                       # HostPrivilegeHelper
+│   │   └── _probe.py                        # HostProbe (pre-flight checks for host readiness)
 │   ├── cache/                               # Cache management
 │   │   └── _service.py
 │   ├── config/                              # Configuration management

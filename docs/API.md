@@ -834,7 +834,6 @@ MVMError
 ├── ConsoleError              — Console or PTY operation failure
 ├── LogsError                 — Log file read or tail operation failure
 ├── ProcessError              — Subprocess execution failure
-├── AssetNotFoundError        — Asset not found locally or remotely
 ├── BundledAssetError         — Bundled asset access failure
 │   └── BundledAssetNotFoundError
 ├── BinaryError               — Firecracker/jailer binary management failure
@@ -861,16 +860,12 @@ MVMError
 │   └── CloudInitInjectModeError  — Rootfs cloud-init injection failure
 ├── GuestfsError              — Base exception for libguestfs-related errors
 │   ├── GuestfsNotAvailableError  — libguestfs bindings not available
-│   ├── GuestfsWriteError         — Failed to write files to guestfs
-│   ├── GuestfsApplianceError     — libguestfs fixed appliance build failure
-│   ├── GuestfsLaunchError        — Guestfs appliance failed to launch
-│   └── GuestfsMountError         — Unable to mount rootfs in guestfs
+│   └── GuestfsWriteError         — Failed to write files to guestfs
 ├── LoopMountError            — Base loop-mount provisioning error
 │   ├── LoopMountBinaryNotFoundError  — Binary not found at configured path
 │   └── LoopMountTimeoutError        — Loop-mount binary did not complete within timeout
 ├── RootPartitionDetectionError
 ├── TieDetectedError
-├── DownloadError             — Download operation failure
 └── HttpDownloadError         — HTTP download failure
 ```
 

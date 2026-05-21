@@ -200,7 +200,7 @@ mvm key export mykey ./backup               # Export keypair to directory
 ```bash
 mvm host init    # One-time host setup (KVM, networking)
 mvm host info    # Show host hardware, limits, VM capacity projection
-mvm host ls      # Show current host configuration state
+mvm host status  # Show current host configuration state
 mvm host clean   # Remove networking config
 mvm host reset   # Full rollback of all host changes
 mvm cache init   # Initialize all cache resources

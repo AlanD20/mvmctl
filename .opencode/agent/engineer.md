@@ -435,17 +435,13 @@ MVMError                              # Root — carries optional code field
 │   └── KeyFileError                  # File read/write failure
 ├── GuestfsError                      # libguestfs errors
 │   ├── GuestfsNotAvailableError      # Python bindings not found
-│   ├── GuestfsLaunchError            # Appliance launch failure
-│   ├── GuestfsMountError             # Rootfs mount failure
-│   ├── GuestfsWriteError             # File write failure
-│   └── GuestfsApplianceError         # Fixed appliance build failure
+│   └── GuestfsWriteError             # File write failure
 ├── LoopMountError                    # Loop-mount errors
 │   ├── LoopMountBinaryNotFoundError  # Binary not found
 │   └── LoopMountTimeoutError         # Timeout
 ├── ProcessError                      # Subprocess errors
 ├── DatabaseError                     # Database errors
 │   └── MigrationError                # Migration failure
-├── AssetNotFoundError                # Asset not found locally/remotely
 ├── BundledAssetError                 # Bundled package asset failure
 │   └── BundledAssetNotFoundError     # Bundled file not found
 ├── ImageAcquireError                 # Image fetch/import failure
@@ -461,7 +457,6 @@ MVMError                              # Root — carries optional code field
 ├── KeyNotFoundError                  # SSH key not found
 ├── RootPartitionDetectionError       # Root partition detection failure
 ├── TieDetectedError                  # Multiple partition tie
-├── DownloadError                     # Download failure
 └── HttpDownloadError                 # HTTP download failure
 ```
 

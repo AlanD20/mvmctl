@@ -142,7 +142,7 @@ groups
 sudo ~/.local/bin/mvm init
 
 # Verify initialization:
-mvm host ls --json
+mvm host status --json
 ```
 
 ### 3.2 Sudo Configuration
@@ -437,7 +437,7 @@ done
 echo "uv:         $(uv --version 2>/dev/null || echo MISSING)"
 
 # === mvm init ===
-echo "mvm init:   $(~/.local/bin/mvm host ls --json 2>/dev/null | python3 -c 'import sys,json; d=json.load(sys.stdin); print("OK" if d.get("kvm_accessible") else "INITIALIZED")' 2>/dev/null || echo NOT INITIALIZED)"
+echo "mvm init:   $(~/.local/bin/mvm host status --json 2>/dev/null | python3 -c 'import sys,json; d=json.load(sys.stdin); print("OK" if d.get("kvm_accessible") else "INITIALIZED")' 2>/dev/null || echo NOT INITIALIZED)"
 
 # === Binary ===
 echo "mvm binary: $(test -f ~/.local/bin/mvm && echo OK || echo MISSING)"

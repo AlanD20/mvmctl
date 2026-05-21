@@ -48,7 +48,7 @@ Host configuration. One-time, machine-global setup.
 | Command | Flags | Description |
 |---------|-------|-------------|
 | `mvm host init` | --- | Apply host configuration changes. Idempotent. Creates mvm group, sudoers drop-in, enables IP forwarding, creates default network. |
-| `mvm host ls` | `--json` | Show current host configuration state vs expected |
+| `mvm host status` | `--json` | Show current host configuration state vs expected |
 | `mvm host info` | `--refresh, --json` | Show host hardware, limits, and VM capacity projection |
 | `mvm host clean` | `-f, --force` | Remove all networking config (bridges, TAPs, iptables). Does not touch sysctl/group. |
 | `mvm host reset` | `-f, --force` | Full rollback: remove networking, revert sysctl, remove sudoers... |

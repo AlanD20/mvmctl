@@ -29,7 +29,7 @@ Firecracker requires an **uncompressed ELF binary** (`vmlinux`) — not the comp
 ls -la /dev/kvm
 
 # Verify mvm host is initialized
-mvm host ls
+mvm host status
 ```
 
 ### Official kernel builds only

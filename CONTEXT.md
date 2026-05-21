@@ -294,7 +294,6 @@ MVMError                                     # Root -- carries optional code str
 ├── ConsoleError                             # Console/PTY operation failure
 ├── LogsError                                # Log read/tail failure
 ├── ProcessError                             # Subprocess execution failure
-├── AssetNotFoundError                       # Asset not found locally/remotely
 ├── BinaryNotFoundError                      # Binary not found in registry
 ├── BundledAssetError                        # Bundled package asset failure
 │   └── BundledAssetNotFoundError            # Bundled file not found
@@ -321,17 +320,13 @@ MVMError                                     # Root -- carries optional code str
 │   └── CloudInitInjectModeError             # Rootfs injection failure
 ├── GuestfsError                             # libguestfs errors
 │   ├── GuestfsNotAvailableError             # Python bindings not found
-│   ├── GuestfsLaunchError                   # Appliance launch failure
-│   ├── GuestfsMountError                    # Rootfs mount failure
-│   ├── GuestfsWriteError                    # File write failure
-│   └── GuestfsApplianceError                # Fixed appliance build failure
+│   └── GuestfsWriteError                    # File write failure
 ├── LoopMountError                           # Loop-mount provisioning errors
 │   ├── LoopMountBinaryNotFoundError         # Binary not found
 │   └── LoopMountTimeoutError                # Timeout
 ├── RootPartitionDetectionError              # Root partition detection failure
 ├── TieDetectedError                         # Multiple partition tie
-├── DownloadError                            # Download failure
-├── HttpDownloadError                        # HTTP download failure (direct child)
+└── HttpDownloadError                        # HTTP download failure (direct child)
 ```
 
 Error message format (user-facing, three parts in one line):

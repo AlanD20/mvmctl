@@ -68,10 +68,10 @@ Create a VM from a portable config file.
 Export a VM's configuration to portable JSON.
 .TP
 .BR vm\ attach-volume
-Attach a volume to a running VM.
+Attach a volume to a running or stopped VM.
 .TP
 .BR vm\ detach-volume
-Detach a volume from a running VM.
+Detach a volume from a running or stopped VM.
 .SS Host Configuration
 .TP
 .BR host\ init
@@ -233,7 +233,7 @@ VM log management.
 .RS
 .PP
 .B \-\-os
-Show logs from the guest OS (serial console) instead of Firecracker.
+Show Firecracker OS log instead of boot log.
 .PP
 .B \-\-follow
 Follow log output in real-time (tail -f style).

@@ -860,7 +860,7 @@ from mvmctl.core.vm._controller import VMController           # Use lazy __getat
 
 **Exception hierarchy (mostly 3-level, with exceptions):** `MVMError` → `{Domain}Error` → `{Domain}{Specific}Error`. Every exception carries an optional `code: str | None` for programmatic branching.
 
-Note: Some exceptions break the strict 3-level pattern by being direct `MVMError` children. These include the `*NotFoundError` family (`BinaryNotFoundError`, `KernelNotFoundError`, `NetworkNotFoundError`, `KeyNotFoundError`, `ImageNotFoundError`, `VolumeNotFoundError`) — they are direct `MVMError` children rather than children of their domain's `*Error` class. The one exception is `VMNotFoundError(VMError)`, which IS a proper 3-level child. Other direct `MVMError` children include `VolumeError`, `ImageAcquireError`, `IPTablesTrackerError`, `AssetNotFoundError`, `VersionError`, `VersionGateError`, `RootPartitionDetectionError`, `TieDetectedError`, `DownloadError`, and `HttpDownloadError`.
+Note: Some exceptions break the strict 3-level pattern by being direct `MVMError` children. These include the `*NotFoundError` family (`BinaryNotFoundError`, `KernelNotFoundError`, `NetworkNotFoundError`, `KeyNotFoundError`, `ImageNotFoundError`, `VolumeNotFoundError`) — they are direct `MVMError` children rather than children of their domain's `*Error` class. The one exception is `VMNotFoundError(VMError)`, which IS a proper 3-level child. Other direct `MVMError` children include `VolumeError`, `ImageAcquireError`, `IPTablesTrackerError`, `VersionError`, `VersionGateError`, `RootPartitionDetectionError`, `TieDetectedError`, and `HttpDownloadError`.
 
 ```
 MVMError                              # Root — carries optional code field
@@ -907,10 +907,7 @@ MVMError                              # Root — carries optional code field
 │   └── KeyFileError                  # File read/write failure
 ├── GuestfsError                      # libguestfs errors
 │   ├── GuestfsNotAvailableError      # Python bindings not found
-│   ├── GuestfsLaunchError            # Appliance launch failure
-│   ├── GuestfsMountError             # Rootfs mount failure
-│   ├── GuestfsWriteError             # File write failure
-│   └── GuestfsApplianceError         # Fixed appliance build failure
+│   └── GuestfsWriteError             # File write failure
 ├── LoopMountError                    # Loop-mount provisioning
 │   ├── LoopMountBinaryNotFoundError  # Binary not found
 │   └── LoopMountTimeoutError         # Timeout
@@ -921,7 +918,6 @@ MVMError                              # Root — carries optional code field
 ├── IPTablesTrackerError              # IPTables action failure (direct child)
 ├── VersionError                      # Version resolution failure
 ├── VersionGateError                  # Binary version does not meet minimum requirement
-├── AssetNotFoundError                # Asset not found locally/remotely
 ├── BundledAssetError                 # Bundled package asset failure
 │   └── BundledAssetNotFoundError     # Bundled file not found
 ├── ... (ImageNotFoundError, BinaryNotFoundError, KernelNotFoundError,
@@ -929,7 +925,6 @@ MVMError                              # Root — carries optional code field
 │        VolumeError are direct MVMError children for legacy compat)
 ├── RootPartitionDetectionError       # Root partition detection failure
 ├── TieDetectedError                  # Multiple partition tie
-├── DownloadError                     # Download failure
 └── HttpDownloadError                 # HTTP download failure
 ```
 
