@@ -124,6 +124,7 @@ markers = [
     "domain_cp: system test for file copy (cp) domain",
     "kernel_build: system test for kernel build from source (excluded from default run)",
     "host_reset: system test for host reset/clean with sudo (excluded from default run)",
+    "requires_firecracker_116: requires Firecracker v1.16+ for hotplug (excluded from default run)",
 ]
 filterwarnings = [
     "ignore::ResourceWarning:coverage.collector",

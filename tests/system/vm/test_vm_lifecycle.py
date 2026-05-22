@@ -858,13 +858,12 @@ class TestVMListInspect:
     # ── Process list ────────────────────────────────────────────────
 
     def test_ps_lists_running(self, mvm_binary, module_vm):
-        # Rationale: Uses module_vm fixture for read-only inspection. Verifies CLI output format (JSON, tree, table) is well-formed. A regression that produces malformed JSON would break all downstream consumers.
-        """vm ps lists running VMs (verify via ls --json)."""
-        result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+        # Rationale: Uses module_vm fixture for read-only inspection. Verifies vm ps table output includes running VMs. A regression where vm ps returns empty/no output for a running VM would indicate a DB/process tracking bug.
+        """vm ps lists running VMs — verify name prefix appears in table output."""
+        result = _run_mvm(mvm_binary, "vm", "ps")
         assert result.returncode == 0
-        vms = json.loads(result.stdout)
-        running = [v for v in vms if v.get("status") in ("starting", "running")]
-        assert any(v["name"] == module_vm["name"] for v in running)
+        # Rich table truncates long names with '…', so we match the prefix (5 chars)
+        assert module_vm["name"][:5] in result.stdout
 
     def test_ls_json_running_vm_fields(self, mvm_binary, module_vm):
         # Rationale: Verifies VM creation and lifecycle operations against a real Firecracker instance. A regression where create succeeds in DB but fails to start Firecracker would not be caught by JSON-only checks.
@@ -905,14 +904,16 @@ class TestVMListInspect:
         )
 
     def test_ps_shows_running_vm_details(self, mvm_binary, module_vm):
-        # Rationale: Uses module_vm fixture. Verifies that process listing and inspect commands return correct data for a running VM. A regression where vm ps shows no output for a running VM would indicate a DB/process tracking bug.
-        """vm ps table output shows running VM — verify via ls --json."""
-        result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+        # Rationale: Uses module_vm fixture. Verifies that vm ps table output includes the running VM and expected column headers. A regression where vm ps shows no output or missing columns would break user observability.
+        """vm ps table output shows running VM details (Name, Status, IPv4, vCPUs, etc.)."""
+        result = _run_mvm(mvm_binary, "vm", "ps")
         assert result.returncode == 0
-        vms = json.loads(result.stdout)
-        running = [v for v in vms if v.get("name") == module_vm["name"]]
-        assert running, f"Module VM not found in ls --json: {vms}"
-        assert running[0].get("status") in ("starting", "running")
+        output = result.stdout
+        # Rich table truncates long names with '…', so we match the prefix (5 chars)
+        assert module_vm["name"][:5] in output
+        # Verify expected column headers appear in the table
+        for header in ("Name", "Status", "IPv4", "vCPUs", "Mem", "Disk"):
+            assert header in output
 
     def test_ps_json(self, mvm_binary, module_vm):
         # Rationale: Uses module_vm fixture for read-only inspection. Verifies ps --json produces valid JSON with expected fields for each running VM. A regression where ps --json returns empty or malformed output would break automation scripts.
@@ -1934,8 +1935,16 @@ class TestVMStateTransitions:
     @pytest.mark.serial
     def test_reboot_graceful(self, mvm_binary, lifecycle_vm):
         # Rationale: Needs real VMs to detect race conditions in concurrent operations.
+        # L3: verifies PID changed after reboot (proves restart) and is alive.
         """Reboot VM."""
         vm_name = lifecycle_vm["name"]
+
+        # Capture PID before reboot
+        inspect_before = json.loads(
+            _run_mvm(mvm_binary, "vm", "inspect", vm_name, "--json").stdout
+        )
+        old_pid = inspect_before.get("vm", {}).get("pid")
+
         result = _run_mvm(mvm_binary, "vm", "reboot", vm_name)
         assert result.returncode == 0
         result = _run_mvm(mvm_binary, "vm", "ls", "--json")
@@ -1943,6 +1952,24 @@ class TestVMStateTransitions:
         vm = next((v for v in vms if v["name"] == vm_name), None)
         assert vm is not None
         assert vm["status"] == "running"
+
+        # L3: Verify PID changed (proves restart happened) and is alive
+        # Rationale: A reboot that updates the DB but does not actually
+        # restart the firecracker process would show status=running with
+        # the same PID. Checking PID change proves the VM was actually
+        # restarted, and /proc/{pid} proves the new process is alive.
+        new_pid = vm.get("pid")
+        assert new_pid is not None and new_pid > 0, (
+            f"Expected positive PID after reboot, got: {new_pid}"
+        )
+        if old_pid and old_pid > 0:
+            assert new_pid != old_pid, (
+                f"PID {old_pid} unchanged after reboot — "
+                f"VM may not have restarted"
+            )
+        assert os.path.exists(f"/proc/{new_pid}"), (
+            f"Firecracker PID {new_pid} should be alive after reboot"
+        )
 
     @pytest.mark.system
     @pytest.mark.shared_vm
@@ -1987,7 +2014,7 @@ class TestVMStateTransitions:
     @pytest.mark.system
     @pytest.mark.independent_vm
     def test_resume_independent(self, mvm_binary, created_vm):
-        # Rationale: Verifies VM state machine transition works end-to-end via real Firecracker instance. A regression where state transitions silently fail (pause written to DB but no actual pausing) would not be caught by returncode checks.
+        # Rationale: Verifies VM state machine transition works end-to-end via real Firecracker instance. A regression where state transitions silently fail (pause written to DB but no actual pausing) would not be caught by returncode checks. L3: verifies PID is alive after resume.
         """Pause then resume VM."""
         vm_name = created_vm["name"]
         _run_mvm(mvm_binary, "vm", "pause", vm_name)
@@ -1998,6 +2025,19 @@ class TestVMStateTransitions:
         vm = next((v for v in vms if v["name"] == vm_name), None)
         assert vm is not None
         assert vm["status"] == "running"
+
+        # L3: Verify PID is alive in /proc
+        # Rationale: A resume that updates the DB but fails to keep the
+        # firecracker process running would show status=running with a
+        # dead process. Checking /proc/{pid} proves the VM process
+        # survived the pause/resume cycle.
+        pid = vm.get("pid")
+        assert pid is not None and pid > 0, (
+            f"Expected positive PID for running VM, got: {pid}"
+        )
+        assert os.path.exists(f"/proc/{pid}"), (
+            f"Firecracker PID {pid} should be alive after resume"
+        )
 
     @pytest.mark.system
     @pytest.mark.independent_vm
@@ -2015,7 +2055,7 @@ class TestVMStateTransitions:
     @pytest.mark.system
     @pytest.mark.independent_vm
     def test_start_independent(self, mvm_binary, created_vm):
-        # Rationale: Verifies VM state machine transition works end-to-end via real Firecracker instance. A regression where state transitions silently fail (pause written to DB but no actual pausing) would not be caught by returncode checks.
+        # Rationale: Verifies VM state machine transition works end-to-end via real Firecracker instance. A regression where state transitions silently fail (pause written to DB but no actual pausing) would not be caught by returncode checks. L3: verifies PID is alive in /proc after start.
         """Stop then start a VM."""
         vm_name = created_vm["name"]
         _run_mvm(mvm_binary, "vm", "stop", vm_name)
@@ -2026,6 +2066,18 @@ class TestVMStateTransitions:
         vm = next((v for v in vms if v["name"] == vm_name), None)
         assert vm is not None
         assert vm["status"] == "running"
+
+        # L3: Verify PID is alive in /proc
+        # Rationale: A start that updates the DB but fails to spawn a
+        # firecracker process would show status=running with no actual
+        # VM running. Checking /proc/{pid} proves the process is alive.
+        pid = vm.get("pid")
+        assert pid is not None and pid > 0, (
+            f"Expected positive PID for running VM, got: {pid}"
+        )
+        assert os.path.exists(f"/proc/{pid}"), (
+            f"Firecracker PID {pid} should be alive after start"
+        )
 
     @pytest.mark.system
     @pytest.mark.independent_vm
@@ -2045,17 +2097,45 @@ class TestVMStateTransitions:
     @pytest.mark.system
     @pytest.mark.independent_vm
     def test_reboot_force_independent(self, mvm_binary, created_vm):
-        # Rationale: Verifies VM boot time is within acceptable limits. A performance regression in Firecracker startup or asset loading would cause user-visible delays.
+        # Rationale: Verifies VM boot time is within acceptable limits. A performance regression in Firecracker startup or asset loading would cause user-visible delays. L3: verifies PID changed (proves restart) and is alive.
         """Reboot VM with --force using a dedicated VM."""
+        vm_name = created_vm["name"]
+
+        # Capture PID before reboot
+        inspect_before = json.loads(
+            _run_mvm(mvm_binary, "vm", "inspect", vm_name, "--json").stdout
+        )
+        old_pid = inspect_before.get("vm", {}).get("pid")
+
         result = _run_mvm(
-            mvm_binary, "vm", "reboot", created_vm["name"], "--force"
+            mvm_binary, "vm", "reboot", vm_name, "--force"
         )
         assert result.returncode == 0
         result = _run_mvm(mvm_binary, "vm", "ls", "--json")
         vms = json.loads(result.stdout)
-        vm = next((v for v in vms if v["name"] == created_vm["name"]), None)
+        vm = next((v for v in vms if v["name"] == vm_name), None)
         assert vm is not None
         assert vm["status"] == "running"
+
+        # L3: Verify PID changed (proves restart happened) and is alive
+        # Rationale: A force-reboot that updates the DB but does not
+        # actually restart the firecracker process would show
+        # status=running with the same PID. Checking PID change proves
+        # the VM was actually restarted, and /proc/{pid} proves the
+        # new process is alive.
+        new_pid = vm.get("pid")
+        assert new_pid is not None and new_pid > 0, (
+            f"Expected positive PID after reboot --force, got: {new_pid}"
+        )
+        if old_pid and old_pid > 0:
+            assert new_pid != old_pid, (
+                f"PID {old_pid} unchanged after reboot --force — "
+                f"VM may not have restarted"
+            )
+        assert os.path.exists(f"/proc/{new_pid}"), (
+            f"Firecracker PID {new_pid} should be alive after "
+            f"reboot --force"
+        )
 
     # ── State machine edge cases (from state_transitions.py) ────────
 
@@ -2522,7 +2602,7 @@ class TestVMStateTransitions:
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network
     def test_stop_clean_shutdown(
-        # Rationale: Verifies VM state machine transition works end-to-end via real Firecracker instance. A regression where state transitions silently fail (pause written to DB but no actual pausing) would not be caught by returncode checks.
+        # Rationale: Verifies VM state machine transition works end-to-end via real Firecracker instance. A regression where state transitions silently fail (pause written to DB but no actual pausing) would not be caught by returncode checks. L3: verifies PID is gone from /proc after graceful stop.
         self,
         mvm_binary,
         unique_vm_name,
@@ -2550,6 +2630,15 @@ class TestVMStateTransitions:
                 "--network",
                 network_name,
             )
+
+            # Capture PID before stop for L3 verification
+            inspect_before = json.loads(
+                _run_mvm(
+                    mvm_binary, "vm", "inspect", unique_vm_name, "--json"
+                ).stdout
+            )
+            pid = inspect_before.get("vm", {}).get("pid")
+
             _run_mvm(mvm_binary, "vm", "stop", unique_vm_name)
             result = _run_mvm(mvm_binary, "vm", "ls", "--json")
             vms = json.loads(result.stdout)
@@ -2558,6 +2647,17 @@ class TestVMStateTransitions:
             )
             assert vm_entry is not None
             assert vm_entry["status"] == "stopped"
+
+            # L3: Verify PID is no longer alive
+            # Rationale: A stop that updates the DB but fails to kill the
+            # firecracker process would leave an orphaned VM consuming
+            # memory and CPU. Checking /proc/{pid} proves the process
+            # was actually terminated.
+            if pid and pid > 0:
+                assert not os.path.exists(f"/proc/{pid}"), (
+                    f"Firecracker PID {pid} should not exist after "
+                    f"graceful stop"
+                )
         finally:
             _run_mvm(
                 mvm_binary, "vm", "rm", unique_vm_name, "--force", check=False

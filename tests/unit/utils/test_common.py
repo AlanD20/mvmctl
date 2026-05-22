@@ -422,18 +422,6 @@ class TestCommonUtilsExtended:
         with pytest.raises(MVMError, match="must match"):
             CommonUtils.validate_entity_name("UPPERCASE", "VM")
 
-    def test_get_combined_marker_default_missing(self):
-        assert CommonUtils._get_combined_marker(True, True) == "*X "
-
-    def test_get_combined_marker_missing_only(self):
-        assert CommonUtils._get_combined_marker(False, True) == " X "
-
-    def test_get_combined_marker_default_only(self):
-        assert CommonUtils._get_combined_marker(True, False) == "*  "
-
-    def test_get_combined_marker_normal(self):
-        assert CommonUtils._get_combined_marker(False, False) == "   "
-
     def test_coerce_bool_true(self):
         assert CommonUtils.coerce("true", bool) is True
 

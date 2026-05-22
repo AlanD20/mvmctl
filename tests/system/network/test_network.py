@@ -1210,9 +1210,10 @@ class TestNetworkRemoveForce:
 
     def test_network_rm_with_force(self, mvm_binary, unique_network_name):
         # Rationale: Needs a real network. Tests --force removal.
-        # Cleanup in finally.
+        # Cleanup in finally. L3: verifies bridge is actually gone.
         """Create a network and remove it with --force, verify cleanup."""
         subnet = _unique_subnet(unique_network_name)
+        bridge = _compute_bridge_name(unique_network_name)
         try:
             _run_mvm(
                 mvm_binary,
@@ -1236,6 +1237,22 @@ class TestNetworkRemoveForce:
         ls_result = _run_mvm(mvm_binary, "network", "ls", "--json")
         networks = json.loads(ls_result.stdout)
         assert not any(n.get("name") == unique_network_name for n in networks)
+
+        # L3: Verify bridge interface is actually gone from the system
+        # Rationale: A deletion that removes the DB entry but fails to
+        # delete the bridge would leave a stale interface consuming
+        # system resources. The `ip link show` check proves the bridge
+        # was actually torn down by network rm --force.
+        result = subprocess.run(
+            ["ip", "link", "show", bridge],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode != 0, (
+            f"Bridge '{bridge}' should no longer exist after "
+            f"network rm --force:\n{result.stdout}"
+        )
 
 
 class TestNetworkVMDependency:

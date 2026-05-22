@@ -576,11 +576,13 @@ class TestImageImport:
 
             result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images = json.loads(result.stdout)
-            # OS detector renames imported images to "<type> (imported)"
+            # The imported image's name and type both match the user-provided
+            # import name ("imported-alpine"), so check for "imported" in name
+            # and "alpine" in type (not startswith, since type is "imported-alpine").
             imported = [
                 i for i in images
                 if "imported" in i.get("name", "").lower()
-                and i.get("type", "").lower().startswith("alpine")
+                and "alpine" in i.get("type", "").lower()
             ]
             assert imported, "Imported image not found in listing"
             imported_prefix = imported[0]["id"][:6]
@@ -1495,14 +1497,13 @@ class TestImageImportCreateVM:
             #   ✓ Image imported: <full_hash>.ext4
             #       Name: <name>
             #       ID:   <short_id>
-            # Extract the full hash before ".ext4" on the first line.
-            first_line = result.stdout.strip().splitlines()[0]
-            m = re.search(r"([0-9a-f]{64})\.", first_line)
+            # Search for the short ID from the "ID:" line (robust against
+            # Rich wrapping of the long path in the first line).
+            m = re.search(r"ID:\s+(\w+)", result.stdout)
             assert m, (
                 f"Could not parse image ID from import output: {result.stdout.strip()}"
             )
-            image_full_id = m.group(1)
-            imported_prefix = image_full_id[:6]
+            imported_prefix = m.group(1)
 
             # Look up the stored name in the listing (it may be "alpine (imported)"
             # when OS detection works, or "imported-<name> (imported)" otherwise).

@@ -56,7 +56,7 @@ removed, or when test coverage changes.
 | `config reset <cat>` (category only) | ⚡ Shallow | `test_config.py` | `TestConfigEdgeCases` | L2 — value not in output |
 | `config reset` no args | ⚡ Shallow | `test_config.py` | `TestConfigEdgeCases` | Shows guidance, exit 0 |
 | `config reset --all` | ⚡ Shallow | `test_config.py` | `TestConfigLifecycle`, `TestConfigEdgeCasesResetAllAfterSet` | Multiple overrides then reset --all |
-| `config list` | ⚡ Shallow | `test_config.py` | `TestConfigLifecycle` | L1 — checks [defaults.vm] in output |
+| `config ls` | ⚡ Shallow | `test_config.py` | `TestConfigLifecycle` | L1 — checks [defaults.vm] in output |
 
 ---
 
@@ -84,7 +84,7 @@ removed, or when test coverage changes.
 | `network inspect <name> --tree` | ⚡ Shallow | `test_network.py` | `TestNetworkInspectTree` | L1 |
 | `network rm <name>` | ✅ Deep | `test_network.py` | `TestNetworkLifecycle` | L2 listing + bridge verification |
 | `network rm <nonexistent>` | ⚡ Shallow | `test_network.py` | `TestNetworkLifecycle` | L1 |
-| `network rm --force` | ⚡ Shallow | `test_network.py` | `TestNetworkRemoveForce` | L2 — listing check. Should add L3 bridge gone. |
+| `network rm --force` | ✅ Deep | `test_network.py` | `TestNetworkRemoveForce` | L3: bridge interface gone after removal (ip link show) |
 | `network rm <name1> <name2>` | ⚡ Shallow | `test_network.py` | `TestNetworkLifecycle` | L2 — listing check |
 | `network default <name>` | ⚡ Shallow | `test_network.py` | `TestNetworkLifecycle` | L2 — is_default in JSON |
 | `network default <nonexistent>` | ⚡ Shallow | `test_network.py` | `TestNetworkLifecycle` | L1 |
@@ -93,6 +93,8 @@ removed, or when test coverage changes.
 | `network sync <specific>` | ✅ Deep | `test_network.py` | `TestNetworkSync` | L3: bridge and rules |
 | `network sync` idempotent | ✅ Deep | `test_network.py` | `TestNetworkSync` | L3: rule count unchanged |
 | Sync after bridge deletion | ✅ Deep | `test_network.py` | `TestNetworkSyncAfterReboot` | L3: bridge recreated, IP reassigned, rules restored |
+| `network sync` conntrack rule | ✅ Deep | `test_network.py` | `TestNetworkSync` | Conntrack established/related accept rule |
+| `network sync` nonexistent | ⚡ Shallow | `test_network.py` | `TestNetworkSync` | Error handling for nonexistent network |
 
 ---
 
@@ -148,24 +150,24 @@ removed, or when test coverage changes.
 | `vm ls` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMListInspect` | L1 |
 | `vm ls --json` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMListInspect` | L2 — checks many fields |
 | `vm ls --json` empty | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMListEmpty` | L2 — empty list. Clears VMs first. |
-| `vm ps` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMListInspect` | L1 — name in table output |
+| `vm ps` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMListInspect::test_ps_lists_running, test_ps_shows_running_vm_details` | L2 — name and column headers in table output |
 | `vm ps --json` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMListInspect` | L2 — JSON list with name, status, pid, ipv4, vcpu_count, mem_size_mib |
 | `vm inspect <name>` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMListInspect` | L1 |
 | `vm inspect <name> --json` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMListInspect` | L2 — checks many fields |
 
 | `vm inspect` by IP | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMListInspect` | L2 — stop by IP test covers resolution |
-| `vm start` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMStateTransitions` | L2 — status=running |
+| `vm start` | ✅ Deep | `test_vm_lifecycle.py` | `TestVMStateTransitions` | L3 — PID alive in /proc after start |
 | `vm start` on running | ⚡ Shallow | `test_cli_edge_cases.py` | `TestVMStateTransitionErrors` | L1 — exit 0 |
 | `vm stop` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMStateTransitions` | L2 — status=stopped |
 | `vm stop --force` | ✅ Deep | `test_vm_lifecycle.py` | `TestVMStateTransitions` | L3 — PID no longer alive |
 | `vm stop` on stopped | ⚡ Shallow | `test_cli_edge_cases.py` | `TestVMStateTransitionErrors` + `test_vm_lifecycle.py` | L1 — exit 0 |
 | `vm stop` by IP | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMStateTransitions` | L2 |
-| `vm stop` graceful (no --force) | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMStateTransitions` | L2 — status=stopped |
+| `vm stop` graceful (no --force) | ✅ Deep | `test_vm_lifecycle.py` | `TestVMStateTransitions` | L3 — PID gone from /proc after graceful stop |
 | `vm pause` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMStateTransitions` | L2 — status=paused |
 | `vm pause` on stopped | ⚡ Shallow | `test_cli_edge_cases.py` | `TestVMStateTransitionErrors` | L1 — non-zero |
-| `vm resume` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMStateTransitions` | L2 — status=running |
+| `vm resume` | ✅ Deep | `test_vm_lifecycle.py` | `TestVMStateTransitions` | L3 — PID alive after resume |
 | `vm resume` on running | ⚡ Shallow | `test_cli_edge_cases.py` | `TestVMStateTransitionErrors` + `test_vm_lifecycle.py` | L1 — exit 0 |
-| `vm reboot` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMStateTransitions` | L2 — status=running |
+| `vm reboot` | ✅ Deep | `test_vm_lifecycle.py` | `TestVMStateTransitions` | L3 — PID changed (proves restart) and alive in /proc |
 | `vm reboot --force` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMStateTransitions` | L2 — status=running |
 | `vm rm` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMStateTransitions` (crash tests) | L2 — not in listing |
 | `vm rm --force` | ⚡ Shallow | `test_vm_lifecycle.py` | Various | L2 |
@@ -227,8 +229,8 @@ removed, or when test coverage changes.
 | Volume rm with running VM | ⚡ Shallow | `test_volume.py` | `TestVolumeRunningVMDependency` | L1 |
 | Volume rm --force with running VM | ⚡ Shallow | `test_volume.py` | `TestVolumeRunningVMDependency` | L2 |
 | Volume resize with running VM | ⚡ Shallow | `test_volume.py` | `TestVolumeRunningVMDependency` | L2 |
-| Volume hotplug (attach to running) | ✅ Deep | `test_volume_hotplug.py` | `TestVolumeHotplug` | L3 — SSH check /dev/vdb appears |
-| Volume hotunplug (detach from running) | ✅ Deep | `test_volume_hotplug.py` | `TestVolumeHotplug` | L3 — SSH check /dev/vdb disappears |
+| Volume hotplug (attach to running) | 🟡 Partial | `test_volume_hotplug.py` | `TestVolumeHotplug` | L3 — SSH check /dev/vdb appears. Requires firecracker_116 marker (excluded from default run) |
+| Volume hotunplug (detach from running) | 🟡 Partial | `test_volume_hotplug.py` | `TestVolumeHotplug` | L3 — SSH check /dev/vdb disappears. Requires firecracker_116 marker (excluded from default run) |
 
 ---
 
@@ -280,6 +282,7 @@ removed, or when test coverage changes.
 | `image pull --disable-detector` | ⏭️ Skip | `test_cli_edge_cases.py` | `TestImageAdvancedFlags` | L1 — often skips |
 | `image pull --arch` | ⏭️ Skip | `test_images.py` | `TestImagePullArchFlag` | Network-dependent. L1: success message |
 | `image pull --no-cache` | ⏭️ Skip | `test_images.py` | `TestImagePullNoCache` | Network-dependent. L1: success message |
+| `image pull --type <type>` (explicit) | ⚡ Shallow | `test_cli_edge_cases.py` | `TestImagePullAdvancedFlags` | Explicit type flag |
 | `image ls` | ⚡ Shallow | `test_images.py` | `TestImageList` | L1 |
 | `image ls --json` | ⚡ Shallow | `test_images.py` | `TestImageList` | L2 |
 | `image ls --no-cache` (local) | ⚡ Shallow | `test_images.py` | `TestImageList` | L1 — exit 0 |
@@ -383,6 +386,9 @@ removed, or when test coverage changes.
 | `console <vm> --state` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMListInspect` | L1 — checks state |
 | `console <vm> --kill` | ⚡ Shallow | `test_console.py` | `TestConsoleKill` | L1 — state check before/after kill |
 | `console <nonexistent> --state` | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMListInspect` | L1 |
+| `console <ip> --state` | ⚡ Shallow | `test_console.py` | `TestConsoleState` | Resolves by IP |
+| `console lifecycle: state → kill → state` | ⚡ Shallow | `test_console.py` | `TestConsoleKill` | Full lifecycle verification |
+| `console on stopped VM` | ⚡ Shallow | `test_console.py` | `TestConsoleOnStoppedVM` | Non-zero exit |
 
 ---
 
@@ -395,6 +401,10 @@ removed, or when test coverage changes.
 | `logs <vm> --lines 5` | ⚡ Shallow | `test_logs.py` | `TestLogsBasic` | L1 — at most 5 lines |
 | `logs <ip>` (by IP) | ⚡ Shallow | `test_cli_edge_cases.py` | `TestVMLogsByIdentifier` | L1 — returncode 0 |
 | `logs --follow` / `-f` | ⚡ Shallow | `test_logs.py` | `TestVMLogs` | L1: brief timeout, verifies no crash |
+| `logs --os --follow` | ⚡ Shallow | `test_logs.py` | `TestVMLogs` | Combined flags |
+| `logs <nonexistent>` | ⚡ Shallow | `test_logs.py` | `TestVMLogs` | Error handling |
+| `logs --lines multiple values` | ⚡ Shallow | `test_logs.py` | `TestVMLogs` | Tested with --lines 5 and --lines 50 |
+| `logs by IP fails for stopped VM` | ⚡ Shallow | `test_logs.py` | `TestVMLogs` | Stopped VM edge case |
 
 ---
 
@@ -412,6 +422,7 @@ removed, or when test coverage changes.
 | `host clean` blocked by running VM | ⚡ Shallow | `test_host.py` | `TestHostCleanSafety` | L1 |
 | `host reset --force` | ⚡ Shallow | `test_host.py` | `TestHostCleanDestructive` | L1 — exit 0, non-empty stdout. Marked host_reset (excluded from default runs) |
 | `host reset` blocked by running VM | ⚡ Shallow | `test_host.py` | `TestHostResetSafety` | L1 |
+| `host init` | 🟡 Partial | `test_host.py` | `TestHostInit` | Non-sudo path verified; sudo path requires host_reset marker |
 
 ---
 
@@ -457,26 +468,26 @@ removed, or when test coverage changes.
 | Root CLI | 7 | 0 | 7 | 0 | 0 |
 | init | 4 | 0 | 4 | 0 | 0 |
 | config | 11 | 0 | 11 | 0 | 0 |
-| network | 29 | 8 | 21 | 0 | 0 |
-| vm | 92 | 11 | 79 | 2 | 0 |
-| volume | 30 | 3 | 27 | 0 | 0 |
+| network | 31 | 10 | 21 | 0 | 0 |
+| vm | 92 | 15 | 75 | 2 | 0 |
+| volume | 30 | 1 | 29 | 0 | 0 |
 | key | 27 | 3 | 24 | 0 | 0 |
-| image | 37 | 0 | 11 | 0 | 26 |
+| image | 38 | 0 | 12 | 0 | 26 |
 | kernel | 23 | 0 | 16 | 0 | 7 |
 | bin | 16 | 1 | 7 | 0 | 8 |
 | ssh | 6 | 4 | 2 | 0 | 0 |
-| console | 3 | 0 | 3 | 0 | 0 |
-| logs | 5 | 0 | 5 | 0 | 0 |
-| host | 10 | 3 | 6 | 0 | 1 |
+| console | 6 | 0 | 6 | 0 | 0 |
+| logs | 9 | 0 | 9 | 0 | 0 |
+| host | 11 | 3 | 7 | 0 | 1 |
 | cache | 7 | 0 | 6 | 0 | 1 |
 | cp | 14 | 9 | 5 | 0 | 0 |
-| **Total** | **321** | **42** | **234** | **2** | **43** |
+| **Total** | **332** | **46** | **241** | **2** | **43** |
 
 **Coverage health:**
-- ✅ Deep (L3): 42/321 = 13.1%
-- ⚡ Shallow (L0-L2 incl. 🟡 Partial): 234/321 = 72.9%
-- 🔴 Missing: **2/321 = 0.6%** — all gaps filled ✅ (2 remaining are erroneous vm entries)
-- ⏭️ Skip-prone: 43/321 = 13.4%
+- ✅ Deep (L3): 46/332 = 13.9%
+- ⚡ Shallow (L0-L2 incl. 🟡 Partial): 241/332 = 72.6%
+- 🔴 Missing: **2/332 = 0.6%** — all gaps filled ✅ (2 remaining are erroneous vm entries)
+- ⏭️ Skip-prone: 43/332 = 13.0%
 
 **Structural improvements made (this refactoring) — historical context:**
 

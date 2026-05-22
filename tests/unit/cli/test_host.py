@@ -110,8 +110,8 @@ class TestHostInit:
         assert "host init" in result.output.lower()
 
 
-class TestHostLs:
-    """Tests for 'host ls' command."""
+class TestHostStatus:
+    """Tests for 'host status' command."""
 
     @patch("mvmctl.cli.host.HostOperation")
     def test_ls_all_ok(self, mock_host_op):
@@ -119,7 +119,7 @@ class TestHostLs:
         mock_host_op.check_required_binaries.return_value = []
         mock_host_op.get_ip_forward_status.return_value = "1"
         mock_host_op.get_state.return_value = _make_state()
-        result = runner.invoke(app, ["host", "ls"])
+        result = runner.invoke(app, ["host", "status"])
         assert result.exit_code == 0
         assert "ok" in result.output
 
@@ -129,7 +129,7 @@ class TestHostLs:
         mock_host_op.check_required_binaries.return_value = ["iptables"]
         mock_host_op.get_ip_forward_status.return_value = "0"
         mock_host_op.get_state.return_value = None
-        result = runner.invoke(app, ["host", "ls"])
+        result = runner.invoke(app, ["host", "status"])
         assert result.exit_code == 0
         assert "FAIL" in result.output
         assert "iptables" in result.output
@@ -140,7 +140,7 @@ class TestHostLs:
         mock_host_op.check_required_binaries.return_value = []
         mock_host_op.get_ip_forward_status.return_value = "1"
         mock_host_op.get_state.return_value = _make_state()
-        result = runner.invoke(app, ["host", "ls", "--json"])
+        result = runner.invoke(app, ["host", "status", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["kvm_accessible"] is True
@@ -154,12 +154,12 @@ class TestHostLs:
             "sysctl not found"
         )
         mock_host_op.get_state.return_value = None
-        result = runner.invoke(app, ["host", "ls"])
+        result = runner.invoke(app, ["host", "status"])
         assert result.exit_code == 0
         assert "unknown" in result.output.lower()
 
     def test_ls_help(self):
-        result = runner.invoke(app, ["host", "ls", "--help"])
+        result = runner.invoke(app, ["host", "status", "--help"])
         assert result.exit_code == 0
 
 
@@ -523,7 +523,7 @@ class TestHostResetEdgeCases:
 
 
 class TestHostLsEdgeCases:
-    """Tests for 'host ls' edge cases."""
+    """Tests for 'host status' edge cases."""
 
     @patch("mvmctl.cli.host.HostOperation")
     def test_ls_get_state_raises(self, mock_host_op):
@@ -531,7 +531,7 @@ class TestHostLsEdgeCases:
         mock_host_op.check_required_binaries.return_value = []
         mock_host_op.get_ip_forward_status.return_value = "1"
         mock_host_op.get_state.side_effect = HostError("DB error")
-        result = runner.invoke(app, ["host", "ls"])
+        result = runner.invoke(app, ["host", "status"])
         assert result.exit_code == 0
         assert "none" in result.output.lower()
 

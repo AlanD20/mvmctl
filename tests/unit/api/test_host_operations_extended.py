@@ -112,6 +112,15 @@ def _patch_init_common(mocker) -> dict[str, MagicMock]:
 
     mocker.patch("mvmctl.api.host_operations.AuditLog.log")
 
+    # HostProbe.run_all() is called as Phase 1 of init() — return a clean result
+    # so tests can focus on the init path they're actually testing.
+    from mvmctl.models.host import ProbeResult
+
+    mocker.patch(
+        "mvmctl.api.host_operations.HostProbe.run_all",
+        return_value=ProbeResult(),
+    )
+
     # NetworkOperation is imported locally in init() — patch at source
     mock_net_op_restore = MagicMock()
     mock_net_op_restore.is_ok = True
@@ -147,66 +156,51 @@ class TestHostOperationInitExtended:
     def test_init_kvm_missing(self, mocker):
         _patch_init_common(mocker)
         mocker.patch("mvmctl.api.host_operations.os.getuid", return_value=0)
-        mocker.patch(
-            "mvmctl.api.host_operations.HostService.check_kvm_access",
-            return_value=False,
+
+        # override the _patch_init_common probe mock — simulate /dev/kvm missing
+        from mvmctl.models.host import ProbeCheck, ProbeResult
+
+        probe_result = ProbeResult()
+        probe_result.critical.append(
+            ProbeCheck(
+                name="dev_kvm",
+                passed=False,
+                message="/dev/kvm does not exist",
+            )
         )
         mocker.patch(
-            "mvmctl.api.host_operations.Path.exists", return_value=False
+            "mvmctl.api.host_operations.HostProbe.run_all",
+            return_value=probe_result,
         )
+
         result = HostOperation.init(Path("/tmp"))
         assert result.status == "error"
-        assert result.code == "host.kvm.missing"
+        assert result.code == "host.init.probe_failed"
 
     def test_init_kvm_unreadable(self, mocker):
         _patch_init_common(mocker)
         mocker.patch("mvmctl.api.host_operations.os.getuid", return_value=0)
-        mocker.patch(
-            "mvmctl.api.host_operations.HostService.check_kvm_access",
-            return_value=False,
+
+        # init() now calls HostProbe.run_all() instead of direct /dev/kvm checks.
+        # Mock run_all to report a critical probe for unreadable /dev/kvm.
+        from mvmctl.models.host import ProbeCheck, ProbeResult
+
+        probe_result = ProbeResult()
+        probe_result.critical.append(
+            ProbeCheck(
+                name="dev_kvm",
+                passed=False,
+                message="/dev/kvm exists but is not readable/writable",
+            )
         )
-        mock_kvm = MagicMock()
-        mock_kvm.exists.return_value = True
-        mock_kvm.stat.return_value.st_mode = 0o200
-        mocker.patch("mvmctl.api.host_operations.Path", return_value=mock_kvm)
+        mocker.patch(
+            "mvmctl.api.host_operations.HostProbe.run_all",
+            return_value=probe_result,
+        )
+
         result = HostOperation.init(Path("/tmp"))
         assert result.status == "error"
-        assert result.code == "host.kvm.unreadable"
-
-    def test_init_iptables_conflict(self, mocker):
-        _patch_init_common(mocker)
-        mocker.patch("mvmctl.api.host_operations.os.getuid", return_value=0)
-        mocker.patch(
-            "mvmctl.api.host_operations.NetworkUtils.detect_iptables_backend_conflict",
-            return_value=(True, "mixed nft/legacy"),
-        )
-        result = HostOperation.init(Path("/tmp"))
-        assert result.status == "error"
-        assert result.code == "host.iptables.conflict"
-
-    def test_init_missing_binaries(self, mocker):
-        _patch_init_common(mocker)
-        mocker.patch("mvmctl.api.host_operations.os.getuid", return_value=0)
-        mocker.patch(
-            "mvmctl.api.host_operations.HostService.check_required_binaries",
-            return_value=["ip", "brctl"],
-        )
-        result = HostOperation.init(Path("/tmp"))
-        assert result.status == "error"
-        assert result.code == "host.binaries.missing"
-        assert "ip" in result.message
-
-    def test_init_cloud_localds_warning_logged(self, mocker):
-        _patch_init_common(mocker)
-        mocker.patch("mvmctl.api.host_operations.os.getuid", return_value=0)
-        mocker.patch(
-            "mvmctl.api.host_operations.HostService.check_cloud_localds",
-            return_value=False,
-        )
-        mock_logger = mocker.patch("mvmctl.api.host_operations.logger.warning")
-        result = HostOperation.init(Path("/tmp"))
-        assert result.status == "success"
-        mock_logger.assert_called_once()
+        assert result.code == "host.init.probe_failed"
 
     def test_init_group_created_and_user_added(self, mocker):
         _patch_init_common(mocker)

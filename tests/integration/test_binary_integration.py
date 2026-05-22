@@ -95,8 +95,8 @@ class TestBinaryPull(_BinaryTestBase):
         assert Path(jl.path).exists()
         assert Path(jl.path).name == "jailer-v1.16.0"
 
-    def test_pull_existing_version_no_override(self) -> None:
-        """Pulling an existing version without override returns existing DB entries."""
+    def test_pull_existing_version_no_override_errors(self) -> None:
+        """Pulling an existing version with ``download_override=False`` returns error."""
         # Seed jailer so both firecracker and jailer exist for v1.15.0
         from mvmctl.core._shared import Database
         from mvmctl.core.binary._repository import BinaryRepository
@@ -130,16 +130,11 @@ class TestBinaryPull(_BinaryTestBase):
             BinaryPullInput(version="1.15.0", download_override=False)
         )
 
-        assert len(result.item) == 2
-        fc = next(b for b in result.item if b.name == "firecracker")
-        assert fc.version == "1.15.0"
-        assert fc.name == "firecracker"
-        assert Path(fc.path).exists()
-        assert Path(fc.path).name == "firecracker"
-
-        jl = next(b for b in result.item if b.name == "jailer")
-        assert jl.version == "1.15.0"
-        assert Path(jl.path).exists()
+        assert result.status == "error"
+        assert result.code == "binary.pull_failed"
+        assert result.item is None
+        assert result.exception is not None
+        assert "already exists" in str(result.exception)
 
     def test_pull_invalid_version(self) -> None:
         """Pulling with an invalid version format returns error status."""

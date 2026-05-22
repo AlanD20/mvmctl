@@ -65,7 +65,7 @@ class TestBinaryPull:
         mock_repo.upsert.assert_called()
 
     def test_pull_early_return_when_exists(self, mocker):
-        """pull() returns existing binaries without download."""
+        """pull() returns error when version already exists and no override."""
         mocker.patch("mvmctl.api.binary_operations.Database")
         mock_repo = MagicMock()
         fc = _make_bin(name="firecracker")
@@ -94,7 +94,8 @@ class TestBinaryPull:
         )
 
         result = BinaryOperation.pull(MagicMock(version="1.15.0"))
-        assert len(result.item) == 2
+        assert result.status == "error"
+        assert "already exists" in result.message
         mock_download.assert_not_called()
 
     def test_pull_sets_default_when_no_default_exists(self, mocker):

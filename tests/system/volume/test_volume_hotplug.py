@@ -26,7 +26,6 @@ from tests.system.conftest import (
 pytestmark = [
     pytest.mark.system,
     pytest.mark.domain_volume,
-    pytest.mark.requires_kvm,
 ]
 
 
@@ -156,6 +155,14 @@ class TestVolumeHotplug:
     with SSH key injected.  The fixture is function-scoped so each test gets
     an isolated VM (expensive, ~60-120s, but required for hotplug tests).
     """
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.domain_volume,
+        pytest.mark.serial,
+        pytest.mark.slow,
+        pytest.mark.requires_firecracker_116,
+    ]
 
     @pytest.fixture(autouse=True)
     def _ensure_firecracker_ge_1_16(self, mvm_binary: str) -> None:
@@ -999,8 +1006,9 @@ class TestVolumeHotplugDestructive:
     pytestmark = [
         pytest.mark.system,
         pytest.mark.domain_volume,
-        pytest.mark.requires_kvm,
         pytest.mark.serial,
+        pytest.mark.slow,
+        pytest.mark.requires_firecracker_116,
     ]
 
     @pytest.fixture(autouse=True)

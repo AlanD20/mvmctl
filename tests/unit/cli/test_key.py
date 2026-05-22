@@ -51,7 +51,7 @@ class TestKeyLs:
             _make_key("key1"),
             _make_key("key2"),
         ]
-        result = runner.invoke(app, ["key", "ls"])
+        result = runner.invoke(app, ["key", "ls", "--long"])
         assert result.exit_code == 0
         assert "key1" in result.output
         assert "key2" in result.output

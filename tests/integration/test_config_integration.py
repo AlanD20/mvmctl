@@ -22,10 +22,10 @@ from mvmctl.exceptions import ConfigError
 class TestConfigGetSetReset:
     """Test basic config get, set, and reset operations."""
 
-    def test_get_returns_none_before_override(self) -> None:
-        """Getting a key that has never been overridden returns None."""
+    def test_get_returns_default_before_override(self) -> None:
+        """Getting a key that has never been overridden returns the built-in default."""
         result = ConfigOperation.get(category="settings.vm", key="max_vms")
-        assert result is None
+        assert result == 1000
 
     def test_set_and_get(self) -> None:
         """Setting a value persists and get returns the new value."""
@@ -33,12 +33,12 @@ class TestConfigGetSetReset:
         result = ConfigOperation.get(category="settings.vm", key="max_vms")
         assert result == 50
 
-    def test_reset_reverts_to_none(self) -> None:
-        """Resetting a key removes the override so get returns None."""
+    def test_reset_reverts_to_default(self) -> None:
+        """Resetting a key removes the override so get returns the built-in default."""
         ConfigOperation.set(category="settings.vm", key="max_vms", value=50)
         ConfigOperation.reset(category="settings.vm", key="max_vms")
         result = ConfigOperation.get(category="settings.vm", key="max_vms")
-        assert result is None
+        assert result == 1000
 
     def test_get_category(self) -> None:
         """Getting a category without a key returns all keys with metadata."""
@@ -101,12 +101,12 @@ class TestConfigListAll:
 class TestConfigEdgeCases:
     """Test edge cases and error handling in the Config API."""
 
-    def test_get_nonexistent_key_returns_none(self) -> None:
-        """Getting a key that does not exist in the schema returns None."""
-        result = ConfigOperation.get(
-            category="settings.vm", key="nonexistent_key"
-        )
-        assert result is None
+    def test_get_nonexistent_key_raises_config_error(self) -> None:
+        """Getting a key that does not exist in the schema raises ConfigError."""
+        with pytest.raises(ConfigError):
+            ConfigOperation.get(
+                category="settings.vm", key="nonexistent_key"
+            )
 
     def test_set_invalid_value_type_raises(self) -> None:
         """Setting a value that cannot be coerced to the expected type raises."""
@@ -137,14 +137,13 @@ class TestConfigEdgeCases:
         assert deleted.item == 3
 
         assert (
-            ConfigOperation.get(category="settings.vm", key="max_vms") is None
+            ConfigOperation.get(category="settings.vm", key="max_vms") == 1000
         )
         assert (
-            ConfigOperation.get(category="settings.vm", key="log_lines") is None
+            ConfigOperation.get(category="settings.vm", key="log_lines") == 50
         )
         assert (
-            ConfigOperation.get(category="defaults.vm", key="vcpu_count")
-            is None
+            ConfigOperation.get(category="defaults.vm", key="vcpu_count") == 1
         )
 
     def test_reset_category_removes_all_in_category(self) -> None:
@@ -157,10 +156,10 @@ class TestConfigEdgeCases:
         assert deleted.item == 2
 
         assert (
-            ConfigOperation.get(category="settings.vm", key="max_vms") is None
+            ConfigOperation.get(category="settings.vm", key="max_vms") == 1000
         )
         assert (
-            ConfigOperation.get(category="settings.vm", key="log_lines") is None
+            ConfigOperation.get(category="settings.vm", key="log_lines") == 50
         )
         # Other category should remain intact
         assert (

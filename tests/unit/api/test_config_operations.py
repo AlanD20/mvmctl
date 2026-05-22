@@ -27,9 +27,9 @@ class TestConfigOperationGet:
         assert result == 4
 
     def test_get_none_for_missing(self) -> None:
-        """get() returns None when no override exists."""
+        """get() returns the built-in default when no override exists."""
         result = ConfigOperation.get("defaults.vm", "vcpu_count")
-        assert result is None
+        assert result == 1
 
     def test_get_by_category_returns_dict(self) -> None:
         """get() without key returns dict for the category."""
@@ -112,7 +112,7 @@ class TestConfigOperationReset:
         ConfigOperation.set("defaults.vm", "vcpu_count", 8)
         result = ConfigOperation.reset("defaults.vm", "vcpu_count")
         assert result.item == 1
-        assert ConfigOperation.get("defaults.vm", "vcpu_count") is None
+        assert ConfigOperation.get("defaults.vm", "vcpu_count") == 1
 
     def test_reset_category(self) -> None:
         """reset() with category removes all overrides in that category."""
@@ -120,8 +120,8 @@ class TestConfigOperationReset:
         ConfigOperation.set("defaults.vm", "mem_size_mib", 1024)
         result = ConfigOperation.reset("defaults.vm")
         assert result.item == 2
-        assert ConfigOperation.get("defaults.vm", "vcpu_count") is None
-        assert ConfigOperation.get("defaults.vm", "mem_size_mib") is None
+        assert ConfigOperation.get("defaults.vm", "vcpu_count") == 1
+        assert ConfigOperation.get("defaults.vm", "mem_size_mib") == 512
 
     def test_reset_all_overrides(self) -> None:
         """reset() with all_overrides removes every override."""
@@ -129,8 +129,8 @@ class TestConfigOperationReset:
         ConfigOperation.set("defaults.network", "name", "test")
         result = ConfigOperation.reset(all_overrides=True)
         assert result.item == 2
-        assert ConfigOperation.get("defaults.vm", "vcpu_count") is None
-        assert ConfigOperation.get("defaults.network", "name") is None
+        assert ConfigOperation.get("defaults.vm", "vcpu_count") == 1
+        assert ConfigOperation.get("defaults.network", "name") == "net"
 
     def test_reset_missing_key_returns_zero(self) -> None:
         """reset() returns 0 when no override exists for the key."""
@@ -171,11 +171,11 @@ class TestConfigOperationFullWorkflow:
     """End-to-end workflow tests for ConfigOperation."""
 
     def test_set_get_reset_get(self) -> None:
-        """Full cycle: set, verify, reset, verify gone."""
+        """Full cycle: set, verify, reset, verify reverted to default."""
         ConfigOperation.set("defaults.vm", "vcpu_count", 8)
         assert ConfigOperation.get("defaults.vm", "vcpu_count") == 8
         ConfigOperation.reset("defaults.vm", "vcpu_count")
-        assert ConfigOperation.get("defaults.vm", "vcpu_count") is None
+        assert ConfigOperation.get("defaults.vm", "vcpu_count") == 1
 
     def test_multiple_overrides_different_categories(self) -> None:
         """Multiple overrides across categories work independently."""

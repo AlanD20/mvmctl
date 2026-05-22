@@ -78,7 +78,7 @@ class TestConfigSet:
 
 
 class TestConfigList:
-    """Tests for 'config list' command."""
+    """Tests for 'config ls' command."""
 
     @patch("mvmctl.cli.config.ConfigOperation")
     def test_list_settings(self, mock_cfg_op):
@@ -88,7 +88,7 @@ class TestConfigList:
                 "mem_size_mib": {"override": "1024", "default": 2048, "type": "int"},
             },
         }
-        result = runner.invoke(app, ["config", "list"])
+        result = runner.invoke(app, ["config", "ls"])
         assert result.exit_code == 0
         assert "defaults.vm" in result.output
         assert "vcpu_count" in result.output
@@ -97,11 +97,11 @@ class TestConfigList:
     @patch("mvmctl.cli.config.ConfigOperation")
     def test_list_empty(self, mock_cfg_op):
         mock_cfg_op.list_all.return_value = {}
-        result = runner.invoke(app, ["config", "list"])
+        result = runner.invoke(app, ["config", "ls"])
         assert result.exit_code == 0
 
     def test_list_help(self):
-        result = runner.invoke(app, ["config", "list", "--help"])
+        result = runner.invoke(app, ["config", "ls", "--help"])
         assert result.exit_code == 0
 
 

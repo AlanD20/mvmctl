@@ -44,7 +44,7 @@ class TestConfigLifecycle:
         """List all overridable settings."""
         # Rationale: Only needs CLI invocation. Read-only operation
         # that lists config categories — no resources needed.
-        result = _run_mvm(mvm_binary, "config", "list")
+        result = _run_mvm(mvm_binary, "config", "ls")
         assert result.returncode == 0
         assert result.stdout.strip()
         assert "[defaults.vm]" in result.stdout
@@ -237,8 +237,7 @@ class TestConfigEdgeCasesExtended:
             "nonexistent_key_xyz",
             check=False,
         )
-        assert result.returncode == 0
-        assert "nonexistent_key_xyz" in result.stdout
+        assert result.returncode != 0
 
     def test_config_set_invalid_value_type(self, mvm_binary):
         """``config set`` with an invalid value type (string for int) should fail."""

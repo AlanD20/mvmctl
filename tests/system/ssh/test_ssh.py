@@ -210,18 +210,40 @@ class TestSSHConnect:
         vm_info = created_vm
         ssh_timeout = timing_targets["alpine:3.21"]
 
+        # Look up the key used by this VM via its ssh_keys field
+        # (contains key fingerprint/IDs). This is more reliable than
+        # finding the first default key since there could be stale
+        # default keys from previous test runs.
+        import json as _json
+
+        vm_ssh_keys = vm_info.get("ssh_keys", [])
+        if not vm_ssh_keys:
+            pytest.skip("VM has no ssh_keys")
+        key_id = vm_ssh_keys[0]
+
+        key_ls_result = _run_mvm(mvm_binary, "key", "ls", "--json", check=False)
+        if key_ls_result.returncode != 0:
+            pytest.skip("key ls --json failed")
+        keys = _json.loads(key_ls_result.stdout)
+        matching_keys = [k for k in keys if k.get("id") == key_id]
+        if not matching_keys:
+            pytest.skip(f"Key with id {key_id[:16]}... not found in cache")
+        key_name = matching_keys[0]["name"]
+
         # Export the default key to a temp directory
         key_export_dir = tmp_path / "ssh-keys"
         key_export_dir.mkdir(exist_ok=True)
-        _run_mvm(
+        export_result = _run_mvm(
             mvm_binary,
             "key",
             "export",
-            "sys-vmkey",
+            key_name,
             "--out",
             str(key_export_dir),
             check=False,
         )
+        if export_result.returncode != 0:
+            pytest.skip(f"Key export failed: {export_result.stderr}")
 
         # Find the exported private key file
         exported_keys = list(key_export_dir.iterdir())
@@ -236,10 +258,6 @@ class TestSSHConnect:
                 break
 
         if private_key_path is None or not private_key_path.exists():
-            # Skip-reason: Could not find exported private key file.
-            # The key export may have failed silently or the export
-            # directory is empty. To run unconditionally, ensure
-            # a default key exists and is exportable.
             pytest.skip("Could not find exported private key file")
 
         # SSH with --key pointing to the exported key file

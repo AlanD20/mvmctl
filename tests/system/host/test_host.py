@@ -904,3 +904,65 @@ class TestHostCleanDestructive:
         assert len(result.stdout.strip()) > 0, (
             f"host reset --force produced no stdout: stderr={result.stderr}"
         )
+
+
+class TestHostInit:
+    """Test host init command (requires sudo, destructive).
+
+    Excluded from default test runs via the ``host_reset`` marker and must be
+    explicitly invoked.
+    """
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.host_reset,
+        pytest.mark.serial,
+        pytest.mark.domain_host,
+    ]
+
+    def test_host_init_requires_sudo(self, mvm_binary):
+        """host init without sudo should show guidance about using sudo."""
+        # Rationale: When run without root privileges, host init returns a
+        # NeedsInteraction result with code "privilege.sudo_required". This
+        # test verifies the CLI handles this case correctly by printing a
+        # message mentioning sudo and exiting non-zero.
+        result = _run_mvm(mvm_binary, "host", "init", check=False)
+        assert result.returncode != 0, (
+            f"Expected non-zero exit without sudo:\nstdout={result.stdout}\nstderr={result.stderr}"
+        )
+        combined = (result.stdout + result.stderr).lower()
+        assert "sudo" in combined or "privilege" in combined, (
+            f"Expected sudo/privilege guidance:\nstdout={result.stdout}\nstderr={result.stderr}"
+        )
+
+    def test_host_init_sudo_success(self, mvm_binary):
+        """host init with sudo should succeed, status reflects initialized state."""
+        # Rationale: Verifies that host init via sudo completes successfully
+        # (exit 0). When the host is already initialized, init is idempotent
+        # ("skipped" status). This test ensures the full init path works.
+        mvm_bin = Path.home() / ".local" / "bin" / "mvm"
+        if not mvm_bin.exists():
+            pytest.skip("mvm binary not at ~/.local/bin/mvm — cannot run sudo")
+
+        result = subprocess.run(
+            ["sudo", str(mvm_bin), "host", "init"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert result.returncode == 0, (
+            f"host init via sudo failed:\nstdout={result.stdout}\nstderr={result.stderr}"
+        )
+        # L1: Verify stdout mentions changes or no-op
+        assert len(result.stdout.strip()) > 0, (
+            f"host init produced no stdout: stderr={result.stderr}"
+        )
+
+        # Verify host status reflects initialized state
+        check = _run_mvm(mvm_binary, "host", "status", "--json", check=False)
+        if check.returncode == 0:
+            data = json.loads(check.stdout)
+            state = data.get("state_snapshot", {})
+            assert state.get("exists") is True, (
+                f"Host should be initialized after init: {data}"
+            )

@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from click.testing import CliRunner
 
-from mvmctl.exceptions import MVMError
+from mvmctl.exceptions import BinaryAlreadyExistsError, MVMError
 from mvmctl.main import app
 from mvmctl.models import BinaryItem
 from mvmctl.models.result import BatchResult, OperationResult
@@ -277,6 +277,12 @@ class TestBinPullExtras:
     def test_pull_already_exists_decline(self, mock_bin_op):
         mock_bin_op.list_all.return_value = ["1.16.0", "1.15.0", "1.14.0"]
         mock_bin_op.get.return_value = [_make_binary("firecracker", "1.15.0")]
+        mock_bin_op.pull.return_value = OperationResult(
+            status="error",
+            code="binary.pull_failed",
+            message="Firecracker v1.15.0 already exists. Use --force to re-download.",
+            exception=BinaryAlreadyExistsError("already exists"),
+        )
         result = runner.invoke(app, ["bin", "pull", "firecracker", "--version", "1.15.0"], input="n\n")
         assert result.exit_code == 0
         assert "Aborted" in result.output
