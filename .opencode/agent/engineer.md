@@ -269,7 +269,7 @@ The canonical 4-file pattern (Controller/Service/Repository/Resolver) is the ide
 | `logs/` | `_controller.py`, `_service.py` | Controller+service, no repository |
 | `cache/` | `_service.py` | Service only |
 | `ssh/` | `_service.py`, `_cp.py` | Service+cp (file copy), no controller |
-| `host/` | `_controller.py`, `_detector.py`, `_helper.py`, `_service.py`, `_repository.py` | Includes detector+helper |
+| `host/` | `_controller.py`, `_detector.py`, `_helper.py`, `_probe.py`, `_repository.py`, `_service.py` | Includes detector, helper, probe |
 | `config/` | `_constraints.py`, `_service.py`, `_repository.py` | Constraints instead of controller |
 | `image/` | `_controller.py`, `_service.py`, `_repository.py`, `_resolver.py`, `_provisioner.py`, `_version_resolver.py` | Extra provisioner+version resolver |
 | `network/` | `_controller.py`, `_service.py`, `_repository.py`, `_resolver.py`, `_lease_service.py`, `_lease_resolver.py` | Extra lease subdomain files |
@@ -302,7 +302,7 @@ class NetworkOperation:
 
 | Layer | Imports from | Example |
 |-------|-------------|---------|
-| **CLI** | `mvmctl.api` (primary), also `mvmctl.models`, `mvmctl.exceptions`, `mvmctl.models.result`, `mvmctl.cli._completion`, `mvmctl.utils.cli`, `mvmctl.core._shared._version_resolver` (via TYPE_CHECKING) | `from mvmctl.api import VMOperation, VMCreateInput` |
+| **CLI** | `mvmctl.api` (primary), also `mvmctl.models`, `mvmctl.exceptions`, `mvmctl.models.result`, `mvmctl.cli._completion`, `mvmctl.utils.cli` | `from mvmctl.api import VMOperation, VMCreateInput` |
 | **API** | `mvmctl.api.inputs` (public input surface) | `from mvmctl.api.inputs import VMCreateInput, VMCreateRequest` |
 | **API** | `mvmctl.core.{domain}` (public domain surface) | `from mvmctl.core.vm import VMController, VMRepository` |
 | **API** | `mvmctl.core._shared` (public infrastructure surface) | `from mvmctl.core._shared import Database` |
@@ -495,6 +495,17 @@ Example: `Subnet "10.0.0.0/24" overlaps with "my-network". Use a different subne
 - **Log message**: Operator-facing — includes module context, parameter values, and the root cause.
 - **Exception message**: User-facing — "what happened. why. possible fix." short summary.
 - **API layer**: `logger.info()` for success, `logger.warning()` for recoverable issues.
+
+### API Result Types
+
+All public API methods return typed result objects from `mvmctl.models.result`:
+
+- **`OperationResult[T]`** — Single operation result. Status (success/skipped/warning/error/failure), code, message, item, metadata, exception, warnings. Properties: `is_ok`, `is_error`.
+- **`BatchResult[T]`** — Batch of `OperationResult[T]` items. Properties: `status_summary`, `successes`, `skipped`, `errors`, `has_any_error`, `all_ok`.
+- **`NeedsInteraction`** — Returned instead of `OperationResult` when user input is needed (sudo/confirm/choice/input). Normal control flow, not an exception.
+- **`ProgressEvent`** — Emitted via `on_progress` callback during long-running ops. Fields: `phase`, `status` (running/complete/failed), `percent`, `message`.
+
+The CLI layer imports these from `mvmctl.models.result`.
 
 ---
 

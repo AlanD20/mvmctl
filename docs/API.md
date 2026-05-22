@@ -692,6 +692,8 @@ Detected host hardware capabilities.
 | `storage_total_bytes` | `int` | Total storage in bytes |
 | `kernel_version` | `str` | Kernel version string |
 | `os_release` | `str` | OS release identifier |
+| `cpu_has_vmx` | `bool` | Whether CPU supports VMX (hardware virtualization) |
+| `cpu_hypervisor` | `bool` | Whether running under a hypervisor |
 
 #### `HostLimits`
 
@@ -704,6 +706,13 @@ Detected host kernel limits.
 | `conntrack_max` | `int` | Maximum conntrack entries |
 | `tap_devices_max` | `int` | Maximum TAP devices |
 | `ip_local_port_range` | `tuple[int, int]` | IP local port range (e.g. `(32768, 60999)`) |
+| `nested_virt_available` | `bool` | Whether nested virtualization is available |
+| `ept_available` | `bool` | Whether EPT (Extended Page Tables) is available |
+| `hugepage_count_2mb` | `int` | Number of 2MB hugepages |
+| `ksm_disabled` | `bool` | Whether Kernel Same-page Merging is disabled |
+| `cgroup_version` | `int` | Cgroup version (1 or 2) |
+| `swap_total_mib` | `int` | Total swap memory in MiB |
+| `kernel_minimum_met` | `bool` | Whether the kernel meets the minimum version requirement |
 
 #### `HostResources`
 
@@ -720,6 +729,16 @@ Current host resource usage and capacity projection.
 | `storage_free_bytes` | `int` | Free storage in bytes |
 | `recommended_max_vms` | `int` | Recommended maximum number of VMs |
 | `limiting_resource` | `str \| None` | Name of the resource that limits VM capacity |
+| `modules_loaded` | `dict[str, bool]` | Kernel modules that are loaded |
+| `swap_used_mib` | `int` | Swap memory used in MiB |
+| `hugepages_free_2mb` | `int` | Number of free 2MB hugepages |
+| `smt_active` | `bool` | Whether SMT/hyperthreading is active |
+| `nftables_available` | `bool` | Whether nftables is available on the host |
+| `iptables_available` | `bool` | Whether iptables is available on the host |
+| `cloud_localds_available` | `bool` | Whether cloud-localds is available |
+| `dev_kvm_status` | `str` | /dev/kvm accessibility status |
+| `user_in_kvm_group` | `bool` | Whether the current user is in the kvm group |
+| `dev_net_tun_accessible` | `bool` | Whether /dev/net/tun is accessible |
 
 ### `mvmctl.models.volume`
 

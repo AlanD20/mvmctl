@@ -5,6 +5,8 @@ These constants are specific to the console relay service and are used
 by both the manager (manager.py) and the standalone process (process.py).
 """
 
+from __future__ import annotations
+
 # Process management
 DEFAULT_CONSOLE_PID_FILENAME: str = "console.pid"
 DEFAULT_CONSOLE_SOCKET_FILENAME: str = "console.sock"

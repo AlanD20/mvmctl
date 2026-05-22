@@ -5,6 +5,8 @@ These constants are specific to the NoCloud server service and are used
 by both the manager (manager.py) and the standalone process (process.py).
 """
 
+from __future__ import annotations
+
 # Process management
 DEFAULT_NOCLOUD_PID_FILENAME: str = "nocloud-server.pid"
 DEFAULT_NOCLOUD_LOG_FILENAME: str = "cloud-init.log"

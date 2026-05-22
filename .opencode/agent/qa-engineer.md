@@ -208,6 +208,21 @@ Focus on edge cases that actually happen in real use:
 - ✅ `vm rm --force` on a VM that's already been removed (cleanup re-run)
 - ✅ `vm stop` then `vm attach-volume` then `vm start` (user attaching storage)
 
+## FULL TEST DIRECTORY STRUCTURE
+
+The top-level `tests/` directory contains these subdirectories:
+
+| Directory | Purpose |
+|-----------|---------|
+| `tests/unit/` | Unit tests — individual class/module in isolation (fastest) |
+| `tests/integration/` | Integration tests — cross-module interactions without hardware |
+| `tests/layer_compliance/` | Layer boundary compliance — verifies NO cross-domain imports in core |
+| `tests/helpers/` | Shared test helper utilities (fixtures, test data generators) |
+| `tests/system/` | System tests — black-box CLI tests against real hardware (slowest) |
+| `tests/conftest.py` | Root conftest with global fixtures and configuration |
+
+Unit, integration, and compliance tests run via fast pytest with xdist parallelization. System tests run one file at a time.
+
 ## SYSTEM TEST FILE STRUCTURE
 
 ### One Subdirectory Per CLI Domain
@@ -233,7 +248,7 @@ tests/system/
 ├── logs/                # VM log viewing (test_logs.py)
 ├── network/             # Network management (test_network.py, test_nftables.py)
 ├── ssh/                 # SSH access (test_ssh.py)
-├── vm/                  # VM lifecycle (test_vm_lifecycle.py, test_vm_nested_virt.py, test_vm_snapshot_load.py)
+├── vm/                  # VM lifecycle (test_vm_lifecycle.py, test_vm_nested_virt.py, test_vm_nested_isolated.py, test_vm_fresh_env.py, test_vm_snapshot_load.py)
 ├── volume/              # Volume management (test_volume.py, test_volume_hotplug.py)
 └── zzz_destructive/     # Destructive cleanup (test_zzz_destructive.py) — runs LAST
 ```
@@ -247,9 +262,11 @@ Some domains span multiple test files. For example:
 - **`kernel/`** has `test_kernel.py` AND `test_kernel_import.py`
 - **`network/`** has `test_network.py` AND `test_nftables.py`
 - **`volume/`** has `test_volume.py` AND `test_volume_hotplug.py`
-- **`vm/`** has `test_vm_lifecycle.py`, `test_vm_nested_virt.py`, AND `test_vm_snapshot_load.py`
+- **`vm/`** has `test_vm_lifecycle.py`, `test_vm_nested_virt.py`, `test_vm_nested_isolated.py`, `test_vm_fresh_env.py`, AND `test_vm_snapshot_load.py`
 
 The root `tests/system/conftest.py` provides session-scoped `mvm_binary` and function-scoped unique name fixtures (`unique_vm_name`, `unique_key_name`, `unique_network_name`, etc.).
+
+The file `tests/system/COVERAGE_MATRIX.md` tracks which CLI commands and flags have system test coverage. Audit it during release readiness to identify blind spots.
 
 ### VM Lifecycle File Split
 
@@ -286,9 +303,14 @@ Key markers include:
 
 - ``system`` — real hardware integration test (requires KVM, mvm group)
 - ``serial`` — must run without parallelism (creates real VMs)
-- ``domain_<name>`` — scoped to one CLI domain (e.g., ``domain_vm``, ``domain_image``)
+- ``domain_<name>`` — scoped to one CLI domain (e.g., ``domain_vm``, ``domain_image``); there are many ``domain_*`` markers covering all CLI domains and edge case categories
+- ``real_mvm_group_check`` — tests real ``_require_mvm_group_membership`` (not mocked)
+- ``shared_vm`` — uses module-scoped VM fixture for stateful tests
+- ``independent_vm`` — creates independent VM per test
+- ``slow`` — test takes >30 seconds
 - ``requires_kvm`` — requires ``/dev/kvm`` access
 - ``requires_network`` — requires network setup
+- ``requires_firecracker_116`` — requires Firecracker v1.16+ for hotplug (excluded from default run)
 - ``kernel_build`` — kernel build from source (excluded from default run)
 - ``host_reset`` — host reset/clean with sudo (excluded from default run)
 

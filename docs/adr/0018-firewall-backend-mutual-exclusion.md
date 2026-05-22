@@ -50,6 +50,8 @@ Users who prefer the iptables compatibility layer can switch:
 mvm config set settings firewall_backend iptables
 ```
 
+> **Implementation Note:** The `FirewallTracker` also reads an `iptables_xtcomment` user setting that, when enabled, adds comment tags to iptables rules for easier identification. This is supported alongside the primary mutual-exclusion pattern.
+
 ## Related Decisions
 
 - ADR-0006: Provisioning backend mutual exclusion (same architecture pattern for rootfs provisioning).

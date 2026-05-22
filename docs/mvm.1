@@ -9,6 +9,18 @@ mvm \- MicroVM Manager - Container speed, VM isolation
 is a production-grade CLI for managing microVMs on Linux.
 It handles the full VM lifecycle: downloading kernels and images, setting up bridge networking,
 creating and destroying VMs, SSH access, log streaming, snapshots, and cleanup.
+.PP
+The following CLI aliases are available:
+.BR net
+for
+.BR network ,
+.BR img
+for
+.BR image ,
+and
+.BR vol
+for
+.BR volume .
 .SH OPTIONS
 .TP
 .BR \-\-verbose
@@ -77,8 +89,11 @@ Detach a volume from a running or stopped VM.
 .BR host\ init
 Apply host configuration (KVM, modules, ip_forward, mvm group, sudoers).
 .TP
-.BR host\ ls
+.BR host\ status
 Show current host configuration state.
+.TP
+.BR host\ info
+Show host hardware, limits, and VM capacity projection.
 .TP
 .BR host\ clean
 Remove networking config (bridges, TAPs, firewall rules).
@@ -220,7 +235,10 @@ Kill any existing console connection to the VM.
 .RE
 .TP
 .BR config
-Configuration management (get, set, list, reset).
+Configuration management (get, set, ls, reset).
+.TP
+.BR cp
+Copy files between host and microVMs.
 .TP
 .BR init
 Initialize mvm (guided setup wizard).

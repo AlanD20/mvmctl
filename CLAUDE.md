@@ -55,7 +55,7 @@ src/mvmctl/
 ├── services/        # Runtime subprocess services (console_relay, nocloud_server, loopmount)
 stubs/               # Type stubs for external dependencies (guestfs.pyi, psutil.pyi)
 packaging/           # Distribution packaging configs (.deb, .rpm, PKGBUILD)
-scripts/             # Build & release helper scripts (build_services.py, check_skip_ratio.py, check_skip_ratio_verify.py, common.py, fresh_env.py, post-release.py, profile_test_memory.py, run_tests.py, setup-test-environment.py)
+scripts/             # Build & release helper scripts (build_services.py, check_skip_ratio.py, check_skip_ratio_verify.py, common.py, dead_code_scanner.py, fresh_env.py, post-release.py, profile_test_memory.py, run_tests.py, setup-test-environment.py)
 tests/               # 235 Python files across 5 top-level directories + root + helpers (139 unit + 20 integration + 64 system + 8 layer_compliance + 2 root + 2 helpers)
 docs/                # Project documentation
   ├── adr/           # 19 ADR files (numbers 0000-0018; ADR 0000 was superseded)
@@ -146,6 +146,8 @@ style: fix formatting
 
 Co-authored-by: Adam <adam@example.com>  # WRONG - no contribution to this change
 ```
+
+> Also documented in GEMINI.md.
 
 ## Related Files
 

@@ -2,6 +2,36 @@
 
 MicroVM Manager -- a speed-first CLI for managing Firecracker microVMs. Provides fast VM lifecycle management, networking, image provisioning, and console/SSH access.
 
+## Table of Contents
+
+- [Language](#language)
+  - [Domain](#domain)
+  - [Intra-domain orchestration](#intra-domain-orchestration)
+  - [Cross-domain orchestration](#cross-domain-orchestration)
+  - [Controller (stateful, per-entity)](#controller-stateful-per-entity)
+  - [Service (stateless, intra-domain)](#service-stateless-intra-domain)
+  - [Repository](#repository)
+  - [Manager+Process pattern (runtime services)](#managerprocess-pattern-runtime-services)
+  - [`_graceful_read` decorator](#_graceful_read-decorator)
+  - [Resolver](#resolver)
+  - [Enrichment pattern (RelationSpec + RelationEnricher)](#enrichment-pattern-relationspec--relationenricher)
+  - [Validation (caller's responsibility)](#validation-callers-responsibility)
+  - [State detection (operation's responsibility)](#state-detection-operations-responsibility)
+  - [Invariant guard](#invariant-guard)
+  - [Speed-first principle](#speed-first-principle)
+  - [Operation class](#operation-class)
+  - [Direct repository calls in the API layer](#direct-repository-calls-in-the-api-layer)
+  - [Input/Request/Resolved triple (public-facing domains only)](#inputrequestresolved-triple-public-facing-domains-only)
+  - [SQLite schema overview](#sqlite-schema-overview)
+  - [Layer compliance enforcement](#layer-compliance-enforcement)
+  - [Public API boundary](#public-api-boundary)
+  - [CLI is the canonical interface](#cli-is-the-canonical-interface)
+  - [Provisioner Backend (LoopMount vs GuestFS — mutual exclusion)](#provisioner-backend-loopmount-vs-guestfs--mutual-exclusion)
+  - [Firewall Backend (nftables vs iptables — mutual exclusion)](#firewall-backend-nftables-vs-iptables--mutual-exclusion)
+- [Relationships](#relationships)
+- [Test types (three-layer test pyramid)](#test-types-three-layer-test-pyramid)
+- [System Tests](#system-tests)
+
 ## Language
 
 ### Domain

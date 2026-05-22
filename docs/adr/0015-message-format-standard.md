@@ -60,3 +60,5 @@ Messages should not end with `!`. Use periods or (for success messages) nothing.
 | **exc_info** | Always `exc_info=True` when inside an `except` block | `logger.warning("Failed to do X: %s", e, exc_info=True)` |
 
 > **Note:** The Warning example was updated to reflect the mutual-exclusion architecture (ADR-0018). Firewall backends are now mutually exclusive — `FirewallTracker` selects exactly one backend at construction time via the `firewall_backend` setting, with no fallback between them. The original example (`"nftables NAT not available — falling back to iptables"`) was removed because fallback no longer exists.
+
+> **Implementation Note:** The `_prettify_key()` helper in `utils/cli.py` handles snake_case→Title Case conversion with acronym normalization (e.g., `nocloud_net_port`→`Nocloud Net Port` is normalized to keep acronyms uppercase). This is used by `print_dict_tree()` and `key_value()` methods.

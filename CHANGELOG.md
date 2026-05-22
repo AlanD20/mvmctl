@@ -14,12 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### CLI Commands (15 top-level groups, 65+ subcommands)
 - **`mvm vm`** -- Full VM lifecycle: ls, ps, create, rm, start, stop, reboot, pause, resume, snapshot, load, inspect, export, import, attach-volume, detach-volume
 - **`mvm console`** -- Interactive serial console access via PTY-over-vsock relay with --state and --kill options (attach is default)
-- **`mvm host`** -- Host configuration: init (KVM, modules, sysctl, mvm group, sudoers), info, ls, clean, reset
+- **`mvm host`** -- Host configuration: init (KVM, modules, sysctl, mvm group, sudoers), info, status, clean, reset
 - **`mvm network`** -- Named bridge networks with NAT: ls, default, create, rm, inspect, sync
 - **`mvm key`** -- SSH key management: ls, add, create, rm, inspect, export, default
-- **`mvm config`** -- Runtime configuration: get, set, list, reset
+- **`mvm config`** -- Runtime configuration: get, set, ls, reset
 - **`mvm init`** -- Interactive setup wizard with non-interactive mode
-- **`mvm kernel`** -- Kernel management: ls, inspect, pull, default, rm
+- **`mvm kernel`** -- Kernel management: ls, inspect, pull, default, import, rm
 - **`mvm image`** -- Image management: ls, pull, default, rm, inspect, import, warm
 - **`mvm bin`** -- Firecracker binary management: ls, pull, rm, default
 - **`mvm cp`** -- Copy files between host and microVMs via SCP-over-SSH
@@ -61,7 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Image Management
 - Fetch images by OS slug (ubuntu-24.04, ubuntu-22.04, archlinux, debian-bookworm, alpine-3.21)
 - Import local image files with automatic format detection
-- Format support: qcow2, raw, vhd, vhdx, tar-rootfs, squashfs
+- Format support: qcow2, raw, vhd, vhdx, tar-rootfs
 - Automated conversion pipeline: download -> decompress -> format conversion -> root partition extraction -> filesystem optimization
 - SHA256 checksum verification for downloaded images
 - Image warm pool for fast VM creation (pre-extracted ready-to-copy images)
@@ -104,7 +104,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Ruff** -- Linting and formatting, zero-tolerance for violations
 - **Test suite** -- Unit, integration, system, and layer compliance tests
 - **uv** -- Fast Python package and project management
-- **Build scripts** (`scripts/`): build_services.py, run_tests.py, setup-test-environment.py, profile_test_memory.py, post-release.py, check_skip_ratio.py, check_skip_ratio_verify.py, common.py, fresh_env.py
+- **Build scripts** (`scripts/` — 10 scripts): build_services.py, check_skip_ratio.py, check_skip_ratio_verify.py, common.py, dead_code_scanner.py, fresh_env.py, post-release.py, profile_test_memory.py, run_tests.py, setup-test-environment.py
 
 #### Distribution
 - Standalone Nuitka-compiled binary (zero Python runtime dependency)

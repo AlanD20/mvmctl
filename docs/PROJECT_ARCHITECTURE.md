@@ -21,6 +21,50 @@ src/mvmctl/
 
 **Orchestration lives in `api/`, NOT in `core/`.** The API layer is the ONLY entity that imports multiple domains and sequences them together.
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Layer Responsibilities](#layer-responsibilities)
+- [File Structure](#file-structure)
+- [Core Structure — Domain Files](#core-structure--domain-files)
+  - [Standard Domain Pattern (4 Files)](#standard-domain-pattern-4-files)
+  - [Controller (Stateful)](#controller-stateful)
+  - [Service (Stateless / Bulk)](#service-stateless--bulk)
+  - [Repository](#repository)
+  - [Resolver](#resolver)
+- [API Layer — Orchestration](#api-layer--orchestration)
+  - [Operation Classes](#operation-classes)
+  - [Public API Surface](#public-api-surface)
+- [API Data Flow — Input → Request → Resolved](#api-data-flow--input--request--resolved)
+  - [The Three Types](#the-three-types)
+  - [VM Creation Flow (Complex — Many Parameters)](#vm-creation-flow-complex--many-parameters)
+  - [VM Operations Flow (Simple — References Existing VM)](#vm-operations-flow-simple--references-existing-vm)
+  - [Default Resolution (API Layer)](#default-resolution-api-layer)
+- [Domain ≠ CLI Command](#domain--cli-command)
+- [File Placement Rules](#file-placement-rules)
+  - [2. Orchestration (Multiple Domains)](#2-orchestration-multiple-domains)
+  - [3. Infrastructure Placement](#3-infrastructure-placement)
+- [Import Boundaries (Enforced)](#import-boundaries-enforced)
+- [Dependency Direction](#dependency-direction)
+- [Naming Conventions](#naming-conventions)
+  - [Model Naming — `*Item` Suffix](#model-naming--item-suffix)
+- [Relation Enrichment System](#relation-enrichment-system)
+  - [Design Principles](#design-principles)
+  - [How It Works](#how-it-works)
+  - [Complete Relation Graph](#complete-relation-graph)
+  - [Model Design — Optional Relation Fields](#model-design--optional-relation-fields)
+  - [Batch Loading — How N+1 is Prevented](#batch-loading--how-n1-is-prevented)
+  - [Nested Relations — Parent Auto-Resolution](#nested-relations--parent-auto-resolution)
+  - [Lazy Resolver Registry](#lazy-resolver-registry)
+  - [Usage](#usage)
+  - [Adding New Relations](#adding-new-relations)
+- [Repository Pattern — SQL-Level Computation](#repository-pattern--sql-level-computation)
+- [Domain Growth Patterns](#domain-growth-patterns)
+  - [Adding New Capabilities to a Domain](#adding-new-capabilities-to-a-domain)
+  - [Extracting Subsystems](#extracting-subsystems)
+  - [When to Create a New Domain](#when-to-create-a-new-domain)
+- [Summary](#summary)
+
 ## Layer Responsibilities
 
 | Layer | Purpose | Import Rules |
@@ -197,6 +241,9 @@ src/mvmctl/
 │   ├── volume.py
 │   └── _completion.py                       # Shell completion helpers (11 functions)
 │
+│   **CLI Aliases:** Several commands have short aliases defined in `_COMMAND_SPECS`:
+│   `net`/`network`, `img`/`image`, `vol`/`volume`.
+│
 ├── models/                                  # Pure @dataclass objects
 │   ├── __init__.py                          # Re-exports all model types
 │   ├── binary.py                            # BinaryItem
@@ -287,7 +334,7 @@ Each domain follows a consistent pattern with four files representing different 
 > - **console** — controller-only (no service, repository, or resolver)
 > - **logs** — has controller + service (no repository or resolver)
 > - **cloudinit** — uses `_manager.py` + `_provisioner.py` instead of the 4-file pattern
-> - **ssh** — service-only (no controller, repository, or resolver)
+> - **ssh** — service + cp (no controller, repository, or resolver; file copy operations via `_cp.py`)
 >
 > Note: guestfs is not a domain; it lives in `core/_shared/_guestfs/` as shared infrastructure.
 
@@ -436,7 +483,7 @@ The `api/__init__.py` re-exports ALL public Operation and Input types. CLI code 
 exclusively from this surface:
 
 Exports include:
-- **Operation classes:** `BinaryOperation`, `CacheOperation`, `ConfigOperation`, `ConsoleOperation`, `HostOperation`, `ImageOperation`, `InitOperation`, `KernelOperation`, `KeyOperation`, `LogOperation`, `NetworkOperation`, `SSHOperation`, `VMOperation`, `VolumeOperation`
+- **Operation classes:** `BinaryOperation`, `CacheOperation`, `ConfigOperation`, `ConsoleOperation`, `CPOperation`, `HostOperation`, `ImageOperation`, `InitOperation`, `KernelOperation`, `KeyOperation`, `LogOperation`, `NetworkOperation`, `SSHOperation`, `VMOperation`, `VolumeOperation`
 - **Console types:** `ConsoleConnectionInfo`
 - **Init types:** `InitResult`, `InitStepResult`
 - **Input classes:** `BinaryPullInput`, `BinaryInput`, `ConsoleInput`, `ConsoleRequest`, `ImagePullInput`, `ImageImportInput`, `ImageInput`, `KernelImportInput`, `KernelImportRequest`, `ResolvedKernelImportInput`, `KernelPullInput`, `KernelInput`, `KeyCreateInput`, `KeyInput`, `LogInput`, `NetworkCreateInput`, `NetworkInput`, `SSHInput`, `VolumeCreateInput`, `VolumeInput`, `VMCreateInput`, `VMImportInput`, `VMImportRequest`, `VMInput`

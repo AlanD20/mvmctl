@@ -51,11 +51,11 @@ mvm ssh myvm
 
   Ubuntu/Debian:
   ```bash
-  sudo apt-get install -y iproute2 iptables nftables cloud-image-utils qemu-img e2fsprogs kmod
+  sudo apt-get install -y iproute2 iptables nftables cloud-image-utils qemu-utils e2fsprogs kmod
   ```
   Arch Linux:
   ```bash
-  sudo pacman -S --needed iproute2 iptables nftables cloud-utils qemu-img e2fsprogs kmod
+  sudo pacman -S --needed iproute2 iptables nftables qemu e2fsprogs kmod
   ```
 - **Root access (one-time):** run `mvm init` once to create the `mvm` group and a sudoers drop-in; normal `mvm` commands require no `sudo` after that
 - **Environment variables:** Configure runtime behavior via `MVM_*` variables. See [docs/REFERENCES.md](docs/REFERENCES.md#environment-variables) for the full list.
@@ -179,13 +179,13 @@ mvm volume resize data 20G                   # Resize a volume
 mvm image pull ubuntu:24.04                 # Download an OS image
 mvm image ls                                # List available images
 mvm image inspect ubuntu:24.04              # Inspect image details
-mvm image import ./myimage.qcow2            # Import local image file
+mvm image import my-name ./myimage.qcow2            # Import local image file
 mvm image warm ubuntu:24.04                 # Pre-decompress image to ready pool
 mvm kernel pull --type firecracker           # Download Firecracker kernel
 mvm kernel pull official:6.19.9 --features kvm,nftables --config ./my-fragment.config  # Build official kernel with features
 mvm kernel pull official:6.19.9 --jobs 4 --keep-build-dir --clean-build  # Official kernel build with parallel jobs
 mvm kernel inspect <kernel>                  # Inspect kernel details
-mvm kernel import ./vmlinux                  # Register a vmlinux file
+mvm kernel import my-kernel ./vmlinux                  # Register a vmlinux file
 mvm bin pull firecracker --version 1.15.0               # Download Firecracker + jailer binaries
 mvm bin pull firecracker --git-ref my-branch             # Build from source at a git ref
 mvm bin default firecracker                              # Set default binary
@@ -214,7 +214,7 @@ mvm cache clean  # Nuclear option for cache cleanup
 mvm config get defaults.vm vcpu_count             # Get a config value
 mvm config set defaults.vm vcpu_count 4           # Set a config value
 mvm config reset defaults.vm vcpu_count           # Reset a config value to default
-mvm config list                                   # List all overridable settings
+mvm config ls                                   # List all overridable settings
 ```
 
 See [docs/REFERENCES.md](docs/REFERENCES.md) for the complete command reference with all flags and options.

@@ -39,7 +39,7 @@ The project strictly adheres to a three-layer architecture: **CLI → API → Co
 - **`core/`**: Isolated domain logic in subdirectories (e.g., `vm/`, `network/`, `host/`). Data-heavy domains follow a Controller, Service, Repository, and Resolver pattern. Simpler domains (cache, cloudinit, config, console, logs) may have fewer files. No cross-domain imports. No defaults. Returns data or raises typed exceptions (`MVMError`).
 - **`models/`**: Pure `@dataclass` objects containing domain data (e.g., `VMInstanceItem`, `FirecrackerConfig`, `ImageSpec`). No side effects.
 - **`utils/`**: Shared helpers (_disk, _io, _lazy_import, _system, _validators, auditlog, cli, common, crypto, fs, http, network, operation_utils, progress, template, timinglog, version, yaml) with no domain knowledge.
-- **`db/`**: SQLite database with migration system (`migrations/001_initial_schema.sql`) for persistent state (VMs, networks, images, kernels, binaries, keys, host state, iptables rules, IP leases, volumes).
+- **`db/`**: SQLite database with migration system (`migrations/001_initial_schema.sql`) for persistent state across 13 tables: images, kernels, binaries, volumes, networks, network_leases, vm_instances, host_state, host_state_changes, iptables_rules, nftables_rules, ssh_keys, user_settings.
 - **`services/`**: Runtime subprocess services — `console_relay/` (PTY-to-vsock bridge), `nocloud_server/` (HTTP cloud-init datasource), and `loopmount/` (rootfs provisioning binary).
 
 ## Building and Running
@@ -88,28 +88,9 @@ uv run mypy src/
 
 *Note: A minimum of 80% branch coverage is strictly enforced.*
 
-## Commit Authorship (MANDATORY)
+## Commit Authorship
 
-**DO NOT add `Co-authored-by` trailers unless the co-author actually contributed to that specific change.**
-
-- Only add co-authors when they **directly contributed code, review, or significant input** to that specific commit
-- Do NOT add co-authors as a blanket practice on every commit
-- Do NOT add co-authors just because they are part of the project or team
-- When in doubt, **omit the co-author trailer entirely**
-
-**Correct:**
-```
-feat: add new VM snapshot feature
-
-Co-authored-by: Alice <alice@example.com>  # Alice wrote part of this feature
-```
-
-**Incorrect:**
-```
-style: fix formatting
-
-Co-authored-by: Adam <adam@example.com>  # WRONG - no contribution to this change
-```
+See the Commit Authorship section in CLAUDE.md for details on the commit convention.
 
 ## Development Conventions
 - **Defaults:** Never hardcode defaults in function parameters. All defaults live in `constants.py` under the `OVERRIDABLE_DEFAULTS` dict with category keys (e.g., `defaults.vm`, `defaults.network`). User-facing asset defaults are resolved from the SQLite database (`is_default` markers) and `MVM_*` environment variables.

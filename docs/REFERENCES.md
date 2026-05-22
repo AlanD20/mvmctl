@@ -38,6 +38,7 @@ First-time setup wizard. Walks through host init, binary/kernel/image download, 
 |------|-------------|---------|
 | `--non-interactive` | Use defaults, skip all prompts | false |
 | `--skip-host` | Skip host init step | false |
+| `--skip-network` | Skip default network creation | false |
 
 ---
 
@@ -155,14 +156,14 @@ VM lifecycle management.
 | `mvm vm resume` | `IDENTIFIER` | Resume a paused VM |
 | `mvm vm rm` | `[NAMES]...`, `-f, --force` | Remove one or more VMs |
 | `mvm vm ls` | `--json` | List all VMs |
-| `mvm vm ps` | --- | List running VMs (active processes) |
+| `mvm vm ps` | `--json` | List running VMs (active processes) |
 | `mvm vm inspect` | `IDENTIFIER`, `--json` | Show detailed information about a VM |
 | `mvm vm snapshot` | `IDENTIFIER`, `MEM_FILE`, `STATE_FILE` | Snapshot VM memory and disk state |
 | `mvm vm load` | `IDENTIFIER`, `MEM_FILE`, `STATE_FILE`, `--resume` | Load VM from snapshot |
 | `mvm vm export` | `IDENTIFIER`, `[OUTPUT]` | Export a VM's configuration to a portable JSON file |
 | `mvm vm import` | `CONFIG_PATH`, `--name, -n` | Create a VM from a portable config file |
-| `mvm vm attach-volume` | `IDENTIFIER`, `VOLUME_NAME` | Attach a volume to a stopped VM |
-| `mvm vm detach-volume` | `IDENTIFIER`, `VOLUME_NAME` | Detach a volume from a stopped VM |
+| `mvm vm attach-volume` | `IDENTIFIER`, `VOLUME_NAME` | Attach a volume to a VM (supports hotplug on Firecracker v1.16+ for running VMs) |
+| `mvm vm detach-volume` | `IDENTIFIER`, `VOLUME_NAME` | Detach a volume from a VM (supports hot-unplug on Firecracker v1.16+ for running VMs) |
 
 **`vm create` flags:**
 

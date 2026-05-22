@@ -18,6 +18,19 @@ Firecracker requires an **uncompressed ELF binary** (`vmlinux`) — not the comp
 | **Official upstream kernel** | `mvm kernel pull --type official` | 10-30 min (compile) | Custom configs, latest features, debugging |
 | **Import custom kernel** | `mvm kernel import <name> <path>` | instant (file copy) | Pre-built or third-party vmlinux files |
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Prerequisites](#prerequisites)
+- [Workflow A: Firecracker CI Kernel (Recommended)](#workflow-a-firecracker-ci-kernel-recommended)
+- [Workflow B: Upstream Kernel Build](#workflow-b-upstream-kernel-build)
+- [Verifying Required Settings](#verifying-required-settings)
+- [Workflow C: Importing a Custom Kernel](#workflow-c-importing-a-custom-kernel)
+- [Managing Multiple Kernels](#managing-multiple-kernels)
+- [Using a Custom Kernel with a VM](#using-a-custom-kernel-with-a-vm)
+- [Troubleshooting](#troubleshooting)
+- [Reference](#reference)
+
 ---
 
 ## Prerequisites

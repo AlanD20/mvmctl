@@ -89,3 +89,5 @@ Total: 23 files modified (12 CLI + 6 API + 4 utility + 1 main). Executed as a si
 ## Future considerations
 
 - Spinner-based `rich.console.Console().status()` calls remain in `vm create`, `image pull/import/warm`, `kernel pull`, `bin ls --remote`, `cache init`, and `init` wizard. These could migrate to `MVMCli` in the future if a common spinner abstraction emerges.
+
+> **Implementation Note:** The `_prettify_key()` helper in `utils/cli.py` handles snake_case→Title Case conversion with acronym normalization (e.g., `nocloud_net_port`→`Nocloud Net Port` is normalized to keep acronyms uppercase). This is used by `print_dict_tree()` and `key_value()` methods.

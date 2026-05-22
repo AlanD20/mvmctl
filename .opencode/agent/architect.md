@@ -771,7 +771,7 @@ CLI  →  API (orchestrates: calls multiple domains in sequence)  →  Core (iso
 | Cross-domain workflow | `*_operations.py` | Functions importing multiple domains — lives in `api/` |
 | Shared infrastructure | None | No domain knowledge, reusable utilities |
 
-> **Note on domain file structure variance:** The canonical 4-file pattern (Controller/Service/Repository/Resolver) is the ideal, but many domains deviate for practical reasons. See CONTEXT.md for the full list. Key examples: `cloudinit/` uses manager+provisioner (no controller/service), `console/` has controller only, `logs/` has controller+service, `cache/` has service only, `ssh/` has service+cp (no controller), `host/` includes detector+helper, `config/` uses constraints instead of controller, and most domains include extra files (provisioner, lease_service, firecracker client, etc.) beyond the core four.
+> **Note on domain file structure variance:** The canonical 4-file pattern (Controller/Service/Repository/Resolver) is the ideal, but many domains deviate for practical reasons. See CONTEXT.md for the full list. Key examples: `cloudinit/` uses manager+provisioner (no controller/service), `console/` has controller only, `logs/` has controller+service, `cache/` has service only, `ssh/` has service+cp (no controller), `host/` includes detector, helper, probe, `config/` uses constraints instead of controller, and most domains include extra files (provisioner, lease_service, firecracker client, etc.) beyond the core four.
 
 ### Repository Pattern Rules
 
@@ -784,7 +784,7 @@ CLI  →  API (orchestrates: calls multiple domains in sequence)  →  Core (iso
 
 | Layer | Purpose | Rules |
 |-------|---------|-------|
-| **CLI** | Argument parsing, output formatting | Primarily imports `mvmctl.api`, but also directly imports `mvmctl.models`, `mvmctl.exceptions`, `mvmctl.models.result`, `mvmctl.cli._completion`, `mvmctl.utils.cli`, and (via TYPE_CHECKING) `mvmctl.core._shared._version_resolver`. NO DB queries. |
+| **CLI** | Argument parsing, output formatting | Primarily imports `mvmctl.api`, but also directly imports `mvmctl.models`, `mvmctl.models.result`, `mvmctl.exceptions`, `mvmctl.cli._completion`, `mvmctl.cli._common`, `mvmctl.utils.cli`, `mvmctl.utils._system`, `mvmctl.utils.network`, `mvmctl.utils.common`, `mvmctl.utils.fs`, `mvmctl.constants`, `mvmctl.api.inputs._logs_input`, `mvmctl.api.logs_operations`, `mvmctl.api.console_operations`. NO DB queries. |
 | **API** | Public contract, privilege checks, DB resolution, **ORCHESTRATION** | Imports `core/*` only. Queries DB when CLI passes `None`. **ONLY layer that imports multiple domains.** |
 | **Core** | Business logic, domain isolation | Imports `core/_shared/` only. Repositories use `_shared/_db.py` for DB access. NO cross-domain imports. |
 
@@ -800,7 +800,7 @@ All `__init__.py` files MUST use **lazy imports** (PEP 562 `__getattr__`) via `m
 
 | Layer | Imports from | Example |
 |-------|-------------|---------|
-| **CLI** | `mvmctl.api` (primary), also `mvmctl.models`, `mvmctl.exceptions`, `mvmctl.models.result`, `mvmctl.cli._completion`, `mvmctl.utils.cli`, `mvmctl.core._shared._version_resolver` (via TYPE_CHECKING) | `from mvmctl.api import VMOperation, VMCreateInput` |
+| **CLI** | `mvmctl.api` (primary), also `mvmctl.models`, `mvmctl.models.result`, `mvmctl.exceptions`, `mvmctl.cli._completion`, `mvmctl.cli._common`, `mvmctl.utils.cli`, `mvmctl.utils._system`, `mvmctl.utils.network`, `mvmctl.utils.common`, `mvmctl.utils.fs`, `mvmctl.constants`, `mvmctl.api.inputs._logs_input`, `mvmctl.api.logs_operations`, `mvmctl.api.console_operations` | `from mvmctl.api import VMOperation, VMCreateInput` |
 | **API** | `mvmctl.api.inputs` (public input surface) | `from mvmctl.api.inputs import VMCreateInput, VMCreateRequest` |
 | **API** | `mvmctl.core.{domain}` (public domain surface) | `from mvmctl.core.vm import VMController, VMRepository` |
 | **API** | `mvmctl.core._shared` (public infrastructure) | `from mvmctl.core._shared import Database` |
@@ -933,6 +933,17 @@ MVMError                              # Root — carries optional code field
 **Error codes format:** Dot-separated with domain prefix: `network.subnet.overlap`, `vm.create.binary_not_found`.
 
 **Log-before-raise:** Every `raise` in Service/Controller has a preceding `logger.error()` with operational context.
+
+### API Result Types
+
+All public API methods return typed result objects from `mvmctl.models.result`:
+
+- **`OperationResult[T]`** — Result of a single operation. Has `status` (one of `"success"`, `"skipped"`, `"warning"`, `"error"`, `"failure"`), `code` (machine-readable reason), `message` (human-readable), `item` (the domain object), `metadata`, `exception`, and `warnings`. Convenience properties `is_ok` and `is_error` for branching.
+- **`BatchResult[T]`** — Result of a batch operation. Contains a list of `OperationResult[T]` items plus aggregate properties: `status_summary`, `successes`, `skipped`, `errors`, `has_any_error`, `all_ok`.
+- **`NeedsInteraction`** — Returned **instead** of `OperationResult` when the API cannot proceed without user input (e.g., sudo escalation). Carries `code`, `message`, `input_type` (`"sudo"`, `"confirm"`, `"choice"`, `"input"`), and `context` dict. This is normal control flow, not an exception.
+- **`ProgressEvent`** — Emitted during long-running operations via an `on_progress` callback. Has `phase` (logical phase name), `status` (`"running"`, `"complete"`, `"failed"`), `percent` (0.0–100.0), and `message`.
+
+The CLI layer consumes these types via `from mvmctl.models.result import OperationResult, BatchResult, NeedsInteraction, ProgressEvent`.
 
 ### Coding Style Conventions
 

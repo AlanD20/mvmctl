@@ -31,7 +31,7 @@ Both backends have separate code paths, separate dependencies, separate error ha
 
 A VM or image is provisioned with a single backend from start to finish:
 - **VM creation**: The provisioner is selected once in `VMCreateRequest._resolve_provisioner()` and passed through the entire create pipeline.
-- **Image optimization**: The provisioner is selected once in `ImageOperation._resolve_image_provisioner()` and used for both shrink and deblob.
+- **Image optimization**: The provisioner type is resolved inline in `ImageOperation.pull()` and `ImageOperation.import_()` and used for both shrink and deblob.
 - **Cache operations**: GuestFS appliance cleanup runs independently of loop-mount state.
 
 Attempting to mix backends within a single operation is a bug.
