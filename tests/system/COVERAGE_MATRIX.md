@@ -194,6 +194,15 @@ removed, or when test coverage changes.
 | Volume mountable in guest | ✅ Deep | `test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L3 — mkfs.ext4 + mount + write + read |
 | DNS resolution in guest | 🟡 Partial | `test_vm_lifecycle.py` | `TestVMCloudInit` | L3 — often skips if DNS unavailable |
 | Boot time within limits | ⚡ Shallow | `test_vm_lifecycle.py` | `TestVMStateTransitions` | L1 — elapsed < 30s |
+| `vm create` fresh_env full pipeline | ✅ Deep | `test_vm_fresh_env.py` | `TestFreshEnvVM` | ubuntu:noble, official:6.19.9 kernel with features, --nested-virt, 6vcpu/4g/8g, L3 SSH + nested KVM verify |
+| `vm create` + volume attach + verify attached | ✅ Deep | `test_vm_fresh_env.py` | `TestFreshEnvVM` | Stop → attach → start → verify vol status=attached via JSON |
+| `vm create` specs verified (--vcpus, --mem, -s, --nested-virt) | ✅ Deep | `test_vm_fresh_env.py` | `TestFreshEnvVM` | ls --json + inspect --json + firecracker.json cpu-config verify |
+| `host status --json` inside nested guest | ✅ Deep | `test_vm_nested_isolated.py` | `TestNestedIsolated` | Binary copied into guest, runs inside via SSH, verifies kvm_accessible |
+| `config set/get/reset` inside nested guest | ⚡ Shallow | `test_vm_nested_isolated.py` | `TestNestedIsolated` | Isolated config roundtrip inside guest |
+| `key create/ls/rm` inside nested guest | ⚡ Shallow | `test_vm_nested_isolated.py` | `TestNestedIsolated` | Key lifecycle inside isolated guest |
+| `volume create/resize/rm` inside nested guest | ⚡ Shallow | `test_vm_nested_isolated.py` | `TestNestedIsolated` | Volume full lifecycle inside isolated guest |
+| `network create/ls/rm` inside nested guest | 🟡 Partial | `test_vm_nested_isolated.py` | `TestNestedIsolated` | Skips if guest lacks iptables/nftables |
+| `vm create` inside nested guest (triple nesting) | 🟡 Partial | `test_vm_nested_isolated.py` | `TestNestedIsolated` | Skips if /dev/kvm unavailable in guest |
 
 ---
 
@@ -469,7 +478,7 @@ removed, or when test coverage changes.
 | init | 4 | 0 | 4 | 0 | 0 |
 | config | 11 | 0 | 11 | 0 | 0 |
 | network | 31 | 10 | 21 | 0 | 0 |
-| vm | 92 | 15 | 75 | 2 | 0 |
+| vm | 101 | 19 | 80 | 2 | 0 |
 | volume | 30 | 1 | 29 | 0 | 0 |
 | key | 27 | 3 | 24 | 0 | 0 |
 | image | 38 | 0 | 12 | 0 | 26 |
@@ -481,13 +490,13 @@ removed, or when test coverage changes.
 | host | 11 | 3 | 7 | 0 | 1 |
 | cache | 7 | 0 | 6 | 0 | 1 |
 | cp | 14 | 9 | 5 | 0 | 0 |
-| **Total** | **332** | **46** | **241** | **2** | **43** |
+| **Total** | **341** | **50** | **246** | **2** | **43** |
 
 **Coverage health:**
-- ✅ Deep (L3): 46/332 = 13.9%
-- ⚡ Shallow (L0-L2 incl. 🟡 Partial): 241/332 = 72.6%
-- 🔴 Missing: **2/332 = 0.6%** — all gaps filled ✅ (2 remaining are erroneous vm entries)
-- ⏭️ Skip-prone: 43/332 = 13.0%
+- ✅ Deep (L3): 50/341 = 14.7%
+- ⚡ Shallow (L0-L2 incl. 🟡 Partial): 246/341 = 72.1%
+- 🔴 Missing: **2/341 = 0.6%** — all gaps filled ✅ (2 remaining are erroneous vm entries)
+- ⏭️ Skip-prone: 43/341 = 12.6%
 
 **Structural improvements made (this refactoring) — historical context:**
 

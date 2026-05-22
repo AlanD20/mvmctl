@@ -55,6 +55,22 @@ class HostOperation:
     """Host management orchestration."""
 
     @staticmethod
+    def _detect_session_has_group() -> bool:
+        """Check if the current process has the mvm group GID active.
+
+        Uses ``os.getgroups()``, ``os.getgid()``, and ``os.getegid()`` to
+        check whether the group is active in the current process credentials.
+        """
+        import grp
+
+        try:
+            g = grp.getgrnam(MVM_UNIX_GROUP)
+            process_gids = set(os.getgroups()) | {os.getgid(), os.getegid()}
+            return g.gr_gid in process_gids
+        except (KeyError, PermissionError):
+            return False
+
+    @staticmethod
     def init(
         cache_dir: Path,
         *,
@@ -78,6 +94,7 @@ class HostOperation:
                 context={
                     "command": "sudo mvm host init",
                     "operation": "initialize host",
+                    "session_has_group": HostOperation._detect_session_has_group(),
                 },
             )
 
@@ -92,6 +109,7 @@ class HostOperation:
                 context={
                     "command": "sudo mvm host init",
                     "operation": "initialize host",
+                    "session_has_group": HostOperation._detect_session_has_group(),
                 },
             )
 
@@ -188,6 +206,7 @@ class HostOperation:
             metadata={
                 "changes": all_changes,
                 "user_added_to_group": was_user_added,
+                "session_has_group": HostOperation._detect_session_has_group(),
             },
         )
 

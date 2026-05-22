@@ -216,19 +216,51 @@ class ProvisionerContent:
         if not ssh_pubkeys:
             return ops
 
-        ssh_home = "/root" if user == "root" else f"/home/{user}"
+        key_data = ("\n".join(ssh_pubkeys) + "\n").encode("utf-8")
 
+        # ALWAYS inject into /root/.ssh/authorized_keys
         ops.append(
             FileOp(
-                path=f"{ssh_home}/.ssh/authorized_keys",
-                data=("\n".join(ssh_pubkeys) + "\n").encode("utf-8"),
+                path="/root/.ssh/authorized_keys",
+                data=key_data,
                 mode=0o600,
                 uid=0,
                 gid=0,
             )
         )
+
         if user != "root":
+            user_home = f"/home/{user}"
+
+            # ALSO inject into the non-root user's authorized_keys
+            ops.append(
+                FileOp(
+                    path=f"{user_home}/.ssh/authorized_keys",
+                    data=key_data,
+                    mode=0o600,
+                    uid=0,
+                    gid=0,
+                )
+            )
+
             ops.append(ChrootOp(f"useradd -m {user}"))
+            # Fix ownership: ``useradd -m`` creates the home directory
+            # owned by root:root when running in chroot (the user's UID
+            # is not resolvable at chroot time).  We must chown the home
+            # directory, .ssh subdirectory, and authorized_keys so that:
+            # 1. sshd accepts the authorized_keys (ownership check)
+            # 2. The user can write files to their own home (tar pipe
+            #    during ``mvm cp``, ssh key writes, etc.)
+            #
+            # Using individual chowns (not -R) to avoid following
+            # symlinks to system files outside the chroot boundary.
+            ops.append(ChrootOp(f"chown {user}:{user} {user_home}"))
+            ops.append(ChrootOp(f"chown {user}:{user} {user_home}/.ssh"))
+            ops.append(
+                ChrootOp(
+                    f"chown {user}:{user} {user_home}/.ssh/authorized_keys"
+                )
+            )
             ops.append(ChrootOp("mkdir -p /etc/sudoers.d"))
             ops.append(
                 ChrootOp(

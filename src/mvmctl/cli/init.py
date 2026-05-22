@@ -76,6 +76,8 @@ def _check_host_state() -> dict[str, bool]:
 
     Returns:
         Dict with keys: group_exists, sudoers_exists, user_in_group.
+        ``session_has_group`` is now provided by the API layer
+        via ``NeedsInteraction.context``.
         Permission errors are silently caught (we're likely not root).
     """
     state: dict[str, bool] = {
@@ -206,13 +208,30 @@ def _handle_interactive_flow(
 
             host_state_before = _check_host_state()
 
+            # Group exists and user is a member, but the current session
+            # doesn't have the group GID active (user hasn't logged out/in
+            # after being added to the group).  Running sudo here would
+            # succeed, but the user would still need to start a new session
+            # before mvm works without sudo — so skip the sudo prompt and
+            # guide them instead.
+            # The API returns session_has_group in the NeedsInteraction
+            # context so we don't need a separate os.getgroups() call.
+            session_has_group = interaction.context.get(
+                "session_has_group", False
+            )
             if (
                 host_state_before["group_exists"]
                 and host_state_before["user_in_group"]
+                and not session_has_group
             ):
-                mvm_cli.warning("group active, but not in this session")
-                mvm_cli.info(f"run:  newgrp {MVM_UNIX_GROUP}")
-            elif host_state_before["group_exists"]:
+                mvm_cli.warning(
+                    f"mvm group — session not active "
+                    f"(log out and back in, or run: newgrp {MVM_UNIX_GROUP})"
+                )
+                skip_host = True
+                continue
+
+            if host_state_before["group_exists"]:
                 mvm_cli.warning("sudoers file is missing")
                 mvm_cli.info(f"run:  sudo {CLI_NAME} host init")
             else:

@@ -347,6 +347,13 @@ Every scenario includes:
 | `vm create` with `--nested-virt` | cpu-config in Firecracker JSON, boot args contain kvm-intel.nested=1 or kvm-amd.nested=1, pci_enabled=true | L3 | If host doesn't support nested virt | Yes |
 | `vm create` with `--no-nested-virt` | No cpu-config in Firecracker JSON, no nested boot args | L3 | No | Yes |
 | `vm create` with `--cpu-template <path>` | cpu-config contains user's merged template plus nested_virt base kvm_capabilities if --nested-virt also set | L3 | If file doesn't exist | Yes |
+| `vm create` fresh_env full pipeline (noble, 6.19.9 kernel, nested-virt) | Full pipeline: image pull, kernel pull, VM create with all flags, SSH, in-guest KVM verify | L3 | If kernel build fails | Yes |
+| Inside-guest-host-status | Run mvm inside a nested VM -- verify host status | L3 | If host lacks nested virt | No |
+| Inside-guest-config-roundtrip | Config set/get/reset inside isolated guest | L2 | If host lacks nested virt | Yes |
+| Inside-guest-key-lifecycle | Key create/ls/rm inside isolated guest | L2 | If host lacks nested virt | Yes |
+| Inside-guest-volume-lifecycle | Volume create/resize/rm inside isolated guest | L2 | If host lacks nested virt | Yes |
+| Inside-guest-network | Network create/ls/rm inside isolated guest | L3 | If guest lacks iptables | Yes |
+| Inside-guest-nested-vm | Create VM inside nested guest (triple nesting) | L3 | If /dev/kvm not in guest | Yes |
 
 ### 4.6 `mvm volume`
 

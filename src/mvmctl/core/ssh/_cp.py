@@ -216,12 +216,21 @@ class CPService:
         if no_overwrite:
             parts.append("-k")
         elif gnu_extras:
-            # GNU tar supports --overwrite; BusyBox tar (Alpine, etc.)
-            # does not, but it also does not need it — it only needs
-            # the absence of -k.
             parts.append("--overwrite")
+        # Suppress ownership-change errors when extracting as non-root.
+        # The archive contains files owned by the SSH source user (often
+        # root), but the extracting SSH user may not have privileges to
+        # chown (e.g., when SSHing as a non-root VM user).  GNU tar's
+        # --same-owner (in _GNU_EXTRACT_EXTRAS) would try to preserve
+        # the original ownership and fail with "Operation not permitted".
         if gnu_extras:
             parts.extend(_GNU_EXTRACT_EXTRAS)
+        # --no-same-owner comes AFTER _GNU_EXTRACT_EXTRAS so it overrides
+        # --same-owner (last flag wins in GNU tar).  Without this, tar
+        # running as a non-root SSH user gets "Cannot change ownership:
+        # Operation not permitted" when the archive contains files owned
+        # by the UID of the source-side SSH user (often root/0).
+        parts.append("--no-same-owner")
         parts.extend(["-C", shlex.quote(dst_path)])
         return f"tar xf - {' '.join(parts)}"
 
