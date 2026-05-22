@@ -352,64 +352,6 @@ class NetworkOperation:
         return resolved.networks[0]
 
     @staticmethod
-    def _network_to_dict(network: NetworkItem) -> dict[str, Any]:
-        """
-        Convert NetworkItem to dictionary for JSON output.
-
-        Includes every field from the model.
-        """
-        return {
-            "id": network.id,
-            "name": network.name,
-            "subnet": network.subnet,
-            "bridge": network.bridge,
-            "ipv4_gateway": network.ipv4_gateway,
-            "bridge_active": network.bridge_active,
-            "nat_enabled": network.nat_enabled,
-            "is_default": network.is_default,
-            "is_present": network.is_present,
-            "created_at": network.created_at,
-            "updated_at": network.updated_at,
-            "nat_gateways": network.nat_gateways_list or [],
-            "vm_count": len(network.leases) if network.leases else 0,
-            "leases": [
-                {
-                    "id": lease.id,
-                    "network_id": lease.network_id,
-                    "vm_id": lease.vm_id,
-                    "ipv4": lease.ipv4,
-                    "leased_at": lease.leased_at,
-                    "expires_at": lease.expires_at,
-                }
-                for lease in (network.leases or [])
-            ],
-            "iptables_rules": [
-                {
-                    "id": rule.id,
-                    "table_name": rule.table_name.value,
-                    "chain_name": rule.chain_name,
-                    "rule_type": rule.rule_type.value,
-                    "protocol": rule.protocol.value,
-                    "source": rule.source,
-                    "destination": rule.destination,
-                    "in_interface": rule.in_interface,
-                    "out_interface": rule.out_interface,
-                    "target": rule.target.value,
-                    "sport": rule.sport,
-                    "dport": rule.dport,
-                    "network_id": rule.network_id,
-                    "is_active": rule.is_active,
-                    "network_name": rule.network_name,
-                    "comment_tag": rule.comment_tag,
-                    "command_string": rule.command_string,
-                    "created_at": rule.created_at,
-                    "last_verified_at": rule.last_verified_at,
-                }
-                for rule in (network.iptables_rules or [])
-            ],
-        }
-
-    @staticmethod
     def to_json(networks: list[NetworkItem]) -> list[dict[str, Any]]:
         """
         Convert network model list to JSON-serializable dicts.
@@ -421,7 +363,7 @@ class NetworkOperation:
             List of network dicts suitable for JSON serialization.
 
         """
-        return [NetworkOperation._network_to_dict(n) for n in networks]
+        return [n.to_dict() for n in networks]
 
     @staticmethod
     def inspect(inputs: NetworkInput) -> dict[str, Any]:

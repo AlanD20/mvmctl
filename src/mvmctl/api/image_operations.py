@@ -224,7 +224,14 @@ class ImageOperation:
                         message="Extracting image...",
                     )
                 )
-            provisioner_type = ImageOperation._resolve_image_provisioner()
+            guestfs_enabled = bool(
+                SettingsService.resolve(db, "settings", "guestfs_enabled")
+            )
+            provisioner_type = (
+                ProvisionerType.GUESTFS
+                if guestfs_enabled
+                else ProvisionerType.LOOP_MOUNT
+            )
             logger.info("Preparing & optimizing image...")
             extracted_path = image_service.extract_image(
                 download_path,
@@ -416,7 +423,14 @@ class ImageOperation:
                         message="Extracting image...",
                     )
                 )
-            provisioner_type = ImageOperation._resolve_image_provisioner()
+            guestfs_enabled = bool(
+                SettingsService.resolve(db, "settings", "guestfs_enabled")
+            )
+            provisioner_type = (
+                ProvisionerType.GUESTFS
+                if guestfs_enabled
+                else ProvisionerType.LOOP_MOUNT
+            )
             extracted_path = image_service.extract_image(
                 resolved.source_path,
                 image_id,
@@ -668,34 +682,6 @@ class ImageOperation:
         return resolved.images[0]
 
     @staticmethod
-    def _image_to_dict(img: ImageItem) -> dict[str, Any]:
-        """
-        Convert ImageItem to dictionary for JSON output.
-
-        Includes every field from the model (except deleted_at).
-        """
-        return {
-            "id": img.id,
-            "type": img.type,
-            "name": img.name,
-            "arch": img.arch,
-            "path": img.path,
-            "fs_type": img.fs_type,
-            "fs_uuid": img.fs_uuid,
-            "compressed_size": img.compressed_size,
-            "original_size": img.original_size,
-            "compression_ratio": img.compression_ratio,
-            "distro": img.distro,
-            "compressed_format": img.compressed_format,
-            "minimum_rootfs_size_mib": img.minimum_rootfs_size_mib,
-            "pulled_at": img.pulled_at,
-            "is_default": img.is_default,
-            "is_present": img.is_present,
-            "created_at": img.created_at,
-            "updated_at": img.updated_at,
-        }
-
-    @staticmethod
     def inspect(inputs: ImageInput) -> dict[str, Any]:
         """
         Inspect an image with enriched data.
@@ -843,25 +829,6 @@ class ImageOperation:
             code="image.warmed",
             item=warmed_paths,
         )
-
-    @staticmethod
-    def _resolve_image_provisioner() -> ProvisionerType:
-        """Resolve which provisioner backend to use for image optimization.
-
-        Checks the ``guestfs_enabled`` setting. Returns LOOP_MOUNT by default.
-        """
-        from mvmctl.core.config._service import SettingsService
-
-        db = Database()
-        try:
-            guestfs_enabled = SettingsService.resolve(
-                db, "settings", "guestfs_enabled"
-            )
-            if guestfs_enabled:
-                return ProvisionerType.GUESTFS
-        except Exception:
-            pass
-        return ProvisionerType.LOOP_MOUNT
 
     @staticmethod
     def find_existing_image(

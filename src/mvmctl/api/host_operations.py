@@ -31,6 +31,7 @@ from mvmctl.core.vm._repository import VMRepository
 from mvmctl.exceptions import HostError, NetworkError, PrivilegeError
 from mvmctl.models import (
     HostHardware,
+    HostInfo,
     HostLimits,
     HostResources,
     HostStateChangeItem,
@@ -58,17 +59,9 @@ class HostOperation:
     def _detect_session_has_group() -> bool:
         """Check if the current process has the mvm group GID active.
 
-        Uses ``os.getgroups()``, ``os.getgid()``, and ``os.getegid()`` to
-        check whether the group is active in the current process credentials.
+        Delegates to ``HostPrivilegeHelper.session_has_group()``.
         """
-        import grp
-
-        try:
-            g = grp.getgrnam(MVM_UNIX_GROUP)
-            process_gids = set(os.getgroups()) | {os.getgid(), os.getegid()}
-            return g.gr_gid in process_gids
-        except (KeyError, PermissionError):
-            return False
+        return HostPrivilegeHelper.session_has_group()
 
     @staticmethod
     def init(
@@ -365,8 +358,8 @@ class HostOperation:
 
         state = HostRepository().get_state()
         if state is not None and state.cpu_model is not None:
-            hardware = HostOperation._hardware_from_state(state)
-            limits = HostOperation._limits_from_state(state)
+            hardware = HostHardware.from_state(state)
+            limits = HostLimits.from_state(state)
         else:
             # No persisted state — fall back to live detection.
             hardware = HostDetector.detect_hardware()
@@ -376,90 +369,6 @@ class HostOperation:
         return HostDetector.detect_resources(
             hardware, limits, CacheUtils.get_cache_dir()
         )
-
-    @staticmethod
-    def _build_info_dict(
-        state: HostStateItem,
-        resources: HostResources,
-        limits: HostLimits,
-        hardware: HostHardware,
-    ) -> dict[str, object]:
-        """Build the standardised info response dict from detection results."""
-        return {
-            "detected_at": state.detected_at or "",
-            "hostname": hardware.hostname,
-            "os": {
-                "kernel": hardware.kernel_version,
-                "release": hardware.os_release,
-            },
-            "cpu": {
-                "model": hardware.cpu_model,
-                "vendor": hardware.cpu_vendor,
-                "cores": hardware.cpu_cores,
-                "architecture": hardware.cpu_architecture,
-                "numa_nodes": hardware.numa_nodes,
-            },
-            "virtualization": {
-                "cpu_has_vmx": hardware.cpu_has_vmx,
-                "nested_virt_available": limits.nested_virt_available,
-                "ept_available": limits.ept_available,
-                "hypervisor": hardware.cpu_hypervisor,
-                "smt_active": resources.smt_active,
-                "modules": dict(resources.modules_loaded),
-            },
-            "hugepages": {
-                "count_2mb": limits.hugepage_count_2mb,
-                "free_2mb": resources.hugepages_free_2mb,
-            },
-            "dependencies": {
-                "nftables_available": resources.nftables_available,
-                "iptables_available": resources.iptables_available,
-                "cloud_localds_available": resources.cloud_localds_available,
-                "dev_net_tun": resources.dev_net_tun_accessible,
-            },
-            "system": {
-                "cgroup_version": limits.cgroup_version,
-                "ksm_disabled": limits.ksm_disabled,
-                "dev_kvm_status": resources.dev_kvm_status,
-                "user_in_kvm_group": resources.user_in_kvm_group,
-            },
-            "memory": {
-                "total_mib": hardware.memory_total_mib,
-                "available_mib": resources.memory_available_mib,
-                "swap_total_mib": limits.swap_total_mib,
-                "swap_used_mib": resources.swap_used_mib,
-            },
-            "storage": {
-                "total_bytes": hardware.storage_total_bytes,
-                "free_bytes": resources.storage_free_bytes,
-            },
-            "kernel": {
-                "version": hardware.kernel_version,
-                "minimum_version_met": limits.kernel_minimum_met,
-            },
-            "limits": {
-                "pid_max": limits.pid_max,
-                "fd_max": limits.fd_max,
-                "conntrack_max": limits.conntrack_max,
-                "tap_devices_max": limits.tap_devices_max,
-                "ip_local_port_range": list(limits.ip_local_port_range),
-            },
-            "capacity": {
-                "current": {
-                    "pids": resources.pids_current,
-                    "fds": resources.fd_current,
-                    "conntrack": resources.conntrack_current,
-                    "tap_devices": resources.tap_devices_used,
-                    "arp_entries": resources.arp_current,
-                },
-                "recommended_max_vms": resources.recommended_max_vms,
-                "limiting_resource": resources.limiting_resource,
-            },
-            "setup": {
-                "initialized": bool(state.initialized),
-                "initialized_at": state.initialized_at,
-            },
-        }
 
     @staticmethod
     def network_setup() -> OperationResult[Any]:
@@ -490,68 +399,6 @@ class HostOperation:
             )
 
     @staticmethod
-    def _hardware_from_state(state: HostStateItem) -> HostHardware | None:
-        """Reconstruct HostHardware from stored state, or None if not yet detected."""
-        if state.cpu_model is None:
-            return None
-        return HostHardware(
-            hostname=state.hostname or "",
-            cpu_model=state.cpu_model or "",
-            cpu_vendor=state.cpu_vendor or "",
-            cpu_cores=state.cpu_cores or 0,
-            cpu_architecture=state.cpu_architecture or "",
-            numa_nodes=state.numa_nodes or 1,
-            memory_total_mib=state.memory_total_mib or 0,
-            storage_total_bytes=state.storage_total_bytes or 0,
-            kernel_version=state.kernel_version or "",
-            os_release=state.os_release or "",
-            cpu_has_vmx=bool(state.cpu_has_vmx)
-            if state.cpu_has_vmx is not None
-            else False,
-            cpu_hypervisor=bool(state.cpu_hypervisor)
-            if state.cpu_hypervisor is not None
-            else False,
-        )
-
-    @staticmethod
-    def _limits_from_state(state: HostStateItem) -> HostLimits | None:
-        """Reconstruct HostLimits from stored state, or None if not yet detected."""
-        if state.pid_max is None:
-            return None
-        port_range = (32768, 60999)
-        if state.ip_local_port_range:
-            try:
-                parts = state.ip_local_port_range.split(",")
-                if len(parts) == 2:
-                    port_range = (int(parts[0]), int(parts[1]))
-            except (ValueError, TypeError):
-                pass
-        return HostLimits(
-            pid_max=state.pid_max or 0,
-            fd_max=state.fd_max or 0,
-            conntrack_max=state.conntrack_max or 0,
-            tap_devices_max=state.tap_devices_max
-            if state.tap_devices_max is not None
-            else 0,
-            ip_local_port_range=port_range,
-            nested_virt_available=bool(state.nested_virt_available)
-            if state.nested_virt_available is not None
-            else False,
-            ept_available=bool(state.ept_available)
-            if state.ept_available is not None
-            else False,
-            hugepage_count_2mb=state.hugepage_count_2mb or 0,
-            ksm_disabled=bool(state.ksm_disabled)
-            if state.ksm_disabled is not None
-            else True,
-            cgroup_version=state.cgroup_version or 1,
-            swap_total_mib=state.swap_total_mib or 0,
-            kernel_minimum_met=bool(state.kernel_minimum_met)
-            if state.kernel_minimum_met is not None
-            else False,
-        )
-
-    @staticmethod
     def info() -> OperationResult[dict[str, object]]:
         """Return current host info with capacity analysis.
 
@@ -571,8 +418,8 @@ class HostOperation:
             )
 
         # Reconstruct hardware/limits from stored state, or detect fresh
-        hardware = HostOperation._hardware_from_state(state)
-        limits = HostOperation._limits_from_state(state)
+        hardware = HostHardware.from_state(state)
+        limits = HostLimits.from_state(state)
 
         if hardware is None or limits is None:
             # Auto-detect if this is the first time
@@ -588,9 +435,9 @@ class HostOperation:
 
         cache_dir = CacheUtils.get_cache_dir()
         resources = HostDetector.detect_resources(hardware, limits, cache_dir)
-        info_dict = HostOperation._build_info_dict(
-            state, resources, limits, hardware
-        )
+        info_dict = HostInfo(
+            state=state, resources=resources, limits=limits, hardware=hardware
+        ).to_dict()
 
         return OperationResult(
             status="success",
@@ -629,9 +476,9 @@ class HostOperation:
 
         cache_dir = CacheUtils.get_cache_dir()
         resources = HostDetector.detect_resources(hardware, limits, cache_dir)
-        info_dict = HostOperation._build_info_dict(
-            state, resources, limits, hardware
-        )
+        info_dict = HostInfo(
+            state=state, resources=resources, limits=limits, hardware=hardware
+        ).to_dict()
 
         return OperationResult(
             status="success",

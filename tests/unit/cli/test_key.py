@@ -60,23 +60,6 @@ class TestKeyLs:
     @patch("mvmctl.cli.key.KeyOperation")
     def test_ls_json(self, mock_key_op):
         mock_key_op.list_all.return_value = [_make_key("testkey")]
-
-        def _mock_to_dict(k: SSHKeyItem) -> dict[str, object]:
-            return {
-                "id": k.id,
-                "name": k.name,
-                "fingerprint": k.fingerprint,
-                "algorithm": k.algorithm,
-                "comment": k.comment,
-                "public_key_path": k.public_key_path,
-                "private_key_path": k.private_key_path,
-                "is_default": k.is_default,
-                "is_present": k.is_present,
-                "created_at": k.created_at,
-                "updated_at": k.updated_at,
-            }
-
-        mock_key_op._key_to_dict.side_effect = _mock_to_dict
         result = runner.invoke(app, ["key", "ls", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)

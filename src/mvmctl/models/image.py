@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import platform
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from mvmctl.utils.common import CommonUtils
 
@@ -38,6 +38,29 @@ class ImageItem:
     compressed_format: str | None = None
     deleted_at: str | None = None
     vms: list[VMInstanceItem] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert ImageItem to a dictionary for JSON output."""
+        return {
+            "id": self.id,
+            "type": self.type,
+            "name": self.name,
+            "arch": self.arch,
+            "path": self.path,
+            "fs_type": self.fs_type,
+            "fs_uuid": self.fs_uuid,
+            "compressed_size": self.compressed_size,
+            "original_size": self.original_size,
+            "compression_ratio": self.compression_ratio,
+            "distro": self.distro,
+            "compressed_format": self.compressed_format,
+            "minimum_rootfs_size_mib": self.minimum_rootfs_size_mib,
+            "pulled_at": self.pulled_at,
+            "is_default": self.is_default,
+            "is_present": self.is_present,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
 
     def __post_init__(self) -> None:
         """Coerce bool fields loaded from SQLite."""

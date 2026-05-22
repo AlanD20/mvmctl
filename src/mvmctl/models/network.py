@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import IntEnum, StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from mvmctl.constants import (
     MVM_FORWARD_CHAIN,
@@ -105,6 +105,59 @@ class NetworkItem:
     leases: list[NetworkLeaseItem] | None = None
     iptables_rules: list[FirewallRule] | None = None
     vms: list[VMInstanceItem] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert NetworkItem to a dictionary for JSON output."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "subnet": self.subnet,
+            "bridge": self.bridge,
+            "ipv4_gateway": self.ipv4_gateway,
+            "bridge_active": self.bridge_active,
+            "nat_enabled": self.nat_enabled,
+            "is_default": self.is_default,
+            "is_present": self.is_present,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "nat_gateways": self.nat_gateways_list or [],
+            "vm_count": len(self.leases) if self.leases else 0,
+            "leases": [
+                {
+                    "id": lease.id,
+                    "network_id": lease.network_id,
+                    "vm_id": lease.vm_id,
+                    "ipv4": lease.ipv4,
+                    "leased_at": lease.leased_at,
+                    "expires_at": lease.expires_at,
+                }
+                for lease in (self.leases or [])
+            ],
+            "iptables_rules": [
+                {
+                    "id": rule.id,
+                    "table_name": rule.table_name.value,
+                    "chain_name": rule.chain_name,
+                    "rule_type": rule.rule_type.value,
+                    "protocol": rule.protocol.value,
+                    "source": rule.source,
+                    "destination": rule.destination,
+                    "in_interface": rule.in_interface,
+                    "out_interface": rule.out_interface,
+                    "target": rule.target.value,
+                    "sport": rule.sport,
+                    "dport": rule.dport,
+                    "network_id": rule.network_id,
+                    "is_active": rule.is_active,
+                    "network_name": rule.network_name,
+                    "comment_tag": rule.comment_tag,
+                    "command_string": rule.command_string,
+                    "created_at": rule.created_at,
+                    "last_verified_at": rule.last_verified_at,
+                }
+                for rule in (self.iptables_rules or [])
+            ],
+        }
 
     @property
     def nat_gateways_list(self) -> list[str]:

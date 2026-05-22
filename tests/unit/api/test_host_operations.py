@@ -6,9 +6,11 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from mvmctl.api.host_operations import HostOperation
+from mvmctl.core.host._helper import HostPrivilegeHelper
 from mvmctl.models import VMStatus
 from mvmctl.models.host import (
     HostHardware,
+    HostInfo,
     HostLimits,
     HostResources,
     HostStateItem,
@@ -97,7 +99,7 @@ class TestHostOperationDelegations:
 
 
 class TestHostOperationBuildInfoDict:
-    """Tests for HostOperation._build_info_dict() — info response formatting."""
+    """Tests for HostInfo.to_dict() — info response formatting."""
 
     def _make_state(self) -> HostStateItem:
         return HostStateItem(
@@ -163,13 +165,13 @@ class TestHostOperationBuildInfoDict:
         )
 
     def test_build_info_dict_structure(self, mocker):
-        """_build_info_dict returns a dict with all expected top-level keys."""
+        """to_dict() returns a dict with all expected top-level keys."""
         state = self._make_state()
         hw = self._make_hardware()
         limits = self._make_limits()
         resources = self._make_resources()
 
-        info_dict = HostOperation._build_info_dict(state, resources, limits, hw)
+        info_dict = HostInfo(state=state, resources=resources, limits=limits, hardware=hw).to_dict()
 
         assert isinstance(info_dict, dict)
         assert "detected_at" in info_dict
@@ -183,13 +185,13 @@ class TestHostOperationBuildInfoDict:
         assert "setup" in info_dict
 
     def test_build_info_dict_cpu_section(self, mocker):
-        """cpu section contains model, vendor, cores, architecture, numa_nodes."""
+        """to_dict() cpu section contains model, vendor, cores, architecture, numa_nodes."""
         state = self._make_state()
         hw = self._make_hardware()
         limits = self._make_limits()
         resources = self._make_resources()
 
-        info_dict = HostOperation._build_info_dict(state, resources, limits, hw)
+        info_dict = HostInfo(state=state, resources=resources, limits=limits, hardware=hw).to_dict()
         cpu = info_dict["cpu"]
         assert isinstance(cpu, dict)
         assert cpu["model"] == "Test CPU"
@@ -199,26 +201,26 @@ class TestHostOperationBuildInfoDict:
         assert cpu["numa_nodes"] == 2
 
     def test_build_info_dict_memory_section(self, mocker):
-        """memory section contains total_mib and available_mib."""
+        """to_dict() memory section contains total_mib and available_mib."""
         state = self._make_state()
         hw = self._make_hardware()
         limits = self._make_limits()
         resources = self._make_resources()
 
-        info_dict = HostOperation._build_info_dict(state, resources, limits, hw)
+        info_dict = HostInfo(state=state, resources=resources, limits=limits, hardware=hw).to_dict()
         mem = info_dict["memory"]
         assert isinstance(mem, dict)
         assert mem["total_mib"] == 32000
         assert mem["available_mib"] == 8192
 
     def test_build_info_dict_limits_section(self, mocker):
-        """limits section contains pid_max, fd_max, conntrack_max, tap_devices_max, ip_local_port_range."""
+        """to_dict() limits section contains pid_max, fd_max, conntrack_max, tap_devices_max, ip_local_port_range."""
         state = self._make_state()
         hw = self._make_hardware()
         limits = self._make_limits()
         resources = self._make_resources()
 
-        info_dict = HostOperation._build_info_dict(state, resources, limits, hw)
+        info_dict = HostInfo(state=state, resources=resources, limits=limits, hardware=hw).to_dict()
         lim = info_dict["limits"]
         assert isinstance(lim, dict)
         assert lim["pid_max"] == 4194304
@@ -228,13 +230,13 @@ class TestHostOperationBuildInfoDict:
         assert lim["ip_local_port_range"] == [32768, 60999]
 
     def test_build_info_dict_capacity_section(self, mocker):
-        """capacity section contains current usage and recommended_max_vms."""
+        """to_dict() capacity section contains current usage and recommended_max_vms."""
         state = self._make_state()
         hw = self._make_hardware()
         limits = self._make_limits()
         resources = self._make_resources()
 
-        info_dict = HostOperation._build_info_dict(state, resources, limits, hw)
+        info_dict = HostInfo(state=state, resources=resources, limits=limits, hardware=hw).to_dict()
         cap = info_dict["capacity"]
         assert isinstance(cap, dict)
         assert "current" in cap
@@ -248,30 +250,30 @@ class TestHostOperationBuildInfoDict:
         assert cap["limiting_resource"] == "memory"
 
     def test_build_info_dict_setup_section(self, mocker):
-        """setup section contains initialized and initialized_at."""
+        """to_dict() setup section contains initialized and initialized_at."""
         state = self._make_state()
         hw = self._make_hardware()
         limits = self._make_limits()
         resources = self._make_resources()
 
-        info_dict = HostOperation._build_info_dict(state, resources, limits, hw)
+        info_dict = HostInfo(state=state, resources=resources, limits=limits, hardware=hw).to_dict()
         setup = info_dict["setup"]
         assert isinstance(setup, dict)
         assert setup["initialized"] is True
         assert setup["initialized_at"] == "2026-01-01T12:00:00+00:00"
 
     def test_build_info_dict_detected_at(self, mocker):
-        """detected_at is populated from state."""
+        """to_dict() detected_at is populated from state."""
         state = self._make_state()
         hw = self._make_hardware()
         limits = self._make_limits()
         resources = self._make_resources()
 
-        info_dict = HostOperation._build_info_dict(state, resources, limits, hw)
+        info_dict = HostInfo(state=state, resources=resources, limits=limits, hardware=hw).to_dict()
         assert info_dict["detected_at"] == "2026-01-01T12:00:00+00:00"
 
     def test_build_info_dict_empty_detected_at(self, mocker):
-        """detected_at returns empty string when state has no detection."""
+        """to_dict() detected_at returns empty string when state has no detection."""
         state = self._make_state()
         state.detected_at = None
         hw = self._make_hardware()
@@ -279,30 +281,30 @@ class TestHostOperationBuildInfoDict:
         resources = self._make_resources()
         hw.hostname = "testhost"
 
-        info_dict = HostOperation._build_info_dict(state, resources, limits, hw)
+        info_dict = HostInfo(state=state, resources=resources, limits=limits, hardware=hw).to_dict()
         assert info_dict["detected_at"] == ""
 
     def test_build_info_dict_os_section(self, mocker):
-        """os section contains kernel and release."""
+        """to_dict() os section contains kernel and release."""
         state = self._make_state()
         hw = self._make_hardware()
         limits = self._make_limits()
         resources = self._make_resources()
 
-        info_dict = HostOperation._build_info_dict(state, resources, limits, hw)
+        info_dict = HostInfo(state=state, resources=resources, limits=limits, hardware=hw).to_dict()
         os_section = info_dict["os"]
         assert isinstance(os_section, dict)
         assert os_section["kernel"] == "6.8.0"
         assert os_section["release"] == "TestOS 1.0"
 
     def test_build_info_dict_storage_section(self, mocker):
-        """storage section contains total_bytes and free_bytes."""
+        """to_dict() storage section contains total_bytes and free_bytes."""
         state = self._make_state()
         hw = self._make_hardware()
         limits = self._make_limits()
         resources = self._make_resources()
 
-        info_dict = HostOperation._build_info_dict(state, resources, limits, hw)
+        info_dict = HostInfo(state=state, resources=resources, limits=limits, hardware=hw).to_dict()
         storage = info_dict["storage"]
         assert isinstance(storage, dict)
         assert storage["total_bytes"] == 500_000_000_000

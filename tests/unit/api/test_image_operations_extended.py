@@ -72,6 +72,9 @@ def _setup_pull_mocks(
 
     mock_db = MagicMock()
     mocker.patch("mvmctl.api.image_operations.Database", return_value=mock_db)
+    mocker.patch(
+        "mvmctl.api.image_operations.SettingsService.resolve", return_value=False
+    )
 
     mock_repo = MagicMock()
     mock_repo.get_by_type.return_value = existing_image
@@ -294,6 +297,9 @@ class TestImageOperationImport:
         deps: dict[str, MagicMock] = {}
 
         mocker.patch("mvmctl.api.image_operations.Database")
+        mocker.patch(
+            "mvmctl.api.image_operations.SettingsService.resolve", return_value=False
+        )
 
         mock_repo = MagicMock()
         mock_repo.get_by_type.return_value = existing_image

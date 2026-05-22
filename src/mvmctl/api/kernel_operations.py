@@ -534,27 +534,6 @@ class KernelOperation:
         return resolved.kernels[0]
 
     @staticmethod
-    def _kernel_to_dict(kernel: KernelItem) -> dict[str, Any]:
-        """
-        Convert KernelItem to dictionary for JSON output.
-
-        Includes every field from the model.
-        """
-        return {
-            "id": kernel.id,
-            "name": kernel.name,
-            "base_name": kernel.base_name,
-            "version": kernel.version,
-            "arch": kernel.arch,
-            "type": kernel.type,
-            "path": kernel.path,
-            "is_default": kernel.is_default,
-            "is_present": kernel.is_present,
-            "created_at": kernel.created_at,
-            "updated_at": kernel.updated_at,
-        }
-
-    @staticmethod
     def inspect(inputs: KernelInput) -> dict[str, Any]:
         """
         Inspect a kernel with full details.

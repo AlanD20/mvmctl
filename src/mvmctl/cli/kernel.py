@@ -93,7 +93,7 @@ def kernel_ls(
         )
 
         if json_output:
-            data = [KernelOperation._kernel_to_dict(k) for k in kernels]
+            data = [k.to_dict() for k in kernels]
             typer.echo(json.dumps(data, indent=2, default=str))
             return
 

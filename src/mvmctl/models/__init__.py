@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     )
     from mvmctl.models.host import (
         HostHardware,
+        HostInfo,
         HostLimits,
         HostResources,
         HostStateChangeItem,
@@ -81,6 +82,7 @@ __all__ = [
     "DriveConfig",
     "FirecrackerConfig",
     "HostHardware",
+    "HostInfo",
     "HostLimits",
     "HostResources",
     "HostStateChangeItem",
@@ -132,6 +134,7 @@ _LAZY_MAP = {
     "DriveConfig": ("mvmctl.models.firecracker", "DriveConfig"),
     "FirecrackerConfig": ("mvmctl.models.firecracker", "FirecrackerConfig"),
     "HostHardware": ("mvmctl.models.host", "HostHardware"),
+    "HostInfo": ("mvmctl.models.host", "HostInfo"),
     "HostLimits": ("mvmctl.models.host", "HostLimits"),
     "HostResources": ("mvmctl.models.host", "HostResources"),
     "HostStateChangeItem": ("mvmctl.models.host", "HostStateChangeItem"),

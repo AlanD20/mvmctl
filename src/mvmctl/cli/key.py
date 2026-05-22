@@ -67,7 +67,7 @@ def key_ls(
     keys = KeyOperation.list_all()
 
     if json_output:
-        data = [KeyOperation._key_to_dict(k) for k in keys]
+        data = [k.to_dict() for k in keys]
         typer.echo(json.dumps(data, indent=2, default=str))
         return
 

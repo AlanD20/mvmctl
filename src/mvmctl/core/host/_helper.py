@@ -1,4 +1,4 @@
-"""Host privilege helpers."""
+"""Host privilege helper — checks group membership and binary availability."""
 
 from __future__ import annotations
 
@@ -89,8 +89,7 @@ class HostPrivilegeHelper:
             )
 
         # User is in group per /etc/group — but check if THIS process has the credentials
-        process_gids = set(os.getgroups()) | {os.getgid(), os.getegid()}
-        if g.gr_gid not in process_gids:
+        if not HostPrivilegeHelper.session_has_group():
             raise PrivilegeError(
                 f"Elevated privileges required{op_str}",
                 details={
@@ -108,6 +107,24 @@ class HostPrivilegeHelper:
                     ],
                 },
             )
+
+    @staticmethod
+    def session_has_group() -> bool:
+        """Check if the current process has the mvm group GID active in its credentials.
+
+        Uses ``os.getgroups()``, ``os.getgid()``, and ``os.getegid()`` to
+        check whether the group is active in the current process credentials.
+
+        Returns:
+            True if the mvm group GID is in the process's active group set.
+            False if the group does not exist or credentials cannot be read.
+        """
+        try:
+            g = grp.getgrnam(MVM_UNIX_GROUP)
+            process_gids = set(os.getgroups()) | {os.getgid(), os.getegid()}
+            return g.gr_gid in process_gids
+        except (KeyError, PermissionError):
+            return False
 
 
 __all__ = ["HostPrivilegeHelper"]

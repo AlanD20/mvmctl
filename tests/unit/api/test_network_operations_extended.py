@@ -1034,22 +1034,22 @@ class TestNetworkOperationSync:
         assert result.status == "error"
 
 
-class TestNetworkOperationHelpers:
-    """Tests for _network_to_dict helper."""
+class TestNetworkItemToDict:
+    """Tests for NetworkItem.to_dict() helper."""
 
-    def test_network_to_dict_with_leases(self):
+    def test_to_dict_with_leases(self):
         net = _make_network()
-        d = NetworkOperation._network_to_dict(net)
+        d = net.to_dict()
         assert d["name"] == "testnet"
         assert d["subnet"] == "10.0.0.0/24"
         assert d["leases"] == []
 
-    def test_network_to_dict_with_nat_gateways(self):
+    def test_to_dict_with_nat_gateways(self):
         net = _make_network(nat_gateways="eth0,eth1")
-        d = NetworkOperation._network_to_dict(net)
+        d = net.to_dict()
         assert d["nat_gateways"] == ["eth0", "eth1"]
 
-    def test_network_to_dict_without_nat_gateways(self):
+    def test_to_dict_without_nat_gateways(self):
         net = _make_network(nat_gateways=None)
-        d = NetworkOperation._network_to_dict(net)
+        d = net.to_dict()
         assert d["nat_gateways"] == []

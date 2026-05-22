@@ -96,7 +96,7 @@ class CacheOperation:
                         message="Building libguestfs appliance...",
                     )
                 )
-            appliance_path = CacheOperation._build_guestfs_appliance(cache_dir)
+            appliance_path = GuestfsService.build_appliance(cache_dir)
 
         # Detected guestfs kernel
         from mvmctl.core._shared._guestfs import KernelDetector
@@ -116,15 +116,6 @@ class CacheOperation:
                 "guestfs_kernel": str(kernel_info[0]) if kernel_info else None,
             },
         )
-
-    @staticmethod
-    def _build_guestfs_appliance(cache_dir: Path) -> Path | None:
-        """Build the libguestfs fixed appliance for faster image operations.
-
-        Returns:
-            Path to appliance directory if built, None if skipped or failed.
-        """
-        return GuestfsService.build_appliance(cache_dir)
 
     @staticmethod
     def prune_vms(

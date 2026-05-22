@@ -55,7 +55,7 @@ class VMRequest:
         self._db = db if db is not None else Database()
         self._vm_resolver = VMResolver(
             VMRepository(self._db),
-            include=["image", "kernel", "network.leases", "volumes"],
+            include=["image", "kernel", "network", "network.leases", "volumes", "binary"],
         )
 
     @property

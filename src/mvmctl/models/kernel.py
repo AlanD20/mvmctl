@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from mvmctl.utils.common import CommonUtils
 
@@ -36,6 +36,22 @@ class KernelItem:
     deleted_at: str | None = None
 
     vms: list[VMInstanceItem] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert KernelItem to a dictionary for JSON output."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "base_name": self.base_name,
+            "version": self.version,
+            "arch": self.arch,
+            "type": self.type,
+            "path": self.path,
+            "is_default": self.is_default,
+            "is_present": self.is_present,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
 
     def __post_init__(self) -> None:
         """Coerce bool fields loaded from SQLite."""

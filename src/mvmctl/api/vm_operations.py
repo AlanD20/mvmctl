@@ -52,10 +52,11 @@ from mvmctl.core.host._repository import HostRepository
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.core.image._service import ImageService
 from mvmctl.core.kernel._repository import KernelRepository
+from mvmctl.core.key._service import KeyService
 from mvmctl.core.network._lease_service import LeaseService
 from mvmctl.core.network._repository import LeaseRepository, NetworkRepository
 from mvmctl.core.network._service import NetworkService
-from mvmctl.core.vm import VMProvisioner, VMResolver
+from mvmctl.core.vm import VMProvisioner
 from mvmctl.core.vm._controller import VMController
 from mvmctl.core.vm._firecracker import FirecrackerSpawner
 from mvmctl.core.vm._repository import VMRepository
@@ -163,19 +164,6 @@ class VMCreateContext:
 
     def set_resolved(self, resolved: ResolvedVMCreateInput) -> None:
         self.resolved = resolved
-
-    @property
-    def _ssh_pubkey_contents(self) -> list[str]:
-        """Extract public key content strings from resolved SSHKeyItem list."""
-        contents: list[str] = []
-        if self.resolved is None:
-            return contents
-        for k in self.resolved.ssh_keys:
-            if k.public_key_path:
-                path = Path(k.public_key_path)
-                if path.exists():
-                    contents.append(path.read_text().strip())
-        return contents
 
     def set_firecracker_manager(self, manager: FirecrackerSpawner) -> None:
         self.fc_manager = manager
@@ -403,7 +391,8 @@ class VMCreateContext:
                 provisioner.set_hostname(self.resolved.name)
                 provisioner.inject_dns(dns_server=self.resolved.dns_server)
                 provisioner.setup_ssh(
-                    self.resolved.user, self._ssh_pubkey_contents
+                    self.resolved.user,
+                    KeyService.read_pubkey_contents(self.resolved.ssh_keys),
                 )
 
             if mode == CloudInitMode.OFF:
@@ -423,7 +412,9 @@ class VMCreateContext:
                     network=self.resolved.network,
                     network_prefix_len=self.resolved.network_prefix_len,
                     skip_network_config=self.resolved.skip_ci_network_config,
-                    ssh_pubkeys=self._ssh_pubkey_contents,
+                    ssh_pubkeys=KeyService.read_pubkey_contents(
+                        self.resolved.ssh_keys
+                    ),
                     custom_user_data_path=self.resolved.custom_user_data_path,
                     nocloud_net_port=self.resolved.nocloud_net_port,
                     cloud_init_iso_path=self.resolved.cloud_init_iso_path,
@@ -452,7 +443,9 @@ class VMCreateContext:
                     network=self.resolved.network,
                     network_prefix_len=self.resolved.network_prefix_len,
                     skip_network_config=self.resolved.skip_ci_network_config,
-                    ssh_pubkeys=self._ssh_pubkey_contents,
+                    ssh_pubkeys=KeyService.read_pubkey_contents(
+                        self.resolved.ssh_keys
+                    ),
                     custom_user_data_path=self.resolved.custom_user_data_path,
                     nocloud_net_port=self.resolved.nocloud_net_port,
                     cloud_init_iso_path=self.resolved.cloud_init_iso_path,
@@ -1408,30 +1401,7 @@ class VMOperation:
         3. Updates PID and process_start_time in DB and in-memory VM object
         """
         db = Database()
-
-        # Enrich VM with resolved relations
         repo = VMRepository(db)
-        resolver = VMResolver(
-            repo, include=["binary", "kernel", "image", "network", "volumes"]
-        )
-        resolver._enrich([vm])
-
-        if vm.binary is None:
-            raise VMNotFoundError(
-                f"Binary not found for VM '{vm.name}' (ID: {vm.binary_id})"
-            )
-        if vm.kernel is None:
-            raise VMNotFoundError(
-                f"Kernel not found for VM '{vm.name}' (ID: {vm.kernel_id})"
-            )
-        if vm.image is None:
-            raise VMNotFoundError(
-                f"Image not found for VM '{vm.name}' (ID: {vm.image_id})"
-            )
-        if vm.network is None:
-            raise VMNotFoundError(
-                f"Network not found for VM '{vm.name}' (ID: {vm.network_id})"
-            )
 
         # Delegate to VMCreateContext for config building + spawn
         ctx = VMCreateContext.for_respawn(vm, snapshot_mode=snapshot_mode)

@@ -29,6 +29,28 @@ class KeyService:
     def __init__(self, repo: KeyRepository) -> None:
         self._repo = repo
 
+    @staticmethod
+    def read_pubkey_contents(ssh_keys: list[SSHKeyItem]) -> list[str]:
+        """Extract public key content strings from a list of SSHKeyItem.
+
+        Iterates over the provided SSHKeyItem list, for each key with a
+        ``public_key_path``, reads the file content (strips whitespace),
+        and returns the list of contents.
+
+        Args:
+            ssh_keys: List of SSHKeyItem to extract public key contents from.
+
+        Returns:
+            List of public key content strings.
+        """
+        contents: list[str] = []
+        for k in ssh_keys:
+            if k.public_key_path:
+                path = Path(k.public_key_path)
+                if path.exists():
+                    contents.append(path.read_text().strip())
+        return contents
+
     @classmethod
     def check_dependencies(cls) -> None:
         """

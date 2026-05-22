@@ -1,6 +1,6 @@
 """Tests for ImageOperation class — API layer image management orchestration.
 
-Covers: list_, get, inspect, set_default, remove, warm, _image_to_dict,
+Covers: list_, get, inspect, set_default, remove, warm, to_dict,
 find_existing_image.
 
 Follows the pattern from test_vm_operations.py: mock at point-of-use,
@@ -505,12 +505,12 @@ class TestImageOperationWarm:
 
 
 class TestImageOperationHelpers:
-    """Tests for helper methods on ImageOperation."""
+    """Tests for ImageItem.to_dict() helper."""
 
-    def test_image_to_dict_includes_all_fields(self):
-        """_image_to_dict() includes all relevant fields."""
+    def test_to_dict_includes_all_fields(self):
+        """to_dict() includes all relevant fields."""
         img = _make_image("ubuntu-24.04", fs_uuid="abc-123", distro="ubuntu")
-        d = ImageOperation._image_to_dict(img)
+        d = img.to_dict()
         assert d["type"] == "ubuntu-24.04"
         assert d["name"] == "Ubuntu 24.04 LTS"
         assert d["arch"] == "x86_64"
@@ -523,30 +523,30 @@ class TestImageOperationHelpers:
         assert d["is_default"] is False
         assert d["is_present"] is True
 
-    def test_image_to_dict_does_not_include_deleted_at(self):
-        """_image_to_dict() omits deleted_at field."""
+    def test_to_dict_does_not_include_deleted_at(self):
+        """to_dict() omits deleted_at field."""
         img = _make_image("test")
-        d = ImageOperation._image_to_dict(img)
+        d = img.to_dict()
         assert "deleted_at" not in d
 
-    def test_image_to_dict_includes_distro_when_set(self):
-        """_image_to_dict() includes distro field when set."""
+    def test_to_dict_includes_distro_when_set(self):
+        """to_dict() includes distro field when set."""
         img = _make_image("test", distro="alpine")
-        d = ImageOperation._image_to_dict(img)
+        d = img.to_dict()
         assert "distro" in d
         assert d["distro"] == "alpine"
 
-    def test_image_to_dict_distro_defaults_to_none(self):
-        """_image_to_dict() includes distro field as None when not set."""
+    def test_to_dict_distro_defaults_to_none(self):
+        """to_dict() includes distro field as None when not set."""
         img = _make_image("test")
-        d = ImageOperation._image_to_dict(img)
+        d = img.to_dict()
         assert "distro" in d
         assert d["distro"] is None
 
-    def test_image_to_dict_handles_none_optionals(self):
-        """_image_to_dict() handles None optional fields gracefully."""
+    def test_to_dict_handles_none_optionals(self):
+        """to_dict() handles None optional fields gracefully."""
         img = _make_image("test", fs_uuid=None, compressed_size=None)
-        d = ImageOperation._image_to_dict(img)
+        d = img.to_dict()
         assert d["fs_uuid"] is None
         assert d["compressed_size"] is None
 
