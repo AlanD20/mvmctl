@@ -275,7 +275,6 @@ def network_inspect(
         autocompletion=_complete_network_names,
     ),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-    tree: bool = typer.Option(False, "--tree", help="Output in tree format"),
 ) -> None:
     """Show detailed information about a network."""
     name = mvm_cli.check_name_arg(ctx, name)

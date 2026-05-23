@@ -81,7 +81,7 @@ removed, or when test coverage changes.
 | `network ls --json` empty | ⚡ Shallow | `test_network.py` | `TestNetworkLifecycle` | L2 — valid empty list |
 | `network inspect <name>` | ⚡ Shallow | `test_network.py` | `TestNetworkLifecycle` | L1 |
 | `network inspect <name> --json` | ⚡ Shallow | `test_network.py` | `TestNetworkLifecycle` | L2 — name, subnet, bridge |
-| `network inspect <name> --tree` | ⚡ Shallow | `test_network.py` | `TestNetworkInspectTree` | L1 |
+| `network inspect <name>` | ⚡ Shallow | `test_network.py` | `TestNetworkInspectTree` | L1 |
 | `network rm <name>` | ✅ Deep | `test_network.py` | `TestNetworkLifecycle` | L2 listing + bridge verification |
 | `network rm <nonexistent>` | ⚡ Shallow | `test_network.py` | `TestNetworkLifecycle` | L1 |
 | `network rm --force` | ✅ Deep | `test_network.py` | `TestNetworkRemoveForce` | L3: bridge interface gone after removal (ip link show) |
@@ -262,7 +262,7 @@ removed, or when test coverage changes.
 | `key ls --json` | ⚡ Shallow | `test_keys.py` | `TestKeyLifecycle` | L2 |
 | `key inspect` | ⚡ Shallow | `test_keys.py` | `TestKeyLifecycle` | L1 |
 | `key inspect --json` | ⚡ Shallow | `test_keys.py` | `TestKeyLifecycle` | L2 |
-| `key inspect --tree` | ⚡ Shallow | `test_keys.py` | `TestKeyInspectTree` | L1 |
+| `key inspect` | ⚡ Shallow | `test_keys.py` | `TestKeyInspectTree` | L1 |
 | `key rm` | ⚡ Shallow | `test_keys.py` | `TestKeyLifecycle` | L2 |
 | `key rm` nonexistent | ⚡ Shallow | `test_keys.py` | `TestKeyLifecycle` | L1 |
 | `key rm --force` | ⚡ Shallow | `test_keys.py` | `TestKeyRunningVMDependency` | L2 |

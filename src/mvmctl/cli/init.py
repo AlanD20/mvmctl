@@ -241,7 +241,12 @@ def _handle_interactive_flow(
                     "passwordless sudo on future runs"
                 )
 
-            proceed_with_sudo = non_interactive or typer.confirm(
+            if non_interactive:
+                mvm_cli.info(
+                    f"Run 'sudo {CLI_NAME} host init' manually."
+                )
+                break
+            proceed_with_sudo = typer.confirm(
                 f"Run 'sudo {CLI_NAME} host init' now?", default=True
             )
             if proceed_with_sudo:

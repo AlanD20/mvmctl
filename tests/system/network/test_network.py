@@ -848,7 +848,7 @@ class TestNetworkLifecycle:
 
 
 class TestNetworkInspectTree:
-    """Test network inspect with --tree flag."""
+    """Test network inspect with default format output."""
 
     pytestmark = [
         pytest.mark.system,
@@ -858,11 +858,11 @@ class TestNetworkInspectTree:
     ]
 
     def test_network_inspect_tree(self, mvm_binary, module_network):
-        # Rationale: Uses module_network fixture. Verifies --tree output
-        # format.
-        """Inspect a network with --tree and verify tree characters in output."""
+        # Rationale: Uses module_network fixture. Verifies default inspect
+        # output format.
+        """Inspect a network and verify tree characters in default output."""
         result = _run_mvm(
-            mvm_binary, "network", "inspect", module_network, "--tree"
+            mvm_binary, "network", "inspect", module_network
         )
         assert result.returncode == 0
         assert "├──" in result.stdout or "└──" in result.stdout

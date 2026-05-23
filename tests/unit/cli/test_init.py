@@ -57,7 +57,7 @@ class TestInit:
 
     @patch("mvmctl.cli.init.InitOperation")
     def test_init_with_sudo_interaction(self, mock_init_op):
-        """Test init path with sudo prompt interaction (non-interactive skips)."""
+        """Test init path with sudo prompt interaction (gracefully continues when session group is not active)."""
         needs_interaction = MagicMock()
         needs_interaction.code = "privilege.sudo_required"
         needs_interaction.context = {}
@@ -74,7 +74,7 @@ class TestInit:
         ]
 
         result = runner.invoke(app, ["init", "--non-interactive"])
-        assert result.exit_code == 1
+        assert result.exit_code == 0
 
     def test_init_help(self):
         result = runner.invoke(app, ["init", "--help"])

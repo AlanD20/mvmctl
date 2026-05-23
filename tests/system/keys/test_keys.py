@@ -19,13 +19,13 @@ pytestmark = [pytest.mark.system, pytest.mark.domain_key]
 
 
 class TestKeyInspectTree:
-    """Test SSH key inspect with tree output format."""
+    """Test SSH key inspect with default output format."""
 
     def test_key_inspect_tree(self, mvm_binary, created_key):
-        """Inspect key with tree-style output."""
+        """Inspect key with default output format."""
         # Rationale: Uses created_key fixture. Read-only — tests the
-        # --tree output format for key inspect.
-        result = _run_mvm(mvm_binary, "key", "inspect", created_key, "--tree")
+        # default output format for key inspect.
+        result = _run_mvm(mvm_binary, "key", "inspect", created_key)
         assert result.returncode == 0
         assert "├──" in result.stdout or "└──" in result.stdout
 

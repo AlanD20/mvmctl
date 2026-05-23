@@ -351,6 +351,13 @@ def run_test_file(
             print(f"         {fl.strip()}")
         if len(fail_lines) > 5:
             print(f"         ... and {len(fail_lines) - 5} more")
+    elif status == "FAIL":
+        # Fallback: show last lines when FAILED lines weren't matched
+        tail = [l.strip() for l in lines[-10:] if l.strip()]
+        if tail:
+            print("       ── failure tail (last output) ──")
+            for tl in tail:
+                print(f"         {tl}")
     if status == "FAIL":
         # Show full failure context — assertion errors and traceback lines
         detail = [
@@ -480,6 +487,14 @@ def _run_pytest_level(
             print(f"         {fl.strip()}")
         if len(fail_lines) > 5:
             print(f"         ... and {len(fail_lines) - 5} more")
+    else:
+        # Fallback: if no FAILED lines matched (e.g. xdist/cov format variance),
+        # show the last lines of stdout to reveal the failure summary.
+        tail = [l.strip() for l in lines[-10:] if l.strip()]
+        if tail:
+            print("       ── failure tail (last output) ──")
+            for tl in tail:
+                print(f"         {tl}")
     if skip_lines:
         print(f"       Skipped: {len(skip_lines)}")
         for sl in skip_lines[:10]:
