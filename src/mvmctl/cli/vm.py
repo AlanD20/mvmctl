@@ -9,29 +9,14 @@ from typing import TYPE_CHECKING
 import typer
 from rich.console import Console
 
-from mvmctl.api import ConfigOperation as _ConfigOperation
-from mvmctl.api import VMCreateInput as _VMCreateInput
-from mvmctl.api import VMInput as _VMInput
-from mvmctl.api import VMOperation as _VMOperation
-from mvmctl.cli._completion import _complete_vm_names
-from mvmctl.models import VMStatus
-from mvmctl.models.result import NeedsInteraction, ProgressEvent
-
-if TYPE_CHECKING:
-    from mvmctl.api.config_operations import ConfigOperation
-    from mvmctl.api.inputs._vm_create_input import VMCreateInput
-    from mvmctl.api.inputs._vm_input import VMInput
-    from mvmctl.api.vm_operations import VMOperation
-else:
-    ConfigOperation = _ConfigOperation
-    VMOperation = _VMOperation
-    VMInput = _VMInput
-    VMCreateInput = _VMCreateInput
 from mvmctl.cli._common import (
     ListingColumn,
     render_listing,
     resolve_listing_style,
 )
+from mvmctl.cli._completion import _complete_vm_names
+from mvmctl.models import VMStatus
+from mvmctl.models.result import NeedsInteraction, ProgressEvent
 from mvmctl.utils.cli import handle_errors, mvm_cli
 
 if TYPE_CHECKING:
@@ -90,6 +75,8 @@ def vm_ls(
     ),
 ) -> None:
     """List all VMs."""
+    from mvmctl.api import VMOperation
+
     vms: list[VMInstanceItem] = VMOperation.list_all()
 
     if json_output:
@@ -108,6 +95,8 @@ def vm_ps(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """List running VMs (active processes)."""
+    from mvmctl.api import VMOperation
+
     active_vms = VMOperation.list_all(
         status=[VMStatus.STARTING, VMStatus.RUNNING]
     )
@@ -307,6 +296,8 @@ def vm_create(
     ),
 ) -> None:
     """Create and start a new Firecracker VM."""
+    from mvmctl.api import VMCreateInput, VMOperation
+
     if skip_cleanup:
         if not typer.confirm(
             "--skip-cleanup is set: if creation fails, resources will be left behind and must be cleaned manually. Continue?",
@@ -396,6 +387,8 @@ def vm_rm(
     force: bool = typer.Option(False, "--force", "-f", help="Force removal"),
 ) -> None:
     """Remove one or more VMs."""
+    from mvmctl.api import VMInput, VMOperation
+
     result = VMOperation.remove(
         VMInput(identifiers=list(identifiers), force=force)
     )
@@ -422,6 +415,8 @@ def vm_start(
     ),
 ) -> None:
     """Start a stopped VM."""
+    from mvmctl.api import VMInput, VMOperation
+
     result = VMOperation.start(VMInput(identifiers=[identifier]))
     if result.has_any_error:
         for r in result.items:
@@ -442,6 +437,8 @@ def vm_stop(
     force: bool = typer.Option(False, "--force", "-f", help="Force stop"),
 ) -> None:
     """Stop a running VM."""
+    from mvmctl.api import VMInput, VMOperation
+
     result = VMOperation.stop(VMInput(identifiers=[identifier], force=force))
     if result.has_any_error:
         for r in result.items:
@@ -462,6 +459,8 @@ def vm_reboot(
     force: bool = typer.Option(False, "--force", "-f", help="Force reboot"),
 ) -> None:
     """Reboot a VM."""
+    from mvmctl.api import VMInput, VMOperation
+
     result = VMOperation.reboot(VMInput(identifiers=[identifier], force=force))
     if result.has_any_error:
         for r in result.items:
@@ -481,6 +480,8 @@ def vm_pause(
     ),
 ) -> None:
     """Pause a running VM."""
+    from mvmctl.api import VMInput, VMOperation
+
     result = VMOperation.pause(VMInput(identifiers=[identifier]))
     if result.has_any_error:
         for r in result.items:
@@ -500,6 +501,8 @@ def vm_resume(
     ),
 ) -> None:
     """Resume a paused VM."""
+    from mvmctl.api import VMInput, VMOperation
+
     result = VMOperation.resume(VMInput(identifiers=[identifier]))
     if result.has_any_error:
         for r in result.items:
@@ -521,6 +524,8 @@ def vm_snapshot(
     state_file: Path = typer.Argument(..., help="State snapshot output path"),
 ) -> None:
     """Snapshot VM memory and disk state."""
+    from mvmctl.api import VMInput, VMOperation
+
     result = VMOperation.snapshot(
         VMInput(identifiers=[identifier]), mem_file, state_file
     )
@@ -545,6 +550,8 @@ def vm_load(
     ),
 ) -> None:
     """Load VM from snapshot."""
+    from mvmctl.api import VMInput, VMOperation
+
     VMOperation.load_snapshot(
         VMInput(identifiers=[identifier]),
         mem_file,
@@ -565,6 +572,8 @@ def vm_inspect(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """Show detailed information about a VM."""
+    from mvmctl.api import VMInput, VMOperation
+
     info = VMOperation.inspect(VMInput(identifiers=[identifier]))
 
     if json_output:
@@ -593,6 +602,8 @@ def vm_export(
     The exported config uses semantic references (type, version, name)
     instead of internal IDs, making it portable across machines.
     """
+    from mvmctl.api import VMInput, VMOperation
+
     config = VMOperation.export(VMInput(identifiers=[identifier]))
     json_output = json.dumps(config.to_dict(), indent=2)
 
@@ -612,6 +623,7 @@ def vm_import(
     ),
 ) -> None:
     """Create a VM from a portable config file."""
+    from mvmctl.api import VMOperation
     from mvmctl.api.inputs import VMImportInput
 
     result = VMOperation.import_(
@@ -638,6 +650,8 @@ def vm_attach_volume(
     volume_name: str = typer.Argument(..., help="Volume name"),
 ) -> None:
     """Attach a volume to a running VM."""
+    from mvmctl.api import VMInput, VMOperation
+
     result = VMOperation.attach_volume(
         VMInput(identifiers=[identifier]), volume_name
     )
@@ -658,6 +672,8 @@ def vm_detach_volume(
     volume_name: str = typer.Argument(..., help="Volume name"),
 ) -> None:
     """Detach a volume from a running VM."""
+    from mvmctl.api import VMInput, VMOperation
+
     result = VMOperation.detach_volume(
         VMInput(identifiers=[identifier]), volume_name
     )

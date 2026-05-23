@@ -2,17 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import typer
 from rich.console import Console
-
-from mvmctl.api import CacheOperation as _CacheOperation
-
-if TYPE_CHECKING:
-    from mvmctl.api.cache_operations import CacheOperation
-else:
-    CacheOperation = _CacheOperation
 
 from mvmctl.cli._completion import _complete_cache_resources
 from mvmctl.models.result import ProgressEvent
@@ -36,6 +27,8 @@ def help_cmd(ctx: typer.Context) -> None:
 @handle_errors
 def cache_init() -> None:
     """Initialize all cache resources."""
+    from mvmctl.api import CacheOperation
+
     console = Console()
     with console.status("", spinner="dots") as status:
 
@@ -102,6 +95,8 @@ def cache_prune(
         mvm cache prune --all --force          # Prune all without confirmation
 
     """
+    from mvmctl.api import CacheOperation
+
     if resource == "vm":
         if not force and not dry_run:
             mvm_cli.warning("This will remove cached data for all VMs")
@@ -343,6 +338,39 @@ def cache_clean(
         mvm cache clean --dry-run      # Preview what would be removed
         mvm cache clean --force        # Clean without confirmation
     """
+    from mvmctl.api import CacheOperation
+    from mvmctl.constants import CLI_NAME
+    from mvmctl.core.host._helper import HostPrivilegeHelper
+    from mvmctl.exceptions import PrivilegeError
+
+    # Check privileges early — before the destructive confirmation — so the
+    # user doesn't confirm an action they can't perform.  When the mvm group
+    # exists and the user is a member but the session doesn't have the group
+    # active, offer a sudo fallback instead of hard-failing.
+    try:
+        HostPrivilegeHelper.check_privileges("/usr/sbin/ip", "clean cache")
+    except PrivilegeError:
+        if HostPrivilegeHelper.session_has_group():
+            # Group is active but something else is wrong (missing binary, etc.)
+            raise
+        # Session doesn't have the group — offer sudo
+        if not typer.confirm(
+            "Elevated privileges required. Run with sudo instead?"
+        ):
+            raise typer.Exit()
+        import shutil
+        import sys
+
+        from mvmctl.utils._system import run_cmd
+
+        mvm_bin = shutil.which(CLI_NAME) or sys.argv[0]
+        run_cmd(
+            ["sudo", mvm_bin, "cache", "clean"],
+            capture=False,
+            check=False,
+        )
+        raise typer.Exit()
+
     if dry_run:
         mvm_cli.info("[DRY RUN] The following would be removed:")
         mvm_cli.info("  - ALL VMs (including RUNNING and STARTING)")

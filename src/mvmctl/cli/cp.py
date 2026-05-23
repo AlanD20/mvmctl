@@ -9,8 +9,6 @@ like ``--user`` / ``--key`` / ``--force`` from positional paths.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import click
 from rich.progress import (
     BarColumn,
@@ -21,12 +19,6 @@ from rich.progress import (
 )
 
 from mvmctl.utils.cli import handle_errors, mvm_cli
-
-if TYPE_CHECKING:
-    from mvmctl.api.cp_operations import CPOperation
-    from mvmctl.api.inputs._cp_input import CPInput
-else:
-    from mvmctl.api import CPInput, CPOperation
 
 
 @click.command(name="cp")
@@ -68,6 +60,8 @@ def cp_app(
     The last positional argument is always the destination. Everything
     before it is a source. Multiple sources only work for host → VM.
     """
+    from mvmctl.api import CPInput, CPOperation
+
     args_list = list(args)
 
     if len(args_list) < 2:

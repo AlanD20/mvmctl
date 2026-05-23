@@ -3,33 +3,18 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 import typer
 from rich.console import Console
 
-from mvmctl.api import BinaryInput as _BinaryInput
-from mvmctl.api import BinaryOperation as _BinaryOperation
-from mvmctl.api import BinaryPullInput as _BinaryPullInput
-from mvmctl.api import ConfigOperation as _ConfigOperation
-from mvmctl.models import BinaryItem
-
-if TYPE_CHECKING:
-    from mvmctl.api.binary_operations import BinaryOperation
-    from mvmctl.api.config_operations import ConfigOperation
-    from mvmctl.api.inputs._binary_input import BinaryInput
-    from mvmctl.api.inputs._binary_pull_input import BinaryPullInput
-else:
-    BinaryOperation = _BinaryOperation
-    BinaryPullInput = _BinaryPullInput
-    BinaryInput = _BinaryInput
-    ConfigOperation = _ConfigOperation
 from mvmctl.cli._common import (
     ListingColumn,
     render_listing,
     resolve_listing_style,
 )
 from mvmctl.cli._completion import _complete_binary_versions
+from mvmctl.models import BinaryItem
 from mvmctl.models.result import OperationResult
 from mvmctl.utils.cli import handle_errors, mvm_cli
 
@@ -72,6 +57,8 @@ def bin_ls(
     ),
 ) -> None:
     """List local (and optionally remote) Firecracker versions."""
+    from mvmctl.api import BinaryOperation
+
     local = cast(list[BinaryItem], BinaryOperation.list_all())
     local_versions = {b.version for b in local if b.name == "firecracker"}
 
@@ -149,6 +136,7 @@ def bin_pull(
     ),
 ) -> None:
     """Download a Firecracker version or build from source."""
+    from mvmctl.api import BinaryOperation, BinaryPullInput
     from mvmctl.exceptions import BinaryAlreadyExistsError
 
     # Only firecracker is supported for download/build
@@ -183,7 +171,7 @@ def bin_pull(
             set_default=set_default,
             download_override=False,
         )
-        result: OperationResult[list[BinaryItem]] = BinaryOperation.pull(inputs)  # type: ignore[assignment]
+        result: OperationResult[list[BinaryItem]] = BinaryOperation.pull(inputs)
 
         mvm_cli.info("")  # spacing after build output
 
@@ -214,7 +202,7 @@ def bin_pull(
         set_default=set_default,
         download_override=force,
     )
-    result = BinaryOperation.pull(inputs)  # type: ignore[assignment]
+    result = BinaryOperation.pull(inputs)
 
     # If binary already exists and --force wasn't set, offer to re-download
     if (
@@ -225,7 +213,7 @@ def bin_pull(
         mvm_cli.warning(result.message)
         if typer.confirm("Re-download?", default=False):
             inputs.download_override = True
-            result = BinaryOperation.pull(inputs)  # type: ignore[assignment]
+            result = BinaryOperation.pull(inputs)
         else:
             mvm_cli.info("Aborted")
             raise typer.Exit(code=0)
@@ -278,6 +266,8 @@ def bin_rm(
     ),
 ) -> None:
     """Remove one or more binaries. Use --version to remove by version pair."""
+    from mvmctl.api import BinaryInput, BinaryOperation
+
     if version is not None:
         result = BinaryOperation.remove_by_version(version, force=force)
         if result.is_error:
@@ -316,6 +306,8 @@ def bin_default(
     ),
 ) -> None:
     """Set a binary as the active default."""
+    from mvmctl.api import BinaryInput, BinaryOperation
+
     inputs = BinaryInput(identifiers=[identifier])
     result = BinaryOperation.set_default(inputs)
 

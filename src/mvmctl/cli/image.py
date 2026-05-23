@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 import typer
 from rich.console import Console
 
-from mvmctl.api import ConfigOperation as _ConfigOperation
-from mvmctl.api import ImageImportInput as _ImageImportInput
-from mvmctl.api import ImageInput as _ImageInput
-from mvmctl.api import ImageOperation as _ImageOperation
-from mvmctl.api import ImagePullInput as _ImagePullInput
+from mvmctl.cli._common import (
+    ListingColumn,
+    render_listing,
+    resolve_listing_style,
+)
 from mvmctl.cli._completion import (
     _complete_local_image_ids,
     _complete_remote_image_ids,
@@ -23,26 +23,6 @@ from mvmctl.models import ImageItem, ImageVersion
 from mvmctl.models.result import (
     NeedsInteraction,
     ProgressEvent,
-)
-
-if TYPE_CHECKING:
-    from mvmctl.api.config_operations import ConfigOperation
-    from mvmctl.api.image_operations import ImageOperation
-    from mvmctl.api.inputs._image_acquire_input import (
-        ImageImportInput,
-        ImagePullInput,
-    )
-    from mvmctl.api.inputs._image_input import ImageInput
-else:
-    ConfigOperation = _ConfigOperation
-    ImageOperation = _ImageOperation
-    ImagePullInput = _ImagePullInput
-    ImageImportInput = _ImageImportInput
-    ImageInput = _ImageInput
-from mvmctl.cli._common import (
-    ListingColumn,
-    render_listing,
-    resolve_listing_style,
 )
 from mvmctl.utils.cli import handle_errors, mvm_cli
 
@@ -98,6 +78,8 @@ def image_ls(
     ),
 ) -> None:
     """List cached images (or available remote images with --remote)."""
+    from mvmctl.api import ImageOperation
+
     if remote:
         with Console().status("Fetching remote images"):
             result = ImageOperation.list_all(
@@ -256,6 +238,8 @@ def image_pull(
     ),
 ) -> None:
     """Download an image by its ID. Run 'mvm image ls -r' to list available image IDs."""
+    from mvmctl.api import ImageOperation, ImagePullInput
+
     disabled_detectors = (
         [n.strip() for n in disable_detector.split(",") if n.strip()]
         if disable_detector
@@ -316,6 +300,8 @@ def image_set_default(
     ),
 ) -> None:
     """Set the default image for VM creation."""
+    from mvmctl.api import ImageInput, ImageOperation
+
     result = ImageOperation.set_default(ImageInput(id=[prefix]))
     if result.is_error:
         mvm_cli.error(result.message or f"Set default failed: {prefix}")
@@ -351,6 +337,8 @@ def image_rm(
         mvm_cli.error("Provide at least one image ID prefix")
         raise typer.Exit(code=1)
 
+    from mvmctl.api import ImageInput, ImageOperation
+
     result = ImageOperation.remove(ImageInput(id=effective_ids), force)
     for r in result.items:
         item_id = mvm_cli.format_id(r.item.id) if r.item else "unknown"
@@ -378,6 +366,8 @@ def image_inspect(
         mvm image inspect abc123 --json
 
     """
+    from mvmctl.api import ImageInput, ImageOperation
+
     info = ImageOperation.inspect(ImageInput(id=[prefix]))
 
     if json_output:
@@ -426,6 +416,7 @@ def image_import(
     ),
 ) -> None:
     """Import a local image file (qcow2, raw, tar-rootfs). The first argument is a display name."""
+    from mvmctl.api import ImageImportInput, ImageOperation
 
     if not source_path.exists():
         mvm_cli.error(f"Source file not found: {source_path}")
@@ -525,6 +516,8 @@ def image_warm(
         mvm image warm --all
 
     """
+    from mvmctl.api import ImageInput, ImageOperation
+
     console = Console()
     with console.status("", spinner="dots") as status:
 

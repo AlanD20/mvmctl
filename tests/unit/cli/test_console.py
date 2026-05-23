@@ -16,7 +16,7 @@ runner = CliRunner()
 class TestConsoleState:
     """Tests for 'console --state' command."""
 
-    @patch("mvmctl.cli.console.ConsoleOperation")
+    @patch("mvmctl.api.ConsoleOperation")
     def test_console_state_running(self, mock_console_op):
         mock_console_op.get_state.return_value = {
             "running": True,
@@ -28,7 +28,7 @@ class TestConsoleState:
         assert "running" in result.output
         assert "12345" in result.output
 
-    @patch("mvmctl.cli.console.ConsoleOperation")
+    @patch("mvmctl.api.ConsoleOperation")
     def test_console_state_stopped(self, mock_console_op):
         mock_console_op.get_state.return_value = {
             "running": False,
@@ -43,7 +43,7 @@ class TestConsoleState:
 class TestConsoleKill:
     """Tests for 'console --kill' command."""
 
-    @patch("mvmctl.cli.console.ConsoleOperation")
+    @patch("mvmctl.api.ConsoleOperation")
     def test_console_kill_success(self, mock_console_op):
         mock_console_op.kill.return_value = OperationResult(
             status="success", code="console.killed"
@@ -52,7 +52,7 @@ class TestConsoleKill:
         assert result.exit_code == 0
         assert "stopped" in result.output.lower()
 
-    @patch("mvmctl.cli.console.ConsoleOperation")
+    @patch("mvmctl.api.ConsoleOperation")
     def test_console_kill_not_running(self, mock_console_op):
         mock_console_op.kill.return_value = OperationResult(
             status="skipped", code="console.not_running"
@@ -61,7 +61,7 @@ class TestConsoleKill:
         assert result.exit_code == 1
         assert "Console relay not running" in result.output
 
-    @patch("mvmctl.cli.console.ConsoleOperation")
+    @patch("mvmctl.api.ConsoleOperation")
     def test_console_kill_not_found(self, mock_console_op):
         mock_console_op.kill.side_effect = MVMError("VM not found")
         result = runner.invoke(app, ["console", "nonexistent", "--kill"])
@@ -76,7 +76,7 @@ class TestConsoleAttach:
     @patch("mvmctl.cli.console.termios.tcsetattr")
     @patch("mvmctl.cli.console._interact")
     @patch("mvmctl.cli.console._connect_socket")
-    @patch("mvmctl.cli.console.ConsoleOperation")
+    @patch("mvmctl.api.ConsoleOperation")
     def test_console_attach_no_terminal(
         self,
         mock_console_op,
@@ -99,7 +99,7 @@ class TestConsoleAttach:
             _attach_to_console("testvm")
         mock_connect.assert_called_once()
 
-    @patch("mvmctl.cli.console.ConsoleOperation")
+    @patch("mvmctl.api.ConsoleOperation")
     def test_console_attach_not_found(self, mock_console_op):
         mock_console_op.get_connection_info.side_effect = MVMError(
             "VM not found"
@@ -140,28 +140,28 @@ class TestConsoleCallbackEdgeCases:
         assert result.exit_code == 2
 
     @patch("mvmctl.cli.console._attach_to_console")
-    @patch("mvmctl.cli.console.ConsoleOperation")
+    @patch("mvmctl.api.ConsoleOperation")
     def test_console_attach_by_ip(self, mock_console_op, mock_attach):
         result = runner.invoke(app, ["console", "10.0.0.5"])
         assert result.exit_code == 0
         mock_attach.assert_called_once_with("10.0.0.5")
 
     @patch("mvmctl.cli.console._attach_to_console")
-    @patch("mvmctl.cli.console.ConsoleOperation")
+    @patch("mvmctl.api.ConsoleOperation")
     def test_console_attach_by_mac(self, mock_console_op, mock_attach):
         result = runner.invoke(app, ["console", "aa:bb:cc:dd:ee:ff"])
         assert result.exit_code == 0
         mock_attach.assert_called_once_with("aa:bb:cc:dd:ee:ff")
 
     @patch("mvmctl.cli.console._attach_to_console")
-    @patch("mvmctl.cli.console.ConsoleOperation")
+    @patch("mvmctl.api.ConsoleOperation")
     def test_console_attach_positional(self, mock_console_op, mock_attach):
         result = runner.invoke(app, ["console", "testvm"])
         assert result.exit_code == 0
         mock_attach.assert_called_once_with("testvm")
 
     @patch("mvmctl.cli.console._attach_to_console")
-    @patch("mvmctl.cli.console.ConsoleOperation")
+    @patch("mvmctl.api.ConsoleOperation")
     def test_console_attach_via_name_cli(self, mock_console_op, mock_attach):
         runner.invoke(app, ["console", "testvm"])
 
@@ -169,7 +169,7 @@ class TestConsoleCallbackEdgeCases:
 class TestConsoleKillExtras:
     """Extended kill tests."""
 
-    @patch("mvmctl.cli.console.ConsoleOperation")
+    @patch("mvmctl.api.ConsoleOperation")
     def test_console_kill_error_status(self, mock_console_op):
         mock_console_op.kill.return_value = OperationResult(
             status="error",
@@ -184,7 +184,7 @@ class TestConsoleKillExtras:
 class TestConsoleAttachErrorPaths:
     """Attach error paths."""
 
-    @patch("mvmctl.cli.console.ConsoleOperation")
+    @patch("mvmctl.api.ConsoleOperation")
     def test_attach_socket_connect_fail(self, mock_console_op):
         mock_console_op.get_connection_info.return_value = MagicMock(
             socket_path="/tmp/test.sock",

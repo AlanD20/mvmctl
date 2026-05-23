@@ -15,7 +15,7 @@ runner = CliRunner()
 class TestConfigGet:
     """Tests for 'config get' command."""
 
-    @patch("mvmctl.cli.config.ConfigOperation")
+    @patch("mvmctl.api.ConfigOperation")
     def test_get_value(self, mock_cfg_op):
         mock_cfg_op.get.return_value = "eth0"
         result = runner.invoke(
@@ -24,7 +24,7 @@ class TestConfigGet:
         assert result.exit_code == 0
         assert "eth0" in result.output
 
-    @patch("mvmctl.cli.config.ConfigOperation")
+    @patch("mvmctl.api.ConfigOperation")
     def test_get_not_set(self, mock_cfg_op):
         mock_cfg_op.get.return_value = None
         result = runner.invoke(
@@ -32,7 +32,7 @@ class TestConfigGet:
         )
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.config.ConfigOperation")
+    @patch("mvmctl.api.ConfigOperation")
     def test_get_section(self, mock_cfg_op):
         mock_cfg_op.get.return_value = {
             "vcpu_count": {
@@ -53,7 +53,7 @@ class TestConfigGet:
 class TestConfigSet:
     """Tests for 'config set' command."""
 
-    @patch("mvmctl.cli.config.ConfigOperation")
+    @patch("mvmctl.api.ConfigOperation")
     def test_set_value(self, mock_cfg_op):
         mock_cfg_op.set.return_value = OperationResult(
             status="success", code="config.set", message="Configuration updated"
@@ -64,7 +64,7 @@ class TestConfigSet:
         assert result.exit_code == 0
         assert "Configuration updated" in result.output
 
-    @patch("mvmctl.cli.config.ConfigOperation")
+    @patch("mvmctl.api.ConfigOperation")
     def test_set_invalid_key(self, mock_cfg_op):
         mock_cfg_op.set.side_effect = ValueError("bad key")
         result = runner.invoke(
@@ -80,7 +80,7 @@ class TestConfigSet:
 class TestConfigList:
     """Tests for 'config ls' command."""
 
-    @patch("mvmctl.cli.config.ConfigOperation")
+    @patch("mvmctl.api.ConfigOperation")
     def test_list_settings(self, mock_cfg_op):
         mock_cfg_op.list_all.return_value = {
             "defaults.vm": {
@@ -94,7 +94,7 @@ class TestConfigList:
         assert "vcpu_count" in result.output
         assert "1024" in result.output
 
-    @patch("mvmctl.cli.config.ConfigOperation")
+    @patch("mvmctl.api.ConfigOperation")
     def test_list_empty(self, mock_cfg_op):
         mock_cfg_op.list_all.return_value = {}
         result = runner.invoke(app, ["config", "ls"])
@@ -108,7 +108,7 @@ class TestConfigList:
 class TestConfigReset:
     """Tests for 'config reset' command."""
 
-    @patch("mvmctl.cli.config.ConfigOperation")
+    @patch("mvmctl.api.ConfigOperation")
     def test_reset_key(self, mock_cfg_op):
         mock_cfg_op.reset.return_value = OperationResult(
             status="success", code="config.reset", item=1
@@ -119,7 +119,7 @@ class TestConfigReset:
         assert result.exit_code == 0
         assert "Reset" in result.output
 
-    @patch("mvmctl.cli.config.ConfigOperation")
+    @patch("mvmctl.api.ConfigOperation")
     def test_reset_category(self, mock_cfg_op):
         mock_cfg_op.reset.return_value = OperationResult(
             status="success", code="config.reset", item=3
@@ -127,7 +127,7 @@ class TestConfigReset:
         result = runner.invoke(app, ["config", "reset", "defaults.vm"])
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.config.ConfigOperation")
+    @patch("mvmctl.api.ConfigOperation")
     def test_reset_all(self, mock_cfg_op):
         mock_cfg_op.reset.return_value = OperationResult(
             status="success", code="config.reset", item=5
@@ -135,7 +135,7 @@ class TestConfigReset:
         result = runner.invoke(app, ["config", "reset", "--all"])
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.config.ConfigOperation")
+    @patch("mvmctl.api.ConfigOperation")
     def test_reset_no_args(self, mock_cfg_op):
         result = runner.invoke(app, ["config", "reset"])
         assert result.exit_code == 0

@@ -42,13 +42,13 @@ def _make_network(
 class TestNetworkLs:
     """Tests for 'network ls' command."""
 
-    @patch("mvmctl.cli.network.NetworkOperation")
+    @patch("mvmctl.api.NetworkOperation")
     def test_ls_empty(self, mock_net_op):
         mock_net_op.list_all.return_value = []
         result = runner.invoke(app, ["network", "ls"])
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.network.NetworkOperation")
+    @patch("mvmctl.api.NetworkOperation")
     def test_ls_with_networks(self, mock_net_op):
         mock_net_op.list_all.return_value = [
             _make_network("testnet"),
@@ -59,7 +59,7 @@ class TestNetworkLs:
         assert "testnet" in result.output
         assert "default" in result.output
 
-    @patch("mvmctl.cli.network.NetworkOperation")
+    @patch("mvmctl.api.NetworkOperation")
     def test_ls_json(self, mock_net_op):
         mock_net_op.to_json.return_value = [
             {
@@ -75,7 +75,7 @@ class TestNetworkLs:
         assert len(data) == 1
         assert data[0]["name"] == "testnet"
 
-    @patch("mvmctl.cli.network.NetworkOperation")
+    @patch("mvmctl.api.NetworkOperation")
     def test_ls_with_leases(self, mock_net_op):
         net = _make_network("testnet")
         net.leases = [
@@ -97,7 +97,7 @@ class TestNetworkLs:
 class TestNetworkCreate:
     """Tests for 'network create' command."""
 
-    @patch("mvmctl.cli.network.NetworkOperation")
+    @patch("mvmctl.api.NetworkOperation")
     @patch("mvmctl.cli.network.NetworkUtils.get_physical_interfaces")
     def test_create_success(self, mock_ifaces, mock_net_op):
         mock_ifaces.return_value = ["eth0"]
@@ -121,14 +121,14 @@ class TestNetworkCreate:
         assert result.exit_code == 0
         assert "created" in result.output.lower()
 
-    @patch("mvmctl.cli.network.NetworkOperation")
+    @patch("mvmctl.api.NetworkOperation")
     @patch("mvmctl.cli.network.NetworkUtils.get_physical_interfaces")
     def test_create_missing_subnet(self, mock_ifaces, mock_net_op):
         mock_ifaces.return_value = ["eth0"]
         result = runner.invoke(app, ["network", "create", "testnet"])
         assert result.exit_code == 1
 
-    @patch("mvmctl.cli.network.NetworkOperation")
+    @patch("mvmctl.api.NetworkOperation")
     def test_create_missing_name(self, mock_net_op):
         result = runner.invoke(app, ["network", "create"])
         assert result.exit_code == 1  # Shows help with error when no args
@@ -141,25 +141,25 @@ class TestNetworkCreate:
 class TestNetworkRemove:
     """Tests for 'network rm' command."""
 
-    @patch("mvmctl.cli.network.NetworkOperation")
+    @patch("mvmctl.api.NetworkOperation")
     def test_rm_success(self, mock_net_op):
         mock_net_op.remove.return_value = MagicMock(status="success")
         result = runner.invoke(app, ["network", "rm", "testnet"])
         assert result.exit_code == 0
         assert "removed" in result.output.lower()
 
-    @patch("mvmctl.cli.network.NetworkOperation")
+    @patch("mvmctl.api.NetworkOperation")
     def test_rm_multiple(self, mock_net_op):
         mock_net_op.remove.return_value = MagicMock(status="success")
         result = runner.invoke(app, ["network", "rm", "net1", "net2"])
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.network.NetworkOperation")
+    @patch("mvmctl.api.NetworkOperation")
     def test_rm_no_name(self, mock_net_op):
         result = runner.invoke(app, ["network", "rm"])
         assert result.exit_code == 1
 
-    @patch("mvmctl.cli.network.NetworkOperation")
+    @patch("mvmctl.api.NetworkOperation")
     def test_rm_api_error(self, mock_net_op):
         mock_net_op.remove.side_effect = NetworkError("not found")
         result = runner.invoke(app, ["network", "rm", "nonexistent"])
@@ -174,7 +174,7 @@ class TestNetworkRemove:
 class TestNetworkInspect:
     """Tests for 'network inspect' command."""
 
-    @patch("mvmctl.cli.network.NetworkOperation")
+    @patch("mvmctl.api.NetworkOperation")
     def test_inspect_success(self, mock_net_op):
         net = _make_network("testnet")
         mock_net_op.inspect.return_value = {
@@ -205,7 +205,7 @@ class TestNetworkInspect:
         assert "testnet" in result.output
         assert "192.168.100.0/24" in result.output
 
-    @patch("mvmctl.cli.network.NetworkOperation")
+    @patch("mvmctl.api.NetworkOperation")
     def test_inspect_json(self, mock_net_op):
         mock_net_op.inspect.return_value = {
             "name": "testnet",
@@ -216,7 +216,7 @@ class TestNetworkInspect:
         data = json.loads(result.output)
         assert data["name"] == "testnet"
 
-    @patch("mvmctl.cli.network.NetworkOperation")
+    @patch("mvmctl.api.NetworkOperation")
     def test_inspect_not_found(self, mock_net_op):
         mock_net_op.inspect.side_effect = NetworkError("not found")
         result = runner.invoke(app, ["network", "inspect", "nonexistent"])
@@ -230,19 +230,19 @@ class TestNetworkInspect:
 class TestNetworkSetDefault:
     """Tests for 'network set-default' command."""
 
-    @patch("mvmctl.cli.network.NetworkOperation")
+    @patch("mvmctl.api.NetworkOperation")
     def test_set_default_success(self, mock_net_op):
         mock_net_op.set_default.return_value = MagicMock(status="success")
         result = runner.invoke(app, ["network", "default", "mynet"])
         assert result.exit_code == 0
         assert "mynet" in result.output
 
-    @patch("mvmctl.cli.network.NetworkOperation")
+    @patch("mvmctl.api.NetworkOperation")
     def test_set_default_no_args(self, mock_net_op):
         result = runner.invoke(app, ["network", "default"])
         assert result.exit_code == 1
 
-    @patch("mvmctl.cli.network.NetworkOperation")
+    @patch("mvmctl.api.NetworkOperation")
     def test_set_default_api_error(self, mock_net_op):
         mock_net_op.set_default.side_effect = NetworkError("no such network")
         result = runner.invoke(app, ["network", "default", "missing"])
@@ -252,7 +252,7 @@ class TestNetworkSetDefault:
 class TestNetworkSync:
     """Tests for 'network sync' command."""
 
-    @patch("mvmctl.cli.network.NetworkOperation")
+    @patch("mvmctl.api.NetworkOperation")
     def test_sync_all(self, mock_net_op):
         test_id = "a" * 64
         mock_net_op.list_all.return_value = [
@@ -278,7 +278,7 @@ class TestNetworkSync:
         result = runner.invoke(app, ["network", "sync"])
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.network.NetworkOperation")
+    @patch("mvmctl.api.NetworkOperation")
     def test_sync_json(self, mock_net_op):
         test_id = "b" * 64
         mock_net_op.list_all.return_value = [

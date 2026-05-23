@@ -15,7 +15,7 @@ runner = CliRunner()
 class TestSSH:
     """Tests for 'ssh' command."""
 
-    @patch("mvmctl.cli.ssh.SSHOperation")
+    @patch("mvmctl.api.SSHOperation")
     def test_ssh_success(self, mock_ssh_op):
         mock_ssh_op.connect.return_value = OperationResult(
             status="success", code="ssh.connected", item=0
@@ -23,7 +23,7 @@ class TestSSH:
         result = runner.invoke(app, ["ssh", "myvm"])
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.ssh.SSHOperation")
+    @patch("mvmctl.api.SSHOperation")
     def test_ssh_failure(self, mock_ssh_op):
         mock_ssh_op.connect.return_value = OperationResult(
             status="error",
@@ -34,7 +34,7 @@ class TestSSH:
         result = runner.invoke(app, ["ssh", "badvm"])
         assert result.exit_code == 1
 
-    @patch("mvmctl.cli.ssh.SSHOperation")
+    @patch("mvmctl.api.SSHOperation")
     def test_ssh_with_user(self, mock_ssh_op):
         mock_ssh_op.connect.return_value = OperationResult(
             status="success", code="ssh.connected", item=0
@@ -44,7 +44,7 @@ class TestSSH:
         call_input = mock_ssh_op.connect.call_args[0][0]
         assert call_input.user == "admin"
 
-    @patch("mvmctl.cli.ssh.SSHOperation")
+    @patch("mvmctl.api.SSHOperation")
     def test_ssh_with_cmd(self, mock_ssh_op):
         mock_ssh_op.connect.return_value = OperationResult(
             status="success", code="ssh.connected", item=0
@@ -54,7 +54,7 @@ class TestSSH:
         call_input = mock_ssh_op.connect.call_args[0][0]
         assert call_input.cmd == "ls -la"
 
-    @patch("mvmctl.cli.ssh.SSHOperation")
+    @patch("mvmctl.api.SSHOperation")
     def test_ssh_with_key(self, mock_ssh_op, tmp_path):
         mock_ssh_op.connect.return_value = OperationResult(
             status="success", code="ssh.connected", item=0
@@ -66,7 +66,7 @@ class TestSSH:
         call_input = mock_ssh_op.connect.call_args[0][0]
         assert str(call_input.key) == str(key_file)
 
-    @patch("mvmctl.cli.ssh.SSHOperation")
+    @patch("mvmctl.api.SSHOperation")
     def test_ssh_with_ip(self, mock_ssh_op):
         mock_ssh_op.connect.return_value = OperationResult(
             status="success", code="ssh.connected", item=0
@@ -74,7 +74,7 @@ class TestSSH:
         result = runner.invoke(app, ["ssh", "10.0.0.2"])
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.ssh.SSHOperation")
+    @patch("mvmctl.api.SSHOperation")
     def test_ssh_with_identifier(self, mock_ssh_op):
         mock_ssh_op.connect.return_value = OperationResult(
             status="success", code="ssh.connected", item=0

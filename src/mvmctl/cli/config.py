@@ -2,17 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import typer
 from rich.markup import escape
 
-from mvmctl.api import ConfigOperation as _ConfigOperation
-
-if TYPE_CHECKING:
-    from mvmctl.api.config_operations import ConfigOperation
-else:
-    ConfigOperation = _ConfigOperation
 from mvmctl.cli._completion import (
     _complete_config_categories,
     _complete_config_keys,
@@ -41,6 +33,8 @@ def config_get(
     ),
 ) -> None:
     """Get a config value."""
+    from mvmctl.api import ConfigOperation
+
     value = ConfigOperation.get(category, key)
     if isinstance(value, dict):
         for k, info in value.items():
@@ -77,6 +71,8 @@ def config_set(
     value: str = typer.Argument(..., help="New value"),
 ) -> None:
     """Set a config value."""
+    from mvmctl.api import ConfigOperation
+
     result = ConfigOperation.set(category, key, value)
     if result.is_error:
         mvm_cli.error(result.message)
@@ -98,6 +94,8 @@ def config_reset(
     ),
 ) -> None:
     """Reset a config value to its default."""
+    from mvmctl.api import ConfigOperation
+
     if all_overrides:
         result = ConfigOperation.reset(all_overrides=True)
         if result.is_error:
@@ -127,6 +125,8 @@ def config_reset(
 @handle_errors
 def config_ls() -> None:
     """List all overridable settings and their current values."""
+    from mvmctl.api import ConfigOperation
+
     settings = ConfigOperation.list_all()
     for category, keys in settings.items():
         mvm_cli.info(escape(f"\n[{category}]"))

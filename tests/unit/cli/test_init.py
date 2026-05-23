@@ -33,21 +33,21 @@ def _make_init_result(
 class TestInit:
     """Tests for 'init' command."""
 
-    @patch("mvmctl.cli.init.InitOperation")
+    @patch("mvmctl.api.InitOperation")
     def test_init_success(self, mock_init_op):
         mock_init_op.run.return_value = _make_init_result(host_ready=True)
         result = runner.invoke(app, ["init", "--non-interactive"])
         assert result.exit_code == 0
         assert "all set" in result.output
 
-    @patch("mvmctl.cli.init.InitOperation")
+    @patch("mvmctl.api.InitOperation")
     def test_init_host_not_ready(self, mock_init_op):
         mock_init_op.run.return_value = _make_init_result(host_ready=False)
         result = runner.invoke(app, ["init", "--non-interactive"])
         assert result.exit_code == 1
         assert "incomplete" in result.output.lower()
 
-    @patch("mvmctl.cli.init.InitOperation")
+    @patch("mvmctl.api.InitOperation")
     def test_init_with_skip_host(self, mock_init_op):
         mock_init_op.run.return_value = _make_init_result(host_ready=True)
         result = runner.invoke(
@@ -55,7 +55,7 @@ class TestInit:
         )
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.init.InitOperation")
+    @patch("mvmctl.api.InitOperation")
     def test_init_with_sudo_interaction(self, mock_init_op):
         """Test init path with sudo prompt interaction (gracefully continues when session group is not active)."""
         needs_interaction = MagicMock()
@@ -159,7 +159,7 @@ class TestInitHelpers:
 class TestInitStepDisplay:
     """Tests for init step result display."""
 
-    @patch("mvmctl.cli.init.InitOperation")
+    @patch("mvmctl.api.InitOperation")
     def test_step_failure(self, mock_init_op):
         steps = [
             InitStepResult(
@@ -183,7 +183,7 @@ class TestInitStepDisplay:
         assert "sudoers / mvm group" in result.output
         assert "incomplete" in result.output.lower()
 
-    @patch("mvmctl.cli.init.InitOperation")
+    @patch("mvmctl.api.InitOperation")
     def test_missing_steps(self, mock_init_op):
         steps = [
             InitStepResult(step="local_state", success=True, message="Started"),
@@ -195,7 +195,7 @@ class TestInitStepDisplay:
         assert result.exit_code == 1
         assert "not checked" in result.output
 
-    @patch("mvmctl.cli.init.InitOperation")
+    @patch("mvmctl.api.InitOperation")
     def test_unknown_step_key(self, mock_init_op):
         steps = [
             InitStepResult(step="unknown_step", success=True, message="Done"),
@@ -213,7 +213,7 @@ class TestInitInteractiveFlow:
     @patch("mvmctl.cli.init._run_with_sudo")
     @patch("mvmctl.cli.init._check_host_state")
     @patch("mvmctl.cli.init.typer.confirm")
-    @patch("mvmctl.cli.init.InitOperation")
+    @patch("mvmctl.api.InitOperation")
     def test_sudo_flow_approved(
         self,
         mock_init_op,
@@ -254,7 +254,7 @@ class TestInitInteractiveFlow:
 
     @patch("mvmctl.cli.init._check_host_state")
     @patch("mvmctl.cli.init.typer.confirm")
-    @patch("mvmctl.cli.init.InitOperation")
+    @patch("mvmctl.api.InitOperation")
     def test_sudo_flow_declined(
         self,
         mock_init_op,
@@ -284,7 +284,7 @@ class TestInitInteractiveFlow:
     @patch("mvmctl.cli.init._run_with_sudo")
     @patch("mvmctl.cli.init._check_host_state")
     @patch("mvmctl.cli.init.typer.confirm")
-    @patch("mvmctl.cli.init.InitOperation")
+    @patch("mvmctl.api.InitOperation")
     def test_sudo_flow_subprocess_fails(
         self,
         mock_init_op,
@@ -314,7 +314,7 @@ class TestInitInteractiveFlow:
         assert "host init failed" in result.output
 
     @patch("mvmctl.cli.init.typer.confirm")
-    @patch("mvmctl.cli.init.InitOperation")
+    @patch("mvmctl.api.InitOperation")
     def test_binary_download_approved(
         self,
         mock_init_op,
@@ -343,7 +343,7 @@ class TestInitInteractiveFlow:
         assert "downloading" in result.output
 
     @patch("mvmctl.cli.init.typer.confirm")
-    @patch("mvmctl.cli.init.InitOperation")
+    @patch("mvmctl.api.InitOperation")
     def test_binary_download_declined(
         self,
         mock_init_op,
@@ -364,7 +364,7 @@ class TestInitInteractiveFlow:
         assert result.exit_code == 1
         assert "skipped" in result.output
 
-    @patch("mvmctl.cli.init.InitOperation")
+    @patch("mvmctl.api.InitOperation")
     def test_binary_download_no_version(self, mock_init_op):
         needs_bin = MagicMock()
         needs_bin.code = "binary.confirm_download"
@@ -381,7 +381,7 @@ class TestInitInteractiveFlow:
         assert "no firecracker binary" in result.output.lower()
         assert "remote versions" in result.output
 
-    @patch("mvmctl.cli.init.InitOperation")
+    @patch("mvmctl.api.InitOperation")
     def test_unknown_interaction(self, mock_init_op):
         needs_unknown = MagicMock()
         needs_unknown.code = "some.random.code"

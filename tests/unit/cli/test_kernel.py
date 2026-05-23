@@ -39,7 +39,7 @@ def _make_kernel(
 class TestKernelLs:
     """Tests for 'kernel ls' command."""
 
-    @patch("mvmctl.cli.kernel.KernelOperation")
+    @patch("mvmctl.api.KernelOperation")
     def test_ls_empty(self, mock_krn_op):
         mock_krn_op.list_all.return_value = []
         result = runner.invoke(app, ["kernel", "ls"])
@@ -48,7 +48,7 @@ class TestKernelLs:
         assert "ID" in result.output
         assert "Name" in result.output
 
-    @patch("mvmctl.cli.kernel.KernelOperation")
+    @patch("mvmctl.api.KernelOperation")
     def test_ls_with_kernels(self, mock_krn_op):
         mock_krn_op.list_all.return_value = [
             _make_kernel("vmlinux-6.1.0"),
@@ -59,7 +59,7 @@ class TestKernelLs:
         assert "vmlinux-6.1.0" in result.output
         assert "vmlinux-5.15.0" in result.output
 
-    @patch("mvmctl.cli.kernel.KernelOperation")
+    @patch("mvmctl.api.KernelOperation")
     def test_ls_json(self, mock_krn_op):
         mock_krn_op.list_all.return_value = [_make_kernel("vmlinux-6.1.0")]
         result = runner.invoke(app, ["kernel", "ls", "--json"])
@@ -75,7 +75,7 @@ class TestKernelLs:
 class TestKernelPull:
     """Tests for 'kernel pull' command."""
 
-    @patch("mvmctl.cli.kernel.KernelOperation")
+    @patch("mvmctl.api.KernelOperation")
     def test_pull_success(self, mock_krn_op):
         mock_krn_op.pull.return_value = OperationResult(
             status="success",
@@ -94,7 +94,7 @@ class TestKernelPull:
         assert result.exit_code == 0
         assert "pulled" in result.output.lower()
 
-    @patch("mvmctl.cli.kernel.KernelOperation")
+    @patch("mvmctl.api.KernelOperation")
     def test_pull_with_version_and_arch(self, mock_krn_op):
         mock_krn_op.pull.return_value = OperationResult(
             status="success",
@@ -119,7 +119,7 @@ class TestKernelPull:
         assert call_input.version == "6.1.0"
         assert call_input.arch == "x86_64"
 
-    @patch("mvmctl.cli.kernel.KernelOperation")
+    @patch("mvmctl.api.KernelOperation")
     def test_pull_missing_type(self, mock_krn_op):
         result = runner.invoke(app, ["kernel", "pull"])
         assert result.exit_code != 0  # Should fail without required --type
@@ -127,7 +127,7 @@ class TestKernelPull:
             "Missing option" in result.output or "type" in result.output.lower()
         )
 
-    @patch("mvmctl.cli.kernel.KernelOperation")
+    @patch("mvmctl.api.KernelOperation")
     def test_pull_error(self, mock_krn_op):
         mock_krn_op.pull.side_effect = MVMError("No version available")
         result = runner.invoke(
@@ -149,7 +149,7 @@ class TestKernelPull:
 class TestKernelRemove:
     """Tests for 'kernel rm' command."""
 
-    @patch("mvmctl.cli.kernel.KernelOperation")
+    @patch("mvmctl.api.KernelOperation")
     def test_rm_success(self, mock_krn_op):
         mock_krn_op.remove.return_value = BatchResult(
             items=[
@@ -164,7 +164,7 @@ class TestKernelRemove:
         assert result.exit_code == 0
         assert "removed" in result.output.lower()
 
-    @patch("mvmctl.cli.kernel.KernelOperation")
+    @patch("mvmctl.api.KernelOperation")
     def test_rm_multiple(self, mock_krn_op):
         mock_krn_op.remove.return_value = BatchResult(
             items=[
@@ -178,12 +178,12 @@ class TestKernelRemove:
         result = runner.invoke(app, ["kernel", "rm", "abc123", "def456"])
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.kernel.KernelOperation")
+    @patch("mvmctl.api.KernelOperation")
     def test_rm_no_ids(self, mock_krn_op):
         result = runner.invoke(app, ["kernel", "rm"])
         assert result.exit_code == 1
 
-    @patch("mvmctl.cli.kernel.KernelOperation")
+    @patch("mvmctl.api.KernelOperation")
     def test_rm_not_found(self, mock_krn_op):
         mock_krn_op.remove.side_effect = MVMError("not found")
         result = runner.invoke(app, ["kernel", "rm", "badid"])
@@ -197,7 +197,7 @@ class TestKernelRemove:
 class TestKernelSetDefault:
     """Tests for 'kernel set-default' command."""
 
-    @patch("mvmctl.cli.kernel.KernelOperation")
+    @patch("mvmctl.api.KernelOperation")
     def test_set_default_success(self, mock_krn_op):
         mock_krn_op.set_default.return_value = OperationResult(
             status="success",
@@ -208,12 +208,12 @@ class TestKernelSetDefault:
         assert result.exit_code == 0
         assert "Default kernel set" in result.output
 
-    @patch("mvmctl.cli.kernel.KernelOperation")
+    @patch("mvmctl.api.KernelOperation")
     def test_set_default_no_args(self, mock_krn_op):
         result = runner.invoke(app, ["kernel", "default"])
         assert result.exit_code == 1
 
-    @patch("mvmctl.cli.kernel.KernelOperation")
+    @patch("mvmctl.api.KernelOperation")
     def test_set_default_not_found(self, mock_krn_op):
         mock_krn_op.set_default.side_effect = MVMError("not found")
         result = runner.invoke(app, ["kernel", "default", "badid"])

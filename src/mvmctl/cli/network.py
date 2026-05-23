@@ -8,21 +8,6 @@ from typing import TYPE_CHECKING
 import typer
 from rich.prompt import Prompt
 
-from mvmctl.api import ConfigOperation as _ConfigOperation
-from mvmctl.api import NetworkCreateInput as _NetworkCreateInput
-from mvmctl.api import NetworkInput as _NetworkInput
-from mvmctl.api import NetworkOperation as _NetworkOperation
-
-if TYPE_CHECKING:
-    from mvmctl.api.config_operations import ConfigOperation
-    from mvmctl.api.inputs._network_create_input import NetworkCreateInput
-    from mvmctl.api.inputs._network_input import NetworkInput
-    from mvmctl.api.network_operations import NetworkOperation
-else:
-    ConfigOperation = _ConfigOperation
-    NetworkOperation = _NetworkOperation
-    NetworkInput = _NetworkInput
-    NetworkCreateInput = _NetworkCreateInput
 from mvmctl.cli._common import (
     ListingColumn,
     render_listing,
@@ -80,6 +65,8 @@ def network_ls(
     ),
 ) -> None:
     """List all networks."""
+    from mvmctl.api import NetworkOperation
+
     networks: list[NetworkItem] = NetworkOperation.list_all()
 
     if json_output:
@@ -107,6 +94,8 @@ def network_set_default(
 ) -> None:
     """Set a network as the default for VM creation."""
     name = mvm_cli.check_name_arg(ctx, name)
+    from mvmctl.api import NetworkInput, NetworkOperation
+
     result = NetworkOperation.set_default(NetworkInput(name=[name]))
     if result.status in ("error", "failure"):
         mvm_cli.error(result.message)
@@ -179,6 +168,8 @@ def network_create(
     ),
 ) -> None:
     """Create a named network."""
+    from mvmctl.api import NetworkCreateInput, NetworkOperation
+
     name = mvm_cli.check_name_arg(ctx, name)
 
     if subnet is None:
@@ -252,6 +243,8 @@ def network_rm(
         mvm_cli.error("Provide at least one network name")
         raise typer.Exit(code=1)
 
+    from mvmctl.api import NetworkInput, NetworkOperation
+
     result = NetworkOperation.remove(
         NetworkInput(name=effective_names), force=force
     )
@@ -278,6 +271,8 @@ def network_inspect(
 ) -> None:
     """Show detailed information about a network."""
     name = mvm_cli.check_name_arg(ctx, name)
+    from mvmctl.api import NetworkInput, NetworkOperation
+
     info = NetworkOperation.inspect(NetworkInput(name=[name]))
 
     if json_output:
@@ -303,6 +298,8 @@ def network_sync(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """Sync iptables rules between database and host."""
+    from mvmctl.api import NetworkInput, NetworkOperation
+
     network_id: str | None = None
     if identifier is not None:
         network = NetworkOperation.get(NetworkInput(name=[identifier]))

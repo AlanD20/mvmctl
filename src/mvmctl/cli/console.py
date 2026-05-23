@@ -10,7 +10,6 @@ import tty
 
 import typer
 
-from mvmctl.api.console_operations import ConsoleOperation
 from mvmctl.cli._completion import _complete_vm_names
 from mvmctl.constants import CONST_CONSOLE_SOCKET_TIMEOUT_S
 from mvmctl.exceptions import MVMError
@@ -59,6 +58,8 @@ def console(
 
 def _show_console_state(identifier: str) -> None:
     """Display console relay state for a VM."""
+    from mvmctl.api import ConsoleOperation
+
     state_dict = ConsoleOperation.get_state(identifier)
 
     status = "running" if state_dict["running"] else "stopped"
@@ -71,6 +72,8 @@ def _show_console_state(identifier: str) -> None:
 
 def _kill_console_relay(identifier: str) -> None:
     """Kill the console relay for a VM."""
+    from mvmctl.api import ConsoleOperation
+
     result = ConsoleOperation.kill(identifier)
 
     if result.status == "success":
@@ -85,6 +88,8 @@ def _kill_console_relay(identifier: str) -> None:
 
 def _attach_to_console(identifier: str) -> None:
     """Attach to VM console interactively."""
+    from mvmctl.api import ConsoleOperation
+
     attach_info = ConsoleOperation.get_connection_info(identifier)
 
     mvm_cli.info(f"Attaching to console of '{attach_info.vm_name}'...")

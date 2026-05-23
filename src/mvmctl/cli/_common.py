@@ -62,7 +62,7 @@ def resolve_listing_style(long_output: bool) -> str:
     try:
         from mvmctl.api import ConfigOperation as _cfg
 
-        value = _cfg.get("settings", "listing_style")  # type: ignore[attr-defined]
+        value = _cfg.get("settings", "listing_style")
         if isinstance(value, str):
             return value
     except Exception:

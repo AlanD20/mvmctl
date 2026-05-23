@@ -14,19 +14,13 @@ import typer
 from rich.console import Console
 from rich.markup import escape as rich_escape
 
-from mvmctl.api import InitOperation as _InitOperation
-from mvmctl.api import InitResult as _InitResult
-
-if TYPE_CHECKING:
-    from mvmctl.api.init_operations import InitOperation, InitResult
-else:
-    InitOperation = _InitOperation
-    InitResult = _InitResult
-
 from mvmctl.constants import CLI_NAME, MVM_UNIX_GROUP, SUDOERS_DROP_IN_PATH
 from mvmctl.models.result import ProgressEvent
 from mvmctl.utils._system import run_cmd
 from mvmctl.utils.cli import handle_errors, mvm_cli
+
+if TYPE_CHECKING:
+    from mvmctl.api.init_operations import InitResult
 
 init_app = typer.Typer(
     name="init",
@@ -135,6 +129,8 @@ def _handle_interactive_flow(
     non_interactive: bool,
 ) -> InitResult:
     """Drive the init wizard, handling sudo and download prompts in the CLI."""
+    from mvmctl.api import InitOperation
+
     console = Console()
     sudo_was_completed = False
     download_version: str | None = None
@@ -242,9 +238,7 @@ def _handle_interactive_flow(
                 )
 
             if non_interactive:
-                mvm_cli.info(
-                    f"Run 'sudo {CLI_NAME} host init' manually."
-                )
+                mvm_cli.info(f"Run 'sudo {CLI_NAME} host init' manually.")
                 break
             proceed_with_sudo = typer.confirm(
                 f"Run 'sudo {CLI_NAME} host init' now?", default=True

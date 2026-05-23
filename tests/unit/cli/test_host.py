@@ -59,7 +59,7 @@ def _make_change(
 class TestHostInit:
     """Tests for 'host init' command."""
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_init_with_changes(self, mock_host_op):
         from mvmctl.models.result import OperationResult
 
@@ -76,7 +76,7 @@ class TestHostInit:
         result = runner.invoke(app, ["host", "init"])
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_init_already_configured(self, mock_host_op):
         from mvmctl.models.result import OperationResult
 
@@ -90,7 +90,7 @@ class TestHostInit:
         assert result.exit_code == 0
         assert "already configured" in result.output.lower()
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_init_error(self, mock_host_op):
         from mvmctl.models.result import OperationResult
 
@@ -113,7 +113,7 @@ class TestHostInit:
 class TestHostStatus:
     """Tests for 'host status' command."""
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_ls_all_ok(self, mock_host_op):
         mock_host_op.check_kvm_access.return_value = True
         mock_host_op.check_required_binaries.return_value = []
@@ -123,7 +123,7 @@ class TestHostStatus:
         assert result.exit_code == 0
         assert "ok" in result.output
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_ls_failures(self, mock_host_op):
         mock_host_op.check_kvm_access.return_value = False
         mock_host_op.check_required_binaries.return_value = ["iptables"]
@@ -134,7 +134,7 @@ class TestHostStatus:
         assert "FAIL" in result.output
         assert "iptables" in result.output
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_ls_json(self, mock_host_op):
         mock_host_op.check_kvm_access.return_value = True
         mock_host_op.check_required_binaries.return_value = []
@@ -146,7 +146,7 @@ class TestHostStatus:
         assert data["kvm_accessible"] is True
         assert data["ip_forward"]["ok"] is True
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_ls_ip_forward_unknown(self, mock_host_op):
         mock_host_op.check_kvm_access.return_value = True
         mock_host_op.check_required_binaries.return_value = []
@@ -166,7 +166,7 @@ class TestHostStatus:
 class TestHostClean:
     """Tests for 'host clean' command."""
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_clean_success(self, mock_host_op):
         mock_host_op.get_running_vms.return_value = []
         mock_host_op.clean.return_value = OperationResult(
@@ -179,7 +179,7 @@ class TestHostClean:
         assert result.exit_code == 0
         assert "cleaned" in result.output.lower()
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_clean_with_running_vms(self, mock_host_op):
         mock_vm = MagicMock()
         mock_vm.name = "myvm"
@@ -188,7 +188,7 @@ class TestHostClean:
         assert result.exit_code == 1
         assert "blocked" in result.output
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_clean_api_error(self, mock_host_op):
         mock_host_op.get_running_vms.return_value = []
         mock_host_op.clean.side_effect = HostError("clean failed")
@@ -199,7 +199,7 @@ class TestHostClean:
 class TestHostReset:
     """Tests for 'host reset' command."""
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_reset_success(self, mock_host_op):
         mock_host_op.get_running_vms.return_value = []
         mock_host_op.reset.return_value = OperationResult(
@@ -215,7 +215,7 @@ class TestHostReset:
         assert result.exit_code == 0
         assert "reset" in result.output.lower()
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_reset_with_running_vms(self, mock_host_op):
         mock_vm = MagicMock()
         mock_vm.name = "myvm"
@@ -224,7 +224,7 @@ class TestHostReset:
         assert result.exit_code == 1
         assert "blocked" in result.output
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_reset_api_error(self, mock_host_op):
         mock_host_op.get_running_vms.return_value = []
         mock_host_op.reset.side_effect = HostError("reset failed")
@@ -248,7 +248,7 @@ class TestHostHelp:
 class TestHostInitPrivilege:
     """Tests for 'host init' privilege error paths."""
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_init_privilege_error_with_details(self, mock_host_op):
         from mvmctl.exceptions import PrivilegeError
 
@@ -265,7 +265,7 @@ class TestHostInitPrivilege:
         assert "This command requires root" in result.output
         assert "Run with sudo" in result.output
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_init_privilege_error_no_details(self, mock_host_op):
         from mvmctl.exceptions import PrivilegeError
 
@@ -276,7 +276,7 @@ class TestHostInitPrivilege:
         assert result.exit_code == 1
         assert "Insufficient permissions" in result.output
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_init_host_error(self, mock_host_op):
         mock_host_op.init.side_effect = HostError("KVM not available")
         result = runner.invoke(app, ["host", "init"])
@@ -287,7 +287,7 @@ class TestHostInitPrivilege:
 class TestHostInitNeedsInteraction:
     """Tests for 'host init' NeedsInteraction paths."""
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_init_sudo_required_declined(self, mock_host_op):
         mock_host_op.init.return_value = NeedsInteraction(
             code="privilege.sudo_required",
@@ -297,7 +297,7 @@ class TestHostInitNeedsInteraction:
         result = runner.invoke(app, ["host", "init"], input="n\n")
         assert result.exit_code == 1
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_init_sudo_confirm_recursion(self, mock_host_op, monkeypatch):
         mock_host_op.init.return_value = NeedsInteraction(
             code="privilege.sudo_required",
@@ -309,7 +309,7 @@ class TestHostInitNeedsInteraction:
         assert result.exit_code == 1
         assert "Recursive sudo restart" in result.output
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_init_needs_interaction_unknown_code(self, mock_host_op):
         mock_host_op.init.return_value = NeedsInteraction(
             code="some.other.code",
@@ -324,14 +324,14 @@ class TestHostInitNeedsInteraction:
 class TestHostInitEdgeCases:
     """Tests for 'host init' edge cases."""
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_init_unexpected_result_type(self, mock_host_op):
         mock_host_op.init.return_value = "surprise string"
         result = runner.invoke(app, ["host", "init"])
         assert result.exit_code == 1
         assert "Unexpected result type" in result.output
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_init_noop_changes_only(self, mock_host_op):
         noop_change = _make_change(
             setting="iptables_chains",
@@ -347,7 +347,7 @@ class TestHostInitEdgeCases:
         assert result.exit_code == 0
         assert "already configured" in result.output.lower()
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_init_user_added_to_group(self, mock_host_op):
         mock_host_op.init.return_value = MagicMock(
             spec=OperationResult,
@@ -361,7 +361,7 @@ class TestHostInitEdgeCases:
         assert result.exit_code == 0
         assert "Log out and back in" in result.output
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_init_failure_status(self, mock_host_op):
         mock_host_op.init.return_value = MagicMock(
             spec=OperationResult,
@@ -373,7 +373,7 @@ class TestHostInitEdgeCases:
         assert result.exit_code == 1
         assert "Host init failed" in result.output
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_init_format_various_changes(self, mock_host_op):
         changes = [
             _make_change(
@@ -417,7 +417,7 @@ class TestHostInitEdgeCases:
 class TestHostCleanEdgeCases:
     """Tests for 'host clean' edge cases."""
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_clean_result_is_error(self, mock_host_op):
         mock_host_op.get_running_vms.return_value = []
         mock_host_op.clean.return_value = OperationResult(
@@ -427,7 +427,7 @@ class TestHostCleanEdgeCases:
         assert result.exit_code == 1
         assert "Clean failed" in result.output
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_clean_with_warning_items(self, mock_host_op):
         mock_host_op.get_running_vms.return_value = []
         mock_host_op.clean.return_value = OperationResult(
@@ -440,14 +440,14 @@ class TestHostCleanEdgeCases:
         assert result.exit_code == 0
         assert "bridge still in use" in result.output
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_clean_confirmation_aborted(self, mock_host_op):
         mock_host_op.get_running_vms.return_value = []
         result = runner.invoke(app, ["host", "clean"], input="n\n")
         assert result.exit_code == 0
         assert "Aborted" in result.output
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_clean_no_summary_items(self, mock_host_op):
         mock_host_op.get_running_vms.return_value = []
         mock_host_op.clean.return_value = OperationResult(
@@ -456,7 +456,7 @@ class TestHostCleanEdgeCases:
         result = runner.invoke(app, ["host", "clean", "--force"])
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_clean_db_not_initialized(self, mock_host_op):
         mock_host_op.get_running_vms.side_effect = Exception(
             "DB not initialized"
@@ -471,7 +471,7 @@ class TestHostCleanEdgeCases:
 class TestHostResetEdgeCases:
     """Tests for 'host reset' edge cases."""
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_reset_result_is_error(self, mock_host_op):
         mock_host_op.get_running_vms.return_value = []
         mock_host_op.reset.return_value = OperationResult(
@@ -481,7 +481,7 @@ class TestHostResetEdgeCases:
         assert result.exit_code == 1
         assert "Reset failed" in result.output
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_reset_with_warning_items(self, mock_host_op):
         mock_host_op.get_running_vms.return_value = []
         mock_host_op.reset.return_value = OperationResult(
@@ -494,14 +494,14 @@ class TestHostResetEdgeCases:
         assert result.exit_code == 0
         assert "iptables rules may remain" in result.output
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_reset_confirmation_aborted(self, mock_host_op):
         mock_host_op.get_running_vms.return_value = []
         result = runner.invoke(app, ["host", "reset"], input="n\n")
         assert result.exit_code == 0
         assert "Aborted" in result.output
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_reset_no_summary_items(self, mock_host_op):
         mock_host_op.get_running_vms.return_value = []
         mock_host_op.reset.return_value = OperationResult(
@@ -510,7 +510,7 @@ class TestHostResetEdgeCases:
         result = runner.invoke(app, ["host", "reset", "--force"])
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_reset_db_not_initialized(self, mock_host_op):
         mock_host_op.get_running_vms.side_effect = Exception(
             "DB not initialized"
@@ -525,7 +525,7 @@ class TestHostResetEdgeCases:
 class TestHostLsEdgeCases:
     """Tests for 'host status' edge cases."""
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_ls_get_state_raises(self, mock_host_op):
         mock_host_op.check_kvm_access.return_value = True
         mock_host_op.check_required_binaries.return_value = []
@@ -539,7 +539,7 @@ class TestHostLsEdgeCases:
 class TestHostStatus:
     """Tests for 'host status' command (alias for 'host ls')."""
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_status_all_ok(self, mock_host_op):
         """host status shows ok when everything is working."""
         mock_host_op.check_kvm_access.return_value = True
@@ -551,7 +551,7 @@ class TestHostStatus:
             pytest.skip("host status command not yet implemented")
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_status_json(self, mock_host_op):
         """host status --json produces valid JSON."""
         mock_host_op.check_kvm_access.return_value = True
@@ -565,7 +565,7 @@ class TestHostStatus:
         assert data["kvm_accessible"] is True
         assert data["ip_forward"]["ok"] is True
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_status_json_structure(self, mock_host_op):
         """host status --json returns all expected fields."""
         mock_host_op.check_kvm_access.return_value = False
@@ -581,7 +581,7 @@ class TestHostStatus:
         assert "ip_forward" in data
         assert "state_snapshot" in data
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_status_failures(self, mock_host_op):
         """host status shows FAIL when components are not working."""
         mock_host_op.check_kvm_access.return_value = False
@@ -604,7 +604,7 @@ class TestHostStatus:
 class TestHostInfo:
     """Tests for 'host info' command."""
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_info_success_human(self, mock_host_op):
         """host info shows info dict in tree format."""
         mock_host_op.info.return_value = MagicMock(
@@ -627,7 +627,7 @@ class TestHostInfo:
         result = runner.invoke(app, ["host", "info"])
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_info_success_json(self, mock_host_op):
         """host info --json produces valid JSON."""
         mock_host_op.info.return_value = MagicMock(
@@ -657,7 +657,7 @@ class TestHostInfo:
         assert data["hostname"] == "testhost"
         assert "cpu" in data
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_info_error(self, mock_host_op):
         """host info shows error message when no state."""
         mock_host_op.info.return_value = MagicMock(
@@ -671,7 +671,7 @@ class TestHostInfo:
         assert result.exit_code == 1
         assert "not yet detected" in result.output.lower()
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_info_refresh(self, mock_host_op):
         """host info --refresh calls refresh_capacity."""
         mock_host_op.refresh_capacity.return_value = MagicMock(
@@ -685,7 +685,7 @@ class TestHostInfo:
         assert result.exit_code == 0
         mock_host_op.refresh_capacity.assert_called_once()
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_info_refresh_error(self, mock_host_op):
         """host info --refresh shows error when refresh fails."""
         mock_host_op.refresh_capacity.return_value = MagicMock(
@@ -698,7 +698,7 @@ class TestHostInfo:
         result = runner.invoke(app, ["host", "info", "--refresh"])
         assert result.exit_code == 1
 
-    @patch("mvmctl.cli.host.HostOperation")
+    @patch("mvmctl.api.HostOperation")
     def test_info_with_none_item(self, mock_host_op):
         """host info shows error when item is None."""
         mock_host_op.info.return_value = MagicMock(

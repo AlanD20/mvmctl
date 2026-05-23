@@ -4,29 +4,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 import typer
 from rich.console import Console
 
-from mvmctl.api import ConfigOperation as _ConfigOperation
-from mvmctl.api import KernelImportInput as _KernelImportInput
-from mvmctl.api import KernelInput as _KernelInput
-from mvmctl.api import KernelOperation as _KernelOperation
-from mvmctl.api import KernelPullInput as _KernelPullInput
-
-if TYPE_CHECKING:
-    from mvmctl.api.config_operations import ConfigOperation
-    from mvmctl.api.inputs._kernel_import_input import KernelImportInput
-    from mvmctl.api.inputs._kernel_input import KernelInput
-    from mvmctl.api.inputs._kernel_pull_input import KernelPullInput
-    from mvmctl.api.kernel_operations import KernelOperation
-else:
-    ConfigOperation = _ConfigOperation
-    KernelOperation = _KernelOperation
-    KernelPullInput = _KernelPullInput
-    KernelInput = _KernelInput
-    KernelImportInput = _KernelImportInput
 from mvmctl.cli._common import (
     ListingColumn,
     render_listing,
@@ -79,6 +61,8 @@ def kernel_ls(
     ),
 ) -> None:
     """List cached kernels (or available remote kernels with --remote)."""
+    from mvmctl.api import KernelOperation
+
     if remote:
         with Console().status("Fetching remote kernel versions"):
             versions = cast(
@@ -170,6 +154,8 @@ def kernel_inspect(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """Show detailed information about a kernel."""
+    from mvmctl.api import KernelInput, KernelOperation
+
     info = KernelOperation.inspect(KernelInput(id=[prefix]))
 
     if json_output:
@@ -248,6 +234,8 @@ def kernel_pull(
         )
         raise typer.Exit(code=1)
 
+    from mvmctl.api import KernelOperation, KernelPullInput
+
     inputs = KernelPullInput(
         kernel_type=effective_type,
         version=effective_version,
@@ -306,6 +294,8 @@ def kernel_set_default(
 ) -> None:
     """Set a kernel as the default."""
     kernel_id = mvm_cli.check_name_arg(ctx, kernel_id)
+    from mvmctl.api import KernelInput, KernelOperation
+
     inputs = KernelInput(id=[kernel_id])
     result = KernelOperation.set_default(inputs)
 
@@ -337,6 +327,8 @@ def kernel_rm(
     if not effective_ids:
         mvm_cli.error("Provide at least one kernel ID or name")
         raise typer.Exit(code=1)
+
+    from mvmctl.api import KernelInput, KernelOperation
 
     inputs = KernelInput(id=effective_ids, force=force)
     batch_result = KernelOperation.remove(inputs)
@@ -389,6 +381,8 @@ def kernel_import(
     if not path.exists():
         mvm_cli.error(f"Source file not found: {path}")
         raise typer.Exit(code=1)
+
+    from mvmctl.api import KernelImportInput, KernelOperation
 
     inputs = KernelImportInput(
         name=name,

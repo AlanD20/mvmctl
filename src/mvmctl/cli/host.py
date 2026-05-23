@@ -9,12 +9,6 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from mvmctl.api import HostOperation as _HostOperation
-
-if TYPE_CHECKING:
-    from mvmctl.api.host_operations import HostOperation
-else:
-    HostOperation = _HostOperation
 from mvmctl.constants import CLI_NAME, MVM_UNIX_GROUP
 from mvmctl.exceptions import HostError, PrivilegeError
 from mvmctl.models.result import NeedsInteraction, OperationResult
@@ -70,6 +64,8 @@ host_app = typer.Typer(
 
 def _abort_if_vms_running(action: str) -> None:
     """Exit with an error if any VMs are currently running."""
+    from mvmctl.api import HostOperation
+
     try:
         running = HostOperation.get_running_vms()
     except Exception:
@@ -117,6 +113,8 @@ def host_init() -> None:
         sudo mvm host init
 
     """
+    from mvmctl.api import HostOperation
+
     cache_dir = CacheUtils.get_cache_dir()
     try:
         result = HostOperation.init(cache_dir)
@@ -221,6 +219,8 @@ def host_status(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """Show current host configuration state vs expected."""
+    from mvmctl.api import HostOperation
+
     kvm_ok = HostOperation.check_kvm_access()
     missing = HostOperation.check_required_binaries()
 
@@ -348,6 +348,8 @@ def host_info(
 
     Use --refresh to re-detect hardware and limits before displaying.
     """
+    from mvmctl.api import HostOperation
+
     if refresh:
         result = HostOperation.refresh_capacity()
     else:
@@ -376,6 +378,8 @@ def host_clean(
     ),
 ) -> None:
     """Remove all networking config (bridges, TAPs, iptables). Does not touch sysctl or group."""
+    from mvmctl.api import HostOperation
+
     _abort_if_vms_running("clean")
 
     if not force:
@@ -433,6 +437,8 @@ def host_reset(
         sudo mvm host reset --force
 
     """
+    from mvmctl.api import HostOperation
+
     _abort_if_vms_running("reset")
 
     if not force:

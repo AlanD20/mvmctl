@@ -16,6 +16,8 @@ first operation class is actually accessed.
 
 from __future__ import annotations
 
+from typing import Any
+
 from mvmctl.utils._lazy_import import resolve_lazy
 
 __all__ = [
@@ -224,7 +226,7 @@ _LAZY_MAP: dict[str, tuple[str, str]] = {
 }
 
 
-def __getattr__(name: str) -> object:
+def __getattr__(name: str) -> Any:
     """Deferred import of submodules on first attribute access."""
     return resolve_lazy(name, _LAZY_MAP, __name__)
 

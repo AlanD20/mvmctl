@@ -4,25 +4,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import typer
 
-from mvmctl.api import ConfigOperation as _ConfigOperation
-from mvmctl.api import KeyCreateInput as _KeyCreateInput
-from mvmctl.api import KeyInput as _KeyInput
-from mvmctl.api import KeyOperation as _KeyOperation
-
-if TYPE_CHECKING:
-    from mvmctl.api.config_operations import ConfigOperation
-    from mvmctl.api.inputs._key_create_input import KeyCreateInput
-    from mvmctl.api.inputs._key_input import KeyInput
-    from mvmctl.api.key_operations import KeyOperation
-else:
-    ConfigOperation = _ConfigOperation
-    KeyOperation = _KeyOperation
-    KeyInput = _KeyInput
-    KeyCreateInput = _KeyCreateInput
 from mvmctl.cli._common import (
     ListingColumn,
     render_listing,
@@ -64,6 +48,8 @@ def key_ls(
     ),
 ) -> None:
     """List all SSH keys."""
+    from mvmctl.api import KeyOperation
+
     keys = KeyOperation.list_all()
 
     if json_output:
@@ -93,6 +79,8 @@ def key_add(
     ),
 ) -> None:
     """Add an existing public key to the cache."""
+    from mvmctl.api import KeyOperation
+
     result = KeyOperation.add(name=name, pub_key_path=path, overwrite=force)
     if result.is_error:
         mvm_cli.error(result.message or f"Add failed: {name}")
@@ -131,6 +119,8 @@ def key_create(
         choice = typer.prompt("Enter number", default="1")
         algo_map = {"1": "ed25519", "2": "rsa", "3": "ecdsa"}
         algorithm = algo_map.get(choice.strip(), "ed25519")
+
+    from mvmctl.api import KeyCreateInput, KeyOperation
 
     inputs = KeyCreateInput(
         name=name,
@@ -171,6 +161,8 @@ def key_rm(
         mvm_cli.error("Provide at least one key name to remove")
         raise typer.Exit(code=1)
 
+    from mvmctl.api import KeyInput, KeyOperation
+
     inputs = KeyInput(name=effective_names)
     result = KeyOperation.remove(inputs, force=force)
     for r in result.items:
@@ -195,6 +187,8 @@ def key_inspect(
 ) -> None:
     """Inspect an SSH key."""
     name = mvm_cli.check_name_arg(ctx, name)
+    from mvmctl.api import KeyInput, KeyOperation
+
     inputs = KeyInput(name=[name])
 
     info = KeyOperation.inspect(inputs)
@@ -221,6 +215,8 @@ def key_export(
 ) -> None:
     """Export a keypair to a directory."""
     name = mvm_cli.check_name_arg(ctx, name)
+    from mvmctl.api import KeyInput, KeyOperation
+
     inputs = KeyInput(name=[name])
     result = KeyOperation.export(inputs, destination=out, overwrite=force)
     if result.is_error:
@@ -243,6 +239,8 @@ def key_set_default(
     clear: bool = typer.Option(False, "--clear", help="Clear all default keys"),
 ) -> None:
     """Set default SSH keys, or clear with --clear."""
+    from mvmctl.api import KeyInput, KeyOperation
+
     if clear:
         clear_result = KeyOperation.clear_defaults()
         if clear_result.is_error:

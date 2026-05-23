@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import typer
 
-from mvmctl.api.inputs._logs_input import LogInput
-from mvmctl.api.logs_operations import LogOperation
 from mvmctl.cli._completion import _complete_vm_names
 from mvmctl.utils.cli import handle_errors
 
@@ -46,6 +44,8 @@ def logs(
     """
     if ctx.invoked_subcommand is not None:
         return
+
+    from mvmctl.api import LogInput, LogOperation
 
     inputs = LogInput(
         identifier=identifier,

@@ -3,32 +3,17 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import typer
 
-from mvmctl.api import ConfigOperation as _ConfigOperation
-from mvmctl.api import VolumeCreateInput as _VolumeCreateInput
-from mvmctl.api import VolumeInput as _VolumeInput
-from mvmctl.api import VolumeOperation as _VolumeOperation
-from mvmctl.cli._completion import _complete_volume_names
-from mvmctl.utils.cli import handle_errors, mvm_cli
-
-if TYPE_CHECKING:
-    from mvmctl.api.config_operations import ConfigOperation
-    from mvmctl.api.inputs._volume_create_input import VolumeCreateInput
-    from mvmctl.api.inputs._volume_input import VolumeInput
-    from mvmctl.api.volume_operations import VolumeOperation
-else:
-    ConfigOperation = _ConfigOperation
-    VolumeOperation = _VolumeOperation
-    VolumeInput = _VolumeInput
-    VolumeCreateInput = _VolumeCreateInput
 from mvmctl.cli._common import (
     ListingColumn,
     render_listing,
     resolve_listing_style,
 )
+from mvmctl.cli._completion import _complete_volume_names
+from mvmctl.utils.cli import handle_errors, mvm_cli
 
 volume_app = typer.Typer(
     help="Volume management",
@@ -59,6 +44,8 @@ def volume_create(
     ),
 ) -> None:
     """Create a new persistent volume."""
+    from mvmctl.api import VolumeCreateInput, VolumeOperation
+
     result = VolumeOperation.create(
         VolumeCreateInput(
             name=name, size=size, format=format, read_only=read_only
@@ -91,6 +78,8 @@ def volume_rm(
     ),
 ) -> None:
     """Remove one or more volumes."""
+    from mvmctl.api import VolumeInput, VolumeOperation
+
     result = VolumeOperation.remove(
         VolumeInput(identifiers=identifiers), force=force
     )
@@ -124,6 +113,8 @@ def volume_ls(
     ),
 ) -> None:
     """List all volumes."""
+    from mvmctl.api import VolumeOperation
+
     volumes = VolumeOperation.list_all()
 
     if json_output:
@@ -161,6 +152,8 @@ def volume_inspect(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """Show detailed information about a volume."""
+    from mvmctl.api import VolumeInput, VolumeOperation
+
     info = VolumeOperation.inspect(VolumeInput(identifiers=[identifier]))
 
     if json_output:
@@ -181,6 +174,8 @@ def volume_resize(
     size: str = typer.Argument(..., help="New size (e.g., 1G, 512M)"),
 ) -> None:
     """Resize a volume."""
+    from mvmctl.api import VolumeCreateInput, VolumeOperation
+
     result = VolumeOperation.resize(
         VolumeCreateInput(name=identifier, size=size)
     )

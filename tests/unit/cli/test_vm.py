@@ -57,13 +57,13 @@ def _make_vm(
 class TestVMLs:
     """Tests for 'vm ls' command."""
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_ls_empty(self, mock_vm_op):
         mock_vm_op.list_all.return_value = []
         result = runner.invoke(app, ["vm", "ls"])
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_ls_with_vms(self, mock_vm_op):
         mock_vm_op.list_all.return_value = [
             _make_vm("vm1", "running"),
@@ -74,7 +74,7 @@ class TestVMLs:
         assert "vm1" in result.output
         assert "vm2" in result.output
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_ls_json(self, mock_vm_op):
         mock_vm_op.to_json.return_value = [
             {"name": "myvm", "network_name": None}
@@ -94,14 +94,14 @@ class TestVMLs:
 class TestVMPs:
     """Tests for 'vm ps' command."""
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_ps_empty(self, mock_vm_op):
         mock_vm_op.list_all.return_value = []
         result = runner.invoke(app, ["vm", "ps"])
         assert result.exit_code == 0
         assert "No active VMs" in result.output
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_ps_with_vms(self, mock_vm_op):
         mock_vm_op.list_all.return_value = [
             _make_vm("vm1", "running"),
@@ -114,7 +114,7 @@ class TestVMPs:
 class TestVMCreate:
     """Tests for 'vm create' command."""
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_create_success(self, mock_vm_op):
         mock_vm_op.create.return_value = OperationResult(
             status="success",
@@ -135,13 +135,13 @@ class TestVMCreate:
         assert result.exit_code == 0
         assert "created" in result.output.lower()
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_create_missing_name(self, mock_vm_op):
         """Missing NAME argument should fail."""
         result = runner.invoke(app, ["vm", "create", "--image", "ubuntu-24.04"])
         assert result.exit_code != 0
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_create_api_error(self, mock_vm_op):
         mock_vm_op.create.side_effect = MVMError("VM already exists")
         result = runner.invoke(
@@ -166,7 +166,7 @@ class TestVMCreate:
 class TestVMRemove:
     """Tests for 'vm rm' command."""
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_rm_success(self, mock_vm_op):
         mock_vm_op.remove.return_value = BatchResult(
             items=[
@@ -179,7 +179,7 @@ class TestVMRemove:
         assert result.exit_code == 0
         assert "removed" in result.output.lower()
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_rm_multiple(self, mock_vm_op):
         mock_vm_op.remove.return_value = BatchResult(
             items=[
@@ -191,7 +191,7 @@ class TestVMRemove:
         result = runner.invoke(app, ["vm", "rm", "vm1", "vm2"])
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_rm_with_name_flag(self, mock_vm_op):
         mock_vm_op.remove.return_value = BatchResult(
             items=[
@@ -203,7 +203,7 @@ class TestVMRemove:
         result = runner.invoke(app, ["vm", "rm", "myvm"])
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_rm_api_error(self, mock_vm_op):
         mock_vm_op.remove.return_value = BatchResult(
             items=[
@@ -222,7 +222,7 @@ class TestVMRemove:
 class TestVMStart:
     """Tests for 'vm start' command."""
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_start_success(self, mock_vm_op):
         mock_vm_op.start.return_value = BatchResult(
             items=[
@@ -235,7 +235,7 @@ class TestVMStart:
         assert result.exit_code == 0
         assert "started" in result.output.lower()
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_start_with_name_flag(self, mock_vm_op):
         mock_vm_op.start.return_value = BatchResult(
             items=[
@@ -247,7 +247,7 @@ class TestVMStart:
         result = runner.invoke(app, ["vm", "start", "myvm"])
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_start_api_error(self, mock_vm_op):
         mock_vm_op.start.return_value = BatchResult(
             items=[
@@ -261,7 +261,7 @@ class TestVMStart:
         result = runner.invoke(app, ["vm", "start", "nonexistent"])
         assert result.exit_code == 1
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_start_missing_identifier(self, mock_vm_op):
         result = runner.invoke(app, ["vm", "start"])
         assert result.exit_code != 0
@@ -270,7 +270,7 @@ class TestVMStart:
 class TestVMStop:
     """Tests for 'vm stop' command."""
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_stop_success(self, mock_vm_op):
         mock_vm_op.stop.return_value = BatchResult(
             items=[
@@ -283,7 +283,7 @@ class TestVMStop:
         assert result.exit_code == 0
         assert "stopped" in result.output.lower()
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_stop_with_force(self, mock_vm_op):
         mock_vm_op.stop.return_value = BatchResult(
             items=[
@@ -297,7 +297,7 @@ class TestVMStop:
         call_kwargs = mock_vm_op.stop.call_args
         assert call_kwargs[0][0].force is True
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_stop_api_error(self, mock_vm_op):
         mock_vm_op.stop.return_value = BatchResult(
             items=[
@@ -315,7 +315,7 @@ class TestVMStop:
 class TestVMReboot:
     """Tests for 'vm reboot' command."""
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_reboot_success(self, mock_vm_op):
         mock_vm_op.reboot.return_value = BatchResult(
             items=[
@@ -328,7 +328,7 @@ class TestVMReboot:
         assert result.exit_code == 0
         assert "rebooted" in result.output.lower()
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_reboot_with_force(self, mock_vm_op):
         mock_vm_op.reboot.return_value = BatchResult(
             items=[
@@ -340,7 +340,7 @@ class TestVMReboot:
         result = runner.invoke(app, ["vm", "reboot", "myvm", "--force"])
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_reboot_api_error(self, mock_vm_op):
         mock_vm_op.reboot.return_value = BatchResult(
             items=[
@@ -358,7 +358,7 @@ class TestVMReboot:
 class TestVMPause:
     """Tests for 'vm pause' command."""
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_pause_success(self, mock_vm_op):
         mock_vm_op.pause.return_value = BatchResult(
             items=[
@@ -371,7 +371,7 @@ class TestVMPause:
         assert result.exit_code == 0
         assert "paused" in result.output.lower()
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_pause_api_error(self, mock_vm_op):
         mock_vm_op.pause.return_value = BatchResult(
             items=[
@@ -389,7 +389,7 @@ class TestVMPause:
 class TestVMResume:
     """Tests for 'vm resume' command."""
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_resume_success(self, mock_vm_op):
         mock_vm_op.resume.return_value = BatchResult(
             items=[
@@ -402,7 +402,7 @@ class TestVMResume:
         assert result.exit_code == 0
         assert "resumed" in result.output.lower()
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_resume_api_error(self, mock_vm_op):
         mock_vm_op.resume.return_value = BatchResult(
             items=[
@@ -420,7 +420,7 @@ class TestVMResume:
 class TestVMSnapshot:
     """Tests for 'vm snapshot' command."""
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_snapshot_success(self, mock_vm_op, tmp_path):
         mock_vm_op.snapshot.return_value = OperationResult(
             status="success",
@@ -442,7 +442,7 @@ class TestVMSnapshot:
         assert result.exit_code == 0
         assert "snapshot created" in result.output.lower()
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_snapshot_api_error(self, mock_vm_op, tmp_path):
         mock_vm_op.snapshot.side_effect = MVMError("VM not running")
         mem_file = tmp_path / "mem.snap"
@@ -459,7 +459,7 @@ class TestVMSnapshot:
         )
         assert result.exit_code == 1
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_snapshot_missing_args(self, mock_vm_op):
         result = runner.invoke(app, ["vm", "snapshot", "myvm"])
         assert result.exit_code != 0
@@ -468,7 +468,7 @@ class TestVMSnapshot:
 class TestVMLoad:
     """Tests for 'vm load' command."""
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_load_success(self, mock_vm_op, tmp_path):
         mock_vm_op.load_snapshot.return_value = OperationResult(
             status="success",
@@ -490,7 +490,7 @@ class TestVMLoad:
         assert result.exit_code == 0
         assert "snapshot loaded" in result.output.lower()
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_load_with_resume(self, mock_vm_op, tmp_path):
         mock_vm_op.load_snapshot.return_value = OperationResult(
             status="success",
@@ -514,7 +514,7 @@ class TestVMLoad:
         call_input = mock_vm_op.load_snapshot.call_args
         assert call_input[1]["resume_after"] is True
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_load_api_error(self, mock_vm_op, tmp_path):
         mock_vm_op.load_snapshot.side_effect = MVMError(
             "Snapshot file not found"
@@ -537,7 +537,7 @@ class TestVMLoad:
 class TestVMInspect:
     """Tests for 'vm inspect' command."""
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_inspect_success(self, mock_vm_op):
         mock_vm_op.inspect.return_value = {
             "name": "myvm",
@@ -579,7 +579,7 @@ class TestVMInspect:
         assert "myvm" in result.output
         assert "running" in result.output
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_inspect_json(self, mock_vm_op):
         mock_vm_op.inspect.return_value = {
             "name": "myvm",
@@ -590,7 +590,7 @@ class TestVMInspect:
         data = json.loads(result.output)
         assert data["name"] == "myvm"
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_inspect_not_found(self, mock_vm_op):
         mock_vm_op.inspect.side_effect = MVMError("VM not found")
         result = runner.invoke(app, ["vm", "inspect", "nonexistent"])
@@ -601,7 +601,7 @@ class TestVMInspect:
 class TestVMExport:
     """Tests for 'vm export' command."""
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_export_success(self, mock_vm_op, tmp_path):
         mock_config = MagicMock()
         mock_config.to_dict.return_value = {
@@ -615,7 +615,7 @@ class TestVMExport:
         assert "Exported" in result.output
         assert output.exists()
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_export_not_found(self, mock_vm_op):
         mock_vm_op.export.side_effect = MVMError("VM not found")
         result = runner.invoke(app, ["vm", "export", "nonexistent"])
@@ -629,7 +629,7 @@ class TestVMImport:
         from mvmctl.models.result import OperationResult
 
         mocker.patch(
-            "mvmctl.cli.vm.VMOperation.import_",
+            "mvmctl.api.VMOperation.import_",
             return_value=OperationResult(
                 status="success", code="ok", message="imported"
             ),
@@ -640,7 +640,7 @@ class TestVMImport:
         assert result.exit_code == 0
         assert "imported" in result.output.lower()
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_import_with_name_override(self, mock_vm_op, tmp_path):
         from mvmctl.models.result import OperationResult
 
@@ -680,7 +680,7 @@ class TestVMHelp:
 class TestVMLsEdgeCases:
     """Tests for 'vm ls' edge cases."""
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_ls_json_empty(self, mock_vm_op):
         mock_vm_op.to_json.return_value = []
         result = runner.invoke(app, ["vm", "ls", "--json"])
@@ -688,7 +688,7 @@ class TestVMLsEdgeCases:
         data = json.loads(result.output)
         assert data == []
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_ls_with_exit_code_set(self, mock_vm_op):
         mock_vm_op.list_all.return_value = [
             _make_vm("exited-vm", "stopped", exit_code=0),
@@ -697,7 +697,7 @@ class TestVMLsEdgeCases:
         assert result.exit_code == 0
         assert "0" in result.output
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_ls_json_includes_all_fields(self, mock_vm_op):
         mock_vm_op.to_json.return_value = [
             {
@@ -724,7 +724,7 @@ class TestVMLsEdgeCases:
 class TestVMCreateEdgeCases:
     """Tests for 'vm create' edge cases."""
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_create_with_skip_cleanup(self, mock_vm_op):
         mock_vm_op.create.return_value = OperationResult(
             status="success",
@@ -746,7 +746,7 @@ class TestVMCreateEdgeCases:
         )
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_create_with_ssh_keys(self, mock_vm_op):
         mock_vm_op.create.return_value = OperationResult(
             status="success",
@@ -768,7 +768,7 @@ class TestVMCreateEdgeCases:
         )
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_create_with_all_options(self, mock_vm_op):
         mock_vm_op.create.return_value = OperationResult(
             status="success",
@@ -812,7 +812,7 @@ class TestVMCreateEdgeCases:
 class TestVMStopEdgeCases:
     """Tests for 'vm stop' edge cases."""
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_stop_with_ip_flag(self, mock_vm_op):
         mock_vm_op.stop.return_value = BatchResult(
             items=[
@@ -827,7 +827,7 @@ class TestVMStopEdgeCases:
         )
         assert result.exit_code == 0
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_stop_with_mac_flag(self, mock_vm_op):
         mock_vm_op.stop.return_value = BatchResult(
             items=[
@@ -846,7 +846,7 @@ class TestVMStopEdgeCases:
 class TestVMRebootEdgeCases:
     """Tests for 'vm reboot' edge cases."""
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_reboot_with_ip_flag(self, mock_vm_op):
         mock_vm_op.reboot.return_value = BatchResult(
             items=[
@@ -865,7 +865,7 @@ class TestVMRebootEdgeCases:
 class TestVMPauseEdgeCases:
     """Tests for 'vm pause' edge cases."""
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_pause_with_ip_flag(self, mock_vm_op):
         mock_vm_op.pause.return_value = BatchResult(
             items=[
@@ -884,7 +884,7 @@ class TestVMPauseEdgeCases:
 class TestVMResumeEdgeCases:
     """Tests for 'vm resume' edge cases."""
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_resume_with_ip_flag(self, mock_vm_op):
         mock_vm_op.resume.return_value = BatchResult(
             items=[
@@ -903,7 +903,7 @@ class TestVMResumeEdgeCases:
 class TestVMSnapshotEdgeCases:
     """Tests for 'vm snapshot' edge cases."""
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_snapshot_with_ip_flag(self, mock_vm_op, tmp_path):
         mock_vm_op.snapshot.return_value = OperationResult(
             status="success",
@@ -928,7 +928,7 @@ class TestVMSnapshotEdgeCases:
 class TestVMLoadEdgeCases:
     """Tests for 'vm load' edge cases."""
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_load_with_ip_flag(self, mock_vm_op, tmp_path):
         mock_vm_op.load_snapshot.return_value = OperationResult(
             status="success",
@@ -953,7 +953,7 @@ class TestVMLoadEdgeCases:
 class TestVMInspectTree:
     """Tests for 'vm inspect' (tree format is the default)."""
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_inspect_tree(self, mock_vm_op):
         mock_vm_op.inspect.return_value = {
             "vm": {
@@ -993,7 +993,7 @@ class TestVMInspectTree:
         assert "Resources" in result.output
         assert "Networking" in result.output
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_inspect_tree_with_nulls(self, mock_vm_op):
         mock_vm_op.inspect.return_value = {
             "vm": {
@@ -1036,7 +1036,7 @@ class TestVMInspectTree:
 class TestVMExportEdgeCases:
     """Tests for 'vm export' edge cases."""
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_export_stdout(self, mock_vm_op):
         mock_config = MagicMock()
         mock_config.to_dict.return_value = {
@@ -1048,7 +1048,7 @@ class TestVMExportEdgeCases:
         assert result.exit_code == 0
         assert "myvm" in result.output
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_export_api_error(self, mock_vm_op):
         mock_vm_op.export.side_effect = MVMError("Export failed")
         result = runner.invoke(app, ["vm", "export", "myvm"])
@@ -1060,7 +1060,7 @@ class TestVMImportEdgeCases:
 
     def test_import_needs_interaction(self, mocker, tmp_path):
         mocker.patch(
-            "mvmctl.cli.vm.VMOperation.import_",
+            "mvmctl.api.VMOperation.import_",
             return_value=NeedsInteraction(
                 code="privilege.required",
                 message="Need privileges",
@@ -1073,7 +1073,7 @@ class TestVMImportEdgeCases:
         assert result.exit_code == 1
         assert "import requires privileges" in result.output.lower()
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_import_error_status(self, mock_vm_op, tmp_path):
         mock_vm_op.import_.return_value = OperationResult(
             status="error", code="vm.import.error", message="Import failed"
@@ -1084,7 +1084,7 @@ class TestVMImportEdgeCases:
         assert result.exit_code == 1
         assert "Import failed" in result.output
 
-    @patch("mvmctl.cli.vm.VMOperation")
+    @patch("mvmctl.api.VMOperation")
     def test_import_failure_status(self, mock_vm_op, tmp_path):
         mock_vm_op.import_.return_value = OperationResult(
             status="failure", code="vm.import.failure", message="Import failed"
