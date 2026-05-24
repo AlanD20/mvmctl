@@ -352,12 +352,24 @@ def run_test_file(
         if len(fail_lines) > 5:
             print(f"         ... and {len(fail_lines) - 5} more")
     elif status == "FAIL":
-        # Fallback: show last lines when FAILED lines weren't matched
-        tail = [l.strip() for l in lines[-10:] if l.strip()]
-        if tail:
-            print("       ── failure tail (last output) ──")
-            for tl in tail:
-                print(f"         {tl}")
+        # Fallback: search entire output for FAILED/ERROR lines
+        all_fail = [
+            l.strip()
+            for l in lines
+            if "FAILED" in l or "ERROR" in l
+        ]
+        if all_fail:
+            print(f"       Failures: {len(all_fail)}")
+            for fl in all_fail[:10]:
+                print(f"         {fl}")
+            if len(all_fail) > 10:
+                print(f"         ... and {len(all_fail) - 10} more")
+        else:
+            tail = [l.strip() for l in lines[-15:] if l.strip()]
+            if tail:
+                print("       ── last output ──")
+                for tl in tail:
+                    print(f"         {tl}")
     if status == "FAIL":
         # Show full failure context — assertion errors and traceback lines
         detail = [
@@ -489,12 +501,25 @@ def _run_pytest_level(
             print(f"         ... and {len(fail_lines) - 5} more")
     else:
         # Fallback: if no FAILED lines matched (e.g. xdist/cov format variance),
-        # show the last lines of stdout to reveal the failure summary.
-        tail = [l.strip() for l in lines[-10:] if l.strip()]
-        if tail:
-            print("       ── failure tail (last output) ──")
-            for tl in tail:
-                print(f"         {tl}")
+        # search the entire output for lines containing "FAILED" or "ERROR".
+        all_fail = [
+            l.strip()
+            for l in lines
+            if "FAILED" in l or "ERROR" in l
+        ]
+        if all_fail:
+            print(f"       Failures: {len(all_fail)}")
+            for fl in all_fail[:10]:
+                print(f"         {fl}")
+            if len(all_fail) > 10:
+                print(f"         ... and {len(all_fail) - 10} more")
+        else:
+            # Last resort: show last lines of stdout
+            tail = [l.strip() for l in lines[-15:] if l.strip()]
+            if tail:
+                print("       ── last output ──")
+                for tl in tail:
+                    print(f"         {tl}")
     if skip_lines:
         print(f"       Skipped: {len(skip_lines)}")
         for sl in skip_lines[:10]:
