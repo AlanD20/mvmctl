@@ -1,0 +1,168 @@
+package key
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/model"
+)
+
+// privateKeyPerm matches Python's CONST_FILE_PERMS_PRIVATE_KEY = 0o600.
+const privateKeyPerm os.FileMode = 0600
+
+// Controller manages SSH key lifecycle for a specific key.
+// Matches Python's KeyController exactly — resolves key eagerly at
+// construction time and stores the resolved key for later use.
+type Controller struct {
+	key  *model.SSHKeyItem
+	repo Repository
+}
+
+// NewController creates a new KeyController.
+// If entity is an SSHKeyItem, it uses it directly.
+// If entity is a string (name or ID prefix), it resolves it eagerly
+// at construction time (matching Python's __init__ behavior).
+func NewController(ctx context.Context, entity interface{}, repo Repository) (*Controller, error) {
+	var key *model.SSHKeyItem
+	switch e := entity.(type) {
+	case *model.SSHKeyItem:
+		key = e
+	case string:
+		resolver := NewResolver(repo)
+		var err error
+		key, err = resolver.Resolve(ctx, e)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, &errs.DomainError{
+			Code:    errs.CodeKeyNotFound,
+			Op:      "key",
+			Message: "invalid entity type",
+			Class:   errs.ClassValidation,
+		}
+	}
+	return &Controller{key: key, repo: repo}, nil
+}
+
+// KeyID returns the SSH key ID (fingerprint).
+func (c *Controller) KeyID() string {
+	return c.key.ID
+}
+
+// KeyName returns the SSH key name.
+func (c *Controller) KeyName() string {
+	return c.key.Name
+}
+
+// Inspect returns the SSHKeyItem model for this key.
+func (c *Controller) Inspect() *model.SSHKeyItem {
+	return c.key
+}
+
+// Export copies both public and private key files to a destination directory.
+// Matches Python's KeyController.export() exactly.
+func (c *Controller) Export(ctx context.Context, destDir string, keysDir string, overwrite bool) (string, string, error) {
+	_ = ctx // context is unused here, kept for API consistency
+
+	sourcePrivate := filepath.Join(keysDir, c.key.Name)
+	sourcePublic := filepath.Join(keysDir, c.key.Name+".pub")
+
+	if _, err := os.Stat(sourcePrivate); os.IsNotExist(err) {
+		return "", "", &errs.DomainError{
+			Code:    errs.CodeKeyExportFailed,
+			Op:      "key",
+			Entity:  c.key.Name,
+			Message: "Private key not found for '" + c.key.Name + "'",
+			Class:   errs.ClassValidation,
+		}
+	}
+	if _, err := os.Stat(sourcePublic); os.IsNotExist(err) {
+		return "", "", &errs.DomainError{
+			Code:    errs.CodeKeyExportFailed,
+			Op:      "key",
+			Entity:  c.key.Name,
+			Message: "Public key not found for '" + c.key.Name + "'",
+			Class:   errs.ClassValidation,
+		}
+	}
+
+	if err := os.MkdirAll(destDir, os.ModePerm); err != nil {
+		return "", "", err
+	}
+
+	destPrivate := filepath.Join(destDir, c.key.Name)
+	destPublic := filepath.Join(destDir, c.key.Name+".pub")
+
+	if !overwrite {
+		var existing []string
+		if _, err := os.Stat(destPrivate); err == nil {
+			existing = append(existing, destPrivate)
+		}
+		if _, err := os.Stat(destPublic); err == nil {
+			existing = append(existing, destPublic)
+		}
+		if len(existing) > 0 {
+			return "", "", &errs.DomainError{
+				Code:    errs.CodeKeyExportFailed,
+				Op:      "key",
+				Message: "Key file(s) already exist: " + strings.Join(existing, ", ") + ". Use --overwrite to replace.",
+				Class:   errs.ClassValidation,
+			}
+		}
+	}
+
+	// Python: shutil.copy2(source_private, dest_private) then dest_private.chmod(0o600)
+	if err := copy2(sourcePrivate, destPrivate); err != nil {
+		return "", "", fmt.Errorf("copy private key: %w", err)
+	}
+	if err := os.Chmod(destPrivate, privateKeyPerm); err != nil {
+		return "", "", fmt.Errorf("chmod private key: %w", err)
+	}
+
+	// Python: shutil.copy2(source_public, dest_public)
+	if err := copy2(sourcePublic, destPublic); err != nil {
+		return "", "", fmt.Errorf("copy public key: %w", err)
+	}
+
+	return destPrivate, destPublic, nil
+}
+
+// copy2 implements Python's shutil.copy2(src, dst) behavior:
+// copies file content, permission bits, and timestamps (atime, mtime).
+// TODO(verdict#33): belongs in infra/fs or similar shared utility
+func copy2(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	// Create dest with the same permissions as source
+	dstFile, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, srcInfo.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		return err
+	}
+
+	// Preserve timestamps (atime and mtime) matching shutil.copystat behavior
+	if err := os.Chtimes(dst, srcInfo.ModTime(), srcInfo.ModTime()); err != nil {
+		return err
+	}
+
+	return dstFile.Close()
+}

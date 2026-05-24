@@ -1,0 +1,96 @@
+# Cloud-init template for mvmctl VMs
+# All sections are rendered together; placeholders are substituted at runtime.
+user_data: |
+  #cloud-config
+  datasource:
+    NoCloud:
+      seedfrom: /
+  # Hostname configuration (will be replaced by setup scripts)
+  hostname: {{.VMName}}
+  fqdn: {{.VMName}}.local
+
+  # DNS Configuration
+  manage_resolv_conf: true
+  resolv_conf:
+    nameservers:
+      - 1.1.1.1
+      - 8.8.8.8
+    searchdomains:
+      - local
+
+  users:
+    - default
+    {{- if .SSHPubkeys }}
+    - name: {{.User}}
+      groups: sudo
+      shell: /bin/bash
+      sudo: ALL=(ALL) NOPASSWD:ALL
+      ssh-authorized-keys:
+        {{- range .SSHPubkeys }}
+        - {{.}}
+        {{- end }}
+    {{- end }}
+
+  {{- if .SSHPubkeys }}
+    - name: human
+      sudo: ALL=(ALL) NOPASSWD:ALL
+      groups: users, admin
+      home: /home/human
+      shell: /bin/bash
+      lock_passwd: false
+      passwd: {{.PasswordHash}}
+      ssh-authorized-keys:
+        {{- range .SSHPubkeys }}
+        - {{.}}
+        {{- end }}
+    {{- end }}
+
+  package_update: false
+  package_upgrade: false
+  packages:
+    - openssh-server
+    - curl
+    - wget
+    - git
+    - net-tools
+    - vim
+    - tmux
+    - netcat-openbsd
+    - iputils-ping
+    - htop
+    - cloud-init
+
+  runcmd:
+    - systemctl disable --now snapd.appliance.service 2>/dev/null || true
+    {{- if .SSHPubkeys }}
+    - systemctl enable --now sshd || systemctl enable --now ssh
+    {{- end }}
+
+  final_message: "[x] VM provisioned via MVMCTL"
+meta_data: |
+  instance-id: {{.VMName}}
+  local-hostname: {{.VMName}}
+# Network configuration for cloud-init netplan/systemd-networkd
+# NOTE: This is IGNORED when kernel ip= parameter is present (kernel has absolute priority)
+# The kernel ip= parameter already configures the network, this is kept for documentation purposes
+network_config: |
+  version: 2
+  ethernets:
+    eth0:
+      dhcp4: false
+      dhcp6: false
+      addresses:
+        - {{.GuestIP}}/{{.NetworkPrefixLen}}
+      routes:
+        - to: default
+          via: {{.IPv4Gateway}}
+      nameservers:
+        addresses:
+          - 8.8.8.8
+          - 1.1.1.1
+nocloud_cfg: |
+  datasource_list:
+    - NoCloud
+  datasource:
+    NoCloud:
+      seedfrom: /

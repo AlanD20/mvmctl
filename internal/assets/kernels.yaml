@@ -1,0 +1,112 @@
+kernel-official:
+  type: official
+  version: "6.19.9"
+  resolver: http-dir
+  versions_url: "https://cdn.kernel.org/pub/linux/kernel/"
+  source: https://cdn.kernel.org/pub/linux/kernel/v{series}.x/linux-{version}.tar.xz
+  sha256: null
+  sha256_url: "https://cdn.kernel.org/pub/linux/kernel/v{series}.x/sha256sums.asc"
+  config_url_template: "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/resources/guest_configs/microvm-kernel-ci-{arch}-6.1.config"
+  config_fragments:
+    - https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/resources/guest_configs/microvm-kernel-ci-{arch}-6.1.config
+  output_name: vmlinux-official
+  build_dir: /tmp/mvmctl/kernel-build
+  parallel_jobs: null
+  enabled_configs:
+    # Filesystems
+    - CONFIG_BTRFS_FS
+    - CONFIG_BTRFS_FS_POSIX_ACL
+    - CONFIG_EXT4_FS
+    - CONFIG_EXT4_FS_POSIX_ACL
+    - CONFIG_XFS_FS
+    - CONFIG_SQUASHFS
+    # VirtIO (all must be built-in for Firecracker)
+    - CONFIG_VIRTIO
+    - CONFIG_VIRTIO_MENU
+    - CONFIG_VIRTIO_MMIO
+    - CONFIG_VIRTIO_PCI
+    - CONFIG_VIRTIO_BLK
+    - CONFIG_VIRTIO_NET
+    - CONFIG_VIRTIO_CONSOLE
+    # Serial console
+    - CONFIG_SERIAL_8250
+    - CONFIG_SERIAL_8250_CONSOLE
+    # Network
+    - CONFIG_NET
+    - CONFIG_INET
+    - CONFIG_IPV6
+    # KVM guest optimisations
+    - CONFIG_KVM_GUEST
+    - CONFIG_PARAVIRT
+    # Security / BPF / cgroups
+    - CONFIG_SECURITY_LANDLOCK
+    - CONFIG_BPF_SYSCALL
+    - CONFIG_CGROUPS
+    - CONFIG_MEMCG
+    # PCI (required for some upstream kernels)
+    - CONFIG_PCI
+  disabled_configs:
+    - CONFIG_BLK_DEV_ZONED
+    - CONFIG_VIRTIO_BLK_F_SECURE_ERASE
+    - CONFIG_VIRTIO_BLK_SCSI
+  set_val_configs:
+    - option: CONFIG_SERIAL_8250_NR_UARTS
+      value: "4"
+  required_settings:
+    - CONFIG_BTRFS_FS=y
+    - CONFIG_VIRTIO_BLK=y
+    - CONFIG_VIRTIO_NET=y
+    - CONFIG_SERIAL_8250_CONSOLE=y
+    - CONFIG_KVM_GUEST=y
+  features:
+    kvm:
+      desc: "Nested KVM virtualization (host modules)"
+      configs:
+        - CONFIG_VIRTUALIZATION
+        - CONFIG_KVM
+        - CONFIG_KVM_INTEL
+        - CONFIG_KVM_AMD
+      requires:
+        - CONFIG_VIRTUALIZATION=y
+        - CONFIG_KVM=y
+        - CONFIG_KVM_INTEL=y
+        - CONFIG_KVM_AMD=y
+    nftables:
+      desc: "nftables NAT firewall backend"
+      configs:
+        - CONFIG_NFT_NAT
+        - CONFIG_NF_TABLES_INET
+        - CONFIG_NF_NAT_MASQUERADE
+        - CONFIG_NFT_MASQ
+    tuntap:
+      desc: "TUN/TAP device support (required for VM networking)"
+      configs:
+        - CONFIG_TUN
+      requires:
+        - CONFIG_TUN=y
+  options:
+    version_discoveries:
+      - "v6.x"
+      - "v7.x"
+    file_pattern: "linux-"
+    file_suffix: ".tar.xz"
+
+kernel-firecracker:
+  type: firecracker
+  version: "6.1"
+  source: "https://s3.amazonaws.com/spec.ccfc.min"
+  resolver: firecracker-s3
+  list_url_template: "http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/vmlinux-{version}&list-type=2"
+  config_url_template: "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/resources/guest_configs/microvm-kernel-ci-{arch}-{version}.config"
+  output_name: vmlinux-firecracker
+  build_dir: /tmp/mvmctl/kernel-build
+  sha256: null
+  sha256_url: null
+  config_fragments: []
+  parallel_jobs: null
+  enabled_configs: []
+  disabled_configs: []
+  set_val_configs: []
+  required_settings: []
+  options:
+    s3_version_pattern: "vmlinux-([\\d.]+)"

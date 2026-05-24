@@ -1,0 +1,163 @@
+package inputs
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"strconv"
+
+	"mvmctl/internal/core/config"
+	"mvmctl/internal/core/vm"
+	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/model"
+)
+
+// LogInput matches Python's LogInput dataclass.
+//
+//	@dataclass
+//	class LogInput:
+//	    identifier: str
+//	    os_log: bool = False
+//	    lines: int | None = None
+//	    follow: bool | None = None
+type LogInput struct {
+	Identifier string `json:"identifier"`
+	OsLog      bool   `json:"os_log"`
+	Lines      *int   `json:"lines,omitempty"`
+	Follow     *bool  `json:"follow,omitempty"`
+}
+
+// ResolvedLogInput matches Python's ResolvedLogInput (frozen dataclass).
+//
+//	@dataclass(frozen=True)
+//	class ResolvedLogInput:
+//	    vm: VMInstanceItem
+//	    log_type: str
+//	    lines: int
+//	    follow: bool
+//	    log_filename: str
+//	    serial_output_filename: str
+type ResolvedLogInput struct {
+	VM                   *model.VM
+	LogType              string
+	Lines                int
+	Follow               bool
+	LogFilename          string
+	SerialOutputFilename string
+}
+
+// LogRequest matches Python's LogRequest.
+//
+// Resolve LogInput against the database and constants.
+type LogRequest struct {
+	_db     *sql.DB
+	_input  LogInput
+	_result *ResolvedLogInput
+}
+
+// NewLogRequest creates a new LogRequest.
+func NewLogRequest(inputs LogInput, db *sql.DB) *LogRequest {
+	return &LogRequest{
+		_db:    db,
+		_input: inputs,
+	}
+}
+
+// Result returns the resolved input, or nil if resolve() has not been called.
+func (r *LogRequest) Result() *ResolvedLogInput {
+	return r._result
+}
+
+// Resolve resolves all inputs to explicit values.
+// Matches Python's LogRequest.resolve().
+func (r *LogRequest) Resolve(ctx context.Context, vmRepo vm.Repository) (*ResolvedLogInput, error) {
+	vmEntity, err := r.resolveVM(ctx, vmRepo)
+	if err != nil {
+		return nil, err
+	}
+
+	logType := r.resolveLogType()
+
+	// Validate log_type before passing to service
+	if logType != "boot" && logType != "os" {
+		return nil, &errs.DomainError{
+			Code:    errs.CodeValidationFailed,
+			Op:      "logs",
+			Message: fmt.Sprintf("Unknown log type '%s'. Valid: boot, os", logType),
+			Class:   errs.ClassValidation,
+		}
+	}
+
+	lines := r.resolveLines(ctx)
+	follow := r.resolveFollow(ctx)
+
+	logFilename, _ := config.Resolve(ctx, r._db, "defaults.firecracker", "log_filename")
+	logFilenameStr := toString(logFilename)
+
+	serialOutputFilename, _ := config.Resolve(ctx, r._db, "defaults.firecracker", "serial_output_filename")
+	serialOutputFilenameStr := toString(serialOutputFilename)
+
+	r._result = &ResolvedLogInput{
+		VM:                   vmEntity,
+		LogType:              logType,
+		Lines:                lines,
+		Follow:               follow,
+		LogFilename:          logFilenameStr,
+		SerialOutputFilename: serialOutputFilenameStr,
+	}
+
+	return r._result, nil
+}
+
+func (r *LogRequest) resolveVM(ctx context.Context, vmRepo vm.Repository) (*model.VM, error) {
+	// Use VMRequest pipeline like Python's LogRequest._resolve_vm()
+	// Python lets VMNotFoundError propagate directly, so we don't wrap
+	vmRequest := NewVMRequest(VMInput{Identifiers: []string{r._input.Identifier}}, r._db, vmRepo, nil)
+	resolved, err := vmRequest.Resolve(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return resolved.VMs[0], nil
+}
+
+func (r *LogRequest) resolveLogType() string {
+	if r._input.OsLog {
+		return "os"
+	}
+	return "boot"
+}
+
+func (r *LogRequest) resolveLines(ctx context.Context) int {
+	if r._input.Lines != nil {
+		return *r._input.Lines
+	}
+	lines, err := config.Resolve(ctx, r._db, "settings.vm", "log_lines")
+	if err == nil && lines != nil {
+		// Python: int(SettingsService.resolve(...)) — handles int, str, etc.
+		switch v := lines.(type) {
+		case int64:
+			return int(v)
+		case int:
+			return v
+		case float64:
+			return int(v)
+		case string:
+			if i, err := strconv.Atoi(v); err == nil {
+				return i
+			}
+		}
+	}
+	return 0
+}
+
+func (r *LogRequest) resolveFollow(ctx context.Context) bool {
+	if r._input.Follow != nil {
+		return *r._input.Follow
+	}
+	follow, err := config.Resolve(ctx, r._db, "settings.vm", "log_follow")
+	if err == nil && follow != nil {
+		// Python: bool(value) is truthy for many types, not just bool
+		return pythonBool(follow)
+	}
+	return false
+}

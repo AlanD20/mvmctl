@@ -1,0 +1,282 @@
+package volume
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/model"
+	"mvmctl/internal/infra/system"
+)
+
+// Service handles volume disk operations — creation, removal, resizing, and inspection.
+// Matches Python's VolumeService exactly.
+type Service struct {
+	repo Repository
+}
+
+// NewService creates a new VolumeService.
+func NewService(repo Repository) *Service {
+	return &Service{repo: repo}
+}
+
+
+// formatProcessError formats an error from a subprocess command to match
+// Python's ProcessError message format exactly.
+//
+// Python's ProcessError formats:
+//   - Non-zero exit:   "Command failed (exit N): cmd\n[sanitized_stderr]"
+//   - Command not found: "Command not found: cmd"
+//   - Timeout:          "Command timed out after Ns: cmd"
+//
+// stderr is the captured stderr content (from an explicit buffer set on cmd.Stderr).
+// If stderr is empty, falls back to exitErr.Stderr (populated by cmd.Output()).
+func formatProcessError(cmdName string, stderr string, err error) string {
+	var exitErr *exec.ExitError
+
+	if !errors.As(err, &exitErr) {
+		// Command not found — matches Python's FileNotFoundError → ProcessError("Command not found: cmd")
+		if errors.Is(err, exec.ErrNotFound) {
+			return fmt.Sprintf("Command not found: %s", cmdName)
+		}
+		// Other non-exit errors (e.g., context cancelled, permissions) — return raw error
+		return err.Error()
+	}
+
+	// Non-zero exit — matches Python's CalledProcessError → ProcessError("Command failed (exit N): cmd")
+	exitCode := exitErr.ExitCode()
+
+	sanitized := sanitizeStderr(stderr)
+	// Fall back to exitErr.Stderr (populated by cmd.Output() when cmd.Stderr was nil)
+	if sanitized == "" && len(exitErr.Stderr) > 0 {
+		sanitized = sanitizeStderr(string(exitErr.Stderr))
+	}
+
+	msg := fmt.Sprintf("Command failed (exit %d): %s", exitCode, cmdName)
+	if sanitized != "" {
+		msg += "\n" + sanitized
+	}
+	return msg
+}
+
+// sanitizeStderr matches Python's _sanitize_stderr(): strip, truncate to 100 chars, add "...".
+func sanitizeStderr(stderr string) string {
+	cleaned := strings.TrimSpace(stderr)
+	const limit = 100
+	if len(cleaned) > limit {
+		return cleaned[:limit] + "..."
+	}
+	return cleaned
+}
+
+// CreateDisk creates a disk file on the filesystem and persists the volume record.
+// Matches Python's VolumeService.create_disk() exactly.
+func (s *Service) CreateDisk(ctx context.Context, vol *model.VolumeItem) (*model.VolumeItem, error) {
+	diskPath := vol.Path
+	parentDir := filepath.Dir(diskPath)
+	// Python: disk_path.parent.mkdir(parents=True, exist_ok=True) — no try/except,
+	// lets OSError/PermissionError propagate unhandled (raw filesystem error).
+	// Go must match: return the raw os.MkdirAll error, NOT wrapped in VolumeError.
+	if err := os.MkdirAll(parentDir, 0777); err != nil {
+		return nil, err
+	}
+
+	switch vol.Format {
+	case "raw":
+		result := system.RunCmdCompat(ctx, []string{"fallocate", "-l", strconv.FormatInt(vol.SizeBytes, 10), diskPath}, system.DefaultRunCmdOptions())
+		if result.Err != nil {
+			// Python: raise VolumeError(f"fallocate failed: {e}") from e
+			return nil, NewVolumeErrorf("fallocate failed: %s", result.Err.Error())
+		}
+	case "qcow2":
+		result := system.RunCmdCompat(ctx, []string{"qemu-img", "create", "-f", "qcow2", diskPath, strconv.FormatInt(vol.SizeBytes, 10)}, system.DefaultRunCmdOptions())
+		if result.Err != nil {
+			return nil, NewVolumeErrorf("qemu-img create failed: %s", result.Err.Error())
+		}
+	default:
+		return nil, NewVolumeErrorf("Unsupported format: %s", vol.Format)
+	}
+
+	if err := s.repo.Upsert(ctx, vol); err != nil {
+		return nil, fmt.Errorf("upsert volume after creation: %w", err)
+	}
+
+	return vol, nil
+}
+
+// ListAll returns all volumes from the database.
+// Matches Python's VolumeService.list_all().
+func (s *Service) ListAll(ctx context.Context) ([]*model.VolumeItem, error) {
+	return s.repo.ListAll(ctx)
+}
+
+// Remove deletes the disk file and its DB record.
+// Matches Python's VolumeService.remove() exactly.
+//
+// Python fire-and-forgets ALL failures silently:
+//
+//	def remove(self, volume: VolumeItem) -> None:
+//	    self._repo.delete(volume.id)             ← no try/except, ignores all errors
+//	    disk_path = Path(volume.path)
+//	    if disk_path.exists():                    ← explicit existence check
+//	        disk_path.unlink(missing_ok=True)     ← ignores file-not-found
+//
+// Go must match: silently ignore ALL errors from repo.Delete and os.Remove.
+// Return nil always (matching Python's None return).
+func (s *Service) Remove(ctx context.Context, volume *model.VolumeItem) error {
+	// Python: self._repo.delete(volume.id) — silently ignores all failures
+	_ = s.repo.Delete(ctx, volume.ID)
+
+	// Python: if disk_path.exists(): disk_path.unlink(missing_ok=True)
+	if _, err := os.Stat(volume.Path); err == nil {
+		_ = os.Remove(volume.Path)
+	}
+
+	return nil
+}
+
+// ResizeDisk resizes a disk file and updates the DB record.
+// Matches Python's VolumeService.resize_disk() exactly.
+func (s *Service) ResizeDisk(ctx context.Context, vol *model.VolumeItem, newSizeBytes int64) (*model.VolumeItem, error) {
+	diskPath := vol.Path
+
+	if _, err := os.Stat(diskPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil, NewVolumeErrorf("Disk file not found: %s", diskPath)
+		}
+		return nil, fmt.Errorf("stat disk file: %w", err)
+	}
+
+	switch vol.Format {
+	case "raw":
+		result := system.RunCmdCompat(ctx, []string{"fallocate", "-l", strconv.FormatInt(newSizeBytes, 10), diskPath}, system.DefaultRunCmdOptions())
+		if result.Err != nil {
+			return nil, NewVolumeErrorf("fallocate resize failed: %s", result.Err.Error())
+		}
+	case "qcow2":
+		result := system.RunCmdCompat(ctx, []string{"qemu-img", "resize", diskPath, strconv.FormatInt(newSizeBytes, 10)}, system.DefaultRunCmdOptions())
+		if result.Err != nil {
+			return nil, NewVolumeErrorf("qemu-img resize failed: %s", result.Err.Error())
+		}
+	default:
+		return nil, NewVolumeErrorf("Unsupported format: %s", vol.Format)
+	}
+
+	// Update volume fields — matches Python's resize_disk() which sets
+	// size_bytes and updated_at before upserting.
+	vol.SizeBytes = newSizeBytes
+	vol.UpdatedAt = infra.NowISO()
+
+	if err := s.repo.Upsert(ctx, vol); err != nil {
+		return nil, fmt.Errorf("upsert volume after resize: %w", err)
+	}
+
+	return vol, nil
+}
+
+// GetDiskInfo returns disk information using qemu-img info.
+// Matches Python's VolumeService.get_disk_info().
+func GetDiskInfo(ctx context.Context, path string) (map[string]any, error) {
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil, NewVolumeErrorf("Disk file not found: %s", path)
+		}
+		return nil, fmt.Errorf("stat disk file: %w", err)
+	}
+
+	result := system.RunCmdCompat(ctx, []string{"qemu-img", "info", "--output=json", path}, system.DefaultRunCmdOptions())
+	if result.Err != nil {
+		return nil, NewVolumeErrorf("qemu-img info failed: %s", result.Err.Error())
+	}
+
+	var data map[string]any
+	if err := json.Unmarshal(result.StdoutBytes, &data); err != nil {
+		return nil, fmt.Errorf("parse qemu-img info output: %w", err)
+	}
+
+	return data, nil
+}
+
+// VolumesToDrives converts volumes to Firecracker drive configurations.
+// Matches Python's VolumeService.volumes_to_drives().
+func VolumesToDrives(volumes []*model.VolumeItem) ([]DriveConfig, error) {
+	var drives []DriveConfig
+	for _, vol := range volumes {
+		if vol.Status != model.VolumeStatusAvailable && vol.Status != model.VolumeStatusAttached {
+			return nil, NewVolumeErrorf(
+				"Volume '%s' is not available (status: %s)",
+				vol.Name, vol.Status,
+			)
+		}
+		drives = append(drives, DriveConfig{
+			DriveID:      vol.ID,
+			PathOnHost:   vol.Path,
+			IsRootDevice: false,
+			IsReadOnly:   vol.IsReadOnly,
+			CacheType:    "Unsafe",
+			IOEngine:     "Sync",
+		})
+	}
+	return drives, nil
+}
+
+// SetVolumesState updates the state of one or more volumes.
+// Matches Python's VolumeService.set_volumes_state() exactly.
+// Python: vm_id: str | None = None — defaults to None.
+// Python fire-and-forgets individual failures: logs a warning and continues.
+// Go must match — don't aggregate errors, just log warnings.
+func (s *Service) SetVolumesState(ctx context.Context, volumes []*model.VolumeItem, status model.VolumeStatus, vmID *string) error {
+	if len(volumes) == 0 {
+		return nil
+	}
+
+	switch status {
+	case model.VolumeStatusAttached:
+		if vmID == nil || *vmID == "" {
+			return errs.ValidationFailed(
+				errs.CodeValidationFailed,
+				"vm_id is required when state is ATTACHED",
+			)
+		}
+		for _, vol := range volumes {
+			controller := &Controller{volume: vol, repo: s.repo}
+			if err := controller.Attach(ctx, *vmID); err != nil {
+				// Python: logger.warning("Failed to attach volume '%s': %s", vol.name, exc)
+				slog.Warn("Failed to attach volume", "name", vol.Name, "error", err)
+			}
+		}
+	case model.VolumeStatusAvailable:
+		for _, vol := range volumes {
+			if vol.Status != model.VolumeStatusAttached {
+				continue
+			}
+			controller := &Controller{volume: vol, repo: s.repo}
+			if err := controller.Detach(ctx); err != nil {
+				// Python: logger.warning("Failed to detach volume '%s': %s", vol.name, exc)
+				slog.Warn("Failed to detach volume", "name", vol.Name, "error", err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// DriveConfig is a Firecracker drive configuration for volume attachment.
+// Matches Python's VolumeService.volumes_to_drives() output exactly.
+type DriveConfig struct {
+	DriveID      string `json:"drive_id"`
+	PathOnHost   string `json:"path_on_host"`
+	IsRootDevice bool   `json:"is_root_device"`
+	IsReadOnly   bool   `json:"is_read_only"`
+	CacheType    string `json:"cache_type"`
+	IOEngine     string `json:"io_engine"`
+}

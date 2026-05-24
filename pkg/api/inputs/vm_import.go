@@ -1,0 +1,281 @@
+package inputs
+
+import (
+	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"path/filepath"
+	"strconv"
+	"time"
+
+	"mvmctl/internal/core/binary"
+	"mvmctl/internal/core/image"
+	"mvmctl/internal/core/kernel"
+	"mvmctl/internal/core/key"
+	"mvmctl/internal/core/network"
+	"mvmctl/internal/core/vm"
+	"mvmctl/internal/core/volume"
+	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/errs"
+)
+
+// VMImportInput is the raw import parameters from CLI.
+// Matches Python's VMImportInput dataclass:
+//
+//	@dataclass
+//	class VMImportInput:
+//	    config_path: Path
+//	    name_override: str | None = None
+type VMImportInput struct {
+	ConfigPath   string  `json:"config_path"`
+	NameOverride *string `json:"name_override,omitempty"`
+}
+
+// VMImportRequest matches Python's VMImportRequest.
+//
+// Resolve VMImportInput to ResolvedVMCreateInput.
+// Python delegates to VMCreateRequest for full resolution.
+type VMImportRequest struct {
+	db     *sql.DB
+	_input VMImportInput
+}
+
+// NewVMImportRequest creates a new VMImportRequest.
+func NewVMImportRequest(inputs VMImportInput, db *sql.DB) *VMImportRequest {
+	return &VMImportRequest{
+		db:     db,
+		_input: inputs,
+	}
+}
+
+// Resolve resolves import config to fully resolved VM creation parameters.
+// Matches Python's VMImportRequest.resolve():
+//
+//  1. Read VMExportConfig from JSON file
+//  2. Resolve semantic references to DB records
+//  3. Build VMCreateInput with resolved values
+//  4. Delegate to VMCreateRequest (VMCreateBuilder) for full resolution
+func (r *VMImportRequest) Resolve(ctx context.Context) (*VMCreateResolved, error) {
+	// 1. Read export config from JSON file
+	exportConfig, err := FromVMExportConfigJSONFile(r._input.ConfigPath)
+	if err != nil {
+		return nil, &errs.DomainError{
+			Code:    errs.CodeVMCreateFailed,
+			Op:      "vm_import",
+			Message: fmt.Sprintf("Failed to read config: %s", err.Error()),
+			Class:   errs.ClassValidation,
+		}
+	}
+
+	// 2. Create repos from DB (matching Python's per-request repo creation)
+	imageRepo := image.NewRepository(r.db)
+	kernelRepo := kernel.NewRepository(r.db)
+	binaryRepo := binary.NewRepository(r.db)
+	networkRepo := network.NewRepository(r.db)
+	vmRepo := vm.NewRepository(r.db)
+	keyRepo := key.NewRepository(r.db)
+	volumeRepo := volume.NewRepository(r.db)
+	leaseRepo := network.NewLeaseRepository(r.db)
+
+	// 3. Resolve all assets from semantic references
+	imageSlug, err := r.resolveImage(ctx, exportConfig.Image, imageRepo)
+	if err != nil {
+		return nil, err
+	}
+
+	kernelID, err := r.resolveKernel(ctx, exportConfig.Kernel, kernelRepo)
+	if err != nil {
+		return nil, err
+	}
+
+	binaryID, err := r.resolveBinary(ctx, exportConfig.Binary, binaryRepo)
+	if err != nil {
+		return nil, err
+	}
+
+	networkName, err := r.resolveNetwork(ctx, exportConfig.Network, networkRepo)
+	if err != nil {
+		return nil, err
+	}
+
+	// 4. Build name
+	vmName := exportConfig.Name
+	if r._input.NameOverride != nil && *r._input.NameOverride != "" {
+		vmName = *r._input.NameOverride
+	}
+
+	// 5. Parse cpu_config from export JSON string (matching Python)
+	var cpuConfig map[string]any
+	if exportConfig.Firecracker.CPUConfig != nil {
+		// Python catches JSONDecodeError and logs a warning (non-fatal).
+		// Python: if cpu_config is not None: try json.loads(cpu_config) except JSONDecodeError: logger.warning(...)
+		if err := json.Unmarshal([]byte(*exportConfig.Firecracker.CPUConfig), &cpuConfig); err != nil {
+			slog.Warn("Failed to parse cpu_config from import file",
+				"cpu_config", *exportConfig.Firecracker.CPUConfig,
+				"error", err,
+			)
+		}
+	}
+
+	// 6. Build VMCreateInput with resolved values (matching Python exactly)
+	createInput := VMCreateInput{
+		Name:                vmName,
+		SSHKeys:             []string{},
+		VCPUCount:           exportConfig.Compute.VCPUs,
+		Image:               imageSlug,
+		KernelID:            kernelID,
+		BinaryID:            binaryID,
+		NetworkName:         networkName,
+		PCIEnabled:          exportConfig.Firecracker.PCIEnabled,
+		EnableConsole:       exportConfig.Boot.EnableConsole,
+		LSMFlags:            exportConfig.Firecracker.LsmFlags,
+		BootArgs:            exportConfig.Boot.Args,
+		NestedVirt:          exportConfig.Firecracker.NestedVirt,
+		NocloudNetPort:      exportConfig.CloudInit.NocloudNetPort,
+		CPUConfig:           cpuConfig,
+		Atomic:              false,
+		SkipCINetworkConfig: false,
+		KeepCloudInitISO:    false,
+		SkipCleanup:         false,
+		SkipDeblob:          false,
+		Count:               nil,
+		Volumes:             nil,
+	}
+
+	// mem_size_mib: Python does str(export_config.compute.mem)
+	// Python: str(None) → "None", str(2048) → "2048"
+	var memStr string
+	if exportConfig.Compute.Mem != nil {
+		memStr = strconv.Itoa(*exportConfig.Compute.Mem)
+	} else {
+		memStr = "None"
+	}
+	createInput.MemSizeMib = &memStr
+
+	// disk_size: Python passes export_config.image.disk_size directly (could be None)
+	createInput.DiskSize = exportConfig.Image.DiskSize
+
+	// requested_guest_ip / requested_guest_mac: Python passes export_config.network fields directly (could be None)
+	createInput.RequestedGuestIP = exportConfig.Network.IP
+	createInput.RequestedGuestMAC = exportConfig.Network.MAC
+
+	// cloud_init_mode / user: Python passes export_config.cloud_init fields directly (could be None)
+	createInput.CloudInitMode = exportConfig.CloudInit.Mode
+	createInput.User = exportConfig.CloudInit.User
+
+	// 7. Generate vm_id and vm_dir (matching Python: HashGenerator.vm + CacheUtils.get_vm_dir)
+	now := time.Now()
+	ts := now.Format(time.RFC3339)
+	vmID := generateVMID(vmName, ts)
+	vmDir := getVMDir(vmID)
+
+	// 8. Create VMCreateBuilder (matching Python's VMCreateRequest)
+	builder := NewVMCreateBuilder(
+		r.db,
+		vmRepo,
+		networkRepo,
+		imageRepo,
+		kernelRepo,
+		binaryRepo,
+		keyRepo,
+		volumeRepo,
+		leaseRepo,
+		vmID,
+		vmDir,
+	)
+
+	// 9. Delegate to builder for full resolution (matching Python's VMCreateRequest.resolve())
+	return builder.Build(ctx, createInput)
+}
+
+func (r *VMImportRequest) resolveImage(ctx context.Context, imgConfig VMExportImageConfig, imageRepo image.Repository) (*string, error) {
+	if imgConfig.Type == nil || *imgConfig.Type == "" {
+		return nil, nil
+	}
+	resolver := image.NewResolver(imageRepo)
+	img, err := resolver.ByType(ctx, *imgConfig.Type)
+	if err != nil {
+		return nil, &errs.DomainError{
+			Code:    errs.CodeImageNotFound,
+			Op:      "vm_import",
+			Message: fmt.Sprintf("Image '%s' not found. Fetch it first: mvm image pull %s", *imgConfig.Type, *imgConfig.Type),
+			Class:   errs.ClassValidation,
+		}
+	}
+	t := img.Type
+	return &t, nil
+}
+
+func (r *VMImportRequest) resolveKernel(ctx context.Context, knlConfig VMExportKernelConfig, kernelRepo kernel.Repository) (*string, error) {
+	if knlConfig.Version == nil || *knlConfig.Version == "" || knlConfig.Type == nil || *knlConfig.Type == "" {
+		return nil, nil
+	}
+	resolver := kernel.NewResolver(kernelRepo, nil)
+	krnl, err := resolver.ByVersionType(ctx, *knlConfig.Version, *knlConfig.Type)
+	if err != nil {
+		return nil, &errs.DomainError{
+			Code: errs.CodeKernelNotFound,
+			Op:   "vm_import",
+			// Python uses !r (repr) which adds quotes: version='6.1.0', type='vmlinux'
+			Message: fmt.Sprintf("Kernel version=%q, type=%q not found. Fetch it first: mvm kernel pull --type %s", *knlConfig.Version, *knlConfig.Type, *knlConfig.Type),
+			Class:   errs.ClassValidation,
+		}
+	}
+	return &krnl.ID, nil
+}
+
+func (r *VMImportRequest) resolveBinary(ctx context.Context, binConfig VMExportBinaryConfig, binaryRepo binary.Repository) (*string, error) {
+	if binConfig.Version == nil || *binConfig.Version == "" {
+		return nil, nil
+	}
+	resolver := binary.NewResolver(binaryRepo)
+	bin, err := resolver.ByNameVersion(ctx, binConfig.Name, *binConfig.Version)
+	if err != nil {
+		return nil, &errs.DomainError{
+			Code:    errs.CodeBinaryNotFound,
+			Op:      "vm_import",
+			Message: fmt.Sprintf("Binary '%s' version='%s' not found. Fetch it first: mvm bin pull %s", binConfig.Name, *binConfig.Version, *binConfig.Version),
+			Class:   errs.ClassValidation,
+		}
+	}
+	return &bin.ID, nil
+}
+
+func (r *VMImportRequest) resolveNetwork(ctx context.Context, netConfig VMExportNetworkConfig, networkRepo network.Repository) (*string, error) {
+	if netConfig.Name == nil || *netConfig.Name == "" {
+		return nil, nil
+	}
+	resolver := network.NewResolver(networkRepo)
+	net, err := resolver.ByName(ctx, *netConfig.Name)
+	if err != nil {
+		return nil, &errs.DomainError{
+			Code:    errs.CodeNetworkNotFound,
+			Op:      "vm_import",
+			Message: fmt.Sprintf("Network '%s' not found. Create it first: mvm network create %s", *netConfig.Name, *netConfig.Name),
+			Class:   errs.ClassValidation,
+		}
+	}
+	return &net.Name, nil
+}
+
+// generateVMID generates a VM ID from name and timestamp.
+// Matches Python's HashGenerator.vm():
+//
+//	data = f"{name}:{created_at}"
+//	return hashlib.sha256(data.encode()).hexdigest()[:32]
+func generateVMID(name, timestamp string) string {
+	h := sha256.Sum256([]byte(name + ":" + timestamp))
+	full := fmt.Sprintf("%x", h)
+	if len(full) > 32 {
+		return full[:32]
+	}
+	return full
+}
+
+// getVMDir returns the VM directory path.
+func getVMDir(vmID string) string {
+	return filepath.Join(infra.GetVmsDir(), vmID)
+}
