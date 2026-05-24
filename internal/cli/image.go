@@ -1,0 +1,744 @@
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/spf13/cobra"
+	"mvmctl/internal/cli/common"
+	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/api"
+	"mvmctl/pkg/api/inputs"
+)
+
+// NewImageCmd creates the image management command tree.
+func NewImageCmd(imageAPI *api.ImageOperation) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "image",
+		Aliases: []string{"img"},
+		Short:   "Image management",
+		Long:    "Download, list, inspect, and manage VM images.",
+	}
+
+	cmd.AddCommand(newImageLsCmd(imageAPI))
+	cmd.AddCommand(newImagePullCmd(imageAPI))
+	cmd.AddCommand(newImageRmCmd(imageAPI))
+	cmd.AddCommand(newImageInspectCmd(imageAPI))
+	cmd.AddCommand(newImageDefaultCmd(imageAPI))
+	cmd.AddCommand(newImageImportCmd(imageAPI))
+	cmd.AddCommand(newImageWarmCmd(imageAPI))
+
+	helpCmd := &cobra.Command{
+		Use:    "help",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		Run: func(cmd *cobra.Command, args []string) {
+			cmd.Help()
+		},
+	}
+	cmd.AddCommand(helpCmd)
+
+	return cmd
+}
+
+// ─── ls ──────────────────────────────────────────────────────────────────────
+
+func newImageLsCmd(imageAPI *api.ImageOperation) *cobra.Command {
+	var (
+		jsonOutput bool
+		remote     bool
+		noCache    bool
+		typeFilter string
+		longOutput bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "ls",
+		Short: "List cached images (or available remote images with --remote).",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if remote {
+				fmt.Fprintln(os.Stderr, "Fetching remote images")
+				raw, err := imageAPI.ListAll(cmd.Context(), true, typeFilter, nil, noCache)
+				if err != nil {
+					return err
+				}
+				if versions, ok := raw.([]*model.ImageVersion); ok {
+					printRemoteImages(versions, jsonOutput)
+				}
+			} else {
+				raw, err := imageAPI.ListAll(cmd.Context(), false, "", nil, false)
+				if err != nil {
+					return err
+				}
+				if images, ok := raw.([]*model.ImageItem); ok {
+					printLocalImages(images, jsonOutput, longOutput, cmd.Context())
+				}
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
+	cmd.Flags().BoolVarP(&remote, "remote", "r", false, "Show available remote images")
+	cmd.Flags().BoolVar(&noCache, "no-cache", false, "Skip cached version listing and fetch live from upstream")
+	cmd.Flags().StringVar(&typeFilter, "type", "", "Filter by image type (e.g. ubuntu, alpine)")
+	cmd.Flags().BoolVar(&longOutput, "long", false, "Show full listing with all columns")
+
+	return cmd
+}
+
+func printRemoteImages(versions []*model.ImageVersion, jsonOutput bool) {
+	if jsonOutput {
+		type remoteEntry struct {
+			Version     string `json:"version"`
+			Codename    string `json:"codename"`
+			Type        string `json:"type"`
+			DisplayName string `json:"display_name"`
+			DownloadURL string `json:"download_url"`
+			SHA256URL   string `json:"sha256_url"`
+			Format      string `json:"format"`
+		}
+		data := make([]remoteEntry, 0, len(versions))
+		for _, v := range versions {
+			codename := ""
+			if v.Codename != nil {
+				codename = *v.Codename
+			}
+			sha256URL := ""
+			if v.SHA256URL != nil {
+				sha256URL = *v.SHA256URL
+			}
+			displayName := v.DisplayName
+			if displayName == "" {
+				displayName = v.Version
+			}
+			data = append(data, remoteEntry{
+				Version:     v.Version,
+				Codename:    codename,
+				Type:        v.Type,
+				DisplayName: displayName,
+				DownloadURL: v.DownloadURL,
+				SHA256URL:   sha256URL,
+				Format:      v.Format,
+			})
+		}
+		b, _ := json.MarshalIndent(data, "", "  ")
+		fmt.Println(string(b))
+		return
+	}
+
+	if len(versions) == 0 {
+		cli.Info("No remote images available.")
+		return
+	}
+
+	// Group by type preserving order
+	groups := make(map[string][]*model.ImageVersion)
+	for _, v := range versions {
+		groups[v.Type] = append(groups[v.Type], v)
+	}
+
+	// Sort types alphabetically
+	sortedTypes := make([]string, 0, len(groups))
+	for t := range groups {
+		sortedTypes = append(sortedTypes, t)
+	}
+	sort.Strings(sortedTypes)
+
+	rows := make([][]string, 0)
+	for _, typeKey := range sortedTypes {
+		versionList := groups[typeKey]
+		if len(versionList) == 0 {
+			continue
+		}
+
+		// Type-level display name from the first version's TypeName
+		typeDisplay := versionList[0].TypeName
+		if typeDisplay == "" {
+			typeDisplay = typeKey
+		}
+
+		// Type header row
+		rows = append(rows, []string{typeKey, typeDisplay})
+
+		// Version rows with tree indent
+		for j, v := range versionList {
+			isLast := j == len(versionList)-1
+			prefix := "  └─ "
+			if !isLast {
+				prefix = "  ├─ "
+			}
+			display := v.DisplayName
+			if display == "" {
+				display = v.Version
+			}
+			rows = append(rows, []string{prefix + v.Version, display})
+		}
+	}
+
+	cli.Table([]string{"Type / Version", "Description"}, rows)
+}
+
+func printLocalImages(images []*model.ImageItem, jsonOutput bool, longOutput bool, ctx context.Context) {
+	if jsonOutput {
+		type localEntry struct {
+			ID               string  `json:"id"`
+			Name             string  `json:"name"`
+			Type             string  `json:"type"`
+			Arch             string  `json:"arch"`
+			Path             string  `json:"path"`
+			FSType           string  `json:"fs_type"`
+			FSUUID           *string `json:"fs_uuid"`
+			CompressedSize   *int64  `json:"compressed_size"`
+			OriginalSize     int64   `json:"original_size"`
+			CompressionRatio *float64 `json:"compression_ratio"`
+			CompressedFormat *string `json:"compressed_format"`
+			MinRootfsSizeMiB int     `json:"minimum_rootfs_size_mib"`
+			PulledAt         string  `json:"pulled_at"`
+			IsDefault        bool    `json:"is_default"`
+			IsPresent        bool    `json:"is_present"`
+			CreatedAt        string  `json:"created_at"`
+			UpdatedAt        string  `json:"updated_at"`
+		}
+		data := make([]localEntry, 0, len(images))
+		for _, img := range images {
+			data = append(data, localEntry{
+				ID:               img.ID,
+				Name:             img.Name,
+				Type:             img.Type,
+				Arch:             img.Arch,
+				Path:             img.Path,
+				FSType:           img.FSType,
+				FSUUID:           img.FSUUID,
+				CompressedSize:   img.CompressedSize,
+				OriginalSize:     img.OriginalSize,
+				CompressionRatio: img.CompressionRatio,
+				CompressedFormat: img.CompressedFormat,
+				MinRootfsSizeMiB: img.MinRootfsSizeMiB,
+				PulledAt:         img.PulledAt,
+				IsDefault:        img.IsDefault,
+				IsPresent:        img.IsPresent,
+				CreatedAt:        img.CreatedAt,
+				UpdatedAt:        img.UpdatedAt,
+			})
+		}
+		b, _ := json.MarshalIndent(data, "", "  ")
+		fmt.Println(string(b))
+		return
+	}
+
+	style := resolveListingStyle(ctx, configAPIRef, longOutput)
+	isLong := style == "long"
+
+	rows := make([][]string, 0, len(images))
+	for _, img := range images {
+		marker := cli.FormatMarker(img.IsDefault)
+		created := cli.FormatTimestamp(img.CreatedAt, "relative")
+
+		if isLong {
+			size := "-"
+			if img.CompressedSize != nil {
+				size = cli.FormatSize(*img.CompressedSize)
+			}
+			rows = append(rows, []string{
+				marker,
+				cli.FormatID(img.ID),
+				cli.FormatName(img.Name, !img.IsPresent),
+				img.Type,
+				img.Arch,
+				img.FSType,
+				size,
+				created,
+			})
+		} else {
+			rows = append(rows, []string{
+				marker,
+				cli.FormatID(img.ID),
+				cli.FormatName(img.Name, !img.IsPresent),
+				img.Type,
+				created,
+			})
+		}
+	}
+
+	if isLong {
+		cli.Table([]string{"", "ID", "Name", "Type", "Arch", "FS Type", "Size", "Created"}, rows)
+	} else {
+		cli.Table([]string{"", "ID", "Name", "Type", "Created"}, rows)
+	}
+}
+
+// ─── pull ────────────────────────────────────────────────────────────────────
+
+func newImagePullCmd(imageAPI *api.ImageOperation) *cobra.Command {
+	var (
+		imageType        string
+		version          string
+		arch             string
+		force            bool
+		noCache          bool
+		setDefault       bool
+		skipOptimization bool
+		disableDetector  string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "pull [selector]",
+		Short: "Download an image by its ID. Run 'mvm image ls -r' to list available image IDs.",
+		Long: `Download an image by its ID. Run 'mvm image ls -r' to list available image IDs.
+
+The selector can be a type (e.g. "ubuntu") or type:version (e.g. "ubuntu:24.04").`,
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeRemoteImageIDs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			selector := args[0]
+
+			var disabledDetectors []string
+			if disableDetector != "" {
+				for _, s := range strings.Split(disableDetector, ",") {
+					s = strings.TrimSpace(s)
+					if s != "" {
+						disabledDetectors = append(disabledDetectors, s)
+					}
+				}
+			}
+
+			// Match Python: if image_type is None (not explicitly set), parse selector for type:version
+			typeFlag := cmd.Flags().Lookup("type")
+			typeExplicitlySet := typeFlag != nil && typeFlag.Changed
+
+			effectiveType := imageType
+			effectiveVersion := version
+
+			if !typeExplicitlySet && strings.Contains(selector, ":") {
+				parts := strings.SplitN(selector, ":", 2)
+				effectiveType = parts[0]
+				if len(parts) > 1 {
+					effectiveVersion = parts[1]
+				}
+			} else if !typeExplicitlySet {
+				effectiveType = selector
+			}
+
+			var ver *string
+			if effectiveVersion != "" {
+				ver = &effectiveVersion
+			}
+			var archPtr *string
+			if arch != "" {
+				archPtr = &arch
+			}
+			input := &inputs.ImagePullInput{
+				Type:              effectiveType,
+				Version:           ver,
+				Arch:              archPtr,
+				Force:             force,
+				NoCache:           noCache,
+				SetDefault:        setDefault,
+				SkipOptimization:  skipOptimization,
+				DisabledDetectors: disabledDetectors,
+			}
+
+			spinner := common.NewSpinner("")
+			spinner.Start()
+			result := imageAPI.Pull(cmd.Context(), input, func(event errs.ProgressEvent) {
+				if event.Message != "" {
+					spinner.UpdateText(event.Message)
+				}
+			})
+			spinner.Stop()
+			if ni, ok := result.(*errs.NeedsInteraction); ok {
+				cli.Info(ni.Message)
+				return nil
+			}
+			opResult, ok := result.(*errs.OperationResult)
+			if !ok {
+				return fmt.Errorf("pull failed: unexpected result type")
+			}
+			if opResult.IsError() {
+				msg := opResult.Message
+				if msg == "" {
+					msg = fmt.Sprintf("Download failed: %s", selector)
+				}
+				cli.Error(msg)
+				return fmt.Errorf("download failed: %s", msg)
+			}
+			img, ok := opResult.Item.(*model.ImageItem)
+			if !ok || img == nil {
+				return fmt.Errorf("pull failed: no image returned")
+			}
+
+			cli.Success(fmt.Sprintf("Pulled: %s (ID: %s)", img.Name, cli.FormatID(img.ID)))
+			if setDefault {
+				cli.Success(fmt.Sprintf("Default image set to: %s", selector))
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&imageType, "type", "", "Image type from images.yaml (e.g. ubuntu, debian, firecracker)")
+	cmd.Flags().StringVar(&version, "version", "", "Image spec version from images.yaml (required if multiple images share the same type)")
+	cmd.Flags().StringVar(&arch, "arch", "", "Image architecture (e.g. x86_64, arm64)")
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "Re-download even if exists")
+	cmd.Flags().BoolVar(&noCache, "no-cache", false, "Skip cached version listing and fetch live from upstream")
+	cmd.Flags().BoolVarP(&setDefault, "default", "d", false, "Set as default image after download")
+	cmd.Flags().BoolVar(&skipOptimization, "skip-optimization", false, "Skip shrink and compression, keep plain ext4")
+	cmd.Flags().StringVar(&disableDetector, "disable-detector", "", "Comma-separated detectors to disable: type,label,size,filesystem,all")
+
+	return cmd
+}
+
+// ─── rm ──────────────────────────────────────────────────────────────────────
+
+func newImageRmCmd(imageAPI *api.ImageOperation) *cobra.Command {
+	var force bool
+
+	cmd := &cobra.Command{
+		Use:                "rm [ids...]",
+		Short:              "Remove cached images by ID prefix.",
+		Long: `Remove cached images by ID prefix.
+
+Examples:
+  mvm image rm abc123
+  mvm image rm abc123 def456`,
+		Args:               cobra.MinimumNArgs(1),
+		ValidArgsFunction:  completeImageIDs,
+		DisableSuggestions: true,
+		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ids := args
+			result := imageAPI.Remove(cmd.Context(), &inputs.ImageInput{ID: ids}, force)
+			for _, r := range result.Items {
+				itemID := "unknown"
+				if r.Item != nil {
+					if img, ok := r.Item.(*model.ImageItem); ok {
+						itemID = cli.FormatID(img.ID)
+					}
+				}
+				if r.IsOK() {
+					cli.Success(fmt.Sprintf("Removed: %s", itemID))
+				} else if r.Message != "" {
+					cli.Error(r.Message)
+				} else {
+					cli.Error(fmt.Sprintf("Remove failed: %s", itemID))
+				}
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "Remove even if referenced by VMs")
+
+	return cmd
+}
+
+// ─── inspect ─────────────────────────────────────────────────────────────────
+
+func newImageInspectCmd(imageAPI *api.ImageOperation) *cobra.Command {
+	var jsonOutput bool
+
+	cmd := &cobra.Command{
+		Use:               "inspect [id]",
+		Short:             "Show detailed information about an image.",
+		Long: `Show detailed information about an image.
+
+Examples:
+  mvm image inspect abc123
+  mvm image inspect abc123 --json`,
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeImageIDs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			prefix := args[0]
+
+			input := &inputs.ImageInput{ID: []string{prefix}}
+			info, err := imageAPI.Inspect(cmd.Context(), input)
+			if err != nil {
+				return err
+			}
+			if info == nil {
+				return fmt.Errorf("image not found: %s", prefix)
+			}
+
+			if jsonOutput {
+				b, _ := json.MarshalIndent(info, "", "  ")
+				fmt.Println(string(b))
+				return nil
+			}
+
+			// Extract name from the grouped dict for the title
+			name := prefix
+			if imgSection, ok := info["image"].(map[string]interface{}); ok {
+				if n, ok := imgSection["name"].(string); ok && n != "" {
+					name = n
+				}
+			}
+			cli.PrintDictTree(info, fmt.Sprintf("Image: %s", name))
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
+
+	return cmd
+}
+
+// ─── default ─────────────────────────────────────────────────────────────────
+
+func newImageDefaultCmd(imageAPI *api.ImageOperation) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:               "default [id]",
+		Short:             "Set the default image for VM creation.",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeImageIDs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			prefix := args[0]
+			imgInput := inputs.ImageInput{ID: []string{prefix}}
+			result := imageAPI.SetDefault(cmd.Context(), &imgInput)
+			if result.IsError() {
+				msg := result.Message
+				if msg == "" {
+					msg = fmt.Sprintf("Set default failed: %s", prefix)
+				}
+				return fmt.Errorf("Set default failed: %s", msg)
+			}
+			cli.Success(fmt.Sprintf("Default image set to: %s", prefix))
+			return nil
+		},
+	}
+
+	return cmd
+}
+
+// ─── import ──────────────────────────────────────────────────────────────────
+
+func newImageImportCmd(imageAPI *api.ImageOperation) *cobra.Command {
+	var (
+		arch             string
+		rootPartition    int
+		format           string
+		force            bool
+		setDefault       bool
+		skipOptimization bool
+		disableDetector  string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "import [name] [path]",
+		Short: "Import a local image file (qcow2, raw, tar-rootfs). The first argument is a display name.",
+		Long: `Import a local image file. The first argument is a display name, the second is the file path.
+
+Examples:
+  mvm image import my-image /path/to/image.qcow2
+  mvm image import my-image /path/to/image.raw --format raw`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			sourcePath := args[1]
+
+			// Verify source exists
+			if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
+				return fmt.Errorf("source file not found: %s", sourcePath)
+			}
+
+			var disabledDetectors []string
+			if disableDetector != "" {
+				for _, s := range strings.Split(disableDetector, ",") {
+					s = strings.TrimSpace(s)
+					if s != "" {
+						disabledDetectors = append(disabledDetectors, s)
+					}
+				}
+			}
+
+			// Auto-detect format from extension if not explicitly set.
+			// Matches Python: if format is None or format == "auto":
+			//   fname = source_path.name.lower()
+			//   format = next((fmt for ext, fmt in IMAGE_IMPORT_FORMAT_MAP.items() if fname.endswith(ext)), None)
+			formatFlag := cmd.Flags().Lookup("format")
+			formatExplicitlySet := formatFlag != nil && formatFlag.Changed
+			if !formatExplicitlySet || format == "auto" {
+				// Use the centralized format map for values but iterate in Python-compatible order.
+				extOrder := []string{".qcow2", ".raw", ".img", ".ext4", ".ext3", ".ext2", ".btrfs", ".xfs", ".vhd", ".vhdx", ".tar", ".tar.gz", ".tar.xz", ".tgz"}
+				fname := strings.ToLower(filepath.Base(sourcePath))
+				found := false
+				for _, ext := range extOrder {
+					if strings.HasSuffix(fname, ext) {
+						if fmtVal, ok := infra.ImageImportFormatMap[ext]; ok {
+							format = fmtVal
+							found = true
+							break
+						}
+					}
+				}
+				if !found {
+					return fmt.Errorf("Cannot auto-detect format from '%s'. Use --format qcow2|raw|tar-rootfs.", filepath.Base(sourcePath))
+				}
+			}
+
+			var archPtr *string
+			if arch != "" {
+				archPtr = &arch
+			}
+			var formatPtr *string
+			if format != "" {
+				formatPtr = &format
+			}
+			var partPtr *int
+			if rootPartition > 0 {
+				partPtr = &rootPartition
+			}
+			input := &inputs.ImageImportInput{
+				Name:              name,
+				Arch:              archPtr,
+				Format:            formatPtr,
+				SourcePath:        sourcePath,
+				Partition:         partPtr,
+				DisabledDetectors: disabledDetectors,
+				SkipOptimization:  skipOptimization,
+				SetDefault:        setDefault,
+				Force:             force,
+			}
+
+			spinner := common.NewSpinner("")
+			spinner.Start()
+			result := imageAPI.Import(cmd.Context(), input, func(event errs.ProgressEvent) {
+				if event.Message != "" {
+					spinner.UpdateText(event.Message)
+				}
+			})
+			spinner.Stop()
+			if result.IsError() {
+				msg := result.Message
+				if msg == "" {
+					msg = fmt.Sprintf("Import failed: %s", name)
+				}
+				return fmt.Errorf("Import failed: %s", msg)
+			}
+			img, ok := result.Item.(*model.ImageItem)
+			if !ok || img == nil {
+				return fmt.Errorf("import failed: no image returned")
+			}
+			cli.Success(fmt.Sprintf("Imported: %s", img.Path))
+			cli.Info(fmt.Sprintf("  Name: %s", name))
+			cli.Info(fmt.Sprintf("  ID:   %s", cli.FormatID(img.ID)))
+
+			if setDefault {
+				cli.Success(fmt.Sprintf("Default image set to: %s", name))
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&arch, "arch", "", "Image arch: x86_64, arm64")
+	cmd.Flags().IntVar(&rootPartition, "root-partition", 0, "Root Partition: 1, 2, 3")
+	cmd.Flags().StringVar(&format, "format", "", "Image format: qcow2, raw, tar-rootfs, or auto")
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "Overwrite existing")
+	cmd.Flags().BoolVarP(&setDefault, "default", "d", false, "Set as default after import")
+	cmd.Flags().BoolVar(&skipOptimization, "skip-optimization", false, "Skip shrink and compression, keep plain ext4")
+	cmd.Flags().StringVar(&disableDetector, "disable-detector", "", "Comma-separated detectors to disable: type,label,size,filesystem,all")
+
+	return cmd
+}
+
+// ─── warm ────────────────────────────────────────────────────────────────────
+
+func newImageWarmCmd(imageAPI *api.ImageOperation) *cobra.Command {
+	var (
+		warmAll bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "warm [id]",
+		Short: "Pre-decompress image to ready pool for fast VM creation.",
+		Long: `Pre-decompress image to ready pool for fast VM creation.
+
+This command decompresses the image to tmpfs/RAM ahead of time,
+so subsequent VM creations can use fast copy instead of waiting
+for decompression.
+
+Examples:
+  # Warm an image by OS slug:
+  mvm image warm ubuntu-24.04
+
+  # Warm by image ID prefix:
+  mvm image warm abc123
+
+  # Warm all cached images:
+  mvm image warm --all`,
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: completeImageIDs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			imageID := ""
+			if len(args) > 0 {
+				imageID = args[0]
+			}
+
+			// Match Python behavior:
+			//   if image_id is not None: warm specific image
+			//   else: warm all (defaults to all=True when no argument given)
+			spinner := common.NewSpinner("")
+			spinner.Start()
+			var opResult *errs.OperationResult
+			if imageID != "" {
+				warmInput := inputs.ImageInput{ID: []string{imageID}}
+				opResult = imageAPI.Warm(cmd.Context(), &warmInput, false, func(event errs.ProgressEvent) {
+					if event.Message != "" {
+						spinner.UpdateText(event.Message)
+					}
+				})
+			} else {
+				opResult = imageAPI.Warm(cmd.Context(), nil, true, func(event errs.ProgressEvent) {
+					if event.Message != "" {
+						spinner.UpdateText(event.Message)
+					}
+				})
+			}
+			result := opResult
+			spinner.Stop()
+			if result.IsError() {
+				msg := result.Message
+				if msg == "" {
+					msg = "Warm failed"
+				}
+				return fmt.Errorf("warm failed: %s", msg)
+			}
+			paths, _ := result.Item.([]string)
+
+			// Match Python:  display_name = image_id or "all images"
+			displayName := imageID
+			if displayName == "" {
+				displayName = "all images"
+			}
+
+			for _, p := range paths {
+				// Match Python: size_str = mvm_cli.format_size(path.stat().st_size)
+				// Python would raise an exception if path.stat() fails — let error propagate.
+				info, err := os.Stat(p)
+				if err != nil {
+					spinner.Stop()
+					return fmt.Errorf("failed to stat warmed path %s: %w", p, err)
+				}
+				sizeStr := cli.FormatSize(info.Size())
+
+				cli.Success(fmt.Sprintf("Warmed: %s", displayName))
+				cli.Info(fmt.Sprintf("  Path: %s", p))
+				cli.Info(fmt.Sprintf("  Size: %s", sizeStr))
+			}
+			cli.Info("  Ready for fast VM creation")
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVarP(&warmAll, "all", "a", false, "Warm all cached images")
+
+	return cmd
+}

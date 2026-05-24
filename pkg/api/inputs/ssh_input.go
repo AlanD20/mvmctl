@@ -1,0 +1,257 @@
+package inputs
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"os"
+	"strings"
+
+	"mvmctl/internal/core/config"
+	"mvmctl/internal/core/key"
+	"mvmctl/internal/core/vm"
+	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/model"
+)
+
+// SSHInput matches Python's SSHInput dataclass.
+//
+//	@dataclass
+//	class SSHInput:
+//	    identifier: str
+//	    user: str | None = None
+//	    key: Path | None = None
+//	    cmd: str | None = None
+//	    timeout: int | None = None
+type SSHInput struct {
+	Identifier string  `json:"identifier"`
+	User       *string `json:"user,omitempty"`
+	Key        *string `json:"key,omitempty"`
+	Cmd        *string `json:"cmd,omitempty"`
+	Timeout    *int    `json:"timeout,omitempty"`
+}
+
+// ResolvedSSHInput matches Python's ResolvedSSHInput (frozen dataclass).
+//
+//	@dataclass(frozen=True)
+//	class ResolvedSSHInput:
+//	    target_ip: str
+//	    user: str
+//	    key: Path | None
+//	    cmd: str | None
+//	    timeout: int | None
+type ResolvedSSHInput struct {
+	TargetIP string
+	User     string
+	Key      *string
+	Cmd      *string
+	Timeout  *int
+}
+
+// SSHRequest matches Python's SSHRequest.
+//
+// Resolve SSHInput against the database.
+type SSHRequest struct {
+	db      *sql.DB
+	_input  SSHInput
+	_result *ResolvedSSHInput
+	vm      *model.VM
+}
+
+// NewSSHRequest creates a new SSHRequest.
+func NewSSHRequest(inputs SSHInput, db *sql.DB) *SSHRequest {
+	return &SSHRequest{
+		db:     db,
+		_input: inputs,
+	}
+}
+
+// Result returns the resolved input, or nil if resolve() has not been called.
+func (r *SSHRequest) Result() *ResolvedSSHInput {
+	return r._result
+}
+
+// Resolve resolves all inputs to explicit values.
+// Matches Python's SSHRequest.resolve().
+func (r *SSHRequest) Resolve(ctx context.Context, vmRepo vm.Repository, keyRepo key.Repository) (*ResolvedSSHInput, error) {
+	targetIP, err := r.resolveTarget(ctx, vmRepo)
+	if err != nil {
+		return nil, err
+	}
+
+	user, err := r.resolveUser(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	sshKey, err := r.resolveKey(ctx, keyRepo)
+	if err != nil {
+		return nil, err
+	}
+
+	r._result = &ResolvedSSHInput{
+		TargetIP: targetIP,
+		User:     user,
+		Key:      sshKey,
+		Cmd:      r._input.Cmd,
+		Timeout:  r._input.Timeout,
+	}
+
+	// Validate
+	if err := r.ensureValidate(); err != nil {
+		return nil, err
+	}
+
+	return r._result, nil
+}
+
+func (r *SSHRequest) ensureValidate() error {
+	if r._result == nil {
+		return &errs.DomainError{
+			Code:    errs.CodeSSHError,
+			Op:      "ssh",
+			Message: "resolve() must be called before validation",
+			Class:   errs.ClassValidation,
+		}
+	}
+
+	if !infra.IsIPAddress(r._result.TargetIP) {
+		return &errs.DomainError{
+			Code:    errs.CodeSSHError,
+			Op:      "ssh",
+			Message: fmt.Sprintf("Invalid IP address: %s", r._result.TargetIP),
+			Class:   errs.ClassValidation,
+		}
+	}
+
+	if err := infra.ValidateSSHUsername(r._result.User); err != nil {
+		return &errs.DomainError{
+			Code:    errs.CodeSSHError,
+			Op:      "ssh",
+			Message: err.Error(),
+			Class:   errs.ClassValidation,
+		}
+	}
+
+	if r._result.Key != nil && *r._result.Key != "" {
+		if _, err := os.Stat(*r._result.Key); os.IsNotExist(err) {
+			return &errs.DomainError{
+				Code:    errs.CodeKeyNotFound,
+				Op:      "ssh",
+				Message: fmt.Sprintf("SSH key not found: %s", *r._result.Key),
+				Class:   errs.ClassValidation,
+			}
+		}
+	}
+
+	return nil
+}
+
+// resolveTarget resolves the target to an IP address.
+// Matches Python's SSHRequest._resolve_target().
+func (r *SSHRequest) resolveTarget(ctx context.Context, vmRepo vm.Repository) (string, error) {
+	target := r._input.Identifier
+
+	if target == "" {
+		return "", &errs.DomainError{
+			Code:    errs.CodeSSHError,
+			Op:      "ssh",
+			Message: "Provide a VM identifier (name, ID prefix, IP, or MAC address)",
+			Class:   errs.ClassValidation,
+		}
+	}
+
+	// Try to resolve as a VM entity
+	vmResolver := vm.NewResolver(vmRepo)
+	vmEntity, err := vmResolver.Resolve(ctx, target)
+	if err == nil && vmEntity != nil && vmEntity.IPv4 != "" {
+		r.vm = vmEntity
+		return vmEntity.IPv4, nil
+	}
+
+	// Fallback: use raw identifier (e.g., IP for a VM not in DB)
+	return target, nil
+}
+
+// resolveUser resolves the SSH user.
+// Matches Python's SSHRequest._resolve_user().
+func (r *SSHRequest) resolveUser(ctx context.Context) (string, error) {
+	if r._input.User != nil && *r._input.User != "" {
+		return *r._input.User, nil
+	}
+	// Check VM's stored ssh_user
+	if r.vm != nil && r.vm.SSHUser != nil && *r.vm.SSHUser != "" {
+		return *r.vm.SSHUser, nil
+	}
+	user, err := config.Resolve(ctx, r.db, "defaults.vm", "ssh_user")
+	if err == nil && user != nil {
+		return toString(user), nil
+	}
+	return "root", nil
+}
+
+// resolveKey resolves SSH private key path via the key domain.
+// Matches Python's SSHRequest._resolve_key().
+func (r *SSHRequest) resolveKey(ctx context.Context, keyRepo key.Repository) (*string, error) {
+	keyResolver := key.NewResolver(keyRepo)
+
+	if r._input.Key != nil && *r._input.Key != "" {
+		keyStr := *r._input.Key
+
+		// 1a. Try as registered key name via key resolver
+		keyItem, err := keyResolver.Resolve(ctx, keyStr)
+		if err == nil && keyItem.PrivateKeyPath != nil && *keyItem.PrivateKeyPath != "" {
+			if _, err := os.Stat(*keyItem.PrivateKeyPath); err == nil {
+				return keyItem.PrivateKeyPath, nil
+			}
+		}
+
+		// 1b. Try as direct filesystem path — validate private key content
+		if fi, err := os.Stat(keyStr); err == nil && !fi.IsDir() {
+			content, err := os.ReadFile(keyStr)
+			if err == nil && isPrivateKey(string(content)) {
+				return &keyStr, nil
+			}
+		}
+
+		return nil, &errs.DomainError{
+			Code:    errs.CodeSSHError,
+			Op:      "ssh",
+			Message: fmt.Sprintf("Key '%s' not found or is not a valid private key", keyStr),
+			Class:   errs.ClassValidation,
+		}
+	}
+
+	// 2. No key provided — check VM's stored ssh_keys (these are IDs)
+	if r.vm != nil {
+		for _, keyID := range r.vm.SSHKeys {
+			keyItem, err := keyResolver.ByID(ctx, keyID)
+			if err == nil && keyItem.PrivateKeyPath != nil && *keyItem.PrivateKeyPath != "" {
+				if _, err := os.Stat(*keyItem.PrivateKeyPath); err == nil {
+					return keyItem.PrivateKeyPath, nil
+				}
+			}
+		}
+	}
+
+	// 3. Fall back to default keys
+	defaults, err := keyRepo.GetDefaults(ctx)
+	if err == nil {
+		for _, keyItem := range defaults {
+			if keyItem.PrivateKeyPath != nil && *keyItem.PrivateKeyPath != "" {
+				if _, err := os.Stat(*keyItem.PrivateKeyPath); err == nil {
+					return keyItem.PrivateKeyPath, nil
+				}
+			}
+		}
+	}
+
+	return nil, nil
+}
+
+// isPrivateKey checks if content contains a PEM-encoded private key header.
+// Matches Python's KeyService._is_private_key().
+func isPrivateKey(content string) bool {
+	return strings.Contains(content, "-----BEGIN") && strings.Contains(content, "PRIVATE KEY-----")
+}

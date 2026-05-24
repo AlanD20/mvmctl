@@ -1,0 +1,198 @@
+package model
+
+// ── CpuConfig ──
+
+// CpuConfig matches Python's CpuConfig(TypedDict, total=False).
+type CpuConfig struct {
+	KvmCapabilities []string              `json:"kvm_capabilities,omitempty"`
+	CpuidModifiers  []CpuidLeafModifier   `json:"cpuid_modifiers,omitempty"`
+	MsrModifiers    []MsrModifier         `json:"msr_modifiers,omitempty"`
+	RegModifiers    []ArmRegisterModifier `json:"reg_modifiers,omitempty"`
+	VcpuFeatures    []VcpuFeatures        `json:"vcpu_features,omitempty"`
+}
+
+// ── CpuidRegisterModifier ──
+
+type CpuidRegisterModifier struct {
+	Register string `json:"register"`
+	Bitmap   string `json:"bitmap"`
+}
+
+// ── CpuidLeafModifier ──
+
+type CpuidLeafModifier struct {
+	Leaf      string                  `json:"leaf"`
+	Subleaf   string                  `json:"subleaf"`
+	Flags     int                     `json:"flags"`
+	Modifiers []CpuidRegisterModifier `json:"modifiers"`
+}
+
+// ── MsrModifier ──
+
+type MsrModifier struct {
+	Addr   string `json:"addr"`
+	Bitmap string `json:"bitmap"`
+}
+
+// ── ArmRegisterModifier ──
+
+type ArmRegisterModifier struct {
+	Addr   string `json:"addr"`
+	Bitmap string `json:"bitmap"`
+}
+
+// ── VcpuFeatures ──
+
+type VcpuFeatures struct {
+	Index  int    `json:"index"`
+	Bitmap string `json:"bitmap"`
+}
+
+// ── DriveConfig ──
+
+type DriveConfig struct {
+	DriveID      string  `json:"drive_id"`
+	PathOnHost   string  `json:"path_on_host"`
+	IsRootDevice bool    `json:"is_root_device"`
+	IsReadOnly   bool    `json:"is_read_only"`
+	Partuuid     *string `json:"partuuid,omitempty"`
+	CacheType    string  `json:"cache_type"`
+	IOEngine     string  `json:"io_engine"`
+	RateLimiter  any     `json:"rate_limiter,omitempty"` // RateLimiter is dynamically typed per Firecracker API spec — can be *TokenBucket, *RateLimiterConfig, or nil. Concrete type determined by Firecracker API response deserialization.
+	Socket       *string `json:"socket,omitempty"`
+}
+
+// ── BootSourceConfig ──
+
+type BootSourceConfig struct {
+	BootArgs        string  `json:"boot_args"`
+	KernelImagePath string  `json:"kernel_image_path"`
+	InitrdPath      *string `json:"initrd_path,omitempty"`
+}
+
+// ── NetworkInterfaceConfig ──
+
+type NetworkInterfaceConfig struct {
+	IfaceID     string `json:"iface_id"`
+	GuestMAC    string `json:"guest_mac"`
+	HostDevName string `json:"host_dev_name"`
+}
+
+// ── MachineConfig ──
+
+type MachineConfig struct {
+	VCPUCount       int     `json:"vcpu_count"`
+	MemSizeMiB      int     `json:"mem_size_mib"`
+	SMT             bool    `json:"smt"`
+	TrackDirtyPages bool    `json:"track_dirty_pages"`
+	CPUTemplate     *string `json:"cpu_template,omitempty"`
+}
+
+// ── LoggerConfig ──
+
+type LoggerConfig struct {
+	LogPath       string `json:"log_path"`
+	Level         string `json:"level"`
+	ShowLevel     bool   `json:"show_level"`
+	ShowLogOrigin bool   `json:"show_log_origin"`
+}
+
+// ── MetricsConfig ──
+
+type MetricsConfig struct {
+	MetricsPath string `json:"metrics_path"`
+}
+
+// ── FirecrackerConfigDict ──
+
+// FirecrackerConfigDict is a dynamic JSON map — Firecracker API has variable response shapes that can't be statically typed.
+// Raw Firecracker JSON config; schema controlled by Firecracker API, not by us
+type FirecrackerConfigDict map[string]any
+
+// ── InstanceInfo ──
+
+type InstanceInfo struct {
+	ID         string  `json:"id"`
+	State      string  `json:"state"`
+	VCPUCount  int     `json:"vcpu_count"`
+	MemSizeMiB int     `json:"mem_size_mib"`
+	BootTime   *string `json:"boot_time,omitempty"`
+}
+
+// ── InstanceDescription ──
+
+type InstanceDescription struct {
+	ID               string            `json:"id"`
+	State            string            `json:"state"`
+	VCPUCount        int               `json:"vcpu_count"`
+	MemSizeMiB       int               `json:"mem_size_mib"`
+	Flags            []string          `json:"flags"`
+	IfAddr           map[string]string `json:"if_addr"`
+	UsedBlockDevices []string          `json:"used_block_devices"`
+}
+
+// ── FirecrackerConfig ──
+
+// FirecrackerConfig matches Python's FirecrackerConfig dataclass exactly.
+type FirecrackerConfig struct {
+	// Paths
+	VMDir      string `json:"vm_dir"`
+	RootfsPath string `json:"rootfs_path"`
+
+	// Binary / kernel
+	BinaryPath string `json:"binary_path"`
+	KernelPath string `json:"kernel_path"`
+
+	// Machine
+	VCPUCount  int `json:"vcpu_count"`
+	MemSizeMiB int `json:"mem_size_mib"`
+
+	// Network
+	GuestIP        string `json:"guest_ip"`
+	GuestMAC       string `json:"guest_mac"`
+	TapName        string `json:"tap_name"`
+	NetworkGateway string `json:"network_gateway"`
+	NetworkNetmask string `json:"network_netmask"`
+
+	// Image metadata
+	ImageFSUUID *string `json:"image_fs_uuid,omitempty"`
+	ImageFSType string  `json:"image_fs_type"`
+
+	// Boot
+	BootArgs *string `json:"boot_args,omitempty"`
+	LSMFlags *string `json:"lsm_flags,omitempty"`
+
+	// Feature flags
+	PCIEnabled    bool `json:"pci_enabled"`
+	NestedVirt    bool `json:"nested_virt"`
+	EnableConsole bool `json:"enable_console"`
+	EnableLogging bool `json:"enable_logging"`
+	EnableMetrics bool `json:"enable_metrics"`
+
+	// File/path overrides
+	LogLevel             string `json:"log_level"`
+	LogFilename          string `json:"log_filename"`
+	SerialOutputFilename string `json:"serial_output_filename"`
+	MetricsFilename      string `json:"metrics_filename"`
+	APISocketFilename    string `json:"api_socket_filename"`
+	PIDFilename          string `json:"pid_filename"`
+	ConfigFilename       string `json:"config_filename"`
+
+	// Cloud-init
+	CloudInitMode       *CloudInitMode `json:"cloud_init_mode,omitempty"`
+	CloudInitISOPath    *string        `json:"cloud_init_iso_path,omitempty"`
+	CloudInitNoCloudURL *string        `json:"cloud_init_nocloud_url,omitempty"`
+
+	// CPU config
+	CPUConfig       *CpuConfig `json:"cpu_config,omitempty"`
+	CPUVendor       *string    `json:"cpu_vendor,omitempty"`
+	CPUArchitecture *string    `json:"cpu_architecture,omitempty"`
+
+	// Extra drives (volumes)
+	ExtraDrives []DriveConfig `json:"extra_drives,omitempty"`
+
+	// Spawn behavior
+	RelayEnabled  bool `json:"relay_enabled"`
+	RelayClientFD *int `json:"relay_client_fd,omitempty"`
+	SnapshotMode  bool `json:"snapshot_mode"`
+}

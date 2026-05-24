@@ -1,0 +1,319 @@
+package inputs
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"os"
+	"strings"
+
+	"mvmctl/internal/core/config"
+	"mvmctl/internal/core/key"
+	"mvmctl/internal/core/vm"
+	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/model"
+)
+
+// CPInput matches Python's CPInput dataclass.
+//
+//	@dataclass
+//	class CPInput:
+//	    sources: list[str]
+//	    dst: str
+//	    user: str | None = None
+//	    key: str | None = None
+//	    force: bool = False
+type CPInput struct {
+	Sources []string `json:"sources"`
+	Dst     string   `json:"dst"`
+	User    *string  `json:"user,omitempty"`
+	Key     *string  `json:"key,omitempty"`
+	Force   bool     `json:"force"`
+}
+
+// ResolvedCPInfo matches Python's ResolvedCPInfo dataclass.
+//
+//	@dataclass
+//	class ResolvedCPInfo:
+//	    identifier: str
+//	    ip: str
+//	    user: str
+//	    key_path: str | None
+//	    remote_path: str
+//	    is_directory: bool | None = None
+//	    total_bytes: int | None = None
+type ResolvedCPInfo struct {
+	Identifier  string
+	IP          string
+	User        string
+	KeyPath     *string
+	RemotePath  string
+	IsDirectory *bool
+	TotalBytes  *int64
+}
+
+// ResolvedCPInput matches Python's ResolvedCPInput (frozen dataclass).
+//
+//	@dataclass(frozen=True)
+//	class ResolvedCPInput:
+//	    direction: str  # "host_to_vm" | "vm_to_host" | "vm_to_vm"
+//	    local_paths: list[str] | None = None
+//	    src_info: ResolvedCPInfo | None = None
+//	    dst_info: ResolvedCPInfo | None = None
+//	    force: bool = False
+type ResolvedCPInput struct {
+	Direction  string
+	LocalPaths []string
+	SrcInfo    *ResolvedCPInfo
+	DstInfo    *ResolvedCPInfo
+	Force      bool
+}
+
+// CPRequest matches Python's CPRequest.
+//
+// Resolve CPInput against the database and filesystem.
+type CPRequest struct {
+	db      *sql.DB
+	_input  CPInput
+	_result *ResolvedCPInput
+}
+
+// NewCPRequest creates a new CPRequest.
+func NewCPRequest(inputs CPInput, db *sql.DB) *CPRequest {
+	return &CPRequest{
+		db:     db,
+		_input: inputs,
+	}
+}
+
+// ParseVMPath parses a "vm:path" string into VM identifier and remote path.
+// Matches Python's CPService._parse_vm_path().
+func ParseVMPath(path string) (vmIdent, remotePath string) {
+	if !strings.Contains(path, ":") {
+		return "", path
+	}
+	idx := strings.Index(path, ":")
+	vmIdent = path[:idx]
+	remotePath = path[idx+1:]
+	return vmIdent, remotePath
+}
+
+// Result returns the resolved input, or nil if resolve() has not been called.
+func (r *CPRequest) Result() *ResolvedCPInput {
+	return r._result
+}
+
+// Resolve resolves all inputs to explicit values.
+// Matches Python's CPRequest.resolve().
+func (r *CPRequest) Resolve(ctx context.Context, vmRepo vm.Repository, keyRepo key.Repository) (*ResolvedCPInput, error) {
+	sources := r._input.Sources
+	dstVM, dstPath := ParseVMPath(r._input.Dst)
+
+	var srcInfo, dstInfo *ResolvedCPInfo
+	var localPaths []string
+	direction := ""
+
+	if len(sources) > 1 {
+		// Multi-source only works for host -> VM
+		if dstVM == "" {
+			return nil, &errs.DomainError{
+				Code:    errs.CodeCPMultiSourceNoVMDest,
+				Op:      "cp",
+				Message: "Multiple sources require a VM destination (use vm_name:/path format)",
+				Class:   errs.ClassValidation,
+			}
+		}
+		direction = "host_to_vm"
+		localPaths = sources
+		var err error
+		dstInfo, err = r.resolveVMSide(ctx, dstVM, dstPath, false, vmRepo, keyRepo)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// Single source — determine direction by parsing source
+		srcPath := sources[0]
+		srcVM, srcRemotePath := ParseVMPath(srcPath)
+
+		if srcVM != "" && dstVM != "" {
+			direction = "vm_to_vm"
+		} else if srcVM != "" {
+			direction = "vm_to_host"
+		} else if dstVM != "" {
+			direction = "host_to_vm"
+		} else {
+			return nil, &errs.DomainError{
+				Code:    errs.CodeCPNoVMSpecified,
+				Op:      "cp",
+				Message: "At least one path must reference a VM (use vm_name:/path format)",
+				Class:   errs.ClassValidation,
+			}
+		}
+
+		switch direction {
+		case "host_to_vm":
+			localPaths = []string{srcPath}
+			var err error
+			dstInfo, err = r.resolveVMSide(ctx, dstVM, dstPath, false, vmRepo, keyRepo)
+			if err != nil {
+				return nil, err
+			}
+		case "vm_to_host":
+			var err error
+			srcInfo, err = r.resolveVMSide(ctx, srcVM, srcRemotePath, true, vmRepo, keyRepo)
+			if err != nil {
+				return nil, err
+			}
+			localPaths = []string{dstPath}
+		case "vm_to_vm":
+			var err error
+			srcInfo, err = r.resolveVMSide(ctx, srcVM, srcRemotePath, true, vmRepo, keyRepo)
+			if err != nil {
+				return nil, err
+			}
+			dstInfo, err = r.resolveVMSide(ctx, dstVM, dstPath, false, vmRepo, keyRepo)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	r._result = &ResolvedCPInput{
+		Direction:  direction,
+		LocalPaths: localPaths,
+		SrcInfo:    srcInfo,
+		DstInfo:    dstInfo,
+		Force:      r._input.Force,
+	}
+
+	return r._result, nil
+}
+
+// resolveVMSide resolves a VM-side path to connection info.
+// Matches Python's CPRequest._resolve_vm_side().
+func (r *CPRequest) resolveVMSide(ctx context.Context, vmIdent, remotePath string, isSource bool, vmRepo vm.Repository, keyRepo key.Repository) (*ResolvedCPInfo, error) {
+	vmEntity, err := r.resolveVM(ctx, vmIdent, vmRepo)
+	if err != nil {
+		return nil, err
+	}
+
+	user := r.resolveUser(ctx, vmEntity)
+	keyPath, err := r.resolveKey(ctx, vmEntity, keyRepo)
+	if err != nil {
+		return nil, err
+	}
+
+	if vmEntity.IPv4 == "" {
+		return nil, &errs.DomainError{
+			Code:    errs.CodeCPVMNoIP,
+			Op:      "cp",
+			Message: fmt.Sprintf("VM '%s' has no IP address assigned", vmIdent),
+			Class:   errs.ClassValidation,
+		}
+	}
+
+	return &ResolvedCPInfo{
+		Identifier: vmIdent,
+		IP:         vmEntity.IPv4,
+		User:       user,
+		KeyPath:    keyPath,
+		RemotePath: remotePath,
+	}, nil
+}
+
+// resolveVM resolves a VM by name, IP, MAC, or ID prefix.
+// Matches Python's CPRequest._resolve_vm().
+func (r *CPRequest) resolveVM(ctx context.Context, identifier string, vmRepo vm.Repository) (*model.VM, error) {
+	vmResolver := vm.NewResolver(vmRepo)
+	vmEntity, err := vmResolver.Resolve(ctx, identifier)
+	if err != nil {
+		return nil, &errs.DomainError{
+			Code:    errs.CodeCPVMNotFound,
+			Op:      "cp",
+			Message: fmt.Sprintf("Could not resolve VM '%s': %s", identifier, err.Error()),
+			Class:   errs.ClassValidation,
+		}
+	}
+	if vmEntity == nil {
+		return nil, &errs.DomainError{
+			Code:    errs.CodeCPVMNotFound,
+			Op:      "cp",
+			Message: fmt.Sprintf("VM '%s' not found", identifier),
+			Class:   errs.ClassValidation,
+		}
+	}
+	return vmEntity, nil
+}
+
+// resolveUser resolves the SSH user for copy.
+// Matches Python's CPRequest._resolve_user().
+func (r *CPRequest) resolveUser(ctx context.Context, vmEntity *model.VM) string {
+	if r._input.User != nil && *r._input.User != "" {
+		return *r._input.User
+	}
+	if vmEntity.SSHUser != nil && *vmEntity.SSHUser != "" {
+		return *vmEntity.SSHUser
+	}
+	user, err := config.Resolve(ctx, r.db, "defaults.vm", "ssh_user")
+	if err == nil && user != nil {
+		return toString(user)
+	}
+	return "root"
+}
+
+// resolveKey resolves SSH private key path for copy.
+// Matches Python's CPRequest._resolve_key().
+func (r *CPRequest) resolveKey(ctx context.Context, vmEntity *model.VM, keyRepo key.Repository) (*string, error) {
+	keyResolver := key.NewResolver(keyRepo)
+
+	if r._input.Key != nil && *r._input.Key != "" {
+		keyStr := *r._input.Key
+
+		// Try as registered key name
+		keyItem, err := keyResolver.Resolve(ctx, keyStr)
+		if err == nil && keyItem.PrivateKeyPath != nil && *keyItem.PrivateKeyPath != "" {
+			if _, err := os.Stat(*keyItem.PrivateKeyPath); err == nil {
+				return keyItem.PrivateKeyPath, nil
+			}
+		}
+
+		// Try as filesystem path — validate private key content
+		if fi, err := os.Stat(keyStr); err == nil && !fi.IsDir() {
+			content, err := os.ReadFile(keyStr)
+			if err == nil && isPrivateKey(string(content)) {
+				return &keyStr, nil
+			}
+		}
+
+		return nil, &errs.DomainError{
+			Code:    errs.CodeSSHError,
+			Op:      "cp",
+			Message: fmt.Sprintf("Key '%s' not found or is not a valid private key", keyStr),
+			Class:   errs.ClassValidation,
+		}
+	}
+
+	// Check VM's stored ssh_keys (these are IDs)
+	for _, keyID := range vmEntity.SSHKeys {
+		keyItem, err := keyResolver.ByID(ctx, keyID)
+		if err == nil && keyItem.PrivateKeyPath != nil && *keyItem.PrivateKeyPath != "" {
+			if _, err := os.Stat(*keyItem.PrivateKeyPath); err == nil {
+				return keyItem.PrivateKeyPath, nil
+			}
+		}
+	}
+
+	// Fall back to default keys
+	defaults, err := keyRepo.GetDefaults(ctx)
+	if err == nil {
+		for _, keyItem := range defaults {
+			if keyItem.PrivateKeyPath != nil && *keyItem.PrivateKeyPath != "" {
+				if _, err := os.Stat(*keyItem.PrivateKeyPath); err == nil {
+					return keyItem.PrivateKeyPath, nil
+				}
+			}
+		}
+	}
+
+	return nil, nil
+}

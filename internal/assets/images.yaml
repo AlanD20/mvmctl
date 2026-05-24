@@ -1,0 +1,103 @@
+# Image type catalog — used by the version listing system (mvm image pull --type)
+# =============================================================================
+image_types:
+  - type: ubuntu
+    name: "Ubuntu LTS"
+    resolver: http-dir
+    version_name_template: "Ubuntu {codename} ({version}) LTS"
+    versions_url: "https://cloud-images.ubuntu.com/releases/"
+    download_url: "https://cloud-images.ubuntu.com/{codename}/current/{codename}-server-cloudimg-{arch}-root.tar.xz"
+    sha256_url: "https://cloud-images.ubuntu.com/{codename}/current/SHA256SUMS"
+    format: tar-rootfs
+    options:
+      skip_patterns:
+        - streams
+        - releases
+        - server
+        - Parent Directory
+      codename_mapping:
+        resolute: "26.04"
+        noble: "24.04"
+        jammy: "22.04"
+        focal: "20.04"
+      arch_mapping:
+        x86_64: "amd64"
+        aarch64: "arm64"
+  - type: ubuntu-minimal
+    name: "Ubuntu Minimal"
+    resolver: http-dir
+    version_name_template: "Ubuntu {codename} ({version}) Minimal"
+    versions_url: "https://cloud-images.ubuntu.com/minimal/releases/"
+    download_url: "https://cloud-images.ubuntu.com/minimal/releases/{codename}/release/ubuntu-{version}-minimal-cloudimg-{arch}-root.tar.xz"
+    sha256_url: "https://cloud-images.ubuntu.com/minimal/releases/{codename}/RELEASE/SHA256SUMS"
+    format: tar-rootfs
+    options:
+      codename_mapping:
+        resolute: "26.04"
+        noble: "24.04"
+        jammy: "22.04"
+        focal: "20.04"
+      arch_mapping:
+        x86_64: "amd64"
+        aarch64: "arm64"
+  - type: debian
+    name: "Debian"
+    resolver: http-dir
+    version_name_template: "Debian {version}"
+    versions_url: "https://cloud.debian.org/images/cloud/"
+    download_url: "https://cloud.debian.org/images/cloud/{codename}/latest/debian-{version}-generic-{arch}.qcow2"
+    sha256_url: "https://cloud.debian.org/images/cloud/{codename}/latest/SHA256SUMS"
+    format: qcow2
+    options:
+      skip_patterns:
+        - OpenStack
+        - monthly
+      codename_mapping:
+        bookworm: "12"
+        trixie: "13"
+        bullseye: "11"
+      arch_mapping:
+        x86_64: "amd64"
+        aarch64: "arm64"
+  - type: alpine
+    name: "Alpine Linux"
+    resolver: http-dir
+    version_name_template: "Alpine Linux {version}"
+    versions_url: "https://dl-cdn.alpinelinux.org/alpine/"
+    download_url: "https://dl-cdn.alpinelinux.org/alpine/v{version}/releases/cloud/"
+    sha256_url: null
+    format: vhd
+    options:
+      version_prefix: "v"
+      skip_patterns:
+        - edge
+        - latest-stable
+        - Parent Directory
+        - MIRRORS
+        - last-updated
+      file_discovery:
+        enabled: true
+        pattern: "aws_alpine"
+        suffix: "-bios-cloudinit-r"
+        sha256_suffix: ".sha512"
+  - type: archlinux
+    name: "Arch Linux"
+    resolver: null
+    version_name_template: "Arch Linux"
+    versions_url: null
+    download_url: "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-{arch}-cloudimg.qcow2"
+    sha256_url: "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-{arch}-cloudimg.qcow2.SHA256"
+    format: qcow2
+    options:
+      convert_to: ext4
+  - type: firecracker
+    name: "Firecracker CI Ubuntu"
+    resolver: firecracker-s3
+    versions_url: null
+    download_url: "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/{ci_version}/{arch}/ubuntu-{version}.squashfs"
+    list_url_template: "http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/ubuntu-&list-type=2"
+    version_name_template: "Ubuntu {version} (Firecracker CI)"
+    sha256_url: null
+    format: squashfs
+    options:
+      s3_version_pattern: "ubuntu-([0-9.]+)\\.squashfs"

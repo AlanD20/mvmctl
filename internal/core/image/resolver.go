@@ -1,0 +1,242 @@
+package image
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"mvmctl/internal/infra/errs"
+)
+
+// RelationSpec corresponds to Python's RelationSpec dataclass in _enrichment.py.
+type RelationSpec struct {
+	FKField      string
+	Resolver     string
+	Method       string
+	RelationName string
+	IsReverse    bool
+	BatchMethod  string
+}
+
+// RELATIONS defines the cross-domain relations for image enrichment.
+// Matches Python's Resolver.RELATIONS dict.
+var RELATIONS = map[string]RelationSpec{
+	"vm": {
+		FKField:      "id",
+		Resolver:     "vm",
+		Method:       "by_image_id",
+		RelationName: "vms",
+		IsReverse:    true,
+		BatchMethod:  "by_image_id_batch",
+	},
+}
+
+// ResolveResult matches Python's ResolveResult dataclass.
+type ResolveResult struct {
+	Items    []*ImageItem
+	Errors   []string
+	ExitCode int
+}
+
+// EnrichFunc is a function that enriches images in-place with relations.
+// Set by the API layer during wiring to avoid circular imports.
+type EnrichFunc func(images []*ImageItem, include []string, relations map[string]RelationSpec)
+
+// Resolver matches Python's Resolver in _resolver.py.
+type Resolver struct {
+	repo       Repository
+	include    []string
+	enrichFunc EnrichFunc
+}
+
+// NewResolver creates a new Resolver.
+func NewResolver(repo Repository) *Resolver {
+	return &Resolver{repo: repo}
+}
+
+// SetEnrichFunc sets the enrichment function called after each resolution.
+// Must be set for cross-domain relation enrichment (e.g., populating VMs).
+func (r *Resolver) SetEnrichFunc(fn EnrichFunc) {
+	r.enrichFunc = fn
+}
+
+// enrich enriches images with relations if include is set.
+// Matches Python's Resolver.enrich() which delegates to RelationEnricher.
+func (r *Resolver) enrich(images []*ImageItem) []*ImageItem {
+	if r.include != nil && len(images) > 0 && r.enrichFunc != nil {
+		r.enrichFunc(images, r.include, RELATIONS)
+	}
+	return images
+}
+
+// SetInclude sets the relation names to include during resolution.
+func (r *Resolver) SetInclude(include []string) {
+	r.include = include
+}
+
+// ByID resolves by full ID.
+func (r *Resolver) ByID(ctx context.Context, imageID string) (*ImageItem, error) {
+	matches, err := r.repo.FindByPrefix(ctx, imageID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve image by ID: %w", err)
+	}
+	if len(matches) == 0 {
+		return nil, NewImageNotFoundError(fmt.Sprintf("Image not found: '%s'", imageID))
+	}
+	if len(matches) > 1 {
+		return nil, NewImageNotFoundError(fmt.Sprintf("Image ID is ambiguous: '%s'", imageID))
+	}
+	return r.enrich(matches)[0], nil
+}
+
+// ByVersionType resolves by version and type (both required).
+func (r *Resolver) ByVersionType(ctx context.Context, version, imgType string) (*ImageItem, error) {
+	dbImage, err := r.repo.GetByVersionAndType(ctx, version, imgType)
+	if err != nil {
+		return nil, err
+	}
+	if dbImage == nil {
+		return nil, NewImageNotFoundError(fmt.Sprintf("Image not found: version='%s', type='%s'", version, imgType))
+	}
+	return r.enrich([]*ImageItem{dbImage})[0], nil
+}
+
+// ByType resolves by image type.
+func (r *Resolver) ByType(ctx context.Context, imgType string) (*ImageItem, error) {
+	dbImage, err := r.repo.GetByType(ctx, imgType)
+	if err != nil {
+		return nil, err
+	}
+	if dbImage == nil {
+		return nil, NewImageNotFoundError(fmt.Sprintf("Image not found: '%s'", imgType))
+	}
+	return r.enrich([]*ImageItem{dbImage})[0], nil
+}
+
+// GetDefault resolves the default image, or nil if not set.
+func (r *Resolver) GetDefault(ctx context.Context) (*ImageItem, error) {
+	image, err := r.repo.GetDefault(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if image == nil {
+		return nil, nil
+	}
+	return r.enrich([]*ImageItem{image})[0], nil
+}
+
+// ByName resolves by display name.
+func (r *Resolver) ByName(ctx context.Context, name string) (*ImageItem, error) {
+	dbImage, err := r.repo.GetByName(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	if dbImage == nil {
+		return nil, NewImageNotFoundError(fmt.Sprintf("Image not found by name: '%s'", name))
+	}
+	return r.enrich([]*ImageItem{dbImage})[0], nil
+}
+
+// isImageNotFoundError checks if the error IS an ImageNotFoundError
+// using direct type assertion — NO unwrapping. Python's bare
+// "except ImageNotFoundError" only catches the exact exception type;
+// a wrapped ImageNotFoundError would NOT be caught in Python either.
+func isImageNotFoundError(err error) bool {
+	de, ok := err.(*errs.DomainError)
+	if !ok {
+		return false
+	}
+	return de.Code == errs.CodeImageNotFound
+}
+
+// Resolve resolves image by type:version, type, display name, or ID prefix.
+// Only ImageNotFoundError causes fallthrough to the next resolution method
+// — all other errors propagate immediately, matching Python's behavior.
+func (r *Resolver) Resolve(ctx context.Context, value string) (*ImageItem, error) {
+	prefix, rest, hasColon := parseSelector(value)
+	if hasColon {
+		// Python: if prefix is not None (None = no colon, "" = colon with empty prefix)
+		// Both cases enter this block since Python checks "is not None", and "" is not None.
+		image, err := r.ByVersionType(ctx, rest, prefix)
+		if err == nil {
+			return image, nil
+		}
+		if !isImageNotFoundError(err) {
+			return nil, err
+		}
+		value = prefix // Fall back to type-only lookup
+	}
+
+	image, err := r.ByType(ctx, value)
+	if err == nil {
+		return image, nil
+	}
+	if !isImageNotFoundError(err) {
+		return nil, err
+	}
+
+	image, err = r.ByName(ctx, value)
+	if err == nil {
+		return image, nil
+	}
+	if !isImageNotFoundError(err) {
+		return nil, err
+	}
+
+	return r.ByID(ctx, value)
+}
+
+// ResolveMany resolves multiple image identifiers.
+func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *ResolveResult {
+	seenInputs := make(map[string]bool)
+	var uniqueIDs []string
+	for _, ident := range identifiers {
+		if !seenInputs[ident] {
+			seenInputs[ident] = true
+			uniqueIDs = append(uniqueIDs, ident)
+		}
+	}
+
+	var items []*ImageItem
+	var errorsList []string
+	resolvedIDs := make(map[string]bool)
+
+	for _, identifier := range uniqueIDs {
+		item, err := r.Resolve(ctx, identifier)
+		if err != nil {
+			errorsList = append(errorsList, fmt.Sprintf("%s: %s", identifier, err))
+			continue
+		}
+		if !resolvedIDs[item.ID] {
+			resolvedIDs[item.ID] = true
+			items = append(items, item)
+		}
+	}
+
+	items = r.enrich(items)
+
+	exitCode := 0
+	if len(errorsList) > 0 && len(items) == 0 {
+		exitCode = 1
+	}
+
+	return &ResolveResult{
+		Items:    items,
+		Errors:   errorsList,
+		ExitCode: exitCode,
+	}
+}
+
+// parseSelector splits a "type:version" selector into its two parts.
+// Matches Python's VersionResolver.parse_selector() EXACTLY:
+//   - Returns ("", selector, false) when no colon is found (Python returns (None, selector))
+//   - Returns (prefix, rest, true) when a colon is found, even if prefix is ""
+//     (e.g. ":version" → ("", "version", true) — Python returns ("", "version")
+//      where "" is not None, so Python enters the fast path)
+func parseSelector(selector string) (string, string, bool) {
+	idx := strings.Index(selector, ":")
+	if idx < 0 {
+		return "", selector, false // no colon: Python returns (None, selector)
+	}
+	return selector[:idx], selector[idx+1:], true // has colon: Python returns (prefix, rest) where prefix may be ""
+}
