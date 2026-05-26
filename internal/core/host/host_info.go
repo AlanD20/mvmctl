@@ -1,8 +1,8 @@
 package host
 
 import (
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/model"
+	"mvmctl/internal/infra/validators"
 )
 
 // HardwareFromState reconstructs HostHardware from stored state, or returns nil if not yet detected.
@@ -64,7 +64,7 @@ func LimitsFromState(state *model.HostStateItem) *model.HostLimits {
 	}
 	var portRange [2]int
 	if state.IPLocalPortRange != nil {
-		portRange = infra.ParsePortRange(*state.IPLocalPortRange)
+		portRange = validators.ParsePortRange(*state.IPLocalPortRange)
 	} else {
 		portRange = [2]int{32768, 60999}
 	}
@@ -204,10 +204,10 @@ func HostInfoToDict(hi *model.HostInfo) map[string]interface{} {
 			"minimum_version_met": hi.Limits.KernelMinimumMet,
 		},
 		"limits": map[string]interface{}{
-			"pid_max":          hi.Limits.PIDMax,
-			"fd_max":           hi.Limits.FDMax,
-			"conntrack_max":    hi.Limits.ConntrackMax,
-			"tap_devices_max":  hi.Limits.TAPDevicesMax,
+			"pid_max":             hi.Limits.PIDMax,
+			"fd_max":              hi.Limits.FDMax,
+			"conntrack_max":       hi.Limits.ConntrackMax,
+			"tap_devices_max":     hi.Limits.TAPDevicesMax,
 			"ip_local_port_range": []int{hi.Limits.IPLocalPortRange[0], hi.Limits.IPLocalPortRange[1]},
 		},
 		"capacity": map[string]interface{}{

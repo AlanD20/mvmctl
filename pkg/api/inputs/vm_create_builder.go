@@ -22,8 +22,10 @@ import (
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/disk"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/internal/infra/validators"
 )
 
 // VMCreateBuilder resolves all DB-backed defaults and validates VM creation inputs.
@@ -90,7 +92,7 @@ func NewVMCreateBuilder(
 // Matches Python's VMCreateRequest.resolve() exactly.
 func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCreateResolved, error) {
 	// Validate VM name early — before any DB or subprocess calls
-	if err := infra.ValidateName(raw.Name); err != nil {
+	if err := validators.ValidateName(raw.Name); err != nil {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
 			Op:      "vm_create",
@@ -158,7 +160,7 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 	// Resolve disk size
 	var rootfsDiskSizeMib int
 	if raw.DiskSize != nil && *raw.DiskSize != "" {
-		bytes, err := infra.ParseDiskSizeToBytes(*raw.DiskSize)
+		bytes, err := disk.ParseDiskSizeToBytes(*raw.DiskSize)
 		if err != nil {
 			return nil, &errs.DomainError{
 				Code:    errs.CodeValidationFailed,
@@ -167,11 +169,11 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 				Class:   errs.ClassValidation,
 			}
 		}
-		rootfsDiskSizeMib = int(bytes / infra.MebibyteBytes)
+		rootfsDiskSizeMib = int(bytes / disk.MebibyteBytes)
 	} else {
 		rootfsDiskSizeMib = img.MinRootfsSizeMiB
 	}
-	rootfsDiskSizeBytes := int64(rootfsDiskSizeMib) * infra.MebibyteBytes
+	rootfsDiskSizeBytes := int64(rootfsDiskSizeMib) * disk.MebibyteBytes
 
 	// Resolve memory
 	memMib, err := b.resolveMemory(ctx, raw)
@@ -314,7 +316,7 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 
 	// Item 8: MAC validation (Python _vm_create_input.py:604-605)
 	if result.RequestedGuestMAC != nil && *result.RequestedGuestMAC != "" {
-		if err := infra.ValidateMAC(*result.RequestedGuestMAC); err != nil {
+		if err := validators.ValidateMAC(*result.RequestedGuestMAC); err != nil {
 			return nil, &errs.DomainError{
 				Code:    errs.CodeValidationFailed,
 				Op:      "vm_create",
@@ -411,7 +413,7 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 		}
 	}
 	if result.DiskSizeBytes > 0 {
-		minRequiredBytes := int64(result.Image.MinRootfsSizeMiB) * infra.MebibyteBytes
+		minRequiredBytes := int64(result.Image.MinRootfsSizeMiB) * disk.MebibyteBytes
 		if result.DiskSizeBytes < minRequiredBytes {
 			return nil, &errs.DomainError{
 				Code:    errs.CodeVMCreateFailed,
@@ -785,7 +787,7 @@ func (b *VMCreateBuilder) resolveMemory(ctx context.Context, raw VMCreateInput) 
 			return mib, nil
 		}
 		// Try parsing as human-readable (512M, 1G) — Python: DiskUtils.parse_disk_size_to_bytes(mem_str)
-		bytes, err := infra.ParseDiskSizeToBytes(memStr)
+		bytes, err := disk.ParseDiskSizeToBytes(memStr)
 		if err != nil {
 			return 0, &errs.DomainError{
 				Code:    errs.CodeValidationFailed,
@@ -794,7 +796,7 @@ func (b *VMCreateBuilder) resolveMemory(ctx context.Context, raw VMCreateInput) 
 				Class:   errs.ClassValidation,
 			}
 		}
-		return int(bytes / infra.MebibyteBytes), nil
+		return int(bytes / disk.MebibyteBytes), nil
 	}
 
 	return resolveSettingInt(ctx, b.db, "defaults.vm", "mem_size_mib"), nil
@@ -948,9 +950,9 @@ func validateGuestIP(ipStr string, netw *model.Network) error {
 	if netw == nil {
 		return nil
 	}
-	// Delegate to infra.ValidateIPv4Address which implements the exact
+	// Delegate to validators.ValidateIPv4Address which implements the exact
 	// same logic as Python's NetworkValidator.validate_ipv4_address.
-	return infra.ValidateIPv4Address(ipStr, "Guest IP", true, netw.Subnet, netw.IPv4Gateway)
+	return validators.ValidateIPv4Address(ipStr, "Guest IP", true, netw.Subnet, netw.IPv4Gateway)
 }
 
 // validateBootArgComponent validates a single boot argument component.
@@ -1319,7 +1321,7 @@ func (b *VMCreateBuilder) FromVM(ctx context.Context, vmEntity *model.VM) (*VMCr
 		KeepCloudInitISO:    false,
 		SkipCleanup:         false,
 		SkipDeblob:          false,
-		DiskSizeBytes:       int64(vmEntity.DiskSizeMiB) * infra.MebibyteBytes,
+		DiskSizeBytes:       int64(vmEntity.DiskSizeMiB) * disk.MebibyteBytes,
 		DiskSizeMib:         vmEntity.DiskSizeMiB,
 		LSMFlags:            lsmFlags,
 		BootArgs:            &bootArgs,

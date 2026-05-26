@@ -18,7 +18,9 @@ import (
 	"mvmctl/internal/enricher"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
+	"mvmctl/internal/infra/operation"
 	"mvmctl/pkg/api/inputs"
 )
 
@@ -233,7 +235,7 @@ func (o *KernelOperation) Pull(ctx context.Context, input *inputs.KernelPullInpu
 		try("download", "running", "Downloading Firecracker kernel...")
 
 		fetchResult, err = o.svc.FetchFirecrackerKernel(ctx, spec, ciVersion, resolved.Arch, resolved.OutputDir,
-			infra.DownloadProgressBridge(onProgress))
+			operation.DownloadProgressBridge(onProgress))
 		if err != nil {
 			return &errs.OperationResult{
 				Status:    "error",
@@ -266,7 +268,7 @@ func (o *KernelOperation) Pull(ctx context.Context, input *inputs.KernelPullInpu
 
 		fetchResult, err = o.svc.BuildOfficialKernel(ctx, spec, resolved.Arch, resolved.OutputDir,
 			resolved.Jobs, resolved.KeepBuildDir, !resolved.CleanBuild, // useCache = !cleanBuild
-			configPath, infra.DownloadProgressBridge(onProgress), onStatusCallback)
+			configPath, operation.DownloadProgressBridge(onProgress), onStatusCallback)
 		if err != nil {
 			return &errs.OperationResult{
 				Status:    "error",
@@ -348,7 +350,7 @@ func (o *KernelOperation) Pull(ctx context.Context, input *inputs.KernelPullInpu
 		}
 	}
 
-	auditLog := infra.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(o.cacheDir)
 	_ = auditLog.LogOperation("kernel.pull", map[string]interface{}{
 		"id": kernelItem.ID, "type": kernelItem.Type,
 		"version": kernelItem.Version, "arch": kernelItem.Arch,
@@ -397,7 +399,7 @@ func (o *KernelOperation) Import(ctx context.Context, input *inputs.KernelImport
 		}
 	}
 
-	auditLog := infra.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(o.cacheDir)
 	_ = auditLog.LogOperation("kernel.import", map[string]interface{}{
 		"name": kernelItem.Name, "version": kernelItem.Version, "arch": kernelItem.Arch,
 	}, "")
@@ -471,7 +473,7 @@ func (o *KernelOperation) Remove(ctx context.Context, identifiers []string, forc
 			continue
 		}
 
-		auditLog := infra.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(o.cacheDir)
 		_ = auditLog.LogOperation("kernel.remove", map[string]interface{}{
 			"id": kernel.ID, "name": kernel.Name, "type": kernel.Type,
 		}, "")
@@ -659,7 +661,7 @@ func (o *KernelOperation) SetDefault(ctx context.Context, id string) *errs.Opera
 		}
 	}
 
-	auditLog := infra.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(o.cacheDir)
 	_ = auditLog.LogOperation("kernel.set_default", map[string]interface{}{"name": kItem.Name}, "")
 
 	return &errs.OperationResult{

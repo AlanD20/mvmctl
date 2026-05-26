@@ -1,4 +1,4 @@
-package infra
+package network
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -194,7 +195,7 @@ func GetPhysicalInterfaces() ([]string, error) {
 	var interfaces []string
 	for _, entry := range entries {
 		name := entry.Name()
-		if containsString(excludedInterfaces, name) {
+		if slices.Contains(excludedInterfaces, name) {
 			continue
 		}
 		isVirtual := false
@@ -522,12 +523,3 @@ func RunBatch(ctx context.Context, commands []string) error {
 }
 
 // ── Internal helpers ──
-
-func containsString(slice []string, s string) bool {
-	for _, item := range slice {
-		if item == s {
-			return true
-		}
-	}
-	return false
-}

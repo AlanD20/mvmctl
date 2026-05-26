@@ -13,8 +13,8 @@ import (
 
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/core/vm"
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api/inputs"
 )
@@ -181,7 +181,7 @@ func (o *KeyOperation) Create(ctx context.Context, input *KeyCreateInput) *errs.
 		}
 	}
 
-	auditLog := infra.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(o.cacheDir)
 	_ = auditLog.LogOperation("key.create", map[string]interface{}{
 		"name":      keyItem.Name,
 		"algorithm": keyItem.Algorithm,
@@ -253,7 +253,7 @@ func (o *KeyOperation) Add(ctx context.Context, name string, pubKeyPath string, 
 		}
 	}
 
-	auditLog := infra.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(o.cacheDir)
 	_ = auditLog.LogOperation("key.add", map[string]interface{}{"name": keyItem.Name}, "")
 
 	return &errs.OperationResult{
@@ -308,7 +308,7 @@ func (o *KeyOperation) Remove(ctx context.Context, input *KeyInput, force bool) 
 			continue
 		}
 
-		auditLog := infra.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(o.cacheDir)
 		_ = auditLog.LogOperation("key.remove", map[string]interface{}{"name": key.Name}, "")
 
 		results = append(results, errs.OperationResult{
@@ -440,7 +440,7 @@ func (o *KeyOperation) SetDefault(ctx context.Context, input *KeyInput) *errs.Op
 	}
 
 	for _, name := range names {
-		auditLog := infra.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(o.cacheDir)
 		_ = auditLog.LogOperation("key.set_default", map[string]interface{}{"name": name}, "")
 	}
 
@@ -475,7 +475,7 @@ func (o *KeyOperation) ClearDefaults(ctx context.Context) *errs.OperationResult 
 		}
 	}
 
-	auditLog := infra.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(o.cacheDir)
 	_ = auditLog.LogOperation("key.clear_defaults", nil, "")
 
 	return &errs.OperationResult{

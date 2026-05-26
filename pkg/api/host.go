@@ -21,8 +21,10 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/db"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
+	"mvmctl/internal/infra/validators"
 	"mvmctl/pkg/api/inputs"
 )
 
@@ -178,7 +180,7 @@ func (o *HostOperation) Init(ctx context.Context, cacheDir string, onProgress fu
 	chownToRealUser(cacheDir)
 
 	// Audit log
-	auditLog := infra.NewAuditLog(cacheDir)
+	auditLog := logging.NewAuditLog(cacheDir)
 	_ = auditLog.LogOperation("host.init", map[string]interface{}{"changes": len(allChanges)}, "")
 
 	wasUserAdded := false
@@ -610,7 +612,7 @@ func (o *HostOperation) Clean(ctx context.Context, cacheDir string) *errs.Operat
 		summary = append(summary, "Warning: skipped host networking cleanup (already clean)")
 	}
 
-	auditLog := infra.NewAuditLog(cacheDir)
+	auditLog := logging.NewAuditLog(cacheDir)
 	_ = auditLog.LogOperation("host.clean", map[string]interface{}{"actions": len(summary)}, "")
 
 	return &errs.OperationResult{
@@ -705,7 +707,7 @@ func (o *HostOperation) Reset(ctx context.Context, cacheDir string) *errs.Operat
 
 	_ = o.hostRepo.ResetState(ctx)
 
-	auditLog := infra.NewAuditLog(cacheDir)
+	auditLog := logging.NewAuditLog(cacheDir)
 	_ = auditLog.LogOperation("host.reset", map[string]interface{}{"actions": len(summary)}, "")
 
 	return &errs.OperationResult{
@@ -925,7 +927,7 @@ func limitsFromState(state *model.HostStateItem) *model.HostLimits {
 	}
 	var portRange [2]int
 	if state.IPLocalPortRange != nil {
-		portRange = infra.ParsePortRange(*state.IPLocalPortRange)
+		portRange = validators.ParsePortRange(*state.IPLocalPortRange)
 	} else {
 		portRange = [2]int{32768, 60999}
 	}

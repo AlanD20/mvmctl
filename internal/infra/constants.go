@@ -210,13 +210,9 @@ const MinRootfsSizeMiB = 128
 const RootfsHeadroomFactor = 1.25
 const RootfsMinHeadroomBytes = 150 * 1024 * 1024
 const Percent = 100
-const MinRootSizeMB = 500
-const SizeTooSmallMB = 100
 
 // ── Buffer / sector ──
 const BufferSizeBytes = 1024
-const SectorSizeBytes = 512
-const MebibyteBytes = 1024 * 1024
 
 // ── Download retry backoff (float64 to match Python's CONST_DOWNLOAD_RETRY_BACKOFF) ──
 const DownloadRetryBackoff = 2.0
@@ -322,27 +318,6 @@ var RequiredBinaries = []string{
 	"groupdel", "visudo", "ssh-keygen", "tar",
 	"qemu-img", "mkfs.ext4", "blkid", "sfdisk", "dumpe2fs",
 	"iptables", "nft",
-}
-
-// ── Detector weights ──
-var DetectorWeights = map[string]float64{
-	"type_code":   1.0,
-	"label":       0.8,
-	"size":        0.5,
-	"filesystem":  0.7,
-}
-
-// ── Detector scores ──
-var DetectorScores = map[string]float64{
-	"root_score":             1.0,
-	"exclude_score":         -1.0,
-	"neutral_score":          0.0,
-	"mbr_linux_score":       0.5,
-	"label_root_score":      1.0,
-	"label_exclude_score":  -0.5,
-	"size_largest_score":    0.5,
-	"size_root_score":       0.3,
-	"size_too_small_score": -0.5,
 }
 
 // CloudInitMode type moved to mvmctl/internal/infra/model (model.CloudInitMode).

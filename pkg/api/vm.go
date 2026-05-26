@@ -32,13 +32,15 @@ import (
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/enricher"
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/disk"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/provisioner"
 	"mvmctl/internal/infra/system"
 	"mvmctl/internal/infra/version"
-	nocloudnet "mvmctl/internal/service/nocloudnet"
 	consoleapi "mvmctl/internal/service/console"
+	nocloudnet "mvmctl/internal/service/nocloudnet"
 	"mvmctl/pkg/api/inputs"
 )
 
@@ -186,7 +188,7 @@ func (o *VMOperation) createSingle(ctx context.Context, input *inputs.VMCreateIn
 		o.vmRepo.Upsert(ctx, vmInstance)
 	}
 
-	auditLog := infra.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(o.cacheDir)
 	_ = auditLog.LogOperation("vm.create", nil, fmt.Sprintf("name=%s", input.Name))
 
 	return &errs.OperationResult{
@@ -493,7 +495,7 @@ func (o *VMOperation) Remove(ctx context.Context, input *inputs.VMInput) *errs.B
 			os.RemoveAll(vmDir)
 		}
 
-		auditLog := infra.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(o.cacheDir)
 		_ = auditLog.LogOperation("vm.remove", map[string]interface{}{"name": vmLocal.Name}, "")
 
 		results = append(results, errs.OperationResult{
@@ -938,7 +940,7 @@ func (o *VMOperation) Start(ctx context.Context, input *inputs.VMInput) *errs.Ba
 			}
 		}
 
-		auditLog := infra.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(o.cacheDir)
 		_ = auditLog.LogOperation("vm.start", nil, fmt.Sprintf("name=%s", vmLocal.Name))
 
 		results = append(results, errs.OperationResult{
@@ -1005,7 +1007,7 @@ func (o *VMOperation) Stop(ctx context.Context, input *inputs.VMInput) *errs.Bat
 			}
 		}
 
-		auditLog := infra.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(o.cacheDir)
 		_ = auditLog.LogOperation("vm.stop", nil, fmt.Sprintf("name=%s", vmLocal.Name))
 
 		results = append(results, errs.OperationResult{
@@ -1279,7 +1281,7 @@ func (o *VMOperation) Snapshot(ctx context.Context, input *inputs.VMInput, memFi
 		}
 	}
 
-	auditLog := infra.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(o.cacheDir)
 	_ = auditLog.LogOperation("vm.snapshot", nil, fmt.Sprintf("name=%s", vmItem.Name))
 
 	return &errs.OperationResult{
@@ -1376,7 +1378,7 @@ func (o *VMOperation) Load(ctx context.Context, input *inputs.VMInput, memFile s
 		exception = err
 		resultItem = vmItem
 	} else {
-		auditLog := infra.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(o.cacheDir)
 		_ = auditLog.LogOperation("vm.load", nil, fmt.Sprintf("name=%s", vmItem.Name))
 	}
 
@@ -1440,7 +1442,7 @@ func (o *VMOperation) Reboot(ctx context.Context, input *inputs.VMInput) *errs.B
 		// After stop, respawn a fresh firecracker process
 		o.respawnFirecracker(ctx, vmLocal, false)
 
-		auditLog := infra.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(o.cacheDir)
 		_ = auditLog.LogOperation("vm.reboot", nil, fmt.Sprintf("name=%s", vmLocal.Name))
 
 		results = append(results, errs.OperationResult{
@@ -1502,7 +1504,7 @@ func (o *VMOperation) Pause(ctx context.Context, input *inputs.VMInput) *errs.Ba
 			continue
 		}
 
-		auditLog := infra.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(o.cacheDir)
 		_ = auditLog.LogOperation("vm.pause", nil, fmt.Sprintf("name=%s", vmLocal.Name))
 
 		results = append(results, errs.OperationResult{
@@ -1564,7 +1566,7 @@ func (o *VMOperation) Resume(ctx context.Context, input *inputs.VMInput) *errs.B
 			continue
 		}
 
-		auditLog := infra.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(o.cacheDir)
 		_ = auditLog.LogOperation("vm.resume", nil, fmt.Sprintf("name=%s", vmLocal.Name))
 
 		results = append(results, errs.OperationResult{
@@ -1688,7 +1690,7 @@ func (o *VMOperation) AttachVolume(ctx context.Context, input *inputs.VMInput, v
 	vmItem.VolumeIDs = vmVolumeIDs
 	_ = o.vmRepo.Upsert(ctx, vmItem)
 
-	auditLog := infra.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(o.cacheDir)
 	_ = auditLog.LogOperation("vm.attach_volume", map[string]interface{}{
 		"vm": vmItem.Name, "volume": vol.Name,
 	}, "")
@@ -1846,7 +1848,7 @@ func (o *VMOperation) DetachVolume(ctx context.Context, input *inputs.VMInput, v
 	vmItem.VolumeIDs = newIDs
 	_ = o.vmRepo.Upsert(ctx, vmItem)
 
-	auditLog := infra.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(o.cacheDir)
 	_ = auditLog.LogOperation("vm.detach_volume", map[string]interface{}{
 		"vm": vmItem.Name, "volume": vol.Name,
 	}, "")
@@ -1953,7 +1955,7 @@ func (o *VMOperation) Import(ctx context.Context, input *inputs.VMImportInput, o
 		}
 	}
 
-	auditLog := infra.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(o.cacheDir)
 	_ = auditLog.LogOperation("vm.import", nil, fmt.Sprintf("name=%s,config=%s", resolved.Name, input.ConfigPath))
 
 	return &errs.OperationResult{
@@ -2119,7 +2121,7 @@ func (o *VMOperation) Export(ctx context.Context, input *inputs.VMInput) (*input
 		},
 	}
 
-	auditLog := infra.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(o.cacheDir)
 	_ = auditLog.LogOperation("vm.export", map[string]interface{}{"name": vmItem.Name}, "")
 
 	return cfg, nil
@@ -3048,7 +3050,7 @@ func (o *VMOperation) buildResolvedInput(ctx context.Context, input *inputs.VMCr
 
 	memSizeMiB := 0
 	if input.MemSizeMib != nil && *input.MemSizeMib != "" {
-		if bytes, err := infra.ParseDiskSizeToBytes(*input.MemSizeMib); err == nil {
+		if bytes, err := disk.ParseDiskSizeToBytes(*input.MemSizeMib); err == nil {
 			memSizeMiB = int(bytes / (1024 * 1024))
 		}
 	}
@@ -3059,7 +3061,7 @@ func (o *VMOperation) buildResolvedInput(ctx context.Context, input *inputs.VMCr
 	diskSizeMiB := image.MinRootfsSizeMiB
 	diskSizeBytes := int64(diskSizeMiB) * 1024 * 1024
 	if input.DiskSize != nil {
-		if bytes, err := infra.ParseDiskSizeToBytes(*input.DiskSize); err == nil {
+		if bytes, err := disk.ParseDiskSizeToBytes(*input.DiskSize); err == nil {
 			diskSizeBytes = bytes
 			diskSizeMiB = int(bytes / (1024 * 1024))
 		}

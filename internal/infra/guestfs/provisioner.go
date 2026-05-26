@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/disk"
 	"mvmctl/internal/infra/provisionercontent"
 	"mvmctl/internal/infra/system"
 )
@@ -196,7 +197,7 @@ func (p *GuestfsProvisioner) ConvertTo(ctx context.Context, targetFs string) err
 	}
 	dataSize := info.Size()
 	sizeBytes := dataSize + int64(infra.RootfsMinHeadroomBytes)
-	mebi := int64(infra.MebibyteBytes)
+	mebi := int64(disk.MebibyteBytes)
 	sizeBytes = ((sizeBytes + mebi - 1) / mebi) * mebi
 	sizeMiB := sizeBytes / mebi
 
@@ -236,7 +237,10 @@ func (p *GuestfsProvisioner) ConvertTo(ctx context.Context, targetFs string) err
 	// Save and set environment (matching Python's OptimizedGuestfs._setup_environment).
 	// Python saves: LIBGUESTFS_BACKEND, LIBGUESTFS_CACHEDIR, QEMU_LOCKING,
 	// SUPERMIN_KERNEL, SUPERMIN_MODULES.
-	type envSnap struct{ key string; val *string }
+	type envSnap struct {
+		key string
+		val *string
+	}
 	var snapshots []envSnap
 	for _, key := range []string{"LIBGUESTFS_BACKEND", "LIBGUESTFS_CACHEDIR", "QEMU_LOCKING", "SUPERMIN_KERNEL", "SUPERMIN_MODULES"} {
 		val, ok := os.LookupEnv(key)
@@ -377,7 +381,10 @@ func (p *GuestfsProvisioner) Run(ctx context.Context) error {
 
 	// Setup environment with proper save/restore (matching Python's
 	// OptimizedGuestfs._setup_environment / _restore_environment).
-	type envSnap struct{ key string; val *string }
+	type envSnap struct {
+		key string
+		val *string
+	}
 	var snapshots []envSnap
 	for _, key := range []string{"LIBGUESTFS_BACKEND", "LIBGUESTFS_CACHEDIR", "QEMU_LOCKING", "SUPERMIN_KERNEL", "SUPERMIN_MODULES"} {
 		val, ok := os.LookupEnv(key)
@@ -1514,5 +1521,3 @@ func provisionerContentSSHKeygenService() string {
 		"[Install]\n" +
 		"WantedBy=multi-user.target\n"
 }
-
-

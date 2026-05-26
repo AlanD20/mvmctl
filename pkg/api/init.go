@@ -67,8 +67,8 @@ type InitStepResult struct {
 
 // InitResult matches Python's InitResult dataclass.
 type InitResult struct {
-	Steps            []InitStepResult              `json:"steps"`
-	HostReady        bool                          `json:"host_ready"`
+	Steps            []InitStepResult       `json:"steps"`
+	HostReady        bool                   `json:"host_ready"`
 	NeedsInteraction *errs.NeedsInteraction `json:"needs_interaction,omitempty"`
 }
 
@@ -126,7 +126,6 @@ func (o *InitOperation) RunFull(
 
 	// ── Step 1: Local state ──
 	steps = append(steps, o.initDatabase(ctx))
-
 
 	// ── Step 3: Host ──
 	hostResult, hostInteraction := o.stepHost(ctx, skipHost, sudoCompleted, hostSetupMessage, onProgress)
@@ -201,7 +200,6 @@ func (o *InitOperation) initDatabase(ctx context.Context) InitStepResult {
 	}
 	return InitStepResult{Step: "local_state", Success: true, Message: "Local state ready"}
 }
-
 
 func (o *InitOperation) stepHost(ctx context.Context, skip bool, sudoCompleted bool, setupMessage string, onProgress func(errs.ProgressEvent)) (InitStepResult, *errs.NeedsInteraction) {
 	if skip {

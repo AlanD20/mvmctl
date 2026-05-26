@@ -5,8 +5,9 @@ import (
 	"database/sql"
 
 	"mvmctl/internal/core/network"
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+	infranet "mvmctl/internal/infra/network"
+	"mvmctl/internal/infra/validators"
 )
 
 // NetworkCreateInput matches Python's NetworkCreateInput dataclass exactly.
@@ -85,7 +86,7 @@ func (r *NetworkCreateRequest) Resolve(ctx context.Context) (*ResolvedNetworkCre
 	if r._input.IPv4Gateway != nil {
 		ipv4Gateway = *r._input.IPv4Gateway
 	} else {
-		gw, err := infra.ComputeIPv4Gateway(r._input.Subnet)
+		gw, err := infranet.ComputeIPv4Gateway(r._input.Subnet)
 		if err != nil {
 			return nil, &errs.DomainError{
 				Code:    errs.CodeNetworkNotFound,
@@ -103,7 +104,7 @@ func (r *NetworkCreateRequest) Resolve(ctx context.Context) (*ResolvedNetworkCre
 	// Auto-detect NAT gateways when enabled but none specified
 	natGateways := r._input.NATGateways
 	if len(natGateways) == 0 && natEnabled {
-		outbound := infra.DetectOutboundInterface()
+		outbound := infranet.DetectOutboundInterface()
 		if outbound != "" {
 			natGateways = []string{outbound}
 		} else {
@@ -140,7 +141,7 @@ func (r *NetworkCreateRequest) ensureValidate(ctx context.Context) error {
 		}
 	}
 
-	validator := infra.NetworkValidator{}
+	validator := validators.NetworkValidator{}
 
 	// Validate name (no dots, lowercase only)
 	if err := validator.ValidateName(r._result.Name); err != nil {

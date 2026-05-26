@@ -12,10 +12,10 @@ import (
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/core/ssh"
 	"mvmctl/internal/core/vm"
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
-	"mvmctl/pkg/api/inputs"
+	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/api/inputs"
 )
 
 // CPOperation orchestrates file copy operations (host ↔ VM, VM ↔ VM).
@@ -109,7 +109,7 @@ func (o *CPOperation) Copy(ctx context.Context, input *inputs.CPInput, onProgres
 	// Audit log (matches Python: AuditLog.log("cp.copy", changes={...}))
 	// Python order: resolution → audit log → direction dispatch.
 	// With destination validation moved before audit log.
-	auditLog := infra.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(o.cacheDir)
 	_ = auditLog.LogOperation("cp.copy", map[string]interface{}{
 		"direction": resolved.Direction,
 		"sources":   strings.Join(input.Sources, ", "),

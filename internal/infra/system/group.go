@@ -8,12 +8,9 @@ import (
 	"os/user"
 	"strings"
 	"sync"
-)
 
-// MVMUnixGroup is the Unix group name for mvm privilege management.
-// Must stay as a const "mvm" matching infra.MVMUnixGroup.
-// This is a copy to avoid circular imports (infra can import system, not reverse).
-const MVMUnixGroup = "mvm"
+	"mvmctl/internal/infra"
+)
 
 // _mvmGroupVerified is a per-process cache matching Python's
 // _MVM_GROUP_VERIFIED module-level flag.  Group membership is immutable
@@ -39,7 +36,7 @@ var _mvmGroupMu sync.Mutex
 //	exist, user not a member, session doesn't have the group active), then
 //	lets sudo handle authentication with its normal password prompt.
 //
-// Uses MVMUnixGroup (which defaults to "mvm" from the CLI binary name).
+// Uses infra.MVMUnixGroup (which defaults to "mvm" from the CLI binary name).
 func RequireMvmGroupMembership() error {
 	_mvmGroupMu.Lock()
 	if _mvmGroupVerified {
@@ -48,7 +45,7 @@ func RequireMvmGroupMembership() error {
 	}
 	_mvmGroupMu.Unlock()
 
-	groupName := MVMUnixGroup
+	groupName := infra.MVMUnixGroup
 
 	// Match Python's: import grp; g = grp.getgrnam(MVM_UNIX_GROUP)
 	g, err := user.LookupGroup(groupName)

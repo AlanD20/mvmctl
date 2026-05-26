@@ -21,6 +21,7 @@ import (
 	"mvmctl/internal/enricher"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api/inputs"
 )
@@ -815,7 +816,7 @@ func (o *ImageOperation) SetDefault(ctx context.Context, input *inputs.ImageInpu
 			Exception: err,
 		}
 	}
-	auditLog := infra.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(o.cacheDir)
 	truncatedID := img.ID
 	if len(truncatedID) > 6 {
 		truncatedID = truncatedID[:6]
@@ -832,6 +833,7 @@ func (o *ImageOperation) SetDefault(ctx context.Context, input *inputs.ImageInpu
 // Matches Python's: guestfs_enabled = bool(SettingsService.resolve(db, "settings", "guestfs_enabled"))
 //
 //	provisioner_type = ProvisionerType.GUESTFS if guestfs_enabled else ProvisionerType.LOOP_MOUNT
+//
 // Returns image.ProvisionerType to match the type expected by Service methods.
 func (o *ImageOperation) resolveProvisionerType(ctx context.Context) image.ProvisionerType {
 	if o.configSvc != nil {

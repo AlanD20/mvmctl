@@ -7,6 +7,7 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/validators"
 )
 
 // KeyCreateInput matches Python's KeyCreateInput dataclass.
@@ -73,7 +74,7 @@ func (r *KeyCreateRequest) Result() *ResolvedKeyCreateInput {
 // Matches Python's KeyCreateRequest.resolve().
 func (r *KeyCreateRequest) Resolve() (*ResolvedKeyCreateInput, error) {
 	// Validate key name early — before any work
-	if err := infra.ValidateKeyName(r._input.Name); err != nil {
+	if err := validators.ValidateKeyName(r._input.Name); err != nil {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
 			Op:      "key_create",

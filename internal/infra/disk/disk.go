@@ -1,4 +1,4 @@
-package infra
+package disk
 
 import (
 	"fmt"
@@ -11,6 +11,35 @@ import (
 
 	"mvmctl/internal/infra/errs"
 )
+
+// ── Disk-specific constants (moved from infra/constants.go) ──
+const (
+	MinRootSizeMB    = 500
+	SizeTooSmallMB   = 100
+	SectorSizeBytes  = 512
+	MebibyteBytes    = 1024 * 1024
+)
+
+// DetectorWeights holds scoring weights for partition root detection.
+var DetectorWeights = map[string]float64{
+	"type_code":  1.0,
+	"label":      0.8,
+	"size":       0.5,
+	"filesystem": 0.7,
+}
+
+// DetectorScores holds scoring values for partition root detection.
+var DetectorScores = map[string]float64{
+	"root_score":             1.0,
+	"exclude_score":         -1.0,
+	"neutral_score":          0.0,
+	"mbr_linux_score":       0.5,
+	"label_root_score":      1.0,
+	"label_exclude_score":  -0.5,
+	"size_largest_score":    0.5,
+	"size_root_score":       0.3,
+	"size_too_small_score": -0.5,
+}
 
 // ── Size multipliers (IEC binary units) ──
 
