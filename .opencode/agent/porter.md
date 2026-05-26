@@ -6,7 +6,7 @@ description: >-
   translates Python behavior into Go with exact error messages,
   CLI flags, SQL queries, and subprocess commands.
 mode: all
-temperature: 0.2
+temperature: 0.5
 permission:
   edit: allow
   write: allow
@@ -91,7 +91,14 @@ all 39 architectural verdicts. This is the single source of truth.
 
 15. **No stdlib wrappers** — Never create a function that just delegates to a stdlib function without adding logic. `func JoinStrings(items []string, sep string) string { return strings.Join(items, sep) }` is banned. Use `strings.Join` directly.
 
-14. **Context everywhere** — `ctx context.Context` as first param in every
-    method, passed through from Cobra `cmd.Context()`.
+16. **Context everywhere** — `ctx context.Context` as first param in every method, passed through from Cobra `cmd.Context()`.
 
-15. **Return errors to Cobra** — no `os.Exit()` in command handlers.
+17. **Return errors to Cobra** — no `os.Exit()` in command handlers.
+
+18. **No implicit defaults** — Values MUST be passed explicitly by callers. No fallback logic, no "if empty then guess" patterns. `if x == "" { x = default }` is banned unless explicitly approved via ADR. Constructors take concrete values, not config structs with optional fields that have fallback logic.
+
+19. **No indirection without justification** — Every function must earn its existence. Banned patterns:
+    - A → B → C delegation chains (`RunMigrations` → `RunMigrationsCtx` → `RunMigrationsCtxWithCount`).
+    - Functions that rediscover information the caller already has and passed in (`PRAGMA database_list` instead of accepting `dbPath`).
+    - Thin wrappers that add no abstraction value over the function they call.
+    - If a caller knows a value (path, config, etc.), pass it directly. Don't make the callee re-derive it.

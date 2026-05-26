@@ -6,16 +6,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/user"
-	"path/filepath"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
 	"mvmctl/pkg/api"
+
+	"github.com/spf13/cobra"
 )
 
 // formatChange returns a concise one-line description of a host change matching Python's _format_change.
@@ -81,38 +80,6 @@ func abortIfVMsRunning(ctx context.Context, hostAPI *api.HostOperation, action s
 	return nil
 }
 
-// getCacheDir returns the cache directory, matching Python's CacheUtils.get_cache_dir().
-// Python behavior:
-//   1. Check MVM_CACHE_DIR env var
-//   2. If set, validate the path is under $HOME, /tmp, or /var/tmp (raise MVMError if not)
-//   3. Fall back to _get_real_home() / ".cache" / PROJECT_NAME
-//   4. _get_real_home() reads SUDO_USER to return the invoking user's home under sudo
-func getCacheDir() string {
-	cacheDir := os.Getenv("MVM_CACHE_DIR")
-	if cacheDir != "" {
-		return cacheDir
-	}
-	home := getRealHome()
-	cacheDir = filepath.Join(home, ".cache", infra.ProjectName)
-	return cacheDir
-}
-
-// getRealHome returns the home directory of the real user (not root when under sudo).
-// Python's _get_real_home() checks SUDO_USER first, then falls back to $HOME.
-func getRealHome() string {
-	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
-		u, err := user.Lookup(sudoUser)
-		if err == nil {
-			return u.HomeDir
-		}
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "/tmp"
-	}
-	return home
-}
-
 // NewHostCmd creates the host command and its subcommands.
 func NewHostCmd(hostAPI *api.HostOperation) *cobra.Command {
 	cmd := &cobra.Command{
@@ -164,7 +131,10 @@ membership to take effect.
 Examples:
   sudo mvm host init`, infra.MVMUnixGroup, infra.CLIName),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cacheDir := getCacheDir()
+			cacheDir, err := infra.GetCacheDir()
+			if err != nil {
+				return fmt.Errorf("cannot resolve cache directory: %w", err)
+			}
 
 			rawResult := hostAPI.Init(cmd.Context(), cacheDir, nil)
 
@@ -194,7 +164,7 @@ Examples:
 					}
 					if confirmed {
 						// Python: env.get("SUDO_RESTART") → os.environ.get("MVM_SUDO_RESTART")
-				if os.Getenv("MVM_SUDO_RESTART") != "" {
+						if os.Getenv("MVM_SUDO_RESTART") != "" {
 							cli.Error("Recursive sudo restart detected. Aborting to prevent lockout.")
 							cli.Info("Please run 'sudo mvm host init' manually.")
 							return fmt.Errorf("recursive sudo restart")
@@ -339,7 +309,7 @@ func newHostStatusCmd(hostAPI *api.HostOperation) *cobra.Command {
 				if resources != nil {
 					data["virtualization"] = map[string]interface{}{
 						"modules_loaded":    resources.ModulesLoaded,
-						"nested_virt": resources.ModulesLoaded["kvm_intel"] || resources.ModulesLoaded["kvm_amd"],
+						"nested_virt":       resources.ModulesLoaded["kvm_intel"] || resources.ModulesLoaded["kvm_amd"],
 						"dev_net_tun":       resources.DevNetTUNAccessible,
 						"user_in_kvm_group": resources.UserInKVMGroup,
 					}
@@ -493,17 +463,20 @@ Sysctl settings, sudoers, and the '%s' group will NOT be affected.`, infra.MVMUn
 				return err
 			}
 
-		if !force {
-			cli.Warning("This will remove all VM networking: bridges, TAP devices, iptables rules, and the default network configuration.")
-			cli.Info(fmt.Sprintf("Sysctl settings, sudoers, and the '%s' group will NOT be affected.", infra.MVMUnixGroup))
-			cli.Info("")
-			if !confirmRePrompt("Proceed with host clean?") {
-				cli.Info("Aborted")
-				return nil
+			if !force {
+				cli.Warning("This will remove all VM networking: bridges, TAP devices, iptables rules, and the default network configuration.")
+				cli.Info(fmt.Sprintf("Sysctl settings, sudoers, and the '%s' group will NOT be affected.", infra.MVMUnixGroup))
+				cli.Info("")
+				if !confirmRePrompt("Proceed with host clean?") {
+					cli.Info("Aborted")
+					return nil
+				}
 			}
-		}
 
-			cacheDir := getCacheDir()
+			cacheDir, err := infra.GetCacheDir()
+			if err != nil {
+				return fmt.Errorf("cannot resolve cache directory: %w", err)
+			}
 			result := hostAPI.Clean(cmd.Context(), cacheDir)
 			if result.IsError() {
 				cli.Error(result.Message)
@@ -566,7 +539,10 @@ Examples:
 				}
 			}
 
-			cacheDir := getCacheDir()
+			cacheDir, err := infra.GetCacheDir()
+			if err != nil {
+				return fmt.Errorf("cannot resolve cache directory: %w", err)
+			}
 			result := hostAPI.Reset(cmd.Context(), cacheDir)
 			if result.IsError() {
 				cli.Error(result.Message)

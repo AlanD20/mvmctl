@@ -121,7 +121,7 @@ func (s *Service) CleanStaleGuestfsState(ctx context.Context) bool {
 // Delegates to GuestfsService.
 func (s *Service) PruneAppliance(ctx context.Context, dryRun bool) bool {
 	// Python: return GuestfsService.prune_appliance(dry_run)
-	return (&guestfs.GuestfsService{}).PruneAppliance(dryRun)
+	return (&guestfs.GuestfsService{}).PruneAppliance(s.cacheDir, dryRun)
 }
 
 // PruneWarmImages removes warm images from the tmpfs ready pool.

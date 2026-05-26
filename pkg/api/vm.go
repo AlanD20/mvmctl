@@ -921,7 +921,14 @@ func (o *VMOperation) Start(ctx context.Context, input *inputs.VMInput) *errs.Ba
 
 		// If VM is stopped, respawn Firecracker process (matches Python's _respawn_firecracker)
 		if vmLocal.Status == model.StatusStopped {
-			o.respawnFirecracker(ctx, vmLocal, false)
+			if err := o.respawnFirecracker(ctx, vmLocal, false); err != nil {
+				results = append(results, errs.OperationResult{
+					Status: "error", Code: "vm.start_failed",
+					Message:   fmt.Sprintf("start '%s': %v", vmLocal.Name, err),
+					Exception: err,
+				})
+				continue
+			}
 		} else {
 			controller, ctrlErr := vm.NewController(vmLocal, repo)
 			if ctrlErr != nil {
@@ -1022,7 +1029,7 @@ func (o *VMOperation) Stop(ctx context.Context, input *inputs.VMInput) *errs.Bat
 	return &errs.BatchResult{Items: results}
 }
 
-func (o *VMOperation) respawnFirecracker(ctx context.Context, v *model.VM, snapshotMode bool) {
+func (o *VMOperation) respawnFirecracker(ctx context.Context, v *model.VM, snapshotMode bool) error {
 	vmDir := filepath.Join(o.cacheDir, "vms", v.ID)
 
 	// ── Restart nocloud-net server if needed (matches Python's respawn_execute) ──
@@ -1121,7 +1128,7 @@ func (o *VMOperation) respawnFirecracker(ctx context.Context, v *model.VM, snaps
 		}
 	}
 	if binaryPath == "" {
-		binaryPath = "/usr/local/bin/firecracker"
+		return fmt.Errorf("no binary path could be resolved for firecracker")
 	}
 
 	kernelPath := ""
@@ -1141,7 +1148,7 @@ func (o *VMOperation) respawnFirecracker(ctx context.Context, v *model.VM, snaps
 
 	rootfsSuffix := v.RootfsSuffix
 	if rootfsSuffix == "" {
-		rootfsSuffix = "ext4"
+		return fmt.Errorf("rootfs suffix is required")
 	}
 	rootfsPath := filepath.Join(vmDir, "rootfs."+rootfsSuffix)
 	if v.RootfsPath != "" {
@@ -1212,7 +1219,7 @@ func (o *VMOperation) respawnFirecracker(ctx context.Context, v *model.VM, snaps
 
 	if err := spawner.Spawn(); err != nil {
 		slog.Warn("Failed to respawn Firecracker", "vm", v.Name, "error", err)
-		return
+		return nil
 	}
 
 	// ── Start console relay after spawn ──
@@ -1241,6 +1248,8 @@ func (o *VMOperation) respawnFirecracker(ctx context.Context, v *model.VM, snaps
 	v.PID = ptr.SafeDerefInt(pid)
 	v.ProcessStartTime = pst
 	v.Status = newStatus
+
+	return nil
 }
 
 // ── Snapshot / Load ──
@@ -1346,7 +1355,14 @@ func (o *VMOperation) Load(ctx context.Context, input *inputs.VMInput, memFile s
 	// Python: if vm.status == VMStatus.STOPPED.value: _respawn_firecracker(vm, snapshot_mode=True)
 	//         repo = Repository(Database()); updated = repo.get(vm.id); if updated: vm = updated
 	if vmItem.Status == model.StatusStopped {
-		o.respawnFirecracker(ctx, vmItem, true)
+		if err := o.respawnFirecracker(ctx, vmItem, true); err != nil {
+			return &errs.OperationResult{
+				Status: "error", Code: "vm.load_snapshot_failed",
+				Item:      vmItem,
+				Message:   fmt.Sprintf("Failed to respawn Firecracker for snapshot load: %v", err),
+				Exception: err,
+			}
+		}
 		// Python re-reads the updated vm from DB after respawn:
 		updated, getErr := repo.Get(ctx, vmItem.ID)
 		if getErr == nil && updated != nil {
@@ -1442,11 +1458,17 @@ func (o *VMOperation) Reboot(ctx context.Context, input *inputs.VMInput) *errs.B
 		controller.Stop(ctx, force)
 
 		// After stop, respawn a fresh firecracker process
-		o.respawnFirecracker(ctx, vmLocal, false)
+		if err := o.respawnFirecracker(ctx, vmLocal, false); err != nil {
+			results = append(results, errs.OperationResult{
+				Status: "error", Code: "vm.reboot_failed",
+				Message:   fmt.Sprintf("reboot '%s': %v", vmLocal.Name, err),
+				Exception: err,
+			})
+			continue
+		}
 
 		auditLog := logging.NewAuditLog(o.cacheDir)
 		_ = auditLog.LogOperation("vm.reboot", nil, fmt.Sprintf("name=%s", vmLocal.Name))
-
 		results = append(results, errs.OperationResult{
 			Status: "success", Code: "vm.rebooted",
 			Item:    vmLocal,
@@ -2507,7 +2529,7 @@ func (c *vmCreateContext) cloneImage() error {
 	}
 	fsType := c.resolved.Image.FSType
 	if fsType == "" {
-		fsType = "ext4"
+		return fmt.Errorf("fsType is required")
 	}
 	vmRootfsPath := filepath.Join(c.vmDir, "rootfs."+fsType)
 
@@ -2581,7 +2603,7 @@ func (c *vmCreateContext) cleanup() {
 
 // forRespawn creates a VMCreateContext for respawning a stopped VM from its stored state.
 // Matches Python's VMCreateContext.for_respawn() exactly.
-func (c *vmCreateContext) forRespawn(vm *model.VM, snapshotMode bool) {
+func (c *vmCreateContext) forRespawn(vm *model.VM, snapshotMode bool) error {
 	c.name = vm.Name
 	c.vmID = vm.ID
 	c.vmDir = filepath.Join(c.cacheDir, "vms", vm.ID)
@@ -2594,7 +2616,7 @@ func (c *vmCreateContext) forRespawn(vm *model.VM, snapshotMode bool) {
 	// Build rootfs path from VM state
 	rootfsSuffix := vm.RootfsSuffix
 	if rootfsSuffix == "" {
-		rootfsSuffix = "ext4"
+		return fmt.Errorf("rootfs suffix is required")
 	}
 	c.rootfsPath = filepath.Join(c.vmDir, "rootfs."+rootfsSuffix)
 
@@ -2672,6 +2694,8 @@ func (c *vmCreateContext) forRespawn(vm *model.VM, snapshotMode bool) {
 		isoPath:    isoPathPtr,
 		nocloudURL: nocloudURL,
 	}
+
+	return nil
 }
 
 // respawnExecute executes the respawn flow for a stopped VM.

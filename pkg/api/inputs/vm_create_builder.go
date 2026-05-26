@@ -175,6 +175,16 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 	}
 	rootfsDiskSizeBytes := int64(rootfsDiskSizeMib) * disk.MebibyteBytes
 
+	// Validate VCPU count is provided explicitly
+	if raw.VCPUCount == nil {
+		return nil, &errs.DomainError{
+			Code:    errs.CodeVMCreateFailed,
+			Op:      "vm_create",
+			Message: "VCPU count is required",
+			Class:   errs.ClassValidation,
+		}
+	}
+
 	// Resolve memory
 	memMib, err := b.resolveMemory(ctx, raw)
 	if err != nil {
@@ -196,8 +206,10 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 	_ = provisioner
 
 	// Resolve nested_virt
-	nestedVirt := defaultIfNil(raw.NestedVirt, false)
-	if raw.NestedVirt == nil {
+	var nestedVirt bool
+	if raw.NestedVirt != nil {
+		nestedVirt = *raw.NestedVirt
+	} else {
 		nestedVirt = resolveSettingBool(ctx, b.db, "defaults.vm", "nested_virt")
 	}
 
@@ -281,8 +293,12 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 	// Resolve lsm_flags
 	lsmFlags := raw.LSMFlags
 	if lsmFlags == nil || *lsmFlags == "" {
-		def := resolveSettingString(ctx, b.db, "defaults.vm", "lsm_flags")
-		lsmFlags = &def
+		return nil, &errs.DomainError{
+			Code:    errs.CodeVMCreateFailed,
+			Op:      "vm_create",
+			Message: "lsm_flags is required",
+			Class:   errs.ClassValidation,
+		}
 	}
 
 	// Build the resolved result — matches Python VMCreateRequest.resolve() result construction
@@ -295,7 +311,7 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 		SSHKeys:             sshKeys,
 		Volumes:             vols,
 		ExtraDrives:         extraDrives,
-		VCPUCount:           defaultIfNil(raw.VCPUCount, resolveSettingInt(ctx, b.db, "defaults.vm", "vcpu_count")),
+		VCPUCount:           *raw.VCPUCount,
 		MemSizeMib:          memMib,
 		DiskSizeMib:         rootfsDiskSizeMib,
 		DiskSizeBytes:       rootfsDiskSizeBytes,
@@ -1229,7 +1245,12 @@ func (b *VMCreateBuilder) FromVM(ctx context.Context, vmEntity *model.VM) (*VMCr
 	// cloud-init mode (Python: CloudInitMode(vm.cloud_init_mode) if vm.cloud_init_mode else CloudInitMode.OFF)
 	ciMode := vmEntity.CloudInitMode
 	if ciMode == "" {
-		ciMode = "off"
+		return nil, &errs.DomainError{
+			Code:    errs.CodeVMCreateFailed,
+			Op:      "vm_from_vm",
+			Message: fmt.Sprintf("Cloud-init mode is required for VM '%s'", vmEntity.Name),
+			Class:   errs.ClassValidation,
+		}
 	}
 
 	// boot_args (Python: vm.boot_args if vm.boot_args else SettingsService.resolve(...))

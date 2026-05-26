@@ -42,7 +42,7 @@ type VMCreateInput struct {
 	CloudInitISOPath    *string
 	KeepCloudInitISO    bool
 	NocloudNetPort      *int
-	NoConsole           bool   // inverse of EnableConsole, kept for CLI compat
+	NoConsole           bool // inverse of EnableConsole, kept for CLI compat
 	SkipCleanup         bool
 	SkipDeblob          bool
 	Count               *int
@@ -118,22 +118,6 @@ type VMCreateResolved struct {
 	Provisioner        model.ProvisionerType
 	ExtraDrives        []model.DriveConfig
 	Volumes            []*model.VolumeItem
-}
-
-// defaultIfNil returns ptr's value if non-nil, else def.
-func defaultIfNil[T any](ptr *T, def T) T {
-	if ptr != nil {
-		return *ptr
-	}
-	return def
-}
-
-// defaultIfNilStr returns the string value if s is non-nil and non-empty, else def.
-func defaultIfNilStr(s *string, def string) string {
-	if s != nil && *s != "" {
-		return *s
-	}
-	return def
 }
 
 // deriveFirecrackerVersionFromPath extracts version from firecracker binary path.

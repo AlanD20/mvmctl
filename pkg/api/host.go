@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -109,7 +110,7 @@ func (o *HostOperation) Init(ctx context.Context, cacheDir string, onProgress fu
 	//   # Ensure DB schema exists before any DB writes.
 	//   Database().migrate()
 	if o.db != nil {
-		_, _ = db.RunMigrations(o.db)
+		_, _ = db.RunMigrationsCtx(ctx, o.db, filepath.Join(o.cacheDir, infra.MVMDBFilename))
 	}
 
 	if os.Geteuid() != 0 {
@@ -229,7 +230,10 @@ func (o *HostOperation) setupHostEnvironment(ctx context.Context, sessionID stri
 		allChanges = append(allChanges, change)
 	}
 
-	username := system.CurrentUsername()
+	username, err := system.CurrentUsername()
+	if err != nil {
+		return allChanges, err
+	}
 	userAdded, _ := host.AddUserToGroup(ctx, username, infra.MVMUnixGroup)
 	if userAdded {
 		change := &model.HostStateChangeItem{

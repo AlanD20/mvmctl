@@ -8,11 +8,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra"
 	versionpkg "mvmctl/internal/infra/version"
 	"mvmctl/pkg/api"
+
+	"github.com/spf13/cobra"
 )
 
 // vmAPIRef holds a reference to the VM API for shell completion.
@@ -152,7 +153,11 @@ func NewRootCmd(
 
 		// Check that the database exists (matching Python lines 329-337).
 		// Python: click.echo("Error: '...' requires initialization...", err=True); ctx.exit(1)
-		dbPath := getDBPath()
+		cacheDir, err := infra.GetCacheDir()
+		if err != nil {
+			return fmt.Errorf("cannot resolve cache directory: %w", err)
+		}
+		dbPath := filepath.Join(cacheDir, infra.MVMDBFilename)
 		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 			return fmt.Errorf("'%s %s' requires initialization. Run '%s init' first",
 				infra.CLIName, subCmd, infra.CLIName)
@@ -287,17 +292,4 @@ For PowerShell:
 	cmd.AddCommand(NewInitCmd(initAPI))
 
 	return cmd
-}
-
-// getDBPath returns the expected path to the mvm database file.
-func getDBPath() string {
-	cacheDir := os.Getenv("MVM_CACHE_DIR")
-	if cacheDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return filepath.Join(".cache", "mvmctl", infra.MVMDBFilename)
-		}
-		cacheDir = filepath.Join(home, ".cache", "mvmctl")
-	}
-	return filepath.Join(cacheDir, infra.MVMDBFilename)
 }

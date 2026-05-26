@@ -12,7 +12,6 @@ import (
 	"syscall"
 	"time"
 
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/system"
 )
 
@@ -295,14 +294,13 @@ func (gs *GuestfsService) hasPythonAncestor(pid int) bool {
 //
 // Args:
 //
+//	cacheDir: The mvmctl cache directory path.
 //	dryRun: If true, only report what would be removed.
 //
 // Returns:
 //
 //	True if appliance folder or stale state was removed.
-func (gs *GuestfsService) PruneAppliance(dryRun bool) bool {
-	// In Go, we derive the cache dir from XDG or home
-	cacheDir := getCacheDir()
+func (gs *GuestfsService) PruneAppliance(cacheDir string, dryRun bool) bool {
 	applianceDir := filepath.Join(cacheDir, "appliance")
 	removed := false
 
@@ -341,17 +339,4 @@ func parseProcStatusField(data, field string) int {
 		}
 	}
 	return -1
-}
-
-// getCacheDir returns the mvmctl cache directory.
-// Follows pattern from Python's CacheUtils.get_cache_dir().
-func getCacheDir() string {
-	if d := infra.EnvGetDefault("CACHE_DIR", ""); d != "" {
-		return d
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join("/tmp", "mvmctl")
-	}
-	return filepath.Join(home, ".cache", "mvmctl")
 }

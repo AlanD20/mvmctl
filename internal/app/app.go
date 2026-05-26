@@ -87,15 +87,17 @@ type apis struct {
 
 func isDBSkipCommand(args []string) bool {
 	// Python: ctx.invoked_subcommand in {"help", "version", "init", "completion", "host", "cache"}
-	if len(args) < 2 {
-		return false
+	// Click always resolves the actual subcommand name regardless of flags.
+	// os.Args[1] may be a flag (--debug), so skip leading flags.
+	cmd := ""
+	for _, a := range args[1:] {
+		if !strings.HasPrefix(a, "-") {
+			cmd = a
+			break
+		}
 	}
-	cmd := args[1]
 	switch cmd {
-	case "help", "version", "init", "completion", "host", "cache", "run":
-		return true
-	}
-	if strings.HasPrefix(cmd, "-") {
+	case "", "help", "version", "init", "completion", "host", "cache", "run":
 		return true
 	}
 	return false
