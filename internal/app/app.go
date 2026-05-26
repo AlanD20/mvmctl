@@ -157,7 +157,7 @@ func isDBSkipCommand(args []string) bool {
 	}
 	cmd := args[1]
 	switch cmd {
-	case "help", "version", "init", "completion", "host", "cache", "_provision":
+	case "help", "version", "init", "completion", "host", "cache", "run":
 		return true
 	}
 	if strings.HasPrefix(cmd, "-") {

@@ -159,24 +159,10 @@ func RemoveUserFromGroup(ctx context.Context, username, groupName string) (bool,
 // ── ValidateSudoersBinaries ──
 // Matches Python's HostService.validate_sudoers_binaries().
 func ValidateSudoersBinaries() error {
-	// System binaries (static paths)
 	for binary, pkg := range infra.PrivilegedBinaries {
 		if _, err := os.Stat(binary); os.IsNotExist(err) {
 			return hostError(errs.CodeHostInitFailed,
 				fmt.Sprintf("Required binary not found: %s (install %s)", binary, pkg))
-		}
-	}
-
-	// Service binaries only exist in compiled mode.
-	if !infra.IsCompiledMode() {
-		return nil
-	}
-
-	for _, name := range infra.PrivilegedServiceBinaries {
-		path := filepath.Join(getBinDir(), name)
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			return hostError(errs.CodeHostInitFailed,
-				fmt.Sprintf("Required service binary not found: %s. Run 'mvm init' to extract service binaries.", path))
 		}
 	}
 	return nil
@@ -203,10 +189,9 @@ func getBinDir() string {
 func GenerateSudoersContent(groupName string) string {
 	// Iterate in Python dict literal insertion order.
 	binaries := privilegedBinariesOrdered()
-	// Service binaries (dynamic paths resolved at runtime)
-	for _, name := range infra.PrivilegedServiceBinaries {
-		binaries = append(binaries, filepath.Join(getBinDir(), name))
-	}
+	// Service binaries via "mvm run <service>" pattern (sudoers wildcard)
+	runCmd := filepath.Join(getBinDir(), infra.CLIName, "run", "*")
+	binaries = append(binaries, runCmd)
 	binariesStr := strings.Join(binaries, ", ")
 	return fmt.Sprintf(
 		"# Managed by %s — do not edit manually.\n"+

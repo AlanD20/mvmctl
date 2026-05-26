@@ -523,97 +523,6 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string, binDir str
 
 // ── Service binaries ───────────────────────────────────────────────────────
 
-// ExtractServiceBinaries extracts the combined mvm-services binary and creates
-// symlinks and DB entries.
-func (s *Service) ExtractServiceBinaries(ctx context.Context) ([]*model.BinaryItem, error) {
-	now := time.Now().UTC().Format(time.RFC3339)
-	var extracted []*model.BinaryItem
-
-	binDir := s.binDir
-	if err := os.MkdirAll(binDir, 0755); err != nil {
-		return nil, binaryError(errs.CodeInternal, fmt.Sprintf("Failed to create bin directory: %v", err))
-	}
-
-	combinedName := "mvm-services"
-	combinedDest := filepath.Join(binDir, combinedName)
-
-	// ── Step 1: Copy the combined binary ──
-	combinedSrc := findEmbeddedServiceBinary(combinedName)
-	if combinedSrc != "" {
-		os.Remove(combinedDest)
-		if err := infra.CopyFile(combinedSrc, combinedDest); err != nil {
-			return nil, binaryError(errs.CodeInternal, fmt.Sprintf("Failed to copy service binary: %v", err))
-		}
-		os.Chmod(combinedDest, infra.ExecutablePerm)
-		slog.Debug("Extracted combined service binary", "name", combinedName)
-	} else {
-		// Dev mode: try dist/services/
-		devSrc := filepath.Join("dist", "services", combinedName)
-		if fileExists(devSrc) {
-			os.Remove(combinedDest)
-			if err := infra.CopyFile(devSrc, combinedDest); err != nil {
-				return nil, binaryError(errs.CodeInternal, fmt.Sprintf("Failed to copy service binary: %v", err))
-			}
-			os.Chmod(combinedDest, infra.ExecutablePerm)
-			slog.Debug("Copied from dist/services (dev mode)", "name", combinedName)
-		} else {
-			slog.Debug("Service binary not found, skipping (dev mode)")
-		}
-	}
-
-	// ── Step 2: Create symlinks ──
-	for _, name := range infra.ServiceBinaries {
-		linkPath := filepath.Join(binDir, name)
-		os.Remove(linkPath)
-		if err := os.Symlink(combinedName, linkPath); err != nil {
-			return nil, binaryError(errs.CodeInternal, fmt.Sprintf("Failed to create symlink for %s: %v", name, err))
-		}
-	}
-
-	// ── Step 3: Clean existing service binary DB entries ──
-	for _, name := range infra.ServiceBinaries {
-		if err := s.repo.DeleteByName(ctx, name); err != nil {
-			return nil, err
-		}
-	}
-
-	// ── Step 4: Create DB entries ──
-	if !fileExists(combinedDest) {
-		slog.Debug("Combined binary not found, skipping DB upsert", "path", combinedDest)
-		return extracted, nil
-	}
-
-	combinedData, err := os.ReadFile(combinedDest)
-	if err != nil {
-		return nil, binaryError(errs.CodeInternal, fmt.Sprintf("Failed to read combined binary: %v", err))
-	}
-
-	for _, name := range infra.ServiceBinaries {
-		id := GenerateServiceBinaryID(combinedData, name, mvmctlVersion)
-
-		item := &model.BinaryItem{
-			ID:          id,
-			Name:        name,
-			Version:     mvmctlVersion,
-			FullVersion: mvmctlVersion,
-			CIVersion:   nil,
-			Path:        filepath.Join(binDir, name),
-			IsDefault:   true,
-			IsPresent:   true,
-			CreatedAt:   now,
-			UpdatedAt:   now,
-		}
-
-		if err := s.repo.Upsert(ctx, item); err != nil {
-			return nil, err
-		}
-		extracted = append(extracted, item)
-		slog.Debug("Registered service binary", "name", name)
-	}
-
-	return extracted, nil
-}
-
 // Repo returns the underlying repository for use by the API layer.
 func (s *Service) Repo() Repository {
 	return s.repo
@@ -661,14 +570,6 @@ func GenerateBinaryID(path, name, version string) (string, error) {
 	return infra.SHA256Hash([]byte(combined)), nil
 }
 
-// GenerateServiceBinaryID generates an ID for service binaries by hashing
-// the combined binary content together with the service name and mvmctl version.
-func GenerateServiceBinaryID(combinedData []byte, name, mvmctlVersion string) string {
-	fileHash := infra.SHA256Hash(combinedData)
-	combined := fileHash + ":" + name + ":" + mvmctlVersion
-	return infra.SHA256Hash([]byte(combined))
-}
-
 // NormalizeVersion strips 'v' prefix from version.
 func NormalizeVersion(version string) string {
 	return strings.TrimPrefix(version, "v")
@@ -712,41 +613,6 @@ func makeExecutable(path string) error {
 
 // findEmbeddedServiceBinary returns the path to an embedded service binary, or "" if not available.
 // TODO(verdict#33): belongs in infra/fs or similar shared utility
-func findEmbeddedServiceBinary(name string) string {
-	if !infra.IsCompiledMode() {
-		return ""
-	}
-
-	// Strategy 1: Nuitka __compiled__.containing_dir.
-	exe, err := os.Executable()
-	if err == nil {
-		exeDir := filepath.Dir(exe)
-		candidate := filepath.Join(exeDir, "mvmctl", "services", name)
-		if fileExists(candidate) {
-			return candidate
-		}
-	}
-
-	// Strategy 2: Relative to os.Args[0] parent (standalone dist layout)
-	if len(os.Args) > 0 {
-		base := filepath.Dir(os.Args[0])
-		candidate := filepath.Join(base, "mvmctl", "services", name)
-		if fileExists(candidate) {
-			return candidate
-		}
-	}
-
-	// Strategy 3: NUITKA_TEMP_DIR environment variable override
-	tempDir := os.Getenv("NUITKA_TEMP_DIR")
-	if tempDir != "" {
-		candidate := filepath.Join(tempDir, "mvmctl", "services", name)
-		if fileExists(candidate) {
-			return candidate
-		}
-	}
-
-	return ""
-}
 
 func extractTarMember(reader *tar.Reader, dest string, memberName ...string) error {
 	outFile, err := os.Create(dest)

@@ -15,6 +15,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"mvmctl/internal/infra/system"
 )
 
 // NoCloudServer is a subprocess-based HTTP server that serves cloud-init files
@@ -95,27 +97,17 @@ func (s *NoCloudServer) URL() string {
 	return fmt.Sprintf("http://%s:%d/", s.host, s.port)
 }
 
-// startNoCloudSubprocess spawns the nocloud server subprocess with the given
-// arguments. Matches Python's subprocess.Popen(server_cmd, ...) pattern.
-// Returns the *exec.Cmd or an error.
-func startNoCloudSubprocess(exe, dir string, port int, host, pidPath, logPath string) (*exec.Cmd, error) {
+// startNoCloudSubprocess spawns the nocloud server subprocess.
+// Matches Python's subprocess.Popen(server_cmd, ...) pattern.
+func startNoCloudSubprocess(dir string, port int, host, pidPath, logPath string) (*exec.Cmd, error) {
 	args := []string{
-		"_nocloud_serve",
 		"--cloud-init-dir", dir,
 		"--port", strconv.Itoa(port),
 		"--host", host,
 		"--pid-file", pidPath,
 		"--log-file", logPath,
 	}
-	cmd := exec.Command(exe, args...)
-	cmd.Stdin = nil
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	return cmd, nil
+	return system.SpawnSubprocess("nocloud-serve", nil, args...)
 }
 
 // Start launches the HTTP server as a subprocess and returns (url, port, pid).
@@ -133,10 +125,6 @@ func (s *NoCloudServer) Start(ctx context.Context, dir string) (string, int, int
 	// Define pid and log file paths matching Python's path / pid_filename / log_filename
 	pidPath := filepath.Join(s.path, "nocloud-server.pid")
 	logPath := filepath.Join(s.path, "cloud-init.log")
-	exe, err := os.Executable()
-	if err != nil {
-		return "", 0, 0, ErrNoCloudServerError(fmt.Sprintf("Cannot determine executable path: %v", err))
-	}
 	var allocatedPort int
 	var spid int
 	var cmd *exec.Cmd
@@ -157,7 +145,7 @@ func (s *NoCloudServer) Start(ctx context.Context, dir string) (string, int, int
 			}
 			ln.Close()
 			// Spawn subprocess on this port (matches Python's subprocess.Popen flow)
-			spawnedCmd, spawnErr := startNoCloudSubprocess(exe, s.path, port, s.host, pidPath, logPath)
+			spawnedCmd, spawnErr := startNoCloudSubprocess(s.path, port, s.host, pidPath, logPath)
 			if spawnErr != nil {
 				continue
 			}
@@ -180,7 +168,7 @@ func (s *NoCloudServer) Start(ctx context.Context, dir string) (string, int, int
 		}
 	} else {
 		// Pre-allocated port
-		spawnedCmd, spawnErr := startNoCloudSubprocess(exe, s.path, s.port, s.host, pidPath, logPath)
+		spawnedCmd, spawnErr := startNoCloudSubprocess(s.path, s.port, s.host, pidPath, logPath)
 		if spawnErr != nil {
 			return "", 0, 0, ErrNoCloudServerError(
 				fmt.Sprintf("Failed to spawn nocloud-net server process: %v", spawnErr))

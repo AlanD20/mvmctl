@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
-	"path/filepath"
 
 	"mvmctl/internal/core/binary"
 	"mvmctl/internal/core/config"
@@ -128,8 +127,6 @@ func (o *InitOperation) RunFull(
 	// ── Step 1: Local state ──
 	steps = append(steps, o.initDatabase(ctx))
 
-	// ── Step 2: Service binaries ──
-	steps = append(steps, o.stepServiceBinaries(ctx))
 
 	// ── Step 3: Host ──
 	hostResult, hostInteraction := o.stepHost(ctx, skipHost, sudoCompleted, hostSetupMessage, onProgress)
@@ -205,15 +202,6 @@ func (o *InitOperation) initDatabase(ctx context.Context) InitStepResult {
 	return InitStepResult{Step: "local_state", Success: true, Message: "Local state ready"}
 }
 
-func (o *InitOperation) stepServiceBinaries(ctx context.Context) InitStepResult {
-	// Python: try: BinaryService(repo).extract_service_binaries()
-	//         except Exception as e: return InitStepResult(...)
-	binSvc := binary.NewService(o.binRepo, filepath.Join(o.cacheDir, "bin"), o.cacheDir)
-	if _, err := binSvc.ExtractServiceBinaries(ctx); err != nil {
-		return InitStepResult{Step: "service_binaries", Success: false, Message: fmt.Sprintf("Service binary extraction failed: %v", err)}
-	}
-	return InitStepResult{Step: "service_binaries", Success: true, Message: "Service binaries ready"}
-}
 
 func (o *InitOperation) stepHost(ctx context.Context, skip bool, sudoCompleted bool, setupMessage string, onProgress func(errs.ProgressEvent)) (InitStepResult, *errs.NeedsInteraction) {
 	if skip {
