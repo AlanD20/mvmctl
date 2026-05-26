@@ -2,7 +2,6 @@ package inputs
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -662,7 +661,10 @@ func (b *VMCreateBuilder) resolveBinary(ctx context.Context, raw VMCreateInput) 
 
 		// Create binary item (matches Python _create_binary_item)
 		now := infra.NowISO()
-		id := generateBinaryID(binPath, "firecracker", version)
+		id, err := infra.HashGenerator{}.Binary(binPath, "firecracker", version)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate binary ID: %w", err)
+		}
 
 		fcBinary = &model.BinaryItem{
 			ID:          id,
@@ -985,19 +987,6 @@ func VolumesToDrives(vols []*model.VolumeItem) ([]DriveConfig, error) {
 
 // generateBinaryID generates a content-addressed SHA256 hash for a binary.
 // Matches Python's HashGenerator.binary().
-func generateBinaryID(path, name, version string) string {
-	// Read the binary for hashing
-	data, err := os.ReadFile(path)
-	if err != nil {
-		// If we can't read it, use path-based hash
-		h := sha256.Sum256([]byte(path + ":" + name + ":" + version))
-		return fmt.Sprintf("%x", h)
-	}
-	fileHash := sha256.Sum256(data)
-	combined := fmt.Sprintf("%x", fileHash) + ":" + name + ":" + version
-	h := sha256.Sum256([]byte(combined))
-	return fmt.Sprintf("%x", h)
-}
 
 // deepMergeMap deeply merges src into dst (non-destructive, returns new map).
 // Matches Python's CommonUtils.deep_merge_dict().

@@ -302,12 +302,11 @@ func (NetworkValidator) ValidateName(name string) error {
 		}
 	}
 	// Network names must not start with CLI_NAME- prefix (reserved for bridges)
-	cliName := ResolveCLIName()
-	if strings.HasPrefix(name, cliName+"-") {
+	if strings.HasPrefix(name, CLIName+"-") {
 		return &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
 			Class:   errs.ClassValidation,
-			Message: fmt.Sprintf("Invalid network name '%s': cannot start with '%s-' (reserved for bridge names)", name, cliName),
+			Message: fmt.Sprintf("Invalid network name '%s': cannot start with '%s-' (reserved for bridge names)", name, CLIName),
 		}
 	}
 	return nil
@@ -774,13 +773,13 @@ func ValidateBootArgs(bootArgs, rootUUID, guestIP string) []string {
 				}
 			}
 		}
-	// Also check root UUID format if present
-	// Python: uuid_pattern.match(root_uuid) — anchored at start only (no $).
-	if strings.Contains(bootArgs, "root_uuid") && rootUUID != "" {
-		if !validUUIDRegex.MatchString(rootUUID) {
-			errors = append(errors, fmt.Sprintf("Invalid root UUID format: %s", rootUUID))
+		// Also check root UUID format if present
+		// Python: uuid_pattern.match(root_uuid) — anchored at start only (no $).
+		if strings.Contains(bootArgs, "root_uuid") && rootUUID != "" {
+			if !validUUIDRegex.MatchString(rootUUID) {
+				errors = append(errors, fmt.Sprintf("Invalid root UUID format: %s", rootUUID))
+			}
 		}
-	}
 	}
 	return errors
 }

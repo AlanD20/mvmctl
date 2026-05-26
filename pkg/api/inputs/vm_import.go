@@ -2,12 +2,10 @@ package inputs
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"strconv"
 	"time"
 
@@ -169,8 +167,8 @@ func (r *VMImportRequest) Resolve(ctx context.Context) (*VMCreateResolved, error
 	// 7. Generate vm_id and vm_dir (matching Python: HashGenerator.vm + CacheUtils.get_vm_dir)
 	now := time.Now()
 	ts := now.Format(time.RFC3339)
-	vmID := generateVMID(vmName, ts)
-	vmDir := getVMDir(vmID)
+	vmID := infra.HashGenerator{}.VM(vmName, ts)
+	vmDir := infra.GetVmDir(vmID)
 
 	// 8. Create VMCreateBuilder (matching Python's VMCreateRequest)
 	builder := NewVMCreateBuilder(
@@ -266,16 +264,3 @@ func (r *VMImportRequest) resolveNetwork(ctx context.Context, netConfig VMExport
 //
 //	data = f"{name}:{created_at}"
 //	return hashlib.sha256(data.encode()).hexdigest()[:32]
-func generateVMID(name, timestamp string) string {
-	h := sha256.Sum256([]byte(name + ":" + timestamp))
-	full := fmt.Sprintf("%x", h)
-	if len(full) > 32 {
-		return full[:32]
-	}
-	return full
-}
-
-// getVMDir returns the VM directory path.
-func getVMDir(vmID string) string {
-	return filepath.Join(infra.GetVmsDir(), vmID)
-}

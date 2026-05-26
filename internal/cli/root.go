@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra"
+	versionpkg "mvmctl/internal/infra/version"
 	"mvmctl/pkg/api"
 )
 
@@ -98,7 +99,7 @@ func NewRootCmd(
 		if showVersion {
 			// Python: click.echo(f"{_get_cli_name()} {_get_version()}")
 			// Use canonical FormatVersion from infra, matching Python _get_version().
-			fmt.Printf("%s %s\n", infra.CLIName, infra.FormatVersion(version))
+			fmt.Printf("%s %s\n", infra.CLIName, versionpkg.FormatVersion(version))
 			return nil
 		}
 		return originalRunE(c, args)
@@ -195,9 +196,9 @@ func NewRootCmd(
 		RunE: func(c *cobra.Command, args []string) error {
 			// Python: version = _get_version()
 			// Use canonical FormatVersion from infra, matching Python _get_version().
-			fullVersion := infra.FormatVersion(version)
+			fullVersion := versionpkg.FormatVersion(version)
 			// Python: git_info = _get_git_version_info()
-			gitInfo := infra.GetGitVersionInfo()
+			gitInfo := versionpkg.GetGitVersionInfo()
 
 			// Python: click.echo(f"{_get_cli_name()} {version}")
 			fmt.Printf("%s %s\n", infra.CLIName, fullVersion)

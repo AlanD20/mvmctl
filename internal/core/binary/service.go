@@ -531,7 +531,7 @@ func (s *Service) Repo() Repository {
 // ── Internal helpers ───────────────────────────────────────────────────────
 
 func (s *Service) createBinaryItem(name, versionStr, path string, resolveCIVersion bool) (*model.BinaryItem, error) {
-	id, err := GenerateBinaryID(path, name, versionStr)
+	id, err := infra.HashGenerator{}.Binary(path, name, versionStr)
 	if err != nil {
 		return nil, binaryError(errs.CodeInternal, fmt.Sprintf("Failed to generate binary ID: %v", err))
 	}
@@ -558,17 +558,6 @@ func (s *Service) createBinaryItem(name, versionStr, path string, resolveCIVersi
 	}, nil
 }
 
-// ── Hash generation ────────────────────────────────────────────────────────
-
-// GenerateBinaryID generates a content-addressed SHA256 hash for a binary.
-func GenerateBinaryID(path, name, version string) (string, error) {
-	fileHash, err := infra.SHA256FileHash(path)
-	if err != nil {
-		return "", fmt.Errorf("read binary file for hashing: %w", err)
-	}
-	combined := fileHash + ":" + name + ":" + version
-	return infra.SHA256Hash([]byte(combined)), nil
-}
 
 // NormalizeVersion strips 'v' prefix from version.
 func NormalizeVersion(version string) string {
