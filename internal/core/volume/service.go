@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
@@ -28,7 +28,6 @@ type Service struct {
 func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
 }
-
 
 // formatProcessError formats an error from a subprocess command to match
 // Python's ProcessError message format exactly.
@@ -174,7 +173,7 @@ func (s *Service) ResizeDisk(ctx context.Context, vol *model.VolumeItem, newSize
 	// Update volume fields — matches Python's resize_disk() which sets
 	// size_bytes and updated_at before upserting.
 	vol.SizeBytes = newSizeBytes
-	vol.UpdatedAt = infra.NowISO()
+	vol.UpdatedAt = time.Now().Format(time.RFC3339)
 
 	if err := s.repo.Upsert(ctx, vol); err != nil {
 		return nil, fmt.Errorf("upsert volume after resize: %w", err)

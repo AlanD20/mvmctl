@@ -208,6 +208,13 @@ All packages follow Go convention: **directory name = package name**. No undersc
 
 **Rule:** Import aliases (`Xcore`) are forbidden. Use bare package names. The only exceptions are when stdlib collision requires an alias (e.g., `"errors"` vs `"mvmctl/internal/infra/errs"`).
 
+**Conflict aliases:** When two packages share the same name (e.g., `"mvmctl/internal/core/network"` and `"mvmctl/internal/infra/network"`), the infra package gets the `infra_` prefix alias:
+- `infranet "mvmctl/internal/infra/network"`
+- `infraslice "mvmctl/internal/infra/slice"`
+- `infraversion "mvmctl/internal/infra/version"` (when needed)
+
+Non-infra packages keep the bare name (`network` for `core/network`, `version` for `core/version`).
+
 ## 4. Layer Responsibilities
 
 ### CLI (`internal/cli/`)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/model"
 )
 
@@ -72,7 +73,7 @@ func (r *sqliteRepo) Upsert(ctx context.Context, key *model.SSHKeyItem) error {
 			updated_at = CURRENT_TIMESTAMP`,
 		key.ID, key.Name, key.Fingerprint, key.Algorithm, key.Comment,
 		privKey, key.PublicKeyPath,
-		boolToInt(key.IsDefault), boolToInt(key.IsPresent),
+		infra.BoolToInt(key.IsDefault), infra.BoolToInt(key.IsPresent),
 		key.CreatedAt, key.UpdatedAt)
 	return err
 }
@@ -84,7 +85,7 @@ func (r *sqliteRepo) UpdateManyIsPresent(ctx context.Context, ids []string, pres
 	placeholders := strings.Repeat("?,", len(ids))
 	placeholders = placeholders[:len(placeholders)-1] // remove trailing comma
 	args := make([]any, 0, len(ids)+1)
-	args = append(args, boolToInt(present))
+	args = append(args, infra.BoolToInt(present))
 	for _, id := range ids {
 		args = append(args, id)
 	}
@@ -171,11 +172,4 @@ func scanKeys(rows *sql.Rows) ([]*model.SSHKeyItem, error) {
 		keys = append(keys, &k)
 	}
 	return keys, rows.Err()
-}
-
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
 }

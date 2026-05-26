@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
+	"time"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
@@ -167,7 +168,6 @@ func ValidateSudoersBinaries() error {
 	}
 	return nil
 }
-
 
 // ── GenerateSudoersContent ──
 // Matches Python's HostService._generate_sudoers_content().
@@ -442,7 +442,7 @@ func EnsureKVMModules(ctx context.Context, repo Repository, sessionID string, ch
 	var changes []*model.HostStateChangeItem
 	now := ""
 	if sessionID != "" {
-		now = infra.NowISO()
+		now = time.Now().Format(time.RFC3339)
 	}
 	nextOrder := changeOrderStart
 
@@ -509,7 +509,7 @@ func EnsureKVMModules(ctx context.Context, repo Repository, sessionID string, ch
 func (s *Service) DetectAndSaveCapacity(ctx context.Context) (*model.HostHardware, *model.HostLimits, error) {
 	hardware := DetectHardware()
 	limits := DetectLimits()
-	detectedAt := infra.NowISO()
+	detectedAt := time.Now().Format(time.RFC3339)
 
 	err := s.repo.SaveCapacity(ctx,
 		hardware.Hostname,
@@ -567,7 +567,7 @@ func (s *Service) RestoreState(ctx context.Context) ([]*model.HostStateChangeIte
 	}
 
 	var reverted []*model.HostStateChangeItem
-	revertedAt := infra.NowISO()
+	revertedAt := time.Now().Format(time.RFC3339)
 
 	restorableSysctl := map[string]bool{sysctlKey: true}
 	restorableFiles := []string{

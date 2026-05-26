@@ -88,8 +88,8 @@ func (gs *GuestfsService) BuildAppliance(ctx context.Context, cacheDir string) (
 	// Build environment map for RunCmdCompat (includes current env + kernel overrides)
 	runEnv := make(map[string]string, len(env))
 	for _, e := range env {
-		if idx := strings.Index(e, "="); idx > 0 {
-			runEnv[e[:idx]] = e[idx+1:]
+		if key, val, found := strings.Cut(e, "="); found && key != "" {
+			runEnv[key] = val
 		}
 	}
 

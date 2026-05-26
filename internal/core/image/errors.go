@@ -58,11 +58,3 @@ func WrapError(code errs.Code, msg string) error {
 func WrapErrorf(code errs.Code, format string, args ...any) error {
 	return &errs.DomainError{Code: code, Message: fmt.Sprintf(format, args...)}
 }
-
-// strPtr returns a pointer to s if s is non-empty, or nil if s is empty.
-func strPtr(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}

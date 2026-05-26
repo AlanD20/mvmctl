@@ -89,12 +89,10 @@ func NewCPRequest(inputs CPInput, db *sql.DB) *CPRequest {
 // ParseVMPath parses a "vm:path" string into VM identifier and remote path.
 // Matches Python's CPService._parse_vm_path().
 func ParseVMPath(path string) (vmIdent, remotePath string) {
-	if !strings.Contains(path, ":") {
+	vmIdent, remotePath, found := strings.Cut(path, ":")
+	if !found {
 		return "", path
 	}
-	idx := strings.Index(path, ":")
-	vmIdent = path[:idx]
-	remotePath = path[idx+1:]
 	return vmIdent, remotePath
 }
 

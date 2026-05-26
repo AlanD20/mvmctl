@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"mvmctl/internal/assets"
 	"mvmctl/internal/infra"
@@ -392,8 +393,8 @@ func (s *Service) buildFromSource(
 // Returns an error if a checksum is required but cannot be resolved.
 func (s *Service) resolveSourceAndChecksum(ctx context.Context, spec *model.KernelSpec, version, arch string, sha256 *string, onStatus func(string)) (string, string, error) {
 	major := ""
-	if idx := strings.Index(version, "."); idx >= 0 {
-		major = version[:idx]
+	if m, _, found := strings.Cut(version, "."); found {
+		major = m
 	}
 	templateVars := map[string]string{
 		"version":        version,
@@ -892,7 +893,7 @@ func (s *Service) PrepareKernelConfig(ctx context.Context, kernelDir string, spe
 				onStatus("Resolving dependencies after user config...")
 			}
 			slog.Debug("Resolving dependencies after user config")
-	if rc, _, _ := runMake(ctx, kernelDir, "olddefconfig", jobs); rc != 0 {
+			if rc, _, _ := runMake(ctx, kernelDir, "olddefconfig", jobs); rc != 0 {
 				return nil, NewKernelError("olddefconfig failed after user config")
 			}
 		}
@@ -1038,7 +1039,7 @@ func (s *Service) ExtractKernelTarball(ctx context.Context, tarball, extractDir 
 	xzCheck := system.RunCmdCompat(ctx, []string{"which", "xz"}, system.RunCmdOptions{Capture: true, Check: false})
 	if xzCheck.ExitCode != 0 {
 		return "", NewKernelErrorf(
-			"Extraction failed: 'xz' binary not found in PATH; xz is required "+
+			"Extraction failed: 'xz' binary not found in PATH; xz is required " +
 				"for kernel tarball extraction (native Go xz reader is not available)")
 	}
 
@@ -1664,7 +1665,7 @@ func (s *Service) ImportKernel(ctx context.Context, name string, sourcePath stri
 	os.Chmod(destPath, 0755)
 
 	// Generate content-addressed ID using HashGenerator.Kernel() (matching Python exactly)
-	now := infra.NowISO()
+	now := time.Now().Format(time.RFC3339)
 	kernelID, err := infra.HashGenerator{}.Kernel(destPath, version, arch, now)
 	if err != nil {
 		return nil, fmt.Errorf("compute kernel ID: %w", err)

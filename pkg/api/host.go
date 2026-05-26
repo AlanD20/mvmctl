@@ -8,9 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/user"
-	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -23,6 +22,7 @@ import (
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
+	infranet "mvmctl/internal/infra/network"
 	"mvmctl/internal/infra/system"
 	"mvmctl/internal/infra/validators"
 	"mvmctl/pkg/api/inputs"
@@ -127,7 +127,7 @@ func (o *HostOperation) Init(ctx context.Context, cacheDir string, onProgress fu
 	}
 
 	// Chown cache directory to real user
-	chownToRealUser(cacheDir)
+	infra.ChownToRealUser(cacheDir)
 
 	// --- Pre-flight probes ---
 	probe := &host.Probe{}
@@ -150,7 +150,7 @@ func (o *HostOperation) Init(ctx context.Context, cacheDir string, onProgress fu
 	// --- iptables comment module check ---
 	fwBackendRaw, _ := o.configSvc.Get(ctx, "settings", "firewall_backend")
 	if fwBackend, ok := fwBackendRaw.(string); ok && fwBackend == "iptables" {
-		if !checkIPTablesCommentAvailable() {
+		if !infranet.CheckIPTablesCommentAvailable() {
 			slog.Info("iptables comment module (xt_comment) not available; rule comments will be skipped")
 			_ = o.configSvc.Set(ctx, "settings.firewall", "iptables_xtcomment", false)
 		}
@@ -172,12 +172,12 @@ func (o *HostOperation) Init(ctx context.Context, cacheDir string, onProgress fu
 
 	// --- Finalize ---
 	// Python: try: controller.mark_initialized(now) except Exception as e: logger.warning(...)
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().Format(time.RFC3339)
 	if err := o.hostCtrl.MarkInitialized(ctx, now); err != nil {
 		slog.Warn("Could not mark host as initialized", "error", err)
 	}
 
-	chownToRealUser(cacheDir)
+	infra.ChownToRealUser(cacheDir)
 
 	// Audit log
 	auditLog := logging.NewAuditLog(cacheDir)
@@ -229,7 +229,7 @@ func (o *HostOperation) setupHostEnvironment(ctx context.Context, sessionID stri
 		allChanges = append(allChanges, change)
 	}
 
-	username := currentUsername()
+	username := system.CurrentUsername()
 	userAdded, _ := host.AddUserToGroup(ctx, username, infra.MVMUnixGroup)
 	if userAdded {
 		change := &model.HostStateChangeItem{
@@ -249,7 +249,7 @@ func (o *HostOperation) setupHostEnvironment(ctx context.Context, sessionID stri
 		return allChanges, fmt.Errorf("Invalid group name: %q", infra.MVMUnixGroup)
 	}
 
-	sudoersPath := sudoersDropInPath()
+	sudoersPath := infra.SudoersDropInPath()
 	sudoersStale := true
 	if data, err := os.ReadFile(sudoersPath); err == nil {
 		expected := host.GenerateSudoersContent(infra.MVMUnixGroup)
@@ -528,14 +528,14 @@ func (o *HostOperation) Clean(ctx context.Context, cacheDir string) *errs.Operat
 	summary := make([]string, 0)
 
 	// Remove TAP devices
-	tapNames := getTuntapDevices()
+	tapNames := infranet.GetTunTapDevices()
 	fallbackTaps := make([]string, 0)
 	for _, tap := range tapNames {
 		if strings.HasPrefix(tap, fmt.Sprintf("%s-", infra.CLIName)) {
 			fallbackTaps = append(fallbackTaps, tap)
 		}
 	}
-	sortStrings(fallbackTaps)
+	slices.Sort(fallbackTaps)
 	for _, tapName := range fallbackTaps {
 		if err := o.netSvc.RemoveRawTap(ctx, tapName); err != nil {
 			summary = append(summary, fmt.Sprintf("Warning: failed to remove TAP '%s': %v", tapName, err))
@@ -570,8 +570,8 @@ func (o *HostOperation) Clean(ctx context.Context, cacheDir string) *errs.Operat
 	if s, ok := defaultNetNameRaw.(string); ok {
 		defaultNetNameStr = s
 	}
-	defaultBridge := fmt.Sprintf("%s-%s", infra.CLIName, truncateString(defaultNetNameStr, 10))
-	if bridgeExists(defaultBridge) {
+	defaultBridge := fmt.Sprintf("%s-%s", infra.CLIName, system.TruncateString(defaultNetNameStr, 10))
+	if infranet.BridgeExists(defaultBridge) {
 		if err := o.netSvc.RemoveRawBridge(ctx, defaultBridge); err != nil {
 			summary = append(summary, fmt.Sprintf("Warning: failed to remove orphan bridge '%s': %v", defaultBridge, err))
 		} else {
@@ -579,7 +579,7 @@ func (o *HostOperation) Clean(ctx context.Context, cacheDir string) *errs.Operat
 		}
 	}
 
-	for _, bridge := range getBridges() {
+	for _, bridge := range infranet.GetBridges() {
 		if !strings.HasPrefix(bridge, fmt.Sprintf("%s-", infra.CLIName)) {
 			continue
 		}
@@ -594,7 +594,7 @@ func (o *HostOperation) Clean(ctx context.Context, cacheDir string) *errs.Operat
 	}
 
 	// Remove default network from database (matching Python)
-	defaultNet := findNetworkByName(networks, defaultNetNameStr)
+	defaultNet := infranet.FindNetworkByName(networks, defaultNetNameStr)
 	if defaultNet != nil {
 		removeResult := o.netOp.Remove(ctx, &inputs.NetworkInput{Name: []string{defaultNetNameStr}}, true)
 		if removeResult.IsError() {
@@ -670,7 +670,7 @@ func (o *HostOperation) Reset(ctx context.Context, cacheDir string) *errs.Operat
 				strings.Join(activeModules, ", ")))
 	}
 
-	sudoersPath := sudoersDropInPath()
+	sudoersPath := infra.SudoersDropInPath()
 	if removed, err := host.RemoveSudoers(ctx, sudoersPath); err != nil {
 		summary = append(summary, fmt.Sprintf("Warning: %v", err))
 	} else if removed {
@@ -689,8 +689,8 @@ func (o *HostOperation) Reset(ctx context.Context, cacheDir string) *errs.Operat
 	if lastUsermod != nil {
 		applied := lastUsermod.AppliedValue
 		username := applied
-		if idx := strings.Index(applied, ":"); idx >= 0 {
-			username = applied[:idx]
+		if u, _, found := strings.Cut(applied, ":"); found {
+			username = u
 		}
 		if removed, err := host.RemoveUserFromGroup(ctx, username, infra.MVMUnixGroup); err != nil {
 			summary = append(summary, fmt.Sprintf("Warning: %v", err))
@@ -735,139 +735,6 @@ func (o *HostOperation) IsInitialized(ctx context.Context) bool {
 func (o *HostOperation) CheckReadiness() *model.ProbeResult {
 	probe := &host.Probe{}
 	return probe.RunAll()
-}
-
-// ── Private helpers ──
-
-func findNetworkByName(networks []*model.Network, name string) *network.Network {
-	for _, n := range networks {
-		if n.Name == name {
-			return n
-		}
-	}
-	return nil
-}
-
-func getRealUserIDs() (int, int, bool) {
-	if os.Geteuid() != 0 {
-		return 0, 0, false
-	}
-	sudoUser := os.Getenv("SUDO_USER")
-	if sudoUser == "" {
-		return 0, 0, false
-	}
-	u, err := user.Lookup(sudoUser)
-	if err != nil {
-		return 0, 0, false
-	}
-	var uid, gid int
-	fmt.Sscanf(u.Uid, "%d", &uid)
-	fmt.Sscanf(u.Gid, "%d", &gid)
-	return uid, gid, true
-}
-
-func chownToRealUser(pathStr string) {
-	uid, gid, ok := getRealUserIDs()
-	if !ok {
-		return
-	}
-	_ = filepath.Walk(pathStr, func(p string, fi os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		os.Chown(p, uid, gid)
-		return nil
-	})
-}
-
-func currentUsername() string {
-	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
-		return sudoUser
-	}
-	u, err := user.Current()
-	if err != nil {
-		return "root"
-	}
-	return u.Username
-}
-
-func sudoersDropInPath() string {
-	return filepath.Join("/etc/sudoers.d", infra.CLIName)
-}
-
-func checkIPTablesCommentAvailable() bool {
-	result := system.RunCmdCompat(context.Background(), []string{"iptables", "-m", "comment", "--comment", "test", "-L"}, system.RunCmdOptions{Check: false})
-	return result.Success
-}
-
-func getTuntapDevices() []string {
-	var devices []string
-	entries, err := os.ReadDir("/sys/class/net")
-	if err != nil {
-		return nil
-	}
-	for _, entry := range entries {
-		tunFlags := filepath.Join("/sys/class/net", entry.Name(), "tun_flags")
-		if _, err := os.Stat(tunFlags); err == nil {
-			devices = append(devices, entry.Name())
-		}
-	}
-	return devices
-}
-
-func bridgeExists(bridge string) bool {
-	result := system.RunCmdCompat(context.Background(), []string{"ip", "link", "show", bridge}, system.RunCmdOptions{Check: false})
-	return result.Success
-}
-
-func getBridges() []string {
-	var bridges []string
-	result := system.RunCmdCompat(context.Background(), []string{"ip", "-o", "link", "show", "type", "bridge"}, system.RunCmdOptions{Capture: true, Check: false})
-	if !result.Success {
-		return nil
-	}
-	for _, line := range strings.Split(result.Stdout, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		parts := strings.Fields(line)
-		if len(parts) >= 2 {
-			bridges = append(bridges, strings.TrimRight(parts[1], ":"))
-		}
-	}
-	return bridges
-}
-
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen]
-}
-
-func sortStrings(s []string) {
-	for i := 0; i < len(s); i++ {
-		for j := i + 1; j < len(s); j++ {
-			if s[i] > s[j] {
-				s[i], s[j] = s[j], s[i]
-			}
-		}
-	}
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-func makeExecutable(path string) error {
-	fi, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("stat for chmod: %w", err)
-	}
-	newMode := fi.Mode().Perm() | 0111
-	return os.Chmod(path, newMode)
 }
 
 // ── Host helpers inlined from internal/core/host/_host_info.go ──
@@ -1063,5 +930,4 @@ func hostInfoToDict(hi *model.HostInfo) map[string]interface{} {
 }
 
 // Compile-time checks
-var _ = slog.Default()
 var _ = regexp.MustCompile

@@ -4,7 +4,6 @@ package api
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -36,7 +35,10 @@ import (
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
+	infranet "mvmctl/internal/infra/network"
 	"mvmctl/internal/infra/provisioner"
+	"mvmctl/internal/infra/ptr"
+	infraslice "mvmctl/internal/infra/slice"
 	"mvmctl/internal/infra/system"
 	"mvmctl/internal/infra/version"
 	consoleapi "mvmctl/internal/service/console"
@@ -113,7 +115,7 @@ func (o *VMOperation) Create(ctx context.Context, input *inputs.VMCreateInput, o
 }
 
 func (o *VMOperation) createSingle(ctx context.Context, input *inputs.VMCreateInput, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
-	createdAt := time.Now().UTC()
+	createdAt := time.Now()
 	vmID := infra.HashGenerator{}.VM(input.Name, createdAt.Format(time.RFC3339))
 	vmDir := filepath.Join(o.cacheDir, "vms", vmID)
 
@@ -226,7 +228,7 @@ func (o *VMOperation) createBatch(ctx context.Context, input *inputs.VMCreateInp
 	errors := make([]string, 0)
 
 	for idx, name := range names {
-		createdAt := time.Now().UTC()
+		createdAt := time.Now()
 		vmID := infra.HashGenerator{}.VM(name, createdAt.Format(time.RFC3339))
 		vmDir := filepath.Join(o.cacheDir, "vms", vmID)
 
@@ -236,7 +238,7 @@ func (o *VMOperation) createBatch(ctx context.Context, input *inputs.VMCreateInp
 			if input.Atomic && len(createdVMs) > 0 {
 				// Rollback
 				for _, vm := range createdVMs {
-					_ = o.Remove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: boolPtr(true)})
+					_ = o.Remove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: ptr.Bool(true)})
 				}
 				return &errs.OperationResult{
 					Status: "error", Code: "vm.atomic_failed",
@@ -262,7 +264,7 @@ func (o *VMOperation) createBatch(ctx context.Context, input *inputs.VMCreateInp
 			errors = append(errors, fmt.Sprintf("%s: %v", name, execErr))
 			if input.Atomic && len(createdVMs) > 0 {
 				for _, vm := range createdVMs {
-					_ = o.Remove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: boolPtr(true)})
+					_ = o.Remove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: ptr.Bool(true)})
 				}
 				return &errs.OperationResult{
 					Status: "error", Code: "vm.atomic_failed",
@@ -465,7 +467,7 @@ func (o *VMOperation) Remove(ctx context.Context, input *inputs.VMInput) *errs.B
 		}
 
 		// Defense-in-depth: force-kill
-		if vmLocal.PID > 0 && isProcessRunningGo(vmLocal.PID) {
+		if vmLocal.PID > 0 && system.IsProcessRunning(vmLocal.PID) {
 			proc, err := os.FindProcess(vmLocal.PID)
 			if err == nil {
 				_ = proc.Kill()
@@ -565,9 +567,9 @@ func (o *VMOperation) Prune(ctx context.Context, dryRun bool, includeAll bool) *
 		}
 
 		if !dryRun {
-			result := o.Remove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: boolPtr(true)})
+			result := o.Remove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: ptr.Bool(true)})
 			if result.HasErrors() {
-				slog.Warn("Failed to remove VM", "name", vm.Name, "error", joinStringsPtrs(result))
+				slog.Warn("Failed to remove VM", "name", vm.Name, "error", infraslice.JoinStringsPtrs(result))
 				continue
 			}
 		}
@@ -1000,7 +1002,7 @@ func (o *VMOperation) Stop(ctx context.Context, input *inputs.VMInput) *errs.Bat
 		controller.Stop(ctx, force)
 
 		// Defense-in-depth: force-kill if stop() silently left the Firecracker process alive
-		if vmLocal.PID > 0 && isProcessRunningGo(vmLocal.PID) {
+		if vmLocal.PID > 0 && system.IsProcessRunning(vmLocal.PID) {
 			proc, _ := os.FindProcess(vmLocal.PID)
 			if proc != nil {
 				_ = proc.Kill()
@@ -1029,7 +1031,7 @@ func (o *VMOperation) respawnFirecracker(ctx context.Context, v *model.VM, snaps
 		if v.NocloudNetPort != nil {
 			port = *v.NocloudNetPort
 		}
-		if port == 0 || (v.NocloudNetPID != nil && !isProcessRunningGo(*v.NocloudNetPID)) {
+		if port == 0 || (v.NocloudNetPID != nil && !system.IsProcessRunning(*v.NocloudNetPID)) {
 			// Resolve network gateway for nocloud URL
 			gateway := ""
 			if v.Network != nil {
@@ -1053,12 +1055,12 @@ func (o *VMOperation) respawnFirecracker(ctx context.Context, v *model.VM, snaps
 	}
 
 	// ── Force-kill any remaining Firecracker process (matches Python) ──
-	if v.PID > 0 && isProcessRunningGo(v.PID) {
+	if v.PID > 0 && system.IsProcessRunning(v.PID) {
 		proc, err := os.FindProcess(v.PID)
 		if err == nil {
 			_ = proc.Signal(syscall.SIGTERM)
 			time.Sleep(100 * time.Millisecond)
-			if isProcessRunningGo(v.PID) {
+			if system.IsProcessRunning(v.PID) {
 				_ = proc.Kill()
 				time.Sleep(50 * time.Millisecond)
 			}
@@ -1236,7 +1238,7 @@ func (o *VMOperation) respawnFirecracker(ctx context.Context, v *model.VM, snaps
 	_ = o.vmRepo.UpdateStatus(ctx, v.ID, newStatus)
 
 	// Update in-memory VM object
-	v.PID = safeDerefInt(pid)
+	v.PID = ptr.SafeDerefInt(pid)
 	v.ProcessStartTime = pst
 	v.Status = newStatus
 }
@@ -1646,7 +1648,7 @@ func (o *VMOperation) AttachVolume(ctx context.Context, input *inputs.VMInput, v
 		if vmItem.BinaryID != "" {
 			bin, _ := o.binaryRepo.Get(ctx, vmItem.BinaryID)
 			if bin != nil && bin.Version != "" {
-				if !isFirecrackerVersionAtLeast(bin.Version, "1.16") {
+				if !version.IsFirecrackerVersionAtLeast(bin.Version, "1.16") {
 					return &errs.OperationResult{
 						Status: "error",
 						Code:   string(errs.CodeBinaryVersionGate),
@@ -1759,7 +1761,7 @@ func (o *VMOperation) DetachVolume(ctx context.Context, input *inputs.VMInput, v
 		if vmItem.BinaryID != "" {
 			bin, _ := o.binaryRepo.Get(ctx, vmItem.BinaryID)
 			if bin != nil && bin.Version != "" {
-				if !isFirecrackerVersionAtLeast(bin.Version, "1.16") {
+				if !version.IsFirecrackerVersionAtLeast(bin.Version, "1.16") {
 					return &errs.OperationResult{
 						Status: "error",
 						Code:   string(errs.CodeBinaryVersionGate),
@@ -2077,8 +2079,8 @@ func (o *VMOperation) Export(ctx context.Context, input *inputs.VMInput) (*input
 		SchemaVersion: "1.0",
 		Name:          vmItem.Name,
 		Compute: inputs.VMExportComputeConfig{
-			VCPUs: intPtr(vmItem.VCPUCount),
-			Mem:   intPtr(vmItem.MemSizeMiB),
+			VCPUs: ptr.Int(vmItem.VCPUCount),
+			Mem:   ptr.Int(vmItem.MemSizeMiB),
 		},
 		Image: inputs.VMExportImageConfig{
 			Type:     imageType,
@@ -2104,11 +2106,11 @@ func (o *VMOperation) Export(ctx context.Context, input *inputs.VMInput) (*input
 			MAC:         macPtr,
 		},
 		Boot: inputs.VMExportBootConfig{
-			Args:          strPtr(bootArgsStr),
+			Args:          ptr.Str(bootArgsStr),
 			EnableConsole: &vmItem.EnableConsole,
 		},
 		Firecracker: inputs.VMExportFirecrackerConfig{
-			EnableAPISocket: boolPtr(true),
+			EnableAPISocket: ptr.Bool(true),
 			PCIEnabled:      &vmItem.PCIEnabled,
 			LsmFlags:        lsmFlagsPtr,
 			NestedVirt:      &vmItem.NestedVirt,
@@ -2117,7 +2119,7 @@ func (o *VMOperation) Export(ctx context.Context, input *inputs.VMInput) (*input
 		CloudInit: inputs.VMExportCloudInitConfig{
 			Mode:           cloudInitModePtr,
 			User:           &rootUser,
-			NocloudNetPort: intPtr(nocloudPort),
+			NocloudNetPort: ptr.Int(nocloudPort),
 		},
 	}
 
@@ -2126,8 +2128,6 @@ func (o *VMOperation) Export(ctx context.Context, input *inputs.VMInput) (*input
 
 	return cfg, nil
 }
-
-func boolPtr(b bool) *bool { return &b }
 
 // ── Internal helpers ──
 
@@ -2233,9 +2233,9 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 	if c.resolved.RequestedGuestMAC != nil {
 		c.guestMAC = *c.resolved.RequestedGuestMAC
 	} else {
-		c.guestMAC = VMGenerateMAC(c.resolved.GuestMACPrefix)
+		c.guestMAC = infranet.VMGenerateMAC(c.resolved.GuestMACPrefix)
 	}
-	c.tapName = VMGenerateTAPName(c.resolved.Network.Name, c.resolved.Name)
+	c.tapName = infranet.VMGenerateTAPName(c.resolved.Network.Name, c.resolved.Name)
 
 	// Create VM directory
 	if err := os.MkdirAll(c.vmDir, 0755); err != nil {
@@ -2605,7 +2605,7 @@ func (c *vmCreateContext) forRespawn(vm *model.VM, snapshotMode bool) {
 		VMDir:                 c.vmDir,
 		VCPUCount:             vm.VCPUCount,
 		MemSizeMiB:            vm.MemSizeMiB,
-		User:                  safeDeref(vm.SSHUser),
+		User:                  ptr.SafeDeref(vm.SSHUser),
 		DNSServer:             "1.1.1.1",
 		GuestMACPrefix:        "02:FC",
 		NetworkPrefixLen:      24,
@@ -2626,8 +2626,8 @@ func (c *vmCreateContext) forRespawn(vm *model.VM, snapshotMode bool) {
 		ConsoleSocketFilename: "console.sock",
 		ConsolePIDFilename:    "console.pid",
 		CloudInitISOName:      "seed.iso",
-		BootArgs:              safeDeref(vm.BootArgs),
-		LSMFlags:              safeDeref(vm.LSMFlags),
+		BootArgs:              ptr.SafeDeref(vm.BootArgs),
+		LSMFlags:              ptr.SafeDeref(vm.LSMFlags),
 	}
 
 	// Set cloud_init_mode from VM state
@@ -2658,7 +2658,7 @@ func (c *vmCreateContext) forRespawn(vm *model.VM, snapshotMode bool) {
 	isoPath := filepath.Join(c.vmDir, "cloud-init", "seed.iso")
 	var isoPathPtr *string
 	if _, err := os.Stat(isoPath); err == nil {
-		isoPathPtr = strPtr(isoPath)
+		isoPathPtr = ptr.Str(isoPath)
 	}
 
 	var nocloudURL *string
@@ -2711,7 +2711,7 @@ func (c *vmCreateContext) respawnExecute(ctx context.Context) error {
 		if c._vm.NocloudNetPort != nil {
 			port = *c._vm.NocloudNetPort
 		}
-		if port == 0 || (c._vm.NocloudNetPID != nil && !isProcessRunningGo(*c._vm.NocloudNetPID)) {
+		if port == 0 || (c._vm.NocloudNetPID != nil && !system.IsProcessRunning(*c._vm.NocloudNetPID)) {
 			nocloudSvc := nocloudnet.NewNoCloudServer(c._vm.ID, c._vm.Name, c.vmDir, netItem.IPv4Gateway, port, 8000, 9000, 100)
 			if _, newPort, _, startErr := nocloudSvc.Start(ctx, c.vmDir); startErr != nil {
 				slog.Warn("Failed to start/restart nocloud-net server", "vm", c._vm.Name, "error", startErr)
@@ -2722,13 +2722,13 @@ func (c *vmCreateContext) respawnExecute(ctx context.Context) error {
 	}
 
 	// ── Force-kill any remaining Firecracker process ──
-	if c._vm.PID > 0 && isProcessRunningGo(c._vm.PID) {
+	if c._vm.PID > 0 && system.IsProcessRunning(c._vm.PID) {
 		proc, err := os.FindProcess(c._vm.PID)
 		if err == nil {
 			// Try SIGTERM first, then SIGKILL (matches Python's kill_and_wait)
 			_ = proc.Signal(syscall.SIGTERM)
 			time.Sleep(100 * time.Millisecond)
-			if isProcessRunningGo(c._vm.PID) {
+			if system.IsProcessRunning(c._vm.PID) {
 				_ = proc.Kill()
 				time.Sleep(50 * time.Millisecond)
 			}
@@ -2825,8 +2825,8 @@ func (c *vmCreateContext) buildFirecrackerConfig() *model.FirecrackerConfig {
 		NetworkNetmask:       c.resolved.NetworkNetmask,
 		ImageFSUUID:          c.resolved.Image.FSUUID,
 		ImageFSType:          c.resolved.Image.FSType,
-		BootArgs:             strPtr(c.resolved.BootArgs),
-		LSMFlags:             strPtr(c.resolved.LSMFlags),
+		BootArgs:             ptr.Str(c.resolved.BootArgs),
+		LSMFlags:             ptr.Str(c.resolved.LSMFlags),
 		PCIEnabled:           c.resolved.PCIEnabled,
 		NestedVirt:           c.resolved.NestedVirt,
 		CPUVendor:            cpuVendor,
@@ -2848,10 +2848,10 @@ func (c *vmCreateContext) buildFirecrackerConfig() *model.FirecrackerConfig {
 	// Cloud-init info from result (isoPath, nocloudURL)
 	if c.cloudInitResult != nil {
 		if c.cloudInitResult.isoPath != nil {
-			fcConfig.CloudInitISOPath = strPtr(*c.cloudInitResult.isoPath)
+			fcConfig.CloudInitISOPath = ptr.Str(*c.cloudInitResult.isoPath)
 		}
 		if c.cloudInitResult.nocloudURL != nil {
-			fcConfig.CloudInitNoCloudURL = strPtr(*c.cloudInitResult.nocloudURL)
+			fcConfig.CloudInitNoCloudURL = ptr.Str(*c.cloudInitResult.nocloudURL)
 		}
 	}
 
@@ -2876,12 +2876,12 @@ func (c *vmCreateContext) toModel() *model.VM {
 		return nil
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().Format(time.RFC3339)
 
 	vm := &model.VM{
 		ID:               c.vmID,
 		Name:             c.resolved.Name,
-		PID:              safeDerefInt(c.spawner.PID()),
+		PID:              ptr.SafeDerefInt(c.spawner.PID()),
 		ExitCode:         nil,
 		ProcessStartTime: c.spawner.ProcessStartTime(),
 		Status:           model.StatusRunning,
@@ -2917,8 +2917,8 @@ func (c *vmCreateContext) toModel() *model.VM {
 		vm.CPUConfig = c.resolved.CPUConfig
 	}
 
-	vm.LogPath = strPtr(filepath.Join(c.vmDir, c.resolved.LogFilename))
-	vm.SerialOutputPath = strPtr(filepath.Join(c.vmDir, c.resolved.SerialOutputFilename))
+	vm.LogPath = ptr.Str(filepath.Join(c.vmDir, c.resolved.LogFilename))
+	vm.SerialOutputPath = ptr.Str(filepath.Join(c.vmDir, c.resolved.SerialOutputFilename))
 
 	if c.resolved.BootArgs != "" {
 		vm.BootArgs = &c.resolved.BootArgs
@@ -3289,63 +3289,6 @@ func (o *VMOperation) generateBatchNames(baseName string, count int) []string {
 
 // ── Standalone helper functions ──
 
-func isProcessRunningGo(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return proc.Signal(syscall.Signal(0)) == nil
-}
-
-func VMGenerateMAC(prefix string) string {
-	if prefix == "" {
-		prefix = "02:FC"
-	}
-	return prefix + fmt.Sprintf(":%02x:%02x:%02x",
-		time.Now().UnixNano()&0xff,
-		os.Getpid()&0xff,
-		time.Now().UnixNano()>>8&0xff)
-}
-
-func VMGenerateTAPName(netName, vmName string) string {
-	h := sha256.Sum256([]byte(netName + ":" + vmName))
-	return fmt.Sprintf("tap-%x", h[:4])
-}
-
-func strPtr(s string) *string { return &s }
-
-// isFirecrackerVersionAtLeast checks if a Firecracker version string is >= minVersion.
-// Matches Python's VersionGate.require() logic.
-func isFirecrackerVersionAtLeast(ver, minVersion string) bool {
-	vParts, _ := version.SplitVersionParts(ver)
-	mParts, _ := version.SplitVersionParts(minVersion)
-	for i := 0; i < len(vParts) && i < len(mParts); i++ {
-		if vParts[i] != mParts[i] {
-			return vParts[i] > mParts[i]
-		}
-	}
-	return len(vParts) >= len(mParts)
-}
-
-func intPtr(i int) *int { return &i }
-
-func safeDeref(s *string) string {
-	if s != nil {
-		return *s
-	}
-	return ""
-}
-
-func safeDerefInt(i *int) int {
-	if i != nil {
-		return *i
-	}
-	return 0
-}
-
 // resolvedFromBuilderOutput converts a VMCreateResolved (from VMCreateBuilder.Build)
 // to the internal resolvedVMCreateInput used by executeCreate.
 // This bridges the public API layer to the internal VM creation pipeline.
@@ -3468,4 +3411,3 @@ func SetupSignalHandler(cancel func()) {
 }
 
 // Compile-time check
-var _ = slog.Default()

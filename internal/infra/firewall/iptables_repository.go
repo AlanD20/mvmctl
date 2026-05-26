@@ -144,7 +144,7 @@ func (r *IPTablesRuleRepository) GetByTableChainName(tableName, chainName string
 func (r *IPTablesRuleRepository) Insert(rule *FirewallRule) (*FirewallRule, error) {
 	createdAt := rule.CreatedAt
 	if createdAt == nil || *createdAt == "" {
-		now := time.Now().UTC().Format(time.RFC3339)
+		now := time.Now().Format(time.RFC3339)
 		createdAt = &now
 	}
 

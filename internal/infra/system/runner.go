@@ -511,19 +511,7 @@ func (h *ProcessSignalHandler) waitForExit(timeout time.Duration) *int {
 // ────────────────────────────────────────────────────────────────────
 
 // IsProcessRunning checks if a process is still running by PID.
-// Python's is_process_running() uses the same logic.
-//
-//	os.kill(pid, 0) — signal 0 tests for process existence.
-func IsProcessRunning(pid *int) bool {
-	if pid == nil {
-		return false
-	}
-	err := syscall.Kill(*pid, syscall.Signal(0))
-	if err != nil {
-		return false
-	}
-	return true
-}
+// ── Signal helpers ──
 
 // SendSignal sends a signal to a process by PID.
 // Returns true if the signal was delivered successfully.

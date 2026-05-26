@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"mvmctl/internal/core/binary"
 	"mvmctl/internal/core/config"
@@ -289,7 +290,7 @@ func (o *KernelOperation) Pull(ctx context.Context, input *inputs.KernelPullInpu
 	}
 
 	// Generate kernel ID in the API layer (matches Python exactly)
-	timestamp := infra.NowISO()
+	timestamp := time.Now().Format(time.RFC3339)
 	kernelID, err := infra.HashGenerator{}.Kernel(fetchResult.Path, fetchResult.Version, resolved.Arch, timestamp)
 	if err != nil {
 		return &errs.OperationResult{
@@ -682,4 +683,3 @@ func resolvedVersionStr(resolved *inputs.ResolvedKernelPullRequest) string {
 }
 
 // Compile-time check
-var _ = slog.Default()

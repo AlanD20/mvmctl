@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"mvmctl/internal/infra"
 	"strings"
 	"time"
 )
@@ -131,8 +132,8 @@ func (r *sqliteRepo) Upsert(ctx context.Context, img *ImageItem) error {
 		img.CompressedFormat,
 		img.MinRootfsSizeMiB,
 		img.PulledAt,
-		boolToInt(img.IsDefault),
-		boolToInt(img.IsPresent),
+		infra.BoolToInt(img.IsDefault),
+		infra.BoolToInt(img.IsPresent),
 		img.CreatedAt,
 		img.UpdatedAt,
 	)
@@ -140,7 +141,7 @@ func (r *sqliteRepo) Upsert(ctx context.Context, img *ImageItem) error {
 }
 
 func (r *sqliteRepo) SoftDelete(ctx context.Context, imageID string) error {
-	now := nowISO()
+	now := time.Now().Format(time.RFC3339)
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE images SET deleted_at = ?, is_present = 0 WHERE id = ?`,
 		now, imageID,
@@ -192,7 +193,7 @@ func (r *sqliteRepo) UpdateManyIsPresent(ctx context.Context, imageIDs []string,
 	placeholders := strings.Repeat("?,", len(imageIDs))
 	placeholders = placeholders[:len(placeholders)-1]
 	args := make([]any, 0, len(imageIDs)+1)
-	args = append(args, boolToInt(isPresent))
+	args = append(args, infra.BoolToInt(isPresent))
 	for _, id := range imageIDs {
 		args = append(args, id)
 	}
@@ -322,18 +323,4 @@ func scanImages(rows *sql.Rows) ([]*ImageItem, error) {
 		return nil, fmt.Errorf("rows iteration: %w", err)
 	}
 	return images, nil
-}
-
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}
-
-// nowISO returns the current UTC time as an RFC 3339 string (matching Python).
-// This is a package-level helper, kept separate from infra.NowISO to avoid
-// import dependency on infra from the core/image domain.
-func nowISO() string {
-	return time.Now().UTC().Format(time.RFC3339)
 }

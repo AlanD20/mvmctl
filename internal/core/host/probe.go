@@ -11,6 +11,7 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/model"
+	"mvmctl/internal/infra/ptr"
 	"mvmctl/internal/infra/system"
 )
 
@@ -20,10 +21,6 @@ type Probe struct{}
 
 func NewProbe() *Probe {
 	return &Probe{}
-}
-
-func strPtr(s string) *string {
-	return &s
 }
 
 // RunAll runs all pre-flight probes and returns aggregated result.
@@ -96,7 +93,7 @@ func (p *Probe) checkVMHost() []model.ProbeCheck {
 	var details *string
 	if !hasVirt {
 		msg = "CPU does not support hardware virtualization (VMX/SVM)"
-		details = strPtr("Enable VT-x/AMD-V in BIOS. Without it, VMs will be extremely slow.")
+		details = ptr.Str("Enable VT-x/AMD-V in BIOS. Without it, VMs will be extremely slow.")
 	}
 	checks = append(checks, model.ProbeCheck{
 		Name:    "cpu_virtualization",
@@ -114,21 +111,21 @@ func (p *Probe) checkVMHost() []model.ProbeCheck {
 			Name:    "dev_kvm",
 			Passed:  false,
 			Message: "/dev/kvm does not exist",
-			Details: strPtr("KVM kernel module not loaded. Run: sudo modprobe kvm && sudo modprobe kvm_intel (or kvm_amd)"),
+			Details: ptr.Str("KVM kernel module not loaded. Run: sudo modprobe kvm && sudo modprobe kvm_intel (or kvm_amd)"),
 		})
 	} else if !system.AccessRW(kvmPath) {
 		checks = append(checks, model.ProbeCheck{
 			Name:    "dev_kvm",
 			Passed:  false,
 			Message: "/dev/kvm exists but is not readable/writable",
-			Details: strPtr("Add user to kvm group: sudo usermod -aG kvm $USER && newgrp kvm"),
+			Details: ptr.Str("Add user to kvm group: sudo usermod -aG kvm $USER && newgrp kvm"),
 		})
 	} else if !cpuVirtOK {
 		checks = append(checks, model.ProbeCheck{
 			Name:    "dev_kvm",
 			Passed:  false,
 			Message: "/dev/kvm exists but no CPU virtualization support detected",
-			Details: strPtr("CPU may not support virtualization, or KVM is built into the kernel without /dev/kvm"),
+			Details: ptr.Str("CPU may not support virtualization, or KVM is built into the kernel without /dev/kvm"),
 		})
 	} else {
 		checks = append(checks, model.ProbeCheck{
@@ -146,7 +143,7 @@ func (p *Probe) checkVMHost() []model.ProbeCheck {
 	var tunDetails *string
 	if !tunOK {
 		tunMsg = "/dev/net/tun is not accessible"
-		tunDetails = strPtr("TUN/TAP networking will not work. Check permissions or load tun module.")
+		tunDetails = ptr.Str("TUN/TAP networking will not work. Check permissions or load tun module.")
 	}
 	checks = append(checks, model.ProbeCheck{
 		Name:    "dev_net_tun",
@@ -184,7 +181,7 @@ func (p *Probe) checkVMHost() []model.ProbeCheck {
 	var kvmDetails *string
 	if !kvmModuleOK {
 		kvmMsg = "KVM kernel module not loaded"
-		kvmDetails = strPtr("Run: sudo modprobe kvm")
+		kvmDetails = ptr.Str("Run: sudo modprobe kvm")
 	}
 	checks = append(checks, model.ProbeCheck{
 		Name:    "kvm_module",
@@ -209,7 +206,7 @@ func (p *Probe) checkVMHost() []model.ProbeCheck {
 	var kernelDetails *string
 	if !kernelMet {
 		kernelMsg = fmt.Sprintf("Kernel %s is below minimum 5.10", release)
-		kernelDetails = strPtr("Firecracker requires Linux kernel 5.10 or later.")
+		kernelDetails = ptr.Str("Firecracker requires Linux kernel 5.10 or later.")
 	}
 	checks = append(checks, model.ProbeCheck{
 		Name:    "kernel_version",
@@ -240,7 +237,7 @@ func (p *Probe) checkVMHost() []model.ProbeCheck {
 	var nestedDetails *string
 	if !nestedVirt {
 		nestedMsg = "Nested virtualization not available"
-		nestedDetails = strPtr("Only needed for running VMs inside VMs. Set kvm_intel.nested=1 or kvm_amd.nested=1.")
+		nestedDetails = ptr.Str("Only needed for running VMs inside VMs. Set kvm_intel.nested=1 or kvm_amd.nested=1.")
 	}
 	checks = append(checks, model.ProbeCheck{
 		Name:    "nested_virtualization",
@@ -263,7 +260,7 @@ func (p *Probe) checkInitBinaries() []model.ProbeCheck {
 		var details *string
 		if !found {
 			msg = fmt.Sprintf("Required binary '%s' not found", name)
-			details = strPtr(fmt.Sprintf("Install the package that provides '%s'", name))
+			details = ptr.Str(fmt.Sprintf("Install the package that provides '%s'", name))
 		}
 		checks = append(checks, model.ProbeCheck{
 			Name:    "binary:" + name,
@@ -315,7 +312,7 @@ func (p *Probe) checkFirewallReadiness() []model.ProbeCheck {
 				Name:    "firewall_conflict",
 				Passed:  false,
 				Message: "Mixed iptables backends detected",
-				Details: strPtr("Both legacy and nft iptables backends are active. This may cause networking issues."),
+				Details: ptr.Str("Both legacy and nft iptables backends are active. This may cause networking issues."),
 			})
 		}
 	}
@@ -356,7 +353,7 @@ func (p *Probe) checkSystemResources() []model.ProbeCheck {
 			Name:    "swap_size",
 			Passed:  false,
 			Message: msg,
-			Details: strPtr("Low swap may cause OOM under high VM load. Consider increasing swap."),
+			Details: ptr.Str("Low swap may cause OOM under high VM load. Consider increasing swap."),
 		})
 	}
 
@@ -367,7 +364,7 @@ func (p *Probe) checkSystemResources() []model.ProbeCheck {
 	var clDetails *string
 	if !clAvailable {
 		clMsg = "cloud-localds not found"
-		clDetails = strPtr("Install cloud-image-utils (Debian/Ubuntu) or cloud-utils (Arch)")
+		clDetails = ptr.Str("Install cloud-image-utils (Debian/Ubuntu) or cloud-utils (Arch)")
 	}
 	checks = append(checks, model.ProbeCheck{
 		Name:    "cloud_localds",

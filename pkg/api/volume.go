@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"mvmctl/internal/core/vm"
@@ -66,7 +65,7 @@ func (o *VolumeOperation) Create(ctx context.Context, input *inputs.VolumeCreate
 		}
 	}
 
-	timestamp := time.Now().UTC().Format(time.RFC3339)
+	timestamp := time.Now().Format(time.RFC3339)
 
 	// Generate ID matching Python's HashGenerator.volume(name, timestamp) exactly
 	var hg infra.HashGenerator
@@ -335,4 +334,3 @@ func (o *VolumeOperation) Resize(ctx context.Context, input *inputs.VolumeCreate
 }
 
 // Compile-time check
-var _ = slog.Default()

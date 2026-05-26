@@ -548,4 +548,3 @@ func (o *BinaryOperation) EnsureDefault(ctx context.Context) *errs.OperationResu
 }
 
 // Compile-time check
-var _ = slog.Default()

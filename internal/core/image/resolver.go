@@ -228,9 +228,9 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *Resol
 //     (e.g. ":version" → ("", "version", true) — Python returns ("", "version")
 //      where "" is not None, so Python enters the fast path)
 func parseSelector(selector string) (string, string, bool) {
-	idx := strings.Index(selector, ":")
-	if idx < 0 {
+	prefix, rest, found := strings.Cut(selector, ":")
+	if !found {
 		return "", selector, false // no colon: Python returns (None, selector)
 	}
-	return selector[:idx], selector[idx+1:], true // has colon: Python returns (prefix, rest) where prefix may be ""
+	return prefix, rest, true // has colon: Python returns (prefix, rest) where prefix may be ""
 }

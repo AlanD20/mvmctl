@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/model"
@@ -71,14 +72,14 @@ func (r *sqliteRepo) Upsert(ctx context.Context, k *model.KernelItem) error {
 			is_present = excluded.is_present,
 			updated_at = CURRENT_TIMESTAMP`,
 		k.ID, k.Name, k.BaseName, k.Version, k.Arch, k.Type, k.Path,
-		boolToInt(k.IsDefault), boolToInt(k.IsPresent),
+		infra.BoolToInt(k.IsDefault), infra.BoolToInt(k.IsPresent),
 		k.CreatedAt, k.UpdatedAt, k.DeletedAt,
 	)
 	return err
 }
 
 func (r *sqliteRepo) SoftDelete(ctx context.Context, id string) error {
-	now := infra.NowISO()
+	now := time.Now().Format(time.RFC3339)
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE kernels SET deleted_at = ?, is_present = 0 WHERE id = ?`, now, id)
 	return err
@@ -155,7 +156,7 @@ func (r *sqliteRepo) UpdateManyIsPresent(ctx context.Context, ids []string, isPr
 	placeholders := strings.Repeat("?,", len(ids))
 	placeholders = placeholders[:len(placeholders)-1]
 	args := make([]any, 0, len(ids)+1)
-	args = append(args, boolToInt(isPresent))
+	args = append(args, infra.BoolToInt(isPresent))
 	for _, id := range ids {
 		args = append(args, id)
 	}
@@ -223,11 +224,4 @@ func scanKernels(rows *sql.Rows) ([]*model.KernelItem, error) {
 		return nil, fmt.Errorf("rows iteration: %w", err)
 	}
 	return kernels, nil
-}
-
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
 }
