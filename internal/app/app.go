@@ -27,10 +27,16 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/db"
 	"mvmctl/internal/infra/download"
+	"mvmctl/internal/infra/version"
 	"mvmctl/pkg/api"
 )
 
 // ── Structs ─────────────────────────────────────────────────────────────────
+
+// Version holds the current base version string, used for User-Agent headers
+// and build metadata. Defaults to "0.1.0" (matching Python's __version__).
+// Set via ldflags when building release binaries.
+var Version = "0.1.0"
 
 type repos struct {
 	vm      vm.Repository
@@ -312,9 +318,6 @@ func Run(ctx context.Context) {
 	// setup_logging(verbose, debug) inside the Click group callback — NOT at
 	// import time or before CLI wiring.
 
-	// Initialize runtime identity constants early (ARCHITECTURE: V12 — no init() globals).
-	infra.InitConstants(infra.ResolveCLIName())
-
 	cacheDir := getCacheDir()
 
 	// Python: Check DB exists before non-exempt commands — matching app() callback.
@@ -322,11 +325,10 @@ func Run(ctx context.Context) {
 	if !isDBSkipCommand(os.Args) {
 		dbPath := filepath.Join(cacheDir, infra.MVMDBFilename)
 		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-			cliName := infra.ResolveCLIName()
 			slog.Error("not initialized",
-				"cli", cliName,
+				"cli", infra.CLIName,
 				"command", os.Args[1],
-				"hint", fmt.Sprintf("Run '%s init' first", cliName),
+				"hint", fmt.Sprintf("Run '%s init' first", infra.CLIName),
 			)
 			os.Exit(1)
 		}
@@ -339,7 +341,7 @@ func Run(ctx context.Context) {
 	download.SetUserAgent(Version)
 
 	// Sync version to infra package for components that reference it.
-	infra.SetBuildVersion(Version)
+	version.SetBuildVersion(Version)
 
 	repos := initRepos(database)
 

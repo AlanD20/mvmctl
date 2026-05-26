@@ -112,7 +112,7 @@ func (o *VMOperation) Create(ctx context.Context, input *inputs.VMCreateInput, o
 
 func (o *VMOperation) createSingle(ctx context.Context, input *inputs.VMCreateInput, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
 	createdAt := time.Now().UTC()
-	vmID := o.generateVMID(input.Name, createdAt.Format(time.RFC3339))
+	vmID := infra.HashGenerator{}.VM(input.Name, createdAt.Format(time.RFC3339))
 	vmDir := filepath.Join(o.cacheDir, "vms", vmID)
 
 	resolved, err := o.buildResolvedInput(ctx, input, vmID, vmDir)
@@ -225,7 +225,7 @@ func (o *VMOperation) createBatch(ctx context.Context, input *inputs.VMCreateInp
 
 	for idx, name := range names {
 		createdAt := time.Now().UTC()
-		vmID := o.generateVMID(name, createdAt.Format(time.RFC3339))
+		vmID := infra.HashGenerator{}.VM(name, createdAt.Format(time.RFC3339))
 		vmDir := filepath.Join(o.cacheDir, "vms", vmID)
 
 		resolved, err := o.buildResolvedInput(ctx, input, vmID, vmDir)
@@ -3275,11 +3275,6 @@ func (o *VMOperation) resolveSingleVM(ctx context.Context, ident string) (*model
 		}
 	}
 	return nil, fmt.Errorf("VM not found: %s", ident)
-}
-
-func (o *VMOperation) generateVMID(name, timestamp string) string {
-	h := sha256.Sum256([]byte(name + ":" + timestamp))
-	return fmt.Sprintf("%x", h[:16])
 }
 
 func (o *VMOperation) generateBatchNames(baseName string, count int) []string {

@@ -168,18 +168,6 @@ func ValidateSudoersBinaries() error {
 	return nil
 }
 
-// TODO: Move to infra/ (verdict #33).
-func getBinDir() string {
-	cacheDir := infra.EnvGetDefault("CACHE_DIR", "")
-	if cacheDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			home = "/tmp"
-		}
-		cacheDir = filepath.Join(home, ".cache", infra.ProjectName)
-	}
-	return filepath.Join(cacheDir, "bin")
-}
 
 // ── GenerateSudoersContent ──
 // Matches Python's HostService._generate_sudoers_content().
@@ -190,7 +178,7 @@ func GenerateSudoersContent(groupName string) string {
 	// Iterate in Python dict literal insertion order.
 	binaries := privilegedBinariesOrdered()
 	// Service binaries via "mvm run <service>" pattern (sudoers wildcard)
-	runCmd := filepath.Join(getBinDir(), infra.CLIName, "run", "*")
+	runCmd := filepath.Join(infra.GetBinDir(), infra.CLIName, "run", "*")
 	binaries = append(binaries, runCmd)
 	binariesStr := strings.Join(binaries, ", ")
 	return fmt.Sprintf(

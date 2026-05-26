@@ -11,16 +11,9 @@ import (
 )
 
 // MVMUnixGroup is the Unix group name for mvm privilege management.
-// Defaults to "mvm" which matches the CLI binary name.
-// This is a copy of infra.MVMUnixGroup to avoid circular imports.
-// SetMVMUnixGroup is called by app.Run() from infra to keep in sync.
-var MVMUnixGroup = "mvm"
-
-// SetMVMUnixGroup allows external packages (e.g. app.go) to set the group name
-// from the resolved CLI name so that it stays in sync with infra.MVMUnixGroup.
-func SetMVMUnixGroup(name string) {
-	MVMUnixGroup = name
-}
+// Must stay as a const "mvm" matching infra.MVMUnixGroup.
+// This is a copy to avoid circular imports (infra can import system, not reverse).
+const MVMUnixGroup = "mvm"
 
 // _mvmGroupVerified is a per-process cache matching Python's
 // _MVM_GROUP_VERIFIED module-level flag.  Group membership is immutable

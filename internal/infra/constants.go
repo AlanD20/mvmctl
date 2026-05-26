@@ -1,7 +1,6 @@
 package infra
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -13,20 +12,21 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"mvmctl/internal/infra/system"
 )
 
 // ── Identity ──
 const BootstrapName = "mvmctl"
 
-// MVMUnixGroup is the Unix group name, resolved from the CLI binary name.
-// Initialized at declaration time with resolveCLIName() to avoid init();
-// override via InitConstants() from app.Run().
-var MVMUnixGroup = resolveCLIName()
+// CLIName is the canonical CLI name. In Go, unlike Python (which needed dynamic
+// resolution for Nuitka console_scripts entry points), the binary name is
+// always "mvm" — a compiled Go binary has one name.
+const CLIName = "mvm"
+
+// MVMUnixGroup is the Unix group name for mvm privilege management.
+// In Go this is always the same as the CLI name.
+const MVMUnixGroup = CLIName
 
 // ProjectNameDefault is the compile-time constant default for the project name.
-// Use this when a compile-time constant is required.
 const ProjectNameDefault = "mvmctl"
 
 // ProjectName is the runtime project name, defaulting to "mvmctl".
@@ -40,192 +40,20 @@ var ProjectName = ProjectNameDefault
 
 const MVMDBFilename = "mvmdb.db"
 
-// ProjectNameResolver returns the project name. This exists to mirror the
-// Python API shape; callers should use ProjectName directly.
-func ProjectNameResolver() string {
-	return ProjectName
-}
-
-// _cliName is the internal CLI name, resolved from the binary name.
-// Initialized at declaration time to avoid needing init().
-// Override via InitConstants() from app.Run().
-var _cliName = resolveCLIName()
-
-// CLIName is the dynamic CLI name resolved from os.Args[0] with fallback to "mvm".
-// Initialized at declaration time; override via InitConstants() from app.Run().
-var CLIName = resolveCLIName()
-
-// InitConstants sets runtime identity constants. Must be called early from app.Run()
-// to set the actual CLI name and sync derived values (MVMUnixGroup, system.MVMUnixGroup).
-// Replaces the former init() pattern (ARCHITECTURE: V12 — no init() globals).
-func InitConstants(cliName string) {
-	_cliName = cliName
-	CLIName = cliName
-	MVMUnixGroup = cliName
-	system.SetMVMUnixGroup(cliName)
-}
-
-func resolveCLIName() string {
-	// Python's _resolve_cli_name() resolves from console_scripts entry points
-	// for "mvmctl.main:app" — which returns "mvm" (the entry point name).
-	// Fallback is "mvmctl", but the actual console_scripts entry point is "mvm".
-	return "mvm"
-}
-
-func ResolveCLIName() string {
-	return _cliName
-}
-
-func MVMUnixGroupName() string {
-	return _cliName
-}
-
 func MVMFwdChain() string {
-	return fmt.Sprintf("%s-FORWARD", strings.ToUpper(_cliName))
+	return fmt.Sprintf("%s-FORWARD", strings.ToUpper(CLIName))
 }
 
 func MVMPostroutingChain() string {
-	return fmt.Sprintf("%s-POSTROUTING", strings.ToUpper(_cliName))
+	return fmt.Sprintf("%s-POSTROUTING", strings.ToUpper(CLIName))
 }
 
 func MVMNocloudNetInputChain() string {
-	return fmt.Sprintf("%s-NOCLOUDNET-INPUT", strings.ToUpper(_cliName))
+	return fmt.Sprintf("%s-NOCLOUDNET-INPUT", strings.ToUpper(CLIName))
 }
 
 func SudoersDropInPath() string {
-	return fmt.Sprintf("/etc/sudoers.d/%s", _cliName)
-}
-
-func HTTPUserAgent() string {
-	return fmt.Sprintf("%s/%s", _cliName, VersionString())
-}
-
-// ── Version ──
-var _buildVersion = "0.0.0"
-
-func VersionString() string {
-	return _buildVersion
-}
-
-func SetBuildVersion(v string) {
-	if v != "" {
-		_buildVersion = v
-	}
-}
-
-// ── Git version info ──
-// Canonical implementation, matching Python _get_git_version_info() in main.py lines 61-104.
-// Starts from SourceDir (set via ldflags or derived from runtime.Caller), which matches
-// Python's Path(__file__).parent.parent.parent. Falls back to os.Getwd() walking up.
-// Returns:
-//   - Tag name if current commit is tagged
-//   - "git+<short_hash>" if not tagged
-//   - empty string if not in a git repo or git not available
-//
-// SourceDir can be embedded at build time via:
-//
-//	-ldflags "-X mvmctl/internal/infra.SourceDir=$(pwd)"
-var SourceDir string
-
-var sourceDirOnce sync.Once
-
-func resolveSourceDir() {
-	if SourceDir != "" {
-		return
-	}
-	// Derive from runtime.Caller(0) at init time — works during development
-	// when source files are accessible at their original build locations.
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		return
-	}
-	// file is .../internal/infra/constants.go
-	// Walk up: constants.go → infra/ → internal/ → mvmctl/ (repo root)
-	dir := filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(file))))
-	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-		SourceDir = dir
-	}
-}
-
-func GetGitVersionInfo() string {
-	sourceDirOnce.Do(resolveSourceDir)
-
-	searchDirs := []string{}
-	if SourceDir != "" {
-		searchDirs = append(searchDirs, SourceDir)
-	}
-
-	// Fallback: try cwd (walking up to 5 levels)
-	cwd, err := os.Getwd()
-	if err == nil {
-		searchDirs = append(searchDirs, cwd)
-	}
-
-	for _, dir := range searchDirs {
-		for i := 0; i < 5; i++ {
-			if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-				repoDir := dir
-
-				// Check if current commit has a tag
-				tag, err := runGitCmd(repoDir, "describe", "--tags", "--exact-match", "HEAD")
-				if err == nil && tag != "" {
-					return strings.TrimSpace(tag)
-				}
-
-				// No tag, get short commit hash
-				hash, err := runGitCmd(repoDir, "rev-parse", "--short", "HEAD")
-				if err == nil && hash != "" {
-					return "git+" + strings.TrimSpace(hash)
-				}
-
-				return ""
-			}
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
-			}
-			dir = parent
-		}
-	}
-	return ""
-}
-
-func runGitCmd(repoDir string, args ...string) (string, error) {
-	result := system.RunCmdCompat(context.Background(), append([]string{"git", "-C", repoDir}, args...), system.RunCmdOptions{Capture: true})
-	if result.Err != nil {
-		return "", fmt.Errorf("git %v: %w", args, result.Err)
-	}
-	return strings.TrimSpace(result.Stdout), nil
-}
-
-// FormatVersion produces the display version string matching Python _get_version().
-// Resolution chain:
-//  1. BuildVersion (set via ldflags) — returned as-is (Python returns BUILD_VERSION as-is).
-//     Python does NOT skip "0.1.0" — any non-empty version is returned as-is.
-//  2. If BuildVersion is empty, use "0.1.0" as hardcoded fallback.
-//  3. Append git info unless a tag is found (tag overrides version entirely).
-func FormatVersion(chosenVersion string) string {
-	// Build-time version baked in (takes priority) — returned as-is.
-	// Python's _get_version() returns BUILD_VERSION as-is with NO "0.1.0" skip check.
-	if chosenVersion != "" {
-		return chosenVersion
-	}
-
-	// Fallback to hardcoded version
-	version := "0.1.0"
-
-	// Add git info if available
-	gitInfo := GetGitVersionInfo()
-	if gitInfo != "" {
-		if strings.HasPrefix(gitInfo, "git+") {
-			version = version + "+" + gitInfo
-		} else {
-			// It's a tag, use tag as version
-			version = gitInfo
-		}
-	}
-
-	return version
+	return fmt.Sprintf("/etc/sudoers.d/%s", CLIName)
 }
 
 // ── User-overridable defaults ──
@@ -550,7 +378,7 @@ func IsCompiledMode() bool {
 // ══════════════════════════════════════════════════════════════════════════════
 
 func EnvKey(suffix string) string {
-	return fmt.Sprintf("%s_%s", strings.ToUpper(_cliName), suffix)
+	return fmt.Sprintf("%s_%s", strings.ToUpper(CLIName), suffix)
 }
 
 // EnvGet returns the environment variable value and whether it was set.
