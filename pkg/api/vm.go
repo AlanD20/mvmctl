@@ -3368,22 +3368,8 @@ func resolvedFromBuilderOutput(r *inputs.VMCreateResolved) *resolvedVMCreateInpu
 		SSHKeys:               sshKeyNames,
 		Provisioner:           model.ProvisionerType(r.Provisioner),
 		Volumes:               r.Volumes,
-		ExtraDrives:           convertExtraDrives(r.ExtraDrives),
+		ExtraDrives:           r.ExtraDrives,
 	}
-}
-
-// convertExtraDrives converts from public inputs.DriveConfig to []model.DriveConfig.
-func convertExtraDrives(drives []inputs.DriveConfig) []model.DriveConfig {
-	result := make([]model.DriveConfig, len(drives))
-	for i, d := range drives {
-		result[i] = model.DriveConfig{
-			DriveID:      d.DriveID,
-			PathOnHost:   d.PathOnHost,
-			IsRootDevice: d.IsRootDevice,
-			IsReadOnly:   d.IsReadOnly,
-		}
-	}
-	return result
 }
 
 // setupConsoleRelay creates a Controller and PTY for the given VM.

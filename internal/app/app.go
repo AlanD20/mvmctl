@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/user"
 	"path/filepath"
 	"strings"
 
@@ -14,7 +13,6 @@ import (
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/core/binary"
 	"mvmctl/internal/core/cache"
-	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/host"
 	"mvmctl/internal/core/image"
@@ -22,6 +20,7 @@ import (
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/core/ssh"
+	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/enricher"
 	"mvmctl/internal/infra"
@@ -84,76 +83,6 @@ type apis struct {
 	ssh     *api.SSHOperation
 	cp      *api.CPOperation
 	init    *api.InitOperation
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-// isUnderSafeDir checks whether path is under one of the safe parent directories
-// using proper path hierarchy comparison (matching Python's is_relative_to).
-// Python uses Path.is_relative_to() which properly checks path hierarchy;
-// this avoids the false-positive issue with string prefix matching
-// (e.g., "/home/user1" incorrectly matching "/home/user").
-func isUnderSafeDir(path, parent string) bool {
-	rel, err := filepath.Rel(parent, path)
-	if err != nil {
-		return false
-	}
-	// rel == "." means path == parent
-	// rel not starting with ".." means path is under parent
-	return rel == "." || !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".."
-}
-
-// getCacheDir returns the MVM cache directory.
-// Matches Python CacheUtils.get_cache_dir() in src/mvmctl/utils/common.py lines 193-219.
-func getCacheDir() string {
-	override := os.Getenv(infra.EnvKey("CACHE_DIR"))
-	if override != "" {
-		resolved, err := filepath.Abs(override)
-		if err != nil {
-			slog.Error("cannot resolve cache dir",
-				"env", infra.EnvKey("CACHE_DIR"),
-				"value", override,
-				"error", err,
-			)
-			os.Exit(1)
-		}
-		// Python: resolved.is_relative_to(home), is_relative_to(tmp), is_relative_to(var_tmp)
-		// Use isUnderSafeDir for proper path hierarchy comparison (avoids string prefix false positives).
-		home, _ := os.UserHomeDir()
-		homeResolved, _ := filepath.Abs(home)
-		tmpResolved := "/tmp"
-		varTmpResolved := "/var/tmp"
-		underHome := isUnderSafeDir(resolved, homeResolved)
-		underTmp := isUnderSafeDir(resolved, tmpResolved)
-		underVarTmp := isUnderSafeDir(resolved, varTmpResolved)
-		if !(underHome || underTmp || underVarTmp) {
-			slog.Error("unsafe cache dir path",
-				"env", infra.EnvKey("CACHE_DIR"),
-				"value", override,
-				"home", homeResolved,
-			)
-			os.Exit(1)
-		}
-		return resolved
-	}
-
-	// Python: _get_real_home() — when running under sudo, use SUDO_USER's home
-	homeDir := ""
-	sudoUser := os.Getenv("SUDO_USER")
-	if sudoUser != "" {
-		u, err := user.Lookup(sudoUser)
-		if err == nil {
-			homeDir = u.HomeDir
-		}
-	}
-	if homeDir == "" {
-		var err error
-		homeDir, err = os.UserHomeDir()
-		if err != nil {
-			homeDir = "/root"
-		}
-	}
-	return filepath.Join(homeDir, ".cache", "mvmctl")
 }
 
 func isDBSkipCommand(args []string) bool {
@@ -318,7 +247,13 @@ func Run(ctx context.Context) {
 	// setup_logging(verbose, debug) inside the Click group callback — NOT at
 	// import time or before CLI wiring.
 
-	cacheDir := getCacheDir()
+	cacheDir, err := infra.GetCacheDir()
+	if err != nil {
+		slog.Error("cannot resolve cache dir",
+			"error", err,
+		)
+		os.Exit(1)
+	}
 
 	// Python: Check DB exists before non-exempt commands — matching app() callback.
 	// Python: if not CacheUtils.get_mvm_db_path().exists(): click.echo("Error: ...", err=True); ctx.exit(1)

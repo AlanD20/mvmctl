@@ -50,14 +50,6 @@ type VMCreateInput struct {
 	Volumes             []string
 }
 
-// DriveConfig matches Python's DriveConfig from VolumeService.volumes_to_drives().
-type DriveConfig struct {
-	DriveID      string `json:"drive_id"`
-	PathOnHost   string `json:"path_on_host"`
-	IsRootDevice bool   `json:"is_root_device"`
-	IsReadOnly   bool   `json:"is_read_only"`
-}
-
 // CloudInitModeResolved matches Python's CloudInitModeResolved dataclass.
 type CloudInitModeResolved struct {
 	Mode    model.CloudInitMode
@@ -124,7 +116,7 @@ type VMCreateResolved struct {
 	BootArgs           *string
 	SSHKeys            []*model.SSHKeyItem
 	Provisioner        model.ProvisionerType
-	ExtraDrives        []DriveConfig
+	ExtraDrives        []model.DriveConfig
 	Volumes            []*model.VolumeItem
 }
 

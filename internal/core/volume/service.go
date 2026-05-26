@@ -205,29 +205,6 @@ func GetDiskInfo(ctx context.Context, path string) (map[string]any, error) {
 	return data, nil
 }
 
-// VolumesToDrives converts volumes to Firecracker drive configurations.
-// Matches Python's VolumeService.volumes_to_drives().
-func VolumesToDrives(volumes []*model.VolumeItem) ([]DriveConfig, error) {
-	var drives []DriveConfig
-	for _, vol := range volumes {
-		if vol.Status != model.VolumeStatusAvailable && vol.Status != model.VolumeStatusAttached {
-			return nil, NewVolumeErrorf(
-				"Volume '%s' is not available (status: %s)",
-				vol.Name, vol.Status,
-			)
-		}
-		drives = append(drives, DriveConfig{
-			DriveID:      vol.ID,
-			PathOnHost:   vol.Path,
-			IsRootDevice: false,
-			IsReadOnly:   vol.IsReadOnly,
-			CacheType:    "Unsafe",
-			IOEngine:     "Sync",
-		})
-	}
-	return drives, nil
-}
-
 // SetVolumesState updates the state of one or more volumes.
 // Matches Python's VolumeService.set_volumes_state() exactly.
 // Python: vm_id: str | None = None — defaults to None.
@@ -267,15 +244,4 @@ func (s *Service) SetVolumesState(ctx context.Context, volumes []*model.VolumeIt
 	}
 
 	return nil
-}
-
-// DriveConfig is a Firecracker drive configuration for volume attachment.
-// Matches Python's VolumeService.volumes_to_drives() output exactly.
-type DriveConfig struct {
-	DriveID      string `json:"drive_id"`
-	PathOnHost   string `json:"path_on_host"`
-	IsRootDevice bool   `json:"is_root_device"`
-	IsReadOnly   bool   `json:"is_read_only"`
-	CacheType    string `json:"cache_type"`
-	IOEngine     string `json:"io_engine"`
 }
