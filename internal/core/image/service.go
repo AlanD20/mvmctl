@@ -27,6 +27,7 @@ import (
 	"mvmctl/internal/infra/download"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/parallel"
+	"mvmctl/internal/infra/ptr"
 	"mvmctl/internal/infra/system"
 )
 
@@ -276,7 +277,7 @@ func (s *Service) OptimizeImage(
 			Arch:             spec.Arch,
 			Path:             imagePath,
 			FSType:           fsType,
-			Distro:           strPtr(detectedOS),
+			Distro:           ptr.StrNonEmpty(detectedOS),
 			MinRootfsSizeMiB: int(actualSize / MiB),
 			OriginalSize:     actualSize,
 			IsDefault:        false,
@@ -284,7 +285,7 @@ func (s *Service) OptimizeImage(
 			PulledAt:         timestamp,
 			CreatedAt:        timestamp,
 			UpdatedAt:        timestamp,
-			FSUUID:           strPtr(fsUUID),
+			FSUUID:           ptr.StrNonEmpty(fsUUID),
 			CompressedSize:   nil,
 			CompressionRatio: nil,
 			CompressedFormat: nil,
@@ -373,25 +374,25 @@ func (s *Service) OptimizeImage(
 
 	compFmt := "zst"
 	return &ImageItem{
-		ID:                 imageID,
-		Type:               spec.Type,
-		Version:            spec.Version,
-		Name:               spec.Name,
-		Arch:               spec.Arch,
-		Distro:             strPtr(distro),
-		Path:               compressedPath,
-		FSType:             fsType,
-		MinRootfsSizeMiB:   minimumRootfsSizeMiB,
-		OriginalSize:       preShrinkSize,
-		IsDefault:          false,
-		IsPresent:          true,
-		PulledAt:           timestamp,
-		CreatedAt:          timestamp,
-		UpdatedAt:          timestamp,
-		FSUUID:             strPtr(fsUUID),
-		CompressedSize:     &compressedSize,
-		CompressionRatio:   &compressionRatio,
-		CompressedFormat:   &compFmt,
+		ID:               imageID,
+		Type:             spec.Type,
+		Version:          spec.Version,
+		Name:             spec.Name,
+		Arch:             spec.Arch,
+		Distro:           ptr.StrNonEmpty(distro),
+		Path:             compressedPath,
+		FSType:           fsType,
+		MinRootfsSizeMiB: minimumRootfsSizeMiB,
+		OriginalSize:     preShrinkSize,
+		IsDefault:        false,
+		IsPresent:        true,
+		PulledAt:         timestamp,
+		CreatedAt:        timestamp,
+		UpdatedAt:        timestamp,
+		FSUUID:           ptr.StrNonEmpty(fsUUID),
+		CompressedSize:   &compressedSize,
+		CompressionRatio: &compressionRatio,
+		CompressedFormat: &compFmt,
 	}, warnings, nil
 }
 
@@ -1604,7 +1605,7 @@ func (s *Service) resolveFSType(imagePath string) (string, error) {
 		return fsType, nil
 	}
 	extMap := map[string]string{
-		".ext4": "ext4",
+		".ext4":  "ext4",
 		".btrfs": "btrfs",
 		".xfs":   "xfs",
 	}

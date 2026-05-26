@@ -5,7 +5,6 @@ package api
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -498,4 +497,3 @@ func (o *KeyOperation) checkDependencies() error {
 }
 
 // Compile-time check
-var _ = slog.Default()

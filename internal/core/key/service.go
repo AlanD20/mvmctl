@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
@@ -172,10 +172,6 @@ func ParseComment(pubKeyContent string) string {
 }
 
 // nowISO returns current time in ISO format matching Python's datetime.now(UTC).isoformat().
-func nowISO() string {
-	// Match Python's format: "2024-01-15T10:30:00.123456+00:00"
-	return infra.NowISO()
-}
 
 // CreateKeypair generates a new SSH keypair.
 // Matches Python's KeyService.create_keypair() exactly.
@@ -240,7 +236,7 @@ func (s *Service) CreateKeypair(ctx context.Context, params *CreateParams) (*mod
 		return nil, "", err
 	}
 
-	now := nowISO()
+	now := time.Now().Format(time.RFC3339)
 	privPathStr := privateKeyPath
 	sshKey := &model.SSHKeyItem{
 		ID:             fingerprint,
@@ -309,7 +305,7 @@ func (s *Service) AddKey(ctx context.Context, name, pubKeyPath, pubKeyContent, k
 		return nil, err
 	}
 
-	now := nowISO()
+	now := time.Now().Format(time.RFC3339)
 	sshKey := &model.SSHKeyItem{
 		ID:            fingerprint,
 		Name:          name,

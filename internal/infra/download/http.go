@@ -417,8 +417,8 @@ func extractFilename(rawURL string) string {
 	if idx := strings.LastIndex(rawURL, "/"); idx >= 0 {
 		rawURL = rawURL[idx+1:]
 	}
-	if idx := strings.Index(rawURL, "?"); idx >= 0 {
-		rawURL = rawURL[:idx]
+	if before, _, found := strings.Cut(rawURL, "?"); found {
+		rawURL = before
 	}
 	return rawURL
 }

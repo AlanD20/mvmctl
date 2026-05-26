@@ -56,9 +56,9 @@ func NewCPService() *CPService {
 // Python returns tuple[str | None, str]; Go returns (vmID, path)
 // where vmID="" corresponds to Python's None.
 func (s *CPService) _parseVMPath(path string) (vmID string, filePath string) {
-	idx := strings.Index(path, ":")
-	if idx >= 0 {
-		return path[:idx], path[idx+1:]
+	prefix, rest, found := strings.Cut(path, ":")
+	if found {
+		return prefix, rest
 	}
 	return "", path
 }

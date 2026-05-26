@@ -8,6 +8,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/model"
 )
 
@@ -94,7 +95,7 @@ func (r *sqliteRepo) Upsert(ctx context.Context, v *model.VolumeItem) error {
 			status = excluded.status,
 			vm_id = excluded.vm_id,
 			updated_at = CURRENT_TIMESTAMP`,
-		v.ID, v.Name, v.SizeBytes, v.Format, boolToInt(v.IsReadOnly), v.Path, string(v.Status),
+		v.ID, v.Name, v.SizeBytes, v.Format, infra.BoolToInt(v.IsReadOnly), v.Path, string(v.Status),
 		v.VMID, v.CreatedAt, v.UpdatedAt)
 	return err
 }
@@ -189,11 +190,4 @@ func scanVolumes(rows *sql.Rows) ([]*model.VolumeItem, error) {
 		volumes = append(volumes, &v)
 	}
 	return volumes, rows.Err()
-}
-
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
 }

@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"time"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/model"
@@ -28,7 +29,7 @@ func (c *Controller) RecordChanges(ctx context.Context, changes []*model.HostSta
 		s := infra.UUIDV4()
 		sid = &s
 	}
-	now := infra.NowISO()
+	now := time.Now().Format(time.RFC3339)
 	for order, change := range changes {
 		change.SessionID = *sid
 		change.InitTimestamp = now
@@ -58,5 +59,3 @@ func (c *Controller) MarkInitialized(ctx context.Context, timestamp string) erro
 func (c *Controller) ResetState(ctx context.Context) error {
 	return c.repo.ResetState(ctx)
 }
-
-

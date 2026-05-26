@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"mvmctl/internal/infra"
 	"strings"
 	"time"
 )
@@ -75,15 +76,15 @@ func (r *sqliteRepo) Upsert(ctx context.Context, n *Network) error {
 			deleted_at = excluded.deleted_at
 	`,
 		n.ID, n.Name, n.Subnet, n.Bridge, n.IPv4Gateway,
-		boolToInt(n.BridgeActive), n.NATGateways, boolToInt(n.NATEnabled),
-		boolToInt(n.IsDefault), boolToInt(n.IsPresent),
+		infra.BoolToInt(n.BridgeActive), n.NATGateways, infra.BoolToInt(n.NATEnabled),
+		infra.BoolToInt(n.IsDefault), infra.BoolToInt(n.IsPresent),
 		n.CreatedAt, n.UpdatedAt, n.DeletedAt)
 	return err
 }
 
 func (r *sqliteRepo) UpdateBridgeActive(ctx context.Context, networkID string, active bool) error {
 	_, err := r.db.ExecContext(ctx, "UPDATE networks SET bridge_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-		boolToInt(active), networkID)
+		infra.BoolToInt(active), networkID)
 	return err
 }
 
@@ -114,7 +115,7 @@ func (r *sqliteRepo) UpdateManyIsPresent(ctx context.Context, networkIDs []strin
 	}
 	placeholders := make([]string, len(networkIDs))
 	args := make([]interface{}, 0, len(networkIDs)+1)
-	args = append(args, boolToInt(isPresent))
+	args = append(args, infra.BoolToInt(isPresent))
 	for i, id := range networkIDs {
 		placeholders[i] = "?"
 		args = append(args, id)
@@ -126,7 +127,7 @@ func (r *sqliteRepo) UpdateManyIsPresent(ctx context.Context, networkIDs []strin
 }
 
 func (r *sqliteRepo) SoftDelete(ctx context.Context, networkID string) error {
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().Format(time.RFC3339)
 	_, err := r.db.ExecContext(ctx, "UPDATE networks SET deleted_at = ?, is_present = 0 WHERE id = ?", now, networkID)
 	return err
 }
@@ -189,11 +190,4 @@ func scanNetworks(rows *sql.Rows) ([]*Network, error) {
 		networks = append(networks, &n)
 	}
 	return networks, rows.Err()
-}
-
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
 }

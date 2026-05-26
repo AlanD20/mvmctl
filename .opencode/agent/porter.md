@@ -87,6 +87,10 @@ all 39 architectural verdicts. This is the single source of truth.
 
 13. **No Xcore aliases** — `binary` not `binarycore`, `vm` not `vmcore`, etc.
 
+14. **Infra import aliases** — When two packages share the same name (e.g., `core/network` and `infra/network`), the infra package gets the `infra_` prefix: `infranet "mvmctl/internal/infra/network"`, `infraslice "mvmctl/internal/infra/slice"`. Non-infra package keeps the bare name.
+
+15. **No stdlib wrappers** — Never create a function that just delegates to a stdlib function without adding logic. `func JoinStrings(items []string, sep string) string { return strings.Join(items, sep) }` is banned. Use `strings.Join` directly.
+
 14. **Context everywhere** — `ctx context.Context` as first param in every
     method, passed through from Cobra `cmd.Context()`.
 

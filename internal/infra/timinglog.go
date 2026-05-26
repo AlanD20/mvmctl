@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -82,13 +83,15 @@ func (h *timingLogHandler) Handle(_ context.Context, r slog.Record) error {
 	})
 
 	// Build message with key=value pairs (Python format)
-	msg := r.Message
+	var b strings.Builder
+	b.WriteString(r.Message)
 	for _, a := range allAttrs {
-		msg += fmt.Sprintf(" %s=%s", a.Key, a.Value.String())
+		b.WriteString(fmt.Sprintf(" %s=%s", a.Key, a.Value.String()))
 	}
+	msg := b.String()
 
 	// Timestamp in RFC3339 format
-	ts := time.Now().UTC().Format(time.RFC3339)
+	ts := time.Now().Format(time.RFC3339)
 	line := fmt.Sprintf("%s %s\n", ts, msg)
 
 	h.mu.Lock()
@@ -128,11 +131,4 @@ func Timed(phase, vmName, vmID string, fn func()) {
 		"vm_name", vmName,
 		"vm_id", vmID,
 	)
-}
-
-// NowISO returns the current time as an ISO 8601 string in UTC.
-// Produces: "2026-05-23T12:34:56+00:00" (matching Python's +00:00 format)
-// This is kept as a general utility (used elsewhere in the Go codebase).
-func NowISO() string {
-	return time.Now().UTC().Format(time.RFC3339)
 }

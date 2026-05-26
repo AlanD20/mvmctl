@@ -257,7 +257,7 @@ func RunMigrationsCtxWithCount(ctx context.Context, db *sql.DB) (int, error) {
 		// Use Go's zero value (empty string) for missing snapshot path.
 		// The reader side handles both "" and "None" for backward compatibility.
 		recordedSnapshotPath := snapshotPath
-		appliedAt := time.Now().UTC().Format(time.RFC3339)
+		appliedAt := time.Now().Format(time.RFC3339)
 		if _, err := db.ExecContext(ctx,
 			"INSERT INTO db_migrations (version, name, applied_at, snapshot_path) VALUES (?, ?, ?, ?)",
 			f.version, f.name, appliedAt, recordedSnapshotPath,

@@ -23,6 +23,7 @@ import (
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
+	"mvmctl/internal/infra/operation"
 	"mvmctl/pkg/api/inputs"
 )
 
@@ -221,7 +222,7 @@ func (o *ImageOperation) Pull(ctx context.Context, input *inputs.ImagePullInput,
 		}
 	}
 
-	timestamp := time.Now().UTC().Format(time.RFC3339)
+	timestamp := time.Now().Format(time.RFC3339)
 	var hg infra.HashGenerator
 	imageID := hg.Image(fmt.Sprintf("%s:%s", spec.Type, spec.Version), spec.Source, timestamp)
 
@@ -241,7 +242,7 @@ func (o *ImageOperation) Pull(ctx context.Context, input *inputs.ImagePullInput,
 			Phase: "download", Status: "running", Message: "Downloading image...",
 		})
 	}
-	progressBridge := downloadProgressBridge(onProgress)
+	progressBridge := operation.DownloadProgressBridge(onProgress)
 	downloadPath, err := o.svc.DownloadImage(ctx, spec, imageID, workDir, input.Force, resolvedCIVersion, progressBridge)
 	if err != nil {
 		return &errs.OperationResult{
@@ -346,7 +347,7 @@ func (o *ImageOperation) Pull(ctx context.Context, input *inputs.ImagePullInput,
 
 	msg := "Image pulled successfully"
 	if len(warnings) > 0 {
-		msg += fmt.Sprintf(" (%s)", joinStrings(warnings, "; "))
+		msg += fmt.Sprintf(" (%s)", strings.Join(warnings, "; "))
 	}
 
 	return &errs.OperationResult{
@@ -415,7 +416,7 @@ func (o *ImageOperation) Import(ctx context.Context, input *inputs.ImageImportIn
 		Format:  format,
 	}
 
-	timestamp := time.Now().UTC().Format(time.RFC3339)
+	timestamp := time.Now().Format(time.RFC3339)
 	var hg infra.HashGenerator
 	imageID := hg.Image(fmt.Sprintf("%s:%s", spec.Type, spec.Version), spec.Source, timestamp)
 
@@ -491,7 +492,7 @@ func (o *ImageOperation) Import(ctx context.Context, input *inputs.ImageImportIn
 
 	importMsg := "Image imported successfully"
 	if len(importWarnings) > 0 {
-		importMsg += fmt.Sprintf(" (%s)", joinStrings(importWarnings, "; "))
+		importMsg += fmt.Sprintf(" (%s)", strings.Join(importWarnings, "; "))
 	}
 
 	return &errs.OperationResult{
@@ -847,45 +848,6 @@ func (o *ImageOperation) resolveProvisionerType(ctx context.Context) image.Provi
 	return image.ProvisionerTypeLoopMount
 }
 
-func downloadProgressBridge(onProgress func(errs.ProgressEvent)) func(int64, int64) {
-	if onProgress == nil {
-		return nil
-	}
-	return func(downloaded, total int64) {
-		if total > 0 {
-			pct := float64(downloaded) / float64(total) * 100.0
-			onProgress(errs.ProgressEvent{
-				Phase: "download", Status: "running",
-				Message: fmt.Sprintf("Downloading... %.0f%%", pct),
-			})
-		} else {
-			onProgress(errs.ProgressEvent{
-				Phase: "download", Status: "running",
-				Message: fmt.Sprintf("Downloaded %d bytes", downloaded),
-			})
-		}
-	}
-}
-
-func joinStrings(items []string, sep string) string {
-	result := ""
-	for i, item := range items {
-		if i > 0 {
-			result += sep
-		}
-		result += item
-	}
-	return result
-}
-
-func joinStringsPtrs(result *errs.BatchResult) string {
-	msgs := make([]string, 0)
-	for _, r := range result.Errors() {
-		msgs = append(msgs, r.Message)
-	}
-	return strings.Join(msgs, "; ")
-}
-
 // isPartitionDetectionError checks if an error is a RootPartitionDetectionError
 // or TieDetectedError (matching Python's exception catching pattern).
 func isPartitionDetectionError(err error) bool {
@@ -913,4 +875,3 @@ func isPartitionDetectionError(err error) bool {
 }
 
 // Compile-time check
-var _ = slog.Default()

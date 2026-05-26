@@ -10,11 +10,13 @@ import (
 	"os/user"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/ptr"
 	"mvmctl/internal/infra/system"
 	"mvmctl/pkg/api"
+
+	"github.com/spf13/cobra"
 )
 
 func NewInitCmd(initAPI *api.InitOperation) *cobra.Command {
@@ -235,7 +237,7 @@ func handleInteractiveFlow(
 		// Python: interaction.code == "guestfs.confirm_enable"
 		if interaction.Code == "guestfs.confirm_enable" {
 			if nonInteractive {
-				guestfsEnabled = boolPtr(false)
+				guestfsEnabled = ptr.Bool(false)
 			} else {
 				enabled := promptYesNo("Enable libguestfs as a provisioning fallback?", false)
 				guestfsEnabled = &enabled
@@ -380,8 +382,4 @@ func composeHostSetupMessage(before, after map[string]bool) string {
 // Delegates to promptConfirm (canonical implementation in cache.go).
 func promptYesNo(prompt string, defaultYes bool) bool {
 	return promptConfirm(prompt, defaultYes)
-}
-
-func boolPtr(b bool) *bool {
-	return &b
 }

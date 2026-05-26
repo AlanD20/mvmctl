@@ -570,9 +570,7 @@ func (b *bootArgsBuilder) parseFromString(s string) {
 		if arg == "" {
 			continue
 		}
-		if idx := strings.Index(arg, "="); idx >= 0 {
-			key := arg[:idx]
-			value := arg[idx+1:]
+		if key, value, found := strings.Cut(arg, "="); found {
 			existing, exists := b.data[key]
 			if !exists {
 				b.order = append(b.order, key)

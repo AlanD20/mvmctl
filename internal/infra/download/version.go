@@ -548,8 +548,8 @@ func (r *HttpDirVersionResolver) resolveViaVersionDiscoveries(
 			var sha256URL *string
 			if config.SHA256URL != "" {
 				series := versionStr
-				if idx := strings.Index(versionStr, "."); idx >= 0 {
-					series = versionStr[:idx]
+				if s, _, found := strings.Cut(versionStr, "."); found {
+					series = s
 				}
 				if su, err := infra.RenderTemplate(config.SHA256URL, map[string]string{
 					"version": versionStr,
@@ -563,8 +563,8 @@ func (r *HttpDirVersionResolver) resolveViaVersionDiscoveries(
 			displayName := strings.TrimSpace(fmt.Sprintf("%s %s", configName, versionStr))
 			if config.VersionNameTmpl != "" {
 				series := versionStr
-				if idx := strings.Index(versionStr, "."); idx >= 0 {
-					series = versionStr[:idx]
+				if s, _, found := strings.Cut(versionStr, "."); found {
+					series = s
 				}
 				if dn, err := infra.RenderTemplate(config.VersionNameTmpl, map[string]string{
 					"version": versionStr,

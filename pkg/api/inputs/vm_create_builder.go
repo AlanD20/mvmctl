@@ -662,7 +662,7 @@ func (b *VMCreateBuilder) resolveBinary(ctx context.Context, raw VMCreateInput) 
 		version := deriveFirecrackerVersionFromPath(binPath)
 
 		// Create binary item (matches Python _create_binary_item)
-		now := infra.NowISO()
+		now := time.Now().Format(time.RFC3339)
 		id, err := infra.HashGenerator{}.Binary(binPath, "firecracker", version)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate binary ID: %w", err)
@@ -1097,7 +1097,7 @@ func (r *kernelResolver) Resolve(ctx context.Context, value string) (*model.Kern
 	// Try as absolute path
 	if strings.HasPrefix(value, "/") {
 		if _, err := os.Stat(value); err == nil {
-			now := NowISO()
+			now := time.Now().Format(time.RFC3339)
 			return &model.KernelItem{
 				ID:        value,
 				Name:      filepath.Base(value),
@@ -1149,12 +1149,6 @@ func (r *binaryResolver) Resolve(ctx context.Context, value string) (*model.Bina
 	}
 
 	return nil, fmt.Errorf("binary not found: %q", value)
-}
-
-// NowISO returns the current time in ISO format.
-// Matches Python's datetime.now().isoformat() — local time, no Z suffix.
-func NowISO() string {
-	return time.Now().Format(time.RFC3339)
 }
 
 // FromVM reconstructs a VMCreateResolved from an enriched VM state.

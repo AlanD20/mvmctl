@@ -6,7 +6,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log/slog"
 	"os/exec"
 
 	"mvmctl/internal/core/binary"
@@ -487,5 +486,4 @@ func (o *InitOperation) stepGuestfs(ctx context.Context, guestfsEnabled *bool) (
 }
 
 // Compile-time check
-var _ = slog.Default()
 var _ = infra.SHA256Hash

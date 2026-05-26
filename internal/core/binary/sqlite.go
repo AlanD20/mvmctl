@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/model"
 )
 
@@ -86,7 +87,7 @@ func (r *sqliteRepo) Upsert(ctx context.Context, b *model.BinaryItem) error {
 			updated_at = CURRENT_TIMESTAMP,
 			deleted_at = excluded.deleted_at`,
 		b.ID, b.Name, b.Version, b.FullVersion, b.CIVersion, b.Path,
-		boolToInt(b.IsDefault), boolToInt(b.IsPresent),
+		infra.BoolToInt(b.IsDefault), infra.BoolToInt(b.IsPresent),
 		b.CreatedAt, b.UpdatedAt, b.DeletedAt,
 	)
 	return err
@@ -148,7 +149,7 @@ func (r *sqliteRepo) GetDefault(ctx context.Context, name string) (*model.Binary
 }
 
 func (r *sqliteRepo) SoftDelete(ctx context.Context, id string) error {
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().Format(time.RFC3339)
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE binaries SET deleted_at = ?, is_present = 0 WHERE id = ?`, now, id)
 	return err
@@ -161,7 +162,7 @@ func (r *sqliteRepo) UpdateManyIsPresent(ctx context.Context, ids []string, pres
 	placeholders := strings.Repeat("?,", len(ids))
 	placeholders = placeholders[:len(placeholders)-1]
 	args := make([]any, 0, len(ids)+1)
-	args = append(args, boolToInt(present))
+	args = append(args, infra.BoolToInt(present))
 	for _, id := range ids {
 		args = append(args, id)
 	}
@@ -206,11 +207,4 @@ func scanBinaries(rows *sql.Rows) ([]*model.BinaryItem, error) {
 		return nil, fmt.Errorf("rows iteration: %w", err)
 	}
 	return binaries, nil
-}
-
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
 }

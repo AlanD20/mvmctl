@@ -85,7 +85,7 @@ func (l *AuditLog) Log(entry string) error {
 	if l.writer == nil {
 		return nil // silent fallback if writer failed to open
 	}
-	now := time.Now().UTC()
+	now := time.Now()
 	asctime := now.Format(time.RFC3339) // matches Python datefmt
 	msgTS := now.Format(time.RFC3339)   // matches Python message format
 	_, err := fmt.Fprintf(l.writer, "%s UTC [%s] %s\n", asctime, msgTS, entry)
@@ -107,7 +107,7 @@ func (l *AuditLog) LogOperation(operation string, changes map[string]interface{}
 	if l.writer == nil {
 		return nil // silent fallback if writer failed to open
 	}
-	now := time.Now().UTC()
+	now := time.Now()
 	asctime := now.Format(time.RFC3339) // matches Python datefmt
 	msgTS := now.Format(time.RFC3339)   // matches Python message format
 	msg := fmt.Sprintf("%s UTC [%s] user=%s op=%s", asctime, msgTS, detectUser(), operation)

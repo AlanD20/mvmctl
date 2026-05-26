@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/model"
 )
 
@@ -76,7 +77,7 @@ func (r *sqliteRepo) SetInitialized(ctx context.Context, initializedAt string) e
 func (r *sqliteRepo) UpdateComponent(ctx context.Context, component string, value bool) error {
 	allowed := map[string]bool{
 		"mvm_group_created":       true,
-		"sudoers_configured":       true,
+		"sudoers_configured":      true,
 		"default_network_created": true,
 	}
 	if !allowed[component] {
@@ -84,7 +85,7 @@ func (r *sqliteRepo) UpdateComponent(ctx context.Context, component string, valu
 	}
 	_, err := r.db.ExecContext(ctx,
 		fmt.Sprintf("UPDATE host_state SET %s = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1", component),
-		boolToInt(value),
+		infra.BoolToInt(value),
 	)
 	return err
 }
@@ -196,15 +197,15 @@ func (r *sqliteRepo) SaveCapacity(ctx context.Context,
 		tapDevicesMax,
 		portRangeStr,
 		detectedAt,
-		boolToInt(cpuHasVMX),
-		boolToInt(cpuHypervisor),
-		boolToInt(nestedVirtAvailable),
-		boolToInt(eptAvailable),
+		infra.BoolToInt(cpuHasVMX),
+		infra.BoolToInt(cpuHypervisor),
+		infra.BoolToInt(nestedVirtAvailable),
+		infra.BoolToInt(eptAvailable),
 		hugepageCount2MB,
-		boolToInt(ksmDisabled),
+		infra.BoolToInt(ksmDisabled),
 		cgroupVersion,
 		swapTotalMiB,
-		boolToInt(kernelMinimumMet),
+		infra.BoolToInt(kernelMinimumMet),
 	)
 	if err != nil {
 		return err
@@ -229,7 +230,7 @@ func (r *sqliteRepo) AddChange(ctx context.Context, change *model.HostStateChang
 		change.Mechanism,
 		change.OriginalValue,
 		change.AppliedValue,
-		boolToInt(change.Reverted),
+		infra.BoolToInt(change.Reverted),
 		change.RevertedAt,
 		change.RevertMechanism,
 		change.ChangeOrder,
@@ -260,7 +261,7 @@ func (r *sqliteRepo) AddChanges(ctx context.Context, changes []*model.HostStateC
 			change.Mechanism,
 			change.OriginalValue,
 			change.AppliedValue,
-			boolToInt(change.Reverted),
+			infra.BoolToInt(change.Reverted),
 			change.RevertedAt,
 			change.RevertMechanism,
 			change.ChangeOrder,
@@ -499,11 +500,4 @@ func scanHostStateChanges(rows *sql.Rows) ([]*model.HostStateChangeItem, error) 
 		changes = append(changes, &c)
 	}
 	return changes, rows.Err()
-}
-
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
 }

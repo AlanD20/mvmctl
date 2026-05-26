@@ -223,4 +223,3 @@ func (o *CPOperation) Copy(ctx context.Context, input *inputs.CPInput, onProgres
 }
 
 // Compile-time checks
-var _ = slog.Default()

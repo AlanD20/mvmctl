@@ -8,7 +8,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
-	"net"
 	"strings"
 	"time"
 
@@ -18,8 +17,8 @@ import (
 	"mvmctl/internal/enricher"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/logging"
-	infranet "mvmctl/internal/infra/network"
 	"mvmctl/internal/infra/model"
+	infranet "mvmctl/internal/infra/network"
 	"mvmctl/pkg/api/inputs"
 )
 
@@ -76,7 +75,7 @@ func (o *NetworkOperation) Create(ctx context.Context, input *inputs.NetworkCrea
 		}
 	}
 
-	createdAt := time.Now().UTC().Format(time.RFC3339)
+	createdAt := time.Now().Format(time.RFC3339)
 	hashInput := fmt.Sprintf("%s:%s:%s", resolved.Name, resolved.Subnet, createdAt)
 	networkID := fmt.Sprintf("%x", sha256.Sum256([]byte(hashInput)))
 
@@ -700,16 +699,4 @@ func (o *NetworkOperation) enrichWithLeases(ctx context.Context, networks []*mod
 		}
 	}
 	return nil
-}
-
-func subnetsOverlap(a, b string) bool {
-	_, anet, err := net.ParseCIDR(a)
-	if err != nil {
-		return false
-	}
-	_, bnet, err := net.ParseCIDR(b)
-	if err != nil {
-		return false
-	}
-	return anet.Contains(bnet.IP) || bnet.Contains(anet.IP)
 }

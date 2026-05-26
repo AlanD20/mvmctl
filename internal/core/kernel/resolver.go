@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
@@ -227,7 +228,7 @@ func (r *Resolver) ItemFromPath(path string) *model.KernelItem {
 		path = absPath
 	}
 	name := filepath.Base(path)
-	now := infra.NowISO()
+	now := time.Now().Format(time.RFC3339)
 	return &model.KernelItem{
 		ID:        path,
 		Name:      name,
@@ -263,17 +264,16 @@ func (r *Resolver) byIDRaw(ctx context.Context, kernelID string) (*model.KernelI
 // Python returns (None, value) for "no colon" or "empty prefix before colon".
 // Go's "" is the equivalent of Python's None for the prefix.
 // Cases:
-//   "firecracker:6.1" -> ("firecracker", "6.1")
-//   "6.1"             -> ("", "6.1")
-//   ":6.1"            -> ("", "6.1")
-//   "firecracker:"    -> ("firecracker", "")
+//
+//	"firecracker:6.1" -> ("firecracker", "6.1")
+//	"6.1"             -> ("", "6.1")
+//	":6.1"            -> ("", "6.1")
+//	"firecracker:"    -> ("firecracker", "")
 func parseSelector(selector string) (string, string) {
-	idx := strings.Index(selector, ":")
-	if idx < 0 {
+	prefix, rest, found := strings.Cut(selector, ":")
+	if !found {
 		return "", selector
 	}
-	prefix := selector[:idx]
-	rest := selector[idx+1:]
 	// Python: if not prefix: return (None, value)
 	if prefix == "" {
 		return "", rest

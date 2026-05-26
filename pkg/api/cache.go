@@ -22,6 +22,7 @@ import (
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/guestfs"
 	"mvmctl/internal/infra/model"
+	infraslice "mvmctl/internal/infra/slice"
 )
 
 // CacheOperation provides cache management orchestration.
@@ -324,16 +325,16 @@ func (o *CacheOperation) PruneAll(ctx context.Context, dryRun bool, includeAll b
 	miscResult := o.PruneMisc(ctx, dryRun)
 	if miscResult != nil && miscResult.IsOK() && miscResult.Item != nil {
 		if misc, ok := miscResult.Item.(map[string]interface{}); ok {
-			if isTrue(misc["appliance"]) {
+			if infraslice.IsTrue(misc["appliance"]) {
 				prunedIDs = append(prunedIDs, "appliance")
 			}
-			if isTrue(misc["warm_images"]) {
+			if infraslice.IsTrue(misc["warm_images"]) {
 				prunedIDs = append(prunedIDs, "warm_images")
 			}
-			if isTrue(misc["guestfs_state"]) {
+			if infraslice.IsTrue(misc["guestfs_state"]) {
 				prunedIDs = append(prunedIDs, "guestfs_state")
 			}
-			if isTrue(misc["stale_provision_mounts"]) {
+			if infraslice.IsTrue(misc["stale_provision_mounts"]) {
 				prunedIDs = append(prunedIDs, "stale_provision_mounts")
 			}
 		}
@@ -379,7 +380,7 @@ func (o *CacheOperation) Clean(ctx context.Context, dryRun bool) *errs.Operation
 			messages := make([]string, 0)
 			if len(failedIDs) > 0 {
 				messages = append(messages, fmt.Sprintf("Failed to remove %d VM(s): %s",
-					len(failedIDs), joinCommas(failedIDs)))
+					len(failedIDs), strings.Join(failedIDs, ", ")))
 			}
 			if len(orphanProcesses) > 0 {
 				pids := make([]string, 0, len(orphanProcesses))
@@ -399,7 +400,7 @@ func (o *CacheOperation) Clean(ctx context.Context, dryRun bool) *errs.Operation
 				sort.Strings(names)
 				messages = append(messages, fmt.Sprintf(
 					"Orphan process(es) still running (PID(s) %s: %s). Kill them manually and re-run ``mvm clean``.",
-					joinCommas(pids), joinCommas(names)))
+					strings.Join(pids, ", "), strings.Join(names, ", ")))
 			}
 
 			result := &model.CleanResult{
@@ -455,25 +456,4 @@ func (o *CacheOperation) Clean(ctx context.Context, dryRun bool) *errs.Operation
 	}
 }
 
-// isTrue checks if a value is truthy (bool true).
-func isTrue(v interface{}) bool {
-	if b, ok := v.(bool); ok {
-		return b
-	}
-	return false
-}
-
-// joinCommas joins strings with comma separator.
-func joinCommas(s []string) string {
-	result := ""
-	for i, part := range s {
-		if i > 0 {
-			result += ", "
-		}
-		result += part
-	}
-	return result
-}
-
 // Compile-time check
-var _ = slog.Default()

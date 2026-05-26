@@ -35,9 +35,9 @@ func CompareVersions(a, b string) int {
 // SplitVersionParts splits a version string into release components and
 // an optional pre-release suffix (everything after the first '-').
 func SplitVersionParts(v string) (release []int, preRelease string) {
-	if idx := strings.Index(v, "-"); idx >= 0 {
-		preRelease = v[idx+1:]
-		v = v[:idx]
+	if before, after, found := strings.Cut(v, "-"); found {
+		preRelease = after
+		v = before
 	}
 
 	parts := strings.Split(v, ".")
