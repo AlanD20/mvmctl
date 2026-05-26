@@ -6,68 +6,31 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"sync"
+
+	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/errs"
 
 	_ "modernc.org/sqlite"
 )
 
-const DBName = "mvmdb.db"
-
-const dbFilePerm = 0640
-
-type Config struct {
-	CacheDir string
-}
-
-// Database wraps connection management and migration support.
-// Mirrors the Python Database class in src/mvmctl/core/_shared/_db.py.
-//
-// Python's Database.__init__ (lines 81-92) only ensures the parent directory
-// exists. It does NOT open a database connection or set PRAGMAs. The first
-// actual connection is created lazily by connect().
-//
-// Go's sql.Open() is also lazy — it validates the DSN but does not actually
-// open a connection until the first query. However, we do NOT call Ping() or
-// set PRAGMAs eagerly in New(). PRAGMAs are passed via DSN parameters so they
-// are applied on every new connection from the pool.
 type Database struct {
 	mu     sync.Mutex
 	db     *sql.DB
 	dbPath string
-	cfg    Config
 	opened bool
 }
 
-// New creates a Database struct and ensures the cache directory exists.
-// Does NOT open a database connection — matching Python's Database.__init__()
-// which only calls mkdir(parents=True, exist_ok=True).
+// New creates a Database struct for the given dbPath.
+// Does NOT open a database connection — matching Python's Database.__init__().
+// The caller is responsible for ensuring the parent directory exists.
 //
 // PRAGMAs are passed via DSN parameters so they apply automatically to every
 // new connection from the pool (matching Python's connect() which sets PRAGMAs
 // on each new connection).
-func New(cfg Config) *Database {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = "/tmp"
-	}
-
-	cacheDir := cfg.CacheDir
-	if cacheDir == "" {
-		cacheDir = filepath.Join(home, ".cache", "mvmctl")
-	}
-
-	dbPath := filepath.Join(cacheDir, DBName)
-
-	// Python: self._db_path.parent.mkdir(parents=True, exist_ok=True)
-	// Default mode 0o777 (subject to umask). 0755 matches effective perms.
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
-		slog.Warn("Failed to create cache dir", "path", cacheDir, "error", err)
-	}
-
+func New(dbPath string) *Database {
 	return &Database{
 		dbPath: dbPath,
-		cfg:    cfg,
 	}
 }
 
@@ -110,6 +73,13 @@ func (d *Database) openLazy() error {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
+	// Set file permissions when the pool first opens. The file is either
+	// newly created by sql.Open or already exists. This runs once — not on
+	// every Connect() call — because permissions don't change between calls.
+	if err := os.Chmod(d.dbPath, infra.DBFilePerm); err != nil {
+		slog.Warn("Failed to set db file permissions", "path", d.dbPath, "error", err)
+	}
+
 	d.db = db
 	d.opened = true
 	return nil
@@ -135,54 +105,84 @@ func (d *Database) Close() error {
 	defer d.mu.Unlock()
 
 	if d.db != nil {
+		d.opened = false
 		return d.db.Close()
 	}
 	return nil
 }
 
-// Connect returns the underlying *sql.DB (lazily opened) and applies file
-// permissions, matching Python's Database.connect() which calls:
-//
-//	conn = sqlite3.connect(self._db_path, ...)
-//	self._db_path.chmod(CONST_FILE_PERMS_DB)
-//
-// Python chmod's the file on every connect. We do the same here to fix
-// permissions that may have changed externally.
-func (d *Database) Connect() (*sql.DB, error) {
-	db, err := d.DB()
+// restoreFromSnapshot overwrites the database at dbPath with a consistent copy
+// from snapshotPath using VACUUM INTO. All existing pool connections to the old
+// file become stale (new inode on Linux). The caller must ensure the pool is
+// closed before calling this, or accept that existing connections read old data.
+func restoreFromSnapshot(snapshotPath, dbPath string) error {
+	if _, err := os.Stat(snapshotPath); os.IsNotExist(err) {
+		return errs.MigrationError(
+			fmt.Sprintf("Snapshot not found: %s", snapshotPath))
+	}
+
+	srcDB, err := sql.Open("sqlite", snapshotPath)
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("open snapshot db for restore: %w", err)
+	}
+	defer srcDB.Close()
+
+	if _, err := srcDB.Exec(fmt.Sprintf("VACUUM INTO '%s'", dbPath)); err != nil {
+		return errs.MigrationError(
+			fmt.Sprintf("Failed to restore from snapshot: %v", err))
 	}
 
-	// Apply database file permissions on every connect, matching Python's
-	// Database.connect() behavior. Python's chmod can raise OSError; we log
-	// rather than escalate to avoid disrupting the connection flow.
-	if err := os.Chmod(d.dbPath, dbFilePerm); err != nil {
-		slog.Warn("Failed to set db file permissions on connect", "error", err)
+	// VACUUM INTO creates a new file (new inode) with default permissions.
+	if err := os.Chmod(dbPath, infra.DBFilePerm); err != nil {
+		slog.Warn("Failed to set permissions on restored database", "path", dbPath, "error", err)
 	}
 
-	return db, nil
+	return nil
 }
 
-// GetCurrentVersion returns the current schema version from PRAGMA user_version.
-// Mirrors Python's Database.get_current_version() which opens a NEW connection
-// each time using closing(sqlite3.connect(self._db_path)).
-func (d *Database) GetCurrentVersion() (int, error) {
-	// Python uses closing(sqlite3.connect(self._db_path)) — opens a new
-	// connection each time. We open a temporary connection for this query
-	// to match Python's isolated connection pattern.
-	tmpDB, err := sql.Open("sqlite", d.dbPath)
-	if err != nil {
-		return 0, fmt.Errorf("open temporary connection for version check: %w", err)
+// RestoreFromSnapshot restores the database from a snapshot file.
+// Mirrors Python's Database._restore_from_snapshot().
+//
+// VACUUM INTO creates a NEW inode on Linux, so existing connections holding
+// file descriptors to the old inode would continue serving stale data.
+// To prevent this, RestoreFromSnapshot closes the connection pool before
+// the restore. The pool reopens lazily on the next DB() call, getting the
+// new inode with all PRAGMAs applied.
+func (d *Database) RestoreFromSnapshot(snapshotPath string) error {
+	// Close the pool so existing connections don't hold stale page cache
+	// from the old inode.
+	if err := d.Close(); err != nil {
+		return fmt.Errorf("close database before restore: %w", err)
 	}
-	defer tmpDB.Close()
+	return restoreFromSnapshot(snapshotPath, d.dbPath)
+}
 
+// Connect returns the underlying *sql.DB (lazily opened).
+// Permissions are set once in openLazy() when the pool first opens, and
+// in RestoreFromSnapshot() after a restore creates a new file.
+func (d *Database) Connect() (*sql.DB, error) {
+	return d.DB()
+}
+
+// readCurrentVersion queries the current schema version from PRAGMA user_version.
+// Shared by Database.GetCurrentVersion and RunMigrationsCtx to avoid duplicating
+// the same PRAGMA query.
+func readCurrentVersion(db *sql.DB) (int, error) {
 	var version int
-	err = tmpDB.QueryRow("PRAGMA user_version").Scan(&version)
+	err := db.QueryRow("PRAGMA user_version").Scan(&version)
 	if err != nil {
 		return 0, fmt.Errorf("get user_version: %w", err)
 	}
 	return version, nil
+}
+
+// GetCurrentVersion returns the current schema version from PRAGMA user_version.
+func (d *Database) GetCurrentVersion() (int, error) {
+	db, err := d.DB()
+	if err != nil {
+		return 0, err
+	}
+	return readCurrentVersion(db)
 }
 
 // Ping verifies the database connection is alive.
@@ -196,8 +196,8 @@ func (d *Database) Ping() error {
 }
 
 // EnsureMigrationsTable creates the db_migrations tracking table if it doesn't exist.
-// Also migrates existing tables to add the snapshot_path column if missing.
-// Mirrors Python's Database._ensure_migrations_table().
+// The db_migrations table must be bootstrapped before running any migrations
+// because migration files record themselves in this table.
 func EnsureMigrationsTable(ctx context.Context, db *sql.DB) error {
 	_, err := db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS db_migrations (
@@ -209,18 +209,5 @@ func EnsureMigrationsTable(ctx context.Context, db *sql.DB) error {
 			snapshot_path TEXT
 		)
 	`)
-	if err != nil {
-		return err
-	}
-
-	// Migrate existing tables that don't have snapshot_path (matching Python's
-	// ALTER TABLE ADD COLUMN with except sqlite3.OperationalError: pass)
-	_, alterErr := db.ExecContext(ctx, "ALTER TABLE db_migrations ADD COLUMN snapshot_path TEXT")
-	if alterErr != nil {
-		// Python catches sqlite3.OperationalError specifically.
-		// We check if the error is about "duplicate column" — if so, ignore it.
-		// Other errors are intentionally ignored to match Python's broad pass.
-	}
-
-	return nil
+	return err
 }

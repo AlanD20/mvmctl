@@ -101,23 +101,6 @@ func isDBSkipCommand(args []string) bool {
 	return false
 }
 
-// openDB opens the database, runs migrations, and returns the database handle.
-func openDB(cacheDir string) *db.Database {
-	dbCfg := db.Config{CacheDir: cacheDir}
-	database := db.New(dbCfg)
-	sqlDB, err := database.DB()
-	if err != nil {
-		slog.Error("failed to open database", "error", err)
-		os.Exit(1)
-	}
-	if _, err := db.RunMigrations(sqlDB); err != nil {
-		slog.Error("failed to run database migrations", "error", err)
-		os.Exit(1)
-	}
-	return database
-}
-
-// initRepos creates all repository instances.
 func initRepos(database *db.Database) repos {
 	sqlDB, err := database.DB()
 	if err != nil {
@@ -269,8 +252,31 @@ func Run(ctx context.Context) {
 		}
 	}
 
-	database := openDB(cacheDir)
+	database := db.New(filepath.Join(cacheDir, infra.MVMDBFilename))
 	defer database.Close()
+
+	// Pending migration gate: block non-init commands when migrations are pending.
+	// Migrations can be destructive, so the user must explicitly run 'mvm init' to
+	// apply them (or 'host init' / 'cache init' which also run migrations).
+	if !isDBSkipCommand(os.Args) {
+		sqlDB, err := database.DB()
+		if err != nil {
+			slog.Error("failed to open database for migration check", "error", err)
+			os.Exit(1)
+		}
+		pending, err := db.GetPendingMigrations(sqlDB)
+		if err != nil {
+			slog.Error("failed to check pending migrations", "error", err)
+			os.Exit(1)
+		}
+		if len(pending) > 0 {
+			slog.Error("pending migrations detected",
+				"count", len(pending),
+				"hint", fmt.Sprintf("Run '%s init' to apply pending migrations", infra.CLIName),
+			)
+			os.Exit(1)
+		}
+	}
 
 	// Set HTTP User-Agent matching Python's HTTP_USER_AGENT = f"{CLI_NAME}/{_resolve_version()}".
 	download.SetUserAgent(Version)
