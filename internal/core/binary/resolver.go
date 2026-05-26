@@ -51,7 +51,7 @@ var RELATIONS = map[string]RelationSpec{
 
 // EnrichFunc is a function that enriches binaries in-place with relations.
 // Set by the API layer during wiring to avoid circular imports.
-type EnrichFunc func(binaries []*model.BinaryItem, include []string, relations map[string]RelationSpec)
+type EnrichFunc func(ctx context.Context, binaries []*model.BinaryItem, include []string, relations map[string]RelationSpec)
 
 // Resolver resolves binary identifiers (ID prefix, name, [name, version] pair)
 // to BinaryItem instances.
@@ -85,7 +85,7 @@ func (r *Resolver) WithInclude(include []string) *Resolver {
 // enrich resolves VM relations on BinaryItems if an enricher is configured.
 func (r *Resolver) enrich(ctx context.Context, binaries []*model.BinaryItem) []*model.BinaryItem {
 	if r.enrichFunc != nil && len(r.include) > 0 && len(binaries) > 0 {
-		r.enrichFunc(binaries, r.include, RELATIONS)
+		r.enrichFunc(ctx, binaries, r.include, RELATIONS)
 	}
 	return binaries
 }

@@ -12,6 +12,7 @@ import (
 	"mvmctl/internal/core/binary"
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/vm"
+	"mvmctl/internal/enricher"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
@@ -27,17 +28,19 @@ type BinaryOperation struct {
 	vmRepo      vm.Repository
 	settingsSvc *config.Service
 	cacheDir    string
+	enr         *enricher.Enricher
 }
 
 // NewBinaryOperation creates a BinaryOperation.
 // Matches Python's BinaryOperation() which creates internal Database/repo/service.
-func NewBinaryOperation(svc *binary.Service, vmRepo vm.Repository, cacheDir string, settingsSvc *config.Service) *BinaryOperation {
+func NewBinaryOperation(svc *binary.Service, vmRepo vm.Repository, cacheDir string, settingsSvc *config.Service, enr *enricher.Enricher) *BinaryOperation {
 	return &BinaryOperation{
 		svc:         svc,
 		repo:        svc.Repo(),
 		vmRepo:      vmRepo,
 		cacheDir:    cacheDir,
 		settingsSvc: settingsSvc,
+		enr:         enr,
 	}
 }
 
@@ -236,15 +239,8 @@ func (o *BinaryOperation) Remove(ctx context.Context, input *inputs.BinaryInput,
 	// Enrich binaries with VM references (matching Python's:
 	//   enriched = Resolver(repo, include=["vm"]).enrich(resolved.binaries)
 	enriched := resolved.Binaries
-	for _, bin := range enriched {
-		if bin.VMs == nil {
-			vms, vmErr := o.vmRepo.FindByBinaryID(ctx, bin.ID)
-			if vmErr == nil && len(vms) > 0 {
-				for _, vm := range vms {
-					bin.VMs = append(bin.VMs, vm)
-				}
-			}
-		}
+	if o.enr != nil {
+		_ = o.enr.EnrichBinary(ctx, enriched)
 	}
 
 	items := make([]errs.OperationResult, 0)

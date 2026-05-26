@@ -15,6 +15,7 @@ import (
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/core/vm"
+	"mvmctl/internal/enricher"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
@@ -30,11 +31,12 @@ type KernelOperation struct {
 	settingsSvc *config.Service
 	db          *sql.DB
 	cacheDir    string
+	enr         *enricher.Enricher
 }
 
 // NewKernelOperation creates a KernelOperation.
 // Matches Python's KernelOperation() which creates internal Database/repo/service.
-func NewKernelOperation(svc *kernel.Service, vmRepo vm.Repository, cacheDir string, settingsSvc *config.Service, db *sql.DB) *KernelOperation {
+func NewKernelOperation(svc *kernel.Service, vmRepo vm.Repository, cacheDir string, settingsSvc *config.Service, db *sql.DB, enr *enricher.Enricher) *KernelOperation {
 	return &KernelOperation{
 		svc:         svc,
 		repo:        svc.Repo(),
@@ -42,6 +44,7 @@ func NewKernelOperation(svc *kernel.Service, vmRepo vm.Repository, cacheDir stri
 		settingsSvc: settingsSvc,
 		db:          db,
 		cacheDir:    cacheDir,
+		enr:         enr,
 	}
 }
 
@@ -437,21 +440,22 @@ func (o *KernelOperation) Remove(ctx context.Context, identifiers []string, forc
 
 	items := make([]errs.OperationResult, 0)
 
+	// Batch-enrich with VM references (matches Python's Resolver(repo, include=["vm"]).enrich())
+	if o.enr != nil {
+		_ = o.enr.EnrichKernel(ctx, resolved.Kernels)
+	}
+
 	for _, kernel := range resolved.Kernels {
-		// Enrich with VM references (matches Python's Resolver(repo, include=["vm"]).enrich())
-		vms, _ := o.vmRepo.FindByKernelID(ctx, kernel.ID)
-		kernel.VMs = make([]*model.VM, len(vms))
-		copy(kernel.VMs, vms)
 
 		// Python: force = force or resolved.force — combine method param with resolved
 		effectiveForce := force || resolved.Force
 
-		if !effectiveForce && len(vms) > 0 {
+		if !effectiveForce && len(kernel.VMs) > 0 {
 			items = append(items, errs.OperationResult{
 				Status:    "error",
 				Code:      "kernel.in_use",
-				Message:   fmt.Sprintf("Kernel '%s' is in use by %d VM(s)", kernel.Name, len(vms)),
-				Exception: fmt.Errorf("kernel in use by %d VMs", len(vms)),
+				Message:   fmt.Sprintf("Kernel '%s' is in use by %d VM(s)", kernel.Name, len(kernel.VMs)),
+				Exception: fmt.Errorf("kernel in use by %d VMs", len(kernel.VMs)),
 			})
 			continue
 		}

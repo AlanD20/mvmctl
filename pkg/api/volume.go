@@ -12,6 +12,7 @@ import (
 
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
+	"mvmctl/internal/enricher"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
@@ -26,16 +27,18 @@ type VolumeOperation struct {
 	vmRepo   vm.Repository
 	cacheDir string
 	db       *sql.DB
+	enr      *enricher.Enricher
 }
 
 // NewVolumeOperation creates a VolumeOperation.
-func NewVolumeOperation(svc *volume.Service, repo volume.Repository, vmRepo vm.Repository, cacheDir string, db *sql.DB) *VolumeOperation {
+func NewVolumeOperation(svc *volume.Service, repo volume.Repository, vmRepo vm.Repository, cacheDir string, db *sql.DB, enr *enricher.Enricher) *VolumeOperation {
 	return &VolumeOperation{
 		svc:      svc,
 		repo:     repo,
 		vmRepo:   vmRepo,
 		cacheDir: cacheDir,
 		db:       db,
+		enr:      enr,
 	}
 }
 
@@ -170,6 +173,11 @@ func (o *VolumeOperation) Remove(ctx context.Context, input *inputs.VolumeInput,
 				},
 			},
 		}
+	}
+
+	// Batch-enrich with VM references for VM attachment check
+	if o.enr != nil {
+		_ = o.enr.EnrichVolume(ctx, resolved.Volumes)
 	}
 
 	for _, vol := range resolved.Volumes {

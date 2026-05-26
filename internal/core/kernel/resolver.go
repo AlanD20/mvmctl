@@ -45,7 +45,7 @@ type RelationSpec struct {
 
 // EnrichFunc is a function that enriches kernels in-place with relations.
 // Set by the API layer during wiring to avoid circular imports.
-type EnrichFunc func(kernels []*model.KernelItem, include []string, relations map[string]RelationSpec)
+type EnrichFunc func(ctx context.Context, kernels []*model.KernelItem, include []string, relations map[string]RelationSpec)
 
 // Resolver matches Python's Resolver with all resolution methods.
 type Resolver struct {
@@ -76,9 +76,9 @@ func (r *Resolver) SetInclude(include []string) {
 
 // Enrich enriches kernels with relations if include is set.
 // Matches Python's Resolver.enrich().
-func (r *Resolver) Enrich(kernels []*model.KernelItem) []*model.KernelItem {
+func (r *Resolver) Enrich(ctx context.Context, kernels []*model.KernelItem) []*model.KernelItem {
 	if r.include != nil && len(kernels) > 0 && r.enrichFunc != nil {
-		r.enrichFunc(kernels, r.include, RELATIONS)
+		r.enrichFunc(ctx, kernels, r.include, RELATIONS)
 	}
 	return kernels
 }
@@ -96,7 +96,7 @@ func (r *Resolver) ByID(ctx context.Context, kernelID string) (*model.KernelItem
 	if len(matches) > 1 {
 		return nil, KernelNotFoundError(fmt.Sprintf("Kernel ID is ambiguous: '%s'", kernelID))
 	}
-	enriched := r.Enrich(matches)
+	enriched := r.Enrich(ctx, matches)
 	return enriched[0], nil
 }
 
@@ -110,7 +110,7 @@ func (r *Resolver) ByVersionType(ctx context.Context, version, kernelType string
 	if k == nil {
 		return nil, KernelNotFoundError(fmt.Sprintf("Kernel not found: version='%s', type='%s'", version, kernelType))
 	}
-	enriched := r.Enrich([]*model.KernelItem{k})
+	enriched := r.Enrich(ctx, []*model.KernelItem{k})
 	return enriched[0], nil
 }
 
@@ -124,7 +124,7 @@ func (r *Resolver) ByType(ctx context.Context, typeStr string) (*model.KernelIte
 	if k == nil {
 		return nil, KernelNotFoundError(fmt.Sprintf("Kernel not found: type='%s'", typeStr))
 	}
-	enriched := r.Enrich([]*model.KernelItem{k})
+	enriched := r.Enrich(ctx, []*model.KernelItem{k})
 	return enriched[0], nil
 }
 
@@ -138,7 +138,7 @@ func (r *Resolver) GetDefault(ctx context.Context) (*model.KernelItem, error) {
 	if k == nil {
 		return nil, nil
 	}
-	enriched := r.Enrich([]*model.KernelItem{k})
+	enriched := r.Enrich(ctx, []*model.KernelItem{k})
 	return enriched[0], nil
 }
 
@@ -164,13 +164,13 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.KernelItem
 	// Try by ID prefix without enrichment (matching Python's resolve flow)
 	k, err := r.byIDRaw(ctx, value)
 	if err == nil && k != nil {
-		return r.Enrich([]*model.KernelItem{k})[0], nil
+		return r.Enrich(ctx, []*model.KernelItem{k})[0], nil
 	}
 
 	// Try by type
 	k, err = r.repo.GetByType(ctx, value)
 	if err == nil && k != nil {
-		return r.Enrich([]*model.KernelItem{k})[0], nil
+		return r.Enrich(ctx, []*model.KernelItem{k})[0], nil
 	}
 
 	// Fallback: treat value as a filesystem path to a vmlinux binary.
@@ -201,7 +201,7 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *Resol
 		}
 	}
 
-	items = r.Enrich(items)
+	items = r.Enrich(ctx, items)
 
 	exitCode := 0
 	if len(errors) > 0 && len(items) == 0 {

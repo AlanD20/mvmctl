@@ -18,6 +18,7 @@ import (
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/image"
 	"mvmctl/internal/core/vm"
+	"mvmctl/internal/enricher"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
@@ -33,10 +34,11 @@ type ImageOperation struct {
 	cacheDir  string
 	imagesDir string
 	configSvc *config.Service
+	enr       *enricher.Enricher
 }
 
 // NewImageOperation creates an ImageOperation.
-func NewImageOperation(svc *image.Service, db *sql.DB, cacheDir string, configSvc *config.Service) *ImageOperation {
+func NewImageOperation(svc *image.Service, db *sql.DB, cacheDir string, configSvc *config.Service, enr *enricher.Enricher) *ImageOperation {
 	return &ImageOperation{
 		svc:       svc,
 		repo:      svc.Repo(),
@@ -44,6 +46,7 @@ func NewImageOperation(svc *image.Service, db *sql.DB, cacheDir string, configSv
 		cacheDir:  cacheDir,
 		imagesDir: filepath.Join(cacheDir, "images"),
 		configSvc: configSvc,
+		enr:       enr,
 	}
 }
 
@@ -586,19 +589,9 @@ func (o *ImageOperation) Remove(ctx context.Context, input *inputs.ImageInput, f
 
 	images := resolved.Images
 
-	vmRepo := vm.NewRepository(o.db)
-	imgIDs := make([]string, 0, len(images))
-	for _, img := range images {
-		imgIDs = append(imgIDs, img.ID)
-	}
-	allVMs, _ := vmRepo.GetByImageIDs(ctx, imgIDs)
-	vmsByImgID := make(map[string][]*model.VM)
-	for _, vm := range allVMs {
-		vmsByImgID[vm.ImageID] = append(vmsByImgID[vm.ImageID], vm)
-	}
-	for _, img := range images {
-		matched := vmsByImgID[img.ID]
-		img.VMs = matched
+	// Batch-enrich with VM references (matches Python's Resolver(repo, include=["vm"]).enrich())
+	if o.enr != nil {
+		_ = o.enr.EnrichImage(ctx, images)
 	}
 
 	for _, img := range images {

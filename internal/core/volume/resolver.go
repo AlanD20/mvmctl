@@ -54,7 +54,7 @@ type ResolveResult struct {
 
 // EnrichFunc is a function that enriches volumes in-place with relations.
 // Set by the API layer during wiring to avoid circular imports.
-type EnrichFunc func(volumes []*model.VolumeItem, include []string, relations map[string]RelationSpec)
+type EnrichFunc func(ctx context.Context, volumes []*model.VolumeItem, include []string, relations map[string]RelationSpec)
 
 // Resolver resolves volume identifiers (name, ID prefix) to volume objects.
 // Matches Python's VolumeResolver.
@@ -81,9 +81,9 @@ func (r *Resolver) SetInclude(include []string) {
 }
 
 // enrich enriches volumes with relations if include is set.
-func (r *Resolver) enrich(volumes []*model.VolumeItem) []*model.VolumeItem {
+func (r *Resolver) enrich(ctx context.Context, volumes []*model.VolumeItem) []*model.VolumeItem {
 	if r.include != nil && len(volumes) > 0 && r.enrichFunc != nil {
-		r.enrichFunc(volumes, r.include, RELATIONS)
+		r.enrichFunc(ctx, volumes, r.include, RELATIONS)
 	}
 	return volumes
 }
@@ -106,7 +106,7 @@ func (r *Resolver) ByID(ctx context.Context, volumeID string) (*model.VolumeItem
 		// Python: raise VolumeNotFoundError(f"Volume ID is ambiguous: {volume_id!r}")
 		return nil, ErrVolumeAmbiguous(volumeID)
 	}
-	return r.enrich(matches)[0], nil
+	return r.enrich(ctx, matches)[0], nil
 }
 
 // ByName resolves a volume by exact name.
@@ -120,7 +120,7 @@ func (r *Resolver) ByName(ctx context.Context, name string) (*model.VolumeItem, 
 		// Python: raise VolumeNotFoundError(f"Volume not found by name: {name!r}")
 		return nil, ErrVolumeNotFoundByName(name)
 	}
-	return r.enrich([]*model.VolumeItem{v})[0], nil
+	return r.enrich(ctx, []*model.VolumeItem{v})[0], nil
 }
 
 // Resolve resolves a volume by name or ID prefix (tries name first).
@@ -164,7 +164,7 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *Resol
 		}
 	}
 
-	volumes = r.enrich(volumes)
+	volumes = r.enrich(ctx, volumes)
 
 	// Python: exit_code = 1 if errors and not items else 0
 	exitCode := 0
