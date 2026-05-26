@@ -1,9 +1,10 @@
-package infra
+package operation
 
 import (
 	"fmt"
 	"time"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 )
 
@@ -42,7 +43,7 @@ func FormatBytesHR(sizeBytes int64) string {
 // transparently uses the monotonic difference, matching Python's
 // time.monotonic() semantics and avoiding issues with wall clock jumps
 // (NTP, suspend/resume).
-func DownloadProgressBridge(onProgress OnProgressCallback) ProgressCallback {
+func DownloadProgressBridge(onProgress OnProgressCallback) infra.ProgressCallback {
 	if onProgress == nil {
 		return nil
 	}

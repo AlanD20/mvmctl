@@ -8,7 +8,9 @@ import (
 
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/disk"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/validators"
 )
 
 // VolumeCreateInput matches Python's VolumeCreateInput dataclass.
@@ -70,7 +72,7 @@ func (r *VolumeCreateRequest) Result() *ResolvedVolumeCreateInput {
 // Resolve resolves creation inputs to explicit values.
 // Matches Python's VolumeCreateRequest.resolve().
 func (r *VolumeCreateRequest) Resolve(ctx context.Context) (*ResolvedVolumeCreateInput, error) {
-	sizeBytes, err := infra.ParseDiskSizeToBytes(r._input.Size)
+	sizeBytes, err := disk.ParseDiskSizeToBytes(r._input.Size)
 	if err != nil {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
@@ -127,7 +129,7 @@ func (r *VolumeCreateRequest) ensureValidate(ctx context.Context) error {
 		}
 	}
 
-	if err := infra.ValidateVolumeName(r._result.Name); err != nil {
+	if err := validators.ValidateVolumeName(r._result.Name); err != nil {
 		return &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
 			Op:      "volume_create",

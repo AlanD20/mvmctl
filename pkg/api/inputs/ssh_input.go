@@ -10,9 +10,9 @@ import (
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/core/vm"
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/internal/infra/validators"
 )
 
 // SSHInput matches Python's SSHInput dataclass.
@@ -116,7 +116,7 @@ func (r *SSHRequest) ensureValidate() error {
 		}
 	}
 
-	if !infra.IsIPAddress(r._result.TargetIP) {
+	if !validators.IsIPAddress(r._result.TargetIP) {
 		return &errs.DomainError{
 			Code:    errs.CodeSSHError,
 			Op:      "ssh",
@@ -125,7 +125,7 @@ func (r *SSHRequest) ensureValidate() error {
 		}
 	}
 
-	if err := infra.ValidateSSHUsername(r._result.User); err != nil {
+	if err := validators.ValidateSSHUsername(r._result.User); err != nil {
 		return &errs.DomainError{
 			Code:    errs.CodeSSHError,
 			Op:      "ssh",

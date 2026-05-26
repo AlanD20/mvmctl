@@ -1,4 +1,4 @@
-package infra
+package validators
 
 import (
 	"fmt"
@@ -6,7 +6,9 @@ import (
 	"regexp"
 	"strings"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/network"
 )
 
 // Pre-compiled regexes — Python caches them at module level, so Go should too.
@@ -75,14 +77,14 @@ func ValidateEntityName(name, entityType string, maxLength int) error {
 			Message: fmt.Sprintf("Invalid %s name '%s': cannot start with a hyphen", entityType, name),
 		}
 	}
-	if IsReservedName(name) {
+	if infra.IsReservedName(name) {
 		return &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
 			Class:   errs.ClassValidation,
 			Message: fmt.Sprintf("Invalid %s name '%s': '%s' is a reserved name", entityType, name, name),
 		}
 	}
-	if ContainsDangerousChars(name) {
+	if infra.ContainsDangerousChars(name) {
 		return &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
 			Class:   errs.ClassValidation,
@@ -302,11 +304,11 @@ func (NetworkValidator) ValidateName(name string) error {
 		}
 	}
 	// Network names must not start with CLI_NAME- prefix (reserved for bridges)
-	if strings.HasPrefix(name, CLIName+"-") {
+	if strings.HasPrefix(name, infra.CLIName+"-") {
 		return &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
 			Class:   errs.ClassValidation,
-			Message: fmt.Sprintf("Invalid network name '%s': cannot start with '%s-' (reserved for bridge names)", name, CLIName),
+			Message: fmt.Sprintf("Invalid network name '%s': cannot start with '%s-' (reserved for bridge names)", name, infra.CLIName),
 		}
 	}
 	return nil
@@ -513,7 +515,7 @@ func (NetworkValidator) ValidateBridgeName(bridge string) error {
 			Message: fmt.Sprintf("Invalid bridge name: '%s' cannot start with a hyphen", bridge),
 		}
 	}
-	if ContainsDangerousChars(bridge) {
+	if infra.ContainsDangerousChars(bridge) {
 		return &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
 			Class:   errs.ClassValidation,
@@ -528,7 +530,7 @@ func (NetworkValidator) ValidateBridgeName(bridge string) error {
 		}
 	}
 	// Check if bridge already exists on host (non-mvm interface)
-	if BridgeExists(bridge) {
+	if network.BridgeExists(bridge) {
 		return &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
 			Class:   errs.ClassValidation,
@@ -563,7 +565,7 @@ func (NetworkValidator) ValidateNATGateways(gateways []string) ([]string, error)
 				Message: fmt.Sprintf("Invalid NAT gateway '%s': exceeds maximum length of %d", iface, ifnamSiz),
 			}
 		}
-		if ContainsDangerousChars(iface) {
+		if infra.ContainsDangerousChars(iface) {
 			return nil, &errs.DomainError{
 				Code:    errs.CodeValidationFailed,
 				Class:   errs.ClassValidation,
@@ -578,7 +580,7 @@ func (NetworkValidator) ValidateNATGateways(gateways []string) ([]string, error)
 			}
 		}
 		// Check that interface actually exists on the host
-		if err := EnsureInterfaceReady(iface); err != nil {
+		if err := network.EnsureInterfaceReady(iface); err != nil {
 			return nil, &errs.DomainError{
 				Code:    errs.CodeValidationFailed,
 				Class:   errs.ClassValidation,

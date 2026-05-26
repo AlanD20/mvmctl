@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"regexp"
 
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/validators"
 )
 
 // ResolveFn is a callable that resolves the effective value of a setting.
@@ -66,11 +66,11 @@ func validateNoCloudPortRange(key string, resolve ResolveFn) error {
 		return err
 	}
 
-	start, err := infra.ToInt(startRaw)
+	start, err := validators.ToInt(startRaw)
 	if err != nil {
 		return err
 	}
-	end, err := infra.ToInt(endRaw)
+	end, err := validators.ToInt(endRaw)
 	if err != nil {
 		return err
 	}
@@ -135,5 +135,3 @@ func RegisterBuiltinConstraints(r *ConstraintRegistry) {
 		validateMACPrefix,
 	)
 }
-
-

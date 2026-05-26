@@ -14,7 +14,9 @@ import (
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/enricher"
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/disk"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api/inputs"
 )
@@ -93,7 +95,7 @@ func (o *VolumeOperation) Create(ctx context.Context, input *inputs.VolumeCreate
 		}
 	}
 
-	auditLog := infra.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(o.cacheDir)
 	_ = auditLog.LogOperation("volume.create", map[string]interface{}{"name": input.Name}, "")
 
 	return &errs.OperationResult{
@@ -224,7 +226,7 @@ func (o *VolumeOperation) Remove(ctx context.Context, input *inputs.VolumeInput,
 			continue
 		}
 
-		auditLog := infra.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(o.cacheDir)
 		_ = auditLog.LogOperation("volume.remove", map[string]interface{}{"name": vol.Name}, "")
 
 		results = append(results, errs.OperationResult{
@@ -302,7 +304,7 @@ func (o *VolumeOperation) Resize(ctx context.Context, input *inputs.VolumeCreate
 	vol := resolved.Volumes[0]
 
 	// Python: size_bytes = DiskUtils.parse_disk_size_to_bytes(inputs.size)
-	sizeBytes, err := infra.ParseDiskSizeToBytes(input.Size)
+	sizeBytes, err := disk.ParseDiskSizeToBytes(input.Size)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:  "error",
@@ -321,7 +323,7 @@ func (o *VolumeOperation) Resize(ctx context.Context, input *inputs.VolumeCreate
 		}
 	}
 
-	auditLog := infra.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(o.cacheDir)
 	_ = auditLog.LogOperation("volume.resize", map[string]interface{}{"name": vol.Name}, "")
 
 	return &errs.OperationResult{

@@ -8,8 +8,8 @@ import (
 	"fmt"
 
 	"mvmctl/internal/core/config"
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api/inputs"
 )
@@ -102,7 +102,7 @@ func (o *ConfigOperation) Set(ctx context.Context, category, key string, value i
 		return nil, err // ConfigError propagates, matching Python
 	}
 
-	auditLog := infra.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(o.cacheDir)
 	_ = auditLog.LogOperation("config.set", nil, fmt.Sprintf("%s.%s=%v", *resolved.Category, *resolved.Key, resolved.Value))
 
 	return &errs.OperationResult{
@@ -153,7 +153,7 @@ func (o *ConfigOperation) Reset(ctx context.Context, category, key string, allOv
 			}
 		}
 		if deleted > 0 {
-			auditLog := infra.NewAuditLog(o.cacheDir)
+			auditLog := logging.NewAuditLog(o.cacheDir)
 			_ = auditLog.LogOperation("config.reset", nil, fmt.Sprintf("all overrides (%d removed)", deleted))
 		}
 		return &errs.OperationResult{
@@ -175,7 +175,7 @@ func (o *ConfigOperation) Reset(ctx context.Context, category, key string, allOv
 			}
 		}
 		if deleted > 0 {
-			auditLog := infra.NewAuditLog(o.cacheDir)
+			auditLog := logging.NewAuditLog(o.cacheDir)
 			_ = auditLog.LogOperation("config.reset", nil, fmt.Sprintf("%s.* (%d removed)", *resolved.Category, deleted))
 		}
 		return &errs.OperationResult{
@@ -198,7 +198,7 @@ func (o *ConfigOperation) Reset(ctx context.Context, category, key string, allOv
 	resultCount := 0
 	if deletedBool {
 		resultCount = 1
-		auditLog := infra.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(o.cacheDir)
 		_ = auditLog.LogOperation("config.reset", nil, fmt.Sprintf("%s.%s", *resolved.Category, *resolved.Key))
 	}
 	return &errs.OperationResult{

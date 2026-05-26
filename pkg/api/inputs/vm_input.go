@@ -8,9 +8,9 @@ import (
 
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/enricher"
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/internal/infra/validators"
 )
 
 // VMInput matches Python's VMInput dataclass.
@@ -133,7 +133,7 @@ func isMAC(identifier string) bool {
 func (r *VMRequest) validateIdentifiers() error {
 	for _, identifier := range r._input.Identifiers {
 		if isMAC(identifier) {
-			var macValidator infra.NetworkValidator
+			var macValidator validators.NetworkValidator
 			if err := macValidator.ValidateMAC(identifier); err != nil {
 				return &errs.DomainError{
 					Code:    errs.CodeVMResolveFailed,
@@ -142,8 +142,8 @@ func (r *VMRequest) validateIdentifiers() error {
 					Class:   errs.ClassValidation,
 				}
 			}
-		} else if infra.IsIPAddress(identifier) {
-			if err := infra.ValidateIPv4Address(identifier, "guest IP", true, "", ""); err != nil {
+		} else if validators.IsIPAddress(identifier) {
+			if err := validators.ValidateIPv4Address(identifier, "guest IP", true, "", ""); err != nil {
 				return &errs.DomainError{
 					Code:    errs.CodeVMResolveFailed,
 					Op:      "vm",
@@ -153,7 +153,7 @@ func (r *VMRequest) validateIdentifiers() error {
 			}
 		} else {
 			// Name or ID — validate as entity name
-			if err := infra.ValidateEntityName(identifier, "VM", 63); err != nil {
+			if err := validators.ValidateEntityName(identifier, "VM", 63); err != nil {
 				return &errs.DomainError{
 					Code:    errs.CodeVMResolveFailed,
 					Op:      "vm",

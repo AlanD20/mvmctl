@@ -16,8 +16,9 @@ import (
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/enricher"
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/logging"
+	infranet "mvmctl/internal/infra/network"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api/inputs"
 )
@@ -139,7 +140,7 @@ func (o *NetworkOperation) Create(ctx context.Context, input *inputs.NetworkCrea
 	}
 
 	// Update bridge_active
-	bridgeActive := infra.BridgeExists(resolved.Bridge)
+	bridgeActive := infranet.BridgeExists(resolved.Bridge)
 	_ = o.repo.UpdateBridgeActive(ctx, networkID, bridgeActive)
 
 	// Re-fetch
@@ -159,7 +160,7 @@ func (o *NetworkOperation) Create(ctx context.Context, input *inputs.NetworkCrea
 	}
 
 	// Audit log
-	auditLog := infra.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(o.cacheDir)
 	_ = auditLog.LogOperation("network.create", map[string]interface{}{"name": resolved.Name}, "")
 
 	return &errs.OperationResult{
@@ -210,7 +211,7 @@ func (o *NetworkOperation) Remove(ctx context.Context, input *inputs.NetworkInpu
 			}
 		}
 
-		auditLog := infra.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(o.cacheDir)
 		_ = auditLog.LogOperation("network.remove", map[string]interface{}{"id": net.ID, "name": net.Name}, "")
 		results = append(results, net.Name)
 	}
@@ -288,7 +289,7 @@ func (o *NetworkOperation) Inspect(ctx context.Context, input *inputs.NetworkInp
 
 	net := resolved.Networks[0]
 
-	bridgeActive := infra.BridgeExists(net.Bridge)
+	bridgeActive := infranet.BridgeExists(net.Bridge)
 	if bridgeActive != net.BridgeActive {
 		_ = o.repo.UpdateBridgeActive(ctx, net.ID, bridgeActive)
 		net.BridgeActive = bridgeActive
@@ -393,7 +394,7 @@ func (o *NetworkOperation) SetDefault(ctx context.Context, input *inputs.Network
 		}
 	}
 
-	auditLog := infra.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(o.cacheDir)
 	_ = auditLog.LogOperation("network.set_default", map[string]interface{}{"name": net.Name}, "")
 
 	return &errs.OperationResult{
@@ -440,7 +441,7 @@ func (o *NetworkOperation) Sync(ctx context.Context, networkID string) *errs.Ope
 	syncErr := func() error {
 		// Step 1: Restore missing bridges (post-reboot recovery)
 		for _, net := range networks {
-			if !infra.BridgeExists(net.Bridge) {
+			if !infranet.BridgeExists(net.Bridge) {
 				bridgeAddr, calcErr := network.ComputeBridgeAddress(net.IPv4Gateway, net.Subnet)
 				if calcErr != nil {
 					return fmt.Errorf("compute bridge address: %w", calcErr)
@@ -458,7 +459,7 @@ func (o *NetworkOperation) Sync(ctx context.Context, networkID string) *errs.Ope
 
 		// Step 2: Reconcile bridge state (DB vs kernel)
 		for _, net := range networks {
-			bridgeActive := infra.BridgeExists(net.Bridge)
+			bridgeActive := infranet.BridgeExists(net.Bridge)
 			if bridgeActive != net.BridgeActive {
 				_ = o.repo.UpdateBridgeActive(ctx, net.ID, bridgeActive)
 				bridgesReconciled++
@@ -608,7 +609,7 @@ func (o *NetworkOperation) CreateDefaultNetwork(ctx context.Context) *errs.Opera
 	// Check existing
 	internalNetwork, _ := o.repo.GetByName(ctx, defaultName)
 	if internalNetwork == nil {
-		outboundIf := infra.DetectOutboundInterface()
+		outboundIf := infranet.DetectOutboundInterface()
 		natGateways := make([]string, 0)
 		if outboundIf != "" {
 			natGateways = []string{outboundIf}
@@ -668,7 +669,7 @@ func (o *NetworkOperation) CreateDefaultNetwork(ctx context.Context) *errs.Opera
 		_ = o.svc.EnsureNAT(ctx, defaultNetwork.Bridge, network.NatGatewaysList(defaultNetwork), defaultNetwork.Subnet, defaultNetwork.ID)
 	}
 
-	bridgeActive := infra.BridgeExists(defaultNetwork.Bridge)
+	bridgeActive := infranet.BridgeExists(defaultNetwork.Bridge)
 	_ = o.repo.UpdateBridgeActive(ctx, defaultNetwork.ID, bridgeActive)
 
 	return &errs.OperationResult{

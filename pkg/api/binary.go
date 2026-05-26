@@ -15,6 +15,7 @@ import (
 	"mvmctl/internal/enricher"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/version"
 	"mvmctl/pkg/api/inputs"
@@ -135,7 +136,7 @@ func (o *BinaryOperation) Pull(ctx context.Context, input *inputs.BinaryPullInpu
 			versionStr = binaries[0].Version
 		}
 
-		auditLog := infra.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(o.cacheDir)
 		_ = auditLog.LogOperation("binary.pull", map[string]interface{}{
 			"git_ref": *resolved.GitRef,
 			"version": versionStr,
@@ -205,7 +206,7 @@ func (o *BinaryOperation) Pull(ctx context.Context, input *inputs.BinaryPullInpu
 		}
 	}
 
-	auditLog := infra.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(o.cacheDir)
 	_ = auditLog.LogOperation("binary.pull", map[string]interface{}{"version": resolvedVersion}, "")
 
 	return &errs.OperationResult{
@@ -259,7 +260,7 @@ func (o *BinaryOperation) Remove(ctx context.Context, input *inputs.BinaryInput,
 			continue
 		}
 
-		auditLog := infra.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(o.cacheDir)
 		_ = auditLog.LogOperation("binary.remove", map[string]interface{}{
 			"id":      bin.ID,
 			"name":    bin.Name,
@@ -328,7 +329,7 @@ func (o *BinaryOperation) RemoveByVersion(ctx context.Context, version string, f
 				Exception: err,
 			}
 		}
-		auditLog := infra.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(o.cacheDir)
 		_ = auditLog.LogOperation("binary.remove", map[string]interface{}{
 			"id":      bin.ID,
 			"name":    bin.Name,
@@ -444,7 +445,7 @@ func (o *BinaryOperation) SetDefault(ctx context.Context, input *inputs.BinaryIn
 		}
 	}
 
-	auditLog := infra.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(o.cacheDir)
 	_ = auditLog.LogOperation("binary.set_default", map[string]interface{}{
 		"id":      bin.ID,
 		"name":    bin.Name,
@@ -531,7 +532,7 @@ func (o *BinaryOperation) EnsureDefault(ctx context.Context) *errs.OperationResu
 		}
 	}
 
-	auditLog := infra.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(o.cacheDir)
 	_ = auditLog.LogOperation("binary.ensure_default", map[string]interface{}{
 		"id":      latest.ID,
 		"name":    latest.Name,
