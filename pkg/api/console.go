@@ -12,16 +12,10 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/logging"
+	"mvmctl/internal/infra/model"
 	"mvmctl/internal/service/console"
 	"mvmctl/pkg/api/inputs"
 )
-
-// ConsoleConnectionInfo matches Python's ConsoleConnectionInfo dataclass.
-type ConsoleConnectionInfo struct {
-	SocketPath string `json:"socket_path"`
-	VMName     string `json:"vm_name"`
-	VMID       string `json:"vm_id"`
-}
 
 // ConsoleOperation provides console relay orchestration for VM console access.
 // Matches Python's ConsoleOperation exactly.
@@ -60,7 +54,7 @@ func (o *ConsoleOperation) GetState(ctx context.Context, identifier string) (map
 // GetConnectionInfo returns connection info for VM console relay.
 // Matches Python's ConsoleOperation.get_connection_info() exactly.
 // Raises MVMError if console relay is not running — Go returns DomainError.
-func (o *ConsoleOperation) GetConnectionInfo(ctx context.Context, identifier string) (*ConsoleConnectionInfo, error) {
+func (o *ConsoleOperation) GetConnectionInfo(ctx context.Context, identifier string) (*model.ConsoleConnectionInfo, error) {
 	resolved, err := o.resolveWithRequest(ctx, identifier)
 	if err != nil {
 		return nil, err
@@ -75,7 +69,7 @@ func (o *ConsoleOperation) GetConnectionInfo(ctx context.Context, identifier str
 		}
 	}
 
-	return &ConsoleConnectionInfo{
+	return &model.ConsoleConnectionInfo{
 		SocketPath: resolved.Relay.SocketPath(),
 		VMName:     resolved.VM.Name,
 		VMID:       resolved.VM.ID,

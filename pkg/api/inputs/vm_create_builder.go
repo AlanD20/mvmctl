@@ -971,13 +971,13 @@ func validateBootArgComponent(component, fieldName string) error {
 
 // VolumesToDrives converts volumes to Firecracker drive configurations.
 // Matches Python's VolumeService.volumes_to_drives().
-func VolumesToDrives(vols []*model.VolumeItem) ([]DriveConfig, error) {
-	var drives []DriveConfig
+func VolumesToDrives(vols []*model.VolumeItem) ([]model.DriveConfig, error) {
+	var drives []model.DriveConfig
 	for _, vol := range vols {
 		if vol == nil {
 			continue
 		}
-		drives = append(drives, DriveConfig{
+		drives = append(drives, model.DriveConfig{
 			DriveID:      vol.ID,
 			PathOnHost:   vol.Path,
 			IsRootDevice: false,
