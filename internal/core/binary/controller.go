@@ -18,7 +18,7 @@ type Controller struct {
 // NewController creates a BinaryController from an entity.
 // entity can be a *model.BinaryItem or a string identifier.
 // Resolves the binary eagerly at construction time (like Python).
-func NewController(ctx context.Context, entity interface{}, repo Repository) (*Controller, error) {
+func NewController(ctx context.Context, entity any, repo Repository) (*Controller, error) {
 	var b *model.BinaryItem
 	switch e := entity.(type) {
 	case *model.BinaryItem:

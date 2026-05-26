@@ -78,17 +78,11 @@ func resolveVersion(dirName string, skipPatterns []string, versionPrefix string,
 func parseDirectoryListing(html string) []string {
 	re := regexp.MustCompile(`href="([^"]+)/"`)
 	matches := re.FindAllStringSubmatch(html, -1)
-
-	seen := make(map[string]bool)
-	var dirs []string
+	dirs := make([]string, 0, len(matches))
 	for _, m := range matches {
-		dir := m[1]
-		if !seen[dir] {
-			seen[dir] = true
-			dirs = append(dirs, dir)
-		}
+		dirs = append(dirs, m[1])
 	}
-	return dirs
+	return infra.Dedup(dirs)
 }
 
 // versionSortKey converts a version string to a numeric slice for sorting.

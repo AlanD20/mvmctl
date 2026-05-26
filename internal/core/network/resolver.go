@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 )
 
@@ -124,14 +125,7 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*Network, error) 
 }
 
 func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) (*ResolveResult, error) {
-	seen := make(map[string]bool)
-	var uniqueIDs []string
-	for _, ident := range identifiers {
-		if !seen[ident] {
-			seen[ident] = true
-			uniqueIDs = append(uniqueIDs, ident)
-		}
-	}
+	uniqueIDs := infra.Dedup(identifiers)
 
 	var items []*Network
 	var errorsList []string

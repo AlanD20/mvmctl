@@ -72,13 +72,7 @@ func (r *KernelRequest) Resolve(ctx context.Context) (*ResolvedKernelInput, erro
 		}
 	}
 
-	// Convert []string to []any for kernel resolver
-	identifiersAny := make([]any, len(identifiers))
-	for i, id := range identifiers {
-		identifiersAny[i] = id
-	}
-
-	result := r.resolver.ResolveMany(ctx, identifiersAny)
+	result := r.resolver.ResolveMany(ctx, identifiers)
 
 	if len(result.Errors) > 0 && len(result.Items) == 0 {
 		return nil, &errs.DomainError{

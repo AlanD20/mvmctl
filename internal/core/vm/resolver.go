@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 )
@@ -236,14 +237,7 @@ func (r *Resolver) Resolve(ctx context.Context, identifier string) (*model.VM, e
 // 1 if errors and not items, else 0.
 func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *ResolveResult {
 	// Deduplicate identifiers while preserving order (matches Python)
-	seenInputs := make(map[string]bool)
-	var uniqueIDs []string
-	for _, ident := range identifiers {
-		if !seenInputs[ident] {
-			seenInputs[ident] = true
-			uniqueIDs = append(uniqueIDs, ident)
-		}
-	}
+	uniqueIDs := infra.Dedup(identifiers)
 
 	var vms []*model.VM
 	var errsList []string

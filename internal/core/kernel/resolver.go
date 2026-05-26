@@ -184,55 +184,20 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.KernelItem
 
 // ResolveMany resolves multiple kernel identifiers.
 // Matches Python's Resolver.resolve_many().
-// identifiers can be strings (ID/type/path) or []any with [version, type] pairs.
-func (r *Resolver) ResolveMany(ctx context.Context, identifiers []any) *ResolveResult {
-	// Deduplicate identifiers while preserving order.
-	// Python: key = str(ident) — for a list [version, type], str() produces "['v', 't']".
-	// Go: match Python's repr format for lists.
-	seenInputs := make(map[string]bool)
-	var uniqueIDs []any
-	for _, ident := range identifiers {
-		key := identifierKey(ident)
-		if !seenInputs[key] {
-			seenInputs[key] = true
-			uniqueIDs = append(uniqueIDs, ident)
-		}
-	}
+func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *ResolveResult {
+	uniqueIDs := infra.Dedup(identifiers)
 
 	var items []*model.KernelItem
 	var errors []string
 	resolvedIDs := make(map[string]bool)
 
 	for _, identifier := range uniqueIDs {
-		switch id := identifier.(type) {
-		case []any:
-			if len(id) == 2 {
-				v, ok1 := id[0].(string)
-				t, ok2 := id[1].(string)
-				if ok1 && ok2 {
-					item, err := r.ByVersionType(ctx, v, t)
-					if err != nil {
-						errors = append(errors, fmt.Sprintf("%v: %s", identifier, err))
-					} else if !resolvedIDs[item.ID] {
-						resolvedIDs[item.ID] = true
-						items = append(items, item)
-					}
-				} else {
-					errors = append(errors, fmt.Sprintf("%v: Invalid identifier format", identifier))
-				}
-			} else {
-				errors = append(errors, fmt.Sprintf("%v: Invalid identifier format", identifier))
-			}
-		case string:
-			item, err := r.Resolve(ctx, id)
-			if err != nil {
-				errors = append(errors, fmt.Sprintf("%s: %s", id, err))
-			} else if !resolvedIDs[item.ID] {
-				resolvedIDs[item.ID] = true
-				items = append(items, item)
-			}
-		default:
-			errors = append(errors, fmt.Sprintf("%v: Invalid identifier format", identifier))
+		item, err := r.Resolve(ctx, identifier)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("%s: %s", identifier, err))
+		} else if !resolvedIDs[item.ID] {
+			resolvedIDs[item.ID] = true
+			items = append(items, item)
 		}
 	}
 
@@ -275,26 +240,6 @@ func (r *Resolver) ItemFromPath(path string) *model.KernelItem {
 		IsPresent: true,
 		CreatedAt: now,
 		UpdatedAt: now,
-	}
-}
-
-// identifierKey produces a string key matching Python's str() for deduplication.
-// Python: str(["official", "6.1"]) → "['official', '6.1']"
-// Python: str("some_id") → "some_id"
-func identifierKey(ident any) string {
-	switch v := ident.(type) {
-	case []any:
-		parts := make([]string, len(v))
-		for i, elem := range v {
-			if s, ok := elem.(string); ok {
-				parts[i] = fmt.Sprintf("'%s'", s)
-			} else {
-				parts[i] = fmt.Sprintf("%v", elem)
-			}
-		}
-		return "[" + strings.Join(parts, ", ") + "]"
-	default:
-		return fmt.Sprintf("%v", v)
 	}
 }
 

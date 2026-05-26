@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/system"
 )
 
@@ -133,14 +134,7 @@ func (kd *KernelDetector) scanBootDirectory(ctx context.Context) ([]kernelCandid
 	}
 
 	// Deduplicate paths while preserving order
-	seen := make(map[string]bool)
-	var unique []string
-	for _, p := range paths {
-		if !seen[p] {
-			seen[p] = true
-			unique = append(unique, p)
-		}
-	}
+	unique := infra.Dedup(paths)
 
 	var candidates []kernelCandidate
 	for _, p := range unique {
