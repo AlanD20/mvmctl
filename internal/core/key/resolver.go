@@ -22,7 +22,7 @@ type ResolveResult struct {
 
 // EnrichFunc is a function that enriches keys in-place with relations.
 // Set by the API layer during wiring to avoid circular imports.
-type EnrichFunc func(keys []*model.SSHKeyItem, include []string, relations map[string]interface{})
+type EnrichFunc func(ctx context.Context, keys []*model.SSHKeyItem, include []string, relations map[string]interface{})
 
 // Resolver resolves key identifiers (name, ID prefix, or .pub file path)
 // to SSHKeyItem instances using database storage.
@@ -53,9 +53,9 @@ func (r *Resolver) SetInclude(include []string) {
 }
 
 // enrich enriches keys with relations if include is set.
-func (r *Resolver) enrich(keys []*model.SSHKeyItem) []*model.SSHKeyItem {
+func (r *Resolver) enrich(ctx context.Context, keys []*model.SSHKeyItem) []*model.SSHKeyItem {
 	if r.include != nil && len(keys) > 0 && r.enrichFunc != nil {
-		r.enrichFunc(keys, r.include, nil)
+		r.enrichFunc(ctx, keys, r.include, nil)
 	}
 	return keys
 }
@@ -75,7 +75,7 @@ func (r *Resolver) ByID(ctx context.Context, keyID string) (*model.SSHKeyItem, e
 			return nil, err
 		}
 		if len(matches) == 1 {
-			return r.enrich(matches)[0], nil
+			return r.enrich(ctx, matches)[0], nil
 		}
 		if len(matches) > 1 {
 			return nil, &errs.DomainError{
@@ -113,7 +113,7 @@ func (r *Resolver) ByName(ctx context.Context, name string) (*model.SSHKeyItem, 
 			Class:   errs.ClassValidation,
 		}
 	}
-	return r.enrich([]*model.SSHKeyItem{key})[0], nil
+	return r.enrich(ctx, []*model.SSHKeyItem{key})[0], nil
 }
 
 // Resolve resolves a key by name, ID prefix, or .pub file path (in that order).
@@ -195,7 +195,7 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) (*Reso
 		}
 	}
 
-	items = r.enrich(items)
+	items = r.enrich(ctx, items)
 
 	exitCode := 0
 	if len(errsList) > 0 && len(items) == 0 {
@@ -216,5 +216,5 @@ func (r *Resolver) GetDefaults(ctx context.Context) ([]*model.SSHKeyItem, error)
 	if err != nil {
 		return nil, err
 	}
-	return r.enrich(keys), nil
+	return r.enrich(ctx, keys), nil
 }
