@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 )
 
@@ -188,14 +189,7 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*ImageItem, error
 
 // ResolveMany resolves multiple image identifiers.
 func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *ResolveResult {
-	seenInputs := make(map[string]bool)
-	var uniqueIDs []string
-	for _, ident := range identifiers {
-		if !seenInputs[ident] {
-			seenInputs[ident] = true
-			uniqueIDs = append(uniqueIDs, ident)
-		}
-	}
+	uniqueIDs := infra.Dedup(identifiers)
 
 	var items []*ImageItem
 	var errorsList []string

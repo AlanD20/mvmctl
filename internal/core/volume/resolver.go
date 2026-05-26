@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 )
@@ -143,14 +144,7 @@ func (r *Resolver) Resolve(ctx context.Context, identifier string) (*model.Volum
 // Python prefixes each error with the identifier: f"{identifier}: {e}"
 func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *ResolveResult {
 	// First, deduplicate input identifiers (matching Python's seen_inputs)
-	seenInputs := make(map[string]bool)
-	var uniqueIDs []string
-	for _, ident := range identifiers {
-		if !seenInputs[ident] {
-			seenInputs[ident] = true
-			uniqueIDs = append(uniqueIDs, ident)
-		}
-	}
+	uniqueIDs := infra.Dedup(identifiers)
 
 	var volumes []*model.VolumeItem
 	var errList []string

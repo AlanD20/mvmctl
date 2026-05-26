@@ -8,20 +8,6 @@ import (
 	"mvmctl/internal/infra/parallel"
 )
 
-// Deduplicate returns a new slice with duplicates removed (in-place order preserved).
-// Matches the inline dedup logic in Python's _resolve_forward and _resolve_reverse.
-func Deduplicate[T comparable](items []T) []T {
-	seen := make(map[T]bool)
-	var result []T
-	for _, item := range items {
-		if !seen[item] {
-			seen[item] = true
-			result = append(result, item)
-		}
-	}
-	return result
-}
-
 // sortByDotCount sorts relation paths by dot count (parents before children).
 // Matches Python's sorted(include, key=lambda p: p.count(".")).
 func sortByDotCount(paths []string) []string {

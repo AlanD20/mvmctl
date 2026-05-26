@@ -2,9 +2,11 @@ package binary
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/version"
@@ -183,77 +185,32 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.BinaryItem
 	return nil, err
 }
 
-// ResolveMany resolves multiple binary identifiers by id or [name, version] pairs.
-func (r *Resolver) ResolveMany(ctx context.Context, identifiers []interface{}) *ResolveResult {
-	// Deduplicate identifiers while preserving order
-	seenInputs := make(map[string]bool)
-	var uniqueIDs []interface{}
-	for _, ident := range identifiers {
-		key := fmt.Sprintf("%v", ident)
-		if !seenInputs[key] {
-			seenInputs[key] = true
-			uniqueIDs = append(uniqueIDs, ident)
-		}
-	}
+// ResolveMany resolves multiple binary identifiers.
+func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *ResolveResult {
+	uniqueIDs := infra.Dedup(identifiers)
 
 	var items []*model.BinaryItem
 	var errsList []string
 	resolvedIDs := make(map[string]bool)
 
 	for _, identifier := range uniqueIDs {
-		var item *model.BinaryItem
-		var err error
-
-		switch id := identifier.(type) {
-		case []interface{}:
-			if len(id) == 2 {
-				name, okName := id[0].(string)
-				version, okVer := id[1].(string)
-				if okName && okVer {
-					item, err = r.ByNameVersion(ctx, name, version)
-				} else {
-					err = &errs.DomainError{
-						Code:    errs.CodeBinaryNotFound,
-						Op:      "binary",
-						Message: fmt.Sprintf("Invalid identifier format: %v", identifier),
-					}
-				}
-			} else {
-				err = &errs.DomainError{
-					Code:    errs.CodeBinaryNotFound,
-					Op:      "binary",
-					Message: fmt.Sprintf("Invalid identifier format: %v", identifier),
-				}
-			}
-		case []string:
-			if len(id) == 2 {
-				item, err = r.ByNameVersion(ctx, id[0], id[1])
-			} else {
-				err = &errs.DomainError{
-					Code:    errs.CodeBinaryNotFound,
-					Op:      "binary",
-					Message: fmt.Sprintf("Invalid identifier format: %v", identifier),
-				}
-			}
-		case string:
-			item, err = r.Resolve(ctx, id)
-		default:
-			err = &errs.DomainError{
-				Code:    errs.CodeBinaryNotFound,
-				Op:      "binary",
-				Message: fmt.Sprintf("Invalid identifier format: %v", identifier),
-			}
-		}
-
+		item, err := r.Resolve(ctx, identifier)
 		if err != nil {
-			errsList = append(errsList, fmt.Sprintf("%v: %s", identifier, err.Error()))
-		} else if !resolvedIDs[item.ID] {
+			var de *errs.DomainError
+			if errors.As(err, &de) && de.Code == errs.CodeBinaryNotFound {
+				errsList = append(errsList, fmt.Sprintf("%s: %s", identifier, err))
+			} else {
+				return &ResolveResult{
+					Items:  items,
+					Errors: append(errsList, err.Error()),
+				}
+			}
+		} else if item != nil && !resolvedIDs[item.ID] {
 			resolvedIDs[item.ID] = true
 			items = append(items, item)
 		}
 	}
 
-	// Enrich all resolved items
 	items = r.enrich(ctx, items)
 
 	exitCode := 0

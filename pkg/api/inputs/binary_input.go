@@ -97,12 +97,8 @@ func (r *BinaryRequest) Resolve(ctx context.Context) (*ResolvedBinaryInput, erro
 
 	// Resolve bare identifiers
 	if len(bareIdentifiers) > 0 {
-		// Convert []string to []interface{} for the binary resolver
-		idAny := make([]interface{}, len(bareIdentifiers))
-		for i, id := range bareIdentifiers {
-			idAny[i] = id
-		}
-		result := r.resolver.ResolveMany(ctx, idAny)
+		// Pass bare identifiers directly to the binary resolver
+		result := r.resolver.ResolveMany(ctx, bareIdentifiers)
 		if result != nil {
 			allBinaries = append(allBinaries, result.Items...)
 		}

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 )
@@ -172,15 +173,7 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.SSHKeyItem
 // (e.g. MVMKeyError from a .pub path that exists but key is not cached)
 // propagate immediately, matching Python's except KeyNotFoundError clause.
 func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) (*ResolveResult, error) {
-	// Deduplicate identifiers while preserving order
-	seen := make(map[string]bool)
-	var uniqueIDs []string
-	for _, ident := range identifiers {
-		if !seen[ident] {
-			seen[ident] = true
-			uniqueIDs = append(uniqueIDs, ident)
-		}
-	}
+	uniqueIDs := infra.Dedup(identifiers)
 
 	var items []*model.SSHKeyItem
 	var errsList []string

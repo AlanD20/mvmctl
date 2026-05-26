@@ -9,8 +9,10 @@ import (
 	"strconv"
 	"strings"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/download"
 	"mvmctl/internal/infra/version"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -126,19 +128,13 @@ func VersionInfoToImageVersion(vi version.VersionInfo, configs []map[string]any,
 // ParseDirectoryListing extracts directory names from Apache HTML directory listing.
 // Matches Python's HttpDirVersionResolver._parse_directory_listing() exactly.
 func ParseDirectoryListing(html string) []string {
-	// Use map to deduplicate while preserving insertion order
-	seen := make(map[string]bool)
-	var result []string
 	re := regexp.MustCompile(`href="([^"]+)/"`)
 	matches := re.FindAllStringSubmatch(html, -1)
+	dirs := make([]string, 0, len(matches))
 	for _, m := range matches {
-		dir := m[1]
-		if !seen[dir] {
-			seen[dir] = true
-			result = append(result, dir)
-		}
+		dirs = append(dirs, m[1])
 	}
-	return result
+	return infra.Dedup(dirs)
 }
 
 // DiscoverFileFromListing fetches a directory listing HTML and finds a matching file URL.
