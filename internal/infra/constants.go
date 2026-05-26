@@ -441,9 +441,17 @@ func GetCacheDir() (string, error) {
 			return "", fmt.Errorf("Unsafe %s path '%s': must be under $HOME (%s), /tmp, or /var/tmp",
 				EnvKey("CACHE_DIR"), override, home)
 		}
+		// Ensure the directory exists with proper permissions (matching
+		// Python's CacheUtils.resolve_dir which creates the directory).
+		if err := ensureDirAndChown(resolved); err != nil {
+			return "", fmt.Errorf("create cache dir: %w", err)
+		}
 		return resolved, nil
 	}
 	path := filepath.Join(GetRealHome(), ".cache", ProjectName)
+	if err := ensureDirAndChown(path); err != nil {
+		return "", fmt.Errorf("create default cache dir: %w", err)
+	}
 	return path, nil
 }
 
@@ -463,9 +471,18 @@ func GetConfigDir() (string, error) {
 			return "", fmt.Errorf("Unsafe %s path '%s': must be under $HOME (%s), /tmp, or /var/tmp",
 				EnvKey("CONFIG_DIR"), override, home)
 		}
+		// Ensure the directory exists with proper permissions (matching
+		// Python's CacheUtils.resolve_dir which creates the directory).
+		if err := ensureDirAndChown(resolved); err != nil {
+			return "", fmt.Errorf("create config dir: %w", err)
+		}
 		return resolved, nil
 	}
-	return filepath.Join(GetRealHome(), ".config", ProjectName), nil
+	path := filepath.Join(GetRealHome(), ".config", ProjectName)
+	if err := ensureDirAndChown(path); err != nil {
+		return "", fmt.Errorf("create default config dir: %w", err)
+	}
+	return path, nil
 }
 
 func GetConfigPath() string {
@@ -487,13 +504,13 @@ func GetMvmDBPath() string {
 func GetTempDir() string {
 	override, ok := EnvGet("TEMP_DIR")
 	if ok && override != "" {
-		if err := os.MkdirAll(override, 0755); err != nil {
+		if err := ensureDirAndChown(override); err != nil {
 			slog.Warn("failed to create temp directory", "path", override, "error", err)
 		}
 		return override
 	}
 	path := filepath.Join("/tmp", ProjectName)
-	if err := os.MkdirAll(path, 0755); err != nil {
+	if err := ensureDirAndChown(path); err != nil {
 		slog.Warn("failed to create temp directory", "path", path, "error", err)
 	}
 	return path
