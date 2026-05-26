@@ -250,7 +250,7 @@ func (s *Service) OptimizeImage(
 
 	// ── Detect OS type from the image (always, even when skipping) ──
 	detectedOS := ""
-	dp := NewProvisioner(imagePath, provisionerType, fsType)
+	dp := NewProvisioner(imagePath, provisionerType, fsType, s.cacheDir)
 	osResult, osErr := dp.DetectOS()
 	if osErr == nil {
 		detectedOS = osResult
@@ -299,7 +299,7 @@ func (s *Service) OptimizeImage(
 	// ── Filesystem conversion (btrfs → ext4) ──────────────────────
 	if fsType == "btrfs" {
 		slog.Info("Converting filesystem from btrfs to ext4...")
-		cp := NewProvisioner(imagePath, provisionerType, fsType)
+		cp := NewProvisioner(imagePath, provisionerType, fsType, s.cacheDir)
 		cp.ConvertTo("ext4")
 		cp.Run() // error intentionally ignored — matches Python where this is inside OptimizeImage's own call path
 		fsType = "ext4"
@@ -310,7 +310,7 @@ func (s *Service) OptimizeImage(
 	preShrinkInfo, _ := os.Stat(imagePath)
 	preShrinkSize := preShrinkInfo.Size()
 
-	p := NewProvisioner(imagePath, provisionerType, fsType)
+	p := NewProvisioner(imagePath, provisionerType, fsType, s.cacheDir)
 	p.Deblob()
 	if FSCanShrink[fsType] {
 		p.Shrink()
@@ -345,7 +345,7 @@ func (s *Service) OptimizeImage(
 
 	// ── Detect OS type from the optimized image ──────────────────
 	var distro string
-	dp2 := NewProvisioner(imagePath, provisionerType, fsType)
+	dp2 := NewProvisioner(imagePath, provisionerType, fsType, s.cacheDir)
 	osResult2, osErr2 := dp2.DetectOS()
 	if osErr2 == nil {
 		distro = osResult2

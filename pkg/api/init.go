@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 
 	"mvmctl/internal/core/binary"
 	"mvmctl/internal/core/config"
@@ -193,7 +194,7 @@ func (o *InitOperation) initDatabase(ctx context.Context) InitStepResult {
 	// Python's init_database: db = Database(); db.migrate()
 	// Go: run migrations via db.RunMigrationsCtx, wrapped in explicit error handling.
 	if o.db != nil {
-		if _, err := db.RunMigrationsCtx(ctx, o.db); err != nil {
+		if _, err := db.RunMigrationsCtx(ctx, o.db, filepath.Join(o.cacheDir, infra.MVMDBFilename)); err != nil {
 			return InitStepResult{Step: "local_state", Success: false, Message: fmt.Sprintf("Failed: %v", err)}
 		}
 	}

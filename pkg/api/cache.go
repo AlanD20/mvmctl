@@ -94,7 +94,7 @@ func (o *CacheOperation) InitAll(ctx context.Context, onProgress func(errs.Progr
 
 	// Ensure DB schema exists before any DB writes. (Python: Database().migrate())
 	if o.db != nil {
-		if _, err := db.RunMigrationsCtx(ctx, o.db); err != nil {
+		if _, err := db.RunMigrationsCtx(ctx, o.db, filepath.Join(cacheDir, infra.MVMDBFilename)); err != nil {
 			slog.Warn("Failed to run DB migrations during cache init", "error", err)
 		}
 	}
@@ -246,7 +246,7 @@ func (o *CacheOperation) PruneMisc(ctx context.Context, dryRun bool) *errs.Opera
 	// Go: Delegate to GuestfsService directly for appliance and guestfs_state,
 	// matching Python's GuestfsService.prune_appliance() and
 	// GuestfsService.clean_stale_guestfs_state() calls.
-	appliancePruned := (&guestfs.GuestfsService{}).PruneAppliance(dryRun)
+	appliancePruned := (&guestfs.GuestfsService{}).PruneAppliance(o.cacheDir, dryRun)
 	warmPruned := o.cacheSvc.PruneWarmImages(ctx, dryRun)
 	guestfsStateCleaned := (&guestfs.GuestfsService{}).CleanStaleGuestfsState()
 	staleProvisionCleaned := o.cacheSvc.CleanStaleProvisionMounts(ctx, dryRun)

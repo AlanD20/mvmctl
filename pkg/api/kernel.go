@@ -143,7 +143,11 @@ func (o *KernelOperation) Pull(ctx context.Context, input *inputs.KernelPullInpu
 			}
 		}
 		if ciVersion == "" {
-			ciVersion = infra.DefaultFirecrackerCIVersion
+			return &errs.OperationResult{
+				Status:  "error",
+				Code:    "kernel.pull_failed",
+				Message: "CI version is required to resolve latest kernel version",
+			}
 		}
 		resolvedVersion, err := o.svc.ResolveLatestVersion(ctx, kernelType, ciVersion)
 		if err != nil {

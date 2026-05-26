@@ -130,7 +130,11 @@ func (o *ImageOperation) Pull(ctx context.Context, input *inputs.ImagePullInput,
 		arch = *input.Arch
 	}
 	if arch == "" {
-		arch = "x86_64"
+		return &errs.OperationResult{
+			Status:  "error",
+			Code:    string(errs.CodeImagePullFailed),
+			Message: "arch is required",
+		}
 	}
 
 	// Use custom output dir if specified, otherwise the default images dir
@@ -367,7 +371,11 @@ func (o *ImageOperation) Import(ctx context.Context, input *inputs.ImageImportIn
 		arch = *input.Arch
 	}
 	if arch == "" {
-		arch = "x86_64"
+		return &errs.OperationResult{
+			Status:  "error",
+			Code:    string(errs.CodeImageImportFailed),
+			Message: "arch is required",
+		}
 	}
 
 	format := ""

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -14,18 +13,6 @@ import (
 	"mvmctl/internal/infra/loopmount"
 	"mvmctl/internal/infra/provisioner"
 )
-
-// resolveCacheDir returns the mvm cache directory, falling back to the
-// default location if MVM_CACHE_DIR is not set. This matches Python's
-// CacheUtils.get_cache_dir() behavior — called internally by the provisioner,
-// not passed as a parameter.
-func resolveCacheDir() string {
-	dir, err := infra.GetCacheDir()
-	if err != nil {
-		return filepath.Join(os.Getenv("HOME"), ".cache", "mvm")
-	}
-	return dir
-}
 
 // ProvisionerType is an alias for provisioner.ProvisionerType.
 type ProvisionerType = provisioner.ProvisionerType
@@ -43,6 +30,7 @@ type Provisioner struct {
 	imagePath       string
 	provisionerType ProvisionerType
 	fsType          string
+	cacheDir        string
 	deblob          bool
 	shrink          bool
 	convertTo       string
@@ -50,17 +38,21 @@ type Provisioner struct {
 
 // NewProvisioner creates a new Provisioner.
 // Matches Python's Provisioner.__init__() which takes:
-//   image_path: Path, *, provisioner_type: ProvisionerType, fs_type: str
-// No cacheDir parameter — matching Python exactly.
+//
+//	image_path: Path, *, provisioner_type: ProvisionerType, fs_type: str
+//
+// cacheDir is resolved by the caller and passed through.
 func NewProvisioner(
 	imagePath string,
 	provisionerType ProvisionerType,
 	fsType string,
+	cacheDir string,
 ) *Provisioner {
 	return &Provisioner{
 		imagePath:       imagePath,
 		provisionerType: provisionerType,
 		fsType:          fsType,
+		cacheDir:        cacheDir,
 	}
 }
 
@@ -71,8 +63,7 @@ func NewProvisioner(
 func (p *Provisioner) createBackend() (provisioner.Backend, error) {
 	switch p.provisionerType {
 	case ProvisionerTypeLoopMount:
-		cacheDir := resolveCacheDir()
-		return loopmount.NewLoopMountBackend(p.imagePath, p.fsType, cacheDir), nil
+		return loopmount.NewLoopMountBackend(p.imagePath, p.fsType, p.cacheDir), nil
 	case ProvisionerTypeGuestFS:
 		if err := provisioner.EnsureGuestfsAppliance(""); err != nil {
 			return nil, err
@@ -117,6 +108,7 @@ func (p *Provisioner) ConvertTo(targetFS string) {
 //   - LoopMountError = DomainError with "loopmount." code prefix
 //   - OSError = os.PathError, os.LinkError, os.SyscallError, syscall.Errno
 //   - RuntimeError = any other non-DomainError
+//
 // Non-loopmount DomainErrors (e.g. image.*, vm.*) are NOT caught — they propagate.
 func isExpectedProvisionerError(err error) bool {
 	var de *errs.DomainError
@@ -259,7 +251,10 @@ func ExtractViaBackend(
 
 	switch provisionerType {
 	case ProvisionerTypeLoopMount:
-		cacheDir := resolveCacheDir()
+		cacheDir, err := infra.GetCacheDir()
+		if err != nil {
+			return "", fmt.Errorf("extract partition: cannot resolve cache directory: %w", err)
+		}
 		backend := loopmount.NewLoopMountBackend(rawPath, fsType, cacheDir)
 		return backend.ExtractPartition(rawPath, outputPath, partition, disabledDetectors)
 	case ProvisionerTypeGuestFS:

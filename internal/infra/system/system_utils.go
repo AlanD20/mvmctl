@@ -1,6 +1,7 @@
 package system
 
 import (
+	"fmt"
 	"os"
 	"os/user"
 	"strconv"
@@ -8,15 +9,15 @@ import (
 
 // CurrentUsername returns the current OS username.
 // Checks SUDO_USER env var first when running under sudo.
-func CurrentUsername() string {
+func CurrentUsername() (string, error) {
 	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
-		return sudoUser
+		return sudoUser, nil
 	}
 	u, err := user.Current()
 	if err != nil {
-		return "unknown"
+		return "", fmt.Errorf("cannot determine current username: %w", err)
 	}
-	return u.Username
+	return u.Username, nil
 }
 
 // GetRealUserIDs returns the real (original) user UID and GID.
