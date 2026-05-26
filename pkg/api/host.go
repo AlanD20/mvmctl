@@ -127,15 +127,6 @@ func (o *HostOperation) Init(ctx context.Context, cacheDir string, onProgress fu
 	// Chown cache directory to real user
 	chownToRealUser(cacheDir)
 
-	// --- Extract embedded service binaries (compiled mode only) ---
-	// Python: try: if is_compiled_mode(): BinaryService(bin_repo).extract_service_binaries()
-	//         except Exception: logger.exception("Failed to extract embedded service binaries")
-	if infra.IsCompiledMode() {
-		if err := o.extractServiceBinaries(cacheDir); err != nil {
-			slog.Error("Failed to extract embedded service binaries", "error", err)
-		}
-	}
-
 	// --- Pre-flight probes ---
 	probe := &host.Probe{}
 	probeResult := probe.RunAll()
@@ -218,49 +209,6 @@ func (o *HostOperation) Init(ctx context.Context, cacheDir string, onProgress fu
 			"session_has_group":   ph2.SessionHasGroup(),
 		},
 	}
-}
-
-// extractServiceBinaries extracts embedded service binaries from the combined
-// mvm-services binary. Mirrors Python's BinaryService.extract_service_binaries().
-func (o *HostOperation) extractServiceBinaries(cacheDir string) error {
-	binDir := filepath.Join(cacheDir, "bin")
-	if err := os.MkdirAll(binDir, 0755); err != nil {
-		return fmt.Errorf("failed to create bin directory: %w", err)
-	}
-
-	combinedName := "mvm-services"
-	combinedDest := filepath.Join(binDir, combinedName)
-
-	// Try to find the combined service binary (embedded or dev)
-	combinedSrc := findEmbeddedServiceBinary(combinedName)
-	if combinedSrc == "" {
-		devSrc := filepath.Join("dist", "services", combinedName)
-		if fileExists(devSrc) {
-			combinedSrc = devSrc
-		}
-	}
-
-	if combinedSrc != "" {
-		os.Remove(combinedDest)
-		if err := infra.CopyFile(combinedSrc, combinedDest); err != nil {
-			return fmt.Errorf("failed to copy service binary: %w", err)
-		}
-		_ = makeExecutable(combinedDest)
-		slog.Debug("Extracted combined service binary", "name", combinedName)
-
-		// Create symlinks for each service binary
-		for _, name := range infra.ServiceBinaries {
-			linkPath := filepath.Join(binDir, name)
-			os.Remove(linkPath)
-			if err := os.Symlink(combinedName, linkPath); err != nil {
-				slog.Warn("Failed to create symlink", "name", name, "error", err)
-			}
-		}
-	} else {
-		slog.Debug("Service binary not found, skipping (dev mode)")
-	}
-
-	return nil
 }
 
 func (o *HostOperation) setupHostEnvironment(ctx context.Context, sessionID string) ([]*model.HostStateChangeItem, error) {
@@ -920,42 +868,6 @@ func makeExecutable(path string) error {
 	return os.Chmod(path, newMode)
 }
 
-func findEmbeddedServiceBinary(name string) string {
-	if !infra.IsCompiledMode() {
-		return ""
-	}
-
-	// Strategy 1: Relative to os.Executable() parent / "mvmctl/services/<name>"
-	exe, err := os.Executable()
-	if err == nil {
-		exeDir := filepath.Dir(exe)
-		candidate := filepath.Join(exeDir, "mvmctl", "services", name)
-		if fileExists(candidate) {
-			return candidate
-		}
-	}
-
-	// Strategy 2: Relative to os.Args[0] parent / "mvmctl/services/<name>"
-	if len(os.Args) > 0 {
-		base := filepath.Dir(os.Args[0])
-		candidate := filepath.Join(base, "mvmctl", "services", name)
-		if fileExists(candidate) {
-			return candidate
-		}
-	}
-
-	// Strategy 3: NUITKA_TEMP_DIR environment variable override
-	tempDir := os.Getenv("NUITKA_TEMP_DIR")
-	if tempDir != "" {
-		candidate := filepath.Join(tempDir, "mvmctl", "services", name)
-		if fileExists(candidate) {
-			return candidate
-		}
-	}
-
-	return ""
-}
-
 // ── Host helpers inlined from internal/core/host/_host_info.go ──
 // (Go ignores files starting with _, so these were never compiled into the host package.)
 
@@ -1124,10 +1036,10 @@ func hostInfoToDict(hi *model.HostInfo) map[string]interface{} {
 			"minimum_version_met": hi.Limits.KernelMinimumMet,
 		},
 		"limits": map[string]interface{}{
-			"pid_max":          hi.Limits.PIDMax,
-			"fd_max":           hi.Limits.FDMax,
-			"conntrack_max":    hi.Limits.ConntrackMax,
-			"tap_devices_max":  hi.Limits.TAPDevicesMax,
+			"pid_max":             hi.Limits.PIDMax,
+			"fd_max":              hi.Limits.FDMax,
+			"conntrack_max":       hi.Limits.ConntrackMax,
+			"tap_devices_max":     hi.Limits.TAPDevicesMax,
 			"ip_local_port_range": []int{hi.Limits.IPLocalPortRange[0], hi.Limits.IPLocalPortRange[1]},
 		},
 		"capacity": map[string]interface{}{

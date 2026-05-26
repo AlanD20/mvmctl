@@ -2,24 +2,31 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"mvmctl/internal/app"
+	"mvmctl/internal/service/console"
+	"mvmctl/internal/service/loopmount"
 	"mvmctl/internal/service/nocloudnet"
 )
 
 func main() {
-	// Hidden subcommand for nocloud server (spawned as standalone process)
-	if len(os.Args) > 1 && os.Args[1] == "_nocloud_serve" {
-		nocloudnet.ServeNoCloudHTTP(os.Args[2:])
-		return
-	}
-
-	// Hidden subcommand for loop-mount provisioning (invoked via sudo)
-	if len(os.Args) > 1 && os.Args[1] == "_provision" {
-		runProvision(os.Args[2:])
+	// "mvm run <service>" dispatches to subprocess or in-process services.
+	if len(os.Args) > 2 && os.Args[1] == "run" {
+		switch os.Args[2] {
+		case "nocloud-serve":
+			nocloudnet.ServeNoCloudHTTP(os.Args[3:])
+		case "console-relay":
+			console.RunRelaySubprocess(os.Args[3:])
+		case "provision":
+			loopmount.RunProvision(os.Args[3:])
+		default:
+			fmt.Fprintf(os.Stderr, "Unknown service: %s\n", os.Args[2])
+			os.Exit(1)
+		}
 		return
 	}
 

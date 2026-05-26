@@ -115,13 +115,6 @@ func (o *CacheOperation) InitAll(ctx context.Context, onProgress func(errs.Progr
 		created = append(created, dir)
 	}
 
-	// Extract embedded service binaries (Python: BinaryService(...).extract_service_binaries())
-	if o.binSvc != nil {
-		if _, err := o.binSvc.ExtractServiceBinaries(ctx); err != nil {
-			slog.Warn("Failed to extract service binaries", "error", err)
-		}
-	}
-
 	// Check whether guestfs was enabled by the user (Python: SettingsService.resolve(db, "settings", "guestfs_enabled"))
 	// Python: try: guestfs_enabled = bool(SettingsService.resolve(db, "settings", "guestfs_enabled"))
 	//         except Exception: pass

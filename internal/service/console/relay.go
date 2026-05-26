@@ -832,3 +832,134 @@ func InteractiveAttach(ctx context.Context, socketPath string, stdin io.Reader, 
 		}
 	}
 }
+
+// RunRelaySubprocess is the entry point for the console relay subprocess.
+// Called from "mvm run console-relay". Parses args, opens the inherited PTY FD,
+// writes PID file, and runs the relay loop (blocking).
+func RunRelaySubprocess(args []string) {
+	var vmID, vmPath, vmName string
+	var ptyFD int
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--vm-id":
+			if i+1 < len(args) { vmID = args[i+1]; i++ }
+		case "--vm-path":
+			if i+1 < len(args) { vmPath = args[i+1]; i++ }
+		case "--vm-name":
+			if i+1 < len(args) { vmName = args[i+1]; i++ }
+		case "--pty-fd":
+			if i+1 < len(args) { ptyFD, _ = strconv.Atoi(args[i+1]); i++ }
+		}
+	}
+
+	if vmID == "" || vmPath == "" || ptyFD == 0 {
+		fmt.Fprintf(os.Stderr, "Error: Missing required arguments for console relay. Usage: ...\n")
+		os.Exit(1)
+	}
+
+	rm := NewRelayManager(vmID, vmPath, vmName, "", "", "")
+
+	// Write PID file with our own PID (subprocess PID, not parent)
+	if err := os.MkdirAll(filepath.Dir(rm.pidPath), 0755); err == nil {
+		_ = os.WriteFile(rm.pidPath, []byte(strconv.Itoa(os.Getpid())), 0644)
+	}
+
+	// Open the PTY FD inherited from parent (passed as ExtraFiles[0] = FD 3)
+	ptyFile := os.NewFile(uintptr(ptyFD), "pty")
+	if ptyFile == nil {
+		fmt.Fprintf(os.Stderr, "Error: Invalid PTY FD %d\n", ptyFD)
+		os.Exit(1)
+	}
+	defer ptyFile.Close()
+
+	rm.mu.Lock()
+	rm.relayPid = os.Getpid()
+	rm.mu.Unlock()
+
+	// Run relay loop synchronously (blocking)
+	rm.runSubprocessRelay(ptyFile)
+}
+
+// runSubprocessRelay runs the relay loop in the current goroutine.
+// This is the subprocess version — blocking, no context cancellation.
+func (rm *RelayManager) runSubprocessRelay(ptyFile *os.File) {
+	// Create log file
+	logFile, err := os.OpenFile(rm.logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating log file: %v\n", err)
+		os.Exit(1)
+	}
+	defer logFile.Close()
+
+	// Wait for client connection on Unix socket
+	listener, err := net.Listen("unix", rm.socketPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error listening on socket %s: %v\n", rm.socketPath, err)
+		os.Exit(1)
+	}
+	defer listener.Close()
+
+	conn, err := listener.Accept()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error accepting connection: %v\n", err)
+		os.Exit(1)
+	}
+	defer conn.Close()
+
+	// Notify parent that socket is ready
+	fmt.Fprintf(os.Stdout, "ready\n")
+
+	// Relay loop: PTY → log + socket, socket → PTY
+	// Matches internal/relayLoop but for subprocess
+	relayLoopImpl(ptyFile, logFile, conn, conn)
+}
+
+// relayLoopImpl implements the core PTY relay logic.
+// Reads from PTY, writes to log and client. Reads from client, writes to PTY.
+func relayLoopImpl(pty io.ReadWriteCloser, logFile io.Writer, client io.ReadWriteCloser, clientReader io.Reader) {
+	// PTY → client + log (goroutine)
+	ptyCh := make(chan []byte, 256)
+	go func() {
+		defer close(ptyCh)
+		buf := make([]byte, 4096)
+		for {
+			n, err := pty.Read(buf)
+			if n > 0 {
+				data := make([]byte, n)
+				copy(data, buf[:n])
+				ptyCh <- data
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	// Client → PTY (main loop)
+	inputBuf := make([]byte, 4096)
+	for {
+		select {
+		case data, ok := <-ptyCh:
+			if !ok {
+				return
+			}
+			logFile.Write(data)
+			client.Write(data)
+		default:
+			n, err := clientReader.Read(inputBuf)
+			if n > 0 {
+				data := inputBuf[:n]
+				// Check for detach sequence Ctrl+X d
+				if len(data) == 2 && data[0] == 0x18 && data[1] == 'd' {
+					return
+				}
+				pty.Write(data)
+			}
+			if err != nil {
+				return
+			}
+		}
+	}
+}
+

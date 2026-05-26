@@ -455,11 +455,6 @@ const FirecrackerGithubReleasesAPIURL = "https://api.github.com/repos/firecracke
 const FirecrackerGithubDownloadURL = "https://github.com/firecracker-microvm/firecracker/releases/download"
 const FirecrackerGitRepoURL = "https://github.com/firecracker-microvm/firecracker.git"
 
-// ── Supported service binaries ──
-var ServiceBinaries = []string{
-	"mvm-provision",
-}
-
 // ── Privileged system binaries ──
 var PrivilegedBinaries = map[string]string{
 	"/usr/sbin/ip":              "iproute2",
@@ -469,11 +464,6 @@ var PrivilegedBinaries = map[string]string{
 	"/usr/sbin/nft":             "nftables",
 	"/usr/sbin/sysctl":          "procps",
 	"/usr/sbin/modprobe":        "kmod",
-}
-
-// ── Privileged service binaries ──
-var PrivilegedServiceBinaries = []string{
-	"mvm-provision",
 }
 
 // ── Init binaries ──
