@@ -172,6 +172,12 @@ func (r *Resolver) GetDefault(ctx context.Context, name string) (*model.BinaryIt
 
 // Resolve resolves a binary by ID prefix or name (latest version).
 func (r *Resolver) Resolve(ctx context.Context, value string) (*model.BinaryItem, error) {
+	// Try "name:version" selector format first
+	name, ver := version.ParseSelector(value)
+	if name != "" && ver != "" {
+		return r.ByNameVersion(ctx, name, ver)
+	}
+
 	// Try by ID first
 	b, err := r.ByID(ctx, value)
 	if err == nil {
@@ -187,6 +193,7 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.BinaryItem
 
 // ResolveMany resolves multiple binary identifiers.
 func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *ResolveResult {
+	// Dedup input identifiers (e.g. duplicate CLI args) before processing.
 	uniqueIDs := infra.Dedup(identifiers)
 
 	var items []*model.BinaryItem
@@ -206,6 +213,9 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *Resol
 				}
 			}
 		} else if item != nil && !resolvedIDs[item.ID] {
+			// Dedup by DB record ID — different input identifiers may
+			// resolve to the same DB record (e.g. "firecracker" and
+			// "firecracker:1.15" when only v1.15 exists).
 			resolvedIDs[item.ID] = true
 			items = append(items, item)
 		}

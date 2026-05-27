@@ -33,6 +33,10 @@ var validSSHUsernameRegex = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
 // ── MAC address strict regex ──
 var validMACRegex = regexp.MustCompile(`^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$`)
 
+// ValidSemverRegex matches semver-like version strings (e.g. "1.15" or "1.15.0").
+// Used for version format validation across domains.
+var ValidSemverRegex = regexp.MustCompile(`^\d+\.\d+(\.\d+)?$`)
+
 // Linux IFNAMSIZ limit for interface names
 const ifnamSiz = 15
 

@@ -52,6 +52,7 @@ Changes made during the architectural grilling (2026-05-22):
 | 39 | Mixin classes | No mixins or OOP inheritance mimicry. Composition (struct fields) + shared package-level functions. Never embed types to simulate inheritance. |
 | 40 | `@lru_cache` caching | **Abolished.** Python's `@lru_cache` on methods (template loading, kernel config, detector scoring) uses `sync.Once` in Go for single-computation patterns, or is simply removed where Go recomputes fast enough without caching. No `lru_cache` equivalent pattern — Go doesn't need it for these use cases. |
 | 41 | **No implicit defaults** | Values MUST be passed explicitly by the caller. No fallback logic, no "if empty then guess" patterns. `if x == "" { x = default }` is banned unless explicitly approved via ADR. Python's `os.environ.get("VAR", "default")` must be resolved at the caller level and passed down. Constructors (New) take concrete values, not config structs with optional fields that have fallback logic. |
+| 42 | **Domain `utils.go` for helpers** | Domain-specific utility functions that don't reference the `Service` struct or repository must live in `utils.go` within the domain package — NOT in `service.go`. This keeps `service.go` focused on orchestration methods and improves discoverability. Pattern: `service.go` = Service struct + orchestration methods, `utils.go` = pure functions, types, constants, error constructors. |
 
 ---
 

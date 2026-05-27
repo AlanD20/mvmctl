@@ -104,3 +104,5 @@ all 39 architectural verdicts. This is the single source of truth.
     - If a caller knows a value (path, config, etc.), pass it directly. Don't make the callee re-derive it.
 
 20. **`any` over `interface{}`** — Use `any` (Go 1.18+ alias) instead of `interface{}` everywhere. `interface{}` is banned in new code. Existing `interface{}` should be replaced when touched.
+
+21. **Domain `utils.go` for helpers** — Domain-specific utility functions that don't reference the `Service` struct or repository must live in `utils.go` within the domain package — NOT in `service.go`. This keeps `service.go` focused on orchestration methods and improves discoverability.
