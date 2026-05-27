@@ -48,7 +48,7 @@ func NewBinaryOperation(svc *binary.Service, vmRepo vm.Repository, cacheDir stri
 
 // Prune prunes unused binaries.
 // Matches Python's BinaryOperation.prune() exactly.
-func (o *BinaryOperation) Prune(ctx context.Context, dryRun bool, includeAll bool) *errs.OperationResult {
+func (o *BinaryOperation) Prune(ctx context.Context, dryRun bool, force bool) *errs.OperationResult {
 	allBinaries, err := o.repo.ListAll(ctx)
 	if err != nil {
 		return &errs.OperationResult{
@@ -65,17 +65,16 @@ func (o *BinaryOperation) Prune(ctx context.Context, dryRun bool, includeAll boo
 		defaultVersion = defaultBinary.Version
 	}
 
-	removed := make([]string, 0)
+	var removed []string
 	for _, bin := range allBinaries {
-		if !includeAll {
+		if !force {
 			if bin.Version == defaultVersion {
 				continue
 			}
 		}
 
 		if !dryRun {
-			// Match Python: BinaryOperation.remove(BinaryInput(identifiers=[binary.id]), force=include_all)
-			removeResult := o.Remove(ctx, &inputs.BinaryInput{Identifiers: []string{bin.ID}}, includeAll)
+			removeResult := o.Remove(ctx, &inputs.BinaryInput{Identifiers: []string{bin.ID}}, force)
 			if removeResult.HasErrors() {
 				slog.Warn("Failed to remove binary",
 					"name", bin.Name, "version", bin.Version, "error", removeResult.Errors()[0].Message)
@@ -112,7 +111,7 @@ func (o *BinaryOperation) Pull(ctx context.Context, input *inputs.BinaryPullInpu
 	// ---- Git build path (parallel to release download) ----
 	if resolved.GitRef != nil && *resolved.GitRef != "" {
 		// Python passes bin_dir=resolved.bin_dir to BinaryService.build_from_source()
-		binaries, err := o.svc.BuildFromSource(ctx, *resolved.GitRef, resolved.BinDir)
+		binaries, err := o.svc.BuildFromSource(ctx, *resolved.GitRef)
 		if err != nil {
 			return &errs.OperationResult{
 				Status:    "error",
@@ -191,9 +190,10 @@ func (o *BinaryOperation) Pull(ctx context.Context, input *inputs.BinaryPullInpu
 
 	// arch maps the current architecture to Firecracker's naming convention.
 	arch := system.RuntimeArch()
-	
-	// Python passes bin_dir=resolved.bin_dir to BinaryService.download_firecracker()
-	binaries, err := o.svc.DownloadFirecracker(ctx, resolvedVersion, resolved.BinDir, arch)
+
+	// Python passes bin_dir=resolved.bin_dir to BinaryService.download_firecracker();
+	// Go uses s.binDir from the Service struct (same value).
+	binaries, err := o.svc.DownloadFirecracker(ctx, resolvedVersion, arch, nil)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",

@@ -181,13 +181,12 @@ func newBinaryPullCmd(binaryAPI *api.BinaryOperation) *cobra.Command {
 				cli.Info("  The build output will appear below once it starts:\n")
 
 			gitRefPtr := &gitRef
-			dwldOverride := false
 			result := binaryAPI.Pull(cmd.Context(), &inputs.BinaryPullInput{
 				Version:          "",
 				Name:             name,
 				GitRef:           gitRefPtr,
 				SetDefault:       setDefault,
-				DownloadOverride: &dwldOverride,
+				DownloadOverride: false,
 			})
 				if result.Status == "error" {
 					cli.Error(result.Message)
@@ -217,7 +216,7 @@ func newBinaryPullCmd(binaryAPI *api.BinaryOperation) *cobra.Command {
 				Version:          ver,
 				Name:             name,
 				SetDefault:       setDefault,
-				DownloadOverride: &dwldOverride,
+				DownloadOverride: dwldOverride,
 			})
 
 			// If binary already exists and --force wasn't set, offer to re-download
@@ -248,13 +247,12 @@ func newBinaryPullCmd(binaryAPI *api.BinaryOperation) *cobra.Command {
 					}
 				}
 				if confirmed {
-					overrideTrue := true
 				result = binaryAPI.Pull(cmd.Context(), &inputs.BinaryPullInput{
-						Version:          ver,
-						Name:             name,
-						SetDefault:       setDefault,
-						DownloadOverride: &overrideTrue,
-					})
+					Version:          ver,
+					Name:             name,
+					SetDefault:       setDefault,
+					DownloadOverride: true,
+				})
 				} else {
 					cli.Info("Aborted")
 					return nil
