@@ -1024,7 +1024,7 @@ func (s *Service) DownloadKernelSource(ctx context.Context, url, dest string, sh
 	if sha256 != "" {
 		return s.dl.DownloadFile(ctx, url, dest, sha256, false, false, nil)
 	}
-	return s.dl.Download(ctx, url, dest)
+	return s.dl.DownloadFile(ctx, url, dest, "", true, true, nil)
 }
 
 // ExtractKernelTarball extracts a kernel tarball (tar.xz) and returns the extracted directory.

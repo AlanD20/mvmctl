@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/user"
+	"runtime"
 	"strconv"
 )
 
@@ -63,4 +64,18 @@ func TruncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen]
+}
+
+// RuntimeArch returns the CPU architecture using Firecracker's naming convention.
+// Maps Go's runtime.GOARCH ("amd64", "arm64") to the names used in Firecracker
+// release tarballs ("x86_64", "aarch64"). Returns GOARCH directly for other values.
+func RuntimeArch() string {
+	switch runtime.GOARCH {
+	case "amd64":
+		return "x86_64"
+	case "arm64":
+		return "aarch64"
+	default:
+		return runtime.GOARCH
+	}
 }
