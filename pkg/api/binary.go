@@ -17,6 +17,7 @@ import (
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
+	"mvmctl/internal/infra/system"
 	"mvmctl/internal/infra/version"
 	"mvmctl/pkg/api/inputs"
 )
@@ -188,8 +189,11 @@ func (o *BinaryOperation) Pull(ctx context.Context, input *inputs.BinaryPullInpu
 	noDefault, _ := o.repo.GetDefault(ctx, "firecracker")
 	shouldSetDefault := resolved.SetDefault || noDefault == nil
 
+	// arch maps the current architecture to Firecracker's naming convention.
+	arch := system.RuntimeArch()
+	
 	// Python passes bin_dir=resolved.bin_dir to BinaryService.download_firecracker()
-	binaries, err := o.svc.DownloadFirecracker(ctx, resolvedVersion, resolved.BinDir)
+	binaries, err := o.svc.DownloadFirecracker(ctx, resolvedVersion, resolved.BinDir, arch)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",

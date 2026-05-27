@@ -21,7 +21,7 @@ import (
 	"mvmctl/internal/infra/errs"
 )
 
-// ── HttpCache (file-based HTTP response cache) ─────────────────────────────
+// ── HttpDiskCache (file-based HTTP response cache) ──────────────────────────
 
 // DefaultCacheTTLSeconds is the default TTL for cached HTTP responses (300s).
 // Mirrors Python's DEFAULT_CACHE_TTL_SECONDS: int = 300.
@@ -31,37 +31,32 @@ const DefaultCacheTTLSeconds = 300
 // Mirrors Python's DEFAULT_CACHE_DIR = "http".
 const DefaultCacheDir = "http"
 
-// HttpCache provides file-based caching for small remote HTTP resources.
+// HttpDiskCache provides file-based caching for small remote HTTP resources.
 // Mirrors Python's HttpCache class in utils/http.py.
 //
 // Python uses all @staticmethod methods with no instance state. Go mirrors
 // this with a stateless struct and separate functions.
-type HttpCache struct{}
+type HttpDiskCache struct{}
 
-// NewHttpCache creates a new HttpCache. No state is maintained (matching
-// Python's all-staticmethod design).
-func NewHttpCache() *HttpCache {
-	return &HttpCache{}
+// NewHttpDiskCache creates a new HttpDiskCache. No state is maintained.
+func NewHttpDiskCache() *HttpDiskCache {
+	return &HttpDiskCache{}
 }
 
-// cacheKey returns the SHA256 hex digest of the URL for use as a cache key.
-// Mirrors Python's HttpCache._cache_key().
-func cacheKey(url string) string {
+// key returns the SHA256 hex digest of the URL for use as a cache key.
+func (c *HttpDiskCache) key(url string) string {
 	h := sha256.Sum256([]byte(url))
 	return hex.EncodeToString(h[:])
 }
 
-// cachePath returns the filesystem path for a cached URL.
-// Mirrors Python's HttpCache._cache_path() which uses
-// CacheUtils.get_temp_dir() / DEFAULT_CACHE_DIR / _cache_key(url).
-func cachePath(url string) string {
+// Path returns the filesystem path for a cached URL.
+func (c *HttpDiskCache) Path(url string) string {
 	cacheDir := filepath.Join(infra.GetTempDir(), DefaultCacheDir)
-	return filepath.Join(cacheDir, cacheKey(url))
+	return filepath.Join(cacheDir, c.key(url))
 }
 
 // IsValid returns true if the cached file exists and is younger than ttlSeconds.
-// Mirrors Python's HttpCache.is_valid().
-func (c *HttpCache) IsValid(cachePath string, ttlSeconds int) bool {
+func (c *HttpDiskCache) IsValid(cachePath string, ttlSeconds int) bool {
 	info, err := os.Stat(cachePath)
 	if err != nil {
 		return false
@@ -71,20 +66,12 @@ func (c *HttpCache) IsValid(cachePath string, ttlSeconds int) bool {
 }
 
 // Read reads the full contents of a cached file.
-// Mirrors Python's HttpCache.read().
-func (c *HttpCache) Read(cachePath string) ([]byte, error) {
+func (c *HttpDiskCache) Read(cachePath string) ([]byte, error) {
 	return os.ReadFile(cachePath)
 }
 
 // Write atomically writes data to the cache using tempfile + rename.
-// Mirrors Python's HttpCache.write() which uses:
-//
-//	fd, temp_path = tempfile.mkstemp(
-//	    dir=cache_path.parent,
-//	    prefix=f"{cache_path.stem}-",
-//	    suffix=".tmp",
-//	)
-func (c *HttpCache) Write(data []byte, cachePath string) error {
+func (c *HttpDiskCache) Write(data []byte, cachePath string) error {
 	dir := filepath.Dir(cachePath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("create cache dir: %w", err)
@@ -118,7 +105,7 @@ func (c *HttpCache) Write(data []byte, cachePath string) error {
 // UserAgent is the HTTP User-Agent header value.
 // Defaults to "mvmctl/dev". Set via SetUserAgent at startup.
 // Mirrors Python's HTTP_USER_AGENT constant.
-var UserAgent = "mvmctl/dev"
+var UserAgent = infra.DefaultUserAgent
 
 // SetUserAgent sets the User-Agent header value.
 // Called at startup by the application to set the dynamic version.
@@ -152,7 +139,7 @@ type Downloader struct {
 	retries int
 	delay   time.Duration
 	backoff float64
-	cache   *HttpCache
+	cache   *HttpDiskCache
 
 	// ConfirmFn is an optional callback for user-facing confirmation prompts.
 	// When set, it is called instead of directly interacting with the terminal.
@@ -172,20 +159,14 @@ func New() *Downloader {
 		retries: infra.HTTPMaxRetries,
 		delay:   infra.HTTPRetryDelay,
 		backoff: infra.HTTPBackoffFactor,
-		cache:   NewHttpCache(),
+		cache:   NewHttpDiskCache(),
 	}
 }
 
-// WithCache sets a custom HttpCache on the Downloader.
-func (d *Downloader) WithCache(c *HttpCache) *Downloader {
+// WithCache sets a custom HttpDiskCache on the Downloader.
+func (d *Downloader) WithCache(c *HttpDiskCache) *Downloader {
 	d.cache = c
 	return d
-}
-
-// urlopen performs an HTTP request and returns the response.
-// Mirrors Python's HttpDownload._urlopen() which uses a shared opener.
-func (d *Downloader) urlopen(req *http.Request) (*http.Response, error) {
-	return d.client.Do(req)
 }
 
 // newRequest creates an HTTP request with the dynamic User-Agent header.
@@ -196,15 +177,6 @@ func (d *Downloader) newRequest(ctx context.Context, method, urlStr string, body
 	}
 	req.Header.Set("User-Agent", UserAgent)
 	return req, nil
-}
-
-// parseContentLength parses Content-Length from an HTTP response.
-// Returns -1 when unknown (matching Python's int | None → -1 for None).
-func parseContentLength(resp *http.Response) int64 {
-	if resp == nil {
-		return -1
-	}
-	return resp.ContentLength // Go returns -1 when unknown
 }
 
 // ── Pure transport: with_download (no checksum) ───────────────────────────
@@ -246,7 +218,7 @@ func (d *Downloader) withDownloadOnce(
 		return 0, fmt.Errorf("create request: %w", err)
 	}
 
-	resp, err := d.urlopen(req)
+	resp, err := d.client.Do(req)
 	if err != nil {
 		return 0, &urlpkg.Error{Op: "GET", URL: url, Err: err}
 	}
@@ -256,10 +228,7 @@ func (d *Downloader) withDownloadOnce(
 		return 0, HttpError{StatusCode: resp.StatusCode, URL: url}
 	}
 
-	totalSize := parseContentLength(resp)
-	if totalSize < 0 {
-		totalSize = -1
-	}
+	totalSize := resp.ContentLength
 
 	// Create temp file for atomic write
 	tmpFile, err := os.CreateTemp(filepath.Dir(dest), "*.tmp")
@@ -459,7 +428,7 @@ func (d *Downloader) DownloadFile(
 	mirrorPath, found := resolveMirrorPath(url)
 	if found {
 		slog.Info("Using local mirror for download", "url", url)
-		if err := copy2File(mirrorPath, dest); err != nil {
+		if err := infra.CopyPreservingMetadata(mirrorPath, dest); err != nil {
 			return fmt.Errorf("copy from mirror: %w", err)
 		}
 		if expectedSHA256 != "" {
@@ -565,42 +534,11 @@ func autoPopulateMirror(url, srcPath string) {
 		slog.Warn("Failed to create asset mirror dir", "error", err)
 		return
 	}
-	if err := copy2File(srcPath, mirrorDest); err != nil {
+	if err := infra.CopyPreservingMetadata(srcPath, mirrorDest); err != nil {
 		slog.Warn("Failed to copy to asset mirror", "path", mirrorDest, "error", err)
 		return
 	}
 	slog.Info("Copied to asset mirror", "path", mirrorDest)
-}
-
-// copy2File copies a file preserving metadata (timestamps), matching Python's shutil.copy2().
-func copy2File(src, dst string) error {
-	s, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("open source: %w", err)
-	}
-	defer s.Close()
-
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-		return fmt.Errorf("create dest dir: %w", err)
-	}
-
-	dstFile, err := os.Create(dst)
-	if err != nil {
-		return fmt.Errorf("create dest: %w", err)
-	}
-	defer dstFile.Close()
-
-	if _, err := io.Copy(dstFile, s); err != nil {
-		return fmt.Errorf("copy: %w", err)
-	}
-
-	srcInfo, err := os.Stat(src)
-	if err == nil {
-		if chErr := os.Chtimes(dst, srcInfo.ModTime(), srcInfo.ModTime()); chErr != nil {
-			slog.Warn("Failed to preserve timestamps in mirror copy", "error", chErr)
-		}
-	}
-	return nil
 }
 
 // ── GetJSON (read_json_content) ─────────────────────────────────────────
@@ -618,14 +556,14 @@ func (d *Downloader) GetJSON(
 	headers map[string]string,
 	useCache bool,
 	cacheTTLSeconds int,
-) (interface{}, error) {
-	cacheFile := cachePath(url)
+) (any, error) {
+	cacheFile := d.cache.Path(url)
 
 	if useCache && d.cache != nil {
 		if d.cache.IsValid(cacheFile, cacheTTLSeconds) {
 			data, err := d.cache.Read(cacheFile)
 			if err == nil {
-				var result interface{}
+				var result any
 				if jsonErr := json.Unmarshal(data, &result); jsonErr == nil {
 					return result, nil
 				}
@@ -648,11 +586,12 @@ func (d *Downloader) GetJSON(
 		req.Header.Set(k, v)
 	}
 
-	resp, err := d.urlopen(req)
+	resp, err := d.client.Do(req)
 	if err != nil {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeDownloadFailed,
 			Message: fmt.Sprintf("Failed to fetch %s: %v", url, err),
+			Err:     err,
 		}
 	}
 	defer resp.Body.Close()
@@ -669,14 +608,16 @@ func (d *Downloader) GetJSON(
 		return nil, &errs.DomainError{
 			Code:    errs.CodeDownloadFailed,
 			Message: fmt.Sprintf("Failed to fetch %s: %v", url, err),
+			Err:     err,
 		}
 	}
 
-	var parsed interface{}
+	var parsed any
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeDownloadFailed,
 			Message: fmt.Sprintf("Failed to parse JSON from %s: %v", url, err),
+			Err:     err,
 		}
 	}
 
@@ -701,7 +642,7 @@ func (d *Downloader) GetRaw(
 	useCache bool,
 	cacheTTLSeconds int,
 ) (string, error) {
-	cacheFile := cachePath(url)
+	cacheFile := d.cache.Path(url)
 
 	if useCache && d.cache != nil {
 		if d.cache.IsValid(cacheFile, cacheTTLSeconds) {
@@ -727,11 +668,12 @@ func (d *Downloader) GetRaw(
 		req.Header.Set(k, v)
 	}
 
-	resp, err := d.urlopen(req)
+	resp, err := d.client.Do(req)
 	if err != nil {
 		return "", &errs.DomainError{
 			Code:    errs.CodeDownloadFailed,
 			Message: fmt.Sprintf("Failed to fetch %s: %v", url, err),
+			Err:     err,
 		}
 	}
 	defer resp.Body.Close()
@@ -748,6 +690,7 @@ func (d *Downloader) GetRaw(
 		return "", &errs.DomainError{
 			Code:    errs.CodeDownloadFailed,
 			Message: fmt.Sprintf("Failed to fetch %s: %v", url, err),
+			Err:     err,
 		}
 	}
 
@@ -772,7 +715,7 @@ func (d *Downloader) HeadSize(
 	useCache bool,
 	cacheTTLSeconds int,
 ) (size int64, ok bool) {
-	cacheFile := cachePath(url)
+	cacheFile := d.cache.Path(url)
 
 	if useCache && d.cache != nil {
 		if d.cache.IsValid(cacheFile, cacheTTLSeconds) {
@@ -791,7 +734,7 @@ func (d *Downloader) HeadSize(
 		return 0, false
 	}
 
-	resp, err := d.urlopen(req)
+	resp, err := d.client.Do(req)
 	if err != nil {
 		return 0, false
 	}
@@ -826,11 +769,12 @@ func (d *Downloader) GetBody(ctx context.Context, url string) ([]byte, error) {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	resp, err := d.urlopen(req)
+	resp, err := d.client.Do(req)
 	if err != nil {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeDownloadFailed,
 			Message: fmt.Sprintf("Failed to fetch %s: %v", url, err),
+			Err:     err,
 		}
 	}
 	defer resp.Body.Close()
@@ -847,16 +791,9 @@ func (d *Downloader) GetBody(ctx context.Context, url string) ([]byte, error) {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeDownloadFailed,
 			Message: fmt.Sprintf("Failed to fetch %s: %v", url, err),
+			Err:     err,
 		}
 	}
 
 	return data, nil
-}
-
-// ── Download (simple wrapper) ────────────────────────────────────────────
-
-// Download downloads a file from url to destPath with retry.
-// Mirrors Python's HttpDownload.download_file() basic usage.
-func (d *Downloader) Download(ctx context.Context, url, destPath string) error {
-	return d.DownloadFile(ctx, url, destPath, "", true, true, nil)
 }

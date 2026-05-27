@@ -169,11 +169,13 @@ const ExecutablePerm = 0755
 const ShadowPerm = 0640
 
 // ── HTTP defaults ──
+
 const HTTPTimeout = 300 * time.Second
 const HTTPChunkSize = 1 << 20 // 1 MiB
 const HTTPMaxRetries = 3
 const HTTPRetryDelay = 1 * time.Second
 const HTTPBackoffFactor = 2
+const DefaultUserAgent = "mvm/dev"
 const SocketTimeoutSeconds = 5.0
 const PollStepSeconds = 0.1
 

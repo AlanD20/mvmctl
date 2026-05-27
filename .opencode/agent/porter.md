@@ -102,3 +102,5 @@ all 39 architectural verdicts. This is the single source of truth.
     - Functions that rediscover information the caller already has and passed in (`PRAGMA database_list` instead of accepting `dbPath`).
     - Thin wrappers that add no abstraction value over the function they call.
     - If a caller knows a value (path, config, etc.), pass it directly. Don't make the callee re-derive it.
+
+20. **`any` over `interface{}`** — Use `any` (Go 1.18+ alias) instead of `interface{}` everywhere. `interface{}` is banned in new code. Existing `interface{}` should be replaced when touched.

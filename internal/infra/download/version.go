@@ -16,6 +16,12 @@ import (
 	"mvmctl/internal/infra/version"
 )
 
+// dirHrefRegex matches href="<dir>/" in Apache HTML directory listings.
+var dirHrefRegex = regexp.MustCompile(`href="([^"]+)/"`)
+
+// allHrefRegex matches any href="..." attribute in HTML.
+var allHrefRegex = regexp.MustCompile(`href="([^"]+)"`)
+
 // ── HttpDirVersionResolver ─────────────────────────────────────────────────
 
 // HttpDirVersionResolver resolves available versions from Apache HTML directory
@@ -28,7 +34,7 @@ import (
 //   - "" or nil (single-source) — single "latest" version from URL templates
 type HttpDirVersionResolver struct {
 	client  *http.Client
-	cache   *HttpCache
+	cache   *HttpDiskCache
 }
 
 // NewHttpDirVersionResolver creates a new HttpDirVersionResolver with default
@@ -38,7 +44,7 @@ func NewHttpDirVersionResolver() *HttpDirVersionResolver {
 		client: &http.Client{
 			Timeout: infra.HTTPTimeout,
 		},
-		cache: NewHttpCache(),
+		cache: NewHttpDiskCache(),
 	}
 }
 
@@ -76,8 +82,7 @@ func resolveVersion(dirName string, skipPatterns []string, versionPrefix string,
 // parseDirectoryListing extracts directory names from Apache HTML directory listing.
 // Mirrors Python's _parse_directory_listing().
 func parseDirectoryListing(html string) []string {
-	re := regexp.MustCompile(`href="([^"]+)/"`)
-	matches := re.FindAllStringSubmatch(html, -1)
+	matches := dirHrefRegex.FindAllStringSubmatch(html, -1)
 	dirs := make([]string, 0, len(matches))
 	for _, m := range matches {
 		dirs = append(dirs, m[1])
@@ -136,8 +141,7 @@ func (r *HttpDirVersionResolver) discoverFileFromListing(ctx context.Context, ur
 
 // extractAllHrefs extracts all href attribute values from HTML.
 func extractAllHrefs(html string) []string {
-	re := regexp.MustCompile(`href="([^"]+)"`)
-	matches := re.FindAllStringSubmatch(html, -1)
+	matches := allHrefRegex.FindAllStringSubmatch(html, -1)
 	var links []string
 	for _, m := range matches {
 		links = append(links, m[1])
@@ -148,7 +152,7 @@ func extractAllHrefs(html string) []string {
 // fetchRawContent fetches a URL's content with optional caching.
 func (r *HttpDirVersionResolver) fetchRawContent(ctx context.Context, url string, useCache bool, ttl int) (string, error) {
 	if useCache && r.cache != nil {
-		cacheFile := cachePath(url)
+		cacheFile := r.cache.Path(url)
 		if r.cache.IsValid(cacheFile, ttl) {
 			data, err := r.cache.Read(cacheFile)
 			if err == nil {
@@ -179,7 +183,7 @@ func (r *HttpDirVersionResolver) fetchRawContent(ctx context.Context, url string
 	}
 
 	if useCache && r.cache != nil {
-		cacheFile := cachePath(url)
+		cacheFile := r.cache.Path(url)
 		if writeErr := r.cache.Write(body, cacheFile); writeErr != nil {
 			slog.Warn("Failed to cache content", "error", writeErr)
 		}

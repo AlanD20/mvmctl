@@ -24,12 +24,8 @@ import (
 )
 
 const (
-	defaultArch = "x86_64"
-	chunkSize   = 512 * 1024 // CONST_MIN_BINARY_SIZE_BYTES * CONST_BUFFER_SIZE_BYTES = 512 * 1024
+	chunkSize = 512 * 1024 // CONST_MIN_BINARY_SIZE_BYTES * CONST_BUFFER_SIZE_BYTES = 512 * 1024
 )
-
-// mvmctlVersion is overridden at build time via -ldflags.
-var mvmctlVersion = "0.0.0"
 
 // Service is the stateless intra-domain orchestrator for binary operations.
 // Mirrors Python mvmctl.core.binary._service.BinaryService exactly.
@@ -62,18 +58,15 @@ func (s *Service) ListAll(ctx context.Context, remote bool, verify bool) ([]*mod
 	}
 
 	var missingIDs []string
-	for _, b := range binaries {
-		if _, err := os.Stat(b.Path); os.IsNotExist(err) {
-			missingIDs = append(missingIDs, b.ID)
+	for i := range binaries {
+		if _, err := os.Stat(binaries[i].Path); os.IsNotExist(err) {
+			missingIDs = append(missingIDs, binaries[i].ID)
+			binaries[i].IsPresent = false
 		}
 	}
 
 	if len(missingIDs) > 0 {
 		if err := s.repo.UpdateManyIsPresent(ctx, missingIDs, false); err != nil {
-			return nil, err
-		}
-		binaries, err = s.repo.ListAll(ctx)
-		if err != nil {
 			return nil, err
 		}
 	}
@@ -127,22 +120,24 @@ func (s *Service) ListRemote(ctx context.Context, limit int) ([]string, error) {
 // mapGitHubAPIError converts an error from the GitHub API into the Python-matching
 // BinaryError with the same message wording.
 func mapGitHubAPIError(err error) error {
-	errMsg := err.Error()
-	if strings.Contains(errMsg, "403") && strings.Contains(strings.ToLower(errMsg), "rate limit") {
-		return binaryError(errs.CodeDownloadFailed,
-			"Failed to fetch Firecracker releases from GitHub: "+
-				"rate limit exceeded (HTTP 403). "+
-				"Either wait for the rate limit to reset, or set a "+
-				"GitHub token via the GITHUB_TOKEN environment variable "+
-				"to increase your rate limit.",
-		)
-	}
-	if strings.Contains(errMsg, "401") {
-		return binaryError(errs.CodeDownloadFailed,
-			"Failed to fetch Firecracker releases from GitHub: "+
-				"authentication failed (HTTP 401). "+
-				"Set a valid GitHub token via GITHUB_TOKEN.",
-		)
+	var httpErr download.HttpError
+	if errors.As(err, &httpErr) {
+		switch httpErr.StatusCode {
+		case 403:
+			return binaryError(errs.CodeDownloadFailed,
+				"Failed to fetch Firecracker releases from GitHub: "+
+					"rate limit exceeded (HTTP 403). "+
+					"Either wait for the rate limit to reset, or set a "+
+					"GitHub token via the GITHUB_TOKEN environment variable "+
+					"to increase your rate limit.",
+			)
+		case 401:
+			return binaryError(errs.CodeDownloadFailed,
+				"Failed to fetch Firecracker releases from GitHub: "+
+					"authentication failed (HTTP 401). "+
+					"Set a valid GitHub token via GITHUB_TOKEN.",
+			)
+		}
 	}
 	return binaryError(errs.CodeDownloadFailed,
 		fmt.Sprintf("Failed to fetch Firecracker releases from GitHub: %s", err),
@@ -152,7 +147,9 @@ func mapGitHubAPIError(err error) error {
 // ── Download ───────────────────────────────────────────────────────────────
 
 // DownloadFirecracker downloads firecracker + jailer for version, returns Binary list.
-func (s *Service) DownloadFirecracker(ctx context.Context, version string, binDir string) ([]*model.BinaryItem, error) {
+// arch is the target architecture (e.g. "x86_64", "aarch64") used in download URLs
+// and tarball member names.
+func (s *Service) DownloadFirecracker(ctx context.Context, version string, binDir string, arch string) ([]*model.BinaryItem, error) {
 	normalizedVersion := NormalizeVersion(version)
 
 	if err := os.MkdirAll(binDir, 0755); err != nil {
@@ -161,10 +158,10 @@ func (s *Service) DownloadFirecracker(ctx context.Context, version string, binDi
 
 	fcDest := filepath.Join(binDir, fmt.Sprintf("firecracker-v%s", normalizedVersion))
 	jlDest := filepath.Join(binDir, fmt.Sprintf("jailer-v%s", normalizedVersion))
-	tgzPath := filepath.Join(binDir, fmt.Sprintf("firecracker-v%s-%s.tgz", normalizedVersion, defaultArch))
+	tgzPath := filepath.Join(binDir, fmt.Sprintf("firecracker-v%s-%s.tgz", normalizedVersion, arch))
 
 	tgzURL := fmt.Sprintf("%s/v%s/firecracker-v%s-%s.tgz",
-		infra.FirecrackerGithubDownloadURL, normalizedVersion, normalizedVersion, defaultArch)
+		infra.FirecrackerGithubDownloadURL, normalizedVersion, normalizedVersion, arch)
 	sha256URL := tgzURL + ".sha256.txt"
 
 	// ── Step 1: Fetch SHA256 checksum ──
@@ -235,10 +232,10 @@ func (s *Service) DownloadFirecracker(ctx context.Context, version string, binDi
 			var dest string
 
 			switch basename {
-			case fmt.Sprintf("firecracker-v%s-%s", normalizedVersion, defaultArch):
+			case fmt.Sprintf("firecracker-v%s-%s", normalizedVersion, arch):
 				dest = fcDest
 				fcFound = true
-			case fmt.Sprintf("jailer-v%s-%s", normalizedVersion, defaultArch):
+			case fmt.Sprintf("jailer-v%s-%s", normalizedVersion, arch):
 				dest = jlDest
 				jlFound = true
 			default:
@@ -348,7 +345,7 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string, binDir str
 		cachedFC := filepath.Join(mirrorDir, fmt.Sprintf("firecracker-%s", mirrorTag))
 		cachedJL := filepath.Join(mirrorDir, fmt.Sprintf("jailer-%s", mirrorTag))
 
-		if fileExists(cachedFC) && fileExists(cachedJL) {
+		if system.FileExists(cachedFC) && system.FileExists(cachedJL) {
 			buildVersion := fmt.Sprintf("dev-%s", mirrorTag)
 			fcDest := filepath.Join(binDir, fmt.Sprintf("firecracker-%s", buildVersion))
 			jlDest := filepath.Join(binDir, fmt.Sprintf("jailer-%s", buildVersion))
@@ -356,12 +353,12 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string, binDir str
 			if err := infra.CopyFile(cachedFC, fcDest); err != nil {
 				return nil, binaryError(errs.CodeInternal, fmt.Sprintf("Failed to copy cached firecracker: %v", err))
 			}
-			makeExecutable(fcDest)
+			system.MakeExecutable(fcDest)
 
 			if err := infra.CopyFile(cachedJL, jlDest); err != nil {
 				return nil, binaryError(errs.CodeInternal, fmt.Sprintf("Failed to copy cached jailer: %v", err))
 			}
-			makeExecutable(jlDest)
+			system.MakeExecutable(jlDest)
 
 			slog.Info("Using mirror cache for git ref", "ref", gitRef)
 
@@ -394,33 +391,40 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string, binDir str
 		slog.Info("Cloning Firecracker repository (this may take a while)...")
 		cloneCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 		defer cancel()
-		if err := runCmd(cloneCtx, "git", "clone", infra.FirecrackerGitRepoURL, srcDir); err != nil {
-			return nil, binaryError(errs.CodeProcessError, fmt.Sprintf("Failed to clone Firecracker repository: %v", err))
+		result := system.RunCmdCompat(cloneCtx, []string{"git", "clone", infra.FirecrackerGitRepoURL, srcDir},
+			system.RunCmdOptions{Capture: false, Check: true})
+		if result.Err != nil {
+			return nil, binaryError(errs.CodeProcessError, fmt.Sprintf("Failed to clone Firecracker repository: %v", result.Err))
 		}
 	} else {
 		slog.Info("Updating existing Firecracker repository...")
 		fetchCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
-		if err := runCmdInDir(fetchCtx, srcDir, []string{"git", "fetch", "origin"}); err != nil {
-			return nil, binaryError(errs.CodeProcessError, fmt.Sprintf("Failed to update Firecracker repository: %v", err))
+		result := system.RunCmdCompat(fetchCtx, []string{"git", "fetch", "origin"},
+			system.RunCmdOptions{Cwd: srcDir, Capture: false, Check: true})
+		if result.Err != nil {
+			return nil, binaryError(errs.CodeProcessError, fmt.Sprintf("Failed to update Firecracker repository: %v", result.Err))
 		}
 	}
 
 	// ── Checkout requested ref ──
 	checkoutCtx, checkoutCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer checkoutCancel()
-	if err := runCmdInDir(checkoutCtx, srcDir, []string{"git", "checkout", gitRef}); err != nil {
-		return nil, binaryError(errs.CodeProcessError, fmt.Sprintf("Failed to checkout git ref '%s': %v", gitRef, err))
+	result := system.RunCmdCompat(checkoutCtx, []string{"git", "checkout", gitRef},
+		system.RunCmdOptions{Cwd: srcDir, Capture: false, Check: true})
+	if result.Err != nil {
+		return nil, binaryError(errs.CodeProcessError, fmt.Sprintf("Failed to checkout git ref '%s': %v", gitRef, result.Err))
 	}
 
 	// ── Resolve short commit hash ──
 	revParseCtx, revParseCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer revParseCancel()
-	hashOut, err := runCmdCapture(revParseCtx, srcDir, "git", "rev-parse", "--short", "HEAD")
-	if err != nil {
-		return nil, binaryError(errs.CodeProcessError, fmt.Sprintf("Failed to get commit hash: %v", err))
+	hashResult := system.RunCmdCompat(revParseCtx, []string{"git", "rev-parse", "--short", "HEAD"},
+		system.RunCmdOptions{Cwd: srcDir, Capture: true, Check: true})
+	if hashResult.Err != nil {
+		return nil, binaryError(errs.CodeProcessError, fmt.Sprintf("Failed to get commit hash: %v", hashResult.Err))
 	}
-	shortHash := strings.TrimSpace(hashOut)
+	shortHash := strings.TrimSpace(hashResult.Stdout)
 	buildVersion := fmt.Sprintf("dev-%s", shortHash)
 
 	slog.Info("Building Firecracker from ref",
@@ -433,12 +437,16 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string, binDir str
 	// ── Run the build with live output ──
 	buildCtx, buildCancel := context.WithTimeout(ctx, 1800*time.Second)
 	defer buildCancel()
-	exitCode, buildStderr, buildErr := runBuildLive(buildCtx, srcDir, "tools/devtool", "build", "--release")
-	if buildErr != nil {
+	buildResult := system.RunCmdCompat(buildCtx, []string{"tools/devtool", "build", "--release"},
+		system.RunCmdOptions{Cwd: srcDir, Capture: false, Check: false})
+	if buildResult.Err != nil {
 		return nil, binaryError(errs.CodeProcessError,
-			fmt.Sprintf("Build process failed: %v", buildErr),
+			fmt.Sprintf("Build process failed: %v", buildResult.Err),
 		)
 	}
+
+	exitCode := buildResult.ExitCode
+	buildStderr := buildResult.Stderr
 
 	if exitCode != 0 {
 		stderr := strings.TrimSpace(buildStderr)
@@ -463,10 +471,10 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string, binDir str
 	jlSrc := filepath.Join(buildOutput, "jailer")
 
 	var missing []string
-	if !fileExists(fcSrc) {
+	if !system.FileExists(fcSrc) {
 		missing = append(missing, "firecracker")
 	}
-	if !fileExists(jlSrc) {
+	if !system.FileExists(jlSrc) {
 		missing = append(missing, "jailer")
 	}
 	if len(missing) > 0 {
@@ -482,12 +490,12 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string, binDir str
 	if err := infra.CopyFile(fcSrc, fcDest); err != nil {
 		return nil, binaryError(errs.CodeInternal, fmt.Sprintf("Failed to copy built firecracker: %v", err))
 	}
-	makeExecutable(fcDest)
+		system.MakeExecutable(fcDest)
 
 	if err := infra.CopyFile(jlSrc, jlDest); err != nil {
 		return nil, binaryError(errs.CodeInternal, fmt.Sprintf("Failed to copy built jailer: %v", err))
 	}
-	makeExecutable(jlDest)
+	system.MakeExecutable(jlDest)
 
 	slog.Info("Built Firecracker", "version", buildVersion, "ref", gitRef)
 
@@ -565,7 +573,6 @@ func NormalizeVersion(version string) string {
 }
 
 // CIVersion generates a CI version from a full version (e.g. "1.15.0" -> "v1.15").
-// TODO(verdict#33): belongs in infra/version or similar shared utility
 func CIVersion(version string) string {
 	parts := strings.Split(version, ".")
 	if len(parts) >= 2 {
@@ -574,34 +581,11 @@ func CIVersion(version string) string {
 	return "v" + version
 }
 
-// ── Standalone utility functions ───────────────────────────────────────────
-
-// TODO(verdict#33): belongs in infra/strings or similar shared utility
+// sanitizeMirrorTag replaces characters that are unsafe for filenames with underscores.
 func sanitizeMirrorTag(gitRef string) string {
 	re := regexp.MustCompile(`[^a-zA-Z0-9._-]`)
 	return re.ReplaceAllString(gitRef, "_")
 }
-
-// TODO(verdict#33): belongs in infra/fs or similar shared utility
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-// makeExecutable adds executable bits (S_IXUSR | S_IXGRP | S_IXOTH) to
-// the file's current permissions without changing the existing mode.
-// TODO(verdict#33): belongs in infra/fs or similar shared utility
-func makeExecutable(path string) error {
-	fi, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("stat for chmod: %w", err)
-	}
-	newMode := fi.Mode().Perm() | 0111 // S_IXUSR | S_IXGRP | S_IXOTH
-	return os.Chmod(path, newMode)
-}
-
-// findEmbeddedServiceBinary returns the path to an embedded service binary, or "" if not available.
-// TODO(verdict#33): belongs in infra/fs or similar shared utility
 
 func extractTarMember(reader *tar.Reader, dest string, memberName ...string) error {
 	outFile, err := os.Create(dest)
@@ -634,7 +618,7 @@ func extractTarMember(reader *tar.Reader, dest string, memberName ...string) err
 		}
 	}
 
-	if err := makeExecutable(dest); err != nil {
+	if err := system.MakeExecutable(dest); err != nil {
 		return binaryError(errs.CodeInternal, fmt.Sprintf("Failed to set executable permissions: %v", err))
 	}
 
@@ -647,54 +631,6 @@ func binaryError(code errs.Code, msg string) *errs.DomainError {
 		Op:      "binary",
 		Message: msg,
 	}
-}
-
-// ── Subprocess helpers ─────────────────────────────────────────────────────
-
-func runCmd(ctx context.Context, cmd string, args ...string) error {
-	fullArgs := append([]string{cmd}, args...)
-	result := system.RunCmdCompat(ctx, fullArgs, system.RunCmdOptions{
-		Capture: false,
-		Check:   true,
-	})
-	return result.Err
-}
-
-func runCmdInDir(ctx context.Context, dir string, args []string) error {
-	result := system.RunCmdCompat(ctx, args, system.RunCmdOptions{
-		Cwd:     dir,
-		Capture: false,
-		Check:   true,
-	})
-	return result.Err
-}
-
-func runCmdCapture(ctx context.Context, dir, cmd string, args ...string) (string, error) {
-	fullArgs := append([]string{cmd}, args...)
-	result := system.RunCmdCompat(ctx, fullArgs, system.RunCmdOptions{
-		Cwd:     dir,
-		Capture: true,
-		Check:   true,
-	})
-	if result.Err != nil {
-		return "", result.Err
-	}
-	return result.Stdout, nil
-}
-
-// runBuildLive runs a build command with live stdout/stderr output.
-func runBuildLive(ctx context.Context, dir, cmd string, args ...string) (int, string, error) {
-	fullArgs := append([]string{cmd}, args...)
-	result := system.RunCmdCompat(ctx, fullArgs, system.RunCmdOptions{
-		Cwd:     dir,
-		Capture: false,
-		Check:   false,
-	})
-
-	if result.Err != nil {
-		return -1, "", result.Err
-	}
-	return result.ExitCode, "", nil
 }
 
 // extractBinaryVMName extracts the "name" from a VM object.
