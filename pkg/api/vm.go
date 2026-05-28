@@ -225,7 +225,7 @@ func (o *VMOperation) createBatch(ctx context.Context, input *inputs.VMCreateInp
 	}
 
 	createdVMs := make([]*model.VM, 0)
-	errors := make([]string, 0)
+	var errors []string
 
 	for idx, name := range names {
 		createdAt := time.Now()
@@ -558,7 +558,7 @@ func (o *VMOperation) Prune(ctx context.Context, dryRun bool, includeAll bool) *
 		}
 	}
 
-	removed := make([]string, 0)
+	var removed []string
 	for _, vm := range allVMs {
 		if vm.Status == model.StatusRunning || vm.Status == model.StatusStarting {
 			if !includeAll {
@@ -1697,7 +1697,7 @@ func (o *VMOperation) AttachVolume(ctx context.Context, input *inputs.VMInput, v
 	}
 
 	// Update VM's volume_ids (matches Python's list comprehension + append-if-not-present)
-	vmVolumeIDs := make([]string, 0)
+	var vmVolumeIDs []string
 	if len(vmItem.VolumeIDs) > 0 {
 		vmVolumeIDs = vmItem.VolumeIDs
 	}
@@ -1859,7 +1859,7 @@ func (o *VMOperation) DetachVolume(ctx context.Context, input *inputs.VMInput, v
 	}
 
 	// Update VM's volume_ids (matches Python's list comprehension + remove-if-present)
-	vmVolumeIDs := make([]string, 0)
+	var vmVolumeIDs []string
 	if len(vmItem.VolumeIDs) > 0 {
 		vmVolumeIDs = vmItem.VolumeIDs
 	}
@@ -2348,8 +2348,8 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 	mode := c.resolved.CloudInitMode
 
 	// Read SSH pubkeys from the key service (used by OFF, INJECT, ISO, NET modes)
-	keySvc := key.NewService(key.NewRepository(nil))
-	pubkeys, _ := keySvc.GetPubkeys(ctx, c.resolved.SSHKeys, filepath.Join(c.cacheDir, "keys"))
+	keySvc := key.NewService(key.NewRepository(nil), filepath.Join(c.cacheDir, "keys"))
+	pubkeys, _ := keySvc.GetPubkeys(ctx, c.resolved.SSHKeys)
 
 	// Common operations for OFF and INJECT modes
 	if mode == model.CloudInitModeOFF || mode == model.CloudInitModeINJECT {

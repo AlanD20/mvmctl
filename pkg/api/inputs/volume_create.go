@@ -50,8 +50,8 @@ type ResolvedVolumeCreateInput struct {
 // Resolve volume creation inputs to explicit values.
 type VolumeCreateRequest struct {
 	db      *sql.DB
-	_input  VolumeCreateInput
-	_result *ResolvedVolumeCreateInput
+	input  VolumeCreateInput
+	result *ResolvedVolumeCreateInput
 	repo    volume.Repository
 }
 
@@ -59,20 +59,17 @@ type VolumeCreateRequest struct {
 func NewVolumeCreateRequest(inputs VolumeCreateInput, db *sql.DB, volumeRepo volume.Repository) *VolumeCreateRequest {
 	return &VolumeCreateRequest{
 		db:     db,
-		_input: inputs,
+		input: inputs,
 		repo:   volumeRepo,
 	}
 }
 
 // Result returns the resolved input, or nil if resolve() has not been called.
-func (r *VolumeCreateRequest) Result() *ResolvedVolumeCreateInput {
-	return r._result
-}
 
 // Resolve resolves creation inputs to explicit values.
 // Matches Python's VolumeCreateRequest.resolve().
 func (r *VolumeCreateRequest) Resolve(ctx context.Context) (*ResolvedVolumeCreateInput, error) {
-	sizeBytes, err := disk.ParseDiskSizeToBytes(r._input.Size)
+	sizeBytes, err := disk.ParseDiskSizeToBytes(r.input.Size)
 	if err != nil {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
@@ -84,8 +81,8 @@ func (r *VolumeCreateRequest) Resolve(ctx context.Context) (*ResolvedVolumeCreat
 
 	// Default format is "raw" — Python: fmt = self._inputs.format if self._inputs.format is not None else "raw"
 	format := "raw"
-	if r._input.Format != nil {
-		format = *r._input.Format
+	if r.input.Format != nil {
+		format = *r.input.Format
 	}
 
 	if format != "raw" && format != "qcow2" {
@@ -97,15 +94,15 @@ func (r *VolumeCreateRequest) Resolve(ctx context.Context) (*ResolvedVolumeCreat
 		}
 	}
 
-	path := filepath.Join(infra.GetVolumesDir(), fmt.Sprintf("%s.%s", r._input.Name, format))
+	path := filepath.Join(infra.GetVolumesDir(), fmt.Sprintf("%s.%s", r.input.Name, format))
 
 	isReadOnly := false
-	if r._input.ReadOnly != nil {
-		isReadOnly = *r._input.ReadOnly
+	if r.input.ReadOnly != nil {
+		isReadOnly = *r.input.ReadOnly
 	}
 
-	r._result = &ResolvedVolumeCreateInput{
-		Name:       r._input.Name,
+	r.result = &ResolvedVolumeCreateInput{
+		Name:       r.input.Name,
 		SizeBytes:  sizeBytes,
 		Format:     format,
 		Path:       path,
@@ -116,11 +113,11 @@ func (r *VolumeCreateRequest) Resolve(ctx context.Context) (*ResolvedVolumeCreat
 		return nil, err
 	}
 
-	return r._result, nil
+	return r.result, nil
 }
 
 func (r *VolumeCreateRequest) ensureValidate(ctx context.Context) error {
-	if r._result == nil {
+	if r.result == nil {
 		return &errs.DomainError{
 			Code:    errs.CodeVolumeNotFound,
 			Op:      "volume_create",
@@ -129,7 +126,7 @@ func (r *VolumeCreateRequest) ensureValidate(ctx context.Context) error {
 		}
 	}
 
-	if err := validators.ValidateVolumeName(r._result.Name); err != nil {
+	if err := validators.ValidateVolumeName(r.result.Name); err != nil {
 		return &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
 			Op:      "volume_create",
@@ -139,7 +136,7 @@ func (r *VolumeCreateRequest) ensureValidate(ctx context.Context) error {
 	}
 
 	// Check for existing volume with same name
-	existing, err := r.repo.GetByName(ctx, r._result.Name)
+	existing, err := r.repo.GetByName(ctx, r.result.Name)
 	if err != nil {
 		return &errs.DomainError{
 			Code:    errs.CodeDatabaseError,
@@ -152,7 +149,7 @@ func (r *VolumeCreateRequest) ensureValidate(ctx context.Context) error {
 		return &errs.DomainError{
 			Code:    errs.CodeVolumeAlreadyExists,
 			Op:      "volume_create",
-			Message: fmt.Sprintf("Volume '%s' already exists", r._result.Name),
+			Message: fmt.Sprintf("Volume '%s' already exists", r.result.Name),
 			Class:   errs.ClassConflict,
 		}
 	}

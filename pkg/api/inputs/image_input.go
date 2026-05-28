@@ -3,7 +3,7 @@ package inputs
 import (
 	"context"
 	"database/sql"
-	"strings"
+	"fmt"
 
 	"mvmctl/internal/core/image"
 	"mvmctl/internal/infra/errs"
@@ -35,8 +35,8 @@ type ResolvedImageInput struct {
 // Request that resolves ImageInput to ImageItem via DB.
 type ImageRequest struct {
 	db       *sql.DB
-	_input   ImageInput
-	_result  *ResolvedImageInput
+	input   ImageInput
+	result  *ResolvedImageInput
 	resolver *image.Resolver
 }
 
@@ -44,20 +44,19 @@ type ImageRequest struct {
 func NewImageRequest(inputs ImageInput, db *sql.DB, imageRepo image.Repository) *ImageRequest {
 	return &ImageRequest{
 		db:       db,
-		_input:   inputs,
+		input:   inputs,
 		resolver: image.NewResolver(imageRepo),
 	}
 }
 
 // Result returns the resolved input, or nil if resolve() has not been called.
-func (r *ImageRequest) Result() *ResolvedImageInput {
-	return r._result
-}
 
 // Resolve resolves identifiers to ImageItem records from DB.
 // Matches Python's ImageRequest.resolve().
 func (r *ImageRequest) Resolve(ctx context.Context) (*ResolvedImageInput, error) {
-	identifiers := append(r._input.ID, r._input.Type...)
+	identifiers := make([]string, 0, len(r.input.ID)+len(r.input.Type))
+	identifiers = append(identifiers, r.input.ID...)
+	identifiers = append(identifiers, r.input.Type...)
 
 	if len(identifiers) == 0 {
 		return nil, &errs.DomainError{
@@ -68,40 +67,21 @@ func (r *ImageRequest) Resolve(ctx context.Context) (*ResolvedImageInput, error)
 		}
 	}
 
+	// Validate identifier length — max 64 chars.
+	for _, ident := range identifiers {
+		if len(ident) > 64 {
+			return nil, &errs.DomainError{
+				Code:    errs.CodeValidationFailed,
+				Op:      "image",
+				Message: fmt.Sprintf("Image identifier too long: '%s' exceeds maximum length of 64 characters", ident),
+				Class:   errs.ClassValidation,
+			}
+		}
+	}
+
 	result := r.resolver.ResolveMany(ctx, identifiers)
-	if len(result.Errors) > 0 && len(result.Items) == 0 {
+	if result == nil || len(result.Items) == 0 {
 		return nil, &errs.DomainError{
-			Code:    errs.CodeImageNotFound,
-			Op:      "image",
-			Message: "Could not resolve any images: " + strings.Join(result.Errors, ", "),
-			Class:   errs.ClassValidation,
-		}
-	}
-
-	r._result = &ResolvedImageInput{
-		Images: result.Items,
-	}
-
-	// Validate
-	if err := r.ensureValidate(); err != nil {
-		return nil, err
-	}
-
-	return r._result, nil
-}
-
-func (r *ImageRequest) ensureValidate() error {
-	if r._result == nil {
-		return &errs.DomainError{
-			Code:    errs.CodeImageNotFound,
-			Op:      "image",
-			Message: "Failed to resolve necessary dependencies to validate",
-			Class:   errs.ClassValidation,
-		}
-	}
-
-	if len(r._result.Images) == 0 {
-		return &errs.DomainError{
 			Code:    errs.CodeImageNotFound,
 			Op:      "image",
 			Message: "No images found matching identifiers",
@@ -109,5 +89,8 @@ func (r *ImageRequest) ensureValidate() error {
 		}
 	}
 
-	return nil
+	r.result = &ResolvedImageInput{
+		Images: result.Items,
+	}
+	return r.result, nil
 }

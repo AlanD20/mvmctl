@@ -51,22 +51,19 @@ type ResolvedLogInput struct {
 // Resolve LogInput against the database and constants.
 type LogRequest struct {
 	_db     *sql.DB
-	_input  LogInput
-	_result *ResolvedLogInput
+	input  LogInput
+	result *ResolvedLogInput
 }
 
 // NewLogRequest creates a new LogRequest.
 func NewLogRequest(inputs LogInput, db *sql.DB) *LogRequest {
 	return &LogRequest{
 		_db:    db,
-		_input: inputs,
+		input: inputs,
 	}
 }
 
 // Result returns the resolved input, or nil if resolve() has not been called.
-func (r *LogRequest) Result() *ResolvedLogInput {
-	return r._result
-}
 
 // Resolve resolves all inputs to explicit values.
 // Matches Python's LogRequest.resolve().
@@ -97,7 +94,7 @@ func (r *LogRequest) Resolve(ctx context.Context, vmRepo vm.Repository) (*Resolv
 	serialOutputFilename, _ := config.Resolve(ctx, r._db, "defaults.firecracker", "serial_output_filename")
 	serialOutputFilenameStr := toString(serialOutputFilename)
 
-	r._result = &ResolvedLogInput{
+	r.result = &ResolvedLogInput{
 		VM:                   vmEntity,
 		LogType:              logType,
 		Lines:                lines,
@@ -106,13 +103,13 @@ func (r *LogRequest) Resolve(ctx context.Context, vmRepo vm.Repository) (*Resolv
 		SerialOutputFilename: serialOutputFilenameStr,
 	}
 
-	return r._result, nil
+	return r.result, nil
 }
 
 func (r *LogRequest) resolveVM(ctx context.Context, vmRepo vm.Repository) (*model.VM, error) {
 	// Use VMRequest pipeline like Python's LogRequest._resolve_vm()
 	// Python lets VMNotFoundError propagate directly, so we don't wrap
-	vmRequest := NewVMRequest(VMInput{Identifiers: []string{r._input.Identifier}}, r._db, vmRepo, nil)
+	vmRequest := NewVMRequest(VMInput{Identifiers: []string{r.input.Identifier}}, r._db, vmRepo, nil)
 	resolved, err := vmRequest.Resolve(ctx)
 	if err != nil {
 		return nil, err
@@ -121,15 +118,15 @@ func (r *LogRequest) resolveVM(ctx context.Context, vmRepo vm.Repository) (*mode
 }
 
 func (r *LogRequest) resolveLogType() string {
-	if r._input.OsLog {
+	if r.input.OsLog {
 		return "os"
 	}
 	return "boot"
 }
 
 func (r *LogRequest) resolveLines(ctx context.Context) int {
-	if r._input.Lines != nil {
-		return *r._input.Lines
+	if r.input.Lines != nil {
+		return *r.input.Lines
 	}
 	lines, err := config.Resolve(ctx, r._db, "settings.vm", "log_lines")
 	if err == nil && lines != nil {
@@ -151,8 +148,8 @@ func (r *LogRequest) resolveLines(ctx context.Context) int {
 }
 
 func (r *LogRequest) resolveFollow(ctx context.Context) bool {
-	if r._input.Follow != nil {
-		return *r._input.Follow
+	if r.input.Follow != nil {
+		return *r.input.Follow
 	}
 	follow, err := config.Resolve(ctx, r._db, "settings.vm", "log_follow")
 	if err == nil && follow != nil {

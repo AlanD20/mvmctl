@@ -147,7 +147,7 @@ func pruneResource(cacheAPI *api.CacheOperation, cmd *cobra.Command, resource st
 		return fmt.Errorf("prune %s failed: %s", resource, opResult.Message)
 	}
 
-	removed := make([]string, 0)
+	var removed []string
 	if item, ok := opResult.Item.([]string); ok {
 		removed = item
 	}

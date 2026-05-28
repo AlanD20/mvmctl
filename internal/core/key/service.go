@@ -2,8 +2,6 @@ package key
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
@@ -20,15 +17,17 @@ import (
 )
 
 // Service provides stateless SSH key operations.
-// Matches Python's KeyService exactly — only stores repo.
+// Matches Python's KeyService exactly — stores repo and keysDir.
 type Service struct {
-	repo Repository
+	repo    Repository
+	keysDir string
 }
 
 // NewService creates a KeyService.
-func NewService(repo Repository) *Service {
+func NewService(repo Repository, keysDir string) *Service {
 	return &Service{
-		repo: repo,
+		repo:    repo,
+		keysDir: keysDir,
 	}
 }
 
@@ -48,25 +47,6 @@ func (s *Service) readPubKeyFile(path string) (string, error) {
 	return trimmed, nil
 }
 
-// ReadPubKeyContents extracts public key content strings from a list of SSHKeyItem.
-// Matches Python's KeyService.read_pubkey_contents() (a @staticmethod).
-func ReadPubKeyContents(keys []*model.SSHKeyItem) ([]string, error) {
-	var contents []string
-	for _, k := range keys {
-		if k.PublicKeyPath == "" {
-			continue
-		}
-		if _, err := os.Stat(k.PublicKeyPath); err == nil {
-			data, err := os.ReadFile(k.PublicKeyPath)
-			if err != nil {
-				return nil, errs.KeyFileError(fmt.Sprintf("Failed to read public key file: %v", err))
-			}
-			contents = append(contents, strings.TrimSpace(string(data)))
-		}
-	}
-	return contents, nil
-}
-
 // checkDependencies checks that ssh-keygen is available.
 func (s *Service) checkDependencies() error {
 	if _, err := exec.LookPath("ssh-keygen"); err != nil {
@@ -78,32 +58,6 @@ func (s *Service) checkDependencies() error {
 		}}
 	}
 	return nil
-}
-
-// computeFingerprint computes SHA256 fingerprint from public key content.
-// Matches Python's KeyService._compute_fingerprint() exactly:
-//
-//	base64 decode key bytes → SHA256 → base64 encode (no padding) → "SHA256:..."
-func computeFingerprint(pubKeyContent string) (string, error) {
-	parts := strings.Fields(pubKeyContent)
-	if len(parts) < 2 {
-		return "", &keyError{err: errs.MVMKeyError("Invalid public key format")}
-	}
-	keyBytes, err := base64.RawStdEncoding.DecodeString(parts[1])
-	if err != nil {
-		return "", &keyError{err: errs.MVMKeyError("Invalid public key format")}
-	}
-	digest := sha256.Sum256(keyBytes)
-	fp := base64.StdEncoding.EncodeToString(digest[:])
-	// Remove trailing padding, matching Python's rstrip(b"=")
-	fp = strings.TrimRight(fp, "=")
-	return "SHA256:" + fp, nil
-}
-
-// isPrivateKey checks if content contains a PEM-encoded private key header.
-// TODO(verdict#33): belongs in infra/crypto or similar shared utility
-func isPrivateKey(content string) bool {
-	return strings.Contains(content, "-----BEGIN") && strings.Contains(content, "PRIVATE KEY-----")
 }
 
 // persistPublicKey writes a public key to disk as {keysDir}/{name}.pub.
@@ -138,40 +92,6 @@ func (s *Service) generateKeypair(ctx context.Context, privateKeyPath, pubKeyPat
 	}
 	return strings.TrimSpace(string(pubContent)), nil
 }
-
-// ParseAlgorithm extracts the algorithm (first field) from SSH public key content.
-// Matches Python's KeyService._parse_algorithm() which raises MVMKeyError on empty content.
-func ParseAlgorithm(pubKeyContent string) (string, error) {
-	parts := strings.Fields(pubKeyContent)
-	if len(parts) == 0 {
-		return "", &keyError{err: errs.MVMKeyError("Invalid public key format")}
-	}
-	return parts[0], nil
-}
-
-// ParseComment extracts the comment (third+ field) from SSH public key content.
-// Matches Python's KeyService._parse_comment() which uses split(None, 2),
-// preserving internal whitespace in parts[2].
-func ParseComment(pubKeyContent string) string {
-	trimmed := strings.TrimSpace(pubKeyContent)
-	fields := strings.Fields(trimmed)
-	if len(fields) < 3 {
-		return ""
-	}
-	// Python's split(None, 2) preserves original whitespace in parts[2].
-	pos := 0
-	for i := 0; i < 2; i++ {
-		for pos < len(trimmed) && !unicode.IsSpace(rune(trimmed[pos])) {
-			pos++
-		}
-		for pos < len(trimmed) && unicode.IsSpace(rune(trimmed[pos])) {
-			pos++
-		}
-	}
-	return trimmed[pos:]
-}
-
-// nowISO returns current time in ISO format matching Python's datetime.now(UTC).isoformat().
 
 // CreateKeypair generates a new SSH keypair.
 // Matches Python's KeyService.create_keypair() exactly.
@@ -260,12 +180,12 @@ func (s *Service) CreateKeypair(ctx context.Context, params *CreateParams) (*mod
 }
 
 // AddKey imports a public key into the cache.
-func (s *Service) AddKey(ctx context.Context, name, pubKeyPath, pubKeyContent, keysDir string, overwrite bool) (*model.SSHKeyItem, error) {
+func (s *Service) AddKey(ctx context.Context, name, pubKeyPath, pubKeyContent string, overwrite bool) (*model.SSHKeyItem, error) {
 	// Check for existing key by name
 	existing, _ := s.repo.GetByName(ctx, name)
 	if existing != nil {
 		if overwrite {
-			oldPub := filepath.Join(keysDir, name+".pub")
+			oldPub := filepath.Join(s.keysDir, name+".pub")
 			if _, err := os.Stat(oldPub); err == nil {
 				os.Remove(oldPub)
 			}
@@ -280,7 +200,7 @@ func (s *Service) AddKey(ctx context.Context, name, pubKeyPath, pubKeyContent, k
 	}
 
 	// Persist public key to keys dir
-	persistedPubPath, err := s.persistPublicKey(name, pubKeyContent, keysDir)
+	persistedPubPath, err := s.persistPublicKey(name, pubKeyContent, s.keysDir)
 	if err != nil {
 		return nil, err
 	}
@@ -330,10 +250,10 @@ func (s *Service) AddKey(ctx context.Context, name, pubKeyPath, pubKeyContent, k
 }
 
 // GetPubkey returns the public key content for a key.
-func (s *Service) GetPubkey(ctx context.Context, entity interface{}, keysDir string) (string, error) {
+func (s *Service) GetPubkey(ctx context.Context, entity interface{}) (string, error) {
 	switch e := entity.(type) {
 	case *model.SSHKeyItem:
-		pubPath := filepath.Join(keysDir, e.Name+".pub")
+		pubPath := filepath.Join(s.keysDir, e.Name+".pub")
 		return s.readPubKeyFile(pubPath)
 	case string:
 		sshKey, err := s.repo.GetByName(ctx, e)
@@ -343,7 +263,7 @@ func (s *Service) GetPubkey(ctx context.Context, entity interface{}, keysDir str
 		if sshKey == nil {
 			return "", &keyError{err: errs.MVMKeyError(fmt.Sprintf("Key '%s' not found in cache", e))}
 		}
-		pubPath := filepath.Join(keysDir, sshKey.Name+".pub")
+		pubPath := filepath.Join(s.keysDir, sshKey.Name+".pub")
 		return s.readPubKeyFile(pubPath)
 	default:
 		return "", &keyError{err: errs.KeyFileError("Invalid key identifier")}
@@ -351,12 +271,12 @@ func (s *Service) GetPubkey(ctx context.Context, entity interface{}, keysDir str
 }
 
 // GetPubkeys returns public key contents for multiple keys.
-func (s *Service) GetPubkeys(ctx context.Context, keys interface{}, keysDir string) ([]string, error) {
+func (s *Service) GetPubkeys(ctx context.Context, keys interface{}) ([]string, error) {
 	switch k := keys.(type) {
 	case []string:
 		contents := make([]string, 0, len(k))
 		for _, name := range k {
-			content, err := s.GetPubkey(ctx, name, keysDir)
+			content, err := s.GetPubkey(ctx, name)
 			if err != nil {
 				return nil, err
 			}
@@ -366,7 +286,7 @@ func (s *Service) GetPubkeys(ctx context.Context, keys interface{}, keysDir stri
 	case []*model.SSHKeyItem:
 		contents := make([]string, 0, len(k))
 		for _, key := range k {
-			content, err := s.GetPubkey(ctx, key, keysDir)
+			content, err := s.GetPubkey(ctx, key)
 			if err != nil {
 				return nil, err
 			}
@@ -379,7 +299,7 @@ func (s *Service) GetPubkeys(ctx context.Context, keys interface{}, keysDir stri
 }
 
 // List returns all keys in the cache, optionally verifying filesystem presence.
-func (s *Service) List(ctx context.Context, keysDir string, verify bool) ([]*model.SSHKeyItem, error) {
+func (s *Service) List(ctx context.Context, verify bool) ([]*model.SSHKeyItem, error) {
 	keys, err := s.repo.List(ctx)
 	if err != nil {
 		return nil, err
@@ -390,7 +310,7 @@ func (s *Service) List(ctx context.Context, keysDir string, verify bool) ([]*mod
 
 	var missingIDs []string
 	for _, key := range keys {
-		pubPath := filepath.Join(keysDir, key.Name+".pub")
+		pubPath := filepath.Join(s.keysDir, key.Name+".pub")
 		if _, err := os.Stat(pubPath); os.IsNotExist(err) {
 			missingIDs = append(missingIDs, key.ID)
 		}
@@ -441,13 +361,4 @@ func (s *Service) ClearDefaultKeys(ctx context.Context) error {
 	return s.repo.ClearDefaults(ctx)
 }
 
-// CreateParams holds parameters for key generation.
-type CreateParams struct {
-	Name       string
-	Algorithm  string
-	Bits       int
-	Comment    string
-	OutputDir  string
-	Overwrite  bool
-	SetDefault bool
-}
+

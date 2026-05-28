@@ -54,8 +54,8 @@ type ResolvedSSHInput struct {
 // Resolve SSHInput against the database.
 type SSHRequest struct {
 	db      *sql.DB
-	_input  SSHInput
-	_result *ResolvedSSHInput
+	input  SSHInput
+	result *ResolvedSSHInput
 	vm      *model.VM
 }
 
@@ -63,14 +63,11 @@ type SSHRequest struct {
 func NewSSHRequest(inputs SSHInput, db *sql.DB) *SSHRequest {
 	return &SSHRequest{
 		db:     db,
-		_input: inputs,
+		input: inputs,
 	}
 }
 
 // Result returns the resolved input, or nil if resolve() has not been called.
-func (r *SSHRequest) Result() *ResolvedSSHInput {
-	return r._result
-}
 
 // Resolve resolves all inputs to explicit values.
 // Matches Python's SSHRequest.resolve().
@@ -90,12 +87,12 @@ func (r *SSHRequest) Resolve(ctx context.Context, vmRepo vm.Repository, keyRepo 
 		return nil, err
 	}
 
-	r._result = &ResolvedSSHInput{
+	r.result = &ResolvedSSHInput{
 		TargetIP: targetIP,
 		User:     user,
 		Key:      sshKey,
-		Cmd:      r._input.Cmd,
-		Timeout:  r._input.Timeout,
+		Cmd:      r.input.Cmd,
+		Timeout:  r.input.Timeout,
 	}
 
 	// Validate
@@ -103,11 +100,11 @@ func (r *SSHRequest) Resolve(ctx context.Context, vmRepo vm.Repository, keyRepo 
 		return nil, err
 	}
 
-	return r._result, nil
+	return r.result, nil
 }
 
 func (r *SSHRequest) ensureValidate() error {
-	if r._result == nil {
+	if r.result == nil {
 		return &errs.DomainError{
 			Code:    errs.CodeSSHError,
 			Op:      "ssh",
@@ -116,16 +113,16 @@ func (r *SSHRequest) ensureValidate() error {
 		}
 	}
 
-	if !validators.IsIPAddress(r._result.TargetIP) {
+	if !validators.IsIPAddress(r.result.TargetIP) {
 		return &errs.DomainError{
 			Code:    errs.CodeSSHError,
 			Op:      "ssh",
-			Message: fmt.Sprintf("Invalid IP address: %s", r._result.TargetIP),
+			Message: fmt.Sprintf("Invalid IP address: %s", r.result.TargetIP),
 			Class:   errs.ClassValidation,
 		}
 	}
 
-	if err := validators.ValidateSSHUsername(r._result.User); err != nil {
+	if err := validators.ValidateSSHUsername(r.result.User); err != nil {
 		return &errs.DomainError{
 			Code:    errs.CodeSSHError,
 			Op:      "ssh",
@@ -134,12 +131,12 @@ func (r *SSHRequest) ensureValidate() error {
 		}
 	}
 
-	if r._result.Key != nil && *r._result.Key != "" {
-		if _, err := os.Stat(*r._result.Key); os.IsNotExist(err) {
+	if r.result.Key != nil && *r.result.Key != "" {
+		if _, err := os.Stat(*r.result.Key); os.IsNotExist(err) {
 			return &errs.DomainError{
 				Code:    errs.CodeKeyNotFound,
 				Op:      "ssh",
-				Message: fmt.Sprintf("SSH key not found: %s", *r._result.Key),
+				Message: fmt.Sprintf("SSH key not found: %s", *r.result.Key),
 				Class:   errs.ClassValidation,
 			}
 		}
@@ -151,7 +148,7 @@ func (r *SSHRequest) ensureValidate() error {
 // resolveTarget resolves the target to an IP address.
 // Matches Python's SSHRequest._resolve_target().
 func (r *SSHRequest) resolveTarget(ctx context.Context, vmRepo vm.Repository) (string, error) {
-	target := r._input.Identifier
+	target := r.input.Identifier
 
 	if target == "" {
 		return "", &errs.DomainError{
@@ -177,8 +174,8 @@ func (r *SSHRequest) resolveTarget(ctx context.Context, vmRepo vm.Repository) (s
 // resolveUser resolves the SSH user.
 // Matches Python's SSHRequest._resolve_user().
 func (r *SSHRequest) resolveUser(ctx context.Context) (string, error) {
-	if r._input.User != nil && *r._input.User != "" {
-		return *r._input.User, nil
+	if r.input.User != nil && *r.input.User != "" {
+		return *r.input.User, nil
 	}
 	// Check VM's stored ssh_user
 	if r.vm != nil && r.vm.SSHUser != nil && *r.vm.SSHUser != "" {
@@ -196,8 +193,8 @@ func (r *SSHRequest) resolveUser(ctx context.Context) (string, error) {
 func (r *SSHRequest) resolveKey(ctx context.Context, keyRepo key.Repository) (*string, error) {
 	keyResolver := key.NewResolver(keyRepo)
 
-	if r._input.Key != nil && *r._input.Key != "" {
-		keyStr := *r._input.Key
+	if r.input.Key != nil && *r.input.Key != "" {
+		keyStr := *r.input.Key
 
 		// 1a. Try as registered key name via key resolver
 		keyItem, err := keyResolver.Resolve(ctx, keyStr)

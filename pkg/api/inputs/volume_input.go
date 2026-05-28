@@ -33,8 +33,8 @@ type ResolvedVolumeInput struct {
 // Request that resolves VolumeInput to VolumeItem via DB.
 type VolumeRequest struct {
 	db       *sql.DB
-	_input   VolumeInput
-	_result  *ResolvedVolumeInput
+	input   VolumeInput
+	result  *ResolvedVolumeInput
 	resolver *volume.Resolver
 	_errors  []string
 }
@@ -43,16 +43,13 @@ type VolumeRequest struct {
 func NewVolumeRequest(inputs VolumeInput, db *sql.DB, volumeRepo volume.Repository) *VolumeRequest {
 	return &VolumeRequest{
 		db:       db,
-		_input:   inputs,
+		input:   inputs,
 		resolver: volume.NewResolver(volumeRepo),
 		_errors:  []string{},
 	}
 }
 
 // Result returns the resolved input, or nil if resolve() has not been called.
-func (r *VolumeRequest) Result() *ResolvedVolumeInput {
-	return r._result
-}
 
 // Errors returns partial-match errors from resolution (identifiers that couldn't be resolved).
 // Matches Python's VolumeRequest.errors property.
@@ -63,7 +60,7 @@ func (r *VolumeRequest) Errors() []string {
 // Resolve resolves identifiers to VolumeItem records from DB.
 // Matches Python's VolumeRequest.resolve().
 func (r *VolumeRequest) Resolve(ctx context.Context) (*ResolvedVolumeInput, error) {
-	identifiers := r._input.Identifiers
+	identifiers := r.input.Identifiers
 
 	if len(identifiers) == 0 {
 		return nil, &errs.DomainError{
@@ -90,7 +87,7 @@ func (r *VolumeRequest) Resolve(ctx context.Context) (*ResolvedVolumeInput, erro
 		r._errors = result.Errors
 	}
 
-	r._result = &ResolvedVolumeInput{
+	r.result = &ResolvedVolumeInput{
 		Volumes: result.Volumes,
 	}
 
@@ -98,11 +95,11 @@ func (r *VolumeRequest) Resolve(ctx context.Context) (*ResolvedVolumeInput, erro
 		return nil, err
 	}
 
-	return r._result, nil
+	return r.result, nil
 }
 
 func (r *VolumeRequest) ensureValidate() error {
-	if r._result == nil {
+	if r.result == nil {
 		return &errs.DomainError{
 			Code:    errs.CodeVolumeNotFound,
 			Op:      "volume",
@@ -111,7 +108,7 @@ func (r *VolumeRequest) ensureValidate() error {
 		}
 	}
 
-	if len(r._result.Volumes) == 0 {
+	if len(r.result.Volumes) == 0 {
 		return &errs.DomainError{
 			Code:    errs.CodeVolumeNotFound,
 			Op:      "volume",

@@ -36,8 +36,8 @@ type ResolvedKeyInput struct {
 // Resolve key identifiers to DB records.
 type KeyRequest struct {
 	db       *sql.DB
-	_input   KeyInput
-	_result  *ResolvedKeyInput
+	input   KeyInput
+	result  *ResolvedKeyInput
 	resolver *key.Resolver
 }
 
@@ -45,20 +45,17 @@ type KeyRequest struct {
 func NewKeyRequest(inputs KeyInput, db *sql.DB, keyRepo key.Repository) *KeyRequest {
 	return &KeyRequest{
 		db:       db,
-		_input:   inputs,
+		input:   inputs,
 		resolver: key.NewResolver(keyRepo),
 	}
 }
 
 // Result returns the resolved input, or nil if resolve() has not been called.
-func (r *KeyRequest) Result() *ResolvedKeyInput {
-	return r._result
-}
 
 // Resolve resolves key identifiers to DB records.
 // Matches Python's KeyRequest.resolve().
 func (r *KeyRequest) Resolve(ctx context.Context) (*ResolvedKeyInput, error) {
-	identifiers := append(r._input.Name, r._input.ID...)
+	identifiers := append(r.input.Name, r.input.ID...)
 
 	if len(identifiers) == 0 {
 		return nil, &errs.DomainError{
@@ -83,9 +80,9 @@ func (r *KeyRequest) Resolve(ctx context.Context) (*ResolvedKeyInput, error) {
 		}
 	}
 
-	r._result = &ResolvedKeyInput{
+	r.result = &ResolvedKeyInput{
 		Keys: result.Items,
 	}
 
-	return r._result, nil
+	return r.result, nil
 }

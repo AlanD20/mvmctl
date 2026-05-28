@@ -101,12 +101,12 @@ type ResolvedImageAcquireInput struct {
 
 // ImageAcquireRequest matches Python's ImageAcquireRequest.
 //
-// _input uses any because it is either ImagePullInput or ImageImportInput —
+// input uses any because it is either ImagePullInput or ImageImportInput —
 // Go has no sum types.
 type ImageAcquireRequest struct {
 	db       *sql.DB
-	_input   any // ImagePullInput or ImageImportInput
-	_result  *ResolvedImageAcquireInput
+	input   any // ImagePullInput or ImageImportInput
+	result  *ResolvedImageAcquireInput
 	resolver *image.Resolver
 }
 
@@ -114,20 +114,17 @@ type ImageAcquireRequest struct {
 func NewImageAcquireRequest(inputs any, db *sql.DB, imageRepo image.Repository) *ImageAcquireRequest {
 	return &ImageAcquireRequest{
 		db:       db,
-		_input:   inputs,
+		input:   inputs,
 		resolver: image.NewResolver(imageRepo),
 	}
 }
 
 // Result returns the resolved input, or nil if resolve() has not been called.
-func (r *ImageAcquireRequest) Result() *ResolvedImageAcquireInput {
-	return r._result
-}
 
 // ResolvePull resolves pull inputs.
 // Matches Python's ImageAcquireRequest.resolve_pull().
 func (r *ImageAcquireRequest) ResolvePull(ctx context.Context) (*ResolvedImageAcquireInput, error) {
-	pullInput, ok := r._input.(ImagePullInput)
+	pullInput, ok := r.input.(ImagePullInput)
 	if !ok {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeImagePullFailed,
@@ -154,7 +151,7 @@ func (r *ImageAcquireRequest) ResolvePull(ctx context.Context) (*ResolvedImageAc
 		return nil, err
 	}
 
-	r._result = &ResolvedImageAcquireInput{
+	r.result = &ResolvedImageAcquireInput{
 		Type:              pullInput.Type,
 		Name:              pullInput.Name,
 		Force:             pullInput.Force,
@@ -172,13 +169,13 @@ func (r *ImageAcquireRequest) ResolvePull(ctx context.Context) (*ResolvedImageAc
 		return nil, err
 	}
 
-	return r._result, nil
+	return r.result, nil
 }
 
 // ResolveImport resolves import inputs.
 // Matches Python's ImageAcquireRequest.resolve_import().
 func (r *ImageAcquireRequest) ResolveImport(ctx context.Context) (*ResolvedImageAcquireInput, error) {
-	importInput, ok := r._input.(ImageImportInput)
+	importInput, ok := r.input.(ImageImportInput)
 	if !ok {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeImageImportFailed,
@@ -221,7 +218,7 @@ func (r *ImageAcquireRequest) ResolveImport(ctx context.Context) (*ResolvedImage
 
 	sourcePath := importInput.SourcePath
 
-	r._result = &ResolvedImageAcquireInput{
+	r.result = &ResolvedImageAcquireInput{
 		Type:              importInput.Name,
 		Name:              &importInput.Name,
 		Arch:              arch,
@@ -242,11 +239,11 @@ func (r *ImageAcquireRequest) ResolveImport(ctx context.Context) (*ResolvedImage
 		return nil, err
 	}
 
-	return r._result, nil
+	return r.result, nil
 }
 
 func (r *ImageAcquireRequest) ensureValidate() error {
-	if r._result == nil {
+	if r.result == nil {
 		return &errs.DomainError{
 			Code:    errs.CodeImageImportFailed,
 			Op:      "image_acquire",
@@ -255,7 +252,7 @@ func (r *ImageAcquireRequest) ensureValidate() error {
 		}
 	}
 
-	arch := r._result.Arch
+	arch := r.result.Arch
 	validArchs := []string{"x86_64", "amd64", "aarch64", "arm64"}
 	archValid := false
 	for _, va := range validArchs {
@@ -273,7 +270,7 @@ func (r *ImageAcquireRequest) ensureValidate() error {
 		}
 	}
 
-	if r._result.Partition != nil && *r._result.Partition < 1 {
+	if r.result.Partition != nil && *r.result.Partition < 1 {
 		return &errs.DomainError{
 			Code:    errs.CodeImageImportFailed,
 			Op:      "image_acquire",
@@ -286,7 +283,7 @@ func (r *ImageAcquireRequest) ensureValidate() error {
 }
 
 func (r *ImageAcquireRequest) ensureValidateImport() error {
-	if r._result == nil {
+	if r.result == nil {
 		return &errs.DomainError{
 			Code:    errs.CodeImageImportFailed,
 			Op:      "image_acquire",

@@ -529,11 +529,11 @@ func (o *HostOperation) Clean(ctx context.Context, cacheDir string) *errs.Operat
 		}
 	}
 
-	summary := make([]string, 0)
+	var summary []string
 
 	// Remove TAP devices
 	tapNames := infranet.GetTunTapDevices()
-	fallbackTaps := make([]string, 0)
+	var fallbackTaps []string
 	for _, tap := range tapNames {
 		if strings.HasPrefix(tap, fmt.Sprintf("%s-", infra.CLIName)) {
 			fallbackTaps = append(fallbackTaps, tap)
@@ -644,7 +644,7 @@ func (o *HostOperation) Reset(ctx context.Context, cacheDir string) *errs.Operat
 	if cleanResult.IsError() {
 		return cleanResult
 	}
-	summary := make([]string, 0)
+	var summary []string
 	if cleanResult.IsOK() && cleanResult.Item != nil {
 		if items, ok := cleanResult.Item.([]string); ok {
 			summary = append(summary, items...)
@@ -662,7 +662,7 @@ func (o *HostOperation) Reset(ctx context.Context, cacheDir string) *errs.Operat
 
 	// Notify about kernel modules that were left loaded
 	moduleChanges, _ := o.hostRepo.ListChanges(ctx, nil, false)
-	activeModules := make([]string, 0)
+	var activeModules []string
 	for _, c := range moduleChanges {
 		if c.Setting == "kernel_module_load" {
 			activeModules = append(activeModules, c.AppliedValue)

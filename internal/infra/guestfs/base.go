@@ -507,7 +507,7 @@ func extractPartitionInner(handle *GuestfsHandle, ctx context.Context, logger *s
 		if vfsErr == nil && fsType != "" {
 			logger.Debug("Superfloppy image detected", "fs_type", fsType)
 			// Copy the whole file as-is
-			if cpErr := infra.CopyFile(rawPath, outputPath); cpErr != nil {
+			if cpErr := infra.CopyPreservingMetadata(rawPath, outputPath); cpErr != nil {
 				return "", fmt.Errorf("copy superfloppy image: %w", cpErr)
 			}
 			logger.Info("Copied superfloppy image", "path", filepath.Base(outputPath))

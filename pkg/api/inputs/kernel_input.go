@@ -3,6 +3,7 @@ package inputs
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 
 	"mvmctl/internal/core/kernel"
@@ -39,8 +40,8 @@ type ResolvedKernelInput struct {
 // Resolve kernel identifiers to DB records and validate.
 type KernelRequest struct {
 	db       *sql.DB
-	_input   KernelInput
-	_result  *ResolvedKernelInput
+	input   KernelInput
+	result  *ResolvedKernelInput
 	resolver *kernel.Resolver
 }
 
@@ -48,20 +49,17 @@ type KernelRequest struct {
 func NewKernelRequest(inputs KernelInput, db *sql.DB, kernelRepo kernel.Repository) *KernelRequest {
 	return &KernelRequest{
 		db:       db,
-		_input:   inputs,
+		input:   inputs,
 		resolver: kernel.NewResolver(kernelRepo, nil),
 	}
 }
 
 // Result returns the resolved input, or nil if resolve() has not been called.
-func (r *KernelRequest) Result() *ResolvedKernelInput {
-	return r._result
-}
 
 // Resolve resolves kernel identifiers to KernelItem records.
 // Matches Python's KernelRequest.resolve().
 func (r *KernelRequest) Resolve(ctx context.Context) (*ResolvedKernelInput, error) {
-	identifiers := append(r._input.ID, r._input.Name...)
+	identifiers := append(r.input.ID, r.input.Name...)
 
 	if len(identifiers) == 0 {
 		return nil, &errs.DomainError{
@@ -69,6 +67,18 @@ func (r *KernelRequest) Resolve(ctx context.Context) (*ResolvedKernelInput, erro
 			Op:      "kernel",
 			Message: "No kernel identifiers provided",
 			Class:   errs.ClassValidation,
+		}
+	}
+
+	// Validate identifier length — max 64 chars.
+	for _, ident := range identifiers {
+		if len(ident) > 64 {
+			return nil, &errs.DomainError{
+				Code:    errs.CodeValidationFailed,
+				Op:      "kernel",
+				Message: fmt.Sprintf("Kernel identifier too long: '%s' exceeds maximum length of 64 characters", ident),
+				Class:   errs.ClassValidation,
+			}
 		}
 	}
 
@@ -84,11 +94,11 @@ func (r *KernelRequest) Resolve(ctx context.Context) (*ResolvedKernelInput, erro
 	}
 
 	force := false
-	if r._input.Force != nil {
-		force = *r._input.Force
+	if r.input.Force != nil {
+		force = *r.input.Force
 	}
 
-	r._result = &ResolvedKernelInput{
+	r.result = &ResolvedKernelInput{
 		Kernels: result.Items,
 		Force:   force,
 	}
@@ -98,11 +108,11 @@ func (r *KernelRequest) Resolve(ctx context.Context) (*ResolvedKernelInput, erro
 		return nil, err
 	}
 
-	return r._result, nil
+	return r.result, nil
 }
 
 func (r *KernelRequest) ensureValidate() error {
-	if r._result == nil {
+	if r.result == nil {
 		return &errs.DomainError{
 			Code:    errs.CodeKernelNotFound,
 			Op:      "kernel",
@@ -111,7 +121,7 @@ func (r *KernelRequest) ensureValidate() error {
 		}
 	}
 
-	if len(r._result.Kernels) == 0 {
+	if len(r.result.Kernels) == 0 {
 		return &errs.DomainError{
 			Code:    errs.CodeKernelNotFound,
 			Op:      "kernel",

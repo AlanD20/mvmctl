@@ -55,8 +55,8 @@ type ResolvedConfigInput struct {
 // Resolve ConfigInput against the database.
 type ConfigRequest struct {
 	db      *sql.DB
-	_input  ConfigInput
-	_result *ResolvedConfigInput
+	input  ConfigInput
+	result *ResolvedConfigInput
 	service *config.Service
 }
 
@@ -65,15 +65,12 @@ func NewConfigRequest(inputs ConfigInput, db *sql.DB) *ConfigRequest {
 	svc := config.NewService(config.NewRepository(db))
 	return &ConfigRequest{
 		db:      db,
-		_input:  inputs,
+		input:  inputs,
 		service: svc,
 	}
 }
 
 // Result returns the resolved input, or nil if resolve() has not been called.
-func (r *ConfigRequest) Result() *ResolvedConfigInput {
-	return r._result
-}
 
 // isKeyInCategory checks if a key is valid for a given category in OverridableSettings.
 func isKeyInCategory(category, key string) bool {
@@ -90,10 +87,10 @@ func isKeyInCategory(category, key string) bool {
 // Resolve resolves and validates config input.
 // Matches Python's ConfigRequest.resolve().
 func (r *ConfigRequest) Resolve(ctx context.Context) (*ResolvedConfigInput, error) {
-	category := r._input.Category
-	key := r._input.Key
+	category := r.input.Category
+	key := r.input.Key
 
-	if r._input.Action == "get" {
+	if r.input.Action == "get" {
 		if category == nil || *category == "" {
 			return nil, &errs.DomainError{
 				Code:    errs.CodeConfigError,
@@ -113,7 +110,7 @@ func (r *ConfigRequest) Resolve(ctx context.Context) (*ResolvedConfigInput, erro
 				}
 			}
 		}
-	} else if r._input.Action == "set" {
+	} else if r.input.Action == "set" {
 		if category == nil || *category == "" || key == nil || *key == "" {
 			return nil, &errs.DomainError{
 				Code:    errs.CodeConfigError,
@@ -122,7 +119,7 @@ func (r *ConfigRequest) Resolve(ctx context.Context) (*ResolvedConfigInput, erro
 				Class:   errs.ClassValidation,
 			}
 		}
-		if r._input.Value == nil {
+		if r.input.Value == nil {
 			return nil, &errs.DomainError{
 				Code:    errs.CodeConfigError,
 				Op:      "config",
@@ -140,8 +137,8 @@ func (r *ConfigRequest) Resolve(ctx context.Context) (*ResolvedConfigInput, erro
 				Class:   errs.ClassValidation,
 			}
 		}
-	} else if r._input.Action == "reset" {
-		if r._input.AllOverrides {
+	} else if r.input.Action == "reset" {
+		if r.input.AllOverrides {
 			// category and key are both optional for --all
 		} else if category == nil || *category == "" {
 			return nil, &errs.DomainError{
@@ -168,14 +165,14 @@ func (r *ConfigRequest) Resolve(ctx context.Context) (*ResolvedConfigInput, erro
 		}
 	}
 
-	r._result = &ResolvedConfigInput{
-		Action:       r._input.Action,
+	r.result = &ResolvedConfigInput{
+		Action:       r.input.Action,
 		Category:     category,
 		Key:          key,
-		Value:        r._input.Value,
-		AllOverrides: r._input.AllOverrides,
+		Value:        r.input.Value,
+		AllOverrides: r.input.AllOverrides,
 		Service:      r.service,
 	}
 
-	return r._result, nil
+	return r.result, nil
 }

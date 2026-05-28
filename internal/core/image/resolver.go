@@ -3,10 +3,10 @@ package image
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/version"
 )
 
 // RelationSpec corresponds to Python's RelationSpec dataclass in _enrichment.py.
@@ -154,18 +154,18 @@ func isImageNotFoundError(err error) bool {
 // Only ImageNotFoundError causes fallthrough to the next resolution method
 // — all other errors propagate immediately, matching Python's behavior.
 func (r *Resolver) Resolve(ctx context.Context, value string) (*ImageItem, error) {
-	prefix, rest, hasColon := parseSelector(value)
-	if hasColon {
-		// Python: if prefix is not None (None = no colon, "" = colon with empty prefix)
-		// Both cases enter this block since Python checks "is not None", and "" is not None.
-		image, err := r.ByVersionType(ctx, rest, prefix)
+	// Try "type:version" selector format first using the shared version parser.
+	name, ver := version.ParseSelector(value)
+	if name != "" && ver != "" {
+		image, err := r.ByVersionType(ctx, ver, name)
 		if err == nil {
 			return image, nil
 		}
 		if !isImageNotFoundError(err) {
 			return nil, err
 		}
-		value = prefix // Fall back to type-only lookup
+		// Fall through to type-only lookup with the type part
+		value = name
 	}
 
 	image, err := r.ByType(ctx, value)
@@ -189,6 +189,7 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*ImageItem, error
 
 // ResolveMany resolves multiple image identifiers.
 func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *ResolveResult {
+	// Dedup input identifiers (e.g. duplicate CLI args) before processing.
 	uniqueIDs := infra.Dedup(identifiers)
 
 	var items []*ImageItem
@@ -202,6 +203,9 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *Resol
 			continue
 		}
 		if !resolvedIDs[item.ID] {
+			// Dedup by DB record ID — different input identifiers may
+			// resolve to the same DB record (e.g. "image" and
+			// "image:ubuntu" when only ubuntu exists).
 			resolvedIDs[item.ID] = true
 			items = append(items, item)
 		}
@@ -221,16 +225,4 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *Resol
 	}
 }
 
-// parseSelector splits a "type:version" selector into its two parts.
-// Matches Python's VersionResolver.parse_selector() EXACTLY:
-//   - Returns ("", selector, false) when no colon is found (Python returns (None, selector))
-//   - Returns (prefix, rest, true) when a colon is found, even if prefix is ""
-//     (e.g. ":version" → ("", "version", true) — Python returns ("", "version")
-//      where "" is not None, so Python enters the fast path)
-func parseSelector(selector string) (string, string, bool) {
-	prefix, rest, found := strings.Cut(selector, ":")
-	if !found {
-		return "", selector, false // no colon: Python returns (None, selector)
-	}
-	return prefix, rest, true // has colon: Python returns (prefix, rest) where prefix may be ""
-}
+

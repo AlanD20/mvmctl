@@ -536,7 +536,7 @@ type bootArgsBuilder struct {
 func newBootArgsBuilder() *bootArgsBuilder {
 	return &bootArgsBuilder{
 		data:  make(map[string][]string),
-		order: make([]string, 0),
+		order: nil,
 	}
 }
 

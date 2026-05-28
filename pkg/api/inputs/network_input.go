@@ -40,8 +40,8 @@ type ResolvedNetworkInput struct {
 // Resolve network identifiers to DB records and validate.
 type NetworkRequest struct {
 	db       *sql.DB
-	_input   NetworkInput
-	_result  *ResolvedNetworkInput
+	input   NetworkInput
+	result  *ResolvedNetworkInput
 	resolver *network.Resolver
 }
 
@@ -54,20 +54,17 @@ type NetworkRequest struct {
 func NewNetworkRequest(inputs NetworkInput, db *sql.DB, networkRepo network.Repository) *NetworkRequest {
 	return &NetworkRequest{
 		db:       db,
-		_input:   inputs,
+		input:   inputs,
 		resolver: network.NewResolverWithInclude(networkRepo, []string{"leases"}),
 	}
 }
 
 // Result returns the resolved input, or nil if resolve() has not been called.
-func (r *NetworkRequest) Result() *ResolvedNetworkInput {
-	return r._result
-}
 
 // Resolve resolves network identifiers to NetworkItem records.
 // Matches Python's NetworkRequest.resolve().
 func (r *NetworkRequest) Resolve(ctx context.Context) (*ResolvedNetworkInput, error) {
-	identifiers := append(r._input.Name, r._input.ID...)
+	identifiers := append(r.input.Name, r.input.ID...)
 
 	if len(identifiers) == 0 {
 		return nil, &errs.DomainError{
@@ -97,9 +94,9 @@ func (r *NetworkRequest) Resolve(ctx context.Context) (*ResolvedNetworkInput, er
 		}
 	}
 
-	r._result = &ResolvedNetworkInput{
+	r.result = &ResolvedNetworkInput{
 		Networks: result.Items,
-		Force:    r._input.Force,
+		Force:    r.input.Force,
 	}
 
 	// Validate
@@ -107,11 +104,11 @@ func (r *NetworkRequest) Resolve(ctx context.Context) (*ResolvedNetworkInput, er
 		return nil, err
 	}
 
-	return r._result, nil
+	return r.result, nil
 }
 
 func (r *NetworkRequest) ensureValidate() error {
-	if r._result == nil {
+	if r.result == nil {
 		return &errs.DomainError{
 			Code:    errs.CodeNetworkNotFound,
 			Op:      "network",
@@ -120,7 +117,7 @@ func (r *NetworkRequest) ensureValidate() error {
 		}
 	}
 
-	if len(r._result.Networks) == 0 {
+	if len(r.result.Networks) == 0 {
 		return &errs.DomainError{
 			Code:    errs.CodeNetworkNotFound,
 			Op:      "network",

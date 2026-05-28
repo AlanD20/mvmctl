@@ -38,14 +38,14 @@ type VMImportInput struct {
 // Python delegates to VMCreateRequest for full resolution.
 type VMImportRequest struct {
 	db     *sql.DB
-	_input VMImportInput
+	input VMImportInput
 }
 
 // NewVMImportRequest creates a new VMImportRequest.
 func NewVMImportRequest(inputs VMImportInput, db *sql.DB) *VMImportRequest {
 	return &VMImportRequest{
 		db:     db,
-		_input: inputs,
+		input: inputs,
 	}
 }
 
@@ -58,7 +58,7 @@ func NewVMImportRequest(inputs VMImportInput, db *sql.DB) *VMImportRequest {
 //  4. Delegate to VMCreateRequest (VMCreateBuilder) for full resolution
 func (r *VMImportRequest) Resolve(ctx context.Context) (*VMCreateResolved, error) {
 	// 1. Read export config from JSON file
-	exportConfig, err := FromVMExportConfigJSONFile(r._input.ConfigPath)
+	exportConfig, err := FromVMExportConfigJSONFile(r.input.ConfigPath)
 	if err != nil {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeVMCreateFailed,
@@ -101,8 +101,8 @@ func (r *VMImportRequest) Resolve(ctx context.Context) (*VMCreateResolved, error
 
 	// 4. Build name
 	vmName := exportConfig.Name
-	if r._input.NameOverride != nil && *r._input.NameOverride != "" {
-		vmName = *r._input.NameOverride
+	if r.input.NameOverride != nil && *r.input.NameOverride != "" {
+		vmName = *r.input.NameOverride
 	}
 
 	// 5. Parse cpu_config from export JSON string (matching Python)

@@ -238,8 +238,8 @@ func (s *Service) BuildOfficialKernel(
 		return nil, err
 	}
 
-	warnings := make([]string, 0)
-	infoMessages := make([]string, 0)
+	var warnings []string
+	var infoMessages []string
 	if buildResult.ConfigResult != nil {
 		warnings = append(warnings, buildResult.ConfigResult.Warnings...)
 		infoMessages = append(infoMessages, buildResult.ConfigResult.InfoMessages...)
@@ -778,8 +778,8 @@ func makeSet(items []string) map[string]bool {
 // PrepareKernelConfig configures a kernel with Firecracker settings.
 // Matches Python's KernelService.prepare_kernel_config() including user_config_path parameter.
 func (s *Service) PrepareKernelConfig(ctx context.Context, kernelDir string, spec *model.KernelSpec, arch string, jobs int, userConfigPath *string, onStatus func(string)) (*KernelConfigResult, error) {
-	warnings := make([]string, 0)
-	infoMessages := make([]string, 0)
+	var warnings []string
+	var infoMessages []string
 	version := spec.Version
 	majorMinor := majorMinorFromVersion(version)
 	templateVars := map[string]string{
@@ -937,7 +937,7 @@ var buildLogPattern = regexp.MustCompile(`(?i)(warning|error|cannot find|undefin
 // Matches Python's KernelService.run_make_vmlinux().
 func (s *Service) RunMakeVmlinux(ctx context.Context, kernelDir, outputPath string, jobs int) (*KernelBuildResult, error) {
 	warnings := []string{"Building kernel... (this may take 10-30 minutes)"}
-	infoMessages := make([]string, 0)
+	var infoMessages []string
 	slog.Info("Building vmlinux", "jobs", jobs)
 	slog.Info("This may take 10-30 minutes")
 
