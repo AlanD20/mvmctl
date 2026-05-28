@@ -14,17 +14,17 @@ import (
 )
 
 // NewBinaryCmd creates the binary command and its subcommands.
-func NewBinaryCmd(binaryAPI *api.BinaryOperation) *cobra.Command {
+func NewBinaryCmd(op *api.Operation) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "bin",
 		Aliases: []string{"binary"},
 		Short:   "Binary management",
 	}
 
-	cmd.AddCommand(newBinaryLsCmd(binaryAPI))
-	cmd.AddCommand(newBinaryPullCmd(binaryAPI))
-	cmd.AddCommand(newBinaryRmCmd(binaryAPI))
-	cmd.AddCommand(newBinaryDefaultCmd(binaryAPI))
+	cmd.AddCommand(newBinaryLsCmd(op))
+	cmd.AddCommand(newBinaryPullCmd(op))
+	cmd.AddCommand(newBinaryRmCmd(op))
+	cmd.AddCommand(newBinaryDefaultCmd(op))
 
 	// Hidden help subcommand matching Python's Typer "help" command
 	helpCmd := &cobra.Command{
@@ -40,7 +40,7 @@ func NewBinaryCmd(binaryAPI *api.BinaryOperation) *cobra.Command {
 	return cmd
 }
 
-func newBinaryLsCmd(binaryAPI *api.BinaryOperation) *cobra.Command {
+func newBinaryLsCmd(op *api.Operation) *cobra.Command {
 	var jsonOutput bool
 	var longOutput bool
 	var remote bool
@@ -50,7 +50,7 @@ func newBinaryLsCmd(binaryAPI *api.BinaryOperation) *cobra.Command {
 		Use:   "ls",
 		Short: "List local (and optionally remote) Firecracker versions",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			local, err := binaryAPI.ListAll(cmd.Context())
+			local, err := op.BinaryListAll(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -97,7 +97,7 @@ func newBinaryLsCmd(binaryAPI *api.BinaryOperation) *cobra.Command {
 
 			if remote {
 				fmt.Fprintf(os.Stderr, "Fetching remote versions...\n")
-				remoteVersions, err := binaryAPI.ListRemote(cmd.Context(), limit)
+				remoteVersions, err := op.BinaryListRemote(cmd.Context(), limit)
 				if err != nil {
 					return err
 				}
@@ -149,7 +149,7 @@ func newBinaryLsCmd(binaryAPI *api.BinaryOperation) *cobra.Command {
 	return cmd
 }
 
-func newBinaryPullCmd(binaryAPI *api.BinaryOperation) *cobra.Command {
+func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 	var version string
 	var gitRef string
 	var setDefault bool
@@ -181,7 +181,7 @@ func newBinaryPullCmd(binaryAPI *api.BinaryOperation) *cobra.Command {
 				cli.Info("  The build output will appear below once it starts:\n")
 
 			gitRefPtr := &gitRef
-			result := binaryAPI.Pull(cmd.Context(), &inputs.BinaryPullInput{
+			result := op.BinaryPull(cmd.Context(), &inputs.BinaryPullInput{
 				Version:          "",
 				Name:             name,
 				GitRef:           gitRefPtr,
@@ -212,7 +212,7 @@ func newBinaryPullCmd(binaryAPI *api.BinaryOperation) *cobra.Command {
 			ver := version
 
 			dwldOverride := force
-			result := binaryAPI.Pull(cmd.Context(), &inputs.BinaryPullInput{
+			result := op.BinaryPull(cmd.Context(), &inputs.BinaryPullInput{
 				Version:          ver,
 				Name:             name,
 				SetDefault:       setDefault,
@@ -247,7 +247,7 @@ func newBinaryPullCmd(binaryAPI *api.BinaryOperation) *cobra.Command {
 					}
 				}
 				if confirmed {
-				result = binaryAPI.Pull(cmd.Context(), &inputs.BinaryPullInput{
+				result = op.BinaryPull(cmd.Context(), &inputs.BinaryPullInput{
 					Version:          ver,
 					Name:             name,
 					SetDefault:       setDefault,
@@ -297,7 +297,7 @@ func newBinaryPullCmd(binaryAPI *api.BinaryOperation) *cobra.Command {
 	return cmd
 }
 
-func newBinaryRmCmd(binaryAPI *api.BinaryOperation) *cobra.Command {
+func newBinaryRmCmd(op *api.Operation) *cobra.Command {
 	var version string
 	var force bool
 
@@ -310,7 +310,7 @@ func newBinaryRmCmd(binaryAPI *api.BinaryOperation) *cobra.Command {
 		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if version != "" {
-				result := binaryAPI.RemoveByVersion(cmd.Context(), version, force)
+				result := op.BinaryRemoveByVersion(cmd.Context(), version, force)
 				if result.IsError() {
 					cli.Error(result.Message)
 					return fmt.Errorf("%s", result.Message)
@@ -325,7 +325,7 @@ func newBinaryRmCmd(binaryAPI *api.BinaryOperation) *cobra.Command {
 				return fmt.Errorf("usage error")
 			}
 
-		batchResult := binaryAPI.Remove(cmd.Context(), &inputs.BinaryInput{Identifiers: effectiveIDs}, force)
+		batchResult := op.BinaryRemove(cmd.Context(), &inputs.BinaryInput{Identifiers: effectiveIDs}, force)
 		for _, r := range batchResult.Items {
 			if r.Status == "success" {
 				msg := r.Message
@@ -354,7 +354,7 @@ func newBinaryRmCmd(binaryAPI *api.BinaryOperation) *cobra.Command {
 	return cmd
 }
 
-func newBinaryDefaultCmd(binaryAPI *api.BinaryOperation) *cobra.Command {
+func newBinaryDefaultCmd(op *api.Operation) *cobra.Command {
 	return &cobra.Command{
 		Use:                "default [identifier]",
 		Short:              "Set a binary as the active default",
@@ -363,7 +363,7 @@ func newBinaryDefaultCmd(binaryAPI *api.BinaryOperation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 
-			result := binaryAPI.SetDefault(cmd.Context(), &inputs.BinaryInput{Identifiers: []string{identifier}})
+			result := op.BinarySetDefault(cmd.Context(), &inputs.BinaryInput{Identifiers: []string{identifier}})
 			if result.IsError() {
 				cli.Error(result.Message)
 				return fmt.Errorf("%s", result.Message)

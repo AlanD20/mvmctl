@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -21,10 +21,6 @@ const BootstrapName = "mvmctl"
 // resolution for Nuitka console_scripts entry points), the binary name is
 // always "mvm" — a compiled Go binary has one name.
 const CLIName = "mvm"
-
-// MVMUnixGroup is the Unix group name for mvm privilege management.
-// In Go this is always the same as the CLI name.
-const MVMUnixGroup = CLIName
 
 // ProjectNameDefault is the compile-time constant default for the project name.
 const ProjectNameDefault = "mvmctl"
@@ -37,6 +33,10 @@ const ProjectNameDefault = "mvmctl"
 // This matches Python's PROJECT_NAME which resolves from importlib.metadata
 // or falls back to _BOOTSTRAP_NAME ("mvmctl").
 var ProjectName = ProjectNameDefault
+
+// MVMUnixGroup is the Unix group name for mvm privilege management.
+// In Go this is always the same as the CLI name.
+const MVMUnixGroup = CLIName
 
 const MVMDBFilename = "mvmdb.db"
 
@@ -57,11 +57,11 @@ func SudoersDropInPath() string {
 }
 
 // ── User-overridable defaults ──
-var OverridableDefaults = map[string]map[string]interface{}{
+var OverridableDefaults = map[string]map[string]any{
 	"settings.vm": {
-		"max_vms":     1000,
-		"log_lines":   50,
-		"log_follow":  false,
+		"max_vms":    1000,
+		"log_lines":  50,
+		"log_follow": false,
 	},
 	"defaults.vm": {
 		"vcpu_count":       1,
@@ -107,12 +107,12 @@ var OverridableDefaults = map[string]map[string]interface{}{
 		"metrics_filename":        "firecracker.metrics",
 		"api_socket_filename":     "firecracker.api.socket",
 		"pid_filename":            "firecracker.pid",
-		"config_filename":        "firecracker.json",
+		"config_filename":         "firecracker.json",
 		"console_socket_filename": "console.sock",
-		"console_pid_filename":   "console.pid",
+		"console_pid_filename":    "console.pid",
 	},
 	"defaults.cloudinit": {
-		"iso_name":                "cloud-init.iso",
+		"iso_name":                 "cloud-init.iso",
 		"nocloud_port_range_start": 8000,
 		"nocloud_port_range_end":   9000,
 		"nocloud_max_port_retries": 100,
@@ -132,7 +132,7 @@ var OverridableDefaults = map[string]map[string]interface{}{
 	},
 }
 
-func GetDefault(category, key string) (interface{}, error) {
+func GetDefault(category, key string) (any, error) {
 	cat, ok := OverridableDefaults[category]
 	if !ok {
 		return nil, fmt.Errorf("default category not found: %s", category)
@@ -175,7 +175,7 @@ const HTTPChunkSize = 1 << 20 // 1 MiB
 const HTTPMaxRetries = 3
 const HTTPRetryDelay = 1 * time.Second
 const HTTPBackoffFactor = 2
-const DefaultUserAgent = "mvm/dev"
+const DefaultUserAgent = "mvmctl/dev"
 const SocketTimeoutSeconds = 5.0
 const PollStepSeconds = 0.1
 
@@ -249,20 +249,20 @@ var SupportedImageExtensions = []string{
 
 // ── Image import format map ──
 var ImageImportFormatMap = map[string]string{
-	".qcow2": "qcow2",
-	".raw":   "raw",
-	".img":   "raw",
-	".ext4":  "raw",
-	".ext3":  "raw",
-	".ext2":  "raw",
-	".btrfs": "raw",
-	".xfs":   "raw",
-	".vhd":   "vhd",
-	".vhdx":  "vhdx",
-	".tar":   "tar-rootfs",
-	".tar.gz":  "tar-rootfs",
-	".tar.xz":  "tar-rootfs",
-	".tgz":     "tar-rootfs",
+	".qcow2":  "qcow2",
+	".raw":    "raw",
+	".img":    "raw",
+	".ext4":   "raw",
+	".ext3":   "raw",
+	".ext2":   "raw",
+	".btrfs":  "raw",
+	".xfs":    "raw",
+	".vhd":    "vhd",
+	".vhdx":   "vhdx",
+	".tar":    "tar-rootfs",
+	".tar.gz": "tar-rootfs",
+	".tar.xz": "tar-rootfs",
+	".tgz":    "tar-rootfs",
 }
 
 // ── Binary size ──
@@ -283,13 +283,13 @@ const FirecrackerGitRepoURL = "https://github.com/firecracker-microvm/firecracke
 
 // ── Privileged system binaries ──
 var PrivilegedBinaries = map[string]string{
-	"/usr/sbin/ip":              "iproute2",
-	"/usr/sbin/iptables":        "iptables",
+	"/usr/sbin/ip":               "iproute2",
+	"/usr/sbin/iptables":         "iptables",
 	"/usr/sbin/iptables-restore": "iptables",
-	"/usr/sbin/iptables-save":   "iptables",
-	"/usr/sbin/nft":             "nftables",
-	"/usr/sbin/sysctl":          "procps",
-	"/usr/sbin/modprobe":        "kmod",
+	"/usr/sbin/iptables-save":    "iptables",
+	"/usr/sbin/nft":              "nftables",
+	"/usr/sbin/sysctl":           "procps",
+	"/usr/sbin/modprobe":         "kmod",
 }
 
 // ── Init binaries ──
@@ -333,22 +333,7 @@ func IsDebugMode() bool   { return debugMode }
 
 // ── Compiled mode ──
 //
-// IsCompiledMode returns true if the binary is running in compiled (release)
-// mode vs development mode. Python's detection checks three things:
-//   1. sys.frozen (Nuitka frozen mode)
-//   2. builtins.__compiled__ (Nuitka sets this for compiled code)
-//   3. /onefile_ in sys.executable path (Nuitka onefile extraction)
-//
-// For Go, there is no direct equivalent. Go is always compiled.
-// We return true if the build version was explicitly set (via -ldflags),
-// indicating a release build. Otherwise return false to match the default
-// Python behavior when none of the Nuitka-specific checks trigger.
-var compiledOnce sync.Once
-var compiledVal bool
 
-func IsCompiledMode() bool {
-	return false
-}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Environment variable access
@@ -393,17 +378,6 @@ func ensureDirAndChown(path string) error {
 	return nil
 }
 
-// isSubDir checks if target is a subdirectory of base (or equal to base).
-// Uses proper path containment, avoiding false positives from prefix matching.
-func isSubDir(base, target string) bool {
-	base = filepath.Clean(base)
-	target = filepath.Clean(target)
-	if target == base {
-		return true
-	}
-	return strings.HasPrefix(target, base+string(filepath.Separator))
-}
-
 func GetRealHome() string {
 	sudoUser := os.Getenv("SUDO_USER")
 	if sudoUser != "" {
@@ -419,29 +393,12 @@ func GetRealHome() string {
 	return home
 }
 
-func getCacheDirSafe() string {
-	override, ok := EnvGet("CACHE_DIR")
-	if ok && override != "" {
-		return override
-	}
-	return filepath.Join(GetRealHome(), ".cache", ProjectName)
-}
-
 func GetCacheDir() (string, error) {
 	override, ok := EnvGet("CACHE_DIR")
 	if ok && override != "" {
 		resolved, err := filepath.Abs(override)
 		if err != nil {
 			return "", fmt.Errorf("invalid cache dir path: %w", err)
-		}
-		home := GetRealHome()
-		tmpDir := "/tmp"
-		varTmp := "/var/tmp"
-		if !isSubDir(home, resolved) &&
-			!isSubDir(tmpDir, resolved) &&
-			!isSubDir(varTmp, resolved) {
-			return "", fmt.Errorf("Unsafe %s path '%s': must be under $HOME (%s), /tmp, or /var/tmp",
-				EnvKey("CACHE_DIR"), override, home)
 		}
 		// Ensure the directory exists with proper permissions (matching
 		// Python's CacheUtils.resolve_dir which creates the directory).
@@ -464,15 +421,6 @@ func GetConfigDir() (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("invalid config dir path: %w", err)
 		}
-		home := GetRealHome()
-		tmpDir := "/tmp"
-		varTmp := "/var/tmp"
-		if !isSubDir(home, resolved) &&
-			!isSubDir(tmpDir, resolved) &&
-			!isSubDir(varTmp, resolved) {
-			return "", fmt.Errorf("Unsafe %s path '%s': must be under $HOME (%s), /tmp, or /var/tmp",
-				EnvKey("CONFIG_DIR"), override, home)
-		}
 		// Ensure the directory exists with proper permissions (matching
 		// Python's CacheUtils.resolve_dir which creates the directory).
 		if err := ensureDirAndChown(resolved); err != nil {
@@ -485,14 +433,6 @@ func GetConfigDir() (string, error) {
 		return "", fmt.Errorf("create default config dir: %w", err)
 	}
 	return path, nil
-}
-
-func GetConfigPath() string {
-	configDir, err := GetConfigDir()
-	if err != nil {
-		configDir = filepath.Join(GetRealHome(), ".config", ProjectName)
-	}
-	return filepath.Join(configDir, "config.json")
 }
 
 func GetMvmDBPath() string {
@@ -516,22 +456,6 @@ func GetTempDir() string {
 		slog.Warn("failed to create temp directory", "path", path, "error", err)
 	}
 	return path
-}
-
-// GetDefaultCacheDir returns the default cache directory path.
-// Checks MVM_CACHE_DIR env var first, then falls back to ~/.cache/mvmctl
-// (or /tmp/mvmctl if home directory cannot be determined).
-// Matches Python's HostDetector._get_default_cache_dir().
-func GetDefaultCacheDir() string {
-	cacheDir := EnvGetDefault("CACHE_DIR", "")
-	if cacheDir != "" {
-		return cacheDir
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "/tmp/mvmctl"
-	}
-	return filepath.Join(home, ".cache", ProjectName)
 }
 
 func GetVmsDir() string {
@@ -635,7 +559,9 @@ func GetLogPath() string {
 	if err != nil {
 		cacheDir = filepath.Join(GetRealHome(), ".cache", ProjectName)
 	}
-	return filepath.Join(cacheDir, "mvmctl.log")
+	logPath := filepath.Join(cacheDir, "mvmctl.log")
+	os.MkdirAll(filepath.Dir(logPath), 0755)
+	return logPath
 }
 
 func GetTimingLogPath() string {
@@ -679,7 +605,10 @@ var DangerousChars = func() map[rune]bool {
 	for _, c := range "./~\\" {
 		chars[c] = true
 	}
-	for i := 0; i < 32; i++ {
+	for i := range 32 {
+		chars[rune(i)] = true
+	}
+	for i := range 32 {
 		chars[rune(i)] = true
 	}
 	chars[127] = true
@@ -705,11 +634,12 @@ func IsReservedName(name string) bool {
 
 var _controlChars = func() map[rune]bool {
 	chars := make(map[rune]bool)
-	for i := 0; i < 32; i++ {
+	for i := range 32 {
 		chars[rune(i)] = true
 	}
 	chars[127] = true
-	return chars}()
+	return chars
+}()
 
 var _zeroWidthChars = map[rune]bool{
 	'\u200b': true,
@@ -748,7 +678,7 @@ func SanitizeForLog(value string) string {
 //   - identity (already correct type): returns as-is
 //
 // target is a string like "bool", "int", "float", "string", "map", "nil".
-func Coerce(value interface{}, target string) (interface{}, error) {
+func Coerce(value any, target string) (any, error) {
 	switch target {
 	case "bool":
 		switch v := value.(type) {
@@ -837,7 +767,7 @@ func Coerce(value interface{}, target string) (interface{}, error) {
 	}
 }
 
-func CoerceBoolFields(instance map[string]interface{}, fieldNames []string) {
+func CoerceBoolFields(instance map[string]any, fieldNames []string) {
 	for _, name := range fieldNames {
 		if val, ok := instance[name]; ok {
 			switch v := val.(type) {
@@ -908,15 +838,13 @@ func GenerateBatchNames(baseName string, count int) []string {
 	return names
 }
 
-func DeepMergeDict(base, override map[string]interface{}) map[string]interface{} {
-	result := make(map[string]interface{})
-	for k, v := range base {
-		result[k] = v
-	}
+func DeepMergeDict(base, override map[string]any) map[string]any {
+	result := make(map[string]any)
+	maps.Copy(result, base)
 	for key, overrideVal := range override {
 		if existingVal, ok := result[key]; ok {
-			if existingMap, ok1 := existingVal.(map[string]interface{}); ok1 {
-				if overrideMap, ok2 := overrideVal.(map[string]interface{}); ok2 {
+			if existingMap, ok1 := existingVal.(map[string]any); ok1 {
+				if overrideMap, ok2 := overrideVal.(map[string]any); ok2 {
 					result[key] = DeepMergeDict(existingMap, overrideMap)
 					continue
 				}
@@ -932,7 +860,7 @@ func NumCPU() int {
 	return runtime.NumCPU()
 }
 
-func SafeInt(value interface{}, defaultVal int) int {
+func SafeInt(value any, defaultVal int) int {
 	switch v := value.(type) {
 	case int:
 		return v
@@ -945,5 +873,3 @@ func SafeInt(value interface{}, defaultVal int) int {
 	}
 	return defaultVal
 }
-
-

@@ -2,80 +2,32 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra"
-	versionpkg "mvmctl/internal/infra/version"
+	"mvmctl/internal/infra/db"
+	"mvmctl/internal/infra/system"
+	infraversion "mvmctl/internal/infra/version"
 	"mvmctl/pkg/api"
 
 	"github.com/spf13/cobra"
 )
 
-// vmAPIRef holds a reference to the VM API for shell completion.
+// ── Global state ─────────────────────────────────────────────────────────────
+// Matching Python's module-level helpers and lazy imports.
+
+// opRef holds a reference to the Operation API for shell completion.
 // Set during wiring in NewRootCmd.
-var vmAPIRef *api.VMOperation
+var opRef *api.Operation
 
-// networkAPIRef holds a reference to the Network API for shell completion.
-var networkAPIRef *api.NetworkOperation
-
-// imageAPIRef holds a reference to the Image API for shell completion.
-var imageAPIRef *api.ImageOperation
-
-// kernelAPIRef holds a reference to the Kernel API for shell completion.
-var kernelAPIRef *api.KernelOperation
-
-// binaryAPIRef holds a reference to the Binary API for shell completion.
-var binaryAPIRef *api.BinaryOperation
-
-// keyAPIRef holds a reference to the Key API for shell completion.
-var keyAPIRef *api.KeyOperation
-
-// volumeAPIRef holds a reference to the Volume API for shell completion.
-var volumeAPIRef *api.VolumeOperation
-
-// configAPIRef holds a reference to the Config API for shell completion.
-var configAPIRef *api.ConfigOperation
-
-// vmAPICtxKey is the context key for storing the VM API.
-type vmAPICtxKey struct{}
-
-// WithVMAPI stores the VM API in the context for shell completion.
-func WithVMAPI(ctx context.Context, vmAPI *api.VMOperation) context.Context {
-	return context.WithValue(ctx, vmAPICtxKey{}, vmAPI)
-}
-
-// GetVMAPIFromCmd retrieves the VM API from a command's context.
-func GetVMAPIFromCmd(cmd *cobra.Command) *api.VMOperation {
-	if vmAPI, ok := cmd.Context().Value(vmAPICtxKey{}).(*api.VMOperation); ok {
-		return vmAPI
-	}
-	return nil
-}
+// ── Root command ─────────────────────────────────────────────────────────────
+// Matching Python's LazyMVMGroup + app() + subcommands.
 
 // NewRootCmd creates the root command matching Python's LazyMVMGroup + app().
-func NewRootCmd(
-	vmAPI *api.VMOperation,
-	networkAPI *api.NetworkOperation,
-	imageAPI *api.ImageOperation,
-	kernelAPI *api.KernelOperation,
-	binaryAPI *api.BinaryOperation,
-	keyAPI *api.KeyOperation,
-	hostAPI *api.HostOperation,
-	configAPI *api.ConfigOperation,
-	consoleAPI *api.ConsoleOperation,
-	logAPI *api.LogOperation,
-	volumeAPI *api.VolumeOperation,
-	cacheAPI *api.CacheOperation,
-	sshAPI *api.SSHOperation,
-	cpAPI *api.CPOperation,
-	initAPI *api.InitOperation,
-	version string,
-) *cobra.Command {
+func NewRootCmd(op *api.Operation) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           infra.CLIName,
 		Short:         "MicroVM Manager - Container speed, VM Isolation",
@@ -93,21 +45,56 @@ func NewRootCmd(
 	cmd.PersistentFlags().Bool("debug", false, "Enable debug mode")
 
 	// Version flag matching Python (not persistent, just on root)
+	// Python's _version_callback is is_eager=True and runs BEFORE app().
+	// In Cobra, we handle it in RunE: the PersistentPreRunE short-circuits
+	// when --version is set, and the RunE prints the version.
 	var showVersion bool
 	cmd.Flags().BoolVar(&showVersion, "version", false, "Show version and exit")
 	originalRunE := cmd.RunE
 	cmd.RunE = func(c *cobra.Command, args []string) error {
 		if showVersion {
-			// Python: click.echo(f"{_get_cli_name()} {_get_version()}")
-			// Use canonical FormatVersion from infra, matching Python _get_version().
-			fmt.Printf("%s %s\n", infra.CLIName, versionpkg.FormatVersion(version))
+			fmt.Printf("%s %s\n", infra.CLIName, infraversion.FormatVersion(infraversion.GetVersion()))
 			return nil
 		}
 		return originalRunE(c, args)
 	}
 
 	// PersistentPreRunE: logging setup + DB check + root warning matching Python app()
-	cmd.PersistentPreRunE = func(c *cobra.Command, args []string) error {
+	cmd.PersistentPreRunE = makePersistentPreRunE()
+
+	// Subcommands matching Python's help_cmd, version_cmd, completion_cmd
+	cmd.SetHelpCommand(newHelpCmd())
+	cmd.AddCommand(newVersionCmd())
+	cmd.AddCommand(newCompletionCmd())
+
+	// Store API reference for shell completion
+	opRef = op
+
+	// Register all domain subcommand groups matching Python's _COMMAND_SPECS
+	cmd.AddCommand(NewVMCmd(op))
+	cmd.AddCommand(NewNetworkCmd(op))
+	cmd.AddCommand(NewImageCmd(op))
+	cmd.AddCommand(NewKernelCmd(op))
+	cmd.AddCommand(NewBinaryCmd(op))
+	cmd.AddCommand(NewKeyCmd(op))
+	cmd.AddCommand(NewHostCmd(op))
+	cmd.AddCommand(NewConfigCmd(op))
+	cmd.AddCommand(NewConsoleCmd(op))
+	cmd.AddCommand(NewLogsCmd(op))
+	cmd.AddCommand(NewVolumeCmd(op, op))
+	cmd.AddCommand(NewCacheCmd(op))
+	cmd.AddCommand(NewSSHCmd(op))
+	cmd.AddCommand(NewCpCmd(op))
+	cmd.AddCommand(NewInitCmd(op))
+
+	return cmd
+}
+
+// ── PersistentPreRunE ────────────────────────────────────────────────────────
+// Matching Python's app() callback in main.py lines 300-337.
+
+func makePersistentPreRunE() func(*cobra.Command, []string) error {
+	return func(c *cobra.Command, args []string) error {
 		// Python's _version_callback is is_eager=True and runs BEFORE app().
 		// Short-circuit everything when --version is set — no logging setup,
 		// no DB check. Version output happens in RunE.
@@ -116,6 +103,7 @@ func NewRootCmd(
 		}
 
 		// If this is the root (no subcommand), skip completely — help is shown in RunE
+		// Matching Python: if ctx.invoked_subcommand is None: ctx.command.format_help(...); ctx.exit()
 		subCmd := c.CalledAs()
 		if subCmd == "" || subCmd == c.CommandPath() {
 			return nil
@@ -125,24 +113,18 @@ func NewRootCmd(
 		// Python uses ctx.invoked_subcommand which returns the first-level subcommand name
 		// (e.g., "host" for "mvm host init"). In Cobra, we check the command path to match
 		// Python's behavior of skipping ALL commands under 'host' and 'cache' groups.
-		skipCmdPath := false
-		for cc := c; cc != nil; cc = cc.Parent() {
-			if cc.Name() == "help" || cc.Name() == "version" || cc.Name() == "init" ||
-				cc.Name() == "completion" || cc.Name() == "host" || cc.Name() == "cache" {
-				skipCmdPath = true
-				break
-			}
-		}
-		if skipCmdPath {
+		if shouldSkipPreRun(c) {
 			return nil
 		}
 
 		// Warn if running as root (matching Python _warn_if_running_as_root)
-		// Python uses env.get("ESCALATED") which with auto_envvar_prefix="MVM_" resolves to "MVM_ESCALATED".
-		if os.Getuid() == 0 && os.Getenv("MVM_ESCALATED") == "" {
-			common.MVMCLI.Warning(
-				fmt.Sprintf("Warning: running as root. Consider using the '%s' group instead (set up via 'sudo %s host init').",
-					infra.CLIName, infra.CLIName))
+		if system.IsRoot() {
+			_, escalated := infra.EnvGet("ESCALATED")
+			if !escalated {
+				common.MVMCLI.Warning(
+					fmt.Sprintf("Warning: running as root. Consider using the '%s' group instead (set up via 'sudo %s host init').",
+						infra.CLIName, infra.CLIName))
+			}
 		}
 
 		// Setup debug mode and logging (matching Python's set_debug_mode + setup_logging)
@@ -153,21 +135,34 @@ func NewRootCmd(
 
 		// Check that the database exists (matching Python lines 329-337).
 		// Python: click.echo("Error: '...' requires initialization...", err=True); ctx.exit(1)
-		cacheDir, err := infra.GetCacheDir()
-		if err != nil {
-			return fmt.Errorf("cannot resolve cache directory: %w", err)
-		}
-		dbPath := filepath.Join(cacheDir, infra.MVMDBFilename)
-		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		if opRef != nil && !db.DBExists(opRef.CacheDir) {
 			return fmt.Errorf("'%s %s' requires initialization. Run '%s init' first",
 				infra.CLIName, subCmd, infra.CLIName)
 		}
 
 		return nil
 	}
+}
 
-	// Custom help command matching Python help_cmd()
-	cmd.SetHelpCommand(&cobra.Command{
+// shouldSkipPreRun checks if the command path should skip PersistentPreRunE
+// setup. Matches Python app() lines 310-318 skip logic.
+func shouldSkipPreRun(c *cobra.Command) bool {
+	for cc := c; cc != nil; cc = cc.Parent() {
+		if cc.Name() == "help" || cc.Name() == "version" || cc.Name() == "init" ||
+			cc.Name() == "completion" || cc.Name() == "host" || cc.Name() == "cache" {
+			return true
+		}
+	}
+	return false
+}
+
+// ── Subcommands ──────────────────────────────────────────────────────────────
+// Matching Python's help_cmd, version_cmd, completion_cmd.
+
+// newHelpCmd creates the help subcommand matching Python's help_cmd().
+func newHelpCmd() *cobra.Command {
+	// Python: @click.command(name="help", help=f"Show help for {_get_cli_name()} or a subcommand")
+	return &cobra.Command{
 		Use:   "help [command]",
 		Short: fmt.Sprintf("Show help for %s or a subcommand", infra.CLIName),
 		Args:  cobra.ArbitraryArgs,
@@ -181,7 +176,6 @@ func NewRootCmd(
 			for _, arg := range args {
 				subCmd, _, err := command.Traverse([]string{arg})
 				if err != nil || subCmd == nil || subCmd == command {
-					// Python: click.echo(f"Unknown command: {' '.join(args)}", err=True) then ctx.exit(1)
 					return fmt.Errorf("Unknown command: %s", strings.Join(args, " "))
 				}
 				command = subCmd
@@ -191,24 +185,21 @@ func NewRootCmd(
 			}
 			return nil
 		},
-	})
+	}
+}
 
-	// Version subcommand matching Python version_cmd()
-	// versionCmd matches Python version_cmd() in main.py lines 364-375.
-	versionCmd := &cobra.Command{
+// newVersionCmd creates the version subcommand matching Python's version_cmd().
+func newVersionCmd() *cobra.Command {
+	// Python: @click.command(name="version", help="Show the version and exit")
+	return &cobra.Command{
 		Use:   "version",
 		Short: "Show the version and exit",
 		RunE: func(c *cobra.Command, args []string) error {
-			// Python: version = _get_version()
-			// Use canonical FormatVersion from infra, matching Python _get_version().
-			fullVersion := versionpkg.FormatVersion(version)
-			// Python: git_info = _get_git_version_info()
-			gitInfo := versionpkg.GetGitVersionInfo()
+			fullVersion := infraversion.FormatVersion(infraversion.GetVersion())
+			gitInfo := infraversion.GetGitVersionInfo()
 
-			// Python: click.echo(f"{_get_cli_name()} {version}")
 			fmt.Printf("%s %s\n", infra.CLIName, fullVersion)
 
-			// Python: if git_info: ... click.echo(...)
 			if gitInfo != "" {
 				if strings.HasPrefix(gitInfo, "git+") {
 					fmt.Printf("  built from: %s\n", gitInfo[4:])
@@ -219,11 +210,13 @@ func NewRootCmd(
 			return nil
 		},
 	}
-	cmd.AddCommand(versionCmd)
+}
 
-	// Shell completion subcommand matching Python completion_cmd()
-	// Uses Cobra's built-in completion generators instead of hardcoded scripts.
-	completionCmd := &cobra.Command{
+// newCompletionCmd creates the completion subcommand matching Python's completion_cmd().
+// Uses Cobra's built-in completion generators instead of hardcoded scripts.
+func newCompletionCmd() *cobra.Command {
+	// Python: @click.command(name="completion", help="Print shell completion script")
+	return &cobra.Command{
 		Use:   "completion [bash|zsh|fish|powershell]",
 		Short: "Generate shell completion script",
 		Long: fmt.Sprintf(`Generate shell completion script for %[1]s.
@@ -243,7 +236,7 @@ For fish:
 For PowerShell:
 
     %[1]s completion powershell | Out-String | Invoke-Expression`, infra.CLIName),
-		Args:      cobra.ExactValidArgs(1),
+		Args:      cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
 		ValidArgs: []string{"bash", "zsh", "fish", "powershell"},
 		RunE: func(c *cobra.Command, args []string) error {
 			shell := args[0]
@@ -262,34 +255,4 @@ For PowerShell:
 			}
 		},
 	}
-	cmd.AddCommand(completionCmd)
-
-	// Store API references for shell completion
-	vmAPIRef = vmAPI
-	networkAPIRef = networkAPI
-	imageAPIRef = imageAPI
-	kernelAPIRef = kernelAPI
-	binaryAPIRef = binaryAPI
-	keyAPIRef = keyAPI
-	volumeAPIRef = volumeAPI
-	configAPIRef = configAPI
-
-	// Register all subcommand groups
-	cmd.AddCommand(NewVMCmd(vmAPI, configAPI))
-	cmd.AddCommand(NewNetworkCmd(networkAPI))
-	cmd.AddCommand(NewImageCmd(imageAPI))
-	cmd.AddCommand(NewKernelCmd(kernelAPI))
-	cmd.AddCommand(NewBinaryCmd(binaryAPI))
-	cmd.AddCommand(NewKeyCmd(keyAPI))
-	cmd.AddCommand(NewHostCmd(hostAPI))
-	cmd.AddCommand(NewConfigCmd(configAPI))
-	cmd.AddCommand(NewConsoleCmd(consoleAPI))
-	cmd.AddCommand(NewLogsCmd(logAPI))
-	cmd.AddCommand(NewVolumeCmd(volumeAPI, configAPI))
-	cmd.AddCommand(NewCacheCmd(cacheAPI))
-	cmd.AddCommand(NewSSHCmd(sshAPI))
-	cmd.AddCommand(NewCpCmd(cpAPI))
-	cmd.AddCommand(NewInitCmd(initAPI))
-
-	return cmd
 }

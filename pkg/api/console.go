@@ -4,11 +4,9 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"io"
 
-	"mvmctl/internal/core/vm"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/logging"
@@ -17,29 +15,12 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// ConsoleOperation provides console relay orchestration for VM console access.
-// Matches Python's ConsoleOperation exactly.
-type ConsoleOperation struct {
-	vmRepo   vm.Repository
-	db       *sql.DB
-	cacheDir string
-}
-
-// NewConsoleOperation creates a ConsoleOperation.
-func NewConsoleOperation(vmRepo vm.Repository, db *sql.DB, cacheDir string) *ConsoleOperation {
-	return &ConsoleOperation{
-		vmRepo:   vmRepo,
-		db:       db,
-		cacheDir: cacheDir,
-	}
-}
-
-// GetState returns console relay state for a VM.
+// ConsoleGetState returns console relay state for a VM.
 // Matches Python's ConsoleOperation.get_state() exactly.
 // Python returns a raw dict with running, pid, socket_path.
 // On VM not found, raises VMNotFoundError — Go returns error.
-func (o *ConsoleOperation) GetState(ctx context.Context, identifier string) (map[string]interface{}, error) {
-	resolved, err := o.resolveWithRequest(ctx, identifier)
+func (op *Operation) ConsoleGetState(ctx context.Context, identifier string) (map[string]interface{}, error) {
+	resolved, err := op.resolveWithRequest(ctx, identifier)
 	if err != nil {
 		return nil, err
 	}
@@ -51,11 +32,11 @@ func (o *ConsoleOperation) GetState(ctx context.Context, identifier string) (map
 	}, nil
 }
 
-// GetConnectionInfo returns connection info for VM console relay.
+// ConsoleGetConnectionInfo returns connection info for VM console relay.
 // Matches Python's ConsoleOperation.get_connection_info() exactly.
 // Raises MVMError if console relay is not running — Go returns DomainError.
-func (o *ConsoleOperation) GetConnectionInfo(ctx context.Context, identifier string) (*model.ConsoleConnectionInfo, error) {
-	resolved, err := o.resolveWithRequest(ctx, identifier)
+func (op *Operation) ConsoleGetConnectionInfo(ctx context.Context, identifier string) (*model.ConsoleConnectionInfo, error) {
+	resolved, err := op.resolveWithRequest(ctx, identifier)
 	if err != nil {
 		return nil, err
 	}
@@ -76,13 +57,13 @@ func (o *ConsoleOperation) GetConnectionInfo(ctx context.Context, identifier str
 	}, nil
 }
 
-// Kill stops the console relay for a VM.
+// ConsoleKill stops the console relay for a VM.
 // Matches Python's ConsoleOperation.kill() exactly.
 // Python: raises MVMError on resolution failure or returns OperationResult[bool].
 // Go: returns (*OperationResult, error). Resolution errors propagate as error
 // (not wrapped in OperationResult), matching Python's exception propagation.
-func (o *ConsoleOperation) Kill(ctx context.Context, identifier string) (*errs.OperationResult, error) {
-	resolved, err := o.resolveWithRequest(ctx, identifier)
+func (op *Operation) ConsoleKill(ctx context.Context, identifier string) (*errs.OperationResult, error) {
+	resolved, err := op.resolveWithRequest(ctx, identifier)
 	if err != nil {
 		// Python: ConsoleRequest(...).resolve() raises MVMError on resolution
 		// failure. In Go, this propagates as a Go error — not wrapped in
@@ -101,7 +82,7 @@ func (o *ConsoleOperation) Kill(ctx context.Context, identifier string) (*errs.O
 
 	killed := resolved.Relay.Stop(true)
 	if killed {
-		auditLog := logging.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(op.CacheDir)
 		// Python: AuditLog.log("console.kill", changes={"name": identifier})
 		_ = auditLog.LogOperation("console.kill", map[string]interface{}{"name": identifier}, "")
 		return &errs.OperationResult{
@@ -120,10 +101,10 @@ func (o *ConsoleOperation) Kill(ctx context.Context, identifier string) (*errs.O
 	}, nil
 }
 
-// AttachConsole attaches to a running console relay in interactive mode.
+// ConsoleAttachConsole attaches to a running console relay in interactive mode.
 // Matches Python's CLI _interact() — sets terminal to raw mode, forwards
 // stdin→relay and relay→stdout, detaches on Ctrl+X then D.
-func (o *ConsoleOperation) AttachConsole(ctx context.Context, socketPath string, stdin io.Reader, stdout io.Writer) error {
+func (op *Operation) ConsoleAttachConsole(ctx context.Context, socketPath string, stdin io.Reader, stdout io.Writer) error {
 	return console.InteractiveAttach(ctx, socketPath, stdin, stdout)
 }
 
@@ -137,14 +118,14 @@ func (o *ConsoleOperation) AttachConsole(ctx context.Context, socketPath string,
 // Raises VMNotFoundError if VM cannot be found — Go returns DomainError with CodeVMNotFound.
 // The relay creation is done here (API layer) rather than in the input resolver
 // to avoid importing internal/service/console from the inputs package.
-func (o *ConsoleOperation) resolveWithRequest(ctx context.Context, identifier string) (*inputs.ResolvedConsoleInput, error) {
+func (op *Operation) resolveWithRequest(ctx context.Context, identifier string) (*inputs.ResolvedConsoleInput, error) {
 	rawInput := inputs.ConsoleInput{Identifier: identifier}
-	req := inputs.NewConsoleRequest(rawInput, o.db)
+	req := inputs.NewConsoleRequest(rawInput, op.DB)
 
 	// Resolve VM first to get ID and name required for relay creation
 	vmRequest := inputs.NewVMRequest(
 		inputs.VMInput{Identifiers: []string{identifier}},
-		o.db, o.vmRepo, nil,
+		op.DB, op.Repos.VM, nil,
 	)
 	vmResolved, err := vmRequest.Resolve(ctx)
 	if err != nil {

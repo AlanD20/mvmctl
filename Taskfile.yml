@@ -73,6 +73,36 @@ tasks:
           --enable-plugin=anti-bloat \
           --jobs=$(nproc) \
           src/mvmctl/main.py
+  # =====================================================================
+  # Go Build — version injected via ldflags, matching standard Go CLI pattern
+  # =====================================================================
+  build-go:
+    desc: Build Go binary with version from git tags
+    cmds:
+      - |
+        VERSION=$(git describe --tags --dirty --always 2>/dev/null || echo "0.1.0-dev")
+        echo "Building mvmctl Go binary (version: $VERSION)..."
+        go build -ldflags "-X 'mvmctl/internal/infra/version.BuildVersion=$VERSION'" -o mvmctl ./cmd/mvm/
+    sources:
+      - '**/*.go'
+      - go.mod
+      - go.sum
+    generates:
+      - mvmctl
+  build-go-release:
+    desc: Build Go binary with release ldflags (stripped, no DWARF)
+    cmds:
+      - |
+        VERSION=$(git describe --tags --dirty --always 2>/dev/null || echo "0.1.0-dev")
+        echo "Building mvmctl release binary (version: $VERSION)..."
+        go build -trimpath -ldflags "-s -w -X 'mvmctl/internal/infra/version.BuildVersion=$VERSION'" -o mvmctl ./cmd/mvm/
+    sources:
+      - '**/*.go'
+      - go.mod
+      - go.sum
+    generates:
+      - mvmctl
+
   link-guestfs:
     desc: Links libguestfs into uv .venv (Supports Arch, Debian, Fedora, Ubuntu)
     vars:

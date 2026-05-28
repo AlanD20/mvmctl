@@ -14,7 +14,7 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-func NewCpCmd(cpAPI *api.CPOperation) *cobra.Command {
+func NewCpCmd(op *api.Operation) *cobra.Command {
 	var user string
 	var key string
 	var force bool
@@ -176,7 +176,7 @@ before it is a source. Multiple sources only work for host -> VM.`,
 			// which calls onProgress(int64(n)).  The CLI accumulates chunks
 			// into the cumulative total for display.
 			var cumulative int64
-			result := cpAPI.Copy(cmd.Context(), input, func(bytesCopied int64) {
+			result := op.CPCopy(cmd.Context(), input, func(bytesCopied int64) {
 				mu.Lock()
 				cumulative += bytesCopied
 				totalTransferred = cumulative

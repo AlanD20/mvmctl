@@ -255,15 +255,13 @@ func SetupLogging(verbose, debug bool) {
 		// File handler always at DEBUG — captures everything without --debug flags.
 		// Mirror's Python's "try: RotatingFileHandler(...) except Exception: pass"
 		logPath := GetLogPath()
-		if err := ensureLogDir(logPath); err == nil {
-			rw, err := newRotatingFileWriter(logPath)
-			if err == nil {
-				fileHandler := &pythonLogHandler{
-					writer: rw,
-					level:  slog.LevelDebug,
-				}
-				handlers = append(handlers, fileHandler)
+		rw, err := newRotatingFileWriter(logPath)
+		if err == nil {
+			fileHandler := &pythonLogHandler{
+				writer: rw,
+				level:  slog.LevelDebug,
 			}
+			handlers = append(handlers, fileHandler)
 		}
 
 		var handler slog.Handler
@@ -276,12 +274,6 @@ func SetupLogging(verbose, debug bool) {
 		logger := slog.New(handler)
 		slog.SetDefault(logger)
 	})
-}
-
-// ensureLogDir ensures the parent directory of logPath exists.
-func ensureLogDir(logPath string) error {
-	dir := filepath.Dir(logPath)
-	return os.MkdirAll(dir, 0755)
 }
 
 // LogException logs an error, matching Python's log_exception().

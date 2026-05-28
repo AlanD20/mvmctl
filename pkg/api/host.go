@@ -14,10 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/host"
 	"mvmctl/internal/core/network"
-	"mvmctl/internal/core/vm"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/db"
 	"mvmctl/internal/infra/errs"
@@ -29,56 +27,13 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// HostOperation provides host management orchestration.
-// Matches Python's HostOperation exactly.
-type HostOperation struct {
-	hostRepo   host.Repository
-	hostSvc    *host.Service
-	hostCtrl   *host.Controller
-	netRepo    network.Repository
-	netSvc     *network.Service
-	configRepo config.SettingsRepository
-	configSvc  *config.Service
-	vmRepo     vm.Repository
-	netOp      *NetworkOperation
-	cacheDir   string
-	db         *sql.DB
-}
-
-// NewHostOperation creates a HostOperation.
-func NewHostOperation(
-	hostRepo host.Repository,
-	hostSvc *host.Service,
-	hostCtrl *host.Controller,
-	netRepo network.Repository,
-	netSvc *network.Service,
-	configRepo config.SettingsRepository,
-	configSvc *config.Service,
-	vmRepo vm.Repository,
-	netOp *NetworkOperation,
-	cacheDir string,
-) *HostOperation {
-	return &HostOperation{
-		hostRepo:   hostRepo,
-		hostSvc:    hostSvc,
-		hostCtrl:   hostCtrl,
-		netRepo:    netRepo,
-		netSvc:     netSvc,
-		configRepo: configRepo,
-		configSvc:  configSvc,
-		vmRepo:     vmRepo,
-		netOp:      netOp,
-		cacheDir:   cacheDir,
-	}
-}
-
 // WithDB sets the database connection for migration calls.
-// Must be called before Init if DB migration is needed.
-func (o *HostOperation) WithDB(database *sql.DB) {
-	o.db = database
+// Must be called before HostInit if DB migration is needed.
+func (op *Operation) HostWithDB(database *sql.DB) {
+	op.DB = database
 }
 
-// Init initializes host configuration.
+// HostInit initializes host configuration.
 // Matches Python's HostOperation.init() exactly — returns NeedsInteraction directly
 // (not wrapped in OperationResult.Item) when elevated privileges are required.
 // Accepts optional onProgress callback matching Python's:
@@ -88,7 +43,7 @@ func (o *HostOperation) WithDB(database *sql.DB) {
 // Returns *errs.OperationResult (success/error/skipped) or
 // *errs.NeedsInteraction (when sudo required).
 // OperationResult.Item varies: nil (success/skipped) or []string (error details).
-func (o *HostOperation) Init(ctx context.Context, cacheDir string, onProgress func(errs.ProgressEvent)) interface{} {
+func (op *Operation) HostInit(ctx context.Context, cacheDir string, onProgress func(errs.ProgressEvent)) interface{} {
 	ph := &host.PrivilegeHelper{}
 
 	// Check for privileges — returns NeedsInteraction if not available
@@ -109,8 +64,8 @@ func (o *HostOperation) Init(ctx context.Context, cacheDir string, onProgress fu
 	// Ensure DB schema exists before any DB writes, matching Python:
 	//   # Ensure DB schema exists before any DB writes.
 	//   Database().migrate()
-	if o.db != nil {
-		_, _ = db.RunMigrationsCtx(ctx, o.db, filepath.Join(o.cacheDir, infra.MVMDBFilename))
+	if op.DB != nil {
+		_, _ = db.RunMigrationsCtx(ctx, op.DB, filepath.Join(op.CacheDir, infra.MVMDBFilename))
 	}
 
 	if os.Geteuid() != 0 {
@@ -149,20 +104,21 @@ func (o *HostOperation) Init(ctx context.Context, cacheDir string, onProgress fu
 	}
 
 	// --- iptables comment module check ---
-	fwBackendRaw, _ := o.configSvc.Get(ctx, "settings", "firewall_backend")
+	fwBackendRaw, _ := op.Services.Config.Get(ctx, "settings", "firewall_backend")
 	if fwBackend, ok := fwBackendRaw.(string); ok && fwBackend == "iptables" {
 		if !infranet.CheckIPTablesCommentAvailable() {
 			slog.Info("iptables comment module (xt_comment) not available; rule comments will be skipped")
-			_ = o.configSvc.Set(ctx, "settings.firewall", "iptables_xtcomment", false)
+			_ = op.Services.Config.Set(ctx, "settings.firewall", "iptables_xtcomment", false)
 		}
 	}
 
 	// --- Initialize host state ---
-	_, _ = o.hostRepo.InitializeState(ctx)
+	hostCtrl := host.NewController(op.Repos.Host)
+	_, _ = op.Repos.Host.InitializeState(ctx)
 	sessionID := infra.UUIDV4()
 
 	// --- Setup host environment ---
-	allChanges, err := o.setupHostEnvironment(ctx, sessionID)
+	allChanges, err := op.hostSetupHostEnvironment(ctx, sessionID, hostCtrl)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:  "error",
@@ -174,7 +130,7 @@ func (o *HostOperation) Init(ctx context.Context, cacheDir string, onProgress fu
 	// --- Finalize ---
 	// Python: try: controller.mark_initialized(now) except Exception as e: logger.warning(...)
 	now := time.Now().Format(time.RFC3339)
-	if err := o.hostCtrl.MarkInitialized(ctx, now); err != nil {
+	if err := hostCtrl.MarkInitialized(ctx, now); err != nil {
 		slog.Warn("Could not mark host as initialized", "error", err)
 	}
 
@@ -214,7 +170,7 @@ func (o *HostOperation) Init(ctx context.Context, cacheDir string, onProgress fu
 	}
 }
 
-func (o *HostOperation) setupHostEnvironment(ctx context.Context, sessionID string) ([]*model.HostStateChangeItem, error) {
+func (op *Operation) hostSetupHostEnvironment(ctx context.Context, sessionID string, hostCtrl *host.Controller) ([]*model.HostStateChangeItem, error) {
 	allChanges := make([]*model.HostStateChangeItem, 0)
 	dbChanges := make([]*model.HostStateChangeItem, 0)
 
@@ -285,13 +241,13 @@ func (o *HostOperation) setupHostEnvironment(ctx context.Context, sessionID stri
 	}
 
 	// --- KVM modules ---
-	moduleChanges, nextOrder, _ := host.EnsureKVMModules(ctx, o.hostRepo, sessionID, 0)
+	moduleChanges, nextOrder, _ := host.EnsureKVMModules(ctx, op.Repos.Host, sessionID, 0)
 	allChanges = append(allChanges, moduleChanges...)
 
 	// --- Firewall chains ---
-	_ = o.netSvc.EnsureMVMChains(ctx)
+	_ = op.Services.Network.EnsureMVMChains(ctx)
 
-	fwBackendRaw, _ := o.configSvc.Get(ctx, "settings", "firewall_backend")
+	fwBackendRaw, _ := op.Services.Config.Get(ctx, "settings", "firewall_backend")
 	fwBackend := "nftables"
 	if s, ok := fwBackendRaw.(string); ok {
 		fwBackend = s
@@ -306,18 +262,18 @@ func (o *HostOperation) setupHostEnvironment(ctx context.Context, sessionID stri
 
 	// --- Persist state ---
 	// Python: try: controller.record_changes(...) except Exception as e: logger.warning(...)
-	if _, err := o.hostCtrl.RecordChanges(ctx, dbChanges, &sessionID, nextOrder); err != nil {
+	if _, err := hostCtrl.RecordChanges(ctx, dbChanges, &sessionID, nextOrder); err != nil {
 		slog.Warn("Could not record host changes to DB", "error", err)
 	}
 
 	// Python: try: repo.update_component(...) except Exception as e: logger.warning(...)
 	if groupCreated {
-		if err := o.hostRepo.UpdateComponent(ctx, "mvm_group_created", true); err != nil {
+		if err := op.Repos.Host.UpdateComponent(ctx, "mvm_group_created", true); err != nil {
 			slog.Warn("Could not update host state", "error", err)
 		}
 	}
 	if sudoersStale {
-		if err := o.hostRepo.UpdateComponent(ctx, "sudoers_configured", true); err != nil {
+		if err := op.Repos.Host.UpdateComponent(ctx, "sudoers_configured", true); err != nil {
 			slog.Warn("Could not update host state", "error", err)
 		}
 	}
@@ -325,16 +281,16 @@ func (o *HostOperation) setupHostEnvironment(ctx context.Context, sessionID stri
 	return allChanges, nil
 }
 
-// GetState returns the current host state snapshot.
+// HostGetState returns the current host state snapshot.
 // Matches Python's HostOperation.get_state().
-func (o *HostOperation) GetState(ctx context.Context) (*model.HostStateItem, error) {
-	return o.hostRepo.GetState(ctx)
+func (op *Operation) HostGetState(ctx context.Context) (*model.HostStateItem, error) {
+	return op.Repos.Host.GetState(ctx)
 }
 
-// DetectResources detects live host resources.
+// HostDetectResources detects live host resources.
 // Matches Python's HostOperation.detect_resources().
-func (o *HostOperation) DetectResources(ctx context.Context) (*model.HostResources, error) {
-	state, err := o.hostRepo.GetState(ctx)
+func (op *Operation) HostDetectResources(ctx context.Context) (*model.HostResources, error) {
+	state, err := op.Repos.Host.GetState(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -345,25 +301,27 @@ func (o *HostOperation) DetectResources(ctx context.Context) (*model.HostResourc
 		hardware = hardwareFromState(state)
 		limits = limitsFromState(state)
 	} else {
-		hardware = host.DetectHardware()
+		var detErr error
+		hardware, detErr = host.DetectHardware()
+		if detErr != nil {
+			return nil, detErr
+		}
 		limits = host.DetectLimits()
 	}
 	if hardware == nil || limits == nil {
 		return nil, nil
 	}
-	return host.DetectResources(hardware, limits, o.cacheDir), nil
+	res, err := host.DetectResources(hardware, limits, op.CacheDir)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
-// NetworkSetup sets up the default network.
+// HostNetworkSetup sets up the default network.
 // Matches Python's HostOperation.network_setup() exactly — static call to
 // NetworkOperation.sync() with try/except wrapping.
-func (o *HostOperation) NetworkSetup(ctx context.Context) *errs.OperationResult {
-	if o.netOp == nil {
-		return &errs.OperationResult{
-			Status: "error", Code: "network.default_failed",
-			Message: "Network operation not available",
-		}
-	}
+func (op *Operation) HostNetworkSetup(ctx context.Context) *errs.OperationResult {
 	// Python: restored_result = NetworkOperation.sync()
 	//         if restored_result.is_ok and not restored_result.item:
 	//             default_result = NetworkOperation.create_default_network()
@@ -371,7 +329,7 @@ func (o *HostOperation) NetworkSetup(ctx context.Context) *errs.OperationResult 
 	//                 logger.warning(...)
 	//                 return default_result
 	//         return OperationResult(status="success", code="network.default_ready")
-	syncResult := o.netOp.Sync(ctx, "")
+	syncResult := op.NetworkSync(ctx, "")
 	if syncResult.IsOK() {
 		// Python: if restored_result.is_ok and not restored_result.item:
 		//         (Python checks "not restored_result.item" — nil/empty/None)
@@ -386,7 +344,7 @@ func (o *HostOperation) NetworkSetup(ctx context.Context) *errs.OperationResult 
 			}
 		}
 		if itemEmpty {
-			result := o.netOp.CreateDefaultNetwork(ctx)
+			result := op.NetworkCreateDefaultNetwork(ctx)
 			if result.IsError() {
 				slog.Warn("Could not create default network", "error", result.Message)
 				return result
@@ -403,10 +361,10 @@ func (o *HostOperation) NetworkSetup(ctx context.Context) *errs.OperationResult 
 	}
 }
 
-// Info returns host info with capacity analysis.
+// HostInfo returns host info with capacity analysis.
 // Matches Python's HostOperation.info() exactly — uses HostInfo.to_dict().
-func (o *HostOperation) Info(ctx context.Context) *errs.OperationResult {
-	state, err := o.hostRepo.GetState(ctx)
+func (op *Operation) HostInfo(ctx context.Context) *errs.OperationResult {
+	state, err := op.Repos.Host.GetState(ctx)
 	if err != nil {
 		return &errs.OperationResult{
 			Status: "error", Code: "host.info.no_state",
@@ -426,7 +384,7 @@ func (o *HostOperation) Info(ctx context.Context) *errs.OperationResult {
 
 	if hardware == nil || limits == nil {
 		// Auto-detect if this is the first time
-		hardware, limits, err = o.hostSvc.DetectAndSaveCapacity(ctx)
+		hardware, limits, err = op.Services.Host.DetectAndSaveCapacity(ctx)
 		if err != nil {
 			return &errs.OperationResult{
 				Status: "error", Code: "host.info.detect_failed",
@@ -434,7 +392,7 @@ func (o *HostOperation) Info(ctx context.Context) *errs.OperationResult {
 				Exception: err,
 			}
 		}
-		state, err = o.hostRepo.GetState(ctx)
+		state, err = op.Repos.Host.GetState(ctx)
 		if err != nil || state == nil {
 			return &errs.OperationResult{
 				Status: "error", Code: "host.info.no_state",
@@ -443,7 +401,15 @@ func (o *HostOperation) Info(ctx context.Context) *errs.OperationResult {
 		}
 	}
 
-	resources := host.DetectResources(hardware, limits, o.cacheDir)
+	// Detect resources
+	resources, err := host.DetectResources(hardware, limits, op.CacheDir)
+	if err != nil {
+		return &errs.OperationResult{
+			Status:  "error",
+			Code:    "host.info_failed",
+			Message: fmt.Sprintf("Failed to detect resources: %v", err),
+		}
+	}
 
 	// Use HostInfo.to_dict() matching Python exactly
 	info := &model.HostInfo{
@@ -460,10 +426,10 @@ func (o *HostOperation) Info(ctx context.Context) *errs.OperationResult {
 	}
 }
 
-// RefreshCapacity re-detects host capacity.
+// HostRefreshCapacity re-detects host capacity.
 // Matches Python's HostOperation.refresh_capacity() exactly.
-func (o *HostOperation) RefreshCapacity(ctx context.Context) *errs.OperationResult {
-	hardware, limits, err := o.hostSvc.DetectAndSaveCapacity(ctx)
+func (op *Operation) HostRefreshCapacity(ctx context.Context) *errs.OperationResult {
+	hardware, limits, err := op.Services.Host.DetectAndSaveCapacity(ctx)
 	if err != nil {
 		return &errs.OperationResult{
 			Status: "error", Code: "host.capacity.detect_failed",
@@ -472,7 +438,7 @@ func (o *HostOperation) RefreshCapacity(ctx context.Context) *errs.OperationResu
 		}
 	}
 
-	state, err := o.hostRepo.GetState(ctx)
+	state, err := op.Repos.Host.GetState(ctx)
 	if err != nil || state == nil {
 		return &errs.OperationResult{
 			Status: "error", Code: "host.info.no_state",
@@ -480,7 +446,14 @@ func (o *HostOperation) RefreshCapacity(ctx context.Context) *errs.OperationResu
 		}
 	}
 
-	resources := host.DetectResources(hardware, limits, o.cacheDir)
+	resources, err := host.DetectResources(hardware, limits, op.CacheDir)
+	if err != nil {
+		return &errs.OperationResult{
+			Status:  "error",
+			Code:    "host.capacity_failed",
+			Message: fmt.Sprintf("Failed to detect resources: %v", err),
+		}
+	}
 
 	// Use HostInfo.to_dict() matching Python exactly
 	info := &model.HostInfo{
@@ -497,18 +470,18 @@ func (o *HostOperation) RefreshCapacity(ctx context.Context) *errs.OperationResu
 	}
 }
 
-// CheckKVMAccess checks /dev/kvm accessibility.
-func (o *HostOperation) CheckKVMAccess() bool {
+// HostCheckKVMAccess checks /dev/kvm accessibility.
+func (op *Operation) HostCheckKVMAccess() bool {
 	return host.CheckKVMAccess()
 }
 
-// CheckRequiredBinaries checks for missing required binaries.
-func (o *HostOperation) CheckRequiredBinaries() []string {
+// HostCheckRequiredBinaries checks for missing required binaries.
+func (op *Operation) HostCheckRequiredBinaries() []string {
 	return host.CheckRequiredBinaries()
 }
 
-// GetIPForwardStatus returns IP forwarding status.
-func (o *HostOperation) GetIPForwardStatus(ctx context.Context) (string, error) {
+// HostGetIPForwardStatus returns IP forwarding status.
+func (op *Operation) HostGetIPForwardStatus(ctx context.Context) (string, error) {
 	result := system.RunCmdCompat(ctx, []string{"sysctl", "-n", "net.ipv4.ip_forward"}, system.RunCmdOptions{Capture: true})
 	if result.Err != nil {
 		return "", fmt.Errorf("failed to read net.ipv4.ip_forward: %w", result.Err)
@@ -516,9 +489,9 @@ func (o *HostOperation) GetIPForwardStatus(ctx context.Context) (string, error) 
 	return strings.TrimSpace(result.Stdout), nil
 }
 
-// Clean cleans host networking configuration.
+// HostClean cleans host networking configuration.
 // Matches Python's HostOperation.clean() exactly — wraps errors in HostError/NetworkError pattern.
-func (o *HostOperation) Clean(ctx context.Context, cacheDir string) *errs.OperationResult {
+func (op *Operation) HostClean(ctx context.Context, cacheDir string) *errs.OperationResult {
 
 	ph := &host.PrivilegeHelper{}
 	if err := ph.CheckPrivileges("/usr/sbin/ip", "clean host"); err != nil {
@@ -541,15 +514,15 @@ func (o *HostOperation) Clean(ctx context.Context, cacheDir string) *errs.Operat
 	}
 	slices.Sort(fallbackTaps)
 	for _, tapName := range fallbackTaps {
-		if err := o.netSvc.RemoveRawTap(ctx, tapName); err != nil {
+		if err := op.Services.Network.RemoveRawTap(ctx, tapName); err != nil {
 			summary = append(summary, fmt.Sprintf("Warning: failed to remove TAP '%s': %v", tapName, err))
 		} else {
 			summary = append(summary, fmt.Sprintf("Removed TAP device '%s'", tapName))
 		}
 	}
 
-	networks, _ := o.netRepo.ListAll(ctx)
-	staleSummary := o.netSvc.RemoveStaleInterfaces(fmt.Sprintf("%s-", infra.CLIName))
+	networks, _ := op.Repos.Network.ListAll(ctx)
+	staleSummary := op.Services.Network.RemoveStaleInterfaces(fmt.Sprintf("%s-", infra.CLIName))
 	summary = append(summary, staleSummary...)
 
 	metadataBridges := make(map[string]bool)
@@ -560,23 +533,23 @@ func (o *HostOperation) Clean(ctx context.Context, cacheDir string) *errs.Operat
 	for _, net := range networks {
 		if net.NATEnabled {
 			// Python: try: service.remove_nat(...) except NetworkError: pass
-			_ = o.netSvc.RemoveNAT(ctx, net.Bridge, network.NatGatewaysList(net), net.Subnet, net.ID, false)
+			_ = op.Services.Network.RemoveNAT(ctx, net.Bridge, network.NatGatewaysList(net), net.Subnet, net.ID, false)
 		}
-		if err := o.netSvc.RemoveBridge(ctx, net.Bridge, net.ID); err != nil {
+		if err := op.Services.Network.RemoveBridge(ctx, net.Bridge, net.ID); err != nil {
 			summary = append(summary, fmt.Sprintf("Warning: failed to remove network '%s': %v", net.Name, err))
 		} else {
 			summary = append(summary, fmt.Sprintf("Removed network '%s' (bridge: %s)", net.Name, net.Bridge))
 		}
 	}
 
-	defaultNetNameRaw, _ := o.configSvc.Get(ctx, "defaults.network", "name")
+	defaultNetNameRaw, _ := op.Services.Config.Get(ctx, "defaults.network", "name")
 	defaultNetNameStr := "net"
 	if s, ok := defaultNetNameRaw.(string); ok {
 		defaultNetNameStr = s
 	}
 	defaultBridge := fmt.Sprintf("%s-%s", infra.CLIName, system.TruncateString(defaultNetNameStr, 10))
 	if infranet.BridgeExists(defaultBridge) {
-		if err := o.netSvc.RemoveRawBridge(ctx, defaultBridge); err != nil {
+		if err := op.Services.Network.RemoveRawBridge(ctx, defaultBridge); err != nil {
 			summary = append(summary, fmt.Sprintf("Warning: failed to remove orphan bridge '%s': %v", defaultBridge, err))
 		} else {
 			summary = append(summary, fmt.Sprintf("Removed orphan bridge '%s'", defaultBridge))
@@ -590,7 +563,7 @@ func (o *HostOperation) Clean(ctx context.Context, cacheDir string) *errs.Operat
 		if bridge == defaultBridge || metadataBridges[bridge] {
 			continue
 		}
-		if err := o.netSvc.RemoveRawBridge(ctx, bridge); err != nil {
+		if err := op.Services.Network.RemoveRawBridge(ctx, bridge); err != nil {
 			summary = append(summary, fmt.Sprintf("Warning: failed to remove orphan bridge '%s': %v", bridge, err))
 		} else {
 			summary = append(summary, fmt.Sprintf("Removed orphan bridge '%s'", bridge))
@@ -600,7 +573,7 @@ func (o *HostOperation) Clean(ctx context.Context, cacheDir string) *errs.Operat
 	// Remove default network from database (matching Python)
 	defaultNet := infranet.FindNetworkByName(networks, defaultNetNameStr)
 	if defaultNet != nil {
-		removeResult := o.netOp.Remove(ctx, &inputs.NetworkInput{Name: []string{defaultNetNameStr}}, true)
+		removeResult := op.NetworkRemove(ctx, &inputs.NetworkInput{Name: []string{defaultNetNameStr}}, true)
 		if removeResult.IsError() {
 			summary = append(summary, fmt.Sprintf("Warning: failed to remove default network: %s", removeResult.Message))
 		} else {
@@ -609,7 +582,7 @@ func (o *HostOperation) Clean(ctx context.Context, cacheDir string) *errs.Operat
 	}
 
 	// Remove MVM chains
-	_ = o.netSvc.Teardown(ctx)
+	_ = op.Services.Network.Teardown(ctx)
 	summary = append(summary, "Removed MVM firewall chains")
 
 	if len(summary) == 0 {
@@ -626,9 +599,9 @@ func (o *HostOperation) Clean(ctx context.Context, cacheDir string) *errs.Operat
 	}
 }
 
-// Reset resets host to pre-init state.
+// HostReset resets host to pre-init state.
 // Matches Python's HostOperation.reset() exactly — usermod processing order matches.
-func (o *HostOperation) Reset(ctx context.Context, cacheDir string) *errs.OperationResult {
+func (op *Operation) HostReset(ctx context.Context, cacheDir string) *errs.OperationResult {
 
 	ph := &host.PrivilegeHelper{}
 	if err := ph.CheckPrivileges("/usr/sbin/ip", "reset host"); err != nil {
@@ -639,7 +612,7 @@ func (o *HostOperation) Reset(ctx context.Context, cacheDir string) *errs.Operat
 		}
 	}
 
-	cleanResult := o.Clean(ctx, cacheDir)
+	cleanResult := op.HostClean(ctx, cacheDir)
 	// Python: if clean_result.is_error: return clean_result
 	if cleanResult.IsError() {
 		return cleanResult
@@ -651,7 +624,7 @@ func (o *HostOperation) Reset(ctx context.Context, cacheDir string) *errs.Operat
 		}
 	}
 
-	reverted, err := o.hostSvc.RestoreState(ctx)
+	reverted, err := op.Services.Host.RestoreState(ctx)
 	if err != nil {
 		slog.Warn("No saved host state to restore", "error", err)
 	} else {
@@ -661,7 +634,7 @@ func (o *HostOperation) Reset(ctx context.Context, cacheDir string) *errs.Operat
 	}
 
 	// Notify about kernel modules that were left loaded
-	moduleChanges, _ := o.hostRepo.ListChanges(ctx, nil, false)
+	moduleChanges, _ := op.Repos.Host.ListChanges(ctx, nil, false)
 	var activeModules []string
 	for _, c := range moduleChanges {
 		if c.Setting == "kernel_module_load" {
@@ -683,7 +656,7 @@ func (o *HostOperation) Reset(ctx context.Context, cacheDir string) *errs.Operat
 
 	// Python: Remove user from group FIRST, then remove group (matches Python order)
 	// Python only processes the LAST usermod change (usermod_changes[-1].applied_value).
-	usermodChanges, _ := o.hostRepo.ListChanges(ctx, nil, false)
+	usermodChanges, _ := op.Repos.Host.ListChanges(ctx, nil, false)
 	var lastUsermod *model.HostStateChangeItem
 	for _, c := range usermodChanges {
 		if c.Mechanism == "usermod" {
@@ -709,7 +682,7 @@ func (o *HostOperation) Reset(ctx context.Context, cacheDir string) *errs.Operat
 		summary = append(summary, fmt.Sprintf("Removed group '%s'", infra.MVMUnixGroup))
 	}
 
-	_ = o.hostRepo.ResetState(ctx)
+	_ = op.Repos.Host.ResetState(ctx)
 
 	auditLog := logging.NewAuditLog(cacheDir)
 	_ = auditLog.LogOperation("host.reset", map[string]interface{}{"actions": len(summary)}, "")
@@ -721,22 +694,22 @@ func (o *HostOperation) Reset(ctx context.Context, cacheDir string) *errs.Operat
 	}
 }
 
-// GetRunningVMs returns running VMs.
+// HostGetRunningVMs returns running VMs.
 // Matches Python's HostOperation.get_running_vms().
-func (o *HostOperation) GetRunningVMs(ctx context.Context) ([]*model.VM, error) {
-	return o.vmRepo.ListByStatus(ctx, string(model.StatusRunning))
+func (op *Operation) HostGetRunningVMs(ctx context.Context) ([]*model.VM, error) {
+	return op.Repos.VM.ListByStatus(ctx, string(model.StatusRunning))
 }
 
-// IsInitialized checks if host is initialized.
+// HostIsInitialized checks if host is initialized.
 // Matches Python's HostOperation.is_initialized().
-func (o *HostOperation) IsInitialized(ctx context.Context) bool {
-	state, err := o.hostRepo.GetState(ctx)
+func (op *Operation) HostIsInitialized(ctx context.Context) bool {
+	state, err := op.Repos.Host.GetState(ctx)
 	return err == nil && state != nil && state.Initialized
 }
 
-// CheckReadiness runs pre-flight checks.
+// HostCheckReadiness runs pre-flight checks.
 // Matches Python's HostOperation.check_readiness().
-func (o *HostOperation) CheckReadiness() *model.ProbeResult {
+func (op *Operation) HostCheckReadiness() *model.ProbeResult {
 	probe := &host.Probe{}
 	return probe.RunAll()
 }

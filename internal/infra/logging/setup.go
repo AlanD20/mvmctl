@@ -63,15 +63,13 @@ func SetupLogging(verbose, debug bool) {
 		// File handler always at DEBUG — captures everything without --debug flags.
 		// Mirror's Python's "try: RotatingFileHandler(...) except Exception: pass"
 		logPath := GetLogPath()
-		if err := ensureLogDir(logPath); err == nil {
-			rw, err := rotating.NewRotatingFileWriter(logPath)
-			if err == nil {
-				fileH := &consoleHandler{
-					writer: rw,
-					level:  slog.LevelDebug,
-				}
-				handlers = append(handlers, fileH)
+		rw, err := rotating.NewRotatingFileWriter(logPath)
+		if err == nil {
+			fileH := &consoleHandler{
+				writer: rw,
+				level:  slog.LevelDebug,
 			}
+			handlers = append(handlers, fileH)
 		}
 
 		var handler slog.Handler
@@ -86,18 +84,15 @@ func SetupLogging(verbose, debug bool) {
 	})
 }
 
-// ensureLogDir ensures the parent directory of logPath exists.
-func ensureLogDir(logPath string) error {
-	dir := filepath.Dir(logPath)
-	return os.MkdirAll(dir, 0755)
-}
-
 // GetLogPath returns the full path to the mvmctl log file.
 // The path is derived from the cache directory (under $HOME/.cache/<project>).
+// The parent directory is created if it does not exist.
 func GetLogPath() string {
 	cacheDir, err := infra.GetCacheDir()
 	if err != nil {
 		cacheDir = filepath.Join(infra.GetRealHome(), ".cache", infra.ProjectName)
 	}
-	return filepath.Join(cacheDir, "mvmctl.log")
+	logPath := filepath.Join(cacheDir, "mvmctl.log")
+	os.MkdirAll(filepath.Dir(logPath), 0755)
+	return logPath
 }

@@ -15,19 +15,19 @@ import (
 )
 
 // NewNetworkCmd creates the network command and its subcommands.
-func NewNetworkCmd(networkAPI *api.NetworkOperation) *cobra.Command {
+func NewNetworkCmd(op *api.Operation) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "network",
 		Aliases: []string{"net"},
 		Short:   "Network management",
 	}
 
-	cmd.AddCommand(newNetworkLsCmd(networkAPI))
-	cmd.AddCommand(newNetworkCreateCmd(networkAPI))
-	cmd.AddCommand(newNetworkRmCmd(networkAPI))
-	cmd.AddCommand(newNetworkInspectCmd(networkAPI))
-	cmd.AddCommand(newNetworkSyncCmd(networkAPI))
-	cmd.AddCommand(newNetworkDefaultCmd(networkAPI))
+	cmd.AddCommand(newNetworkLsCmd(op))
+	cmd.AddCommand(newNetworkCreateCmd(op))
+	cmd.AddCommand(newNetworkRmCmd(op))
+	cmd.AddCommand(newNetworkInspectCmd(op))
+	cmd.AddCommand(newNetworkSyncCmd(op))
+	cmd.AddCommand(newNetworkDefaultCmd(op))
 
 	// Hidden help subcommand matching Python's @network_app.command(name="help", hidden=True)
 	helpCmd := &cobra.Command{
@@ -46,7 +46,7 @@ func NewNetworkCmd(networkAPI *api.NetworkOperation) *cobra.Command {
 	return cmd
 }
 
-func newNetworkLsCmd(networkAPI *api.NetworkOperation) *cobra.Command {
+func newNetworkLsCmd(op *api.Operation) *cobra.Command {
 	var jsonOutput bool
 	var longOutput bool
 
@@ -56,7 +56,7 @@ func newNetworkLsCmd(networkAPI *api.NetworkOperation) *cobra.Command {
 		Short:   "List all networks.",
 		// Python's ls never takes positional arguments — no ValidArgsFunction needed
 		RunE: func(cmd *cobra.Command, args []string) error {
-			nets, err := networkAPI.ListAll(cmd.Context())
+			nets, err := op.NetworkListAll(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -71,7 +71,7 @@ func newNetworkLsCmd(networkAPI *api.NetworkOperation) *cobra.Command {
 			}
 
 			// Resolve listing style from --long flag or DB config (matching Python's resolve_listing_style)
-			style := resolveListingStyle(cmd.Context(), configAPIRef, longOutput)
+			style := resolveListingStyle(cmd.Context(), op, longOutput)
 			isLong := style == "long"
 
 			rows := make([][]string, 0, len(nets))
@@ -124,7 +124,7 @@ func newNetworkLsCmd(networkAPI *api.NetworkOperation) *cobra.Command {
 	return cmd
 }
 
-func newNetworkCreateCmd(networkAPI *api.NetworkOperation) *cobra.Command {
+func newNetworkCreateCmd(op *api.Operation) *cobra.Command {
 	var subnet string
 	var ipv4Gateway string
 	var noNAT bool
@@ -188,7 +188,7 @@ func newNetworkCreateCmd(networkAPI *api.NetworkOperation) *cobra.Command {
 				SetDefault:  setDefault,
 			}
 
-			createResult := networkAPI.Create(cmd.Context(), input)
+			createResult := op.NetworkCreate(cmd.Context(), input)
 			if createResult.IsError() {
 				return fmt.Errorf("create network failed: %s", createResult.Message)
 			}
@@ -321,7 +321,7 @@ func resolveUserNATGateways() (string, error) {
 	return strings.Join(selectedInterfaces, ","), nil
 }
 
-func newNetworkRmCmd(networkAPI *api.NetworkOperation) *cobra.Command {
+func newNetworkRmCmd(op *api.Operation) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
@@ -339,7 +339,7 @@ func newNetworkRmCmd(networkAPI *api.NetworkOperation) *cobra.Command {
 				return fmt.Errorf("usage error")
 			}
 
-			removeResult := networkAPI.Remove(cmd.Context(), &inputs.NetworkInput{Name: names}, force)
+			removeResult := op.NetworkRemove(cmd.Context(), &inputs.NetworkInput{Name: names}, force)
 			if removeResult.Status == "error" || removeResult.Status == "failure" {
 				return fmt.Errorf("remove failed: %s", removeResult.Message)
 			}
@@ -356,7 +356,7 @@ func newNetworkRmCmd(networkAPI *api.NetworkOperation) *cobra.Command {
 	return cmd
 }
 
-func newNetworkInspectCmd(networkAPI *api.NetworkOperation) *cobra.Command {
+func newNetworkInspectCmd(op *api.Operation) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
@@ -379,10 +379,10 @@ func newNetworkInspectCmd(networkAPI *api.NetworkOperation) *cobra.Command {
 				return fmt.Errorf("missing required argument")
 			}
 
-			info, err := networkAPI.Inspect(cmd.Context(), &inputs.NetworkInput{Name: []string{name}})
-			if err != nil {
-				return err
-			}
+			info, err := op.NetworkInspect(cmd.Context(), &inputs.NetworkInput{Name: []string{name}})
+				if err != nil {
+					return fmt.Errorf("network not found: %s", name)
+				}
 
 			if jsonOutput {
 				// Match Python's json.dumps(info, indent=2, default=str)
@@ -406,7 +406,7 @@ func newNetworkInspectCmd(networkAPI *api.NetworkOperation) *cobra.Command {
 	return cmd
 }
 
-func newNetworkSyncCmd(networkAPI *api.NetworkOperation) *cobra.Command {
+func newNetworkSyncCmd(op *api.Operation) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
@@ -421,7 +421,7 @@ func newNetworkSyncCmd(networkAPI *api.NetworkOperation) *cobra.Command {
 			var networkID string
 			if len(args) > 0 {
 				name := args[0]
-				info, err := networkAPI.Inspect(cmd.Context(), &inputs.NetworkInput{Name: []string{name}})
+			info, err := op.NetworkInspect(cmd.Context(), &inputs.NetworkInput{Name: []string{name}})
 				if err != nil {
 					return fmt.Errorf("network not found: %s", name)
 				}
@@ -433,7 +433,7 @@ func newNetworkSyncCmd(networkAPI *api.NetworkOperation) *cobra.Command {
 			}
 
 			// Call sync with optional network ID
-			syncResult := networkAPI.Sync(cmd.Context(), networkID)
+			syncResult := op.NetworkSync(cmd.Context(), networkID)
 			if syncResult.Status == "error" || syncResult.Status == "failure" {
 				return fmt.Errorf("sync failed: %s", syncResult.Message)
 			}
@@ -452,7 +452,7 @@ func newNetworkSyncCmd(networkAPI *api.NetworkOperation) *cobra.Command {
 			}
 
 			// Build name map from all networks
-			allNetworks, listErr := networkAPI.ListAll(cmd.Context())
+			allNetworks, listErr := op.NetworkListAll(cmd.Context())
 			if listErr != nil {
 				return listErr
 			}
@@ -491,7 +491,7 @@ func newNetworkSyncCmd(networkAPI *api.NetworkOperation) *cobra.Command {
 	return cmd
 }
 
-func newNetworkDefaultCmd(networkAPI *api.NetworkOperation) *cobra.Command {
+func newNetworkDefaultCmd(op *api.Operation) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:                "default [name]",
 		Short:              "Set a network as the default for VM creation.",
@@ -511,7 +511,7 @@ func newNetworkDefaultCmd(networkAPI *api.NetworkOperation) *cobra.Command {
 				return fmt.Errorf("missing required argument")
 			}
 
-			defaultResult := networkAPI.SetDefault(cmd.Context(), &inputs.NetworkInput{Name: []string{name}})
+			defaultResult := op.NetworkSetDefault(cmd.Context(), &inputs.NetworkInput{Name: []string{name}})
 			if defaultResult.Status == "error" || defaultResult.Status == "failure" {
 				return fmt.Errorf("set default failed: %s", defaultResult.Message)
 			}

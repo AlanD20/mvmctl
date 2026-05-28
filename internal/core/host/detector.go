@@ -83,7 +83,7 @@ func meminfoKbToMiB(key string) int {
 
 // ── DetectHardware ──
 // Matches Python's HostDetector.detect_hardware().
-func DetectHardware() *model.HostHardware {
+func DetectHardware() (*model.HostHardware, error) {
 	hostname, _ := os.Hostname()
 
 	cpuModel := ""
@@ -187,7 +187,10 @@ func DetectHardware() *model.HostHardware {
 	memoryTotalMiB := meminfoKbToMiB("MemTotal")
 
 	// Storage: use root cache dir (fallback to / if needed)
-	cacheDir := infra.GetDefaultCacheDir()
+	cacheDir, err := infra.GetCacheDir()
+	if err != nil {
+		return nil, err
+	}
 	storageTotalBytes := 0
 	var diskUsage syscall.Statfs_t
 	err = syscall.Statfs(cacheDir, &diskUsage)
@@ -256,7 +259,7 @@ func DetectHardware() *model.HostHardware {
 		OSRelease:         osRelease,
 		CPUHasVMX:         cpuHasVMX,
 		CPUHypervisor:     cpuHypervisor,
-	}
+	}, nil
 }
 
 // ── DetectLimits ──
@@ -373,7 +376,7 @@ func parseModules() map[string]bool {
 
 // ── DetectResources ──
 // Matches Python's HostDetector.detect_resources().
-func DetectResources(hardware *model.HostHardware, limits *model.HostLimits, vmDirPath string) *model.HostResources {
+func DetectResources(hardware *model.HostHardware, limits *model.HostLimits, vmDirPath string) (*model.HostResources, error) {
 	memoryAvailableMiB := meminfoKbToMiB("MemAvailable")
 
 	// TAP devices in use
@@ -582,7 +585,7 @@ func DetectResources(hardware *model.HostHardware, limits *model.HostLimits, vmD
 		DevKVMStatus:          devKVMStatus,
 		UserInKVMGroup:        userInKVMGroup,
 		DevNetTUNAccessible:   devNetTUNAccessible,
-	}
+	}, nil
 }
 
 func isDigits(s string) bool {

@@ -4,50 +4,28 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
-	"mvmctl/internal/core/key"
 	"mvmctl/internal/core/ssh"
-	"mvmctl/internal/core/vm"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/logging"
 	"mvmctl/pkg/api/inputs"
 )
 
-// SSHOperation orchestrates SSH connections.
-// Matches Python's SSHOperation class exactly.
-type SSHOperation struct {
-	db       *sql.DB
-	vmRepo   vm.Repository
-	keyRepo  key.Repository
-	cacheDir string
-}
-
-// NewSSHOperation creates an SSHOperation.
-func NewSSHOperation(db *sql.DB, vmRepo vm.Repository, keyRepo key.Repository, cacheDir string) *SSHOperation {
-	return &SSHOperation{
-		db:       db,
-		vmRepo:   vmRepo,
-		keyRepo:  keyRepo,
-		cacheDir: cacheDir,
-	}
-}
-
-// Connect opens SSH session or executes command on a VM.
+// SSHConnect opens SSH session or executes command on a VM.
 // Matches Python's SSHOperation.connect() exactly.
 // Python: returns OperationResult[int]; only MVMError is caught and wrapped
 // in OperationResult; other exceptions propagate.
 // Go: returns *OperationResult. Non-MVMError errors are wrapped with code
 // "ssh.failed" as well (Go has no exceptions, so all errors are returned).
-func (o *SSHOperation) Connect(ctx context.Context, input *inputs.SSHInput) *errs.OperationResult {
+func (op *Operation) SSHConnect(ctx context.Context, input *inputs.SSHInput) *errs.OperationResult {
 	// Python: try:
 	//   request = SSHRequest(inputs, db); resolved = request.resolve()
 	//   ...
 	// except MVMError as e:
 	//   return OperationResult(status="error", code="ssh.failed", ...)
-	request := inputs.NewSSHRequest(*input, o.db)
-	resolved, err := request.Resolve(ctx, o.vmRepo, o.keyRepo)
+	request := inputs.NewSSHRequest(*input, op.DB)
+	resolved, err := request.Resolve(ctx, op.Repos.VM, op.Repos.Key)
 	if err != nil {
 		// Python: except MVMError — only MVMError is caught.
 		// Other exceptions propagate. In Go, we return the result directly.
@@ -55,7 +33,7 @@ func (o *SSHOperation) Connect(ctx context.Context, input *inputs.SSHInput) *err
 	}
 
 	// Audit log (matches Python: AuditLog.log("vm.ssh", changes={"ip": ..., "user": ...}))
-	auditLog := logging.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(op.CacheDir)
 	_ = auditLog.LogOperation("vm.ssh", map[string]interface{}{
 		"ip":   resolved.TargetIP,
 		"user": resolved.User,

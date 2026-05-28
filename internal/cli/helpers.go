@@ -137,10 +137,10 @@ func confirmPromptNoDefault(prompt string) bool {
 
 // completeNetworkNames completes with network names and short IDs.
 func completeNetworkNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if networkAPIRef == nil {
+	if opRef == nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	networks, _ := networkAPIRef.ListAll(cmd.Context())
+	networks, _ := opRef.NetworkListAll(cmd.Context())
 	var results []string
 	for _, net := range networks {
 		if net.Name != "" && hasPrefix(net.Name, toComplete) && !contains(results, net.Name) {
@@ -157,10 +157,10 @@ func completeNetworkNames(cmd *cobra.Command, args []string, toComplete string) 
 
 // completeImageIDs completes with local image types and short IDs.
 func completeImageIDs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if imageAPIRef == nil {
+	if opRef == nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	raw, _ := imageAPIRef.ListAll(cmd.Context(), false, "", nil, false)
+	raw, _ := opRef.ImageListAll(cmd.Context(), false, "", nil, false)
 	images, ok := raw.([]*model.ImageItem)
 	if !ok {
 		return nil, cobra.ShellCompDirectiveNoFileComp
@@ -181,10 +181,10 @@ func completeImageIDs(cmd *cobra.Command, args []string, toComplete string) ([]s
 
 // completeKernelIDs completes with kernel type:version combos and short IDs.
 func completeKernelIDs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if kernelAPIRef == nil {
+	if opRef == nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	raw, _ := kernelAPIRef.ListAll(cmd.Context(), false, false)
+	raw, _ := opRef.KernelListAll(cmd.Context(), false, false)
 	kernels, ok := raw.([]*model.KernelItem)
 	if !ok {
 		return nil, cobra.ShellCompDirectiveNoFileComp
@@ -208,10 +208,10 @@ func completeKernelIDs(cmd *cobra.Command, args []string, toComplete string) ([]
 
 // completeBinaryVersions completes with binary names, versions, and short IDs.
 func completeBinaryVersions(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if binaryAPIRef == nil {
+	if opRef == nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	binaries, _ := binaryAPIRef.ListAll(cmd.Context())
+	binaries, _ := opRef.BinaryListAll(cmd.Context())
 	var results []string
 	for _, b := range binaries {
 		if b.Name != "" && hasPrefix(b.Name, toComplete) && !contains(results, b.Name) {
@@ -231,10 +231,10 @@ func completeBinaryVersions(cmd *cobra.Command, args []string, toComplete string
 
 // completeKeyNames completes with key names, fingerprints (with and without SHA256: prefix).
 func completeKeyNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if keyAPIRef == nil {
+	if opRef == nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	keys, _ := keyAPIRef.ListAll(cmd.Context())
+	keys, _ := opRef.KeyListAll(cmd.Context())
 	var results []string
 	for _, k := range keys {
 		if k.Name != "" && hasPrefix(k.Name, toComplete) && !contains(results, k.Name) {
@@ -255,10 +255,10 @@ func completeKeyNames(cmd *cobra.Command, args []string, toComplete string) ([]s
 
 // completeVolumeNames completes with volume names and short IDs.
 func completeVolumeNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if volumeAPIRef == nil {
+	if opRef == nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	volumes := volumeAPIRef.ListAll(cmd.Context())
+	volumes := opRef.VolumeListAll(cmd.Context())
 	var results []string
 	for _, v := range volumes {
 		if v.Name != "" && hasPrefix(v.Name, toComplete) && !contains(results, v.Name) {
@@ -337,10 +337,10 @@ func listCategories(toComplete string) ([]string, cobra.ShellCompDirective) {
 // completeRemoteImageIDs completes with remote image IDs (via API).
 // Matches Python's _complete_remote_image_ids() in cli/_completion.py.
 func completeRemoteImageIDs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if imageAPIRef == nil {
+	if opRef == nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	raw, _ := imageAPIRef.ListAll(cmd.Context(), true, "", nil, false)
+	raw, _ := opRef.ImageListAll(cmd.Context(), true, "", nil, false)
 	images, ok := raw.([]*model.ImageItem)
 	if !ok {
 		return nil, cobra.ShellCompDirectiveNoFileComp
@@ -356,11 +356,11 @@ func completeRemoteImageIDs(cmd *cobra.Command, args []string, toComplete string
 
 // completeVMNamesEnhanced completes with VM names, short IDs, IPv4 addresses, and MAC addresses.
 // Matches Python's _complete_vm_names() in cli/_completion.py with full dedup.
-func completeVMNamesEnhanced(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if vmAPIRef == nil {
+func completeVMNamesEnhanced(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if opRef == nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	vms := vmAPIRef.List(cmd.Context(), nil)
+	vms := opRef.VMList(cmd.Context(), nil)
 	var results []string
 	for _, vm := range vms {
 		if vm.Name != "" && hasPrefix(vm.Name, toComplete) && !contains(results, vm.Name) {

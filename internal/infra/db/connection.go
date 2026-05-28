@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"mvmctl/internal/infra"
@@ -19,6 +20,14 @@ type Database struct {
 	db     *sql.DB
 	dbPath string
 	opened bool
+}
+
+// DBExists returns true if the mvm database file exists in the given cache
+// directory. This is a filesystem-only check — no connection is opened.
+// Matching Python's CacheUtils.get_mvm_db_path().exists().
+func DBExists(cacheDir string) bool {
+	_, err := os.Stat(filepath.Join(cacheDir, infra.MVMDBFilename))
+	return err == nil
 }
 
 // New creates a Database struct for the given dbPath.
