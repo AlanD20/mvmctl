@@ -8,7 +8,7 @@ import (
 	"mvmctl/pkg/api"
 )
 
-func NewConfigCmd(configAPI *api.ConfigOperation) *cobra.Command {
+func NewConfigCmd(configAPI *api.Operation) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
 		Short: "Configuration management",
@@ -33,7 +33,7 @@ func NewConfigCmd(configAPI *api.ConfigOperation) *cobra.Command {
 	return cmd
 }
 
-func newConfigGetCmd(configAPI *api.ConfigOperation) *cobra.Command {
+func newConfigGetCmd(configAPI *api.Operation) *cobra.Command {
 	return &cobra.Command{
 		Use:                "get [category] [key]",
 		Short:              "Get a config value.",
@@ -43,7 +43,7 @@ func newConfigGetCmd(configAPI *api.ConfigOperation) *cobra.Command {
 			category := args[0]
 			if len(args) == 2 {
 				key := args[1]
-				val, err := configAPI.Get(cmd.Context(), category, key)
+				val, err := configAPI.ConfigGet(cmd.Context(), category, key)
 				if err != nil {
 					// Python: error propagates to @handle_errors which prints it and exits 1.
 					// With SilenceErrors=true on root, we must print before returning.
@@ -57,7 +57,7 @@ func newConfigGetCmd(configAPI *api.ConfigOperation) *cobra.Command {
 				}
 			} else {
 				// Category-only: show metadata per key matching Python
-				val, err := configAPI.Get(cmd.Context(), category, "")
+				val, err := configAPI.ConfigGet(cmd.Context(), category, "")
 				if err != nil {
 					cli.Error(err.Error())
 					return err
@@ -77,14 +77,14 @@ func newConfigGetCmd(configAPI *api.ConfigOperation) *cobra.Command {
 	}
 }
 
-func newConfigSetCmd(configAPI *api.ConfigOperation) *cobra.Command {
+func newConfigSetCmd(configAPI *api.Operation) *cobra.Command {
 	return &cobra.Command{
 		Use:                "set [category] [key] [value]",
 		Short:              "Set a config value.",
 		Args:               cobra.ExactArgs(3),
 		ValidArgsFunction:  completeConfigSet,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := configAPI.Set(cmd.Context(), args[0], args[1], args[2])
+			result, err := configAPI.ConfigSet(cmd.Context(), args[0], args[1], args[2])
 			if err != nil {
 				cli.Error(err.Error())
 				return err
@@ -100,7 +100,7 @@ func newConfigSetCmd(configAPI *api.ConfigOperation) *cobra.Command {
 	}
 }
 
-func newConfigResetCmd(configAPI *api.ConfigOperation) *cobra.Command {
+func newConfigResetCmd(configAPI *api.Operation) *cobra.Command {
 	var allOverrides bool
 
 	cc := &cobra.Command{
@@ -110,7 +110,7 @@ func newConfigResetCmd(configAPI *api.ConfigOperation) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if allOverrides {
-				result := configAPI.Reset(cmd.Context(), "", "", true)
+				result := configAPI.ConfigReset(cmd.Context(), "", "", true)
 				if result.IsError() {
 					cli.Error(result.Message)
 					return fmt.Errorf("%s", result.Message)
@@ -124,7 +124,7 @@ func newConfigResetCmd(configAPI *api.ConfigOperation) *cobra.Command {
 				cli.Info("Provide a category, category and key, or use --all")
 			case 1:
 				category := args[0]
-				result := configAPI.Reset(cmd.Context(), category, "", false)
+				result := configAPI.ConfigReset(cmd.Context(), category, "", false)
 				if result.IsError() {
 					cli.Error(result.Message)
 					return fmt.Errorf("%s", result.Message)
@@ -133,7 +133,7 @@ func newConfigResetCmd(configAPI *api.ConfigOperation) *cobra.Command {
 			case 2:
 				category := args[0]
 				key := args[1]
-				result := configAPI.Reset(cmd.Context(), category, key, false)
+				result := configAPI.ConfigReset(cmd.Context(), category, key, false)
 				if result.IsError() {
 					cli.Error(result.Message)
 					return fmt.Errorf("%s", result.Message)
@@ -152,12 +152,12 @@ func newConfigResetCmd(configAPI *api.ConfigOperation) *cobra.Command {
 	return cc
 }
 
-func newConfigListCmd(configAPI *api.ConfigOperation) *cobra.Command {
+func newConfigListCmd(configAPI *api.Operation) *cobra.Command {
 	return &cobra.Command{
 		Use:   "ls",
 		Short: "List all overridable settings and their current values.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			allSettings, err := configAPI.ListAll(cmd.Context())
+			allSettings, err := configAPI.ConfigListAll(cmd.Context())
 			if err != nil {
 				// Python: error propagates to @handle_errors which prints it and exits 1.
 				// With SilenceErrors=true on root, we must print before returning.

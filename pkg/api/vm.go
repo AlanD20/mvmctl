@@ -29,7 +29,6 @@ import (
 	"mvmctl/internal/core/ssh"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
-	"mvmctl/internal/enricher"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/disk"
 	"mvmctl/internal/infra/errs"
@@ -46,53 +45,11 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// VMOperation provides the public orchestration API for all VM lifecycle operations.
-// Matches Python's VMOperation exactly. All methods return OperationResult/BatchResult.
-type VMOperation struct {
-	db         *sql.DB
-	cacheDir   string
-	vmRepo     vm.Repository
-	netRepo    network.Repository
-	imageRepo  image.Repository
-	kernelRepo kernel.Repository
-	binaryRepo binary.Repository
-	keyRepo    key.Repository
-	volRepo    volume.Repository
-	enr        *enricher.Enricher
-}
-
-// NewVMOperation creates a VMOperation with all dependencies.
-func NewVMOperation(
-	cacheDir string,
-	db *sql.DB,
-	vmRepo vm.Repository,
-	netRepo network.Repository,
-	imageRepo image.Repository,
-	kernelRepo kernel.Repository,
-	binaryRepo binary.Repository,
-	keyRepo key.Repository,
-	volRepo volume.Repository,
-	enr *enricher.Enricher,
-) *VMOperation {
-	return &VMOperation{
-		db:         db,
-		cacheDir:   cacheDir,
-		vmRepo:     vmRepo,
-		netRepo:    netRepo,
-		imageRepo:  imageRepo,
-		kernelRepo: kernelRepo,
-		binaryRepo: binaryRepo,
-		keyRepo:    keyRepo,
-		volRepo:    volRepo,
-		enr:        enr,
-	}
-}
-
 // ── Create ──
 
 // Create creates one or more VMs.
 // Matches Python's VMOperation.create() exactly.
-func (o *VMOperation) Create(ctx context.Context, input *inputs.VMCreateInput, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
+func (op *Operation) VMCreate(ctx context.Context, input *inputs.VMCreateInput, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
 	ph := &host.PrivilegeHelper{}
 	if err := ph.CheckPrivileges("/usr/sbin/ip", "create VMs"); err != nil {
 		return &errs.OperationResult{
@@ -108,18 +65,18 @@ func (o *VMOperation) Create(ctx context.Context, input *inputs.VMCreateInput, o
 	}
 
 	if count == 1 {
-		return o.createSingle(ctx, input, onProgress)
+		return op.vmCreateSingle(ctx, input, onProgress)
 	}
 
-	return o.createBatch(ctx, input, count, onProgress)
+	return op.vmCreateBatch(ctx, input, count, onProgress)
 }
 
-func (o *VMOperation) createSingle(ctx context.Context, input *inputs.VMCreateInput, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
+func (op *Operation) vmCreateSingle(ctx context.Context, input *inputs.VMCreateInput, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
 	createdAt := time.Now()
 	vmID := infra.HashGenerator{}.VM(input.Name, createdAt.Format(time.RFC3339))
-	vmDir := filepath.Join(o.cacheDir, "vms", vmID)
+	vmDir := filepath.Join(op.CacheDir, "vms", vmID)
 
-	resolved, err := o.buildResolvedInput(ctx, input, vmID, vmDir)
+	resolved, err := op.vmBuildResolvedInput(ctx, input, vmID, vmDir)
 	if err != nil {
 		status := "error"
 		var de *errs.DomainError
@@ -159,7 +116,7 @@ func (o *VMOperation) createSingle(ctx context.Context, input *inputs.VMCreateIn
 		cancelCreate()
 	}
 
-	vmInstance, execErr := o.executeCreate(createCtx, resolved, onProgress, &vmCleanup)
+	vmInstance, execErr := op.vmExecuteCreate(createCtx, resolved, onProgress, &vmCleanup)
 	signalCleanup()
 	if execErr != nil {
 		// Python's SigtermContext already called cleanup on signal regardless of skip_cleanup.
@@ -181,16 +138,16 @@ func (o *VMOperation) createSingle(ctx context.Context, input *inputs.VMCreateIn
 
 	// Handle volumes
 	if len(resolved.Volumes) > 0 {
-		volSvc := volume.NewService(o.volRepo)
+		volSvc := volume.NewService(op.Repos.Volume)
 		volSvc.SetVolumesState(ctx, resolved.Volumes, model.VolumeStatusAttached, &vmInstance.ID)
 		vmInstance.VolumeIDs = make([]string, len(resolved.Volumes))
 		for i, v := range resolved.Volumes {
 			vmInstance.VolumeIDs[i] = v.ID
 		}
-		o.vmRepo.Upsert(ctx, vmInstance)
+		op.Repos.VM.Upsert(ctx, vmInstance)
 	}
 
-	auditLog := logging.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(op.CacheDir)
 	_ = auditLog.LogOperation("vm.create", nil, fmt.Sprintf("name=%s", input.Name))
 
 	return &errs.OperationResult{
@@ -200,11 +157,11 @@ func (o *VMOperation) createSingle(ctx context.Context, input *inputs.VMCreateIn
 	}
 }
 
-func (o *VMOperation) createBatch(ctx context.Context, input *inputs.VMCreateInput, count int, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
-	names := o.generateBatchNames(input.Name, count)
+func (op *Operation) vmCreateBatch(ctx context.Context, input *inputs.VMCreateInput, count int, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
+	names := op.vmGenerateBatchNames(input.Name, count)
 
 	// Pre-allocate: check name collisions (single query, matching Python)
-	existing, err := o.vmRepo.GetByNames(ctx, names)
+	existing, err := op.Repos.VM.GetByNames(ctx, names)
 	if err != nil {
 		return &errs.OperationResult{
 			Status: "error", Code: string(errs.CodeDatabaseError),
@@ -230,15 +187,15 @@ func (o *VMOperation) createBatch(ctx context.Context, input *inputs.VMCreateInp
 	for idx, name := range names {
 		createdAt := time.Now()
 		vmID := infra.HashGenerator{}.VM(name, createdAt.Format(time.RFC3339))
-		vmDir := filepath.Join(o.cacheDir, "vms", vmID)
+		vmDir := filepath.Join(op.CacheDir, "vms", vmID)
 
-		resolved, err := o.buildResolvedInput(ctx, input, vmID, vmDir)
+		resolved, err := op.vmBuildResolvedInput(ctx, input, vmID, vmDir)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("%s: %v", name, err))
 			if input.Atomic && len(createdVMs) > 0 {
 				// Rollback
 				for _, vm := range createdVMs {
-					_ = o.Remove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: ptr.Bool(true)})
+					_ = op.VMRemove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: ptr.Bool(true)})
 				}
 				return &errs.OperationResult{
 					Status: "error", Code: "vm.atomic_failed",
@@ -259,12 +216,12 @@ func (o *VMOperation) createBatch(ctx context.Context, input *inputs.VMCreateInp
 			}
 		}
 
-		vmInstance, execErr := o.executeCreateWithOpts(ctx, resolved, batchProgress, nil, true)
+		vmInstance, execErr := op.vmExecuteCreateWithOpts(ctx, resolved, batchProgress, nil, true)
 		if execErr != nil {
 			errors = append(errors, fmt.Sprintf("%s: %v", name, execErr))
 			if input.Atomic && len(createdVMs) > 0 {
 				for _, vm := range createdVMs {
-					_ = o.Remove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: ptr.Bool(true)})
+					_ = op.VMRemove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: ptr.Bool(true)})
 				}
 				return &errs.OperationResult{
 					Status: "error", Code: "vm.atomic_failed",
@@ -277,13 +234,13 @@ func (o *VMOperation) createBatch(ctx context.Context, input *inputs.VMCreateInp
 
 		// Handle volumes for batch VM (matches Python's volume handling after _execute_create)
 		if resolved.Volumes != nil && len(resolved.Volumes) > 0 {
-			volSvc := volume.NewService(o.volRepo)
+			volSvc := volume.NewService(op.Repos.Volume)
 			volSvc.SetVolumesState(ctx, resolved.Volumes, model.VolumeStatusAttached, &vmInstance.ID)
 			vmInstance.VolumeIDs = make([]string, len(resolved.Volumes))
 			for i, v := range resolved.Volumes {
 				vmInstance.VolumeIDs[i] = v.ID
 			}
-			o.vmRepo.Upsert(ctx, vmInstance)
+			op.Repos.VM.Upsert(ctx, vmInstance)
 		}
 		createdVMs = append(createdVMs, vmInstance)
 	}
@@ -318,18 +275,18 @@ func (o *VMOperation) createBatch(ctx context.Context, input *inputs.VMCreateInp
 	}
 }
 
-func (o *VMOperation) executeCreate(ctx context.Context, resolved *resolvedVMCreateInput, onProgress func(errs.ProgressEvent), cleanupFn *func()) (*model.VM, error) {
-	return o.executeCreateWithOpts(ctx, resolved, onProgress, cleanupFn, false)
+func (op *Operation) vmExecuteCreate(ctx context.Context, resolved *resolvedVMCreateInput, onProgress func(errs.ProgressEvent), cleanupFn *func()) (*model.VM, error) {
+	return op.vmExecuteCreateWithOpts(ctx, resolved, onProgress, cleanupFn, false)
 }
 
-func (o *VMOperation) executeCreateWithOpts(ctx context.Context, resolved *resolvedVMCreateInput, onProgress func(errs.ProgressEvent), cleanupFn *func(), skipLimitCheck bool) (*model.VM, error) {
-	vmRepo := o.vmRepo
+func (op *Operation) vmExecuteCreateWithOpts(ctx context.Context, resolved *resolvedVMCreateInput, onProgress func(errs.ProgressEvent), cleanupFn *func(), skipLimitCheck bool) (*model.VM, error) {
+	vmRepo := op.Repos.VM
 
 	// Check VM limit (Python: SettingsService.resolve(Database(), "settings.vm", "max_vms"))
 	if !skipLimitCheck {
 		maxVMs := 10
-		if o.db != nil {
-			row := o.db.QueryRowContext(ctx, "SELECT value FROM user_settings WHERE category = 'settings.vm' AND key = 'max_vms'")
+		if op.DB != nil {
+			row := op.DB.QueryRowContext(ctx, "SELECT value FROM user_settings WHERE category = 'settings.vm' AND key = 'max_vms'")
 			var val string
 			if err := row.Scan(&val); err == nil {
 				if n, err := strconv.Atoi(val); err == nil && n > 0 {
@@ -354,8 +311,8 @@ func (o *VMOperation) executeCreateWithOpts(ctx context.Context, resolved *resol
 		onProgress:       onProgress,
 		resolved:         resolved,
 		resourcesCreated: make(map[string]bool),
-		cacheDir:         o.cacheDir,
-		db:               o.db,
+		cacheDir:         op.CacheDir,
+		db:               op.DB,
 	}
 
 	// Set the cleanup function so signal handlers can call it
@@ -401,7 +358,7 @@ func (o *VMOperation) executeCreateWithOpts(ctx context.Context, resolved *resol
 // Matches Python's VMOperation.remove() exactly.
 // Uses the proper VMRequest pipeline (validation + resolution + enrichment)
 // instead of inline resolution, matching Python's VMRequest(inputs=inputs, db=db).resolve().
-func (o *VMOperation) Remove(ctx context.Context, input *inputs.VMInput) *errs.BatchResult {
+func (op *Operation) VMRemove(ctx context.Context, input *inputs.VMInput) *errs.BatchResult {
 	ph := &host.PrivilegeHelper{}
 	if err := ph.CheckPrivileges("/usr/sbin/ip", "Remove VM"); err != nil {
 		return &errs.BatchResult{
@@ -418,9 +375,9 @@ func (o *VMOperation) Remove(ctx context.Context, input *inputs.VMInput) *errs.B
 			Identifiers: input.Identifiers,
 			Force:       input.Force,
 		},
-		o.db,
-		o.vmRepo,
-		o.enr,
+		op.DB,
+		op.Repos.VM,
+		op.Enr,
 	)
 	resolved, err := vmRequest.Resolve(ctx)
 	if err != nil {
@@ -453,12 +410,12 @@ func (o *VMOperation) Remove(ctx context.Context, input *inputs.VMInput) *errs.B
 		})
 	}
 
-	repo := o.vmRepo
-	volSvc := volume.NewService(o.volRepo)
+	repo := op.Repos.VM
+	volSvc := volume.NewService(op.Repos.Volume)
 
 	for _, v := range resolved.VMs {
 		vmLocal := v
-		vmDir := filepath.Join(o.cacheDir, "vms", vmLocal.ID)
+		vmDir := filepath.Join(op.CacheDir, "vms", vmLocal.ID)
 
 		// Stop the VM
 		controller, ctrlErr := vm.NewController(vmLocal, repo)
@@ -475,13 +432,13 @@ func (o *VMOperation) Remove(ctx context.Context, input *inputs.VMInput) *errs.B
 		}
 
 		// Perform removal cleanup
-		o.performRemovalCleanup(vmLocal)
+		op.vmPerformRemovalCleanup(vmLocal)
 
 		// Detach volumes
 		if len(vmLocal.VolumeIDs) > 0 {
 			var vols []*model.VolumeItem
 			for _, vid := range vmLocal.VolumeIDs {
-				v, _ := o.volRepo.Get(ctx, vid)
+				v, _ := op.Repos.Volume.Get(ctx, vid)
 				if v != nil {
 					vols = append(vols, v)
 				}
@@ -497,7 +454,7 @@ func (o *VMOperation) Remove(ctx context.Context, input *inputs.VMInput) *errs.B
 			os.RemoveAll(vmDir)
 		}
 
-		auditLog := logging.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(op.CacheDir)
 		_ = auditLog.LogOperation("vm.remove", map[string]interface{}{"name": vmLocal.Name}, "")
 
 		results = append(results, errs.OperationResult{
@@ -509,12 +466,12 @@ func (o *VMOperation) Remove(ctx context.Context, input *inputs.VMInput) *errs.B
 	return &errs.BatchResult{Items: results}
 }
 
-func (o *VMOperation) performRemovalCleanup(vm *model.VM) {
+func (op *Operation) vmPerformRemovalCleanup(vm *model.VM) {
 	ctx := context.Background()
 
 	// Console relay cleanup (matches Python's _cleanup_console)
 	if vm.RelayPID != nil && vm.ID != "" {
-		relay := consoleapi.NewRelayManager(vm.ID, filepath.Join(o.cacheDir, "vms", vm.ID), vm.Name,
+		relay := consoleapi.NewRelayManager(vm.ID, filepath.Join(op.CacheDir, "vms", vm.ID), vm.Name,
 			"console.pid", "console.sock", "firecracker.console.log")
 		relay.Stop(true)
 	}
@@ -527,7 +484,7 @@ func (o *VMOperation) performRemovalCleanup(vm *model.VM) {
 
 	// IP lease cleanup (matches Python's _cleanup_ip)
 	if vm.ID != "" {
-		leaseRepo := network.NewLeaseRepository(o.db)
+		leaseRepo := network.NewLeaseRepository(op.DB)
 		_ = leaseRepo.ReleaseByVM(ctx, vm.ID)
 	}
 
@@ -541,7 +498,7 @@ func (o *VMOperation) performRemovalCleanup(vm *model.VM) {
 
 // Prune prunes VMs.
 // Matches Python's VMOperation.prune() exactly.
-func (o *VMOperation) Prune(ctx context.Context, dryRun bool, includeAll bool) *errs.OperationResult {
+func (op *Operation) VMPrune(ctx context.Context, dryRun bool, includeAll bool) *errs.OperationResult {
 	ph := &host.PrivilegeHelper{}
 	if err := ph.CheckPrivileges("/usr/sbin/ip", "prune VMs"); err != nil {
 		return &errs.OperationResult{
@@ -550,7 +507,7 @@ func (o *VMOperation) Prune(ctx context.Context, dryRun bool, includeAll bool) *
 		}
 	}
 
-	allVMs, err := o.vmRepo.ListAll(ctx)
+	allVMs, err := op.Repos.VM.ListAll(ctx)
 	if err != nil {
 		return &errs.OperationResult{
 			Status: "error", Code: string(errs.CodeDatabaseError),
@@ -567,7 +524,7 @@ func (o *VMOperation) Prune(ctx context.Context, dryRun bool, includeAll bool) *
 		}
 
 		if !dryRun {
-			result := o.Remove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: ptr.Bool(true)})
+			result := op.VMRemove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: ptr.Bool(true)})
 			if result.HasErrors() {
 				slog.Warn("Failed to remove VM", "name", vm.Name, "error", infraslice.JoinStringsPtrs(result))
 				continue
@@ -587,29 +544,29 @@ func (o *VMOperation) Prune(ctx context.Context, dryRun bool, includeAll bool) *
 
 // List returns all VMs, optionally filtered by status.
 // Matches Python's VMOperation.list_all() exactly.
-func (o *VMOperation) List(ctx context.Context, statusFilter interface{}) []*model.VM {
+func (op *Operation) VMList(ctx context.Context, statusFilter interface{}) []*model.VM {
 	var vms []*model.VM
 	var err error
 
 	if statusFilter != nil {
 		switch s := statusFilter.(type) {
 		case string:
-			vms, err = o.vmRepo.ListByStatus(ctx, s)
+			vms, err = op.Repos.VM.ListByStatus(ctx, s)
 		case []string:
-			vms, err = o.vmRepo.ListByStatus(ctx, s...)
+			vms, err = op.Repos.VM.ListByStatus(ctx, s...)
 		default:
-			vms, err = o.vmRepo.ListAll(ctx)
+			vms, err = op.Repos.VM.ListAll(ctx)
 		}
 	} else {
-		vms, err = o.vmRepo.ListAll(ctx)
+		vms, err = op.Repos.VM.ListAll(ctx)
 	}
 
 	if err != nil || len(vms) == 0 {
 		return vms
 	}
 
-	if o.enr != nil {
-		_ = o.enr.EnrichVM(ctx, vms)
+	if op.Enr != nil {
+		_ = op.Enr.EnrichVM(ctx, vms)
 	}
 
 	return vms
@@ -618,7 +575,7 @@ func (o *VMOperation) List(ctx context.Context, statusFilter interface{}) []*mod
 // ToJSON converts VMs to JSON-serializable dicts.
 // Matches Python's VMOperation.to_json() exactly.
 // Python always includes ALL fields in every entry (with None/null if not set).
-func (o *VMOperation) ToJSON(vms []*model.VM) []map[string]interface{} {
+func (op *Operation) VMToJSON(vms []*model.VM) []map[string]interface{} {
 	result := make([]map[string]interface{}, 0, len(vms))
 	for _, vm := range vms {
 		// Always include all fields — Python always sets every key in the dict,
@@ -726,26 +683,26 @@ func (o *VMOperation) ToJSON(vms []*model.VM) []map[string]interface{} {
 
 // Get returns a single VM by identifier.
 // Matches Python's VMOperation.get() exactly.
-func (o *VMOperation) Get(ctx context.Context, input *inputs.VMInput) (*model.VM, error) {
+func (op *Operation) VMGet(ctx context.Context, input *inputs.VMInput) (*model.VM, error) {
 	if len(input.Identifiers) != 1 {
 		return nil, fmt.Errorf("Expected exactly one VM identifier")
 	}
 	// Use the full resolution pipeline (name, IP, MAC, ID prefix) matching Python's VMResolver
-	vm, err := o.resolveSingleVM(ctx, input.Identifiers[0])
+	vm, err := op.vmResolveSingleVM(ctx, input.Identifiers[0])
 	if err != nil {
 		return nil, err
 	}
 	// Enrich VM with relations (matches Python's VMResolver._enrich)
-	if o.enr != nil {
-		_ = o.enr.EnrichVM(ctx, []*model.VM{vm})
+	if op.Enr != nil {
+		_ = op.Enr.EnrichVM(ctx, []*model.VM{vm})
 	}
 	return vm, nil
 }
 
 // Inspect returns detailed VM info with enriched data.
 // Matches Python's VMOperation.inspect() exactly.
-func (o *VMOperation) Inspect(ctx context.Context, input *inputs.VMInput) (map[string]interface{}, error) {
-	vm, err := o.Get(ctx, input)
+func (op *Operation) VMInspect(ctx context.Context, input *inputs.VMInput) (map[string]interface{}, error) {
+	vm, err := op.VMGet(ctx, input)
 	if err != nil {
 		return nil, err
 	}
@@ -753,28 +710,28 @@ func (o *VMOperation) Inspect(ctx context.Context, input *inputs.VMInput) (map[s
 	// Resolve asset names (matches Python's Repository(db).get(vm.image_id) etc.)
 	var imageName *string
 	if vm.ImageID != "" {
-		img, err := o.imageRepo.Get(ctx, vm.ImageID)
+		img, err := op.Repos.Image.Get(ctx, vm.ImageID)
 		if err == nil && img != nil {
 			imageName = &img.Name
 		}
 	}
 	var kernelVersion *string
 	if vm.KernelID != "" {
-		krn, err := o.kernelRepo.Get(ctx, vm.KernelID)
+		krn, err := op.Repos.Kernel.Get(ctx, vm.KernelID)
 		if err == nil && krn != nil {
 			kernelVersion = &krn.Version
 		}
 	}
 	var networkName *string
 	if vm.NetworkID != "" {
-		net, err := o.netRepo.Get(ctx, vm.NetworkID)
+		net, err := op.Repos.Network.Get(ctx, vm.NetworkID)
 		if err == nil && net != nil {
 			networkName = &net.Name
 		}
 	}
 	var binaryName *string
 	if vm.BinaryID != "" {
-		bin, err := o.binaryRepo.Get(ctx, vm.BinaryID)
+		bin, err := op.Repos.Binary.Get(ctx, vm.BinaryID)
 		if err == nil && bin != nil {
 			binaryName = &bin.Name
 		}
@@ -785,12 +742,12 @@ func (o *VMOperation) Inspect(ctx context.Context, input *inputs.VMInput) (map[s
 	relayPID := vm.RelayPID
 	relaySocketPath := vm.RelaySocketPath
 	if vm.ID != "" && vm.RelayPID != nil {
-		relay := consoleapi.NewRelayManager(vm.ID, filepath.Join(o.cacheDir, "vms", vm.ID), vm.Name,
+		relay := consoleapi.NewRelayManager(vm.ID, filepath.Join(op.CacheDir, "vms", vm.ID), vm.Name,
 			"console.pid", "console.sock", "firecracker.console.log")
 		relayRunning = relay.IsRunning()
 	}
 
-	vmDir := filepath.Join(o.cacheDir, "vms", vm.ID)
+	vmDir := filepath.Join(op.CacheDir, "vms", vm.ID)
 	rootfsPath := filepath.Join(vmDir, "rootfs."+vm.RootfsSuffix)
 	if vm.RootfsSuffix == "" {
 		rootfsPath = filepath.Join(vmDir, "rootfs.ext4")
@@ -817,7 +774,7 @@ func (o *VMOperation) Inspect(ctx context.Context, input *inputs.VMInput) (map[s
 	// Resolve volumes with enrichment (matches Python's vm.volumes)
 	volumes := make([]map[string]interface{}, 0)
 	if len(vm.VolumeIDs) > 0 {
-		vols, err := o.volRepo.FindByIDs(ctx, vm.VolumeIDs)
+		vols, err := op.Repos.Volume.FindByIDs(ctx, vm.VolumeIDs)
 		if err == nil {
 			for _, v := range vols {
 				volumes = append(volumes, map[string]interface{}{
@@ -891,8 +848,8 @@ func (o *VMOperation) Inspect(ctx context.Context, input *inputs.VMInput) (map[s
 // Start starts one or more VMs.
 // Matches Python's VMOperation.start() exactly — returns BatchResult[VMInstanceItem].
 // Uses batch VMRequest resolution (no N+1), matching Python's VMRequest(inputs=inputs, db=db).resolve().
-func (o *VMOperation) Start(ctx context.Context, input *inputs.VMInput) *errs.BatchResult {
-	repo := o.vmRepo
+func (op *Operation) VMStart(ctx context.Context, input *inputs.VMInput) *errs.BatchResult {
+	repo := op.Repos.VM
 	results := make([]errs.OperationResult, 0)
 
 	// Batch resolve all VMs first (matches Python's VMRequest.resolve())
@@ -901,9 +858,9 @@ func (o *VMOperation) Start(ctx context.Context, input *inputs.VMInput) *errs.Ba
 			Identifiers: input.Identifiers,
 			Force:       input.Force,
 		},
-		o.db,
-		o.vmRepo,
-		o.enr,
+		op.DB,
+		op.Repos.VM,
+		op.Enr,
 	)
 	resolved, resolveErr := vmRequest.Resolve(ctx)
 	if resolveErr != nil {
@@ -921,7 +878,7 @@ func (o *VMOperation) Start(ctx context.Context, input *inputs.VMInput) *errs.Ba
 
 		// If VM is stopped, respawn Firecracker process (matches Python's _respawn_firecracker)
 		if vmLocal.Status == model.StatusStopped {
-			if err := o.respawnFirecracker(ctx, vmLocal, false); err != nil {
+			if err := op.vmRespawnFirecracker(ctx, vmLocal, false); err != nil {
 				results = append(results, errs.OperationResult{
 					Status: "error", Code: "vm.start_failed",
 					Message:   fmt.Sprintf("start '%s': %v", vmLocal.Name, err),
@@ -949,7 +906,7 @@ func (o *VMOperation) Start(ctx context.Context, input *inputs.VMInput) *errs.Ba
 			}
 		}
 
-		auditLog := logging.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(op.CacheDir)
 		_ = auditLog.LogOperation("vm.start", nil, fmt.Sprintf("name=%s", vmLocal.Name))
 
 		results = append(results, errs.OperationResult{
@@ -965,8 +922,8 @@ func (o *VMOperation) Start(ctx context.Context, input *inputs.VMInput) *errs.Ba
 // Stop stops one or more VMs.
 // Matches Python's VMOperation.stop() exactly — returns BatchResult[VMInstanceItem].
 // Uses batch VMRequest resolution (no N+1), matching Python's VMRequest(inputs=inputs, db=db).resolve().
-func (o *VMOperation) Stop(ctx context.Context, input *inputs.VMInput) *errs.BatchResult {
-	repo := o.vmRepo
+func (op *Operation) VMStop(ctx context.Context, input *inputs.VMInput) *errs.BatchResult {
+	repo := op.Repos.VM
 	results := make([]errs.OperationResult, 0)
 
 	// Batch resolve all VMs first (matches Python's VMRequest.resolve())
@@ -975,9 +932,9 @@ func (o *VMOperation) Stop(ctx context.Context, input *inputs.VMInput) *errs.Bat
 			Identifiers: input.Identifiers,
 			Force:       input.Force,
 		},
-		o.db,
-		o.vmRepo,
-		o.enr,
+		op.DB,
+		op.Repos.VM,
+		op.Enr,
 	)
 	resolved, resolveErr := vmRequest.Resolve(ctx)
 	if resolveErr != nil {
@@ -1016,7 +973,7 @@ func (o *VMOperation) Stop(ctx context.Context, input *inputs.VMInput) *errs.Bat
 			}
 		}
 
-		auditLog := logging.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(op.CacheDir)
 		_ = auditLog.LogOperation("vm.stop", nil, fmt.Sprintf("name=%s", vmLocal.Name))
 
 		results = append(results, errs.OperationResult{
@@ -1029,8 +986,8 @@ func (o *VMOperation) Stop(ctx context.Context, input *inputs.VMInput) *errs.Bat
 	return &errs.BatchResult{Items: results}
 }
 
-func (o *VMOperation) respawnFirecracker(ctx context.Context, v *model.VM, snapshotMode bool) error {
-	vmDir := filepath.Join(o.cacheDir, "vms", v.ID)
+func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snapshotMode bool) error {
+	vmDir := filepath.Join(op.CacheDir, "vms", v.ID)
 
 	// ── Restart nocloud-net server if needed (matches Python's respawn_execute) ──
 	if v.CloudInitMode == "net" {
@@ -1045,7 +1002,7 @@ func (o *VMOperation) respawnFirecracker(ctx context.Context, v *model.VM, snaps
 				gateway = v.Network.IPv4Gateway
 			}
 			if gateway == "" {
-				netw, _ := o.netRepo.Get(ctx, v.NetworkID)
+				netw, _ := op.Repos.Network.Get(ctx, v.NetworkID)
 				if netw != nil {
 					gateway = netw.IPv4Gateway
 				}
@@ -1085,7 +1042,7 @@ func (o *VMOperation) respawnFirecracker(ctx context.Context, v *model.VM, snaps
 			gateway = v.Network.IPv4Gateway
 		}
 		if bridgeName == "" {
-			netw, _ := o.netRepo.Get(ctx, v.NetworkID)
+			netw, _ := op.Repos.Network.Get(ctx, v.NetworkID)
 			if netw != nil {
 				bridgeName = netw.Bridge
 				netID = netw.ID
@@ -1094,7 +1051,7 @@ func (o *VMOperation) respawnFirecracker(ctx context.Context, v *model.VM, snaps
 			}
 		}
 		if bridgeName != "" {
-			netSvc := network.NewService(network.NewRepository(o.db), nil)
+			netSvc := network.NewService(network.NewRepository(op.DB), nil)
 			bridgeAddr, calcErr := network.ComputeBridgeAddress(gateway, subnet)
 			if calcErr != nil {
 				slog.Warn("Failed to compute bridge address during respawn", "vm", v.Name, "error", calcErr)
@@ -1115,14 +1072,14 @@ func (o *VMOperation) respawnFirecracker(ctx context.Context, v *model.VM, snaps
 			}
 		}
 		if binaryPath == "" {
-			bin, err := o.binaryRepo.Get(ctx, v.BinaryID)
+			bin, err := op.Repos.Binary.Get(ctx, v.BinaryID)
 			if err == nil && bin != nil {
 				binaryPath = bin.Path
 			}
 		}
 	}
 	if binaryPath == "" {
-		defaultBin, _ := o.binaryRepo.GetDefault(ctx, "firecracker")
+		defaultBin, _ := op.Repos.Binary.GetDefault(ctx, "firecracker")
 		if defaultBin != nil {
 			binaryPath = defaultBin.Path
 		}
@@ -1139,7 +1096,7 @@ func (o *VMOperation) respawnFirecracker(ctx context.Context, v *model.VM, snaps
 			}
 		}
 		if kernelPath == "" {
-			krnl, err := o.kernelRepo.Get(ctx, v.KernelID)
+			krnl, err := op.Repos.Kernel.Get(ctx, v.KernelID)
 			if err == nil && krnl != nil {
 				kernelPath = krnl.Path
 			}
@@ -1161,7 +1118,7 @@ func (o *VMOperation) respawnFirecracker(ctx context.Context, v *model.VM, snaps
 			networkGateway = v.Network.IPv4Gateway
 		}
 		if networkGateway == "" {
-			netw, _ := o.netRepo.Get(ctx, v.NetworkID)
+			netw, _ := op.Repos.Network.Get(ctx, v.NetworkID)
 			if netw != nil {
 				networkGateway = netw.IPv4Gateway
 			}
@@ -1236,13 +1193,13 @@ func (o *VMOperation) respawnFirecracker(ctx context.Context, v *model.VM, snaps
 	// Python: targeted DB updates, not full upsert.
 	pid := spawner.PID()
 	pst := spawner.ProcessStartTime()
-	_ = o.vmRepo.UpdateProcessInfo(ctx, v.ID, pid, pst)
+	_ = op.Repos.VM.UpdateProcessInfo(ctx, v.ID, pid, pst)
 
 	newStatus := model.StatusRunning
 	if snapshotMode {
 		newStatus = model.StatusPaused
 	}
-	_ = o.vmRepo.UpdateStatus(ctx, v.ID, newStatus)
+	_ = op.Repos.VM.UpdateStatus(ctx, v.ID, newStatus)
 
 	// Update in-memory VM object
 	v.PID = ptr.SafeDerefInt(pid)
@@ -1257,10 +1214,10 @@ func (o *VMOperation) respawnFirecracker(ctx context.Context, v *model.VM, snaps
 // Snapshot creates a snapshot of a single VM (matches Python's VMOperation.snapshot() exactly).
 // Python resolves exactly one VM, returns item=vm in all cases (success, error, failure).
 // memFile and stateFile are output paths for the snapshot files (matches Python's mem_out, state_out).
-func (o *VMOperation) Snapshot(ctx context.Context, input *inputs.VMInput, memFile string, stateFile string) *errs.OperationResult {
+func (op *Operation) VMSnapshot(ctx context.Context, input *inputs.VMInput, memFile string, stateFile string) *errs.OperationResult {
 	// Python: resolved = VMRequest(inputs=inputs, db=Database()).resolve()
 	//         if len(resolved.vms) != 1: raise VMNotFoundError
-	vmItem, err := o.resolveSingleVM(ctx, input.Identifiers[0])
+	vmItem, err := op.vmResolveSingleVM(ctx, input.Identifiers[0])
 	if err != nil {
 		return &errs.OperationResult{
 			Status: "error", Code: string(errs.CodeVMNotFound),
@@ -1268,7 +1225,7 @@ func (o *VMOperation) Snapshot(ctx context.Context, input *inputs.VMInput, memFi
 		}
 	}
 
-	controller, ctrlErr := vm.NewController(vmItem, o.vmRepo)
+	controller, ctrlErr := vm.NewController(vmItem, op.Repos.VM)
 	if ctrlErr != nil {
 		return &errs.OperationResult{
 			Status: "error", Code: "vm.snapshot_failed",
@@ -1292,7 +1249,7 @@ func (o *VMOperation) Snapshot(ctx context.Context, input *inputs.VMInput, memFi
 		}
 	}
 
-	auditLog := logging.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(op.CacheDir)
 	_ = auditLog.LogOperation("vm.snapshot", nil, fmt.Sprintf("name=%s", vmItem.Name))
 
 	return &errs.OperationResult{
@@ -1307,8 +1264,8 @@ func (o *VMOperation) Snapshot(ctx context.Context, input *inputs.VMInput, memFi
 // Matches Python's VMOperation.load_snapshot() exactly:
 //   - re-reads VM after respawn (Python: repo.get(vm.id) → updated)
 //   - catches MVMError → status="error", Exception → status="failure", item=vm
-func (o *VMOperation) Load(ctx context.Context, input *inputs.VMInput, memFile string, stateFile string, resume bool) *errs.OperationResult {
-	repo := o.vmRepo
+func (op *Operation) VMLoad(ctx context.Context, input *inputs.VMInput, memFile string, stateFile string, resume bool) *errs.OperationResult {
+	repo := op.Repos.VM
 
 	// Validate only one VM for load (matches Python's exactly one VM identifier check)
 	if len(input.Identifiers) != 1 {
@@ -1341,7 +1298,7 @@ func (o *VMOperation) Load(ctx context.Context, input *inputs.VMInput, memFile s
 		}
 	}
 
-	vmItem, err := o.resolveSingleVM(ctx, input.Identifiers[0])
+	vmItem, err := op.vmResolveSingleVM(ctx, input.Identifiers[0])
 	if err != nil {
 		return &errs.OperationResult{
 			Status: "error", Code: "vm.load_snapshot_failed",
@@ -1355,7 +1312,7 @@ func (o *VMOperation) Load(ctx context.Context, input *inputs.VMInput, memFile s
 	// Python: if vm.status == VMStatus.STOPPED.value: _respawn_firecracker(vm, snapshot_mode=True)
 	//         repo = Repository(Database()); updated = repo.get(vm.id); if updated: vm = updated
 	if vmItem.Status == model.StatusStopped {
-		if err := o.respawnFirecracker(ctx, vmItem, true); err != nil {
+		if err := op.vmRespawnFirecracker(ctx, vmItem, true); err != nil {
 			return &errs.OperationResult{
 				Status: "error", Code: "vm.load_snapshot_failed",
 				Item:      vmItem,
@@ -1396,7 +1353,7 @@ func (o *VMOperation) Load(ctx context.Context, input *inputs.VMInput, memFile s
 		exception = err
 		resultItem = vmItem
 	} else {
-		auditLog := logging.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(op.CacheDir)
 		_ = auditLog.LogOperation("vm.load", nil, fmt.Sprintf("name=%s", vmItem.Name))
 	}
 
@@ -1413,8 +1370,8 @@ func (o *VMOperation) Load(ctx context.Context, input *inputs.VMInput, memFile s
 // Reboot reboots one or more VMs.
 // Matches Python's VMOperation.reboot() exactly — returns BatchResult[VMInstanceItem].
 // Uses batch VMRequest resolution (no N+1), matching Python's VMRequest(inputs=inputs, db=db).resolve().
-func (o *VMOperation) Reboot(ctx context.Context, input *inputs.VMInput) *errs.BatchResult {
-	repo := o.vmRepo
+func (op *Operation) VMReboot(ctx context.Context, input *inputs.VMInput) *errs.BatchResult {
+	repo := op.Repos.VM
 	results := make([]errs.OperationResult, 0)
 
 	// Batch resolve all VMs first (matches Python's VMRequest.resolve())
@@ -1423,9 +1380,9 @@ func (o *VMOperation) Reboot(ctx context.Context, input *inputs.VMInput) *errs.B
 			Identifiers: input.Identifiers,
 			Force:       input.Force,
 		},
-		o.db,
-		o.vmRepo,
-		o.enr,
+		op.DB,
+		op.Repos.VM,
+		op.Enr,
 	)
 	resolved, resolveErr := vmRequest.Resolve(ctx)
 	if resolveErr != nil {
@@ -1458,7 +1415,7 @@ func (o *VMOperation) Reboot(ctx context.Context, input *inputs.VMInput) *errs.B
 		controller.Stop(ctx, force)
 
 		// After stop, respawn a fresh firecracker process
-		if err := o.respawnFirecracker(ctx, vmLocal, false); err != nil {
+		if err := op.vmRespawnFirecracker(ctx, vmLocal, false); err != nil {
 			results = append(results, errs.OperationResult{
 				Status: "error", Code: "vm.reboot_failed",
 				Message:   fmt.Sprintf("reboot '%s': %v", vmLocal.Name, err),
@@ -1467,7 +1424,7 @@ func (o *VMOperation) Reboot(ctx context.Context, input *inputs.VMInput) *errs.B
 			continue
 		}
 
-		auditLog := logging.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(op.CacheDir)
 		_ = auditLog.LogOperation("vm.reboot", nil, fmt.Sprintf("name=%s", vmLocal.Name))
 		results = append(results, errs.OperationResult{
 			Status: "success", Code: "vm.rebooted",
@@ -1482,8 +1439,8 @@ func (o *VMOperation) Reboot(ctx context.Context, input *inputs.VMInput) *errs.B
 // Pause pauses one or more VMs.
 // Matches Python's VMOperation.pause() exactly — returns BatchResult[VMInstanceItem].
 // Uses batch VMRequest resolution (no N+1), matching Python's VMRequest(inputs=inputs, db=db).resolve().
-func (o *VMOperation) Pause(ctx context.Context, input *inputs.VMInput) *errs.BatchResult {
-	repo := o.vmRepo
+func (op *Operation) VMPause(ctx context.Context, input *inputs.VMInput) *errs.BatchResult {
+	repo := op.Repos.VM
 	results := make([]errs.OperationResult, 0)
 
 	// Batch resolve all VMs first (matches Python's VMRequest.resolve())
@@ -1492,9 +1449,9 @@ func (o *VMOperation) Pause(ctx context.Context, input *inputs.VMInput) *errs.Ba
 			Identifiers: input.Identifiers,
 			Force:       input.Force,
 		},
-		o.db,
-		o.vmRepo,
-		o.enr,
+		op.DB,
+		op.Repos.VM,
+		op.Enr,
 	)
 	resolved, resolveErr := vmRequest.Resolve(ctx)
 	if resolveErr != nil {
@@ -1528,7 +1485,7 @@ func (o *VMOperation) Pause(ctx context.Context, input *inputs.VMInput) *errs.Ba
 			continue
 		}
 
-		auditLog := logging.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(op.CacheDir)
 		_ = auditLog.LogOperation("vm.pause", nil, fmt.Sprintf("name=%s", vmLocal.Name))
 
 		results = append(results, errs.OperationResult{
@@ -1544,8 +1501,8 @@ func (o *VMOperation) Pause(ctx context.Context, input *inputs.VMInput) *errs.Ba
 // Resume resumes one or more VMs.
 // Matches Python's VMOperation.resume() exactly — returns BatchResult[VMInstanceItem].
 // Uses batch VMRequest resolution (no N+1), matching Python's VMRequest(inputs=inputs, db=db).resolve().
-func (o *VMOperation) Resume(ctx context.Context, input *inputs.VMInput) *errs.BatchResult {
-	repo := o.vmRepo
+func (op *Operation) VMResume(ctx context.Context, input *inputs.VMInput) *errs.BatchResult {
+	repo := op.Repos.VM
 	results := make([]errs.OperationResult, 0)
 
 	// Batch resolve all VMs first (matches Python's VMRequest.resolve())
@@ -1554,9 +1511,9 @@ func (o *VMOperation) Resume(ctx context.Context, input *inputs.VMInput) *errs.B
 			Identifiers: input.Identifiers,
 			Force:       input.Force,
 		},
-		o.db,
-		o.vmRepo,
-		o.enr,
+		op.DB,
+		op.Repos.VM,
+		op.Enr,
 	)
 	resolved, resolveErr := vmRequest.Resolve(ctx)
 	if resolveErr != nil {
@@ -1590,7 +1547,7 @@ func (o *VMOperation) Resume(ctx context.Context, input *inputs.VMInput) *errs.B
 			continue
 		}
 
-		auditLog := logging.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(op.CacheDir)
 		_ = auditLog.LogOperation("vm.resume", nil, fmt.Sprintf("name=%s", vmLocal.Name))
 
 		results = append(results, errs.OperationResult{
@@ -1611,7 +1568,7 @@ func (o *VMOperation) Resume(ctx context.Context, input *inputs.VMInput) *errs.B
 //   - VolumeResolver for volume resolution
 //   - Version gate for hotplug
 //   - VolumeController.attach + VM volume_ids update
-func (o *VMOperation) AttachVolume(ctx context.Context, input *inputs.VMInput, volumeName string) *errs.OperationResult {
+func (op *Operation) VMAttachVolume(ctx context.Context, input *inputs.VMInput, volumeName string) *errs.OperationResult {
 	ph := &host.PrivilegeHelper{}
 	if err := ph.CheckPrivileges("/usr/sbin/ip", "attach volume"); err != nil {
 		return &errs.OperationResult{
@@ -1627,9 +1584,9 @@ func (o *VMOperation) AttachVolume(ctx context.Context, input *inputs.VMInput, v
 			Identifiers: input.Identifiers,
 			Force:       input.Force,
 		},
-		o.db,
-		o.vmRepo,
-		o.enr,
+		op.DB,
+		op.Repos.VM,
+		op.Enr,
 	)
 	resolved, resolveErr := vmRequest.Resolve(ctx)
 	if resolveErr != nil {
@@ -1647,7 +1604,7 @@ func (o *VMOperation) AttachVolume(ctx context.Context, input *inputs.VMInput, v
 	vmItem := resolved.VMs[0]
 
 	// Resolve volume using VolumeResolver (matches Python: vol_resolver.resolve(volume_name))
-	volResolver := volume.NewResolver(o.volRepo)
+	volResolver := volume.NewResolver(op.Repos.Volume)
 	vol, err := volResolver.Resolve(ctx, volumeName)
 	if err != nil {
 		return &errs.OperationResult{
@@ -1668,7 +1625,7 @@ func (o *VMOperation) AttachVolume(ctx context.Context, input *inputs.VMInput, v
 	if vmItem.Status == model.StatusRunning {
 		// Version gate: hotplug requires Firecracker v1.16+ (matches Python's VersionGate.require)
 		if vmItem.BinaryID != "" {
-			bin, _ := o.binaryRepo.Get(ctx, vmItem.BinaryID)
+			bin, _ := op.Repos.Binary.Get(ctx, vmItem.BinaryID)
 			if bin != nil && bin.Version != "" {
 				if !version.IsFirecrackerVersionAtLeast(bin.Version, "1.16") {
 					return &errs.OperationResult{
@@ -1682,7 +1639,7 @@ func (o *VMOperation) AttachVolume(ctx context.Context, input *inputs.VMInput, v
 			}
 		}
 		// Try Firecracker API hotplug (matches Python's try: controller.attach_volume(vol) except Exception: logger.warning)
-		controller, ctrlErr := vm.NewController(vmItem, o.vmRepo)
+		controller, ctrlErr := vm.NewController(vmItem, op.Repos.VM)
 		if ctrlErr == nil {
 			if err := controller.AttachVolume(ctx, vol); err != nil {
 				slog.Warn("Hotplug failed for drive", "volume", vol.ID, "error", err)
@@ -1691,7 +1648,7 @@ func (o *VMOperation) AttachVolume(ctx context.Context, input *inputs.VMInput, v
 	}
 
 	// VolumeController.attach (matches Python's vol_controller = VolumeController(vol, vol_repo); vol_controller.attach(vm.id))
-	volController, volCtrlErr := volume.NewController(ctx, vol, o.volRepo)
+	volController, volCtrlErr := volume.NewController(ctx, vol, op.Repos.Volume)
 	if volCtrlErr == nil {
 		_ = volController.Attach(ctx, vmItem.ID)
 	}
@@ -1712,9 +1669,9 @@ func (o *VMOperation) AttachVolume(ctx context.Context, input *inputs.VMInput, v
 		vmVolumeIDs = append(vmVolumeIDs, vol.ID)
 	}
 	vmItem.VolumeIDs = vmVolumeIDs
-	_ = o.vmRepo.Upsert(ctx, vmItem)
+	_ = op.Repos.VM.Upsert(ctx, vmItem)
 
-	auditLog := logging.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(op.CacheDir)
 	_ = auditLog.LogOperation("vm.attach_volume", map[string]interface{}{
 		"vm": vmItem.Name, "volume": vol.Name,
 	}, "")
@@ -1732,7 +1689,7 @@ func (o *VMOperation) AttachVolume(ctx context.Context, input *inputs.VMInput, v
 //   - VolumeResolver for volume resolution
 //   - Version gate + SSH PCI removal + Firecracker API for hot-unplug
 //   - VolumeController.detach + VM volume_ids update
-func (o *VMOperation) DetachVolume(ctx context.Context, input *inputs.VMInput, volumeName string) *errs.OperationResult {
+func (op *Operation) VMDetachVolume(ctx context.Context, input *inputs.VMInput, volumeName string) *errs.OperationResult {
 	ph := &host.PrivilegeHelper{}
 	if err := ph.CheckPrivileges("/usr/sbin/ip", "detach volume"); err != nil {
 		return &errs.OperationResult{
@@ -1748,9 +1705,9 @@ func (o *VMOperation) DetachVolume(ctx context.Context, input *inputs.VMInput, v
 			Identifiers: input.Identifiers,
 			Force:       input.Force,
 		},
-		o.db,
-		o.vmRepo,
-		o.enr,
+		op.DB,
+		op.Repos.VM,
+		op.Enr,
 	)
 	resolved, resolveErr := vmRequest.Resolve(ctx)
 	if resolveErr != nil {
@@ -1768,7 +1725,7 @@ func (o *VMOperation) DetachVolume(ctx context.Context, input *inputs.VMInput, v
 	vmItem := resolved.VMs[0]
 
 	// Resolve volume using VolumeResolver (matches Python: vol_resolver.resolve(volume_name))
-	volResolver := volume.NewResolver(o.volRepo)
+	volResolver := volume.NewResolver(op.Repos.Volume)
 	vol, err := volResolver.Resolve(ctx, volumeName)
 	if err != nil {
 		return &errs.OperationResult{
@@ -1781,7 +1738,7 @@ func (o *VMOperation) DetachVolume(ctx context.Context, input *inputs.VMInput, v
 	if vmItem.Status == model.StatusRunning {
 		// Version gate: hot-unplug requires Firecracker v1.16+ (matches Python's VersionGate.require)
 		if vmItem.BinaryID != "" {
-			bin, _ := o.binaryRepo.Get(ctx, vmItem.BinaryID)
+			bin, _ := op.Repos.Binary.Get(ctx, vmItem.BinaryID)
 			if bin != nil && bin.Version != "" {
 				if !version.IsFirecrackerVersionAtLeast(bin.Version, "1.16") {
 					return &errs.OperationResult{
@@ -1798,9 +1755,9 @@ func (o *VMOperation) DetachVolume(ctx context.Context, input *inputs.VMInput, v
 		// Step 1: SSH into guest and remove the PCI device (matches Python's SSH PCI removal)
 		if len(vmItem.SSHKeys) > 0 && vmItem.IPv4 != "" {
 			// Resolve the first SSH key to get private key path (matches Python's KeyResolver().by_id())
-			sshKey, keyErr := o.keyRepo.GetByName(ctx, vmItem.SSHKeys[0])
+			sshKey, keyErr := op.Repos.Key.GetByName(ctx, vmItem.SSHKeys[0])
 			if keyErr != nil || sshKey == nil {
-				matches, matchErr := o.keyRepo.FindByPrefix(ctx, vmItem.SSHKeys[0])
+				matches, matchErr := op.Repos.Key.FindByPrefix(ctx, vmItem.SSHKeys[0])
 				if matchErr == nil && len(matches) > 0 {
 					sshKey = matches[0]
 					keyErr = nil
@@ -1844,7 +1801,7 @@ func (o *VMOperation) DetachVolume(ctx context.Context, input *inputs.VMInput, v
 		}
 
 		// Step 2: Call Firecracker API to delete the drive (matches Python's controller.detach_volume)
-		controller, ctrlErr := vm.NewController(vmItem, o.vmRepo)
+		controller, ctrlErr := vm.NewController(vmItem, op.Repos.VM)
 		if ctrlErr == nil {
 			if err := controller.DetachVolume(ctx, vol); err != nil {
 				slog.Warn("Firecracker delete_drive failed", "volume", vol.ID, "error", err)
@@ -1853,7 +1810,7 @@ func (o *VMOperation) DetachVolume(ctx context.Context, input *inputs.VMInput, v
 	}
 
 	// VolumeController.detach (matches Python's vol_controller = VolumeController(vol, vol_repo); vol_controller.detach())
-	volController, volCtrlErr := volume.NewController(ctx, vol, o.volRepo)
+	volController, volCtrlErr := volume.NewController(ctx, vol, op.Repos.Volume)
 	if volCtrlErr == nil {
 		_ = volController.Detach(ctx)
 	}
@@ -1870,9 +1827,9 @@ func (o *VMOperation) DetachVolume(ctx context.Context, input *inputs.VMInput, v
 		}
 	}
 	vmItem.VolumeIDs = newIDs
-	_ = o.vmRepo.Upsert(ctx, vmItem)
+	_ = op.Repos.VM.Upsert(ctx, vmItem)
 
-	auditLog := logging.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(op.CacheDir)
 	_ = auditLog.LogOperation("vm.detach_volume", map[string]interface{}{
 		"vm": vmItem.Name, "volume": vol.Name,
 	}, "")
@@ -1893,7 +1850,7 @@ func (o *VMOperation) DetachVolume(ctx context.Context, input *inputs.VMInput, v
 //   - Delegates to VMCreateBuilder for full resolution
 //   - Delegates to executeCreate for provisioning
 //   - Matches Python's try/except MVMError → "error", Exception → "failure"
-func (o *VMOperation) Import(ctx context.Context, input *inputs.VMImportInput, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
+func (op *Operation) VMImport(ctx context.Context, input *inputs.VMImportInput, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
 	ph := &host.PrivilegeHelper{}
 	if err := ph.CheckPrivileges("/usr/sbin/ip", "import VM"); err != nil {
 		return &errs.OperationResult{
@@ -1910,7 +1867,7 @@ func (o *VMOperation) Import(ctx context.Context, input *inputs.VMImportInput, o
 
 	// Use VMImportRequest for full semantic resolution pipeline
 	// (matches Python: VMImportRequest(inputs=inputs, db=db).resolve())
-	request := inputs.NewVMImportRequest(*input, o.db)
+	request := inputs.NewVMImportRequest(*input, op.DB)
 	resolved, execErr = request.Resolve(ctx)
 	if execErr == nil {
 		// Set up signal-based cleanup (matches Python's SigtermContext(lambda: ctx.cleanup()))
@@ -1943,7 +1900,7 @@ func (o *VMOperation) Import(ctx context.Context, input *inputs.VMImportInput, o
 			signalCleanup()
 			execErr = fmt.Errorf("Failed to convert resolved input")
 		} else {
-			vmInstance, execErr = o.executeCreate(createCtx, internalResolved, onProgress, &vmCleanup)
+			vmInstance, execErr = op.vmExecuteCreate(createCtx, internalResolved, onProgress, &vmCleanup)
 			signalCleanup()
 			if execErr != nil {
 				if internalResolved.SkipCleanup {
@@ -1952,13 +1909,13 @@ func (o *VMOperation) Import(ctx context.Context, input *inputs.VMImportInput, o
 			} else {
 				// Handle volumes
 				if len(internalResolved.Volumes) > 0 {
-					volSvc := volume.NewService(o.volRepo)
+					volSvc := volume.NewService(op.Repos.Volume)
 					volSvc.SetVolumesState(ctx, internalResolved.Volumes, model.VolumeStatusAttached, &vmInstance.ID)
 					vmInstance.VolumeIDs = make([]string, len(internalResolved.Volumes))
 					for i, v := range internalResolved.Volumes {
 						vmInstance.VolumeIDs[i] = v.ID
 					}
-					o.vmRepo.Upsert(ctx, vmInstance)
+					op.Repos.VM.Upsert(ctx, vmInstance)
 				}
 			}
 		}
@@ -1979,7 +1936,7 @@ func (o *VMOperation) Import(ctx context.Context, input *inputs.VMImportInput, o
 		}
 	}
 
-	auditLog := logging.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(op.CacheDir)
 	_ = auditLog.LogOperation("vm.import", nil, fmt.Sprintf("name=%s,config=%s", resolved.Name, input.ConfigPath))
 
 	return &errs.OperationResult{
@@ -1991,17 +1948,17 @@ func (o *VMOperation) Import(ctx context.Context, input *inputs.VMImportInput, o
 
 // Export exports a VM's configuration as a portable VMExportConfig.
 // Matches Python's VMOperation.export() exactly — returns VMExportConfig, not an error code.
-func (o *VMOperation) Export(ctx context.Context, input *inputs.VMInput) (*inputs.VMExportConfig, error) {
-	vmItem, err := o.Get(ctx, input)
+func (op *Operation) VMExport(ctx context.Context, input *inputs.VMInput) (*inputs.VMExportConfig, error) {
+	vmItem, err := op.VMGet(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("VM not found: %w", err)
 	}
 
 	// Resolve related asset metadata (matches Python's Repository(db).get(vm.image_id) etc.)
-	imageRepo := image.NewRepository(o.db)
-	kernelRepo := kernel.NewRepository(o.db)
-	binaryRepo := binary.NewRepository(o.db)
-	netRepo := network.NewRepository(o.db)
+	imageRepo := image.NewRepository(op.DB)
+	kernelRepo := kernel.NewRepository(op.DB)
+	binaryRepo := binary.NewRepository(op.DB)
+	netRepo := network.NewRepository(op.DB)
 
 	image, _ := imageRepo.Get(ctx, vmItem.ImageID)
 	kernel, _ := kernelRepo.Get(ctx, vmItem.KernelID)
@@ -2145,7 +2102,7 @@ func (o *VMOperation) Export(ctx context.Context, input *inputs.VMInput) (*input
 		},
 	}
 
-	auditLog := logging.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(op.CacheDir)
 	_ = auditLog.LogOperation("vm.export", map[string]interface{}{"name": vmItem.Name}, "")
 
 	return cfg, nil
@@ -2976,11 +2933,11 @@ func (c *vmCreateContext) toModel() *model.VM {
 	return vm
 }
 
-func (o *VMOperation) buildResolvedInput(ctx context.Context, input *inputs.VMCreateInput, vmID, vmDir string) (*resolvedVMCreateInput, error) {
-	imageRepo := image.NewRepository(o.db)
-	kernelRepo := kernel.NewRepository(o.db)
-	netRepo := network.NewRepository(o.db)
-	keyRepo := key.NewRepository(o.db)
+func (op *Operation) vmBuildResolvedInput(ctx context.Context, input *inputs.VMCreateInput, vmID, vmDir string) (*resolvedVMCreateInput, error) {
+	imageRepo := image.NewRepository(op.DB)
+	kernelRepo := kernel.NewRepository(op.DB)
+	netRepo := network.NewRepository(op.DB)
+	keyRepo := key.NewRepository(op.DB)
 
 	// Resolve image (handles selectors like "alpine:3.21" and ID prefixes)
 	var image *model.ImageItem
@@ -3050,8 +3007,8 @@ func (o *VMOperation) buildResolvedInput(ctx context.Context, input *inputs.VMCr
 	}
 
 	// Resolve binary from DB (matches Python's Repository resolution)
-	binaryRepo := binary.NewRepository(o.db)
-	binary := o.resolveBinary(ctx, input.BinaryID, input.FirecrackerBin, binaryRepo)
+	binaryRepo := binary.NewRepository(op.DB)
+	binary := op.vmResolveBinary(ctx, input.BinaryID, input.FirecrackerBin, binaryRepo)
 
 	// Resolve SSH keys
 	sshKeyNames := input.SSHKeys
@@ -3144,8 +3101,8 @@ func (o *VMOperation) buildResolvedInput(ctx context.Context, input *inputs.VMCr
 
 	// Resolve provisioner type from settings (matches Python)
 	provisionerType := provisioner.ProvisionerLoopMount
-	if o.db != nil {
-		row := o.db.QueryRowContext(ctx, "SELECT value FROM user_settings WHERE category = 'settings' AND key = 'guestfs_enabled'")
+	if op.DB != nil {
+		row := op.DB.QueryRowContext(ctx, "SELECT value FROM user_settings WHERE category = 'settings' AND key = 'guestfs_enabled'")
 		var val string
 		if err := row.Scan(&val); err == nil {
 			if val == "true" || val == "1" {
@@ -3216,7 +3173,7 @@ func (o *VMOperation) buildResolvedInput(ctx context.Context, input *inputs.VMCr
 
 // resolveBinary resolves the firecracker binary from DB or falls back to hardcoded path.
 // Matches Python's VMCreateRequest binary resolution: tries explicit ID/path, then default, then fallback.
-func (o *VMOperation) resolveBinary(ctx context.Context, binaryID, firecrackerBin *string, binaryRepo binary.Repository) *model.BinaryItem {
+func (op *Operation) vmResolveBinary(ctx context.Context, binaryID, firecrackerBin *string, binaryRepo binary.Repository) *model.BinaryItem {
 	// 1. Explicit binary ID from input
 	if binaryID != nil && *binaryID != "" {
 		bin, err := binaryRepo.Get(ctx, *binaryID)
@@ -3262,32 +3219,32 @@ func mapToVMCPUCfg(m map[string]interface{}) *model.CpuConfig {
 	return &cfg
 }
 
-func (o *VMOperation) resolveSingleVM(ctx context.Context, ident string) (*model.VM, error) {
+func (op *Operation) vmResolveSingleVM(ctx context.Context, ident string) (*model.VM, error) {
 	if ident == "" {
 		return nil, fmt.Errorf("VM identifier is required")
 	}
 	// Match Python's VMResolver.resolve() order:
 	// 1. Try by name first
-	vm, err := o.vmRepo.GetByName(ctx, ident)
+	vm, err := op.Repos.VM.GetByName(ctx, ident)
 	if err == nil && vm != nil {
 		return vm, nil
 	}
 	// 2. If contains '.', try by IP (matches Python's by_ip)
 	if strings.Contains(ident, ".") {
-		vm, err = o.vmRepo.FindByIP(ctx, ident)
+		vm, err = op.Repos.VM.FindByIP(ctx, ident)
 		if err == nil && vm != nil {
 			return vm, nil
 		}
 	}
 	// 3. If contains ':', try by MAC (matches Python's by_mac)
 	if strings.Contains(ident, ":") {
-		vm, err = o.vmRepo.FindByMAC(ctx, ident)
+		vm, err = op.Repos.VM.FindByMAC(ctx, ident)
 		if err == nil && vm != nil {
 			return vm, nil
 		}
 	}
 	// 4. Try by ID prefix (matches Python's find_by_prefix)
-	matches, err := o.vmRepo.FindByPrefix(ctx, ident)
+	matches, err := op.Repos.VM.FindByPrefix(ctx, ident)
 	if err == nil {
 		if len(matches) == 1 {
 			return matches[0], nil
@@ -3303,7 +3260,7 @@ func (o *VMOperation) resolveSingleVM(ctx context.Context, ident string) (*model
 	return nil, fmt.Errorf("VM not found: %s", ident)
 }
 
-func (o *VMOperation) generateBatchNames(baseName string, count int) []string {
+func (op *Operation) vmGenerateBatchNames(baseName string, count int) []string {
 	names := make([]string, count)
 	for i := 0; i < count; i++ {
 		names[i] = fmt.Sprintf("%s-%d", baseName, i+1)
@@ -3398,8 +3355,8 @@ func resolvedFromBuilderOutput(r *inputs.VMCreateResolved) *resolvedVMCreateInpu
 
 // setupConsoleRelay creates a Controller and PTY for the given VM.
 // Matches Python's ConsoleOperation startup sequence.
-func (o *VMOperation) setupConsoleRelay(ctx context.Context, vm *model.VM) (*console.Controller, error) {
-	relayPath := filepath.Join(o.cacheDir, "vms", vm.ID)
+func (op *Operation) vmSetupConsoleRelay(ctx context.Context, vm *model.VM) (*console.Controller, error) {
+	relayPath := filepath.Join(op.CacheDir, "vms", vm.ID)
 	cc := console.NewController(vm.ID, relayPath, vm.Name, "console.pid", "console.sock", "firecracker.console.log")
 	ptyFD, err := cc.CreatePTY()
 	if err != nil {

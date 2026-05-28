@@ -11,19 +11,19 @@ import (
 	"mvmctl/pkg/api"
 )
 
-func NewKeyCmd(keyAPI *api.KeyOperation) *cobra.Command {
+func NewKeyCmd(op *api.Operation) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "key",
 		Short: "SSH key management",
 	}
 
-	cmd.AddCommand(newKeyListCmd(keyAPI))
-	cmd.AddCommand(newKeyCreateCmd(keyAPI))
-	cmd.AddCommand(newKeyAddCmd(keyAPI))
-	cmd.AddCommand(newKeyRemoveCmd(keyAPI))
-	cmd.AddCommand(newKeyInspectCmd(keyAPI))
-	cmd.AddCommand(newKeyExportCmd(keyAPI))
-	cmd.AddCommand(newKeyDefaultCmd(keyAPI))
+	cmd.AddCommand(newKeyListCmd(op))
+	cmd.AddCommand(newKeyCreateCmd(op))
+	cmd.AddCommand(newKeyAddCmd(op))
+	cmd.AddCommand(newKeyRemoveCmd(op))
+	cmd.AddCommand(newKeyInspectCmd(op))
+	cmd.AddCommand(newKeyExportCmd(op))
+	cmd.AddCommand(newKeyDefaultCmd(op))
 
 	// Hidden help subcommand matching Python's Typer "help" command
 	helpCmd := &cobra.Command{
@@ -39,7 +39,7 @@ func NewKeyCmd(keyAPI *api.KeyOperation) *cobra.Command {
 	return cmd
 }
 
-func newKeyListCmd(keyAPI *api.KeyOperation) *cobra.Command {
+func newKeyListCmd(op *api.Operation) *cobra.Command {
 	var jsonOutput bool
 	var longOutput bool
 
@@ -47,7 +47,7 @@ func newKeyListCmd(keyAPI *api.KeyOperation) *cobra.Command {
 		Use:                "ls",
 		Short:              "List all SSH keys.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			keys, err := keyAPI.ListAll(cmd.Context())
+			keys, err := op.KeyListAll(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -109,7 +109,7 @@ func newKeyListCmd(keyAPI *api.KeyOperation) *cobra.Command {
 	return cmd
 }
 
-func newKeyCreateCmd(keyAPI *api.KeyOperation) *cobra.Command {
+func newKeyCreateCmd(op *api.Operation) *cobra.Command {
 	var algorithm string
 	var bits int
 	var comment string
@@ -157,7 +157,7 @@ func newKeyCreateCmd(keyAPI *api.KeyOperation) *cobra.Command {
 				SetDefault: setDefault,
 			}
 
-			createResult := keyAPI.Create(cmd.Context(), input)
+			createResult := op.KeyCreate(cmd.Context(), input)
 			if createResult.Status == "error" {
 				cli.Error(createResult.Message)
 				return fmt.Errorf("%s", createResult.Message)
@@ -179,7 +179,7 @@ func newKeyCreateCmd(keyAPI *api.KeyOperation) *cobra.Command {
 	return cmd
 }
 
-func newKeyAddCmd(keyAPI *api.KeyOperation) *cobra.Command {
+func newKeyAddCmd(op *api.Operation) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
@@ -190,7 +190,7 @@ func newKeyAddCmd(keyAPI *api.KeyOperation) *cobra.Command {
 			name := args[0]
 			pubKeyPath := args[1]
 
-			createdKey := keyAPI.Add(cmd.Context(), name, pubKeyPath, force)
+			createdKey := op.KeyAdd(cmd.Context(), name, pubKeyPath, force)
 			if createdKey.Status == "error" {
 				cli.Error(createdKey.Message)
 				return fmt.Errorf("%s", createdKey.Message)
@@ -206,7 +206,7 @@ func newKeyAddCmd(keyAPI *api.KeyOperation) *cobra.Command {
 	return cmd
 }
 
-func newKeyRemoveCmd(keyAPI *api.KeyOperation) *cobra.Command {
+func newKeyRemoveCmd(op *api.Operation) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
@@ -223,7 +223,7 @@ func newKeyRemoveCmd(keyAPI *api.KeyOperation) *cobra.Command {
 			}
 
 			// Use API-side resolution matching Python's KeyInput(name=effective_names) + KeyOperation.remove()
-			removeResult := keyAPI.Remove(cmd.Context(), &api.KeyInput{Names: names}, force)
+			removeResult := op.KeyRemove(cmd.Context(), &api.KeyInput{Names: names}, force)
 			for _, r := range removeResult.Items {
 				if r.Status == "success" {
 					if keyItem, ok := r.Item.(*model.SSHKeyItem); ok {
@@ -247,7 +247,7 @@ func newKeyRemoveCmd(keyAPI *api.KeyOperation) *cobra.Command {
 	return cmd
 }
 
-func newKeyInspectCmd(keyAPI *api.KeyOperation) *cobra.Command {
+func newKeyInspectCmd(op *api.Operation) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
@@ -267,7 +267,7 @@ func newKeyInspectCmd(keyAPI *api.KeyOperation) *cobra.Command {
 				return fmt.Errorf("key name required")
 			}
 
-			info, err := keyAPI.Inspect(cmd.Context(), &api.KeyInput{Names: []string{name}})
+			info, err := op.KeyInspect(cmd.Context(), &api.KeyInput{Names: []string{name}})
 			if err != nil {
 				cli.Error(err.Error())
 				return err
@@ -297,7 +297,7 @@ func newKeyInspectCmd(keyAPI *api.KeyOperation) *cobra.Command {
 	return cmd
 }
 
-func newKeyExportCmd(keyAPI *api.KeyOperation) *cobra.Command {
+func newKeyExportCmd(op *api.Operation) *cobra.Command {
 	var out string
 	var force bool
 
@@ -321,7 +321,7 @@ func newKeyExportCmd(keyAPI *api.KeyOperation) *cobra.Command {
 				return fmt.Errorf("required flag \"--out\" not set")
 			}
 
-			exportResult := keyAPI.Export(cmd.Context(), &api.KeyInput{Names: []string{name}}, out, force)
+			exportResult := op.KeyExport(cmd.Context(), &api.KeyInput{Names: []string{name}}, out, force)
 			if exportResult.Status == "error" {
 				cli.Error(exportResult.Message)
 				return fmt.Errorf("%s", exportResult.Message)
@@ -341,7 +341,7 @@ func newKeyExportCmd(keyAPI *api.KeyOperation) *cobra.Command {
 	return cmd
 }
 
-func newKeyDefaultCmd(keyAPI *api.KeyOperation) *cobra.Command {
+func newKeyDefaultCmd(op *api.Operation) *cobra.Command {
 	var clear bool
 
 	cmd := &cobra.Command{
@@ -351,7 +351,7 @@ func newKeyDefaultCmd(keyAPI *api.KeyOperation) *cobra.Command {
 		ValidArgsFunction:  completeKeyNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if clear {
-				clearResult := keyAPI.ClearDefaults(cmd.Context())
+				clearResult := op.KeyClearDefaults(cmd.Context())
 				if clearResult.Status == "error" {
 					cli.Error(clearResult.Message)
 					return fmt.Errorf("%s", clearResult.Message)
@@ -368,7 +368,7 @@ func newKeyDefaultCmd(keyAPI *api.KeyOperation) *cobra.Command {
 			// Python: KeyInput(name=effective_names) -> KeyOperation.set_default(inputs)
 			// Single API call with ALL names, matching Python exactly.
 			effectiveNames := args
-			setResult := keyAPI.SetDefault(cmd.Context(), &api.KeyInput{Names: effectiveNames})
+			setResult := op.KeySetDefault(cmd.Context(), &api.KeyInput{Names: effectiveNames})
 			if setResult.Status == "error" {
 				cli.Error(setResult.Message)
 				return fmt.Errorf("set default failed")

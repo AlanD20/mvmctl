@@ -13,7 +13,7 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-func NewVolumeCmd(volumeAPI *api.VolumeOperation, configAPI *api.ConfigOperation) *cobra.Command {
+func NewVolumeCmd(op *api.Operation, configAPI *api.Operation) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "volume",
 		Aliases: []string{"vol"},
@@ -21,23 +21,23 @@ func NewVolumeCmd(volumeAPI *api.VolumeOperation, configAPI *api.ConfigOperation
 		Long:    "Manage persistent volumes — list, create, remove, inspect, resize.",
 	}
 
-	cmd.AddCommand(newVolumeLsCmd(volumeAPI, configAPI))
-	cmd.AddCommand(newVolumeCreateCmd(volumeAPI))
-	cmd.AddCommand(newVolumeRmCmd(volumeAPI))
-	cmd.AddCommand(newVolumeInspectCmd(volumeAPI))
-	cmd.AddCommand(newVolumeResizeCmd(volumeAPI))
+	cmd.AddCommand(newVolumeLsCmd(op, configAPI))
+	cmd.AddCommand(newVolumeCreateCmd(op))
+	cmd.AddCommand(newVolumeRmCmd(op))
+	cmd.AddCommand(newVolumeInspectCmd(op))
+	cmd.AddCommand(newVolumeResizeCmd(op))
 
 	return cmd
 }
 
 // resolveListingStyle resolves "short" or "long" from --long flag or user config.
 // Matches Python's resolve_listing_style() in cli/_common.py exactly.
-func resolveListingStyle(ctx context.Context, configAPI *api.ConfigOperation, longOutput bool) string {
+func resolveListingStyle(ctx context.Context, configAPI *api.Operation, longOutput bool) string {
 	if longOutput {
 		return "long"
 	}
 	if configAPI != nil {
-		value, err := configAPI.Get(ctx, "settings", "listing_style")
+		value, err := configAPI.ConfigGet(ctx, "settings", "listing_style")
 		if err == nil {
 			if s, ok := value.(string); ok && s != "" {
 				return s
@@ -47,7 +47,7 @@ func resolveListingStyle(ctx context.Context, configAPI *api.ConfigOperation, lo
 	return "short"
 }
 
-func newVolumeLsCmd(volumeAPI *api.VolumeOperation, configAPI *api.ConfigOperation) *cobra.Command {
+func newVolumeLsCmd(op *api.Operation, configAPI *api.Operation) *cobra.Command {
 	var jsonOutput bool
 	var longOutput bool
 
@@ -56,7 +56,7 @@ func newVolumeLsCmd(volumeAPI *api.VolumeOperation, configAPI *api.ConfigOperati
 		Short: "List all volumes",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			volumes := volumeAPI.ListAll(cmd.Context())
+			volumes := op.VolumeListAll(cmd.Context())
 
 			if jsonOutput {
 				var data []map[string]any
@@ -136,7 +136,7 @@ func newVolumeLsCmd(volumeAPI *api.VolumeOperation, configAPI *api.ConfigOperati
 	return cmd
 }
 
-func newVolumeCreateCmd(volumeAPI *api.VolumeOperation) *cobra.Command {
+func newVolumeCreateCmd(op *api.Operation) *cobra.Command {
 	var format string
 	var readOnly bool
 
@@ -162,7 +162,7 @@ func newVolumeCreateCmd(volumeAPI *api.VolumeOperation) *cobra.Command {
 				Format:   formatPtr,
 				ReadOnly: readOnlyPtr,
 			}
-			result := volumeAPI.Create(cmd.Context(), input)
+			result := op.VolumeCreate(cmd.Context(), input)
 			if result.IsError() {
 				// Match Python: mvm_cli.error(result.message); raise typer.Exit(code=1)
 				cli.Error(result.Message)
@@ -195,7 +195,7 @@ func newVolumeCreateCmd(volumeAPI *api.VolumeOperation) *cobra.Command {
 	return cmd
 }
 
-func newVolumeRmCmd(volumeAPI *api.VolumeOperation) *cobra.Command {
+func newVolumeRmCmd(op *api.Operation) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
@@ -204,7 +204,7 @@ func newVolumeRmCmd(volumeAPI *api.VolumeOperation) *cobra.Command {
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeVolumeNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			removeResult := volumeAPI.Remove(cmd.Context(), &inputs.VolumeInput{Identifiers: args}, force)
+			removeResult := op.VolumeRemove(cmd.Context(), &inputs.VolumeInput{Identifiers: args}, force)
 			// Match Python: for r in result.items: if r.is_ok: mvm_cli.success("Removed: {name}")
 			//              else: mvm_cli.error(r.message or "Remove failed: {name}")
 			for _, r := range removeResult.Items {
@@ -235,7 +235,7 @@ func newVolumeRmCmd(volumeAPI *api.VolumeOperation) *cobra.Command {
 	return cmd
 }
 
-func newVolumeInspectCmd(volumeAPI *api.VolumeOperation) *cobra.Command {
+func newVolumeInspectCmd(op *api.Operation) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
@@ -246,7 +246,7 @@ func newVolumeInspectCmd(volumeAPI *api.VolumeOperation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 
-			info, err := volumeAPI.Inspect(cmd.Context(), &inputs.VolumeInput{Identifiers: []string{identifier}})
+			info, err := op.VolumeInspect(cmd.Context(), &inputs.VolumeInput{Identifiers: []string{identifier}})
 			if err != nil {
 				// Match Python: @handle_errors decorator — pass through actual error message
 				return err
@@ -272,7 +272,7 @@ func newVolumeInspectCmd(volumeAPI *api.VolumeOperation) *cobra.Command {
 	return cmd
 }
 
-func newVolumeResizeCmd(volumeAPI *api.VolumeOperation) *cobra.Command {
+func newVolumeResizeCmd(op *api.Operation) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:               "resize [identifier] [size]",
 		Short:             "Resize a volume",
@@ -282,7 +282,7 @@ func newVolumeResizeCmd(volumeAPI *api.VolumeOperation) *cobra.Command {
 			identifier := args[0]
 			sizeArg := args[1]
 
-			resizeResult := volumeAPI.Resize(cmd.Context(), &inputs.VolumeCreateInput{Name: identifier, Size: sizeArg})
+			resizeResult := op.VolumeResize(cmd.Context(), &inputs.VolumeCreateInput{Name: identifier, Size: sizeArg})
 			if resizeResult.IsError() {
 				// Match Python: mvm_cli.error(result.message); raise typer.Exit(code=1)
 				cli.Error(resizeResult.Message)

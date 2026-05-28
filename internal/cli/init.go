@@ -19,7 +19,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewInitCmd(initAPI *api.InitOperation) *cobra.Command {
+func NewInitCmd(op *api.Operation) *cobra.Command {
 	var nonInteractive bool
 	var skipHost bool
 	var skipNetwork bool
@@ -28,7 +28,7 @@ func NewInitCmd(initAPI *api.InitOperation) *cobra.Command {
 		Use:   "init",
 		Short: fmt.Sprintf("Initialize %s", infra.CLIName),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInitWizard(cmd.Context(), initAPI, nonInteractive, skipHost, skipNetwork)
+			return runInitWizard(cmd.Context(), op, nonInteractive, skipHost, skipNetwork)
 		},
 	}
 
@@ -51,7 +51,7 @@ func NewInitCmd(initAPI *api.InitOperation) *cobra.Command {
 }
 
 // runInitWizard drives the init wizard, handling sudo and download prompts.
-func runInitWizard(ctx context.Context, initAPI *api.InitOperation, nonInteractive, skipHost, skipNetwork bool) error {
+func runInitWizard(ctx context.Context, op *api.Operation, nonInteractive, skipHost, skipNetwork bool) error {
 	// Match Python: mvm_cli.info("")
 	common.MVMCLI.Info("")
 	// Match Python: mvm_cli.info(f"{CLI_NAME} init — first-time setup")
@@ -60,7 +60,7 @@ func runInitWizard(ctx context.Context, initAPI *api.InitOperation, nonInteracti
 	common.MVMCLI.Info(strings.Repeat("─", 40))
 
 	// Call the Python-style _handle_interactive_flow logic
-	result, err := handleInteractiveFlow(ctx, initAPI, nonInteractive, skipHost, skipNetwork)
+	result, err := handleInteractiveFlow(ctx, op, nonInteractive, skipHost, skipNetwork)
 	if err != nil {
 		return err
 	}
@@ -119,7 +119,7 @@ func runInitWizard(ctx context.Context, initAPI *api.InitOperation, nonInteracti
 // InitResult (never nil), even when the loop breaks early.
 func handleInteractiveFlow(
 	ctx context.Context,
-	initAPI *api.InitOperation,
+	op *api.Operation,
 	nonInteractive, skipHost, skipNetwork bool,
 ) (*api.InitResult, error) {
 	sudoCompleted := false
@@ -134,7 +134,7 @@ func handleInteractiveFlow(
 	for {
 		// Call InitOperation.Run with current state
 		// Python: result = InitOperation.run(...)
-		result = initAPI.RunFull(ctx, skipHost, skipNetwork, nonInteractive, sudoCompleted, hostSetupMessage, downloadVersion, guestfsEnabled, nil)
+		result = op.InitRunFull(ctx, skipHost, skipNetwork, nonInteractive, sudoCompleted, hostSetupMessage, downloadVersion, guestfsEnabled, nil)
 
 		if result.NeedsInteraction == nil {
 			return result, nil
@@ -148,7 +148,7 @@ func handleInteractiveFlow(
 			// Run pre-flight probes before prompting for sudo
 			// Python: from mvmctl.api.host_operations import HostOperation
 			//         probe_result = HostOperation.check_readiness()
-			probeResult := initAPI.CheckReadiness()
+			probeResult := op.InitCheckReadiness()
 			if len(probeResult.Critical) > 0 {
 				common.MVMCLI.Warning("Pre-flight checks found issues:")
 				for _, c := range probeResult.Critical {
@@ -272,7 +272,7 @@ func runWithSudo(ctx context.Context) sudoResult {
 	}
 
 	// Build env var assignments — passed via the 'env' utility to sudo
-	envAssignments := []string{"MVM_ESCALATED=1"}
+	envAssignments := []string{infra.EnvKey("ESCALATED") + "=1"}
 	for _, key := range []string{"MVM_CONFIG_DIR", "MVM_CACHE_DIR", "HOME", "PATH"} {
 		if val := os.Getenv(key); val != "" {
 			envAssignments = append(envAssignments, fmt.Sprintf("%s=%s", key, val))

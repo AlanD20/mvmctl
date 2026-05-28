@@ -63,8 +63,8 @@ func formatChange(mechanism, setting, appliedValue, originalValue string) string
 }
 
 // abortIfVMsRunning exits with an error if any VMs are currently running.
-func abortIfVMsRunning(ctx context.Context, hostAPI *api.HostOperation, action string) error {
-	running, err := hostAPI.GetRunningVMs(ctx)
+func abortIfVMsRunning(ctx context.Context, op *api.Operation, action string) error {
+	running, err := op.HostGetRunningVMs(ctx)
 	if err != nil {
 		return nil
 	}
@@ -81,7 +81,7 @@ func abortIfVMsRunning(ctx context.Context, hostAPI *api.HostOperation, action s
 }
 
 // NewHostCmd creates the host command and its subcommands.
-func NewHostCmd(hostAPI *api.HostOperation) *cobra.Command {
+func NewHostCmd(op *api.Operation) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "host",
 		Short: "Host configuration",
@@ -90,11 +90,11 @@ func NewHostCmd(hostAPI *api.HostOperation) *cobra.Command {
 Requires root privileges for most operations. Run with: sudo mvm host <command>`,
 	}
 
-	cmd.AddCommand(newHostInitCmd(hostAPI))
-	cmd.AddCommand(newHostStatusCmd(hostAPI))
-	cmd.AddCommand(newHostInfoCmd(hostAPI))
-	cmd.AddCommand(newHostCleanCmd(hostAPI))
-	cmd.AddCommand(newHostResetCmd(hostAPI))
+	cmd.AddCommand(newHostInitCmd(op))
+	cmd.AddCommand(newHostStatusCmd(op))
+	cmd.AddCommand(newHostInfoCmd(op))
+	cmd.AddCommand(newHostCleanCmd(op))
+	cmd.AddCommand(newHostResetCmd(op))
 
 	// Hidden help subcommand matching Python's hidden `help` command.
 	cmd.AddCommand(&cobra.Command{
@@ -109,7 +109,7 @@ Requires root privileges for most operations. Run with: sudo mvm host <command>`
 	return cmd
 }
 
-func newHostInitCmd(hostAPI *api.HostOperation) *cobra.Command {
+func newHostInitCmd(op *api.Operation) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Apply host configuration changes. Idempotent.",
@@ -136,7 +136,7 @@ Examples:
 				return fmt.Errorf("cannot resolve cache directory: %w", err)
 			}
 
-			rawResult := hostAPI.Init(cmd.Context(), cacheDir, nil)
+			rawResult := op.HostInit(cmd.Context(), cacheDir, nil)
 
 			switch v := rawResult.(type) {
 			case *errs.NeedsInteraction:
@@ -163,16 +163,15 @@ Examples:
 						}
 					}
 					if confirmed {
-						// Python: env.get("SUDO_RESTART") → os.environ.get("MVM_SUDO_RESTART")
-						if os.Getenv("MVM_SUDO_RESTART") != "" {
+						if sudoRestart, _ := infra.EnvGet("SUDO_RESTART"); sudoRestart != "" {
 							cli.Error("Recursive sudo restart detected. Aborting to prevent lockout.")
 							cli.Info("Please run 'sudo mvm host init' manually.")
 							return fmt.Errorf("recursive sudo restart")
 						}
 
 						envAssignments := []string{
-							"MVM_SUDO_RESTART=1",
-							"MVM_ESCALATED=1",
+							infra.EnvKey("SUDO_RESTART") + "=1",
+							infra.EnvKey("ESCALATED") + "=1",
 						}
 						for _, key := range []string{"MVM_CONFIG_DIR", "MVM_CACHE_DIR", "HOME", "PATH"} {
 							if val := os.Getenv(key); val != "" {
@@ -269,26 +268,26 @@ Examples:
 	return cmd
 }
 
-func newHostStatusCmd(hostAPI *api.HostOperation) *cobra.Command {
+func newHostStatusCmd(op *api.Operation) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show current host configuration state vs expected",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			kvmOK := hostAPI.CheckKVMAccess()
-			missing := hostAPI.CheckRequiredBinaries()
+			kvmOK := op.HostCheckKVMAccess()
+			missing := op.HostCheckRequiredBinaries()
 
-			ipFwd, err := hostAPI.GetIPForwardStatus(cmd.Context())
+			ipFwd, err := op.HostGetIPForwardStatus(cmd.Context())
 			if err != nil {
 				ipFwd = "unknown"
 			}
 			fwdOK := ipFwd == "1"
 
-			state, _ := hostAPI.GetState(cmd.Context())
+			state, _ := op.HostGetState(cmd.Context())
 
 			// Resource / virtualization checks
-			resources, _ := hostAPI.DetectResources(cmd.Context())
+			resources, _ := op.HostDetectResources(cmd.Context())
 
 			if jsonOutput {
 				// Format state_snapshot timestamp matching Python's CommonUtils.human_readable_datetime
@@ -402,7 +401,7 @@ func newHostStatusCmd(hostAPI *api.HostOperation) *cobra.Command {
 	return cmd
 }
 
-func newHostInfoCmd(hostAPI *api.HostOperation) *cobra.Command {
+func newHostInfoCmd(op *api.Operation) *cobra.Command {
 	var refresh bool
 	var jsonOutput bool
 
@@ -418,9 +417,9 @@ Use --refresh to re-detect hardware and limits before displaying.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var result *errs.OperationResult
 			if refresh {
-				result = hostAPI.RefreshCapacity(cmd.Context())
+				result = op.HostRefreshCapacity(cmd.Context())
 			} else {
-				result = hostAPI.Info(cmd.Context())
+				result = op.HostInfo(cmd.Context())
 			}
 
 			if result.IsError() {
@@ -449,7 +448,7 @@ Use --refresh to re-detect hardware and limits before displaying.`,
 	return cmd
 }
 
-func newHostCleanCmd(hostAPI *api.HostOperation) *cobra.Command {
+func newHostCleanCmd(op *api.Operation) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
@@ -459,7 +458,7 @@ func newHostCleanCmd(hostAPI *api.HostOperation) *cobra.Command {
 
 Sysctl settings, sudoers, and the '%s' group will NOT be affected.`, infra.MVMUnixGroup),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := abortIfVMsRunning(cmd.Context(), hostAPI, "clean"); err != nil {
+			if err := abortIfVMsRunning(cmd.Context(), op, "clean"); err != nil {
 				return err
 			}
 
@@ -477,7 +476,7 @@ Sysctl settings, sudoers, and the '%s' group will NOT be affected.`, infra.MVMUn
 			if err != nil {
 				return fmt.Errorf("cannot resolve cache directory: %w", err)
 			}
-			result := hostAPI.Clean(cmd.Context(), cacheDir)
+			result := op.HostClean(cmd.Context(), cacheDir)
 			if result.IsError() {
 				cli.Error(result.Message)
 				return fmt.Errorf("%s", result.Message)
@@ -506,7 +505,7 @@ Sysctl settings, sudoers, and the '%s' group will NOT be affected.`, infra.MVMUn
 	return cmd
 }
 
-func newHostResetCmd(hostAPI *api.HostOperation) *cobra.Command {
+func newHostResetCmd(op *api.Operation) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
@@ -526,7 +525,7 @@ All running VMs must be stopped before running this command.
 Examples:
   sudo mvm host reset --force`, infra.CLIName, infra.MVMUnixGroup),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := abortIfVMsRunning(cmd.Context(), hostAPI, "reset"); err != nil {
+			if err := abortIfVMsRunning(cmd.Context(), op, "reset"); err != nil {
 				return err
 			}
 
@@ -543,7 +542,7 @@ Examples:
 			if err != nil {
 				return fmt.Errorf("cannot resolve cache directory: %w", err)
 			}
-			result := hostAPI.Reset(cmd.Context(), cacheDir)
+			result := op.HostReset(cmd.Context(), cacheDir)
 			if result.IsError() {
 				cli.Error(result.Message)
 				return fmt.Errorf("%s", result.Message)

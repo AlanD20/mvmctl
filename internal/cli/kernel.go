@@ -16,19 +16,19 @@ import (
 	"mvmctl/internal/infra/errs"
 )
 
-func NewKernelCmd(kernelAPI *api.KernelOperation) *cobra.Command {
+func NewKernelCmd(op *api.Operation) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "kernel",
 		Short: "Kernel management",
 		Long:  "Manage kernels — list, pull, remove, inspect, set default, import.",
 	}
 
-	cmd.AddCommand(newKernelLsCmd(kernelAPI))
-	cmd.AddCommand(newKernelPullCmd(kernelAPI))
-	cmd.AddCommand(newKernelRmCmd(kernelAPI))
-	cmd.AddCommand(newKernelInspectCmd(kernelAPI))
-	cmd.AddCommand(newKernelDefaultCmd(kernelAPI))
-	cmd.AddCommand(newKernelImportCmd(kernelAPI))
+	cmd.AddCommand(newKernelLsCmd(op))
+	cmd.AddCommand(newKernelPullCmd(op))
+	cmd.AddCommand(newKernelRmCmd(op))
+	cmd.AddCommand(newKernelInspectCmd(op))
+	cmd.AddCommand(newKernelDefaultCmd(op))
+	cmd.AddCommand(newKernelImportCmd(op))
 
 	// Hidden help subcommand matching Python's Typer "help" command
 	helpCmd := &cobra.Command{
@@ -44,7 +44,7 @@ func NewKernelCmd(kernelAPI *api.KernelOperation) *cobra.Command {
 	return cmd
 }
 
-func newKernelLsCmd(kernelAPI *api.KernelOperation) *cobra.Command {
+func newKernelLsCmd(op *api.Operation) *cobra.Command {
 	var jsonOutput bool
 	var longOutput bool
 	var remote bool
@@ -56,7 +56,7 @@ func newKernelLsCmd(kernelAPI *api.KernelOperation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if remote {
 				fmt.Fprintln(os.Stderr, "Fetching remote kernel versions...")
-				remoteVersions, err := kernelAPI.ListRemote(cmd.Context(), noCache)
+				remoteVersions, err := op.KernelListRemote(cmd.Context(), noCache)
 				if err != nil {
 					return err
 				}
@@ -141,7 +141,7 @@ func newKernelLsCmd(kernelAPI *api.KernelOperation) *cobra.Command {
 			}
 
 			// Local listing
-			raw, err := kernelAPI.ListAll(cmd.Context(), false, false)
+			raw, err := op.KernelListAll(cmd.Context(), false, false)
 			if err != nil {
 				return err
 			}
@@ -207,7 +207,7 @@ func newKernelLsCmd(kernelAPI *api.KernelOperation) *cobra.Command {
 	return cmd
 }
 
-func newKernelPullCmd(kernelAPI *api.KernelOperation) *cobra.Command {
+func newKernelPullCmd(op *api.Operation) *cobra.Command {
 	var kernelType string
 	var version string
 	var arch string
@@ -307,7 +307,7 @@ Examples:
 				Features:     featureStr,
 			}
 
-			result := kernelAPI.Pull(cmd.Context(), kernelInput, func(event errs.ProgressEvent) {
+			result := op.KernelPull(cmd.Context(), kernelInput, func(event errs.ProgressEvent) {
 				if event.Message != "" {
 					spinner.UpdateText(event.Message)
 				}
@@ -358,7 +358,7 @@ Examples:
 	return cmd
 }
 
-func newKernelRmCmd(kernelAPI *api.KernelOperation) *cobra.Command {
+func newKernelRmCmd(op *api.Operation) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
@@ -373,7 +373,7 @@ func newKernelRmCmd(kernelAPI *api.KernelOperation) *cobra.Command {
 				cli.Error("Provide at least one kernel ID or name")
 				return fmt.Errorf("usage error")
 			}
-			result := kernelAPI.Remove(cmd.Context(), args, force)
+			result := op.KernelRemove(cmd.Context(), args, force)
 			for _, item := range result.Items {
 				if item.IsOK() {
 					msg := item.Message
@@ -401,7 +401,7 @@ func newKernelRmCmd(kernelAPI *api.KernelOperation) *cobra.Command {
 	return cmd
 }
 
-func newKernelInspectCmd(kernelAPI *api.KernelOperation) *cobra.Command {
+func newKernelInspectCmd(op *api.Operation) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
@@ -412,7 +412,7 @@ func newKernelInspectCmd(kernelAPI *api.KernelOperation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prefix := args[0]
 
-			info, err := kernelAPI.Inspect(cmd.Context(), prefix)
+			info, err := op.KernelInspect(cmd.Context(), prefix)
 			if err != nil {
 				return err
 			}
@@ -440,7 +440,7 @@ func newKernelInspectCmd(kernelAPI *api.KernelOperation) *cobra.Command {
 	return cmd
 }
 
-func newKernelDefaultCmd(kernelAPI *api.KernelOperation) *cobra.Command {
+func newKernelDefaultCmd(op *api.Operation) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:                "default [kernel-id]",
 		Short:              "Set a kernel as the default",
@@ -453,7 +453,7 @@ func newKernelDefaultCmd(kernelAPI *api.KernelOperation) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result := kernelAPI.SetDefault(cmd.Context(), kernelID)
+			result := op.KernelSetDefault(cmd.Context(), kernelID)
 			if result.Status == "error" {
 				return fmt.Errorf("set default failed: %s", result.Message)
 			}
@@ -469,7 +469,7 @@ func newKernelDefaultCmd(kernelAPI *api.KernelOperation) *cobra.Command {
 	return cmd
 }
 
-func newKernelImportCmd(kernelAPI *api.KernelOperation) *cobra.Command {
+func newKernelImportCmd(op *api.Operation) *cobra.Command {
 	var version string
 	var arch string
 	var setDefault bool
@@ -511,7 +511,7 @@ Examples:
 				Arch:       archPtr,
 				SetDefault: setDefault,
 			}
-			result := kernelAPI.Import(cmd.Context(), importInput)
+			result := op.KernelImport(cmd.Context(), importInput)
 			if result.Status == "error" {
 				msg := result.Message
 				if msg == "" {

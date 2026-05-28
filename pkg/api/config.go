@@ -4,7 +4,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
 	"mvmctl/internal/core/config"
@@ -14,31 +13,12 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// ConfigOperation provides config settings orchestration.
-// Matches Python's ConfigOperation exactly.
-type ConfigOperation struct {
-	svc      *config.Service
-	repo     config.SettingsRepository
-	db       *sql.DB
-	cacheDir string
-}
-
-// NewConfigOperation creates a ConfigOperation.
-func NewConfigOperation(svc *config.Service, repo config.SettingsRepository, db *sql.DB, cacheDir string) *ConfigOperation {
-	return &ConfigOperation{
-		svc:      svc,
-		repo:     repo,
-		db:       db,
-		cacheDir: cacheDir,
-	}
-}
-
-// Get returns a config value for category and optional key.
+// ConfigGet returns a config value for category and optional key.
 // Matches Python's ConfigOperation.get() exactly — uses ConfigInput/ConfigRequest pipeline
 // with OVERRIDABLE_SETTINGS validation.
 // Returns the raw config value (type varies by setting: string, int, bool, etc.)
 // or []config.SettingInfo when key is empty (category listing).
-func (o *ConfigOperation) Get(ctx context.Context, category, key string) (interface{}, error) {
+func (op *Operation) ConfigGet(ctx context.Context, category, key string) (interface{}, error) {
 	cat := &category
 	var keyPtr *string
 	if key != "" {
@@ -50,7 +30,7 @@ func (o *ConfigOperation) Get(ctx context.Context, category, key string) (interf
 		Category: cat,
 		Key:      keyPtr,
 	}
-	req := inputs.NewConfigRequest(rawInput, o.db)
+	req := inputs.NewConfigRequest(rawInput, op.DB)
 	resolved, err := req.Resolve(ctx)
 	if err != nil {
 		return nil, err
@@ -71,18 +51,18 @@ func (o *ConfigOperation) Get(ctx context.Context, category, key string) (interf
 
 	if resolved.Key == nil {
 		// Python: return resolved.service.list_by_category(cat)
-		return o.svc.ListByCategory(ctx, *resolved.Category)
+		return op.Services.Config.ListByCategory(ctx, *resolved.Category)
 	}
 
 	// Python: return SettingsService.resolve(db, cat, resolved.key)
-	return config.Resolve(ctx, o.db, *resolved.Category, *resolved.Key)
+	return config.Resolve(ctx, op.DB, *resolved.Category, *resolved.Key)
 }
 
-// Set sets a config value for category.key.
+// ConfigSet sets a config value for category.key.
 // Matches Python's ConfigOperation.set() exactly — ConfigError propagates from
 // SettingsService.set() just as in Python (error is returned as second return value
 // instead of wrapped in OperationResult).
-func (o *ConfigOperation) Set(ctx context.Context, category, key string, value interface{}) (*errs.OperationResult, error) {
+func (op *Operation) ConfigSet(ctx context.Context, category, key string, value interface{}) (*errs.OperationResult, error) {
 	cat := &category
 	keyPtr := &key
 
@@ -92,17 +72,17 @@ func (o *ConfigOperation) Set(ctx context.Context, category, key string, value i
 		Key:      keyPtr,
 		Value:    value,
 	}
-	req := inputs.NewConfigRequest(rawInput, o.db)
+	req := inputs.NewConfigRequest(rawInput, op.DB)
 	resolved, err := req.Resolve(ctx)
 	if err != nil {
 		return nil, err // ConfigError propagates, matching Python
 	}
 
-	if err := o.svc.Set(ctx, *resolved.Category, *resolved.Key, resolved.Value); err != nil {
+	if err := op.Services.Config.Set(ctx, *resolved.Category, *resolved.Key, resolved.Value); err != nil {
 		return nil, err // ConfigError propagates, matching Python
 	}
 
-	auditLog := logging.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(op.CacheDir)
 	_ = auditLog.LogOperation("config.set", nil, fmt.Sprintf("%s.%s=%v", *resolved.Category, *resolved.Key, resolved.Value))
 
 	return &errs.OperationResult{
@@ -112,9 +92,9 @@ func (o *ConfigOperation) Set(ctx context.Context, category, key string, value i
 	}, nil
 }
 
-// Reset resets a config value to its default (removes override).
+// ConfigReset resets a config value to its default (removes override).
 // Matches Python's ConfigOperation.reset() exactly — uses ConfigRequest resolution pipeline.
-func (o *ConfigOperation) Reset(ctx context.Context, category, key string, allOverrides bool) *errs.OperationResult {
+func (op *Operation) ConfigReset(ctx context.Context, category, key string, allOverrides bool) *errs.OperationResult {
 	// Python: inputs = ConfigInput(action="reset", ...)
 	//         resolved = ConfigRequest(inputs=inputs, db=Database()).resolve()
 	var cat *string
@@ -131,7 +111,7 @@ func (o *ConfigOperation) Reset(ctx context.Context, category, key string, allOv
 		Key:          keyPtr,
 		AllOverrides: allOverrides,
 	}
-	req := inputs.NewConfigRequest(rawInput, o.db)
+	req := inputs.NewConfigRequest(rawInput, op.DB)
 	resolved, err := req.Resolve(ctx)
 	if err != nil {
 		return &errs.OperationResult{
@@ -143,7 +123,7 @@ func (o *ConfigOperation) Reset(ctx context.Context, category, key string, allOv
 	}
 
 	if resolved.AllOverrides {
-		deleted, err := o.svc.DeleteAll(ctx)
+		deleted, err := op.Services.Config.DeleteAll(ctx)
 		if err != nil {
 			return &errs.OperationResult{
 				Status:    "error",
@@ -153,7 +133,7 @@ func (o *ConfigOperation) Reset(ctx context.Context, category, key string, allOv
 			}
 		}
 		if deleted > 0 {
-			auditLog := logging.NewAuditLog(o.cacheDir)
+			auditLog := logging.NewAuditLog(op.CacheDir)
 			_ = auditLog.LogOperation("config.reset", nil, fmt.Sprintf("all overrides (%d removed)", deleted))
 		}
 		return &errs.OperationResult{
@@ -165,7 +145,7 @@ func (o *ConfigOperation) Reset(ctx context.Context, category, key string, allOv
 	}
 
 	if resolved.Key == nil {
-		deleted, err := o.svc.DeleteByCategory(ctx, *resolved.Category)
+		deleted, err := op.Services.Config.DeleteByCategory(ctx, *resolved.Category)
 		if err != nil {
 			return &errs.OperationResult{
 				Status:    "error",
@@ -175,7 +155,7 @@ func (o *ConfigOperation) Reset(ctx context.Context, category, key string, allOv
 			}
 		}
 		if deleted > 0 {
-			auditLog := logging.NewAuditLog(o.cacheDir)
+			auditLog := logging.NewAuditLog(op.CacheDir)
 			_ = auditLog.LogOperation("config.reset", nil, fmt.Sprintf("%s.* (%d removed)", *resolved.Category, deleted))
 		}
 		return &errs.OperationResult{
@@ -186,7 +166,7 @@ func (o *ConfigOperation) Reset(ctx context.Context, category, key string, allOv
 		}
 	}
 
-	deletedBool, err := o.svc.Delete(ctx, *resolved.Category, *resolved.Key)
+	deletedBool, err := op.Services.Config.Delete(ctx, *resolved.Category, *resolved.Key)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
@@ -198,7 +178,7 @@ func (o *ConfigOperation) Reset(ctx context.Context, category, key string, allOv
 	resultCount := 0
 	if deletedBool {
 		resultCount = 1
-		auditLog := logging.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(op.CacheDir)
 		_ = auditLog.LogOperation("config.reset", nil, fmt.Sprintf("%s.%s", *resolved.Category, *resolved.Key))
 	}
 	return &errs.OperationResult{
@@ -209,18 +189,18 @@ func (o *ConfigOperation) Reset(ctx context.Context, category, key string, allOv
 	}
 }
 
-// ListAll returns all overridable settings.
+// ConfigListAll returns all overridable settings.
 // Matches Python's ConfigOperation.list_all() exactly — uses ConfigRequest resolution pipeline.
-func (o *ConfigOperation) ListAll(ctx context.Context) (map[string]map[string]model.SettingInfo, error) {
+func (op *Operation) ConfigListAll(ctx context.Context) (map[string]map[string]model.SettingInfo, error) {
 	// Python: inputs = ConfigInput(action="list")
 	//         resolved = ConfigRequest(inputs=inputs, db=Database()).resolve()
 	rawInput := inputs.ConfigInput{
 		Action: "list",
 	}
-	req := inputs.NewConfigRequest(rawInput, o.db)
+	req := inputs.NewConfigRequest(rawInput, op.DB)
 	_, err := req.Resolve(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return o.svc.ListAll(ctx)
+	return op.Services.Config.ListAll(ctx)
 }

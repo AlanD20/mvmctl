@@ -4,7 +4,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
@@ -15,10 +14,8 @@ import (
 
 	"mvmctl/internal/assets"
 	"mvmctl/internal/core/binary"
-	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/image"
 	"mvmctl/internal/core/vm"
-	"mvmctl/internal/enricher"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/logging"
@@ -27,36 +24,11 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// ImageOperation orchestrates image management.
-// Matches Python's ImageOperation exactly.
-type ImageOperation struct {
-	svc       *image.Service
-	repo      image.Repository
-	db        *sql.DB
-	cacheDir  string
-	imagesDir string
-	configSvc *config.Service
-	enr       *enricher.Enricher
-}
-
-// NewImageOperation creates an ImageOperation.
-func NewImageOperation(svc *image.Service, db *sql.DB, cacheDir string, configSvc *config.Service, enr *enricher.Enricher) *ImageOperation {
-	return &ImageOperation{
-		svc:       svc,
-		repo:      svc.Repo(),
-		db:        db,
-		cacheDir:  cacheDir,
-		imagesDir: filepath.Join(cacheDir, "images"),
-		configSvc: configSvc,
-		enr:       enr,
-	}
-}
-
-// Prune prunes unused images.
+// ImagePrune prunes unused images.
 // Matches Python's ImageOperation.prune() exactly — queries Repository for
 // referenced images instead of using img.VMs field.
-func (o *ImageOperation) Prune(ctx context.Context, dryRun bool, includeAll bool) *errs.OperationResult {
-	allImages, err := o.repo.ListAll(ctx)
+func (op *Operation) ImagePrune(ctx context.Context, dryRun bool, includeAll bool) *errs.OperationResult {
+	allImages, err := op.Repos.Image.ListAll(ctx)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
@@ -66,14 +38,14 @@ func (o *ImageOperation) Prune(ctx context.Context, dryRun bool, includeAll bool
 		}
 	}
 
-	defaultItem, _ := o.repo.GetDefault(ctx)
+	defaultItem, _ := op.Repos.Image.GetDefault(ctx)
 	var defaultID string
 	if defaultItem != nil {
 		defaultID = defaultItem.ID
 	}
 
 	// Get referenced image IDs from VMs (matching Python's Repository.list_all() pattern)
-	vmRepo := vm.NewRepository(o.db)
+	vmRepo := vm.NewRepository(op.DB)
 	allVMs, _ := vmRepo.ListAll(ctx)
 	referencedIDs := make(map[string]bool)
 	for _, vm := range allVMs {
@@ -96,7 +68,7 @@ func (o *ImageOperation) Prune(ctx context.Context, dryRun bool, includeAll bool
 		if !dryRun {
 			// Matches Python: ImageOperation.remove(ImageInput(id=[image.id]), force=include_all)
 			// Uses the full remove pipeline (BatchResult, VM reference check, etc.)
-			result := o.Remove(ctx, &inputs.ImageInput{ID: []string{img.ID}, Type: nil}, includeAll)
+			result := op.ImageRemove(ctx, &inputs.ImageInput{ID: []string{img.ID}, Type: nil}, includeAll)
 			if result.HasErrors() {
 				for _, r := range result.Errors() {
 					slog.Warn("Failed to remove image", "id", img.ID, "error", r.Message)
@@ -115,12 +87,12 @@ func (o *ImageOperation) Prune(ctx context.Context, dryRun bool, includeAll bool
 	}
 }
 
-// Pull downloads an image with full orchestration.
+// ImagePull downloads an image with full orchestration.
 // Matches Python's ImageOperation.pull() exactly.
 // Matches Python's return type: OperationResult[ImageItem] | NeedsInteraction
 // Returns *errs.OperationResult with Item of type *model.ImageItem (success)
 // or *errs.NeedsInteraction (when user confirmation required).
-func (o *ImageOperation) Pull(ctx context.Context, input *inputs.ImagePullInput, onProgress func(errs.ProgressEvent)) interface{} {
+func (op *Operation) ImagePull(ctx context.Context, input *inputs.ImagePullInput, onProgress func(errs.ProgressEvent)) interface{} {
 	var version string
 	if input.Version != nil {
 		version = *input.Version
@@ -138,7 +110,7 @@ func (o *ImageOperation) Pull(ctx context.Context, input *inputs.ImagePullInput,
 	}
 
 	// Use custom output dir if specified, otherwise the default images dir
-	imagesDir := o.imagesDir
+	imagesDir := filepath.Join(op.CacheDir, "images")
 	if input.OutputDir != "" {
 		imagesDir = input.OutputDir
 	}
@@ -153,8 +125,8 @@ func (o *ImageOperation) Pull(ctx context.Context, input *inputs.ImagePullInput,
 	// Resolve cache TTL and ci_version from settings/binary (matches Python)
 	cacheTTL := 0
 	if !input.NoCache {
-		if o.configSvc != nil {
-			if ttlRaw, err := o.configSvc.Get(ctx, "defaults.image", "remote_list_cache_ttl"); err == nil {
+		if op.Services.Config != nil {
+			if ttlRaw, err := op.Services.Config.Get(ctx, "defaults.image", "remote_list_cache_ttl"); err == nil {
 				if ttl, ok := ttlRaw.(int); ok {
 					cacheTTL = ttl
 				}
@@ -164,7 +136,7 @@ func (o *ImageOperation) Pull(ctx context.Context, input *inputs.ImagePullInput,
 	resolvedCIVersion := ""
 
 	// Resolve ci_version from default firecracker binary (matches Python)
-	binRepo := binary.NewRepository(o.db)
+	binRepo := binary.NewRepository(op.DB)
 	defaultBin, _ := binRepo.GetDefault(ctx, "firecracker")
 	if defaultBin != nil && defaultBin.CIVersion != nil {
 		resolvedCIVersion = *defaultBin.CIVersion
@@ -209,13 +181,13 @@ func (o *ImageOperation) Pull(ctx context.Context, input *inputs.ImagePullInput,
 	spec := specs[0]
 
 	// Early return check
-	existing, _ := o.repo.GetByType(ctx, spec.Type)
+	existing, _ := op.Repos.Image.GetByType(ctx, spec.Type)
 	if !input.Force && existing != nil && existing.Version == spec.Version {
 		if existing.Path != "" {
 			if _, err := os.Stat(existing.Path); err == nil {
 				slog.Info("Image already exists", "path", existing.Path)
 				if input.SetDefault {
-					_ = o.repo.SetDefault(ctx, existing.ID)
+					_ = op.Repos.Image.SetDefault(ctx, existing.ID)
 				}
 				return &errs.OperationResult{
 					Status: "skipped",
@@ -247,7 +219,7 @@ func (o *ImageOperation) Pull(ctx context.Context, input *inputs.ImagePullInput,
 		})
 	}
 	progressBridge := operation.DownloadProgressBridge(onProgress)
-	downloadPath, err := o.svc.DownloadImage(ctx, spec, imageID, workDir, input.Force, resolvedCIVersion, progressBridge)
+	downloadPath, err := op.Services.Image.DownloadImage(ctx, spec, imageID, workDir, input.Force, resolvedCIVersion, progressBridge)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
@@ -263,8 +235,8 @@ func (o *ImageOperation) Pull(ctx context.Context, input *inputs.ImagePullInput,
 		})
 	}
 
-	provisionerType := o.resolveProvisionerType(ctx)
-	extractedPath, err := o.svc.ExtractImage(downloadPath, imageID, workDir, spec.Format, input.Partition, input.DisabledDetectors, provisionerType)
+	provisionerType := op.resolveProvisionerType(ctx)
+	extractedPath, err := op.Services.Image.ExtractImage(downloadPath, imageID, workDir, spec.Format, input.Partition, input.DisabledDetectors, provisionerType)
 	if err != nil {
 		// Catch RootPartitionDetectionError and TieDetectedError (matching Python)
 		if isPartitionDetectionError(err) {
@@ -289,7 +261,7 @@ func (o *ImageOperation) Pull(ctx context.Context, input *inputs.ImagePullInput,
 		})
 	}
 
-	imageItem, warnings, err := o.svc.OptimizeImage(extractedPath, imageID, spec, timestamp, input.SkipOptimization, provisionerType, nil)
+	imageItem, warnings, err := op.Services.Image.OptimizeImage(extractedPath, imageID, spec, timestamp, input.SkipOptimization, provisionerType, nil)
 	if err != nil {
 		if isPartitionDetectionError(err) {
 			return &errs.OperationResult{
@@ -327,17 +299,17 @@ func (o *ImageOperation) Pull(ctx context.Context, input *inputs.ImagePullInput,
 
 	os.Remove(downloadPath)
 
-	_ = o.repo.Upsert(ctx, imageItem)
+	_ = op.Repos.Image.Upsert(ctx, imageItem)
 	if input.SetDefault {
-		_ = o.repo.SetDefault(ctx, imageItem.ID)
+		_ = op.Repos.Image.SetDefault(ctx, imageItem.ID)
 	} else if existing != nil && existing.IsDefault {
-		_ = o.repo.SetDefault(ctx, imageItem.ID)
+		_ = op.Repos.Image.SetDefault(ctx, imageItem.ID)
 	}
 
 	// Clean up old images
 	if existing != nil && existing.ID != imageItem.ID {
-		removed := o.svc.RemoveImageFiles(existing)
-		_ = o.repo.SoftDelete(ctx, existing.ID)
+		removed := op.Services.Image.RemoveImageFiles(existing)
+		_ = op.Repos.Image.SoftDelete(ctx, existing.ID)
 		if len(removed) > 0 {
 			slog.Info("Cleaned up old image files", "count", len(removed), "type", spec.Type)
 		}
@@ -363,9 +335,9 @@ func (o *ImageOperation) Pull(ctx context.Context, input *inputs.ImagePullInput,
 	}
 }
 
-// Import imports a local image file.
+// ImageImport imports a local image file.
 // Matches Python's ImageOperation.import_() exactly.
-func (o *ImageOperation) Import(ctx context.Context, input *inputs.ImageImportInput, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
+func (op *Operation) ImageImport(ctx context.Context, input *inputs.ImageImportInput, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
 	arch := ""
 	if input.Arch != nil {
 		arch = *input.Arch
@@ -400,12 +372,12 @@ func (o *ImageOperation) Import(ctx context.Context, input *inputs.ImageImportIn
 			fmt.Sprintf("Declared format '%s' does not match detected format '%s'", format, detected))
 	}
 
-	existing, _ := o.repo.GetByType(ctx, input.Name)
+	existing, _ := op.Repos.Image.GetByType(ctx, input.Name)
 	if !input.Force && existing != nil && existing.Path != "" {
 		if _, err := os.Stat(existing.Path); err == nil {
 			slog.Info("Image already exists", "path", existing.Path)
 			if input.SetDefault {
-				_ = o.repo.SetDefault(ctx, existing.ID)
+				_ = op.Repos.Image.SetDefault(ctx, existing.ID)
 			}
 			return &errs.OperationResult{
 				Status: "skipped",
@@ -434,8 +406,8 @@ func (o *ImageOperation) Import(ctx context.Context, input *inputs.ImageImportIn
 		})
 	}
 
-	provisionerType := o.resolveProvisionerType(ctx)
-	extractedPath, err := o.svc.ExtractImage(input.SourcePath, imageID, o.imagesDir, format, input.Partition, input.DisabledDetectors, provisionerType)
+	provisionerType := op.resolveProvisionerType(ctx)
+	extractedPath, err := op.Services.Image.ExtractImage(input.SourcePath, imageID, filepath.Join(op.CacheDir, "images"), format, input.Partition, input.DisabledDetectors, provisionerType)
 	if err != nil {
 		if isPartitionDetectionError(err) {
 			return &errs.OperationResult{
@@ -459,7 +431,7 @@ func (o *ImageOperation) Import(ctx context.Context, input *inputs.ImageImportIn
 		})
 	}
 
-	imageItem, _, err := o.svc.OptimizeImage(extractedPath, imageID, spec, timestamp, input.SkipOptimization, provisionerType, importWarnings)
+	imageItem, _, err := op.Services.Image.OptimizeImage(extractedPath, imageID, spec, timestamp, input.SkipOptimization, provisionerType, importWarnings)
 	if err != nil {
 		if isPartitionDetectionError(err) {
 			return &errs.OperationResult{
@@ -477,16 +449,16 @@ func (o *ImageOperation) Import(ctx context.Context, input *inputs.ImageImportIn
 		}
 	}
 
-	_ = o.repo.Upsert(ctx, imageItem)
+	_ = op.Repos.Image.Upsert(ctx, imageItem)
 	if input.SetDefault {
-		_ = o.repo.SetDefault(ctx, imageItem.ID)
+		_ = op.Repos.Image.SetDefault(ctx, imageItem.ID)
 	} else if existing != nil && existing.IsDefault {
-		_ = o.repo.SetDefault(ctx, imageItem.ID)
+		_ = op.Repos.Image.SetDefault(ctx, imageItem.ID)
 	}
 
 	if existing != nil && existing.ID != imageItem.ID {
-		removed := o.svc.RemoveImageFiles(existing)
-		_ = o.repo.SoftDelete(ctx, existing.ID)
+		removed := op.Services.Image.RemoveImageFiles(existing)
+		_ = op.Repos.Image.SoftDelete(ctx, existing.ID)
 		if len(removed) > 0 {
 			slog.Info("Cleaned up old image files", "count", len(removed), "id", imageItem.ID)
 		}
@@ -512,15 +484,15 @@ func (o *ImageOperation) Import(ctx context.Context, input *inputs.ImageImportIn
 	}
 }
 
-// Warm pre-decompresses images to ready pool for fast VM creation.
+// ImageWarm pre-decompresses images to ready pool for fast VM creation.
 // Matches Python's ImageOperation.warm() exactly.
 // Python: input can be None when all=True — Go handles with nil check.
-func (o *ImageOperation) Warm(ctx context.Context, input *inputs.ImageInput, all bool, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
+func (op *Operation) ImageWarm(ctx context.Context, input *inputs.ImageInput, all bool, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
 	var images []*model.ImageItem
 
 	if all {
 		var err error
-		images, err = o.repo.ListAll(ctx)
+		images, err = op.Repos.Image.ListAll(ctx)
 		if err != nil {
 			return &errs.OperationResult{
 				Status:    "error",
@@ -530,7 +502,7 @@ func (o *ImageOperation) Warm(ctx context.Context, input *inputs.ImageInput, all
 			}
 		}
 	} else if input != nil {
-		request := inputs.NewImageRequest(*input, o.db, o.repo)
+		request := inputs.NewImageRequest(*input, op.DB, op.Repos.Image)
 		resolved, err := request.Resolve(ctx)
 		if err != nil {
 			return &errs.OperationResult{
@@ -555,7 +527,7 @@ func (o *ImageOperation) Warm(ctx context.Context, input *inputs.ImageInput, all
 		})
 	}
 
-	warmed, err := o.svc.EnsureCached(images)
+	warmed, err := op.Services.Image.EnsureCached(images)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
@@ -582,12 +554,12 @@ func (o *ImageOperation) Warm(ctx context.Context, input *inputs.ImageInput, all
 	}
 }
 
-// Remove removes images by input.
+// ImageRemove removes images by input.
 // Matches Python's ImageOperation.remove() exactly.
-func (o *ImageOperation) Remove(ctx context.Context, input *inputs.ImageInput, force bool) *errs.BatchResult {
+func (op *Operation) ImageRemove(ctx context.Context, input *inputs.ImageInput, force bool) *errs.BatchResult {
 	results := make([]errs.OperationResult, 0)
 
-	request := inputs.NewImageRequest(*input, o.db, o.repo)
+	request := inputs.NewImageRequest(*input, op.DB, op.Repos.Image)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return &errs.BatchResult{
@@ -600,8 +572,8 @@ func (o *ImageOperation) Remove(ctx context.Context, input *inputs.ImageInput, f
 	images := resolved.Images
 
 	// Batch-enrich with VM references (matches Python's Resolver(repo, include=["vm"]).enrich())
-	if o.enr != nil {
-		_ = o.enr.EnrichImage(ctx, images)
+	if op.Enr != nil {
+		_ = op.Enr.EnrichImage(ctx, images)
 	}
 
 	for _, img := range images {
@@ -615,7 +587,7 @@ func (o *ImageOperation) Remove(ctx context.Context, input *inputs.ImageInput, f
 			continue
 		}
 
-		if err := o.svc.RemoveImage(ctx, img, force); err != nil {
+		if err := op.Services.Image.RemoveImage(ctx, img, force); err != nil {
 			results = append(results, errs.OperationResult{
 				Status:    "error",
 				Code:      string(errs.CodeImageNotFound),
@@ -635,12 +607,12 @@ func (o *ImageOperation) Remove(ctx context.Context, input *inputs.ImageInput, f
 	return &errs.BatchResult{Items: results}
 }
 
-// FindExistingImage checks DB for existing image for a spec.
+// ImageFindExisting checks DB for existing image for a spec.
 // Matches Python's ImageOperation.find_existing_image().
-func (o *ImageOperation) FindExistingImage(spec *model.ImageSpec) *model.ImageItem {
-	item, _ := o.repo.GetByType(context.Background(), spec.Type)
+func (op *Operation) ImageFindExisting(spec *model.ImageSpec) *model.ImageItem {
+	item, _ := op.Repos.Image.GetByType(context.Background(), spec.Type)
 	if item == nil && spec.Version != "" {
-		item, _ = o.repo.GetByVersionAndType(context.Background(), spec.Version, spec.Type)
+		item, _ = op.Repos.Image.GetByVersionAndType(context.Background(), spec.Version, spec.Type)
 	}
 	if item != nil && item.Path != "" {
 		if _, err := os.Stat(item.Path); err == nil {
@@ -650,19 +622,19 @@ func (o *ImageOperation) FindExistingImage(spec *model.ImageSpec) *model.ImageIt
 	return nil
 }
 
-// ListAll returns images.
+// ImageListAll returns images.
 // Matches Python's ImageOperation.list_all() exactly.
 // When remote=true, returns available remote images discovered via version resolver.
 // When type_filter is set and remote=true, only returns versions for that specific image type.
 // When inputs is set and remote=false, filters local images by the given identifiers.
 // no_cache bypasses cached version listings when remote=true.
 // Returns []*model.ImageVersion (remote=true) or []*model.ImageItem (remote=false).
-func (o *ImageOperation) ListAll(ctx context.Context, remote bool, typeFilter string, imgInputs *inputs.ImageInput, noCache bool) (interface{}, error) {
+func (op *Operation) ImageListAll(ctx context.Context, remote bool, typeFilter string, imgInputs *inputs.ImageInput, noCache bool) (interface{}, error) {
 	if remote {
 		// Discover remote images via version resolver
 		// Resolve ci_version from default firecracker binary
 		resolvedCIVersion := ""
-		binRepo := binary.NewRepository(o.db)
+		binRepo := binary.NewRepository(op.DB)
 		defaultBin, _ := binRepo.GetDefault(ctx, "firecracker")
 		if defaultBin != nil && defaultBin.CIVersion != nil {
 			resolvedCIVersion = *defaultBin.CIVersion
@@ -674,8 +646,8 @@ func (o *ImageOperation) ListAll(ctx context.Context, remote bool, typeFilter st
 			cacheTTL = 0
 		} else {
 			cacheTTL = 3600
-			if o.configSvc != nil {
-				if ttlRaw, err := o.configSvc.Get(ctx, "defaults.image", "remote_list_cache_ttl"); err == nil {
+			if op.Services.Config != nil {
+				if ttlRaw, err := op.Services.Config.Get(ctx, "defaults.image", "remote_list_cache_ttl"); err == nil {
 					if ttl, ok := ttlRaw.(int); ok && ttl > 0 {
 						cacheTTL = ttl
 					}
@@ -696,8 +668,8 @@ func (o *ImageOperation) ListAll(ctx context.Context, remote bool, typeFilter st
 		} else if arch == "arm64" {
 			arch = "aarch64"
 		}
-		if o.configSvc != nil {
-			if archRaw, err := o.configSvc.Get(ctx, "defaults.image", "arch"); err == nil {
+		if op.Services.Config != nil {
+			if archRaw, err := op.Services.Config.Get(ctx, "defaults.image", "arch"); err == nil {
 				if archStr, ok := archRaw.(string); ok && archStr != "" {
 					arch = archStr
 				}
@@ -744,20 +716,20 @@ func (o *ImageOperation) ListAll(ctx context.Context, remote bool, typeFilter st
 	// Local images from DB
 	if imgInputs != nil {
 		// Filter by identifiers if provided
-		request := inputs.NewImageRequest(*imgInputs, o.db, o.repo)
+		request := inputs.NewImageRequest(*imgInputs, op.DB, op.Repos.Image)
 		resolved, err := request.Resolve(ctx)
 		if err != nil {
 			return nil, err
 		}
 		return resolved.Images, nil
 	}
-	return o.svc.ListAll(ctx, true, false)
+	return op.Services.Image.ListAll(ctx, true, false)
 }
 
-// Get returns a single image by ID prefix or type.
+// ImageGet returns a single image by ID prefix or type.
 // Matches Python's ImageOperation.get() exactly — uses ImageRequest for resolution.
-func (o *ImageOperation) Get(ctx context.Context, input *inputs.ImageInput) (*model.ImageItem, error) {
-	request := inputs.NewImageRequest(*input, o.db, o.repo)
+func (op *Operation) ImageGet(ctx context.Context, input *inputs.ImageInput) (*model.ImageItem, error) {
+	request := inputs.NewImageRequest(*input, op.DB, op.Repos.Image)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("image not found: %v", err)
@@ -768,10 +740,10 @@ func (o *ImageOperation) Get(ctx context.Context, input *inputs.ImageInput) (*mo
 	return resolved.Images[0], nil
 }
 
-// Inspect returns grouped dict of an image.
+// ImageInspect returns grouped dict of an image.
 // Matches Python's ImageOperation.inspect() exactly.
-func (o *ImageOperation) Inspect(ctx context.Context, input *inputs.ImageInput) (map[string]interface{}, error) {
-	img, err := o.Get(ctx, input)
+func (op *Operation) ImageInspect(ctx context.Context, input *inputs.ImageInput) (map[string]interface{}, error) {
+	img, err := op.ImageGet(ctx, input)
 	if err != nil {
 		return nil, err
 	}
@@ -796,10 +768,10 @@ func (o *ImageOperation) Inspect(ctx context.Context, input *inputs.ImageInput) 
 	}, nil
 }
 
-// SetDefault sets an image as default.
+// ImageSetDefault sets an image as default.
 // Matches Python's ImageOperation.set_default() exactly — uses ImageRequest for resolution.
-func (o *ImageOperation) SetDefault(ctx context.Context, input *inputs.ImageInput) *errs.OperationResult {
-	request := inputs.NewImageRequest(*input, o.db, o.repo)
+func (op *Operation) ImageSetDefault(ctx context.Context, input *inputs.ImageInput) *errs.OperationResult {
+	request := inputs.NewImageRequest(*input, op.DB, op.Repos.Image)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return &errs.OperationResult{
@@ -817,7 +789,7 @@ func (o *ImageOperation) SetDefault(ctx context.Context, input *inputs.ImageInpu
 		}
 	}
 	img := resolved.Images[0]
-	if err := o.repo.SetDefault(ctx, img.ID); err != nil {
+	if err := op.Repos.Image.SetDefault(ctx, img.ID); err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
 			Code:      string(errs.CodeImageNotFound),
@@ -825,7 +797,7 @@ func (o *ImageOperation) SetDefault(ctx context.Context, input *inputs.ImageInpu
 			Exception: err,
 		}
 	}
-	auditLog := logging.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(op.CacheDir)
 	truncatedID := img.ID
 	if len(truncatedID) > 6 {
 		truncatedID = truncatedID[:6]
@@ -844,9 +816,9 @@ func (o *ImageOperation) SetDefault(ctx context.Context, input *inputs.ImageInpu
 //	provisioner_type = ProvisionerType.GUESTFS if guestfs_enabled else ProvisionerType.LOOP_MOUNT
 //
 // Returns image.ProvisionerType to match the type expected by Service methods.
-func (o *ImageOperation) resolveProvisionerType(ctx context.Context) image.ProvisionerType {
-	if o.configSvc != nil {
-		guestfsEnabledRaw, err := o.configSvc.Get(ctx, "settings", "guestfs_enabled")
+func (op *Operation) resolveProvisionerType(ctx context.Context) image.ProvisionerType {
+	if op.Services.Config != nil {
+		guestfsEnabledRaw, err := op.Services.Config.Get(ctx, "settings", "guestfs_enabled")
 		if err == nil {
 			if guestfsEnabled, ok := guestfsEnabledRaw.(bool); ok && guestfsEnabled {
 				return image.ProvisionerTypeGuestFS

@@ -4,14 +4,12 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"time"
 
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
-	"mvmctl/internal/enricher"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/disk"
 	"mvmctl/internal/infra/errs"
@@ -20,34 +18,18 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// VolumeOperation orchestrates volume lifecycle across core domains.
-// Matches Python's VolumeOperation exactly.
-type VolumeOperation struct {
-	svc      *volume.Service
-	repo     volume.Repository
-	vmRepo   vm.Repository
-	cacheDir string
-	db       *sql.DB
-	enr      *enricher.Enricher
+// VolumeListAll returns all volumes.
+// Matches Python's VolumeOperation.list_all() exactly.
+func (op *Operation) VolumeListAll(ctx context.Context) []*model.VolumeItem {
+	volumes, _ := op.Repos.Volume.ListAll(ctx)
+	return volumes
 }
 
-// NewVolumeOperation creates a VolumeOperation.
-func NewVolumeOperation(svc *volume.Service, repo volume.Repository, vmRepo vm.Repository, cacheDir string, db *sql.DB, enr *enricher.Enricher) *VolumeOperation {
-	return &VolumeOperation{
-		svc:      svc,
-		repo:     repo,
-		vmRepo:   vmRepo,
-		cacheDir: cacheDir,
-		db:       db,
-		enr:      enr,
-	}
-}
-
-// Create creates a new volume.
+// VolumeCreate creates a new volume.
 // Matches Python's VolumeOperation.create() exactly — uses VolumeCreateRequest
 // resolution pipeline and HashGenerator.volume() for ID.
-func (o *VolumeOperation) Create(ctx context.Context, input *inputs.VolumeCreateInput) *errs.OperationResult {
-	req := inputs.NewVolumeCreateRequest(*input, o.db, o.repo)
+func (op *Operation) VolumeCreate(ctx context.Context, input *inputs.VolumeCreateInput) *errs.OperationResult {
+	req := inputs.NewVolumeCreateRequest(*input, op.DB, op.Repos.Volume)
 	resolved, err := req.Resolve(ctx)
 	if err != nil {
 		// Extract the original error code from DomainError — for duplicate names
@@ -83,7 +65,7 @@ func (o *VolumeOperation) Create(ctx context.Context, input *inputs.VolumeCreate
 		UpdatedAt:  timestamp,
 	}
 
-	if _, volErr := o.svc.CreateDisk(ctx, volumeItem); volErr != nil {
+	if _, volErr := op.Services.Volume.CreateDisk(ctx, volumeItem); volErr != nil {
 		// Python: VolumeError from create_disk propagates uncaught; in Go we
 		// return an OperationResult with the correct error code.
 		return &errs.OperationResult{
@@ -94,7 +76,7 @@ func (o *VolumeOperation) Create(ctx context.Context, input *inputs.VolumeCreate
 		}
 	}
 
-	auditLog := logging.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(op.CacheDir)
 	_ = auditLog.LogOperation("volume.create", map[string]interface{}{"name": input.Name}, "")
 
 	return &errs.OperationResult{
@@ -105,39 +87,14 @@ func (o *VolumeOperation) Create(ctx context.Context, input *inputs.VolumeCreate
 	}
 }
 
-// ListAll returns all volumes.
-// Matches Python's VolumeOperation.list_all() exactly.
-func (o *VolumeOperation) ListAll(ctx context.Context) []*model.VolumeItem {
-	volumes, _ := o.repo.ListAll(ctx)
-	return volumes
-}
-
-// Get returns a single volume by identifier.
-// Matches Python's VolumeOperation.get() exactly — uses VolumeRequest pipeline.
-func (o *VolumeOperation) Get(ctx context.Context, input *inputs.VolumeInput) (*model.VolumeItem, error) {
-	// Python: resolved = VolumeRequest(inputs=inputs, db=Database()).resolve()
-	req := inputs.NewVolumeRequest(*input, o.db, o.repo)
-	resolved, err := req.Resolve(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// Python: if len(resolved.volumes) > 1: raise VolumeNotFoundError(...)
-	if len(resolved.Volumes) > 1 {
-		return nil, fmt.Errorf("Expected exactly one volume identifier")
-	}
-
-	return resolved.Volumes[0], nil
-}
-
-// Remove removes volumes by name or ID.
+// VolumeRemove removes volumes by name or ID.
 // Matches Python's VolumeOperation.remove() exactly — uses VolumeRequest resolution
 // with partial-match error reporting, VM volume_ids cleanup, and hot-unplug.
-func (o *VolumeOperation) Remove(ctx context.Context, input *inputs.VolumeInput, force bool) *errs.BatchResult {
+func (op *Operation) VolumeRemove(ctx context.Context, input *inputs.VolumeInput, force bool) *errs.BatchResult {
 	// Python: request = VolumeRequest(inputs=inputs, db=db)
 	//         try: resolved = request.resolve()
 	//         except VolumeNotFoundError as e: return BatchResult(items=[OperationResult(...)])
-	req := inputs.NewVolumeRequest(*input, o.db, o.repo)
+	req := inputs.NewVolumeRequest(*input, op.DB, op.Repos.Volume)
 	resolved, err := req.Resolve(ctx)
 	if err != nil {
 		return &errs.BatchResult{
@@ -177,8 +134,8 @@ func (o *VolumeOperation) Remove(ctx context.Context, input *inputs.VolumeInput,
 	}
 
 	// Batch-enrich with VM references for VM attachment check
-	if o.enr != nil {
-		_ = o.enr.EnrichVolume(ctx, resolved.Volumes)
+	if op.Enr != nil {
+		_ = op.Enr.EnrichVolume(ctx, resolved.Volumes)
 	}
 
 	for _, vol := range resolved.Volumes {
@@ -195,7 +152,7 @@ func (o *VolumeOperation) Remove(ctx context.Context, input *inputs.VolumeInput,
 		// When force-removing attached volume, clean up the VM's volume_ids reference,
 		// hot-unplug if running, and update config on disk (matching Python).
 		if vol.Status == model.VolumeStatusAttached && force && vol.VMID != nil {
-			vmItem, _ := o.vmRepo.Get(ctx, *vol.VMID)
+			vmItem, _ := op.Repos.VM.Get(ctx, *vol.VMID)
 			if vmItem != nil && vmItem.VolumeIDs != nil {
 				// Remove this volume from VM's volume_ids
 				var newIDs []string
@@ -205,16 +162,16 @@ func (o *VolumeOperation) Remove(ctx context.Context, input *inputs.VolumeInput,
 					}
 				}
 				vmItem.VolumeIDs = newIDs
-				_ = o.vmRepo.Upsert(ctx, vmItem)
+				_ = op.Repos.VM.Upsert(ctx, vmItem)
 
 				// Python: try: ctrl.detach_volume(volume) except Exception: pass
-				if vmCtrl, ctrlErr := vm.NewController(vmItem, o.vmRepo); ctrlErr == nil {
+				if vmCtrl, ctrlErr := vm.NewController(vmItem, op.Repos.VM); ctrlErr == nil {
 					_ = vmCtrl.DetachVolume(ctx, vol)
 				}
 			}
 		}
 
-		if err := o.svc.Remove(ctx, vol); err != nil {
+		if err := op.Services.Volume.Remove(ctx, vol); err != nil {
 			results = append(results, errs.OperationResult{
 				Status:    "error",
 				Code:      "volume.remove_failed",
@@ -225,7 +182,7 @@ func (o *VolumeOperation) Remove(ctx context.Context, input *inputs.VolumeInput,
 			continue
 		}
 
-		auditLog := logging.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(op.CacheDir)
 		_ = auditLog.LogOperation("volume.remove", map[string]interface{}{"name": vol.Name}, "")
 
 		results = append(results, errs.OperationResult{
@@ -239,11 +196,11 @@ func (o *VolumeOperation) Remove(ctx context.Context, input *inputs.VolumeInput,
 	return &errs.BatchResult{Items: results}
 }
 
-// Inspect returns detailed volume info as a raw dictionary.
+// VolumeInspect returns detailed volume info as a raw dictionary.
 // Matches Python's VolumeOperation.inspect() exactly — returns dict[str, Any]
 // with volume metadata and disk information, not wrapped in OperationResult.
-func (o *VolumeOperation) Inspect(ctx context.Context, input *inputs.VolumeInput) (map[string]interface{}, error) {
-	vol, err := o.Get(ctx, input)
+func (op *Operation) VolumeInspect(ctx context.Context, input *inputs.VolumeInput) (map[string]interface{}, error) {
+	vol, err := op.VolumeGet(ctx, input)
 	if err != nil {
 		return nil, err // Propagate error, matching Python's raise VolumeNotFoundError
 	}
@@ -253,7 +210,7 @@ func (o *VolumeOperation) Inspect(ctx context.Context, input *inputs.VolumeInput
 
 	vmName := ""
 	if vol.VMID != nil && *vol.VMID != "" {
-		vm, _ := o.vmRepo.Get(ctx, *vol.VMID)
+		vm, _ := op.Repos.VM.Get(ctx, *vol.VMID)
 		if vm != nil {
 			vmName = vm.Name
 		}
@@ -281,15 +238,15 @@ func (o *VolumeOperation) Inspect(ctx context.Context, input *inputs.VolumeInput
 	}, nil
 }
 
-// Resize resizes a volume.
+// VolumeResize resizes a volume.
 // Matches Python's VolumeOperation.resize() exactly — uses VolumeRequest resolution
 // for identifier lookup and separate size parsing.
-func (o *VolumeOperation) Resize(ctx context.Context, input *inputs.VolumeCreateInput) *errs.OperationResult {
+func (op *Operation) VolumeResize(ctx context.Context, input *inputs.VolumeCreateInput) *errs.OperationResult {
 	// Python: vol_input = VolumeInput(identifiers=[inputs.name])
 	//         resolved_vol = VolumeRequest(inputs=vol_input, db=db).resolve()
 	//         volume = resolved_vol.volumes[0]
 	volInput := inputs.VolumeInput{Identifiers: []string{input.Name}}
-	req := inputs.NewVolumeRequest(volInput, o.db, o.repo)
+	req := inputs.NewVolumeRequest(volInput, op.DB, op.Repos.Volume)
 	resolved, err := req.Resolve(ctx)
 	if err != nil {
 		return &errs.OperationResult{
@@ -312,7 +269,7 @@ func (o *VolumeOperation) Resize(ctx context.Context, input *inputs.VolumeCreate
 		}
 	}
 
-	updated, err := o.svc.ResizeDisk(ctx, vol, sizeBytes)
+	updated, err := op.Services.Volume.ResizeDisk(ctx, vol, sizeBytes)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
@@ -322,7 +279,7 @@ func (o *VolumeOperation) Resize(ctx context.Context, input *inputs.VolumeCreate
 		}
 	}
 
-	auditLog := logging.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(op.CacheDir)
 	_ = auditLog.LogOperation("volume.resize", map[string]interface{}{"name": vol.Name}, "")
 
 	return &errs.OperationResult{
@@ -333,4 +290,20 @@ func (o *VolumeOperation) Resize(ctx context.Context, input *inputs.VolumeCreate
 	}
 }
 
-// Compile-time check
+// VolumeGet returns a single volume by identifier.
+// Matches Python's VolumeOperation.get() exactly — uses VolumeRequest pipeline.
+func (op *Operation) VolumeGet(ctx context.Context, input *inputs.VolumeInput) (*model.VolumeItem, error) {
+	// Python: resolved = VolumeRequest(inputs=inputs, db=Database()).resolve()
+	req := inputs.NewVolumeRequest(*input, op.DB, op.Repos.Volume)
+	resolved, err := req.Resolve(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Python: if len(resolved.volumes) > 1: raise VolumeNotFoundError(...)
+	if len(resolved.Volumes) > 1 {
+		return nil, fmt.Errorf("Expected exactly one volume identifier")
+	}
+
+	return resolved.Volumes[0], nil
+}

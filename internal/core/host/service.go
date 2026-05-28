@@ -227,11 +227,14 @@ func EnsureKVMModules(ctx context.Context, repo Repository, sessionID string, ch
 // ── DetectAndSaveCapacity ──
 // Matches Python's HostService.detect_and_save_capacity().
 func (s *Service) DetectAndSaveCapacity(ctx context.Context) (*model.HostHardware, *model.HostLimits, error) {
-	hardware := DetectHardware()
+	hardware, err := DetectHardware()
+	if err != nil {
+		return nil, nil, fmt.Errorf("detect hardware: %w", err)
+	}
 	limits := DetectLimits()
 	detectedAt := time.Now().Format(time.RFC3339)
 
-	err := s.repo.SaveCapacity(ctx,
+	err = s.repo.SaveCapacity(ctx,
 		hardware.Hostname,
 		hardware.CPUModel,
 		hardware.CPUVendor,

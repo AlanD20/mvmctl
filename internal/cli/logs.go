@@ -10,7 +10,7 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-func NewLogsCmd(logAPI *api.LogOperation) *cobra.Command {
+func NewLogsCmd(op *api.Operation) *cobra.Command {
 	var osLog bool
 	var rawLines int
 	var follow bool
@@ -53,7 +53,7 @@ Use --os to show the Firecracker process log.`,
 
 			// Python: for line in LogOperation.stream(inputs): print(line)
 			// Go:     LogOperation.Stream(ctx, input, func(line) { fmt.Println(line) })
-			err := logAPI.Stream(cmd.Context(), input, func(line string) error {
+			err := op.LogStream(cmd.Context(), input, func(line string) error {
 				fmt.Println(line)
 				return nil
 			})

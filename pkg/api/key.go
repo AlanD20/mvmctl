@@ -11,31 +11,11 @@ import (
 	"strings"
 
 	"mvmctl/internal/core/key"
-	"mvmctl/internal/core/vm"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api/inputs"
 )
-
-// KeyOperation orchestrates SSH key operations.
-// Matches Python's KeyOperation exactly.
-type KeyOperation struct {
-	svc      *key.Service
-	repo     key.Repository
-	vmRepo   vm.Repository
-	cacheDir string
-}
-
-// NewKeyOperation creates a KeyOperation.
-func NewKeyOperation(svc *key.Service, repo key.Repository, vmRepo vm.Repository, cacheDir string) *KeyOperation {
-	return &KeyOperation{
-		svc:      svc,
-		repo:     repo,
-		vmRepo:   vmRepo,
-		cacheDir: cacheDir,
-	}
-}
 
 // KeyCreateInput holds options for key creation.
 type KeyCreateInput struct {
@@ -65,13 +45,13 @@ type KeyInput struct {
 
 // resolveKeys resolves KeyInput identifiers via KeyResolver, matching Python's
 // KeyRequest.resolve() path.
-func (o *KeyOperation) resolveKeys(ctx context.Context, input *KeyInput) ([]*model.SSHKeyItem, []string) {
+func (op *Operation) resolveKeys(ctx context.Context, input *KeyInput) ([]*model.SSHKeyItem, []string) {
 	identifiers := append(input.Names, input.IDs...)
 	if len(identifiers) == 0 {
 		return nil, []string{"No key identifiers provided"}
 	}
 
-	resolver := key.NewResolver(o.repo)
+	resolver := key.NewResolver(op.Repos.Key)
 	result, err := resolver.ResolveMany(ctx, identifiers)
 	if err != nil {
 		return nil, []string{err.Error()}
@@ -80,19 +60,19 @@ func (o *KeyOperation) resolveKeys(ctx context.Context, input *KeyInput) ([]*mod
 	return result.Items, result.Errors
 }
 
-// ListAll lists all SSH keys.
+// KeyListAll lists all SSH keys.
 // Matches Python's KeyOperation.list_all() exactly — passes keys_dir only,
 // no verify parameter (matching Python's service.list_all(keys_dir) call).
-func (o *KeyOperation) ListAll(ctx context.Context) ([]*model.SSHKeyItem, error) {
-	return o.svc.List(ctx, false)
+func (op *Operation) KeyListAll(ctx context.Context) ([]*model.SSHKeyItem, error) {
+	return op.Services.Key.List(ctx, false)
 }
 
 // Get returns a single key by name or ID.
 // Matches Python's KeyOperation.get() exactly — uses KeyRequest resolution pipeline
 // with KeyInput matching Python's KeyInput(name, id) pattern.
-func (o *KeyOperation) Get(ctx context.Context, input *KeyInput) (*model.SSHKeyItem, error) {
+func (op *Operation) Get(ctx context.Context, input *KeyInput) (*model.SSHKeyItem, error) {
 	// Match Python: KeyRequest(inputs=inputs, db=db).resolve()
-	items, errs := o.resolveKeys(ctx, input)
+	items, errs := op.resolveKeys(ctx, input)
 	if len(items) == 0 {
 		msg := "key not found"
 		if len(errs) > 0 {
@@ -107,15 +87,15 @@ func (o *KeyOperation) Get(ctx context.Context, input *KeyInput) (*model.SSHKeyI
 	return items[0], nil
 }
 
-// Create creates a new SSH keypair.
+// KeyCreate creates a new SSH keypair.
 // Matches Python's KeyOperation.create() exactly — calls check_dependencies() first,
 // then uses KeyCreateRequest resolution pipeline.
 // Python wraps check_dependencies in try/except Exception — top-level panic recovery matches this.
-func (o *KeyOperation) Create(ctx context.Context, input *KeyCreateInput) *errs.OperationResult {
+func (op *Operation) KeyCreate(ctx context.Context, input *KeyCreateInput) *errs.OperationResult {
 	// Python: service.check_dependencies() called separately before resolution.
 	// Go: CreateKeypair calls checkDependencies internally, but we call it explicitly
 	// to match Python's exact ordering (check happens before resolution).
-	if err := o.checkDependencies(); err != nil {
+	if err := op.checkDependencies(); err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
 			Code:      "key.create_failed",
@@ -169,7 +149,7 @@ func (o *KeyOperation) Create(ctx context.Context, input *KeyCreateInput) *errs.
 		Overwrite:  resolved.Overwrite,
 		SetDefault: resolved.SetDefault,
 	}
-	keyItem, _, err := o.svc.CreateKeypair(ctx, params)
+	keyItem, _, err := op.Services.Key.CreateKeypair(ctx, params)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
@@ -179,7 +159,7 @@ func (o *KeyOperation) Create(ctx context.Context, input *KeyCreateInput) *errs.
 		}
 	}
 
-	auditLog := logging.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(op.CacheDir)
 	_ = auditLog.LogOperation("key.create", map[string]interface{}{
 		"name":      keyItem.Name,
 		"algorithm": keyItem.Algorithm,
@@ -192,10 +172,10 @@ func (o *KeyOperation) Create(ctx context.Context, input *KeyCreateInput) *errs.
 	}
 }
 
-// Add adds an existing public key to the cache.
+// KeyAdd adds an existing public key to the cache.
 // Matches Python's KeyOperation.add() exactly — passes overwrite parameter.
 // Python wraps the entire flow in try/except Exception — top-level panic recovery matches this.
-func (o *KeyOperation) Add(ctx context.Context, name string, pubKeyPath string, overwrite bool) *errs.OperationResult {
+func (op *Operation) KeyAdd(ctx context.Context, name string, pubKeyPath string, overwrite bool) *errs.OperationResult {
 	// Python does inline validation at the API level before calling service
 	if _, err := os.Stat(pubKeyPath); os.IsNotExist(err) {
 		return &errs.OperationResult{
@@ -240,7 +220,7 @@ func (o *KeyOperation) Add(ctx context.Context, name string, pubKeyPath string, 
 		}
 	}
 
-	keyItem, err := o.svc.AddKey(ctx, name, pubKeyPath, pubKeyContent, overwrite)
+	keyItem, err := op.Services.Key.AddKey(ctx, name, pubKeyPath, pubKeyContent, overwrite)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
@@ -250,7 +230,7 @@ func (o *KeyOperation) Add(ctx context.Context, name string, pubKeyPath string, 
 		}
 	}
 
-	auditLog := logging.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(op.CacheDir)
 	_ = auditLog.LogOperation("key.add", map[string]interface{}{"name": keyItem.Name}, "")
 
 	return &errs.OperationResult{
@@ -260,17 +240,17 @@ func (o *KeyOperation) Add(ctx context.Context, name string, pubKeyPath string, 
 	}
 }
 
-// Remove removes keys by name or ID.
+// KeyRemove removes keys by name or ID.
 // Matches Python's KeyOperation.remove() exactly — uses KeyRequest resolution pipeline.
-func (o *KeyOperation) Remove(ctx context.Context, input *KeyInput, force bool) *errs.BatchResult {
+func (op *Operation) KeyRemove(ctx context.Context, input *KeyInput, force bool) *errs.BatchResult {
 	// Match Python: KeyRequest(inputs=inputs, db=db).resolve()
-	items, _ := o.resolveKeys(ctx, input)
+	items, _ := op.resolveKeys(ctx, input)
 
 	results := make([]errs.OperationResult, 0)
 
 	for _, key := range items {
 		// Check if any VMs reference this key
-		vms, _ := o.vmRepo.FindBySSHKeyID(ctx, key.ID)
+		vms, _ := op.Repos.VM.FindBySSHKeyID(ctx, key.ID)
 		if len(vms) > 0 && !force {
 			vmNames := make([]string, len(vms))
 			for i, vm := range vms {
@@ -285,7 +265,7 @@ func (o *KeyOperation) Remove(ctx context.Context, input *KeyInput, force bool) 
 		}
 
 		// File cleanup is done at the API layer before DB deletion (matching Python)
-		keysDir := filepath.Join(o.cacheDir, "keys")
+		keysDir := filepath.Join(op.CacheDir, "keys")
 		pubFile := filepath.Join(keysDir, key.Name+".pub")
 		privFile := filepath.Join(keysDir, key.Name)
 		if _, err := os.Stat(pubFile); err == nil {
@@ -295,7 +275,7 @@ func (o *KeyOperation) Remove(ctx context.Context, input *KeyInput, force bool) 
 			os.Remove(privFile)
 		}
 
-		if err := o.repo.Delete(ctx, key.ID); err != nil {
+		if err := op.Repos.Key.Delete(ctx, key.ID); err != nil {
 			results = append(results, errs.OperationResult{
 				Status:    "error",
 				Code:      "key.remove_failed",
@@ -305,7 +285,7 @@ func (o *KeyOperation) Remove(ctx context.Context, input *KeyInput, force bool) 
 			continue
 		}
 
-		auditLog := logging.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(op.CacheDir)
 		_ = auditLog.LogOperation("key.remove", map[string]interface{}{"name": key.Name}, "")
 
 		results = append(results, errs.OperationResult{
@@ -318,11 +298,11 @@ func (o *KeyOperation) Remove(ctx context.Context, input *KeyInput, force bool) 
 	return &errs.BatchResult{Items: results}
 }
 
-// Inspect returns detailed key info.
+// KeyInspect returns detailed key info.
 // Matches Python's KeyOperation.inspect() exactly — uses KeyRequest resolution,
 // returns raw dict (not wrapped in OperationResult).
-func (o *KeyOperation) Inspect(ctx context.Context, input *KeyInput) (map[string]interface{}, error) {
-	key, err := o.Get(ctx, input)
+func (op *Operation) KeyInspect(ctx context.Context, input *KeyInput) (map[string]interface{}, error) {
+	key, err := op.Get(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("key not found: %v", err)
 	}
@@ -347,12 +327,12 @@ func (o *KeyOperation) Inspect(ctx context.Context, input *KeyInput) (map[string
 	}, nil
 }
 
-// Export exports a keypair to a destination directory.
+// KeyExport exports a keypair to a destination directory.
 // Matches Python's KeyOperation.export() exactly — uses KeyRequest resolution
 // and KeyController.export(). Python wraps controller.export() in try/except Exception.
-func (o *KeyOperation) Export(ctx context.Context, input *KeyInput, destination string, overwrite bool) *errs.OperationResult {
+func (op *Operation) KeyExport(ctx context.Context, input *KeyInput, destination string, overwrite bool) *errs.OperationResult {
 	// Python: request = KeyRequest(inputs=inputs, db=db); resolved = request.resolve()
-	items, resolveErrs := o.resolveKeys(ctx, input)
+	items, resolveErrs := op.resolveKeys(ctx, input)
 	if len(items) == 0 {
 		msg := "key not found"
 		if len(resolveErrs) > 0 {
@@ -379,8 +359,8 @@ func (o *KeyOperation) Export(ctx context.Context, input *KeyInput, destination 
 	// controller = KeyController(resolved.keys[0], repo)
 	// keys_dir is a per-call parameter of export(), NOT stored in the controller.
 	// paths = controller.export(destination=destination, keys_dir=keys_dir, overwrite=overwrite)
-	keysDir := filepath.Join(o.cacheDir, "keys")
-	ctrl, err := key.NewController(ctx, keyItem, o.repo)
+	keysDir := filepath.Join(op.CacheDir, "keys")
+	ctrl, err := key.NewController(ctx, keyItem, op.Repos.Key)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
@@ -407,12 +387,12 @@ func (o *KeyOperation) Export(ctx context.Context, input *KeyInput, destination 
 	}
 }
 
-// SetDefault sets a key as default.
+// KeySetDefault sets a key as default.
 // Matches Python's KeyOperation.set_default() exactly — uses KeyRequest resolution.
 // Python wraps service.set_default_keys() in try/except Exception.
-func (o *KeyOperation) SetDefault(ctx context.Context, input *KeyInput) *errs.OperationResult {
+func (op *Operation) KeySetDefault(ctx context.Context, input *KeyInput) *errs.OperationResult {
 	// Python: request = KeyRequest(inputs=inputs, db=db); resolved = request.resolve()
-	items, _ := o.resolveKeys(ctx, input)
+	items, _ := op.resolveKeys(ctx, input)
 	if len(items) == 0 {
 		return &errs.OperationResult{
 			Status:  "error",
@@ -427,7 +407,7 @@ func (o *KeyOperation) SetDefault(ctx context.Context, input *KeyInput) *errs.Op
 		names[i] = k.Name
 	}
 
-	if err := o.svc.SetDefaultKeys(ctx, names); err != nil {
+	if err := op.Services.Key.SetDefaultKeys(ctx, names); err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
 			Code:      "key.default_set_failed",
@@ -437,7 +417,7 @@ func (o *KeyOperation) SetDefault(ctx context.Context, input *KeyInput) *errs.Op
 	}
 
 	for _, name := range names {
-		auditLog := logging.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(op.CacheDir)
 		_ = auditLog.LogOperation("key.set_default", map[string]interface{}{"name": name}, "")
 	}
 
@@ -455,15 +435,15 @@ func (o *KeyOperation) SetDefault(ctx context.Context, input *KeyInput) *errs.Op
 
 // GetDefaults returns all default keys.
 // Matches Python's KeyOperation.get_defaults() exactly.
-func (o *KeyOperation) GetDefaults(ctx context.Context) ([]*model.SSHKeyItem, error) {
-	return o.repo.GetDefaults(ctx)
+func (op *Operation) GetDefaults(ctx context.Context) ([]*model.SSHKeyItem, error) {
+	return op.Repos.Key.GetDefaults(ctx)
 }
 
-// ClearDefaults clears all default keys.
+// KeyClearDefaults clears all default keys.
 // Matches Python's KeyOperation.clear_defaults() exactly.
 // Python wraps service.clear_default_keys() in try/except Exception.
-func (o *KeyOperation) ClearDefaults(ctx context.Context) *errs.OperationResult {
-	if err := o.svc.ClearDefaultKeys(ctx); err != nil {
+func (op *Operation) KeyClearDefaults(ctx context.Context) *errs.OperationResult {
+	if err := op.Services.Key.ClearDefaultKeys(ctx); err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
 			Code:      "key.defaults_clear_failed",
@@ -472,7 +452,7 @@ func (o *KeyOperation) ClearDefaults(ctx context.Context) *errs.OperationResult 
 		}
 	}
 
-	auditLog := logging.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(op.CacheDir)
 	_ = auditLog.LogOperation("key.clear_defaults", nil, "")
 
 	return &errs.OperationResult{
@@ -487,7 +467,7 @@ func isPrivateKey(content string) bool {
 
 // checkDependencies checks that ssh-keygen is available, matching Python's
 // KeyService.check_dependencies().
-func (o *KeyOperation) checkDependencies() error {
+func (op *Operation) checkDependencies() error {
 	if _, err := exec.LookPath("ssh-keygen"); err != nil {
 		return fmt.Errorf("ssh-keygen not found in PATH. Install OpenSSH client package (e.g., 'apt install openssh-client').")
 	}

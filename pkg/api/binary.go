@@ -10,9 +10,6 @@ import (
 	"strconv"
 
 	"mvmctl/internal/core/binary"
-	"mvmctl/internal/core/config"
-	"mvmctl/internal/core/vm"
-	"mvmctl/internal/enricher"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/logging"
@@ -22,34 +19,10 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// BinaryOperation orchestrates binary management.
-// Matches Python's BinaryOperation exactly.
-type BinaryOperation struct {
-	svc         *binary.Service
-	repo        binary.Repository
-	vmRepo      vm.Repository
-	settingsSvc *config.Service
-	cacheDir    string
-	enr         *enricher.Enricher
-}
-
-// NewBinaryOperation creates a BinaryOperation.
-// Matches Python's BinaryOperation() which creates internal Database/repo/service.
-func NewBinaryOperation(svc *binary.Service, vmRepo vm.Repository, cacheDir string, settingsSvc *config.Service, enr *enricher.Enricher) *BinaryOperation {
-	return &BinaryOperation{
-		svc:         svc,
-		repo:        svc.Repo(),
-		vmRepo:      vmRepo,
-		cacheDir:    cacheDir,
-		settingsSvc: settingsSvc,
-		enr:         enr,
-	}
-}
-
-// Prune prunes unused binaries.
+// BinaryPrune prunes unused binaries.
 // Matches Python's BinaryOperation.prune() exactly.
-func (o *BinaryOperation) Prune(ctx context.Context, dryRun bool, force bool) *errs.OperationResult {
-	allBinaries, err := o.repo.ListAll(ctx)
+func (op *Operation) BinaryPrune(ctx context.Context, dryRun bool, force bool) *errs.OperationResult {
+	allBinaries, err := op.Repos.Binary.ListAll(ctx)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
@@ -59,7 +32,7 @@ func (o *BinaryOperation) Prune(ctx context.Context, dryRun bool, force bool) *e
 		}
 	}
 
-	defaultBinary, _ := o.repo.GetDefault(ctx, "firecracker")
+	defaultBinary, _ := op.Repos.Binary.GetDefault(ctx, "firecracker")
 	var defaultVersion string
 	if defaultBinary != nil {
 		defaultVersion = defaultBinary.Version
@@ -74,7 +47,7 @@ func (o *BinaryOperation) Prune(ctx context.Context, dryRun bool, force bool) *e
 		}
 
 		if !dryRun {
-			removeResult := o.Remove(ctx, &inputs.BinaryInput{Identifiers: []string{bin.ID}}, force)
+			removeResult := op.BinaryRemove(ctx, &inputs.BinaryInput{Identifiers: []string{bin.ID}}, force)
 			if removeResult.HasErrors() {
 				slog.Warn("Failed to remove binary",
 					"name", bin.Name, "version", bin.Version, "error", removeResult.Errors()[0].Message)
@@ -92,10 +65,10 @@ func (o *BinaryOperation) Prune(ctx context.Context, dryRun bool, force bool) *e
 	}
 }
 
-// Pull downloads or builds a binary.
+// BinaryPull downloads or builds a binary.
 // Matches Python's BinaryOperation.pull() exactly — uses BinaryPullRequest
 // resolution pipeline and wraps all BinaryErrors in code="binary.pull_failed".
-func (o *BinaryOperation) Pull(ctx context.Context, input *inputs.BinaryPullInput) *errs.OperationResult {
+func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInput) *errs.OperationResult {
 	// Python: request = BinaryPullRequest(inputs=inputs, db=db); resolved = request.resolve()
 	request := inputs.NewBinaryPullRequest(*input, nil)
 	resolved, err := request.Resolve(ctx)
@@ -111,7 +84,7 @@ func (o *BinaryOperation) Pull(ctx context.Context, input *inputs.BinaryPullInpu
 	// ---- Git build path (parallel to release download) ----
 	if resolved.GitRef != nil && *resolved.GitRef != "" {
 		// Python passes bin_dir=resolved.bin_dir to BinaryService.build_from_source()
-		binaries, err := o.svc.BuildFromSource(ctx, *resolved.GitRef)
+		binaries, err := op.Services.Binary.BuildFromSource(ctx, *resolved.GitRef)
 		if err != nil {
 			return &errs.OperationResult{
 				Status:    "error",
@@ -121,13 +94,13 @@ func (o *BinaryOperation) Pull(ctx context.Context, input *inputs.BinaryPullInpu
 			}
 		}
 
-		noDefault, _ := o.repo.GetDefault(ctx, "firecracker")
+		noDefault, _ := op.Repos.Binary.GetDefault(ctx, "firecracker")
 		shouldSetDefault := resolved.SetDefault || noDefault == nil
 
 		for _, b := range binaries {
-			_ = o.repo.Upsert(ctx, b)
+			_ = op.Repos.Binary.Upsert(ctx, b)
 			if shouldSetDefault {
-				_ = o.repo.SetDefault(ctx, b.Name, b.Version, b.Path)
+				_ = op.Repos.Binary.SetDefault(ctx, b.Name, b.Version, b.Path)
 			}
 		}
 
@@ -136,7 +109,7 @@ func (o *BinaryOperation) Pull(ctx context.Context, input *inputs.BinaryPullInpu
 			versionStr = binaries[0].Version
 		}
 
-		auditLog := logging.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(op.CacheDir)
 		_ = auditLog.LogOperation("binary.pull", map[string]interface{}{
 			"git_ref": *resolved.GitRef,
 			"version": versionStr,
@@ -153,7 +126,7 @@ func (o *BinaryOperation) Pull(ctx context.Context, input *inputs.BinaryPullInpu
 	// ---- Release download path ----
 	resolvedVersion := resolved.Version
 	if resolvedVersion == "" {
-		remoteVersions, err := o.svc.ListRemote(ctx, 20)
+		remoteVersions, err := op.Services.Binary.ListRemote(ctx, 20)
 		if err != nil {
 			return &errs.OperationResult{
 				Status:    "error",
@@ -173,8 +146,8 @@ func (o *BinaryOperation) Pull(ctx context.Context, input *inputs.BinaryPullInpu
 	}
 
 	normalized := binary.NormalizeVersion(resolvedVersion)
-	fcExists, _ := o.repo.GetByNameAndVersion(ctx, "firecracker", normalized)
-	jlExists, _ := o.repo.GetByNameAndVersion(ctx, "jailer", normalized)
+	fcExists, _ := op.Repos.Binary.GetByNameAndVersion(ctx, "firecracker", normalized)
+	jlExists, _ := op.Repos.Binary.GetByNameAndVersion(ctx, "jailer", normalized)
 	versionExists := fcExists != nil && jlExists != nil
 
 	if versionExists && !resolved.DownloadOverride {
@@ -185,7 +158,7 @@ func (o *BinaryOperation) Pull(ctx context.Context, input *inputs.BinaryPullInpu
 		}
 	}
 
-	noDefault, _ := o.repo.GetDefault(ctx, "firecracker")
+	noDefault, _ := op.Repos.Binary.GetDefault(ctx, "firecracker")
 	shouldSetDefault := resolved.SetDefault || noDefault == nil
 
 	// arch maps the current architecture to Firecracker's naming convention.
@@ -193,7 +166,7 @@ func (o *BinaryOperation) Pull(ctx context.Context, input *inputs.BinaryPullInpu
 
 	// Python passes bin_dir=resolved.bin_dir to BinaryService.download_firecracker();
 	// Go uses s.binDir from the Service struct (same value).
-	binaries, err := o.svc.DownloadFirecracker(ctx, resolvedVersion, arch, nil)
+	binaries, err := op.Services.Binary.DownloadFirecracker(ctx, resolvedVersion, arch, nil)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
@@ -204,13 +177,13 @@ func (o *BinaryOperation) Pull(ctx context.Context, input *inputs.BinaryPullInpu
 	}
 
 	for _, b := range binaries {
-		_ = o.repo.Upsert(ctx, b)
+		_ = op.Repos.Binary.Upsert(ctx, b)
 		if shouldSetDefault {
-			_ = o.repo.SetDefault(ctx, b.Name, b.Version, b.Path)
+			_ = op.Repos.Binary.SetDefault(ctx, b.Name, b.Version, b.Path)
 		}
 	}
 
-	auditLog := logging.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(op.CacheDir)
 	_ = auditLog.LogOperation("binary.pull", map[string]interface{}{"version": resolvedVersion}, "")
 
 	return &errs.OperationResult{
@@ -221,12 +194,12 @@ func (o *BinaryOperation) Pull(ctx context.Context, input *inputs.BinaryPullInpu
 	}
 }
 
-// Remove removes binaries by identifiers.
+// BinaryRemove removes binaries by identifiers.
 // Matches Python's BinaryOperation.remove() exactly — resolves via BinaryRequest
 // then enriches with VM references. Each binary removal is wrapped in per-binary
 // error handling (matching Python's try/except (BinaryError, BinaryNotFoundError)).
-func (o *BinaryOperation) Remove(ctx context.Context, input *inputs.BinaryInput, force bool) *errs.BatchResult {
-	request := inputs.NewBinaryRequest(*input, o.repo)
+func (op *Operation) BinaryRemove(ctx context.Context, input *inputs.BinaryInput, force bool) *errs.BatchResult {
+	request := inputs.NewBinaryRequest(*input, op.Repos.Binary)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return &errs.BatchResult{
@@ -244,8 +217,8 @@ func (o *BinaryOperation) Remove(ctx context.Context, input *inputs.BinaryInput,
 	// Enrich binaries with VM references (matching Python's:
 	//   enriched = Resolver(repo, include=["vm"]).enrich(resolved.binaries)
 	enriched := resolved.Binaries
-	if o.enr != nil {
-		_ = o.enr.EnrichBinary(ctx, enriched)
+	if op.Enr != nil {
+		_ = op.Enr.EnrichBinary(ctx, enriched)
 	}
 
 	items := make([]errs.OperationResult, 0)
@@ -253,7 +226,7 @@ func (o *BinaryOperation) Remove(ctx context.Context, input *inputs.BinaryInput,
 	for _, bin := range enriched {
 		// Python: svc.remove(binary, force=force)
 		// Go: svc.Remove returns (*BinaryItem, error)
-		if _, err := o.svc.Remove(ctx, bin, force); err != nil {
+		if _, err := op.Services.Binary.Remove(ctx, bin, force); err != nil {
 			items = append(items, errs.OperationResult{
 				Status:    "error",
 				Code:      "binary.remove_failed",
@@ -264,7 +237,7 @@ func (o *BinaryOperation) Remove(ctx context.Context, input *inputs.BinaryInput,
 			continue
 		}
 
-		auditLog := logging.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(op.CacheDir)
 		_ = auditLog.LogOperation("binary.remove", map[string]interface{}{
 			"id":      bin.ID,
 			"name":    bin.Name,
@@ -282,11 +255,11 @@ func (o *BinaryOperation) Remove(ctx context.Context, input *inputs.BinaryInput,
 	return &errs.BatchResult{Items: items}
 }
 
-// RemoveByVersion removes both firecracker and jailer for a version.
+// BinaryRemoveByVersion removes both firecracker and jailer for a version.
 // Matches Python's BinaryOperation.remove_by_version() exactly — wraps the
 // entire flow in try/except (BinaryError, BinaryNotFoundError).
-func (o *BinaryOperation) RemoveByVersion(ctx context.Context, version string, force bool) *errs.OperationResult {
-	resolver := binary.NewResolver(o.repo)
+func (op *Operation) BinaryRemoveByVersion(ctx context.Context, version string, force bool) *errs.OperationResult {
+	resolver := binary.NewResolver(op.Repos.Binary)
 
 	normalized := binary.NormalizeVersion(version)
 
@@ -314,7 +287,7 @@ func (o *BinaryOperation) RemoveByVersion(ctx context.Context, version string, f
 	//   enriched = Resolver(repo, include=["vm"]).enrich(binaries_to_remove)
 	for _, bin := range binariesToRemove {
 		if bin.VMs == nil {
-			vms, err := o.vmRepo.FindByBinaryID(ctx, bin.ID)
+			vms, err := op.Repos.VM.FindByBinaryID(ctx, bin.ID)
 			if err == nil && len(vms) > 0 {
 				for _, vm := range vms {
 					bin.VMs = append(bin.VMs, vm)
@@ -325,7 +298,7 @@ func (o *BinaryOperation) RemoveByVersion(ctx context.Context, version string, f
 
 	for _, bin := range binariesToRemove {
 		// Python: svc.remove(binary, force=force) — returns (*BinaryItem, error)
-		if _, err := o.svc.Remove(ctx, bin, force); err != nil {
+		if _, err := op.Services.Binary.Remove(ctx, bin, force); err != nil {
 			return &errs.OperationResult{
 				Status:    "error",
 				Code:      "binary.remove_failed",
@@ -333,7 +306,7 @@ func (o *BinaryOperation) RemoveByVersion(ctx context.Context, version string, f
 				Exception: err,
 			}
 		}
-		auditLog := logging.NewAuditLog(o.cacheDir)
+		auditLog := logging.NewAuditLog(op.CacheDir)
 		_ = auditLog.LogOperation("binary.remove", map[string]interface{}{
 			"id":      bin.ID,
 			"name":    bin.Name,
@@ -348,21 +321,21 @@ func (o *BinaryOperation) RemoveByVersion(ctx context.Context, version string, f
 	}
 }
 
-// ListAll returns all local binaries.
+// BinaryListAll returns all local binaries.
 // Matches Python's BinaryOperation.list_all(remote=False) exactly.
-func (o *BinaryOperation) ListAll(ctx context.Context) ([]*model.BinaryItem, error) {
-	return o.svc.ListAll(ctx, false, true)
+func (op *Operation) BinaryListAll(ctx context.Context) ([]*model.BinaryItem, error) {
+	return op.Services.Binary.ListAll(ctx, false, true)
 }
 
-// ListRemote returns available remote versions.
+// BinaryListRemote returns available remote versions.
 // Matches Python's BinaryOperation.list_all(remote=True) exactly.
 // When limit <= 0, reads the default from SettingsService like Python:
 //
 //	SettingsService.resolve(Database(), "defaults.binary", "remote_version_limit")
-func (o *BinaryOperation) ListRemote(ctx context.Context, limit int) ([]string, error) {
+func (op *Operation) BinaryListRemote(ctx context.Context, limit int) ([]string, error) {
 	if limit <= 0 {
-		if o.settingsSvc != nil {
-			rawLimit, _ := o.settingsSvc.Get(ctx, "defaults.binary", "remote_version_limit")
+		if op.Services.Config != nil {
+			rawLimit, _ := op.Services.Config.Get(ctx, "defaults.binary", "remote_version_limit")
 			if rawLimit != nil {
 				switch v := rawLimit.(type) {
 				case int:
@@ -387,14 +360,14 @@ func (o *BinaryOperation) ListRemote(ctx context.Context, limit int) ([]string, 
 			limit = 20
 		}
 	}
-	return o.svc.ListRemote(ctx, limit)
+	return op.Services.Binary.ListRemote(ctx, limit)
 }
 
-// Get returns binaries by identifier.
+// BinaryGet returns binaries by identifier.
 // Matches Python's BinaryOperation.get() exactly — resolves via BinaryRequest
 // with multi-identifier resolution.
-func (o *BinaryOperation) Get(ctx context.Context, input *inputs.BinaryInput) ([]*model.BinaryItem, error) {
-	request := inputs.NewBinaryRequest(*input, o.repo)
+func (op *Operation) BinaryGet(ctx context.Context, input *inputs.BinaryInput) ([]*model.BinaryItem, error) {
+	request := inputs.NewBinaryRequest(*input, op.Repos.Binary)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return nil, err
@@ -402,11 +375,11 @@ func (o *BinaryOperation) Get(ctx context.Context, input *inputs.BinaryInput) ([
 	return resolved.Binaries, nil
 }
 
-// SetDefault sets a binary as default.
+// BinarySetDefault sets a binary as default.
 // Matches Python's BinaryOperation.set_default() exactly — resolves via BinaryRequest,
 // checks for ambiguous results, then delegates to BinaryController.
-func (o *BinaryOperation) SetDefault(ctx context.Context, input *inputs.BinaryInput) *errs.OperationResult {
-	request := inputs.NewBinaryRequest(*input, o.repo)
+func (op *Operation) BinarySetDefault(ctx context.Context, input *inputs.BinaryInput) *errs.OperationResult {
+	request := inputs.NewBinaryRequest(*input, op.Repos.Binary)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return &errs.OperationResult{
@@ -430,7 +403,7 @@ func (o *BinaryOperation) SetDefault(ctx context.Context, input *inputs.BinaryIn
 
 	// Use BinaryController for the default-setting operation, matching Python:
 	// controller = BinaryController(entity=binary, repo=repo); controller.set_default()
-	ctrl, err := binary.NewController(ctx, bin, o.repo)
+	ctrl, err := binary.NewController(ctx, bin, op.Repos.Binary)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
@@ -449,7 +422,7 @@ func (o *BinaryOperation) SetDefault(ctx context.Context, input *inputs.BinaryIn
 		}
 	}
 
-	auditLog := logging.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(op.CacheDir)
 	_ = auditLog.LogOperation("binary.set_default", map[string]interface{}{
 		"id":      bin.ID,
 		"name":    bin.Name,
@@ -464,12 +437,12 @@ func (o *BinaryOperation) SetDefault(ctx context.Context, input *inputs.BinaryIn
 	}
 }
 
-// EnsureDefault ensures a default Firecracker binary exists.
+// BinaryEnsureDefault ensures a default Firecracker binary exists.
 // Matches Python's BinaryOperation.ensure_default() exactly — wraps the entire
 // flow in try/except BinaryError and uses PEP 440 version sorting via
 // packaging.version.Version (replicated as a PEP 440-compatible sort).
-func (o *BinaryOperation) EnsureDefault(ctx context.Context) *errs.OperationResult {
-	local, err := o.svc.ListAll(ctx, true, true)
+func (op *Operation) BinaryEnsureDefault(ctx context.Context) *errs.OperationResult {
+	local, err := op.Services.Binary.ListAll(ctx, true, true)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
@@ -486,7 +459,7 @@ func (o *BinaryOperation) EnsureDefault(ctx context.Context) *errs.OperationResu
 		}
 	}
 
-	default_, _ := o.svc.GetDefaultFirecracker(ctx)
+	default_, _ := op.Services.Binary.GetDefaultFirecracker(ctx)
 	if default_ != nil {
 		return &errs.OperationResult{
 			Status:  "skipped",
@@ -517,7 +490,7 @@ func (o *BinaryOperation) EnsureDefault(ctx context.Context) *errs.OperationResu
 	})
 	latest := firecrackerBins[0]
 
-	ctrl, err := binary.NewController(ctx, latest, o.repo)
+	ctrl, err := binary.NewController(ctx, latest, op.Repos.Binary)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
@@ -536,7 +509,7 @@ func (o *BinaryOperation) EnsureDefault(ctx context.Context) *errs.OperationResu
 		}
 	}
 
-	auditLog := logging.NewAuditLog(o.cacheDir)
+	auditLog := logging.NewAuditLog(op.CacheDir)
 	_ = auditLog.LogOperation("binary.ensure_default", map[string]interface{}{
 		"id":      latest.ID,
 		"name":    latest.Name,

@@ -4,33 +4,14 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
 	"mvmctl/internal/core/logs"
-	"mvmctl/internal/core/vm"
 	"mvmctl/internal/infra"
 	"mvmctl/pkg/api/inputs"
 )
 
-// LogOperation provides log viewing orchestration.
-// Matches Python's LogOperation exactly.
-type LogOperation struct {
-	vmRepo   vm.Repository
-	db       *sql.DB
-	cacheDir string
-}
-
-// NewLogOperation creates a LogOperation.
-func NewLogOperation(vmRepo vm.Repository, db *sql.DB, cacheDir string) *LogOperation {
-	return &LogOperation{
-		vmRepo:   vmRepo,
-		db:       db,
-		cacheDir: cacheDir,
-	}
-}
-
-// Stream streams log lines for a VM synchronously via callback.
+// LogStream streams log lines for a VM synchronously via callback.
 // Matches Python's LogOperation.stream() -> Generator[str] exactly.
 //
 // Python:
@@ -40,7 +21,7 @@ func NewLogOperation(vmRepo vm.Repository, db *sql.DB, cacheDir string) *LogOper
 //
 // Go equivalent:
 //
-//	LogOperation.Stream(ctx, inputs, func(line string) error {
+//	op.LogStream(ctx, inputs, func(line string) error {
 //	    fmt.Println(line)
 //	    return nil
 //	})
@@ -52,15 +33,15 @@ func NewLogOperation(vmRepo vm.Repository, db *sql.DB, cacheDir string) *LogOper
 // For "follow": resolves input, reads from the channel returned by the controller's
 // FollowSync, invoking the callback for each line as it is received. Blocks until
 // the channel is closed (ctx cancelled or error occurs).
-func (o *LogOperation) Stream(ctx context.Context, input *inputs.LogInput, callback func(string) error) error {
+func (op *Operation) LogStream(ctx context.Context, input *inputs.LogInput, callback func(string) error) error {
 	// Python: resolved = LogRequest(inputs=inputs).resolve()
 	//         controller = LogController(resolved.vm)
 	//         if resolved.follow:
 	//             yield from controller.follow(...)
 	//         else:
 	//             yield from controller.show(...)
-	req := inputs.NewLogRequest(*input, o.db)
-	resolved, err := req.Resolve(ctx, o.vmRepo)
+	req := inputs.NewLogRequest(*input, op.DB)
+	resolved, err := req.Resolve(ctx, op.Repos.VM)
 	if err != nil {
 		return err
 	}
@@ -101,7 +82,7 @@ func (o *LogOperation) Stream(ctx context.Context, input *inputs.LogInput, callb
 	return nil
 }
 
-// StreamChannel streams log lines for a VM via a channel.
+// LogStreamChannel streams log lines for a VM via a channel.
 // Provides a goroutine+channel based version for callers that want asynchronous
 // channel-based consumption rather than synchronous callback iteration.
 //
@@ -112,9 +93,9 @@ func (o *LogOperation) Stream(ctx context.Context, input *inputs.LogInput, callb
 // For "show": goroutine reads lines, sends them to channel, closes channel.
 // For "follow": goroutine follows the log file, sending lines as they arrive,
 // until ctx is cancelled.
-func (o *LogOperation) StreamChannel(ctx context.Context, input *inputs.LogInput) (<-chan string, error) {
-	req := inputs.NewLogRequest(*input, o.db)
-	resolved, err := req.Resolve(ctx, o.vmRepo)
+func (op *Operation) LogStreamChannel(ctx context.Context, input *inputs.LogInput) (<-chan string, error) {
+	req := inputs.NewLogRequest(*input, op.DB)
+	resolved, err := req.Resolve(ctx, op.Repos.VM)
 	if err != nil {
 		return nil, err
 	}

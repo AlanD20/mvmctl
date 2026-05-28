@@ -13,13 +13,12 @@ import (
 // completeVMNames provides shell completion for VM identifiers.
 // Matches Python's _complete_vm_names() in cli/_completion.py.
 func completeVMNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	apiOp := vmAPIRef
-	if apiOp == nil {
+	if opRef == nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 
 	// Use the existing List method with nil filter (= all VMs)
-	vms := apiOp.List(context.Background(), nil)
+	vms := opRef.VMList(context.Background(), nil)
 	if len(vms) == 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -48,7 +47,7 @@ func completeVMNames(cmd *cobra.Command, args []string, toComplete string) ([]st
 	return results, cobra.ShellCompDirectiveNoFileComp
 }
 
-func NewSSHCmd(sshAPI *api.SSHOperation) *cobra.Command {
+func NewSSHCmd(op *api.Operation) *cobra.Command {
 	var userFlag string
 	var key string
 	var cmdStr string
@@ -99,7 +98,7 @@ Examples:
 				input.Timeout = &timeout
 			}
 
-			result := sshAPI.Connect(cmd.Context(), input)
+			result := op.SSHConnect(cmd.Context(), input)
 			if result.Status == "error" {
 				cli.Error(result.Message)
 				return fmt.Errorf("%s", result.Message)
