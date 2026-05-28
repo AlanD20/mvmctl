@@ -194,7 +194,7 @@ func (o *NetworkOperation) Remove(ctx context.Context, input *inputs.NetworkInpu
 	// Match Python: service.remove(network, force=force) raises NetworkError on failure.
 	// Python catches the first error and returns it immediately — we match by iterating
 	// once and returning the first error encountered.
-	results := make([]string, 0)
+	var results []string
 	for _, net := range resolved.Networks {
 		if err := o.svc.Remove(ctx, net, force); err != nil {
 			errorMsg := err.Error()
@@ -546,7 +546,7 @@ func (o *NetworkOperation) Prune(ctx context.Context, dryRun bool, includeAll bo
 		defaultNetName = s
 	}
 
-	removed := make([]string, 0)
+	var removed []string
 	for _, network := range networks {
 		if !includeAll {
 			if network.Name == defaultNetName {
@@ -609,7 +609,7 @@ func (o *NetworkOperation) CreateDefaultNetwork(ctx context.Context) *errs.Opera
 	internalNetwork, _ := o.repo.GetByName(ctx, defaultName)
 	if internalNetwork == nil {
 		outboundIf := infranet.DetectOutboundInterface()
-		natGateways := make([]string, 0)
+		var natGateways []string
 		if outboundIf != "" {
 			natGateways = []string{outboundIf}
 		}

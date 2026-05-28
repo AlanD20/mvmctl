@@ -53,29 +53,26 @@ type ResolvedKernelImportInput struct {
 // Resolve and validate kernel import inputs.
 type KernelImportRequest struct {
 	db      *sql.DB
-	_input  KernelImportInput
-	_result *ResolvedKernelImportInput
+	input  KernelImportInput
+	result *ResolvedKernelImportInput
 }
 
 // NewKernelImportRequest creates a new KernelImportRequest.
 func NewKernelImportRequest(inputs KernelImportInput, db *sql.DB) *KernelImportRequest {
 	return &KernelImportRequest{
 		db:     db,
-		_input: inputs,
+		input: inputs,
 	}
 }
 
 // Result returns the resolved input, or nil if resolve() has not been called.
-func (r *KernelImportRequest) Result() *ResolvedKernelImportInput {
-	return r._result
-}
 
 // Resolve resolves all input fields to concrete values and validates.
 // Matches Python's KernelImportRequest.resolve().
 func (r *KernelImportRequest) Resolve(ctx context.Context) (*ResolvedKernelImportInput, error) {
 	// Expand and resolve path — Python: source_path = self._inputs.path.expanduser().resolve()
 	// Python's Path.resolve() follows symlinks and resolves to an absolute path.
-	sourcePath := r._input.Path
+	sourcePath := r.input.Path
 	if strings.HasPrefix(sourcePath, "~") {
 		home, err := os.UserHomeDir()
 		if err == nil {
@@ -101,8 +98,8 @@ func (r *KernelImportRequest) Resolve(ctx context.Context) (*ResolvedKernelImpor
 	//   else → arch = str(SettingsService.resolve(...))
 	//          if not arch → arch = platform.machine()
 	var arch string
-	if r._input.Arch != nil && *r._input.Arch != "" {
-		arch = *r._input.Arch
+	if r.input.Arch != nil && *r.input.Arch != "" {
+		arch = *r.input.Arch
 	} else if parsedArch != "" && parsedArch != "-" {
 		arch = parsedArch
 	} else {
@@ -121,20 +118,20 @@ func (r *KernelImportRequest) Resolve(ctx context.Context) (*ResolvedKernelImpor
 	//   if self._inputs.version is not None → version = self._inputs.version
 	//   else → version = parsed.version if parsed.version != "-" else "unknown"
 	var version string
-	if r._input.Version != nil && *r._input.Version != "" {
-		version = *r._input.Version
+	if r.input.Version != nil && *r.input.Version != "" {
+		version = *r.input.Version
 	} else if parsedVersion != "" && parsedVersion != "-" {
 		version = parsedVersion
 	} else {
 		version = "unknown"
 	}
 
-	r._result = &ResolvedKernelImportInput{
-		Name:       r._input.Name,
+	r.result = &ResolvedKernelImportInput{
+		Name:       r.input.Name,
 		Path:       sourcePath,
 		Version:    version,
 		Arch:       arch,
-		SetDefault: r._input.SetDefault,
+		SetDefault: r.input.SetDefault,
 	}
 
 	// Validate
@@ -142,12 +139,12 @@ func (r *KernelImportRequest) Resolve(ctx context.Context) (*ResolvedKernelImpor
 		return nil, err
 	}
 
-	return r._result, nil
+	return r.result, nil
 }
 
 // ensureValidate matches Python's KernelImportRequest.ensure_validate() exactly.
 func (r *KernelImportRequest) ensureValidate() error {
-	if r._result == nil {
+	if r.result == nil {
 		return &errs.DomainError{
 			Code:    errs.CodeKernelBuildFailed,
 			Op:      "kernel_import",
@@ -156,41 +153,41 @@ func (r *KernelImportRequest) ensureValidate() error {
 		}
 	}
 
-	// 1. Path exists — Python: if not self._result.path.exists()
-	if _, err := os.Stat(r._result.Path); os.IsNotExist(err) {
+	// 1. Path exists — Python: if not self.result.path.exists()
+	if _, err := os.Stat(r.result.Path); os.IsNotExist(err) {
 		return &errs.DomainError{
 			Code:    errs.CodeKernelNotFound,
 			Op:      "kernel_import",
-			Message: fmt.Sprintf("Kernel file not found: %s", r._result.Path),
+			Message: fmt.Sprintf("Kernel file not found: %s", r.result.Path),
 			Class:   errs.ClassValidation,
 		}
 	}
 
-	// 2. Path is non-empty — Python: if self._result.path.stat().st_size == 0
-	fi, err := os.Stat(r._result.Path)
+	// 2. Path is non-empty — Python: if self.result.path.stat().st_size == 0
+	fi, err := os.Stat(r.result.Path)
 	if err == nil && fi.Size() == 0 {
 		return &errs.DomainError{
 			Code:    errs.CodeKernelNotFound,
 			Op:      "kernel_import",
-			Message: fmt.Sprintf("Kernel file is empty: %s", r._result.Path),
+			Message: fmt.Sprintf("Kernel file is empty: %s", r.result.Path),
 			Class:   errs.ClassValidation,
 		}
 	}
 
-	// 3. Arch is supported — Python: if self._result.arch not in FIRECRACKER_SUPPORTED_ARCH
+	// 3. Arch is supported — Python: if self.result.arch not in FIRECRACKER_SUPPORTED_ARCH
 	// Python: FIRECRACKER_SUPPORTED_ARCH = ["x86_64", "amd64", "aarch64", "arm64"]
 	validArchs := map[string]bool{"x86_64": true, "amd64": true, "aarch64": true, "arm64": true}
-	if !validArchs[r._result.Arch] {
+	if !validArchs[r.result.Arch] {
 		return &errs.DomainError{
 			Code:    errs.CodeKernelBuildFailed,
 			Op:      "kernel_import",
-			Message: fmt.Sprintf("Unknown arch: %s. Valid: x86_64, amd64, aarch64, arm64", r._result.Arch),
+			Message: fmt.Sprintf("Unknown arch: %s. Valid: x86_64, amd64, aarch64, arm64", r.result.Arch),
 			Class:   errs.ClassValidation,
 		}
 	}
 
-	// 4. Name is non-empty — Python: if not self._result.name
-	if r._result.Name == "" {
+	// 4. Name is non-empty — Python: if not self.result.name
+	if r.result.Name == "" {
 		return &errs.DomainError{
 			Code:    errs.CodeKernelBuildFailed,
 			Op:      "kernel_import",

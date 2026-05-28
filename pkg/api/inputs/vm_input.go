@@ -41,8 +41,8 @@ type ResolvedVMInput struct {
 // Python version creates VMResolver with include=["image","kernel","network","network.leases","volumes","binary"].
 type VMRequest struct {
 	db       *sql.DB
-	_input   VMInput
-	_result  *ResolvedVMInput
+	input   VMInput
+	result  *ResolvedVMInput
 	resolver *vm.Resolver
 	enricher *enricher.Enricher
 }
@@ -52,16 +52,13 @@ type VMRequest struct {
 func NewVMRequest(inputs VMInput, db *sql.DB, vmRepo vm.Repository, enricher *enricher.Enricher) *VMRequest {
 	return &VMRequest{
 		db:       db,
-		_input:   inputs,
+		input:   inputs,
 		resolver: vm.NewResolver(vmRepo),
 		enricher: enricher,
 	}
 }
 
 // Result returns the resolved input, or nil if resolve() has not been called.
-func (r *VMRequest) Result() *ResolvedVMInput {
-	return r._result
-}
 
 // Resolve resolves VM identifiers to VMInstanceItem records.
 // Matches Python's VMRequest.resolve().
@@ -70,7 +67,7 @@ func (r *VMRequest) Resolve(ctx context.Context) (*ResolvedVMInput, error) {
 		return nil, err
 	}
 
-	result := r.resolver.ResolveMany(ctx, r._input.Identifiers)
+	result := r.resolver.ResolveMany(ctx, r.input.Identifiers)
 	if result == nil {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeVMNotFound,
@@ -96,16 +93,16 @@ func (r *VMRequest) Resolve(ctx context.Context) (*ResolvedVMInput, error) {
 	}
 
 	force := false
-	if r._input.Force != nil {
-		force = *r._input.Force
+	if r.input.Force != nil {
+		force = *r.input.Force
 	}
 
-	r._result = &ResolvedVMInput{
+	r.result = &ResolvedVMInput{
 		VMs:   result.VMs,
 		Force: force,
 	}
 
-	return r._result, nil
+	return r.result, nil
 }
 
 // isMAC checks if identifier looks like a MAC address.
@@ -131,7 +128,7 @@ func isMAC(identifier string) bool {
 // validateIdentifiers validates each identifier based on detected type.
 // Matches Python's VMRequest._validate_identifiers().
 func (r *VMRequest) validateIdentifiers() error {
-	for _, identifier := range r._input.Identifiers {
+	for _, identifier := range r.input.Identifiers {
 		if isMAC(identifier) {
 			var macValidator validators.NetworkValidator
 			if err := macValidator.ValidateMAC(identifier); err != nil {

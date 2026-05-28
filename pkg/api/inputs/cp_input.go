@@ -74,15 +74,15 @@ type ResolvedCPInput struct {
 // Resolve CPInput against the database and filesystem.
 type CPRequest struct {
 	db      *sql.DB
-	_input  CPInput
-	_result *ResolvedCPInput
+	input  CPInput
+	result *ResolvedCPInput
 }
 
 // NewCPRequest creates a new CPRequest.
 func NewCPRequest(inputs CPInput, db *sql.DB) *CPRequest {
 	return &CPRequest{
 		db:     db,
-		_input: inputs,
+		input: inputs,
 	}
 }
 
@@ -97,15 +97,12 @@ func ParseVMPath(path string) (vmIdent, remotePath string) {
 }
 
 // Result returns the resolved input, or nil if resolve() has not been called.
-func (r *CPRequest) Result() *ResolvedCPInput {
-	return r._result
-}
 
 // Resolve resolves all inputs to explicit values.
 // Matches Python's CPRequest.resolve().
 func (r *CPRequest) Resolve(ctx context.Context, vmRepo vm.Repository, keyRepo key.Repository) (*ResolvedCPInput, error) {
-	sources := r._input.Sources
-	dstVM, dstPath := ParseVMPath(r._input.Dst)
+	sources := r.input.Sources
+	dstVM, dstPath := ParseVMPath(r.input.Dst)
 
 	var srcInfo, dstInfo *ResolvedCPInfo
 	var localPaths []string
@@ -176,15 +173,15 @@ func (r *CPRequest) Resolve(ctx context.Context, vmRepo vm.Repository, keyRepo k
 		}
 	}
 
-	r._result = &ResolvedCPInput{
+	r.result = &ResolvedCPInput{
 		Direction:  direction,
 		LocalPaths: localPaths,
 		SrcInfo:    srcInfo,
 		DstInfo:    dstInfo,
-		Force:      r._input.Force,
+		Force:      r.input.Force,
 	}
 
-	return r._result, nil
+	return r.result, nil
 }
 
 // resolveVMSide resolves a VM-side path to connection info.
@@ -246,8 +243,8 @@ func (r *CPRequest) resolveVM(ctx context.Context, identifier string, vmRepo vm.
 // resolveUser resolves the SSH user for copy.
 // Matches Python's CPRequest._resolve_user().
 func (r *CPRequest) resolveUser(ctx context.Context, vmEntity *model.VM) string {
-	if r._input.User != nil && *r._input.User != "" {
-		return *r._input.User
+	if r.input.User != nil && *r.input.User != "" {
+		return *r.input.User
 	}
 	if vmEntity.SSHUser != nil && *vmEntity.SSHUser != "" {
 		return *vmEntity.SSHUser
@@ -264,8 +261,8 @@ func (r *CPRequest) resolveUser(ctx context.Context, vmEntity *model.VM) string 
 func (r *CPRequest) resolveKey(ctx context.Context, vmEntity *model.VM, keyRepo key.Repository) (*string, error) {
 	keyResolver := key.NewResolver(keyRepo)
 
-	if r._input.Key != nil && *r._input.Key != "" {
-		keyStr := *r._input.Key
+	if r.input.Key != nil && *r.input.Key != "" {
+		keyStr := *r.input.Key
 
 		// Try as registered key name
 		keyItem, err := keyResolver.Resolve(ctx, keyStr)

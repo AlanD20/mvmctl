@@ -77,22 +77,19 @@ type ResolvedKernelPullRequest struct {
 // Resolve and validate kernel pull/build inputs.
 type KernelPullRequest struct {
 	db      *sql.DB
-	_input  KernelPullInput
-	_result *ResolvedKernelPullRequest
+	input  KernelPullInput
+	result *ResolvedKernelPullRequest
 }
 
 // NewKernelPullRequest creates a new KernelPullRequest.
 func NewKernelPullRequest(inputs KernelPullInput, db *sql.DB) *KernelPullRequest {
 	return &KernelPullRequest{
 		db:     db,
-		_input: inputs,
+		input: inputs,
 	}
 }
 
 // Result returns the resolved request, or nil if resolve() has not been called.
-func (r *KernelPullRequest) Result() *ResolvedKernelPullRequest {
-	return r._result
-}
 
 // Resolve resolves all inputs to explicit values.
 // Matches Python's KernelPullRequest.resolve() exactly.
@@ -101,8 +98,8 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 	//   if self._inputs.version is not None → version = self._inputs.version
 	//   else → version = SettingsService.resolve(self._db, "defaults.kernel", "version")
 	var version *string
-	if r._input.Version != nil {
-		v := *r._input.Version
+	if r.input.Version != nil {
+		v := *r.input.Version
 		version = &v
 	} else {
 		v, err := config.Resolve(ctx, r.db, "defaults.kernel", "version")
@@ -114,7 +111,7 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 
 	// Python: if self._inputs.kernel_type == "firecracker": version = None
 	//         elif version is not None: version = version.removeprefix("v")
-	if r._input.KernelType == "firecracker" {
+	if r.input.KernelType == "firecracker" {
 		version = nil
 	} else if version != nil {
 		v := strings.TrimPrefix(*version, "v")
@@ -125,8 +122,8 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 	//   if self._inputs.arch is not None → arch = self._inputs.arch
 	//   else → arch = SettingsService.resolve(self._db, "defaults.kernel", "arch")
 	var arch string
-	if r._input.Arch != nil {
-		arch = *r._input.Arch
+	if r.input.Arch != nil {
+		arch = *r.input.Arch
 	} else {
 		v, err := config.Resolve(ctx, r.db, "defaults.kernel", "arch")
 		if err == nil && v != nil {
@@ -141,8 +138,8 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 	//   else → jobs = SettingsService.resolve(self._db, "defaults.kernel", "build_jobs")
 	//   if jobs is None → jobs = os.cpu_count() or SettingsService.resolve(...)
 	var jobs int
-	if r._input.Jobs != nil {
-		jobs = *r._input.Jobs
+	if r.input.Jobs != nil {
+		jobs = *r.input.Jobs
 	} else {
 		v, err := config.Resolve(ctx, r.db, "defaults.kernel", "build_jobs")
 		if err == nil && v != nil {
@@ -171,7 +168,7 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 	// Resolve features from comma-separated input string — Python:
 	//   features_raw = (self._inputs.features or "").strip()
 	//   features_list = ([f.strip() for f in features_raw.split(",") if f.strip()] if features_raw else [])
-	featuresRaw := strings.TrimSpace(r._input.Features)
+	featuresRaw := strings.TrimSpace(r.input.Features)
 	var featuresList []string
 	if featuresRaw != "" {
 		for _, f := range strings.Split(featuresRaw, ",") {
@@ -205,20 +202,20 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 
 	// Resolve output_dir — Python: self._inputs.output_dir or CacheUtils.get_kernels_dir()
 	outputDir := infra.GetKernelsDir()
-	if r._input.OutputDir != nil && *r._input.OutputDir != "" {
-		outputDir = *r._input.OutputDir
+	if r.input.OutputDir != nil && *r.input.OutputDir != "" {
+		outputDir = *r.input.OutputDir
 	}
 
-	r._result = &ResolvedKernelPullRequest{
-		KernelType:   r._input.KernelType,
+	r.result = &ResolvedKernelPullRequest{
+		KernelType:   r.input.KernelType,
 		Version:      version,
 		Arch:         arch,
 		OutputDir:    outputDir,
 		Jobs:         jobs,
-		KeepBuildDir: r._input.KeepBuildDir,
-		CleanBuild:   r._input.CleanBuild,
-		KernelConfig: r._input.KernelConfig,
-		SetDefault:   r._input.SetDefault,
+		KeepBuildDir: r.input.KeepBuildDir,
+		CleanBuild:   r.input.CleanBuild,
+		KernelConfig: r.input.KernelConfig,
+		SetDefault:   r.input.SetDefault,
 		Features:     featuresList,
 	}
 
@@ -227,11 +224,11 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 		return nil, err
 	}
 
-	return r._result, nil
+	return r.result, nil
 }
 
 func (r *KernelPullRequest) ensureValidate() error {
-	if r._result == nil {
+	if r.result == nil {
 		return &errs.DomainError{
 			Code:    errs.CodeKernelBuildFailed,
 			Op:      "kernel_pull",
@@ -242,29 +239,29 @@ func (r *KernelPullRequest) ensureValidate() error {
 
 	// 1. Validate kernel type — Python:
 	//    valid_types = ("firecracker", "official")
-	//    if self._result.kernel_type not in valid_types:
+	//    if self.result.kernel_type not in valid_types:
 	validTypes := map[string]bool{"firecracker": true, "official": true}
-	if !validTypes[r._result.KernelType] {
+	if !validTypes[r.result.KernelType] {
 		return &errs.DomainError{
 			Code:    errs.CodeKernelBuildFailed,
 			Op:      "kernel_pull",
-			Message: fmt.Sprintf("Unsupported kernel type: %s. Valid types: firecracker, official", r._result.KernelType),
+			Message: fmt.Sprintf("Unsupported kernel type: %s. Valid types: firecracker, official", r.result.KernelType),
 			Class:   errs.ClassValidation,
 		}
 	}
 
 	// 2. Validate version (semver-like: 5.10, 6.1.0, v6.1) — Python:
-	//    version = self._result.version
+	//    version = self.result.version
 	//    if version:
 	//        stripped = version.removeprefix("v")
 	//        if not re.fullmatch(r"\d+(\.\d+)*", stripped):
-	if r._result.Version != nil {
-		stripped := strings.TrimPrefix(*r._result.Version, "v")
+	if r.result.Version != nil {
+		stripped := strings.TrimPrefix(*r.result.Version, "v")
 		if !isValidVersion(stripped) {
 			return &errs.DomainError{
 				Code:    errs.CodeKernelBuildFailed,
 				Op:      "kernel_pull",
-				Message: fmt.Sprintf("Invalid kernel version: '%s'. Expected format like '5.10', '6.1.0', or 'v6.1'", *r._result.Version),
+				Message: fmt.Sprintf("Invalid kernel version: '%s'. Expected format like '5.10', '6.1.0', or 'v6.1'", *r.result.Version),
 				Class:   errs.ClassValidation,
 			}
 		}
@@ -272,25 +269,25 @@ func (r *KernelPullRequest) ensureValidate() error {
 
 	// 3. Validate architecture — Python:
 	//    valid_archs = ("x86_64", "amd64", "arm64", "aarch64")
-	//    if self._result.arch not in valid_archs:
+	//    if self.result.arch not in valid_archs:
 	validArchs := map[string]bool{"x86_64": true, "amd64": true, "arm64": true, "aarch64": true}
-	if !validArchs[r._result.Arch] {
+	if !validArchs[r.result.Arch] {
 		return &errs.DomainError{
 			Code:    errs.CodeKernelBuildFailed,
 			Op:      "kernel_pull",
-			Message: fmt.Sprintf("Unsupported architecture: %s. Valid architectures: x86_64, amd64, arm64, aarch64", r._result.Arch),
+			Message: fmt.Sprintf("Unsupported architecture: %s. Valid architectures: x86_64, amd64, arm64, aarch64", r.result.Arch),
 			Class:   errs.ClassValidation,
 		}
 	}
 
 	// 4. Validate output directory (must exist or be creatable) — Python:
 	//    if output_dir.exists() and not output_dir.is_dir():
-	if r._result.OutputDir != "" {
-		if fi, err := os.Stat(r._result.OutputDir); err == nil && !fi.IsDir() {
+	if r.result.OutputDir != "" {
+		if fi, err := os.Stat(r.result.OutputDir); err == nil && !fi.IsDir() {
 			return &errs.DomainError{
 				Code:    errs.CodeKernelBuildFailed,
 				Op:      "kernel_pull",
-				Message: fmt.Sprintf("Output path exists but is not a directory: %s", r._result.OutputDir),
+				Message: fmt.Sprintf("Output path exists but is not a directory: %s", r.result.OutputDir),
 				Class:   errs.ClassValidation,
 			}
 		}
@@ -298,11 +295,11 @@ func (r *KernelPullRequest) ensureValidate() error {
 
 	// 5. Validate build jobs (positive integer) — Python:
 	//    if jobs <= 0:
-	if r._result.Jobs <= 0 {
+	if r.result.Jobs <= 0 {
 		return &errs.DomainError{
 			Code:    errs.CodeKernelBuildFailed,
 			Op:      "kernel_pull",
-			Message: fmt.Sprintf("Invalid build jobs: %d. Must be a positive integer.", r._result.Jobs),
+			Message: fmt.Sprintf("Invalid build jobs: %d. Must be a positive integer.", r.result.Jobs),
 			Class:   errs.ClassValidation,
 		}
 	}

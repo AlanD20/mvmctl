@@ -198,7 +198,7 @@ func (o *VolumeOperation) Remove(ctx context.Context, input *inputs.VolumeInput,
 			vmItem, _ := o.vmRepo.Get(ctx, *vol.VMID)
 			if vmItem != nil && vmItem.VolumeIDs != nil {
 				// Remove this volume from VM's volume_ids
-				newIDs := make([]string, 0)
+				var newIDs []string
 				for _, vid := range vmItem.VolumeIDs {
 					if vid != vol.ID {
 						newIDs = append(newIDs, vid)

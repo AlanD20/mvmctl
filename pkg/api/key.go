@@ -84,8 +84,7 @@ func (o *KeyOperation) resolveKeys(ctx context.Context, input *KeyInput) ([]*mod
 // Matches Python's KeyOperation.list_all() exactly — passes keys_dir only,
 // no verify parameter (matching Python's service.list_all(keys_dir) call).
 func (o *KeyOperation) ListAll(ctx context.Context) ([]*model.SSHKeyItem, error) {
-	keysDir := filepath.Join(o.cacheDir, "keys")
-	return o.svc.List(ctx, keysDir, false)
+	return o.svc.List(ctx, false)
 }
 
 // Get returns a single key by name or ID.
@@ -241,8 +240,7 @@ func (o *KeyOperation) Add(ctx context.Context, name string, pubKeyPath string, 
 		}
 	}
 
-	keysDir := filepath.Join(o.cacheDir, "keys")
-	keyItem, err := o.svc.AddKey(ctx, name, pubKeyPath, pubKeyContent, keysDir, overwrite)
+	keyItem, err := o.svc.AddKey(ctx, name, pubKeyPath, pubKeyContent, overwrite)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",

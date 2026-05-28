@@ -82,7 +82,7 @@ func (o *ImageOperation) Prune(ctx context.Context, dryRun bool, includeAll bool
 		}
 	}
 
-	removed := make([]string, 0)
+	var removed []string
 	for _, img := range allImages {
 		if !includeAll {
 			if img.ID == defaultID {
@@ -393,7 +393,7 @@ func (o *ImageOperation) Import(ctx context.Context, input *inputs.ImageImportIn
 		}
 	}
 
-	importWarnings := make([]string, 0)
+	var importWarnings []string
 	detected := image.DetectImageFormat(input.SourcePath)
 	if detected != "" && detected != format {
 		importWarnings = append(importWarnings,

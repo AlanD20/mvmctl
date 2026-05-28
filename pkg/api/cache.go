@@ -90,7 +90,7 @@ func (o *CacheOperation) SessionHasGroup() bool {
 
 func (o *CacheOperation) InitAll(ctx context.Context, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
 	cacheDir := o.cacheDir
-	created := make([]string, 0)
+	var created []string
 
 	// Ensure DB schema exists before any DB writes. (Python: Database().migrate())
 	if o.db != nil {
@@ -296,8 +296,8 @@ func (o *CacheOperation) PruneAll(ctx context.Context, dryRun bool, includeAll b
 		}
 	}
 
-	prunedIDs := make([]string, 0)
-	failedIDs := make([]string, 0)
+	var prunedIDs []string
+	var failedIDs []string
 
 	for _, opResult := range []*errs.OperationResult{
 		o.PruneVMs(ctx, dryRun, includeAll),
@@ -377,7 +377,7 @@ func (o *CacheOperation) Clean(ctx context.Context, dryRun bool) *errs.Operation
 		orphanProcesses := o.cacheSvc.ScanOrphanProcesses(ctx)
 
 		if len(failedIDs) > 0 || len(orphanProcesses) > 0 {
-			messages := make([]string, 0)
+			var messages []string
 			if len(failedIDs) > 0 {
 				messages = append(messages, fmt.Sprintf("Failed to remove %d VM(s): %s",
 					len(failedIDs), strings.Join(failedIDs, ", ")))

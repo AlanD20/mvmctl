@@ -82,7 +82,7 @@ func (o *KernelOperation) Prune(ctx context.Context, dryRun bool, includeAll boo
 		}
 	}
 
-	removed := make([]string, 0)
+	var removed []string
 	for _, kernel := range allKernels {
 		if !includeAll {
 			if kernel.ID == defaultID {

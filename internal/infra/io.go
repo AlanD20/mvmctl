@@ -543,27 +543,6 @@ func ReadInt(path string, defaultVal int) int {
 	return val
 }
 
-// CopyFile copies src to dst, preserving source file permissions
-// (like Python's shutil.copy2).
-func CopyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return fmt.Errorf("read source: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-		return fmt.Errorf("create dest dir: %w", err)
-	}
-	// Preserve source file permissions (like Python's shutil.copy2)
-	fi, err := os.Stat(src)
-	if err != nil {
-		return fmt.Errorf("stat source: %w", err)
-	}
-	if err := os.WriteFile(dst, data, fi.Mode().Perm()); err != nil {
-		return fmt.Errorf("write dest: %w", err)
-	}
-	return nil
-}
-
 // CopyPreservingMetadata copies a file preserving both permissions and timestamps,
 // matching Python's shutil.copy2() behavior. Uses io.Copy for streaming (no full
 // memory load) and is appropriate for large files.

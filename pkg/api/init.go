@@ -416,7 +416,7 @@ func (o *InitOperation) binaryNeedsInteraction(ctx context.Context) (InitStepRes
 	//         except BinaryError: versions = []
 	remote, err := o.binOp.ListRemote(ctx, 5)
 
-	versions := make([]string, 0)
+	var versions []string
 	if err == nil {
 		versions = remote
 	}

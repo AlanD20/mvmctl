@@ -12,6 +12,7 @@ import (
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
+	"mvmctl/internal/infra/version"
 )
 
 // RELATIONS defines the cross-domain relations for kernel enrichment.
@@ -115,6 +116,13 @@ func (r *Resolver) ByVersionType(ctx context.Context, version, kernelType string
 	return enriched[0], nil
 }
 
+// ByNameVersion resolves a kernel by name and version.
+// The name is the kernel type (e.g., "official", "kvib") — delegates to ByVersionType.
+// Matches binary resolver's ByNameVersion for uniform Selector handling.
+func (r *Resolver) ByNameVersion(ctx context.Context, name, ver string) (*model.KernelItem, error) {
+	return r.ByVersionType(ctx, ver, name)
+}
+
 // ByType resolves by kernel type name.
 // Matches Python's Resolver.by_type().
 func (r *Resolver) ByType(ctx context.Context, typeStr string) (*model.KernelItem, error) {
@@ -143,9 +151,15 @@ func (r *Resolver) GetDefault(ctx context.Context) (*model.KernelItem, error) {
 	return enriched[0], nil
 }
 
-// Resolve resolves a kernel by ID prefix, "type:version" syntax, or file path.
+// Resolve resolves a kernel by ID prefix, "[type:]version" selector, or file path.
 // Matches Python's Resolver.resolve().
 func (r *Resolver) Resolve(ctx context.Context, value string) (*model.KernelItem, error) {
+	// Try "name:version" selector format first (matches binary resolver pattern)
+	name, ver := version.ParseSelector(value)
+	if name != "" && ver != "" {
+		return r.ByNameVersion(ctx, name, ver)
+	}
+
 	// Fast-path: absolute path -> skip DB queries entirely.
 	// Python: path = Path(value).expanduser() — expand ~ before checking existence.
 	if strings.HasPrefix(value, "/") {
@@ -154,12 +168,6 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.KernelItem
 			return r.ItemFromPath(path), nil
 		}
 		return nil, KernelNotFoundError(fmt.Sprintf("Kernel not found at path: '%s'", value))
-	}
-
-	// Try "type:version" syntax (e.g. "official:6.19.9")
-	prefix, rest := parseSelector(value)
-	if prefix != "" {
-		return r.ByVersionType(ctx, rest, prefix)
 	}
 
 	// Try by ID prefix without enrichment (matching Python's resolve flow)
@@ -186,6 +194,7 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.KernelItem
 // ResolveMany resolves multiple kernel identifiers.
 // Matches Python's Resolver.resolve_many().
 func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *ResolveResult {
+	// Dedup input identifiers (e.g. duplicate CLI args) before processing.
 	uniqueIDs := infra.Dedup(identifiers)
 
 	var items []*model.KernelItem
@@ -197,6 +206,9 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *Resol
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("%s: %s", identifier, err))
 		} else if !resolvedIDs[item.ID] {
+			// Dedup by DB record ID — different input identifiers may
+			// resolve to the same DB record (e.g. "kernel" and
+			// "kernel:6.1" when only v6.1 exists).
 			resolvedIDs[item.ID] = true
 			items = append(items, item)
 		}
@@ -259,24 +271,4 @@ func (r *Resolver) byIDRaw(ctx context.Context, kernelID string) (*model.KernelI
 	return matches[0], nil
 }
 
-// parseSelector splits a "type:version" selector into its two parts.
-// Matches Python's VersionResolver.parse_selector().
-// Python returns (None, value) for "no colon" or "empty prefix before colon".
-// Go's "" is the equivalent of Python's None for the prefix.
-// Cases:
-//
-//	"firecracker:6.1" -> ("firecracker", "6.1")
-//	"6.1"             -> ("", "6.1")
-//	":6.1"            -> ("", "6.1")
-//	"firecracker:"    -> ("firecracker", "")
-func parseSelector(selector string) (string, string) {
-	prefix, rest, found := strings.Cut(selector, ":")
-	if !found {
-		return "", selector
-	}
-	// Python: if not prefix: return (None, value)
-	if prefix == "" {
-		return "", rest
-	}
-	return prefix, rest
-}
+

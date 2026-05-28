@@ -498,7 +498,7 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 			}
 		}
 
-		// Check subnet capacity — Python: lease_repo.count_available(self._result.network.id)
+		// Check subnet capacity — Python: lease_repo.count_available(self.result.network.id)
 		available := 0
 		if result.Network != nil {
 			available, _ = b.leaseRepo.CountAvailable(ctx, result.Network.ID)

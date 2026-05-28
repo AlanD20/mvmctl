@@ -54,27 +54,24 @@ type ResolvedKeyCreateInput struct {
 
 // KeyCreateRequest matches Python's KeyCreateRequest.
 type KeyCreateRequest struct {
-	_input  KeyCreateInput
-	_result *ResolvedKeyCreateInput
+	input  KeyCreateInput
+	result *ResolvedKeyCreateInput
 }
 
 // NewKeyCreateRequest creates a new KeyCreateRequest.
 func NewKeyCreateRequest(inputs KeyCreateInput) *KeyCreateRequest {
 	return &KeyCreateRequest{
-		_input: inputs,
+		input: inputs,
 	}
 }
 
 // Result returns the resolved input, or nil if resolve() has not been called.
-func (r *KeyCreateRequest) Result() *ResolvedKeyCreateInput {
-	return r._result
-}
 
 // Resolve resolves defaults and validates.
 // Matches Python's KeyCreateRequest.resolve().
 func (r *KeyCreateRequest) Resolve() (*ResolvedKeyCreateInput, error) {
 	// Validate key name early — before any work
-	if err := validators.ValidateKeyName(r._input.Name); err != nil {
+	if err := validators.ValidateKeyName(r.input.Name); err != nil {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
 			Op:      "key_create",
@@ -85,8 +82,8 @@ func (r *KeyCreateRequest) Resolve() (*ResolvedKeyCreateInput, error) {
 
 	// Default algorithm (Python: algorithm = self._inputs.algorithm or "ed25519")
 	algorithm := "ed25519"
-	if r._input.Algorithm != nil && *r._input.Algorithm != "" {
-		algorithm = *r._input.Algorithm
+	if r.input.Algorithm != nil && *r.input.Algorithm != "" {
+		algorithm = *r.input.Algorithm
 	}
 
 	// Validate algorithm
@@ -101,34 +98,34 @@ func (r *KeyCreateRequest) Resolve() (*ResolvedKeyCreateInput, error) {
 	}
 
 	// Default comment (Python: f"{name}@{socket.gethostname()}")
-	comment := fmt.Sprintf("%s@%s", r._input.Name, getHostname())
-	if r._input.Comment != nil && *r._input.Comment != "" {
-		comment = *r._input.Comment
+	comment := fmt.Sprintf("%s@%s", r.input.Name, getHostname())
+	if r.input.Comment != nil && *r.input.Comment != "" {
+		comment = *r.input.Comment
 	}
 
 	// Default output_dir resolved via CacheUtils
 	outputDir := getKeysDir()
-	if r._input.OutputDir != nil && *r._input.OutputDir != "" {
-		outputDir = *r._input.OutputDir
+	if r.input.OutputDir != nil && *r.input.OutputDir != "" {
+		outputDir = *r.input.OutputDir
 	}
 
 	// File conflict validation (caller validates)
-	if !r._input.Overwrite {
-		if err := keyFilesExist(r._input.Name, outputDir); err != nil {
+	if !r.input.Overwrite {
+		if err := keyFilesExist(r.input.Name, outputDir); err != nil {
 			return nil, err
 		}
 	}
 
-	r._result = &ResolvedKeyCreateInput{
-		Name:       r._input.Name,
+	r.result = &ResolvedKeyCreateInput{
+		Name:       r.input.Name,
 		Algorithm:  algorithm,
-		Bits:       r._input.Bits,
+		Bits:       r.input.Bits,
 		OutputDir:  outputDir,
 		Comment:    comment,
-		Overwrite:  r._input.Overwrite,
-		SetDefault: r._input.SetDefault,
+		Overwrite:  r.input.Overwrite,
+		SetDefault: r.input.SetDefault,
 	}
-	return r._result, nil
+	return r.result, nil
 }
 
 // keyFilesExist checks if key files already exist on disk.
