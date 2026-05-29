@@ -15,6 +15,7 @@ import (
 	"mvmctl/pkg/api"
 
 	"github.com/spf13/cobra"
+	"mvmctl/internal/cli/common"
 )
 
 // formatChange returns a concise one-line description of a host change matching Python's _format_change.
@@ -73,8 +74,8 @@ func abortIfVMsRunning(ctx context.Context, op *api.Operation, action string) er
 		for _, v := range running {
 			names = append(names, v.Name)
 		}
-		cli.Error(fmt.Sprintf("%s blocked: VMs still running: %s", action, strings.Join(names, ", ")))
-		cli.Error("Stop all VMs first: mvm vm stop <name>")
+		common.Cli.Error(fmt.Sprintf("%s blocked: VMs still running: %s", action, strings.Join(names, ", ")))
+		common.Cli.Error("Stop all VMs first: mvm vm stop <name>")
 		return fmt.Errorf("VMs still running: %s", strings.Join(names, ", "))
 	}
 	return nil
@@ -141,8 +142,8 @@ Examples:
 			switch v := rawResult.(type) {
 			case *errs.NeedsInteraction:
 				if v.Code == "privilege.sudo_required" {
-					cli.Warning("Root privileges required for: mvm host init")
-					cli.Info("Run with sudo: sudo mvm host init")
+					common.Cli.Warning("Root privileges required for: mvm host init")
+					common.Cli.Info("Run with sudo: sudo mvm host init")
 					// Python: typer.confirm("Run 'sudo mvm host init' now?", default=False)
 					// Default is No (Enter = reject). Re-prompts on invalid input.
 					confirmed := false
@@ -164,8 +165,8 @@ Examples:
 					}
 					if confirmed {
 						if sudoRestart, _ := infra.EnvGet("SUDO_RESTART"); sudoRestart != "" {
-							cli.Error("Recursive sudo restart detected. Aborting to prevent lockout.")
-							cli.Info("Please run 'sudo mvm host init' manually.")
+							common.Cli.Error("Recursive sudo restart detected. Aborting to prevent lockout.")
+							common.Cli.Info("Please run 'sudo mvm host init' manually.")
 							return fmt.Errorf("recursive sudo restart")
 						}
 
@@ -185,22 +186,22 @@ Examples:
 							Check:   false,
 						})
 						if !result.Success && result.Err != nil {
-							cli.Error(fmt.Sprintf("sudo command failed: %s", result.Err.Error()))
+							common.Cli.Error(fmt.Sprintf("sudo command failed: %s", result.Err.Error()))
 						}
 					}
 					return fmt.Errorf("needs sudo")
 				}
 
 				// Other NeedsInteraction (not sudo_required)
-				cli.Error(v.Message)
+				common.Cli.Error(v.Message)
 				if detailsCtx, ok := v.Context["details"].(map[string]interface{}); ok {
 					if detailMsg, ok := detailsCtx["message"].(string); ok && detailMsg != "" {
-						cli.Warning(fmt.Sprintf("Details: %s", detailMsg))
+						common.Cli.Warning(fmt.Sprintf("Details: %s", detailMsg))
 					}
 					if suggestions, ok := detailsCtx["suggestions"].([]string); ok && len(suggestions) > 0 {
-						cli.Info("Options:")
+						common.Cli.Info("Options:")
 						for _, s := range suggestions {
-							cli.Info(fmt.Sprintf("  - %s", s))
+							common.Cli.Info(fmt.Sprintf("  - %s", s))
 						}
 					}
 				}
@@ -208,12 +209,12 @@ Examples:
 
 			case *errs.OperationResult:
 				if v.IsError() {
-					cli.Error(fmt.Sprintf("Host init failed: %s", v.Message))
+					common.Cli.Error(fmt.Sprintf("Host init failed: %s", v.Message))
 					return fmt.Errorf("%s", v.Message)
 				}
 
 				if v.Status == "skipped" {
-					cli.Info(v.Message)
+					common.Cli.Info(v.Message)
 					return nil
 				}
 
@@ -231,22 +232,22 @@ Examples:
 							origVal = *change.OriginalValue
 						}
 						if change.Mechanism == "noop" && change.Setting == "iptables_chains" {
-							cli.Warning(formatChange(change.Mechanism, change.Setting, change.AppliedValue, origVal))
+							common.Cli.Warning(formatChange(change.Mechanism, change.Setting, change.AppliedValue, origVal))
 							continue
 						}
 						appliedChanges++
-						cli.Success(formatChange(change.Mechanism, change.Setting, change.AppliedValue, origVal))
+						common.Cli.Success(formatChange(change.Mechanism, change.Setting, change.AppliedValue, origVal))
 					}
 
 					if appliedChanges == 0 {
-						cli.Info("Host already configured — nothing to do.")
+						common.Cli.Info("Host already configured — nothing to do.")
 					} else {
-						cli.Success(fmt.Sprintf("Initialized: host (%d change(s) applied)", appliedChanges))
+						common.Cli.Success(fmt.Sprintf("Initialized: host (%d change(s) applied)", appliedChanges))
 					}
 
 					if wasUserAdded, ok := v.Metadata["user_added_to_group"].(bool); ok && wasUserAdded {
-						cli.Warning("Log out and back in for group membership to take effect")
-						cli.Info(fmt.Sprintf("Or run immediately: newgrp %s", infra.MVMUnixGroup))
+						common.Cli.Warning("Log out and back in for group membership to take effect")
+						common.Cli.Info(fmt.Sprintf("Or run immediately: newgrp %s", infra.MVMUnixGroup))
 					}
 				}
 
@@ -254,7 +255,7 @@ Examples:
 				// Python: if not isinstance(result, OperationResult):
 				//         mvm_cli.error(f"Unexpected result type: {type(result).__name__}")
 				//         raise typer.Exit(code=1)
-				cli.Error(fmt.Sprintf("Unexpected result type: %T", v))
+				common.Cli.Error(fmt.Sprintf("Unexpected result type: %T", v))
 				return fmt.Errorf("unexpected result type: %T", v)
 			}
 
@@ -293,7 +294,7 @@ func newHostStatusCmd(op *api.Operation) *cobra.Command {
 				// Format state_snapshot timestamp matching Python's CommonUtils.human_readable_datetime
 				var timestamp interface{}
 				if state != nil && state.InitializedAt != "" {
-					timestamp = cli.FormatTimestamp(state.InitializedAt, "full")
+					timestamp = common.Cli.FormatTimestamp(state.InitializedAt, "full")
 				}
 
 				data := map[string]interface{}{
@@ -349,7 +350,7 @@ func newHostStatusCmd(op *api.Operation) *cobra.Command {
 			if state != nil {
 				stateStatus = "saved"
 				if state.InitializedAt != "" {
-					stateDetail = cli.FormatTimestamp(state.InitializedAt, "full")
+					stateDetail = common.Cli.FormatTimestamp(state.InitializedAt, "full")
 				} else {
 					stateDetail = "no snapshot"
 				}
@@ -392,7 +393,7 @@ func newHostStatusCmd(op *api.Operation) *cobra.Command {
 				rows = append(rows, []string{"user in kvm group", userKVMStatus, userKVMDetail})
 			}
 
-			cli.Table([]string{"Check", "Status", "Detail"}, rows)
+			common.Cli.Table([]string{"Check", "Status", "Detail"}, rows)
 			return nil
 		},
 	}
@@ -423,12 +424,12 @@ Use --refresh to re-detect hardware and limits before displaying.`,
 			}
 
 			if result.IsError() {
-				cli.Error(result.Message)
+				common.Cli.Error(result.Message)
 				return fmt.Errorf("%s", result.Message)
 			}
 
 			if result.Item == nil {
-				cli.Error("No host info available.")
+				common.Cli.Error("No host info available.")
 				return fmt.Errorf("no host info available")
 			}
 
@@ -463,11 +464,11 @@ Sysctl settings, sudoers, and the '%s' group will NOT be affected.`, infra.MVMUn
 			}
 
 			if !force {
-				cli.Warning("This will remove all VM networking: bridges, TAP devices, iptables rules, and the default network configuration.")
-				cli.Info(fmt.Sprintf("Sysctl settings, sudoers, and the '%s' group will NOT be affected.", infra.MVMUnixGroup))
-				cli.Info("")
+				common.Cli.Warning("This will remove all VM networking: bridges, TAP devices, iptables rules, and the default network configuration.")
+				common.Cli.Info(fmt.Sprintf("Sysctl settings, sudoers, and the '%s' group will NOT be affected.", infra.MVMUnixGroup))
+				common.Cli.Info("")
 				if !confirmRePrompt("Proceed with host clean?") {
-					cli.Info("Aborted")
+					common.Cli.Info("Aborted")
 					return nil
 				}
 			}
@@ -478,7 +479,7 @@ Sysctl settings, sudoers, and the '%s' group will NOT be affected.`, infra.MVMUn
 			}
 			result := op.HostClean(cmd.Context(), cacheDir)
 			if result.IsError() {
-				cli.Error(result.Message)
+				common.Cli.Error(result.Message)
 				return fmt.Errorf("%s", result.Message)
 			}
 
@@ -488,15 +489,15 @@ Sysctl settings, sudoers, and the '%s' group will NOT be affected.`, infra.MVMUn
 					for _, item := range summary {
 						if strings.HasPrefix(item, "Warning:") {
 							remainder := strings.TrimSpace(item[len("Warning:"):])
-							cli.Warning(fmt.Sprintf("  %s", remainder))
+							common.Cli.Warning(fmt.Sprintf("  %s", remainder))
 						} else {
-							cli.Info(fmt.Sprintf("  %s", item))
+							common.Cli.Info(fmt.Sprintf("  %s", item))
 						}
 					}
 				}
 			}
 
-			cli.Success(result.Message)
+			common.Cli.Success(result.Message)
 			return nil
 		},
 	}
@@ -530,10 +531,10 @@ Examples:
 			}
 
 			if !force {
-				cli.Warning("This will tear down all networking, revert sysctl changes, remove the sudoers drop-in, and remove the project group. This is a full rollback to pre-init state.")
-				cli.Info("")
+				common.Cli.Warning("This will tear down all networking, revert sysctl changes, remove the sudoers drop-in, and remove the project group. This is a full rollback to pre-init state.")
+				common.Cli.Info("")
 				if !confirmRePrompt("Proceed with host reset?") {
-					cli.Info("Aborted")
+					common.Cli.Info("Aborted")
 					return nil
 				}
 			}
@@ -544,7 +545,7 @@ Examples:
 			}
 			result := op.HostReset(cmd.Context(), cacheDir)
 			if result.IsError() {
-				cli.Error(result.Message)
+				common.Cli.Error(result.Message)
 				return fmt.Errorf("%s", result.Message)
 			}
 
@@ -554,15 +555,15 @@ Examples:
 					for _, item := range summary {
 						if strings.HasPrefix(item, "Warning:") {
 							remainder := strings.TrimSpace(item[len("Warning:"):])
-							cli.Warning(fmt.Sprintf("  %s", remainder))
+							common.Cli.Warning(fmt.Sprintf("  %s", remainder))
 						} else {
-							cli.Info(fmt.Sprintf("  %s", item))
+							common.Cli.Info(fmt.Sprintf("  %s", item))
 						}
 					}
 				}
 			}
 
-			cli.Success(result.Message)
+			common.Cli.Success(result.Message)
 			return nil
 		},
 	}
@@ -573,7 +574,7 @@ Examples:
 
 // printHostInfo pretty-prints host info data matching Python's print_dict_tree.
 func printHostInfo(item interface{}) {
-	cli.PrintDictTree(item, "Host Info")
+	common.Cli.PrintDictTree(item, "Host Info")
 }
 
 // confirmRePrompt loops until the user enters y/n, matching Python's typer.confirm()

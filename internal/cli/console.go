@@ -61,7 +61,7 @@ func showConsoleState(op *api.Operation, ctx context.Context, identifier string)
 		// which calls mvm_cli.error(str(e)) then raises typer.Exit(1).
 		// In Go, print the error and return it (SilenceErrors on the root
 		// command prevents Cobra from double-printing).
-		common.MVMCLI.Error(err.Error())
+		common.Cli.Error(err.Error())
 		return err
 	}
 
@@ -70,15 +70,15 @@ func showConsoleState(op *api.Operation, ctx context.Context, identifier string)
 	if running {
 		status = "running"
 	}
-	common.MVMCLI.Info(fmt.Sprintf("Console for '%s': %s", identifier, status))
+	common.Cli.Info(fmt.Sprintf("Console for '%s': %s", identifier, status))
 
 	// Python: if state_dict["pid"]: — truthiness of int|None
 	if pidPtr, ok := state["pid"].(*int); ok && pidPtr != nil && *pidPtr != 0 {
-		common.MVMCLI.Info(fmt.Sprintf("  PID: %d", *pidPtr))
+		common.Cli.Info(fmt.Sprintf("  PID: %d", *pidPtr))
 	}
 	// Python: if state_dict["socket_path"]: — truthiness of str
 	if socketPath, ok := state["socket_path"].(string); ok && socketPath != "" {
-		common.MVMCLI.Info(fmt.Sprintf("  Socket: %s", socketPath))
+		common.Cli.Info(fmt.Sprintf("  Socket: %s", socketPath))
 	}
 
 	return nil
@@ -88,12 +88,12 @@ func killConsoleRelay(op *api.Operation, ctx context.Context, identifier string)
 	result, err := op.ConsoleKill(ctx, identifier)
 	if err != nil {
 		// Python: resolution failure propagates as exception to @handle_errors
-		common.MVMCLI.Error(err.Error())
+		common.Cli.Error(err.Error())
 		return err
 	}
 
 	if result.Status == "success" {
-		common.MVMCLI.Success(fmt.Sprintf("Stopped: %s", identifier))
+		common.Cli.Success(fmt.Sprintf("Stopped: %s", identifier))
 		return nil
 	}
 
@@ -102,7 +102,7 @@ func killConsoleRelay(op *api.Operation, ctx context.Context, identifier string)
 	// and allows deferred cleanup to run. Go's Cobra equivalent: return an error
 	// (the root command has SilenceErrors=true, so it won't be printed again).
 	if result.Status == "skipped" {
-		common.MVMCLI.Error(fmt.Sprintf("Console relay not running: %s", identifier))
+		common.Cli.Error(fmt.Sprintf("Console relay not running: %s", identifier))
 		return fmt.Errorf("console relay not running: %s", identifier)
 	}
 
@@ -111,7 +111,7 @@ func killConsoleRelay(op *api.Operation, ctx context.Context, identifier string)
 	if msg == "" {
 		msg = fmt.Sprintf("Stop failed: %s", identifier)
 	}
-	common.MVMCLI.Error(msg)
+	common.Cli.Error(msg)
 	return fmt.Errorf("%s", msg)
 }
 
@@ -121,17 +121,17 @@ func attachToConsole(op *api.Operation, cmd *cobra.Command, identifier string) e
 		// Python: get_connection_info raises MVMError which propagates to
 		// @handle_errors, which calls mvm_cli.error(str(e)) then typer.Exit(1).
 		// In Go, print the error and return it.
-		common.MVMCLI.Error(err.Error())
+		common.Cli.Error(err.Error())
 		return err
 	}
 
-	common.MVMCLI.Info(fmt.Sprintf("Attaching to console of '%s'...", info.VMName))
-	common.MVMCLI.Info("Press Ctrl+X then D to detach")
+	common.Cli.Info(fmt.Sprintf("Attaching to console of '%s'...", info.VMName))
+	common.Cli.Info("Press Ctrl+X then D to detach")
 
 	err = op.ConsoleAttachConsole(cmd.Context(), info.SocketPath, os.Stdin, os.Stdout)
 	if err == nil {
 		// Python's _attach_to_console: mvm_cli.info("\nDetached from console")
-		common.MVMCLI.Info("\nDetached from console")
+		common.Cli.Info("\nDetached from console")
 	} else {
 		// Python's socket connection failure is handled inside _connect_socket
 		// (mvm_cli.error(f"Console relay connection failed: {e}")) and then
@@ -139,7 +139,7 @@ func attachToConsole(op *api.Operation, cmd *cobra.Command, identifier string) e
 		// failed" before raising typer.Exit(1). MVMErrors during _interact are
 		// caught and printed via mvm_cli.error(str(e)). In Go, InteractiveAttach
 		// returns these errors so we print and return them here.
-		common.MVMCLI.Error(err.Error())
+		common.Cli.Error(err.Error())
 	}
 	return err
 }

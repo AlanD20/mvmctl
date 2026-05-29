@@ -65,21 +65,17 @@ func newImageLsCmd(op *api.Operation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if remote {
 				fmt.Fprintln(os.Stderr, "Fetching remote images")
-				raw, err := op.ImageListAll(cmd.Context(), true, typeFilter, nil, noCache)
+				_, versions, err := op.ImageListAll(cmd.Context(), true, typeFilter, nil, noCache)
 				if err != nil {
 					return err
 				}
-				if versions, ok := raw.([]*model.ImageVersion); ok {
-					printRemoteImages(versions, jsonOutput)
-				}
+				printRemoteImages(versions, jsonOutput)
 			} else {
-				raw, err := op.ImageListAll(cmd.Context(), false, "", nil, false)
+				images, _, err := op.ImageListAll(cmd.Context(), false, "", nil, false)
 				if err != nil {
 					return err
 				}
-				if images, ok := raw.([]*model.ImageItem); ok {
-					printLocalImages(images, jsonOutput, longOutput, cmd.Context())
-				}
+				printLocalImages(images, jsonOutput, longOutput, cmd.Context())
 			}
 			return nil
 		},
@@ -135,7 +131,7 @@ func printRemoteImages(versions []*model.ImageVersion, jsonOutput bool) {
 	}
 
 	if len(versions) == 0 {
-		cli.Info("No remote images available.")
+		common.Cli.Info("No remote images available.")
 		return
 	}
 
@@ -183,7 +179,7 @@ func printRemoteImages(versions []*model.ImageVersion, jsonOutput bool) {
 		}
 	}
 
-	cli.Table([]string{"Type / Version", "Description"}, rows)
+	common.Cli.Table([]string{"Type / Version", "Description"}, rows)
 }
 
 func printLocalImages(images []*model.ImageItem, jsonOutput bool, longOutput bool, ctx context.Context) {
@@ -239,18 +235,18 @@ func printLocalImages(images []*model.ImageItem, jsonOutput bool, longOutput boo
 
 	rows := make([][]string, 0, len(images))
 	for _, img := range images {
-		marker := cli.FormatMarker(img.IsDefault)
-		created := cli.FormatTimestamp(img.CreatedAt, "relative")
+		marker := common.Cli.FormatMarker(img.IsDefault)
+		created := common.Cli.FormatTimestamp(img.CreatedAt, "relative")
 
 		if isLong {
 			size := "-"
 			if img.CompressedSize != nil {
-				size = cli.FormatSize(*img.CompressedSize)
+				size = common.Cli.FormatSize(*img.CompressedSize)
 			}
 			rows = append(rows, []string{
 				marker,
-				cli.FormatID(img.ID),
-				cli.FormatName(img.Name, !img.IsPresent),
+				common.Cli.FormatID(img.ID),
+				common.Cli.FormatName(img.Name, !img.IsPresent),
 				img.Type,
 				img.Arch,
 				img.FSType,
@@ -260,8 +256,8 @@ func printLocalImages(images []*model.ImageItem, jsonOutput bool, longOutput boo
 		} else {
 			rows = append(rows, []string{
 				marker,
-				cli.FormatID(img.ID),
-				cli.FormatName(img.Name, !img.IsPresent),
+				common.Cli.FormatID(img.ID),
+				common.Cli.FormatName(img.Name, !img.IsPresent),
 				img.Type,
 				created,
 			})
@@ -269,9 +265,9 @@ func printLocalImages(images []*model.ImageItem, jsonOutput bool, longOutput boo
 	}
 
 	if isLong {
-		cli.Table([]string{"", "ID", "Name", "Type", "Arch", "FS Type", "Size", "Created"}, rows)
+		common.Cli.Table([]string{"", "ID", "Name", "Type", "Arch", "FS Type", "Size", "Created"}, rows)
 	} else {
-		cli.Table([]string{"", "ID", "Name", "Type", "Created"}, rows)
+		common.Cli.Table([]string{"", "ID", "Name", "Type", "Created"}, rows)
 	}
 }
 
@@ -355,7 +351,7 @@ The selector can be a type (e.g. "ubuntu") or type:version (e.g. "ubuntu:24.04")
 			})
 			spinner.Stop()
 			if ni, ok := result.(*errs.NeedsInteraction); ok {
-				cli.Info(ni.Message)
+				common.Cli.Info(ni.Message)
 				return nil
 			}
 			opResult, ok := result.(*errs.OperationResult)
@@ -367,7 +363,7 @@ The selector can be a type (e.g. "ubuntu") or type:version (e.g. "ubuntu:24.04")
 				if msg == "" {
 					msg = fmt.Sprintf("Download failed: %s", selector)
 				}
-				cli.Error(msg)
+				common.Cli.Error(msg)
 				return fmt.Errorf("download failed: %s", msg)
 			}
 			img, ok := opResult.Item.(*model.ImageItem)
@@ -375,9 +371,9 @@ The selector can be a type (e.g. "ubuntu") or type:version (e.g. "ubuntu:24.04")
 				return fmt.Errorf("pull failed: no image returned")
 			}
 
-			cli.Success(fmt.Sprintf("Pulled: %s (ID: %s)", img.Name, cli.FormatID(img.ID)))
+			common.Cli.Success(fmt.Sprintf("Pulled: %s (ID: %s)", img.Name, common.Cli.FormatID(img.ID)))
 			if setDefault {
-				cli.Success(fmt.Sprintf("Default image set to: %s", selector))
+				common.Cli.Success(fmt.Sprintf("Default image set to: %s", selector))
 			}
 
 			return nil
@@ -420,15 +416,15 @@ Examples:
 				itemID := "unknown"
 				if r.Item != nil {
 					if img, ok := r.Item.(*model.ImageItem); ok {
-						itemID = cli.FormatID(img.ID)
+						itemID = common.Cli.FormatID(img.ID)
 					}
 				}
 				if r.IsOK() {
-					cli.Success(fmt.Sprintf("Removed: %s", itemID))
+					common.Cli.Success(fmt.Sprintf("Removed: %s", itemID))
 				} else if r.Message != "" {
-					cli.Error(r.Message)
+					common.Cli.Error(r.Message)
 				} else {
-					cli.Error(fmt.Sprintf("Remove failed: %s", itemID))
+					common.Cli.Error(fmt.Sprintf("Remove failed: %s", itemID))
 				}
 			}
 			return nil
@@ -480,7 +476,7 @@ Examples:
 					name = n
 				}
 			}
-			cli.PrintDictTree(info, fmt.Sprintf("Image: %s", name))
+			common.Cli.PrintDictTree(info, fmt.Sprintf("Image: %s", name))
 			return nil
 		},
 	}
@@ -509,7 +505,7 @@ func newImageDefaultCmd(op *api.Operation) *cobra.Command {
 				}
 				return fmt.Errorf("Set default failed: %s", msg)
 			}
-			cli.Success(fmt.Sprintf("Default image set to: %s", prefix))
+			common.Cli.Success(fmt.Sprintf("Default image set to: %s", prefix))
 			return nil
 		},
 	}
@@ -626,12 +622,12 @@ Examples:
 			if !ok || img == nil {
 				return fmt.Errorf("import failed: no image returned")
 			}
-			cli.Success(fmt.Sprintf("Imported: %s", img.Path))
-			cli.Info(fmt.Sprintf("  Name: %s", name))
-			cli.Info(fmt.Sprintf("  ID:   %s", cli.FormatID(img.ID)))
+			common.Cli.Success(fmt.Sprintf("Imported: %s", img.Path))
+			common.Cli.Info(fmt.Sprintf("  Name: %s", name))
+			common.Cli.Info(fmt.Sprintf("  ID:   %s", common.Cli.FormatID(img.ID)))
 
 			if setDefault {
-				cli.Success(fmt.Sprintf("Default image set to: %s", name))
+				common.Cli.Success(fmt.Sprintf("Default image set to: %s", name))
 			}
 
 			return nil
@@ -727,13 +723,13 @@ Examples:
 					spinner.Stop()
 					return fmt.Errorf("failed to stat warmed path %s: %w", p, err)
 				}
-				sizeStr := cli.FormatSize(info.Size())
+				sizeStr := common.Cli.FormatSize(info.Size())
 
-				cli.Success(fmt.Sprintf("Warmed: %s", displayName))
-				cli.Info(fmt.Sprintf("  Path: %s", p))
-				cli.Info(fmt.Sprintf("  Size: %s", sizeStr))
+				common.Cli.Success(fmt.Sprintf("Warmed: %s", displayName))
+				common.Cli.Info(fmt.Sprintf("  Path: %s", p))
+				common.Cli.Info(fmt.Sprintf("  Size: %s", sizeStr))
 			}
-			cli.Info("  Ready for fast VM creation")
+			common.Cli.Info("  Ready for fast VM creation")
 			return nil
 		},
 	}

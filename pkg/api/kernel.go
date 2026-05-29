@@ -464,21 +464,24 @@ func (op *Operation) KernelRemove(ctx context.Context, identifiers []string, for
 	return &errs.BatchResult{Items: items}
 }
 
-// KernelListAll returns locally cached or remote kernel listing.
+// KernelList returns locally cached or remote kernel listing.
 // Matches Python's KernelOperation.list_all() exactly.
-// Returns []*model.KernelItem (remote=false) or []model.VersionInfo (remote=true).
-func (op *Operation) KernelListAll(ctx context.Context, remote bool, noCache bool) (interface{}, error) {
+// When remote=false, returns ([]*model.KernelItem, nil, error).
+// When remote=true, returns (nil, []model.VersionInfo, error).
+func (op *Operation) KernelList(ctx context.Context, remote bool, noCache bool) ([]*model.KernelItem, []model.VersionInfo, error) {
 	if remote {
-		return op.KernelListRemote(ctx, noCache)
+		versions, err := op.kernelListRemote(ctx, noCache)
+		return nil, versions, err
 	}
-	return op.Services.Kernel.List(ctx)
+	items, err := op.Services.Kernel.List(ctx)
+	return items, nil, err
 }
 
-// KernelListRemote returns available remote kernel versions as a flat list.
+// kernelListRemote returns available remote kernel versions as a flat list.
 // Matches Python's KernelOperation._list_remote() — resolves cache_ttl,
 // ci_version, and remote_list_limit from SettingsService before calling
 // the HttpDirVersionResolver with a limit parameter.
-func (op *Operation) KernelListRemote(ctx context.Context, noCache bool) ([]model.VersionInfo, error) {
+func (op *Operation) kernelListRemote(ctx context.Context, noCache bool) ([]model.VersionInfo, error) {
 	// Load kernel specs
 	specs, err := op.Services.Kernel.LoadSpecs()
 	if err != nil {

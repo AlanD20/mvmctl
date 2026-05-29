@@ -62,7 +62,7 @@ Use --os to show the Firecracker process log.`,
 				// mvm_cli.error(str(e)) and exits 1. In Go, with SilenceErrors=true
 				// on the root command, the error is silently swallowed. We must
 				// print it before returning to match Python's behavior.
-				common.MVMCLI.Error(err.Error())
+				common.Cli.Error(err.Error())
 				return err
 			}
 			return nil

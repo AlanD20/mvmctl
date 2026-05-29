@@ -624,12 +624,12 @@ func (op *Operation) ImageFindExisting(spec *model.ImageSpec) *model.ImageItem {
 
 // ImageListAll returns images.
 // Matches Python's ImageOperation.list_all() exactly.
-// When remote=true, returns available remote images discovered via version resolver.
+// When remote=false, returns ([]*model.ImageItem, nil, error).
+// When remote=true, returns (nil, []*model.ImageVersion, error).
 // When type_filter is set and remote=true, only returns versions for that specific image type.
 // When inputs is set and remote=false, filters local images by the given identifiers.
 // no_cache bypasses cached version listings when remote=true.
-// Returns []*model.ImageVersion (remote=true) or []*model.ImageItem (remote=false).
-func (op *Operation) ImageListAll(ctx context.Context, remote bool, typeFilter string, imgInputs *inputs.ImageInput, noCache bool) (interface{}, error) {
+func (op *Operation) ImageListAll(ctx context.Context, remote bool, typeFilter string, imgInputs *inputs.ImageInput, noCache bool) ([]*model.ImageItem, []*model.ImageVersion, error) {
 	if remote {
 		// Discover remote images via version resolver
 		// Resolve ci_version from default firecracker binary
@@ -679,11 +679,11 @@ func (op *Operation) ImageListAll(ctx context.Context, remote bool, typeFilter s
 		// Load image types config from embedded assets
 		rawYAML, err := assets.ReadFile("images.yaml")
 		if err != nil {
-			return nil, fmt.Errorf("load images.yaml: %w", err)
+			return nil, nil, fmt.Errorf("load images.yaml: %w", err)
 		}
 		imageTypesConfig, err := image.LoadImageTypesConfig(rawYAML)
 		if err != nil {
-			return nil, fmt.Errorf("parse image types config: %w", err)
+			return nil, nil, fmt.Errorf("parse image types config: %w", err)
 		}
 
 		// Filter by type BEFORE resolving (matches Python's type_filter handling)
@@ -696,7 +696,7 @@ func (op *Operation) ImageListAll(ctx context.Context, remote bool, typeFilter s
 			}
 			imageTypesConfig = filtered
 			if len(imageTypesConfig) == 0 {
-				return []model.ImageVersion{}, nil
+				return nil, []*model.ImageVersion{}, nil
 			}
 		}
 
@@ -710,7 +710,7 @@ func (op *Operation) ImageListAll(ctx context.Context, remote bool, typeFilter s
 			}
 		}
 
-		return versions, nil
+		return nil, versions, nil
 	}
 
 	// Local images from DB
@@ -719,11 +719,12 @@ func (op *Operation) ImageListAll(ctx context.Context, remote bool, typeFilter s
 		request := inputs.NewImageRequest(*imgInputs, op.DB, op.Repos.Image)
 		resolved, err := request.Resolve(ctx)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return resolved.Images, nil
+		return resolved.Images, nil, nil
 	}
-	return op.Services.Image.ListAll(ctx, true, false)
+	items, err := op.Services.Image.ListAll(ctx, true, false)
+	return items, nil, err
 }
 
 // ImageGet returns a single image by ID prefix or type.

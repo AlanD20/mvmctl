@@ -53,11 +53,11 @@ func NewInitCmd(op *api.Operation) *cobra.Command {
 // runInitWizard drives the init wizard, handling sudo and download prompts.
 func runInitWizard(ctx context.Context, op *api.Operation, nonInteractive, skipHost, skipNetwork bool) error {
 	// Match Python: mvm_cli.info("")
-	common.MVMCLI.Info("")
+	common.Cli.Info("")
 	// Match Python: mvm_cli.info(f"{CLI_NAME} init — first-time setup")
-	common.MVMCLI.Info(fmt.Sprintf("%s init — first-time setup", infra.CLIName))
+	common.Cli.Info(fmt.Sprintf("%s init — first-time setup", infra.CLIName))
 	// Match Python: mvm_cli.info("─" * 40)
-	common.MVMCLI.Info(strings.Repeat("─", 40))
+	common.Cli.Info(strings.Repeat("─", 40))
 
 	// Call the Python-style _handle_interactive_flow logic
 	result, err := handleInteractiveFlow(ctx, op, nonInteractive, skipHost, skipNetwork)
@@ -76,7 +76,7 @@ func runInitWizard(ctx context.Context, op *api.Operation, nonInteractive, skipH
 		"binary":           "Firecracker Binary",
 	}
 
-	common.MVMCLI.Info("")
+	common.Cli.Info("")
 	for _, step := range result.Steps {
 		label := stepLabels[step.Step]
 		if label == "" {
@@ -84,12 +84,12 @@ func runInitWizard(ctx context.Context, op *api.Operation, nonInteractive, skipH
 		}
 		if step.Success {
 			if step.Message != "" {
-				common.MVMCLI.Success(fmt.Sprintf("%s  (%s)", label, step.Message))
+				common.Cli.Success(fmt.Sprintf("%s  (%s)", label, step.Message))
 			} else {
-				common.MVMCLI.Success(label)
+				common.Cli.Success(label)
 			}
 		} else {
-			common.MVMCLI.Warning(fmt.Sprintf("%s — %s", label, step.Message))
+			common.Cli.Warning(fmt.Sprintf("%s — %s", label, step.Message))
 		}
 	}
 
@@ -100,15 +100,15 @@ func runInitWizard(ctx context.Context, op *api.Operation, nonInteractive, skipH
 	}
 	for key, label := range stepLabels {
 		if !present[key] {
-			common.MVMCLI.Warning(fmt.Sprintf("%s — not checked", label))
+			common.Cli.Warning(fmt.Sprintf("%s — not checked", label))
 		}
 	}
 
-	common.MVMCLI.Info("")
+	common.Cli.Info("")
 	if result.HostReady {
-		common.MVMCLI.Success("all set")
+		common.Cli.Success("all set")
 	} else {
-		common.MVMCLI.Warning(fmt.Sprintf("setup incomplete — run '%s init' again", infra.CLIName))
+		common.Cli.Warning(fmt.Sprintf("setup incomplete — run '%s init' again", infra.CLIName))
 		return fmt.Errorf("setup incomplete")
 	}
 	return nil
@@ -150,19 +150,19 @@ func handleInteractiveFlow(
 			//         probe_result = HostOperation.check_readiness()
 			probeResult := op.InitCheckReadiness()
 			if len(probeResult.Critical) > 0 {
-				common.MVMCLI.Warning("Pre-flight checks found issues:")
+				common.Cli.Warning("Pre-flight checks found issues:")
 				for _, c := range probeResult.Critical {
-					common.MVMCLI.Warning(fmt.Sprintf("  %s: %s", c.Name, c.Message))
+					common.Cli.Warning(fmt.Sprintf("  %s: %s", c.Name, c.Message))
 				}
 				// Python: if not typer.confirm(...): mvm_cli.info("Aborted"); raise typer.Exit(code=1)
 				if !promptYesNo("Continue with host init? Some features may not work.", false) {
-					common.MVMCLI.Info("Aborted")
+					common.Cli.Info("Aborted")
 					break
 				}
 			}
 			if len(probeResult.Warnings) > 0 {
 				for _, w := range probeResult.Warnings {
-					common.MVMCLI.Info(fmt.Sprintf("  %s: %s", w.Name, w.Message))
+					common.Cli.Info(fmt.Sprintf("  %s: %s", w.Name, w.Message))
 				}
 			}
 
@@ -174,7 +174,7 @@ func handleInteractiveFlow(
 			// Python: if group_exists and user_in_group and not session_has_group:
 			//     show message about logout/newgrp, skip_host = True, continue
 			if hostStateBefore["group_exists"] && hostStateBefore["user_in_group"] && !sessionHasGroup {
-				common.MVMCLI.Warning(fmt.Sprintf(
+				common.Cli.Warning(fmt.Sprintf(
 					"mvm group — session not active (log out and back in, or run: newgrp %s)",
 					infra.MVMUnixGroup,
 				))
@@ -183,22 +183,22 @@ func handleInteractiveFlow(
 			}
 
 			if hostStateBefore["group_exists"] {
-				common.MVMCLI.Warning("sudoers file is missing")
-				common.MVMCLI.Info(fmt.Sprintf("run:  sudo %s host init", infra.CLIName))
+				common.Cli.Warning("sudoers file is missing")
+				common.Cli.Info(fmt.Sprintf("run:  sudo %s host init", infra.CLIName))
 			} else {
-				common.MVMCLI.Warning("this requires sudo once")
-				common.MVMCLI.Info(fmt.Sprintf("creates the %s group and sudoers drop-in for passwordless sudo on future runs", infra.MVMUnixGroup))
+				common.Cli.Warning("this requires sudo once")
+				common.Cli.Info(fmt.Sprintf("creates the %s group and sudoers drop-in for passwordless sudo on future runs", infra.MVMUnixGroup))
 			}
 
 			if nonInteractive {
-				common.MVMCLI.Info(fmt.Sprintf("Run 'sudo %s host init' manually.", infra.CLIName))
+				common.Cli.Info(fmt.Sprintf("Run 'sudo %s host init' manually.", infra.CLIName))
 				break
 			}
 
 			if promptYesNo(fmt.Sprintf("Run 'sudo %s host init' now?", infra.CLIName), true) {
 				proc := runWithSudo(ctx)
 				if !proc.Success {
-					common.MVMCLI.Warning(fmt.Sprintf("host init failed. Run 'sudo %s host init' manually.", infra.CLIName))
+					common.Cli.Warning(fmt.Sprintf("host init failed. Run 'sudo %s host init' manually.", infra.CLIName))
 					break
 				}
 				hostStateAfter := checkHostState()
@@ -207,7 +207,7 @@ func handleInteractiveFlow(
 				downloadVersion = ""
 				continue
 			} else {
-				common.MVMCLI.Info(fmt.Sprintf("skipped. Run 'sudo %s host init' manually when ready.", infra.CLIName))
+				common.Cli.Info(fmt.Sprintf("skipped. Run 'sudo %s host init' manually when ready.", infra.CLIName))
 				break
 			}
 		}
@@ -217,18 +217,18 @@ func handleInteractiveFlow(
 		if interaction.Code == "binary.confirm_download" {
 			latest, _ := interaction.Context["latest_version"].(string)
 			if latest == "" {
-				common.MVMCLI.Warning("no Firecracker binary found and no remote versions available.")
+				common.Cli.Warning("no Firecracker binary found and no remote versions available.")
 				break
 			}
 
-			common.MVMCLI.Info(fmt.Sprintf("latest available: v%s", latest))
+			common.Cli.Info(fmt.Sprintf("latest available: v%s", latest))
 			if nonInteractive || promptYesNo(fmt.Sprintf("Download v%s?", latest), true) {
-				common.MVMCLI.Info("")
-				common.MVMCLI.Info(fmt.Sprintf("downloading Firecracker v%s ...", latest))
+				common.Cli.Info("")
+				common.Cli.Info(fmt.Sprintf("downloading Firecracker v%s ...", latest))
 				downloadVersion = latest
 				continue
 			} else {
-				common.MVMCLI.Info(fmt.Sprintf("skipped. Run '%s bin pull <version>' manually.", infra.CLIName))
+				common.Cli.Info(fmt.Sprintf("skipped. Run '%s bin pull <version>' manually.", infra.CLIName))
 				break
 			}
 		}
@@ -245,7 +245,7 @@ func handleInteractiveFlow(
 			continue
 		}
 
-		common.MVMCLI.Warning(fmt.Sprintf("unhandled interaction: %s", interaction.Code))
+		common.Cli.Warning(fmt.Sprintf("unhandled interaction: %s", interaction.Code))
 		break
 	}
 
@@ -279,8 +279,8 @@ func runWithSudo(ctx context.Context) sudoResult {
 		}
 	}
 
-	common.MVMCLI.Info("")
-	common.MVMCLI.Info("Running host init with sudo...")
+	common.Cli.Info("")
+	common.Cli.Info("Running host init with sudo...")
 
 	// Use system.RunCmdCompat with the env utility to properly pass environment
 	// variables through sudo's env_reset.

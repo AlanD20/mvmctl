@@ -1,5 +1,5 @@
 // Package common provides CLI display helpers — table rendering, JSON output,
-// error display, and the MVMCli singleton matching Python's ``utils/cli.py:MVMCli``.
+// error display, and the MVMCli singleton matching Python's “utils/cli.py:MVMCli“.
 package common
 
 import (
@@ -144,12 +144,12 @@ func isStderrTTY() bool {
 
 // ANSI escape codes for Rich-compatible styling.
 const (
-	ansiRed     = "\033[31m"
-	ansiGreen   = "\033[32m"
-	ansiYellow  = "\033[33m"
-	ansiDim     = "\033[2m"
-	ansiBold    = "\033[1m"
-	ansiReset   = "\033[0m"
+	ansiRed    = "\033[31m"
+	ansiGreen  = "\033[32m"
+	ansiYellow = "\033[33m"
+	ansiDim    = "\033[2m"
+	ansiBold   = "\033[1m"
+	ansiReset  = "\033[0m"
 )
 
 // MVMCli is a centralized display output matching Python's MVMCli.
@@ -157,11 +157,12 @@ const (
 // and strips it when piped. Go uses ANSI escape codes with manual TTY checks.
 type MVMCli struct{}
 
-// MVMCLI is the module-level singleton matching Python's mvm_cli.
-var MVMCLI = &MVMCli{}
+// Cli is the module-level singleton matching Python's mvm_cli.
+// All display output goes through this single instance.
+var Cli = &MVMCli{}
 
 // NewCli returns the singleton MVMCli instance.
-func NewCli() *MVMCli { return MVMCLI }
+func NewCli() *MVMCli { return Cli }
 
 // Error prints an error message to stderr.
 // Matches Python's mvm_cli.error() — Rich: "[red]✗ Error:[/] {message}"
@@ -302,16 +303,16 @@ func (c *MVMCli) Table(columns []string, rows [][]string, title ...string) {
 }
 
 // PrintDictTree prints a nested map/slice as a tree, matching Python's print_dict_tree.
-func (c *MVMCli) PrintDictTree(data interface{}, title string) {
+func (c *MVMCli) PrintDictTree(data any, title string) {
 	if title != "" {
 		fmt.Println(title)
 	}
 	c.buildTree(data, "", true)
 }
 
-func (c *MVMCli) buildTree(data interface{}, indent string, isRoot bool) {
+func (c *MVMCli) buildTree(data any, indent string, isRoot bool) {
 	switch v := data.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		keys := sortedKeys(v)
 		for i, key := range keys {
 			val := v[key]
@@ -321,16 +322,16 @@ func (c *MVMCli) buildTree(data interface{}, indent string, isRoot bool) {
 				connector = "└─ "
 			}
 			switch child := val.(type) {
-			case map[string]interface{}:
+			case map[string]any:
 				fmt.Printf("%s%s%s\n", indent, connector, pretty)
 				childIndent := indent + "   "
 				if i < len(keys)-1 {
 					childIndent = indent + "│  "
 				}
 				c.buildTree(child, childIndent, false)
-			case []interface{}:
+			case []any:
 				if len(child) > 0 {
-					if _, isMapSlice := child[0].(map[string]interface{}); isMapSlice {
+					if _, isMapSlice := child[0].(map[string]any); isMapSlice {
 						fmt.Printf("%s%s%s\n", indent, connector, pretty)
 						childIndent := indent + "   "
 						if i < len(keys)-1 {
@@ -366,13 +367,13 @@ func (c *MVMCli) buildTree(data interface{}, indent string, isRoot bool) {
 				fmt.Printf("%s%s%s: %s\n", indent, connector, pretty, display)
 			}
 		}
-	case []interface{}:
+	case []any:
 		for i, item := range v {
 			connector := "├─ "
 			if i == len(v)-1 {
 				connector = "└─ "
 			}
-			if m, ok := item.(map[string]interface{}); ok {
+			if m, ok := item.(map[string]any); ok {
 				fmt.Printf("%s%s#%d\n", indent, connector, i+1)
 				childIndent := indent + "   "
 				if i < len(v)-1 {
@@ -390,33 +391,18 @@ func (c *MVMCli) buildTree(data interface{}, indent string, isRoot bool) {
 	}
 }
 
-func (c *MVMCli) formatLeafValue(key string, value interface{}) string {
+func (c *MVMCli) formatLeafValue(key string, value any) string {
 	if value == nil {
 		return "-"
 	}
 	if s, ok := value.(string); ok && strings.HasSuffix(key, "_at") {
-		formatted := FormatTimestamp(s, "full")
+		formatted := c.FormatTimestamp(s, "full")
 		if formatted != s {
 			return formatted
 		}
 	}
 	return fmt.Sprintf("%v", value)
 }
-
-// FormatMarker delegates to the package-level function.
-func (c *MVMCli) FormatMarker(isDefault bool) string { return FormatMarker(isDefault) }
-
-// FormatTimestamp delegates to the package-level function.
-func (c *MVMCli) FormatTimestamp(isoString string, style string) string { return FormatTimestamp(isoString, style) }
-
-// FormatSize delegates to the package-level function.
-func (c *MVMCli) FormatSize(sizeBytes int64) string { return FormatSize(sizeBytes) }
-
-// FormatID delegates to the package-level function.
-func (c *MVMCli) FormatID(idString string) string { return FormatID(idString) }
-
-// FormatName delegates to the package-level function.
-func (c *MVMCli) FormatName(name string, isMissing bool) string { return FormatName(name, isMissing) }
 
 // ─── Static helper functions matching MVMCli static methods ──────────────────
 
@@ -442,7 +428,7 @@ func parseTime(isoString string) (time.Time, bool) {
 }
 
 // FormatTimestamp formats an ISO timestamp as relative or full date string.
-func FormatTimestamp(isoString string, style string) string {
+func (c *MVMCli) FormatTimestamp(isoString string, style string) string {
 	if isoString == "" {
 		return "-"
 	}
@@ -495,7 +481,7 @@ func FormatTimestamp(isoString string, style string) string {
 }
 
 // FormatSize formats bytes as human-readable size, or "-" if negative.
-func FormatSize(sizeBytes int64) string {
+func (c *MVMCli) FormatSize(sizeBytes int64) string {
 	if sizeBytes < 0 {
 		return "-"
 	}
@@ -517,7 +503,7 @@ func FormatSize(sizeBytes int64) string {
 
 // FormatID returns the first 6 characters of a hash for display.
 // Strips "SHA256:" prefix if present.
-func FormatID(idString string) string {
+func (c *MVMCli) FormatID(idString string) string {
 	if strings.HasPrefix(idString, "SHA256:") {
 		idString = idString[len("SHA256:"):]
 	}
@@ -528,7 +514,7 @@ func FormatID(idString string) string {
 }
 
 // FormatMarker returns "*" if isDefault, else empty string.
-func FormatMarker(isDefault bool) string {
+func (c *MVMCli) FormatMarker(isDefault bool) string {
 	if isDefault {
 		return "*"
 	}
@@ -537,8 +523,8 @@ func FormatMarker(isDefault bool) string {
 
 // FormatName returns name with a missing indicator suffix if not present.
 // Uses ANSI red markup (only when stdout is a TTY) to match Python's
-// ``[red]{name}[/]`` Rich formatting, which auto-strips when piped.
-func FormatName(name string, isMissing bool) string {
+// “[red]{name}[/]“ Rich formatting, which auto-strips when piped.
+func (c *MVMCli) FormatName(name string, isMissing bool) string {
 	if isMissing {
 		if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode() & os.ModeCharDevice) != 0 {
 			return "\033[31m" + name + "\033[0m"
@@ -550,7 +536,7 @@ func FormatName(name string, isMissing bool) string {
 
 // FormatEntityName returns a display-ready entity name.
 // Matches Python's cli.py FormatEntityName function.
-func FormatEntityName(name string) string {
+func (c *MVMCli) FormatEntityName(name string) string {
 	if name == "" {
 		return "-"
 	}
@@ -558,7 +544,7 @@ func FormatEntityName(name string) string {
 }
 
 // FormatSettingValue formats an arbitrary setting value for display.
-func FormatSettingValue(v interface{}) string {
+func (c *MVMCli) FormatSettingValue(v any) string {
 	if v == nil {
 		return "<nil>"
 	}
@@ -566,7 +552,7 @@ func FormatSettingValue(v interface{}) string {
 }
 
 // FormatJSON marshals v to indented JSON.
-func FormatJSON(v interface{}) string {
+func (c *MVMCli) FormatJSON(v any) string {
 	b, _ := json.MarshalIndent(v, "", "  ")
 	return string(b)
 }
@@ -577,7 +563,7 @@ func FormatJSON(v interface{}) string {
 // display to the user. Matches Python's mvm_cli.error() format:
 //
 //	"✗ Error: <message>"
-func FormatError(err error) string {
+func (c *MVMCli) FormatError(err error) string {
 	if err == nil {
 		return ""
 	}
@@ -610,7 +596,7 @@ func isAlreadyExistsCode(c errs.Code) bool {
 }
 
 // DisplayError returns a verbose error string for debugging.
-func DisplayError(err error, verbose bool) string {
+func (c *MVMCli) DisplayError(err error, verbose bool) string {
 	var de *errs.DomainError
 	if errors.As(err, &de) {
 		var b strings.Builder
@@ -634,13 +620,13 @@ func DisplayError(err error, verbose bool) string {
 // in short mode.
 type ListingColumn struct {
 	Header   string
-	Extract  func(interface{}) string
+	Extract  func(any) string
 	LongOnly bool
 }
 
 // renderListing builds and prints a listing table from column specs.
 // Matches Python's render_listing() in cli/_common.py.
-func renderListing(items []interface{}, columns []ListingColumn, style string, title ...string) {
+func renderListing(items []any, columns []ListingColumn, style string, title ...string) {
 	visible := columns
 	if style != "long" {
 		var short []ListingColumn
@@ -667,12 +653,12 @@ func renderListing(items []interface{}, columns []ListingColumn, style string, t
 	if len(title) > 0 {
 		tableTitle = title[0]
 	}
-	MVMCLI.Table(headers, rows, tableTitle)
+	Cli.Table(headers, rows, tableTitle)
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-func sortedKeys(m map[string]interface{}) []string {
+func sortedKeys(m map[string]any) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)

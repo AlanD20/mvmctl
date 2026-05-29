@@ -238,7 +238,7 @@ func (op *Operation) initStepCache(ctx context.Context, onProgress func(errs.Pro
 
 func (op *Operation) initStepBinary(ctx context.Context, nonInteractive bool, downloadVersion string) (InitStepResult, *errs.NeedsInteraction) {
 	// Python: local = cast(list[BinaryItem], BinaryOperation.list_all())
-	local, err := op.BinaryListAll(ctx)
+	local, _, err := op.BinaryList(ctx, false, nil)
 	if err != nil {
 		return InitStepResult{Step: "binary", Success: false, Message: "Failed to list binaries"}, nil
 	}
@@ -321,7 +321,8 @@ func (op *Operation) initDownloadBinaryLatest(ctx context.Context) InitStepResul
 	// Python: try: BinaryOperation.list_all(remote=True, limit=1); except BinaryError:
 	//         return InitStepResult("binary", False, f"Download failed: {e}")
 	// Go wraps the list and pull in an error-checking pattern.
-	remote, err := op.BinaryListRemote(ctx, 1)
+	one := 1
+	_, remote, err := op.BinaryList(ctx, true, &one)
 	if err != nil || len(remote) == 0 {
 		return InitStepResult{Step: "binary", Success: false, Message: "No remote versions found"}
 	}
@@ -371,7 +372,8 @@ func isNeedsInteraction(result *errs.OperationResult) bool {
 func (op *Operation) initBinaryNeedsInteraction(ctx context.Context) (InitStepResult, *errs.NeedsInteraction) {
 	// Python: try: versions = BinaryOperation.list_all(remote=True, limit=5)
 	//         except BinaryError: versions = []
-	remote, err := op.BinaryListRemote(ctx, 5)
+	five := 5
+	_, remote, err := op.BinaryList(ctx, true, &five)
 
 	var versions []string
 	if err == nil {

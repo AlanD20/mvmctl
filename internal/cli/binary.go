@@ -11,7 +11,37 @@ import (
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/internal/cli/common"
 )
+
+// binJSON is the JSON output format for binary ls.
+type binJSON struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Version     string  `json:"version"`
+	FullVersion string  `json:"full_version"`
+	CIVersion   *string `json:"ci_version"`
+	Path        string  `json:"path"`
+	IsDefault   bool    `json:"is_default"`
+	IsPresent   bool    `json:"is_present"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
+}
+
+// localFirecrackerVersions builds a set of Firecracker versions present locally.
+// BinaryList for local entries returns all binary types (firecracker, jailer,
+// kernels, images), but BinaryList for remote only fetches Firecracker releases.
+// This filter prevents type-mismatch when checking which remote releases are
+// already downloaded.
+func localFirecrackerVersions(local []*model.BinaryItem) map[string]bool {
+	versions := make(map[string]bool)
+	for _, b := range local {
+		if b.Name == "firecracker" {
+			versions[b.Version] = true
+		}
+	}
+	return versions
+}
 
 // NewBinaryCmd creates the binary command and its subcommands.
 func NewBinaryCmd(op *api.Operation) *cobra.Command {
@@ -50,31 +80,14 @@ func newBinaryLsCmd(op *api.Operation) *cobra.Command {
 		Use:   "ls",
 		Short: "List local (and optionally remote) Firecracker versions",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			local, err := op.BinaryListAll(cmd.Context())
+			local, _, err := op.BinaryList(cmd.Context(), false, nil)
 			if err != nil {
 				return err
 			}
 
-			localVersions := make(map[string]bool)
-			for _, b := range local {
-				if b.Name == "firecracker" {
-					localVersions[b.Version] = true
-				}
-			}
+			localVersions := localFirecrackerVersions(local)
 
 			if jsonOutput {
-				type binJSON struct {
-					ID          string  `json:"id"`
-					Name        string  `json:"name"`
-					Version     string  `json:"version"`
-					FullVersion string  `json:"full_version"`
-					CIVersion   *string `json:"ci_version"`
-					Path        string  `json:"path"`
-					IsDefault   bool    `json:"is_default"`
-					IsPresent   bool    `json:"is_present"`
-					CreatedAt   string  `json:"created_at"`
-					UpdatedAt   string  `json:"updated_at"`
-				}
 				data := make([]binJSON, 0, len(local))
 				for _, b := range local {
 					data = append(data, binJSON{
@@ -97,7 +110,7 @@ func newBinaryLsCmd(op *api.Operation) *cobra.Command {
 
 			if remote {
 				fmt.Fprintf(os.Stderr, "Fetching remote versions...\n")
-				remoteVersions, err := op.BinaryListRemote(cmd.Context(), limit)
+				_, remoteVersions, err := op.BinaryList(cmd.Context(), true, &limit)
 				if err != nil {
 					return err
 				}
@@ -110,32 +123,32 @@ func newBinaryLsCmd(op *api.Operation) *cobra.Command {
 					}
 					rows = append(rows, []string{cached, ver})
 				}
-				cli.Table([]string{"Downloaded", "Version"}, rows)
+				common.Cli.Table([]string{"Downloaded", "Version"}, rows)
 				return nil
 			}
 
 			if longOutput {
 				rows := make([][]string, 0, len(local))
 				for _, b := range local {
-					marker := cli.FormatMarker(b.IsDefault)
-					shortID := cli.FormatID(b.ID)
+					marker := common.Cli.FormatMarker(b.IsDefault)
+					shortID := common.Cli.FormatID(b.ID)
 					fullVer := b.FullVersion
 					if fullVer == "" {
 						fullVer = "-"
 					}
-					created := cli.FormatTimestamp(b.CreatedAt, "relative")
+					created := common.Cli.FormatTimestamp(b.CreatedAt, "relative")
 					rows = append(rows, []string{marker, shortID, b.Name, b.Version, fullVer, created})
 				}
-				cli.Table([]string{"", "ID", "Name", "Version", "Full Version", "Created"}, rows)
+				common.Cli.Table([]string{"", "ID", "Name", "Version", "Full Version", "Created"}, rows)
 			} else {
 				rows := make([][]string, 0, len(local))
 				for _, b := range local {
-					marker := cli.FormatMarker(b.IsDefault)
-					shortID := cli.FormatID(b.ID)
-					created := cli.FormatTimestamp(b.CreatedAt, "relative")
+					marker := common.Cli.FormatMarker(b.IsDefault)
+					shortID := common.Cli.FormatID(b.ID)
+					created := common.Cli.FormatTimestamp(b.CreatedAt, "relative")
 					rows = append(rows, []string{marker, shortID, b.Name, b.Version, created})
 				}
-				cli.Table([]string{"", "ID", "Name", "Version", "Created"}, rows)
+				common.Cli.Table([]string{"", "ID", "Name", "Version", "Created"}, rows)
 			}
 
 			return nil
@@ -164,21 +177,21 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 			name := args[0]
 
 			if strings.ToLower(name) != "firecracker" {
-				cli.Error(fmt.Sprintf("Unsupported binary: '%s'. Only 'firecracker' is supported for download or build.", name))
+				common.Cli.Error(fmt.Sprintf("Unsupported binary: '%s'. Only 'firecracker' is supported for download or build.", name))
 				return fmt.Errorf("unsupported binary")
 			}
 
 			if gitRef != "" && version != "" {
-				cli.Error("--git-ref and --version are mutually exclusive. Use --git-ref to build from source, or --version to download a release.")
+				common.Cli.Error("--git-ref and --version are mutually exclusive. Use --git-ref to build from source, or --version to download a release.")
 				return fmt.Errorf("mutually exclusive options")
 			}
 
 			// Git build path
 			if gitRef != "" {
-				cli.Info(fmt.Sprintf("Building Firecracker from ref '%s' via Docker-based devtool...", gitRef))
-				cli.Info("  Phase 1: Cloning/updating Firecracker source (git)")
-				cli.Info("  Phase 2: Building release binary (5-15 min via Docker)")
-				cli.Info("  The build output will appear below once it starts:\n")
+				common.Cli.Info(fmt.Sprintf("Building Firecracker from ref '%s' via Docker-based devtool...", gitRef))
+				common.Cli.Info("  Phase 1: Cloning/updating Firecracker source (git)")
+				common.Cli.Info("  Phase 2: Building release binary (5-15 min via Docker)")
+				common.Cli.Info("  The build output will appear below once it starts:\n")
 
 			gitRefPtr := &gitRef
 			result := op.BinaryPull(cmd.Context(), &inputs.BinaryPullInput{
@@ -189,20 +202,20 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 				DownloadOverride: false,
 			})
 				if result.Status == "error" {
-					cli.Error(result.Message)
+					common.Cli.Error(result.Message)
 					return fmt.Errorf("%s", result.Message)
 				}
 				binaries, _ := result.Item.([]*model.BinaryItem)
 
-				cli.Info("")
+				common.Cli.Info("")
 				for _, b := range binaries {
-					shortID := cli.FormatID(b.ID)
-					cli.Success(fmt.Sprintf("Built: %s %s: %s", b.Name, b.Version, b.Path))
-					cli.Info(fmt.Sprintf("  ID: %s", shortID))
+					shortID := common.Cli.FormatID(b.ID)
+					common.Cli.Success(fmt.Sprintf("Built: %s %s: %s", b.Name, b.Version, b.Path))
+					common.Cli.Info(fmt.Sprintf("  ID: %s", shortID))
 				}
 
 				if setDefault && len(binaries) > 0 {
-					cli.Success(fmt.Sprintf("Default binary set to: %s", binaries[0].Version))
+					common.Cli.Success(fmt.Sprintf("Default binary set to: %s", binaries[0].Version))
 				}
 
 				return nil
@@ -221,7 +234,7 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 
 			// If binary already exists and --force wasn't set, offer to re-download
 			if result.Status == "error" && result.Code == string(errs.CodeBinaryAlreadyExists) && !force {
-				cli.Warning(result.Message)
+				common.Cli.Warning(result.Message)
 				// Prompt for re-download matching typer.confirm() behavior
 				confirmed := false
 				prompt := "Re-download? [y/N]: "
@@ -254,22 +267,22 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 					DownloadOverride: true,
 				})
 				} else {
-					cli.Info("Aborted")
+					common.Cli.Info("Aborted")
 					return nil
 				}
 			}
 
 			if result.Status == "error" {
-				cli.Error(result.Message)
+				common.Cli.Error(result.Message)
 				return fmt.Errorf("%s", result.Message)
 			}
 
 			if result.Status == "skipped" {
-				cli.Info(result.Message)
+				common.Cli.Info(result.Message)
 				if binaries, ok := result.Item.([]*model.BinaryItem); ok {
 					for _, b := range binaries {
-						shortID := cli.FormatID(b.ID)
-						cli.Info(fmt.Sprintf("  %s v%s: %s", b.Name, b.Version, shortID))
+						shortID := common.Cli.FormatID(b.ID)
+						common.Cli.Info(fmt.Sprintf("  %s v%s: %s", b.Name, b.Version, shortID))
 					}
 				}
 				return nil
@@ -277,13 +290,13 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 
 			binaries, _ := result.Item.([]*model.BinaryItem)
 			for _, b := range binaries {
-				shortID := cli.FormatID(b.ID)
-				cli.Success(fmt.Sprintf("Downloaded: %s v%s: %s", b.Name, b.Version, b.Path))
-				cli.Info(fmt.Sprintf("  ID: %s", shortID))
+				shortID := common.Cli.FormatID(b.ID)
+				common.Cli.Success(fmt.Sprintf("Downloaded: %s v%s: %s", b.Name, b.Version, b.Path))
+				common.Cli.Info(fmt.Sprintf("  ID: %s", shortID))
 			}
 
 			if setDefault && len(binaries) > 0 {
-				cli.Success(fmt.Sprintf("Default binary set to: v%s", binaries[0].Version))
+				common.Cli.Success(fmt.Sprintf("Default binary set to: v%s", binaries[0].Version))
 			}
 
 			return nil
@@ -312,16 +325,16 @@ func newBinaryRmCmd(op *api.Operation) *cobra.Command {
 			if version != "" {
 				result := op.BinaryRemoveByVersion(cmd.Context(), version, force)
 				if result.IsError() {
-					cli.Error(result.Message)
+					common.Cli.Error(result.Message)
 					return fmt.Errorf("%s", result.Message)
 				}
-				cli.Success(fmt.Sprintf("Removed: v%s", version))
+				common.Cli.Success(fmt.Sprintf("Removed: v%s", version))
 				return nil
 			}
 
 			effectiveIDs := args
 			if len(effectiveIDs) == 0 {
-				cli.Error("Provide at least one binary ID to remove or use --version")
+				common.Cli.Error("Provide at least one binary ID to remove or use --version")
 				return fmt.Errorf("usage error")
 			}
 
@@ -332,13 +345,13 @@ func newBinaryRmCmd(op *api.Operation) *cobra.Command {
 				if msg == "" {
 					msg = "Removed"
 				}
-				cli.Success(msg)
+				common.Cli.Success(msg)
 			} else {
 				msg := r.Message
 				if msg == "" {
 					msg = "Remove failed"
 				}
-				cli.Error(msg)
+				common.Cli.Error(msg)
 			}
 		}
 			if batchResult.HasErrors() {
@@ -365,7 +378,7 @@ func newBinaryDefaultCmd(op *api.Operation) *cobra.Command {
 
 			result := op.BinarySetDefault(cmd.Context(), &inputs.BinaryInput{Identifiers: []string{identifier}})
 			if result.IsError() {
-				cli.Error(result.Message)
+				common.Cli.Error(result.Message)
 				return fmt.Errorf("%s", result.Message)
 			}
 
@@ -373,7 +386,7 @@ func newBinaryDefaultCmd(op *api.Operation) *cobra.Command {
 			if msg == "" {
 				msg = fmt.Sprintf("Default binary set to: %s", identifier)
 			}
-			cli.Success(msg)
+			common.Cli.Success(msg)
 			return nil
 		},
 	}

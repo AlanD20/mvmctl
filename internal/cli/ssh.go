@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/internal/cli/common"
 )
 
 // completeVMNames provides shell completion for VM identifiers.
@@ -100,7 +101,7 @@ Examples:
 
 			result := op.SSHConnect(cmd.Context(), input)
 			if result.Status == "error" {
-				cli.Error(result.Message)
+				common.Cli.Error(result.Message)
 				return fmt.Errorf("%s", result.Message)
 			}
 			return nil

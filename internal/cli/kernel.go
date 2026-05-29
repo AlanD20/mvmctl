@@ -56,7 +56,7 @@ func newKernelLsCmd(op *api.Operation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if remote {
 				fmt.Fprintln(os.Stderr, "Fetching remote kernel versions...")
-				remoteVersions, err := op.KernelListRemote(cmd.Context(), noCache)
+				_, remoteVersions, err := op.KernelList(cmd.Context(), true, noCache)
 				if err != nil {
 					return err
 				}
@@ -136,18 +136,14 @@ func newKernelLsCmd(op *api.Operation) *cobra.Command {
 					}
 				}
 
-				cli.Table([]string{"Type / Version", "Description"}, rows)
+				common.Cli.Table([]string{"Type / Version", "Description"}, rows)
 				return nil
 			}
 
 			// Local listing
-			raw, err := op.KernelListAll(cmd.Context(), false, false)
+			kernels, _, err := op.KernelList(cmd.Context(), false, false)
 			if err != nil {
 				return err
-			}
-			kernels, ok := raw.([]*model.KernelItem)
-			if !ok {
-				return nil
 			}
 
 			if jsonOutput {
@@ -165,14 +161,14 @@ func newKernelLsCmd(op *api.Operation) *cobra.Command {
 
 			rows := make([][]string, 0, len(kernels))
 			for _, k := range kernels {
-				marker := cli.FormatMarker(k.IsDefault)
-				created := cli.FormatTimestamp(k.CreatedAt, "relative")
+				marker := common.Cli.FormatMarker(k.IsDefault)
+				created := common.Cli.FormatTimestamp(k.CreatedAt, "relative")
 
 				if longOutput {
 					rows = append(rows, []string{
 						marker,
-						cli.FormatID(k.ID),
-						common.FormatName(k.BaseName, !k.IsPresent),
+						common.Cli.FormatID(k.ID),
+						common.Cli.FormatName(k.BaseName, !k.IsPresent),
 						k.Version,
 						k.Type,
 						k.Arch,
@@ -181,8 +177,8 @@ func newKernelLsCmd(op *api.Operation) *cobra.Command {
 				} else {
 					rows = append(rows, []string{
 						marker,
-						cli.FormatID(k.ID),
-						common.FormatName(k.BaseName, !k.IsPresent),
+						common.Cli.FormatID(k.ID),
+						common.Cli.FormatName(k.BaseName, !k.IsPresent),
 						k.Version,
 						k.Type,
 						created,
@@ -191,9 +187,9 @@ func newKernelLsCmd(op *api.Operation) *cobra.Command {
 			}
 
 			if longOutput {
-				cli.Table([]string{"", "ID", "Name", "Version", "Type", "Arch", "Created"}, rows)
+				common.Cli.Table([]string{"", "ID", "Name", "Version", "Type", "Arch", "Created"}, rows)
 			} else {
-				cli.Table([]string{"", "ID", "Name", "Version", "Type", "Created"}, rows)
+				common.Cli.Table([]string{"", "ID", "Name", "Version", "Type", "Created"}, rows)
 			}
 			return nil
 		},
@@ -248,7 +244,7 @@ Examples:
 			}
 
 			if effectiveType == "" {
-				cli.Error("Kernel type is required. Use 'mvm kernel pull --type official' or 'mvm kernel pull official:6.19.9'")
+				common.Cli.Error("Kernel type is required. Use 'mvm kernel pull --type official' or 'mvm kernel pull official:6.19.9'")
 				return fmt.Errorf("kernel type is required")
 			}
 
@@ -317,29 +313,29 @@ Examples:
 				return nil
 			}
 			if result.IsError() {
-				cli.Error(result.Message)
+				common.Cli.Error(result.Message)
 				return fmt.Errorf("%s", result.Message)
 			}
 			if result.Status == "skipped" {
-				cli.Info(result.Message)
+				common.Cli.Info(result.Message)
 				if result.Item != nil {
 					if ki, ok := result.Item.(*model.KernelItem); ok && ki != nil {
-						cli.Info(fmt.Sprintf("  ID: %s", cli.FormatID(ki.ID)))
+						common.Cli.Info(fmt.Sprintf("  ID: %s", common.Cli.FormatID(ki.ID)))
 					}
 				}
 				return nil
 			}
 			if result.Item != nil {
 				if ki, ok := result.Item.(*model.KernelItem); ok && ki != nil {
-					cli.Success(fmt.Sprintf("Pulled: %s (ID: %s)", ki.Name, cli.FormatID(ki.ID)))
+					common.Cli.Success(fmt.Sprintf("Pulled: %s (ID: %s)", ki.Name, common.Cli.FormatID(ki.ID)))
 					resolvedFeatures, _ := result.Metadata["features"].([]string)
 					if len(resolvedFeatures) > 0 {
-						cli.Info("Enabled features: " + strings.Join(resolvedFeatures, ", "))
+						common.Cli.Info("Enabled features: " + strings.Join(resolvedFeatures, ", "))
 					}
 				}
 			} else {
 				// Fallback for unexpected non-OperationResult returns
-				cli.Success("Pull completed")
+				common.Cli.Success("Pull completed")
 			}
 			return nil
 		},
@@ -370,7 +366,7 @@ func newKernelRmCmd(op *api.Operation) *cobra.Command {
 		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				cli.Error("Provide at least one kernel ID or name")
+				common.Cli.Error("Provide at least one kernel ID or name")
 				return fmt.Errorf("usage error")
 			}
 			result := op.KernelRemove(cmd.Context(), args, force)
@@ -380,13 +376,13 @@ func newKernelRmCmd(op *api.Operation) *cobra.Command {
 					if msg == "" {
 						msg = "Removed"
 					}
-					cli.Success(msg)
+					common.Cli.Success(msg)
 				} else {
 					msg := item.Message
 					if msg == "" {
 						msg = "Remove failed"
 					}
-					cli.Error(msg)
+					common.Cli.Error(msg)
 				}
 			}
 			if result.HasErrors() {
@@ -430,7 +426,7 @@ func newKernelInspectCmd(op *api.Operation) *cobra.Command {
 				}
 			}
 
-			cli.PrintDictTree(info, fmt.Sprintf("Kernel: %s", name))
+			common.Cli.PrintDictTree(info, fmt.Sprintf("Kernel: %s", name))
 			return nil
 		},
 	}
@@ -461,7 +457,7 @@ func newKernelDefaultCmd(op *api.Operation) *cobra.Command {
 			if msg == "" {
 				msg = fmt.Sprintf("Default kernel set to: %s", kernelID)
 			}
-			cli.Success(msg)
+			common.Cli.Success(msg)
 			return nil
 		},
 	}
@@ -489,7 +485,7 @@ Examples:
 
 			// Check source file exists
 			if _, err := os.Stat(path); os.IsNotExist(err) {
-				cli.Error(fmt.Sprintf("Source file not found: %s", path))
+				common.Cli.Error(fmt.Sprintf("Source file not found: %s", path))
 				return fmt.Errorf("source file not found: %s", path)
 			}
 
@@ -517,15 +513,15 @@ Examples:
 				if msg == "" {
 					msg = fmt.Sprintf("Import failed: %s", name)
 				}
-				cli.Error(msg)
+				common.Cli.Error(msg)
 				return fmt.Errorf("%s", msg)
 			}
 			if kernelItem, ok := result.Item.(*model.KernelItem); ok && kernelItem != nil {
-				cli.Success(fmt.Sprintf("Imported: %s", kernelItem.Name))
-				cli.Info(fmt.Sprintf("  ID:   %s", cli.FormatID(kernelItem.ID)))
+				common.Cli.Success(fmt.Sprintf("Imported: %s", kernelItem.Name))
+				common.Cli.Info(fmt.Sprintf("  ID:   %s", common.Cli.FormatID(kernelItem.ID)))
 			}
 			if setDefault {
-				cli.Success(fmt.Sprintf("Default kernel set to: %s", name))
+				common.Cli.Success(fmt.Sprintf("Default kernel set to: %s", name))
 			}
 			return nil
 		},

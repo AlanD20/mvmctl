@@ -91,9 +91,9 @@ func newVolumeLsCmd(op *api.Operation, configAPI *api.Operation) *cobra.Command 
 				longOnly bool
 			}
 			allColumns := []volColumn{
-				{"ID", func(v *model.VolumeItem) string { return common.FormatID(v.ID) }, false},
+				{"ID", func(v *model.VolumeItem) string { return common.Cli.FormatID(v.ID) }, false},
 				{"Name", func(v *model.VolumeItem) string { return v.Name }, false},
-				{"Size", func(v *model.VolumeItem) string { return common.FormatSize(v.SizeBytes) }, false},
+				{"Size", func(v *model.VolumeItem) string { return common.Cli.FormatSize(v.SizeBytes) }, false},
 				{"Status", func(v *model.VolumeItem) string { return string(v.Status) }, false},
 				{"Format", func(v *model.VolumeItem) string { return v.Format }, true},
 				{"Attached To", func(v *model.VolumeItem) string {
@@ -102,7 +102,7 @@ func newVolumeLsCmd(op *api.Operation, configAPI *api.Operation) *cobra.Command 
 					}
 					return "-"
 				}, true},
-				{"Created", func(v *model.VolumeItem) string { return common.FormatTimestamp(v.CreatedAt, "relative") }, false},
+				{"Created", func(v *model.VolumeItem) string { return common.Cli.FormatTimestamp(v.CreatedAt, "relative") }, false},
 			}
 
 			visible := make([]volColumn, 0)
@@ -126,7 +126,7 @@ func newVolumeLsCmd(op *api.Operation, configAPI *api.Operation) *cobra.Command 
 				rows[i] = row
 			}
 
-			common.MVMCLI.Table(headers, rows)
+			common.Cli.Table(headers, rows)
 			return nil
 		},
 	}
@@ -165,24 +165,24 @@ func newVolumeCreateCmd(op *api.Operation) *cobra.Command {
 			result := op.VolumeCreate(cmd.Context(), input)
 			if result.IsError() {
 				// Match Python: mvm_cli.error(result.message); raise typer.Exit(code=1)
-				cli.Error(result.Message)
+				common.Cli.Error(result.Message)
 				return fmt.Errorf("%s", result.Message)
 			}
 			// Match Python: mvm_cli.success(result.message)
-			common.MVMCLI.Success(result.Message)
+			common.Cli.Success(result.Message)
 			if vol, ok := result.Item.(*model.VolumeItem); ok && vol != nil {
 				// Match Python: mvm_cli.key_value("ID", mvm_cli.format_id(result.item.id))
-				common.MVMCLI.KeyValue("ID", common.FormatID(vol.ID), 2, 12)
+				common.Cli.KeyValue("ID", common.Cli.FormatID(vol.ID), 2, 12)
 				// Match Python: mvm_cli.key_value("Mode", "ro" if result.item.is_read_only else "rw")
 				mode := "rw"
 				if vol.IsReadOnly {
 					mode = "ro"
 				}
-				common.MVMCLI.KeyValue("Mode", mode, 2, 12)
+				common.Cli.KeyValue("Mode", mode, 2, 12)
 				// Match Python: mvm_cli.key_value("Format", result.item.format)
-				common.MVMCLI.KeyValue("Format", vol.Format, 2, 12)
+				common.Cli.KeyValue("Format", vol.Format, 2, 12)
 				// Match Python: mvm_cli.key_value("Size", mvm_cli.format_size(result.item.size_bytes))
-				common.MVMCLI.KeyValue("Size", common.FormatSize(vol.SizeBytes), 2, 12)
+				common.Cli.KeyValue("Size", common.Cli.FormatSize(vol.SizeBytes), 2, 12)
 			}
 			return nil
 		},
@@ -215,13 +215,13 @@ func newVolumeRmCmd(op *api.Operation) *cobra.Command {
 					}
 				}
 				if r.IsOK() {
-					common.MVMCLI.Success(fmt.Sprintf("Removed: %s", itemName))
+					common.Cli.Success(fmt.Sprintf("Removed: %s", itemName))
 				} else {
 					msg := r.Message
 					if msg == "" {
 						msg = fmt.Sprintf("Remove failed: %s", itemName)
 					}
-					common.MVMCLI.Error(msg)
+					common.Cli.Error(msg)
 				}
 			}
 			if removeResult.HasErrors() {
@@ -263,7 +263,7 @@ func newVolumeInspectCmd(op *api.Operation) *cobra.Command {
 			// propagates to @handle_errors.
 			vm := info["volume"].(map[string]interface{})
 			name := vm["name"].(string)
-			common.MVMCLI.PrintDictTree(info, fmt.Sprintf("Volume: %s", name))
+			common.Cli.PrintDictTree(info, fmt.Sprintf("Volume: %s", name))
 			return nil
 		},
 	}
@@ -285,11 +285,11 @@ func newVolumeResizeCmd(op *api.Operation) *cobra.Command {
 			resizeResult := op.VolumeResize(cmd.Context(), &inputs.VolumeCreateInput{Name: identifier, Size: sizeArg})
 			if resizeResult.IsError() {
 				// Match Python: mvm_cli.error(result.message); raise typer.Exit(code=1)
-				cli.Error(resizeResult.Message)
+				common.Cli.Error(resizeResult.Message)
 				return fmt.Errorf("%s", resizeResult.Message)
 			}
 			// Match Python: mvm_cli.success(result.message)
-			common.MVMCLI.Success(resizeResult.Message)
+			common.Cli.Success(resizeResult.Message)
 			return nil
 		},
 	}

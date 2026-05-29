@@ -72,19 +72,19 @@ func HandleErrors(fn func() error) func() error {
 		if isDatabaseError(err) {
 			msg := err.Error()
 			if strings.Contains(msg, "no such table") {
-				MVMCLI.Error(
+				Cli.Error(
 					"Database schema not initialized. " +
 						"Run 'mvm init' first to create the database.",
 				)
 			} else {
-				MVMCLI.Error("Database error: " + msg)
+				Cli.Error("Database error: " + msg)
 			}
 			return err
 		}
 
 		// ── 5. Unexpected error (Exception) ─────────────────────
 		// Python: mvm_cli.error(f"{e.__class__.__name__}: {e}", is_unexpected=True)
-		MVMCLI.Error(formatUnexpected(err), true) // is_unexpected = true
+		Cli.Error(formatUnexpected(err), true) // is_unexpected = true
 		return err
 	}
 }
@@ -121,23 +121,23 @@ func handleDomainError(de *errs.DomainError) error {
 	// ── PrivilegeError subclass ──────────────────────────────────
 	// Matches Python's PrivilegeError(MVMError) handling.
 	if de.Code == errs.CodePrivilegeRequired && de.Class == errs.ClassNeedsInteraction {
-		MVMCLI.Error(displayMsg)
+		Cli.Error(displayMsg)
 
 		if de.Details != nil {
 			detailMsg, _ := de.Details["message"].(string)
 			if detailMsg != "" {
-				MVMCLI.Warning("Details: " + detailMsg)
+				Cli.Warning("Details: " + detailMsg)
 			}
 
-			MVMCLI.Info("Options:")
+			Cli.Info("Options:")
 			if suggestions, ok := de.Details["suggestions"]; ok {
 				if sugList, ok := suggestions.([]string); ok {
 					for _, suggestion := range sugList {
-						MVMCLI.Info("  - " + suggestion)
+						Cli.Info("  - " + suggestion)
 					}
 				} else if sugList, ok := suggestions.([]interface{}); ok {
 					for _, s := range sugList {
-						MVMCLI.Info(fmt.Sprintf("  - %v", s))
+						Cli.Info(fmt.Sprintf("  - %v", s))
 					}
 				}
 			}
@@ -148,7 +148,7 @@ func handleDomainError(de *errs.DomainError) error {
 
 	// ── General MVMError (and all other DomainErrors) ────────────
 	// Python: mvm_cli.error(str(e))
-	MVMCLI.Error(displayMsg)
+	Cli.Error(displayMsg)
 	return de
 }
 
