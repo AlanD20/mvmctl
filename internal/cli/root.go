@@ -121,7 +121,7 @@ func makePersistentPreRunE() func(*cobra.Command, []string) error {
 		if system.IsRoot() {
 			_, escalated := infra.EnvGet("ESCALATED")
 			if !escalated {
-				common.MVMCLI.Warning(
+				common.Cli.Warning(
 					fmt.Sprintf("Warning: running as root. Consider using the '%s' group instead (set up via 'sudo %s host init').",
 						infra.CLIName, infra.CLIName))
 			}

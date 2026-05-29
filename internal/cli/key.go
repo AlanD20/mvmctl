@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api"
+	"mvmctl/internal/cli/common"
 )
 
 func NewKeyCmd(op *api.Operation) *cobra.Command {
@@ -66,20 +67,20 @@ func newKeyListCmd(op *api.Operation) *cobra.Command {
 			}
 
 			if len(keys) == 0 {
-				cli.Info("No keys found. Use 'mvm key create <name>' or 'mvm key add <name> <path>' to add one.")
+				common.Cli.Info("No keys found. Use 'mvm key create <name>' or 'mvm key add <name> <path>' to add one.")
 				return nil
 			}
 
 			rows := make([][]string, 0, len(keys))
 			for _, k := range keys {
-				marker := cli.FormatMarker(k.IsDefault)
-				created := cli.FormatTimestamp(k.CreatedAt, "relative")
+				marker := common.Cli.FormatMarker(k.IsDefault)
+				created := common.Cli.FormatTimestamp(k.CreatedAt, "relative")
 
 				if longOutput {
 				rows = append(rows, []string{
 					marker,
-					cli.FormatID(k.ID),
-					cli.FormatName(k.Name, !k.IsPresent),
+					common.Cli.FormatID(k.ID),
+					common.Cli.FormatName(k.Name, !k.IsPresent),
 					k.Algorithm,
 					k.Fingerprint,
 					created,
@@ -87,8 +88,8 @@ func newKeyListCmd(op *api.Operation) *cobra.Command {
 			} else {
 				rows = append(rows, []string{
 					marker,
-					cli.FormatID(k.ID),
-					cli.FormatName(k.Name, !k.IsPresent),
+					common.Cli.FormatID(k.ID),
+					common.Cli.FormatName(k.Name, !k.IsPresent),
 					k.Algorithm,
 					created,
 				})
@@ -96,9 +97,9 @@ func newKeyListCmd(op *api.Operation) *cobra.Command {
 			}
 
 			if longOutput {
-				cli.Table([]string{"", "ID", "Name", "Algorithm", "Fingerprint", "Created"}, rows)
+				common.Cli.Table([]string{"", "ID", "Name", "Algorithm", "Fingerprint", "Created"}, rows)
 			} else {
-				cli.Table([]string{"", "ID", "Name", "Algorithm", "Created"}, rows)
+				common.Cli.Table([]string{"", "ID", "Name", "Algorithm", "Created"}, rows)
 			}
 			return nil
 		},
@@ -126,10 +127,10 @@ func newKeyCreateCmd(op *api.Operation) *cobra.Command {
 
 			alg := algorithm
 			if alg == "" {
-				cli.Info("Select algorithm:")
-				cli.Info("  1. ed25519")
-				cli.Info("  2. rsa")
-				cli.Info("  3. ecdsa")
+				common.Cli.Info("Select algorithm:")
+				common.Cli.Info("  1. ed25519")
+				common.Cli.Info("  2. rsa")
+				common.Cli.Info("  3. ecdsa")
 				fmt.Fprintf(os.Stderr, "Enter number [1]: ")
 				var choice string
 				_, _ = fmt.Scanln(&choice)
@@ -159,11 +160,11 @@ func newKeyCreateCmd(op *api.Operation) *cobra.Command {
 
 			createResult := op.KeyCreate(cmd.Context(), input)
 			if createResult.Status == "error" {
-				cli.Error(createResult.Message)
+				common.Cli.Error(createResult.Message)
 				return fmt.Errorf("%s", createResult.Message)
 			}
 			if createdKey, ok := createResult.Item.(*model.SSHKeyItem); ok && createdKey != nil {
-				cli.Success(fmt.Sprintf("Created: %s (ID: %s)", createdKey.Name, createdKey.Fingerprint))
+				common.Cli.Success(fmt.Sprintf("Created: %s (ID: %s)", createdKey.Name, createdKey.Fingerprint))
 			}
 			return nil
 		},
@@ -192,11 +193,11 @@ func newKeyAddCmd(op *api.Operation) *cobra.Command {
 
 			createdKey := op.KeyAdd(cmd.Context(), name, pubKeyPath, force)
 			if createdKey.Status == "error" {
-				cli.Error(createdKey.Message)
+				common.Cli.Error(createdKey.Message)
 				return fmt.Errorf("%s", createdKey.Message)
 			}
 			if keyItem, ok := createdKey.Item.(*model.SSHKeyItem); ok && keyItem != nil {
-				cli.Success(fmt.Sprintf("Added: %s (ID: %s)", keyItem.Name, cli.FormatID(keyItem.ID)))
+				common.Cli.Success(fmt.Sprintf("Added: %s (ID: %s)", keyItem.Name, common.Cli.FormatID(keyItem.ID)))
 			}
 			return nil
 		},
@@ -218,7 +219,7 @@ func newKeyRemoveCmd(op *api.Operation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			names := args
 			if len(names) == 0 {
-				cli.Error("Provide at least one key name to remove")
+				common.Cli.Error("Provide at least one key name to remove")
 				return fmt.Errorf("usage error")
 			}
 
@@ -227,12 +228,12 @@ func newKeyRemoveCmd(op *api.Operation) *cobra.Command {
 			for _, r := range removeResult.Items {
 				if r.Status == "success" {
 					if keyItem, ok := r.Item.(*model.SSHKeyItem); ok {
-						cli.Success(fmt.Sprintf("Removed: %s", keyItem.Name))
+						common.Cli.Success(fmt.Sprintf("Removed: %s", keyItem.Name))
 					} else {
-						cli.Success("Removed")
+						common.Cli.Success("Removed")
 					}
 				} else {
-					cli.Error(r.Message)
+					common.Cli.Error(r.Message)
 				}
 			}
 
@@ -269,7 +270,7 @@ func newKeyInspectCmd(op *api.Operation) *cobra.Command {
 
 			info, err := op.KeyInspect(cmd.Context(), &api.KeyInput{Names: []string{name}})
 			if err != nil {
-				cli.Error(err.Error())
+				common.Cli.Error(err.Error())
 				return err
 			}
 
@@ -288,7 +289,7 @@ func newKeyInspectCmd(op *api.Operation) *cobra.Command {
 					keyName = n
 				}
 			}
-			cli.PrintDictTree(info, fmt.Sprintf("Key: %s", keyName))
+			common.Cli.PrintDictTree(info, fmt.Sprintf("Key: %s", keyName))
 			return nil
 		},
 	}
@@ -323,13 +324,13 @@ func newKeyExportCmd(op *api.Operation) *cobra.Command {
 
 			exportResult := op.KeyExport(cmd.Context(), &api.KeyInput{Names: []string{name}}, out, force)
 			if exportResult.Status == "error" {
-				cli.Error(exportResult.Message)
+				common.Cli.Error(exportResult.Message)
 				return fmt.Errorf("%s", exportResult.Message)
 			}
 
 			if paths, ok := exportResult.Item.([]string); ok && len(paths) >= 2 {
-				cli.Success(fmt.Sprintf("Exported: %s", paths[0]))
-				cli.Info(fmt.Sprintf("Exported public key to %s", paths[1]))
+				common.Cli.Success(fmt.Sprintf("Exported: %s", paths[0]))
+				common.Cli.Info(fmt.Sprintf("Exported public key to %s", paths[1]))
 			}
 			return nil
 		},
@@ -353,15 +354,15 @@ func newKeyDefaultCmd(op *api.Operation) *cobra.Command {
 			if clear {
 				clearResult := op.KeyClearDefaults(cmd.Context())
 				if clearResult.Status == "error" {
-					cli.Error(clearResult.Message)
+					common.Cli.Error(clearResult.Message)
 					return fmt.Errorf("%s", clearResult.Message)
 				}
-				cli.Success("Cleared: all default keys")
+				common.Cli.Success("Cleared: all default keys")
 				return nil
 			}
 
 			if len(args) == 0 {
-				cli.Error("Provide at least one key name or use --clear")
+				common.Cli.Error("Provide at least one key name or use --clear")
 				return fmt.Errorf("usage error")
 			}
 
@@ -370,11 +371,11 @@ func newKeyDefaultCmd(op *api.Operation) *cobra.Command {
 			effectiveNames := args
 			setResult := op.KeySetDefault(cmd.Context(), &api.KeyInput{Names: effectiveNames})
 			if setResult.Status == "error" {
-				cli.Error(setResult.Message)
+				common.Cli.Error(setResult.Message)
 				return fmt.Errorf("set default failed")
 			}
 
-			cli.Success(fmt.Sprintf("Default key(s) set: %s", strings.Join(effectiveNames, ", ")))
+			common.Cli.Success(fmt.Sprintf("Default key(s) set: %s", strings.Join(effectiveNames, ", ")))
 			return nil
 		},
 	}

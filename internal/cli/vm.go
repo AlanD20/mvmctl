@@ -41,10 +41,6 @@ func NewVMCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-// ─── helpers ───────────────────────────────────────────────────────────────────
-
-var cli = common.NewCli()
-
 // ─── help (hidden, matches Python's @vm_app.command(name="help", hidden=True)) ─
 
 func newVMHelpCmd(parent *cobra.Command) *cobra.Command {
@@ -101,24 +97,24 @@ func runVMLs(op *api.Operation, cmd *cobra.Command, jsonOutput, longOutput bool)
 		if ipStr == "" {
 			ipStr = "-"
 		}
-		created := common.FormatTimestamp(v.CreatedAt, "relative")
+		created := common.Cli.FormatTimestamp(v.CreatedAt, "relative")
 
 		if style == "long" {
 			resources := fmt.Sprintf("%d vCPU / %d MiB / %d MiB", v.VCPUCount, v.MemSizeMiB, v.DiskSizeMiB)
 			rows = append(rows, []string{
-				common.FormatID(v.ID),
+				common.Cli.FormatID(v.ID),
 				v.Name,
 				string(v.Status),
 				exitStr,
 				ipStr,
 				resources,
-				common.FormatID(v.ImageID),
-				common.FormatID(v.KernelID),
+				common.Cli.FormatID(v.ImageID),
+				common.Cli.FormatID(v.KernelID),
 				created,
 			})
 		} else {
 			rows = append(rows, []string{
-				common.FormatID(v.ID),
+				common.Cli.FormatID(v.ID),
 				v.Name,
 				string(v.Status),
 				exitStr,
@@ -129,9 +125,9 @@ func runVMLs(op *api.Operation, cmd *cobra.Command, jsonOutput, longOutput bool)
 	}
 
 	if style == "long" {
-		cli.Table([]string{"ID", "Name", "Status", "Exit", "IPv4", "Resources", "Image", "Kernel", "Created"}, rows)
+		common.Cli.Table([]string{"ID", "Name", "Status", "Exit", "IPv4", "Resources", "Image", "Kernel", "Created"}, rows)
 	} else {
-		cli.Table([]string{"ID", "Name", "Status", "Exit", "IPv4", "Created"}, rows)
+		common.Cli.Table([]string{"ID", "Name", "Status", "Exit", "IPv4", "Created"}, rows)
 	}
 	return nil
 }
@@ -179,7 +175,7 @@ func runVMps(op *api.Operation, cmd *cobra.Command, jsonOutput bool) error {
 	}
 
 	if len(vms) == 0 {
-		cli.Success("No active VMs")
+		common.Cli.Success("No active VMs")
 		return nil
 	}
 
@@ -196,13 +192,13 @@ func runVMps(op *api.Operation, cmd *cobra.Command, jsonOutput bool) error {
 			fmt.Sprintf("%d", v.VCPUCount),
 			fmt.Sprintf("%d", v.MemSizeMiB),
 			fmt.Sprintf("%d", v.DiskSizeMiB),
-			common.FormatID(v.ImageID),
-			common.FormatID(v.KernelID),
-			common.FormatTimestamp(v.CreatedAt, "relative"),
+			common.Cli.FormatID(v.ImageID),
+			common.Cli.FormatID(v.KernelID),
+			common.Cli.FormatTimestamp(v.CreatedAt, "relative"),
 		})
 	}
 
-	cli.Table([]string{"Name", "Status", "IPv4", "vCPUs", "Mem(MiB)", "Disk(MiB)", "Image", "Kernel", "Created"}, rows)
+	common.Cli.Table([]string{"Name", "Status", "IPv4", "vCPUs", "Mem(MiB)", "Disk(MiB)", "Image", "Kernel", "Created"}, rows)
 	return nil
 }
 
@@ -311,7 +307,7 @@ func runVMCreate(
 	if skipCleanup {
 		// Python: typer.confirm() defaults to True (Enter = Yes)
 		if !confirmPrompt("--skip-cleanup is set: if creation fails, resources will be left behind and must be cleaned manually. Continue?") {
-			cli.Info("Aborted")
+			common.Cli.Info("Aborted")
 			return nil // exit code 0, matching Python's raise typer.Exit(code=0)
 		}
 	}
@@ -332,7 +328,7 @@ func runVMCreate(
 	// --count and --volume are mutually exclusive
 	effectiveCount := max(count, 1)
 	if effectiveCount > 1 && len(volume) > 0 {
-		cli.Error("Cannot use --count with --volume: a volume can only be attached to a single VM. Create VMs individually with --volume.")
+		common.Cli.Error("Cannot use --count with --volume: a volume can only be attached to a single VM. Create VMs individually with --volume.")
 		return fmt.Errorf("--count and --volume are mutually exclusive")
 	}
 
@@ -502,23 +498,23 @@ func runVMCreate(
 	})
 	// Check for NeedsInteraction (Python: isinstance(result, NeedsInteraction))
 	if createResult.Exception != nil && errs.IsNeedsInteraction(createResult.Exception) {
-		cli.Error(createResult.Message)
+		common.Cli.Error(createResult.Message)
 		return fmt.Errorf("create VMs: %s", createResult.Message)
 	}
 	if createResult.IsError() {
-		cli.Error(createResult.Message)
+		common.Cli.Error(createResult.Message)
 		return fmt.Errorf("create VMs: %s", createResult.Message)
 	}
 
 	// Check for nil item (Python: if result.item is None: error "No VMs returned")
 	if createResult.Item == nil {
-		cli.Error("No VMs returned")
+		common.Cli.Error("No VMs returned")
 		return fmt.Errorf("no VMs returned")
 	}
 
 	vms, ok := createResult.Item.([]*model.VM)
 	if !ok || len(vms) == 0 {
-		cli.Error("No VMs returned")
+		common.Cli.Error("No VMs returned")
 		return fmt.Errorf("no VMs returned")
 	}
 
@@ -527,12 +523,12 @@ func runVMCreate(
 		for i, v := range vms {
 			names[i] = v.Name
 		}
-		cli.Success(fmt.Sprintf("Created: %s", strings.Join(names, ", ")))
+		common.Cli.Success(fmt.Sprintf("Created: %s", strings.Join(names, ", ")))
 	}
 	// Match Python's `if nested_virt:` — truthy check on the tri-state value.
 	// Python has three states: not-set (None), True, False. Prints only when True.
 	if nestedVirtPtr != nil && *nestedVirtPtr {
-		cli.Info("Nested virtualization: enabled")
+		common.Cli.Info("Nested virtualization: enabled")
 	}
 	return nil
 }
@@ -564,7 +560,7 @@ func runVMRemove(op *api.Operation, cmd *cobra.Command, identifiers []string, fo
 			if r.IsOK() {
 				vm, ok := r.Item.(*model.VM)
 				if ok && vm != nil {
-					cli.Success(fmt.Sprintf("Removed: %s", vm.Name))
+					common.Cli.Success(fmt.Sprintf("Removed: %s", vm.Name))
 				}
 			} else {
 				itemName := "unknown"
@@ -575,7 +571,7 @@ func runVMRemove(op *api.Operation, cmd *cobra.Command, identifiers []string, fo
 				if msg == "" {
 					msg = fmt.Sprintf("Remove failed: %s", itemName)
 				}
-				cli.Error(msg)
+				common.Cli.Error(msg)
 			}
 		}
 		return fmt.Errorf("one or more removals failed")
@@ -586,7 +582,7 @@ func runVMRemove(op *api.Operation, cmd *cobra.Command, identifiers []string, fo
 			names = append(names, vm.Name)
 		}
 	}
-	cli.Success(fmt.Sprintf("Removed: %s", strings.Join(names, ", ")))
+	common.Cli.Success(fmt.Sprintf("Removed: %s", strings.Join(names, ", ")))
 	return nil
 }
 
@@ -608,12 +604,12 @@ func newVMStartCmd(op *api.Operation) *cobra.Command {
 						if msg == "" {
 							msg = fmt.Sprintf("Start failed: %s", id)
 						}
-						cli.Error(msg)
+						common.Cli.Error(msg)
 					}
 				}
 				return fmt.Errorf("start failed for %s", id)
 			}
-			cli.Success(fmt.Sprintf("Started: %s", id))
+			common.Cli.Success(fmt.Sprintf("Started: %s", id))
 			return nil
 		},
 	}
@@ -639,12 +635,12 @@ func newVMStopCmd(op *api.Operation) *cobra.Command {
 						if msg == "" {
 							msg = fmt.Sprintf("Stop failed: %s", id)
 						}
-						cli.Error(msg)
+						common.Cli.Error(msg)
 					}
 				}
 				return fmt.Errorf("stop failed for %s", id)
 			}
-			cli.Success(fmt.Sprintf("Stopped: %s", id))
+			common.Cli.Success(fmt.Sprintf("Stopped: %s", id))
 			return nil
 		},
 	}
@@ -673,12 +669,12 @@ func newVMRebootCmd(op *api.Operation) *cobra.Command {
 						if msg == "" {
 							msg = fmt.Sprintf("Reboot failed: %s", id)
 						}
-						cli.Error(msg)
+						common.Cli.Error(msg)
 					}
 				}
 				return fmt.Errorf("reboot failed for %s", id)
 			}
-			cli.Success(fmt.Sprintf("Rebooted: %s", id))
+			common.Cli.Success(fmt.Sprintf("Rebooted: %s", id))
 			return nil
 		},
 	}
@@ -705,12 +701,12 @@ func newVMPauseCmd(op *api.Operation) *cobra.Command {
 						if msg == "" {
 							msg = fmt.Sprintf("Pause failed: %s", id)
 						}
-						cli.Error(msg)
+						common.Cli.Error(msg)
 					}
 				}
 				return fmt.Errorf("pause failed for %s", id)
 			}
-			cli.Success(fmt.Sprintf("Paused: %s", id))
+			common.Cli.Success(fmt.Sprintf("Paused: %s", id))
 			return nil
 		},
 	}
@@ -734,12 +730,12 @@ func newVMResumeCmd(op *api.Operation) *cobra.Command {
 						if msg == "" {
 							msg = fmt.Sprintf("Resume failed: %s", id)
 						}
-						cli.Error(msg)
+						common.Cli.Error(msg)
 					}
 				}
 				return fmt.Errorf("resume failed for %s", id)
 			}
-			cli.Success(fmt.Sprintf("Resumed: %s", id))
+			common.Cli.Success(fmt.Sprintf("Resumed: %s", id))
 			return nil
 		},
 	}
@@ -760,7 +756,7 @@ func newVMSnapshotCmd(op *api.Operation) *cobra.Command {
 
 			snapResult := op.VMSnapshot(cmd.Context(), &inputs.VMInput{Identifiers: []string{id}}, memFile, stateFile)
 			if snapResult.IsError() {
-				cli.Error(snapResult.Message)
+				common.Cli.Error(snapResult.Message)
 				return fmt.Errorf("snapshot failed: %s", snapResult.Message)
 			}
 
@@ -768,7 +764,7 @@ func newVMSnapshotCmd(op *api.Operation) *cobra.Command {
 			if msg == "" {
 				msg = fmt.Sprintf("Snapshot saved: %s", id)
 			}
-			cli.Success(msg)
+			common.Cli.Success(msg)
 			return nil
 		},
 	}
@@ -803,7 +799,7 @@ Flags:
 			op.VMLoad(cmd.Context(), &inputs.VMInput{Identifiers: []string{id}}, memFile, stateFile, resume)
 
 			// Match Python exactly: success message with no extra detail, no post-check.
-			cli.Success(fmt.Sprintf("Snapshot loaded: %s", id))
+			common.Cli.Success(fmt.Sprintf("Snapshot loaded: %s", id))
 			return nil
 		},
 	}
@@ -849,7 +845,7 @@ func runVMInspect(op *api.Operation, cmd *cobra.Command, id string, jsonOutput b
 		}
 	}
 
-	cli.PrintDictTree(info, fmt.Sprintf("VM: %s", vmName))
+	common.Cli.PrintDictTree(info, fmt.Sprintf("VM: %s", vmName))
 	return nil
 }
 
@@ -883,7 +879,7 @@ instead of internal IDs, making it portable across machines.`,
 				if err := os.WriteFile(outputPath, jsonBytes, 0644); err != nil {
 					return err
 				}
-				cli.Success(fmt.Sprintf("Exported: %s", outputPath))
+				common.Cli.Success(fmt.Sprintf("Exported: %s", outputPath))
 			} else {
 				fmt.Println(string(jsonBytes))
 			}
@@ -909,13 +905,13 @@ func newVMImportCmd(op *api.Operation) *cobra.Command {
 			importResult := op.VMImport(cmd.Context(), &inputs.VMImportInput{ConfigPath: args[0], NameOverride: nameOverride}, nil)
 			// Check for NeedsInteraction (Python: isinstance(result, NeedsInteraction))
 			if importResult.Exception != nil && errs.IsNeedsInteraction(importResult.Exception) {
-				cli.Error("Import requires privileges")
+				common.Cli.Error("Import requires privileges")
 				return fmt.Errorf("import requires privileges")
 			}
 			if importResult.Status == "success" {
-				cli.Success(importResult.Message)
+				common.Cli.Success(importResult.Message)
 			} else if importResult.IsError() {
-				cli.Error(importResult.Message)
+				common.Cli.Error(importResult.Message)
 				return fmt.Errorf("import failed: %s", importResult.Message)
 			}
 			return nil
@@ -948,7 +944,7 @@ Arguments:
 				return fmt.Errorf("attach volume %q: %s", volumeName, attachResult.Message)
 			}
 
-			cli.Success(attachResult.Message)
+			common.Cli.Success(attachResult.Message)
 			return nil
 		},
 	}
@@ -976,7 +972,7 @@ Arguments:
 				return fmt.Errorf("detach volume %q: %s", volumeName, detachResult.Message)
 			}
 
-			cli.Success(detachResult.Message)
+			common.Cli.Success(detachResult.Message)
 			return nil
 		},
 	}

@@ -321,46 +321,52 @@ func (op *Operation) BinaryRemoveByVersion(ctx context.Context, version string, 
 	}
 }
 
-// BinaryListAll returns all local binaries.
-// Matches Python's BinaryOperation.list_all(remote=False) exactly.
-func (op *Operation) BinaryListAll(ctx context.Context) ([]*model.BinaryItem, error) {
-	return op.Services.Binary.ListAll(ctx, false, true)
-}
-
-// BinaryListRemote returns available remote versions.
-// Matches Python's BinaryOperation.list_all(remote=True) exactly.
-// When limit <= 0, reads the default from SettingsService like Python:
+// BinaryList returns local binaries or remote versions.
+// Matches Python's BinaryOperation.list_all(remote=bool, limit=int|None) exactly.
+// When remote=false, returns ([]*model.BinaryItem, nil, error).
+// When remote=true, returns (nil, []string, error) with remote version strings.
+// When limit is nil and remote=true, reads default from settings like Python:
 //
 //	SettingsService.resolve(Database(), "defaults.binary", "remote_version_limit")
-func (op *Operation) BinaryListRemote(ctx context.Context, limit int) ([]string, error) {
-	if limit <= 0 {
+func (op *Operation) BinaryList(ctx context.Context, remote bool, limit *int) ([]*model.BinaryItem, []string, error) {
+	if !remote {
+		items, err := op.Services.Binary.ListAll(ctx, false, true)
+		return items, nil, err
+	}
+
+	lmt := 0
+	if limit != nil {
+		lmt = *limit
+	}
+	if lmt <= 0 {
 		if op.Services.Config != nil {
 			rawLimit, _ := op.Services.Config.Get(ctx, "defaults.binary", "remote_version_limit")
 			if rawLimit != nil {
 				switch v := rawLimit.(type) {
 				case int:
-					limit = v
+					lmt = v
 				case float64:
-					limit = int(v)
+					lmt = int(v)
 				case string:
-					limit, _ = strconv.Atoi(v)
+					lmt, _ = strconv.Atoi(v)
 				}
 			}
 		}
-		if limit <= 0 {
+		if lmt <= 0 {
 			dflt, _ := infra.GetDefault("defaults.binary", "remote_version_limit")
 			switch v := dflt.(type) {
 			case int:
-				limit = v
+				lmt = v
 			case float64:
-				limit = int(v)
+				lmt = int(v)
 			}
 		}
-		if limit <= 0 {
-			limit = 20
+		if lmt <= 0 {
+			lmt = 20
 		}
 	}
-	return op.Services.Binary.ListRemote(ctx, limit)
+	versions, err := op.Services.Binary.ListRemote(ctx, lmt)
+	return nil, versions, err
 }
 
 // BinaryGet returns binaries by identifier.

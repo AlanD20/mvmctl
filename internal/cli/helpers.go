@@ -8,100 +8,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/model"
 )
-
-// Success prints a success message to stdout.
-func Success(format string, args ...interface{}) {
-	msg := fmt.Sprintf(format, args...)
-	common.MVMCLI.Success(msg)
-}
-
-// Error prints an error message to stderr.
-func Error(format string, args ...interface{}) {
-	msg := fmt.Sprintf(format, args...)
-	common.MVMCLI.Error(msg)
-}
-
-// Warning prints a warning message to stderr.
-func Warning(format string, args ...interface{}) {
-	msg := fmt.Sprintf(format, args...)
-	common.MVMCLI.Warning(msg)
-}
-
-// Info prints an info/dim message to stdout.
-func Info(format string, args ...interface{}) {
-	msg := fmt.Sprintf(format, args...)
-	common.MVMCLI.Info(msg)
-}
-
-// Table renders a table via the shared table renderer.
-func Table(headers []string, rows [][]string, title ...string) {
-	common.MVMCLI.Table(headers, rows, title...)
-}
-
-// PrintDictTree prints a grouped dictionary tree view.
-func PrintDictTree(data interface{}, title string) {
-	common.MVMCLI.PrintDictTree(data, title)
-}
-
-// FormatID returns short ID display (first 6 chars).
-func FormatID(id string) string {
-	return common.FormatID(id)
-}
-
-// FormatName returns name with missing indicator if not present on disk.
-// Matches Python's mvm_cli.format_name().
-func FormatName(name string, isMissing bool) string {
-	return common.FormatName(name, isMissing)
-}
-
-// FormatMarker returns "*" if default, else " ".
-func FormatMarker(isDefault bool) string {
-	return common.FormatMarker(isDefault)
-}
-
-// FormatSize formats bytes as human-readable size.
-func FormatSize(sizeBytes int64) string {
-	return common.FormatSize(sizeBytes)
-}
-
-// FormatTimestamp formats an ISO timestamp for display.
-func FormatTimestamp(isoString string, style string) string {
-	return common.FormatTimestamp(isoString, style)
-}
-
-// FormatError returns a clean, user-friendly error string.
-func FormatError(err error) string {
-	return common.FormatError(err)
-}
-
-// SectionHeader prints a bold section title.
-func SectionHeader(title string) {
-	common.MVMCLI.SectionHeader(title)
-}
-
-// InspectHeader prints an inspect-style header with underline.
-func InspectHeader(title, subtitle string) {
-	common.MVMCLI.InspectHeader(title, subtitle)
-}
-
-// Printf prints to stdout.
-func Printf(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stdout, format, args...)
-}
-
-// Fprintf prints to stderr.
-func Fprintf(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, format, args...)
-}
-
-// KeyValue prints a key-value pair with consistent padding.
-func KeyValue(key string, value string, indent int, keyWidth int) {
-	common.MVMCLI.KeyValue(key, value, indent, keyWidth)
-}
 
 // checkNameArg guards for positional name arg: shows help on "help" or empty,
 // matching Python's MVMCli.check_name_arg() in utils/cli.py.
@@ -160,11 +68,7 @@ func completeImageIDs(cmd *cobra.Command, args []string, toComplete string) ([]s
 	if opRef == nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	raw, _ := opRef.ImageListAll(cmd.Context(), false, "", nil, false)
-	images, ok := raw.([]*model.ImageItem)
-	if !ok {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
+	images, _, _ := opRef.ImageListAll(cmd.Context(), false, "", nil, false)
 	var results []string
 	for _, img := range images {
 		short := img.ID
@@ -184,11 +88,7 @@ func completeKernelIDs(cmd *cobra.Command, args []string, toComplete string) ([]
 	if opRef == nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	raw, _ := opRef.KernelListAll(cmd.Context(), false, false)
-	kernels, ok := raw.([]*model.KernelItem)
-	if !ok {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
+	kernels, _, _ := opRef.KernelList(cmd.Context(), false, false)
 	var results []string
 	for _, k := range kernels {
 		if k.Type != "" && k.Version != "" {
@@ -211,7 +111,7 @@ func completeBinaryVersions(cmd *cobra.Command, args []string, toComplete string
 	if opRef == nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	binaries, _ := opRef.BinaryListAll(cmd.Context())
+	binaries, _, _ := opRef.BinaryList(cmd.Context(), false, nil)
 	var results []string
 	for _, b := range binaries {
 		if b.Name != "" && hasPrefix(b.Name, toComplete) && !contains(results, b.Name) {
@@ -340,17 +240,11 @@ func completeRemoteImageIDs(cmd *cobra.Command, args []string, toComplete string
 	if opRef == nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	raw, _ := opRef.ImageListAll(cmd.Context(), true, "", nil, false)
-	images, ok := raw.([]*model.ImageItem)
-	if !ok {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
+	// Match Python: ImageOperation.list_all(remote=True) returns list[ImageVersion]
+	// ImageVersion has no ID field in either Python or Go, so the Python completion
+	// `hasattr(img, "id")` always returns False, yielding zero results. Match that.
+	_, _, _ = opRef.ImageListAll(cmd.Context(), true, "", nil, false)
 	var results []string
-	for _, img := range images {
-		if img.ID != "" && hasPrefix(img.ID, toComplete) && !contains(results, img.ID) {
-			results = append(results, img.ID)
-		}
-	}
 	return results, cobra.ShellCompDirectiveNoFileComp
 }
 

@@ -211,10 +211,10 @@ before it is a source. Multiple sources only work for host -> VM.`,
 						}
 					}
 				}
-				common.MVMCLI.Success(msg)
+				common.Cli.Success(msg)
 				return nil
 			} else if result.IsOK() {
-				common.MVMCLI.Success(result.Message)
+				common.Cli.Success(result.Message)
 				return nil
 			}
 
@@ -223,7 +223,7 @@ before it is a source. Multiple sources only work for host -> VM.`,
 			if msg == "" {
 				msg = "Copy failed"
 			}
-			common.MVMCLI.Error(msg)
+			common.Cli.Error(msg)
 			return fmt.Errorf("%s", msg)
 		},
 	}

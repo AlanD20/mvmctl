@@ -52,18 +52,18 @@ func newCacheInitCmd(op *api.Operation) *cobra.Command {
 			spinner.Stop()
 
 			if result.IsError() {
-				common.MVMCLI.Error(result.Message)
+				common.Cli.Error(result.Message)
 				return fmt.Errorf("cache init failed: %s", result.Message)
 			}
 
 			// Match Python: mvm_cli.success(operation_result.message)
-			common.MVMCLI.Success(result.Message)
+			common.Cli.Success(result.Message)
 			// Match Python: for resource, path in item.items(): if path: mvm_cli.info(f"  {resource}: {path}")
 			if result.Item != nil {
 				if item, ok := result.Item.(map[string]interface{}); ok {
 					for resource, path := range item {
 						if path != nil && path != "" {
-							common.MVMCLI.Info(fmt.Sprintf("  %s: %v", resource, path))
+							common.Cli.Info(fmt.Sprintf("  %s: %v", resource, path))
 						}
 					}
 				}
@@ -117,8 +117,8 @@ func resourceDisplayNamePlural(resource string) string {
 func pruneResource(op *api.Operation, cmd *cobra.Command, resource string, dryRun bool, allResources bool, force bool) error {
 	if !force && !dryRun {
 		// Match Python: mvm_cli.warning("This will remove cached data for all VMs")
-		common.MVMCLI.Warning(fmt.Sprintf("This will remove cached data for all %s", resourceDisplayNamePlural(resource)))
-		common.MVMCLI.Info("")
+		common.Cli.Warning(fmt.Sprintf("This will remove cached data for all %s", resourceDisplayNamePlural(resource)))
+		common.Cli.Info("")
 		if !promptConfirm("Continue?", true) {
 			return nil
 		}
@@ -143,7 +143,7 @@ func pruneResource(op *api.Operation, cmd *cobra.Command, resource string, dryRu
 		return nil
 	}
 	if opResult.IsError() {
-		common.MVMCLI.Error(opResult.Message)
+		common.Cli.Error(opResult.Message)
 		return fmt.Errorf("prune %s failed: %s", resource, opResult.Message)
 	}
 
@@ -157,19 +157,19 @@ func pruneResource(op *api.Operation, cmd *cobra.Command, resource string, dryRu
 			// Match Python: mvm_cli.info(f"[DRY RUN] Would prune {len(removed)} VM(s): {', '.join(removed)}")
 			if resource == "binary" {
 				// Python: f"[DRY RUN] Would prune {len(removed)} binaries: {', '.join(removed)}"
-				common.MVMCLI.Info(fmt.Sprintf("[DRY RUN] Would prune %d binaries: %s", len(removed), strings.Join(removed, ", ")))
+				common.Cli.Info(fmt.Sprintf("[DRY RUN] Would prune %d binaries: %s", len(removed), strings.Join(removed, ", ")))
 			} else {
 				displayName := resourceDisplayName(resource)
-				common.MVMCLI.Info(fmt.Sprintf("[DRY RUN] Would prune %d %s(s): %s", len(removed), displayName, strings.Join(removed, ", ")))
+				common.Cli.Info(fmt.Sprintf("[DRY RUN] Would prune %d %s(s): %s", len(removed), displayName, strings.Join(removed, ", ")))
 			}
 		} else {
 			// Match Python: mvm_cli.success(f"Pruned: {', '.join(removed)}")
-			common.MVMCLI.Success(fmt.Sprintf("Pruned: %s", strings.Join(removed, ", ")))
+			common.Cli.Success(fmt.Sprintf("Pruned: %s", strings.Join(removed, ", ")))
 		}
 	} else {
 		// Match Python: lowercase, e.g. mvm_cli.info("No binaries to prune") — NOT title-case
 		plural := resourceDisplayNamePlural(resource)
-		common.MVMCLI.Info(fmt.Sprintf("No %s to prune", plural))
+		common.Cli.Info(fmt.Sprintf("No %s to prune", plural))
 	}
 
 	return nil
@@ -178,8 +178,8 @@ func pruneResource(op *api.Operation, cmd *cobra.Command, resource string, dryRu
 func pruneMisc(op *api.Operation, cmd *cobra.Command, dryRun bool, force bool) error {
 	if !force && !dryRun {
 		// Match Python: mvm_cli.warning("This will remove cached data (appliance folder, warm images)")
-		common.MVMCLI.Warning("This will remove cached data (appliance folder, warm images)")
-		common.MVMCLI.Info("")
+		common.Cli.Warning("This will remove cached data (appliance folder, warm images)")
+		common.Cli.Info("")
 		if !promptConfirm("Continue?", true) {
 			return nil
 		}
@@ -187,18 +187,18 @@ func pruneMisc(op *api.Operation, cmd *cobra.Command, dryRun bool, force bool) e
 
 	miscResult := op.CachePruneMisc(cmd.Context(), dryRun)
 	if miscResult.IsError() {
-		common.MVMCLI.Error(miscResult.Message)
+		common.Cli.Error(miscResult.Message)
 		return fmt.Errorf("prune misc failed: %s", miscResult.Message)
 	}
 
 	if miscResult.Item == nil {
-		common.MVMCLI.Info("No misc cache to prune")
+		common.Cli.Info("No misc cache to prune")
 		return nil
 	}
 
 	miscMap, ok := miscResult.Item.(map[string]interface{})
 	if !ok {
-		common.MVMCLI.Info("No misc cache to prune")
+		common.Cli.Info("No misc cache to prune")
 		return nil
 	}
 
@@ -208,22 +208,22 @@ func pruneMisc(op *api.Operation, cmd *cobra.Command, dryRun bool, force bool) e
 
 	if applianceRemoved {
 		if dryRun {
-			common.MVMCLI.Info("[DRY RUN] Would remove appliance folder")
+			common.Cli.Info("[DRY RUN] Would remove appliance folder")
 		} else {
-			common.MVMCLI.Success("Removed: appliance folder")
+			common.Cli.Success("Removed: appliance folder")
 		}
 	}
 
 	if warmRemoved {
 		if dryRun {
-			common.MVMCLI.Info("[DRY RUN] Would remove warm images (ready pool)")
+			common.Cli.Info("[DRY RUN] Would remove warm images (ready pool)")
 		} else {
-			common.MVMCLI.Success("Removed: warm images (ready pool)")
+			common.Cli.Success("Removed: warm images (ready pool)")
 		}
 	}
 
 	if !applianceRemoved && !warmRemoved {
-		common.MVMCLI.Info("No misc cache to prune")
+		common.Cli.Info("No misc cache to prune")
 	}
 
 	return nil
@@ -231,33 +231,33 @@ func pruneMisc(op *api.Operation, cmd *cobra.Command, dryRun bool, force bool) e
 
 func pruneAll(op *api.Operation, cmd *cobra.Command, dryRun bool, force bool) error {
 	if dryRun {
-		common.MVMCLI.Info("[DRY RUN] The following would be removed:")
-		common.MVMCLI.Info("  - ALL VMs (including RUNNING and STARTING)")
-		common.MVMCLI.Info("  - ALL networks (including default)")
-		common.MVMCLI.Info("  - ALL images (including default)")
-		common.MVMCLI.Info("  - ALL kernels (including default)")
-		common.MVMCLI.Info("  - ALL binaries (including default)")
-		common.MVMCLI.Info("  - Appliance folder (libguestfs cache)")
-		common.MVMCLI.Info("  - Warm images (tmpfs ready pool)")
+		common.Cli.Info("[DRY RUN] The following would be removed:")
+		common.Cli.Info("  - ALL VMs (including RUNNING and STARTING)")
+		common.Cli.Info("  - ALL networks (including default)")
+		common.Cli.Info("  - ALL images (including default)")
+		common.Cli.Info("  - ALL kernels (including default)")
+		common.Cli.Info("  - ALL binaries (including default)")
+		common.Cli.Info("  - Appliance folder (libguestfs cache)")
+		common.Cli.Info("  - Warm images (tmpfs ready pool)")
 	} else if !force {
-		common.MVMCLI.Warning("This will remove ALL cache resources INCLUDING protected items:")
-		common.MVMCLI.Info("  - ALL VMs (including RUNNING and STARTING)")
-		common.MVMCLI.Info("  - ALL networks (including default)")
-		common.MVMCLI.Info("  - ALL images (including default)")
-		common.MVMCLI.Info("  - ALL kernels (including default)")
-		common.MVMCLI.Info("  - ALL binaries (including default)")
-		common.MVMCLI.Info("  - Appliance folder (libguestfs cache)")
-		common.MVMCLI.Info("  - Warm images (tmpfs ready pool)")
-		common.MVMCLI.Info("")
+		common.Cli.Warning("This will remove ALL cache resources INCLUDING protected items:")
+		common.Cli.Info("  - ALL VMs (including RUNNING and STARTING)")
+		common.Cli.Info("  - ALL networks (including default)")
+		common.Cli.Info("  - ALL images (including default)")
+		common.Cli.Info("  - ALL kernels (including default)")
+		common.Cli.Info("  - ALL binaries (including default)")
+		common.Cli.Info("  - Appliance folder (libguestfs cache)")
+		common.Cli.Info("  - Warm images (tmpfs ready pool)")
+		common.Cli.Info("")
 		if !promptConfirm("Continue?", true) {
-			common.MVMCLI.Info("Aborted")
+			common.Cli.Info("Aborted")
 			return nil
 		}
 	}
 
 	pruneOpResult := op.CachePruneAll(cmd.Context(), dryRun, true)
 	if pruneOpResult.IsError() {
-		common.MVMCLI.Error(pruneOpResult.Message)
+		common.Cli.Error(pruneOpResult.Message)
 		return fmt.Errorf("prune failed: %s", pruneOpResult.Message)
 	}
 
@@ -267,18 +267,18 @@ func pruneAll(op *api.Operation, cmd *cobra.Command, dryRun bool, force bool) er
 	if pruneItem != nil {
 		if len(pruneItem.PrunedIDs) > 0 {
 			if dryRun {
-				common.MVMCLI.Info(fmt.Sprintf("[DRY RUN] Would prune %d item(s)", len(pruneItem.PrunedIDs)))
+				common.Cli.Info(fmt.Sprintf("[DRY RUN] Would prune %d item(s)", len(pruneItem.PrunedIDs)))
 			} else {
-				common.MVMCLI.Success("Pruned")
+				common.Cli.Success("Pruned")
 			}
 		}
 
 		if len(pruneItem.FailedIDs) > 0 {
-			common.MVMCLI.Warning(fmt.Sprintf("Failed to prune %d item(s): %s", len(pruneItem.FailedIDs), strings.Join(pruneItem.FailedIDs, ", ")))
+			common.Cli.Warning(fmt.Sprintf("Failed to prune %d item(s): %s", len(pruneItem.FailedIDs), strings.Join(pruneItem.FailedIDs, ", ")))
 		}
 
 		if pruneItem.HadRunningVMs {
-			common.MVMCLI.Info("Note: running or starting VMs were present during prune")
+			common.Cli.Info("Note: running or starting VMs were present during prune")
 		}
 	}
 
@@ -361,9 +361,9 @@ Examples:
 					return pruneAll(op, cmd, dryRun, force)
 				}
 				// Match Python: mvm_cli.error("No resource specified. Use --all to prune all resource types.")
-				common.MVMCLI.Error("No resource specified. Use --all to prune all resource types.")
-				common.MVMCLI.Info("Valid resources: vm, network, image, kernel, binary, misc")
-				common.MVMCLI.Info("Or use: mvm cache prune --all  # Prune all types")
+				common.Cli.Error("No resource specified. Use --all to prune all resource types.")
+				common.Cli.Info("Valid resources: vm, network, image, kernel, binary, misc")
+				common.Cli.Info("Or use: mvm cache prune --all  # Prune all types")
 				return fmt.Errorf("no resource specified")
 		default:
 			// Python: elif resource is None or all_resources: — unknown resource with
@@ -371,9 +371,9 @@ Examples:
 			if allResources {
 				return pruneAll(op, cmd, dryRun, force)
 			}
-			common.MVMCLI.Error(fmt.Sprintf("Unknown resource: %s", resource))
-			common.MVMCLI.Info("Valid resources: vm, network, image, kernel, binary, misc")
-			common.MVMCLI.Info("Or use: mvm cache prune --all  # Prune all types including protected")
+			common.Cli.Error(fmt.Sprintf("Unknown resource: %s", resource))
+			common.Cli.Info("Valid resources: vm, network, image, kernel, binary, misc")
+			common.Cli.Info("Or use: mvm cache prune --all  # Prune all types including protected")
 			return fmt.Errorf("unknown resource: %s", resource)
 			}
 		},
@@ -399,8 +399,8 @@ func runCacheCleanWithSudo(ctx context.Context) error {
 		}
 	}
 
-	common.MVMCLI.Info("")
-	common.MVMCLI.Info("Running cache clean with sudo...")
+	common.Cli.Info("")
+	common.Cli.Info("Running cache clean with sudo...")
 	result := system.RunCmdCompat(ctx, []string{"sudo", mvmBin, "cache", "clean"}, system.RunCmdOptions{
 		Capture: false,
 		Check:   false,
@@ -442,35 +442,35 @@ Examples:
 				// Session doesn't have the group — offer sudo
 				// Match Python: single confirm prompt: "Elevated privileges required. Run with sudo instead?"
 				if !promptConfirm("Elevated privileges required. Run with sudo instead?", true) {
-					common.MVMCLI.Info("Aborted")
+					common.Cli.Info("Aborted")
 					return nil
 				}
 				return runCacheCleanWithSudo(cmd.Context())
 			}
 
 			if dryRun {
-				common.MVMCLI.Info("[DRY RUN] The following would be removed:")
-				common.MVMCLI.Info("  - ALL VMs (including RUNNING and STARTING)")
-				common.MVMCLI.Info("  - ALL networks (including default)")
-				common.MVMCLI.Info("  - ALL images (including default)")
-				common.MVMCLI.Info("  - ALL kernels (including default)")
-				common.MVMCLI.Info("  - ALL binaries (including default)")
-				common.MVMCLI.Info("  - Appliance folder (libguestfs cache)")
-				common.MVMCLI.Info("  - Warm images (tmpfs ready pool)")
-				common.MVMCLI.Info("  - Host networking (TAPs, bridges, iptables chains)")
-				common.MVMCLI.Info("  - Entire cache directory (~/.cache/mvmctl)")
+				common.Cli.Info("[DRY RUN] The following would be removed:")
+				common.Cli.Info("  - ALL VMs (including RUNNING and STARTING)")
+				common.Cli.Info("  - ALL networks (including default)")
+				common.Cli.Info("  - ALL images (including default)")
+				common.Cli.Info("  - ALL kernels (including default)")
+				common.Cli.Info("  - ALL binaries (including default)")
+				common.Cli.Info("  - Appliance folder (libguestfs cache)")
+				common.Cli.Info("  - Warm images (tmpfs ready pool)")
+				common.Cli.Info("  - Host networking (TAPs, bridges, iptables chains)")
+				common.Cli.Info("  - Entire cache directory (~/.cache/mvmctl)")
 			} else if !force {
-				common.MVMCLI.Warning("This will COMPLETELY remove ALL cache data INCLUDING:")
-				common.MVMCLI.Info("  - ALL VMs (including RUNNING and STARTING)")
-				common.MVMCLI.Info("  - ALL networks (including default)")
-				common.MVMCLI.Info("  - ALL images (including default)")
-				common.MVMCLI.Info("  - ALL kernels (including default)")
-				common.MVMCLI.Info("  - ALL binaries (including default)")
-				common.MVMCLI.Info("  - Appliance folder (libguestfs cache)")
-				common.MVMCLI.Info("  - Warm images (tmpfs ready pool)")
-				common.MVMCLI.Info("  - Host networking (TAPs, bridges, iptables chains)")
-				common.MVMCLI.Info("  - Entire cache directory (~/.cache/mvmctl)")
-				common.MVMCLI.Info("")
+				common.Cli.Warning("This will COMPLETELY remove ALL cache data INCLUDING:")
+				common.Cli.Info("  - ALL VMs (including RUNNING and STARTING)")
+				common.Cli.Info("  - ALL networks (including default)")
+				common.Cli.Info("  - ALL images (including default)")
+				common.Cli.Info("  - ALL kernels (including default)")
+				common.Cli.Info("  - ALL binaries (including default)")
+				common.Cli.Info("  - Appliance folder (libguestfs cache)")
+				common.Cli.Info("  - Warm images (tmpfs ready pool)")
+				common.Cli.Info("  - Host networking (TAPs, bridges, iptables chains)")
+				common.Cli.Info("  - Entire cache directory (~/.cache/mvmctl)")
+				common.Cli.Info("")
 				if !promptConfirm("Continue?", true) {
 					return nil
 				}
@@ -478,7 +478,7 @@ Examples:
 
 			opResult := op.CacheClean(cmd.Context(), dryRun)
 			if opResult.IsError() {
-				common.MVMCLI.Error(opResult.Message)
+				common.Cli.Error(opResult.Message)
 				return fmt.Errorf("clean failed: %s", opResult.Message)
 			}
 
@@ -490,28 +490,28 @@ Examples:
 
 				if len(prune.PrunedIDs) > 0 {
 					if dryRun {
-						common.MVMCLI.Info(fmt.Sprintf("[DRY RUN] Would prune %d item(s)", len(prune.PrunedIDs)))
+						common.Cli.Info(fmt.Sprintf("[DRY RUN] Would prune %d item(s)", len(prune.PrunedIDs)))
 					} else {
-						common.MVMCLI.Success("Pruned")
+						common.Cli.Success("Pruned")
 					}
 				}
 
 				if len(prune.FailedIDs) > 0 {
-					common.MVMCLI.Warning(fmt.Sprintf("Failed to prune %d item(s): %s", len(prune.FailedIDs), strings.Join(prune.FailedIDs, ", ")))
+					common.Cli.Warning(fmt.Sprintf("Failed to prune %d item(s): %s", len(prune.FailedIDs), strings.Join(prune.FailedIDs, ", ")))
 				}
 
 				if prune.HadRunningVMs {
-					common.MVMCLI.Info("Note: running or starting VMs were present during clean")
+					common.Cli.Info("Note: running or starting VMs were present during clean")
 				}
 
 				if cleanResult.CacheDirRemoved {
 					if dryRun {
-						common.MVMCLI.Info(fmt.Sprintf("[DRY RUN] Would remove cache directory: %s", cleanResult.CacheDir))
+						common.Cli.Info(fmt.Sprintf("[DRY RUN] Would remove cache directory: %s", cleanResult.CacheDir))
 					} else {
-						common.MVMCLI.Success(fmt.Sprintf("Removed: %s", cleanResult.CacheDir))
+						common.Cli.Success(fmt.Sprintf("Removed: %s", cleanResult.CacheDir))
 					}
 				} else {
-					common.MVMCLI.Info("Cache directory was already empty")
+					common.Cli.Info("Cache directory was already empty")
 				}
 			}
 			// Match Python: no fallback output when result is nil (no "Cache cleaned" message)

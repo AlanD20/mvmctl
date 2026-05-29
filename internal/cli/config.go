@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api"
+	"mvmctl/internal/cli/common"
 )
 
 func NewConfigCmd(configAPI *api.Operation) *cobra.Command {
@@ -47,27 +48,27 @@ func newConfigGetCmd(configAPI *api.Operation) *cobra.Command {
 				if err != nil {
 					// Python: error propagates to @handle_errors which prints it and exits 1.
 					// With SilenceErrors=true on root, we must print before returning.
-					cli.Error(err.Error())
+					common.Cli.Error(err.Error())
 					return err
 				}
 				if val == nil {
-					cli.Info(fmt.Sprintf("%s.%s = (default)", category, key))
+					common.Cli.Info(fmt.Sprintf("%s.%s = (default)", category, key))
 				} else {
-					cli.Info(fmt.Sprintf("%s.%s = %v", category, key, val))
+					common.Cli.Info(fmt.Sprintf("%s.%s = %v", category, key, val))
 				}
 			} else {
 				// Category-only: show metadata per key matching Python
 				val, err := configAPI.ConfigGet(cmd.Context(), category, "")
 				if err != nil {
-					cli.Error(err.Error())
+					common.Cli.Error(err.Error())
 					return err
 				}
 				if settings, ok := val.(map[string]model.SettingInfo); ok {
 					for k, info := range settings {
 						if info.Override != nil {
-							cli.Info(fmt.Sprintf("%s = %v (override: %v, type: %s)", k, info.Override, info.Override, info.Type))
+							common.Cli.Info(fmt.Sprintf("%s = %v (override: %v, type: %s)", k, info.Override, info.Override, info.Type))
 						} else {
-							cli.Info(fmt.Sprintf("%s = %v (default: %v, type: %s)", k, info.Default, info.Default, info.Type))
+							common.Cli.Info(fmt.Sprintf("%s = %v (default: %v, type: %s)", k, info.Default, info.Default, info.Type))
 						}
 					}
 				}
@@ -86,15 +87,15 @@ func newConfigSetCmd(configAPI *api.Operation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			result, err := configAPI.ConfigSet(cmd.Context(), args[0], args[1], args[2])
 			if err != nil {
-				cli.Error(err.Error())
+				common.Cli.Error(err.Error())
 				return err
 			}
 			if result.IsError() {
 				// Python: mvm_cli.error(result.message); raise typer.Exit(code=1)
-				cli.Error(result.Message)
+				common.Cli.Error(result.Message)
 				return fmt.Errorf("%s", result.Message)
 			}
-			cli.Success(result.Message)
+			common.Cli.Success(result.Message)
 			return nil
 		},
 	}
@@ -112,36 +113,36 @@ func newConfigResetCmd(configAPI *api.Operation) *cobra.Command {
 			if allOverrides {
 				result := configAPI.ConfigReset(cmd.Context(), "", "", true)
 				if result.IsError() {
-					cli.Error(result.Message)
+					common.Cli.Error(result.Message)
 					return fmt.Errorf("%s", result.Message)
 				}
-				cli.Success(fmt.Sprintf("Reset: %v override(s) globally", result.Item))
+				common.Cli.Success(fmt.Sprintf("Reset: %v override(s) globally", result.Item))
 				return nil
 			}
 
 			switch len(args) {
 			case 0:
-				cli.Info("Provide a category, category and key, or use --all")
+				common.Cli.Info("Provide a category, category and key, or use --all")
 			case 1:
 				category := args[0]
 				result := configAPI.ConfigReset(cmd.Context(), category, "", false)
 				if result.IsError() {
-					cli.Error(result.Message)
+					common.Cli.Error(result.Message)
 					return fmt.Errorf("%s", result.Message)
 				}
-				cli.Success(fmt.Sprintf("Reset: %v override(s) in %s", result.Item, category))
+				common.Cli.Success(fmt.Sprintf("Reset: %v override(s) in %s", result.Item, category))
 			case 2:
 				category := args[0]
 				key := args[1]
 				result := configAPI.ConfigReset(cmd.Context(), category, key, false)
 				if result.IsError() {
-					cli.Error(result.Message)
+					common.Cli.Error(result.Message)
 					return fmt.Errorf("%s", result.Message)
 				}
 				if item, ok := result.Item.(int); ok && item > 0 {
-					cli.Success(fmt.Sprintf("Reset: %s.%s", category, key))
+					common.Cli.Success(fmt.Sprintf("Reset: %s.%s", category, key))
 				} else {
-					cli.Info(fmt.Sprintf("%s.%s was already at default", category, key))
+					common.Cli.Info(fmt.Sprintf("%s.%s was already at default", category, key))
 				}
 			}
 			return nil
@@ -161,18 +162,18 @@ func newConfigListCmd(configAPI *api.Operation) *cobra.Command {
 			if err != nil {
 				// Python: error propagates to @handle_errors which prints it and exits 1.
 				// With SilenceErrors=true on root, we must print before returning.
-				cli.Error(err.Error())
+				common.Cli.Error(err.Error())
 				return err
 			}
 			for category, settings := range allSettings {
-				cli.Info(fmt.Sprintf("\n[%s]", category))
+				common.Cli.Info(fmt.Sprintf("\n[%s]", category))
 				for key, info := range settings {
 					override := info.Override
 					default_ := info.Default
 					if override != nil {
-						cli.Info(fmt.Sprintf("  %s = %v (default: %v, type: %s)", key, override, default_, info.Type))
+						common.Cli.Info(fmt.Sprintf("  %s = %v (default: %v, type: %s)", key, override, default_, info.Type))
 					} else {
-						cli.Info(fmt.Sprintf("  %s = %v (type: %s)", key, default_, info.Type))
+						common.Cli.Info(fmt.Sprintf("  %s = %v (type: %s)", key, default_, info.Type))
 					}
 				}
 			}

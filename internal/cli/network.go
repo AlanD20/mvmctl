@@ -12,6 +12,7 @@ import (
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/internal/cli/common"
 )
 
 // NewNetworkCmd creates the network command and its subcommands.
@@ -76,12 +77,12 @@ func newNetworkLsCmd(op *api.Operation) *cobra.Command {
 
 			rows := make([][]string, 0, len(nets))
 			for _, n := range nets {
-				marker := cli.FormatMarker(n.IsDefault)
+				marker := common.Cli.FormatMarker(n.IsDefault)
 				natStr := "no"
 				if n.NATEnabled {
 					natStr = "yes"
 				}
-				created := cli.FormatTimestamp(n.CreatedAt, "relative")
+				created := common.Cli.FormatTimestamp(n.CreatedAt, "relative")
 
 				if isLong {
 					vmCount := 0
@@ -90,8 +91,8 @@ func newNetworkLsCmd(op *api.Operation) *cobra.Command {
 					}
 					rows = append(rows, []string{
 						marker,
-						cli.FormatID(n.ID),
-						cli.FormatName(n.Name, !n.IsPresent),
+						common.Cli.FormatID(n.ID),
+						common.Cli.FormatName(n.Name, !n.IsPresent),
 						n.Subnet,
 						natStr,
 						n.Bridge,
@@ -101,8 +102,8 @@ func newNetworkLsCmd(op *api.Operation) *cobra.Command {
 				} else {
 					rows = append(rows, []string{
 						marker,
-						cli.FormatID(n.ID),
-						cli.FormatName(n.Name, !n.IsPresent),
+						common.Cli.FormatID(n.ID),
+						common.Cli.FormatName(n.Name, !n.IsPresent),
 						n.Subnet,
 						natStr,
 						created,
@@ -111,9 +112,9 @@ func newNetworkLsCmd(op *api.Operation) *cobra.Command {
 			}
 
 			if isLong {
-				cli.Table([]string{"", "ID", "Name", "Subnet", "NAT", "Bridge", "VMs", "Created"}, rows)
+				common.Cli.Table([]string{"", "ID", "Name", "Subnet", "NAT", "Bridge", "VMs", "Created"}, rows)
 			} else {
-				cli.Table([]string{"", "ID", "Name", "Subnet", "NAT", "Created"}, rows)
+				common.Cli.Table([]string{"", "ID", "Name", "Subnet", "NAT", "Created"}, rows)
 			}
 			return nil
 		},
@@ -193,29 +194,29 @@ func newNetworkCreateCmd(op *api.Operation) *cobra.Command {
 				return fmt.Errorf("create network failed: %s", createResult.Message)
 			}
 			if createResult.Status == "skipped" {
-				cli.Info(createResult.Message)
+				common.Cli.Info(createResult.Message)
 				return nil
 			}
 			// NeedsInteraction fallback (matches Python's else branch)
 			if createResult.Item == nil {
-				cli.Error(createResult.Message)
+				common.Cli.Error(createResult.Message)
 				return fmt.Errorf("create network failed")
 			}
 			net, ok := createResult.Item.(*model.Network)
 			if !ok {
-				cli.Error("Network created but no item returned")
+				common.Cli.Error("Network created but no item returned")
 				return fmt.Errorf("create network failed: no network returned")
 			}
 
-			cli.Success(fmt.Sprintf("Created: %s", net.Name))
-			cli.Info(fmt.Sprintf("  SUBNET:    %s", net.Subnet))
-			cli.Info(fmt.Sprintf("  IPv4 Gateway: %s", net.IPv4Gateway))
-			cli.Info(fmt.Sprintf("  Bridge:  %s", net.Bridge))
+			common.Cli.Success(fmt.Sprintf("Created: %s", net.Name))
+			common.Cli.Info(fmt.Sprintf("  SUBNET:    %s", net.Subnet))
+			common.Cli.Info(fmt.Sprintf("  IPv4 Gateway: %s", net.IPv4Gateway))
+			common.Cli.Info(fmt.Sprintf("  Bridge:  %s", net.Bridge))
 			natDisplay := "False"
 			if net.NATEnabled {
 				natDisplay = "True"
 			}
-			cli.Info(fmt.Sprintf("  NAT:     %s", natDisplay))
+			common.Cli.Info(fmt.Sprintf("  NAT:     %s", natDisplay))
 			if net.NATGateways != nil && *net.NATGateways != "" {
 				natGwList := strings.Split(*net.NATGateways, ",")
 				trimmed := make([]string, 0, len(natGwList))
@@ -226,12 +227,12 @@ func newNetworkCreateCmd(op *api.Operation) *cobra.Command {
 					}
 				}
 				if len(trimmed) > 0 {
-					cli.Info(fmt.Sprintf("  NAT gateways: %s", strings.Join(trimmed, ", ")))
+					common.Cli.Info(fmt.Sprintf("  NAT gateways: %s", strings.Join(trimmed, ", ")))
 				}
 			}
 
 			if setDefault {
-				cli.Success(fmt.Sprintf("Default network set to: %s", net.Name))
+				common.Cli.Success(fmt.Sprintf("Default network set to: %s", net.Name))
 			}
 
 			return nil
@@ -284,9 +285,9 @@ func resolveUserNATGateways() (string, error) {
 		return interfaces[0], nil
 	}
 
-	cli.Info("Select interface(s) for NAT (internet access):")
+	common.Cli.Info("Select interface(s) for NAT (internet access):")
 	for i, iface := range interfaces {
-		cli.Info(fmt.Sprintf("  [%d] %s", i+1, iface))
+		common.Cli.Info(fmt.Sprintf("  [%d] %s", i+1, iface))
 	}
 
 	// Use bufio.Reader for proper line reading (matches Python's Prompt.ask which reads a full line)
@@ -335,7 +336,7 @@ func newNetworkRmCmd(op *api.Operation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			names := args
 			if len(names) == 0 {
-				cli.Error("Provide at least one network name")
+				common.Cli.Error("Provide at least one network name")
 				return fmt.Errorf("usage error")
 			}
 
@@ -345,7 +346,7 @@ func newNetworkRmCmd(op *api.Operation) *cobra.Command {
 			}
 
 			for _, name := range names {
-				cli.Success(fmt.Sprintf("Removed: %s", name))
+				common.Cli.Success(fmt.Sprintf("Removed: %s", name))
 			}
 
 			return nil
@@ -397,7 +398,7 @@ func newNetworkInspectCmd(op *api.Operation) *cobra.Command {
 				}
 			}
 
-			cli.PrintDictTree(info, fmt.Sprintf("Network: %s", netName))
+			common.Cli.PrintDictTree(info, fmt.Sprintf("Network: %s", netName))
 			return nil
 		},
 	}
@@ -442,7 +443,7 @@ func newNetworkSyncCmd(op *api.Operation) *cobra.Command {
 			// Python: if results is None → error
 			results, ok := syncResult.Item.(map[string]map[string]int)
 			if !ok || results == nil {
-				cli.Error("Sync returned no results")
+				common.Cli.Error("Sync returned no results")
 				return fmt.Errorf("sync returned no results")
 			}
 
@@ -464,7 +465,7 @@ func newNetworkSyncCmd(op *api.Operation) *cobra.Command {
 			// Build table rows matching Python format
 			rows := make([][]string, 0, len(results))
 			for nid, counts := range results {
-				shortID := cli.FormatID(nid)
+				shortID := common.Cli.FormatID(nid)
 				name := nameMap[nid]
 				if name == "" {
 					if len(nid) > 8 {
@@ -482,7 +483,7 @@ func newNetworkSyncCmd(op *api.Operation) *cobra.Command {
 				})
 			}
 
-			cli.Table([]string{"ID", "Name", "Verified", "Added", "Orphaned"}, rows)
+			common.Cli.Table([]string{"ID", "Name", "Verified", "Added", "Orphaned"}, rows)
 			return nil
 		},
 	}
@@ -516,7 +517,7 @@ func newNetworkDefaultCmd(op *api.Operation) *cobra.Command {
 				return fmt.Errorf("set default failed: %s", defaultResult.Message)
 			}
 
-			cli.Success(fmt.Sprintf("Default network set to: %s", name))
+			common.Cli.Success(fmt.Sprintf("Default network set to: %s", name))
 			return nil
 		},
 	}
