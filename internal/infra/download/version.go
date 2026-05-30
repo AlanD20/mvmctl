@@ -33,8 +33,8 @@ var allHrefRegex = regexp.MustCompile(`href="([^"]+)"`)
 //   - "firecracker-s3" — S3 bucket XML listings
 //   - "" or nil (single-source) — single "latest" version from URL templates
 type HttpDirVersionResolver struct {
-	client  *http.Client
-	cache   *HttpDiskCache
+	client *http.Client
+	cache  *HttpDiskCache
 }
 
 // NewHttpDirVersionResolver creates a new HttpDirVersionResolver with default
@@ -109,7 +109,6 @@ func versionSortKey(ver string) []int {
 func versionInfoSortKey(v version.VersionInfo) []int {
 	return versionSortKey(v.Version)
 }
-
 
 // discoverFileFromListing fetches a directory listing HTML and finds a matching file.
 // Mirrors Python's _discover_file_from_listing().
@@ -197,19 +196,19 @@ func (r *HttpDirVersionResolver) fetchRawContent(ctx context.Context, url string
 // ResolverConfig represents a single version source configuration.
 // Mirrors the Python config dicts for HttpDirVersionResolver.
 type ResolverConfig struct {
-	Type               string          `json:"type"`
-	Resolver           string          `json:"resolver,omitempty"`
-	VersionsURL        string          `json:"versions_url,omitempty"`
-	DownloadURL        string          `json:"download_url,omitempty"`
-	SHA256URL          string          `json:"sha256_url,omitempty"`
-	ListURLTemplate    string          `json:"list_url_template,omitempty"`
-	Format             string          `json:"format,omitempty"`
-	Name               string          `json:"name,omitempty"`
-	VersionNameTmpl    string          `json:"version_name_template,omitempty"`
-	Source             string          `json:"source,omitempty"`
-	Version            string          `json:"version,omitempty"`
-	Limit              int             `json:"limit,omitempty"`
-	Options            ResolverOptions `json:"options,omitempty"`
+	Type            string          `json:"type"`
+	Resolver        string          `json:"resolver,omitempty"`
+	VersionsURL     string          `json:"versions_url,omitempty"`
+	DownloadURL     string          `json:"download_url,omitempty"`
+	SHA256URL       string          `json:"sha256_url,omitempty"`
+	ListURLTemplate string          `json:"list_url_template,omitempty"`
+	Format          string          `json:"format,omitempty"`
+	Name            string          `json:"name,omitempty"`
+	VersionNameTmpl string          `json:"version_name_template,omitempty"`
+	Source          string          `json:"source,omitempty"`
+	Version         string          `json:"version,omitempty"`
+	Limit           int             `json:"limit,omitempty"`
+	Options         ResolverOptions `json:"options,omitempty"`
 }
 
 // ResolverOptions contains resolver-specific options for version resolution.
@@ -419,7 +418,7 @@ func (r *HttpDirVersionResolver) resolveViaDirectoryListing(
 			var rendered string
 			rendered, err = infra.RenderTemplate(config.SHA256URL, tmplVars)
 			if err != nil {
-		slog.Warn("Failed to render sha256 URL for version", "type", typeName, "version", versionStr, "error", err)
+				slog.Warn("Failed to render sha256 URL for version", "type", typeName, "version", versionStr, "error", err)
 			} else {
 				sha256URL = &rendered
 			}
@@ -720,7 +719,7 @@ func (r *HttpDirVersionResolver) resolveViaFirecrackerS3(
 			var rendered string
 			rendered, err = infra.RenderTemplate(config.SHA256URL, downloadVars)
 			if err != nil {
-		slog.Warn("Failed to render sha256 URL for version", "type", typeName, "version", versionStr, "error", err)
+				slog.Warn("Failed to render sha256 URL for version", "type", typeName, "version", versionStr, "error", err)
 			} else {
 				sha256URL = &rendered
 			}

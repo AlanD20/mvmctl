@@ -354,7 +354,7 @@ func (s *Service) buildFromSource(
 		// 6. Cache output — using shutil.copy2 equivalent (preserving metadata)
 		if useCache {
 			os.MkdirAll(filepath.Dir(cachedKernelPath), 0755)
-			if err := copyFilePreserve(ctx, outputPath, cachedKernelPath); err != nil {
+			if err := infra.CopyPreservingMetadata(outputPath, cachedKernelPath); err != nil {
 				slog.Warn("Failed to cache kernel build", "error", err)
 			}
 			os.WriteFile(cacheMarker, []byte(cacheKey), 0644)
@@ -996,7 +996,7 @@ func (s *Service) RunMakeVmlinux(ctx context.Context, kernelDir, outputPath stri
 		return nil, NewKernelError("Build succeeded but vmlinux not found")
 	}
 	// Use cp -p to match Python's shutil.copy2 (preserves timestamps, permissions)
-	if err := copyFilePreserve(ctx, vmlinuxPath, outputPath); err != nil {
+	if err := infra.CopyPreservingMetadata(vmlinuxPath, outputPath); err != nil {
 		return nil, NewKernelErrorf("Kernel build failed: unable to copy vmlinux: %s", err)
 	}
 	os.Chmod(outputPath, 0755)
@@ -1390,7 +1390,7 @@ func (s *Service) tryCacheHit(ctx context.Context, outputPath, cacheMarker, cach
 	}
 	if _, err := os.Stat(cacheMarker); err == nil {
 		if _, err := os.Stat(cachedKernelPath); err == nil {
-			copyFilePreserve(ctx, cachedKernelPath, outputPath)
+			infra.CopyPreservingMetadata(cachedKernelPath, outputPath)
 			os.Chmod(outputPath, 0755)
 			slog.Info("Using cached kernel build (config hash match)", "path", outputPath)
 			return true
@@ -1407,27 +1407,6 @@ func (s *Service) tryCacheHit(ctx context.Context, outputPath, cacheMarker, cach
 		}
 	}
 	return false
-}
-
-// copyFilePreserve copies a file while preserving metadata (timestamps, permissions).
-// Matches Python's shutil.copy2() behavior.
-// TODO(verdict#33): belongs in infra/fs or similar shared utility
-func copyFilePreserve(ctx context.Context, src, dst string) error {
-	result := system.RunCmdCompat(ctx, []string{"cp", "-p", src, dst}, system.RunCmdOptions{Check: true, Capture: true})
-	if result.Err == nil {
-		return nil
-	}
-	input, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(dst, input, 0644); err != nil {
-		return err
-	}
-	if fi, err := os.Stat(src); err == nil {
-		os.Chmod(dst, fi.Mode())
-	}
-	return nil
 }
 
 // checkBuildDependencies checks for required kernel build dependencies.
@@ -1659,7 +1638,7 @@ func (s *Service) ImportKernel(ctx context.Context, name string, sourcePath stri
 	destPath := filepath.Join(kernelsDir, destFilename)
 
 	// Copy file (matching Python's shutil.copy2 which preserves metadata)
-	if err := copyFilePreserve(ctx, resolvedPath, destPath); err != nil {
+	if err := infra.CopyPreservingMetadata(resolvedPath, destPath); err != nil {
 		return nil, NewKernelErrorf("Failed to copy kernel file to %s: %s", destPath, err)
 	}
 	os.Chmod(destPath, 0755)

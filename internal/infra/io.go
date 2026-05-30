@@ -229,7 +229,7 @@ func SetupLogging(verbose, debug bool) {
 			level = slog.LevelInfo
 		default:
 			envLevel, _ := EnvGet("LOG_LEVEL")
-		envLevel = strings.ToUpper(envLevel)
+			envLevel = strings.ToUpper(envLevel)
 			switch envLevel {
 			case "DEBUG":
 				level = slog.LevelDebug

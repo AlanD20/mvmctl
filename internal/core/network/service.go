@@ -42,7 +42,8 @@ func NewService(repo Repository, db *sql.DB) *Service {
 // WithBatch runs a function inside a firewall batch context, flushing
 // all queued rule operations atomically on return. This matches Python's:
 // with self._tracker.batch():
-//     ...
+//
+//	...
 func (s *Service) WithBatch(fn func()) {
 	if s.firewallTracker == nil {
 		fn()

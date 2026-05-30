@@ -300,5 +300,3 @@ func ScanBootDirectory(ctx context.Context) ([]string, error) {
 	}
 	return result, nil
 }
-
-

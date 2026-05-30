@@ -154,13 +154,13 @@ func EnsureGuestfsAppliance(cacheDir string) error {
 // =========================================================================
 
 type GuestfsBackend struct {
-	rootfsPath  string
-	readonly    bool
-	ctx         context.Context
-	rootUID     int
-	rootGID     int
-	userUID     int
-	userGID     int
+	rootfsPath string
+	readonly   bool
+	ctx        context.Context
+	rootUID    int
+	rootGID    int
+	userUID    int
+	userGID    int
 
 	// Internal provisioner for queued operations (lazily created)
 	provisioner *guestfs.GuestfsProvisioner
@@ -401,5 +401,3 @@ func runGuestfish(ctx context.Context, diskPath string, readonly bool, args ...s
 	}
 	return result.Stdout, nil
 }
-
-

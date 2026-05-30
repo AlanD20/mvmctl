@@ -76,7 +76,7 @@ type ResolvedKernelPullRequest struct {
 //
 // Resolve and validate kernel pull/build inputs.
 type KernelPullRequest struct {
-	db      *sql.DB
+	db     *sql.DB
 	input  KernelPullInput
 	result *ResolvedKernelPullRequest
 }
@@ -84,7 +84,7 @@ type KernelPullRequest struct {
 // NewKernelPullRequest creates a new KernelPullRequest.
 func NewKernelPullRequest(inputs KernelPullInput, db *sql.DB) *KernelPullRequest {
 	return &KernelPullRequest{
-		db:     db,
+		db:    db,
 		input: inputs,
 	}
 }

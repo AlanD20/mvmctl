@@ -10,7 +10,7 @@ import (
 type Class int
 
 const (
-	ClassUnknown   Class = iota
+	ClassUnknown Class = iota
 	ClassValidation
 	ClassConflict
 	ClassRetryable

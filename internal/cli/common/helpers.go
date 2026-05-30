@@ -1,5 +1,5 @@
 // Package common provides CLI display helpers — table rendering, JSON output,
-// error display, and the MVMCli singleton matching Python's ``utils/cli.py:MVMCli``.
+// error display, and the MVMCli singleton matching Python's “utils/cli.py:MVMCli“.
 package common
 
 import (
@@ -17,7 +17,7 @@ import (
 // ─── Error handler wrapper (matching Python's @handle_errors) ────────────────
 
 // HandleErrors wraps a command function with the global error handling
-// pattern from Python's ``@handle_errors`` decorator in ``utils/cli.py``.
+// pattern from Python's “@handle_errors“ decorator in “utils/cli.py“.
 //
 // Python behavior replicated:
 //   - typer.Exit         → re-raised (Cobra returns the error)
@@ -153,7 +153,7 @@ func handleDomainError(de *errs.DomainError) error {
 }
 
 // isBrokenPipe checks if err is a broken pipe / closed pipe error, matching
-// Python's ``BrokenPipeError``.
+// Python's “BrokenPipeError“.
 func isBrokenPipe(err error) bool {
 	if errors.Is(err, syscall.EPIPE) {
 		return true
@@ -196,7 +196,7 @@ func isDatabaseError(err error) bool {
 }
 
 // formatUnexpected formats an unexpected error matching Python's
-// ``f"{e.__class__.__name__}: {e}"`` format.
+// “f"{e.__class__.__name__}: {e}"“ format.
 func formatUnexpected(err error) string {
 	typeName := fmt.Sprintf("%T", err)
 	// Strip leading "*" for pointer types
@@ -209,5 +209,3 @@ func formatUnexpected(err error) string {
 	}
 	return fmt.Sprintf("%s: %s", typeName, err.Error())
 }
-
-

@@ -27,22 +27,22 @@ import (
 // This backend continues to use LoopMountProvisioner which delegates to the
 // service layer.
 type LoopMountBackend struct {
-	lp        *LoopMountProvisioner
-	cacheDir  string
+	lp         *LoopMountProvisioner
+	cacheDir   string
 	rootfsPath string
-	fsType    string
-	ctx       context.Context
+	fsType     string
+	ctx        context.Context
 }
 
 // NewLoopMountBackend creates a new LoopMountBackend.
 // Matches Python's __init__().
 func NewLoopMountBackend(rootfsPath string, fsType string, cacheDir string) *LoopMountBackend {
 	return &LoopMountBackend{
-		lp:        NewLoopMountProvisioner(rootfsPath, fsType, cacheDir),
-		cacheDir:  cacheDir,
+		lp:         NewLoopMountProvisioner(rootfsPath, fsType, cacheDir),
+		cacheDir:   cacheDir,
 		rootfsPath: rootfsPath,
-		fsType:    fsType,
-		ctx:       context.Background(),
+		fsType:     fsType,
+		ctx:        context.Background(),
 	}
 }
 
@@ -175,9 +175,9 @@ func (b *LoopMountBackend) ExtractPartition(
 			}
 		}
 		extMap := map[string]string{
-			"ext4": ".ext4",
-			"ext3": ".ext4",
-			"ext2": ".ext4",
+			"ext4":  ".ext4",
+			"ext3":  ".ext4",
+			"ext2":  ".ext4",
 			"btrfs": ".btrfs",
 			"xfs":   ".xfs",
 		}

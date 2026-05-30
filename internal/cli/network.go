@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,26 +8,32 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
-	"mvmctl/internal/cli/common"
 )
 
 // networkColumns defines the local listing columns for networks.
 var networkColumns = []common.ListingColumn{
 	{Header: "", Extract: func(v any) string { return common.Cli.FormatMarker(v.(*model.Network).IsDefault) }},
 	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.Network).ID) }},
-	{Header: "Name", Extract: func(v any) string { return common.Cli.FormatName(v.(*model.Network).Name, !v.(*model.Network).IsPresent) }},
+	{Header: "Name", Extract: func(v any) string {
+		return common.Cli.FormatName(v.(*model.Network).Name, !v.(*model.Network).IsPresent)
+	}},
 	{Header: "Subnet", Extract: func(v any) string { return v.(*model.Network).Subnet }},
 	{Header: "NAT", Extract: func(v any) string {
-		if v.(*model.Network).NATEnabled { return "yes" }
+		if v.(*model.Network).NATEnabled {
+			return "yes"
+		}
 		return "no"
 	}},
 	{Header: "Bridge", Extract: func(v any) string { return v.(*model.Network).Bridge }, LongOnly: true},
 	{Header: "VMs", Extract: func(v any) string {
 		l := v.(*model.Network).Leases
-		if l != nil { return fmt.Sprintf("%d", len(l)) }
+		if l != nil {
+			return fmt.Sprintf("%d", len(l))
+		}
 		return "0"
 	}, LongOnly: true},
 	{Header: "Created", Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.Network).CreatedAt, "relative") }},
@@ -42,9 +47,9 @@ func NewNetworkCmd(op *api.Operation) *cobra.Command {
 		Short:   "Network management",
 	}
 
-	cmd.AddCommand(newNetworkLsCmd(op))
+	cmd.AddCommand(newNetworkListCmd(op))
 	cmd.AddCommand(newNetworkCreateCmd(op))
-	cmd.AddCommand(newNetworkRmCmd(op))
+	cmd.AddCommand(newNetworkRemoveCmd(op))
 	cmd.AddCommand(newNetworkInspectCmd(op))
 	cmd.AddCommand(newNetworkSyncCmd(op))
 	cmd.AddCommand(newNetworkDefaultCmd(op))
@@ -66,7 +71,7 @@ func NewNetworkCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newNetworkLsCmd(op *api.Operation) *cobra.Command {
+func newNetworkListCmd(op *api.Operation) *cobra.Command {
 	var jsonOutput bool
 	var longOutput bool
 
@@ -82,11 +87,8 @@ func newNetworkLsCmd(op *api.Operation) *cobra.Command {
 			}
 
 			if jsonOutput {
-				data := make([]map[string]interface{}, 0, len(nets))
-				for _, n := range nets {
-					data = append(data, map[string]interface{}{"id": n.ID, "name": n.Name, "subnet": n.Subnet})
-				}
-				fmt.Println(marshalJSONDefaultStr(data))
+				data, _ := json.MarshalIndent(nets, "", "  ")
+				fmt.Println(string(data))
 				return nil
 			}
 
@@ -115,14 +117,14 @@ func newNetworkCreateCmd(op *api.Operation) *cobra.Command {
 	var setDefault bool
 
 	cmd := &cobra.Command{
-		Use:                   "create [name]",
-		Short:                 "Create a named network.",
-		Args:                  cobra.MaximumNArgs(1),
+		Use:   "create [name]",
+		Short: "Create a named network.",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var name string
 			if len(args) > 0 {
 				var err error
-				name, err = common.Cli.CheckNameArg(cmd, args[0])
+				name, err = common.Cli.CheckArg(cmd, args[0])
 				if err != nil {
 					return err
 				}
@@ -257,72 +259,40 @@ func resolveUserNATGateways() (string, error) {
 	sort.Strings(interfaces) // Match Python's sorted(interfaces)
 
 	if len(interfaces) == 0 {
-		// Python raises typer.Exit(code=1) with "No network interfaces found"
 		return "", fmt.Errorf("no network interfaces found")
 	}
 	if len(interfaces) == 1 {
 		return interfaces[0], nil
 	}
 
-	common.Cli.Info("Select interface(s) for NAT (internet access):")
-	for i, iface := range interfaces {
-		common.Cli.Info(fmt.Sprintf("  [%d] %s", i+1, iface))
+	selected, err := common.Cli.PromptMultiSelect("Select interface(s) for NAT (internet access):", interfaces, nil)
+	if err != nil {
+		return "", err
 	}
-
-	// Use bufio.Reader for proper line reading (matches Python's Prompt.ask which reads a full line)
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Fprintf(os.Stderr, "Select interface number(s) [comma-separated] [1]: ")
-	selected, _ := reader.ReadString('\n')
-	selected = strings.TrimSpace(selected)
-	if selected == "" {
-		return interfaces[0], nil
-	}
-
-	var selectedInterfaces []string
-	for _, part := range strings.Split(selected, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		var idx int
-		if _, err := fmt.Sscanf(part, "%d", &idx); err != nil {
-			return "", fmt.Errorf("invalid interface selection: %s", selected)
-		}
-		if idx < 1 || idx > len(interfaces) {
-			return "", fmt.Errorf("invalid interface index: %d", idx)
-		}
-		selectedInterfaces = append(selectedInterfaces, interfaces[idx-1])
-	}
-
-	if len(selectedInterfaces) == 0 {
-		return "", fmt.Errorf("no valid interface indices selected")
-	}
-
-	return strings.Join(selectedInterfaces, ","), nil
+	return strings.Join(selected, ","), nil
 }
 
-func newNetworkRmCmd(op *api.Operation) *cobra.Command {
+func newNetworkRemoveCmd(op *api.Operation) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:                "rm [names...]",
-		Aliases:            []string{"remove", "delete"},
-		Short:              "Remove one or more networks by name.",
-		Args:               cobra.ArbitraryArgs,
-		ValidArgsFunction:  completeNetworkNames,
+		Use:               "rm [names...]",
+		Aliases:           []string{"remove", "delete"},
+		Short:             "Remove one or more networks by name.",
+		Args:              cobra.ArbitraryArgs,
+		ValidArgsFunction: completeNetworkNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			names := args
-			if len(names) == 0 {
+			if len(args) == 0 {
 				common.Cli.Error("Provide at least one network name")
 				return fmt.Errorf("usage error")
 			}
 
-			removeResult := op.NetworkRemove(cmd.Context(), &inputs.NetworkInput{Name: names}, force)
+			removeResult := op.NetworkRemove(cmd.Context(), &inputs.NetworkInput{Name: args}, force)
 			if removeResult.Status == "error" || removeResult.Status == "failure" {
 				return fmt.Errorf("remove failed: %s", removeResult.Message)
 			}
 
-			for _, name := range names {
+			for _, name := range args {
 				common.Cli.Success(fmt.Sprintf("Removed: %s", name))
 			}
 
@@ -338,15 +308,15 @@ func newNetworkInspectCmd(op *api.Operation) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
-		Use:                "inspect [name]",
-		Short:              "Show detailed information about a network.",
-		Args:               cobra.MaximumNArgs(1),
-		ValidArgsFunction:  completeNetworkNames,
+		Use:               "inspect [name]",
+		Short:             "Show detailed information about a network.",
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: completeNetworkNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var name string
 			if len(args) > 0 {
 				var err error
-				name, err = common.Cli.CheckNameArg(cmd, args[0])
+				name, err = common.Cli.CheckArg(cmd, args[0])
 				if err != nil {
 					return err
 				}
@@ -356,9 +326,9 @@ func newNetworkInspectCmd(op *api.Operation) *cobra.Command {
 			}
 
 			info, err := op.NetworkInspect(cmd.Context(), &inputs.NetworkInput{Name: []string{name}})
-				if err != nil {
-					return fmt.Errorf("network not found: %s", name)
-				}
+			if err != nil {
+				return fmt.Errorf("network not found: %s", name)
+			}
 
 			if jsonOutput {
 				// Match Python's json.dumps(info, indent=2, default=str)
@@ -386,16 +356,16 @@ func newNetworkSyncCmd(op *api.Operation) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
-		Use:                "sync [name]",
-		Short:              "Sync iptables rules between database and host.",
-		Args:               cobra.MaximumNArgs(1),
-		ValidArgsFunction:  completeNetworkNames,
+		Use:               "sync [name]",
+		Short:             "Sync iptables rules between database and host.",
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: completeNetworkNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Resolve network ID if name provided
 			var networkID string
 			if len(args) > 0 {
 				name := args[0]
-			info, err := op.NetworkInspect(cmd.Context(), &inputs.NetworkInput{Name: []string{name}})
+				info, err := op.NetworkInspect(cmd.Context(), &inputs.NetworkInput{Name: []string{name}})
 				if err != nil {
 					return fmt.Errorf("network not found: %s", name)
 				}
@@ -467,14 +437,14 @@ func newNetworkSyncCmd(op *api.Operation) *cobra.Command {
 
 func newNetworkDefaultCmd(op *api.Operation) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:                "default [name]",
-		Short:              "Set a network as the default for VM creation.",
-		Args:               cobra.MaximumNArgs(1),
+		Use:   "default [name]",
+		Short: "Set a network as the default for VM creation.",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var name string
 			if len(args) > 0 {
 				var err error
-				name, err = common.Cli.CheckNameArg(cmd, args[0])
+				name, err = common.Cli.CheckArg(cmd, args[0])
 				if err != nil {
 					return err
 				}
@@ -536,4 +506,3 @@ func convertToStringsRecursive(v interface{}) interface{} {
 		return v
 	}
 }
-

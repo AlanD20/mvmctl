@@ -224,5 +224,3 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *Resol
 		ExitCode: exitCode,
 	}
 }
-
-

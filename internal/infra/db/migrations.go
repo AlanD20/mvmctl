@@ -194,11 +194,10 @@ func RunMigrationsCtx(ctx context.Context, db *sql.DB, dbPath string) (int, erro
 		// Record migration with ISO-8601 timestamp (matching Python's datetime.now().isoformat() — local time, microsecond precision).
 		// Use Go's zero value (empty string) for missing snapshot path.
 		// The reader side handles both "" and "None" for backward compatibility.
-		recordedSnapshotPath := snapshotPath
 		appliedAt := time.Now().Format(time.RFC3339)
 		if _, err := db.ExecContext(ctx,
 			"INSERT INTO db_migrations (version, name, applied_at, snapshot_path) VALUES (?, ?, ?, ?)",
-			f.version, f.name, appliedAt, recordedSnapshotPath,
+			f.version, f.name, appliedAt, snapshotPath,
 		); err != nil {
 			return applied, errs.MigrationError(
 				fmt.Sprintf("Failed to record migration %s: %v", f.name, err))

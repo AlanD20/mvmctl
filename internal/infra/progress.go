@@ -194,12 +194,12 @@ func formatBytes(size int64) string {
 // Displays a rotating Braille character with a message on a single line.
 // Mirrors Python's mvmctl.utils.progress.Spinner.
 type Spinner struct {
-	message   string
-	stopCh    chan struct{}
-	doneCh    chan struct{}
-	mu        sync.Mutex
-	started   bool
-	stopped   bool // prevents double-close panic on second Stop() call
+	message string
+	stopCh  chan struct{}
+	doneCh  chan struct{}
+	mu      sync.Mutex
+	started bool
+	stopped bool // prevents double-close panic on second Stop() call
 }
 
 // NewSpinner creates a new Spinner with the given message.

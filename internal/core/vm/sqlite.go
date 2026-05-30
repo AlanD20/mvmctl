@@ -505,31 +505,31 @@ func scanVM(row *sql.Row) (*model.VM, error) {
 	var v vmScanRow
 	err := row.Scan(
 		&v.ID, &v.Name, &v.Status, &v.PID, &v.ProcessStartTime, // 1-5
-		&v.IPv4, &v.MAC, &v.NetworkID, &v.TapDevice,             // 6-9
-		&v.ImageID, &v.KernelID, &v.BinaryID, &v.APISocketPath,  // 10-13
-		&v.RelaySocketPath, &v.ConfigPath, &v.CloudInitMode,      // 14-16
-		&v.NocloudNetPort, &v.NocloudNetPID, &v.RelayPID,         // 17-19
-		&v.ExitCode,             // 20
-		&v.LogPath,              // 21
-		&v.SerialOutputPath,     // 22
-		&v.VCPUCount,            // 23
-		&v.MemSizeMiB,           // 24
-		&v.DiskSizeMiB,          // 25
-		&v.RootfsPath,           // 26
-		&v.RootfsSuffix,         // 27
-		&v.PCIEnabled,           // 28
-		&v.NestedVirt,           // 29
-		&v.CPUConfig,            // 30
-		&v.LSMFlags,             // 31
-		&v.EnableLogging,        // 32
-		&v.EnableMetrics,        // 33
-		&v.EnableConsole,        // 34
-		&v.BootArgs,             // 35
-		&v.SSHKeys,              // 36
-		&v.SSHUser,              // 37
-		&v.VolumeIDs,            // 38
-		&v.CreatedAt,            // 39
-		&v.UpdatedAt,            // 40
+		&v.IPv4, &v.MAC, &v.NetworkID, &v.TapDevice, // 6-9
+		&v.ImageID, &v.KernelID, &v.BinaryID, &v.APISocketPath, // 10-13
+		&v.RelaySocketPath, &v.ConfigPath, &v.CloudInitMode, // 14-16
+		&v.NocloudNetPort, &v.NocloudNetPID, &v.RelayPID, // 17-19
+		&v.ExitCode,         // 20
+		&v.LogPath,          // 21
+		&v.SerialOutputPath, // 22
+		&v.VCPUCount,        // 23
+		&v.MemSizeMiB,       // 24
+		&v.DiskSizeMiB,      // 25
+		&v.RootfsPath,       // 26
+		&v.RootfsSuffix,     // 27
+		&v.PCIEnabled,       // 28
+		&v.NestedVirt,       // 29
+		&v.CPUConfig,        // 30
+		&v.LSMFlags,         // 31
+		&v.EnableLogging,    // 32
+		&v.EnableMetrics,    // 33
+		&v.EnableConsole,    // 34
+		&v.BootArgs,         // 35
+		&v.SSHKeys,          // 36
+		&v.SSHUser,          // 37
+		&v.VolumeIDs,        // 38
+		&v.CreatedAt,        // 39
+		&v.UpdatedAt,        // 40
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -546,31 +546,31 @@ func scanVMs(rows *sql.Rows) ([]*model.VM, error) {
 		var v vmScanRow
 		err := rows.Scan(
 			&v.ID, &v.Name, &v.Status, &v.PID, &v.ProcessStartTime, // 1-5
-			&v.IPv4, &v.MAC, &v.NetworkID, &v.TapDevice,             // 6-9
-			&v.ImageID, &v.KernelID, &v.BinaryID, &v.APISocketPath,  // 10-13
-			&v.RelaySocketPath, &v.ConfigPath, &v.CloudInitMode,      // 14-16
-			&v.NocloudNetPort, &v.NocloudNetPID, &v.RelayPID,         // 17-19
-			&v.ExitCode,             // 20
-			&v.LogPath,              // 21
-			&v.SerialOutputPath,     // 22
-			&v.VCPUCount,            // 23
-			&v.MemSizeMiB,           // 24
-			&v.DiskSizeMiB,          // 25
-			&v.RootfsPath,           // 26
-			&v.RootfsSuffix,         // 27
-			&v.PCIEnabled,           // 28
-			&v.NestedVirt,           // 29
-			&v.CPUConfig,            // 30
-			&v.LSMFlags,             // 31
-			&v.EnableLogging,        // 32
-			&v.EnableMetrics,        // 33
-			&v.EnableConsole,        // 34
-			&v.BootArgs,             // 35
-			&v.SSHKeys,              // 36
-			&v.SSHUser,              // 37
-			&v.VolumeIDs,            // 38
-			&v.CreatedAt,            // 39
-			&v.UpdatedAt,            // 40
+			&v.IPv4, &v.MAC, &v.NetworkID, &v.TapDevice, // 6-9
+			&v.ImageID, &v.KernelID, &v.BinaryID, &v.APISocketPath, // 10-13
+			&v.RelaySocketPath, &v.ConfigPath, &v.CloudInitMode, // 14-16
+			&v.NocloudNetPort, &v.NocloudNetPID, &v.RelayPID, // 17-19
+			&v.ExitCode,         // 20
+			&v.LogPath,          // 21
+			&v.SerialOutputPath, // 22
+			&v.VCPUCount,        // 23
+			&v.MemSizeMiB,       // 24
+			&v.DiskSizeMiB,      // 25
+			&v.RootfsPath,       // 26
+			&v.RootfsSuffix,     // 27
+			&v.PCIEnabled,       // 28
+			&v.NestedVirt,       // 29
+			&v.CPUConfig,        // 30
+			&v.LSMFlags,         // 31
+			&v.EnableLogging,    // 32
+			&v.EnableMetrics,    // 33
+			&v.EnableConsole,    // 34
+			&v.BootArgs,         // 35
+			&v.SSHKeys,          // 36
+			&v.SSHUser,          // 37
+			&v.VolumeIDs,        // 38
+			&v.CreatedAt,        // 39
+			&v.UpdatedAt,        // 40
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan vm: %w", err)
@@ -589,23 +589,23 @@ func scanVMs(rows *sql.Rows) ([]*model.VM, error) {
 // JSON columns are scanned as string and deserialized by toVM().
 // Nullable columns use sql.Null* types.
 type vmScanRow struct {
-	ID, Name, Status string
-	PID              int
-	ProcessStartTime sql.NullInt64
-	IPv4, MAC, NetworkID, TapDevice string
-	ImageID, KernelID, BinaryID, APISocketPath string
-	RelaySocketPath  sql.NullString
-	ConfigPath, CloudInitMode string
-	NocloudNetPort, NocloudNetPID, RelayPID sql.NullInt64
-	ExitCode         sql.NullInt64
-	VCPUCount, MemSizeMiB, DiskSizeMiB int
-	RootfsPath, RootfsSuffix string
-	PCIEnabled, NestedVirt         sql.NullInt64
-	EnableLogging, EnableMetrics, EnableConsole sql.NullInt64
-	SSHKeys, SSHUser sql.NullString
-	CreatedAt, UpdatedAt string
+	ID, Name, Status                              string
+	PID                                           int
+	ProcessStartTime                              sql.NullInt64
+	IPv4, MAC, NetworkID, TapDevice               string
+	ImageID, KernelID, BinaryID, APISocketPath    string
+	RelaySocketPath                               sql.NullString
+	ConfigPath, CloudInitMode                     string
+	NocloudNetPort, NocloudNetPID, RelayPID       sql.NullInt64
+	ExitCode                                      sql.NullInt64
+	VCPUCount, MemSizeMiB, DiskSizeMiB            int
+	RootfsPath, RootfsSuffix                      string
+	PCIEnabled, NestedVirt                        sql.NullInt64
+	EnableLogging, EnableMetrics, EnableConsole   sql.NullInt64
+	SSHKeys, SSHUser                              sql.NullString
+	CreatedAt, UpdatedAt                          string
 	LogPath, SerialOutputPath, LSMFlags, BootArgs sql.NullString
-	VolumeIDs, CPUConfig sql.NullString
+	VolumeIDs, CPUConfig                          sql.NullString
 }
 
 func (v *vmScanRow) toVM() (*model.VM, error) {

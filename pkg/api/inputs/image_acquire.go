@@ -105,8 +105,8 @@ type ResolvedImageAcquireInput struct {
 // Go has no sum types.
 type ImageAcquireRequest struct {
 	db       *sql.DB
-	input   any // ImagePullInput or ImageImportInput
-	result  *ResolvedImageAcquireInput
+	input    any // ImagePullInput or ImageImportInput
+	result   *ResolvedImageAcquireInput
 	resolver *image.Resolver
 }
 
@@ -114,7 +114,7 @@ type ImageAcquireRequest struct {
 func NewImageAcquireRequest(inputs any, db *sql.DB, imageRepo image.Repository) *ImageAcquireRequest {
 	return &ImageAcquireRequest{
 		db:       db,
-		input:   inputs,
+		input:    inputs,
 		resolver: image.NewResolver(imageRepo),
 	}
 }

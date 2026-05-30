@@ -24,6 +24,7 @@ import (
 // Interactive controls sudo mode:
 //   - true  → plain "sudo" (allows password prompt via TTY forwarding)
 //   - false → "sudo -n" (non-interactive, fails immediately if password required)
+//
 // Default is false (non-interactive), suitable for automated operations.
 type RunCmdOptions struct {
 	Cmd         string
@@ -117,15 +118,15 @@ const signalExitCodeBase = 128
 //	    def __init__(self, pid, *, is_child=True, expected_start_time=None,
 //	                 graceful_timeout=30.0, kill_timeout=5.0, poll_interval=0.1)
 type ProcessSignalHandler struct {
-	Pid                int
-	IsChild            bool
-	ExpectedStartTime  *int64
-	GracefulTimeout    time.Duration
-	KillTimeout        time.Duration
-	PollInterval       time.Duration
-	exitCode           *int
-	reaped             bool
-	lastErr            error
+	Pid               int
+	IsChild           bool
+	ExpectedStartTime *int64
+	GracefulTimeout   time.Duration
+	KillTimeout       time.Duration
+	PollInterval      time.Duration
+	exitCode          *int
+	reaped            bool
+	lastErr           error
 }
 
 // NewProcessSignalHandler creates a new ProcessSignalHandler, matching Python's

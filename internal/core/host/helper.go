@@ -193,5 +193,3 @@ func (h *PrivilegeHelper) RequireRoot() error {
 func SudoersDropInPath() string {
 	return fmt.Sprintf("/etc/sudoers.d/%s", infra.CLIName)
 }
-
-

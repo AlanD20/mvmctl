@@ -234,5 +234,3 @@ func (s *Service) CleanStaleProvisionMounts(ctx context.Context, dryRun bool) bo
 
 	return cleaned
 }
-
-

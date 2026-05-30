@@ -40,8 +40,8 @@ type ResolvedNetworkInput struct {
 // Resolve network identifiers to DB records and validate.
 type NetworkRequest struct {
 	db       *sql.DB
-	input   NetworkInput
-	result  *ResolvedNetworkInput
+	input    NetworkInput
+	result   *ResolvedNetworkInput
 	resolver *network.Resolver
 }
 
@@ -54,7 +54,7 @@ type NetworkRequest struct {
 func NewNetworkRequest(inputs NetworkInput, db *sql.DB, networkRepo network.Repository) *NetworkRequest {
 	return &NetworkRequest{
 		db:       db,
-		input:   inputs,
+		input:    inputs,
 		resolver: network.NewResolverWithInclude(networkRepo, []string{"leases"}),
 	}
 }

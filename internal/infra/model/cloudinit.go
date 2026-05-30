@@ -39,11 +39,11 @@ type ProvisionConfig struct {
 	NetworkID   string
 	NetworkName string
 
-	GuestIP          string
-	User             string
-	TapName          string
-	IPv4Gateway      string
-	NetworkPrefixLen int
+	GuestIP           string
+	User              string
+	TapName           string
+	IPv4Gateway       string
+	NetworkPrefixLen  int
 	SkipNetworkConfig bool
 
 	SSHPubkeys []string
@@ -68,11 +68,11 @@ type ProvisionConfig struct {
 type ProvisionResult struct {
 	Mode CloudInitMode
 
-	ISOPath    *string
-	NocloudURL *string
+	ISOPath     *string
+	NocloudURL  *string
 	NocloudPort int
 
-	NocloudPID  *int
-	NocloudNetManager any           `json:"-"` // Runtime lifecycle manager — not a data field
+	NocloudPID        *int
+	NocloudNetManager any            `json:"-"` // Runtime lifecycle manager — not a data field
 	NocloudNetRules   []FirewallRule // Firewall rules created
 }

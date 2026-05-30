@@ -25,7 +25,9 @@ func completeNetworkNames(cmd *cobra.Command, args []string, toComplete string) 
 			results = append(results, net.Name)
 		}
 		short := net.ID
-		if len(short) > 6 { short = short[:6] }
+		if len(short) > 6 {
+			short = short[:6]
+		}
 		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
 			results = append(results, short)
 		}
@@ -42,7 +44,9 @@ func completeImageIDs(cmd *cobra.Command, args []string, toComplete string) ([]s
 	var results []string
 	for _, img := range images {
 		short := img.ID
-		if len(short) > 6 { short = short[:6] }
+		if len(short) > 6 {
+			short = short[:6]
+		}
 		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
 			results = append(results, short)
 		}
@@ -68,7 +72,9 @@ func completeKernelIDs(cmd *cobra.Command, args []string, toComplete string) ([]
 			}
 		}
 		short := k.ID
-		if len(short) > 6 { short = short[:6] }
+		if len(short) > 6 {
+			short = short[:6]
+		}
 		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
 			results = append(results, short)
 		}
@@ -91,7 +97,9 @@ func completeBinaryVersions(cmd *cobra.Command, args []string, toComplete string
 			results = append(results, b.Version)
 		}
 		short := b.ID
-		if len(short) > 6 { short = short[:6] }
+		if len(short) > 6 {
+			short = short[:6]
+		}
 		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
 			results = append(results, short)
 		}
@@ -135,7 +143,9 @@ func completeVolumeNames(cmd *cobra.Command, args []string, toComplete string) (
 			results = append(results, v.Name)
 		}
 		short := v.ID
-		if len(short) > 6 { short = short[:6] }
+		if len(short) > 6 {
+			short = short[:6]
+		}
 		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
 			results = append(results, short)
 		}

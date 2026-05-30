@@ -21,10 +21,10 @@ type OperationResult struct {
 	Status    string         `json:"status"`
 	Code      string         `json:"code"`
 	Message   string         `json:"message"`
-	Item      any            `json:"item,omitempty"`       // Item is any because OperationResult is a generic container used across all domain operations (VM, Network, Image, etc.). Concrete typing not feasible — each operation type would need its own result type.
-	Exception error          `json:"-"`  // Serialized via MarshalJSON
-	Metadata  map[string]any `json:"-"`  // Arbitrary per-operation metadata; schema varies by operation type
-	Warnings  []string       `json:"-"`  // Serialized via MarshalJSON
+	Item      any            `json:"item,omitempty"` // Item is any because OperationResult is a generic container used across all domain operations (VM, Network, Image, etc.). Concrete typing not feasible — each operation type would need its own result type.
+	Exception error          `json:"-"`              // Serialized via MarshalJSON
+	Metadata  map[string]any `json:"-"`              // Arbitrary per-operation metadata; schema varies by operation type
+	Warnings  []string       `json:"-"`              // Serialized via MarshalJSON
 }
 
 // ── ProgressEvent ──

@@ -864,8 +864,8 @@ func isConnRefused(err error) bool {
 func (fc *FirecrackerClient) CreateSnapshot(memPath, snapshotPath string) (bool, error) {
 	slog.Info("Creating snapshot...")
 	body := map[string]any{
-		"mem_file_path":  memPath,
-		"snapshot_path":  snapshotPath,
+		"mem_file_path": memPath,
+		"snapshot_path": snapshotPath,
 	}
 	status, data, err := fc.request("PUT", "/snapshot/create", body)
 	if err != nil {
@@ -887,9 +887,9 @@ func (fc *FirecrackerClient) CreateSnapshot(memPath, snapshotPath string) (bool,
 func (fc *FirecrackerClient) LoadSnapshot(memPath, snapshotPath string, resume bool) (bool, error) {
 	slog.Info("Loading snapshot...")
 	body := map[string]any{
-		"mem_file_path":  memPath,
-		"snapshot_path":  snapshotPath,
-		"resume_vm":      resume,
+		"mem_file_path": memPath,
+		"snapshot_path": snapshotPath,
+		"resume_vm":     resume,
 	}
 	status, data, err := fc.request("PUT", "/snapshot/load", body)
 	if err != nil {

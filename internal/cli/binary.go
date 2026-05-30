@@ -15,20 +15,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// binJSON is the JSON output format for binary ls.
-type binJSON struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Version     string  `json:"version"`
-	FullVersion string  `json:"full_version"`
-	CIVersion   *string `json:"ci_version"`
-	Path        string  `json:"path"`
-	IsDefault   bool    `json:"is_default"`
-	IsPresent   bool    `json:"is_present"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
-}
-
 // localFirecrackerVersions builds a set of Firecracker versions present locally.
 // BinaryList for local entries returns all binary types (firecracker, jailer,
 // kernels, images), but BinaryList for remote only fetches Firecracker releases.
@@ -68,9 +54,9 @@ func NewBinaryCmd(op *api.Operation) *cobra.Command {
 		Short:   "Binary management",
 	}
 
-	cmd.AddCommand(newBinaryLsCmd(op))
+	cmd.AddCommand(newBinaryListCmd(op))
 	cmd.AddCommand(newBinaryPullCmd(op))
-	cmd.AddCommand(newBinaryRmCmd(op))
+	cmd.AddCommand(newBinaryRemoveCmd(op))
 	cmd.AddCommand(newBinaryDefaultCmd(op))
 
 	// Hidden help subcommand matching Python's Typer "help" command
@@ -87,7 +73,7 @@ func NewBinaryCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newBinaryLsCmd(op *api.Operation) *cobra.Command {
+func newBinaryListCmd(op *api.Operation) *cobra.Command {
 	var jsonOutput bool
 	var longOutput bool
 	var remote bool
@@ -105,22 +91,7 @@ func newBinaryLsCmd(op *api.Operation) *cobra.Command {
 			localVersions := localFirecrackerVersions(local)
 
 			if jsonOutput {
-				data := make([]binJSON, 0, len(local))
-				for _, b := range local {
-					data = append(data, binJSON{
-						ID:          b.ID,
-						Name:        b.Name,
-						Version:     b.Version,
-						FullVersion: b.FullVersion,
-						CIVersion:   b.CIVersion,
-						Path:        b.Path,
-						IsDefault:   b.IsDefault,
-						IsPresent:   b.IsPresent,
-						CreatedAt:   b.CreatedAt,
-						UpdatedAt:   b.UpdatedAt,
-					})
-				}
-				b, _ := json.MarshalIndent(data, "", "  ")
+				b, _ := json.MarshalIndent(local, "", "  ")
 				fmt.Println(string(b))
 				return nil
 			}
@@ -300,7 +271,7 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newBinaryRmCmd(op *api.Operation) *cobra.Command {
+func newBinaryRemoveCmd(op *api.Operation) *cobra.Command {
 	var version string
 	var force bool
 
@@ -320,13 +291,12 @@ func newBinaryRmCmd(op *api.Operation) *cobra.Command {
 				return nil
 			}
 
-			effectiveIDs := args
-			if len(effectiveIDs) == 0 {
+			if len(args) == 0 {
 				common.Cli.Error("Provide at least one binary ID to remove or use --version")
 				return fmt.Errorf("usage error")
 			}
 
-			batchResult := op.BinaryRemove(cmd.Context(), &inputs.BinaryInput{Identifiers: effectiveIDs}, force)
+			batchResult := op.BinaryRemove(cmd.Context(), &inputs.BinaryInput{Identifiers: args}, force)
 			for _, r := range batchResult.Items {
 				if r.Status == "success" {
 					msg := r.Message

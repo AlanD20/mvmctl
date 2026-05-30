@@ -45,10 +45,10 @@ func NewKernelErrorfWithCode(code errs.Code, format string, args ...any) *errs.D
 // KernelNotFoundError creates a "kernel not found" error matching Python's KernelNotFoundError.
 func KernelNotFoundError(entity string) *errs.DomainError {
 	return &errs.DomainError{
-		Code:    errs.CodeKernelNotFound,
-		Op:      "kernel.resolve",
-		Entity:  entity,
-		Class:   errs.ClassValidation,
+		Code:   errs.CodeKernelNotFound,
+		Op:     "kernel.resolve",
+		Entity: entity,
+		Class:  errs.ClassValidation,
 	}
 }
 

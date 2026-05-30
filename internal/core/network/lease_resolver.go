@@ -21,8 +21,10 @@ func NewLeaseResolverWithInclude(repo LeaseRepository, include []string) *LeaseR
 
 // enrich enriches leases with relations if include is set.
 // Matches Python's _enrich() method exactly. In Python:
-//   if self._include and leases:
-//       RelationEnricher().enrich(leases, self._include, self.RELATIONS)
+//
+//	if self._include and leases:
+//	    RelationEnricher().enrich(leases, self._include, self.RELATIONS)
+//
 // where RELATIONS is empty ({}), so this is a pass-through.
 // Enrichment of cross-domain relations is handled by the enricher package
 // (internal/enricher/) which is the only package authorised to import

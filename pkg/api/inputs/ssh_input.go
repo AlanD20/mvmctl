@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-	"strings"
 
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/key"
@@ -53,16 +52,16 @@ type ResolvedSSHInput struct {
 //
 // Resolve SSHInput against the database.
 type SSHRequest struct {
-	db      *sql.DB
+	db     *sql.DB
 	input  SSHInput
 	result *ResolvedSSHInput
-	vm      *model.VM
+	vm     *model.VM
 }
 
 // NewSSHRequest creates a new SSHRequest.
 func NewSSHRequest(inputs SSHInput, db *sql.DB) *SSHRequest {
 	return &SSHRequest{
-		db:     db,
+		db:    db,
 		input: inputs,
 	}
 }
@@ -207,7 +206,7 @@ func (r *SSHRequest) resolveKey(ctx context.Context, keyRepo key.Repository) (*s
 		// 1b. Try as direct filesystem path — validate private key content
 		if fi, err := os.Stat(keyStr); err == nil && !fi.IsDir() {
 			content, err := os.ReadFile(keyStr)
-			if err == nil && isPrivateKey(string(content)) {
+			if err == nil && key.IsPrivateKey(string(content)) {
 				return &keyStr, nil
 			}
 		}
@@ -247,8 +246,4 @@ func (r *SSHRequest) resolveKey(ctx context.Context, keyRepo key.Repository) (*s
 	return nil, nil
 }
 
-// isPrivateKey checks if content contains a PEM-encoded private key header.
-// Matches Python's KeyService._is_private_key().
-func isPrivateKey(content string) bool {
-	return strings.Contains(content, "-----BEGIN") && strings.Contains(content, "PRIVATE KEY-----")
-}
+

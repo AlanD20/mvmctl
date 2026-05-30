@@ -37,14 +37,14 @@ type VMImportInput struct {
 // Resolve VMImportInput to ResolvedVMCreateInput.
 // Python delegates to VMCreateRequest for full resolution.
 type VMImportRequest struct {
-	db     *sql.DB
+	db    *sql.DB
 	input VMImportInput
 }
 
 // NewVMImportRequest creates a new VMImportRequest.
 func NewVMImportRequest(inputs VMImportInput, db *sql.DB) *VMImportRequest {
 	return &VMImportRequest{
-		db:     db,
+		db:    db,
 		input: inputs,
 	}
 }

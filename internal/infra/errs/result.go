@@ -26,13 +26,13 @@ type ProgressEvent struct {
 // OperationResult matches Python's OperationResult(status, code, message, item, exception,
 // metadata, warnings). T is generic in Python but we use any for the Item field in Go.
 type OperationResult struct {
-	Status    string         `json:"status"`              // "success", "error", "failure", "warning", "skipped"
-	Code      string         `json:"code"`                // e.g. "vm.created", "vm.not_found"
-	Message   string         `json:"message"`             // Human-readable message
-	Item      any            `json:"item,omitempty"`       // Item is any because OperationResult is a generic container. Concrete typing not feasible since each domain operation sets a different type.
-	Exception error          `json:"-"`                    // Optional exception — serialized via MarshalJSON
-	Metadata  map[string]any `json:"-"`                    // Structured extra data — serialized via MarshalJSON
-	Warnings  []string       `json:"-"`                    // Non-fatal warnings — serialized via MarshalJSON
+	Status    string         `json:"status"`         // "success", "error", "failure", "warning", "skipped"
+	Code      string         `json:"code"`           // e.g. "vm.created", "vm.not_found"
+	Message   string         `json:"message"`        // Human-readable message
+	Item      any            `json:"item,omitempty"` // Item is any because OperationResult is a generic container. Concrete typing not feasible since each domain operation sets a different type.
+	Exception error          `json:"-"`              // Optional exception — serialized via MarshalJSON
+	Metadata  map[string]any `json:"-"`              // Structured extra data — serialized via MarshalJSON
+	Warnings  []string       `json:"-"`              // Non-fatal warnings — serialized via MarshalJSON
 }
 
 // MarshalJSON implements json.Marshaler for OperationResult.
@@ -60,9 +60,9 @@ func (r *OperationResult) MarshalJSON() ([]byte, error) {
 	}
 	type Alias OperationResult // avoid infinite recursion
 	return json.Marshal(&struct {
-		Exception *string         `json:"exception"`
-		Metadata  map[string]any  `json:"metadata"`
-		Warnings  []string        `json:"warnings"`
+		Exception *string        `json:"exception"`
+		Metadata  map[string]any `json:"metadata"`
+		Warnings  []string       `json:"warnings"`
 		*Alias
 	}{
 		Exception: exceptionStr,
@@ -99,10 +99,10 @@ func (r *OperationResult) IsError() bool {
 // Returned instead of OperationResult when the API cannot proceed without user input.
 // This is NOT an exception — it is normal control flow.
 type NeedsInteraction struct {
-	Code      string         `json:"code"`                // Machine-readable reason code
-	Message   string         `json:"message"`             // Human-readable prompt
-	InputType string         `json:"input_type"`          // "sudo", "confirm", "choice", "input"
-	Context   map[string]any `json:"context,omitempty"`   // Structured context
+	Code      string         `json:"code"`              // Machine-readable reason code
+	Message   string         `json:"message"`           // Human-readable prompt
+	InputType string         `json:"input_type"`        // "sudo", "confirm", "choice", "input"
+	Context   map[string]any `json:"context,omitempty"` // Structured context
 }
 
 // ── BatchResult (Python-matching) ──

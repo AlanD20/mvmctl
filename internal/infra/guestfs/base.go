@@ -34,8 +34,8 @@ func (e *GuestfsError) Error() string { return e.msg }
 // ── Constants ───────────────────────────────────────────────────────────────
 
 const (
-	guestfishBin  = "guestfish"
-	guestmountBin = "guestmount"
+	guestfishBin   = "guestfish"
+	guestmountBin  = "guestmount"
 	defaultMemsize = 256
 )
 
@@ -127,12 +127,13 @@ func RunGuestfishCommand(ctx context.Context, diskPath string, readonly bool, ar
 
 // guestfishCommonFlags returns the shared guestfish flags matching Python's
 // OptimizedGuestfs._create_handle() handle configuration:
-//   set_recovery_proc(False)  → --no-recovery-proc
-//   set_autosync(False)       → --no-autosync
-//   set_network(False)        → --no-network
-//   set_smp(1)                → --smp 1
-//   set_memsize(256)          → --memsize 256
-//   set_backend("direct")     → --backend direct
+//
+//	set_recovery_proc(False)  → --no-recovery-proc
+//	set_autosync(False)       → --no-autosync
+//	set_network(False)        → --no-network
+//	set_smp(1)                → --smp 1
+//	set_memsize(256)          → --memsize 256
+//	set_backend("direct")     → --backend direct
 func guestfishCommonFlags(diskPath string, readonly bool) []string {
 	flags := []string{"-a", diskPath}
 	if readonly {

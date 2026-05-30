@@ -41,8 +41,8 @@ type ResolvedVMInput struct {
 // Python version creates VMResolver with include=["image","kernel","network","network.leases","volumes","binary"].
 type VMRequest struct {
 	db       *sql.DB
-	input   VMInput
-	result  *ResolvedVMInput
+	input    VMInput
+	result   *ResolvedVMInput
 	resolver *vm.Resolver
 	enricher *enricher.Enricher
 }
@@ -52,7 +52,7 @@ type VMRequest struct {
 func NewVMRequest(inputs VMInput, db *sql.DB, vmRepo vm.Repository, enricher *enricher.Enricher) *VMRequest {
 	return &VMRequest{
 		db:       db,
-		input:   inputs,
+		input:    inputs,
 		resolver: vm.NewResolver(vmRepo),
 		enricher: enricher,
 	}

@@ -75,7 +75,8 @@ func (HashGenerator) Image(type_, source, timestamp string) string {
 
 // Kernel generates a 64-char SHA256 hash for a kernel.
 // Python: file_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
-//         data = f"{file_hash}:{version}:{arch}:{timestamp}"
+//
+//	data = f"{file_hash}:{version}:{arch}:{timestamp}"
 func (HashGenerator) Kernel(filePath, version, arch, timestamp string) (string, error) {
 	fileHash, err := SHA256FileHash(filePath)
 	if err != nil {
@@ -88,7 +89,8 @@ func (HashGenerator) Kernel(filePath, version, arch, timestamp string) (string, 
 
 // Binary generates a 64-char SHA256 hash for a binary.
 // Python: file_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
-//         data = f"{file_hash}:{name}:{version}"
+//
+//	data = f"{file_hash}:{name}:{version}"
 func (HashGenerator) Binary(filePath, name, version string) (string, error) {
 	fileHash, err := SHA256FileHash(filePath)
 	if err != nil {
@@ -161,5 +163,3 @@ func (HashGenerator) Shorten(fullHash string, length ...int) (string, error) {
 	}
 	return fullHash[:n], nil
 }
-
-

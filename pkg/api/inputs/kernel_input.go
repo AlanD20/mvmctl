@@ -40,8 +40,8 @@ type ResolvedKernelInput struct {
 // Resolve kernel identifiers to DB records and validate.
 type KernelRequest struct {
 	db       *sql.DB
-	input   KernelInput
-	result  *ResolvedKernelInput
+	input    KernelInput
+	result   *ResolvedKernelInput
 	resolver *kernel.Resolver
 }
 
@@ -49,7 +49,7 @@ type KernelRequest struct {
 func NewKernelRequest(inputs KernelInput, db *sql.DB, kernelRepo kernel.Repository) *KernelRequest {
 	return &KernelRequest{
 		db:       db,
-		input:   inputs,
+		input:    inputs,
 		resolver: kernel.NewResolver(kernelRepo, nil),
 	}
 }

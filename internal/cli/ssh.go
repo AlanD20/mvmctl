@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"mvmctl/internal/cli/common"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
-	"mvmctl/internal/cli/common"
 )
 
 // completeVMNames provides shell completion for VM identifiers.

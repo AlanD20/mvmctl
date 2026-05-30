@@ -102,6 +102,7 @@ type SetValEntry struct {
 // Each entry in the list should be either:
 //   - a map with "option" and "value" keys (like Python dict entries), or
 //   - a two-element list/tuple where item[0]=option, item[1]=value
+//
 // Matches Python's parse_set_val_list() function.
 func ParseSetValList(data map[string]any, key string) ([]SetValEntry, error) {
 	v, ok := data[key]

@@ -55,8 +55,8 @@ type ResolvedConfigInput struct {
 // Resolve ConfigInput against the database.
 type ConfigRequest struct {
 	db      *sql.DB
-	input  ConfigInput
-	result *ResolvedConfigInput
+	input   ConfigInput
+	result  *ResolvedConfigInput
 	service *config.Service
 }
 
@@ -65,7 +65,7 @@ func NewConfigRequest(inputs ConfigInput, db *sql.DB) *ConfigRequest {
 	svc := config.NewService(config.NewRepository(db))
 	return &ConfigRequest{
 		db:      db,
-		input:  inputs,
+		input:   inputs,
 		service: svc,
 	}
 }

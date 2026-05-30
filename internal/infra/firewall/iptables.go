@@ -89,7 +89,8 @@ func (t *IPTablesTracker) buildComment(ruleType FirewallRuleType, networkName, c
 // ── Shell-safe quote ──
 // Matches Python shlex.quote(). Wraps argument in single quotes if it contains
 // characters unsafe for shell tokenization. Safe characters:
-//   ASCII letters, digits, and @%_+=:,./-
+//
+//	ASCII letters, digits, and @%_+=:,./-
 func shlexQuote(s string) string {
 	if s == "" {
 		return "''"

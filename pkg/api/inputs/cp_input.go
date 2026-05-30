@@ -73,7 +73,7 @@ type ResolvedCPInput struct {
 //
 // Resolve CPInput against the database and filesystem.
 type CPRequest struct {
-	db      *sql.DB
+	db     *sql.DB
 	input  CPInput
 	result *ResolvedCPInput
 }
@@ -81,7 +81,7 @@ type CPRequest struct {
 // NewCPRequest creates a new CPRequest.
 func NewCPRequest(inputs CPInput, db *sql.DB) *CPRequest {
 	return &CPRequest{
-		db:     db,
+		db:    db,
 		input: inputs,
 	}
 }
@@ -275,7 +275,7 @@ func (r *CPRequest) resolveKey(ctx context.Context, vmEntity *model.VM, keyRepo 
 		// Try as filesystem path — validate private key content
 		if fi, err := os.Stat(keyStr); err == nil && !fi.IsDir() {
 			content, err := os.ReadFile(keyStr)
-			if err == nil && isPrivateKey(string(content)) {
+			if err == nil && key.IsPrivateKey(string(content)) {
 				return &keyStr, nil
 			}
 		}

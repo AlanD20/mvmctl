@@ -550,8 +550,10 @@ func getStringSlice(m map[string]any, key string) []string {
 // findConfig finds the config dict for a given type name from the
 // image_types_config list. Matches Python's _find_config():
 // for config in configs:
-//     if config.get("type") == type_name:
-//         return config
+//
+//	if config.get("type") == type_name:
+//	    return config
+//
 // return None
 func findConfig(configs []map[string]any, typeName string) map[string]any {
 	for _, config := range configs {
