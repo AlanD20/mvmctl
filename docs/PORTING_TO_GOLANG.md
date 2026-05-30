@@ -59,6 +59,8 @@ Changes made during the architectural grilling (2026-05-22):
 | 46 | **Deviations from Python CLI naming are allowed when they improve UX** | Example: `mvm key add` → `mvm key import`. Python names are not sacred — if Go naming is clearer, use it. Document the deviation. |
 | 47 | **N+1 query prevention** | Always pass resolved domain objects through the pipeline instead of extracting identifiers and re-querying. Example: `GetPubkeys` receives `[]*model.SSHKeyItem` (with `PublicKeyPath` set) instead of `[]string` key names — zero DB queries instead of N individual lookups. This is a performance deviation from Python that preserves behavior. |
 | 48 | **Short flags for common options** | Add short flags (`-a`, `-d`, `-f` etc.) for commonly-used options even when Python doesn't have them. CLI ergonomics trumps Python parity. Example: `--algorithm` gets `-a` even though Python's Click/Typer doesn't define it. |
+| 49 | **Constraint registry is DI, not global singleton** | Python's `ConstraintRegistry` is a module-level singleton (`constraints = ConstraintRegistry()` in `_constraints.py`). Go version must NOT replicate this with a package-level var + `InitConstraints()`. Instead, create the registry explicitly in `NewOperation()`, register built-in constraints on it, and inject it into `config.NewService(repo, reg)`. This eliminates init-ordering bugs, nil-panic risks, and makes tests trivially injectable. |
+| 50 | **PromptConfirm for destructive actions with --force bypass** | Destructive bulk operations (e.g., `config reset --all`) must prompt for confirmation via `common.Cli.PromptConfirm()`. A `--force` / `-f` flag MUST be provided to skip the prompt. Python doesn't have this pattern — it's a Go UX improvement for safety. |
 
 ---
 
@@ -156,7 +158,7 @@ mvmctl/
 │       ├── image_input.go, image_acquire.go
 │       ├── kernel_input.go, kernel_pull.go, kernel_import.go
 │       ├── binary_input.go, binary_pull.go
-│       ├── key_input.go, key_create.go
+│       ├── key_input.go, key_create.go, key_import.go
 │       ├── ssh_input.go, console_input.go, logs_input.go
 │       ├── volume_input.go, volume_create.go
 │       ├── config_input.go, cp_input.go

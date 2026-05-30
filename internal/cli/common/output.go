@@ -200,6 +200,11 @@ func (c *MVMCli) Success(message string) {
 
 // Warning prints a warning message to stderr.
 // Matches Python's mvm_cli.warning() — Rich: "[yellow]! {message}[/]"
+// Text prints a plain indented message with no color or decoration.
+func (c *MVMCli) Text(message string) {
+	fmt.Printf("  %s\n", message)
+}
+
 func (c *MVMCli) Warning(message string) {
 	if isStderrTTY() {
 		fmt.Fprintf(os.Stderr, "%s! %s%s\n", ansiYellow, message, ansiReset)
@@ -547,10 +552,21 @@ func (c *MVMCli) FormatEntityName(name string) string {
 	return name
 }
 
-// FormatSettingValue formats an arbitrary setting value for display.
-func (c *MVMCli) FormatSettingValue(v any) string {
+// settingNilOverrides maps setting keys to human-readable labels for nil values.
+// e.g., build_jobs = nil means "use all cores" — display as "<auto>".
+var settingNilOverrides = map[string]string{
+	"build_jobs": "<auto>",
+}
+
+// FormatSettingValue formats a setting value for display.
+// key is the setting name used for nil-value overrides (e.g., build_jobs → "<auto>").
+// Pass "" if no key-based override is needed.
+func (c *MVMCli) FormatSettingValue(v any, key string) string {
 	if v == nil {
-		return "<nil>"
+		if display, ok := settingNilOverrides[key]; ok {
+			return display
+		}
+		return "(unset)"
 	}
 	return fmt.Sprintf("%v", v)
 }

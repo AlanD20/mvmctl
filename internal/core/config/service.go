@@ -2,7 +2,6 @@ package config
 
 import (
 	"context"
-	"errors"
 
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
@@ -11,17 +10,15 @@ import (
 // Service matches the Python mvmctl.core.config._service.SettingsService.
 // Handles type coercion, cross-key constraint validation, and DB persistence.
 type Service struct {
-	repo SettingsRepository
+	repo        SettingsRepository
+	constraints *ConstraintRegistry
 }
 
-// NewService creates a new Service with the given repo.
-// Uses the package-level constraint registry (defaultConstraints) which has all
-// built-in constraints auto-registered — matching Python's module-level singleton
-// `constraints = ConstraintRegistry()` with built-in constraints registered at
-// module load time (no parameterization in the constructor).
-func NewService(repo SettingsRepository) *Service {
+// NewService creates a new Service with the given repo and constraint registry.
+func NewService(repo SettingsRepository, constraints *ConstraintRegistry) *Service {
 	return &Service{
-		repo: repo,
+		repo:        repo,
+		constraints: constraints,
 	}
 }
 
@@ -38,7 +35,6 @@ func (s *Service) Get(ctx context.Context, category, key string) (any, error) {
 	}
 	expected := GetExpectedType(category, key)
 	if expected != "" {
-		// Python: return CommonUtils.coerce(value, expected_type) — TypeError propagates
 		return Coerce(value, expected)
 	}
 	return value, nil
@@ -61,16 +57,8 @@ func (s *Service) Set(ctx context.Context, category, key string, value any) erro
 		}
 	}
 
-	// Python: coerced = CommonUtils.coerce(value, expected_type) — TypeError propagates
-	// Go: propagate raw Coerce error without wrapping in DomainError
 	coerced, err := Coerce(value, expected)
 	if err != nil {
-		// Python raises TypeError directly — don't wrap, let it propagate as-is.
-		// But if it's already a DomainError (from a prior wrap), pass it through.
-		var de *errs.DomainError
-		if errors.As(err, &de) {
-			return de
-		}
 		return err
 	}
 
@@ -181,10 +169,8 @@ func (s *Service) ListAll(ctx context.Context) (map[string]map[string]model.Sett
 
 // checkConstraints validates cross-key constraints before writing.
 // Matches Python: _check_constraints(category, key, new_value).
-// Uses the package-level defaultConstraints singleton — Python accesses
-// `_constraints.constraints` (module-level ConstraintRegistry instance) directly.
 func (s *Service) checkConstraints(ctx context.Context, category, key string, newValue any) error {
-	constraints := defaultConstraints.Get(category, key)
+	constraints := s.constraints.Get(category, key)
 	if len(constraints) == 0 {
 		return nil
 	}

@@ -108,20 +108,6 @@ func validateMACPrefix(key string, resolve ResolveFn) error {
 	return nil
 }
 
-// defaultConstraints is the package-level default registry with built-in constraints
-// auto-registered via InitConstraints(), matching Python's module-level singleton behavior.
-// Call InitConstraints() before accessing.
-var defaultConstraints *ConstraintRegistry
-
-// InitConstraints initializes the package-level defaultConstraints singleton and
-// registers all built-in constraints. Replaces the former init() — must be called
-// explicitly from app startup.
-// TODO: call InitConstraints() from internal/app/app.go after InitSettings().
-func InitConstraints() {
-	defaultConstraints = NewConstraintRegistry()
-	RegisterBuiltinConstraints(defaultConstraints)
-}
-
 // RegisterBuiltinConstraints registers all built-in constraints on the given registry.
 // Called during app initialization to match Python's module-level registration.
 func RegisterBuiltinConstraints(r *ConstraintRegistry) {

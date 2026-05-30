@@ -5,6 +5,18 @@ import (
 	"database/sql"
 )
 
+// IsKeyInCategory checks if a key is valid for a given category in OverridableSettings.
+func IsKeyInCategory(category, key string) bool {
+	if catSettings, ok := OverridableSettings[category]; ok {
+		for k := range catSettings {
+			if k == key {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Resolve looks up a setting: check user_settings override, else fall back to default.
 // Matches Python: classmethod SettingsService.resolve(db, category, key).
 // Python's get_default raises KeyError if key doesn't exist — Go returns error.
