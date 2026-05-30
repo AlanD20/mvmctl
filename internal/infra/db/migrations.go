@@ -122,11 +122,6 @@ func takeSnapshot(dbPath string, version int) (string, error) {
 // RunMigrationsCtx runs pending migrations against the database.
 // Mirrors Python's Database.migrate().
 //
-// dbPath must be the filesystem path to the database file. It is used for
-// snapshot creation and chmod — the caller already knows this path and
-// should pass it directly rather than making the function discover it via
-// PRAGMA database_list.
-//
 // Each migration SQL file is executed via ExecContext (matching Python's
 // conn.executescript()). No wrapping transaction is used — matching Python's
 // executescript semantics where each DDL/DML is auto-committed individually
@@ -136,9 +131,11 @@ func takeSnapshot(dbPath string, version int) (string, error) {
 // managed by each migration SQL file via PRAGMA user_version.
 //
 // Returns the number of migrations applied (0 if none pending).
-func RunMigrationsCtx(ctx context.Context, db *sql.DB, dbPath string) (int, error) {
+func (d *Handle) RunMigrationsCtx(ctx context.Context) (int, error) {
+	sqlDB := d.DB()
+
 	// Ensure the tracking table exists (Python's _ensure_migrations_table)
-	if err := EnsureMigrationsTable(ctx, db); err != nil {
+	if err := EnsureMigrationsTable(ctx, sqlDB); err != nil {
 		return 0, fmt.Errorf("create migrations table: %w", err)
 	}
 
@@ -153,7 +150,7 @@ func RunMigrationsCtx(ctx context.Context, db *sql.DB, dbPath string) (int, erro
 
 	// Get current version from PRAGMA user_version (matching Python's
 	// Database.get_current_version() — not from db_migrations table).
-	currentVersion, err := readCurrentVersion(db)
+	currentVersion, err := readCurrentVersion(sqlDB)
 	if err != nil {
 		return 0, fmt.Errorf("get current version from user_version: %w", err)
 	}
@@ -168,7 +165,7 @@ func RunMigrationsCtx(ctx context.Context, db *sql.DB, dbPath string) (int, erro
 		// Take online snapshot before migration (for version > 1, matching Python)
 		snapshotPath := ""
 		if f.version > 1 {
-			snapPath, snapErr := takeSnapshot(dbPath, f.version)
+			snapPath, snapErr := takeSnapshot(d.Path(), f.version)
 			if snapErr != nil {
 				return applied, fmt.Errorf("take snapshot before migration %s: %w", f.name, snapErr)
 			}
@@ -178,11 +175,11 @@ func RunMigrationsCtx(ctx context.Context, db *sql.DB, dbPath string) (int, erro
 		// Execute the migration SQL via ExecContext (matching Python's executescript).
 		// No explicit transaction wrapping — each statement auto-commits individually
 		// in SQLite's autocommit mode (isolation_level=None equivalent).
-		if _, err := db.ExecContext(ctx, f.sql); err != nil {
+		if _, err := sqlDB.ExecContext(ctx, f.sql); err != nil {
 			// Migration failed — restore the snapshot taken before it so the
 			// database is left in a clean pre-migration state rather than broken.
 			if snapshotPath != "" {
-				if restoreErr := restoreFromSnapshot(snapshotPath, dbPath); restoreErr != nil {
+				if restoreErr := restoreFromSnapshot(snapshotPath, d.Path()); restoreErr != nil {
 					slog.Error("failed to restore snapshot after migration failure",
 						"version", f.version, "snapshot", snapshotPath, "error", restoreErr)
 				}
@@ -195,7 +192,7 @@ func RunMigrationsCtx(ctx context.Context, db *sql.DB, dbPath string) (int, erro
 		// Use Go's zero value (empty string) for missing snapshot path.
 		// The reader side handles both "" and "None" for backward compatibility.
 		appliedAt := time.Now().Format(time.RFC3339)
-		if _, err := db.ExecContext(ctx,
+		if _, err := sqlDB.ExecContext(ctx,
 			"INSERT INTO db_migrations (version, name, applied_at, snapshot_path) VALUES (?, ?, ?, ?)",
 			f.version, f.name, appliedAt, snapshotPath,
 		); err != nil {
@@ -211,8 +208,8 @@ func RunMigrationsCtx(ctx context.Context, db *sql.DB, dbPath string) (int, erro
 }
 
 // GetPendingMigrations returns the list of migration files that haven't been applied yet.
-func GetPendingMigrations(db *sql.DB) ([]string, error) {
-	currentVersion, err := readCurrentVersion(db)
+func (d *Handle) GetPendingMigrations(ctx context.Context) ([]string, error) {
+	currentVersion, err := readCurrentVersion(d.DB())
 	if err != nil {
 		return nil, fmt.Errorf("get current version: %w", err)
 	}

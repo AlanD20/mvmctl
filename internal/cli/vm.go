@@ -828,14 +828,11 @@ func runVMInspect(op *api.Operation, cmd *cobra.Command, id string, jsonOutput b
 		return nil
 	}
 
-	vmName := id
-	if vm, ok := info["vm"].(map[string]any); ok {
-		if n, ok := vm["name"].(string); ok {
-			vmName = n
-		}
+	vmName := info.VM.Name
+	if vmName == "" {
+		vmName = id
 	}
-
-	common.Cli.PrintDictTree(info, fmt.Sprintf("VM: %s", vmName))
+	common.Cli.PrintDictTree(common.Cli.ToMap(info), fmt.Sprintf("VM: %s", vmName))
 	return nil
 }
 

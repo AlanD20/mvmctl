@@ -12,26 +12,23 @@ import (
 	"strings"
 
 	"mvmctl/internal/core/config"
-	"mvmctl/internal/core/host"
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/db"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/guestfs"
 	"mvmctl/internal/infra/model"
 	infraslice "mvmctl/internal/infra/slice"
+	"mvmctl/internal/infra/system"
 )
 
 // CacheCheckPrivileges checks if the current process has the required system privileges
 // for destructive cache operations. Returns nil if OK, or an error describing what's missing.
 func (op *Operation) CacheCheckPrivileges(binary, operation string) error {
-	helper := &host.PrivilegeHelper{}
-	return helper.CheckPrivileges(binary, operation)
+	return system.CheckPrivileges(binary, operation)
 }
 
 // CacheSessionHasGroup returns true if the current process has the mvm group active.
 func (op *Operation) CacheSessionHasGroup() bool {
-	helper := &host.PrivilegeHelper{}
-	return helper.SessionHasGroup()
+	return system.SessionHasGroup()
 }
 
 // CacheInitAll initializes all cache directories.
@@ -41,8 +38,8 @@ func (op *Operation) CacheInitAll(ctx context.Context, onProgress func(errs.Prog
 	var created []string
 
 	// Ensure DB schema exists before any DB writes. (Python: Database().migrate())
-	if op.DB != nil {
-		if _, err := db.RunMigrationsCtx(ctx, op.DB, filepath.Join(cacheDir, infra.MVMDBFilename)); err != nil {
+	if op.Connection != nil {
+		if _, err := op.Connection.RunMigrationsCtx(ctx); err != nil {
 			slog.Warn("Failed to run DB migrations during cache init", "error", err)
 		}
 	}
@@ -68,8 +65,8 @@ func (op *Operation) CacheInitAll(ctx context.Context, onProgress func(errs.Prog
 	// Python: try: guestfs_enabled = bool(SettingsService.resolve(db, "settings", "guestfs_enabled"))
 	//         except Exception: pass
 	guestfsEnabled := false
-	if op.DB != nil {
-		raw, err := config.Resolve(ctx, op.DB, "settings", "guestfs_enabled")
+	if op.Connection != nil {
+		raw, err := config.Resolve(ctx, op.Connection.DB(), "settings", "guestfs_enabled")
 		if err == nil {
 			if b, ok := raw.(bool); ok {
 				guestfsEnabled = b
@@ -185,8 +182,7 @@ func (op *Operation) CachePruneMisc(ctx context.Context, dryRun bool) *errs.Oper
 // Returns OperationResult with item of type *model.PruneAllResult matching Python's PruneAllResult dataclass.
 func (op *Operation) CachePruneAll(ctx context.Context, dryRun bool, includeAll bool) *errs.OperationResult {
 	// Python: HostPrivilegeHelper.check_privileges("/usr/sbin/ip", "prune all cache resources")
-	ph := &host.PrivilegeHelper{}
-	if err := ph.CheckPrivileges("/usr/sbin/ip", "prune all cache resources"); err != nil {
+	if err := system.CheckPrivileges("/usr/sbin/ip", "prune all cache resources"); err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
 			Code:      string(errs.CodePrivilegeRequired),

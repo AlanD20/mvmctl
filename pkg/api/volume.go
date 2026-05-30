@@ -16,6 +16,7 @@ import (
 	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/pkg/api/responses"
 )
 
 // VolumeListAll returns all volumes.
@@ -29,7 +30,7 @@ func (op *Operation) VolumeListAll(ctx context.Context) []*model.VolumeItem {
 // Matches Python's VolumeOperation.create() exactly — uses VolumeCreateRequest
 // resolution pipeline and HashGenerator.volume() for ID.
 func (op *Operation) VolumeCreate(ctx context.Context, input *inputs.VolumeCreateInput) *errs.OperationResult {
-	req := inputs.NewVolumeCreateRequest(*input, op.DB, op.Repos.Volume)
+	req := inputs.NewVolumeCreateRequest(*input, op.Connection.DB(), op.Repos.Volume)
 	resolved, err := req.Resolve(ctx)
 	if err != nil {
 		// Extract the original error code from DomainError — for duplicate names
@@ -94,7 +95,7 @@ func (op *Operation) VolumeRemove(ctx context.Context, input *inputs.VolumeInput
 	// Python: request = VolumeRequest(inputs=inputs, db=db)
 	//         try: resolved = request.resolve()
 	//         except VolumeNotFoundError as e: return BatchResult(items=[OperationResult(...)])
-	req := inputs.NewVolumeRequest(*input, op.DB, op.Repos.Volume)
+	req := inputs.NewVolumeRequest(*input, op.Connection.DB(), op.Repos.Volume)
 	resolved, err := req.Resolve(ctx)
 	if err != nil {
 		return &errs.BatchResult{
@@ -199,13 +200,12 @@ func (op *Operation) VolumeRemove(ctx context.Context, input *inputs.VolumeInput
 // VolumeInspect returns detailed volume info as a raw dictionary.
 // Matches Python's VolumeOperation.inspect() exactly — returns dict[str, Any]
 // with volume metadata and disk information, not wrapped in OperationResult.
-func (op *Operation) VolumeInspect(ctx context.Context, input *inputs.VolumeInput) (map[string]interface{}, error) {
+func (op *Operation) VolumeInspect(ctx context.Context, input *inputs.VolumeInput) (*responses.VolumeInspect, error) {
 	vol, err := op.VolumeGet(ctx, input)
 	if err != nil {
-		return nil, err // Propagate error, matching Python's raise VolumeNotFoundError
+		return nil, err
 	}
 
-	// Use service.GetDiskInfo() matching Python's service.get_disk_info(Path(volume_item.path))
 	diskInfo, _ := volume.GetDiskInfo(ctx, vol.Path)
 
 	vmName := ""
@@ -216,24 +216,18 @@ func (op *Operation) VolumeInspect(ctx context.Context, input *inputs.VolumeInpu
 		}
 	}
 
-	return map[string]interface{}{
-		"volume": map[string]interface{}{
-			"id":           vol.ID,
-			"name":         vol.Name,
-			"size_bytes":   vol.SizeBytes,
-			"format":       vol.Format,
-			"is_read_only": vol.IsReadOnly,
-			"path":         vol.Path,
-			"status":       string(vol.Status),
+	return &responses.VolumeInspect{
+		Volume: responses.VolumeItemInfo{
+			ID: vol.ID, Name: vol.Name, SizeBytes: vol.SizeBytes,
+			Format: vol.Format, IsReadOnly: vol.IsReadOnly,
+			Path: vol.Path, Status: string(vol.Status),
 		},
-		"attachment": map[string]interface{}{
-			"vm_id":   vol.VMID,
-			"vm_name": vmName,
+		Attachment: responses.VolumeAttachmentInfo{
+			VMID: vol.VMID, VMName: vmName,
 		},
-		"disk_info": diskInfo,
-		"timestamps": map[string]interface{}{
-			"created_at": vol.CreatedAt,
-			"updated_at": vol.UpdatedAt,
+		DiskInfo: diskInfo,
+		Timestamps: responses.VolumeTimestampsInfo{
+			CreatedAt: vol.CreatedAt, UpdatedAt: vol.UpdatedAt,
 		},
 	}, nil
 }
@@ -246,7 +240,7 @@ func (op *Operation) VolumeResize(ctx context.Context, input *inputs.VolumeCreat
 	//         resolved_vol = VolumeRequest(inputs=vol_input, db=db).resolve()
 	//         volume = resolved_vol.volumes[0]
 	volInput := inputs.VolumeInput{Identifiers: []string{input.Name}}
-	req := inputs.NewVolumeRequest(volInput, op.DB, op.Repos.Volume)
+	req := inputs.NewVolumeRequest(volInput, op.Connection.DB(), op.Repos.Volume)
 	resolved, err := req.Resolve(ctx)
 	if err != nil {
 		return &errs.OperationResult{
@@ -294,7 +288,7 @@ func (op *Operation) VolumeResize(ctx context.Context, input *inputs.VolumeCreat
 // Matches Python's VolumeOperation.get() exactly — uses VolumeRequest pipeline.
 func (op *Operation) VolumeGet(ctx context.Context, input *inputs.VolumeInput) (*model.VolumeItem, error) {
 	// Python: resolved = VolumeRequest(inputs=inputs, db=Database()).resolve()
-	req := inputs.NewVolumeRequest(*input, op.DB, op.Repos.Volume)
+	req := inputs.NewVolumeRequest(*input, op.Connection.DB(), op.Repos.Volume)
 	resolved, err := req.Resolve(ctx)
 	if err != nil {
 		return nil, err

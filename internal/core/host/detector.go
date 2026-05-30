@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -15,6 +16,7 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
+	"mvmctl/internal/infra/validators"
 )
 
 // ── CPU vendor maps ──
@@ -38,7 +40,7 @@ var cpuImplementerMapAarch64 = map[string]string{
 	"0x69": "intel",
 }
 
-// Per-VM resource overhead estimates (MiB) — matching Python.
+// Per-VM resource overhead estimates (MiB)
 const (
 	vmOverheadMiB    = 50
 	vmMemoryMiB      = 512
@@ -59,32 +61,37 @@ var vmHostKernelModules = []string{
 	"nft_chain_nat",
 }
 
-// ── meminfoKbToMiB ──
-// Matches Python's HostDetector._meminfo_kb_to_mib().
-func meminfoKbToMiB(key string) int {
+// readMeminfo reads /proc/meminfo once and returns all key->value KiB mappings.
+// Replaces repeated individual reads for efficiency — /proc/meminfo is a single
+// syscall for all fields instead of one per field.
+func readMeminfo() map[string]int {
 	data, err := os.ReadFile("/proc/meminfo")
 	if err != nil {
-		return 0
+		return nil
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(line, key+":") {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				val, err := strconv.Atoi(parts[1])
-				if err != nil {
-					return 0
-				}
-				return val / 1024
-			}
+	result := make(map[string]int)
+	for line := range strings.SplitSeq(string(data), "\n") {
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
 		}
+		fields := strings.Fields(parts[1])
+		if len(fields) == 0 {
+			continue
+		}
+		val, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue
+		}
+		result[parts[0]] = val
 	}
-	return 0
+	return result
 }
 
 // ── DetectHardware ──
 // Matches Python's HostDetector.detect_hardware().
 func DetectHardware() (*model.HostHardware, error) {
-	hostname, _ := os.Hostname()
+	hostname := system.Hostname()
 
 	cpuModel := ""
 	cpuVendor := ""
@@ -92,10 +99,11 @@ func DetectHardware() (*model.HostHardware, error) {
 	cpuHasVMX := false
 	cpuHypervisor := false
 
-	// Read /proc/cpuinfo
-	data, err := os.ReadFile("/proc/cpuinfo")
-	if err == nil {
-		lines := strings.Split(string(data), "\n")
+	// Read /proc/cpuinfo once and reuse for all parsing
+	cpuinfoData, cpuinfoErr := os.ReadFile("/proc/cpuinfo")
+	_ = cpuinfoErr // file not found handled by nil check below
+	if cpuinfoData != nil {
+		lines := strings.Split(string(cpuinfoData), "\n")
 		for _, line := range lines {
 			if strings.HasPrefix(line, "model name") && cpuModel == "" {
 				parts := strings.SplitN(line, ":", 2)
@@ -131,8 +139,7 @@ func DetectHardware() (*model.HostHardware, error) {
 			if strings.HasPrefix(line, "flags") {
 				parts := strings.SplitN(line, ":", 2)
 				if len(parts) == 2 {
-					flags := strings.Fields(parts[1])
-					for _, f := range flags {
+					for f := range strings.FieldsSeq(parts[1]) {
 						if f == "vmx" || f == "svm" {
 							cpuHasVMX = true
 						}
@@ -146,11 +153,10 @@ func DetectHardware() (*model.HostHardware, error) {
 		}
 	}
 
-	// Fallback vendor detection for aarch64
+	// Fallback vendor detection for aarch64 — reuses cpuinfoData from above
 	if cpuVendor == "" && (strings.HasPrefix(cpuArchitecture, "arm") || strings.HasPrefix(cpuArchitecture, "aarch64")) {
-		raw, err := os.ReadFile("/proc/cpuinfo")
-		if err == nil {
-			for _, line := range strings.Split(string(raw), "\n") {
+		if cpuinfoData != nil {
+			for line := range strings.SplitSeq(string(cpuinfoData), "\n") {
 				if strings.HasPrefix(line, "CPU implementer") {
 					parts := strings.SplitN(line, ":", 2)
 					if len(parts) == 2 {
@@ -184,7 +190,8 @@ func DetectHardware() (*model.HostHardware, error) {
 		}
 	}
 
-	memoryTotalMiB := meminfoKbToMiB("MemTotal")
+	meminfo := readMeminfo()
+	memoryTotalMiB := meminfo["MemTotal"] / 1024
 
 	// Storage: use root cache dir (fallback to / if needed)
 	cacheDir, err := infra.GetCacheDir()
@@ -204,7 +211,7 @@ func DetectHardware() (*model.HostHardware, error) {
 	osRelease := ""
 	data2, err := os.ReadFile("/etc/os-release")
 	if err == nil {
-		for _, line := range strings.Split(string(data2), "\n") {
+		for line := range strings.SplitSeq(string(data2), "\n") {
 			if strings.HasPrefix(line, "PRETTY_NAME=") {
 				parts := strings.SplitN(line, "=", 2)
 				if len(parts) == 2 {
@@ -216,7 +223,7 @@ func DetectHardware() (*model.HostHardware, error) {
 		if osRelease == "" {
 			osID := ""
 			osVersion := ""
-			for _, line := range strings.Split(string(data2), "\n") {
+			for line := range strings.SplitSeq(string(data2), "\n") {
 				if strings.HasPrefix(line, "ID=") {
 					parts := strings.SplitN(line, "=", 2)
 					if len(parts) == 2 {
@@ -263,13 +270,13 @@ func DetectHardware() (*model.HostHardware, error) {
 }
 
 // ── DetectLimits ──
-// Matches Python's HostDetector.detect_limits().
 func DetectLimits() *model.HostLimits {
 	pidMax := infra.ReadInt("/proc/sys/kernel/pid_max", 32768)
 	fdMax := infra.ReadInt("/proc/sys/fs/file-max", 100000)
 	conntrackMax := infra.ReadInt("/proc/sys/net/netfilter/nf_conntrack_max", 0)
 
 	tapDevicesMax := infra.ReadInt("/sys/module/tun/parameters/max_tap_devices", 0)
+	// 0 means unlimited (kernel default when module param not set)
 	if tapDevicesMax == 0 {
 		tapDevicesMax = -1
 	}
@@ -317,7 +324,8 @@ func DetectLimits() *model.HostLimits {
 	}
 
 	// Swap total
-	swapTotalMiB := meminfoKbToMiB("SwapTotal")
+	meminfoDl := readMeminfo()
+	swapTotalMiB := meminfoDl["SwapTotal"] / 1024
 
 	// Kernel minimum version
 	kernelMinimumMet := checkKernelVersion()
@@ -338,30 +346,30 @@ func DetectLimits() *model.HostLimits {
 	}
 }
 
+var kernelVersionRE = regexp.MustCompile(`(\d+)\.(\d+)`)
+
 // ── checkKernelVersion ──
 // Matches Python's HostDetector._check_kernel_version().
 func checkKernelVersion() bool {
 	release := system.KernelRelease()
-	re := regexp.MustCompile(`(\d+)\.(\d+)`)
+	re := kernelVersionRE
 	match := re.FindStringSubmatch(release)
 	if match == nil {
 		return false
 	}
-	var major, minor int
-	fmt.Sscanf(match[1], "%d", &major)
-	fmt.Sscanf(match[2], "%d", &minor)
+	major, _ := strconv.Atoi(match[1])
+	minor, _ := strconv.Atoi(match[2])
 	return (major > infra.MinKernelMajor) || (major == infra.MinKernelMajor && minor >= infra.MinKernelMinor)
 }
 
 // ── parseModules ──
-// Matches Python's HostDetector._parse_modules().
 func parseModules() map[string]bool {
 	result := make(map[string]bool)
 	data, err := os.ReadFile("/proc/modules")
 	if err != nil {
 		return result
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -375,9 +383,9 @@ func parseModules() map[string]bool {
 }
 
 // ── DetectResources ──
-// Matches Python's HostDetector.detect_resources().
 func DetectResources(hardware *model.HostHardware, limits *model.HostLimits, vmDirPath string) (*model.HostResources, error) {
-	memoryAvailableMiB := meminfoKbToMiB("MemAvailable")
+	meminfo := readMeminfo()
+	memoryAvailableMiB := meminfo["MemAvailable"] / 1024
 
 	// TAP devices in use
 	tapDevicesUsed := 0
@@ -396,7 +404,7 @@ func DetectResources(hardware *model.HostHardware, limits *model.HostLimits, vmD
 	procEntries, err := os.ReadDir("/proc")
 	if err == nil {
 		for _, entry := range procEntries {
-			if entry.IsDir() && isDigits(entry.Name()) {
+			if entry.IsDir() && validators.IsDigits(entry.Name()) {
 				pidsCurrent++
 			}
 		}
@@ -412,17 +420,13 @@ func DetectResources(hardware *model.HostHardware, limits *model.HostLimits, vmD
 	arpCurrent := 0
 	data, err := os.ReadFile("/proc/net/arp")
 	if err == nil {
-		lines := strings.Split(string(data), "\n")
-		var nonEmpty []string
-		for _, l := range lines {
+		arpCount := 0
+		for l := range strings.SplitSeq(string(data), "\n") {
 			if strings.TrimSpace(l) != "" {
-				nonEmpty = append(nonEmpty, l)
+				arpCount++
 			}
 		}
-		arpCurrent = len(nonEmpty) - 1 // -1 for header
-		if arpCurrent < 0 {
-			arpCurrent = 0
-		}
+		arpCurrent = max(arpCount-1, 0) // -1 for header
 	}
 
 	// Storage free
@@ -440,33 +444,21 @@ func DetectResources(hardware *model.HostHardware, limits *model.HostLimits, vmD
 	var candidates []candidate
 
 	// CPU: leave 1 core for host
-	cpuVMs := hardware.CPUCores - 1
-	if cpuVMs < 0 {
-		cpuVMs = 0
-	}
+	cpuVMs := max(hardware.CPUCores-1, 0)
 	candidates = append(candidates, candidate{"cpu", cpuVMs})
 
 	// Memory
-	memoryVMs := (memoryAvailableMiB - vmReservedMiB) / (vmOverheadMiB + vmMemoryMiB)
-	if memoryVMs < 0 {
-		memoryVMs = 0
-	}
+	memoryVMs := max((memoryAvailableMiB-vmReservedMiB)/(vmOverheadMiB+vmMemoryMiB), 0)
 	candidates = append(candidates, candidate{"memory", memoryVMs})
 
 	// TAP devices
-	tapAvailable := limits.TAPDevicesMax - tapDevicesUsed
-	if tapAvailable < 0 {
-		tapAvailable = 0
-	}
+	tapAvailable := max(limits.TAPDevicesMax-tapDevicesUsed, 0)
 	if limits.TAPDevicesMax > 0 {
 		candidates = append(candidates, candidate{"tap_devices", tapAvailable})
 	}
 
 	// PIDs
-	pidVMs := (limits.PIDMax - vmReservedPIDs) / vmPIDsPerVM
-	if pidVMs < 0 {
-		pidVMs = 0
-	}
+	pidVMs := max((limits.PIDMax-vmReservedPIDs)/vmPIDsPerVM, 0)
 	candidates = append(candidates, candidate{"pids", pidVMs})
 
 	// Conntrack
@@ -498,12 +490,9 @@ func DetectResources(hardware *model.HostHardware, limits *model.HostLimits, vmD
 	}
 
 	// Swap used
-	swapFreeMiB := meminfoKbToMiB("SwapFree")
-	swapTotalMiB := meminfoKbToMiB("SwapTotal")
-	swapUsedMiB := swapTotalMiB - swapFreeMiB
-	if swapUsedMiB < 0 {
-		swapUsedMiB = 0
-	}
+	swapFreeMiB := meminfo["SwapFree"] / 1024
+	swapTotalMiB := meminfo["SwapTotal"] / 1024
+	swapUsedMiB := max(swapTotalMiB-swapFreeMiB, 0)
 
 	// Hugepages free
 	hugepagesFree2MB := infra.ReadInt("/sys/kernel/mm/hugepages/hugepages-2048kB/free_hugepages", 0)
@@ -541,12 +530,7 @@ func DetectResources(hardware *model.HostHardware, limits *model.HostLimits, vmD
 			// Check group members via NSS (getent)
 			members, parseErr := system.GroupMembersViaNSS("kvm")
 			if parseErr == nil {
-				for _, m := range members {
-					if m == currentUser.Username {
-						userInKVMGroup = true
-						break
-					}
-				}
+				userInKVMGroup = slices.Contains(members, currentUser.Username)
 			}
 			_ = g // gid used for primary group check
 		}
@@ -556,13 +540,9 @@ func DetectResources(hardware *model.HostHardware, limits *model.HostLimits, vmD
 	tunPath := "/dev/net/tun"
 	devNetTUNAccessible := system.AccessRW(tunPath)
 
-	limitingRes := limitingResource
-	if limitingResource == "" {
-		limitingRes = ""
-	}
 	var limResPtr *string
-	if limitingRes != "" {
-		limResPtr = &limitingRes
+	if limitingResource != "" {
+		limResPtr = &limitingResource
 	}
 
 	return &model.HostResources{
@@ -586,15 +566,6 @@ func DetectResources(hardware *model.HostHardware, limits *model.HostLimits, vmD
 		UserInKVMGroup:        userInKVMGroup,
 		DevNetTUNAccessible:   devNetTUNAccessible,
 	}, nil
-}
-
-func isDigits(s string) bool {
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return len(s) > 0
 }
 
 // getUnameM returns the machine hardware name, matching Python's platform.machine().

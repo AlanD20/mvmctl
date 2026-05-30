@@ -4,7 +4,6 @@
 package api
 
 import (
-	"database/sql"
 	"path/filepath"
 
 	"mvmctl/internal/core/binary"
@@ -20,16 +19,17 @@ import (
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/enricher"
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/db"
 )
 
 // Operation is the single composition root for all API operations.
 // Every method receives the full dependency set.
 type Operation struct {
-	DB       *sql.DB
-	CacheDir string
-	Enr      *enricher.Enricher
-	Repos    Repos
-	Services Services
+	Connection *db.Handle
+	CacheDir   string
+	Enr        *enricher.Enricher
+	Repos      Repos
+	Services   Services
 }
 
 // Repos bundles all database repositories.
@@ -61,23 +61,25 @@ type Services struct {
 }
 
 // NewOperation creates the single Operation instance with all dependencies wired.
-func NewOperation(db *sql.DB, cacheDir string) *Operation {
+func NewOperation(conn *db.Handle, cacheDir string) *Operation {
+	sqlDB := conn.DB()
+
 	r := Repos{
-		VM:      vm.NewRepository(db),
-		Network: network.NewRepository(db),
-		Lease:   network.NewLeaseRepository(db),
-		Image:   image.NewRepository(db),
-		Kernel:  kernel.NewRepository(db),
-		Binary:  binary.NewRepository(db),
-		Key:     key.NewRepository(db),
-		Volume:  volume.NewRepository(db),
-		Host:    host.NewRepository(db),
-		Config:  config.NewRepository(db),
+		VM:      vm.NewRepository(sqlDB),
+		Network: network.NewRepository(sqlDB),
+		Lease:   network.NewLeaseRepository(sqlDB),
+		Image:   image.NewRepository(sqlDB),
+		Kernel:  kernel.NewRepository(sqlDB),
+		Binary:  binary.NewRepository(sqlDB),
+		Key:     key.NewRepository(sqlDB),
+		Volume:  volume.NewRepository(sqlDB),
+		Host:    host.NewRepository(sqlDB),
+		Config:  config.NewRepository(sqlDB),
 	}
 	configReg := config.NewConstraintRegistry()
 	config.RegisterBuiltinConstraints(configReg)
 	s := Services{
-		Network: network.NewService(r.Network, db),
+		Network: network.NewService(r.Network, sqlDB),
 		Image:   image.NewService(r.Image, cacheDir),
 		Kernel:  kernel.NewService(r.Kernel, cacheDir),
 		Binary:  binary.NewService(r.Binary, filepath.Join(cacheDir, "bin"), cacheDir),
@@ -89,10 +91,10 @@ func NewOperation(db *sql.DB, cacheDir string) *Operation {
 		CP:      ssh.NewCPService(),
 	}
 	return &Operation{
-		DB:       db,
-		CacheDir: cacheDir,
-		Enr:      enricher.New(r.VM, r.Network, r.Lease, r.Image, r.Kernel, r.Binary, r.Volume),
-		Repos:    r,
-		Services: s,
+		Connection: conn,
+		CacheDir:   cacheDir,
+		Enr:        enricher.New(r.VM, r.Network, r.Lease, r.Image, r.Kernel, r.Binary, r.Volume),
+		Repos:      r,
+		Services:   s,
 	}
 }

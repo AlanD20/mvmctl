@@ -40,7 +40,7 @@ func (op *Operation) LogStream(ctx context.Context, input *inputs.LogInput, call
 	//             yield from controller.follow(...)
 	//         else:
 	//             yield from controller.show(...)
-	req := inputs.NewLogRequest(*input, op.DB)
+	req := inputs.NewLogRequest(*input, op.Connection.DB())
 	resolved, err := req.Resolve(ctx, op.Repos.VM)
 	if err != nil {
 		return err
@@ -94,7 +94,7 @@ func (op *Operation) LogStream(ctx context.Context, input *inputs.LogInput, call
 // For "follow": goroutine follows the log file, sending lines as they arrive,
 // until ctx is cancelled.
 func (op *Operation) LogStreamChannel(ctx context.Context, input *inputs.LogInput) (<-chan string, error) {
-	req := inputs.NewLogRequest(*input, op.DB)
+	req := inputs.NewLogRequest(*input, op.Connection.DB())
 	resolved, err := req.Resolve(ctx, op.Repos.VM)
 	if err != nil {
 		return nil, err

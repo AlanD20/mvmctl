@@ -13,6 +13,7 @@ import (
 	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/pkg/api/responses"
 )
 
 // KeyListAll lists all SSH keys.
@@ -225,28 +226,24 @@ func (op *Operation) KeyRemove(ctx context.Context, input *inputs.KeyInput, forc
 // KeyInspect returns detailed key info.
 // Matches Python's KeyOperation.inspect() exactly — uses KeyRequest resolution,
 // returns raw dict (not wrapped in OperationResult).
-func (op *Operation) KeyInspect(ctx context.Context, input *inputs.KeyInput) (map[string]any, error) {
-	key, err := op.KeyGet(ctx, input)
+func (op *Operation) KeyInspect(ctx context.Context, input *inputs.KeyInput) (*responses.KeyInspect, error) {
+	k, err := op.KeyGet(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("key not found: %v", err)
 	}
-	return map[string]any{
-		"key": map[string]any{
-			"id":          key.ID,
-			"name":        key.Name,
-			"fingerprint": key.Fingerprint,
-			"algorithm":   key.Algorithm,
-			"comment":     key.Comment,
-			"is_default":  key.IsDefault,
-			"is_present":  key.IsPresent,
+	return &responses.KeyInspect{
+		Key: responses.KeyInfo{
+			ID: k.ID, Name: k.Name, Fingerprint: k.Fingerprint,
+			Algorithm: k.Algorithm, Comment: k.Comment,
+			IsDefault: k.IsDefault, IsPresent: k.IsPresent,
 		},
-		"files": map[string]any{
-			"public_key_path":  key.PublicKeyPath,
-			"private_key_path": key.PrivateKeyPath,
+		Files: responses.KeyFilesInfo{
+			PublicKeyPath:  k.PublicKeyPath,
+			PrivateKeyPath: k.PrivateKeyPath,
 		},
-		"timestamps": map[string]any{
-			"created_at": key.CreatedAt,
-			"updated_at": key.UpdatedAt,
+		Timestamps: responses.KeyTimestampsInfo{
+			CreatedAt: k.CreatedAt,
+			UpdatedAt: k.UpdatedAt,
 		},
 	}, nil
 }

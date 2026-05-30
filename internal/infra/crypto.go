@@ -132,8 +132,6 @@ func (HashGenerator) Volume(name, createdAt string) string {
 }
 
 // ── UUID v4 ──
-// NOTE: There's a duplicate copy in pkg/api/host.go:885 using /dev/urandom directly.
-// If modifying, update both.
 
 // UUIDV4 generates a random UUID v4 string matching Python's str(uuid.uuid4()).
 // Uses crypto/rand (Go standard library) for cryptographically secure random bytes,

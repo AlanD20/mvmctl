@@ -23,7 +23,12 @@ func NewController(repo Repository) *Controller {
 // the latest backup remains.
 //
 // Matches Python's HostController.record_changes().
-func (c *Controller) RecordChanges(ctx context.Context, changes []*model.HostStateChangeItem, sessionID *string, changeOrderOffset int) (string, error) {
+func (c *Controller) RecordChanges(
+	ctx context.Context,
+	changes []*model.HostStateChangeItem,
+	sessionID *string,
+	changeOrderOffset int,
+) (string, error) {
 	sid := sessionID
 	if sid == nil || *sid == "" {
 		s := infra.UUIDV4()

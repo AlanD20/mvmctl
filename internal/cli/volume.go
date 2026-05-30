@@ -202,12 +202,7 @@ func newVolumeInspectCmd(op *api.Operation) *cobra.Command {
 				return nil
 			}
 
-			// Match Python: mvm_cli.print_dict_tree(info, title=f"Volume: {info['volume']['name']}")
-			// Python directly accesses info['volume']['name'] — if missing, KeyError
-			// propagates to @handle_errors.
-			vm := info["volume"].(map[string]interface{})
-			name := vm["name"].(string)
-			common.Cli.PrintDictTree(info, fmt.Sprintf("Volume: %s", name))
+			common.Cli.PrintDictTree(common.Cli.ToMap(info), fmt.Sprintf("Volume: %s", info.Volume.Name))
 			return nil
 		},
 	}

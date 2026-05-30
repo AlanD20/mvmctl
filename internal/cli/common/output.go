@@ -558,6 +558,19 @@ var settingNilOverrides = map[string]string{
 	"build_jobs": "<auto>",
 }
 
+// ToMap converts a struct with json tags to map[string]any for PrintDictTree.
+func (c *MVMCli) ToMap(v any) map[string]any {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil
+	}
+	return m
+}
+
 // FormatSettingValue formats a setting value for display.
 // key is the setting name used for nil-value overrides (e.g., build_jobs → "<auto>").
 // Pass "" if no key-based override is needed.

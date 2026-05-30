@@ -52,7 +52,7 @@ func (op *Operation) copyError(err error) *errs.OperationResult {
 func (op *Operation) CPCopy(ctx context.Context, input *inputs.CPInput, onProgress func(int64)) *errs.OperationResult {
 	// Python: try: ... except CPError as e: ...
 	// Build CPRequest and resolve (matches Python: CPRequest(inputs, db).resolve())
-	req := inputs.NewCPRequest(*input, op.DB)
+	req := inputs.NewCPRequest(*input, op.Connection.DB())
 	resolved, err := req.Resolve(ctx, op.Repos.VM, op.Repos.Key)
 	if err != nil {
 		// Python: raises CPError during resolution → caught by except CPError.

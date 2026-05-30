@@ -77,15 +77,9 @@ func Run(ctx context.Context) {
 	database := db.New(dbPath)
 	defer database.Close()
 
-	sqlDB, err := database.DB()
-	if err != nil {
-		slog.Error("failed to get database handle", "error", err)
-		os.Exit(1)
-	}
-
 	// Pending migration gate: block non-init commands when migrations are pending.
 	if !isDBSkipCommand(os.Args) {
-		pending, err := db.GetPendingMigrations(sqlDB)
+		pending, err := database.GetPendingMigrations(ctx)
 		if err != nil {
 			slog.Error("failed to check pending migrations", "error", err)
 			os.Exit(1)
@@ -102,7 +96,7 @@ func Run(ctx context.Context) {
 	// Set HTTP User-Agent matching Python's HTTP_USER_AGENT = f"{CLI_NAME}/{_resolve_version()}".
 	download.SetUserAgent(infraversion.GetVersion())
 
-	op := api.NewOperation(sqlDB, cacheDir)
+	op := api.NewOperation(database, cacheDir)
 	config.InitSettings()
 	executeCLI(ctx, op)
 }

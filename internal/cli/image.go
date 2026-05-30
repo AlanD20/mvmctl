@@ -380,14 +380,11 @@ Examples:
 				return nil
 			}
 
-			// Extract name from the grouped dict for the title
-			name := prefix
-			if imgSection, ok := info["image"].(map[string]interface{}); ok {
-				if n, ok := imgSection["name"].(string); ok && n != "" {
-					name = n
-				}
+			name := info.Image.Name
+			if name == "" {
+				name = prefix
 			}
-			common.Cli.PrintDictTree(info, fmt.Sprintf("Image: %s", name))
+			common.Cli.PrintDictTree(common.Cli.ToMap(info), fmt.Sprintf("Image: %s", name))
 			return nil
 		},
 	}

@@ -132,12 +132,7 @@ membership to take effect.
 Examples:
   sudo mvm host init`, infra.MVMUnixGroup, infra.CLIName),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cacheDir, err := infra.GetCacheDir()
-			if err != nil {
-				return fmt.Errorf("cannot resolve cache directory: %w", err)
-			}
-
-			rawResult := op.HostInit(cmd.Context(), cacheDir, nil)
+			rawResult := op.HostInit(cmd.Context(), nil)
 
 			switch v := rawResult.(type) {
 			case *errs.NeedsInteraction:
@@ -258,9 +253,6 @@ Examples:
 				common.Cli.Error(fmt.Sprintf("Unexpected result type: %T", v))
 				return fmt.Errorf("unexpected result type: %T", v)
 			}
-
-			// Chown cache dir to real user (matching Python's FsUtils.chown_to_real_user)
-			infra.ChownToRealUser(cacheDir)
 
 			return nil
 		},
@@ -572,9 +564,9 @@ Examples:
 	return cmd
 }
 
-// printHostInfo pretty-prints host info data matching Python's print_dict_tree.
+// printHostInfo pretty-prints host info data.
 func printHostInfo(item interface{}) {
-	common.Cli.PrintDictTree(item, "Host Info")
+	common.Cli.PrintDictTree(common.Cli.ToMap(item), "Host Info")
 }
 
 // confirmRePrompt loops until the user enters y/n, matching Python's typer.confirm()

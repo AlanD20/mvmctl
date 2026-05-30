@@ -401,14 +401,11 @@ func newKernelInspectCmd(op *api.Operation) *cobra.Command {
 				return nil
 			}
 
-			name := prefix
-			if n, ok := info["kernel"].(map[string]interface{}); ok {
-				if kn, ok := n["name"].(string); ok {
-					name = kn
-				}
+			name := info.Kernel.Name
+			if name == "" {
+				name = prefix
 			}
-
-			common.Cli.PrintDictTree(info, fmt.Sprintf("Kernel: %s", name))
+			common.Cli.PrintDictTree(common.Cli.ToMap(info), fmt.Sprintf("Kernel: %s", name))
 			return nil
 		},
 	}
