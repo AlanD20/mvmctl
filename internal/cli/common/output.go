@@ -697,37 +697,33 @@ func (c *MVMCli) CheckNameArg(cmd *cobra.Command, name string) (string, error) {
 	return name, nil
 }
 
-// ConfirmPrompt shows a y/n prompt on stderr, defaulting to True (Enter = accept).
-// Matches Python's typer.confirm(text) behavior.
-func (c *MVMCli) ConfirmPrompt(prompt string) bool {
-	return c.PromptConfirm(prompt, true)
-}
-
-// ConfirmPromptNoDefault shows a y/n prompt on stderr with no default (Enter declines).
-func (c *MVMCli) ConfirmPromptNoDefault(prompt string) bool {
-	return c.PromptConfirm(prompt, false)
-}
-
 // PromptConfirm asks a yes/no question on stderr. Returns true for yes.
-// Matches Python's typer.confirm(text, default=True).
+// Matches Python's typer.confirm(text, default=True) behavior.
+// Shows [Y/n]: when defaultYes=true, [y/N]: when defaultYes=false.
+// Loops on invalid input until y/yes, n/no, or empty (which returns default).
 func (c *MVMCli) PromptConfirm(prompt string, defaultYes bool) bool {
 	suffix := " [Y/n]: "
 	if !defaultYes {
 		suffix = " [y/N]: "
 	}
-	fmt.Fprintf(os.Stderr, "%s%s", prompt, suffix)
-
-	var response string
-	_, err := fmt.Scanln(&response)
-	if err != nil {
-		return defaultYes
+	for {
+		fmt.Fprint(os.Stderr, prompt+suffix)
+		var response string
+		if _, err := fmt.Scanln(&response); err != nil {
+			return defaultYes
+		}
+		response = strings.TrimSpace(strings.ToLower(response))
+		switch response {
+		case "y", "yes":
+			return true
+		case "n", "no":
+			return false
+		case "":
+			return defaultYes
+		default:
+			fmt.Fprint(os.Stderr, "Please enter 'yes' or 'no': ")
+		}
 	}
-	response = strings.TrimSpace(strings.ToLower(response))
-
-	if response == "" {
-		return defaultYes
-	}
-	return response == "y" || response == "yes"
 }
 
 func sortedKeys(m map[string]any) []string {

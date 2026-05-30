@@ -1,5 +1,3 @@
-// Package api provides the public orchestration layer for all operations.
-// Matches src/mvmctl/api/binary_operations.py exactly.
 package api
 
 import (
@@ -70,7 +68,7 @@ func (op *Operation) BinaryPrune(ctx context.Context, dryRun bool, force bool) *
 // resolution pipeline and wraps all BinaryErrors in code="binary.pull_failed".
 func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInput) *errs.OperationResult {
 	// Python: request = BinaryPullRequest(inputs=inputs, db=db); resolved = request.resolve()
-	request := inputs.NewBinaryPullRequest(*input, nil)
+	request := inputs.NewBinaryPullRequest(*input, op.DB)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return &errs.OperationResult{

@@ -292,7 +292,7 @@ func runVMCreate(
 ) error {
 	if skipCleanup {
 		// Python: typer.confirm() defaults to True (Enter = Yes)
-		if !common.Cli.ConfirmPrompt("--skip-cleanup is set: if creation fails, resources will be left behind and must be cleaned manually. Continue?") {
+		if !common.Cli.PromptConfirm("--skip-cleanup is set: if creation fails, resources will be left behind and must be cleaned manually. Continue?", true) {
 			common.Cli.Info("Aborted")
 			return nil // exit code 0, matching Python's raise typer.Exit(code=0)
 		}

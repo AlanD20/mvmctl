@@ -52,7 +52,9 @@ var binaryColumns = []common.ListingColumn{
 	{Header: "Version", Extract: func(v any) string { return v.(*model.BinaryItem).Version }},
 	{Header: "Full Version", Extract: func(v any) string {
 		fv := v.(*model.BinaryItem).FullVersion
-		if fv == "" { return "-" }
+		if fv == "" {
+			return "-"
+		}
 		return fv
 	}, LongOnly: true},
 	{Header: "Created", Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.BinaryItem).CreatedAt, "relative") }},
@@ -175,13 +177,25 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 		ValidArgsFunction: completeBinaryVersions,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
+			effectiveVersion := version
+
+			// Support name:version selector (matching kernel pull pattern)
+			if strings.Contains(name, ":") {
+				idx := strings.LastIndex(name, ":")
+				effectiveVersion = name[idx+1:]
+				name = name[:idx]
+				if cmd.Flags().Changed("version") {
+					common.Cli.Error("--version and name:version selector are mutually exclusive")
+					return fmt.Errorf("mutually exclusive options")
+				}
+			}
 
 			if strings.ToLower(name) != "firecracker" {
 				common.Cli.Error(fmt.Sprintf("Unsupported binary: '%s'. Only 'firecracker' is supported for download or build.", name))
 				return fmt.Errorf("unsupported binary")
 			}
 
-			if gitRef != "" && version != "" {
+			if gitRef != "" && effectiveVersion != "" {
 				common.Cli.Error("--git-ref and --version are mutually exclusive. Use --git-ref to build from source, or --version to download a release.")
 				return fmt.Errorf("mutually exclusive options")
 			}
@@ -222,54 +236,29 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 			}
 
 			// Normal download path
-			ver := version
-
-			dwldOverride := force
 			result := op.BinaryPull(cmd.Context(), &inputs.BinaryPullInput{
-				Version:          ver,
+				Version:          effectiveVersion,
 				Name:             name,
 				SetDefault:       setDefault,
-				DownloadOverride: dwldOverride,
+				DownloadOverride: force,
 			})
 
 			// If binary already exists and --force wasn't set, offer to re-download
 			if result.Status == "error" && result.Code == string(errs.CodeBinaryAlreadyExists) && !force {
 				common.Cli.Warning(result.Message)
-				// Prompt for re-download matching typer.confirm() behavior
-				confirmed := false
-				prompt := "Re-download? [y/N]: "
-			promptLoop:
-				for {
-					fmt.Fprint(os.Stderr, prompt)
-					var response string
-					_, err := fmt.Scanln(&response)
-					if err != nil {
-						response = ""
-					}
-					response = strings.TrimSpace(response)
-					switch strings.ToLower(response) {
-					case "y", "yes":
-						confirmed = true
-						break promptLoop
-					case "n", "no":
-						break promptLoop
-					case "":
-						break promptLoop
-					default:
-						prompt = "Please enter 'yes' or 'no': "
-					}
-				}
-				if confirmed {
-					result = op.BinaryPull(cmd.Context(), &inputs.BinaryPullInput{
-						Version:          ver,
-						Name:             name,
-						SetDefault:       setDefault,
-						DownloadOverride: true,
-					})
-				} else {
+
+				confirmed := common.Cli.PromptConfirm("Re-download?", false)
+				if !confirmed {
 					common.Cli.Info("Aborted")
 					return nil
 				}
+
+				result = op.BinaryPull(cmd.Context(), &inputs.BinaryPullInput{
+					Version:          effectiveVersion,
+					Name:             name,
+					SetDefault:       setDefault,
+					DownloadOverride: true,
+				})
 			}
 
 			if result.Status == "error" {
@@ -307,6 +296,7 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 	cmd.Flags().StringVar(&gitRef, "git-ref", "", "Git ref (branch/tag/commit) to build from source. Mutually exclusive with --version.")
 	cmd.Flags().BoolVarP(&setDefault, "default", "d", false, "Set as default after download")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Re-download even if version already exists")
+
 	return cmd
 }
 
@@ -315,12 +305,10 @@ func newBinaryRmCmd(op *api.Operation) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:                "rm [identifiers...]",
-		Short:              "Remove one or more binaries. Use --version to remove by version pair.",
-		Args:               cobra.ArbitraryArgs,
-		ValidArgsFunction:  completeBinaryVersions,
-		DisableSuggestions: true,
-		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
+		Use:               "rm [identifiers...]",
+		Short:             "Remove one or more binaries. Use --version to remove by version pair.",
+		Args:              cobra.ArbitraryArgs,
+		ValidArgsFunction: completeBinaryVersions,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if version != "" {
 				result := op.BinaryRemoveByVersion(cmd.Context(), version, force)
@@ -364,6 +352,7 @@ func newBinaryRmCmd(op *api.Operation) *cobra.Command {
 
 	cmd.Flags().StringVar(&version, "version", "", "Remove both firecracker and jailer for this version")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Remove even if referenced by VMs")
+
 	return cmd
 }
 

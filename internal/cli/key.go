@@ -215,7 +215,6 @@ func newKeyRemoveCmd(op *api.Operation) *cobra.Command {
 		Short:              "Remove one or more SSH keys",
 		Args:               cobra.ArbitraryArgs,
 		ValidArgsFunction:  completeKeyNames,
-		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			names := args
 			if len(names) == 0 {
@@ -256,7 +255,6 @@ func newKeyInspectCmd(op *api.Operation) *cobra.Command {
 		Short:              "Inspect an SSH key",
 		Args:               cobra.ExactArgs(1),
 		ValidArgsFunction:  completeKeyNames,
-		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			// check_name_arg: "help" → show help; empty → show help with error

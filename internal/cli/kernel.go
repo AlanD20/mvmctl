@@ -348,8 +348,6 @@ func newKernelRmCmd(op *api.Operation) *cobra.Command {
 		Aliases:            []string{"remove"},
 		Short:              "Remove one or more kernels",
 		ValidArgsFunction:  completeKernelIDs,
-		DisableSuggestions: true,
-		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				common.Cli.Error("Provide at least one kernel ID or name")
@@ -428,8 +426,6 @@ func newKernelDefaultCmd(op *api.Operation) *cobra.Command {
 		Short:              "Set a kernel as the default",
 		Args:               cobra.ExactArgs(1),
 		ValidArgsFunction:  completeKernelIDs,
-		DisableSuggestions: true,
-		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			kernelID, err := common.Cli.CheckNameArg(cmd, args[0])
 			if err != nil {

@@ -81,7 +81,7 @@ func (s *Service) GetDefaultFirecracker(ctx context.Context) (*model.BinaryItem,
 func (s *Service) ListRemote(ctx context.Context, limit int) ([]string, error) {
 	url := fmt.Sprintf("%s?per_page=%d", infra.FirecrackerGithubReleasesAPIURL, limit)
 
-	raw, err := s.dl.GetRaw(ctx, url, 30, nil, true, 300)
+	raw, err := s.dl.GetContent(ctx, url, 30, map[string]string{"Accept": "application/json"}, true, 300)
 	if err != nil {
 		return nil, mapGitHubAPIError(err)
 	}
@@ -124,7 +124,7 @@ func (s *Service) DownloadFirecracker(ctx context.Context, version string, arch 
 
 	// ── Step 1: Fetch SHA256 checksum ──
 	var expectedSHA256 string
-	sha256Content, err := s.dl.GetRaw(ctx, sha256URL, 30, nil, true, 300)
+	sha256Content, err := s.dl.GetContent(ctx, sha256URL, 30, nil, true, 300)
 	if err == nil {
 		parts := strings.Fields(strings.TrimSpace(sha256Content))
 		if len(parts) > 0 {
@@ -243,26 +243,16 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 			fcDest := filepath.Join(s.binDir, fmt.Sprintf("firecracker-%s", buildVersion))
 			jlDest := filepath.Join(s.binDir, fmt.Sprintf("jailer-%s", buildVersion))
 
-			if err := infra.CopyPreservingMetadata(cachedFC, fcDest); err != nil {
-				return nil, binaryError(errs.CodeInternal, fmt.Sprintf("Failed to copy cached firecracker: %v", err))
+			fcBinary, err := s.copyBinary("firecracker", buildVersion, cachedFC, fcDest, "cached")
+			if err != nil {
+				return nil, err
 			}
-			system.MakeExecutable(fcDest)
-
-			if err := infra.CopyPreservingMetadata(cachedJL, jlDest); err != nil {
-				return nil, binaryError(errs.CodeInternal, fmt.Sprintf("Failed to copy cached jailer: %v", err))
+			jlBinary, err := s.copyBinary("jailer", buildVersion, cachedJL, jlDest, "cached")
+			if err != nil {
+				return nil, err
 			}
-			system.MakeExecutable(jlDest)
 
 			slog.Info("Using mirror cache for git ref", "ref", gitRef)
-
-			fcBinary, err := s.createBinaryItem("firecracker", buildVersion, fcDest, false)
-			if err != nil {
-				return nil, err
-			}
-			jlBinary, err := s.createBinaryItem("jailer", buildVersion, jlDest, false)
-			if err != nil {
-				return nil, err
-			}
 			return []*model.BinaryItem{fcBinary, jlBinary}, nil
 		}
 	}
@@ -380,15 +370,14 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 	fcDest := filepath.Join(s.binDir, fmt.Sprintf("firecracker-%s", buildVersion))
 	jlDest := filepath.Join(s.binDir, fmt.Sprintf("jailer-%s", buildVersion))
 
-	if err := infra.CopyPreservingMetadata(fcSrc, fcDest); err != nil {
-		return nil, binaryError(errs.CodeInternal, fmt.Sprintf("Failed to copy built firecracker: %v", err))
+	fcBinary, err := s.copyBinary("firecracker", buildVersion, fcSrc, fcDest, "built")
+	if err != nil {
+		return nil, err
 	}
-	system.MakeExecutable(fcDest)
-
-	if err := infra.CopyPreservingMetadata(jlSrc, jlDest); err != nil {
-		return nil, binaryError(errs.CodeInternal, fmt.Sprintf("Failed to copy built jailer: %v", err))
+	jlBinary, err := s.copyBinary("jailer", buildVersion, jlSrc, jlDest, "built")
+	if err != nil {
+		return nil, err
 	}
-	system.MakeExecutable(jlDest)
 
 	slog.Info("Built Firecracker", "version", buildVersion, "ref", gitRef)
 
@@ -411,14 +400,6 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 		}
 	}
 
-	fcBinary, err := s.createBinaryItem("firecracker", buildVersion, fcDest, false)
-	if err != nil {
-		return nil, err
-	}
-	jlBinary, err := s.createBinaryItem("jailer", buildVersion, jlDest, false)
-	if err != nil {
-		return nil, err
-	}
 	return []*model.BinaryItem{fcBinary, jlBinary}, nil
 }
 
@@ -457,4 +438,15 @@ func (s *Service) createBinaryItem(name, versionStr, path string, resolveCIVersi
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}, nil
+}
+
+// copyBinary handles: copy + chmod + createItem for one binary,
+// with an error message label (e.g. "cached" or "built").
+func (s *Service) copyBinary(name, version, src, dest, label string) (*model.BinaryItem, error) {
+	if err := infra.CopyPreservingMetadata(src, dest); err != nil {
+		return nil, binaryError(errs.CodeInternal,
+			fmt.Sprintf("Failed to copy %s %s: %v", label, name, err))
+	}
+	system.MakeExecutable(dest)
+	return s.createBinaryItem(name, version, dest, false)
 }
