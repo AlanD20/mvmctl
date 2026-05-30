@@ -2,7 +2,6 @@ package inputs
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 
@@ -11,15 +10,11 @@ import (
 	"mvmctl/internal/infra/model"
 )
 
-// KeyInput matches Python's KeyInput dataclass.
-//
-//	@dataclass
-//	class KeyInput:
-//	    name: list[str] = field(default_factory=list)
-//	    id: list[str] = field(default_factory=list)
+// KeyInput is the raw input for identifying existing SSH keys.
+// Matches Python's KeyInput dataclass behaviour — identifiers are resolved
+// by name or ID in a single pass (lumping both).
 type KeyInput struct {
-	Name []string `json:"name,omitempty"`
-	ID   []string `json:"id,omitempty"`
+	Identifiers []string `json:"identifiers,omitempty"`
 }
 
 // ResolvedKeyInput matches Python's ResolvedKeyInput (frozen dataclass).
@@ -35,27 +30,22 @@ type ResolvedKeyInput struct {
 //
 // Resolve key identifiers to DB records.
 type KeyRequest struct {
-	db       *sql.DB
-	input   KeyInput
-	result  *ResolvedKeyInput
+	input    KeyInput
 	resolver *key.Resolver
 }
 
 // NewKeyRequest creates a new KeyRequest.
-func NewKeyRequest(inputs KeyInput, db *sql.DB, keyRepo key.Repository) *KeyRequest {
+func NewKeyRequest(inputs KeyInput, keyRepo key.Repository) *KeyRequest {
 	return &KeyRequest{
-		db:       db,
-		input:   inputs,
+		input:    inputs,
 		resolver: key.NewResolver(keyRepo),
 	}
 }
 
-// Result returns the resolved input, or nil if resolve() has not been called.
-
 // Resolve resolves key identifiers to DB records.
 // Matches Python's KeyRequest.resolve().
 func (r *KeyRequest) Resolve(ctx context.Context) (*ResolvedKeyInput, error) {
-	identifiers := append(r.input.Name, r.input.ID...)
+	identifiers := r.input.Identifiers
 
 	if len(identifiers) == 0 {
 		return nil, &errs.DomainError{
@@ -80,9 +70,7 @@ func (r *KeyRequest) Resolve(ctx context.Context) (*ResolvedKeyInput, error) {
 		}
 	}
 
-	r.result = &ResolvedKeyInput{
+	return &ResolvedKeyInput{
 		Keys: result.Items,
-	}
-
-	return r.result, nil
+	}, nil
 }

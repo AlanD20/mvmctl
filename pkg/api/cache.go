@@ -56,7 +56,7 @@ func (op *Operation) CacheInitAll(ctx context.Context, onProgress func(errs.Prog
 		infra.GetKernelsDir,
 		infra.GetBinDir,
 		infra.GetLogsDir,
-		infra.GetKeysDir,
+		infra.GetKeyDir,
 	}
 
 	for _, fn := range dirFuncs {

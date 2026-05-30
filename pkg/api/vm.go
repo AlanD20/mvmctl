@@ -1275,19 +1275,15 @@ func (op *Operation) VMLoad(ctx context.Context, input *inputs.VMInput, memFile 
 		}
 	}
 
-	memFilePath := memFile
-	stateFilePath := stateFile
-
-	// Validate snapshot files exist before loading (matches Python's exists() checks)
 	var missing []string
-	if _, err := os.Stat(memFilePath); err != nil {
+	if _, err := os.Stat(memFile); err != nil {
 		if os.IsNotExist(err) {
-			missing = append(missing, memFilePath)
+			missing = append(missing, memFile)
 		}
 	}
-	if _, err := os.Stat(stateFilePath); err != nil {
+	if _, err := os.Stat(stateFile); err != nil {
 		if os.IsNotExist(err) {
-			missing = append(missing, stateFilePath)
+			missing = append(missing, stateFile)
 		}
 	}
 	if len(missing) > 0 {
@@ -1341,7 +1337,7 @@ func (op *Operation) VMLoad(ctx context.Context, input *inputs.VMInput, memFile 
 		msg = fmt.Sprintf("Failed to load snapshot for VM '%s': %v", vmItem.Name, ctrlErr)
 		exception = ctrlErr
 		resultItem = vmItem
-	} else if err := controller.LoadSnapshot(ctx, memFilePath, stateFilePath, resume); err != nil {
+	} else if err := controller.LoadSnapshot(ctx, memFile, stateFile, resume); err != nil {
 		// Python catches MVMError → status="error", Exception → status="failure", item=vm
 		status = "error"
 		var de *errs.DomainError
@@ -2162,7 +2158,7 @@ type resolvedVMCreateInput struct {
 	CloudInitISOPath      *string
 	CPUConfig             *model.CpuConfig
 	BootArgs              string
-	SSHKeys               []string
+	SSHKeys               []*model.SSHKeyItem
 	Provisioner           model.ProvisionerType
 	ExtraDrives           []model.DriveConfig
 	Volumes               []*model.VolumeItem
@@ -2305,7 +2301,7 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 	mode := c.resolved.CloudInitMode
 
 	// Read SSH pubkeys from the key service (used by OFF, INJECT, ISO, NET modes)
-	keySvc := key.NewService(key.NewRepository(nil), filepath.Join(c.cacheDir, "keys"))
+	keySvc := key.NewService(key.NewRepository(nil), infra.GetKeyDir())
 	pubkeys, _ := keySvc.GetPubkeys(ctx, c.resolved.SSHKeys)
 
 	// Common operations for OFF and INJECT modes
@@ -2888,9 +2884,14 @@ func (c *vmCreateContext) toModel() *model.VM {
 		EnableConsole:    c.resolved.EnableConsole,
 		CreatedAt:        now,
 		UpdatedAt:        now,
-		SSHKeys:          c.resolved.SSHKeys,
 		SSHUser:          &c.resolved.User,
 		VolumeIDs:        []string{},
+	}
+	// Extract key names for the VM record (model.SSHKeys is []string)
+	for _, k := range c.resolved.SSHKeys {
+		if k != nil {
+			vm.SSHKeys = append(vm.SSHKeys, k.Name)
+		}
 	}
 
 	// Set cpu_config from resolved input (matches Python: if self.resolved.cpu_config is not None)
@@ -3111,15 +3112,16 @@ func (op *Operation) vmBuildResolvedInput(ctx context.Context, input *inputs.VMC
 		}
 	}
 
-	// Extract SSH key IDs from the key items (not names, matching Python's to_model())
-	sshKeyIDs := make([]string, len(sshKeyNames))
-	for i, name := range sshKeyNames {
+	// Resolve SSH key items (with PublicKeyPath) so GetPubkeys can read
+	// files directly without re-querying the DB.
+	var sshKeyItems []*model.SSHKeyItem
+	for _, name := range sshKeyNames {
 		key, err := keyRepo.GetByName(ctx, name)
 		if err == nil && key != nil {
-			sshKeyIDs[i] = key.ID
+			sshKeyItems = append(sshKeyItems, key)
 		} else {
-			// Fall back to using the name
-			sshKeyIDs[i] = name
+			// Fall back: create a minimal item with just the name
+			sshKeyItems = append(sshKeyItems, &model.SSHKeyItem{Name: name, PublicKeyPath: filepath.Join(infra.GetKeyDir(), name+".pub")})
 		}
 	}
 
@@ -3166,7 +3168,7 @@ func (op *Operation) vmBuildResolvedInput(ctx context.Context, input *inputs.VMC
 		RequestedGuestIP:      input.RequestedGuestIP,
 		RequestedGuestMAC:     input.RequestedGuestMAC,
 		CPUConfig:             mapToVMCPUCfg(input.CPUConfig),
-		SSHKeys:               sshKeyIDs,
+		SSHKeys:               sshKeyItems,
 		Provisioner:           model.ProvisionerType(provisionerType),
 	}, nil
 }
@@ -3280,14 +3282,6 @@ func resolvedFromBuilderOutput(r *inputs.VMCreateResolved) *resolvedVMCreateInpu
 
 	// Fields are already typed — no type assertions needed
 
-	// Convert SSHKeys: []*key.SSHKeyItem -> []string (names)
-	var sshKeyNames []string
-	for _, keyItem := range r.SSHKeys {
-		if keyItem != nil {
-			sshKeyNames = append(sshKeyNames, keyItem.Name)
-		}
-	}
-
 	// BootArgs: *string -> string
 	bootArgs := ""
 	if r.BootArgs != nil {
@@ -3346,7 +3340,7 @@ func resolvedFromBuilderOutput(r *inputs.VMCreateResolved) *resolvedVMCreateInpu
 		CloudInitISOPath:      r.CloudInitISOPath,
 		CPUConfig:             r.CPUConfig,
 		BootArgs:              bootArgs,
-		SSHKeys:               sshKeyNames,
+		SSHKeys:               r.SSHKeys,
 		Provisioner:           model.ProvisionerType(r.Provisioner),
 		Volumes:               r.Volumes,
 		ExtraDrives:           r.ExtraDrives,
