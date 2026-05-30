@@ -152,7 +152,7 @@ func DiscoverFileFromListing(
 
 	dl := download.New()
 	useCache := cacheTTLSeconds >= 0
-	html, err := dl.GetRaw(context.Background(), url, 30, nil, useCache, _ttl)
+	html, err := dl.GetContent(context.Background(), url, 30, nil, useCache, _ttl)
 	if err != nil {
 		slog.Warn("File discovery directory not available (skipping)", "url", url)
 		return ""

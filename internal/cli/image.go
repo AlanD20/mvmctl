@@ -391,8 +391,6 @@ Examples:
   mvm image rm abc123 def456`,
 		Args:               cobra.MinimumNArgs(1),
 		ValidArgsFunction:  completeImageIDs,
-		DisableSuggestions: true,
-		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ids := args
 			result := op.ImageRemove(cmd.Context(), &inputs.ImageInput{ID: ids}, force)

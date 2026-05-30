@@ -1532,11 +1532,11 @@ func calculateMinimumImageSizeMB(contentBytes int64) int {
 // ──────────────────────────────────────────────────────────────────────────────
 
 func (s *Service) fetchSHA256FromURL(ctx context.Context, sha256URL, sourceFilename string) (string, error) {
-	// Use shared HttpDownload.GetRaw instead of raw http.Client.Get — provides
+	// Use shared HttpDownload.GetContent instead of raw http.Client.Get — provides
 	// retry logic, HTTP caching, and mirror support matching Python's behavior.
 	// Python passes timeout=HTTP_TIMEOUT_SHA256_FETCH_S (30s).
 	// Python catches HttpDownloadError → returns None (no error).
-	content, err := s.dl.GetRaw(ctx, sha256URL, infra.HTTPTimeoutSha256FetchS, nil, false, 0)
+	content, err := s.dl.GetContent(ctx, sha256URL, infra.HTTPTimeoutSha256FetchS, nil, false, 0)
 	if err != nil {
 		return "", nil // Python catches HttpDownloadError → returns None
 	}
@@ -1635,7 +1635,7 @@ func (s *Service) getTemplateVariables(spec *ImageSpec, ciVersion string) map[st
 }
 
 // resolveSourceTemplate resolves source URL by fetching and parsing CI image list.
-// Uses the shared HttpDownload.GetRaw to benefit from retry + caching.
+// Uses the shared HttpDownload.GetContent to benefit from retry + caching.
 // Matches Python's _resolve_source_template() exactly — sorts keys alphabetically
 // before picking the last (highest) one (C05).
 func (s *Service) resolveSourceTemplate(ctx context.Context, spec *ImageSpec, templateVars map[string]string) (string, error) {
@@ -1649,9 +1649,9 @@ func (s *Service) resolveSourceTemplate(ctx context.Context, spec *ImageSpec, te
 
 	listURL := renderOptionalTemplate(listURLTmpl, templateVars)
 
-	// Use shared HttpDownload.GetRaw instead of raw http.Client.Get — provides
+	// Use shared HttpDownload.GetContent instead of raw http.Client.Get — provides
 	// retry logic, HTTP caching, and mirror support matching Python's behavior.
-	xmlContent, err := s.dl.GetRaw(ctx, listURL, 30, nil, false, 0)
+	xmlContent, err := s.dl.GetContent(ctx, listURL, 30, nil, false, 0)
 	if err != nil {
 		return "", NewImageError("Failed to list Firecracker CI ubuntu images")
 	}

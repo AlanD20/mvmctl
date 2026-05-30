@@ -630,11 +630,11 @@ func (d *Downloader) GetJSON(
 	return parsed, nil
 }
 
-// ── GetRaw (read_raw_content) ─────────────────────────────────────────────
+// ── GetContent (read_raw_content) ─────────────────────────────────────────────
 
-// GetRaw fetches a URL and returns the raw response body as a string.
+// GetContent fetches a URL and returns the raw response body as a string.
 // Mirrors Python's HttpDownload.read_raw_content().
-func (d *Downloader) GetRaw(
+func (d *Downloader) GetContent(
 	ctx context.Context,
 	url string,
 	timeout int,

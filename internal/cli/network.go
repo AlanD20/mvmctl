@@ -118,8 +118,6 @@ func newNetworkCreateCmd(op *api.Operation) *cobra.Command {
 		Use:                   "create [name]",
 		Short:                 "Create a named network.",
 		Args:                  cobra.MaximumNArgs(1),
-		DisableSuggestions:    true,
-		FParseErrWhitelist:    cobra.FParseErrWhitelist{UnknownFlags: true},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var name string
 			if len(args) > 0 {
@@ -311,8 +309,6 @@ func newNetworkRmCmd(op *api.Operation) *cobra.Command {
 		Aliases:            []string{"remove", "delete"},
 		Short:              "Remove one or more networks by name.",
 		Args:               cobra.ArbitraryArgs,
-		DisableSuggestions: true,
-		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
 		ValidArgsFunction:  completeNetworkNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			names := args
@@ -345,8 +341,6 @@ func newNetworkInspectCmd(op *api.Operation) *cobra.Command {
 		Use:                "inspect [name]",
 		Short:              "Show detailed information about a network.",
 		Args:               cobra.MaximumNArgs(1),
-		DisableSuggestions: true,
-		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
 		ValidArgsFunction:  completeNetworkNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var name string
@@ -395,8 +389,6 @@ func newNetworkSyncCmd(op *api.Operation) *cobra.Command {
 		Use:                "sync [name]",
 		Short:              "Sync iptables rules between database and host.",
 		Args:               cobra.MaximumNArgs(1),
-		DisableSuggestions: true,
-		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
 		ValidArgsFunction:  completeNetworkNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Resolve network ID if name provided
@@ -478,8 +470,6 @@ func newNetworkDefaultCmd(op *api.Operation) *cobra.Command {
 		Use:                "default [name]",
 		Short:              "Set a network as the default for VM creation.",
 		Args:               cobra.MaximumNArgs(1),
-		DisableSuggestions: true,
-		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var name string
 			if len(args) > 0 {
