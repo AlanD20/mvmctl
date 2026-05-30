@@ -119,7 +119,7 @@ func pruneResource(op *api.Operation, cmd *cobra.Command, resource string, dryRu
 		// Match Python: mvm_cli.warning("This will remove cached data for all VMs")
 		common.Cli.Warning(fmt.Sprintf("This will remove cached data for all %s", resourceDisplayNamePlural(resource)))
 		common.Cli.Info("")
-		if !promptConfirm("Continue?", true) {
+		if !common.Cli.PromptConfirm("Continue?", true) {
 			return nil
 		}
 	}
@@ -180,7 +180,7 @@ func pruneMisc(op *api.Operation, cmd *cobra.Command, dryRun bool, force bool) e
 		// Match Python: mvm_cli.warning("This will remove cached data (appliance folder, warm images)")
 		common.Cli.Warning("This will remove cached data (appliance folder, warm images)")
 		common.Cli.Info("")
-		if !promptConfirm("Continue?", true) {
+		if !common.Cli.PromptConfirm("Continue?", true) {
 			return nil
 		}
 	}
@@ -249,7 +249,7 @@ func pruneAll(op *api.Operation, cmd *cobra.Command, dryRun bool, force bool) er
 		common.Cli.Info("  - Appliance folder (libguestfs cache)")
 		common.Cli.Info("  - Warm images (tmpfs ready pool)")
 		common.Cli.Info("")
-		if !promptConfirm("Continue?", true) {
+		if !common.Cli.PromptConfirm("Continue?", true) {
 			common.Cli.Info("Aborted")
 			return nil
 		}
@@ -283,29 +283,6 @@ func pruneAll(op *api.Operation, cmd *cobra.Command, dryRun bool, force bool) er
 	}
 
 	return nil
-}
-
-// promptConfirm asks a yes/no question. Returns true for yes.
-// Matches Python's typer.confirm(text, default=True).
-// Python shows "[Y/n]: " for default=True and "[y/N]: " for default=False (with colon space).
-func promptConfirm(prompt string, defaultYes bool) bool {
-	suffix := " [Y/n]: "
-	if !defaultYes {
-		suffix = " [y/N]: "
-	}
-	fmt.Fprintf(os.Stderr, "%s%s", prompt, suffix)
-
-	var response string
-	_, err := fmt.Scanln(&response)
-	if err != nil {
-		return defaultYes
-	}
-	response = strings.TrimSpace(strings.ToLower(response))
-
-	if response == "" {
-		return defaultYes
-	}
-	return response == "y" || response == "yes"
 }
 
 func newCachePruneCmd(op *api.Operation) *cobra.Command {
@@ -441,7 +418,7 @@ Examples:
 				}
 				// Session doesn't have the group — offer sudo
 				// Match Python: single confirm prompt: "Elevated privileges required. Run with sudo instead?"
-				if !promptConfirm("Elevated privileges required. Run with sudo instead?", true) {
+				if !common.Cli.PromptConfirm("Elevated privileges required. Run with sudo instead?", true) {
 					common.Cli.Info("Aborted")
 					return nil
 				}
@@ -471,7 +448,7 @@ Examples:
 				common.Cli.Info("  - Host networking (TAPs, bridges, iptables chains)")
 				common.Cli.Info("  - Entire cache directory (~/.cache/mvmctl)")
 				common.Cli.Info("")
-				if !promptConfirm("Continue?", true) {
+				if !common.Cli.PromptConfirm("Continue?", true) {
 					return nil
 				}
 			}

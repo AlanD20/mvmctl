@@ -2,43 +2,13 @@
 package cli
 
 import (
-	"fmt"
-	"os"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"mvmctl/internal/infra"
 )
-
-// checkNameArg guards for positional name arg: shows help on "help" or empty,
-// matching Python's MVMCli.check_name_arg() in utils/cli.py.
-// Returns the validated name or an error.
-// Python prints help to stdout via typer.echo(); Cobra's Help() defaults to stderr,
-// so we redirect to stdout before calling Help().
-func checkNameArg(cmd *cobra.Command, name string) (string, error) {
-	if name == "help" {
-		cmd.SetOut(os.Stdout)
-		cmd.Help()
-		return "", nil // nil error = help shown, caller should return nil
-	}
-	if name == "" {
-		cmd.SetOut(os.Stdout)
-		cmd.Help()
-		return "", fmt.Errorf("name required")
-	}
-	return name, nil
-}
-
-// confirmPrompt shows a y/n prompt on stderr and returns true if the user confirms.
-// Matches Python's typer.confirm(text) behavior: defaults to True (Enter = accept).
-func confirmPrompt(prompt string) bool {
-	return promptConfirm(prompt, true)
-}
-
-func confirmPromptNoDefault(prompt string) bool {
-	return promptConfirm(prompt, false)
-}
 
 // ── Shell completion functions ──
 // Matches Python's cli/_completion.py functions.
@@ -51,12 +21,12 @@ func completeNetworkNames(cmd *cobra.Command, args []string, toComplete string) 
 	networks, _ := opRef.NetworkListAll(cmd.Context())
 	var results []string
 	for _, net := range networks {
-		if net.Name != "" && hasPrefix(net.Name, toComplete) && !contains(results, net.Name) {
+		if net.Name != "" && strings.HasPrefix(net.Name, toComplete) && !slices.Contains(results, net.Name) {
 			results = append(results, net.Name)
 		}
 		short := net.ID
 		if len(short) > 6 { short = short[:6] }
-		if hasPrefix(short, toComplete) && !contains(results, short) {
+		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
 			results = append(results, short)
 		}
 	}
@@ -73,10 +43,10 @@ func completeImageIDs(cmd *cobra.Command, args []string, toComplete string) ([]s
 	for _, img := range images {
 		short := img.ID
 		if len(short) > 6 { short = short[:6] }
-		if hasPrefix(short, toComplete) && !contains(results, short) {
+		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
 			results = append(results, short)
 		}
-		if img.Type != "" && hasPrefix(img.Type, toComplete) && !contains(results, img.Type) {
+		if img.Type != "" && strings.HasPrefix(img.Type, toComplete) && !slices.Contains(results, img.Type) {
 			results = append(results, img.Type)
 		}
 	}
@@ -93,13 +63,13 @@ func completeKernelIDs(cmd *cobra.Command, args []string, toComplete string) ([]
 	for _, k := range kernels {
 		if k.Type != "" && k.Version != "" {
 			combo := k.Type + ":" + k.Version
-			if hasPrefix(combo, toComplete) && !contains(results, combo) {
+			if strings.HasPrefix(combo, toComplete) && !slices.Contains(results, combo) {
 				results = append(results, combo)
 			}
 		}
 		short := k.ID
 		if len(short) > 6 { short = short[:6] }
-		if hasPrefix(short, toComplete) && !contains(results, short) {
+		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
 			results = append(results, short)
 		}
 	}
@@ -114,15 +84,15 @@ func completeBinaryVersions(cmd *cobra.Command, args []string, toComplete string
 	binaries, _, _ := opRef.BinaryList(cmd.Context(), false, nil)
 	var results []string
 	for _, b := range binaries {
-		if b.Name != "" && hasPrefix(b.Name, toComplete) && !contains(results, b.Name) {
+		if b.Name != "" && strings.HasPrefix(b.Name, toComplete) && !slices.Contains(results, b.Name) {
 			results = append(results, b.Name)
 		}
-		if b.Version != "" && hasPrefix(b.Version, toComplete) && !contains(results, b.Version) {
+		if b.Version != "" && strings.HasPrefix(b.Version, toComplete) && !slices.Contains(results, b.Version) {
 			results = append(results, b.Version)
 		}
 		short := b.ID
 		if len(short) > 6 { short = short[:6] }
-		if hasPrefix(short, toComplete) && !contains(results, short) {
+		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
 			results = append(results, short)
 		}
 	}
@@ -137,15 +107,15 @@ func completeKeyNames(cmd *cobra.Command, args []string, toComplete string) ([]s
 	keys, _ := opRef.KeyListAll(cmd.Context())
 	var results []string
 	for _, k := range keys {
-		if k.Name != "" && hasPrefix(k.Name, toComplete) && !contains(results, k.Name) {
+		if k.Name != "" && strings.HasPrefix(k.Name, toComplete) && !slices.Contains(results, k.Name) {
 			results = append(results, k.Name)
 		}
-		if k.Fingerprint != "" && hasPrefix(k.Fingerprint, toComplete) && !contains(results, k.Fingerprint) {
+		if k.Fingerprint != "" && strings.HasPrefix(k.Fingerprint, toComplete) && !slices.Contains(results, k.Fingerprint) {
 			results = append(results, k.Fingerprint)
 		}
 		if k.Fingerprint != "" {
 			bare := strings.TrimPrefix(k.Fingerprint, "SHA256:")
-			if bare != k.Fingerprint && hasPrefix(bare, toComplete) && !contains(results, bare) {
+			if bare != k.Fingerprint && strings.HasPrefix(bare, toComplete) && !slices.Contains(results, bare) {
 				results = append(results, bare)
 			}
 		}
@@ -161,12 +131,12 @@ func completeVolumeNames(cmd *cobra.Command, args []string, toComplete string) (
 	volumes := opRef.VolumeListAll(cmd.Context())
 	var results []string
 	for _, v := range volumes {
-		if v.Name != "" && hasPrefix(v.Name, toComplete) && !contains(results, v.Name) {
+		if v.Name != "" && strings.HasPrefix(v.Name, toComplete) && !slices.Contains(results, v.Name) {
 			results = append(results, v.Name)
 		}
 		short := v.ID
 		if len(short) > 6 { short = short[:6] }
-		if hasPrefix(short, toComplete) && !contains(results, short) {
+		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
 			results = append(results, short)
 		}
 	}
@@ -178,7 +148,7 @@ func completeCacheResources(cmd *cobra.Command, args []string, toComplete string
 	resources := []string{"vm", "network", "image", "kernel", "binary", "misc"}
 	var results []string
 	for _, r := range resources {
-		if hasPrefix(r, toComplete) {
+		if strings.HasPrefix(r, toComplete) {
 			results = append(results, r)
 		}
 	}
@@ -194,7 +164,7 @@ func completeConfigGet(cmd *cobra.Command, args []string, toComplete string) ([]
 	if catKeys, ok := infra.OverridableDefaults[args[0]]; ok {
 		var keys []string
 		for k := range catKeys {
-			if hasPrefix(k, toComplete) {
+			if strings.HasPrefix(k, toComplete) {
 				keys = append(keys, k)
 			}
 		}
@@ -212,7 +182,7 @@ func completeConfigSet(cmd *cobra.Command, args []string, toComplete string) ([]
 	if catKeys, ok := infra.OverridableDefaults[args[0]]; ok {
 		var keys []string
 		for k := range catKeys {
-			if hasPrefix(k, toComplete) {
+			if strings.HasPrefix(k, toComplete) {
 				keys = append(keys, k)
 			}
 		}
@@ -226,7 +196,7 @@ func completeConfigSet(cmd *cobra.Command, args []string, toComplete string) ([]
 func listCategories(toComplete string) ([]string, cobra.ShellCompDirective) {
 	var cats []string
 	for cat := range infra.OverridableDefaults {
-		if hasPrefix(cat, toComplete) {
+		if strings.HasPrefix(cat, toComplete) {
 			cats = append(cats, cat)
 		}
 	}
@@ -257,7 +227,7 @@ func completeVMNamesEnhanced(cmd *cobra.Command, _ []string, toComplete string) 
 	vms := opRef.VMList(cmd.Context(), nil)
 	var results []string
 	for _, vm := range vms {
-		if vm.Name != "" && hasPrefix(vm.Name, toComplete) && !contains(results, vm.Name) {
+		if vm.Name != "" && strings.HasPrefix(vm.Name, toComplete) && !slices.Contains(results, vm.Name) {
 			results = append(results, vm.Name)
 		}
 		if vm.ID != "" {
@@ -265,31 +235,16 @@ func completeVMNamesEnhanced(cmd *cobra.Command, _ []string, toComplete string) 
 			if len(short) > 6 {
 				short = short[:6]
 			}
-			if hasPrefix(short, toComplete) && !contains(results, short) {
+			if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
 				results = append(results, short)
 			}
 		}
-		if vm.IPv4 != "" && hasPrefix(vm.IPv4, toComplete) && !contains(results, vm.IPv4) {
+		if vm.IPv4 != "" && strings.HasPrefix(vm.IPv4, toComplete) && !slices.Contains(results, vm.IPv4) {
 			results = append(results, vm.IPv4)
 		}
-		if vm.MAC != "" && hasPrefix(vm.MAC, toComplete) && !contains(results, vm.MAC) {
+		if vm.MAC != "" && strings.HasPrefix(vm.MAC, toComplete) && !slices.Contains(results, vm.MAC) {
 			results = append(results, vm.MAC)
 		}
 	}
 	return results, cobra.ShellCompDirectiveNoFileComp
-}
-
-// contains checks if a string is in a slice.
-func contains(slice []string, s string) bool {
-	for _, item := range slice {
-		if item == s {
-			return true
-		}
-	}
-	return false
-}
-
-// hasPrefix checks if s starts with prefix.
-func hasPrefix(s, prefix string) bool {
-	return strings.HasPrefix(s, prefix)
 }

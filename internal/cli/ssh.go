@@ -4,6 +4,8 @@ package cli
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"mvmctl/pkg/api"
@@ -26,7 +28,7 @@ func completeVMNames(cmd *cobra.Command, args []string, toComplete string) ([]st
 
 	var results []string
 	for _, vm := range vms {
-		if vm.Name != "" && hasPrefix(vm.Name, toComplete) && !contains(results, vm.Name) {
+		if vm.Name != "" && strings.HasPrefix(vm.Name, toComplete) && !slices.Contains(results, vm.Name) {
 			results = append(results, vm.Name)
 		}
 		if vm.ID != "" {
@@ -34,14 +36,14 @@ func completeVMNames(cmd *cobra.Command, args []string, toComplete string) ([]st
 			if len(short) > 6 {
 				short = short[:6]
 			}
-			if hasPrefix(short, toComplete) && !contains(results, short) {
+			if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
 				results = append(results, short)
 			}
 		}
-		if vm.IPv4 != "" && hasPrefix(vm.IPv4, toComplete) && !contains(results, vm.IPv4) {
+		if vm.IPv4 != "" && strings.HasPrefix(vm.IPv4, toComplete) && !slices.Contains(results, vm.IPv4) {
 			results = append(results, vm.IPv4)
 		}
-		if vm.MAC != "" && hasPrefix(vm.MAC, toComplete) && !contains(results, vm.MAC) {
+		if vm.MAC != "" && strings.HasPrefix(vm.MAC, toComplete) && !slices.Contains(results, vm.MAC) {
 			results = append(results, vm.MAC)
 		}
 	}

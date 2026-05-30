@@ -3,6 +3,7 @@
 package common
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,8 +14,10 @@ import (
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/spf13/cobra"
 
 	"mvmctl/internal/infra/errs"
+	"mvmctl/pkg/api"
 )
 
 // ─── Spinner ───────────────────────────────────────────────────────────────────
@@ -624,28 +627,45 @@ type ListingColumn struct {
 	LongOnly bool
 }
 
-// renderListing builds and prints a listing table from column specs.
+// ResolveListingStyle resolves "short" or "long" from --long flag or user config.
+// Matches Python's resolve_listing_style() in cli/_common.py exactly.
+func (c *MVMCli) ResolveListingStyle(ctx context.Context, op *api.Operation, longOutput bool) string {
+	if longOutput {
+		return "long"
+	}
+	if op != nil {
+		value, err := op.ConfigGet(ctx, "settings", "listing_style")
+		if err == nil {
+			if s, ok := value.(string); ok && s != "" {
+				return s
+			}
+		}
+	}
+	return "short"
+}
+
+// RenderListing builds and prints a listing table from column specs.
 // Matches Python's render_listing() in cli/_common.py.
-func renderListing(items []any, columns []ListingColumn, style string, title ...string) {
+func (c *MVMCli) RenderListing(items []any, columns []ListingColumn, style string, title ...string) {
 	visible := columns
 	if style != "long" {
 		var short []ListingColumn
-		for _, c := range columns {
-			if !c.LongOnly {
-				short = append(short, c)
+		for _, col := range columns {
+			if !col.LongOnly {
+				short = append(short, col)
 			}
 		}
 		visible = short
 	}
 	headers := make([]string, len(visible))
-	for i, c := range visible {
-		headers[i] = c.Header
+	for i, col := range visible {
+		headers[i] = col.Header
 	}
 	rows := make([][]string, len(items))
 	for i, item := range items {
 		row := make([]string, len(visible))
-		for j, c := range visible {
-			row[j] = c.Extract(item)
+		for j, col := range visible {
+			row[j] = col.Extract(item)
 		}
 		rows[i] = row
 	}
@@ -657,6 +677,58 @@ func renderListing(items []any, columns []ListingColumn, style string, title ...
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// CheckNameArg guards for positional name arg: shows help on "help" or empty,
+// matching Python's MVMCli.check_name_arg() in utils/cli.py.
+// Returns the validated name or an error.
+// Python prints help to stdout via typer.echo(); Cobra's Help() defaults to stderr,
+// so we redirect to stdout before calling Help().
+func (c *MVMCli) CheckNameArg(cmd *cobra.Command, name string) (string, error) {
+	if name == "help" {
+		cmd.SetOut(os.Stdout)
+		cmd.Help()
+		return "", nil
+	}
+	if name == "" {
+		cmd.SetOut(os.Stdout)
+		cmd.Help()
+		return "", fmt.Errorf("name required")
+	}
+	return name, nil
+}
+
+// ConfirmPrompt shows a y/n prompt on stderr, defaulting to True (Enter = accept).
+// Matches Python's typer.confirm(text) behavior.
+func (c *MVMCli) ConfirmPrompt(prompt string) bool {
+	return c.PromptConfirm(prompt, true)
+}
+
+// ConfirmPromptNoDefault shows a y/n prompt on stderr with no default (Enter declines).
+func (c *MVMCli) ConfirmPromptNoDefault(prompt string) bool {
+	return c.PromptConfirm(prompt, false)
+}
+
+// PromptConfirm asks a yes/no question on stderr. Returns true for yes.
+// Matches Python's typer.confirm(text, default=True).
+func (c *MVMCli) PromptConfirm(prompt string, defaultYes bool) bool {
+	suffix := " [Y/n]: "
+	if !defaultYes {
+		suffix = " [y/N]: "
+	}
+	fmt.Fprintf(os.Stderr, "%s%s", prompt, suffix)
+
+	var response string
+	_, err := fmt.Scanln(&response)
+	if err != nil {
+		return defaultYes
+	}
+	response = strings.TrimSpace(strings.ToLower(response))
+
+	if response == "" {
+		return defaultYes
+	}
+	return response == "y" || response == "yes"
+}
 
 func sortedKeys(m map[string]any) []string {
 	keys := make([]string, 0, len(m))

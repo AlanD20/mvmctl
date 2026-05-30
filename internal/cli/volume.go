@@ -2,7 +2,6 @@
 package cli
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 
@@ -12,6 +11,24 @@ import (
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
 )
+
+// volumeColumns defines the listing columns for volumes.
+// Matches Python's _VOLUME_COLUMNS in cli/volume.py.
+var volumeColumns = []common.ListingColumn{
+	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.VolumeItem).ID) }},
+	{Header: "Name", Extract: func(v any) string { return v.(*model.VolumeItem).Name }},
+	{Header: "Size", Extract: func(v any) string { return common.Cli.FormatSize(v.(*model.VolumeItem).SizeBytes) }},
+	{Header: "Status", Extract: func(v any) string { return string(v.(*model.VolumeItem).Status) }},
+	{Header: "Format", Extract: func(v any) string { return v.(*model.VolumeItem).Format }, LongOnly: true},
+	{Header: "Attached To", Extract: func(v any) string {
+		vmID := v.(*model.VolumeItem).VMID
+		if vmID != nil && *vmID != "" {
+			return *vmID
+		}
+		return "-"
+	}, LongOnly: true},
+	{Header: "Created", Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.VolumeItem).CreatedAt, "relative") }},
+}
 
 func NewVolumeCmd(op *api.Operation, configAPI *api.Operation) *cobra.Command {
 	cmd := &cobra.Command{
@@ -30,22 +47,6 @@ func NewVolumeCmd(op *api.Operation, configAPI *api.Operation) *cobra.Command {
 	return cmd
 }
 
-// resolveListingStyle resolves "short" or "long" from --long flag or user config.
-// Matches Python's resolve_listing_style() in cli/_common.py exactly.
-func resolveListingStyle(ctx context.Context, configAPI *api.Operation, longOutput bool) string {
-	if longOutput {
-		return "long"
-	}
-	if configAPI != nil {
-		value, err := configAPI.ConfigGet(ctx, "settings", "listing_style")
-		if err == nil {
-			if s, ok := value.(string); ok && s != "" {
-				return s
-			}
-		}
-	}
-	return "short"
-}
 
 func newVolumeLsCmd(op *api.Operation, configAPI *api.Operation) *cobra.Command {
 	var jsonOutput bool
@@ -82,51 +83,13 @@ func newVolumeLsCmd(op *api.Operation, configAPI *api.Operation) *cobra.Command 
 				return nil
 			}
 
-			style := resolveListingStyle(cmd.Context(), configAPI, longOutput)
+			style := common.Cli.ResolveListingStyle(cmd.Context(), configAPI, longOutput)
 
-			// Match Python's _VOLUME_COLUMNS exactly
-			type volColumn struct {
-				header   string
-				extract  func(*model.VolumeItem) string
-				longOnly bool
-			}
-			allColumns := []volColumn{
-				{"ID", func(v *model.VolumeItem) string { return common.Cli.FormatID(v.ID) }, false},
-				{"Name", func(v *model.VolumeItem) string { return v.Name }, false},
-				{"Size", func(v *model.VolumeItem) string { return common.Cli.FormatSize(v.SizeBytes) }, false},
-				{"Status", func(v *model.VolumeItem) string { return string(v.Status) }, false},
-				{"Format", func(v *model.VolumeItem) string { return v.Format }, true},
-				{"Attached To", func(v *model.VolumeItem) string {
-					if v.VMID != nil && *v.VMID != "" {
-						return *v.VMID
-					}
-					return "-"
-				}, true},
-				{"Created", func(v *model.VolumeItem) string { return common.Cli.FormatTimestamp(v.CreatedAt, "relative") }, false},
-			}
-
-			visible := make([]volColumn, 0)
-			for _, col := range allColumns {
-				if style == "long" || !col.longOnly {
-					visible = append(visible, col)
-				}
-			}
-
-			headers := make([]string, len(visible))
-			for i, col := range visible {
-				headers[i] = col.header
-			}
-
-			rows := make([][]string, len(volumes))
+			items := make([]any, len(volumes))
 			for i, v := range volumes {
-				row := make([]string, len(visible))
-				for j, col := range visible {
-					row[j] = col.extract(v)
-				}
-				rows[i] = row
+				items[i] = v
 			}
-
-			common.Cli.Table(headers, rows)
+			common.Cli.RenderListing(items, volumeColumns, style)
 			return nil
 		},
 	}
