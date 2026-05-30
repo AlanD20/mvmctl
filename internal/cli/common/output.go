@@ -3,6 +3,7 @@
 package common
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -678,23 +679,23 @@ func (c *MVMCli) RenderListing(items []any, columns []ListingColumn, style strin
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// CheckNameArg guards for positional name arg: shows help on "help" or empty,
+// CheckArg guards for positional arg: shows help on "help" or empty,
 // matching Python's MVMCli.check_name_arg() in utils/cli.py.
-// Returns the validated name or an error.
+// Returns the validated value or an error.
 // Python prints help to stdout via typer.echo(); Cobra's Help() defaults to stderr,
 // so we redirect to stdout before calling Help().
-func (c *MVMCli) CheckNameArg(cmd *cobra.Command, name string) (string, error) {
-	if name == "help" {
+func (c *MVMCli) CheckArg(cmd *cobra.Command, value string) (string, error) {
+	if value == "help" {
 		cmd.SetOut(os.Stdout)
 		cmd.Help()
 		return "", nil
 	}
-	if name == "" {
+	if value == "" {
 		cmd.SetOut(os.Stdout)
 		cmd.Help()
-		return "", fmt.Errorf("name required")
+		return "", fmt.Errorf("value required")
 	}
-	return name, nil
+	return value, nil
 }
 
 // PromptConfirm asks a yes/no question on stderr. Returns true for yes.
@@ -724,6 +725,77 @@ func (c *MVMCli) PromptConfirm(prompt string, defaultYes bool) bool {
 			fmt.Fprint(os.Stderr, "Please enter 'yes' or 'no': ")
 		}
 	}
+}
+
+// PromptSelect shows a numbered list of options on stderr and returns the
+// selected value. Defaults to options[defaultIdx] on empty input.
+func (c *MVMCli) PromptSelect(title string, options []string, defaultIdx int) string {
+	c.Info(title)
+	for i, opt := range options {
+		c.Info(fmt.Sprintf("  %d. %s", i+1, opt))
+	}
+	prompt := fmt.Sprintf("Enter number [%d]: ", defaultIdx+1)
+	fmt.Fprint(os.Stderr, prompt)
+	var choice string
+	_, _ = fmt.Scanln(&choice)
+	choice = strings.TrimSpace(choice)
+	if choice == "" {
+		return options[defaultIdx]
+	}
+	idx := 0
+	if _, err := fmt.Sscan(choice, &idx); err == nil && idx >= 1 && idx <= len(options) {
+		return options[idx-1]
+	}
+	return options[defaultIdx]
+}
+
+// PromptMultiSelect shows numbered options on stderr and returns selected values
+// from a comma-separated input. Returns defaultIndices on empty input.
+// If defaultIndices is nil, defaults to the first option.
+func (c *MVMCli) PromptMultiSelect(title string, options []string, defaultIndices []int) ([]string, error) {
+	c.Info(title)
+	for i, opt := range options {
+		c.Info(fmt.Sprintf("  [%d] %s", i+1, opt))
+	}
+	def := 1
+	if len(defaultIndices) > 0 {
+		def = defaultIndices[0] + 1
+	}
+	fmt.Fprintf(os.Stderr, "Select number(s) [comma-separated] [%d]: ", def)
+	reader := bufio.NewReader(os.Stdin)
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(input)
+
+	if input == "" {
+		if len(defaultIndices) > 0 {
+			selected := make([]string, len(defaultIndices))
+			for i, idx := range defaultIndices {
+				selected[i] = options[idx]
+			}
+			return selected, nil
+		}
+		return []string{options[0]}, nil
+	}
+
+	var selected []string
+	for _, part := range strings.Split(input, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		var idx int
+		if _, err := fmt.Sscanf(part, "%d", &idx); err != nil {
+			return nil, fmt.Errorf("invalid selection: %s", input)
+		}
+		if idx < 1 || idx > len(options) {
+			return nil, fmt.Errorf("invalid index: %d (options are 1-%d)", idx, len(options))
+		}
+		selected = append(selected, options[idx-1])
+	}
+	if len(selected) == 0 {
+		return nil, fmt.Errorf("no valid selections")
+	}
+	return selected, nil
 }
 
 func sortedKeys(m map[string]any) []string {

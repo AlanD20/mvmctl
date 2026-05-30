@@ -22,7 +22,7 @@ type ResolveResult struct {
 
 // EnrichFunc is a function that enriches keys in-place with relations.
 // Set by the API layer during wiring to avoid circular imports.
-type EnrichFunc func(ctx context.Context, keys []*model.SSHKeyItem, include []string, relations map[string]interface{})
+type EnrichFunc func(ctx context.Context, keys []*model.SSHKeyItem, include []string, relations map[string]any)
 
 // Resolver resolves key identifiers (name, ID prefix, or .pub file path)
 // to SSHKeyItem instances using database storage.
@@ -154,7 +154,7 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.SSHKeyItem
 		// through resolve_many as an uncaught exception.
 		return nil, errs.MVMKeyError(
 			"Public key file '" + value + "' found on disk but key '" + stem + "' is not in the cache. " +
-				"Import it first with: mvm key add " + stem + " " + value,
+				"Import it first with: mvm key import " + stem + " " + value,
 		)
 	}
 

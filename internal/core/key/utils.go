@@ -1,16 +1,48 @@
 package key
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"os"
+	"os/exec"
+	"strconv"
 	"strings"
 	"unicode"
 
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/internal/infra/system"
 )
+
+// readPubKeyFile reads and validates a public key file.
+func readPubKeyFile(path string) (string, error) {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return "", &keyError{err: errs.KeyFileError(fmt.Sprintf("Public key file not found: %s", path))}
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", &keyError{err: errs.KeyFileError(fmt.Sprintf("Failed to read public key file: %v", err))}
+	}
+	trimmed := strings.TrimSpace(string(content))
+	if trimmed == "" {
+		return "", &keyError{err: errs.KeyFileError(fmt.Sprintf("Public key file is empty: %s", path))}
+	}
+	return trimmed, nil
+}
+
+// checkDependencies checks that ssh-keygen is available.
+func checkDependencies() error {
+	if _, err := exec.LookPath("ssh-keygen"); err != nil {
+		return &keyError{err: &errs.DomainError{
+			Code:    errs.CodeKeyDependencyMissing,
+			Op:      "key",
+			Message: "ssh-keygen is not installed. Install openssh-client (apt install openssh-client / brew install openssh).",
+		}}
+	}
+	return nil
+}
 
 // ReadPubKeyContents extracts public key content strings from a list of SSHKeyItem.
 // Matches Python's KeyService.read_pubkey_contents() (a @staticmethod).
@@ -51,9 +83,9 @@ func computeFingerprint(pubKeyContent string) (string, error) {
 	return "SHA256:" + fp, nil
 }
 
-// isPrivateKey checks if content contains a PEM-encoded private key header.
+// IsPrivateKey checks if content contains a PEM-encoded private key header.
 // TODO(verdict#33): belongs in infra/crypto or similar shared utility
-func isPrivateKey(content string) bool {
+func IsPrivateKey(content string) bool {
 	return strings.Contains(content, "-----BEGIN") && strings.Contains(content, "PRIVATE KEY-----")
 }
 
@@ -98,4 +130,25 @@ type CreateParams struct {
 	OutputDir  string
 	Overwrite  bool
 	SetDefault bool
+}
+
+// generateKeypair generates an SSH key pair using ssh-keygen subprocess.
+func generateKeypair(ctx context.Context, privateKeyPath, pubKeyPath, comment, algorithm string, bits int) (string, error) {
+	args := []string{"-t", algorithm, "-f", privateKeyPath, "-N", "", "-C", comment}
+	if algorithm == "rsa" {
+		if bits <= 0 {
+			bits = 4096
+		}
+		args = append(args, "-b", strconv.Itoa(bits))
+	}
+	result := system.RunCmdCompat(ctx, append([]string{"ssh-keygen"}, args...), system.DefaultRunCmdOptions())
+	if result.Err != nil {
+		return "", &keyError{err: errs.MVMKeyError(fmt.Sprintf("ssh-keygen failed: %s", strings.TrimSpace(result.Stderr)))}
+	}
+
+	pubContent, err := os.ReadFile(pubKeyPath)
+	if err != nil {
+		return "", &keyError{err: errs.KeyFileError(fmt.Sprintf("Failed to read generated public key: %v", err))}
+	}
+	return strings.TrimSpace(string(pubContent)), nil
 }

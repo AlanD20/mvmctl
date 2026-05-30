@@ -19,6 +19,7 @@ import (
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/enricher"
+	"mvmctl/internal/infra"
 )
 
 // Operation is the single composition root for all API operations.
@@ -78,7 +79,7 @@ func NewOperation(db *sql.DB, cacheDir string) *Operation {
 		Image:   image.NewService(r.Image, cacheDir),
 		Kernel:  kernel.NewService(r.Kernel, cacheDir),
 		Binary:  binary.NewService(r.Binary, filepath.Join(cacheDir, "bin"), cacheDir),
-		Key:     key.NewService(r.Key, filepath.Join(cacheDir, "keys")),
+		Key:     key.NewService(r.Key, infra.GetKeyDir()),
 		Host:    host.NewService(r.Host),
 		Config:  config.NewService(r.Config),
 		Volume:  volume.NewService(r.Volume),

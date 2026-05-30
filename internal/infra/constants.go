@@ -498,7 +498,7 @@ func GetKernelsDir() string {
 	return path
 }
 
-func GetKeysDir() string {
+func GetKeyDir() string {
 	configDir, err := GetConfigDir()
 	if err != nil {
 		configDir = filepath.Join(GetRealHome(), ".config", ProjectName)

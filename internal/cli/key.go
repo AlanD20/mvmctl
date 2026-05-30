@@ -3,14 +3,27 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
-	"github.com/spf13/cobra"
+	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api"
-	"mvmctl/internal/cli/common"
+	"mvmctl/pkg/api/inputs"
+
+	"github.com/spf13/cobra"
 )
+
+// keyColumns defines the local listing columns for SSH keys.
+var keyColumns = []common.ListingColumn{
+	{Header: "", Extract: func(v any) string { return common.Cli.FormatMarker(v.(*model.SSHKeyItem).IsDefault) }},
+	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.SSHKeyItem).ID) }},
+	{Header: "Name", Extract: func(v any) string {
+		return common.Cli.FormatName(v.(*model.SSHKeyItem).Name, !v.(*model.SSHKeyItem).IsPresent)
+	}},
+	{Header: "Algorithm", Extract: func(v any) string { return v.(*model.SSHKeyItem).Algorithm }},
+	{Header: "Fingerprint", Extract: func(v any) string { return v.(*model.SSHKeyItem).Fingerprint }, LongOnly: true},
+	{Header: "Created", Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.SSHKeyItem).CreatedAt, "relative") }},
+}
 
 func NewKeyCmd(op *api.Operation) *cobra.Command {
 	cmd := &cobra.Command{
@@ -20,7 +33,7 @@ func NewKeyCmd(op *api.Operation) *cobra.Command {
 
 	cmd.AddCommand(newKeyListCmd(op))
 	cmd.AddCommand(newKeyCreateCmd(op))
-	cmd.AddCommand(newKeyAddCmd(op))
+	cmd.AddCommand(newKeyImportCmd(op))
 	cmd.AddCommand(newKeyRemoveCmd(op))
 	cmd.AddCommand(newKeyInspectCmd(op))
 	cmd.AddCommand(newKeyExportCmd(op))
@@ -45,8 +58,8 @@ func newKeyListCmd(op *api.Operation) *cobra.Command {
 	var longOutput bool
 
 	cmd := &cobra.Command{
-		Use:                "ls",
-		Short:              "List all SSH keys.",
+		Use:   "ls",
+		Short: "List all SSH keys.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			keys, err := op.KeyListAll(cmd.Context())
 			if err != nil {
@@ -54,11 +67,7 @@ func newKeyListCmd(op *api.Operation) *cobra.Command {
 			}
 
 			if jsonOutput {
-				dicts := make([]map[string]interface{}, 0, len(keys))
-				for _, k := range keys {
-					dicts = append(dicts, map[string]interface{}{"id": k.ID, "name": k.Name, "algorithm": k.Algorithm})
-				}
-				data, err := json.MarshalIndent(dicts, "", "  ")
+				data, err := json.MarshalIndent(keys, "", "  ")
 				if err != nil {
 					return err
 				}
@@ -66,47 +75,19 @@ func newKeyListCmd(op *api.Operation) *cobra.Command {
 				return nil
 			}
 
-			if len(keys) == 0 {
-				common.Cli.Info("No keys found. Use 'mvm key create <name>' or 'mvm key add <name> <path>' to add one.")
-				return nil
+			style := common.Cli.ResolveListingStyle(cmd.Context(), op, longOutput)
+			items := make([]any, len(keys))
+			for i, k := range keys {
+				items[i] = k
 			}
-
-			rows := make([][]string, 0, len(keys))
-			for _, k := range keys {
-				marker := common.Cli.FormatMarker(k.IsDefault)
-				created := common.Cli.FormatTimestamp(k.CreatedAt, "relative")
-
-				if longOutput {
-				rows = append(rows, []string{
-					marker,
-					common.Cli.FormatID(k.ID),
-					common.Cli.FormatName(k.Name, !k.IsPresent),
-					k.Algorithm,
-					k.Fingerprint,
-					created,
-				})
-			} else {
-				rows = append(rows, []string{
-					marker,
-					common.Cli.FormatID(k.ID),
-					common.Cli.FormatName(k.Name, !k.IsPresent),
-					k.Algorithm,
-					created,
-				})
-				}
-			}
-
-			if longOutput {
-				common.Cli.Table([]string{"", "ID", "Name", "Algorithm", "Fingerprint", "Created"}, rows)
-			} else {
-				common.Cli.Table([]string{"", "ID", "Name", "Algorithm", "Created"}, rows)
-			}
+			common.Cli.RenderListing(items, keyColumns, style)
 			return nil
 		},
 	}
 
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&longOutput, "long", false, "Show full listing with all columns")
+
 	return cmd
 }
 
@@ -127,28 +108,16 @@ func newKeyCreateCmd(op *api.Operation) *cobra.Command {
 
 			alg := algorithm
 			if alg == "" {
-				common.Cli.Info("Select algorithm:")
-				common.Cli.Info("  1. ed25519")
-				common.Cli.Info("  2. rsa")
-				common.Cli.Info("  3. ecdsa")
-				fmt.Fprintf(os.Stderr, "Enter number [1]: ")
-				var choice string
-				_, _ = fmt.Scanln(&choice)
-				choice = strings.TrimSpace(choice)
-				algoMap := map[string]string{
-					"1": "ed25519",
-					"2": "rsa",
-					"3": "ecdsa",
-				}
-				alg = algoMap[choice]
-				if alg == "" {
+				if force {
 					alg = "ed25519"
+				} else {
+					alg = common.Cli.PromptSelect("Select algorithm:", []string{"ed25519", "rsa", "ecdsa"}, 0)
 				}
 			}
 
 			apiAlg := strings.ToLower(alg)
 
-			input := &api.KeyCreateInput{
+			input := &inputs.KeyCreateInput{
 				Name:       name,
 				Algorithm:  apiAlg,
 				Bits:       bits,
@@ -170,40 +139,48 @@ func newKeyCreateCmd(op *api.Operation) *cobra.Command {
 		},
 	}
 
-	// Python does NOT have -a short flag for --algorithm
-	cmd.Flags().StringVar(&algorithm, "algorithm", "", "Key algorithm (ed25519, rsa, ecdsa)")
+	cmd.Flags().StringVarP(&algorithm, "algorithm", "a", "", "Key algorithm (ed25519, rsa, ecdsa)")
 	cmd.Flags().IntVar(&bits, "bits", 0, "Key size in bits (RSA only; default 4096)")
 	cmd.Flags().StringVar(&comment, "comment", "", "Key comment")
 	cmd.Flags().StringVar(&out, "out", "", "Output directory")
 	cmd.Flags().BoolVarP(&setDefault, "default", "d", false, "Set as default key")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Overwrite existing key")
+
 	return cmd
 }
 
-func newKeyAddCmd(op *api.Operation) *cobra.Command {
+func newKeyImportCmd(op *api.Operation) *cobra.Command {
 	var force bool
+	var setDefault bool
 
 	cmd := &cobra.Command{
-		Use:   "add [name] [path]",
-		Short: "Add an existing public key to the cache",
+		Use:   "import [name] [path]",
+		Short: "Import an existing public key to the cache",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			pubKeyPath := args[1]
 
-			createdKey := op.KeyAdd(cmd.Context(), name, pubKeyPath, force)
+			createdKey := op.KeyImport(cmd.Context(), &inputs.KeyImportInput{
+				Name: name, PubKeyPath: pubKeyPath, Overwrite: force, SetDefault: setDefault,
+			})
 			if createdKey.Status == "error" {
 				common.Cli.Error(createdKey.Message)
 				return fmt.Errorf("%s", createdKey.Message)
 			}
 			if keyItem, ok := createdKey.Item.(*model.SSHKeyItem); ok && keyItem != nil {
-				common.Cli.Success(fmt.Sprintf("Added: %s (ID: %s)", keyItem.Name, common.Cli.FormatID(keyItem.ID)))
+				common.Cli.Success(fmt.Sprintf("Imported: %s (ID: %s)", keyItem.Name, common.Cli.FormatID(keyItem.ID)))
+			}
+			if setDefault {
+				common.Cli.Success(fmt.Sprintf("Default key set to: %s", name))
 			}
 			return nil
 		},
 	}
 
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Overwrite existing key")
+	cmd.Flags().BoolVarP(&setDefault, "default", "d", false, "Set as default key")
+
 	return cmd
 }
 
@@ -211,19 +188,18 @@ func newKeyRemoveCmd(op *api.Operation) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:                "rm [name]...",
-		Short:              "Remove one or more SSH keys",
-		Args:               cobra.ArbitraryArgs,
-		ValidArgsFunction:  completeKeyNames,
+		Use:               "rm [identifier]...",
+		Short:             "Remove one or more SSH keys",
+		Args:              cobra.ArbitraryArgs,
+		ValidArgsFunction: completeKeyNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			names := args
-			if len(names) == 0 {
-				common.Cli.Error("Provide at least one key name to remove")
+			if len(args) == 0 {
+				common.Cli.Error("Provide at least one key identifier to remove")
 				return fmt.Errorf("usage error")
 			}
 
 			// Use API-side resolution matching Python's KeyInput(name=effective_names) + KeyOperation.remove()
-			removeResult := op.KeyRemove(cmd.Context(), &api.KeyInput{Names: names}, force)
+			removeResult := op.KeyRemove(cmd.Context(), &inputs.KeyInput{Identifiers: args}, force)
 			for _, r := range removeResult.Items {
 				if r.Status == "success" {
 					if keyItem, ok := r.Item.(*model.SSHKeyItem); ok {
@@ -251,38 +227,33 @@ func newKeyInspectCmd(op *api.Operation) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
-		Use:                "inspect [name]",
-		Short:              "Inspect an SSH key",
-		Args:               cobra.ExactArgs(1),
-		ValidArgsFunction:  completeKeyNames,
+		Use:               "inspect [identifier]",
+		Short:             "Inspect an SSH key",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeKeyNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
-			// check_name_arg: "help" → show help; empty → show help with error
-			if name == "help" {
-				return cmd.Help()
+			identifier, err := common.Cli.CheckArg(cmd, args[0])
+			if err != nil {
+				return err
 			}
-			if name == "" {
-				cmd.Help()
-				return fmt.Errorf("key name required")
+			if identifier == "" {
+				return nil // help was shown
 			}
 
-			info, err := op.KeyInspect(cmd.Context(), &api.KeyInput{Names: []string{name}})
+			info, err := op.KeyInspect(cmd.Context(), &inputs.KeyInput{Identifiers: []string{identifier}})
 			if err != nil {
 				common.Cli.Error(err.Error())
 				return err
 			}
 
 			if jsonOutput {
-				data, err := json.MarshalIndent(info, "", "  ")
-				if err != nil {
-					return err
-				}
-				fmt.Println(string(data))
+				b, _ := json.MarshalIndent(info, "", "  ")
+				fmt.Println(string(b))
 				return nil
 			}
 
-			keyName := name
-			if keyInfo, ok := info["key"].(map[string]interface{}); ok {
+			keyName := identifier
+			if keyInfo, ok := info["key"].(map[string]any); ok {
 				if n, ok := keyInfo["name"].(string); ok {
 					keyName = n
 				}
@@ -293,34 +264,30 @@ func newKeyInspectCmd(op *api.Operation) *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
+
 	return cmd
 }
 
 func newKeyExportCmd(op *api.Operation) *cobra.Command {
-	var out string
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:               "export [name]",
+		Use:               "export [identifier] [path]",
 		Short:             "Export a keypair to a directory",
-		Args:              cobra.ExactArgs(1),
+		Args:              cobra.ExactArgs(2),
 		ValidArgsFunction: completeKeyNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
-			// check_name_arg: "help" → show help; empty → show help with error
-			if name == "help" {
-				return cmd.Help()
+			identifier, err := common.Cli.CheckArg(cmd, args[0])
+			if err != nil {
+				return err
 			}
-			if name == "" {
-				cmd.Help()
-				return fmt.Errorf("key name required")
+			if identifier == "" {
+				return nil // help was shown
 			}
 
-			if out == "" {
-				return fmt.Errorf("required flag \"--out\" not set")
-			}
+			path := args[1]
 
-			exportResult := op.KeyExport(cmd.Context(), &api.KeyInput{Names: []string{name}}, out, force)
+			exportResult := op.KeyExport(cmd.Context(), &inputs.KeyInput{Identifiers: []string{identifier}}, path, force)
 			if exportResult.Status == "error" {
 				common.Cli.Error(exportResult.Message)
 				return fmt.Errorf("%s", exportResult.Message)
@@ -334,9 +301,8 @@ func newKeyExportCmd(op *api.Operation) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&out, "out", "", "Destination directory")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Overwrite existing files")
-	cmd.MarkFlagRequired("out")
+
 	return cmd
 }
 
@@ -344,10 +310,10 @@ func newKeyDefaultCmd(op *api.Operation) *cobra.Command {
 	var clear bool
 
 	cmd := &cobra.Command{
-		Use:                "default [name]...",
-		Short:              "Set default SSH keys, or clear with --clear",
-		Args:               cobra.ArbitraryArgs,
-		ValidArgsFunction:  completeKeyNames,
+		Use:               "default [identifier]...",
+		Short:             "Set default SSH keys, or clear with --clear",
+		Args:              cobra.ArbitraryArgs,
+		ValidArgsFunction: completeKeyNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if clear {
 				clearResult := op.KeyClearDefaults(cmd.Context())
@@ -360,24 +326,23 @@ func newKeyDefaultCmd(op *api.Operation) *cobra.Command {
 			}
 
 			if len(args) == 0 {
-				common.Cli.Error("Provide at least one key name or use --clear")
+				common.Cli.Error("Provide at least one key identifier or use --clear")
 				return fmt.Errorf("usage error")
 			}
 
-			// Python: KeyInput(name=effective_names) -> KeyOperation.set_default(inputs)
 			// Single API call with ALL names, matching Python exactly.
-			effectiveNames := args
-			setResult := op.KeySetDefault(cmd.Context(), &api.KeyInput{Names: effectiveNames})
+			setResult := op.KeySetDefaults(cmd.Context(), &inputs.KeyInput{Identifiers: args})
 			if setResult.Status == "error" {
 				common.Cli.Error(setResult.Message)
 				return fmt.Errorf("set default failed")
 			}
 
-			common.Cli.Success(fmt.Sprintf("Default key(s) set: %s", strings.Join(effectiveNames, ", ")))
+			common.Cli.Success(fmt.Sprintf("Default key(s) set: %s", strings.Join(args, ", ")))
 			return nil
 		},
 	}
 
 	cmd.Flags().BoolVar(&clear, "clear", false, "Clear all default keys")
+
 	return cmd
 }

@@ -66,6 +66,16 @@ func TruncateString(s string, maxLen int) string {
 	return s[:maxLen]
 }
 
+// Hostname returns the system hostname.
+// Returns empty string on error (matching Python's socket.gethostname() behavior).
+func Hostname() string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return ""
+	}
+	return hostname
+}
+
 // RuntimeArch returns the CPU architecture using Firecracker's naming convention.
 // Maps Go's runtime.GOARCH ("amd64", "arm64") to the names used in Firecracker
 // release tarballs ("x86_64", "aarch64"). Returns GOARCH directly for other values.

@@ -7,10 +7,12 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/system"
 	"mvmctl/internal/infra/validators"
 )
 
-// KeyCreateInput matches Python's KeyCreateInput dataclass.
+// KeyCreateInput holds options for key creation.
+// Matches Python's KeyCreateInput dataclass:
 //
 //	@dataclass
 //	class KeyCreateInput:
@@ -22,13 +24,13 @@ import (
 //	    overwrite: bool = False
 //	    set_default: bool = False
 type KeyCreateInput struct {
-	Name       string  `json:"name"`
-	Algorithm  *string `json:"algorithm,omitempty"`
-	Bits       *int    `json:"bits,omitempty"`
-	OutputDir  *string `json:"output_dir,omitempty"`
-	Comment    *string `json:"comment,omitempty"`
-	Overwrite  bool    `json:"overwrite"`
-	SetDefault bool    `json:"set_default"`
+	Name       string `json:"name"`
+	Algorithm  string `json:"algorithm,omitempty"`
+	Bits       int    `json:"bits,omitempty"`
+	OutputDir  string `json:"output_dir,omitempty"`
+	Comment    string `json:"comment,omitempty"`
+	Overwrite  bool   `json:"overwrite"`
+	SetDefault bool   `json:"set_default"`
 }
 
 // ResolvedKeyCreateInput matches Python's ResolvedKeyCreateInput (frozen dataclass).
@@ -65,8 +67,6 @@ func NewKeyCreateRequest(inputs KeyCreateInput) *KeyCreateRequest {
 	}
 }
 
-// Result returns the resolved input, or nil if resolve() has not been called.
-
 // Resolve resolves defaults and validates.
 // Matches Python's KeyCreateRequest.resolve().
 func (r *KeyCreateRequest) Resolve() (*ResolvedKeyCreateInput, error) {
@@ -80,10 +80,10 @@ func (r *KeyCreateRequest) Resolve() (*ResolvedKeyCreateInput, error) {
 		}
 	}
 
-	// Default algorithm (Python: algorithm = self._inputs.algorithm or "ed25519")
-	algorithm := "ed25519"
-	if r.input.Algorithm != nil && *r.input.Algorithm != "" {
-		algorithm = *r.input.Algorithm
+	// Default algorithm
+	algorithm := r.input.Algorithm
+	if algorithm == "" {
+		algorithm = "ed25519"
 	}
 
 	// Validate algorithm
@@ -98,15 +98,15 @@ func (r *KeyCreateRequest) Resolve() (*ResolvedKeyCreateInput, error) {
 	}
 
 	// Default comment (Python: f"{name}@{socket.gethostname()}")
-	comment := fmt.Sprintf("%s@%s", r.input.Name, getHostname())
-	if r.input.Comment != nil && *r.input.Comment != "" {
-		comment = *r.input.Comment
+	comment := r.input.Comment
+	if comment == "" {
+		comment = fmt.Sprintf("%s@%s", r.input.Name, system.Hostname())
 	}
 
 	// Default output_dir resolved via CacheUtils
-	outputDir := getKeysDir()
-	if r.input.OutputDir != nil && *r.input.OutputDir != "" {
-		outputDir = *r.input.OutputDir
+	outputDir := r.input.OutputDir
+	if outputDir == "" {
+		outputDir = infra.GetKeyDir()
 	}
 
 	// File conflict validation (caller validates)
@@ -116,15 +116,23 @@ func (r *KeyCreateRequest) Resolve() (*ResolvedKeyCreateInput, error) {
 		}
 	}
 
+	// Keep Bits as *int in the resolved output to match Python's
+	// ResolvedKeyCreateInput.bits: int | None. Zero means "not specified".
+	var bits *int
+	if r.input.Bits != 0 {
+		bits = &r.input.Bits
+	}
+
 	r.result = &ResolvedKeyCreateInput{
 		Name:       r.input.Name,
 		Algorithm:  algorithm,
-		Bits:       r.input.Bits,
+		Bits:       bits,
 		OutputDir:  outputDir,
 		Comment:    comment,
 		Overwrite:  r.input.Overwrite,
 		SetDefault: r.input.SetDefault,
 	}
+
 	return r.result, nil
 }
 
@@ -151,21 +159,4 @@ func keyFilesExist(name, outputDir string) error {
 		}
 	}
 	return nil
-}
-
-// getHostname returns the system hostname.
-// Matches Python's socket.gethostname() which raises socket.gaierror on failure.
-func getHostname() string {
-	hostname, err := os.Hostname()
-	if err != nil {
-		// Python raises an exception; Go returns empty string to match the
-		// spirit of an error — the fmt.Sprintf below will produce "name@"
-		return ""
-	}
-	return hostname
-}
-
-// getKeysDir returns the default keys directory.
-func getKeysDir() string {
-	return infra.GetKeysDir()
 }
