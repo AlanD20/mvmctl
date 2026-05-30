@@ -21,12 +21,16 @@ var vmColumns = []common.ListingColumn{
 	{Header: "Status", Extract: func(v any) string { return string(v.(*model.VM).Status) }},
 	{Header: "Exit", Extract: func(v any) string {
 		ec := v.(*model.VM).ExitCode
-		if ec != nil { return fmt.Sprintf("%d", *ec) }
+		if ec != nil {
+			return fmt.Sprintf("%d", *ec)
+		}
 		return "-"
 	}},
 	{Header: "IPv4", Extract: func(v any) string {
 		ip := v.(*model.VM).IPv4
-		if ip == "" { return "-" }
+		if ip == "" {
+			return "-"
+		}
 		return ip
 	}},
 	{Header: "Resources", Extract: func(v any) string {
@@ -44,7 +48,7 @@ func NewVMCmd(op *api.Operation) *cobra.Command {
 		Short: "VM lifecycle management",
 	}
 
-	cmd.AddCommand(newVMLsCmd(op))
+	cmd.AddCommand(newVMListCmd(op))
 	cmd.AddCommand(newVMpsCmd(op))
 	cmd.AddCommand(newVMCreateCmd(op))
 	cmd.AddCommand(newVMRemoveCmd(op))
@@ -82,7 +86,7 @@ func newVMHelpCmd(parent *cobra.Command) *cobra.Command {
 
 // ─── ls (list all VMs) ────────────────────────────────────────────────────────
 
-func newVMLsCmd(op *api.Operation) *cobra.Command {
+func newVMListCmd(op *api.Operation) *cobra.Command {
 	var jsonOutput bool
 	var longOutput bool
 

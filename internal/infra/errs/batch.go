@@ -5,8 +5,8 @@ import "encoding/json"
 // BulkResultItem matches Python's models/bulk.py:BulkResultItem(Generic[T]).
 // Represents the result of a single item in a bulk operation.
 type BulkResultItem struct {
-	Item  any    `json:"item"`  // Item is any because BatchResultItem stores results of different types per operation. Concrete typing not feasible — it's a generic container.
-	Error error  `json:"-"` // Serialized via MarshalJSON
+	Item  any   `json:"item"` // Item is any because BatchResultItem stores results of different types per operation. Concrete typing not feasible — it's a generic container.
+	Error error `json:"-"`    // Serialized via MarshalJSON
 }
 
 // MarshalJSON implements json.Marshaler for BulkResultItem.
@@ -55,11 +55,20 @@ func (br *BulkResult) Successes() []any {
 
 // Failures returns all failed items as (item, error) pairs.
 // Python: @property def failures(self) -> list[tuple[T, Exception]]:
-func (br *BulkResult) Failures() []struct{ Item any; Error error } {
-	var result []struct{ Item any; Error error }
+func (br *BulkResult) Failures() []struct {
+	Item  any
+	Error error
+} {
+	var result []struct {
+		Item  any
+		Error error
+	}
 	for _, i := range br.Items {
 		if i.Error != nil {
-			result = append(result, struct{ Item any; Error error }{i.Item, i.Error})
+			result = append(result, struct {
+				Item  any
+				Error error
+			}{i.Item, i.Error})
 		}
 	}
 	return result

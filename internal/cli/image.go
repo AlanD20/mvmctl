@@ -22,13 +22,17 @@ import (
 var imageColumns = []common.ListingColumn{
 	{Header: "", Extract: func(v any) string { return common.Cli.FormatMarker(v.(*model.ImageItem).IsDefault) }},
 	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.ImageItem).ID) }},
-	{Header: "Name", Extract: func(v any) string { return common.Cli.FormatName(v.(*model.ImageItem).Name, !v.(*model.ImageItem).IsPresent) }},
+	{Header: "Name", Extract: func(v any) string {
+		return common.Cli.FormatName(v.(*model.ImageItem).Name, !v.(*model.ImageItem).IsPresent)
+	}},
 	{Header: "Type", Extract: func(v any) string { return v.(*model.ImageItem).Type }},
 	{Header: "Arch", Extract: func(v any) string { return v.(*model.ImageItem).Arch }, LongOnly: true},
 	{Header: "FS Type", Extract: func(v any) string { return v.(*model.ImageItem).FSType }, LongOnly: true},
 	{Header: "Size", Extract: func(v any) string {
 		cs := v.(*model.ImageItem).CompressedSize
-		if cs != nil { return common.Cli.FormatSize(*cs) }
+		if cs != nil {
+			return common.Cli.FormatSize(*cs)
+		}
 		return "-"
 	}, LongOnly: true},
 	{Header: "Created", Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.ImageItem).CreatedAt, "relative") }},
@@ -43,9 +47,9 @@ func NewImageCmd(op *api.Operation) *cobra.Command {
 		Long:    "Download, list, inspect, and manage VM images.",
 	}
 
-	cmd.AddCommand(newImageLsCmd(op))
+	cmd.AddCommand(newImageListCmd(op))
 	cmd.AddCommand(newImagePullCmd(op))
-	cmd.AddCommand(newImageRmCmd(op))
+	cmd.AddCommand(newImageRemoveCmd(op))
 	cmd.AddCommand(newImageInspectCmd(op))
 	cmd.AddCommand(newImageDefaultCmd(op))
 	cmd.AddCommand(newImageImportCmd(op))
@@ -66,7 +70,7 @@ func NewImageCmd(op *api.Operation) *cobra.Command {
 
 // ─── ls ──────────────────────────────────────────────────────────────────────
 
-func newImageLsCmd(op *api.Operation) *cobra.Command {
+func newImageListCmd(op *api.Operation) *cobra.Command {
 	var (
 		jsonOutput bool
 		remote     bool
@@ -108,40 +112,7 @@ func newImageLsCmd(op *api.Operation) *cobra.Command {
 
 func printRemoteImages(versions []*model.ImageVersion, jsonOutput bool) {
 	if jsonOutput {
-		type remoteEntry struct {
-			Version     string `json:"version"`
-			Codename    string `json:"codename"`
-			Type        string `json:"type"`
-			DisplayName string `json:"display_name"`
-			DownloadURL string `json:"download_url"`
-			SHA256URL   string `json:"sha256_url"`
-			Format      string `json:"format"`
-		}
-		data := make([]remoteEntry, 0, len(versions))
-		for _, v := range versions {
-			codename := ""
-			if v.Codename != nil {
-				codename = *v.Codename
-			}
-			sha256URL := ""
-			if v.SHA256URL != nil {
-				sha256URL = *v.SHA256URL
-			}
-			displayName := v.DisplayName
-			if displayName == "" {
-				displayName = v.Version
-			}
-			data = append(data, remoteEntry{
-				Version:     v.Version,
-				Codename:    codename,
-				Type:        v.Type,
-				DisplayName: displayName,
-				DownloadURL: v.DownloadURL,
-				SHA256URL:   sha256URL,
-				Format:      v.Format,
-			})
-		}
-		b, _ := json.MarshalIndent(data, "", "  ")
+		b, _ := json.MarshalIndent(versions, "", "  ")
 		fmt.Println(string(b))
 		return
 	}
@@ -201,48 +172,7 @@ func printRemoteImages(versions []*model.ImageVersion, jsonOutput bool) {
 // printLocalImages prints the local image listing table.
 func printLocalImages(images []*model.ImageItem, jsonOutput bool, longOutput bool, ctx context.Context) {
 	if jsonOutput {
-		type localEntry struct {
-			ID               string  `json:"id"`
-			Name             string  `json:"name"`
-			Type             string  `json:"type"`
-			Arch             string  `json:"arch"`
-			Path             string  `json:"path"`
-			FSType           string  `json:"fs_type"`
-			FSUUID           *string `json:"fs_uuid"`
-			CompressedSize   *int64  `json:"compressed_size"`
-			OriginalSize     int64   `json:"original_size"`
-			CompressionRatio *float64 `json:"compression_ratio"`
-			CompressedFormat *string `json:"compressed_format"`
-			MinRootfsSizeMiB int     `json:"minimum_rootfs_size_mib"`
-			PulledAt         string  `json:"pulled_at"`
-			IsDefault        bool    `json:"is_default"`
-			IsPresent        bool    `json:"is_present"`
-			CreatedAt        string  `json:"created_at"`
-			UpdatedAt        string  `json:"updated_at"`
-		}
-		data := make([]localEntry, 0, len(images))
-		for _, img := range images {
-			data = append(data, localEntry{
-				ID:               img.ID,
-				Name:             img.Name,
-				Type:             img.Type,
-				Arch:             img.Arch,
-				Path:             img.Path,
-				FSType:           img.FSType,
-				FSUUID:           img.FSUUID,
-				CompressedSize:   img.CompressedSize,
-				OriginalSize:     img.OriginalSize,
-				CompressionRatio: img.CompressionRatio,
-				CompressedFormat: img.CompressedFormat,
-				MinRootfsSizeMiB: img.MinRootfsSizeMiB,
-				PulledAt:         img.PulledAt,
-				IsDefault:        img.IsDefault,
-				IsPresent:        img.IsPresent,
-				CreatedAt:        img.CreatedAt,
-				UpdatedAt:        img.UpdatedAt,
-			})
-		}
-		b, _ := json.MarshalIndent(data, "", "  ")
+		b, _ := json.MarshalIndent(images, "", "  ")
 		fmt.Println(string(b))
 		return
 	}
@@ -378,22 +308,21 @@ The selector can be a type (e.g. "ubuntu") or type:version (e.g. "ubuntu:24.04")
 
 // ─── rm ──────────────────────────────────────────────────────────────────────
 
-func newImageRmCmd(op *api.Operation) *cobra.Command {
+func newImageRemoveCmd(op *api.Operation) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:                "rm [ids...]",
-		Short:              "Remove cached images by ID prefix.",
+		Use:   "rm [ids...]",
+		Short: "Remove cached images by ID prefix.",
 		Long: `Remove cached images by ID prefix.
 
 Examples:
   mvm image rm abc123
   mvm image rm abc123 def456`,
-		Args:               cobra.MinimumNArgs(1),
-		ValidArgsFunction:  completeImageIDs,
+		Args:              cobra.MinimumNArgs(1),
+		ValidArgsFunction: completeImageIDs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ids := args
-			result := op.ImageRemove(cmd.Context(), &inputs.ImageInput{ID: ids}, force)
+			result := op.ImageRemove(cmd.Context(), &inputs.ImageInput{ID: args}, force)
 			for _, r := range result.Items {
 				itemID := "unknown"
 				if r.Item != nil {
@@ -424,8 +353,8 @@ func newImageInspectCmd(op *api.Operation) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
-		Use:               "inspect [id]",
-		Short:             "Show detailed information about an image.",
+		Use:   "inspect [id]",
+		Short: "Show detailed information about an image.",
 		Long: `Show detailed information about an image.
 
 Examples:

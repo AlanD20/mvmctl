@@ -52,7 +52,7 @@ type ResolvedKernelImportInput struct {
 //
 // Resolve and validate kernel import inputs.
 type KernelImportRequest struct {
-	db      *sql.DB
+	db     *sql.DB
 	input  KernelImportInput
 	result *ResolvedKernelImportInput
 }
@@ -60,7 +60,7 @@ type KernelImportRequest struct {
 // NewKernelImportRequest creates a new KernelImportRequest.
 func NewKernelImportRequest(inputs KernelImportInput, db *sql.DB) *KernelImportRequest {
 	return &KernelImportRequest{
-		db:     db,
+		db:    db,
 		input: inputs,
 	}
 }

@@ -32,7 +32,7 @@ type ResolvedBinaryPullInput struct {
 
 // BinaryPullRequest matches Python's BinaryPullRequest.
 type BinaryPullRequest struct {
-	db      *sql.DB
+	db     *sql.DB
 	input  BinaryPullInput
 	result *ResolvedBinaryPullInput
 }
@@ -40,7 +40,7 @@ type BinaryPullRequest struct {
 // NewBinaryPullRequest creates a new BinaryPullRequest.
 func NewBinaryPullRequest(inputs BinaryPullInput, db *sql.DB) *BinaryPullRequest {
 	return &BinaryPullRequest{
-		db:     db,
+		db:    db,
 		input: inputs,
 	}
 }

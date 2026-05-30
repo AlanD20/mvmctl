@@ -600,7 +600,7 @@ func runGuestfishCmd(diskPath string, readonly bool, args ...string) (string, er
 	opts.Check = true
 	opts.Capture = true
 	result := system.RunCmdCompat(context.Background(), append([]string{"guestfish"}, gfArgs...), opts)
-		if result.Err != nil {
+	if result.Err != nil {
 		return "", result.Err
 	}
 	return result.Stdout, nil

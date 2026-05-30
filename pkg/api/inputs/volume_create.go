@@ -49,18 +49,18 @@ type ResolvedVolumeCreateInput struct {
 //
 // Resolve volume creation inputs to explicit values.
 type VolumeCreateRequest struct {
-	db      *sql.DB
+	db     *sql.DB
 	input  VolumeCreateInput
 	result *ResolvedVolumeCreateInput
-	repo    volume.Repository
+	repo   volume.Repository
 }
 
 // NewVolumeCreateRequest creates a new VolumeCreateRequest.
 func NewVolumeCreateRequest(inputs VolumeCreateInput, db *sql.DB, volumeRepo volume.Repository) *VolumeCreateRequest {
 	return &VolumeCreateRequest{
-		db:     db,
+		db:    db,
 		input: inputs,
-		repo:   volumeRepo,
+		repo:  volumeRepo,
 	}
 }
 

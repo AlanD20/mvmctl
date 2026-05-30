@@ -62,8 +62,8 @@ func Run(ctx context.Context) {
 
 	// Python: Check DB exists before non-exempt commands — matching app() callback.
 	// Python: if not CacheUtils.get_mvm_db_path().exists(): click.echo("Error: ...", err=True); ctx.exit(1)
+	dbPath := filepath.Join(cacheDir, infra.MVMDBFilename)
 	if !isDBSkipCommand(os.Args) {
-		dbPath := filepath.Join(cacheDir, infra.MVMDBFilename)
 		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 			slog.Error("not initialized",
 				"cli", infra.CLIName,
@@ -74,7 +74,7 @@ func Run(ctx context.Context) {
 		}
 	}
 
-	database := db.New(filepath.Join(cacheDir, infra.MVMDBFilename))
+	database := db.New(dbPath)
 	defer database.Close()
 
 	sqlDB, err := database.DB()

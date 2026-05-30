@@ -14,10 +14,10 @@ import (
 
 // ── Disk-specific constants (moved from infra/constants.go) ──
 const (
-	MinRootSizeMB    = 500
-	SizeTooSmallMB   = 100
-	SectorSizeBytes  = 512
-	MebibyteBytes    = 1024 * 1024
+	MinRootSizeMB   = 500
+	SizeTooSmallMB  = 100
+	SectorSizeBytes = 512
+	MebibyteBytes   = 1024 * 1024
 )
 
 // DetectorWeights holds scoring weights for partition root detection.
@@ -30,14 +30,14 @@ var DetectorWeights = map[string]float64{
 
 // DetectorScores holds scoring values for partition root detection.
 var DetectorScores = map[string]float64{
-	"root_score":             1.0,
-	"exclude_score":         -1.0,
-	"neutral_score":          0.0,
-	"mbr_linux_score":       0.5,
-	"label_root_score":      1.0,
+	"root_score":           1.0,
+	"exclude_score":        -1.0,
+	"neutral_score":        0.0,
+	"mbr_linux_score":      0.5,
+	"label_root_score":     1.0,
 	"label_exclude_score":  -0.5,
-	"size_largest_score":    0.5,
-	"size_root_score":       0.3,
+	"size_largest_score":   0.5,
+	"size_root_score":      0.3,
 	"size_too_small_score": -0.5,
 }
 
@@ -445,13 +445,13 @@ func partitionsToMaps(partitions []Partition) []map[string]any {
 	result := make([]map[string]any, len(partitions))
 	for i, p := range partitions {
 		result[i] = map[string]any{
-			"node":    p.Node,
-			"size":    p.Size,
-			"type":    p.Type,
-			"name":    p.Name,
-			"label":   p.Label,
-			"fstype":  p.Fstype,
-			"start":   p.Start,
+			"node":   p.Node,
+			"size":   p.Size,
+			"type":   p.Type,
+			"name":   p.Name,
+			"label":  p.Label,
+			"fstype": p.Fstype,
+			"start":  p.Start,
 		}
 	}
 	return result

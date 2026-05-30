@@ -270,5 +270,3 @@ func (r *Resolver) byIDRaw(ctx context.Context, kernelID string) (*model.KernelI
 	}
 	return matches[0], nil
 }
-
-

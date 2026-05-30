@@ -1,9 +1,11 @@
 package console
+
 import (
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"golang.org/x/term"
 	"io"
 	"log/slog"
 	"net"
@@ -14,14 +16,14 @@ import (
 	"sync"
 	"syscall"
 	"time"
-	"golang.org/x/term"
-	
 )
+
 // relayPID stores the OS PID of the current process when running as a
 // goroutine-based relay. Since Go uses goroutines (not subprocesses),
 // all relays share the mvm process's PID. This PID is used for liveness
 // checks (via os.FindProcess/kill(0)) in CleanupOrphans.
 var relayPID = os.Getpid()
+
 // TODO(verdict #32): The goroutine-based relay logic has been migrated to
 // internal/service/console/. New code should prefer that package.
 // This file is kept for backward compatibility.
@@ -30,34 +32,36 @@ const (
 	DefaultConsolePIDFilename    = "console.pid"
 	DefaultConsoleSocketFilename = "console.sock"
 	DefaultConsoleLogFilename    = "firecracker.console.log"
-	consoleKillTimeoutS   = 2.0             // CONST_CONSOLE_KILL_TIMEOUT_S (from _defaults.py)
-	consoleReadBufferSize = 4096            // CONST_CONSOLE_READ_BUFFER_SIZE
-	consoleSelectTimeoutS = 0.1             // CONST_CONSOLE_SELECT_TIMEOUT_S
-	consoleSocketBacklog  = 1               // CONST_CONSOLE_SOCKET_BACKLOG
-	consoleSocketTimeout  = 2 * time.Second // CONST_CONSOLE_SOCKET_TIMEOUT_S (from constants.py)
-	consolePollIntervalS  = 0.05            // polling interval used by CLI _interact
+	consoleKillTimeoutS          = 2.0             // CONST_CONSOLE_KILL_TIMEOUT_S (from _defaults.py)
+	consoleReadBufferSize        = 4096            // CONST_CONSOLE_READ_BUFFER_SIZE
+	consoleSelectTimeoutS        = 0.1             // CONST_CONSOLE_SELECT_TIMEOUT_S
+	consoleSocketBacklog         = 1               // CONST_CONSOLE_SOCKET_BACKLOG
+	consoleSocketTimeout         = 2 * time.Second // CONST_CONSOLE_SOCKET_TIMEOUT_S (from constants.py)
+	consolePollIntervalS         = 0.05            // polling interval used by CLI _interact
 )
+
 // DetachSequence is the byte sequence that triggers detach: Ctrl+X (0x18) followed by 'd' (0x64).
 // Matches Python's CONST_CONSOLE_DETACH_SEQUENCE = b"\x18d".
 var DetachSequence = []byte{0x18, 'd'}
+
 // ── RelayManager — Manages a console relay instance ─────────────────────
 // Matches Python's ConsoleRelayManager exactly in behavior.
 // Python spawns a subprocess; Go uses a goroutine + Unix socket.
 // RelayManager manages the lifecycle of a console relay.
 type RelayManager struct {
-	mu       sync.Mutex
-	id       string
-	path     string
-	name     string
-	pidFile  string
-	sockFile string
-	logFile  string
+	mu         sync.Mutex
+	id         string
+	path       string
+	name       string
+	pidFile    string
+	sockFile   string
+	logFile    string
 	pidPath    string
 	socketPath string
 	logPath    string
-	listener net.Listener
-	cancel   context.CancelFunc
-	relayPid int
+	listener   net.Listener
+	cancel     context.CancelFunc
+	relayPid   int
 	// ptyFD is the PTY controller file descriptor used by relayLoop.
 	// Stored so Stop() can close it to force-unblock a stuck read goroutine
 	// (SIGKILL equivalent, matching Python's _send_signal(pid, signal.SIGKILL)).
@@ -66,6 +70,7 @@ type RelayManager struct {
 	// Used by Stop() to poll for goroutine completion (matching Python's os.kill(pid, 0) liveness check).
 	doneCh chan struct{}
 }
+
 // NewRelayManager creates a new console relay manager.
 // Matches Python's ConsoleRelayManager.__init__().
 func NewRelayManager(id string, path string, name string, pidFilename, socketFilename, logFilename string) *RelayManager {
@@ -93,10 +98,13 @@ func NewRelayManager(id string, path string, name string, pidFilename, socketFil
 		logPath:    filepath.Join(path, logFilename),
 	}
 }
+
 // ID returns the relay's unique identifier. Matches Python's property.
 func (rm *RelayManager) ID() string { return rm.id }
+
 // Name returns the relay's human-readable name. Matches Python's property.
 func (rm *RelayManager) Name() string { return rm.name }
+
 // PID returns the relay process PID, or nil if not running.
 // Matches Python's pid property.
 func (rm *RelayManager) PID() *int {
@@ -114,12 +122,16 @@ func (rm *RelayManager) PID() *int {
 	}
 	return nil
 }
+
 // PIDPath returns the path to the PID file. Matches Python's property.
 func (rm *RelayManager) PIDPath() string { return rm.pidPath }
+
 // SocketPath returns the relay's socket path. Matches Python's property.
 func (rm *RelayManager) SocketPath() string { return rm.socketPath }
+
 // LogPath returns the relay's log path. Matches Python's property.
 func (rm *RelayManager) LogPath() string { return rm.logPath }
+
 // Start begins the console relay goroutine with the given PTY controller FD.
 // Uses the caller's context so SIGINT/SIGTERM propagate properly.
 // Returns (socketPath, pid, error). Matches Python's ConsoleRelayManager.start().
@@ -162,6 +174,7 @@ func (rm *RelayManager) Start(ctx context.Context, ptyControllerFD int) (string,
 	}
 	return rm.socketPath, rm.relayPid, nil
 }
+
 // relayLoop is the main goroutine implementing the relay logic.
 // Matches Python's process.py main() — reads from PTY, writes to log file,
 // listens on Unix socket, forwards bidirectionally between PTY and connected client.
@@ -315,6 +328,7 @@ func (rm *RelayManager) relayLoop(ctx context.Context, ptyFD int, ready chan<- e
 		}
 	}
 }
+
 // Stop stops the relay and cleans up.
 // force=true: immediate stop (matches Python's force=True: SIGTERM + cleanup_files + _pid = None).
 // force=false: graceful stop with kill escalation timeout (matches Python's graceful stop).
@@ -412,6 +426,7 @@ func (rm *RelayManager) cleanupFiles() {
 	os.Remove(rm.pidPath)
 	os.Remove(rm.socketPath)
 }
+
 // GetPID returns the PID of the running relay, verifying liveness via doneCh.
 // Matches Python's ConsoleRelayManager.get_pid() which uses os.kill(pid, 0)
 // to confirm the process is alive before returning the PID.
@@ -439,6 +454,7 @@ func (rm *RelayManager) GetPID() *int {
 	}
 	return nil
 }
+
 // readPIDFromFile reads the PID from the PID file without liveness verification.
 // This is the Go fallback for when no in-memory PID is available, matching
 // Python's fallback path in get_pid().
@@ -454,12 +470,14 @@ func (rm *RelayManager) readPIDFromFile() *int {
 	}
 	return &pid
 }
+
 // IsRunning checks if the relay is currently running.
 // Matches Python's ConsoleRelayManager.is_running() which calls get_pid()
 // and returns True only if get_pid() returns a non-None PID.
 func (rm *RelayManager) IsRunning() bool {
 	return rm.GetPID() != nil
 }
+
 // CleanupOrphans scans for stale console PID files from previous crashed sessions
 // and cleans them up. Matches Python's ConsoleRelayManager.cleanup_orphans() exactly.
 // vmsDir is the path to the directory containing per-VM directories.
@@ -529,6 +547,7 @@ func (rm *RelayManager) CleanupOrphans(vmsDir string) {
 		}
 	}
 }
+
 // ── RelayClient connects to a console relay Unix socket ─────────────────
 // Matches Python's ConsoleRelayClient exactly.
 // RelayClient provides a high-level client for bidirectional console
@@ -538,6 +557,7 @@ type RelayClient struct {
 	detachSeq  []byte
 	conn       net.Conn
 }
+
 // NewRelayClient creates a console relay client.
 // Matches Python's ConsoleRelayClient.__init__().
 func NewRelayClient(socketPath string, detachSequence []byte) *RelayClient {
@@ -549,6 +569,7 @@ func NewRelayClient(socketPath string, detachSequence []byte) *RelayClient {
 		detachSeq:  detachSequence,
 	}
 }
+
 // Connect connects to the console relay socket.
 // Matches Python's ConsoleRelayClient.connect() exactly:
 //
@@ -573,11 +594,13 @@ func (c *RelayClient) Connect() error {
 	c.conn = conn
 	return nil
 }
+
 // IsConnected checks if client is currently connected.
 // Matches Python's ConsoleRelayClient.is_connected().
 func (c *RelayClient) IsConnected() bool {
 	return c.conn != nil
 }
+
 // Disconnect disconnects from the relay socket.
 // Matches Python's ConsoleRelayClient.disconnect().
 func (c *RelayClient) Disconnect() {
@@ -586,12 +609,14 @@ func (c *RelayClient) Disconnect() {
 		c.conn = nil
 	}
 }
+
 // Close is the context-manager cleanup equivalent of Python's __exit__.
 // Matches Python's ConsoleRelayClient.__exit__() which calls self.disconnect().
 func (c *RelayClient) Close() error {
 	c.Disconnect()
 	return nil
 }
+
 // Send sends data to the console.
 // Matches Python's ConsoleRelayClient.send().
 func (c *RelayClient) Send(data []byte) bool {
@@ -601,6 +626,7 @@ func (c *RelayClient) Send(data []byte) bool {
 	_, err := c.conn.Write(data)
 	return err == nil
 }
+
 // Receive returns a channel that yields data chunks as they arrive from
 // the console relay socket. This is the Go equivalent of Python's
 // ConsoleRelayClient.receive() generator, which yields bytes until the
@@ -656,6 +682,7 @@ func (c *RelayClient) Receive(ctx context.Context, bufferSize int) <-chan []byte
 	}()
 	return ch
 }
+
 // CheckDetach checks if buffer ends with the detach sequence.
 // Matches Python's ConsoleRelayClient.check_detach().
 func (c *RelayClient) CheckDetach(buf []byte) bool {
@@ -665,14 +692,17 @@ func (c *RelayClient) CheckDetach(buf []byte) bool {
 	}
 	return false
 }
+
 // DetachSequence returns the detach sequence. Matches Python's property.
 func (c *RelayClient) DetachSequence() []byte {
 	return c.detachSeq
 }
+
 // SocketPath returns the socket path. Matches Python's property.
 func (c *RelayClient) SocketPath() string {
 	return c.socketPath
 }
+
 // GetSocket returns the underlying connected socket for advanced use.
 // Matches Python's ConsoleRelayClient.get_socket() which raises
 // RuntimeError("Not connected - call connect() first") when not connected.
@@ -682,6 +712,7 @@ func (c *RelayClient) GetSocket() (net.Conn, error) {
 	}
 	return c.conn, nil
 }
+
 // ── Interactive Console Attach ──────────────────────────────────────────
 // Matches Python's CLI _interact() exactly.
 // InteractiveAttach connects to the console relay and enters interactive mode.
@@ -843,13 +874,25 @@ func RunRelaySubprocess(args []string) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--vm-id":
-			if i+1 < len(args) { vmID = args[i+1]; i++ }
+			if i+1 < len(args) {
+				vmID = args[i+1]
+				i++
+			}
 		case "--vm-path":
-			if i+1 < len(args) { vmPath = args[i+1]; i++ }
+			if i+1 < len(args) {
+				vmPath = args[i+1]
+				i++
+			}
 		case "--vm-name":
-			if i+1 < len(args) { vmName = args[i+1]; i++ }
+			if i+1 < len(args) {
+				vmName = args[i+1]
+				i++
+			}
 		case "--pty-fd":
-			if i+1 < len(args) { ptyFD, _ = strconv.Atoi(args[i+1]); i++ }
+			if i+1 < len(args) {
+				ptyFD, _ = strconv.Atoi(args[i+1])
+				i++
+			}
 		}
 	}
 
@@ -962,4 +1005,3 @@ func relayLoopImpl(pty io.ReadWriteCloser, logFile io.Writer, client io.ReadWrit
 		}
 	}
 }
-

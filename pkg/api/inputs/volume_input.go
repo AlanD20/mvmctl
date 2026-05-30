@@ -33,8 +33,8 @@ type ResolvedVolumeInput struct {
 // Request that resolves VolumeInput to VolumeItem via DB.
 type VolumeRequest struct {
 	db       *sql.DB
-	input   VolumeInput
-	result  *ResolvedVolumeInput
+	input    VolumeInput
+	result   *ResolvedVolumeInput
 	resolver *volume.Resolver
 	_errors  []string
 }
@@ -43,7 +43,7 @@ type VolumeRequest struct {
 func NewVolumeRequest(inputs VolumeInput, db *sql.DB, volumeRepo volume.Repository) *VolumeRequest {
 	return &VolumeRequest{
 		db:       db,
-		input:   inputs,
+		input:    inputs,
 		resolver: volume.NewResolver(volumeRepo),
 		_errors:  []string{},
 	}

@@ -56,8 +56,8 @@ type ResolvedNetworkCreateRequest struct {
 // a ResolvedNetworkCreateRequest suitable for network creation.
 type NetworkCreateRequest struct {
 	db          *sql.DB
-	input      NetworkCreateInput
-	result     *ResolvedNetworkCreateRequest
+	input       NetworkCreateInput
+	result      *ResolvedNetworkCreateRequest
 	networkRepo network.Repository
 }
 
@@ -65,7 +65,7 @@ type NetworkCreateRequest struct {
 func NewNetworkCreateRequest(inputs NetworkCreateInput, db *sql.DB, networkRepo network.Repository) *NetworkCreateRequest {
 	return &NetworkCreateRequest{
 		db:          db,
-		input:      inputs,
+		input:       inputs,
 		networkRepo: networkRepo,
 	}
 }

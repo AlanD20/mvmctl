@@ -4,31 +4,31 @@ package model
 
 // HostStateItem matches Python's HostStateItem — singleton row (id=1).
 type HostStateItem struct {
-	ID                    int     `json:"id"`
-	Initialized           bool    `json:"initialized"`
-	MvmGroupCreated       bool    `json:"mvm_group_created"`
-	SudoersConfigured     bool    `json:"sudoers_configured"`
-	DefaultNetworkCreated bool    `json:"default_network_created"`
-	InitializedAt         string  `json:"initialized_at"`
-	UpdatedAt             string  `json:"updated_at"`
+	ID                    int    `json:"id"`
+	Initialized           bool   `json:"initialized"`
+	MvmGroupCreated       bool   `json:"mvm_group_created"`
+	SudoersConfigured     bool   `json:"sudoers_configured"`
+	DefaultNetworkCreated bool   `json:"default_network_created"`
+	InitializedAt         string `json:"initialized_at"`
+	UpdatedAt             string `json:"updated_at"`
 
 	// Capacity detection fields
-	Hostname         *string `json:"hostname,omitempty"`
-	CPUModel         *string `json:"cpu_model,omitempty"`
-	CPUVendor        *string `json:"cpu_vendor,omitempty"`
-	CPUCores         *int    `json:"cpu_cores,omitempty"`
-	CPUArchitecture  *string `json:"cpu_architecture,omitempty"`
-	NumaNodes        *int    `json:"numa_nodes,omitempty"`
-	MemoryTotalMiB   *int    `json:"memory_total_mib,omitempty"`
-	StorageTotalBytes *int   `json:"storage_total_bytes,omitempty"`
-	KernelVersion    *string `json:"kernel_version,omitempty"`
-	OSRelease        *string `json:"os_release,omitempty"`
-	PIDMax           *int    `json:"pid_max,omitempty"`
-	FDMax            *int    `json:"fd_max,omitempty"`
-	ConntrackMax     *int    `json:"conntrack_max,omitempty"`
-	TAPDevicesMax    *int    `json:"tap_devices_max,omitempty"`
-	IPLocalPortRange *string `json:"ip_local_port_range,omitempty"`
-	DetectedAt       *string `json:"detected_at,omitempty"`
+	Hostname          *string `json:"hostname,omitempty"`
+	CPUModel          *string `json:"cpu_model,omitempty"`
+	CPUVendor         *string `json:"cpu_vendor,omitempty"`
+	CPUCores          *int    `json:"cpu_cores,omitempty"`
+	CPUArchitecture   *string `json:"cpu_architecture,omitempty"`
+	NumaNodes         *int    `json:"numa_nodes,omitempty"`
+	MemoryTotalMiB    *int    `json:"memory_total_mib,omitempty"`
+	StorageTotalBytes *int    `json:"storage_total_bytes,omitempty"`
+	KernelVersion     *string `json:"kernel_version,omitempty"`
+	OSRelease         *string `json:"os_release,omitempty"`
+	PIDMax            *int    `json:"pid_max,omitempty"`
+	FDMax             *int    `json:"fd_max,omitempty"`
+	ConntrackMax      *int    `json:"conntrack_max,omitempty"`
+	TAPDevicesMax     *int    `json:"tap_devices_max,omitempty"`
+	IPLocalPortRange  *string `json:"ip_local_port_range,omitempty"`
+	DetectedAt        *string `json:"detected_at,omitempty"`
 
 	// Virtualization detection fields
 	CPUHasVMX           *int `json:"cpu_has_vmx,omitempty"`
@@ -100,25 +100,25 @@ type HostLimits struct {
 
 // HostResources matches Python's HostResources.
 type HostResources struct {
-	MemoryAvailableMiB   int             `json:"memory_available_mib"`
-	TAPDevicesUsed       int             `json:"tap_devices_used"`
-	PIDsCurrent          int             `json:"pids_current"`
-	FDCurrent            int             `json:"fd_current"`
-	ConntrackCurrent     int             `json:"conntrack_current"`
-	ARPCurrent           int             `json:"arp_current"`
-	StorageFreeBytes     int             `json:"storage_free_bytes"`
-	RecommendedMaxVMs    int             `json:"recommended_max_vms"`
-	LimitingResource     *string         `json:"limiting_resource,omitempty"`
-	ModulesLoaded        map[string]bool `json:"modules_loaded"`
-	SwapUsedMiB          int             `json:"swap_used_mib"`
-	HugepagesFree2MB     int             `json:"hugepages_free_2mb"`
-	SMTActive            bool            `json:"smt_active"`
-	NftablesAvailable    bool            `json:"nftables_available"`
-	IptablesAvailable    bool            `json:"iptables_available"`
-	CloudLocaldsAvailable bool           `json:"cloud_localds_available"`
-	DevKVMStatus         string          `json:"dev_kvm_status"`
-	UserInKVMGroup       bool            `json:"user_in_kvm_group"`
-	DevNetTUNAccessible  bool            `json:"dev_net_tun_accessible"`
+	MemoryAvailableMiB    int             `json:"memory_available_mib"`
+	TAPDevicesUsed        int             `json:"tap_devices_used"`
+	PIDsCurrent           int             `json:"pids_current"`
+	FDCurrent             int             `json:"fd_current"`
+	ConntrackCurrent      int             `json:"conntrack_current"`
+	ARPCurrent            int             `json:"arp_current"`
+	StorageFreeBytes      int             `json:"storage_free_bytes"`
+	RecommendedMaxVMs     int             `json:"recommended_max_vms"`
+	LimitingResource      *string         `json:"limiting_resource,omitempty"`
+	ModulesLoaded         map[string]bool `json:"modules_loaded"`
+	SwapUsedMiB           int             `json:"swap_used_mib"`
+	HugepagesFree2MB      int             `json:"hugepages_free_2mb"`
+	SMTActive             bool            `json:"smt_active"`
+	NftablesAvailable     bool            `json:"nftables_available"`
+	IptablesAvailable     bool            `json:"iptables_available"`
+	CloudLocaldsAvailable bool            `json:"cloud_localds_available"`
+	DevKVMStatus          string          `json:"dev_kvm_status"`
+	UserInKVMGroup        bool            `json:"user_in_kvm_group"`
+	DevNetTUNAccessible   bool            `json:"dev_net_tun_accessible"`
 }
 
 // ── ProbeCheck ──
@@ -144,8 +144,8 @@ type ProbeResult struct {
 
 // HostInfo matches Python's HostInfo — aggregated host detection results.
 type HostInfo struct {
-	State     HostStateItem  `json:"state"`
-	Resources HostResources  `json:"resources"`
-	Limits    HostLimits     `json:"limits"`
-	Hardware  HostHardware   `json:"hardware"`
+	State     HostStateItem `json:"state"`
+	Resources HostResources `json:"resources"`
+	Limits    HostLimits    `json:"limits"`
+	Hardware  HostHardware  `json:"hardware"`
 }

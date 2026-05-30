@@ -35,8 +35,8 @@ type ResolvedImageInput struct {
 // Request that resolves ImageInput to ImageItem via DB.
 type ImageRequest struct {
 	db       *sql.DB
-	input   ImageInput
-	result  *ResolvedImageInput
+	input    ImageInput
+	result   *ResolvedImageInput
 	resolver *image.Resolver
 }
 
@@ -44,7 +44,7 @@ type ImageRequest struct {
 func NewImageRequest(inputs ImageInput, db *sql.DB, imageRepo image.Repository) *ImageRequest {
 	return &ImageRequest{
 		db:       db,
-		input:   inputs,
+		input:    inputs,
 		resolver: image.NewResolver(imageRepo),
 	}
 }

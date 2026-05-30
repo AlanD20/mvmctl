@@ -10,17 +10,19 @@ import (
 
 	"github.com/spf13/cobra"
 	"mvmctl/internal/cli/common"
+	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
-	"mvmctl/internal/infra/errs"
 )
 
 // kernelColumns defines the local listing columns for kernels.
 var kernelColumns = []common.ListingColumn{
 	{Header: "", Extract: func(v any) string { return common.Cli.FormatMarker(v.(*model.KernelItem).IsDefault) }},
 	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.KernelItem).ID) }},
-	{Header: "Name", Extract: func(v any) string { return common.Cli.FormatName(v.(*model.KernelItem).BaseName, !v.(*model.KernelItem).IsPresent) }},
+	{Header: "Name", Extract: func(v any) string {
+		return common.Cli.FormatName(v.(*model.KernelItem).BaseName, !v.(*model.KernelItem).IsPresent)
+	}},
 	{Header: "Version", Extract: func(v any) string { return v.(*model.KernelItem).Version }},
 	{Header: "Type", Extract: func(v any) string { return v.(*model.KernelItem).Type }},
 	{Header: "Arch", Extract: func(v any) string { return v.(*model.KernelItem).Arch }, LongOnly: true},
@@ -34,9 +36,9 @@ func NewKernelCmd(op *api.Operation) *cobra.Command {
 		Long:  "Manage kernels — list, pull, remove, inspect, set default, import.",
 	}
 
-	cmd.AddCommand(newKernelLsCmd(op))
+	cmd.AddCommand(newKernelListCmd(op))
 	cmd.AddCommand(newKernelPullCmd(op))
-	cmd.AddCommand(newKernelRmCmd(op))
+	cmd.AddCommand(newKernelRemoveCmd(op))
 	cmd.AddCommand(newKernelInspectCmd(op))
 	cmd.AddCommand(newKernelDefaultCmd(op))
 	cmd.AddCommand(newKernelImportCmd(op))
@@ -55,7 +57,7 @@ func NewKernelCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newKernelLsCmd(op *api.Operation) *cobra.Command {
+func newKernelListCmd(op *api.Operation) *cobra.Command {
 	var jsonOutput bool
 	var longOutput bool
 	var remote bool
@@ -161,11 +163,7 @@ func newKernelLsCmd(op *api.Operation) *cobra.Command {
 				if kernels == nil {
 					kernels = []*model.KernelItem{}
 				}
-				dictList := make([]map[string]interface{}, 0, len(kernels))
-				for _, k := range kernels {
-					dictList = append(dictList, map[string]interface{}{"id": k.ID, "name": k.Name, "version": k.Version})
-				}
-				b, _ := json.MarshalIndent(dictList, "", "  ")
+				b, _ := json.MarshalIndent(kernels, "", "  ")
 				fmt.Println(string(b))
 				return nil
 			}
@@ -340,14 +338,14 @@ Examples:
 	return cmd
 }
 
-func newKernelRmCmd(op *api.Operation) *cobra.Command {
+func newKernelRemoveCmd(op *api.Operation) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:                "rm [identifiers...]",
-		Aliases:            []string{"remove"},
-		Short:              "Remove one or more kernels",
-		ValidArgsFunction:  completeKernelIDs,
+		Use:               "rm [identifiers...]",
+		Aliases:           []string{"remove"},
+		Short:             "Remove one or more kernels",
+		ValidArgsFunction: completeKernelIDs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				common.Cli.Error("Provide at least one kernel ID or name")
@@ -422,12 +420,12 @@ func newKernelInspectCmd(op *api.Operation) *cobra.Command {
 
 func newKernelDefaultCmd(op *api.Operation) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:                "default [kernel-id]",
-		Short:              "Set a kernel as the default",
-		Args:               cobra.ExactArgs(1),
-		ValidArgsFunction:  completeKernelIDs,
+		Use:               "default [kernel-id]",
+		Short:             "Set a kernel as the default",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeKernelIDs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			kernelID, err := common.Cli.CheckNameArg(cmd, args[0])
+			kernelID, err := common.Cli.CheckArg(cmd, args[0])
 			if err != nil {
 				return err
 			}

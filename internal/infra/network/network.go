@@ -219,7 +219,7 @@ func GetPhysicalInterfaces() ([]string, error) {
 func DetectOutboundInterface() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-		result := system.RunCmdCompat(ctx, []string{"ip", "route", "show", "default"}, system.RunCmdOptions{Check: false, Capture: true, Text: true})
+	result := system.RunCmdCompat(ctx, []string{"ip", "route", "show", "default"}, system.RunCmdOptions{Check: false, Capture: true, Text: true})
 	if result.Err != nil || result.ExitCode != 0 {
 		slog.Debug("Failed to detect outbound network interface", "error", result.Err)
 		return ""

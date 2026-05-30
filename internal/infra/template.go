@@ -106,9 +106,10 @@ func Dedent(text string) string {
 
 // RenderOptionalTemplate renders a template, propagating errors.
 // Python distinguishes None (not provided) from "" (empty string).
-// - If tmpl is nil (None in Python), returns nil with no error.
-// - If tmpl is "" (empty string in Python), calls RenderTemplate("", vars)
-//   which returns "" with no error.
+//   - If tmpl is nil (None in Python), returns nil with no error.
+//   - If tmpl is "" (empty string in Python), calls RenderTemplate("", vars)
+//     which returns "" with no error.
+//
 // Mirrors Python's mvmctl.utils.template.render_optional_template().
 func RenderOptionalTemplate(tmpl *string, vars map[string]string) (*string, error) {
 	if tmpl == nil {

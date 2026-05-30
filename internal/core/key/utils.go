@@ -84,7 +84,6 @@ func computeFingerprint(pubKeyContent string) (string, error) {
 }
 
 // IsPrivateKey checks if content contains a PEM-encoded private key header.
-// TODO(verdict#33): belongs in infra/crypto or similar shared utility
 func IsPrivateKey(content string) bool {
 	return strings.Contains(content, "-----BEGIN") && strings.Contains(content, "PRIVATE KEY-----")
 }
@@ -110,7 +109,7 @@ func ParseComment(pubKeyContent string) string {
 	}
 	// Python's split(None, 2) preserves original whitespace in parts[2].
 	pos := 0
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		for pos < len(trimmed) && !unicode.IsSpace(rune(trimmed[pos])) {
 			pos++
 		}

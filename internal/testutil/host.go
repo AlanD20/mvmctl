@@ -76,8 +76,8 @@ func (r *HostRepo) UpdateComponent(_ context.Context, component string, value bo
 	}
 	// Match Python's allowed set validation
 	allowed := map[string]bool{
-		"mvm_group_created":      true,
-		"sudoers_configured":     true,
+		"mvm_group_created":       true,
+		"sudoers_configured":      true,
 		"default_network_created": true,
 	}
 	if !allowed[component] {

@@ -4,9 +4,9 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api"
-	"mvmctl/internal/cli/common"
 )
 
 func NewConfigCmd(configAPI *api.Operation) *cobra.Command {
@@ -36,10 +36,10 @@ func NewConfigCmd(configAPI *api.Operation) *cobra.Command {
 
 func newConfigGetCmd(configAPI *api.Operation) *cobra.Command {
 	return &cobra.Command{
-		Use:                "get [category] [key]",
-		Short:              "Get a config value.",
-		Args:               cobra.RangeArgs(1, 2),
-		ValidArgsFunction:  completeConfigGet,
+		Use:               "get [category] [key]",
+		Short:             "Get a config value.",
+		Args:              cobra.RangeArgs(1, 2),
+		ValidArgsFunction: completeConfigGet,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			category := args[0]
 			if len(args) == 2 {
@@ -80,10 +80,10 @@ func newConfigGetCmd(configAPI *api.Operation) *cobra.Command {
 
 func newConfigSetCmd(configAPI *api.Operation) *cobra.Command {
 	return &cobra.Command{
-		Use:                "set [category] [key] [value]",
-		Short:              "Set a config value.",
-		Args:               cobra.ExactArgs(3),
-		ValidArgsFunction:  completeConfigSet,
+		Use:               "set [category] [key] [value]",
+		Short:             "Set a config value.",
+		Args:              cobra.ExactArgs(3),
+		ValidArgsFunction: completeConfigSet,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			result, err := configAPI.ConfigSet(cmd.Context(), args[0], args[1], args[2])
 			if err != nil {
@@ -105,10 +105,10 @@ func newConfigResetCmd(configAPI *api.Operation) *cobra.Command {
 	var allOverrides bool
 
 	cc := &cobra.Command{
-		Use:                "reset [category] [key]",
-		ValidArgsFunction:  completeConfigGet,
-		Short: "Reset a config value to its default.",
-		Args:  cobra.ArbitraryArgs,
+		Use:               "reset [category] [key]",
+		ValidArgsFunction: completeConfigGet,
+		Short:             "Reset a config value to its default.",
+		Args:              cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if allOverrides {
 				result := configAPI.ConfigReset(cmd.Context(), "", "", true)
@@ -183,4 +183,3 @@ func newConfigListCmd(configAPI *api.Operation) *cobra.Command {
 }
 
 // escapeRichMarkup escapes text to prevent Rich markup interpretation of brackets.
-

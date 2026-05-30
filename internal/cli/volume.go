@@ -38,17 +38,16 @@ func NewVolumeCmd(op *api.Operation, configAPI *api.Operation) *cobra.Command {
 		Long:    "Manage persistent volumes — list, create, remove, inspect, resize.",
 	}
 
-	cmd.AddCommand(newVolumeLsCmd(op, configAPI))
+	cmd.AddCommand(newVolumeListCmd(op, configAPI))
 	cmd.AddCommand(newVolumeCreateCmd(op))
-	cmd.AddCommand(newVolumeRmCmd(op))
+	cmd.AddCommand(newVolumeRemoveCmd(op))
 	cmd.AddCommand(newVolumeInspectCmd(op))
 	cmd.AddCommand(newVolumeResizeCmd(op))
 
 	return cmd
 }
 
-
-func newVolumeLsCmd(op *api.Operation, configAPI *api.Operation) *cobra.Command {
+func newVolumeListCmd(op *api.Operation, configAPI *api.Operation) *cobra.Command {
 	var jsonOutput bool
 	var longOutput bool
 
@@ -60,25 +59,7 @@ func newVolumeLsCmd(op *api.Operation, configAPI *api.Operation) *cobra.Command 
 			volumes := op.VolumeListAll(cmd.Context())
 
 			if jsonOutput {
-				var data []map[string]any
-				for _, v := range volumes {
-					entry := map[string]any{
-						"id":           v.ID,
-						"name":         v.Name,
-						"size_bytes":   v.SizeBytes,
-						"size":         v.SizeBytes,
-						"format":       v.Format,
-						"is_read_only": v.IsReadOnly,
-						"status":       v.Status,
-						"vm_id":        v.VMID,
-						"created_at":   v.CreatedAt,
-					}
-					data = append(data, entry)
-				}
-				if data == nil {
-					data = make([]map[string]interface{}, 0)
-				}
-				jsonBytes, _ := json.MarshalIndent(data, "", "  ")
+				jsonBytes, _ := json.MarshalIndent(volumes, "", "  ")
 				fmt.Println(string(jsonBytes))
 				return nil
 			}
@@ -158,7 +139,7 @@ func newVolumeCreateCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newVolumeRmCmd(op *api.Operation) *cobra.Command {
+func newVolumeRemoveCmd(op *api.Operation) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{

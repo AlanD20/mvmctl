@@ -114,7 +114,7 @@ func splitLines(s string) []string {
 }
 
 // ── processErrorMsg ──
-// Builds an error message matching Python's ``str(ProcessError)`` format:
+// Builds an error message matching Python's “str(ProcessError)“ format:
 //
 //	"Command failed (exit <code>): <binary_name>"
 //	+ optional "\n<stderr_preview>"
@@ -177,10 +177,10 @@ type FirewallRule struct {
 //	command_executed is *string to match Python's ``str | None``.
 
 type FirewallRuleResult struct {
-	Success         bool           `json:"success"`
-	Rule            *FirewallRule  `json:"rule,omitempty"`
-	ErrorMessage    *string        `json:"error_message,omitempty"`
-	CommandExecuted *string        `json:"command_executed,omitempty"`
+	Success         bool          `json:"success"`
+	Rule            *FirewallRule `json:"rule,omitempty"`
+	ErrorMessage    *string       `json:"error_message,omitempty"`
+	CommandExecuted *string       `json:"command_executed,omitempty"`
 }
 
 // NetworkRef is a minimal reference to a network used by firewall operations.
@@ -423,7 +423,7 @@ func (ft *FirewallTracker) Teardown() {
 }
 
 // Repo returns the active firewall rule repository.
-// Matches Python's ``FirewallTracker.repo`` property.
+// Matches Python's “FirewallTracker.repo“ property.
 // Callers can type-assert to *IPTablesRuleRepository or *NFTablesRuleRepository.
 func (ft *FirewallTracker) Repo() any {
 	return ft.fwRepo

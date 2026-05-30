@@ -144,8 +144,8 @@ func (lp *LoopMountProvisioner) Run(ctx context.Context) error {
 			op.Commands = append(op.Commands, o.Command)
 		case provisionercontent.CopyDirOp:
 			op.CopyDirs = append(op.CopyDirs, loopmountsvc.CopyDirOp{
-				Src: o.Src,
-				Dst: o.Dst,
+				Src:  o.Src,
+				Dst:  o.Dst,
 				Mode: 0755,
 			})
 		case provisionercontent.ResizeOp:

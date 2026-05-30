@@ -31,7 +31,7 @@ type ResolvedConsoleInput struct {
 //
 // Resolve the VM for console operations.
 type ConsoleRequest struct {
-	db      *sql.DB
+	db     *sql.DB
 	input  ConsoleInput
 	result *ResolvedConsoleInput
 }
@@ -39,7 +39,7 @@ type ConsoleRequest struct {
 // NewConsoleRequest creates a new ConsoleRequest.
 func NewConsoleRequest(inputs ConsoleInput, db *sql.DB) *ConsoleRequest {
 	return &ConsoleRequest{
-		db:     db,
+		db:    db,
 		input: inputs,
 	}
 }

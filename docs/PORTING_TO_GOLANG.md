@@ -428,3 +428,22 @@ These Python patterns have NO equivalent in Go and are either abolished or handl
 | **Custom `String()` mimicking Python repr** | No value. | `fmt.Sprintf("%+v", v)` provides struct display. |
 | **`init()` + global map resolver registry** | Mutable global state, runtime panics. | Explicit wiring in `app.Run()` — compile-time checked. |
 | **Pidfile-based process management** | Goroutines don't need PID tracking. | `context.Context` cancellation. |
+
+---
+
+## 12. Domain Review Status
+
+- [ ] vm
+- [ ] network
+- [ ] image
+- [ ] kernel
+- [x] binary
+- [x] key
+- [ ] host
+- [ ] volume
+- [ ] config
+- [ ] console
+- [ ] logs
+- [ ] cloudinit
+- [ ] cache
+- [ ] ssh

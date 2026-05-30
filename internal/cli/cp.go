@@ -99,10 +99,10 @@ before it is a source. Multiple sources only work for host -> VM.`,
 			// stays full (Rich clamps ratio at 1.0).
 
 			var (
-				mu              sync.Mutex
+				mu               sync.Mutex
 				totalTransferred int64
-				firstChunkSize  int64
-				firstChunkSet   bool
+				firstChunkSize   int64
+				firstChunkSet    bool
 			)
 
 			startTime := time.Now()
@@ -239,12 +239,12 @@ before it is a source. Multiple sources only work for host -> VM.`,
 // matching Python's Rich TransferSpeedColumn which uses Rich's filesize()
 // format with a "/s" suffix.
 //
-//   Rich filesize format:
-//     0 B  → "0.0 B/s"
-//     <1024 B   → "500 B/s"       (no decimal)
-//     <1024 KiB → "500.0 KiB/s"   (1 decimal)
-//     <1024 MiB → "5.2 MiB/s"     (1 decimal)
-//     ≥1024 GiB → "1.0 GiB/s"     (1 decimal)
+//	Rich filesize format:
+//	  0 B  → "0.0 B/s"
+//	  <1024 B   → "500 B/s"       (no decimal)
+//	  <1024 KiB → "500.0 KiB/s"   (1 decimal)
+//	  <1024 MiB → "5.2 MiB/s"     (1 decimal)
+//	  ≥1024 GiB → "1.0 GiB/s"     (1 decimal)
 func formatSpeed(bytesPerSec float64) string {
 	if bytesPerSec < 1 {
 		return "0.0 B/s"

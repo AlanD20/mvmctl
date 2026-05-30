@@ -107,19 +107,19 @@ type NetworkLeaseItem struct {
 
 // FirewallRule matches Python's FirewallRule dataclass.
 type FirewallRule struct {
-	TableName      FirewallTable    `json:"table_name"`
-	ChainName      FirewallChain    `json:"chain_name"`
-	RuleType       FirewallRuleType `json:"rule_type"`
-	Protocol       FirewallProtocol `json:"protocol"`
-	Source         string           `json:"source"`
-	Destination    string           `json:"destination"`
-	InInterface    string           `json:"in_interface"`
-	OutInterface   string           `json:"out_interface"`
-	Target         FirewallTarget   `json:"target"`
-	SPort          int              `json:"sport"`
-	DPort          int              `json:"dport"`
-	NetworkID      string           `json:"network_id"`
-	IsActive       bool             `json:"is_active"`
+	TableName    FirewallTable    `json:"table_name"`
+	ChainName    FirewallChain    `json:"chain_name"`
+	RuleType     FirewallRuleType `json:"rule_type"`
+	Protocol     FirewallProtocol `json:"protocol"`
+	Source       string           `json:"source"`
+	Destination  string           `json:"destination"`
+	InInterface  string           `json:"in_interface"`
+	OutInterface string           `json:"out_interface"`
+	Target       FirewallTarget   `json:"target"`
+	SPort        int              `json:"sport"`
+	DPort        int              `json:"dport"`
+	NetworkID    string           `json:"network_id"`
+	IsActive     bool             `json:"is_active"`
 
 	ID             *int64  `json:"id,omitempty"`
 	NetworkName    *string `json:"network_name,omitempty"`

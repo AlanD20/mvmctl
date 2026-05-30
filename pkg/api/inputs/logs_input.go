@@ -50,7 +50,7 @@ type ResolvedLogInput struct {
 //
 // Resolve LogInput against the database and constants.
 type LogRequest struct {
-	_db     *sql.DB
+	_db    *sql.DB
 	input  LogInput
 	result *ResolvedLogInput
 }
@@ -58,7 +58,7 @@ type LogRequest struct {
 // NewLogRequest creates a new LogRequest.
 func NewLogRequest(inputs LogInput, db *sql.DB) *LogRequest {
 	return &LogRequest{
-		_db:    db,
+		_db:   db,
 		input: inputs,
 	}
 }

@@ -342,16 +342,16 @@ Examples:
 				common.Cli.Info("Valid resources: vm, network, image, kernel, binary, misc")
 				common.Cli.Info("Or use: mvm cache prune --all  # Prune all types")
 				return fmt.Errorf("no resource specified")
-		default:
-			// Python: elif resource is None or all_resources: — unknown resource with
-			// --all should prune all, matching Python behavior.
-			if allResources {
-				return pruneAll(op, cmd, dryRun, force)
-			}
-			common.Cli.Error(fmt.Sprintf("Unknown resource: %s", resource))
-			common.Cli.Info("Valid resources: vm, network, image, kernel, binary, misc")
-			common.Cli.Info("Or use: mvm cache prune --all  # Prune all types including protected")
-			return fmt.Errorf("unknown resource: %s", resource)
+			default:
+				// Python: elif resource is None or all_resources: — unknown resource with
+				// --all should prune all, matching Python behavior.
+				if allResources {
+					return pruneAll(op, cmd, dryRun, force)
+				}
+				common.Cli.Error(fmt.Sprintf("Unknown resource: %s", resource))
+				common.Cli.Info("Valid resources: vm, network, image, kernel, binary, misc")
+				common.Cli.Info("Or use: mvm cache prune --all  # Prune all types including protected")
+				return fmt.Errorf("unknown resource: %s", resource)
 			}
 		},
 	}

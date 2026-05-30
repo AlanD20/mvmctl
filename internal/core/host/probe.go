@@ -104,7 +104,6 @@ func (p *Probe) checkVMHost() []model.ProbeCheck {
 
 	// --- /dev/kvm ---
 	kvmPath := "/dev/kvm"
-	cpuVirtOK := hasVirt
 
 	if _, err := os.Stat(kvmPath); os.IsNotExist(err) {
 		checks = append(checks, model.ProbeCheck{
@@ -120,7 +119,7 @@ func (p *Probe) checkVMHost() []model.ProbeCheck {
 			Message: "/dev/kvm exists but is not readable/writable",
 			Details: ptr.Str("Add user to kvm group: sudo usermod -aG kvm $USER && newgrp kvm"),
 		})
-	} else if !cpuVirtOK {
+	} else if !hasVirt {
 		checks = append(checks, model.ProbeCheck{
 			Name:    "dev_kvm",
 			Passed:  false,
@@ -159,7 +158,7 @@ func (p *Probe) checkVMHost() []model.ProbeCheck {
 	// Matches Python behavior: Python's lsmod reads /proc/modules internally.
 	// When KVM is built-in (CONFIG_KVM_INTEL=y), /proc/modules won't list it
 	// but /dev/kvm is still fully functional — the probe accepts this.
-	kvmModuleOK := system.AccessRW(kvmPath) && cpuVirtOK
+	kvmModuleOK := system.AccessRW(kvmPath) && hasVirt
 	if !kvmModuleOK {
 		data, err = os.ReadFile("/proc/modules")
 		if err == nil {

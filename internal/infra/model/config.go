@@ -7,17 +7,17 @@ package model
 type Setting struct {
 	Category  string `json:"category"`
 	Key       string `json:"key"`
-	Value     any    `json:"value"`               // Value is any because config values can be int, bool, string, nil, or nested maps — Go has no JSON-value sum type
-	UpdatedAt string `json:"updated_at"`          // ISO timestamp from CURRENT_TIMESTAMP
+	Value     any    `json:"value"`      // Value is any because config values can be int, bool, string, nil, or nested maps — Go has no JSON-value sum type
+	UpdatedAt string `json:"updated_at"` // ISO timestamp from CURRENT_TIMESTAMP
 }
 
 // ── SettingInfo ──
 
 // SettingInfo represents a single key's metadata for listing.
 type SettingInfo struct {
-	Type     string `json:"type"`      // Go type name: "string", "int", "bool", "map", "nil"
-	Default  any    `json:"default"`   // Default is any because config defaults can be int, bool, string, nil, or map — cannot use concrete type
-	Override any    `json:"override"`  // Override is any because config overrides can be int, bool, string, nil, or map — nil means no override set
+	Type     string `json:"type"`     // Go type name: "string", "int", "bool", "map", "nil"
+	Default  any    `json:"default"`  // Default is any because config defaults can be int, bool, string, nil, or map — cannot use concrete type
+	Override any    `json:"override"` // Override is any because config overrides can be int, bool, string, nil, or map — nil means no override set
 }
 
 // ── Constraint / ConstraintRegistry ──
