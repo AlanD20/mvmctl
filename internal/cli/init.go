@@ -381,5 +381,5 @@ func composeHostSetupMessage(before, after map[string]bool) string {
 // promptYesNo asks a yes/no question and returns true for yes.
 // Delegates to promptConfirm (canonical implementation in cache.go).
 func promptYesNo(prompt string, defaultYes bool) bool {
-	return promptConfirm(prompt, defaultYes)
+	return common.Cli.PromptConfirm(prompt, defaultYes)
 }

@@ -14,6 +14,30 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
+// vmColumns defines the local listing columns for VMs.
+var vmColumns = []common.ListingColumn{
+	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.VM).ID) }},
+	{Header: "Name", Extract: func(v any) string { return v.(*model.VM).Name }},
+	{Header: "Status", Extract: func(v any) string { return string(v.(*model.VM).Status) }},
+	{Header: "Exit", Extract: func(v any) string {
+		ec := v.(*model.VM).ExitCode
+		if ec != nil { return fmt.Sprintf("%d", *ec) }
+		return "-"
+	}},
+	{Header: "IPv4", Extract: func(v any) string {
+		ip := v.(*model.VM).IPv4
+		if ip == "" { return "-" }
+		return ip
+	}},
+	{Header: "Resources", Extract: func(v any) string {
+		vm := v.(*model.VM)
+		return fmt.Sprintf("%d vCPU / %d MiB / %d MiB", vm.VCPUCount, vm.MemSizeMiB, vm.DiskSizeMiB)
+	}, LongOnly: true},
+	{Header: "Image", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.VM).ImageID) }, LongOnly: true},
+	{Header: "Kernel", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.VM).KernelID) }, LongOnly: true},
+	{Header: "Created", Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.VM).CreatedAt, "relative") }},
+}
+
 func NewVMCmd(op *api.Operation) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "vm",
@@ -85,50 +109,12 @@ func runVMLs(op *api.Operation, cmd *cobra.Command, jsonOutput, longOutput bool)
 		return nil
 	}
 
-	style := resolveListingStyle(cmd.Context(), op, longOutput)
-
-	rows := make([][]string, 0, len(vms))
-	for _, v := range vms {
-		exitStr := "-"
-		if v.ExitCode != nil {
-			exitStr = fmt.Sprintf("%d", *v.ExitCode)
-		}
-		ipStr := v.IPv4
-		if ipStr == "" {
-			ipStr = "-"
-		}
-		created := common.Cli.FormatTimestamp(v.CreatedAt, "relative")
-
-		if style == "long" {
-			resources := fmt.Sprintf("%d vCPU / %d MiB / %d MiB", v.VCPUCount, v.MemSizeMiB, v.DiskSizeMiB)
-			rows = append(rows, []string{
-				common.Cli.FormatID(v.ID),
-				v.Name,
-				string(v.Status),
-				exitStr,
-				ipStr,
-				resources,
-				common.Cli.FormatID(v.ImageID),
-				common.Cli.FormatID(v.KernelID),
-				created,
-			})
-		} else {
-			rows = append(rows, []string{
-				common.Cli.FormatID(v.ID),
-				v.Name,
-				string(v.Status),
-				exitStr,
-				ipStr,
-				created,
-			})
-		}
+	style := common.Cli.ResolveListingStyle(cmd.Context(), op, longOutput)
+	items := make([]any, len(vms))
+	for i, v := range vms {
+		items[i] = v
 	}
-
-	if style == "long" {
-		common.Cli.Table([]string{"ID", "Name", "Status", "Exit", "IPv4", "Resources", "Image", "Kernel", "Created"}, rows)
-	} else {
-		common.Cli.Table([]string{"ID", "Name", "Status", "Exit", "IPv4", "Created"}, rows)
-	}
+	common.Cli.RenderListing(items, vmColumns, style)
 	return nil
 }
 
@@ -306,7 +292,7 @@ func runVMCreate(
 ) error {
 	if skipCleanup {
 		// Python: typer.confirm() defaults to True (Enter = Yes)
-		if !confirmPrompt("--skip-cleanup is set: if creation fails, resources will be left behind and must be cleaned manually. Continue?") {
+		if !common.Cli.ConfirmPrompt("--skip-cleanup is set: if creation fails, resources will be left behind and must be cleaned manually. Continue?") {
 			common.Cli.Info("Aborted")
 			return nil // exit code 0, matching Python's raise typer.Exit(code=0)
 		}

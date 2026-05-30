@@ -18,6 +18,22 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
+// imageColumns defines the local listing columns for images.
+var imageColumns = []common.ListingColumn{
+	{Header: "", Extract: func(v any) string { return common.Cli.FormatMarker(v.(*model.ImageItem).IsDefault) }},
+	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.ImageItem).ID) }},
+	{Header: "Name", Extract: func(v any) string { return common.Cli.FormatName(v.(*model.ImageItem).Name, !v.(*model.ImageItem).IsPresent) }},
+	{Header: "Type", Extract: func(v any) string { return v.(*model.ImageItem).Type }},
+	{Header: "Arch", Extract: func(v any) string { return v.(*model.ImageItem).Arch }, LongOnly: true},
+	{Header: "FS Type", Extract: func(v any) string { return v.(*model.ImageItem).FSType }, LongOnly: true},
+	{Header: "Size", Extract: func(v any) string {
+		cs := v.(*model.ImageItem).CompressedSize
+		if cs != nil { return common.Cli.FormatSize(*cs) }
+		return "-"
+	}, LongOnly: true},
+	{Header: "Created", Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.ImageItem).CreatedAt, "relative") }},
+}
+
 // NewImageCmd creates the image management command tree.
 func NewImageCmd(op *api.Operation) *cobra.Command {
 	cmd := &cobra.Command{
@@ -182,6 +198,7 @@ func printRemoteImages(versions []*model.ImageVersion, jsonOutput bool) {
 	common.Cli.Table([]string{"Type / Version", "Description"}, rows)
 }
 
+// printLocalImages prints the local image listing table.
 func printLocalImages(images []*model.ImageItem, jsonOutput bool, longOutput bool, ctx context.Context) {
 	if jsonOutput {
 		type localEntry struct {
@@ -230,45 +247,12 @@ func printLocalImages(images []*model.ImageItem, jsonOutput bool, longOutput boo
 		return
 	}
 
-	style := resolveListingStyle(ctx, opRef, longOutput)
-	isLong := style == "long"
-
-	rows := make([][]string, 0, len(images))
-	for _, img := range images {
-		marker := common.Cli.FormatMarker(img.IsDefault)
-		created := common.Cli.FormatTimestamp(img.CreatedAt, "relative")
-
-		if isLong {
-			size := "-"
-			if img.CompressedSize != nil {
-				size = common.Cli.FormatSize(*img.CompressedSize)
-			}
-			rows = append(rows, []string{
-				marker,
-				common.Cli.FormatID(img.ID),
-				common.Cli.FormatName(img.Name, !img.IsPresent),
-				img.Type,
-				img.Arch,
-				img.FSType,
-				size,
-				created,
-			})
-		} else {
-			rows = append(rows, []string{
-				marker,
-				common.Cli.FormatID(img.ID),
-				common.Cli.FormatName(img.Name, !img.IsPresent),
-				img.Type,
-				created,
-			})
-		}
+	style := common.Cli.ResolveListingStyle(ctx, opRef, longOutput)
+	items := make([]any, len(images))
+	for i, img := range images {
+		items[i] = img
 	}
-
-	if isLong {
-		common.Cli.Table([]string{"", "ID", "Name", "Type", "Arch", "FS Type", "Size", "Created"}, rows)
-	} else {
-		common.Cli.Table([]string{"", "ID", "Name", "Type", "Created"}, rows)
-	}
+	common.Cli.RenderListing(items, imageColumns, style)
 }
 
 // ─── pull ────────────────────────────────────────────────────────────────────

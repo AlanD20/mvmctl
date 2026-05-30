@@ -15,6 +15,25 @@ import (
 	"mvmctl/internal/cli/common"
 )
 
+// networkColumns defines the local listing columns for networks.
+var networkColumns = []common.ListingColumn{
+	{Header: "", Extract: func(v any) string { return common.Cli.FormatMarker(v.(*model.Network).IsDefault) }},
+	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.Network).ID) }},
+	{Header: "Name", Extract: func(v any) string { return common.Cli.FormatName(v.(*model.Network).Name, !v.(*model.Network).IsPresent) }},
+	{Header: "Subnet", Extract: func(v any) string { return v.(*model.Network).Subnet }},
+	{Header: "NAT", Extract: func(v any) string {
+		if v.(*model.Network).NATEnabled { return "yes" }
+		return "no"
+	}},
+	{Header: "Bridge", Extract: func(v any) string { return v.(*model.Network).Bridge }, LongOnly: true},
+	{Header: "VMs", Extract: func(v any) string {
+		l := v.(*model.Network).Leases
+		if l != nil { return fmt.Sprintf("%d", len(l)) }
+		return "0"
+	}, LongOnly: true},
+	{Header: "Created", Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.Network).CreatedAt, "relative") }},
+}
+
 // NewNetworkCmd creates the network command and its subcommands.
 func NewNetworkCmd(op *api.Operation) *cobra.Command {
 	cmd := &cobra.Command{
@@ -72,50 +91,12 @@ func newNetworkLsCmd(op *api.Operation) *cobra.Command {
 			}
 
 			// Resolve listing style from --long flag or DB config (matching Python's resolve_listing_style)
-			style := resolveListingStyle(cmd.Context(), op, longOutput)
-			isLong := style == "long"
-
-			rows := make([][]string, 0, len(nets))
-			for _, n := range nets {
-				marker := common.Cli.FormatMarker(n.IsDefault)
-				natStr := "no"
-				if n.NATEnabled {
-					natStr = "yes"
-				}
-				created := common.Cli.FormatTimestamp(n.CreatedAt, "relative")
-
-				if isLong {
-					vmCount := 0
-					if n.Leases != nil {
-						vmCount = len(n.Leases)
-					}
-					rows = append(rows, []string{
-						marker,
-						common.Cli.FormatID(n.ID),
-						common.Cli.FormatName(n.Name, !n.IsPresent),
-						n.Subnet,
-						natStr,
-						n.Bridge,
-						fmt.Sprintf("%d", vmCount),
-						created,
-					})
-				} else {
-					rows = append(rows, []string{
-						marker,
-						common.Cli.FormatID(n.ID),
-						common.Cli.FormatName(n.Name, !n.IsPresent),
-						n.Subnet,
-						natStr,
-						created,
-					})
-				}
+			style := common.Cli.ResolveListingStyle(cmd.Context(), op, longOutput)
+			items := make([]any, len(nets))
+			for i, n := range nets {
+				items[i] = n
 			}
-
-			if isLong {
-				common.Cli.Table([]string{"", "ID", "Name", "Subnet", "NAT", "Bridge", "VMs", "Created"}, rows)
-			} else {
-				common.Cli.Table([]string{"", "ID", "Name", "Subnet", "NAT", "Created"}, rows)
-			}
+			common.Cli.RenderListing(items, networkColumns, style)
 			return nil
 		},
 	}
@@ -143,7 +124,7 @@ func newNetworkCreateCmd(op *api.Operation) *cobra.Command {
 			var name string
 			if len(args) > 0 {
 				var err error
-				name, err = checkNameArg(cmd, args[0])
+				name, err = common.Cli.CheckNameArg(cmd, args[0])
 				if err != nil {
 					return err
 				}
@@ -371,7 +352,7 @@ func newNetworkInspectCmd(op *api.Operation) *cobra.Command {
 			var name string
 			if len(args) > 0 {
 				var err error
-				name, err = checkNameArg(cmd, args[0])
+				name, err = common.Cli.CheckNameArg(cmd, args[0])
 				if err != nil {
 					return err
 				}
@@ -503,7 +484,7 @@ func newNetworkDefaultCmd(op *api.Operation) *cobra.Command {
 			var name string
 			if len(args) > 0 {
 				var err error
-				name, err = checkNameArg(cmd, args[0])
+				name, err = common.Cli.CheckNameArg(cmd, args[0])
 				if err != nil {
 					return err
 				}

@@ -16,6 +16,17 @@ import (
 	"mvmctl/internal/infra/errs"
 )
 
+// kernelColumns defines the local listing columns for kernels.
+var kernelColumns = []common.ListingColumn{
+	{Header: "", Extract: func(v any) string { return common.Cli.FormatMarker(v.(*model.KernelItem).IsDefault) }},
+	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.KernelItem).ID) }},
+	{Header: "Name", Extract: func(v any) string { return common.Cli.FormatName(v.(*model.KernelItem).BaseName, !v.(*model.KernelItem).IsPresent) }},
+	{Header: "Version", Extract: func(v any) string { return v.(*model.KernelItem).Version }},
+	{Header: "Type", Extract: func(v any) string { return v.(*model.KernelItem).Type }},
+	{Header: "Arch", Extract: func(v any) string { return v.(*model.KernelItem).Arch }, LongOnly: true},
+	{Header: "Created", Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.KernelItem).CreatedAt, "relative") }},
+}
+
 func NewKernelCmd(op *api.Operation) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "kernel",
@@ -159,38 +170,13 @@ func newKernelLsCmd(op *api.Operation) *cobra.Command {
 				return nil
 			}
 
-			rows := make([][]string, 0, len(kernels))
-			for _, k := range kernels {
-				marker := common.Cli.FormatMarker(k.IsDefault)
-				created := common.Cli.FormatTimestamp(k.CreatedAt, "relative")
-
-				if longOutput {
-					rows = append(rows, []string{
-						marker,
-						common.Cli.FormatID(k.ID),
-						common.Cli.FormatName(k.BaseName, !k.IsPresent),
-						k.Version,
-						k.Type,
-						k.Arch,
-						created,
-					})
-				} else {
-					rows = append(rows, []string{
-						marker,
-						common.Cli.FormatID(k.ID),
-						common.Cli.FormatName(k.BaseName, !k.IsPresent),
-						k.Version,
-						k.Type,
-						created,
-					})
-				}
+			// Local listing
+			style := common.Cli.ResolveListingStyle(cmd.Context(), op, longOutput)
+			items := make([]any, len(kernels))
+			for i, k := range kernels {
+				items[i] = k
 			}
-
-			if longOutput {
-				common.Cli.Table([]string{"", "ID", "Name", "Version", "Type", "Arch", "Created"}, rows)
-			} else {
-				common.Cli.Table([]string{"", "ID", "Name", "Version", "Type", "Created"}, rows)
-			}
+			common.Cli.RenderListing(items, kernelColumns, style)
 			return nil
 		},
 	}
@@ -445,7 +431,7 @@ func newKernelDefaultCmd(op *api.Operation) *cobra.Command {
 		DisableSuggestions: true,
 		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			kernelID, err := checkNameArg(cmd, args[0])
+			kernelID, err := common.Cli.CheckNameArg(cmd, args[0])
 			if err != nil {
 				return err
 			}
