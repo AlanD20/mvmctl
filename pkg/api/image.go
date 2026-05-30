@@ -22,6 +22,7 @@ import (
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/operation"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/pkg/api/responses"
 )
 
 // ImagePrune prunes unused images.
@@ -45,7 +46,7 @@ func (op *Operation) ImagePrune(ctx context.Context, dryRun bool, includeAll boo
 	}
 
 	// Get referenced image IDs from VMs (matching Python's Repository.list_all() pattern)
-	vmRepo := vm.NewRepository(op.DB)
+	vmRepo := vm.NewRepository(op.Connection.DB())
 	allVMs, _ := vmRepo.ListAll(ctx)
 	referencedIDs := make(map[string]bool)
 	for _, vm := range allVMs {
@@ -136,7 +137,7 @@ func (op *Operation) ImagePull(ctx context.Context, input *inputs.ImagePullInput
 	resolvedCIVersion := ""
 
 	// Resolve ci_version from default firecracker binary (matches Python)
-	binRepo := binary.NewRepository(op.DB)
+	binRepo := binary.NewRepository(op.Connection.DB())
 	defaultBin, _ := binRepo.GetDefault(ctx, "firecracker")
 	if defaultBin != nil && defaultBin.CIVersion != nil {
 		resolvedCIVersion = *defaultBin.CIVersion
@@ -502,7 +503,7 @@ func (op *Operation) ImageWarm(ctx context.Context, input *inputs.ImageInput, al
 			}
 		}
 	} else if input != nil {
-		request := inputs.NewImageRequest(*input, op.DB, op.Repos.Image)
+		request := inputs.NewImageRequest(*input, op.Connection.DB(), op.Repos.Image)
 		resolved, err := request.Resolve(ctx)
 		if err != nil {
 			return &errs.OperationResult{
@@ -559,7 +560,7 @@ func (op *Operation) ImageWarm(ctx context.Context, input *inputs.ImageInput, al
 func (op *Operation) ImageRemove(ctx context.Context, input *inputs.ImageInput, force bool) *errs.BatchResult {
 	results := make([]errs.OperationResult, 0)
 
-	request := inputs.NewImageRequest(*input, op.DB, op.Repos.Image)
+	request := inputs.NewImageRequest(*input, op.Connection.DB(), op.Repos.Image)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return &errs.BatchResult{
@@ -634,7 +635,7 @@ func (op *Operation) ImageListAll(ctx context.Context, remote bool, typeFilter s
 		// Discover remote images via version resolver
 		// Resolve ci_version from default firecracker binary
 		resolvedCIVersion := ""
-		binRepo := binary.NewRepository(op.DB)
+		binRepo := binary.NewRepository(op.Connection.DB())
 		defaultBin, _ := binRepo.GetDefault(ctx, "firecracker")
 		if defaultBin != nil && defaultBin.CIVersion != nil {
 			resolvedCIVersion = *defaultBin.CIVersion
@@ -716,7 +717,7 @@ func (op *Operation) ImageListAll(ctx context.Context, remote bool, typeFilter s
 	// Local images from DB
 	if imgInputs != nil {
 		// Filter by identifiers if provided
-		request := inputs.NewImageRequest(*imgInputs, op.DB, op.Repos.Image)
+		request := inputs.NewImageRequest(*imgInputs, op.Connection.DB(), op.Repos.Image)
 		resolved, err := request.Resolve(ctx)
 		if err != nil {
 			return nil, nil, err
@@ -730,7 +731,7 @@ func (op *Operation) ImageListAll(ctx context.Context, remote bool, typeFilter s
 // ImageGet returns a single image by ID prefix or type.
 // Matches Python's ImageOperation.get() exactly — uses ImageRequest for resolution.
 func (op *Operation) ImageGet(ctx context.Context, input *inputs.ImageInput) (*model.ImageItem, error) {
-	request := inputs.NewImageRequest(*input, op.DB, op.Repos.Image)
+	request := inputs.NewImageRequest(*input, op.Connection.DB(), op.Repos.Image)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("image not found: %v", err)
@@ -743,28 +744,28 @@ func (op *Operation) ImageGet(ctx context.Context, input *inputs.ImageInput) (*m
 
 // ImageInspect returns grouped dict of an image.
 // Matches Python's ImageOperation.inspect() exactly.
-func (op *Operation) ImageInspect(ctx context.Context, input *inputs.ImageInput) (map[string]interface{}, error) {
+func (op *Operation) ImageInspect(ctx context.Context, input *inputs.ImageInput) (*responses.ImageInspect, error) {
 	img, err := op.ImageGet(ctx, input)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]interface{}{
-		"image": map[string]interface{}{
-			"id": img.ID, "name": img.Name, "type": img.Type,
-			"arch": img.Arch, "is_default": img.IsDefault, "is_present": img.IsPresent,
+	return &responses.ImageInspect{
+		Image: responses.ImageItemInfo{
+			ID: img.ID, Name: img.Name, Type: img.Type,
+			Arch: img.Arch, IsDefault: img.IsDefault, IsPresent: img.IsPresent,
 		},
-		"storage": map[string]interface{}{
-			"path": img.Path, "fs_type": img.FSType, "fs_uuid": img.FSUUID,
-			"compressed_size": img.CompressedSize, "original_size": img.OriginalSize,
+		Storage: responses.ImageStorageInfo{
+			Path: img.Path, FSType: img.FSType, FSUUID: img.FSUUID,
+			CompressedSize: img.CompressedSize, OriginalSize: img.OriginalSize,
 		},
-		"compression": map[string]interface{}{
-			"format": img.CompressedFormat, "ratio": img.CompressionRatio,
+		Compression: responses.ImageCompressionInfo{
+			Format: img.CompressedFormat, Ratio: img.CompressionRatio,
 		},
-		"requirements": map[string]interface{}{
-			"minimum_rootfs_size_mib": img.MinRootfsSizeMiB,
+		Requirements: responses.ImageRequirementsInfo{
+			MinRootfsSizeMiB: img.MinRootfsSizeMiB,
 		},
-		"timestamps": map[string]interface{}{
-			"pulled_at": img.PulledAt, "created_at": img.CreatedAt, "updated_at": img.UpdatedAt,
+		Timestamps: responses.ImageTimestampsInfo{
+			PulledAt: img.PulledAt, CreatedAt: img.CreatedAt, UpdatedAt: img.UpdatedAt,
 		},
 	}, nil
 }
@@ -772,7 +773,7 @@ func (op *Operation) ImageInspect(ctx context.Context, input *inputs.ImageInput)
 // ImageSetDefault sets an image as default.
 // Matches Python's ImageOperation.set_default() exactly — uses ImageRequest for resolution.
 func (op *Operation) ImageSetDefault(ctx context.Context, input *inputs.ImageInput) *errs.OperationResult {
-	request := inputs.NewImageRequest(*input, op.DB, op.Repos.Image)
+	request := inputs.NewImageRequest(*input, op.Connection.DB(), op.Repos.Image)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return &errs.OperationResult{

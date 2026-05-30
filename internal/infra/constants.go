@@ -159,6 +159,10 @@ const ConstIPTablesMaxCommentLen = 240
 const DefaultIPLocalPortRangeStart = 32768
 const DefaultIPLocalPortRangeEnd = 60999
 
+// DefaultIPLocalPortRange is the default ip_local_port_range used when
+// /proc/sys/net/ipv4/ip_local_port_range cannot be read.
+var DefaultIPLocalPortRange = [2]int{DefaultIPLocalPortRangeStart, DefaultIPLocalPortRangeEnd}
+
 // ── File permissions ──
 const PrivateKeyPerm = 0600
 const PublicKeyPerm = 0644
@@ -290,6 +294,20 @@ var PrivilegedBinaries = map[string]string{
 	"/usr/sbin/nft":              "nftables",
 	"/usr/sbin/sysctl":           "procps",
 	"/usr/sbin/modprobe":         "kmod",
+}
+
+// PrivilegedBinariesOrdered returns the keys of PrivilegedBinaries in
+// insertion order, matching Python's PRIVILEGED_BINARIES dict literal order.
+// Go maps have random iteration, so an ordered slice is needed for
+// deterministic sudoers content generation.
+var PrivilegedBinariesOrdered = [...]string{
+	"/usr/sbin/ip",
+	"/usr/sbin/iptables",
+	"/usr/sbin/iptables-restore",
+	"/usr/sbin/iptables-save",
+	"/usr/sbin/nft",
+	"/usr/sbin/sysctl",
+	"/usr/sbin/modprobe",
 }
 
 // ── Init binaries ──

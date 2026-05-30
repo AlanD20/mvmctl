@@ -44,7 +44,7 @@ func (op *Operation) ConfigGet(ctx context.Context, category, key string) (inter
 		return op.Services.Config.ListByCategory(ctx, resolved.Category)
 	}
 
-	return config.Resolve(ctx, op.DB, resolved.Category, resolved.Key)
+	return config.Resolve(ctx, op.Connection.DB(), resolved.Category, resolved.Key)
 }
 
 // ConfigSet sets a config value for category.key.

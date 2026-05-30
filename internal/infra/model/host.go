@@ -125,10 +125,10 @@ type HostResources struct {
 
 // ProbeCheck matches Python's ProbeCheck.
 type ProbeCheck struct {
-	Name    string  `json:"name"`
-	Passed  bool    `json:"passed"`
-	Message string  `json:"message"`
-	Details *string `json:"details,omitempty"`
+	Name    string `json:"name"`
+	Passed  bool   `json:"passed"`
+	Message string `json:"message"`
+	Details string `json:"details,omitempty"`
 }
 
 // ── ProbeResult ──

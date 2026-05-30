@@ -145,13 +145,12 @@ func getGroupMembers(groupName string) []string {
 
 // ── OS helpers ──
 
-// IsRoot returns true if the real user ID is 0 (root).
-// Uses os.Getuid() to match Python's os.getuid() == 0 behavior in run_cmd().
-// Note: This checks the REAL user ID, not the effective UID.
-// Python's os.getuid() returns the real user ID, and os.geteuid() the effective.
-// We match Python's getuid() here for behavioral consistency.
+// IsRoot returns true if the effective user ID is 0 (root).
+// Uses os.Geteuid() because the kernel checks the effective UID for
+// permission decisions. This correctly detects priviledged access
+// via sudo, doas, or setuid binaries.
 func IsRoot() bool {
-	return os.Getuid() == 0
+	return os.Geteuid() == 0
 }
 
 // ── GroupExists ──

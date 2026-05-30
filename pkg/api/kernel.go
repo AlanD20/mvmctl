@@ -19,6 +19,7 @@ import (
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/operation"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/pkg/api/responses"
 )
 
 // KernelPrune prunes unused kernels.
@@ -133,7 +134,7 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 	}
 
 	// Resolve through the Request pipeline (matches Python)
-	request := inputs.NewKernelPullRequest(*input, op.DB)
+	request := inputs.NewKernelPullRequest(*input, op.Connection.DB())
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return &errs.OperationResult{
@@ -200,7 +201,7 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 	if resolved.KernelType == "firecracker" {
 
 		binDir := filepath.Join(op.CacheDir, "bin")
-		binaryService := binary.NewService(binary.NewRepository(op.DB), binDir, op.CacheDir)
+		binaryService := binary.NewService(binary.NewRepository(op.Connection.DB()), binDir, op.CacheDir)
 		defaultFirecracker, _ := binaryService.GetDefaultFirecracker(ctx)
 		ciVersion := infra.DefaultFirecrackerCIVersion
 		if defaultFirecracker != nil && defaultFirecracker.CIVersion != nil {
@@ -350,7 +351,7 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 // resolution pipeline for input validation and default resolution before
 // calling service.import_kernel().
 func (op *Operation) KernelImport(ctx context.Context, input *inputs.KernelImportInput) *errs.OperationResult {
-	db := op.DB
+	db := op.Connection.DB()
 
 	// Python: request = KernelImportRequest(inputs=inputs, db=db); resolved = request.resolve()
 	request := inputs.NewKernelImportRequest(*input, db)
@@ -400,7 +401,7 @@ func (op *Operation) KernelRemove(ctx context.Context, identifiers []string, for
 		Force: &forceVal,
 	}
 
-	request := inputs.NewKernelRequest(kernelInput, op.DB, op.Repos.Kernel)
+	request := inputs.NewKernelRequest(kernelInput, op.Connection.DB(), op.Repos.Kernel)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return &errs.BatchResult{
@@ -508,7 +509,7 @@ func (op *Operation) kernelListRemote(ctx context.Context, noCache bool) ([]mode
 	// Resolve ci_version from default firecracker binary (matches Python)
 	resolvedCIVersion := ""
 	if op.Services.Config != nil {
-		binaryRepo := binary.NewRepository(op.DB)
+		binaryRepo := binary.NewRepository(op.Connection.DB())
 		binDir := filepath.Join(op.CacheDir, "bin")
 		binaryService := binary.NewService(binaryRepo, binDir, op.CacheDir)
 		defaultFC, _ := binaryService.GetDefaultFirecracker(ctx)
@@ -558,7 +559,7 @@ func (op *Operation) KernelGet(ctx context.Context, id string) (*model.KernelIte
 		ID: []string{id},
 	}
 
-	request := inputs.NewKernelRequest(kernelInput, op.DB, op.Repos.Kernel)
+	request := inputs.NewKernelRequest(kernelInput, op.Connection.DB(), op.Repos.Kernel)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("kernel not found: %s", id)
@@ -574,20 +575,20 @@ func (op *Operation) KernelGet(ctx context.Context, id string) (*model.KernelIte
 
 // KernelInspect returns grouped dict of a kernel.
 // Matches Python's KernelOperation.inspect() exactly.
-func (op *Operation) KernelInspect(ctx context.Context, id string) (map[string]interface{}, error) {
+func (op *Operation) KernelInspect(ctx context.Context, id string) (*responses.KernelInspect, error) {
 	k, err := op.KernelGet(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]interface{}{
-		"kernel": map[string]interface{}{
-			"id": k.ID, "name": k.Name, "base_name": k.BaseName,
-			"version": k.Version, "arch": k.Arch, "type": k.Type,
-			"is_default": k.IsDefault, "is_present": k.IsPresent,
+	return &responses.KernelInspect{
+		Kernel: responses.KernelItemInfo{
+			ID: k.ID, Name: k.Name, BaseName: k.BaseName,
+			Version: k.Version, Arch: k.Arch, Type: k.Type,
+			IsDefault: k.IsDefault, IsPresent: k.IsPresent,
 		},
-		"storage": map[string]interface{}{"path": k.Path},
-		"timestamps": map[string]interface{}{
-			"created_at": k.CreatedAt, "updated_at": k.UpdatedAt,
+		Storage: responses.KernelStorageInfo{Path: k.Path},
+		Timestamps: responses.KernelTimestampsInfo{
+			CreatedAt: k.CreatedAt, UpdatedAt: k.UpdatedAt,
 		},
 	}, nil
 }
@@ -600,7 +601,7 @@ func (op *Operation) KernelSetDefault(ctx context.Context, id string) *errs.Oper
 		ID: []string{id},
 	}
 
-	request := inputs.NewKernelRequest(kernelInput, op.DB, op.Repos.Kernel)
+	request := inputs.NewKernelRequest(kernelInput, op.Connection.DB(), op.Repos.Kernel)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return &errs.OperationResult{

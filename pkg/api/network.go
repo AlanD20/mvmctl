@@ -10,19 +10,20 @@ import (
 	"strings"
 	"time"
 
-	"mvmctl/internal/core/host"
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	infranet "mvmctl/internal/infra/network"
+	"mvmctl/internal/infra/system"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/pkg/api/responses"
 )
 
 // NetworkCreate creates a new network.
 // Matches Python's NetworkOperation.create() exactly.
 func (op *Operation) NetworkCreate(ctx context.Context, input *inputs.NetworkCreateInput) *errs.OperationResult {
-	request := inputs.NewNetworkCreateRequest(*input, op.DB, op.Repos.Network)
+	request := inputs.NewNetworkCreateRequest(*input, op.Connection.DB(), op.Repos.Network)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return &errs.OperationResult{
@@ -132,7 +133,7 @@ func (op *Operation) NetworkCreate(ctx context.Context, input *inputs.NetworkCre
 // Matches Python's NetworkOperation.remove() exactly — uses NetworkRequest for resolution,
 // enriches with VM references, checks "in use".
 func (op *Operation) NetworkRemove(ctx context.Context, input *inputs.NetworkInput, force bool) *errs.OperationResult {
-	request := inputs.NewNetworkRequest(*input, op.DB, op.Repos.Network)
+	request := inputs.NewNetworkRequest(*input, op.Connection.DB(), op.Repos.Network)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return &errs.OperationResult{
@@ -197,7 +198,7 @@ func (op *Operation) NetworkListAll(ctx context.Context) ([]*model.Network, erro
 // Matches Python's NetworkOperation.get() exactly — uses NetworkInput/NetworkRequest
 // to resolve identifiers (by name or ID) and supports multi-identifier resolution.
 func (op *Operation) NetworkGet(ctx context.Context, input *inputs.NetworkInput) (*model.Network, error) {
-	request := inputs.NewNetworkRequest(*input, op.DB, op.Repos.Network)
+	request := inputs.NewNetworkRequest(*input, op.Connection.DB(), op.Repos.Network)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("network not found: %v", err)
@@ -234,8 +235,8 @@ func (op *Operation) NetworkToJSON(networks []*model.Network) []map[string]inter
 // NetworkInspect returns detailed network info via Input/Request resolution pipeline.
 // Matches Python's NetworkOperation.inspect() exactly — uses NetworkInput/NetworkRequest
 // to resolve identifiers (by name or ID) with lease enrichment.
-func (op *Operation) NetworkInspect(ctx context.Context, input *inputs.NetworkInput) (map[string]interface{}, error) {
-	request := inputs.NewNetworkRequest(*input, op.DB, op.Repos.Network)
+func (op *Operation) NetworkInspect(ctx context.Context, input *inputs.NetworkInput) (*responses.NetworkInspect, error) {
+	request := inputs.NewNetworkRequest(*input, op.Connection.DB(), op.Repos.Network)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("network not found: %v", err)
@@ -252,62 +253,51 @@ func (op *Operation) NetworkInspect(ctx context.Context, input *inputs.NetworkIn
 		net.BridgeActive = bridgeActive
 	}
 
-	// Re-fetch with updated state (matching Python)
 	updated, err := op.Repos.Network.GetByName(ctx, net.Name)
 	if err != nil || updated == nil {
 		return nil, fmt.Errorf("network '%s' not found after update", net.Name)
 	}
 
-	// Load leases — Python always includes ALL keys (with None for missing values).
-	leaseList := make([]map[string]interface{}, 0)
+	// Load leases
 	leases, err := op.Repos.Lease.ListAll(ctx, updated.ID)
+	leaseList := make([]responses.NetworkLease, 0)
 	if err == nil {
+		leaseList = make([]responses.NetworkLease, 0, len(leases))
 		for _, lease := range leases {
-			var leaseID interface{} = nil
+			l := responses.NetworkLease{
+				IPv4:     lease.IPv4,
+				LeasedAt: lease.LeasedAt,
+			}
 			if lease.ID != nil {
-				leaseID = *lease.ID
+				l.ID = *lease.ID
 			}
-			var vmID interface{} = nil
 			if lease.VMID != nil {
-				vmID = *lease.VMID
+				l.VMID = *lease.VMID
 			}
-			var expiresAt interface{} = nil
 			if lease.ExpiresAt != nil {
-				expiresAt = *lease.ExpiresAt
+				l.ExpiresAt = *lease.ExpiresAt
 			}
-			entry := map[string]interface{}{
-				"id":         leaseID,
-				"vm_id":      vmID,
-				"ipv4":       lease.IPv4,
-				"leased_at":  lease.LeasedAt,
-				"expires_at": expiresAt,
-			}
-			leaseList = append(leaseList, entry)
+			leaseList = append(leaseList, l)
 		}
 	}
 
-	return map[string]interface{}{
-		"network": map[string]interface{}{
-			"id":           updated.ID,
-			"name":         updated.Name,
-			"subnet":       updated.Subnet,
-			"bridge":       updated.Bridge,
-			"ipv4_gateway": updated.IPv4Gateway,
-			"is_default":   updated.IsDefault,
-			"is_present":   updated.IsPresent,
-			"created_at":   updated.CreatedAt,
-			"updated_at":   updated.UpdatedAt,
+	return &responses.NetworkInspect{
+		Network: responses.NetworkItemInfo{
+			ID: updated.ID, Name: updated.Name, Subnet: updated.Subnet,
+			Bridge: updated.Bridge, IPv4Gateway: updated.IPv4Gateway,
+			IsDefault: updated.IsDefault, IsPresent: updated.IsPresent,
+			CreatedAt: updated.CreatedAt, UpdatedAt: updated.UpdatedAt,
 		},
-		"status": map[string]interface{}{
-			"bridge_active": updated.BridgeActive,
-			"is_present":    updated.IsPresent,
-			"is_default":    updated.IsDefault,
+		Status: responses.NetworkStatusInfo{
+			BridgeActive: updated.BridgeActive,
+			IsPresent:    updated.IsPresent,
+			IsDefault:    updated.IsDefault,
 		},
-		"nat": map[string]interface{}{
-			"nat_enabled":  updated.NATEnabled,
-			"nat_gateways": network.NatGatewaysList(updated),
+		NAT: responses.NetworkNATInfo{
+			NATEnabled:  updated.NATEnabled,
+			NATGateways: network.NatGatewaysList(updated),
 		},
-		"leases": leaseList,
+		Leases: leaseList,
 	}, nil
 }
 
@@ -315,7 +305,7 @@ func (op *Operation) NetworkInspect(ctx context.Context, input *inputs.NetworkIn
 // Matches Python's NetworkOperation.set_default() exactly — goes through Controller
 // and uses NetworkInput/NetworkRequest to resolve identifiers.
 func (op *Operation) NetworkSetDefault(ctx context.Context, input *inputs.NetworkInput) *errs.OperationResult {
-	request := inputs.NewNetworkRequest(*input, op.DB, op.Repos.Network)
+	request := inputs.NewNetworkRequest(*input, op.Connection.DB(), op.Repos.Network)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return &errs.OperationResult{
@@ -469,8 +459,7 @@ func (op *Operation) NetworkSync(ctx context.Context, networkID string) *errs.Op
 // Matches Python's NetworkOperation.prune() exactly.
 func (op *Operation) NetworkPrune(ctx context.Context, dryRun bool, includeAll bool) *errs.OperationResult {
 	// Python: HostPrivilegeHelper.check_privileges("/usr/sbin/ip", "prune networks")
-	privHelper := host.NewPrivilegeHelper()
-	if err := privHelper.CheckPrivileges("/usr/sbin/ip", "prune networks"); err != nil {
+	if err := system.CheckPrivileges("/usr/sbin/ip", "prune networks"); err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
 			Code:      string(errs.CodePrivilegeRequired),

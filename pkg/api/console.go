@@ -120,12 +120,12 @@ func (op *Operation) ConsoleAttachConsole(ctx context.Context, socketPath string
 // to avoid importing internal/service/console from the inputs package.
 func (op *Operation) resolveWithRequest(ctx context.Context, identifier string) (*inputs.ResolvedConsoleInput, error) {
 	rawInput := inputs.ConsoleInput{Identifier: identifier}
-	req := inputs.NewConsoleRequest(rawInput, op.DB)
+	req := inputs.NewConsoleRequest(rawInput, op.Connection.DB())
 
 	// Resolve VM first to get ID and name required for relay creation
 	vmRequest := inputs.NewVMRequest(
 		inputs.VMInput{Identifiers: []string{identifier}},
-		op.DB, op.Repos.VM, nil,
+		op.Connection.DB(), op.Repos.VM, nil,
 	)
 	vmResolved, err := vmRequest.Resolve(ctx)
 	if err != nil {

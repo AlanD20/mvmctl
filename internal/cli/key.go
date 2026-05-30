@@ -252,13 +252,11 @@ func newKeyInspectCmd(op *api.Operation) *cobra.Command {
 				return nil
 			}
 
-			keyName := identifier
-			if keyInfo, ok := info["key"].(map[string]any); ok {
-				if n, ok := keyInfo["name"].(string); ok {
-					keyName = n
-				}
+			keyName := info.Key.Name
+			if keyName == "" {
+				keyName = identifier
 			}
-			common.Cli.PrintDictTree(info, fmt.Sprintf("Key: %s", keyName))
+			common.Cli.PrintDictTree(common.Cli.ToMap(info), fmt.Sprintf("Key: %s", keyName))
 			return nil
 		},
 	}

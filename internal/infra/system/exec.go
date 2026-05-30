@@ -167,7 +167,7 @@ func runCmdInternal(ctx context.Context, opts RunCmdOptions) *RunCmdResult {
 	// ── Stdin ──
 	if opts.Input != "" {
 		c.Stdin = strings.NewReader(opts.Input)
-	} else if opts.Interactive && opts.Privileged && os.Getuid() != 0 {
+	} else if opts.Interactive && opts.Privileged && !IsRoot() {
 		// Interactive mode with sudo: forward os.Stdin so the user can
 		// respond to sudo's password prompt via TTY.
 		c.Stdin = os.Stdin
@@ -344,8 +344,8 @@ func (opts RunCmdOptions) buildCmdArgs() []string {
 	if !opts.Privileged {
 		return args
 	}
-	// Python: os.getuid() != 0  →  Go: os.Getuid() != 0
-	if os.Getuid() != 0 {
+	// Python: os.getuid() != 0  →  Go: IsRoot()
+	if !IsRoot() {
 		_ = RequireMvmGroupMembership() // warn only, like Python
 		if opts.Interactive {
 			return append([]string{"sudo"}, args...)

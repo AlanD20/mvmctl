@@ -15,7 +15,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-type Database struct {
+type Handle struct {
 	mu     sync.Mutex
 	db     *sql.DB
 	dbPath string
@@ -30,15 +30,15 @@ func DBExists(cacheDir string) bool {
 	return err == nil
 }
 
-// New creates a Database struct for the given dbPath.
+// New creates a Handle for the given dbPath.
 // Does NOT open a database connection — matching Python's Database.__init__().
 // The caller is responsible for ensuring the parent directory exists.
 //
 // PRAGMAs are passed via DSN parameters so they apply automatically to every
 // new connection from the pool (matching Python's connect() which sets PRAGMAs
 // on each new connection).
-func New(dbPath string) *Database {
-	return &Database{
+func New(dbPath string) *Handle {
+	return &Handle{
 		dbPath: dbPath,
 	}
 }
@@ -46,12 +46,15 @@ func New(dbPath string) *Database {
 // openLazy opens the database connection on first use, matching Python's lazy
 // connect() pattern. PRAGMAs are set via DSN parameters so they apply to
 // every new connection from the pool.
-func (d *Database) openLazy() error {
+//
+// Panics on failure — a database connection is required for the application
+// to function and failures are unrecoverable.
+func (d *Handle) openLazy() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	if d.opened {
-		return nil
+		return
 	}
 
 	// PRAGMAs passed in DSN — applied to every new connection from the pool,
@@ -76,7 +79,7 @@ func (d *Database) openLazy() error {
 
 	db, err := sql.Open("sqlite", d.dbPath+"?"+pragmaParams)
 	if err != nil {
-		return fmt.Errorf("open db: %w", err)
+		panic(fmt.Sprintf("failed to open database: %v", err))
 	}
 
 	db.SetMaxOpenConns(1)
@@ -91,25 +94,22 @@ func (d *Database) openLazy() error {
 
 	d.db = db
 	d.opened = true
-	return nil
 }
 
 // DB returns the underlying *sql.DB, opening it lazily if needed.
 // Matching Python's connect() which yields a connection, but Go uses a pool.
-func (d *Database) DB() (*sql.DB, error) {
-	if err := d.openLazy(); err != nil {
-		return nil, err
-	}
-	return d.db, nil
+func (d *Handle) DB() *sql.DB {
+	d.openLazy()
+	return d.db
 }
 
 // Path returns the database file path. Matches Python's db_path property.
-func (d *Database) Path() string {
+func (d *Handle) Path() string {
 	return d.dbPath
 }
 
 // Close closes the database connection pool.
-func (d *Database) Close() error {
+func (d *Handle) Close() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -157,7 +157,7 @@ func restoreFromSnapshot(snapshotPath, dbPath string) error {
 // To prevent this, RestoreFromSnapshot closes the connection pool before
 // the restore. The pool reopens lazily on the next DB() call, getting the
 // new inode with all PRAGMAs applied.
-func (d *Database) RestoreFromSnapshot(snapshotPath string) error {
+func (d *Handle) RestoreFromSnapshot(snapshotPath string) error {
 	// Close the pool so existing connections don't hold stale page cache
 	// from the old inode.
 	if err := d.Close(); err != nil {
@@ -169,12 +169,12 @@ func (d *Database) RestoreFromSnapshot(snapshotPath string) error {
 // Connect returns the underlying *sql.DB (lazily opened).
 // Permissions are set once in openLazy() when the pool first opens, and
 // in RestoreFromSnapshot() after a restore creates a new file.
-func (d *Database) Connect() (*sql.DB, error) {
+func (d *Handle) Connect() *sql.DB {
 	return d.DB()
 }
 
 // readCurrentVersion queries the current schema version from PRAGMA user_version.
-// Shared by Database.GetCurrentVersion and RunMigrationsCtx to avoid duplicating
+// Shared by Handle.GetCurrentVersion and RunMigrationsCtx to avoid duplicating
 // the same PRAGMA query.
 func readCurrentVersion(db *sql.DB) (int, error) {
 	var version int
@@ -186,22 +186,14 @@ func readCurrentVersion(db *sql.DB) (int, error) {
 }
 
 // GetCurrentVersion returns the current schema version from PRAGMA user_version.
-func (d *Database) GetCurrentVersion() (int, error) {
-	db, err := d.DB()
-	if err != nil {
-		return 0, err
-	}
-	return readCurrentVersion(db)
+func (d *Handle) GetCurrentVersion() (int, error) {
+	return readCurrentVersion(d.DB())
 }
 
 // Ping verifies the database connection is alive.
 // Python's Database class has no Ping() method; this exists for Go convenience.
-func (d *Database) Ping() error {
-	db, err := d.DB()
-	if err != nil {
-		return err
-	}
-	return db.Ping()
+func (d *Handle) Ping() error {
+	return d.DB().Ping()
 }
 
 // EnsureMigrationsTable creates the db_migrations tracking table if it doesn't exist.

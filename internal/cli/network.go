@@ -331,19 +331,11 @@ func newNetworkInspectCmd(op *api.Operation) *cobra.Command {
 			}
 
 			if jsonOutput {
-				// Match Python's json.dumps(info, indent=2, default=str)
 				fmt.Println(marshalJSONDefaultStr(info))
 				return nil
 			}
 
-			netName := name
-			if net, ok := info["network"].(map[string]interface{}); ok {
-				if n, ok := net["name"].(string); ok {
-					netName = n
-				}
-			}
-
-			common.Cli.PrintDictTree(info, fmt.Sprintf("Network: %s", netName))
+			common.Cli.PrintDictTree(common.Cli.ToMap(info), fmt.Sprintf("Network: %s", info.Network.Name))
 			return nil
 		},
 	}
@@ -365,15 +357,11 @@ func newNetworkSyncCmd(op *api.Operation) *cobra.Command {
 			var networkID string
 			if len(args) > 0 {
 				name := args[0]
-				info, err := op.NetworkInspect(cmd.Context(), &inputs.NetworkInput{Name: []string{name}})
+				nInfo, err := op.NetworkInspect(cmd.Context(), &inputs.NetworkInput{Name: []string{name}})
 				if err != nil {
 					return fmt.Errorf("network not found: %s", name)
 				}
-				if n, ok := info["network"].(map[string]interface{}); ok {
-					if id, ok := n["id"].(string); ok {
-						networkID = id
-					}
-				}
+				networkID = nInfo.Network.ID
 			}
 
 			// Call sync with optional network ID

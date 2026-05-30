@@ -43,6 +43,7 @@ import (
 	consoleapi "mvmctl/internal/service/console"
 	nocloudnet "mvmctl/internal/service/nocloudnet"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/pkg/api/responses"
 )
 
 // ── Create ──
@@ -50,8 +51,7 @@ import (
 // Create creates one or more VMs.
 // Matches Python's VMOperation.create() exactly.
 func (op *Operation) VMCreate(ctx context.Context, input *inputs.VMCreateInput, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
-	ph := &host.PrivilegeHelper{}
-	if err := ph.CheckPrivileges("/usr/sbin/ip", "create VMs"); err != nil {
+	if err := system.CheckPrivileges("/usr/sbin/ip", "create VMs"); err != nil {
 		return &errs.OperationResult{
 			Status: "error", Code: string(errs.CodePrivilegeRequired),
 			Message:   fmt.Sprintf("Privilege check failed: %v", err),
@@ -285,8 +285,8 @@ func (op *Operation) vmExecuteCreateWithOpts(ctx context.Context, resolved *reso
 	// Check VM limit (Python: SettingsService.resolve(Database(), "settings.vm", "max_vms"))
 	if !skipLimitCheck {
 		maxVMs := 10
-		if op.DB != nil {
-			row := op.DB.QueryRowContext(ctx, "SELECT value FROM user_settings WHERE category = 'settings.vm' AND key = 'max_vms'")
+		if op.Connection != nil {
+			row := op.Connection.DB().QueryRowContext(ctx, "SELECT value FROM user_settings WHERE category = 'settings.vm' AND key = 'max_vms'")
 			var val string
 			if err := row.Scan(&val); err == nil {
 				if n, err := strconv.Atoi(val); err == nil && n > 0 {
@@ -312,7 +312,7 @@ func (op *Operation) vmExecuteCreateWithOpts(ctx context.Context, resolved *reso
 		resolved:         resolved,
 		resourcesCreated: make(map[string]bool),
 		cacheDir:         op.CacheDir,
-		db:               op.DB,
+		db:               op.Connection.DB(),
 	}
 
 	// Set the cleanup function so signal handlers can call it
@@ -359,8 +359,7 @@ func (op *Operation) vmExecuteCreateWithOpts(ctx context.Context, resolved *reso
 // Uses the proper VMRequest pipeline (validation + resolution + enrichment)
 // instead of inline resolution, matching Python's VMRequest(inputs=inputs, db=db).resolve().
 func (op *Operation) VMRemove(ctx context.Context, input *inputs.VMInput) *errs.BatchResult {
-	ph := &host.PrivilegeHelper{}
-	if err := ph.CheckPrivileges("/usr/sbin/ip", "Remove VM"); err != nil {
+	if err := system.CheckPrivileges("/usr/sbin/ip", "Remove VM"); err != nil {
 		return &errs.BatchResult{
 			Items: []errs.OperationResult{
 				{Status: "error", Code: string(errs.CodePrivilegeRequired),
@@ -375,7 +374,7 @@ func (op *Operation) VMRemove(ctx context.Context, input *inputs.VMInput) *errs.
 			Identifiers: input.Identifiers,
 			Force:       input.Force,
 		},
-		op.DB,
+		op.Connection.DB(),
 		op.Repos.VM,
 		op.Enr,
 	)
@@ -484,7 +483,7 @@ func (op *Operation) vmPerformRemovalCleanup(vm *model.VM) {
 
 	// IP lease cleanup (matches Python's _cleanup_ip)
 	if vm.ID != "" {
-		leaseRepo := network.NewLeaseRepository(op.DB)
+		leaseRepo := network.NewLeaseRepository(op.Connection.DB())
 		_ = leaseRepo.ReleaseByVM(ctx, vm.ID)
 	}
 
@@ -499,8 +498,7 @@ func (op *Operation) vmPerformRemovalCleanup(vm *model.VM) {
 // Prune prunes VMs.
 // Matches Python's VMOperation.prune() exactly.
 func (op *Operation) VMPrune(ctx context.Context, dryRun bool, includeAll bool) *errs.OperationResult {
-	ph := &host.PrivilegeHelper{}
-	if err := ph.CheckPrivileges("/usr/sbin/ip", "prune VMs"); err != nil {
+	if err := system.CheckPrivileges("/usr/sbin/ip", "prune VMs"); err != nil {
 		return &errs.OperationResult{
 			Status: "error", Code: string(errs.CodePrivilegeRequired),
 			Message: fmt.Sprintf("Privilege check failed: %v", err), Exception: err,
@@ -701,13 +699,12 @@ func (op *Operation) VMGet(ctx context.Context, input *inputs.VMInput) (*model.V
 
 // Inspect returns detailed VM info with enriched data.
 // Matches Python's VMOperation.inspect() exactly.
-func (op *Operation) VMInspect(ctx context.Context, input *inputs.VMInput) (map[string]interface{}, error) {
+func (op *Operation) VMInspect(ctx context.Context, input *inputs.VMInput) (*responses.VMInspect, error) {
 	vm, err := op.VMGet(ctx, input)
 	if err != nil {
 		return nil, err
 	}
 
-	// Resolve asset names (matches Python's Repository(db).get(vm.image_id) etc.)
 	var imageName *string
 	if vm.ImageID != "" {
 		img, err := op.Repos.Image.Get(ctx, vm.ImageID)
@@ -722,13 +719,6 @@ func (op *Operation) VMInspect(ctx context.Context, input *inputs.VMInput) (map[
 			kernelVersion = &krn.Version
 		}
 	}
-	var networkName *string
-	if vm.NetworkID != "" {
-		net, err := op.Repos.Network.Get(ctx, vm.NetworkID)
-		if err == nil && net != nil {
-			networkName = &net.Name
-		}
-	}
 	var binaryName *string
 	if vm.BinaryID != "" {
 		bin, err := op.Repos.Binary.Get(ctx, vm.BinaryID)
@@ -736,8 +726,14 @@ func (op *Operation) VMInspect(ctx context.Context, input *inputs.VMInput) (map[
 			binaryName = &bin.Name
 		}
 	}
+	var networkName *string
+	if vm.NetworkID != "" {
+		net, err := op.Repos.Network.Get(ctx, vm.NetworkID)
+		if err == nil && net != nil {
+			networkName = &net.Name
+		}
+	}
 
-	// Console relay status — check actual relay process (matches Python's ConsoleRelayManager.is_running())
 	relayRunning := false
 	relayPID := vm.RelayPID
 	relaySocketPath := vm.RelaySocketPath
@@ -758,88 +754,65 @@ func (op *Operation) VMInspect(ctx context.Context, input *inputs.VMInput) (map[
 		p := filepath.Join(vmDir, vm.ConfigPath)
 		configPath = &p
 	}
-
 	var logPath *string
 	if vm.LogPath != nil {
 		p := filepath.Join(vmDir, *vm.LogPath)
 		logPath = &p
 	}
-
 	var serialPath *string
 	if vm.SerialOutputPath != nil {
 		p := filepath.Join(vmDir, *vm.SerialOutputPath)
 		serialPath = &p
 	}
 
-	// Resolve volumes with enrichment (matches Python's vm.volumes)
-	volumes := make([]map[string]interface{}, 0)
+	// Volumes
+	var volumes []responses.VMVolume
 	if len(vm.VolumeIDs) > 0 {
 		vols, err := op.Repos.Volume.FindByIDs(ctx, vm.VolumeIDs)
 		if err == nil {
+			volumes = make([]responses.VMVolume, 0, len(vols))
 			for _, v := range vols {
-				volumes = append(volumes, map[string]interface{}{
-					"id":     v.ID,
-					"name":   v.Name,
-					"size":   v.SizeBytes,
-					"format": v.Format,
-					"status": v.Status,
+				volumes = append(volumes, responses.VMVolume{
+					ID: v.ID, Name: v.Name, Size: v.SizeBytes,
+					Format: v.Format, Status: string(v.Status),
 				})
 			}
 		}
 	}
 
-	return map[string]interface{}{
-		"vm": map[string]interface{}{
-			"name":             vm.Name,
-			"id":               vm.ID,
-			"status":           vm.Status,
-			"pid":              vm.PID,
-			"exit_code":        vm.ExitCode,
-			"ssh_keys":         vm.SSHKeys,
-			"ssh_user":         vm.SSHUser,
-			"cloud_init_mode":  vm.CloudInitMode,
-			"nocloud_net_port": vm.NocloudNetPort,
-			"nocloud_net_pid":  vm.NocloudNetPID,
-			"pci_enabled":      vm.PCIEnabled,
-			"enable_console":   vm.EnableConsole,
-			"enable_logging":   vm.EnableLogging,
-			"enable_metrics":   vm.EnableMetrics,
-			"created_at":       vm.CreatedAt,
-			"updated_at":       vm.UpdatedAt,
+	return &responses.VMInspect{
+		VM: responses.VMItemInfo{
+			Name: vm.Name, ID: vm.ID, Status: string(vm.Status),
+			PID: vm.PID, ExitCode: vm.ExitCode,
+			SSHKeys: vm.SSHKeys, SSHUser: vm.SSHUser,
+			CloudInitMode:  vm.CloudInitMode,
+			NocloudNetPort: vm.NocloudNetPort, NocloudNetPID: vm.NocloudNetPID,
+			PCIEnabled: vm.PCIEnabled, EnableConsole: vm.EnableConsole,
+			EnableLogging: vm.EnableLogging, EnableMetrics: vm.EnableMetrics,
+			CreatedAt: vm.CreatedAt, UpdatedAt: vm.UpdatedAt,
 		},
-		"resources": map[string]interface{}{
-			"vcpus": vm.VCPUCount,
-			"mem":   vm.MemSizeMiB,
-			"disk":  vm.DiskSizeMiB,
+		Resources: responses.VMResourcesInfo{
+			VCPUs: vm.VCPUCount, Mem: vm.MemSizeMiB, Disk: vm.DiskSizeMiB,
 		},
-		"networking": map[string]interface{}{
-			"ipv4":         vm.IPv4,
-			"mac":          vm.MAC,
-			"network_id":   vm.NetworkID,
-			"network_name": networkName,
-			"tap_device":   vm.TapDevice,
+		Networking: responses.VMNetworkingInfo{
+			IPv4: vm.IPv4, MAC: vm.MAC, NetworkID: vm.NetworkID,
+			NetworkName: networkName, TapDevice: vm.TapDevice,
 		},
-		"assets": map[string]interface{}{
-			"image_id":       vm.ImageID,
-			"image_name":     imageName,
-			"kernel_id":      vm.KernelID,
-			"kernel_version": kernelVersion,
-			"binary_id":      vm.BinaryID,
-			"binary_name":    binaryName,
+		Assets: responses.VMAssetsInfo{
+			ImageID: vm.ImageID, ImageName: imageName,
+			KernelID: vm.KernelID, KernelVersion: kernelVersion,
+			BinaryID: vm.BinaryID, BinaryName: binaryName,
 		},
-		"filesystem": map[string]interface{}{
-			"vm_dir":             vmDir,
-			"rootfs_path":        rootfsPath,
-			"config_path":        configPath,
-			"log_path":           logPath,
-			"serial_output_path": serialPath,
+		Filesystem: responses.VMFilesystemInfo{
+			VMDir: vmDir, RootfsPath: rootfsPath,
+			ConfigPath: configPath, LogPath: logPath,
+			SerialOutputPath: serialPath,
 		},
-		"console": map[string]interface{}{
-			"relay_running":     relayRunning,
-			"relay_pid":         relayPID,
-			"relay_socket_path": relaySocketPath,
+		Console: responses.VMConsoleInfo{
+			RelayRunning: relayRunning, RelayPID: relayPID,
+			RelaySocketPath: relaySocketPath,
 		},
-		"volumes": volumes,
+		Volumes: volumes,
 	}, nil
 }
 
@@ -858,7 +831,7 @@ func (op *Operation) VMStart(ctx context.Context, input *inputs.VMInput) *errs.B
 			Identifiers: input.Identifiers,
 			Force:       input.Force,
 		},
-		op.DB,
+		op.Connection.DB(),
 		op.Repos.VM,
 		op.Enr,
 	)
@@ -932,7 +905,7 @@ func (op *Operation) VMStop(ctx context.Context, input *inputs.VMInput) *errs.Ba
 			Identifiers: input.Identifiers,
 			Force:       input.Force,
 		},
-		op.DB,
+		op.Connection.DB(),
 		op.Repos.VM,
 		op.Enr,
 	)
@@ -1051,7 +1024,7 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snap
 			}
 		}
 		if bridgeName != "" {
-			netSvc := network.NewService(network.NewRepository(op.DB), nil)
+			netSvc := network.NewService(network.NewRepository(op.Connection.DB()), nil)
 			bridgeAddr, calcErr := network.ComputeBridgeAddress(gateway, subnet)
 			if calcErr != nil {
 				slog.Warn("Failed to compute bridge address during respawn", "vm", v.Name, "error", calcErr)
@@ -1376,7 +1349,7 @@ func (op *Operation) VMReboot(ctx context.Context, input *inputs.VMInput) *errs.
 			Identifiers: input.Identifiers,
 			Force:       input.Force,
 		},
-		op.DB,
+		op.Connection.DB(),
 		op.Repos.VM,
 		op.Enr,
 	)
@@ -1445,7 +1418,7 @@ func (op *Operation) VMPause(ctx context.Context, input *inputs.VMInput) *errs.B
 			Identifiers: input.Identifiers,
 			Force:       input.Force,
 		},
-		op.DB,
+		op.Connection.DB(),
 		op.Repos.VM,
 		op.Enr,
 	)
@@ -1507,7 +1480,7 @@ func (op *Operation) VMResume(ctx context.Context, input *inputs.VMInput) *errs.
 			Identifiers: input.Identifiers,
 			Force:       input.Force,
 		},
-		op.DB,
+		op.Connection.DB(),
 		op.Repos.VM,
 		op.Enr,
 	)
@@ -1565,8 +1538,7 @@ func (op *Operation) VMResume(ctx context.Context, input *inputs.VMInput) *errs.
 //   - Version gate for hotplug
 //   - VolumeController.attach + VM volume_ids update
 func (op *Operation) VMAttachVolume(ctx context.Context, input *inputs.VMInput, volumeName string) *errs.OperationResult {
-	ph := &host.PrivilegeHelper{}
-	if err := ph.CheckPrivileges("/usr/sbin/ip", "attach volume"); err != nil {
+	if err := system.CheckPrivileges("/usr/sbin/ip", "attach volume"); err != nil {
 		return &errs.OperationResult{
 			Status: "error", Code: string(errs.CodePrivilegeRequired),
 			Message:   fmt.Sprintf("Privilege check failed: %v", err),
@@ -1580,7 +1552,7 @@ func (op *Operation) VMAttachVolume(ctx context.Context, input *inputs.VMInput, 
 			Identifiers: input.Identifiers,
 			Force:       input.Force,
 		},
-		op.DB,
+		op.Connection.DB(),
 		op.Repos.VM,
 		op.Enr,
 	)
@@ -1686,8 +1658,7 @@ func (op *Operation) VMAttachVolume(ctx context.Context, input *inputs.VMInput, 
 //   - Version gate + SSH PCI removal + Firecracker API for hot-unplug
 //   - VolumeController.detach + VM volume_ids update
 func (op *Operation) VMDetachVolume(ctx context.Context, input *inputs.VMInput, volumeName string) *errs.OperationResult {
-	ph := &host.PrivilegeHelper{}
-	if err := ph.CheckPrivileges("/usr/sbin/ip", "detach volume"); err != nil {
+	if err := system.CheckPrivileges("/usr/sbin/ip", "detach volume"); err != nil {
 		return &errs.OperationResult{
 			Status: "error", Code: string(errs.CodePrivilegeRequired),
 			Message:   fmt.Sprintf("Privilege check failed: %v", err),
@@ -1701,7 +1672,7 @@ func (op *Operation) VMDetachVolume(ctx context.Context, input *inputs.VMInput, 
 			Identifiers: input.Identifiers,
 			Force:       input.Force,
 		},
-		op.DB,
+		op.Connection.DB(),
 		op.Repos.VM,
 		op.Enr,
 	)
@@ -1847,8 +1818,7 @@ func (op *Operation) VMDetachVolume(ctx context.Context, input *inputs.VMInput, 
 //   - Delegates to executeCreate for provisioning
 //   - Matches Python's try/except MVMError → "error", Exception → "failure"
 func (op *Operation) VMImport(ctx context.Context, input *inputs.VMImportInput, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
-	ph := &host.PrivilegeHelper{}
-	if err := ph.CheckPrivileges("/usr/sbin/ip", "import VM"); err != nil {
+	if err := system.CheckPrivileges("/usr/sbin/ip", "import VM"); err != nil {
 		return &errs.OperationResult{
 			Status: "error", Code: string(errs.CodePrivilegeRequired),
 			Message:   fmt.Sprintf("Privilege check failed: %v", err),
@@ -1863,7 +1833,7 @@ func (op *Operation) VMImport(ctx context.Context, input *inputs.VMImportInput, 
 
 	// Use VMImportRequest for full semantic resolution pipeline
 	// (matches Python: VMImportRequest(inputs=inputs, db=db).resolve())
-	request := inputs.NewVMImportRequest(*input, op.DB)
+	request := inputs.NewVMImportRequest(*input, op.Connection.DB())
 	resolved, execErr = request.Resolve(ctx)
 	if execErr == nil {
 		// Set up signal-based cleanup (matches Python's SigtermContext(lambda: ctx.cleanup()))
@@ -1951,10 +1921,10 @@ func (op *Operation) VMExport(ctx context.Context, input *inputs.VMInput) (*inpu
 	}
 
 	// Resolve related asset metadata (matches Python's Repository(db).get(vm.image_id) etc.)
-	imageRepo := image.NewRepository(op.DB)
-	kernelRepo := kernel.NewRepository(op.DB)
-	binaryRepo := binary.NewRepository(op.DB)
-	netRepo := network.NewRepository(op.DB)
+	imageRepo := image.NewRepository(op.Connection.DB())
+	kernelRepo := kernel.NewRepository(op.Connection.DB())
+	binaryRepo := binary.NewRepository(op.Connection.DB())
+	netRepo := network.NewRepository(op.Connection.DB())
 
 	image, _ := imageRepo.Get(ctx, vmItem.ImageID)
 	kernel, _ := kernelRepo.Get(ctx, vmItem.KernelID)
@@ -2935,10 +2905,10 @@ func (c *vmCreateContext) toModel() *model.VM {
 }
 
 func (op *Operation) vmBuildResolvedInput(ctx context.Context, input *inputs.VMCreateInput, vmID, vmDir string) (*resolvedVMCreateInput, error) {
-	imageRepo := image.NewRepository(op.DB)
-	kernelRepo := kernel.NewRepository(op.DB)
-	netRepo := network.NewRepository(op.DB)
-	keyRepo := key.NewRepository(op.DB)
+	imageRepo := image.NewRepository(op.Connection.DB())
+	kernelRepo := kernel.NewRepository(op.Connection.DB())
+	netRepo := network.NewRepository(op.Connection.DB())
+	keyRepo := key.NewRepository(op.Connection.DB())
 
 	// Resolve image (handles selectors like "alpine:3.21" and ID prefixes)
 	var image *model.ImageItem
@@ -3008,7 +2978,7 @@ func (op *Operation) vmBuildResolvedInput(ctx context.Context, input *inputs.VMC
 	}
 
 	// Resolve binary from DB (matches Python's Repository resolution)
-	binaryRepo := binary.NewRepository(op.DB)
+	binaryRepo := binary.NewRepository(op.Connection.DB())
 	binary := op.vmResolveBinary(ctx, input.BinaryID, input.FirecrackerBin, binaryRepo)
 
 	// Resolve SSH keys
@@ -3102,8 +3072,8 @@ func (op *Operation) vmBuildResolvedInput(ctx context.Context, input *inputs.VMC
 
 	// Resolve provisioner type from settings (matches Python)
 	provisionerType := provisioner.ProvisionerLoopMount
-	if op.DB != nil {
-		row := op.DB.QueryRowContext(ctx, "SELECT value FROM user_settings WHERE category = 'settings' AND key = 'guestfs_enabled'")
+	if op.Connection != nil {
+		row := op.Connection.DB().QueryRowContext(ctx, "SELECT value FROM user_settings WHERE category = 'settings' AND key = 'guestfs_enabled'")
 		var val string
 		if err := row.Scan(&val); err == nil {
 			if val == "true" || val == "1" {

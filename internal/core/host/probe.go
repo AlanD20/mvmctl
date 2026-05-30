@@ -3,15 +3,12 @@ package host
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
-	"regexp"
 	"strconv"
 	"strings"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/model"
-	"mvmctl/internal/infra/ptr"
 	"mvmctl/internal/infra/system"
 )
 
@@ -25,10 +22,13 @@ func NewProbe() *Probe {
 
 // RunAll runs all pre-flight probes and returns aggregated result.
 // Matches Python's HostProbe.run_all().
-func (p *Probe) RunAll() *model.ProbeResult {
+//
+// Takes detection results as input instead of re-reading system files —
+// detector.go is the single source of truth for all /proc data.
+func (p *Probe) RunAll(hardware *model.HostHardware, limits *model.HostLimits, resources *model.HostResources) *model.ProbeResult {
 	result := &model.ProbeResult{}
 
-	for _, check := range p.checkVMHost() {
+	for _, check := range p.checkVMHost(hardware, limits, resources) {
 		if !check.Passed {
 			result.Critical = append(result.Critical, check)
 		} else {
@@ -44,7 +44,7 @@ func (p *Probe) RunAll() *model.ProbeResult {
 		}
 	}
 
-	for _, check := range p.checkFirewallReadiness() {
+	for _, check := range p.checkFirewallReadiness(resources) {
 		if !check.Passed {
 			result.Warnings = append(result.Warnings, check)
 		} else {
@@ -52,7 +52,7 @@ func (p *Probe) RunAll() *model.ProbeResult {
 		}
 	}
 
-	for _, check := range p.checkSystemResources() {
+	for _, check := range p.checkSystemResources(hardware, limits, resources) {
 		if !check.Passed {
 			result.Warnings = append(result.Warnings, check)
 		} else {
@@ -63,37 +63,19 @@ func (p *Probe) RunAll() *model.ProbeResult {
 	return result
 }
 
-// checkVMHost checks KVM and VM host prerequisites.
+// checkVMHost checks KVM and VM host prerequisites using pre-detected data.
 // Matches Python's HostProbe.check_vm_host() exactly.
-func (p *Probe) checkVMHost() []model.ProbeCheck {
+// No file I/O — all data comes from detector.go models.
+func (p *Probe) checkVMHost(hardware *model.HostHardware, limits *model.HostLimits, resources *model.HostResources) []model.ProbeCheck {
 	var checks []model.ProbeCheck
 
 	// --- CPU virtualization support (VMX/SVM) ---
-	hasVirt := false
-	data, err := os.ReadFile("/proc/cpuinfo")
-	if err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			if strings.HasPrefix(line, "flags") {
-				parts := strings.SplitN(line, ":", 2)
-				if len(parts) == 2 {
-					flags := strings.Fields(parts[1])
-					for _, f := range flags {
-						if f == "vmx" || f == "svm" {
-							hasVirt = true
-							break
-						}
-					}
-				}
-				break
-			}
-		}
-	}
-
+	hasVirt := hardware.CPUHasVMX
 	msg := "CPU virtualization extensions (VMX/SVM)"
-	var details *string
+	var details string
 	if !hasVirt {
 		msg = "CPU does not support hardware virtualization (VMX/SVM)"
-		details = ptr.Str("Enable VT-x/AMD-V in BIOS. Without it, VMs will be extremely slow.")
+		details = "Enable VT-x/AMD-V in BIOS. Without it, VMs will be extremely slow."
 	}
 	checks = append(checks, model.ProbeCheck{
 		Name:    "cpu_virtualization",
@@ -103,30 +85,29 @@ func (p *Probe) checkVMHost() []model.ProbeCheck {
 	})
 
 	// --- /dev/kvm ---
-	kvmPath := "/dev/kvm"
-
-	if _, err := os.Stat(kvmPath); os.IsNotExist(err) {
+	switch resources.DevKVMStatus {
+	case "missing":
 		checks = append(checks, model.ProbeCheck{
 			Name:    "dev_kvm",
 			Passed:  false,
 			Message: "/dev/kvm does not exist",
-			Details: ptr.Str("KVM kernel module not loaded. Run: sudo modprobe kvm && sudo modprobe kvm_intel (or kvm_amd)"),
+			Details: "KVM kernel module not loaded. Run: sudo modprobe kvm && sudo modprobe kvm_intel (or kvm_amd)",
 		})
-	} else if !system.AccessRW(kvmPath) {
+	case "no_permission":
 		checks = append(checks, model.ProbeCheck{
 			Name:    "dev_kvm",
 			Passed:  false,
 			Message: "/dev/kvm exists but is not readable/writable",
-			Details: ptr.Str("Add user to kvm group: sudo usermod -aG kvm $USER && newgrp kvm"),
+			Details: "Add user to kvm group: sudo usermod -aG kvm $USER && newgrp kvm",
 		})
-	} else if !hasVirt {
+	case "no_hardware":
 		checks = append(checks, model.ProbeCheck{
 			Name:    "dev_kvm",
 			Passed:  false,
 			Message: "/dev/kvm exists but no CPU virtualization support detected",
-			Details: ptr.Str("CPU may not support virtualization, or KVM is built into the kernel without /dev/kvm"),
+			Details: "CPU may not support virtualization, or KVM is built into the kernel without /dev/kvm",
 		})
-	} else {
+	default: // "ok"
 		checks = append(checks, model.ProbeCheck{
 			Name:    "dev_kvm",
 			Passed:  true,
@@ -135,14 +116,12 @@ func (p *Probe) checkVMHost() []model.ProbeCheck {
 	}
 
 	// --- /dev/net/tun ---
-	// Matches Python: tun_path.exists() and os.access(tun_path, os.R_OK | os.W_OK)
-	tunPath := "/dev/net/tun"
-	tunOK := system.AccessRW(tunPath)
+	tunOK := resources.DevNetTUNAccessible
 	tunMsg := "/dev/net/tun is accessible"
-	var tunDetails *string
+	var tunDetails string
 	if !tunOK {
 		tunMsg = "/dev/net/tun is not accessible"
-		tunDetails = ptr.Str("TUN/TAP networking will not work. Check permissions or load tun module.")
+		tunDetails = "TUN/TAP networking will not work. Check permissions or load tun module."
 	}
 	checks = append(checks, model.ProbeCheck{
 		Name:    "dev_net_tun",
@@ -158,29 +137,16 @@ func (p *Probe) checkVMHost() []model.ProbeCheck {
 	// Matches Python behavior: Python's lsmod reads /proc/modules internally.
 	// When KVM is built-in (CONFIG_KVM_INTEL=y), /proc/modules won't list it
 	// but /dev/kvm is still fully functional — the probe accepts this.
-	kvmModuleOK := system.AccessRW(kvmPath) && hasVirt
+	kvmModuleOK := resources.DevKVMStatus == "ok" && hasVirt
 	if !kvmModuleOK {
-		data, err = os.ReadFile("/proc/modules")
-		if err == nil {
-			for _, line := range strings.Split(string(data), "\n") {
-				line = strings.TrimSpace(line)
-				if line == "" {
-					continue
-				}
-				parts := strings.Fields(line)
-				if len(parts) > 0 && parts[0] == "kvm" {
-					kvmModuleOK = true
-					break
-				}
-			}
-		}
+		kvmModuleOK = resources.ModulesLoaded["kvm"]
 	}
 
 	kvmMsg := "KVM kernel module loaded"
-	var kvmDetails *string
+	var kvmDetails string
 	if !kvmModuleOK {
 		kvmMsg = "KVM kernel module not loaded"
-		kvmDetails = ptr.Str("Run: sudo modprobe kvm")
+		kvmDetails = "Run: sudo modprobe kvm"
 	}
 	checks = append(checks, model.ProbeCheck{
 		Name:    "kvm_module",
@@ -190,22 +156,13 @@ func (p *Probe) checkVMHost() []model.ProbeCheck {
 	})
 
 	// --- Kernel minimum version ---
-	release := system.KernelRelease()
-	re := regexp.MustCompile(`(\d+)\.(\d+)`)
-	match := re.FindStringSubmatch(release)
-	kernelMet := false
-	if match != nil {
-		var major, minor int
-		fmt.Sscanf(match[1], "%d", &major)
-		fmt.Sscanf(match[2], "%d", &minor)
-		kernelMet = (major > 5) || (major == 5 && minor >= 10)
-	}
-
+	release := hardware.KernelVersion
+	kernelMet := limits.KernelMinimumMet
 	kernelMsg := fmt.Sprintf("Kernel %s meets minimum 5.10", release)
-	var kernelDetails *string
+	var kernelDetails string
 	if !kernelMet {
 		kernelMsg = fmt.Sprintf("Kernel %s is below minimum 5.10", release)
-		kernelDetails = ptr.Str("Firecracker requires Linux kernel 5.10 or later.")
+		kernelDetails = "Firecracker requires Linux kernel 5.10 or later."
 	}
 	checks = append(checks, model.ProbeCheck{
 		Name:    "kernel_version",
@@ -215,28 +172,12 @@ func (p *Probe) checkVMHost() []model.ProbeCheck {
 	})
 
 	// --- Nested virtualization ---
-	nestedVirt := false
-	for _, nestedPath := range []string{
-		"/sys/module/kvm_intel/parameters/nested",
-		"/sys/module/kvm_amd/parameters/nested",
-	} {
-		data, err := os.ReadFile(nestedPath)
-		if err != nil {
-			continue
-		}
-		val := strings.TrimSpace(string(data))
-		lower := strings.ToLower(val)
-		if lower == "y" || lower == "1" || lower == "yes" || lower == "on" {
-			nestedVirt = true
-			break
-		}
-	}
-
+	nestedVirt := limits.NestedVirtAvailable
 	nestedMsg := "Nested virtualization supported"
-	var nestedDetails *string
+	var nestedDetails string
 	if !nestedVirt {
 		nestedMsg = "Nested virtualization not available"
-		nestedDetails = ptr.Str("Only needed for running VMs inside VMs. Set kvm_intel.nested=1 or kvm_amd.nested=1.")
+		nestedDetails = "Only needed for running VMs inside VMs. Set kvm_intel.nested=1 or kvm_amd.nested=1."
 	}
 	checks = append(checks, model.ProbeCheck{
 		Name:    "nested_virtualization",
@@ -256,10 +197,10 @@ func (p *Probe) checkInitBinaries() []model.ProbeCheck {
 		_, lookupErr := exec.LookPath(name)
 		found := lookupErr == nil
 		msg := fmt.Sprintf("Required binary '%s' found", name)
-		var details *string
+		var details string
 		if !found {
 			msg = fmt.Sprintf("Required binary '%s' not found", name)
-			details = ptr.Str(fmt.Sprintf("Install the package that provides '%s'", name))
+			details = fmt.Sprintf("Install the package that provides '%s'", name)
 		}
 		checks = append(checks, model.ProbeCheck{
 			Name:    "binary:" + name,
@@ -273,13 +214,11 @@ func (p *Probe) checkInitBinaries() []model.ProbeCheck {
 
 // checkFirewallReadiness checks firewall backend availability and detect conflicts.
 // Matches Python's HostProbe.check_firewall_readiness().
-func (p *Probe) checkFirewallReadiness() []model.ProbeCheck {
+func (p *Probe) checkFirewallReadiness(resources *model.HostResources) []model.ProbeCheck {
 	var checks []model.ProbeCheck
 
-	_, nftLookupErr := exec.LookPath("nft")
-	nftAvailable := nftLookupErr == nil
-	_, iptLookupErr := exec.LookPath("iptables")
-	iptAvailable := iptLookupErr == nil
+	nftAvailable := resources.NftablesAvailable
+	iptAvailable := resources.IptablesAvailable
 
 	msg := "nftables available"
 	if !nftAvailable {
@@ -289,7 +228,6 @@ func (p *Probe) checkFirewallReadiness() []model.ProbeCheck {
 		Name:    "nftables",
 		Passed:  nftAvailable,
 		Message: msg,
-		Details: nil,
 	})
 
 	msg = "iptables available"
@@ -300,7 +238,6 @@ func (p *Probe) checkFirewallReadiness() []model.ProbeCheck {
 		Name:    "iptables",
 		Passed:  iptAvailable,
 		Message: msg,
-		Details: nil,
 	})
 
 	// Mixed backend detection
@@ -311,7 +248,7 @@ func (p *Probe) checkFirewallReadiness() []model.ProbeCheck {
 				Name:    "firewall_conflict",
 				Passed:  false,
 				Message: "Mixed iptables backends detected",
-				Details: ptr.Str("Both legacy and nft iptables backends are active. This may cause networking issues."),
+				Details: "Both legacy and nft iptables backends are active. This may cause networking issues.",
 			})
 		}
 	}
@@ -321,49 +258,29 @@ func (p *Probe) checkFirewallReadiness() []model.ProbeCheck {
 
 // checkSystemResources checks system resource thresholds.
 // Matches Python's HostProbe.check_system_resources().
-func (p *Probe) checkSystemResources() []model.ProbeCheck {
+func (p *Probe) checkSystemResources(hardware *model.HostHardware, limits *model.HostLimits, resources *model.HostResources) []model.ProbeCheck {
 	var checks []model.ProbeCheck
 
 	// Swap check
-	totalMem := 0
-	totalSwap := 0
-	data, err := os.ReadFile("/proc/meminfo")
-	if err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			if strings.HasPrefix(line, "MemTotal:") {
-				parts := strings.Fields(line)
-				if len(parts) >= 2 {
-					totalMem, _ = strconv.Atoi(parts[1])
-				}
-			} else if strings.HasPrefix(line, "SwapTotal:") {
-				parts := strings.Fields(line)
-				if len(parts) >= 2 {
-					totalSwap, _ = strconv.Atoi(parts[1])
-				}
-			}
-		}
-	}
-
-	totalMemMiB := totalMem / 1024
-	totalSwapMiB := totalSwap / 1024
+	totalMemMiB := hardware.MemoryTotalMiB
+	totalSwapMiB := limits.SwapTotalMiB
 	if totalSwapMiB < totalMemMiB/2 && totalMemMiB > 1024 {
 		msg := fmt.Sprintf("Swap (%d MiB) is less than half of RAM (%d MiB)", totalSwapMiB, totalMemMiB)
 		checks = append(checks, model.ProbeCheck{
 			Name:    "swap_size",
 			Passed:  false,
 			Message: msg,
-			Details: ptr.Str("Low swap may cause OOM under high VM load. Consider increasing swap."),
+			Details: "Low swap may cause OOM under high VM load. Consider increasing swap.",
 		})
 	}
 
 	// cloud-localds
-	_, clLookupErr := exec.LookPath("cloud-localds")
-	clAvailable := clLookupErr == nil
+	clAvailable := resources.CloudLocaldsAvailable
 	clMsg := "cloud-localds available"
-	var clDetails *string
+	var clDetails string
 	if !clAvailable {
 		clMsg = "cloud-localds not found"
-		clDetails = ptr.Str("Install cloud-image-utils (Debian/Ubuntu) or cloud-utils (Arch)")
+		clDetails = "Install cloud-image-utils (Debian/Ubuntu) or cloud-utils (Arch)"
 	}
 	checks = append(checks, model.ProbeCheck{
 		Name:    "cloud_localds",
@@ -373,16 +290,11 @@ func (p *Probe) checkSystemResources() []model.ProbeCheck {
 	})
 
 	// Huge pages info
-	nrHugepages := 0
-	data, err = os.ReadFile("/sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages")
-	if err == nil {
-		nrHugepages, _ = strconv.Atoi(strings.TrimSpace(string(data)))
-	}
-	if nrHugepages > 0 {
+	if limits.HugepageCount2MB > 0 {
 		checks = append(checks, model.ProbeCheck{
 			Name:    "hugepages",
 			Passed:  true,
-			Message: fmt.Sprintf("%d x 2MB hugepages configured", nrHugepages),
+			Message: fmt.Sprintf("%d x 2MB hugepages configured", limits.HugepageCount2MB),
 		})
 	}
 
@@ -413,7 +325,7 @@ func detectIPTablesBackendConflict() bool {
 	legacyOpts.Privileged = true
 	legacyResult := system.RunCmdCompat(ctx, []string{"iptables-legacy", "-L", "-n", "-v"}, legacyOpts)
 	if legacyResult.ExitCode == 0 {
-		for _, line := range strings.Split(legacyResult.Stdout, "\n") {
+		for line := range strings.SplitSeq(legacyResult.Stdout, "\n") {
 			parts := strings.Fields(line)
 			if len(parts) >= 2 {
 				if pkts, err := strconv.Atoi(parts[0]); err == nil && pkts > 0 {
@@ -430,7 +342,7 @@ func detectIPTablesBackendConflict() bool {
 	nftOpts.Privileged = true
 	nftResult := system.RunCmdCompat(ctx, []string{"iptables", "-L", "-n", "-v"}, nftOpts)
 	if nftResult.ExitCode == 0 {
-		for _, line := range strings.Split(nftResult.Stdout, "\n") {
+		for line := range strings.SplitSeq(nftResult.Stdout, "\n") {
 			parts := strings.Fields(line)
 			if len(parts) >= 2 {
 				if pkts, err := strconv.Atoi(parts[0]); err == nil && pkts > 0 {

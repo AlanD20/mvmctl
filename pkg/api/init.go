@@ -6,10 +6,8 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/db"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api/inputs"
@@ -37,8 +35,8 @@ func (op *Operation) InitCheckReadiness() *model.ProbeResult {
 
 // InitSetupHost sets up host configuration.
 // Matches Python's InitOperation.setup_host() exactly.
-func (op *Operation) InitSetupHost(ctx context.Context, cacheDir string) *errs.OperationResult {
-	raw := op.HostInit(ctx, cacheDir, nil)
+func (op *Operation) InitSetupHost(ctx context.Context) *errs.OperationResult {
+	raw := op.HostInit(ctx, nil)
 	if result, ok := raw.(*errs.OperationResult); ok {
 		return result
 	}
@@ -150,8 +148,8 @@ func (op *Operation) initInitDatabase(ctx context.Context) InitStepResult {
 	//         return InitStepResult("local_state", False, f"Failed: {e}")
 	// Python's init_database: db = Database(); db.migrate()
 	// Go: run migrations via db.RunMigrationsCtx, wrapped in explicit error handling.
-	if op.DB != nil {
-		if _, err := db.RunMigrationsCtx(ctx, op.DB, filepath.Join(op.CacheDir, infra.MVMDBFilename)); err != nil {
+	if op.Connection != nil {
+		if _, err := op.Connection.RunMigrationsCtx(ctx); err != nil {
 			return InitStepResult{Step: "local_state", Success: false, Message: fmt.Sprintf("Failed: %v", err)}
 		}
 	}
@@ -171,7 +169,7 @@ func (op *Operation) initStepHost(ctx context.Context, skip bool, sudoCompleted 
 		return InitStepResult{Step: "host", Success: true, Message: msg}, nil
 	}
 
-	initResult := op.HostInit(ctx, op.CacheDir, onProgress)
+	initResult := op.HostInit(ctx, onProgress)
 	if initResult == nil {
 		return InitStepResult{Step: "host", Success: false, Message: "Host init returned no result"}, nil
 	}

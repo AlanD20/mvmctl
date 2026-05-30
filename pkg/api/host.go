@@ -4,12 +4,9 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -17,21 +14,14 @@ import (
 	"mvmctl/internal/core/host"
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/db"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	infranet "mvmctl/internal/infra/network"
 	"mvmctl/internal/infra/system"
-	"mvmctl/internal/infra/validators"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/pkg/api/responses"
 )
-
-// WithDB sets the database connection for migration calls.
-// Must be called before HostInit if DB migration is needed.
-func (op *Operation) HostWithDB(database *sql.DB) {
-	op.DB = database
-}
 
 // HostInit initializes host configuration.
 // Matches Python's HostOperation.init() exactly — returns NeedsInteraction directly
@@ -43,17 +33,15 @@ func (op *Operation) HostWithDB(database *sql.DB) {
 // Returns *errs.OperationResult (success/error/skipped) or
 // *errs.NeedsInteraction (when sudo required).
 // OperationResult.Item varies: nil (success/skipped) or []string (error details).
-func (op *Operation) HostInit(ctx context.Context, cacheDir string, onProgress func(errs.ProgressEvent)) interface{} {
-	ph := &host.PrivilegeHelper{}
-
+func (op *Operation) HostInit(ctx context.Context, onProgress func(errs.ProgressEvent)) any {
 	// Check for privileges — returns NeedsInteraction if not available
-	if err := ph.CheckPrivileges("/usr/sbin/ip", "initialize host"); err != nil {
-		hasGroup := ph.SessionHasGroup()
+	if err := system.CheckPrivileges("/usr/sbin/ip", "initialize host"); err != nil {
+		hasGroup := system.SessionHasGroup()
 		return &errs.NeedsInteraction{
 			Code:      "privilege.sudo_required",
 			Message:   "Elevated privileges required for host initialization",
 			InputType: "sudo",
-			Context: map[string]interface{}{
+			Context: map[string]any{
 				"command":           "sudo mvm host init",
 				"operation":         "initialize host",
 				"session_has_group": hasGroup,
@@ -64,17 +52,17 @@ func (op *Operation) HostInit(ctx context.Context, cacheDir string, onProgress f
 	// Ensure DB schema exists before any DB writes, matching Python:
 	//   # Ensure DB schema exists before any DB writes.
 	//   Database().migrate()
-	if op.DB != nil {
-		_, _ = db.RunMigrationsCtx(ctx, op.DB, filepath.Join(op.CacheDir, infra.MVMDBFilename))
+	if op.Connection != nil {
+		_, _ = op.Connection.RunMigrationsCtx(ctx)
 	}
 
-	if os.Geteuid() != 0 {
-		hasGroup := ph.SessionHasGroup()
+	if !system.IsRoot() {
+		hasGroup := system.SessionHasGroup()
 		return &errs.NeedsInteraction{
 			Code:      "privilege.sudo_required",
 			Message:   "Root privileges required for host initialization",
 			InputType: "sudo",
-			Context: map[string]interface{}{
+			Context: map[string]any{
 				"command":           "sudo mvm host init",
 				"operation":         "initialize host",
 				"session_has_group": hasGroup,
@@ -82,12 +70,16 @@ func (op *Operation) HostInit(ctx context.Context, cacheDir string, onProgress f
 		}
 	}
 
-	// Chown cache directory to real user
-	infra.ChownToRealUser(cacheDir)
-
 	// --- Pre-flight probes ---
+	// Run detection first, then probe against the detected state (verdict #53).
+	hardware, detErr := host.DetectHardware()
+	if detErr != nil {
+		return &errs.OperationResult{Status: "error", Code: "host.init.detect_failed", Message: fmt.Sprintf("Hardware detection failed: %v", detErr)}
+	}
+	limits := host.DetectLimits()
+	resources, _ := host.DetectResources(hardware, limits, op.CacheDir)
 	probe := &host.Probe{}
-	probeResult := probe.RunAll()
+	probeResult := probe.RunAll(hardware, limits, resources)
 	if len(probeResult.Critical) > 0 {
 		criticalNames := make([]string, len(probeResult.Critical))
 		for i, c := range probeResult.Critical {
@@ -97,15 +89,21 @@ func (op *Operation) HostInit(ctx context.Context, cacheDir string, onProgress f
 			Status:  "error",
 			Code:    "host.init.probe_failed",
 			Message: fmt.Sprintf("Probe failures: %s", strings.Join(criticalNames, ", ")),
-			Metadata: map[string]interface{}{
+			Metadata: map[string]any{
 				"probe_result": probeResult,
 			},
 		}
 	}
 
-	// --- iptables comment module check ---
+	// Resolve firewall backend once (verdict #44).
 	fwBackendRaw, _ := op.Services.Config.Get(ctx, "settings", "firewall_backend")
-	if fwBackend, ok := fwBackendRaw.(string); ok && fwBackend == "iptables" {
+	fwBackend := "nftables"
+	if s, ok := fwBackendRaw.(string); ok {
+		fwBackend = s
+	}
+
+	// --- iptables comment module check ---
+	if fwBackend == "iptables" {
 		if !infranet.CheckIPTablesCommentAvailable() {
 			slog.Info("iptables comment module (xt_comment) not available; rule comments will be skipped")
 			_ = op.Services.Config.Set(ctx, "settings.firewall", "iptables_xtcomment", false)
@@ -113,12 +111,12 @@ func (op *Operation) HostInit(ctx context.Context, cacheDir string, onProgress f
 	}
 
 	// --- Initialize host state ---
+	sessionID := infra.UUIDV4()
 	hostCtrl := host.NewController(op.Repos.Host)
 	_, _ = op.Repos.Host.InitializeState(ctx)
-	sessionID := infra.UUIDV4()
 
 	// --- Setup host environment ---
-	allChanges, err := op.hostSetupHostEnvironment(ctx, sessionID, hostCtrl)
+	allChanges, err := op.hostInitSetupEnvironment(ctx, sessionID, hostCtrl, fwBackend)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:  "error",
@@ -134,11 +132,11 @@ func (op *Operation) HostInit(ctx context.Context, cacheDir string, onProgress f
 		slog.Warn("Could not mark host as initialized", "error", err)
 	}
 
-	infra.ChownToRealUser(cacheDir)
+	infra.ChownToRealUser(op.CacheDir)
 
 	// Audit log
-	auditLog := logging.NewAuditLog(cacheDir)
-	_ = auditLog.LogOperation("host.init", map[string]interface{}{"changes": len(allChanges)}, "")
+	auditLog := logging.NewAuditLog(op.CacheDir)
+	_ = auditLog.LogOperation("host.init", map[string]any{"changes": len(allChanges)}, "")
 
 	wasUserAdded := false
 	for _, c := range allChanges {
@@ -156,21 +154,19 @@ func (op *Operation) HostInit(ctx context.Context, cacheDir string, onProgress f
 		}
 	}
 
-	ph2 := &host.PrivilegeHelper{}
-
 	return &errs.OperationResult{
 		Status:  "success",
 		Code:    "host.init.complete",
 		Message: fmt.Sprintf("Host initialized (%d change(s) applied).", len(allChanges)),
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"changes":             allChanges,
 			"user_added_to_group": wasUserAdded,
-			"session_has_group":   ph2.SessionHasGroup(),
+			"session_has_group":   system.SessionHasGroup(),
 		},
 	}
 }
 
-func (op *Operation) hostSetupHostEnvironment(ctx context.Context, sessionID string, hostCtrl *host.Controller) ([]*model.HostStateChangeItem, error) {
+func (op *Operation) hostInitSetupEnvironment(ctx context.Context, sessionID string, hostCtrl *host.Controller, fwBackend string) ([]*model.HostStateChangeItem, error) {
 	allChanges := make([]*model.HostStateChangeItem, 0)
 	dbChanges := make([]*model.HostStateChangeItem, 0)
 
@@ -202,21 +198,14 @@ func (op *Operation) hostSetupHostEnvironment(ctx context.Context, sessionID str
 	}
 
 	// --- Sudoers setup ---
-	// Python: validate group name BEFORE writing sudoers.
-	//         if not re.fullmatch(r"[a-z][a-z0-9_-]{0,30}", MVM_UNIX_GROUP):
-	//             raise HostError(f"Invalid group name: {MVM_UNIX_GROUP!r}")
-	if !regexp.MustCompile(`^[a-z][a-z0-9_-]{0,30}$`).MatchString(infra.MVMUnixGroup) {
-		return allChanges, fmt.Errorf("Invalid group name: %q", infra.MVMUnixGroup)
-	}
-
 	sudoersPath := infra.SudoersDropInPath()
+	sudoersContent := host.GenerateSudoersContent(infra.MVMUnixGroup)
 	sudoersStale := true
 	if data, err := os.ReadFile(sudoersPath); err == nil {
-		expected := host.GenerateSudoersContent(infra.MVMUnixGroup)
-		sudoersStale = string(data) != expected
+		sudoersStale = string(data) != sudoersContent
 	}
 	if sudoersStale {
-		_ = host.WriteSudoers(ctx, sudoersPath, infra.MVMUnixGroup)
+		_ = host.WriteSudoers(ctx, sudoersPath, sudoersContent)
 		change := &model.HostStateChangeItem{
 			SessionID: "", Setting: "sudoers_dropin",
 			Mechanism: "file_create", AppliedValue: sudoersPath,
@@ -241,17 +230,12 @@ func (op *Operation) hostSetupHostEnvironment(ctx context.Context, sessionID str
 	}
 
 	// --- KVM modules ---
-	moduleChanges, nextOrder, _ := host.EnsureKVMModules(ctx, op.Repos.Host, sessionID, 0)
+	moduleChanges, nextOrder, _ := op.Services.Host.EnsureKVMModules(ctx, sessionID, 0)
 	allChanges = append(allChanges, moduleChanges...)
 
 	// --- Firewall chains ---
 	_ = op.Services.Network.EnsureMVMChains(ctx)
 
-	fwBackendRaw, _ := op.Services.Config.Get(ctx, "settings", "firewall_backend")
-	fwBackend := "nftables"
-	if s, ok := fwBackendRaw.(string); ok {
-		fwBackend = s
-	}
 	chainChange := &model.HostStateChangeItem{
 		SessionID: "", Setting: fmt.Sprintf("%s_chains", fwBackend),
 		Mechanism: fwBackend, AppliedValue: "MVM chains ensured",
@@ -298,8 +282,8 @@ func (op *Operation) HostDetectResources(ctx context.Context) (*model.HostResour
 	var hardware *model.HostHardware
 	var limits *model.HostLimits
 	if state != nil && state.CPUModel != nil {
-		hardware = hardwareFromState(state)
-		limits = limitsFromState(state)
+		hardware = host.HardwareFromState(state)
+		limits = host.LimitsFromState(state)
 	} else {
 		var detErr error
 		hardware, detErr = host.DetectHardware()
@@ -320,26 +304,16 @@ func (op *Operation) HostDetectResources(ctx context.Context) (*model.HostResour
 
 // HostNetworkSetup sets up the default network.
 // Matches Python's HostOperation.network_setup() exactly — static call to
-// NetworkOperation.sync() with try/except wrapping.
 func (op *Operation) HostNetworkSetup(ctx context.Context) *errs.OperationResult {
-	// Python: restored_result = NetworkOperation.sync()
-	//         if restored_result.is_ok and not restored_result.item:
-	//             default_result = NetworkOperation.create_default_network()
-	//             if default_result.is_error:
-	//                 logger.warning(...)
-	//                 return default_result
-	//         return OperationResult(status="success", code="network.default_ready")
 	syncResult := op.NetworkSync(ctx, "")
 	if syncResult.IsOK() {
-		// Python: if restored_result.is_ok and not restored_result.item:
-		//         (Python checks "not restored_result.item" — nil/empty/None)
 		itemEmpty := syncResult.Item == nil
 		if !itemEmpty {
 			// Check for empty collection types
 			switch v := syncResult.Item.(type) {
-			case []interface{}:
+			case []any:
 				itemEmpty = len(v) == 0
-			case map[string]interface{}:
+			case map[string]any:
 				itemEmpty = len(v) == 0
 			}
 		}
@@ -379,8 +353,8 @@ func (op *Operation) HostInfo(ctx context.Context) *errs.OperationResult {
 		}
 	}
 
-	hardware := hardwareFromState(state)
-	limits := limitsFromState(state)
+	hardware := host.HardwareFromState(state)
+	limits := host.LimitsFromState(state)
 
 	if hardware == nil || limits == nil {
 		// Auto-detect if this is the first time
@@ -418,11 +392,9 @@ func (op *Operation) HostInfo(ctx context.Context) *errs.OperationResult {
 		Limits:    *limits,
 		Hardware:  *hardware,
 	}
-	infoDict := hostInfoToDict(info)
-
 	return &errs.OperationResult{
 		Status: "success", Code: "host.info",
-		Item: infoDict,
+		Item: responses.BuildHostInfo(info),
 	}
 }
 
@@ -462,11 +434,9 @@ func (op *Operation) HostRefreshCapacity(ctx context.Context) *errs.OperationRes
 		Limits:    *limits,
 		Hardware:  *hardware,
 	}
-	infoDict := hostInfoToDict(info)
-
 	return &errs.OperationResult{
 		Status: "success", Code: "host.capacity.refreshed",
-		Item: infoDict,
+		Item: responses.BuildHostInfo(info),
 	}
 }
 
@@ -482,19 +452,14 @@ func (op *Operation) HostCheckRequiredBinaries() []string {
 
 // HostGetIPForwardStatus returns IP forwarding status.
 func (op *Operation) HostGetIPForwardStatus(ctx context.Context) (string, error) {
-	result := system.RunCmdCompat(ctx, []string{"sysctl", "-n", "net.ipv4.ip_forward"}, system.RunCmdOptions{Capture: true})
-	if result.Err != nil {
-		return "", fmt.Errorf("failed to read net.ipv4.ip_forward: %w", result.Err)
-	}
-	return strings.TrimSpace(result.Stdout), nil
+	return host.GetIPForwardStatus(ctx)
 }
 
 // HostClean cleans host networking configuration.
 // Matches Python's HostOperation.clean() exactly — wraps errors in HostError/NetworkError pattern.
 func (op *Operation) HostClean(ctx context.Context, cacheDir string) *errs.OperationResult {
 
-	ph := &host.PrivilegeHelper{}
-	if err := ph.CheckPrivileges("/usr/sbin/ip", "clean host"); err != nil {
+	if err := system.CheckPrivileges("/usr/sbin/ip", "clean host"); err != nil {
 		return &errs.OperationResult{
 			Status: "error", Code: string(errs.CodePrivilegeRequired),
 			Message:   fmt.Sprintf("Privilege check failed: %v", err),
@@ -590,7 +555,7 @@ func (op *Operation) HostClean(ctx context.Context, cacheDir string) *errs.Opera
 	}
 
 	auditLog := logging.NewAuditLog(cacheDir)
-	_ = auditLog.LogOperation("host.clean", map[string]interface{}{"actions": len(summary)}, "")
+	_ = auditLog.LogOperation("host.clean", map[string]any{"actions": len(summary)}, "")
 
 	return &errs.OperationResult{
 		Status: "success", Code: "host.cleaned",
@@ -603,8 +568,7 @@ func (op *Operation) HostClean(ctx context.Context, cacheDir string) *errs.Opera
 // Matches Python's HostOperation.reset() exactly — usermod processing order matches.
 func (op *Operation) HostReset(ctx context.Context, cacheDir string) *errs.OperationResult {
 
-	ph := &host.PrivilegeHelper{}
-	if err := ph.CheckPrivileges("/usr/sbin/ip", "reset host"); err != nil {
+	if err := system.CheckPrivileges("/usr/sbin/ip", "reset host"); err != nil {
 		return &errs.OperationResult{
 			Status: "error", Code: string(errs.CodePrivilegeRequired),
 			Message:   fmt.Sprintf("Privilege check failed: %v", err),
@@ -633,10 +597,12 @@ func (op *Operation) HostReset(ctx context.Context, cacheDir string) *errs.Opera
 		}
 	}
 
+	// Single query for all host state changes (verdict #44).
+	allHostChanges, _ := op.Repos.Host.ListChanges(ctx, nil, false)
+
 	// Notify about kernel modules that were left loaded
-	moduleChanges, _ := op.Repos.Host.ListChanges(ctx, nil, false)
 	var activeModules []string
-	for _, c := range moduleChanges {
+	for _, c := range allHostChanges {
 		if c.Setting == "kernel_module_load" {
 			activeModules = append(activeModules, c.AppliedValue)
 		}
@@ -656,9 +622,8 @@ func (op *Operation) HostReset(ctx context.Context, cacheDir string) *errs.Opera
 
 	// Python: Remove user from group FIRST, then remove group (matches Python order)
 	// Python only processes the LAST usermod change (usermod_changes[-1].applied_value).
-	usermodChanges, _ := op.Repos.Host.ListChanges(ctx, nil, false)
 	var lastUsermod *model.HostStateChangeItem
-	for _, c := range usermodChanges {
+	for _, c := range allHostChanges {
 		if c.Mechanism == "usermod" {
 			lastUsermod = c
 		}
@@ -685,7 +650,7 @@ func (op *Operation) HostReset(ctx context.Context, cacheDir string) *errs.Opera
 	_ = op.Repos.Host.ResetState(ctx)
 
 	auditLog := logging.NewAuditLog(cacheDir)
-	_ = auditLog.LogOperation("host.reset", map[string]interface{}{"actions": len(summary)}, "")
+	_ = auditLog.LogOperation("host.reset", map[string]any{"actions": len(summary)}, "")
 
 	return &errs.OperationResult{
 		Status: "success", Code: "host.reset",
@@ -710,201 +675,12 @@ func (op *Operation) HostIsInitialized(ctx context.Context) bool {
 // HostCheckReadiness runs pre-flight checks.
 // Matches Python's HostOperation.check_readiness().
 func (op *Operation) HostCheckReadiness() *model.ProbeResult {
+	hardware, _ := host.DetectHardware()
+	limits := host.DetectLimits()
+	resources, _ := host.DetectResources(hardware, limits, op.CacheDir)
 	probe := &host.Probe{}
-	return probe.RunAll()
+	return probe.RunAll(hardware, limits, resources)
 }
 
 // ── Host helpers inlined from internal/core/host/_host_info.go ──
 // (Go ignores files starting with _, so these were never compiled into the host package.)
-
-// hardwareFromState reconstructs HostHardware from stored state, or returns nil if not yet detected.
-func hardwareFromState(state *model.HostStateItem) *model.HostHardware {
-	if state.CPUModel == nil {
-		return nil
-	}
-	h := &model.HostHardware{}
-	if state.Hostname != nil {
-		h.Hostname = *state.Hostname
-	}
-	if state.CPUModel != nil {
-		h.CPUModel = *state.CPUModel
-	}
-	if state.CPUVendor != nil {
-		h.CPUVendor = *state.CPUVendor
-	}
-	if state.CPUCores != nil {
-		h.CPUCores = *state.CPUCores
-	}
-	if state.CPUArchitecture != nil {
-		h.CPUArchitecture = *state.CPUArchitecture
-	}
-	if state.NumaNodes != nil && *state.NumaNodes != 0 {
-		h.NumaNodes = *state.NumaNodes
-	} else {
-		h.NumaNodes = 1
-	}
-	if state.MemoryTotalMiB != nil {
-		h.MemoryTotalMiB = *state.MemoryTotalMiB
-	}
-	if state.StorageTotalBytes != nil {
-		h.StorageTotalBytes = *state.StorageTotalBytes
-	}
-	if state.KernelVersion != nil {
-		h.KernelVersion = *state.KernelVersion
-	}
-	if state.OSRelease != nil {
-		h.OSRelease = *state.OSRelease
-	}
-	if state.CPUHasVMX != nil {
-		h.CPUHasVMX = *state.CPUHasVMX != 0
-	}
-	if state.CPUHypervisor != nil {
-		h.CPUHypervisor = *state.CPUHypervisor != 0
-	}
-	return h
-}
-
-// limitsFromState reconstructs HostLimits from stored state, or returns nil if not yet detected.
-func limitsFromState(state *model.HostStateItem) *model.HostLimits {
-	if state.PIDMax == nil {
-		return nil
-	}
-	var portRange [2]int
-	if state.IPLocalPortRange != nil {
-		portRange = validators.ParsePortRange(*state.IPLocalPortRange)
-	} else {
-		portRange = [2]int{32768, 60999}
-	}
-	l := &model.HostLimits{}
-	if state.PIDMax != nil {
-		l.PIDMax = *state.PIDMax
-	}
-	if state.FDMax != nil {
-		l.FDMax = *state.FDMax
-	}
-	if state.ConntrackMax != nil {
-		l.ConntrackMax = *state.ConntrackMax
-	}
-	if state.TAPDevicesMax != nil {
-		l.TAPDevicesMax = *state.TAPDevicesMax
-	}
-	l.IPLocalPortRange = portRange
-	if state.NestedVirtAvailable != nil {
-		l.NestedVirtAvailable = *state.NestedVirtAvailable != 0
-	}
-	if state.EPTAvailable != nil {
-		l.EPTAvailable = *state.EPTAvailable != 0
-	}
-	if state.HugepageCount2MB != nil {
-		l.HugepageCount2MB = *state.HugepageCount2MB
-	}
-	if state.KSMDisabled != nil {
-		l.KSMDisabled = *state.KSMDisabled != 0
-	} else {
-		l.KSMDisabled = true
-	}
-	if state.CgroupVersion != nil && *state.CgroupVersion != 0 {
-		l.CgroupVersion = *state.CgroupVersion
-	} else {
-		l.CgroupVersion = 1
-	}
-	if state.SwapTotalMiB != nil {
-		l.SwapTotalMiB = *state.SwapTotalMiB
-	}
-	if state.KernelMinimumMet != nil {
-		l.KernelMinimumMet = *state.KernelMinimumMet != 0
-	}
-	return l
-}
-
-// hostInfoToDict builds the standardised info response dict from host info.
-func hostInfoToDict(hi *model.HostInfo) map[string]interface{} {
-	detectedAt := ""
-	if hi.State.DetectedAt != nil {
-		detectedAt = *hi.State.DetectedAt
-	}
-
-	modulesLoaded := make(map[string]bool)
-	for k, v := range hi.Resources.ModulesLoaded {
-		modulesLoaded[k] = v
-	}
-
-	return map[string]interface{}{
-		"detected_at": detectedAt,
-		"hostname":    hi.Hardware.Hostname,
-		"os": map[string]interface{}{
-			"kernel":  hi.Hardware.KernelVersion,
-			"release": hi.Hardware.OSRelease,
-		},
-		"cpu": map[string]interface{}{
-			"model":        hi.Hardware.CPUModel,
-			"vendor":       hi.Hardware.CPUVendor,
-			"cores":        hi.Hardware.CPUCores,
-			"architecture": hi.Hardware.CPUArchitecture,
-			"numa_nodes":   hi.Hardware.NumaNodes,
-		},
-		"virtualization": map[string]interface{}{
-			"cpu_has_vmx":           hi.Hardware.CPUHasVMX,
-			"nested_virt_available": hi.Limits.NestedVirtAvailable,
-			"ept_available":         hi.Limits.EPTAvailable,
-			"hypervisor":            hi.Hardware.CPUHypervisor,
-			"smt_active":            hi.Resources.SMTActive,
-			"modules":               modulesLoaded,
-		},
-		"hugepages": map[string]interface{}{
-			"count_2mb": hi.Limits.HugepageCount2MB,
-			"free_2mb":  hi.Resources.HugepagesFree2MB,
-		},
-		"dependencies": map[string]interface{}{
-			"nftables_available":      hi.Resources.NftablesAvailable,
-			"iptables_available":      hi.Resources.IptablesAvailable,
-			"cloud_localds_available": hi.Resources.CloudLocaldsAvailable,
-			"dev_net_tun":             hi.Resources.DevNetTUNAccessible,
-		},
-		"system": map[string]interface{}{
-			"cgroup_version":    hi.Limits.CgroupVersion,
-			"ksm_disabled":      hi.Limits.KSMDisabled,
-			"dev_kvm_status":    hi.Resources.DevKVMStatus,
-			"user_in_kvm_group": hi.Resources.UserInKVMGroup,
-		},
-		"memory": map[string]interface{}{
-			"total_mib":      hi.Hardware.MemoryTotalMiB,
-			"available_mib":  hi.Resources.MemoryAvailableMiB,
-			"swap_total_mib": hi.Limits.SwapTotalMiB,
-			"swap_used_mib":  hi.Resources.SwapUsedMiB,
-		},
-		"storage": map[string]interface{}{
-			"total_bytes": hi.Hardware.StorageTotalBytes,
-			"free_bytes":  hi.Resources.StorageFreeBytes,
-		},
-		"kernel": map[string]interface{}{
-			"version":             hi.Hardware.KernelVersion,
-			"minimum_version_met": hi.Limits.KernelMinimumMet,
-		},
-		"limits": map[string]interface{}{
-			"pid_max":             hi.Limits.PIDMax,
-			"fd_max":              hi.Limits.FDMax,
-			"conntrack_max":       hi.Limits.ConntrackMax,
-			"tap_devices_max":     hi.Limits.TAPDevicesMax,
-			"ip_local_port_range": []int{hi.Limits.IPLocalPortRange[0], hi.Limits.IPLocalPortRange[1]},
-		},
-		"capacity": map[string]interface{}{
-			"current": map[string]interface{}{
-				"pids":        hi.Resources.PIDsCurrent,
-				"fds":         hi.Resources.FDCurrent,
-				"conntrack":   hi.Resources.ConntrackCurrent,
-				"tap_devices": hi.Resources.TAPDevicesUsed,
-				"arp_entries": hi.Resources.ARPCurrent,
-			},
-			"recommended_max_vms": hi.Resources.RecommendedMaxVMs,
-			"limiting_resource":   hi.Resources.LimitingResource,
-		},
-		"setup": map[string]interface{}{
-			"initialized":    hi.State.Initialized,
-			"initialized_at": hi.State.InitializedAt,
-		},
-	}
-}
-
-// Compile-time checks
-var _ = regexp.MustCompile

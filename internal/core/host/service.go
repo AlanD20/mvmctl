@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,7 +30,7 @@ func NewService(repo Repository) *Service {
 
 // ── EnableIPForward ──
 func EnableIPForward(ctx context.Context) (*model.HostStateChangeItem, error) {
-	current, err := getIPForwardStatus(ctx)
+	current, err := GetIPForwardStatus(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -37,14 +38,9 @@ func EnableIPForward(ctx context.Context) (*model.HostStateChangeItem, error) {
 		slog.Debug("IP forwarding already enabled")
 		return nil, nil
 	}
-	_, err = hostRunCmd(ctx,
-		[]string{"sysctl", "-w", fmt.Sprintf("%s=1", sysctlKey)},
-		"Failed to enable IP forwarding",
-		"sysctl command not found",
-		true, true,
-	)
-	if err != nil {
-		return nil, err
+	res := system.RunCmdCompat(ctx, []string{"sysctl", "-w", fmt.Sprintf("%s=1", sysctlKey)}, system.DefaultRunCmdOpts())
+	if res.Err != nil {
+		return nil, fmt.Errorf("failed to enable IP forwarding: %w", res.Err)
 	}
 	return &model.HostStateChangeItem{
 		SessionID:     "",
@@ -103,39 +99,11 @@ func PersistSysctl(ctx context.Context) (*model.HostStateChangeItem, error) {
 	}, nil
 }
 
-// ── isModuleLoaded ──
-// TODO: Move to infra/ (verdict #33).
-func isModuleLoaded(ctx context.Context, module string) bool {
-	opts := system.DefaultRunCmdOpts()
-	opts.Check = false
-	result := system.RunCmdCompat(ctx, []string{"lsmod"}, opts)
-	if result.ExitCode != 0 {
-		return false
-	}
-	for _, line := range strings.Split(result.Stdout, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		parts := strings.Fields(line)
-		if len(parts) > 0 && parts[0] == module {
-			return true
-		}
-	}
-	return false
-}
-
 // ── loadModule ──
-// TODO: Move to infra/ (verdict #33).
-func loadModule(ctx context.Context, module string, repo Repository, sessionID string, changeOrder int, initTimestamp, createdAt string) (*model.HostStateChangeItem, error) {
-	_, err := hostRunCmd(ctx,
-		[]string{"modprobe", module},
-		fmt.Sprintf("Failed to load kernel module %s", module),
-		"modprobe command not found",
-		true, true,
-	)
-	if err != nil {
-		return nil, err
+func (s *Service) loadModule(ctx context.Context, module string, sessionID string, changeOrder int, initTimestamp, createdAt string) (*model.HostStateChangeItem, error) {
+	res := system.RunCmdCompat(ctx, []string{"modprobe", module}, system.DefaultRunCmdOpts())
+	if res.Err != nil {
+		return nil, fmt.Errorf("failed to load kernel module %s: %w", module, res.Err)
 	}
 	change := &model.HostStateChangeItem{
 		SessionID:     sessionID,
@@ -148,8 +116,8 @@ func loadModule(ctx context.Context, module string, repo Repository, sessionID s
 		CreatedAt:     createdAt,
 		OriginalValue: nil,
 	}
-	if repo != nil {
-		if err := repo.AddChange(ctx, change); err != nil {
+	if s.repo != nil {
+		if err := s.repo.AddChange(ctx, change); err != nil {
 			return nil, err
 		}
 	}
@@ -158,7 +126,7 @@ func loadModule(ctx context.Context, module string, repo Repository, sessionID s
 
 // ── EnsureKVMModules ──
 // Matches Python's HostService.ensure_kvm_modules() exactly.
-func EnsureKVMModules(ctx context.Context, repo Repository, sessionID string, changeOrderStart int) ([]*model.HostStateChangeItem, int, error) {
+func (s *Service) EnsureKVMModules(ctx context.Context, sessionID string, changeOrderStart int) ([]*model.HostStateChangeItem, int, error) {
 	var changes []*model.HostStateChangeItem
 	now := ""
 	if sessionID != "" {
@@ -194,7 +162,7 @@ func EnsureKVMModules(ctx context.Context, repo Repository, sessionID string, ch
 			slog.Debug("Module already loaded", "module", module)
 			continue
 		}
-		change, err := loadModule(ctx, module, repo, sessionID, nextOrder, now, now)
+		change, err := s.loadModule(ctx, module, sessionID, nextOrder, now, now)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -211,7 +179,7 @@ func EnsureKVMModules(ctx context.Context, repo Repository, sessionID string, ch
 	}
 	if !vendorLoaded {
 		for _, module := range vendorModules {
-			change, err := loadModule(ctx, module, repo, sessionID, nextOrder, now, now)
+			change, err := s.loadModule(ctx, module, sessionID, nextOrder, now, now)
 			if err != nil {
 				continue
 			}
@@ -311,14 +279,9 @@ func (s *Service) RestoreState(ctx context.Context) ([]*model.HostStateChangeIte
 				slog.Warn("Skipping disallowed sysctl key from state", "key", change.Setting)
 				continue
 			}
-			_, err := hostRunCmd(ctx,
-				[]string{"sysctl", "-w", fmt.Sprintf("%s=%s", change.Setting, *change.OriginalValue)},
-				fmt.Sprintf("Failed to revert %s", change.Setting),
-				"sysctl command not found",
-				true, true,
-			)
-			if err != nil {
-				return nil, err
+			res := system.RunCmdCompat(ctx, []string{"sysctl", "-w", fmt.Sprintf("%s=%s", change.Setting, *change.OriginalValue)}, system.DefaultRunCmdOpts())
+			if res.Err != nil {
+				return nil, fmt.Errorf("failed to revert %s: %w", change.Setting, res.Err)
 			}
 			reverted = append(reverted, &model.HostStateChangeItem{
 				SessionID:     change.SessionID,
@@ -335,13 +298,7 @@ func (s *Service) RestoreState(ctx context.Context) ([]*model.HostStateChangeIte
 
 		} else if change.Mechanism == "file_create" {
 			target := system.ResolvePath(change.AppliedValue)
-			allowed := false
-			for _, allowedPath := range resolvedAllowedFiles {
-				if target == allowedPath {
-					allowed = true
-					break
-				}
-			}
+			allowed := slices.Contains(resolvedAllowedFiles, target)
 			if !allowed {
 				slog.Warn("Skipping disallowed file path from state", "path", target)
 				continue

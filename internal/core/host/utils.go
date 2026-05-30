@@ -12,7 +12,9 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
+	"mvmctl/internal/infra/validators"
 )
 
 // POSIX access mode constants matching Python's os.R_OK, os.W_OK.
@@ -23,24 +25,6 @@ const (
 )
 
 // ── _run (matches Python's HostService._run()) ──
-func hostRunCmd(ctx context.Context, args []string, failureMsg, missingMsg string, capture, check bool) (*system.RunCmdResult, error) {
-	opts := system.DefaultRunCmdOpts()
-	opts.Check = check
-	opts.Capture = capture
-	result := system.RunCmdCompat(ctx, args, opts)
-
-	if result.Err != nil {
-		errStr := result.Err.Error()
-		if strings.Contains(errStr, "Command not found") {
-			return nil, hostError(errs.CodeHostInitFailed, missingMsg)
-		}
-		return nil, hostError(errs.CodeHostInitFailed, fmt.Sprintf("%s: %s", failureMsg, errStr))
-	}
-	// If check=false and exit code != 0, result.Err may be nil —
-	// caller inspects result directly.
-	return result, nil
-}
-
 // ── CheckKVMAccess ──
 // Matches Python's HostService.check_kvm_access() — checks /dev/kvm exists and os.access(path, R_OK|W_OK).
 // Python's os.access checks the REAL UID; Go's os.OpenFile checks effective UID.
@@ -93,14 +77,10 @@ func CreateGroup(ctx context.Context, groupName string) (bool, error) {
 	if system.GroupExists(groupName) {
 		return false, nil
 	}
-	_, err := hostRunCmd(ctx,
-		[]string{"groupadd", "--system", groupName},
-		fmt.Sprintf("Failed to create group %s", groupName),
-		"groupadd command not found",
-		true, true,
-	)
-	if err != nil {
-		return false, err
+
+	res := system.RunCmdCompat(ctx, []string{"groupadd", "--system", groupName}, system.DefaultRunCmdOpts())
+	if res.Err != nil {
+		return false, fmt.Errorf("failed to create group %s: %w", groupName, res.Err)
 	}
 	return true, nil
 }
@@ -110,14 +90,10 @@ func AddUserToGroup(ctx context.Context, username, groupName string) (bool, erro
 	if system.UserInGroup(username, groupName) {
 		return false, nil
 	}
-	_, err := hostRunCmd(ctx,
-		[]string{"usermod", "-aG", groupName, username},
-		fmt.Sprintf("Failed to add %s to group %s", username, groupName),
-		"usermod command not found",
-		true, true,
-	)
-	if err != nil {
-		return false, err
+
+	res := system.RunCmdCompat(ctx, []string{"usermod", "-aG", groupName, username}, system.DefaultRunCmdOpts())
+	if res.Err != nil {
+		return false, fmt.Errorf("failed to add %s to group %s: %w", username, groupName, res.Err)
 	}
 	return true, nil
 }
@@ -130,14 +106,10 @@ func RemoveUserFromGroup(ctx context.Context, username, groupName string) (bool,
 	if !system.UserInGroup(username, groupName) {
 		return false, nil
 	}
-	_, err := hostRunCmd(ctx,
-		[]string{"gpasswd", "-d", username, groupName},
-		fmt.Sprintf("Failed to remove user %s from group %s", username, groupName),
-		"gpasswd command not found",
-		true, true,
-	)
-	if err != nil {
-		return false, err
+
+	res := system.RunCmdCompat(ctx, []string{"gpasswd", "-d", username, groupName}, system.DefaultRunCmdOpts())
+	if res.Err != nil {
+		return false, fmt.Errorf("failed to remove user %s from group %s: %w", username, groupName, res.Err)
 	}
 	return true, nil
 }
@@ -160,11 +132,9 @@ func ValidateSudoersBinaries() error {
 // Go maps have random iteration, so we iterate keys in an ordered slice
 // that matches Python's dict literal order from constants.py.
 func GenerateSudoersContent(groupName string) string {
-	// Iterate in Python dict literal insertion order.
-	binaries := privilegedBinariesOrdered()
 	// Service binaries via "mvm run <service>" pattern (sudoers wildcard)
 	runCmd := filepath.Join(infra.GetBinDir(), infra.CLIName, "run", "*")
-	binaries = append(binaries, runCmd)
+	binaries := append(infra.PrivilegedBinariesOrdered[:], runCmd)
 	binariesStr := strings.Join(binaries, ", ")
 	return fmt.Sprintf(
 		"# Managed by %s — do not edit manually.\n"+
@@ -174,31 +144,12 @@ func GenerateSudoersContent(groupName string) string {
 	)
 }
 
-// privilegedBinariesOrdered returns the keys of infra.PrivilegedBinaries in the
-// order matching Python's PRIVILEGED_BINARIES dict literal insertion order.
-// TODO: Move to infra/ (verdict #33).
-func privilegedBinariesOrdered() []string {
-	// Python dict literal order from constants.py:
-	// /usr/sbin/ip, /usr/sbin/iptables, /usr/sbin/iptables-restore,
-	// /usr/sbin/iptables-save, /usr/sbin/nft, /usr/sbin/sysctl, /usr/sbin/modprobe
-	return []string{
-		"/usr/sbin/ip",
-		"/usr/sbin/iptables",
-		"/usr/sbin/iptables-restore",
-		"/usr/sbin/iptables-save",
-		"/usr/sbin/nft",
-		"/usr/sbin/sysctl",
-		"/usr/sbin/modprobe",
-	}
-}
-
 // ── WriteSudoers ──
 // Matches Python's HostService.write_sudoers() exactly.
-func WriteSudoers(ctx context.Context, path string, groupName string) error {
+func WriteSudoers(ctx context.Context, path string, content string) error {
 	if err := ValidateSudoersBinaries(); err != nil {
 		return err
 	}
-	content := GenerateSudoersContent(groupName)
 
 	// Write to temp file using tempfile.NamedTemporaryFile equivalent:
 	// mode="w", suffix=".sudoers", delete=False
@@ -265,29 +216,143 @@ func RemoveGroup(ctx context.Context, groupName string) (bool, error) {
 	if !system.GroupExists(groupName) {
 		return false, nil
 	}
-	_, err := hostRunCmd(ctx,
-		[]string{"groupdel", groupName},
-		fmt.Sprintf("Failed to remove group %s", groupName),
-		"groupdel command not found",
-		true, true,
-	)
-	if err != nil {
-		return false, err
+
+	res := system.RunCmdCompat(ctx, []string{"groupdel", groupName}, system.DefaultRunCmdOpts())
+	if res.Err != nil {
+		return false, fmt.Errorf("failed to remove group %s: %w", groupName, res.Err)
 	}
 	return true, nil
 }
 
-// ── getIPForwardStatus ──
-// TODO: Move to infra/ (verdict #33).
-func getIPForwardStatus(ctx context.Context) (string, error) {
-	result, err := hostRunCmd(ctx,
-		[]string{"sysctl", "-n", sysctlKey},
-		fmt.Sprintf("Failed to read %s", sysctlKey),
-		"sysctl command not found",
-		true, true,
-	)
-	if err != nil {
-		return "", err
+// ── isModuleLoaded ──
+func isModuleLoaded(ctx context.Context, module string) bool {
+	opts := system.DefaultRunCmdOpts()
+	opts.Check = false
+	result := system.RunCmdCompat(ctx, []string{"lsmod"}, opts)
+	if result.ExitCode != 0 {
+		return false
 	}
-	return strings.TrimSpace(result.Stdout), nil
+	for line := range strings.SplitSeq(result.Stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) > 0 && parts[0] == module {
+			return true
+		}
+	}
+	return false
+}
+
+// ── GetIPForwardStatus ──
+func GetIPForwardStatus(ctx context.Context) (string, error) {
+
+	res := system.RunCmdCompat(ctx, []string{"sysctl", "-n", sysctlKey}, system.DefaultRunCmdOpts())
+	if res.Err != nil {
+		return "", fmt.Errorf("failed to read %s: %w", sysctlKey, res.Err)
+	}
+	return strings.TrimSpace(res.Stdout), nil
+}
+
+// ── HardwareFromState ──
+// Reconstructs HostHardware from stored host state (cache layer).
+func HardwareFromState(state *model.HostStateItem) *model.HostHardware {
+	if state.CPUModel == nil {
+		return nil
+	}
+	h := &model.HostHardware{}
+	if state.Hostname != nil {
+		h.Hostname = *state.Hostname
+	}
+	if state.CPUModel != nil {
+		h.CPUModel = *state.CPUModel
+	}
+	if state.CPUVendor != nil {
+		h.CPUVendor = *state.CPUVendor
+	}
+	if state.CPUCores != nil {
+		h.CPUCores = *state.CPUCores
+	}
+	if state.CPUArchitecture != nil {
+		h.CPUArchitecture = *state.CPUArchitecture
+	}
+	if state.NumaNodes != nil && *state.NumaNodes != 0 {
+		h.NumaNodes = *state.NumaNodes
+	} else {
+		h.NumaNodes = 1
+	}
+	if state.MemoryTotalMiB != nil {
+		h.MemoryTotalMiB = *state.MemoryTotalMiB
+	}
+	if state.StorageTotalBytes != nil {
+		h.StorageTotalBytes = *state.StorageTotalBytes
+	}
+	if state.KernelVersion != nil {
+		h.KernelVersion = *state.KernelVersion
+	}
+	if state.OSRelease != nil {
+		h.OSRelease = *state.OSRelease
+	}
+	if state.CPUHasVMX != nil {
+		h.CPUHasVMX = *state.CPUHasVMX != 0
+	}
+	if state.CPUHypervisor != nil {
+		h.CPUHypervisor = *state.CPUHypervisor != 0
+	}
+	return h
+}
+
+// ── LimitsFromState ──
+// Reconstructs HostLimits from stored host state (cache layer).
+func LimitsFromState(state *model.HostStateItem) *model.HostLimits {
+	if state.PIDMax == nil {
+		return nil
+	}
+	var portRange [2]int
+	if state.IPLocalPortRange != nil {
+		portRange = validators.ParsePortRange(*state.IPLocalPortRange)
+	} else {
+		portRange = infra.DefaultIPLocalPortRange
+	}
+	l := &model.HostLimits{}
+	if state.PIDMax != nil {
+		l.PIDMax = *state.PIDMax
+	}
+	if state.FDMax != nil {
+		l.FDMax = *state.FDMax
+	}
+	if state.ConntrackMax != nil {
+		l.ConntrackMax = *state.ConntrackMax
+	}
+	if state.TAPDevicesMax != nil {
+		l.TAPDevicesMax = *state.TAPDevicesMax
+	}
+	l.IPLocalPortRange = portRange
+	if state.NestedVirtAvailable != nil {
+		l.NestedVirtAvailable = *state.NestedVirtAvailable != 0
+	}
+	if state.EPTAvailable != nil {
+		l.EPTAvailable = *state.EPTAvailable != 0
+	}
+	if state.HugepageCount2MB != nil {
+		l.HugepageCount2MB = *state.HugepageCount2MB
+	}
+	if state.KSMDisabled != nil {
+		l.KSMDisabled = *state.KSMDisabled != 0
+	} else {
+		l.KSMDisabled = true
+	}
+	if state.CgroupVersion != nil && *state.CgroupVersion != 0 {
+		l.CgroupVersion = *state.CgroupVersion
+	} else {
+		l.CgroupVersion = 1
+	}
+	if state.SwapTotalMiB != nil {
+		l.SwapTotalMiB = *state.SwapTotalMiB
+	}
+	if state.KernelMinimumMet != nil {
+		l.KernelMinimumMet = *state.KernelMinimumMet != 0
+	}
+	return l
 }

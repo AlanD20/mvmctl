@@ -68,7 +68,7 @@ func (op *Operation) BinaryPrune(ctx context.Context, dryRun bool, force bool) *
 // resolution pipeline and wraps all BinaryErrors in code="binary.pull_failed".
 func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInput) *errs.OperationResult {
 	// Python: request = BinaryPullRequest(inputs=inputs, db=db); resolved = request.resolve()
-	request := inputs.NewBinaryPullRequest(*input, op.DB)
+	request := inputs.NewBinaryPullRequest(*input, op.Connection.DB())
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return &errs.OperationResult{

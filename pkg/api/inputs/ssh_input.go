@@ -245,5 +245,3 @@ func (r *SSHRequest) resolveKey(ctx context.Context, keyRepo key.Repository) (*s
 
 	return nil, nil
 }
-
-

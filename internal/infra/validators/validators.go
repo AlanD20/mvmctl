@@ -801,12 +801,25 @@ func ParsePortRange(s string) [2]int {
 	var low, high int
 	n, _ := fmt.Sscanf(s, "%d,%d", &low, &high)
 	if n != 2 {
-		return [2]int{32768, 60999}
+		return infra.DefaultIPLocalPortRange
 	}
 	return [2]int{low, high}
 }
 
 // ToInt safely extracts an int from any numeric type.
+// IsDigits returns true if the string contains only ASCII digits (0-9) and is non-empty.
+// Intended for PID directory validation in /proc — NOT unicode.IsDigit which matches
+// non-ASCII digits (Arabic-Indic, etc.) that would not be valid PID directory names.
+func IsDigits(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
+// ToInt coerces a value to int, matching Python's int() behavior.
 // Returns an error if the value is not a numeric type or is nil.
 func ToInt(v any) (int, error) {
 	switch n := v.(type) {
