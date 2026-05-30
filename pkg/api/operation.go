@@ -74,6 +74,8 @@ func NewOperation(db *sql.DB, cacheDir string) *Operation {
 		Host:    host.NewRepository(db),
 		Config:  config.NewRepository(db),
 	}
+	configReg := config.NewConstraintRegistry()
+	config.RegisterBuiltinConstraints(configReg)
 	s := Services{
 		Network: network.NewService(r.Network, db),
 		Image:   image.NewService(r.Image, cacheDir),
@@ -81,7 +83,7 @@ func NewOperation(db *sql.DB, cacheDir string) *Operation {
 		Binary:  binary.NewService(r.Binary, filepath.Join(cacheDir, "bin"), cacheDir),
 		Key:     key.NewService(r.Key, infra.GetKeyDir()),
 		Host:    host.NewService(r.Host),
-		Config:  config.NewService(r.Config),
+		Config:  config.NewService(r.Config, configReg),
 		Volume:  volume.NewService(r.Volume),
 		Cache:   cache.NewService(cacheDir),
 		CP:      ssh.NewCPService(),

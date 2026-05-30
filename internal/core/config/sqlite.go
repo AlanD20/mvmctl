@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 )
 
@@ -32,8 +33,8 @@ func (r *sqliteRepo) Get(ctx context.Context, category, key string) (any, error)
 		return nil, err
 	}
 
-	val, err := UnmarshalValue(valueStr)
-	if err != nil {
+	var val any
+	if err := json.Unmarshal([]byte(valueStr), &val); err != nil {
 		return nil, fmt.Errorf("parse setting value: %w", err)
 	}
 	return val, nil
@@ -146,8 +147,8 @@ func (r *sqliteRepo) ListByCategory(ctx context.Context, category *string) (map[
 		if err := rows.Scan(&cat, &keyOut, &valueStr); err != nil {
 			return nil, fmt.Errorf("scan setting row: %w", err)
 		}
-		val, err := UnmarshalValue(valueStr)
-		if err != nil {
+		var val any
+		if err := json.Unmarshal([]byte(valueStr), &val); err != nil {
 			return nil, fmt.Errorf("parse setting value for %s.%s: %w", cat, keyOut, err)
 		}
 		if _, ok := result[cat]; !ok {

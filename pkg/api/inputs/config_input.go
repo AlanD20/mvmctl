@@ -2,7 +2,6 @@ package inputs
 
 import (
 	"context"
-	"database/sql"
 
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/infra/errs"
@@ -21,11 +20,11 @@ import (
 // Value uses any because config values can be int, bool, string, map, or
 // slice — Go has no union type for this.
 type ConfigInput struct {
-	Action       string  `json:"action"`
-	Category     *string `json:"category,omitempty"`
-	Key          *string `json:"key,omitempty"`
-	Value        any     `json:"value,omitempty"`
-	AllOverrides bool    `json:"all_overrides"`
+	Action       string `json:"action"`
+	Category     string `json:"category,omitempty"`
+	Key          string `json:"key,omitempty"`
+	Value        any    `json:"value,omitempty"`
+	AllOverrides bool   `json:"all_overrides"`
 }
 
 // ResolvedConfigInput matches Python's ResolvedConfigInput (frozen dataclass).
@@ -37,52 +36,33 @@ type ConfigInput struct {
 //	    key: str | None
 //	    value: Any | None
 //	    all_overrides: bool
-//	    service: SettingsService
 //
 // Value uses any because config values can be int, bool, string, map, or
 // slice — Go has no union type for this.
 type ResolvedConfigInput struct {
 	Action       string
-	Category     *string
-	Key          *string
+	Category     string
+	Key          string
 	Value        any
 	AllOverrides bool
-	Service      *config.Service // SettingsService — set during resolve
 }
 
 // ConfigRequest matches Python's ConfigRequest.
 //
 // Resolve ConfigInput against the database.
 type ConfigRequest struct {
-	db      *sql.DB
-	input   ConfigInput
-	result  *ResolvedConfigInput
-	service *config.Service
+	input  ConfigInput
+	result *ResolvedConfigInput
 }
 
 // NewConfigRequest creates a new ConfigRequest.
-func NewConfigRequest(inputs ConfigInput, db *sql.DB) *ConfigRequest {
-	svc := config.NewService(config.NewRepository(db))
+func NewConfigRequest(inputs ConfigInput) *ConfigRequest {
 	return &ConfigRequest{
-		db:      db,
-		input:   inputs,
-		service: svc,
+		input: inputs,
 	}
 }
 
 // Result returns the resolved input, or nil if resolve() has not been called.
-
-// isKeyInCategory checks if a key is valid for a given category in OverridableSettings.
-func isKeyInCategory(category, key string) bool {
-	if catSettings, ok := config.OverridableSettings[category]; ok {
-		for k := range catSettings {
-			if k == key {
-				return true
-			}
-		}
-	}
-	return false
-}
 
 // Resolve resolves and validates config input.
 // Matches Python's ConfigRequest.resolve().
@@ -91,7 +71,7 @@ func (r *ConfigRequest) Resolve(ctx context.Context) (*ResolvedConfigInput, erro
 	key := r.input.Key
 
 	if r.input.Action == "get" {
-		if category == nil || *category == "" {
+		if category == "" {
 			return nil, &errs.DomainError{
 				Code:    errs.CodeConfigError,
 				Op:      "config",
@@ -100,18 +80,18 @@ func (r *ConfigRequest) Resolve(ctx context.Context) (*ResolvedConfigInput, erro
 			}
 		}
 		// key is optional for category-level get
-		if key != nil {
-			if !isKeyInCategory(*category, *key) {
+		if key != "" {
+			if !config.IsKeyInCategory(category, key) {
 				return nil, &errs.DomainError{
 					Code:    errs.CodeConfigError,
 					Op:      "config",
-					Message: "'" + *category + "." + *key + "' is not a valid setting key. Use 'mvm config ls' to see valid keys.",
+					Message: "'" + category + "." + key + "' is not a valid setting key. Use 'mvm config ls' to see valid keys.",
 					Class:   errs.ClassValidation,
 				}
 			}
 		}
 	} else if r.input.Action == "set" {
-		if category == nil || *category == "" || key == nil || *key == "" {
+		if category == "" || key == "" {
 			return nil, &errs.DomainError{
 				Code:    errs.CodeConfigError,
 				Op:      "config",
@@ -129,18 +109,18 @@ func (r *ConfigRequest) Resolve(ctx context.Context) (*ResolvedConfigInput, erro
 		}
 
 		// Validate key is overridable
-		if !isKeyInCategory(*category, *key) {
+		if !config.IsKeyInCategory(category, key) {
 			return nil, &errs.DomainError{
 				Code:    errs.CodeConfigError,
 				Op:      "config",
-				Message: "'" + *category + "." + *key + "' is not an overridable setting. Use 'mvm config ls' to see valid keys.",
+				Message: "'" + category + "." + key + "' is not an overridable setting. Use 'mvm config ls' to see valid keys.",
 				Class:   errs.ClassValidation,
 			}
 		}
 	} else if r.input.Action == "reset" {
 		if r.input.AllOverrides {
 			// category and key are both optional for --all
-		} else if category == nil || *category == "" {
+		} else if category == "" {
 			return nil, &errs.DomainError{
 				Code:    errs.CodeConfigError,
 				Op:      "config",
@@ -149,16 +129,12 @@ func (r *ConfigRequest) Resolve(ctx context.Context) (*ResolvedConfigInput, erro
 			}
 		}
 		// key is optional for category-level reset
-		if key != nil {
-			catName := ""
-			if category != nil {
-				catName = *category
-			}
-			if !isKeyInCategory(catName, *key) {
+		if key != "" {
+			if !config.IsKeyInCategory(category, key) {
 				return nil, &errs.DomainError{
 					Code:    errs.CodeConfigError,
 					Op:      "config",
-					Message: "'" + catName + "." + *key + "' is not a valid setting key",
+					Message: "'" + category + "." + key + "' is not a valid setting key",
 					Class:   errs.ClassValidation,
 				}
 			}
@@ -171,7 +147,6 @@ func (r *ConfigRequest) Resolve(ctx context.Context) (*ResolvedConfigInput, erro
 		Key:          key,
 		Value:        r.input.Value,
 		AllOverrides: r.input.AllOverrides,
-		Service:      r.service,
 	}
 
 	return r.result, nil

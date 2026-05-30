@@ -179,11 +179,4 @@ func MarshalValue(v any) (string, error) {
 	return string(data), nil
 }
 
-// UnmarshalValue parses a JSON string back into a Go value.
-func UnmarshalValue(s string) (any, error) {
-	var v any
-	if err := json.Unmarshal([]byte(s), &v); err != nil {
-		return nil, err
-	}
-	return v, nil
-}
+

@@ -2,11 +2,13 @@ package cli
 
 import (
 	"fmt"
+	"sort"
 
-	"github.com/spf13/cobra"
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api"
+
+	"github.com/spf13/cobra"
 )
 
 func NewConfigCmd(configAPI *api.Operation) *cobra.Command {
@@ -34,7 +36,7 @@ func NewConfigCmd(configAPI *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newConfigGetCmd(configAPI *api.Operation) *cobra.Command {
+func newConfigGetCmd(op *api.Operation) *cobra.Command {
 	return &cobra.Command{
 		Use:               "get [category] [key]",
 		Short:             "Get a config value.",
@@ -42,56 +44,56 @@ func newConfigGetCmd(configAPI *api.Operation) *cobra.Command {
 		ValidArgsFunction: completeConfigGet,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			category := args[0]
+			key := ""
 			if len(args) == 2 {
-				key := args[1]
-				val, err := configAPI.ConfigGet(cmd.Context(), category, key)
-				if err != nil {
-					// Python: error propagates to @handle_errors which prints it and exits 1.
-					// With SilenceErrors=true on root, we must print before returning.
-					common.Cli.Error(err.Error())
-					return err
+				key = args[1]
+			}
+
+			val, err := op.ConfigGet(cmd.Context(), category, key)
+			if err != nil {
+				common.Cli.Error(err.Error())
+				return err
+			}
+
+			// Category-only: dict of SettingInfo per key
+			if settings, ok := val.(map[string]model.SettingInfo); ok {
+				keys := make([]string, 0, len(settings))
+				for k := range settings {
+					keys = append(keys, k)
 				}
-				if val == nil {
-					common.Cli.Info(fmt.Sprintf("%s.%s = (default)", category, key))
-				} else {
-					common.Cli.Info(fmt.Sprintf("%s.%s = %v", category, key, val))
-				}
-			} else {
-				// Category-only: show metadata per key matching Python
-				val, err := configAPI.ConfigGet(cmd.Context(), category, "")
-				if err != nil {
-					common.Cli.Error(err.Error())
-					return err
-				}
-				if settings, ok := val.(map[string]model.SettingInfo); ok {
-					for k, info := range settings {
-						if info.Override != nil {
-							common.Cli.Info(fmt.Sprintf("%s = %v (override: %v, type: %s)", k, info.Override, info.Override, info.Type))
-						} else {
-							common.Cli.Info(fmt.Sprintf("%s = %v (default: %v, type: %s)", k, info.Default, info.Default, info.Type))
-						}
+				sort.Strings(keys)
+				for _, k := range keys {
+					info := settings[k]
+					if info.Override != nil {
+						common.Cli.Text(fmt.Sprintf("%s = %v (override: %v, type: %s)", k, info.Override, info.Override, info.Type))
+					} else {
+						common.Cli.Text(fmt.Sprintf("%s = %v (default: %v, type: %s)", k, common.Cli.FormatSettingValue(info.Default, k), common.Cli.FormatSettingValue(info.Default, k), info.Type))
 					}
 				}
+			} else if val == nil {
+				common.Cli.Text(fmt.Sprintf("%s.%s = (default)", category, key))
+			} else {
+				common.Cli.Text(fmt.Sprintf("%s.%s = %v", category, key, val))
 			}
+
 			return nil
 		},
 	}
 }
 
-func newConfigSetCmd(configAPI *api.Operation) *cobra.Command {
+func newConfigSetCmd(op *api.Operation) *cobra.Command {
 	return &cobra.Command{
 		Use:               "set [category] [key] [value]",
 		Short:             "Set a config value.",
 		Args:              cobra.ExactArgs(3),
 		ValidArgsFunction: completeConfigSet,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := configAPI.ConfigSet(cmd.Context(), args[0], args[1], args[2])
+			result, err := op.ConfigSet(cmd.Context(), args[0], args[1], args[2])
 			if err != nil {
 				common.Cli.Error(err.Error())
 				return err
 			}
 			if result.IsError() {
-				// Python: mvm_cli.error(result.message); raise typer.Exit(code=1)
 				common.Cli.Error(result.Message)
 				return fmt.Errorf("%s", result.Message)
 			}
@@ -101,8 +103,9 @@ func newConfigSetCmd(configAPI *api.Operation) *cobra.Command {
 	}
 }
 
-func newConfigResetCmd(configAPI *api.Operation) *cobra.Command {
+func newConfigResetCmd(op *api.Operation) *cobra.Command {
 	var allOverrides bool
+	var force bool
 
 	cc := &cobra.Command{
 		Use:               "reset [category] [key]",
@@ -111,7 +114,11 @@ func newConfigResetCmd(configAPI *api.Operation) *cobra.Command {
 		Args:              cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if allOverrides {
-				result := configAPI.ConfigReset(cmd.Context(), "", "", true)
+				if !force && !common.Cli.PromptConfirm("Reset all overrides globally?", false) {
+					common.Cli.Text("Cancelled")
+					return nil
+				}
+				result := op.ConfigReset(cmd.Context(), "", "", true)
 				if result.IsError() {
 					common.Cli.Error(result.Message)
 					return fmt.Errorf("%s", result.Message)
@@ -122,10 +129,10 @@ func newConfigResetCmd(configAPI *api.Operation) *cobra.Command {
 
 			switch len(args) {
 			case 0:
-				common.Cli.Info("Provide a category, category and key, or use --all")
+				common.Cli.Text("Provide a category, category and key, or use --all")
 			case 1:
 				category := args[0]
-				result := configAPI.ConfigReset(cmd.Context(), category, "", false)
+				result := op.ConfigReset(cmd.Context(), category, "", false)
 				if result.IsError() {
 					common.Cli.Error(result.Message)
 					return fmt.Errorf("%s", result.Message)
@@ -134,7 +141,7 @@ func newConfigResetCmd(configAPI *api.Operation) *cobra.Command {
 			case 2:
 				category := args[0]
 				key := args[1]
-				result := configAPI.ConfigReset(cmd.Context(), category, key, false)
+				result := op.ConfigReset(cmd.Context(), category, key, false)
 				if result.IsError() {
 					common.Cli.Error(result.Message)
 					return fmt.Errorf("%s", result.Message)
@@ -142,7 +149,7 @@ func newConfigResetCmd(configAPI *api.Operation) *cobra.Command {
 				if item, ok := result.Item.(int); ok && item > 0 {
 					common.Cli.Success(fmt.Sprintf("Reset: %s.%s", category, key))
 				} else {
-					common.Cli.Info(fmt.Sprintf("%s.%s was already at default", category, key))
+					common.Cli.Text(fmt.Sprintf("%s.%s was already at default", category, key))
 				}
 			}
 			return nil
@@ -150,6 +157,8 @@ func newConfigResetCmd(configAPI *api.Operation) *cobra.Command {
 	}
 
 	cc.Flags().BoolVarP(&allOverrides, "all", "a", false, "Reset all overrides globally")
+	cc.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation")
+
 	return cc
 }
 
@@ -160,20 +169,34 @@ func newConfigListCmd(configAPI *api.Operation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			allSettings, err := configAPI.ConfigListAll(cmd.Context())
 			if err != nil {
-				// Python: error propagates to @handle_errors which prints it and exits 1.
-				// With SilenceErrors=true on root, we must print before returning.
 				common.Cli.Error(err.Error())
 				return err
 			}
-			for category, settings := range allSettings {
-				common.Cli.Info(fmt.Sprintf("\n[%s]", category))
-				for key, info := range settings {
+
+			categories := make([]string, 0, len(allSettings))
+			for cat := range allSettings {
+				categories = append(categories, cat)
+			}
+			sort.Strings(categories)
+
+			for _, category := range categories {
+				common.Cli.Text(fmt.Sprintf("\n[%s]", category))
+				settings := allSettings[category]
+
+				keys := make([]string, 0, len(settings))
+				for k := range settings {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+
+				for _, key := range keys {
+					info := settings[key]
 					override := info.Override
 					default_ := info.Default
 					if override != nil {
-						common.Cli.Info(fmt.Sprintf("  %s = %v (default: %v, type: %s)", key, override, default_, info.Type))
+						common.Cli.Text(fmt.Sprintf("  %s = %v (default: %v, type: %s)", key, override, common.Cli.FormatSettingValue(default_, key), info.Type))
 					} else {
-						common.Cli.Info(fmt.Sprintf("  %s = %v (type: %s)", key, default_, info.Type))
+						common.Cli.Text(fmt.Sprintf("  %s = %v (type: %s)", key, common.Cli.FormatSettingValue(default_, key), info.Type))
 					}
 				}
 			}
@@ -181,5 +204,3 @@ func newConfigListCmd(configAPI *api.Operation) *cobra.Command {
 		},
 	}
 }
-
-// escapeRichMarkup escapes text to prevent Rich markup interpretation of brackets.
