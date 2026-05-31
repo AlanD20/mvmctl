@@ -195,7 +195,7 @@ func (op *Operation) NetworkListAll(ctx context.Context) ([]*model.Network, erro
 		return nil, err
 	}
 	if len(networks) > 0 {
-		_ = op.networkEnrichWithLeases(ctx, networks)
+		_ = op.Services.Network.EnrichWithLeases(ctx, networks, op.Repos.Lease)
 	}
 	return networks, nil
 }
@@ -361,30 +361,30 @@ func (op *Operation) NetworkSetDefault(ctx context.Context, input *inputs.Networ
 	}
 }
 
-// NetworkSync syncs firewall rules for a network.
+// NetworkSync syncs firewall rules for one or more networks.
 // Matches Python's NetworkOperation.sync() exactly.
-func (op *Operation) NetworkSync(ctx context.Context, networkID string) *errs.OperationResult {
+func (op *Operation) NetworkSync(ctx context.Context, input *inputs.NetworkInput) *errs.OperationResult {
 	var networks []*model.Network
 	var err error
-
-	if networkID != "" {
-		net, err2 := op.Repos.Network.Get(ctx, networkID)
-		if err2 != nil || net == nil {
+	if input != nil && len(input.Identifiers) > 0 {
+		req := inputs.NewNetworkRequest(*input, op.Connection.DB(), op.Repos.Network)
+		resolved, resolveErr := req.Resolve(ctx)
+		if resolveErr != nil {
 			return &errs.OperationResult{
-				Status:  "error",
-				Code:    string(errs.CodeNetworkNotFound),
-				Message: fmt.Sprintf("Network '%s' not found", networkID),
+				Status:    "error",
+				Code:      string(errs.CodeNetworkNotFound),
+				Message:   resolveErr.Error(),
+				Exception: resolveErr,
 			}
 		}
-		networks = []*model.Network{net}
+		networks = resolved.Networks
 	} else {
 		networks, err = op.Repos.Network.ListAll(ctx)
 		if err != nil {
 			return &errs.OperationResult{
-				Status:    "error",
-				Code:      string(errs.CodeDatabaseError),
-				Message:   fmt.Sprintf("Failed to list networks: %v", err),
-				Exception: err,
+				Status:  "error",
+				Code:    string(errs.CodeDatabaseError),
+				Message: fmt.Sprintf("Failed to list networks: %v", err),
 			}
 		}
 	}
@@ -503,10 +503,7 @@ func (op *Operation) NetworkPrune(ctx context.Context, dryRun bool, includeAll b
 	}
 
 	defaultNetNameRaw, _ := op.ConfigGet(ctx, "defaults.network", "name")
-	defaultNetName := "net"
-	if s, ok := defaultNetNameRaw.(string); ok {
-		defaultNetName = s
-	}
+	defaultNetName, _ := defaultNetNameRaw.(string)
 
 	var removed []string
 	for _, network := range networks {
@@ -527,7 +524,7 @@ func (op *Operation) NetworkPrune(ctx context.Context, dryRun bool, includeAll b
 			if !network.IsPresent {
 				_ = op.Repos.Network.Delete(ctx, network.ID)
 			} else {
-				result := op.NetworkRemove(ctx, &inputs.NetworkInput{Name: []string{network.Name}}, includeAll)
+				result := op.NetworkRemove(ctx, &inputs.NetworkInput{Identifiers: []string{network.Name}}, includeAll)
 				if result.IsError() {
 					slog.Warn("Failed to remove network", "name", network.Name, "error", result.Message)
 					continue
@@ -550,22 +547,13 @@ func (op *Operation) NetworkPrune(ctx context.Context, dryRun bool, includeAll b
 // Updates Repository component tracking after creation.
 func (op *Operation) NetworkCreateDefaultNetwork(ctx context.Context) *errs.OperationResult {
 	defaultNameRaw, _ := op.ConfigGet(ctx, "defaults.network", "name")
-	defaultName := "net"
-	if s, ok := defaultNameRaw.(string); ok {
-		defaultName = s
-	}
+	defaultName, _ := defaultNameRaw.(string)
 
 	defaultSubnetRaw, _ := op.ConfigGet(ctx, "defaults.network", "subnet")
-	defaultSubnet := "172.27.0.0/24"
-	if s, ok := defaultSubnetRaw.(string); ok {
-		defaultSubnet = s
-	}
+	defaultSubnet, _ := defaultSubnetRaw.(string)
 
 	defaultNATEnabledRaw, _ := op.ConfigGet(ctx, "defaults.network", "nat_enabled")
-	defaultNATEnabled := true
-	if b, ok := defaultNATEnabledRaw.(bool); ok {
-		defaultNATEnabled = b
-	}
+	defaultNATEnabled, _ := defaultNATEnabledRaw.(bool)
 
 	// Check existing
 	internalNetwork, _ := op.Repos.Network.GetByName(ctx, defaultName)
@@ -645,26 +633,4 @@ func (op *Operation) NetworkCreateDefaultNetwork(ctx context.Context) *errs.Oper
 		Item:    defaultNetwork,
 		Message: fmt.Sprintf("Default network '%s' ready", defaultNetwork.Name),
 	}
-}
-
-func (op *Operation) networkEnrichWithLeases(ctx context.Context, networks []*model.Network) error {
-	ids := make([]string, len(networks))
-	for i, n := range networks {
-		ids[i] = n.ID
-	}
-	leases, err := op.Repos.Lease.ListAllBatch(ctx, ids)
-	if err != nil {
-		return errs.Wrap(errs.CodeDatabaseError, fmt.Errorf("batch load leases: %w", err))
-	}
-	leaseMap := make(map[string][]*model.NetworkLeaseItem)
-	for _, lease := range leases {
-		leaseMap[lease.NetworkID] = append(leaseMap[lease.NetworkID], lease)
-	}
-	for _, n := range networks {
-		n.Leases = leaseMap[n.ID]
-		if n.Leases == nil {
-			n.Leases = []*model.NetworkLeaseItem{}
-		}
-	}
-	return nil
 }

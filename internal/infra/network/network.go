@@ -68,6 +68,22 @@ func ComputePrefixLength(subnet string) int {
 	return ones
 }
 
+// CountHosts returns the number of usable host addresses in a subnet.
+// For standard subnets this is total - 2 (excludes network and broadcast).
+// For /31 and /32 (RFC 3021) all addresses are usable.
+func CountHosts(ipnet *net.IPNet) int {
+	ip := ipnet.IP.To4()
+	if ip == nil {
+		return 0
+	}
+	ones, bits := ipnet.Mask.Size()
+	total := 1 << (bits - ones)
+	if total <= 2 {
+		return total
+	}
+	return total - 2
+}
+
 // ComputeIPv4Gateway computes default gateway IP from subnet (first usable host).
 // Python: compute_ipv4_gateway(subnet) -> str
 // For /31 subnets (RFC 3021), both addresses are usable hosts, so we
@@ -149,6 +165,8 @@ func GenerateTAPName(cliName, networkName, vmName string) string {
 
 // AllocateNextIP allocates the next available IP in a subnet.
 // Python: allocate_next_ip(existing_ips, subnet, gateway=None) -> str
+// For /31 (RFC 3021): both addresses are usable.
+// For /32: the single address is usable.
 func AllocateNextIP(existingIPs []string, subnet, gateway string) (string, error) {
 	_, ipnet, err := net.ParseCIDR(subnet)
 	if err != nil {
@@ -165,7 +183,14 @@ func AllocateNextIP(existingIPs []string, subnet, gateway string) (string, error
 	ones, bits := mask.Size()
 	total := 1 << (bits - ones)
 
-	for i := 1; i < total-1; i++ {
+	start := 1
+	end := total - 1
+	if total <= 2 {
+		start = 0
+		end = total
+	}
+
+	for i := start; i < end; i++ {
 		n := ipToInt(ip) + uint32(i)
 		candidate := intToIP(n).String()
 		if gateway != "" && candidate == gateway {
@@ -187,6 +212,9 @@ var excludedInterfaces = []string{"lo"}
 // Python: get_physical_interfaces() -> list[str]
 func GetPhysicalInterfaces() ([]string, error) {
 	netPath := "/sys/class/net"
+	if _, err := os.Stat(netPath); os.IsNotExist(err) {
+		return nil, errs.NetworkError("Unable to access /sys/class/net")
+	}
 	entries, err := os.ReadDir(netPath)
 	if err != nil {
 		return nil, errs.NetworkError("Failed to list network interfaces")
@@ -571,6 +599,120 @@ func RunBatch(ctx context.Context, commands []string) error {
 		return fmt.Errorf("ip -batch failed: %w\n%s", result.Err, result.Stderr)
 	}
 	return nil
+}
+
+// RemoveRawTap removes a TAP device by name with fallback to tuntap del.
+// Python: remove_raw_tap(tap, privileged=True) -> None
+func RemoveRawTap(ctx context.Context, tap string) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	// Try standard link delete first
+	result := system.RunCmdCompat(ctx, []string{"ip", "link", "delete", tap},
+		system.RunCmdOptions{Capture: true, Privileged: true, Check: false, Text: true})
+	if result.Success {
+		return nil
+	}
+	stderrFirst := strings.TrimSpace(result.Stderr)
+
+	// Fallback for tuntap-type interfaces
+	result = system.RunCmdCompat(ctx, []string{"ip", "tuntap", "del", "dev", tap, "mode", "tap"},
+		system.RunCmdOptions{Capture: true, Privileged: true, Check: false, Text: true})
+	if result.Success {
+		return nil
+	}
+
+	details := ""
+	if stderrFirst != "" {
+		details = fmt.Sprintf(" (%s)", stderrFirst)
+	}
+	return errs.Wrap(errs.CodeNetworkBridgeFailed,
+		fmt.Errorf("Failed to remove TAP device '%s'. Tried 'ip link delete'%s and 'ip tuntap del'.", tap, details))
+}
+
+// RemoveRawBridge removes a bridge interface with slave cleanup.
+// Python: remove_raw_bridge(bridge, privileged=True) -> None
+func RemoveRawBridge(ctx context.Context, bridge string) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	// Remove slave interfaces first
+	for _, slave := range GetBridgeSlaves(ctx, bridge) {
+		system.RunCmdCompat(ctx, []string{"ip", "link", "set", slave, "down"},
+			system.RunCmdOptions{Capture: true, Privileged: true, Check: false, Text: true})
+		result := system.RunCmdCompat(ctx, []string{"ip", "link", "delete", slave},
+			system.RunCmdOptions{Capture: true, Privileged: true, Check: false, Text: true})
+		if !result.Success {
+			system.RunCmdCompat(ctx, []string{"ip", "tuntap", "del", "dev", slave, "mode", "tap"},
+				system.RunCmdOptions{Capture: true, Privileged: true, Check: false, Text: true})
+		}
+	}
+
+	// Bring bridge down
+	system.RunCmdCompat(ctx, []string{"ip", "link", "set", bridge, "down"},
+		system.RunCmdOptions{Capture: true, Privileged: true, Check: false, Text: true})
+
+	// Delete bridge with type
+	result := system.RunCmdCompat(ctx, []string{"ip", "link", "delete", bridge, "type", "bridge"},
+		system.RunCmdOptions{Capture: true, Privileged: true, Check: false, Text: true})
+	if result.Success {
+		return nil
+	}
+	stderrFirst := strings.TrimSpace(result.Stderr)
+
+	// Fallback: try without type specifier
+	result = system.RunCmdCompat(ctx, []string{"ip", "link", "delete", bridge},
+		system.RunCmdOptions{Capture: true, Privileged: true, Check: false, Text: true})
+	if result.Success {
+		return nil
+	}
+
+	details := ""
+	if stderrFirst != "" {
+		details = fmt.Sprintf(" (%s)", stderrFirst)
+	}
+	return errs.Wrap(errs.CodeNetworkBridgeFailed,
+		fmt.Errorf("Failed to remove bridge '%s'. Tried 'ip link delete' with type%s and without.", bridge, details))
+}
+
+// GetSystemBridges returns all bridge interfaces on the host.
+// Python: get_system_bridges() -> list[str]
+func GetSystemBridges(ctx context.Context) []string {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	result := system.RunCmdCompat(ctx, []string{"ip", "-o", "link", "show", "type", "bridge"},
+		system.RunCmdOptions{Capture: true, Check: false, Text: true})
+	if !result.Success {
+		return nil
+	}
+	var bridges []string
+	for _, line := range strings.Split(result.Stdout, "\n") {
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			bridges = append(bridges, strings.TrimRight(parts[1], ":"))
+		}
+	}
+	return bridges
+}
+
+// FlushARP flushes the ARP cache for a bridge interface.
+// Python: flush_arp(bridge, privileged=True) -> None
+func FlushARP(ctx context.Context, bridge string) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	system.RunCmdCompat(ctx, []string{"ip", "neigh", "flush", "dev", bridge},
+		system.RunCmdOptions{Capture: true, Privileged: true, Check: false, Text: true})
+}
+
+// IPToUint32 converts an IPv4 address to a uint32.
+func IPToUint32(ip net.IP) uint32 {
+	ip = ip.To4()
+	return uint32(ip[0])<<24 | uint32(ip[1])<<16 | uint32(ip[2])<<8 | uint32(ip[3])
+}
+
+// IntToIP converts a uint32 to an IPv4 address.
+func IntToIP(n uint32) net.IP {
+	return net.IPv4(byte(n>>24), byte(n>>16), byte(n>>8), byte(n))
 }
 
 // ── Internal helpers ──

@@ -590,6 +590,45 @@ func (c *MVMCli) FormatJSON(v any) string {
 	return string(b)
 }
 
+// MarshalJSONDefaultStr marshals to JSON with Python's default=str semantics.
+// On marshalling error, recursively converts non-serializable values to strings.
+func MarshalJSONDefaultStr(v any) string {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err == nil {
+		return string(b)
+	}
+	v2 := convertToStringsRecursive(v)
+	b, _ = json.MarshalIndent(v2, "", "  ")
+	return string(b)
+}
+
+// convertToStringsRecursive recursively converts non-serializable Go types to strings.
+// Handles the equivalent of Python's json.dumps(..., default=str).
+func convertToStringsRecursive(v any) any {
+	if v == nil {
+		return nil
+	}
+	switch val := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(val))
+		for k, item := range val {
+			out[k] = convertToStringsRecursive(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(val))
+		for i, item := range val {
+			out[i] = convertToStringsRecursive(item)
+		}
+		return out
+	default:
+		if _, err := json.Marshal(v); err != nil {
+			return fmt.Sprintf("%v", v)
+		}
+		return v
+	}
+}
+
 // ─── Error display (matching Python's handle_errors + mvm_cli.error) ─────────
 
 // FormatError returns a clean, user-friendly error string suitable for

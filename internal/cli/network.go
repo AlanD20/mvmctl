@@ -4,14 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 
-	"github.com/spf13/cobra"
+	infranet "mvmctl/internal/infra/network"
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
+
+	"github.com/spf13/cobra"
 )
 
 // networkColumns defines the local listing columns for networks.
@@ -82,7 +83,6 @@ func newNetworkListCmd(op *api.Operation) *cobra.Command {
 		Use:     "ls",
 		Aliases: []string{"list"},
 		Short:   "List all networks.",
-		// Python's ls never takes positional arguments — no ValidArgsFunction needed
 		RunE: func(cmd *cobra.Command, args []string) error {
 			nets, err := op.NetworkListAll(cmd.Context())
 			if err != nil {
@@ -137,8 +137,6 @@ func newNetworkCreateCmd(op *api.Operation) *cobra.Command {
 			}
 
 			if subnet == "" {
-				// Python: mvm_cli.error("Missing required option '--subnet'"); raise typer.Exit(code=1)
-				// Return error once (Cobra prints it) — no double-print.
 				return fmt.Errorf("Missing required option '--subnet'")
 			}
 
@@ -192,28 +190,7 @@ func newNetworkCreateCmd(op *api.Operation) *cobra.Command {
 				return fmt.Errorf("create network failed: no network returned")
 			}
 
-			common.Cli.Success(fmt.Sprintf("Created: %s", net.Name))
-			common.Cli.Info(fmt.Sprintf("  SUBNET:    %s", net.Subnet))
-			common.Cli.Info(fmt.Sprintf("  IPv4 Gateway: %s", net.IPv4Gateway))
-			common.Cli.Info(fmt.Sprintf("  Bridge:  %s", net.Bridge))
-			natDisplay := "False"
-			if net.NATEnabled {
-				natDisplay = "True"
-			}
-			common.Cli.Info(fmt.Sprintf("  NAT:     %s", natDisplay))
-			if net.NATGateways != nil && *net.NATGateways != "" {
-				natGwList := strings.Split(*net.NATGateways, ",")
-				trimmed := make([]string, 0, len(natGwList))
-				for _, gw := range natGwList {
-					gw = strings.TrimSpace(gw)
-					if gw != "" {
-						trimmed = append(trimmed, gw)
-					}
-				}
-				if len(trimmed) > 0 {
-					common.Cli.Info(fmt.Sprintf("  NAT gateways: %s", strings.Join(trimmed, ", ")))
-				}
-			}
+			common.Cli.PrintDictTree(common.Cli.ToMap(net), fmt.Sprintf("Network: %s", net.Name))
 
 			if setDefault {
 				common.Cli.Success(fmt.Sprintf("Default network set to: %s", net.Name))
@@ -237,39 +214,16 @@ func newNetworkCreateCmd(op *api.Operation) *cobra.Command {
 // resolveUserNATGateways prompts the user to select NAT gateway interfaces.
 // Matches Python's _resolve_user_nat_gateways() exactly.
 func resolveUserNATGateways() (string, error) {
-	// Detect interfaces via /sys/class/net — matching Python's NetworkUtils.get_physical_interfaces()
-	entries, err := os.ReadDir("/sys/class/net")
+	interfaces, err := infranet.GetPhysicalInterfaces()
 	if err != nil {
-		// Python raises NetworkError("Failed to list network interfaces") which is caught by @handle_errors
 		return "", fmt.Errorf("failed to list network interfaces: %w", err)
 	}
-	if len(entries) == 0 {
-		return "", fmt.Errorf("no network interfaces found")
-	}
-
-	var interfaces []string
-	for _, entry := range entries {
-		name := entry.Name()
-		// Match Python's _VIRTUAL_INTERFACE_PREFIXES and _EXCLUDED_INTERFACES
-		if name == "lo" {
-			continue
-		}
-		if strings.HasPrefix(name, "mvm-") || strings.HasPrefix(name, "tap") ||
-			strings.HasPrefix(name, "br-") || strings.HasPrefix(name, "virbr") ||
-			strings.HasPrefix(name, "docker") || strings.HasPrefix(name, "veth") {
-			continue
-		}
-		interfaces = append(interfaces, name)
-	}
-	sort.Strings(interfaces) // Match Python's sorted(interfaces)
-
 	if len(interfaces) == 0 {
 		return "", fmt.Errorf("no network interfaces found")
 	}
 	if len(interfaces) == 1 {
 		return interfaces[0], nil
 	}
-
 	selected, err := common.Cli.PromptMultiSelect("Select interface(s) for NAT (internet access):", interfaces, nil)
 	if err != nil {
 		return "", err
@@ -282,7 +236,7 @@ func newNetworkRemoveCmd(op *api.Operation) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:               "rm [names...]",
-		Aliases:           []string{"remove", "delete"},
+		Aliases:           []string{"remove", "delete", "del"},
 		Short:             "Remove one or more networks by name.",
 		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: completeNetworkNames,
@@ -292,7 +246,7 @@ func newNetworkRemoveCmd(op *api.Operation) *cobra.Command {
 				return fmt.Errorf("usage error")
 			}
 
-			removeResult := op.NetworkRemove(cmd.Context(), &inputs.NetworkInput{Name: args}, force)
+			removeResult := op.NetworkRemove(cmd.Context(), &inputs.NetworkInput{Identifiers: args}, force)
 			if removeResult.Status == "error" || removeResult.Status == "failure" {
 				return fmt.Errorf("remove failed: %s", removeResult.Message)
 			}
@@ -330,13 +284,13 @@ func newNetworkInspectCmd(op *api.Operation) *cobra.Command {
 				return fmt.Errorf("missing required argument")
 			}
 
-			info, err := op.NetworkInspect(cmd.Context(), &inputs.NetworkInput{Name: []string{name}})
+			info, err := op.NetworkInspect(cmd.Context(), &inputs.NetworkInput{Identifiers: []string{name}})
 			if err != nil {
 				return fmt.Errorf("network not found: %s", name)
 			}
 
 			if jsonOutput {
-				fmt.Println(marshalJSONDefaultStr(info))
+				fmt.Println(common.MarshalJSONDefaultStr(info))
 				return nil
 			}
 
@@ -353,24 +307,16 @@ func newNetworkSyncCmd(op *api.Operation) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
-		Use:               "sync [name]",
+		Use:               "sync [names...]",
 		Short:             "Sync iptables rules between database and host.",
-		Args:              cobra.MaximumNArgs(1),
+		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: completeNetworkNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Resolve network ID if name provided
-			var networkID string
+			var netInput *inputs.NetworkInput
 			if len(args) > 0 {
-				name := args[0]
-				nInfo, err := op.NetworkInspect(cmd.Context(), &inputs.NetworkInput{Name: []string{name}})
-				if err != nil {
-					return fmt.Errorf("network not found: %s", name)
-				}
-				networkID = nInfo.Network.ID
+				netInput = &inputs.NetworkInput{Identifiers: args}
 			}
-
-			// Call sync with optional network ID
-			syncResult := op.NetworkSync(cmd.Context(), networkID)
+			syncResult := op.NetworkSync(cmd.Context(), netInput)
 			if syncResult.Status == "error" || syncResult.Status == "failure" {
 				return fmt.Errorf("sync failed: %s", syncResult.Message)
 			}
@@ -384,7 +330,7 @@ func newNetworkSyncCmd(op *api.Operation) *cobra.Command {
 			}
 
 			if jsonOutput {
-				fmt.Println(marshalJSONDefaultStr(results))
+				fmt.Println(common.MarshalJSONDefaultStr(results))
 				return nil
 			}
 
@@ -446,7 +392,7 @@ func newNetworkDefaultCmd(op *api.Operation) *cobra.Command {
 				return fmt.Errorf("missing required argument")
 			}
 
-			defaultResult := op.NetworkSetDefault(cmd.Context(), &inputs.NetworkInput{Name: []string{name}})
+			defaultResult := op.NetworkSetDefault(cmd.Context(), &inputs.NetworkInput{Identifiers: []string{name}})
 			if defaultResult.Status == "error" || defaultResult.Status == "failure" {
 				return fmt.Errorf("set default failed: %s", defaultResult.Message)
 			}
@@ -458,44 +404,4 @@ func newNetworkDefaultCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-// marshalJSONDefaultStr marshals to JSON with Python's default=str semantics.
-// On marshalling error, recursively converts non-serializable values to strings.
-func marshalJSONDefaultStr(v interface{}) string {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err == nil {
-		return string(b)
-	}
-	// Fallback: convert all non-serializable values to strings (default=str)
-	v2 := convertToStringsRecursive(v)
-	b, _ = json.MarshalIndent(v2, "", "  ")
-	return string(b)
-}
 
-// convertToStringsRecursive recursively converts non-serializable Go types to strings.
-// Handles the equivalent of Python's json.dumps(..., default=str).
-func convertToStringsRecursive(v interface{}) interface{} {
-	if v == nil {
-		return nil
-	}
-
-	switch val := v.(type) {
-	case map[string]interface{}:
-		out := make(map[string]interface{}, len(val))
-		for k, item := range val {
-			out[k] = convertToStringsRecursive(item)
-		}
-		return out
-	case []interface{}:
-		out := make([]interface{}, len(val))
-		for i, item := range val {
-			out[i] = convertToStringsRecursive(item)
-		}
-		return out
-	default:
-		// For structs, pointers, and non-serializable types, try MarshalJSON first
-		if _, err := json.Marshal(v); err != nil {
-			return fmt.Sprintf("%v", v)
-		}
-		return v
-	}
-}
