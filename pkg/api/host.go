@@ -15,6 +15,7 @@ import (
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/firewall"
 	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	infranet "mvmctl/internal/infra/network"
@@ -77,9 +78,9 @@ func (op *Operation) HostInit(ctx context.Context, onProgress func(errs.Progress
 		return &errs.OperationResult{Status: "error", Code: "host.init.detect_failed", Message: fmt.Sprintf("Hardware detection failed: %v", detErr)}
 	}
 	limits := host.DetectLimits()
-	resources, _ := host.DetectResources(hardware, limits, op.CacheDir)
+	resources, _ := host.DetectResources(ctx, hardware, limits, op.CacheDir)
 	probe := &host.Probe{}
-	probeResult := probe.RunAll(hardware, limits, resources)
+	probeResult := probe.RunAll(ctx, hardware, limits, resources)
 	if len(probeResult.Critical) > 0 {
 		criticalNames := make([]string, len(probeResult.Critical))
 		for i, c := range probeResult.Critical {
@@ -103,12 +104,23 @@ func (op *Operation) HostInit(ctx context.Context, onProgress func(errs.Progress
 	}
 
 	// --- iptables comment module check ---
+	xtcommentAvail := true
 	if fwBackend == "iptables" {
-		if !infranet.CheckIPTablesCommentAvailable() {
+		if !infranet.CheckIPTablesCommentAvailable(ctx) {
 			slog.Info("iptables comment module (xt_comment) not available; rule comments will be skipped")
 			_ = op.Services.Config.Set(ctx, "settings.firewall", "iptables_xtcomment", false)
+			xtcommentAvail = false
 		}
 	}
+
+	// Replace the default firewall tracker with the configured one.
+	fwBackendType := model.FirewallBackendNFTables
+	if fwBackend == "iptables" {
+		fwBackendType = model.FirewallBackendIPTables
+	}
+	sqlDB := op.Connection.DB()
+	fwTracker := firewall.NewFirewallTracker(fwBackendType, xtcommentAvail, sqlDB)
+	op.Services.Network.SetFirewallTracker(fwTracker)
 
 	// --- Initialize host state ---
 	sessionID := infra.UUIDV4()
@@ -295,7 +307,7 @@ func (op *Operation) HostDetectResources(ctx context.Context) (*model.HostResour
 	if hardware == nil || limits == nil {
 		return nil, nil
 	}
-	res, err := host.DetectResources(hardware, limits, op.CacheDir)
+	res, err := host.DetectResources(ctx, hardware, limits, op.CacheDir)
 	if err != nil {
 		return nil, err
 	}
@@ -376,7 +388,7 @@ func (op *Operation) HostInfo(ctx context.Context) *errs.OperationResult {
 	}
 
 	// Detect resources
-	resources, err := host.DetectResources(hardware, limits, op.CacheDir)
+	resources, err := host.DetectResources(ctx, hardware, limits, op.CacheDir)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:  "error",
@@ -418,7 +430,7 @@ func (op *Operation) HostRefreshCapacity(ctx context.Context) *errs.OperationRes
 		}
 	}
 
-	resources, err := host.DetectResources(hardware, limits, op.CacheDir)
+	resources, err := host.DetectResources(ctx, hardware, limits, op.CacheDir)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:  "error",
@@ -470,7 +482,7 @@ func (op *Operation) HostClean(ctx context.Context, cacheDir string) *errs.Opera
 	var summary []string
 
 	// Remove TAP devices
-	tapNames := infranet.GetTunTapDevices()
+	tapNames := infranet.GetTunTapDevices(ctx)
 	var fallbackTaps []string
 	for _, tap := range tapNames {
 		if strings.HasPrefix(tap, fmt.Sprintf("%s-", infra.CLIName)) {
@@ -487,7 +499,7 @@ func (op *Operation) HostClean(ctx context.Context, cacheDir string) *errs.Opera
 	}
 
 	networks, _ := op.Repos.Network.ListAll(ctx)
-	staleSummary := op.Services.Network.RemoveStaleInterfaces(fmt.Sprintf("%s-", infra.CLIName))
+	staleSummary := op.Services.Network.RemoveStaleInterfaces(ctx, fmt.Sprintf("%s-", infra.CLIName))
 	summary = append(summary, staleSummary...)
 
 	metadataBridges := make(map[string]bool)
@@ -513,7 +525,7 @@ func (op *Operation) HostClean(ctx context.Context, cacheDir string) *errs.Opera
 		defaultNetNameStr = s
 	}
 	defaultBridge := fmt.Sprintf("%s-%s", infra.CLIName, system.TruncateString(defaultNetNameStr, 10))
-	if infranet.BridgeExists(defaultBridge) {
+	if infranet.BridgeExists(ctx, defaultBridge) {
 		if err := op.Services.Network.RemoveRawBridge(ctx, defaultBridge); err != nil {
 			summary = append(summary, fmt.Sprintf("Warning: failed to remove orphan bridge '%s': %v", defaultBridge, err))
 		} else {
@@ -521,7 +533,7 @@ func (op *Operation) HostClean(ctx context.Context, cacheDir string) *errs.Opera
 		}
 	}
 
-	for _, bridge := range infranet.GetBridges() {
+	for _, bridge := range infranet.GetBridges(ctx) {
 		if !strings.HasPrefix(bridge, fmt.Sprintf("%s-", infra.CLIName)) {
 			continue
 		}
@@ -674,12 +686,12 @@ func (op *Operation) HostIsInitialized(ctx context.Context) bool {
 
 // HostCheckReadiness runs pre-flight checks.
 // Matches Python's HostOperation.check_readiness().
-func (op *Operation) HostCheckReadiness() *model.ProbeResult {
+func (op *Operation) HostCheckReadiness(ctx context.Context) *model.ProbeResult {
 	hardware, _ := host.DetectHardware()
 	limits := host.DetectLimits()
-	resources, _ := host.DetectResources(hardware, limits, op.CacheDir)
+	resources, _ := host.DetectResources(ctx, hardware, limits, op.CacheDir)
 	probe := &host.Probe{}
-	return probe.RunAll(hardware, limits, resources)
+	return probe.RunAll(ctx, hardware, limits, resources)
 }
 
 // ── Host helpers inlined from internal/core/host/_host_info.go ──

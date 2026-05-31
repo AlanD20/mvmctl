@@ -3,71 +3,59 @@ package binary
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"strings"
 	"time"
+
+	"github.com/jmoiron/sqlx"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/model"
 )
 
 type sqliteRepo struct {
-	db *sql.DB
+	db *sqlx.DB
 }
 
-func NewRepository(db *sql.DB) Repository {
+func NewRepository(db *sqlx.DB) Repository {
 	return &sqliteRepo{db: db}
 }
 
 func (r *sqliteRepo) Get(ctx context.Context, id string) (*model.BinaryItem, error) {
-	row := r.db.QueryRowContext(ctx,
+	var b model.BinaryItem
+	err := r.db.GetContext(ctx, &b,
 		`SELECT * FROM binaries WHERE id = ? AND deleted_at IS NULL AND is_present = 1`, id)
-	b, err := scanBinary(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	return b, err
+	return &b, err
 }
 
 func (r *sqliteRepo) FindByPrefix(ctx context.Context, prefix string) ([]*model.BinaryItem, error) {
-	rows, err := r.db.QueryContext(ctx,
+	var items []*model.BinaryItem
+	return items, r.db.SelectContext(ctx, &items,
 		`SELECT * FROM binaries WHERE id LIKE ? AND deleted_at IS NULL AND is_present = 1`, prefix+"%")
-	if err != nil {
-		return nil, fmt.Errorf("find binaries by prefix: %w", err)
-	}
-	defer rows.Close()
-	return scanBinaries(rows)
 }
 
 func (r *sqliteRepo) ListAll(ctx context.Context) ([]*model.BinaryItem, error) {
-	rows, err := r.db.QueryContext(ctx,
+	var items []*model.BinaryItem
+	return items, r.db.SelectContext(ctx, &items,
 		`SELECT * FROM binaries WHERE deleted_at IS NULL ORDER BY created_at`)
-	if err != nil {
-		return nil, fmt.Errorf("list binaries: %w", err)
-	}
-	defer rows.Close()
-	return scanBinaries(rows)
 }
 
 func (r *sqliteRepo) ListByName(ctx context.Context, name string) ([]*model.BinaryItem, error) {
-	rows, err := r.db.QueryContext(ctx,
+	var items []*model.BinaryItem
+	return items, r.db.SelectContext(ctx, &items,
 		`SELECT * FROM binaries WHERE name = ? AND deleted_at IS NULL AND is_present = 1 ORDER BY created_at`, name)
-	if err != nil {
-		return nil, fmt.Errorf("list binaries by name: %w", err)
-	}
-	defer rows.Close()
-	return scanBinaries(rows)
 }
 
 func (r *sqliteRepo) GetByNameAndVersion(ctx context.Context, name, version string) (*model.BinaryItem, error) {
-	row := r.db.QueryRowContext(ctx,
-		`SELECT * FROM binaries WHERE name = ? AND version = ? AND deleted_at IS NULL AND is_present = 1 LIMIT 1`,
-		name, version)
-	b, err := scanBinary(row)
+	var b model.BinaryItem
+	err := r.db.GetContext(ctx, &b,
+		`SELECT * FROM binaries WHERE name = ? AND version = ? AND deleted_at IS NULL AND is_present = 1`, name, version)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	return b, err
+	return &b, err
 }
 
 func (r *sqliteRepo) Upsert(ctx context.Context, b *model.BinaryItem) error {
@@ -113,17 +101,17 @@ func (r *sqliteRepo) DeleteByNameAndVersion(ctx context.Context, name, version s
 }
 
 func (r *sqliteRepo) SetDefault(ctx context.Context, name, version, path string) error {
-	tx, err := r.db.Begin()
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.Exec(
+	_, err = tx.ExecContext(ctx,
 		`UPDATE binaries SET is_default = 0 WHERE name = ? AND deleted_at IS NULL`, name)
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(
+	_, err = tx.ExecContext(ctx,
 		`UPDATE binaries SET is_default = 1, updated_at = CURRENT_TIMESTAMP
 		WHERE name = ? AND version = ? AND deleted_at IS NULL`, name, version)
 	if err != nil {
@@ -134,18 +122,18 @@ func (r *sqliteRepo) SetDefault(ctx context.Context, name, version, path string)
 
 func (r *sqliteRepo) Count(ctx context.Context) (int, error) {
 	var count int
-	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM binaries WHERE deleted_at IS NULL`).Scan(&count)
+	err := sqlx.GetContext(ctx, r.db, &count, `SELECT COUNT(*) FROM binaries WHERE deleted_at IS NULL`)
 	return count, err
 }
 
 func (r *sqliteRepo) GetDefault(ctx context.Context, name string) (*model.BinaryItem, error) {
-	row := r.db.QueryRowContext(ctx,
-		`SELECT * FROM binaries WHERE name = ? AND is_default = 1 AND deleted_at IS NULL AND is_present = 1 LIMIT 1`, name)
-	b, err := scanBinary(row)
+	var b model.BinaryItem
+	err := r.db.GetContext(ctx, &b,
+		`SELECT * FROM binaries WHERE name = ? AND is_default = 1 AND deleted_at IS NULL AND is_present = 1`, name)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	return b, err
+	return &b, err
 }
 
 func (r *sqliteRepo) SoftDelete(ctx context.Context, id string) error {
@@ -170,41 +158,4 @@ func (r *sqliteRepo) UpdateManyIsPresent(ctx context.Context, ids []string, pres
 		`UPDATE binaries SET is_present = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN (`+placeholders+`)`,
 		args...)
 	return err
-}
-
-func scanBinary(scanner interface{ Scan(dest ...any) error }) (*model.BinaryItem, error) {
-	var b model.BinaryItem
-	var ciVersion, deletedAt sql.NullString
-	var isDefault, isPresent int
-	err := scanner.Scan(
-		&b.ID, &b.Name, &b.Version, &b.FullVersion, &ciVersion, &b.Path,
-		&isDefault, &isPresent, &b.CreatedAt, &b.UpdatedAt, &deletedAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-	b.IsDefault = isDefault == 1
-	b.IsPresent = isPresent == 1
-	if ciVersion.Valid {
-		b.CIVersion = &ciVersion.String
-	}
-	if deletedAt.Valid {
-		b.DeletedAt = &deletedAt.String
-	}
-	return &b, nil
-}
-
-func scanBinaries(rows *sql.Rows) ([]*model.BinaryItem, error) {
-	var binaries []*model.BinaryItem
-	for rows.Next() {
-		b, err := scanBinary(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan binary: %w", err)
-		}
-		binaries = append(binaries, b)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("rows iteration: %w", err)
-	}
-	return binaries, nil
 }

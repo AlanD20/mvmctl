@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"mvmctl/internal/core/network"
+	"mvmctl/internal/infra/model"
 )
 
 // LeaseRepo is an in-memory lease repository for testing.
@@ -16,7 +17,7 @@ import (
 // to match the subnet's usable host count. Defaults: subnetTotalHosts=254, hasGateway=true.
 type LeaseRepo struct {
 	mu               sync.RWMutex
-	leases           []*network.NetworkLeaseItem
+	leases           []*model.NetworkLeaseItem
 	nextID           int64
 	subnetTotalHosts int  // total usable hosts in the subnet (from ipaddress.IPv4Network(network.subnet).hosts())
 	hasGateway       bool // whether the gateway is set
@@ -24,7 +25,7 @@ type LeaseRepo struct {
 
 func NewLeaseRepo() *LeaseRepo {
 	return &LeaseRepo{
-		leases:           make([]*network.NetworkLeaseItem, 0),
+		leases:           make([]*model.NetworkLeaseItem, 0),
 		nextID:           1,
 		subnetTotalHosts: 254, // default /24
 		hasGateway:       true,
@@ -41,7 +42,7 @@ func (r *LeaseRepo) SetNetwork(totalHosts int, hasGateway bool) {
 	r.hasGateway = hasGateway
 }
 
-func (r *LeaseRepo) Get(_ context.Context, networkID string, ipv4 string) (*network.NetworkLeaseItem, error) {
+func (r *LeaseRepo) Get(_ context.Context, networkID string, ipv4 string) (*model.NetworkLeaseItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, l := range r.leases {
@@ -52,10 +53,10 @@ func (r *LeaseRepo) Get(_ context.Context, networkID string, ipv4 string) (*netw
 	return nil, nil
 }
 
-func (r *LeaseRepo) ListAll(_ context.Context, networkID string) ([]*network.NetworkLeaseItem, error) {
+func (r *LeaseRepo) ListAll(_ context.Context, networkID string) ([]*model.NetworkLeaseItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	var result []*network.NetworkLeaseItem
+	var result []*model.NetworkLeaseItem
 	for _, l := range r.leases {
 		if l.NetworkID == networkID {
 			result = append(result, l)
@@ -64,10 +65,10 @@ func (r *LeaseRepo) ListAll(_ context.Context, networkID string) ([]*network.Net
 	return result, nil
 }
 
-func (r *LeaseRepo) ListByVM(_ context.Context, networkID string, vmID string) ([]*network.NetworkLeaseItem, error) {
+func (r *LeaseRepo) ListByVM(_ context.Context, networkID string, vmID string) ([]*model.NetworkLeaseItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	var result []*network.NetworkLeaseItem
+	var result []*model.NetworkLeaseItem
 	for _, l := range r.leases {
 		if l.NetworkID == networkID {
 			if l.VMID != nil && *l.VMID == vmID {
@@ -78,14 +79,14 @@ func (r *LeaseRepo) ListByVM(_ context.Context, networkID string, vmID string) (
 	return result, nil
 }
 
-func (r *LeaseRepo) ListAllBatch(_ context.Context, networkIDs []string) ([]*network.NetworkLeaseItem, error) {
+func (r *LeaseRepo) ListAllBatch(_ context.Context, networkIDs []string) ([]*model.NetworkLeaseItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	set := make(map[string]bool)
 	for _, id := range networkIDs {
 		set[id] = true
 	}
-	var result []*network.NetworkLeaseItem
+	var result []*model.NetworkLeaseItem
 	for _, l := range r.leases {
 		if set[l.NetworkID] {
 			result = append(result, l)
@@ -94,7 +95,7 @@ func (r *LeaseRepo) ListAllBatch(_ context.Context, networkIDs []string) ([]*net
 	return result, nil
 }
 
-func (r *LeaseRepo) Acquire(_ context.Context, networkID string, ipv4 string, vmID *string) (*network.NetworkLeaseItem, error) {
+func (r *LeaseRepo) Acquire(_ context.Context, networkID string, ipv4 string, vmID *string) (*model.NetworkLeaseItem, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -108,7 +109,7 @@ func (r *LeaseRepo) Acquire(_ context.Context, networkID string, ipv4 string, vm
 	id := r.nextID
 	r.nextID++
 	now := time.Now().UTC().Format(time.RFC3339)
-	lease := &network.NetworkLeaseItem{
+	lease := &model.NetworkLeaseItem{
 		ID:        &id,
 		NetworkID: networkID,
 		IPv4:      ipv4,
@@ -134,7 +135,7 @@ func (r *LeaseRepo) Release(_ context.Context, networkID string, ipv4 string) er
 func (r *LeaseRepo) ReleaseByVM(_ context.Context, vmID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	var kept []*network.NetworkLeaseItem
+	var kept []*model.NetworkLeaseItem
 	for _, l := range r.leases {
 		if l.VMID == nil || *l.VMID != vmID {
 			kept = append(kept, l)

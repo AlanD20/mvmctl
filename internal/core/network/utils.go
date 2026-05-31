@@ -2,14 +2,16 @@ package network
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
-	"log/slog"
 	"net"
 	"os"
 	"strings"
+	"time"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
-	"mvmctl/internal/infra/firewall"
 	"mvmctl/internal/infra/system"
 )
 
@@ -25,17 +27,17 @@ type SyncResult struct {
 
 // ── Raw bridge/TAP operations (static helpers matching Python) ──
 
-func removeRawTap(tap string) error {
-	if !tapExists(tap) {
+func RemoveRawTap(ctx context.Context, tap string) error {
+	if !TapExists(ctx, tap) {
 		return nil
 	}
 
 	// Bring down (best effort — may already be down)
-	system.RunCmdCompat(context.Background(), []string{"ip", "link", "set", tap, "down"},
+	system.RunCmdCompat(ctx, []string{"ip", "link", "set", tap, "down"},
 		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
 
 	// Try standard link delete first
-	result := system.RunCmdCompat(context.Background(), []string{"ip", "link", "delete", tap},
+	result := system.RunCmdCompat(ctx, []string{"ip", "link", "delete", tap},
 		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
 	if result != nil && result.Success {
 		return nil
@@ -47,7 +49,7 @@ func removeRawTap(tap string) error {
 	}
 
 	// Fallback for tuntap-type interfaces
-	result = system.RunCmdCompat(context.Background(), []string{"ip", "tuntap", "del", "dev", tap, "mode", "tap"},
+	result = system.RunCmdCompat(ctx, []string{"ip", "tuntap", "del", "dev", tap, "mode", "tap"},
 		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
 	if result != nil && result.Success {
 		return nil
@@ -61,30 +63,30 @@ func removeRawTap(tap string) error {
 		fmt.Errorf("Failed to remove TAP device '%s'. Tried 'ip link delete'%s and 'ip tuntap del'.", tap, details))
 }
 
-func removeRawBridge(bridge string) error {
-	if !bridgeExists(bridge) {
+func RemoveRawBridge(ctx context.Context, bridge string) error {
+	if !BridgeExists(ctx, bridge) {
 		return nil
 	}
 
 	// Remove slave interfaces first
-	for _, slave := range getBridgeSlaves(bridge) {
-		system.RunCmdCompat(context.Background(), []string{"ip", "link", "set", slave, "down"},
+	for _, slave := range GetBridgeSlaves(ctx, bridge) {
+		system.RunCmdCompat(ctx, []string{"ip", "link", "set", slave, "down"},
 			system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
-		result := system.RunCmdCompat(context.Background(), []string{"ip", "link", "delete", slave},
+		result := system.RunCmdCompat(ctx, []string{"ip", "link", "delete", slave},
 			system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
 		if result == nil || !result.Success {
 			// Try tuntap fallback for TAP slaves
-			system.RunCmdCompat(context.Background(), []string{"ip", "tuntap", "del", "dev", slave, "mode", "tap"},
+			system.RunCmdCompat(ctx, []string{"ip", "tuntap", "del", "dev", slave, "mode", "tap"},
 				system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
 		}
 	}
 
 	// Bring bridge down
-	system.RunCmdCompat(context.Background(), []string{"ip", "link", "set", bridge, "down"},
+	system.RunCmdCompat(ctx, []string{"ip", "link", "set", bridge, "down"},
 		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
 
 	// Delete bridge
-	result := system.RunCmdCompat(context.Background(), []string{"ip", "link", "delete", bridge, "type", "bridge"},
+	result := system.RunCmdCompat(ctx, []string{"ip", "link", "delete", bridge, "type", "bridge"},
 		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
 	if result != nil && result.Success {
 		return nil
@@ -96,7 +98,7 @@ func removeRawBridge(bridge string) error {
 	}
 
 	// Fallback: try without type specifier
-	result = system.RunCmdCompat(context.Background(), []string{"ip", "link", "delete", bridge},
+	result = system.RunCmdCompat(ctx, []string{"ip", "link", "delete", bridge},
 		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
 	if result != nil && result.Success {
 		return nil
@@ -110,76 +112,22 @@ func removeRawBridge(bridge string) error {
 		fmt.Errorf("Failed to remove bridge '%s'. Tried 'ip link delete' with type%s and without.", bridge, details))
 }
 
-// ── IP forwarding ──
-
-func ensureIPForwarding() error {
-	if err := os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1\n"), 0644); err != nil {
-		result := system.RunCmdCompat(context.Background(), []string{"sysctl", "-w", "net.ipv4.ip_forward=1"},
-			system.RunCmdOpts{Capture: true, Privileged: true, Check: true})
-		if result != nil && result.Err != nil {
-			slog.Debug("Failed to enable IP forwarding")
-			return errs.NetworkError("Failed to enable IP forwarding")
-		}
-	}
-	return nil
-}
-
-// ── Conversion helpers (network.FirewallRule → firewall.FirewallRule) ──
-
-func toFWRule(r *FirewallRule) firewall.FirewallRule {
-	fr := firewall.FirewallRule{
-		TableName:    firewall.FirewallTable(r.TableName),
-		ChainName:    firewall.FirewallChain(r.ChainName),
-		RuleType:     firewall.FirewallRuleType(r.RuleType),
-		Protocol:     firewall.FirewallProtocol(r.Protocol),
-		Source:       r.Source,
-		Destination:  r.Destination,
-		InInterface:  r.InInterface,
-		OutInterface: r.OutInterface,
-		Target:       firewall.FirewallTarget(r.Target),
-		SPort:        r.SPort,
-		DPort:        r.DPort,
-		NetworkID:    r.NetworkID,
-		IsActive:     r.IsActive,
-	}
-	if r.ID != nil {
-		v := *r.ID
-		fr.ID = &v
-	}
-	if r.NetworkName != nil {
-		fr.NetworkName = r.NetworkName
-	}
-	if r.CommentTag != nil {
-		fr.CommentTag = r.CommentTag
-	}
-	if r.CommandString != nil {
-		fr.CommandString = r.CommandString
-	}
-	if r.CreatedAt != nil {
-		fr.CreatedAt = r.CreatedAt
-	}
-	if r.LastVerifiedAt != nil {
-		fr.LastVerifiedAt = r.LastVerifiedAt
-	}
-	return fr
-}
-
 // ── System query helpers (non-privileged) ──
 
-func bridgeExists(bridge string) bool {
-	result := system.RunCmdCompat(context.Background(), []string{"ip", "link", "show", bridge},
+func BridgeExists(ctx context.Context, bridge string) bool {
+	result := system.RunCmdCompat(ctx, []string{"ip", "link", "show", bridge},
 		system.RunCmdOpts{Capture: true, Check: false})
 	return result != nil && result.Success
 }
 
-func tapExists(tap string) bool {
-	result := system.RunCmdCompat(context.Background(), []string{"ip", "link", "show", tap},
+func TapExists(ctx context.Context, tap string) bool {
+	result := system.RunCmdCompat(ctx, []string{"ip", "link", "show", tap},
 		system.RunCmdOpts{Capture: true, Check: false})
 	return result != nil && result.Success
 }
 
-func bridgeHasSubnet(bridge, subnet string) bool {
-	result := system.RunCmdCompat(context.Background(), []string{"ip", "-o", "addr", "show", bridge},
+func bridgeHasSubnet(ctx context.Context, bridge, subnet string) bool {
+	result := system.RunCmdCompat(ctx, []string{"ip", "-o", "addr", "show", bridge},
 		system.RunCmdOpts{Capture: true, Check: false})
 	if result == nil || !result.Success {
 		return false
@@ -187,8 +135,8 @@ func bridgeHasSubnet(bridge, subnet string) bool {
 	return strings.Contains(result.Stdout, subnet)
 }
 
-func getBridgeSlaves(bridge string) []string {
-	result := system.RunCmdCompat(context.Background(), []string{"ip", "-o", "link", "show", "master", bridge},
+func GetBridgeSlaves(ctx context.Context, bridge string) []string {
+	result := system.RunCmdCompat(ctx, []string{"ip", "-o", "link", "show", "master", bridge},
 		system.RunCmdOpts{Capture: true, Check: false})
 	if result == nil || !result.Success {
 		return nil
@@ -211,8 +159,8 @@ func getBridgeSlaves(bridge string) []string {
 	return slaves
 }
 
-func getBridgeTaps(bridge string) []string {
-	result := system.RunCmdCompat(context.Background(), []string{"ip", "link", "show", "master", bridge},
+func GetBridgeTaps(ctx context.Context, bridge string) []string {
+	result := system.RunCmdCompat(ctx, []string{"ip", "link", "show", "master", bridge},
 		system.RunCmdOpts{Capture: true, Check: false})
 	if result == nil || !result.Success {
 		return nil
@@ -233,8 +181,8 @@ func getBridgeTaps(bridge string) []string {
 	return taps
 }
 
-func getTapBridge(tap string) string {
-	result := system.RunCmdCompat(context.Background(), []string{"ip", "link", "show", tap},
+func GetTapBridge(ctx context.Context, tap string) string {
+	result := system.RunCmdCompat(ctx, []string{"ip", "link", "show", tap},
 		system.RunCmdOpts{Capture: true, Check: false})
 	if result == nil || !result.Success {
 		return ""
@@ -272,8 +220,8 @@ func runBatch(ctx context.Context, commands []string) error {
 
 // ── System bridge listing ──
 
-func getSystemBridges() []string {
-	result := system.RunCmdCompat(context.Background(), []string{"ip", "-o", "link", "show", "type", "bridge"},
+func GetSystemBridges(ctx context.Context) []string {
+	result := system.RunCmdCompat(ctx, []string{"ip", "-o", "link", "show", "type", "bridge"},
 		system.RunCmdOpts{Capture: true, Check: false})
 	if result == nil || !result.Success {
 		return nil
@@ -334,25 +282,134 @@ func ComputeIPv4Gateway(subnet string) (string, error) {
 			return ip.String(), nil
 		}
 		// /31: Python's IPv4Network.hosts() returns [ip, ip+1], uses hosts[1]
-		n := ipToUint32(ip) + 1
-		return intToIP(n).String(), nil
+		n := IPToUint32(ip) + 1
+		return IntToIP(n).String(), nil
 	}
 
 	// Normal subnets: first usable host = ip + 1
-	n := ipToUint32(ip) + 1
-	return intToIP(n).String(), nil
+	n := IPToUint32(ip) + 1
+	return IntToIP(n).String(), nil
 }
 
-// ── Firewall rule list interfaces ──
+// allocateNextIP finds the next available IP in a subnet, skipping gateway.
+// Matches Python's NetworkUtils.allocate_next_ip exactly.
+func AllocateNextIP(existingIPs []string, subnet, gateway string) (string, error) {
+	network := &net.IPNet{}
+	if _, ipnet, err := net.ParseCIDR(subnet); err == nil {
+		network = ipnet
+	} else {
+		return "", fmt.Errorf("invalid subnet: %s", subnet)
+	}
 
-// fwRuleLister is a local interface that matches the GetByNetworkID method
-// shared by both IPTablesRuleRepository and NFTablesRuleRepository.
-type fwRuleLister interface {
-	GetByNetworkID(networkID string, activeOnly bool) ([]*firewall.FirewallRule, error)
+	existingSet := make(map[string]bool)
+	for _, ip := range existingIPs {
+		existingSet[ip] = true
+	}
+
+	ip := network.IP.To4()
+	mask := network.Mask
+	ones, bits := mask.Size()
+	total := 1 << (bits - ones)
+
+	// Matches Python's ipaddress.IPv4Network(subnet, strict=False).hosts():
+	// For /31 (RFC 3021): both addresses are usable.
+	// For /32: the single address is usable.
+	start := 1
+	end := total - 1
+	if total <= 2 {
+		start = 0
+		end = total
+	}
+
+	for i := start; i < end; i++ {
+		n := IPToUint32(ip) + uint32(i)
+		candidate := IntToIP(n).String()
+
+		if gateway != "" && candidate == gateway {
+			continue
+		}
+		if !existingSet[candidate] {
+			return candidate, nil
+		}
+	}
+
+	return "", fmt.Errorf("no available IPs in subnet %s", subnet)
 }
 
-// fwRuleByInterfaceLister extends fwRuleLister with interface-based filtering.
-type fwRuleByInterfaceLister interface {
-	GetByNetworkID(networkID string, activeOnly bool) ([]*firewall.FirewallRule, error)
-	GetByNetworkIDAndInterface(networkID string, iface string, activeOnly bool) ([]*firewall.FirewallRule, error)
+// ipToUint32 converts an IPv4 address to a uint32.
+func IPToUint32(ip net.IP) uint32 {
+	ip = ip.To4()
+	return uint32(ip[0])<<24 | uint32(ip[1])<<16 | uint32(ip[2])<<8 | uint32(ip[3])
+}
+
+// intToIP converts a uint32 to an IPv4 address.
+func IntToIP(n uint32) net.IP {
+	return net.IPv4(byte(n>>24), byte(n>>16), byte(n>>8), byte(n))
+}
+
+// ── Network utilities ──
+
+// FlushARP flushes the ARP cache for a bridge interface.
+// Matches Python's Service.flush_arp().
+func FlushARP(ctx context.Context, bridge string) {
+	system.RunCmdCompat(ctx, []string{"ip", "neigh", "flush", "dev", bridge},
+		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
+}
+
+// ComputeBridgeAddress returns gateway IP with subnet prefix.
+// Matches Python's compute_bridge_address which raises ValueError on invalid subnet.
+func ComputeBridgeAddress(gateway, subnet string) (string, error) {
+	_, ipnet, err := net.ParseCIDR(subnet)
+	if err != nil {
+		return "", fmt.Errorf("invalid subnet: %s", subnet)
+	}
+	ones, _ := ipnet.Mask.Size()
+	return fmt.Sprintf("%s/%d", gateway, ones), nil
+}
+
+// ComputeBridgeName generates a 15-char bridge name from the network name.
+// Matches Python's NetworkUtils.compute_bridge_name().
+func ComputeBridgeName(networkName string) string {
+	raw := fmt.Sprintf("%s-%s", infra.CLIName, networkName)
+	if len(raw) <= 15 {
+		return raw
+	}
+
+	hashLen := 8
+	prefix := fmt.Sprintf("%s-", infra.CLIName)
+	maxName := 15 - len(prefix) - hashLen - 1
+	nameTruncated := networkName
+	if maxName > 0 && len(networkName) > maxName {
+		nameTruncated = networkName[:maxName]
+	}
+	shortHash := sha256Hex(networkName)[:hashLen]
+	return fmt.Sprintf("%s%s-%s", prefix, nameTruncated, shortHash)
+}
+
+func sha256Hex(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return fmt.Sprintf("%x", h)
+}
+
+// GenerateMAC generates a MAC address with the given prefix.
+// Matches Python's generate_mac which uses 4 random bytes + uppercase.
+func GenerateMAC(macPrefix string) string {
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		b = []byte{
+			byte(time.Now().UnixNano()),
+			byte(os.Getpid()),
+			byte(os.Getppid()),
+			0x00,
+		}
+	}
+	return strings.ToUpper(fmt.Sprintf("%s:%02x:%02x:%02x:%02x", macPrefix, b[0], b[1], b[2], b[3]))
+}
+
+// GenerateTAPName generates a TAP device name from network and VM names.
+// Matches Python's NetworkUtils.generate_tap_name().
+func GenerateTAPName(networkName, vmName string) string {
+	raw := fmt.Sprintf("%s-%s", networkName, vmName)
+	hash := sha256Hex(raw)[:11]
+	return fmt.Sprintf("%s-%s", infra.CLIName, hash)
 }

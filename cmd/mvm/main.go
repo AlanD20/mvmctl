@@ -18,7 +18,7 @@ func main() {
 	if len(os.Args) > 2 && os.Args[1] == "run" {
 		switch os.Args[2] {
 		case "nocloud-serve":
-			nocloudnet.ServeNoCloudHTTP(os.Args[3:])
+			nocloudnet.ServeNoCloudHTTP(context.Background(), os.Args[3:])
 		case "console-relay":
 			console.RunRelaySubprocess(os.Args[3:])
 		case "provision":

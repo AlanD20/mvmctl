@@ -24,14 +24,14 @@ type Controller struct {
 
 // NewController creates a new VM controller.
 // Matches Python's VMController.__init__(self, entity: str | VMInstanceItem, repo: Repository).
-func NewController(entity any, repo Repository) (*Controller, error) {
+func NewController(ctx context.Context, entity any, repo Repository) (*Controller, error) {
 	c := &Controller{repo: repo}
 	switch e := entity.(type) {
 	case *model.VM:
 		c.vm = e
 	case string:
 		resolver := NewResolver(repo)
-		resolved, err := resolver.Resolve(context.Background(), e)
+		resolved, err := resolver.Resolve(ctx, e)
 		if err != nil {
 			return nil, err
 		}
@@ -140,7 +140,7 @@ func (c *Controller) normalStop(ctx context.Context, force bool, handler *system
 
 		// Try graceful shutdown via Firecracker API first
 		client := NewFirecrackerClient(apiSocket)
-		wasCtrlAltDel, ctrlErr := client.SendCtrlAltDel()
+		wasCtrlAltDel, ctrlErr := client.SendCtrlAltDel(ctx)
 		client.Close()
 
 		if ctrlErr != nil {
@@ -230,7 +230,7 @@ func (c *Controller) Pause(ctx context.Context) error {
 	// Python: try: ... finally: client.close()
 	defer client.Close()
 
-	if err := client.PauseVM(); err != nil {
+	if err := client.PauseVM(ctx); err != nil {
 		return err
 	}
 
@@ -285,7 +285,7 @@ func (c *Controller) Resume(ctx context.Context) error {
 	// Python: try: ... finally: client.close()
 	defer client.Close()
 
-	if err := client.ResumeVM(); err != nil {
+	if err := client.ResumeVM(ctx); err != nil {
 		return err
 	}
 
@@ -339,7 +339,7 @@ func (c *Controller) Start(ctx context.Context) error {
 	// Python: try: ... finally: client.close()
 	defer client.Close()
 
-	if _, err := client.StartInstance(); err != nil {
+	if _, err := client.StartInstance(ctx); err != nil {
 		return err
 	}
 
@@ -407,7 +407,7 @@ func (c *Controller) Snapshot(ctx context.Context, memOut, stateOut string) (err
 		// Only MVMError-equivalent errors (Firecracker client / domain errors) are
 		// absorbed; unexpected errors propagate to the caller via named return err.
 		if wasRunning {
-			if resumeErr := client.ResumeVM(); resumeErr != nil {
+			if resumeErr := client.ResumeVM(ctx); resumeErr != nil {
 				if isMVMError(resumeErr) {
 					slog.Warn("Failed to resume VM after snapshot — leaving in paused state", "name", name)
 				} else {
@@ -431,7 +431,7 @@ func (c *Controller) Snapshot(ctx context.Context, memOut, stateOut string) (err
 
 	// Pause before snapshotting (Firecracker requires VM to be paused)
 	if wasRunning {
-		if err := client.PauseVM(); err != nil {
+		if err := client.PauseVM(ctx); err != nil {
 			return err
 		}
 		// Python's update_status() is inside the try block — if it fails,
@@ -442,7 +442,7 @@ func (c *Controller) Snapshot(ctx context.Context, memOut, stateOut string) (err
 		c.vm.Status = model.StatusPaused
 	}
 
-	_, snapshotErr := client.CreateSnapshot(memOut, stateOut)
+	_, snapshotErr := client.CreateSnapshot(ctx, memOut, stateOut)
 	if snapshotErr != nil {
 		return snapshotErr
 	}
@@ -464,7 +464,7 @@ func (c *Controller) LoadSnapshot(ctx context.Context, memIn, stateIn string, re
 	// Python: try: ... finally: client.close()
 	defer client.Close()
 
-	if _, err := client.LoadSnapshot(memIn, stateIn, resumeAfter); err != nil {
+	if _, err := client.LoadSnapshot(ctx, memIn, stateIn, resumeAfter); err != nil {
 		return err
 	}
 
@@ -527,7 +527,7 @@ func (c *Controller) AttachVolume(ctx context.Context, vol any) error {
 
 	// Hotplug into the running Firecracker process
 	client := NewFirecrackerClient(apiSocket)
-	err := client.PutDrive(driveConfig)
+	err := client.PutDrive(ctx, driveConfig)
 	client.Close()
 	if err != nil {
 		return err
@@ -571,7 +571,7 @@ func (c *Controller) DetachVolume(ctx context.Context, vol any) error {
 
 	// Call Firecracker API to delete the drive
 	client := NewFirecrackerClient(apiSocket)
-	err := client.DeleteDrive(driveID)
+	err := client.DeleteDrive(ctx, driveID)
 	client.Close()
 	if err != nil {
 		return err

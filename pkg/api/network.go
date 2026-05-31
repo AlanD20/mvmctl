@@ -98,7 +98,7 @@ func (op *Operation) NetworkCreate(ctx context.Context, input *inputs.NetworkCre
 	}
 
 	// Update bridge_active
-	bridgeActive := infranet.BridgeExists(resolved.Bridge)
+	bridgeActive := infranet.BridgeExists(ctx, resolved.Bridge)
 	_ = op.Repos.Network.UpdateBridgeActive(ctx, networkID, bridgeActive)
 
 	// Re-fetch
@@ -247,7 +247,7 @@ func (op *Operation) NetworkInspect(ctx context.Context, input *inputs.NetworkIn
 
 	net := resolved.Networks[0]
 
-	bridgeActive := infranet.BridgeExists(net.Bridge)
+	bridgeActive := infranet.BridgeExists(ctx, net.Bridge)
 	if bridgeActive != net.BridgeActive {
 		_ = op.Repos.Network.UpdateBridgeActive(ctx, net.ID, bridgeActive)
 		net.BridgeActive = bridgeActive
@@ -324,7 +324,7 @@ func (op *Operation) NetworkSetDefault(ctx context.Context, input *inputs.Networ
 	}
 
 	net := resolved.Networks[0]
-	controller, err := network.NewController(net, op.Repos.Network)
+	controller, err := network.NewController(ctx, net, op.Repos.Network)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:  "error",
@@ -388,7 +388,7 @@ func (op *Operation) NetworkSync(ctx context.Context, networkID string) *errs.Op
 	syncErr := func() error {
 		// Step 1: Restore missing bridges (post-reboot recovery)
 		for _, net := range networks {
-			if !infranet.BridgeExists(net.Bridge) {
+			if !infranet.BridgeExists(ctx, net.Bridge) {
 				bridgeAddr, calcErr := network.ComputeBridgeAddress(net.IPv4Gateway, net.Subnet)
 				if calcErr != nil {
 					return fmt.Errorf("compute bridge address: %w", calcErr)
@@ -406,7 +406,7 @@ func (op *Operation) NetworkSync(ctx context.Context, networkID string) *errs.Op
 
 		// Step 2: Reconcile bridge state (DB vs kernel)
 		for _, net := range networks {
-			bridgeActive := infranet.BridgeExists(net.Bridge)
+			bridgeActive := infranet.BridgeExists(ctx, net.Bridge)
 			if bridgeActive != net.BridgeActive {
 				_ = op.Repos.Network.UpdateBridgeActive(ctx, net.ID, bridgeActive)
 				bridgesReconciled++
@@ -429,7 +429,7 @@ func (op *Operation) NetworkSync(ctx context.Context, networkID string) *errs.Op
 		}
 
 		// Step 4: Clean up orphaned bridges (matches Python's service.cleanup_orphaned_bridges())
-		orphanedBridgesRemoved = op.Services.Network.CleanupOrphanedBridges(networks)
+		orphanedBridgesRemoved = op.Services.Network.CleanupOrphanedBridges(ctx, networks)
 		return nil
 	}()
 
@@ -555,7 +555,7 @@ func (op *Operation) NetworkCreateDefaultNetwork(ctx context.Context) *errs.Oper
 	// Check existing
 	internalNetwork, _ := op.Repos.Network.GetByName(ctx, defaultName)
 	if internalNetwork == nil {
-		outboundIf := infranet.DetectOutboundInterface()
+		outboundIf := infranet.DetectOutboundInterface(ctx)
 		var natGateways []string
 		if outboundIf != "" {
 			natGateways = []string{outboundIf}
@@ -615,7 +615,7 @@ func (op *Operation) NetworkCreateDefaultNetwork(ctx context.Context) *errs.Oper
 		_ = op.Services.Network.EnsureNAT(ctx, defaultNetwork.Bridge, network.NatGatewaysList(defaultNetwork), defaultNetwork.Subnet, defaultNetwork.ID)
 	}
 
-	bridgeActive := infranet.BridgeExists(defaultNetwork.Bridge)
+	bridgeActive := infranet.BridgeExists(ctx, defaultNetwork.Bridge)
 	_ = op.Repos.Network.UpdateBridgeActive(ctx, defaultNetwork.ID, bridgeActive)
 
 	return &errs.OperationResult{

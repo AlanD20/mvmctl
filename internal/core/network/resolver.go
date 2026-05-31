@@ -6,18 +6,19 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/model"
 )
 
 // ResolveResult holds the result of multi-resolve.
 type ResolveResult struct {
-	Items    []*Network
+	Items    []*model.Network
 	Errors   []string
 	ExitCode int
 }
 
 // NetworkEnrichFunc is a callback for enriching networks with relations.
 // Set by the API layer during wiring to avoid circular imports.
-type NetworkEnrichFunc func(ctx context.Context, networks []*Network) ([]*Network, error)
+type NetworkEnrichFunc func(ctx context.Context, networks []*model.Network) ([]*model.Network, error)
 
 // Resolver resolves network identifiers.
 // Matches src/mvmctl/core/network/_resolver.py: Resolver
@@ -27,13 +28,7 @@ type Resolver struct {
 	enrichFn NetworkEnrichFunc
 }
 
-func NewResolver(repo Repository) *Resolver {
-	return &Resolver{repo: repo}
-}
-
-// NewResolverWithInclude creates a resolver with enrichment relations to include.
-// Matches Python: Resolver(repo, include=["leases", "vms"])
-func NewResolverWithInclude(repo Repository, include []string) *Resolver {
+func NewResolver(repo Repository, include []string) *Resolver {
 	return &Resolver{repo: repo, include: include}
 }
 
@@ -47,7 +42,7 @@ func (r *Resolver) SetEnrichFunc(fn NetworkEnrichFunc) {
 // Enrich enriches networks with relations if include is set.
 // Matches Python's Resolver.enrich() method which calls
 // RelationEnricher().enrich(networks, self._include, self.RELATIONS).
-func (r *Resolver) enrich(ctx context.Context, networks []*Network) []*Network {
+func (r *Resolver) enrich(ctx context.Context, networks []*model.Network) []*model.Network {
 	if r.include == nil || len(r.include) == 0 || len(networks) == 0 {
 		return networks
 	}
@@ -63,37 +58,37 @@ func (r *Resolver) enrich(ctx context.Context, networks []*Network) []*Network {
 // EnrichWithRelations loads relations for a resolved network.
 // This is the public entry point for the enricher package to call.
 // Matches Python's Resolver.enrich() used by RelationEnricher.
-func (r *Resolver) EnrichWithRelations(ctx context.Context, networks []*Network) []*Network {
+func (r *Resolver) EnrichWithRelations(ctx context.Context, networks []*model.Network) []*model.Network {
 	return r.enrich(ctx, networks)
 }
 
-func (r *Resolver) ByID(ctx context.Context, networkID string) (*Network, error) {
+func (r *Resolver) ByID(ctx context.Context, networkID string) (*model.Network, error) {
 	matches, err := r.repo.FindByPrefix(ctx, networkID)
 	if err != nil {
 		return nil, err
 	}
 	if len(matches) == 0 {
-		return nil, errs.NotFound(errs.CodeNetworkNotFound, fmt.Sprintf("Network not found: %s", networkID))
+		return nil, errs.NotFound(errs.CodeNetworkNotFound, fmt.Sprintf("model.Network not found: %s", networkID))
 	}
 	if len(matches) > 1 {
 		return nil, errs.NotFound(errs.CodeNetworkNotFound,
-			fmt.Sprintf("Network ID is ambiguous: %s", networkID))
+			fmt.Sprintf("model.Network ID is ambiguous: %s", networkID))
 	}
 	return r.enrich(ctx, matches)[0], nil
 }
 
-func (r *Resolver) ByName(ctx context.Context, name string) (*Network, error) {
+func (r *Resolver) ByName(ctx context.Context, name string) (*model.Network, error) {
 	network, err := r.repo.GetByName(ctx, name)
 	if err != nil {
 		return nil, err
 	}
 	if network == nil {
-		return nil, errs.NotFound(errs.CodeNetworkNotFound, fmt.Sprintf("Network not found: %s", name))
+		return nil, errs.NotFound(errs.CodeNetworkNotFound, fmt.Sprintf("model.Network not found: %s", name))
 	}
-	return r.enrich(ctx, []*Network{network})[0], nil
+	return r.enrich(ctx, []*model.Network{network})[0], nil
 }
 
-func (r *Resolver) GetDefault(ctx context.Context) (*Network, error) {
+func (r *Resolver) GetDefault(ctx context.Context) (*model.Network, error) {
 	network, err := r.repo.GetDefault(ctx)
 	if err != nil {
 		return nil, err
@@ -101,10 +96,10 @@ func (r *Resolver) GetDefault(ctx context.Context) (*Network, error) {
 	if network == nil {
 		return nil, nil
 	}
-	return r.enrich(ctx, []*Network{network})[0], nil
+	return r.enrich(ctx, []*model.Network{network})[0], nil
 }
 
-func (r *Resolver) Resolve(ctx context.Context, value string) (*Network, error) {
+func (r *Resolver) Resolve(ctx context.Context, value string) (*model.Network, error) {
 	// Try by name first, then by ID prefix
 	// Matches Python's resolve() which catches only NetworkNotFoundError
 	// from by_name — any other error (DB error, etc.) propagates immediately.
@@ -127,7 +122,7 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*Network, error) 
 func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) (*ResolveResult, error) {
 	uniqueIDs := infra.Dedup(identifiers)
 
-	var items []*Network
+	var items []*model.Network
 	var errorsList []string
 	resolvedIDs := make(map[string]bool)
 

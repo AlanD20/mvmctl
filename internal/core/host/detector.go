@@ -1,6 +1,7 @@
 package host
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -383,7 +384,7 @@ func parseModules() map[string]bool {
 }
 
 // ── DetectResources ──
-func DetectResources(hardware *model.HostHardware, limits *model.HostLimits, vmDirPath string) (*model.HostResources, error) {
+func DetectResources(ctx context.Context, hardware *model.HostHardware, limits *model.HostLimits, vmDirPath string) (*model.HostResources, error) {
 	meminfo := readMeminfo()
 	memoryAvailableMiB := meminfo["MemAvailable"] / 1024
 
@@ -528,7 +529,7 @@ func DetectResources(hardware *model.HostHardware, limits *model.HostLimits, vmD
 		currentUser, err := user.Current()
 		if err == nil {
 			// Check group members via NSS (getent)
-			members, parseErr := system.GroupMembersViaNSS("kvm")
+			members, parseErr := system.GroupMembersViaNSS(ctx, "kvm")
 			if parseErr == nil {
 				userInKVMGroup = slices.Contains(members, currentUser.Username)
 			}

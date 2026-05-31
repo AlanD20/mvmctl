@@ -216,8 +216,8 @@ func GetPhysicalInterfaces() ([]string, error) {
 
 // DetectOutboundInterface returns the outbound (default route) network interface.
 // Python: detect_outbound_interface() -> str | None
-func DetectOutboundInterface() string {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func DetectOutboundInterface(ctx context.Context) string {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	result := system.RunCmdCompat(ctx, []string{"ip", "route", "show", "default"}, system.RunCmdOptions{Check: false, Capture: true, Text: true})
 	if result.Err != nil || result.ExitCode != 0 {
@@ -237,8 +237,8 @@ func DetectOutboundInterface() string {
 
 // BridgeExists checks if a bridge interface exists.
 // Python: bridge_exists(bridge) -> bool
-func BridgeExists(bridge string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func BridgeExists(ctx context.Context, bridge string) bool {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	result := system.RunCmdCompat(ctx, []string{"ip", "link", "show", bridge}, system.RunCmdOptions{Check: false, Capture: true, Text: true})
 	return result.Success
@@ -246,8 +246,8 @@ func BridgeExists(bridge string) bool {
 
 // TapExists checks if a TAP interface exists.
 // Python: tap_exists(tap) -> bool
-func TapExists(tap string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func TapExists(ctx context.Context, tap string) bool {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	result := system.RunCmdCompat(ctx, []string{"ip", "link", "show", tap}, system.RunCmdOptions{Check: false, Capture: true, Text: true})
 	return result.Success
@@ -256,8 +256,8 @@ func TapExists(tap string) bool {
 // ChainExists checks if an iptables chain exists.
 // Python: chain_exists(chain, table="filter") -> bool
 // NOTE: Go does not support default parameters; callers must pass table explicitly.
-func ChainExists(chain, table string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func ChainExists(ctx context.Context, chain, table string) bool {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	result := system.RunCmdCompat(ctx, []string{"iptables", "-t", table, "-L", chain, "-n"}, system.RunCmdOptions{Check: false, Capture: true, Text: true})
 	return result.Success
@@ -265,8 +265,8 @@ func ChainExists(chain, table string) bool {
 
 // GetTunTapDevices lists all TUN/TAP devices.
 // Python: get_tuntap_devices() -> list[str]
-func GetTunTapDevices() []string {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func GetTunTapDevices(ctx context.Context) []string {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	result := system.RunCmdCompat(ctx, []string{"ip", "-o", "link", "show", "type", "tuntap"}, system.RunCmdOptions{Check: false, Capture: true, Text: true})
 	if !result.Success {
@@ -284,8 +284,8 @@ func GetTunTapDevices() []string {
 
 // GetBridges lists all bridge interfaces.
 // Python: get_bridges() -> list[str]
-func GetBridges() []string {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func GetBridges(ctx context.Context) []string {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	result := system.RunCmdCompat(ctx, []string{"ip", "-o", "link", "show", "type", "bridge"}, system.RunCmdOptions{Check: false, Capture: true, Text: true})
 	if !result.Success {
@@ -303,8 +303,8 @@ func GetBridges() []string {
 
 // GetBridgeSlaves returns all interface names attached to a bridge.
 // Python: get_bridge_slaves(bridge) -> list[str]
-func GetBridgeSlaves(bridge string) []string {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func GetBridgeSlaves(ctx context.Context, bridge string) []string {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	result := system.RunCmdCompat(ctx, []string{"ip", "-o", "link", "show", "master", bridge}, system.RunCmdOptions{Check: false, Capture: true, Text: true})
 	if !result.Success {
@@ -330,8 +330,8 @@ func GetBridgeSlaves(bridge string) []string {
 
 // GetBridgeTaps lists all TAP devices currently attached to the bridge.
 // Python: get_bridge_taps(bridge) -> list[str]
-func GetBridgeTaps(bridge string) []string {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func GetBridgeTaps(ctx context.Context, bridge string) []string {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	result := system.RunCmdCompat(ctx, []string{"ip", "link", "show", "master", bridge}, system.RunCmdOptions{Check: false, Capture: true, Text: true})
 	if !result.Success {
@@ -351,7 +351,7 @@ func GetBridgeTaps(bridge string) []string {
 // EnsureInterfaceReady ensures a network interface exists and is usable for NAT.
 // Python: ensure_interface_ready(interface) -> bool
 // Returns nil on success, error on failure.
-func EnsureInterfaceReady(iface string) error {
+func EnsureInterfaceReady(ctx context.Context, iface string) error {
 	if iface == "lo" {
 		return errs.NetworkError("Loopback interface 'lo' cannot be used for NAT")
 	}
@@ -366,7 +366,7 @@ func EnsureInterfaceReady(iface string) error {
 		return errs.NetworkError(fmt.Sprintf("Interface '%s' is down. Bring it up with: ip link set %s up", iface, iface))
 	}
 
-	result := system.RunCmdCompat(context.Background(), []string{"ip", "-o", "-4", "addr", "show", iface}, system.RunCmdOptions{
+	result := system.RunCmdCompat(ctx, []string{"ip", "-o", "-4", "addr", "show", iface}, system.RunCmdOptions{
 		Check:   false,
 		Capture: true,
 		Text:    true,
@@ -384,8 +384,8 @@ func EnsureInterfaceReady(iface string) error {
 
 // BridgeHasSubnet checks if a bridge already has a given subnet assigned.
 // Python: bridge_has_subnet(bridge, subnet) -> bool
-func BridgeHasSubnet(bridge, subnet string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func BridgeHasSubnet(ctx context.Context, bridge, subnet string) bool {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	result := system.RunCmdCompat(ctx, []string{"ip", "-o", "addr", "show", bridge}, system.RunCmdOptions{Check: false, Capture: true, Text: true})
 	if !result.Success {
@@ -396,8 +396,8 @@ func BridgeHasSubnet(bridge, subnet string) bool {
 
 // GetTapBridge returns the bridge that a TAP device is attached to.
 // Python: get_tap_bridge(tap) -> str | None
-func GetTapBridge(tap string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func GetTapBridge(ctx context.Context, tap string) string {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	result := system.RunCmdCompat(ctx, []string{"ip", "link", "show", tap}, system.RunCmdOptions{Check: false, Capture: true, Text: true})
 	if !result.Success {
@@ -420,8 +420,8 @@ func GetTapBridge(tap string) string {
 
 // StripTapRules strips TAP-related rules from iptables rules text.
 // Python: strip_tap_rules(rules_text) -> str
-func StripTapRules(rulesText string) string {
-	tapNames := GetTunTapDevices()
+func StripTapRules(ctx context.Context, rulesText string) string {
+	tapNames := GetTunTapDevices(ctx)
 	if len(tapNames) == 0 {
 		return rulesText
 	}
@@ -449,8 +449,8 @@ type BackendConflictResult struct {
 	Diagnosis   string
 }
 
-func DetectIPTablesBackendConflict() BackendConflictResult {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func DetectIPTablesBackendConflict(ctx context.Context) BackendConflictResult {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	versionResult := system.RunCmdCompat(ctx, []string{"iptables", "--version"}, system.RunCmdOptions{Check: false, Capture: true, Text: true})

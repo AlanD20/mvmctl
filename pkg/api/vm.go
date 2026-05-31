@@ -4,7 +4,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,6 +43,8 @@ import (
 	nocloudnet "mvmctl/internal/service/nocloudnet"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // ── Create ──
@@ -417,7 +418,7 @@ func (op *Operation) VMRemove(ctx context.Context, input *inputs.VMInput) *errs.
 		vmDir := filepath.Join(op.CacheDir, "vms", vmLocal.ID)
 
 		// Stop the VM
-		controller, ctrlErr := vm.NewController(vmLocal, repo)
+		controller, ctrlErr := vm.NewController(ctx, vmLocal, repo)
 		if ctrlErr == nil {
 			controller.Stop(ctx, resolved.Force)
 		}
@@ -431,7 +432,7 @@ func (op *Operation) VMRemove(ctx context.Context, input *inputs.VMInput) *errs.
 		}
 
 		// Perform removal cleanup
-		op.vmPerformRemovalCleanup(vmLocal)
+		op.vmPerformRemovalCleanup(ctx, vmLocal)
 
 		// Detach volumes
 		if len(vmLocal.VolumeIDs) > 0 {
@@ -465,9 +466,7 @@ func (op *Operation) VMRemove(ctx context.Context, input *inputs.VMInput) *errs.
 	return &errs.BatchResult{Items: results}
 }
 
-func (op *Operation) vmPerformRemovalCleanup(vm *model.VM) {
-	ctx := context.Background()
-
+func (op *Operation) vmPerformRemovalCleanup(ctx context.Context, vm *model.VM) {
 	// Console relay cleanup (matches Python's _cleanup_console)
 	if vm.RelayPID != nil && vm.ID != "" {
 		relay := consoleapi.NewRelayManager(vm.ID, filepath.Join(op.CacheDir, "vms", vm.ID), vm.Name,
@@ -860,7 +859,7 @@ func (op *Operation) VMStart(ctx context.Context, input *inputs.VMInput) *errs.B
 				continue
 			}
 		} else {
-			controller, ctrlErr := vm.NewController(vmLocal, repo)
+			controller, ctrlErr := vm.NewController(ctx, vmLocal, repo)
 			if ctrlErr != nil {
 				results = append(results, errs.OperationResult{
 					Status: "error", Code: "vm.start_failed",
@@ -923,7 +922,7 @@ func (op *Operation) VMStop(ctx context.Context, input *inputs.VMInput) *errs.Ba
 	for _, v := range resolved.VMs {
 		vmLocal := v
 
-		controller, ctrlErr := vm.NewController(vmLocal, repo)
+		controller, ctrlErr := vm.NewController(ctx, vmLocal, repo)
 		if ctrlErr != nil {
 			results = append(results, errs.OperationResult{
 				Status: "error", Code: "vm.stop_failed",
@@ -1032,7 +1031,7 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snap
 				_ = netSvc.EnsureBridge(ctx, bridgeName, bridgeAddr)
 			}
 			_ = netSvc.EnsureTap(ctx, v.TapDevice, bridgeName, netID, subnet)
-			netSvc.FlushARP(bridgeName)
+			network.FlushARP(ctx, bridgeName)
 		}
 	}
 
@@ -1198,7 +1197,7 @@ func (op *Operation) VMSnapshot(ctx context.Context, input *inputs.VMInput, memF
 		}
 	}
 
-	controller, ctrlErr := vm.NewController(vmItem, op.Repos.VM)
+	controller, ctrlErr := vm.NewController(ctx, vmItem, op.Repos.VM)
 	if ctrlErr != nil {
 		return &errs.OperationResult{
 			Status: "error", Code: "vm.snapshot_failed",
@@ -1303,7 +1302,7 @@ func (op *Operation) VMLoad(ctx context.Context, input *inputs.VMInput, memFile 
 	var resultItem interface{} = vmItem
 	var exception error
 
-	controller, ctrlErr := vm.NewController(vmItem, repo)
+	controller, ctrlErr := vm.NewController(ctx, vmItem, repo)
 	if ctrlErr != nil {
 		status = "error"
 		code = "vm.load_snapshot_failed"
@@ -1368,7 +1367,7 @@ func (op *Operation) VMReboot(ctx context.Context, input *inputs.VMInput) *errs.
 		vmLocal := v
 
 		// Stop the VM first (kills the firecracker process)
-		controller, ctrlErr := vm.NewController(vmLocal, repo)
+		controller, ctrlErr := vm.NewController(ctx, vmLocal, repo)
 		if ctrlErr != nil {
 			results = append(results, errs.OperationResult{
 				Status: "error", Code: "vm.reboot_failed",
@@ -1436,7 +1435,7 @@ func (op *Operation) VMPause(ctx context.Context, input *inputs.VMInput) *errs.B
 	for _, v := range resolved.VMs {
 		vmLocal := v
 
-		controller, ctrlErr := vm.NewController(vmLocal, repo)
+		controller, ctrlErr := vm.NewController(ctx, vmLocal, repo)
 		if ctrlErr != nil {
 			results = append(results, errs.OperationResult{
 				Status: "error", Code: "vm.pause_failed",
@@ -1498,7 +1497,7 @@ func (op *Operation) VMResume(ctx context.Context, input *inputs.VMInput) *errs.
 	for _, v := range resolved.VMs {
 		vmLocal := v
 
-		controller, ctrlErr := vm.NewController(vmLocal, repo)
+		controller, ctrlErr := vm.NewController(ctx, vmLocal, repo)
 		if ctrlErr != nil {
 			results = append(results, errs.OperationResult{
 				Status: "error", Code: "vm.resume_failed",
@@ -1607,7 +1606,7 @@ func (op *Operation) VMAttachVolume(ctx context.Context, input *inputs.VMInput, 
 			}
 		}
 		// Try Firecracker API hotplug (matches Python's try: controller.attach_volume(vol) except Exception: logger.warning)
-		controller, ctrlErr := vm.NewController(vmItem, op.Repos.VM)
+		controller, ctrlErr := vm.NewController(ctx, vmItem, op.Repos.VM)
 		if ctrlErr == nil {
 			if err := controller.AttachVolume(ctx, vol); err != nil {
 				slog.Warn("Hotplug failed for drive", "volume", vol.ID, "error", err)
@@ -1768,7 +1767,7 @@ func (op *Operation) VMDetachVolume(ctx context.Context, input *inputs.VMInput, 
 		}
 
 		// Step 2: Call Firecracker API to delete the drive (matches Python's controller.detach_volume)
-		controller, ctrlErr := vm.NewController(vmItem, op.Repos.VM)
+		controller, ctrlErr := vm.NewController(ctx, vmItem, op.Repos.VM)
 		if ctrlErr == nil {
 			if err := controller.DetachVolume(ctx, vol); err != nil {
 				slog.Warn("Firecracker delete_drive failed", "volume", vol.ID, "error", err)
@@ -2150,7 +2149,7 @@ type vmCreateContext struct {
 	cloudInitResult  *cloudInitResult
 	resourcesCreated map[string]bool
 	cacheDir         string
-	db               *sql.DB
+	db               *sqlx.DB
 	// Fields for respawn flow (matches Python's _vm, _snapshot_mode)
 	_vm           *model.VM
 	_snapshotMode bool
@@ -2203,7 +2202,7 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 		return fmt.Errorf("ensure bridge: %w", err)
 	}
 
-	leaseSvc, err := network.NewLeaseService(c.resolved.Network, network.NewLeaseRepository(c.db), nil)
+	leaseSvc, err := network.NewLeaseService(ctx, c.resolved.Network, network.NewLeaseRepository(c.db), nil)
 	if err != nil {
 		return fmt.Errorf("create lease service: %w", err)
 	}
@@ -2232,7 +2231,7 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 		return fmt.Errorf("ensure TAP: %w", err)
 	}
 	c.markCreated("network_tap")
-	netSvc.FlushARP(c.resolved.Network.Bridge)
+	network.FlushARP(ctx, c.resolved.Network.Bridge)
 
 	// Progress: rootfs
 	if c.onProgress != nil {
@@ -2240,7 +2239,7 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 	}
 
 	// Clone rootfs
-	if err := c.cloneImage(); err != nil {
+	if err := c.cloneImage(ctx); err != nil {
 		return err
 	}
 	c.markCreated("rootfs")
@@ -2370,14 +2369,14 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 		if c.resolved.Image.Distro != nil {
 			distro = *c.resolved.Image.Distro
 		}
-		provisioner.Deblob(distro)
+		provisioner.Deblob(ctx, distro)
 	}
 
 	// Fix fstab for Firecracker (superfloppy /dev/vda layout)
 	provisioner.FixFstab()
 
 	// Execute all queued provisioning operations
-	provisioner.Run()
+	provisioner.Run(ctx)
 
 	// Progress: firecracker
 	if c.onProgress != nil {
@@ -2385,7 +2384,7 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 	}
 
 	// --- Firecracker config ---
-	fcConfig := c.buildFirecrackerConfig()
+	fcConfig := c.buildFirecrackerConfig(ctx)
 	if fcConfig == nil {
 		return fmt.Errorf("Firecracker config is not set in context")
 	}
@@ -2446,7 +2445,7 @@ type consoleRelayRef struct {
 	vmDir string
 }
 
-func (c *vmCreateContext) cloneImage() error {
+func (c *vmCreateContext) cloneImage(ctx context.Context) error {
 	if c.resolved == nil {
 		return fmt.Errorf("Failed to resolve necessary dependencies")
 	}
@@ -2460,7 +2459,7 @@ func (c *vmCreateContext) cloneImage() error {
 	if _, err := imageSvc.EnsureCached([]*model.ImageItem{c.resolved.Image}); err != nil {
 		return fmt.Errorf("ensure cached image: %w", err)
 	}
-	if err := imageSvc.MaterializeTo(c.resolved.Image.ID, fsType, vmRootfsPath); err != nil {
+	if err := imageSvc.MaterializeTo(ctx, c.resolved.Image.ID, fsType, vmRootfsPath); err != nil {
 		return fmt.Errorf("materialize image: %w", err)
 	}
 
@@ -2690,10 +2689,10 @@ func (c *vmCreateContext) respawnExecute(ctx context.Context) error {
 	}
 	_ = netSvc.EnsureBridge(ctx, netItem.Bridge, bridgeAddr)
 	_ = netSvc.EnsureTap(ctx, c.tapName, netItem.Bridge, netItem.ID, netItem.Subnet)
-	netSvc.FlushARP(netItem.Bridge)
+	network.FlushARP(ctx, netItem.Bridge)
 
 	// ── Build config and spawn ──
-	fcConfig := c.buildFirecrackerConfig()
+	fcConfig := c.buildFirecrackerConfig(ctx)
 	if fcConfig == nil {
 		return fmt.Errorf("Firecracker config is not set in context")
 	}
@@ -2730,7 +2729,7 @@ func (c *vmCreateContext) respawnExecute(ctx context.Context) error {
 
 // buildFirecrackerConfig builds a FirecrackerConfig from the resolved create context.
 // Matches Python's VMCreateContext.build_firecracker_config() exactly.
-func (c *vmCreateContext) buildFirecrackerConfig() *model.FirecrackerConfig {
+func (c *vmCreateContext) buildFirecrackerConfig(ctx context.Context) *model.FirecrackerConfig {
 	if c.resolved == nil {
 		return nil
 	}
@@ -2738,7 +2737,6 @@ func (c *vmCreateContext) buildFirecrackerConfig() *model.FirecrackerConfig {
 	var cpuVendor *string
 	var cpuArchitecture *string
 	if c.db != nil {
-		ctx := context.Background()
 		hostRepo := host.NewRepository(c.db)
 		if hostState, err := hostRepo.GetState(ctx); err == nil && hostState != nil {
 			cpuVendor = hostState.CPUVendor

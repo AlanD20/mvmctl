@@ -2,9 +2,10 @@ package inputs
 
 import (
 	"context"
-	"database/sql"
 
 	"mvmctl/internal/infra/model"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // ConsoleInput matches Python's ConsoleInput dataclass.
@@ -31,13 +32,13 @@ type ResolvedConsoleInput struct {
 //
 // Resolve the VM for console operations.
 type ConsoleRequest struct {
-	db     *sql.DB
+	db     *sqlx.DB
 	input  ConsoleInput
 	result *ResolvedConsoleInput
 }
 
 // NewConsoleRequest creates a new ConsoleRequest.
-func NewConsoleRequest(inputs ConsoleInput, db *sql.DB) *ConsoleRequest {
+func NewConsoleRequest(inputs ConsoleInput, db *sqlx.DB) *ConsoleRequest {
 	return &ConsoleRequest{
 		db:    db,
 		input: inputs,

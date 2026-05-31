@@ -2,7 +2,6 @@ package inputs
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"regexp"
@@ -12,6 +11,8 @@ import (
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // KernelPullInput matches Python's KernelPullInput dataclass.
@@ -76,13 +77,13 @@ type ResolvedKernelPullRequest struct {
 //
 // Resolve and validate kernel pull/build inputs.
 type KernelPullRequest struct {
-	db     *sql.DB
+	db     *sqlx.DB
 	input  KernelPullInput
 	result *ResolvedKernelPullRequest
 }
 
 // NewKernelPullRequest creates a new KernelPullRequest.
-func NewKernelPullRequest(inputs KernelPullInput, db *sql.DB) *KernelPullRequest {
+func NewKernelPullRequest(inputs KernelPullInput, db *sqlx.DB) *KernelPullRequest {
 	return &KernelPullRequest{
 		db:    db,
 		input: inputs,
@@ -316,7 +317,7 @@ func isValidVersion(v string) bool {
 }
 
 // resolveSettingIntFallback resolves an integer setting, returning 0 if not found.
-func resolveSettingIntFallback(ctx context.Context, db *sql.DB, category, key string) int {
+func resolveSettingIntFallback(ctx context.Context, db *sqlx.DB, category, key string) int {
 	v, err := config.Resolve(ctx, db, category, key)
 	if err == nil && v != nil {
 		if i, ok := v.(int64); ok {

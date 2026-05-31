@@ -2,7 +2,6 @@ package inputs
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 
@@ -12,6 +11,8 @@ import (
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/validators"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // SSHInput matches Python's SSHInput dataclass.
@@ -52,14 +53,14 @@ type ResolvedSSHInput struct {
 //
 // Resolve SSHInput against the database.
 type SSHRequest struct {
-	db     *sql.DB
+	db     *sqlx.DB
 	input  SSHInput
 	result *ResolvedSSHInput
 	vm     *model.VM
 }
 
 // NewSSHRequest creates a new SSHRequest.
-func NewSSHRequest(inputs SSHInput, db *sql.DB) *SSHRequest {
+func NewSSHRequest(inputs SSHInput, db *sqlx.DB) *SSHRequest {
 	return &SSHRequest{
 		db:    db,
 		input: inputs,

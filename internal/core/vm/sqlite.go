@@ -6,14 +6,16 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jmoiron/sqlx"
+
 	"mvmctl/internal/infra/model"
 )
 
 type sqliteRepo struct {
-	db *sql.DB
+	db *sqlx.DB
 }
 
-func NewRepository(db *sql.DB) Repository {
+func NewRepository(db *sqlx.DB) Repository {
 	return &sqliteRepo{db: db}
 }
 
@@ -23,13 +25,21 @@ const vmBaseQuery = "SELECT * FROM vm_instances"
 // ── Basic CRUD ──
 
 func (r *sqliteRepo) Get(ctx context.Context, id string) (*model.VM, error) {
-	row := r.db.QueryRowContext(ctx, vmBaseQuery+" WHERE id = ?", id)
-	return scanVM(row)
+	var v vmScanRow
+	err := sqlx.GetContext(ctx, r.db, &v, vmBaseQuery+" WHERE id = ?", id)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return v.toVM()
 }
 
 func (r *sqliteRepo) GetByName(ctx context.Context, name string) (*model.VM, error) {
-	row := r.db.QueryRowContext(ctx, vmBaseQuery+" WHERE name = ?", name)
-	return scanVM(row)
+	var v vmScanRow
+	err := sqlx.GetContext(ctx, r.db, &v, vmBaseQuery+" WHERE name = ?", name)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return v.toVM()
 }
 
 func (r *sqliteRepo) GetByNames(ctx context.Context, names []string) (map[string]bool, error) {
@@ -44,48 +54,65 @@ func (r *sqliteRepo) GetByNames(ctx context.Context, names []string) (map[string
 		args[i] = n
 	}
 	query := "SELECT name FROM vm_instances WHERE name IN (" + strings.Join(placeholders, ",") + ")"
-	rows, err := r.db.QueryContext(ctx, query, args...)
-	if err != nil {
+	var vmNames []struct {
+		Name string `db:"name"`
+	}
+	if err := r.db.SelectContext(ctx, &vmNames, query, args...); err != nil {
 		return nil, fmt.Errorf("get vms by names: %w", err)
 	}
-	defer rows.Close()
 	result := make(map[string]bool)
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		result[name] = true
+	for _, r := range vmNames {
+		result[r.Name] = true
 	}
-	return result, rows.Err()
+	return result, nil
 }
 
 // ── Lookups ──
 
 func (r *sqliteRepo) FindByIP(ctx context.Context, ipv4 string) (*model.VM, error) {
-	row := r.db.QueryRowContext(ctx, vmBaseQuery+" WHERE ipv4 = ?", ipv4)
-	return scanVM(row)
+	var v vmScanRow
+	err := sqlx.GetContext(ctx, r.db, &v, vmBaseQuery+" WHERE ipv4 = ?", ipv4)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return v.toVM()
 }
 
 func (r *sqliteRepo) FindByMAC(ctx context.Context, mac string) (*model.VM, error) {
-	row := r.db.QueryRowContext(ctx, vmBaseQuery+" WHERE mac = ?", mac)
-	return scanVM(row)
+	var v vmScanRow
+	err := sqlx.GetContext(ctx, r.db, &v, vmBaseQuery+" WHERE mac = ?", mac)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return v.toVM()
 }
 
 func (r *sqliteRepo) FindByPrefix(ctx context.Context, prefix string) ([]*model.VM, error) {
-	rows, err := r.db.QueryContext(ctx, vmBaseQuery+" WHERE id LIKE ?", prefix+"%")
+	rows, err := r.db.QueryxContext(ctx, vmBaseQuery+" WHERE id LIKE ?", prefix+"%")
 	if err != nil {
 		return nil, fmt.Errorf("find vm by prefix: %w", err)
 	}
 	defer rows.Close()
-	return scanVMs(rows)
+	var items []*model.VM
+	for rows.Next() {
+		var v vmScanRow
+		if err := rows.StructScan(&v); err != nil {
+			return nil, fmt.Errorf("scan vm: %w", err)
+		}
+		vm, err := v.toVM()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, vm)
+	}
+	return items, rows.Err()
 }
 
 // ── Counting ──
 
 func (r *sqliteRepo) Count(ctx context.Context) (int, error) {
 	var c int
-	err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM vm_instances").Scan(&c)
+	err := sqlx.GetContext(ctx, r.db, &c, "SELECT COUNT(*) FROM vm_instances")
 	return c, err
 }
 
@@ -104,19 +131,31 @@ func (r *sqliteRepo) CountByStatus(ctx context.Context, statuses ...string) (int
 	}
 	query := "SELECT COUNT(*) FROM vm_instances WHERE status IN (" + strings.Join(placeholders, ",") + ")"
 	var c int
-	err := r.db.QueryRowContext(ctx, query, args...).Scan(&c)
+	err := sqlx.GetContext(ctx, r.db, &c, query, args...)
 	return c, err
 }
 
 // ── Foreign key lookups ──
 
 func (r *sqliteRepo) FindByNetworkID(ctx context.Context, networkID string) ([]*model.VM, error) {
-	rows, err := r.db.QueryContext(ctx, vmBaseQuery+" WHERE network_id = ?", networkID)
+	rows, err := r.db.QueryxContext(ctx, vmBaseQuery+" WHERE network_id = ?", networkID)
 	if err != nil {
 		return nil, fmt.Errorf("find vms by network id: %w", err)
 	}
 	defer rows.Close()
-	return scanVMs(rows)
+	var items []*model.VM
+	for rows.Next() {
+		var v vmScanRow
+		if err := rows.StructScan(&v); err != nil {
+			return nil, fmt.Errorf("scan vm: %w", err)
+		}
+		vm, err := v.toVM()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, vm)
+	}
+	return items, rows.Err()
 }
 
 func (r *sqliteRepo) GetByNetworkIDs(ctx context.Context, networkIDs []string) ([]*model.VM, error) {
@@ -129,21 +168,45 @@ func (r *sqliteRepo) GetByNetworkIDs(ctx context.Context, networkIDs []string) (
 		placeholders[i] = "?"
 		args[i] = nid
 	}
-	rows, err := r.db.QueryContext(ctx, vmBaseQuery+" WHERE network_id IN ("+strings.Join(placeholders, ",")+")", args...)
+	rows, err := r.db.QueryxContext(ctx, vmBaseQuery+" WHERE network_id IN ("+strings.Join(placeholders, ",")+")", args...)
 	if err != nil {
 		return nil, fmt.Errorf("get vms by network ids: %w", err)
 	}
 	defer rows.Close()
-	return scanVMs(rows)
+	var items []*model.VM
+	for rows.Next() {
+		var v vmScanRow
+		if err := rows.StructScan(&v); err != nil {
+			return nil, fmt.Errorf("scan vm: %w", err)
+		}
+		vm, err := v.toVM()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, vm)
+	}
+	return items, rows.Err()
 }
 
 func (r *sqliteRepo) FindByKernelID(ctx context.Context, kernelID string) ([]*model.VM, error) {
-	rows, err := r.db.QueryContext(ctx, vmBaseQuery+" WHERE kernel_id = ?", kernelID)
+	rows, err := r.db.QueryxContext(ctx, vmBaseQuery+" WHERE kernel_id = ?", kernelID)
 	if err != nil {
 		return nil, fmt.Errorf("find vms by kernel id: %w", err)
 	}
 	defer rows.Close()
-	return scanVMs(rows)
+	var items []*model.VM
+	for rows.Next() {
+		var v vmScanRow
+		if err := rows.StructScan(&v); err != nil {
+			return nil, fmt.Errorf("scan vm: %w", err)
+		}
+		vm, err := v.toVM()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, vm)
+	}
+	return items, rows.Err()
 }
 
 func (r *sqliteRepo) GetByKernelIDs(ctx context.Context, kernelIDs []string) ([]*model.VM, error) {
@@ -156,21 +219,45 @@ func (r *sqliteRepo) GetByKernelIDs(ctx context.Context, kernelIDs []string) ([]
 		placeholders[i] = "?"
 		args[i] = kid
 	}
-	rows, err := r.db.QueryContext(ctx, vmBaseQuery+" WHERE kernel_id IN ("+strings.Join(placeholders, ",")+")", args...)
+	rows, err := r.db.QueryxContext(ctx, vmBaseQuery+" WHERE kernel_id IN ("+strings.Join(placeholders, ",")+")", args...)
 	if err != nil {
 		return nil, fmt.Errorf("get vms by kernel ids: %w", err)
 	}
 	defer rows.Close()
-	return scanVMs(rows)
+	var items []*model.VM
+	for rows.Next() {
+		var v vmScanRow
+		if err := rows.StructScan(&v); err != nil {
+			return nil, fmt.Errorf("scan vm: %w", err)
+		}
+		vm, err := v.toVM()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, vm)
+	}
+	return items, rows.Err()
 }
 
 func (r *sqliteRepo) FindByBinaryID(ctx context.Context, binaryID string) ([]*model.VM, error) {
-	rows, err := r.db.QueryContext(ctx, vmBaseQuery+" WHERE binary_id = ?", binaryID)
+	rows, err := r.db.QueryxContext(ctx, vmBaseQuery+" WHERE binary_id = ?", binaryID)
 	if err != nil {
 		return nil, fmt.Errorf("find vms by binary id: %w", err)
 	}
 	defer rows.Close()
-	return scanVMs(rows)
+	var items []*model.VM
+	for rows.Next() {
+		var v vmScanRow
+		if err := rows.StructScan(&v); err != nil {
+			return nil, fmt.Errorf("scan vm: %w", err)
+		}
+		vm, err := v.toVM()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, vm)
+	}
+	return items, rows.Err()
 }
 
 func (r *sqliteRepo) GetByBinaryIDs(ctx context.Context, binaryIDs []string) ([]*model.VM, error) {
@@ -183,12 +270,24 @@ func (r *sqliteRepo) GetByBinaryIDs(ctx context.Context, binaryIDs []string) ([]
 		placeholders[i] = "?"
 		args[i] = bid
 	}
-	rows, err := r.db.QueryContext(ctx, vmBaseQuery+" WHERE binary_id IN ("+strings.Join(placeholders, ",")+")", args...)
+	rows, err := r.db.QueryxContext(ctx, vmBaseQuery+" WHERE binary_id IN ("+strings.Join(placeholders, ",")+")", args...)
 	if err != nil {
 		return nil, fmt.Errorf("get vms by binary ids: %w", err)
 	}
 	defer rows.Close()
-	return scanVMs(rows)
+	var items []*model.VM
+	for rows.Next() {
+		var v vmScanRow
+		if err := rows.StructScan(&v); err != nil {
+			return nil, fmt.Errorf("scan vm: %w", err)
+		}
+		vm, err := v.toVM()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, vm)
+	}
+	return items, rows.Err()
 }
 
 func (r *sqliteRepo) GetByImageIDs(ctx context.Context, imageIDs []string) ([]*model.VM, error) {
@@ -201,24 +300,48 @@ func (r *sqliteRepo) GetByImageIDs(ctx context.Context, imageIDs []string) ([]*m
 		placeholders[i] = "?"
 		args[i] = iid
 	}
-	rows, err := r.db.QueryContext(ctx, vmBaseQuery+" WHERE image_id IN ("+strings.Join(placeholders, ",")+")", args...)
+	rows, err := r.db.QueryxContext(ctx, vmBaseQuery+" WHERE image_id IN ("+strings.Join(placeholders, ",")+")", args...)
 	if err != nil {
 		return nil, fmt.Errorf("get vms by image ids: %w", err)
 	}
 	defer rows.Close()
-	return scanVMs(rows)
+	var items []*model.VM
+	for rows.Next() {
+		var v vmScanRow
+		if err := rows.StructScan(&v); err != nil {
+			return nil, fmt.Errorf("scan vm: %w", err)
+		}
+		vm, err := v.toVM()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, vm)
+	}
+	return items, rows.Err()
 }
 
 // ── Volume lookups (JSON array match) ──
 
 func (r *sqliteRepo) FindByVolumeID(ctx context.Context, volumeID string) ([]*model.VM, error) {
 	// Python: "SELECT * FROM vm_instances WHERE volume_ids LIKE ?" with '%"{volume_id}"%'
-	rows, err := r.db.QueryContext(ctx, vmBaseQuery+" WHERE volume_ids LIKE ?", `%`+`"`+volumeID+`"`+`%`)
+	rows, err := r.db.QueryxContext(ctx, vmBaseQuery+" WHERE volume_ids LIKE ?", `%`+`"`+volumeID+`"`+`%`)
 	if err != nil {
 		return nil, fmt.Errorf("find vms by volume id: %w", err)
 	}
 	defer rows.Close()
-	return scanVMs(rows)
+	var items []*model.VM
+	for rows.Next() {
+		var v vmScanRow
+		if err := rows.StructScan(&v); err != nil {
+			return nil, fmt.Errorf("scan vm: %w", err)
+		}
+		vm, err := v.toVM()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, vm)
+	}
+	return items, rows.Err()
 }
 
 func (r *sqliteRepo) FindByVolumeIDsBatch(ctx context.Context, volumeIDs []string) ([]*model.VM, error) {
@@ -235,12 +358,24 @@ func (r *sqliteRepo) FindByVolumeIDsBatch(ctx context.Context, volumeIDs []strin
 	}
 	// Python uses DISTINCT since multiple volume_ids can match the same VM
 	query := "SELECT DISTINCT vm_instances.* FROM vm_instances WHERE " + strings.Join(patterns, " OR ")
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	rows, err := r.db.QueryxContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("find vms by volume ids batch: %w", err)
 	}
 	defer rows.Close()
-	return scanVMs(rows)
+	var items []*model.VM
+	for rows.Next() {
+		var v vmScanRow
+		if err := rows.StructScan(&v); err != nil {
+			return nil, fmt.Errorf("scan vm: %w", err)
+		}
+		vm, err := v.toVM()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, vm)
+	}
+	return items, rows.Err()
 }
 
 // ── SSH key lookup ──
@@ -248,24 +383,48 @@ func (r *sqliteRepo) FindByVolumeIDsBatch(ctx context.Context, volumeIDs []strin
 func (r *sqliteRepo) FindBySSHKeyID(ctx context.Context, keyID string) ([]*model.VM, error) {
 	// Python: no @_graceful_read on this method.
 	// Python: "SELECT * FROM vm_instances WHERE ssh_keys LIKE ?" with '%"{key_id}"%'
-	rows, err := r.db.QueryContext(ctx, vmBaseQuery+" WHERE ssh_keys LIKE ?", `%`+`"`+keyID+`"`+`%`)
+	rows, err := r.db.QueryxContext(ctx, vmBaseQuery+" WHERE ssh_keys LIKE ?", `%`+`"`+keyID+`"`+`%`)
 	if err != nil {
 		return nil, fmt.Errorf("find vms by ssh key id: %w", err)
 	}
 	defer rows.Close()
-	return scanVMs(rows)
+	var items []*model.VM
+	for rows.Next() {
+		var v vmScanRow
+		if err := rows.StructScan(&v); err != nil {
+			return nil, fmt.Errorf("scan vm: %w", err)
+		}
+		vm, err := v.toVM()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, vm)
+	}
+	return items, rows.Err()
 }
 
 // ── Listing ──
 
 func (r *sqliteRepo) ListAll(ctx context.Context) ([]*model.VM, error) {
 	// Python: "SELECT * FROM vm_instances ORDER BY created_at"
-	rows, err := r.db.QueryContext(ctx, vmBaseQuery+" ORDER BY created_at")
+	rows, err := r.db.QueryxContext(ctx, vmBaseQuery+" ORDER BY created_at")
 	if err != nil {
 		return nil, fmt.Errorf("list all vms: %w", err)
 	}
 	defer rows.Close()
-	return scanVMs(rows)
+	var items []*model.VM
+	for rows.Next() {
+		var v vmScanRow
+		if err := rows.StructScan(&v); err != nil {
+			return nil, fmt.Errorf("scan vm: %w", err)
+		}
+		vm, err := v.toVM()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, vm)
+	}
+	return items, rows.Err()
 }
 
 func (r *sqliteRepo) ListByStatus(ctx context.Context, statuses ...string) ([]*model.VM, error) {
@@ -283,12 +442,24 @@ func (r *sqliteRepo) ListByStatus(ctx context.Context, statuses ...string) ([]*m
 	}
 	// Python: "SELECT * FROM vm_instances WHERE status IN (...) ORDER BY created_at"
 	query := vmBaseQuery + " WHERE status IN (" + strings.Join(placeholders, ",") + ") ORDER BY created_at"
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	rows, err := r.db.QueryxContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list vms by status: %w", err)
 	}
 	defer rows.Close()
-	return scanVMs(rows)
+	var items []*model.VM
+	for rows.Next() {
+		var v vmScanRow
+		if err := rows.StructScan(&v); err != nil {
+			return nil, fmt.Errorf("scan vm: %w", err)
+		}
+		vm, err := v.toVM()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, vm)
+	}
+	return items, rows.Err()
 }
 
 func (r *sqliteRepo) ListExcludingStatuses(ctx context.Context, excluded ...string) ([]*model.VM, error) {
@@ -306,12 +477,24 @@ func (r *sqliteRepo) ListExcludingStatuses(ctx context.Context, excluded ...stri
 	}
 	// Python: "SELECT * FROM vm_instances WHERE status NOT IN (...) ORDER BY created_at"
 	query := vmBaseQuery + " WHERE status NOT IN (" + strings.Join(placeholders, ",") + ") ORDER BY created_at"
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	rows, err := r.db.QueryxContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list vms excluding statuses: %w", err)
 	}
 	defer rows.Close()
-	return scanVMs(rows)
+	var items []*model.VM
+	for rows.Next() {
+		var v vmScanRow
+		if err := rows.StructScan(&v); err != nil {
+			return nil, fmt.Errorf("scan vm: %w", err)
+		}
+		vm, err := v.toVM()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, vm)
+	}
+	return items, rows.Err()
 }
 
 // ── Mutations ──
@@ -501,111 +684,51 @@ func (r *sqliteRepo) DeleteMany(ctx context.Context, ids []string) (int, error) 
 //	34: enable_console      35: boot_args            36: ssh_keys
 //	37: ssh_user            38: volume_ids           39: created_at
 //	40: updated_at
-func scanVM(row *sql.Row) (*model.VM, error) {
-	var v vmScanRow
-	err := row.Scan(
-		&v.ID, &v.Name, &v.Status, &v.PID, &v.ProcessStartTime, // 1-5
-		&v.IPv4, &v.MAC, &v.NetworkID, &v.TapDevice, // 6-9
-		&v.ImageID, &v.KernelID, &v.BinaryID, &v.APISocketPath, // 10-13
-		&v.RelaySocketPath, &v.ConfigPath, &v.CloudInitMode, // 14-16
-		&v.NocloudNetPort, &v.NocloudNetPID, &v.RelayPID, // 17-19
-		&v.ExitCode,         // 20
-		&v.LogPath,          // 21
-		&v.SerialOutputPath, // 22
-		&v.VCPUCount,        // 23
-		&v.MemSizeMiB,       // 24
-		&v.DiskSizeMiB,      // 25
-		&v.RootfsPath,       // 26
-		&v.RootfsSuffix,     // 27
-		&v.PCIEnabled,       // 28
-		&v.NestedVirt,       // 29
-		&v.CPUConfig,        // 30
-		&v.LSMFlags,         // 31
-		&v.EnableLogging,    // 32
-		&v.EnableMetrics,    // 33
-		&v.EnableConsole,    // 34
-		&v.BootArgs,         // 35
-		&v.SSHKeys,          // 36
-		&v.SSHUser,          // 37
-		&v.VolumeIDs,        // 38
-		&v.CreatedAt,        // 39
-		&v.UpdatedAt,        // 40
-	)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("scan vm: %w", err)
-	}
-	return v.toVM()
-}
 
-func scanVMs(rows *sql.Rows) ([]*model.VM, error) {
-	var vms []*model.VM
-	for rows.Next() {
-		var v vmScanRow
-		err := rows.Scan(
-			&v.ID, &v.Name, &v.Status, &v.PID, &v.ProcessStartTime, // 1-5
-			&v.IPv4, &v.MAC, &v.NetworkID, &v.TapDevice, // 6-9
-			&v.ImageID, &v.KernelID, &v.BinaryID, &v.APISocketPath, // 10-13
-			&v.RelaySocketPath, &v.ConfigPath, &v.CloudInitMode, // 14-16
-			&v.NocloudNetPort, &v.NocloudNetPID, &v.RelayPID, // 17-19
-			&v.ExitCode,         // 20
-			&v.LogPath,          // 21
-			&v.SerialOutputPath, // 22
-			&v.VCPUCount,        // 23
-			&v.MemSizeMiB,       // 24
-			&v.DiskSizeMiB,      // 25
-			&v.RootfsPath,       // 26
-			&v.RootfsSuffix,     // 27
-			&v.PCIEnabled,       // 28
-			&v.NestedVirt,       // 29
-			&v.CPUConfig,        // 30
-			&v.LSMFlags,         // 31
-			&v.EnableLogging,    // 32
-			&v.EnableMetrics,    // 33
-			&v.EnableConsole,    // 34
-			&v.BootArgs,         // 35
-			&v.SSHKeys,          // 36
-			&v.SSHUser,          // 37
-			&v.VolumeIDs,        // 38
-			&v.CreatedAt,        // 39
-			&v.UpdatedAt,        // 40
-		)
-		if err != nil {
-			return nil, fmt.Errorf("scan vm: %w", err)
-		}
-		vm, err := v.toVM()
-		if err != nil {
-			return nil, err
-		}
-		vms = append(vms, vm)
-	}
-	return vms, rows.Err()
-}
-
-// vmScanRow is an intermediate struct for scanning raw SQLite rows.
-// Bool columns are scanned as int (SQLite stores bool as 0/1).
-// JSON columns are scanned as string and deserialized by toVM().
-// Nullable columns use sql.Null* types.
+// vmScanRow for scanning raw SQLite rows with sqlx.StructScan.
+// Bool columns use sql.NullInt64 (SQLite stores bool as 0/1).
+// JSON columns use sql.NullString and are deserialized by toVM().
 type vmScanRow struct {
-	ID, Name, Status                              string
-	PID                                           int
-	ProcessStartTime                              sql.NullInt64
-	IPv4, MAC, NetworkID, TapDevice               string
-	ImageID, KernelID, BinaryID, APISocketPath    string
-	RelaySocketPath                               sql.NullString
-	ConfigPath, CloudInitMode                     string
-	NocloudNetPort, NocloudNetPID, RelayPID       sql.NullInt64
-	ExitCode                                      sql.NullInt64
-	VCPUCount, MemSizeMiB, DiskSizeMiB            int
-	RootfsPath, RootfsSuffix                      string
-	PCIEnabled, NestedVirt                        sql.NullInt64
-	EnableLogging, EnableMetrics, EnableConsole   sql.NullInt64
-	SSHKeys, SSHUser                              sql.NullString
-	CreatedAt, UpdatedAt                          string
-	LogPath, SerialOutputPath, LSMFlags, BootArgs sql.NullString
-	VolumeIDs, CPUConfig                          sql.NullString
+	ID               string         `db:"id"`
+	Name             string         `db:"name"`
+	Status           string         `db:"status"`
+	PID              int            `db:"pid"`
+	ProcessStartTime sql.NullInt64  `db:"process_start_time"`
+	IPv4             string         `db:"ipv4"`
+	MAC              string         `db:"mac"`
+	NetworkID        string         `db:"network_id"`
+	TapDevice        string         `db:"tap_device"`
+	ImageID          string         `db:"image_id"`
+	KernelID         string         `db:"kernel_id"`
+	BinaryID         string         `db:"binary_id"`
+	APISocketPath    string         `db:"api_socket_path"`
+	RelaySocketPath  sql.NullString `db:"relay_socket_path"`
+	ConfigPath       string         `db:"config_path"`
+	CloudInitMode    string         `db:"cloud_init_mode"`
+	NocloudNetPort   sql.NullInt64  `db:"nocloud_net_port"`
+	NocloudNetPID    sql.NullInt64  `db:"nocloud_net_pid"`
+	RelayPID         sql.NullInt64  `db:"relay_pid"`
+	ExitCode         sql.NullInt64  `db:"exit_code"`
+	LogPath          sql.NullString `db:"log_path"`
+	SerialOutputPath sql.NullString `db:"serial_output_path"`
+	VCPUCount        int            `db:"vcpu_count"`
+	MemSizeMiB       int            `db:"mem_size_mib"`
+	DiskSizeMiB      int            `db:"disk_size_mib"`
+	RootfsPath       string         `db:"rootfs_path"`
+	RootfsSuffix     string         `db:"rootfs_suffix"`
+	PCIEnabled       sql.NullInt64  `db:"pci_enabled"`
+	NestedVirt       sql.NullInt64  `db:"nested_virt"`
+	CPUConfig        sql.NullString `db:"cpu_config"`
+	LSMFlags         sql.NullString `db:"lsm_flags"`
+	EnableLogging    sql.NullInt64  `db:"enable_logging"`
+	EnableMetrics    sql.NullInt64  `db:"enable_metrics"`
+	EnableConsole    sql.NullInt64  `db:"enable_console"`
+	BootArgs         sql.NullString `db:"boot_args"`
+	SSHKeys          sql.NullString `db:"ssh_keys"`
+	SSHUser          sql.NullString `db:"ssh_user"`
+	VolumeIDs        sql.NullString `db:"volume_ids"`
+	CreatedAt        string         `db:"created_at"`
+	UpdatedAt        string         `db:"updated_at"`
 }
 
 func (v *vmScanRow) toVM() (*model.VM, error) {

@@ -48,7 +48,7 @@ var NoPartitionTableSentinel = &NoPartitionTable{}
 // LoopMountBackend. This breaks the circular dependency between the
 // provisioner and loopmount packages.
 // Matches Python's _LoopMountBackend.__init__(self, rootfs_path, fs_type).
-type LoopMountBackendConstructor func(rootfsPath string, fsType string, cacheDir string) Backend
+type LoopMountBackendConstructor func(ctx context.Context, rootfsPath string, fsType string, cacheDir string) Backend
 
 // ProvisionerBackendFactory constructs the correct backend based on ProvisionerType.
 // Matches Python's ProvisionerBackend class.
@@ -67,6 +67,7 @@ type ProvisionerBackendFactory struct {
 // GetVM constructs a backend for VM provisioning.
 // Matches Python's ProvisionerBackend.get_vm().
 func (f *ProvisionerBackendFactory) GetVM(
+	ctx context.Context,
 	rootfsPath string,
 	provisionerType ProvisionerType,
 	fsType string,
@@ -80,13 +81,13 @@ func (f *ProvisionerBackendFactory) GetVM(
 		if f.NewLoopMount == nil {
 			return nil, fmt.Errorf("provisioner: LoopMountBackend constructor not set")
 		}
-		return f.NewLoopMount(rootfsPath, fsType, f.CacheDir), nil
+		return f.NewLoopMount(ctx, rootfsPath, fsType, f.CacheDir), nil
 	case ProvisionerGuestFS:
 		// Must ensure guestfs appliance cache is available
 		if err := EnsureGuestfsAppliance(f.CacheDir); err != nil {
 			return nil, err
 		}
-		return NewGuestfsBackend(rootfsPath, rootUID, rootGID, userUID, userGID), nil
+		return NewGuestfsBackend(ctx, rootfsPath, rootUID, rootGID, userUID, userGID), nil
 	default:
 		return nil, fmt.Errorf("provisioner: unknown provisioner type: %s", provisionerType)
 	}
@@ -96,6 +97,7 @@ func (f *ProvisionerBackendFactory) GetVM(
 // fs_type is only meaningful for the LOOP_MOUNT backend.
 // Matches Python's ProvisionerBackend.get_image() — no UID/GID overrides.
 func (f *ProvisionerBackendFactory) GetImage(
+	ctx context.Context,
 	imagePath string,
 	provisionerType ProvisionerType,
 	fsType string,
@@ -105,12 +107,12 @@ func (f *ProvisionerBackendFactory) GetImage(
 		if f.NewLoopMount == nil {
 			return nil, fmt.Errorf("provisioner: LoopMountBackend constructor not set")
 		}
-		return f.NewLoopMount(imagePath, fsType, f.CacheDir), nil
+		return f.NewLoopMount(ctx, imagePath, fsType, f.CacheDir), nil
 	case ProvisionerGuestFS:
 		if err := EnsureGuestfsAppliance(f.CacheDir); err != nil {
 			return nil, err
 		}
-		return NewGuestfsBackend(imagePath, 0, 0, 1000, 1000), nil
+		return NewGuestfsBackend(ctx, imagePath, 0, 0, 1000, 1000), nil
 	default:
 		return nil, fmt.Errorf("provisioner: unknown provisioner type: %s", provisionerType)
 	}
@@ -167,14 +169,14 @@ type GuestfsBackend struct {
 }
 
 // NewGuestfsBackend creates a new GuestFS backend for the given rootfs path.
-func NewGuestfsBackend(rootfsPath string, rootUID, rootGID, userUID, userGID int) *GuestfsBackend {
+func NewGuestfsBackend(ctx context.Context, rootfsPath string, rootUID, rootGID, userUID, userGID int) *GuestfsBackend {
 	return &GuestfsBackend{
 		rootfsPath: rootfsPath,
 		rootUID:    rootUID,
 		rootGID:    rootGID,
 		userUID:    userUID,
 		userGID:    userGID,
-		ctx:        context.Background(),
+		ctx:        ctx,
 	}
 }
 

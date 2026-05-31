@@ -2,7 +2,6 @@ package inputs
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +11,8 @@ import (
 
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/infra/errs"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // KernelImportInput matches Python's KernelImportInput dataclass.
@@ -52,13 +53,13 @@ type ResolvedKernelImportInput struct {
 //
 // Resolve and validate kernel import inputs.
 type KernelImportRequest struct {
-	db     *sql.DB
+	db     *sqlx.DB
 	input  KernelImportInput
 	result *ResolvedKernelImportInput
 }
 
 // NewKernelImportRequest creates a new KernelImportRequest.
-func NewKernelImportRequest(inputs KernelImportInput, db *sql.DB) *KernelImportRequest {
+func NewKernelImportRequest(inputs KernelImportInput, db *sqlx.DB) *KernelImportRequest {
 	return &KernelImportRequest{
 		db:    db,
 		input: inputs,

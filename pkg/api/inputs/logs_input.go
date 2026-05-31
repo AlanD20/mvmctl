@@ -2,7 +2,6 @@ package inputs
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strconv"
 
@@ -10,6 +9,8 @@ import (
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // LogInput matches Python's LogInput dataclass.
@@ -50,13 +51,13 @@ type ResolvedLogInput struct {
 //
 // Resolve LogInput against the database and constants.
 type LogRequest struct {
-	_db    *sql.DB
+	_db    *sqlx.DB
 	input  LogInput
 	result *ResolvedLogInput
 }
 
 // NewLogRequest creates a new LogRequest.
-func NewLogRequest(inputs LogInput, db *sql.DB) *LogRequest {
+func NewLogRequest(inputs LogInput, db *sqlx.DB) *LogRequest {
 	return &LogRequest{
 		_db:   db,
 		input: inputs,

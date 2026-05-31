@@ -36,13 +36,13 @@ type LoopMountBackend struct {
 
 // NewLoopMountBackend creates a new LoopMountBackend.
 // Matches Python's __init__().
-func NewLoopMountBackend(rootfsPath string, fsType string, cacheDir string) *LoopMountBackend {
+func NewLoopMountBackend(ctx context.Context, rootfsPath string, fsType string, cacheDir string) *LoopMountBackend {
 	return &LoopMountBackend{
 		lp:         NewLoopMountProvisioner(rootfsPath, fsType, cacheDir),
 		cacheDir:   cacheDir,
 		rootfsPath: rootfsPath,
 		fsType:     fsType,
-		ctx:        context.Background(),
+		ctx:        ctx,
 	}
 }
 
@@ -159,7 +159,7 @@ func (b *LoopMountBackend) ExtractPartition(
 	sectorSize := int64(512)
 
 	// Check if the image is a direct filesystem (superfloppy) using blkid
-	fsType := detectFilesystemType(rawPath)
+	fsType := detectFilesystemType(b.ctx, rawPath)
 	if fsType == "ext4" || fsType == "ext3" || fsType == "ext2" ||
 		fsType == "btrfs" || fsType == "xfs" {
 		slog.Info("Image is filesystem, using as-is", "type", fsType)
@@ -351,12 +351,12 @@ func copyBytesDD(ctx context.Context, src, dst string, skipBytes, countBytes int
 
 // detectFilesystemType detects filesystem type using blkid.
 // Matches Python's _detect_filesystem_type().
-func detectFilesystemType(imagePath string) string {
+func detectFilesystemType(ctx context.Context, imagePath string) string {
 	opts := system.DefaultRunCmdOpts()
 	opts.Check = false
 	opts.Capture = true
 	result := system.RunCmdCompat(
-		context.Background(),
+		ctx,
 		[]string{"blkid", "-o", "value", "-s", "TYPE", imagePath},
 		opts,
 	)

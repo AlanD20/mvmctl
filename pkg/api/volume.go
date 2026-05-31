@@ -166,7 +166,7 @@ func (op *Operation) VolumeRemove(ctx context.Context, input *inputs.VolumeInput
 				_ = op.Repos.VM.Upsert(ctx, vmItem)
 
 				// Python: try: ctrl.detach_volume(volume) except Exception: pass
-				if vmCtrl, ctrlErr := vm.NewController(vmItem, op.Repos.VM); ctrlErr == nil {
+				if vmCtrl, ctrlErr := vm.NewController(ctx, vmItem, op.Repos.VM); ctrlErr == nil {
 					_ = vmCtrl.DetachVolume(ctx, vol)
 				}
 			}

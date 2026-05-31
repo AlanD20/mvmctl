@@ -25,7 +25,7 @@ import (
 // ProvisionerBackend is the interface that provisioning backends must implement.
 // Matches Python's ProvisionerBackend.
 type ProvisionerBackend interface {
-	DetectOS() string
+	DetectOS(ctx context.Context) string
 	Resize(targetSizeBytes int64) error
 	SetHostname(hostname string) error
 	InjectDNS(dnsServer string) error
@@ -33,8 +33,8 @@ type ProvisionerBackend interface {
 	DisableCloudInit() error
 	InjectCloudInit(cloudInitDir string) error
 	FixFstab() error
-	Deblob(osType string) error
-	Run() error
+	Deblob(ctx context.Context, osType string) error
+	Run(ctx context.Context) error
 }
 
 // Provisioner matches Python's Provisioner class.
@@ -133,8 +133,8 @@ func newLoopMountBackend(rootfsPath, fsType string, opts *ProvisionerOptions) *l
 	}
 }
 
-func (b *loopMountBackend) DetectOS() string {
-	osType, err := b.detectOSInternal()
+func (b *loopMountBackend) DetectOS(ctx context.Context) string {
+	osType, err := b.detectOSInternal(ctx)
 	if err != nil {
 		slog.Warn("OS detection failed, falling back to 'linux'", "error", err)
 		return "linux"
@@ -142,12 +142,12 @@ func (b *loopMountBackend) DetectOS() string {
 	return osType
 }
 
-func (b *loopMountBackend) detectOSInternal() (string, error) {
-	mountPoint, loopDev, err := mountImage(b.rootfsPath)
+func (b *loopMountBackend) detectOSInternal(ctx context.Context) (string, error) {
+	mountPoint, loopDev, err := mountImage(ctx, b.rootfsPath)
 	if err != nil {
 		return "", fmt.Errorf("mount for OS detection: %w", err)
 	}
-	defer unmountImage(mountPoint, loopDev)
+	defer unmountImage(ctx, mountPoint, loopDev)
 
 	content, err := os.ReadFile(filepath.Join(mountPoint, "etc/os-release"))
 	if err != nil {
@@ -217,16 +217,16 @@ func (b *loopMountBackend) FixFstab() error {
 	return nil
 }
 
-func (b *loopMountBackend) Deblob(osType string) error {
+func (b *loopMountBackend) Deblob(ctx context.Context, osType string) error {
 	if osType == "" {
-		osType = b.DetectOS()
+		osType = b.DetectOS(ctx)
 	}
 	pc := provisioner.ProvisionerContent{}
 	b.ops = append(b.ops, pc.BuildDeblobOps(osType)...)
 	return nil
 }
 
-func (b *loopMountBackend) Run() error {
+func (b *loopMountBackend) Run(ctx context.Context) error {
 	if len(b.ops) == 0 {
 		slog.Debug("No operations queued, skipping loop-mount Run()")
 		return nil
@@ -244,7 +244,7 @@ func (b *loopMountBackend) Run() error {
 	}
 
 	if len(preOps) > 0 {
-		mountPoint, loopDev, err := mountImage(b.rootfsPath)
+		mountPoint, loopDev, err := mountImage(ctx, b.rootfsPath)
 		if err != nil {
 			return fmt.Errorf("mount for Run(): %w", err)
 		}
@@ -253,27 +253,27 @@ func (b *loopMountBackend) Run() error {
 			switch o := op.(type) {
 			case provisioner.FileOp:
 				if err := executeFileOp(mountPoint, o); err != nil {
-					unmountImage(mountPoint, loopDev)
+					unmountImage(ctx, mountPoint, loopDev)
 					return fmt.Errorf("file op failed: %w", err)
 				}
 			case provisioner.ChrootOp:
-				if err := executeChrootOp(mountPoint, o); err != nil {
-					unmountImage(mountPoint, loopDev)
+				if err := executeChrootOp(ctx, mountPoint, o); err != nil {
+					unmountImage(ctx, mountPoint, loopDev)
 					return fmt.Errorf("chroot op failed: %w", err)
 				}
 			case provisioner.CopyDirOp:
-				if err := executeCopyDirOp(mountPoint, o); err != nil {
-					unmountImage(mountPoint, loopDev)
+				if err := executeCopyDirOp(ctx, mountPoint, o); err != nil {
+					unmountImage(ctx, mountPoint, loopDev)
 					return fmt.Errorf("copy dir op failed: %w", err)
 				}
 			}
 		}
 
-		unmountImage(mountPoint, loopDev)
+		unmountImage(ctx, mountPoint, loopDev)
 	}
 
 	if resizeOp != nil {
-		if err := executeResizeOp(b.rootfsPath, *resizeOp); err != nil {
+		if err := executeResizeOp(ctx, b.rootfsPath, *resizeOp); err != nil {
 			return fmt.Errorf("resize op failed: %w", err)
 		}
 	}
@@ -301,8 +301,8 @@ func newGuestfsBackend(rootfsPath, fsType string, opts *ProvisionerOptions) *gue
 	}
 }
 
-func (b *guestfsBackend) DetectOS() string {
-	osType, err := b.detectOSInternal()
+func (b *guestfsBackend) DetectOS(ctx context.Context) string {
+	osType, err := b.detectOSInternal(ctx)
 	if err != nil {
 		slog.Warn("Guestfs OS detection failed, falling back to 'linux'", "error", err)
 		return "linux"
@@ -310,10 +310,10 @@ func (b *guestfsBackend) DetectOS() string {
 	return osType
 }
 
-func (b *guestfsBackend) detectOSInternal() (string, error) {
-	content, err := runGuestfishCmd(b.rootfsPath, true, "read-file", "/etc/os-release")
+func (b *guestfsBackend) detectOSInternal(ctx context.Context) (string, error) {
+	content, err := runGuestfishCmd(ctx, b.rootfsPath, true, "read-file", "/etc/os-release")
 	if err != nil {
-		content, err = runGuestfishCmd(b.rootfsPath, true, "read-file", "/usr/lib/os-release")
+		content, err = runGuestfishCmd(ctx, b.rootfsPath, true, "read-file", "/usr/lib/os-release")
 		if err != nil {
 			return "", fmt.Errorf("guestfs: no os-release found")
 		}
@@ -379,7 +379,7 @@ func (b *guestfsBackend) FixFstab() error {
 	return nil
 }
 
-func (b *guestfsBackend) Deblob(osType string) error {
+func (b *guestfsBackend) Deblob(ctx context.Context, osType string) error {
 	// os_type is ignored for guestfs backend (it detects OS internally).
 	// Parameter accepted for interface compatibility with loopMountBackend.
 	pc := provisioner.ProvisionerContent{}
@@ -387,7 +387,7 @@ func (b *guestfsBackend) Deblob(osType string) error {
 	return nil
 }
 
-func (b *guestfsBackend) Run() error {
+func (b *guestfsBackend) Run(ctx context.Context) error {
 	if len(b.ops) == 0 {
 		slog.Debug("No operations queued, skipping guestfs Run()")
 		return nil
@@ -424,13 +424,13 @@ func (b *guestfsBackend) Run() error {
 			}
 		}
 
-		if err := runGuestfishSession(b.rootfsPath, false, gfCommands); err != nil {
+		if err := runGuestfishSession(ctx, b.rootfsPath, false, gfCommands); err != nil {
 			return fmt.Errorf("guestfs Run() failed: %w", err)
 		}
 	}
 
 	if resizeOp != nil {
-		if err := executeResizeOp(b.rootfsPath, *resizeOp); err != nil {
+		if err := executeResizeOp(ctx, b.rootfsPath, *resizeOp); err != nil {
 			return fmt.Errorf("guestfs resize op failed: %w", err)
 		}
 	}
@@ -455,49 +455,49 @@ func executeFileOp(mountPoint string, op provisioner.FileOp) error {
 	return nil
 }
 
-func executeChrootOp(mountPoint string, op provisioner.ChrootOp) error {
-	stdout, stderr, err := system.RunCmd(context.Background(), "chroot", mountPoint, "/bin/sh", "-c", op.Command)
+func executeChrootOp(ctx context.Context, mountPoint string, op provisioner.ChrootOp) error {
+	stdout, stderr, err := system.RunCmd(ctx, "chroot", mountPoint, "/bin/sh", "-c", op.Command)
 	if err != nil {
 		return fmt.Errorf("chroot command exited: %s\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
 	return nil
 }
 
-func executeCopyDirOp(mountPoint string, op provisioner.CopyDirOp) error {
+func executeCopyDirOp(ctx context.Context, mountPoint string, op provisioner.CopyDirOp) error {
 	dstPath := filepath.Join(mountPoint, op.Dst)
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(dstPath), err)
 	}
-	stdout, stderr, err := system.RunCmd(context.Background(), "cp", "-a", op.Src, dstPath+"/")
+	stdout, stderr, err := system.RunCmd(ctx, "cp", "-a", op.Src, dstPath+"/")
 	if err != nil {
 		return fmt.Errorf("cp -a %s -> %s: %w\nstdout: %s\nstderr: %s", op.Src, dstPath, err, stdout, stderr)
 	}
 	return nil
 }
 
-func executeResizeOp(imagePath string, op provisioner.ResizeOp) error {
+func executeResizeOp(ctx context.Context, imagePath string, op provisioner.ResizeOp) error {
 	switch op.Action {
 	case provisioner.ResizeActionShrink:
 		slog.Debug("Shrinking filesystem", "image", imagePath)
-		if err := runCommand("e2fsck", "-f", "-y", imagePath); err != nil {
+		if err := runCommand(ctx, "e2fsck", "-f", "-y", imagePath); err != nil {
 			return fmt.Errorf("e2fsck failed for shrink: %w", err)
 		}
-		if err := runCommand("resize2fs", "-M", imagePath); err != nil {
+		if err := runCommand(ctx, "resize2fs", "-M", imagePath); err != nil {
 			return fmt.Errorf("resize2fs -M failed: %w", err)
 		}
 		slog.Debug("Filesystem shrunk", "image", imagePath)
 
 	case provisioner.ResizeActionGrow:
 		slog.Debug("Growing filesystem", "image", imagePath, "bytes", op.Bytes)
-		if err := runCommand("e2fsck", "-f", "-y", imagePath); err != nil {
+		if err := runCommand(ctx, "e2fsck", "-f", "-y", imagePath); err != nil {
 			return fmt.Errorf("e2fsck failed for grow: %w", err)
 		}
 		if op.Bytes > 0 {
-			if err := runCommand("resize2fs", imagePath, fmt.Sprintf("%d", op.Bytes)); err != nil {
+			if err := runCommand(ctx, "resize2fs", imagePath, fmt.Sprintf("%d", op.Bytes)); err != nil {
 				return fmt.Errorf("resize2fs failed: %w", err)
 			}
 		} else {
-			if err := runCommand("resize2fs", imagePath); err != nil {
+			if err := runCommand(ctx, "resize2fs", imagePath); err != nil {
 				return fmt.Errorf("resize2fs failed: %w", err)
 			}
 		}
@@ -511,14 +511,14 @@ func executeResizeOp(imagePath string, op provisioner.ResizeOp) error {
 // TODO(verdict#33): move mountImage, hasPartitionTable, unmountImage, detachLoopDevice to infra/
 // =========================================================================
 
-func mountImage(imagePath string) (mountPoint string, loopDev string, err error) {
+func mountImage(ctx context.Context, imagePath string) (mountPoint string, loopDev string, err error) {
 	mountPoint, err = os.MkdirTemp("", "mvm-provision-*")
 	if err != nil {
 		return "", "", fmt.Errorf("mkdtemp: %w", err)
 	}
 
-	if hasPartitionTable(imagePath) {
-		out, _, err := system.RunCmd(context.Background(), "losetup", "-Pf", "--show", imagePath)
+	if hasPartitionTable(ctx, imagePath) {
+		out, _, err := system.RunCmd(ctx, "losetup", "-Pf", "--show", imagePath)
 		if err != nil {
 			os.RemoveAll(mountPoint)
 			return "", "", fmt.Errorf("losetup -Pf: %w", err)
@@ -526,9 +526,9 @@ func mountImage(imagePath string) (mountPoint string, loopDev string, err error)
 		loopDev = strings.TrimSpace(out)
 
 		partDev := loopDev + "p1"
-		_, _, err = system.RunCmd(context.Background(), "mount", partDev, mountPoint)
+		_, _, err = system.RunCmd(ctx, "mount", partDev, mountPoint)
 		if err != nil {
-			detachLoopDevice(loopDev)
+			detachLoopDevice(ctx, loopDev)
 			os.RemoveAll(mountPoint)
 
 			mountPoint2, err2 := os.MkdirTemp("", "mvm-provision-*")
@@ -543,7 +543,7 @@ func mountImage(imagePath string) (mountPoint string, loopDev string, err error)
 	}
 
 tryRawMount:
-	_, _, err = system.RunCmd(context.Background(), "mount", "-o", "loop", imagePath, mountPoint)
+	_, _, err = system.RunCmd(ctx, "mount", "-o", "loop", imagePath, mountPoint)
 	if err != nil {
 		os.RemoveAll(mountPoint)
 		return "", "", fmt.Errorf("mount -o loop: %w", err)
@@ -551,11 +551,11 @@ tryRawMount:
 	return mountPoint, "", nil
 }
 
-func hasPartitionTable(imagePath string) bool {
+func hasPartitionTable(ctx context.Context, imagePath string) bool {
 	opts := system.DefaultRunCmdOpts()
 	opts.Check = false
 	opts.Capture = true
-	result := system.RunCmdCompat(context.Background(),
+	result := system.RunCmdCompat(ctx,
 		[]string{"blkid", "-o", "value", "-s", "TYPE", imagePath}, opts)
 	if result.ExitCode != 0 || result.Stdout == "" {
 		return false
@@ -568,18 +568,18 @@ func hasPartitionTable(imagePath string) bool {
 	return true
 }
 
-func unmountImage(mountPoint string, loopDev string) {
+func unmountImage(ctx context.Context, mountPoint string, loopDev string) {
 	if mountPoint != "" {
-		_, _, _ = system.RunCmd(context.Background(), "umount", "-l", mountPoint)
+		_, _, _ = system.RunCmd(ctx, "umount", "-l", mountPoint)
 		_ = os.RemoveAll(mountPoint)
 	}
 	if loopDev != "" {
-		_ = detachLoopDevice(loopDev)
+		_ = detachLoopDevice(ctx, loopDev)
 	}
 }
 
-func detachLoopDevice(loopDev string) error {
-	_, _, err := system.RunCmd(context.Background(), "losetup", "-d", loopDev)
+func detachLoopDevice(ctx context.Context, loopDev string) error {
+	_, _, err := system.RunCmd(ctx, "losetup", "-d", loopDev)
 	return err
 }
 
@@ -588,7 +588,7 @@ func detachLoopDevice(loopDev string) error {
 // TODO(verdict#33): move runGuestfishCmd, runGuestfishSession to infra/
 // =========================================================================
 
-func runGuestfishCmd(diskPath string, readonly bool, args ...string) (string, error) {
+func runGuestfishCmd(ctx context.Context, diskPath string, readonly bool, args ...string) (string, error) {
 	gfArgs := []string{}
 	if readonly {
 		gfArgs = append(gfArgs, "--ro")
@@ -599,14 +599,14 @@ func runGuestfishCmd(diskPath string, readonly bool, args ...string) (string, er
 	opts := system.DefaultRunCmdOpts()
 	opts.Check = true
 	opts.Capture = true
-	result := system.RunCmdCompat(context.Background(), append([]string{"guestfish"}, gfArgs...), opts)
+	result := system.RunCmdCompat(ctx, append([]string{"guestfish"}, gfArgs...), opts)
 	if result.Err != nil {
 		return "", result.Err
 	}
 	return result.Stdout, nil
 }
 
-func runGuestfishSession(diskPath string, readonly bool, commands []string) error {
+func runGuestfishSession(ctx context.Context, diskPath string, readonly bool, commands []string) error {
 	gfArgs := []string{}
 	if readonly {
 		gfArgs = append(gfArgs, "--ro")
@@ -623,7 +623,7 @@ func runGuestfishSession(diskPath string, readonly bool, commands []string) erro
 	opts.Check = false
 	opts.Capture = true
 	opts.Input = script.String()
-	result := system.RunCmdCompat(context.Background(), append([]string{"guestfish"}, gfArgs...), opts)
+	result := system.RunCmdCompat(ctx, append([]string{"guestfish"}, gfArgs...), opts)
 	if result.ExitCode != 0 {
 		return fmt.Errorf("guestfish session failed (exit %d): %s", result.ExitCode, result.Stderr)
 	}
@@ -634,8 +634,8 @@ func runGuestfishSession(diskPath string, readonly bool, commands []string) erro
 // General command helpers
 // =========================================================================
 
-func runCommand(name string, args ...string) error {
-	_, stderr, err := system.RunCmd(context.Background(), name, args...)
+func runCommand(ctx context.Context, name string, args ...string) error {
+	_, stderr, err := system.RunCmd(ctx, name, args...)
 	if err != nil {
 		return fmt.Errorf("%s failed: %w\nstderr: %s", name, err, stderr)
 	}
@@ -646,8 +646,8 @@ func runCommand(name string, args ...string) error {
 // Builder methods
 // =========================================================================
 
-func (p *Provisioner) DetectOS() string {
-	return p.backend.DetectOS()
+func (p *Provisioner) DetectOS(ctx context.Context) string {
+	return p.backend.DetectOS(ctx)
 }
 
 func (p *Provisioner) Resize(targetSizeBytes int64) error {
@@ -678,10 +678,10 @@ func (p *Provisioner) FixFstab() error {
 	return p.backend.FixFstab()
 }
 
-func (p *Provisioner) Deblob(osType string) error {
-	return p.backend.Deblob(osType)
+func (p *Provisioner) Deblob(ctx context.Context, osType string) error {
+	return p.backend.Deblob(ctx, osType)
 }
 
-func (p *Provisioner) Run() error {
-	return p.backend.Run()
+func (p *Provisioner) Run(ctx context.Context) error {
+	return p.backend.Run(ctx)
 }

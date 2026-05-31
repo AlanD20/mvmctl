@@ -40,17 +40,11 @@ const MVMUnixGroup = CLIName
 
 const MVMDBFilename = "mvmdb.db"
 
-func MVMFwdChain() string {
-	return fmt.Sprintf("%s-FORWARD", strings.ToUpper(CLIName))
-}
+const MVMForwardChain = "MVM-FORWARD"
 
-func MVMPostroutingChain() string {
-	return fmt.Sprintf("%s-POSTROUTING", strings.ToUpper(CLIName))
-}
+const MVMPostroutingChain = "MVM-POSTROUTING"
 
-func MVMNocloudNetInputChain() string {
-	return fmt.Sprintf("%s-NOCLOUDNET-INPUT", strings.ToUpper(CLIName))
-}
+const MVMNocloudNetInputChain = "MVM-NOCLOUDNET-INPUT"
 
 func SudoersDropInPath() string {
 	return fmt.Sprintf("/etc/sudoers.d/%s", CLIName)

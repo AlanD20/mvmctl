@@ -1,19 +1,23 @@
 package network
 
-import "context"
+import (
+	"context"
+
+	"mvmctl/internal/infra/model"
+)
 
 // Repository — database operations for networks.
 // Matches src/mvmctl/core/network/_repository.py: Repository
 type Repository interface {
-	Get(ctx context.Context, networkID string) (*Network, error)
-	GetByName(ctx context.Context, name string) (*Network, error)
-	FindByPrefix(ctx context.Context, prefix string) ([]*Network, error)
+	Get(ctx context.Context, networkID string) (*model.Network, error)
+	GetByName(ctx context.Context, name string) (*model.Network, error)
+	FindByPrefix(ctx context.Context, prefix string) ([]*model.Network, error)
 	Count(ctx context.Context) (int, error)
-	ListAll(ctx context.Context) ([]*Network, error)
-	Upsert(ctx context.Context, network *Network) error
+	ListAll(ctx context.Context) ([]*model.Network, error)
+	Upsert(ctx context.Context, network *model.Network) error
 	UpdateBridgeActive(ctx context.Context, networkID string, active bool) error
 	SetDefault(ctx context.Context, networkID string) error
-	GetDefault(ctx context.Context) (*Network, error)
+	GetDefault(ctx context.Context) (*model.Network, error)
 	UpdateManyIsPresent(ctx context.Context, networkIDs []string, isPresent bool) error
 	SoftDelete(ctx context.Context, networkID string) error
 	Delete(ctx context.Context, networkID string) error

@@ -258,7 +258,7 @@ func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
 		}
 		command := strings.Join(chrootBuffer, " && ")
 		chrootBuffer = chrootBuffer[:0]
-		return runChrootCommands(mountPoint, command, input.Shell)
+		return runChrootCommands(ctx, mountPoint, command, input.Shell)
 	}
 
 	// ── Flush any pending chroot commands before file operations ──
@@ -298,7 +298,7 @@ func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
 		if len(chrootBuffer) >= chrootBatchSize {
 			command := strings.Join(chrootBuffer, " && ")
 			chrootBuffer = chrootBuffer[:0]
-			if err := runChrootCommands(mountPoint, command, input.Shell); err != nil {
+			if err := runChrootCommands(ctx, mountPoint, command, input.Shell); err != nil {
 				return Result{Status: "error", Error: err.Error(), Step: ps.step}
 			}
 		}
@@ -843,7 +843,7 @@ func copyDirectory(mountPoint string, c CopyDirOp, ps *provisionState) (int, err
 
 // runChrootCommands runs a command inside the chroot, trying each available shell.
 // Matches Python's _flush_chroot_buffer() logic.
-func runChrootCommands(mountPoint, command, customShell string) error {
+func runChrootCommands(ctx context.Context, mountPoint, command, customShell string) error {
 	// Ensure /dev/null exists in the chroot — matches Python's os.mknod(null_path, 0o666, os.makedev(1, 3)).
 	nullPath := filepath.Join(mountPoint, "dev", "null")
 	if _, err := os.Stat(nullPath); os.IsNotExist(err) {
@@ -881,7 +881,7 @@ func runChrootCommands(mountPoint, command, customShell string) error {
 		shellBase := filepath.Base(shell)
 
 		// Matching Python's proc.communicate(timeout=60) — wrap in context with timeout.
-		chrootCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		chrootCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
 
 		var cmd *exec.Cmd

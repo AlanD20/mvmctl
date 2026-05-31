@@ -1,6 +1,7 @@
 package system
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -89,7 +90,7 @@ func CheckPrivileges(binary string, operationDescription string) error {
 	username := currentUser.Username
 
 	isSupplementaryMember := false
-	members, parseErr := GroupMembersViaNSS(infra.MVMUnixGroup)
+	members, parseErr := GroupMembersViaNSS(context.Background(), infra.MVMUnixGroup)
 	if parseErr == nil {
 		for _, m := range members {
 			if m == username {

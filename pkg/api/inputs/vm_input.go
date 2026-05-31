@@ -2,7 +2,6 @@ package inputs
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 
@@ -11,6 +10,8 @@ import (
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/validators"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // VMInput matches Python's VMInput dataclass.
@@ -40,7 +41,7 @@ type ResolvedVMInput struct {
 // Request to resolve a VM by name, ID, IP, or MAC.
 // Python version creates VMResolver with include=["image","kernel","network","network.leases","volumes","binary"].
 type VMRequest struct {
-	db       *sql.DB
+	db       *sqlx.DB
 	input    VMInput
 	result   *ResolvedVMInput
 	resolver *vm.Resolver
@@ -49,7 +50,7 @@ type VMRequest struct {
 
 // NewVMRequest creates a new VMRequest.
 // Accepts optional enricher for enriching resolved VMs with related data.
-func NewVMRequest(inputs VMInput, db *sql.DB, vmRepo vm.Repository, enricher *enricher.Enricher) *VMRequest {
+func NewVMRequest(inputs VMInput, db *sqlx.DB, vmRepo vm.Repository, enricher *enricher.Enricher) *VMRequest {
 	return &VMRequest{
 		db:       db,
 		input:    inputs,

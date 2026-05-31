@@ -29,8 +29,8 @@ type InitResult struct {
 
 // InitCheckReadiness runs pre-flight host readiness checks via the public API layer.
 // Matches Python's HostOperation.check_readiness() called from CLI.
-func (op *Operation) InitCheckReadiness() *model.ProbeResult {
-	return op.HostCheckReadiness()
+func (op *Operation) InitCheckReadiness(ctx context.Context) *model.ProbeResult {
+	return op.HostCheckReadiness(ctx)
 }
 
 // InitSetupHost sets up host configuration.

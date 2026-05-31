@@ -5,14 +5,18 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+
+	"github.com/jmoiron/sqlx"
+
+	"mvmctl/internal/infra/model"
 )
 
 type sqliteRepo struct {
-	db *sql.DB
+	db *sqlx.DB
 }
 
 // NewRepository creates a new SettingsRepository backed by SQLite.
-func NewRepository(db *sql.DB) SettingsRepository {
+func NewRepository(db *sqlx.DB) SettingsRepository {
 	return &sqliteRepo{db: db}
 }
 
@@ -22,10 +26,9 @@ func NewRepository(db *sql.DB) SettingsRepository {
 // only sql.ErrNoRows is treated as not-found (returns nil, nil).
 func (r *sqliteRepo) Get(ctx context.Context, category, key string) (any, error) {
 	var valueStr string
-	err := r.db.QueryRowContext(ctx,
+	err := sqlx.GetContext(ctx, r.db, &valueStr,
 		"SELECT value FROM user_settings WHERE category = ? AND key = ?",
-		category, key,
-	).Scan(&valueStr)
+		category, key)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -114,7 +117,7 @@ func (r *sqliteRepo) DeleteAll(ctx context.Context) (int, error) {
 // Error behavior matches Python: database errors (including "no such table") propagate.
 func (r *sqliteRepo) Count(ctx context.Context) (int, error) {
 	var c int
-	err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM user_settings").Scan(&c)
+	err := sqlx.GetContext(ctx, r.db, &c, "SELECT COUNT(*) FROM user_settings")
 	if err != nil {
 		return 0, err
 	}
@@ -135,30 +138,21 @@ func (r *sqliteRepo) ListByCategory(ctx context.Context, category *string) (map[
 	}
 	query += " ORDER BY category, key"
 
-	rows, err := r.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
+	var settings []model.Setting
+	if err := r.db.SelectContext(ctx, &settings, query, args...); err != nil {
+		return nil, fmt.Errorf("query settings: %w", err)
 	}
-	defer rows.Close()
 
 	result := make(map[string]map[string]any)
-	for rows.Next() {
-		var cat, keyOut, valueStr string
-		if err := rows.Scan(&cat, &keyOut, &valueStr); err != nil {
-			return nil, fmt.Errorf("scan setting row: %w", err)
-		}
+	for _, s := range settings {
 		var val any
-		if err := json.Unmarshal([]byte(valueStr), &val); err != nil {
-			return nil, fmt.Errorf("parse setting value for %s.%s: %w", cat, keyOut, err)
+		if err := json.Unmarshal([]byte(s.Value), &val); err != nil {
+			return nil, fmt.Errorf("parse setting value for %s.%s: %w", s.Category, s.Key, err)
 		}
-		if _, ok := result[cat]; !ok {
-			result[cat] = make(map[string]any)
+		if _, ok := result[s.Category]; !ok {
+			result[s.Category] = make(map[string]any)
 		}
-		result[cat][keyOut] = val
+		result[s.Category][s.Key] = val
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
 	return result, nil
 }

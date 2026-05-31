@@ -20,6 +20,8 @@ import (
 	"mvmctl/internal/enricher"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/db"
+	"mvmctl/internal/infra/firewall"
+	"mvmctl/internal/infra/model"
 )
 
 // Operation is the single composition root for all API operations.
@@ -78,8 +80,13 @@ func NewOperation(conn *db.Handle, cacheDir string) *Operation {
 	}
 	configReg := config.NewConstraintRegistry()
 	config.RegisterBuiltinConstraints(configReg)
+	// Create a default firewall tracker (nftables, xtcomment enabled).
+	// HostInit will replace it with the properly configured tracker once
+	// firewall_backend and iptables_xtcomment settings are resolved.
+	defaultFwTracker := firewall.NewFirewallTracker(model.FirewallBackendNFTables, true, sqlDB)
+
 	s := Services{
-		Network: network.NewService(r.Network, sqlDB),
+		Network: network.NewService(r.Network, defaultFwTracker),
 		Image:   image.NewService(r.Image, cacheDir),
 		Kernel:  kernel.NewService(r.Kernel, cacheDir),
 		Binary:  binary.NewService(r.Binary, filepath.Join(cacheDir, "bin"), cacheDir),

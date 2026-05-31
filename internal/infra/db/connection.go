@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/jmoiron/sqlx"
+
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 
@@ -17,7 +19,7 @@ import (
 
 type Handle struct {
 	mu     sync.Mutex
-	db     *sql.DB
+	db     *sqlx.DB
 	dbPath string
 	opened bool
 }
@@ -77,7 +79,7 @@ func (d *Handle) openLazy() {
 		"&_pragma=wal_autocheckpoint=1000" +
 		"&_pragma=cache_size=-64000"
 
-	db, err := sql.Open("sqlite", d.dbPath+"?"+pragmaParams)
+	db, err := sqlx.Open("sqlite", d.dbPath+"?"+pragmaParams)
 	if err != nil {
 		panic(fmt.Sprintf("failed to open database: %v", err))
 	}
@@ -96,9 +98,9 @@ func (d *Handle) openLazy() {
 	d.opened = true
 }
 
-// DB returns the underlying *sql.DB, opening it lazily if needed.
+// DB returns the underlying *sqlx.DB, opening it lazily if needed.
 // Matching Python's connect() which yields a connection, but Go uses a pool.
-func (d *Handle) DB() *sql.DB {
+func (d *Handle) DB() *sqlx.DB {
 	d.openLazy()
 	return d.db
 }
@@ -166,17 +168,17 @@ func (d *Handle) RestoreFromSnapshot(snapshotPath string) error {
 	return restoreFromSnapshot(snapshotPath, d.dbPath)
 }
 
-// Connect returns the underlying *sql.DB (lazily opened).
+// Connect returns the underlying *sqlx.DB (lazily opened).
 // Permissions are set once in openLazy() when the pool first opens, and
 // in RestoreFromSnapshot() after a restore creates a new file.
-func (d *Handle) Connect() *sql.DB {
+func (d *Handle) Connect() *sqlx.DB {
 	return d.DB()
 }
 
 // readCurrentVersion queries the current schema version from PRAGMA user_version.
 // Shared by Handle.GetCurrentVersion and RunMigrationsCtx to avoid duplicating
 // the same PRAGMA query.
-func readCurrentVersion(db *sql.DB) (int, error) {
+func readCurrentVersion(db *sqlx.DB) (int, error) {
 	var version int
 	err := db.QueryRow("PRAGMA user_version").Scan(&version)
 	if err != nil {
@@ -199,7 +201,7 @@ func (d *Handle) Ping() error {
 // EnsureMigrationsTable creates the db_migrations tracking table if it doesn't exist.
 // The db_migrations table must be bootstrapped before running any migrations
 // because migration files record themselves in this table.
-func EnsureMigrationsTable(ctx context.Context, db *sql.DB) error {
+func EnsureMigrationsTable(ctx context.Context, db *sqlx.DB) error {
 	_, err := db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS db_migrations (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,

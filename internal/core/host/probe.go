@@ -25,7 +25,7 @@ func NewProbe() *Probe {
 //
 // Takes detection results as input instead of re-reading system files —
 // detector.go is the single source of truth for all /proc data.
-func (p *Probe) RunAll(hardware *model.HostHardware, limits *model.HostLimits, resources *model.HostResources) *model.ProbeResult {
+func (p *Probe) RunAll(ctx context.Context, hardware *model.HostHardware, limits *model.HostLimits, resources *model.HostResources) *model.ProbeResult {
 	result := &model.ProbeResult{}
 
 	for _, check := range p.checkVMHost(hardware, limits, resources) {
@@ -44,7 +44,7 @@ func (p *Probe) RunAll(hardware *model.HostHardware, limits *model.HostLimits, r
 		}
 	}
 
-	for _, check := range p.checkFirewallReadiness(resources) {
+	for _, check := range p.checkFirewallReadiness(ctx, resources) {
 		if !check.Passed {
 			result.Warnings = append(result.Warnings, check)
 		} else {
@@ -214,7 +214,7 @@ func (p *Probe) checkInitBinaries() []model.ProbeCheck {
 
 // checkFirewallReadiness checks firewall backend availability and detect conflicts.
 // Matches Python's HostProbe.check_firewall_readiness().
-func (p *Probe) checkFirewallReadiness(resources *model.HostResources) []model.ProbeCheck {
+func (p *Probe) checkFirewallReadiness(ctx context.Context, resources *model.HostResources) []model.ProbeCheck {
 	var checks []model.ProbeCheck
 
 	nftAvailable := resources.NftablesAvailable
@@ -242,7 +242,7 @@ func (p *Probe) checkFirewallReadiness(resources *model.HostResources) []model.P
 
 	// Mixed backend detection
 	if nftAvailable && iptAvailable {
-		hasConflict := detectIPTablesBackendConflict()
+		hasConflict := detectIPTablesBackendConflict(ctx)
 		if hasConflict {
 			checks = append(checks, model.ProbeCheck{
 				Name:    "firewall_conflict",
@@ -304,9 +304,7 @@ func (p *Probe) checkSystemResources(hardware *model.HostHardware, limits *model
 // detectIPTablesBackendConflict checks if both iptables-legacy and iptables-nft have active rules.
 // Matches Python's NetworkUtils.detect_iptables_backend_conflict() exactly,
 // including the initial iptables --version call.
-func detectIPTablesBackendConflict() bool {
-	ctx := context.Background()
-
+func detectIPTablesBackendConflict(ctx context.Context) bool {
 	// Python: run_cmd(["iptables", "--version"], check=False)
 	// This determines the current iptables backend (nft vs legacy).
 	// The diagnosis string is computed but discarded by the probe caller

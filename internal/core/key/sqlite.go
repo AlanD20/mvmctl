@@ -3,63 +3,59 @@ package key
 import (
 	"context"
 	"database/sql"
-	"fmt"
-	"strings"
+
+	"github.com/jmoiron/sqlx"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/model"
 )
 
 type sqliteRepo struct {
-	db *sql.DB
+	db *sqlx.DB
 }
 
-// NewRepository creates a new Repository backed by SQLite.
-func NewRepository(db *sql.DB) Repository {
+func NewRepository(db *sqlx.DB) Repository {
 	return &sqliteRepo{db: db}
 }
 
+func (r *sqliteRepo) Get(ctx context.Context, id string) (*model.SSHKeyItem, error) {
+	var k model.SSHKeyItem
+	err := r.db.GetContext(ctx, &k, `SELECT * FROM ssh_keys WHERE id = ?`, id)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return &k, err
+}
+
+func (r *sqliteRepo) ListAll(ctx context.Context) ([]*model.SSHKeyItem, error) {
+	var items []*model.SSHKeyItem
+	return items, r.db.SelectContext(ctx, &items, `SELECT * FROM ssh_keys ORDER BY name`)
+}
+
 func (r *sqliteRepo) GetByName(ctx context.Context, name string) (*model.SSHKeyItem, error) {
-	row := r.db.QueryRowContext(ctx,
-		`SELECT * FROM ssh_keys WHERE name = ?`, name)
-	return scanKey(row)
-}
-
-func (r *sqliteRepo) FindByPrefix(ctx context.Context, prefix string) ([]*model.SSHKeyItem, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT * FROM ssh_keys WHERE id LIKE ?`, prefix+"%")
-	if err != nil {
-		return nil, fmt.Errorf("find by prefix: %w", err)
+	var k model.SSHKeyItem
+	err := r.db.GetContext(ctx, &k, `SELECT * FROM ssh_keys WHERE name = ?`, name)
+	if err == sql.ErrNoRows {
+		return nil, nil
 	}
-	defer rows.Close()
-	return scanKeys(rows)
+	return &k, err
 }
 
-func (r *sqliteRepo) Count(ctx context.Context) (int, error) {
-	var count int
-	err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM ssh_keys").Scan(&count)
-	return count, err
-}
-
-func (r *sqliteRepo) List(ctx context.Context) ([]*model.SSHKeyItem, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT * FROM ssh_keys ORDER BY created_at`)
-	if err != nil {
-		return nil, fmt.Errorf("list keys: %w", err)
+func (r *sqliteRepo) GetDefault(ctx context.Context) (*model.SSHKeyItem, error) {
+	var k model.SSHKeyItem
+	err := r.db.GetContext(ctx, &k, `SELECT * FROM ssh_keys WHERE is_default = 1 LIMIT 1`)
+	if err == sql.ErrNoRows {
+		return nil, nil
 	}
-	defer rows.Close()
-	return scanKeys(rows)
+	return &k, err
 }
 
-func (r *sqliteRepo) Upsert(ctx context.Context, key *model.SSHKeyItem) error {
-	var privKey any
-	if key.PrivateKeyPath != nil {
-		privKey = *key.PrivateKeyPath
-	}
+func (r *sqliteRepo) Upsert(ctx context.Context, k *model.SSHKeyItem) error {
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO ssh_keys (
 			id, name, fingerprint, algorithm, comment,
-			private_key_path, public_key_path, is_default, is_present, created_at, updated_at
+			private_key_path, public_key_path,
+			is_default, is_present, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
@@ -71,10 +67,55 @@ func (r *sqliteRepo) Upsert(ctx context.Context, key *model.SSHKeyItem) error {
 			is_default = excluded.is_default,
 			is_present = excluded.is_present,
 			updated_at = CURRENT_TIMESTAMP`,
-		key.ID, key.Name, key.Fingerprint, key.Algorithm, key.Comment,
-		privKey, key.PublicKeyPath,
-		infra.BoolToInt(key.IsDefault), infra.BoolToInt(key.IsPresent),
-		key.CreatedAt, key.UpdatedAt)
+		k.ID, k.Name, k.Fingerprint, k.Algorithm, k.Comment,
+		k.PrivateKeyPath, k.PublicKeyPath,
+		infra.BoolToInt(k.IsDefault), infra.BoolToInt(k.IsPresent),
+		k.CreatedAt, k.UpdatedAt,
+	)
+	return err
+}
+
+func (r *sqliteRepo) Delete(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM ssh_keys WHERE id = ?`, id)
+	return err
+}
+
+func (r *sqliteRepo) SetDefault(ctx context.Context, name string) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `UPDATE ssh_keys SET is_default = 0`)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE ssh_keys SET is_default = 1, updated_at = CURRENT_TIMESTAMP WHERE name = ?`, name)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *sqliteRepo) List(ctx context.Context) ([]*model.SSHKeyItem, error) {
+	var items []*model.SSHKeyItem
+	return items, r.db.SelectContext(ctx, &items, `SELECT * FROM ssh_keys ORDER BY name`)
+}
+
+func (r *sqliteRepo) FindByPrefix(ctx context.Context, prefix string) ([]*model.SSHKeyItem, error) {
+	var items []*model.SSHKeyItem
+	return items, r.db.SelectContext(ctx, &items,
+		`SELECT * FROM ssh_keys WHERE id LIKE ?`, prefix+"%")
+}
+
+func (r *sqliteRepo) GetDefaults(ctx context.Context) ([]*model.SSHKeyItem, error) {
+	var items []*model.SSHKeyItem
+	return items, r.db.SelectContext(ctx, &items,
+		`SELECT * FROM ssh_keys WHERE is_default = 1`)
+}
+
+func (r *sqliteRepo) ClearDefaults(ctx context.Context) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE ssh_keys SET is_default = 0`)
 	return err
 }
 
@@ -82,94 +123,17 @@ func (r *sqliteRepo) UpdateManyIsPresent(ctx context.Context, ids []string, pres
 	if len(ids) == 0 {
 		return nil
 	}
-	placeholders := strings.Repeat("?,", len(ids))
-	placeholders = placeholders[:len(placeholders)-1] // remove trailing comma
-	args := make([]any, 0, len(ids)+1)
-	args = append(args, infra.BoolToInt(present))
-	for _, id := range ids {
-		args = append(args, id)
-	}
-	_, err := r.db.ExecContext(ctx,
-		fmt.Sprintf(`UPDATE ssh_keys SET is_present = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE id IN (%s)`, placeholders),
-		args...)
-	return err
-}
-
-func (r *sqliteRepo) Delete(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, "DELETE FROM ssh_keys WHERE id = ?", id)
-	return err
-}
-
-// SetDefault sets a key as default. Does NOT clear other defaults,
-// matching Python's behavior exactly.
-func (r *sqliteRepo) SetDefault(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, "UPDATE ssh_keys SET is_default = 1 WHERE id = ?", id)
-	return err
-}
-
-// GetDefaults returns all keys marked as default.
-func (r *sqliteRepo) GetDefaults(ctx context.Context) ([]*model.SSHKeyItem, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT * FROM ssh_keys WHERE is_default = 1 ORDER BY created_at`)
+	query, args, err := sqlx.In("UPDATE ssh_keys SET is_present = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN (?)",
+		infra.BoolToInt(present), ids)
 	if err != nil {
-		return nil, fmt.Errorf("get defaults: %w", err)
+		return err
 	}
-	defer rows.Close()
-	return scanKeys(rows)
-}
-
-func (r *sqliteRepo) ClearDefaults(ctx context.Context) error {
-	_, err := r.db.ExecContext(ctx, "UPDATE ssh_keys SET is_default = 0")
+	query = r.db.Rebind(query)
+	_, err = r.db.ExecContext(ctx, query, args...)
 	return err
 }
 
-// scanKey scans a single row into an SSHKeyItem.
-// Returns nil, nil if no rows.
-func scanKey(row *sql.Row) (*model.SSHKeyItem, error) {
-	var k model.SSHKeyItem
-	var privPath sql.NullString
-	var isDefault, isPresent int
-	var createdAt, updatedAt string
-	err := row.Scan(&k.ID, &k.Name, &k.Fingerprint, &k.Algorithm, &k.Comment,
-		&privPath, &k.PublicKeyPath, &isDefault, &isPresent, &createdAt, &updatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("scan key: %w", err)
-	}
-	if privPath.Valid {
-		k.PrivateKeyPath = &privPath.String
-	}
-	k.IsDefault = isDefault == 1
-	k.IsPresent = isPresent == 1
-	k.CreatedAt = createdAt
-	k.UpdatedAt = updatedAt
-	return &k, nil
-}
-
-// scanKeys scans multiple rows into a slice of SSHKeyItem.
-func scanKeys(rows *sql.Rows) ([]*model.SSHKeyItem, error) {
-	var keys []*model.SSHKeyItem
-	for rows.Next() {
-		var k model.SSHKeyItem
-		var privPath sql.NullString
-		var isDefault, isPresent int
-		var createdAt, updatedAt string
-		err := rows.Scan(&k.ID, &k.Name, &k.Fingerprint, &k.Algorithm, &k.Comment,
-			&privPath, &k.PublicKeyPath, &isDefault, &isPresent, &createdAt, &updatedAt)
-		if err != nil {
-			return nil, fmt.Errorf("scan key: %w", err)
-		}
-		if privPath.Valid {
-			k.PrivateKeyPath = &privPath.String
-		}
-		k.IsDefault = isDefault == 1
-		k.IsPresent = isPresent == 1
-		k.CreatedAt = createdAt
-		k.UpdatedAt = updatedAt
-		keys = append(keys, &k)
-	}
-	return keys, rows.Err()
+func (r *sqliteRepo) Count(ctx context.Context) (int, error) {
+	var count int
+	return count, sqlx.GetContext(ctx, r.db, &count, `SELECT COUNT(*) FROM ssh_keys`)
 }

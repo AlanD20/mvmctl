@@ -793,14 +793,14 @@ func (s *Service) PrepareKernelConfig(ctx context.Context, kernelDir string, spe
 	// Download Firecracker config and apply fragments (combined try/except matching Python)
 	// Python: except KernelError — only catches KernelError, not any other error.
 	configErr := func() error {
-		if err := s.downloadFCConfig(kernelDir, spec, arch, templateVars); err != nil {
+		if err := s.downloadFCConfig(ctx, kernelDir, spec, arch, templateVars); err != nil {
 			return err
 		}
 		if len(spec.ConfigFragments) > 0 {
 			if onStatus != nil {
 				onStatus("Applying kernel config fragments...")
 			}
-			if err := s.applyConfigFragments(kernelDir, spec.ConfigFragments, templateVars, onStatus); err != nil {
+			if err := s.applyConfigFragments(ctx, kernelDir, spec.ConfigFragments, templateVars, onStatus); err != nil {
 				return err
 			}
 		}
@@ -1142,12 +1142,12 @@ func (s *Service) ListRemoteVersions(ctx context.Context, specs []*model.KernelS
 
 // ── Internal helpers ────────────────────────────────────────────────────
 
-func (s *Service) downloadFCConfig(kernelDir string, spec *model.KernelSpec, arch string, vars map[string]string) error {
+func (s *Service) downloadFCConfig(ctx context.Context, kernelDir string, spec *model.KernelSpec, arch string, vars map[string]string) error {
 	if spec.ConfigURLTemplate == nil || *spec.ConfigURLTemplate == "" {
 		return NewKernelErrorf("Missing 'config_url_template' in kernels.yaml for %s", spec.Name)
 	}
 	url := renderTemplate(*spec.ConfigURLTemplate, vars)
-	data, err := s.dl.GetBody(context.Background(), url)
+	data, err := s.dl.GetBody(ctx, url)
 	if err != nil {
 		return NewKernelErrorf("Failed to download config: %s", err)
 	}
@@ -1155,7 +1155,7 @@ func (s *Service) downloadFCConfig(kernelDir string, spec *model.KernelSpec, arc
 	return os.WriteFile(configPath, data, 0644)
 }
 
-func (s *Service) applyConfigFragments(kernelDir string, fragments []string, vars map[string]string, onStatus func(string)) error {
+func (s *Service) applyConfigFragments(ctx context.Context, kernelDir string, fragments []string, vars map[string]string, onStatus func(string)) error {
 	configPath := filepath.Join(kernelDir, ".config")
 	for idx, fragment := range fragments {
 		rendered := renderTemplate(fragment, vars)
@@ -1166,7 +1166,7 @@ func (s *Service) applyConfigFragments(kernelDir string, fragments []string, var
 			if onStatus != nil {
 				onStatus(fmt.Sprintf("Fetching config fragment: %s", rendered))
 			}
-			content, err = s.dl.GetBody(context.Background(), rendered)
+			content, err = s.dl.GetBody(ctx, rendered)
 			if err != nil {
 				return NewKernelErrorf("Failed to fetch config fragment %s: %s", rendered, err)
 			}

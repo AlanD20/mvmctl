@@ -2,12 +2,13 @@ package inputs
 
 import (
 	"context"
-	"database/sql"
 	"strings"
 
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // NetworkInput is the raw input for identifying existing networks.
@@ -39,7 +40,7 @@ type ResolvedNetworkInput struct {
 //
 // Resolve network identifiers to DB records and validate.
 type NetworkRequest struct {
-	db       *sql.DB
+	db       *sqlx.DB
 	input    NetworkInput
 	result   *ResolvedNetworkInput
 	resolver *network.Resolver
@@ -51,11 +52,11 @@ type NetworkRequest struct {
 //	self._network_resolver = Resolver(
 //	    Repository(self._db), include=["leases"],
 //	)
-func NewNetworkRequest(inputs NetworkInput, db *sql.DB, networkRepo network.Repository) *NetworkRequest {
+func NewNetworkRequest(inputs NetworkInput, db *sqlx.DB, networkRepo network.Repository) *NetworkRequest {
 	return &NetworkRequest{
 		db:       db,
 		input:    inputs,
-		resolver: network.NewResolverWithInclude(networkRepo, []string{"leases"}),
+		resolver: network.NewResolver(networkRepo, []string{"leases"}),
 	}
 }
 

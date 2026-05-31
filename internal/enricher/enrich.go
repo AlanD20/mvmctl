@@ -1048,7 +1048,7 @@ func (e *Enricher) enrichVolumeVMs(ctx context.Context, volumes []*model.VolumeI
 // EnrichKey populates resolved relations on Key items.
 // KeyResolver.RELATIONS is empty in Python, so this is a no-op.
 // Included for symmetry with other domain methods.
-func (e *Enricher) EnrichKey(ctx context.Context, keys []any) error {
+func (e *Enricher) EnrichKey(keys []any) error {
 	// No relations defined for keys — matches Python's KeyResolver.RELATIONS = {}.
 	return nil
 }

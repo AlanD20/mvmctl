@@ -50,7 +50,7 @@ func VersionString() string {
 //   - Tag name if current commit is tagged
 //   - "git+<short_hash>" if not tagged
 //   - empty string if not in a git repo or git not available
-func GetGitVersionInfo() string {
+func GetGitVersionInfo(ctx context.Context) string {
 	searchDirs := []string{}
 	if SourceDir != "" {
 		searchDirs = append(searchDirs, SourceDir)
@@ -66,12 +66,12 @@ func GetGitVersionInfo() string {
 			if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 				repoDir := dir
 
-				tag, err := runGitCmd(repoDir, "describe", "--tags", "--exact-match", "HEAD")
+				tag, err := runGitCmd(ctx, repoDir, "describe", "--tags", "--exact-match", "HEAD")
 				if err == nil && tag != "" {
 					return strings.TrimSpace(tag)
 				}
 
-				hash, err := runGitCmd(repoDir, "rev-parse", "--short", "HEAD")
+				hash, err := runGitCmd(ctx, repoDir, "rev-parse", "--short", "HEAD")
 				if err == nil && hash != "" {
 					return "git+" + strings.TrimSpace(hash)
 				}
@@ -88,8 +88,8 @@ func GetGitVersionInfo() string {
 	return ""
 }
 
-func runGitCmd(repoDir string, args ...string) (string, error) {
-	result := system.RunCmdCompat(context.Background(), append([]string{"git", "-C", repoDir}, args...), system.RunCmdOptions{Capture: true})
+func runGitCmd(ctx context.Context, repoDir string, args ...string) (string, error) {
+	result := system.RunCmdCompat(ctx, append([]string{"git", "-C", repoDir}, args...), system.RunCmdOptions{Capture: true})
 	if result.Err != nil {
 		return "", fmt.Errorf("git %v: %w", args, result.Err)
 	}
@@ -101,14 +101,14 @@ func runGitCmd(repoDir string, args ...string) (string, error) {
 //  1. chosenVersion (set via ldflags) — returned as-is
 //  2. If empty, use "0.1.0" as hardcoded fallback.
 //  3. Append git info unless a tag is found (tag overrides version entirely).
-func FormatVersion(chosenVersion string) string {
+func FormatVersion(ctx context.Context, chosenVersion string) string {
 	if chosenVersion != "" {
 		return chosenVersion
 	}
 
 	version := "0.1.0"
 
-	gitInfo := GetGitVersionInfo()
+	gitInfo := GetGitVersionInfo(ctx)
 	if gitInfo != "" {
 		if strings.HasPrefix(gitInfo, "git+") {
 			version = version + "+" + gitInfo
@@ -122,14 +122,14 @@ func FormatVersion(chosenVersion string) string {
 
 // GetVersion returns a cached full version string with git info.
 // Matches Python's _get_version().
-func GetVersion() string {
+func GetVersion(ctx context.Context) string {
 	versionOnce.Do(func() {
 		if BuildVersion != "" {
 			versionCached = BuildVersion
 			return
 		}
 
-		gitInfo := GetGitVersionInfo()
+		gitInfo := GetGitVersionInfo(ctx)
 		version := "0.1.0"
 
 		if gitInfo != "" {

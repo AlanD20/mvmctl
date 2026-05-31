@@ -4,18 +4,18 @@ package model
 
 // KernelItem corresponds to Python's KernelItem dataclass.
 type KernelItem struct {
-	ID        string  `json:"id"`
-	Name      string  `json:"name"`
-	BaseName  string  `json:"base_name"`
-	Version   string  `json:"version"`
-	Arch      string  `json:"arch"`
-	Type      string  `json:"type"`
-	Path      string  `json:"path"`
-	IsDefault bool    `json:"is_default"`
-	IsPresent bool    `json:"is_present"`
-	CreatedAt string  `json:"created_at"`
-	UpdatedAt string  `json:"updated_at"`
-	DeletedAt *string `json:"deleted_at,omitempty"`
+	ID        string  `json:"id" db:"id"`
+	Name      string  `json:"name" db:"name"`
+	BaseName  string  `json:"base_name" db:"base_name"`
+	Version   string  `json:"version" db:"version"`
+	Arch      string  `json:"arch" db:"arch"`
+	Type      string  `json:"type" db:"type"`
+	Path      string  `json:"path" db:"path"`
+	IsDefault bool    `json:"is_default" db:"is_default"`
+	IsPresent bool    `json:"is_present" db:"is_present"`
+	CreatedAt string  `json:"created_at" db:"created_at"`
+	UpdatedAt string  `json:"updated_at" db:"updated_at"`
+	DeletedAt *string `json:"deleted_at,omitempty" db:"deleted_at"`
 
 	// Resolved relations
 	VMs []*VM `json:"vms,omitempty"`

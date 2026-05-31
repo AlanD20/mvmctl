@@ -2,12 +2,13 @@ package inputs
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
 	"mvmctl/internal/core/image"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // ImageInput matches Python's ImageInput dataclass.
@@ -34,14 +35,14 @@ type ResolvedImageInput struct {
 //
 // Request that resolves ImageInput to ImageItem via DB.
 type ImageRequest struct {
-	db       *sql.DB
+	db       *sqlx.DB
 	input    ImageInput
 	result   *ResolvedImageInput
 	resolver *image.Resolver
 }
 
 // NewImageRequest creates a new ImageRequest.
-func NewImageRequest(inputs ImageInput, db *sql.DB, imageRepo image.Repository) *ImageRequest {
+func NewImageRequest(inputs ImageInput, db *sqlx.DB, imageRepo image.Repository) *ImageRequest {
 	return &ImageRequest{
 		db:       db,
 		input:    inputs,
