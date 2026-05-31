@@ -524,15 +524,11 @@ func SendSignal(pid int, sig syscall.Signal) bool {
 	return true
 }
 
-// HasPythonAncestor walks the PPID chain for pid upward through /proc.
-//
-// Returns true if any ancestor process has "python" or "mvm" in its
-// command line (case-insensitive), indicating the process tree is
-// managed by a Python / mvmctl process.  Returns false if the parent
-// chain reaches PID 1 without finding a Python ancestor.
-//
-// Python's has_python_ancestor() uses the same logic.
-func HasPythonAncestor(pid int) bool {
+// HasAncestorWithCmdline walks the PPID chain for pid upward through /proc.
+// Returns true if any ancestor process has the given substrings in its
+// command line (case-insensitive). Returns false if the parent chain reaches
+// PID 1 without finding a match or if /proc is inaccessible.
+func HasAncestorWithCmdline(pid int, substr ...string) bool {
 	visited := make(map[int]struct{})
 	current := pid
 
@@ -551,11 +547,11 @@ func HasPythonAncestor(pid int) bool {
 		// cmdline uses null bytes as separators; decode with replace
 		// and convert to lowercase for case-insensitive matching
 		cmdline := strings.ToLower(string(raw))
-		// Replace null bytes with spaces so "python" substring check
-		// works across argument boundaries
 		cmdline = strings.ReplaceAll(cmdline, "\x00", " ")
-		if strings.Contains(cmdline, "python") || strings.Contains(cmdline, "mvm") {
-			return true
+		for _, s := range substr {
+			if strings.Contains(cmdline, s) {
+				return true
+			}
 		}
 
 		// Read PPid from /proc/<pid>/status
@@ -564,24 +560,11 @@ func HasPythonAncestor(pid int) bool {
 		if err != nil {
 			return false
 		}
-		foundPpid := false
-		for _, line := range strings.Split(string(data), "\n") {
-			if strings.HasPrefix(line, "PPid:") {
-				parts := strings.SplitN(line, ":", 2)
-				if len(parts) >= 2 {
-					ppid, err := strconv.Atoi(strings.TrimSpace(parts[1]))
-					if err != nil {
-						return false
-					}
-					current = ppid
-					foundPpid = true
-					break
-				}
-			}
+		ppid := ParseProcStatusField(string(data), "PPid:")
+		if ppid < 0 {
+			break
 		}
-		if !foundPpid {
-			break // PPid not found — stop walking
-		}
+		current = ppid
 	}
 
 	return false

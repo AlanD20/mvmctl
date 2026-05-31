@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
+
+	"mvmctl/internal/infra"
 )
 
 // SpawnSubprocess starts a detached subprocess in a new process group (Setpgid).
@@ -24,6 +26,7 @@ func SpawnSubprocess(name string, extraFiles []*os.File, args ...string) (*exec.
 	cmd.Stdin = nil
 	cmd.Stdout = nil
 	cmd.Stderr = nil
+	cmd.Env = append(os.Environ(), infra.MVMBackgroundServiceEnv)
 	if len(extraFiles) > 0 {
 		cmd.ExtraFiles = extraFiles
 	}

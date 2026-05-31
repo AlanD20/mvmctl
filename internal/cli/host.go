@@ -14,8 +14,9 @@ import (
 	"mvmctl/internal/infra/system"
 	"mvmctl/pkg/api"
 
-	"github.com/spf13/cobra"
 	"mvmctl/internal/cli/common"
+
+	"github.com/spf13/cobra"
 )
 
 // formatChange returns a concise one-line description of a host change matching Python's _format_change.
@@ -64,7 +65,7 @@ func formatChange(mechanism, setting, appliedValue, originalValue string) string
 }
 
 // abortIfVMsRunning exits with an error if any VMs are currently running.
-func abortIfVMsRunning(ctx context.Context, op *api.Operation, action string) error {
+func abortIfVMsRunning(ctx context.Context, op *api.Operation) error {
 	running, err := op.HostGetRunningVMs(ctx)
 	if err != nil {
 		return nil
@@ -74,8 +75,6 @@ func abortIfVMsRunning(ctx context.Context, op *api.Operation, action string) er
 		for _, v := range running {
 			names = append(names, v.Name)
 		}
-		common.Cli.Error(fmt.Sprintf("%s blocked: VMs still running: %s", action, strings.Join(names, ", ")))
-		common.Cli.Error("Stop all VMs first: mvm vm stop <name>")
 		return fmt.Errorf("VMs still running: %s", strings.Join(names, ", "))
 	}
 	return nil
@@ -96,16 +95,6 @@ Requires root privileges for most operations. Run with: sudo mvm host <command>`
 	cmd.AddCommand(newHostInfoCmd(op))
 	cmd.AddCommand(newHostCleanCmd(op))
 	cmd.AddCommand(newHostResetCmd(op))
-
-	// Hidden help subcommand matching Python's hidden `help` command.
-	cmd.AddCommand(&cobra.Command{
-		Use:    "help",
-		Short:  "Show help for the host command group.",
-		Hidden: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Parent().Help()
-		},
-	})
 
 	return cmd
 }
@@ -139,24 +128,9 @@ Examples:
 				if v.Code == "privilege.sudo_required" {
 					common.Cli.Warning("Root privileges required for: mvm host init")
 					common.Cli.Info("Run with sudo: sudo mvm host init")
-					// Python: typer.confirm("Run 'sudo mvm host init' now?", default=False)
-					// Default is No (Enter = reject). Re-prompts on invalid input.
-					confirmed := false
-					for {
-						fmt.Fprintf(os.Stderr, "Run 'sudo mvm host init' now? [y/N]: ")
-						var response string
-						_, err := fmt.Scanln(&response)
-						if err != nil {
-							break
-						}
-						response = strings.TrimSpace(strings.ToLower(response))
-						if response == "y" || response == "yes" {
-							confirmed = true
-							break
-						} else if response == "n" || response == "no" || response == "" {
-							// Default (empty/Enter) = No
-							break
-						}
+					confirmed, pErr := common.Cli.PromptConfirm(cmd.Context(), "Run 'sudo mvm host init' now?", false)
+					if pErr != nil {
+						return pErr
 					}
 					if confirmed {
 						if sudoRestart, _ := infra.EnvGet("SUDO_RESTART"); sudoRestart != "" {
@@ -165,15 +139,22 @@ Examples:
 							return fmt.Errorf("recursive sudo restart")
 						}
 
-						envAssignments := []string{
-							infra.EnvKey("SUDO_RESTART") + "=1",
-							infra.EnvKey("ESCALATED") + "=1",
+						envAssignments := []string{}
+						for _, env := range os.Environ() {
+							if strings.HasPrefix(env, "MVM_") {
+								envAssignments = append(envAssignments, env)
+							}
 						}
-						for _, key := range []string{"MVM_CONFIG_DIR", "MVM_CACHE_DIR", "HOME", "PATH"} {
-							if val := os.Getenv(key); val != "" {
+						for _, key := range []string{"HOME", "PATH"} {
+							if val, ok := os.LookupEnv(key); ok {
 								envAssignments = append(envAssignments, key+"="+val)
 							}
 						}
+						// Restart/escaped markers go last so they override scanned env
+						envAssignments = append(envAssignments,
+							infra.EnvKey("SUDO_RESTART")+"=1",
+							infra.EnvKey("ESCALATED")+"=1",
+						)
 
 						sudoArgs := append([]string{"env"}, append(envAssignments, os.Args...)...)
 						result := system.RunCmdCompat(
@@ -186,14 +167,22 @@ Examples:
 						)
 						if !result.Success && result.Err != nil {
 							common.Cli.Error(fmt.Sprintf("sudo command failed: %s", result.Err.Error()))
+							if result.Stderr != "" {
+								common.Cli.Warning(result.Stderr)
+							}
+							return result.Err
 						}
+						if !result.Success {
+							return fmt.Errorf("sudo command failed with exit code %d", result.ExitCode)
+						}
+						common.Cli.Success("Host init completed successfully.")
 					}
 					return fmt.Errorf("needs sudo")
 				}
 
 				// Other NeedsInteraction (not sudo_required)
 				common.Cli.Error(v.Message)
-				if detailsCtx, ok := v.Context["details"].(map[string]interface{}); ok {
+				if detailsCtx, ok := v.Context["details"].(map[string]any); ok {
 					if detailMsg, ok := detailsCtx["message"].(string); ok && detailMsg != "" {
 						common.Cli.Warning(fmt.Sprintf("Details: %s", detailMsg))
 					}
@@ -208,8 +197,7 @@ Examples:
 
 			case *errs.OperationResult:
 				if v.IsError() {
-					common.Cli.Error(fmt.Sprintf("Host init failed: %s", v.Message))
-					return fmt.Errorf("%s", v.Message)
+					return fmt.Errorf("Host init failed: %s", v.Message)
 				}
 
 				if v.Status == "skipped" {
@@ -256,7 +244,6 @@ Examples:
 				// Python: if not isinstance(result, OperationResult):
 				//         mvm_cli.error(f"Unexpected result type: {type(result).__name__}")
 				//         raise typer.Exit(code=1)
-				common.Cli.Error(fmt.Sprintf("Unexpected result type: %T", v))
 				return fmt.Errorf("unexpected result type: %T", v)
 			}
 
@@ -274,119 +261,66 @@ func newHostStatusCmd(op *api.Operation) *cobra.Command {
 		Use:   "status",
 		Short: "Show current host configuration state vs expected",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			kvmOK := op.HostCheckKVMAccess()
-			missing := op.HostCheckRequiredBinaries()
-
-			ipFwd, err := op.HostGetIPForwardStatus(cmd.Context())
-			if err != nil {
-				ipFwd = "unknown"
-			}
-			fwdOK := ipFwd == "1"
-
-			state, _ := op.HostGetState(cmd.Context())
-
-			// Resource / virtualization checks
-			resources, _ := op.HostDetectResources(cmd.Context())
+			status := op.HostStatusCheck(cmd.Context())
 
 			if jsonOutput {
-				// Format state_snapshot timestamp matching Python's CommonUtils.human_readable_datetime
-				var timestamp interface{}
-				if state != nil && state.InitializedAt != "" {
-					timestamp = common.Cli.FormatTimestamp(state.InitializedAt, "full")
-				}
-
-				data := map[string]interface{}{
-					"kvm_accessible":    kvmOK,
-					"required_binaries": map[string]interface{}{"ok": len(missing) == 0, "missing": missing},
-					"ip_forward":        map[string]interface{}{"value": ipFwd, "ok": fwdOK},
-					"state_snapshot": map[string]interface{}{
-						"exists":    state != nil,
-						"timestamp": timestamp,
-					},
-				}
-				if resources != nil {
-					data["virtualization"] = map[string]interface{}{
-						"modules_loaded":    resources.ModulesLoaded,
-						"nested_virt":       resources.ModulesLoaded["kvm_intel"] || resources.ModulesLoaded["kvm_amd"],
-						"dev_net_tun":       resources.DevNetTUNAccessible,
-						"user_in_kvm_group": resources.UserInKVMGroup,
-					}
-				}
-				b, _ := json.MarshalIndent(data, "", "  ")
+				b, _ := json.MarshalIndent(status, "", "  ")
 				fmt.Println(string(b))
 				return nil
 			}
 
 			rows := make([][]string, 0)
 
-			kvmStatus := "ok"
-			kvmDetail := "accessible"
-			if !kvmOK {
-				kvmStatus = "FAIL"
-				kvmDetail = "not accessible"
+			kvmStatus, kvmDetail := "ok", "accessible"
+			if !status.KVMOK {
+				kvmStatus, kvmDetail = "FAIL", "not accessible"
 			}
 			rows = append(rows, []string{"/dev/kvm", kvmStatus, kvmDetail})
 
-			binStatus := "ok"
-			binDetail := "all found"
-			if len(missing) > 0 {
-				binStatus = "FAIL"
-				binDetail = fmt.Sprintf("missing: %s", strings.Join(missing, ", "))
+			binStatus, binDetail := "ok", "all found"
+			if len(status.MissingBinaries) > 0 {
+				binStatus, binDetail = "FAIL", fmt.Sprintf("missing: %s", strings.Join(status.MissingBinaries, ", "))
 			}
 			rows = append(rows, []string{"required binaries", binStatus, binDetail})
 
-			fwdStatus := "ok"
-			fwdDetail := fmt.Sprintf("value=%s", ipFwd)
-			if !fwdOK {
+			fwdStatus, fwdDetail := "ok", fmt.Sprintf("value=%s", status.IPForward)
+			if !status.IPForwardOK {
 				fwdStatus = "off"
 			}
 			rows = append(rows, []string{"ip_forward", fwdStatus, fwdDetail})
 
-			// Format state snapshot timestamp matching Python's CommonUtils.human_readable_datetime
-			stateStatus := "none"
-			stateDetail := "no snapshot"
-			if state != nil {
+			stateStatus, stateDetail := "none", "no snapshot"
+			if status.State != nil {
 				stateStatus = "saved"
-				if state.InitializedAt != "" {
-					stateDetail = common.Cli.FormatTimestamp(state.InitializedAt, "full")
-				} else {
-					stateDetail = "no snapshot"
+				if status.State.InitializedAt != "" {
+					stateDetail = common.Cli.FormatTimestamp(status.State.InitializedAt, "full")
 				}
 			}
 			rows = append(rows, []string{"state snapshot", stateStatus, stateDetail})
 
-			if resources != nil {
-				nestedOK := resources.ModulesLoaded["kvm_intel"] || resources.ModulesLoaded["kvm_amd"]
-				nestedStatus := "-"
-				nestedDetail := "not loaded"
+			if r := status.Resources; r != nil {
+				nestedOK := r.ModulesLoaded["kvm_intel"] || r.ModulesLoaded["kvm_amd"]
+				nestedStatus, nestedDetail := "-", "not loaded"
 				if nestedOK {
-					nestedStatus = "ok"
-					nestedDetail = "supported"
+					nestedStatus, nestedDetail = "ok", "supported"
 				}
 				rows = append(rows, []string{"nested virt", nestedStatus, nestedDetail})
 
-				kvmMod := resources.ModulesLoaded["kvm"]
-				kvmModStatus := "FAIL"
-				kvmModDetail := "not loaded"
-				if kvmMod {
-					kvmModStatus = "ok"
-					kvmModDetail = "loaded"
+				kvmModStatus, kvmModDetail := "FAIL", "not loaded"
+				if r.ModulesLoaded["kvm"] {
+					kvmModStatus, kvmModDetail = "ok", "loaded"
 				}
 				rows = append(rows, []string{"kvm module", kvmModStatus, kvmModDetail})
 
-				tunStatus := "FAIL"
-				tunDetail := "not accessible"
-				if resources.DevNetTUNAccessible {
-					tunStatus = "ok"
-					tunDetail = "accessible"
+				tunStatus, tunDetail := "FAIL", "not accessible"
+				if r.DevNetTUNAccessible {
+					tunStatus, tunDetail = "ok", "accessible"
 				}
 				rows = append(rows, []string{"/dev/net/tun", tunStatus, tunDetail})
 
-				userKVMStatus := "-"
-				userKVMDetail := "not member"
-				if resources.UserInKVMGroup {
-					userKVMStatus = "ok"
-					userKVMDetail = "member"
+				userKVMStatus, userKVMDetail := "-", "not member"
+				if r.UserInKVMGroup {
+					userKVMStatus, userKVMDetail = "ok", "member"
 				}
 				rows = append(rows, []string{"user in kvm group", userKVMStatus, userKVMDetail})
 			}
@@ -422,12 +356,10 @@ Use --refresh to re-detect hardware and limits before displaying.`,
 			}
 
 			if result.IsError() {
-				common.Cli.Error(result.Message)
 				return fmt.Errorf("%s", result.Message)
 			}
 
 			if result.Item == nil {
-				common.Cli.Error("No host info available.")
 				return fmt.Errorf("no host info available")
 			}
 
@@ -457,7 +389,7 @@ func newHostCleanCmd(op *api.Operation) *cobra.Command {
 
 Sysctl settings, sudoers, and the '%s' group will NOT be affected.`, infra.MVMUnixGroup),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := abortIfVMsRunning(cmd.Context(), op, "clean"); err != nil {
+			if err := abortIfVMsRunning(cmd.Context(), op); err != nil {
 				return err
 			}
 
@@ -472,19 +404,18 @@ Sysctl settings, sudoers, and the '%s' group will NOT be affected.`, infra.MVMUn
 					),
 				)
 				common.Cli.Info("")
-				if !confirmRePrompt("Proceed with host clean?") {
+				proceed, pErr := common.Cli.PromptConfirm(cmd.Context(), "Proceed with host clean?", false)
+				if pErr != nil {
+					return pErr
+				}
+				if !proceed {
 					common.Cli.Info("Aborted")
 					return nil
 				}
 			}
 
-			cacheDir, err := infra.GetCacheDir()
-			if err != nil {
-				return fmt.Errorf("cannot resolve cache directory: %w", err)
-			}
-			result := op.HostClean(cmd.Context(), cacheDir)
+			result := op.HostClean(cmd.Context())
 			if result.IsError() {
-				common.Cli.Error(result.Message)
 				return fmt.Errorf("%s", result.Message)
 			}
 
@@ -531,7 +462,7 @@ All running VMs must be stopped before running this command.
 Examples:
   sudo mvm host reset --force`, infra.CLIName, infra.MVMUnixGroup),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := abortIfVMsRunning(cmd.Context(), op, "reset"); err != nil {
+			if err := abortIfVMsRunning(cmd.Context(), op); err != nil {
 				return err
 			}
 
@@ -540,19 +471,18 @@ Examples:
 					"This will tear down all networking, revert sysctl changes, remove the sudoers drop-in, and remove the project group. This is a full rollback to pre-init state.",
 				)
 				common.Cli.Info("")
-				if !confirmRePrompt("Proceed with host reset?") {
+				proceed, pErr := common.Cli.PromptConfirm(cmd.Context(), "Proceed with host reset?", false)
+				if pErr != nil {
+					return pErr
+				}
+				if !proceed {
 					common.Cli.Info("Aborted")
 					return nil
 				}
 			}
 
-			cacheDir, err := infra.GetCacheDir()
-			if err != nil {
-				return fmt.Errorf("cannot resolve cache directory: %w", err)
-			}
-			result := op.HostReset(cmd.Context(), cacheDir)
+			result := op.HostReset(cmd.Context())
 			if result.IsError() {
-				common.Cli.Error(result.Message)
 				return fmt.Errorf("%s", result.Message)
 			}
 
@@ -580,28 +510,6 @@ Examples:
 }
 
 // printHostInfo pretty-prints host info data.
-func printHostInfo(item interface{}) {
+func printHostInfo(item any) {
 	common.Cli.PrintDictTree(common.Cli.ToMap(item), "Host Info")
-}
-
-// confirmRePrompt loops until the user enters y/n, matching Python's typer.confirm()
-// with no default argument (which uses click.Choice(["y", "n"]) and re-prompts on empty input).
-// Python's confirm prompt format: "Proceed with host clean? [y/N]: " (with colon+space).
-func confirmRePrompt(prompt string) bool {
-	for {
-		fmt.Fprintf(os.Stderr, "%s [y/N]: ", prompt)
-		var response string
-		_, err := fmt.Scanln(&response)
-		if err != nil {
-			return false
-		}
-		response = strings.TrimSpace(strings.ToLower(response))
-		if response == "y" || response == "yes" {
-			return true
-		}
-		if response == "n" || response == "no" {
-			return false
-		}
-		// Empty or invalid input → re-prompt (matching Python's behavior)
-	}
 }

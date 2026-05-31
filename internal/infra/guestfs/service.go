@@ -223,7 +223,7 @@ func (gs *GuestfsService) findAbandonedGuestfsProcesses(uid int) []int {
 		if err != nil {
 			continue
 		}
-		procUid := parseProcStatusField(string(statusData), "Uid:")
+		procUid := system.ParseProcStatusField(string(statusData), "Uid:")
 		if procUid != uid {
 			continue
 		}
@@ -240,11 +240,11 @@ func (gs *GuestfsService) findAbandonedGuestfsProcesses(uid int) []int {
 		// or guestfish processes left behind
 		if strings.Contains(cmdline, ".guestfs-") &&
 			(strings.Contains(cmdline, "appliance.d") || strings.Contains(cmdline, "guestfsd.sock")) {
-			if !gs.hasPythonAncestor(pid) {
+			if !system.HasAncestorWithCmdline(pid, "mvm") {
 				abandoned = append(abandoned, pid)
 			}
 		} else if strings.Contains(strings.ToLower(cmdline), "guestfish") {
-			if !gs.hasPythonAncestor(pid) {
+			if !system.HasAncestorWithCmdline(pid, "mvm") {
 				abandoned = append(abandoned, pid)
 			}
 		}
@@ -253,53 +253,7 @@ func (gs *GuestfsService) findAbandonedGuestfsProcesses(uid int) []int {
 	return abandoned
 }
 
-// hasPythonAncestor walks the PPID chain for pid upward through /proc.
-// Returns true if any ancestor process has "python" or "mvm" in its command
-// line (case-insensitive), matching Python's has_python_ancestor exactly
-// which checks: "python" in cmdline or "mvm" in cmdline.
-func (gs *GuestfsService) hasPythonAncestor(pid int) bool {
-	visited := make(map[int]bool)
-	current := pid
-
-	for current > 1 && !visited[current] {
-		visited[current] = true
-
-		cmdlinePath := filepath.Join("/proc", strconv.Itoa(current), "cmdline")
-		cmdlineData, err := os.ReadFile(cmdlinePath)
-		if err != nil {
-			break
-		}
-		cmdline := strings.ToLower(string(cmdlineData))
-		if strings.Contains(cmdline, "python") || strings.Contains(cmdline, "mvm") {
-			return true
-		}
-
-		// Read PPid from status
-		statusPath := filepath.Join("/proc", strconv.Itoa(current), "status")
-		statusData, err := os.ReadFile(statusPath)
-		if err != nil {
-			break
-		}
-		ppid := parseProcStatusField(string(statusData), "PPid:")
-		if ppid <= 0 {
-			break
-		}
-		current = ppid
-	}
-
-	return false
-}
-
 // PruneAppliance removes the libguestfs appliance folder and stale system state.
-//
-// Args:
-//
-//	cacheDir: The mvmctl cache directory path.
-//	dryRun: If true, only report what would be removed.
-//
-// Returns:
-//
-//	True if appliance folder or stale state was removed.
 func (gs *GuestfsService) PruneAppliance(cacheDir string, dryRun bool) bool {
 	applianceDir := filepath.Join(cacheDir, "appliance")
 	removed := false
@@ -320,23 +274,4 @@ func (gs *GuestfsService) PruneAppliance(cacheDir string, dryRun bool) bool {
 	}
 
 	return removed
-}
-
-// ── Parsing helpers ─────────────────────────────────────────────────────────
-
-// parseProcStatusField parses a field from /proc/[pid]/status format.
-func parseProcStatusField(data, field string) int {
-	for _, line := range strings.Split(data, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, field) {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				val, err := strconv.Atoi(parts[1])
-				if err == nil {
-					return val
-				}
-			}
-		}
-	}
-	return -1
 }

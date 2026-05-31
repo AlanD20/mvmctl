@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os/exec"
 
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api/inputs"
@@ -233,9 +232,9 @@ func (op *Operation) initStepCache(ctx context.Context, onProgress func(errs.Pro
 		return InitStepResult{Step: "cache", Success: false, Message: result.Message}
 	}
 	// Python: checks cache_dict.get("guestfs_appliance")
-	cacheDict := map[string]interface{}{}
+	cacheDict := map[string]any{}
 	if result.Item != nil {
-		if m, ok := result.Item.(map[string]interface{}); ok {
+		if m, ok := result.Item.(map[string]any); ok {
 			cacheDict = m
 		}
 	}
@@ -255,13 +254,11 @@ func (op *Operation) initStepBinary(
 	nonInteractive bool,
 	downloadVersion string,
 ) (InitStepResult, *errs.NeedsInteraction) {
-	// Python: local = cast(list[BinaryItem], BinaryOperation.list_all())
 	local, _, err := op.BinaryList(ctx, false, nil)
 	if err != nil {
 		return InitStepResult{Step: "binary", Success: false, Message: "Failed to list binaries"}, nil
 	}
 
-	// Python: fc_binaries = [b for b in local if b.name in ("firecracker", "jailer")]
 	fcBinaries := make([]*model.BinaryItem, 0)
 	for _, b := range local {
 		if b.Name == "firecracker" || b.Name == "jailer" {
@@ -270,7 +267,6 @@ func (op *Operation) initStepBinary(
 	}
 
 	if len(fcBinaries) > 0 {
-		// Python: active = [v for v in fc_binaries if v.is_default]
 		active := make([]*model.BinaryItem, 0)
 		for _, v := range fcBinaries {
 			if v.IsDefault {
@@ -424,7 +420,7 @@ func (op *Operation) initBinaryNeedsInteraction(ctx context.Context) (InitStepRe
 				Code:      "binary.confirm_download",
 				Message:   "No remote versions available",
 				InputType: "confirm",
-				Context:   map[string]interface{}{},
+				Context:   map[string]any{},
 			}
 	}
 
@@ -433,7 +429,7 @@ func (op *Operation) initBinaryNeedsInteraction(ctx context.Context) (InitStepRe
 			Code:      "binary.confirm_download",
 			Message:   "No Firecracker binary found in cache",
 			InputType: "confirm",
-			Context: map[string]interface{}{
+			Context: map[string]any{
 				"latest_version":     versions[0],
 				"available_versions": versions,
 			},
@@ -482,9 +478,6 @@ func (op *Operation) initStepGuestfs(
 			Code:      "guestfs.confirm_enable",
 			Message:   "libguestfs is available. Enable it as a fallback?",
 			InputType: "confirm",
-			Context:   map[string]interface{}{},
+			Context:   map[string]any{},
 		}
 }
-
-// Compile-time check
-var _ = infra.SHA256Hash

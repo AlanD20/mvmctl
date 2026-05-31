@@ -42,8 +42,6 @@ func NewKeyCmd(op *api.Operation) *cobra.Command {
 	cmd.AddCommand(newKeyExportCmd(op))
 	cmd.AddCommand(newKeyDefaultCmd(op))
 
-
-
 	return cmd
 }
 

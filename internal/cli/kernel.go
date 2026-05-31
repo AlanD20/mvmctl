@@ -46,8 +46,6 @@ func NewKernelCmd(op *api.Operation) *cobra.Command {
 	cmd.AddCommand(newKernelDefaultCmd(op))
 	cmd.AddCommand(newKernelImportCmd(op))
 
-
-
 	return cmd
 }
 

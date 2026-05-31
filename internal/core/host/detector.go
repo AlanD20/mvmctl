@@ -296,14 +296,22 @@ func DetectLimits() *model.HostLimits {
 	}
 
 	// Nested virtualization
+	// Kernel exposes "Y" or "1" for enabled; ReadInt can't parse "Y".
 	nestedVirtAvailable := false
 	for _, nestedPath := range []string{
 		"/sys/module/kvm_intel/parameters/nested",
 		"/sys/module/kvm_amd/parameters/nested",
 	} {
-		val := infra.ReadInt(nestedPath, -1)
-		if val == 1 {
+		data, err := os.ReadFile(nestedPath)
+		if err != nil {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(string(data))) {
+		case "y", "1":
 			nestedVirtAvailable = true
+			break
+		}
+		if nestedVirtAvailable {
 			break
 		}
 	}

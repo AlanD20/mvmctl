@@ -2,19 +2,17 @@
 package cli
 
 import (
-	"bufio"
 	"context"
+	"errors"
 	"fmt"
-	"os"
-	"os/exec"
-	"os/user"
 	"strings"
 
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/ptr"
-	"mvmctl/internal/infra/system"
 	"mvmctl/pkg/api"
+	"mvmctl/pkg/api/responses"
 
 	"github.com/spf13/cobra"
 )
@@ -36,8 +34,6 @@ func NewInitCmd(op *api.Operation) *cobra.Command {
 	cmd.Flags().BoolVar(&skipHost, "skip-host", false, "Skip host init step")
 	cmd.Flags().BoolVar(&skipNetwork, "skip-network", false, "Skip default network creation")
 
-
-
 	return cmd
 }
 
@@ -58,13 +54,12 @@ func runInitWizard(ctx context.Context, op *api.Operation, nonInteractive, skipH
 
 	// Match Python init_run step display (after _handle_interactive_flow returns)
 	stepLabels := map[string]string{
-		"local_state":      "Local State",
-		"service_binaries": "Service Binaries",
-		"host":             fmt.Sprintf("sudoers / %s group", infra.MVMUnixGroup),
-		"network_setup":    "Network Setup (Sync + Default)",
-		"guestfs":          "libguestfs",
-		"cache":            "Cache Directories",
-		"binary":           "Firecracker Binary",
+		"local_state":   "Local State",
+		"host":          fmt.Sprintf("sudoers / %s group", infra.MVMUnixGroup),
+		"network_setup": "Network Setup (Sync + Default)",
+		"guestfs":       "libguestfs",
+		"cache":         "Cache Directories",
+		"binary":        "Firecracker Binary",
 	}
 
 	common.Cli.Info("")
@@ -105,305 +100,221 @@ func runInitWizard(ctx context.Context, op *api.Operation, nonInteractive, skipH
 	return nil
 }
 
+// initState holds mutable state for the init wizard interaction loop.
+type initState struct {
+	op             *api.Operation
+	nonInteractive bool
+	skipHost       bool
+	skipNetwork    bool
+
+	// Mutable state updated by interaction handlers
+	sudoCompleted   bool
+	downloadVersion string
+	hostSetupMsg    string
+	guestfsEnabled  *bool
+}
+
+// runInit calls InitRunFull with current state.
+func (s *initState) runInit(ctx context.Context) *api.InitResult {
+	return s.op.InitRunFull(
+		ctx,
+		s.skipHost,
+		s.skipNetwork,
+		s.nonInteractive,
+		s.sudoCompleted,
+		s.hostSetupMsg,
+		s.downloadVersion,
+		s.guestfsEnabled,
+		nil,
+	)
+}
+
+// dispatch routes each interaction code to its handler.
+// Returns an error when the loop should abort (unhandled code, user decline).
+// Returns nil to continue the loop.
+func (s *initState) dispatch(ctx context.Context, interaction *errs.NeedsInteraction) error {
+	switch interaction.Code {
+	case "privilege.sudo_required":
+		return s.handleSudoRequired(ctx, interaction)
+	case "binary.confirm_download":
+		return s.handleBinaryDownload(ctx, interaction)
+	case "guestfs.confirm_enable":
+		return s.handleGuestfs(ctx)
+	default:
+		return fmt.Errorf("unhandled interaction: %s", interaction.Code)
+	}
+}
+
+// handleSudoRequired manages sudo escalation: pre-flight probes, prompts,
+// running sudo host init, and updating loop state.
+func (s *initState) handleSudoRequired(ctx context.Context, interaction *errs.NeedsInteraction) error {
+	// Run pre-flight probes before prompting for sudo
+	probeResult := s.op.InitCheckReadiness(ctx)
+	if len(probeResult.Critical) > 0 {
+		common.Cli.Warning("Pre-flight checks found issues:")
+		for _, c := range probeResult.Critical {
+			common.Cli.Warning(fmt.Sprintf("  %s: %s", c.Name, c.Message))
+		}
+		confirmed, pErr := common.Cli.PromptConfirm(ctx, "Continue with host init? Some features may not work.", false)
+		if pErr != nil {
+			return pErr
+		}
+		if !confirmed {
+			common.Cli.Info("Aborted")
+			return fmt.Errorf("aborted by user")
+		}
+	}
+	if len(probeResult.Warnings) > 0 {
+		for _, w := range probeResult.Warnings {
+			common.Cli.Info(fmt.Sprintf("  %s: %s", w.Name, w.Message))
+		}
+	}
+
+	hostStateBefore := s.op.HostStatusCheck(ctx)
+
+	sessionHasGroup, _ := interaction.Context["session_has_group"].(bool)
+
+	// Group exists, user is member, but session doesn't have it active
+	if hostStateBefore.GroupExists && hostStateBefore.UserInGroup && !sessionHasGroup {
+		common.Cli.Warning(fmt.Sprintf(
+			"mvm group — session not active (log out and back in, or run: newgrp %s)",
+			infra.MVMUnixGroup,
+		))
+		s.skipHost = true
+		return nil
+	}
+
+	if hostStateBefore.GroupExists {
+		common.Cli.Warning("sudoers file is missing")
+		common.Cli.Info(fmt.Sprintf("run:  sudo %s host init", infra.CLIName))
+	} else {
+		common.Cli.Warning("this requires sudo once")
+		common.Cli.Info(fmt.Sprintf(
+			"creates the %s group and sudoers drop-in for passwordless sudo on future runs",
+			infra.MVMUnixGroup,
+		))
+	}
+
+	if s.nonInteractive {
+		// Default: skip host setup in non-interactive mode
+		s.skipHost = true
+		return nil
+	}
+
+	runInit, pErr := common.Cli.PromptConfirm(ctx, fmt.Sprintf("Run 'sudo %s host init' now?", infra.CLIName), true)
+	if pErr != nil {
+		return pErr
+	}
+	if !runInit {
+		common.Cli.Info(fmt.Sprintf("skipped. Run 'sudo %s host init' manually when ready.", infra.CLIName))
+		return fmt.Errorf("skipped by user")
+	}
+
+	proc := common.RunWithSudo(ctx, []string{"host", "init"}, infra.EnvKey("ESCALATED")+"=1")
+	if !proc.Success {
+		common.Cli.Warning(fmt.Sprintf("host init failed. Run 'sudo %s host init' manually.", infra.CLIName))
+		return fmt.Errorf("sudo host init failed")
+	}
+
+	hostStateAfter := s.op.HostStatusCheck(ctx)
+	s.hostSetupMsg = composeHostSetupMessage(hostStateBefore, hostStateAfter)
+	s.sudoCompleted = true
+	s.downloadVersion = ""
+	return nil
+}
+
+// handleBinaryDownload manages the binary download confirmation prompt.
+func (s *initState) handleBinaryDownload(ctx context.Context, interaction *errs.NeedsInteraction) error {
+	latest, _ := interaction.Context["latest_version"].(string)
+	if latest == "" {
+		common.Cli.Warning("no Firecracker binary found and no remote versions available.")
+		return fmt.Errorf("no binary available")
+	}
+
+	common.Cli.Info(fmt.Sprintf("latest available: v%s", latest))
+	if !s.nonInteractive {
+		confirmed, pErr := common.Cli.PromptConfirm(ctx, fmt.Sprintf("Download v%s?", latest), true)
+		if pErr != nil {
+			return pErr
+		}
+		if !confirmed {
+			common.Cli.Info(fmt.Sprintf("skipped. Run '%s bin pull <version>' manually.", infra.CLIName))
+			return fmt.Errorf("skipped by user")
+		}
+	}
+	common.Cli.Info("")
+	common.Cli.Info(fmt.Sprintf("downloading Firecracker v%s ...", latest))
+	s.downloadVersion = latest
+	return nil
+}
+
+// handleGuestfs manages the libguestfs enable prompt.
+func (s *initState) handleGuestfs(ctx context.Context) error {
+	if s.nonInteractive {
+		s.guestfsEnabled = ptr.Bool(false)
+		return nil
+	}
+	enabled, pErr := common.Cli.PromptConfirm(ctx, "Enable libguestfs as a provisioning fallback?", false)
+	if pErr != nil {
+		return pErr
+	}
+	s.guestfsEnabled = &enabled
+	return nil
+}
+
 // handleInteractiveFlow drives the init wizard with interaction handling.
-// Matches Python's _handle_interactive_flow() — always returns the last
-// InitResult (never nil), even when the loop breaks early.
+// Always returns the last InitResult (never nil), even when the loop breaks early.
+// Matches Python's _handle_interactive_flow() — returns (nil, err) only on
+// system failures (context cancellation); user-initiated breaks return
+// (lastResult, nil) so runInitWizard can display step progress.
 func handleInteractiveFlow(
 	ctx context.Context,
 	op *api.Operation,
 	nonInteractive, skipHost, skipNetwork bool,
 ) (*api.InitResult, error) {
-	sudoCompleted := false
-	var downloadVersion string
-	hostSetupMessage := ""
-	var guestfsEnabled *bool
+	state := &initState{
+		op:             op,
+		nonInteractive: nonInteractive,
+		skipHost:       skipHost,
+		skipNetwork:    skipNetwork,
+	}
 
-	// Declare result at function scope so it's always returned,
-	// matching Python: result: InitResult at the top of the function.
-	var result *api.InitResult
+	// Always return the last result even on early exit,
+	// matching Python's "result: InitResult" at function scope.
+	var lastResult *api.InitResult
 
 	for {
-		// Call InitOperation.Run with current state
-		// Python: result = InitOperation.run(...)
-		result = op.InitRunFull(
-			ctx,
-			skipHost,
-			skipNetwork,
-			nonInteractive,
-			sudoCompleted,
-			hostSetupMessage,
-			downloadVersion,
-			guestfsEnabled,
-			nil,
-		)
+		result := state.runInit(ctx)
+		lastResult = result
 
 		if result.NeedsInteraction == nil {
 			return result, nil
 		}
 
-		interaction := result.NeedsInteraction
-
-		// ── Handle sudo escalation ─────────────────────────────────────
-		// Python: interaction.code == "privilege.sudo_required"
-		if interaction.Code == "privilege.sudo_required" {
-			// Run pre-flight probes before prompting for sudo
-			// Python: from mvmctl.api.host_operations import HostOperation
-			//         probe_result = HostOperation.check_readiness()
-			probeResult := op.InitCheckReadiness(ctx)
-			if len(probeResult.Critical) > 0 {
-				common.Cli.Warning("Pre-flight checks found issues:")
-				for _, c := range probeResult.Critical {
-					common.Cli.Warning(fmt.Sprintf("  %s: %s", c.Name, c.Message))
-				}
-				// Python: if not typer.confirm(...): mvm_cli.info("Aborted"); raise typer.Exit(code=1)
-				confirmed, pErr := promptYesNo(ctx, "Continue with host init? Some features may not work.", false)
-				if pErr != nil {
-					return nil, pErr
-				}
-				if !confirmed {
-					common.Cli.Info("Aborted")
-					break
-				}
+		if err := state.dispatch(ctx, result.NeedsInteraction); err != nil {
+			// Propagate cancellation/real errors; user-aborts return lastResult.
+			if errors.Is(err, context.Canceled) {
+				return nil, err
 			}
-			if len(probeResult.Warnings) > 0 {
-				for _, w := range probeResult.Warnings {
-					common.Cli.Info(fmt.Sprintf("  %s: %s", w.Name, w.Message))
-				}
-			}
-
-			hostStateBefore := checkHostState()
-
-			// Python: session_has_group = interaction.context.get("session_has_group", False)
-			sessionHasGroup, _ := interaction.Context["session_has_group"].(bool)
-
-			// Python: if group_exists and user_in_group and not session_has_group:
-			//     show message about logout/newgrp, skip_host = True, continue
-			if hostStateBefore["group_exists"] && hostStateBefore["user_in_group"] && !sessionHasGroup {
-				common.Cli.Warning(fmt.Sprintf(
-					"mvm group — session not active (log out and back in, or run: newgrp %s)",
-					infra.MVMUnixGroup,
-				))
-				skipHost = true
-				continue
-			}
-
-			if hostStateBefore["group_exists"] {
-				common.Cli.Warning("sudoers file is missing")
-				common.Cli.Info(fmt.Sprintf("run:  sudo %s host init", infra.CLIName))
-			} else {
-				common.Cli.Warning("this requires sudo once")
-				common.Cli.Info(
-					fmt.Sprintf(
-						"creates the %s group and sudoers drop-in for passwordless sudo on future runs",
-						infra.MVMUnixGroup,
-					),
-				)
-			}
-
-			if nonInteractive {
-				common.Cli.Info(fmt.Sprintf("Run 'sudo %s host init' manually.", infra.CLIName))
-				break
-			}
-
-			runInit, pErr := promptYesNo(ctx, fmt.Sprintf("Run 'sudo %s host init' now?", infra.CLIName), true)
-			if pErr != nil {
-				return nil, pErr
-			}
-			if runInit {
-				proc := runWithSudo(ctx)
-				if !proc.Success {
-					common.Cli.Warning(
-						fmt.Sprintf("host init failed. Run 'sudo %s host init' manually.", infra.CLIName),
-					)
-					break
-				}
-				hostStateAfter := checkHostState()
-				hostSetupMessage = composeHostSetupMessage(hostStateBefore, hostStateAfter)
-				sudoCompleted = true
-				downloadVersion = ""
-				continue
-			} else {
-				common.Cli.Info(fmt.Sprintf("skipped. Run 'sudo %s host init' manually when ready.", infra.CLIName))
-				break
-			}
-		}
-
-		// ── Handle binary download confirmation ────────────────────────
-		// Python: interaction.code == "binary.confirm_download"
-		if interaction.Code == "binary.confirm_download" {
-			latest, _ := interaction.Context["latest_version"].(string)
-			if latest == "" {
-				common.Cli.Warning("no Firecracker binary found and no remote versions available.")
-				break
-			}
-
-			common.Cli.Info(fmt.Sprintf("latest available: v%s", latest))
-			if !nonInteractive {
-				downloadConfirmed, pErr := promptYesNo(ctx, fmt.Sprintf("Download v%s?", latest), true)
-				if pErr != nil {
-					return nil, pErr
-				}
-				if !downloadConfirmed {
-					common.Cli.Info(fmt.Sprintf("skipped. Run '%s bin pull <version>' manually.", infra.CLIName))
-					break
-				}
-			}
-			common.Cli.Info("")
-			common.Cli.Info(fmt.Sprintf("downloading Firecracker v%s ...", latest))
-			downloadVersion = latest
-			continue
-		}
-
-		// ── Handle guestfs enable prompt ──────────────────────────────
-		// Python: interaction.code == "guestfs.confirm_enable"
-		if interaction.Code == "guestfs.confirm_enable" {
-			if nonInteractive {
-				guestfsEnabled = ptr.Bool(false)
-			} else {
-				enabled, pErr := promptYesNo(ctx, "Enable libguestfs as a provisioning fallback?", false)
-				if pErr != nil {
-					return nil, pErr
-				}
-				guestfsEnabled = &enabled
-			}
-			continue
-		}
-
-		common.Cli.Warning(fmt.Sprintf("unhandled interaction: %s", interaction.Code))
-		break
-	}
-
-	// Python always returns the last result object, even when breaking early.
-	// This ensures runInitWizard can display steps even on cancelled init.
-	return result, nil
-}
-
-// sudoResult carries the outcome of a sudo subprocess.
-type sudoResult struct {
-	Success    bool
-	ReturnCode int
-}
-
-// runWithSudo spawns "sudo host init" with elevated privileges.
-// Matches Python: shutil.which(CLI_NAME) or sys.argv[0]
-func runWithSudo(ctx context.Context) sudoResult {
-	mvmBin, err := exec.LookPath(infra.CLIName)
-	if err != nil {
-		mvmBin, err = os.Executable()
-		if err != nil {
-			mvmBin = infra.CLIName
+			return lastResult, nil
 		}
 	}
-
-	// Build env var assignments — passed via the 'env' utility to sudo
-	envAssignments := []string{infra.EnvKey("ESCALATED") + "=1"}
-	for _, key := range []string{"MVM_CONFIG_DIR", "MVM_CACHE_DIR", "HOME", "PATH"} {
-		if val := os.Getenv(key); val != "" {
-			envAssignments = append(envAssignments, fmt.Sprintf("%s=%s", key, val))
-		}
-	}
-
-	common.Cli.Info("")
-	common.Cli.Info("Running host init with sudo...")
-
-	// Use system.RunCmdCompat with the env utility to properly pass environment
-	// variables through sudo's env_reset.
-	runArgs := append([]string{"env"}, append(envAssignments, mvmBin, "host", "init")...)
-	result := system.RunCmdCompat(ctx, runArgs, system.RunCmdOptions{
-		Capture:    false,
-		Check:      false,
-		Privileged: true,
-	})
-	if !result.Success {
-		return sudoResult{Success: false, ReturnCode: result.ExitCode}
-	}
-	return sudoResult{Success: true, ReturnCode: 0}
-}
-
-// checkHostState checks current host setup state, matching Python's
-// _check_host_state() which uses grp.getgrnam() + g.gr_mem.
-// Uses os/user.LookupGroup for group existence (NSS-compatible), and
-// parses /etc/group for member list (matching Python's gr_mem behavior).
-func checkHostState() map[string]bool {
-	state := map[string]bool{
-		"group_exists":   false,
-		"sudoers_exists": false,
-		"user_in_group":  false,
-	}
-
-	// Get current username (matching Python: pwd.getpwuid(os.getuid()).pw_name)
-	currentUser, err := user.Current()
-	if err != nil {
-		return state
-	}
-	username := currentUser.Username
-
-	// Check group existence using os/user.LookupGroup (NSS-compatible, like Python's grp.getgrnam)
-	grpInfo, err := user.LookupGroup(infra.MVMUnixGroup)
-	if err == nil {
-		state["group_exists"] = true
-
-		// Check membership: parse /etc/group for the member list (gr_mem),
-		// matching Python's username in g.gr_mem.
-		// Also check primary group GID.
-		if currentUser.Gid == grpInfo.Gid {
-			state["user_in_group"] = true
-		} else {
-			// Parse /etc/group for membership list
-			f, openErr := os.Open("/etc/group")
-			if openErr == nil {
-				defer f.Close()
-				scanner := bufio.NewScanner(f)
-				for scanner.Scan() {
-					line := scanner.Text()
-					fields := strings.Split(line, ":")
-					if len(fields) >= 4 && fields[0] == infra.MVMUnixGroup {
-						// fields[3] is the comma-separated member list (gr_mem)
-						if fields[3] != "" {
-							members := strings.Split(fields[3], ",")
-							for _, member := range members {
-								if strings.TrimSpace(member) == username {
-									state["user_in_group"] = true
-									break
-								}
-							}
-						}
-						break
-					}
-				}
-			}
-		}
-	}
-
-	// Check sudoers file (matching Python's Path(SUDOERS_DROP_IN_PATH).exists())
-	sudoersPath := fmt.Sprintf("/etc/sudoers.d/%s", infra.MVMUnixGroup)
-	if _, statErr := os.Stat(sudoersPath); statErr == nil {
-		state["sudoers_exists"] = true
-	}
-
-	return state
 }
 
 // composeHostSetupMessage composes a human-readable message about what changed.
-func composeHostSetupMessage(before, after map[string]bool) string {
+func composeHostSetupMessage(before, after *responses.HostStatusCheck) string {
 	var parts []string
-	if !before["group_exists"] && after["group_exists"] {
+	if !before.GroupExists && after.GroupExists {
 		parts = append(parts, "group created")
 	}
-	if !before["sudoers_exists"] && after["sudoers_exists"] {
+	if !before.SudoersExists && after.SudoersExists {
 		parts = append(parts, "sudoers configured")
 	}
-	if !before["user_in_group"] && after["user_in_group"] {
+	if !before.UserInGroup && after.UserInGroup {
 		parts = append(parts, "user added to group")
 	}
 	if len(parts) > 0 {
 		return "Host " + strings.Join(parts, ", ")
 	}
 	return "Host already configured"
-}
-
-// promptYesNo asks a yes/no question and returns true for yes.
-// Delegates to promptConfirm (canonical implementation in cache.go).
-func promptYesNo(ctx context.Context, prompt string, defaultYes bool) (bool, error) {
-	return common.Cli.PromptConfirm(ctx, prompt, defaultYes)
 }

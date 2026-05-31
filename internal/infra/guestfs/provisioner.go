@@ -211,16 +211,43 @@ func (p *GuestfsProvisioner) ConvertTo(ctx context.Context, targetFs string) err
 		return fmt.Errorf("truncate output: %s: %w", result.Stdout, result.Err)
 	}
 
+	// Detect root device: run list-filesystems in a separate guestfish session.
+	// Python: g.list_filesystems() → tries /dev/sda, /dev/sda1, /dev/vda, /dev/vda1
+	fsOut, fsErr := guestfishRun(
+		ctx,
+		guestfishRunOpts{diskPath: p.rootfsPath, readonly: true, args: []string{"list-filesystems"}},
+	)
+	rootDev := "/dev/sda" // fallback
+	if fsErr == nil {
+		fsLines := strings.Split(fsOut, "\n")
+		fsSet := make(map[string]bool)
+		for _, line := range fsLines {
+			if parts := strings.Fields(line); len(parts) >= 1 {
+				fsSet[parts[0]] = true
+			}
+		}
+		for _, candidate := range []string{"/dev/sda", "/dev/sda1", "/dev/vda", "/dev/vda1"} {
+			if fsSet[candidate] {
+				rootDev = candidate
+				break
+			}
+		}
+		// Fallback: first filesystem if no candidate matched
+		if rootDev == "/dev/sda" && !fsSet["/dev/sda"] {
+			for dev := range fsSet {
+				rootDev = dev
+				break
+			}
+		}
+	}
+
 	// Build a guestfish script for dual-drive operation
 	var scriptLines []string
 	scriptLines = append(scriptLines,
 		fmt.Sprintf("add-drive-opts %s format:raw readonly:true", p.rootfsPath),
 		fmt.Sprintf("add-drive-opts %s format:raw readonly:false", outputPath),
 		"run",
-	)
-	// Try mounting source, then create and populate target
-	scriptLines = append(scriptLines,
-		"mount /dev/sda /",
+		fmt.Sprintf("mount %s /", rootDev),
 		"mkdir-p /ext4",
 		fmt.Sprintf("mkfs %s /dev/sdb", targetFs),
 		"mount /dev/sdb /ext4",
@@ -473,7 +500,14 @@ func (p *GuestfsProvisioner) Run(ctx context.Context) error {
 	if hasShrink && p.shrinkResult <= 0 {
 		rootDevice, err := p.detectRootDevice(ctx)
 		if err == nil {
-			result, err := guestfishRaw(ctx, p.rootfsPath, true, "blockdev-getsize64", rootDevice)
+			result, err := guestfishRun(
+				ctx,
+				guestfishRunOpts{
+					diskPath: p.rootfsPath,
+					readonly: true,
+					args:     []string{"blockdev-getsize64", rootDevice},
+				},
+			)
 			if err == nil {
 				if val, parseErr := strconv.ParseInt(strings.TrimSpace(result), 10, 64); parseErr == nil {
 					p.shrinkResult = val
@@ -510,7 +544,10 @@ func (p *GuestfsProvisioner) doTruncateFile(path string, targetSize int64) {
 // and iterating through known candidates (matching Python's iteration over
 // ["/dev/sda", "/dev/vda", "/dev/sda1", "/dev/vda1"]).
 func (p *GuestfsProvisioner) detectRootDevice(ctx context.Context) (string, error) {
-	out, err := guestfishRaw(ctx, p.rootfsPath, true, "list-filesystems")
+	out, err := guestfishRun(
+		ctx,
+		guestfishRunOpts{diskPath: p.rootfsPath, readonly: true, args: []string{"list-filesystems"}},
+	)
 	if err != nil {
 		return "", &GuestfsError{msg: fmt.Sprintf("Failed to list filesystems for root device detection: %v", err)}
 	}
@@ -561,9 +598,14 @@ func (p *GuestfsProvisioner) buildFilesystemResize(ctx context.Context) ([]strin
 	}
 
 	// Detect filesystem type (Python: fs_type = handle.vfs_type(root_device))
-	fsTypeOut, fsErr := guestfishInspect(ctx, p.rootfsPath, true,
-		"vfs-type", rootDevice)
-	fsType := strings.TrimSpace(fsTypeOut)
+	out, fsErr := guestfishRunOpts{
+		diskPath: p.rootfsPath,
+		readonly: true,
+		args:     []string{"-i", "vfs-type", rootDevice},
+	}.run(
+		ctx,
+	)
+	fsType := strings.TrimSpace(out)
 	if fsErr != nil || fsType == "" {
 		return nil, fmt.Errorf("filesystem resize: unable to detect fs type for %s", rootDevice)
 	}
@@ -622,8 +664,13 @@ func (p *GuestfsProvisioner) buildSetHostname(ctx context.Context) []string {
 
 	// Read existing /etc/hosts (Python reads via handle.exists/handle.read_file)
 	existingHosts := ""
-	out, err := guestfishInspect(ctx, p.rootfsPath, true,
-		"read-file", "/etc/hosts")
+	out, err := guestfishRunOpts{
+		diskPath: p.rootfsPath,
+		readonly: true,
+		args:     []string{"-i", "read-file", "/etc/hosts"},
+	}.run(
+		ctx,
+	)
 	if err == nil {
 		existingHosts = out
 	}
@@ -666,8 +713,13 @@ func (p *GuestfsProvisioner) buildInjectDNS(ctx context.Context) []string {
 		return nil
 	}
 	// Pre-read existing resolv.conf — if it has a nameserver entry, skip entirely
-	out, err := guestfishInspect(ctx, p.rootfsPath, true,
-		"read-file", "/etc/resolv.conf")
+	out, err := guestfishRunOpts{
+		diskPath: p.rootfsPath,
+		readonly: true,
+		args:     []string{"-i", "read-file", "/etc/resolv.conf"},
+	}.run(
+		ctx,
+	)
 	if err == nil {
 		existing := strings.TrimSpace(out)
 		if existing != "" && strings.Contains(strings.ToLower(existing), "nameserver") {
@@ -685,8 +737,10 @@ func (p *GuestfsProvisioner) buildInjectDNS(ctx context.Context) []string {
 	//   - Otherwise → just write (file doesn't exist, or is a real file)
 	isDangling := false
 	if err != nil {
-		out2, err2 := guestfishRaw(ctx, p.rootfsPath, true,
-			"exists", "/etc/resolv.conf")
+		out2, err2 := guestfishRun(
+			ctx,
+			guestfishRunOpts{diskPath: p.rootfsPath, readonly: true, args: []string{"exists", "/etc/resolv.conf"}},
+		)
 		if err2 == nil && strings.TrimSpace(out2) == "true" {
 			isDangling = true
 		}
@@ -718,15 +772,17 @@ func (p *GuestfsProvisioner) preReadSetupSSHFiles(ctx context.Context) {
 	}
 	authKeysPath := fmt.Sprintf("%s/.ssh/authorized_keys", sshHomeDir)
 
-	raw, err := guestfishRaw(ctx, p.rootfsPath, true,
-		"read-file", "/etc/passwd",
-		":", "echo", "---PASSWD_END---",
-		":", "read-file", "/etc/shadow",
-		":", "echo", "---SHADOW_END---",
-		":", "read-file", "/etc/group",
-		":", "echo", "---GROUP_END---",
-		":", "read-file", authKeysPath,
-		":", "echo", "---AUTHKEYS_END---",
+	raw, err := guestfishRun(
+		ctx,
+		guestfishRunOpts{diskPath: p.rootfsPath, readonly: true, args: []string{"read-file", "/etc/passwd",
+			":", "echo", "---PASSWD_END---",
+			":", "read-file", "/etc/shadow",
+			":", "echo", "---SHADOW_END---",
+			":", "read-file", "/etc/group",
+			":", "echo", "---GROUP_END---",
+			":", "read-file", authKeysPath,
+			":", "echo", "---AUTHKEYS_END---",
+		}},
 	)
 	if err != nil {
 		return
@@ -1071,8 +1127,14 @@ func (p *GuestfsProvisioner) buildShrink(ctx context.Context) []string {
 	}
 
 	// Detect filesystem type (Python: fs_type = handle.vfs_type(root_device))
-	fsTypeOut, fsErr := guestfishInspect(ctx, p.rootfsPath, true, "vfs-type", rootDevice)
-	fsType := strings.TrimSpace(fsTypeOut)
+	out, fsErr := guestfishRunOpts{
+		diskPath: p.rootfsPath,
+		readonly: true,
+		args:     []string{"-i", "vfs-type", rootDevice},
+	}.run(
+		ctx,
+	)
+	fsType := strings.TrimSpace(out)
 	if fsErr != nil || fsType == "" {
 		fsType = "ext4"
 	}
@@ -1084,7 +1146,13 @@ func (p *GuestfsProvisioner) buildShrink(ctx context.Context) []string {
 	}
 
 	// Check free space — skip if there isn't enough to reclaim (Python: free_ratio <= 0.02)
-	out, svErr := guestfishInspect(ctx, p.rootfsPath, true, "statvfs", "/")
+	out, svErr := guestfishRunOpts{
+		diskPath: p.rootfsPath,
+		readonly: true,
+		args:     []string{"-i", "statvfs", "/"},
+	}.run(
+		ctx,
+	)
 	if svErr == nil {
 		blocks := parseStatvfsField(out, "blocks")
 		bfree := parseStatvfsField(out, "bfree")

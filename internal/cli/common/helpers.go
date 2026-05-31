@@ -8,10 +8,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 	"syscall"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/system"
 )
 
 // ─── Error handler wrapper (matching Python's @handle_errors) ────────────────
@@ -208,4 +211,56 @@ func formatUnexpected(err error) string {
 		typeName = typeName[dotIdx+1:]
 	}
 	return fmt.Sprintf("%s: %s", typeName, err.Error())
+}
+
+// SudoResult carries the outcome of a sudo subprocess.
+type SudoResult struct {
+	Success    bool
+	ReturnCode int
+}
+
+// RunWithSudo runs args via "sudo env ..." forwarding all MVM_* env vars
+// as well as HOME and PATH. extraEnv are additional KEY=VALUE pairs placed
+// after scanned vars so they take precedence (env uses last-wins).
+func RunWithSudo(ctx context.Context, args []string, extraEnv ...string) SudoResult {
+	mvmBin, err := exec.LookPath(infra.CLIName)
+	if err != nil {
+		mvmBin, err = os.Executable()
+		if err != nil {
+			mvmBin = infra.CLIName
+		}
+	}
+
+	// Build env var assignments — passed via the 'env' utility to sudo.
+	// Scanned vars first, then extraEnv so explicit overrides win.
+	envAssignments := []string{}
+	for _, env := range os.Environ() {
+		if strings.HasPrefix(env, "MVM_") {
+			envAssignments = append(envAssignments, env)
+		}
+	}
+	for _, key := range []string{"HOME", "PATH"} {
+		if val, ok := os.LookupEnv(key); ok {
+			envAssignments = append(envAssignments, key+"="+val)
+		}
+	}
+	envAssignments = append(envAssignments, extraEnv...)
+
+	Cli.Info("")
+	Cli.Info("Running host init with sudo...")
+
+	// Use system.RunCmdCompat with the env utility to properly pass environment
+	// variables through sudo's env_reset.
+	cmdArgs := append([]string{mvmBin}, args...)
+	runArgs := append([]string{"env"}, append(envAssignments, cmdArgs...)...)
+	result := system.RunCmdCompat(ctx, runArgs, system.RunCmdOptions{
+		Capture:     false,
+		Check:       false,
+		Privileged:  true,
+		Interactive: true,
+	})
+	if !result.Success {
+		return SudoResult{Success: false, ReturnCode: result.ExitCode}
+	}
+	return SudoResult{Success: true, ReturnCode: 0}
 }

@@ -226,6 +226,11 @@ const ConsoleSocketTimeoutS = 2.0
 const ConsoleKillTimeoutS = 5.0
 
 // ── Kernel types ──
+const MVMBackgroundServiceEnv = "MVM_BACKGROUND_SERVICE=1"
+
+// MVMProvisionPrefix is the prefix for provisioner temp directories.
+const MVMProvisionPrefix = CLIName + "-provision-"
+
 const KernelTypeFirecracker = "firecracker"
 const KernelTypeOfficial = "official"
 

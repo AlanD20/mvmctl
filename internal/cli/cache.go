@@ -27,8 +27,6 @@ func NewCacheCmd(op *api.Operation) *cobra.Command {
 	cmd.AddCommand(newCacheInitCmd(op))
 	cmd.AddCommand(newCachePruneCmd(op))
 	cmd.AddCommand(newCacheCleanCmd(op))
-	cmd.AddCommand(newCacheHelpCmd())
-
 	return cmd
 }
 
@@ -52,7 +50,6 @@ func newCacheInitCmd(op *api.Operation) *cobra.Command {
 			spinner.Stop()
 
 			if result.IsError() {
-				common.Cli.Error(result.Message)
 				return fmt.Errorf("cache init failed: %s", result.Message)
 			}
 
@@ -126,7 +123,11 @@ func pruneResource(
 		// Match Python: mvm_cli.warning("This will remove cached data for all VMs")
 		common.Cli.Warning(fmt.Sprintf("This will remove cached data for all %s", resourceDisplayNamePlural(resource)))
 		common.Cli.Info("")
-		if !common.Cli.PromptConfirm("Continue?", true) {
+		confirmed, pErr := common.Cli.PromptConfirm(cmd.Context(), "Continue?", true)
+		if pErr != nil {
+			return pErr
+		}
+		if !confirmed {
 			return nil
 		}
 	}
@@ -150,7 +151,6 @@ func pruneResource(
 		return nil
 	}
 	if opResult.IsError() {
-		common.Cli.Error(opResult.Message)
 		return fmt.Errorf("prune %s failed: %s", resource, opResult.Message)
 	}
 
@@ -196,14 +196,17 @@ func pruneMisc(op *api.Operation, cmd *cobra.Command, dryRun bool, force bool) e
 		// Match Python: mvm_cli.warning("This will remove cached data (appliance folder, warm images)")
 		common.Cli.Warning("This will remove cached data (appliance folder, warm images)")
 		common.Cli.Info("")
-		if !common.Cli.PromptConfirm("Continue?", true) {
+		confirmed, pErr := common.Cli.PromptConfirm(cmd.Context(), "Continue?", true)
+		if pErr != nil {
+			return pErr
+		}
+		if !confirmed {
 			return nil
 		}
 	}
 
 	miscResult := op.CachePruneMisc(cmd.Context(), dryRun)
 	if miscResult.IsError() {
-		common.Cli.Error(miscResult.Message)
 		return fmt.Errorf("prune misc failed: %s", miscResult.Message)
 	}
 
@@ -265,7 +268,11 @@ func pruneAll(op *api.Operation, cmd *cobra.Command, dryRun bool, force bool) er
 		common.Cli.Info("  - Appliance folder (libguestfs cache)")
 		common.Cli.Info("  - Warm images (tmpfs ready pool)")
 		common.Cli.Info("")
-		if !common.Cli.PromptConfirm("Continue?", true) {
+		confirmed, pErr := common.Cli.PromptConfirm(cmd.Context(), "Continue?", true)
+		if pErr != nil {
+			return pErr
+		}
+		if !confirmed {
 			common.Cli.Info("Aborted")
 			return nil
 		}
@@ -273,7 +280,6 @@ func pruneAll(op *api.Operation, cmd *cobra.Command, dryRun bool, force bool) er
 
 	pruneOpResult := op.CachePruneAll(cmd.Context(), dryRun, true)
 	if pruneOpResult.IsError() {
-		common.Cli.Error(pruneOpResult.Message)
 		return fmt.Errorf("prune failed: %s", pruneOpResult.Message)
 	}
 
@@ -440,7 +446,11 @@ Examples:
 				}
 				// Session doesn't have the group — offer sudo
 				// Match Python: single confirm prompt: "Elevated privileges required. Run with sudo instead?"
-				if !common.Cli.PromptConfirm("Elevated privileges required. Run with sudo instead?", true) {
+				sudoConfirmed, pErr := common.Cli.PromptConfirm(cmd.Context(), "Elevated privileges required. Run with sudo instead?", true)
+				if pErr != nil {
+					return pErr
+				}
+				if !sudoConfirmed {
 					common.Cli.Info("Aborted")
 					return nil
 				}
@@ -470,14 +480,17 @@ Examples:
 				common.Cli.Info("  - Host networking (TAPs, bridges, iptables chains)")
 				common.Cli.Info("  - Entire cache directory (~/.cache/mvmctl)")
 				common.Cli.Info("")
-				if !common.Cli.PromptConfirm("Continue?", true) {
+				cleanConfirmed, pErr := common.Cli.PromptConfirm(cmd.Context(), "Continue?", true)
+				if pErr != nil {
+					return pErr
+				}
+				if !cleanConfirmed {
 					return nil
 				}
 			}
 
 			opResult := op.CacheClean(cmd.Context(), dryRun)
 			if opResult.IsError() {
-				common.Cli.Error(opResult.Message)
 				return fmt.Errorf("clean failed: %s", opResult.Message)
 			}
 
@@ -528,17 +541,4 @@ Examples:
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be removed without actually removing")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation prompts")
 	return cmd
-}
-
-// newCacheHelpCmd creates a hidden "help" subcommand for the cache group.
-// Matches Python: @cache_app.command(name="help", hidden=True) that prints parent help.
-func newCacheHelpCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:    "help",
-		Short:  "Show help for the cache command group",
-		Hidden: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Parent().Help()
-		},
-	}
 }

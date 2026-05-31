@@ -87,9 +87,18 @@ func (d *Handle) openLazy() {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
-	// Set file permissions when the pool first opens. The file is either
-	// newly created by sql.Open or already exists. This runs once — not on
-	// every Connect() call — because permissions don't change between calls.
+	// Ensure the DB file exists with correct permissions before our chmod runs.
+	// sqlx.Open is lazy — it doesn't create the file until the first query.
+	f, err := os.OpenFile(d.dbPath, os.O_CREATE|os.O_RDONLY, infra.DBFilePerm)
+	if err != nil {
+		slog.Warn("Failed to create db file", "path", d.dbPath, "error", err)
+	} else {
+		f.Close()
+	}
+
+	// Set file permissions explicitly. If the file was just created by
+	// OpenFile above, permissions are already correct; this catches the
+	// case where the file already existed with wrong permissions.
 	if err := os.Chmod(d.dbPath, infra.DBFilePerm); err != nil {
 		slog.Warn("Failed to set db file permissions", "path", d.dbPath, "error", err)
 	}
