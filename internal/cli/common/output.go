@@ -832,7 +832,12 @@ func (c *MVMCli) PromptSelect(ctx context.Context, title string, options []strin
 // PromptMultiSelect shows numbered options on stderr and returns selected values
 // from a comma-separated input. Returns defaultIndices on empty input.
 // If defaultIndices is nil, defaults to the first option.
-func (c *MVMCli) PromptMultiSelect(ctx context.Context, title string, options []string, defaultIndices []int) ([]string, error) {
+func (c *MVMCli) PromptMultiSelect(
+	ctx context.Context,
+	title string,
+	options []string,
+	defaultIndices []int,
+) ([]string, error) {
 	c.Info(title)
 	for i, opt := range options {
 		c.Info(fmt.Sprintf("  [%d] %s", i+1, opt))

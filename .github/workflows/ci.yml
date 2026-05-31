@@ -11,46 +11,45 @@ permissions:
   actions: read
 
 jobs:
-  test:
-    name: Test (Python ${{ matrix.python-version }} on ${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.13"]
-        os: [ubuntu-24.04]
+  build:
+    name: Build & Test
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.1.0
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          enable-cache: true
+          go-version: "1.26"
+          cache: true
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
+      - name: Tidy
+        run: go mod tidy && git diff --exit-code
 
-      - name: Install dependencies
-        run: uv sync --locked --group dev
+      - name: Install golines
+        run: go install github.com/segmentio/golines@latest
 
-      - name: Lint with ruff
-        run: uv run ruff check src/
+      - name: Check formatting (gofmt)
+        run: test -z "$(gofmt -l .)"
 
-      - name: Check formatting with ruff
-        run: uv run ruff format --check src/
+      - name: Check line length (golines 120)
+        run: |
+         golines --max-len=120 --list-files ./internal/ ./pkg/ ./cmd/ 2>&1 | \
+         grep . && echo "Line length violations found" && exit 1 || true
 
-      - name: Type check with mypy
-        run: uv run mypy src/
+      - name: Vet
+        run: go vet ./...
 
-      - name: Run tests
-        run: uv run scripts/run_tests.py --ci --unit --integration --pytest-extra "--cov=src/mvmctl --cov-branch --cov-report=term-missing --cov-report=xml --cov-fail-under=80"
+      - name: Build
+        run: CGO_ENABLED=0 go build -trimpath ./...
+
+      - name: Test
+        run: go test ./... -coverprofile=coverage.out -covermode=atomic
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-report-${{ matrix.os }}
-          path: coverage.xml
-          retention-days: 30
+          name: coverage-report
+          path: coverage.out
+          retention-days: 3

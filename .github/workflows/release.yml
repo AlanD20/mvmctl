@@ -7,30 +7,31 @@ on:
 
 permissions:
   contents: write
-  id-token: write  # For trusted publishing to PyPI
 
 jobs:
   test:
-    name: Test with Coverage Gate
+    name: Test
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.1.0
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          enable-cache: true
+          go-version: "1.26"
+          cache: true
 
-      - name: Set up Python 3.13
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
+      - name: Tidy
+        run: go mod tidy && git diff --exit-code
 
-      - name: Install dependencies
-        run: uv sync --locked --group dev
+      - name: Vet
+        run: go vet ./...
 
-      - name: Run tests with coverage gate
-        run: uv run scripts/run_tests.py --pytest-extra "--cov=src/mvmctl --cov-report=term-missing --cov-fail-under=79"
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./... -coverprofile=coverage.out -covermode=atomic
 
   build:
     name: Build (${{ matrix.os }})
@@ -44,29 +45,18 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.1.0
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          enable-cache: true
-
-      - name: Set up Python 3.13
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential patchelf ccache
-
-      - name: Install dependencies
-        run: uv sync --locked --group dev --group build
-
-      - name: Run tests
-        run: uv run scripts/run_tests.py
+          go-version: "1.26"
+          cache: true
 
       - name: Build binary
-        run: uv run python scripts/build_services.py --mvm --release
+        run: |
+          mkdir -p dist
+          CGO_ENABLED=0 go build -trimpath \
+            -ldflags="-s -w -X 'mvmctl/internal/infra/version.BuildVersion=${GITHUB_REF_NAME#v}'" \
+            -o dist/mvm ./cmd/mvm/
 
       - name: Smoke test binary
         run: |
@@ -185,10 +175,6 @@ jobs:
         run: |
           mkdir -p dist/arch
           cp packaging/PKGBUILD dist/arch/
-          # Update PKGBUILD with actual checksums
-          cd dist
-          MVM_SHA256=$(sha256sum mvm | cut -d' ' -f1)
-          # We'll let makepkg compute the checksum during build on Arch
 
       - name: Upload PKGBUILD artifact
         uses: actions/upload-artifact@v7
@@ -197,36 +183,6 @@ jobs:
           path: |
             dist/arch/PKGBUILD
             dist/mvm
-
-  publish-pypi:
-    name: Publish to PyPI
-    needs: [test, build, build-deb, build-rpm, build-arch]
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.1.0
-        with:
-          enable-cache: true
-
-      - name: Set up Python 3.13
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
-
-      - name: Install dependencies
-        run: uv sync --locked --group dev
-
-      - name: Build wheel and sdist
-        run: uv build
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: dist/
 
   upload-packages-to-release:
     name: Upload Packages to GitHub Release
@@ -254,18 +210,18 @@ jobs:
           append_body: true
           body: |
             ## Distribution Packages
-            
+
             ### Debian/Ubuntu (.deb)
             ```bash
             sudo dpkg -i mvmctl_*.deb
             sudo apt-get install -f  # Install dependencies
             ```
-            
+
             ### RHEL/CentOS/Fedora (.rpm)
             ```bash
             sudo dnf install mvmctl-*.rpm
             ```
-            
+
             ### Arch Linux (PKGBUILD)
             ```bash
             # Use your AUR helper or build manually

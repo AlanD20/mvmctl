@@ -6,8 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"mvmctl/internal/infra"
+
+	"github.com/spf13/cobra"
 )
 
 // ── Shell completion functions ──

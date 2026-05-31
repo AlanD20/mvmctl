@@ -105,7 +105,12 @@ func newKeyCreateCmd(op *api.Operation) *cobra.Command {
 					alg = "ed25519"
 				} else {
 					var pErr error
-					alg, pErr = common.Cli.PromptSelect(cmd.Context(), "Select algorithm:", []string{"ed25519", "rsa", "ecdsa"}, 0)
+					alg, pErr = common.Cli.PromptSelect(
+						cmd.Context(),
+						"Select algorithm:",
+						[]string{"ed25519", "rsa", "ecdsa"},
+						0,
+					)
 					if pErr != nil {
 						return pErr
 					}

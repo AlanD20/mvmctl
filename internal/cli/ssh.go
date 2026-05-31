@@ -6,9 +6,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
+
+	"github.com/spf13/cobra"
 )
 
 // completeVMNames provides shell completion for VM identifiers.

@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/spf13/cobra"
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
+
+	"github.com/spf13/cobra"
 )
 
 // volumeColumns defines the listing columns for volumes.

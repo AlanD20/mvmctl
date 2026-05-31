@@ -9,13 +9,14 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
+
+	"github.com/spf13/cobra"
 )
 
 // imageColumns defines the local listing columns for images.

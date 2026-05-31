@@ -209,7 +209,12 @@ func resolveUserNATGateways(ctx context.Context) (string, error) {
 	if len(interfaces) == 1 {
 		return interfaces[0], nil
 	}
-	selected, err := common.Cli.PromptMultiSelect(ctx, "Select interface(s) for NAT (internet access):", interfaces, nil)
+	selected, err := common.Cli.PromptMultiSelect(
+		ctx,
+		"Select interface(s) for NAT (internet access):",
+		interfaces,
+		nil,
+	)
 	if err != nil {
 		return "", err
 	}
