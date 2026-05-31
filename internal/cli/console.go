@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/spf13/cobra"
 	"mvmctl/internal/cli/common"
 	"mvmctl/pkg/api"
+
+	"github.com/spf13/cobra"
 )
 
 func NewConsoleCmd(op *api.Operation) *cobra.Command {

@@ -8,10 +8,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/spf13/cobra"
 	"mvmctl/internal/cli/common"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
+
+	"github.com/spf13/cobra"
 )
 
 func NewCpCmd(op *api.Operation) *cobra.Command {

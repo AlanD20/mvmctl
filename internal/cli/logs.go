@@ -4,10 +4,11 @@ package cli
 import (
 	"fmt"
 
-	"github.com/spf13/cobra"
 	"mvmctl/internal/cli/common"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
+
+	"github.com/spf13/cobra"
 )
 
 func NewLogsCmd(op *api.Operation) *cobra.Command {

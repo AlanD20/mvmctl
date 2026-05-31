@@ -8,13 +8,14 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
 	"mvmctl/pkg/api"
+
+	"github.com/spf13/cobra"
 )
 
 // NewCacheCmd creates the cache command and its subcommands.
@@ -446,7 +447,11 @@ Examples:
 				}
 				// Session doesn't have the group — offer sudo
 				// Match Python: single confirm prompt: "Elevated privileges required. Run with sudo instead?"
-				sudoConfirmed, pErr := common.Cli.PromptConfirm(cmd.Context(), "Elevated privileges required. Run with sudo instead?", true)
+				sudoConfirmed, pErr := common.Cli.PromptConfirm(
+					cmd.Context(),
+					"Elevated privileges required. Run with sudo instead?",
+					true,
+				)
 				if pErr != nil {
 					return pErr
 				}

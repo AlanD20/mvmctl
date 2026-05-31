@@ -10,13 +10,14 @@ import (
 	"strings"
 	"text/template"
 
-	"golang.org/x/crypto/bcrypt"
-	"gopkg.in/yaml.v3"
 	"mvmctl/internal/assets"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
+
+	"golang.org/x/crypto/bcrypt"
+	"gopkg.in/yaml.v3"
 )
 
 // requiredISOTool is the command used to create cloud-init ISO images.

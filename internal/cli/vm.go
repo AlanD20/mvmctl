@@ -6,12 +6,13 @@ import (
 	"os"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
+
+	"github.com/spf13/cobra"
 )
 
 // vmColumns defines the local listing columns for VMs.
@@ -307,7 +308,8 @@ func runVMCreate(
 ) error {
 	if skipCleanup {
 		// Python: typer.confirm() defaults to True (Enter = Yes)
-		cleanupConfirmed, pErr := common.Cli.PromptConfirm(cmd.Context(),
+		cleanupConfirmed, pErr := common.Cli.PromptConfirm(
+			cmd.Context(),
 			"--skip-cleanup is set: if creation fails, resources will be left behind and must be cleaned manually. Continue?",
 			true,
 		)
