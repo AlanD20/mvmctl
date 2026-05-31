@@ -256,7 +256,7 @@ func DetectOutboundInterface(ctx context.Context) string {
 		slog.Debug("Failed to detect outbound network interface", "error", result.Err)
 		return ""
 	}
-	for _, line := range strings.Split(strings.TrimSpace(result.Stdout), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(result.Stdout), "\n") {
 		parts := strings.Fields(line)
 		for i, part := range parts {
 			if part == "dev" && i+1 < len(parts) {
@@ -321,7 +321,7 @@ func GetTunTapDevices(ctx context.Context) []string {
 		return nil
 	}
 	var devices []string
-	for _, line := range strings.Split(result.Stdout, "\n") {
+	for line := range strings.SplitSeq(result.Stdout, "\n") {
 		parts := strings.Fields(line)
 		if len(parts) >= 2 {
 			devices = append(devices, strings.TrimRight(parts[1], ":"))
@@ -344,7 +344,7 @@ func GetBridges(ctx context.Context) []string {
 		return nil
 	}
 	var bridges []string
-	for _, line := range strings.Split(result.Stdout, "\n") {
+	for line := range strings.SplitSeq(result.Stdout, "\n") {
 		parts := strings.Fields(line)
 		if len(parts) >= 2 {
 			bridges = append(bridges, strings.TrimRight(parts[1], ":"))
@@ -367,7 +367,7 @@ func GetBridgeSlaves(ctx context.Context, bridge string) []string {
 		return nil
 	}
 	var slaves []string
-	for _, line := range strings.Split(result.Stdout, "\n") {
+	for line := range strings.SplitSeq(result.Stdout, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -398,7 +398,7 @@ func GetBridgeTaps(ctx context.Context, bridge string) []string {
 		return nil
 	}
 	var devices []string
-	for _, line := range strings.Split(result.Stdout, "\n") {
+	for line := range strings.SplitSeq(result.Stdout, "\n") {
 		parts := strings.Fields(line)
 		if len(parts) > 0 && len(parts[0]) > 0 && parts[0][0] >= '0' && parts[0][0] <= '9' && len(parts) >= 2 {
 			iface := strings.TrimRight(parts[1], ":")
@@ -478,7 +478,7 @@ func GetTapBridge(ctx context.Context, tap string) string {
 	if !result.Success {
 		return ""
 	}
-	for _, line := range strings.Split(result.Stdout, "\n") {
+	for line := range strings.SplitSeq(result.Stdout, "\n") {
 		if strings.Contains(line, "master") {
 			parts := strings.Fields(line)
 			for i, part := range parts {
@@ -546,7 +546,7 @@ func DetectIPTablesBackendConflict(ctx context.Context) BackendConflictResult {
 		Privileged: true,
 	})
 	if legacyResult.Success {
-		for _, line := range strings.Split(legacyResult.Stdout, "\n") {
+		for line := range strings.SplitSeq(legacyResult.Stdout, "\n") {
 			parts := strings.Fields(line)
 			if len(parts) >= 2 {
 				if pkts, err := strconv.Atoi(parts[0]); err == nil && pkts > 0 {
@@ -565,7 +565,7 @@ func DetectIPTablesBackendConflict(ctx context.Context) BackendConflictResult {
 		Privileged: true,
 	})
 	if nftResult.Success {
-		for _, line := range strings.Split(nftResult.Stdout, "\n") {
+		for line := range strings.SplitSeq(nftResult.Stdout, "\n") {
 			parts := strings.Fields(line)
 			if len(parts) >= 2 {
 				if pkts, err := strconv.Atoi(parts[0]); err == nil && pkts > 0 {
@@ -627,7 +627,7 @@ func RemoveRawTap(ctx context.Context, tap string) error {
 		details = fmt.Sprintf(" (%s)", stderrFirst)
 	}
 	return errs.Wrap(errs.CodeNetworkBridgeFailed,
-		fmt.Errorf("Failed to remove TAP device '%s'. Tried 'ip link delete'%s and 'ip tuntap del'.", tap, details))
+		fmt.Errorf("failed to remove TAP device '%s': tried 'ip link delete'%s and 'ip tuntap del'", tap, details))
 }
 
 // RemoveRawBridge removes a bridge interface with slave cleanup.
@@ -672,7 +672,7 @@ func RemoveRawBridge(ctx context.Context, bridge string) error {
 		details = fmt.Sprintf(" (%s)", stderrFirst)
 	}
 	return errs.Wrap(errs.CodeNetworkBridgeFailed,
-		fmt.Errorf("Failed to remove bridge '%s'. Tried 'ip link delete' with type%s and without.", bridge, details))
+		fmt.Errorf("failed to remove bridge '%s': tried 'ip link delete' with type%s and without", bridge, details))
 }
 
 // GetSystemBridges returns all bridge interfaces on the host.
@@ -686,7 +686,7 @@ func GetSystemBridges(ctx context.Context) []string {
 		return nil
 	}
 	var bridges []string
-	for _, line := range strings.Split(result.Stdout, "\n") {
+	for line := range strings.SplitSeq(result.Stdout, "\n") {
 		parts := strings.Fields(line)
 		if len(parts) >= 2 {
 			bridges = append(bridges, strings.TrimRight(parts[1], ":"))

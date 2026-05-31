@@ -87,12 +87,6 @@ func autoWorkers(n int) int {
 	if cpus < 1 {
 		cpus = 4
 	}
-	w := cpus * 2
-	if n < w {
-		w = n
-	}
-	if w < 1 {
-		w = 1
-	}
-	return w
+	w := min(cpus*2, n)
+	return max(w, 1)
 }

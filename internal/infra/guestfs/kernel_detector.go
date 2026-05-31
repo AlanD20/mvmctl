@@ -29,6 +29,13 @@ var (
 	cachedKernelPath string
 	cachedModulesDir string
 	cachedKernelErr  error
+
+	// Compiled regexes for kernel version extraction and scoring
+	versionRegex    = regexp.MustCompile(`version\s+(\S+)`)
+	versionStart    = regexp.MustCompile(`^\d`)                // version starts with digit
+	customSuffixRe  = regexp.MustCompile(`-(g14|custom)$`)     // explicit custom suffix
+	cleanVersionRe  = regexp.MustCompile(`^\d+\.\d+\.\d+$`)    // clean "6.9.3"
+	distroVersionRe = regexp.MustCompile(`^\d+\.\d+\.\d+[-.]`) // distro "6.9.3-1"
 )
 
 // FindBestKernel finds the best host kernel for libguestfs.
@@ -168,8 +175,7 @@ func (kd *KernelDetector) extractVersion(ctx context.Context, kernelPath string)
 		}
 		// Other errors: silently fall through to filename fallback
 	} else if result.Stdout != "" {
-		re := regexp.MustCompile(`version\s+(\S+)`)
-		matches := re.FindStringSubmatch(result.Stdout)
+		matches := versionRegex.FindStringSubmatch(result.Stdout)
 		if len(matches) >= 2 {
 			return matches[1], nil
 		}
@@ -182,11 +188,8 @@ func (kd *KernelDetector) extractVersion(ctx context.Context, kernelPath string)
 			remainder := name[len(prefix):]
 			if strings.HasPrefix(remainder, "-") {
 				version := remainder[1:]
-				if version != "" {
-					matched, _ := regexp.MatchString(`^\d`, version)
-					if matched {
-						return version, nil
-					}
+				if version != "" && versionStart.MatchString(version) {
+					return version, nil
 				}
 			}
 			break
@@ -250,24 +253,15 @@ func (kd *KernelDetector) countVirtioDrivers(modulesDir string) int {
 }
 
 func (kd *KernelDetector) customSuffixPenalty(version string) int {
-	// Explicit custom suffix patterns: -g14, -custom at end
-	matchedCustom, _ := regexp.MatchString(`-(g14|custom)$`, version)
-	if matchedCustom {
+	if customSuffixRe.MatchString(version) {
 		return 5
 	}
-
-	// Clean version like 6.9.3
-	matchedClean, _ := regexp.MatchString(`^\d+\.\d+\.\d+$`, version)
-	if matchedClean {
+	if cleanVersionRe.MatchString(version) {
 		return 0
 	}
-
-	// Distro version like 6.9.3-1, 6.8.0-40-generic
-	matchedDistro, _ := regexp.MatchString(`^\d+\.\d+\.\d+[-.]`, version)
-	if matchedDistro {
+	if distroVersionRe.MatchString(version) {
 		return 1
 	}
-
 	return 5
 }
 

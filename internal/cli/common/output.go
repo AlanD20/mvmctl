@@ -747,20 +747,11 @@ func (c *MVMCli) RenderListing(items []any, columns []ListingColumn, style strin
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// CheckArg guards for positional arg: shows help on "help" or empty,
-// matching Python's MVMCli.check_name_arg() in utils/cli.py.
-// Returns the validated value or an error.
-// Python prints help to stdout via typer.echo(); Cobra's Help() defaults to stderr,
-// so we redirect to stdout before calling Help().
+// CheckArg guards for empty positional arg.
+// Matches Python's MVMCli.check_name_arg() in utils/cli.py.
+// Returns the validated value or an error on empty string.
 func (c *MVMCli) CheckArg(cmd *cobra.Command, value string) (string, error) {
-	if value == "help" {
-		cmd.SetOut(os.Stdout)
-		cmd.Help()
-		return "", nil
-	}
 	if value == "" {
-		cmd.SetOut(os.Stdout)
-		cmd.Help()
 		return "", fmt.Errorf("value required")
 	}
 	return value, nil
@@ -770,25 +761,35 @@ func (c *MVMCli) CheckArg(cmd *cobra.Command, value string) (string, error) {
 // Matches Python's typer.confirm(text, default=True) behavior.
 // Shows [Y/n]: when defaultYes=true, [y/N]: when defaultYes=false.
 // Loops on invalid input until y/yes, n/no, or empty (which returns default).
-func (c *MVMCli) PromptConfirm(prompt string, defaultYes bool) bool {
+func (c *MVMCli) PromptConfirm(ctx context.Context, prompt string, defaultYes bool) (bool, error) {
 	suffix := " [Y/n]: "
 	if !defaultYes {
 		suffix = " [y/N]: "
 	}
 	for {
 		fmt.Fprint(os.Stderr, prompt+suffix)
+		ch := make(chan string, 1)
+		go func() {
+			var response string
+			fmt.Scanln(&response)
+			ch <- strings.TrimSpace(strings.ToLower(response))
+		}()
+
 		var response string
-		if _, err := fmt.Scanln(&response); err != nil {
-			return defaultYes
+		select {
+		case <-ctx.Done():
+			os.Stdin.Close()
+			return false, ctx.Err()
+		case response = <-ch:
 		}
-		response = strings.TrimSpace(strings.ToLower(response))
+
 		switch response {
 		case "y", "yes":
-			return true
+			return true, nil
 		case "n", "no":
-			return false
+			return false, nil
 		case "":
-			return defaultYes
+			return defaultYes, nil
 		default:
 			fmt.Fprint(os.Stderr, "Please enter 'yes' or 'no': ")
 		}
@@ -797,30 +798,41 @@ func (c *MVMCli) PromptConfirm(prompt string, defaultYes bool) bool {
 
 // PromptSelect shows a numbered list of options on stderr and returns the
 // selected value. Defaults to options[defaultIdx] on empty input.
-func (c *MVMCli) PromptSelect(title string, options []string, defaultIdx int) string {
+func (c *MVMCli) PromptSelect(ctx context.Context, title string, options []string, defaultIdx int) (string, error) {
 	c.Info(title)
 	for i, opt := range options {
 		c.Info(fmt.Sprintf("  %d. %s", i+1, opt))
 	}
 	prompt := fmt.Sprintf("Enter number [%d]: ", defaultIdx+1)
 	fmt.Fprint(os.Stderr, prompt)
-	var choice string
-	_, _ = fmt.Scanln(&choice)
-	choice = strings.TrimSpace(choice)
-	if choice == "" {
-		return options[defaultIdx]
+
+	ch := make(chan string, 1)
+	go func() {
+		var choice string
+		fmt.Scanln(&choice)
+		ch <- strings.TrimSpace(choice)
+	}()
+
+	select {
+	case <-ctx.Done():
+		os.Stdin.Close()
+		return "", ctx.Err()
+	case choice := <-ch:
+		if choice == "" {
+			return options[defaultIdx], nil
+		}
+		idx := 0
+		if _, err := fmt.Sscan(choice, &idx); err == nil && idx >= 1 && idx <= len(options) {
+			return options[idx-1], nil
+		}
+		return options[defaultIdx], nil
 	}
-	idx := 0
-	if _, err := fmt.Sscan(choice, &idx); err == nil && idx >= 1 && idx <= len(options) {
-		return options[idx-1]
-	}
-	return options[defaultIdx]
 }
 
 // PromptMultiSelect shows numbered options on stderr and returns selected values
 // from a comma-separated input. Returns defaultIndices on empty input.
 // If defaultIndices is nil, defaults to the first option.
-func (c *MVMCli) PromptMultiSelect(title string, options []string, defaultIndices []int) ([]string, error) {
+func (c *MVMCli) PromptMultiSelect(ctx context.Context, title string, options []string, defaultIndices []int) ([]string, error) {
 	c.Info(title)
 	for i, opt := range options {
 		c.Info(fmt.Sprintf("  [%d] %s", i+1, opt))
@@ -830,8 +842,22 @@ func (c *MVMCli) PromptMultiSelect(title string, options []string, defaultIndice
 		def = defaultIndices[0] + 1
 	}
 	fmt.Fprintf(os.Stderr, "Select number(s) [comma-separated] [%d]: ", def)
-	reader := bufio.NewReader(os.Stdin)
-	input, _ := reader.ReadString('\n')
+
+	ch := make(chan string, 1)
+	go func() {
+		reader := bufio.NewReader(os.Stdin)
+		input, _ := reader.ReadString('\n')
+		ch <- input
+	}()
+
+	var input string
+	select {
+	case <-ctx.Done():
+		os.Stdin.Close()
+		return nil, ctx.Err()
+	case input = <-ch:
+	}
+
 	input = strings.TrimSpace(input)
 
 	if input == "" {

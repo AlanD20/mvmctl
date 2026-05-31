@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/user"
 	"slices"
 	"strings"
 	"time"
@@ -328,17 +329,11 @@ func (op *Operation) HostDetectResources(ctx context.Context) (*model.HostResour
 func (op *Operation) HostNetworkSetup(ctx context.Context) *errs.OperationResult {
 	syncResult := op.NetworkSync(ctx, nil)
 	if syncResult.IsOK() {
-		itemEmpty := syncResult.Item == nil
-		if !itemEmpty {
-			// Check for empty collection types
-			switch v := syncResult.Item.(type) {
-			case []any:
-				itemEmpty = len(v) == 0
-			case map[string]any:
-				itemEmpty = len(v) == 0
-			}
-		}
-		if itemEmpty {
+		// Use the explicit network_count from sync metadata.
+		// syncResult.Item is map[string]map[string]int (not map[string]any),
+		// so a type-based emptiness check is fragile.
+		nc, _ := syncResult.Metadata["network_count"].(int)
+		if nc == 0 {
 			result := op.NetworkCreateDefaultNetwork(ctx)
 			if result.IsError() {
 				slog.Warn("Could not create default network", "error", result.Message)
@@ -476,9 +471,49 @@ func (op *Operation) HostGetIPForwardStatus(ctx context.Context) (string, error)
 	return host.GetIPForwardStatus(ctx)
 }
 
+// HostStatusCheck returns a consolidated host status with all checks.
+func (op *Operation) HostStatusCheck(ctx context.Context) *responses.HostStatusCheck {
+	kvmOK := op.HostCheckKVMAccess()
+	missing := op.HostCheckRequiredBinaries()
+	ipFwd, _ := op.HostGetIPForwardStatus(ctx)
+	fwdOK := ipFwd == "1"
+
+	var setup *responses.HostSetupInfo
+	state, _ := op.HostGetState(ctx)
+	if state != nil {
+		setup = &responses.HostSetupInfo{
+			Initialized:   state.Initialized,
+			InitializedAt: state.InitializedAt,
+		}
+	}
+
+	resources, _ := op.HostDetectResources(ctx)
+
+	// Check group and sudoers state from live system
+	groupExists := system.GroupExists(infra.MVMUnixGroup)
+	currentUser, _ := user.Current()
+	userInGroup := currentUser != nil && system.UserInGroup(ctx, currentUser.Username, infra.MVMUnixGroup)
+	sudoersExists := false
+	if _, err := os.Stat(fmt.Sprintf("/etc/sudoers.d/%s", infra.MVMUnixGroup)); err == nil {
+		sudoersExists = true
+	}
+
+	return &responses.HostStatusCheck{
+		KVMOK:           kvmOK,
+		MissingBinaries: missing,
+		IPForward:       ipFwd,
+		IPForwardOK:     fwdOK,
+		GroupExists:     groupExists,
+		SudoersExists:   sudoersExists,
+		UserInGroup:     userInGroup,
+		State:           setup,
+		Resources:       resources,
+	}
+}
+
 // HostClean cleans host networking configuration.
 // Matches Python's HostOperation.clean() exactly — wraps errors in HostError/NetworkError pattern.
-func (op *Operation) HostClean(ctx context.Context, cacheDir string) *errs.OperationResult {
+func (op *Operation) HostClean(ctx context.Context) *errs.OperationResult {
 
 	if err := system.CheckPrivileges("/usr/sbin/ip", "clean host"); err != nil {
 		return &errs.OperationResult{
@@ -581,7 +616,7 @@ func (op *Operation) HostClean(ctx context.Context, cacheDir string) *errs.Opera
 		summary = append(summary, "Warning: skipped host networking cleanup (already clean)")
 	}
 
-	auditLog := logging.NewAuditLog(cacheDir)
+	auditLog := logging.NewAuditLog(op.CacheDir)
 	_ = auditLog.LogOperation("host.clean", map[string]any{"actions": len(summary)}, "")
 
 	return &errs.OperationResult{
@@ -593,7 +628,7 @@ func (op *Operation) HostClean(ctx context.Context, cacheDir string) *errs.Opera
 
 // HostReset resets host to pre-init state.
 // Matches Python's HostOperation.reset() exactly — usermod processing order matches.
-func (op *Operation) HostReset(ctx context.Context, cacheDir string) *errs.OperationResult {
+func (op *Operation) HostReset(ctx context.Context) *errs.OperationResult {
 
 	if err := system.CheckPrivileges("/usr/sbin/ip", "reset host"); err != nil {
 		return &errs.OperationResult{
@@ -603,7 +638,7 @@ func (op *Operation) HostReset(ctx context.Context, cacheDir string) *errs.Opera
 		}
 	}
 
-	cleanResult := op.HostClean(ctx, cacheDir)
+	cleanResult := op.HostClean(ctx)
 	// Python: if clean_result.is_error: return clean_result
 	if cleanResult.IsError() {
 		return cleanResult
@@ -680,7 +715,7 @@ func (op *Operation) HostReset(ctx context.Context, cacheDir string) *errs.Opera
 
 	_ = op.Repos.Host.ResetState(ctx)
 
-	auditLog := logging.NewAuditLog(cacheDir)
+	auditLog := logging.NewAuditLog(op.CacheDir)
 	_ = auditLog.LogOperation("host.reset", map[string]any{"actions": len(summary)}, "")
 
 	return &errs.OperationResult{
@@ -693,7 +728,7 @@ func (op *Operation) HostReset(ctx context.Context, cacheDir string) *errs.Opera
 // HostGetRunningVMs returns running VMs.
 // Matches Python's HostOperation.get_running_vms().
 func (op *Operation) HostGetRunningVMs(ctx context.Context) ([]*model.VM, error) {
-	return op.Repos.VM.ListByStatus(ctx, string(model.StatusRunning))
+	return op.Repos.VM.ListByStatus(ctx, string(model.StatusRunning), string(model.StatusStarting))
 }
 
 // HostIsInitialized checks if host is initialized.

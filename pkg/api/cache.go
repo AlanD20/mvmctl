@@ -7,11 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
-	"mvmctl/internal/core/config"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/guestfs"
@@ -61,16 +59,12 @@ func (op *Operation) CacheInitAll(ctx context.Context, onProgress func(errs.Prog
 		created = append(created, dir)
 	}
 
-	// Check whether guestfs was enabled by the user (Python: SettingsService.resolve(db, "settings", "guestfs_enabled"))
-	// Python: try: guestfs_enabled = bool(SettingsService.resolve(db, "settings", "guestfs_enabled"))
-	//         except Exception: pass
+	// Check whether guestfs was enabled by the user
 	guestfsEnabled := false
-	if op.Connection != nil {
-		raw, err := config.Resolve(ctx, op.Connection.DB(), "settings", "guestfs_enabled")
-		if err == nil {
-			if b, ok := raw.(bool); ok {
-				guestfsEnabled = b
-			}
+	raw, err := op.ConfigGet(ctx, "settings", "guestfs_enabled")
+	if err == nil {
+		if b, ok := raw.(bool); ok {
+			guestfsEnabled = b
 		}
 	}
 
@@ -96,7 +90,7 @@ func (op *Operation) CacheInitAll(ctx context.Context, onProgress func(errs.Prog
 		Status:  "success",
 		Code:    "cache.initialized",
 		Message: "Cache initialized successfully",
-		Item: map[string]interface{}{
+		Item: map[string]any{
 			"cache_dir":         cacheDir,
 			"directories":       created,
 			"guestfs_appliance": appliancePath,
@@ -136,32 +130,20 @@ func (op *Operation) CachePruneBinaries(ctx context.Context, dryRun bool, includ
 }
 
 // CachePruneMisc prunes miscellaneous cache items.
-// Matches Python's CacheOperation.prune_misc() exactly.
 func (op *Operation) CachePruneMisc(ctx context.Context, dryRun bool) *errs.OperationResult {
-	// Clean service binaries (Python: shutil.rmtree(bin_dir))
-	binDir := filepath.Join(op.CacheDir, "bin")
+	binDir := infra.GetBinDir()
 	serviceBinariesCleaned := false
 	if _, err := os.Stat(binDir); err == nil && !dryRun {
 		os.RemoveAll(binDir)
 		serviceBinariesCleaned = true
 	}
 
-	// Python:
-	//   "service_binaries": shutil.rmtree(bin_dir, ignore_errors=True),
-	//   "appliance": GuestfsService.prune_appliance(dry_run),
-	//   "warm_images": CacheService.prune_warm_images(dry_run),
-	//   "guestfs_state": GuestfsService.clean_stale_guestfs_state(),
-	//   "stale_provision_mounts": CacheService.clean_stale_provision_mounts(dry_run),
-	//
-	// Go: Delegate to GuestfsService directly for appliance and guestfs_state,
-	// matching Python's GuestfsService.prune_appliance() and
-	// GuestfsService.clean_stale_guestfs_state() calls.
 	appliancePruned := (&guestfs.GuestfsService{}).PruneAppliance(op.CacheDir, dryRun)
 	warmPruned := op.Services.Cache.PruneWarmImages(ctx, dryRun)
 	guestfsStateCleaned := (&guestfs.GuestfsService{}).CleanStaleGuestfsState()
 	staleProvisionCleaned := op.Services.Cache.CleanStaleProvisionMounts(ctx, dryRun)
 
-	result := map[string]interface{}{
+	result := map[string]any{
 		"service_binaries":       serviceBinariesCleaned,
 		"appliance":              appliancePruned,
 		"warm_images":            warmPruned,
@@ -233,7 +215,7 @@ func (op *Operation) CachePruneAll(ctx context.Context, dryRun bool, includeAll 
 
 	miscResult := op.CachePruneMisc(ctx, dryRun)
 	if miscResult != nil && miscResult.IsOK() && miscResult.Item != nil {
-		if misc, ok := miscResult.Item.(map[string]interface{}); ok {
+		if misc, ok := miscResult.Item.(map[string]any); ok {
 			if infraslice.IsTrue(misc["appliance"]) {
 				prunedIDs = append(prunedIDs, "appliance")
 			}
@@ -329,7 +311,7 @@ func (op *Operation) CacheClean(ctx context.Context, dryRun bool) *errs.Operatio
 	// Step 2: Clean host networking (while DB still exists in cache dir)
 	// Python: HostOperation.clean(cache_dir) — unconditional call (hostOp is required constructor param)
 	if !dryRun {
-		_ = op.HostClean(ctx, op.CacheDir)
+		_ = op.HostClean(ctx)
 	}
 
 	// Step 3: Remove the cache directory itself
@@ -364,5 +346,3 @@ func (op *Operation) CacheClean(ctx context.Context, dryRun bool) *errs.Operatio
 		Item:    result,
 	}
 }
-
-// Compile-time check

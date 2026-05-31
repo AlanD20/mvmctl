@@ -8,18 +8,13 @@ import (
 	"os"
 )
 
-// SHA256Hash returns a 64-character lowercase hexadecimal SHA256 hash of data.
-func SHA256Hash(data []byte) string {
-	return fmt.Sprintf("%x", sha256.Sum256(data))
-}
-
 // SHA256File returns a 64-character lowercase hexadecimal SHA256 hash of a file's contents.
 func SHA256File(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
@@ -69,7 +64,7 @@ type HashGenerator struct{}
 // Python: data = f"{type_}:{source}:{timestamp}"
 func (HashGenerator) Image(type_, source, timestamp string) string {
 	h := sha256.New()
-	h.Write([]byte(fmt.Sprintf("%s:%s:%s", type_, source, timestamp)))
+	fmt.Fprintf(h, "%s:%s:%s", type_, source, timestamp)
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
@@ -83,7 +78,7 @@ func (HashGenerator) Kernel(filePath, version, arch, timestamp string) (string, 
 		return "", err
 	}
 	h := sha256.New()
-	h.Write([]byte(fmt.Sprintf("%s:%s:%s:%s", fileHash, version, arch, timestamp)))
+	fmt.Fprintf(h, "%s:%s:%s:%s", fileHash, version, arch, timestamp)
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
@@ -97,7 +92,7 @@ func (HashGenerator) Binary(filePath, name, version string) (string, error) {
 		return "", err
 	}
 	h := sha256.New()
-	h.Write([]byte(fmt.Sprintf("%s:%s:%s", fileHash, name, version)))
+	fmt.Fprintf(h, "%s:%s:%s", fileHash, name, version)
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
@@ -107,7 +102,7 @@ func (HashGenerator) Binary(filePath, name, version string) (string, error) {
 // Python: data = f"{name}:{created_at}"
 func (HashGenerator) VM(name, createdAt string) string {
 	h := sha256.New()
-	h.Write([]byte(fmt.Sprintf("%s:%s", name, createdAt)))
+	fmt.Fprintf(h, "%s:%s", name, createdAt)
 	full := fmt.Sprintf("%x", h.Sum(nil))
 	if len(full) > 32 {
 		return full[:32]
@@ -119,7 +114,7 @@ func (HashGenerator) VM(name, createdAt string) string {
 // Python: data = f"{name}:{subnet}:{created_at}"
 func (HashGenerator) Network(name, subnet, createdAt string) string {
 	h := sha256.New()
-	h.Write([]byte(fmt.Sprintf("%s:%s:%s", name, subnet, createdAt)))
+	fmt.Fprintf(h, "%s:%s:%s", name, subnet, createdAt)
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
@@ -127,7 +122,7 @@ func (HashGenerator) Network(name, subnet, createdAt string) string {
 // Python: data = f"{name}:{created_at}"
 func (HashGenerator) Volume(name, createdAt string) string {
 	h := sha256.New()
-	h.Write([]byte(fmt.Sprintf("%s:%s", name, createdAt)))
+	fmt.Fprintf(h, "%s:%s", name, createdAt)
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
@@ -157,7 +152,7 @@ func (HashGenerator) Shorten(fullHash string, length ...int) (string, error) {
 		n = length[0]
 	}
 	if len(fullHash) < n {
-		return "", fmt.Errorf("Hash '%s' is shorter than requested length %d", fullHash, n)
+		return "", fmt.Errorf("hash '%s' is shorter than requested length %d", fullHash, n)
 	}
 	return fullHash[:n], nil
 }

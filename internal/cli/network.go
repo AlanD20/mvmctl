@@ -7,9 +7,9 @@ import (
 	"os"
 	"strings"
 
-	infranet "mvmctl/internal/infra/network"
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra/model"
+	infranet "mvmctl/internal/infra/network"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
 
@@ -386,5 +386,3 @@ func newNetworkDefaultCmd(op *api.Operation) *cobra.Command {
 	}
 	return cmd
 }
-
-

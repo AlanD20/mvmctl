@@ -106,12 +106,15 @@ type HostSetupInfo struct {
 
 // HostStatusCheck is the structured response for host status queries.
 type HostStatusCheck struct {
-	KVMOK            bool                `json:"kvm_accessible"`
-	MissingBinaries  []string            `json:"missing_binaries"`
-	IPForward        string              `json:"ip_forward"`
-	IPForwardOK      bool                `json:"ip_forward_ok"`
-	State            *HostSetupInfo      `json:"state"`
-	Resources        *model.HostResources `json:"resources,omitempty"`
+	KVMOK           bool                 `json:"kvm_accessible"`
+	MissingBinaries []string             `json:"missing_binaries"`
+	IPForward       string               `json:"ip_forward"`
+	IPForwardOK     bool                 `json:"ip_forward_ok"`
+	GroupExists     bool                 `json:"group_exists"`
+	SudoersExists   bool                 `json:"sudoers_exists"`
+	UserInGroup     bool                 `json:"user_in_group"`
+	State           *HostSetupInfo       `json:"state"`
+	Resources       *model.HostResources `json:"resources,omitempty"`
 }
 
 // HostInfo is the structured response for host info/capacity queries.

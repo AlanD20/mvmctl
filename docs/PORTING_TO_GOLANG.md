@@ -465,19 +465,34 @@ These Python patterns have NO equivalent in Go and are either abolished or handl
 
 ---
 
-## 12. Domain Review Status
+## 12. Domain User Review Status
 
 - [ ] vm
-- [ ] network
+- [x] network
 - [ ] image
 - [ ] kernel
 - [x] binary
 - [x] key
-- [ ] host
+- [x] host
 - [ ] volume
-- [ ] config
+- [x] config
 - [ ] console
 - [ ] logs
 - [ ] cloudinit
-- [ ] cache
+- [x] cache
 - [ ] ssh
+- [x] guestfs
+- [x] firewall tracker
+- [x] init
+- [ ] logging
+- [ ] loopmount
+- [ ] infra network
+- [ ] infra operation
+- [ ] infra parallel
+- [ ] infra provisioner
+- [ ] infra system
+- [ ] service console
+- [ ] cloudinit
+- [ ] service nocloudnet
+- [ ] infra errs
+- [ ] infra download
