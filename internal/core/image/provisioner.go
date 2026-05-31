@@ -1,6 +1,7 @@
 package image
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -27,6 +28,7 @@ const (
 // deblob() and shrink() are declarative — they only set flags.
 // run() creates a fresh backend for each phase.
 type Provisioner struct {
+	ctx             context.Context
 	imagePath       string
 	provisionerType ProvisionerType
 	fsType          string
@@ -43,12 +45,14 @@ type Provisioner struct {
 //
 // cacheDir is resolved by the caller and passed through.
 func NewProvisioner(
+	ctx context.Context,
 	imagePath string,
 	provisionerType ProvisionerType,
 	fsType string,
 	cacheDir string,
 ) *Provisioner {
 	return &Provisioner{
+		ctx:             ctx,
 		imagePath:       imagePath,
 		provisionerType: provisionerType,
 		fsType:          fsType,
@@ -63,12 +67,12 @@ func NewProvisioner(
 func (p *Provisioner) createBackend() (provisioner.Backend, error) {
 	switch p.provisionerType {
 	case ProvisionerTypeLoopMount:
-		return loopmount.NewLoopMountBackend(p.imagePath, p.fsType, p.cacheDir), nil
+		return loopmount.NewLoopMountBackend(p.ctx, p.imagePath, p.fsType, p.cacheDir), nil
 	case ProvisionerTypeGuestFS:
 		if err := provisioner.EnsureGuestfsAppliance(""); err != nil {
 			return nil, err
 		}
-		return provisioner.NewGuestfsBackend(p.imagePath, 0, 0, 1000, 1000), nil
+		return provisioner.NewGuestfsBackend(p.ctx, p.imagePath, 0, 0, 1000, 1000), nil
 	default:
 		return nil, fmt.Errorf("image provisioner: unknown provisioner type: %s", p.provisionerType)
 	}
@@ -229,6 +233,7 @@ func (p *Provisioner) Run() (bool, error) {
 // Matches Python's _extract_via_backend() which catches RuntimeError and
 // re-raises as ImageError — keeping Go behavior identical.
 func ExtractViaBackend(
+	ctx context.Context,
 	rawPath, outputPath string,
 	partition int,
 	disabledDetectors []string,
@@ -255,10 +260,10 @@ func ExtractViaBackend(
 		if err != nil {
 			return "", fmt.Errorf("extract partition: cannot resolve cache directory: %w", err)
 		}
-		backend := loopmount.NewLoopMountBackend(rawPath, fsType, cacheDir)
+		backend := loopmount.NewLoopMountBackend(ctx, rawPath, fsType, cacheDir)
 		return backend.ExtractPartition(rawPath, outputPath, partition, disabledDetectors)
 	case ProvisionerTypeGuestFS:
-		backend := provisioner.NewGuestfsBackend(rawPath, 0, 0, 1000, 1000)
+		backend := provisioner.NewGuestfsBackend(ctx, rawPath, 0, 0, 1000, 1000)
 		return backend.ExtractPartition(rawPath, outputPath, partition, disabledDetectors)
 	default:
 		return "", fmt.Errorf("image provisioner: unknown provisioner type: %s", provisionerType)

@@ -2,19 +2,15 @@ package network
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
-	"os"
 	"strings"
-	"time"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/firewall"
+	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
 )
 
@@ -25,18 +21,19 @@ type Service struct {
 	firewallTracker *firewall.FirewallTracker
 }
 
-// NewService creates a Service. The db parameter is used to create
-// the firewall tracker internally (matching Python's FirewallTracker(repo.db)).
-// If db is nil, firewall operations are skipped (used for cleanup contexts).
-func NewService(repo Repository, db *sql.DB) *Service {
-	var tracker *firewall.FirewallTracker
-	if db != nil {
-		t, err := firewall.NewFirewallTracker(db)
-		if err == nil {
-			tracker = t
-		}
-	}
+// NewService creates a Service. The tracker parameter is the firewall tracker
+// to use for firewall operations. If nil, all firewall operations are skipped
+// (used for cleanup contexts). Callers can replace the tracker later via
+// SetFirewallTracker (e.g., after HostInit resolves the firewall backend).
+func NewService(repo Repository, tracker *firewall.FirewallTracker) *Service {
 	return &Service{repo: repo, firewallTracker: tracker}
+}
+
+// SetFirewallTracker replaces the firewall tracker.
+// Used by the API layer to inject the configured tracker after HostInit
+// resolves firewall_backend and iptables_xtcomment settings.
+func (s *Service) SetFirewallTracker(tracker *firewall.FirewallTracker) {
+	s.firewallTracker = tracker
 }
 
 // WithBatch runs a function inside a firewall batch context, flushing
@@ -44,19 +41,17 @@ func NewService(repo Repository, db *sql.DB) *Service {
 // with self._tracker.batch():
 //
 //	...
-func (s *Service) WithBatch(fn func()) {
+func (s *Service) WithBatch(ctx context.Context, fn func()) {
 	if s.firewallTracker == nil {
 		fn()
 		return
 	}
-	batch := s.firewallTracker.Batch()
-	defer batch.Close()
-	fn()
+	s.firewallTracker.WithBatch(ctx, fn)
 }
 
 // ── List ──
 
-func (s *Service) ListAll(ctx context.Context, verify bool) ([]*Network, error) {
+func (s *Service) ListAll(ctx context.Context, verify bool) ([]*model.Network, error) {
 	networks, err := s.repo.ListAll(ctx)
 	if err != nil {
 		return nil, err
@@ -67,7 +62,7 @@ func (s *Service) ListAll(ctx context.Context, verify bool) ([]*Network, error) 
 
 	var missingIDs []string
 	for _, network := range networks {
-		if !bridgeExists(network.Bridge) {
+		if !BridgeExists(ctx, network.Bridge) {
 			missingIDs = append(missingIDs, network.ID)
 		}
 	}
@@ -85,14 +80,14 @@ func (s *Service) ListAll(ctx context.Context, verify bool) ([]*Network, error) 
 
 func (s *Service) EnsureMVMChains(ctx context.Context) error {
 	if s.firewallTracker != nil {
-		s.firewallTracker.Initialize()
+		s.firewallTracker.Initialize(ctx)
 	}
 	return nil
 }
 
 func (s *Service) Initialize(ctx context.Context) error {
 	if s.firewallTracker != nil {
-		s.firewallTracker.Initialize()
+		s.firewallTracker.Initialize(ctx)
 	}
 	return nil
 }
@@ -101,72 +96,17 @@ func (s *Service) Teardown(ctx context.Context) error {
 	if s.firewallTracker == nil {
 		return nil
 	}
-	s.firewallTracker.Teardown()
+	s.firewallTracker.Teardown(ctx)
 	return nil
-}
-
-// detect_iptables_backend_conflict detects mixed iptables backend conflict.
-// Matches Python NetworkUtils.detect_iptables_backend_conflict().
-func (s *Service) DetectIPTablesBackendConflict() (bool, string) {
-	// Check current iptables backend version
-	result := system.RunCmdCompat(context.Background(), []string{"iptables", "--version"}, system.RunCmdOpts{Capture: true, Check: false})
-	currentBackend := "legacy"
-	if result != nil && strings.Contains(result.Stderr, "nf_tables") {
-		currentBackend = "nft"
-	}
-
-	legacyActive := false
-	func() {
-		legacyResult := system.RunCmdCompat(context.Background(), []string{"iptables-legacy", "-L", "-n", "-v"}, system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
-		if legacyResult != nil && legacyResult.Success {
-			for _, line := range strings.Split(legacyResult.Stdout, "\n") {
-				parts := strings.Fields(line)
-				if len(parts) >= 2 {
-					var pkts int
-					if _, err := fmt.Sscanf(parts[0], "%d", &pkts); err == nil && pkts > 0 {
-						legacyActive = true
-						break
-					}
-				}
-			}
-		}
-	}()
-
-	nftActive := false
-	func() {
-		nftResult := system.RunCmdCompat(context.Background(), []string{"iptables", "-L", "-n", "-v"}, system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
-		if nftResult != nil && nftResult.Success {
-			for _, line := range strings.Split(nftResult.Stdout, "\n") {
-				parts := strings.Fields(line)
-				if len(parts) >= 2 {
-					var pkts int
-					if _, err := fmt.Sscanf(parts[0], "%d", &pkts); err == nil && pkts > 0 {
-						nftActive = true
-						break
-					}
-				}
-			}
-		}
-	}()
-
-	hasConflict := legacyActive && nftActive
-	diagnosis := fmt.Sprintf("iptables backend: %s, legacy active: %t, nft active: %t", currentBackend, legacyActive, nftActive)
-	return hasConflict, diagnosis
-}
-
-// ── IP forwarding ──
-
-func (s *Service) EnsureIPForwarding(ctx context.Context) error {
-	return ensureIPForwarding()
 }
 
 // ── Bridge management ──
 
 func (s *Service) EnsureBridge(ctx context.Context, bridge, bridgeAddress string) error {
-	if bridgeExists(bridge) {
+	if BridgeExists(ctx, bridge) {
 		slog.Debug("Bridge already exists, reconciling state", "bridge", bridge)
 		var reconcileCmds []string
-		if !bridgeHasSubnet(bridge, bridgeAddress) {
+		if !bridgeHasSubnet(ctx, bridge, bridgeAddress) {
 			reconcileCmds = append(reconcileCmds, fmt.Sprintf("addr add %s dev %s", bridgeAddress, bridge))
 		}
 		reconcileCmds = append(reconcileCmds, fmt.Sprintf("link set %s up", bridge))
@@ -185,22 +125,17 @@ func (s *Service) EnsureBridge(ctx context.Context, bridge, bridgeAddress string
 		}
 	}
 
-	// ip forwarding has to be enabled
-	if err := s.EnsureIPForwarding(ctx); err != nil {
-		return err
-	}
-
 	slog.Info("Bridge created with address", "bridge", bridge, "address", bridgeAddress)
 	return nil
 }
 
 func (s *Service) RemoveBridge(ctx context.Context, bridge string, networkID string) error {
-	attachedTaps := getBridgeTaps(bridge)
+	attachedTaps := GetBridgeTaps(ctx, bridge)
 	for _, tap := range attachedTaps {
 		slog.Debug("Removing attached TAP from bridge", "tap", tap, "bridge", bridge)
 		s.RemoveTap(ctx, tap, bridge, networkID)
 	}
-	if err := removeRawBridge(bridge); err != nil {
+	if err := RemoveRawBridge(ctx, bridge); err != nil {
 		return errs.WrapMsg(errs.CodeNetworkBridgeFailed,
 			fmt.Sprintf("Failed to teardown bridge %s", bridge), err)
 	}
@@ -214,81 +149,77 @@ func (s *Service) EnsureNAT(ctx context.Context, bridge string, natGateways []st
 	// Initialize firewall chains
 	s.Initialize(ctx)
 
-	for _, gwIface := range natGateways {
-		masqRule := &FirewallRule{
-			TableName:    FirewallTableNat,
+	for _, gatewayIface := range natGateways {
+		masqRule := &model.FirewallRule{
+			TableName:    model.FirewallTableNat,
 			ChainName:    FirewallChainMVMPostrouting,
-			RuleType:     FirewallRuleMasquerade,
-			Target:       FirewallTargetMasquerade,
+			RuleType:     model.FirewallRuleTypeMasquerade,
+			Target:       model.FirewallTargetMasquerade,
 			NetworkID:    networkID,
-			Protocol:     FirewallProtocolAll,
+			Protocol:     model.FirewallProtocolAll,
 			Source:       subnet,
-			Destination:  string(FirewallWildcardAnyCIDR),
-			InInterface:  string(FirewallWildcardAnyInterface),
-			OutInterface: gwIface,
-			SPort:        int(FirewallPortAny),
-			DPort:        int(FirewallPortAny),
+			Destination:  string(model.FirewallWildcardAnyCIDR),
+			InInterface:  string(model.FirewallWildcardAnyInterface),
+			OutInterface: gatewayIface,
+			SPort:        int(model.FirewallPortAny),
+			DPort:        int(model.FirewallPortAny),
 			IsActive:     true,
 			NetworkName:  &bridge,
 		}
-		fwdOutRule := &FirewallRule{
-			TableName:    FirewallTableFilter,
+		fwdOutRule := &model.FirewallRule{
+			TableName:    model.FirewallTableFilter,
 			ChainName:    FirewallChainMVMForward,
-			RuleType:     FirewallRuleForwardOut,
-			Target:       FirewallTargetAccept,
+			RuleType:     model.FirewallRuleTypeForwardOut,
+			Target:       model.FirewallTargetAccept,
 			NetworkID:    networkID,
-			Protocol:     FirewallProtocolAll,
+			Protocol:     model.FirewallProtocolAll,
 			Source:       subnet,
-			Destination:  string(FirewallWildcardAnyCIDR),
+			Destination:  string(model.FirewallWildcardAnyCIDR),
 			InInterface:  bridge,
-			OutInterface: gwIface,
-			SPort:        int(FirewallPortAny),
-			DPort:        int(FirewallPortAny),
+			OutInterface: gatewayIface,
+			SPort:        int(model.FirewallPortAny),
+			DPort:        int(model.FirewallPortAny),
 			IsActive:     true,
 			NetworkName:  &bridge,
 		}
-		fwdInRule := &FirewallRule{
-			TableName:    FirewallTableFilter,
+		fwdInRule := &model.FirewallRule{
+			TableName:    model.FirewallTableFilter,
 			ChainName:    FirewallChainMVMForward,
-			RuleType:     FirewallRuleForwardIn,
-			Target:       FirewallTargetAccept,
+			RuleType:     model.FirewallRuleTypeForwardIn,
+			Target:       model.FirewallTargetAccept,
 			NetworkID:    networkID,
-			Protocol:     FirewallProtocolAll,
-			Source:       string(FirewallWildcardAnyCIDR),
+			Protocol:     model.FirewallProtocolAll,
+			Source:       string(model.FirewallWildcardAnyCIDR),
 			Destination:  subnet,
-			InInterface:  gwIface,
+			InInterface:  gatewayIface,
 			OutInterface: bridge,
-			SPort:        int(FirewallPortAny),
-			DPort:        int(FirewallPortAny),
+			SPort:        int(model.FirewallPortAny),
+			DPort:        int(model.FirewallPortAny),
 			IsActive:     true,
 			NetworkName:  &bridge,
 		}
 
 		if s.firewallTracker != nil {
-			context := fmt.Sprintf("%s:%s", bridge, gwIface)
-			result := s.firewallTracker.EnsureRule(toFWRule(masqRule), context)
+			context := fmt.Sprintf("%s:%s", bridge, gatewayIface)
+			result := s.firewallTracker.EnsureRule(ctx, *masqRule, context)
 			if !result.Success {
-				errMsg := errorMessageString(result.ErrorMessage)
+				errMsg := infra.DerefOrZero(result.ErrorMessage)
 				return errs.Wrap(errs.CodeNetworkNATFailed,
-					fmt.Errorf("Failed to add MASQUERADE rule for %s via %s: %s", bridge, gwIface, errMsg))
+					fmt.Errorf("Failed to add MASQUERADE rule for %s via %s: %s", bridge, gatewayIface, errMsg))
 			}
-			result = s.firewallTracker.EnsureRule(toFWRule(fwdOutRule), context)
+			result = s.firewallTracker.EnsureRule(ctx, *fwdOutRule, context)
 			if !result.Success {
-				errMsg := errorMessageString(result.ErrorMessage)
+				errMsg := infra.DerefOrZero(result.ErrorMessage)
 				return errs.Wrap(errs.CodeNetworkNATFailed,
-					fmt.Errorf("Failed to add FORWARD out rule for %s via %s: %s", bridge, gwIface, errMsg))
+					fmt.Errorf("Failed to add FORWARD out rule for %s via %s: %s", bridge, gatewayIface, errMsg))
 			}
-			result = s.firewallTracker.EnsureRule(toFWRule(fwdInRule), context)
+			result = s.firewallTracker.EnsureRule(ctx, *fwdInRule, context)
 			if !result.Success {
-				errMsg := errorMessageString(result.ErrorMessage)
+				errMsg := infra.DerefOrZero(result.ErrorMessage)
 				return errs.Wrap(errs.CodeNetworkNATFailed,
-					fmt.Errorf("Failed to add FORWARD in rule for %s via %s: %s", bridge, gwIface, errMsg))
+					fmt.Errorf("Failed to add FORWARD in rule for %s via %s: %s", bridge, gatewayIface, errMsg))
 			}
 		}
-	}
-
-	if err := s.EnsureIPForwarding(ctx); err != nil {
-		return err
 	}
 
 	slog.Info("NAT rules configured for bridge",
@@ -302,10 +233,10 @@ func (s *Service) RemoveNAT(ctx context.Context, bridge string, natGateways []st
 	effectiveGateways := natGateways
 	effectiveSubnet := subnet
 
-	// Python: tries resolver.by_name(bridge) to resolve missing values, catching ALL exceptions
-	// (including DB errors) silently — any error is simply ignored.
+	// Matches Python: tries resolver.by_name(bridge), catching ALL exceptions silently
 	if effectiveGateways == nil || effectiveSubnet == "" {
-		network, err := s.repo.GetByName(ctx, bridge)
+		resolver := NewResolver(s.repo, nil)
+		network, err := resolver.ByName(ctx, bridge)
 		if err == nil && network != nil {
 			if effectiveSubnet == "" {
 				effectiveSubnet = network.Subnet
@@ -326,7 +257,7 @@ func (s *Service) RemoveNAT(ctx context.Context, bridge string, natGateways []st
 	}
 
 	// Check for attached TAPs — matches Python's NetworkError
-	attachedTaps := getBridgeTaps(bridge)
+	attachedTaps := GetBridgeTaps(ctx, bridge)
 	if len(attachedTaps) > 0 {
 		if !force {
 			return errs.NetworkError(
@@ -339,53 +270,53 @@ func (s *Service) RemoveNAT(ctx context.Context, bridge string, natGateways []st
 	}
 
 	// Build rules to remove
-	var rulesToRemove []FirewallRule
+	var rulesToRemove []model.FirewallRule
 	for _, gwIface := range effectiveGateways {
-		rulesToRemove = append(rulesToRemove, FirewallRule{
-			TableName:    FirewallTableNat,
+		rulesToRemove = append(rulesToRemove, model.FirewallRule{
+			TableName:    model.FirewallTableNat,
 			ChainName:    FirewallChainMVMPostrouting,
-			RuleType:     FirewallRuleMasquerade,
-			Target:       FirewallTargetMasquerade,
+			RuleType:     model.FirewallRuleTypeMasquerade,
+			Target:       model.FirewallTargetMasquerade,
 			NetworkID:    networkID,
-			Protocol:     FirewallProtocolAll,
+			Protocol:     model.FirewallProtocolAll,
 			Source:       effectiveSubnet,
-			Destination:  string(FirewallWildcardAnyCIDR),
-			InInterface:  string(FirewallWildcardAnyInterface),
+			Destination:  string(model.FirewallWildcardAnyCIDR),
+			InInterface:  string(model.FirewallWildcardAnyInterface),
 			OutInterface: gwIface,
-			SPort:        int(FirewallPortAny),
-			DPort:        int(FirewallPortAny),
+			SPort:        int(model.FirewallPortAny),
+			DPort:        int(model.FirewallPortAny),
 			IsActive:     true,
 			NetworkName:  &bridge,
 		})
-		rulesToRemove = append(rulesToRemove, FirewallRule{
-			TableName:    FirewallTableFilter,
+		rulesToRemove = append(rulesToRemove, model.FirewallRule{
+			TableName:    model.FirewallTableFilter,
 			ChainName:    FirewallChainMVMForward,
-			RuleType:     FirewallRuleForwardOut,
-			Target:       FirewallTargetAccept,
+			RuleType:     model.FirewallRuleTypeForwardOut,
+			Target:       model.FirewallTargetAccept,
 			NetworkID:    networkID,
-			Protocol:     FirewallProtocolAll,
+			Protocol:     model.FirewallProtocolAll,
 			Source:       effectiveSubnet,
-			Destination:  string(FirewallWildcardAnyCIDR),
+			Destination:  string(model.FirewallWildcardAnyCIDR),
 			InInterface:  bridge,
 			OutInterface: gwIface,
-			SPort:        int(FirewallPortAny),
-			DPort:        int(FirewallPortAny),
+			SPort:        int(model.FirewallPortAny),
+			DPort:        int(model.FirewallPortAny),
 			IsActive:     true,
 			NetworkName:  &bridge,
 		})
-		rulesToRemove = append(rulesToRemove, FirewallRule{
-			TableName:    FirewallTableFilter,
+		rulesToRemove = append(rulesToRemove, model.FirewallRule{
+			TableName:    model.FirewallTableFilter,
 			ChainName:    FirewallChainMVMForward,
-			RuleType:     FirewallRuleForwardIn,
-			Target:       FirewallTargetAccept,
+			RuleType:     model.FirewallRuleTypeForwardIn,
+			Target:       model.FirewallTargetAccept,
 			NetworkID:    networkID,
-			Protocol:     FirewallProtocolAll,
-			Source:       string(FirewallWildcardAnyCIDR),
+			Protocol:     model.FirewallProtocolAll,
+			Source:       string(model.FirewallWildcardAnyCIDR),
 			Destination:  effectiveSubnet,
 			InInterface:  gwIface,
 			OutInterface: bridge,
-			SPort:        int(FirewallPortAny),
-			DPort:        int(FirewallPortAny),
+			SPort:        int(model.FirewallPortAny),
+			DPort:        int(model.FirewallPortAny),
 			IsActive:     true,
 			NetworkName:  &bridge,
 		})
@@ -393,13 +324,13 @@ func (s *Service) RemoveNAT(ctx context.Context, bridge string, natGateways []st
 
 	// Batch remove all rules (non-fatal on failure — matches Python's behavior)
 	if s.firewallTracker != nil {
-		fwRules := make([]firewall.FirewallRule, len(rulesToRemove))
+		fwRules := make([]model.FirewallRule, len(rulesToRemove))
 		for i := range rulesToRemove {
-			fwRules[i] = toFWRule(&rulesToRemove[i])
+			fwRules[i] = rulesToRemove[i]
 		}
-		res := s.firewallTracker.BatchRemoveRules(fwRules)
+		res := s.firewallTracker.BatchRemoveRules(ctx, fwRules)
 		if !res.Success {
-			msg := errorMessageString(res.ErrorMessage)
+			msg := infra.DerefOrZero(res.ErrorMessage)
 			slog.Warn("Failed to remove NAT rules",
 				"bridge", bridge,
 				"error", msg)
@@ -416,8 +347,8 @@ func (s *Service) RemoveNAT(ctx context.Context, bridge string, natGateways []st
 // ── TAP management ──
 
 func (s *Service) EnsureTap(ctx context.Context, tap, bridge, networkID, subnet string) error {
-	if tapExists(tap) {
-		currentBridge := getTapBridge(tap)
+	if TapExists(ctx, tap) {
+		currentBridge := GetTapBridge(ctx, tap)
 		if currentBridge == bridge {
 			slog.Debug("TAP device already attached to bridge", "tap", tap, "bridge", bridge)
 		} else if currentBridge != "" {
@@ -456,31 +387,40 @@ func (s *Service) EnsureTap(ctx context.Context, tap, bridge, networkID, subnet 
 
 	s.Initialize(ctx)
 
-	fwdBridgeToTap := &FirewallRule{
-		TableName:    FirewallTableFilter,
+	// Matches Python ensure_tap exactly:
+	//   forward_bridge_to_tap: source=subnet or ANY_CIDR, destination=ANY_CIDR
+	//   forward_tap_to_bridge: source=ANY_CIDR,           destination=subnet or ANY_CIDR
+	wildcard := string(model.FirewallWildcardAnyCIDR)
+
+	fwdBridgeToTap := &model.FirewallRule{
+		TableName:    model.FirewallTableFilter,
 		ChainName:    FirewallChainMVMForward,
-		RuleType:     FirewallRuleForwardOut,
-		Target:       FirewallTargetAccept,
+		RuleType:     model.FirewallRuleTypeForwardOut,
+		Target:       model.FirewallTargetAccept,
 		NetworkID:    networkID,
-		Protocol:     FirewallProtocolAll,
+		Protocol:     model.FirewallProtocolAll,
+		Source:       wildcard, // overwritten below if subnet != ""
+		Destination:  wildcard, // ALWAYS wildcard — matches Python
 		InInterface:  bridge,
 		OutInterface: tap,
-		SPort:        int(FirewallPortAny),
-		DPort:        int(FirewallPortAny),
+		SPort:        int(model.FirewallPortAny),
+		DPort:        int(model.FirewallPortAny),
 		IsActive:     true,
 		NetworkName:  &bridge,
 	}
-	fwdTapToBridge := &FirewallRule{
-		TableName:    FirewallTableFilter,
+	fwdTapToBridge := &model.FirewallRule{
+		TableName:    model.FirewallTableFilter,
 		ChainName:    FirewallChainMVMForward,
-		RuleType:     FirewallRuleForwardIn,
-		Target:       FirewallTargetAccept,
+		RuleType:     model.FirewallRuleTypeForwardIn,
+		Target:       model.FirewallTargetAccept,
 		NetworkID:    networkID,
-		Protocol:     FirewallProtocolAll,
+		Protocol:     model.FirewallProtocolAll,
+		Source:       wildcard, // ALWAYS wildcard — matches Python
+		Destination:  wildcard, // overwritten below if subnet != ""
 		InInterface:  tap,
 		OutInterface: bridge,
-		SPort:        int(FirewallPortAny),
-		DPort:        int(FirewallPortAny),
+		SPort:        int(model.FirewallPortAny),
+		DPort:        int(model.FirewallPortAny),
 		IsActive:     true,
 		NetworkName:  &bridge,
 	}
@@ -488,22 +428,19 @@ func (s *Service) EnsureTap(ctx context.Context, tap, bridge, networkID, subnet 
 	if subnet != "" {
 		fwdBridgeToTap.Source = subnet
 		fwdTapToBridge.Destination = subnet
-	} else {
-		fwdBridgeToTap.Source = string(FirewallWildcardAnyCIDR)
-		fwdTapToBridge.Destination = string(FirewallWildcardAnyCIDR)
 	}
 
 	if s.firewallTracker != nil {
-		result := s.firewallTracker.EnsureRule(toFWRule(fwdBridgeToTap), fmt.Sprintf("tap:%s", tap))
+		result := s.firewallTracker.EnsureRule(ctx, *fwdBridgeToTap, fmt.Sprintf("tap:%s", tap))
 		if !result.Success {
-			errMsg := errorMessageString(result.ErrorMessage)
+			errMsg := infra.DerefOrZero(result.ErrorMessage)
 			return errs.Wrap(errs.CodeNetworkFirewallFailed,
 				fmt.Errorf("Failed to add FORWARD rule for bridge %s to TAP %s: %s", bridge, tap, errMsg))
 		}
-		result = s.firewallTracker.EnsureRule(toFWRule(fwdTapToBridge), fmt.Sprintf("tap:%s", tap))
+		result = s.firewallTracker.EnsureRule(ctx, *fwdTapToBridge, fmt.Sprintf("tap:%s", tap))
 		if !result.Success {
-			s.firewallTracker.RemoveRule(toFWRule(fwdBridgeToTap))
-			errMsg := errorMessageString(result.ErrorMessage)
+			s.firewallTracker.RemoveRule(ctx, *fwdBridgeToTap)
+			errMsg := infra.DerefOrZero(result.ErrorMessage)
 			return errs.Wrap(errs.CodeNetworkFirewallFailed,
 				fmt.Errorf("Failed to add FORWARD rule for TAP %s to bridge %s: %s", tap, bridge, errMsg))
 		}
@@ -513,48 +450,45 @@ func (s *Service) EnsureTap(ctx context.Context, tap, bridge, networkID, subnet 
 }
 
 func (s *Service) RemoveTap(ctx context.Context, tap, bridge string, networkID string) error {
-	if !tapExists(tap) {
+	if !TapExists(ctx, tap) {
 		slog.Debug("TAP device does not exist, skipping removal", "tap", tap)
 		return nil
 	}
 
 	effectiveBridge := bridge
 	if effectiveBridge == "" {
-		effectiveBridge = getTapBridge(tap)
+		effectiveBridge = GetTapBridge(ctx, tap)
 	}
 
-	if effectiveBridge != "" && s.firewallTracker != nil {
-		repo := s.firewallTracker.Repo()
-		if fwRepo, ok := repo.(fwRuleByInterfaceLister); ok {
-			dbRules, err := fwRepo.GetByNetworkIDAndInterface(networkID, tap, false)
-			if err == nil && len(dbRules) > 0 {
-				valRules := make([]firewall.FirewallRule, len(dbRules))
-				for i, r := range dbRules {
-					valRules[i] = *r
-				}
-				res := s.firewallTracker.BatchRemoveRules(valRules)
-				if !res.Success {
-					msg := errorMessageString(res.ErrorMessage)
-					slog.Warn("Failed to remove FORWARD rules for TAP",
-						"tap", tap,
-						"error", msg)
-				}
+	if effectiveBridge != "" {
+		dbRules, err := s.firewallTracker.GetByNetworkIDAndInterface(ctx, networkID, tap, false)
+		if err == nil && len(dbRules) > 0 {
+			valRules := make([]model.FirewallRule, len(dbRules))
+			for i, r := range dbRules {
+				valRules[i] = *r
+			}
+			res := s.firewallTracker.BatchRemoveRules(ctx, valRules)
+			if !res.Success {
+				msg := infra.DerefOrZero(res.ErrorMessage)
+				slog.Warn("Failed to remove FORWARD rules for TAP",
+					"tap", tap,
+					"error", msg)
 			}
 		}
-	} else if effectiveBridge == "" {
+	} else {
 		slog.Warn("Could not determine bridge for TAP, skipping rule cleanup", "tap", tap)
 	}
 
-	if err := removeRawTap(tap); err != nil {
+	if err := RemoveRawTap(ctx, tap); err != nil {
 		return err
 	}
 	slog.Info("TAP device removed", "tap", tap)
 	return nil
 }
 
-// ── Network removal ──
+// ── model.Network removal ──
 
-func (s *Service) Remove(ctx context.Context, network *Network, force bool) error {
+func (s *Service) Remove(ctx context.Context, network *model.Network, force bool) error {
 	// 1. Tear down NAT — only catch NetworkError, matching Python's behavior
 	if network.NATEnabled {
 		if err := s.RemoveNAT(ctx, network.Bridge, NatGatewaysList(network), network.Subnet, network.ID, force); err != nil {
@@ -585,7 +519,7 @@ func (s *Service) Remove(ctx context.Context, network *Network, force bool) erro
 			}
 		}
 		return errs.NetworkError(
-			fmt.Sprintf("Network referenced by VMs: %s", strings.Join(vmNames, ", ")))
+			fmt.Sprintf("model.Network referenced by VMs: %s", strings.Join(vmNames, ", ")))
 	}
 
 	if hasVMs {
@@ -594,7 +528,7 @@ func (s *Service) Remove(ctx context.Context, network *Network, force bool) erro
 	return s.repo.Delete(ctx, network.ID)
 }
 
-func (s *Service) RemoveMany(ctx context.Context, networks []*Network, force bool) error {
+func (s *Service) RemoveMany(ctx context.Context, networks []*model.Network, force bool) error {
 	for _, n := range networks {
 		if err := s.Remove(ctx, n, force); err != nil {
 			return err
@@ -611,17 +545,12 @@ func (s *Service) RemoveMany(ctx context.Context, networks []*Network, force boo
 //   - added: rules that were created (command_executed was not None)
 //   - verified: rules that already existed (command_executed is None)
 //   - orphaned: host iptables rules referencing the network but absent from the DB
-func (s *Service) SyncIPTablesRules(ctx context.Context, network *Network) (*SyncResult, error) {
-	// 1. Get active DB rules for the network through the tracker's repo.
-	var dbRules []*firewall.FirewallRule
+func (s *Service) SyncIPTablesRules(ctx context.Context, network *model.Network) (*SyncResult, error) {
+	// 1. Get active DB rules for the network through the tracker.
+	var dbRules []*model.FirewallRule
 	if s.firewallTracker != nil {
-		repo := s.firewallTracker.Repo()
-		fwRepo, ok := repo.(fwRuleLister)
-		if !ok {
-			return nil, fmt.Errorf("firewall tracker repo does not implement GetByNetworkID")
-		}
 		var err error
-		dbRules, err = fwRepo.GetByNetworkID(network.ID, true)
+		dbRules, err = s.firewallTracker.GetByNetworkID(ctx, network.ID, true)
 		if err != nil {
 			return nil, err
 		}
@@ -635,9 +564,9 @@ func (s *Service) SyncIPTablesRules(ctx context.Context, network *Network) (*Syn
 	//                       for rule in db_rules: self._tracker.ensure_rule(rule)
 	//    Python does NOT pass a context parameter to ensure_rule.
 	if s.firewallTracker != nil && len(dbRules) > 0 {
-		s.WithBatch(func() {
+		s.WithBatch(ctx, func() {
 			for _, rule := range dbRules {
-				result := s.firewallTracker.EnsureRule(*rule, "")
+				result := s.firewallTracker.EnsureRule(ctx, *rule, "")
 				if result.Success {
 					// Python: if result.command_executed is None → verified, else → added
 					if result.CommandExecuted == nil {
@@ -653,7 +582,7 @@ func (s *Service) SyncIPTablesRules(ctx context.Context, network *Network) (*Syn
 	// 3. Count orphaned rules
 	orphaned := 0
 	if s.firewallTracker != nil {
-		orphaned = s.firewallTracker.CountOrphanedRules(firewall.NetworkRef{ID: network.ID, Name: network.Name})
+		orphaned = s.firewallTracker.CountOrphanedRules(ctx, network)
 	}
 
 	return &SyncResult{
@@ -667,13 +596,13 @@ func (s *Service) SyncIPTablesRules(ctx context.Context, network *Network) (*Syn
 // Matches Python: Service.cleanup_orphaned_bridges(db_networks) exactly.
 // Python: @staticmethod cleanup_orphaned_bridges(db_networks: list[NetworkItem]) -> int
 
-func (s *Service) CleanupOrphanedBridges(dbNetworks []*Network) int {
+func (s *Service) CleanupOrphanedBridges(ctx context.Context, dbNetworks []*model.Network) int {
 	dbBridgeNames := make(map[string]bool)
 	for _, n := range dbNetworks {
 		dbBridgeNames[n.Bridge] = true
 	}
 
-	hostBridges := getSystemBridges()
+	hostBridges := GetSystemBridges(ctx)
 	count := 0
 	for _, bridge := range hostBridges {
 		if !strings.HasPrefix(bridge, "mvm-") {
@@ -683,12 +612,12 @@ func (s *Service) CleanupOrphanedBridges(dbNetworks []*Network) int {
 			continue
 		}
 		err := func() error {
-			for _, slave := range getBridgeSlaves(bridge) {
-				if err := removeRawTap(slave); err != nil {
+			for _, slave := range GetBridgeSlaves(ctx, bridge) {
+				if err := RemoveRawTap(ctx, slave); err != nil {
 					return err
 				}
 			}
-			return removeRawBridge(bridge)
+			return RemoveRawBridge(ctx, bridge)
 		}()
 		if err != nil {
 			slog.Warn("Failed to remove orphaned bridge", "bridge", bridge, "error", err)
@@ -703,15 +632,15 @@ func (s *Service) CleanupOrphanedBridges(dbNetworks []*Network) int {
 // ── Remove stale interfaces ──
 // Matches Python: Service.remove_stale_interfaces()
 
-func (s *Service) RemoveStaleInterfaces(prefix string) []string {
+func (s *Service) RemoveStaleInterfaces(ctx context.Context, prefix string) []string {
 	var summary []string
-	bridges := getSystemBridges()
+	bridges := GetSystemBridges(ctx)
 	for _, bridge := range bridges {
 		if !strings.HasPrefix(bridge, prefix) {
 			continue
 		}
-		for _, slave := range getBridgeSlaves(bridge) {
-			if err := removeRawTap(slave); err != nil {
+		for _, slave := range GetBridgeSlaves(ctx, bridge) {
+			if err := RemoveRawTap(ctx, slave); err != nil {
 				summary = append(summary, fmt.Sprintf("Warning: failed to remove interface '%s': %s", slave, err))
 			} else {
 				summary = append(summary, fmt.Sprintf("Removed interface '%s'", slave))
@@ -724,123 +653,42 @@ func (s *Service) RemoveStaleInterfaces(prefix string) []string {
 // RemoveRawTap removes a TAP device by name.
 // Matches Python's Service.remove_raw_tap() @staticmethod.
 func (s *Service) RemoveRawTap(ctx context.Context, tap string) error {
-	return removeRawTap(tap)
+	return RemoveRawTap(ctx, tap)
 }
 
 // RemoveRawBridge removes a bridge interface by name.
 // Matches Python's Service.remove_raw_bridge() @staticmethod.
 func (s *Service) RemoveRawBridge(ctx context.Context, bridge string) error {
-	return removeRawBridge(bridge)
+	return RemoveRawBridge(ctx, bridge)
 }
 
 // ── nftables availability check ──
 // Matches Python Service.check_nftables_available()
 
-func (s *Service) CheckNFTablesAvailable() bool {
-	result := system.RunCmdCompat(context.Background(), []string{"nft", "--version"},
+func (s *Service) CheckNFTablesAvailable(ctx context.Context) bool {
+	result := system.RunCmdCompat(ctx, []string{"nft", "--version"},
 		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
 	if result == nil || !result.Success {
 		slog.Debug("nftables not available: nft --version failed")
 		return false
 	}
 
-	system.RunCmdCompat(context.Background(), []string{"modprobe", "nft_chain_nat"},
+	system.RunCmdCompat(ctx, []string{"modprobe", "nft_chain_nat"},
 		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
 
 	test := "add table inet __mvm_nft_test\n" +
 		"add chain inet __mvm_nft_test test_post { type nat hook postrouting priority srcnat; policy accept; }\n" +
 		"add rule inet __mvm_nft_test test_post masquerade\n"
-	testResult := system.RunCmdCompat(context.Background(), []string{"nft", "-f", "-"},
+	testResult := system.RunCmdCompat(ctx, []string{"nft", "-f", "-"},
 		system.RunCmdOpts{Capture: true, Privileged: true, Check: false, Input: test})
 
-	system.RunCmdCompat(context.Background(), []string{"nft", "delete", "table", "inet", "__mvm_nft_test"},
+	system.RunCmdCompat(ctx, []string{"nft", "delete", "table", "inet", "__mvm_nft_test"},
 		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
 
 	if testResult == nil || !testResult.Success {
 		slog.Debug("nftables MASQUERADE not available (kernel module nft_chain_nat may be missing)")
 	}
 	return testResult != nil && testResult.Success
-}
-
-// ── Flush ARP ──
-
-func (s *Service) FlushARP(bridge string) {
-	system.RunCmdCompat(context.Background(), []string{"ip", "neigh", "flush", "dev", bridge},
-		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
-}
-
-// ComputeBridgeAddress returns gateway IP with subnet prefix.
-// Matches Python's compute_bridge_address which raises ValueError on invalid subnet.
-func ComputeBridgeAddress(gateway, subnet string) (string, error) {
-	_, ipnet, err := net.ParseCIDR(subnet)
-	if err != nil {
-		return "", fmt.Errorf("invalid subnet: %s", subnet)
-	}
-	ones, _ := ipnet.Mask.Size()
-	return fmt.Sprintf("%s/%d", gateway, ones), nil
-}
-
-func ComputeBridgeName(networkName string) string {
-	cliName := "mvm"
-	raw := fmt.Sprintf("%s-%s", cliName, networkName)
-	if len(raw) <= 15 {
-		return raw
-	}
-
-	hashLen := 8
-	prefix := fmt.Sprintf("%s-", cliName)
-	maxName := 15 - len(prefix) - hashLen - 1
-	nameTruncated := networkName
-	if maxName > 0 && len(networkName) > maxName {
-		nameTruncated = networkName[:maxName]
-	}
-	shortHash := sha256Hex(networkName)[:hashLen]
-	return fmt.Sprintf("%s%s-%s", prefix, nameTruncated, shortHash)
-}
-
-func sha256Hex(s string) string {
-	h := sha256.Sum256([]byte(s))
-	return fmt.Sprintf("%x", h)
-}
-
-// GenerateMAC generates a MAC address with the given prefix.
-// Matches Python's generate_mac which uses 4 random bytes + uppercase.
-func GenerateMAC(macPrefix string) string {
-	b := make([]byte, 4)
-	if _, err := rand.Read(b); err != nil {
-		b = []byte{
-			byte(time.Now().UnixNano()),
-			byte(os.Getpid()),
-			byte(os.Getppid()),
-			0x00, // 4th byte for the additional random byte
-		}
-	}
-	return strings.ToUpper(fmt.Sprintf("%s:%02x:%02x:%02x:%02x", macPrefix, b[0], b[1], b[2], b[3]))
-}
-
-func GenerateTAPName(networkName, vmName string) string {
-	raw := fmt.Sprintf("%s-%s", networkName, vmName)
-	hash := sha256Hex(raw)[:11]
-	return fmt.Sprintf("mvm-%s", hash)
-}
-
-func getIPNet(subnet string) *net.IPNet {
-	_, ipnet, err := net.ParseCIDR(subnet)
-	if err != nil {
-		return nil
-	}
-	return ipnet
-}
-
-// ── Error helpers ──
-
-// errorMessageString returns the error message as a string, handling nil.
-// Returns empty string for nil, which is Go's natural zero value.
-func errorMessageString(msg *string) string {
-	if msg == nil {
-		return ""
-	}
-	return *msg
 }
 
 // isNetworkError checks if an error is a NetworkError-type error.
@@ -865,7 +713,3 @@ func isNetworkError(err error) bool {
 	}
 	return false
 }
-
-// ── IP conversion helpers (shared with lease_service.go) ──
-// ipToUint32 and intToIP are defined in lease_service.go
-// TODO(verdict#33): move ipToUint32, intToIP to infra/

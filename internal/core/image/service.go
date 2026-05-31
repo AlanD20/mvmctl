@@ -231,6 +231,7 @@ func (s *Service) resolveImagePath(image *ImageItem) string {
 // OptimizeImage shrinks and compresses an image. Returns fully constructed ImageItem and warnings.
 // Matches Python's Service.optimize_image() parameter order EXACTLY.
 func (s *Service) OptimizeImage(
+	ctx context.Context,
 	imagePath string,
 	imageID string,
 	spec *ImageSpec,
@@ -240,17 +241,17 @@ func (s *Service) OptimizeImage(
 	warnings []string,
 ) (*ImageItem, []string, error) {
 	t0 := time.Now()
-	fsType, resolveErr := s.resolveFSType(imagePath)
+	fsType, resolveErr := s.resolveFSType(ctx, imagePath)
 	if resolveErr != nil {
 		return nil, warnings, resolveErr
 	}
-	fsUUID := s.getFilesystemUUID(imagePath)
+	fsUUID := s.getFilesystemUUID(ctx, imagePath)
 	t1 := time.Now()
 	slog.Debug("fs detect", "elapsed_seconds", t1.Sub(t0).Seconds())
 
 	// ── Detect OS type from the image (always, even when skipping) ──
 	detectedOS := ""
-	dp := NewProvisioner(imagePath, provisionerType, fsType, s.cacheDir)
+	dp := NewProvisioner(ctx, imagePath, provisionerType, fsType, s.cacheDir)
 	osResult, osErr := dp.DetectOS()
 	if osErr == nil {
 		detectedOS = osResult
@@ -299,7 +300,7 @@ func (s *Service) OptimizeImage(
 	// ── Filesystem conversion (btrfs → ext4) ──────────────────────
 	if fsType == "btrfs" {
 		slog.Info("Converting filesystem from btrfs to ext4...")
-		cp := NewProvisioner(imagePath, provisionerType, fsType, s.cacheDir)
+		cp := NewProvisioner(ctx, imagePath, provisionerType, fsType, s.cacheDir)
 		cp.ConvertTo("ext4")
 		cp.Run() // error intentionally ignored — matches Python where this is inside OptimizeImage's own call path
 		fsType = "ext4"
@@ -310,7 +311,7 @@ func (s *Service) OptimizeImage(
 	preShrinkInfo, _ := os.Stat(imagePath)
 	preShrinkSize := preShrinkInfo.Size()
 
-	p := NewProvisioner(imagePath, provisionerType, fsType, s.cacheDir)
+	p := NewProvisioner(ctx, imagePath, provisionerType, fsType, s.cacheDir)
 	p.Deblob()
 	if FSCanShrink[fsType] {
 		p.Shrink()
@@ -345,7 +346,7 @@ func (s *Service) OptimizeImage(
 
 	// ── Detect OS type from the optimized image ──────────────────
 	var distro string
-	dp2 := NewProvisioner(imagePath, provisionerType, fsType, s.cacheDir)
+	dp2 := NewProvisioner(ctx, imagePath, provisionerType, fsType, s.cacheDir)
 	osResult2, osErr2 := dp2.DetectOS()
 	if osErr2 == nil {
 		distro = osResult2
@@ -462,6 +463,7 @@ func (s *Service) DownloadImage(
 // Handles all formats: qcow2, vhd, vhdx, raw, tar-rootfs, squashfs.
 // partition is optional (nil = auto-detect), matching Python's partition: int | None = None.
 func (s *Service) ExtractImage(
+	ctx context.Context,
 	sourcePath string,
 	imageID string,
 	outputDir string,
@@ -474,21 +476,21 @@ func (s *Service) ExtractImage(
 
 	switch format {
 	case "qcow2", "vhd", "vhdx", "raw":
-		return s.extractDiskImage(sourcePath, finalPath, format, partition, disabledDetectors, provisionerType)
+		return s.extractDiskImage(ctx, sourcePath, finalPath, format, partition, disabledDetectors, provisionerType)
 	case "tar-rootfs":
-		if err := s.createExt4FromTar(sourcePath, finalPath, "dynamic"); err != nil {
+		if err := s.createExt4FromTar(ctx, sourcePath, finalPath, "dynamic"); err != nil {
 			return "", err
 		}
 		return finalPath, nil
 	case "squashfs":
-		return s.handleSquashfs(sourcePath, finalPath, "dynamic")
+		return s.handleSquashfs(ctx, sourcePath, finalPath, "dynamic")
 	default:
 		return "", NewImageError(fmt.Sprintf("Unknown format: %s", format))
 	}
 }
 
 // MaterializeTo performs fast durable copy from tmpfs cache to destination.
-func (s *Service) MaterializeTo(imageID, fsType, outputPath string) error {
+func (s *Service) MaterializeTo(ctx context.Context, imageID, fsType, outputPath string) error {
 	cachedPath := filepath.Join(s.warmDir, fmt.Sprintf("%s.%s", imageID, fsType))
 	if _, err := os.Stat(cachedPath); os.IsNotExist(err) {
 		return NewImageError(fmt.Sprintf("Image not in cache: %s", imageID))
@@ -497,10 +499,10 @@ func (s *Service) MaterializeTo(imageID, fsType, outputPath string) error {
 	os.MkdirAll(filepath.Dir(outputPath), 0755)
 
 	// Try reflink copy (matching Python: run_cmd(["cp", "--reflink=auto", ...]) with ProcessError fallback)
-	result := system.RunCmdCompat(context.Background(), []string{"cp", "--reflink=auto", "--sparse=always", cachedPath, outputPath}, system.DefaultRunCmdOptions())
+	result := system.RunCmdCompat(ctx, []string{"cp", "--reflink=auto", "--sparse=always", cachedPath, outputPath}, system.DefaultRunCmdOptions())
 	combined := string(result.StdoutBytes) + string(result.StderrBytes)
 	if result.Err != nil {
-		if err := s.copyWithDD(cachedPath, outputPath, true); err != nil {
+		if err := s.copyWithDD(ctx, cachedPath, outputPath, true); err != nil {
 			return NewImageError(fmt.Sprintf("cp and dd fallback both failed: cp: %s; dd: %s", combined, err))
 		}
 	}
@@ -562,6 +564,7 @@ func (s *Service) EnsureCached(images []*ImageItem) ([]string, error) {
 // Matches Python's Service.get_specs_for() EXACTLY with two-phase resolution.
 // This is a package-level function (not a method) matching Python's pattern.
 func GetSpecsFor(
+	ctx context.Context,
 	types []string,
 	version string,
 	arch string,
@@ -646,7 +649,7 @@ func GetSpecsFor(
 
 			availableHTTPTypes[type_] = true
 
-			versionResult := resolver.Resolve([]map[string]any{config}, arch, cacheTTLSeconds, ciVersion)
+			versionResult := resolver.Resolve(ctx, []map[string]any{config}, arch, cacheTTLSeconds, ciVersion)
 			listings := versionResult[type_]
 			if len(listings) == 0 {
 				continue
@@ -708,7 +711,7 @@ func GetSpecsFor(
 				continue // already handled above
 			}
 
-			versionResult := resolver.Resolve([]map[string]any{config}, arch, cacheTTLSeconds, ciVersion)
+			versionResult := resolver.Resolve(ctx, []map[string]any{config}, arch, cacheTTLSeconds, ciVersion)
 			listings := versionResult[type_]
 			if len(listings) == 0 {
 				continue
@@ -1293,7 +1296,7 @@ func (s *Service) validateTar(path string) error {
 // Tries the selected backend first, falls back to loop-mount on ImageError/RuntimeError.
 // partition is optional (nil = auto-detect), matching Python's partition: int | None = None.
 // Matches Python's _extract_disk_image() EXACTLY.
-func (s *Service) extractDiskImage(
+func (s *Service) extractDiskImage(ctx context.Context,
 	inputPath, outputPath, format string,
 	partition *int, disabledDetectors []string,
 	provisionerType ProvisionerType,
@@ -1331,7 +1334,7 @@ func (s *Service) extractDiskImage(
 		defer os.RemoveAll(tmpDir)
 
 		rawPath := filepath.Join(tmpDir, "intermediate.raw")
-		if err := s.convertToRaw(inputPath, rawPath, fmtFlag); err != nil {
+		if err := s.convertToRaw(ctx, inputPath, rawPath, fmtFlag); err != nil {
 			return "", err
 		}
 
@@ -1339,35 +1342,35 @@ func (s *Service) extractDiskImage(
 		if partition != nil {
 			partitionInt = *partition
 		}
-		result, err := ExtractViaBackend(rawPath, imgPath, partitionInt, disabledDetectors, provisionerType)
+		result, err := ExtractViaBackend(ctx, rawPath, imgPath, partitionInt, disabledDetectors, provisionerType)
 		if err == nil {
 			return result, nil
 		}
 		if !isFallbackError(err) {
 			return "", err
 		}
-		return ExtractViaBackend(rawPath, imgPath, partitionInt, disabledDetectors, ProvisionerTypeLoopMount)
+		return ExtractViaBackend(ctx, rawPath, imgPath, partitionInt, disabledDetectors, ProvisionerTypeLoopMount)
 	} else if format == "raw" {
 		partitionInt := 0
 		if partition != nil {
 			partitionInt = *partition
 		}
-		result, err := ExtractViaBackend(inputPath, imgPath, partitionInt, disabledDetectors, provisionerType)
+		result, err := ExtractViaBackend(ctx, inputPath, imgPath, partitionInt, disabledDetectors, provisionerType)
 		if err == nil {
 			return result, nil
 		}
 		if !isFallbackError(err) {
 			return "", err
 		}
-		return ExtractViaBackend(inputPath, imgPath, partitionInt, disabledDetectors, ProvisionerTypeLoopMount)
+		return ExtractViaBackend(ctx, inputPath, imgPath, partitionInt, disabledDetectors, ProvisionerTypeLoopMount)
 	} else {
 		return "", NewImageError(fmt.Sprintf("Unsupported disk image format: %s", format))
 	}
 }
 
-func (s *Service) convertToRaw(inputPath, outputPath, fmtFlag string) error {
+func (s *Service) convertToRaw(ctx context.Context, inputPath, outputPath, fmtFlag string) error {
 	slog.Info("Converting to raw...", "file", filepath.Base(inputPath))
-	result := system.RunCmdCompat(context.Background(), []string{"qemu-img", "convert", "-m", "16", "-f", fmtFlag, "-O", "raw",
+	result := system.RunCmdCompat(ctx, []string{"qemu-img", "convert", "-m", "16", "-f", fmtFlag, "-O", "raw",
 		"-t", "none", "-T", "none", "-W", inputPath, outputPath}, system.DefaultRunCmdOptions())
 	combined := string(result.StdoutBytes) + string(result.StderrBytes)
 	if result.Err != nil {
@@ -1377,7 +1380,7 @@ func (s *Service) convertToRaw(inputPath, outputPath, fmtFlag string) error {
 	return nil
 }
 
-func (s *Service) handleSquashfs(inputPath, finalPath, minimumRootfsSize string) (string, error) {
+func (s *Service) handleSquashfs(ctx context.Context, inputPath, finalPath, minimumRootfsSize string) (string, error) {
 	tmpDir, err := os.MkdirTemp(s.tempDir, "squashfs-*")
 	if err != nil {
 		return "", fmt.Errorf("create temp dir: %w", err)
@@ -1386,7 +1389,7 @@ func (s *Service) handleSquashfs(inputPath, finalPath, minimumRootfsSize string)
 
 	extractDir := filepath.Join(tmpDir, "squashfs-root")
 
-	result := system.RunCmdCompat(context.Background(), []string{"unsquashfs", "-d", extractDir, inputPath}, system.DefaultRunCmdOptions())
+	result := system.RunCmdCompat(ctx, []string{"unsquashfs", "-d", extractDir, inputPath}, system.DefaultRunCmdOptions())
 	if result.Err != nil {
 		return "", NewImageError("unsquashfs failed")
 	}
@@ -1395,7 +1398,7 @@ func (s *Service) handleSquashfs(inputPath, finalPath, minimumRootfsSize string)
 		return "", NewImageError("mkfs.ext4 not found. Install e2fsprogs package.")
 	}
 
-	duResult := system.RunCmdCompat(context.Background(), []string{"du", "-sb", extractDir}, system.DefaultRunCmdOptions())
+	duResult := system.RunCmdCompat(ctx, []string{"du", "-sb", extractDir}, system.DefaultRunCmdOptions())
 	contentBytes := int64(0)
 	if duResult.Err == nil {
 		fields := strings.Fields(duResult.Stdout)
@@ -1411,13 +1414,13 @@ func (s *Service) handleSquashfs(inputPath, finalPath, minimumRootfsSize string)
 		imageSizeMB, _ = strconv.Atoi(minimumRootfsSize)
 	}
 
-	truncResult := system.RunCmdCompat(context.Background(), []string{"truncate", "-s", fmt.Sprintf("%dM", imageSizeMB), finalPath}, system.DefaultRunCmdOptions())
+	truncResult := system.RunCmdCompat(ctx, []string{"truncate", "-s", fmt.Sprintf("%dM", imageSizeMB), finalPath}, system.DefaultRunCmdOptions())
 	truncCombined := string(truncResult.StdoutBytes) + string(truncResult.StderrBytes)
 	if truncResult.Err != nil {
 		return "", NewImageError(fmt.Sprintf("Failed to allocate ext4 image file: %s", truncCombined))
 	}
 
-	mkfsResult := system.RunCmdCompat(context.Background(), []string{"mkfs.ext4", "-d", extractDir, "-L", "", finalPath}, system.DefaultRunCmdOptions())
+	mkfsResult := system.RunCmdCompat(ctx, []string{"mkfs.ext4", "-d", extractDir, "-L", "", finalPath}, system.DefaultRunCmdOptions())
 	mkfsCombined := string(mkfsResult.StdoutBytes) + string(mkfsResult.StderrBytes)
 	if mkfsResult.Err != nil {
 		return "", NewImageError(fmt.Sprintf("Failed to create ext4 from squashfs: %s", mkfsCombined))
@@ -1427,7 +1430,7 @@ func (s *Service) handleSquashfs(inputPath, finalPath, minimumRootfsSize string)
 	return finalPath, nil
 }
 
-func (s *Service) createExt4FromTar(tarPath, outputPath, minimumRootfsMib string) error {
+func (s *Service) createExt4FromTar(ctx context.Context, tarPath, outputPath, minimumRootfsMib string) error {
 	t0 := time.Now()
 
 	tmpDir, err := os.MkdirTemp(s.tempDir, "tar-extract-*")
@@ -1439,7 +1442,7 @@ func (s *Service) createExt4FromTar(tarPath, outputPath, minimumRootfsMib string
 	t1 := time.Now()
 	slog.Info("Extracting tar...", "tmp_dir", tmpDir)
 
-	tarResult := system.RunCmdCompat(context.Background(), []string{"tar", "-xf", tarPath, "-C", tmpDir,
+	tarResult := system.RunCmdCompat(ctx, []string{"tar", "-xf", tarPath, "-C", tmpDir,
 		"--exclude=dev/*", "--no-same-owner", "--no-same-permissions"}, system.DefaultRunCmdOptions())
 	tarCombined := string(tarResult.StdoutBytes) + string(tarResult.StderrBytes)
 	if tarResult.Err != nil {
@@ -1448,11 +1451,11 @@ func (s *Service) createExt4FromTar(tarPath, outputPath, minimumRootfsMib string
 	t2 := time.Now()
 	slog.Debug("tar extract", "elapsed_seconds", t2.Sub(t1).Seconds())
 
-	system.RunCmdCompat(context.Background(), []string{"chmod", "-R", "u+rwx", tmpDir}, system.RunCmdOptions{Capture: false, Check: false})
+	system.RunCmdCompat(ctx, []string{"chmod", "-R", "u+rwx", tmpDir}, system.RunCmdOptions{Capture: false, Check: false})
 	t3 := time.Now()
 	slog.Debug("chmod", "elapsed_seconds", t3.Sub(t2).Seconds())
 
-	duResult := system.RunCmdCompat(context.Background(), []string{"du", "-sb", tmpDir}, system.RunCmdOptions{Capture: true, Check: false})
+	duResult := system.RunCmdCompat(ctx, []string{"du", "-sb", tmpDir}, system.RunCmdOptions{Capture: true, Check: false})
 	duCombined := string(duResult.StdoutBytes) + string(duResult.StderrBytes)
 	duReturnCode := 0
 	if duResult.Err == nil {
@@ -1489,7 +1492,7 @@ func (s *Service) createExt4FromTar(tarPath, outputPath, minimumRootfsMib string
 		}
 	}
 
-	truncResult := system.RunCmdCompat(context.Background(), []string{"truncate", "-s", fmt.Sprintf("%dM", rawSizeMB), outputPath}, system.DefaultRunCmdOptions())
+	truncResult := system.RunCmdCompat(ctx, []string{"truncate", "-s", fmt.Sprintf("%dM", rawSizeMB), outputPath}, system.DefaultRunCmdOptions())
 	truncCombined := string(truncResult.StdoutBytes) + string(truncResult.StderrBytes)
 	if truncResult.Err != nil {
 		return fmt.Errorf("truncate failed: %s: %w", truncCombined, truncResult.Err)
@@ -1497,7 +1500,7 @@ func (s *Service) createExt4FromTar(tarPath, outputPath, minimumRootfsMib string
 	t5 := time.Now()
 	slog.Debug("truncate", "elapsed_seconds", t5.Sub(t4).Seconds())
 
-	mkfsResult := system.RunCmdCompat(context.Background(), []string{"mkfs.ext4", "-d", tmpDir, "-F", outputPath}, system.DefaultRunCmdOptions())
+	mkfsResult := system.RunCmdCompat(ctx, []string{"mkfs.ext4", "-d", tmpDir, "-F", outputPath}, system.DefaultRunCmdOptions())
 	mkfsCombined := string(mkfsResult.StdoutBytes) + string(mkfsResult.StderrBytes)
 	if mkfsResult.Err != nil {
 		msg := mkfsCombined
@@ -1589,18 +1592,18 @@ func (s *Service) downloadFile(ctx context.Context, url, destPath, expectedSHA25
 // Filesystem helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-func (s *Service) detectFilesystemType(imagePath string) string {
-	result := system.RunCmdCompat(context.Background(), []string{"blkid", "-o", "value", "-s", "TYPE", imagePath}, system.RunCmdOptions{Capture: true, Check: false})
+func (s *Service) detectFilesystemType(ctx context.Context, imagePath string) string {
+	result := system.RunCmdCompat(ctx, []string{"blkid", "-o", "value", "-s", "TYPE", imagePath}, system.RunCmdOptions{Capture: true, Check: false})
 	return strings.TrimSpace(result.Stdout)
 }
 
-func (s *Service) getFilesystemUUID(imagePath string) string {
-	result := system.RunCmdCompat(context.Background(), []string{"blkid", "-p", "-s", "UUID", "-o", "value", imagePath}, system.RunCmdOptions{Capture: true, Check: false})
+func (s *Service) getFilesystemUUID(ctx context.Context, imagePath string) string {
+	result := system.RunCmdCompat(ctx, []string{"blkid", "-p", "-s", "UUID", "-o", "value", imagePath}, system.RunCmdOptions{Capture: true, Check: false})
 	return strings.TrimSpace(result.Stdout)
 }
 
-func (s *Service) resolveFSType(imagePath string) (string, error) {
-	fsType := s.detectFilesystemType(imagePath)
+func (s *Service) resolveFSType(ctx context.Context, imagePath string) (string, error) {
+	fsType := s.detectFilesystemType(ctx, imagePath)
 	if fsType != "" {
 		return fsType, nil
 	}
@@ -1690,12 +1693,12 @@ func (s *Service) resolveSourceTemplate(ctx context.Context, spec *ImageSpec, te
 	return fmt.Sprintf("%s/%s", base, chosenKey), nil
 }
 
-func (s *Service) copyWithDD(src, dst string, sparse bool) error {
+func (s *Service) copyWithDD(ctx context.Context, src, dst string, sparse bool) error {
 	conv := "fsync"
 	if sparse {
 		conv = "sparse,fsync"
 	}
-	result := system.RunCmdCompat(context.Background(), []string{"dd", fmt.Sprintf("if=%s", src), fmt.Sprintf("of=%s", dst),
+	result := system.RunCmdCompat(ctx, []string{"dd", fmt.Sprintf("if=%s", src), fmt.Sprintf("of=%s", dst),
 		"bs=1M", fmt.Sprintf("conv=%s", conv), "status=none"}, system.DefaultRunCmdOptions())
 	combined := string(result.StdoutBytes) + string(result.StderrBytes)
 	if result.Err != nil {

@@ -307,7 +307,7 @@ func (h *_cloudInitRequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 // cloud-init files until shutdown is requested.
 //
 // Called from main.go when the "_nocloud_serve" subcommand is routed.
-func ServeNoCloudHTTP(args []string) {
+func ServeNoCloudHTTP(ctx context.Context, args []string) {
 	// Parse args: --cloud-init-dir DIR --port PORT --host HOST --pid-file PIDFILE --log-file LOGFILE
 	var cloudInitDir, host, pidFile, logFile string
 	var port int
@@ -387,7 +387,7 @@ func ServeNoCloudHTTP(args []string) {
 		fmt.Fprintf(logFP, "NoCloud-net server received signal, shutting down...\n")
 		shutdownRequested = true
 		if server != nil {
-			server.Shutdown(context.Background())
+			server.Shutdown(ctx)
 		}
 	}()
 	err = server.ListenAndServe()

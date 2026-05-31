@@ -4,6 +4,7 @@ go 1.26.3
 
 require (
 	github.com/jedib0t/go-pretty/v6 v6.7.10
+	github.com/jmoiron/sqlx v1.4.0
 	github.com/klauspost/compress v1.17.11
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/crypto v0.52.0

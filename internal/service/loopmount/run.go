@@ -5,6 +5,7 @@
 package loopmount
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -63,7 +64,7 @@ func RunProvision(args []string) {
 	}
 
 	// Execute wire protocol
-	resultJSON, err := ExecuteWireProtocol(raw)
+	resultJSON, err := ExecuteWireProtocol(context.Background(), raw)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, string(resultJSON))
 		os.Exit(1)

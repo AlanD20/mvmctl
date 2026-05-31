@@ -2,30 +2,28 @@ package network
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
-	"net"
-	"strings"
 
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/model"
 )
 
 // LeaseService manages IP leases for a specific network.
 // Matches src/mvmctl/core/network/_lease_service.py: LeaseService
 type LeaseService struct {
 	leaseRepo LeaseRepository
-	net       *Network
+	net       *model.Network
 }
 
-// NewLeaseService creates a LeaseService from a *Network or string identifier.
+// NewLeaseService creates a LeaseService from a *model.Network or string identifier.
 // Matches Python: LeaseService(entity: str | NetworkItem, repo)
 // Python's __init__ accepts both str and NetworkItem — if str, it resolves via
 // NetworkResolver() which uses the default database. Go requires an explicit
 // Repository for string resolution, and returns an error if networkRepo
 // is nil when it's needed.
-func NewLeaseService(entity interface{}, leaseRepo LeaseRepository, networkRepo Repository) (*LeaseService, error) {
+func NewLeaseService(ctx context.Context, entity any, leaseRepo LeaseRepository, networkRepo Repository) (*LeaseService, error) {
 	switch e := entity.(type) {
-	case *Network:
+	case *model.Network:
 		return &LeaseService{
 			leaseRepo: leaseRepo,
 			net:       e,
@@ -35,8 +33,8 @@ func NewLeaseService(entity interface{}, leaseRepo LeaseRepository, networkRepo 
 			return nil, errs.Wrap(errs.CodeNetworkNotFound,
 				fmt.Errorf("cannot resolve network entity %q: no network repository provided", e))
 		}
-		resolver := NewResolver(networkRepo)
-		net, err := resolver.Resolve(context.Background(), e)
+		resolver := NewResolver(networkRepo, nil)
+		net, err := resolver.Resolve(ctx, e)
 		if err != nil {
 			return nil, err
 		}
@@ -45,7 +43,7 @@ func NewLeaseService(entity interface{}, leaseRepo LeaseRepository, networkRepo 
 			net:       net,
 		}, nil
 	default:
-		return nil, fmt.Errorf("expected *Network or string, got %T", entity)
+		return nil, fmt.Errorf("expected *model.Network or string, got %T", entity)
 	}
 }
 
@@ -58,15 +56,15 @@ func (s *LeaseService) NetworkName() string {
 }
 
 // GetLeases returns all IP leases for this network.
-// Matches Python: returns new NetworkLeaseItem copies from db leases.
-func (s *LeaseService) GetLeases(ctx context.Context) ([]*NetworkLeaseItem, error) {
+// Matches Python: returns new model.NetworkLeaseItem copies from db leases.
+func (s *LeaseService) GetLeases(ctx context.Context) ([]*model.NetworkLeaseItem, error) {
 	dbLeases, err := s.leaseRepo.ListAll(ctx, s.net.ID)
 	if err != nil {
 		return nil, err
 	}
-	result := make([]*NetworkLeaseItem, len(dbLeases))
+	result := make([]*model.NetworkLeaseItem, len(dbLeases))
 	for i, l := range dbLeases {
-		result[i] = &NetworkLeaseItem{
+		result[i] = &model.NetworkLeaseItem{
 			NetworkID: l.NetworkID,
 			IPv4:      l.IPv4,
 			VMID:      l.VMID,
@@ -79,8 +77,8 @@ func (s *LeaseService) GetLeases(ctx context.Context) ([]*NetworkLeaseItem, erro
 }
 
 // Get returns lease for a specific IP address.
-// Matches Python: returns NetworkLeaseItem copy or nil.
-func (s *LeaseService) Get(ctx context.Context, ip string) (*NetworkLeaseItem, error) {
+// Matches Python: returns model.NetworkLeaseItem copy or nil.
+func (s *LeaseService) Get(ctx context.Context, ip string) (*model.NetworkLeaseItem, error) {
 	lease, err := s.leaseRepo.Get(ctx, s.net.ID, ip)
 	if err != nil {
 		return nil, err
@@ -88,7 +86,7 @@ func (s *LeaseService) Get(ctx context.Context, ip string) (*NetworkLeaseItem, e
 	if lease == nil {
 		return nil, nil
 	}
-	return &NetworkLeaseItem{
+	return &model.NetworkLeaseItem{
 		NetworkID: lease.NetworkID,
 		IPv4:      lease.IPv4,
 		VMID:      lease.VMID,
@@ -100,14 +98,14 @@ func (s *LeaseService) Get(ctx context.Context, ip string) (*NetworkLeaseItem, e
 
 // GetByVMID returns all leases for a specific VM on this network.
 // Matches Python's get_by_vm_id.
-func (s *LeaseService) GetByVMID(ctx context.Context, vmID string) ([]*NetworkLeaseItem, error) {
+func (s *LeaseService) GetByVMID(ctx context.Context, vmID string) ([]*model.NetworkLeaseItem, error) {
 	dbLeases, err := s.leaseRepo.ListByVM(ctx, s.net.ID, vmID)
 	if err != nil {
 		return nil, err
 	}
-	result := make([]*NetworkLeaseItem, len(dbLeases))
+	result := make([]*model.NetworkLeaseItem, len(dbLeases))
 	for i, l := range dbLeases {
-		result[i] = &NetworkLeaseItem{
+		result[i] = &model.NetworkLeaseItem{
 			NetworkID: l.NetworkID,
 			IPv4:      l.IPv4,
 			VMID:      l.VMID,
@@ -145,24 +143,23 @@ func (s *LeaseService) Lease(ctx context.Context, vmID string) (string, error) {
 			usedIPs[i] = l.IPv4
 		}
 
-		allocatedIP, err := allocateNextIP(usedIPs, s.net.Subnet, s.net.IPv4Gateway)
+		allocatedIP, err := AllocateNextIP(usedIPs, s.net.Subnet, s.net.IPv4Gateway)
 		if err != nil {
 			return "", errs.Wrap(errs.CodeNetworkLeaseExhausted, err)
 		}
 
 		vmIDCopy := vmID
-		_, err = s.leaseRepo.Acquire(ctx, s.net.ID, allocatedIP, &vmIDCopy)
-		if err == nil {
+		lease, err := s.leaseRepo.Acquire(ctx, s.net.ID, allocatedIP, &vmIDCopy)
+		if err != nil {
+			return "", err
+		}
+		if lease != nil {
 			return allocatedIP, nil
 		}
 
-		// Check for sqlite3.IntegrityError (UNIQUE constraint violation)
-		if isSQLiteIntegrityError(err) {
-			lastError = err
-			continue
-		}
-
-		return "", err
+		// IP was already taken (INSERT OR IGNORE returned 0 rows affected) — retry next candidate.
+		lastError = fmt.Errorf("IP %s already allocated", allocatedIP)
+		continue
 	}
 
 	if lastError != nil {
@@ -196,78 +193,4 @@ func (s *LeaseService) LeaseSpecific(ctx context.Context, ip, vmID string) (stri
 // Matches Python's release.
 func (s *LeaseService) Release(ctx context.Context, vmID string) error {
 	return s.leaseRepo.ReleaseByVM(ctx, vmID)
-}
-
-// allocateNextIP finds the next available IP in a subnet, skipping gateway.
-// Matches Python's NetworkUtils.allocate_next_ip exactly.
-func allocateNextIP(existingIPs []string, subnet, gateway string) (string, error) {
-	network := &net.IPNet{}
-	if _, ipnet, err := net.ParseCIDR(subnet); err == nil {
-		network = ipnet
-	} else {
-		return "", fmt.Errorf("invalid subnet: %s", subnet)
-	}
-
-	existingSet := make(map[string]bool)
-	for _, ip := range existingIPs {
-		existingSet[ip] = true
-	}
-
-	ip := network.IP.To4()
-	mask := network.Mask
-	ones, bits := mask.Size()
-	total := 1 << (bits - ones)
-
-	// Matches Python's ipaddress.IPv4Network(subnet, strict=False).hosts():
-	// For /31 (RFC 3021): both addresses are usable.
-	// For /32: the single address is usable.
-	start := 1
-	end := total - 1
-	if total <= 2 {
-		start = 0
-		end = total
-	}
-
-	for i := start; i < end; i++ {
-		n := ipToUint32(ip) + uint32(i)
-		candidate := intToIP(n).String()
-
-		if gateway != "" && candidate == gateway {
-			continue
-		}
-		if !existingSet[candidate] {
-			return candidate, nil
-		}
-	}
-
-	return "", fmt.Errorf("no available IPs in subnet %s", subnet)
-}
-
-// ipToUint32 converts an IPv4 address to a uint32.
-func ipToUint32(ip net.IP) uint32 {
-	ip = ip.To4()
-	return uint32(ip[0])<<24 | uint32(ip[1])<<16 | uint32(ip[2])<<8 | uint32(ip[3])
-}
-
-// intToIP converts a uint32 to an IPv4 address.
-func intToIP(n uint32) net.IP {
-	return net.IPv4(byte(n>>24), byte(n>>16), byte(n>>8), byte(n))
-}
-
-// isSQLiteIntegrityError checks if the error is a SQLite UNIQUE constraint violation.
-// Matches Python's sqlite3.IntegrityError handling.
-func isSQLiteIntegrityError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := err.Error()
-	// sqlite3.IntegrityError manifests as "UNIQUE constraint failed: ..." in modernc.org/sqlite
-	if strings.Contains(errStr, "UNIQUE constraint") {
-		return true
-	}
-	if err == sql.ErrNoRows {
-		return false
-	}
-	// Check for the specific error code
-	return strings.Contains(errStr, "constraint failed")
 }

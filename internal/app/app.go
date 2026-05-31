@@ -94,7 +94,7 @@ func Run(ctx context.Context) {
 	}
 
 	// Set HTTP User-Agent matching Python's HTTP_USER_AGENT = f"{CLI_NAME}/{_resolve_version()}".
-	download.SetUserAgent(infraversion.GetVersion())
+	download.SetUserAgent(infraversion.GetVersion(ctx))
 
 	op := api.NewOperation(database, cacheDir)
 	config.InitSettings()

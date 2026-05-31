@@ -585,7 +585,7 @@ func (p *GuestfsProvisioner) buildOp(ctx context.Context, opName string) ([]stri
 	case "set_hostname":
 		return p.buildSetHostname(ctx), nil
 	case "inject_dns":
-		return p.buildInjectDNS(), nil
+		return p.buildInjectDNS(ctx), nil
 	case "setup_ssh":
 		return p.buildSetupSSH(ctx), nil
 	case "inject_cloud_init":
@@ -653,12 +653,12 @@ func (p *GuestfsProvisioner) buildSetHostname(ctx context.Context) []string {
 
 // ── inject_dns ──────────────────────────────────────────────────────────────
 
-func (p *GuestfsProvisioner) buildInjectDNS() []string {
+func (p *GuestfsProvisioner) buildInjectDNS(ctx context.Context) []string {
 	if p.dnsServer == "" {
 		return nil
 	}
 	// Pre-read existing resolv.conf — if it has a nameserver entry, skip entirely
-	out, err := guestfishInspect(context.Background(), p.rootfsPath, true,
+	out, err := guestfishInspect(ctx, p.rootfsPath, true,
 		"read-file", "/etc/resolv.conf")
 	if err == nil {
 		existing := strings.TrimSpace(out)
@@ -677,7 +677,7 @@ func (p *GuestfsProvisioner) buildInjectDNS() []string {
 	//   - Otherwise → just write (file doesn't exist, or is a real file)
 	isDangling := false
 	if err != nil {
-		out2, err2 := guestfishRaw(context.Background(), p.rootfsPath, true,
+		out2, err2 := guestfishRaw(ctx, p.rootfsPath, true,
 			"exists", "/etc/resolv.conf")
 		if err2 == nil && strings.TrimSpace(out2) == "true" {
 			isDangling = true

@@ -72,7 +72,7 @@ func RequireMvmGroupMembership() error {
 
 	// Get group member list like Python's g.gr_mem
 	// Use getent group (NSS-compatible) instead of reading /etc/group directly.
-	groupMembers := getGroupMembers(g.Name)
+	groupMembers := getGroupMembers(context.Background(), g.Name)
 
 	// -- Check 1: is user a member (supplementary OR primary)? --
 	// Python:
@@ -126,8 +126,8 @@ func RequireMvmGroupMembership() error {
 // SSSD, etc.), we use `getent group` which queries the configured Name
 // Service Switch libraries via libc, matching Python's NSS-compatible
 // behavior.
-func getGroupMembers(groupName string) []string {
-	result := RunCmdCompat(context.Background(), []string{"getent", "group", groupName}, RunCmdOptions{Capture: true})
+func getGroupMembers(ctx context.Context, groupName string) []string {
+	result := RunCmdCompat(ctx, []string{"getent", "group", groupName}, RunCmdOptions{Capture: true})
 	if result.Err != nil {
 		return nil
 	}
@@ -165,12 +165,12 @@ func GroupExists(groupName string) bool {
 // Checks if username is a member of the given group.
 // Uses stdlib os/user.LookupGroup + GroupMembersViaNSS to get member list
 // via NSS (LDAP, systemd-userdb, etc.), matching Python's grp.getgrnam().gr_mem.
-func UserInGroup(username, groupName string) bool {
+func UserInGroup(ctx context.Context, username, groupName string) bool {
 	_, err := user.LookupGroup(groupName)
 	if err != nil {
 		return false
 	}
-	members, err := GroupMembersViaNSS(groupName)
+	members, err := GroupMembersViaNSS(ctx, groupName)
 	if err != nil {
 		return false
 	}
@@ -188,8 +188,8 @@ func UserInGroup(username, groupName string) bool {
 // (LDAP, systemd-userdb, etc.) instead of parsing /etc/group directly.
 //
 // TODO: Consolidate with getGroupMembers (unexported) which has similar logic.
-func GroupMembersViaNSS(groupName string) ([]string, error) {
-	result := RunCmdCompat(context.Background(), []string{"getent", "group", groupName}, RunCmdOptions{Capture: true})
+func GroupMembersViaNSS(ctx context.Context, groupName string) ([]string, error) {
+	result := RunCmdCompat(ctx, []string{"getent", "group", groupName}, RunCmdOptions{Capture: true})
 	if result.Err != nil {
 		return nil, fmt.Errorf("unable to resolve group %q via NSS: %w", groupName, result.Err)
 	}

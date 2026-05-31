@@ -2,13 +2,14 @@ package inputs
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/image"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // CLI_TO_INTERNAL_DETECTOR maps CLI detector names to internal detector codes.
@@ -104,14 +105,14 @@ type ResolvedImageAcquireInput struct {
 // input uses any because it is either ImagePullInput or ImageImportInput —
 // Go has no sum types.
 type ImageAcquireRequest struct {
-	db       *sql.DB
+	db       *sqlx.DB
 	input    any // ImagePullInput or ImageImportInput
 	result   *ResolvedImageAcquireInput
 	resolver *image.Resolver
 }
 
 // NewImageAcquireRequest creates a new ImageAcquireRequest.
-func NewImageAcquireRequest(inputs any, db *sql.DB, imageRepo image.Repository) *ImageAcquireRequest {
+func NewImageAcquireRequest(inputs any, db *sqlx.DB, imageRepo image.Repository) *ImageAcquireRequest {
 	return &ImageAcquireRequest{
 		db:       db,
 		input:    inputs,

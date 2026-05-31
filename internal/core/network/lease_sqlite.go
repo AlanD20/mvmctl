@@ -3,118 +3,110 @@ package network
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"net"
-	"strings"
+
+	"github.com/jmoiron/sqlx"
+
+	"mvmctl/internal/infra/model"
 )
 
 type sqliteLeaseRepo struct {
-	db *sql.DB
+	db *sqlx.DB
 }
 
-func NewLeaseRepository(db *sql.DB) LeaseRepository {
+func NewLeaseRepository(db *sqlx.DB) LeaseRepository {
 	return &sqliteLeaseRepo{db: db}
 }
 
-func (r *sqliteLeaseRepo) Get(ctx context.Context, networkID, ipv4 string) (*NetworkLeaseItem, error) {
-	row := r.db.QueryRowContext(ctx, `SELECT * FROM network_leases WHERE network_id = ? AND ipv4 = ?`, networkID, ipv4)
-	return scanLeaseItem(row)
-}
-
-func (r *sqliteLeaseRepo) ListAll(ctx context.Context, networkID string) ([]*NetworkLeaseItem, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT * FROM network_leases WHERE network_id = ? ORDER BY leased_at`, networkID)
-	if err != nil {
-		return nil, fmt.Errorf("list leases for network %s: %w", networkID, err)
+func (r *sqliteLeaseRepo) Get(ctx context.Context, networkID, ipv4 string) (*model.NetworkLeaseItem, error) {
+	var l model.NetworkLeaseItem
+	err := r.db.GetContext(ctx, &l,
+		`SELECT * FROM network_leases WHERE network_id = ? AND ipv4 = ?`, networkID, ipv4)
+	if err == sql.ErrNoRows {
+		return nil, nil
 	}
-	defer rows.Close()
-	return scanLeaseItems(rows)
+	return &l, err
 }
 
-func (r *sqliteLeaseRepo) ListByVM(ctx context.Context, networkID, vmID string) ([]*NetworkLeaseItem, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT * FROM network_leases WHERE network_id = ? AND vm_id = ? ORDER BY leased_at`, networkID, vmID)
-	if err != nil {
-		return nil, fmt.Errorf("list leases for network %s vm %s: %w", networkID, vmID, err)
-	}
-	defer rows.Close()
-	return scanLeaseItems(rows)
+func (r *sqliteLeaseRepo) ListAll(ctx context.Context, networkID string) ([]*model.NetworkLeaseItem, error) {
+	var items []*model.NetworkLeaseItem
+	return items, r.db.SelectContext(ctx, &items,
+		`SELECT * FROM network_leases WHERE network_id = ? ORDER BY leased_at`, networkID)
 }
 
-func (r *sqliteLeaseRepo) ListAllBatch(ctx context.Context, networkIDs []string) ([]*NetworkLeaseItem, error) {
+func (r *sqliteLeaseRepo) ListByVM(ctx context.Context, networkID, vmID string) ([]*model.NetworkLeaseItem, error) {
+	var items []*model.NetworkLeaseItem
+	return items, r.db.SelectContext(ctx, &items,
+		`SELECT * FROM network_leases WHERE network_id = ? AND vm_id = ? ORDER BY leased_at`, networkID, vmID)
+}
+
+func (r *sqliteLeaseRepo) ListAllBatch(ctx context.Context, networkIDs []string) ([]*model.NetworkLeaseItem, error) {
 	if len(networkIDs) == 0 {
-		return []*NetworkLeaseItem{}, nil
+		return []*model.NetworkLeaseItem{}, nil
 	}
-	placeholders := make([]string, len(networkIDs))
-	args := make([]interface{}, len(networkIDs))
-	for i, id := range networkIDs {
-		placeholders[i] = "?"
-		args[i] = id
-	}
-	query := fmt.Sprintf("SELECT * FROM network_leases WHERE network_id IN (%s) ORDER BY leased_at",
-		strings.Join(placeholders, ","))
-	rows, err := r.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("list leases batch: %w", err)
-	}
-	defer rows.Close()
-	return scanLeaseItems(rows)
-}
-
-func (r *sqliteLeaseRepo) Acquire(ctx context.Context, networkID, ipv4 string, vmID *string) (*NetworkLeaseItem, error) {
-	tx, err := r.db.Begin()
+	query, args, err := sqlx.In("SELECT * FROM network_leases WHERE network_id IN (?) ORDER BY leased_at", networkIDs)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	query = r.db.Rebind(query)
+	var items []*model.NetworkLeaseItem
+	return items, r.db.SelectContext(ctx, &items, query, args...)
+}
 
-	_, err = tx.Exec("INSERT INTO network_leases (network_id, ipv4, vm_id) VALUES (?, ?, ?)",
+func (r *sqliteLeaseRepo) Acquire(ctx context.Context, networkID, ipv4 string, vmID *string) (*model.NetworkLeaseItem, error) {
+	result, err := r.db.ExecContext(ctx,
+		"INSERT OR IGNORE INTO network_leases (network_id, ipv4, vm_id) VALUES (?, ?, ?)",
 		networkID, ipv4, vmID)
 	if err != nil {
 		return nil, err
 	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-
-	lease, err := r.Get(ctx, networkID, ipv4)
+	rows, err := result.RowsAffected()
 	if err != nil {
 		return nil, err
 	}
-	return lease, nil
+	if rows == 0 {
+		return nil, nil
+	}
+	return r.Get(ctx, networkID, ipv4)
 }
 
 func (r *sqliteLeaseRepo) Release(ctx context.Context, networkID, ipv4 string) error {
-	_, err := r.db.ExecContext(ctx, "DELETE FROM network_leases WHERE network_id = ? AND ipv4 = ?", networkID, ipv4)
+	_, err := r.db.ExecContext(ctx,
+		"DELETE FROM network_leases WHERE network_id = ? AND ipv4 = ?", networkID, ipv4)
 	return err
 }
 
 func (r *sqliteLeaseRepo) ReleaseByVM(ctx context.Context, vmID string) error {
-	_, err := r.db.ExecContext(ctx, "DELETE FROM network_leases WHERE vm_id = ?", vmID)
+	_, err := r.db.ExecContext(ctx,
+		"DELETE FROM network_leases WHERE vm_id = ?", vmID)
 	return err
 }
 
 func (r *sqliteLeaseRepo) Count(ctx context.Context) (int, error) {
 	var c int
-	err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM network_leases").Scan(&c)
-	if err != nil {
-		return 0, err
-	}
-	return c, nil
+	return c, sqlx.GetContext(ctx, r.db, &c, "SELECT COUNT(*) FROM network_leases")
 }
 
 func (r *sqliteLeaseRepo) CountAvailable(ctx context.Context, networkID string) (int, error) {
-	row := r.db.QueryRowContext(ctx, "SELECT subnet, ipv4_gateway FROM networks WHERE id = ? AND deleted_at IS NULL AND is_present = 1", networkID)
-	var subnet, gateway string
-	if err := row.Scan(&subnet, &gateway); err != nil {
-		if err == sql.ErrNoRows {
-			return 0, nil
-		}
+	type netInfo struct {
+		Subnet      string `db:"subnet"`
+		IPv4Gateway string `db:"ipv4_gateway"`
+	}
+	var info netInfo
+	err := sqlx.GetContext(ctx, r.db, &info,
+		"SELECT subnet, ipv4_gateway FROM networks WHERE id = ? AND deleted_at IS NULL AND is_present = 1",
+		networkID)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
 		return 0, err
 	}
+	subnet, gateway := info.Subnet, info.IPv4Gateway
 
 	var leaseCount int
-	err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM network_leases WHERE network_id = ?", networkID).Scan(&leaseCount)
-	if err != nil {
+	if err := sqlx.GetContext(ctx, r.db, &leaseCount,
+		"SELECT COUNT(*) FROM network_leases WHERE network_id = ?", networkID); err != nil {
 		return 0, err
 	}
 
@@ -134,8 +126,6 @@ func (r *sqliteLeaseRepo) CountAvailable(ctx context.Context, networkID string) 
 	return available, nil
 }
 
-// countHosts returns the number of usable host addresses in the network.
-// Matches Python's len(list(ipaddress.IPv4Network(subnet, strict=False).hosts())).
 func countHosts(ipnet *net.IPNet) int {
 	ip := ipnet.IP.To4()
 	if ip == nil {
@@ -147,53 +137,4 @@ func countHosts(ipnet *net.IPNet) int {
 		return total
 	}
 	return total - 2
-}
-
-// ── Scan helpers ──
-
-func scanLeaseItem(row *sql.Row) (*NetworkLeaseItem, error) {
-	var l NetworkLeaseItem
-	var vmID, expiresAt sql.NullString
-	var id sql.NullInt64
-	err := row.Scan(&id, &l.NetworkID, &l.IPv4, &vmID, &l.LeasedAt, &expiresAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	if id.Valid {
-		l.ID = &id.Int64
-	}
-	if vmID.Valid {
-		l.VMID = &vmID.String
-	}
-	if expiresAt.Valid {
-		l.ExpiresAt = &expiresAt.String
-	}
-	return &l, nil
-}
-
-func scanLeaseItems(rows *sql.Rows) ([]*NetworkLeaseItem, error) {
-	var items []*NetworkLeaseItem
-	for rows.Next() {
-		var l NetworkLeaseItem
-		var vmID, expiresAt sql.NullString
-		var id sql.NullInt64
-		err := rows.Scan(&id, &l.NetworkID, &l.IPv4, &vmID, &l.LeasedAt, &expiresAt)
-		if err != nil {
-			return nil, err
-		}
-		if id.Valid {
-			l.ID = &id.Int64
-		}
-		if vmID.Valid {
-			l.VMID = &vmID.String
-		}
-		if expiresAt.Valid {
-			l.ExpiresAt = &expiresAt.String
-		}
-		items = append(items, &l)
-	}
-	return items, rows.Err()
 }

@@ -35,6 +35,7 @@ func NewHttpDirVersionResolver() *HttpDirVersionResolver {
 // Converts map-based configs to download.ResolverConfig, delegates to the shared
 // resolver, then converts version.VersionInfo results to ImageVersion.
 func (r *HttpDirVersionResolver) Resolve(
+	ctx context.Context,
 	configs []map[string]any,
 	arch string,
 	cacheTTLSeconds int,
@@ -52,7 +53,7 @@ func (r *HttpDirVersionResolver) Resolve(
 	}
 
 	// Delegate to the shared infra resolver
-	results := r.inner.Resolve(context.Background(), resolverConfigs, arch, ciVersion, cacheTTLSeconds, 0)
+	results := r.inner.Resolve(ctx, resolverConfigs, arch, ciVersion, cacheTTLSeconds, 0)
 
 	// Convert version.VersionInfo results to ImageVersion with config-aware
 	// fields (type_name, codename) — matching Python's inline conversion loop.
@@ -140,6 +141,7 @@ func ParseDirectoryListing(html string) []string {
 // DiscoverFileFromListing fetches a directory listing HTML and finds a matching file URL.
 // Matches Python's HttpDirVersionResolver._discover_file_from_listing() exactly.
 func DiscoverFileFromListing(
+	ctx context.Context,
 	url string,
 	pattern string,
 	suffix string,
@@ -152,7 +154,7 @@ func DiscoverFileFromListing(
 
 	dl := download.New()
 	useCache := cacheTTLSeconds >= 0
-	html, err := dl.GetContent(context.Background(), url, 30, nil, useCache, _ttl)
+	html, err := dl.GetContent(ctx, url, 30, nil, useCache, _ttl)
 	if err != nil {
 		slog.Warn("File discovery directory not available (skipping)", "url", url)
 		return ""

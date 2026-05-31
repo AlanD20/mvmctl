@@ -1,6 +1,7 @@
 package validators
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"regexp"
@@ -497,7 +498,7 @@ func (NetworkValidator) ValidateIPv4Address(ip string, fieldName string, require
 	return parsed.String(), nil
 }
 
-func (NetworkValidator) ValidateBridgeName(bridge string) error {
+func (NetworkValidator) ValidateBridgeName(ctx context.Context, bridge string) error {
 	if bridge == "" {
 		return &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
@@ -534,7 +535,7 @@ func (NetworkValidator) ValidateBridgeName(bridge string) error {
 		}
 	}
 	// Check if bridge already exists on host (non-mvm interface)
-	if network.BridgeExists(bridge) {
+	if network.BridgeExists(ctx, bridge) {
 		return &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
 			Class:   errs.ClassValidation,
@@ -544,7 +545,7 @@ func (NetworkValidator) ValidateBridgeName(bridge string) error {
 	return nil
 }
 
-func (NetworkValidator) ValidateNATGateways(gateways []string) ([]string, error) {
+func (NetworkValidator) ValidateNATGateways(ctx context.Context, gateways []string) ([]string, error) {
 	if len(gateways) == 0 {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
@@ -584,7 +585,7 @@ func (NetworkValidator) ValidateNATGateways(gateways []string) ([]string, error)
 			}
 		}
 		// Check that interface actually exists on the host
-		if err := network.EnsureInterfaceReady(iface); err != nil {
+		if err := network.EnsureInterfaceReady(ctx, iface); err != nil {
 			return nil, &errs.DomainError{
 				Code:    errs.CodeValidationFailed,
 				Class:   errs.ClassValidation,

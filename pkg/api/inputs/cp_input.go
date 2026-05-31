@@ -2,7 +2,6 @@ package inputs
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"strings"
@@ -12,6 +11,8 @@ import (
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // CPInput matches Python's CPInput dataclass.
@@ -73,13 +74,13 @@ type ResolvedCPInput struct {
 //
 // Resolve CPInput against the database and filesystem.
 type CPRequest struct {
-	db     *sql.DB
+	db     *sqlx.DB
 	input  CPInput
 	result *ResolvedCPInput
 }
 
 // NewCPRequest creates a new CPRequest.
-func NewCPRequest(inputs CPInput, db *sql.DB) *CPRequest {
+func NewCPRequest(inputs CPInput, db *sqlx.DB) *CPRequest {
 	return &CPRequest{
 		db:    db,
 		input: inputs,

@@ -53,7 +53,7 @@ func NewRootCmd(op *api.Operation) *cobra.Command {
 	originalRunE := cmd.RunE
 	cmd.RunE = func(c *cobra.Command, args []string) error {
 		if showVersion {
-			fmt.Printf("%s %s\n", infra.CLIName, infraversion.FormatVersion(infraversion.GetVersion()))
+			fmt.Printf("%s %s\n", infra.CLIName, infraversion.FormatVersion(c.Context(), infraversion.GetVersion(c.Context())))
 			return nil
 		}
 		return originalRunE(c, args)
@@ -195,8 +195,8 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Show the version and exit",
 		RunE: func(c *cobra.Command, args []string) error {
-			fullVersion := infraversion.FormatVersion(infraversion.GetVersion())
-			gitInfo := infraversion.GetGitVersionInfo()
+			fullVersion := infraversion.FormatVersion(c.Context(), infraversion.GetVersion(c.Context()))
+			gitInfo := infraversion.GetGitVersionInfo(c.Context())
 
 			fmt.Printf("%s %s\n", infra.CLIName, fullVersion)
 

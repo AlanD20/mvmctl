@@ -2,7 +2,6 @@ package inputs
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -18,6 +17,8 @@ import (
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // VMImportInput is the raw import parameters from CLI.
@@ -37,12 +38,12 @@ type VMImportInput struct {
 // Resolve VMImportInput to ResolvedVMCreateInput.
 // Python delegates to VMCreateRequest for full resolution.
 type VMImportRequest struct {
-	db    *sql.DB
+	db    *sqlx.DB
 	input VMImportInput
 }
 
 // NewVMImportRequest creates a new VMImportRequest.
-func NewVMImportRequest(inputs VMImportInput, db *sql.DB) *VMImportRequest {
+func NewVMImportRequest(inputs VMImportInput, db *sqlx.DB) *VMImportRequest {
 	return &VMImportRequest{
 		db:    db,
 		input: inputs,
@@ -246,7 +247,7 @@ func (r *VMImportRequest) resolveNetwork(ctx context.Context, netConfig VMExport
 	if netConfig.Name == nil || *netConfig.Name == "" {
 		return nil, nil
 	}
-	resolver := network.NewResolver(networkRepo)
+	resolver := network.NewResolver(networkRepo, nil)
 	net, err := resolver.ByName(ctx, *netConfig.Name)
 	if err != nil {
 		return nil, &errs.DomainError{

@@ -67,7 +67,7 @@ type WireOutput struct {
 // ExecuteWireProtocol handles the full stdin/stdout wire protocol:
 // parses raw JSON input, converts to service types, executes,
 // converts result back to JSON output.
-func ExecuteWireProtocol(rawInput []byte) ([]byte, error) {
+func ExecuteWireProtocol(ctx context.Context, rawInput []byte) ([]byte, error) {
 	var input WireInput
 	if err := json.Unmarshal(rawInput, &input); err != nil {
 		return marshalWireError("Invalid JSON: "+err.Error(), "parse")
@@ -75,7 +75,7 @@ func ExecuteWireProtocol(rawInput []byte) ([]byte, error) {
 
 	op := convertWireToOp(input)
 	provisioner := NewProvisioner("/tmp/mvm-provision")
-	results, err := provisioner.Execute(context.Background(), []Op{op})
+	results, err := provisioner.Execute(ctx, []Op{op})
 	if err != nil {
 		return marshalWireError(err.Error(), "execute")
 	}

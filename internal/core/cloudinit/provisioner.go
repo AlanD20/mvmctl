@@ -2,7 +2,6 @@ package cloudinit
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
@@ -16,20 +15,19 @@ import (
 // Provisioner handles all cloud-init provisioning modes.
 // Matches Python's CloudInitProvisioner.
 type Provisioner struct {
-	config  *model.ProvisionConfig
-	manager *Manager
-	db      *sql.DB // used to create FirewallTracker internally, matching Python
+	config          *model.ProvisionConfig
+	manager         *Manager
+	firewallTracker *firewall.FirewallTracker
 }
 
 // NewProvisioner creates a new CloudInitProvisioner.
-// Matches Python's __init__(self, config: CloudInitProvisionConfig).
-// The db parameter is used to create FirewallTracker internally in _provision_net(),
-// matching Python's behavior of creating FirewallTracker(Database()) inside that method.
-func NewProvisioner(config *model.ProvisionConfig, db *sql.DB) *Provisioner {
+// The tracker parameter is a pre-configured firewall tracker. If nil,
+// firewall operations in NET mode are skipped.
+func NewProvisioner(config *model.ProvisionConfig, tracker *firewall.FirewallTracker) *Provisioner {
 	return &Provisioner{
-		config:  config,
-		manager: NewManager(config),
-		db:      db,
+		config:          config,
+		manager:         NewManager(config),
+		firewallTracker: tracker,
 	}
 }
 
@@ -123,45 +121,51 @@ func (p *Provisioner) provisionNet(ctx context.Context) (*model.ProvisionResult,
 	//   tracker = FirewallTracker(Database())
 	//   tracker.ensure_chain(FirewallChain.MVM_NOCLOUDNET_INPUT, auto_jump_from="INPUT")
 	//   tracker.ensure_rule(nocloud_net_in_rule)
-	// This is always done unconditionally for NET mode.
-	fwTracker, fwErr := firewall.NewFirewallTracker(p.db)
-	if fwErr != nil {
-		return nil, ErrCloudInitNetModeFailed(
-			fmt.Sprintf("Nocloud-net provisioning failed: %s", fwErr))
+	// The tracker is now injected by the caller instead.
+	if p.firewallTracker == nil {
+		slog.Warn("No firewall tracker available, skipping NET mode firewall rules",
+			"vm_name", p.config.VMName)
+		return &model.ProvisionResult{
+			Mode:              model.CloudInitModeNET,
+			NocloudURL:        &url,
+			NocloudPort:       allocatedPort,
+			NocloudPID:        &spid,
+			NocloudNetManager: nocloudServer,
+			NocloudNetRules:   []model.FirewallRule{},
+		}, nil
 	}
 
 	// Ensure the nocloud chain exists (in filter table)
 	// Python: tracker.ensure_chain(FirewallChain.MVM_NOCLOUDNET_INPUT, auto_jump_from="INPUT")
-	_ = fwTracker.EnsureChain(
-		firewall.ChainMVMNocloudnetIn,
-		firewall.TableFilter,
-		"INPUT", // auto_jump_from — matches Python
-		0,       // position
+	_ = p.firewallTracker.EnsureChain(
+		ctx,
+		model.FirewallChainMVMNocloudNetIn,
+		model.FirewallTableFilter,
+		"INPUT",
+		0,
 	)
 
-	// Build comment tag matching Python exactly
 	commentTag := fmt.Sprintf("# nocloudnet:%s:%d", p.config.VMName, allocatedPort)
-	networkName := p.config.NetworkName // Python uses network.name
+	networkName := p.config.NetworkName
 
-	// Build firewall rule matching Python's FirewallRule dataclass with ALL fields
-	rule := firewall.FirewallRule{
-		TableName:    firewall.TableFilter,
-		ChainName:    firewall.ChainMVMNocloudnetIn,
-		RuleType:     firewall.RuleTypeNocloudnetInput,
-		Target:       firewall.TargetAccept,
+	rule := model.FirewallRule{
+		TableName:    model.FirewallTableFilter,
+		ChainName:    model.FirewallChainMVMNocloudNetIn,
+		RuleType:     model.FirewallRuleTypeNocloudNetInput,
+		Target:       model.FirewallTargetAccept,
 		NetworkID:    p.config.NetworkID,
-		Protocol:     firewall.ProtoTCP,
+		Protocol:     model.FirewallProtocolTCP,
 		Source:       p.config.GuestIP,
 		Destination:  p.config.IPv4Gateway,
 		InInterface:  p.config.TapName,
-		OutInterface: string(firewall.WildcardAnyInterface),
-		SPort:        firewall.FirewallPortAny,
+		OutInterface: string(model.FirewallWildcardAnyInterface),
+		SPort:        model.FirewallPortAny,
 		DPort:        allocatedPort,
 		NetworkName:  &networkName,
 		CommentTag:   &commentTag,
 		IsActive:     true,
 	}
-	if fwResult := fwTracker.EnsureRule(rule, "nocloud-net"); !fwResult.Success {
+	if fwResult := p.firewallTracker.EnsureRule(ctx, rule, "nocloud-net"); !fwResult.Success {
 		msg := ""
 		if fwResult.ErrorMessage != nil {
 			msg = *fwResult.ErrorMessage
@@ -176,7 +180,7 @@ func (p *Provisioner) provisionNet(ctx context.Context) (*model.ProvisionResult,
 		NocloudPort:       allocatedPort,
 		NocloudPID:        &spid,
 		NocloudNetManager: nocloudServer,
-		NocloudNetRules:   []model.FirewallRule{toModelRule(rule)},
+		NocloudNetRules:   []model.FirewallRule{rule},
 	}, nil
 }
 
@@ -218,30 +222,4 @@ func (p *Provisioner) provisionISO(ctx context.Context) (*model.ProvisionResult,
 // Matches Python's _provision_inject().
 func (p *Provisioner) provisionInject(ctx context.Context) (*model.ProvisionResult, error) {
 	return &model.ProvisionResult{Mode: model.CloudInitModeINJECT, NocloudNetRules: []model.FirewallRule{}}, nil
-}
-
-// toModelRule converts a firewall.FirewallRule to model.FirewallRule.
-// Both types are structurally identical but defined in different packages.
-func toModelRule(r firewall.FirewallRule) model.FirewallRule {
-	return model.FirewallRule{
-		TableName:      model.FirewallTable(r.TableName),
-		ChainName:      model.FirewallChain(r.ChainName),
-		RuleType:       model.FirewallRuleType(r.RuleType),
-		Protocol:       model.FirewallProtocol(r.Protocol),
-		Source:         r.Source,
-		Destination:    r.Destination,
-		InInterface:    r.InInterface,
-		OutInterface:   r.OutInterface,
-		Target:         model.FirewallTarget(r.Target),
-		SPort:          r.SPort,
-		DPort:          r.DPort,
-		NetworkID:      r.NetworkID,
-		IsActive:       r.IsActive,
-		ID:             r.ID,
-		NetworkName:    r.NetworkName,
-		CommentTag:     r.CommentTag,
-		CommandString:  r.CommandString,
-		CreatedAt:      r.CreatedAt,
-		LastVerifiedAt: r.LastVerifiedAt,
-	}
 }

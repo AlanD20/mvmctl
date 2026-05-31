@@ -2,12 +2,13 @@ package inputs
 
 import (
 	"context"
-	"database/sql"
 	"strings"
 
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // VolumeInput matches Python's VolumeInput dataclass.
@@ -32,7 +33,7 @@ type ResolvedVolumeInput struct {
 //
 // Request that resolves VolumeInput to VolumeItem via DB.
 type VolumeRequest struct {
-	db       *sql.DB
+	db       *sqlx.DB
 	input    VolumeInput
 	result   *ResolvedVolumeInput
 	resolver *volume.Resolver
@@ -40,7 +41,7 @@ type VolumeRequest struct {
 }
 
 // NewVolumeRequest creates a new VolumeRequest.
-func NewVolumeRequest(inputs VolumeInput, db *sql.DB, volumeRepo volume.Repository) *VolumeRequest {
+func NewVolumeRequest(inputs VolumeInput, db *sqlx.DB, volumeRepo volume.Repository) *VolumeRequest {
 	return &VolumeRequest{
 		db:       db,
 		input:    inputs,

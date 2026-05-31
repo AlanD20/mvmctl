@@ -2,12 +2,13 @@ package inputs
 
 import (
 	"context"
-	"database/sql"
 	"strings"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/validators"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // BinaryPullInput is the raw input for pulling a firecracker binary.
@@ -32,13 +33,13 @@ type ResolvedBinaryPullInput struct {
 
 // BinaryPullRequest matches Python's BinaryPullRequest.
 type BinaryPullRequest struct {
-	db     *sql.DB
+	db     *sqlx.DB
 	input  BinaryPullInput
 	result *ResolvedBinaryPullInput
 }
 
 // NewBinaryPullRequest creates a new BinaryPullRequest.
-func NewBinaryPullRequest(inputs BinaryPullInput, db *sql.DB) *BinaryPullRequest {
+func NewBinaryPullRequest(inputs BinaryPullInput, db *sqlx.DB) *BinaryPullRequest {
 	return &BinaryPullRequest{
 		db:    db,
 		input: inputs,

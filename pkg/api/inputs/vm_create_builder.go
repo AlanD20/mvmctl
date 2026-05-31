@@ -2,7 +2,6 @@ package inputs
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -26,12 +25,14 @@ import (
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/validators"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // VMCreateBuilder resolves all DB-backed defaults and validates VM creation inputs.
 // Matches Python mvmctl.api.inputs._vm_create_input.VMCreateRequest.
 type VMCreateBuilder struct {
-	db          *sql.DB
+	db          *sqlx.DB
 	vmRepo      vm.Repository
 	networkRepo network.Repository
 	imageRepo   image.Repository
@@ -55,7 +56,7 @@ type VMCreateBuilder struct {
 // NewVMCreateBuilder creates a new VMCreateBuilder with all resolvers.
 // Matches Python's VMCreateRequest.__init__().
 func NewVMCreateBuilder(
-	db *sql.DB,
+	db *sqlx.DB,
 	vmRepo vm.Repository,
 	networkRepo network.Repository,
 	imageRepo image.Repository,
@@ -77,7 +78,7 @@ func NewVMCreateBuilder(
 		keyRepo:         keyRepo,
 		volumeRepo:      volumeRepo,
 		leaseRepo:       leaseRepo,
-		networkResolver: network.NewResolver(networkRepo),
+		networkResolver: network.NewResolver(networkRepo, nil),
 		imageResolver:   image.NewResolver(imageRepo),
 		kernelResolver:  newKernelResolver(kernelRepo),
 		binaryResolver:  newBinaryResolver(binaryRepo),
@@ -884,11 +885,11 @@ func (b *VMCreateBuilder) resolveProvisioner(ctx context.Context) (model.Provisi
 
 // ── Setting resolution helpers ──────────────────────────────────────────────
 
-func resolveSetting(ctx context.Context, db *sql.DB, category, key string) (any, error) {
+func resolveSetting(ctx context.Context, db *sqlx.DB, category, key string) (any, error) {
 	return config.Resolve(ctx, db, category, key)
 }
 
-func resolveSettingString(ctx context.Context, db *sql.DB, category, key string) string {
+func resolveSettingString(ctx context.Context, db *sqlx.DB, category, key string) string {
 	v, err := config.Resolve(ctx, db, category, key)
 	if err != nil || v == nil {
 		return ""
@@ -901,7 +902,7 @@ func resolveSettingString(ctx context.Context, db *sql.DB, category, key string)
 	}
 }
 
-func resolveSettingInt(ctx context.Context, db *sql.DB, category, key string) int {
+func resolveSettingInt(ctx context.Context, db *sqlx.DB, category, key string) int {
 	v, err := config.Resolve(ctx, db, category, key)
 	if err != nil || v == nil {
 		return 0
@@ -928,7 +929,7 @@ func resolveSettingInt(ctx context.Context, db *sql.DB, category, key string) in
 	}
 }
 
-func resolveSettingBool(ctx context.Context, db *sql.DB, category, key string) bool {
+func resolveSettingBool(ctx context.Context, db *sqlx.DB, category, key string) bool {
 	v, err := config.Resolve(ctx, db, category, key)
 	if err != nil || v == nil {
 		return false

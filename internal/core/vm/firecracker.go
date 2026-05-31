@@ -775,7 +775,7 @@ func (fc *FirecrackerClient) Close() {
 //   - SocketNotFoundError when socket doesn't exist
 //   - On ECONNREFUSED: retry with reconnect
 //   - Returns (status, data_json, error)
-func (fc *FirecrackerClient) request(method, path string, body map[string]any) (int, map[string]any, error) {
+func (fc *FirecrackerClient) request(ctx context.Context, method, path string, body map[string]any) (int, map[string]any, error) {
 	// Check socket exists first (matches Python's _connect which checks)
 	if _, err := os.Stat(fc.socketPath); os.IsNotExist(err) {
 		return 0, nil, &SocketNotFoundError{Path: fc.socketPath}
@@ -800,7 +800,7 @@ func (fc *FirecrackerClient) request(method, path string, body map[string]any) (
 			reqBodyReader = *strings.NewReader(bodyStr)
 		}
 
-		req, err := http.NewRequest(method, fmt.Sprintf("http://localhost%s", path), &reqBodyReader)
+		req, err := http.NewRequestWithContext(ctx, method, fmt.Sprintf("http://localhost%s", path), &reqBodyReader)
 		if err != nil {
 			return 0, nil, fmt.Errorf("failed to create request: %w", err)
 		}
@@ -861,13 +861,13 @@ func isConnRefused(err error) bool {
 
 // CreateSnapshot creates a VM snapshot via PUT /snapshot/create.
 // Matches Python's create_snapshot().
-func (fc *FirecrackerClient) CreateSnapshot(memPath, snapshotPath string) (bool, error) {
+func (fc *FirecrackerClient) CreateSnapshot(ctx context.Context, memPath, snapshotPath string) (bool, error) {
 	slog.Info("Creating snapshot...")
 	body := map[string]any{
 		"mem_file_path": memPath,
 		"snapshot_path": snapshotPath,
 	}
-	status, data, err := fc.request("PUT", "/snapshot/create", body)
+	status, data, err := fc.request(ctx, "PUT", "/snapshot/create", body)
 	if err != nil {
 		return false, err
 	}
@@ -884,14 +884,14 @@ func (fc *FirecrackerClient) CreateSnapshot(memPath, snapshotPath string) (bool,
 
 // LoadSnapshot loads a VM from snapshot via PUT /snapshot/load.
 // Matches Python's load_snapshot().
-func (fc *FirecrackerClient) LoadSnapshot(memPath, snapshotPath string, resume bool) (bool, error) {
+func (fc *FirecrackerClient) LoadSnapshot(ctx context.Context, memPath, snapshotPath string, resume bool) (bool, error) {
 	slog.Info("Loading snapshot...")
 	body := map[string]any{
 		"mem_file_path": memPath,
 		"snapshot_path": snapshotPath,
 		"resume_vm":     resume,
 	}
-	status, data, err := fc.request("PUT", "/snapshot/load", body)
+	status, data, err := fc.request(ctx, "PUT", "/snapshot/load", body)
 	if err != nil {
 		return false, err
 	}
@@ -910,8 +910,8 @@ func (fc *FirecrackerClient) LoadSnapshot(memPath, snapshotPath string, resume b
 
 // GetInstanceInfo returns VM instance information via GET /.
 // Matches Python's get_instance_info().
-func (fc *FirecrackerClient) GetInstanceInfo() (*model.InstanceInfo, error) {
-	status, data, err := fc.request("GET", "/", nil)
+func (fc *FirecrackerClient) GetInstanceInfo(ctx context.Context) (*model.InstanceInfo, error) {
+	status, data, err := fc.request(ctx, "GET", "/", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -936,8 +936,8 @@ func (fc *FirecrackerClient) GetInstanceInfo() (*model.InstanceInfo, error) {
 
 // DescribeInstance returns a VM description via GET /vm.
 // Matches Python's describe_instance().
-func (fc *FirecrackerClient) DescribeInstance() (*model.InstanceDescription, error) {
-	status, data, err := fc.request("GET", "/vm", nil)
+func (fc *FirecrackerClient) DescribeInstance(ctx context.Context) (*model.InstanceDescription, error) {
+	status, data, err := fc.request(ctx, "GET", "/vm", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -986,9 +986,9 @@ func (fc *FirecrackerClient) DescribeInstance() (*model.InstanceDescription, err
 
 // StartInstance starts the VM instance via PUT /actions with action_type InstanceStart.
 // Matches Python's start_instance().
-func (fc *FirecrackerClient) StartInstance() (bool, error) {
+func (fc *FirecrackerClient) StartInstance(ctx context.Context) (bool, error) {
 	slog.Info("Starting VM...")
-	status, _, err := fc.request("PUT", "/actions", map[string]any{"action_type": "InstanceStart"})
+	status, _, err := fc.request(ctx, "PUT", "/actions", map[string]any{"action_type": "InstanceStart"})
 	if err != nil {
 		return false, err
 	}
@@ -1003,8 +1003,8 @@ func (fc *FirecrackerClient) StartInstance() (bool, error) {
 // Matches Python's send_ctrl_alt_del():
 //   - SocketNotFoundError and FirecrackerClientError are absorbed (return false, nil)
 //   - All other errors propagate (return false, err)
-func (fc *FirecrackerClient) SendCtrlAltDel() (bool, error) {
-	status, _, err := fc.request("PUT", "/actions", map[string]any{"action_type": "SendCtrlAltDel"})
+func (fc *FirecrackerClient) SendCtrlAltDel(ctx context.Context) (bool, error) {
+	status, _, err := fc.request(ctx, "PUT", "/actions", map[string]any{"action_type": "SendCtrlAltDel"})
 	if err != nil {
 		// Only absorb expected error types (matches Python's except SocketNotFoundError, FirecrackerClientError)
 		switch err.(type) {
@@ -1026,9 +1026,9 @@ func (fc *FirecrackerClient) SendCtrlAltDel() (bool, error) {
 
 // PauseVM pauses the microVM via PATCH /vm with state: "Paused".
 // Matches Python's pause_vm().
-func (fc *FirecrackerClient) PauseVM() error {
+func (fc *FirecrackerClient) PauseVM(ctx context.Context) error {
 	slog.Info("Pausing VM...")
-	status, _, err := fc.request("PATCH", "/vm", map[string]any{"state": "Paused"})
+	status, _, err := fc.request(ctx, "PATCH", "/vm", map[string]any{"state": "Paused"})
 	if err != nil {
 		return err
 	}
@@ -1041,9 +1041,9 @@ func (fc *FirecrackerClient) PauseVM() error {
 
 // ResumeVM resumes a paused microVM via PATCH /vm with state: "Resumed".
 // Matches Python's resume_vm().
-func (fc *FirecrackerClient) ResumeVM() error {
+func (fc *FirecrackerClient) ResumeVM(ctx context.Context) error {
 	slog.Info("Resuming VM...")
-	status, _, err := fc.request("PATCH", "/vm", map[string]any{"state": "Resumed"})
+	status, _, err := fc.request(ctx, "PATCH", "/vm", map[string]any{"state": "Resumed"})
 	if err != nil {
 		return err
 	}
@@ -1058,7 +1058,7 @@ func (fc *FirecrackerClient) ResumeVM() error {
 
 // PutDrive attaches or updates a drive via PUT /drives/{drive_id}.
 // Matches Python's put_drive().
-func (fc *FirecrackerClient) PutDrive(driveConfig model.DriveConfig) error {
+func (fc *FirecrackerClient) PutDrive(ctx context.Context, driveConfig model.DriveConfig) error {
 	body := map[string]any{
 		"drive_id":       driveConfig.DriveID,
 		"path_on_host":   driveConfig.PathOnHost,
@@ -1067,7 +1067,7 @@ func (fc *FirecrackerClient) PutDrive(driveConfig model.DriveConfig) error {
 		"cache_type":     driveConfig.CacheType,
 		"io_engine":      driveConfig.IOEngine,
 	}
-	status, data, err := fc.request("PUT", "/drives/"+driveConfig.DriveID, body)
+	status, data, err := fc.request(ctx, "PUT", "/drives/"+driveConfig.DriveID, body)
 	if err != nil {
 		return err
 	}
@@ -1083,9 +1083,9 @@ func (fc *FirecrackerClient) PutDrive(driveConfig model.DriveConfig) error {
 
 // PatchDrive removes a drive from a running VM via PATCH /drives/{drive_id}.
 // Matches Python's patch_drive().
-func (fc *FirecrackerClient) PatchDrive(driveID string) error {
+func (fc *FirecrackerClient) PatchDrive(ctx context.Context, driveID string) error {
 	body := map[string]any{"drive_id": driveID}
-	status, data, err := fc.request("PATCH", "/drives/"+driveID, body)
+	status, data, err := fc.request(ctx, "PATCH", "/drives/"+driveID, body)
 	if err != nil {
 		return err
 	}
@@ -1101,8 +1101,8 @@ func (fc *FirecrackerClient) PatchDrive(driveID string) error {
 
 // DeleteDrive removes a drive from a running VM via DELETE /drives/{drive_id}.
 // Matches Python's delete_drive().
-func (fc *FirecrackerClient) DeleteDrive(driveID string) error {
-	status, data, err := fc.request("DELETE", "/drives/"+driveID, nil)
+func (fc *FirecrackerClient) DeleteDrive(ctx context.Context, driveID string) error {
+	status, data, err := fc.request(ctx, "DELETE", "/drives/"+driveID, nil)
 	if err != nil {
 		return err
 	}

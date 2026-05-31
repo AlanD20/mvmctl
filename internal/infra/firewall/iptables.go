@@ -1,19 +1,27 @@
 package firewall
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
 	"unicode"
+
+	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/model"
+	"mvmctl/internal/infra/system"
 )
+
+// MaxCommentLen maximum length for iptables comment tags.
+const MaxCommentLen = 240
 
 // ── Chain/table mapping ──
 // Matches Python's _CHAIN_TO_TABLE.
-var chainToTable = map[FirewallChain]string{
-	ChainMVMForward:      "filter",
-	ChainMVMPostrouting:  "nat",
-	ChainMVMNocloudnetIn: "filter",
+var chainToTable = map[model.FirewallChain]string{
+	model.FirewallChainMVMForward:      "filter",
+	model.FirewallChainMVMPostrouting:  "nat",
+	model.FirewallChainMVMNocloudNetIn: "filter",
 }
 
 // ── IPTablesTracker ──
@@ -45,40 +53,40 @@ func NewIPTablesTracker(repo *IPTablesRuleRepository, xtcommentAvailable bool) *
 // ── Initialize ──
 // Matches Python IPTablesTracker.initialize().
 
-func (t *IPTablesTracker) Initialize() {
+func (t *IPTablesTracker) Initialize(ctx context.Context) {
 	type chainDef struct {
-		chain    FirewallChain
-		table    FirewallTable
+		chain    model.FirewallChain
+		table    model.FirewallTable
 		jumpFrom string
 	}
 	chains := []chainDef{
-		{ChainMVMForward, TableFilter, "FORWARD"},
-		{ChainMVMPostrouting, TableNat, "POSTROUTING"},
-		{ChainMVMNocloudnetIn, TableFilter, "INPUT"},
+		{model.FirewallChainMVMForward, model.FirewallTableFilter, "FORWARD"},
+		{model.FirewallChainMVMPostrouting, model.FirewallTableNat, "POSTROUTING"},
+		{model.FirewallChainMVMNocloudNetIn, model.FirewallTableFilter, "INPUT"},
 	}
 	for _, c := range chains {
-		t.EnsureChain(c.chain, c.table, c.jumpFrom, 1)
+		t.EnsureChain(ctx, c.chain, c.table, c.jumpFrom, 1)
 	}
 }
 
 // ── CheckCommentAvailable (static method) ──
 // Matches Python IPTablesTracker.check_comment_available() static method.
 
-func (t *IPTablesTracker) CheckCommentAvailable() bool {
-	result := runFirewallCmd(
+func (t *IPTablesTracker) CheckCommentAvailable(ctx context.Context) bool {
+	result := system.RunCmdCompat(ctx,
 		[]string{"iptables", "-C", "INPUT", "-m", "comment", "--comment", "mvmctl-probe", "-j", "ACCEPT"},
-		false,
+		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
 	)
-	return result.returnCode == 0
+	return result.ExitCode == 0
 }
 
 // ── Build comment ──
 // Matches Python IPTablesTracker._build_comment().
 
-func (t *IPTablesTracker) buildComment(ruleType FirewallRuleType, networkName, context string) string {
-	comment := fmt.Sprintf("%s:%s:%s", CommentPrefix, string(ruleType), networkName)
-	if context != "" {
-		comment = fmt.Sprintf("%s:%s", comment, context)
+func (t *IPTablesTracker) buildComment(ruleType model.FirewallRuleType, networkName, contextLabel string) string {
+	comment := fmt.Sprintf("%s:%s:%s", infra.CLIName, string(ruleType), networkName)
+	if contextLabel != "" {
+		comment = fmt.Sprintf("%s:%s", comment, contextLabel)
 	}
 	if len(comment) > MaxCommentLen {
 		comment = comment[:MaxCommentLen]
@@ -112,7 +120,7 @@ quote:
 // ── Build iptables args ──
 // Matches Python IPTablesTracker._build_iptables_args().
 
-func (t *IPTablesTracker) buildIptablesArgs(rule *FirewallRule, action RuleAction) []string {
+func (t *IPTablesTracker) buildIptablesArgs(rule *model.FirewallRule, action RuleAction) []string {
 	args := []string{
 		"iptables",
 		"-t", string(rule.TableName),
@@ -121,37 +129,37 @@ func (t *IPTablesTracker) buildIptablesArgs(rule *FirewallRule, action RuleActio
 	}
 
 	// Protocol (only if not ALL)
-	if rule.Protocol != ProtoAll {
+	if rule.Protocol != model.FirewallProtocolAll {
 		args = append(args, "-p", string(rule.Protocol))
 	}
 
 	// Source
-	if rule.Source != string(WildcardAnyCIDR) {
+	if rule.Source != string(model.FirewallWildcardAnyCIDR) {
 		args = append(args, "-s", rule.Source)
 	}
 
 	// Destination
-	if rule.Destination != string(WildcardAnyCIDR) {
+	if rule.Destination != string(model.FirewallWildcardAnyCIDR) {
 		args = append(args, "-d", rule.Destination)
 	}
 
 	// Input interface
-	if rule.InInterface != string(WildcardAnyInterface) {
+	if rule.InInterface != string(model.FirewallWildcardAnyInterface) {
 		args = append(args, "-i", rule.InInterface)
 	}
 
 	// Output interface
-	if rule.OutInterface != string(WildcardAnyInterface) {
+	if rule.OutInterface != string(model.FirewallWildcardAnyInterface) {
 		args = append(args, "-o", rule.OutInterface)
 	}
 
 	// Source port
-	if rule.SPort != FirewallPortAny {
+	if rule.SPort != model.FirewallPortAny {
 		args = append(args, "--sport", strconv.Itoa(rule.SPort))
 	}
 
 	// Destination port
-	if rule.DPort != FirewallPortAny {
+	if rule.DPort != model.FirewallPortAny {
 		args = append(args, "--dport", strconv.Itoa(rule.DPort))
 	}
 
@@ -169,34 +177,34 @@ func (t *IPTablesTracker) buildIptablesArgs(rule *FirewallRule, action RuleActio
 // ── Build restore line ──
 // Matches Python IPTablesTracker._build_restore_line().
 
-func (t *IPTablesTracker) buildRestoreLine(rule *FirewallRule) string {
+func (t *IPTablesTracker) buildRestoreLine(rule *model.FirewallRule) string {
 	parts := []string{"-A", string(rule.ChainName)}
 
-	if rule.Protocol != ProtoAll {
+	if rule.Protocol != model.FirewallProtocolAll {
 		parts = append(parts, "-p", string(rule.Protocol))
 	}
 
-	if rule.Source != string(WildcardAnyCIDR) {
+	if rule.Source != string(model.FirewallWildcardAnyCIDR) {
 		parts = append(parts, "-s", rule.Source)
 	}
 
-	if rule.Destination != string(WildcardAnyCIDR) {
+	if rule.Destination != string(model.FirewallWildcardAnyCIDR) {
 		parts = append(parts, "-d", rule.Destination)
 	}
 
-	if rule.InInterface != string(WildcardAnyInterface) {
+	if rule.InInterface != string(model.FirewallWildcardAnyInterface) {
 		parts = append(parts, "-i", rule.InInterface)
 	}
 
-	if rule.OutInterface != string(WildcardAnyInterface) {
+	if rule.OutInterface != string(model.FirewallWildcardAnyInterface) {
 		parts = append(parts, "-o", rule.OutInterface)
 	}
 
-	if rule.SPort != FirewallPortAny {
+	if rule.SPort != model.FirewallPortAny {
 		parts = append(parts, "--sport", strconv.Itoa(rule.SPort))
 	}
 
-	if rule.DPort != FirewallPortAny {
+	if rule.DPort != model.FirewallPortAny {
 		parts = append(parts, "--dport", strconv.Itoa(rule.DPort))
 	}
 
@@ -212,7 +220,7 @@ func (t *IPTablesTracker) buildRestoreLine(rule *FirewallRule) string {
 // ── Build restore input ──
 // Matches Python IPTablesTracker._build_restore_input().
 
-func (t *IPTablesTracker) buildRestoreInput(rules []*FirewallRule, table string) string {
+func (t *IPTablesTracker) buildRestoreInput(rules []*model.FirewallRule, table string) string {
 	var lines []string
 	lines = append(lines, fmt.Sprintf("*%s", table))
 
@@ -246,7 +254,7 @@ func (t *IPTablesTracker) buildRestoreInput(rules []*FirewallRule, table string)
 // ── Ensure rule ──
 // Matches Python IPTablesTracker.ensure_rule().
 
-func (t *IPTablesTracker) EnsureRule(rule FirewallRule, context string) FirewallRuleResult {
+func (t *IPTablesTracker) EnsureRule(ctx context.Context, rule model.FirewallRule, contextLabel string) model.FirewallRuleResult {
 	// No clone — work directly on the input rule, matching Python behavior
 	// where comment_tag and command_string are mutated in place.
 	r := &rule
@@ -257,7 +265,7 @@ func (t *IPTablesTracker) EnsureRule(rule FirewallRule, context string) Firewall
 		if r.NetworkName != nil {
 			networkName = *r.NetworkName
 		}
-		comment := t.buildComment(r.RuleType, networkName, context)
+		comment := t.buildComment(r.RuleType, networkName, contextLabel)
 		r.CommentTag = &comment
 	}
 
@@ -274,7 +282,7 @@ func (t *IPTablesTracker) EnsureRule(rule FirewallRule, context string) Firewall
 	r.CommandString = &cmdStr
 
 	// Check if rule exists in database
-	existingDBRule, err := t.repo.FindByAttributes(
+	existingDBRule, err := t.repo.FindByAttributes(ctx,
 		r.TableName,
 		r.ChainName,
 		r.RuleType,
@@ -293,38 +301,37 @@ func (t *IPTablesTracker) EnsureRule(rule FirewallRule, context string) Firewall
 
 	// Check if rule exists in iptables
 	iptablesExists := false
-	checkResult := runFirewallCmd(checkArgs, false)
-	if checkResult.returnCode == 0 {
+	checkResult := system.RunCmdCompat(ctx, checkArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+	if checkResult.ExitCode == 0 {
 		iptablesExists = true
 	}
 
 	// If rule exists in both DB and iptables, update verification timestamp
 	if existingDBRule != nil && iptablesExists {
 		if existingDBRule.ID != nil {
-			_ = t.repo.UpdateVerifiedAt(*existingDBRule.ID)
+			_ = t.repo.UpdateVerifiedAt(ctx, *existingDBRule.ID)
 		}
-		return FirewallRuleResult{Success: true, Rule: existingDBRule}
+		return model.FirewallRuleResult{Success: true, Rule: existingDBRule}
 	}
 
 	// If rule exists in iptables but not in DB, record it
 	if iptablesExists && existingDBRule == nil {
-		recorded, err := t.repo.Insert(r)
+		recorded, err := t.repo.Insert(ctx, r)
 		if err != nil {
 			errMsg := fmt.Sprintf("Failed to record rule: %v", err)
-			return FirewallRuleResult{
+			return model.FirewallRuleResult{
 				Success:      false,
 				ErrorMessage: &errMsg,
 			}
 		}
-		return FirewallRuleResult{Success: true, Rule: recorded}
+		return model.FirewallRuleResult{Success: true, Rule: recorded}
 	}
 
 	// Create the rule in iptables
-	addResult := runFirewallCmd(addArgs, true)
-	if addResult.returnCode != 0 {
-		errMsg := fmt.Sprintf("Failed to create rule: %s",
-			processErrorMsg(addArgs, addResult.returnCode, addResult.stderr))
-		return FirewallRuleResult{
+	addResult := system.RunCmdCompat(ctx, addArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true})
+	if addResult.ExitCode != 0 {
+		errMsg := fmt.Sprintf("Failed to create rule: command %s failed (exit %d): %s", addArgs[0], addResult.ExitCode, addResult.Stderr)
+		return model.FirewallRuleResult{
 			Success:         false,
 			ErrorMessage:    &errMsg,
 			CommandExecuted: &cmdStr,
@@ -332,18 +339,18 @@ func (t *IPTablesTracker) EnsureRule(rule FirewallRule, context string) Firewall
 	}
 
 	// Record in database (insert new or reactivate existing)
-	var recorded *FirewallRule
+	var recorded *model.FirewallRule
 	if existingDBRule != nil {
 		if existingDBRule.ID != nil {
-			_ = t.repo.UpdateVerifiedAt(*existingDBRule.ID)
+			_ = t.repo.UpdateVerifiedAt(ctx, *existingDBRule.ID)
 		}
 		r.ID = existingDBRule.ID
 		recorded = r
 	} else {
-		recorded, err = t.repo.Insert(r)
+		recorded, err = t.repo.Insert(ctx, r)
 		if err != nil {
 			errMsg := fmt.Sprintf("Failed to insert rule: %v", err)
-			return FirewallRuleResult{
+			return model.FirewallRuleResult{
 				Success:         false,
 				ErrorMessage:    &errMsg,
 				CommandExecuted: &cmdStr,
@@ -351,7 +358,7 @@ func (t *IPTablesTracker) EnsureRule(rule FirewallRule, context string) Firewall
 		}
 	}
 
-	return FirewallRuleResult{
+	return model.FirewallRuleResult{
 		Success:         true,
 		Rule:            recorded,
 		CommandExecuted: &cmdStr,
@@ -361,14 +368,14 @@ func (t *IPTablesTracker) EnsureRule(rule FirewallRule, context string) Firewall
 // ── Remove rule ──
 // Matches Python IPTablesTracker.remove_rule().
 
-func (t *IPTablesTracker) RemoveRule(rule FirewallRule) FirewallRuleResult {
+func (t *IPTablesTracker) RemoveRule(ctx context.Context, rule model.FirewallRule) model.FirewallRuleResult {
 	dbRuleID := rule.ID
 	// Matches Python's reference assignment: effective_rule = rule
 	effectiveRule := &rule
 
 	// Find the rule in database first to get its comment_tag
 	if dbRuleID == nil {
-		existing, err := t.repo.FindByAttributes(
+		existing, err := t.repo.FindByAttributes(ctx,
 			rule.TableName,
 			rule.ChainName,
 			rule.RuleType,
@@ -396,15 +403,15 @@ func (t *IPTablesTracker) RemoveRule(rule FirewallRule) FirewallRuleResult {
 	cmdStrPtr = &cmdStr
 
 	// Remove from iptables
-	deleteResult := runFirewallCmd(deleteArgs, false)
+	deleteResult := system.RunCmdCompat(ctx, deleteArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
 
-	if deleteResult.returnCode != 0 {
+	if deleteResult.ExitCode != 0 {
 		// Deletion failed — try by line number
-		if !t.removeByLineNumber(effectiveRule) {
+		if !t.removeByLineNumber(ctx, effectiveRule) {
 			// Best-effort: check if any rule with these interfaces remains
-			if t.ruleExistsByInterfaces(effectiveRule) {
-				errMsg := fmt.Sprintf("Failed to remove rule: %s", deleteResult.stderr)
-				return FirewallRuleResult{
+			if t.ruleExistsByInterfaces(ctx, effectiveRule) {
+				errMsg := fmt.Sprintf("Failed to remove rule: %s", deleteResult.Stderr)
+				return model.FirewallRuleResult{
 					Success:         false,
 					ErrorMessage:    &errMsg,
 					CommandExecuted: cmdStrPtr,
@@ -415,10 +422,10 @@ func (t *IPTablesTracker) RemoveRule(rule FirewallRule) FirewallRuleResult {
 
 	// Mark as deleted in database if we found it
 	if dbRuleID != nil {
-		_ = t.repo.MarkDeleted(*dbRuleID)
+		_ = t.repo.MarkDeleted(ctx, *dbRuleID)
 	}
 
-	return FirewallRuleResult{
+	return model.FirewallRuleResult{
 		Success:         true,
 		Rule:            effectiveRule,
 		CommandExecuted: cmdStrPtr,
@@ -428,27 +435,27 @@ func (t *IPTablesTracker) RemoveRule(rule FirewallRule) FirewallRuleResult {
 // ── Remove by line number ──
 // Matches Python IPTablesTracker._remove_by_line_number().
 
-func (t *IPTablesTracker) removeByLineNumber(rule *FirewallRule) bool {
+func (t *IPTablesTracker) removeByLineNumber(ctx context.Context, rule *model.FirewallRule) bool {
 	listArgs := []string{
 		"iptables", "-t", string(rule.TableName),
 		"-L", string(rule.ChainName),
 		"-n", "--line-numbers", "-v",
 	}
-	result := runFirewallCmd(listArgs, false)
-	if result.returnCode != 0 {
+	result := system.RunCmdCompat(ctx, listArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+	if result.ExitCode != 0 {
 		return false
 	}
 
 	inIface := rule.InInterface
 	outIface := rule.OutInterface
-	if inIface == string(WildcardAnyInterface) {
+	if inIface == string(model.FirewallWildcardAnyInterface) {
 		inIface = "*"
 	}
-	if outIface == string(WildcardAnyInterface) {
+	if outIface == string(model.FirewallWildcardAnyInterface) {
 		outIface = "*"
 	}
 
-	for _, line := range splitLines(result.stdout) {
+	for line := range strings.SplitSeq(strings.TrimRight(result.Stdout, "\n"), "\n") {
 		parts := strings.Fields(line)
 		if len(parts) < 9 {
 			continue
@@ -464,8 +471,8 @@ func (t *IPTablesTracker) removeByLineNumber(rule *FirewallRule) bool {
 					"-D", string(rule.ChainName),
 					lineNum,
 				}
-				delResult := runFirewallCmd(delArgs, false)
-				return delResult.returnCode == 0
+				delResult := system.RunCmdCompat(ctx, delArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+				return delResult.ExitCode == 0
 			}
 		}
 	}
@@ -475,27 +482,27 @@ func (t *IPTablesTracker) removeByLineNumber(rule *FirewallRule) bool {
 // ── Rule exists by interfaces ──
 // Matches Python IPTablesTracker._rule_exists_by_interfaces().
 
-func (t *IPTablesTracker) ruleExistsByInterfaces(rule *FirewallRule) bool {
+func (t *IPTablesTracker) ruleExistsByInterfaces(ctx context.Context, rule *model.FirewallRule) bool {
 	listArgs := []string{
 		"iptables", "-t", string(rule.TableName),
 		"-L", string(rule.ChainName),
 		"-n", "-v",
 	}
-	result := runFirewallCmd(listArgs, false)
-	if result.returnCode != 0 {
+	result := system.RunCmdCompat(ctx, listArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+	if result.ExitCode != 0 {
 		return false
 	}
 
 	inIface := rule.InInterface
 	outIface := rule.OutInterface
-	if inIface == string(WildcardAnyInterface) {
+	if inIface == string(model.FirewallWildcardAnyInterface) {
 		inIface = "*"
 	}
-	if outIface == string(WildcardAnyInterface) {
+	if outIface == string(model.FirewallWildcardAnyInterface) {
 		outIface = "*"
 	}
 
-	for _, line := range splitLines(result.stdout) {
+	for line := range strings.SplitSeq(strings.TrimRight(result.Stdout, "\n"), "\n") {
 		parts := strings.Fields(line)
 		if len(parts) < 9 {
 			continue
@@ -514,26 +521,26 @@ func (t *IPTablesTracker) ruleExistsByInterfaces(rule *FirewallRule) bool {
 // ── Batch ensure rules ──
 // Matches Python IPTablesTracker.batch_ensure_rules().
 
-func (t *IPTablesTracker) BatchEnsureRules(rules []FirewallRule) FirewallRuleResult {
-	var filterRules []*FirewallRule
-	var natRules []*FirewallRule
+func (t *IPTablesTracker) BatchEnsureRules(ctx context.Context, rules []model.FirewallRule) model.FirewallRuleResult {
+	var filterRules []*model.FirewallRule
+	var natRules []*model.FirewallRule
 
 	for i := range rules {
 		rule := rules[i]
 		switch rule.TableName {
-		case TableFilter:
+		case model.FirewallTableFilter:
 			filterRules = append(filterRules, &rule)
-		case TableNat:
+		case model.FirewallTableNat:
 			natRules = append(natRules, &rule)
 		}
 	}
 
 	if len(filterRules) > 0 {
 		restoreInput := t.buildRestoreInput(filterRules, "filter")
-		result := runFirewallCmdWithInput([]string{"iptables-restore", "-n"}, restoreInput, true)
-		if result.returnCode != 0 {
-			errMsg := processErrorMsg([]string{"iptables-restore", "-n"}, result.returnCode, result.stderr)
-			return FirewallRuleResult{
+		result := system.RunCmdCompat(ctx, []string{"iptables-restore", "-n"}, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true, Input: restoreInput})
+		if result.ExitCode != 0 {
+			errMsg := fmt.Sprintf("command iptables-restore -n failed (exit %d): %s", result.ExitCode, result.Stderr)
+			return model.FirewallRuleResult{
 				Success:      false,
 				ErrorMessage: &errMsg,
 			}
@@ -542,34 +549,46 @@ func (t *IPTablesTracker) BatchEnsureRules(rules []FirewallRule) FirewallRuleRes
 
 	if len(natRules) > 0 {
 		restoreInput := t.buildRestoreInput(natRules, "nat")
-		result := runFirewallCmdWithInput([]string{"iptables-restore", "-n"}, restoreInput, true)
-		if result.returnCode != 0 {
-			errMsg := processErrorMsg([]string{"iptables-restore", "-n"}, result.returnCode, result.stderr)
-			return FirewallRuleResult{
+		result := system.RunCmdCompat(ctx, []string{"iptables-restore", "-n"}, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true, Input: restoreInput})
+		if result.ExitCode != 0 {
+			errMsg := fmt.Sprintf("command iptables-restore -n failed (exit %d): %s", result.ExitCode, result.Stderr)
+			return model.FirewallRuleResult{
 				Success:      false,
 				ErrorMessage: &errMsg,
 			}
 		}
 	}
 
-	return FirewallRuleResult{Success: true}
+	// DB sync: find existing rules, update verified_at, insert new ones.
+	// Uses a single compound query instead of N individual lookups.
+	// This also fixes a bug in the Python original where iptables batch
+	// did not update last_verified_at for existing rules.
+	var ptrs []*model.FirewallRule
+	for i := range rules {
+		ptrs = append(ptrs, &rules[i])
+	}
+	if _, err := t.repo.FindAndUpsertRules(ctx, ptrs); err != nil {
+		slog.Error("Failed to sync iptables rules in DB after batch", "error", err)
+	}
+
+	return model.FirewallRuleResult{Success: true}
 }
 
 // ── Batch remove rules ──
 // Matches Python IPTablesTracker.batch_remove_rules().
 
-func (t *IPTablesTracker) BatchRemoveRules(rules []FirewallRule) FirewallRuleResult {
+func (t *IPTablesTracker) BatchRemoveRules(ctx context.Context, rules []model.FirewallRule) model.FirewallRuleResult {
 	for _, rule := range rules {
-		t.RemoveRule(rule)
+		t.RemoveRule(ctx, rule)
 	}
-	return FirewallRuleResult{Success: true}
+	return model.FirewallRuleResult{Success: true}
 }
 
 // ── Count orphaned rules ──
 // Matches Python IPTablesTracker.count_orphaned_rules().
 
-func (t *IPTablesTracker) CountOrphanedRules(network NetworkRef) int {
-	dbRules, err := t.repo.GetByNetworkID(network.ID, true)
+func (t *IPTablesTracker) CountOrphanedRules(ctx context.Context, network *model.Network) int {
+	dbRules, err := t.repo.GetByNetworkID(ctx, network.ID, true)
 	if err != nil {
 		return 0
 	}
@@ -581,13 +600,13 @@ func (t *IPTablesTracker) CountOrphanedRules(network NetworkRef) int {
 		}
 	}
 
-	result := runFirewallCmd([]string{"iptables-save"}, false)
-	if result.returnCode != 0 {
+	result := system.RunCmdCompat(ctx, []string{"iptables-save"}, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+	if result.ExitCode != 0 {
 		return 0
 	}
 
 	orphaned := 0
-	for _, line := range splitLines(result.stdout) {
+	for line := range strings.SplitSeq(strings.TrimRight(result.Stdout, "\n"), "\n") {
 		if !strings.HasPrefix(line, "-A MVM-") {
 			continue
 		}
@@ -616,24 +635,24 @@ func (t *IPTablesTracker) CountOrphanedRules(network NetworkRef) int {
 // ── Ensure chain ──
 // Matches Python IPTablesTracker.ensure_chain().
 
-func (t *IPTablesTracker) EnsureChain(chainName FirewallChain, table FirewallTable, autoJumpFrom string, position int) bool {
+func (t *IPTablesTracker) EnsureChain(ctx context.Context, chainName model.FirewallChain, table model.FirewallTable, autoJumpFrom string, position int) bool {
 	chainNameStr := string(chainName)
 	tableStr := string(table)
 
 	// Check if chain exists
 	checkArgs := []string{"iptables", "-t", tableStr, "-L", chainNameStr, "-n"}
-	checkResult := runFirewallCmd(checkArgs, false)
-	if checkResult.returnCode == 0 {
+	checkResult := system.RunCmdCompat(ctx, checkArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+	if checkResult.ExitCode == 0 {
 		slog.Debug("Chain already exists", "chain", chainNameStr)
 		return false
 	}
 
 	// Create the chain
 	createArgs := []string{"iptables", "-t", tableStr, "-N", chainNameStr}
-	createResult := runFirewallCmd(createArgs, false)
-	if createResult.returnCode != 0 {
+	createResult := system.RunCmdCompat(ctx, createArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+	if createResult.ExitCode != 0 {
 		// Check if chain already exists (race condition)
-		errStr := processErrorMsg(createArgs, createResult.returnCode, createResult.stderr)
+		errStr := fmt.Sprintf("command %s failed (exit %d): %s", createArgs[0], createResult.ExitCode, createResult.Stderr)
 		if strings.Contains(errStr, "Chain already exists") {
 			slog.Debug("Chain already exists", "chain", chainNameStr)
 			return false
@@ -646,7 +665,7 @@ func (t *IPTablesTracker) EnsureChain(chainName FirewallChain, table FirewallTab
 
 	// Add jump rule if requested
 	if autoJumpFrom != "" {
-		jumpResult := t.EnsureJumpRule(autoJumpFrom, chainNameStr, table, position)
+		jumpResult := t.EnsureJumpRule(ctx, autoJumpFrom, chainNameStr, table, position)
 		if !jumpResult.Success {
 			errMsg := ""
 			if jumpResult.ErrorMessage != nil {
@@ -667,15 +686,15 @@ func (t *IPTablesTracker) EnsureChain(chainName FirewallChain, table FirewallTab
 // ── Ensure jump rule ──
 // Matches Python IPTablesTracker.ensure_jump_rule().
 
-func (t *IPTablesTracker) EnsureJumpRule(fromChain, toChain string, table FirewallTable, position int) FirewallRuleResult {
+func (t *IPTablesTracker) EnsureJumpRule(ctx context.Context, fromChain, toChain string, table model.FirewallTable, position int) model.FirewallRuleResult {
 	tableStr := string(table)
 
 	// Check if jump rule exists
 	checkArgs := []string{"iptables", "-t", tableStr, "-C", fromChain, "-j", toChain}
-	checkResult := runFirewallCmd(checkArgs, false)
-	if checkResult.returnCode == 0 {
+	checkResult := system.RunCmdCompat(ctx, checkArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+	if checkResult.ExitCode == 0 {
 		slog.Debug("Jump rule already exists", "from", fromChain, "to", toChain)
-		return FirewallRuleResult{Success: true}
+		return model.FirewallRuleResult{Success: true}
 	}
 
 	// Insert jump rule at specified position
@@ -684,11 +703,11 @@ func (t *IPTablesTracker) EnsureJumpRule(fromChain, toChain string, table Firewa
 		"-I", fromChain, strconv.Itoa(position),
 		"-j", toChain,
 	}
-	insertResult := runFirewallCmd(insertArgs, true)
-	if insertResult.returnCode != 0 {
-		errMsg := fmt.Sprintf("Failed to add jump rule %s -> %s: %s", fromChain, toChain, insertResult.stderr)
-		slog.Error("Failed to add jump rule", "from", fromChain, "to", toChain, "error", insertResult.stderr)
-		return FirewallRuleResult{
+	insertResult := system.RunCmdCompat(ctx, insertArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true})
+	if insertResult.ExitCode != 0 {
+		errMsg := fmt.Sprintf("Failed to add jump rule %s -> %s: %s", fromChain, toChain, insertResult.Stderr)
+		slog.Error("Failed to add jump rule", "from", fromChain, "to", toChain, "error", insertResult.Stderr)
+		return model.FirewallRuleResult{
 			Success:      false,
 			ErrorMessage: &errMsg,
 		}
@@ -696,7 +715,7 @@ func (t *IPTablesTracker) EnsureJumpRule(fromChain, toChain string, table Firewa
 
 	slog.Info("Inserted jump rule", "from", fromChain, "to", toChain, "position", position)
 	cmdStr := strings.Join(insertArgs, " ")
-	return FirewallRuleResult{
+	return model.FirewallRuleResult{
 		Success:         true,
 		CommandExecuted: &cmdStr,
 	}
@@ -705,37 +724,37 @@ func (t *IPTablesTracker) EnsureJumpRule(fromChain, toChain string, table Firewa
 // ── Teardown ──
 // Matches Python IPTablesTracker.teardown().
 
-func (t *IPTablesTracker) Teardown() {
+func (t *IPTablesTracker) Teardown(ctx context.Context) {
 	type chainDef struct {
-		chain    FirewallChain
-		table    FirewallTable
+		chain    model.FirewallChain
+		table    model.FirewallTable
 		jumpFrom string
 	}
 	chains := []chainDef{
-		{ChainMVMForward, TableFilter, "FORWARD"},
-		{ChainMVMPostrouting, TableNat, "POSTROUTING"},
-		{ChainMVMNocloudnetIn, TableFilter, "INPUT"},
+		{model.FirewallChainMVMForward, model.FirewallTableFilter, "FORWARD"},
+		{model.FirewallChainMVMPostrouting, model.FirewallTableNat, "POSTROUTING"},
+		{model.FirewallChainMVMNocloudNetIn, model.FirewallTableFilter, "INPUT"},
 	}
 	for _, c := range chains {
 		chainName := string(c.chain)
 		table := string(c.table)
 
 		// 1. Delete the jump rule from the parent chain
-		runFirewallCmd(
+		system.RunCmdCompat(ctx,
 			[]string{"iptables", "-t", table, "-D", c.jumpFrom, "-j", chainName},
-			false,
+			system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
 		)
 
 		// 2. Flush the custom chain
-		runFirewallCmd(
+		system.RunCmdCompat(ctx,
 			[]string{"iptables", "-t", table, "-F", chainName},
-			false,
+			system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
 		)
 
 		// 3. Delete the custom chain
-		runFirewallCmd(
+		system.RunCmdCompat(ctx,
 			[]string{"iptables", "-t", table, "-X", chainName},
-			false,
+			system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
 		)
 	}
 }
@@ -743,22 +762,22 @@ func (t *IPTablesTracker) Teardown() {
 // ── Flush chain ──
 // Matches Python IPTablesTracker.flush_chain().
 
-func (t *IPTablesTracker) FlushChain(chainName FirewallChain, table FirewallTable) bool {
+func (t *IPTablesTracker) FlushChain(ctx context.Context, chainName model.FirewallChain, table model.FirewallTable) bool {
 	chainNameStr := string(chainName)
 	tableStr := string(table)
 
 	// Check if chain exists first
 	checkArgs := []string{"iptables", "-t", tableStr, "-L", chainNameStr, "-n"}
-	checkResult := runFirewallCmd(checkArgs, false)
-	if checkResult.returnCode != 0 {
+	checkResult := system.RunCmdCompat(ctx, checkArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+	if checkResult.ExitCode != 0 {
 		slog.Debug("Chain doesn't exist, nothing to flush", "chain", chainNameStr)
 		return false
 	}
 
 	// Flush the chain in iptables
 	flushArgs := []string{"iptables", "-t", tableStr, "-F", chainNameStr}
-	flushResult := runFirewallCmd(flushArgs, true)
-	if flushResult.returnCode != 0 {
+	flushResult := system.RunCmdCompat(ctx, flushArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true})
+	if flushResult.ExitCode != 0 {
 		slog.Warn("Failed to flush chain", "chain", chainNameStr)
 		return false
 	}
@@ -766,7 +785,7 @@ func (t *IPTablesTracker) FlushChain(chainName FirewallChain, table FirewallTabl
 	slog.Info("Flushed all rules from chain", "chain", chainNameStr)
 
 	// Mark all rules for this chain as deleted in database
-	deleted, err := t.repo.MarkDeletedByTableChainName(chainName, table)
+	deleted, err := t.repo.MarkDeletedByTableChainName(ctx, chainName, table)
 	if err != nil {
 		slog.Warn("Failed to mark rules as deleted for chain",
 			"chain", chainNameStr,
@@ -785,28 +804,28 @@ func (t *IPTablesTracker) FlushChain(chainName FirewallChain, table FirewallTabl
 // ── Remove chain ──
 // Matches Python IPTablesTracker.remove_chain().
 
-func (t *IPTablesTracker) RemoveChain(chainName FirewallChain, table FirewallTable) bool {
+func (t *IPTablesTracker) RemoveChain(ctx context.Context, chainName model.FirewallChain, table model.FirewallTable) bool {
 	chainNameStr := string(chainName)
 	tableStr := string(table)
 
 	// Check if chain exists
 	checkArgs := []string{"iptables", "-t", tableStr, "-L", chainNameStr, "-n"}
-	checkResult := runFirewallCmd(checkArgs, false)
-	if checkResult.returnCode != 0 {
+	checkResult := system.RunCmdCompat(ctx, checkArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+	if checkResult.ExitCode != 0 {
 		slog.Debug("Chain doesn't exist, nothing to remove", "chain", chainNameStr)
 		return false
 	}
 
 	// Mark all rules for this chain as deleted in database
-	_, _ = t.repo.MarkDeletedByTableChainName(chainName, table)
+	_, _ = t.repo.MarkDeletedByTableChainName(ctx, chainName, table)
 
 	// Delete the chain
 	deleteArgs := []string{"iptables", "-t", tableStr, "-X", chainNameStr}
-	deleteResult := runFirewallCmd(deleteArgs, true)
-	if deleteResult.returnCode != 0 {
+	deleteResult := system.RunCmdCompat(ctx, deleteArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true})
+	if deleteResult.ExitCode != 0 {
 		slog.Warn("Failed to delete chain",
 			"chain", chainNameStr,
-			"error", processErrorMsg(deleteArgs, deleteResult.returnCode, deleteResult.stderr),
+			"error", fmt.Sprintf("command %s failed (exit %d): %s", deleteArgs[0], deleteResult.ExitCode, deleteResult.Stderr),
 		)
 		return false
 	}

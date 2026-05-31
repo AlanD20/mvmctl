@@ -2,12 +2,13 @@ package inputs
 
 import (
 	"context"
-	"database/sql"
 
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/infra/errs"
 	infranet "mvmctl/internal/infra/network"
 	"mvmctl/internal/infra/validators"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // NetworkCreateInput matches Python's NetworkCreateInput dataclass exactly.
@@ -55,14 +56,14 @@ type ResolvedNetworkCreateRequest struct {
 // validates subnet overlap and bridge conflicts, and produces
 // a ResolvedNetworkCreateRequest suitable for network creation.
 type NetworkCreateRequest struct {
-	db          *sql.DB
+	db          *sqlx.DB
 	input       NetworkCreateInput
 	result      *ResolvedNetworkCreateRequest
 	networkRepo network.Repository
 }
 
 // NewNetworkCreateRequest creates a new NetworkCreateRequest.
-func NewNetworkCreateRequest(inputs NetworkCreateInput, db *sql.DB, networkRepo network.Repository) *NetworkCreateRequest {
+func NewNetworkCreateRequest(inputs NetworkCreateInput, db *sqlx.DB, networkRepo network.Repository) *NetworkCreateRequest {
 	return &NetworkCreateRequest{
 		db:          db,
 		input:       inputs,
@@ -101,7 +102,7 @@ func (r *NetworkCreateRequest) Resolve(ctx context.Context) (*ResolvedNetworkCre
 	// Auto-detect NAT gateways when enabled but none specified
 	natGateways := r.input.NATGateways
 	if len(natGateways) == 0 && natEnabled {
-		outbound := infranet.DetectOutboundInterface()
+		outbound := infranet.DetectOutboundInterface(ctx)
 		if outbound != "" {
 			natGateways = []string{outbound}
 		} else {
@@ -171,7 +172,7 @@ func (r *NetworkCreateRequest) ensureValidate(ctx context.Context) error {
 	}
 
 	// Validate bridge name
-	if err := validator.ValidateBridgeName(r.result.Bridge); err != nil {
+	if err := validator.ValidateBridgeName(ctx, r.result.Bridge); err != nil {
 		return &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
 			Op:      "network_create",
@@ -182,7 +183,7 @@ func (r *NetworkCreateRequest) ensureValidate(ctx context.Context) error {
 
 	// Validate NAT gateways
 	if len(r.result.NATGateways) > 0 {
-		if _, err := validator.ValidateNATGateways(r.result.NATGateways); err != nil {
+		if _, err := validator.ValidateNATGateways(ctx, r.result.NATGateways); err != nil {
 			return &errs.DomainError{
 				Code:    errs.CodeValidationFailed,
 				Op:      "network_create",

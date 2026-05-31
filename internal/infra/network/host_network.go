@@ -21,8 +21,8 @@ func FindNetworkByName(networks []*model.Network, name string) *model.Network {
 
 // CheckIPTablesCommentAvailable checks if iptables supports comments.
 // Uses the comment match module to verify availability.
-func CheckIPTablesCommentAvailable() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func CheckIPTablesCommentAvailable(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	result := system.RunCmdCompat(ctx, []string{"iptables", "-m", "comment", "--comment", "test", "-L"}, system.RunCmdOptions{Check: false})
 	return result.Success

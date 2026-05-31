@@ -163,7 +163,7 @@ func (op *Operation) ImagePull(ctx context.Context, input *inputs.ImagePullInput
 		}
 	}
 
-	specs, err := image.GetSpecsFor([]string{input.Type}, version, arch, cacheTTL, resolvedCIVersion, imageTypesConfig)
+	specs, err := image.GetSpecsFor(ctx, []string{input.Type}, version, arch, cacheTTL, resolvedCIVersion, imageTypesConfig)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
@@ -237,7 +237,7 @@ func (op *Operation) ImagePull(ctx context.Context, input *inputs.ImagePullInput
 	}
 
 	provisionerType := op.resolveProvisionerType(ctx)
-	extractedPath, err := op.Services.Image.ExtractImage(downloadPath, imageID, workDir, spec.Format, input.Partition, input.DisabledDetectors, provisionerType)
+	extractedPath, err := op.Services.Image.ExtractImage(ctx, downloadPath, imageID, workDir, spec.Format, input.Partition, input.DisabledDetectors, provisionerType)
 	if err != nil {
 		// Catch RootPartitionDetectionError and TieDetectedError (matching Python)
 		if isPartitionDetectionError(err) {
@@ -262,7 +262,7 @@ func (op *Operation) ImagePull(ctx context.Context, input *inputs.ImagePullInput
 		})
 	}
 
-	imageItem, warnings, err := op.Services.Image.OptimizeImage(extractedPath, imageID, spec, timestamp, input.SkipOptimization, provisionerType, nil)
+	imageItem, warnings, err := op.Services.Image.OptimizeImage(ctx, extractedPath, imageID, spec, timestamp, input.SkipOptimization, provisionerType, nil)
 	if err != nil {
 		if isPartitionDetectionError(err) {
 			return &errs.OperationResult{
@@ -408,7 +408,7 @@ func (op *Operation) ImageImport(ctx context.Context, input *inputs.ImageImportI
 	}
 
 	provisionerType := op.resolveProvisionerType(ctx)
-	extractedPath, err := op.Services.Image.ExtractImage(input.SourcePath, imageID, filepath.Join(op.CacheDir, "images"), format, input.Partition, input.DisabledDetectors, provisionerType)
+	extractedPath, err := op.Services.Image.ExtractImage(ctx, input.SourcePath, imageID, filepath.Join(op.CacheDir, "images"), format, input.Partition, input.DisabledDetectors, provisionerType)
 	if err != nil {
 		if isPartitionDetectionError(err) {
 			return &errs.OperationResult{
@@ -432,7 +432,7 @@ func (op *Operation) ImageImport(ctx context.Context, input *inputs.ImageImportI
 		})
 	}
 
-	imageItem, _, err := op.Services.Image.OptimizeImage(extractedPath, imageID, spec, timestamp, input.SkipOptimization, provisionerType, importWarnings)
+	imageItem, _, err := op.Services.Image.OptimizeImage(ctx, extractedPath, imageID, spec, timestamp, input.SkipOptimization, provisionerType, importWarnings)
 	if err != nil {
 		if isPartitionDetectionError(err) {
 			return &errs.OperationResult{
@@ -703,7 +703,7 @@ func (op *Operation) ImageListAll(ctx context.Context, remote bool, typeFilter s
 
 		// Use HttpDirVersionResolver to get ImageVersion objects (matches Python exactly)
 		resolver := image.NewHttpDirVersionResolver()
-		versionMap := resolver.Resolve(imageTypesConfig, arch, cacheTTLParam, resolvedCIVersion)
+		versionMap := resolver.Resolve(ctx, imageTypesConfig, arch, cacheTTLParam, resolvedCIVersion)
 		var versions []*model.ImageVersion
 		for _, vs := range versionMap {
 			for i := range vs {

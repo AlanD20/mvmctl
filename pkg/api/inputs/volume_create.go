@@ -2,7 +2,6 @@ package inputs
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"path/filepath"
 
@@ -11,6 +10,8 @@ import (
 	"mvmctl/internal/infra/disk"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/validators"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // VolumeCreateInput matches Python's VolumeCreateInput dataclass.
@@ -49,14 +50,14 @@ type ResolvedVolumeCreateInput struct {
 //
 // Resolve volume creation inputs to explicit values.
 type VolumeCreateRequest struct {
-	db     *sql.DB
+	db     *sqlx.DB
 	input  VolumeCreateInput
 	result *ResolvedVolumeCreateInput
 	repo   volume.Repository
 }
 
 // NewVolumeCreateRequest creates a new VolumeCreateRequest.
-func NewVolumeCreateRequest(inputs VolumeCreateInput, db *sql.DB, volumeRepo volume.Repository) *VolumeCreateRequest {
+func NewVolumeCreateRequest(inputs VolumeCreateInput, db *sqlx.DB, volumeRepo volume.Repository) *VolumeCreateRequest {
 	return &VolumeCreateRequest{
 		db:    db,
 		input: inputs,

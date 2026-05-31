@@ -27,8 +27,8 @@ func NewService(repo Repository) *Service {
 
 // newController creates a VM controller from a resolved VM.
 // This is a convenience wrapper since NewController with a *model.VM never errors.
-func (s *Service) newController(vm *model.VM) *Controller {
-	c, err := NewController(vm, s.repo)
+func (s *Service) newController(ctx context.Context, vm *model.VM) *Controller {
+	c, err := NewController(ctx, vm, s.repo)
 	if err != nil {
 		panic("newController: unexpected error with pre-resolved VM: " + err.Error())
 	}
@@ -37,27 +37,27 @@ func (s *Service) newController(vm *model.VM) *Controller {
 
 // Stop stops a single VM. Matches Python's stop().
 func (s *Service) Stop(ctx context.Context, vm *model.VM, force bool) error {
-	return s.newController(vm).Stop(ctx, force)
+	return s.newController(ctx, vm).Stop(ctx, force)
 }
 
 // Start starts a single VM. Matches Python's start().
 func (s *Service) Start(ctx context.Context, vm *model.VM) error {
-	return s.newController(vm).Start(ctx)
+	return s.newController(ctx, vm).Start(ctx)
 }
 
 // Pause pauses a single VM. Matches Python's pause().
 func (s *Service) Pause(ctx context.Context, vm *model.VM) error {
-	return s.newController(vm).Pause(ctx)
+	return s.newController(ctx, vm).Pause(ctx)
 }
 
 // Resume resumes a single VM. Matches Python's resume().
 func (s *Service) Resume(ctx context.Context, vm *model.VM) error {
-	return s.newController(vm).Resume(ctx)
+	return s.newController(ctx, vm).Resume(ctx)
 }
 
 // Reboot reboots a single VM. Matches Python's reboot().
 func (s *Service) Reboot(ctx context.Context, vm *model.VM, force bool) error {
-	return s.newController(vm).Reboot(ctx, force)
+	return s.newController(ctx, vm).Reboot(ctx, force)
 }
 
 // ── Bulk operations ──

@@ -148,7 +148,7 @@ func handleInteractiveFlow(
 			// Run pre-flight probes before prompting for sudo
 			// Python: from mvmctl.api.host_operations import HostOperation
 			//         probe_result = HostOperation.check_readiness()
-			probeResult := op.InitCheckReadiness()
+			probeResult := op.InitCheckReadiness(ctx)
 			if len(probeResult.Critical) > 0 {
 				common.Cli.Warning("Pre-flight checks found issues:")
 				for _, c := range probeResult.Critical {

@@ -2,13 +2,14 @@ package inputs
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 
 	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // KernelInput matches Python's KernelInput dataclass.
@@ -39,14 +40,14 @@ type ResolvedKernelInput struct {
 //
 // Resolve kernel identifiers to DB records and validate.
 type KernelRequest struct {
-	db       *sql.DB
+	db       *sqlx.DB
 	input    KernelInput
 	result   *ResolvedKernelInput
 	resolver *kernel.Resolver
 }
 
 // NewKernelRequest creates a new KernelRequest.
-func NewKernelRequest(inputs KernelInput, db *sql.DB, kernelRepo kernel.Repository) *KernelRequest {
+func NewKernelRequest(inputs KernelInput, db *sqlx.DB, kernelRepo kernel.Repository) *KernelRequest {
 	return &KernelRequest{
 		db:       db,
 		input:    inputs,

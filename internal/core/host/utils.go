@@ -87,7 +87,7 @@ func CreateGroup(ctx context.Context, groupName string) (bool, error) {
 
 // ── AddUserToGroup ──
 func AddUserToGroup(ctx context.Context, username, groupName string) (bool, error) {
-	if system.UserInGroup(username, groupName) {
+	if system.UserInGroup(ctx, username, groupName) {
 		return false, nil
 	}
 
@@ -103,7 +103,7 @@ func RemoveUserFromGroup(ctx context.Context, username, groupName string) (bool,
 	if !system.GroupExists(groupName) {
 		return false, nil
 	}
-	if !system.UserInGroup(username, groupName) {
+	if !system.UserInGroup(ctx, username, groupName) {
 		return false, nil
 	}
 
