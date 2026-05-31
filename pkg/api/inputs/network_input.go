@@ -12,17 +12,9 @@ import (
 )
 
 // NetworkInput is the raw input for identifying existing networks.
-// Matches Python's NetworkInput dataclass:
-//
-//	@dataclass
-//	class NetworkInput:
-//	    name: list[str] = field(default_factory=list)
-//	    id: list[str] = field(default_factory=list)
-//	    force: bool | None = None
 type NetworkInput struct {
-	Name  []string `json:"name,omitempty"`
-	ID    []string `json:"id,omitempty"`
-	Force *bool    `json:"force,omitempty"`
+	Identifiers []string `json:"identifiers"`
+	Force       *bool    `json:"force,omitempty"`
 }
 
 // ResolvedNetworkInput matches Python's ResolvedNetworkInput (frozen dataclass).
@@ -65,9 +57,7 @@ func NewNetworkRequest(inputs NetworkInput, db *sqlx.DB, networkRepo network.Rep
 // Resolve resolves network identifiers to NetworkItem records.
 // Matches Python's NetworkRequest.resolve().
 func (r *NetworkRequest) Resolve(ctx context.Context) (*ResolvedNetworkInput, error) {
-	identifiers := append(r.input.Name, r.input.ID...)
-
-	if len(identifiers) == 0 {
+	if len(r.input.Identifiers) == 0 {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeNetworkNotFound,
 			Op:      "network",
@@ -76,7 +66,7 @@ func (r *NetworkRequest) Resolve(ctx context.Context) (*ResolvedNetworkInput, er
 		}
 	}
 
-	result, err := r.resolver.ResolveMany(ctx, identifiers)
+	result, err := r.resolver.ResolveMany(ctx, r.input.Identifiers)
 	if err != nil {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeNetworkNotFound,
