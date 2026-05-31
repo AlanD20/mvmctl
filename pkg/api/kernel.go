@@ -426,8 +426,8 @@ func (op *Operation) KernelImport(ctx context.Context, input *inputs.KernelImpor
 func (op *Operation) KernelRemove(ctx context.Context, identifiers []string, force bool) *errs.BatchResult {
 	forceVal := force
 	kernelInput := inputs.KernelInput{
-		ID:    identifiers,
-		Force: &forceVal,
+		Identifiers: identifiers,
+		Force:       &forceVal,
 	}
 
 	request := inputs.NewKernelRequest(kernelInput, op.Connection.DB(), op.Repos.Kernel)
@@ -596,7 +596,7 @@ func (op *Operation) kernelListRemote(ctx context.Context, noCache bool) ([]mode
 // internally for consistent resolution behavior.
 func (op *Operation) KernelGet(ctx context.Context, id string) (*model.KernelItem, error) {
 	kernelInput := inputs.KernelInput{
-		ID: []string{id},
+		Identifiers: []string{id},
 	}
 
 	request := inputs.NewKernelRequest(kernelInput, op.Connection.DB(), op.Repos.Kernel)
@@ -638,7 +638,7 @@ func (op *Operation) KernelInspect(ctx context.Context, id string) (*responses.K
 // for consistent identifier resolution, catches KernelError at top level.
 func (op *Operation) KernelSetDefault(ctx context.Context, id string) *errs.OperationResult {
 	kernelInput := inputs.KernelInput{
-		ID: []string{id},
+		Identifiers: []string{id},
 	}
 
 	request := inputs.NewKernelRequest(kernelInput, op.Connection.DB(), op.Repos.Kernel)

@@ -1,5 +1,7 @@
 package infra
 
+import "strings"
+
 // BoolToInt converts a bool to an int (1 for true, 0 for false).
 // Used for SQLite storage where bools are stored as integers.
 func BoolToInt(b bool) int {
@@ -25,4 +27,23 @@ func DerefOrNil[T any](p *T) any {
 		return nil
 	}
 	return *p
+}
+
+// ShlexQuote returns a shell-safe single-quoted version of s.
+// Matches Python's shlex.quote(): safe characters pass through, everything
+// else is wrapped in single quotes with embedded quotes escaped as '"'"'.
+func ShlexQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	for _, r := range s {
+		if !('a' <= r && r <= 'z') && !('A' <= r && r <= 'Z') &&
+			!('0' <= r && r <= '9') &&
+			r != '@' && r != '%' && r != '_' && r != '+' &&
+			r != '=' && r != ':' && r != ',' && r != '.' &&
+			r != '/' && r != '-' {
+			return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+		}
+	}
+	return s
 }

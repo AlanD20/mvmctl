@@ -67,8 +67,9 @@ func newKernelListCmd(op *api.Operation) *cobra.Command {
 	var noCache bool
 
 	cmd := &cobra.Command{
-		Use:   "ls",
-		Short: "List cached kernels (or available remote kernels with --remote)",
+		Use:     "ls",
+		Aliases: []string{"list"},
+		Short:   "List cached kernels (or available remote kernels with --remote)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if remote {
 				fmt.Fprintln(os.Stderr, "Fetching remote kernel versions...")
@@ -348,7 +349,7 @@ func newKernelRemoveCmd(op *api.Operation) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:               "rm [identifiers...]",
-		Aliases:           []string{"remove"},
+		Aliases:           []string{"remove", "delete", "del"},
 		Short:             "Remove one or more kernels",
 		ValidArgsFunction: completeKernelIDs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -522,7 +523,7 @@ func sortedStringKeys(m map[string][]string) []string {
 	for k := range m {
 		keys = append(keys, k)
 	}
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		for j := i + 1; j < len(keys); j++ {
 			if keys[j] < keys[i] {
 				keys[i], keys[j] = keys[j], keys[i]

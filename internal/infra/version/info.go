@@ -62,7 +62,7 @@ func GetGitVersionInfo(ctx context.Context) string {
 	}
 
 	for _, dir := range searchDirs {
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 				repoDir := dir
 

@@ -6,6 +6,7 @@ import (
 
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	infranet "mvmctl/internal/infra/network"
 )
 
 // LeaseService manages IP leases for a specific network.
@@ -61,65 +62,18 @@ func (s *LeaseService) NetworkName() string {
 }
 
 // GetLeases returns all IP leases for this network.
-// Matches Python: returns new model.NetworkLeaseItem copies from db leases.
 func (s *LeaseService) GetLeases(ctx context.Context) ([]*model.NetworkLeaseItem, error) {
-	dbLeases, err := s.leaseRepo.ListAll(ctx, s.net.ID)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]*model.NetworkLeaseItem, len(dbLeases))
-	for i, l := range dbLeases {
-		result[i] = &model.NetworkLeaseItem{
-			NetworkID: l.NetworkID,
-			IPv4:      l.IPv4,
-			VMID:      l.VMID,
-			ID:        l.ID,
-			LeasedAt:  l.LeasedAt,
-			ExpiresAt: l.ExpiresAt,
-		}
-	}
-	return result, nil
+	return s.leaseRepo.ListAll(ctx, s.net.ID)
 }
 
 // Get returns lease for a specific IP address.
-// Matches Python: returns model.NetworkLeaseItem copy or nil.
 func (s *LeaseService) Get(ctx context.Context, ip string) (*model.NetworkLeaseItem, error) {
-	lease, err := s.leaseRepo.Get(ctx, s.net.ID, ip)
-	if err != nil {
-		return nil, err
-	}
-	if lease == nil {
-		return nil, nil
-	}
-	return &model.NetworkLeaseItem{
-		NetworkID: lease.NetworkID,
-		IPv4:      lease.IPv4,
-		VMID:      lease.VMID,
-		ID:        lease.ID,
-		LeasedAt:  lease.LeasedAt,
-		ExpiresAt: lease.ExpiresAt,
-	}, nil
+	return s.leaseRepo.Get(ctx, s.net.ID, ip)
 }
 
 // GetByVMID returns all leases for a specific VM on this network.
-// Matches Python's get_by_vm_id.
 func (s *LeaseService) GetByVMID(ctx context.Context, vmID string) ([]*model.NetworkLeaseItem, error) {
-	dbLeases, err := s.leaseRepo.ListByVM(ctx, s.net.ID, vmID)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]*model.NetworkLeaseItem, len(dbLeases))
-	for i, l := range dbLeases {
-		result[i] = &model.NetworkLeaseItem{
-			NetworkID: l.NetworkID,
-			IPv4:      l.IPv4,
-			VMID:      l.VMID,
-			ID:        l.ID,
-			LeasedAt:  l.LeasedAt,
-			ExpiresAt: l.ExpiresAt,
-		}
-	}
-	return result, nil
+	return s.leaseRepo.ListByVM(ctx, s.net.ID, vmID)
 }
 
 // IsAvailable checks if an IP address is available (not leased).
@@ -138,7 +92,7 @@ func (s *LeaseService) Lease(ctx context.Context, vmID string) (string, error) {
 	maxRetries := 10
 	var lastError error
 
-	for attempt := 0; attempt < maxRetries; attempt++ {
+	for range maxRetries {
 		leases, err := s.GetLeases(ctx)
 		if err != nil {
 			return "", err
@@ -148,7 +102,7 @@ func (s *LeaseService) Lease(ctx context.Context, vmID string) (string, error) {
 			usedIPs[i] = l.IPv4
 		}
 
-		allocatedIP, err := AllocateNextIP(usedIPs, s.net.Subnet, s.net.IPv4Gateway)
+		allocatedIP, err := infranet.AllocateNextIP(usedIPs, s.net.Subnet, s.net.IPv4Gateway)
 		if err != nil {
 			return "", errs.Wrap(errs.CodeNetworkLeaseExhausted, err)
 		}

@@ -102,10 +102,11 @@ func newVMListCmd(op *api.Operation) *cobra.Command {
 	var longOutput bool
 
 	cmd := &cobra.Command{
-		Use:   "ls",
-		Short: "List all VMs.",
+		Use:     "ls",
+		Aliases: []string{"list"},
+		Short:   "List all VMs.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runVMLs(op, cmd, jsonOutput, longOutput)
+			return runVMList(op, cmd, jsonOutput, longOutput)
 		},
 	}
 
@@ -114,12 +115,11 @@ func newVMListCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func runVMLs(op *api.Operation, cmd *cobra.Command, jsonOutput, longOutput bool) error {
+func runVMList(op *api.Operation, cmd *cobra.Command, jsonOutput, longOutput bool) error {
 	vms := op.VMList(cmd.Context(), nil)
 
 	if jsonOutput {
-		data := op.VMToJSON(vms)
-		b, _ := json.MarshalIndent(data, "", "  ")
+		b, _ := json.MarshalIndent(vms, "", "  ")
 		fmt.Println(string(b))
 		return nil
 	}
@@ -563,6 +563,7 @@ func newVMRemoveCmd(op *api.Operation) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:               "rm [identifiers...]",
+		Aliases:           []string{"remove", "delete", "del"},
 		Short:             "Remove one or more VMs.",
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeVMNames,
@@ -857,7 +858,7 @@ func runVMInspect(op *api.Operation, cmd *cobra.Command, id string, jsonOutput b
 	}
 
 	if jsonOutput {
-		fmt.Println(marshalJSONDefaultStr(info))
+		fmt.Println(common.MarshalJSONDefaultStr(info))
 		return nil
 	}
 

@@ -61,8 +61,9 @@ func newKeyListCmd(op *api.Operation) *cobra.Command {
 	var longOutput bool
 
 	cmd := &cobra.Command{
-		Use:   "ls",
-		Short: "List all SSH keys.",
+		Use:     "ls",
+		Aliases: []string{"list"},
+		Short:   "List all SSH keys.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			keys, err := op.KeyListAll(cmd.Context())
 			if err != nil {
@@ -192,6 +193,7 @@ func newKeyRemoveCmd(op *api.Operation) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:               "rm [identifier]...",
+		Aliases:           []string{"remove", "delete", "del"},
 		Short:             "Remove one or more SSH keys",
 		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: completeKeyNames,

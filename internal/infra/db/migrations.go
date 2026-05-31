@@ -98,31 +98,16 @@ func listMigrationFiles() ([]migrationFile, error) {
 }
 
 // takeSnapshot creates an online SQLite backup snapshot before a migration.
-// Mirrors Python's Database._take_snapshot().
-//
-// Uses VACUUM INTO to create a transactionally consistent copy. The snapshot
-// file is created alongside the database at {dbPath}.v{version}.snap.
-//
-// The SQLite backup API (NewBackup/Backup.Step/Backup.Finish) exists in
-// modernc.org/sqlite but is NOT accessible from external packages because the
-// conn type (which carries NewBackup/NewRestore methods) is unexported.
-// VACUUM INTO is the closest equivalent accessible through database/sql:
-// it creates a transactionally consistent copy and is supported by
-// modernc.org/sqlite's embedded SQLite (which tracks current upstream releases
-// well past the 3.27.0 minimum requirement for VACUUM INTO).
-func takeSnapshot(dbPath string, version int) (string, error) {
-	snapPath := fmt.Sprintf("%s.v%d.snap", dbPath, version)
+// Uses VACUUM INTO to create a transactionally consistent copy.
+func (d *Handle) takeSnapshot(version int) (string, error) {
+	snapPath := fmt.Sprintf("%s.v%d.snap", d.Path(), version)
 
-	srcDB, err := sql.Open("sqlite", dbPath)
+	srcDB, err := sql.Open("sqlite", d.Path())
 	if err != nil {
 		return "", fmt.Errorf("open source db for snapshot: %w", err)
 	}
 	defer srcDB.Close()
 
-	// VACUUM INTO creates a transactionally consistent copy of the database.
-	// Equivalent to Python's src.backup(dst) for snapshot creation, with the
-	// minor behavioural difference that it also vacuums the data (removing
-	// free pages), making snapshots slightly more compact.
 	if _, err := srcDB.Exec(fmt.Sprintf("VACUUM INTO '%s'", snapPath)); err != nil {
 		return "", fmt.Errorf("create snapshot via VACUUM INTO: %w", err)
 	}
@@ -146,7 +131,7 @@ func (d *Handle) RunMigrationsCtx(ctx context.Context) (int, error) {
 	sqlDB := d.DB()
 
 	// Ensure the tracking table exists (Python's _ensure_migrations_table)
-	if err := EnsureMigrationsTable(ctx, sqlDB); err != nil {
+	if err := d.ensureMigrationsTable(ctx); err != nil {
 		return 0, fmt.Errorf("create migrations table: %w", err)
 	}
 
@@ -159,10 +144,9 @@ func (d *Handle) RunMigrationsCtx(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 
-	// Get current version from PRAGMA user_version (matching Python's
-	// Database.get_current_version() — not from db_migrations table).
-	currentVersion, err := readCurrentVersion(sqlDB)
-	if err != nil {
+	// Get current version from PRAGMA user_version
+	var currentVersion int
+	if err := sqlDB.QueryRow("PRAGMA user_version").Scan(&currentVersion); err != nil {
 		return 0, fmt.Errorf("get current version from user_version: %w", err)
 	}
 
@@ -176,7 +160,7 @@ func (d *Handle) RunMigrationsCtx(ctx context.Context) (int, error) {
 		// Take online snapshot before migration (for version > 1, matching Python)
 		snapshotPath := ""
 		if f.version > 1 {
-			snapPath, snapErr := takeSnapshot(d.Path(), f.version)
+			snapPath, snapErr := d.takeSnapshot(f.version)
 			if snapErr != nil {
 				return applied, fmt.Errorf("take snapshot before migration %s: %w", f.name, snapErr)
 			}
@@ -190,7 +174,7 @@ func (d *Handle) RunMigrationsCtx(ctx context.Context) (int, error) {
 			// Migration failed — restore the snapshot taken before it so the
 			// database is left in a clean pre-migration state rather than broken.
 			if snapshotPath != "" {
-				if restoreErr := restoreFromSnapshot(snapshotPath, d.Path()); restoreErr != nil {
+				if restoreErr := d.RestoreFromSnapshot(snapshotPath); restoreErr != nil {
 					slog.Error("failed to restore snapshot after migration failure",
 						"version", f.version, "snapshot", snapshotPath, "error", restoreErr)
 				}
@@ -220,8 +204,8 @@ func (d *Handle) RunMigrationsCtx(ctx context.Context) (int, error) {
 
 // GetPendingMigrations returns the list of migration files that haven't been applied yet.
 func (d *Handle) GetPendingMigrations(ctx context.Context) ([]string, error) {
-	currentVersion, err := readCurrentVersion(d.DB())
-	if err != nil {
+	var currentVersion int
+	if err := d.DB().QueryRow("PRAGMA user_version").Scan(&currentVersion); err != nil {
 		return nil, fmt.Errorf("get current version: %w", err)
 	}
 

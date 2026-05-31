@@ -617,114 +617,6 @@ func (op *Operation) VMList(ctx context.Context, statusFilter interface{}) []*mo
 // ToJSON converts VMs to JSON-serializable dicts.
 // Matches Python's VMOperation.to_json() exactly.
 // Python always includes ALL fields in every entry (with None/null if not set).
-func (op *Operation) VMToJSON(vms []*model.VM) []map[string]interface{} {
-	result := make([]map[string]interface{}, 0, len(vms))
-	for _, vm := range vms {
-		// Always include all fields — Python always sets every key in the dict,
-		// using None for missing values. For Go, use interface{}(nil) for nil
-		// pointer fields to produce JSON `null`, matching Python's `None`.
-		var processStartTime interface{} = nil
-		if vm.ProcessStartTime != nil {
-			processStartTime = *vm.ProcessStartTime
-		}
-		var nocloudNetPort interface{} = nil
-		if vm.NocloudNetPort != nil {
-			nocloudNetPort = *vm.NocloudNetPort
-		}
-		var nocloudNetPID interface{} = nil
-		if vm.NocloudNetPID != nil {
-			nocloudNetPID = *vm.NocloudNetPID
-		}
-		var relayPID interface{} = nil
-		if vm.RelayPID != nil {
-			relayPID = *vm.RelayPID
-		}
-		var relaySocketPath interface{} = nil
-		if vm.RelaySocketPath != nil {
-			relaySocketPath = *vm.RelaySocketPath
-		}
-		var logPath interface{} = nil
-		if vm.LogPath != nil {
-			logPath = *vm.LogPath
-		}
-		var serialOutputPath interface{} = nil
-		if vm.SerialOutputPath != nil {
-			serialOutputPath = *vm.SerialOutputPath
-		}
-		var lsmFlags interface{} = nil
-		if vm.LSMFlags != nil {
-			lsmFlags = *vm.LSMFlags
-		}
-		var bootArgs interface{} = nil
-		if vm.BootArgs != nil {
-			bootArgs = *vm.BootArgs
-		}
-
-		// Network enrichment fields — always included, null if not enriched
-		var networkName interface{} = nil
-		var networkSubnet interface{} = nil
-		var networkBridge interface{} = nil
-		var networkGateway interface{} = nil
-		if vm.Network != nil {
-			networkName = vm.Network.Name
-			networkSubnet = vm.Network.Subnet
-			networkBridge = vm.Network.Bridge
-			networkGateway = vm.Network.IPv4Gateway
-		}
-
-		entry := map[string]interface{}{
-			"id":                 vm.ID,
-			"name":               vm.Name,
-			"status":             vm.Status,
-			"pid":                vm.PID,
-			"exit_code":          vm.ExitCode,
-			"ipv4":               vm.IPv4,
-			"mac":                vm.MAC,
-			"network_id":         vm.NetworkID,
-			"network_name":       networkName,
-			"network_subnet":     networkSubnet,
-			"network_bridge":     networkBridge,
-			"network_gateway":    networkGateway,
-			"tap_device":         vm.TapDevice,
-			"image_id":           vm.ImageID,
-			"kernel_id":          vm.KernelID,
-			"binary_id":          vm.BinaryID,
-			"vcpu_count":         vm.VCPUCount,
-			"mem_size_mib":       vm.MemSizeMiB,
-			"disk_size_mib":      vm.DiskSizeMiB,
-			"api_socket_path":    vm.APISocketPath,
-			"config_path":        vm.ConfigPath,
-			"cloud_init_mode":    vm.CloudInitMode,
-			"rootfs_path":        vm.RootfsPath,
-			"rootfs_suffix":      vm.RootfsSuffix,
-			"pci_enabled":        vm.PCIEnabled,
-			"enable_logging":     vm.EnableLogging,
-			"enable_metrics":     vm.EnableMetrics,
-			"enable_console":     vm.EnableConsole,
-			"created_at":         vm.CreatedAt,
-			"updated_at":         vm.UpdatedAt,
-			"relay_socket_path":  relaySocketPath,
-			"process_start_time": processStartTime,
-			"nocloud_net_port":   nocloudNetPort,
-			"nocloud_net_pid":    nocloudNetPID,
-			"relay_pid":          relayPID,
-			"log_path":           logPath,
-			"serial_output_path": serialOutputPath,
-			"lsm_flags":          lsmFlags,
-			"boot_args":          bootArgs,
-			"ssh_keys":           vm.SSHKeys,
-			"ssh_user":           vm.SSHUser,
-		}
-
-		result = append(result, entry)
-	}
-	return result
-}
-
-// ── Get / Inspect ──
-
-// Get returns a single VM by identifier.
-// Matches Python's VMOperation.get() exactly.
 func (op *Operation) VMGet(ctx context.Context, input *inputs.VMInput) (*model.VM, error) {
 	if len(input.Identifiers) != 1 {
 		return nil, fmt.Errorf("Expected exactly one VM identifier")
@@ -1076,7 +968,7 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snap
 				_ = netSvc.EnsureBridge(ctx, bridgeName, bridgeAddr)
 			}
 			_ = netSvc.EnsureTap(ctx, v.TapDevice, bridgeName, netID, subnet)
-			network.FlushARP(ctx, bridgeName)
+			infranet.FlushARP(ctx, bridgeName)
 		}
 	}
 
@@ -2303,7 +2195,7 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 		return fmt.Errorf("ensure TAP: %w", err)
 	}
 	c.markCreated("network_tap")
-	network.FlushARP(ctx, c.resolved.Network.Bridge)
+	infranet.FlushARP(ctx, c.resolved.Network.Bridge)
 
 	// Progress: rootfs
 	if c.onProgress != nil {
@@ -2776,7 +2668,7 @@ func (c *vmCreateContext) respawnExecute(ctx context.Context) error {
 	}
 	_ = netSvc.EnsureBridge(ctx, netItem.Bridge, bridgeAddr)
 	_ = netSvc.EnsureTap(ctx, c.tapName, netItem.Bridge, netItem.ID, netItem.Subnet)
-	network.FlushARP(ctx, netItem.Bridge)
+	infranet.FlushARP(ctx, netItem.Bridge)
 
 	// ── Build config and spawn ──
 	fcConfig := c.buildFirecrackerConfig(ctx)
@@ -3331,7 +3223,7 @@ func (op *Operation) vmResolveSingleVM(ctx context.Context, ident string) (*mode
 
 func (op *Operation) vmGenerateBatchNames(baseName string, count int) []string {
 	names := make([]string, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		names[i] = fmt.Sprintf("%s-%d", baseName, i+1)
 	}
 	return names

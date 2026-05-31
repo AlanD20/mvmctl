@@ -11,22 +11,12 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-// ImageInput matches Python's ImageInput dataclass.
-//
-//	@dataclass
-//	class ImageInput:
-//	    id: list[str] = field(default_factory=list)
-//	    type: list[str] = field(default_factory=list)
+// ImageInput is the raw input for identifying existing images.
 type ImageInput struct {
-	ID   []string `json:"id,omitempty"`
-	Type []string `json:"type,omitempty"`
+	Identifiers []string `json:"identifiers"`
 }
 
 // ResolvedImageInput matches Python's ResolvedImageInput (frozen dataclass).
-//
-//	@dataclass(frozen=True)
-//	class ResolvedImageInput:
-//	    images: list[ImageItem]
 type ResolvedImageInput struct {
 	Images []*model.ImageItem
 }
@@ -55,11 +45,7 @@ func NewImageRequest(inputs ImageInput, db *sqlx.DB, imageRepo image.Repository)
 // Resolve resolves identifiers to ImageItem records from DB.
 // Matches Python's ImageRequest.resolve().
 func (r *ImageRequest) Resolve(ctx context.Context) (*ResolvedImageInput, error) {
-	identifiers := make([]string, 0, len(r.input.ID)+len(r.input.Type))
-	identifiers = append(identifiers, r.input.ID...)
-	identifiers = append(identifiers, r.input.Type...)
-
-	if len(identifiers) == 0 {
+	if len(r.input.Identifiers) == 0 {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeImageNotFound,
 			Op:      "image",
@@ -69,7 +55,7 @@ func (r *ImageRequest) Resolve(ctx context.Context) (*ResolvedImageInput, error)
 	}
 
 	// Validate identifier length — max 64 chars.
-	for _, ident := range identifiers {
+	for _, ident := range r.input.Identifiers {
 		if len(ident) > 64 {
 			return nil, &errs.DomainError{
 				Code:    errs.CodeValidationFailed,
@@ -80,7 +66,7 @@ func (r *ImageRequest) Resolve(ctx context.Context) (*ResolvedImageInput, error)
 		}
 	}
 
-	result := r.resolver.ResolveMany(ctx, identifiers)
+	result := r.resolver.ResolveMany(ctx, r.input.Identifiers)
 	if result == nil || len(result.Items) == 0 {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeImageNotFound,

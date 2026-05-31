@@ -800,7 +800,7 @@ func (fc *FirecrackerClient) request(
 	delay := 0.1
 	var lastErr error
 
-	for attempt := 0; attempt < maxRetries; attempt++ {
+	for attempt := range maxRetries {
 		var reqBodyReader strings.Reader
 		if bodyStr != "" {
 			reqBodyReader = *strings.NewReader(bodyStr)

@@ -12,25 +12,13 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-// KernelInput matches Python's KernelInput dataclass.
-//
-//	@dataclass
-//	class KernelInput:
-//	    id: list[str] = field(default_factory=list)
-//	    name: list[str] = field(default_factory=list)
-//	    force: bool | None = None
+// KernelInput is the raw input for identifying existing kernels.
 type KernelInput struct {
-	ID    []string `json:"id,omitempty"`
-	Name  []string `json:"name,omitempty"`
-	Force *bool    `json:"force,omitempty"`
+	Identifiers []string `json:"identifiers"`
+	Force       *bool    `json:"force,omitempty"`
 }
 
 // ResolvedKernelInput matches Python's ResolvedKernelInput (frozen dataclass).
-//
-//	@dataclass(frozen=True)
-//	class ResolvedKernelInput:
-//	    kernels: list[KernelItem]
-//	    force: bool
 type ResolvedKernelInput struct {
 	Kernels []*model.KernelItem
 	Force   bool
@@ -60,9 +48,7 @@ func NewKernelRequest(inputs KernelInput, db *sqlx.DB, kernelRepo kernel.Reposit
 // Resolve resolves kernel identifiers to KernelItem records.
 // Matches Python's KernelRequest.resolve().
 func (r *KernelRequest) Resolve(ctx context.Context) (*ResolvedKernelInput, error) {
-	identifiers := append(r.input.ID, r.input.Name...)
-
-	if len(identifiers) == 0 {
+	if len(r.input.Identifiers) == 0 {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeKernelNotFound,
 			Op:      "kernel",
@@ -72,7 +58,7 @@ func (r *KernelRequest) Resolve(ctx context.Context) (*ResolvedKernelInput, erro
 	}
 
 	// Validate identifier length — max 64 chars.
-	for _, ident := range identifiers {
+	for _, ident := range r.input.Identifiers {
 		if len(ident) > 64 {
 			return nil, &errs.DomainError{
 				Code:    errs.CodeValidationFailed,
@@ -83,7 +69,7 @@ func (r *KernelRequest) Resolve(ctx context.Context) (*ResolvedKernelInput, erro
 		}
 	}
 
-	result := r.resolver.ResolveMany(ctx, identifiers)
+	result := r.resolver.ResolveMany(ctx, r.input.Identifiers)
 
 	if len(result.Errors) > 0 && len(result.Items) == 0 {
 		return nil, &errs.DomainError{

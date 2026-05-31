@@ -83,8 +83,9 @@ func newBinaryListCmd(op *api.Operation) *cobra.Command {
 	var limit int
 
 	cmd := &cobra.Command{
-		Use:   "ls",
-		Short: "List local (and optionally remote) Firecracker versions",
+		Use:     "ls",
+		Aliases: []string{"list"},
+		Short:   "List local (and optionally remote) Firecracker versions",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			local, _, err := op.BinaryList(cmd.Context(), false, nil)
 			if err != nil {
@@ -288,6 +289,7 @@ func newBinaryRemoveCmd(op *api.Operation) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:               "rm [identifiers...]",
+		Aliases:           []string{"remove", "delete", "del"},
 		Short:             "Remove one or more binaries. Use --version to remove by version pair.",
 		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: completeBinaryVersions,
