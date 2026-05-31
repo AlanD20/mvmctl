@@ -58,16 +58,6 @@ func NewImageCmd(op *api.Operation) *cobra.Command {
 	cmd.AddCommand(newImageImportCmd(op))
 	cmd.AddCommand(newImageWarmCmd(op))
 
-	helpCmd := &cobra.Command{
-		Use:    "help",
-		Hidden: true,
-		Args:   cobra.NoArgs,
-		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Help()
-		},
-	}
-	cmd.AddCommand(helpCmd)
-
 	return cmd
 }
 
@@ -281,7 +271,6 @@ The selector can be a type (e.g. "ubuntu") or type:version (e.g. "ubuntu:24.04")
 				if msg == "" {
 					msg = fmt.Sprintf("Download failed: %s", selector)
 				}
-				common.Cli.Error(msg)
 				return fmt.Errorf("download failed: %s", msg)
 			}
 			img, ok := opResult.Item.(*model.ImageItem)

@@ -36,16 +36,7 @@ func NewInitCmd(op *api.Operation) *cobra.Command {
 	cmd.Flags().BoolVar(&skipHost, "skip-host", false, "Skip host init step")
 	cmd.Flags().BoolVar(&skipNetwork, "skip-network", false, "Skip default network creation")
 
-	// Hidden help subcommand matching Python's Typer "help" command
-	helpCmd := &cobra.Command{
-		Use:    "help",
-		Hidden: true,
-		Args:   cobra.NoArgs,
-		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Parent().Help()
-		},
-	}
-	cmd.AddCommand(helpCmd)
+
 
 	return cmd
 }
@@ -165,7 +156,11 @@ func handleInteractiveFlow(
 					common.Cli.Warning(fmt.Sprintf("  %s: %s", c.Name, c.Message))
 				}
 				// Python: if not typer.confirm(...): mvm_cli.info("Aborted"); raise typer.Exit(code=1)
-				if !promptYesNo("Continue with host init? Some features may not work.", false) {
+				confirmed, pErr := promptYesNo(ctx, "Continue with host init? Some features may not work.", false)
+				if pErr != nil {
+					return nil, pErr
+				}
+				if !confirmed {
 					common.Cli.Info("Aborted")
 					break
 				}
@@ -210,7 +205,11 @@ func handleInteractiveFlow(
 				break
 			}
 
-			if promptYesNo(fmt.Sprintf("Run 'sudo %s host init' now?", infra.CLIName), true) {
+			runInit, pErr := promptYesNo(ctx, fmt.Sprintf("Run 'sudo %s host init' now?", infra.CLIName), true)
+			if pErr != nil {
+				return nil, pErr
+			}
+			if runInit {
 				proc := runWithSudo(ctx)
 				if !proc.Success {
 					common.Cli.Warning(
@@ -239,15 +238,20 @@ func handleInteractiveFlow(
 			}
 
 			common.Cli.Info(fmt.Sprintf("latest available: v%s", latest))
-			if nonInteractive || promptYesNo(fmt.Sprintf("Download v%s?", latest), true) {
-				common.Cli.Info("")
-				common.Cli.Info(fmt.Sprintf("downloading Firecracker v%s ...", latest))
-				downloadVersion = latest
-				continue
-			} else {
-				common.Cli.Info(fmt.Sprintf("skipped. Run '%s bin pull <version>' manually.", infra.CLIName))
-				break
+			if !nonInteractive {
+				downloadConfirmed, pErr := promptYesNo(ctx, fmt.Sprintf("Download v%s?", latest), true)
+				if pErr != nil {
+					return nil, pErr
+				}
+				if !downloadConfirmed {
+					common.Cli.Info(fmt.Sprintf("skipped. Run '%s bin pull <version>' manually.", infra.CLIName))
+					break
+				}
 			}
+			common.Cli.Info("")
+			common.Cli.Info(fmt.Sprintf("downloading Firecracker v%s ...", latest))
+			downloadVersion = latest
+			continue
 		}
 
 		// ── Handle guestfs enable prompt ──────────────────────────────
@@ -256,7 +260,10 @@ func handleInteractiveFlow(
 			if nonInteractive {
 				guestfsEnabled = ptr.Bool(false)
 			} else {
-				enabled := promptYesNo("Enable libguestfs as a provisioning fallback?", false)
+				enabled, pErr := promptYesNo(ctx, "Enable libguestfs as a provisioning fallback?", false)
+				if pErr != nil {
+					return nil, pErr
+				}
 				guestfsEnabled = &enabled
 			}
 			continue
@@ -397,6 +404,6 @@ func composeHostSetupMessage(before, after map[string]bool) string {
 
 // promptYesNo asks a yes/no question and returns true for yes.
 // Delegates to promptConfirm (canonical implementation in cache.go).
-func promptYesNo(prompt string, defaultYes bool) bool {
-	return common.Cli.PromptConfirm(prompt, defaultYes)
+func promptYesNo(ctx context.Context, prompt string, defaultYes bool) (bool, error) {
+	return common.Cli.PromptConfirm(ctx, prompt, defaultYes)
 }

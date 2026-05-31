@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"mvmctl/internal/cli/common"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
 )
@@ -102,7 +101,6 @@ Examples:
 
 			result := op.SSHConnect(cmd.Context(), input)
 			if result.Status == "error" {
-				common.Cli.Error(result.Message)
 				return fmt.Errorf("%s", result.Message)
 			}
 			return nil

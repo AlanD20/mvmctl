@@ -42,16 +42,7 @@ func NewKeyCmd(op *api.Operation) *cobra.Command {
 	cmd.AddCommand(newKeyExportCmd(op))
 	cmd.AddCommand(newKeyDefaultCmd(op))
 
-	// Hidden help subcommand matching Python's Typer "help" command
-	helpCmd := &cobra.Command{
-		Use:    "help",
-		Hidden: true,
-		Args:   cobra.NoArgs,
-		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Parent().Help()
-		},
-	}
-	cmd.AddCommand(helpCmd)
+
 
 	return cmd
 }
@@ -115,7 +106,11 @@ func newKeyCreateCmd(op *api.Operation) *cobra.Command {
 				if force {
 					alg = "ed25519"
 				} else {
-					alg = common.Cli.PromptSelect("Select algorithm:", []string{"ed25519", "rsa", "ecdsa"}, 0)
+					var pErr error
+					alg, pErr = common.Cli.PromptSelect(cmd.Context(), "Select algorithm:", []string{"ed25519", "rsa", "ecdsa"}, 0)
+					if pErr != nil {
+						return pErr
+					}
 				}
 			}
 
@@ -133,7 +128,6 @@ func newKeyCreateCmd(op *api.Operation) *cobra.Command {
 
 			createResult := op.KeyCreate(cmd.Context(), input)
 			if createResult.Status == "error" {
-				common.Cli.Error(createResult.Message)
 				return fmt.Errorf("%s", createResult.Message)
 			}
 			if createdKey, ok := createResult.Item.(*model.SSHKeyItem); ok && createdKey != nil {
@@ -169,7 +163,6 @@ func newKeyImportCmd(op *api.Operation) *cobra.Command {
 				Name: name, PubKeyPath: pubKeyPath, Overwrite: force, SetDefault: setDefault,
 			})
 			if createdKey.Status == "error" {
-				common.Cli.Error(createdKey.Message)
 				return fmt.Errorf("%s", createdKey.Message)
 			}
 			if keyItem, ok := createdKey.Item.(*model.SSHKeyItem); ok && keyItem != nil {
@@ -199,7 +192,6 @@ func newKeyRemoveCmd(op *api.Operation) *cobra.Command {
 		ValidArgsFunction: completeKeyNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				common.Cli.Error("Provide at least one key identifier to remove")
 				return fmt.Errorf("usage error")
 			}
 
@@ -241,13 +233,9 @@ func newKeyInspectCmd(op *api.Operation) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if identifier == "" {
-				return nil // help was shown
-			}
 
 			info, err := op.KeyInspect(cmd.Context(), &inputs.KeyInput{Identifiers: []string{identifier}})
 			if err != nil {
-				common.Cli.Error(err.Error())
 				return err
 			}
 
@@ -284,9 +272,6 @@ func newKeyExportCmd(op *api.Operation) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if identifier == "" {
-				return nil // help was shown
-			}
 
 			path := args[1]
 
@@ -297,7 +282,6 @@ func newKeyExportCmd(op *api.Operation) *cobra.Command {
 				force,
 			)
 			if exportResult.Status == "error" {
-				common.Cli.Error(exportResult.Message)
 				return fmt.Errorf("%s", exportResult.Message)
 			}
 
@@ -326,7 +310,6 @@ func newKeyDefaultCmd(op *api.Operation) *cobra.Command {
 			if clear {
 				clearResult := op.KeyClearDefaults(cmd.Context())
 				if clearResult.Status == "error" {
-					common.Cli.Error(clearResult.Message)
 					return fmt.Errorf("%s", clearResult.Message)
 				}
 				common.Cli.Success("Cleared: all default keys")
@@ -334,14 +317,12 @@ func newKeyDefaultCmd(op *api.Operation) *cobra.Command {
 			}
 
 			if len(args) == 0 {
-				common.Cli.Error("Provide at least one key identifier or use --clear")
 				return fmt.Errorf("usage error")
 			}
 
 			// Single API call with ALL names, matching Python exactly.
 			setResult := op.KeySetDefaults(cmd.Context(), &inputs.KeyInput{Identifiers: args})
 			if setResult.Status == "error" {
-				common.Cli.Error(setResult.Message)
 				return fmt.Errorf("set default failed")
 			}
 

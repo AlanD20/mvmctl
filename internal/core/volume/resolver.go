@@ -3,7 +3,6 @@ package volume
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
@@ -155,7 +154,7 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *Resol
 		v, err := r.Resolve(ctx, ident)
 		if err != nil {
 			// Python: errors.append(f"{identifier}: {e}")
-			errList = append(errList, fmt.Sprintf("%s: %s", ident, err.Error()))
+			errList = append(errList, err.Error())
 			continue
 		}
 		if !resolvedIDs[v.ID] {

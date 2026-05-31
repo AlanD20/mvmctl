@@ -22,17 +22,6 @@ func NewConfigCmd(configAPI *api.Operation) *cobra.Command {
 	cmd.AddCommand(newConfigResetCmd(configAPI))
 	cmd.AddCommand(newConfigListCmd(configAPI))
 
-	// Hidden help subcommand matching Python's Typer "help" command
-	helpCmd := &cobra.Command{
-		Use:    "help",
-		Hidden: true,
-		Args:   cobra.NoArgs,
-		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Parent().Help()
-		},
-	}
-	cmd.AddCommand(helpCmd)
-
 	return cmd
 }
 
@@ -104,7 +93,6 @@ func newConfigSetCmd(op *api.Operation) *cobra.Command {
 				return err
 			}
 			if result.IsError() {
-				common.Cli.Error(result.Message)
 				return fmt.Errorf("%s", result.Message)
 			}
 			common.Cli.Success(result.Message)
@@ -124,13 +112,18 @@ func newConfigResetCmd(op *api.Operation) *cobra.Command {
 		Args:              cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if allOverrides {
-				if !force && !common.Cli.PromptConfirm("Reset all overrides globally?", false) {
-					common.Cli.Text("Cancelled")
-					return nil
+				if !force {
+					confirmed, pErr := common.Cli.PromptConfirm(cmd.Context(), "Reset all overrides globally?", false)
+					if pErr != nil {
+						return pErr
+					}
+					if !confirmed {
+						common.Cli.Text("Cancelled")
+						return nil
+					}
 				}
 				result := op.ConfigReset(cmd.Context(), "", "", true)
 				if result.IsError() {
-					common.Cli.Error(result.Message)
 					return fmt.Errorf("%s", result.Message)
 				}
 				common.Cli.Success(fmt.Sprintf("Reset: %v override(s) globally", result.Item))
@@ -144,7 +137,6 @@ func newConfigResetCmd(op *api.Operation) *cobra.Command {
 				category := args[0]
 				result := op.ConfigReset(cmd.Context(), category, "", false)
 				if result.IsError() {
-					common.Cli.Error(result.Message)
 					return fmt.Errorf("%s", result.Message)
 				}
 				common.Cli.Success(fmt.Sprintf("Reset: %v override(s) in %s", result.Item, category))
@@ -153,7 +145,6 @@ func newConfigResetCmd(op *api.Operation) *cobra.Command {
 				key := args[1]
 				result := op.ConfigReset(cmd.Context(), category, key, false)
 				if result.IsError() {
-					common.Cli.Error(result.Message)
 					return fmt.Errorf("%s", result.Message)
 				}
 				if item, ok := result.Item.(int); ok && item > 0 {

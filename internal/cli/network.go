@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -57,20 +58,6 @@ func NewNetworkCmd(op *api.Operation) *cobra.Command {
 	cmd.AddCommand(newNetworkInspectCmd(op))
 	cmd.AddCommand(newNetworkSyncCmd(op))
 	cmd.AddCommand(newNetworkDefaultCmd(op))
-
-	// Hidden help subcommand matching Python's @network_app.command(name="help", hidden=True)
-	helpCmd := &cobra.Command{
-		Use:    "help",
-		Hidden: true,
-		Args:   cobra.NoArgs,
-		Run: func(cmd *cobra.Command, args []string) {
-			// Show help for the parent (network) group, matching Python's ctx.parent.get_help()
-			if parent := cmd.Parent(); parent != nil {
-				parent.Help()
-			}
-		},
-	}
-	cmd.AddCommand(helpCmd)
 
 	return cmd
 }
@@ -142,7 +129,7 @@ func newNetworkCreateCmd(op *api.Operation) *cobra.Command {
 
 			if natGateways == "" && !noNAT && !nonInteractive {
 				var err error
-				natGateways, err = resolveUserNATGateways()
+				natGateways, err = resolveUserNATGateways(cmd.Context())
 				if err != nil {
 					return err
 				}
@@ -181,12 +168,10 @@ func newNetworkCreateCmd(op *api.Operation) *cobra.Command {
 			}
 			// NeedsInteraction fallback (matches Python's else branch)
 			if createResult.Item == nil {
-				common.Cli.Error(createResult.Message)
 				return fmt.Errorf("create network failed")
 			}
 			net, ok := createResult.Item.(*model.Network)
 			if !ok {
-				common.Cli.Error("Network created but no item returned")
 				return fmt.Errorf("create network failed: no network returned")
 			}
 
@@ -213,7 +198,7 @@ func newNetworkCreateCmd(op *api.Operation) *cobra.Command {
 
 // resolveUserNATGateways prompts the user to select NAT gateway interfaces.
 // Matches Python's _resolve_user_nat_gateways() exactly.
-func resolveUserNATGateways() (string, error) {
+func resolveUserNATGateways(ctx context.Context) (string, error) {
 	interfaces, err := infranet.GetPhysicalInterfaces()
 	if err != nil {
 		return "", fmt.Errorf("failed to list network interfaces: %w", err)
@@ -224,7 +209,7 @@ func resolveUserNATGateways() (string, error) {
 	if len(interfaces) == 1 {
 		return interfaces[0], nil
 	}
-	selected, err := common.Cli.PromptMultiSelect("Select interface(s) for NAT (internet access):", interfaces, nil)
+	selected, err := common.Cli.PromptMultiSelect(ctx, "Select interface(s) for NAT (internet access):", interfaces, nil)
 	if err != nil {
 		return "", err
 	}
@@ -242,7 +227,6 @@ func newNetworkRemoveCmd(op *api.Operation) *cobra.Command {
 		ValidArgsFunction: completeNetworkNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				common.Cli.Error("Provide at least one network name")
 				return fmt.Errorf("usage error")
 			}
 
@@ -325,7 +309,6 @@ func newNetworkSyncCmd(op *api.Operation) *cobra.Command {
 			// Python: if results is None → error
 			results, ok := syncResult.Item.(map[string]map[string]int)
 			if !ok || results == nil {
-				common.Cli.Error("Sync returned no results")
 				return fmt.Errorf("sync returned no results")
 			}
 

@@ -62,17 +62,6 @@ func NewBinaryCmd(op *api.Operation) *cobra.Command {
 	cmd.AddCommand(newBinaryRemoveCmd(op))
 	cmd.AddCommand(newBinaryDefaultCmd(op))
 
-	// Hidden help subcommand matching Python's Typer "help" command
-	helpCmd := &cobra.Command{
-		Use:    "help",
-		Hidden: true,
-		Args:   cobra.NoArgs,
-		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Parent().Help()
-		},
-	}
-	cmd.AddCommand(helpCmd)
-
 	return cmd
 }
 
@@ -146,7 +135,7 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:               "pull [name]",
+		Use:               "pull [name|selector]",
 		Short:             "Download a Firecracker version or build from source",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeBinaryVersions,
@@ -160,7 +149,6 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 				effectiveVersion = name[idx+1:]
 				name = name[:idx]
 				if cmd.Flags().Changed("version") {
-					common.Cli.Error("--version and name:version selector are mutually exclusive")
 					return fmt.Errorf("mutually exclusive options")
 				}
 			}
@@ -176,9 +164,6 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 			}
 
 			if gitRef != "" && effectiveVersion != "" {
-				common.Cli.Error(
-					"--git-ref and --version are mutually exclusive. Use --git-ref to build from source, or --version to download a release.",
-				)
 				return fmt.Errorf("mutually exclusive options")
 			}
 
@@ -198,7 +183,6 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 					DownloadOverride: false,
 				})
 				if result.Status == "error" {
-					common.Cli.Error(result.Message)
 					return fmt.Errorf("%s", result.Message)
 				}
 				binaries, _ := result.Item.([]*model.BinaryItem)
@@ -229,7 +213,10 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 			if result.Status == "error" && result.Code == string(errs.CodeBinaryAlreadyExists) && !force {
 				common.Cli.Warning(result.Message)
 
-				confirmed := common.Cli.PromptConfirm("Re-download?", false)
+				confirmed, pErr := common.Cli.PromptConfirm(cmd.Context(), "Re-download?", false)
+				if pErr != nil {
+					return pErr
+				}
 				if !confirmed {
 					common.Cli.Info("Aborted")
 					return nil
@@ -244,7 +231,6 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 			}
 
 			if result.Status == "error" {
-				common.Cli.Error(result.Message)
 				return fmt.Errorf("%s", result.Message)
 			}
 
@@ -297,7 +283,6 @@ func newBinaryRemoveCmd(op *api.Operation) *cobra.Command {
 			if version != "" {
 				result := op.BinaryRemoveByVersion(cmd.Context(), version, force)
 				if result.IsError() {
-					common.Cli.Error(result.Message)
 					return fmt.Errorf("%s", result.Message)
 				}
 				common.Cli.Success(fmt.Sprintf("Removed: v%s", version))
@@ -305,7 +290,6 @@ func newBinaryRemoveCmd(op *api.Operation) *cobra.Command {
 			}
 
 			if len(args) == 0 {
-				common.Cli.Error("Provide at least one binary ID to remove or use --version")
 				return fmt.Errorf("usage error")
 			}
 
@@ -350,7 +334,6 @@ func newBinaryDefaultCmd(op *api.Operation) *cobra.Command {
 
 			result := op.BinarySetDefault(cmd.Context(), &inputs.BinaryInput{Identifiers: []string{identifier}})
 			if result.IsError() {
-				common.Cli.Error(result.Message)
 				return fmt.Errorf("%s", result.Message)
 			}
 

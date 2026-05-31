@@ -205,7 +205,7 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *Resol
 		if err != nil {
 			var de *errs.DomainError
 			if errors.As(err, &de) && de.Code == errs.CodeBinaryNotFound {
-				errsList = append(errsList, fmt.Sprintf("%s: %s", identifier, err))
+				errsList = append(errsList, err.Error())
 			} else {
 				return &ResolveResult{
 					Items:  items,

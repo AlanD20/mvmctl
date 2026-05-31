@@ -113,7 +113,6 @@ func newVolumeCreateCmd(op *api.Operation) *cobra.Command {
 			result := op.VolumeCreate(cmd.Context(), input)
 			if result.IsError() {
 				// Match Python: mvm_cli.error(result.message); raise typer.Exit(code=1)
-				common.Cli.Error(result.Message)
 				return fmt.Errorf("%s", result.Message)
 			}
 			// Match Python: mvm_cli.success(result.message)
@@ -229,7 +228,6 @@ func newVolumeResizeCmd(op *api.Operation) *cobra.Command {
 			resizeResult := op.VolumeResize(cmd.Context(), &inputs.VolumeCreateInput{Name: identifier, Size: sizeArg})
 			if resizeResult.IsError() {
 				// Match Python: mvm_cli.error(result.message); raise typer.Exit(code=1)
-				common.Cli.Error(resizeResult.Message)
 				return fmt.Errorf("%s", resizeResult.Message)
 			}
 			// Match Python: mvm_cli.success(result.message)

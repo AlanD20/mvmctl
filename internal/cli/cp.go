@@ -223,7 +223,6 @@ before it is a source. Multiple sources only work for host -> VM.`,
 			if msg == "" {
 				msg = "Copy failed"
 			}
-			common.Cli.Error(msg)
 			return fmt.Errorf("%s", msg)
 		},
 	}

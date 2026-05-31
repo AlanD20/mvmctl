@@ -66,8 +66,7 @@ func NewRootCmd(op *api.Operation) *cobra.Command {
 	// PersistentPreRunE: logging setup + DB check + root warning matching Python app()
 	cmd.PersistentPreRunE = makePersistentPreRunE()
 
-	// Subcommands matching Python's help_cmd, version_cmd, completion_cmd
-	cmd.SetHelpCommand(newHelpCmd())
+	// Subcommands matching Python's version_cmd, completion_cmd
 	cmd.AddCommand(newVersionCmd())
 	cmd.AddCommand(newCompletionCmd())
 
@@ -166,35 +165,6 @@ func shouldSkipPreRun(c *cobra.Command) bool {
 
 // ── Subcommands ──────────────────────────────────────────────────────────────
 // Matching Python's help_cmd, version_cmd, completion_cmd.
-
-// newHelpCmd creates the help subcommand matching Python's help_cmd().
-func newHelpCmd() *cobra.Command {
-	// Python: @click.command(name="help", help=f"Show help for {_get_cli_name()} or a subcommand")
-	return &cobra.Command{
-		Use:   "help [command]",
-		Short: fmt.Sprintf("Show help for %s or a subcommand", infra.CLIName),
-		Args:  cobra.ArbitraryArgs,
-		RunE: func(c *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				return c.Root().Help()
-			}
-
-			root := c.Root()
-			command := root
-			for _, arg := range args {
-				subCmd, _, err := command.Traverse([]string{arg})
-				if err != nil || subCmd == nil || subCmd == command {
-					return fmt.Errorf("Unknown command: %s", strings.Join(args, " "))
-				}
-				command = subCmd
-			}
-			if err := command.Help(); err != nil {
-				return err
-			}
-			return nil
-		},
-	}
-}
 
 // newVersionCmd creates the version subcommand matching Python's version_cmd().
 func newVersionCmd() *cobra.Command {

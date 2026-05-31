@@ -29,7 +29,7 @@ func (op *Operation) KeyGet(ctx context.Context, input *inputs.KeyInput) (*model
 	req := inputs.NewKeyRequest(*input, op.Repos.Key)
 	resolved, err := req.Resolve(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("key not found: %s", err.Error())
+		return nil, err
 	}
 	// Match Python: if len(resolved.keys) != 1: raise MVMKeyError(...)
 	if len(resolved.Keys) != 1 {
@@ -249,7 +249,7 @@ func (op *Operation) KeyRemove(ctx context.Context, input *inputs.KeyInput, forc
 func (op *Operation) KeyInspect(ctx context.Context, input *inputs.KeyInput) (*responses.KeyInspect, error) {
 	k, err := op.KeyGet(ctx, input)
 	if err != nil {
-		return nil, fmt.Errorf("key not found: %v", err)
+		return nil, err
 	}
 	return &responses.KeyInspect{
 		Key: responses.KeyInfo{
