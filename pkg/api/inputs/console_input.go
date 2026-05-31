@@ -51,7 +51,11 @@ func NewConsoleRequest(inputs ConsoleInput, db *sqlx.DB) *ConsoleRequest {
 // Matches Python's ConsoleRequest.resolve().
 // The relay is created by the caller (API layer) to avoid importing
 // internal/service/console from this package.
-func (r *ConsoleRequest) Resolve(ctx context.Context, vmEntity *model.VM, relay model.ConsoleRelay) (*ResolvedConsoleInput, error) {
+func (r *ConsoleRequest) Resolve(
+	ctx context.Context,
+	vmEntity *model.VM,
+	relay model.ConsoleRelay,
+) (*ResolvedConsoleInput, error) {
 	r.result = &ResolvedConsoleInput{
 		VM:    vmEntity,
 		Relay: relay,

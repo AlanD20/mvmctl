@@ -35,7 +35,10 @@ func (op *Operation) ConsoleGetState(ctx context.Context, identifier string) (ma
 // ConsoleGetConnectionInfo returns connection info for VM console relay.
 // Matches Python's ConsoleOperation.get_connection_info() exactly.
 // Raises MVMError if console relay is not running — Go returns DomainError.
-func (op *Operation) ConsoleGetConnectionInfo(ctx context.Context, identifier string) (*model.ConsoleConnectionInfo, error) {
+func (op *Operation) ConsoleGetConnectionInfo(
+	ctx context.Context,
+	identifier string,
+) (*model.ConsoleConnectionInfo, error) {
 	resolved, err := op.resolveWithRequest(ctx, identifier)
 	if err != nil {
 		return nil, err
@@ -104,7 +107,12 @@ func (op *Operation) ConsoleKill(ctx context.Context, identifier string) (*errs.
 // ConsoleAttachConsole attaches to a running console relay in interactive mode.
 // Matches Python's CLI _interact() — sets terminal to raw mode, forwards
 // stdin→relay and relay→stdout, detaches on Ctrl+X then D.
-func (op *Operation) ConsoleAttachConsole(ctx context.Context, socketPath string, stdin io.Reader, stdout io.Writer) error {
+func (op *Operation) ConsoleAttachConsole(
+	ctx context.Context,
+	socketPath string,
+	stdin io.Reader,
+	stdout io.Writer,
+) error {
 	return console.InteractiveAttach(ctx, socketPath, stdin, stdout)
 }
 

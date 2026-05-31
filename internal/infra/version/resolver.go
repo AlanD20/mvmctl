@@ -263,8 +263,12 @@ func (g *VersionGate) Require(binaryName, version, minimum string) error {
 
 	if !g.IsSatisfiedBy(version, minimum) {
 		return errs.VersionGateError(
-			fmt.Sprintf("%s v%s+ required for this operation (current: v%s). Stop the VM first, perform the operation, then start it again.",
-				binaryName, minimum, version),
+			fmt.Sprintf(
+				"%s v%s+ required for this operation (current: v%s). Stop the VM first, perform the operation, then start it again.",
+				binaryName,
+				minimum,
+				version,
+			),
 		)
 	}
 

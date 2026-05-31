@@ -28,14 +28,25 @@ func (r *NFTablesRuleRepository) ListAll(ctx context.Context) ([]*model.Firewall
 
 func (r *NFTablesRuleRepository) ListByNetworkID(ctx context.Context, networkID string) ([]*model.FirewallRule, error) {
 	var rules []*model.FirewallRule
-	return rules, r.db.SelectContext(ctx, &rules, "SELECT "+nftablesColumns+" FROM nftables_rules WHERE network_id = ? ORDER BY id", networkID)
+	return rules, r.db.SelectContext(
+		ctx,
+		&rules,
+		"SELECT "+nftablesColumns+" FROM nftables_rules WHERE network_id = ? ORDER BY id",
+		networkID,
+	)
 }
 
-func (r *NFTablesRuleRepository) ListByNetworkIDBatch(ctx context.Context, networkIDs []string) ([]*model.FirewallRule, error) {
+func (r *NFTablesRuleRepository) ListByNetworkIDBatch(
+	ctx context.Context,
+	networkIDs []string,
+) ([]*model.FirewallRule, error) {
 	if len(networkIDs) == 0 {
 		return nil, nil
 	}
-	query, args, err := sqlx.In("SELECT "+nftablesColumns+" FROM nftables_rules WHERE network_id IN (?) ORDER BY id", networkIDs)
+	query, args, err := sqlx.In(
+		"SELECT "+nftablesColumns+" FROM nftables_rules WHERE network_id IN (?) ORDER BY id",
+		networkIDs,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -53,20 +64,53 @@ func (r *NFTablesRuleRepository) Get(ctx context.Context, ruleID int64) (*model.
 	return &rule, err
 }
 
-func (r *NFTablesRuleRepository) GetByNetworkID(ctx context.Context, networkID string, activeOnly bool) ([]*model.FirewallRule, error) {
+func (r *NFTablesRuleRepository) GetByNetworkID(
+	ctx context.Context,
+	networkID string,
+	activeOnly bool,
+) ([]*model.FirewallRule, error) {
 	var rules []*model.FirewallRule
 	if activeOnly {
-		return rules, r.db.SelectContext(ctx, &rules, "SELECT "+nftablesColumns+" FROM nftables_rules WHERE network_id = ? AND is_active = 1", networkID)
+		return rules, r.db.SelectContext(
+			ctx,
+			&rules,
+			"SELECT "+nftablesColumns+" FROM nftables_rules WHERE network_id = ? AND is_active = 1",
+			networkID,
+		)
 	}
-	return rules, r.db.SelectContext(ctx, &rules, "SELECT "+nftablesColumns+" FROM nftables_rules WHERE network_id = ?", networkID)
+	return rules, r.db.SelectContext(
+		ctx,
+		&rules,
+		"SELECT "+nftablesColumns+" FROM nftables_rules WHERE network_id = ?",
+		networkID,
+	)
 }
 
-func (r *NFTablesRuleRepository) GetByNetworkIDAndInterface(ctx context.Context, networkID string, iface string, activeOnly bool) ([]*model.FirewallRule, error) {
+func (r *NFTablesRuleRepository) GetByNetworkIDAndInterface(
+	ctx context.Context,
+	networkID string,
+	iface string,
+	activeOnly bool,
+) ([]*model.FirewallRule, error) {
 	var rules []*model.FirewallRule
 	if activeOnly {
-		return rules, r.db.SelectContext(ctx, &rules, "SELECT "+nftablesColumns+" FROM nftables_rules WHERE network_id = ? AND is_active = 1 AND (in_interface = ? OR out_interface = ?)", networkID, iface, iface)
+		return rules, r.db.SelectContext(
+			ctx,
+			&rules,
+			"SELECT "+nftablesColumns+" FROM nftables_rules WHERE network_id = ? AND is_active = 1 AND (in_interface = ? OR out_interface = ?)",
+			networkID,
+			iface,
+			iface,
+		)
 	}
-	return rules, r.db.SelectContext(ctx, &rules, "SELECT "+nftablesColumns+" FROM nftables_rules WHERE network_id = ? AND (in_interface = ? OR out_interface = ?)", networkID, iface, iface)
+	return rules, r.db.SelectContext(
+		ctx,
+		&rules,
+		"SELECT "+nftablesColumns+" FROM nftables_rules WHERE network_id = ? AND (in_interface = ? OR out_interface = ?)",
+		networkID,
+		iface,
+		iface,
+	)
 }
 
 func (r *NFTablesRuleRepository) Insert(ctx context.Context, rule *model.FirewallRule) (*model.FirewallRule, error) {
@@ -104,7 +148,11 @@ func (r *NFTablesRuleRepository) Insert(ctx context.Context, rule *model.Firewal
 }
 
 func (r *NFTablesRuleRepository) UpdateVerifiedAt(ctx context.Context, ruleID int64) error {
-	_, err := r.db.ExecContext(ctx, "UPDATE nftables_rules SET last_verified_at = CURRENT_TIMESTAMP WHERE id = ?", ruleID)
+	_, err := r.db.ExecContext(
+		ctx,
+		"UPDATE nftables_rules SET last_verified_at = CURRENT_TIMESTAMP WHERE id = ?",
+		ruleID,
+	)
 	return err
 }
 
@@ -114,7 +162,11 @@ func (r *NFTablesRuleRepository) MarkDeleted(ctx context.Context, ruleID int64) 
 }
 
 func (r *NFTablesRuleRepository) MarkDeletedByChain(ctx context.Context, chain string) (int64, error) {
-	result, err := r.db.ExecContext(ctx, "UPDATE nftables_rules SET is_active = 0 WHERE chain = ? AND is_active = 1", chain)
+	result, err := r.db.ExecContext(
+		ctx,
+		"UPDATE nftables_rules SET is_active = 0 WHERE chain = ? AND is_active = 1",
+		chain,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -126,7 +178,10 @@ func (r *NFTablesRuleRepository) UpdateHandle(ctx context.Context, ruleID int64,
 	return err
 }
 
-func (r *NFTablesRuleRepository) FindAndUpsertRules(ctx context.Context, rules []*model.FirewallRule) ([]*model.FirewallRule, error) {
+func (r *NFTablesRuleRepository) FindAndUpsertRules(
+	ctx context.Context,
+	rules []*model.FirewallRule,
+) ([]*model.FirewallRule, error) {
 	if len(rules) == 0 {
 		return nil, nil
 	}

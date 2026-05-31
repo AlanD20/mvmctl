@@ -251,7 +251,11 @@ func (r *HostRepo) DeleteChangesExceptSession(_ context.Context, sessionID strin
 
 // ListChanges returns host state changes, optionally filtered by session and reverted status.
 // Matches Python: ORDER BY change_order ASC.
-func (r *HostRepo) ListChanges(_ context.Context, sessionID *string, includeReverted bool) ([]*model.HostStateChangeItem, error) {
+func (r *HostRepo) ListChanges(
+	_ context.Context,
+	sessionID *string,
+	includeReverted bool,
+) ([]*model.HostStateChangeItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var result []*model.HostStateChangeItem
@@ -267,7 +271,12 @@ func (r *HostRepo) ListChanges(_ context.Context, sessionID *string, includeReve
 	return result, nil
 }
 
-func (r *HostRepo) MarkChangeReverted(_ context.Context, changeID int, revertedAt string, revertMechanism *string) error {
+func (r *HostRepo) MarkChangeReverted(
+	_ context.Context,
+	changeID int,
+	revertedAt string,
+	revertMechanism *string,
+) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, c := range r.changes {
@@ -282,7 +291,11 @@ func (r *HostRepo) MarkChangeReverted(_ context.Context, changeID int, revertedA
 }
 
 // RevertChanges marks all unreverted changes for a session as reverted (LIFO order).
-func (r *HostRepo) RevertChanges(_ context.Context, sessionID string, revertedAt string) ([]*model.HostStateChangeItem, error) {
+func (r *HostRepo) RevertChanges(
+	_ context.Context,
+	sessionID string,
+	revertedAt string,
+) ([]*model.HostStateChangeItem, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var reverted []*model.HostStateChangeItem

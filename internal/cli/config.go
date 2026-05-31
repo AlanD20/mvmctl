@@ -65,9 +65,19 @@ func newConfigGetCmd(op *api.Operation) *cobra.Command {
 				for _, k := range keys {
 					info := settings[k]
 					if info.Override != nil {
-						common.Cli.Text(fmt.Sprintf("%s = %v (override: %v, type: %s)", k, info.Override, info.Override, info.Type))
+						common.Cli.Text(
+							fmt.Sprintf("%s = %v (override: %v, type: %s)", k, info.Override, info.Override, info.Type),
+						)
 					} else {
-						common.Cli.Text(fmt.Sprintf("%s = %v (default: %v, type: %s)", k, common.Cli.FormatSettingValue(info.Default, k), common.Cli.FormatSettingValue(info.Default, k), info.Type))
+						common.Cli.Text(
+							fmt.Sprintf(
+								"%s = %v (default: %v, type: %s)",
+								k,
+								common.Cli.FormatSettingValue(info.Default, k),
+								common.Cli.FormatSettingValue(info.Default, k),
+								info.Type,
+							),
+						)
 					}
 				}
 			} else if val == nil {
@@ -194,9 +204,24 @@ func newConfigListCmd(configAPI *api.Operation) *cobra.Command {
 					override := info.Override
 					default_ := info.Default
 					if override != nil {
-						common.Cli.Text(fmt.Sprintf("  %s = %v (default: %v, type: %s)", key, override, common.Cli.FormatSettingValue(default_, key), info.Type))
+						common.Cli.Text(
+							fmt.Sprintf(
+								"  %s = %v (default: %v, type: %s)",
+								key,
+								override,
+								common.Cli.FormatSettingValue(default_, key),
+								info.Type,
+							),
+						)
 					} else {
-						common.Cli.Text(fmt.Sprintf("  %s = %v (type: %s)", key, common.Cli.FormatSettingValue(default_, key), info.Type))
+						common.Cli.Text(
+							fmt.Sprintf(
+								"  %s = %v (type: %s)",
+								key,
+								common.Cli.FormatSettingValue(default_, key),
+								info.Type,
+							),
+						)
 					}
 				}
 			}

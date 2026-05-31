@@ -75,7 +75,11 @@ func (op *Operation) HostInit(ctx context.Context, onProgress func(errs.Progress
 	// Run detection first, then probe against the detected state (verdict #53).
 	hardware, detErr := host.DetectHardware()
 	if detErr != nil {
-		return &errs.OperationResult{Status: "error", Code: "host.init.detect_failed", Message: fmt.Sprintf("Hardware detection failed: %v", detErr)}
+		return &errs.OperationResult{
+			Status:  "error",
+			Code:    "host.init.detect_failed",
+			Message: fmt.Sprintf("Hardware detection failed: %v", detErr),
+		}
 	}
 	limits := host.DetectLimits()
 	resources, _ := host.DetectResources(ctx, hardware, limits, op.CacheDir)
@@ -178,7 +182,12 @@ func (op *Operation) HostInit(ctx context.Context, onProgress func(errs.Progress
 	}
 }
 
-func (op *Operation) hostInitSetupEnvironment(ctx context.Context, sessionID string, hostCtrl *host.Controller, fwBackend string) ([]*model.HostStateChangeItem, error) {
+func (op *Operation) hostInitSetupEnvironment(
+	ctx context.Context,
+	sessionID string,
+	hostCtrl *host.Controller,
+	fwBackend string,
+) ([]*model.HostStateChangeItem, error) {
 	allChanges := make([]*model.HostStateChangeItem, 0)
 	dbChanges := make([]*model.HostStateChangeItem, 0)
 
@@ -527,7 +536,10 @@ func (op *Operation) HostClean(ctx context.Context, cacheDir string) *errs.Opera
 	defaultBridge := fmt.Sprintf("%s-%s", infra.CLIName, system.TruncateString(defaultNetNameStr, 10))
 	if infranet.BridgeExists(ctx, defaultBridge) {
 		if err := op.Services.Network.RemoveRawBridge(ctx, defaultBridge); err != nil {
-			summary = append(summary, fmt.Sprintf("Warning: failed to remove orphan bridge '%s': %v", defaultBridge, err))
+			summary = append(
+				summary,
+				fmt.Sprintf("Warning: failed to remove orphan bridge '%s': %v", defaultBridge, err),
+			)
 		} else {
 			summary = append(summary, fmt.Sprintf("Removed orphan bridge '%s'", defaultBridge))
 		}
@@ -552,7 +564,10 @@ func (op *Operation) HostClean(ctx context.Context, cacheDir string) *errs.Opera
 	if defaultNet != nil {
 		removeResult := op.NetworkRemove(ctx, &inputs.NetworkInput{Name: []string{defaultNetNameStr}}, true)
 		if removeResult.IsError() {
-			summary = append(summary, fmt.Sprintf("Warning: failed to remove default network: %s", removeResult.Message))
+			summary = append(
+				summary,
+				fmt.Sprintf("Warning: failed to remove default network: %s", removeResult.Message),
+			)
 		} else {
 			summary = append(summary, fmt.Sprintf("Removed default network '%s'", defaultNetNameStr))
 		}
@@ -620,9 +635,13 @@ func (op *Operation) HostReset(ctx context.Context, cacheDir string) *errs.Opera
 		}
 	}
 	if len(activeModules) > 0 {
-		summary = append(summary,
-			fmt.Sprintf("Modules loaded by mvm: %s. These were left loaded. Unload manually with 'modprobe -r <module>' if desired.",
-				strings.Join(activeModules, ", ")))
+		summary = append(
+			summary,
+			fmt.Sprintf(
+				"Modules loaded by mvm: %s. These were left loaded. Unload manually with 'modprobe -r <module>' if desired.",
+				strings.Join(activeModules, ", "),
+			),
+		)
 	}
 
 	sudoersPath := infra.SudoersDropInPath()

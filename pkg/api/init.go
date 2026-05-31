@@ -62,7 +62,17 @@ func (op *Operation) InitRun(
 	downloadVersion string,
 	onProgress func(errs.ProgressEvent),
 ) *InitResult {
-	return op.InitRunFull(ctx, skipHost, skipNetwork, nonInteractive, sudoCompleted, "", downloadVersion, nil, onProgress)
+	return op.InitRunFull(
+		ctx,
+		skipHost,
+		skipNetwork,
+		nonInteractive,
+		sudoCompleted,
+		"",
+		downloadVersion,
+		nil,
+		onProgress,
+	)
 }
 
 // InitRunFull runs the init wizard steps with full parameters matching Python's InitOperation.run().
@@ -156,7 +166,13 @@ func (op *Operation) initInitDatabase(ctx context.Context) InitStepResult {
 	return InitStepResult{Step: "local_state", Success: true, Message: "Local state ready"}
 }
 
-func (op *Operation) initStepHost(ctx context.Context, skip bool, sudoCompleted bool, setupMessage string, onProgress func(errs.ProgressEvent)) (InitStepResult, *errs.NeedsInteraction) {
+func (op *Operation) initStepHost(
+	ctx context.Context,
+	skip bool,
+	sudoCompleted bool,
+	setupMessage string,
+	onProgress func(errs.ProgressEvent),
+) (InitStepResult, *errs.NeedsInteraction) {
 	if skip {
 		return InitStepResult{Step: "host", Success: true, Message: "Skipped (--skip-host)"}, nil
 	}
@@ -234,7 +250,11 @@ func (op *Operation) initStepCache(ctx context.Context, onProgress func(errs.Pro
 	return InitStepResult{Step: "cache", Success: true, Message: msg}
 }
 
-func (op *Operation) initStepBinary(ctx context.Context, nonInteractive bool, downloadVersion string) (InitStepResult, *errs.NeedsInteraction) {
+func (op *Operation) initStepBinary(
+	ctx context.Context,
+	nonInteractive bool,
+	downloadVersion string,
+) (InitStepResult, *errs.NeedsInteraction) {
 	// Python: local = cast(list[BinaryItem], BinaryOperation.list_all())
 	local, _, err := op.BinaryList(ctx, false, nil)
 	if err != nil {
@@ -258,16 +278,28 @@ func (op *Operation) initStepBinary(ctx context.Context, nonInteractive bool, do
 			}
 		}
 		if len(active) > 0 {
-			return InitStepResult{Step: "binary", Success: true, Message: fmt.Sprintf("Binary available (v%s)", active[0].Version)}, nil
+			return InitStepResult{
+				Step:    "binary",
+				Success: true,
+				Message: fmt.Sprintf("Binary available (v%s)", active[0].Version),
+			}, nil
 		}
 		// Python: repaired = BinaryOperation.ensure_default()
 		repaired := op.BinaryEnsureDefault(ctx)
 		if !repaired.IsError() && repaired.Item != nil {
 			if item, ok := repaired.Item.(*model.BinaryItem); ok {
-				return InitStepResult{Step: "binary", Success: true, Message: fmt.Sprintf("Binary available (v%s) — set as default", item.Version)}, nil
+				return InitStepResult{
+					Step:    "binary",
+					Success: true,
+					Message: fmt.Sprintf("Binary available (v%s) — set as default", item.Version),
+				}, nil
 			}
 		}
-		return InitStepResult{Step: "binary", Success: true, Message: fmt.Sprintf("Binary available (v%s)", fcBinaries[0].Version)}, nil
+		return InitStepResult{
+			Step:    "binary",
+			Success: true,
+			Message: fmt.Sprintf("Binary available (v%s)", fcBinaries[0].Version),
+		}, nil
 	}
 
 	// No local binaries found
@@ -296,7 +328,11 @@ func (op *Operation) initDownloadBinary(ctx context.Context, version string) Ini
 	}
 
 	if pullResult.IsError() {
-		return InitStepResult{Step: "binary", Success: false, Message: fmt.Sprintf("Download failed: %s", pullResult.Message)}
+		return InitStepResult{
+			Step:    "binary",
+			Success: false,
+			Message: fmt.Sprintf("Download failed: %s", pullResult.Message),
+		}
 	}
 	// Python: get version from result item
 	binaries := []*model.BinaryItem{}
@@ -334,7 +370,11 @@ func (op *Operation) initDownloadBinaryLatest(ctx context.Context) InitStepResul
 	}
 
 	if pullResult.IsError() {
-		return InitStepResult{Step: "binary", Success: false, Message: fmt.Sprintf("Download failed: %s", pullResult.Message)}
+		return InitStepResult{
+			Step:    "binary",
+			Success: false,
+			Message: fmt.Sprintf("Download failed: %s", pullResult.Message),
+		}
 	}
 	// Python: get version from result item
 	binaries := []*model.BinaryItem{}
@@ -400,7 +440,10 @@ func (op *Operation) initBinaryNeedsInteraction(ctx context.Context) (InitStepRe
 		}
 }
 
-func (op *Operation) initStepGuestfs(ctx context.Context, guestfsEnabled *bool) (InitStepResult, *errs.NeedsInteraction) {
+func (op *Operation) initStepGuestfs(
+	ctx context.Context,
+	guestfsEnabled *bool,
+) (InitStepResult, *errs.NeedsInteraction) {
 	// Python: Matches InitOperation._step_guestfs(guestfs_enabled=guestfs_enabled)
 	// When guestfs_enabled is provided (from a previous interaction round),
 	// the decision is persisted directly.

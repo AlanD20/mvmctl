@@ -294,7 +294,9 @@ func (s *Service) OptimizeImage(
 	}
 
 	if _, statErr := os.Stat(imagePath); os.IsNotExist(statErr) {
-		return nil, warnings, NewImageError(fmt.Sprintf("Image processing failed: output file not created at %s", imagePath))
+		return nil, warnings, NewImageError(
+			fmt.Sprintf("Image processing failed: output file not created at %s", imagePath),
+		)
 	}
 
 	// ── Filesystem conversion (btrfs → ext4) ──────────────────────
@@ -499,7 +501,11 @@ func (s *Service) MaterializeTo(ctx context.Context, imageID, fsType, outputPath
 	os.MkdirAll(filepath.Dir(outputPath), 0755)
 
 	// Try reflink copy (matching Python: run_cmd(["cp", "--reflink=auto", ...]) with ProcessError fallback)
-	result := system.RunCmdCompat(ctx, []string{"cp", "--reflink=auto", "--sparse=always", cachedPath, outputPath}, system.DefaultRunCmdOptions())
+	result := system.RunCmdCompat(
+		ctx,
+		[]string{"cp", "--reflink=auto", "--sparse=always", cachedPath, outputPath},
+		system.DefaultRunCmdOptions(),
+	)
 	combined := string(result.StdoutBytes) + string(result.StderrBytes)
 	if result.Err != nil {
 		if err := s.copyWithDD(ctx, cachedPath, outputPath, true); err != nil {
@@ -830,7 +836,9 @@ func (s *Service) compress(imagePath string, level int, keepSource bool) (string
 		}
 	}
 	if allZeros {
-		return "", NewImageCorruptError(fmt.Sprintf("Source file appears to be all zeros: %s. File may be corrupted.", imagePath))
+		return "", NewImageCorruptError(
+			fmt.Sprintf("Source file appears to be all zeros: %s. File may be corrupted.", imagePath),
+		)
 	}
 
 	// Python uses Path.with_suffix(".zst") which REPLACES the existing extension.
@@ -878,7 +886,9 @@ func (s *Service) compress(imagePath string, level int, keepSource bool) (string
 	compressedSize := compInfo.Size()
 	if compressedSize == 0 {
 		os.Remove(compressedPath)
-		return "", NewImageCompressionError(fmt.Sprintf("Compression failed: output is empty (source was %d bytes)", originalSize))
+		return "", NewImageCompressionError(
+			fmt.Sprintf("Compression failed: output is empty (source was %d bytes)", originalSize),
+		)
 	}
 
 	ratio := float64(originalSize) / float64(compressedSize)
@@ -904,7 +914,9 @@ func (s *Service) decompress(compressedPath, outputPath, compressedFormat string
 		fmt_ = "zst"
 	}
 	if fmt_ != "zst" {
-		return NewImageDecompressionError(fmt.Sprintf("Unsupported compression format: '%s'. Only 'zst' (zstd) is supported.", fmt_))
+		return NewImageDecompressionError(
+			fmt.Sprintf("Unsupported compression format: '%s'. Only 'zst' (zstd) is supported.", fmt_),
+		)
 	}
 
 	// Python's decompress() calls self._validate_image_path() first, which raises
@@ -946,12 +958,16 @@ func (s *Service) decompress(compressedPath, outputPath, compressedFormat string
 	// Python catches ImageEmptyError from _validate_image_path and re-raises as
 	// ImageDecompressionError with output_path unlinked.
 	if _, err := os.Stat(outputPath); os.IsNotExist(err) {
-		return NewImageDecompressionError(fmt.Sprintf("Decompression failed: output could not be verified: %s", outputPath))
+		return NewImageDecompressionError(
+			fmt.Sprintf("Decompression failed: output could not be verified: %s", outputPath),
+		)
 	}
 	outInfo, _ := os.Stat(outputPath)
 	if outInfo.Size() == 0 {
 		os.Remove(outputPath)
-		return NewImageDecompressionError(fmt.Sprintf("Decompression failed: output could not be verified: %s", outputPath))
+		return NewImageDecompressionError(
+			fmt.Sprintf("Decompression failed: output could not be verified: %s", outputPath),
+		)
 	}
 
 	slog.Info("Decompressed",
@@ -1389,7 +1405,11 @@ func (s *Service) handleSquashfs(ctx context.Context, inputPath, finalPath, mini
 
 	extractDir := filepath.Join(tmpDir, "squashfs-root")
 
-	result := system.RunCmdCompat(ctx, []string{"unsquashfs", "-d", extractDir, inputPath}, system.DefaultRunCmdOptions())
+	result := system.RunCmdCompat(
+		ctx,
+		[]string{"unsquashfs", "-d", extractDir, inputPath},
+		system.DefaultRunCmdOptions(),
+	)
 	if result.Err != nil {
 		return "", NewImageError("unsquashfs failed")
 	}
@@ -1414,13 +1434,21 @@ func (s *Service) handleSquashfs(ctx context.Context, inputPath, finalPath, mini
 		imageSizeMB, _ = strconv.Atoi(minimumRootfsSize)
 	}
 
-	truncResult := system.RunCmdCompat(ctx, []string{"truncate", "-s", fmt.Sprintf("%dM", imageSizeMB), finalPath}, system.DefaultRunCmdOptions())
+	truncResult := system.RunCmdCompat(
+		ctx,
+		[]string{"truncate", "-s", fmt.Sprintf("%dM", imageSizeMB), finalPath},
+		system.DefaultRunCmdOptions(),
+	)
 	truncCombined := string(truncResult.StdoutBytes) + string(truncResult.StderrBytes)
 	if truncResult.Err != nil {
 		return "", NewImageError(fmt.Sprintf("Failed to allocate ext4 image file: %s", truncCombined))
 	}
 
-	mkfsResult := system.RunCmdCompat(ctx, []string{"mkfs.ext4", "-d", extractDir, "-L", "", finalPath}, system.DefaultRunCmdOptions())
+	mkfsResult := system.RunCmdCompat(
+		ctx,
+		[]string{"mkfs.ext4", "-d", extractDir, "-L", "", finalPath},
+		system.DefaultRunCmdOptions(),
+	)
 	mkfsCombined := string(mkfsResult.StdoutBytes) + string(mkfsResult.StderrBytes)
 	if mkfsResult.Err != nil {
 		return "", NewImageError(fmt.Sprintf("Failed to create ext4 from squashfs: %s", mkfsCombined))
@@ -1451,11 +1479,19 @@ func (s *Service) createExt4FromTar(ctx context.Context, tarPath, outputPath, mi
 	t2 := time.Now()
 	slog.Debug("tar extract", "elapsed_seconds", t2.Sub(t1).Seconds())
 
-	system.RunCmdCompat(ctx, []string{"chmod", "-R", "u+rwx", tmpDir}, system.RunCmdOptions{Capture: false, Check: false})
+	system.RunCmdCompat(
+		ctx,
+		[]string{"chmod", "-R", "u+rwx", tmpDir},
+		system.RunCmdOptions{Capture: false, Check: false},
+	)
 	t3 := time.Now()
 	slog.Debug("chmod", "elapsed_seconds", t3.Sub(t2).Seconds())
 
-	duResult := system.RunCmdCompat(ctx, []string{"du", "-sb", tmpDir}, system.RunCmdOptions{Capture: true, Check: false})
+	duResult := system.RunCmdCompat(
+		ctx,
+		[]string{"du", "-sb", tmpDir},
+		system.RunCmdOptions{Capture: true, Check: false},
+	)
 	duCombined := string(duResult.StdoutBytes) + string(duResult.StderrBytes)
 	duReturnCode := 0
 	if duResult.Err == nil {
@@ -1487,12 +1523,22 @@ func (s *Service) createExt4FromTar(ctx context.Context, tarPath, outputPath, mi
 		freeBytes := int64(statfs.Bavail) * int64(statfs.Bsize)
 		neededBytes := int64(rawSizeMB) * MiB
 		if freeBytes < neededBytes {
-			return NewImageError(fmt.Sprintf("Not enough free space on %s to create the ext4 image: need %d MiB, only %d MiB available. Free up space or set MVM_CACHE_DIR to a larger filesystem.",
-				filepath.Dir(outputPath), rawSizeMB, freeBytes/MiB))
+			return NewImageError(
+				fmt.Sprintf(
+					"Not enough free space on %s to create the ext4 image: need %d MiB, only %d MiB available. Free up space or set MVM_CACHE_DIR to a larger filesystem.",
+					filepath.Dir(outputPath),
+					rawSizeMB,
+					freeBytes/MiB,
+				),
+			)
 		}
 	}
 
-	truncResult := system.RunCmdCompat(ctx, []string{"truncate", "-s", fmt.Sprintf("%dM", rawSizeMB), outputPath}, system.DefaultRunCmdOptions())
+	truncResult := system.RunCmdCompat(
+		ctx,
+		[]string{"truncate", "-s", fmt.Sprintf("%dM", rawSizeMB), outputPath},
+		system.DefaultRunCmdOptions(),
+	)
 	truncCombined := string(truncResult.StdoutBytes) + string(truncResult.StderrBytes)
 	if truncResult.Err != nil {
 		return fmt.Errorf("truncate failed: %s: %w", truncCombined, truncResult.Err)
@@ -1500,7 +1546,11 @@ func (s *Service) createExt4FromTar(ctx context.Context, tarPath, outputPath, mi
 	t5 := time.Now()
 	slog.Debug("truncate", "elapsed_seconds", t5.Sub(t4).Seconds())
 
-	mkfsResult := system.RunCmdCompat(ctx, []string{"mkfs.ext4", "-d", tmpDir, "-F", outputPath}, system.DefaultRunCmdOptions())
+	mkfsResult := system.RunCmdCompat(
+		ctx,
+		[]string{"mkfs.ext4", "-d", tmpDir, "-F", outputPath},
+		system.DefaultRunCmdOptions(),
+	)
 	mkfsCombined := string(mkfsResult.StdoutBytes) + string(mkfsResult.StderrBytes)
 	if mkfsResult.Err != nil {
 		msg := mkfsCombined
@@ -1576,7 +1626,11 @@ func (s *Service) fetchSHA256FromURL(ctx context.Context, sha256URL, sourceFilen
 	return "", nil // Python returns None when not found (not an error)
 }
 
-func (s *Service) downloadFile(ctx context.Context, url, destPath, expectedSHA256 string, progress func(int64, int64)) error {
+func (s *Service) downloadFile(
+	ctx context.Context,
+	url, destPath, expectedSHA256 string,
+	progress func(int64, int64),
+) error {
 	// Use service-level shared HttpDownload — matching Python's static HttpDownload.download_file()
 	// which shares the underlying HTTP client and cache infrastructure.
 	dCtx, cancel := context.WithTimeout(ctx, infra.HTTPTimeoutSha256FetchS)
@@ -1593,12 +1647,20 @@ func (s *Service) downloadFile(ctx context.Context, url, destPath, expectedSHA25
 // ──────────────────────────────────────────────────────────────────────────────
 
 func (s *Service) detectFilesystemType(ctx context.Context, imagePath string) string {
-	result := system.RunCmdCompat(ctx, []string{"blkid", "-o", "value", "-s", "TYPE", imagePath}, system.RunCmdOptions{Capture: true, Check: false})
+	result := system.RunCmdCompat(
+		ctx,
+		[]string{"blkid", "-o", "value", "-s", "TYPE", imagePath},
+		system.RunCmdOptions{Capture: true, Check: false},
+	)
 	return strings.TrimSpace(result.Stdout)
 }
 
 func (s *Service) getFilesystemUUID(ctx context.Context, imagePath string) string {
-	result := system.RunCmdCompat(ctx, []string{"blkid", "-p", "-s", "UUID", "-o", "value", imagePath}, system.RunCmdOptions{Capture: true, Check: false})
+	result := system.RunCmdCompat(
+		ctx,
+		[]string{"blkid", "-p", "-s", "UUID", "-o", "value", imagePath},
+		system.RunCmdOptions{Capture: true, Check: false},
+	)
 	return strings.TrimSpace(result.Stdout)
 }
 
@@ -1641,13 +1703,19 @@ func (s *Service) getTemplateVariables(spec *ImageSpec, ciVersion string) map[st
 // Uses the shared HttpDownload.GetContent to benefit from retry + caching.
 // Matches Python's _resolve_source_template() exactly — sorts keys alphabetically
 // before picking the last (highest) one (C05).
-func (s *Service) resolveSourceTemplate(ctx context.Context, spec *ImageSpec, templateVars map[string]string) (string, error) {
+func (s *Service) resolveSourceTemplate(
+	ctx context.Context,
+	spec *ImageSpec,
+	templateVars map[string]string,
+) (string, error) {
 	listURLTmpl := ""
 	if spec.ListURLTemplate != nil {
 		listURLTmpl = *spec.ListURLTemplate
 	}
 	if listURLTmpl == "" {
-		return "", NewImageError(fmt.Sprintf("Missing 'list_url_template' in images.yaml for %s:%s", spec.Type, spec.Version))
+		return "", NewImageError(
+			fmt.Sprintf("Missing 'list_url_template' in images.yaml for %s:%s", spec.Type, spec.Version),
+		)
 	}
 
 	listURL := renderOptionalTemplate(listURLTmpl, templateVars)

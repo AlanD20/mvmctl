@@ -48,7 +48,10 @@ func (r *LeaseResolver) ListByNetworkID(ctx context.Context, networkID string) (
 }
 
 // ListByNetworkIDBatch batch-resolves leases by network IDs.
-func (r *LeaseResolver) ListByNetworkIDBatch(ctx context.Context, networkIDs []string) (map[string][]*model.NetworkLeaseItem, error) {
+func (r *LeaseResolver) ListByNetworkIDBatch(
+	ctx context.Context,
+	networkIDs []string,
+) (map[string][]*model.NetworkLeaseItem, error) {
 	leases, err := r.repo.ListAllBatch(ctx, networkIDs)
 	if err != nil {
 		return nil, err

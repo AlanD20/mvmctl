@@ -88,7 +88,15 @@ func NewASCIIProgressBar(total int64, width int, title string) *ASCIIProgressBar
 // Go uses ioctl TCGETS directly. Both are equivalent on Linux.
 func isTerminal(fd int) bool {
 	var termios syscall.Termios
-	_, _, err := syscall.Syscall6(syscall.SYS_IOCTL, uintptr(fd), syscall.TCGETS, uintptr(unsafe.Pointer(&termios)), 0, 0, 0)
+	_, _, err := syscall.Syscall6(
+		syscall.SYS_IOCTL,
+		uintptr(fd),
+		syscall.TCGETS,
+		uintptr(unsafe.Pointer(&termios)),
+		0,
+		0,
+		0,
+	)
 	return err == 0
 }
 
@@ -163,7 +171,12 @@ func getTermWidth() int {
 		XPixel uint16
 		YPixel uint16
 	}
-	_, _, _ = syscall.Syscall(syscall.SYS_IOCTL, uintptr(os.Stdout.Fd()), syscall.TIOCGWINSZ, uintptr(unsafe.Pointer(&ws)))
+	_, _, _ = syscall.Syscall(
+		syscall.SYS_IOCTL,
+		uintptr(os.Stdout.Fd()),
+		syscall.TIOCGWINSZ,
+		uintptr(unsafe.Pointer(&ws)),
+	)
 	if ws.Col > 0 {
 		return int(ws.Col)
 	}

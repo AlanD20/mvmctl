@@ -39,7 +39,11 @@ func (f *FakeRunner) Run(ctx context.Context, args []string, opts ...system.RunO
 }
 
 // Stream records the call and returns an immediately-closed channel.
-func (f *FakeRunner) Stream(ctx context.Context, args []string, opts ...system.RunOption) (<-chan system.StreamLine, error) {
+func (f *FakeRunner) Stream(
+	ctx context.Context,
+	args []string,
+	opts ...system.RunOption,
+) (<-chan system.StreamLine, error) {
 	ch := make(chan system.StreamLine)
 	close(ch)
 	return ch, nil

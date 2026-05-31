@@ -176,17 +176,27 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 	specs, err := op.Services.Kernel.GetSpecsFor(nil, resolved.KernelType, resolvedVersionStr(resolved))
 	if err != nil {
 		return &errs.OperationResult{
-			Status:    "error",
-			Code:      "kernel.pull_failed",
-			Message:   fmt.Sprintf("Failed to get spec for '%s' version '%s': %v", resolved.KernelType, resolvedVersionStr(resolved), err),
+			Status: "error",
+			Code:   "kernel.pull_failed",
+			Message: fmt.Sprintf(
+				"Failed to get spec for '%s' version '%s': %v",
+				resolved.KernelType,
+				resolvedVersionStr(resolved),
+				err,
+			),
 			Exception: err,
 		}
 	}
 	if len(specs) != 1 {
 		return &errs.OperationResult{
-			Status:    "error",
-			Code:      "kernel.pull_failed",
-			Message:   fmt.Sprintf("Expected exactly one kernel spec for type='%s' version='%s', got %d", resolved.KernelType, resolvedVersionStr(resolved), len(specs)),
+			Status: "error",
+			Code:   "kernel.pull_failed",
+			Message: fmt.Sprintf(
+				"Expected exactly one kernel spec for type='%s' version='%s', got %d",
+				resolved.KernelType,
+				resolvedVersionStr(resolved),
+				len(specs),
+			),
 			Exception: fmt.Errorf("unexpected spec count: %d", len(specs)),
 		}
 	}
@@ -210,8 +220,14 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 
 		try("download", "running", "Downloading Firecracker kernel...")
 
-		fetchResult, err = op.Services.Kernel.FetchFirecrackerKernel(ctx, spec, ciVersion, resolved.Arch, resolved.OutputDir,
-			operation.DownloadProgressBridge(onProgress))
+		fetchResult, err = op.Services.Kernel.FetchFirecrackerKernel(
+			ctx,
+			spec,
+			ciVersion,
+			resolved.Arch,
+			resolved.OutputDir,
+			operation.DownloadProgressBridge(onProgress),
+		)
 		if err != nil {
 			return &errs.OperationResult{
 				Status:    "error",
@@ -321,7 +337,13 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 		if oldPathResolved != newPathResolved && oldPathResolved != "" {
 			if _, err := os.Stat(oldPathResolved); err == nil {
 				os.Remove(oldPathResolved)
-				slog.Info("Cleaned up old kernel file", "type", resolved.KernelType, "version", resolvedVersionStr(resolved))
+				slog.Info(
+					"Cleaned up old kernel file",
+					"type",
+					resolved.KernelType,
+					"version",
+					resolvedVersionStr(resolved),
+				)
 			}
 		}
 	}
@@ -365,7 +387,14 @@ func (op *Operation) KernelImport(ctx context.Context, input *inputs.KernelImpor
 		}
 	}
 
-	kernelItem, err := op.Services.Kernel.ImportKernel(ctx, resolved.Name, resolved.Path, resolved.Version, resolved.Arch, resolved.SetDefault)
+	kernelItem, err := op.Services.Kernel.ImportKernel(
+		ctx,
+		resolved.Name,
+		resolved.Path,
+		resolved.Version,
+		resolved.Arch,
+		resolved.SetDefault,
+	)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
@@ -469,7 +498,11 @@ func (op *Operation) KernelRemove(ctx context.Context, identifiers []string, for
 // Matches Python's KernelOperation.list_all() exactly.
 // When remote=false, returns ([]*model.KernelItem, nil, error).
 // When remote=true, returns (nil, []model.VersionInfo, error).
-func (op *Operation) KernelList(ctx context.Context, remote bool, noCache bool) ([]*model.KernelItem, []model.VersionInfo, error) {
+func (op *Operation) KernelList(
+	ctx context.Context,
+	remote bool,
+	noCache bool,
+) ([]*model.KernelItem, []model.VersionInfo, error) {
 	if remote {
 		versions, err := op.kernelListRemote(ctx, noCache)
 		return nil, versions, err
@@ -543,7 +576,14 @@ func (op *Operation) kernelListRemote(ctx context.Context, noCache bool) ([]mode
 	if cacheTTL != nil {
 		cacheTTLVal = *cacheTTL
 	}
-	versionMap := op.Services.Kernel.ListRemoteVersions(ctx, allSpecs, "x86_64", resolvedCIVersion, cacheTTLVal, remoteListLimit)
+	versionMap := op.Services.Kernel.ListRemoteVersions(
+		ctx,
+		allSpecs,
+		"x86_64",
+		resolvedCIVersion,
+		cacheTTLVal,
+		remoteListLimit,
+	)
 	flattened := make([]model.VersionInfo, 0)
 	for _, versions := range versionMap {
 		flattened = append(flattened, versions...)

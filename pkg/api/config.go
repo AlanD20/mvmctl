@@ -51,7 +51,11 @@ func (op *Operation) ConfigGet(ctx context.Context, category, key string) (inter
 // Matches Python's ConfigOperation.set() exactly — ConfigError propagates from
 // SettingsService.set() just as in Python (error is returned as second return value
 // instead of wrapped in OperationResult).
-func (op *Operation) ConfigSet(ctx context.Context, category, key string, value interface{}) (*errs.OperationResult, error) {
+func (op *Operation) ConfigSet(
+	ctx context.Context,
+	category, key string,
+	value interface{},
+) (*errs.OperationResult, error) {
 	rawInput := inputs.ConfigInput{
 		Action:   "set",
 		Category: category,
@@ -69,7 +73,11 @@ func (op *Operation) ConfigSet(ctx context.Context, category, key string, value 
 	}
 
 	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("config.set", nil, fmt.Sprintf("%s.%s=%v", resolved.Category, resolved.Key, resolved.Value))
+	_ = auditLog.LogOperation(
+		"config.set",
+		nil,
+		fmt.Sprintf("%s.%s=%v", resolved.Category, resolved.Key, resolved.Value),
+	)
 
 	return &errs.OperationResult{
 		Status:  "success",

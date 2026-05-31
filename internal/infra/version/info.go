@@ -89,7 +89,11 @@ func GetGitVersionInfo(ctx context.Context) string {
 }
 
 func runGitCmd(ctx context.Context, repoDir string, args ...string) (string, error) {
-	result := system.RunCmdCompat(ctx, append([]string{"git", "-C", repoDir}, args...), system.RunCmdOptions{Capture: true})
+	result := system.RunCmdCompat(
+		ctx,
+		append([]string{"git", "-C", repoDir}, args...),
+		system.RunCmdOptions{Capture: true},
+	)
 	if result.Err != nil {
 		return "", fmt.Errorf("git %v: %w", args, result.Err)
 	}

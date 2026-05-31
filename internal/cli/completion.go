@@ -118,7 +118,8 @@ func completeKeyNames(cmd *cobra.Command, args []string, toComplete string) ([]s
 		if k.Name != "" && strings.HasPrefix(k.Name, toComplete) && !slices.Contains(results, k.Name) {
 			results = append(results, k.Name)
 		}
-		if k.Fingerprint != "" && strings.HasPrefix(k.Fingerprint, toComplete) && !slices.Contains(results, k.Fingerprint) {
+		if k.Fingerprint != "" && strings.HasPrefix(k.Fingerprint, toComplete) &&
+			!slices.Contains(results, k.Fingerprint) {
 			results = append(results, k.Fingerprint)
 		}
 		if k.Fingerprint != "" {

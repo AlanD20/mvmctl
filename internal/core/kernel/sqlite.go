@@ -115,8 +115,13 @@ func (r *sqliteRepo) GetByType(ctx context.Context, kernelType string) (*model.K
 
 func (r *sqliteRepo) GetByVersionAndType(ctx context.Context, version, kernelType string) (*model.KernelItem, error) {
 	var k model.KernelItem
-	err := r.db.GetContext(ctx, &k,
-		`SELECT * FROM kernels WHERE version = ? AND type = ? AND deleted_at IS NULL AND is_present = 1`, version, kernelType)
+	err := r.db.GetContext(
+		ctx,
+		&k,
+		`SELECT * FROM kernels WHERE version = ? AND type = ? AND deleted_at IS NULL AND is_present = 1`,
+		version,
+		kernelType,
+	)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

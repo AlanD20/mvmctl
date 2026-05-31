@@ -37,9 +37,20 @@ var vmColumns = []common.ListingColumn{
 		vm := v.(*model.VM)
 		return fmt.Sprintf("%d vCPU / %d MiB / %d MiB", vm.VCPUCount, vm.MemSizeMiB, vm.DiskSizeMiB)
 	}, LongOnly: true},
-	{Header: "Image", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.VM).ImageID) }, LongOnly: true},
-	{Header: "Kernel", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.VM).KernelID) }, LongOnly: true},
-	{Header: "Created", Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.VM).CreatedAt, "relative") }},
+	{
+		Header:   "Image",
+		Extract:  func(v any) string { return common.Cli.FormatID(v.(*model.VM).ImageID) },
+		LongOnly: true,
+	},
+	{
+		Header:   "Kernel",
+		Extract:  func(v any) string { return common.Cli.FormatID(v.(*model.VM).KernelID) },
+		LongOnly: true,
+	},
+	{
+		Header:  "Created",
+		Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.VM).CreatedAt, "relative") },
+	},
 }
 
 func NewVMCmd(op *api.Operation) *cobra.Command {
@@ -188,7 +199,10 @@ func runVMps(op *api.Operation, cmd *cobra.Command, jsonOutput bool) error {
 		})
 	}
 
-	common.Cli.Table([]string{"Name", "Status", "IPv4", "vCPUs", "Mem(MiB)", "Disk(MiB)", "Image", "Kernel", "Created"}, rows)
+	common.Cli.Table(
+		[]string{"Name", "Status", "IPv4", "vCPUs", "Mem(MiB)", "Disk(MiB)", "Image", "Kernel", "Created"},
+		rows,
+	)
 	return nil
 }
 
@@ -242,13 +256,15 @@ func newVMCreateCmd(op *api.Operation) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&image, "image", "", "Image name, type:version (e.g. ubuntu:24.04), short ID, or path to .ext4 file")
+	cmd.Flags().
+		StringVar(&image, "image", "", "Image name, type:version (e.g. ubuntu:24.04), short ID, or path to .ext4 file")
 	cmd.Flags().StringVar(&kernel, "kernel", "", "Kernel short ID or path to vmlinux file")
 	cmd.Flags().IntVar(&vcpus, "vcpus", 0, "Number of vCPUs (default: from user config)")
 	cmd.Flags().IntVar(&vcpus, "cpus", 0, "Number of vCPUs (alias for --vcpus)")
 	cmd.Flags().StringVar(&mem, "mem", "", "Memory in MiB or GiB (e.g. 512M, 1G, 4096). Default: from user config")
 	cmd.Flags().StringVar(&mem, "memory", "", "Memory size (alias for --mem)")
-	cmd.Flags().StringVarP(&diskSize, "disk-size", "s", "", "Rootfs disk size in MiB/GiB (e.g., 512M=512MiB, 1G=1GiB). Default from config.")
+	cmd.Flags().
+		StringVarP(&diskSize, "disk-size", "s", "", "Rootfs disk size in MiB/GiB (e.g., 512M=512MiB, 1G=1GiB). Default from config.")
 	cmd.Flags().StringVar(&ip, "ip", "", "Guest IP (auto-assigned if omitted)")
 	cmd.Flags().StringVar(&networkName, "network", "", "Named network to use")
 	_ = cmd.Flags().String("net", "", "Named network to use")
@@ -256,31 +272,43 @@ func newVMCreateCmd(op *api.Operation) *cobra.Command {
 	cmd.Flags().StringVar(&mac, "mac", "", "Custom MAC address (auto-generated if omitted)")
 	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH public key name (from key cache) or file path")
 	cmd.Flags().StringVar(&userData, "user-data", "", "Path to custom cloud-init user-data file")
-	cmd.Flags().StringVar(&cloudInitMode, "cloud-init-mode", "", "Cloud-init mode: 'inject' (direct injection), 'iso' (ISO mode), 'net' (HTTP), 'off' (default, no cloud-init)")
-	cmd.Flags().IntVar(&nocloudNetPort, "nocloud-net-port", 0, "Port for nocloud-net HTTP server (0 for auto-assign, default: auto-assign)")
+	cmd.Flags().
+		StringVar(&cloudInitMode, "cloud-init-mode", "", "Cloud-init mode: 'inject' (direct injection), 'iso' (ISO mode), 'net' (HTTP), 'off' (default, no cloud-init)")
+	cmd.Flags().
+		IntVar(&nocloudNetPort, "nocloud-net-port", 0, "Port for nocloud-net HTTP server (0 for auto-assign, default: auto-assign)")
 	cmd.Flags().StringVar(&user, "user", "", "Default SSH user for cloud-init (default: from user config)")
-	cmd.Flags().BoolVar(&noPCI, "no-pci", false, "Disable PCI transport (default: enabled). Required for hotplug support.")
-	cmd.Flags().BoolVar(&nestedVirt, "nested-virt", false, "Enable nested virtualization (requires PCI, adds kvm-intel/amd.nested=1 boot arg)")
+	cmd.Flags().
+		BoolVar(&noPCI, "no-pci", false, "Disable PCI transport (default: enabled). Required for hotplug support.")
+	cmd.Flags().
+		BoolVar(&nestedVirt, "nested-virt", false, "Enable nested virtualization (requires PCI, adds kvm-intel/amd.nested=1 boot arg)")
 	cmd.Flags().BoolVar(&noNestedVirt, "no-nested-virt", false, "Disable nested virtualization")
 	cmd.Flags().MarkHidden("no-nested-virt")
 	cmd.MarkFlagsMutuallyExclusive("nested-virt", "no-nested-virt")
-	cmd.Flags().StringVar(&cpuTemplate, "cpu-template", "", "Path to CPU template JSON file (merged with nested-virt config if both set)")
+	cmd.Flags().
+		StringVar(&cpuTemplate, "cpu-template", "", "Path to CPU template JSON file (merged with nested-virt config if both set)")
 	cmd.Flags().BoolVar(&noConsole, "no-console", false, "Disable serial console")
 	cmd.Flags().StringVar(&bootArgs, "boot-args", "", "Kernel boot arguments (default: from constants.py)")
-	cmd.Flags().StringVar(&lsmFlags, "lsm-flags", "", "Linux Security Module flags for kernel cmdline (default: from user config)")
-	cmd.Flags().BoolVar(&enableLogging, "enable-logging", false, "Enable Firecracker logging (default: from user config)")
+	cmd.Flags().
+		StringVar(&lsmFlags, "lsm-flags", "", "Linux Security Module flags for kernel cmdline (default: from user config)")
+	cmd.Flags().
+		BoolVar(&enableLogging, "enable-logging", false, "Enable Firecracker logging (default: from user config)")
 	cmd.Flags().BoolVar(&noEnableLogging, "no-enable-logging", false, "Disable Firecracker logging")
 	cmd.Flags().MarkHidden("no-enable-logging")
 	cmd.MarkFlagsMutuallyExclusive("enable-logging", "no-enable-logging")
-	cmd.Flags().BoolVar(&enableMetrics, "enable-metrics", false, "Enable Firecracker metrics (default: from user config)")
+	cmd.Flags().
+		BoolVar(&enableMetrics, "enable-metrics", false, "Enable Firecracker metrics (default: from user config)")
 	cmd.Flags().BoolVar(&noEnableMetrics, "no-enable-metrics", false, "Disable Firecracker metrics")
 	cmd.Flags().MarkHidden("no-enable-metrics")
 	cmd.MarkFlagsMutuallyExclusive("enable-metrics", "no-enable-metrics")
-	cmd.Flags().StringVar(&firecrackerBin, "firecracker-bin", os.Getenv("MVM_FIRECRACKER_BIN"), "Path to firecracker binary (default: active version from mvm bin default)")
+	cmd.Flags().
+		StringVar(&firecrackerBin, "firecracker-bin", os.Getenv("MVM_FIRECRACKER_BIN"), "Path to firecracker binary (default: active version from mvm bin default)")
 	cmd.Flags().IntVarP(&count, "count", "c", 1, "Number of VMs to create (default: 1)")
-	cmd.Flags().BoolVar(&atomic, "atomic", false, "If any VM fails, remove all successfully-created VMs (all-or-nothing)")
-	cmd.Flags().BoolVar(&skipCleanup, "skip-cleanup", false, "Skip cleanup if VM creation fails; keeps cloud-init ISO and partial resources (for debugging)")
-	cmd.Flags().BoolVar(&skipDeblob, "skip-deblob", false, "Skip debloat operations on rootfs (removes OS caches, cleans package manager caches)")
+	cmd.Flags().
+		BoolVar(&atomic, "atomic", false, "If any VM fails, remove all successfully-created VMs (all-or-nothing)")
+	cmd.Flags().
+		BoolVar(&skipCleanup, "skip-cleanup", false, "Skip cleanup if VM creation fails; keeps cloud-init ISO and partial resources (for debugging)")
+	cmd.Flags().
+		BoolVar(&skipDeblob, "skip-deblob", false, "Skip debloat operations on rootfs (removes OS caches, cleans package manager caches)")
 	cmd.Flags().StringArrayVarP(&volume, "volume", "v", nil, "Attach volume(s) to the VM (can specify multiple times)")
 
 	return cmd
@@ -296,7 +324,10 @@ func runVMCreate(
 ) error {
 	if skipCleanup {
 		// Python: typer.confirm() defaults to True (Enter = Yes)
-		if !common.Cli.PromptConfirm("--skip-cleanup is set: if creation fails, resources will be left behind and must be cleaned manually. Continue?", true) {
+		if !common.Cli.PromptConfirm(
+			"--skip-cleanup is set: if creation fails, resources will be left behind and must be cleaned manually. Continue?",
+			true,
+		) {
 			common.Cli.Info("Aborted")
 			return nil // exit code 0, matching Python's raise typer.Exit(code=0)
 		}
@@ -318,7 +349,9 @@ func runVMCreate(
 	// --count and --volume are mutually exclusive
 	effectiveCount := max(count, 1)
 	if effectiveCount > 1 && len(volume) > 0 {
-		common.Cli.Error("Cannot use --count with --volume: a volume can only be attached to a single VM. Create VMs individually with --volume.")
+		common.Cli.Error(
+			"Cannot use --count with --volume: a volume can only be attached to a single VM. Create VMs individually with --volume.",
+		)
 		return fmt.Errorf("--count and --volume are mutually exclusive")
 	}
 
@@ -889,7 +922,11 @@ func newVMImportCmd(op *api.Operation) *cobra.Command {
 			if name != "" {
 				nameOverride = &name
 			}
-			importResult := op.VMImport(cmd.Context(), &inputs.VMImportInput{ConfigPath: args[0], NameOverride: nameOverride}, nil)
+			importResult := op.VMImport(
+				cmd.Context(),
+				&inputs.VMImportInput{ConfigPath: args[0], NameOverride: nameOverride},
+				nil,
+			)
 			// Check for NeedsInteraction (Python: isinstance(result, NeedsInteraction))
 			if importResult.Exception != nil && errs.IsNeedsInteraction(importResult.Exception) {
 				common.Cli.Error("Import requires privileges")

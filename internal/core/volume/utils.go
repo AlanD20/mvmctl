@@ -70,7 +70,11 @@ func GetDiskInfo(ctx context.Context, path string) (map[string]any, error) {
 		return nil, fmt.Errorf("stat disk file: %w", err)
 	}
 
-	result := system.RunCmdCompat(ctx, []string{"qemu-img", "info", "--output=json", path}, system.DefaultRunCmdOptions())
+	result := system.RunCmdCompat(
+		ctx,
+		[]string{"qemu-img", "info", "--output=json", path},
+		system.DefaultRunCmdOptions(),
+	)
 	if result.Err != nil {
 		return nil, NewVolumeErrorf("qemu-img info failed: %s", result.Err.Error())
 	}

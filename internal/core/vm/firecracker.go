@@ -448,7 +448,9 @@ func (s *FirecrackerSpawner) buildDrivesConfig() []model.DriveConfig {
 	// Cloud-init ISO drive (if configured)
 	cloudInitMode := s.config.CloudInitMode
 	cloudInitISOPath := s.config.CloudInitISOPath
-	if cloudInitMode != nil && *cloudInitMode != "" && *cloudInitMode != model.CloudInitModeOFF && cloudInitISOPath != nil && *cloudInitISOPath != "" {
+	if cloudInitMode != nil && *cloudInitMode != "" && *cloudInitMode != model.CloudInitModeOFF &&
+		cloudInitISOPath != nil &&
+		*cloudInitISOPath != "" {
 		// Python also calls .absolute() on cloud_init_iso_path
 		ciAbs, err := filepath.Abs(*cloudInitISOPath)
 		if err != nil {
@@ -775,7 +777,11 @@ func (fc *FirecrackerClient) Close() {
 //   - SocketNotFoundError when socket doesn't exist
 //   - On ECONNREFUSED: retry with reconnect
 //   - Returns (status, data_json, error)
-func (fc *FirecrackerClient) request(ctx context.Context, method, path string, body map[string]any) (int, map[string]any, error) {
+func (fc *FirecrackerClient) request(
+	ctx context.Context,
+	method, path string,
+	body map[string]any,
+) (int, map[string]any, error) {
 	// Check socket exists first (matches Python's _connect which checks)
 	if _, err := os.Stat(fc.socketPath); os.IsNotExist(err) {
 		return 0, nil, &SocketNotFoundError{Path: fc.socketPath}
@@ -884,7 +890,11 @@ func (fc *FirecrackerClient) CreateSnapshot(ctx context.Context, memPath, snapsh
 
 // LoadSnapshot loads a VM from snapshot via PUT /snapshot/load.
 // Matches Python's load_snapshot().
-func (fc *FirecrackerClient) LoadSnapshot(ctx context.Context, memPath, snapshotPath string, resume bool) (bool, error) {
+func (fc *FirecrackerClient) LoadSnapshot(
+	ctx context.Context,
+	memPath, snapshotPath string,
+	resume bool,
+) (bool, error) {
 	slog.Info("Loading snapshot...")
 	body := map[string]any{
 		"mem_file_path": memPath,

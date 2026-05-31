@@ -143,7 +143,10 @@ func (r *sqliteRepo) Count(ctx context.Context) (int, error) {
 }
 
 func (r *sqliteRepo) InitializeState(ctx context.Context) (*model.HostStateItem, error) {
-	_, err := r.db.ExecContext(ctx, `INSERT OR IGNORE INTO host_state (id, initialized_at, updated_at) VALUES (1, '', '')`)
+	_, err := r.db.ExecContext(
+		ctx,
+		`INSERT OR IGNORE INTO host_state (id, initialized_at, updated_at) VALUES (1, '', '')`,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -151,8 +154,11 @@ func (r *sqliteRepo) InitializeState(ctx context.Context) (*model.HostStateItem,
 }
 
 func (r *sqliteRepo) SetInitialized(ctx context.Context, initializedAt string) error {
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE host_state SET initialized = 1, initialized_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1`, initializedAt)
+	_, err := r.db.ExecContext(
+		ctx,
+		`UPDATE host_state SET initialized = 1, initialized_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1`,
+		initializedAt,
+	)
 	return err
 }
 
@@ -235,7 +241,11 @@ func (r *sqliteRepo) DeleteChangesExceptSession(ctx context.Context, sessionID s
 	return err
 }
 
-func (r *sqliteRepo) ListChanges(ctx context.Context, sessionID *string, includeReverted bool) ([]*model.HostStateChangeItem, error) {
+func (r *sqliteRepo) ListChanges(
+	ctx context.Context,
+	sessionID *string,
+	includeReverted bool,
+) ([]*model.HostStateChangeItem, error) {
 	var items []*model.HostStateChangeItem
 	if sessionID != nil {
 		if includeReverted {
@@ -253,14 +263,23 @@ func (r *sqliteRepo) ListChanges(ctx context.Context, sessionID *string, include
 		`SELECT * FROM host_state_changes WHERE reverted = 0 ORDER BY change_order`)
 }
 
-func (r *sqliteRepo) MarkChangeReverted(ctx context.Context, changeID int, revertedAt string, revertMechanism *string) error {
+func (r *sqliteRepo) MarkChangeReverted(
+	ctx context.Context,
+	changeID int,
+	revertedAt string,
+	revertMechanism *string,
+) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE host_state_changes SET reverted = 1, reverted_at = ?, revert_mechanism = ? WHERE id = ?`,
 		revertedAt, revertMechanism, changeID)
 	return err
 }
 
-func (r *sqliteRepo) RevertChanges(ctx context.Context, sessionID string, revertedAt string) ([]*model.HostStateChangeItem, error) {
+func (r *sqliteRepo) RevertChanges(
+	ctx context.Context,
+	sessionID string,
+	revertedAt string,
+) ([]*model.HostStateChangeItem, error) {
 	items, err := r.ListChanges(ctx, &sessionID, false)
 	if err != nil {
 		return nil, err

@@ -14,16 +14,16 @@ const (
 
 // VolumeItem represents a persistent data disk attachable to VMs.
 type VolumeItem struct {
-	ID         string       `json:"id" db:"id"`
-	Name       string       `json:"name" db:"name"`
-	SizeBytes  int64        `json:"size_bytes" db:"size_bytes"`
-	Format     string       `json:"format" db:"format"`
-	Path       string       `json:"path" db:"path"`
-	Status     VolumeStatus `json:"status" db:"status"`
+	ID         string       `json:"id"              db:"id"`
+	Name       string       `json:"name"            db:"name"`
+	SizeBytes  int64        `json:"size_bytes"      db:"size_bytes"`
+	Format     string       `json:"format"          db:"format"`
+	Path       string       `json:"path"            db:"path"`
+	Status     VolumeStatus `json:"status"          db:"status"`
 	VMID       *string      `json:"vm_id,omitempty" db:"vm_id"`
-	CreatedAt  string       `json:"created_at" db:"created_at"`
-	UpdatedAt  string       `json:"updated_at" db:"updated_at"`
-	IsReadOnly bool         `json:"is_read_only" db:"is_read_only"`
+	CreatedAt  string       `json:"created_at"      db:"created_at"`
+	UpdatedAt  string       `json:"updated_at"      db:"updated_at"`
+	IsReadOnly bool         `json:"is_read_only"    db:"is_read_only"`
 
 	// Resolved relations
 	VMs []*VM `json:"vms,omitempty"`

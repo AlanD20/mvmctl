@@ -43,7 +43,10 @@ var binaryColumns = []common.ListingColumn{
 		}
 		return fv
 	}, LongOnly: true},
-	{Header: "Created", Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.BinaryItem).CreatedAt, "relative") }},
+	{
+		Header:  "Created",
+		Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.BinaryItem).CreatedAt, "relative") },
+	},
 }
 
 // NewBinaryCmd creates the binary command and its subcommands.
@@ -162,12 +165,19 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 			}
 
 			if strings.ToLower(name) != "firecracker" {
-				common.Cli.Error(fmt.Sprintf("Unsupported binary: '%s'. Only 'firecracker' is supported for download or build.", name))
+				common.Cli.Error(
+					fmt.Sprintf(
+						"Unsupported binary: '%s'. Only 'firecracker' is supported for download or build.",
+						name,
+					),
+				)
 				return fmt.Errorf("unsupported binary")
 			}
 
 			if gitRef != "" && effectiveVersion != "" {
-				common.Cli.Error("--git-ref and --version are mutually exclusive. Use --git-ref to build from source, or --version to download a release.")
+				common.Cli.Error(
+					"--git-ref and --version are mutually exclusive. Use --git-ref to build from source, or --version to download a release.",
+				)
 				return fmt.Errorf("mutually exclusive options")
 			}
 
@@ -264,7 +274,8 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&version, "version", "", "Version to download (e.g. 1.15.0, latest)")
-	cmd.Flags().StringVar(&gitRef, "git-ref", "", "Git ref (branch/tag/commit) to build from source. Mutually exclusive with --version.")
+	cmd.Flags().
+		StringVar(&gitRef, "git-ref", "", "Git ref (branch/tag/commit) to build from source. Mutually exclusive with --version.")
 	cmd.Flags().BoolVarP(&setDefault, "default", "d", false, "Set as default after download")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Re-download even if version already exists")
 

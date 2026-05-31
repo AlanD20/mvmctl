@@ -77,10 +77,14 @@ func validateNoCloudPortRange(key string, resolve ResolveFn) error {
 
 	if end <= start {
 		return &errs.DomainError{
-			Code:    errs.CodeConfigError,
-			Message: fmt.Sprintf("nocloud_port_range_end (%d) must be greater than nocloud_port_range_start (%d)", end, start),
-			Op:      "constraint",
-			Class:   errs.ClassValidation,
+			Code: errs.CodeConfigError,
+			Message: fmt.Sprintf(
+				"nocloud_port_range_end (%d) must be greater than nocloud_port_range_start (%d)",
+				end,
+				start,
+			),
+			Op:    "constraint",
+			Class: errs.ClassValidation,
 		}
 	}
 	return nil
@@ -99,10 +103,13 @@ func validateMACPrefix(key string, resolve ResolveFn) error {
 	prefix := fmt.Sprintf("%v", prefixRaw)
 	if !macPrefixRE.MatchString(prefix) {
 		return &errs.DomainError{
-			Code:    errs.CodeConfigError,
-			Message: fmt.Sprintf("Invalid MAC prefix '%s'. Must be two hex bytes separated by a colon (e.g. '02:FC').", prefix),
-			Op:      "constraint",
-			Class:   errs.ClassValidation,
+			Code: errs.CodeConfigError,
+			Message: fmt.Sprintf(
+				"Invalid MAC prefix '%s'. Must be two hex bytes separated by a colon (e.g. '02:FC').",
+				prefix,
+			),
+			Op:    "constraint",
+			Class: errs.ClassValidation,
 		}
 	}
 	return nil

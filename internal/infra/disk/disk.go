@@ -106,9 +106,12 @@ func ParseDiskSize(s string) (int64, error) {
 	match := sizePattern.FindStringSubmatch(upper)
 	if match == nil {
 		return 0, &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Class:   errs.ClassValidation,
-			Message: fmt.Sprintf("Invalid disk size format: '%s'. Expected format: <number><unit> where unit is B, K, KB, M, MB, G, GB, T, TB", upper),
+			Code:  errs.CodeValidationFailed,
+			Class: errs.ClassValidation,
+			Message: fmt.Sprintf(
+				"Invalid disk size format: '%s'. Expected format: <number><unit> where unit is B, K, KB, M, MB, G, GB, T, TB",
+				upper,
+			),
 		}
 	}
 

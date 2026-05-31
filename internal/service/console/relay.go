@@ -73,7 +73,12 @@ type RelayManager struct {
 
 // NewRelayManager creates a new console relay manager.
 // Matches Python's ConsoleRelayManager.__init__().
-func NewRelayManager(id string, path string, name string, pidFilename, socketFilename, logFilename string) *RelayManager {
+func NewRelayManager(
+	id string,
+	path string,
+	name string,
+	pidFilename, socketFilename, logFilename string,
+) *RelayManager {
 	if pidFilename == "" {
 		pidFilename = DefaultConsolePIDFilename
 	}

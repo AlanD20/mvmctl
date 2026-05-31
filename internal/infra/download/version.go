@@ -50,7 +50,12 @@ func NewHttpDirVersionResolver() *HttpDirVersionResolver {
 
 // resolveVersion resolves a directory name to a (version, codename) pair.
 // Mirrors Python's _resolve_version().
-func resolveVersion(dirName string, skipPatterns []string, versionPrefix string, codenameMapping map[string]string) (string, string, bool) {
+func resolveVersion(
+	dirName string,
+	skipPatterns []string,
+	versionPrefix string,
+	codenameMapping map[string]string,
+) (string, string, bool) {
 	if dirName == "." || dirName == ".." {
 		return "", "", false
 	}
@@ -113,7 +118,12 @@ func versionInfoSortKey(v version.VersionInfo) []int {
 // discoverFileFromListing fetches a directory listing HTML and finds a matching file.
 // Mirrors Python's _discover_file_from_listing().
 // Returns "" (matching Python's None) when no match is found or fetch fails.
-func (r *HttpDirVersionResolver) discoverFileFromListing(ctx context.Context, url, pattern, suffix string, useCache bool, ttl int) string {
+func (r *HttpDirVersionResolver) discoverFileFromListing(
+	ctx context.Context,
+	url, pattern, suffix string,
+	useCache bool,
+	ttl int,
+) string {
 	html, err := r.fetchRawContent(ctx, url, useCache, ttl)
 	if err != nil {
 		return ""
@@ -149,7 +159,12 @@ func extractAllHrefs(html string) []string {
 }
 
 // fetchRawContent fetches a URL's content with optional caching.
-func (r *HttpDirVersionResolver) fetchRawContent(ctx context.Context, url string, useCache bool, ttl int) (string, error) {
+func (r *HttpDirVersionResolver) fetchRawContent(
+	ctx context.Context,
+	url string,
+	useCache bool,
+	ttl int,
+) (string, error) {
 	if useCache && r.cache != nil {
 		cacheFile := r.cache.Path(url)
 		if r.cache.IsValid(cacheFile, ttl) {
@@ -240,7 +255,14 @@ type FileDiscoveryOpt struct {
 //
 // Returns a map of type name → sorted list of VersionInfo (newest first).
 // On fetch failure for a given type, returns an empty list for that type.
-func (r *HttpDirVersionResolver) Resolve(ctx context.Context, configs []ResolverConfig, arch string, ciVersion string, cacheTTLSeconds int, limit int) map[string][]version.VersionInfo {
+func (r *HttpDirVersionResolver) Resolve(
+	ctx context.Context,
+	configs []ResolverConfig,
+	arch string,
+	ciVersion string,
+	cacheTTLSeconds int,
+	limit int,
+) map[string][]version.VersionInfo {
 	result := make(map[string][]version.VersionInfo)
 
 	// Phase 1: http-dir resolver types
@@ -409,7 +431,15 @@ func (r *HttpDirVersionResolver) resolveViaDirectoryListing(
 
 		downloadURL, err := infra.RenderTemplate(config.DownloadURL, tmplVars)
 		if err != nil {
-			slog.Warn("Failed to render download URL for version", "type", typeName, "version", versionStr, "error", err)
+			slog.Warn(
+				"Failed to render download URL for version",
+				"type",
+				typeName,
+				"version",
+				versionStr,
+				"error",
+				err,
+			)
 			continue
 		}
 
@@ -418,7 +448,15 @@ func (r *HttpDirVersionResolver) resolveViaDirectoryListing(
 			var rendered string
 			rendered, err = infra.RenderTemplate(config.SHA256URL, tmplVars)
 			if err != nil {
-				slog.Warn("Failed to render sha256 URL for version", "type", typeName, "version", versionStr, "error", err)
+				slog.Warn(
+					"Failed to render sha256 URL for version",
+					"type",
+					typeName,
+					"version",
+					versionStr,
+					"error",
+					err,
+				)
 			} else {
 				sha256URL = &rendered
 			}
@@ -707,7 +745,15 @@ func (r *HttpDirVersionResolver) resolveViaFirecrackerS3(
 		if config.DownloadURL != "" {
 			downloadURL, err = infra.RenderTemplate(config.DownloadURL, downloadVars)
 			if err != nil {
-				slog.Warn("Failed to render download URL for version", "type", typeName, "version", versionStr, "error", err)
+				slog.Warn(
+					"Failed to render download URL for version",
+					"type",
+					typeName,
+					"version",
+					versionStr,
+					"error",
+					err,
+				)
 				continue
 			}
 		} else if config.Source != "" {
@@ -719,7 +765,15 @@ func (r *HttpDirVersionResolver) resolveViaFirecrackerS3(
 			var rendered string
 			rendered, err = infra.RenderTemplate(config.SHA256URL, downloadVars)
 			if err != nil {
-				slog.Warn("Failed to render sha256 URL for version", "type", typeName, "version", versionStr, "error", err)
+				slog.Warn(
+					"Failed to render sha256 URL for version",
+					"type",
+					typeName,
+					"version",
+					versionStr,
+					"error",
+					err,
+				)
 			} else {
 				sha256URL = &rendered
 			}

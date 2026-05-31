@@ -202,7 +202,11 @@ func (p *GuestfsProvisioner) ConvertTo(ctx context.Context, targetFs string) err
 	sizeMiB := sizeBytes / mebi
 
 	// Create sparse output file
-	result := system.RunCmdCompat(ctx, []string{"truncate", "-s", fmt.Sprintf("%dM", sizeMiB), outputPath}, system.RunCmdOptions{Capture: true, Check: true})
+	result := system.RunCmdCompat(
+		ctx,
+		[]string{"truncate", "-s", fmt.Sprintf("%dM", sizeMiB), outputPath},
+		system.RunCmdOptions{Capture: true, Check: true},
+	)
 	if result.Err != nil {
 		return fmt.Errorf("truncate output: %s: %w", result.Stdout, result.Err)
 	}
@@ -443,7 +447,11 @@ func (p *GuestfsProvisioner) Run(ctx context.Context) error {
 	}
 	allArgs = append(allArgs, "-f", scriptPath)
 
-	result3 := system.RunCmdCompat(ctx, append([]string{"guestfish"}, allArgs...), system.RunCmdOptions{Capture: true, Check: true})
+	result3 := system.RunCmdCompat(
+		ctx,
+		append([]string{"guestfish"}, allArgs...),
+		system.RunCmdOptions{Capture: true, Check: true},
+	)
 
 	slog.Debug("Running guestfish provisioner batch",
 		"image", filepath.Base(p.rootfsPath),
@@ -832,12 +840,16 @@ func (p *GuestfsProvisioner) buildSetupSSH(ctx context.Context) []string {
 	cmds = append(cmds, hostKeyCmds...)
 
 	// Write first-boot installer
-	cmds = append(cmds,
+	cmds = append(
+		cmds,
 		"mkdir-p /usr/local/bin",
 		fmt.Sprintf("write /usr/local/bin/first-boot-ssh-installer.sh %q", provisionerContentFirstBootInstaller()),
 		fmt.Sprintf("chmod %o /usr/local/bin/first-boot-ssh-installer.sh", infra.ExecutablePerm),
 		"mkdir-p /etc/systemd/system",
-		fmt.Sprintf("write /etc/systemd/system/first-boot-ssh-installer.service %q", provisionerContentFirstBootService()),
+		fmt.Sprintf(
+			"write /etc/systemd/system/first-boot-ssh-installer.service %q",
+			provisionerContentFirstBootService(),
+		),
 		fmt.Sprintf("chmod %o /etc/systemd/system/first-boot-ssh-installer.service", infra.PublicKeyPerm),
 		"mkdir-p /etc/systemd/system/multi-user.target.wants",
 		"ln-s /etc/systemd/system/first-boot-ssh-installer.service /etc/systemd/system/multi-user.target.wants/first-boot-ssh-installer.service",
@@ -849,7 +861,10 @@ func (p *GuestfsProvisioner) buildSetupSSH(ctx context.Context) []string {
 // buildEnsureUser returns guestfish commands to create a user, group, home dir,
 // and sudoers in the guest. Corresponds to Python GuestfsProvisioner.ensure_user().
 // Accepts pre-read file contents as parameters (avoids separate subprocess calls).
-func (p *GuestfsProvisioner) buildEnsureUser(ctx context.Context, passwdContent, shadowContent, groupContent string) []string {
+func (p *GuestfsProvisioner) buildEnsureUser(
+	ctx context.Context,
+	passwdContent, shadowContent, groupContent string,
+) []string {
 	if p.user == "" || p.user == "root" {
 		return nil
 	}
@@ -959,7 +974,8 @@ func (p *GuestfsProvisioner) buildGenerateHostKeys(ctx context.Context) []string
 		return nil
 	}
 
-	cmds = append(cmds,
+	cmds = append(
+		cmds,
 		"mkdir-p /etc/local.d",
 		fmt.Sprintf("write /etc/local.d/ssh-keygen.start %q", provisionerContentSSHKeygenScript()),
 		fmt.Sprintf("chmod %o /etc/local.d/ssh-keygen.start", infra.ExecutablePerm),
@@ -1163,7 +1179,11 @@ func (p *GuestfsProvisioner) parseOSRelease(ctx context.Context) (string, string
 	// (Python: matches both paths that systemd supports)
 	paths := []string{"/etc/os-release", "/usr/lib/os-release"}
 	for _, osReleasePath := range paths {
-		res := system.RunCmdCompat(ctx, []string{"guestfish", "-a", p.rootfsPath, "--ro", "-i", "read-file", osReleasePath}, system.RunCmdOptions{Capture: true, Check: true})
+		res := system.RunCmdCompat(
+			ctx,
+			[]string{"guestfish", "-a", p.rootfsPath, "--ro", "-i", "read-file", osReleasePath},
+			system.RunCmdOptions{Capture: true, Check: true},
+		)
 		if res.Err != nil {
 			continue
 		}
@@ -1243,9 +1263,18 @@ func EnableSSH(ctx context.Context, diskPath string) bool {
 			if res.Err == nil && strings.TrimSpace(res.Stdout) == "true" {
 				svcName := filepath.Base(svc)
 				// Enable the service
-				system.RunCmdCompat(ctx, []string{"guestfish", "-a", diskPath, "-i",
-					"mkdir-p", "/etc/systemd/system/multi-user.target.wants",
-					":", "ln-sf", svc, "/etc/systemd/system/multi-user.target.wants/" + svcName}, system.RunCmdOptions{})
+				system.RunCmdCompat(ctx, []string{
+					"guestfish",
+					"-a",
+					diskPath,
+					"-i",
+					"mkdir-p",
+					"/etc/systemd/system/multi-user.target.wants",
+					":",
+					"ln-sf",
+					svc,
+					"/etc/systemd/system/multi-user.target.wants/" + svcName,
+				}, system.RunCmdOptions{})
 				return true
 			}
 		}

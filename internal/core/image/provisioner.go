@@ -172,8 +172,13 @@ func (p *Provisioner) Run() (bool, error) {
 		}
 		if err := backend.ConvertTo(p.convertTo); err != nil {
 			if isExpectedProvisionerError(err) {
-				slog.Warn("Filesystem conversion skipped", "error", err,
-					"hint", "Build the provisioner binary with 'python scripts/build_services.py' or enable libguestfs to enable fs conversion.")
+				slog.Warn(
+					"Filesystem conversion skipped",
+					"error",
+					err,
+					"hint",
+					"Build the provisioner binary with 'python scripts/build_services.py' or enable libguestfs to enable fs conversion.",
+				)
 			} else {
 				return false, err
 			}
@@ -195,8 +200,13 @@ func (p *Provisioner) Run() (bool, error) {
 		}
 		if err := backend.Run(); err != nil {
 			if isExpectedProvisionerError(err) {
-				slog.Warn("Debloating skipped", "error", err,
-					"hint", "Build the provisioner binary with 'python scripts/build_services.py' or enable libguestfs to enable boot optimization.")
+				slog.Warn(
+					"Debloating skipped",
+					"error",
+					err,
+					"hint",
+					"Build the provisioner binary with 'python scripts/build_services.py' or enable libguestfs to enable boot optimization.",
+				)
 			} else {
 				return false, err
 			}

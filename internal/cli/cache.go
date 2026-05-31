@@ -114,7 +114,14 @@ func resourceDisplayNamePlural(resource string) string {
 
 // pruneResource handles pruning a specific resource type.
 // Matches Python's resource-specific blocks exactly.
-func pruneResource(op *api.Operation, cmd *cobra.Command, resource string, dryRun bool, allResources bool, force bool) error {
+func pruneResource(
+	op *api.Operation,
+	cmd *cobra.Command,
+	resource string,
+	dryRun bool,
+	allResources bool,
+	force bool,
+) error {
 	if !force && !dryRun {
 		// Match Python: mvm_cli.warning("This will remove cached data for all VMs")
 		common.Cli.Warning(fmt.Sprintf("This will remove cached data for all %s", resourceDisplayNamePlural(resource)))
@@ -157,10 +164,19 @@ func pruneResource(op *api.Operation, cmd *cobra.Command, resource string, dryRu
 			// Match Python: mvm_cli.info(f"[DRY RUN] Would prune {len(removed)} VM(s): {', '.join(removed)}")
 			if resource == "binary" {
 				// Python: f"[DRY RUN] Would prune {len(removed)} binaries: {', '.join(removed)}"
-				common.Cli.Info(fmt.Sprintf("[DRY RUN] Would prune %d binaries: %s", len(removed), strings.Join(removed, ", ")))
+				common.Cli.Info(
+					fmt.Sprintf("[DRY RUN] Would prune %d binaries: %s", len(removed), strings.Join(removed, ", ")),
+				)
 			} else {
 				displayName := resourceDisplayName(resource)
-				common.Cli.Info(fmt.Sprintf("[DRY RUN] Would prune %d %s(s): %s", len(removed), displayName, strings.Join(removed, ", ")))
+				common.Cli.Info(
+					fmt.Sprintf(
+						"[DRY RUN] Would prune %d %s(s): %s",
+						len(removed),
+						displayName,
+						strings.Join(removed, ", "),
+					),
+				)
 			}
 		} else {
 			// Match Python: mvm_cli.success(f"Pruned: {', '.join(removed)}")
@@ -274,7 +290,13 @@ func pruneAll(op *api.Operation, cmd *cobra.Command, dryRun bool, force bool) er
 		}
 
 		if len(pruneItem.FailedIDs) > 0 {
-			common.Cli.Warning(fmt.Sprintf("Failed to prune %d item(s): %s", len(pruneItem.FailedIDs), strings.Join(pruneItem.FailedIDs, ", ")))
+			common.Cli.Warning(
+				fmt.Sprintf(
+					"Failed to prune %d item(s): %s",
+					len(pruneItem.FailedIDs),
+					strings.Join(pruneItem.FailedIDs, ", "),
+				),
+			)
 		}
 
 		if pruneItem.HadRunningVMs {
@@ -474,7 +496,13 @@ Examples:
 				}
 
 				if len(prune.FailedIDs) > 0 {
-					common.Cli.Warning(fmt.Sprintf("Failed to prune %d item(s): %s", len(prune.FailedIDs), strings.Join(prune.FailedIDs, ", ")))
+					common.Cli.Warning(
+						fmt.Sprintf(
+							"Failed to prune %d item(s): %s",
+							len(prune.FailedIDs),
+							strings.Join(prune.FailedIDs, ", "),
+						),
+					)
 				}
 
 				if prune.HadRunningVMs {

@@ -323,7 +323,12 @@ func (e *Enricher) EnrichVM(ctx context.Context, vms []*model.VM, include ...str
 }
 
 // enrichVMFromPaths enriches VMs for the given sorted paths.
-func (e *Enricher) enrichVMFromPaths(ctx context.Context, vms []*model.VM, paths []string, registry map[string]RelationSpec) error {
+func (e *Enricher) enrichVMFromPaths(
+	ctx context.Context,
+	vms []*model.VM,
+	paths []string,
+	registry map[string]RelationSpec,
+) error {
 	for _, path := range paths {
 		spec := registry[path]
 		switch path {
@@ -536,7 +541,10 @@ func safeCastNetwork(v any) (*model.Network, error) {
 // a map from the JSON string key to the resolved VolumeItem list.
 //
 // Matches Python's VolumeResolver.resolve_by_vm_volume_ids() method.
-func (e *Enricher) resolveByVMVolumeIDs(ctx context.Context, jsonIDKeys []string) (map[string][]*model.VolumeItem, error) {
+func (e *Enricher) resolveByVMVolumeIDs(
+	ctx context.Context,
+	jsonIDKeys []string,
+) (map[string][]*model.VolumeItem, error) {
 	// Collect all unique volume IDs across all JSON keys.
 	allVolumeIDs := make(map[string]bool)
 	keyToIDs := make(map[string][]string, len(jsonIDKeys))
@@ -685,7 +693,12 @@ func (e *Enricher) EnrichNetwork(ctx context.Context, networks []*model.Network,
 }
 
 // enrichNetworkFromPaths enriches Networks for the given sorted paths.
-func (e *Enricher) enrichNetworkFromPaths(ctx context.Context, networks []*model.Network, paths []string, registry map[string]RelationSpec) error {
+func (e *Enricher) enrichNetworkFromPaths(
+	ctx context.Context,
+	networks []*model.Network,
+	paths []string,
+	registry map[string]RelationSpec,
+) error {
 	for _, path := range paths {
 		spec := registry[path]
 		switch path {
@@ -785,7 +798,12 @@ func (e *Enricher) EnrichImage(ctx context.Context, images []*model.ImageItem, i
 }
 
 // enrichImageFromPaths enriches Images for the given sorted paths.
-func (e *Enricher) enrichImageFromPaths(ctx context.Context, images []*model.ImageItem, paths []string, registry map[string]RelationSpec) error {
+func (e *Enricher) enrichImageFromPaths(
+	ctx context.Context,
+	images []*model.ImageItem,
+	paths []string,
+	registry map[string]RelationSpec,
+) error {
 	for _, path := range paths {
 		spec := registry[path]
 		switch path {
@@ -853,7 +871,12 @@ func (e *Enricher) EnrichKernel(ctx context.Context, kernels []*model.KernelItem
 }
 
 // enrichKernelFromPaths enriches Kernels for the given sorted paths.
-func (e *Enricher) enrichKernelFromPaths(ctx context.Context, kernels []*model.KernelItem, paths []string, registry map[string]RelationSpec) error {
+func (e *Enricher) enrichKernelFromPaths(
+	ctx context.Context,
+	kernels []*model.KernelItem,
+	paths []string,
+	registry map[string]RelationSpec,
+) error {
 	for _, path := range paths {
 		spec := registry[path]
 		switch path {
@@ -921,7 +944,12 @@ func (e *Enricher) EnrichBinary(ctx context.Context, binaries []*model.BinaryIte
 }
 
 // enrichBinaryFromPaths enriches Binaries for the given sorted paths.
-func (e *Enricher) enrichBinaryFromPaths(ctx context.Context, binaries []*model.BinaryItem, paths []string, registry map[string]RelationSpec) error {
+func (e *Enricher) enrichBinaryFromPaths(
+	ctx context.Context,
+	binaries []*model.BinaryItem,
+	paths []string,
+	registry map[string]RelationSpec,
+) error {
 	for _, path := range paths {
 		spec := registry[path]
 		switch path {
@@ -991,7 +1019,12 @@ func (e *Enricher) EnrichVolume(ctx context.Context, volumes []*model.VolumeItem
 }
 
 // enrichVolumeFromPaths enriches Volumes for the given sorted paths.
-func (e *Enricher) enrichVolumeFromPaths(ctx context.Context, volumes []*model.VolumeItem, paths []string, registry map[string]RelationSpec) error {
+func (e *Enricher) enrichVolumeFromPaths(
+	ctx context.Context,
+	volumes []*model.VolumeItem,
+	paths []string,
+	registry map[string]RelationSpec,
+) error {
 	for _, path := range paths {
 		spec := registry[path]
 		switch path {

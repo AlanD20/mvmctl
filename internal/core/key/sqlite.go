@@ -90,7 +90,11 @@ func (r *sqliteRepo) SetDefault(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE ssh_keys SET is_default = 1, updated_at = CURRENT_TIMESTAMP WHERE name = ?`, name)
+	_, err = tx.ExecContext(
+		ctx,
+		`UPDATE ssh_keys SET is_default = 1, updated_at = CURRENT_TIMESTAMP WHERE name = ?`,
+		name,
+	)
 	if err != nil {
 		return err
 	}

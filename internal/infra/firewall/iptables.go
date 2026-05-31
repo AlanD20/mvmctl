@@ -254,7 +254,11 @@ func (t *IPTablesTracker) buildRestoreInput(rules []*model.FirewallRule, table s
 // ── Ensure rule ──
 // Matches Python IPTablesTracker.ensure_rule().
 
-func (t *IPTablesTracker) EnsureRule(ctx context.Context, rule model.FirewallRule, contextLabel string) model.FirewallRuleResult {
+func (t *IPTablesTracker) EnsureRule(
+	ctx context.Context,
+	rule model.FirewallRule,
+	contextLabel string,
+) model.FirewallRuleResult {
 	// No clone — work directly on the input rule, matching Python behavior
 	// where comment_tag and command_string are mutated in place.
 	r := &rule
@@ -301,7 +305,11 @@ func (t *IPTablesTracker) EnsureRule(ctx context.Context, rule model.FirewallRul
 
 	// Check if rule exists in iptables
 	iptablesExists := false
-	checkResult := system.RunCmdCompat(ctx, checkArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+	checkResult := system.RunCmdCompat(
+		ctx,
+		checkArgs,
+		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+	)
 	if checkResult.ExitCode == 0 {
 		iptablesExists = true
 	}
@@ -328,9 +336,18 @@ func (t *IPTablesTracker) EnsureRule(ctx context.Context, rule model.FirewallRul
 	}
 
 	// Create the rule in iptables
-	addResult := system.RunCmdCompat(ctx, addArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true})
+	addResult := system.RunCmdCompat(
+		ctx,
+		addArgs,
+		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true},
+	)
 	if addResult.ExitCode != 0 {
-		errMsg := fmt.Sprintf("Failed to create rule: command %s failed (exit %d): %s", addArgs[0], addResult.ExitCode, addResult.Stderr)
+		errMsg := fmt.Sprintf(
+			"Failed to create rule: command %s failed (exit %d): %s",
+			addArgs[0],
+			addResult.ExitCode,
+			addResult.Stderr,
+		)
 		return model.FirewallRuleResult{
 			Success:         false,
 			ErrorMessage:    &errMsg,
@@ -403,7 +420,11 @@ func (t *IPTablesTracker) RemoveRule(ctx context.Context, rule model.FirewallRul
 	cmdStrPtr = &cmdStr
 
 	// Remove from iptables
-	deleteResult := system.RunCmdCompat(ctx, deleteArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+	deleteResult := system.RunCmdCompat(
+		ctx,
+		deleteArgs,
+		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+	)
 
 	if deleteResult.ExitCode != 0 {
 		// Deletion failed — try by line number
@@ -441,7 +462,11 @@ func (t *IPTablesTracker) removeByLineNumber(ctx context.Context, rule *model.Fi
 		"-L", string(rule.ChainName),
 		"-n", "--line-numbers", "-v",
 	}
-	result := system.RunCmdCompat(ctx, listArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+	result := system.RunCmdCompat(
+		ctx,
+		listArgs,
+		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+	)
 	if result.ExitCode != 0 {
 		return false
 	}
@@ -471,7 +496,11 @@ func (t *IPTablesTracker) removeByLineNumber(ctx context.Context, rule *model.Fi
 					"-D", string(rule.ChainName),
 					lineNum,
 				}
-				delResult := system.RunCmdCompat(ctx, delArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+				delResult := system.RunCmdCompat(
+					ctx,
+					delArgs,
+					system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+				)
 				return delResult.ExitCode == 0
 			}
 		}
@@ -488,7 +517,11 @@ func (t *IPTablesTracker) ruleExistsByInterfaces(ctx context.Context, rule *mode
 		"-L", string(rule.ChainName),
 		"-n", "-v",
 	}
-	result := system.RunCmdCompat(ctx, listArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+	result := system.RunCmdCompat(
+		ctx,
+		listArgs,
+		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+	)
 	if result.ExitCode != 0 {
 		return false
 	}
@@ -537,7 +570,11 @@ func (t *IPTablesTracker) BatchEnsureRules(ctx context.Context, rules []model.Fi
 
 	if len(filterRules) > 0 {
 		restoreInput := t.buildRestoreInput(filterRules, "filter")
-		result := system.RunCmdCompat(ctx, []string{"iptables-restore", "-n"}, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true, Input: restoreInput})
+		result := system.RunCmdCompat(
+			ctx,
+			[]string{"iptables-restore", "-n"},
+			system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true, Input: restoreInput},
+		)
 		if result.ExitCode != 0 {
 			errMsg := fmt.Sprintf("command iptables-restore -n failed (exit %d): %s", result.ExitCode, result.Stderr)
 			return model.FirewallRuleResult{
@@ -549,7 +586,11 @@ func (t *IPTablesTracker) BatchEnsureRules(ctx context.Context, rules []model.Fi
 
 	if len(natRules) > 0 {
 		restoreInput := t.buildRestoreInput(natRules, "nat")
-		result := system.RunCmdCompat(ctx, []string{"iptables-restore", "-n"}, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true, Input: restoreInput})
+		result := system.RunCmdCompat(
+			ctx,
+			[]string{"iptables-restore", "-n"},
+			system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true, Input: restoreInput},
+		)
 		if result.ExitCode != 0 {
 			errMsg := fmt.Sprintf("command iptables-restore -n failed (exit %d): %s", result.ExitCode, result.Stderr)
 			return model.FirewallRuleResult{
@@ -600,7 +641,11 @@ func (t *IPTablesTracker) CountOrphanedRules(ctx context.Context, network *model
 		}
 	}
 
-	result := system.RunCmdCompat(ctx, []string{"iptables-save"}, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+	result := system.RunCmdCompat(
+		ctx,
+		[]string{"iptables-save"},
+		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+	)
 	if result.ExitCode != 0 {
 		return 0
 	}
@@ -635,13 +680,23 @@ func (t *IPTablesTracker) CountOrphanedRules(ctx context.Context, network *model
 // ── Ensure chain ──
 // Matches Python IPTablesTracker.ensure_chain().
 
-func (t *IPTablesTracker) EnsureChain(ctx context.Context, chainName model.FirewallChain, table model.FirewallTable, autoJumpFrom string, position int) bool {
+func (t *IPTablesTracker) EnsureChain(
+	ctx context.Context,
+	chainName model.FirewallChain,
+	table model.FirewallTable,
+	autoJumpFrom string,
+	position int,
+) bool {
 	chainNameStr := string(chainName)
 	tableStr := string(table)
 
 	// Check if chain exists
 	checkArgs := []string{"iptables", "-t", tableStr, "-L", chainNameStr, "-n"}
-	checkResult := system.RunCmdCompat(ctx, checkArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+	checkResult := system.RunCmdCompat(
+		ctx,
+		checkArgs,
+		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+	)
 	if checkResult.ExitCode == 0 {
 		slog.Debug("Chain already exists", "chain", chainNameStr)
 		return false
@@ -649,10 +704,19 @@ func (t *IPTablesTracker) EnsureChain(ctx context.Context, chainName model.Firew
 
 	// Create the chain
 	createArgs := []string{"iptables", "-t", tableStr, "-N", chainNameStr}
-	createResult := system.RunCmdCompat(ctx, createArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+	createResult := system.RunCmdCompat(
+		ctx,
+		createArgs,
+		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+	)
 	if createResult.ExitCode != 0 {
 		// Check if chain already exists (race condition)
-		errStr := fmt.Sprintf("command %s failed (exit %d): %s", createArgs[0], createResult.ExitCode, createResult.Stderr)
+		errStr := fmt.Sprintf(
+			"command %s failed (exit %d): %s",
+			createArgs[0],
+			createResult.ExitCode,
+			createResult.Stderr,
+		)
 		if strings.Contains(errStr, "Chain already exists") {
 			slog.Debug("Chain already exists", "chain", chainNameStr)
 			return false
@@ -686,12 +750,21 @@ func (t *IPTablesTracker) EnsureChain(ctx context.Context, chainName model.Firew
 // ── Ensure jump rule ──
 // Matches Python IPTablesTracker.ensure_jump_rule().
 
-func (t *IPTablesTracker) EnsureJumpRule(ctx context.Context, fromChain, toChain string, table model.FirewallTable, position int) model.FirewallRuleResult {
+func (t *IPTablesTracker) EnsureJumpRule(
+	ctx context.Context,
+	fromChain, toChain string,
+	table model.FirewallTable,
+	position int,
+) model.FirewallRuleResult {
 	tableStr := string(table)
 
 	// Check if jump rule exists
 	checkArgs := []string{"iptables", "-t", tableStr, "-C", fromChain, "-j", toChain}
-	checkResult := system.RunCmdCompat(ctx, checkArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+	checkResult := system.RunCmdCompat(
+		ctx,
+		checkArgs,
+		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+	)
 	if checkResult.ExitCode == 0 {
 		slog.Debug("Jump rule already exists", "from", fromChain, "to", toChain)
 		return model.FirewallRuleResult{Success: true}
@@ -703,7 +776,11 @@ func (t *IPTablesTracker) EnsureJumpRule(ctx context.Context, fromChain, toChain
 		"-I", fromChain, strconv.Itoa(position),
 		"-j", toChain,
 	}
-	insertResult := system.RunCmdCompat(ctx, insertArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true})
+	insertResult := system.RunCmdCompat(
+		ctx,
+		insertArgs,
+		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true},
+	)
 	if insertResult.ExitCode != 0 {
 		errMsg := fmt.Sprintf("Failed to add jump rule %s -> %s: %s", fromChain, toChain, insertResult.Stderr)
 		slog.Error("Failed to add jump rule", "from", fromChain, "to", toChain, "error", insertResult.Stderr)
@@ -762,13 +839,21 @@ func (t *IPTablesTracker) Teardown(ctx context.Context) {
 // ── Flush chain ──
 // Matches Python IPTablesTracker.flush_chain().
 
-func (t *IPTablesTracker) FlushChain(ctx context.Context, chainName model.FirewallChain, table model.FirewallTable) bool {
+func (t *IPTablesTracker) FlushChain(
+	ctx context.Context,
+	chainName model.FirewallChain,
+	table model.FirewallTable,
+) bool {
 	chainNameStr := string(chainName)
 	tableStr := string(table)
 
 	// Check if chain exists first
 	checkArgs := []string{"iptables", "-t", tableStr, "-L", chainNameStr, "-n"}
-	checkResult := system.RunCmdCompat(ctx, checkArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+	checkResult := system.RunCmdCompat(
+		ctx,
+		checkArgs,
+		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+	)
 	if checkResult.ExitCode != 0 {
 		slog.Debug("Chain doesn't exist, nothing to flush", "chain", chainNameStr)
 		return false
@@ -776,7 +861,11 @@ func (t *IPTablesTracker) FlushChain(ctx context.Context, chainName model.Firewa
 
 	// Flush the chain in iptables
 	flushArgs := []string{"iptables", "-t", tableStr, "-F", chainNameStr}
-	flushResult := system.RunCmdCompat(ctx, flushArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true})
+	flushResult := system.RunCmdCompat(
+		ctx,
+		flushArgs,
+		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true},
+	)
 	if flushResult.ExitCode != 0 {
 		slog.Warn("Failed to flush chain", "chain", chainNameStr)
 		return false
@@ -804,13 +893,21 @@ func (t *IPTablesTracker) FlushChain(ctx context.Context, chainName model.Firewa
 // ── Remove chain ──
 // Matches Python IPTablesTracker.remove_chain().
 
-func (t *IPTablesTracker) RemoveChain(ctx context.Context, chainName model.FirewallChain, table model.FirewallTable) bool {
+func (t *IPTablesTracker) RemoveChain(
+	ctx context.Context,
+	chainName model.FirewallChain,
+	table model.FirewallTable,
+) bool {
 	chainNameStr := string(chainName)
 	tableStr := string(table)
 
 	// Check if chain exists
 	checkArgs := []string{"iptables", "-t", tableStr, "-L", chainNameStr, "-n"}
-	checkResult := system.RunCmdCompat(ctx, checkArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+	checkResult := system.RunCmdCompat(
+		ctx,
+		checkArgs,
+		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+	)
 	if checkResult.ExitCode != 0 {
 		slog.Debug("Chain doesn't exist, nothing to remove", "chain", chainNameStr)
 		return false
@@ -821,11 +918,18 @@ func (t *IPTablesTracker) RemoveChain(ctx context.Context, chainName model.Firew
 
 	// Delete the chain
 	deleteArgs := []string{"iptables", "-t", tableStr, "-X", chainNameStr}
-	deleteResult := system.RunCmdCompat(ctx, deleteArgs, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true})
+	deleteResult := system.RunCmdCompat(
+		ctx,
+		deleteArgs,
+		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true},
+	)
 	if deleteResult.ExitCode != 0 {
-		slog.Warn("Failed to delete chain",
-			"chain", chainNameStr,
-			"error", fmt.Sprintf("command %s failed (exit %d): %s", deleteArgs[0], deleteResult.ExitCode, deleteResult.Stderr),
+		slog.Warn(
+			"Failed to delete chain",
+			"chain",
+			chainNameStr,
+			"error",
+			fmt.Sprintf("command %s failed (exit %d): %s", deleteArgs[0], deleteResult.ExitCode, deleteResult.Stderr),
 		)
 		return false
 	}

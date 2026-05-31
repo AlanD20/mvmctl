@@ -35,7 +35,10 @@ var imageColumns = []common.ListingColumn{
 		}
 		return "-"
 	}, LongOnly: true},
-	{Header: "Created", Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.ImageItem).CreatedAt, "relative") }},
+	{
+		Header:  "Created",
+		Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.ImageItem).CreatedAt, "relative") },
+	},
 }
 
 // NewImageCmd creates the image management command tree.
@@ -295,13 +298,15 @@ The selector can be a type (e.g. "ubuntu") or type:version (e.g. "ubuntu:24.04")
 	}
 
 	cmd.Flags().StringVar(&imageType, "type", "", "Image type from images.yaml (e.g. ubuntu, debian, firecracker)")
-	cmd.Flags().StringVar(&version, "version", "", "Image spec version from images.yaml (required if multiple images share the same type)")
+	cmd.Flags().
+		StringVar(&version, "version", "", "Image spec version from images.yaml (required if multiple images share the same type)")
 	cmd.Flags().StringVar(&arch, "arch", "", "Image architecture (e.g. x86_64, arm64)")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Re-download even if exists")
 	cmd.Flags().BoolVar(&noCache, "no-cache", false, "Skip cached version listing and fetch live from upstream")
 	cmd.Flags().BoolVarP(&setDefault, "default", "d", false, "Set as default image after download")
 	cmd.Flags().BoolVar(&skipOptimization, "skip-optimization", false, "Skip shrink and compression, keep plain ext4")
-	cmd.Flags().StringVar(&disableDetector, "disable-detector", "", "Comma-separated detectors to disable: type,label,size,filesystem,all")
+	cmd.Flags().
+		StringVar(&disableDetector, "disable-detector", "", "Comma-separated detectors to disable: type,label,size,filesystem,all")
 
 	return cmd
 }
@@ -470,7 +475,22 @@ Examples:
 			formatExplicitlySet := formatFlag != nil && formatFlag.Changed
 			if !formatExplicitlySet || format == "auto" {
 				// Use the centralized format map for values but iterate in Python-compatible order.
-				extOrder := []string{".qcow2", ".raw", ".img", ".ext4", ".ext3", ".ext2", ".btrfs", ".xfs", ".vhd", ".vhdx", ".tar", ".tar.gz", ".tar.xz", ".tgz"}
+				extOrder := []string{
+					".qcow2",
+					".raw",
+					".img",
+					".ext4",
+					".ext3",
+					".ext2",
+					".btrfs",
+					".xfs",
+					".vhd",
+					".vhdx",
+					".tar",
+					".tar.gz",
+					".tar.xz",
+					".tgz",
+				}
 				fname := strings.ToLower(filepath.Base(sourcePath))
 				found := false
 				for _, ext := range extOrder {
@@ -483,7 +503,10 @@ Examples:
 					}
 				}
 				if !found {
-					return fmt.Errorf("Cannot auto-detect format from '%s'. Use --format qcow2|raw|tar-rootfs.", filepath.Base(sourcePath))
+					return fmt.Errorf(
+						"Cannot auto-detect format from '%s'. Use --format qcow2|raw|tar-rootfs.",
+						filepath.Base(sourcePath),
+					)
 				}
 			}
 
@@ -548,7 +571,8 @@ Examples:
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Overwrite existing")
 	cmd.Flags().BoolVarP(&setDefault, "default", "d", false, "Set as default after import")
 	cmd.Flags().BoolVar(&skipOptimization, "skip-optimization", false, "Skip shrink and compression, keep plain ext4")
-	cmd.Flags().StringVar(&disableDetector, "disable-detector", "", "Comma-separated detectors to disable: type,label,size,filesystem,all")
+	cmd.Flags().
+		StringVar(&disableDetector, "disable-detector", "", "Comma-separated detectors to disable: type,label,size,filesystem,all")
 
 	return cmd
 }

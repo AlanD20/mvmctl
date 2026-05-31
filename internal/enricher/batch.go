@@ -25,7 +25,12 @@ type BatchResolveFunc[T any] func(id string) (T, error)
 // BatchResolveParallel resolves multiple IDs in parallel using goroutines.
 // Returns a map from ID to resolved value, collecting all results or errors.
 // Uses parallel.Map for goroutine-based parallelism.
-func BatchResolveParallel[T any](ctx context.Context, ids []string, fn BatchResolveFunc[T], maxWorkers int) map[string]T {
+func BatchResolveParallel[T any](
+	ctx context.Context,
+	ids []string,
+	fn BatchResolveFunc[T],
+	maxWorkers int,
+) map[string]T {
 	// Resolve each ID concurrently; collect results for callers that want partial success.
 	type idResult struct {
 		ID  string

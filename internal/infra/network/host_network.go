@@ -24,7 +24,11 @@ func FindNetworkByName(networks []*model.Network, name string) *model.Network {
 func CheckIPTablesCommentAvailable(ctx context.Context) bool {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	result := system.RunCmdCompat(ctx, []string{"iptables", "-m", "comment", "--comment", "test", "-L"}, system.RunCmdOptions{Check: false})
+	result := system.RunCmdCompat(
+		ctx,
+		[]string{"iptables", "-m", "comment", "--comment", "test", "-L"},
+		system.RunCmdOptions{Check: false},
+	)
 	return result.Success
 }
 

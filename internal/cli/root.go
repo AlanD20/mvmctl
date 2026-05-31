@@ -53,7 +53,11 @@ func NewRootCmd(op *api.Operation) *cobra.Command {
 	originalRunE := cmd.RunE
 	cmd.RunE = func(c *cobra.Command, args []string) error {
 		if showVersion {
-			fmt.Printf("%s %s\n", infra.CLIName, infraversion.FormatVersion(c.Context(), infraversion.GetVersion(c.Context())))
+			fmt.Printf(
+				"%s %s\n",
+				infra.CLIName,
+				infraversion.FormatVersion(c.Context(), infraversion.GetVersion(c.Context())),
+			)
 			return nil
 		}
 		return originalRunE(c, args)
@@ -122,8 +126,12 @@ func makePersistentPreRunE() func(*cobra.Command, []string) error {
 			_, escalated := infra.EnvGet("ESCALATED")
 			if !escalated {
 				common.Cli.Warning(
-					fmt.Sprintf("Warning: running as root. Consider using the '%s' group instead (set up via 'sudo %s host init').",
-						infra.CLIName, infra.CLIName))
+					fmt.Sprintf(
+						"Warning: running as root. Consider using the '%s' group instead (set up via 'sudo %s host init').",
+						infra.CLIName,
+						infra.CLIName,
+					),
+				)
 			}
 		}
 

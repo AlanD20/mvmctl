@@ -25,7 +25,12 @@ func NewProbe() *Probe {
 //
 // Takes detection results as input instead of re-reading system files —
 // detector.go is the single source of truth for all /proc data.
-func (p *Probe) RunAll(ctx context.Context, hardware *model.HostHardware, limits *model.HostLimits, resources *model.HostResources) *model.ProbeResult {
+func (p *Probe) RunAll(
+	ctx context.Context,
+	hardware *model.HostHardware,
+	limits *model.HostLimits,
+	resources *model.HostResources,
+) *model.ProbeResult {
 	result := &model.ProbeResult{}
 
 	for _, check := range p.checkVMHost(hardware, limits, resources) {
@@ -66,7 +71,11 @@ func (p *Probe) RunAll(ctx context.Context, hardware *model.HostHardware, limits
 // checkVMHost checks KVM and VM host prerequisites using pre-detected data.
 // Matches Python's HostProbe.check_vm_host() exactly.
 // No file I/O — all data comes from detector.go models.
-func (p *Probe) checkVMHost(hardware *model.HostHardware, limits *model.HostLimits, resources *model.HostResources) []model.ProbeCheck {
+func (p *Probe) checkVMHost(
+	hardware *model.HostHardware,
+	limits *model.HostLimits,
+	resources *model.HostResources,
+) []model.ProbeCheck {
 	var checks []model.ProbeCheck
 
 	// --- CPU virtualization support (VMX/SVM) ---
@@ -258,7 +267,11 @@ func (p *Probe) checkFirewallReadiness(ctx context.Context, resources *model.Hos
 
 // checkSystemResources checks system resource thresholds.
 // Matches Python's HostProbe.check_system_resources().
-func (p *Probe) checkSystemResources(hardware *model.HostHardware, limits *model.HostLimits, resources *model.HostResources) []model.ProbeCheck {
+func (p *Probe) checkSystemResources(
+	hardware *model.HostHardware,
+	limits *model.HostLimits,
+	resources *model.HostResources,
+) []model.ProbeCheck {
 	var checks []model.ProbeCheck
 
 	// Swap check
