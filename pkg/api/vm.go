@@ -51,7 +51,11 @@ import (
 
 // Create creates one or more VMs.
 // Matches Python's VMOperation.create() exactly.
-func (op *Operation) VMCreate(ctx context.Context, input *inputs.VMCreateInput, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
+func (op *Operation) VMCreate(
+	ctx context.Context,
+	input *inputs.VMCreateInput,
+	onProgress func(errs.ProgressEvent),
+) *errs.OperationResult {
 	if err := system.CheckPrivileges("/usr/sbin/ip", "create VMs"); err != nil {
 		return &errs.OperationResult{
 			Status: "error", Code: string(errs.CodePrivilegeRequired),
@@ -72,7 +76,11 @@ func (op *Operation) VMCreate(ctx context.Context, input *inputs.VMCreateInput, 
 	return op.vmCreateBatch(ctx, input, count, onProgress)
 }
 
-func (op *Operation) vmCreateSingle(ctx context.Context, input *inputs.VMCreateInput, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
+func (op *Operation) vmCreateSingle(
+	ctx context.Context,
+	input *inputs.VMCreateInput,
+	onProgress func(errs.ProgressEvent),
+) *errs.OperationResult {
 	createdAt := time.Now()
 	vmID := infra.HashGenerator{}.VM(input.Name, createdAt.Format(time.RFC3339))
 	vmDir := filepath.Join(op.CacheDir, "vms", vmID)
@@ -158,7 +166,12 @@ func (op *Operation) vmCreateSingle(ctx context.Context, input *inputs.VMCreateI
 	}
 }
 
-func (op *Operation) vmCreateBatch(ctx context.Context, input *inputs.VMCreateInput, count int, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
+func (op *Operation) vmCreateBatch(
+	ctx context.Context,
+	input *inputs.VMCreateInput,
+	count int,
+	onProgress func(errs.ProgressEvent),
+) *errs.OperationResult {
 	names := op.vmGenerateBatchNames(input.Name, count)
 
 	// Pre-allocate: check name collisions (single query, matching Python)
@@ -199,9 +212,14 @@ func (op *Operation) vmCreateBatch(ctx context.Context, input *inputs.VMCreateIn
 					_ = op.VMRemove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: ptr.Bool(true)})
 				}
 				return &errs.OperationResult{
-					Status: "error", Code: "vm.atomic_failed",
-					Message: fmt.Sprintf("Atomic creation failed at '%s': %v. All %d previously created VMs have been removed.",
-						name, err, len(createdVMs)),
+					Status: "error",
+					Code:   "vm.atomic_failed",
+					Message: fmt.Sprintf(
+						"Atomic creation failed at '%s': %v. All %d previously created VMs have been removed.",
+						name,
+						err,
+						len(createdVMs),
+					),
 				}
 			}
 			continue
@@ -225,9 +243,14 @@ func (op *Operation) vmCreateBatch(ctx context.Context, input *inputs.VMCreateIn
 					_ = op.VMRemove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: ptr.Bool(true)})
 				}
 				return &errs.OperationResult{
-					Status: "error", Code: "vm.atomic_failed",
-					Message: fmt.Sprintf("Atomic creation failed at '%s': %v. All %d previously created VMs have been removed.",
-						name, execErr, len(createdVMs)),
+					Status: "error",
+					Code:   "vm.atomic_failed",
+					Message: fmt.Sprintf(
+						"Atomic creation failed at '%s': %v. All %d previously created VMs have been removed.",
+						name,
+						execErr,
+						len(createdVMs),
+					),
 				}
 			}
 			continue
@@ -276,18 +299,30 @@ func (op *Operation) vmCreateBatch(ctx context.Context, input *inputs.VMCreateIn
 	}
 }
 
-func (op *Operation) vmExecuteCreate(ctx context.Context, resolved *resolvedVMCreateInput, onProgress func(errs.ProgressEvent), cleanupFn *func()) (*model.VM, error) {
+func (op *Operation) vmExecuteCreate(
+	ctx context.Context,
+	resolved *resolvedVMCreateInput,
+	onProgress func(errs.ProgressEvent),
+	cleanupFn *func(),
+) (*model.VM, error) {
 	return op.vmExecuteCreateWithOpts(ctx, resolved, onProgress, cleanupFn, false)
 }
 
-func (op *Operation) vmExecuteCreateWithOpts(ctx context.Context, resolved *resolvedVMCreateInput, onProgress func(errs.ProgressEvent), cleanupFn *func(), skipLimitCheck bool) (*model.VM, error) {
+func (op *Operation) vmExecuteCreateWithOpts(
+	ctx context.Context,
+	resolved *resolvedVMCreateInput,
+	onProgress func(errs.ProgressEvent),
+	cleanupFn *func(),
+	skipLimitCheck bool,
+) (*model.VM, error) {
 	vmRepo := op.Repos.VM
 
 	// Check VM limit (Python: SettingsService.resolve(Database(), "settings.vm", "max_vms"))
 	if !skipLimitCheck {
 		maxVMs := 10
 		if op.Connection != nil {
-			row := op.Connection.DB().QueryRowContext(ctx, "SELECT value FROM user_settings WHERE category = 'settings.vm' AND key = 'max_vms'")
+			row := op.Connection.DB().
+				QueryRowContext(ctx, "SELECT value FROM user_settings WHERE category = 'settings.vm' AND key = 'max_vms'")
 			var val string
 			if err := row.Scan(&val); err == nil {
 				if n, err := strconv.Atoi(val); err == nil && n > 0 {
@@ -403,7 +438,13 @@ func (op *Operation) VMRemove(ctx context.Context, input *inputs.VMInput) *errs.
 	// Report identifiers that couldn't be resolved (matches Python's logger.warning + error result)
 	unresolvedCount := len(input.Identifiers) - len(resolved.VMs)
 	if unresolvedCount > 0 {
-		slog.Warn("VM rm: identifier(s) could not be resolved", "unresolved", unresolvedCount, "total", len(input.Identifiers))
+		slog.Warn(
+			"VM rm: identifier(s) could not be resolved",
+			"unresolved",
+			unresolvedCount,
+			"total",
+			len(input.Identifiers),
+		)
 		results = append(results, errs.OperationResult{
 			Status: "error", Code: string(errs.CodeVMNotFound),
 			Message: fmt.Sprintf("%d VM identifier(s) not found", unresolvedCount),
@@ -488,7 +529,11 @@ func (op *Operation) vmPerformRemovalCleanup(ctx context.Context, vm *model.VM) 
 
 	// SSH known hosts cleanup (matches Python's ssh-keygen -R {ipv4})
 	if vm.IPv4 != "" {
-		_ = system.RunCmdCompat(ctx, []string{"ssh-keygen", "-R", vm.IPv4}, system.RunCmdOptions{Check: false, Capture: false})
+		_ = system.RunCmdCompat(
+			ctx,
+			[]string{"ssh-keygen", "-R", vm.IPv4},
+			system.RunCmdOptions{Check: false, Capture: false},
+		)
 	}
 }
 
@@ -1186,7 +1231,12 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snap
 // Snapshot creates a snapshot of a single VM (matches Python's VMOperation.snapshot() exactly).
 // Python resolves exactly one VM, returns item=vm in all cases (success, error, failure).
 // memFile and stateFile are output paths for the snapshot files (matches Python's mem_out, state_out).
-func (op *Operation) VMSnapshot(ctx context.Context, input *inputs.VMInput, memFile string, stateFile string) *errs.OperationResult {
+func (op *Operation) VMSnapshot(
+	ctx context.Context,
+	input *inputs.VMInput,
+	memFile string,
+	stateFile string,
+) *errs.OperationResult {
 	// Python: resolved = VMRequest(inputs=inputs, db=Database()).resolve()
 	//         if len(resolved.vms) != 1: raise VMNotFoundError
 	vmItem, err := op.vmResolveSingleVM(ctx, input.Identifiers[0])
@@ -1236,7 +1286,13 @@ func (op *Operation) VMSnapshot(ctx context.Context, input *inputs.VMInput, memF
 // Matches Python's VMOperation.load_snapshot() exactly:
 //   - re-reads VM after respawn (Python: repo.get(vm.id) → updated)
 //   - catches MVMError → status="error", Exception → status="failure", item=vm
-func (op *Operation) VMLoad(ctx context.Context, input *inputs.VMInput, memFile string, stateFile string, resume bool) *errs.OperationResult {
+func (op *Operation) VMLoad(
+	ctx context.Context,
+	input *inputs.VMInput,
+	memFile string,
+	stateFile string,
+	resume bool,
+) *errs.OperationResult {
 	repo := op.Repos.VM
 
 	// Validate only one VM for load (matches Python's exactly one VM identifier check)
@@ -1536,7 +1592,11 @@ func (op *Operation) VMResume(ctx context.Context, input *inputs.VMInput) *errs.
 //   - VolumeResolver for volume resolution
 //   - Version gate for hotplug
 //   - VolumeController.attach + VM volume_ids update
-func (op *Operation) VMAttachVolume(ctx context.Context, input *inputs.VMInput, volumeName string) *errs.OperationResult {
+func (op *Operation) VMAttachVolume(
+	ctx context.Context,
+	input *inputs.VMInput,
+	volumeName string,
+) *errs.OperationResult {
 	if err := system.CheckPrivileges("/usr/sbin/ip", "attach volume"); err != nil {
 		return &errs.OperationResult{
 			Status: "error", Code: string(errs.CodePrivilegeRequired),
@@ -1599,8 +1659,10 @@ func (op *Operation) VMAttachVolume(ctx context.Context, input *inputs.VMInput, 
 						Status: "error",
 						Code:   string(errs.CodeBinaryVersionGate),
 						Item:   vmItem,
-						Message: fmt.Sprintf("Volume hotplug requires Firecracker >= 1.16, got %s. Use a newer Firecracker binary or attach the volume while the VM is stopped.",
-							bin.Version),
+						Message: fmt.Sprintf(
+							"Volume hotplug requires Firecracker >= 1.16, got %s. Use a newer Firecracker binary or attach the volume while the VM is stopped.",
+							bin.Version,
+						),
 					}
 				}
 			}
@@ -1656,7 +1718,11 @@ func (op *Operation) VMAttachVolume(ctx context.Context, input *inputs.VMInput, 
 //   - VolumeResolver for volume resolution
 //   - Version gate + SSH PCI removal + Firecracker API for hot-unplug
 //   - VolumeController.detach + VM volume_ids update
-func (op *Operation) VMDetachVolume(ctx context.Context, input *inputs.VMInput, volumeName string) *errs.OperationResult {
+func (op *Operation) VMDetachVolume(
+	ctx context.Context,
+	input *inputs.VMInput,
+	volumeName string,
+) *errs.OperationResult {
 	if err := system.CheckPrivileges("/usr/sbin/ip", "detach volume"); err != nil {
 		return &errs.OperationResult{
 			Status: "error", Code: string(errs.CodePrivilegeRequired),
@@ -1711,8 +1777,10 @@ func (op *Operation) VMDetachVolume(ctx context.Context, input *inputs.VMInput, 
 						Status: "error",
 						Code:   string(errs.CodeBinaryVersionGate),
 						Item:   vmItem,
-						Message: fmt.Sprintf("Volume hot-unplug requires Firecracker >= 1.16, got %s. Use a newer Firecracker binary or detach the volume while the VM is stopped.",
-							bin.Version),
+						Message: fmt.Sprintf(
+							"Volume hot-unplug requires Firecracker >= 1.16, got %s. Use a newer Firecracker binary or detach the volume while the VM is stopped.",
+							bin.Version,
+						),
 					}
 				}
 			}
@@ -1816,7 +1884,11 @@ func (op *Operation) VMDetachVolume(ctx context.Context, input *inputs.VMInput, 
 //   - Delegates to VMCreateBuilder for full resolution
 //   - Delegates to executeCreate for provisioning
 //   - Matches Python's try/except MVMError → "error", Exception → "failure"
-func (op *Operation) VMImport(ctx context.Context, input *inputs.VMImportInput, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
+func (op *Operation) VMImport(
+	ctx context.Context,
+	input *inputs.VMImportInput,
+	onProgress func(errs.ProgressEvent),
+) *errs.OperationResult {
 	if err := system.CheckPrivileges("/usr/sbin/ip", "import VM"); err != nil {
 		return &errs.OperationResult{
 			Status: "error", Code: string(errs.CodePrivilegeRequired),
@@ -2380,7 +2452,9 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 
 	// Progress: firecracker
 	if c.onProgress != nil {
-		c.onProgress(errs.ProgressEvent{Phase: "firecracker", Status: "running", Message: "Starting Firecracker microVM..."})
+		c.onProgress(
+			errs.ProgressEvent{Phase: "firecracker", Status: "running", Message: "Starting Firecracker microVM..."},
+		)
 	}
 
 	// --- Firecracker config ---
@@ -2397,8 +2471,12 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 	// Validate socket path won't exceed Unix domain socket limit
 	socketPath := spawner.APISocketPath()
 	if len(socketPath) >= 108 {
-		return fmt.Errorf("VM ID '%s' produces a socket path that is too long (%d chars, max 107). This is a system limit for Unix domain sockets. Path: %s",
-			c.vmID, len(socketPath), socketPath)
+		return fmt.Errorf(
+			"VM ID '%s' produces a socket path that is too long (%d chars, max 107). This is a system limit for Unix domain sockets. Path: %s",
+			c.vmID,
+			len(socketPath),
+			socketPath,
+		)
 	}
 
 	// Console relay setup (before spawn)
@@ -2658,7 +2736,16 @@ func (c *vmCreateContext) respawnExecute(ctx context.Context) error {
 			port = *c._vm.NocloudNetPort
 		}
 		if port == 0 || (c._vm.NocloudNetPID != nil && !system.IsProcessRunning(*c._vm.NocloudNetPID)) {
-			nocloudSvc := nocloudnet.NewNoCloudServer(c._vm.ID, c._vm.Name, c.vmDir, netItem.IPv4Gateway, port, 8000, 9000, 100)
+			nocloudSvc := nocloudnet.NewNoCloudServer(
+				c._vm.ID,
+				c._vm.Name,
+				c.vmDir,
+				netItem.IPv4Gateway,
+				port,
+				8000,
+				9000,
+				100,
+			)
 			if _, newPort, _, startErr := nocloudSvc.Start(ctx, c.vmDir); startErr != nil {
 				slog.Warn("Failed to start/restart nocloud-net server", "vm", c._vm.Name, "error", startErr)
 			} else if port == 0 {
@@ -2902,7 +2989,11 @@ func (c *vmCreateContext) toModel() *model.VM {
 	return vm
 }
 
-func (op *Operation) vmBuildResolvedInput(ctx context.Context, input *inputs.VMCreateInput, vmID, vmDir string) (*resolvedVMCreateInput, error) {
+func (op *Operation) vmBuildResolvedInput(
+	ctx context.Context,
+	input *inputs.VMCreateInput,
+	vmID, vmDir string,
+) (*resolvedVMCreateInput, error) {
 	imageRepo := image.NewRepository(op.Connection.DB())
 	kernelRepo := kernel.NewRepository(op.Connection.DB())
 	netRepo := network.NewRepository(op.Connection.DB())
@@ -3071,7 +3162,8 @@ func (op *Operation) vmBuildResolvedInput(ctx context.Context, input *inputs.VMC
 	// Resolve provisioner type from settings (matches Python)
 	provisionerType := provisioner.ProvisionerLoopMount
 	if op.Connection != nil {
-		row := op.Connection.DB().QueryRowContext(ctx, "SELECT value FROM user_settings WHERE category = 'settings' AND key = 'guestfs_enabled'")
+		row := op.Connection.DB().
+			QueryRowContext(ctx, "SELECT value FROM user_settings WHERE category = 'settings' AND key = 'guestfs_enabled'")
 		var val string
 		if err := row.Scan(&val); err == nil {
 			if val == "true" || val == "1" {
@@ -3089,7 +3181,10 @@ func (op *Operation) vmBuildResolvedInput(ctx context.Context, input *inputs.VMC
 			sshKeyItems = append(sshKeyItems, key)
 		} else {
 			// Fall back: create a minimal item with just the name
-			sshKeyItems = append(sshKeyItems, &model.SSHKeyItem{Name: name, PublicKeyPath: filepath.Join(infra.GetKeyDir(), name+".pub")})
+			sshKeyItems = append(
+				sshKeyItems,
+				&model.SSHKeyItem{Name: name, PublicKeyPath: filepath.Join(infra.GetKeyDir(), name+".pub")},
+			)
 		}
 	}
 
@@ -3143,7 +3238,11 @@ func (op *Operation) vmBuildResolvedInput(ctx context.Context, input *inputs.VMC
 
 // resolveBinary resolves the firecracker binary from DB or falls back to hardcoded path.
 // Matches Python's VMCreateRequest binary resolution: tries explicit ID/path, then default, then fallback.
-func (op *Operation) vmResolveBinary(ctx context.Context, binaryID, firecrackerBin *string, binaryRepo binary.Repository) *model.BinaryItem {
+func (op *Operation) vmResolveBinary(
+	ctx context.Context,
+	binaryID, firecrackerBin *string,
+	binaryRepo binary.Repository,
+) *model.BinaryItem {
 	// 1. Explicit binary ID from input
 	if binaryID != nil && *binaryID != "" {
 		bin, err := binaryRepo.Get(ctx, *binaryID)

@@ -50,8 +50,13 @@ func (r *sqliteRepo) ListByName(ctx context.Context, name string) ([]*model.Bina
 
 func (r *sqliteRepo) GetByNameAndVersion(ctx context.Context, name, version string) (*model.BinaryItem, error) {
 	var b model.BinaryItem
-	err := r.db.GetContext(ctx, &b,
-		`SELECT * FROM binaries WHERE name = ? AND version = ? AND deleted_at IS NULL AND is_present = 1`, name, version)
+	err := r.db.GetContext(
+		ctx,
+		&b,
+		`SELECT * FROM binaries WHERE name = ? AND version = ? AND deleted_at IS NULL AND is_present = 1`,
+		name,
+		version,
+	)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

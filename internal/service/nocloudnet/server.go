@@ -48,7 +48,11 @@ type NoCloudServer struct {
 // NewNoCloudServer creates a new NoCloudServer manager.
 // Matches Python's NoCloudNetServerManager.__init__().
 // If port is 0, auto-allocation from the range [portRangeStart, portRangeEnd] is used.
-func NewNoCloudServer(id, name, path, host string, port int, portRangeStart, portRangeEnd, maxRetries int) *NoCloudServer {
+func NewNoCloudServer(
+	id, name, path, host string,
+	port int,
+	portRangeStart, portRangeEnd, maxRetries int,
+) *NoCloudServer {
 	if portRangeEnd <= portRangeStart {
 		slog.Warn("Invalid port range, adjusting end to start+1",
 			"port_range_end", portRangeEnd,
@@ -341,7 +345,10 @@ func ServeNoCloudHTTP(ctx context.Context, args []string) {
 		}
 	}
 	if cloudInitDir == "" || host == "" || port == 0 || pidFile == "" || logFile == "" {
-		fmt.Fprintf(os.Stderr, "Error: Missing required arguments. Usage: _nocloud_serve --cloud-init-dir DIR --port PORT --host HOST --pid-file PIDFILE --log-file LOGFILE\n")
+		fmt.Fprintf(
+			os.Stderr,
+			"Error: Missing required arguments. Usage: _nocloud_serve --cloud-init-dir DIR --port PORT --host HOST --pid-file PIDFILE --log-file LOGFILE\n",
+		)
 		os.Exit(1)
 	}
 	// Validate cloud-init directory (matches Python's process.py main())

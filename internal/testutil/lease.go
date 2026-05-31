@@ -95,7 +95,12 @@ func (r *LeaseRepo) ListAllBatch(_ context.Context, networkIDs []string) ([]*mod
 	return result, nil
 }
 
-func (r *LeaseRepo) Acquire(_ context.Context, networkID string, ipv4 string, vmID *string) (*model.NetworkLeaseItem, error) {
+func (r *LeaseRepo) Acquire(
+	_ context.Context,
+	networkID string,
+	ipv4 string,
+	vmID *string,
+) (*model.NetworkLeaseItem, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

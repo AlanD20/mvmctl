@@ -52,8 +52,11 @@ func RequireMvmGroupMembership() error {
 	if err != nil {
 		// Python: logger.warning("Group '%s' does not exist. ...")
 		// slog routes to the configured logging infrastructure (stderr + file).
-		slog.Warn("Group does not exist. Run 'sudo mvm host init' to set up privilege management and avoid password prompts.",
-			"group", groupName)
+		slog.Warn(
+			"Group does not exist. Run 'sudo mvm host init' to set up privilege management and avoid password prompts.",
+			"group",
+			groupName,
+		)
 		_mvmGroupMu.Lock()
 		_mvmGroupVerified = true
 		_mvmGroupMu.Unlock()
@@ -89,8 +92,13 @@ func RequireMvmGroupMembership() error {
 
 	if !(isSupplementaryMember || isPrimaryGroup) {
 		// Python: logger.warning("User '%s' is not in the '%s' group. ...")
-		slog.Warn("User is not in the mvm group. Run 'sudo mvm host init' to configure privileges, then 'newgrp' or log out and back in.",
-			"user", username, "group", groupName)
+		slog.Warn(
+			"User is not in the mvm group. Run 'sudo mvm host init' to configure privileges, then 'newgrp' or log out and back in.",
+			"user",
+			username,
+			"group",
+			groupName,
+		)
 	}
 
 	// -- Check 2: does THIS session have the group active? --
@@ -108,8 +116,11 @@ func RequireMvmGroupMembership() error {
 	if _, ok := processGIDs[g.Gid]; !ok {
 		// Python: logger.warning("Your user is in the '%s' group, but your
 		//          current session does not have the group active yet. ...")
-		slog.Warn("User is in the mvm group but current session does not have the group active. Log out and back in, or run 'newgrp'.",
-			"group", groupName)
+		slog.Warn(
+			"User is in the mvm group but current session does not have the group active. Log out and back in, or run 'newgrp'.",
+			"group",
+			groupName,
+		)
 	}
 
 	_mvmGroupMu.Lock()

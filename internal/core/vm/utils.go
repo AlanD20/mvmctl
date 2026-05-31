@@ -36,7 +36,13 @@ func executeSeq[T, R any](items []T, fn func(T) R) []executorItem[T, R] {
 
 // executePar runs functions in parallel using a worker pool.
 // Matches Python's ParallelExecutor._execute_batch() + _parallel().
-func executePar[T, R any](ctx context.Context, items []T, fn func(T) R, maxWorkers int, batchSize int) []executorItem[T, R] {
+func executePar[T, R any](
+	ctx context.Context,
+	items []T,
+	fn func(T) R,
+	maxWorkers int,
+	batchSize int,
+) []executorItem[T, R] {
 	var allResults []executorItem[T, R]
 
 	for i := 0; i < len(items); i += batchSize {
@@ -46,10 +52,15 @@ func executePar[T, R any](ctx context.Context, items []T, fn func(T) R, maxWorke
 		}
 		batch := items[i:end]
 
-		batchResults, _ := parallel.Map(ctx, maxWorkers, batch, func(_ context.Context, it T) (executorItem[T, R], error) {
-			res := fn(it)
-			return executorItem[T, R]{Item: it, Result: res}, nil
-		})
+		batchResults, _ := parallel.Map(
+			ctx,
+			maxWorkers,
+			batch,
+			func(_ context.Context, it T) (executorItem[T, R], error) {
+				res := fn(it)
+				return executorItem[T, R]{Item: it, Result: res}, nil
+			},
+		)
 
 		allResults = append(allResults, batchResults...)
 	}

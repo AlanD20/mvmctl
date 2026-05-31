@@ -145,7 +145,11 @@ func (m *Manager) CreateSeedISO(ctx context.Context, cloudInitDir, outputISO str
 	// Python's ProcessError message format:
 	//   "Command failed (exit N): cloud-localds\n[sanitized_stderr]"
 	// where sanitized_stderr is trimmed and limited to 100 chars.
-	result := system.RunCmdCompat(ctx, append([]string{requiredISOTool}, args...), system.RunCmdOptions{Capture: true, Check: false})
+	result := system.RunCmdCompat(
+		ctx,
+		append([]string{requiredISOTool}, args...),
+		system.RunCmdOptions{Capture: true, Check: false},
+	)
 	if !result.Success {
 		exitCode := result.ExitCode
 		stderr := strings.TrimSpace(result.Stderr)
@@ -229,8 +233,10 @@ func (m *Manager) parseCustomUserData() error {
 
 	// Warn about "network" key in custom user-data — cloud-init will process it
 	if _, hasNetwork := customUserdata["network"]; hasNetwork {
-		slog.Warn("Custom user-data already contains 'network' key; cloud-init network stage will apply it. Ensure this is intentional.",
-			"vm_name", m.config.VMName,
+		slog.Warn(
+			"Custom user-data already contains 'network' key; cloud-init network stage will apply it. Ensure this is intentional.",
+			"vm_name",
+			m.config.VMName,
 		)
 	}
 

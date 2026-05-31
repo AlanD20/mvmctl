@@ -5,9 +5,9 @@ package model
 // Setting represents a row in the user_settings table.
 // Value is stored as JSON in the DB and parsed on read.
 type Setting struct {
-	Category  string `json:"category" db:"category"`
-	Key       string `json:"key" db:"key"`
-	Value     string `json:"value" db:"value"`           // Raw JSON string from DB; callers json.Unmarshal to get the actual value
+	Category  string `json:"category"   db:"category"`
+	Key       string `json:"key"        db:"key"`
+	Value     string `json:"value"      db:"value"`      // Raw JSON string from DB; callers json.Unmarshal to get the actual value
 	UpdatedAt string `json:"updated_at" db:"updated_at"` // ISO timestamp from CURRENT_TIMESTAMP
 }
 

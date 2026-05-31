@@ -168,7 +168,10 @@ func (r *sqliteRepo) GetByNetworkIDs(ctx context.Context, networkIDs []string) (
 		placeholders[i] = "?"
 		args[i] = nid
 	}
-	rows, err := r.db.QueryxContext(ctx, vmBaseQuery+" WHERE network_id IN ("+strings.Join(placeholders, ",")+")", args...)
+	rows, err := r.db.QueryxContext(
+		ctx,
+		vmBaseQuery+" WHERE network_id IN ("+strings.Join(placeholders, ",")+")",
+		args...)
 	if err != nil {
 		return nil, fmt.Errorf("get vms by network ids: %w", err)
 	}
@@ -219,7 +222,10 @@ func (r *sqliteRepo) GetByKernelIDs(ctx context.Context, kernelIDs []string) ([]
 		placeholders[i] = "?"
 		args[i] = kid
 	}
-	rows, err := r.db.QueryxContext(ctx, vmBaseQuery+" WHERE kernel_id IN ("+strings.Join(placeholders, ",")+")", args...)
+	rows, err := r.db.QueryxContext(
+		ctx,
+		vmBaseQuery+" WHERE kernel_id IN ("+strings.Join(placeholders, ",")+")",
+		args...)
 	if err != nil {
 		return nil, fmt.Errorf("get vms by kernel ids: %w", err)
 	}
@@ -270,7 +276,10 @@ func (r *sqliteRepo) GetByBinaryIDs(ctx context.Context, binaryIDs []string) ([]
 		placeholders[i] = "?"
 		args[i] = bid
 	}
-	rows, err := r.db.QueryxContext(ctx, vmBaseQuery+" WHERE binary_id IN ("+strings.Join(placeholders, ",")+")", args...)
+	rows, err := r.db.QueryxContext(
+		ctx,
+		vmBaseQuery+" WHERE binary_id IN ("+strings.Join(placeholders, ",")+")",
+		args...)
 	if err != nil {
 		return nil, fmt.Errorf("get vms by binary ids: %w", err)
 	}
@@ -300,7 +309,10 @@ func (r *sqliteRepo) GetByImageIDs(ctx context.Context, imageIDs []string) ([]*m
 		placeholders[i] = "?"
 		args[i] = iid
 	}
-	rows, err := r.db.QueryxContext(ctx, vmBaseQuery+" WHERE image_id IN ("+strings.Join(placeholders, ",")+")", args...)
+	rows, err := r.db.QueryxContext(
+		ctx,
+		vmBaseQuery+" WHERE image_id IN ("+strings.Join(placeholders, ",")+")",
+		args...)
 	if err != nil {
 		return nil, fmt.Errorf("get vms by image ids: %w", err)
 	}
@@ -614,25 +626,46 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VM) error {
 
 func (r *sqliteRepo) UpdateStatus(ctx context.Context, id string, status model.Status) error {
 	// Python: "UPDATE vm_instances SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
-	_, err := r.db.ExecContext(ctx, "UPDATE vm_instances SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", status, id)
+	_, err := r.db.ExecContext(
+		ctx,
+		"UPDATE vm_instances SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		status,
+		id,
+	)
 	return err
 }
 
 func (r *sqliteRepo) UpdatePID(ctx context.Context, id string, pid *int) error {
 	// Python: "UPDATE vm_instances SET pid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
-	_, err := r.db.ExecContext(ctx, "UPDATE vm_instances SET pid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", pid, id)
+	_, err := r.db.ExecContext(
+		ctx,
+		"UPDATE vm_instances SET pid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		pid,
+		id,
+	)
 	return err
 }
 
 func (r *sqliteRepo) UpdateProcessInfo(ctx context.Context, id string, pid *int, processStartTime *int64) error {
 	// Python: "UPDATE vm_instances SET pid = ?, process_start_time = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
-	_, err := r.db.ExecContext(ctx, "UPDATE vm_instances SET pid = ?, process_start_time = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", pid, processStartTime, id)
+	_, err := r.db.ExecContext(
+		ctx,
+		"UPDATE vm_instances SET pid = ?, process_start_time = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		pid,
+		processStartTime,
+		id,
+	)
 	return err
 }
 
 func (r *sqliteRepo) UpdateExitCode(ctx context.Context, id string, exitCode int) error {
 	// Python: "UPDATE vm_instances SET exit_code = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
-	_, err := r.db.ExecContext(ctx, "UPDATE vm_instances SET exit_code = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", exitCode, id)
+	_, err := r.db.ExecContext(
+		ctx,
+		"UPDATE vm_instances SET exit_code = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		exitCode,
+		id,
+	)
 	return err
 }
 
@@ -653,7 +686,10 @@ func (r *sqliteRepo) DeleteMany(ctx context.Context, ids []string) (int, error) 
 		placeholders[i] = "?"
 		args[i] = id
 	}
-	result, err := r.db.ExecContext(ctx, "DELETE FROM vm_instances WHERE id IN ("+strings.Join(placeholders, ",")+")", args...)
+	result, err := r.db.ExecContext(
+		ctx,
+		"DELETE FROM vm_instances WHERE id IN ("+strings.Join(placeholders, ",")+")",
+		args...)
 	if err != nil {
 		return 0, err
 	}

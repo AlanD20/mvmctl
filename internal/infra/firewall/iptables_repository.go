@@ -26,10 +26,18 @@ func (r *IPTablesRuleRepository) ListAll(ctx context.Context) ([]*model.Firewall
 
 func (r *IPTablesRuleRepository) ListByNetworkID(ctx context.Context, networkID string) ([]*model.FirewallRule, error) {
 	var rules []*model.FirewallRule
-	return rules, r.db.SelectContext(ctx, &rules, "SELECT * FROM iptables_rules WHERE network_id = ? ORDER BY id", networkID)
+	return rules, r.db.SelectContext(
+		ctx,
+		&rules,
+		"SELECT * FROM iptables_rules WHERE network_id = ? ORDER BY id",
+		networkID,
+	)
 }
 
-func (r *IPTablesRuleRepository) ListByNetworkIDBatch(ctx context.Context, networkIDs []string) ([]*model.FirewallRule, error) {
+func (r *IPTablesRuleRepository) ListByNetworkIDBatch(
+	ctx context.Context,
+	networkIDs []string,
+) ([]*model.FirewallRule, error) {
 	if len(networkIDs) == 0 {
 		return nil, nil
 	}
@@ -51,28 +59,72 @@ func (r *IPTablesRuleRepository) Get(ctx context.Context, ruleID int64) (*model.
 	return &rule, err
 }
 
-func (r *IPTablesRuleRepository) GetByNetworkID(ctx context.Context, networkID string, activeOnly bool) ([]*model.FirewallRule, error) {
+func (r *IPTablesRuleRepository) GetByNetworkID(
+	ctx context.Context,
+	networkID string,
+	activeOnly bool,
+) ([]*model.FirewallRule, error) {
 	var rules []*model.FirewallRule
 	if activeOnly {
-		return rules, r.db.SelectContext(ctx, &rules, "SELECT * FROM iptables_rules WHERE network_id = ? AND is_active = 1", networkID)
+		return rules, r.db.SelectContext(
+			ctx,
+			&rules,
+			"SELECT * FROM iptables_rules WHERE network_id = ? AND is_active = 1",
+			networkID,
+		)
 	}
 	return rules, r.db.SelectContext(ctx, &rules, "SELECT * FROM iptables_rules WHERE network_id = ?", networkID)
 }
 
-func (r *IPTablesRuleRepository) GetByNetworkIDAndInterface(ctx context.Context, networkID string, iface string, activeOnly bool) ([]*model.FirewallRule, error) {
+func (r *IPTablesRuleRepository) GetByNetworkIDAndInterface(
+	ctx context.Context,
+	networkID string,
+	iface string,
+	activeOnly bool,
+) ([]*model.FirewallRule, error) {
 	var rules []*model.FirewallRule
 	if activeOnly {
-		return rules, r.db.SelectContext(ctx, &rules, "SELECT * FROM iptables_rules WHERE network_id = ? AND is_active = 1 AND (in_interface = ? OR out_interface = ?)", networkID, iface, iface)
+		return rules, r.db.SelectContext(
+			ctx,
+			&rules,
+			"SELECT * FROM iptables_rules WHERE network_id = ? AND is_active = 1 AND (in_interface = ? OR out_interface = ?)",
+			networkID,
+			iface,
+			iface,
+		)
 	}
-	return rules, r.db.SelectContext(ctx, &rules, "SELECT * FROM iptables_rules WHERE network_id = ? AND (in_interface = ? OR out_interface = ?)", networkID, iface, iface)
+	return rules, r.db.SelectContext(
+		ctx,
+		&rules,
+		"SELECT * FROM iptables_rules WHERE network_id = ? AND (in_interface = ? OR out_interface = ?)",
+		networkID,
+		iface,
+		iface,
+	)
 }
 
-func (r *IPTablesRuleRepository) GetByTableChainName(ctx context.Context, tableName, chainName string, activeOnly bool) ([]*model.FirewallRule, error) {
+func (r *IPTablesRuleRepository) GetByTableChainName(
+	ctx context.Context,
+	tableName, chainName string,
+	activeOnly bool,
+) ([]*model.FirewallRule, error) {
 	var rules []*model.FirewallRule
 	if activeOnly {
-		return rules, r.db.SelectContext(ctx, &rules, "SELECT * FROM iptables_rules WHERE table_name = ? AND chain_name = ? AND is_active = 1", tableName, chainName)
+		return rules, r.db.SelectContext(
+			ctx,
+			&rules,
+			"SELECT * FROM iptables_rules WHERE table_name = ? AND chain_name = ? AND is_active = 1",
+			tableName,
+			chainName,
+		)
 	}
-	return rules, r.db.SelectContext(ctx, &rules, "SELECT * FROM iptables_rules WHERE table_name = ? AND chain_name = ?", tableName, chainName)
+	return rules, r.db.SelectContext(
+		ctx,
+		&rules,
+		"SELECT * FROM iptables_rules WHERE table_name = ? AND chain_name = ?",
+		tableName,
+		chainName,
+	)
 }
 
 func (r *IPTablesRuleRepository) Insert(ctx context.Context, rule *model.FirewallRule) (*model.FirewallRule, error) {
@@ -110,7 +162,11 @@ func (r *IPTablesRuleRepository) Insert(ctx context.Context, rule *model.Firewal
 }
 
 func (r *IPTablesRuleRepository) UpdateVerifiedAt(ctx context.Context, ruleID int64) error {
-	_, err := r.db.ExecContext(ctx, "UPDATE iptables_rules SET last_verified_at = CURRENT_TIMESTAMP WHERE id = ?", ruleID)
+	_, err := r.db.ExecContext(
+		ctx,
+		"UPDATE iptables_rules SET last_verified_at = CURRENT_TIMESTAMP WHERE id = ?",
+		ruleID,
+	)
 	return err
 }
 
@@ -135,15 +191,27 @@ func (r *IPTablesRuleRepository) DeleteInactive(ctx context.Context) (int64, err
 	return result.RowsAffected()
 }
 
-func (r *IPTablesRuleRepository) MarkDeletedByTableChainName(ctx context.Context, chainName model.FirewallChain, tableName model.FirewallTable) (int64, error) {
-	result, err := r.db.ExecContext(ctx, "UPDATE iptables_rules SET is_active = 0 WHERE table_name = ? AND chain_name = ? AND is_active = 1", string(tableName), string(chainName))
+func (r *IPTablesRuleRepository) MarkDeletedByTableChainName(
+	ctx context.Context,
+	chainName model.FirewallChain,
+	tableName model.FirewallTable,
+) (int64, error) {
+	result, err := r.db.ExecContext(
+		ctx,
+		"UPDATE iptables_rules SET is_active = 0 WHERE table_name = ? AND chain_name = ? AND is_active = 1",
+		string(tableName),
+		string(chainName),
+	)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected()
 }
 
-func (r *IPTablesRuleRepository) FindAndUpsertRules(ctx context.Context, rules []*model.FirewallRule) ([]*model.FirewallRule, error) {
+func (r *IPTablesRuleRepository) FindAndUpsertRules(
+	ctx context.Context,
+	rules []*model.FirewallRule,
+) ([]*model.FirewallRule, error) {
 	if len(rules) == 0 {
 		return nil, nil
 	}

@@ -176,10 +176,14 @@ Examples:
 						}
 
 						sudoArgs := append([]string{"env"}, append(envAssignments, os.Args...)...)
-						result := system.RunCmdCompat(cmd.Context(), append([]string{"sudo"}, sudoArgs...), system.RunCmdOptions{
-							Capture: false,
-							Check:   false,
-						})
+						result := system.RunCmdCompat(
+							cmd.Context(),
+							append([]string{"sudo"}, sudoArgs...),
+							system.RunCmdOptions{
+								Capture: false,
+								Check:   false,
+							},
+						)
 						if !result.Success && result.Err != nil {
 							common.Cli.Error(fmt.Sprintf("sudo command failed: %s", result.Err.Error()))
 						}
@@ -227,7 +231,9 @@ Examples:
 							origVal = *change.OriginalValue
 						}
 						if change.Mechanism == "noop" && change.Setting == "iptables_chains" {
-							common.Cli.Warning(formatChange(change.Mechanism, change.Setting, change.AppliedValue, origVal))
+							common.Cli.Warning(
+								formatChange(change.Mechanism, change.Setting, change.AppliedValue, origVal),
+							)
 							continue
 						}
 						appliedChanges++
@@ -456,8 +462,15 @@ Sysctl settings, sudoers, and the '%s' group will NOT be affected.`, infra.MVMUn
 			}
 
 			if !force {
-				common.Cli.Warning("This will remove all VM networking: bridges, TAP devices, iptables rules, and the default network configuration.")
-				common.Cli.Info(fmt.Sprintf("Sysctl settings, sudoers, and the '%s' group will NOT be affected.", infra.MVMUnixGroup))
+				common.Cli.Warning(
+					"This will remove all VM networking: bridges, TAP devices, iptables rules, and the default network configuration.",
+				)
+				common.Cli.Info(
+					fmt.Sprintf(
+						"Sysctl settings, sudoers, and the '%s' group will NOT be affected.",
+						infra.MVMUnixGroup,
+					),
+				)
 				common.Cli.Info("")
 				if !confirmRePrompt("Proceed with host clean?") {
 					common.Cli.Info("Aborted")
@@ -523,7 +536,9 @@ Examples:
 			}
 
 			if !force {
-				common.Cli.Warning("This will tear down all networking, revert sysctl changes, remove the sudoers drop-in, and remove the project group. This is a full rollback to pre-init state.")
+				common.Cli.Warning(
+					"This will tear down all networking, revert sysctl changes, remove the sudoers drop-in, and remove the project group. This is a full rollback to pre-init state.",
+				)
 				common.Cli.Info("")
 				if !confirmRePrompt("Proceed with host reset?") {
 					common.Cli.Info("Aborted")

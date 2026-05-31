@@ -49,8 +49,13 @@ func listMigrationFiles() ([]migrationFile, error) {
 		}
 		matches := migrationFileRegex.FindStringSubmatch(entry.Name())
 		if matches == nil {
-			return nil, errs.ValidationFailed(errs.CodeMigrationFailed,
-				fmt.Sprintf("Invalid migration filename: %s. Expected format: '{version:03d}_{description}.sql'", entry.Name()))
+			return nil, errs.ValidationFailed(
+				errs.CodeMigrationFailed,
+				fmt.Sprintf(
+					"Invalid migration filename: %s. Expected format: '{version:03d}_{description}.sql'",
+					entry.Name(),
+				),
+			)
 		}
 		version, err := strconv.Atoi(matches[1])
 		if err != nil || version == 0 {
@@ -77,9 +82,15 @@ func listMigrationFiles() ([]migrationFile, error) {
 	// Validate no version gaps: after sorting, files[i].version must be i+1.
 	for i, f := range files {
 		if f.version != i+1 {
-			return nil, errs.ValidationFailed(errs.CodeMigrationFailed,
-				fmt.Sprintf("Missing migration version %d: found version %d in file %s. Versions must be sequential starting from 1.",
-					i+1, f.version, f.name))
+			return nil, errs.ValidationFailed(
+				errs.CodeMigrationFailed,
+				fmt.Sprintf(
+					"Missing migration version %d: found version %d in file %s. Versions must be sequential starting from 1.",
+					i+1,
+					f.version,
+					f.name,
+				),
+			)
 		}
 	}
 

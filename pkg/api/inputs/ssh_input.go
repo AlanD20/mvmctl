@@ -71,7 +71,11 @@ func NewSSHRequest(inputs SSHInput, db *sqlx.DB) *SSHRequest {
 
 // Resolve resolves all inputs to explicit values.
 // Matches Python's SSHRequest.resolve().
-func (r *SSHRequest) Resolve(ctx context.Context, vmRepo vm.Repository, keyRepo key.Repository) (*ResolvedSSHInput, error) {
+func (r *SSHRequest) Resolve(
+	ctx context.Context,
+	vmRepo vm.Repository,
+	keyRepo key.Repository,
+) (*ResolvedSSHInput, error) {
 	targetIP, err := r.resolveTarget(ctx, vmRepo)
 	if err != nil {
 		return nil, err

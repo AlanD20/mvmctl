@@ -53,7 +53,11 @@ func (r *sqliteLeaseRepo) ListAllBatch(ctx context.Context, networkIDs []string)
 	return items, r.db.SelectContext(ctx, &items, query, args...)
 }
 
-func (r *sqliteLeaseRepo) Acquire(ctx context.Context, networkID, ipv4 string, vmID *string) (*model.NetworkLeaseItem, error) {
+func (r *sqliteLeaseRepo) Acquire(
+	ctx context.Context,
+	networkID, ipv4 string,
+	vmID *string,
+) (*model.NetworkLeaseItem, error) {
 	result, err := r.db.ExecContext(ctx,
 		"INSERT OR IGNORE INTO network_leases (network_id, ipv4, vm_id) VALUES (?, ?, ?)",
 		networkID, ipv4, vmID)

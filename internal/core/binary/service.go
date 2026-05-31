@@ -111,7 +111,12 @@ func (s *Service) ListRemote(ctx context.Context, limit int) ([]string, error) {
 // DownloadFirecracker downloads firecracker + jailer for version, returns Binary list.
 // arch is the target architecture (e.g. "x86_64", "aarch64") used in download URLs
 // and tarball member names.
-func (s *Service) DownloadFirecracker(ctx context.Context, version string, arch string, onProgress infra.ProgressCallback) ([]*model.BinaryItem, error) {
+func (s *Service) DownloadFirecracker(
+	ctx context.Context,
+	version string,
+	arch string,
+	onProgress infra.ProgressCallback,
+) ([]*model.BinaryItem, error) {
 	normalizedVersion := NormalizeVersion(version)
 
 	fcDest := filepath.Join(s.binDir, fmt.Sprintf("firecracker-v%s", normalizedVersion))
@@ -214,7 +219,11 @@ func (s *Service) Remove(ctx context.Context, binary *model.BinaryItem, force bo
 }
 
 // RemoveMany removes multiple binaries.
-func (s *Service) RemoveMany(ctx context.Context, binaries []*model.BinaryItem, force bool) ([]*model.BinaryItem, error) {
+func (s *Service) RemoveMany(
+	ctx context.Context,
+	binaries []*model.BinaryItem,
+	force bool,
+) ([]*model.BinaryItem, error) {
 	var deleted []*model.BinaryItem
 	for _, b := range binaries {
 		result, err := s.Remove(ctx, b, force)
@@ -277,7 +286,10 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 		result := system.RunCmdCompat(cloneCtx, []string{"git", "clone", infra.FirecrackerGitRepoURL, srcDir},
 			system.RunCmdOptions{Capture: false, Check: true})
 		if result.Err != nil {
-			return nil, binaryError(errs.CodeProcessError, fmt.Sprintf("Failed to clone Firecracker repository: %v", result.Err))
+			return nil, binaryError(
+				errs.CodeProcessError,
+				fmt.Sprintf("Failed to clone Firecracker repository: %v", result.Err),
+			)
 		}
 	} else {
 		slog.Info("Updating existing Firecracker repository...")
@@ -286,7 +298,10 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 		result := system.RunCmdCompat(fetchCtx, []string{"git", "fetch", "origin"},
 			system.RunCmdOptions{Cwd: srcDir, Capture: false, Check: true})
 		if result.Err != nil {
-			return nil, binaryError(errs.CodeProcessError, fmt.Sprintf("Failed to update Firecracker repository: %v", result.Err))
+			return nil, binaryError(
+				errs.CodeProcessError,
+				fmt.Sprintf("Failed to update Firecracker repository: %v", result.Err),
+			)
 		}
 	}
 
@@ -296,7 +311,10 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 	result := system.RunCmdCompat(checkoutCtx, []string{"git", "checkout", gitRef},
 		system.RunCmdOptions{Cwd: srcDir, Capture: false, Check: true})
 	if result.Err != nil {
-		return nil, binaryError(errs.CodeProcessError, fmt.Sprintf("Failed to checkout git ref '%s': %v", gitRef, result.Err))
+		return nil, binaryError(
+			errs.CodeProcessError,
+			fmt.Sprintf("Failed to checkout git ref '%s': %v", gitRef, result.Err),
+		)
 	}
 
 	// ── Resolve short commit hash ──

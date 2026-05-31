@@ -86,7 +86,13 @@ func (op *Operation) NetworkCreate(ctx context.Context, input *inputs.NetworkCre
 	}
 
 	if resolved.NATEnabled {
-		if err := op.Services.Network.EnsureNAT(ctx, resolved.Bridge, resolved.NATGateways, resolved.Subnet, networkID); err != nil {
+		if err := op.Services.Network.EnsureNAT(
+			ctx,
+			resolved.Bridge,
+			resolved.NATGateways,
+			resolved.Subnet,
+			networkID,
+		); err != nil {
 			_ = op.Repos.Network.Delete(ctx, networkID)
 			return &errs.OperationResult{
 				Status:    "error",
@@ -235,7 +241,10 @@ func (op *Operation) NetworkToJSON(networks []*model.Network) []map[string]inter
 // NetworkInspect returns detailed network info via Input/Request resolution pipeline.
 // Matches Python's NetworkOperation.inspect() exactly — uses NetworkInput/NetworkRequest
 // to resolve identifiers (by name or ID) with lease enrichment.
-func (op *Operation) NetworkInspect(ctx context.Context, input *inputs.NetworkInput) (*responses.NetworkInspect, error) {
+func (op *Operation) NetworkInspect(
+	ctx context.Context,
+	input *inputs.NetworkInput,
+) (*responses.NetworkInspect, error) {
 	request := inputs.NewNetworkRequest(*input, op.Connection.DB(), op.Repos.Network)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
@@ -397,7 +406,13 @@ func (op *Operation) NetworkSync(ctx context.Context, networkID string) *errs.Op
 					return fmt.Errorf("ensure bridge: %w", err)
 				}
 				if net.NATEnabled {
-					if err := op.Services.Network.EnsureNAT(ctx, net.Bridge, network.NatGatewaysList(net), net.Subnet, net.ID); err != nil {
+					if err := op.Services.Network.EnsureNAT(
+						ctx,
+						net.Bridge,
+						network.NatGatewaysList(net),
+						net.Subnet,
+						net.ID,
+					); err != nil {
 						return fmt.Errorf("ensure NAT: %w", err)
 					}
 				}
@@ -612,7 +627,13 @@ func (op *Operation) NetworkCreateDefaultNetwork(ctx context.Context) *errs.Oper
 	}
 	_ = op.Services.Network.EnsureBridge(ctx, defaultNetwork.Bridge, bridgeAddr)
 	if defaultNetwork.NATEnabled {
-		_ = op.Services.Network.EnsureNAT(ctx, defaultNetwork.Bridge, network.NatGatewaysList(defaultNetwork), defaultNetwork.Subnet, defaultNetwork.ID)
+		_ = op.Services.Network.EnsureNAT(
+			ctx,
+			defaultNetwork.Bridge,
+			network.NatGatewaysList(defaultNetwork),
+			defaultNetwork.Subnet,
+			defaultNetwork.ID,
+		)
 	}
 
 	bridgeActive := infranet.BridgeExists(ctx, defaultNetwork.Bridge)

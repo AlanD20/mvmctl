@@ -322,20 +322,39 @@ func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
 			}
 		} else {
 			// ext4 shrink: unmount → e2fsck → resize2fs -M (NO remount — Python leaves it unmounted)
-			if _, err := system.DefaultRunner.Run(ctx, []string{"umount", mountPoint}, system.WithCapture(false)); err != nil {
+			if _, err := system.DefaultRunner.Run(
+				ctx,
+				[]string{"umount", mountPoint},
+				system.WithCapture(false),
+			); err != nil {
 				return Result{Status: "error", Error: fmt.Sprintf("umount failed: %v", err), Step: ps.step}
 			}
-			if _, err := system.DefaultRunner.Run(ctx, []string{"e2fsck", "-f", "-y", rootPart}, system.WithCapture(true), system.WithCheck(true)); err != nil {
+			if _, err := system.DefaultRunner.Run(
+				ctx,
+				[]string{"e2fsck", "-f", "-y", rootPart},
+				system.WithCapture(true),
+				system.WithCheck(true),
+			); err != nil {
 				return Result{Status: "error", Error: err.Error(), Step: ps.step}
 			}
-			if _, err := system.DefaultRunner.Run(ctx, []string{"resize2fs", "-M", rootPart}, system.WithCapture(true), system.WithCheck(true)); err != nil {
+			if _, err := system.DefaultRunner.Run(
+				ctx,
+				[]string{"resize2fs", "-M", rootPart},
+				system.WithCapture(true),
+				system.WithCheck(true),
+			); err != nil {
 				return Result{Status: "error", Error: err.Error(), Step: ps.step}
 			}
 			if input.Resize.Headroom > 0 {
 				// Run resize2fs with extra headroom
 				curSize := getFSByteSize(rootPart)
 				targetSize := curSize + int64(input.Resize.Headroom)
-				if _, err := system.DefaultRunner.Run(ctx, []string{"resize2fs", rootPart, strconv.FormatInt(targetSize, 10)}, system.WithCapture(true), system.WithCheck(true)); err != nil {
+				if _, err := system.DefaultRunner.Run(
+					ctx,
+					[]string{"resize2fs", rootPart, strconv.FormatInt(targetSize, 10)},
+					system.WithCapture(true),
+					system.WithCheck(true),
+				); err != nil {
 					return Result{Status: "error", Error: err.Error(), Step: ps.step}
 				}
 			}
@@ -346,13 +365,27 @@ func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
 	// ── Post-mount resize: grow (ext4 only; btrfs grown after truncate) ──
 	if input.Resize != nil && input.Resize.Action == "grow" && detectedFSType != "btrfs" {
 		ps.step = "resize"
-		if _, err := system.DefaultRunner.Run(ctx, []string{"umount", mountPoint}, system.WithCapture(false)); err != nil {
+		if _, err := system.DefaultRunner.Run(
+			ctx,
+			[]string{"umount", mountPoint},
+			system.WithCapture(false),
+		); err != nil {
 			return Result{Status: "error", Error: fmt.Sprintf("umount failed: %v", err), Step: ps.step}
 		}
-		if _, err := system.DefaultRunner.Run(ctx, []string{"e2fsck", "-f", "-y", rootPart}, system.WithCapture(true), system.WithCheck(true)); err != nil {
+		if _, err := system.DefaultRunner.Run(
+			ctx,
+			[]string{"e2fsck", "-f", "-y", rootPart},
+			system.WithCapture(true),
+			system.WithCheck(true),
+		); err != nil {
 			return Result{Status: "error", Error: err.Error(), Step: ps.step}
 		}
-		if _, err := system.DefaultRunner.Run(ctx, []string{"resize2fs", rootPart}, system.WithCapture(true), system.WithCheck(true)); err != nil {
+		if _, err := system.DefaultRunner.Run(
+			ctx,
+			[]string{"resize2fs", rootPart},
+			system.WithCapture(true),
+			system.WithCheck(true),
+		); err != nil {
 			return Result{Status: "error", Error: err.Error(), Step: ps.step}
 		}
 	}
@@ -424,7 +457,16 @@ func (p *Provisioner) doDetectOS(ctx context.Context, input Op) Result {
 	osReleasePath := filepath.Join(mountPoint, "etc", "os-release")
 	data, err := os.ReadFile(osReleasePath)
 	if err != nil {
-		return Result{Status: "ok", OSType: "linux", Error: "", Step: "", FilesWritten: 0, CommandsRun: 0, NewFSType: "", NewSizeBytes: 0}
+		return Result{
+			Status:       "ok",
+			OSType:       "linux",
+			Error:        "",
+			Step:         "",
+			FilesWritten: 0,
+			CommandsRun:  0,
+			NewFSType:    "",
+			NewSizeBytes: 0,
+		}
 	}
 
 	osType := "linux"
@@ -937,7 +979,12 @@ func shrinkBtrfs(mountPoint, rootPart string, targetBytes int64) (int64, error) 
 	cmd := exec.Command("btrfs", "filesystem", "resize", strconv.FormatInt(targetBytes, 10), mountPoint)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return 0, fmt.Errorf("btrfs filesystem resize to %d failed (exit %v): %s", targetBytes, err, strings.TrimSpace(string(output)))
+		return 0, fmt.Errorf(
+			"btrfs filesystem resize to %d failed (exit %v): %s",
+			targetBytes,
+			err,
+			strings.TrimSpace(string(output)),
+		)
 	}
 
 	return getBtrfsDeviceSize(mountPoint), nil

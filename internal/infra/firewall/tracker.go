@@ -17,7 +17,13 @@ type Tracker interface {
 	BatchEnsureRules(ctx context.Context, rules []model.FirewallRule) model.FirewallRuleResult
 	RemoveRule(ctx context.Context, rule model.FirewallRule) model.FirewallRuleResult
 	BatchRemoveRules(ctx context.Context, rules []model.FirewallRule) model.FirewallRuleResult
-	EnsureChain(ctx context.Context, chainName model.FirewallChain, table model.FirewallTable, autoJumpFrom string, position int) bool
+	EnsureChain(
+		ctx context.Context,
+		chainName model.FirewallChain,
+		table model.FirewallTable,
+		autoJumpFrom string,
+		position int,
+	) bool
 	FlushChain(ctx context.Context, chainName model.FirewallChain, table model.FirewallTable) bool
 	CountOrphanedRules(ctx context.Context, network *model.Network) int
 }
@@ -25,7 +31,12 @@ type Tracker interface {
 // firewallRuleRepo is the interface both rule repository backends implement.
 type firewallRuleRepo interface {
 	GetByNetworkID(ctx context.Context, networkID string, activeOnly bool) ([]*model.FirewallRule, error)
-	GetByNetworkIDAndInterface(ctx context.Context, networkID string, iface string, activeOnly bool) ([]*model.FirewallRule, error)
+	GetByNetworkIDAndInterface(
+		ctx context.Context,
+		networkID string,
+		iface string,
+		activeOnly bool,
+	) ([]*model.FirewallRule, error)
 }
 
 // ── FirewallTracker (dispatcher) ──
@@ -80,7 +91,11 @@ func (ft *FirewallTracker) WithBatch(ctx context.Context, fn func()) {
 
 // ── Rule lifecycle ──
 
-func (ft *FirewallTracker) EnsureRule(ctx context.Context, rule model.FirewallRule, contextLabel string) model.FirewallRuleResult {
+func (ft *FirewallTracker) EnsureRule(
+	ctx context.Context,
+	rule model.FirewallRule,
+	contextLabel string,
+) model.FirewallRuleResult {
 	if ft.batchMode {
 		ft.batchRules = append(ft.batchRules, rule)
 		return model.FirewallRuleResult{Success: true}
@@ -106,11 +121,21 @@ func (ft *FirewallTracker) CountOrphanedRules(ctx context.Context, network *mode
 
 // ── Chain lifecycle ──
 
-func (ft *FirewallTracker) EnsureChain(ctx context.Context, chainName model.FirewallChain, table model.FirewallTable, autoJumpFrom string, position int) bool {
+func (ft *FirewallTracker) EnsureChain(
+	ctx context.Context,
+	chainName model.FirewallChain,
+	table model.FirewallTable,
+	autoJumpFrom string,
+	position int,
+) bool {
 	return ft.backend.EnsureChain(ctx, chainName, table, autoJumpFrom, position)
 }
 
-func (ft *FirewallTracker) FlushChain(ctx context.Context, chainName model.FirewallChain, table model.FirewallTable) bool {
+func (ft *FirewallTracker) FlushChain(
+	ctx context.Context,
+	chainName model.FirewallChain,
+	table model.FirewallTable,
+) bool {
 	return ft.backend.FlushChain(ctx, chainName, table)
 }
 
@@ -124,10 +149,19 @@ func (ft *FirewallTracker) Teardown(ctx context.Context) {
 
 // ── DB query methods ──
 
-func (ft *FirewallTracker) GetByNetworkID(ctx context.Context, networkID string, activeOnly bool) ([]*model.FirewallRule, error) {
+func (ft *FirewallTracker) GetByNetworkID(
+	ctx context.Context,
+	networkID string,
+	activeOnly bool,
+) ([]*model.FirewallRule, error) {
 	return ft.firewallRepo.GetByNetworkID(ctx, networkID, activeOnly)
 }
 
-func (ft *FirewallTracker) GetByNetworkIDAndInterface(ctx context.Context, networkID string, iface string, activeOnly bool) ([]*model.FirewallRule, error) {
+func (ft *FirewallTracker) GetByNetworkIDAndInterface(
+	ctx context.Context,
+	networkID string,
+	iface string,
+	activeOnly bool,
+) ([]*model.FirewallRule, error) {
 	return ft.firewallRepo.GetByNetworkIDAndInterface(ctx, networkID, iface, activeOnly)
 }

@@ -36,7 +36,10 @@ var networkColumns = []common.ListingColumn{
 		}
 		return "0"
 	}, LongOnly: true},
-	{Header: "Created", Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.Network).CreatedAt, "relative") }},
+	{
+		Header:  "Created",
+		Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.Network).CreatedAt, "relative") },
+	},
 }
 
 // NewNetworkCmd creates the network command and its subcommands.
@@ -223,8 +226,10 @@ func newNetworkCreateCmd(op *api.Operation) *cobra.Command {
 	cmd.Flags().StringVar(&subnet, "subnet", "", "IP subnet in SUBNET notation (e.g. 192.168.100.0/24)")
 	cmd.Flags().StringVar(&ipv4Gateway, "ipv4-gateway", "", "Gateway IPv4 for the bridge")
 	cmd.Flags().BoolVar(&noNAT, "no-nat", false, "Disable NAT/masquerade")
-	cmd.Flags().StringVar(&natGateways, "nat-gateways", "", "Physical interfaces for NAT (comma-separated, auto-detected if not provided)")
-	cmd.Flags().BoolVar(&nonInteractive, "non-interactive", false, "Skip interactive prompts (auto-detect NAT interfaces)")
+	cmd.Flags().
+		StringVar(&natGateways, "nat-gateways", "", "Physical interfaces for NAT (comma-separated, auto-detected if not provided)")
+	cmd.Flags().
+		BoolVar(&nonInteractive, "non-interactive", false, "Skip interactive prompts (auto-detect NAT interfaces)")
 	cmd.Flags().BoolVarP(&setDefault, "default", "d", false, "Set as default network")
 	return cmd
 }

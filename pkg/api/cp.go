@@ -75,9 +75,12 @@ func (op *Operation) CPCopy(ctx context.Context, input *inputs.CPInput, onProgre
 			// )
 			// Go: create DomainError with the exact same message and code.
 			return &errs.OperationResult{
-				Status:  "error",
-				Code:    "cp.destination_not_directory",
-				Message: fmt.Sprintf("Destination path must be a directory (end with /). Got: '%s'. Use 'vm_name:/dest/dir/' to copy into a directory.", dstPath),
+				Status: "error",
+				Code:   "cp.destination_not_directory",
+				Message: fmt.Sprintf(
+					"Destination path must be a directory (end with /). Got: '%s'. Use 'vm_name:/dest/dir/' to copy into a directory.",
+					dstPath,
+				),
 			}
 		}
 	}
@@ -107,15 +110,22 @@ func (op *Operation) CPCopy(ctx context.Context, input *inputs.CPInput, onProgre
 		if resolved.DstInfo.KeyPath != nil {
 			dstKeyPath = *resolved.DstInfo.KeyPath
 		}
-		totalBytes, resultMessage, err = op.Services.CP.CopyToVM(ctx, resolved.LocalPaths, resolved.DstInfo.RemotePath, model.ConnectionInfo{
-			Host:    resolved.DstInfo.IP,
-			User:    resolved.DstInfo.User,
-			KeyPath: dstKeyPath,
-		}, resolved.Force, func(bytes int64) {
-			if onProgress != nil {
-				onProgress(bytes)
-			}
-		})
+		totalBytes, resultMessage, err = op.Services.CP.CopyToVM(
+			ctx,
+			resolved.LocalPaths,
+			resolved.DstInfo.RemotePath,
+			model.ConnectionInfo{
+				Host:    resolved.DstInfo.IP,
+				User:    resolved.DstInfo.User,
+				KeyPath: dstKeyPath,
+			},
+			resolved.Force,
+			func(bytes int64) {
+				if onProgress != nil {
+					onProgress(bytes)
+				}
+			},
+		)
 		if err != nil {
 			return op.copyError(err)
 		}
@@ -129,15 +139,22 @@ func (op *Operation) CPCopy(ctx context.Context, input *inputs.CPInput, onProgre
 		if resolved.SrcInfo.KeyPath != nil {
 			srcKeyPath = *resolved.SrcInfo.KeyPath
 		}
-		totalBytes, resultMessage, err = op.Services.CP.CopyFromVM(ctx, resolved.SrcInfo.RemotePath, resolved.LocalPaths[0], model.ConnectionInfo{
-			Host:    resolved.SrcInfo.IP,
-			User:    resolved.SrcInfo.User,
-			KeyPath: srcKeyPath,
-		}, resolved.Force, func(bytes int64) {
-			if onProgress != nil {
-				onProgress(bytes)
-			}
-		})
+		totalBytes, resultMessage, err = op.Services.CP.CopyFromVM(
+			ctx,
+			resolved.SrcInfo.RemotePath,
+			resolved.LocalPaths[0],
+			model.ConnectionInfo{
+				Host:    resolved.SrcInfo.IP,
+				User:    resolved.SrcInfo.User,
+				KeyPath: srcKeyPath,
+			},
+			resolved.Force,
+			func(bytes int64) {
+				if onProgress != nil {
+					onProgress(bytes)
+				}
+			},
+		)
 		if err != nil {
 			return op.copyError(err)
 		}

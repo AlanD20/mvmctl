@@ -105,7 +105,9 @@ func CheckPrivileges(binary string, operationDescription string) error {
 	if !userInGroup {
 		msg := fmt.Sprintf(
 			"User '%s' is not in the '%s' group. Run 'sudo mvm host init' to configure privileges, then 'newgrp %s' or log out and back in.",
-			username, infra.MVMUnixGroup, infra.MVMUnixGroup,
+			username,
+			infra.MVMUnixGroup,
+			infra.MVMUnixGroup,
 		)
 		details := &PrivilegeDetails{
 			Message:         msg,
@@ -125,7 +127,8 @@ func CheckPrivileges(binary string, operationDescription string) error {
 	if !SessionHasGroup() {
 		msg := fmt.Sprintf(
 			"Your user is in the '%s' group, but your current session does not have the group active yet. Please log out and log back in, or run: newgrp %s",
-			infra.MVMUnixGroup, infra.MVMUnixGroup,
+			infra.MVMUnixGroup,
+			infra.MVMUnixGroup,
 		)
 		details := &PrivilegeDetails{
 			Message:         msg,

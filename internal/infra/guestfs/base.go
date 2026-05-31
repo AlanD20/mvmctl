@@ -180,7 +180,11 @@ func guestfishRawOnce(ctx context.Context, diskPath string, readonly bool, args 
 	allArgs := guestfishCommonFlags(diskPath, readonly)
 	allArgs = append(allArgs, args...)
 
-	result := system.RunCmdCompat(ctx, append([]string{guestfishBin}, allArgs...), system.RunCmdOptions{Capture: true, Check: true})
+	result := system.RunCmdCompat(
+		ctx,
+		append([]string{guestfishBin}, allArgs...),
+		system.RunCmdOptions{Capture: true, Check: true},
+	)
 	if result.Err != nil {
 		if result.Stderr != "" {
 			return "", fmt.Errorf("guestfish[%s]: %s: %w", strings.Join(allArgs, " "), result.Stderr, result.Err)
@@ -228,7 +232,11 @@ func guestfishWithInputOnce(ctx context.Context, diskPath string, readonly bool,
 	allArgs := guestfishCommonFlags(diskPath, readonly)
 	allArgs = append(allArgs, "-i")
 
-	result := system.RunCmdCompat(ctx, append([]string{guestfishBin}, allArgs...), system.RunCmdOptions{Input: input, Capture: true, Check: true})
+	result := system.RunCmdCompat(
+		ctx,
+		append([]string{guestfishBin}, allArgs...),
+		system.RunCmdOptions{Input: input, Capture: true, Check: true},
+	)
 	if result.Err != nil {
 		if result.Stderr != "" {
 			return result.Stdout, fmt.Errorf("guestfish[stdin]: %s: %w", result.Stderr, result.Err)
@@ -495,7 +503,13 @@ func ExtractPartition(ctx context.Context, rawPath, outputPath string, partition
 }
 
 // extractPartitionInner contains the actual partition extraction logic.
-func extractPartitionInner(handle *GuestfsHandle, ctx context.Context, logger *slog.Logger, rawPath, outputPath string, partition *int) (string, error) {
+func extractPartitionInner(
+	handle *GuestfsHandle,
+	ctx context.Context,
+	logger *slog.Logger,
+	rawPath, outputPath string,
+	partition *int,
+) (string, error) {
 
 	partitions, err := handle.ListPartitions(ctx)
 	if err != nil {

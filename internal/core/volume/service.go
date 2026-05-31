@@ -39,13 +39,21 @@ func (s *Service) CreateDisk(ctx context.Context, vol *model.VolumeItem) (*model
 
 	switch vol.Format {
 	case "raw":
-		result := system.RunCmdCompat(ctx, []string{"fallocate", "-l", strconv.FormatInt(vol.SizeBytes, 10), diskPath}, system.DefaultRunCmdOptions())
+		result := system.RunCmdCompat(
+			ctx,
+			[]string{"fallocate", "-l", strconv.FormatInt(vol.SizeBytes, 10), diskPath},
+			system.DefaultRunCmdOptions(),
+		)
 		if result.Err != nil {
 			// Python: raise VolumeError(f"fallocate failed: {e}") from e
 			return nil, NewVolumeErrorf("fallocate failed: %s", result.Err.Error())
 		}
 	case "qcow2":
-		result := system.RunCmdCompat(ctx, []string{"qemu-img", "create", "-f", "qcow2", diskPath, strconv.FormatInt(vol.SizeBytes, 10)}, system.DefaultRunCmdOptions())
+		result := system.RunCmdCompat(
+			ctx,
+			[]string{"qemu-img", "create", "-f", "qcow2", diskPath, strconv.FormatInt(vol.SizeBytes, 10)},
+			system.DefaultRunCmdOptions(),
+		)
 		if result.Err != nil {
 			return nil, NewVolumeErrorf("qemu-img create failed: %s", result.Err.Error())
 		}
@@ -93,7 +101,11 @@ func (s *Service) Remove(ctx context.Context, volume *model.VolumeItem) error {
 
 // ResizeDisk resizes a disk file and updates the DB record.
 // Matches Python's VolumeService.resize_disk() exactly.
-func (s *Service) ResizeDisk(ctx context.Context, vol *model.VolumeItem, newSizeBytes int64) (*model.VolumeItem, error) {
+func (s *Service) ResizeDisk(
+	ctx context.Context,
+	vol *model.VolumeItem,
+	newSizeBytes int64,
+) (*model.VolumeItem, error) {
 	diskPath := vol.Path
 
 	if _, err := os.Stat(diskPath); err != nil {
@@ -105,12 +117,20 @@ func (s *Service) ResizeDisk(ctx context.Context, vol *model.VolumeItem, newSize
 
 	switch vol.Format {
 	case "raw":
-		result := system.RunCmdCompat(ctx, []string{"fallocate", "-l", strconv.FormatInt(newSizeBytes, 10), diskPath}, system.DefaultRunCmdOptions())
+		result := system.RunCmdCompat(
+			ctx,
+			[]string{"fallocate", "-l", strconv.FormatInt(newSizeBytes, 10), diskPath},
+			system.DefaultRunCmdOptions(),
+		)
 		if result.Err != nil {
 			return nil, NewVolumeErrorf("fallocate resize failed: %s", result.Err.Error())
 		}
 	case "qcow2":
-		result := system.RunCmdCompat(ctx, []string{"qemu-img", "resize", diskPath, strconv.FormatInt(newSizeBytes, 10)}, system.DefaultRunCmdOptions())
+		result := system.RunCmdCompat(
+			ctx,
+			[]string{"qemu-img", "resize", diskPath, strconv.FormatInt(newSizeBytes, 10)},
+			system.DefaultRunCmdOptions(),
+		)
 		if result.Err != nil {
 			return nil, NewVolumeErrorf("qemu-img resize failed: %s", result.Err.Error())
 		}
@@ -135,7 +155,12 @@ func (s *Service) ResizeDisk(ctx context.Context, vol *model.VolumeItem, newSize
 // Python: vm_id: str | None = None — defaults to None.
 // Python fire-and-forgets individual failures: logs a warning and continues.
 // Go must match — don't aggregate errors, just log warnings.
-func (s *Service) SetVolumesState(ctx context.Context, volumes []*model.VolumeItem, status model.VolumeStatus, vmID *string) error {
+func (s *Service) SetVolumesState(
+	ctx context.Context,
+	volumes []*model.VolumeItem,
+	status model.VolumeStatus,
+	vmID *string,
+) error {
 	if len(volumes) == 0 {
 		return nil
 	}

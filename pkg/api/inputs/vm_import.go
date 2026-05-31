@@ -190,7 +190,11 @@ func (r *VMImportRequest) Resolve(ctx context.Context) (*VMCreateResolved, error
 	return builder.Build(ctx, createInput)
 }
 
-func (r *VMImportRequest) resolveImage(ctx context.Context, imgConfig VMExportImageConfig, imageRepo image.Repository) (*string, error) {
+func (r *VMImportRequest) resolveImage(
+	ctx context.Context,
+	imgConfig VMExportImageConfig,
+	imageRepo image.Repository,
+) (*string, error) {
 	if imgConfig.Type == nil || *imgConfig.Type == "" {
 		return nil, nil
 	}
@@ -198,17 +202,25 @@ func (r *VMImportRequest) resolveImage(ctx context.Context, imgConfig VMExportIm
 	img, err := resolver.ByType(ctx, *imgConfig.Type)
 	if err != nil {
 		return nil, &errs.DomainError{
-			Code:    errs.CodeImageNotFound,
-			Op:      "vm_import",
-			Message: fmt.Sprintf("Image '%s' not found. Fetch it first: mvm image pull %s", *imgConfig.Type, *imgConfig.Type),
-			Class:   errs.ClassValidation,
+			Code: errs.CodeImageNotFound,
+			Op:   "vm_import",
+			Message: fmt.Sprintf(
+				"Image '%s' not found. Fetch it first: mvm image pull %s",
+				*imgConfig.Type,
+				*imgConfig.Type,
+			),
+			Class: errs.ClassValidation,
 		}
 	}
 	t := img.Type
 	return &t, nil
 }
 
-func (r *VMImportRequest) resolveKernel(ctx context.Context, knlConfig VMExportKernelConfig, kernelRepo kernel.Repository) (*string, error) {
+func (r *VMImportRequest) resolveKernel(
+	ctx context.Context,
+	knlConfig VMExportKernelConfig,
+	kernelRepo kernel.Repository,
+) (*string, error) {
 	if knlConfig.Version == nil || *knlConfig.Version == "" || knlConfig.Type == nil || *knlConfig.Type == "" {
 		return nil, nil
 	}
@@ -219,14 +231,23 @@ func (r *VMImportRequest) resolveKernel(ctx context.Context, knlConfig VMExportK
 			Code: errs.CodeKernelNotFound,
 			Op:   "vm_import",
 			// Python uses !r (repr) which adds quotes: version='6.1.0', type='vmlinux'
-			Message: fmt.Sprintf("Kernel version=%q, type=%q not found. Fetch it first: mvm kernel pull --type %s", *knlConfig.Version, *knlConfig.Type, *knlConfig.Type),
-			Class:   errs.ClassValidation,
+			Message: fmt.Sprintf(
+				"Kernel version=%q, type=%q not found. Fetch it first: mvm kernel pull --type %s",
+				*knlConfig.Version,
+				*knlConfig.Type,
+				*knlConfig.Type,
+			),
+			Class: errs.ClassValidation,
 		}
 	}
 	return &krnl.ID, nil
 }
 
-func (r *VMImportRequest) resolveBinary(ctx context.Context, binConfig VMExportBinaryConfig, binaryRepo binary.Repository) (*string, error) {
+func (r *VMImportRequest) resolveBinary(
+	ctx context.Context,
+	binConfig VMExportBinaryConfig,
+	binaryRepo binary.Repository,
+) (*string, error) {
 	if binConfig.Version == nil || *binConfig.Version == "" {
 		return nil, nil
 	}
@@ -234,16 +255,25 @@ func (r *VMImportRequest) resolveBinary(ctx context.Context, binConfig VMExportB
 	bin, err := resolver.ByNameVersion(ctx, binConfig.Name, *binConfig.Version)
 	if err != nil {
 		return nil, &errs.DomainError{
-			Code:    errs.CodeBinaryNotFound,
-			Op:      "vm_import",
-			Message: fmt.Sprintf("Binary '%s' version='%s' not found. Fetch it first: mvm bin pull %s", binConfig.Name, *binConfig.Version, *binConfig.Version),
-			Class:   errs.ClassValidation,
+			Code: errs.CodeBinaryNotFound,
+			Op:   "vm_import",
+			Message: fmt.Sprintf(
+				"Binary '%s' version='%s' not found. Fetch it first: mvm bin pull %s",
+				binConfig.Name,
+				*binConfig.Version,
+				*binConfig.Version,
+			),
+			Class: errs.ClassValidation,
 		}
 	}
 	return &bin.ID, nil
 }
 
-func (r *VMImportRequest) resolveNetwork(ctx context.Context, netConfig VMExportNetworkConfig, networkRepo network.Repository) (*string, error) {
+func (r *VMImportRequest) resolveNetwork(
+	ctx context.Context,
+	netConfig VMExportNetworkConfig,
+	networkRepo network.Repository,
+) (*string, error) {
 	if netConfig.Name == nil || *netConfig.Name == "" {
 		return nil, nil
 	}
@@ -251,10 +281,14 @@ func (r *VMImportRequest) resolveNetwork(ctx context.Context, netConfig VMExport
 	net, err := resolver.ByName(ctx, *netConfig.Name)
 	if err != nil {
 		return nil, &errs.DomainError{
-			Code:    errs.CodeNetworkNotFound,
-			Op:      "vm_import",
-			Message: fmt.Sprintf("Network '%s' not found. Create it first: mvm network create %s", *netConfig.Name, *netConfig.Name),
-			Class:   errs.ClassValidation,
+			Code: errs.CodeNetworkNotFound,
+			Op:   "vm_import",
+			Message: fmt.Sprintf(
+				"Network '%s' not found. Create it first: mvm network create %s",
+				*netConfig.Name,
+				*netConfig.Name,
+			),
+			Class: errs.ClassValidation,
 		}
 	}
 	return &net.Name, nil

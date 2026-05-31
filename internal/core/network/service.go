@@ -145,7 +145,13 @@ func (s *Service) RemoveBridge(ctx context.Context, bridge string, networkID str
 
 // ── NAT ──
 
-func (s *Service) EnsureNAT(ctx context.Context, bridge string, natGateways []string, subnet string, networkID string) error {
+func (s *Service) EnsureNAT(
+	ctx context.Context,
+	bridge string,
+	natGateways []string,
+	subnet string,
+	networkID string,
+) error {
 	// Initialize firewall chains
 	s.Initialize(ctx)
 
@@ -229,7 +235,13 @@ func (s *Service) EnsureNAT(ctx context.Context, bridge string, natGateways []st
 	return nil
 }
 
-func (s *Service) RemoveNAT(ctx context.Context, bridge string, natGateways []string, subnet, networkID string, force bool) error {
+func (s *Service) RemoveNAT(
+	ctx context.Context,
+	bridge string,
+	natGateways []string,
+	subnet, networkID string,
+	force bool,
+) error {
 	effectiveGateways := natGateways
 	effectiveSubnet := subnet
 
@@ -248,12 +260,22 @@ func (s *Service) RemoveNAT(ctx context.Context, bridge string, natGateways []st
 	}
 
 	if effectiveGateways == nil {
-		return errs.Wrap(errs.CodeNetworkNATFailed,
-			fmt.Errorf("Could not determine NAT gateways for bridge %s. Provide nat_gateways explicitly or ensure network exists in database.", bridge))
+		return errs.Wrap(
+			errs.CodeNetworkNATFailed,
+			fmt.Errorf(
+				"Could not determine NAT gateways for bridge %s. Provide nat_gateways explicitly or ensure network exists in database.",
+				bridge,
+			),
+		)
 	}
 	if effectiveSubnet == "" {
-		return errs.Wrap(errs.CodeNetworkNATFailed,
-			fmt.Errorf("Could not determine subnet for bridge %s. Provide subnet explicitly or ensure network exists in database.", bridge))
+		return errs.Wrap(
+			errs.CodeNetworkNATFailed,
+			fmt.Errorf(
+				"Could not determine subnet for bridge %s. Provide subnet explicitly or ensure network exists in database.",
+				bridge,
+			),
+		)
 	}
 
 	// Check for attached TAPs — matches Python's NetworkError
@@ -261,7 +283,12 @@ func (s *Service) RemoveNAT(ctx context.Context, bridge string, natGateways []st
 	if len(attachedTaps) > 0 {
 		if !force {
 			return errs.NetworkError(
-				fmt.Sprintf("Cannot remove NAT: %d TAP(s) still attached on bridge %s. Use --force to override.", len(attachedTaps), bridge))
+				fmt.Sprintf(
+					"Cannot remove NAT: %d TAP(s) still attached on bridge %s. Use --force to override.",
+					len(attachedTaps),
+					bridge,
+				),
+			)
 		}
 		slog.Warn("Removing NAT for bridge but TAPs still attached",
 			"bridge", bridge,
@@ -491,7 +518,14 @@ func (s *Service) RemoveTap(ctx context.Context, tap, bridge string, networkID s
 func (s *Service) Remove(ctx context.Context, network *model.Network, force bool) error {
 	// 1. Tear down NAT — only catch NetworkError, matching Python's behavior
 	if network.NATEnabled {
-		if err := s.RemoveNAT(ctx, network.Bridge, NatGatewaysList(network), network.Subnet, network.ID, force); err != nil {
+		if err := s.RemoveNAT(
+			ctx,
+			network.Bridge,
+			NatGatewaysList(network),
+			network.Subnet,
+			network.ID,
+			force,
+		); err != nil {
 			if isNetworkError(err) {
 				slog.Debug("NAT teardown", "bridge", network.Bridge, "error", err)
 			} else {

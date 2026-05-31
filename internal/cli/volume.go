@@ -27,7 +27,10 @@ var volumeColumns = []common.ListingColumn{
 		}
 		return "-"
 	}, LongOnly: true},
-	{Header: "Created", Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.VolumeItem).CreatedAt, "relative") }},
+	{
+		Header:  "Created",
+		Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.VolumeItem).CreatedAt, "relative") },
+	},
 }
 
 func NewVolumeCmd(op *api.Operation, configAPI *api.Operation) *cobra.Command {

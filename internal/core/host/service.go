@@ -38,7 +38,11 @@ func EnableIPForward(ctx context.Context) (*model.HostStateChangeItem, error) {
 		slog.Debug("IP forwarding already enabled")
 		return nil, nil
 	}
-	res := system.RunCmdCompat(ctx, []string{"sysctl", "-w", fmt.Sprintf("%s=1", sysctlKey)}, system.DefaultRunCmdOpts())
+	res := system.RunCmdCompat(
+		ctx,
+		[]string{"sysctl", "-w", fmt.Sprintf("%s=1", sysctlKey)},
+		system.DefaultRunCmdOpts(),
+	)
 	if res.Err != nil {
 		return nil, fmt.Errorf("failed to enable IP forwarding: %w", res.Err)
 	}
@@ -100,7 +104,13 @@ func PersistSysctl(ctx context.Context) (*model.HostStateChangeItem, error) {
 }
 
 // ── loadModule ──
-func (s *Service) loadModule(ctx context.Context, module string, sessionID string, changeOrder int, initTimestamp, createdAt string) (*model.HostStateChangeItem, error) {
+func (s *Service) loadModule(
+	ctx context.Context,
+	module string,
+	sessionID string,
+	changeOrder int,
+	initTimestamp, createdAt string,
+) (*model.HostStateChangeItem, error) {
 	res := system.RunCmdCompat(ctx, []string{"modprobe", module}, system.DefaultRunCmdOpts())
 	if res.Err != nil {
 		return nil, fmt.Errorf("failed to load kernel module %s: %w", module, res.Err)
@@ -126,7 +136,11 @@ func (s *Service) loadModule(ctx context.Context, module string, sessionID strin
 
 // ── EnsureKVMModules ──
 // Matches Python's HostService.ensure_kvm_modules() exactly.
-func (s *Service) EnsureKVMModules(ctx context.Context, sessionID string, changeOrderStart int) ([]*model.HostStateChangeItem, int, error) {
+func (s *Service) EnsureKVMModules(
+	ctx context.Context,
+	sessionID string,
+	changeOrderStart int,
+) ([]*model.HostStateChangeItem, int, error) {
 	var changes []*model.HostStateChangeItem
 	now := ""
 	if sessionID != "" {
@@ -152,8 +166,10 @@ func (s *Service) EnsureKVMModules(ctx context.Context, sessionID string, change
 			slog.Warn("KVM appears to be built into the kernel (no modules to manage) — /dev/kvm is accessible")
 			return changes, nextOrder, nil
 		}
-		return nil, 0, hostError(errs.CodeHostInitFailed,
-			"No KVM vendor modules available. Ensure virtualization is enabled in BIOS and KVM kernel modules are installed.")
+		return nil, 0, hostError(
+			errs.CodeHostInitFailed,
+			"No KVM vendor modules available. Ensure virtualization is enabled in BIOS and KVM kernel modules are installed.",
+		)
 	}
 
 	kvmModules := []string{"kvm"}
@@ -279,7 +295,11 @@ func (s *Service) RestoreState(ctx context.Context) ([]*model.HostStateChangeIte
 				slog.Warn("Skipping disallowed sysctl key from state", "key", change.Setting)
 				continue
 			}
-			res := system.RunCmdCompat(ctx, []string{"sysctl", "-w", fmt.Sprintf("%s=%s", change.Setting, *change.OriginalValue)}, system.DefaultRunCmdOpts())
+			res := system.RunCmdCompat(
+				ctx,
+				[]string{"sysctl", "-w", fmt.Sprintf("%s=%s", change.Setting, *change.OriginalValue)},
+				system.DefaultRunCmdOpts(),
+			)
 			if res.Err != nil {
 				return nil, fmt.Errorf("failed to revert %s: %w", change.Setting, res.Err)
 			}

@@ -26,7 +26,10 @@ var kernelColumns = []common.ListingColumn{
 	{Header: "Version", Extract: func(v any) string { return v.(*model.KernelItem).Version }},
 	{Header: "Type", Extract: func(v any) string { return v.(*model.KernelItem).Type }},
 	{Header: "Arch", Extract: func(v any) string { return v.(*model.KernelItem).Arch }, LongOnly: true},
-	{Header: "Created", Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.KernelItem).CreatedAt, "relative") }},
+	{
+		Header:  "Created",
+		Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.KernelItem).CreatedAt, "relative") },
+	},
 }
 
 func NewKernelCmd(op *api.Operation) *cobra.Command {
@@ -228,7 +231,9 @@ Examples:
 			}
 
 			if effectiveType == "" {
-				common.Cli.Error("Kernel type is required. Use 'mvm kernel pull --type official' or 'mvm kernel pull official:6.19.9'")
+				common.Cli.Error(
+					"Kernel type is required. Use 'mvm kernel pull --type official' or 'mvm kernel pull official:6.19.9'",
+				)
 				return fmt.Errorf("kernel type is required")
 			}
 

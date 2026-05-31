@@ -132,7 +132,11 @@ type CreateParams struct {
 }
 
 // generateKeypair generates an SSH key pair using ssh-keygen subprocess.
-func generateKeypair(ctx context.Context, privateKeyPath, pubKeyPath, comment, algorithm string, bits int) (string, error) {
+func generateKeypair(
+	ctx context.Context,
+	privateKeyPath, pubKeyPath, comment, algorithm string,
+	bits int,
+) (string, error) {
 	args := []string{"-t", algorithm, "-f", privateKeyPath, "-N", "", "-C", comment}
 	if algorithm == "rsa" {
 		if bits <= 0 {
@@ -142,7 +146,9 @@ func generateKeypair(ctx context.Context, privateKeyPath, pubKeyPath, comment, a
 	}
 	result := system.RunCmdCompat(ctx, append([]string{"ssh-keygen"}, args...), system.DefaultRunCmdOptions())
 	if result.Err != nil {
-		return "", &keyError{err: errs.MVMKeyError(fmt.Sprintf("ssh-keygen failed: %s", strings.TrimSpace(result.Stderr)))}
+		return "", &keyError{
+			err: errs.MVMKeyError(fmt.Sprintf("ssh-keygen failed: %s", strings.TrimSpace(result.Stderr))),
+		}
 	}
 
 	pubContent, err := os.ReadFile(pubKeyPath)

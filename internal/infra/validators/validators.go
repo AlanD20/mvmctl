@@ -70,9 +70,14 @@ func ValidateEntityName(name, entityType string, maxLength int) error {
 	}
 	if len(name) > maxLength {
 		return &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Class:   errs.ClassValidation,
-			Message: fmt.Sprintf("Invalid %s name '%s': exceeds maximum length of %d characters", entityType, name, maxLength),
+			Code:  errs.CodeValidationFailed,
+			Class: errs.ClassValidation,
+			Message: fmt.Sprintf(
+				"Invalid %s name '%s': exceeds maximum length of %d characters",
+				entityType,
+				name,
+				maxLength,
+			),
 		}
 	}
 	if strings.HasPrefix(name, "-") {
@@ -91,9 +96,13 @@ func ValidateEntityName(name, entityType string, maxLength int) error {
 	}
 	if infra.ContainsDangerousChars(name) {
 		return &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Class:   errs.ClassValidation,
-			Message: fmt.Sprintf("Invalid %s name '%s': contains forbidden characters (shell metacharacters, path traversal, or control characters)", entityType, name),
+			Code:  errs.CodeValidationFailed,
+			Class: errs.ClassValidation,
+			Message: fmt.Sprintf(
+				"Invalid %s name '%s': contains forbidden characters (shell metacharacters, path traversal, or control characters)",
+				entityType,
+				name,
+			),
 		}
 	}
 	// Check if name is an IP address
@@ -311,9 +320,13 @@ func (NetworkValidator) ValidateName(name string) error {
 	// Network names must not start with CLI_NAME- prefix (reserved for bridges)
 	if strings.HasPrefix(name, infra.CLIName+"-") {
 		return &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Class:   errs.ClassValidation,
-			Message: fmt.Sprintf("Invalid network name '%s': cannot start with '%s-' (reserved for bridge names)", name, infra.CLIName),
+			Code:  errs.CodeValidationFailed,
+			Class: errs.ClassValidation,
+			Message: fmt.Sprintf(
+				"Invalid network name '%s': cannot start with '%s-' (reserved for bridge names)",
+				name,
+				infra.CLIName,
+			),
 		}
 	}
 	return nil
@@ -362,9 +375,13 @@ func (NetworkValidator) ValidateSubnet(subnet string) (string, error) {
 	}
 	if ipnet.IP.To4() == nil {
 		return "", &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Class:   errs.ClassValidation,
-			Message: fmt.Sprintf("Invalid subnet: '%s' is not a valid IPv4 CIDR: '%s' does not appear to be an IPv4 network", subnet, subnet),
+			Code:  errs.CodeValidationFailed,
+			Class: errs.ClassValidation,
+			Message: fmt.Sprintf(
+				"Invalid subnet: '%s' is not a valid IPv4 CIDR: '%s' does not appear to be an IPv4 network",
+				subnet,
+				subnet,
+			),
 		}
 	}
 	// Python uses strict=False in validate_subnet, so host bits are accepted.
@@ -398,9 +415,12 @@ func (NetworkValidator) ValidateIPv4Gateway(gateway string, subnet string) (stri
 	}
 	if !parsed.IsPrivate() {
 		return "", &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Class:   errs.ClassValidation,
-			Message: fmt.Sprintf("Invalid gateway: '%s' must be a private/internal address. Use a subnet from RFC1918 ranges: 10.0.0.0/8, 172.16.0.0/12, or 192.168.0.0/16", gateway),
+			Code:  errs.CodeValidationFailed,
+			Class: errs.ClassValidation,
+			Message: fmt.Sprintf(
+				"Invalid gateway: '%s' must be a private/internal address. Use a subnet from RFC1918 ranges: 10.0.0.0/8, 172.16.0.0/12, or 192.168.0.0/16",
+				gateway,
+			),
 		}
 	}
 	_, ipnet, err := net.ParseCIDR(subnet)
@@ -428,7 +448,13 @@ func (NetworkValidator) ValidateIPv4Gateway(gateway string, subnet string) (stri
 	return parsed.String(), nil
 }
 
-func (NetworkValidator) ValidateIPv4Address(ip string, fieldName string, requirePrivate bool, subnet string, gateway string) (string, error) {
+func (NetworkValidator) ValidateIPv4Address(
+	ip string,
+	fieldName string,
+	requirePrivate bool,
+	subnet string,
+	gateway string,
+) (string, error) {
 	if fieldName == "" {
 		fieldName = "IP address"
 	}
@@ -522,16 +548,22 @@ func (NetworkValidator) ValidateBridgeName(ctx context.Context, bridge string) e
 	}
 	if infra.ContainsDangerousChars(bridge) {
 		return &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Class:   errs.ClassValidation,
-			Message: fmt.Sprintf("Invalid bridge name: '%s' contains forbidden characters (shell metacharacters, path traversal, or control characters)", bridge),
+			Code:  errs.CodeValidationFailed,
+			Class: errs.ClassValidation,
+			Message: fmt.Sprintf(
+				"Invalid bridge name: '%s' contains forbidden characters (shell metacharacters, path traversal, or control characters)",
+				bridge,
+			),
 		}
 	}
 	if !validInterfaceNameRegex.MatchString(bridge) {
 		return &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Class:   errs.ClassValidation,
-			Message: fmt.Sprintf("Invalid bridge name: '%s' must contain only lowercase alphanumeric, hyphen, and underscore characters", bridge),
+			Code:  errs.CodeValidationFailed,
+			Class: errs.ClassValidation,
+			Message: fmt.Sprintf(
+				"Invalid bridge name: '%s' must contain only lowercase alphanumeric, hyphen, and underscore characters",
+				bridge,
+			),
 		}
 	}
 	// Check if bridge already exists on host (non-mvm interface)
@@ -572,16 +604,22 @@ func (NetworkValidator) ValidateNATGateways(ctx context.Context, gateways []stri
 		}
 		if infra.ContainsDangerousChars(iface) {
 			return nil, &errs.DomainError{
-				Code:    errs.CodeValidationFailed,
-				Class:   errs.ClassValidation,
-				Message: fmt.Sprintf("Invalid NAT gateway '%s': contains forbidden characters (shell metacharacters, path traversal, or control characters)", iface),
+				Code:  errs.CodeValidationFailed,
+				Class: errs.ClassValidation,
+				Message: fmt.Sprintf(
+					"Invalid NAT gateway '%s': contains forbidden characters (shell metacharacters, path traversal, or control characters)",
+					iface,
+				),
 			}
 		}
 		if !validInterfaceNameRegex.MatchString(iface) {
 			return nil, &errs.DomainError{
-				Code:    errs.CodeValidationFailed,
-				Class:   errs.ClassValidation,
-				Message: fmt.Sprintf("Invalid NAT gateway '%s': must contain only lowercase alphanumeric, hyphen, and underscore characters", iface),
+				Code:  errs.CodeValidationFailed,
+				Class: errs.ClassValidation,
+				Message: fmt.Sprintf(
+					"Invalid NAT gateway '%s': must contain only lowercase alphanumeric, hyphen, and underscore characters",
+					iface,
+				),
 			}
 		}
 		// Check that interface actually exists on the host
@@ -739,9 +777,13 @@ func ValidateBootArgComponent(value, componentName string) error {
 	}
 	if validBootArgComponentRegex.MatchString(value) {
 		return &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Class:   errs.ClassValidation,
-			Message: fmt.Sprintf("Invalid %s '%s': must not contain spaces or shell metacharacters", componentName, value),
+			Code:  errs.CodeValidationFailed,
+			Class: errs.ClassValidation,
+			Message: fmt.Sprintf(
+				"Invalid %s '%s': must not contain spaces or shell metacharacters",
+				componentName,
+				value,
+			),
 		}
 	}
 	return nil

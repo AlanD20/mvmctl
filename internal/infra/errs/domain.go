@@ -342,7 +342,13 @@ func PrivilegeError(msg string, details map[string]any) *DomainError {
 	if msg == "" {
 		msg = "Insufficient privileges"
 	}
-	return &DomainError{Code: CodePrivilegeRequired, Op: "host", Message: msg, Class: ClassNeedsInteraction, Details: details}
+	return &DomainError{
+		Code:    CodePrivilegeRequired,
+		Op:      "host",
+		Message: msg,
+		Class:   ClassNeedsInteraction,
+		Details: details,
+	}
 }
 
 // FormatExceptionDebug formats an error for debug output, including a full

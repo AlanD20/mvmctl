@@ -159,11 +159,14 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.SSHKeyItem
 	}
 
 	return nil, &errs.DomainError{
-		Code:    errs.CodeKeyNotFound,
-		Op:      "key",
-		Entity:  value,
-		Message: fmt.Sprintf("Key not found: '%s' is not a cached key name, a readable .pub file path, or a resolvable ID.", value),
-		Class:   errs.ClassValidation,
+		Code:   errs.CodeKeyNotFound,
+		Op:     "key",
+		Entity: value,
+		Message: fmt.Sprintf(
+			"Key not found: '%s' is not a cached key name, a readable .pub file path, or a resolvable ID.",
+			value,
+		),
+		Class: errs.ClassValidation,
 	}
 }
 

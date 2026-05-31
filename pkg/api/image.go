@@ -93,7 +93,11 @@ func (op *Operation) ImagePrune(ctx context.Context, dryRun bool, includeAll boo
 // Matches Python's return type: OperationResult[ImageItem] | NeedsInteraction
 // Returns *errs.OperationResult with Item of type *model.ImageItem (success)
 // or *errs.NeedsInteraction (when user confirmation required).
-func (op *Operation) ImagePull(ctx context.Context, input *inputs.ImagePullInput, onProgress func(errs.ProgressEvent)) interface{} {
+func (op *Operation) ImagePull(
+	ctx context.Context,
+	input *inputs.ImagePullInput,
+	onProgress func(errs.ProgressEvent),
+) interface{} {
 	var version string
 	if input.Version != nil {
 		version = *input.Version
@@ -163,7 +167,15 @@ func (op *Operation) ImagePull(ctx context.Context, input *inputs.ImagePullInput
 		}
 	}
 
-	specs, err := image.GetSpecsFor(ctx, []string{input.Type}, version, arch, cacheTTL, resolvedCIVersion, imageTypesConfig)
+	specs, err := image.GetSpecsFor(
+		ctx,
+		[]string{input.Type},
+		version,
+		arch,
+		cacheTTL,
+		resolvedCIVersion,
+		imageTypesConfig,
+	)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
@@ -220,7 +232,15 @@ func (op *Operation) ImagePull(ctx context.Context, input *inputs.ImagePullInput
 		})
 	}
 	progressBridge := operation.DownloadProgressBridge(onProgress)
-	downloadPath, err := op.Services.Image.DownloadImage(ctx, spec, imageID, workDir, input.Force, resolvedCIVersion, progressBridge)
+	downloadPath, err := op.Services.Image.DownloadImage(
+		ctx,
+		spec,
+		imageID,
+		workDir,
+		input.Force,
+		resolvedCIVersion,
+		progressBridge,
+	)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
@@ -237,7 +257,16 @@ func (op *Operation) ImagePull(ctx context.Context, input *inputs.ImagePullInput
 	}
 
 	provisionerType := op.resolveProvisionerType(ctx)
-	extractedPath, err := op.Services.Image.ExtractImage(ctx, downloadPath, imageID, workDir, spec.Format, input.Partition, input.DisabledDetectors, provisionerType)
+	extractedPath, err := op.Services.Image.ExtractImage(
+		ctx,
+		downloadPath,
+		imageID,
+		workDir,
+		spec.Format,
+		input.Partition,
+		input.DisabledDetectors,
+		provisionerType,
+	)
 	if err != nil {
 		// Catch RootPartitionDetectionError and TieDetectedError (matching Python)
 		if isPartitionDetectionError(err) {
@@ -262,7 +291,16 @@ func (op *Operation) ImagePull(ctx context.Context, input *inputs.ImagePullInput
 		})
 	}
 
-	imageItem, warnings, err := op.Services.Image.OptimizeImage(ctx, extractedPath, imageID, spec, timestamp, input.SkipOptimization, provisionerType, nil)
+	imageItem, warnings, err := op.Services.Image.OptimizeImage(
+		ctx,
+		extractedPath,
+		imageID,
+		spec,
+		timestamp,
+		input.SkipOptimization,
+		provisionerType,
+		nil,
+	)
 	if err != nil {
 		if isPartitionDetectionError(err) {
 			return &errs.OperationResult{
@@ -338,7 +376,11 @@ func (op *Operation) ImagePull(ctx context.Context, input *inputs.ImagePullInput
 
 // ImageImport imports a local image file.
 // Matches Python's ImageOperation.import_() exactly.
-func (op *Operation) ImageImport(ctx context.Context, input *inputs.ImageImportInput, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
+func (op *Operation) ImageImport(
+	ctx context.Context,
+	input *inputs.ImageImportInput,
+	onProgress func(errs.ProgressEvent),
+) *errs.OperationResult {
 	arch := ""
 	if input.Arch != nil {
 		arch = *input.Arch
@@ -408,7 +450,16 @@ func (op *Operation) ImageImport(ctx context.Context, input *inputs.ImageImportI
 	}
 
 	provisionerType := op.resolveProvisionerType(ctx)
-	extractedPath, err := op.Services.Image.ExtractImage(ctx, input.SourcePath, imageID, filepath.Join(op.CacheDir, "images"), format, input.Partition, input.DisabledDetectors, provisionerType)
+	extractedPath, err := op.Services.Image.ExtractImage(
+		ctx,
+		input.SourcePath,
+		imageID,
+		filepath.Join(op.CacheDir, "images"),
+		format,
+		input.Partition,
+		input.DisabledDetectors,
+		provisionerType,
+	)
 	if err != nil {
 		if isPartitionDetectionError(err) {
 			return &errs.OperationResult{
@@ -432,7 +483,16 @@ func (op *Operation) ImageImport(ctx context.Context, input *inputs.ImageImportI
 		})
 	}
 
-	imageItem, _, err := op.Services.Image.OptimizeImage(ctx, extractedPath, imageID, spec, timestamp, input.SkipOptimization, provisionerType, importWarnings)
+	imageItem, _, err := op.Services.Image.OptimizeImage(
+		ctx,
+		extractedPath,
+		imageID,
+		spec,
+		timestamp,
+		input.SkipOptimization,
+		provisionerType,
+		importWarnings,
+	)
 	if err != nil {
 		if isPartitionDetectionError(err) {
 			return &errs.OperationResult{
@@ -488,7 +548,12 @@ func (op *Operation) ImageImport(ctx context.Context, input *inputs.ImageImportI
 // ImageWarm pre-decompresses images to ready pool for fast VM creation.
 // Matches Python's ImageOperation.warm() exactly.
 // Python: input can be None when all=True — Go handles with nil check.
-func (op *Operation) ImageWarm(ctx context.Context, input *inputs.ImageInput, all bool, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
+func (op *Operation) ImageWarm(
+	ctx context.Context,
+	input *inputs.ImageInput,
+	all bool,
+	onProgress func(errs.ProgressEvent),
+) *errs.OperationResult {
 	var images []*model.ImageItem
 
 	if all {
@@ -565,7 +630,12 @@ func (op *Operation) ImageRemove(ctx context.Context, input *inputs.ImageInput, 
 	if err != nil {
 		return &errs.BatchResult{
 			Items: []errs.OperationResult{
-				{Status: "error", Code: string(errs.CodeImageNotFound), Message: fmt.Sprintf("Resolution failed: %v", err), Exception: err},
+				{
+					Status:    "error",
+					Code:      string(errs.CodeImageNotFound),
+					Message:   fmt.Sprintf("Resolution failed: %v", err),
+					Exception: err,
+				},
 			},
 		}
 	}
@@ -630,7 +700,13 @@ func (op *Operation) ImageFindExisting(spec *model.ImageSpec) *model.ImageItem {
 // When type_filter is set and remote=true, only returns versions for that specific image type.
 // When inputs is set and remote=false, filters local images by the given identifiers.
 // no_cache bypasses cached version listings when remote=true.
-func (op *Operation) ImageListAll(ctx context.Context, remote bool, typeFilter string, imgInputs *inputs.ImageInput, noCache bool) ([]*model.ImageItem, []*model.ImageVersion, error) {
+func (op *Operation) ImageListAll(
+	ctx context.Context,
+	remote bool,
+	typeFilter string,
+	imgInputs *inputs.ImageInput,
+	noCache bool,
+) ([]*model.ImageItem, []*model.ImageVersion, error) {
 	if remote {
 		// Discover remote images via version resolver
 		// Resolve ci_version from default firecracker binary

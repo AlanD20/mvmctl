@@ -266,7 +266,10 @@ func (pc ProvisionerContent) BuildSSHOps(user string, sshPubkeys []string) []Ope
 		ops = append(ops, ChrootOp{Command: fmt.Sprintf("chown %s:%s %s/.ssh", user, user, userHome)})
 		ops = append(ops, ChrootOp{Command: fmt.Sprintf("chown %s:%s %s/.ssh/authorized_keys", user, user, userHome)})
 		ops = append(ops, ChrootOp{Command: "mkdir -p /etc/sudoers.d"})
-		ops = append(ops, ChrootOp{Command: fmt.Sprintf("echo '%s ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/%s", user, user)})
+		ops = append(
+			ops,
+			ChrootOp{Command: fmt.Sprintf("echo '%s ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/%s", user, user)},
+		)
 		ops = append(ops, ChrootOp{Command: fmt.Sprintf("chmod 440 /etc/sudoers.d/%s", user)})
 	}
 
@@ -366,7 +369,10 @@ func (pc ProvisionerContent) BuildDeblobOps(osType string) []Operation {
 
 	// ── Common cleanup (all distros) ──────────────────────────────
 	ops = append(ops, ChrootOp{Command: "rm -rf /var/log/* /tmp/* /var/tmp/* 2>/dev/null || true"})
-	ops = append(ops, ChrootOp{Command: "rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/* 2>/dev/null || true"})
+	ops = append(
+		ops,
+		ChrootOp{Command: "rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/* 2>/dev/null || true"},
+	)
 	ops = append(ops, ChrootOp{Command: "find /var/log -type f -delete 2>/dev/null || true"})
 
 	// ── MicroVM boot optimizations (systemd) ──────────────────────────

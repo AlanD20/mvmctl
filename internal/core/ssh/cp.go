@@ -98,7 +98,10 @@ func (s *CPService) _buildSSHPrefix(ip, user, keyPath string) []string {
 func (s *CPService) _probeRemotePath(sshPrefix []string, remotePath string) (string, int64, error) {
 	probeCmd := fmt.Sprintf(
 		"test -f '%s' && echo FILE && stat -c%%s '%s' || (test -d '%s' && echo DIR && du -sb '%s' | cut -f1) || echo NONE",
-		remotePath, remotePath, remotePath, remotePath,
+		remotePath,
+		remotePath,
+		remotePath,
+		remotePath,
 	)
 	cmd := append([]string{}, sshPrefix...)
 	cmd = append(cmd, probeCmd)
@@ -358,7 +361,13 @@ func (s *CPService) _getDirectorySize(path string) int64 {
 // calls _pipe_with_progress. The behavior is:
 //   - copy_host_to_vm: checkExists=true
 //   - copy_vm_to_host and copy_vm_to_vm: checkExists=false
-func (s *CPService) _pipeWithProgress(ctx context.Context, sourceCmd, destCmd []string, totalSize int64, onProgress func(int64), checkDestExists bool) error {
+func (s *CPService) _pipeWithProgress(
+	ctx context.Context,
+	sourceCmd, destCmd []string,
+	totalSize int64,
+	onProgress func(int64),
+	checkDestExists bool,
+) error {
 	srcProc := exec.CommandContext(ctx, sourceCmd[0], sourceCmd[1:]...)
 	destProc := exec.CommandContext(ctx, destCmd[0], destCmd[1:]...)
 
@@ -430,7 +439,8 @@ func (s *CPService) _pipeWithProgress(ctx context.Context, sourceCmd, destCmd []
 		if msg == "" {
 			msg = fmt.Sprintf("Destination process failed (exit %d)", exitCode)
 		}
-		if strings.Contains(msg, "Cannot open") || strings.Contains(msg, "Exists") || strings.Contains(msg, "File exists") {
+		if strings.Contains(msg, "Cannot open") || strings.Contains(msg, "Exists") ||
+			strings.Contains(msg, "File exists") {
 			// Python: raise CPDestinationExistsError(f"Destination exists: {msg}", code="cp.destination_exists")
 			return ErrCPDestinationExists(fmt.Sprintf("Destination exists: %s", msg))
 		}
@@ -451,7 +461,14 @@ func (s *CPService) _pipeWithProgress(ctx context.Context, sourceCmd, destCmd []
 //
 // force: if true, overwrite existing files (no_overwrite = false).
 // Returns (total_bytes, message, error).
-func (s *CPService) CopyToVM(ctx context.Context, srcs []string, dest string, info model.ConnectionInfo, force bool, onProgress ProgressCallback) (int64, string, error) {
+func (s *CPService) CopyToVM(
+	ctx context.Context,
+	srcs []string,
+	dest string,
+	info model.ConnectionInfo,
+	force bool,
+	onProgress ProgressCallback,
+) (int64, string, error) {
 	if len(srcs) == 0 {
 		return 0, "", fmt.Errorf("no source paths specified")
 	}
@@ -581,7 +598,13 @@ func (s *CPService) CopyToVM(ctx context.Context, srcs []string, dest string, in
 //
 // force: if true, overwrite existing destination files.
 // Returns (total_bytes, message, error).
-func (s *CPService) CopyFromVM(ctx context.Context, src, dest string, info model.ConnectionInfo, force bool, onProgress ProgressCallback) (int64, string, error) {
+func (s *CPService) CopyFromVM(
+	ctx context.Context,
+	src, dest string,
+	info model.ConnectionInfo,
+	force bool,
+	onProgress ProgressCallback,
+) (int64, string, error) {
 	sshPrefix := s._buildSSHPrefix(info.Host, info.User, info.KeyPath)
 	remoteGnu := s._probeRemoteTar(sshPrefix)
 	localGnu := s._isLocalTarGnu()
@@ -700,7 +723,13 @@ func (s *CPService) CopyFromVM(ctx context.Context, src, dest string, info model
 // Matches Python's CPService.copy_vm_to_vm() exactly.
 // Uses a direct pipe: ssh VM1 "tar cf - src" | ssh VM2 "tar xf - -C dest"
 // Returns (total_bytes, message, error).
-func (s *CPService) CopyVMToVM(ctx context.Context, srcVMInfo, destVMInfo model.ConnectionInfo, src, dest string, force bool, onProgress ProgressCallback) (int64, string, error) {
+func (s *CPService) CopyVMToVM(
+	ctx context.Context,
+	srcVMInfo, destVMInfo model.ConnectionInfo,
+	src, dest string,
+	force bool,
+	onProgress ProgressCallback,
+) (int64, string, error) {
 	noOverwrite := !force
 	srcSSHPrefix := s._buildSSHPrefix(srcVMInfo.Host, srcVMInfo.User, srcVMInfo.KeyPath)
 	destSSHPrefix := s._buildSSHPrefix(destVMInfo.Host, destVMInfo.User, destVMInfo.KeyPath)

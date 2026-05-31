@@ -63,7 +63,11 @@ type NetworkCreateRequest struct {
 }
 
 // NewNetworkCreateRequest creates a new NetworkCreateRequest.
-func NewNetworkCreateRequest(inputs NetworkCreateInput, db *sqlx.DB, networkRepo network.Repository) *NetworkCreateRequest {
+func NewNetworkCreateRequest(
+	inputs NetworkCreateInput,
+	db *sqlx.DB,
+	networkRepo network.Repository,
+) *NetworkCreateRequest {
 	return &NetworkCreateRequest{
 		db:          db,
 		input:       inputs,

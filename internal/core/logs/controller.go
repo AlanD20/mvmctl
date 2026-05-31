@@ -52,7 +52,12 @@ func (c *Controller) VMInfo() model.VMInfo {
 
 // Show reads the last N lines from the VM's log file.
 // Matches Python's LogController.show().
-func (c *Controller) Show(ctx context.Context, logType string, lines int, logFilename, serialOutputFilename string) ([]string, error) {
+func (c *Controller) Show(
+	ctx context.Context,
+	logType string,
+	lines int,
+	logFilename, serialOutputFilename string,
+) ([]string, error) {
 	logFile, err := c.getLogPath(ctx, logType, logFilename, serialOutputFilename)
 	if err != nil {
 		return nil, err
@@ -66,7 +71,10 @@ func (c *Controller) Show(ctx context.Context, logType string, lines int, logFil
 //
 //	for line in controller.follow(...):
 //	    print(line)
-func (c *Controller) FollowSync(ctx context.Context, logType, logFilename, serialOutputFilename string) (<-chan string, <-chan error) {
+func (c *Controller) FollowSync(
+	ctx context.Context,
+	logType, logFilename, serialOutputFilename string,
+) (<-chan string, <-chan error) {
 	logFile, err := c.getLogPath(ctx, logType, logFilename, serialOutputFilename)
 	if err != nil {
 		lineCh := make(chan string, 10)
@@ -82,7 +90,12 @@ func (c *Controller) FollowSync(ctx context.Context, logType, logFilename, seria
 // Follow streams log file lines in real-time.
 // Lines are sent to the provided channel until context is cancelled.
 // Matches Python's LogController.follow() — which returns a Generator[str].
-func (c *Controller) Follow(ctx context.Context, logType string, lines chan<- string, logFilename, serialOutputFilename string) error {
+func (c *Controller) Follow(
+	ctx context.Context,
+	logType string,
+	lines chan<- string,
+	logFilename, serialOutputFilename string,
+) error {
 	logFile, err := c.getLogPath(ctx, logType, logFilename, serialOutputFilename)
 	if err != nil {
 		return err

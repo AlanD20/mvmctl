@@ -36,8 +36,12 @@ func (r *sqliteRepo) FindByPrefix(ctx context.Context, prefix string) ([]*model.
 
 func (r *sqliteRepo) GetByType(ctx context.Context, imgType string) (*model.ImageItem, error) {
 	var img model.ImageItem
-	err := r.db.GetContext(ctx, &img,
-		`SELECT * FROM images WHERE type = ? AND deleted_at IS NULL AND is_present = 1 ORDER BY is_default DESC, created_at DESC`, imgType)
+	err := r.db.GetContext(
+		ctx,
+		&img,
+		`SELECT * FROM images WHERE type = ? AND deleted_at IS NULL AND is_present = 1 ORDER BY is_default DESC, created_at DESC`,
+		imgType,
+	)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -46,8 +50,13 @@ func (r *sqliteRepo) GetByType(ctx context.Context, imgType string) (*model.Imag
 
 func (r *sqliteRepo) GetByVersionAndType(ctx context.Context, version, imgType string) (*model.ImageItem, error) {
 	var img model.ImageItem
-	err := r.db.GetContext(ctx, &img,
-		`SELECT * FROM images WHERE version = ? AND type = ? AND deleted_at IS NULL AND is_present = 1`, version, imgType)
+	err := r.db.GetContext(
+		ctx,
+		&img,
+		`SELECT * FROM images WHERE version = ? AND type = ? AND deleted_at IS NULL AND is_present = 1`,
+		version,
+		imgType,
+	)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

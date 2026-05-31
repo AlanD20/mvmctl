@@ -85,7 +85,10 @@ func (t *NFTablesTracker) jumpRuleExists(ctx context.Context, family, table, bui
 // ── Find jump rule handle ──
 // Matches Python NFTablesTracker._find_jump_rule_handle().
 
-func (t *NFTablesTracker) findJumpRuleHandle(ctx context.Context, family, table, builtinChain, targetChain string) *int {
+func (t *NFTablesTracker) findJumpRuleHandle(
+	ctx context.Context,
+	family, table, builtinChain, targetChain string,
+) *int {
 	result := system.RunCmdCompat(ctx,
 		[]string{"nft", "-a", "list", "chain", family, table, builtinChain},
 		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
@@ -135,7 +138,11 @@ func (t *NFTablesTracker) Initialize(ctx context.Context) {
 			continue
 		}
 		cmd := []string{"nft", "add", "chain", "ip", table, string(chain)}
-		result := system.RunCmdCompat(ctx, cmd, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true})
+		result := system.RunCmdCompat(
+			ctx,
+			cmd,
+			system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true},
+		)
 		if result.ExitCode != 0 {
 			slog.Error("Failed to create nftables chain",
 				"chain", string(chain),
@@ -161,7 +168,11 @@ func (t *NFTablesTracker) Initialize(ctx context.Context) {
 			"nft", "add", "chain", jr.family, jr.table, jr.builtin,
 			hookDef,
 		}
-		result := system.RunCmdCompat(ctx, cmd, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true})
+		result := system.RunCmdCompat(
+			ctx,
+			cmd,
+			system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true},
+		)
 		if result.ExitCode != 0 {
 			slog.Error("Failed to create built-in chain",
 				"chain", jr.builtin,
@@ -194,7 +205,11 @@ func (t *NFTablesTracker) Initialize(ctx context.Context) {
 			jr.family, jr.table, jr.builtin,
 			"jump", jr.target,
 		}
-		result := system.RunCmdCompat(ctx, cmd, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true})
+		result := system.RunCmdCompat(
+			ctx,
+			cmd,
+			system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true},
+		)
 		if result.ExitCode != 0 {
 			slog.Error("Failed to insert jump rule",
 				"builtin", jr.builtin,
@@ -218,17 +233,31 @@ func (t *NFTablesTracker) Initialize(ctx context.Context) {
 // Matches Python NFTablesTracker.ensure_chain().
 // Python raises RuntimeError on failure; Go returns false.
 
-func (t *NFTablesTracker) EnsureChain(ctx context.Context, chainName model.FirewallChain, table model.FirewallTable, autoJumpFrom string, position int) bool {
+func (t *NFTablesTracker) EnsureChain(
+	ctx context.Context,
+	chainName model.FirewallChain,
+	table model.FirewallTable,
+	autoJumpFrom string,
+	position int,
+) bool {
 	if t.chainExists(ctx, "ip", string(table), string(chainName)) {
 		slog.Debug("Chain already exists", "chain", string(chainName), "table", string(table))
 		return false
 	}
 
 	// Ensure the table exists before adding a chain to it
-	system.RunCmdCompat(ctx, []string{"nft", "add", "table", "ip", string(table)}, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+	system.RunCmdCompat(
+		ctx,
+		[]string{"nft", "add", "table", "ip", string(table)},
+		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+	)
 
 	cmd := []string{"nft", "add", "chain", "ip", string(table), string(chainName)}
-	result := system.RunCmdCompat(ctx, cmd, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true})
+	result := system.RunCmdCompat(
+		ctx,
+		cmd,
+		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true},
+	)
 	if result.ExitCode != 0 {
 		slog.Error("Failed to create chain",
 			"chain", string(chainName),
@@ -362,7 +391,11 @@ func (t *NFTablesTracker) ruleToNftExpr(rule *model.FirewallRule) []string {
 // ── Ensure rule ──
 // Matches Python NFTablesTracker.ensure_rule().
 
-func (t *NFTablesTracker) EnsureRule(ctx context.Context, rule model.FirewallRule, contextLabel string) model.FirewallRuleResult {
+func (t *NFTablesTracker) EnsureRule(
+	ctx context.Context,
+	rule model.FirewallRule,
+	contextLabel string,
+) model.FirewallRuleResult {
 	nftExpr := t.ruleToNftExpr(&rule)
 
 	// Check if rule exists in database
@@ -408,9 +441,18 @@ func (t *NFTablesTracker) EnsureRule(ctx context.Context, rule model.FirewallRul
 	ruleCmdStr := cmdStr
 	rule.CommandString = &ruleCmdStr
 
-	addResult := system.RunCmdCompat(ctx, addCmd, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true})
+	addResult := system.RunCmdCompat(
+		ctx,
+		addCmd,
+		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true},
+	)
 	if addResult.ExitCode != 0 {
-		errMsg := fmt.Sprintf("Failed to create nftables rule: command %s failed (exit %d): %s", addCmd[0], addResult.ExitCode, addResult.Stderr)
+		errMsg := fmt.Sprintf(
+			"Failed to create nftables rule: command %s failed (exit %d): %s",
+			addCmd[0],
+			addResult.ExitCode,
+			addResult.Stderr,
+		)
 		return model.FirewallRuleResult{
 			Success:         false,
 			ErrorMessage:    &errMsg,
@@ -477,7 +519,11 @@ func (t *NFTablesTracker) RemoveRule(ctx context.Context, rule model.FirewallRul
 		strconv.Itoa(*handle),
 	}
 
-	deleteResult := system.RunCmdCompat(ctx, delCmd, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+	deleteResult := system.RunCmdCompat(
+		ctx,
+		delCmd,
+		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+	)
 	cmdStr := strings.Join(delCmd, " ")
 	if deleteResult.ExitCode != 0 {
 		errMsg := fmt.Sprintf("Failed to remove nftables rule: %s", deleteResult.Stderr)
@@ -547,7 +593,11 @@ func (t *NFTablesTracker) BatchEnsureRules(ctx context.Context, rules []model.Fi
 
 	nftScript := strings.Join(lines, "\n") + "\n"
 
-	result := system.RunCmdCompat(ctx, []string{"nft", "-f", "-"}, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true, Input: nftScript})
+	result := system.RunCmdCompat(
+		ctx,
+		[]string{"nft", "-f", "-"},
+		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true, Input: nftScript},
+	)
 	if result.ExitCode != 0 {
 		errMsg := fmt.Sprintf("command nft -f - failed (exit %d): %s", result.ExitCode, result.Stderr)
 		return model.FirewallRuleResult{
@@ -596,7 +646,11 @@ func (t *NFTablesTracker) BatchRemoveRules(ctx context.Context, rules []model.Fi
 			strconv.Itoa(*handle),
 		}
 
-		delResult := system.RunCmdCompat(ctx, delCmd, system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false})
+		delResult := system.RunCmdCompat(
+			ctx,
+			delCmd,
+			system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+		)
 		if delResult.ExitCode != 0 {
 			lastError = delResult.Stderr
 			if lastError == "" {
@@ -699,7 +753,11 @@ func (t *NFTablesTracker) Teardown(ctx context.Context) {
 // ── Flush chain ──
 // Matches Python NFTablesTracker.flush_chain().
 
-func (t *NFTablesTracker) FlushChain(ctx context.Context, chain model.FirewallChain, tableName model.FirewallTable) bool {
+func (t *NFTablesTracker) FlushChain(
+	ctx context.Context,
+	chain model.FirewallChain,
+	tableName model.FirewallTable,
+) bool {
 	chainName := string(chain)
 	tableStr := string(tableName)
 

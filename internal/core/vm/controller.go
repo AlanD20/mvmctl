@@ -213,7 +213,12 @@ func (c *Controller) Pause(ctx context.Context) error {
 	}
 	if c.vm.Status == model.StatusError || c.vm.Status == model.StatusCrashed {
 		return &ControllerStateError{
-			Message: fmt.Sprintf("VM '%s' is in %s state — cannot pause (current state: %s)", name, c.vm.Status, c.vm.Status),
+			Message: fmt.Sprintf(
+				"VM '%s' is in %s state — cannot pause (current state: %s)",
+				name,
+				c.vm.Status,
+				c.vm.Status,
+			),
 		}
 	}
 
@@ -254,7 +259,12 @@ func (c *Controller) Resume(ctx context.Context) error {
 	// Error/crashed state
 	if c.vm.Status == model.StatusError || c.vm.Status == model.StatusCrashed {
 		return &ControllerStateError{
-			Message: fmt.Sprintf("VM '%s' is in %s state — remove and recreate (current state: %s)", name, c.vm.Status, c.vm.Status),
+			Message: fmt.Sprintf(
+				"VM '%s' is in %s state — remove and recreate (current state: %s)",
+				name,
+				c.vm.Status,
+				c.vm.Status,
+			),
 		}
 	}
 
@@ -268,7 +278,11 @@ func (c *Controller) Resume(ctx context.Context) error {
 	// Wrong direction — shutting down
 	if c.vm.Status == model.StatusStopping {
 		return &ControllerStateError{
-			Message: fmt.Sprintf("VM '%s' is shutting down — use start() after it stops (current state: %s)", name, c.vm.Status),
+			Message: fmt.Sprintf(
+				"VM '%s' is shutting down — use start() after it stops (current state: %s)",
+				name,
+				c.vm.Status,
+			),
 		}
 	}
 
@@ -308,14 +322,20 @@ func (c *Controller) Start(ctx context.Context) error {
 
 	// No-op — already in or moving toward target state (RUNNING),
 	// or will be stopped soon (retry start after)
-	if c.vm.Status == model.StatusRunning || c.vm.Status == model.StatusStarting || c.vm.Status == model.StatusStopping {
+	if c.vm.Status == model.StatusRunning || c.vm.Status == model.StatusStarting ||
+		c.vm.Status == model.StatusStopping {
 		return nil
 	}
 
 	// Error/crashed state
 	if c.vm.Status == model.StatusError || c.vm.Status == model.StatusCrashed {
 		return &ControllerStateError{
-			Message: fmt.Sprintf("VM '%s' is in %s state — remove and recreate (current state: %s)", name, c.vm.Status, c.vm.Status),
+			Message: fmt.Sprintf(
+				"VM '%s' is in %s state — remove and recreate (current state: %s)",
+				name,
+				c.vm.Status,
+				c.vm.Status,
+			),
 		}
 	}
 
@@ -384,7 +404,12 @@ func (c *Controller) Snapshot(ctx context.Context, memOut, stateOut string) (err
 	}
 	if c.vm.Status == model.StatusError || c.vm.Status == model.StatusCrashed {
 		return &ControllerStateError{
-			Message: fmt.Sprintf("VM '%s' is in %s state — cannot snapshot (current state: %s)", name, c.vm.Status, c.vm.Status),
+			Message: fmt.Sprintf(
+				"VM '%s' is in %s state — cannot snapshot (current state: %s)",
+				name,
+				c.vm.Status,
+				c.vm.Status,
+			),
 		}
 	}
 

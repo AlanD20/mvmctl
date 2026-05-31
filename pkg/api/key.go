@@ -129,19 +129,35 @@ func (op *Operation) KeyImport(ctx context.Context, input *inputs.KeyImportInput
 		altPath := input.PubKeyPath + ".pub"
 		if _, err := os.Stat(altPath); err == nil {
 			return &errs.OperationResult{
-				Status:  "error",
-				Code:    "key.add_failed",
-				Message: fmt.Sprintf("'%s' looks like a private key.\nUse the public key instead: mvm key import %s %s", input.PubKeyPath, input.Name, altPath),
+				Status: "error",
+				Code:   "key.add_failed",
+				Message: fmt.Sprintf(
+					"'%s' looks like a private key.\nUse the public key instead: mvm key import %s %s",
+					input.PubKeyPath,
+					input.Name,
+					altPath,
+				),
 			}
 		}
 		return &errs.OperationResult{
-			Status:  "error",
-			Code:    "key.add_failed",
-			Message: fmt.Sprintf("'%s' looks like a private key.\nPass the corresponding .pub file instead: mvm key import %s <path>.pub", input.PubKeyPath, input.Name),
+			Status: "error",
+			Code:   "key.add_failed",
+			Message: fmt.Sprintf(
+				"'%s' looks like a private key.\nPass the corresponding .pub file instead: mvm key import %s <path>.pub",
+				input.PubKeyPath,
+				input.Name,
+			),
 		}
 	}
 
-	keyItem, err := op.Services.Key.Import(ctx, input.Name, input.PubKeyPath, pubKeyContent, input.Overwrite, input.SetDefault)
+	keyItem, err := op.Services.Key.Import(
+		ctx,
+		input.Name,
+		input.PubKeyPath,
+		pubKeyContent,
+		input.Overwrite,
+		input.SetDefault,
+	)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
@@ -184,9 +200,13 @@ func (op *Operation) KeyRemove(ctx context.Context, input *inputs.KeyInput, forc
 				vmNames[i] = vm.Name
 			}
 			results = append(results, errs.OperationResult{
-				Status:  "error",
-				Code:    "key.remove_failed",
-				Message: fmt.Sprintf("Key '%s' is used by VM(s): %s. Use --force to remove anyway.", key.Name, strings.Join(vmNames, ", ")),
+				Status: "error",
+				Code:   "key.remove_failed",
+				Message: fmt.Sprintf(
+					"Key '%s' is used by VM(s): %s. Use --force to remove anyway.",
+					key.Name,
+					strings.Join(vmNames, ", "),
+				),
 			})
 			continue
 		}
@@ -251,7 +271,12 @@ func (op *Operation) KeyInspect(ctx context.Context, input *inputs.KeyInput) (*r
 // KeyExport exports a keypair to a destination directory.
 // Matches Python's KeyOperation.export() exactly — uses KeyRequest resolution
 // and KeyController.export(). Python wraps controller.export() in try/except Exception.
-func (op *Operation) KeyExport(ctx context.Context, input *inputs.KeyInput, destination string, overwrite bool) *errs.OperationResult {
+func (op *Operation) KeyExport(
+	ctx context.Context,
+	input *inputs.KeyInput,
+	destination string,
+	overwrite bool,
+) *errs.OperationResult {
 	// Python: request = KeyRequest(inputs=inputs, db=db); resolved = request.resolve()
 	req := inputs.NewKeyRequest(*input, op.Repos.Key)
 	resolved, err := req.Resolve(ctx)

@@ -358,20 +358,30 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 	// Item 1: VCPU range validation (Python _vm_create_input.py:616-621)
 	if result.VCPUCount < infra.VCPUMin || result.VCPUCount > infra.VCPUMax {
 		return nil, &errs.DomainError{
-			Code:    errs.CodeVMCreateFailed,
-			Op:      "vm_create",
-			Message: fmt.Sprintf("Invalid vcpus=%d: must be between %d and %d", result.VCPUCount, infra.VCPUMin, infra.VCPUMax),
-			Class:   errs.ClassValidation,
+			Code: errs.CodeVMCreateFailed,
+			Op:   "vm_create",
+			Message: fmt.Sprintf(
+				"Invalid vcpus=%d: must be between %d and %d",
+				result.VCPUCount,
+				infra.VCPUMin,
+				infra.VCPUMax,
+			),
+			Class: errs.ClassValidation,
 		}
 	}
 
 	// Item 2: Memory range validation (Python _vm_create_input.py:622-629)
 	if result.MemSizeMib < infra.MemMinMB || result.MemSizeMib > infra.MemMaxMB {
 		return nil, &errs.DomainError{
-			Code:    errs.CodeVMCreateFailed,
-			Op:      "vm_create",
-			Message: fmt.Sprintf("Invalid mem_size_mib=%d: must be between %d and %d", result.MemSizeMib, infra.MemMinMB, infra.MemMaxMB),
-			Class:   errs.ClassValidation,
+			Code: errs.CodeVMCreateFailed,
+			Op:   "vm_create",
+			Message: fmt.Sprintf(
+				"Invalid mem_size_mib=%d: must be between %d and %d",
+				result.MemSizeMib,
+				infra.MemMinMB,
+				infra.MemMaxMB,
+			),
+			Class: errs.ClassValidation,
 		}
 	}
 
@@ -423,20 +433,26 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 			imageRef = *raw.Image
 		}
 		return nil, &errs.DomainError{
-			Code:    errs.CodeVMCreateFailed,
-			Op:      "vm_create",
-			Message: fmt.Sprintf("Image %s is missing minimum_rootfs_size_mib. This image was created with an older version. Re-import the image: mvm image pull <slug> --force", imageRef),
-			Class:   errs.ClassValidation,
+			Code: errs.CodeVMCreateFailed,
+			Op:   "vm_create",
+			Message: fmt.Sprintf(
+				"Image %s is missing minimum_rootfs_size_mib. This image was created with an older version. Re-import the image: mvm image pull <slug> --force",
+				imageRef,
+			),
+			Class: errs.ClassValidation,
 		}
 	}
 	if result.DiskSizeBytes > 0 {
 		minRequiredBytes := int64(result.Image.MinRootfsSizeMiB) * disk.MebibyteBytes
 		if result.DiskSizeBytes < minRequiredBytes {
 			return nil, &errs.DomainError{
-				Code:    errs.CodeVMCreateFailed,
-				Op:      "vm_create",
-				Message: fmt.Sprintf("Requested disk size is smaller than minimum required (%d MiB). Use a larger size or choose a different image.", result.Image.MinRootfsSizeMiB),
-				Class:   errs.ClassValidation,
+				Code: errs.CodeVMCreateFailed,
+				Op:   "vm_create",
+				Message: fmt.Sprintf(
+					"Requested disk size is smaller than minimum required (%d MiB). Use a larger size or choose a different image.",
+					result.Image.MinRootfsSizeMiB,
+				),
+				Class: errs.ClassValidation,
 			}
 		}
 	}
@@ -526,10 +542,15 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 		maxVMs := resolveSettingInt(ctx, b.db, "settings.vm", "max_vms")
 		if current+count > maxVMs {
 			return nil, &errs.DomainError{
-				Code:    errs.CodeVMResourceExhausted,
-				Op:      "vm_create",
-				Message: fmt.Sprintf("Creating %d VMs would exceed the limit (%d/%d). Remove existing VMs first.", count, current, maxVMs),
-				Class:   errs.ClassValidation,
+				Code: errs.CodeVMResourceExhausted,
+				Op:   "vm_create",
+				Message: fmt.Sprintf(
+					"Creating %d VMs would exceed the limit (%d/%d). Remove existing VMs first.",
+					count,
+					current,
+					maxVMs,
+				),
+				Class: errs.ClassValidation,
 			}
 		}
 	}
@@ -651,10 +672,13 @@ func (b *VMCreateBuilder) resolveBinary(ctx context.Context, raw VMCreateInput) 
 		//         raise BinaryNotFoundError("Firecracker binary not found at {bin_path}. ...")
 		if _, err := os.Stat(binPath); os.IsNotExist(err) {
 			return nil, &errs.DomainError{
-				Code:    errs.CodeVMBinaryNotFound,
-				Op:      "vm_create",
-				Message: fmt.Sprintf("Firecracker binary not found at %s. Use 'mvm bin pull <version>' or provide a valid path.", binPath),
-				Class:   errs.ClassValidation,
+				Code: errs.CodeVMBinaryNotFound,
+				Op:   "vm_create",
+				Message: fmt.Sprintf(
+					"Firecracker binary not found at %s. Use 'mvm bin pull <version>' or provide a valid path.",
+					binPath,
+				),
+				Class: errs.ClassValidation,
 			}
 		} else if err != nil {
 			return nil, &errs.DomainError{
@@ -668,10 +692,13 @@ func (b *VMCreateBuilder) resolveBinary(ctx context.Context, raw VMCreateInput) 
 		// X_OK = 1 on Linux/POSIX (defined as syscall.X_OK on most platforms)
 		if err := syscall.Access(binPath, 1); err != nil {
 			return nil, &errs.DomainError{
-				Code:    errs.CodeVMBinaryNotFound,
-				Op:      "vm_create",
-				Message: fmt.Sprintf("Firecracker binary not found at %s. Use 'mvm bin pull <version>' or provide a valid path.", binPath),
-				Class:   errs.ClassValidation,
+				Code: errs.CodeVMBinaryNotFound,
+				Op:   "vm_create",
+				Message: fmt.Sprintf(
+					"Firecracker binary not found at %s. Use 'mvm bin pull <version>' or provide a valid path.",
+					binPath,
+				),
+				Class: errs.ClassValidation,
 			}
 		}
 
@@ -831,10 +858,13 @@ func (b *VMCreateBuilder) resolveCloudInitMode(raw VMCreateInput) (CloudInitMode
 	validModes := map[string]bool{"inject": true, "iso": true, "off": true, "net": true}
 	if !validModes[modeLower] {
 		return CloudInitModeResolved{}, &errs.DomainError{
-			Code:    errs.CodeCloudInitProvisionFailed,
-			Op:      "vm_create",
-			Message: fmt.Sprintf("Invalid --cloud-init-mode '%s'. Valid modes: inject, iso, off, net", *raw.CloudInitMode),
-			Class:   errs.ClassValidation,
+			Code: errs.CodeCloudInitProvisionFailed,
+			Op:   "vm_create",
+			Message: fmt.Sprintf(
+				"Invalid --cloud-init-mode '%s'. Valid modes: inject, iso, off, net",
+				*raw.CloudInitMode,
+			),
+			Class: errs.ClassValidation,
 		}
 	}
 

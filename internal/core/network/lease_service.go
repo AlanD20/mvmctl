@@ -21,7 +21,12 @@ type LeaseService struct {
 // NetworkResolver() which uses the default database. Go requires an explicit
 // Repository for string resolution, and returns an error if networkRepo
 // is nil when it's needed.
-func NewLeaseService(ctx context.Context, entity any, leaseRepo LeaseRepository, networkRepo Repository) (*LeaseService, error) {
+func NewLeaseService(
+	ctx context.Context,
+	entity any,
+	leaseRepo LeaseRepository,
+	networkRepo Repository,
+) (*LeaseService, error) {
 	switch e := entity.(type) {
 	case *model.Network:
 		return &LeaseService{

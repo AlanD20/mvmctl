@@ -22,7 +22,10 @@ var keyColumns = []common.ListingColumn{
 	}},
 	{Header: "Algorithm", Extract: func(v any) string { return v.(*model.SSHKeyItem).Algorithm }},
 	{Header: "Fingerprint", Extract: func(v any) string { return v.(*model.SSHKeyItem).Fingerprint }, LongOnly: true},
-	{Header: "Created", Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.SSHKeyItem).CreatedAt, "relative") }},
+	{
+		Header:  "Created",
+		Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.SSHKeyItem).CreatedAt, "relative") },
+	},
 }
 
 func NewKeyCmd(op *api.Operation) *cobra.Command {
@@ -285,7 +288,12 @@ func newKeyExportCmd(op *api.Operation) *cobra.Command {
 
 			path := args[1]
 
-			exportResult := op.KeyExport(cmd.Context(), &inputs.KeyInput{Identifiers: []string{identifier}}, path, force)
+			exportResult := op.KeyExport(
+				cmd.Context(),
+				&inputs.KeyInput{Identifiers: []string{identifier}},
+				path,
+				force,
+			)
 			if exportResult.Status == "error" {
 				common.Cli.Error(exportResult.Message)
 				return fmt.Errorf("%s", exportResult.Message)

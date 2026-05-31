@@ -116,7 +116,11 @@ func (s *Service) CreateKeypair(ctx context.Context, params *CreateParams) (*mod
 }
 
 // Import imports a public key into the cache.
-func (s *Service) Import(ctx context.Context, name, pubKeyPath, pubKeyContent string, overwrite, setDefault bool) (*model.SSHKeyItem, error) {
+func (s *Service) Import(
+	ctx context.Context,
+	name, pubKeyPath, pubKeyContent string,
+	overwrite, setDefault bool,
+) (*model.SSHKeyItem, error) {
 	// Check for existing key by name
 	existing, _ := s.repo.GetByName(ctx, name)
 	if existing != nil {

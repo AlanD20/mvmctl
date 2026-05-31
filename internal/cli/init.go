@@ -134,7 +134,17 @@ func handleInteractiveFlow(
 	for {
 		// Call InitOperation.Run with current state
 		// Python: result = InitOperation.run(...)
-		result = op.InitRunFull(ctx, skipHost, skipNetwork, nonInteractive, sudoCompleted, hostSetupMessage, downloadVersion, guestfsEnabled, nil)
+		result = op.InitRunFull(
+			ctx,
+			skipHost,
+			skipNetwork,
+			nonInteractive,
+			sudoCompleted,
+			hostSetupMessage,
+			downloadVersion,
+			guestfsEnabled,
+			nil,
+		)
 
 		if result.NeedsInteraction == nil {
 			return result, nil
@@ -187,7 +197,12 @@ func handleInteractiveFlow(
 				common.Cli.Info(fmt.Sprintf("run:  sudo %s host init", infra.CLIName))
 			} else {
 				common.Cli.Warning("this requires sudo once")
-				common.Cli.Info(fmt.Sprintf("creates the %s group and sudoers drop-in for passwordless sudo on future runs", infra.MVMUnixGroup))
+				common.Cli.Info(
+					fmt.Sprintf(
+						"creates the %s group and sudoers drop-in for passwordless sudo on future runs",
+						infra.MVMUnixGroup,
+					),
+				)
 			}
 
 			if nonInteractive {
@@ -198,7 +213,9 @@ func handleInteractiveFlow(
 			if promptYesNo(fmt.Sprintf("Run 'sudo %s host init' now?", infra.CLIName), true) {
 				proc := runWithSudo(ctx)
 				if !proc.Success {
-					common.Cli.Warning(fmt.Sprintf("host init failed. Run 'sudo %s host init' manually.", infra.CLIName))
+					common.Cli.Warning(
+						fmt.Sprintf("host init failed. Run 'sudo %s host init' manually.", infra.CLIName),
+					)
 					break
 				}
 				hostStateAfter := checkHostState()

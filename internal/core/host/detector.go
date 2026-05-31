@@ -384,7 +384,12 @@ func parseModules() map[string]bool {
 }
 
 // ── DetectResources ──
-func DetectResources(ctx context.Context, hardware *model.HostHardware, limits *model.HostLimits, vmDirPath string) (*model.HostResources, error) {
+func DetectResources(
+	ctx context.Context,
+	hardware *model.HostHardware,
+	limits *model.HostLimits,
+	vmDirPath string,
+) (*model.HostResources, error) {
 	meminfo := readMeminfo()
 	memoryAvailableMiB := meminfo["MemAvailable"] / 1024
 

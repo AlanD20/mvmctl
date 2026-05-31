@@ -244,10 +244,13 @@ func (r *KernelPullRequest) ensureValidate() error {
 	validTypes := map[string]bool{"firecracker": true, "official": true}
 	if !validTypes[r.result.KernelType] {
 		return &errs.DomainError{
-			Code:    errs.CodeKernelBuildFailed,
-			Op:      "kernel_pull",
-			Message: fmt.Sprintf("Unsupported kernel type: %s. Valid types: firecracker, official", r.result.KernelType),
-			Class:   errs.ClassValidation,
+			Code: errs.CodeKernelBuildFailed,
+			Op:   "kernel_pull",
+			Message: fmt.Sprintf(
+				"Unsupported kernel type: %s. Valid types: firecracker, official",
+				r.result.KernelType,
+			),
+			Class: errs.ClassValidation,
 		}
 	}
 
@@ -260,10 +263,13 @@ func (r *KernelPullRequest) ensureValidate() error {
 		stripped := strings.TrimPrefix(*r.result.Version, "v")
 		if !isValidVersion(stripped) {
 			return &errs.DomainError{
-				Code:    errs.CodeKernelBuildFailed,
-				Op:      "kernel_pull",
-				Message: fmt.Sprintf("Invalid kernel version: '%s'. Expected format like '5.10', '6.1.0', or 'v6.1'", *r.result.Version),
-				Class:   errs.ClassValidation,
+				Code: errs.CodeKernelBuildFailed,
+				Op:   "kernel_pull",
+				Message: fmt.Sprintf(
+					"Invalid kernel version: '%s'. Expected format like '5.10', '6.1.0', or 'v6.1'",
+					*r.result.Version,
+				),
+				Class: errs.ClassValidation,
 			}
 		}
 	}
@@ -274,10 +280,13 @@ func (r *KernelPullRequest) ensureValidate() error {
 	validArchs := map[string]bool{"x86_64": true, "amd64": true, "arm64": true, "aarch64": true}
 	if !validArchs[r.result.Arch] {
 		return &errs.DomainError{
-			Code:    errs.CodeKernelBuildFailed,
-			Op:      "kernel_pull",
-			Message: fmt.Sprintf("Unsupported architecture: %s. Valid architectures: x86_64, amd64, arm64, aarch64", r.result.Arch),
-			Class:   errs.ClassValidation,
+			Code: errs.CodeKernelBuildFailed,
+			Op:   "kernel_pull",
+			Message: fmt.Sprintf(
+				"Unsupported architecture: %s. Valid architectures: x86_64, amd64, arm64, aarch64",
+				r.result.Arch,
+			),
+			Class: errs.ClassValidation,
 		}
 	}
 

@@ -101,7 +101,11 @@ func ParseVMPath(path string) (vmIdent, remotePath string) {
 
 // Resolve resolves all inputs to explicit values.
 // Matches Python's CPRequest.resolve().
-func (r *CPRequest) Resolve(ctx context.Context, vmRepo vm.Repository, keyRepo key.Repository) (*ResolvedCPInput, error) {
+func (r *CPRequest) Resolve(
+	ctx context.Context,
+	vmRepo vm.Repository,
+	keyRepo key.Repository,
+) (*ResolvedCPInput, error) {
 	sources := r.input.Sources
 	dstVM, dstPath := ParseVMPath(r.input.Dst)
 
@@ -187,7 +191,13 @@ func (r *CPRequest) Resolve(ctx context.Context, vmRepo vm.Repository, keyRepo k
 
 // resolveVMSide resolves a VM-side path to connection info.
 // Matches Python's CPRequest._resolve_vm_side().
-func (r *CPRequest) resolveVMSide(ctx context.Context, vmIdent, remotePath string, isSource bool, vmRepo vm.Repository, keyRepo key.Repository) (*ResolvedCPInfo, error) {
+func (r *CPRequest) resolveVMSide(
+	ctx context.Context,
+	vmIdent, remotePath string,
+	isSource bool,
+	vmRepo vm.Repository,
+	keyRepo key.Repository,
+) (*ResolvedCPInfo, error) {
 	vmEntity, err := r.resolveVM(ctx, vmIdent, vmRepo)
 	if err != nil {
 		return nil, err
