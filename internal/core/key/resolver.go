@@ -191,7 +191,7 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) (*Reso
 				return nil, err
 			}
 			// Match Python's str(e) which returns just the message for MVMError subclasses.
-			errsList = append(errsList, identifier+": "+err.Error())
+			errsList = append(errsList, err.Error())
 		} else if !resolvedIDs[key.ID] {
 			resolvedIDs[key.ID] = true
 			items = append(items, key)

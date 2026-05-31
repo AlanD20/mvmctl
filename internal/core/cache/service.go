@@ -3,6 +3,7 @@
 package cache
 
 import (
+	"bytes"
 	"context"
 	"log/slog"
 	"os"
@@ -18,16 +19,18 @@ import (
 // Service provides stateless cache cleanup operations.
 // Matches Python's CacheService exactly — all methods are the equivalent of
 // Python's @staticmethod methods (no instance state needed).
-// The cacheDir field is kept only for delegation to loopmount operations that
-// require it for binary path resolution.
+// The cacheDir and tempDir fields are kept for delegation to operations that
+// require them for binary path resolution or temp directory scanning.
 type Service struct {
 	cacheDir string
+	tempDir  string
 }
 
 // NewService creates a new CacheService.
-func NewService(cacheDir string) *Service {
+func NewService(cacheDir, tempDir string) *Service {
 	return &Service{
 		cacheDir: cacheDir,
+		tempDir:  tempDir,
 	}
 }
 
@@ -50,8 +53,8 @@ func NewService(cacheDir string) *Service {
 //	    logger.warning(
 //	        "Cannot scan /proc for orphan processes (permission denied)"
 //	    )
-func (s *Service) ScanOrphanProcesses(ctx context.Context) []map[string]interface{} {
-	var orphans []map[string]interface{}
+func (s *Service) ScanOrphanProcesses(ctx context.Context) []map[string]any {
+	var orphans []map[string]any
 
 	procDir, err := os.Open("/proc")
 	if err != nil {
@@ -78,18 +81,44 @@ func (s *Service) ScanOrphanProcesses(ctx context.Context) []map[string]interfac
 			continue
 		}
 
-		// Python inner try: comm = (entry / "comm").read_text().strip()
-		// Python except (OSError, PermissionError, ValueError): continue
-		commBytes, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "comm"))
+		pid := entry.Name()
+		procPath := filepath.Join("/proc", pid)
+
+		// Check /proc/PID/comm for separate binaries (e.g. firecracker).
+		commBytes, err := os.ReadFile(filepath.Join(procPath, "comm"))
 		if err != nil {
 			continue
 		}
 		comm := strings.TrimSpace(string(commBytes))
 
-		if _, ok := knownMVMComms[comm]; ok {
-			pid, _ := strconv.Atoi(entry.Name())
-			orphans = append(orphans, map[string]interface{}{
-				"pid":  pid,
+		isKnown := false
+		for _, known := range knownMVMComms {
+			if comm == known {
+				isKnown = true
+				break
+			}
+		}
+
+		// Check /proc/PID/environ for MVM_BACKGROUND_SERVICE=1 marker.
+		// Set by SpawnSubprocess for all "mvm run <service>" subprocesses.
+		if !isKnown {
+			environBytes, err := os.ReadFile(filepath.Join(procPath, "environ"))
+			if err != nil {
+				continue
+			}
+			// environ is null-byte separated: "KEY=val\0KEY2=val2\0"
+			for _, entry := range bytes.Split(environBytes, []byte{0}) {
+				if string(entry) == infra.MVMBackgroundServiceEnv {
+					isKnown = true
+					break
+				}
+			}
+		}
+
+		if isKnown {
+			p, _ := strconv.Atoi(pid)
+			orphans = append(orphans, map[string]any{
+				"pid":  p,
 				"comm": comm,
 			})
 		}
@@ -117,27 +146,8 @@ func (s *Service) PruneAppliance(ctx context.Context, dryRun bool) bool {
 
 // PruneWarmImages removes warm images from the tmpfs ready pool.
 // Matches Python's CacheService.prune_warm_images() exactly.
-//
-// Python implementation:
-//
-//	warm_dir = CacheUtils.get_warm_image_dir()
-//	if not warm_dir.exists():
-//	    return False
-//	has_content = any(warm_dir.iterdir())
-//	if not has_content:
-//	    return False
-//	if not dry_run:
-//	    for item in warm_dir.iterdir():
-//	        try:
-//	            if item.is_dir():
-//	                shutil.rmtree(item)
-//	            else:
-//	                item.unlink()
-//	        except OSError:
-//	            pass
-//	return True
 func (s *Service) PruneWarmImages(ctx context.Context, dryRun bool) bool {
-	warmDir := infra.GetWarmImageDir("")
+	warmDir := infra.GetWarmImageDir(s.tempDir)
 	if _, err := os.Stat(warmDir); os.IsNotExist(err) {
 		return false
 	}
@@ -168,45 +178,25 @@ func (s *Service) PruneWarmImages(ctx context.Context, dryRun bool) bool {
 	return true
 }
 
-// CleanStaleProvisionMounts cleans stale mvm-provision mount directories in /tmp/.
+// CleanStaleProvisionMounts cleans stale provision mount directories in tempDir.
 // Matches Python's CacheService.clean_stale_provision_mounts() exactly.
-//
-// Python implementation:
-//
-//	tmp = Path("/tmp")
-//	cleaned = False
-//	for path in tmp.glob("mvm-provision-*"):
-//	    if not path.is_dir():
-//	        continue
-//	    if not dry_run:
-//	        try:
-//	            if path.is_mount():
-//	                logger.info("Unmounting stale provision mount: %s", path)
-//	                LoopMountManager.cleanup_mount(str(path))
-//	            logger.info("Removing stale provision mount point: %s", path)
-//	            path.rmdir()
-//	        except OSError:
-//	            logger.warning("Failed to clean stale provision mount: %s", path)
-//	    cleaned = True
-//	return cleaned
 func (s *Service) CleanStaleProvisionMounts(ctx context.Context, dryRun bool) bool {
-	tmp := "/tmp"
 	cleaned := false
 
-	entries, err := os.ReadDir(tmp)
+	entries, err := os.ReadDir(s.tempDir)
 	if err != nil {
 		return false
 	}
 
 	for _, entry := range entries {
-		if !strings.HasPrefix(entry.Name(), "mvm-provision-") {
+		if !strings.HasPrefix(entry.Name(), infra.MVMProvisionPrefix) {
 			continue
 		}
 		if !entry.IsDir() {
 			continue
 		}
 
-		fullPath := filepath.Join(tmp, entry.Name())
+		fullPath := filepath.Join(s.tempDir, entry.Name())
 
 		if !dryRun {
 			// Python: single try/except OSError wraps both unmount and rmdir.

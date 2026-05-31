@@ -204,7 +204,7 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *Resol
 	for _, identifier := range uniqueIDs {
 		item, err := r.Resolve(ctx, identifier)
 		if err != nil {
-			errors = append(errors, fmt.Sprintf("%s: %s", identifier, err))
+			errors = append(errors, err.Error())
 		} else if !resolvedIDs[item.ID] {
 			// Dedup by DB record ID — different input identifiers may
 			// resolve to the same DB record (e.g. "kernel" and

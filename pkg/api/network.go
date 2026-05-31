@@ -207,7 +207,7 @@ func (op *Operation) NetworkGet(ctx context.Context, input *inputs.NetworkInput)
 	request := inputs.NewNetworkRequest(*input, op.Connection.DB(), op.Repos.Network)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("network not found: %v", err)
+		return nil, err
 	}
 	if len(resolved.Networks) != 1 {
 		return nil, fmt.Errorf("expected exactly one network, got %d", len(resolved.Networks))
@@ -248,7 +248,7 @@ func (op *Operation) NetworkInspect(
 	request := inputs.NewNetworkRequest(*input, op.Connection.DB(), op.Repos.Network)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("network not found: %v", err)
+		return nil, err
 	}
 	if len(resolved.Networks) != 1 {
 		return nil, fmt.Errorf("expected exactly one network, got %d", len(resolved.Networks))

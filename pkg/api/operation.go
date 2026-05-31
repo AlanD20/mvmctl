@@ -94,7 +94,7 @@ func NewOperation(conn *db.Handle, cacheDir string) *Operation {
 		Host:    host.NewService(r.Host),
 		Config:  config.NewService(r.Config, configReg),
 		Volume:  volume.NewService(r.Volume),
-		Cache:   cache.NewService(cacheDir),
+		Cache:   cache.NewService(cacheDir, infra.GetTempDir()),
 		CP:      ssh.NewCPService(),
 	}
 	return &Operation{

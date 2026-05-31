@@ -111,7 +111,6 @@ func killConsoleRelay(op *api.Operation, ctx context.Context, identifier string)
 	if msg == "" {
 		msg = fmt.Sprintf("Stop failed: %s", identifier)
 	}
-	common.Cli.Error(msg)
 	return fmt.Errorf("%s", msg)
 }
 

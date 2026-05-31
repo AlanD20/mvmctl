@@ -75,24 +75,7 @@ func NewVMCmd(op *api.Operation) *cobra.Command {
 	cmd.AddCommand(newVMImportCmd(op))
 	cmd.AddCommand(newVMAttachVolumeCmd(op))
 	cmd.AddCommand(newVMDetachVolumeCmd(op))
-	cmd.AddCommand(newVMHelpCmd(cmd))
-
 	return cmd
-}
-
-// ─── help (hidden, matches Python's @vm_app.command(name="help", hidden=True)) ─
-
-func newVMHelpCmd(parent *cobra.Command) *cobra.Command {
-	return &cobra.Command{
-		Use:    "help",
-		Hidden: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if parent != nil {
-				fmt.Println(parent.UsageString())
-			}
-			return nil
-		},
-	}
 }
 
 // ─── ls (list all VMs) ────────────────────────────────────────────────────────
@@ -324,10 +307,14 @@ func runVMCreate(
 ) error {
 	if skipCleanup {
 		// Python: typer.confirm() defaults to True (Enter = Yes)
-		if !common.Cli.PromptConfirm(
+		cleanupConfirmed, pErr := common.Cli.PromptConfirm(cmd.Context(),
 			"--skip-cleanup is set: if creation fails, resources will be left behind and must be cleaned manually. Continue?",
 			true,
-		) {
+		)
+		if pErr != nil {
+			return pErr
+		}
+		if !cleanupConfirmed {
 			common.Cli.Info("Aborted")
 			return nil // exit code 0, matching Python's raise typer.Exit(code=0)
 		}
@@ -349,9 +336,6 @@ func runVMCreate(
 	// --count and --volume are mutually exclusive
 	effectiveCount := max(count, 1)
 	if effectiveCount > 1 && len(volume) > 0 {
-		common.Cli.Error(
-			"Cannot use --count with --volume: a volume can only be attached to a single VM. Create VMs individually with --volume.",
-		)
 		return fmt.Errorf("--count and --volume are mutually exclusive")
 	}
 
@@ -521,23 +505,19 @@ func runVMCreate(
 	})
 	// Check for NeedsInteraction (Python: isinstance(result, NeedsInteraction))
 	if createResult.Exception != nil && errs.IsNeedsInteraction(createResult.Exception) {
-		common.Cli.Error(createResult.Message)
 		return fmt.Errorf("create VMs: %s", createResult.Message)
 	}
 	if createResult.IsError() {
-		common.Cli.Error(createResult.Message)
 		return fmt.Errorf("create VMs: %s", createResult.Message)
 	}
 
 	// Check for nil item (Python: if result.item is None: error "No VMs returned")
 	if createResult.Item == nil {
-		common.Cli.Error("No VMs returned")
 		return fmt.Errorf("no VMs returned")
 	}
 
 	vms, ok := createResult.Item.([]*model.VM)
 	if !ok || len(vms) == 0 {
-		common.Cli.Error("No VMs returned")
 		return fmt.Errorf("no VMs returned")
 	}
 
@@ -780,7 +760,6 @@ func newVMSnapshotCmd(op *api.Operation) *cobra.Command {
 
 			snapResult := op.VMSnapshot(cmd.Context(), &inputs.VMInput{Identifiers: []string{id}}, memFile, stateFile)
 			if snapResult.IsError() {
-				common.Cli.Error(snapResult.Message)
 				return fmt.Errorf("snapshot failed: %s", snapResult.Message)
 			}
 
@@ -930,13 +909,11 @@ func newVMImportCmd(op *api.Operation) *cobra.Command {
 			)
 			// Check for NeedsInteraction (Python: isinstance(result, NeedsInteraction))
 			if importResult.Exception != nil && errs.IsNeedsInteraction(importResult.Exception) {
-				common.Cli.Error("Import requires privileges")
 				return fmt.Errorf("import requires privileges")
 			}
 			if importResult.Status == "success" {
 				common.Cli.Success(importResult.Message)
 			} else if importResult.IsError() {
-				common.Cli.Error(importResult.Message)
 				return fmt.Errorf("import failed: %s", importResult.Message)
 			}
 			return nil

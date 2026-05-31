@@ -104,6 +104,16 @@ type HostSetupInfo struct {
 	InitializedAt string `json:"initialized_at"`
 }
 
+// HostStatusCheck is the structured response for host status queries.
+type HostStatusCheck struct {
+	KVMOK            bool                `json:"kvm_accessible"`
+	MissingBinaries  []string            `json:"missing_binaries"`
+	IPForward        string              `json:"ip_forward"`
+	IPForwardOK      bool                `json:"ip_forward_ok"`
+	State            *HostSetupInfo      `json:"state"`
+	Resources        *model.HostResources `json:"resources,omitempty"`
+}
+
 // HostInfo is the structured response for host info/capacity queries.
 // Matches Python's HostInfo.to_dict() output.
 type HostInfo struct {

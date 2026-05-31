@@ -46,16 +46,7 @@ func NewKernelCmd(op *api.Operation) *cobra.Command {
 	cmd.AddCommand(newKernelDefaultCmd(op))
 	cmd.AddCommand(newKernelImportCmd(op))
 
-	// Hidden help subcommand matching Python's Typer "help" command
-	helpCmd := &cobra.Command{
-		Use:    "help",
-		Hidden: true,
-		Args:   cobra.NoArgs,
-		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Parent().Help()
-		},
-	}
-	cmd.AddCommand(helpCmd)
+
 
 	return cmd
 }
@@ -232,9 +223,6 @@ Examples:
 			}
 
 			if effectiveType == "" {
-				common.Cli.Error(
-					"Kernel type is required. Use 'mvm kernel pull --type official' or 'mvm kernel pull official:6.19.9'",
-				)
 				return fmt.Errorf("kernel type is required")
 			}
 
@@ -303,7 +291,6 @@ Examples:
 				return nil
 			}
 			if result.IsError() {
-				common.Cli.Error(result.Message)
 				return fmt.Errorf("%s", result.Message)
 			}
 			if result.Status == "skipped" {
@@ -354,7 +341,6 @@ func newKernelRemoveCmd(op *api.Operation) *cobra.Command {
 		ValidArgsFunction: completeKernelIDs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				common.Cli.Error("Provide at least one kernel ID or name")
 				return fmt.Errorf("usage error")
 			}
 			result := op.KernelRemove(cmd.Context(), args, force)
@@ -468,7 +454,6 @@ Examples:
 
 			// Check source file exists
 			if _, err := os.Stat(path); os.IsNotExist(err) {
-				common.Cli.Error(fmt.Sprintf("Source file not found: %s", path))
 				return fmt.Errorf("source file not found: %s", path)
 			}
 
@@ -496,7 +481,6 @@ Examples:
 				if msg == "" {
 					msg = fmt.Sprintf("Import failed: %s", name)
 				}
-				common.Cli.Error(msg)
 				return fmt.Errorf("%s", msg)
 			}
 			if kernelItem, ok := result.Item.(*model.KernelItem); ok && kernelItem != nil {

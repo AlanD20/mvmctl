@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/system"
 )
 
@@ -233,7 +234,7 @@ func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
 	ps.step = "mount"
 	{
 		var err error
-		mountPoint, err = os.MkdirTemp("", "mvm-provision-")
+		mountPoint, err = os.MkdirTemp("", infra.MVMProvisionPrefix)
 		if err != nil {
 			return Result{Status: "error", Error: fmt.Sprintf("mkdtemp: %v", err), Step: ps.step}
 		}

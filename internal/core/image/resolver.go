@@ -199,7 +199,7 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *Resol
 	for _, identifier := range uniqueIDs {
 		item, err := r.Resolve(ctx, identifier)
 		if err != nil {
-			errorsList = append(errorsList, fmt.Sprintf("%s: %s", identifier, err))
+			errorsList = append(errorsList, err.Error())
 			continue
 		}
 		if !resolvedIDs[item.ID] {

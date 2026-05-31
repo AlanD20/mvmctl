@@ -5,13 +5,10 @@ import (
 	"syscall"
 )
 
-// knownMVMComms lists mvmctl-managed process comm names.
-// Matches Python's _KNOWN_MVM_COMMS frozenset exactly (unexported).
-var knownMVMComms = map[string]struct{}{
-	"firecracker":   {},
-	"mvm-provision": {},
-	"mvm-services":  {},
-}
+// knownMVMComms lists mvm-managed process comm names.
+// Only Firecracker has its own binary — service subprocesses are identified
+// by the MVM_BACKGROUND_SERVICE=1 environment variable set in SpawnSubprocess.
+var knownMVMComms = [...]string{"firecracker"}
 
 // isMountPoint checks if a path is currently a mount point by comparing
 // device numbers (st_dev) of path and its parent — matching Python's

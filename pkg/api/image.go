@@ -810,7 +810,7 @@ func (op *Operation) ImageGet(ctx context.Context, input *inputs.ImageInput) (*m
 	request := inputs.NewImageRequest(*input, op.Connection.DB(), op.Repos.Image)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("image not found: %v", err)
+		return nil, err
 	}
 	if len(resolved.Images) > 1 {
 		return nil, fmt.Errorf("expected exactly one image identifier")
