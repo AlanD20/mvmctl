@@ -174,8 +174,9 @@ func newConfigResetCmd(op *api.Operation) *cobra.Command {
 
 func newConfigListCmd(configAPI *api.Operation) *cobra.Command {
 	return &cobra.Command{
-		Use:   "ls",
-		Short: "List all overridable settings and their current values.",
+		Use:     "ls",
+		Aliases: []string{"list"},
+		Short:   "List all overridable settings and their current values.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			allSettings, err := configAPI.ConfigListAll(cmd.Context())
 			if err != nil {

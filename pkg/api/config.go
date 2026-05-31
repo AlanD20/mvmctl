@@ -18,7 +18,7 @@ import (
 // with OVERRIDABLE_SETTINGS validation.
 // Returns the raw config value (type varies by setting: string, int, bool, etc.)
 // or []config.SettingInfo when key is empty (category listing).
-func (op *Operation) ConfigGet(ctx context.Context, category, key string) (interface{}, error) {
+func (op *Operation) ConfigGet(ctx context.Context, category, key string) (any, error) {
 
 	rawInput := inputs.ConfigInput{
 		Action:   "get",
@@ -54,7 +54,7 @@ func (op *Operation) ConfigGet(ctx context.Context, category, key string) (inter
 func (op *Operation) ConfigSet(
 	ctx context.Context,
 	category, key string,
-	value interface{},
+	value any,
 ) (*errs.OperationResult, error) {
 	rawInput := inputs.ConfigInput{
 		Action:   "set",

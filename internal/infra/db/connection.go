@@ -122,35 +122,6 @@ func (d *Handle) Close() error {
 	return nil
 }
 
-// restoreFromSnapshot overwrites the database at dbPath with a consistent copy
-// from snapshotPath using VACUUM INTO. All existing pool connections to the old
-// file become stale (new inode on Linux). The caller must ensure the pool is
-// closed before calling this, or accept that existing connections read old data.
-func restoreFromSnapshot(snapshotPath, dbPath string) error {
-	if _, err := os.Stat(snapshotPath); os.IsNotExist(err) {
-		return errs.MigrationError(
-			fmt.Sprintf("Snapshot not found: %s", snapshotPath))
-	}
-
-	srcDB, err := sql.Open("sqlite", snapshotPath)
-	if err != nil {
-		return fmt.Errorf("open snapshot db for restore: %w", err)
-	}
-	defer srcDB.Close()
-
-	if _, err := srcDB.Exec(fmt.Sprintf("VACUUM INTO '%s'", dbPath)); err != nil {
-		return errs.MigrationError(
-			fmt.Sprintf("Failed to restore from snapshot: %v", err))
-	}
-
-	// VACUUM INTO creates a new file (new inode) with default permissions.
-	if err := os.Chmod(dbPath, infra.DBFilePerm); err != nil {
-		slog.Warn("Failed to set permissions on restored database", "path", dbPath, "error", err)
-	}
-
-	return nil
-}
-
 // RestoreFromSnapshot restores the database from a snapshot file.
 // Mirrors Python's Database._restore_from_snapshot().
 //
@@ -165,7 +136,29 @@ func (d *Handle) RestoreFromSnapshot(snapshotPath string) error {
 	if err := d.Close(); err != nil {
 		return fmt.Errorf("close database before restore: %w", err)
 	}
-	return restoreFromSnapshot(snapshotPath, d.dbPath)
+
+	if _, err := os.Stat(snapshotPath); os.IsNotExist(err) {
+		return errs.MigrationError(
+			fmt.Sprintf("Snapshot not found: %s", snapshotPath))
+	}
+
+	srcDB, err := sql.Open("sqlite", snapshotPath)
+	if err != nil {
+		return fmt.Errorf("open snapshot db for restore: %w", err)
+	}
+	defer srcDB.Close()
+
+	if _, err := srcDB.Exec(fmt.Sprintf("VACUUM INTO '%s'", d.dbPath)); err != nil {
+		return errs.MigrationError(
+			fmt.Sprintf("Failed to restore from snapshot: %v", err))
+	}
+
+	// VACUUM INTO creates a new file (new inode) with default permissions.
+	if err := os.Chmod(d.dbPath, infra.DBFilePerm); err != nil {
+		slog.Warn("Failed to set permissions on restored database", "path", d.dbPath, "error", err)
+	}
+
+	return nil
 }
 
 // Connect returns the underlying *sqlx.DB (lazily opened).
@@ -175,34 +168,24 @@ func (d *Handle) Connect() *sqlx.DB {
 	return d.DB()
 }
 
-// readCurrentVersion queries the current schema version from PRAGMA user_version.
-// Shared by Handle.GetCurrentVersion and RunMigrationsCtx to avoid duplicating
-// the same PRAGMA query.
-func readCurrentVersion(db *sqlx.DB) (int, error) {
+// GetCurrentVersion returns the current schema version from PRAGMA user_version.
+func (d *Handle) GetCurrentVersion() (int, error) {
 	var version int
-	err := db.QueryRow("PRAGMA user_version").Scan(&version)
+	err := d.DB().QueryRow("PRAGMA user_version").Scan(&version)
 	if err != nil {
 		return 0, fmt.Errorf("get user_version: %w", err)
 	}
 	return version, nil
 }
 
-// GetCurrentVersion returns the current schema version from PRAGMA user_version.
-func (d *Handle) GetCurrentVersion() (int, error) {
-	return readCurrentVersion(d.DB())
-}
-
 // Ping verifies the database connection is alive.
-// Python's Database class has no Ping() method; this exists for Go convenience.
 func (d *Handle) Ping() error {
 	return d.DB().Ping()
 }
 
-// EnsureMigrationsTable creates the db_migrations tracking table if it doesn't exist.
-// The db_migrations table must be bootstrapped before running any migrations
-// because migration files record themselves in this table.
-func EnsureMigrationsTable(ctx context.Context, db *sqlx.DB) error {
-	_, err := db.ExecContext(ctx, `
+// ensureMigrationsTable creates the db_migrations tracking table if it doesn't exist.
+func (d *Handle) ensureMigrationsTable(ctx context.Context) error {
+	_, err := d.DB().ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS db_migrations (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			version INTEGER NOT NULL UNIQUE,

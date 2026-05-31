@@ -69,7 +69,7 @@ func (op *Operation) ImagePrune(ctx context.Context, dryRun bool, includeAll boo
 		if !dryRun {
 			// Matches Python: ImageOperation.remove(ImageInput(id=[image.id]), force=include_all)
 			// Uses the full remove pipeline (BatchResult, VM reference check, etc.)
-			result := op.ImageRemove(ctx, &inputs.ImageInput{ID: []string{img.ID}, Type: nil}, includeAll)
+			result := op.ImageRemove(ctx, &inputs.ImageInput{Identifiers: []string{img.ID}}, includeAll)
 			if result.HasErrors() {
 				for _, r := range result.Errors() {
 					slog.Warn("Failed to remove image", "id", img.ID, "error", r.Message)

@@ -157,7 +157,7 @@ func guestfishCommonFlags(diskPath string, readonly bool) []string {
 // Returns stdout on success.
 func guestfishRaw(ctx context.Context, diskPath string, readonly bool, args ...string) (string, error) {
 	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := range 3 {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
@@ -209,7 +209,7 @@ func guestfishInspect(ctx context.Context, diskPath string, readonly bool, args 
 // guestfishWithInput runs guestfish with stdin input (for batched commands).
 func guestfishWithInput(ctx context.Context, diskPath string, readonly bool, input string) (string, error) {
 	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := range 3 {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
@@ -653,7 +653,7 @@ func (h *GuestfsHandle) StatVFS(ctx context.Context, path string) (map[string]in
 // OptimizedGuestfs.__enter__ retry loop).
 func WithRetry(ctx context.Context, maxAttempts int, fn func() error) error {
 	var lastErr error
-	for attempt := 0; attempt < maxAttempts; attempt++ {
+	for attempt := range maxAttempts {
 		if attempt > 0 {
 			time.Sleep(time.Duration(500*(attempt+1)) * time.Millisecond)
 		}

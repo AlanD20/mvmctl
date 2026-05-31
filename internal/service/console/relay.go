@@ -876,7 +876,7 @@ func RunRelaySubprocess(args []string) {
 	var vmID, vmPath, vmName string
 	var ptyFD int
 
-	for i := 0; i < len(args); i++ {
+	for i := range args {
 		switch args[i] {
 		case "--vm-id":
 			if i+1 < len(args) {

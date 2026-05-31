@@ -16,7 +16,7 @@ type Controller struct {
 }
 
 // NewController creates a controller from a string identifier or *model.Network.
-func NewController(ctx context.Context, entity interface{}, repo Repository) (*Controller, error) {
+func NewController(ctx context.Context, entity any, repo Repository) (*Controller, error) {
 	switch e := entity.(type) {
 	case *model.Network:
 		return &Controller{repo: repo, network: e}, nil

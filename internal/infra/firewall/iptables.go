@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/model"
@@ -99,24 +98,6 @@ func (t *IPTablesTracker) buildComment(ruleType model.FirewallRuleType, networkN
 // characters unsafe for shell tokenization. Safe characters:
 //
 //	ASCII letters, digits, and @%_+=:,./-
-func shlexQuote(s string) string {
-	if s == "" {
-		return "''"
-	}
-	for _, r := range s {
-		if !unicode.IsLetter(r) && !unicode.IsDigit(r) &&
-			r != '@' && r != '%' && r != '_' && r != '+' &&
-			r != '=' && r != ':' && r != ',' && r != '.' &&
-			r != '/' && r != '-' {
-			goto quote
-		}
-	}
-	return s
-quote:
-	// Use single quotes, with embedded single quotes escaped as: '"'"'
-	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
-}
-
 // ── Build iptables args ──
 // Matches Python IPTablesTracker._build_iptables_args().
 
@@ -280,7 +261,7 @@ func (t *IPTablesTracker) EnsureRule(
 	// Python: rule.command_string = " ".join(shlex.quote(arg) for arg in add_args)
 	quotedArgs := make([]string, len(addArgs))
 	for i, arg := range addArgs {
-		quotedArgs[i] = shlexQuote(arg)
+		quotedArgs[i] = infra.ShlexQuote(arg)
 	}
 	cmdStr := strings.Join(quotedArgs, " ")
 	r.CommandString = &cmdStr

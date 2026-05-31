@@ -657,7 +657,7 @@ func networkRange(ipnet *net.IPNet) (net.IP, net.IP) {
 	}
 	mask := ipnet.Mask
 	last := make(net.IP, 4)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		last[i] = first[i] | ^mask[i]
 	}
 	return first, last
@@ -665,7 +665,7 @@ func networkRange(ipnet *net.IPNet) (net.IP, net.IP) {
 
 // ipCmp compares two IPv4 addresses, returning -1 if a<b, 0 if a==b, 1 if a>b.
 func ipCmp(a, b net.IP) int {
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		if a[i] < b[i] {
 			return -1
 		}

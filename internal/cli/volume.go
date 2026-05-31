@@ -55,9 +55,10 @@ func newVolumeListCmd(op *api.Operation, configAPI *api.Operation) *cobra.Comman
 	var longOutput bool
 
 	cmd := &cobra.Command{
-		Use:   "ls",
-		Short: "List all volumes",
-		Args:  cobra.NoArgs,
+		Use:     "ls",
+		Aliases: []string{"list"},
+		Short:   "List all volumes",
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			volumes := op.VolumeListAll(cmd.Context())
 
@@ -147,6 +148,7 @@ func newVolumeRemoveCmd(op *api.Operation) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:               "rm [identifiers...]",
+		Aliases:           []string{"remove", "delete", "del"},
 		Short:             "Remove one or more volumes",
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeVolumeNames,
@@ -201,7 +203,7 @@ func newVolumeInspectCmd(op *api.Operation) *cobra.Command {
 
 			if jsonOutput {
 				// Match Python's json.dumps(info, indent=2, default=str)
-				fmt.Println(marshalJSONDefaultStr(info))
+				fmt.Println(common.MarshalJSONDefaultStr(info))
 				return nil
 			}
 

@@ -83,8 +83,9 @@ func newImageListCmd(op *api.Operation) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "ls",
-		Short: "List cached images (or available remote images with --remote).",
+		Use:     "ls",
+		Aliases: []string{"list"},
+		Short:   "List cached images (or available remote images with --remote).",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if remote {
 				fmt.Fprintln(os.Stderr, "Fetching remote images")
@@ -317,8 +318,9 @@ func newImageRemoveCmd(op *api.Operation) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:   "rm [ids...]",
-		Short: "Remove cached images by ID prefix.",
+		Use:     "rm [ids...]",
+		Aliases: []string{"remove", "delete", "del"},
+		Short:   "Remove cached images by ID prefix.",
 		Long: `Remove cached images by ID prefix.
 
 Examples:
@@ -327,7 +329,7 @@ Examples:
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeImageIDs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result := op.ImageRemove(cmd.Context(), &inputs.ImageInput{ID: args}, force)
+			result := op.ImageRemove(cmd.Context(), &inputs.ImageInput{Identifiers: args}, force)
 			for _, r := range result.Items {
 				itemID := "unknown"
 				if r.Item != nil {
@@ -370,7 +372,7 @@ Examples:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prefix := args[0]
 
-			input := &inputs.ImageInput{ID: []string{prefix}}
+			input := &inputs.ImageInput{Identifiers: []string{prefix}}
 			info, err := op.ImageInspect(cmd.Context(), input)
 			if err != nil {
 				return err
@@ -409,7 +411,7 @@ func newImageDefaultCmd(op *api.Operation) *cobra.Command {
 		ValidArgsFunction: completeImageIDs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prefix := args[0]
-			imgInput := inputs.ImageInput{ID: []string{prefix}}
+			imgInput := inputs.ImageInput{Identifiers: []string{prefix}}
 			result := op.ImageSetDefault(cmd.Context(), &imgInput)
 			if result.IsError() {
 				msg := result.Message
@@ -617,7 +619,7 @@ Examples:
 			spinner.Start()
 			var opResult *errs.OperationResult
 			if imageID != "" {
-				warmInput := inputs.ImageInput{ID: []string{imageID}}
+				warmInput := inputs.ImageInput{Identifiers: []string{imageID}}
 				opResult = op.ImageWarm(cmd.Context(), &warmInput, false, func(event errs.ProgressEvent) {
 					if event.Message != "" {
 						spinner.UpdateText(event.Message)

@@ -198,7 +198,7 @@ func Resolve(versions []string, spec VersionSpec) (string, error) {
 		vParts := strings.Split(vClean, ".")
 		if len(vParts) >= n {
 			match := true
-			for i := 0; i < n; i++ {
+			for i := range n {
 				vp, err := strconv.Atoi(vParts[i])
 				if err != nil || vp != specParts[i] {
 					match = false
@@ -323,7 +323,7 @@ func (g *VersionGate) IsSatisfiedBy(version, minimum string) bool {
 	if len(mParts) < n {
 		n = len(mParts)
 	}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if vParts[i] > mParts[i] {
 			return true
 		}
