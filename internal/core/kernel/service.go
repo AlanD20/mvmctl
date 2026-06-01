@@ -160,7 +160,10 @@ func (s *Service) FetchFirecrackerKernel(
 
 	templateVars["kernel_version"] = kernelVersion
 	downloadURL := fmt.Sprintf("%s/%s", strings.TrimRight(spec.Source, "/"), chosenKey)
-	sha256URL := renderOptionalTemplate(spec.SHA256URL, templateVars)
+	sha256URL := ""
+	if r, err := infra.RenderOptionalTemplate(spec.SHA256URL, templateVars); err == nil && r != nil {
+		sha256URL = *r
+	}
 	if sha256URL == "" && !intentionalNoChecksum {
 		sha256URL = downloadURL + ".sha256"
 	}
@@ -440,7 +443,10 @@ func (s *Service) resolveSourceAndChecksum(
 	}
 
 	if resolvedSHA256 == "" && !intentionalNoChecksum {
-		resolvedSHA256URL := renderOptionalTemplate(spec.SHA256URL, templateVars)
+		resolvedSHA256URL := ""
+		if r, err := infra.RenderOptionalTemplate(spec.SHA256URL, templateVars); err == nil && r != nil {
+			resolvedSHA256URL = *r
+		}
 		if resolvedSHA256URL != "" {
 			filename := fmt.Sprintf("linux-%s.tar.xz", version)
 			if sha, err := s.fetchSHA256FromURL(ctx, resolvedSHA256URL, filename); err == nil && sha != "" {
@@ -1394,13 +1400,6 @@ func renderTemplate(tmpl string, vars map[string]string) string {
 		tmpl = strings.ReplaceAll(tmpl, "{"+k+"}", v)
 	}
 	return tmpl
-}
-
-func renderOptionalTemplate(tmpl *string, vars map[string]string) string {
-	if tmpl == nil || *tmpl == "" {
-		return ""
-	}
-	return renderTemplate(*tmpl, vars)
 }
 
 // ── Caching helpers ────────────────────────────────────────────────────

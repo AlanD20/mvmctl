@@ -241,7 +241,7 @@ func RootPartitionDetectionError(partitions []map[string]any, message string) *D
 		details["partitions"] = partitions
 	}
 	return &DomainError{
-		Code:    CodeInternal,
+		Code:    CodeRootPartitionDetection,
 		Class:   ClassInternal,
 		Message: message,
 		Details: details,
@@ -250,7 +250,6 @@ func RootPartitionDetectionError(partitions []map[string]any, message string) *D
 
 // TieDetectedError creates a tie detection error matching Python's TieDetectedError.
 // Carries tied partition identifiers and optional partitions list in Details.
-// Uses CodeInternal as the generic fallback.
 //
 // Python: TieDetectedError.__init__(self, tied_partitions, message="Tie detected between partitions", partitions=None)
 // Python __str__: f"{self.message}: {', '.join(self.tied_partitions)}"

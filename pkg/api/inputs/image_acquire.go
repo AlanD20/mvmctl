@@ -3,10 +3,12 @@ package inputs
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/image"
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/disk"
 	"mvmctl/internal/infra/errs"
 
 	"github.com/jmoiron/sqlx"
@@ -20,9 +22,6 @@ var CLI_TO_INTERNAL_DETECTOR = map[string]string{
 	"size":       "size",
 	"filesystem": "filesystem",
 }
-
-// FIRECRACKER_SUPPORTED_ARCH lists architectures supported by Firecracker.
-const FIRECRACKER_SUPPORTED_ARCH_STR = "x86_64,amd64,aarch64,arm64"
 
 // ImagePullInput is the raw input for pulling a remote image.
 // Matches Python's ImagePullInput dataclass:
@@ -44,13 +43,13 @@ type ImagePullInput struct {
 	Name              *string  `json:"name,omitempty"`
 	Force             bool     `json:"force"`
 	SetDefault        bool     `json:"set_default"`
-	Arch              *string  `json:"arch,omitempty"`
-	Version           *string  `json:"version,omitempty"`
+	Arch              string   `json:"arch,omitempty"`
+	Version           string   `json:"version,omitempty"`
 	NoCache           bool     `json:"no_cache"`
-	Partition         *int     `json:"partition,omitempty"`
+	Partition         int      `json:"partition,omitempty"`
 	SkipOptimization  bool     `json:"skip_optimization"`
 	DisabledDetectors []string `json:"disabled_detectors,omitempty"`
-	OutputDir         string   `json:"output_dir,omitempty"` // custom output directory; empty means use default images dir
+	OutputDir         string   `json:"output_dir,omitempty"`
 }
 
 // ImageImportInput is the raw input for importing a local image file.
@@ -59,43 +58,28 @@ type ImageImportInput struct {
 	Name              string   `json:"name"`
 	SourcePath        string   `json:"source_path"`
 	Force             bool     `json:"force"`
-	Format            *string  `json:"format,omitempty"`
-	Arch              *string  `json:"arch,omitempty"`
+	Format            string   `json:"format,omitempty"`
+	Arch              string   `json:"arch,omitempty"`
 	SetDefault        bool     `json:"set_default"`
-	Partition         *int     `json:"partition,omitempty"`
+	Partition         int      `json:"partition,omitempty"`
 	SkipOptimization  bool     `json:"skip_optimization"`
 	DisabledDetectors []string `json:"disabled_detectors,omitempty"`
 }
 
 // ResolvedImageAcquireInput matches Python's ResolvedImageAcquireInput (frozen dataclass).
-//
-//	@dataclass
-//	class ResolvedImageAcquireInput:
-//	    type: str
-//	    arch: str
-//	    output_dir: Path
-//	    name: str | None = None
-//	    source_path: Path | None = None
-//	    version: str | None = None
-//	    no_cache: bool = False
-//	    force: bool = False
-//	    format: str | None = None
-//	    set_default: bool = False
-//	    partition: int | None = None
-//	    skip_optimization: bool = False
-//	    disabled_detectors: list[str] = field(default_factory=list)
 type ResolvedImageAcquireInput struct {
 	Type              string
 	Arch              string
 	OutputDir         string
 	Name              *string
 	SourcePath        *string
-	Version           *string
+	Version           string // resolved version; "" means latest
 	NoCache           bool
 	Force             bool
-	Format            *string
+	Format            string // resolved format; "" if unknown
+	FormatDetected    string // auto-detected format ("" if none, for warning display)
 	SetDefault        bool
-	Partition         *int
+	Partition         int // 0 = auto-detect
 	SkipOptimization  bool
 	DisabledDetectors []string
 }
@@ -136,13 +120,11 @@ func (r *ImageAcquireRequest) ResolvePull(ctx context.Context) (*ResolvedImageAc
 	}
 
 	// Default arch — Python: SettingsService.resolve(..., "arch"), no fallback
-	var arch string
-	if pullInput.Arch != nil {
-		arch = *pullInput.Arch
-	} else {
+	arch := pullInput.Arch
+	if arch == "" {
 		archVal, err := config.Resolve(ctx, r.db, "defaults.image", "arch")
 		if err == nil && archVal != nil {
-			arch = toString(archVal)
+			arch = fmt.Sprint(archVal)
 		}
 	}
 
@@ -150,6 +132,11 @@ func (r *ImageAcquireRequest) ResolvePull(ctx context.Context) (*ResolvedImageAc
 	disabled, err := r.resolveDisabledDetectors(pullInput.DisabledDetectors)
 	if err != nil {
 		return nil, err
+	}
+
+	outputDir := pullInput.OutputDir
+	if outputDir == "" {
+		outputDir = infra.GetImagesDir()
 	}
 
 	r.result = &ResolvedImageAcquireInput{
@@ -161,7 +148,7 @@ func (r *ImageAcquireRequest) ResolvePull(ctx context.Context) (*ResolvedImageAc
 		Version:           pullInput.Version,
 		NoCache:           pullInput.NoCache,
 		Partition:         pullInput.Partition,
-		OutputDir:         infra.GetImagesDir(),
+		OutputDir:         outputDir,
 		SkipOptimization:  pullInput.SkipOptimization,
 		DisabledDetectors: disabled,
 	}
@@ -187,13 +174,11 @@ func (r *ImageAcquireRequest) ResolveImport(ctx context.Context) (*ResolvedImage
 	}
 
 	// Default arch — Python: SettingsService.resolve(..., "arch"), no fallback
-	var arch string
-	if importInput.Arch != nil {
-		arch = *importInput.Arch
-	} else {
+	arch := importInput.Arch
+	if arch == "" {
 		archVal, err := config.Resolve(ctx, r.db, "defaults.image", "arch")
 		if err == nil && archVal != nil {
-			arch = toString(archVal)
+			arch = infra.ToString(archVal)
 		}
 	}
 
@@ -205,16 +190,18 @@ func (r *ImageAcquireRequest) ResolveImport(ctx context.Context) (*ResolvedImage
 
 	// Default format — Python: str(SettingsService.resolve(...))
 	// Python's str(None) returns "None", so we match that behavior exactly
-	var format string
-	if importInput.Format != nil {
-		format = *importInput.Format
-	} else {
+	format := importInput.Format
+	if format == "" {
 		formatVal, err := config.Resolve(ctx, r.db, "defaults.image", "import_format")
 		if err == nil {
-			format = stringify(formatVal) // str(None) → "None" in Python
-		} else {
-			format = "None"
+			format = infra.ToString(formatVal)
 		}
+	}
+
+	// Auto-detect format from file if format is not known
+	detected := disk.DetectImageFormat(importInput.SourcePath)
+	if detected != "" && format == "" {
+		format = detected
 	}
 
 	sourcePath := importInput.SourcePath
@@ -224,19 +211,17 @@ func (r *ImageAcquireRequest) ResolveImport(ctx context.Context) (*ResolvedImage
 		Name:              &importInput.Name,
 		Arch:              arch,
 		SourcePath:        &sourcePath,
-		Format:            &format,
+		Format:            format,
 		OutputDir:         infra.GetImagesDir(),
 		DisabledDetectors: disabled,
 		Force:             importInput.Force,
 		Partition:         importInput.Partition,
 		SetDefault:        importInput.SetDefault,
 		SkipOptimization:  importInput.SkipOptimization,
+		FormatDetected:    detected,
 	}
 
 	if err := r.ensureValidate(); err != nil {
-		return nil, err
-	}
-	if err := r.ensureValidateImport(); err != nil {
 		return nil, err
 	}
 
@@ -254,24 +239,32 @@ func (r *ImageAcquireRequest) ensureValidate() error {
 	}
 
 	arch := r.result.Arch
-	validArchs := []string{"x86_64", "amd64", "aarch64", "arm64"}
-	archValid := false
-	for _, va := range validArchs {
-		if arch == va {
-			archValid = true
-			break
-		}
-	}
-	if !archValid {
+	if arch == "" {
 		return &errs.DomainError{
 			Code:    errs.CodeImageImportFailed,
 			Op:      "image_acquire",
-			Message: "Unknown arch: " + arch + ". Valid: x86_64, amd64, aarch64, arm64",
+			Message: "arch is required",
+			Class:   errs.ClassValidation,
+		}
+	}
+	parts := strings.Split(infra.FirecrackerSupportedArchStr, ",")
+	archOk := false
+	for _, p := range parts {
+		if p == arch {
+			archOk = true
+			break
+		}
+	}
+	if !archOk {
+		return &errs.DomainError{
+			Code:    errs.CodeImageImportFailed,
+			Op:      "image_acquire",
+			Message: fmt.Sprintf("Unknown arch: %s. Valid: %s", arch, infra.FirecrackerSupportedArchStr),
 			Class:   errs.ClassValidation,
 		}
 	}
 
-	if r.result.Partition != nil && *r.result.Partition < 1 {
+	if r.result.Partition < 0 {
 		return &errs.DomainError{
 			Code:    errs.CodeImageImportFailed,
 			Op:      "image_acquire",
@@ -317,23 +310,4 @@ func (r *ImageAcquireRequest) resolveDisabledDetectors(detectors []string) ([]st
 		}
 	}
 	return disabled, nil
-}
-
-// toString converts an any to string.
-func toString(v any) string {
-	if v == nil {
-		return ""
-	}
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return fmt.Sprintf("%v", v)
-}
-
-// stringify matches Python's str() builtin: str(None) → "None", str(5) → "5", etc.
-func stringify(v any) string {
-	if v == nil {
-		return "None"
-	}
-	return fmt.Sprintf("%v", v)
 }

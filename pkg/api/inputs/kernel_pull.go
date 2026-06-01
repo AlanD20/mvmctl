@@ -105,7 +105,7 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 	} else {
 		v, err := config.Resolve(ctx, r.db, "defaults.kernel", "version")
 		if err == nil && v != nil {
-			s := toString(v)
+			s := infra.ToString(v)
 			version = &s
 		}
 	}
@@ -128,7 +128,7 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 	} else {
 		v, err := config.Resolve(ctx, r.db, "defaults.kernel", "arch")
 		if err == nil && v != nil {
-			arch = toString(v)
+			arch = infra.ToString(v)
 		}
 	}
 

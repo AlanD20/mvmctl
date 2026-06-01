@@ -9,6 +9,7 @@ import (
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/core/vm"
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 
@@ -262,7 +263,7 @@ func (r *CPRequest) resolveUser(ctx context.Context, vmEntity *model.VM) string 
 	}
 	user, err := config.Resolve(ctx, r.db, "defaults.vm", "ssh_user")
 	if err == nil && user != nil {
-		return toString(user)
+		return infra.ToString(user)
 	}
 	return "root"
 }

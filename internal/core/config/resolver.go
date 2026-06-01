@@ -3,6 +3,8 @@ package config
 import (
 	"context"
 
+	"mvmctl/internal/infra"
+
 	"github.com/jmoiron/sqlx"
 )
 
@@ -18,11 +20,11 @@ func Resolve(ctx context.Context, db *sqlx.DB, category, key string) (any, error
 	if override != nil {
 		expected := GetExpectedType(category, key)
 		if expected != "" {
-			return Coerce(override, expected)
+			return infra.Coerce(override, expected)
 		}
 		return override, nil
 	}
-	def, gdErr := GetDefault(category, key)
+	def, gdErr := infra.GetDefault(category, key)
 	if gdErr != nil {
 		return nil, gdErr
 	}

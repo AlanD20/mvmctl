@@ -1,6 +1,21 @@
 package infra
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
+
+// ToString converts any value to its string representation.
+// nil maps to "", non-string types use fmt.Sprint (matching Python's str()).
+func ToString(v any) string {
+	if v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return fmt.Sprint(v)
+}
 
 // BoolToInt converts a bool to an int (1 for true, 0 for false).
 // Used for SQLite storage where bools are stored as integers.

@@ -166,5 +166,3 @@ for svc in \
   ln -sf /dev/null "/etc/systemd/system/$svc.service" 2>/dev/null || true
 done`,
 ))
-
-

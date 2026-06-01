@@ -210,9 +210,7 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 	// ── Dispatch based on kernel type (matches Python exactly) ──
 	if resolved.KernelType == "firecracker" {
 
-		binDir := filepath.Join(op.CacheDir, "bin")
-		binaryService := binary.NewService(binary.NewRepository(op.Connection.DB()), binDir, op.CacheDir)
-		defaultFirecracker, _ := binaryService.GetDefaultFirecracker(ctx)
+		defaultFirecracker, _ := op.Services.Binary.GetDefaultFirecracker(ctx)
 		ciVersion := infra.DefaultFirecrackerCIVersion
 		if defaultFirecracker != nil && defaultFirecracker.CIVersion != nil {
 			ciVersion = *defaultFirecracker.CIVersion
@@ -542,10 +540,7 @@ func (op *Operation) kernelListRemote(ctx context.Context, noCache bool) ([]mode
 	// Resolve ci_version from default firecracker binary (matches Python)
 	resolvedCIVersion := ""
 	if op.Services.Config != nil {
-		binaryRepo := binary.NewRepository(op.Connection.DB())
-		binDir := filepath.Join(op.CacheDir, "bin")
-		binaryService := binary.NewService(binaryRepo, binDir, op.CacheDir)
-		defaultFC, _ := binaryService.GetDefaultFirecracker(ctx)
+		defaultFC, _ := op.Services.Binary.GetDefaultFirecracker(ctx)
 		if defaultFC != nil && defaultFC.CIVersion != nil {
 			resolvedCIVersion = *defaultFC.CIVersion
 		}

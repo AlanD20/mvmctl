@@ -46,12 +46,18 @@ func (r *sqliteRepo) Get(ctx context.Context, category, key string) (any, error)
 // Set stores a value as JSON. Uses INSERT ... ON CONFLICT with CURRENT_TIMESTAMP.
 // Matches Python exactly: json.dumps(value), CURRENT_TIMESTAMP, ON CONFLICT DO UPDATE.
 func (r *sqliteRepo) Set(ctx context.Context, category, key string, value any) error {
-	valueStr, err := MarshalValue(value)
-	if err != nil {
-		return fmt.Errorf("marshal setting value: %w", err)
+	var valueStr string
+	if value == nil {
+		valueStr = "null"
+	} else {
+		data, mErr := json.Marshal(value)
+		if mErr != nil {
+			return fmt.Errorf("marshal setting value: %w", mErr)
+		}
+		valueStr = string(data)
 	}
 
-	_, err = r.db.ExecContext(ctx, `
+	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO user_settings (category, key, value, updated_at)
 		VALUES (?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(category, key) DO UPDATE SET

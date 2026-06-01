@@ -7,6 +7,7 @@ import (
 
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/vm"
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 
@@ -90,10 +91,10 @@ func (r *LogRequest) Resolve(ctx context.Context, vmRepo vm.Repository) (*Resolv
 	follow := r.resolveFollow(ctx)
 
 	logFilename, _ := config.Resolve(ctx, r._db, "defaults.firecracker", "log_filename")
-	logFilenameStr := toString(logFilename)
+	logFilenameStr := infra.ToString(logFilename)
 
 	serialOutputFilename, _ := config.Resolve(ctx, r._db, "defaults.firecracker", "serial_output_filename")
-	serialOutputFilenameStr := toString(serialOutputFilename)
+	serialOutputFilenameStr := infra.ToString(serialOutputFilename)
 
 	r.result = &ResolvedLogInput{
 		VM:                   vmEntity,

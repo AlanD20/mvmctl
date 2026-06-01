@@ -81,7 +81,11 @@ func (s *Service) GetDefaultFirecracker(ctx context.Context) (*model.BinaryItem,
 func (s *Service) ListRemote(ctx context.Context, limit int) ([]string, error) {
 	url := fmt.Sprintf("%s?per_page=%d", infra.FirecrackerGithubReleasesAPIURL, limit)
 
-	raw, err := s.dl.GetContent(ctx, url, 30, map[string]string{"Accept": "application/json"}, true, 300)
+	raw, err := s.dl.GetContent(ctx, download.RequestOpts{
+		URL: url, Timeout: 30,
+		Headers:  map[string]string{"Accept": "application/json"},
+		UseCache: true, CacheTTLSeconds: 300,
+	})
 	if err != nil {
 		return nil, mapGitHubAPIError(err)
 	}
@@ -129,7 +133,10 @@ func (s *Service) DownloadFirecracker(
 
 	// ── Step 1: Fetch SHA256 checksum ──
 	var expectedSHA256 string
-	sha256Content, err := s.dl.GetContent(ctx, sha256URL, 30, nil, true, 300)
+	sha256Content, err := s.dl.GetContent(ctx, download.RequestOpts{
+		URL: sha256URL, Timeout: 30,
+		UseCache: true, CacheTTLSeconds: 300,
+	})
 	if err == nil {
 		parts := strings.Fields(strings.TrimSpace(sha256Content))
 		if len(parts) > 0 {

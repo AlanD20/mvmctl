@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"mvmctl/internal/core/config"
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 
 	"github.com/jmoiron/sqlx"
@@ -106,7 +107,7 @@ func (r *KernelImportRequest) Resolve(ctx context.Context) (*ResolvedKernelImpor
 	} else {
 		v, err := config.Resolve(ctx, r.db, "defaults.kernel", "arch")
 		if err == nil && v != nil {
-			arch = toString(v)
+			arch = infra.ToString(v)
 		}
 		if arch == "" {
 			// Python: platform.machine() returns machine hardware name

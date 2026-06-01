@@ -87,7 +87,7 @@ func NewOperation(conn *db.Handle, cacheDir string) *Operation {
 
 	s := Services{
 		Network: network.NewService(r.Network, defaultFwTracker),
-		Image:   image.NewService(r.Image, cacheDir),
+		Image:   image.NewService(r.Image),
 		Kernel:  kernel.NewService(r.Kernel, cacheDir),
 		Binary:  binary.NewService(r.Binary, filepath.Join(cacheDir, "bin"), cacheDir),
 		Key:     key.NewService(r.Key, infra.GetKeyDir()),

@@ -1,11 +1,7 @@
 package image
 
 import (
-	"archive/tar"
-	"bytes"
 	"context"
-	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -24,19 +20,23 @@ import (
 	"github.com/klauspost/compress/zstd"
 
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/disk"
 	"mvmctl/internal/infra/download"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/parallel"
 	"mvmctl/internal/infra/provisioner"
-	"mvmctl/internal/infra/ptr"
 	"mvmctl/internal/infra/system"
 )
 
 // Time constants matching Python's CONST_MEBIBYTE_BYTES etc.
+// ── Compression defaults ──
+const (
+	CompressionLevel  = 3
+	CompressionFormat = "zst"
+)
+
 const (
 	MiB              = 1024 * 1024
-	SectorSize       = 512
 	Percent          = 100
 	RatioMin         = 1.0
 	RuntimeBufferMB  = 160
@@ -54,39 +54,21 @@ var FSCanShrink = map[string]bool{
 // Service matches Python's Service in _service.py.
 // Handles image processing: compression, decompression, shrinking, format conversion, and pool management.
 type Service struct {
-	repo      Repository
-	cacheDir  string
-	imagesDir string
-	warmDir   string
-	tempDir   string
-	dl        *download.Downloader
+	repo Repository
+	dl   *download.Downloader
 }
 
 // NewService creates a new Service.
-func NewService(repo Repository, cacheDir string) *Service {
+func NewService(repo Repository) *Service {
 	return &Service{
-		repo:      repo,
-		cacheDir:  cacheDir,
-		imagesDir: filepath.Join(cacheDir, "images"),
-		warmDir:   filepath.Join(cacheDir, "warm"),
-		tempDir:   filepath.Join(cacheDir, "tmp"),
-		dl:        download.New(),
+		repo: repo,
+		dl:   download.New(),
 	}
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Public API
 // ──────────────────────────────────────────────────────────────────────────────
-
-// Repo returns the underlying repository for use by the API layer.
-func (s *Service) Repo() Repository {
-	return s.repo
-}
-
-// GetImagesDir returns the path to the images cache directory.
-func (s *Service) GetImagesDir() string {
-	return s.imagesDir
-}
 
 // RemoveImage removes an image, handling file deletion and hard/soft delete.
 // The image must be pre-enriched with VM references by the caller.
@@ -95,14 +77,10 @@ func (s *Service) RemoveImage(ctx context.Context, image *model.ImageItem, force
 	hasVMs := len(vms) > 0
 
 	if hasVMs && !force {
-		var names []string
-		for _, vm := range vms {
-			names = append(names, resolveVMName(vm))
-		}
-		return NewImageError(fmt.Sprintf("Image is referenced by VMs: %s", strings.Join(names, ", ")))
+		return NewImageError("Image is referenced by VMs")
 	}
 
-	// Delete ALL related files from disk (Python: self._remove_image_files(image))
+	// Delete ALL related files from disk
 	removed := s.RemoveImageFiles(image)
 	if len(removed) > 0 {
 		slog.Info("Removed image files", "files", strings.Join(removed, ", "))
@@ -119,22 +97,7 @@ func (s *Service) RemoveImage(ctx context.Context, image *model.ImageItem, force
 		}
 	}
 
-	// Audit log AFTER DB delete (matching Python order)
-	if auditLogAvailable() {
-		logAudit("image.remove", map[string]any{"id": image.ID})
-	}
-
 	return nil
-}
-
-// auditLogAvailable checks if the audit log helper can be used.
-func auditLogAvailable() bool {
-	return true
-}
-
-// logAudit logs an audit event (stub matching Python's AuditLog.log).
-func logAudit(event string, changes map[string]any) {
-	slog.Info("Audit event", "event", event, "changes", changes)
 }
 
 // RemoveManyPaths removes files for multiple images from disk. No DB changes.
@@ -152,25 +115,24 @@ func (s *Service) RemoveManyPaths(images []*model.ImageItem) []string {
 func (s *Service) RemoveImageFiles(image *model.ImageItem) []string {
 	var removed []string
 
-	entries, err := os.ReadDir(s.imagesDir)
+	entries, err := os.ReadDir(infra.GetImagesDir())
 	if err == nil {
 		for _, entry := range entries {
 			if strings.HasPrefix(entry.Name(), image.ID) && !entry.IsDir() {
-				if err := os.Remove(filepath.Join(s.imagesDir, entry.Name())); err == nil {
+				if err := os.Remove(filepath.Join(infra.GetImagesDir(), entry.Name())); err == nil {
 					removed = append(removed, entry.Name())
 				}
 			}
 		}
 	}
 
-	entries, err = os.ReadDir(s.warmDir)
-	if err == nil {
-		for _, entry := range entries {
-			if strings.HasPrefix(entry.Name(), image.ID) && !entry.IsDir() {
-				if err := os.Remove(filepath.Join(s.warmDir, entry.Name())); err == nil {
-					removed = append(removed, entry.Name())
-				}
-			}
+	entries, err = os.ReadDir(infra.GetWarmImageDir())
+	if err != nil {
+		return removed
+	}
+	for _, entry := range entries {
+		if err := os.Remove(filepath.Join(infra.GetWarmImageDir(), entry.Name())); err == nil {
+			removed = append(removed, entry.Name())
 		}
 	}
 
@@ -222,7 +184,7 @@ func (s *Service) resolveImagePath(image *model.ImageItem) string {
 		}
 	}
 	for _, ext := range infra.SupportedImageExtensions {
-		candidate := filepath.Join(s.imagesDir, image.ID+ext)
+		candidate := filepath.Join(infra.GetImagesDir(), image.ID+ext)
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate
 		}
@@ -247,14 +209,19 @@ func (s *Service) OptimizeImage(
 	if resolveErr != nil {
 		return nil, warnings, resolveErr
 	}
-	fsUUID := s.getFilesystemUUID(ctx, imagePath)
+	fsUUID := system.DetectFilesystemUUID(ctx, imagePath)
 	t1 := time.Now()
 	slog.Debug("fs detect", "elapsed_seconds", t1.Sub(t0).Seconds())
 
+	// ── Single Provisioner reused across all phases ──
+	// Each method (DetectOS, Run) creates a fresh backend session internally,
+	// so the struct itself is just shared config. Flags are cleared after Run()
+	// to keep the struct reusable.
+	p := NewProvisioner(imagePath, provisionerType, fsType)
+
 	// ── Detect OS type from the image (always, even when skipping) ──
 	detectedOS := ""
-	dp := NewProvisioner(ctx, imagePath, provisionerType, fsType, s.cacheDir)
-	osResult, osErr := dp.DetectOS()
+	osResult, osErr := p.DetectOS(ctx)
 	if osErr == nil {
 		detectedOS = osResult
 	} else {
@@ -271,7 +238,6 @@ func (s *Service) OptimizeImage(
 		slog.Info("Skipping optimization (shrink and compression)")
 		info, _ := os.Stat(imagePath)
 		actualSize := info.Size()
-		// Python returns distro=detected_os (the raw result, not imageType)
 		return &model.ImageItem{
 			ID:               imageID,
 			Type:             imageType,
@@ -280,7 +246,7 @@ func (s *Service) OptimizeImage(
 			Arch:             spec.Arch,
 			Path:             imagePath,
 			FSType:           fsType,
-			Distro:           ptr.StrNonEmpty(detectedOS),
+			Distro:           detectedOS,
 			MinRootfsSizeMiB: int(actualSize / MiB),
 			OriginalSize:     actualSize,
 			IsDefault:        false,
@@ -288,7 +254,7 @@ func (s *Service) OptimizeImage(
 			PulledAt:         timestamp,
 			CreatedAt:        timestamp,
 			UpdatedAt:        timestamp,
-			FSUUID:           ptr.StrNonEmpty(fsUUID),
+			FSUUID:           fsUUID,
 			CompressedSize:   nil,
 			CompressionRatio: nil,
 			CompressedFormat: nil,
@@ -301,26 +267,20 @@ func (s *Service) OptimizeImage(
 		)
 	}
 
-	// ── Filesystem conversion (btrfs → ext4) ──────────────────────
+	// ── Convert, deblob, shrink in a single backend session ──
 	if fsType == "btrfs" {
 		slog.Info("Converting filesystem from btrfs to ext4...")
-		cp := NewProvisioner(ctx, imagePath, provisionerType, fsType, s.cacheDir)
-		cp.ConvertTo("ext4")
-		cp.Run() // error intentionally ignored — matches Python where this is inside OptimizeImage's own call path
-		fsType = "ext4"
-		slog.Info("Filesystem conversion completed: btrfs → ext4")
+		p.ConvertTo("ext4")
 	}
 
-	// ── Shrink + deblob via Provisioner ──────────────────────
 	preShrinkInfo, _ := os.Stat(imagePath)
 	preShrinkSize := preShrinkInfo.Size()
 
-	p := NewProvisioner(ctx, imagePath, provisionerType, fsType, s.cacheDir)
 	p.Deblob()
-	if FSCanShrink[fsType] {
+	if FSCanShrink[fsType] || fsType == "btrfs" {
 		p.Shrink()
 	}
-	optimized, runErr := p.Run()
+	optimized, runErr := p.Run(ctx)
 	if runErr != nil {
 		return nil, warnings, runErr
 	}
@@ -348,17 +308,7 @@ func (s *Service) OptimizeImage(
 		slog.Warn("Image shrinking not performed (filesystem type may be unsupported or detection failed)")
 	}
 
-	// ── Detect OS type from the optimized image ──────────────────
-	var distro string
-	dp2 := NewProvisioner(ctx, imagePath, provisionerType, fsType, s.cacheDir)
-	osResult2, osErr2 := dp2.DetectOS()
-	if osErr2 == nil {
-		distro = osResult2
-	} else {
-		slog.Warn("Failed to detect OS type for image", "image_id", imageID)
-	}
-
-	compressedPath, compErr := s.compress(imagePath, 3, false)
+	compressedPath, compErr := s.compress(imagePath, CompressionLevel, false)
 	if compErr != nil {
 		return nil, warnings, compErr
 	}
@@ -370,21 +320,20 @@ func (s *Service) OptimizeImage(
 
 	compressionRatio := float64(preShrinkSize) / float64(compressedSize)
 	if compressedSize <= 0 {
-		compressionRatio = 1.0
+		compressionRatio = RatioMin
 	}
 
 	minimumRootfsSizeMiB := int(postShrinkSize/MiB) + RuntimeBufferMB
 
 	slog.Info("Optimization complete", "total_seconds", t3.Sub(t0).Seconds())
 
-	compFmt := "zst"
 	return &model.ImageItem{
 		ID:               imageID,
 		Type:             spec.Type,
 		Version:          spec.Version,
 		Name:             spec.Name,
 		Arch:             spec.Arch,
-		Distro:           ptr.StrNonEmpty(distro),
+		Distro:           detectedOS,
 		Path:             compressedPath,
 		FSType:           fsType,
 		MinRootfsSizeMiB: minimumRootfsSizeMiB,
@@ -394,10 +343,10 @@ func (s *Service) OptimizeImage(
 		PulledAt:         timestamp,
 		CreatedAt:        timestamp,
 		UpdatedAt:        timestamp,
-		FSUUID:           ptr.StrNonEmpty(fsUUID),
+		FSUUID:           fsUUID,
 		CompressedSize:   &compressedSize,
 		CompressionRatio: &compressionRatio,
-		CompressedFormat: &compFmt,
+		CompressedFormat: new(CompressionFormat),
 	}, warnings, nil
 }
 
@@ -431,14 +380,15 @@ func (s *Service) DownloadImage(
 	}
 
 	var resolvedSHA256 string
-	if spec.SHA256 != nil {
-		resolvedSHA256 = strings.ToLower(*spec.SHA256)
+	if spec.SHA256 != "" {
+		resolvedSHA256 = strings.ToLower(spec.SHA256)
 	}
 
-	var sha256URL string
-	if spec.SHA256URL != nil {
-		sha256URL = *spec.SHA256URL
-		sha256URL = renderOptionalTemplate(sha256URL, templateVars)
+	sha256URL := spec.SHA256URL
+	if sha256URL != "" {
+		if r, err := infra.RenderTemplate(sha256URL, templateVars); err == nil {
+			sha256URL = r
+		}
 	}
 
 	if resolvedSHA256 == "" && sha256URL != "" {
@@ -458,7 +408,9 @@ func (s *Service) DownloadImage(
 	}
 
 	// Validate downloaded file
-	s.validateDownloadedFile(downloadPath, spec.Format)
+	if err := s.validateDownloadedFile(downloadPath, spec.Format); err != nil {
+		return "", err
+	}
 
 	return downloadPath, nil
 }
@@ -472,7 +424,7 @@ func (s *Service) ExtractImage(
 	imageID string,
 	outputDir string,
 	format string,
-	partition *int,
+	partition int,
 	disabledDetectors []string,
 	provisionerType provisioner.ProvisionerType,
 ) (string, error) {
@@ -495,7 +447,7 @@ func (s *Service) ExtractImage(
 
 // MaterializeTo performs fast durable copy from tmpfs cache to destination.
 func (s *Service) MaterializeTo(ctx context.Context, imageID, fsType, outputPath string) error {
-	cachedPath := filepath.Join(s.warmDir, fmt.Sprintf("%s.%s", imageID, fsType))
+	cachedPath := filepath.Join(infra.GetWarmImageDir(), fmt.Sprintf("%s.%s", imageID, fsType))
 	if _, err := os.Stat(cachedPath); os.IsNotExist(err) {
 		return NewImageError(fmt.Sprintf("Image not in cache: %s", imageID))
 	}
@@ -510,7 +462,7 @@ func (s *Service) MaterializeTo(ctx context.Context, imageID, fsType, outputPath
 	)
 	combined := string(result.StdoutBytes) + string(result.StderrBytes)
 	if result.Err != nil {
-		if err := s.copyWithDD(ctx, cachedPath, outputPath, true); err != nil {
+		if err := system.CopyWithDD(ctx, cachedPath, outputPath, true); err != nil {
 			return NewImageError(fmt.Sprintf("cp and dd fallback both failed: cp: %s; dd: %s", combined, err))
 		}
 	}
@@ -534,7 +486,7 @@ func (s *Service) MaterializeTo(ctx context.Context, imageID, fsType, outputPath
 func (s *Service) EnsureCached(images []*model.ImageItem) ([]string, error) {
 	var results []string
 	for _, image := range images {
-		cachedPath := filepath.Join(s.warmDir, fmt.Sprintf("%s.%s", image.ID, image.FSType))
+		cachedPath := filepath.Join(infra.GetWarmImageDir(), fmt.Sprintf("%s.%s", image.ID, image.FSType))
 
 		if _, err := os.Stat(cachedPath); err == nil {
 			slog.Debug("Found image in cache", "path", cachedPath)
@@ -544,7 +496,7 @@ func (s *Service) EnsureCached(images []*model.ImageItem) ([]string, error) {
 
 		if image.CompressedFormat == nil || *image.CompressedFormat == "" {
 			slog.Debug("Copying uncompressed image to cache", "path", filepath.Base(cachedPath))
-			if err := copyFile(image.Path, cachedPath); err != nil {
+			if err := infra.CopyFile(image.Path, cachedPath); err != nil {
 				return nil, fmt.Errorf("copy to cache: %w", err)
 			}
 		} else {
@@ -578,23 +530,16 @@ func GetSpecsFor(
 	arch string,
 	cacheTTLSeconds int,
 	ciVersion string,
-	imageTypesConfig []map[string]any,
+	imageTypesConfig []download.ResolverConfig,
 ) ([]*model.ImageSpec, error) {
 	// Default arch to current machine if not specified
 	if arch == "" {
-		arch = runtime.GOARCH
-		if arch == "amd64" {
-			arch = "x86_64"
-		} else if arch == "arm64" {
-			arch = "aarch64"
-		}
+		arch = system.RuntimeArch()
 	}
 
-	typeConfigMap := make(map[string]map[string]any)
+	typeConfigMap := make(map[string]download.ResolverConfig, len(imageTypesConfig))
 	for _, cfg := range imageTypesConfig {
-		if t, ok := cfg["type"].(string); ok {
-			typeConfigMap[t] = cfg
-		}
+		typeConfigMap[cfg.Type] = cfg
 	}
 
 	// "latest" alias → "" (select latest from directory listing)
@@ -616,10 +561,9 @@ func GetSpecsFor(
 				continue
 			}
 
-			opts, _ := config["options"].(map[string]any)
 			fileDiscovery := false
-			if fd, ok := opts["file_discovery"].(map[string]any); ok {
-				fileDiscovery, _ = fd["enabled"].(bool)
+			if config.Options.FileDiscovery != nil && config.Options.FileDiscovery.Enabled {
+				fileDiscovery = true
 			}
 			if fileDiscovery {
 				newRemaining = append(newRemaining, type_)
@@ -638,26 +582,24 @@ func GetSpecsFor(
 	// ── Phase 2: try version resolver for types not in flat spec_map ──
 	if len(remaining) > 0 {
 		availableHTTPTypes := make(map[string]bool)
-		resolver := NewHttpDirVersionResolver()
+		var remaining2 []string
 
-		// First loop: http-dir with version matching
+		// Single pass: handle http-dir types, collect non-http-dir for next loop.
 		for _, type_ := range remaining {
 			config, ok := typeConfigMap[type_]
 			if !ok {
+				remaining2 = append(remaining2, type_)
 				continue
 			}
 
-			if config == nil {
-				continue
-			}
-			resolverType, _ := config["resolver"].(string)
-			if resolverType != "http-dir" {
+			if config.Resolver != "http-dir" {
+				remaining2 = append(remaining2, type_)
 				continue
 			}
 
 			availableHTTPTypes[type_] = true
 
-			versionResult := resolver.Resolve(ctx, []map[string]any{config}, arch, cacheTTLSeconds, ciVersion)
+			versionResult := ResolveVersions(ctx, []download.ResolverConfig{config}, arch, cacheTTLSeconds, ciVersion)
 			listings := versionResult[type_]
 			if len(listings) == 0 {
 				continue
@@ -677,33 +619,10 @@ func GetSpecsFor(
 					continue
 				}
 			} else {
-				// Pick the first (latest — already sorted desc)
 				chosen = listings[0]
 			}
 
-			results = append(results, &model.ImageSpec{
-				Type:    chosen.Type,
-				Version: chosen.Version,
-				Name:    fmt.Sprintf("%s %s", chosen.Type, chosen.Version),
-				Source:  chosen.DownloadURL,
-				Format:  chosen.Format,
-				Arch:    arch,
-			})
-		}
-
-		// Remove http-dir types from remaining
-		var remaining2 []string
-		for _, type_ := range remaining {
-			config, ok := typeConfigMap[type_]
-			if !ok {
-				remaining2 = append(remaining2, type_)
-				continue
-			}
-			resolverType, _ := config["resolver"].(string)
-			if resolverType == "http-dir" {
-				continue
-			}
-			remaining2 = append(remaining2, type_)
+			results = append(results, specFromVersion(chosen, arch))
 		}
 		remaining = remaining2
 
@@ -714,28 +633,13 @@ func GetSpecsFor(
 				continue
 			}
 
-			resolverType, _ := config["resolver"].(string)
-			if resolverType == "http-dir" {
-				continue // already handled above
-			}
-
-			versionResult := resolver.Resolve(ctx, []map[string]any{config}, arch, cacheTTLSeconds, ciVersion)
+			versionResult := ResolveVersions(ctx, []download.ResolverConfig{config}, arch, cacheTTLSeconds, ciVersion)
 			listings := versionResult[type_]
 			if len(listings) == 0 {
 				continue
 			}
 
-			// Pick the first (latest — already sorted desc)
-			chosen := listings[0]
-
-			results = append(results, &model.ImageSpec{
-				Type:    chosen.Type,
-				Version: chosen.Version,
-				Name:    fmt.Sprintf("%s %s", chosen.Type, chosen.Version),
-				Source:  chosen.DownloadURL,
-				Format:  chosen.Format,
-				Arch:    arch,
-			})
+			results = append(results, specFromVersion(listings[0], arch))
 		}
 
 		// Compute unresolved types by checking which types in the
@@ -778,6 +682,18 @@ func GetSpecsFor(
 	return results, nil
 }
 
+// specFromVersion constructs an ImageSpec from a resolved ImageVersion.
+func specFromVersion(v model.ImageVersion, arch string) *model.ImageSpec {
+	return &model.ImageSpec{
+		Type:    v.Type,
+		Version: v.Version,
+		Name:    fmt.Sprintf("%s %s", v.Type, v.Version),
+		Source:  v.DownloadURL,
+		Format:  v.Format,
+		Arch:    arch,
+	}
+}
+
 // ResolveRemoteSizes resolves remote image sizes via concurrent HEAD requests.
 // Matches Python's Service.resolve_remote_sizes() with max_workers=5.
 // Uses download.Downloader.HeadSize (which includes retry + cache) matching
@@ -799,11 +715,16 @@ func (s *Service) ResolveRemoteSizes(
 			}
 		} else if strings.Contains(sp.Source, "{") {
 			// Static image with template: resolve variables
-			source = renderOptionalTemplate(sp.Source, templateVars)
+			if r, err := infra.RenderTemplate(sp.Source, templateVars); err == nil {
+				source = r
+			}
 		}
 
 		// HEAD request with retry + cache — matching Python's HttpDownload.head_size()
-		size, ok := s.dl.HeadSize(ctx, source, 10, true, 300)
+		size, ok := s.dl.HeadSize(ctx, download.RequestOpts{
+			URL: source, Timeout: 10,
+			UseCache: true, CacheTTLSeconds: 300,
+		})
 		if ok && size >= 0 {
 			sp.Size = &size
 		}
@@ -985,140 +906,7 @@ func (s *Service) decompress(compressedPath, outputPath, compressedFormat string
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Format detection — magic bytes for 6 formats
-// TODO(verdict#33): move DetectImageFormat and is* helpers to infra/
-// ──────────────────────────────────────────────────────────────────────────────
-
-// DetectImageFormat detects container format from magic bytes. Returns "" if unknown.
-func DetectImageFormat(path string) string {
-	info, err := os.Stat(path)
-	if err != nil || info.Size() == 0 {
-		return ""
-	}
-	fileSize := info.Size()
-
-	if isQCOW2(path) {
-		return "qcow2"
-	}
-	if isVHD(path, fileSize) {
-		return "vhd"
-	}
-	if isVHDX(path) {
-		return "vhdx"
-	}
-	if isSquashFS(path) {
-		return "squashfs"
-	}
-	if isTar(path) {
-		return "tar-rootfs"
-	}
-	if isRaw(path, fileSize) {
-		return "raw"
-	}
-	return ""
-}
-
-func isQCOW2(path string) bool {
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	buf := make([]byte, 4)
-	if _, err := io.ReadFull(f, buf); err != nil {
-		return false
-	}
-	return bytes.Equal(buf, []byte("QFI\xfb"))
-}
-
-func isVHD(path string, fileSize int64) bool {
-	if fileSize < 512 {
-		return false
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	f.Seek(fileSize-512, io.SeekStart)
-	buf := make([]byte, 8)
-	if _, err := io.ReadFull(f, buf); err != nil {
-		return false
-	}
-	return bytes.Equal(buf, []byte("conectix"))
-}
-
-func isVHDX(path string) bool {
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	buf := make([]byte, 8)
-	if _, err := io.ReadFull(f, buf); err != nil {
-		return false
-	}
-	return bytes.Equal(buf, []byte("vhdxfile"))
-}
-
-func isSquashFS(path string) bool {
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	var magic uint32
-	if err := binary.Read(f, binary.LittleEndian, &magic); err != nil {
-		return false
-	}
-	return magic == 0x73717368
-}
-
-func isTar(path string) bool {
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	tr := tar.NewReader(f)
-	_, err = tr.Next()
-	return err == nil
-}
-
-func isRaw(path string, fileSize int64) bool {
-	if fileSize < SectorSize || fileSize%SectorSize != 0 {
-		return false
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	firstKB := make([]byte, 1024)
-	if _, err := io.ReadFull(f, firstKB); err != nil {
-		return false
-	}
-	allZeros := true
-	for _, b := range firstKB {
-		if b != 0 {
-			allZeros = false
-			break
-		}
-	}
-	if allZeros {
-		return false
-	}
-	if len(firstKB) > 512 && bytes.Equal(firstKB[510:512], []byte{0x55, 0xaa}) {
-		return true
-	}
-	if len(firstKB) > 520 && bytes.Equal(firstKB[512:520], []byte("EFI PART")) {
-		return true
-	}
-	return true
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Format validators — matching Python's _validate_* methods exactly
-// ──────────────────────────────────────────────────────────────────────────────
+// ─── Format validators — matching Python's _validate_* methods exactly ──
 
 func (s *Service) validateDownloadedFile(downloadedPath, imageFormat string) error {
 	if _, err := os.Stat(downloadedPath); os.IsNotExist(err) {
@@ -1135,180 +923,33 @@ func (s *Service) validateDownloadedFile(downloadedPath, imageFormat string) err
 		return NewImageValidationError("Downloaded file is empty")
 	}
 
+	var validateErr error
 	switch imageFormat {
 	case "qcow2":
-		return s.validateQCOW2(downloadedPath)
+		validateErr = disk.ValidateQCOW2(downloadedPath)
 	case "vhd":
-		return s.validateVHD(downloadedPath, fileSize)
+		validateErr = disk.ValidateVHD(downloadedPath, fileSize)
 	case "vhdx":
-		return s.validateVHDX(downloadedPath, fileSize)
+		validateErr = disk.ValidateVHDX(downloadedPath, fileSize)
 	case "raw":
-		return s.validateRaw(downloadedPath, fileSize)
+		validateErr = disk.ValidateRaw(downloadedPath, fileSize)
 	case "squashfs":
-		return s.validateSquashFS(downloadedPath)
+		validateErr = disk.ValidateSquashFS(downloadedPath)
 	case "tar-rootfs":
-		return s.validateTar(downloadedPath)
+		validateErr = disk.ValidateTar(downloadedPath)
 	default:
 		os.Remove(downloadedPath)
 		return NewImageValidationError(fmt.Sprintf("Unknown format for validation: %s", imageFormat))
 	}
-}
-
-func (s *Service) validateQCOW2(path string) error {
-	if !isQCOW2(path) {
-		os.Remove(path)
-		return NewImageValidationError("Invalid qcow2 file: wrong magic number")
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		os.Remove(path)
-		return NewImageValidationError(fmt.Sprintf("Failed to validate qcow2 file: %s", err))
-	}
-	defer f.Close()
-
-	f.Read(make([]byte, 4))
-	var version uint32
-	if err := binary.Read(f, binary.BigEndian, &version); err != nil {
-		os.Remove(path)
-		return NewImageValidationError(fmt.Sprintf("Failed to validate qcow2 file: %s", err))
-	}
-	if version != 2 && version != 3 {
-		os.Remove(path)
-		return NewImageValidationError(fmt.Sprintf("Unsupported qcow2 version: %d (expected 2 or 3)", version))
-	}
-
-	f.Seek(24, io.SeekStart)
-	var virtualSize uint64
-	if err := binary.Read(f, binary.BigEndian, &virtualSize); err != nil {
-		os.Remove(path)
-		return NewImageValidationError(fmt.Sprintf("Failed to validate qcow2 file: %s", err))
-	}
-	if virtualSize == 0 {
-		os.Remove(path)
-		return NewImageValidationError("Invalid qcow2 file: zero virtual size")
+	if validateErr != nil {
+		os.Remove(downloadedPath)
+		return NewImageValidationError(err.Error())
 	}
 	return nil
 }
 
-func (s *Service) validateVHD(path string, fileSize int64) error {
-	if fileSize < 512 {
-		os.Remove(path)
-		return NewImageValidationError("Invalid VHD file: too small")
-	}
-	if !isVHD(path, fileSize) {
-		os.Remove(path)
-		return NewImageValidationError("Invalid VHD file: missing conectix cookie")
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		os.Remove(path)
-		return NewImageValidationError(fmt.Sprintf("Failed to validate VHD file: %s", err))
-	}
-	defer f.Close()
-
-	f.Seek(fileSize-512, io.SeekStart)
-	footer := make([]byte, 512)
-	if _, err := io.ReadFull(f, footer); err != nil {
-		os.Remove(path)
-		return NewImageValidationError(fmt.Sprintf("Failed to validate VHD file: %s", err))
-	}
-
-	features := binary.BigEndian.Uint32(footer[8:12])
-	if features&0x00000002 == 0 {
-		os.Remove(path)
-		return NewImageValidationError("Invalid VHD file: reserved bit not set")
-	}
-
-	diskType := binary.BigEndian.Uint32(footer[60:64])
-	if diskType != 2 && diskType != 3 && diskType != 4 {
-		os.Remove(path)
-		return NewImageValidationError(fmt.Sprintf("Invalid VHD file: unknown disk type %d", diskType))
-	}
-	return nil
-}
-
-func (s *Service) validateVHDX(path string, fileSize int64) error {
-	if fileSize < 65536 {
-		os.Remove(path)
-		return NewImageValidationError("Invalid VHDX file: too small")
-	}
-	if !isVHDX(path) {
-		os.Remove(path)
-		return NewImageValidationError("Invalid VHDX file: missing vhdxfile signature")
-	}
-	return nil
-}
-
-func (s *Service) validateRaw(path string, fileSize int64) error {
-	if fileSize < SectorSize {
-		os.Remove(path)
-		return NewImageValidationError("Invalid raw image: too small")
-	}
-	if fileSize%SectorSize != 0 {
-		slog.Warn("Raw image size is not sector-aligned", "size", fileSize)
-	}
-	if !isRaw(path, fileSize) {
-		os.Remove(path)
-		return NewImageValidationError("Invalid raw image: file appears to be all zeros")
-	}
-	return nil
-}
-
-func (s *Service) validateSquashFS(path string) error {
-	if !isSquashFS(path) {
-		os.Remove(path)
-		return NewImageValidationError("Invalid squashfs file: wrong magic number")
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		os.Remove(path)
-		return NewImageValidationError(fmt.Sprintf("Failed to validate squashfs file: %s", err))
-	}
-	defer f.Close()
-
-	f.Seek(28, io.SeekStart)
-	var major uint16
-	if err := binary.Read(f, binary.LittleEndian, &major); err != nil {
-		os.Remove(path)
-		return NewImageValidationError(fmt.Sprintf("Failed to validate squashfs file: %s", err))
-	}
-	var minor uint16
-	if err := binary.Read(f, binary.LittleEndian, &minor); err != nil {
-		os.Remove(path)
-		return NewImageValidationError(fmt.Sprintf("Failed to validate squashfs file: %s", err))
-	}
-	if major != 4 {
-		os.Remove(path)
-		return NewImageValidationError(fmt.Sprintf("Unsupported squashfs version: %d.%d (expected 4.x)", major, minor))
-	}
-	return nil
-}
-
-func (s *Service) validateTar(path string) error {
-	if !isTar(path) {
-		os.Remove(path)
-		return NewImageValidationError("Invalid tar file")
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		os.Remove(path)
-		return NewImageValidationError(fmt.Sprintf("Failed to validate tar file: %s", err))
-	}
-	defer f.Close()
-	tr := tar.NewReader(f)
-	for {
-		_, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			os.Remove(path)
-			return NewImageValidationError(fmt.Sprintf("Failed to validate tar file: %s", err))
-		}
-	}
-	return nil
-}
-
+// ──────────────────────────────────────────────────────────────────────────────
+// disk extraction
 // ──────────────────────────────────────────────────────────────────────────────
 // Extraction helpers
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1319,25 +960,10 @@ func (s *Service) validateTar(path string) error {
 // Matches Python's _extract_disk_image() EXACTLY.
 func (s *Service) extractDiskImage(ctx context.Context,
 	inputPath, outputPath, format string,
-	partition *int, disabledDetectors []string,
+	partition int, disabledDetectors []string,
 	provisionerType provisioner.ProvisionerType,
 ) (string, error) {
-	// isFallbackError checks if the error should trigger fallback to loopmount.
-	// Python catches (ImageError, RuntimeError) — ImageError maps to DomainError
-	// with "image." code prefix; RuntimeError maps to any non-DomainError error.
-	isFallbackError := func(err error) bool {
-		var de *errs.DomainError
-		if errors.As(err, &de) {
-			// Only fallback on DomainError with "image." code prefix (ImageError equivalent)
-			return strings.HasPrefix(string(de.Code), "image.")
-		}
-		// Non-DomainError errors are RuntimeError-equivalent → also fallback
-		return true
-	}
-
 	// Enforce .img suffix — matching Python's output_path.with_suffix(".img") EXACTLY.
-	// Python's Path.with_suffix(".img") replaces the existing extension (e.g. .raw → .img,
-	// .img → .img). Go equivalent: strip extension and add .img.
 	imgPath := outputPath
 	if ext := filepath.Ext(imgPath); ext != "" {
 		imgPath = imgPath[:len(imgPath)-len(ext)] + ".img"
@@ -1345,10 +971,8 @@ func (s *Service) extractDiskImage(ctx context.Context,
 		imgPath = imgPath + ".img"
 	}
 
-	if format == "qcow2" || format == "vhd" || format == "vhdx" {
-		fmtFlag := map[string]string{"qcow2": "qcow2", "vhd": "vpc", "vhdx": "vhdx"}[format]
-
-		tmpDir, err := os.MkdirTemp(s.tempDir, "extract-*")
+	if fmtFlag := infra.QemuImgFormat[format]; fmtFlag != "" {
+		tmpDir, err := os.MkdirTemp(infra.GetTempDir(), "extract-*")
 		if err != nil {
 			return "", fmt.Errorf("create temp dir: %w", err)
 		}
@@ -1358,46 +982,9 @@ func (s *Service) extractDiskImage(ctx context.Context,
 		if err := s.convertToRaw(ctx, inputPath, rawPath, fmtFlag); err != nil {
 			return "", err
 		}
-
-		partitionInt := 0
-		if partition != nil {
-			partitionInt = *partition
-		}
-		result, err := ExtractViaBackend(ctx, rawPath, imgPath, partitionInt, disabledDetectors, provisionerType)
-		if err == nil {
-			return result, nil
-		}
-		if !isFallbackError(err) {
-			return "", err
-		}
-		return ExtractViaBackend(
-			ctx,
-			rawPath,
-			imgPath,
-			partitionInt,
-			disabledDetectors,
-			provisioner.ProvisionerLoopMount,
-		)
+		return ExtractViaBackend(ctx, rawPath, imgPath, partition, disabledDetectors, provisionerType)
 	} else if format == "raw" {
-		partitionInt := 0
-		if partition != nil {
-			partitionInt = *partition
-		}
-		result, err := ExtractViaBackend(ctx, inputPath, imgPath, partitionInt, disabledDetectors, provisionerType)
-		if err == nil {
-			return result, nil
-		}
-		if !isFallbackError(err) {
-			return "", err
-		}
-		return ExtractViaBackend(
-			ctx,
-			inputPath,
-			imgPath,
-			partitionInt,
-			disabledDetectors,
-			provisioner.ProvisionerLoopMount,
-		)
+		return ExtractViaBackend(ctx, inputPath, imgPath, partition, disabledDetectors, provisionerType)
 	} else {
 		return "", NewImageError(fmt.Sprintf("Unsupported disk image format: %s", format))
 	}
@@ -1416,7 +1003,7 @@ func (s *Service) convertToRaw(ctx context.Context, inputPath, outputPath, fmtFl
 }
 
 func (s *Service) handleSquashfs(ctx context.Context, inputPath, finalPath, minimumRootfsSize string) (string, error) {
-	tmpDir, err := os.MkdirTemp(s.tempDir, "squashfs-*")
+	tmpDir, err := os.MkdirTemp(infra.GetTempDir(), "squashfs-*")
 	if err != nil {
 		return "", fmt.Errorf("create temp dir: %w", err)
 	}
@@ -1480,7 +1067,7 @@ func (s *Service) handleSquashfs(ctx context.Context, inputPath, finalPath, mini
 func (s *Service) createExt4FromTar(ctx context.Context, tarPath, outputPath, minimumRootfsMib string) error {
 	t0 := time.Now()
 
-	tmpDir, err := os.MkdirTemp(s.tempDir, "tar-extract-*")
+	tmpDir, err := os.MkdirTemp(infra.GetTempDir(), "tar-extract-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
 	}
@@ -1608,7 +1195,9 @@ func (s *Service) fetchSHA256FromURL(ctx context.Context, sha256URL, sourceFilen
 	// retry logic, HTTP caching, and mirror support matching Python's behavior.
 	// Python passes timeout=HTTP_TIMEOUT_SHA256_FETCH_S (30s).
 	// Python catches HttpDownloadError → returns None (no error).
-	content, err := s.dl.GetContent(ctx, sha256URL, infra.HTTPTimeoutSha256FetchS, nil, false, 0)
+	content, err := s.dl.GetContent(ctx, download.RequestOpts{
+		URL: sha256URL, Timeout: infra.HTTPTimeoutSha256FetchS,
+	})
 	if err != nil {
 		return "", nil // Python catches HttpDownloadError → returns None
 	}
@@ -1661,40 +1250,13 @@ func (s *Service) downloadFile(
 	return s.dl.DownloadFile(dCtx, url, destPath, expectedSHA256, allowMissing, allowMissing, progress)
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Filesystem helpers
-// ──────────────────────────────────────────────────────────────────────────────
-
-func (s *Service) detectFilesystemType(ctx context.Context, imagePath string) string {
-	result := system.RunCmdCompat(
-		ctx,
-		[]string{"blkid", "-o", "value", "-s", "TYPE", imagePath},
-		system.RunCmdOpts{Capture: true, Check: false},
-	)
-	return strings.TrimSpace(result.Stdout)
-}
-
-func (s *Service) getFilesystemUUID(ctx context.Context, imagePath string) string {
-	result := system.RunCmdCompat(
-		ctx,
-		[]string{"blkid", "-p", "-s", "UUID", "-o", "value", imagePath},
-		system.RunCmdOpts{Capture: true, Check: false},
-	)
-	return strings.TrimSpace(result.Stdout)
-}
-
 func (s *Service) resolveFSType(ctx context.Context, imagePath string) (string, error) {
-	fsType := s.detectFilesystemType(ctx, imagePath)
+	fsType := system.DetectFilesystemType(ctx, imagePath)
 	if fsType != "" {
 		return fsType, nil
 	}
-	extMap := map[string]string{
-		".ext4":  "ext4",
-		".btrfs": "btrfs",
-		".xfs":   "xfs",
-	}
 	ext := filepath.Ext(imagePath)
-	if mapped, ok := extMap[ext]; ok {
+	if mapped, ok := infra.ExtToFSType[ext]; ok {
 		return mapped, nil
 	}
 	return "", NewImageError(fmt.Sprintf(
@@ -1737,11 +1299,13 @@ func (s *Service) resolveSourceTemplate(
 		)
 	}
 
-	listURL := renderOptionalTemplate(listURLTmpl, templateVars)
+	listURL, _ := infra.RenderTemplate(listURLTmpl, templateVars)
 
 	// Use shared HttpDownload.GetContent instead of raw http.Client.Get — provides
 	// retry logic, HTTP caching, and mirror support matching Python's behavior.
-	xmlContent, err := s.dl.GetContent(ctx, listURL, 30, nil, false, 0)
+	xmlContent, err := s.dl.GetContent(ctx, download.RequestOpts{
+		URL: listURL, Timeout: 30,
+	})
 	if err != nil {
 		return "", NewImageError("Failed to list Firecracker CI ubuntu images")
 	}
@@ -1766,7 +1330,7 @@ func (s *Service) resolveSourceTemplate(
 	sort.Strings(keys)
 	chosenKey := keys[len(keys)-1]
 
-	sourceResolved := renderOptionalTemplate(spec.Source, templateVars)
+	sourceResolved, _ := infra.RenderTemplate(spec.Source, templateVars)
 	parsedURL, urlErr := url.Parse(sourceResolved)
 	if urlErr != nil {
 		return "", fmt.Errorf("parse URL: %w", urlErr)
@@ -1778,80 +1342,4 @@ func (s *Service) resolveSourceTemplate(
 	}
 	base := fmt.Sprintf("%s://%s/%s", parsedURL.Scheme, parsedURL.Host, bucket)
 	return fmt.Sprintf("%s/%s", base, chosenKey), nil
-}
-
-func (s *Service) copyWithDD(ctx context.Context, src, dst string, sparse bool) error {
-	conv := "fsync"
-	if sparse {
-		conv = "sparse,fsync"
-	}
-	result := system.RunCmdCompat(ctx, []string{"dd", fmt.Sprintf("if=%s", src), fmt.Sprintf("of=%s", dst),
-		"bs=1M", fmt.Sprintf("conv=%s", conv), "status=none"}, system.DefaultRunCmdOpts())
-	combined := string(result.StdoutBytes) + string(result.StderrBytes)
-	if result.Err != nil {
-		return NewImageError(fmt.Sprintf("dd copy failed: %s", combined))
-	}
-	return nil
-}
-
-// resolveVMName extracts the VM name from an enrichment result element.
-// Handles both map[string]any (JSON-serialized) and struct types (with Name field
-// via interface), matching Python's vm.name attribute access. Falls back to
-// fmt.Sprintf for unknown types — never silently returns empty names.
-func resolveVMName(vm any) string {
-	if m, ok := vm.(map[string]any); ok {
-		if n, ok := m["name"].(string); ok && n != "" {
-			return n
-		}
-	}
-	// Try struct types with Name() or GetName() method
-	if n, ok := vm.(interface{ Name() string }); ok {
-		if name := n.Name(); name != "" {
-			return name
-		}
-	}
-	if n, ok := vm.(interface{ GetName() string }); ok {
-		if name := n.GetName(); name != "" {
-			return name
-		}
-	}
-	// Fallback: string representation is better than silently empty
-	return fmt.Sprintf("%v", vm)
-}
-
-func renderOptionalTemplate(tmpl string, vars map[string]string) string {
-	result := tmpl
-	for k, v := range vars {
-		result = strings.ReplaceAll(result, "{"+k+"}", v)
-	}
-	return result
-}
-
-func copyFile(src, dst string) error {
-	s, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer s.Close()
-
-	os.MkdirAll(filepath.Dir(dst), infra.DirPerm)
-	d, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-
-	if _, err := io.Copy(d, s); err != nil {
-		return err
-	}
-	if err := d.Close(); err != nil {
-		return err
-	}
-
-	// Preserve timestamps matching Python's shutil.copy2
-	srcInfo, err := os.Stat(src)
-	if err == nil {
-		os.Chtimes(dst, srcInfo.ModTime(), srcInfo.ModTime())
-	}
-	return nil
 }

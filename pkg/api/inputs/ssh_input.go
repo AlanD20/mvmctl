@@ -8,6 +8,7 @@ import (
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/core/vm"
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/validators"
@@ -187,7 +188,7 @@ func (r *SSHRequest) resolveUser(ctx context.Context) (string, error) {
 	}
 	user, err := config.Resolve(ctx, r.db, "defaults.vm", "ssh_user")
 	if err == nil && user != nil {
-		return toString(user), nil
+		return infra.ToString(user), nil
 	}
 	return "root", nil
 }

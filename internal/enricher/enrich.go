@@ -86,10 +86,6 @@ var VMRelations = map[string]RelationSpec{
 	},
 }
 
-// defaultVMInclude is the default include list when callers don't specify one.
-// Matches Python's typical VMResolver(include=["image","kernel","network","network.leases","volumes","binary"]).
-var defaultVMInclude = []string{"kernel", "image", "binary", "network", "network.leases", "volumes"}
-
 // NetworkRelations matches Python's Resolver.RELATIONS.
 var NetworkRelations = map[string]RelationSpec{
 	"leases": {
@@ -104,9 +100,6 @@ var NetworkRelations = map[string]RelationSpec{
 	},
 }
 
-// defaultNetworkInclude is the default include list for networks (all relations).
-var defaultNetworkInclude = []string{"leases", "vm"}
-
 // ImageRelations matches Python's Resolver.RELATIONS.
 var ImageRelations = map[string]RelationSpec{
 	"vm": {
@@ -115,9 +108,6 @@ var ImageRelations = map[string]RelationSpec{
 		IsReverse: true, BatchMethod: "by_image_id_batch",
 	},
 }
-
-// defaultImageInclude is the default include list for images (all relations).
-var defaultImageInclude = []string{"vm"}
 
 // KernelRelations matches Python's Resolver.RELATIONS.
 var KernelRelations = map[string]RelationSpec{
@@ -128,9 +118,6 @@ var KernelRelations = map[string]RelationSpec{
 	},
 }
 
-// defaultKernelInclude is the default include list for kernels (all relations).
-var defaultKernelInclude = []string{"vm"}
-
 // BinaryRelations matches Python's Resolver.RELATIONS.
 var BinaryRelations = map[string]RelationSpec{
 	"vm": {
@@ -140,9 +127,6 @@ var BinaryRelations = map[string]RelationSpec{
 	},
 }
 
-// defaultBinaryInclude is the default include list for binaries (all relations).
-var defaultBinaryInclude = []string{"vm"}
-
 // VolumeRelations matches Python's VolumeResolver.RELATIONS.
 var VolumeRelations = map[string]RelationSpec{
 	"vm": {
@@ -151,9 +135,6 @@ var VolumeRelations = map[string]RelationSpec{
 		IsReverse: true, BatchMethod: "by_volume_id_batch",
 	},
 }
-
-// defaultVolumeInclude is the default include list for volumes (all relations).
-var defaultVolumeInclude = []string{"vm"}
 
 // KeyRelations matches Python's KeyResolver.RELATIONS (empty — no relations defined).
 var KeyRelations = map[string]RelationSpec{}
@@ -308,14 +289,12 @@ func isEnrichmentError(err error) bool {
 // ── VM enrichment ──────────────────────────────────────────────────────────
 
 // EnrichVM populates resolved relations on VM instances.
-// If include is empty/nil, enriches all known VM relations (backward compat).
-//
-// Matches Python's VMResolver.enrich() with the specified include list.
+// include must specify which relations to load (e.g., "kernel", "image", "binary", "network", "volumes").
 func (e *Enricher) EnrichVM(ctx context.Context, vms []*model.VM, include ...string) error {
 	if len(vms) == 0 {
 		return nil
 	}
-	paths, err := resolveInclude(include, defaultVMInclude, VMRelations)
+	paths, err := resolveInclude(include, VMRelations)
 	if err != nil {
 		return err
 	}
@@ -685,7 +664,7 @@ func (e *Enricher) EnrichNetwork(ctx context.Context, networks []*model.Network,
 	if len(networks) == 0 {
 		return nil
 	}
-	paths, err := resolveInclude(include, defaultNetworkInclude, NetworkRelations)
+	paths, err := resolveInclude(include, NetworkRelations)
 	if err != nil {
 		return err
 	}
@@ -790,7 +769,7 @@ func (e *Enricher) EnrichImage(ctx context.Context, images []*model.ImageItem, i
 	if len(images) == 0 {
 		return nil
 	}
-	paths, err := resolveInclude(include, defaultImageInclude, ImageRelations)
+	paths, err := resolveInclude(include, ImageRelations)
 	if err != nil {
 		return err
 	}
@@ -863,7 +842,7 @@ func (e *Enricher) EnrichKernel(ctx context.Context, kernels []*model.KernelItem
 	if len(kernels) == 0 {
 		return nil
 	}
-	paths, err := resolveInclude(include, defaultKernelInclude, KernelRelations)
+	paths, err := resolveInclude(include, KernelRelations)
 	if err != nil {
 		return err
 	}
@@ -936,7 +915,7 @@ func (e *Enricher) EnrichBinary(ctx context.Context, binaries []*model.BinaryIte
 	if len(binaries) == 0 {
 		return nil
 	}
-	paths, err := resolveInclude(include, defaultBinaryInclude, BinaryRelations)
+	paths, err := resolveInclude(include, BinaryRelations)
 	if err != nil {
 		return err
 	}
@@ -1011,7 +990,7 @@ func (e *Enricher) EnrichVolume(ctx context.Context, volumes []*model.VolumeItem
 	if len(volumes) == 0 {
 		return nil
 	}
-	paths, err := resolveInclude(include, defaultVolumeInclude, VolumeRelations)
+	paths, err := resolveInclude(include, VolumeRelations)
 	if err != nil {
 		return err
 	}
@@ -1088,15 +1067,11 @@ func (e *Enricher) EnrichKey(keys []any) error {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-// resolveInclude resolves the effective include list.
-// If include is empty/nil, returns the defaultInclude.
-// Otherwise, validates paths against the registry and sorts by dot count.
-func resolveInclude(include []string, defaultInclude []string, registry map[string]RelationSpec) ([]string, error) {
+// resolveInclude validates and sorts the include list against the registry.
+// include must be non-empty — callers must explicitly specify relations to load.
+func resolveInclude(include []string, registry map[string]RelationSpec) ([]string, error) {
 	if len(include) == 0 {
-		// Empty include from variadic or explicit empty list → use default
-		result := make([]string, len(defaultInclude))
-		copy(result, defaultInclude)
-		return result, nil
+		return nil, fmt.Errorf("enrichment include list is required — specify which relations to load")
 	}
 
 	if err := validatePaths(include, registry); err != nil {

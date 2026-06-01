@@ -37,7 +37,7 @@ type Backend interface {
 	ExtractPartition(
 		ctx context.Context,
 		rawPath, outputPath string,
-		partition *int,
+		partition int,
 		disabledDetectors []string,
 	) (string, error)
 	ConvertTo(ctx context.Context, targetFS string) error

@@ -174,7 +174,7 @@ func (b *GuestfsBackend) DetectOS(ctx context.Context) (string, error) {
 func (b *GuestfsBackend) ExtractPartition(
 	ctx context.Context,
 	rawPath, outputPath string,
-	partition *int,
+	partition int,
 	disabledDetectors []string,
 ) (string, error) {
 	result, err := ExtractPartition(ctx, rawPath, outputPath, partition)

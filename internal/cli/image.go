@@ -232,18 +232,10 @@ The selector can be a type (e.g. "ubuntu") or type:version (e.g. "ubuntu:24.04")
 				effectiveType = selector
 			}
 
-			var ver *string
-			if effectiveVersion != "" {
-				ver = &effectiveVersion
-			}
-			var archPtr *string
-			if arch != "" {
-				archPtr = &arch
-			}
 			input := &inputs.ImagePullInput{
 				Type:              effectiveType,
-				Version:           ver,
-				Arch:              archPtr,
+				Version:           effectiveVersion,
+				Arch:              arch,
 				Force:             force,
 				NoCache:           noCache,
 				SetDefault:        setDefault,
@@ -502,24 +494,12 @@ Examples:
 				}
 			}
 
-			var archPtr *string
-			if arch != "" {
-				archPtr = &arch
-			}
-			var formatPtr *string
-			if format != "" {
-				formatPtr = &format
-			}
-			var partPtr *int
-			if rootPartition > 0 {
-				partPtr = &rootPartition
-			}
 			input := &inputs.ImageImportInput{
 				Name:              name,
-				Arch:              archPtr,
-				Format:            formatPtr,
+				Arch:              arch,
+				Format:            format,
 				SourcePath:        sourcePath,
-				Partition:         partPtr,
+				Partition:         rootPartition,
 				DisabledDetectors: disabledDetectors,
 				SkipOptimization:  skipOptimization,
 				SetDefault:        setDefault,
