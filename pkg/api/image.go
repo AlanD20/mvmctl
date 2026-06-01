@@ -21,6 +21,7 @@ import (
 	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/operation"
+	"mvmctl/internal/infra/provisioner"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"
 )
@@ -892,18 +893,16 @@ func (op *Operation) ImageSetDefault(ctx context.Context, input *inputs.ImageInp
 // Matches Python's: guestfs_enabled = bool(SettingsService.resolve(db, "settings", "guestfs_enabled"))
 //
 //	provisioner_type = ProvisionerType.GUESTFS if guestfs_enabled else ProvisionerType.LOOP_MOUNT
-//
-// Returns image.ProvisionerType to match the type expected by Service methods.
-func (op *Operation) resolveProvisionerType(ctx context.Context) image.ProvisionerType {
+func (op *Operation) resolveProvisionerType(ctx context.Context) provisioner.ProvisionerType {
 	if op.Services.Config != nil {
 		guestfsEnabledRaw, err := op.Services.Config.Get(ctx, "settings", "guestfs_enabled")
 		if err == nil {
 			if guestfsEnabled, ok := guestfsEnabledRaw.(bool); ok && guestfsEnabled {
-				return image.ProvisionerTypeGuestFS
+				return provisioner.ProvisionerGuestFS
 			}
 		}
 	}
-	return image.ProvisionerTypeLoopMount
+	return provisioner.ProvisionerLoopMount
 }
 
 // isPartitionDetectionError checks if an error is a RootPartitionDetectionError

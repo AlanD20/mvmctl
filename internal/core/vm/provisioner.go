@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/provcontent"
 	"mvmctl/internal/infra/provisioner"
 	"mvmctl/internal/infra/system"
 )
@@ -43,75 +44,21 @@ type Provisioner struct {
 }
 
 // NewProvisioner creates a new VM provisioner.
-// Matches Python's Provisioner(rootfs_path, provisioner_type, fs_type, ...).
-// Returns an error for unknown provisioner types (Python raises ValueError).
 func NewProvisioner(
 	rootfsPath string,
 	provisionerType provisioner.ProvisionerType,
 	fsType string,
-	opts ...ProvisionerOption,
 ) (*Provisioner, error) {
-	p := &ProvisionerOptions{
-		RootUID: 0,
-		RootGID: 0,
-		UserUID: 1000,
-		UserGID: 1000,
-	}
-	for _, opt := range opts {
-		opt(p)
-	}
-
 	var backend ProvisionerBackend
 	switch provisionerType {
 	case provisioner.ProvisionerLoopMount:
-		backend = newLoopMountBackend(rootfsPath, fsType, p)
+		backend = newLoopMountBackend(rootfsPath, fsType)
 	case provisioner.ProvisionerGuestFS:
-		// Must ensure guestfs appliance cache is available (Python's _ensure_guestfs_appliance())
-		cacheDir, err := infra.GetCacheDir()
-		if err != nil {
-			return nil, fmt.Errorf("provisioner: failed to get cache dir: %w", err)
-		}
-		if err := provisioner.EnsureGuestfsAppliance(cacheDir); err != nil {
-			return nil, err
-		}
-		backend = newGuestfsBackend(rootfsPath, fsType, p)
+		backend = newGuestfsBackend(rootfsPath, fsType)
 	default:
-		// Python raises ValueError for unknown provisioner types
 		return nil, fmt.Errorf("unknown provisioner type: %s", provisionerType)
 	}
-
 	return &Provisioner{backend: backend}, nil
-}
-
-// ProvisionerOptions holds optional parameters for the provisioner.
-type ProvisionerOptions struct {
-	RootUID int
-	RootGID int
-	UserUID int
-	UserGID int
-}
-
-// ProvisionerOption is a functional option for Provisioner.
-type ProvisionerOption func(*ProvisionerOptions)
-
-// WithRootUID sets the root UID. Default: 0.
-func WithRootUID(uid int) ProvisionerOption {
-	return func(o *ProvisionerOptions) { o.RootUID = uid }
-}
-
-// WithRootGID sets the root GID. Default: 0.
-func WithRootGID(gid int) ProvisionerOption {
-	return func(o *ProvisionerOptions) { o.RootGID = gid }
-}
-
-// WithUserUID sets the user UID. Default: 1000.
-func WithUserUID(uid int) ProvisionerOption {
-	return func(o *ProvisionerOptions) { o.UserUID = uid }
-}
-
-// WithUserGID sets the user GID. Default: 1000.
-func WithUserGID(gid int) ProvisionerOption {
-	return func(o *ProvisionerOptions) { o.UserGID = gid }
 }
 
 // =========================================================================
@@ -121,15 +68,13 @@ func WithUserGID(gid int) ProvisionerOption {
 type loopMountBackend struct {
 	rootfsPath string
 	fsType     string
-	opts       *ProvisionerOptions
-	ops        []provisioner.Operation
+	ops        []provcontent.Operation
 }
 
-func newLoopMountBackend(rootfsPath, fsType string, opts *ProvisionerOptions) *loopMountBackend {
+func newLoopMountBackend(rootfsPath, fsType string) *loopMountBackend {
 	return &loopMountBackend{
 		rootfsPath: rootfsPath,
 		fsType:     fsType,
-		opts:       opts,
 	}
 }
 
@@ -171,7 +116,7 @@ func (b *loopMountBackend) detectOSInternal(ctx context.Context) (string, error)
 }
 
 func (b *loopMountBackend) Resize(targetSizeBytes int64) error {
-	pc := provisioner.ProvisionerContent{}
+	pc := provcontent.Builder{}
 	if targetSizeBytes == 0 {
 		b.ops = append(b.ops, pc.BuildShrinkOps(0)...)
 	} else {
@@ -181,38 +126,38 @@ func (b *loopMountBackend) Resize(targetSizeBytes int64) error {
 }
 
 func (b *loopMountBackend) SetHostname(hostname string) error {
-	pc := provisioner.ProvisionerContent{}
+	pc := provcontent.Builder{}
 	b.ops = append(b.ops, pc.BuildHostnameOps(hostname)...)
 	return nil
 }
 
 func (b *loopMountBackend) InjectDNS(dnsServer string) error {
-	pc := provisioner.ProvisionerContent{}
+	pc := provcontent.Builder{}
 	b.ops = append(b.ops, pc.BuildDNSOps(dnsServer)...)
 	return nil
 }
 
 func (b *loopMountBackend) SetupSSH(user string, sshPubkeys []string) error {
-	pc := provisioner.ProvisionerContent{}
+	pc := provcontent.Builder{}
 	b.ops = append(b.ops, pc.BuildSSHOps(user, sshPubkeys)...)
 	return nil
 }
 
 func (b *loopMountBackend) DisableCloudInit() error {
 	// Queue cloud-init datasource blocking + service masking (Python's build_cloud_init_disable_ops)
-	pc := provisioner.ProvisionerContent{}
+	pc := provcontent.Builder{}
 	b.ops = append(b.ops, pc.BuildCloudInitDisableOps()...)
 	return nil
 }
 
 func (b *loopMountBackend) InjectCloudInit(cloudInitDir string) error {
-	pc := provisioner.ProvisionerContent{}
+	pc := provcontent.Builder{}
 	b.ops = append(b.ops, pc.BuildCloudInitInjectOps(cloudInitDir)...)
 	return nil
 }
 
 func (b *loopMountBackend) FixFstab() error {
-	pc := provisioner.ProvisionerContent{}
+	pc := provcontent.Builder{}
 	b.ops = append(b.ops, pc.BuildFixFstabOps()...)
 	return nil
 }
@@ -221,7 +166,7 @@ func (b *loopMountBackend) Deblob(ctx context.Context, osType string) error {
 	if osType == "" {
 		osType = b.DetectOS(ctx)
 	}
-	pc := provisioner.ProvisionerContent{}
+	pc := provcontent.Builder{}
 	b.ops = append(b.ops, pc.BuildDeblobOps(osType)...)
 	return nil
 }
@@ -232,11 +177,11 @@ func (b *loopMountBackend) Run(ctx context.Context) error {
 		return nil
 	}
 
-	var preOps []provisioner.Operation
-	var resizeOp *provisioner.ResizeOp
+	var preOps []provcontent.Operation
+	var resizeOp *provcontent.ResizeOp
 
 	for _, op := range b.ops {
-		if ro, ok := op.(provisioner.ResizeOp); ok {
+		if ro, ok := op.(provcontent.ResizeOp); ok {
 			resizeOp = &ro
 		} else {
 			preOps = append(preOps, op)
@@ -251,17 +196,17 @@ func (b *loopMountBackend) Run(ctx context.Context) error {
 
 		for _, op := range preOps {
 			switch o := op.(type) {
-			case provisioner.FileOp:
+			case provcontent.FileOp:
 				if err := executeFileOp(mountPoint, o); err != nil {
 					unmountImage(ctx, mountPoint, loopDev)
 					return fmt.Errorf("file op failed: %w", err)
 				}
-			case provisioner.ChrootOp:
+			case provcontent.ChrootOp:
 				if err := executeChrootOp(ctx, mountPoint, o); err != nil {
 					unmountImage(ctx, mountPoint, loopDev)
 					return fmt.Errorf("chroot op failed: %w", err)
 				}
-			case provisioner.CopyDirOp:
+			case provcontent.CopyDirOp:
 				if err := executeCopyDirOp(ctx, mountPoint, o); err != nil {
 					unmountImage(ctx, mountPoint, loopDev)
 					return fmt.Errorf("copy dir op failed: %w", err)
@@ -289,15 +234,13 @@ func (b *loopMountBackend) Run(ctx context.Context) error {
 type guestfsBackend struct {
 	rootfsPath string
 	fsType     string
-	opts       *ProvisionerOptions
-	ops        []provisioner.Operation
+	ops        []provcontent.Operation
 }
 
-func newGuestfsBackend(rootfsPath, fsType string, opts *ProvisionerOptions) *guestfsBackend {
+func newGuestfsBackend(rootfsPath, fsType string) *guestfsBackend {
 	return &guestfsBackend{
 		rootfsPath: rootfsPath,
 		fsType:     fsType,
-		opts:       opts,
 	}
 }
 
@@ -333,7 +276,7 @@ func (b *guestfsBackend) detectOSInternal(ctx context.Context) (string, error) {
 }
 
 func (b *guestfsBackend) Resize(targetSizeBytes int64) error {
-	pc := provisioner.ProvisionerContent{}
+	pc := provcontent.Builder{}
 	if targetSizeBytes == 0 {
 		b.ops = append(b.ops, pc.BuildShrinkOps(0)...)
 	} else {
@@ -343,38 +286,38 @@ func (b *guestfsBackend) Resize(targetSizeBytes int64) error {
 }
 
 func (b *guestfsBackend) SetHostname(hostname string) error {
-	pc := provisioner.ProvisionerContent{}
+	pc := provcontent.Builder{}
 	b.ops = append(b.ops, pc.BuildHostnameOps(hostname)...)
 	return nil
 }
 
 func (b *guestfsBackend) InjectDNS(dnsServer string) error {
-	pc := provisioner.ProvisionerContent{}
+	pc := provcontent.Builder{}
 	b.ops = append(b.ops, pc.BuildDNSOps(dnsServer)...)
 	return nil
 }
 
 func (b *guestfsBackend) SetupSSH(user string, sshPubkeys []string) error {
-	pc := provisioner.ProvisionerContent{}
+	pc := provcontent.Builder{}
 	b.ops = append(b.ops, pc.BuildSSHOps(user, sshPubkeys)...)
 	return nil
 }
 
 func (b *guestfsBackend) DisableCloudInit() error {
 	// Queue cloud-init datasource blocking + service masking (Python's build_cloud_init_disable_ops)
-	pc := provisioner.ProvisionerContent{}
+	pc := provcontent.Builder{}
 	b.ops = append(b.ops, pc.BuildCloudInitDisableOps()...)
 	return nil
 }
 
 func (b *guestfsBackend) InjectCloudInit(cloudInitDir string) error {
-	pc := provisioner.ProvisionerContent{}
+	pc := provcontent.Builder{}
 	b.ops = append(b.ops, pc.BuildCloudInitInjectOps(cloudInitDir)...)
 	return nil
 }
 
 func (b *guestfsBackend) FixFstab() error {
-	pc := provisioner.ProvisionerContent{}
+	pc := provcontent.Builder{}
 	b.ops = append(b.ops, pc.BuildFixFstabOps()...)
 	return nil
 }
@@ -382,7 +325,7 @@ func (b *guestfsBackend) FixFstab() error {
 func (b *guestfsBackend) Deblob(ctx context.Context, osType string) error {
 	// os_type is ignored for guestfs backend (it detects OS internally).
 	// Parameter accepted for interface compatibility with loopMountBackend.
-	pc := provisioner.ProvisionerContent{}
+	pc := provcontent.Builder{}
 	b.ops = append(b.ops, pc.BuildDeblobOps(osType)...)
 	return nil
 }
@@ -393,11 +336,11 @@ func (b *guestfsBackend) Run(ctx context.Context) error {
 		return nil
 	}
 
-	var preOps []provisioner.Operation
-	var resizeOp *provisioner.ResizeOp
+	var preOps []provcontent.Operation
+	var resizeOp *provcontent.ResizeOp
 
 	for _, op := range b.ops {
-		if ro, ok := op.(provisioner.ResizeOp); ok {
+		if ro, ok := op.(provcontent.ResizeOp); ok {
 			resizeOp = &ro
 		} else {
 			preOps = append(preOps, op)
@@ -412,13 +355,13 @@ func (b *guestfsBackend) Run(ctx context.Context) error {
 
 		for _, op := range preOps {
 			switch o := op.(type) {
-			case provisioner.FileOp:
+			case provcontent.FileOp:
 				gfCommands = append(gfCommands,
 					fmt.Sprintf("write-file %s %q %d", o.Path, string(o.Data), o.Mode))
-			case provisioner.ChrootOp:
+			case provcontent.ChrootOp:
 				gfCommands = append(gfCommands,
 					fmt.Sprintf("sh %q", o.Command))
-			case provisioner.CopyDirOp:
+			case provcontent.CopyDirOp:
 				gfCommands = append(gfCommands,
 					fmt.Sprintf("copy-in %s %s", o.Src, o.Dst))
 			}
@@ -443,10 +386,10 @@ func (b *guestfsBackend) Run(ctx context.Context) error {
 // Inline operation execution helpers
 // =========================================================================
 
-func executeFileOp(mountPoint string, op provisioner.FileOp) error {
+func executeFileOp(mountPoint string, op provcontent.FileOp) error {
 	fullPath := filepath.Join(mountPoint, op.Path)
 	dir := filepath.Dir(fullPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, infra.DirPerm); err != nil {
 		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
 	if err := os.WriteFile(fullPath, op.Data, os.FileMode(op.Mode)); err != nil {
@@ -455,7 +398,7 @@ func executeFileOp(mountPoint string, op provisioner.FileOp) error {
 	return nil
 }
 
-func executeChrootOp(ctx context.Context, mountPoint string, op provisioner.ChrootOp) error {
+func executeChrootOp(ctx context.Context, mountPoint string, op provcontent.ChrootOp) error {
 	stdout, stderr, err := system.RunCmd(ctx, "chroot", mountPoint, "/bin/sh", "-c", op.Command)
 	if err != nil {
 		return fmt.Errorf("chroot command exited: %s\nstdout: %s\nstderr: %s", err, stdout, stderr)
@@ -463,9 +406,9 @@ func executeChrootOp(ctx context.Context, mountPoint string, op provisioner.Chro
 	return nil
 }
 
-func executeCopyDirOp(ctx context.Context, mountPoint string, op provisioner.CopyDirOp) error {
+func executeCopyDirOp(ctx context.Context, mountPoint string, op provcontent.CopyDirOp) error {
 	dstPath := filepath.Join(mountPoint, op.Dst)
-	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dstPath), infra.DirPerm); err != nil {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(dstPath), err)
 	}
 	stdout, stderr, err := system.RunCmd(ctx, "cp", "-a", op.Src, dstPath+"/")
@@ -475,9 +418,9 @@ func executeCopyDirOp(ctx context.Context, mountPoint string, op provisioner.Cop
 	return nil
 }
 
-func executeResizeOp(ctx context.Context, imagePath string, op provisioner.ResizeOp) error {
+func executeResizeOp(ctx context.Context, imagePath string, op provcontent.ResizeOp) error {
 	switch op.Action {
-	case provisioner.ResizeActionShrink:
+	case provcontent.ResizeActionShrink:
 		slog.Debug("Shrinking filesystem", "image", imagePath)
 		if err := runCommand(ctx, "e2fsck", "-f", "-y", imagePath); err != nil {
 			return fmt.Errorf("e2fsck failed for shrink: %w", err)
@@ -487,7 +430,7 @@ func executeResizeOp(ctx context.Context, imagePath string, op provisioner.Resiz
 		}
 		slog.Debug("Filesystem shrunk", "image", imagePath)
 
-	case provisioner.ResizeActionGrow:
+	case provcontent.ResizeActionGrow:
 		slog.Debug("Growing filesystem", "image", imagePath, "bytes", op.Bytes)
 		if err := runCommand(ctx, "e2fsck", "-f", "-y", imagePath); err != nil {
 			return fmt.Errorf("e2fsck failed for grow: %w", err)

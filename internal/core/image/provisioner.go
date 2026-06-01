@@ -11,16 +11,9 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
-	"mvmctl/internal/infra/loopmount"
 	"mvmctl/internal/infra/provisioner"
-)
-
-// ProvisionerType is an alias for provisioner.ProvisionerType.
-type ProvisionerType = provisioner.ProvisionerType
-
-const (
-	ProvisionerTypeLoopMount ProvisionerType = provisioner.ProvisionerLoopMount
-	ProvisionerTypeGuestFS   ProvisionerType = provisioner.ProvisionerGuestFS
+	"mvmctl/internal/infra/provisioner/guestfs"
+	"mvmctl/internal/infra/provisioner/loopmount"
 )
 
 // Provisioner matches Python's Provisioner in _provisioner.py.
@@ -30,7 +23,7 @@ const (
 type Provisioner struct {
 	ctx             context.Context
 	imagePath       string
-	provisionerType ProvisionerType
+	provisionerType provisioner.ProvisionerType
 	fsType          string
 	cacheDir        string
 	deblob          bool
@@ -41,13 +34,13 @@ type Provisioner struct {
 // NewProvisioner creates a new Provisioner.
 // Matches Python's Provisioner.__init__() which takes:
 //
-//	image_path: Path, *, provisioner_type: ProvisionerType, fs_type: str
+//	image_path: Path, *, provisioner_type: provisioner.ProvisionerType, fs_type: str
 //
 // cacheDir is resolved by the caller and passed through.
 func NewProvisioner(
 	ctx context.Context,
 	imagePath string,
-	provisionerType ProvisionerType,
+	provisionerType provisioner.ProvisionerType,
 	fsType string,
 	cacheDir string,
 ) *Provisioner {
@@ -62,20 +55,17 @@ func NewProvisioner(
 
 // createBackend creates a fresh backend for the current image.
 // Matches Python's ProvisionerBackend.get_image().
-// Resolves cacheDir internally (from environment/config) — matching Python
-// which doesn't pass cacheDir as a parameter.
+// cacheDir is taken from the Provisioner struct (resolved by the caller at
+// construction time), not from the environment at call time.
 func (p *Provisioner) createBackend() (provisioner.Backend, error) {
-	switch p.provisionerType {
-	case ProvisionerTypeLoopMount:
-		return loopmount.NewLoopMountBackend(p.ctx, p.imagePath, p.fsType, p.cacheDir), nil
-	case ProvisionerTypeGuestFS:
-		if err := provisioner.EnsureGuestfsAppliance(""); err != nil {
-			return nil, err
-		}
-		return provisioner.NewGuestfsBackend(p.ctx, p.imagePath, 0, 0, 1000, 1000), nil
-	default:
-		return nil, fmt.Errorf("image provisioner: unknown provisioner type: %s", p.provisionerType)
-	}
+	return provisioner.NewBackend(p.ctx, provisioner.BackendOpts{
+		RootfsPath:      p.imagePath,
+		FsType:          p.fsType,
+		CacheDir:        p.cacheDir,
+		ProvisionerType: p.provisionerType,
+		UserUID:         1000,
+		UserGID:         1000,
+	})
 }
 
 // -- builder methods (declarative) -------------------------------------------
@@ -89,7 +79,7 @@ func (p *Provisioner) DetectOS() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return backend.DetectOS()
+	return backend.DetectOS(p.ctx)
 }
 
 // Deblob marks that deblob + fstab fix should run.
@@ -170,7 +160,7 @@ func (p *Provisioner) Run() (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		if err := backend.ConvertTo(p.convertTo); err != nil {
+		if err := backend.ConvertTo(p.ctx, p.convertTo); err != nil {
 			if isExpectedProvisionerError(err) {
 				slog.Warn(
 					"Filesystem conversion skipped",
@@ -195,10 +185,10 @@ func (p *Provisioner) Run() (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		if err := backend.Deblob(""); err != nil {
+		if err := backend.Deblob(p.ctx, nil); err != nil {
 			return false, err
 		}
-		if err := backend.Run(); err != nil {
+		if err := backend.Run(p.ctx); err != nil {
 			if isExpectedProvisionerError(err) {
 				slog.Warn(
 					"Debloating skipped",
@@ -221,10 +211,10 @@ func (p *Provisioner) Run() (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		if err := backend.Shrink(); err != nil {
+		if err := backend.Shrink(p.ctx); err != nil {
 			return false, err
 		}
-		if err := backend.Run(); err != nil {
+		if err := backend.Run(p.ctx); err != nil {
 			if isExpectedProvisionerError(err) {
 				slog.Warn("Shrink skipped (image may already be minimal)", "error", err)
 			} else {
@@ -247,7 +237,7 @@ func ExtractViaBackend(
 	rawPath, outputPath string,
 	partition int,
 	disabledDetectors []string,
-	provisionerType ProvisionerType,
+	provisionerType provisioner.ProvisionerType,
 ) (result string, err error) {
 	// Wrap non-DomainError as ImageError — matching Python's:
 	// except RuntimeError as e:
@@ -264,17 +254,23 @@ func ExtractViaBackend(
 	// For extraction, fsType is a placeholder — the backend detects it from the image.
 	fsType := "ext4"
 
+	// Convert partition int to *int (nil = auto-detect, matching Python int | None = None).
+	var partitionPtr *int
+	if partition > 0 {
+		partitionPtr = &partition
+	}
+
 	switch provisionerType {
-	case ProvisionerTypeLoopMount:
+	case provisioner.ProvisionerLoopMount:
 		cacheDir, err := infra.GetCacheDir()
 		if err != nil {
 			return "", fmt.Errorf("extract partition: cannot resolve cache directory: %w", err)
 		}
 		backend := loopmount.NewLoopMountBackend(ctx, rawPath, fsType, cacheDir)
-		return backend.ExtractPartition(rawPath, outputPath, partition, disabledDetectors)
-	case ProvisionerTypeGuestFS:
-		backend := provisioner.NewGuestfsBackend(ctx, rawPath, 0, 0, 1000, 1000)
-		return backend.ExtractPartition(rawPath, outputPath, partition, disabledDetectors)
+		return backend.ExtractPartition(ctx, rawPath, outputPath, partitionPtr, disabledDetectors)
+	case provisioner.ProvisionerGuestFS:
+		backend := guestfs.NewGuestfsBackend(rawPath, 0, 0, 1000, 1000)
+		return backend.ExtractPartition(ctx, rawPath, outputPath, partitionPtr, disabledDetectors)
 	default:
 		return "", fmt.Errorf("image provisioner: unknown provisioner type: %s", provisionerType)
 	}

@@ -1,4 +1,4 @@
-// Package provisionercontent holds shared provisioning content types and builders.
+// Package provcontent holds shared provisioning content types and builders.
 //
 // This package is intentionally separate from "mvmctl/internal/infra/provisioner"
 // to avoid circular imports: guestfs and loopmount packages import this for
@@ -6,12 +6,11 @@
 // guestfs and loopmount directly.
 //
 // Mirrors Python's src/mvmctl/core/_shared/_provisioner/_content.py exactly.
-package provisionercontent
+package provcontent
 
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -93,22 +92,166 @@ func NewFileOp(path string, data []byte) FileOp {
 }
 
 // =========================================================================
-// ProvisionerContent — shared provisioning content
+// Builder — shared provisioning content
 // Matches Python's ProvisionerContent class exactly.
 //
 // - Raw content methods return plain strings/bytes (single source of truth).
 // - Builder methods wrap raw content into Operation types.
 // =========================================================================
 
-type ProvisionerContent struct{}
+type Builder struct{}
 
-// ---------------------------------------------------------------------------
-// Raw content methods
-// ---------------------------------------------------------------------------
+// Provisioning content constants and shell scripts.
+var (
+	CloudInitDisableDatasource = []byte("datasource_list: [None]\n")
+	CloudInitDisabledMarker    = []byte("disabled by mvmctl\n")
+	SnapdOverride              = []byte("[Service]\nExecStart=\nExecStart=/bin/true\n")
+	NetworkdWaitOverride       = []byte("[Unit]\nConditionPathExists=/nonexistent-disabled-by-mvm\n")
+
+	maskServicesScript = `# Mask non-essential systemd services for faster microVM boot
+if command -v systemctl >/dev/null 2>&1; then
+  for svc in \
+    systemd-timesyncd.service \
+    systemd-time-wait-sync.service \
+    systemd-firstboot.service \
+    ldconfig.service \
+    modprobe@drm.service \
+    modprobe@efi_pstore.service \
+    sys-kernel-debug.mount \
+    pollinate.service \
+    snapd.service \
+    snapd.socket \
+    systemd-udev-settle.service \
+    unattended-upgrades.service \
+    packagekit.service \
+    man-db.timer \
+    whoopsie.service \
+    apport.service \
+    udisks2.service \
+    console-setup.service \
+    keyboard-setup.service \
+    motd-news.service \
+    fstrim.timer \
+    logrotate.timer \
+    multipathd.service \
+    accounts-daemon.service \
+    systemd-userdbd.service \
+    systemd-nsresourced.service \
+    systemd-pcrphase.service \
+    systemd-pcrphase-initrd.service \
+    systemd-pcrphase-sysinit.service \
+    systemd-boot-update.service; do
+    ln -sf /dev/null "/etc/systemd/system/$svc" 2>/dev/null || true
+  done
+fi`
+
+	enableSSHScript = `if command -v systemctl >/dev/null 2>&1; then
+  systemctl enable sshd 2>/dev/null || systemctl enable ssh 2>/dev/null || true;
+fi`
+
+	maskTimerServicesScript = `# Mask unnecessary timer services for microVM
+systemctl mask e2scrub_all.timer e2scrub_reap.service apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true`
+
+	alpineSSHEnableScript = `# Pre-enable SSH daemon for OpenRC
+rc-update add sshd default 2>/dev/null || rc-update add ssh default 2>/dev/null || true`
+
+	alpineParallelStartupScript = `# Enable parallel service startup (microVM optimisation)
+sed -i '/^rc_parallel=/d; /^#rc_parallel=/d' /etc/rc.conf 2>/dev/null; echo 'rc_parallel="YES"' >> /etc/rc.conf`
+
+	firstBootInstallerScript = `#!/bin/bash
+if ! command -v sshd >/dev/null 2>&1 && ! command -v ssh >/dev/null 2>&1; then
+  if command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm openssh 2>/dev/null || true;
+  elif command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y openssh-server 2>/dev/null || true;
+  elif command -v apk >/dev/null 2>&1; then apk add --no-cache openssh 2>/dev/null || true; fi;
+fi
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl enable --now sshd 2>/dev/null || systemctl enable --now ssh 2>/dev/null || true;
+elif [ -f /sbin/openrc ]; then
+  rc-update add sshd default 2>/dev/null || rc-update add ssh default 2>/dev/null || true;
+  rc-service sshd start 2>/dev/null || rc-service ssh start 2>/dev/null || true;
+fi
+systemctl disable first-boot-ssh-installer.service 2>/dev/null || true`
+
+	firstBootServiceScript = `[Unit]
+Description=First-boot SSH installer
+After=network.target
+ConditionFirstBoot=yes
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/first-boot-ssh-installer.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target`
+
+	hostsTemplate = `127.0.0.1	localhost
+127.0.1.1	%s
+
+::1	localhost ip6-localhost ip6-loopback
+fe00::0	ip6-localnet
+ff00::0	ip6-mcastprefix
+ff02::1	ip6-allnodes
+ff02::2	ip6-allrouters`
+
+	alpineDhcpcdScript = `grep -qs '^denyinterfaces eth0' /etc/dhcpcd.conf 2>/dev/null || echo 'denyinterfaces eth0' >> /etc/dhcpcd.conf
+sed -i 's/iface eth0 inet dhcp/iface eth0 inet manual/' /etc/network/interfaces`
+
+	alpineCloudInitDisableScript = `# Disable cloud-init services for faster boot
+rc-update del cloud-init default 2>/dev/null || true
+rc-update del cloud-config default 2>/dev/null || true
+rc-update del cloud-final default 2>/dev/null || true
+rc-update del cloud-init-hotplugd default 2>/dev/null || true
+rc-update del cloud-init ssh 2>/dev/null || true`
+
+	alpineSerialGettyScript = `# Disable serial getty on ttyS0
+sed -i '/ttyS0/s/^/#/' /etc/inittab 2>/dev/null || true`
+
+	archPacmanKeyInitScript = `if [ ! -f /etc/pacman.d/gnupg/pubring.gpg ]; then pacman-key --init 2>/dev/null || true; fi`
+
+	archPacmanKeyPopulateScript = `if [ -f /etc/pacman.d/gnupg/pubring.gpg ]; then pacman-key --populate archlinux 2>/dev/null || true; fi`
+
+	archHostnameLocaleScript = `echo 'mvm' > /etc/hostname 2>/dev/null || true
+echo 'LANG=en_US.UTF-8' > /etc/locale.conf 2>/dev/null || true
+echo 'KEYMAP=us' > /etc/vconsole.conf 2>/dev/null || true`
+
+	archBtrfsMkinitcpioScript = `# Remove btrfs mkinitcpio hook (not needed for single-device btrfs)
+if [ -f /etc/mkinitcpio.conf ]; then
+  sed -i 's/ btrfs / /g' /etc/mkinitcpio.conf 2>/dev/null || true
+fi`
+
+	archPacmanInitMaskScript = `ln -sf /dev/null /etc/systemd/system/pacman-init.service 2>/dev/null || true`
+
+	archFirstBootMaskScript = `ln -sf /dev/null /etc/systemd/system/systemd-firstboot.service 2>/dev/null || true`
+
+	archUdevSettleMaskScript = `ln -sf /dev/null /etc/systemd/system/systemd-udev-settle.service 2>/dev/null || true`
+
+	archBtrfsBalanceScript = `# Consolidate btrfs metadata chunks
+command -v btrfs >/dev/null 2>&1 && btrfs balance start -dusage=0 / 2>/dev/null || true`
+
+	cloudInitMaskScript = `if command -v systemctl >/dev/null 2>&1; then
+  for svc in \
+    cloud-init.service \
+    cloud-init-local.service \
+    cloud-config.service \
+    cloud-final.service; do
+    ln -sf /dev/null "/etc/systemd/system/$svc" 2>/dev/null || true
+  done
+fi`
+
+	fixFstabScript = `if [ -f /etc/fstab ]; then
+  sed -i '/^PARTUUID=/s/^/#/' /etc/fstab
+  sed -i '/^UUID=/s/^/#/' /etc/fstab
+  sed -i '/^\/dev\/vda\s/ s/defaults/noatime,defaults/' /etc/fstab
+  sed -i '/\/boot\/efi/s/^/#/' /etc/fstab
+  sed -i '/ swap /s/^/#/' /etc/fstab
+  sed -i '/\/dev\/vda[0-9]/s/^/#/' /etc/fstab
+fi`
+)
 
 // SSHDConfig returns content for /etc/ssh/sshd_config.d/mvm.conf.
 // Matches Python's sshd_config() static method.
-func (ProvisionerContent) SSHDConfig(user string) string {
+func (Builder) SSHDConfig(user string) string {
 	lines := []string{
 		"PubkeyAuthentication yes",
 		"AuthorizedKeysFile .ssh/authorized_keys",
@@ -128,75 +271,25 @@ func (ProvisionerContent) SSHDConfig(user string) string {
 
 // FirstBootInstaller returns content for /usr/local/bin/first-boot-ssh-installer.sh.
 // Matches Python's first_boot_installer() static method.
-func (ProvisionerContent) FirstBootInstaller() string {
-	return "#!/bin/bash\n" +
-		"if ! command -v sshd >/dev/null 2>&1 && " +
-		"! command -v ssh >/dev/null 2>&1; then\n" +
-		"  if command -v pacman >/dev/null 2>&1; then " +
-		"pacman -Sy --noconfirm openssh 2>/dev/null || true;\n" +
-		"  elif command -v apt-get >/dev/null 2>&1; then " +
-		"apt-get update && apt-get install -y openssh-server " +
-		"2>/dev/null || true;\n" +
-		"  elif command -v apk >/dev/null 2>&1; then " +
-		"apk add --no-cache openssh 2>/dev/null || true; fi;\n" +
-		"fi\n" +
-		"if command -v systemctl >/dev/null 2>&1; then\n" +
-		"  systemctl enable --now sshd 2>/dev/null || " +
-		"systemctl enable --now ssh 2>/dev/null || true;\n" +
-		"elif [ -f /sbin/openrc ]; then\n" +
-		"  rc-update add sshd default 2>/dev/null || " +
-		"rc-update add ssh default 2>/dev/null || true;\n" +
-		"  rc-service sshd start 2>/dev/null || " +
-		"rc-service ssh start 2>/dev/null || true;\n" +
-		"fi\n" +
-		"systemctl disable first-boot-ssh-installer.service " +
-		"2>/dev/null || true\n"
+func (Builder) FirstBootInstaller() string {
+	return firstBootInstallerScript + "\n"
 }
 
 // FirstBootService returns content for /etc/systemd/system/first-boot-ssh-installer.service.
 // Matches Python's first_boot_service() static method.
-func (ProvisionerContent) FirstBootService() string {
-	return "[Unit]\n" +
-		"Description=First-boot SSH installer\n" +
-		"After=network.target\n" +
-		"ConditionFirstBoot=yes\n\n" +
-		"[Service]\n" +
-		"Type=oneshot\n" +
-		"ExecStart=/usr/local/bin/first-boot-ssh-installer.sh\n" +
-		"RemainAfterExit=yes\n\n" +
-		"[Install]\n" +
-		"WantedBy=multi-user.target\n"
+func (Builder) FirstBootService() string {
+	return firstBootServiceScript + "\n"
 }
 
 // Hosts returns content for /etc/hosts with a 127.0.1.1 entry.
 // Matches Python's hosts() static method.
-func (ProvisionerContent) Hosts(hostname string) string {
-	return fmt.Sprintf("127.0.0.1\tlocalhost\n"+
-		"127.0.1.1\t%s\n"+
-		"\n"+
-		"::1\tlocalhost ip6-localhost ip6-loopback\n"+
-		"fe00::0\tip6-localnet\n"+
-		"ff00::0\tip6-mcastprefix\n"+
-		"ff02::1\tip6-allnodes\n"+
-		"ff02::2\tip6-allrouters\n", hostname)
+func (Builder) Hosts(hostname string) string {
+	return fmt.Sprintf(hostsTemplate+"\n", hostname)
 }
-
-// Cloud-init disable content constants.
-// Matches Python's class-level constants.
-var (
-	CloudInitDisableDatasource = []byte("datasource_list: [None]\n")
-	CloudInitDisabledMarker    = []byte("disabled by mvmctl\n")
-	SnapdOverride              = []byte("[Service]\nExecStart=\nExecStart=/bin/true\n")
-	NetworkdWaitOverride       = []byte("[Unit]\nConditionPathExists=/nonexistent-disabled-by-mvm\n")
-)
-
-// ---------------------------------------------------------------------------
-// Builder methods — wrap raw content into Operation objects
-// ---------------------------------------------------------------------------
 
 // BuildHostnameOps generates operations for setting hostname and /etc/hosts.
 // Matches Python's build_hostname_ops() classmethod.
-func (pc ProvisionerContent) BuildHostnameOps(hostname string) []Operation {
+func (pc Builder) BuildHostnameOps(hostname string) []Operation {
 	return []Operation{
 		FileOp{
 			Path: "/etc/hostname",
@@ -217,11 +310,11 @@ func (pc ProvisionerContent) BuildHostnameOps(hostname string) []Operation {
 
 // BuildDNSOps generates operation for injecting DNS resolver.
 // Matches Python's build_dns_ops() classmethod.
-func (ProvisionerContent) BuildDNSOps(dnsServer string) []Operation {
+func (Builder) BuildDNSOps(dnsServer string) []Operation {
 	return []Operation{
 		FileOp{
 			Path: "/etc/resolv.conf",
-			Data: []byte(fmt.Sprintf("nameserver %s\n", dnsServer)),
+			Data: fmt.Appendf([]byte(nil), "nameserver %s\n", dnsServer),
 			Mode: 0644,
 			UID:  0,
 			GID:  0,
@@ -231,7 +324,7 @@ func (ProvisionerContent) BuildDNSOps(dnsServer string) []Operation {
 
 // BuildSSHOps generates operations for SSH key injection and SSHD config.
 // Matches Python's build_ssh_ops() classmethod.
-func (pc ProvisionerContent) BuildSSHOps(user string, sshPubkeys []string) []Operation {
+func (pc Builder) BuildSSHOps(user string, sshPubkeys []string) []Operation {
 	var ops []Operation
 	if len(sshPubkeys) == 0 {
 		return ops
@@ -278,7 +371,7 @@ func (pc ProvisionerContent) BuildSSHOps(user string, sshPubkeys []string) []Ope
 
 // BuildCloudInitDisableOps generates operations to disable cloud-init.
 // Matches Python's build_cloud_init_disable_ops() classmethod.
-func (ProvisionerContent) BuildCloudInitDisableOps() []Operation {
+func (Builder) BuildCloudInitDisableOps() []Operation {
 	ops := []Operation{
 		FileOp{
 			Path: "/etc/cloud/cloud.cfg.d/99-disable-datasources.cfg",
@@ -325,7 +418,7 @@ func (ProvisionerContent) BuildCloudInitDisableOps() []Operation {
 // BuildCloudInitInjectOps generates operations to inject cloud-init seed directory.
 // Matches Python's build_cloud_init_inject_ops() classmethod — returns empty
 // list if the directory does not exist.
-func (ProvisionerContent) BuildCloudInitInjectOps(cloudInitDir string) []Operation {
+func (Builder) BuildCloudInitInjectOps(cloudInitDir string) []Operation {
 	if _, err := os.Stat(cloudInitDir); os.IsNotExist(err) {
 		return nil
 	}
@@ -339,7 +432,7 @@ func (ProvisionerContent) BuildCloudInitInjectOps(cloudInitDir string) []Operati
 
 // BuildResizeOps generates operation for filesystem resize (grow).
 // Matches Python's build_resize_ops() classmethod.
-func (ProvisionerContent) BuildResizeOps(targetSizeBytes int64) []Operation {
+func (Builder) BuildResizeOps(targetSizeBytes int64) []Operation {
 	return []Operation{
 		ResizeOp{
 			Action: ResizeActionGrow,
@@ -350,7 +443,7 @@ func (ProvisionerContent) BuildResizeOps(targetSizeBytes int64) []Operation {
 
 // BuildShrinkOps generates operation for filesystem shrink to minimum size.
 // Matches Python's build_shrink_ops() classmethod.
-func (ProvisionerContent) BuildShrinkOps(limitBytes int64) []Operation {
+func (Builder) BuildShrinkOps(limitBytes int64) []Operation {
 	return []Operation{
 		ResizeOp{
 			Action: ResizeActionShrink,
@@ -364,7 +457,7 @@ func (ProvisionerContent) BuildShrinkOps(limitBytes int64) []Operation {
 //
 // These operations run once at image import time — they are identical
 // for every VM from the same image.
-func (pc ProvisionerContent) BuildDeblobOps(osType string) []Operation {
+func (pc Builder) BuildDeblobOps(osType string) []Operation {
 	var ops []Operation
 
 	// ── Common cleanup (all distros) ──────────────────────────────
@@ -376,44 +469,7 @@ func (pc ProvisionerContent) BuildDeblobOps(osType string) []Operation {
 	ops = append(ops, ChrootOp{Command: "find /var/log -type f -delete 2>/dev/null || true"})
 
 	// ── MicroVM boot optimizations (systemd) ──────────────────────────
-	ops = append(ops, ChrootOp{
-		Command: "# Mask non-essential systemd services for faster microVM boot\n" +
-			"if command -v systemctl >/dev/null 2>&1; then\n" +
-			"  for svc in \\\n" +
-			"    systemd-timesyncd.service \\\n" +
-			"    systemd-time-wait-sync.service \\\n" +
-			"    systemd-firstboot.service \\\n" +
-			"    ldconfig.service \\\n" +
-			"    modprobe@drm.service \\\n" +
-			"    modprobe@efi_pstore.service \\\n" +
-			"    sys-kernel-debug.mount \\\n" +
-			"    pollinate.service \\\n" +
-			"    snapd.service \\\n" +
-			"    snapd.socket \\\n" +
-			"    systemd-udev-settle.service \\\n" +
-			"    unattended-upgrades.service \\\n" +
-			"    packagekit.service \\\n" +
-			"    man-db.timer \\\n" +
-			"    whoopsie.service \\\n" +
-			"    apport.service \\\n" +
-			"    udisks2.service \\\n" +
-			"    console-setup.service \\\n" +
-			"    keyboard-setup.service \\\n" +
-			"    motd-news.service \\\n" +
-			"    fstrim.timer \\\n" +
-			"    logrotate.timer \\\n" +
-			"    multipathd.service \\\n" +
-			"    accounts-daemon.service \\\n" +
-			"    systemd-userdbd.service \\\n" +
-			"    systemd-nsresourced.service \\\n" +
-			"    systemd-pcrphase.service \\\n" +
-			"    systemd-pcrphase-initrd.service \\\n" +
-			"    systemd-pcrphase-sysinit.service \\\n" +
-			"    systemd-boot-update.service; do\n" +
-			`    ln -sf /dev/null "/etc/systemd/system/$svc" 2>/dev/null || true` + "\n" +
-			"  done\n" +
-			"fi",
-	})
+	ops = append(ops, ChrootOp{Command: maskServicesScript})
 
 	// ── SSH daemon configuration (identical for every VM from this image) ──
 	ops = append(ops, FileOp{
@@ -438,12 +494,7 @@ func (pc ProvisionerContent) BuildDeblobOps(osType string) []Operation {
 		GID:  0,
 	})
 	ops = append(ops, ChrootOp{Command: "ssh-keygen -A"})
-	ops = append(ops, ChrootOp{
-		Command: "if command -v systemctl >/dev/null 2>&1; then\n" +
-			"  systemctl enable sshd 2>/dev/null || " +
-			"systemctl enable ssh 2>/dev/null || true;\n" +
-			"fi",
-	})
+	ops = append(ops, ChrootOp{Command: enableSSHScript})
 
 	// ── OS-specific cache cleanup ─────────────────────────────────
 	osLower := strings.ToLower(osType)
@@ -452,89 +503,50 @@ func (pc ProvisionerContent) BuildDeblobOps(osType string) []Operation {
 		ops = append(ops, ChrootOp{Command: "apt-get clean 2>/dev/null || true"})
 		ops = append(ops, ChrootOp{Command: "rm -rf /var/cache/apt/archives/*.deb 2>/dev/null || true"})
 		ops = append(ops, ChrootOp{Command: "rm -rf /var/cache/debconf/* 2>/dev/null || true"})
-		ops = append(ops, ChrootOp{
-			Command: "# Mask unnecessary timer services for microVM\n" +
-				"systemctl mask e2scrub_all.timer " +
-				"e2scrub_reap.service " +
-				"apt-daily.timer " +
-				"apt-daily-upgrade.timer " +
-				"2>/dev/null || true",
-		})
+		ops = append(ops, ChrootOp{Command: maskTimerServicesScript})
 
 	case osLower == "alpine":
 		ops = append(ops, ChrootOp{Command: "apk cache clean 2>/dev/null || true"})
 		ops = append(ops, ChrootOp{Command: "rm -rf /var/cache/apk/* 2>/dev/null || true"})
-		ops = append(ops, ChrootOp{
-			Command: "grep -qs '^denyinterfaces eth0' /etc/dhcpcd.conf " +
-				"2>/dev/null || echo 'denyinterfaces eth0' >> /etc/dhcpcd.conf; " +
-				"sed -i 's/iface eth0 inet dhcp/iface eth0 inet manual/' " +
-				"/etc/network/interfaces",
-		})
-		ops = append(ops, ChrootOp{
-			Command: "# Pre-enable SSH daemon for OpenRC\n" +
-				"rc-update add sshd default 2>/dev/null || " +
-				"rc-update add ssh default 2>/dev/null || true",
-		})
-		ops = append(ops, ChrootOp{
-			Command: "# Enable parallel service startup (microVM optimisation)\n" +
-				"sed -i '/^rc_parallel=/d; /^#rc_parallel=/d' /etc/rc.conf 2>/dev/null; " +
-				`echo 'rc_parallel="YES"' >> /etc/rc.conf`,
-		})
-		ops = append(ops, ChrootOp{
-			Command: "# Disable cloud-init services for faster boot\n" +
-				"rc-update del cloud-init default 2>/dev/null || true; " +
-				"rc-update del cloud-config default 2>/dev/null || true; " +
-				"rc-update del cloud-final default 2>/dev/null || true; " +
-				"rc-update del cloud-init-hotplugd default 2>/dev/null || true; " +
-				"rc-update del cloud-init ssh 2>/dev/null || true",
-		})
+		ops = append(
+			ops,
+			ChrootOp{Command: alpineDhcpcdScript},
+		)
+		ops = append(ops, ChrootOp{Command: alpineSSHEnableScript})
+		ops = append(ops, ChrootOp{Command: alpineParallelStartupScript})
+		ops = append(ops, ChrootOp{Command: alpineCloudInitDisableScript})
 		ops = append(ops, ChrootOp{Command: "rc-update del chronyd default 2>/dev/null || true"})
-		ops = append(ops, ChrootOp{
-			Command: "# Disable serial getty on ttyS0\n" +
-				"sed -i '/ttyS0/s/^/#/' /etc/inittab 2>/dev/null || true",
-		})
+		ops = append(ops, ChrootOp{Command: alpineSerialGettyScript})
 
 	case osLower == "arch" || osLower == "archlinux" || osLower == "manjaro":
 		ops = append(ops, ChrootOp{Command: "pacman -Sc --noconfirm 2>/dev/null || true"})
 		ops = append(ops, ChrootOp{Command: "rm -rf /var/cache/pacman/pkg/* 2>/dev/null || true"})
-		ops = append(ops, ChrootOp{
-			Command: "if [ ! -f /etc/pacman.d/gnupg/pubring.gpg ]; then " +
-				"pacman-key --init 2>/dev/null || true; fi",
-		})
-		ops = append(ops, ChrootOp{
-			Command: "if [ -f /etc/pacman.d/gnupg/pubring.gpg ]; then " +
-				"pacman-key --populate archlinux 2>/dev/null || true; fi",
-		})
-		ops = append(ops, ChrootOp{
-			Command: "echo 'mvm' > /etc/hostname 2>/dev/null || true; " +
-				"echo 'LANG=en_US.UTF-8' > /etc/locale.conf 2>/dev/null || true; " +
-				"echo 'KEYMAP=us' > /etc/vconsole.conf 2>/dev/null || true",
-		})
-		ops = append(ops, ChrootOp{
-			Command: "ln -sf /dev/null " +
-				"/etc/systemd/system/pacman-init.service 2>/dev/null || true",
-		})
-		ops = append(ops, ChrootOp{
-			Command: "ln -sf /dev/null " +
-				"/etc/systemd/system/systemd-firstboot.service 2>/dev/null || true",
-		})
-		ops = append(ops, ChrootOp{
-			Command: "# Remove btrfs mkinitcpio hook (not needed for single-device btrfs)\n" +
-				"if [ -f /etc/mkinitcpio.conf ]; then\n" +
-				"  sed -i 's/ btrfs / /g' /etc/mkinitcpio.conf 2>/dev/null || true\n" +
-				"fi",
-		})
-		ops = append(ops, ChrootOp{
-			Command: "# Consolidate btrfs metadata chunks\n" +
-				"command -v btrfs >/dev/null 2>&1 && " +
-				"btrfs balance start -dusage=0 / " +
-				"2>/dev/null || true",
-		})
-		ops = append(ops, ChrootOp{
-			Command: "ln -sf /dev/null " +
-				"/etc/systemd/system/systemd-udev-settle.service " +
-				"2>/dev/null || true",
-		})
+		ops = append(
+			ops,
+			ChrootOp{Command: archPacmanKeyInitScript},
+		)
+		ops = append(
+			ops,
+			ChrootOp{Command: archPacmanKeyPopulateScript},
+		)
+		ops = append(
+			ops,
+			ChrootOp{Command: archHostnameLocaleScript},
+		)
+		ops = append(
+			ops,
+			ChrootOp{Command: archPacmanInitMaskScript},
+		)
+		ops = append(
+			ops,
+			ChrootOp{Command: archFirstBootMaskScript},
+		)
+		ops = append(ops, ChrootOp{Command: archBtrfsMkinitcpioScript})
+		ops = append(ops, ChrootOp{Command: archBtrfsBalanceScript})
+		ops = append(
+			ops,
+			ChrootOp{Command: archUdevSettleMaskScript},
+		)
 
 	case osLower == "fedora" || osLower == "centos" || osLower == "rhel" ||
 		osLower == "rocky" || osLower == "almalinux":
@@ -579,18 +591,7 @@ func (pc ProvisionerContent) BuildDeblobOps(osType string) []Operation {
 		UID:  0,
 		GID:  0,
 	})
-	ops = append(ops, ChrootOp{
-		Command: "if command -v systemctl >/dev/null 2>&1; then\n" +
-			"  for svc in \\\n" +
-			"    cloud-init.service \\\n" +
-			"    cloud-init-local.service \\\n" +
-			"    cloud-config.service \\\n" +
-			"    cloud-final.service; do\n" +
-			`    ln -sf /dev/null "/etc/systemd/system/$svc" ` +
-			"2>/dev/null || true\n" +
-			"  done\n" +
-			"fi",
-	})
+	ops = append(ops, ChrootOp{Command: cloudInitMaskScript})
 
 	ops = append(ops, ChrootOp{Command: "rm -rf /var/lib/apt/lists/* 2>/dev/null || true"})
 
@@ -599,32 +600,8 @@ func (pc ProvisionerContent) BuildDeblobOps(osType string) []Operation {
 
 // BuildFixFstabOps generates operation to fix /etc/fstab for Firecracker.
 // Matches Python's build_fix_fstab_ops() classmethod.
-func (ProvisionerContent) BuildFixFstabOps() []Operation {
+func (Builder) BuildFixFstabOps() []Operation {
 	return []Operation{
-		ChrootOp{
-			Command: "if [ -f /etc/fstab ]; then " +
-				"sed -i '/^PARTUUID=/s/^/#/' /etc/fstab; " +
-				"sed -i '/^UUID=/s/^/#/' /etc/fstab; " +
-				"sed -i '/^\\/dev\\/vda\\s/ s/defaults/noatime,defaults/' /etc/fstab; " +
-				"sed -i '/^PARTUUID=/s/^/#/' /etc/fstab; " +
-				"sed -i '/\\/boot\\/efi/s/^/#/' /etc/fstab; " +
-				"sed -i '/ swap /s/^/#/' /etc/fstab; " +
-				"sed -i '/\\/dev\\/vda[0-9]/s/^/#/' /etc/fstab; " +
-				"fi",
-		},
+		ChrootOp{Command: fixFstabScript},
 	}
-}
-
-// =========================================================================
-// Helpers
-// =========================================================================
-
-// JoinLines joins lines for a shell command execution.
-func JoinLines(lines ...string) string {
-	return strings.Join(lines, "\n")
-}
-
-// MaskServicePath returns the path for masking a systemd service.
-func MaskServicePath(serviceName string) string {
-	return filepath.Join("/etc/systemd/system", serviceName)
 }

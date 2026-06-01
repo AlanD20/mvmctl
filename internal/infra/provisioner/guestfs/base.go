@@ -9,27 +9,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/system"
 )
-
-// ── Errors ──────────────────────────────────────────────────────────────────
-
-// GuestfsNotAvailableError indicates libguestfs/guestfish is not installed.
-type GuestfsNotAvailableError struct {
-	msg string
-}
-
-func (e *GuestfsNotAvailableError) Error() string { return e.msg }
-
-// GuestfsError indicates a guestfs operation failure.
-type GuestfsError struct {
-	msg string
-}
-
-func (e *GuestfsError) Error() string { return e.msg }
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -41,96 +26,85 @@ const (
 
 // ── GuestfsHandle ───────────────────────────────────────────────────────────
 //
-// Mirrors src/mvmctl/core/_shared/_guestfs/_base.py OptimizedGuestfs.
 // Uses guestfish CLI tool as a subprocess (Go has no native guestfs bindings).
+// Each method launches a separate guestfish subprocess.
+// The optimized environment (LIBGUESTFS_BACKEND=direct, QEMU_LOCKING=off,
+// forced kernel with virtio) is set up automatically on the first invocation
+// via guestfishRun — no manual env setup needed.
 
 // GuestfsHandle wraps guestfish CLI for disk image operations.
-// Each method launches a separate guestfish subprocess, which is
-// functionally equivalent but slower than the Python C-bindings approach.
 type GuestfsHandle struct {
 	diskPath string
 	readonly bool
-	origEnv  map[string]*string // nil means "was not set"
 }
 
-// NewHandle creates a new GuestfsHandle. Returns error if guestfish is not
-// available in PATH.
+// NewHandle creates a new GuestfsHandle.
 func NewHandle(diskPath string, readonly bool) (*GuestfsHandle, error) {
 	if _, err := exec.LookPath(guestfishBin); err != nil {
-		return nil, &GuestfsNotAvailableError{
-			msg: "libguestfs is not available",
-		}
+		return nil, &GuestfsNotAvailableError{msg: "libguestfs is not available"}
 	}
-	return &GuestfsHandle{
-		diskPath: diskPath,
-		readonly: readonly,
-		origEnv:  make(map[string]*string),
-	}, nil
+	return &GuestfsHandle{diskPath: diskPath, readonly: readonly}, nil
 }
 
-// ── Environment helpers ─────────────────────────────────────────────────────
+// ── Lazy environment initialization (once per process) ───────────────────────
 
-// SetupEnvironment sets LIBGUESTFS_BACKEND, CACHEDIR, QEMU_LOCKING,
-// SUPERMIN_KERNEL, SUPERMIN_MODULES env vars. Saves originals for Restore.
-func (h *GuestfsHandle) SetupEnvironment(ctx context.Context) {
-	keys := []string{
-		"LIBGUESTFS_BACKEND",
-		"LIBGUESTFS_CACHEDIR",
-		"QEMU_LOCKING",
-		"SUPERMIN_KERNEL",
-		"SUPERMIN_MODULES",
-	}
-	for _, key := range keys {
-		val := os.Getenv(key)
-		if val != "" {
-			h.origEnv[key] = &val
-		} else {
-			h.origEnv[key] = nil
+var (
+	envOnce     sync.Once
+	origEnvVars map[string]*string
+)
+
+// initEnv sets the optimized guestfs environment variables once per process.
+// Called automatically by guestfishRun on the first invocation.
+func initEnv(ctx context.Context) {
+	envOnce.Do(func() {
+		keys := []string{
+			"LIBGUESTFS_BACKEND",
+			"LIBGUESTFS_CACHEDIR",
+			"QEMU_LOCKING",
+			"SUPERMIN_KERNEL",
+			"SUPERMIN_MODULES",
 		}
-	}
-
-	os.Setenv("LIBGUESTFS_BACKEND", "direct")
-
-	if _, err := os.Stat("/dev/shm"); err == nil {
-		os.Setenv("LIBGUESTFS_CACHEDIR", "/dev/shm")
-	}
-
-	os.Setenv("QEMU_LOCKING", "off")
-
-	// Force a known-good kernel with virtio drivers
-	kd := &KernelDetector{}
-	kernelPath, modulesDir, err := kd.FindBestKernel(ctx)
-	if err == nil && kernelPath != "" {
-		os.Setenv("SUPERMIN_KERNEL", kernelPath)
-		os.Setenv("SUPERMIN_MODULES", modulesDir)
-	}
-}
-
-// RestoreEnvironment restores env vars to their original values.
-func (h *GuestfsHandle) RestoreEnvironment() {
-	for key, val := range h.origEnv {
-		if val != nil {
-			os.Setenv(key, *val)
-		} else {
-			os.Unsetenv(key)
+		origEnvVars = make(map[string]*string, len(keys))
+		for _, key := range keys {
+			val := os.Getenv(key)
+			if val != "" {
+				v := val
+				origEnvVars[key] = &v
+			} else {
+				origEnvVars[key] = nil
+			}
 		}
-	}
+
+		os.Setenv("LIBGUESTFS_BACKEND", "direct")
+		if _, err := os.Stat("/dev/shm"); err == nil {
+			os.Setenv("LIBGUESTFS_CACHEDIR", "/dev/shm")
+		}
+		os.Setenv("QEMU_LOCKING", "off")
+
+		kd := &KernelDetector{}
+		kernelPath, modulesDir, err := kd.FindBestKernel(ctx)
+		if err == nil && kernelPath != "" {
+			os.Setenv("SUPERMIN_KERNEL", kernelPath)
+			os.Setenv("SUPERMIN_MODULES", modulesDir)
+		}
+	})
 }
 
 // ── Low-level guestfish invocation ──────────────────────────────────────────
 
-// guestfishRunOpts configures a guestfish invocation.
-type guestfishRunOpts struct {
-	diskPath string
-	readonly bool
-	input    string   // stdin input
-	args     []string // guestfish commands
-}
+// guestfishRun executes guestfish with retry (3 attempts, backoff).
+// If input is non-empty, it is piped to guestfish's stdin (interactive mode).
+func guestfishRun(
+	ctx context.Context,
+	diskPath string,
+	readonly bool,
+	input string,
+	args ...string,
+) (string, error) {
+	initEnv(ctx)
 
-// run executes guestfish with retry (up to 3 attempts with backoff).
-func (o guestfishRunOpts) run(ctx context.Context) (string, error) {
-	allArgs := []string{"-a", o.diskPath}
-	if o.readonly {
+	allArgs := []string{"-a", diskPath}
+	if readonly {
 		allArgs = append(allArgs, "--ro")
 	}
 	allArgs = append(allArgs,
@@ -142,7 +116,7 @@ func (o guestfishRunOpts) run(ctx context.Context) (string, error) {
 		"--memsize", "256",
 		"--backend", "direct",
 	)
-	allArgs = append(allArgs, o.args...)
+	allArgs = append(allArgs, args...)
 
 	var lastErr error
 	for attempt := range 3 {
@@ -155,13 +129,13 @@ func (o guestfishRunOpts) run(ctx context.Context) (string, error) {
 		}
 
 		runOpts := system.RunCmdOpts{Capture: true, Check: true}
-		if o.input != "" {
-			runOpts.Input = o.input
+		if input != "" {
+			runOpts.Input = input
 		}
 		result := system.RunCmdCompat(ctx, append([]string{guestfishBin}, allArgs...), runOpts)
 		if result.Err != nil {
 			label := "guestfish"
-			if o.input != "" {
+			if input != "" {
 				label = "guestfish[stdin]"
 			}
 			if result.Stderr != "" {
@@ -176,9 +150,9 @@ func (o guestfishRunOpts) run(ctx context.Context) (string, error) {
 	return "", lastErr
 }
 
-// guestfishRun is a convenience wrapper around guestfishRunOpts.run.
-func guestfishRun(ctx context.Context, opts guestfishRunOpts) (string, error) {
-	return opts.run(ctx)
+// h.run is a convenience wrapper so handle methods don't repeat diskPath/readonly.
+func (h *GuestfsHandle) run(ctx context.Context, args ...string) (string, error) {
+	return guestfishRun(ctx, h.diskPath, h.readonly, "", args...)
 }
 
 // ── High-level operations ───────────────────────────────────────────────────
@@ -186,10 +160,7 @@ func guestfishRun(ctx context.Context, opts guestfishRunOpts) (string, error) {
 // MountRootfs lists filesystems, identifies root device, returns it.
 // No persistent mount in subprocess mode — use RunBatch() or provisioner's Run().
 func (h *GuestfsHandle) MountRootfs(ctx context.Context) (string, error) {
-	out, err := guestfishRun(
-		ctx,
-		guestfishRunOpts{diskPath: h.diskPath, readonly: h.readonly, args: []string{"list-filesystems"}},
-	)
+	out, err := h.run(ctx, "list-filesystems")
 	if err != nil {
 		return "", &GuestfsError{msg: fmt.Sprintf("Failed to list filesystems for %s: %v", h.diskPath, err)}
 	}
@@ -238,10 +209,7 @@ func (h *GuestfsHandle) MountRootfs(ctx context.Context) (string, error) {
 
 // ListPartitions lists partitions in the disk image.
 func (h *GuestfsHandle) ListPartitions(ctx context.Context) ([]string, error) {
-	out, err := guestfishRun(
-		ctx,
-		guestfishRunOpts{diskPath: h.diskPath, readonly: h.readonly, args: []string{"list-partitions"}},
-	)
+	out, err := h.run(ctx, "list-partitions")
 	if err != nil {
 		return nil, &GuestfsError{msg: fmt.Sprintf("Failed to list partitions: %v", err)}
 	}
@@ -256,10 +224,7 @@ func (h *GuestfsHandle) ListPartitions(ctx context.Context) ([]string, error) {
 
 // VfsType returns the filesystem type of a device.
 func (h *GuestfsHandle) VfsType(ctx context.Context, device string) (string, error) {
-	out, err := guestfishRun(
-		ctx,
-		guestfishRunOpts{diskPath: h.diskPath, readonly: true, args: []string{"-i", "vfs-type", device}},
-	)
+	out, err := guestfishRun(ctx, h.diskPath, true, "", "-i", "vfs-type", device)
 	if err != nil {
 		return "", &GuestfsError{msg: fmt.Sprintf("Failed to get vfs-type for %s: %v", device, err)}
 	}
@@ -268,10 +233,7 @@ func (h *GuestfsHandle) VfsType(ctx context.Context, device string) (string, err
 
 // BlockdevGetSize64 returns the size of a block device in bytes.
 func (h *GuestfsHandle) BlockdevGetSize64(ctx context.Context, device string) (int64, error) {
-	out, err := guestfishRun(
-		ctx,
-		guestfishRunOpts{diskPath: h.diskPath, readonly: true, args: []string{"blockdev-getsize64", device}},
-	)
+	out, err := guestfishRun(ctx, h.diskPath, true, "", "blockdev-getsize64", device)
 	if err != nil {
 		return 0, &GuestfsError{msg: fmt.Sprintf("Failed to get blockdev size for %s: %v", device, err)}
 	}
@@ -280,14 +242,7 @@ func (h *GuestfsHandle) BlockdevGetSize64(ctx context.Context, device string) (i
 
 // CopyDeviceToFile copies a device to a file.
 func (h *GuestfsHandle) CopyDeviceToFile(ctx context.Context, device string, outputPath string) error {
-	_, err := guestfishRun(
-		ctx,
-		guestfishRunOpts{
-			diskPath: h.diskPath,
-			readonly: true,
-			args:     []string{"copy-device-to-file", device, outputPath},
-		},
-	)
+	_, err := guestfishRun(ctx, h.diskPath, true, "", "copy-device-to-file", device, outputPath)
 	if err != nil {
 		return &GuestfsError{msg: fmt.Sprintf("Failed to copy device %s to %s: %v", device, outputPath, err)}
 	}
@@ -309,11 +264,11 @@ func (h *GuestfsHandle) FindLargestLinuxFS(ctx context.Context, partitions []str
 		if fsType != "ext2" && fsType != "ext3" && fsType != "ext4" && fsType != "btrfs" && fsType != "xfs" {
 			continue
 		}
-		out, err := guestfishRun(ctx, guestfishRunOpts{diskPath: h.diskPath, readonly: true, args: []string{
+		out, err := guestfishRun(ctx, h.diskPath, true, "",
 			"mount", dev, "/",
 			":", "statvfs", "/",
 			":", "umount", "/",
-		}})
+		)
 		if err != nil {
 			continue
 		}
@@ -332,11 +287,11 @@ func (h *GuestfsHandle) FindLargestLinuxFS(ctx context.Context, partitions []str
 
 // GetFSSize returns the size of a filesystem device in bytes.
 func (h *GuestfsHandle) GetFSSize(ctx context.Context, device string) (int64, error) {
-	out, err := guestfishRun(ctx, guestfishRunOpts{diskPath: h.diskPath, readonly: true, args: []string{
+	out, err := guestfishRun(ctx, h.diskPath, true, "",
 		"mount", device, "/",
 		":", "statvfs", "/",
 		":", "umount", "/",
-	}})
+	)
 	if err != nil {
 		return 0, &GuestfsError{msg: fmt.Sprintf("Failed to get fs size for %s: %v", device, err)}
 	}
@@ -350,14 +305,14 @@ func (h *GuestfsHandle) GetFSSize(ctx context.Context, device string) (int64, er
 
 // ShrinkExt4 shrinks an ext4 filesystem to minimum size.
 func (h *GuestfsHandle) ShrinkExt4(ctx context.Context, device string) error {
-	_, err := guestfishRunOpts{diskPath: h.diskPath, readonly: false, args: []string{
+	_, err := guestfishRun(ctx, h.diskPath, false, "",
 		"-i", "mount", device, "/",
 		":", "zero-free-space", device,
 		":", "umount", "/",
 		":", "e2fsck", device, "correct:true",
 		":", "umount", "/",
 		":", "resize2fs-size", device, "0",
-	}}.run(ctx)
+	)
 	if err != nil {
 		return &GuestfsError{msg: fmt.Sprintf("Failed to shrink ext4 %s: %v", device, err)}
 	}
@@ -366,13 +321,13 @@ func (h *GuestfsHandle) ShrinkExt4(ctx context.Context, device string) error {
 
 // ShrinkBtrfs shrinks a btrfs filesystem to minimum size.
 func (h *GuestfsHandle) ShrinkBtrfs(ctx context.Context, device string) error {
-	_, err := guestfishRunOpts{diskPath: h.diskPath, readonly: false, args: []string{
+	_, err := guestfishRun(ctx, h.diskPath, false, "",
 		"-i", "mount", device, "/",
 		":", "sh", `fstrim -av / 2>/dev/null || true`,
 		":", "btrfs-filesystem-sync", "/",
 		":", "btrfs-filesystem-resize", "/", "0",
 		":", "umount", "/",
-	}}.run(ctx)
+	)
 	if err != nil {
 		return &GuestfsError{msg: fmt.Sprintf("Failed to shrink btrfs %s: %v", device, err)}
 	}
@@ -387,23 +342,17 @@ func (h *GuestfsHandle) GrowFS(ctx context.Context, device string, targetSizeByt
 	}
 	switch fsType {
 	case "ext2", "ext3", "ext4":
-		_, err := guestfishRunOpts{
-			diskPath: h.diskPath,
-			readonly: false,
-			args:     []string{"-i", "resize2fs", device},
-		}.run(
-			ctx,
-		)
+		_, err := guestfishRun(ctx, h.diskPath, false, "", "-i", "resize2fs", device)
 		if err != nil {
 			return &GuestfsError{msg: fmt.Sprintf("Failed to grow ext fs %s: %v", device, err)}
 		}
 	case "btrfs":
 		targetStr := strconv.FormatInt(targetSizeBytes, 10)
-		_, err := guestfishRunOpts{diskPath: h.diskPath, readonly: false, args: []string{
+		_, err := guestfishRun(ctx, h.diskPath, false, "",
 			"-i", "mount", device, "/",
 			":", "btrfs-filesystem-resize", "/", targetStr,
 			":", "umount", "/",
-		}}.run(ctx)
+		)
 		if err != nil {
 			return &GuestfsError{msg: fmt.Sprintf("Failed to grow btrfs %s: %v", device, err)}
 		}
@@ -417,7 +366,20 @@ func (h *GuestfsHandle) GrowFS(ctx context.Context, device string, targetSizeByt
 
 // RunBatch runs a batch of guestfish commands in a single invocation.
 func (h *GuestfsHandle) RunBatch(ctx context.Context, commands string) (string, error) {
-	return guestfishRunOpts{diskPath: h.diskPath, readonly: h.readonly, input: commands, args: []string{"-i"}}.run(ctx)
+	return guestfishRun(ctx, h.diskPath, h.readonly, commands, "-i")
+}
+
+// ReadFile reads a file from the guestfs image (uses inspect mode `-i`
+// to auto-mount the rootfs). Returns an error if the file does not exist
+// or guestfish fails. Callers that want to fall back to alternate paths
+// (e.g. /etc/os-release → /usr/lib/os-release) should catch the error
+// and try the next path.
+func (h *GuestfsHandle) ReadFile(ctx context.Context, path string) (string, error) {
+	out, err := guestfishRun(ctx, h.diskPath, true, "", "read-file", path)
+	if err != nil {
+		return "", &GuestfsError{msg: fmt.Sprintf("read-file %s failed: %v", path, err)}
+	}
+	return out, nil
 }
 
 // ── Parsing helpers ─────────────────────────────────────────────────────────
@@ -440,7 +402,7 @@ func parseStatvfsField(out, field string) int64 {
 
 // StatVFS parses statvfs output into a map for programmatic access.
 func (h *GuestfsHandle) StatVFS(ctx context.Context, path string) (map[string]int64, error) {
-	out, err := guestfishRunOpts{diskPath: h.diskPath, readonly: true, args: []string{"-i", "statvfs", path}}.run(ctx)
+	out, err := guestfishRun(ctx, h.diskPath, true, "", "-i", "statvfs", path)
 	if err != nil {
 		return nil, &GuestfsError{msg: fmt.Sprintf("statvfs %s failed: %v", path, err)}
 	}

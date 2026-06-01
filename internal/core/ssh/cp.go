@@ -12,6 +12,7 @@ import (
 	"sync"
 	"unicode"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/model"
 )
 
@@ -627,7 +628,7 @@ func (s *CPService) CopyFromVM(
 	if isDir {
 		// For directories, local_dst is the parent directory
 		// Python: if not os.path.exists(dst_dir): os.makedirs(dst_dir, exist_ok=True)
-		if err := os.MkdirAll(dstPathObj, 0755); err != nil {
+		if err := os.MkdirAll(dstPathObj, infra.DirPerm); err != nil {
 			return 0, "", err
 		}
 	} else {
@@ -644,7 +645,7 @@ func (s *CPService) CopyFromVM(
 		if parentDir == "" {
 			parentDir = "."
 		}
-		if err := os.MkdirAll(parentDir, 0755); err != nil {
+		if err := os.MkdirAll(parentDir, infra.DirPerm); err != nil {
 			return 0, "", err
 		}
 	}

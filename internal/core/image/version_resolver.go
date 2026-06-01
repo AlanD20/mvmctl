@@ -11,13 +11,14 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/download"
-	"mvmctl/internal/infra/version"
+	"mvmctl/internal/infra/model"
+	"mvmctl/internal/infra/system"
 
 	"gopkg.in/yaml.v3"
 )
 
 // HttpDirVersionResolver resolves available image versions by delegating to
-// the shared download.HttpDirVersionResolver and converting results to ImageVersion.
+// the shared download.HttpDirVersionResolver and converting results to model.ImageVersion.
 // This is a thin wrapper around the shared infra resolver — matching Python's pattern
 // where image/version_resolver.py wraps _http_dir_version_resolver.py.
 type HttpDirVersionResolver struct {
@@ -33,14 +34,14 @@ func NewHttpDirVersionResolver() *HttpDirVersionResolver {
 
 // Resolve fetches and parses version listings for all provided image type configs.
 // Converts map-based configs to download.ResolverConfig, delegates to the shared
-// resolver, then converts version.VersionInfo results to ImageVersion.
+// resolver, then converts model.VersionInfo results to model.ImageVersion.
 func (r *HttpDirVersionResolver) Resolve(
 	ctx context.Context,
 	configs []map[string]any,
 	arch string,
 	cacheTTLSeconds int,
 	ciVersion string,
-) map[string][]ImageVersion {
+) map[string][]model.ImageVersion {
 	// Convert map configs to typed ResolverConfig structs
 	resolverConfigs := make([]download.ResolverConfig, 0, len(configs))
 	for _, cfg := range configs {
@@ -55,11 +56,11 @@ func (r *HttpDirVersionResolver) Resolve(
 	// Delegate to the shared infra resolver
 	results := r.inner.Resolve(ctx, resolverConfigs, arch, ciVersion, cacheTTLSeconds, 0)
 
-	// Convert version.VersionInfo results to ImageVersion with config-aware
+	// Convert model.VersionInfo results to model.ImageVersion with config-aware
 	// fields (type_name, codename) — matching Python's inline conversion loop.
-	output := make(map[string][]ImageVersion, len(results))
+	output := make(map[string][]model.ImageVersion, len(results))
 	for typeName, versions := range results {
-		imageVersions := make([]ImageVersion, 0, len(versions))
+		imageVersions := make([]model.ImageVersion, 0, len(versions))
 		for _, v := range versions {
 			imageVersion := VersionInfoToImageVersion(v, configs, typeName)
 			imageVersions = append(imageVersions, imageVersion)
@@ -70,14 +71,14 @@ func (r *HttpDirVersionResolver) Resolve(
 	return output
 }
 
-// VersionInfoToImageVersion converts a version.VersionInfo to an ImageVersion,
+// VersionInfoToImageVersion converts a model.VersionInfo to an model.ImageVersion,
 // optionally resolving the config_name (type_name) and codename from the
 // original image_types_config. This matches Python's inline conversion in
 // HttpDirVersionResolver.resolve().
 //
 // configs is the original image_types_config list used to find config_name
 // and codename. If nil, fields are populated from VersionInfo directly.
-func VersionInfoToImageVersion(vi version.VersionInfo, configs []map[string]any, typeName string) ImageVersion {
+func VersionInfoToImageVersion(vi model.VersionInfo, configs []map[string]any, typeName string) model.ImageVersion {
 	// Resolve config_name from the config's "name" field (e.g. "Ubuntu"),
 	// matching Python: config = _find_config(image_types_config, type_name);
 	// config_name = config.get("name", "") if config else ""
@@ -109,7 +110,7 @@ func VersionInfoToImageVersion(vi version.VersionInfo, configs []map[string]any,
 		}
 	}
 
-	return ImageVersion{
+	return model.ImageVersion{
 		Version:     vi.Version,
 		Codename:    codename,
 		DownloadURL: vi.DownloadURL,
@@ -222,10 +223,10 @@ func ResolveVersion(
 	return dirName, "", true
 }
 
-// VersionSortKey returns a sort key for ImageVersion, supporting dotted numeric versions.
+// VersionSortKey returns a sort key for model.ImageVersion, supporting dotted numeric versions.
 // Matches Python's HttpDirVersionResolver._version_sort_key() exactly.
 // The returned slice supports comparison: lower sort key = earlier version.
-func VersionSortKey(entry ImageVersion) []int {
+func VersionSortKey(entry model.ImageVersion) []int {
 	parts := strings.Split(entry.Version, ".")
 	key := make([]int, len(parts))
 	for i, p := range parts {
@@ -238,9 +239,9 @@ func VersionSortKey(entry ImageVersion) []int {
 	return key
 }
 
-// SortImageVersions sorts a slice of ImageVersion by version (newest first).
+// SortImageVersions sorts a slice of model.ImageVersion by version (newest first).
 // Matches Python's sort with reverse=True after _version_sort_key.
-func SortImageVersions(versions []ImageVersion) {
+func SortImageVersions(versions []model.ImageVersion) {
 	sort.Slice(versions, func(i, j int) bool {
 		ki := VersionSortKey(versions[i])
 		kj := VersionSortKey(versions[j])
@@ -386,10 +387,14 @@ func LoadImageTypesConfigFromAsset(assetReader func(name string) ([]byte, error)
 	return LoadImageTypesConfig(data)
 }
 
-// ConstructSpecFromTypeConfig constructs an ImageSpec from a type config dict.
+// ConstructSpecFromTypeConfig constructs an model.ImageSpec from a type config dict.
 // Returns nil if source URL template resolution fails (missing variables),
 // matching Python's render_template KeyError propagation.
-func ConstructSpecFromTypeConfig(config map[string]any, versionStr, arch string, ciVersion string) (*ImageSpec, error) {
+func ConstructSpecFromTypeConfig(
+	config map[string]any,
+	versionStr, arch string,
+	ciVersion string,
+) (*model.ImageSpec, error) {
 	typeName, _ := config["type"].(string)
 	resolver, _ := config["resolver"].(string)
 	configName, _ := config["name"].(string)
@@ -401,7 +406,7 @@ func ConstructSpecFromTypeConfig(config map[string]any, versionStr, arch string,
 	}
 
 	if arch == "" {
-		arch = DefaultArch()
+		arch = system.RuntimeArch()
 	}
 
 	archMapping := getStringMap(opts, "arch_mapping")
@@ -489,7 +494,7 @@ func ConstructSpecFromTypeConfig(config map[string]any, versionStr, arch string,
 		sha256Ptr = &sha256URL
 	}
 
-	return &ImageSpec{
+	return &model.ImageSpec{
 		Type:      typeName,
 		Version:   versionStr,
 		Name:      name,

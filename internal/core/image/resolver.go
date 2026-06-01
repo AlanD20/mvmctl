@@ -6,6 +6,7 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/version"
 )
 
@@ -34,14 +35,14 @@ var RELATIONS = map[string]RelationSpec{
 
 // ResolveResult matches Python's ResolveResult dataclass.
 type ResolveResult struct {
-	Items    []*ImageItem
+	Items    []*model.ImageItem
 	Errors   []string
 	ExitCode int
 }
 
 // EnrichFunc is a function that enriches images in-place with relations.
 // Set by the API layer during wiring to avoid circular imports.
-type EnrichFunc func(ctx context.Context, images []*ImageItem, include []string, relations map[string]RelationSpec)
+type EnrichFunc func(ctx context.Context, images []*model.ImageItem, include []string, relations map[string]RelationSpec)
 
 // Resolver matches Python's Resolver in _resolver.py.
 type Resolver struct {
@@ -63,7 +64,7 @@ func (r *Resolver) SetEnrichFunc(fn EnrichFunc) {
 
 // enrich enriches images with relations if include is set.
 // Matches Python's Resolver.enrich() which delegates to RelationEnricher.
-func (r *Resolver) enrich(ctx context.Context, images []*ImageItem) []*ImageItem {
+func (r *Resolver) enrich(ctx context.Context, images []*model.ImageItem) []*model.ImageItem {
 	if r.include != nil && len(images) > 0 && r.enrichFunc != nil {
 		r.enrichFunc(ctx, images, r.include, RELATIONS)
 	}
@@ -76,7 +77,7 @@ func (r *Resolver) SetInclude(include []string) {
 }
 
 // ByID resolves by full ID.
-func (r *Resolver) ByID(ctx context.Context, imageID string) (*ImageItem, error) {
+func (r *Resolver) ByID(ctx context.Context, imageID string) (*model.ImageItem, error) {
 	matches, err := r.repo.FindByPrefix(ctx, imageID)
 	if err != nil {
 		return nil, fmt.Errorf("resolve image by ID: %w", err)
@@ -91,7 +92,7 @@ func (r *Resolver) ByID(ctx context.Context, imageID string) (*ImageItem, error)
 }
 
 // ByVersionType resolves by version and type (both required).
-func (r *Resolver) ByVersionType(ctx context.Context, version, imgType string) (*ImageItem, error) {
+func (r *Resolver) ByVersionType(ctx context.Context, version, imgType string) (*model.ImageItem, error) {
 	dbImage, err := r.repo.GetByVersionAndType(ctx, version, imgType)
 	if err != nil {
 		return nil, err
@@ -99,11 +100,11 @@ func (r *Resolver) ByVersionType(ctx context.Context, version, imgType string) (
 	if dbImage == nil {
 		return nil, NewImageNotFoundError(fmt.Sprintf("Image not found: version='%s', type='%s'", version, imgType))
 	}
-	return r.enrich(ctx, []*ImageItem{dbImage})[0], nil
+	return r.enrich(ctx, []*model.ImageItem{dbImage})[0], nil
 }
 
 // ByType resolves by image type.
-func (r *Resolver) ByType(ctx context.Context, imgType string) (*ImageItem, error) {
+func (r *Resolver) ByType(ctx context.Context, imgType string) (*model.ImageItem, error) {
 	dbImage, err := r.repo.GetByType(ctx, imgType)
 	if err != nil {
 		return nil, err
@@ -111,11 +112,11 @@ func (r *Resolver) ByType(ctx context.Context, imgType string) (*ImageItem, erro
 	if dbImage == nil {
 		return nil, NewImageNotFoundError(fmt.Sprintf("Image not found: '%s'", imgType))
 	}
-	return r.enrich(ctx, []*ImageItem{dbImage})[0], nil
+	return r.enrich(ctx, []*model.ImageItem{dbImage})[0], nil
 }
 
 // GetDefault resolves the default image, or nil if not set.
-func (r *Resolver) GetDefault(ctx context.Context) (*ImageItem, error) {
+func (r *Resolver) GetDefault(ctx context.Context) (*model.ImageItem, error) {
 	image, err := r.repo.GetDefault(ctx)
 	if err != nil {
 		return nil, err
@@ -123,11 +124,11 @@ func (r *Resolver) GetDefault(ctx context.Context) (*ImageItem, error) {
 	if image == nil {
 		return nil, nil
 	}
-	return r.enrich(ctx, []*ImageItem{image})[0], nil
+	return r.enrich(ctx, []*model.ImageItem{image})[0], nil
 }
 
 // ByName resolves by display name.
-func (r *Resolver) ByName(ctx context.Context, name string) (*ImageItem, error) {
+func (r *Resolver) ByName(ctx context.Context, name string) (*model.ImageItem, error) {
 	dbImage, err := r.repo.GetByName(ctx, name)
 	if err != nil {
 		return nil, err
@@ -135,7 +136,7 @@ func (r *Resolver) ByName(ctx context.Context, name string) (*ImageItem, error) 
 	if dbImage == nil {
 		return nil, NewImageNotFoundError(fmt.Sprintf("Image not found by name: '%s'", name))
 	}
-	return r.enrich(ctx, []*ImageItem{dbImage})[0], nil
+	return r.enrich(ctx, []*model.ImageItem{dbImage})[0], nil
 }
 
 // isImageNotFoundError checks if the error IS an ImageNotFoundError
@@ -153,7 +154,7 @@ func isImageNotFoundError(err error) bool {
 // Resolve resolves image by type:version, type, display name, or ID prefix.
 // Only ImageNotFoundError causes fallthrough to the next resolution method
 // — all other errors propagate immediately, matching Python's behavior.
-func (r *Resolver) Resolve(ctx context.Context, value string) (*ImageItem, error) {
+func (r *Resolver) Resolve(ctx context.Context, value string) (*model.ImageItem, error) {
 	// Try "type:version" selector format first using the shared version parser.
 	name, ver := version.ParseSelector(value)
 	if name != "" && ver != "" {
@@ -192,7 +193,7 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *Resol
 	// Dedup input identifiers (e.g. duplicate CLI args) before processing.
 	uniqueIDs := infra.Dedup(identifiers)
 
-	var items []*ImageItem
+	var items []*model.ImageItem
 	var errorsList []string
 	resolvedIDs := make(map[string]bool)
 

@@ -2219,10 +2219,6 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 		c.rootfsPath,
 		provisioner.ProvisionerType(c.resolved.Provisioner),
 		c.resolved.Image.FSType,
-		vm.WithRootUID(c.resolved.RootUID),
-		vm.WithRootGID(c.resolved.RootGID),
-		vm.WithUserUID(c.resolved.UserUID),
-		vm.WithUserGID(c.resolved.UserGID),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create VM provisioner: %w", err)

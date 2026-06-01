@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/guestfs"
 	loopmountsvc "mvmctl/internal/service/loopmount"
 )
 
@@ -127,54 +126,44 @@ func (s *Service) ScanOrphanProcesses(ctx context.Context) []map[string]any {
 	return orphans
 }
 
-// CleanStaleGuestfsState removes stale libguestfs processes, locks, sockets, and caches.
-// Matches Python's CacheService.clean_stale_guestfs_state() exactly.
-// Delegates to GuestfsService. Returns True if any stale state was removed.
-func (s *Service) CleanStaleGuestfsState(ctx context.Context) bool {
-	// Python: return GuestfsService.clean_stale_guestfs_state()
-	// GuestfsService is an empty struct (stateless), matching Python's classmethod pattern.
-	return (&guestfs.GuestfsService{}).CleanStaleGuestfsState()
-}
-
-// PruneAppliance removes the libguestfs appliance folder and stale system state.
-// Matches Python's CacheService.prune_appliance().
-// Delegates to GuestfsService.
-func (s *Service) PruneAppliance(ctx context.Context, dryRun bool) bool {
-	// Python: return GuestfsService.prune_appliance(dry_run)
-	return (&guestfs.GuestfsService{}).PruneAppliance(s.cacheDir, dryRun)
-}
-
 // PruneWarmImages removes warm images from the tmpfs ready pool.
-// Matches Python's CacheService.prune_warm_images() exactly.
 func (s *Service) PruneWarmImages(ctx context.Context, dryRun bool) bool {
 	warmDir := infra.GetWarmImageDir(s.tempDir)
 	if _, err := os.Stat(warmDir); os.IsNotExist(err) {
 		return false
 	}
 
-	// Python: has_content = any(warm_dir.iterdir())
-	// iter() never yields "." or "..", so standard ReadDir is equivalent.
 	entries, err := os.ReadDir(warmDir)
 	if err != nil {
 		return false
 	}
 
-	hasContent := len(entries) > 0
-	if !hasContent {
+	if len(entries) == 0 {
 		return false
 	}
 
-	if !dryRun {
-		for _, entry := range entries {
-			fullPath := filepath.Join(warmDir, entry.Name())
-			// Python: except OSError: pass — silently skip items that can't be removed
-			if entry.IsDir() {
-				_ = os.RemoveAll(fullPath)
-			} else {
-				_ = os.Remove(fullPath)
-			}
+	if dryRun {
+		return true
+	}
+
+	removed := 0
+	for _, entry := range entries {
+		fullPath := filepath.Join(warmDir, entry.Name())
+		var rmErr error
+		if entry.IsDir() {
+			rmErr = os.RemoveAll(fullPath)
+		} else {
+			rmErr = os.Remove(fullPath)
+		}
+		if rmErr != nil {
+			slog.Warn("Failed to remove from warm cache", "entry", entry.Name(), "error", rmErr)
+		} else {
+			removed++
+			slog.Debug("Removed from warm cache", "entry", entry.Name())
 		}
 	}
+
+	slog.Info("Pruned warm cache", "removed", removed, "total", len(entries))
 	return true
 }
 

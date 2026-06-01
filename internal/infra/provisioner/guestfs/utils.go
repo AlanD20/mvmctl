@@ -12,25 +12,39 @@ import (
 	"syscall"
 	"time"
 
+	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/system"
 )
 
-// ── GuestfsService ──────────────────────────────────────────────────────────
-//
-// Mirrors src/mvmctl/core/_shared/_guestfs/_service.py GuestfsService.
-// Stateless service for libguestfs appliance and backend operations.
+const applianceBuildTimeout = 60 * time.Second
+const staleProcessWaitTime = 500 * time.Millisecond
 
-// GuestfsService provides static helpers for libguestfs appliance management.
-type GuestfsService struct{}
+// ── Low-level helpers ────────────────────────────────────────────────────────
+
+// doTruncateFile expands a file to targetSize if it's smaller.
+func doTruncateFile(path string, targetSize int64) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	if info.Size() < targetSize {
+		if err := os.Truncate(path, targetSize); err != nil {
+			slog.Warn("Failed to truncate file", "path", path, "error", err)
+		}
+	}
+}
+
+// ── Appliance management ─────────────────────────────────────────────────────
+//
+// Mirrors src/mvmctl/core/_shared/_guestfs/_service.py.
 
 // BuildAppliance builds the libguestfs fixed appliance for faster image ops.
-// Uses KernelDetector to find a suitable upstream kernel with virtio drivers,
-// sets the appropriate environment variables, and runs
-// libguestfs-make-fixed-appliance.
+// Uses KernelDetector to find a suitable upstream kernel with virtio drivers.
 //
 // Returns the path to the appliance directory if built, or empty string if
 // skipped or failed.
-func (gs *GuestfsService) BuildAppliance(ctx context.Context, cacheDir string) (string, error) {
+func BuildAppliance(ctx context.Context, cacheDir string) (string, error) {
 	makeTool, err := exec.LookPath("libguestfs-make-fixed-appliance")
 	if err != nil {
 		slog.Debug("libguestfs-make-fixed-appliance not found — skipping appliance build")
@@ -38,7 +52,7 @@ func (gs *GuestfsService) BuildAppliance(ctx context.Context, cacheDir string) (
 	}
 
 	applianceDir := filepath.Join(cacheDir, "appliance")
-	if err := os.MkdirAll(applianceDir, 0755); err != nil {
+	if err := os.MkdirAll(applianceDir, infra.DirPerm); err != nil {
 		return "", fmt.Errorf("create appliance dir: %w", err)
 	}
 
@@ -65,7 +79,7 @@ func (gs *GuestfsService) BuildAppliance(ctx context.Context, cacheDir string) (
 	}
 
 	// Clean stale state first
-	gs.CleanStaleGuestfsState()
+	CleanStaleState()
 
 	// Build environment
 	env := os.Environ()
@@ -92,14 +106,13 @@ func (gs *GuestfsService) BuildAppliance(ctx context.Context, cacheDir string) (
 		}
 	}
 
-	timeout := 60 * time.Second
-	cmdCtx, cmdCancel := context.WithTimeout(ctx, timeout)
+	cmdCtx, cmdCancel := context.WithTimeout(ctx, applianceBuildTimeout)
 	defer cmdCancel()
 
 	result := system.RunCmdCompat(cmdCtx, []string{makeTool, applianceDir}, system.RunCmdOpts{
 		Capture: true,
 		Check:   true,
-		Timeout: timeout,
+		Timeout: applianceBuildTimeout,
 		Env:     runEnv,
 	})
 	if result.Err != nil {
@@ -123,40 +136,29 @@ func (gs *GuestfsService) BuildAppliance(ctx context.Context, cacheDir string) (
 	return applianceDir, nil
 }
 
-// CleanStaleGuestfsState removes stale libguestfs processes, locks, sockets,
-// and caches.
-//
-// Returns true if any stale state was removed or process was killed.
-func (gs *GuestfsService) CleanStaleGuestfsState() bool {
+// CleanStaleState removes stale libguestfs processes, locks, sockets, and caches.
+func CleanStaleState() bool {
 	uid := os.Getuid()
 	cleaned := false
 
-	// ── Phase 0: Find and kill abandoned guestfs processes ──────────────
-	// Matches Python's ProcessSignalHandler.terminate_batch():
-	//   sends SIGTERM to ALL PIDs, waits graceful_timeout=0.5s,
-	//   then SIGKILL for survivors.
-	abandonedPids := gs.findAbandonedGuestfsProcesses(uid)
+	abandonedPids := findAbandonedGuestfsProcesses(uid)
 	if len(abandonedPids) > 0 {
-		// Phase 0a: SIGTERM all PIDs (batch)
 		for _, pid := range abandonedPids {
 			if proc, err := os.FindProcess(pid); err == nil {
-				proc.Signal(syscall.SIGTERM) // ignore error — process may already be gone
+				proc.Signal(syscall.SIGTERM)
 			}
 		}
 
-		// Phase 0b: Wait for graceful shutdown (matches Python's graceful_timeout=0.5)
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(staleProcessWaitTime)
 
-		// Phase 0c: SIGKILL survivors
 		for _, pid := range abandonedPids {
 			if proc, err := os.FindProcess(pid); err == nil {
-				proc.Kill() // ignore error — may already have exited
+				proc.Kill()
 			}
 		}
 		cleaned = true
 	}
 
-	// ── Phase 1: Remove the global lock file ────────────────────────────
 	lockFile := filepath.Join("/var/tmp", fmt.Sprintf(".guestfs-%d", uid), "lock")
 	if _, err := os.Stat(lockFile); err == nil {
 		if err := os.Remove(lockFile); err == nil {
@@ -165,7 +167,6 @@ func (gs *GuestfsService) CleanStaleGuestfsState() bool {
 		}
 	}
 
-	// ── Phase 2: Remove stale daemon sockets ────────────────────────────
 	sockBase := filepath.Join("/run/user", strconv.Itoa(uid))
 	sockDirs, err := filepath.Glob(filepath.Join(sockBase, "libguestfs*"))
 	if err == nil {
@@ -180,7 +181,6 @@ func (gs *GuestfsService) CleanStaleGuestfsState() bool {
 		}
 	}
 
-	// ── Phase 3: Remove cached appliance directories in /var/tmp ────────
 	guestfsTmp := filepath.Join("/var/tmp", fmt.Sprintf(".guestfs-%d", uid))
 	if entries, err := os.ReadDir(guestfsTmp); err == nil {
 		for _, entry := range entries {
@@ -199,9 +199,8 @@ func (gs *GuestfsService) CleanStaleGuestfsState() bool {
 
 // findAbandonedGuestfsProcesses finds QEMU/guestfish PIDs owned by uid that
 // are running the libguestfs appliance but have no mvmctl ancestor.
-func (gs *GuestfsService) findAbandonedGuestfsProcesses(uid int) []int {
+func findAbandonedGuestfsProcesses(uid int) []int {
 	var abandoned []int
-
 	procDir := "/proc"
 	entries, err := os.ReadDir(procDir)
 	if err != nil {
@@ -217,7 +216,6 @@ func (gs *GuestfsService) findAbandonedGuestfsProcesses(uid int) []int {
 			continue
 		}
 
-		// Check ownership
 		statusPath := filepath.Join(procDir, entry.Name(), "status")
 		statusData, err := os.ReadFile(statusPath)
 		if err != nil {
@@ -228,7 +226,6 @@ func (gs *GuestfsService) findAbandonedGuestfsProcesses(uid int) []int {
 			continue
 		}
 
-		// Read cmdline
 		cmdlinePath := filepath.Join(procDir, entry.Name(), "cmdline")
 		cmdlineData, err := os.ReadFile(cmdlinePath)
 		if err != nil {
@@ -236,8 +233,6 @@ func (gs *GuestfsService) findAbandonedGuestfsProcesses(uid int) []int {
 		}
 		cmdline := string(cmdlineData)
 
-		// Match QEMU processes running the libguestfs appliance,
-		// or guestfish processes left behind
 		if strings.Contains(cmdline, ".guestfs-") &&
 			(strings.Contains(cmdline, "appliance.d") || strings.Contains(cmdline, "guestfsd.sock")) {
 			if !system.HasAncestorWithCmdline(pid, "mvm") {
@@ -254,7 +249,7 @@ func (gs *GuestfsService) findAbandonedGuestfsProcesses(uid int) []int {
 }
 
 // PruneAppliance removes the libguestfs appliance folder and stale system state.
-func (gs *GuestfsService) PruneAppliance(cacheDir string, dryRun bool) bool {
+func PruneAppliance(cacheDir string, dryRun bool) bool {
 	applianceDir := filepath.Join(cacheDir, "appliance")
 	removed := false
 
@@ -269,9 +264,36 @@ func (gs *GuestfsService) PruneAppliance(cacheDir string, dryRun bool) bool {
 	}
 
 	if !dryRun {
-		stateCleaned := gs.CleanStaleGuestfsState()
+		stateCleaned := CleanStaleState()
 		removed = removed || stateCleaned
 	}
 
 	return removed
+}
+
+// EnsureAppliance checks if the libguestfs fixed appliance cache exists.
+// Returns an error with a helpful message if the appliance has not been built.
+func EnsureAppliance(cacheDir string) error {
+	applianceDir := filepath.Join(cacheDir, "appliance")
+	required := map[string]bool{"kernel": false, "initrd": false, "root": false}
+
+	entries, err := filepath.Glob(filepath.Join(applianceDir, "*"))
+	if err != nil || len(entries) == 0 {
+		return errs.GuestfsError("libguestfs appliance cache not found. Run: mvm cache init")
+	}
+
+	for _, entry := range entries {
+		name := filepath.Base(entry)
+		if _, ok := required[name]; ok {
+			required[name] = true
+		}
+	}
+
+	for _, found := range required {
+		if !found {
+			return errs.GuestfsError("libguestfs appliance cache not found. Run: mvm cache init")
+		}
+	}
+
+	return nil
 }

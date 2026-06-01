@@ -26,7 +26,9 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/download"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/parallel"
+	"mvmctl/internal/infra/provisioner"
 	"mvmctl/internal/infra/ptr"
 	"mvmctl/internal/infra/system"
 )
@@ -88,7 +90,7 @@ func (s *Service) GetImagesDir() string {
 
 // RemoveImage removes an image, handling file deletion and hard/soft delete.
 // The image must be pre-enriched with VM references by the caller.
-func (s *Service) RemoveImage(ctx context.Context, image *ImageItem, force bool) error {
+func (s *Service) RemoveImage(ctx context.Context, image *model.ImageItem, force bool) error {
 	vms := image.VMs
 	hasVMs := len(vms) > 0
 
@@ -137,7 +139,7 @@ func logAudit(event string, changes map[string]any) {
 
 // RemoveManyPaths removes files for multiple images from disk. No DB changes.
 // Matches Python's Service.remove_many_paths().
-func (s *Service) RemoveManyPaths(images []*ImageItem) []string {
+func (s *Service) RemoveManyPaths(images []*model.ImageItem) []string {
 	var removed []string
 	for _, image := range images {
 		removed = append(removed, s.RemoveImageFiles(image)...)
@@ -147,7 +149,7 @@ func (s *Service) RemoveManyPaths(images []*ImageItem) []string {
 
 // RemoveImageFiles removes all files for an image from disk. No DB changes.
 // Matches Python's Service._remove_image_files().
-func (s *Service) RemoveImageFiles(image *ImageItem) []string {
+func (s *Service) RemoveImageFiles(image *model.ImageItem) []string {
 	var removed []string
 
 	entries, err := os.ReadDir(s.imagesDir)
@@ -177,7 +179,7 @@ func (s *Service) RemoveImageFiles(image *ImageItem) []string {
 
 // ListAll lists all images, syncing is_present flag with filesystem.
 // remote controls whether to also list remote images (matches Python signature).
-func (s *Service) ListAll(ctx context.Context, remote bool, verify bool) ([]*ImageItem, error) {
+func (s *Service) ListAll(ctx context.Context, remote bool, verify bool) ([]*model.ImageItem, error) {
 	images, err := s.repo.ListAll(ctx)
 	if err != nil {
 		return nil, err
@@ -213,7 +215,7 @@ func (s *Service) ListAll(ctx context.Context, remote bool, verify bool) ([]*Ima
 
 // resolveImagePath resolves the actual filesystem path for an image.
 // Tries the stored path first, then known extensions. Returns "" if no file found.
-func (s *Service) resolveImagePath(image *ImageItem) string {
+func (s *Service) resolveImagePath(image *model.ImageItem) string {
 	if image.Path != "" {
 		if _, err := os.Stat(image.Path); err == nil {
 			return image.Path
@@ -228,18 +230,18 @@ func (s *Service) resolveImagePath(image *ImageItem) string {
 	return ""
 }
 
-// OptimizeImage shrinks and compresses an image. Returns fully constructed ImageItem and warnings.
+// OptimizeImage shrinks and compresses an image. Returns fully constructed model.ImageItem and warnings.
 // Matches Python's Service.optimize_image() parameter order EXACTLY.
 func (s *Service) OptimizeImage(
 	ctx context.Context,
 	imagePath string,
 	imageID string,
-	spec *ImageSpec,
+	spec *model.ImageSpec,
 	timestamp string,
 	skipOptimization bool,
-	provisionerType ProvisionerType,
+	provisionerType provisioner.ProvisionerType,
 	warnings []string,
-) (*ImageItem, []string, error) {
+) (*model.ImageItem, []string, error) {
 	t0 := time.Now()
 	fsType, resolveErr := s.resolveFSType(ctx, imagePath)
 	if resolveErr != nil {
@@ -270,7 +272,7 @@ func (s *Service) OptimizeImage(
 		info, _ := os.Stat(imagePath)
 		actualSize := info.Size()
 		// Python returns distro=detected_os (the raw result, not imageType)
-		return &ImageItem{
+		return &model.ImageItem{
 			ID:               imageID,
 			Type:             imageType,
 			Version:          spec.Version,
@@ -376,7 +378,7 @@ func (s *Service) OptimizeImage(
 	slog.Info("Optimization complete", "total_seconds", t3.Sub(t0).Seconds())
 
 	compFmt := "zst"
-	return &ImageItem{
+	return &model.ImageItem{
 		ID:               imageID,
 		Type:             spec.Type,
 		Version:          spec.Version,
@@ -405,7 +407,7 @@ func (s *Service) OptimizeImage(
 // cancellation and timeout propagation.
 func (s *Service) DownloadImage(
 	ctx context.Context,
-	spec *ImageSpec,
+	spec *model.ImageSpec,
 	imageID string,
 	outputDir string,
 	force bool,
@@ -472,7 +474,7 @@ func (s *Service) ExtractImage(
 	format string,
 	partition *int,
 	disabledDetectors []string,
-	provisionerType ProvisionerType,
+	provisionerType provisioner.ProvisionerType,
 ) (string, error) {
 	finalPath := filepath.Join(outputDir, imageID+".img")
 
@@ -498,13 +500,13 @@ func (s *Service) MaterializeTo(ctx context.Context, imageID, fsType, outputPath
 		return NewImageError(fmt.Sprintf("Image not in cache: %s", imageID))
 	}
 
-	os.MkdirAll(filepath.Dir(outputPath), 0755)
+	os.MkdirAll(filepath.Dir(outputPath), infra.DirPerm)
 
 	// Try reflink copy (matching Python: run_cmd(["cp", "--reflink=auto", ...]) with ProcessError fallback)
 	result := system.RunCmdCompat(
 		ctx,
 		[]string{"cp", "--reflink=auto", "--sparse=always", cachedPath, outputPath},
-		system.DefaultRunCmdOptions(),
+		system.DefaultRunCmdOpts(),
 	)
 	combined := string(result.StdoutBytes) + string(result.StderrBytes)
 	if result.Err != nil {
@@ -529,7 +531,7 @@ func (s *Service) MaterializeTo(ctx context.Context, imageID, fsType, outputPath
 }
 
 // EnsureCached ensures images are decompressed to tmpfs cache, creating if needed.
-func (s *Service) EnsureCached(images []*ImageItem) ([]string, error) {
+func (s *Service) EnsureCached(images []*model.ImageItem) ([]string, error) {
 	var results []string
 	for _, image := range images {
 		cachedPath := filepath.Join(s.warmDir, fmt.Sprintf("%s.%s", image.ID, image.FSType))
@@ -577,7 +579,7 @@ func GetSpecsFor(
 	cacheTTLSeconds int,
 	ciVersion string,
 	imageTypesConfig []map[string]any,
-) ([]*ImageSpec, error) {
+) ([]*model.ImageSpec, error) {
 	// Default arch to current machine if not specified
 	if arch == "" {
 		arch = runtime.GOARCH
@@ -600,7 +602,7 @@ func GetSpecsFor(
 		version = ""
 	}
 
-	var results []*ImageSpec
+	var results []*model.ImageSpec
 	remaining := make([]string, len(types))
 	copy(remaining, types)
 
@@ -661,7 +663,7 @@ func GetSpecsFor(
 				continue
 			}
 
-			var chosen ImageVersion
+			var chosen model.ImageVersion
 			if version != "" {
 				found := false
 				for _, v := range listings {
@@ -679,7 +681,7 @@ func GetSpecsFor(
 				chosen = listings[0]
 			}
 
-			results = append(results, &ImageSpec{
+			results = append(results, &model.ImageSpec{
 				Type:    chosen.Type,
 				Version: chosen.Version,
 				Name:    fmt.Sprintf("%s %s", chosen.Type, chosen.Version),
@@ -726,7 +728,7 @@ func GetSpecsFor(
 			// Pick the first (latest — already sorted desc)
 			chosen := listings[0]
 
-			results = append(results, &ImageSpec{
+			results = append(results, &model.ImageSpec{
 				Type:    chosen.Type,
 				Version: chosen.Version,
 				Name:    fmt.Sprintf("%s %s", chosen.Type, chosen.Version),
@@ -780,8 +782,12 @@ func GetSpecsFor(
 // Matches Python's Service.resolve_remote_sizes() with max_workers=5.
 // Uses download.Downloader.HeadSize (which includes retry + cache) matching
 // Python's HttpDownload.head_size().
-func (s *Service) ResolveRemoteSizes(ctx context.Context, specs []*ImageSpec, ciVersion string) []*ImageSpec {
-	_ = parallel.Parallel(ctx, 5, specs, func(_ context.Context, sp *ImageSpec) error {
+func (s *Service) ResolveRemoteSizes(
+	ctx context.Context,
+	specs []*model.ImageSpec,
+	ciVersion string,
+) []*model.ImageSpec {
+	_ = parallel.Parallel(ctx, 5, specs, func(_ context.Context, sp *model.ImageSpec) error {
 		templateVars := s.getTemplateVariables(sp, ciVersion)
 		source := sp.Source
 		if sp.ListURLTemplate != nil && *sp.ListURLTemplate != "" {
@@ -909,13 +915,12 @@ func (s *Service) compress(imagePath string, level int, keepSource bool) (string
 // decompress decompresses the image to the specified output path using in-process zstd.
 // Matches Python's Service.decompress() exactly.
 func (s *Service) decompress(compressedPath, outputPath, compressedFormat string) error {
-	fmt_ := compressedFormat
-	if fmt_ == "" {
-		fmt_ = "zst"
+	if compressedFormat == "" {
+		return NewImageDecompressionError("compressedFormat must be specified; got empty string")
 	}
-	if fmt_ != "zst" {
+	if compressedFormat != "zst" {
 		return NewImageDecompressionError(
-			fmt.Sprintf("Unsupported compression format: '%s'. Only 'zst' (zstd) is supported.", fmt_),
+			fmt.Sprintf("Unsupported compression format: '%s'. Only 'zst' (zstd) is supported.", compressedFormat),
 		)
 	}
 
@@ -1315,7 +1320,7 @@ func (s *Service) validateTar(path string) error {
 func (s *Service) extractDiskImage(ctx context.Context,
 	inputPath, outputPath, format string,
 	partition *int, disabledDetectors []string,
-	provisionerType ProvisionerType,
+	provisionerType provisioner.ProvisionerType,
 ) (string, error) {
 	// isFallbackError checks if the error should trigger fallback to loopmount.
 	// Python catches (ImageError, RuntimeError) — ImageError maps to DomainError
@@ -1365,7 +1370,14 @@ func (s *Service) extractDiskImage(ctx context.Context,
 		if !isFallbackError(err) {
 			return "", err
 		}
-		return ExtractViaBackend(ctx, rawPath, imgPath, partitionInt, disabledDetectors, ProvisionerTypeLoopMount)
+		return ExtractViaBackend(
+			ctx,
+			rawPath,
+			imgPath,
+			partitionInt,
+			disabledDetectors,
+			provisioner.ProvisionerLoopMount,
+		)
 	} else if format == "raw" {
 		partitionInt := 0
 		if partition != nil {
@@ -1378,7 +1390,14 @@ func (s *Service) extractDiskImage(ctx context.Context,
 		if !isFallbackError(err) {
 			return "", err
 		}
-		return ExtractViaBackend(ctx, inputPath, imgPath, partitionInt, disabledDetectors, ProvisionerTypeLoopMount)
+		return ExtractViaBackend(
+			ctx,
+			inputPath,
+			imgPath,
+			partitionInt,
+			disabledDetectors,
+			provisioner.ProvisionerLoopMount,
+		)
 	} else {
 		return "", NewImageError(fmt.Sprintf("Unsupported disk image format: %s", format))
 	}
@@ -1387,7 +1406,7 @@ func (s *Service) extractDiskImage(ctx context.Context,
 func (s *Service) convertToRaw(ctx context.Context, inputPath, outputPath, fmtFlag string) error {
 	slog.Info("Converting to raw...", "file", filepath.Base(inputPath))
 	result := system.RunCmdCompat(ctx, []string{"qemu-img", "convert", "-m", "16", "-f", fmtFlag, "-O", "raw",
-		"-t", "none", "-T", "none", "-W", inputPath, outputPath}, system.DefaultRunCmdOptions())
+		"-t", "none", "-T", "none", "-W", inputPath, outputPath}, system.DefaultRunCmdOpts())
 	combined := string(result.StdoutBytes) + string(result.StderrBytes)
 	if result.Err != nil {
 		return NewImageError(fmt.Sprintf("qemu-img conversion failed: %s", combined))
@@ -1408,7 +1427,7 @@ func (s *Service) handleSquashfs(ctx context.Context, inputPath, finalPath, mini
 	result := system.RunCmdCompat(
 		ctx,
 		[]string{"unsquashfs", "-d", extractDir, inputPath},
-		system.DefaultRunCmdOptions(),
+		system.DefaultRunCmdOpts(),
 	)
 	if result.Err != nil {
 		return "", NewImageError("unsquashfs failed")
@@ -1418,7 +1437,7 @@ func (s *Service) handleSquashfs(ctx context.Context, inputPath, finalPath, mini
 		return "", NewImageError("mkfs.ext4 not found. Install e2fsprogs package.")
 	}
 
-	duResult := system.RunCmdCompat(ctx, []string{"du", "-sb", extractDir}, system.DefaultRunCmdOptions())
+	duResult := system.RunCmdCompat(ctx, []string{"du", "-sb", extractDir}, system.DefaultRunCmdOpts())
 	contentBytes := int64(0)
 	if duResult.Err == nil {
 		fields := strings.Fields(duResult.Stdout)
@@ -1437,7 +1456,7 @@ func (s *Service) handleSquashfs(ctx context.Context, inputPath, finalPath, mini
 	truncResult := system.RunCmdCompat(
 		ctx,
 		[]string{"truncate", "-s", fmt.Sprintf("%dM", imageSizeMB), finalPath},
-		system.DefaultRunCmdOptions(),
+		system.DefaultRunCmdOpts(),
 	)
 	truncCombined := string(truncResult.StdoutBytes) + string(truncResult.StderrBytes)
 	if truncResult.Err != nil {
@@ -1447,7 +1466,7 @@ func (s *Service) handleSquashfs(ctx context.Context, inputPath, finalPath, mini
 	mkfsResult := system.RunCmdCompat(
 		ctx,
 		[]string{"mkfs.ext4", "-d", extractDir, "-L", "", finalPath},
-		system.DefaultRunCmdOptions(),
+		system.DefaultRunCmdOpts(),
 	)
 	mkfsCombined := string(mkfsResult.StdoutBytes) + string(mkfsResult.StderrBytes)
 	if mkfsResult.Err != nil {
@@ -1471,7 +1490,7 @@ func (s *Service) createExt4FromTar(ctx context.Context, tarPath, outputPath, mi
 	slog.Info("Extracting tar...", "tmp_dir", tmpDir)
 
 	tarResult := system.RunCmdCompat(ctx, []string{"tar", "-xf", tarPath, "-C", tmpDir,
-		"--exclude=dev/*", "--no-same-owner", "--no-same-permissions"}, system.DefaultRunCmdOptions())
+		"--exclude=dev/*", "--no-same-owner", "--no-same-permissions"}, system.DefaultRunCmdOpts())
 	tarCombined := string(tarResult.StdoutBytes) + string(tarResult.StderrBytes)
 	if tarResult.Err != nil {
 		return fmt.Errorf("tar extract failed: %s: %w", tarCombined, tarResult.Err)
@@ -1482,7 +1501,7 @@ func (s *Service) createExt4FromTar(ctx context.Context, tarPath, outputPath, mi
 	system.RunCmdCompat(
 		ctx,
 		[]string{"chmod", "-R", "u+rwx", tmpDir},
-		system.RunCmdOptions{Capture: false, Check: false},
+		system.RunCmdOpts{Capture: false, Check: false},
 	)
 	t3 := time.Now()
 	slog.Debug("chmod", "elapsed_seconds", t3.Sub(t2).Seconds())
@@ -1490,7 +1509,7 @@ func (s *Service) createExt4FromTar(ctx context.Context, tarPath, outputPath, mi
 	duResult := system.RunCmdCompat(
 		ctx,
 		[]string{"du", "-sb", tmpDir},
-		system.RunCmdOptions{Capture: true, Check: false},
+		system.RunCmdOpts{Capture: true, Check: false},
 	)
 	duCombined := string(duResult.StdoutBytes) + string(duResult.StderrBytes)
 	duReturnCode := 0
@@ -1537,7 +1556,7 @@ func (s *Service) createExt4FromTar(ctx context.Context, tarPath, outputPath, mi
 	truncResult := system.RunCmdCompat(
 		ctx,
 		[]string{"truncate", "-s", fmt.Sprintf("%dM", rawSizeMB), outputPath},
-		system.DefaultRunCmdOptions(),
+		system.DefaultRunCmdOpts(),
 	)
 	truncCombined := string(truncResult.StdoutBytes) + string(truncResult.StderrBytes)
 	if truncResult.Err != nil {
@@ -1549,7 +1568,7 @@ func (s *Service) createExt4FromTar(ctx context.Context, tarPath, outputPath, mi
 	mkfsResult := system.RunCmdCompat(
 		ctx,
 		[]string{"mkfs.ext4", "-d", tmpDir, "-F", outputPath},
-		system.DefaultRunCmdOptions(),
+		system.DefaultRunCmdOpts(),
 	)
 	mkfsCombined := string(mkfsResult.StdoutBytes) + string(mkfsResult.StderrBytes)
 	if mkfsResult.Err != nil {
@@ -1650,7 +1669,7 @@ func (s *Service) detectFilesystemType(ctx context.Context, imagePath string) st
 	result := system.RunCmdCompat(
 		ctx,
 		[]string{"blkid", "-o", "value", "-s", "TYPE", imagePath},
-		system.RunCmdOptions{Capture: true, Check: false},
+		system.RunCmdOpts{Capture: true, Check: false},
 	)
 	return strings.TrimSpace(result.Stdout)
 }
@@ -1659,7 +1678,7 @@ func (s *Service) getFilesystemUUID(ctx context.Context, imagePath string) strin
 	result := system.RunCmdCompat(
 		ctx,
 		[]string{"blkid", "-p", "-s", "UUID", "-o", "value", imagePath},
-		system.RunCmdOptions{Capture: true, Check: false},
+		system.RunCmdOpts{Capture: true, Check: false},
 	)
 	return strings.TrimSpace(result.Stdout)
 }
@@ -1688,7 +1707,7 @@ func (s *Service) resolveFSType(ctx context.Context, imagePath string) (string, 
 // Other helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-func (s *Service) getTemplateVariables(spec *ImageSpec, ciVersion string) map[string]string {
+func (s *Service) getTemplateVariables(spec *model.ImageSpec, ciVersion string) map[string]string {
 	return map[string]string{
 		"ci_version":     ciVersion,
 		"arch":           spec.Arch,
@@ -1705,7 +1724,7 @@ func (s *Service) getTemplateVariables(spec *ImageSpec, ciVersion string) map[st
 // before picking the last (highest) one (C05).
 func (s *Service) resolveSourceTemplate(
 	ctx context.Context,
-	spec *ImageSpec,
+	spec *model.ImageSpec,
 	templateVars map[string]string,
 ) (string, error) {
 	listURLTmpl := ""
@@ -1767,7 +1786,7 @@ func (s *Service) copyWithDD(ctx context.Context, src, dst string, sparse bool) 
 		conv = "sparse,fsync"
 	}
 	result := system.RunCmdCompat(ctx, []string{"dd", fmt.Sprintf("if=%s", src), fmt.Sprintf("of=%s", dst),
-		"bs=1M", fmt.Sprintf("conv=%s", conv), "status=none"}, system.DefaultRunCmdOptions())
+		"bs=1M", fmt.Sprintf("conv=%s", conv), "status=none"}, system.DefaultRunCmdOpts())
 	combined := string(result.StdoutBytes) + string(result.StderrBytes)
 	if result.Err != nil {
 		return NewImageError(fmt.Sprintf("dd copy failed: %s", combined))
@@ -1815,7 +1834,7 @@ func copyFile(src, dst string) error {
 	}
 	defer s.Close()
 
-	os.MkdirAll(filepath.Dir(dst), 0755)
+	os.MkdirAll(filepath.Dir(dst), infra.DirPerm)
 	d, err := os.Create(dst)
 	if err != nil {
 		return err
