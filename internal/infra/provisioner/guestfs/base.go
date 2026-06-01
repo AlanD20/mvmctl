@@ -428,7 +428,7 @@ func (h *GuestfsHandle) StatVFS(ctx context.Context, path string) (map[string]in
 
 // ExtractPartition extracts root partition using guestfish for reliable VHD handling.
 // Returns the output path, or empty string if extraction fails/guestfs unavailable.
-func ExtractPartition(ctx context.Context, rawPath, outputPath string, partition *int) (string, error) {
+func ExtractPartition(ctx context.Context, rawPath, outputPath string, partition int) (string, error) {
 	handle, err := NewHandle(rawPath, true)
 	if err != nil {
 		if _, ok := err.(*GuestfsNotAvailableError); ok {
@@ -456,7 +456,7 @@ func ExtractPartition(ctx context.Context, rawPath, outputPath string, partition
 func (h *GuestfsHandle) extractPartitionInner(
 	ctx context.Context,
 	rawPath, outputPath string,
-	partition *int,
+	partition int,
 ) (string, error) {
 
 	partitions, err := h.ListPartitions(ctx)
@@ -479,12 +479,12 @@ func (h *GuestfsHandle) extractPartitionInner(
 	}
 
 	var rootDevice string
-	if partition != nil {
-		if *partition < 1 || *partition > len(partitions) {
-			slog.Debug("Partition out of range", "partition", *partition, "max", len(partitions))
+	if partition > 0 {
+		if partition > len(partitions) {
+			slog.Debug("Partition out of range", "partition", partition, "max", len(partitions))
 			return "", nil
 		}
-		rootDevice = partitions[*partition-1]
+		rootDevice = partitions[partition-1]
 	} else {
 		rootDev, findErr := h.FindLargestLinuxFS(ctx, partitions)
 		if findErr == nil && rootDev != "" {

@@ -5,15 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"strings"
-	"syscall"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/provisioner"
-	"mvmctl/internal/infra/provisioner/guestfs"
-	"mvmctl/internal/infra/provisioner/loopmount"
 )
 
 // Provisioner matches Python's Provisioner in _provisioner.py.
@@ -21,11 +16,9 @@ import (
 // deblob() and shrink() are declarative — they only set flags.
 // run() creates a fresh backend for each phase.
 type Provisioner struct {
-	ctx             context.Context
 	imagePath       string
 	provisionerType provisioner.ProvisionerType
 	fsType          string
-	cacheDir        string
 	deblob          bool
 	shrink          bool
 	convertTo       string
@@ -35,33 +28,29 @@ type Provisioner struct {
 // Matches Python's Provisioner.__init__() which takes:
 //
 //	image_path: Path, *, provisioner_type: provisioner.ProvisionerType, fs_type: str
-//
-// cacheDir is resolved by the caller and passed through.
 func NewProvisioner(
-	ctx context.Context,
 	imagePath string,
 	provisionerType provisioner.ProvisionerType,
 	fsType string,
-	cacheDir string,
 ) *Provisioner {
 	return &Provisioner{
-		ctx:             ctx,
 		imagePath:       imagePath,
 		provisionerType: provisionerType,
 		fsType:          fsType,
-		cacheDir:        cacheDir,
 	}
 }
 
 // createBackend creates a fresh backend for the current image.
 // Matches Python's ProvisionerBackend.get_image().
-// cacheDir is taken from the Provisioner struct (resolved by the caller at
-// construction time), not from the environment at call time.
-func (p *Provisioner) createBackend() (provisioner.Backend, error) {
-	return provisioner.NewBackend(p.ctx, provisioner.BackendOpts{
+func (p *Provisioner) createBackend(ctx context.Context) (provisioner.Backend, error) {
+	cacheDir, err := infra.GetCacheDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve cache dir: %w", err)
+	}
+	return provisioner.NewBackend(ctx, provisioner.BackendOpts{
 		RootfsPath:      p.imagePath,
 		FsType:          p.fsType,
-		CacheDir:        p.cacheDir,
+		CacheDir:        cacheDir,
 		ProvisionerType: p.provisionerType,
 		UserUID:         1000,
 		UserGID:         1000,
@@ -74,12 +63,12 @@ func (p *Provisioner) createBackend() (provisioner.Backend, error) {
 // Returns OS identifier (e.g. "ubuntu", "debian", "alpine").
 // Matches Python's Provisioner.detect_os() which lets errors propagate
 // to the caller (Service wraps it in try/except).
-func (p *Provisioner) DetectOS() (string, error) {
-	backend, err := p.createBackend()
+func (p *Provisioner) DetectOS(ctx context.Context) (string, error) {
+	backend, err := p.createBackend(ctx)
 	if err != nil {
 		return "", err
 	}
-	return backend.DetectOS(p.ctx)
+	return backend.DetectOS(ctx)
 }
 
 // Deblob marks that deblob + fstab fix should run.
@@ -97,132 +86,56 @@ func (p *Provisioner) ConvertTo(targetFS string) {
 	p.convertTo = targetFS
 }
 
-// isExpectedProvisionerError checks if an error matches Python's
-// (LoopMountError, OSError, RuntimeError) catch pattern.
-//   - LoopMountError = DomainError with "loopmount." code prefix
-//   - OSError = os.PathError, os.LinkError, os.SyscallError, syscall.Errno
-//   - RuntimeError = any other non-DomainError
-//
-// Non-loopmount DomainErrors (e.g. image.*, vm.*) are NOT caught — they propagate.
-func isExpectedProvisionerError(err error) bool {
-	var de *errs.DomainError
-	if errors.As(err, &de) {
-		// LoopMountError: DomainError with "loopmount." prefix
-		return strings.HasPrefix(string(de.Code), "loopmount.")
-	}
-	// OSError equivalent: os.PathError, os.LinkError, os.SyscallError
-	if isOSError(err) {
-		return true
-	}
-	// RuntimeError equivalent: any non-DomainError error
-	return true
-}
-
-// isOSError checks if an error is Go's equivalent of Python's OSError.
-func isOSError(err error) bool {
-	var pe *os.PathError
-	if errors.As(err, &pe) {
-		return true
-	}
-	var le *os.LinkError
-	if errors.As(err, &le) {
-		return true
-	}
-	var se *os.SyscallError
-	if errors.As(err, &se) {
-		return true
-	}
-	var errno syscall.Errno
-	if errors.As(err, &errno) {
-		return true
-	}
-	return false
-}
-
 // -- execution ---------------------------------------------------------------
 
 // Run executes queued operations with the selected backend.
 // Phases run in order — conversion (Phase 0), deblob (Phase 1), shrink (Phase 2).
-// Each phase uses a fresh backend session so a failure in one never leaks into the next.
+// All phases share a single backend session — operations are idempotent and
+// independent, so there's no risk of state pollution between phases.
 // Returns true if at least one phase ran successfully.
-// IMPORTANT: Matching Python error propagation EXACTLY:
-//   - backend creation + declarative calls (deblob, shrink) = OUTSIDE try/except → errors propagate as (false, err)
-//   - convert_to + run = INSIDE try/except → errors caught, logged as warnings, phase skipped
-//   - Only (LoopMountError, OSError, RuntimeError) are caught — matching Python EXACTLY
-func (p *Provisioner) Run() (bool, error) {
+func (p *Provisioner) Run(ctx context.Context) (bool, error) {
 	deblobOK := false
 	shrinkOK := false
 	convertOK := false
 
+	backend, err := p.createBackend(ctx)
+	if err != nil {
+		return false, err
+	}
+
 	// Phase 0: filesystem conversion (e.g. btrfs → ext4)
 	if p.convertTo != "" {
-		backend, err := p.createBackend()
-		if err != nil {
+		if err := backend.ConvertTo(ctx, p.convertTo); err != nil {
 			return false, err
 		}
-		if err := backend.ConvertTo(p.ctx, p.convertTo); err != nil {
-			if isExpectedProvisionerError(err) {
-				slog.Warn(
-					"Filesystem conversion skipped",
-					"error",
-					err,
-					"hint",
-					"Build the provisioner binary with 'python scripts/build_services.py' or enable libguestfs to enable fs conversion.",
-				)
-			} else {
-				return false, err
-			}
-		} else {
-			p.fsType = p.convertTo
-			convertOK = true
-			slog.Info("Filesystem converted", "from", p.fsType, "to", p.convertTo)
-		}
+		p.fsType = p.convertTo
+		p.convertTo = ""
+		convertOK = true
+		slog.Info("Filesystem converted")
 	}
 
-	// Phase 1: deblob + fstab fix (fresh backend — no state leakage)
+	// Phase 1: deblob + fstab fix
 	if p.deblob {
-		backend, err := p.createBackend()
-		if err != nil {
+		if err := backend.Deblob(ctx, nil); err != nil {
 			return false, err
 		}
-		if err := backend.Deblob(p.ctx, nil); err != nil {
+		if err := backend.Run(ctx); err != nil {
 			return false, err
 		}
-		if err := backend.Run(p.ctx); err != nil {
-			if isExpectedProvisionerError(err) {
-				slog.Warn(
-					"Debloating skipped",
-					"error",
-					err,
-					"hint",
-					"Build the provisioner binary with 'python scripts/build_services.py' or enable libguestfs to enable boot optimization.",
-				)
-			} else {
-				return false, err
-			}
-		} else {
-			deblobOK = true
-		}
+		p.deblob = false
+		deblobOK = true
 	}
 
-	// Phase 2: shrink (fresh backend — deblob state completely isolated)
+	// Phase 2: shrink
 	if p.shrink {
-		backend, err := p.createBackend()
-		if err != nil {
+		if err := backend.Shrink(ctx); err != nil {
 			return false, err
 		}
-		if err := backend.Shrink(p.ctx); err != nil {
+		if err := backend.Run(ctx); err != nil {
 			return false, err
 		}
-		if err := backend.Run(p.ctx); err != nil {
-			if isExpectedProvisionerError(err) {
-				slog.Warn("Shrink skipped (image may already be minimal)", "error", err)
-			} else {
-				return false, err
-			}
-		} else {
-			shrinkOK = true
-		}
+		p.shrink = false
+		shrinkOK = true
 	}
 
 	return convertOK || deblobOK || shrinkOK, nil
@@ -251,27 +164,24 @@ func ExtractViaBackend(
 		}
 	}()
 
-	// For extraction, fsType is a placeholder — the backend detects it from the image.
-	fsType := "ext4"
-
-	// Convert partition int to *int (nil = auto-detect, matching Python int | None = None).
-	var partitionPtr *int
-	if partition > 0 {
-		partitionPtr = &partition
+	cacheDir, err := infra.GetCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve cache dir: %w", err)
 	}
 
-	switch provisionerType {
-	case provisioner.ProvisionerLoopMount:
-		cacheDir, err := infra.GetCacheDir()
-		if err != nil {
-			return "", fmt.Errorf("extract partition: cannot resolve cache directory: %w", err)
-		}
-		backend := loopmount.NewLoopMountBackend(ctx, rawPath, fsType, cacheDir)
-		return backend.ExtractPartition(ctx, rawPath, outputPath, partitionPtr, disabledDetectors)
-	case provisioner.ProvisionerGuestFS:
-		backend := guestfs.NewGuestfsBackend(rawPath, 0, 0, 1000, 1000)
-		return backend.ExtractPartition(ctx, rawPath, outputPath, partitionPtr, disabledDetectors)
-	default:
-		return "", fmt.Errorf("image provisioner: unknown provisioner type: %s", provisionerType)
+	backend, err := provisioner.NewBackend(ctx, provisioner.BackendOpts{
+		RootfsPath:      rawPath,
+		FsType:          "ext4", // placeholder — backends detect fs from the image
+		CacheDir:        cacheDir,
+		ProvisionerType: provisionerType,
+		RootUID:         0,
+		RootGID:         0,
+		UserUID:         1000,
+		UserGID:         1000,
+	})
+	if err != nil {
+		return "", err
 	}
+
+	return backend.ExtractPartition(ctx, rawPath, outputPath, partition, disabledDetectors)
 }

@@ -4,24 +4,23 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
 	"mvmctl/internal/assets"
-	"mvmctl/internal/core/binary"
 	"mvmctl/internal/core/image"
-	"mvmctl/internal/core/vm"
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/crypto"
+	"mvmctl/internal/infra/download"
 	"mvmctl/internal/infra/errs"
-	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/operation"
-	"mvmctl/internal/infra/provisioner"
+	"mvmctl/internal/infra/system"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"
 )
@@ -47,8 +46,7 @@ func (op *Operation) ImagePrune(ctx context.Context, dryRun bool, includeAll boo
 	}
 
 	// Get referenced image IDs from VMs (matching Python's Repository.list_all() pattern)
-	vmRepo := vm.NewRepository(op.Connection.DB())
-	allVMs, _ := vmRepo.ListAll(ctx)
+	allVMs, _ := op.Repos.VM.ListAll(ctx)
 	referencedIDs := make(map[string]bool)
 	for _, vm := range allVMs {
 		if vm.ImageID != "" {
@@ -98,52 +96,33 @@ func (op *Operation) ImagePull(
 	ctx context.Context,
 	input *inputs.ImagePullInput,
 	onProgress func(errs.ProgressEvent),
-) interface{} {
-	var version string
-	if input.Version != nil {
-		version = *input.Version
-	}
-	arch := ""
-	if input.Arch != nil {
-		arch = *input.Arch
-	}
-	if arch == "" {
+) any {
+	// Resolve pull input via ImageAcquireRequest (arch, output dir, validation)
+	req := inputs.NewImageAcquireRequest(input, op.Connection.DB(), op.Repos.Image)
+	resolved, err := req.ResolvePull(ctx)
+	if err != nil {
 		return &errs.OperationResult{
-			Status:  "error",
-			Code:    string(errs.CodeImagePullFailed),
-			Message: "arch is required",
+			Status:    "error",
+			Code:      string(errs.CodeImagePullFailed),
+			Message:   fmt.Sprintf("Failed to resolve pull input: %v", err),
+			Exception: err,
 		}
 	}
 
-	// Use custom output dir if specified, otherwise the default images dir
-	imagesDir := filepath.Join(op.CacheDir, "images")
-	if input.OutputDir != "" {
-		imagesDir = input.OutputDir
-	}
-	if imagesDir == "" {
-		return &errs.OperationResult{
-			Status:  "error",
-			Code:    string(errs.CodeImagePullFailed),
-			Message: "Failed to resolve output_dir",
-		}
-	}
-
-	// Resolve cache TTL and ci_version from settings/binary (matches Python)
+	// Resolve cache TTL from settings
 	cacheTTL := 0
-	if !input.NoCache {
-		if op.Services.Config != nil {
-			if ttlRaw, err := op.Services.Config.Get(ctx, "defaults.image", "remote_list_cache_ttl"); err == nil {
-				if ttl, ok := ttlRaw.(int); ok {
-					cacheTTL = ttl
-				}
+	if !resolved.NoCache {
+		// Config Service must always exist, or panic
+		if ttlRaw, err := op.Services.Config.Get(ctx, "defaults.image", "remote_list_cache_ttl"); err == nil {
+			if ttl, ok := ttlRaw.(int); ok {
+				cacheTTL = ttl
 			}
 		}
 	}
-	resolvedCIVersion := ""
 
-	// Resolve ci_version from default firecracker binary (matches Python)
-	binRepo := binary.NewRepository(op.Connection.DB())
-	defaultBin, _ := binRepo.GetDefault(ctx, "firecracker")
+	// Resolve ci_version from default firecracker binary
+	defaultBin, _ := op.Repos.Binary.GetDefault(ctx, "firecracker")
+	resolvedCIVersion := ""
 	if defaultBin != nil && defaultBin.CIVersion != nil {
 		resolvedCIVersion = *defaultBin.CIVersion
 	}
@@ -170,9 +149,9 @@ func (op *Operation) ImagePull(
 
 	specs, err := image.GetSpecsFor(
 		ctx,
-		[]string{input.Type},
-		version,
-		arch,
+		[]string{resolved.Type},
+		resolved.Version,
+		resolved.Arch,
 		cacheTTL,
 		resolvedCIVersion,
 		imageTypesConfig,
@@ -181,7 +160,7 @@ func (op *Operation) ImagePull(
 		return &errs.OperationResult{
 			Status:    "error",
 			Code:      string(errs.CodeImagePullFailed),
-			Message:   fmt.Sprintf("Failed to resolve spec for %s: %v", input.Type, err),
+			Message:   fmt.Sprintf("Failed to resolve spec for %s: %v", resolved.Type, err),
 			Exception: err,
 		}
 	}
@@ -189,7 +168,7 @@ func (op *Operation) ImagePull(
 		return &errs.OperationResult{
 			Status:  "error",
 			Code:    string(errs.CodeImagePullFailed),
-			Message: fmt.Sprintf("No matching image spec for type=%q version=%q", input.Type, version),
+			Message: fmt.Sprintf("No matching image spec for type=%q version=%q", resolved.Type, resolved.Version),
 		}
 	}
 	spec := specs[0]
@@ -213,10 +192,9 @@ func (op *Operation) ImagePull(
 	}
 
 	timestamp := time.Now().Format(time.RFC3339)
-	var hg infra.HashGenerator
-	imageID := hg.Image(fmt.Sprintf("%s:%s", spec.Type, spec.Version), spec.Source, timestamp)
+	imageID := crypto.ImageID(fmt.Sprintf("%s:%s", spec.Type, spec.Version), spec.Source, timestamp)
 
-	workDir, err := os.MkdirTemp("", "mvm-pull-*")
+	workDir, err := os.MkdirTemp(infra.GetTempDir(), "mvm-pull-*")
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
@@ -257,7 +235,6 @@ func (op *Operation) ImagePull(
 		})
 	}
 
-	provisionerType := op.resolveProvisionerType(ctx)
 	extractedPath, err := op.Services.Image.ExtractImage(
 		ctx,
 		downloadPath,
@@ -266,7 +243,7 @@ func (op *Operation) ImagePull(
 		spec.Format,
 		input.Partition,
 		input.DisabledDetectors,
-		provisionerType,
+		op.ProvisionerType,
 	)
 	if err != nil {
 		// Catch RootPartitionDetectionError and TieDetectedError (matching Python)
@@ -299,7 +276,7 @@ func (op *Operation) ImagePull(
 		spec,
 		timestamp,
 		input.SkipOptimization,
-		provisionerType,
+		op.ProvisionerType,
 		nil,
 	)
 	if err != nil {
@@ -322,8 +299,8 @@ func (op *Operation) ImagePull(
 	// Move compressed result to images dir
 	if imageItem.Path != "" {
 		src := imageItem.Path
-		dst := filepath.Join(imagesDir, filepath.Base(src))
-		os.MkdirAll(imagesDir, 0755)
+		dst := filepath.Join(resolved.OutputDir, filepath.Base(src))
+		os.MkdirAll(resolved.OutputDir, 0755)
 		if dst != src {
 			os.Remove(dst)
 			if err := os.Rename(src, dst); err != nil {
@@ -382,45 +359,23 @@ func (op *Operation) ImageImport(
 	input *inputs.ImageImportInput,
 	onProgress func(errs.ProgressEvent),
 ) *errs.OperationResult {
-	arch := ""
-	if input.Arch != nil {
-		arch = *input.Arch
-	}
-	if arch == "" {
+	// Resolve import input via ImageAcquireRequest (arch, format, validation)
+	req := inputs.NewImageAcquireRequest(input, op.Connection.DB(), op.Repos.Image)
+	resolved, err := req.ResolveImport(ctx)
+	if err != nil {
 		return &errs.OperationResult{
-			Status:  "error",
-			Code:    string(errs.CodeImageImportFailed),
-			Message: "arch is required",
+			Status:    "error",
+			Code:      string(errs.CodeImageImportFailed),
+			Message:   fmt.Sprintf("Failed to resolve import input: %v", err),
+			Exception: err,
 		}
 	}
 
-	format := ""
-	if input.Format != nil {
-		format = *input.Format
-	}
-	if format == "" {
-		format = image.DetectImageFormat(input.SourcePath)
-		if format == "" {
-			return &errs.OperationResult{
-				Status:  "error",
-				Code:    string(errs.CodeImageFormatInvalid),
-				Message: fmt.Sprintf("Cannot detect format for %s", input.SourcePath),
-			}
-		}
-	}
-
-	var importWarnings []string
-	detected := image.DetectImageFormat(input.SourcePath)
-	if detected != "" && detected != format {
-		importWarnings = append(importWarnings,
-			fmt.Sprintf("Declared format '%s' does not match detected format '%s'", format, detected))
-	}
-
-	existing, _ := op.Repos.Image.GetByType(ctx, input.Name)
-	if !input.Force && existing != nil && existing.Path != "" {
+	existing, _ := op.Repos.Image.GetByType(ctx, resolved.Type)
+	if !resolved.Force && existing != nil && existing.Path != "" {
 		if _, err := os.Stat(existing.Path); err == nil {
 			slog.Info("Image already exists", "path", existing.Path)
-			if input.SetDefault {
+			if resolved.SetDefault {
 				_ = op.Repos.Image.SetDefault(ctx, existing.ID)
 			}
 			return &errs.OperationResult{
@@ -431,18 +386,30 @@ func (op *Operation) ImageImport(
 		}
 	}
 
+	// Format detection warning
+	var importWarnings []string
+	if resolved.FormatDetected != "" && resolved.Format != resolved.FormatDetected {
+		importWarnings = append(
+			importWarnings,
+			fmt.Sprintf(
+				"Declared format '%s' does not match detected format '%s'",
+				resolved.Format,
+				resolved.FormatDetected,
+			),
+		)
+	}
+
 	spec := &model.ImageSpec{
-		Type:    input.Name,
+		Type:    resolved.Type,
 		Version: "",
-		Name:    input.Name,
-		Arch:    arch,
-		Source:  input.SourcePath,
-		Format:  format,
+		Name:    resolved.Type,
+		Arch:    resolved.Arch,
+		Source:  *resolved.SourcePath,
+		Format:  resolved.Format,
 	}
 
 	timestamp := time.Now().Format(time.RFC3339)
-	var hg infra.HashGenerator
-	imageID := hg.Image(fmt.Sprintf("%s:%s", spec.Type, spec.Version), spec.Source, timestamp)
+	imageID := crypto.ImageID(fmt.Sprintf("%s:%s", spec.Type, spec.Version), spec.Source, timestamp)
 
 	if onProgress != nil {
 		onProgress(errs.ProgressEvent{
@@ -450,16 +417,15 @@ func (op *Operation) ImageImport(
 		})
 	}
 
-	provisionerType := op.resolveProvisionerType(ctx)
 	extractedPath, err := op.Services.Image.ExtractImage(
 		ctx,
-		input.SourcePath,
+		*resolved.SourcePath,
 		imageID,
-		filepath.Join(op.CacheDir, "images"),
-		format,
-		input.Partition,
-		input.DisabledDetectors,
-		provisionerType,
+		infra.GetImagesDir(),
+		resolved.Format,
+		resolved.Partition,
+		resolved.DisabledDetectors,
+		op.ProvisionerType,
 	)
 	if err != nil {
 		if isPartitionDetectionError(err) {
@@ -491,7 +457,7 @@ func (op *Operation) ImageImport(
 		spec,
 		timestamp,
 		input.SkipOptimization,
-		provisionerType,
+		op.ProvisionerType,
 		importWarnings,
 	)
 	if err != nil {
@@ -644,9 +610,7 @@ func (op *Operation) ImageRemove(ctx context.Context, input *inputs.ImageInput, 
 	images := resolved.Images
 
 	// Batch-enrich with VM references (matches Python's Resolver(repo, include=["vm"]).enrich())
-	if op.Enr != nil {
-		_ = op.Enr.EnrichImage(ctx, images)
-	}
+	op.Enr.EnrichImage(ctx, images, "vm")
 
 	for _, img := range images {
 		if !force && len(img.VMs) > 0 {
@@ -668,6 +632,9 @@ func (op *Operation) ImageRemove(ctx context.Context, input *inputs.ImageInput, 
 			})
 			continue
 		}
+
+		// Audit log AFTER successful removal
+		op.AuditLog.LogOperation("image.remove", map[string]any{"id": img.ID}, "")
 
 		results = append(results, errs.OperationResult{
 			Status: "success",
@@ -712,8 +679,7 @@ func (op *Operation) ImageListAll(
 		// Discover remote images via version resolver
 		// Resolve ci_version from default firecracker binary
 		resolvedCIVersion := ""
-		binRepo := binary.NewRepository(op.Connection.DB())
-		defaultBin, _ := binRepo.GetDefault(ctx, "firecracker")
+		defaultBin, _ := op.Repos.Binary.GetDefault(ctx, "firecracker")
 		if defaultBin != nil && defaultBin.CIVersion != nil {
 			resolvedCIVersion = *defaultBin.CIVersion
 		}
@@ -724,11 +690,9 @@ func (op *Operation) ImageListAll(
 			cacheTTL = 0
 		} else {
 			cacheTTL = 3600
-			if op.Services.Config != nil {
-				if ttlRaw, err := op.Services.Config.Get(ctx, "defaults.image", "remote_list_cache_ttl"); err == nil {
-					if ttl, ok := ttlRaw.(int); ok && ttl > 0 {
-						cacheTTL = ttl
-					}
+			if ttlRaw, err := op.Services.Config.Get(ctx, "defaults.image", "remote_list_cache_ttl"); err == nil {
+				if ttl, ok := ttlRaw.(int); ok && ttl > 0 {
+					cacheTTL = ttl
 				}
 			}
 		}
@@ -740,17 +704,10 @@ func (op *Operation) ImageListAll(
 		}
 
 		// Resolve arch from settings (matches Python: SettingsService.resolve(db, "defaults.image", "arch"))
-		arch := runtime.GOARCH
-		if arch == "amd64" {
-			arch = "x86_64"
-		} else if arch == "arm64" {
-			arch = "aarch64"
-		}
-		if op.Services.Config != nil {
-			if archRaw, err := op.Services.Config.Get(ctx, "defaults.image", "arch"); err == nil {
-				if archStr, ok := archRaw.(string); ok && archStr != "" {
-					arch = archStr
-				}
+		arch := system.RuntimeArch()
+		if archRaw, err := op.Services.Config.Get(ctx, "defaults.image", "arch"); err == nil {
+			if archStr, ok := archRaw.(string); ok && archStr != "" {
+				arch = archStr
 			}
 		}
 
@@ -766,9 +723,9 @@ func (op *Operation) ImageListAll(
 
 		// Filter by type BEFORE resolving (matches Python's type_filter handling)
 		if typeFilter != "" {
-			filtered := make([]map[string]any, 0)
+			filtered := make([]download.ResolverConfig, 0)
 			for _, cfg := range imageTypesConfig {
-				if t, ok := cfg["type"].(string); ok && t == typeFilter {
+				if cfg.Type == typeFilter {
 					filtered = append(filtered, cfg)
 				}
 			}
@@ -778,9 +735,8 @@ func (op *Operation) ImageListAll(
 			}
 		}
 
-		// Use HttpDirVersionResolver to get ImageVersion objects (matches Python exactly)
-		resolver := image.NewHttpDirVersionResolver()
-		versionMap := resolver.Resolve(ctx, imageTypesConfig, arch, cacheTTLParam, resolvedCIVersion)
+		// Use ResolveVersions to get ImageVersion objects (matches Python exactly)
+		versionMap := image.ResolveVersions(ctx, imageTypesConfig, arch, cacheTTLParam, resolvedCIVersion)
 		var versions []*model.ImageVersion
 		for _, vs := range versionMap {
 			for i := range vs {
@@ -876,12 +832,12 @@ func (op *Operation) ImageSetDefault(ctx context.Context, input *inputs.ImageInp
 			Exception: err,
 		}
 	}
-	auditLog := logging.NewAuditLog(op.CacheDir)
+
 	truncatedID := img.ID
 	if len(truncatedID) > 6 {
 		truncatedID = truncatedID[:6]
 	}
-	_ = auditLog.LogOperation("image.set_default", map[string]interface{}{"id": truncatedID}, "")
+	op.AuditLog.LogOperation("image.set_default", map[string]any{"id": truncatedID}, "")
 	return &errs.OperationResult{
 		Status: "success",
 		Code:   "image.default_set",
@@ -889,46 +845,14 @@ func (op *Operation) ImageSetDefault(ctx context.Context, input *inputs.ImageInp
 	}
 }
 
-// resolveProvisionerType reads settings.guestfs_enabled to choose provisioner type.
-// Matches Python's: guestfs_enabled = bool(SettingsService.resolve(db, "settings", "guestfs_enabled"))
-//
-//	provisioner_type = ProvisionerType.GUESTFS if guestfs_enabled else ProvisionerType.LOOP_MOUNT
-func (op *Operation) resolveProvisionerType(ctx context.Context) provisioner.ProvisionerType {
-	if op.Services.Config != nil {
-		guestfsEnabledRaw, err := op.Services.Config.Get(ctx, "settings", "guestfs_enabled")
-		if err == nil {
-			if guestfsEnabled, ok := guestfsEnabledRaw.(bool); ok && guestfsEnabled {
-				return provisioner.ProvisionerGuestFS
-			}
-		}
-	}
-	return provisioner.ProvisionerLoopMount
-}
-
 // isPartitionDetectionError checks if an error is a RootPartitionDetectionError
 // or TieDetectedError (matching Python's exception catching pattern).
 func isPartitionDetectionError(err error) bool {
-	if err == nil {
+	var de *errs.DomainError
+	if !errors.As(err, &de) {
 		return false
 	}
-	// Check if it's a DomainError with the root partition detection code
-	var de *errs.DomainError
-	if asErr, ok := err.(*errs.DomainError); ok {
-		de = asErr
-	} else if wrapped, ok := err.(interface{ Unwrap() error }); ok {
-		if asErr, ok := wrapped.Unwrap().(*errs.DomainError); ok {
-			de = asErr
-		}
-	}
-	if de != nil {
-		// RootPartitionDetectionError and TieDetectedError now use CodeInternal
-		// as the generic fallback, so detect by message pattern instead.
-		if de.Message == "no partitions to evaluate" ||
-			strings.HasPrefix(de.Message, "Tie detected between partitions") {
-			return true
-		}
-	}
-	return false
+	return de.Code == errs.CodeRootPartitionDetection || de.Code == errs.CodeTieDetected
 }
 
 // Compile-time check

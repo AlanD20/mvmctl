@@ -95,8 +95,8 @@ func parseDirectoryListing(html string) []string {
 	return infra.Dedup(dirs)
 }
 
-// versionSortKey converts a version string to a numeric slice for sorting.
-// Mirrors Python's _version_sort_key() which returns a tuple[int, ...].
+// versionSortKey returns a sort key for a dotted numeric version string.
+// Mirrors Python's _version_sort_key().
 func versionSortKey(ver string) []int {
 	parts := strings.Split(ver, ".")
 	var nums []int
@@ -108,11 +108,6 @@ func versionSortKey(ver string) []int {
 		nums = append(nums, n)
 	}
 	return nums
-}
-
-// versionInfoSortKey provides a sort key for VersionInfo entries.
-func versionInfoSortKey(v model.VersionInfo) []int {
-	return versionSortKey(v.Version)
 }
 
 // discoverFileFromListing fetches a directory listing HTML and finds a matching file.
@@ -211,41 +206,41 @@ func (r *HttpDirVersionResolver) fetchRawContent(
 // ResolverConfig represents a single version source configuration.
 // Mirrors the Python config dicts for HttpDirVersionResolver.
 type ResolverConfig struct {
-	Type            string          `json:"type"`
-	Resolver        string          `json:"resolver,omitempty"`
-	VersionsURL     string          `json:"versions_url,omitempty"`
-	DownloadURL     string          `json:"download_url,omitempty"`
-	SHA256URL       string          `json:"sha256_url,omitempty"`
-	ListURLTemplate string          `json:"list_url_template,omitempty"`
-	Format          string          `json:"format,omitempty"`
-	Name            string          `json:"name,omitempty"`
-	VersionNameTmpl string          `json:"version_name_template,omitempty"`
-	Source          string          `json:"source,omitempty"`
-	Version         string          `json:"version,omitempty"`
-	Limit           int             `json:"limit,omitempty"`
-	Options         ResolverOptions `json:"options,omitempty"`
+	Type            string          `json:"type"                            yaml:"type"`
+	Resolver        string          `json:"resolver,omitempty"              yaml:"resolver,omitempty"`
+	VersionsURL     string          `json:"versions_url,omitempty"          yaml:"versions_url,omitempty"`
+	DownloadURL     string          `json:"download_url,omitempty"          yaml:"download_url,omitempty"`
+	SHA256URL       string          `json:"sha256_url,omitempty"            yaml:"sha256_url,omitempty"`
+	ListURLTemplate string          `json:"list_url_template,omitempty"     yaml:"list_url_template,omitempty"`
+	Format          string          `json:"format,omitempty"                yaml:"format,omitempty"`
+	Name            string          `json:"name,omitempty"                  yaml:"name,omitempty"`
+	VersionNameTmpl string          `json:"version_name_template,omitempty" yaml:"version_name_template,omitempty"`
+	Source          string          `json:"source,omitempty"                yaml:"source,omitempty"`
+	Version         string          `json:"version,omitempty"               yaml:"version,omitempty"`
+	Limit           int             `json:"limit,omitempty"                 yaml:"limit,omitempty"`
+	Options         ResolverOptions `json:"options"                         yaml:"options"`
 }
 
 // ResolverOptions contains resolver-specific options for version resolution.
 type ResolverOptions struct {
-	SkipPatterns       []string          `json:"skip_patterns,omitempty"`
-	VersionPrefix      string            `json:"version_prefix,omitempty"`
-	CodenameMapping    map[string]string `json:"codename_mapping,omitempty"`
-	ArchMapping        map[string]string `json:"arch_mapping,omitempty"`
-	FileDiscovery      *FileDiscoveryOpt `json:"file_discovery,omitempty"`
-	FilePattern        string            `json:"file_pattern,omitempty"`
-	FileSuffix         string            `json:"file_suffix,omitempty"`
-	VersionDiscoveries []string          `json:"version_discoveries,omitempty"`
-	S3VersionPattern   string            `json:"s3_version_pattern,omitempty"`
-	Limit              int               `json:"limit,omitempty"`
+	SkipPatterns       []string          `json:"skip_patterns,omitempty"       yaml:"skip_patterns,omitempty"`
+	VersionPrefix      string            `json:"version_prefix,omitempty"      yaml:"version_prefix,omitempty"`
+	CodenameMapping    map[string]string `json:"codename_mapping,omitempty"    yaml:"codename_mapping,omitempty"`
+	ArchMapping        map[string]string `json:"arch_mapping,omitempty"        yaml:"arch_mapping,omitempty"`
+	FileDiscovery      *FileDiscoveryOpt `json:"file_discovery,omitempty"      yaml:"file_discovery,omitempty"`
+	FilePattern        string            `json:"file_pattern,omitempty"        yaml:"file_pattern,omitempty"`
+	FileSuffix         string            `json:"file_suffix,omitempty"         yaml:"file_suffix,omitempty"`
+	VersionDiscoveries []string          `json:"version_discoveries,omitempty" yaml:"version_discoveries,omitempty"`
+	S3VersionPattern   string            `json:"s3_version_pattern,omitempty"  yaml:"s3_version_pattern,omitempty"`
+	Limit              int               `json:"limit,omitempty"               yaml:"limit,omitempty"`
 }
 
 // FileDiscoveryOpt configures file discovery from directory listings.
 type FileDiscoveryOpt struct {
-	Enabled      bool   `json:"enabled"`
-	Pattern      string `json:"pattern"`
-	Suffix       string `json:"suffix,omitempty"`
-	SHA256Suffix string `json:"sha256_suffix,omitempty"`
+	Enabled      bool   `json:"enabled"                 yaml:"enabled"`
+	Pattern      string `json:"pattern"                 yaml:"pattern"`
+	Suffix       string `json:"suffix,omitempty"        yaml:"suffix,omitempty"`
+	SHA256Suffix string `json:"sha256_suffix,omitempty" yaml:"sha256_suffix,omitempty"`
 }
 
 // ── Resolve method ─────────────────────────────────────────────────────────
@@ -321,14 +316,14 @@ func (r *HttpDirVersionResolver) Resolve(
 			continue
 		}
 
-		var sha256URL *string
+		var sha256URL string
 		if config.SHA256URL != "" {
 			var rendered string
 			rendered, err = infra.RenderTemplate(config.SHA256URL, tmplVars)
 			if err != nil {
 				slog.Warn("Failed to render sha256 URL", "type", typeName, "error", err)
 			} else {
-				sha256URL = &rendered
+				sha256URL = rendered
 			}
 		}
 
@@ -390,10 +385,7 @@ func (r *HttpDirVersionResolver) resolveViaDirectoryListing(
 	typeName := config.Type
 	versionsURL := config.VersionsURL
 	useCache := cacheTTLSeconds != 0
-	ttl := cacheTTLSeconds
-	if ttl <= 0 {
-		ttl = 0
-	}
+	ttl := max(cacheTTLSeconds, 0)
 
 	html, err := r.fetchRawContent(ctx, versionsURL, useCache, ttl)
 	if err != nil {
@@ -443,7 +435,7 @@ func (r *HttpDirVersionResolver) resolveViaDirectoryListing(
 			continue
 		}
 
-		var sha256URL *string
+		var sha256URL string
 		if config.SHA256URL != "" {
 			var rendered string
 			rendered, err = infra.RenderTemplate(config.SHA256URL, tmplVars)
@@ -458,7 +450,7 @@ func (r *HttpDirVersionResolver) resolveViaDirectoryListing(
 					err,
 				)
 			} else {
-				sha256URL = &rendered
+				sha256URL = rendered
 			}
 		}
 
@@ -471,7 +463,7 @@ func (r *HttpDirVersionResolver) resolveViaDirectoryListing(
 				downloadURL = discoveredURL
 				if opts.FileDiscovery.SHA256Suffix != "" {
 					url := downloadURL + opts.FileDiscovery.SHA256Suffix
-					sha256URL = &url
+					sha256URL = url
 				}
 			} else {
 				slog.Debug("No matching cloud image", "type", typeName, "version", versionStr)
@@ -503,14 +495,14 @@ func (r *HttpDirVersionResolver) resolveViaDirectoryListing(
 
 	// Sort newest first
 	sort.Slice(versions, func(i, j int) bool {
-		ki := versionInfoSortKey(versions[i])
-		kj := versionInfoSortKey(versions[j])
+		ki := versionSortKey(versions[i].Version)
+		kj := versionSortKey(versions[j].Version)
 		for idx := 0; idx < len(ki) && idx < len(kj); idx++ {
 			if ki[idx] != kj[idx] {
 				return ki[idx] > kj[idx]
 			}
 		}
-		return len(ki) > len(kj)
+		return len(ki) > len(kj) // more specific version wins (e.g. 1.2.3 > 1.2)
 	})
 
 	cfgLimit := config.Limit
@@ -530,10 +522,7 @@ func (r *HttpDirVersionResolver) resolveViaVersionDiscoveries(
 	typeName := config.Type
 	versionsURL := config.VersionsURL
 	useCache := cacheTTLSeconds != 0
-	ttl := cacheTTLSeconds
-	if ttl <= 0 {
-		ttl = 0
-	}
+	ttl := max(cacheTTLSeconds, 0)
 
 	opts := config.Options
 	discoveries := opts.VersionDiscoveries
@@ -586,7 +575,7 @@ func (r *HttpDirVersionResolver) resolveViaVersionDiscoveries(
 
 			downloadURL := strings.TrimRight(discoveryURL, "/") + "/" + link
 
-			var sha256URL *string
+			var sha256URL string
 			if config.SHA256URL != "" {
 				series := versionStr
 				if s, _, found := strings.Cut(versionStr, "."); found {
@@ -597,7 +586,7 @@ func (r *HttpDirVersionResolver) resolveViaVersionDiscoveries(
 					"series":  series,
 					"arch":    arch,
 				}); err == nil {
-					sha256URL = &su
+					sha256URL = su
 				}
 			}
 
@@ -627,8 +616,8 @@ func (r *HttpDirVersionResolver) resolveViaVersionDiscoveries(
 		}
 
 		sort.Slice(discVersions, func(i, j int) bool {
-			ki := versionInfoSortKey(discVersions[i])
-			kj := versionInfoSortKey(discVersions[j])
+			ki := versionSortKey(discVersions[i].Version)
+			kj := versionSortKey(discVersions[j].Version)
 			for idx := 0; idx < len(ki) && idx < len(kj); idx++ {
 				if ki[idx] != kj[idx] {
 					return ki[idx] > kj[idx]
@@ -672,10 +661,7 @@ func (r *HttpDirVersionResolver) resolveViaFirecrackerS3(
 	typeName := config.Type
 	configName := config.Name
 	useCache := cacheTTLSeconds != 0
-	ttl := cacheTTLSeconds
-	if ttl <= 0 {
-		ttl = 0
-	}
+	ttl := max(cacheTTLSeconds, 0)
 
 	if config.ListURLTemplate == "" {
 		slog.Warn("Skipping type with missing list_url_template", "type", typeName)
@@ -760,7 +746,7 @@ func (r *HttpDirVersionResolver) resolveViaFirecrackerS3(
 			downloadURL = fmt.Sprintf("%s/%s", strings.TrimRight(config.Source, "/"), key)
 		}
 
-		var sha256URL *string
+		var sha256URL string
 		if config.SHA256URL != "" {
 			var rendered string
 			rendered, err = infra.RenderTemplate(config.SHA256URL, downloadVars)
@@ -775,7 +761,7 @@ func (r *HttpDirVersionResolver) resolveViaFirecrackerS3(
 					err,
 				)
 			} else {
-				sha256URL = &rendered
+				sha256URL = rendered
 			}
 		}
 
@@ -801,8 +787,8 @@ func (r *HttpDirVersionResolver) resolveViaFirecrackerS3(
 	}
 
 	sort.Slice(s3Versions, func(i, j int) bool {
-		ki := versionInfoSortKey(s3Versions[i])
-		kj := versionInfoSortKey(s3Versions[j])
+		ki := versionSortKey(s3Versions[i].Version)
+		kj := versionSortKey(s3Versions[j].Version)
 		for idx := 0; idx < len(ki) && idx < len(kj); idx++ {
 			if ki[idx] != kj[idx] {
 				return ki[idx] > kj[idx]
@@ -820,6 +806,3 @@ func (r *HttpDirVersionResolver) resolveViaFirecrackerS3(
 	}
 	result[typeName] = s3Versions
 }
-
-// DefaultVersionLimit is the default number of versions to return per type.
-const DefaultVersionLimit = 5

@@ -21,6 +21,16 @@ import (
 	"mvmctl/internal/infra/errs"
 )
 
+// RequestOpts bundles common HTTP request parameters.
+// Used by GetContent, HeadSize, GetJSON, and DownloadFile.
+type RequestOpts struct {
+	URL             string
+	Timeout         int
+	Headers         map[string]string
+	UseCache        bool
+	CacheTTLSeconds int
+}
+
 // ── HttpDiskCache (file-based HTTP response cache) ──────────────────────────
 
 // DefaultCacheTTLSeconds is the default TTL for cached HTTP responses (300s).
@@ -211,6 +221,12 @@ func (d *Downloader) withDownloadOnce(
 ) (int64, error) {
 	if err := os.MkdirAll(filepath.Dir(dest), infra.DirPerm); err != nil {
 		return 0, fmt.Errorf("create dest dir: %w", err)
+	}
+
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+		defer cancel()
 	}
 
 	req, err := d.newRequest(ctx, http.MethodGet, url, nil)
@@ -636,16 +652,12 @@ func (d *Downloader) GetJSON(
 // Mirrors Python's HttpDownload.read_raw_content().
 func (d *Downloader) GetContent(
 	ctx context.Context,
-	url string,
-	timeout int,
-	headers map[string]string,
-	useCache bool,
-	cacheTTLSeconds int,
+	opts RequestOpts,
 ) (string, error) {
-	cacheFile := d.cache.Path(url)
+	cacheFile := d.cache.Path(opts.URL)
 
-	if useCache && d.cache != nil {
-		if d.cache.IsValid(cacheFile, cacheTTLSeconds) {
+	if opts.UseCache && d.cache != nil {
+		if d.cache.IsValid(cacheFile, opts.CacheTTLSeconds) {
 			data, err := d.cache.Read(cacheFile)
 			if err == nil {
 				return string(data), nil
@@ -656,11 +668,11 @@ func (d *Downloader) GetContent(
 	defaultHeaders := map[string]string{
 		"Accept": "text/plain",
 	}
-	for k, v := range headers {
+	for k, v := range opts.Headers {
 		defaultHeaders[k] = v
 	}
 
-	req, err := d.newRequest(ctx, http.MethodGet, url, nil)
+	req, err := d.newRequest(ctx, http.MethodGet, opts.URL, nil)
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
@@ -672,7 +684,7 @@ func (d *Downloader) GetContent(
 	if err != nil {
 		return "", &errs.DomainError{
 			Code:    errs.CodeDownloadFailed,
-			Message: fmt.Sprintf("Failed to fetch %s: %v", url, err),
+			Message: fmt.Sprintf("Failed to fetch %s: %v", opts.URL, err),
 			Err:     err,
 		}
 	}
@@ -681,7 +693,7 @@ func (d *Downloader) GetContent(
 	if resp.StatusCode != http.StatusOK {
 		return "", &errs.DomainError{
 			Code:    errs.CodeDownloadFailed,
-			Message: fmt.Sprintf("Failed to fetch %s: HTTP %d", url, resp.StatusCode),
+			Message: fmt.Sprintf("Failed to fetch %s: HTTP %d", opts.URL, resp.StatusCode),
 		}
 	}
 
@@ -689,12 +701,12 @@ func (d *Downloader) GetContent(
 	if err != nil {
 		return "", &errs.DomainError{
 			Code:    errs.CodeDownloadFailed,
-			Message: fmt.Sprintf("Failed to fetch %s: %v", url, err),
+			Message: fmt.Sprintf("Failed to fetch %s: %v", opts.URL, err),
 			Err:     err,
 		}
 	}
 
-	if useCache && d.cache != nil {
+	if opts.UseCache && d.cache != nil {
 		if writeErr := d.cache.Write(body, cacheFile); writeErr != nil {
 			slog.Warn("Failed to cache raw response", "error", writeErr)
 		}
@@ -710,15 +722,12 @@ func (d *Downloader) GetContent(
 // Mirrors Python's HttpDownload.head_size().
 func (d *Downloader) HeadSize(
 	ctx context.Context,
-	url string,
-	timeout int,
-	useCache bool,
-	cacheTTLSeconds int,
+	opts RequestOpts,
 ) (size int64, ok bool) {
-	cacheFile := d.cache.Path(url)
+	cacheFile := d.cache.Path(opts.URL)
 
-	if useCache && d.cache != nil {
-		if d.cache.IsValid(cacheFile, cacheTTLSeconds) {
+	if opts.UseCache && d.cache != nil {
+		if d.cache.IsValid(cacheFile, opts.CacheTTLSeconds) {
 			data, err := d.cache.Read(cacheFile)
 			if err == nil && len(data) > 0 {
 				var cachedSize int64
@@ -729,7 +738,7 @@ func (d *Downloader) HeadSize(
 		}
 	}
 
-	req, err := d.newRequest(ctx, http.MethodHead, url, nil)
+	req, err := d.newRequest(ctx, http.MethodHead, opts.URL, nil)
 	if err != nil {
 		return 0, false
 	}
@@ -749,7 +758,7 @@ func (d *Downloader) HeadSize(
 		return 0, false
 	}
 
-	if useCache && d.cache != nil {
+	if opts.UseCache && d.cache != nil {
 		cacheData := fmt.Sprintf("%d", contentLength)
 		if writeErr := d.cache.Write([]byte(cacheData), cacheFile); writeErr != nil {
 			slog.Warn("Failed to cache HEAD response", "error", writeErr)

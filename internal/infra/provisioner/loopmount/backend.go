@@ -17,14 +17,6 @@ import (
 	loopmountsvc "mvmctl/internal/service/loopmount"
 )
 
-var extMap = map[string]string{
-	"ext4":  ".ext4",
-	"ext3":  ".ext4",
-	"ext2":  ".ext4",
-	"btrfs": ".btrfs",
-	"xfs":   ".xfs",
-}
-
 // runWireOp serializes a WireInput to JSON, pipes it to
 // "sudo env mvm run provision" via stdin, and returns the parsed WireOutput.
 func runWireOp(ctx context.Context, input *loopmountsvc.WireInput) (*loopmountsvc.WireOutput, error) {
@@ -204,14 +196,9 @@ func (b *LoopMountBackend) ExtractPartition(
 	ctx context.Context,
 	rawPath string,
 	outputPath string,
-	partition *int,
+	partition int,
 	disabledDetectors []string,
 ) (string, error) {
-	partitionInt := 0
-	if partition != nil {
-		partitionInt = *partition
-	}
-
 	fsType := system.DetectFilesystemType(ctx, rawPath)
 	if fsType == "ext4" || fsType == "ext3" || fsType == "ext2" ||
 		fsType == "btrfs" || fsType == "xfs" {
@@ -225,7 +212,7 @@ func (b *LoopMountBackend) ExtractPartition(
 				return "", err
 			}
 		}
-		ext, ok := extMap[fsType]
+		ext, ok := infra.FSTypeToExt[fsType]
 		if !ok {
 			ext = ".img"
 		}
@@ -236,9 +223,9 @@ func (b *LoopMountBackend) ExtractPartition(
 		return finalPath, nil
 	}
 
-	parsed := parsePartitionsSfdisk(ctx, rawPath, partitionInt)
+	parsed := parsePartitionsSfdisk(ctx, rawPath, partition)
 	if parsed == nil {
-		parsed = parsePartitionsParted(ctx, rawPath, partitionInt)
+		parsed = parsePartitionsParted(ctx, rawPath, partition)
 	}
 	if parsed == nil {
 		return "", fmt.Errorf("Failed to parse partition table: neither sfdisk nor parted is available or succeeded")

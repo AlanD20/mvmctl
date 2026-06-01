@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/system"
 )
 
@@ -104,7 +105,7 @@ func detectAndRenameFS(ctx context.Context, outputPath string) string {
 	if fsType == "" {
 		return outputPath
 	}
-	ext, ok := extMap[fsType]
+	ext, ok := infra.FSTypeToExt[fsType]
 	if !ok {
 		return outputPath
 	}

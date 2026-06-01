@@ -22,7 +22,6 @@ import (
 	"mvmctl/internal/core/console"
 	"mvmctl/internal/core/host"
 	"mvmctl/internal/core/image"
-	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/core/ssh"
@@ -960,7 +959,7 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snap
 			}
 		}
 		if bridgeName != "" {
-			netSvc := network.NewService(network.NewRepository(op.Connection.DB()), nil)
+			netSvc := op.Services.Network
 			bridgeAddr, calcErr := network.ComputeBridgeAddress(gateway, subnet)
 			if calcErr != nil {
 				slog.Warn("Failed to compute bridge address during respawn", "vm", v.Name, "error", calcErr)
@@ -1884,15 +1883,10 @@ func (op *Operation) VMExport(ctx context.Context, input *inputs.VMInput) (*inpu
 	}
 
 	// Resolve related asset metadata (matches Python's Repository(db).get(vm.image_id) etc.)
-	imageRepo := image.NewRepository(op.Connection.DB())
-	kernelRepo := kernel.NewRepository(op.Connection.DB())
-	binaryRepo := binary.NewRepository(op.Connection.DB())
-	netRepo := network.NewRepository(op.Connection.DB())
-
-	image, _ := imageRepo.Get(ctx, vmItem.ImageID)
-	kernel, _ := kernelRepo.Get(ctx, vmItem.KernelID)
-	binary, _ := binaryRepo.Get(ctx, vmItem.BinaryID)
-	netItem, _ := netRepo.Get(ctx, vmItem.NetworkID)
+	image, _ := op.Repos.Image.Get(ctx, vmItem.ImageID)
+	kernel, _ := op.Repos.Kernel.Get(ctx, vmItem.KernelID)
+	binary, _ := op.Repos.Binary.Get(ctx, vmItem.BinaryID)
+	netItem, _ := op.Repos.Network.Get(ctx, vmItem.NetworkID)
 
 	diskSize := ""
 	if vmItem.DiskSizeMiB > 0 {
@@ -2421,7 +2415,7 @@ func (c *vmCreateContext) cloneImage(ctx context.Context) error {
 	}
 	vmRootfsPath := filepath.Join(c.vmDir, "rootfs."+fsType)
 
-	imageSvc := image.NewService(image.NewRepository(nil), c.cacheDir)
+	imageSvc := image.NewService(image.NewRepository(nil))
 	if _, err := imageSvc.EnsureCached([]*model.ImageItem{c.resolved.Image}); err != nil {
 		return fmt.Errorf("ensure cached image: %w", err)
 	}
@@ -2882,30 +2876,26 @@ func (op *Operation) vmBuildResolvedInput(
 	input *inputs.VMCreateInput,
 	vmID, vmDir string,
 ) (*resolvedVMCreateInput, error) {
-	imageRepo := image.NewRepository(op.Connection.DB())
-	kernelRepo := kernel.NewRepository(op.Connection.DB())
-	netRepo := network.NewRepository(op.Connection.DB())
-	keyRepo := key.NewRepository(op.Connection.DB())
-
 	// Resolve image (handles selectors like "alpine:3.21" and ID prefixes)
 	var image *model.ImageItem
 	var err error
 	if input.Image != nil {
 		selector := *input.Image
 		// Try exact name first
-		image, err = imageRepo.GetByName(ctx, selector)
+		image, err = op.Repos.Image.GetByName(ctx, selector)
 		if err == nil && image == nil {
 			// Try type:version selector (e.g. "alpine:3.21")
-			if parts := strings.SplitN(selector, ":", 2); len(parts) == 2 {
-				image, err = imageRepo.GetByVersionAndType(ctx, parts[1], parts[0])
+			parts := strings.SplitN(selector, ":", 2)
+			if len(parts) == 2 {
+				image, err = op.Repos.Image.GetByVersionAndType(ctx, parts[1], parts[0])
 			}
 		}
-		if err == nil && image == nil {
-			// Try as ID prefix
-			image, err = imageRepo.Get(ctx, selector)
+		if image == nil {
+			image, err = op.Repos.Image.Get(ctx, selector)
 		}
-	} else {
-		image, err = imageRepo.GetDefault(ctx)
+	}
+	if image == nil {
+		image, err = op.Repos.Image.GetDefault(ctx)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("resolve image: %w", err)
@@ -2920,12 +2910,12 @@ func (op *Operation) vmBuildResolvedInput(
 	// Resolve kernel
 	var kernel *model.KernelItem
 	if input.KernelID != nil {
-		kernel, err = kernelRepo.Get(ctx, *input.KernelID)
+		kernel, err = op.Repos.Kernel.Get(ctx, *input.KernelID)
 		if err != nil || kernel == nil {
-			kernel, err = kernelRepo.GetByName(ctx, *input.KernelID)
+			kernel, err = op.Repos.Kernel.GetByName(ctx, *input.KernelID)
 		}
 	} else {
-		kernel, err = kernelRepo.GetDefault(ctx)
+		kernel, err = op.Repos.Kernel.GetDefault(ctx)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("resolve kernel: %w", err)
@@ -2940,12 +2930,12 @@ func (op *Operation) vmBuildResolvedInput(
 	// Resolve network
 	var network *model.Network
 	if input.NetworkName != nil {
-		network, err = netRepo.GetByName(ctx, *input.NetworkName)
+		network, err = op.Repos.Network.GetByName(ctx, *input.NetworkName)
 		if err != nil || network == nil {
-			network, err = netRepo.Get(ctx, *input.NetworkName)
+			network, err = op.Repos.Network.Get(ctx, *input.NetworkName)
 		}
 	} else {
-		network, err = netRepo.GetDefault(ctx)
+		network, err = op.Repos.Network.GetDefault(ctx)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("resolve network: %w", err)
@@ -2955,13 +2945,12 @@ func (op *Operation) vmBuildResolvedInput(
 	}
 
 	// Resolve binary from DB (matches Python's Repository resolution)
-	binaryRepo := binary.NewRepository(op.Connection.DB())
-	binary := op.vmResolveBinary(ctx, input.BinaryID, input.FirecrackerBin, binaryRepo)
+	binary := op.vmResolveBinary(ctx, input.BinaryID, input.FirecrackerBin, op.Repos.Binary)
 
 	// Resolve SSH keys
 	sshKeyNames := input.SSHKeys
 	if len(sshKeyNames) == 0 {
-		defaultKeys, _ := keyRepo.GetDefaults(ctx)
+		defaultKeys, _ := op.Repos.Key.GetDefaults(ctx)
 		for _, k := range defaultKeys {
 			sshKeyNames = append(sshKeyNames, k.Name)
 		}
@@ -3064,7 +3053,7 @@ func (op *Operation) vmBuildResolvedInput(
 	// files directly without re-querying the DB.
 	var sshKeyItems []*model.SSHKeyItem
 	for _, name := range sshKeyNames {
-		key, err := keyRepo.GetByName(ctx, name)
+		key, err := op.Repos.Key.GetByName(ctx, name)
 		if err == nil && key != nil {
 			sshKeyItems = append(sshKeyItems, key)
 		} else {

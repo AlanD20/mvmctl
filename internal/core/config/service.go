@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 )
@@ -35,7 +36,7 @@ func (s *Service) Get(ctx context.Context, category, key string) (any, error) {
 	}
 	expected := GetExpectedType(category, key)
 	if expected != "" {
-		return Coerce(value, expected)
+		return infra.Coerce(value, expected)
 	}
 	return value, nil
 }
@@ -57,7 +58,7 @@ func (s *Service) Set(ctx context.Context, category, key string, value any) erro
 		}
 	}
 
-	coerced, err := Coerce(value, expected)
+	coerced, err := infra.Coerce(value, expected)
 	if err != nil {
 		return err
 	}
@@ -123,7 +124,7 @@ func (s *Service) ListByCategory(ctx context.Context, category string) (map[stri
 		catOverrides = make(map[string]any)
 	}
 	for key, expectedType := range OverridableSettings[category] {
-		defaultVal, _ := GetDefault(category, key)
+		defaultVal, _ := infra.GetDefault(category, key)
 		override := catOverrides[key] // nil if not present
 		result[key] = model.SettingInfo{
 			Type:     expectedType,
@@ -150,7 +151,7 @@ func (s *Service) ListAll(ctx context.Context) (map[string]map[string]model.Sett
 			catOverrides = make(map[string]any)
 		}
 		for key, expectedType := range keys {
-			defaultVal, _ := GetDefault(category, key)
+			defaultVal, _ := infra.GetDefault(category, key)
 			override := catOverrides[key] // nil if not present
 			catResult[key] = model.SettingInfo{
 				Type:     expectedType,
@@ -205,11 +206,11 @@ func (s *Service) getActiveValue(ctx context.Context, category, key string) (any
 	if override != nil {
 		expected := GetExpectedType(category, key)
 		if expected != "" {
-			return Coerce(override, expected)
+			return infra.Coerce(override, expected)
 		}
 		return override, nil
 	}
-	def, gdErr := GetDefault(category, key)
+	def, gdErr := infra.GetDefault(category, key)
 	if gdErr != nil {
 		// Python: bare KeyError propagates through — no wrapping in MVMError.
 		// Go: propagate the plain error as-is, no DomainError wrapping.

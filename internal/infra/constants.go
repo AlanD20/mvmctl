@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -167,6 +168,9 @@ const DBFilePerm = 0640
 const ExecutablePerm = 0755
 const ShadowPerm = 0640
 
+// ── Firecracker architecture support ──
+const FirecrackerSupportedArchStr = "x86_64,amd64,aarch64,arm64"
+
 // ── HTTP defaults ──
 
 const HTTPTimeout = 300 * time.Second
@@ -177,6 +181,31 @@ const HTTPBackoffFactor = 2
 const DefaultUserAgent = "mvmctl/dev"
 const SocketTimeoutSeconds = 5.0
 const PollStepSeconds = 0.1
+
+// ── Filesystem type ↔ extension mapping ──
+
+// FSTypeToExt maps filesystem type to file extension.
+var FSTypeToExt = map[string]string{
+	"ext4":  ".ext4",
+	"ext3":  ".ext4",
+	"ext2":  ".ext4",
+	"btrfs": ".btrfs",
+	"xfs":   ".xfs",
+}
+
+// ExtToFSType maps file extension to filesystem type.
+var ExtToFSType = map[string]string{
+	".ext4":  "ext4",
+	".btrfs": "btrfs",
+	".xfs":   "xfs",
+}
+
+// QemuImgFormat maps disk image formats to qemu-img convert -f flags.
+var QemuImgFormat = map[string]string{
+	"qcow2": "qcow2",
+	"vhd":   "vpc",
+	"vhdx":  "vhdx",
+}
 
 // ── HTTP status codes ──
 const HTTPStatusNoContent = 204
@@ -410,25 +439,39 @@ func GetRealHome() string {
 	return home
 }
 
+var (
+	cacheDirOnce sync.Once
+	cacheDirVal  string
+	cacheDirErr  error
+)
+
 func GetCacheDir() (string, error) {
-	override, ok := EnvGet("CACHE_DIR")
-	if ok && override != "" {
-		resolved, err := filepath.Abs(override)
-		if err != nil {
-			return "", fmt.Errorf("invalid cache dir path: %w", err)
+	cacheDirOnce.Do(func() {
+		override, ok := EnvGet("CACHE_DIR")
+		if ok && override != "" {
+			var resolved string
+			resolved, cacheDirErr = filepath.Abs(override)
+			if cacheDirErr != nil {
+				cacheDirErr = fmt.Errorf("invalid cache dir path: %w", cacheDirErr)
+				return
+			}
+			// Ensure the directory exists with proper permissions (matching
+			// Python's CacheUtils.resolve_dir which creates the directory).
+			if err := ensureDirAndChown(resolved); err != nil {
+				cacheDirErr = fmt.Errorf("create cache dir: %w", err)
+				return
+			}
+			cacheDirVal = resolved
+			return
 		}
-		// Ensure the directory exists with proper permissions (matching
-		// Python's CacheUtils.resolve_dir which creates the directory).
-		if err := ensureDirAndChown(resolved); err != nil {
-			return "", fmt.Errorf("create cache dir: %w", err)
+		path := filepath.Join(GetRealHome(), ".cache", ProjectName)
+		if err := ensureDirAndChown(path); err != nil {
+			cacheDirErr = fmt.Errorf("create default cache dir: %w", err)
+			return
 		}
-		return resolved, nil
-	}
-	path := filepath.Join(GetRealHome(), ".cache", ProjectName)
-	if err := ensureDirAndChown(path); err != nil {
-		return "", fmt.Errorf("create default cache dir: %w", err)
-	}
-	return path, nil
+		cacheDirVal = path
+	})
+	return cacheDirVal, cacheDirErr
 }
 
 func GetConfigDir() (string, error) {
@@ -590,12 +633,8 @@ func GetTimingLogPath() string {
 }
 
 // ── Warm image directory ──
-func GetWarmImageDir(tmpPath string) string {
-	base := tmpPath
-	if base == "" {
-		base = os.TempDir()
-	}
-	path := filepath.Join(base, ProjectName, "ready")
+func GetWarmImageDir() string {
+	path := filepath.Join(GetTempDir(), "ready")
 	if err := ensureDirAndChown(path); err != nil {
 		slog.Warn("failed to create warm image directory", "path", path, "error", err)
 	}

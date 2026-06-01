@@ -12,11 +12,11 @@ type ImageItemInfo struct {
 
 // ImageStorageInfo groups image storage info in an inspect response.
 type ImageStorageInfo struct {
-	Path           string  `json:"path"`
-	FSType         string  `json:"fs_type"`
-	FSUUID         *string `json:"fs_uuid"`
-	CompressedSize *int64  `json:"compressed_size"`
-	OriginalSize   int64   `json:"original_size"`
+	Path           string `json:"path"`
+	FSType         string `json:"fs_type"`
+	FSUUID         string `json:"fs_uuid"`
+	CompressedSize *int64 `json:"compressed_size"`
+	OriginalSize   int64  `json:"original_size"`
 }
 
 // ImageCompressionInfo groups image compression info in an inspect response.

@@ -18,8 +18,8 @@ type ImageItem struct {
 	CreatedAt        string   `json:"created_at"                  db:"created_at"`
 	UpdatedAt        string   `json:"updated_at"                  db:"updated_at"`
 	Version          string   `json:"version"                     db:"version"`
-	Distro           *string  `json:"distro,omitempty"            db:"distro"`
-	FSUUID           *string  `json:"fs_uuid,omitempty"           db:"fs_uuid"`
+	Distro           string   `json:"distro,omitempty"            db:"distro"`
+	FSUUID           string   `json:"fs_uuid,omitempty"           db:"fs_uuid"`
 	CompressedSize   *int64   `json:"compressed_size,omitempty"   db:"compressed_size"`
 	CompressionRatio *float64 `json:"compression_ratio,omitempty" db:"compression_ratio"`
 	CompressedFormat *string  `json:"compressed_format,omitempty" db:"compressed_format"`
@@ -39,8 +39,8 @@ type ImageSpec struct {
 	Source          string  `yaml:"source"`
 	Format          string  `yaml:"format"`
 	Arch            string  `yaml:"arch"`
-	SHA256          *string `yaml:"sha256,omitempty"`
-	SHA256URL       *string `yaml:"sha256_url,omitempty"`
+	SHA256          string  `yaml:"sha256,omitempty"`
+	SHA256URL       string  `yaml:"sha256_url,omitempty"`
 	ListURLTemplate *string `yaml:"list_url_template,omitempty"`
 	Size            *int64  `yaml:"size,omitempty"`
 }
@@ -53,7 +53,7 @@ type ImageVersion struct {
 	Codename    *string `json:"codename,omitempty"`
 	Type        string  `json:"type"`
 	DownloadURL string  `json:"download_url"`
-	SHA256URL   *string `json:"sha256_url,omitempty"`
+	SHA256URL   string  `json:"sha256_url,omitempty"`
 	Format      string  `json:"format"`
 	DisplayName string  `json:"display_name"`
 	TypeName    string  `json:"type_name"`

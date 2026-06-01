@@ -39,6 +39,8 @@ const (
 	CodeImageError              Code = "image.error"
 	CodeImageCompressionError   Code = "image.compression.failed"
 	CodeImageDecompressionError Code = "image.decompression.failed"
+	CodeRootPartitionDetection  Code = "image.root_partition_detection"
+	CodeTieDetected             Code = "image.tie_detected"
 
 	// ── Kernel domain ──
 	CodeKernelNotFound     Code = "kernel.not_found"
