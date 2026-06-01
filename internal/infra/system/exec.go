@@ -37,22 +37,10 @@ type RunCmdResult struct {
 	StderrBytes []byte
 }
 
-// ── Backward compatibility aliases ──
-
-// RunCmdOpts is an alias for RunCmdOptions kept so existing callers
-// (e.g. host/service.go, host/probe.go) continue to compile.
-type RunCmdOpts = RunCmdOptions
-
-// DefaultRunCmdOpts returns default RunCmdOptions.
-// Kept as an alias for backward compatibility.
-func DefaultRunCmdOpts() RunCmdOpts {
-	return DefaultRunCmdOptions()
-}
-
-// DefaultRunCmdOptions returns RunCmdOptions with the same defaults as
+// DefaultRunCmdOpts returns RunCmdOpts with the same defaults as
 // Python's run_cmd(): check=True, capture=True, text=True.
-func DefaultRunCmdOptions() RunCmdOptions {
-	return RunCmdOptions{
+func DefaultRunCmdOpts() RunCmdOpts {
+	return RunCmdOpts{
 		Check:   true,
 		Capture: true,
 		Text:    true,
@@ -75,7 +63,7 @@ func sanitizeStderr(stderr string) string {
 
 // RunCmd runs a command with context and args.
 func RunCmd(ctx context.Context, cmd string, args ...string) (string, string, error) {
-	opts := RunCmdOptions{
+	opts := RunCmdOpts{
 		Cmd:     cmd,
 		Args:    args,
 		Check:   true,
@@ -98,7 +86,7 @@ func RunCmd(ctx context.Context, cmd string, args ...string) (string, string, er
 //
 // Delegates through DefaultRunner so that the CommandRunner interface is
 // actually used for every subprocess call (fix V1).
-func RunCmdCompat(ctx context.Context, args []string, opts RunCmdOptions) *RunCmdResult {
+func RunCmdCompat(ctx context.Context, args []string, opts RunCmdOpts) *RunCmdResult {
 	if len(args) == 0 {
 		return &RunCmdResult{ExitCode: 1, Success: false}
 	}
@@ -131,7 +119,7 @@ func RunCmdCompat(ctx context.Context, args []string, opts RunCmdOptions) *RunCm
 
 // runCmdInternal is the shared core that both RunCmd and RunCmdCompat
 // delegate to.  It contains all the logic matching Python's run_cmd().
-func runCmdInternal(ctx context.Context, opts RunCmdOptions) *RunCmdResult {
+func runCmdInternal(ctx context.Context, opts RunCmdOpts) *RunCmdResult {
 	// ── Build argument list (handle privileged) ──
 	cmdArgs := opts.buildCmdArgs()
 
@@ -337,7 +325,7 @@ func StreamCmd(ctx context.Context, args []string, cwd string) (<-chan StreamLin
 //	        args = ["sudo", *args]       # allows password prompt
 //	    else:
 //	        args = ["sudo", "-n", *args]  # non-interactive, fails if password required
-func (opts RunCmdOptions) buildCmdArgs() []string {
+func (opts RunCmdOpts) buildCmdArgs() []string {
 	args := []string{opts.Cmd}
 	args = append(args, opts.Args...)
 

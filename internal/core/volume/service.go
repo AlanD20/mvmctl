@@ -42,7 +42,7 @@ func (s *Service) CreateDisk(ctx context.Context, vol *model.VolumeItem) (*model
 		result := system.RunCmdCompat(
 			ctx,
 			[]string{"fallocate", "-l", strconv.FormatInt(vol.SizeBytes, 10), diskPath},
-			system.DefaultRunCmdOptions(),
+			system.DefaultRunCmdOpts(),
 		)
 		if result.Err != nil {
 			// Python: raise VolumeError(f"fallocate failed: {e}") from e
@@ -52,7 +52,7 @@ func (s *Service) CreateDisk(ctx context.Context, vol *model.VolumeItem) (*model
 		result := system.RunCmdCompat(
 			ctx,
 			[]string{"qemu-img", "create", "-f", "qcow2", diskPath, strconv.FormatInt(vol.SizeBytes, 10)},
-			system.DefaultRunCmdOptions(),
+			system.DefaultRunCmdOpts(),
 		)
 		if result.Err != nil {
 			return nil, NewVolumeErrorf("qemu-img create failed: %s", result.Err.Error())
@@ -120,7 +120,7 @@ func (s *Service) ResizeDisk(
 		result := system.RunCmdCompat(
 			ctx,
 			[]string{"fallocate", "-l", strconv.FormatInt(newSizeBytes, 10), diskPath},
-			system.DefaultRunCmdOptions(),
+			system.DefaultRunCmdOpts(),
 		)
 		if result.Err != nil {
 			return nil, NewVolumeErrorf("fallocate resize failed: %s", result.Err.Error())
@@ -129,7 +129,7 @@ func (s *Service) ResizeDisk(
 		result := system.RunCmdCompat(
 			ctx,
 			[]string{"qemu-img", "resize", diskPath, strconv.FormatInt(newSizeBytes, 10)},
-			system.DefaultRunCmdOptions(),
+			system.DefaultRunCmdOpts(),
 		)
 		if result.Err != nil {
 			return nil, NewVolumeErrorf("qemu-img resize failed: %s", result.Err.Error())

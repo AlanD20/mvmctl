@@ -991,7 +991,7 @@ func (s *Service) RunMakeVmlinux(
 	buildLogPath := outputPath + ".build.log"
 	os.MkdirAll(filepath.Dir(buildLogPath), 0755)
 
-	result := system.RunCmdCompat(ctx, []string{"make", "vmlinux", fmt.Sprintf("-j%d", jobs)}, system.RunCmdOptions{
+	result := system.RunCmdCompat(ctx, []string{"make", "vmlinux", fmt.Sprintf("-j%d", jobs)}, system.RunCmdOpts{
 		Cwd:     kernelDir,
 		Capture: true,
 		Check:   true,
@@ -1083,7 +1083,7 @@ func (s *Service) ExtractKernelTarball(ctx context.Context, tarball, extractDir 
 	}
 
 	// Check xz availability via which command
-	xzCheck := system.RunCmdCompat(ctx, []string{"which", "xz"}, system.RunCmdOptions{Capture: true, Check: false})
+	xzCheck := system.RunCmdCompat(ctx, []string{"which", "xz"}, system.RunCmdOpts{Capture: true, Check: false})
 	if xzCheck.ExitCode != 0 {
 		return "", NewKernelErrorf(
 			"Extraction failed: 'xz' binary not found in PATH; xz is required " +
@@ -1095,7 +1095,7 @@ func (s *Service) ExtractKernelTarball(ctx context.Context, tarball, extractDir 
 		return "", NewKernelErrorf("Extraction failed: %s", err)
 	}
 
-	xzResult := system.RunCmdCompat(ctx, []string{"xz", "-d", "--stdout"}, system.RunCmdOptions{
+	xzResult := system.RunCmdCompat(ctx, []string{"xz", "-d", "--stdout"}, system.RunCmdOpts{
 		Input:   string(tarballData),
 		Capture: true,
 		Check:   true,
@@ -1273,7 +1273,7 @@ func (s *Service) applyConfigFragments(
 func runConfigScript(ctx context.Context, configScript, kernelDir string, args ...string) {
 	cmdArgs := []string{configScript}
 	cmdArgs = append(cmdArgs, args...)
-	result := system.RunCmdCompat(ctx, cmdArgs, system.RunCmdOptions{
+	result := system.RunCmdCompat(ctx, cmdArgs, system.RunCmdOpts{
 		Cwd:     kernelDir,
 		Capture: true,
 		Check:   false,
@@ -1297,7 +1297,7 @@ func majorMinorFromVersion(version string) string {
 }
 
 func runMake(ctx context.Context, kernelDir, target string, jobs int) (int, string, string) {
-	result := system.RunCmdCompat(ctx, []string{"make", target, fmt.Sprintf("-j%d", jobs)}, system.RunCmdOptions{
+	result := system.RunCmdCompat(ctx, []string{"make", target, fmt.Sprintf("-j%d", jobs)}, system.RunCmdOpts{
 		Cwd:     kernelDir,
 		Capture: true,
 		Check:   false,
@@ -1486,7 +1486,7 @@ func checkBuildDependencies(ctx context.Context) error {
 	}
 	var missing []string
 	for _, cmd := range requiredCommands {
-		result := system.RunCmdCompat(ctx, []string{"which", cmd}, system.RunCmdOptions{Capture: true, Check: false})
+		result := system.RunCmdCompat(ctx, []string{"which", cmd}, system.RunCmdOpts{Capture: true, Check: false})
 		if result.ExitCode != 0 {
 			missing = append(missing, cmd)
 		}
@@ -1501,7 +1501,7 @@ func checkBuildDependencies(ctx context.Context) error {
 		result := system.RunCmdCompat(
 			ctx,
 			[]string{"pkg-config", "--exists", lc.pkg},
-			system.RunCmdOptions{Check: true},
+			system.RunCmdOpts{Check: true},
 		)
 		if result.Err != nil {
 			missing = append(missing, lc.display)

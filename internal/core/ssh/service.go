@@ -140,7 +140,7 @@ func (s *Service) RunCommand(ctx context.Context, command string) (int, error) {
 	}
 
 	// capture=False → connect stdout/stderr directly to parent terminal
-	result := system.RunCmdCompat(ctx, sshArgs, system.RunCmdOptions{
+	result := system.RunCmdCompat(ctx, sshArgs, system.RunCmdOpts{
 		Capture: false,
 		Check:   false,
 		Timeout: optsTimeout,

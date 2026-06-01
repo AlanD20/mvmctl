@@ -253,7 +253,7 @@ func RunWithSudo(ctx context.Context, args []string, extraEnv ...string) SudoRes
 	// variables through sudo's env_reset.
 	cmdArgs := append([]string{mvmBin}, args...)
 	runArgs := append([]string{"env"}, append(envAssignments, cmdArgs...)...)
-	result := system.RunCmdCompat(ctx, runArgs, system.RunCmdOptions{
+	result := system.RunCmdCompat(ctx, runArgs, system.RunCmdOpts{
 		Capture:     false,
 		Check:       false,
 		Privileged:  true,

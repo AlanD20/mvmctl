@@ -267,7 +267,7 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 	}
 
 	// ── Check git availability ──
-	gitCheck := system.RunCmdCompat(ctx, []string{"which", "git"}, system.RunCmdOptions{Capture: true, Check: false})
+	gitCheck := system.RunCmdCompat(ctx, []string{"which", "git"}, system.RunCmdOpts{Capture: true, Check: false})
 	if gitCheck.ExitCode != 0 {
 		return nil, binaryError(errs.CodeProcessError,
 			"Git is required to build from source. "+
@@ -284,7 +284,7 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 		cloneCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 		defer cancel()
 		result := system.RunCmdCompat(cloneCtx, []string{"git", "clone", infra.FirecrackerGitRepoURL, srcDir},
-			system.RunCmdOptions{Capture: false, Check: true})
+			system.RunCmdOpts{Capture: false, Check: true})
 		if result.Err != nil {
 			return nil, binaryError(
 				errs.CodeProcessError,
@@ -296,7 +296,7 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 		fetchCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
 		result := system.RunCmdCompat(fetchCtx, []string{"git", "fetch", "origin"},
-			system.RunCmdOptions{Cwd: srcDir, Capture: false, Check: true})
+			system.RunCmdOpts{Cwd: srcDir, Capture: false, Check: true})
 		if result.Err != nil {
 			return nil, binaryError(
 				errs.CodeProcessError,
@@ -309,7 +309,7 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 	checkoutCtx, checkoutCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer checkoutCancel()
 	result := system.RunCmdCompat(checkoutCtx, []string{"git", "checkout", gitRef},
-		system.RunCmdOptions{Cwd: srcDir, Capture: false, Check: true})
+		system.RunCmdOpts{Cwd: srcDir, Capture: false, Check: true})
 	if result.Err != nil {
 		return nil, binaryError(
 			errs.CodeProcessError,
@@ -321,7 +321,7 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 	revParseCtx, revParseCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer revParseCancel()
 	hashResult := system.RunCmdCompat(revParseCtx, []string{"git", "rev-parse", "--short", "HEAD"},
-		system.RunCmdOptions{Cwd: srcDir, Capture: true, Check: true})
+		system.RunCmdOpts{Cwd: srcDir, Capture: true, Check: true})
 	if hashResult.Err != nil {
 		return nil, binaryError(errs.CodeProcessError, fmt.Sprintf("Failed to get commit hash: %v", hashResult.Err))
 	}
@@ -339,7 +339,7 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 	buildCtx, buildCancel := context.WithTimeout(ctx, 1800*time.Second)
 	defer buildCancel()
 	buildResult := system.RunCmdCompat(buildCtx, []string{"tools/devtool", "build", "--release"},
-		system.RunCmdOptions{Cwd: srcDir, Capture: false, Check: false})
+		system.RunCmdOpts{Cwd: srcDir, Capture: false, Check: false})
 	if buildResult.Err != nil {
 		return nil, binaryError(errs.CodeProcessError,
 			fmt.Sprintf("Build process failed: %v", buildResult.Err),

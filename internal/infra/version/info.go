@@ -92,7 +92,7 @@ func runGitCmd(ctx context.Context, repoDir string, args ...string) (string, err
 	result := system.RunCmdCompat(
 		ctx,
 		append([]string{"git", "-C", repoDir}, args...),
-		system.RunCmdOptions{Capture: true},
+		system.RunCmdOpts{Capture: true},
 	)
 	if result.Err != nil {
 		return "", fmt.Errorf("git %v: %w", args, result.Err)

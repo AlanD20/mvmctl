@@ -17,7 +17,7 @@ import (
 	"mvmctl/internal/infra/errs"
 )
 
-// RunCmdOptions matches Python's run_cmd() parameter set exactly.
+// RunCmdOpts matches Python's run_cmd() parameter set exactly.
 // Fields map to Python's: args, check, capture, cwd, timeout, input, env,
 // privileged, text.  Plus a StartOnly flag for background/spawn-and-forget.
 //
@@ -26,7 +26,7 @@ import (
 //   - false → "sudo -n" (non-interactive, fails immediately if password required)
 //
 // Default is false (non-interactive), suitable for automated operations.
-type RunCmdOptions struct {
+type RunCmdOpts struct {
 	Cmd         string
 	Args        []string
 	Check       bool
@@ -632,7 +632,7 @@ func (r *RealRunner) Run(ctx context.Context, args []string, opts ...RunOption) 
 		opt(cfg)
 	}
 
-	cmdOpts := RunCmdOptions{
+	cmdOpts := RunCmdOpts{
 		Cmd:         args[0],
 		Capture:     cfg.capture,
 		Cwd:         cfg.cwd,

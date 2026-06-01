@@ -532,7 +532,7 @@ func (op *Operation) vmPerformRemovalCleanup(ctx context.Context, vm *model.VM) 
 		_ = system.RunCmdCompat(
 			ctx,
 			[]string{"ssh-keygen", "-R", vm.IPv4},
-			system.RunCmdOptions{Check: false, Capture: false},
+			system.RunCmdOpts{Check: false, Capture: false},
 		)
 	}
 }
@@ -1711,7 +1711,7 @@ func (op *Operation) VMDetachVolume(
 					slog.Warn("SSH PCI removal: failed to create SSH service", "error", svcErr)
 				} else {
 					findBDFCmd := sshSvc.BuildCommand("lspci -D | grep 'Virtio.*block' | tail -1 | awk '{print $1}'")
-					bdfResult := system.RunCmdCompat(ctx, findBDFCmd, system.RunCmdOptions{Capture: true, Check: false})
+					bdfResult := system.RunCmdCompat(ctx, findBDFCmd, system.RunCmdOpts{Capture: true, Check: false})
 					bdf := ""
 					if bdfResult.Err == nil {
 						bdf = strings.TrimSpace(bdfResult.Stdout)
@@ -1719,7 +1719,7 @@ func (op *Operation) VMDetachVolume(
 
 					if bdf != "" {
 						removeCmd := sshSvc.BuildCommand(fmt.Sprintf("echo 1 > /sys/bus/pci/devices/%s/remove", bdf))
-						_ = system.RunCmdCompat(ctx, removeCmd, system.RunCmdOptions{Capture: false, Check: false})
+						_ = system.RunCmdCompat(ctx, removeCmd, system.RunCmdOpts{Capture: false, Check: false})
 						slog.Info("Removed PCI device from guest for drive", "bdf", bdf, "volume", vol.ID)
 					}
 				}
