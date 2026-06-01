@@ -326,7 +326,7 @@ func (s *Service) buildFromSource(
 	func() {
 		// 3. Download + extract
 		if _, err := os.Stat(tarball); os.IsNotExist(err) {
-			os.MkdirAll(filepath.Dir(tarball), 0755)
+			os.MkdirAll(filepath.Dir(tarball), infra.DirPerm)
 			slog.Info("Downloading kernel", "url", resolvedSourceURL)
 			if err := s.dl.DownloadFile(
 				ctx,
@@ -374,7 +374,7 @@ func (s *Service) buildFromSource(
 		}
 		// 6. Cache output — using shutil.copy2 equivalent (preserving metadata)
 		if useCache {
-			os.MkdirAll(filepath.Dir(cachedKernelPath), 0755)
+			os.MkdirAll(filepath.Dir(cachedKernelPath), infra.DirPerm)
 			if err := infra.CopyPreservingMetadata(outputPath, cachedKernelPath); err != nil {
 				slog.Warn("Failed to cache kernel build", "error", err)
 			}
@@ -989,7 +989,7 @@ func (s *Service) RunMakeVmlinux(
 	slog.Info("This may take 10-30 minutes")
 
 	buildLogPath := outputPath + ".build.log"
-	os.MkdirAll(filepath.Dir(buildLogPath), 0755)
+	os.MkdirAll(filepath.Dir(buildLogPath), infra.DirPerm)
 
 	result := system.RunCmdCompat(ctx, []string{"make", "vmlinux", fmt.Sprintf("-j%d", jobs)}, system.RunCmdOpts{
 		Cwd:     kernelDir,
@@ -1078,7 +1078,7 @@ func (s *Service) DownloadKernelSource(ctx context.Context, url, dest string, sh
 // Uses Go's archive/tar with path traversal protection, matching Python's
 // tarfile.open(tarball, "r:xz") with filter="data" security behavior.
 func (s *Service) ExtractKernelTarball(ctx context.Context, tarball, extractDir string) (string, error) {
-	if err := os.MkdirAll(extractDir, 0755); err != nil {
+	if err := os.MkdirAll(extractDir, infra.DirPerm); err != nil {
 		return "", err
 	}
 
@@ -1127,11 +1127,11 @@ func (s *Service) ExtractKernelTarball(ctx context.Context, tarball, extractDir 
 
 		switch header.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0755); err != nil {
+			if err := os.MkdirAll(target, infra.DirPerm); err != nil {
 				return "", NewKernelErrorf("Extraction failed: %s", err)
 			}
 		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(target), infra.DirPerm); err != nil {
 				return "", NewKernelErrorf("Extraction failed: %s", err)
 			}
 			outFile, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
@@ -1711,7 +1711,7 @@ func (s *Service) ImportKernel(
 	}
 
 	kernelsDir := filepath.Join(s.cacheDir, "kernels")
-	if err := os.MkdirAll(kernelsDir, 0755); err != nil {
+	if err := os.MkdirAll(kernelsDir, infra.DirPerm); err != nil {
 		return nil, err
 	}
 

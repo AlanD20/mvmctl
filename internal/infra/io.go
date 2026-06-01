@@ -324,7 +324,7 @@ func SecureMkdir(path, name string) error {
 		return fmt.Errorf("stat %s: %w", path, err)
 	}
 
-	err = os.MkdirAll(path, 0755)
+	err = os.MkdirAll(path, DirPerm)
 	if err != nil {
 		// Race condition — someone created it between our check and mkdir
 		fi2, err2 := os.Lstat(path)
@@ -545,7 +545,7 @@ func CopyPreservingMetadata(src, dst string) error {
 	}
 	defer s.Close()
 
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dst), DirPerm); err != nil {
 		return fmt.Errorf("create dest dir: %w", err)
 	}
 

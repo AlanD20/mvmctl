@@ -81,7 +81,7 @@ func PersistSysctl(ctx context.Context) (*model.HostStateChangeItem, error) {
 		}
 	}
 
-	if err := os.MkdirAll(filepath.Dir(sysctlConfPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(sysctlConfPath), infra.DirPerm); err != nil {
 		return nil, hostError(errs.CodeHostInitFailed,
 			fmt.Sprintf("Failed to write %s: %v", sysctlConfPath, err))
 	}

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"golang.org/x/term"
+	"mvmctl/internal/infra"
 )
 
 // relayPID stores the OS PID of the current process when running as a
@@ -147,7 +148,7 @@ func (rm *RelayManager) Start(ctx context.Context, ptyControllerFD int) (string,
 	if rm.cancel != nil {
 		return "", 0, ErrAlreadyRunning(rm.id)
 	}
-	if err := os.MkdirAll(rm.path, 0755); err != nil {
+	if err := os.MkdirAll(rm.path, infra.DirPerm); err != nil {
 		return "", 0, err
 	}
 	ctx, cancel := context.WithCancel(ctx)
@@ -162,7 +163,7 @@ func (rm *RelayManager) Start(ctx context.Context, ptyControllerFD int) (string,
 	// Write PID file in Start() rather than relayLoop() to avoid racing
 	// on rm.relayPid access (relayLoop runs in a separate goroutine).
 	// Matches Python's process.py _write_pid_file() which runs before the select loop.
-	if err := os.MkdirAll(filepath.Dir(rm.pidPath), 0755); err == nil {
+	if err := os.MkdirAll(filepath.Dir(rm.pidPath), infra.DirPerm); err == nil {
 		_ = os.WriteFile(rm.pidPath, []byte(strconv.Itoa(relayPID)), 0644)
 	}
 	// doneCh allows Stop() to poll for goroutine completion, matching
@@ -910,7 +911,7 @@ func RunRelaySubprocess(args []string) {
 	rm := NewRelayManager(vmID, vmPath, vmName, "", "", "")
 
 	// Write PID file with our own PID (subprocess PID, not parent)
-	if err := os.MkdirAll(filepath.Dir(rm.pidPath), 0755); err == nil {
+	if err := os.MkdirAll(filepath.Dir(rm.pidPath), infra.DirPerm); err == nil {
 		_ = os.WriteFile(rm.pidPath, []byte(strconv.Itoa(os.Getpid())), 0644)
 	}
 
