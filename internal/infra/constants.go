@@ -158,6 +158,7 @@ const DefaultIPLocalPortRangeEnd = 60999
 var DefaultIPLocalPortRange = [2]int{DefaultIPLocalPortRangeStart, DefaultIPLocalPortRangeEnd}
 
 // ── File permissions ──
+const DirPerm = 0755
 const PrivateKeyPerm = 0600
 const PublicKeyPerm = 0644
 const CacheDirPerm = 0700
@@ -576,7 +577,7 @@ func GetLogPath() string {
 		cacheDir = filepath.Join(GetRealHome(), ".cache", ProjectName)
 	}
 	logPath := filepath.Join(cacheDir, "mvmctl.log")
-	os.MkdirAll(filepath.Dir(logPath), 0755)
+	os.MkdirAll(filepath.Dir(logPath), DirPerm)
 	return logPath
 }
 

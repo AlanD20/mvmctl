@@ -187,7 +187,7 @@ func WriteSudoers(ctx context.Context, path string, content string) error {
 	}
 
 	// Write to final location
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), infra.DirPerm); err != nil {
 		return hostError(errs.CodeHostInitFailed,
 			fmt.Sprintf("Failed to write sudoers file %s: %v", path, err))
 	}

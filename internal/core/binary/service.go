@@ -401,7 +401,7 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 
 	// ── Cache in mirror ──
 	if mirrorDir != "" {
-		os.MkdirAll(mirrorDir, 0755)
+		os.MkdirAll(mirrorDir, infra.DirPerm)
 		cachedFC := filepath.Join(mirrorDir, fmt.Sprintf("firecracker-%s", mirrorTag))
 		cachedJL := filepath.Join(mirrorDir, fmt.Sprintf("jailer-%s", mirrorTag))
 		fcErr := infra.CopyPreservingMetadata(fcDest, cachedFC)

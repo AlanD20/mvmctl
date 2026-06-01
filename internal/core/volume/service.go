@@ -33,7 +33,7 @@ func (s *Service) CreateDisk(ctx context.Context, vol *model.VolumeItem) (*model
 	// Python: disk_path.parent.mkdir(parents=True, exist_ok=True) — no try/except,
 	// lets OSError/PermissionError propagate unhandled (raw filesystem error).
 	// Go must match: return the raw os.MkdirAll error, NOT wrapped in VolumeError.
-	if err := os.MkdirAll(parentDir, 0777); err != nil {
+	if err := os.MkdirAll(parentDir, os.ModePerm); err != nil {
 		return nil, err
 	}
 

@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/model"
 )
 
@@ -385,7 +386,7 @@ func (s *FirecrackerSpawner) WriteToFile() error {
 		return err
 	}
 	dir := filepath.Dir(s.configPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, infra.DirPerm); err != nil {
 		return err
 	}
 	data, err := json.Marshal(config)
@@ -1172,7 +1173,7 @@ func (m *FirecrackerConfigManager) load() (map[string]any, error) {
 // Matches Python's _save().
 func (m *FirecrackerConfigManager) save() error {
 	dir := filepath.Dir(m.configPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, infra.DirPerm); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(m.config, "", "  ")

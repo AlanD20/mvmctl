@@ -43,7 +43,7 @@ func (tl *TimingLog) getLogger() *slog.Logger {
 		}
 		logPath := GetTimingLogPath()
 		dir := filepath.Dir(logPath)
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, DirPerm); err != nil {
 			// Fall back to no-op (like Python's NullHandler)
 			tl.logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError + 100}))
 			return

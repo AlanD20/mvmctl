@@ -93,6 +93,6 @@ func GetLogPath() string {
 		cacheDir = filepath.Join(infra.GetRealHome(), ".cache", infra.ProjectName)
 	}
 	logPath := filepath.Join(cacheDir, "mvmctl.log")
-	os.MkdirAll(filepath.Dir(logPath), 0755)
+	os.MkdirAll(filepath.Dir(logPath), infra.DirPerm)
 	return logPath
 }

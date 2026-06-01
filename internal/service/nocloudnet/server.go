@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/system"
 )
 
@@ -359,7 +360,7 @@ func ServeNoCloudHTTP(ctx context.Context, args []string) {
 	}
 	// Write PID file (matches Python's: args.pid_file.write_text(str(os.getpid())))
 	pidDir := filepath.Dir(pidFile)
-	if err := os.MkdirAll(pidDir, 0755); err == nil {
+	if err := os.MkdirAll(pidDir, infra.DirPerm); err == nil {
 		_ = os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0644)
 	} else {
 		fmt.Fprintf(os.Stderr, "Error: Cannot write PID file: %v\n", err)

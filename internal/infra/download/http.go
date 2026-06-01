@@ -73,7 +73,7 @@ func (c *HttpDiskCache) Read(cachePath string) ([]byte, error) {
 // Write atomically writes data to the cache using tempfile + rename.
 func (c *HttpDiskCache) Write(data []byte, cachePath string) error {
 	dir := filepath.Dir(cachePath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, infra.DirPerm); err != nil {
 		return fmt.Errorf("create cache dir: %w", err)
 	}
 
@@ -209,7 +209,7 @@ func (d *Downloader) withDownloadOnce(
 	progressCallback ProgressFunc,
 	onStart func(totalSize int64),
 ) (int64, error) {
-	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dest), infra.DirPerm); err != nil {
 		return 0, fmt.Errorf("create dest dir: %w", err)
 	}
 
@@ -420,7 +420,7 @@ func (d *Downloader) DownloadFile(
 	allowMissingChecksum, silentMissingChecksum bool,
 	progress func(currentBytes, totalBytes int64),
 ) error {
-	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dest), infra.DirPerm); err != nil {
 		return fmt.Errorf("create dest dir: %w", err)
 	}
 
@@ -530,7 +530,7 @@ func autoPopulateMirror(url, srcPath string) {
 	if err == nil && !info.IsDir() {
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(mirrorDest), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(mirrorDest), infra.DirPerm); err != nil {
 		slog.Warn("Failed to create asset mirror dir", "error", err)
 		return
 	}
