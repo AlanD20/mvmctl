@@ -3,27 +3,25 @@ package image
 import (
 	"context"
 	"fmt"
-	"log/slog"
-	"os"
 	"path/filepath"
 
-	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/model"
 )
 
 // Controller matches Python's Controller.
 // Manages image operations for a specific image — compression, decompression,
 // and tmpfs caching for fast VM rootfs cloning.
 type Controller struct {
-	image *ImageItem
+	image *model.ImageItem
 	repo  Repository
 }
 
 // NewController creates an Controller from an entity.
-// entity can be an *ImageItem or a string identifier.
-func NewController(ctx context.Context, entity interface{}, repo Repository) (*Controller, error) {
+// entity can be an *model.ImageItem or a string identifier.
+func NewController(ctx context.Context, entity any, repo Repository) (*Controller, error) {
 	ctrl := &Controller{repo: repo}
 	switch e := entity.(type) {
-	case *ImageItem:
+	case *model.ImageItem:
 		ctrl.image = e
 	case string:
 		resolver := NewResolver(repo)
@@ -38,8 +36,8 @@ func NewController(ctx context.Context, entity interface{}, repo Repository) (*C
 	return ctrl, nil
 }
 
-// Get returns the resolved ImageItem.
-func (c *Controller) Get() *ImageItem {
+// Get returns the resolved model.ImageItem.
+func (c *Controller) Get() *model.ImageItem {
 	return c.image
 }
 
@@ -49,47 +47,20 @@ func (c *Controller) ImagePath() string {
 }
 
 // CompressedPath returns the compressed path for this image.
-// Uses compressed_format from ImageItem if set, otherwise defaults to .zst.
-func (c *Controller) CompressedPath() string {
-	fmt_ := "zst"
-	if c.image.CompressedFormat != nil && *c.image.CompressedFormat != "" {
-		fmt_ = *c.image.CompressedFormat
+// Derives the suffix strictly from model.ImageItem.CompressedFormat.
+// Returns an error if CompressedFormat is nil or empty — that state means
+// "image is not compressed" (see service.go copyToCache branch), and silently
+// guessing a suffix would produce a path that does not exist on disk.
+func (c *Controller) CompressedPath() (string, error) {
+	if c.image.CompressedFormat == nil || *c.image.CompressedFormat == "" {
+		return "", fmt.Errorf("image %q has no CompressedFormat; cannot derive CompressedPath", c.image.ID)
 	}
-	suffix := "." + fmt_
-	if fmt_[0] == '.' {
-		suffix = fmt_
+	format := *c.image.CompressedFormat
+	suffix := "." + format
+	if format[0] == '.' {
+		suffix = format
 	}
 	base := c.image.Path
 	ext := filepath.Ext(base)
-	return base[:len(base)-len(ext)] + suffix
-}
-
-// PruneCached removes all images from the tmpfs cache (warm directory).
-// Matches Python's Controller.prune_cached() static method with no parameters
-// — resolves cache dir internally via infra.GetWarmImageDir().
-func PruneCached() int {
-	warmDir := infra.GetWarmImageDir("")
-	removedCount := 0
-	info, err := os.Stat(warmDir)
-	if err != nil || !info.IsDir() {
-		return 0
-	}
-
-	entries, err := os.ReadDir(warmDir)
-	if err != nil {
-		return 0
-	}
-
-	for _, entry := range entries {
-		path := filepath.Join(warmDir, entry.Name())
-		if err := os.Remove(path); err != nil {
-			slog.Warn("Failed to remove from cache", "entry", entry.Name(), "error", err)
-		} else {
-			removedCount++
-			slog.Info("Removed from cache", "entry", entry.Name())
-		}
-	}
-
-	slog.Info("Pruned cache", "removed", removedCount)
-	return removedCount
+	return base[:len(base)-len(ext)] + suffix, nil
 }

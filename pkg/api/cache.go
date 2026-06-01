@@ -12,8 +12,8 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
-	"mvmctl/internal/infra/guestfs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/internal/infra/provisioner/guestfs"
 	infraslice "mvmctl/internal/infra/slice"
 	"mvmctl/internal/infra/system"
 )
@@ -79,8 +79,7 @@ func (op *Operation) CacheInitAll(ctx context.Context, onProgress func(errs.Prog
 				Message: "Building libguestfs appliance...",
 			})
 		}
-		gstSvc := &guestfs.GuestfsService{}
-		appliancePath, _ = gstSvc.BuildAppliance(ctx, cacheDir)
+		appliancePath, _ = guestfs.BuildAppliance(ctx, cacheDir)
 	}
 
 	// Detected guestfs kernel (Python: KernelDetector.find_best_kernel())
@@ -138,9 +137,9 @@ func (op *Operation) CachePruneMisc(ctx context.Context, dryRun bool) *errs.Oper
 		serviceBinariesCleaned = true
 	}
 
-	appliancePruned := (&guestfs.GuestfsService{}).PruneAppliance(op.CacheDir, dryRun)
+	appliancePruned := guestfs.PruneAppliance(op.CacheDir, dryRun)
 	warmPruned := op.Services.Cache.PruneWarmImages(ctx, dryRun)
-	guestfsStateCleaned := (&guestfs.GuestfsService{}).CleanStaleGuestfsState()
+	guestfsStateCleaned := guestfs.CleanStaleState()
 	staleProvisionCleaned := op.Services.Cache.CleanStaleProvisionMounts(ctx, dryRun)
 
 	result := map[string]any{

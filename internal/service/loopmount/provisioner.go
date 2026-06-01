@@ -778,7 +778,7 @@ func writeFile(mountPoint string, f FileOp, ps *provisionState) error {
 
 	// Create parent directories
 	parent := filepath.Dir(fullPath)
-	if err := os.MkdirAll(parent, 0755); err != nil {
+	if err := os.MkdirAll(parent, infra.DirPerm); err != nil {
 		return fmt.Errorf("mkdir %s: %v", parent, err)
 	}
 
@@ -843,7 +843,7 @@ func copyDirectory(mountPoint string, c CopyDirOp, ps *provisionState) (int, err
 
 		// Create parent directories for file
 		if parent := filepath.Dir(dstPath); parent != "" {
-			os.MkdirAll(parent, 0755)
+			os.MkdirAll(parent, infra.DirPerm)
 		}
 
 		// Copy file using 64KB chunks matching Python's sf.read(65536)
@@ -891,7 +891,7 @@ func runChrootCommands(ctx context.Context, mountPoint, command, customShell str
 	nullPath := filepath.Join(mountPoint, "dev", "null")
 	if _, err := os.Stat(nullPath); os.IsNotExist(err) {
 		devDir := filepath.Dir(nullPath)
-		os.MkdirAll(devDir, 0755)
+		os.MkdirAll(devDir, infra.DirPerm)
 		// makedev(1, 3) on Linux = (1 << 8) | 3 = 259 for /dev/null (major=1, minor=3)
 		syscall.Mknod(nullPath, syscall.S_IFCHR|0666, 259)
 	}
