@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/version"
+	"mvmctl/internal/infra/model"
 )
 
 // dirHrefRegex matches href="<dir>/" in Apache HTML directory listings.
@@ -111,7 +111,7 @@ func versionSortKey(ver string) []int {
 }
 
 // versionInfoSortKey provides a sort key for VersionInfo entries.
-func versionInfoSortKey(v version.VersionInfo) []int {
+func versionInfoSortKey(v model.VersionInfo) []int {
 	return versionSortKey(v.Version)
 }
 
@@ -262,8 +262,8 @@ func (r *HttpDirVersionResolver) Resolve(
 	ciVersion string,
 	cacheTTLSeconds int,
 	limit int,
-) map[string][]version.VersionInfo {
-	result := make(map[string][]version.VersionInfo)
+) map[string][]model.VersionInfo {
+	result := make(map[string][]model.VersionInfo)
 
 	// Phase 1: http-dir resolver types
 	for _, config := range configs {
@@ -343,7 +343,7 @@ func (r *HttpDirVersionResolver) Resolve(
 			}
 		}
 
-		result[typeName] = []version.VersionInfo{
+		result[typeName] = []model.VersionInfo{
 			{
 				Version:     "latest",
 				DownloadURL: downloadURL,
@@ -385,7 +385,7 @@ func (r *HttpDirVersionResolver) Resolve(
 
 func (r *HttpDirVersionResolver) resolveViaDirectoryListing(
 	ctx context.Context, config ResolverConfig, arch string, cacheTTLSeconds int,
-	result map[string][]version.VersionInfo,
+	result map[string][]model.VersionInfo,
 ) {
 	typeName := config.Type
 	versionsURL := config.VersionsURL
@@ -398,7 +398,7 @@ func (r *HttpDirVersionResolver) resolveViaDirectoryListing(
 	html, err := r.fetchRawContent(ctx, versionsURL, useCache, ttl)
 	if err != nil {
 		slog.Warn("Failed to fetch version listing", "type", typeName, "url", versionsURL, "error", err)
-		result[typeName] = []version.VersionInfo{}
+		result[typeName] = []model.VersionInfo{}
 		return
 	}
 
@@ -411,7 +411,7 @@ func (r *HttpDirVersionResolver) resolveViaDirectoryListing(
 	dirs := parseDirectoryListing(html)
 	configName := config.Name
 
-	var versions []version.VersionInfo
+	var versions []model.VersionInfo
 	for _, dirName := range dirs {
 		versionStr, codename, ok := resolveVersion(dirName, skipPatterns, versionPrefix, codenameMapping)
 		if !ok {
@@ -491,7 +491,7 @@ func (r *HttpDirVersionResolver) resolveViaDirectoryListing(
 			}
 		}
 
-		versions = append(versions, version.VersionInfo{
+		versions = append(versions, model.VersionInfo{
 			Version:     versionStr,
 			DownloadURL: downloadURL,
 			SHA256URL:   sha256URL,
@@ -525,7 +525,7 @@ func (r *HttpDirVersionResolver) resolveViaDirectoryListing(
 
 func (r *HttpDirVersionResolver) resolveViaVersionDiscoveries(
 	ctx context.Context, config ResolverConfig, arch string, cacheTTLSeconds int,
-	result map[string][]version.VersionInfo,
+	result map[string][]model.VersionInfo,
 ) {
 	typeName := config.Type
 	versionsURL := config.VersionsURL
@@ -554,7 +554,7 @@ func (r *HttpDirVersionResolver) resolveViaVersionDiscoveries(
 		}
 
 		allLinks := extractAllHrefs(html)
-		var discVersions []version.VersionInfo
+		var discVersions []model.VersionInfo
 
 		for _, link := range allLinks {
 			if strings.HasSuffix(link, "/") || link == "." || link == ".." || link == "../" {
@@ -616,7 +616,7 @@ func (r *HttpDirVersionResolver) resolveViaVersionDiscoveries(
 				}
 			}
 
-			discVersions = append(discVersions, version.VersionInfo{
+			discVersions = append(discVersions, model.VersionInfo{
 				Version:     versionStr,
 				DownloadURL: downloadURL,
 				SHA256URL:   sha256URL,
@@ -667,7 +667,7 @@ type S3Contents struct {
 
 func (r *HttpDirVersionResolver) resolveViaFirecrackerS3(
 	ctx context.Context, config ResolverConfig, arch string, ciVersion string, cacheTTLSeconds int,
-	result map[string][]version.VersionInfo,
+	result map[string][]model.VersionInfo,
 ) {
 	typeName := config.Type
 	configName := config.Name
@@ -679,7 +679,7 @@ func (r *HttpDirVersionResolver) resolveViaFirecrackerS3(
 
 	if config.ListURLTemplate == "" {
 		slog.Warn("Skipping type with missing list_url_template", "type", typeName)
-		result[typeName] = []version.VersionInfo{}
+		result[typeName] = []model.VersionInfo{}
 		return
 	}
 
@@ -701,27 +701,27 @@ func (r *HttpDirVersionResolver) resolveViaFirecrackerS3(
 	listURL, err := infra.RenderTemplate(config.ListURLTemplate, listVars)
 	if err != nil {
 		slog.Warn("Failed to render S3 list URL", "type", typeName, "error", err)
-		result[typeName] = []version.VersionInfo{}
+		result[typeName] = []model.VersionInfo{}
 		return
 	}
 
 	xmlContent, err := r.fetchRawContent(ctx, listURL, useCache, ttl)
 	if err != nil {
 		slog.Warn("Failed to fetch S3 version listing", "type", typeName, "url", listURL, "error", err)
-		result[typeName] = []version.VersionInfo{}
+		result[typeName] = []model.VersionInfo{}
 		return
 	}
 
 	var bucketResult S3ListBucketResult
 	if err := xml.Unmarshal([]byte(xmlContent), &bucketResult); err != nil {
 		slog.Warn("Failed to parse S3 XML for type", "type", typeName, "error", err)
-		result[typeName] = []version.VersionInfo{}
+		result[typeName] = []model.VersionInfo{}
 		return
 	}
 
 	reVersion := regexp.MustCompile(s3VersionPattern)
 	seenVersions := make(map[string]bool)
-	var s3Versions []version.VersionInfo
+	var s3Versions []model.VersionInfo
 
 	for _, contents := range bucketResult.Contents {
 		key := contents.Key
@@ -790,7 +790,7 @@ func (r *HttpDirVersionResolver) resolveViaFirecrackerS3(
 			}
 		}
 
-		s3Versions = append(s3Versions, version.VersionInfo{
+		s3Versions = append(s3Versions, model.VersionInfo{
 			Version:     versionStr,
 			DownloadURL: downloadURL,
 			SHA256URL:   sha256URL,

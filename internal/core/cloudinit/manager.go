@@ -149,7 +149,7 @@ func (m *Manager) CreateSeedISO(ctx context.Context, cloudInitDir, outputISO str
 	result := system.RunCmdCompat(
 		ctx,
 		append([]string{requiredISOTool}, args...),
-		system.RunCmdOptions{Capture: true, Check: false},
+		system.RunCmdOpts{Capture: true, Check: false},
 	)
 	if !result.Success {
 		exitCode := result.ExitCode

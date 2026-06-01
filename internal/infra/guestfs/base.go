@@ -154,7 +154,7 @@ func (o guestfishRunOpts) run(ctx context.Context) (string, error) {
 			}
 		}
 
-		runOpts := system.RunCmdOptions{Capture: true, Check: true}
+		runOpts := system.RunCmdOpts{Capture: true, Check: true}
 		if o.input != "" {
 			runOpts.Input = o.input
 		}

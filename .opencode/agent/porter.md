@@ -25,6 +25,8 @@ permission:
     "git diff *": allow
     "git status *": allow
     "git checkout *": deny
+    "rm *": deny
+    "git rm *": deny
     "git revert *": deny
     "git clean *": deny
     "git reset --hard *": deny

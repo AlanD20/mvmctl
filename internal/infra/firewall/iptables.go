@@ -74,7 +74,7 @@ func (t *IPTablesTracker) Initialize(ctx context.Context) {
 func (t *IPTablesTracker) CheckCommentAvailable(ctx context.Context) bool {
 	result := system.RunCmdCompat(ctx,
 		[]string{"iptables", "-C", "INPUT", "-m", "comment", "--comment", "mvmctl-probe", "-j", "ACCEPT"},
-		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+		system.RunCmdOpts{Privileged: true, Capture: true, Text: true, Check: false},
 	)
 	return result.ExitCode == 0
 }
@@ -289,7 +289,7 @@ func (t *IPTablesTracker) EnsureRule(
 	checkResult := system.RunCmdCompat(
 		ctx,
 		checkArgs,
-		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+		system.RunCmdOpts{Privileged: true, Capture: true, Text: true, Check: false},
 	)
 	if checkResult.ExitCode == 0 {
 		iptablesExists = true
@@ -320,7 +320,7 @@ func (t *IPTablesTracker) EnsureRule(
 	addResult := system.RunCmdCompat(
 		ctx,
 		addArgs,
-		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true},
+		system.RunCmdOpts{Privileged: true, Capture: true, Text: true, Check: true},
 	)
 	if addResult.ExitCode != 0 {
 		errMsg := fmt.Sprintf(
@@ -404,7 +404,7 @@ func (t *IPTablesTracker) RemoveRule(ctx context.Context, rule model.FirewallRul
 	deleteResult := system.RunCmdCompat(
 		ctx,
 		deleteArgs,
-		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+		system.RunCmdOpts{Privileged: true, Capture: true, Text: true, Check: false},
 	)
 
 	if deleteResult.ExitCode != 0 {
@@ -446,7 +446,7 @@ func (t *IPTablesTracker) removeByLineNumber(ctx context.Context, rule *model.Fi
 	result := system.RunCmdCompat(
 		ctx,
 		listArgs,
-		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+		system.RunCmdOpts{Privileged: true, Capture: true, Text: true, Check: false},
 	)
 	if result.ExitCode != 0 {
 		return false
@@ -480,7 +480,7 @@ func (t *IPTablesTracker) removeByLineNumber(ctx context.Context, rule *model.Fi
 				delResult := system.RunCmdCompat(
 					ctx,
 					delArgs,
-					system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+					system.RunCmdOpts{Privileged: true, Capture: true, Text: true, Check: false},
 				)
 				return delResult.ExitCode == 0
 			}
@@ -501,7 +501,7 @@ func (t *IPTablesTracker) ruleExistsByInterfaces(ctx context.Context, rule *mode
 	result := system.RunCmdCompat(
 		ctx,
 		listArgs,
-		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+		system.RunCmdOpts{Privileged: true, Capture: true, Text: true, Check: false},
 	)
 	if result.ExitCode != 0 {
 		return false
@@ -554,7 +554,7 @@ func (t *IPTablesTracker) BatchEnsureRules(ctx context.Context, rules []model.Fi
 		result := system.RunCmdCompat(
 			ctx,
 			[]string{"iptables-restore", "-n"},
-			system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true, Input: restoreInput},
+			system.RunCmdOpts{Privileged: true, Capture: true, Text: true, Check: true, Input: restoreInput},
 		)
 		if result.ExitCode != 0 {
 			errMsg := fmt.Sprintf("command iptables-restore -n failed (exit %d): %s", result.ExitCode, result.Stderr)
@@ -570,7 +570,7 @@ func (t *IPTablesTracker) BatchEnsureRules(ctx context.Context, rules []model.Fi
 		result := system.RunCmdCompat(
 			ctx,
 			[]string{"iptables-restore", "-n"},
-			system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true, Input: restoreInput},
+			system.RunCmdOpts{Privileged: true, Capture: true, Text: true, Check: true, Input: restoreInput},
 		)
 		if result.ExitCode != 0 {
 			errMsg := fmt.Sprintf("command iptables-restore -n failed (exit %d): %s", result.ExitCode, result.Stderr)
@@ -625,7 +625,7 @@ func (t *IPTablesTracker) CountOrphanedRules(ctx context.Context, network *model
 	result := system.RunCmdCompat(
 		ctx,
 		[]string{"iptables-save"},
-		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+		system.RunCmdOpts{Privileged: true, Capture: true, Text: true, Check: false},
 	)
 	if result.ExitCode != 0 {
 		return 0
@@ -676,7 +676,7 @@ func (t *IPTablesTracker) EnsureChain(
 	checkResult := system.RunCmdCompat(
 		ctx,
 		checkArgs,
-		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+		system.RunCmdOpts{Privileged: true, Capture: true, Text: true, Check: false},
 	)
 	if checkResult.ExitCode == 0 {
 		slog.Debug("Chain already exists", "chain", chainNameStr)
@@ -688,7 +688,7 @@ func (t *IPTablesTracker) EnsureChain(
 	createResult := system.RunCmdCompat(
 		ctx,
 		createArgs,
-		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+		system.RunCmdOpts{Privileged: true, Capture: true, Text: true, Check: false},
 	)
 	if createResult.ExitCode != 0 {
 		// Check if chain already exists (race condition)
@@ -744,7 +744,7 @@ func (t *IPTablesTracker) EnsureJumpRule(
 	checkResult := system.RunCmdCompat(
 		ctx,
 		checkArgs,
-		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+		system.RunCmdOpts{Privileged: true, Capture: true, Text: true, Check: false},
 	)
 	if checkResult.ExitCode == 0 {
 		slog.Debug("Jump rule already exists", "from", fromChain, "to", toChain)
@@ -760,7 +760,7 @@ func (t *IPTablesTracker) EnsureJumpRule(
 	insertResult := system.RunCmdCompat(
 		ctx,
 		insertArgs,
-		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true},
+		system.RunCmdOpts{Privileged: true, Capture: true, Text: true, Check: true},
 	)
 	if insertResult.ExitCode != 0 {
 		errMsg := fmt.Sprintf("Failed to add jump rule %s -> %s: %s", fromChain, toChain, insertResult.Stderr)
@@ -800,19 +800,19 @@ func (t *IPTablesTracker) Teardown(ctx context.Context) {
 		// 1. Delete the jump rule from the parent chain
 		system.RunCmdCompat(ctx,
 			[]string{"iptables", "-t", table, "-D", c.jumpFrom, "-j", chainName},
-			system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+			system.RunCmdOpts{Privileged: true, Capture: true, Text: true, Check: false},
 		)
 
 		// 2. Flush the custom chain
 		system.RunCmdCompat(ctx,
 			[]string{"iptables", "-t", table, "-F", chainName},
-			system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+			system.RunCmdOpts{Privileged: true, Capture: true, Text: true, Check: false},
 		)
 
 		// 3. Delete the custom chain
 		system.RunCmdCompat(ctx,
 			[]string{"iptables", "-t", table, "-X", chainName},
-			system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+			system.RunCmdOpts{Privileged: true, Capture: true, Text: true, Check: false},
 		)
 	}
 }
@@ -833,7 +833,7 @@ func (t *IPTablesTracker) FlushChain(
 	checkResult := system.RunCmdCompat(
 		ctx,
 		checkArgs,
-		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+		system.RunCmdOpts{Privileged: true, Capture: true, Text: true, Check: false},
 	)
 	if checkResult.ExitCode != 0 {
 		slog.Debug("Chain doesn't exist, nothing to flush", "chain", chainNameStr)
@@ -845,7 +845,7 @@ func (t *IPTablesTracker) FlushChain(
 	flushResult := system.RunCmdCompat(
 		ctx,
 		flushArgs,
-		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true},
+		system.RunCmdOpts{Privileged: true, Capture: true, Text: true, Check: true},
 	)
 	if flushResult.ExitCode != 0 {
 		slog.Warn("Failed to flush chain", "chain", chainNameStr)
@@ -887,7 +887,7 @@ func (t *IPTablesTracker) RemoveChain(
 	checkResult := system.RunCmdCompat(
 		ctx,
 		checkArgs,
-		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: false},
+		system.RunCmdOpts{Privileged: true, Capture: true, Text: true, Check: false},
 	)
 	if checkResult.ExitCode != 0 {
 		slog.Debug("Chain doesn't exist, nothing to remove", "chain", chainNameStr)
@@ -902,7 +902,7 @@ func (t *IPTablesTracker) RemoveChain(
 	deleteResult := system.RunCmdCompat(
 		ctx,
 		deleteArgs,
-		system.RunCmdOptions{Privileged: true, Capture: true, Text: true, Check: true},
+		system.RunCmdOpts{Privileged: true, Capture: true, Text: true, Check: true},
 	)
 	if deleteResult.ExitCode != 0 {
 		slog.Warn(

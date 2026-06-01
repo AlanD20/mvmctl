@@ -160,7 +160,7 @@ Examples:
 						result := system.RunCmdCompat(
 							cmd.Context(),
 							append([]string{"sudo"}, sudoArgs...),
-							system.RunCmdOptions{
+							system.RunCmdOpts{
 								Capture: false,
 								Check:   false,
 							},

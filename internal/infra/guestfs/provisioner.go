@@ -205,7 +205,7 @@ func (p *GuestfsProvisioner) ConvertTo(ctx context.Context, targetFs string) err
 	result := system.RunCmdCompat(
 		ctx,
 		[]string{"truncate", "-s", fmt.Sprintf("%dM", sizeMiB), outputPath},
-		system.RunCmdOptions{Capture: true, Check: true},
+		system.RunCmdOpts{Capture: true, Check: true},
 	)
 	if result.Err != nil {
 		return fmt.Errorf("truncate output: %s: %w", result.Stdout, result.Err)
@@ -316,7 +316,7 @@ func (p *GuestfsProvisioner) ConvertTo(ctx context.Context, targetFs string) err
 		"--memsize", "256",
 		"--backend", "direct",
 		"-f", tmpScript,
-	}, system.RunCmdOptions{Capture: true, Check: true})
+	}, system.RunCmdOpts{Capture: true, Check: true})
 	if result2.Err != nil {
 		os.Remove(outputPath)
 		return fmt.Errorf("guestfish convert failed: %s: %s: %w",
@@ -477,7 +477,7 @@ func (p *GuestfsProvisioner) Run(ctx context.Context) error {
 	result3 := system.RunCmdCompat(
 		ctx,
 		append([]string{"guestfish"}, allArgs...),
-		system.RunCmdOptions{Capture: true, Check: true},
+		system.RunCmdOpts{Capture: true, Check: true},
 	)
 
 	slog.Debug("Running guestfish provisioner batch",
@@ -1017,7 +1017,7 @@ func (p *GuestfsProvisioner) buildGenerateHostKeys(ctx context.Context) []string
 	allExist := true
 	for _, key := range keyTypes {
 		res := system.RunCmdCompat(ctx, []string{"guestfish", "-a", p.rootfsPath, "--ro", "-i",
-			"exists", "/etc/ssh/" + key}, system.RunCmdOptions{Capture: true, Check: true})
+			"exists", "/etc/ssh/" + key}, system.RunCmdOpts{Capture: true, Check: true})
 		if res.Err != nil || strings.TrimSpace(res.Stdout) != "true" {
 			allExist = false
 			break
@@ -1045,11 +1045,11 @@ func (p *GuestfsProvisioner) buildGenerateHostKeys(ctx context.Context) []string
 	// OpenRC support (Python: checks /sbin/openrc or /usr/sbin/openrc)
 	hasOpenRC := false
 	res := system.RunCmdCompat(ctx, []string{"guestfish", "-a", p.rootfsPath, "--ro", "-i",
-		"exists", "/sbin/openrc"}, system.RunCmdOptions{Capture: true, Check: true})
+		"exists", "/sbin/openrc"}, system.RunCmdOpts{Capture: true, Check: true})
 	hasOpenRC = res.Err == nil && strings.TrimSpace(res.Stdout) == "true"
 	if !hasOpenRC {
 		res = system.RunCmdCompat(ctx, []string{"guestfish", "-a", p.rootfsPath, "--ro", "-i",
-			"exists", "/usr/sbin/openrc"}, system.RunCmdOptions{Capture: true, Check: true})
+			"exists", "/usr/sbin/openrc"}, system.RunCmdOpts{Capture: true, Check: true})
 		hasOpenRC = res.Err == nil && strings.TrimSpace(res.Stdout) == "true"
 	}
 	if hasOpenRC {
@@ -1250,7 +1250,7 @@ func (p *GuestfsProvisioner) parseOSRelease(ctx context.Context) (string, string
 		res := system.RunCmdCompat(
 			ctx,
 			[]string{"guestfish", "-a", p.rootfsPath, "--ro", "-i", "read-file", osReleasePath},
-			system.RunCmdOptions{Capture: true, Check: true},
+			system.RunCmdOpts{Capture: true, Check: true},
 		)
 		if res.Err != nil {
 			continue
@@ -1296,7 +1296,7 @@ func EnableSSH(ctx context.Context, diskPath string) bool {
 	hasSystemd := false
 	for _, path := range systemdPaths {
 		res := system.RunCmdCompat(ctx, []string{"guestfish", "-a", diskPath, "--ro", "-i",
-			"exists", path}, system.RunCmdOptions{Capture: true, Check: true})
+			"exists", path}, system.RunCmdOpts{Capture: true, Check: true})
 		if res.Err == nil && strings.TrimSpace(res.Stdout) == "true" {
 			hasSystemd = true
 			break
@@ -1308,7 +1308,7 @@ func EnableSSH(ctx context.Context, diskPath string) bool {
 	if !hasSystemd {
 		for _, path := range openrcPaths {
 			res := system.RunCmdCompat(ctx, []string{"guestfish", "-a", diskPath, "--ro", "-i",
-				"exists", path}, system.RunCmdOptions{Capture: true, Check: true})
+				"exists", path}, system.RunCmdOpts{Capture: true, Check: true})
 			if res.Err == nil && strings.TrimSpace(res.Stdout) == "true" {
 				hasOpenRC = true
 				break
@@ -1327,7 +1327,7 @@ func EnableSSH(ctx context.Context, diskPath string) bool {
 		}
 		for _, svc := range sshServices {
 			res := system.RunCmdCompat(ctx, []string{"guestfish", "-a", diskPath, "--ro", "-i",
-				"exists", svc}, system.RunCmdOptions{Capture: true, Check: true})
+				"exists", svc}, system.RunCmdOpts{Capture: true, Check: true})
 			if res.Err == nil && strings.TrimSpace(res.Stdout) == "true" {
 				svcName := filepath.Base(svc)
 				// Enable the service
@@ -1342,7 +1342,7 @@ func EnableSSH(ctx context.Context, diskPath string) bool {
 					"ln-sf",
 					svc,
 					"/etc/systemd/system/multi-user.target.wants/" + svcName,
-				}, system.RunCmdOptions{})
+				}, system.RunCmdOpts{})
 				return true
 			}
 		}
@@ -1353,15 +1353,15 @@ func EnableSSH(ctx context.Context, diskPath string) bool {
 		system.RunCmdCompat(ctx, []string{"guestfish", "-a", diskPath, "-i",
 			"mkdir-p", "/etc/runlevels/default",
 			":", "ln-sf", "/etc/init.d/sshd", "/etc/runlevels/default/sshd",
-		}, system.RunCmdOptions{})
+		}, system.RunCmdOpts{})
 
 		res := system.RunCmdCompat(ctx, []string{"guestfish", "-a", diskPath, "--ro", "-i",
-			"exists", "/etc/init.d/sshd"}, system.RunCmdOptions{Capture: true, Check: true})
+			"exists", "/etc/init.d/sshd"}, system.RunCmdOpts{Capture: true, Check: true})
 		if res.Err == nil && strings.TrimSpace(res.Stdout) == "true" {
 			return true
 		}
 		res = system.RunCmdCompat(ctx, []string{"guestfish", "-a", diskPath, "--ro", "-i",
-			"exists", "/etc/init.d/ssh"}, system.RunCmdOptions{Capture: true, Check: true})
+			"exists", "/etc/init.d/ssh"}, system.RunCmdOpts{Capture: true, Check: true})
 		if res.Err == nil && strings.TrimSpace(res.Stdout) == "true" {
 			return true
 		}
@@ -1370,13 +1370,13 @@ func EnableSSH(ctx context.Context, diskPath string) bool {
 
 	// sysvinit
 	res := system.RunCmdCompat(ctx, []string{"guestfish", "-a", diskPath, "--ro", "-i",
-		"exists", "/etc/init.d/ssh"}, system.RunCmdOptions{Capture: true, Check: true})
+		"exists", "/etc/init.d/ssh"}, system.RunCmdOpts{Capture: true, Check: true})
 	if res.Err == nil && strings.TrimSpace(res.Stdout) == "true" {
 		for _, level := range []string{"2", "3", "4", "5"} {
 			system.RunCmdCompat(ctx, []string{"guestfish", "-a", diskPath, "-i",
 				"mkdir-p", "/etc/rc" + level + ".d",
 				":", "ln-sf", "../init.d/ssh", "/etc/rc" + level + ".d/S02ssh",
-			}, system.RunCmdOptions{})
+			}, system.RunCmdOpts{})
 		}
 		return true
 	}
@@ -1389,7 +1389,7 @@ func EnableSSH(ctx context.Context, diskPath string) bool {
 // ConfigureSSHKeys configures SSH key authentication in the guest.
 func ConfigureSSHKeys(ctx context.Context, diskPath string, user string) {
 	res := system.RunCmdCompat(ctx, []string{"guestfish", "-a", diskPath, "--ro", "-i",
-		"exists", "/etc/ssh/sshd_config"}, system.RunCmdOptions{Capture: true, Check: true})
+		"exists", "/etc/ssh/sshd_config"}, system.RunCmdOpts{Capture: true, Check: true})
 	if res.Err != nil || strings.TrimSpace(res.Stdout) != "true" {
 		slog.Warn("sshd_config not found", "image", filepath.Base(diskPath))
 		return
@@ -1400,7 +1400,7 @@ func ConfigureSSHKeys(ctx context.Context, diskPath string, user string) {
 		"mkdir-p", "/etc/ssh/sshd_config.d",
 		":", fmt.Sprintf("write /etc/ssh/sshd_config.d/mvm.conf %q", sshdConfig),
 		":", fmt.Sprintf("chmod %o /etc/ssh/sshd_config.d/mvm.conf", infra.PublicKeyPerm),
-	}, system.RunCmdOptions{})
+	}, system.RunCmdOpts{})
 
 	slog.Info("Configured SSH key authentication",
 		"user", user,
@@ -1418,7 +1418,7 @@ func EnsureUser(ctx context.Context, diskPath string, user string, userUID, user
 
 	// Check if user already exists + read existing content for append
 	res := system.RunCmdCompat(ctx, []string{"guestfish", "-a", diskPath, "--ro", "-i",
-		"read-file", "/etc/passwd"}, system.RunCmdOptions{Capture: true, Check: true})
+		"read-file", "/etc/passwd"}, system.RunCmdOpts{Capture: true, Check: true})
 	if res.Err != nil {
 		return
 	}
@@ -1434,14 +1434,14 @@ func EnsureUser(ctx context.Context, diskPath string, user string, userUID, user
 	// Read existing /etc/shadow and /etc/group for append
 	existingShadow := ""
 	res2 := system.RunCmdCompat(ctx, []string{"guestfish", "-a", diskPath, "--ro", "-i",
-		"read-file", "/etc/shadow"}, system.RunCmdOptions{Capture: true, Check: true})
+		"read-file", "/etc/shadow"}, system.RunCmdOpts{Capture: true, Check: true})
 	if res2.Err == nil {
 		existingShadow = res2.Stdout
 	}
 
 	existingGroup := ""
 	res3 := system.RunCmdCompat(ctx, []string{"guestfish", "-a", diskPath, "--ro", "-i",
-		"read-file", "/etc/group"}, system.RunCmdOptions{Capture: true, Check: true})
+		"read-file", "/etc/group"}, system.RunCmdOpts{Capture: true, Check: true})
 	if res3.Err == nil {
 		existingGroup = res3.Stdout
 	}
@@ -1485,7 +1485,7 @@ func EnsureUser(ctx context.Context, diskPath string, user string, userUID, user
 		":", fmt.Sprintf("chmod %o /etc/sudoers.d/%s", infra.SudoersPerm, user),
 		":", fmt.Sprintf("chown %d %d %s", userUID, userGID, homeDir),
 		":", fmt.Sprintf("chown %d %d %s/.ssh", userUID, userGID, homeDir),
-	}, system.RunCmdOptions{})
+	}, system.RunCmdOpts{})
 
 	slog.Info("Created user",
 		"user", user,
@@ -1506,7 +1506,7 @@ func GenerateHostKeys(ctx context.Context, diskPath string) {
 	allExist := true
 	for _, key := range keyTypes {
 		res := system.RunCmdCompat(ctx, []string{"guestfish", "-a", diskPath, "--ro", "-i",
-			"exists", "/etc/ssh/" + key}, system.RunCmdOptions{Capture: true, Check: true})
+			"exists", "/etc/ssh/" + key}, system.RunCmdOpts{Capture: true, Check: true})
 		if res.Err != nil || strings.TrimSpace(res.Stdout) != "true" {
 			allExist = false
 			break
@@ -1527,16 +1527,16 @@ func GenerateHostKeys(ctx context.Context, diskPath string) {
 		":", "mkdir-p", "/etc/systemd/system/multi-user.target.wants",
 		":", "ln-s", "/etc/systemd/system/ssh-hostkeygen.service",
 		"/etc/systemd/system/multi-user.target.wants/ssh-hostkeygen.service",
-	}, system.RunCmdOptions{})
+	}, system.RunCmdOpts{})
 
 	// Also check for OpenRC
 	res := system.RunCmdCompat(ctx, []string{"guestfish", "-a", diskPath, "--ro", "-i",
-		"exists", "/sbin/openrc"}, system.RunCmdOptions{Capture: true, Check: true})
+		"exists", "/sbin/openrc"}, system.RunCmdOpts{Capture: true, Check: true})
 	hasOpenRC := res.Err == nil && strings.TrimSpace(res.Stdout) == "true"
 
 	if !hasOpenRC {
 		res = system.RunCmdCompat(ctx, []string{"guestfish", "-a", diskPath, "--ro", "-i",
-			"exists", "/usr/sbin/openrc"}, system.RunCmdOptions{Capture: true, Check: true})
+			"exists", "/usr/sbin/openrc"}, system.RunCmdOpts{Capture: true, Check: true})
 		hasOpenRC = res.Err == nil && strings.TrimSpace(res.Stdout) == "true"
 	}
 
@@ -1544,7 +1544,7 @@ func GenerateHostKeys(ctx context.Context, diskPath string) {
 		system.RunCmdCompat(ctx, []string{"guestfish", "-a", diskPath, "-i",
 			"mkdir-p", "/etc/runlevels/default",
 			":", "ln-sf", "/sbin/openrc-local", "/etc/runlevels/default/local",
-		}, system.RunCmdOptions{})
+		}, system.RunCmdOpts{})
 	}
 
 	slog.Info("Created SSH host key generation service",

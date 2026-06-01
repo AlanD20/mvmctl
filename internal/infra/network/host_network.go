@@ -27,7 +27,7 @@ func CheckIPTablesCommentAvailable(ctx context.Context) bool {
 	result := system.RunCmdCompat(
 		ctx,
 		[]string{"iptables", "-m", "comment", "--comment", "test", "-L"},
-		system.RunCmdOptions{Check: false},
+		system.RunCmdOpts{Check: false},
 	)
 	return result.Success
 }

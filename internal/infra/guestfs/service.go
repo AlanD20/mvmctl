@@ -96,7 +96,7 @@ func (gs *GuestfsService) BuildAppliance(ctx context.Context, cacheDir string) (
 	cmdCtx, cmdCancel := context.WithTimeout(ctx, timeout)
 	defer cmdCancel()
 
-	result := system.RunCmdCompat(cmdCtx, []string{makeTool, applianceDir}, system.RunCmdOptions{
+	result := system.RunCmdCompat(cmdCtx, []string{makeTool, applianceDir}, system.RunCmdOpts{
 		Capture: true,
 		Check:   true,
 		Timeout: timeout,
