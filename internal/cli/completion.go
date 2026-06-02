@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/crypto"
 
 	"github.com/spf13/cobra"
 )
@@ -25,10 +26,7 @@ func completeNetworkNames(cmd *cobra.Command, args []string, toComplete string) 
 		if net.Name != "" && strings.HasPrefix(net.Name, toComplete) && !slices.Contains(results, net.Name) {
 			results = append(results, net.Name)
 		}
-		short := net.ID
-		if len(short) > 6 {
-			short = short[:6]
-		}
+		short := crypto.Truncate(net.ID, 6)
 		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
 			results = append(results, short)
 		}
@@ -41,13 +39,10 @@ func completeImageIDs(cmd *cobra.Command, args []string, toComplete string) ([]s
 	if opRef == nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	images, _, _ := opRef.ImageListAll(cmd.Context(), false, "", nil, false)
+	images, _, _ := opRef.ImageListAll(cmd.Context(), false, "", false)
 	var results []string
 	for _, img := range images {
-		short := img.ID
-		if len(short) > 6 {
-			short = short[:6]
-		}
+		short := crypto.Truncate(img.ID, 6)
 		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
 			results = append(results, short)
 		}
@@ -72,10 +67,7 @@ func completeKernelIDs(cmd *cobra.Command, args []string, toComplete string) ([]
 				results = append(results, combo)
 			}
 		}
-		short := k.ID
-		if len(short) > 6 {
-			short = short[:6]
-		}
+		short := crypto.Truncate(k.ID, 6)
 		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
 			results = append(results, short)
 		}
@@ -97,10 +89,7 @@ func completeBinaryVersions(cmd *cobra.Command, args []string, toComplete string
 		if b.Version != "" && strings.HasPrefix(b.Version, toComplete) && !slices.Contains(results, b.Version) {
 			results = append(results, b.Version)
 		}
-		short := b.ID
-		if len(short) > 6 {
-			short = short[:6]
-		}
+		short := crypto.Truncate(b.ID, 6)
 		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
 			results = append(results, short)
 		}
@@ -144,10 +133,7 @@ func completeVolumeNames(cmd *cobra.Command, args []string, toComplete string) (
 		if v.Name != "" && strings.HasPrefix(v.Name, toComplete) && !slices.Contains(results, v.Name) {
 			results = append(results, v.Name)
 		}
-		short := v.ID
-		if len(short) > 6 {
-			short = short[:6]
-		}
+		short := crypto.Truncate(v.ID, 6)
 		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
 			results = append(results, short)
 		}
@@ -225,7 +211,7 @@ func completeRemoteImageIDs(cmd *cobra.Command, args []string, toComplete string
 	// Match Python: ImageOperation.list_all(remote=True) returns list[ImageVersion]
 	// ImageVersion has no ID field in either Python or Go, so the Python completion
 	// `hasattr(img, "id")` always returns False, yielding zero results. Match that.
-	_, _, _ = opRef.ImageListAll(cmd.Context(), true, "", nil, false)
+	_, _, _ = opRef.ImageListAll(cmd.Context(), true, "", false)
 	var results []string
 	return results, cobra.ShellCompDirectiveNoFileComp
 }
@@ -243,10 +229,7 @@ func completeVMNamesEnhanced(cmd *cobra.Command, _ []string, toComplete string) 
 			results = append(results, vm.Name)
 		}
 		if vm.ID != "" {
-			short := vm.ID
-			if len(short) > 6 {
-				short = short[:6]
-			}
+			short := crypto.Truncate(vm.ID, 6)
 			if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
 				results = append(results, short)
 			}

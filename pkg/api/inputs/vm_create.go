@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/model"
 )
 
@@ -132,5 +133,5 @@ func deriveFirecrackerVersionFromPath(path string) string {
 	}
 	// fallback: custom-{path_hash}
 	h := sha256.Sum256([]byte(path))
-	return fmt.Sprintf("custom-%x", h[:6])
+	return "custom-" + crypto.Truncate(fmt.Sprintf("%x", h[:]), 12)
 }

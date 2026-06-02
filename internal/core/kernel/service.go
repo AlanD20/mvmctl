@@ -1421,7 +1421,7 @@ func (s *Service) computeConfigHash(spec *model.KernelSpec, version string, user
 			h.Write(data)
 		}
 	}
-	return fmt.Sprintf("%x", h.Sum(nil))[:16]
+	return crypto.Truncate(fmt.Sprintf("%x", h.Sum(nil)), 16)
 }
 
 // pythonStr formats a []string like Python's str() on a list:

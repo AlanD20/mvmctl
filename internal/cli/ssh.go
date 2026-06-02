@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"mvmctl/internal/infra/crypto"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
 
@@ -31,10 +32,7 @@ func completeVMNames(cmd *cobra.Command, args []string, toComplete string) ([]st
 			results = append(results, vm.Name)
 		}
 		if vm.ID != "" {
-			short := vm.ID
-			if len(short) > 6 {
-				short = short[:6]
-			}
+			short := crypto.Truncate(vm.ID, 6)
 			if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
 				results = append(results, short)
 			}
