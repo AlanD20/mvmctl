@@ -11,6 +11,7 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/internal/infra/operation"
 	"mvmctl/internal/infra/system"
 	"mvmctl/internal/infra/version"
 	"mvmctl/pkg/api/inputs"
@@ -65,7 +66,9 @@ func (op *Operation) BinaryPrune(ctx context.Context, dryRun bool, force bool) *
 // BinaryPull downloads or builds a binary.
 // Matches Python's BinaryOperation.pull() exactly — uses BinaryPullRequest
 // resolution pipeline and wraps all BinaryErrors in code="binary.pull_failed".
-func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInput) *errs.OperationResult {
+func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInput,
+	onProgress func(errs.ProgressEvent)) *errs.OperationResult {
+
 	// Python: request = BinaryPullRequest(inputs=inputs, db=db); resolved = request.resolve()
 	request := inputs.NewBinaryPullRequest(*input, op.Connection.DB())
 	resolved, err := request.Resolve(ctx)
@@ -80,7 +83,8 @@ func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInp
 
 	// ---- Git build path (parallel to release download) ----
 	if resolved.GitRef != nil && *resolved.GitRef != "" {
-		// Python passes bin_dir=resolved.bin_dir to BinaryService.build_from_source()
+		emitProgress(onProgress, "build", "running", "Building Firecracker from source...")
+
 		binaries, err := op.Services.Binary.BuildFromSource(ctx, *resolved.GitRef)
 		if err != nil {
 			return &errs.OperationResult{
@@ -111,6 +115,8 @@ func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInp
 			"version": versionStr,
 		}, "")
 
+		emitProgress(onProgress, "complete", "complete", "Firecracker built successfully")
+
 		return &errs.OperationResult{
 			Status:  "success",
 			Code:    "binary.built_from_source",
@@ -122,6 +128,7 @@ func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInp
 	// ---- Release download path ----
 	resolvedVersion := resolved.Version
 	if resolvedVersion == "" {
+		emitProgress(onProgress, "listing", "running", "Fetching remote versions...")
 		remoteVersions, err := op.Services.Binary.ListRemote(ctx, 20)
 		if err != nil {
 			return &errs.OperationResult{
@@ -138,7 +145,8 @@ func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInp
 				Message: "No remote Firecracker versions found",
 			}
 		}
-		resolvedVersion = remoteVersions[0]
+		resolvedVersion = remoteVersions[0].Version
+		emitProgress(onProgress, "listing", "complete", fmt.Sprintf("Found Firecracker v%s", resolvedVersion))
 	}
 
 	normalized := binary.NormalizeVersion(resolvedVersion)
@@ -160,9 +168,11 @@ func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInp
 	// arch maps the current architecture to Firecracker's naming convention.
 	arch := system.RuntimeArch()
 
-	// Python passes bin_dir=resolved.bin_dir to BinaryService.download_firecracker();
-	// Go uses s.binDir from the Service struct (same value).
-	binaries, err := op.Services.Binary.DownloadFirecracker(ctx, resolvedVersion, arch, nil)
+	// Bridge byte-level download progress to phase-level ProgressEvent
+	emitProgress(onProgress, "download", "running", "Downloading Firecracker...")
+	progressBridge := operation.DownloadProgressBridge(onProgress)
+
+	binaries, err := op.Services.Binary.DownloadFirecracker(ctx, resolvedVersion, arch, progressBridge)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
@@ -180,6 +190,8 @@ func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInp
 	}
 
 	op.AuditLog.LogOperation("binary.pull", map[string]interface{}{"version": resolvedVersion}, "")
+
+	emitProgress(onProgress, "complete", "complete", "Firecracker downloaded successfully")
 
 	return &errs.OperationResult{
 		Status:  "success",
@@ -320,11 +332,13 @@ func (op *Operation) BinaryRemoveByVersion(ctx context.Context, version string, 
 // When limit is nil and remote=true, reads default from settings like Python:
 //
 //	SettingsService.resolve(Database(), "defaults.binary", "remote_version_limit")
-func (op *Operation) BinaryList(ctx context.Context, remote bool, limit *int) ([]*model.BinaryItem, []string, error) {
+func (op *Operation) BinaryList(ctx context.Context, remote bool, limit *int, onProgress func(errs.ProgressEvent)) ([]*model.BinaryItem, []model.VersionInfo, error) {
 	if !remote {
 		items, err := op.Services.Binary.ListAll(ctx, false, true)
 		return items, nil, err
 	}
+
+	emitProgress(onProgress, "listing", "running", "Fetching remote versions...")
 
 	lmt := 0
 	if limit != nil {
@@ -356,7 +370,22 @@ func (op *Operation) BinaryList(ctx context.Context, remote bool, limit *int) ([
 		}
 	}
 	versions, err := op.Services.Binary.ListRemote(ctx, lmt)
-	return nil, versions, err
+	if err != nil {
+		return nil, nil, err
+	}
+	// Mark locally cached versions
+	local, _ := op.Repos.Binary.ListAll(ctx)
+	localSet := make(map[string]bool, len(local))
+	for _, l := range local {
+		localSet[l.Version] = true
+	}
+	for i := range versions {
+		if localSet[versions[i].Version] {
+			versions[i].IsPresent = true
+		}
+	}
+	emitProgress(onProgress, "listing", "complete", fmt.Sprintf("Found %d remote version(s)", len(versions)))
+	return nil, versions, nil
 }
 
 // BinaryGet returns binaries by identifier.

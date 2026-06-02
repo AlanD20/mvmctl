@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/model"
@@ -259,27 +260,36 @@ func (r *HttpDirVersionResolver) Resolve(
 	limit int,
 ) map[string][]model.VersionInfo {
 	result := make(map[string][]model.VersionInfo)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
 
-	// Phase 1: http-dir resolver types
+	// Phase 1: http-dir resolver types — parallel per config
 	for _, config := range configs {
-		if config.Resolver != "http-dir" {
-			continue
-		}
-		if config.VersionsURL == "" {
+		if config.Resolver != "http-dir" || config.VersionsURL == "" {
 			continue
 		}
 
-		opts := config.Options
-		versionDiscoveries := opts.VersionDiscoveries
-
-		if len(versionDiscoveries) > 0 {
-			r.resolveViaVersionDiscoveries(ctx, config, arch, cacheTTLSeconds, result)
-		} else {
-			r.resolveViaDirectoryListing(ctx, config, arch, cacheTTLSeconds, result)
-		}
+		wg.Add(1)
+		cfg := config
+		go func() {
+			defer wg.Done()
+			opts := cfg.Options
+			local := make(map[string][]model.VersionInfo)
+			if len(opts.VersionDiscoveries) > 0 {
+				r.resolveViaVersionDiscoveries(ctx, cfg, arch, cacheTTLSeconds, local)
+			} else {
+				r.resolveViaDirectoryListing(ctx, cfg, arch, cacheTTLSeconds, local)
+			}
+			mu.Lock()
+			for k, v := range local {
+				result[k] = v
+			}
+			mu.Unlock()
+		}()
 	}
+	wg.Wait()
 
-	// Phase 2: single-source types (no resolver or empty resolver)
+	// Phase 2: single-source types (no resolver or empty resolver) — parallel
 	for _, config := range configs {
 		if config.Resolver != "" && config.Resolver != "http-dir" {
 			if config.Resolver == "firecracker-s3" {
@@ -290,79 +300,107 @@ func (r *HttpDirVersionResolver) Resolve(
 			continue
 		}
 
-		typeName := config.Type
-		if _, exists := result[typeName]; exists {
-			continue
-		}
+		wg.Add(1)
+		cfg := config
+		go func() {
+			defer wg.Done()
 
-		if config.DownloadURL == "" {
-			continue
-		}
-
-		resolvedArch := arch
-		if mapped, ok := config.Options.ArchMapping[resolvedArch]; ok {
-			resolvedArch = mapped
-		}
-
-		tmplVars := map[string]string{
-			"version":  "latest",
-			"codename": "",
-			"arch":     resolvedArch,
-		}
-
-		downloadURL, err := infra.RenderTemplate(config.DownloadURL, tmplVars)
-		if err != nil {
-			slog.Warn("Failed to render download URL", "type", typeName, "error", err)
-			continue
-		}
-
-		var sha256URL string
-		if config.SHA256URL != "" {
-			var rendered string
-			rendered, err = infra.RenderTemplate(config.SHA256URL, tmplVars)
-			if err != nil {
-				slog.Warn("Failed to render sha256 URL", "type", typeName, "error", err)
-			} else {
-				sha256URL = rendered
+			typeName := cfg.Type
+			mu.Lock()
+			_, exists := result[typeName]
+			mu.Unlock()
+			if exists {
+				return
 			}
-		}
 
-		displayName := config.Name
-		if config.VersionNameTmpl != "" {
-			if dn, err := infra.RenderTemplate(config.VersionNameTmpl, map[string]string{
+			if cfg.DownloadURL == "" {
+				return
+			}
+
+			resolvedArch := arch
+			if mapped, ok := cfg.Options.ArchMapping[resolvedArch]; ok {
+				resolvedArch = mapped
+			}
+
+			tmplVars := map[string]string{
 				"version":  "latest",
 				"codename": "",
-				"type":     typeName,
-			}); err == nil {
-				displayName = dn
+				"arch":     resolvedArch,
 			}
-		}
 
-		result[typeName] = []model.VersionInfo{
-			{
-				Version:     "latest",
-				DownloadURL: downloadURL,
-				SHA256URL:   sha256URL,
-				DisplayName: displayName,
-				Type:        typeName,
-				Format:      config.Format,
-			},
-		}
+			downloadURL, err := infra.RenderTemplate(cfg.DownloadURL, tmplVars)
+			if err != nil {
+				slog.Warn("Failed to render download URL", "type", typeName, "error", err)
+				return
+			}
+
+			var sha256URL string
+			if cfg.SHA256URL != "" {
+				var rendered string
+				rendered, err = infra.RenderTemplate(cfg.SHA256URL, tmplVars)
+				if err != nil {
+					slog.Warn("Failed to render sha256 URL", "type", typeName, "error", err)
+				} else {
+					sha256URL = rendered
+				}
+			}
+
+			displayName := cfg.Name
+			if cfg.VersionNameTmpl != "" {
+				if dn, err := infra.RenderTemplate(cfg.VersionNameTmpl, map[string]string{
+					"version":  "latest",
+					"codename": "",
+					"type":     typeName,
+				}); err == nil {
+					displayName = dn
+				}
+			}
+
+			mu.Lock()
+			result[typeName] = []model.VersionInfo{
+				{
+					Version:     "latest",
+					DownloadURL: downloadURL,
+					SHA256URL:   sha256URL,
+					DisplayName: displayName,
+					Type:        typeName,
+					Format:      cfg.Format,
+				},
+			}
+			mu.Unlock()
+		}()
 	}
+	wg.Wait()
 
-	// Phase 3: firecracker-s3 resolver types
+	// Phase 3: firecracker-s3 resolver types — parallel
 	for _, config := range configs {
 		if config.Resolver != "firecracker-s3" {
 			continue
 		}
 
-		typeName := config.Type
-		if _, exists := result[typeName]; exists {
-			continue
-		}
+		wg.Add(1)
+		cfg := config
+		go func() {
+			defer wg.Done()
 
-		r.resolveViaFirecrackerS3(ctx, config, arch, ciVersion, cacheTTLSeconds, result)
+			typeName := cfg.Type
+			mu.Lock()
+			_, exists := result[typeName]
+			mu.Unlock()
+			if exists {
+				return
+			}
+
+			local := make(map[string][]model.VersionInfo)
+			r.resolveViaFirecrackerS3(ctx, cfg, arch, ciVersion, cacheTTLSeconds, local)
+			mu.Lock()
+			for k, v := range local {
+				result[k] = v
+			}
+			mu.Unlock()
+		}()
 	}
+	wg.Wait()
 
 	// Apply global limit across all type groups
 	if limit > 0 {
@@ -482,6 +520,7 @@ func (r *HttpDirVersionResolver) resolveViaDirectoryListing(
 				displayName = dn
 			}
 		}
+		displayName = infra.ToTitle(displayName)
 
 		versions = append(versions, model.VersionInfo{
 			Version:     versionStr,

@@ -79,7 +79,7 @@ func (s *Service) GetDefaultFirecracker(ctx context.Context) (*model.BinaryItem,
 // ── Remote listing ─────────────────────────────────────────────────────────
 
 // ListRemote fetches Firecracker release versions from GitHub.
-func (s *Service) ListRemote(ctx context.Context, limit int) ([]string, error) {
+func (s *Service) ListRemote(ctx context.Context, limit int) ([]model.VersionInfo, error) {
 	url := fmt.Sprintf("%s?per_page=%d", infra.FirecrackerGithubReleasesAPIURL, limit)
 
 	raw, err := s.dl.GetContent(ctx, download.RequestOpts{
@@ -97,15 +97,19 @@ func (s *Service) ListRemote(ctx context.Context, limit int) ([]string, error) {
 			fmt.Sprintf("Unexpected response from GitHub: %v", err))
 	}
 
-	versions := make([]string, 0, len(releases))
+	versions := make([]model.VersionInfo, 0, len(releases))
 	for _, rel := range releases {
 		if rel.TagName != "" {
-			versions = append(versions, NormalizeVersion(rel.TagName))
+			versions = append(versions, model.VersionInfo{
+				Version: NormalizeVersion(rel.TagName),
+				Type:    "bin",
+				Name:    "firecracker",
+			})
 		}
 	}
 
 	sort.Slice(versions, func(i, j int) bool {
-		return version.SemverGreater(versions[i], versions[j])
+		return version.SemverGreater(versions[i].Version, versions[j].Version)
 	})
 
 	return versions, nil

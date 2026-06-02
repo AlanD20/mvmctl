@@ -1186,6 +1186,22 @@ func (s *Service) ListRemoteVersions(
 	raw := s.resolver.Resolve(ctx, configs, arch, ciVersion, cacheTTLSeconds, limit)
 	result := make(map[string][]model.VersionInfo, len(raw))
 	for key, versions := range raw {
+		// Extract base type from the resolver key (e.g. "official-v6.x" → "official")
+		baseType := key
+		if idx := strings.Index(key, "-v"); idx > 0 {
+			baseType = key[:idx]
+		}
+
+		// Build human-readable Name from type key
+		parts := strings.SplitN(key, "-", 2)
+		name := strings.ToUpper(parts[0][:1]) + parts[0][1:]
+		if len(parts) > 1 {
+			name += " " + parts[1]
+		}
+		if strings.HasPrefix(key, "official") {
+			name += " (build required)"
+		}
+
 		converted := make([]model.VersionInfo, len(versions))
 		for i, v := range versions {
 			converted[i] = model.VersionInfo{
@@ -1193,8 +1209,9 @@ func (s *Service) ListRemoteVersions(
 				DownloadURL: v.DownloadURL,
 				SHA256URL:   v.SHA256URL,
 				DisplayName: v.DisplayName,
-				Type:        v.Type,
+				Type:        baseType,
 				Format:      v.Format,
+				Name:        name,
 			}
 		}
 		result[key] = converted

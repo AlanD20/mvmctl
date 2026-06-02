@@ -254,7 +254,7 @@ func (op *Operation) initStepBinary(
 	nonInteractive bool,
 	downloadVersion string,
 ) (InitStepResult, *errs.NeedsInteraction) {
-	local, _, err := op.BinaryList(ctx, false, nil)
+	local, _, err := op.BinaryList(ctx, false, nil, nil)
 	if err != nil {
 		return InitStepResult{Step: "binary", Success: false, Message: "Failed to list binaries"}, nil
 	}
@@ -314,7 +314,7 @@ func (op *Operation) initStepBinary(
 func (op *Operation) initDownloadBinary(ctx context.Context, version string) InitStepResult {
 	// Python: BinaryOperation.pull(BinaryPullInput(version=version, set_default=True))
 	// Python: try: fetch_result = BinaryOperation.pull(...); if isinstance(fetch_result, NeedsInteraction): ...
-	pullResult := op.BinaryPull(ctx, &inputs.BinaryPullInput{Version: version, SetDefault: true})
+	pullResult := op.BinaryPull(ctx, &inputs.BinaryPullInput{Version: version, SetDefault: true}, nil)
 
 	// Python: if isinstance(fetch_result, NeedsInteraction):
 	// In Go, Pull returns *OperationResult. A NeedsInteraction code indicates
@@ -352,13 +352,13 @@ func (op *Operation) initDownloadBinaryLatest(ctx context.Context) InitStepResul
 	//         return InitStepResult("binary", False, f"Download failed: {e}")
 	// Go wraps the list and pull in an error-checking pattern.
 	one := 1
-	_, remote, err := op.BinaryList(ctx, true, &one)
+	_, remote, err := op.BinaryList(ctx, true, &one, nil)
 	if err != nil || len(remote) == 0 {
 		return InitStepResult{Step: "binary", Success: false, Message: "No remote versions found"}
 	}
 
-	version := remote[0]
-	pullResult := op.BinaryPull(ctx, &inputs.BinaryPullInput{Version: version, SetDefault: true})
+	version := remote[0].Version
+	pullResult := op.BinaryPull(ctx, &inputs.BinaryPullInput{Version: version, SetDefault: true}, nil)
 
 	// Python: if isinstance(fetch_result, NeedsInteraction):
 	if isNeedsInteraction(pullResult) {
@@ -407,11 +407,14 @@ func (op *Operation) initBinaryNeedsInteraction(ctx context.Context) (InitStepRe
 	// Python: try: versions = BinaryOperation.list_all(remote=True, limit=5)
 	//         except BinaryError: versions = []
 	five := 5
-	_, remote, err := op.BinaryList(ctx, true, &five)
+	_, remote, err := op.BinaryList(ctx, true, &five, nil)
 
 	var versions []string
 	if err == nil {
-		versions = remote
+		versions = make([]string, len(remote))
+		for i := range remote {
+			versions[i] = remote[i].Version
+		}
 	}
 
 	if len(versions) == 0 {

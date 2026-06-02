@@ -649,7 +649,7 @@ func (op *Operation) ImageRemove(ctx context.Context, input *inputs.ImageInput, 
 // ImageListAll returns images.
 // Matches Python's ImageOperation.list_all() exactly.
 // When remote=false, returns ([]*model.ImageItem, nil, error).
-// When remote=true, returns (nil, []*model.ImageVersion, error).
+// When remote=true, returns (nil, []model.VersionInfo, error).
 // When type_filter is set and remote=true, only returns versions for that specific image type.
 // no_cache bypasses cached version listings when remote=true.
 func (op *Operation) ImageListAll(
@@ -657,9 +657,11 @@ func (op *Operation) ImageListAll(
 	remote bool,
 	typeFilter string,
 	noCache bool,
-) ([]*model.ImageItem, []*model.ImageVersion, error) {
+	onProgress func(errs.ProgressEvent),
+) ([]*model.ImageItem, []model.VersionInfo, error) {
 	if remote {
-		// Discover remote images via version resolver
+		emitProgress(onProgress, "listing", "running", "Fetching remote images...")
+
 		// Resolve ci_version from default firecracker binary
 		resolvedCIVersion := ""
 		defaultBin, _ := op.Repos.Binary.GetDefault(ctx, "firecracker")
@@ -714,19 +716,30 @@ func (op *Operation) ImageListAll(
 			}
 			imageTypesConfig = filtered
 			if len(imageTypesConfig) == 0 {
-				return nil, []*model.ImageVersion{}, nil
+				return nil, []model.VersionInfo{}, nil
 			}
 		}
 
-		// Use ResolveVersions to get ImageVersion objects (matches Python exactly)
+		// Use ResolveVersions to get VersionInfo objects
 		versionMap := image.ResolveVersions(ctx, imageTypesConfig, arch, cacheTTLParam, resolvedCIVersion)
-		var versions []*model.ImageVersion
+		var versions []model.VersionInfo
 		for _, vs := range versionMap {
-			for i := range vs {
-				versions = append(versions, &vs[i])
+			versions = append(versions, vs...)
+		}
+
+		// Mark locally cached images
+		local, _ := op.Repos.Image.ListAll(ctx)
+		localSet := make(map[string]bool, len(local))
+		for _, l := range local {
+			localSet[l.Type+":"+l.Version] = true
+		}
+		for i := range versions {
+			if localSet[versions[i].Type+":"+versions[i].Version] {
+				versions[i].IsPresent = true
 			}
 		}
 
+		emitProgress(onProgress, "listing", "complete", fmt.Sprintf("Found %d remote image(s)", len(versions)))
 		return nil, versions, nil
 	}
 

@@ -605,7 +605,7 @@ func GetSpecsFor(
 				continue
 			}
 
-			var chosen model.ImageVersion
+			var chosen model.VersionInfo
 			if version != "" {
 				found := false
 				for _, v := range listings {
@@ -682,8 +682,8 @@ func GetSpecsFor(
 	return results, nil
 }
 
-// specFromVersion constructs an ImageSpec from a resolved ImageVersion.
-func specFromVersion(v model.ImageVersion, arch string) *model.ImageSpec {
+// specFromVersion constructs an ImageSpec from a resolved VersionInfo.
+func specFromVersion(v model.VersionInfo, arch string) *model.ImageSpec {
 	return &model.ImageSpec{
 		Type:    v.Type,
 		Version: v.Version,

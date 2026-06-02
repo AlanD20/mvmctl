@@ -495,10 +495,16 @@ func (op *Operation) KernelList(
 	ctx context.Context,
 	remote bool,
 	noCache bool,
+	onProgress func(errs.ProgressEvent),
 ) ([]*model.KernelItem, []model.VersionInfo, error) {
 	if remote {
+		emitProgress(onProgress, "listing", "running", "Fetching remote kernel versions...")
 		versions, err := op.kernelListRemote(ctx, noCache)
-		return nil, versions, err
+		if err != nil {
+			return nil, nil, err
+		}
+		emitProgress(onProgress, "listing", "complete", fmt.Sprintf("Found %d remote kernel(s)", len(versions)))
+		return nil, versions, nil
 	}
 	items, err := op.Services.Kernel.List(ctx)
 	return items, nil, err
@@ -573,6 +579,17 @@ func (op *Operation) kernelListRemote(ctx context.Context, noCache bool) ([]mode
 	flattened := make([]model.VersionInfo, 0)
 	for _, versions := range versionMap {
 		flattened = append(flattened, versions...)
+	}
+	// Mark locally cached kernels
+	local, _ := op.Repos.Kernel.ListAll(ctx)
+	localSet := make(map[string]bool, len(local))
+	for _, l := range local {
+		localSet[l.Version] = true
+	}
+	for i := range flattened {
+		if localSet[flattened[i].Version] {
+			flattened[i].IsPresent = true
+		}
 	}
 	return flattened, nil
 }
