@@ -80,13 +80,13 @@ func newImageListCmd(op *api.Operation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if remote {
 				fmt.Fprintln(os.Stderr, "Fetching remote images")
-				_, versions, err := op.ImageListAll(cmd.Context(), true, typeFilter, nil, noCache)
+				_, versions, err := op.ImageListAll(cmd.Context(), true, typeFilter, noCache)
 				if err != nil {
 					return err
 				}
 				printRemoteImages(versions, jsonOutput)
 			} else {
-				images, _, err := op.ImageListAll(cmd.Context(), false, "", nil, false)
+				images, _, err := op.ImageListAll(cmd.Context(), false, "", false)
 				if err != nil {
 					return err
 				}

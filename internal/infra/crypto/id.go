@@ -56,11 +56,7 @@ func BinaryID(filePath, name, version string) (string, error) {
 func VMID(name, createdAt string) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "%s:%s", name, createdAt)
-	full := fmt.Sprintf("%x", h.Sum(nil))
-	if len(full) > 32 {
-		return full[:32]
-	}
-	return full
+	return Truncate(fmt.Sprintf("%x", h.Sum(nil)), 32)
 }
 
 // NetworkID generates a 64-char SHA256 network ID from name, subnet, and timestamp.
@@ -87,4 +83,13 @@ func ShortenID(id string, length ...int) (string, error) {
 		return "", fmt.Errorf("hash '%s' is shorter than requested length %d", id, n)
 	}
 	return id[:n], nil
+}
+
+// Truncate returns the first n characters of s.
+// If s is shorter than n, returns s unchanged. Never errors.
+func Truncate(s string, n int) string {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
 }

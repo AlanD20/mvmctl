@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"mvmctl/internal/cli/common"
+	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/model"
 	infranet "mvmctl/internal/infra/network"
 	"mvmctl/pkg/api"
@@ -338,11 +339,7 @@ func newNetworkSyncCmd(op *api.Operation) *cobra.Command {
 				shortID := common.Cli.FormatID(nid)
 				name := nameMap[nid]
 				if name == "" {
-					if len(nid) > 8 {
-						name = nid[:8]
-					} else {
-						name = nid
-					}
+					name = crypto.Truncate(nid, 8)
 				}
 				rows = append(rows, []string{
 					shortID,

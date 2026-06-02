@@ -646,33 +646,16 @@ func (op *Operation) ImageRemove(ctx context.Context, input *inputs.ImageInput, 
 	return &errs.BatchResult{Items: results}
 }
 
-// ImageFindExisting checks DB for existing image for a spec.
-// Matches Python's ImageOperation.find_existing_image().
-func (op *Operation) ImageFindExisting(spec *model.ImageSpec) *model.ImageItem {
-	item, _ := op.Repos.Image.GetByType(context.Background(), spec.Type)
-	if item == nil && spec.Version != "" {
-		item, _ = op.Repos.Image.GetByVersionAndType(context.Background(), spec.Version, spec.Type)
-	}
-	if item != nil && item.Path != "" {
-		if _, err := os.Stat(item.Path); err == nil {
-			return item
-		}
-	}
-	return nil
-}
-
 // ImageListAll returns images.
 // Matches Python's ImageOperation.list_all() exactly.
 // When remote=false, returns ([]*model.ImageItem, nil, error).
 // When remote=true, returns (nil, []*model.ImageVersion, error).
 // When type_filter is set and remote=true, only returns versions for that specific image type.
-// When inputs is set and remote=false, filters local images by the given identifiers.
 // no_cache bypasses cached version listings when remote=true.
 func (op *Operation) ImageListAll(
 	ctx context.Context,
 	remote bool,
 	typeFilter string,
-	imgInputs *inputs.ImageInput,
 	noCache bool,
 ) ([]*model.ImageItem, []*model.ImageVersion, error) {
 	if remote {
@@ -748,15 +731,6 @@ func (op *Operation) ImageListAll(
 	}
 
 	// Local images from DB
-	if imgInputs != nil {
-		// Filter by identifiers if provided
-		request := inputs.NewImageRequest(*imgInputs, op.Connection.DB(), op.Repos.Image)
-		resolved, err := request.Resolve(ctx)
-		if err != nil {
-			return nil, nil, err
-		}
-		return resolved.Images, nil, nil
-	}
 	items, err := op.Services.Image.ListAll(ctx, true, false)
 	return items, nil, err
 }
@@ -833,11 +807,7 @@ func (op *Operation) ImageSetDefault(ctx context.Context, input *inputs.ImageInp
 		}
 	}
 
-	truncatedID := img.ID
-	if len(truncatedID) > 6 {
-		truncatedID = truncatedID[:6]
-	}
-	op.AuditLog.LogOperation("image.set_default", map[string]any{"id": truncatedID}, "")
+	op.AuditLog.LogOperation("image.set_default", map[string]any{"id": img.ID}, "")
 	return &errs.OperationResult{
 		Status: "success",
 		Code:   "image.default_set",
@@ -854,5 +824,3 @@ func isPartitionDetectionError(err error) bool {
 	}
 	return de.Code == errs.CodeRootPartitionDetection || de.Code == errs.CodeTieDetected
 }
-
-// Compile-time check

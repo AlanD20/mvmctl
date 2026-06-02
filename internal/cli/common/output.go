@@ -17,6 +17,7 @@ import (
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/spf13/cobra"
 
+	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/pkg/api"
 )
@@ -516,10 +517,7 @@ func (c *MVMCli) FormatID(idString string) string {
 	if strings.HasPrefix(idString, "SHA256:") {
 		idString = idString[len("SHA256:"):]
 	}
-	if len(idString) > 6 {
-		return idString[:6]
-	}
-	return idString
+	return crypto.Truncate(idString, 6)
 }
 
 // FormatMarker returns "*" if isDefault, else empty string.
