@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -304,10 +305,19 @@ func (op *Operation) ImagePull(
 		if dst != src {
 			os.Remove(dst)
 			if err := os.Rename(src, dst); err != nil {
-				data, readErr := os.ReadFile(src)
-				if readErr == nil {
-					os.WriteFile(dst, data, 0644)
-					os.Remove(src)
+				srcFile, openErr := os.Open(src)
+				if openErr == nil {
+					dstFile, createErr := os.Create(dst)
+					if createErr == nil {
+						_, copyErr := io.Copy(dstFile, srcFile)
+						dstFile.Close()
+						srcFile.Close()
+						if copyErr == nil {
+							os.Remove(src)
+						}
+					} else {
+						srcFile.Close()
+					}
 				}
 			}
 			imageItem.Path = dst

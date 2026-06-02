@@ -223,9 +223,9 @@ type SudoResult struct {
 // as well as HOME and PATH. extraEnv are additional KEY=VALUE pairs placed
 // after scanned vars so they take precedence (env uses last-wins).
 func RunWithSudo(ctx context.Context, args []string, extraEnv ...string) SudoResult {
-	mvmBin, err := exec.LookPath(infra.CLIName)
+	mvmBin, err := os.Executable()
 	if err != nil {
-		mvmBin, err = os.Executable()
+		mvmBin, err = exec.LookPath(infra.CLIName)
 		if err != nil {
 			mvmBin = infra.CLIName
 		}

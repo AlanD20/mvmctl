@@ -25,7 +25,8 @@ func runWireOp(ctx context.Context, input *loopmountsvc.WireInput) (*loopmountsv
 		return nil, fmt.Errorf("marshal wire input: %w", err)
 	}
 
-	result := system.RunCmdCompat(ctx, []string{"sudo", "env", "mvm", "run", "provision"},
+	mvmPath, _ := os.Executable()
+	result := system.RunCmdCompat(ctx, []string{"sudo", mvmPath, "run", "provision"},
 		system.RunCmdOpts{Capture: true, Check: true, Input: string(data)})
 	if result.Err != nil {
 		return nil, fmt.Errorf("provision subprocess failed: %s: %w", result.Stderr, result.Err)
@@ -180,6 +181,8 @@ func (b *LoopMountBackend) Run(ctx context.Context) error {
 // ═════════════════════════════════════════════════════════════════════════════
 
 // ConvertTo converts the image filesystem to targetFS via loop-mount subprocess.
+// On success, updates b.fsType so subsequent operations (deblob, shrink) use
+// the correct filesystem type for mounting.
 func (b *LoopMountBackend) ConvertTo(ctx context.Context, targetFS string) error {
 	_, err := runWireOp(ctx, &loopmountsvc.WireInput{
 		Image:    b.rootfsPath,
@@ -187,7 +190,11 @@ func (b *LoopMountBackend) ConvertTo(ctx context.Context, targetFS string) error
 		FsType:   b.fsType,
 		TargetFS: targetFS,
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	b.fsType = targetFS
+	return nil
 }
 
 // ExtractPartition extracts root partition from a raw disk image.

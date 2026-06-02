@@ -133,7 +133,9 @@ func ValidateSudoersBinaries() error {
 // that matches Python's dict literal order from constants.py.
 func GenerateSudoersContent(groupName string) string {
 	// Service binaries via "mvm run <service>" pattern (sudoers wildcard)
-	runCmd := filepath.Join(infra.GetBinDir(), infra.CLIName, "run", "*")
+	// Use the current binary's path so sudoers matches how provisioner invokes it.
+	mvmPath, _ := os.Executable()
+	runCmd := mvmPath + " run *"
 	binaries := append(infra.PrivilegedBinariesOrdered[:], runCmd)
 	binariesStr := strings.Join(binaries, ", ")
 	return fmt.Sprintf(

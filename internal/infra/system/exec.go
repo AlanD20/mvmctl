@@ -107,11 +107,13 @@ func RunCmdCompat(ctx context.Context, args []string, opts RunCmdOpts) *RunCmdRe
 		return &RunCmdResult{Err: err, ExitCode: -1}
 	}
 	return &RunCmdResult{
-		Stdout:   result.Stdout,
-		Stderr:   result.Stderr,
-		ExitCode: result.ExitCode,
-		Success:  result.ExitCode == 0 && err == nil,
-		Err:      err,
+		Stdout:      result.Stdout,
+		Stderr:      result.Stderr,
+		StdoutBytes: []byte(result.Stdout),
+		StderrBytes: []byte(result.Stderr),
+		ExitCode:    result.ExitCode,
+		Success:     result.ExitCode == 0 && err == nil,
+		Err:         err,
 	}
 }
 

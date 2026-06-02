@@ -183,9 +183,14 @@ func (s *initState) handleSudoRequired(ctx context.Context, interaction *errs.Ne
 		return nil
 	}
 
+	sudoCmd, _ := interaction.Context["command"].(string)
+	if sudoCmd == "" {
+		sudoCmd = fmt.Sprintf("sudo %s host init", infra.CLIName)
+	}
+
 	if hostStateBefore.GroupExists {
 		common.Cli.Warning("sudoers file is missing")
-		common.Cli.Info(fmt.Sprintf("run:  sudo %s host init", infra.CLIName))
+		common.Cli.Info(fmt.Sprintf("run:  %s", sudoCmd))
 	} else {
 		common.Cli.Warning("this requires sudo once")
 		common.Cli.Info(fmt.Sprintf(
@@ -200,18 +205,18 @@ func (s *initState) handleSudoRequired(ctx context.Context, interaction *errs.Ne
 		return nil
 	}
 
-	runInit, pErr := common.Cli.PromptConfirm(ctx, fmt.Sprintf("Run 'sudo %s host init' now?", infra.CLIName), true)
+	runInit, pErr := common.Cli.PromptConfirm(ctx, fmt.Sprintf("Run '%s' now?", sudoCmd), true)
 	if pErr != nil {
 		return pErr
 	}
 	if !runInit {
-		common.Cli.Info(fmt.Sprintf("skipped. Run 'sudo %s host init' manually when ready.", infra.CLIName))
+		common.Cli.Info(fmt.Sprintf("skipped. Run '%s' manually when ready.", sudoCmd))
 		return fmt.Errorf("skipped by user")
 	}
 
 	proc := common.RunWithSudo(ctx, []string{"host", "init"}, infra.EnvKey("ESCALATED")+"=1")
 	if !proc.Success {
-		common.Cli.Warning(fmt.Sprintf("host init failed. Run 'sudo %s host init' manually.", infra.CLIName))
+		common.Cli.Warning(fmt.Sprintf("host init failed. Run '%s' manually.", sudoCmd))
 		return fmt.Errorf("sudo host init failed")
 	}
 
