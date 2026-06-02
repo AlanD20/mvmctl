@@ -713,7 +713,7 @@ func (c *MVMCli) ResolveListingStyle(ctx context.Context, op *api.Operation, lon
 
 // RenderListing builds and prints a listing table from column specs.
 // Matches Python's render_listing() in cli/_common.py.
-func (c *MVMCli) RenderListing(items []any, columns []ListingColumn, style string, title ...string) {
+func RenderListing[T any](items []T, columns []ListingColumn, style string, title ...string) {
 	visible := columns
 	if style != "long" {
 		var short []ListingColumn

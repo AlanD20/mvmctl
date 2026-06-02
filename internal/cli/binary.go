@@ -110,11 +110,7 @@ func newBinaryListCmd(op *api.Operation) *cobra.Command {
 
 			// Local listing
 			style := common.Cli.ResolveListingStyle(cmd.Context(), op, longOutput)
-			items := make([]any, len(local))
-			for i, b := range local {
-				items[i] = b
-			}
-			common.Cli.RenderListing(items, binaryColumns, style)
+			common.RenderListing(local, binaryColumns, style)
 
 			return nil
 		},

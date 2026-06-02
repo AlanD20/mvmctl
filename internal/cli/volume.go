@@ -71,11 +71,7 @@ func newVolumeListCmd(op *api.Operation, configAPI *api.Operation) *cobra.Comman
 
 			style := common.Cli.ResolveListingStyle(cmd.Context(), configAPI, longOutput)
 
-			items := make([]any, len(volumes))
-			for i, v := range volumes {
-				items[i] = v
-			}
-			common.Cli.RenderListing(items, volumeColumns, style)
+			common.RenderListing(volumes, volumeColumns, style)
 			return nil
 		},
 	}
