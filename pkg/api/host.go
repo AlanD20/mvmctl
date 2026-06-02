@@ -15,9 +15,9 @@ import (
 	"mvmctl/internal/core/host"
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/firewall"
-	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	infranet "mvmctl/internal/infra/network"
 	"mvmctl/internal/infra/system"
@@ -128,7 +128,7 @@ func (op *Operation) HostInit(ctx context.Context, onProgress func(errs.Progress
 	op.Services.Network.SetFirewallTracker(fwTracker)
 
 	// --- Initialize host state ---
-	sessionID := infra.UUIDV4()
+	sessionID := crypto.UUIDV4()
 	hostCtrl := host.NewController(op.Repos.Host)
 	_, _ = op.Repos.Host.InitializeState(ctx)
 
@@ -152,8 +152,8 @@ func (op *Operation) HostInit(ctx context.Context, onProgress func(errs.Progress
 	infra.ChownToRealUser(op.CacheDir)
 
 	// Audit log
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("host.init", map[string]any{"changes": len(allChanges)}, "")
+
+	op.AuditLog.LogOperation("host.init", map[string]any{"changes": len(allChanges)}, "")
 
 	wasUserAdded := false
 	for _, c := range allChanges {
@@ -616,8 +616,7 @@ func (op *Operation) HostClean(ctx context.Context) *errs.OperationResult {
 		summary = append(summary, "Warning: skipped host networking cleanup (already clean)")
 	}
 
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("host.clean", map[string]any{"actions": len(summary)}, "")
+	op.AuditLog.LogOperation("host.clean", map[string]any{"actions": len(summary)}, "")
 
 	return &errs.OperationResult{
 		Status: "success", Code: "host.cleaned",
@@ -715,8 +714,7 @@ func (op *Operation) HostReset(ctx context.Context) *errs.OperationResult {
 
 	_ = op.Repos.Host.ResetState(ctx)
 
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("host.reset", map[string]any{"actions": len(summary)}, "")
+	op.AuditLog.LogOperation("host.reset", map[string]any{"actions": len(summary)}, "")
 
 	return &errs.OperationResult{
 		Status: "success", Code: "host.reset",

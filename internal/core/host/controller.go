@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/model"
 )
 
@@ -31,7 +31,7 @@ func (c *Controller) RecordChanges(
 ) (string, error) {
 	sid := sessionID
 	if sid == nil || *sid == "" {
-		s := infra.UUIDV4()
+		s := crypto.UUIDV4()
 		sid = &s
 	}
 	now := time.Now().Format(time.RFC3339)

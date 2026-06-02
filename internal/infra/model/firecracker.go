@@ -155,8 +155,8 @@ type FirecrackerConfig struct {
 	NetworkNetmask string `json:"network_netmask"`
 
 	// Image metadata
-	ImageFSUUID *string `json:"image_fs_uuid,omitempty"`
-	ImageFSType string  `json:"image_fs_type"`
+	ImageFSUUID string `json:"image_fs_uuid,omitempty"`
+	ImageFSType string `json:"image_fs_type"`
 
 	// Boot
 	BootArgs *string `json:"boot_args,omitempty"`

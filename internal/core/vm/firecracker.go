@@ -663,7 +663,7 @@ func (s *FirecrackerSpawner) buildBootArgs() (string, error) {
 		}
 	}
 
-	if s.config.PCIEnabled && (s.config.ImageFSUUID == nil || *s.config.ImageFSUUID == "") {
+	if s.config.PCIEnabled && s.config.ImageFSUUID == "" {
 		return "", &FirecrackerConfigError{
 			Message: "PCI transport enabled but no filesystem UUID available for " +
 				"root device identification. Use an image with a known " +
@@ -671,13 +671,13 @@ func (s *FirecrackerSpawner) buildBootArgs() (string, error) {
 		}
 	}
 
-	if s.config.ImageFSUUID != nil && *s.config.ImageFSUUID != "" {
-		bootArgs.set("root", []string{fmt.Sprintf("UUID=%s", *s.config.ImageFSUUID)})
+	if s.config.ImageFSUUID != "" {
+		bootArgs.set("root", []string{fmt.Sprintf("UUID=%s", s.config.ImageFSUUID)})
 	} else {
 		bootArgs.set("root", []string{"/dev/vda"})
 	}
 
-	if s.config.ImageFSUUID != nil && *s.config.ImageFSUUID != "" {
+	if s.config.ImageFSUUID != "" {
 		bootArgs.set("rootfstype", []string{s.config.ImageFSType})
 	}
 

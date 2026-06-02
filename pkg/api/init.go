@@ -444,9 +444,7 @@ func (op *Operation) initStepGuestfs(
 	// When guestfs_enabled is provided (from a previous interaction round),
 	// the decision is persisted directly.
 	if guestfsEnabled != nil {
-		if op.Services.Config != nil {
-			_ = op.Services.Config.Set(ctx, "settings", "guestfs_enabled", *guestfsEnabled)
-		}
+		op.Services.Config.Set(ctx, "settings", "guestfs_enabled", *guestfsEnabled)
 		if *guestfsEnabled {
 			return InitStepResult{Step: "guestfs", Success: true, Message: "enabled"}, nil
 		}
@@ -466,9 +464,7 @@ func (op *Operation) initStepGuestfs(
 
 	if !available {
 		// libguestfs not installed — no point prompting (Python: svc.set("settings", "guestfs_enabled", False))
-		if op.Services.Config != nil {
-			_ = op.Services.Config.Set(ctx, "settings", "guestfs_enabled", false)
-		}
+		op.Services.Config.Set(ctx, "settings", "guestfs_enabled", false)
 		return InitStepResult{Step: "guestfs", Success: true, Message: "not installed"}, nil
 	}
 

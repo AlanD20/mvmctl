@@ -10,7 +10,6 @@ import (
 
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/infra/errs"
-	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"
@@ -82,8 +81,7 @@ func (op *Operation) KeyCreate(ctx context.Context, input *inputs.KeyCreateInput
 		}
 	}
 
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("key.create", map[string]any{
+	op.AuditLog.LogOperation("key.create", map[string]any{
 		"name":      keyItem.Name,
 		"algorithm": keyItem.Algorithm,
 	}, "")
@@ -167,8 +165,7 @@ func (op *Operation) KeyImport(ctx context.Context, input *inputs.KeyImportInput
 		}
 	}
 
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("key.add", map[string]any{"name": keyItem.Name}, "")
+	op.AuditLog.LogOperation("key.add", map[string]any{"name": keyItem.Name}, "")
 
 	return &errs.OperationResult{
 		Status: "success",
@@ -230,8 +227,7 @@ func (op *Operation) KeyRemove(ctx context.Context, input *inputs.KeyInput, forc
 			continue
 		}
 
-		auditLog := logging.NewAuditLog(op.CacheDir)
-		_ = auditLog.LogOperation("key.remove", map[string]any{"name": key.Name}, "")
+		op.AuditLog.LogOperation("key.remove", map[string]any{"name": key.Name}, "")
 
 		results = append(results, errs.OperationResult{
 			Status: "success",
@@ -352,8 +348,8 @@ func (op *Operation) KeySetDefaults(ctx context.Context, input *inputs.KeyInput)
 	}
 
 	for _, k := range resolved.Keys {
-		auditLog := logging.NewAuditLog(op.CacheDir)
-		_ = auditLog.LogOperation("key.set_default", map[string]any{"name": k.Name}, "")
+
+		op.AuditLog.LogOperation("key.set_default", map[string]any{"name": k.Name}, "")
 	}
 
 	var item any = nil
@@ -387,8 +383,7 @@ func (op *Operation) KeyClearDefaults(ctx context.Context) *errs.OperationResult
 		}
 	}
 
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("key.clear_defaults", nil, "")
+	op.AuditLog.LogOperation("key.clear_defaults", nil, "")
 
 	return &errs.OperationResult{
 		Status: "success",

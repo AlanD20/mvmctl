@@ -10,7 +10,6 @@ import (
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
-	"mvmctl/internal/infra/ptr"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/responses"
 
@@ -251,7 +250,7 @@ func (s *initState) handleBinaryDownload(ctx context.Context, interaction *errs.
 // handleGuestfs manages the libguestfs enable prompt.
 func (s *initState) handleGuestfs(ctx context.Context) error {
 	if s.nonInteractive {
-		s.guestfsEnabled = ptr.Bool(false)
+		s.guestfsEnabled = new(false)
 		return nil
 	}
 	enabled, pErr := common.Cli.PromptConfirm(ctx, "Enable libguestfs as a provisioning fallback?", false)

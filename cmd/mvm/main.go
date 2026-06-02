@@ -30,17 +30,22 @@ func main() {
 		return
 	}
 
-	// SIGTERM handler: match Python's _handle_sigterm (sys.exit(128+15)=143).
-	sigtermCh := make(chan os.Signal, 1)
-	signal.Notify(sigtermCh, syscall.SIGTERM)
+	// Both SIGINT and SIGTERM cancel the context, giving in-flight operations a
+	// chance to clean up. Exit code matches signal: 128 + signal number.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var exitCode int
 	go func() {
-		<-sigtermCh
-		os.Exit(143)
+		sig := <-sigCh
+		exitCode = 128 + int(sig.(syscall.Signal))
+		cancel()
 	}()
 
-	// SIGINT handler: graceful context cancellation (exit code 130 matches Python).
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT)
-	defer stop()
-
 	app.Run(ctx)
+	if exitCode != 0 {
+		os.Exit(exitCode)
+	}
 }
