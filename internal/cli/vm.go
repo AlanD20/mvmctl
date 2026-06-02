@@ -109,11 +109,7 @@ func runVMList(op *api.Operation, cmd *cobra.Command, jsonOutput, longOutput boo
 	}
 
 	style := common.Cli.ResolveListingStyle(cmd.Context(), op, longOutput)
-	items := make([]any, len(vms))
-	for i, v := range vms {
-		items[i] = v
-	}
-	common.Cli.RenderListing(items, vmColumns, style)
+	common.RenderListing(vms, vmColumns, style)
 	return nil
 }
 

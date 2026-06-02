@@ -173,11 +173,7 @@ func printLocalImages(images []*model.ImageItem, jsonOutput bool, longOutput boo
 	}
 
 	style := common.Cli.ResolveListingStyle(ctx, opRef, longOutput)
-	items := make([]any, len(images))
-	for i, img := range images {
-		items[i] = img
-	}
-	common.Cli.RenderListing(items, imageColumns, style)
+	common.RenderListing(images, imageColumns, style)
 }
 
 // ─── pull ────────────────────────────────────────────────────────────────────

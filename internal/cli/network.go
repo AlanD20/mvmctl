@@ -85,11 +85,7 @@ func newNetworkListCmd(op *api.Operation) *cobra.Command {
 
 			// Resolve listing style from --long flag or DB config (matching Python's resolve_listing_style)
 			style := common.Cli.ResolveListingStyle(cmd.Context(), op, longOutput)
-			items := make([]any, len(nets))
-			for i, n := range nets {
-				items[i] = n
-			}
-			common.Cli.RenderListing(items, networkColumns, style)
+			common.RenderListing(nets, networkColumns, style)
 			return nil
 		},
 	}

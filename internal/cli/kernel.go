@@ -161,11 +161,7 @@ func newKernelListCmd(op *api.Operation) *cobra.Command {
 
 			// Local listing
 			style := common.Cli.ResolveListingStyle(cmd.Context(), op, longOutput)
-			items := make([]any, len(kernels))
-			for i, k := range kernels {
-				items[i] = k
-			}
-			common.Cli.RenderListing(items, kernelColumns, style)
+			common.RenderListing(kernels, kernelColumns, style)
 			return nil
 		},
 	}

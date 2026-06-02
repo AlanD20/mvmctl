@@ -69,11 +69,7 @@ func newKeyListCmd(op *api.Operation) *cobra.Command {
 			}
 
 			style := common.Cli.ResolveListingStyle(cmd.Context(), op, longOutput)
-			items := make([]any, len(keys))
-			for i, k := range keys {
-				items[i] = k
-			}
-			common.Cli.RenderListing(items, keyColumns, style)
+			common.RenderListing(keys, keyColumns, style)
 			return nil
 		},
 	}
