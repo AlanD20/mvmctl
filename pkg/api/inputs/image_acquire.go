@@ -109,7 +109,7 @@ func NewImageAcquireRequest(inputs any, db *sqlx.DB, imageRepo image.Repository)
 // ResolvePull resolves pull inputs.
 // Matches Python's ImageAcquireRequest.resolve_pull().
 func (r *ImageAcquireRequest) ResolvePull(ctx context.Context) (*ResolvedImageAcquireInput, error) {
-	pullInput, ok := r.input.(ImagePullInput)
+	in, ok := r.input.(*ImagePullInput)
 	if !ok {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeImagePullFailed,
@@ -120,7 +120,7 @@ func (r *ImageAcquireRequest) ResolvePull(ctx context.Context) (*ResolvedImageAc
 	}
 
 	// Default arch — Python: SettingsService.resolve(..., "arch"), no fallback
-	arch := pullInput.Arch
+	arch := in.Arch
 	if arch == "" {
 		archVal, err := config.Resolve(ctx, r.db, "defaults.image", "arch")
 		if err == nil && archVal != nil {
@@ -129,27 +129,27 @@ func (r *ImageAcquireRequest) ResolvePull(ctx context.Context) (*ResolvedImageAc
 	}
 
 	// Resolve disabled detectors — Python: self._resolve_disabled_detectors(self._inputs.disabled_detectors)
-	disabled, err := r.resolveDisabledDetectors(pullInput.DisabledDetectors)
+	disabled, err := r.resolveDisabledDetectors(in.DisabledDetectors)
 	if err != nil {
 		return nil, err
 	}
 
-	outputDir := pullInput.OutputDir
+	outputDir := in.OutputDir
 	if outputDir == "" {
 		outputDir = infra.GetImagesDir()
 	}
 
 	r.result = &ResolvedImageAcquireInput{
-		Type:              pullInput.Type,
-		Name:              pullInput.Name,
-		Force:             pullInput.Force,
-		SetDefault:        pullInput.SetDefault,
+		Type:              in.Type,
+		Name:              in.Name,
+		Force:             in.Force,
+		SetDefault:        in.SetDefault,
 		Arch:              arch,
-		Version:           pullInput.Version,
-		NoCache:           pullInput.NoCache,
-		Partition:         pullInput.Partition,
+		Version:           in.Version,
+		NoCache:           in.NoCache,
+		Partition:         in.Partition,
 		OutputDir:         outputDir,
-		SkipOptimization:  pullInput.SkipOptimization,
+		SkipOptimization:  in.SkipOptimization,
 		DisabledDetectors: disabled,
 	}
 
@@ -163,7 +163,7 @@ func (r *ImageAcquireRequest) ResolvePull(ctx context.Context) (*ResolvedImageAc
 // ResolveImport resolves import inputs.
 // Matches Python's ImageAcquireRequest.resolve_import().
 func (r *ImageAcquireRequest) ResolveImport(ctx context.Context) (*ResolvedImageAcquireInput, error) {
-	importInput, ok := r.input.(ImageImportInput)
+	in, ok := r.input.(*ImageImportInput)
 	if !ok {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeImageImportFailed,
@@ -174,7 +174,7 @@ func (r *ImageAcquireRequest) ResolveImport(ctx context.Context) (*ResolvedImage
 	}
 
 	// Default arch — Python: SettingsService.resolve(..., "arch"), no fallback
-	arch := importInput.Arch
+	arch := in.Arch
 	if arch == "" {
 		archVal, err := config.Resolve(ctx, r.db, "defaults.image", "arch")
 		if err == nil && archVal != nil {
@@ -183,14 +183,14 @@ func (r *ImageAcquireRequest) ResolveImport(ctx context.Context) (*ResolvedImage
 	}
 
 	// Resolve disabled detectors
-	disabled, err := r.resolveDisabledDetectors(importInput.DisabledDetectors)
+	disabled, err := r.resolveDisabledDetectors(in.DisabledDetectors)
 	if err != nil {
 		return nil, err
 	}
 
 	// Default format — Python: str(SettingsService.resolve(...))
 	// Python's str(None) returns "None", so we match that behavior exactly
-	format := importInput.Format
+	format := in.Format
 	if format == "" {
 		formatVal, err := config.Resolve(ctx, r.db, "defaults.image", "import_format")
 		if err == nil {
@@ -199,25 +199,25 @@ func (r *ImageAcquireRequest) ResolveImport(ctx context.Context) (*ResolvedImage
 	}
 
 	// Auto-detect format from file if format is not known
-	detected := disk.DetectImageFormat(importInput.SourcePath)
+	detected := disk.DetectImageFormat(in.SourcePath)
 	if detected != "" && format == "" {
 		format = detected
 	}
 
-	sourcePath := importInput.SourcePath
+	sourcePath := in.SourcePath
 
 	r.result = &ResolvedImageAcquireInput{
-		Type:              importInput.Name,
-		Name:              &importInput.Name,
+		Type:              in.Name,
+		Name:              &in.Name,
 		Arch:              arch,
 		SourcePath:        &sourcePath,
 		Format:            format,
 		OutputDir:         infra.GetImagesDir(),
 		DisabledDetectors: disabled,
-		Force:             importInput.Force,
-		Partition:         importInput.Partition,
-		SetDefault:        importInput.SetDefault,
-		SkipOptimization:  importInput.SkipOptimization,
+		Force:             in.Force,
+		Partition:         in.Partition,
+		SetDefault:        in.SetDefault,
+		SkipOptimization:  in.SkipOptimization,
 		FormatDetected:    detected,
 	}
 

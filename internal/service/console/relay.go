@@ -412,11 +412,9 @@ func (rm *RelayManager) Stop(force bool) bool {
 				syscall.Close(rm.ptyFD)
 			}
 			// Wait briefly for goroutine to exit after force-close.
-			if doneCh != nil {
-				select {
-				case <-doneCh:
-				case <-time.After(100 * time.Millisecond):
-				}
+			select {
+			case <-doneCh:
+			case <-time.After(100 * time.Millisecond):
 			}
 		}
 	}

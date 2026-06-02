@@ -943,7 +943,7 @@ func (s *Service) validateDownloadedFile(downloadedPath, imageFormat string) err
 	}
 	if validateErr != nil {
 		os.Remove(downloadedPath)
-		return NewImageValidationError(err.Error())
+		return NewImageValidationError(validateErr.Error())
 	}
 	return nil
 }
@@ -1239,15 +1239,11 @@ func (s *Service) downloadFile(
 	url, destPath, expectedSHA256 string,
 	progress func(int64, int64),
 ) error {
-	// Use service-level shared HttpDownload — matching Python's static HttpDownload.download_file()
-	// which shares the underlying HTTP client and cache infrastructure.
-	dCtx, cancel := context.WithTimeout(ctx, infra.HTTPTimeoutSha256FetchS)
-	defer cancel()
 	allowMissing := expectedSHA256 == ""
 	if progress == nil {
-		return s.dl.DownloadFile(dCtx, url, destPath, expectedSHA256, allowMissing, allowMissing, nil)
+		return s.dl.DownloadFile(ctx, url, destPath, expectedSHA256, allowMissing, allowMissing, nil)
 	}
-	return s.dl.DownloadFile(dCtx, url, destPath, expectedSHA256, allowMissing, allowMissing, progress)
+	return s.dl.DownloadFile(ctx, url, destPath, expectedSHA256, allowMissing, allowMissing, progress)
 }
 
 func (s *Service) resolveFSType(ctx context.Context, imagePath string) (string, error) {
