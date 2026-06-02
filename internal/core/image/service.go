@@ -271,13 +271,14 @@ func (s *Service) OptimizeImage(
 	if fsType == "btrfs" {
 		slog.Info("Converting filesystem from btrfs to ext4...")
 		p.ConvertTo("ext4")
+		fsType = "ext4"
 	}
 
 	preShrinkInfo, _ := os.Stat(imagePath)
 	preShrinkSize := preShrinkInfo.Size()
 
 	p.Deblob()
-	if FSCanShrink[fsType] || fsType == "btrfs" {
+	if FSCanShrink[fsType] {
 		p.Shrink()
 	}
 	optimized, runErr := p.Run(ctx)
@@ -408,7 +409,7 @@ func (s *Service) DownloadImage(
 	}
 
 	// Validate downloaded file
-	if err := s.validateDownloadedFile(downloadPath, spec.Format); err != nil {
+	if err := s.validateDownloadedFile(ctx, downloadPath, spec.Format); err != nil {
 		return "", err
 	}
 
@@ -908,7 +909,7 @@ func (s *Service) decompress(compressedPath, outputPath, compressedFormat string
 // Format detection — magic bytes for 6 formats
 // ─── Format validators — matching Python's _validate_* methods exactly ──
 
-func (s *Service) validateDownloadedFile(downloadedPath, imageFormat string) error {
+func (s *Service) validateDownloadedFile(ctx context.Context, downloadedPath, imageFormat string) error {
 	if _, err := os.Stat(downloadedPath); os.IsNotExist(err) {
 		return NewImageValidationError("Downloaded file not found")
 	}
@@ -936,7 +937,7 @@ func (s *Service) validateDownloadedFile(downloadedPath, imageFormat string) err
 	case "squashfs":
 		validateErr = disk.ValidateSquashFS(downloadedPath)
 	case "tar-rootfs":
-		validateErr = disk.ValidateTar(downloadedPath)
+		validateErr = disk.ValidateTar(ctx, downloadedPath)
 	default:
 		os.Remove(downloadedPath)
 		return NewImageValidationError(fmt.Sprintf("Unknown format for validation: %s", imageFormat))
@@ -1098,15 +1099,17 @@ func (s *Service) createExt4FromTar(ctx context.Context, tarPath, outputPath, mi
 		[]string{"du", "-sb", tmpDir},
 		system.RunCmdOpts{Capture: true, Check: false},
 	)
-	duCombined := string(duResult.StdoutBytes) + string(duResult.StderrBytes)
-	duReturnCode := 0
-	if duResult.Err == nil {
-		duReturnCode = duResult.ExitCode
+	duExitCode := duResult.ExitCode
+	duStdout := strings.TrimSpace(duResult.Stdout)
+	duStderr := strings.TrimSpace(duResult.Stderr)
+
+	if duExitCode != 0 && duExitCode != 1 {
+		if duStderr != "" {
+			return NewImageError(fmt.Sprintf("Failed to get directory size: %s", duStderr))
+		}
+		return NewImageError(fmt.Sprintf("Failed to get directory size (exit %d)", duExitCode))
 	}
-	if duReturnCode != 0 && duReturnCode != 1 {
-		return NewImageError(fmt.Sprintf("Failed to get directory size: %s", duCombined))
-	}
-	fields := strings.Fields(duCombined)
+	fields := strings.Fields(duStdout)
 	if len(fields) == 0 {
 		return NewImageError("Failed to get directory size")
 	}

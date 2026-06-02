@@ -3,10 +3,15 @@ package disk
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
+	"strings"
+	"time"
+
+	"mvmctl/internal/infra/system"
 )
 
 // DetectImageFormat detects container format from magic bytes. Returns "" if unknown.
@@ -255,25 +260,35 @@ func ValidateSquashFS(path string) error {
 	return nil
 }
 
-// ValidateTar validates a tar archive by iterating through all entries.
-func ValidateTar(path string) error {
-	if !IsTar(path) {
-		return fmt.Errorf("invalid tar file")
-	}
-	f, err := os.Open(path)
+// tarValidateTimeout is the maximum time to wait for tar -tf to complete.
+const tarValidateTimeout = 30 * time.Second
+
+// ValidateTar validates a tar archive by listing all entries via the system tar command.
+func ValidateTar(ctx context.Context, path string) error {
+	stat, err := os.Stat(path)
 	if err != nil {
-		return fmt.Errorf("open tar: %w", err)
+		return fmt.Errorf("stat tar file: %w", err)
 	}
-	defer f.Close()
-	tr := tar.NewReader(f)
-	for {
-		_, err := tr.Next()
-		if err == io.EOF {
-			break
+	if stat.Size() == 0 {
+		return fmt.Errorf("tar file is empty")
+	}
+	if !stat.Mode().IsRegular() {
+		return fmt.Errorf("not a regular file")
+	}
+
+	vCtx, cancel := context.WithTimeout(ctx, tarValidateTimeout)
+	defer cancel()
+
+	result := system.RunCmdCompat(vCtx,
+		[]string{"tar", "-tf", path},
+		system.RunCmdOpts{Capture: true, Check: false},
+	)
+	if result.ExitCode != 0 {
+		errMsg := strings.TrimSpace(string(result.StderrBytes))
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("tar exited with code %d", result.ExitCode)
 		}
-		if err != nil {
-			return fmt.Errorf("read tar entry: %w", err)
-		}
+		return fmt.Errorf("invalid tar file: %s", errMsg)
 	}
 	return nil
 }

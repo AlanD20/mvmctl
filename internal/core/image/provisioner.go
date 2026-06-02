@@ -90,8 +90,9 @@ func (p *Provisioner) ConvertTo(targetFS string) {
 
 // Run executes queued operations with the selected backend.
 // Phases run in order — conversion (Phase 0), deblob (Phase 1), shrink (Phase 2).
-// All phases share a single backend session — operations are idempotent and
-// independent, so there's no risk of state pollution between phases.
+// A single backend session is shared across all phases — unnecessary
+// mount/umount cycles are avoided.  ConvertTo updates the backend's internal
+// fsType so subsequent phases see the converted filesystem.
 // Returns true if at least one phase ran successfully.
 func (p *Provisioner) Run(ctx context.Context) (bool, error) {
 	deblobOK := false

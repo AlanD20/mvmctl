@@ -448,6 +448,7 @@ func (d *Downloader) DownloadFile(
 			}
 			slog.Warn("Mirror checksum mismatch, falling back to HTTP download", "url", url)
 			os.Remove(dest)
+			os.Remove(mirrorPath) // Remove stale mirror so autoPopulateMirror can replace it
 		} else {
 			return nil
 		}

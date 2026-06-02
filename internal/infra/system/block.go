@@ -26,6 +26,7 @@ func CopyWithDD(ctx context.Context, src, dst string, sparse bool) error {
 // CopyBytesDD copies bytes from src starting at skipBytes into dst using dd.
 func CopyBytesDD(ctx context.Context, src, dst string, skipBytes, countBytes int64) error {
 	ddArgs := []string{
+		"dd",
 		fmt.Sprintf("if=%s", src), fmt.Sprintf("of=%s", dst),
 		"bs=1M", fmt.Sprintf("skip=%d", skipBytes),
 		"iflag=skip_bytes,count_bytes", "conv=sparse,fsync", "status=none",

@@ -36,6 +36,13 @@ import (
 // *errs.NeedsInteraction (when sudo required).
 // OperationResult.Item varies: nil (success/skipped) or []string (error details).
 func (op *Operation) HostInit(ctx context.Context, onProgress func(errs.ProgressEvent)) any {
+	// Resolve the actual binary path so sudo invokes the correct binary.
+	mvmPath, _ := os.Executable()
+	if mvmPath == "" {
+		mvmPath = infra.CLIName
+	}
+	sudoCmd := fmt.Sprintf("sudo %s host init", mvmPath)
+
 	// Check for privileges — returns NeedsInteraction if not available
 	if err := system.CheckPrivileges("/usr/sbin/ip", "initialize host"); err != nil {
 		hasGroup := system.SessionHasGroup()
@@ -44,7 +51,7 @@ func (op *Operation) HostInit(ctx context.Context, onProgress func(errs.Progress
 			Message:   "Elevated privileges required for host initialization",
 			InputType: "sudo",
 			Context: map[string]any{
-				"command":           "sudo mvm host init",
+				"command":           sudoCmd,
 				"operation":         "initialize host",
 				"session_has_group": hasGroup,
 			},
@@ -65,7 +72,7 @@ func (op *Operation) HostInit(ctx context.Context, onProgress func(errs.Progress
 			Message:   "Root privileges required for host initialization",
 			InputType: "sudo",
 			Context: map[string]any{
-				"command":           "sudo mvm host init",
+				"command":           sudoCmd,
 				"operation":         "initialize host",
 				"session_has_group": hasGroup,
 			},
