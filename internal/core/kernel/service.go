@@ -17,6 +17,7 @@ import (
 
 	"mvmctl/internal/assets"
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/download"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
@@ -156,13 +157,15 @@ func (s *Service) FetchFirecrackerKernel(
 	}
 
 	// Compute intentional_no_checksum before sha256_url rendering (matching Python)
-	intentionalNoChecksum := spec.SHA256 == nil && spec.SHA256URL == nil
+	intentionalNoChecksum := spec.SHA256 == "" && spec.SHA256URL == ""
 
 	templateVars["kernel_version"] = kernelVersion
 	downloadURL := fmt.Sprintf("%s/%s", strings.TrimRight(spec.Source, "/"), chosenKey)
 	sha256URL := ""
-	if r, err := infra.RenderOptionalTemplate(spec.SHA256URL, templateVars); err == nil && r != nil {
-		sha256URL = *r
+	if spec.SHA256URL != "" {
+		if r, err := infra.RenderTemplate(spec.SHA256URL, templateVars); err == nil {
+			sha256URL = r
+		}
 	}
 	if sha256URL == "" && !intentionalNoChecksum {
 		sha256URL = downloadURL + ".sha256"
@@ -286,7 +289,7 @@ func (s *Service) buildFromSource(
 	outputPath string,
 	jobs int,
 	arch string,
-	sha256 *string,
+	sha256 string,
 	keepBuildDir bool,
 	userConfigPath *string,
 	useCache bool,
@@ -419,7 +422,7 @@ func (s *Service) resolveSourceAndChecksum(
 	ctx context.Context,
 	spec *model.KernelSpec,
 	version, arch string,
-	sha256 *string,
+	sha256 string,
 	onStatus func(string),
 ) (string, string, error) {
 	major := ""
@@ -435,17 +438,16 @@ func (s *Service) resolveSourceAndChecksum(
 	}
 	resolvedSourceURL := renderTemplate(spec.Source, templateVars)
 
-	intentionalNoChecksum := spec.SHA256 == nil && spec.SHA256URL == nil
+	intentionalNoChecksum := spec.SHA256 == "" && spec.SHA256URL == ""
 
-	resolvedSHA256 := ""
-	if sha256 != nil {
-		resolvedSHA256 = *sha256
-	}
+	resolvedSHA256 := sha256
 
 	if resolvedSHA256 == "" && !intentionalNoChecksum {
 		resolvedSHA256URL := ""
-		if r, err := infra.RenderOptionalTemplate(spec.SHA256URL, templateVars); err == nil && r != nil {
-			resolvedSHA256URL = *r
+		if spec.SHA256URL != "" {
+			if r, err := infra.RenderTemplate(spec.SHA256URL, templateVars); err == nil {
+				resolvedSHA256URL = r
+			}
 		}
 		if resolvedSHA256URL != "" {
 			filename := fmt.Sprintf("linux-%s.tar.xz", version)
@@ -640,8 +642,8 @@ func (s *Service) LoadSpecs() (map[string]*model.KernelSpec, error) {
 			BuildDir:          requireStr(rawMap, "build_dir"),
 			ListURLTemplate:   optionalStrPtr(rawMap, "list_url_template"),
 			ConfigURLTemplate: optionalStrPtr(rawMap, "config_url_template"),
-			SHA256:            optionalStrPtr(rawMap, "sha256"),
-			SHA256URL:         optionalStrPtr(rawMap, "sha256_url"),
+			SHA256:            getStringOption(rawMap, "sha256"),
+			SHA256URL:         getStringOption(rawMap, "sha256_url"),
 			ParallelJobs:      optionalIntPtr(rawMap, "parallel_jobs"),
 			ConfigFragments:   requireStrList(rawMap, "config_fragments"),
 			EnabledConfigs:    requireStrList(rawMap, "enabled_configs"),
@@ -688,8 +690,8 @@ func (s *Service) LoadKernelTypesConfig() ([]map[string]any, error) {
 		if spec.ListURLTemplate != nil {
 			config["list_url_template"] = *spec.ListURLTemplate
 		}
-		if spec.SHA256URL != nil {
-			config["sha256_url"] = *spec.SHA256URL
+		if spec.SHA256URL != "" {
+			config["sha256_url"] = spec.SHA256URL
 		}
 		if spec.Options != nil {
 			config["options"] = spec.Options
@@ -1725,7 +1727,7 @@ func (s *Service) ImportKernel(
 
 	// Generate content-addressed ID using HashGenerator.Kernel() (matching Python exactly)
 	now := time.Now().Format(time.RFC3339)
-	kernelID, err := infra.HashGenerator{}.Kernel(destPath, version, arch, now)
+	kernelID, err := crypto.KernelID(destPath, version, arch, now)
 	if err != nil {
 		return nil, fmt.Errorf("compute kernel ID: %w", err)
 	}
@@ -1753,7 +1755,7 @@ func (s *Service) ImportKernel(
 		}
 	}
 
-	shortID, _ := infra.HashGenerator{}.Shorten(kernelID)
+	shortID, _ := crypto.ShortenID(kernelID)
 	slog.Info("Imported kernel", "name", kernelItem.Name, "version", version, "arch", arch, "id", shortID)
 	return kernelItem, nil
 }
@@ -1779,8 +1781,8 @@ func kernelSpecsToResolverConfigs(specs []*model.KernelSpec) []download.Resolver
 		if spec.Source != "" {
 			cfg.Source = spec.Source
 		}
-		if spec.SHA256URL != nil {
-			cfg.SHA256URL = *spec.SHA256URL
+		if spec.SHA256URL != "" {
+			cfg.SHA256URL = spec.SHA256URL
 		}
 		if spec.Version != "" {
 			cfg.Version = spec.Version
@@ -1801,8 +1803,8 @@ func kernelSpecsToResolverConfigs(specs []*model.KernelSpec) []download.Resolver
 		case "http-dir":
 			if spec.VersionsURL != nil && *spec.VersionsURL != "" {
 				cfg.DownloadURL = spec.Source
-				if spec.SHA256URL != nil {
-					cfg.SHA256URL = *spec.SHA256URL
+				if spec.SHA256URL != "" {
+					cfg.SHA256URL = spec.SHA256URL
 				}
 				filePattern := "linux-"
 				if spec.FilePattern != nil {
@@ -1827,8 +1829,8 @@ func kernelSpecsToResolverConfigs(specs []*model.KernelSpec) []download.Resolver
 				// Download URL template
 				sourceBase := strings.TrimRight(spec.Source, "/")
 				cfg.DownloadURL = fmt.Sprintf("%s/firecracker-ci/{ci_version}/{arch}/vmlinux-{version}", sourceBase)
-				if spec.SHA256URL != nil {
-					cfg.SHA256URL = *spec.SHA256URL
+				if spec.SHA256URL != "" {
+					cfg.SHA256URL = spec.SHA256URL
 				}
 				s3Pattern := "vmlinux-([\\d.]+)"
 				if spec.Options != nil {

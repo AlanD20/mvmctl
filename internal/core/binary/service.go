@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/download"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
@@ -438,7 +439,7 @@ func (s *Service) Repo() Repository {
 // ── Internal helpers ───────────────────────────────────────────────────────
 
 func (s *Service) createBinaryItem(name, versionStr, path string, resolveCIVersion bool) (*model.BinaryItem, error) {
-	id, err := infra.HashGenerator{}.Binary(path, name, versionStr)
+	id, err := crypto.BinaryID(path, name, versionStr)
 	if err != nil {
 		return nil, binaryError(errs.CodeInternal, fmt.Sprintf("Failed to generate binary ID: %v", err))
 	}

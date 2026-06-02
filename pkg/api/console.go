@@ -9,7 +9,6 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
-	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/service/console"
 	"mvmctl/pkg/api/inputs"
@@ -85,9 +84,8 @@ func (op *Operation) ConsoleKill(ctx context.Context, identifier string) (*errs.
 
 	killed := resolved.Relay.Stop(true)
 	if killed {
-		auditLog := logging.NewAuditLog(op.CacheDir)
 		// Python: AuditLog.log("console.kill", changes={"name": identifier})
-		_ = auditLog.LogOperation("console.kill", map[string]interface{}{"name": identifier}, "")
+		op.AuditLog.LogOperation("console.kill", map[string]interface{}{"name": identifier}, "")
 		return &errs.OperationResult{
 			Status:  "success",
 			Code:    "console.killed",

@@ -128,7 +128,7 @@ func (s *Service) ScanOrphanProcesses(ctx context.Context) []map[string]any {
 
 // PruneWarmImages removes warm images from the tmpfs ready pool.
 func (s *Service) PruneWarmImages(ctx context.Context, dryRun bool) bool {
-	warmDir := infra.GetWarmImageDir(s.tempDir)
+	warmDir := infra.GetWarmImageDir()
 	if _, err := os.Stat(warmDir); os.IsNotExist(err) {
 		return false
 	}

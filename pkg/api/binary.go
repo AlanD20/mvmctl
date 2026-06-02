@@ -10,7 +10,6 @@ import (
 	"mvmctl/internal/core/binary"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
-	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
 	"mvmctl/internal/infra/version"
@@ -107,8 +106,7 @@ func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInp
 			versionStr = binaries[0].Version
 		}
 
-		auditLog := logging.NewAuditLog(op.CacheDir)
-		_ = auditLog.LogOperation("binary.pull", map[string]interface{}{
+		op.AuditLog.LogOperation("binary.pull", map[string]interface{}{
 			"git_ref": *resolved.GitRef,
 			"version": versionStr,
 		}, "")
@@ -181,8 +179,7 @@ func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInp
 		}
 	}
 
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("binary.pull", map[string]interface{}{"version": resolvedVersion}, "")
+	op.AuditLog.LogOperation("binary.pull", map[string]interface{}{"version": resolvedVersion}, "")
 
 	return &errs.OperationResult{
 		Status:  "success",
@@ -215,9 +212,7 @@ func (op *Operation) BinaryRemove(ctx context.Context, input *inputs.BinaryInput
 	// Enrich binaries with VM references (matching Python's:
 	//   enriched = Resolver(repo, include=["vm"]).enrich(resolved.binaries)
 	enriched := resolved.Binaries
-	if op.Enr != nil {
-		_ = op.Enr.EnrichBinary(ctx, enriched)
-	}
+	op.Enr.EnrichBinary(ctx, enriched, "vm")
 
 	items := make([]errs.OperationResult, 0)
 
@@ -235,8 +230,7 @@ func (op *Operation) BinaryRemove(ctx context.Context, input *inputs.BinaryInput
 			continue
 		}
 
-		auditLog := logging.NewAuditLog(op.CacheDir)
-		_ = auditLog.LogOperation("binary.remove", map[string]interface{}{
+		op.AuditLog.LogOperation("binary.remove", map[string]interface{}{
 			"id":      bin.ID,
 			"name":    bin.Name,
 			"version": bin.FullVersion,
@@ -304,8 +298,8 @@ func (op *Operation) BinaryRemoveByVersion(ctx context.Context, version string, 
 				Exception: err,
 			}
 		}
-		auditLog := logging.NewAuditLog(op.CacheDir)
-		_ = auditLog.LogOperation("binary.remove", map[string]interface{}{
+
+		op.AuditLog.LogOperation("binary.remove", map[string]interface{}{
 			"id":      bin.ID,
 			"name":    bin.Name,
 			"version": normalized,
@@ -337,17 +331,15 @@ func (op *Operation) BinaryList(ctx context.Context, remote bool, limit *int) ([
 		lmt = *limit
 	}
 	if lmt <= 0 {
-		if op.Services.Config != nil {
-			rawLimit, _ := op.Services.Config.Get(ctx, "defaults.binary", "remote_version_limit")
-			if rawLimit != nil {
-				switch v := rawLimit.(type) {
-				case int:
-					lmt = v
-				case float64:
-					lmt = int(v)
-				case string:
-					lmt, _ = strconv.Atoi(v)
-				}
+		rawLimit, _ := op.Services.Config.Get(ctx, "defaults.binary", "remote_version_limit")
+		if rawLimit != nil {
+			switch v := rawLimit.(type) {
+			case int:
+				lmt = v
+			case float64:
+				lmt = int(v)
+			case string:
+				lmt, _ = strconv.Atoi(v)
 			}
 		}
 		if lmt <= 0 {
@@ -426,8 +418,7 @@ func (op *Operation) BinarySetDefault(ctx context.Context, input *inputs.BinaryI
 		}
 	}
 
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("binary.set_default", map[string]interface{}{
+	op.AuditLog.LogOperation("binary.set_default", map[string]interface{}{
 		"id":      bin.ID,
 		"name":    bin.Name,
 		"version": bin.Version,
@@ -513,8 +504,7 @@ func (op *Operation) BinaryEnsureDefault(ctx context.Context) *errs.OperationRes
 		}
 	}
 
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("binary.ensure_default", map[string]interface{}{
+	op.AuditLog.LogOperation("binary.ensure_default", map[string]interface{}{
 		"id":      latest.ID,
 		"name":    latest.Name,
 		"version": latest.Version,

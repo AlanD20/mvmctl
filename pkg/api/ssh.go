@@ -8,7 +8,6 @@ import (
 
 	"mvmctl/internal/core/ssh"
 	"mvmctl/internal/infra/errs"
-	"mvmctl/internal/infra/logging"
 	"mvmctl/pkg/api/inputs"
 )
 
@@ -33,8 +32,7 @@ func (op *Operation) SSHConnect(ctx context.Context, input *inputs.SSHInput) *er
 	}
 
 	// Audit log (matches Python: AuditLog.log("vm.ssh", changes={"ip": ..., "user": ...}))
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("vm.ssh", map[string]interface{}{
+	op.AuditLog.LogOperation("vm.ssh", map[string]interface{}{
 		"ip":   resolved.TargetIP,
 		"user": resolved.User,
 	}, "")

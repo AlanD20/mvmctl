@@ -71,10 +71,7 @@ func newKernelListCmd(op *api.Operation) *cobra.Command {
 				if jsonOutput {
 					data := make([]map[string]interface{}, 0, len(remoteVersions))
 					for _, v := range remoteVersions {
-						var sha256URL interface{}
-						if v.SHA256URL != nil {
-							sha256URL = *v.SHA256URL
-						}
+						sha256URL := v.SHA256URL
 						data = append(data, map[string]interface{}{
 							"version":      v.Version,
 							"type":         v.Type,

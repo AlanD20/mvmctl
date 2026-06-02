@@ -21,6 +21,7 @@ import (
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/disk"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
@@ -283,10 +284,7 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 	bootArgs := raw.BootArgs
 	if bootArgs == nil {
 		defaultBootArgs := resolveSettingString(ctx, b.db, "defaults.vm", "boot_args")
-		uuidSuffix := ""
-		if img.FSUUID != nil && *img.FSUUID != "" {
-			uuidSuffix = *img.FSUUID
-		}
+		uuidSuffix := img.FSUUID
 		bootArgsStr := defaultBootArgs + " root=UUID=" + uuidSuffix
 		bootArgs = &bootArgsStr
 	}
@@ -707,7 +705,7 @@ func (b *VMCreateBuilder) resolveBinary(ctx context.Context, raw VMCreateInput) 
 
 		// Create binary item (matches Python _create_binary_item)
 		now := time.Now().Format(time.RFC3339)
-		id, err := infra.HashGenerator{}.Binary(binPath, "firecracker", version)
+		id, err := crypto.BinaryID(binPath, "firecracker", version)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate binary ID: %w", err)
 		}

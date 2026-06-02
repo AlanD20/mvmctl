@@ -33,17 +33,6 @@ func isDBSkipCommand(args []string) bool {
 	return false
 }
 
-// executeCLI creates the root CLI command and executes it.
-func executeCLI(ctx context.Context, op *api.Operation) {
-	rootCmd := cli.NewRootCmd(op)
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
-		// Delegate ALL error handling to the single shared handler in helpers.go.
-		// This wraps the error back through HandleErrors so there is exactly ONE
-		// place where errors are formatted for CLI output.
-		common.HandleErrors(func() error { return err })()
-	}
-}
-
 // ── Run ──────────────────────────────────────────────────────────────────────
 
 func Run(ctx context.Context) {
@@ -96,7 +85,15 @@ func Run(ctx context.Context) {
 	// Set HTTP User-Agent matching Python's HTTP_USER_AGENT = f"{CLI_NAME}/{_resolve_version()}".
 	download.SetUserAgent(infraversion.GetVersion(ctx))
 
-	op := api.NewOperation(database, cacheDir)
+	op := api.NewOperation(ctx, database, cacheDir)
 	config.InitSettings()
-	executeCLI(ctx, op)
+
+	// Execute CLI
+	rootCmd := cli.NewRootCmd(op)
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
+		// Delegate ALL error handling to the single shared handler in helpers.go.
+		// This wraps the error back through HandleErrors so there is exactly ONE
+		// place where errors are formatted for CLI output.
+		common.HandleErrors(func() error { return err })()
+	}
 }

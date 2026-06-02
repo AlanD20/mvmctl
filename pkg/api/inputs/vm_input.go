@@ -90,7 +90,7 @@ func (r *VMRequest) Resolve(ctx context.Context) (*ResolvedVMInput, error) {
 	// Enrich resolved VMs with related data (image, kernel, network, volumes, binary).
 	// Matches Python's VMResolver(include=["image","kernel","network","network.leases","volumes","binary"]).
 	if r.enricher != nil && len(result.VMs) > 0 {
-		_ = r.enricher.EnrichVM(ctx, result.VMs)
+		_ = r.enricher.EnrichVM(ctx, result.VMs, "kernel", "image", "binary", "network", "network.leases", "volumes")
 	}
 
 	force := false

@@ -54,8 +54,8 @@ type KernelSpec struct {
 	BuildDir          string                   `yaml:"build_dir"`
 	ListURLTemplate   *string                  `yaml:"list_url_template,omitempty"`
 	ConfigURLTemplate *string                  `yaml:"config_url_template,omitempty"`
-	SHA256            *string                  `yaml:"sha256,omitempty"`
-	SHA256URL         *string                  `yaml:"sha256_url,omitempty"`
+	SHA256            string                   `yaml:"sha256,omitempty"`
+	SHA256URL         string                   `yaml:"sha256_url,omitempty"`
 	ConfigFragments   []string                 `yaml:"config_fragments"`
 	ParallelJobs      *int                     `yaml:"parallel_jobs,omitempty"`
 	EnabledConfigs    []string                 `yaml:"enabled_configs"`

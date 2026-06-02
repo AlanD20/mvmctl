@@ -14,8 +14,8 @@ import (
 	"mvmctl/internal/core/binary"
 	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/errs"
-	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/operation"
 	"mvmctl/pkg/api/inputs"
@@ -280,7 +280,7 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 
 	// Generate kernel ID in the API layer (matches Python exactly)
 	timestamp := time.Now().Format(time.RFC3339)
-	kernelID, err := infra.HashGenerator{}.Kernel(fetchResult.Path, fetchResult.Version, resolved.Arch, timestamp)
+	kernelID, err := crypto.KernelID(fetchResult.Path, fetchResult.Version, resolved.Arch, timestamp)
 	if err != nil {
 		return &errs.OperationResult{
 			Status:    "error",
@@ -346,8 +346,7 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 		}
 	}
 
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("kernel.pull", map[string]interface{}{
+	op.AuditLog.LogOperation("kernel.pull", map[string]interface{}{
 		"id": kernelItem.ID, "type": kernelItem.Type,
 		"version": kernelItem.Version, "arch": kernelItem.Arch,
 	}, "")
@@ -402,8 +401,7 @@ func (op *Operation) KernelImport(ctx context.Context, input *inputs.KernelImpor
 		}
 	}
 
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("kernel.import", map[string]interface{}{
+	op.AuditLog.LogOperation("kernel.import", map[string]interface{}{
 		"name": kernelItem.Name, "version": kernelItem.Version, "arch": kernelItem.Arch,
 	}, "")
 
@@ -446,9 +444,7 @@ func (op *Operation) KernelRemove(ctx context.Context, identifiers []string, for
 	items := make([]errs.OperationResult, 0)
 
 	// Batch-enrich with VM references (matches Python's Resolver(repo, include=["vm"]).enrich())
-	if op.Enr != nil {
-		_ = op.Enr.EnrichKernel(ctx, resolved.Kernels)
-	}
+	op.Enr.EnrichKernel(ctx, resolved.Kernels, "vm")
 
 	for _, kernel := range resolved.Kernels {
 
@@ -476,8 +472,7 @@ func (op *Operation) KernelRemove(ctx context.Context, identifiers []string, for
 			continue
 		}
 
-		auditLog := logging.NewAuditLog(op.CacheDir)
-		_ = auditLog.LogOperation("kernel.remove", map[string]interface{}{
+		op.AuditLog.LogOperation("kernel.remove", map[string]interface{}{
 			"id": kernel.ID, "name": kernel.Name, "type": kernel.Type,
 		}, "")
 
@@ -526,7 +521,7 @@ func (op *Operation) kernelListRemote(ctx context.Context, noCache bool) ([]mode
 
 	// Resolve cache_ttl from settings (matches Python)
 	var cacheTTL *int
-	if !noCache && op.Services.Config != nil {
+	if !noCache {
 		v, err := op.Services.Config.Get(ctx, "defaults.kernel", "remote_list_cache_ttl")
 		if err == nil && v != nil {
 			if s, ok := v.(string); ok {
@@ -539,31 +534,27 @@ func (op *Operation) kernelListRemote(ctx context.Context, noCache bool) ([]mode
 
 	// Resolve ci_version from default firecracker binary (matches Python)
 	resolvedCIVersion := ""
-	if op.Services.Config != nil {
-		defaultFC, _ := op.Services.Binary.GetDefaultFirecracker(ctx)
-		if defaultFC != nil && defaultFC.CIVersion != nil {
-			resolvedCIVersion = *defaultFC.CIVersion
-		}
+	defaultFC, _ := op.Services.Binary.GetDefaultFirecracker(ctx)
+	if defaultFC != nil && defaultFC.CIVersion != nil {
+		resolvedCIVersion = *defaultFC.CIVersion
 	}
 
 	// Resolve remote_list_limit from settings (matches Python)
 	// Python: remote_list_limit = int(SettingsService.resolve(db, "defaults.kernel", "remote_list_limit"))
 	remoteListLimit := 0
-	if op.Services.Config != nil {
-		v, err := op.Services.Config.Get(ctx, "defaults.kernel", "remote_list_limit")
-		if err == nil && v != nil {
-			switch val := v.(type) {
-			case string:
-				if i, parseErr := strconv.Atoi(val); parseErr == nil {
-					remoteListLimit = i
-				}
-			case int:
-				remoteListLimit = val
-			case int64:
-				remoteListLimit = int(val)
-			case float64:
-				remoteListLimit = int(val)
+	v, err := op.Services.Config.Get(ctx, "defaults.kernel", "remote_list_limit")
+	if err == nil && v != nil {
+		switch val := v.(type) {
+		case string:
+			if i, parseErr := strconv.Atoi(val); parseErr == nil {
+				remoteListLimit = i
 			}
+		case int:
+			remoteListLimit = val
+		case int64:
+			remoteListLimit = int(val)
+		case float64:
+			remoteListLimit = int(val)
 		}
 	}
 
@@ -675,8 +666,7 @@ func (op *Operation) KernelSetDefault(ctx context.Context, id string) *errs.Oper
 		}
 	}
 
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("kernel.set_default", map[string]interface{}{"name": kItem.Name}, "")
+	op.AuditLog.LogOperation("kernel.set_default", map[string]interface{}{"name": kItem.Name}, "")
 
 	return &errs.OperationResult{
 		Status:  "success",

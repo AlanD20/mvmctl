@@ -4,6 +4,8 @@
 package api
 
 import (
+	"context"
+	"fmt"
 	"path/filepath"
 
 	"mvmctl/internal/core/binary"
@@ -21,17 +23,21 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/db"
 	"mvmctl/internal/infra/firewall"
+	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
+	"mvmctl/internal/infra/provisioner"
 )
 
 // Operation is the single composition root for all API operations.
 // Every method receives the full dependency set.
 type Operation struct {
-	Connection *db.Handle
-	CacheDir   string
-	Enr        *enricher.Enricher
-	Repos      Repos
-	Services   Services
+	Connection      *db.Handle
+	CacheDir        string
+	Enr             *enricher.Enricher
+	Repos           Repos
+	Services        Services
+	ProvisionerType provisioner.ProvisionerType
+	AuditLog        *logging.AuditLog
 }
 
 // Repos bundles all database repositories.
@@ -61,9 +67,13 @@ type Services struct {
 	Cache   *cache.Service
 	CP      *ssh.CPService
 }
+type RequiredService struct {
+	Name string
+	Svc  any
+}
 
 // NewOperation creates the single Operation instance with all dependencies wired.
-func NewOperation(conn *db.Handle, cacheDir string) *Operation {
+func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operation {
 	sqlDB := conn.DB()
 
 	r := Repos{
@@ -97,11 +107,33 @@ func NewOperation(conn *db.Handle, cacheDir string) *Operation {
 		Cache:   cache.NewService(cacheDir, infra.GetTempDir()),
 		CP:      ssh.NewCPService(),
 	}
+	// Enforce that all required services are non-nil — fail fast at startup.
+	required := []RequiredService{
+		{"Config", s.Config}, {"Image", s.Image}, {"Kernel", s.Kernel},
+		{"Binary", s.Binary}, {"Network", s.Network}, {"Host", s.Host},
+		{"Key", s.Key}, {"Volume", s.Volume}, {"Cache", s.Cache},
+	}
+	for _, r := range required {
+		if r.Svc == nil {
+			panic(fmt.Sprintf("service %s is nil — check initialization", r.Name))
+		}
+	}
+
+	// Resolve provisioner type once at startup.
+	provisionerType := provisioner.ProvisionerLoopMount
+	if guestfsRaw, err := s.Config.Get(ctx, "settings", "guestfs_enabled"); err == nil {
+		if enabled, ok := guestfsRaw.(bool); ok && enabled {
+			provisionerType = provisioner.ProvisionerGuestFS
+		}
+	}
+
 	return &Operation{
-		Connection: conn,
-		CacheDir:   cacheDir,
-		Enr:        enricher.New(r.VM, r.Network, r.Lease, r.Image, r.Kernel, r.Binary, r.Volume),
-		Repos:      r,
-		Services:   s,
+		Connection:      conn,
+		CacheDir:        cacheDir,
+		Enr:             enricher.New(r.VM, r.Network, r.Lease, r.Image, r.Kernel, r.Binary, r.Volume),
+		Repos:           r,
+		Services:        s,
+		ProvisionerType: provisionerType,
+		AuditLog:        logging.NewAuditLog(cacheDir),
 	}
 }

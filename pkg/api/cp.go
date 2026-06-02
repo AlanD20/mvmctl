@@ -10,7 +10,6 @@ import (
 
 	"mvmctl/internal/core/ssh"
 	"mvmctl/internal/infra/errs"
-	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api/inputs"
 )
@@ -88,8 +87,7 @@ func (op *Operation) CPCopy(ctx context.Context, input *inputs.CPInput, onProgre
 	// Audit log (matches Python: AuditLog.log("cp.copy", changes={...}))
 	// Python order: resolution → audit log → direction dispatch.
 	// With destination validation moved before audit log.
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("cp.copy", map[string]interface{}{
+	op.AuditLog.LogOperation("cp.copy", map[string]interface{}{
 		"direction": resolved.Direction,
 		"sources":   strings.Join(input.Sources, ", "),
 		"dst":       input.Dst,

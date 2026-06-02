@@ -28,9 +28,9 @@ import (
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/disk"
 	"mvmctl/internal/infra/errs"
-	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	infranet "mvmctl/internal/infra/network"
 	"mvmctl/internal/infra/provisioner"
@@ -81,7 +81,7 @@ func (op *Operation) vmCreateSingle(
 	onProgress func(errs.ProgressEvent),
 ) *errs.OperationResult {
 	createdAt := time.Now()
-	vmID := infra.HashGenerator{}.VM(input.Name, createdAt.Format(time.RFC3339))
+	vmID := crypto.VMID(input.Name, createdAt.Format(time.RFC3339))
 	vmDir := filepath.Join(op.CacheDir, "vms", vmID)
 
 	resolved, err := op.vmBuildResolvedInput(ctx, input, vmID, vmDir)
@@ -155,8 +155,7 @@ func (op *Operation) vmCreateSingle(
 		op.Repos.VM.Upsert(ctx, vmInstance)
 	}
 
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("vm.create", nil, fmt.Sprintf("name=%s", input.Name))
+	op.AuditLog.LogOperation("vm.create", nil, fmt.Sprintf("name=%s", input.Name))
 
 	return &errs.OperationResult{
 		Status: "success", Code: "vm.created",
@@ -199,7 +198,7 @@ func (op *Operation) vmCreateBatch(
 
 	for idx, name := range names {
 		createdAt := time.Now()
-		vmID := infra.HashGenerator{}.VM(name, createdAt.Format(time.RFC3339))
+		vmID := crypto.VMID(name, createdAt.Format(time.RFC3339))
 		vmDir := filepath.Join(op.CacheDir, "vms", vmID)
 
 		resolved, err := op.vmBuildResolvedInput(ctx, input, vmID, vmDir)
@@ -208,7 +207,7 @@ func (op *Operation) vmCreateBatch(
 			if input.Atomic && len(createdVMs) > 0 {
 				// Rollback
 				for _, vm := range createdVMs {
-					_ = op.VMRemove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: ptr.Bool(true)})
+					_ = op.VMRemove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: new(true)})
 				}
 				return &errs.OperationResult{
 					Status: "error",
@@ -239,7 +238,7 @@ func (op *Operation) vmCreateBatch(
 			errors = append(errors, fmt.Sprintf("%s: %v", name, execErr))
 			if input.Atomic && len(createdVMs) > 0 {
 				for _, vm := range createdVMs {
-					_ = op.VMRemove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: ptr.Bool(true)})
+					_ = op.VMRemove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: new(true)})
 				}
 				return &errs.OperationResult{
 					Status: "error",
@@ -494,8 +493,7 @@ func (op *Operation) VMRemove(ctx context.Context, input *inputs.VMInput) *errs.
 			os.RemoveAll(vmDir)
 		}
 
-		auditLog := logging.NewAuditLog(op.CacheDir)
-		_ = auditLog.LogOperation("vm.remove", map[string]interface{}{"name": vmLocal.Name}, "")
+		op.AuditLog.LogOperation("vm.remove", map[string]interface{}{"name": vmLocal.Name}, "")
 
 		results = append(results, errs.OperationResult{
 			Status: "success", Code: "vm.removed",
@@ -565,7 +563,7 @@ func (op *Operation) VMPrune(ctx context.Context, dryRun bool, includeAll bool) 
 		}
 
 		if !dryRun {
-			result := op.VMRemove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: ptr.Bool(true)})
+			result := op.VMRemove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: new(true)})
 			if result.HasErrors() {
 				slog.Warn("Failed to remove VM", "name", vm.Name, "error", infraslice.JoinStringsPtrs(result))
 				continue
@@ -606,9 +604,7 @@ func (op *Operation) VMList(ctx context.Context, statusFilter interface{}) []*mo
 		return vms
 	}
 
-	if op.Enr != nil {
-		_ = op.Enr.EnrichVM(ctx, vms)
-	}
+	op.Enr.EnrichVM(ctx, vms, "kernel", "image", "binary", "network", "network.leases", "volumes")
 
 	return vms
 }
@@ -626,9 +622,7 @@ func (op *Operation) VMGet(ctx context.Context, input *inputs.VMInput) (*model.V
 		return nil, err
 	}
 	// Enrich VM with relations (matches Python's VMResolver._enrich)
-	if op.Enr != nil {
-		_ = op.Enr.EnrichVM(ctx, []*model.VM{vm})
-	}
+	op.Enr.EnrichVM(ctx, []*model.VM{vm}, "kernel", "image", "binary", "network", "network.leases", "volumes")
 	return vm, nil
 }
 
@@ -814,8 +808,7 @@ func (op *Operation) VMStart(ctx context.Context, input *inputs.VMInput) *errs.B
 			}
 		}
 
-		auditLog := logging.NewAuditLog(op.CacheDir)
-		_ = auditLog.LogOperation("vm.start", nil, fmt.Sprintf("name=%s", vmLocal.Name))
+		op.AuditLog.LogOperation("vm.start", nil, fmt.Sprintf("name=%s", vmLocal.Name))
 
 		results = append(results, errs.OperationResult{
 			Status: "success", Code: "vm.started",
@@ -881,8 +874,7 @@ func (op *Operation) VMStop(ctx context.Context, input *inputs.VMInput) *errs.Ba
 			}
 		}
 
-		auditLog := logging.NewAuditLog(op.CacheDir)
-		_ = auditLog.LogOperation("vm.stop", nil, fmt.Sprintf("name=%s", vmLocal.Name))
+		op.AuditLog.LogOperation("vm.stop", nil, fmt.Sprintf("name=%s", vmLocal.Name))
 
 		results = append(results, errs.OperationResult{
 			Status: "success", Code: "vm.stopped",
@@ -1162,8 +1154,7 @@ func (op *Operation) VMSnapshot(
 		}
 	}
 
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("vm.snapshot", nil, fmt.Sprintf("name=%s", vmItem.Name))
+	op.AuditLog.LogOperation("vm.snapshot", nil, fmt.Sprintf("name=%s", vmItem.Name))
 
 	return &errs.OperationResult{
 		Status: "success", Code: "vm.snapshot_created",
@@ -1268,8 +1259,8 @@ func (op *Operation) VMLoad(
 		exception = err
 		resultItem = vmItem
 	} else {
-		auditLog := logging.NewAuditLog(op.CacheDir)
-		_ = auditLog.LogOperation("vm.load", nil, fmt.Sprintf("name=%s", vmItem.Name))
+
+		op.AuditLog.LogOperation("vm.load", nil, fmt.Sprintf("name=%s", vmItem.Name))
 	}
 
 	return &errs.OperationResult{
@@ -1339,8 +1330,7 @@ func (op *Operation) VMReboot(ctx context.Context, input *inputs.VMInput) *errs.
 			continue
 		}
 
-		auditLog := logging.NewAuditLog(op.CacheDir)
-		_ = auditLog.LogOperation("vm.reboot", nil, fmt.Sprintf("name=%s", vmLocal.Name))
+		op.AuditLog.LogOperation("vm.reboot", nil, fmt.Sprintf("name=%s", vmLocal.Name))
 		results = append(results, errs.OperationResult{
 			Status: "success", Code: "vm.rebooted",
 			Item:    vmLocal,
@@ -1400,8 +1390,7 @@ func (op *Operation) VMPause(ctx context.Context, input *inputs.VMInput) *errs.B
 			continue
 		}
 
-		auditLog := logging.NewAuditLog(op.CacheDir)
-		_ = auditLog.LogOperation("vm.pause", nil, fmt.Sprintf("name=%s", vmLocal.Name))
+		op.AuditLog.LogOperation("vm.pause", nil, fmt.Sprintf("name=%s", vmLocal.Name))
 
 		results = append(results, errs.OperationResult{
 			Status: "success", Code: "vm.paused",
@@ -1462,8 +1451,7 @@ func (op *Operation) VMResume(ctx context.Context, input *inputs.VMInput) *errs.
 			continue
 		}
 
-		auditLog := logging.NewAuditLog(op.CacheDir)
-		_ = auditLog.LogOperation("vm.resume", nil, fmt.Sprintf("name=%s", vmLocal.Name))
+		op.AuditLog.LogOperation("vm.resume", nil, fmt.Sprintf("name=%s", vmLocal.Name))
 
 		results = append(results, errs.OperationResult{
 			Status: "success", Code: "vm.resumed",
@@ -1591,8 +1579,7 @@ func (op *Operation) VMAttachVolume(
 	vmItem.VolumeIDs = vmVolumeIDs
 	_ = op.Repos.VM.Upsert(ctx, vmItem)
 
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("vm.attach_volume", map[string]interface{}{
+	op.AuditLog.LogOperation("vm.attach_volume", map[string]interface{}{
 		"vm": vmItem.Name, "volume": vol.Name,
 	}, "")
 
@@ -1754,8 +1741,7 @@ func (op *Operation) VMDetachVolume(
 	vmItem.VolumeIDs = newIDs
 	_ = op.Repos.VM.Upsert(ctx, vmItem)
 
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("vm.detach_volume", map[string]interface{}{
+	op.AuditLog.LogOperation("vm.detach_volume", map[string]interface{}{
 		"vm": vmItem.Name, "volume": vol.Name,
 	}, "")
 
@@ -1864,8 +1850,7 @@ func (op *Operation) VMImport(
 		}
 	}
 
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("vm.import", nil, fmt.Sprintf("name=%s,config=%s", resolved.Name, input.ConfigPath))
+	op.AuditLog.LogOperation("vm.import", nil, fmt.Sprintf("name=%s,config=%s", resolved.Name, input.ConfigPath))
 
 	return &errs.OperationResult{
 		Status: "success", Code: "vm.imported",
@@ -1981,8 +1966,8 @@ func (op *Operation) VMExport(ctx context.Context, input *inputs.VMInput) (*inpu
 		SchemaVersion: "1.0",
 		Name:          vmItem.Name,
 		Compute: inputs.VMExportComputeConfig{
-			VCPUs: ptr.Int(vmItem.VCPUCount),
-			Mem:   ptr.Int(vmItem.MemSizeMiB),
+			VCPUs: new(vmItem.VCPUCount),
+			Mem:   new(vmItem.MemSizeMiB),
 		},
 		Image: inputs.VMExportImageConfig{
 			Type:     imageType,
@@ -2008,11 +1993,11 @@ func (op *Operation) VMExport(ctx context.Context, input *inputs.VMInput) (*inpu
 			MAC:         macPtr,
 		},
 		Boot: inputs.VMExportBootConfig{
-			Args:          ptr.Str(bootArgsStr),
+			Args:          new(bootArgsStr),
 			EnableConsole: &vmItem.EnableConsole,
 		},
 		Firecracker: inputs.VMExportFirecrackerConfig{
-			EnableAPISocket: ptr.Bool(true),
+			EnableAPISocket: new(true),
 			PCIEnabled:      &vmItem.PCIEnabled,
 			LsmFlags:        lsmFlagsPtr,
 			NestedVirt:      &vmItem.NestedVirt,
@@ -2021,12 +2006,11 @@ func (op *Operation) VMExport(ctx context.Context, input *inputs.VMInput) (*inpu
 		CloudInit: inputs.VMExportCloudInitConfig{
 			Mode:           cloudInitModePtr,
 			User:           &rootUser,
-			NocloudNetPort: ptr.Int(nocloudPort),
+			NocloudNetPort: new(nocloudPort),
 		},
 	}
 
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("vm.export", map[string]interface{}{"name": vmItem.Name}, "")
+	op.AuditLog.LogOperation("vm.export", map[string]interface{}{"name": vmItem.Name}, "")
 
 	return cfg, nil
 }
@@ -2319,11 +2303,7 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 	if !c.resolved.SkipDeblob {
 		// Pass the image's pre-detected distro to avoid redundant OS detection.
 		// Matches Python: provisioner.deblob(os_type=self.resolved.image.distro)
-		var distro string
-		if c.resolved.Image.Distro != nil {
-			distro = *c.resolved.Image.Distro
-		}
-		provisioner.Deblob(ctx, distro)
+		provisioner.Deblob(ctx, c.resolved.Image.Distro)
 	}
 
 	// Fix fstab for Firecracker (superfloppy /dev/vda layout)
@@ -2562,7 +2542,7 @@ func (c *vmCreateContext) forRespawn(vm *model.VM, snapshotMode bool) error {
 	isoPath := filepath.Join(c.vmDir, "cloud-init", "seed.iso")
 	var isoPathPtr *string
 	if _, err := os.Stat(isoPath); err == nil {
-		isoPathPtr = ptr.Str(isoPath)
+		isoPathPtr = new(isoPath)
 	}
 
 	var nocloudURL *string
@@ -2739,8 +2719,8 @@ func (c *vmCreateContext) buildFirecrackerConfig(ctx context.Context) *model.Fir
 		NetworkNetmask:       c.resolved.NetworkNetmask,
 		ImageFSUUID:          c.resolved.Image.FSUUID,
 		ImageFSType:          c.resolved.Image.FSType,
-		BootArgs:             ptr.Str(c.resolved.BootArgs),
-		LSMFlags:             ptr.Str(c.resolved.LSMFlags),
+		BootArgs:             new(c.resolved.BootArgs),
+		LSMFlags:             new(c.resolved.LSMFlags),
 		PCIEnabled:           c.resolved.PCIEnabled,
 		NestedVirt:           c.resolved.NestedVirt,
 		CPUVendor:            cpuVendor,
@@ -2762,10 +2742,10 @@ func (c *vmCreateContext) buildFirecrackerConfig(ctx context.Context) *model.Fir
 	// Cloud-init info from result (isoPath, nocloudURL)
 	if c.cloudInitResult != nil {
 		if c.cloudInitResult.isoPath != nil {
-			fcConfig.CloudInitISOPath = ptr.Str(*c.cloudInitResult.isoPath)
+			fcConfig.CloudInitISOPath = new(*c.cloudInitResult.isoPath)
 		}
 		if c.cloudInitResult.nocloudURL != nil {
-			fcConfig.CloudInitNoCloudURL = ptr.Str(*c.cloudInitResult.nocloudURL)
+			fcConfig.CloudInitNoCloudURL = new(*c.cloudInitResult.nocloudURL)
 		}
 	}
 
@@ -2836,8 +2816,8 @@ func (c *vmCreateContext) toModel() *model.VM {
 		vm.CPUConfig = c.resolved.CPUConfig
 	}
 
-	vm.LogPath = ptr.Str(filepath.Join(c.vmDir, c.resolved.LogFilename))
-	vm.SerialOutputPath = ptr.Str(filepath.Join(c.vmDir, c.resolved.SerialOutputFilename))
+	vm.LogPath = new(filepath.Join(c.vmDir, c.resolved.LogFilename))
+	vm.SerialOutputPath = new(filepath.Join(c.vmDir, c.resolved.SerialOutputFilename))
 
 	if c.resolved.BootArgs != "" {
 		vm.BootArgs = &c.resolved.BootArgs

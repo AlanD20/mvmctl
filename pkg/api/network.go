@@ -12,7 +12,6 @@ import (
 
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/infra/errs"
-	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	infranet "mvmctl/internal/infra/network"
 	"mvmctl/internal/infra/system"
@@ -124,8 +123,8 @@ func (op *Operation) NetworkCreate(ctx context.Context, input *inputs.NetworkCre
 	}
 
 	// Audit log
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("network.create", map[string]interface{}{"name": resolved.Name}, "")
+
+	op.AuditLog.LogOperation("network.create", map[string]interface{}{"name": resolved.Name}, "")
 
 	return &errs.OperationResult{
 		Status:  "success",
@@ -152,9 +151,7 @@ func (op *Operation) NetworkRemove(ctx context.Context, input *inputs.NetworkInp
 
 	// Batch-enrich with VM references for VM reference check
 	// (matches Python: Resolver(repo, include=["vm"]).enrich(resolved.networks))
-	if op.Enr != nil {
-		_ = op.Enr.EnrichNetwork(ctx, resolved.Networks, "vm")
-	}
+	op.Enr.EnrichNetwork(ctx, resolved.Networks, "vm")
 
 	// Match Python: service.remove(network, force=force) raises NetworkError on failure.
 	// Python catches the first error and returns it immediately — we match by iterating
@@ -175,8 +172,7 @@ func (op *Operation) NetworkRemove(ctx context.Context, input *inputs.NetworkInp
 			}
 		}
 
-		auditLog := logging.NewAuditLog(op.CacheDir)
-		_ = auditLog.LogOperation("network.remove", map[string]interface{}{"id": net.ID, "name": net.Name}, "")
+		op.AuditLog.LogOperation("network.remove", map[string]interface{}{"id": net.ID, "name": net.Name}, "")
 		results = append(results, net.Name)
 	}
 
@@ -350,8 +346,7 @@ func (op *Operation) NetworkSetDefault(ctx context.Context, input *inputs.Networ
 		}
 	}
 
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("network.set_default", map[string]interface{}{"name": net.Name}, "")
+	op.AuditLog.LogOperation("network.set_default", map[string]interface{}{"name": net.Name}, "")
 
 	return &errs.OperationResult{
 		Status:  "success",

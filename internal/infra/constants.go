@@ -645,12 +645,98 @@ func GetWarmImageDir() string {
 // CommonUtils — domain-agnostic helpers
 // ══════════════════════════════════════════════════════════════════════════════
 
-// ReservedNames that cannot be used as entity names
+// ReservedNames that cannot be used as entity names.
+// Prevents conflicts with CLI subcommands, resource types, and common identifiers.
+// Add proactively whenever a new subcommand or resource type is introduced.
 var ReservedNames = map[string]bool{
-	"help": true, "all": true, "default": true, "none": true,
-	"root": true, "self": true, "system": true,
+	// CRUD + lifecycle actions
+	"create": true, "delete": true, "remove": true, "rm": true,
+	"update": true, "set": true, "clear": true, "unset": true,
+	"get": true, "list": true, "ls": true, "show": true,
+	"describe": true, "inspect": true, "find": true, "search": true,
+	"edit": true, "rename": true, "move": true, "copy": true,
+	"clone": true, "import": true, "export": true, "backup": true,
+	"restore": true, "save": true, "load": true, "sync": true,
+	"merge": true, "split": true, "convert": true, "transform": true,
+
+	// State transitions
+	"start": true, "stop": true, "pause": true, "resume": true,
+	"restart": true, "reboot": true, "shutdown": true, "halt": true,
+	"poweroff": true, "poweron": true, "reset": true, "init": true,
+	"clean": true, "prune": true, "purge": true, "wipe": true,
+
+	// Lifecycle hooks
+	"attach": true, "detach": true, "mount": true, "unmount": true,
+	"connect": true, "disconnect": true, "link": true, "unlink": true,
+	"lock": true, "unlock": true, "freeze": true, "unfreeze": true,
+	"enable": true, "disable": true, "enabled": true, "disabled": true,
+	"activate": true, "deactivate": true, "register": true, "unregister": true,
+
+	// Network actions
+	"ping": true, "traceroute": true, "dns": true, "dhcp": true,
+	"nat": true, "forward": true, "route": true, "bridge": true,
+	"firewall": true, "proxy": true, "tunnel": true, "vpn": true,
+
+	// Observability
+	"log": true, "logs": true, "tail": true, "follow": true,
+	"watch": true, "monitor": true, "trace": true, "debug": true,
+	"profile": true, "metrics": true, "stats": true, "health": true,
+	"status": true, "info": true, "version": true, "audit": true,
+
+	// Auth & security
+	"login": true, "logout": true, "auth": true, "token": true,
+	"secret": true, "certificate": true, "cert": true, "key": true, "role": true,
+	"user": true, "group": true, "permission": true, "policy": true,
+
+	// Provisioning
+	"build": true, "deploy": true, "install": true, "uninstall": true,
+	"upgrade": true, "rollback": true, "release": true, "publish": true,
+	"compile": true, "validate": true, "verify": true, "check": true,
+	"lint": true, "format": true, "test": true, "benchmark": true,
+
+	// Snapshot & migration
+	"snapshot": true, "migrate": true, "live-migrate": true,
+	"takeover": true, "failover": true, "switchover": true,
+
+	// Scheduling
+	"schedule": true, "suspend": true, "reschedule": true,
+	"job": true, "task": true, "cron": true, "queue": true,
+
+	// Notifications
+	"alert": true, "notification": true, "notify": true,
+	"webhook": true, "hook": true, "callback": true, "event": true,
+
+	// Resource types
+	"vm": true, "network": true, "image": true, "kernel": true,
+	"binary": true, "volume": true, "config": true,
+	"cache": true, "host": true, "console": true,
+	"ssh": true,
+
+	// Potential future resource types
+	"template": true, "tag": true, "label": true, "annotation": true,
+	"quota": true, "limit": true,
+	"setting": true, "preference": true,
+
+	// Primitive and language type names
+	"string": true, "int": true, "int8": true, "int16": true,
+	"int32": true, "int64": true, "uint": true, "uint8": true,
+	"uint16": true, "uint32": true, "uint64": true,
+	"float": true, "float32": true, "float64": true,
+	"bool": true, "byte": true, "rune": true,
+	"any": true, "interface": true, "struct": true, "map": true,
+	"slice": true, "array": true, "chan": true, "func": true,
+	"pointer": true, "none": true, "nonetype": true,
+	"bytes": true, "bytearray": true, "tuple": true,
+	"object": true, "type": true, "class": true, "enum": true,
+
+	// Common identifiers with special meaning
+	"all": true, "default": true,
+	"new": true, "old": true, "empty": true,
+	"root": true, "self": true, "system": true, "parent": true,
+	"force": true, "help": true,
 	"true": true, "false": true, "yes": true, "no": true,
 	"on": true, "off": true, "nil": true, "null": true,
+	"0": true, "1": true,
 }
 
 var DangerousChars = func() map[rune]bool {

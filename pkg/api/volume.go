@@ -10,10 +10,9 @@ import (
 
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
-	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/disk"
 	"mvmctl/internal/infra/errs"
-	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"
@@ -51,8 +50,7 @@ func (op *Operation) VolumeCreate(ctx context.Context, input *inputs.VolumeCreat
 	timestamp := time.Now().Format(time.RFC3339)
 
 	// Generate ID matching Python's HashGenerator.volume(name, timestamp) exactly
-	var hg infra.HashGenerator
-	volumeID := hg.Volume(resolved.Name, timestamp)
+	volumeID := crypto.VolumeID(resolved.Name, timestamp)
 
 	volumeItem := &model.VolumeItem{
 		ID:         volumeID,
@@ -77,8 +75,7 @@ func (op *Operation) VolumeCreate(ctx context.Context, input *inputs.VolumeCreat
 		}
 	}
 
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("volume.create", map[string]interface{}{"name": input.Name}, "")
+	op.AuditLog.LogOperation("volume.create", map[string]interface{}{"name": input.Name}, "")
 
 	return &errs.OperationResult{
 		Status:  "success",
@@ -135,9 +132,7 @@ func (op *Operation) VolumeRemove(ctx context.Context, input *inputs.VolumeInput
 	}
 
 	// Batch-enrich with VM references for VM attachment check
-	if op.Enr != nil {
-		_ = op.Enr.EnrichVolume(ctx, resolved.Volumes)
-	}
+	op.Enr.EnrichVolume(ctx, resolved.Volumes, "vm")
 
 	for _, vol := range resolved.Volumes {
 		if vol.Status == model.VolumeStatusAttached && !force {
@@ -183,8 +178,7 @@ func (op *Operation) VolumeRemove(ctx context.Context, input *inputs.VolumeInput
 			continue
 		}
 
-		auditLog := logging.NewAuditLog(op.CacheDir)
-		_ = auditLog.LogOperation("volume.remove", map[string]interface{}{"name": vol.Name}, "")
+		op.AuditLog.LogOperation("volume.remove", map[string]interface{}{"name": vol.Name}, "")
 
 		results = append(results, errs.OperationResult{
 			Status:  "success",
@@ -273,8 +267,7 @@ func (op *Operation) VolumeResize(ctx context.Context, input *inputs.VolumeCreat
 		}
 	}
 
-	auditLog := logging.NewAuditLog(op.CacheDir)
-	_ = auditLog.LogOperation("volume.resize", map[string]interface{}{"name": vol.Name}, "")
+	op.AuditLog.LogOperation("volume.resize", map[string]interface{}{"name": vol.Name}, "")
 
 	return &errs.OperationResult{
 		Status:  "success",
