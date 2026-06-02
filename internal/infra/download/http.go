@@ -204,29 +204,21 @@ func (d *Downloader) newRequest(ctx context.Context, method, urlStr string, body
 func (d *Downloader) WithDownload(
 	ctx context.Context,
 	url, dest string,
-	timeout int,
 	progressCallback ProgressFunc,
 	onStart func(totalSize int64),
 ) (totalSize int64, err error) {
-	return d.withDownloadWithRetry(ctx, url, dest, timeout, progressCallback, onStart)
+	return d.withDownloadWithRetry(ctx, url, dest, progressCallback, onStart)
 }
 
 // withDownloadOnce performs a single HTTP download attempt (no retry).
 func (d *Downloader) withDownloadOnce(
 	ctx context.Context,
 	url, dest string,
-	timeout int,
 	progressCallback ProgressFunc,
 	onStart func(totalSize int64),
 ) (int64, error) {
 	if err := os.MkdirAll(filepath.Dir(dest), infra.DirPerm); err != nil {
 		return 0, fmt.Errorf("create dest dir: %w", err)
-	}
-
-	if timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
-		defer cancel()
 	}
 
 	req, err := d.newRequest(ctx, http.MethodGet, url, nil)
@@ -339,7 +331,6 @@ func isRetryableError(err error) bool {
 func (d *Downloader) withDownloadWithRetry(
 	ctx context.Context,
 	url, dest string,
-	timeout int,
 	progressCallback ProgressFunc,
 	onStart func(totalSize int64),
 ) (int64, error) {
@@ -347,7 +338,7 @@ func (d *Downloader) withDownloadWithRetry(
 	delay := d.delay
 
 	for attempt := 0; attempt <= d.retries; attempt++ {
-		totalSize, err := d.withDownloadOnce(ctx, url, dest, timeout, progressCallback, onStart)
+		totalSize, err := d.withDownloadOnce(ctx, url, dest, progressCallback, onStart)
 		if err == nil {
 			return totalSize, nil
 		}
@@ -511,7 +502,7 @@ func (d *Downloader) DownloadFile(
 	}
 
 	// ── Download via HTTP with retry ──
-	if _, err := d.WithDownload(ctx, url, dest, 300, chunkCallback, onStart); err != nil {
+	if _, err := d.WithDownload(ctx, url, dest, chunkCallback, onStart); err != nil {
 		return err
 	}
 

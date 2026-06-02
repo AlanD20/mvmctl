@@ -173,7 +173,7 @@ const FirecrackerSupportedArchStr = "x86_64,amd64,aarch64,arm64"
 
 // ── HTTP defaults ──
 
-const HTTPTimeout = 300 * time.Second
+const HTTPTimeout = 900 * time.Second
 const HTTPChunkSize = 1 << 20 // 1 MiB
 const HTTPMaxRetries = 3
 const HTTPRetryDelay = 1 * time.Second
