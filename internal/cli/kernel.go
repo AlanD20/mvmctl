@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 
 	"mvmctl/internal/cli/common"
@@ -63,7 +62,7 @@ func newKernelListCmd(op *api.Operation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if remote {
 				fmt.Fprintln(os.Stderr, "Fetching remote kernel versions...")
-				_, remoteVersions, err := op.KernelList(cmd.Context(), true, noCache)
+				_, remoteVersions, err := op.KernelList(cmd.Context(), true, noCache, nil)
 				if err != nil {
 					return err
 				}
@@ -91,61 +90,12 @@ func newKernelListCmd(op *api.Operation) *cobra.Command {
 					return nil
 				}
 
-				// Group by type
-				groups := make(map[string][]model.VersionInfo)
-				for _, v := range remoteVersions {
-					groups[v.Type] = append(groups[v.Type], v)
-				}
-
-				// Sort types alphabetically
-				sortedTypes := make([]string, 0, len(groups))
-				for t := range groups {
-					sortedTypes = append(sortedTypes, t)
-				}
-				sort.Strings(sortedTypes)
-
-				rows := make([][]string, 0)
-				for _, typeKey := range sortedTypes {
-					versionList := groups[typeKey]
-					if len(versionList) == 0 {
-						continue
-					}
-
-					// Build display name for type header
-					parts := strings.SplitN(typeKey, "-", 2)
-					var typeDisplay string
-					if len(parts) > 1 {
-						typeDisplay = toTitle(parts[0]) + " " + parts[1]
-					} else {
-						typeDisplay = toTitle(typeKey)
-					}
-					suffix := ""
-					if strings.HasPrefix(typeKey, "official") {
-						suffix = " (build required)"
-					}
-					rows = append(rows, []string{typeKey, typeDisplay + suffix})
-
-					// Version rows with tree indent
-					for j, v := range versionList {
-						isLast := j == len(versionList)-1
-						prefix := "  └─ "
-						if !isLast {
-							prefix = "  ├─ "
-						}
-						display := v.DisplayName
-						if display == "" {
-							display = v.Version
-						}
-						rows = append(rows, []string{prefix + v.Version, display})
-					}
-				}
-
-				common.Cli.Table([]string{"Type / Version", "Description"}, rows)
+				common.RenderVersionTree(remoteVersions)
 				return nil
 			}
 
 			// Local listing
-			kernels, _, err := op.KernelList(cmd.Context(), false, false)
+			kernels, _, err := op.KernelList(cmd.Context(), false, false, nil)
 			if err != nil {
 				return err
 			}

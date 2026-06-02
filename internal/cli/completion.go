@@ -39,7 +39,7 @@ func completeImageIDs(cmd *cobra.Command, args []string, toComplete string) ([]s
 	if opRef == nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	images, _, _ := opRef.ImageListAll(cmd.Context(), false, "", false)
+	images, _, _ := opRef.ImageListAll(cmd.Context(), false, "", false, nil)
 	var results []string
 	for _, img := range images {
 		short := crypto.Truncate(img.ID, 6)
@@ -58,7 +58,7 @@ func completeKernelIDs(cmd *cobra.Command, args []string, toComplete string) ([]
 	if opRef == nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	kernels, _, _ := opRef.KernelList(cmd.Context(), false, false)
+	kernels, _, _ := opRef.KernelList(cmd.Context(), false, false, nil)
 	var results []string
 	for _, k := range kernels {
 		if k.Type != "" && k.Version != "" {
@@ -80,7 +80,7 @@ func completeBinaryVersions(cmd *cobra.Command, args []string, toComplete string
 	if opRef == nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	binaries, _, _ := opRef.BinaryList(cmd.Context(), false, nil)
+	binaries, _, _ := opRef.BinaryList(cmd.Context(), false, nil, nil)
 	var results []string
 	for _, b := range binaries {
 		if b.Name != "" && strings.HasPrefix(b.Name, toComplete) && !slices.Contains(results, b.Name) {
@@ -211,7 +211,7 @@ func completeRemoteImageIDs(cmd *cobra.Command, args []string, toComplete string
 	// Match Python: ImageOperation.list_all(remote=True) returns list[ImageVersion]
 	// ImageVersion has no ID field in either Python or Go, so the Python completion
 	// `hasattr(img, "id")` always returns False, yielding zero results. Match that.
-	_, _, _ = opRef.ImageListAll(cmd.Context(), true, "", false)
+	_, _, _ = opRef.ImageListAll(cmd.Context(), true, "", false, nil)
 	var results []string
 	return results, cobra.ShellCompDirectiveNoFileComp
 }

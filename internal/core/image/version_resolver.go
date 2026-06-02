@@ -14,77 +14,38 @@ import (
 )
 
 // ResolveVersions fetches and parses version listings for all provided image type configs.
-// Delegates to the shared infra resolver, then converts model.VersionInfo results
-// to model.ImageVersion.
+// Delegates to the shared infra resolver, then enriches results with the
+// human-readable Name from the image type config.
 func ResolveVersions(
 	ctx context.Context,
 	configs []download.ResolverConfig,
 	arch string,
 	cacheTTLSeconds int,
 	ciVersion string,
-) map[string][]model.ImageVersion {
-	// Delegate to the shared infra resolver
+) map[string][]model.VersionInfo {
 	inner := download.NewHttpDirVersionResolver()
 	results := inner.Resolve(ctx, configs, arch, ciVersion, cacheTTLSeconds, 0)
 
-	// Convert model.VersionInfo results to model.ImageVersion with config-aware
-	// fields (type_name, codename) — matching Python's inline conversion loop.
-	output := make(map[string][]model.ImageVersion, len(results))
+	// Enrich each version with the config-level Name (e.g. "Ubuntu LTS").
+	output := make(map[string][]model.VersionInfo, len(results))
 	for typeName, versions := range results {
-		imageVersions := make([]model.ImageVersion, 0, len(versions))
-		for _, v := range versions {
-			imageVersion := VersionInfoToImageVersion(v, configs, typeName)
-			imageVersions = append(imageVersions, imageVersion)
+		configName := resolveConfigName(configs, typeName)
+		for i := range versions {
+			versions[i].Name = configName
 		}
-		output[typeName] = imageVersions
+		output[typeName] = versions
 	}
-
 	return output
 }
 
-// VersionInfoToImageVersion converts a model.VersionInfo to an model.ImageVersion,
-// optionally resolving the config_name (type_name) and codename from the
-// original image_types_config. This matches Python's inline conversion in
-// HttpDirVersionResolver.resolve().
-//
-// configs is the original image_types_config list used to find config_name
-// and codename. If nil, fields are populated from VersionInfo directly.
-func VersionInfoToImageVersion(
-	vi model.VersionInfo,
-	configs []download.ResolverConfig,
-	typeName string,
-) model.ImageVersion {
-	// Resolve config_name from the config's "name" field (e.g. "Ubuntu"),
-	// matching Python: config = _find_config(image_types_config, type_name);
-	// config_name = config.get("name", "") if config else ""
-	// Find the config for this type name and extract name + codename.
-	configName := ""
-	var codename *string
+// resolveConfigName finds the human-readable name for a type from the config list.
+func resolveConfigName(configs []download.ResolverConfig, typeName string) string {
 	for i := range configs {
-		if configs[i].Type != typeName {
-			continue
+		if configs[i].Type == typeName {
+			return configs[i].Name
 		}
-		configName = configs[i].Name
-		for codenameKey, mappedVersion := range configs[i].Options.CodenameMapping {
-			if mappedVersion == vi.Version {
-				cn := codenameKey
-				codename = &cn
-				break
-			}
-		}
-		break
 	}
-
-	return model.ImageVersion{
-		Version:     vi.Version,
-		Codename:    codename,
-		DownloadURL: vi.DownloadURL,
-		SHA256URL:   vi.SHA256URL, // populated from VersionInfo
-		DisplayName: vi.DisplayName,
-		Type:        vi.Type,
-		Format:      vi.Format,
-		TypeName:    configName,
-	}
+	return ""
 }
 
 // TypeConfigRaw holds the raw YAML structure from images.yaml.

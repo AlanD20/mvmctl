@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 
 	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api"
 )
 
@@ -741,6 +743,63 @@ func RenderListing[T any](items []T, columns []ListingColumn, style string, titl
 		tableTitle = title[0]
 	}
 	Cli.Table(headers, rows, tableTitle)
+}
+
+// ─── RenderVersionTree ─────────────────────────────────────────────────────────
+
+// RenderVersionTree renders a grouped tree of version items (image ls -r, kernel ls -r).
+// Items are grouped by Type, sorted alphabetically, with a header row per type
+// and tree-indented version rows underneath.
+// The type header display uses Name from the first item, falling back to the type key.
+func RenderVersionTree(versions []model.VersionInfo) {
+	if len(versions) == 0 {
+		return
+	}
+
+	// Group by type
+	groups := make(map[string][]model.VersionInfo)
+	for _, v := range versions {
+		groups[v.Type] = append(groups[v.Type], v)
+	}
+
+	// Sort types alphabetically
+	sortedTypes := make([]string, 0, len(groups))
+	for t := range groups {
+		sortedTypes = append(sortedTypes, t)
+	}
+	sort.Strings(sortedTypes)
+
+	rows := make([][]string, 0)
+	for _, typeKey := range sortedTypes {
+		versionList := groups[typeKey]
+		if len(versionList) == 0 {
+			continue
+		}
+
+		// Type header: use Name from first item, fall back to type key
+		typeDisplay := versionList[0].Name
+		if typeDisplay == "" {
+			typeDisplay = typeKey
+		}
+		rows = append(rows, []string{typeKey, typeDisplay})
+
+		// Version rows with tree indent
+		for j, v := range versionList {
+			isLast := j == len(versionList)-1
+			prefix := "  └─ "
+			if !isLast {
+				prefix = "  ├─ "
+			}
+			versionLabel := prefix + v.Version
+			if v.IsPresent {
+				versionLabel = prefix + "✓ " + v.Version
+			}
+			display := v.DisplayName
+			rows = append(rows, []string{versionLabel, display})
+		}
+	}
+
+	Cli.Table([]string{"Type / Version", "Description"}, rows)
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

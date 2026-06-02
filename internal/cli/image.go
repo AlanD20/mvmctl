@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"mvmctl/internal/cli/common"
@@ -80,13 +79,13 @@ func newImageListCmd(op *api.Operation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if remote {
 				fmt.Fprintln(os.Stderr, "Fetching remote images")
-				_, versions, err := op.ImageListAll(cmd.Context(), true, typeFilter, noCache)
+				_, versions, err := op.ImageListAll(cmd.Context(), true, typeFilter, noCache, nil)
 				if err != nil {
 					return err
 				}
 				printRemoteImages(versions, jsonOutput)
 			} else {
-				images, _, err := op.ImageListAll(cmd.Context(), false, "", false)
+				images, _, err := op.ImageListAll(cmd.Context(), false, "", false, nil)
 				if err != nil {
 					return err
 				}
@@ -105,7 +104,7 @@ func newImageListCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func printRemoteImages(versions []*model.ImageVersion, jsonOutput bool) {
+func printRemoteImages(versions []model.VersionInfo, jsonOutput bool) {
 	if jsonOutput {
 		b, _ := json.MarshalIndent(versions, "", "  ")
 		fmt.Println(string(b))
@@ -117,51 +116,7 @@ func printRemoteImages(versions []*model.ImageVersion, jsonOutput bool) {
 		return
 	}
 
-	// Group by type preserving order
-	groups := make(map[string][]*model.ImageVersion)
-	for _, v := range versions {
-		groups[v.Type] = append(groups[v.Type], v)
-	}
-
-	// Sort types alphabetically
-	sortedTypes := make([]string, 0, len(groups))
-	for t := range groups {
-		sortedTypes = append(sortedTypes, t)
-	}
-	sort.Strings(sortedTypes)
-
-	rows := make([][]string, 0)
-	for _, typeKey := range sortedTypes {
-		versionList := groups[typeKey]
-		if len(versionList) == 0 {
-			continue
-		}
-
-		// Type-level display name from the first version's TypeName
-		typeDisplay := versionList[0].TypeName
-		if typeDisplay == "" {
-			typeDisplay = typeKey
-		}
-
-		// Type header row
-		rows = append(rows, []string{typeKey, typeDisplay})
-
-		// Version rows with tree indent
-		for j, v := range versionList {
-			isLast := j == len(versionList)-1
-			prefix := "  └─ "
-			if !isLast {
-				prefix = "  ├─ "
-			}
-			display := v.DisplayName
-			if display == "" {
-				display = v.Version
-			}
-			rows = append(rows, []string{prefix + v.Version, display})
-		}
-	}
-
-	common.Cli.Table([]string{"Type / Version", "Description"}, rows)
+	common.RenderVersionTree(versions)
 }
 
 // printLocalImages prints the local image listing table.

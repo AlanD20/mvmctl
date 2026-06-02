@@ -22,6 +22,7 @@ import (
 	"mvmctl/internal/enricher"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/db"
+	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/firewall"
 	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
@@ -136,4 +137,12 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 		ProvisionerType: provisionerType,
 		AuditLog:        logging.NewAuditLog(cacheDir),
 	}
+}
+
+// emitProgress calls the onProgress callback if non-nil.
+func emitProgress(onProgress func(errs.ProgressEvent), phase, status, msg string) {
+	if onProgress == nil {
+		return
+	}
+	onProgress(errs.ProgressEvent{Phase: phase, Status: status, Message: msg})
 }

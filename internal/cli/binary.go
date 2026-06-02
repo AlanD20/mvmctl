@@ -15,21 +15,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// localFirecrackerVersions builds a set of Firecracker versions present locally.
-// BinaryList for local entries returns all binary types (firecracker, jailer,
-// kernels, images), but BinaryList for remote only fetches Firecracker releases.
-// This filter prevents type-mismatch when checking which remote releases are
-// already downloaded.
-func localFirecrackerVersions(local []*model.BinaryItem) map[string]bool {
-	versions := make(map[string]bool)
-	for _, b := range local {
-		if b.Name == "firecracker" {
-			versions[b.Version] = true
-		}
-	}
-	return versions
-}
-
 // binaryColumns defines the local listing columns for binaries.
 var binaryColumns = []common.ListingColumn{
 	{Header: "", Extract: func(v any) string { return common.Cli.FormatMarker(v.(*model.BinaryItem).IsDefault) }},
@@ -76,12 +61,10 @@ func newBinaryListCmd(op *api.Operation) *cobra.Command {
 		Aliases: []string{"list"},
 		Short:   "List local (and optionally remote) Firecracker versions",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			local, _, err := op.BinaryList(cmd.Context(), false, nil)
+			local, _, err := op.BinaryList(cmd.Context(), false, nil, nil)
 			if err != nil {
 				return err
 			}
-
-			localVersions := localFirecrackerVersions(local)
 
 			if jsonOutput {
 				b, _ := json.MarshalIndent(local, "", "  ")
@@ -91,20 +74,11 @@ func newBinaryListCmd(op *api.Operation) *cobra.Command {
 
 			if remote {
 				fmt.Fprintf(os.Stderr, "Fetching remote versions...\n")
-				_, remoteVersions, err := op.BinaryList(cmd.Context(), true, &limit)
+				_, remoteVersions, err := op.BinaryList(cmd.Context(), true, &limit, nil)
 				if err != nil {
 					return err
 				}
-
-				rows := make([][]string, 0, len(remoteVersions))
-				for _, ver := range remoteVersions {
-					cached := " "
-					if localVersions[ver] {
-						cached = "✓"
-					}
-					rows = append(rows, []string{cached, ver})
-				}
-				common.Cli.Table([]string{"Downloaded", "Version"}, rows)
+				common.RenderVersionTree(remoteVersions)
 				return nil
 			}
 
@@ -177,7 +151,7 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 					GitRef:           gitRefPtr,
 					SetDefault:       setDefault,
 					DownloadOverride: false,
-				})
+				}, nil)
 				if result.Status == "error" {
 					return fmt.Errorf("%s", result.Message)
 				}
@@ -203,7 +177,7 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 				Name:             name,
 				SetDefault:       setDefault,
 				DownloadOverride: force,
-			})
+			}, nil)
 
 			// If binary already exists and --force wasn't set, offer to re-download
 			if result.Status == "error" && result.Code == string(errs.CodeBinaryAlreadyExists) && !force {
@@ -223,7 +197,7 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 					Name:             name,
 					SetDefault:       setDefault,
 					DownloadOverride: true,
-				})
+				}, nil)
 			}
 
 			if result.Status == "error" {

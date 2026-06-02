@@ -44,17 +44,3 @@ type ImageSpec struct {
 	ListURLTemplate *string `yaml:"list_url_template,omitempty"`
 	Size            *int64  `yaml:"size,omitempty"`
 }
-
-// ── ImageVersion ──
-
-// ImageVersion corresponds to Python's ImageVersion dataclass.
-type ImageVersion struct {
-	Version     string  `json:"version"`
-	Codename    *string `json:"codename,omitempty"`
-	Type        string  `json:"type"`
-	DownloadURL string  `json:"download_url"`
-	SHA256URL   string  `json:"sha256_url,omitempty"`
-	Format      string  `json:"format"`
-	DisplayName string  `json:"display_name"`
-	TypeName    string  `json:"type_name"`
-}

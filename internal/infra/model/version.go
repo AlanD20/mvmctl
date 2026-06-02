@@ -10,4 +10,6 @@ type VersionInfo struct {
 	DisplayName string `json:"display_name"`
 	Type        string `json:"type"`
 	Format      string `json:"format"`
+	Name        string `json:"name,omitempty"`
+	IsPresent   bool   `json:"is_present,omitempty"`
 }
