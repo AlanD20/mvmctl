@@ -10,19 +10,9 @@ import (
 	"mvmctl/internal/infra/version"
 )
 
-// RelationSpec corresponds to Python's RelationSpec dataclass in _enrichment.py.
-type RelationSpec struct {
-	FKField      string
-	Resolver     string
-	Method       string
-	RelationName string
-	IsReverse    bool
-	BatchMethod  string
-}
-
 // RELATIONS defines the cross-domain relations for image enrichment.
 // Matches Python's Resolver.RELATIONS dict.
-var RELATIONS = map[string]RelationSpec{
+var RELATIONS = map[string]model.RelationSpec{
 	"vm": {
 		FKField:      "id",
 		Resolver:     "vm",
@@ -42,7 +32,7 @@ type ResolveResult struct {
 
 // EnrichFunc is a function that enriches images in-place with relations.
 // Set by the API layer during wiring to avoid circular imports.
-type EnrichFunc func(ctx context.Context, images []*model.ImageItem, include []string, relations map[string]RelationSpec)
+type EnrichFunc func(ctx context.Context, images []*model.ImageItem, include []string, relations map[string]model.RelationSpec)
 
 // Resolver matches Python's Resolver in _resolver.py.
 type Resolver struct {

@@ -9,30 +9,8 @@ import (
 	"mvmctl/internal/infra/model"
 )
 
-// RelationSpec corresponds to Python's RelationSpec dataclass in _enrichment.py.
-type RelationSpec struct {
-	FKField      string
-	Resolver     string
-	Method       string
-	RelationName string
-	IsReverse    bool
-	BatchMethod  string
-}
-
 // RELATIONS defines the cross-domain relations for volume enrichment.
-// Matches Python's RELATIONS exactly:
-//
-//	RELATIONS: dict[str, RelationSpec] = {
-//	    "vm": RelationSpec(
-//	        fk_field="id",
-//	        resolver="vm",
-//	        method="find_by_volume_ids",
-//	        relation_name="vms",
-//	        is_reverse=True,
-//	        batch_method="by_volume_id_batch",
-//	    ),
-//	}
-var RELATIONS = map[string]RelationSpec{
+var RELATIONS = map[string]model.RelationSpec{
 	"vm": {
 		FKField:      "id",
 		Resolver:     "vm",
@@ -53,7 +31,7 @@ type ResolveResult struct {
 
 // EnrichFunc is a function that enriches volumes in-place with relations.
 // Set by the API layer during wiring to avoid circular imports.
-type EnrichFunc func(ctx context.Context, volumes []*model.VolumeItem, include []string, relations map[string]RelationSpec)
+type EnrichFunc func(ctx context.Context, volumes []*model.VolumeItem, include []string, relations map[string]model.RelationSpec)
 
 // Resolver resolves volume identifiers (name, ID prefix) to volume objects.
 // Matches Python's VolumeResolver.
