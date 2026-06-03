@@ -169,7 +169,7 @@ const ExecutablePerm = 0755
 const ShadowPerm = 0640
 
 // ── Firecracker architecture support ──
-const FirecrackerSupportedArchStr = "x86_64,amd64,aarch64,arm64"
+var FirecrackerSupportedArches = []string{"x86_64", "amd64", "aarch64", "arm64"}
 
 // ── HTTP defaults ──
 
@@ -558,7 +558,7 @@ func GetKernelsDir() string {
 	return path
 }
 
-func GetKeyDir() string {
+func GetKeysDir() string {
 	configDir, err := GetConfigDir()
 	if err != nil {
 		configDir = filepath.Join(GetRealHome(), ".config", ProjectName)
@@ -633,7 +633,7 @@ func GetTimingLogPath() string {
 }
 
 // ── Warm image directory ──
-func GetWarmImageDir() string {
+func GetWarmImagesDir() string {
 	path := filepath.Join(GetTempDir(), "ready")
 	if err := ensureDirAndChown(path); err != nil {
 		slog.Warn("failed to create warm image directory", "path", path, "error", err)

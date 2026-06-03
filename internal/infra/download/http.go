@@ -204,17 +204,17 @@ func (d *Downloader) newRequest(ctx context.Context, method, urlStr string, body
 func (d *Downloader) WithDownload(
 	ctx context.Context,
 	url, dest string,
-	progressCallback ProgressFunc,
+	onProgress ProgressFunc,
 	onStart func(totalSize int64),
 ) (totalSize int64, err error) {
-	return d.withDownloadWithRetry(ctx, url, dest, progressCallback, onStart)
+	return d.withDownloadWithRetry(ctx, url, dest, onProgress, onStart)
 }
 
 // withDownloadOnce performs a single HTTP download attempt (no retry).
 func (d *Downloader) withDownloadOnce(
 	ctx context.Context,
 	url, dest string,
-	progressCallback ProgressFunc,
+	onProgress ProgressFunc,
 	onStart func(totalSize int64),
 ) (int64, error) {
 	if err := os.MkdirAll(filepath.Dir(dest), infra.DirPerm); err != nil {
@@ -269,8 +269,8 @@ func (d *Downloader) withDownloadOnce(
 				}
 				return 0, fmt.Errorf("write file: %w", writeErr)
 			}
-			if progressCallback != nil {
-				progressCallback(chunk)
+			if onProgress != nil {
+				onProgress(chunk)
 			}
 		}
 		if readErr == io.EOF {
@@ -331,14 +331,14 @@ func isRetryableError(err error) bool {
 func (d *Downloader) withDownloadWithRetry(
 	ctx context.Context,
 	url, dest string,
-	progressCallback ProgressFunc,
+	onProgress ProgressFunc,
 	onStart func(totalSize int64),
 ) (int64, error) {
 	var lastErr error
 	delay := d.delay
 
 	for attempt := 0; attempt <= d.retries; attempt++ {
-		totalSize, err := d.withDownloadOnce(ctx, url, dest, progressCallback, onStart)
+		totalSize, err := d.withDownloadOnce(ctx, url, dest, onProgress, onStart)
 		if err == nil {
 			return totalSize, nil
 		}

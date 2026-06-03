@@ -101,7 +101,7 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 		Image:   image.NewService(r.Image),
 		Kernel:  kernel.NewService(r.Kernel, cacheDir),
 		Binary:  binary.NewService(r.Binary, filepath.Join(cacheDir, "bin"), cacheDir),
-		Key:     key.NewService(r.Key, infra.GetKeyDir()),
+		Key:     key.NewService(r.Key, infra.GetKeysDir()),
 		Host:    host.NewService(r.Host),
 		Config:  config.NewService(r.Config, configReg),
 		Volume:  volume.NewService(r.Volume),
