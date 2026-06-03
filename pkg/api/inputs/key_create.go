@@ -106,7 +106,7 @@ func (r *KeyCreateRequest) Resolve() (*ResolvedKeyCreateInput, error) {
 	// Default output_dir resolved via CacheUtils
 	outputDir := r.input.OutputDir
 	if outputDir == "" {
-		outputDir = infra.GetKeyDir()
+		outputDir = infra.GetKeysDir()
 	}
 
 	// File conflict validation (caller validates)

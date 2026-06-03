@@ -247,7 +247,7 @@ func (r *ImageAcquireRequest) ensureValidate() error {
 			Class:   errs.ClassValidation,
 		}
 	}
-	parts := strings.Split(infra.FirecrackerSupportedArchStr, ",")
+	parts := infra.FirecrackerSupportedArches
 	archOk := false
 	for _, p := range parts {
 		if p == arch {
@@ -257,10 +257,14 @@ func (r *ImageAcquireRequest) ensureValidate() error {
 	}
 	if !archOk {
 		return &errs.DomainError{
-			Code:    errs.CodeImageImportFailed,
-			Op:      "image_acquire",
-			Message: fmt.Sprintf("Unknown arch: %s. Valid: %s", arch, infra.FirecrackerSupportedArchStr),
-			Class:   errs.ClassValidation,
+			Code: errs.CodeImageImportFailed,
+			Op:   "image_acquire",
+			Message: fmt.Sprintf(
+				"Unknown arch: %s. Valid: %s",
+				arch,
+				strings.Join(infra.FirecrackerSupportedArches, ", "),
+			),
+			Class: errs.ClassValidation,
 		}
 	}
 

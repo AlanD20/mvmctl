@@ -55,7 +55,7 @@ func (op *Operation) CacheInitAll(
 		infra.GetKernelsDir,
 		infra.GetBinDir,
 		infra.GetLogsDir,
-		infra.GetKeyDir,
+		infra.GetKeysDir,
 	}
 
 	for _, fn := range dirFuncs {

@@ -126,12 +126,12 @@ func (s *Service) RemoveImageFiles(image *model.ImageItem) []string {
 		}
 	}
 
-	entries, err = os.ReadDir(infra.GetWarmImageDir())
+	entries, err = os.ReadDir(infra.GetWarmImagesDir())
 	if err != nil {
 		return removed
 	}
 	for _, entry := range entries {
-		if err := os.Remove(filepath.Join(infra.GetWarmImageDir(), entry.Name())); err == nil {
+		if err := os.Remove(filepath.Join(infra.GetWarmImagesDir(), entry.Name())); err == nil {
 			removed = append(removed, entry.Name())
 		}
 	}
@@ -448,7 +448,7 @@ func (s *Service) ExtractImage(
 
 // MaterializeTo performs fast durable copy from tmpfs cache to destination.
 func (s *Service) MaterializeTo(ctx context.Context, imageID, fsType, outputPath string) error {
-	cachedPath := filepath.Join(infra.GetWarmImageDir(), fmt.Sprintf("%s.%s", imageID, fsType))
+	cachedPath := filepath.Join(infra.GetWarmImagesDir(), fmt.Sprintf("%s.%s", imageID, fsType))
 	if _, err := os.Stat(cachedPath); os.IsNotExist(err) {
 		return NewImageError(fmt.Sprintf("Image not in cache: %s", imageID))
 	}
@@ -487,7 +487,7 @@ func (s *Service) MaterializeTo(ctx context.Context, imageID, fsType, outputPath
 func (s *Service) EnsureCached(images []*model.ImageItem) ([]string, error) {
 	var results []string
 	for _, image := range images {
-		cachedPath := filepath.Join(infra.GetWarmImageDir(), fmt.Sprintf("%s.%s", image.ID, image.FSType))
+		cachedPath := filepath.Join(infra.GetWarmImagesDir(), fmt.Sprintf("%s.%s", image.ID, image.FSType))
 
 		if _, err := os.Stat(cachedPath); err == nil {
 			slog.Debug("Found image in cache", "path", cachedPath)

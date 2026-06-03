@@ -2105,7 +2105,7 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 	mode := c.resolved.CloudInitMode
 
 	// Read SSH pubkeys from the key service (used by OFF, INJECT, ISO, NET modes)
-	keySvc := key.NewService(key.NewRepository(nil), infra.GetKeyDir())
+	keySvc := key.NewService(key.NewRepository(nil), infra.GetKeysDir())
 	pubkeys, _ := keySvc.GetPubkeys(ctx, c.resolved.SSHKeys)
 
 	// Common operations for OFF and INJECT modes
@@ -2937,7 +2937,7 @@ func (op *Operation) vmBuildResolvedInput(
 			// Fall back: create a minimal item with just the name
 			sshKeyItems = append(
 				sshKeyItems,
-				&model.SSHKeyItem{Name: name, PublicKeyPath: filepath.Join(infra.GetKeyDir(), name+".pub")},
+				&model.SSHKeyItem{Name: name, PublicKeyPath: filepath.Join(infra.GetKeysDir(), name+".pub")},
 			)
 		}
 	}
