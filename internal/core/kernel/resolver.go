@@ -17,7 +17,7 @@ import (
 
 // RELATIONS defines the cross-domain relations for kernel enrichment.
 // Matches Python's Resolver.RELATIONS.
-var RELATIONS = map[string]RelationSpec{
+var RELATIONS = map[string]model.RelationSpec{
 	"vm": {
 		FKField:      "id",
 		Resolver:     "vm",
@@ -35,19 +35,9 @@ type ResolveResult struct {
 	ExitCode int
 }
 
-// RelationSpec corresponds to Python's RelationSpec dataclass in _enrichment.py.
-type RelationSpec struct {
-	FKField      string
-	Resolver     string
-	Method       string
-	RelationName string
-	IsReverse    bool
-	BatchMethod  string
-}
-
 // EnrichFunc is a function that enriches kernels in-place with relations.
 // Set by the API layer during wiring to avoid circular imports.
-type EnrichFunc func(ctx context.Context, kernels []*model.KernelItem, include []string, relations map[string]RelationSpec)
+type EnrichFunc func(ctx context.Context, kernels []*model.KernelItem, include []string, relations map[string]model.RelationSpec)
 
 // Resolver matches Python's Resolver with all resolution methods.
 type Resolver struct {

@@ -19,6 +19,26 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// imageImportExtensionOrder defines the priority order for auto-detecting
+// image format from filename extension. Must match Python's
+// IMAGE_IMPORT_FORMAT_MAP iteration order for backwards compatibility.
+var imageImportExtensionOrder = []string{
+	".qcow2",
+	".raw",
+	".img",
+	".ext4",
+	".ext3",
+	".ext2",
+	".btrfs",
+	".xfs",
+	".vhd",
+	".vhdx",
+	".tar",
+	".tar.gz",
+	".tar.xz",
+	".tgz",
+}
+
 // imageColumns defines the local listing columns for images.
 var imageColumns = []common.ListingColumn{
 	{Header: "", Extract: func(v any) string { return common.Cli.FormatMarker(v.(*model.ImageItem).IsDefault) }},
@@ -395,25 +415,9 @@ Examples:
 			formatExplicitlySet := formatFlag != nil && formatFlag.Changed
 			if !formatExplicitlySet || format == "auto" {
 				// Use the centralized format map for values but iterate in Python-compatible order.
-				extOrder := []string{
-					".qcow2",
-					".raw",
-					".img",
-					".ext4",
-					".ext3",
-					".ext2",
-					".btrfs",
-					".xfs",
-					".vhd",
-					".vhdx",
-					".tar",
-					".tar.gz",
-					".tar.xz",
-					".tgz",
-				}
 				fname := strings.ToLower(filepath.Base(sourcePath))
 				found := false
-				for _, ext := range extOrder {
+				for _, ext := range imageImportExtensionOrder {
 					if strings.HasSuffix(fname, ext) {
 						if fmtVal, ok := infra.ImageImportFormatMap[ext]; ok {
 							format = fmtVal

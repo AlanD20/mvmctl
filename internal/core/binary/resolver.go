@@ -26,19 +26,9 @@ type ResolveResult struct {
 	ExitCode int
 }
 
-// RelationSpec corresponds to Python's RelationSpec dataclass in _enrichment.py.
-type RelationSpec struct {
-	FKField      string
-	Resolver     string
-	Method       string
-	RelationName string
-	IsReverse    bool
-	BatchMethod  string
-}
-
 // RELATIONS defines the cross-domain relations for binary enrichment.
 // Matches Python's Resolver.RELATIONS dict exactly.
-var RELATIONS = map[string]RelationSpec{
+var RELATIONS = map[string]model.RelationSpec{
 	"vm": {
 		FKField:      "id",
 		Resolver:     "vm",
@@ -51,7 +41,7 @@ var RELATIONS = map[string]RelationSpec{
 
 // EnrichFunc is a function that enriches binaries in-place with relations.
 // Set by the API layer during wiring to avoid circular imports.
-type EnrichFunc func(ctx context.Context, binaries []*model.BinaryItem, include []string, relations map[string]RelationSpec)
+type EnrichFunc func(ctx context.Context, binaries []*model.BinaryItem, include []string, relations map[string]model.RelationSpec)
 
 // Resolver resolves binary identifiers (ID prefix, name, [name, version] pair)
 // to BinaryItem instances.
