@@ -12,31 +12,14 @@ import (
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/pkg/api/responses"
 )
 
-// copyError converts a CPService error to OperationResult.
+// copyError converts a CPService error to a DomainError.
 // Matches Python's except CPError as e: logger.debug("CP error: %s", e, exc_info=True)
-// Returns *OperationResult so it can be used as a unified error return value
-// from the Copy method's outer try/except pattern.
-func (op *Operation) copyError(err error) *errs.OperationResult {
+func (op *Operation) copyError(err error) error {
 	slog.Debug("CP error", "error", err)
-	errCode := "cp.failed"
-	msg := err.Error()
-	if de, ok := err.(*errs.DomainError); ok {
-		if de.Code != "" {
-			errCode = string(de.Code)
-		}
-		// Python: message=str(e) returns just the message, not the code-prefixed string
-		if de.Message != "" {
-			msg = de.Message
-		}
-	}
-	return &errs.OperationResult{
-		Status:    "error",
-		Code:      errCode,
-		Message:   msg,
-		Exception: err,
-	}
+	return err
 }
 
 // CPCopy copies files between host and microVMs using tar-over-SSH.
@@ -48,15 +31,13 @@ func (op *Operation) copyError(err error) *errs.OperationResult {
 // the CopyToVM/CopyFromVM/CopyVMToVM methods are DomainError types that map
 // to CPError. All CP-path errors (resolution, validation, copy) go through
 // the unified copyError handler.
-func (op *Operation) CPCopy(ctx context.Context, input *inputs.CPInput, onProgress func(int64)) *errs.OperationResult {
+func (op *Operation) CPCopy(ctx context.Context, input *inputs.CPInput, onProgress func(int64)) (*responses.CPCopyResult, error) {
 	// Python: try: ... except CPError as e: ...
 	// Build CPRequest and resolve (matches Python: CPRequest(inputs, db).resolve())
 	req := inputs.NewCPRequest(*input, op.Connection.DB())
 	resolved, err := req.Resolve(ctx, op.Repos.VM, op.Repos.Key)
 	if err != nil {
-		// Python: raises CPError during resolution → caught by except CPError.
-		// Go: DomainError with CP error codes → unified error handler.
-		return op.copyError(err)
+		return nil, op.copyError(err)
 	}
 
 	// ── Validate destination is a directory for host_to_vm ──────────────
@@ -66,20 +47,14 @@ func (op *Operation) CPCopy(ctx context.Context, input *inputs.CPInput, onProgre
 	if resolved.Direction == "host_to_vm" && resolved.DstInfo != nil {
 		dstPath := resolved.DstInfo.RemotePath
 		if dstPath != "" && !strings.HasSuffix(dstPath, "/") {
-			// Python: raise CPDestinationNotDirectoryError(
-			//   f"Destination path must be a directory (end with /). "
-			//   f"Got: '{dst_path}'. "
-			//   f"Use 'vm_name:/dest/dir/' to copy into a directory.",
-			//   code="cp.destination_not_directory",
-			// )
-			// Go: create DomainError with the exact same message and code.
-			return &errs.OperationResult{
-				Status: "error",
-				Code:   "cp.destination_not_directory",
+			return nil, &errs.DomainError{
+				Code: errs.CodeCPDestinationNotDir,
+				Op:   "cp",
 				Message: fmt.Sprintf(
 					"Destination path must be a directory (end with /). Got: '%s'. Use 'vm_name:/dest/dir/' to copy into a directory.",
 					dstPath,
 				),
+				Class: errs.ClassValidation,
 			}
 		}
 	}
@@ -101,7 +76,7 @@ func (op *Operation) CPCopy(ctx context.Context, input *inputs.CPInput, onProgre
 	switch resolved.Direction {
 	case "host_to_vm":
 		if resolved.DstInfo == nil || resolved.LocalPaths == nil {
-			return op.copyError(ssh.ErrCPFailed("Internal error: destination VM info not available"))
+			return nil, op.copyError(ssh.ErrCPFailed("Internal error: destination VM info not available"))
 		}
 
 		dstKeyPath := ""
@@ -125,12 +100,12 @@ func (op *Operation) CPCopy(ctx context.Context, input *inputs.CPInput, onProgre
 			},
 		)
 		if err != nil {
-			return op.copyError(err)
+			return nil, op.copyError(err)
 		}
 
 	case "vm_to_host":
 		if resolved.SrcInfo == nil || resolved.LocalPaths == nil {
-			return op.copyError(ssh.ErrCPFailed("Internal error: source VM info not available"))
+			return nil, op.copyError(ssh.ErrCPFailed("Internal error: source VM info not available"))
 		}
 
 		srcKeyPath := ""
@@ -154,12 +129,12 @@ func (op *Operation) CPCopy(ctx context.Context, input *inputs.CPInput, onProgre
 			},
 		)
 		if err != nil {
-			return op.copyError(err)
+			return nil, op.copyError(err)
 		}
 
 	case "vm_to_vm":
 		if resolved.SrcInfo == nil || resolved.DstInfo == nil {
-			return op.copyError(ssh.ErrCPFailed("Internal error: source or destination VM info not available"))
+			return nil, op.copyError(ssh.ErrCPFailed("Internal error: source or destination VM info not available"))
 		}
 
 		srcKeyPath := ""
@@ -191,26 +166,22 @@ func (op *Operation) CPCopy(ctx context.Context, input *inputs.CPInput, onProgre
 			},
 		)
 		if err != nil {
-			return op.copyError(err)
+			return nil, op.copyError(err)
 		}
 
 	default:
-		return &errs.OperationResult{
-			Status:  "error",
+		return nil, &errs.DomainError{
 			Code:    "cp.failed",
+			Op:      "cp",
 			Message: fmt.Sprintf("Unknown copy direction: %s", resolved.Direction),
+			Class:   errs.ClassInternal,
 		}
 	}
 
-	return &errs.OperationResult{
-		Status:  "success",
-		Code:    "cp.success",
+	return &responses.CPCopyResult{
+		Bytes:   totalBytes,
 		Message: resultMessage,
-		Item: map[string]interface{}{
-			"bytes":   totalBytes,
-			"message": resultMessage,
-		},
-	}
+	}, nil
 }
 
 // Compile-time checks

@@ -32,10 +32,11 @@ import (
 //
 //	on_progress: Callable[[ProgressEvent], None] | None = None
 //
-// Returns *errs.OperationResult (success/error/skipped) or
-// *errs.NeedsInteraction (when sudo required).
-// OperationResult.Item varies: nil (success/skipped) or []string (error details).
-func (op *Operation) HostInit(ctx context.Context, onProgress func(errs.ProgressEvent)) any {
+// Returns (any, error) where any is:
+//   - *errs.NeedsInteraction when sudo required
+//   - map[string]any with changes/user_added_to_group on success
+//   - nil when skipped (no changes needed)
+func (op *Operation) HostInit(ctx context.Context, onProgress func(errs.ProgressEvent)) (any, error) {
 	// Resolve the actual binary path so sudo invokes the correct binary.
 	mvmPath, _ := os.Executable()
 	if mvmPath == "" {
@@ -55,7 +56,7 @@ func (op *Operation) HostInit(ctx context.Context, onProgress func(errs.Progress
 				"operation":         "initialize host",
 				"session_has_group": hasGroup,
 			},
-		}
+		}, nil
 	}
 
 	// Ensure DB schema exists before any DB writes, matching Python:
@@ -76,17 +77,19 @@ func (op *Operation) HostInit(ctx context.Context, onProgress func(errs.Progress
 				"operation":         "initialize host",
 				"session_has_group": hasGroup,
 			},
-		}
+		}, nil
 	}
 
 	// --- Pre-flight probes ---
 	// Run detection first, then probe against the detected state (verdict #53).
 	hardware, detErr := host.DetectHardware()
 	if detErr != nil {
-		return &errs.OperationResult{
-			Status:  "error",
+		return nil, &errs.DomainError{
 			Code:    "host.init.detect_failed",
+			Op:      "host",
 			Message: fmt.Sprintf("Hardware detection failed: %v", detErr),
+			Err:     detErr,
+			Class:   errs.ClassInternal,
 		}
 	}
 	limits := host.DetectLimits()
@@ -98,13 +101,11 @@ func (op *Operation) HostInit(ctx context.Context, onProgress func(errs.Progress
 		for i, c := range probeResult.Critical {
 			criticalNames[i] = c.Name
 		}
-		return &errs.OperationResult{
-			Status:  "error",
+		return nil, &errs.DomainError{
 			Code:    "host.init.probe_failed",
+			Op:      "host",
 			Message: fmt.Sprintf("Probe failures: %s", strings.Join(criticalNames, ", ")),
-			Metadata: map[string]any{
-				"probe_result": probeResult,
-			},
+			Class:   errs.ClassValidation,
 		}
 	}
 
@@ -142,10 +143,11 @@ func (op *Operation) HostInit(ctx context.Context, onProgress func(errs.Progress
 	// --- Setup host environment ---
 	allChanges, err := op.hostInitSetupEnvironment(ctx, sessionID, hostCtrl, fwBackend)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:  "error",
+		return nil, &errs.DomainError{
 			Code:    "host.init.failed",
+			Op:      "host",
 			Message: err.Error(),
+			Class:   errs.ClassInternal,
 		}
 	}
 
@@ -171,23 +173,14 @@ func (op *Operation) HostInit(ctx context.Context, onProgress func(errs.Progress
 	}
 
 	if len(allChanges) == 0 {
-		return &errs.OperationResult{
-			Status:  "skipped",
-			Code:    "host.init.noop",
-			Message: "Host already configured — nothing to do.",
-		}
+		return nil, nil
 	}
 
-	return &errs.OperationResult{
-		Status:  "success",
-		Code:    "host.init.complete",
-		Message: fmt.Sprintf("Host initialized (%d change(s) applied).", len(allChanges)),
-		Metadata: map[string]any{
-			"changes":             allChanges,
-			"user_added_to_group": wasUserAdded,
-			"session_has_group":   system.SessionHasGroup(),
-		},
-	}
+	return map[string]any{
+		"changes":             allChanges,
+		"user_added_to_group": wasUserAdded,
+		"session_has_group":   system.SessionHasGroup(),
+	}, nil
 }
 
 func (op *Operation) hostInitSetupEnvironment(
@@ -333,46 +326,42 @@ func (op *Operation) HostDetectResources(ctx context.Context) (*model.HostResour
 
 // HostNetworkSetup sets up the default network.
 // Matches Python's HostOperation.network_setup() exactly — static call to
-func (op *Operation) HostNetworkSetup(ctx context.Context) *errs.OperationResult {
-	syncResult := op.NetworkSync(ctx, nil)
-	if syncResult.IsOK() {
-		// Use the explicit network_count from sync metadata.
-		// syncResult.Item is map[string]map[string]int (not map[string]any),
-		// so a type-based emptiness check is fragile.
-		nc, _ := syncResult.Metadata["network_count"].(int)
-		if nc == 0 {
-			result := op.NetworkCreateDefaultNetwork(ctx)
-			if result.IsError() {
-				slog.Warn("Could not create default network", "error", result.Message)
-				return result
+func (op *Operation) HostNetworkSetup(ctx context.Context) error {
+	results, syncErr := op.NetworkSync(ctx, nil)
+	if syncErr == nil {
+		if len(results) == 0 {
+			_, err := op.NetworkCreateDefaultNetwork(ctx)
+			if err != nil {
+				slog.Warn("Could not create default network", "error", err)
+				return err
 			}
 		}
+	} else {
+		slog.Warn("Could not sync networks", "error", syncErr)
 	}
 
-	if syncResult.IsError() {
-		slog.Warn("Could not sync networks", "error", syncResult.Message)
-	}
-
-	return &errs.OperationResult{
-		Status: "success", Code: "network.default_ready",
-	}
+	return nil
 }
 
 // HostInfo returns host info with capacity analysis.
 // Matches Python's HostOperation.info() exactly — uses HostInfo.to_dict().
-func (op *Operation) HostInfo(ctx context.Context) *errs.OperationResult {
+func (op *Operation) HostInfo(ctx context.Context) (*responses.HostInfo, error) {
 	state, err := op.Repos.Host.GetState(ctx)
 	if err != nil {
-		return &errs.OperationResult{
-			Status: "error", Code: "host.info.no_state",
-			Message:   fmt.Sprintf("Failed to get host state: %v", err),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code:    "host.info.no_state",
+			Op:      "host",
+			Message: fmt.Sprintf("Failed to get host state: %v", err),
+			Err:     err,
+			Class:   errs.ClassInternal,
 		}
 	}
 	if state == nil {
-		return &errs.OperationResult{
-			Status: "error", Code: "host.info.no_state",
+		return nil, &errs.DomainError{
+			Code:    "host.info.no_state",
+			Op:      "host",
 			Message: "Host not yet detected. Run 'mvm host init' first.",
+			Class:   errs.ClassValidation,
 		}
 	}
 
@@ -383,17 +372,21 @@ func (op *Operation) HostInfo(ctx context.Context) *errs.OperationResult {
 		// Auto-detect if this is the first time
 		hardware, limits, err = op.Services.Host.DetectAndSaveCapacity(ctx)
 		if err != nil {
-			return &errs.OperationResult{
-				Status: "error", Code: "host.info.detect_failed",
-				Message:   fmt.Sprintf("Failed to detect host capacity: %v", err),
-				Exception: err,
+			return nil, &errs.DomainError{
+				Code:    "host.info.detect_failed",
+				Op:      "host",
+				Message: fmt.Sprintf("Failed to detect host capacity: %v", err),
+				Err:     err,
+				Class:   errs.ClassInternal,
 			}
 		}
 		state, err = op.Repos.Host.GetState(ctx)
 		if err != nil || state == nil {
-			return &errs.OperationResult{
-				Status: "error", Code: "host.info.no_state",
+			return nil, &errs.DomainError{
+				Code:    "host.info.no_state",
+				Op:      "host",
 				Message: "Failed to retrieve host state after detection.",
+				Class:   errs.ClassInternal,
 			}
 		}
 	}
@@ -401,10 +394,11 @@ func (op *Operation) HostInfo(ctx context.Context) *errs.OperationResult {
 	// Detect resources
 	resources, err := host.DetectResources(ctx, hardware, limits, op.CacheDir)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:  "error",
+		return nil, &errs.DomainError{
 			Code:    "host.info_failed",
+			Op:      "host",
 			Message: fmt.Sprintf("Failed to detect resources: %v", err),
+			Class:   errs.ClassInternal,
 		}
 	}
 
@@ -415,38 +409,40 @@ func (op *Operation) HostInfo(ctx context.Context) *errs.OperationResult {
 		Limits:    *limits,
 		Hardware:  *hardware,
 	}
-	return &errs.OperationResult{
-		Status: "success", Code: "host.info",
-		Item: responses.BuildHostInfo(info),
-	}
+	return responses.BuildHostInfo(info), nil
 }
 
 // HostRefreshCapacity re-detects host capacity.
 // Matches Python's HostOperation.refresh_capacity() exactly.
-func (op *Operation) HostRefreshCapacity(ctx context.Context) *errs.OperationResult {
+func (op *Operation) HostRefreshCapacity(ctx context.Context) (*responses.HostInfo, error) {
 	hardware, limits, err := op.Services.Host.DetectAndSaveCapacity(ctx)
 	if err != nil {
-		return &errs.OperationResult{
-			Status: "error", Code: "host.capacity.detect_failed",
-			Message:   fmt.Sprintf("Failed to detect host capacity: %v", err),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code:    "host.capacity.detect_failed",
+			Op:      "host",
+			Message: fmt.Sprintf("Failed to detect host capacity: %v", err),
+			Err:     err,
+			Class:   errs.ClassInternal,
 		}
 	}
 
 	state, err := op.Repos.Host.GetState(ctx)
 	if err != nil || state == nil {
-		return &errs.OperationResult{
-			Status: "error", Code: "host.info.no_state",
+		return nil, &errs.DomainError{
+			Code:    "host.info.no_state",
+			Op:      "host",
 			Message: "Failed to retrieve host state after detection.",
+			Class:   errs.ClassInternal,
 		}
 	}
 
 	resources, err := host.DetectResources(ctx, hardware, limits, op.CacheDir)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:  "error",
+		return nil, &errs.DomainError{
 			Code:    "host.capacity_failed",
+			Op:      "host",
 			Message: fmt.Sprintf("Failed to detect resources: %v", err),
+			Class:   errs.ClassInternal,
 		}
 	}
 
@@ -457,10 +453,7 @@ func (op *Operation) HostRefreshCapacity(ctx context.Context) *errs.OperationRes
 		Limits:    *limits,
 		Hardware:  *hardware,
 	}
-	return &errs.OperationResult{
-		Status: "success", Code: "host.capacity.refreshed",
-		Item: responses.BuildHostInfo(info),
-	}
+	return responses.BuildHostInfo(info), nil
 }
 
 // HostCheckKVMAccess checks /dev/kvm accessibility.
@@ -520,13 +513,15 @@ func (op *Operation) HostStatusCheck(ctx context.Context) *responses.HostStatusC
 
 // HostClean cleans host networking configuration.
 // Matches Python's HostOperation.clean() exactly — wraps errors in HostError/NetworkError pattern.
-func (op *Operation) HostClean(ctx context.Context) *errs.OperationResult {
+func (op *Operation) HostClean(ctx context.Context) ([]string, error) {
 
 	if err := system.CheckPrivileges("/usr/sbin/ip", "clean host"); err != nil {
-		return &errs.OperationResult{
-			Status: "error", Code: string(errs.CodePrivilegeRequired),
-			Message:   fmt.Sprintf("Privilege check failed: %v", err),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code:    errs.CodePrivilegeRequired,
+			Op:      "host",
+			Message: fmt.Sprintf("Privilege check failed: %v", err),
+			Err:     err,
+			Class:   errs.ClassNeedsInteraction,
 		}
 	}
 
@@ -604,11 +599,11 @@ func (op *Operation) HostClean(ctx context.Context) *errs.OperationResult {
 	// Remove default network from database (matching Python)
 	defaultNet := infranet.FindNetworkByName(networks, defaultNetNameStr)
 	if defaultNet != nil {
-		removeResult := op.NetworkRemove(ctx, &inputs.NetworkInput{Identifiers: []string{defaultNetNameStr}}, true)
-		if removeResult.IsError() {
+		removeErr := op.NetworkRemove(ctx, &inputs.NetworkInput{Identifiers: []string{defaultNetNameStr}}, true)
+		if removeErr != nil {
 			summary = append(
 				summary,
-				fmt.Sprintf("Warning: failed to remove default network: %s", removeResult.Message),
+				fmt.Sprintf("Warning: failed to remove default network: %s", removeErr.Error()),
 			)
 		} else {
 			summary = append(summary, fmt.Sprintf("Removed default network '%s'", defaultNetNameStr))
@@ -625,36 +620,28 @@ func (op *Operation) HostClean(ctx context.Context) *errs.OperationResult {
 
 	op.AuditLog.LogOperation("host.clean", map[string]any{"actions": len(summary)}, "")
 
-	return &errs.OperationResult{
-		Status: "success", Code: "host.cleaned",
-		Message: fmt.Sprintf("Cleaned %d networking item(s)", len(summary)),
-		Item:    summary,
-	}
+	return summary, nil
 }
 
 // HostReset resets host to pre-init state.
 // Matches Python's HostOperation.reset() exactly — usermod processing order matches.
-func (op *Operation) HostReset(ctx context.Context) *errs.OperationResult {
+func (op *Operation) HostReset(ctx context.Context) ([]string, error) {
 
 	if err := system.CheckPrivileges("/usr/sbin/ip", "reset host"); err != nil {
-		return &errs.OperationResult{
-			Status: "error", Code: string(errs.CodePrivilegeRequired),
-			Message:   fmt.Sprintf("Privilege check failed: %v", err),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code:    errs.CodePrivilegeRequired,
+			Op:      "host",
+			Message: fmt.Sprintf("Privilege check failed: %v", err),
+			Err:     err,
+			Class:   errs.ClassNeedsInteraction,
 		}
 	}
 
-	cleanResult := op.HostClean(ctx)
-	// Python: if clean_result.is_error: return clean_result
-	if cleanResult.IsError() {
-		return cleanResult
+	cleanSummary, cleanErr := op.HostClean(ctx)
+	if cleanErr != nil {
+		return nil, cleanErr
 	}
-	var summary []string
-	if cleanResult.IsOK() && cleanResult.Item != nil {
-		if items, ok := cleanResult.Item.([]string); ok {
-			summary = append(summary, items...)
-		}
-	}
+	summary := cleanSummary
 
 	reverted, err := op.Services.Host.RestoreState(ctx)
 	if err != nil {
@@ -723,11 +710,7 @@ func (op *Operation) HostReset(ctx context.Context) *errs.OperationResult {
 
 	op.AuditLog.LogOperation("host.reset", map[string]any{"actions": len(summary)}, "")
 
-	return &errs.OperationResult{
-		Status: "success", Code: "host.reset",
-		Message: fmt.Sprintf("Reset %d item(s)", len(summary)),
-		Item:    summary,
-	}
+	return summary, nil
 }
 
 // HostGetRunningVMs returns running VMs.

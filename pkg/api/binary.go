@@ -19,14 +19,11 @@ import (
 
 // BinaryPrune prunes unused binaries.
 // Matches Python's BinaryOperation.prune() exactly.
-func (op *Operation) BinaryPrune(ctx context.Context, dryRun bool, force bool) *errs.OperationResult {
+func (op *Operation) BinaryPrune(ctx context.Context, dryRun bool, force bool) ([]string, error) {
 	allBinaries, err := op.Repos.Binary.ListAll(ctx)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      string(errs.CodeDatabaseError),
-			Message:   fmt.Sprintf("Failed to list binaries: %v", err),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code: errs.CodeDatabaseError, Message: fmt.Sprintf("Failed to list binaries: %v", err), Err: err,
 		}
 	}
 
@@ -55,29 +52,21 @@ func (op *Operation) BinaryPrune(ctx context.Context, dryRun bool, force bool) *
 		removed = append(removed, fmt.Sprintf("%s:%s", bin.Name, bin.Version))
 	}
 
-	return &errs.OperationResult{
-		Status:  "success",
-		Code:    "cache.pruned",
-		Message: fmt.Sprintf("Pruned %d binary(ies)", len(removed)),
-		Item:    removed,
-	}
+	return removed, nil
 }
 
 // BinaryPull downloads or builds a binary.
 // Matches Python's BinaryOperation.pull() exactly — uses BinaryPullRequest
 // resolution pipeline and wraps all BinaryErrors in code="binary.pull_failed".
 func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInput,
-	onProgress func(errs.ProgressEvent)) *errs.OperationResult {
+	onProgress func(errs.ProgressEvent)) ([]*model.BinaryItem, error) {
 
 	// Python: request = BinaryPullRequest(inputs=inputs, db=db); resolved = request.resolve()
 	request := inputs.NewBinaryPullRequest(*input, op.Connection.DB())
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      "binary.pull_failed",
-			Message:   err.Error(),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code: "binary.pull_failed", Message: err.Error(), Err: err,
 		}
 	}
 
@@ -87,11 +76,8 @@ func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInp
 
 		binaries, err := op.Services.Binary.BuildFromSource(ctx, *resolved.GitRef)
 		if err != nil {
-			return &errs.OperationResult{
-				Status:    "error",
-				Code:      "binary.pull_failed",
-				Message:   fmt.Sprintf("Build failed: %v", err),
-				Exception: err,
+			return nil, &errs.DomainError{
+				Code: "binary.pull_failed", Message: fmt.Sprintf("Build failed: %v", err), Err: err,
 			}
 		}
 
@@ -117,12 +103,7 @@ func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInp
 
 		emitProgress(onProgress, "complete", "complete", "Firecracker built successfully")
 
-		return &errs.OperationResult{
-			Status:  "success",
-			Code:    "binary.built_from_source",
-			Message: fmt.Sprintf("Built Firecracker %s from ref '%s'", versionStr, *resolved.GitRef),
-			Item:    binaries,
-		}
+		return binaries, nil
 	}
 
 	// ---- Release download path ----
@@ -131,18 +112,13 @@ func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInp
 		emitProgress(onProgress, "listing", "running", "Fetching remote versions...")
 		remoteVersions, err := op.Services.Binary.ListRemote(ctx, 20)
 		if err != nil {
-			return &errs.OperationResult{
-				Status:    "error",
-				Code:      "binary.pull_failed",
-				Message:   fmt.Sprintf("Failed to list remote versions: %v", err),
-				Exception: err,
+			return nil, &errs.DomainError{
+				Code: "binary.pull_failed", Message: fmt.Sprintf("Failed to list remote versions: %v", err), Err: err,
 			}
 		}
 		if len(remoteVersions) == 0 {
-			return &errs.OperationResult{
-				Status:  "error",
-				Code:    "binary.no_remote_versions",
-				Message: "No remote Firecracker versions found",
+			return nil, &errs.DomainError{
+				Code: "binary.no_remote_versions", Message: "No remote Firecracker versions found",
 			}
 		}
 		resolvedVersion = remoteVersions[0].Version
@@ -155,10 +131,8 @@ func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInp
 	versionExists := fcExists != nil && jlExists != nil
 
 	if versionExists && !resolved.DownloadOverride {
-		return &errs.OperationResult{
-			Status:  "error",
-			Code:    "binary.pull_failed",
-			Message: fmt.Sprintf("Firecracker v%s already exists. Use --force to re-download.", normalized),
+		return nil, &errs.DomainError{
+			Code: errs.CodeBinaryAlreadyExists, Message: fmt.Sprintf("Firecracker v%s already exists. Use --force to re-download.", normalized),
 		}
 	}
 
@@ -174,11 +148,8 @@ func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInp
 
 	binaries, err := op.Services.Binary.DownloadFirecracker(ctx, resolvedVersion, arch, progressBridge)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      "binary.pull_failed",
-			Message:   fmt.Sprintf("Download failed: %v", err),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code: "binary.pull_failed", Message: fmt.Sprintf("Download failed: %v", err), Err: err,
 		}
 	}
 
@@ -193,12 +164,7 @@ func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInp
 
 	emitProgress(onProgress, "complete", "complete", "Firecracker downloaded successfully")
 
-	return &errs.OperationResult{
-		Status:  "success",
-		Code:    "binary.downloaded",
-		Message: fmt.Sprintf("Downloaded Firecracker v%s", normalized),
-		Item:    binaries,
-	}
+	return binaries, nil
 }
 
 // BinaryRemove removes binaries by identifiers.
@@ -262,7 +228,7 @@ func (op *Operation) BinaryRemove(ctx context.Context, input *inputs.BinaryInput
 // BinaryRemoveByVersion removes both firecracker and jailer for a version.
 // Matches Python's BinaryOperation.remove_by_version() exactly — wraps the
 // entire flow in try/except (BinaryError, BinaryNotFoundError).
-func (op *Operation) BinaryRemoveByVersion(ctx context.Context, version string, force bool) *errs.OperationResult {
+func (op *Operation) BinaryRemoveByVersion(ctx context.Context, version string, force bool) error {
 	resolver := binary.NewResolver(op.Repos.Binary)
 
 	normalized := binary.NormalizeVersion(version)
@@ -280,10 +246,8 @@ func (op *Operation) BinaryRemoveByVersion(ctx context.Context, version string, 
 	}
 
 	if len(binariesToRemove) == 0 {
-		return &errs.OperationResult{
-			Status:  "error",
-			Code:    "binary.not_found",
-			Message: fmt.Sprintf("No binaries found for version %s", normalized),
+		return &errs.DomainError{
+			Code: "binary.not_found", Message: fmt.Sprintf("No binaries found for version %s", normalized),
 		}
 	}
 
@@ -303,11 +267,8 @@ func (op *Operation) BinaryRemoveByVersion(ctx context.Context, version string, 
 	for _, bin := range binariesToRemove {
 		// Python: svc.remove(binary, force=force) — returns (*BinaryItem, error)
 		if _, err := op.Services.Binary.Remove(ctx, bin, force); err != nil {
-			return &errs.OperationResult{
-				Status:    "error",
-				Code:      "binary.remove_failed",
-				Message:   fmt.Sprintf("Failed to remove %s: %v", bin.Name, err),
-				Exception: err,
+			return &errs.DomainError{
+				Code: "binary.remove_failed", Message: fmt.Sprintf("Failed to remove %s: %v", bin.Name, err), Err: err,
 			}
 		}
 
@@ -318,11 +279,7 @@ func (op *Operation) BinaryRemoveByVersion(ctx context.Context, version string, 
 		}, "")
 	}
 
-	return &errs.OperationResult{
-		Status:  "success",
-		Code:    "binary.removed",
-		Message: fmt.Sprintf("Removed binaries for v%s", normalized),
-	}
+	return nil
 }
 
 // BinaryList returns local binaries or remote versions.
@@ -403,24 +360,19 @@ func (op *Operation) BinaryGet(ctx context.Context, input *inputs.BinaryInput) (
 // BinarySetDefault sets a binary as default.
 // Matches Python's BinaryOperation.set_default() exactly — resolves via BinaryRequest,
 // checks for ambiguous results, then delegates to BinaryController.
-func (op *Operation) BinarySetDefault(ctx context.Context, input *inputs.BinaryInput) *errs.OperationResult {
+func (op *Operation) BinarySetDefault(ctx context.Context, input *inputs.BinaryInput) (*model.BinaryItem, error) {
 	request := inputs.NewBinaryRequest(*input, op.Repos.Binary)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      "binary.default_set_failed",
-			Message:   fmt.Sprintf("Binary not found: %v", err),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code: "binary.default_set_failed", Message: fmt.Sprintf("Binary not found: %v", err), Err: err,
 		}
 	}
 
 	// Match Python's: if len(resolved.binaries) > 1: raise BinaryError("Ambiguous ID to set to default")
 	if len(resolved.Binaries) > 1 {
-		return &errs.OperationResult{
-			Status:  "error",
-			Code:    "binary.default_set_failed",
-			Message: "Ambiguous ID to set to default",
+		return nil, &errs.DomainError{
+			Code: "binary.default_set_failed", Message: "Ambiguous ID to set to default",
 		}
 	}
 
@@ -430,20 +382,14 @@ func (op *Operation) BinarySetDefault(ctx context.Context, input *inputs.BinaryI
 	// controller = BinaryController(entity=binary, repo=repo); controller.set_default()
 	ctrl, err := binary.NewController(ctx, bin, op.Repos.Binary)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      "binary.default_set_failed",
-			Message:   fmt.Sprintf("Failed to set default: %v", err),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code: "binary.default_set_failed", Message: fmt.Sprintf("Failed to set default: %v", err), Err: err,
 		}
 	}
 
 	if err := ctrl.SetDefault(ctx); err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      "binary.default_set_failed",
-			Message:   fmt.Sprintf("Failed to set default: %v", err),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code: "binary.default_set_failed", Message: fmt.Sprintf("Failed to set default: %v", err), Err: err,
 		}
 	}
 
@@ -453,44 +399,27 @@ func (op *Operation) BinarySetDefault(ctx context.Context, input *inputs.BinaryI
 		"version": bin.Version,
 	}, "")
 
-	return &errs.OperationResult{
-		Status:  "success",
-		Code:    "binary.default_set",
-		Message: fmt.Sprintf("Default binary set to %s v%s", bin.Name, bin.Version),
-		Item:    bin,
-	}
+	return bin, nil
 }
 
 // BinaryEnsureDefault ensures a default Firecracker binary exists.
 // Matches Python's BinaryOperation.ensure_default() exactly — wraps the entire
 // flow in try/except BinaryError and uses PEP 440 version sorting via
 // packaging.version.Version (replicated as a PEP 440-compatible sort).
-func (op *Operation) BinaryEnsureDefault(ctx context.Context) *errs.OperationResult {
+func (op *Operation) BinaryEnsureDefault(ctx context.Context) (*model.BinaryItem, error) {
 	local, err := op.Services.Binary.ListAll(ctx, true, true)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      "binary.ensure_default_failed",
-			Message:   fmt.Sprintf("Failed to list binaries: %v", err),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code: "binary.ensure_default_failed", Message: fmt.Sprintf("Failed to list binaries: %v", err), Err: err,
 		}
 	}
 	if len(local) == 0 {
-		return &errs.OperationResult{
-			Status:  "success",
-			Code:    "binary.default_unchanged",
-			Message: "No local binaries found",
-		}
+		return nil, nil
 	}
 
 	default_, _ := op.Services.Binary.GetDefaultFirecracker(ctx)
 	if default_ != nil {
-		return &errs.OperationResult{
-			Status:  "skipped",
-			Code:    "binary.default_unchanged",
-			Message: "Default already set",
-			Item:    default_,
-		}
+		return default_, nil
 	}
 
 	firecrackerBins := make([]*model.BinaryItem, 0)
@@ -500,11 +429,7 @@ func (op *Operation) BinaryEnsureDefault(ctx context.Context) *errs.OperationRes
 		}
 	}
 	if len(firecrackerBins) == 0 {
-		return &errs.OperationResult{
-			Status:  "success",
-			Code:    "binary.default_unchanged",
-			Message: "No firecracker binaries found",
-		}
+		return nil, nil
 	}
 
 	// PEP 440 version sorting: newest first (matching Python's:
@@ -516,20 +441,14 @@ func (op *Operation) BinaryEnsureDefault(ctx context.Context) *errs.OperationRes
 
 	ctrl, err := binary.NewController(ctx, latest, op.Repos.Binary)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      "binary.ensure_default_failed",
-			Message:   fmt.Sprintf("Failed to set default binary: %v", err),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code: "binary.ensure_default_failed", Message: fmt.Sprintf("Failed to set default binary: %v", err), Err: err,
 		}
 	}
 
 	if err := ctrl.SetDefault(ctx); err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      "binary.ensure_default_failed",
-			Message:   fmt.Sprintf("Failed to set default binary: %v", err),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code: "binary.ensure_default_failed", Message: fmt.Sprintf("Failed to set default binary: %v", err), Err: err,
 		}
 	}
 
@@ -539,12 +458,7 @@ func (op *Operation) BinaryEnsureDefault(ctx context.Context) *errs.OperationRes
 		"version": latest.Version,
 	}, "")
 
-	return &errs.OperationResult{
-		Status:  "success",
-		Code:    "binary.default_repaired",
-		Message: fmt.Sprintf("Default set to %s v%s", latest.Name, latest.Version),
-		Item:    latest,
-	}
+	return latest, nil
 }
 
 // Compile-time check

@@ -86,8 +86,7 @@ func HandleErrors(fn func() error) func() error {
 		}
 
 		// ── 5. Unexpected error (Exception) ─────────────────────
-		// Python: mvm_cli.error(f"{e.__class__.__name__}: {e}", is_unexpected=True)
-		Cli.Error(formatUnexpected(err), true) // is_unexpected = true
+		Cli.Error(formatUnexpected(err))
 		return err
 	}
 }
@@ -112,13 +111,12 @@ func HandleErrors(fn func() error) func() error {
 //
 //	mvm_cli.error(str(e))
 func handleDomainError(de *errs.DomainError) error {
-	// Resolve display message matching Python's str(e) behavior.
-	// Python MVMError.__str__() returns just the message
-	// (e.g. "VM not found: my-vm"), not the full code/op/entity prefix.
-	// Fall back to de.Error() if Message is empty.
 	displayMsg := de.Message
 	if displayMsg == "" {
-		displayMsg = de.Error()
+		displayMsg = string(de.Code)
+	}
+	if displayMsg == "" {
+		displayMsg = "An error occurred"
 	}
 
 	// ── PrivilegeError subclass ──────────────────────────────────
@@ -198,19 +196,8 @@ func isDatabaseError(err error) bool {
 	return false
 }
 
-// formatUnexpected formats an unexpected error matching Python's
-// “f"{e.__class__.__name__}: {e}"“ format.
 func formatUnexpected(err error) string {
-	typeName := fmt.Sprintf("%T", err)
-	// Strip leading "*" for pointer types
-	if strings.HasPrefix(typeName, "*") {
-		typeName = typeName[1:]
-	}
-	// Strip package path: "errors.errorString" → "errorString"
-	if dotIdx := strings.LastIndex(typeName, "."); dotIdx >= 0 {
-		typeName = typeName[dotIdx+1:]
-	}
-	return fmt.Sprintf("%s: %s", typeName, err.Error())
+	return err.Error()
 }
 
 // SudoResult carries the outcome of a sudo subprocess.

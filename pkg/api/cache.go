@@ -16,6 +16,7 @@ import (
 	"mvmctl/internal/infra/provisioner/guestfs"
 	infraslice "mvmctl/internal/infra/slice"
 	"mvmctl/internal/infra/system"
+	"mvmctl/pkg/api/responses"
 )
 
 // CacheCheckPrivileges checks if the current process has the required system privileges
@@ -31,7 +32,7 @@ func (op *Operation) CacheSessionHasGroup() bool {
 
 // CacheInitAll initializes all cache directories.
 // Matches Python's CacheOperation.init_all() exactly.
-func (op *Operation) CacheInitAll(ctx context.Context, onProgress func(errs.ProgressEvent)) *errs.OperationResult {
+func (op *Operation) CacheInitAll(ctx context.Context, onProgress func(errs.ProgressEvent)) (*responses.CacheInitResult, error) {
 	cacheDir := op.CacheDir
 	var created []string
 
@@ -85,51 +86,59 @@ func (op *Operation) CacheInitAll(ctx context.Context, onProgress func(errs.Prog
 	// Detected guestfs kernel (Python: KernelDetector.find_best_kernel())
 	kernelPath, _, _ := guestfs.FindBestKernel(ctx)
 
-	return &errs.OperationResult{
-		Status:  "success",
-		Code:    "cache.initialized",
-		Message: "Cache initialized successfully",
-		Item: map[string]any{
-			"cache_dir":         cacheDir,
-			"directories":       created,
-			"guestfs_appliance": appliancePath,
-			"guestfs_kernel":    kernelPath,
-		},
-	}
+	return &responses.CacheInitResult{
+		CacheDir:         cacheDir,
+		Directories:      created,
+		GuestfsAppliance: appliancePath,
+		GuestfsKernel:    kernelPath,
+	}, nil
 }
 
 // CachePruneVMs prunes VMs via VMOperation.Prune.
 // Matches Python's CacheOperation.prune_vms() exactly.
 func (op *Operation) CachePruneVMs(ctx context.Context, dryRun bool, includeAll bool) *errs.OperationResult {
-	return op.VMPrune(ctx, dryRun, includeAll)
+	ids, err := op.VMPrune(ctx, dryRun, includeAll)
+	if err != nil {
+		return &errs.OperationResult{
+			Status:    "error",
+			Code:      "cache.prune_failed",
+			Message:   fmt.Sprintf("Failed to prune VMs: %v", err),
+			Exception: err,
+		}
+	}
+	return &errs.OperationResult{
+		Status: "success",
+		Code:   "cache.pruned",
+		Item:   ids,
+	}
 }
 
 // CachePruneNetworks prunes networks via NetworkOperation.Prune.
 // Matches Python's CacheOperation.prune_networks() exactly.
-func (op *Operation) CachePruneNetworks(ctx context.Context, dryRun bool, includeAll bool) *errs.OperationResult {
+func (op *Operation) CachePruneNetworks(ctx context.Context, dryRun bool, includeAll bool) ([]string, error) {
 	return op.NetworkPrune(ctx, dryRun, includeAll)
 }
 
 // CachePruneImages prunes images via ImageOperation.Prune.
 // Matches Python's CacheOperation.prune_images() exactly.
-func (op *Operation) CachePruneImages(ctx context.Context, dryRun bool, includeAll bool) *errs.OperationResult {
+func (op *Operation) CachePruneImages(ctx context.Context, dryRun bool, includeAll bool) ([]string, error) {
 	return op.ImagePrune(ctx, dryRun, includeAll)
 }
 
 // CachePruneKernels prunes kernels via KernelOperation.Prune.
 // Matches Python's CacheOperation.prune_kernels() exactly.
-func (op *Operation) CachePruneKernels(ctx context.Context, dryRun bool, includeAll bool) *errs.OperationResult {
+func (op *Operation) CachePruneKernels(ctx context.Context, dryRun bool, includeAll bool) ([]string, error) {
 	return op.KernelPrune(ctx, dryRun, includeAll)
 }
 
 // CachePruneBinaries prunes binaries via BinaryOperation.Prune.
 // Matches Python's CacheOperation.prune_binaries() exactly.
-func (op *Operation) CachePruneBinaries(ctx context.Context, dryRun bool, includeAll bool) *errs.OperationResult {
+func (op *Operation) CachePruneBinaries(ctx context.Context, dryRun bool, includeAll bool) ([]string, error) {
 	return op.BinaryPrune(ctx, dryRun, includeAll)
 }
 
 // CachePruneMisc prunes miscellaneous cache items.
-func (op *Operation) CachePruneMisc(ctx context.Context, dryRun bool) *errs.OperationResult {
+func (op *Operation) CachePruneMisc(ctx context.Context, dryRun bool) (map[string]interface{}, error) {
 	binDir := infra.GetBinDir()
 	serviceBinariesCleaned := false
 	if _, err := os.Stat(binDir); err == nil && !dryRun {
@@ -142,7 +151,7 @@ func (op *Operation) CachePruneMisc(ctx context.Context, dryRun bool) *errs.Oper
 	guestfsStateCleaned := guestfs.CleanStaleState()
 	staleProvisionCleaned := op.Services.Cache.CleanStaleProvisionMounts(ctx, dryRun)
 
-	result := map[string]any{
+	result := map[string]interface{}{
 		"service_binaries":       serviceBinariesCleaned,
 		"appliance":              appliancePruned,
 		"warm_images":            warmPruned,
@@ -150,25 +159,20 @@ func (op *Operation) CachePruneMisc(ctx context.Context, dryRun bool) *errs.Oper
 		"stale_provision_mounts": staleProvisionCleaned,
 	}
 
-	return &errs.OperationResult{
-		Status:  "success",
-		Code:    "cache.pruned",
-		Message: "Misc cache pruned",
-		Item:    result,
-	}
+	return result, nil
 }
 
 // CachePruneAll performs complete cache prune across all resource types.
 // Matches Python's CacheOperation.prune_all() exactly.
-// Returns OperationResult with item of type *model.PruneAllResult matching Python's PruneAllResult dataclass.
-func (op *Operation) CachePruneAll(ctx context.Context, dryRun bool, includeAll bool) *errs.OperationResult {
+// Returns *model.PruneAllResult matching Python's PruneAllResult dataclass.
+func (op *Operation) CachePruneAll(ctx context.Context, dryRun bool, includeAll bool) (*model.PruneAllResult, error) {
 	// Python: HostPrivilegeHelper.check_privileges("/usr/sbin/ip", "prune all cache resources")
 	if err := system.CheckPrivileges("/usr/sbin/ip", "prune all cache resources"); err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      string(errs.CodePrivilegeRequired),
-			Message:   fmt.Sprintf("Privilege check failed: %v", err),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code:    errs.CodePrivilegeRequired,
+			Message: fmt.Sprintf("Privilege check failed: %v", err),
+			Err:     err,
+			Class:   errs.ClassNeedsInteraction,
 		}
 	}
 
@@ -186,47 +190,48 @@ func (op *Operation) CachePruneAll(ctx context.Context, dryRun bool, includeAll 
 		}
 	}
 
+	// Prune each resource type — collect IDs from results.
 	var prunedIDs []string
 	var failedIDs []string
 
-	for _, opResult := range []*errs.OperationResult{
-		op.CachePruneVMs(ctx, dryRun, includeAll),
-		op.CachePruneNetworks(ctx, dryRun, includeAll),
-		op.CachePruneImages(ctx, dryRun, includeAll),
-		op.CachePruneKernels(ctx, dryRun, includeAll),
-		op.CachePruneBinaries(ctx, dryRun, includeAll),
-	} {
-		if opResult != nil {
-			if opResult.IsOK() && opResult.Item != nil {
-				if items, ok := opResult.Item.([]string); ok {
-					prunedIDs = append(prunedIDs, items...)
-				}
-			}
-			// Collect failed IDs from failed operations.
-			// Matches Python's declared (but unused-in-python) failed_ids list.
-			if opResult.IsError() && opResult.Item != nil {
-				if items, ok := opResult.Item.([]string); ok {
-					failedIDs = append(failedIDs, items...)
-				}
-			}
+	// CachePruneVMs still returns *errs.OperationResult (not yet refactored)
+	pruneVMsResult := op.CachePruneVMs(ctx, dryRun, includeAll)
+	if pruneVMsResult != nil && pruneVMsResult.IsOK() && pruneVMsResult.Item != nil {
+		if items, ok := pruneVMsResult.Item.([]string); ok {
+			prunedIDs = append(prunedIDs, items...)
 		}
 	}
 
-	miscResult := op.CachePruneMisc(ctx, dryRun)
-	if miscResult != nil && miscResult.IsOK() && miscResult.Item != nil {
-		if misc, ok := miscResult.Item.(map[string]any); ok {
-			if infraslice.IsTrue(misc["appliance"]) {
-				prunedIDs = append(prunedIDs, "appliance")
-			}
-			if infraslice.IsTrue(misc["warm_images"]) {
-				prunedIDs = append(prunedIDs, "warm_images")
-			}
-			if infraslice.IsTrue(misc["guestfs_state"]) {
-				prunedIDs = append(prunedIDs, "guestfs_state")
-			}
-			if infraslice.IsTrue(misc["stale_provision_mounts"]) {
-				prunedIDs = append(prunedIDs, "stale_provision_mounts")
-			}
+	netIDs, err := op.CachePruneNetworks(ctx, dryRun, includeAll)
+	if err == nil {
+		prunedIDs = append(prunedIDs, netIDs...)
+	}
+	imgIDs, err := op.CachePruneImages(ctx, dryRun, includeAll)
+	if err == nil {
+		prunedIDs = append(prunedIDs, imgIDs...)
+	}
+	kernelIDs, err := op.CachePruneKernels(ctx, dryRun, includeAll)
+	if err == nil {
+		prunedIDs = append(prunedIDs, kernelIDs...)
+	}
+	binIDs, err := op.CachePruneBinaries(ctx, dryRun, includeAll)
+	if err == nil {
+		prunedIDs = append(prunedIDs, binIDs...)
+	}
+
+	miscMap, miscErr := op.CachePruneMisc(ctx, dryRun)
+	if miscErr == nil {
+		if infraslice.IsTrue(miscMap["appliance"]) {
+			prunedIDs = append(prunedIDs, "appliance")
+		}
+		if infraslice.IsTrue(miscMap["warm_images"]) {
+			prunedIDs = append(prunedIDs, "warm_images")
+		}
+		if infraslice.IsTrue(miscMap["guestfs_state"]) {
+			prunedIDs = append(prunedIDs, "guestfs_state")
+		}
+		if infraslice.IsTrue(miscMap["stale_provision_mounts"]) {
+			prunedIDs = append(prunedIDs, "stale_provision_mounts")
 		}
 	}
 
@@ -237,32 +242,19 @@ func (op *Operation) CachePruneAll(ctx context.Context, dryRun bool, includeAll 
 		HadRunningVMs: hadRunningVMs,
 	}
 
-	return &errs.OperationResult{
-		Status:  "success",
-		Code:    "cache.pruned",
-		Message: fmt.Sprintf("Pruned %d item(s)", len(prunedIDs)),
-		Item:    result,
-	}
+	return result, nil
 }
 
 // CacheClean performs complete cache clean.
 // Matches Python's CacheOperation.clean() exactly.
-// Returns OperationResult with item of type *model.CleanResult matching Python's CleanResult dataclass.
-func (op *Operation) CacheClean(ctx context.Context, dryRun bool) *errs.OperationResult {
+// Returns *model.CleanResult matching Python's CleanResult dataclass.
+func (op *Operation) CacheClean(ctx context.Context, dryRun bool) (*model.CleanResult, error) {
 	// Step 1: Prune all cached resources (Python: CacheOperation.prune_all(dry_run=dry_run, include_all=True))
-	pruneOpResult := op.CachePruneAll(ctx, dryRun, true)
-
-	// Extract PruneAllResult from the prune operation
-	var pruneResult *model.PruneAllResult
-	if pruneOpResult != nil && pruneOpResult.Item != nil {
-		if p, ok := pruneOpResult.Item.(*model.PruneAllResult); ok {
-			pruneResult = p
-		}
-	}
+	pruneResult, pruneErr := op.CachePruneAll(ctx, dryRun, true)
 
 	// Step 1b: Abort if any VMs failed to prune or orphan processes remain.
 	// (Python: checks prune_result.failed_ids and CacheService.scan_orphan_processes())
-	if !dryRun && pruneResult != nil {
+	if !dryRun && pruneErr == nil && pruneResult != nil {
 		failedIDs := pruneResult.FailedIDs
 		orphanProcesses := op.Services.Cache.ScanOrphanProcesses(ctx)
 
@@ -293,16 +285,15 @@ func (op *Operation) CacheClean(ctx context.Context, dryRun bool) *errs.Operatio
 					strings.Join(pids, ", "), strings.Join(names, ", ")))
 			}
 
-			result := &model.CleanResult{
+			return &model.CleanResult{
 				PruneResult:     *pruneResult,
 				CacheDirRemoved: false,
 				CacheDir:        op.CacheDir,
-			}
-			return &errs.OperationResult{
-				Status:  "error",
+			}, &errs.DomainError{
 				Code:    "cache.clean_failed",
+				Op:      "cache",
 				Message: strings.Join(messages, "; "),
-				Item:    result,
+				Class:   errs.ClassInternal,
 			}
 		}
 	}
@@ -310,7 +301,7 @@ func (op *Operation) CacheClean(ctx context.Context, dryRun bool) *errs.Operatio
 	// Step 2: Clean host networking (while DB still exists in cache dir)
 	// Python: HostOperation.clean(cache_dir) — unconditional call (hostOp is required constructor param)
 	if !dryRun {
-		_ = op.HostClean(ctx)
+		_, _ = op.HostClean(ctx)
 	}
 
 	// Step 3: Remove the cache directory itself
@@ -332,16 +323,9 @@ func (op *Operation) CacheClean(ctx context.Context, dryRun bool) *errs.Operatio
 		}
 	}
 
-	result := &model.CleanResult{
+	return &model.CleanResult{
 		PruneResult:     *pruneResult,
 		CacheDirRemoved: cacheDirRemoved,
 		CacheDir:        op.CacheDir,
-	}
-
-	return &errs.OperationResult{
-		Status:  "success",
-		Code:    "cache.cleaned",
-		Message: "Cache cleaned successfully",
-		Item:    result,
-	}
+	}, nil
 }

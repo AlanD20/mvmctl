@@ -6,18 +6,15 @@ import (
 
 // RequireString extracts a required string field from a YAML map.
 // Returns an error if the key is missing or the value is not a string.
-// Error messages match Python's yaml.require_str() format.
-// Python uses data.get(key) which returns None for missing keys, and
-// raises: "field '<key>' must be a string (got 'NoneType')".
-// For wrong types, Python produces: "field '<key>' must be a string (got '<typename>')".
+// Error messages use Go type names, not Python type names.
 func RequireString(m map[string]any, key string) (string, error) {
 	v, ok := m[key]
 	if !ok {
-		return "", fmt.Errorf("field '%s' must be a string (got 'NoneType')", key)
+		return "", fmt.Errorf("field '%s' is required", key)
 	}
 	s, ok := v.(string)
 	if !ok {
-		return "", fmt.Errorf("field '%s' must be a string (got '%T')", key, v)
+		return "", fmt.Errorf("field '%s' must be a string (got %T)", key, v)
 	}
 	return s, nil
 }

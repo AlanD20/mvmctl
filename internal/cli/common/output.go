@@ -171,23 +171,13 @@ var Cli = &MVMCli{}
 // NewCli returns the singleton MVMCli instance.
 func NewCli() *MVMCli { return Cli }
 
-// Error prints an error message to stderr.
-// Matches Python's mvm_cli.error() — Rich: "[red]✗ Error:[/] {message}"
-func (c *MVMCli) Error(message string, isUnexpected ...bool) {
-	unexpected := len(isUnexpected) > 0 && isUnexpected[0]
-	tty := isStderrTTY()
-	if unexpected {
-		if tty {
-			fmt.Fprintf(os.Stderr, "%s⚠ Unexpected Error:%s %s\n", ansiYellow, ansiReset, message)
-		} else {
-			fmt.Fprintf(os.Stderr, "⚠ Unexpected Error: %s\n", message)
-		}
+// Error prints an error message to stderr in red.
+// All errors use the same format — no "Unexpected" distinction.
+func (c *MVMCli) Error(message string) {
+	if isStderrTTY() {
+		fmt.Fprintf(os.Stderr, "%s✗ Error:%s %s\n", ansiRed, ansiReset, message)
 	} else {
-		if tty {
-			fmt.Fprintf(os.Stderr, "%s✗ Error:%s %s\n", ansiRed, ansiReset, message)
-		} else {
-			fmt.Fprintf(os.Stderr, "✗ Error: %s\n", message)
-		}
+		fmt.Fprintf(os.Stderr, "✗ Error: %s\n", message)
 	}
 }
 

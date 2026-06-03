@@ -223,37 +223,18 @@ Examples:
 				Features:     featureStr,
 			}
 
-			result := op.KernelPull(cmd.Context(), kernelInput, func(event errs.ProgressEvent) {
+			kernelItem, err := op.KernelPull(cmd.Context(), kernelInput, func(event errs.ProgressEvent) {
 				if event.Message != "" {
 					spinner.UpdateText(event.Message)
 				}
 			})
 			spinner.Stop()
-			if result == nil {
-				return nil
+			if err != nil {
+				return err
 			}
-			if result.IsError() {
-				return fmt.Errorf("%s", result.Message)
-			}
-			if result.Status == "skipped" {
-				common.Cli.Info(result.Message)
-				if result.Item != nil {
-					if ki, ok := result.Item.(*model.KernelItem); ok && ki != nil {
-						common.Cli.Info(fmt.Sprintf("  ID: %s", common.Cli.FormatID(ki.ID)))
-					}
-				}
-				return nil
-			}
-			if result.Item != nil {
-				if ki, ok := result.Item.(*model.KernelItem); ok && ki != nil {
-					common.Cli.Success(fmt.Sprintf("Pulled: %s (ID: %s)", ki.Name, common.Cli.FormatID(ki.ID)))
-					resolvedFeatures, _ := result.Metadata["features"].([]string)
-					if len(resolvedFeatures) > 0 {
-						common.Cli.Info("Enabled features: " + strings.Join(resolvedFeatures, ", "))
-					}
-				}
+			if kernelItem != nil {
+				common.Cli.Success(fmt.Sprintf("Pulled: %s (ID: %s)", kernelItem.Name, common.Cli.FormatID(kernelItem.ID)))
 			} else {
-				// Fallback for unexpected non-OperationResult returns
 				common.Cli.Success("Pull completed")
 			}
 			return nil
@@ -356,19 +337,14 @@ func newKernelDefaultCmd(op *api.Operation) *cobra.Command {
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeKernelIDs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			kernelID, err := common.Cli.CheckArg(cmd, args[0])
-			if err != nil {
+			kernelID, checkErr := common.Cli.CheckArg(cmd, args[0])
+			if checkErr != nil {
+				return checkErr
+			}
+			if err := op.KernelSetDefault(cmd.Context(), kernelID); err != nil {
 				return err
 			}
-			result := op.KernelSetDefault(cmd.Context(), kernelID)
-			if result.Status == "error" {
-				return fmt.Errorf("set default failed: %s", result.Message)
-			}
-			msg := result.Message
-			if msg == "" {
-				msg = fmt.Sprintf("Default kernel set to: %s", kernelID)
-			}
-			common.Cli.Success(msg)
+			common.Cli.Success(fmt.Sprintf("Default kernel set to: %s", kernelID))
 			return nil
 		},
 	}
@@ -417,18 +393,12 @@ Examples:
 				Arch:       archPtr,
 				SetDefault: setDefault,
 			}
-			result := op.KernelImport(cmd.Context(), importInput)
-			if result.Status == "error" {
-				msg := result.Message
-				if msg == "" {
-					msg = fmt.Sprintf("Import failed: %s", name)
-				}
-				return fmt.Errorf("%s", msg)
+			kernelItem, err := op.KernelImport(cmd.Context(), importInput)
+			if err != nil {
+				return err
 			}
-			if kernelItem, ok := result.Item.(*model.KernelItem); ok && kernelItem != nil {
-				common.Cli.Success(fmt.Sprintf("Imported: %s", kernelItem.Name))
-				common.Cli.Info(fmt.Sprintf("  ID:   %s", common.Cli.FormatID(kernelItem.ID)))
-			}
+			common.Cli.Success(fmt.Sprintf("Imported: %s", kernelItem.Name))
+			common.Cli.Info(fmt.Sprintf("  ID:   %s", common.Cli.FormatID(kernelItem.ID)))
 			if setDefault {
 				common.Cli.Success(fmt.Sprintf("Default kernel set to: %s", name))
 			}

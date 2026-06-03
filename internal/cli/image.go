@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -196,30 +197,19 @@ The selector can be a type (e.g. "ubuntu") or type:version (e.g. "ubuntu:24.04")
 
 			spinner := common.NewSpinner("")
 			spinner.Start()
-			result := op.ImagePull(cmd.Context(), input, func(event errs.ProgressEvent) {
+			img, err := op.ImagePull(cmd.Context(), input, func(event errs.ProgressEvent) {
 				if event.Message != "" {
 					spinner.UpdateText(event.Message)
 				}
 			})
 			spinner.Stop()
-			if ni, ok := result.(*errs.NeedsInteraction); ok {
-				common.Cli.Info(ni.Message)
-				return nil
-			}
-			opResult, ok := result.(*errs.OperationResult)
-			if !ok {
-				return fmt.Errorf("pull failed: unexpected result type")
-			}
-			if opResult.IsError() {
-				msg := opResult.Message
-				if msg == "" {
-					msg = fmt.Sprintf("Download failed: %s", selector)
+			if err != nil {
+				var ni *errs.NeedsInteraction
+				if errors.As(err, &ni) {
+					common.Cli.Info(ni.Message)
+					return nil
 				}
-				return fmt.Errorf("download failed: %s", msg)
-			}
-			img, ok := opResult.Item.(*model.ImageItem)
-			if !ok || img == nil {
-				return fmt.Errorf("pull failed: no image returned")
+				return err
 			}
 
 			common.Cli.Success(fmt.Sprintf("Pulled: %s (ID: %s)", img.Name, common.Cli.FormatID(img.ID)))
@@ -345,13 +335,8 @@ func newImageDefaultCmd(op *api.Operation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prefix := args[0]
 			imgInput := inputs.ImageInput{Identifiers: []string{prefix}}
-			result := op.ImageSetDefault(cmd.Context(), &imgInput)
-			if result.IsError() {
-				msg := result.Message
-				if msg == "" {
-					msg = fmt.Sprintf("Set default failed: %s", prefix)
-				}
-				return fmt.Errorf("Set default failed: %s", msg)
+			if err := op.ImageSetDefault(cmd.Context(), &imgInput); err != nil {
+				return err
 			}
 			common.Cli.Success(fmt.Sprintf("Default image set to: %s", prefix))
 			return nil
@@ -459,21 +444,16 @@ Examples:
 
 			spinner := common.NewSpinner("")
 			spinner.Start()
-			result := op.ImageImport(cmd.Context(), input, func(event errs.ProgressEvent) {
+			img, err := op.ImageImport(cmd.Context(), input, func(event errs.ProgressEvent) {
 				if event.Message != "" {
 					spinner.UpdateText(event.Message)
 				}
 			})
 			spinner.Stop()
-			if result.IsError() {
-				msg := result.Message
-				if msg == "" {
-					msg = fmt.Sprintf("Import failed: %s", name)
-				}
-				return fmt.Errorf("Import failed: %s", msg)
+			if err != nil {
+				return err
 			}
-			img, ok := result.Item.(*model.ImageItem)
-			if !ok || img == nil {
+			if img == nil {
 				return fmt.Errorf("import failed: no image returned")
 			}
 			common.Cli.Success(fmt.Sprintf("Imported: %s", img.Path))
@@ -538,31 +518,26 @@ Examples:
 			//   else: warm all (defaults to all=True when no argument given)
 			spinner := common.NewSpinner("")
 			spinner.Start()
-			var opResult *errs.OperationResult
+			var paths []string
+			var warmErr error
 			if imageID != "" {
 				warmInput := inputs.ImageInput{Identifiers: []string{imageID}}
-				opResult = op.ImageWarm(cmd.Context(), &warmInput, false, func(event errs.ProgressEvent) {
+				paths, warmErr = op.ImageWarm(cmd.Context(), &warmInput, false, func(event errs.ProgressEvent) {
 					if event.Message != "" {
 						spinner.UpdateText(event.Message)
 					}
 				})
 			} else {
-				opResult = op.ImageWarm(cmd.Context(), nil, true, func(event errs.ProgressEvent) {
+				paths, warmErr = op.ImageWarm(cmd.Context(), nil, true, func(event errs.ProgressEvent) {
 					if event.Message != "" {
 						spinner.UpdateText(event.Message)
 					}
 				})
 			}
-			result := opResult
 			spinner.Stop()
-			if result.IsError() {
-				msg := result.Message
-				if msg == "" {
-					msg = "Warm failed"
-				}
-				return fmt.Errorf("warm failed: %s", msg)
+			if warmErr != nil {
+				return warmErr
 			}
-			paths, _ := result.Item.([]string)
 
 			// Match Python:  display_name = image_id or "all images"
 			displayName := imageID

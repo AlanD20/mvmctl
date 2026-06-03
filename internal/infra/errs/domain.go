@@ -351,11 +351,10 @@ func PrivilegeError(msg string, details map[string]any) *DomainError {
 }
 
 // FormatExceptionDebug formats an error for debug output, including a full
-// stack trace when includeStack is true. Mirrors Python's format_exception_debug().
-// Python: f"{exc.__class__.__name__}: {exc}\n{traceback.format_exc()}"
+// stack trace when includeStack is true.
 func FormatExceptionDebug(err error, includeStack bool) string {
 	if includeStack {
-		return fmt.Sprintf("%s: %v\n%s", typeName(err), err, debug.Stack())
+		return fmt.Sprintf("%v\n%s", err, debug.Stack())
 	}
 	return err.Error()
 }
@@ -513,16 +512,4 @@ func GuestfsError(msg string) *DomainError {
 	return &DomainError{Code: CodeGuestfsError, Op: "guestfs", Message: msg, Class: ClassInternal}
 }
 
-// typeName extracts the underlying type name from an error value, matching
-// Python's exc.__class__.__name__. Returns just the name without any package
-// prefix or pointer indicator.
-func typeName(err error) string {
-	s := fmt.Sprintf("%T", err)
-	// Strip pointer prefix
-	s = strings.TrimLeft(s, "*")
-	// Strip package prefix (everything before the last dot)
-	if idx := strings.LastIndex(s, "."); idx >= 0 {
-		s = s[idx+1:]
-	}
-	return s
-}
+

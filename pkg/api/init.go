@@ -34,16 +34,17 @@ func (op *Operation) InitCheckReadiness(ctx context.Context) *model.ProbeResult 
 
 // InitSetupHost sets up host configuration.
 // Matches Python's InitOperation.setup_host() exactly.
-func (op *Operation) InitSetupHost(ctx context.Context) *errs.OperationResult {
-	raw := op.HostInit(ctx, nil)
-	if result, ok := raw.(*errs.OperationResult); ok {
-		return result
+func (op *Operation) InitSetupHost(ctx context.Context) error {
+	raw, err := op.HostInit(ctx, nil)
+	if err != nil {
+		return err
 	}
 	if _, ok := raw.(*errs.NeedsInteraction); ok {
-		return &errs.OperationResult{
-			Status:  "error",
-			Code:    "privilege.sudo_required",
+		return &errs.DomainError{
+			Code:    errs.CodePrivilegeRequired,
+			Op:      "host",
 			Message: "Root privileges required",
+			Class:   errs.ClassNeedsInteraction,
 		}
 	}
 	return nil
@@ -184,9 +185,9 @@ func (op *Operation) initStepHost(
 		return InitStepResult{Step: "host", Success: true, Message: msg}, nil
 	}
 
-	initResult := op.HostInit(ctx, onProgress)
-	if initResult == nil {
-		return InitStepResult{Step: "host", Success: false, Message: "Host init returned no result"}, nil
+	initResult, initErr := op.HostInit(ctx, onProgress)
+	if initErr != nil {
+		return InitStepResult{Step: "host", Success: false, Message: initErr.Error()}, nil
 	}
 
 	// Check for NeedsInteraction (Python: isinstance(result, NeedsInteraction))
@@ -194,26 +195,20 @@ func (op *Operation) initStepHost(
 		return InitStepResult{Step: "host", Success: false, Message: "Root privileges required"}, interaction
 	}
 
-	// Type assertion to OperationResult
-	hostResult, ok := initResult.(*errs.OperationResult)
-	if !ok {
-		return InitStepResult{Step: "host", Success: false, Message: "Unexpected result from host init"}, nil
+	if initResult == nil {
+		return InitStepResult{Step: "host", Success: true, Message: "Host already configured"}, nil
 	}
 
-	if hostResult.IsOK() {
-		if hostResult.Status == "skipped" {
-			return InitStepResult{Step: "host", Success: true, Message: "Host already configured"}, nil
-		}
-		return InitStepResult{Step: "host", Success: true, Message: "Host initialized"}, nil
-	}
-
-	return InitStepResult{Step: "host", Success: false, Message: hostResult.Message}, nil
+	return InitStepResult{Step: "host", Success: true, Message: "Host initialized"}, nil
 }
 
 func (op *Operation) initStepNetworkSetup(ctx context.Context) InitStepResult {
-	result := op.HostNetworkSetup(ctx)
-	success := result.IsOK()
-	msg := result.Message
+	err := op.HostNetworkSetup(ctx)
+	success := err == nil
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+	}
 	if msg == "" {
 		if success {
 			msg = "Default network ready"
@@ -227,21 +222,12 @@ func (op *Operation) initStepNetworkSetup(ctx context.Context) InitStepResult {
 func (op *Operation) initStepCache(ctx context.Context, onProgress func(errs.ProgressEvent)) InitStepResult {
 	// Python: try: result = CacheOperation.init_all(...); except Exception as e:
 	//         return InitStepResult("cache", False, f"Cache init failed: {e}")
-	result := op.CacheInitAll(ctx, onProgress)
-	if result.IsError() {
-		return InitStepResult{Step: "cache", Success: false, Message: result.Message}
+	cacheDict, err := op.CacheInitAll(ctx, onProgress)
+	if err != nil {
+		return InitStepResult{Step: "cache", Success: false, Message: fmt.Sprintf("Cache init failed: %v", err)}
 	}
 	// Python: checks cache_dict.get("guestfs_appliance")
-	cacheDict := map[string]any{}
-	if result.Item != nil {
-		if m, ok := result.Item.(map[string]any); ok {
-			cacheDict = m
-		}
-	}
-	guestfsBuilt := false
-	if a, ok := cacheDict["guestfs_appliance"]; ok && a != nil && a != "" {
-		guestfsBuilt = true
-	}
+	guestfsBuilt := cacheDict.GuestfsAppliance != ""
 	msg := "Cache directories ready"
 	if guestfsBuilt {
 		msg = "Cache directories ready (libguestfs appliance built)"
@@ -281,15 +267,13 @@ func (op *Operation) initStepBinary(
 			}, nil
 		}
 		// Python: repaired = BinaryOperation.ensure_default()
-		repaired := op.BinaryEnsureDefault(ctx)
-		if !repaired.IsError() && repaired.Item != nil {
-			if item, ok := repaired.Item.(*model.BinaryItem); ok {
-				return InitStepResult{
-					Step:    "binary",
-					Success: true,
-					Message: fmt.Sprintf("Binary available (v%s) — set as default", item.Version),
-				}, nil
-			}
+		repaired, err := op.BinaryEnsureDefault(ctx)
+		if err == nil && repaired != nil {
+			return InitStepResult{
+				Step:    "binary",
+				Success: true,
+				Message: fmt.Sprintf("Binary available (v%s) — set as default", repaired.Version),
+			}, nil
 		}
 		return InitStepResult{
 			Step:    "binary",
@@ -312,29 +296,12 @@ func (op *Operation) initStepBinary(
 }
 
 func (op *Operation) initDownloadBinary(ctx context.Context, version string) InitStepResult {
-	// Python: BinaryOperation.pull(BinaryPullInput(version=version, set_default=True))
-	// Python: try: fetch_result = BinaryOperation.pull(...); if isinstance(fetch_result, NeedsInteraction): ...
-	pullResult := op.BinaryPull(ctx, &inputs.BinaryPullInput{Version: version, SetDefault: true}, nil)
-
-	// Python: if isinstance(fetch_result, NeedsInteraction):
-	// In Go, Pull returns *OperationResult. A NeedsInteraction code indicates
-	// the operation requires user confirmation before proceeding.
-	if isNeedsInteraction(pullResult) {
-		return InitStepResult{Step: "binary", Success: false, Message: "Binary download requires interaction"}
-	}
-
-	if pullResult.IsError() {
+	binaries, err := op.BinaryPull(ctx, &inputs.BinaryPullInput{Version: version, SetDefault: true}, nil)
+	if err != nil {
 		return InitStepResult{
 			Step:    "binary",
 			Success: false,
-			Message: fmt.Sprintf("Download failed: %s", pullResult.Message),
-		}
-	}
-	// Python: get version from result item
-	binaries := []*model.BinaryItem{}
-	if pullResult.Item != nil {
-		if items, ok := pullResult.Item.([]*model.BinaryItem); ok {
-			binaries = items
+			Message: fmt.Sprintf("Download failed: %v", err),
 		}
 	}
 	versionStr := version
@@ -358,27 +325,15 @@ func (op *Operation) initDownloadBinaryLatest(ctx context.Context) InitStepResul
 	}
 
 	version := remote[0].Version
-	pullResult := op.BinaryPull(ctx, &inputs.BinaryPullInput{Version: version, SetDefault: true}, nil)
-
-	// Python: if isinstance(fetch_result, NeedsInteraction):
-	if isNeedsInteraction(pullResult) {
-		return InitStepResult{Step: "binary", Success: false, Message: "Binary download requires interaction"}
-	}
-
-	if pullResult.IsError() {
+	binaries, err := op.BinaryPull(ctx, &inputs.BinaryPullInput{Version: version, SetDefault: true}, nil)
+	if err != nil {
 		return InitStepResult{
 			Step:    "binary",
 			Success: false,
-			Message: fmt.Sprintf("Download failed: %s", pullResult.Message),
+			Message: fmt.Sprintf("Download failed: %v", err),
 		}
 	}
-	// Python: get version from result item
-	binaries := []*model.BinaryItem{}
-	if pullResult.Item != nil {
-		if items, ok := pullResult.Item.([]*model.BinaryItem); ok {
-			binaries = items
-		}
-	}
+
 	versionStr := version
 	for _, b := range binaries {
 		if b.Name == "firecracker" {
@@ -387,20 +342,6 @@ func (op *Operation) initDownloadBinaryLatest(ctx context.Context) InitStepResul
 		}
 	}
 	return InitStepResult{Step: "binary", Success: true, Message: fmt.Sprintf("Downloaded v%s", versionStr)}
-}
-
-// isNeedsInteraction checks if an OperationResult indicates that the operation
-// requires user interaction before proceeding.
-// Python: isinstance(result, NeedsInteraction) instead of OperationResult.
-// In Go, this checks for a specific code or status that represents the
-// needs-interaction state.
-func isNeedsInteraction(result *errs.OperationResult) bool {
-	if result == nil {
-		return false
-	}
-	// Python returns OperationResult with status "interaction" or code
-	// prefixed with "interaction." when NeedsInteraction is expected.
-	return result.Code == "interaction_required" || result.Status == "interaction"
 }
 
 func (op *Operation) initBinaryNeedsInteraction(ctx context.Context) (InitStepResult, *errs.NeedsInteraction) {
