@@ -31,7 +31,11 @@ func (op *Operation) copyError(err error) error {
 // the CopyToVM/CopyFromVM/CopyVMToVM methods are DomainError types that map
 // to CPError. All CP-path errors (resolution, validation, copy) go through
 // the unified copyError handler.
-func (op *Operation) CPCopy(ctx context.Context, input *inputs.CPInput, onProgress func(int64)) (*responses.CPCopyResult, error) {
+func (op *Operation) CPCopy(
+	ctx context.Context,
+	input *inputs.CPInput,
+	onProgress func(int64),
+) (*responses.CPCopyResult, error) {
 	// Python: try: ... except CPError as e: ...
 	// Build CPRequest and resolve (matches Python: CPRequest(inputs, db).resolve())
 	req := inputs.NewCPRequest(*input, op.Connection.DB())

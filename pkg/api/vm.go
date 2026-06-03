@@ -200,10 +200,15 @@ func (op *Operation) vmCreateBatch(
 					_ = op.VMRemove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: new(true)})
 				}
 				return nil, &errs.DomainError{
-					Code:    "vm.atomic_failed",
-					Op:      "vm",
-					Message: fmt.Sprintf("Atomic creation failed at '%s': %v. All %d previously created VMs have been removed.", name, err, len(createdVMs)),
-					Class:   errs.ClassInternal,
+					Code: "vm.atomic_failed",
+					Op:   "vm",
+					Message: fmt.Sprintf(
+						"Atomic creation failed at '%s': %v. All %d previously created VMs have been removed.",
+						name,
+						err,
+						len(createdVMs),
+					),
+					Class: errs.ClassInternal,
 				}
 			}
 			continue
@@ -227,10 +232,15 @@ func (op *Operation) vmCreateBatch(
 					_ = op.VMRemove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: new(true)})
 				}
 				return nil, &errs.DomainError{
-					Code:    "vm.atomic_failed",
-					Op:      "vm",
-					Message: fmt.Sprintf("Atomic creation failed at '%s': %v. All %d previously created VMs have been removed.", name, execErr, len(createdVMs)),
-					Class:   errs.ClassInternal,
+					Code: "vm.atomic_failed",
+					Op:   "vm",
+					Message: fmt.Sprintf(
+						"Atomic creation failed at '%s': %v. All %d previously created VMs have been removed.",
+						name,
+						execErr,
+						len(createdVMs),
+					),
+					Class: errs.ClassInternal,
 				}
 			}
 			continue
@@ -1491,9 +1501,12 @@ func (op *Operation) VMAttachVolume(
 			if bin != nil && bin.Version != "" {
 				if !version.IsFirecrackerVersionAtLeast(bin.Version, "1.16") {
 					return &errs.DomainError{
-						Code:    errs.CodeBinaryVersionGate,
-						Message: fmt.Sprintf("Volume hotplug requires Firecracker >= 1.16, got %s. Use a newer Firecracker binary or attach the volume while the VM is stopped.", bin.Version),
-						Class:   errs.ClassValidation,
+						Code: errs.CodeBinaryVersionGate,
+						Message: fmt.Sprintf(
+							"Volume hotplug requires Firecracker >= 1.16, got %s. Use a newer Firecracker binary or attach the volume while the VM is stopped.",
+							bin.Version,
+						),
+						Class: errs.ClassValidation,
 					}
 				}
 			}
@@ -1604,9 +1617,12 @@ func (op *Operation) VMDetachVolume(
 			if bin != nil && bin.Version != "" {
 				if !version.IsFirecrackerVersionAtLeast(bin.Version, "1.16") {
 					return &errs.DomainError{
-						Code:    errs.CodeBinaryVersionGate,
-						Message: fmt.Sprintf("Volume hot-unplug requires Firecracker >= 1.16, got %s. Use a newer Firecracker binary or detach the volume while the VM is stopped.", bin.Version),
-						Class:   errs.ClassValidation,
+						Code: errs.CodeBinaryVersionGate,
+						Message: fmt.Sprintf(
+							"Volume hot-unplug requires Firecracker >= 1.16, got %s. Use a newer Firecracker binary or detach the volume while the VM is stopped.",
+							bin.Version,
+						),
+						Class: errs.ClassValidation,
 					}
 				}
 			}

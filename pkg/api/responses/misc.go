@@ -10,9 +10,9 @@ type CacheInitResult struct {
 
 // ConsoleStateResult is the typed result of ConsoleGetState.
 type ConsoleStateResult struct {
-	Running    bool    `json:"running"`
-	PID        *int    `json:"pid"`
-	SocketPath string  `json:"socket_path"`
+	Running    bool   `json:"running"`
+	PID        *int   `json:"pid"`
+	SocketPath string `json:"socket_path"`
 }
 
 // CPCopyResult is the typed result of CPCopy.

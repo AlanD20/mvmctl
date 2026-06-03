@@ -132,7 +132,8 @@ func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInp
 
 	if versionExists && !resolved.DownloadOverride {
 		return nil, &errs.DomainError{
-			Code: errs.CodeBinaryAlreadyExists, Message: fmt.Sprintf("Firecracker v%s already exists. Use --force to re-download.", normalized),
+			Code:    errs.CodeBinaryAlreadyExists,
+			Message: fmt.Sprintf("Firecracker v%s already exists. Use --force to re-download.", normalized),
 		}
 	}
 
@@ -289,7 +290,12 @@ func (op *Operation) BinaryRemoveByVersion(ctx context.Context, version string, 
 // When limit is nil and remote=true, reads default from settings like Python:
 //
 //	SettingsService.resolve(Database(), "defaults.binary", "remote_version_limit")
-func (op *Operation) BinaryList(ctx context.Context, remote bool, limit *int, onProgress func(errs.ProgressEvent)) ([]*model.BinaryItem, []model.VersionInfo, error) {
+func (op *Operation) BinaryList(
+	ctx context.Context,
+	remote bool,
+	limit *int,
+	onProgress func(errs.ProgressEvent),
+) ([]*model.BinaryItem, []model.VersionInfo, error) {
 	if !remote {
 		items, err := op.Services.Binary.ListAll(ctx, false, true)
 		return items, nil, err
@@ -442,13 +448,17 @@ func (op *Operation) BinaryEnsureDefault(ctx context.Context) (*model.BinaryItem
 	ctrl, err := binary.NewController(ctx, latest, op.Repos.Binary)
 	if err != nil {
 		return nil, &errs.DomainError{
-			Code: "binary.ensure_default_failed", Message: fmt.Sprintf("Failed to set default binary: %v", err), Err: err,
+			Code:    "binary.ensure_default_failed",
+			Message: fmt.Sprintf("Failed to set default binary: %v", err),
+			Err:     err,
 		}
 	}
 
 	if err := ctrl.SetDefault(ctx); err != nil {
 		return nil, &errs.DomainError{
-			Code: "binary.ensure_default_failed", Message: fmt.Sprintf("Failed to set default binary: %v", err), Err: err,
+			Code:    "binary.ensure_default_failed",
+			Message: fmt.Sprintf("Failed to set default binary: %v", err),
+			Err:     err,
 		}
 	}
 

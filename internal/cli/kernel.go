@@ -233,7 +233,9 @@ Examples:
 				return err
 			}
 			if kernelItem != nil {
-				common.Cli.Success(fmt.Sprintf("Pulled: %s (ID: %s)", kernelItem.Name, common.Cli.FormatID(kernelItem.ID)))
+				common.Cli.Success(
+					fmt.Sprintf("Pulled: %s (ID: %s)", kernelItem.Name, common.Cli.FormatID(kernelItem.ID)),
+				)
 			} else {
 				common.Cli.Success("Pull completed")
 			}

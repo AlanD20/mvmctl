@@ -32,7 +32,10 @@ func (op *Operation) CacheSessionHasGroup() bool {
 
 // CacheInitAll initializes all cache directories.
 // Matches Python's CacheOperation.init_all() exactly.
-func (op *Operation) CacheInitAll(ctx context.Context, onProgress func(errs.ProgressEvent)) (*responses.CacheInitResult, error) {
+func (op *Operation) CacheInitAll(
+	ctx context.Context,
+	onProgress func(errs.ProgressEvent),
+) (*responses.CacheInitResult, error) {
 	cacheDir := op.CacheDir
 	var created []string
 
@@ -286,15 +289,15 @@ func (op *Operation) CacheClean(ctx context.Context, dryRun bool) (*model.CleanR
 			}
 
 			return &model.CleanResult{
-				PruneResult:     *pruneResult,
-				CacheDirRemoved: false,
-				CacheDir:        op.CacheDir,
-			}, &errs.DomainError{
-				Code:    "cache.clean_failed",
-				Op:      "cache",
-				Message: strings.Join(messages, "; "),
-				Class:   errs.ClassInternal,
-			}
+					PruneResult:     *pruneResult,
+					CacheDirRemoved: false,
+					CacheDir:        op.CacheDir,
+				}, &errs.DomainError{
+					Code:    "cache.clean_failed",
+					Op:      "cache",
+					Message: strings.Join(messages, "; "),
+					Class:   errs.ClassInternal,
+				}
 		}
 	}
 
