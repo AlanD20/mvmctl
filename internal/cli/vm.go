@@ -337,10 +337,10 @@ func runVMCreate(
 		return fmt.Errorf("--count and --volume are mutually exclusive")
 	}
 
-	// Show spinner for long-running create operations
-	spinner := common.NewSpinner("")
-	spinner.Start()
-	defer spinner.Stop()
+	// Show progress for long-running create operations
+	prog := common.NewProgress()
+	prog.Start("Creating VM...")
+	defer prog.Stop()
 
 	baseName := name
 
@@ -498,7 +498,7 @@ func runVMCreate(
 
 	vms, err := op.VMCreate(cmd.Context(), input, func(event errs.ProgressEvent) {
 		if event.Message != "" {
-			spinner.UpdateText(event.Message)
+			prog.UpdateText(event.Message)
 		}
 	})
 	if err != nil {

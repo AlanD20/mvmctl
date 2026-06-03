@@ -195,14 +195,14 @@ The selector can be a type (e.g. "ubuntu") or type:version (e.g. "ubuntu:24.04")
 				DisabledDetectors: disabledDetectors,
 			}
 
-			spinner := common.NewSpinner("")
-			spinner.Start()
+			prog := common.NewProgress()
+			prog.Start("Downloading image...")
 			img, err := op.ImagePull(cmd.Context(), input, func(event errs.ProgressEvent) {
 				if event.Message != "" {
-					spinner.UpdateText(event.Message)
+					prog.UpdateText(event.Message)
 				}
 			})
-			spinner.Stop()
+			prog.Stop()
 			if err != nil {
 				var ni *errs.NeedsInteraction
 				if errors.As(err, &ni) {
@@ -442,14 +442,14 @@ Examples:
 				Force:             force,
 			}
 
-			spinner := common.NewSpinner("")
-			spinner.Start()
+			prog := common.NewProgress()
+			prog.Start("Importing image...")
 			img, err := op.ImageImport(cmd.Context(), input, func(event errs.ProgressEvent) {
 				if event.Message != "" {
-					spinner.UpdateText(event.Message)
+					prog.UpdateText(event.Message)
 				}
 			})
-			spinner.Stop()
+			prog.Stop()
 			if err != nil {
 				return err
 			}
@@ -516,25 +516,25 @@ Examples:
 			// Match Python behavior:
 			//   if image_id is not None: warm specific image
 			//   else: warm all (defaults to all=True when no argument given)
-			spinner := common.NewSpinner("")
-			spinner.Start()
+			prog := common.NewProgress()
+			prog.Start("Warming images...")
 			var paths []string
 			var warmErr error
 			if imageID != "" {
 				warmInput := inputs.ImageInput{Identifiers: []string{imageID}}
 				paths, warmErr = op.ImageWarm(cmd.Context(), &warmInput, false, func(event errs.ProgressEvent) {
 					if event.Message != "" {
-						spinner.UpdateText(event.Message)
+						prog.UpdateText(event.Message)
 					}
 				})
 			} else {
 				paths, warmErr = op.ImageWarm(cmd.Context(), nil, true, func(event errs.ProgressEvent) {
 					if event.Message != "" {
-						spinner.UpdateText(event.Message)
+						prog.UpdateText(event.Message)
 					}
 				})
 			}
-			spinner.Stop()
+			prog.Stop()
 			if warmErr != nil {
 				return warmErr
 			}
@@ -550,7 +550,7 @@ Examples:
 				// Python would raise an exception if path.stat() fails — let error propagate.
 				info, err := os.Stat(p)
 				if err != nil {
-					spinner.Stop()
+					prog.Stop()
 					return fmt.Errorf("failed to stat warmed path %s: %w", p, err)
 				}
 				sizeStr := common.Cli.FormatSize(info.Size())

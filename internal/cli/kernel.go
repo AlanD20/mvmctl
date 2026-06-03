@@ -185,8 +185,8 @@ Examples:
 				jobsArg = jobs
 			}
 
-			spinner := common.NewSpinner("")
-			spinner.Start()
+			prog := common.NewProgress()
+			prog.Start("Pulling kernel...")
 
 			// Build KernelPullInput matching Python's KernelPullInput dataclass
 			var versionPtr *string
@@ -225,10 +225,10 @@ Examples:
 
 			kernelItem, err := op.KernelPull(cmd.Context(), kernelInput, func(event errs.ProgressEvent) {
 				if event.Message != "" {
-					spinner.UpdateText(event.Message)
+					prog.UpdateText(event.Message)
 				}
 			})
-			spinner.Stop()
+			prog.Stop()
 			if err != nil {
 				return err
 			}

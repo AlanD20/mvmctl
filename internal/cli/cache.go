@@ -38,16 +38,16 @@ func newCacheInitCmd(op *api.Operation) *cobra.Command {
 			// Match Python: uses Rich Console spinner with on_progress callback.
 			// Python: console.status("", spinner="dots") with _on_progress(event) that
 			// calls status.update(f"[dim]{event.message}[/dim]") to update in-place.
-			spinner := common.NewSpinner("")
-			spinner.Start()
+			prog := common.NewProgress()
+			prog.Start("Initializing cache...")
 
 			item, err := op.CacheInitAll(cmd.Context(), func(event errs.ProgressEvent) {
 				if event.Message != "" {
-					spinner.UpdateText(event.Message)
+					prog.UpdateText(event.Message)
 				}
 			})
 
-			spinner.Stop()
+			prog.Stop()
 
 			if err != nil {
 				return err
