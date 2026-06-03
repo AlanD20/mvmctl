@@ -4,13 +4,13 @@ package model
 
 // HostStateItem matches Python's HostStateItem — singleton row (id=1).
 type HostStateItem struct {
-	ID                    int    `json:"id"                        db:"id"`
-	Initialized           bool   `json:"initialized"               db:"initialized"`
-	MvmGroupCreated       bool   `json:"mvm_group_created"         db:"mvm_group_created"`
-	SudoersConfigured     bool   `json:"sudoers_configured"        db:"sudoers_configured"`
-	DefaultNetworkCreated bool   `json:"default_network_created"   db:"default_network_created"`
-	InitializedAt         string `json:"initialized_at"         db:"initialized_at"`
-	UpdatedAt             string `json:"updated_at"             db:"updated_at"`
+	ID                    int    `json:"id"                      db:"id"`
+	Initialized           bool   `json:"initialized"             db:"initialized"`
+	MvmGroupCreated       bool   `json:"mvm_group_created"       db:"mvm_group_created"`
+	SudoersConfigured     bool   `json:"sudoers_configured"      db:"sudoers_configured"`
+	DefaultNetworkCreated bool   `json:"default_network_created" db:"default_network_created"`
+	InitializedAt         string `json:"initialized_at"          db:"initialized_at"`
+	UpdatedAt             string `json:"updated_at"              db:"updated_at"`
 
 	// Capacity detection fields
 	Hostname          *string `json:"hostname,omitempty"`

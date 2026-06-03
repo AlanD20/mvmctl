@@ -744,7 +744,12 @@ func newVMSnapshotCmd(op *api.Operation) *cobra.Command {
 			memFile := args[1]
 			stateFile := args[2]
 
-			if err := op.VMSnapshot(cmd.Context(), &inputs.VMInput{Identifiers: []string{id}}, memFile, stateFile); err != nil {
+			if err := op.VMSnapshot(
+				cmd.Context(),
+				&inputs.VMInput{Identifiers: []string{id}},
+				memFile,
+				stateFile,
+			); err != nil {
 				return fmt.Errorf("snapshot failed: %w", err)
 			}
 
@@ -780,7 +785,13 @@ Flags:
 			memFile := args[1]
 			stateFile := args[2]
 
-			if err := op.VMLoad(cmd.Context(), &inputs.VMInput{Identifiers: []string{id}}, memFile, stateFile, resume); err != nil {
+			if err := op.VMLoad(
+				cmd.Context(),
+				&inputs.VMInput{Identifiers: []string{id}},
+				memFile,
+				stateFile,
+				resume,
+			); err != nil {
 				return err
 			}
 
@@ -921,7 +932,11 @@ Arguments:
 			id := args[0]
 			volumeName := args[1]
 
-			if err := op.VMAttachVolume(cmd.Context(), &inputs.VMInput{Identifiers: []string{id}}, volumeName); err != nil {
+			if err := op.VMAttachVolume(
+				cmd.Context(),
+				&inputs.VMInput{Identifiers: []string{id}},
+				volumeName,
+			); err != nil {
 				return fmt.Errorf("attach volume %q: %w", volumeName, err)
 			}
 
@@ -948,7 +963,11 @@ Arguments:
 			id := args[0]
 			volumeName := args[1]
 
-			if err := op.VMDetachVolume(cmd.Context(), &inputs.VMInput{Identifiers: []string{id}}, volumeName); err != nil {
+			if err := op.VMDetachVolume(
+				cmd.Context(),
+				&inputs.VMInput{Identifiers: []string{id}},
+				volumeName,
+			); err != nil {
 				return fmt.Errorf("detach volume %q: %w", volumeName, err)
 			}
 

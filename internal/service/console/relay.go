@@ -16,8 +16,9 @@ import (
 	"syscall"
 	"time"
 
-	"golang.org/x/term"
 	"mvmctl/internal/infra"
+
+	"golang.org/x/term"
 )
 
 // relayPID stores the OS PID of the current process when running as a

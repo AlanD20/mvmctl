@@ -62,13 +62,17 @@ func (op *Operation) NetworkCreate(ctx context.Context, input *inputs.NetworkCre
 	if bridgeErr != nil {
 		_ = op.Repos.Network.Delete(ctx, networkID)
 		return nil, &errs.DomainError{
-			Code: errs.CodeNetworkBridgeFailed, Message: fmt.Sprintf("Failed to compute bridge address: %v", bridgeErr), Err: bridgeErr,
+			Code:    errs.CodeNetworkBridgeFailed,
+			Message: fmt.Sprintf("Failed to compute bridge address: %v", bridgeErr),
+			Err:     bridgeErr,
 		}
 	}
 	if err := op.Services.Network.EnsureBridge(ctx, resolved.Bridge, bridgeAddr); err != nil {
 		_ = op.Repos.Network.Delete(ctx, networkID)
 		return nil, &errs.DomainError{
-			Code: errs.CodeNetworkBridgeFailed, Message: fmt.Sprintf("Failed to create network '%s': %v", resolved.Name, err), Err: err,
+			Code:    errs.CodeNetworkBridgeFailed,
+			Message: fmt.Sprintf("Failed to create network '%s': %v", resolved.Name, err),
+			Err:     err,
 		}
 	}
 
@@ -82,7 +86,9 @@ func (op *Operation) NetworkCreate(ctx context.Context, input *inputs.NetworkCre
 		); err != nil {
 			_ = op.Repos.Network.Delete(ctx, networkID)
 			return nil, &errs.DomainError{
-				Code: errs.CodeNetworkNATFailed, Message: fmt.Sprintf("Failed to create network '%s': %v", resolved.Name, err), Err: err,
+				Code:    errs.CodeNetworkNATFailed,
+				Message: fmt.Sprintf("Failed to create network '%s': %v", resolved.Name, err),
+				Err:     err,
 			}
 		}
 	}
@@ -285,7 +291,8 @@ func (op *Operation) NetworkSetDefault(ctx context.Context, input *inputs.Networ
 	}
 	if len(resolved.Networks) != 1 {
 		return &errs.DomainError{
-			Code: "network.default_set_failed", Message: fmt.Sprintf("Expected exactly one network, got %d", len(resolved.Networks)),
+			Code:    "network.default_set_failed",
+			Message: fmt.Sprintf("Expected exactly one network, got %d", len(resolved.Networks)),
 		}
 	}
 
@@ -298,7 +305,9 @@ func (op *Operation) NetworkSetDefault(ctx context.Context, input *inputs.Networ
 	}
 	if err := controller.SetDefault(ctx); err != nil {
 		return &errs.DomainError{
-			Code: "network.default_set_failed", Message: fmt.Sprintf("Failed to set network '%s' as default: %v", net.Name, err), Err: err,
+			Code:    "network.default_set_failed",
+			Message: fmt.Sprintf("Failed to set network '%s' as default: %v", net.Name, err),
+			Err:     err,
 		}
 	}
 
@@ -519,7 +528,8 @@ func (op *Operation) NetworkCreateDefaultNetwork(ctx context.Context) (*model.Ne
 	bridgeAddr, calcErr := network.ComputeBridgeAddress(defaultNetwork.IPv4Gateway, defaultNetwork.Subnet)
 	if calcErr != nil {
 		return nil, &errs.DomainError{
-			Code: "network.default_created_failed", Message: fmt.Sprintf("Failed to compute bridge address: %v", calcErr),
+			Code:    "network.default_created_failed",
+			Message: fmt.Sprintf("Failed to compute bridge address: %v", calcErr),
 		}
 	}
 	_ = op.Services.Network.EnsureBridge(ctx, defaultNetwork.Bridge, bridgeAddr)

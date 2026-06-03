@@ -221,7 +221,10 @@ func newVolumeResizeCmd(op *api.Operation) *cobra.Command {
 			identifier := args[0]
 			sizeArg := args[1]
 
-			if err := op.VolumeResize(cmd.Context(), &inputs.VolumeCreateInput{Name: identifier, Size: sizeArg}); err != nil {
+			if err := op.VolumeResize(
+				cmd.Context(),
+				&inputs.VolumeCreateInput{Name: identifier, Size: sizeArg},
+			); err != nil {
 				return err
 			}
 			// Match Python: mvm_cli.success(result.message)

@@ -113,7 +113,9 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 		resolvedVersion, err := op.Services.Kernel.ResolveLatestVersion(ctx, kernelType, ciVersion)
 		if err != nil {
 			return nil, &errs.DomainError{
-				Code: "kernel.pull_failed", Message: fmt.Sprintf("Failed to resolve latest version for '%s': %v", kernelType, err), Err: err,
+				Code:    "kernel.pull_failed",
+				Message: fmt.Sprintf("Failed to resolve latest version for '%s': %v", kernelType, err),
+				Err:     err,
 			}
 		}
 		version = resolvedVersion
@@ -205,7 +207,9 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 		)
 		if err != nil {
 			return nil, &errs.DomainError{
-				Code: "kernel.pull_failed", Message: fmt.Sprintf("Firecracker kernel download failed: %v", err), Err: err,
+				Code:    "kernel.pull_failed",
+				Message: fmt.Sprintf("Firecracker kernel download failed: %v", err),
+				Err:     err,
 			}
 		}
 
@@ -242,7 +246,9 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 		try("build", "complete", "Kernel build complete.")
 	} else {
 		return nil, &errs.DomainError{
-			Code: "kernel.pull_failed", Message: fmt.Sprintf("Unsupported kernel type: %s", resolved.KernelType), Err: fmt.Errorf("unsupported kernel type: %s", resolved.KernelType),
+			Code:    "kernel.pull_failed",
+			Message: fmt.Sprintf("Unsupported kernel type: %s", resolved.KernelType),
+			Err:     fmt.Errorf("unsupported kernel type: %s", resolved.KernelType),
 		}
 	}
 
@@ -328,7 +334,9 @@ func (op *Operation) KernelImport(ctx context.Context, input *inputs.KernelImpor
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return nil, &errs.DomainError{
-			Code: "kernel.import_failed", Message: fmt.Sprintf("Kernel import input resolution failed: %v", err), Err: err,
+			Code:    "kernel.import_failed",
+			Message: fmt.Sprintf("Kernel import input resolution failed: %v", err),
+			Err:     err,
 		}
 	}
 

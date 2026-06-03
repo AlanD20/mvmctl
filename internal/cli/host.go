@@ -130,7 +130,11 @@ Examples:
 					if ni.Code == "privilege.sudo_required" {
 						common.Cli.Warning("Root privileges required for: mvm host init")
 						common.Cli.Info("Run with sudo: sudo mvm host init")
-						confirmed, pErr := common.Cli.PromptConfirm(cmd.Context(), "Run 'sudo mvm host init' now?", false)
+						confirmed, pErr := common.Cli.PromptConfirm(
+							cmd.Context(),
+							"Run 'sudo mvm host init' now?",
+							false,
+						)
 						if pErr != nil {
 							return pErr
 						}

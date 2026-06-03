@@ -511,5 +511,3 @@ func LogsError(msg string) *DomainError {
 func GuestfsError(msg string) *DomainError {
 	return &DomainError{Code: CodeGuestfsError, Op: "guestfs", Message: msg, Class: ClassInternal}
 }
-
-

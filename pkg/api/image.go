@@ -123,7 +123,9 @@ func (op *Operation) ImagePull(
 	imageTypesConfig, err := image.LoadImageTypesConfig(rawYAML)
 	if err != nil {
 		return nil, &errs.DomainError{
-			Code: errs.CodeImagePullFailed, Message: fmt.Sprintf("Failed to parse image types config: %v", err), Err: err,
+			Code:    errs.CodeImagePullFailed,
+			Message: fmt.Sprintf("Failed to parse image types config: %v", err),
+			Err:     err,
 		}
 	}
 
@@ -138,12 +140,15 @@ func (op *Operation) ImagePull(
 	)
 	if err != nil {
 		return nil, &errs.DomainError{
-			Code: errs.CodeImagePullFailed, Message: fmt.Sprintf("Failed to resolve spec for %s: %v", resolved.Type, err), Err: err,
+			Code:    errs.CodeImagePullFailed,
+			Message: fmt.Sprintf("Failed to resolve spec for %s: %v", resolved.Type, err),
+			Err:     err,
 		}
 	}
 	if len(specs) == 0 {
 		return nil, &errs.DomainError{
-			Code: errs.CodeImagePullFailed, Message: fmt.Sprintf("No matching image spec for type=%q version=%q", resolved.Type, resolved.Version),
+			Code:    errs.CodeImagePullFailed,
+			Message: fmt.Sprintf("No matching image spec for type=%q version=%q", resolved.Type, resolved.Version),
 		}
 	}
 	spec := specs[0]
