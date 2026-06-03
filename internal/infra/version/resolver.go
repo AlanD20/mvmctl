@@ -352,6 +352,18 @@ func SemverGreater(a, b string) bool {
 	return len(va) > len(vb)
 }
 
+// SortVersions sorts a slice of version strings in descending order (newest
+// first). Pass asc=true for ascending order.
+func SortVersions(versions []string, asc ...bool) {
+	ascending := len(asc) > 0 && asc[0]
+	sort.Slice(versions, func(i, j int) bool {
+		if ascending {
+			return SemverGreater(versions[j], versions[i])
+		}
+		return SemverGreater(versions[i], versions[j])
+	})
+}
+
 // ParseSemverInts splits a version string into numeric components for comparison.
 func ParseSemverInts(v string) []int {
 	clean := strings.TrimPrefix(v, "v")

@@ -1,17 +1,14 @@
 package disk
 
 import (
-	"archive/tar"
 	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
-	"strings"
-	"time"
 
-	"mvmctl/internal/infra/system"
+	"mvmctl/internal/infra/archive"
 )
 
 // DetectImageFormat detects container format from magic bytes. Returns "" if unknown.
@@ -105,14 +102,7 @@ func IsSquashFS(path string) bool {
 
 // IsTar checks if the file at path is a tar archive.
 func IsTar(path string) bool {
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	tr := tar.NewReader(f)
-	_, err = tr.Next()
-	return err == nil
+	return archive.DetectFormat(path) == archive.FormatTar
 }
 
 // IsRaw checks if the file at path is a raw disk image.
@@ -260,35 +250,7 @@ func ValidateSquashFS(path string) error {
 	return nil
 }
 
-// tarValidateTimeout is the maximum time to wait for tar -tf to complete.
-const tarValidateTimeout = 30 * time.Second
-
-// ValidateTar validates a tar archive by listing all entries via the system tar command.
+// ValidateTar validates a tar archive by reading all entries.
 func ValidateTar(ctx context.Context, path string) error {
-	stat, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("stat tar file: %w", err)
-	}
-	if stat.Size() == 0 {
-		return fmt.Errorf("tar file is empty")
-	}
-	if !stat.Mode().IsRegular() {
-		return fmt.Errorf("not a regular file")
-	}
-
-	vCtx, cancel := context.WithTimeout(ctx, tarValidateTimeout)
-	defer cancel()
-
-	result := system.RunCmdCompat(vCtx,
-		[]string{"tar", "-tf", path},
-		system.RunCmdOpts{Capture: true, Check: false},
-	)
-	if result.ExitCode != 0 {
-		errMsg := strings.TrimSpace(string(result.StderrBytes))
-		if errMsg == "" {
-			errMsg = fmt.Sprintf("tar exited with code %d", result.ExitCode)
-		}
-		return fmt.Errorf("invalid tar file: %s", errMsg)
-	}
-	return nil
+	return archive.Validate(ctx, path)
 }

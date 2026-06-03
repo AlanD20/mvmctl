@@ -1,38 +1,29 @@
 package kernel
 
 import (
-	"archive/tar"
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
-	"mvmctl/internal/assets"
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/archive"
 	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/download"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
 	"mvmctl/internal/infra/version"
+
+	"mvmctl/internal/assets"
 )
 
 // ── Service-layer types (moved from model.go per Go porting spec) ──
-
-// ParsedKernelFilename corresponds to Python's ParsedKernelFilename.
-type ParsedKernelFilename struct {
-	BaseName string
-	Version  string
-	Arch     string
-}
 
 // KernelPipelineResult corresponds to Python's KernelPipelineResult.
 type KernelPipelineResult struct {
@@ -55,12 +46,20 @@ type KernelBuildResult struct {
 	InfoMessages []string
 }
 
-// resolvedKernelPath returns the absolute filesystem path for a kernel item.
-func resolvedKernelPath(k *model.KernelItem) string {
-	if filepath.IsAbs(k.Path) {
-		return k.Path
-	}
-	return filepath.Join(infra.GetKernelsDir(), k.Path)
+// BuildConfig groups the parameters for buildFromSource into a single struct.
+type BuildConfig struct {
+	Spec           *model.KernelSpec
+	Version        string
+	SourceURL      string
+	OutputPath     string
+	Jobs           int
+	Arch           string
+	SHA256         string
+	KeepBuildDir   bool
+	UserConfigPath *string
+	UseCache       bool
+	OnProgress     func(currentBytes, totalBytes int64)
+	OnStatus       func(string)
 }
 
 // Service provides stateless kernel operations: loading specs, downloading,
@@ -83,11 +82,6 @@ func NewService(repo Repository, cacheDir string) *Service {
 	}
 }
 
-// Repo returns the underlying repository for use by the API layer.
-func (s *Service) Repo() Repository {
-	return s.repo
-}
-
 // ── Firecracker Kernel Download ──────────────────────────────────────────
 
 // FetchFirecrackerKernel downloads a pre-built Firecracker CI vmlinux.
@@ -96,7 +90,7 @@ func (s *Service) FetchFirecrackerKernel(
 	ctx context.Context,
 	spec *model.KernelSpec,
 	ciVersion, arch, outputDir string,
-	progressCallback func(currentBytes, totalBytes int64),
+	onProgress func(currentBytes, totalBytes int64),
 ) (*model.KernelPullResult, error) {
 	if spec.ListURLTemplate == nil || *spec.ListURLTemplate == "" {
 		return nil, NewKernelErrorf(
@@ -108,7 +102,10 @@ func (s *Service) FetchFirecrackerKernel(
 		"arch":       arch,
 		"version":    spec.Version,
 	}
-	listURL := renderTemplate(*spec.ListURLTemplate, templateVars)
+	listURL, err := infra.RenderTemplate(*spec.ListURLTemplate, templateVars)
+	if err != nil {
+		return nil, NewKernelErrorf("Failed to render list URL template: %s", err)
+	}
 
 	// Fetch S3 XML listing
 	xmlContent, err := s.dl.GetBody(ctx, listURL)
@@ -127,19 +124,15 @@ func (s *Service) FetchFirecrackerKernel(
 			"No vmlinux found for Firecracker CI version %s / arch %s", ciVersion, arch)
 	}
 
-	// Extract keys and sort by version descending
-	var keys []string
+	// Extract versions and sort descending
+	var versions []string
 	for _, m := range matches {
-		keys = append(keys, m[1])
+		versions = append(versions, extractVersionFromKey(m[1]))
 	}
-	sort.Slice(keys, func(i, j int) bool {
-		vi := extractVersionFromKey(keys[i])
-		vj := extractVersionFromKey(keys[j])
-		return version.SemverGreater(vi, vj)
-	})
+	version.SortVersions(versions)
 
-	chosenKey := keys[0]
-	kernelVersion := extractVersionFromKey(chosenKey)
+	kernelVersion := versions[0]
+	chosenKey := fmt.Sprintf("firecracker-ci/%s/%s/vmlinux-%s", ciVersion, arch, kernelVersion)
 
 	outputPath := filepath.Join(outputDir, fmt.Sprintf("%s-%s-%s", spec.OutputName, kernelVersion, arch))
 
@@ -179,7 +172,7 @@ func (s *Service) FetchFirecrackerKernel(
 				slog.Debug("Fetched CI kernel checksum", "sha256", expectedSHA256)
 			}
 		} else {
-			// Python: logger.debug level — silently skip
+			slog.Debug("Skipping checksum")
 		}
 	}
 	if expectedSHA256 == "" && !intentionalNoChecksum {
@@ -195,11 +188,11 @@ func (s *Service) FetchFirecrackerKernel(
 		expectedSHA256,
 		true,
 		true,
-		progressCallback,
+		onProgress,
 	); err != nil {
 		return nil, NewKernelErrorf("Failed to download Firecracker CI kernel: %s", err)
 	}
-	os.Chmod(outputPath, 0755)
+	os.Chmod(outputPath, infra.ExecutablePerm)
 
 	slog.Info("Firecracker CI kernel saved", "path", outputPath)
 	return &model.KernelPullResult{
@@ -225,7 +218,7 @@ func (s *Service) BuildOfficialKernel(
 	keepBuildDir bool,
 	useCache bool,
 	userConfigPath *string,
-	progressCallback func(currentBytes, totalBytes int64),
+	onProgress func(currentBytes, totalBytes int64),
 	onStatus func(string),
 ) (*model.KernelPullResult, error) {
 	if err := checkBuildDependencies(ctx); err != nil {
@@ -233,26 +226,20 @@ func (s *Service) BuildOfficialKernel(
 	}
 	outputPath := filepath.Join(outputDir, fmt.Sprintf("%s-%s-%s", spec.OutputName, spec.Version, arch))
 
-	// Use spec properties directly (matching Python's build_official_kernel which
-	// reads spec.version, spec.source, spec.sha256 internally).
-	sourceURL := spec.Source
-	sha256 := spec.SHA256
-
-	buildResult, err := s.buildFromSource(
-		ctx,
-		spec,
-		spec.Version,
-		sourceURL,
-		outputPath,
-		jobs,
-		arch,
-		sha256,
-		keepBuildDir,
-		userConfigPath,
-		useCache,
-		progressCallback,
-		onStatus,
-	)
+	buildResult, err := s.buildFromSource(ctx, BuildConfig{
+		Spec:           spec,
+		Version:        spec.Version,
+		SourceURL:      spec.Source,
+		OutputPath:     outputPath,
+		Jobs:           jobs,
+		Arch:           arch,
+		SHA256:         spec.SHA256,
+		KeepBuildDir:   keepBuildDir,
+		UserConfigPath: userConfigPath,
+		UseCache:       useCache,
+		OnProgress:     onProgress,
+		OnStatus:       onStatus,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -281,34 +268,20 @@ func (s *Service) BuildOfficialKernel(
 
 // buildFromSource orchestrates download → extract → configure → build.
 // Matches Python's KernelService.build_from_source().
-func (s *Service) buildFromSource(
-	ctx context.Context,
-	spec *model.KernelSpec,
-	version string,
-	sourceURL string,
-	outputPath string,
-	jobs int,
-	arch string,
-	sha256 string,
-	keepBuildDir bool,
-	userConfigPath *string,
-	useCache bool,
-	progressCallback func(currentBytes, totalBytes int64),
-	onStatus func(string),
-) (*KernelPipelineResult, error) {
+func (s *Service) buildFromSource(ctx context.Context, cfg BuildConfig) (*KernelPipelineResult, error) {
 	// Python: build_dir = Path(spec.build_dir)
 	// If spec.build_dir is empty string, Path("") resolves to current directory.
-	buildDir := spec.BuildDir
+	buildDir := cfg.Spec.BuildDir
 	if buildDir == "" {
 		buildDir = "."
 	}
-	configHash := s.computeConfigHash(spec, version, userConfigPath)
-	cacheKey := fmt.Sprintf("%s-%s", version, configHash)
+	configHash := s.computeConfigHash(cfg.Spec, cfg.Version, cfg.UserConfigPath)
+	cacheKey := fmt.Sprintf("%s-%s", cfg.Version, configHash)
 	cacheMarker := filepath.Join(filepath.Dir(buildDir), fmt.Sprintf("kernel-cache-%s.marker", cacheKey))
 	cachedKernelPath := filepath.Join(filepath.Dir(buildDir), fmt.Sprintf("kernel-cache-%s.vmlinux", cacheKey))
 
 	// 1. Cache hit?
-	if s.tryCacheHit(ctx, outputPath, cacheMarker, cachedKernelPath, useCache) {
+	if tryCacheHit(cfg.OutputPath, cacheMarker, cachedKernelPath, cfg.UseCache) {
 		return &KernelPipelineResult{
 			ConfigResult: nil,
 			BuildResult:  nil,
@@ -317,13 +290,20 @@ func (s *Service) buildFromSource(
 	}
 
 	// 2. Resolve source URL and checksum
-	resolvedSourceURL, resolvedSHA256, err := s.resolveSourceAndChecksum(ctx, spec, version, arch, sha256, onStatus)
+	resolvedSourceURL, resolvedSHA256, err := s.resolveSourceAndChecksum(
+		ctx,
+		cfg.Spec,
+		cfg.Version,
+		cfg.Arch,
+		cfg.SHA256,
+		cfg.OnStatus,
+	)
 	if err != nil {
 		return nil, err
 	}
 
-	tarball := filepath.Join(buildDir, fmt.Sprintf("linux-%s.tar.xz", version))
-	kernelSrcDir := filepath.Join(buildDir, fmt.Sprintf("linux-%s-%s", version, arch))
+	tarball := filepath.Join(buildDir, fmt.Sprintf("linux-%s.tar.xz", cfg.Version))
+	kernelSrcDir := filepath.Join(buildDir, fmt.Sprintf("linux-%s-%s", cfg.Version, cfg.Arch))
 	var configResult *KernelConfigResult
 	var buildResult *KernelBuildResult
 	var pipelineErr error
@@ -341,7 +321,7 @@ func (s *Service) buildFromSource(
 				resolvedSHA256,
 				true,
 				true,
-				progressCallback,
+				cfg.OnProgress,
 			); err != nil {
 				pipelineErr = NewKernelErrorf("Download failed: %s", err)
 				return
@@ -366,22 +346,30 @@ func (s *Service) buildFromSource(
 		}
 		// 4. Prepare kernel config
 		var configErr error
-		configResult, configErr = s.PrepareKernelConfig(ctx, kernelSrcDir, spec, arch, jobs, userConfigPath, onStatus)
+		configResult, configErr = s.PrepareKernelConfig(
+			ctx,
+			kernelSrcDir,
+			cfg.Spec,
+			cfg.Arch,
+			cfg.Jobs,
+			cfg.UserConfigPath,
+			cfg.OnStatus,
+		)
 		if configErr != nil {
 			pipelineErr = configErr
 			return
 		}
 		// 5. Build vmlinux
 		var buildErr error
-		buildResult, buildErr = s.RunMakeVmlinux(ctx, kernelSrcDir, outputPath, jobs)
+		buildResult, buildErr = s.RunMakeVmlinux(ctx, kernelSrcDir, cfg.OutputPath, cfg.Jobs)
 		if buildErr != nil {
 			pipelineErr = buildErr
 			return
 		}
 		// 6. Cache output — using shutil.copy2 equivalent (preserving metadata)
-		if useCache {
+		if cfg.UseCache {
 			os.MkdirAll(filepath.Dir(cachedKernelPath), infra.DirPerm)
-			if err := infra.CopyPreservingMetadata(outputPath, cachedKernelPath); err != nil {
+			if err := infra.CopyPreservingMetadata(cfg.OutputPath, cachedKernelPath); err != nil {
 				slog.Warn("Failed to cache kernel build", "error", err)
 			}
 			os.WriteFile(cacheMarker, []byte(cacheKey), 0644)
@@ -390,13 +378,13 @@ func (s *Service) buildFromSource(
 
 	// Python: except block → exception propagates (pipelineErr is non-nil).
 	// Python: else block → cleanup runs only on success.
-	if pipelineErr == nil && !keepBuildDir {
+	if pipelineErr == nil && !cfg.KeepBuildDir {
 		if err := os.RemoveAll(buildDir); err != nil {
 			slog.Warn("Failed to clean up build directory", "dir", buildDir, "error", err)
 		} else {
 			slog.Debug("Build directory cleaned up", "dir", buildDir)
 		}
-	} else if pipelineErr == nil && keepBuildDir {
+	} else if pipelineErr == nil && cfg.KeepBuildDir {
 		slog.Debug("Build directory kept at", "dir", buildDir)
 	}
 
@@ -436,7 +424,10 @@ func (s *Service) resolveSourceAndChecksum(
 		"ci_version":     version,
 		"arch":           arch,
 	}
-	resolvedSourceURL := renderTemplate(spec.Source, templateVars)
+	resolvedSourceURL, err := infra.RenderTemplate(spec.Source, templateVars)
+	if err != nil {
+		return "", "", NewKernelErrorf("Failed to render source URL template: %s", err)
+	}
 
 	intentionalNoChecksum := spec.SHA256 == "" && spec.SHA256URL == ""
 
@@ -499,17 +490,6 @@ func (s *Service) fetchSHA256FromURL(ctx context.Context, sha256URL, filename st
 	return "", nil
 }
 
-// extractVersionFromKey extracts the version from a Firecracker S3 key.
-// e.g. "firecracker-ci/v1.15/x86_64/vmlinux-6.1.155" → "6.1.155"
-// TODO(verdict#33): belongs in infra/version or similar shared utility
-func extractVersionFromKey(key string) string {
-	idx := strings.LastIndex(key, "/vmlinux-")
-	if idx < 0 {
-		return key
-	}
-	return key[idx+len("/vmlinux-"):]
-}
-
 // ── Kernel Listing ──────────────────────────────────────────────────────
 
 // ListAll returns all kernels, optionally verifying is_present against the filesystem.
@@ -525,8 +505,7 @@ func (s *Service) ListAll(ctx context.Context, verify bool) ([]*model.KernelItem
 	// Verify filesystem presence (matching Python's list_all verification)
 	var missingIDs []string
 	for _, kernel := range kernels {
-		rp := resolvedKernelPath(kernel)
-		if _, err := os.Stat(rp); os.IsNotExist(err) {
+		if _, err := os.Stat(kernel.Path); os.IsNotExist(err) {
 			missingIDs = append(missingIDs, kernel.ID)
 		}
 	}
@@ -562,10 +541,9 @@ func (s *Service) Remove(ctx context.Context, kernel *model.KernelItem, force bo
 		return nil, NewKernelErrorf("Kernel referenced by VMs: %s", strings.Join(names, ", "))
 	}
 
-	// Delete file from disk (using ResolvedPath to match Python's kernel.resolved_path)
-	rp := resolvedKernelPath(kernel)
-	if _, statErr := os.Stat(rp); statErr == nil {
-		if err := os.Remove(rp); err != nil {
+	// Delete file from disk
+	if _, statErr := os.Stat(kernel.Path); statErr == nil {
+		if err := os.Remove(kernel.Path); err != nil {
 			slog.Warn("Failed to remove kernel file", "error", err)
 		}
 	}
@@ -806,15 +784,6 @@ func (s *Service) GetSpecsFor(names []string, kernelType, version string) ([]*mo
 	return filtered, nil
 }
 
-// TODO(verdict#33): belongs in infra/slices or similar shared utility
-func makeSet(items []string) map[string]bool {
-	s := make(map[string]bool, len(items))
-	for _, item := range items {
-		s[item] = true
-	}
-	return s
-}
-
 // ── Build Pipeline ──────────────────────────────────────────────────────
 
 // PrepareKernelConfig configures a kernel with Firecracker settings.
@@ -955,9 +924,13 @@ func (s *Service) PrepareKernelConfig(
 		onStatus("Verifying kernel configuration...")
 	}
 	slog.Debug("Verifying configuration")
+	configSettings, err := parseKernelConfig(kernelDir)
+	if err != nil {
+		return nil, err
+	}
 	var missingSettings []string
 	for _, setting := range spec.RequiredSettings {
-		if err := verifyConfigSetting(kernelDir, setting); err != nil {
+		if !configSettings[setting] {
 			missingSettings = append(missingSettings, setting)
 		} else {
 			slog.Debug("Required setting", "setting", setting)
@@ -1083,79 +1056,9 @@ func (s *Service) DownloadKernelSource(ctx context.Context, url, dest string, sh
 }
 
 // ExtractKernelTarball extracts a kernel tarball (tar.xz) and returns the extracted directory.
-// Uses Go's archive/tar with path traversal protection, matching Python's
-// tarfile.open(tarball, "r:xz") with filter="data" security behavior.
 func (s *Service) ExtractKernelTarball(ctx context.Context, tarball, extractDir string) (string, error) {
-	if err := os.MkdirAll(extractDir, infra.DirPerm); err != nil {
-		return "", err
-	}
-
-	// Check xz availability via which command
-	xzCheck := system.RunCmdCompat(ctx, []string{"which", "xz"}, system.RunCmdOpts{Capture: true, Check: false})
-	if xzCheck.ExitCode != 0 {
-		return "", NewKernelErrorf(
-			"Extraction failed: 'xz' binary not found in PATH; xz is required " +
-				"for kernel tarball extraction (native Go xz reader is not available)")
-	}
-
-	tarballData, err := os.ReadFile(tarball)
-	if err != nil {
+	if err := archive.Extract(ctx, tarball, extractDir); err != nil {
 		return "", NewKernelErrorf("Extraction failed: %s", err)
-	}
-
-	xzResult := system.RunCmdCompat(ctx, []string{"xz", "-d", "--stdout"}, system.RunCmdOpts{
-		Input:   string(tarballData),
-		Capture: true,
-		Check:   true,
-	})
-	if xzResult.Err != nil {
-		return "", NewKernelErrorf("Extraction failed: xz decompression failed: %s", xzResult.Err)
-	}
-
-	tarReader := tar.NewReader(strings.NewReader(xzResult.Stdout))
-	for {
-		header, err := tarReader.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return "", NewKernelErrorf("Extraction failed: %s", err)
-		}
-
-		if strings.Contains(header.Name, "..") {
-			return "", NewKernelErrorf(
-				"Extraction failed: path traversal detected in tarball: %s", header.Name)
-		}
-
-		target := filepath.Join(extractDir, header.Name)
-		if !strings.HasPrefix(target, filepath.Clean(extractDir)+string(os.PathSeparator)) {
-			return "", NewKernelErrorf(
-				"Extraction failed: path traversal detected in tarball: %s", header.Name)
-		}
-
-		switch header.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(target, infra.DirPerm); err != nil {
-				return "", NewKernelErrorf("Extraction failed: %s", err)
-			}
-		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), infra.DirPerm); err != nil {
-				return "", NewKernelErrorf("Extraction failed: %s", err)
-			}
-			outFile, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-			if err != nil {
-				return "", NewKernelErrorf("Extraction failed: %s", err)
-			}
-			if _, err := io.Copy(outFile, tarReader); err != nil {
-				outFile.Close()
-				return "", NewKernelErrorf("Extraction failed: %s", err)
-			}
-			outFile.Close()
-		case tar.TypeSymlink:
-			continue
-		default:
-			continue
-		}
 	}
 
 	entries, err := os.ReadDir(extractDir)
@@ -1167,7 +1070,7 @@ func (s *Service) ExtractKernelTarball(ctx context.Context, tarball, extractDir 
 			return filepath.Join(extractDir, entry.Name()), nil
 		}
 	}
-	return "", NewKernelError("Could not find extracted kernel directory")
+	return "", NewKernelErrorf("No linux-* directory found in kernel tarball")
 }
 
 // ── Remote Version Listing ──────────────────────────────────────────────
@@ -1231,7 +1134,10 @@ func (s *Service) downloadFCConfig(
 	if spec.ConfigURLTemplate == nil || *spec.ConfigURLTemplate == "" {
 		return NewKernelErrorf("Missing 'config_url_template' in kernels.yaml for %s", spec.Name)
 	}
-	url := renderTemplate(*spec.ConfigURLTemplate, vars)
+	url, err := infra.RenderTemplate(*spec.ConfigURLTemplate, vars)
+	if err != nil {
+		return NewKernelErrorf("Failed to render config URL template: %s", err)
+	}
 	data, err := s.dl.GetBody(ctx, url)
 	if err != nil {
 		return NewKernelErrorf("Failed to download config: %s", err)
@@ -1249,9 +1155,11 @@ func (s *Service) applyConfigFragments(
 ) error {
 	configPath := filepath.Join(kernelDir, ".config")
 	for idx, fragment := range fragments {
-		rendered := renderTemplate(fragment, vars)
+		rendered, err := infra.RenderTemplate(fragment, vars)
+		if err != nil {
+			return NewKernelErrorf("Failed to render config fragment %d: %s", idx, err)
+		}
 		var content []byte
-		var err error
 
 		if strings.HasPrefix(rendered, "http://") || strings.HasPrefix(rendered, "https://") {
 			if onStatus != nil {
@@ -1293,186 +1201,31 @@ func (s *Service) applyConfigFragments(
 	return nil
 }
 
-// runConfigScript runs scripts/config with the given args, logging a warning on failure.
-// Matches Python's KernelService._run_config_script() which captures stderr separately.
-func runConfigScript(ctx context.Context, configScript, kernelDir string, args ...string) {
-	cmdArgs := []string{configScript}
-	cmdArgs = append(cmdArgs, args...)
-	result := system.RunCmdCompat(ctx, cmdArgs, system.RunCmdOpts{
-		Cwd:     kernelDir,
-		Capture: true,
-		Check:   false,
-	})
-	exitCode := result.ExitCode
-	if result.Err != nil || exitCode != 0 {
-		slog.Warn("scripts/config failed",
-			"args", strings.Join(args, " "),
-			"rc", exitCode,
-			"stderr", strings.TrimSpace(result.Stderr))
-	}
-}
-
-// TODO(verdict#33): belongs in infra/strings or similar shared utility
-func majorMinorFromVersion(version string) string {
-	parts := strings.Split(version, ".")
-	if len(parts) >= 2 {
-		return parts[0] + "." + parts[1]
-	}
-	return version
-}
-
-func runMake(ctx context.Context, kernelDir, target string, jobs int) (int, string, string) {
-	result := system.RunCmdCompat(ctx, []string{"make", target, fmt.Sprintf("-j%d", jobs)}, system.RunCmdOpts{
-		Cwd:     kernelDir,
-		Capture: true,
-		Check:   false,
-	})
-	stdoutStr := result.Stdout
-	stderrStr := result.Stderr
-	// Log config warnings from make output (matching Python)
-	for _, line := range strings.Split(stderrStr, "\n") {
-		stripped := strings.TrimSpace(line)
-		if strings.Contains(stripped, ".config:") || strings.Contains(strings.ToLower(stripped), "warning:") {
-			slog.Debug("Config warning", "message", stripped)
-		}
-	}
-	return result.ExitCode, stdoutStr, stderrStr
-}
-
-// TODO(verdict#33): belongs in infra/config or similar shared utility
-func mergeConfigLines(content, configPath string) {
-	existing := ""
-	if data, err := os.ReadFile(configPath); err == nil {
-		existing = string(data)
-	}
-
-	existingLines := strings.Split(existing, "\n")
-	keyToIdx := make(map[string]int)
-	for i, line := range existingLines {
-		if key := extractConfigKey(line); key != "" {
-			keyToIdx[key] = i
-		}
-	}
-
-	for _, fragLine := range strings.Split(content, "\n") {
-		normalized := strings.TrimSpace(fragLine)
-		if key := extractConfigKey(normalized); key != "" {
-			if idx, ok := keyToIdx[key]; ok {
-				existingLines[idx] = normalized
-			} else {
-				keyToIdx[key] = len(existingLines)
-				existingLines = append(existingLines, normalized)
-			}
-		}
-	}
-
-	merged := strings.Join(existingLines, "\n") + "\n"
-	os.WriteFile(configPath, []byte(merged), 0644)
-}
-
-// TODO(verdict#33): belongs in infra/config or similar shared utility
-func extractConfigKey(line string) string {
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return ""
-	}
-	if strings.HasPrefix(line, "# ") && strings.HasSuffix(line, " is not set") {
-		key := line[2 : len(line)-11]
-		if strings.HasPrefix(key, "CONFIG_") {
-			return key
-		}
-		return ""
-	}
-	if strings.HasPrefix(line, "CONFIG_") && strings.Contains(line, "=") {
-		return strings.SplitN(line, "=", 2)[0]
-	}
-	return ""
-}
-
-// TODO(verdict#33): belongs in infra/config or similar shared utility
-func verifyConfigSetting(kernelDir, setting string) error {
-	data, err := os.ReadFile(filepath.Join(kernelDir, ".config"))
-	if err != nil {
-		return err
-	}
-	// Python: config_lines = set(config_content.splitlines())
-	// splitlines() splits on \n, \r\n, \r, etc. and removes trailing empty strings.
-	normalized := strings.ReplaceAll(string(data), "\r\n", "\n")
-	normalized = strings.ReplaceAll(normalized, "\r", "\n")
-	normalized = strings.TrimRight(normalized, "\n")
-	lines := makeSet(strings.Split(normalized, "\n"))
-	if strings.Contains(setting, "=") {
-		if !lines[setting] {
-			return fmt.Errorf("missing: %s", setting)
-		}
-	} else {
-		if !lines[setting+"=y"] && !lines[setting+"=m"] && !lines["# "+setting+" is not set"] {
-			return fmt.Errorf("missing: %s", setting)
-		}
-	}
-	return nil
-}
-
-// TODO(verdict#33): belongs in infra/strings or similar shared utility
-func renderTemplate(tmpl string, vars map[string]string) string {
-	for k, v := range vars {
-		tmpl = strings.ReplaceAll(tmpl, "{"+k+"}", v)
-	}
-	return tmpl
-}
-
 // ── Caching helpers ────────────────────────────────────────────────────
 
 // computeConfigHash computes a hash of kernel configuration parameters for caching.
 func (s *Service) computeConfigHash(spec *model.KernelSpec, version string, userConfigPath *string) string {
-	h := sha256.New()
-	h.Write([]byte(version))
-	h.Write([]byte(pythonStr(spec.ConfigFragments)))
-	h.Write([]byte(pythonStr(spec.EnabledConfigs)))
-	h.Write([]byte(pythonStr(spec.DisabledConfigs)))
-	h.Write([]byte(pythonStrSetVal(spec.SetValConfigs)))
-	h.Write([]byte(pythonStr(spec.RequiredSettings)))
+	hash := crypto.ContentHash(
+		version,
+		fmt.Sprintf("%v", spec.ConfigFragments),
+		fmt.Sprintf("%v", spec.EnabledConfigs),
+		fmt.Sprintf("%v", spec.DisabledConfigs),
+		fmt.Sprintf("%v", spec.SetValConfigs),
+		fmt.Sprintf("%v", spec.RequiredSettings),
+	)
 	if userConfigPath != nil {
 		data, err := os.ReadFile(*userConfigPath)
 		if err == nil {
-			h.Write(data)
+			hash = crypto.ContentHash(hash, string(data))
 		}
 	}
-	return crypto.Truncate(fmt.Sprintf("%x", h.Sum(nil)), 16)
-}
-
-// pythonStr formats a []string like Python's str() on a list:
-// ["CONFIG_A", "CONFIG_B"] → "['CONFIG_A', 'CONFIG_B']"
-func pythonStr(items []string) string {
-	if items == nil {
-		return "[]"
-	}
-	var parts []string
-	for _, s := range items {
-		parts = append(parts, fmt.Sprintf("'%s'", s))
-	}
-	return "[" + strings.Join(parts, ", ") + "]"
-}
-
-// pythonStrSetVal formats a [][2]string like Python's str() on a list of tuples:
-// [["a","b"]] → "[('a', 'b')]"
-func pythonStrSetVal(items [][2]string) string {
-	if items == nil {
-		return "[]"
-	}
-	var parts []string
-	for _, pair := range items {
-		parts = append(parts, fmt.Sprintf("('%s', '%s')", pair[0], pair[1]))
-	}
-	return "[" + strings.Join(parts, ", ") + "]"
+	return crypto.Truncate(hash, 16)
 }
 
 // tryCacheHit attempts to satisfy a build from cache.
-func (s *Service) tryCacheHit(
-	ctx context.Context,
-	outputPath, cacheMarker, cachedKernelPath string,
-	useCache bool,
-) bool {
+// tryCacheHit checks if the kernel build can be satisfied from cache.
+// Returns true if a cached kernel is usable (config hash matches).
+func tryCacheHit(outputPath, cacheMarker, cachedKernelPath string, useCache bool) bool {
 	if !useCache {
 		return false
 	}
@@ -1495,219 +1248,6 @@ func (s *Service) tryCacheHit(
 		}
 	}
 	return false
-}
-
-// checkBuildDependencies checks for required kernel build dependencies.
-func checkBuildDependencies(ctx context.Context) error {
-	requiredCommands := []string{
-		"git", "curl", "make", "gcc", "flex", "bison", "bc", "pahole", "ld",
-	}
-	var missing []string
-	for _, cmd := range requiredCommands {
-		result := system.RunCmdCompat(ctx, []string{"which", cmd}, system.RunCmdOpts{Capture: true, Check: false})
-		if result.ExitCode != 0 {
-			missing = append(missing, cmd)
-		}
-	}
-	libraryChecks := []struct {
-		pkg, display string
-	}{
-		{"libelf", "libelf"},
-		{"openssl", "libssl-dev"},
-	}
-	for _, lc := range libraryChecks {
-		result := system.RunCmdCompat(
-			ctx,
-			[]string{"pkg-config", "--exists", lc.pkg},
-			system.RunCmdOpts{Check: true},
-		)
-		if result.Err != nil {
-			missing = append(missing, lc.display)
-		}
-	}
-	if len(missing) > 0 {
-		sort.Strings(missing)
-		missingStr := strings.Join(missing, ", ")
-		return NewKernelErrorf(
-			"Missing kernel build dependencies: %s\n\n"+
-				"Install on Ubuntu/Debian:\n"+
-				"  sudo apt update\n"+
-				"  sudo apt install -y build-essential libncurses-dev bison flex\n"+
-				"  sudo apt install -y libssl-dev libelf-dev bc curl git dwarves\n\n"+
-				"Install on Arch Linux:\n"+
-				"  sudo pacman -S base-devel ncurses bison flex\n"+
-				"  sudo pacman -S openssl bc curl git pahole\n",
-			missingStr)
-	}
-	return nil
-}
-
-// ── Utility helpers ─────────────────────────────────────────────────────
-
-// TODO(verdict#33): belongs in infra/maps or similar shared utility
-func requireStr(m map[string]any, key string) string {
-	v, _ := m[key].(string)
-	return v
-}
-
-// TODO(verdict#33): belongs in infra/maps or similar shared utility
-func optionalStr(m map[string]any, key string) string {
-	v, _ := m[key].(string)
-	return v
-}
-
-// TODO(verdict#33): belongs in infra/maps or similar shared utility
-func optionalStrPtr(m map[string]any, key string) *string {
-	v, _ := m[key].(string)
-	if v == "" {
-		return nil
-	}
-	return &v
-}
-
-// TODO(verdict#33): belongs in infra/maps or similar shared utility
-func optionalIntPtr(m map[string]any, key string) *int {
-	v, ok := m[key].(int)
-	if !ok {
-		if f, ok := m[key].(float64); ok {
-			v = int(f)
-		} else {
-			return nil
-		}
-	}
-	if v == 0 {
-		return nil
-	}
-	return &v
-}
-
-// TODO(verdict#33): belongs in infra/maps or similar shared utility
-func optionalStrFromPtr(m map[string]any, parent, key string) *string {
-	if p, ok := m[parent].(map[string]any); ok {
-		v, _ := p[key].(string)
-		if v != "" {
-			return &v
-		}
-	}
-	return nil
-}
-
-// TODO(verdict#33): belongs in infra/maps or similar shared utility
-func optionalStrFrom(m map[string]any, parent, key string) string {
-	if p, ok := m[parent].(map[string]any); ok {
-		v, _ := p[key].(string)
-		return v
-	}
-	return ""
-}
-
-// TODO(verdict#33): belongs in infra/maps or similar shared utility
-func requireStrList(m map[string]any, key string) []string {
-	raw, ok := m[key].([]any)
-	if !ok {
-		return nil
-	}
-	var result []string
-	for _, item := range raw {
-		if s, ok := item.(string); ok {
-			result = append(result, s)
-		}
-	}
-	return result
-}
-
-// TODO(verdict#33): belongs in infra/maps or similar shared utility
-func optionalInt(m map[string]any, key string) int {
-	switch v := m[key].(type) {
-	case int:
-		return v
-	case float64:
-		return int(v)
-	}
-	return 0
-}
-
-// TODO(verdict#33): belongs in infra/maps or similar shared utility
-func parseSetValList(m map[string]any, key string) [][2]string {
-	raw, ok := m[key].([]any)
-	if !ok {
-		return nil
-	}
-	var result [][2]string
-	for _, item := range raw {
-		s, ok := item.(string)
-		if !ok {
-			continue
-		}
-		parts := strings.SplitN(s, "=", 2)
-		if len(parts) == 2 {
-			result = append(result, [2]string{parts[0], parts[1]})
-		}
-	}
-	return result
-}
-
-// Helper to get a string list from options map
-func getStringListOption(opts map[string]any, key string) []string {
-	if opts == nil {
-		return nil
-	}
-	raw, ok := opts[key]
-	if !ok {
-		return nil
-	}
-	rawList, ok := raw.([]any)
-	if !ok {
-		return nil
-	}
-	var result []string
-	for _, item := range rawList {
-		if s, ok := item.(string); ok {
-			result = append(result, s)
-		}
-	}
-	return result
-}
-
-// Helper to get a string from options map
-func getStringOption(opts map[string]any, key string) string {
-	if opts == nil {
-		return ""
-	}
-	v, _ := opts[key].(string)
-	return v
-}
-
-// ParseFilename parses a kernel filename to extract base name, version, and arch.
-// Matches Python's KernelService.parse_filename().
-func ParseFilename(filename string) ParsedKernelFilename {
-	name := filename
-	arches := []string{"x86_64", "amd64", "arm64", "aarch64"}
-	version := "-"
-	arch := "-"
-
-	for _, a := range arches {
-		if strings.HasSuffix(name, "-"+a) {
-			arch = a
-			name = name[:len(name)-len(a)-1]
-			break
-		}
-	}
-
-	versionRe := regexp.MustCompile(`-v?(\d+(?:\.\d+)*)$`)
-	if m := versionRe.FindStringSubmatch(name); len(m) >= 2 {
-		versionNum := m[1]
-		fullMatch := m[0]
-		if strings.HasPrefix(fullMatch, "-v") {
-			version = "v" + versionNum
-		} else {
-			version = versionNum
-		}
-		name = name[:len(name)-len(fullMatch)]
-	}
-
-	baseName := strings.Split(name, "-")[0]
-	return ParsedKernelFilename{BaseName: baseName, Version: version, Arch: arch}
 }
 
 // ImportKernel copies a local vmlinux file to the kernels cache directory,
@@ -1756,7 +1296,7 @@ func (s *Service) ImportKernel(
 		Version:   version,
 		Arch:      arch,
 		Type:      "custom",
-		Path:      destFilename,
+		Path:      destPath,
 		IsDefault: setDefault,
 		IsPresent: true,
 		CreatedAt: now,
@@ -1775,181 +1315,6 @@ func (s *Service) ImportKernel(
 	shortID, _ := crypto.ShortenID(kernelID)
 	slog.Info("Imported kernel", "name", kernelItem.Name, "version", version, "arch", arch, "id", shortID)
 	return kernelItem, nil
-}
-
-// ── Version resolution helpers ─────────────────────────────────────────────
-
-// kernelSpecsToResolverConfigs converts a list of KernelSpec to ResolverConfig structs
-// for delegation to the shared HttpDirVersionResolver.
-func kernelSpecsToResolverConfigs(specs []*model.KernelSpec) []download.ResolverConfig {
-	configs := make([]download.ResolverConfig, 0, len(specs))
-	for _, spec := range specs {
-		cfg := download.ResolverConfig{
-			Type: spec.KernelType,
-			Name: spec.Name,
-		}
-
-		if spec.Resolver != nil {
-			cfg.Resolver = *spec.Resolver
-		}
-		if spec.VersionsURL != nil {
-			cfg.VersionsURL = *spec.VersionsURL
-		}
-		if spec.Source != "" {
-			cfg.Source = spec.Source
-		}
-		if spec.SHA256URL != "" {
-			cfg.SHA256URL = spec.SHA256URL
-		}
-		if spec.Version != "" {
-			cfg.Version = spec.Version
-		}
-
-		if spec.KernelType == infra.KernelTypeOfficial {
-			cfg.Format = "tar.xz"
-		} else {
-			cfg.Format = "vmlinux"
-		}
-
-		resolver := ""
-		if spec.Resolver != nil {
-			resolver = *spec.Resolver
-		}
-
-		switch resolver {
-		case "http-dir":
-			if spec.VersionsURL != nil && *spec.VersionsURL != "" {
-				cfg.DownloadURL = spec.Source
-				if spec.SHA256URL != "" {
-					cfg.SHA256URL = spec.SHA256URL
-				}
-				filePattern := "linux-"
-				if spec.FilePattern != nil {
-					filePattern = *spec.FilePattern
-				}
-				fileSuffix := ".tar.xz"
-				if spec.FileSuffix != nil {
-					fileSuffix = *spec.FileSuffix
-				}
-				discoveries := getStringSlice(spec.Options, "version_discoveries")
-				cfg.Options = download.ResolverOptions{
-					VersionDiscoveries: discoveries,
-					FilePattern:        filePattern,
-					FileSuffix:         fileSuffix,
-				}
-			}
-		case "firecracker-s3":
-			if spec.ListURLTemplate != nil && *spec.ListURLTemplate != "" {
-				cfg.ListURLTemplate = *spec.ListURLTemplate
-				// Strip {version} from list_url_template for listing purposes
-				cfg.ListURLTemplate = strings.ReplaceAll(cfg.ListURLTemplate, "{version}", "")
-				// Download URL template
-				sourceBase := strings.TrimRight(spec.Source, "/")
-				cfg.DownloadURL = fmt.Sprintf("%s/firecracker-ci/{ci_version}/{arch}/vmlinux-{version}", sourceBase)
-				if spec.SHA256URL != "" {
-					cfg.SHA256URL = spec.SHA256URL
-				}
-				s3Pattern := "vmlinux-([\\d.]+)"
-				if spec.Options != nil {
-					if p, ok := spec.Options["s3_version_pattern"].(string); ok && p != "" {
-						s3Pattern = p
-					}
-				}
-				cfg.Options = download.ResolverOptions{
-					S3VersionPattern: s3Pattern,
-				}
-			}
-		default:
-		}
-
-		configs = append(configs, cfg)
-	}
-	return configs
-}
-
-// resolverConfigsFromMaps converts []map[string]any to []download.ResolverConfig.
-func resolverConfigsFromMaps(configs []map[string]any) []download.ResolverConfig {
-	result := make([]download.ResolverConfig, 0, len(configs))
-	for _, m := range configs {
-		var cfg download.ResolverConfig
-		if v, ok := m["type"].(string); ok {
-			cfg.Type = v
-		}
-		if v, ok := m["resolver"].(string); ok {
-			cfg.Resolver = v
-		}
-		if v, ok := m["versions_url"].(string); ok {
-			cfg.VersionsURL = v
-		}
-		if v, ok := m["download_url"].(string); ok {
-			cfg.DownloadURL = v
-		}
-		if v, ok := m["sha256_url"].(string); ok {
-			cfg.SHA256URL = v
-		}
-		if v, ok := m["list_url_template"].(string); ok {
-			cfg.ListURLTemplate = v
-		}
-		if v, ok := m["format"].(string); ok {
-			cfg.Format = v
-		}
-		if v, ok := m["name"].(string); ok {
-			cfg.Name = v
-		}
-		if v, ok := m["source"].(string); ok {
-			cfg.Source = v
-		}
-		if v, ok := m["version"].(string); ok {
-			cfg.Version = v
-		}
-
-		if optsRaw, ok := m["options"].(map[string]any); ok {
-			if v, ok := optsRaw["version_discoveries"].([]any); ok {
-				cfg.Options.VersionDiscoveries = make([]string, len(v))
-				for i, item := range v {
-					cfg.Options.VersionDiscoveries[i], _ = item.(string)
-				}
-			}
-			if v, ok := optsRaw["file_pattern"].(string); ok {
-				cfg.Options.FilePattern = v
-			}
-			if v, ok := optsRaw["file_suffix"].(string); ok {
-				cfg.Options.FileSuffix = v
-			}
-			if v, ok := optsRaw["s3_version_pattern"].(string); ok {
-				cfg.Options.S3VersionPattern = v
-			}
-		}
-
-		result = append(result, cfg)
-	}
-	return result
-}
-
-// getStringSlice extracts a []string value from a map for a given key.
-// TODO(verdict#33): belongs in infra/maps or similar shared utility
-func getStringSlice(m map[string]any, key string) []string {
-	if m == nil {
-		return nil
-	}
-	raw, ok := m[key].([]any)
-	if !ok {
-		return nil
-	}
-	result := make([]string, 0, len(raw))
-	for _, item := range raw {
-		if s, ok := item.(string); ok {
-			result = append(result, s)
-		}
-	}
-	return result
-}
-
-// extractVMName extracts the "name" from a VM object.
-// VMs are now typed as *model.VM from the shared model package,
-// so we access Name directly without reflection.
-func extractVMName(vm *model.VM) string {
-	return vm.Name
 }
 
 // ResolveLatestVersion resolves the latest available version for a given kernel type.
@@ -1984,8 +1349,6 @@ func (s *Service) ResolveLatestVersion(ctx context.Context, kernelType string, c
 			"Cannot resolve 'latest' for %s: no versions available from upstream", kernelType)
 	}
 
-	sort.Slice(allVersions, func(i, j int) bool {
-		return version.SemverGreater(allVersions[i], allVersions[j])
-	})
+	version.SortVersions(allVersions)
 	return allVersions[0], nil
 }
