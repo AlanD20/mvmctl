@@ -125,11 +125,11 @@ func newKeyCreateCmd(op *api.Operation) *cobra.Command {
 				SetDefault: setDefault,
 			}
 
-			createResult := op.KeyCreate(cmd.Context(), input)
-			if createResult.Status == "error" {
-				return fmt.Errorf("%s", createResult.Message)
+			createdKey, err := op.KeyCreate(cmd.Context(), input)
+			if err != nil {
+				return err
 			}
-			if createdKey, ok := createResult.Item.(*model.SSHKeyItem); ok && createdKey != nil {
+			if createdKey != nil {
 				common.Cli.Success(fmt.Sprintf("Created: %s (ID: %s)", createdKey.Name, createdKey.Fingerprint))
 			}
 			return nil
@@ -158,13 +158,13 @@ func newKeyImportCmd(op *api.Operation) *cobra.Command {
 			name := args[0]
 			pubKeyPath := args[1]
 
-			createdKey := op.KeyImport(cmd.Context(), &inputs.KeyImportInput{
+			keyItem, err := op.KeyImport(cmd.Context(), &inputs.KeyImportInput{
 				Name: name, PubKeyPath: pubKeyPath, Overwrite: force, SetDefault: setDefault,
 			})
-			if createdKey.Status == "error" {
-				return fmt.Errorf("%s", createdKey.Message)
+			if err != nil {
+				return err
 			}
-			if keyItem, ok := createdKey.Item.(*model.SSHKeyItem); ok && keyItem != nil {
+			if keyItem != nil {
 				common.Cli.Success(fmt.Sprintf("Imported: %s (ID: %s)", keyItem.Name, common.Cli.FormatID(keyItem.ID)))
 			}
 			if setDefault {
@@ -274,17 +274,17 @@ func newKeyExportCmd(op *api.Operation) *cobra.Command {
 
 			path := args[1]
 
-			exportResult := op.KeyExport(
+			paths, err := op.KeyExport(
 				cmd.Context(),
 				&inputs.KeyInput{Identifiers: []string{identifier}},
 				path,
 				force,
 			)
-			if exportResult.Status == "error" {
-				return fmt.Errorf("%s", exportResult.Message)
+			if err != nil {
+				return err
 			}
 
-			if paths, ok := exportResult.Item.([]string); ok && len(paths) >= 2 {
+			if len(paths) >= 2 {
 				common.Cli.Success(fmt.Sprintf("Exported: %s", paths[0]))
 				common.Cli.Info(fmt.Sprintf("Exported public key to %s", paths[1]))
 			}
@@ -307,9 +307,8 @@ func newKeyDefaultCmd(op *api.Operation) *cobra.Command {
 		ValidArgsFunction: completeKeyNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if clear {
-				clearResult := op.KeyClearDefaults(cmd.Context())
-				if clearResult.Status == "error" {
-					return fmt.Errorf("%s", clearResult.Message)
+				if err := op.KeyClearDefaults(cmd.Context()); err != nil {
+					return err
 				}
 				common.Cli.Success("Cleared: all default keys")
 				return nil
@@ -320,9 +319,8 @@ func newKeyDefaultCmd(op *api.Operation) *cobra.Command {
 			}
 
 			// Single API call with ALL names, matching Python exactly.
-			setResult := op.KeySetDefaults(cmd.Context(), &inputs.KeyInput{Identifiers: args})
-			if setResult.Status == "error" {
-				return fmt.Errorf("set default failed")
+			if err := op.KeySetDefaults(cmd.Context(), &inputs.KeyInput{Identifiers: args}); err != nil {
+				return fmt.Errorf("set default failed: %w", err)
 			}
 
 			common.Cli.Success(fmt.Sprintf("Default key(s) set: %s", strings.Join(args, ", ")))

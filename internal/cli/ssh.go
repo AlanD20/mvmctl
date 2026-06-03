@@ -2,7 +2,6 @@
 package cli
 
 import (
-	"fmt"
 	"slices"
 	"strings"
 
@@ -98,9 +97,8 @@ Examples:
 				input.Timeout = &timeout
 			}
 
-			result := op.SSHConnect(cmd.Context(), input)
-			if result.Status == "error" {
-				return fmt.Errorf("%s", result.Message)
+			if err := op.SSHConnect(cmd.Context(), input); err != nil {
+				return err
 			}
 			return nil
 		},

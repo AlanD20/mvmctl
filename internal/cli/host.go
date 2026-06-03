@@ -4,6 +4,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -121,130 +122,121 @@ membership to take effect.
 Examples:
   sudo mvm host init`, infra.MVMUnixGroup, infra.CLIName),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			rawResult := op.HostInit(cmd.Context(), nil)
-
-			switch v := rawResult.(type) {
-			case *errs.NeedsInteraction:
-				if v.Code == "privilege.sudo_required" {
-					common.Cli.Warning("Root privileges required for: mvm host init")
-					common.Cli.Info("Run with sudo: sudo mvm host init")
-					confirmed, pErr := common.Cli.PromptConfirm(cmd.Context(), "Run 'sudo mvm host init' now?", false)
-					if pErr != nil {
-						return pErr
-					}
-					if confirmed {
-						if sudoRestart, _ := infra.EnvGet("SUDO_RESTART"); sudoRestart != "" {
-							common.Cli.Error("Recursive sudo restart detected. Aborting to prevent lockout.")
-							common.Cli.Info("Please run 'sudo mvm host init' manually.")
-							return fmt.Errorf("recursive sudo restart")
+			rawResult, err := op.HostInit(cmd.Context(), nil)
+			if err != nil {
+				// NeedsInteraction flows through the error return
+				var ni *errs.NeedsInteraction
+				if errors.As(err, &ni) {
+					if ni.Code == "privilege.sudo_required" {
+						common.Cli.Warning("Root privileges required for: mvm host init")
+						common.Cli.Info("Run with sudo: sudo mvm host init")
+						confirmed, pErr := common.Cli.PromptConfirm(cmd.Context(), "Run 'sudo mvm host init' now?", false)
+						if pErr != nil {
+							return pErr
 						}
-
-						envAssignments := []string{}
-						for _, env := range os.Environ() {
-							if strings.HasPrefix(env, "MVM_") {
-								envAssignments = append(envAssignments, env)
+						if confirmed {
+							if sudoRestart, _ := infra.EnvGet("SUDO_RESTART"); sudoRestart != "" {
+								common.Cli.Error("Recursive sudo restart detected. Aborting to prevent lockout.")
+								common.Cli.Info("Please run 'sudo mvm host init' manually.")
+								return fmt.Errorf("recursive sudo restart")
 							}
-						}
-						for _, key := range []string{"HOME", "PATH"} {
-							if val, ok := os.LookupEnv(key); ok {
-								envAssignments = append(envAssignments, key+"="+val)
+
+							envAssignments := []string{}
+							for _, env := range os.Environ() {
+								if strings.HasPrefix(env, "MVM_") {
+									envAssignments = append(envAssignments, env)
+								}
 							}
-						}
-						// Restart/escaped markers go last so they override scanned env
-						envAssignments = append(envAssignments,
-							infra.EnvKey("SUDO_RESTART")+"=1",
-							infra.EnvKey("ESCALATED")+"=1",
-						)
-
-						sudoArgs := append([]string{"env"}, append(envAssignments, os.Args...)...)
-						result := system.RunCmdCompat(
-							cmd.Context(),
-							append([]string{"sudo"}, sudoArgs...),
-							system.RunCmdOpts{
-								Capture: false,
-								Check:   false,
-							},
-						)
-						if !result.Success && result.Err != nil {
-							common.Cli.Error(fmt.Sprintf("sudo command failed: %s", result.Err.Error()))
-							if result.Stderr != "" {
-								common.Cli.Warning(result.Stderr)
+							for _, key := range []string{"HOME", "PATH"} {
+								if val, ok := os.LookupEnv(key); ok {
+									envAssignments = append(envAssignments, key+"="+val)
+								}
 							}
-							return result.Err
-						}
-						if !result.Success {
-							return fmt.Errorf("sudo command failed with exit code %d", result.ExitCode)
-						}
-						common.Cli.Success("Host init completed successfully.")
-					}
-					return fmt.Errorf("needs sudo")
-				}
-
-				// Other NeedsInteraction (not sudo_required)
-				common.Cli.Error(v.Message)
-				if detailsCtx, ok := v.Context["details"].(map[string]any); ok {
-					if detailMsg, ok := detailsCtx["message"].(string); ok && detailMsg != "" {
-						common.Cli.Warning(fmt.Sprintf("Details: %s", detailMsg))
-					}
-					if suggestions, ok := detailsCtx["suggestions"].([]string); ok && len(suggestions) > 0 {
-						common.Cli.Info("Options:")
-						for _, s := range suggestions {
-							common.Cli.Info(fmt.Sprintf("  - %s", s))
-						}
-					}
-				}
-				return fmt.Errorf("%s", v.Message)
-
-			case *errs.OperationResult:
-				if v.IsError() {
-					return fmt.Errorf("Host init failed: %s", v.Message)
-				}
-
-				if v.Status == "skipped" {
-					common.Cli.Info(v.Message)
-					return nil
-				}
-
-				// Show change summary matching Python's flow
-				if v.Status == "success" {
-					var changes []*model.HostStateChangeItem
-					if metadata, ok := v.Metadata["changes"].([]*model.HostStateChangeItem); ok {
-						changes = metadata
-					}
-
-					appliedChanges := 0
-					for _, change := range changes {
-						origVal := ""
-						if change.OriginalValue != nil {
-							origVal = *change.OriginalValue
-						}
-						if change.Mechanism == "noop" && change.Setting == "iptables_chains" {
-							common.Cli.Warning(
-								formatChange(change.Mechanism, change.Setting, change.AppliedValue, origVal),
+							envAssignments = append(envAssignments,
+								infra.EnvKey("SUDO_RESTART")+"=1",
+								infra.EnvKey("ESCALATED")+"=1",
 							)
-							continue
+
+							sudoArgs := append([]string{"env"}, append(envAssignments, os.Args...)...)
+							result := system.RunCmdCompat(
+								cmd.Context(),
+								append([]string{"sudo"}, sudoArgs...),
+								system.RunCmdOpts{
+									Capture: false,
+									Check:   false,
+								},
+							)
+							if !result.Success && result.Err != nil {
+								common.Cli.Error(fmt.Sprintf("sudo command failed: %s", result.Err.Error()))
+								if result.Stderr != "" {
+									common.Cli.Warning(result.Stderr)
+								}
+								return result.Err
+							}
+							if !result.Success {
+								return fmt.Errorf("sudo command failed with exit code %d", result.ExitCode)
+							}
+							common.Cli.Success("Host init completed successfully.")
 						}
-						appliedChanges++
-						common.Cli.Success(formatChange(change.Mechanism, change.Setting, change.AppliedValue, origVal))
+						return fmt.Errorf("needs sudo")
 					}
 
-					if appliedChanges == 0 {
-						common.Cli.Info("Host already configured — nothing to do.")
-					} else {
-						common.Cli.Success(fmt.Sprintf("Initialized: host (%d change(s) applied)", appliedChanges))
+					// Other NeedsInteraction (not sudo_required)
+					common.Cli.Error(ni.Message)
+					if detailsCtx, ok := ni.Context["details"].(map[string]any); ok {
+						if detailMsg, ok := detailsCtx["message"].(string); ok && detailMsg != "" {
+							common.Cli.Warning(fmt.Sprintf("Details: %s", detailMsg))
+						}
+						if suggestions, ok := detailsCtx["suggestions"].([]string); ok && len(suggestions) > 0 {
+							common.Cli.Info("Options:")
+							for _, s := range suggestions {
+								common.Cli.Info(fmt.Sprintf("  - %s", s))
+							}
+						}
 					}
-
-					if wasUserAdded, ok := v.Metadata["user_added_to_group"].(bool); ok && wasUserAdded {
-						common.Cli.Warning("Log out and back in for group membership to take effect")
-						common.Cli.Info(fmt.Sprintf("Or run immediately: newgrp %s", infra.MVMUnixGroup))
-					}
+					return fmt.Errorf("%s", ni.Message)
 				}
+				return err
+			}
 
-			default:
-				// Python: if not isinstance(result, OperationResult):
-				//         mvm_cli.error(f"Unexpected result type: {type(result).__name__}")
-				//         raise typer.Exit(code=1)
-				return fmt.Errorf("unexpected result type: %T", v)
+			// nil result = skipped (no changes)
+			if rawResult == nil {
+				common.Cli.Info("Host already configured — nothing to do.")
+				return nil
+			}
+
+			// Success case - rawResult is a map of metadata
+			meta, ok := rawResult.(map[string]any)
+			if !ok {
+				return fmt.Errorf("unexpected result type: %T", rawResult)
+			}
+
+			changes, _ := meta["changes"].([]*model.HostStateChangeItem)
+			appliedChanges := 0
+			for _, change := range changes {
+				origVal := ""
+				if change.OriginalValue != nil {
+					origVal = *change.OriginalValue
+				}
+				if change.Mechanism == "noop" && change.Setting == "iptables_chains" {
+					common.Cli.Warning(
+						formatChange(change.Mechanism, change.Setting, change.AppliedValue, origVal),
+					)
+					continue
+				}
+				appliedChanges++
+				common.Cli.Success(formatChange(change.Mechanism, change.Setting, change.AppliedValue, origVal))
+			}
+
+			if appliedChanges == 0 {
+				common.Cli.Info("Host already configured — nothing to do.")
+			} else {
+				common.Cli.Success(fmt.Sprintf("Initialized: host (%d change(s) applied)", appliedChanges))
+			}
+
+			if wasUserAdded, ok := meta["user_added_to_group"].(bool); ok && wasUserAdded {
+				common.Cli.Warning("Log out and back in for group membership to take effect")
+				common.Cli.Info(fmt.Sprintf("Or run immediately: newgrp %s", infra.MVMUnixGroup))
 			}
 
 			return nil
@@ -348,26 +340,27 @@ usage, and a recommended maximum VM count based on available resources.
 
 Use --refresh to re-detect hardware and limits before displaying.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var result *errs.OperationResult
+			var result any
+			var err error
 			if refresh {
-				result = op.HostRefreshCapacity(cmd.Context())
+				result, err = op.HostRefreshCapacity(cmd.Context())
 			} else {
-				result = op.HostInfo(cmd.Context())
+				result, err = op.HostInfo(cmd.Context())
 			}
 
-			if result.IsError() {
-				return fmt.Errorf("%s", result.Message)
+			if err != nil {
+				return err
 			}
 
-			if result.Item == nil {
+			if result == nil {
 				return fmt.Errorf("no host info available")
 			}
 
 			if jsonOutput {
-				b, _ := json.MarshalIndent(result.Item, "", "  ")
+				b, _ := json.MarshalIndent(result, "", "  ")
 				fmt.Println(string(b))
 			} else {
-				printHostInfo(result.Item)
+				printHostInfo(result)
 			}
 
 			return nil
@@ -414,26 +407,22 @@ Sysctl settings, sudoers, and the '%s' group will NOT be affected.`, infra.MVMUn
 				}
 			}
 
-			result := op.HostClean(cmd.Context())
-			if result.IsError() {
-				return fmt.Errorf("%s", result.Message)
+			summary, err := op.HostClean(cmd.Context())
+			if err != nil {
+				return err
 			}
 
 			// Show per-item lines matching Python
-			if result.Item != nil {
-				if summary, ok := result.Item.([]string); ok {
-					for _, item := range summary {
-						if strings.HasPrefix(item, "Warning:") {
-							remainder := strings.TrimSpace(item[len("Warning:"):])
-							common.Cli.Warning(fmt.Sprintf("  %s", remainder))
-						} else {
-							common.Cli.Info(fmt.Sprintf("  %s", item))
-						}
-					}
+			for _, item := range summary {
+				if strings.HasPrefix(item, "Warning:") {
+					remainder := strings.TrimSpace(item[len("Warning:"):])
+					common.Cli.Warning(fmt.Sprintf("  %s", remainder))
+				} else {
+					common.Cli.Info(fmt.Sprintf("  %s", item))
 				}
 			}
 
-			common.Cli.Success(result.Message)
+			common.Cli.Success(fmt.Sprintf("Cleaned %d networking item(s)", len(summary)))
 			return nil
 		},
 	}
@@ -481,26 +470,22 @@ Examples:
 				}
 			}
 
-			result := op.HostReset(cmd.Context())
-			if result.IsError() {
-				return fmt.Errorf("%s", result.Message)
+			summary, err := op.HostReset(cmd.Context())
+			if err != nil {
+				return err
 			}
 
 			// Show per-item lines matching Python
-			if result.Item != nil {
-				if summary, ok := result.Item.([]string); ok {
-					for _, item := range summary {
-						if strings.HasPrefix(item, "Warning:") {
-							remainder := strings.TrimSpace(item[len("Warning:"):])
-							common.Cli.Warning(fmt.Sprintf("  %s", remainder))
-						} else {
-							common.Cli.Info(fmt.Sprintf("  %s", item))
-						}
-					}
+			for _, item := range summary {
+				if strings.HasPrefix(item, "Warning:") {
+					remainder := strings.TrimSpace(item[len("Warning:"):])
+					common.Cli.Warning(fmt.Sprintf("  %s", remainder))
+				} else {
+					common.Cli.Info(fmt.Sprintf("  %s", item))
 				}
 			}
 
-			common.Cli.Success(result.Message)
+			common.Cli.Success(fmt.Sprintf("Reset %d item(s)", len(summary)))
 			return nil
 		},
 	}

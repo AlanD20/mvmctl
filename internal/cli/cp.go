@@ -177,7 +177,7 @@ before it is a source. Multiple sources only work for host -> VM.`,
 			// which calls onProgress(int64(n)).  The CLI accumulates chunks
 			// into the cumulative total for display.
 			var cumulative int64
-			result := op.CPCopy(cmd.Context(), input, func(bytesCopied int64) {
+			result, cpErr := op.CPCopy(cmd.Context(), input, func(bytesCopied int64) {
 				mu.Lock()
 				cumulative += bytesCopied
 				totalTransferred = cumulative
@@ -193,38 +193,17 @@ before it is a source. Multiple sources only work for host -> VM.`,
 			close(done)
 
 			// ── Result handling: match Python's nuanced success/error ─────
-			// Python:
-			//   if result.is_ok and result.item:
-			//       msg = result.item.get("message", result.message)
-			//       mvm_cli.success(msg)
-			//   elif result.is_ok:
-			//       mvm_cli.success(result.message)
-			//   else:
-			//       mvm_cli.error(result.message or "Copy failed")
-			//       raise SystemExit(1)
-			if result.IsOK() && result.Item != nil {
-				msg := result.Message
-				if item, ok := result.Item.(map[string]interface{}); ok {
-					// Python: result.item.get("message", result.message)
-					if m, exists := item["message"]; exists {
-						if ms, ok := m.(string); ok {
-							msg = ms
-						}
-					}
-				}
-				common.Cli.Success(msg)
-				return nil
-			} else if result.IsOK() {
-				common.Cli.Success(result.Message)
-				return nil
+			if cpErr != nil {
+				return cpErr
 			}
 
-			// Error path: match Python's raise SystemExit(1)
+			// Success path
 			msg := result.Message
 			if msg == "" {
-				msg = "Copy failed"
+				msg = "Copy completed"
 			}
-			return fmt.Errorf("%s", msg)
+			common.Cli.Success(msg)
+			return nil
 		},
 	}
 

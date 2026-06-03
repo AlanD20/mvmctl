@@ -11,7 +11,6 @@ import (
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
-	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
 	"mvmctl/pkg/api"
 
@@ -42,7 +41,7 @@ func newCacheInitCmd(op *api.Operation) *cobra.Command {
 			spinner := common.NewSpinner("")
 			spinner.Start()
 
-			result := op.CacheInitAll(cmd.Context(), func(event errs.ProgressEvent) {
+			item, err := op.CacheInitAll(cmd.Context(), func(event errs.ProgressEvent) {
 				if event.Message != "" {
 					spinner.UpdateText(event.Message)
 				}
@@ -50,21 +49,21 @@ func newCacheInitCmd(op *api.Operation) *cobra.Command {
 
 			spinner.Stop()
 
-			if result.IsError() {
-				return fmt.Errorf("cache init failed: %s", result.Message)
+			if err != nil {
+				return err
 			}
 
-			// Match Python: mvm_cli.success(operation_result.message)
-			common.Cli.Success(result.Message)
-			// Match Python: for resource, path in item.items(): if path: mvm_cli.info(f"  {resource}: {path}")
-			if result.Item != nil {
-				if item, ok := result.Item.(map[string]interface{}); ok {
-					for resource, path := range item {
-						if path != nil && path != "" {
-							common.Cli.Info(fmt.Sprintf("  %s: %v", resource, path))
-						}
-					}
-				}
+			// Match Python: mvm_cli.success("Cache initialized successfully")
+			common.Cli.Success("Cache initialized successfully")
+			// Show initialized directories
+			for _, dir := range item.Directories {
+				common.Cli.Info(fmt.Sprintf("  %s", dir))
+			}
+			if item.GuestfsAppliance != "" {
+				common.Cli.Info(fmt.Sprintf("  guestfs: %s", item.GuestfsAppliance))
+			}
+			if item.GuestfsKernel != "" {
+				common.Cli.Info(fmt.Sprintf("  kernel: %s", item.GuestfsKernel))
 			}
 
 			return nil
@@ -133,31 +132,47 @@ func pruneResource(
 		}
 	}
 
-	var opResult *errs.OperationResult
+	var removed []string
 
 	switch resource {
-	case "vm":
-		opResult = op.CachePruneVMs(cmd.Context(), dryRun, allResources)
-	case "network":
-		opResult = op.CachePruneNetworks(cmd.Context(), dryRun, allResources)
 	case "image":
-		opResult = op.CachePruneImages(cmd.Context(), dryRun, allResources)
-	case "kernel":
-		opResult = op.CachePruneKernels(cmd.Context(), dryRun, allResources)
+		ids, err := op.CachePruneImages(cmd.Context(), dryRun, allResources)
+		if err != nil {
+			return err
+		}
+		removed = ids
 	case "binary":
-		opResult = op.CachePruneBinaries(cmd.Context(), dryRun, allResources)
-	}
-
-	if opResult == nil {
-		return nil
-	}
-	if opResult.IsError() {
-		return fmt.Errorf("prune %s failed: %s", resource, opResult.Message)
-	}
-
-	var removed []string
-	if item, ok := opResult.Item.([]string); ok {
-		removed = item
+		ids, err := op.CachePruneBinaries(cmd.Context(), dryRun, allResources)
+		if err != nil {
+			return err
+		}
+		removed = ids
+	default:
+		switch resource {
+		case "vm":
+			opResult := op.CachePruneVMs(cmd.Context(), dryRun, allResources)
+			if opResult == nil {
+				return nil
+			}
+			if opResult.IsError() {
+				return opResult.ToError()
+			}
+			if item, ok := opResult.Item.([]string); ok {
+				removed = item
+			}
+		case "network":
+			ids, err := op.CachePruneNetworks(cmd.Context(), dryRun, allResources)
+			if err != nil {
+				return err
+			}
+			removed = ids
+		case "kernel":
+			ids, err := op.CachePruneKernels(cmd.Context(), dryRun, allResources)
+			if err != nil {
+				return err
+			}
+			removed = ids
+		}
 	}
 
 	if len(removed) > 0 {
@@ -206,18 +221,12 @@ func pruneMisc(op *api.Operation, cmd *cobra.Command, dryRun bool, force bool) e
 		}
 	}
 
-	miscResult := op.CachePruneMisc(cmd.Context(), dryRun)
-	if miscResult.IsError() {
-		return fmt.Errorf("prune misc failed: %s", miscResult.Message)
+	miscMap, err := op.CachePruneMisc(cmd.Context(), dryRun)
+	if err != nil {
+		return err
 	}
 
-	if miscResult.Item == nil {
-		common.Cli.Info("No misc cache to prune")
-		return nil
-	}
-
-	miscMap, ok := miscResult.Item.(map[string]interface{})
-	if !ok {
+	if miscMap == nil {
 		common.Cli.Info("No misc cache to prune")
 		return nil
 	}
@@ -279,14 +288,10 @@ func pruneAll(op *api.Operation, cmd *cobra.Command, dryRun bool, force bool) er
 		}
 	}
 
-	pruneOpResult := op.CachePruneAll(cmd.Context(), dryRun, true)
-	if pruneOpResult.IsError() {
-		return fmt.Errorf("prune failed: %s", pruneOpResult.Message)
+	pruneItem, err := op.CachePruneAll(cmd.Context(), dryRun, true)
+	if err != nil {
+		return err
 	}
-
-	// Match Python: prune_item = prune_op_result.item (type-safe from *model.PruneAllResult)
-	// Python uses a typed PruneAllResult dataclass with pruned_ids, failed_ids, had_running_vms.
-	pruneItem, _ := pruneOpResult.Item.(*model.PruneAllResult)
 	if pruneItem != nil {
 		if len(pruneItem.PrunedIDs) > 0 {
 			if dryRun {
@@ -494,14 +499,10 @@ Examples:
 				}
 			}
 
-			opResult := op.CacheClean(cmd.Context(), dryRun)
-			if opResult.IsError() {
-				return fmt.Errorf("clean failed: %s", opResult.Message)
+			cleanResult, err := op.CacheClean(cmd.Context(), dryRun)
+			if err != nil {
+				return err
 			}
-
-			// Match Python: result = op_result.item (type-safe from *model.CleanResult)
-			// Python uses a typed CleanResult dataclass containing a PruneAllResult sub-object.
-			cleanResult, _ := opResult.Item.(*model.CleanResult)
 			if cleanResult != nil {
 				prune := cleanResult.PruneResult
 

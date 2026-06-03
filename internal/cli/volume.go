@@ -107,14 +107,13 @@ func newVolumeCreateCmd(op *api.Operation) *cobra.Command {
 				Format:   formatPtr,
 				ReadOnly: readOnlyPtr,
 			}
-			result := op.VolumeCreate(cmd.Context(), input)
-			if result.IsError() {
-				// Match Python: mvm_cli.error(result.message); raise typer.Exit(code=1)
-				return fmt.Errorf("%s", result.Message)
+			vol, err := op.VolumeCreate(cmd.Context(), input)
+			if err != nil {
+				return err
 			}
 			// Match Python: mvm_cli.success(result.message)
-			common.Cli.Success(result.Message)
-			if vol, ok := result.Item.(*model.VolumeItem); ok && vol != nil {
+			common.Cli.Success(fmt.Sprintf("Volume '%s' created", name))
+			if vol != nil {
 				// Match Python: mvm_cli.key_value("ID", mvm_cli.format_id(result.item.id))
 				common.Cli.KeyValue("ID", common.Cli.FormatID(vol.ID), 2, 12)
 				// Match Python: mvm_cli.key_value("Mode", "ro" if result.item.is_read_only else "rw")
@@ -222,13 +221,11 @@ func newVolumeResizeCmd(op *api.Operation) *cobra.Command {
 			identifier := args[0]
 			sizeArg := args[1]
 
-			resizeResult := op.VolumeResize(cmd.Context(), &inputs.VolumeCreateInput{Name: identifier, Size: sizeArg})
-			if resizeResult.IsError() {
-				// Match Python: mvm_cli.error(result.message); raise typer.Exit(code=1)
-				return fmt.Errorf("%s", resizeResult.Message)
+			if err := op.VolumeResize(cmd.Context(), &inputs.VolumeCreateInput{Name: identifier, Size: sizeArg}); err != nil {
+				return err
 			}
 			// Match Python: mvm_cli.success(result.message)
-			common.Cli.Success(resizeResult.Message)
+			common.Cli.Success(fmt.Sprintf("Volume '%s' resized", identifier))
 			return nil
 		},
 	}

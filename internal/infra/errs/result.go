@@ -95,15 +95,35 @@ func (r *OperationResult) IsError() bool {
 	return r.Status == string(StatusError) || r.Status == string(StatusFailure)
 }
 
+// ToError converts an error-status OperationResult to a DomainError.
+// Returns nil if the result is not an error status.
+// This replaces the pattern of unwrapping result.Message into fmt.Errorf,
+// which loses the DomainError type and makes errors appear "unexpected".
+func (r *OperationResult) ToError() *DomainError {
+	if r == nil || !r.IsError() {
+		return nil
+	}
+	return &DomainError{
+		Code:    Code(r.Code),
+		Message: r.Message,
+		Entity:  "",
+		Err:     r.Exception,
+		Class:   ClassInternal,
+	}
+}
+
 // NeedsInteraction matches Python's NeedsInteraction.
 // Returned instead of OperationResult when the API cannot proceed without user input.
 // This is NOT an exception — it is normal control flow.
+// Implements the error interface so it can flow through (T, error) return types.
 type NeedsInteraction struct {
 	Code      string         `json:"code"`              // Machine-readable reason code
 	Message   string         `json:"message"`           // Human-readable prompt
 	InputType string         `json:"input_type"`        // "sudo", "confirm", "choice", "input"
 	Context   map[string]any `json:"context,omitempty"` // Structured context
 }
+
+func (n *NeedsInteraction) Error() string { return n.Message }
 
 // ── BatchResult (Python-matching) ──
 

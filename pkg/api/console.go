@@ -12,22 +12,23 @@ import (
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/service/console"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/pkg/api/responses"
 )
 
 // ConsoleGetState returns console relay state for a VM.
 // Matches Python's ConsoleOperation.get_state() exactly.
 // Python returns a raw dict with running, pid, socket_path.
 // On VM not found, raises VMNotFoundError — Go returns error.
-func (op *Operation) ConsoleGetState(ctx context.Context, identifier string) (map[string]interface{}, error) {
+func (op *Operation) ConsoleGetState(ctx context.Context, identifier string) (*responses.ConsoleStateResult, error) {
 	resolved, err := op.resolveWithRequest(ctx, identifier)
 	if err != nil {
 		return nil, err
 	}
 
-	return map[string]interface{}{
-		"running":     resolved.Relay.IsRunning(),
-		"pid":         resolved.Relay.PID(),
-		"socket_path": resolved.Relay.SocketPath(),
+	return &responses.ConsoleStateResult{
+		Running:    resolved.Relay.IsRunning(),
+		PID:        resolved.Relay.PID(),
+		SocketPath: resolved.Relay.SocketPath(),
 	}, nil
 }
 
@@ -62,44 +63,34 @@ func (op *Operation) ConsoleGetConnectionInfo(
 // ConsoleKill stops the console relay for a VM.
 // Matches Python's ConsoleOperation.kill() exactly.
 // Python: raises MVMError on resolution failure or returns OperationResult[bool].
-// Go: returns (*OperationResult, error). Resolution errors propagate as error
-// (not wrapped in OperationResult), matching Python's exception propagation.
-func (op *Operation) ConsoleKill(ctx context.Context, identifier string) (*errs.OperationResult, error) {
+// Go: returns error. Resolution errors propagate as error (not wrapped in
+// OperationResult), matching Python's exception propagation.
+func (op *Operation) ConsoleKill(ctx context.Context, identifier string) error {
 	resolved, err := op.resolveWithRequest(ctx, identifier)
 	if err != nil {
-		// Python: ConsoleRequest(...).resolve() raises MVMError on resolution
-		// failure. In Go, this propagates as a Go error — not wrapped in
-		// an OperationResult, matching Python's exception behavior.
-		return nil, err
+		return err
 	}
 
 	if !resolved.Relay.IsRunning() {
-		return &errs.OperationResult{
-			Status:  "skipped",
+		return &errs.DomainError{
 			Code:    "console.not_running",
+			Op:      "console",
 			Message: fmt.Sprintf("No console relay running for '%s'", identifier),
-			Item:    false,
-		}, nil
+			Class:   errs.ClassValidation,
+		}
 	}
 
 	killed := resolved.Relay.Stop(true)
 	if killed {
-		// Python: AuditLog.log("console.kill", changes={"name": identifier})
 		op.AuditLog.LogOperation("console.kill", map[string]interface{}{"name": identifier}, "")
-		return &errs.OperationResult{
-			Status:  "success",
-			Code:    "console.killed",
-			Message: fmt.Sprintf("Console relay stopped for '%s'", identifier),
-			Item:    true,
-		}, nil
+		return nil
 	}
-	// Python: code="console.kill_failed"
-	return &errs.OperationResult{
-		Status:  "error",
+	return &errs.DomainError{
 		Code:    "console.kill_failed",
+		Op:      "console",
 		Message: fmt.Sprintf("Failed to stop console relay for '%s'", identifier),
-		Item:    false,
-	}, nil
+		Class:   errs.ClassInternal,
+	}
 }
 
 // ConsoleAttachConsole attaches to a running console relay in interactive mode.

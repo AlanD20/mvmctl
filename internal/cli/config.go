@@ -87,15 +87,11 @@ func newConfigSetCmd(op *api.Operation) *cobra.Command {
 		Args:              cobra.ExactArgs(3),
 		ValidArgsFunction: completeConfigSet,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := op.ConfigSet(cmd.Context(), args[0], args[1], args[2])
-			if err != nil {
+			if err := op.ConfigSet(cmd.Context(), args[0], args[1], args[2]); err != nil {
 				common.Cli.Error(err.Error())
 				return err
 			}
-			if result.IsError() {
-				return fmt.Errorf("%s", result.Message)
-			}
-			common.Cli.Success(result.Message)
+			common.Cli.Success(fmt.Sprintf("Set %s.%s = %s", args[0], args[1], args[2]))
 			return nil
 		},
 	}
@@ -122,11 +118,11 @@ func newConfigResetCmd(op *api.Operation) *cobra.Command {
 						return nil
 					}
 				}
-				result := op.ConfigReset(cmd.Context(), "", "", true)
-				if result.IsError() {
-					return fmt.Errorf("%s", result.Message)
+				deleted, err := op.ConfigReset(cmd.Context(), "", "", true)
+				if err != nil {
+					return err
 				}
-				common.Cli.Success(fmt.Sprintf("Reset: %v override(s) globally", result.Item))
+				common.Cli.Success(fmt.Sprintf("Reset: %v override(s) globally", deleted))
 				return nil
 			}
 
@@ -135,19 +131,19 @@ func newConfigResetCmd(op *api.Operation) *cobra.Command {
 				common.Cli.Text("Provide a category, category and key, or use --all")
 			case 1:
 				category := args[0]
-				result := op.ConfigReset(cmd.Context(), category, "", false)
-				if result.IsError() {
-					return fmt.Errorf("%s", result.Message)
+				deleted, err := op.ConfigReset(cmd.Context(), category, "", false)
+				if err != nil {
+					return err
 				}
-				common.Cli.Success(fmt.Sprintf("Reset: %v override(s) in %s", result.Item, category))
+				common.Cli.Success(fmt.Sprintf("Reset: %v override(s) in %s", deleted, category))
 			case 2:
 				category := args[0]
 				key := args[1]
-				result := op.ConfigReset(cmd.Context(), category, key, false)
-				if result.IsError() {
-					return fmt.Errorf("%s", result.Message)
+				deleted, err := op.ConfigReset(cmd.Context(), category, key, false)
+				if err != nil {
+					return err
 				}
-				if item, ok := result.Item.(int); ok && item > 0 {
+				if deleted > 0 {
 					common.Cli.Success(fmt.Sprintf("Reset: %s.%s", category, key))
 				} else {
 					common.Cli.Text(fmt.Sprintf("%s.%s was already at default", category, key))

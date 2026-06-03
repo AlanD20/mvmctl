@@ -15,9 +15,9 @@ import (
 // Matches Python's SSHOperation.connect() exactly.
 // Python: returns OperationResult[int]; only MVMError is caught and wrapped
 // in OperationResult; other exceptions propagate.
-// Go: returns *OperationResult. Non-MVMError errors are wrapped with code
+// Go: returns error. Non-MVMError errors are wrapped with code
 // "ssh.failed" as well (Go has no exceptions, so all errors are returned).
-func (op *Operation) SSHConnect(ctx context.Context, input *inputs.SSHInput) *errs.OperationResult {
+func (op *Operation) SSHConnect(ctx context.Context, input *inputs.SSHInput) error {
 	// Python: try:
 	//   request = SSHRequest(inputs, db); resolved = request.resolve()
 	//   ...
@@ -26,8 +26,6 @@ func (op *Operation) SSHConnect(ctx context.Context, input *inputs.SSHInput) *er
 	request := inputs.NewSSHRequest(*input, op.Connection.DB())
 	resolved, err := request.Resolve(ctx, op.Repos.VM, op.Repos.Key)
 	if err != nil {
-		// Python: except MVMError — only MVMError is caught.
-		// Other exceptions propagate. In Go, we return the result directly.
 		return newSSHError(err)
 	}
 
@@ -57,30 +55,20 @@ func (op *Operation) SSHConnect(ctx context.Context, input *inputs.SSHInput) *er
 		return newSSHError(err)
 	}
 
-	if exitCode == 0 {
-		return &errs.OperationResult{
-			Status:  "success",
-			Code:    "ssh.connected",
-			Message: "SSH connection successful",
-			Item:    exitCode,
-		}
+	if exitCode != 0 {
+		return newSSHError(fmt.Errorf("SSH command failed with exit code %d", exitCode))
 	}
-	return &errs.OperationResult{
-		Status:  "error",
-		Code:    "ssh.failed",
-		Message: fmt.Sprintf("SSH command failed with exit code %d", exitCode),
-		Item:    exitCode,
-	}
+
+	return nil
 }
 
-// newSSHError wraps any error as an OperationResult with "ssh.failed" code.
-// Matches Python's except MVMError: return OperationResult(status="error",
-// code="ssh.failed", message=str(e), exception=e).
-func newSSHError(err error) *errs.OperationResult {
-	return &errs.OperationResult{
-		Status:    "error",
-		Code:      "ssh.failed",
-		Message:   err.Error(),
-		Exception: err,
+// newSSHError wraps any error as a DomainError with "ssh.failed" code.
+func newSSHError(err error) error {
+	return &errs.DomainError{
+		Code:    "ssh.failed",
+		Op:      "ssh",
+		Message: err.Error(),
+		Err:     err,
+		Class:   errs.ClassInternal,
 	}
 }

@@ -27,14 +27,11 @@ import (
 // Python's prune() calls KernelOperation.remove() through the full pipeline
 // (resolution, enrichment, VM reference checks) — Go matches this by calling
 // op.KernelRemove() instead of calling the service directly.
-func (op *Operation) KernelPrune(ctx context.Context, dryRun bool, includeAll bool) *errs.OperationResult {
+func (op *Operation) KernelPrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error) {
 	allKernels, err := op.Repos.Kernel.ListAll(ctx)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      string(errs.CodeDatabaseError),
-			Message:   fmt.Sprintf("Failed to list kernels: %v", err),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code: errs.CodeDatabaseError, Message: fmt.Sprintf("Failed to list kernels: %v", err), Err: err,
 		}
 	}
 
@@ -76,18 +73,13 @@ func (op *Operation) KernelPrune(ctx context.Context, dryRun bool, includeAll bo
 		removed = append(removed, kernel.ID)
 	}
 
-	return &errs.OperationResult{
-		Status:  "success",
-		Code:    "cache.pruned",
-		Message: fmt.Sprintf("Pruned %d kernel(s)", len(removed)),
-		Item:    removed,
-	}
+	return removed, nil
 }
 
 // KernelPull downloads or builds a kernel with full pipeline.
 // Matches Python's KernelOperation.pull(inputs: KernelPullInput, *, on_progress=...) exactly.
 func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInput,
-	onProgress func(errs.ProgressEvent)) *errs.OperationResult {
+	onProgress func(errs.ProgressEvent)) (*model.KernelItem, error) {
 
 	try := func(phase, status, msg string) {
 		if onProgress != nil {
@@ -114,19 +106,14 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 			}
 		}
 		if ciVersion == "" {
-			return &errs.OperationResult{
-				Status:  "error",
-				Code:    "kernel.pull_failed",
-				Message: "CI version is required to resolve latest kernel version",
+			return nil, &errs.DomainError{
+				Code: "kernel.pull_failed", Message: "CI version is required to resolve latest kernel version",
 			}
 		}
 		resolvedVersion, err := op.Services.Kernel.ResolveLatestVersion(ctx, kernelType, ciVersion)
 		if err != nil {
-			return &errs.OperationResult{
-				Status:    "error",
-				Code:      "kernel.pull_failed",
-				Message:   fmt.Sprintf("Failed to resolve latest version for '%s': %v", kernelType, err),
-				Exception: err,
+			return nil, &errs.DomainError{
+				Code: "kernel.pull_failed", Message: fmt.Sprintf("Failed to resolve latest version for '%s': %v", kernelType, err), Err: err,
 			}
 		}
 		version = resolvedVersion
@@ -137,11 +124,8 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 	request := inputs.NewKernelPullRequest(*input, op.Connection.DB())
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      "kernel.pull_failed",
-			Message:   fmt.Sprintf("Kernel pull input resolution failed: %v", err),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code: "kernel.pull_failed", Message: fmt.Sprintf("Kernel pull input resolution failed: %v", err), Err: err,
 		}
 	}
 
@@ -163,41 +147,34 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 			if resolved.SetDefault {
 				_ = op.Repos.Kernel.SetDefault(ctx, existing.ID)
 			}
-			return &errs.OperationResult{
-				Status:  "skipped",
-				Code:    "kernel.already_present",
-				Message: fmt.Sprintf("Kernel already exists: %s", existing.Path),
-				Item:    existing,
-			}
+			return existing, nil
 		}
 	}
 
 	// Resolve spec via KernelService (matches Python)
 	specs, err := op.Services.Kernel.GetSpecsFor(nil, resolved.KernelType, resolvedVersionStr(resolved))
 	if err != nil {
-		return &errs.OperationResult{
-			Status: "error",
-			Code:   "kernel.pull_failed",
+		return nil, &errs.DomainError{
+			Code: "kernel.pull_failed",
 			Message: fmt.Sprintf(
 				"Failed to get spec for '%s' version '%s': %v",
 				resolved.KernelType,
 				resolvedVersionStr(resolved),
 				err,
 			),
-			Exception: err,
+			Err: err,
 		}
 	}
 	if len(specs) != 1 {
-		return &errs.OperationResult{
-			Status: "error",
-			Code:   "kernel.pull_failed",
+		return nil, &errs.DomainError{
+			Code: "kernel.pull_failed",
 			Message: fmt.Sprintf(
 				"Expected exactly one kernel spec for type='%s' version='%s', got %d",
 				resolved.KernelType,
 				resolvedVersionStr(resolved),
 				len(specs),
 			),
-			Exception: fmt.Errorf("unexpected spec count: %d", len(specs)),
+			Err: fmt.Errorf("unexpected spec count: %d", len(specs)),
 		}
 	}
 	spec := specs[0]
@@ -227,11 +204,8 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 			operation.DownloadProgressBridge(onProgress),
 		)
 		if err != nil {
-			return &errs.OperationResult{
-				Status:    "error",
-				Code:      "kernel.pull_failed",
-				Message:   fmt.Sprintf("Firecracker kernel download failed: %v", err),
-				Exception: err,
+			return nil, &errs.DomainError{
+				Code: "kernel.pull_failed", Message: fmt.Sprintf("Firecracker kernel download failed: %v", err), Err: err,
 			}
 		}
 
@@ -260,21 +234,15 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 			resolved.Jobs, resolved.KeepBuildDir, !resolved.CleanBuild, // useCache = !cleanBuild
 			configPath, operation.DownloadProgressBridge(onProgress), onStatusCallback)
 		if err != nil {
-			return &errs.OperationResult{
-				Status:    "error",
-				Code:      "kernel.pull_failed",
-				Message:   fmt.Sprintf("Kernel build failed: %v", err),
-				Exception: err,
+			return nil, &errs.DomainError{
+				Code: "kernel.pull_failed", Message: fmt.Sprintf("Kernel build failed: %v", err), Err: err,
 			}
 		}
 
 		try("build", "complete", "Kernel build complete.")
 	} else {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      "kernel.pull_failed",
-			Message:   fmt.Sprintf("Unsupported kernel type: %s", resolved.KernelType),
-			Exception: fmt.Errorf("unsupported kernel type: %s", resolved.KernelType),
+		return nil, &errs.DomainError{
+			Code: "kernel.pull_failed", Message: fmt.Sprintf("Unsupported kernel type: %s", resolved.KernelType), Err: fmt.Errorf("unsupported kernel type: %s", resolved.KernelType),
 		}
 	}
 
@@ -282,11 +250,8 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 	timestamp := time.Now().Format(time.RFC3339)
 	kernelID, err := crypto.KernelID(fetchResult.Path, fetchResult.Version, resolved.Arch, timestamp)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      "kernel.pull_failed",
-			Message:   fmt.Sprintf("Failed to compute kernel ID: %v", err),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code: "kernel.pull_failed", Message: fmt.Sprintf("Failed to compute kernel ID: %v", err), Err: err,
 		}
 	}
 
@@ -309,11 +274,8 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 	}
 
 	if err := op.Repos.Kernel.Upsert(ctx, kernelItem); err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      "kernel.pull_failed",
-			Message:   fmt.Sprintf("Failed to persist kernel: %v", err),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code: "kernel.pull_failed", Message: fmt.Sprintf("Failed to persist kernel: %v", err), Err: err,
 		}
 	}
 
@@ -351,36 +313,22 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 		"version": kernelItem.Version, "arch": kernelItem.Arch,
 	}, "")
 
-	md := map[string]interface{}{}
-	if len(resolved.Features) > 0 {
-		md["features"] = resolved.Features
-	}
-
-	return &errs.OperationResult{
-		Status:   "success",
-		Code:     "kernel.pulled",
-		Message:  fmt.Sprintf("Kernel '%s' pulled successfully", kernelItem.Name),
-		Item:     kernelItem,
-		Metadata: md,
-	}
+	return kernelItem, nil
 }
 
 // KernelImport imports a local vmlinux file as a kernel.
 // Matches Python's KernelOperation.import_() exactly — uses KernelImportRequest
 // resolution pipeline for input validation and default resolution before
 // calling service.import_kernel().
-func (op *Operation) KernelImport(ctx context.Context, input *inputs.KernelImportInput) *errs.OperationResult {
+func (op *Operation) KernelImport(ctx context.Context, input *inputs.KernelImportInput) (*model.KernelItem, error) {
 	db := op.Connection.DB()
 
 	// Python: request = KernelImportRequest(inputs=inputs, db=db); resolved = request.resolve()
 	request := inputs.NewKernelImportRequest(*input, db)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      "kernel.import_failed",
-			Message:   fmt.Sprintf("Kernel import input resolution failed: %v", err),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code: "kernel.import_failed", Message: fmt.Sprintf("Kernel import input resolution failed: %v", err), Err: err,
 		}
 	}
 
@@ -393,11 +341,8 @@ func (op *Operation) KernelImport(ctx context.Context, input *inputs.KernelImpor
 		resolved.SetDefault,
 	)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      "kernel.import_failed",
-			Message:   fmt.Sprintf("Kernel import failed: %v", err),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code: "kernel.import_failed", Message: fmt.Sprintf("Kernel import failed: %v", err), Err: err,
 		}
 	}
 
@@ -405,12 +350,7 @@ func (op *Operation) KernelImport(ctx context.Context, input *inputs.KernelImpor
 		"name": kernelItem.Name, "version": kernelItem.Version, "arch": kernelItem.Arch,
 	}, "")
 
-	return &errs.OperationResult{
-		Status:  "success",
-		Code:    "kernel.imported",
-		Message: fmt.Sprintf("Kernel imported: %s", kernelItem.Name),
-		Item:    kernelItem,
-	}
+	return kernelItem, nil
 }
 
 // KernelRemove removes kernels by identifiers.
@@ -639,7 +579,7 @@ func (op *Operation) KernelInspect(ctx context.Context, id string) (*responses.K
 // KernelSetDefault sets a kernel as default.
 // Matches Python's KernelOperation.set_default() exactly — uses KernelRequest.resolve()
 // for consistent identifier resolution, catches KernelError at top level.
-func (op *Operation) KernelSetDefault(ctx context.Context, id string) *errs.OperationResult {
+func (op *Operation) KernelSetDefault(ctx context.Context, id string) error {
 	kernelInput := inputs.KernelInput{
 		Identifiers: []string{id},
 	}
@@ -647,18 +587,14 @@ func (op *Operation) KernelSetDefault(ctx context.Context, id string) *errs.Oper
 	request := inputs.NewKernelRequest(kernelInput, op.Connection.DB(), op.Repos.Kernel)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:  "error",
-			Code:    string(errs.CodeKernelNotFound),
-			Message: fmt.Sprintf("Kernel not found: %s", id),
+		return &errs.DomainError{
+			Code: errs.CodeKernelNotFound, Message: fmt.Sprintf("Kernel not found: %s", id),
 		}
 	}
 
 	if len(resolved.Kernels) != 1 {
-		return &errs.OperationResult{
-			Status:  "error",
-			Code:    string(errs.CodeKernelNotFound),
-			Message: fmt.Sprintf("Kernel not found: %s", id),
+		return &errs.DomainError{
+			Code: errs.CodeKernelNotFound, Message: fmt.Sprintf("Kernel not found: %s", id),
 		}
 	}
 
@@ -666,31 +602,20 @@ func (op *Operation) KernelSetDefault(ctx context.Context, id string) *errs.Oper
 
 	ctrl, err := kernel.NewController(ctx, kItem, op.Repos.Kernel)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      "kernel.default_set_failed",
-			Message:   fmt.Sprintf("Failed to create controller: %v", err),
-			Exception: err,
+		return &errs.DomainError{
+			Code: "kernel.default_set_failed", Message: fmt.Sprintf("Failed to create controller: %v", err), Err: err,
 		}
 	}
 
 	if err := ctrl.SetDefault(ctx); err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      "kernel.default_set_failed",
-			Message:   fmt.Sprintf("Failed to set default kernel: %v", err),
-			Exception: err,
+		return &errs.DomainError{
+			Code: "kernel.default_set_failed", Message: fmt.Sprintf("Failed to set default kernel: %v", err), Err: err,
 		}
 	}
 
 	op.AuditLog.LogOperation("kernel.set_default", map[string]interface{}{"name": kItem.Name}, "")
 
-	return &errs.OperationResult{
-		Status:  "success",
-		Code:    "kernel.default_set",
-		Message: fmt.Sprintf("Default kernel set to %s", kItem.Name),
-		Item:    kItem,
-	}
+	return nil
 }
 
 // resolvedVersionStr returns the version from a ResolvedKernelPullRequest,

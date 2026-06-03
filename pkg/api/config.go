@@ -48,13 +48,12 @@ func (op *Operation) ConfigGet(ctx context.Context, category, key string) (any, 
 
 // ConfigSet sets a config value for category.key.
 // Matches Python's ConfigOperation.set() exactly — ConfigError propagates from
-// SettingsService.set() just as in Python (error is returned as second return value
-// instead of wrapped in OperationResult).
+// SettingsService.set() just as in Python (error is returned directly).
 func (op *Operation) ConfigSet(
 	ctx context.Context,
 	category, key string,
 	value any,
-) (*errs.OperationResult, error) {
+) error {
 	rawInput := inputs.ConfigInput{
 		Action:   "set",
 		Category: category,
@@ -64,11 +63,11 @@ func (op *Operation) ConfigSet(
 	req := inputs.NewConfigRequest(rawInput)
 	resolved, err := req.Resolve(ctx)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if err := op.Services.Config.Set(ctx, resolved.Category, resolved.Key, resolved.Value); err != nil {
-		return nil, err
+		return err
 	}
 
 	op.AuditLog.LogOperation(
@@ -81,16 +80,12 @@ func (op *Operation) ConfigSet(
 		"",
 	)
 
-	return &errs.OperationResult{
-		Status:  "success",
-		Code:    "config.set",
-		Message: fmt.Sprintf("Set %s.%s = %v", resolved.Category, resolved.Key, resolved.Value),
-	}, nil
+	return nil
 }
 
 // ConfigReset resets a config value to its default (removes override).
 // Matches Python's ConfigOperation.reset() exactly — uses ConfigRequest resolution pipeline.
-func (op *Operation) ConfigReset(ctx context.Context, category, key string, allOverrides bool) *errs.OperationResult {
+func (op *Operation) ConfigReset(ctx context.Context, category, key string, allOverrides bool) (int, error) {
 	rawInput := inputs.ConfigInput{
 		Action:       "reset",
 		Category:     category,
@@ -100,63 +95,53 @@ func (op *Operation) ConfigReset(ctx context.Context, category, key string, allO
 	req := inputs.NewConfigRequest(rawInput)
 	resolved, err := req.Resolve(ctx)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      string(errs.CodeConfigError),
-			Message:   err.Error(),
-			Exception: err,
+		return 0, &errs.DomainError{
+			Code:    errs.CodeConfigError,
+			Message: err.Error(),
+			Err:     err,
+			Class:   errs.ClassValidation,
 		}
 	}
 
 	if resolved.AllOverrides {
 		deleted, err := op.Services.Config.DeleteAll(ctx)
 		if err != nil {
-			return &errs.OperationResult{
-				Status:    "error",
-				Code:      string(errs.CodeConfigError),
-				Message:   err.Error(),
-				Exception: err,
+			return 0, &errs.DomainError{
+				Code:    errs.CodeConfigError,
+				Message: err.Error(),
+				Err:     err,
+				Class:   errs.ClassInternal,
 			}
 		}
 		if deleted > 0 {
 			op.AuditLog.LogOperation("config.reset", nil, fmt.Sprintf("all overrides (%d removed)", deleted))
 		}
-		return &errs.OperationResult{
-			Status:  "success",
-			Code:    "config.reset",
-			Message: fmt.Sprintf("Reset %d override(s) globally", deleted),
-			Item:    deleted,
-		}
+		return deleted, nil
 	}
 
 	if resolved.Key == "" {
 		deleted, err := op.Services.Config.DeleteByCategory(ctx, resolved.Category)
 		if err != nil {
-			return &errs.OperationResult{
-				Status:    "error",
-				Code:      string(errs.CodeConfigError),
-				Message:   err.Error(),
-				Exception: err,
+			return 0, &errs.DomainError{
+				Code:    errs.CodeConfigError,
+				Message: err.Error(),
+				Err:     err,
+				Class:   errs.ClassInternal,
 			}
 		}
 		if deleted > 0 {
 			op.AuditLog.LogOperation("config.reset", nil, fmt.Sprintf("%s.* (%d removed)", resolved.Category, deleted))
 		}
-		return &errs.OperationResult{
-			Status:  "success",
-			Code:    "config.reset",
-			Message: fmt.Sprintf("Reset %d override(s) in %s", deleted, resolved.Category),
-			Item:    deleted,
-		}
+		return deleted, nil
 	}
 
 	deletedBool, err := op.Services.Config.Delete(ctx, resolved.Category, resolved.Key)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      string(errs.CodeConfigError),
-			Message:   err.Error(),
-			Exception: err,
+		return 0, &errs.DomainError{
+			Code:    errs.CodeConfigError,
+			Message: err.Error(),
+			Err:     err,
+			Class:   errs.ClassInternal,
 		}
 	}
 	resultCount := 0
@@ -164,12 +149,7 @@ func (op *Operation) ConfigReset(ctx context.Context, category, key string, allO
 		resultCount = 1
 		op.AuditLog.LogOperation("config.reset", nil, fmt.Sprintf("%s.%s", resolved.Category, resolved.Key))
 	}
-	return &errs.OperationResult{
-		Status:  "success",
-		Code:    "config.reset",
-		Message: fmt.Sprintf("Reset %s.%s (%d override(s))", resolved.Category, resolved.Key, resultCount),
-		Item:    resultCount,
-	}
+	return resultCount, nil
 }
 
 // ConfigListAll returns all overridable settings.

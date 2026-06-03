@@ -155,21 +155,9 @@ func newNetworkCreateCmd(op *api.Operation) *cobra.Command {
 				SetDefault:  setDefault,
 			}
 
-			createResult := op.NetworkCreate(cmd.Context(), input)
-			if createResult.IsError() {
-				return fmt.Errorf("create network failed: %s", createResult.Message)
-			}
-			if createResult.Status == "skipped" {
-				common.Cli.Info(createResult.Message)
-				return nil
-			}
-			// NeedsInteraction fallback (matches Python's else branch)
-			if createResult.Item == nil {
-				return fmt.Errorf("create network failed")
-			}
-			net, ok := createResult.Item.(*model.Network)
-			if !ok {
-				return fmt.Errorf("create network failed: no network returned")
+			net, err := op.NetworkCreate(cmd.Context(), input)
+			if err != nil {
+				return fmt.Errorf("create network failed: %w", err)
 			}
 
 			common.Cli.PrintDictTree(common.Cli.ToMap(net), fmt.Sprintf("Network: %s", net.Name))
@@ -232,9 +220,9 @@ func newNetworkRemoveCmd(op *api.Operation) *cobra.Command {
 				return fmt.Errorf("usage error")
 			}
 
-			removeResult := op.NetworkRemove(cmd.Context(), &inputs.NetworkInput{Identifiers: args}, force)
-			if removeResult.Status == "error" || removeResult.Status == "failure" {
-				return fmt.Errorf("remove failed: %s", removeResult.Message)
+			err := op.NetworkRemove(cmd.Context(), &inputs.NetworkInput{Identifiers: args}, force)
+			if err != nil {
+				return fmt.Errorf("remove failed: %w", err)
 			}
 
 			for _, name := range args {
@@ -302,16 +290,9 @@ func newNetworkSyncCmd(op *api.Operation) *cobra.Command {
 			if len(args) > 0 {
 				netInput = &inputs.NetworkInput{Identifiers: args}
 			}
-			syncResult := op.NetworkSync(cmd.Context(), netInput)
-			if syncResult.Status == "error" || syncResult.Status == "failure" {
-				return fmt.Errorf("sync failed: %s", syncResult.Message)
-			}
-
-			// results is a dict[net_id, {verified, added, orphaned}]
-			// Python: if results is None → error
-			results, ok := syncResult.Item.(map[string]map[string]int)
-			if !ok || results == nil {
-				return fmt.Errorf("sync returned no results")
+			results, err := op.NetworkSync(cmd.Context(), netInput)
+			if err != nil {
+				return fmt.Errorf("sync failed: %w", err)
 			}
 
 			if jsonOutput {
@@ -373,9 +354,9 @@ func newNetworkDefaultCmd(op *api.Operation) *cobra.Command {
 				return fmt.Errorf("missing required argument")
 			}
 
-			defaultResult := op.NetworkSetDefault(cmd.Context(), &inputs.NetworkInput{Identifiers: []string{name}})
-			if defaultResult.Status == "error" || defaultResult.Status == "failure" {
-				return fmt.Errorf("set default failed: %s", defaultResult.Message)
+			err := op.NetworkSetDefault(cmd.Context(), &inputs.NetworkInput{Identifiers: []string{name}})
+			if err != nil {
+				return fmt.Errorf("set default failed: %w", err)
 			}
 
 			common.Cli.Success(fmt.Sprintf("Default network set to: %s", name))

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -145,17 +146,16 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 				common.Cli.Info("  The build output will appear below once it starts:\n")
 
 				gitRefPtr := &gitRef
-				result := op.BinaryPull(cmd.Context(), &inputs.BinaryPullInput{
+				binaries, err := op.BinaryPull(cmd.Context(), &inputs.BinaryPullInput{
 					Version:          "",
 					Name:             name,
 					GitRef:           gitRefPtr,
 					SetDefault:       setDefault,
 					DownloadOverride: false,
 				}, nil)
-				if result.Status == "error" {
-					return fmt.Errorf("%s", result.Message)
+				if err != nil {
+					return err
 				}
-				binaries, _ := result.Item.([]*model.BinaryItem)
 
 				common.Cli.Info("")
 				for _, b := range binaries {
@@ -172,7 +172,7 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 			}
 
 			// Normal download path
-			result := op.BinaryPull(cmd.Context(), &inputs.BinaryPullInput{
+			binaries, err := op.BinaryPull(cmd.Context(), &inputs.BinaryPullInput{
 				Version:          effectiveVersion,
 				Name:             name,
 				SetDefault:       setDefault,
@@ -180,42 +180,31 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 			}, nil)
 
 			// If binary already exists and --force wasn't set, offer to re-download
-			if result.Status == "error" && result.Code == string(errs.CodeBinaryAlreadyExists) && !force {
-				common.Cli.Warning(result.Message)
+			if err != nil {
+				var de *errs.DomainError
+				if errors.As(err, &de) && de.Code == errs.CodeBinaryAlreadyExists && !force {
+					common.Cli.Warning(de.Message)
 
-				confirmed, pErr := common.Cli.PromptConfirm(cmd.Context(), "Re-download?", false)
-				if pErr != nil {
-					return pErr
-				}
-				if !confirmed {
-					common.Cli.Info("Aborted")
-					return nil
-				}
-
-				result = op.BinaryPull(cmd.Context(), &inputs.BinaryPullInput{
-					Version:          effectiveVersion,
-					Name:             name,
-					SetDefault:       setDefault,
-					DownloadOverride: true,
-				}, nil)
-			}
-
-			if result.Status == "error" {
-				return fmt.Errorf("%s", result.Message)
-			}
-
-			if result.Status == "skipped" {
-				common.Cli.Info(result.Message)
-				if binaries, ok := result.Item.([]*model.BinaryItem); ok {
-					for _, b := range binaries {
-						shortID := common.Cli.FormatID(b.ID)
-						common.Cli.Info(fmt.Sprintf("  %s v%s: %s", b.Name, b.Version, shortID))
+					confirmed, pErr := common.Cli.PromptConfirm(cmd.Context(), "Re-download?", false)
+					if pErr != nil {
+						return pErr
 					}
-				}
-				return nil
-			}
+					if !confirmed {
+						common.Cli.Info("Aborted")
+						return nil
+					}
 
-			binaries, _ := result.Item.([]*model.BinaryItem)
+					binaries, err = op.BinaryPull(cmd.Context(), &inputs.BinaryPullInput{
+						Version:          effectiveVersion,
+						Name:             name,
+						SetDefault:       setDefault,
+						DownloadOverride: true,
+					}, nil)
+				}
+				if err != nil {
+					return err
+				}
+			}
 			for _, b := range binaries {
 				shortID := common.Cli.FormatID(b.ID)
 				common.Cli.Success(fmt.Sprintf("Downloaded: %s v%s: %s", b.Name, b.Version, b.Path))
@@ -251,9 +240,8 @@ func newBinaryRemoveCmd(op *api.Operation) *cobra.Command {
 		ValidArgsFunction: completeBinaryVersions,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if version != "" {
-				result := op.BinaryRemoveByVersion(cmd.Context(), version, force)
-				if result.IsError() {
-					return fmt.Errorf("%s", result.Message)
+				if err := op.BinaryRemoveByVersion(cmd.Context(), version, force); err != nil {
+					return err
 				}
 				common.Cli.Success(fmt.Sprintf("Removed: v%s", version))
 				return nil
@@ -302,16 +290,11 @@ func newBinaryDefaultCmd(op *api.Operation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 
-			result := op.BinarySetDefault(cmd.Context(), &inputs.BinaryInput{Identifiers: []string{identifier}})
-			if result.IsError() {
-				return fmt.Errorf("%s", result.Message)
+			item, err := op.BinarySetDefault(cmd.Context(), &inputs.BinaryInput{Identifiers: []string{identifier}})
+			if err != nil {
+				return err
 			}
-
-			msg := result.Message
-			if msg == "" {
-				msg = fmt.Sprintf("Default binary set to: %s", identifier)
-			}
-			common.Cli.Success(msg)
+			common.Cli.Success(fmt.Sprintf("Default binary set to %s v%s", item.Name, item.Version))
 			return nil
 		},
 	}

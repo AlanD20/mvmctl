@@ -21,15 +21,12 @@ import (
 
 // NetworkCreate creates a new network.
 // Matches Python's NetworkOperation.create() exactly.
-func (op *Operation) NetworkCreate(ctx context.Context, input *inputs.NetworkCreateInput) *errs.OperationResult {
+func (op *Operation) NetworkCreate(ctx context.Context, input *inputs.NetworkCreateInput) (*model.Network, error) {
 	request := inputs.NewNetworkCreateRequest(*input, op.Connection.DB(), op.Repos.Network)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      "network.create_failed",
-			Message:   err.Error(),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code: "network.create_failed", Message: err.Error(), Err: err,
 		}
 	}
 
@@ -56,31 +53,22 @@ func (op *Operation) NetworkCreate(ctx context.Context, input *inputs.NetworkCre
 	}
 
 	if err := op.Repos.Network.Upsert(ctx, networkItem); err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      string(errs.CodeDatabaseError),
-			Message:   "Failed to persist network: " + err.Error(),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code: errs.CodeDatabaseError, Message: "Failed to persist network: " + err.Error(), Err: err,
 		}
 	}
 
 	bridgeAddr, bridgeErr := network.ComputeBridgeAddress(resolved.IPv4Gateway, resolved.Subnet)
 	if bridgeErr != nil {
 		_ = op.Repos.Network.Delete(ctx, networkID)
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      string(errs.CodeNetworkBridgeFailed),
-			Message:   fmt.Sprintf("Failed to compute bridge address: %v", bridgeErr),
-			Exception: bridgeErr,
+		return nil, &errs.DomainError{
+			Code: errs.CodeNetworkBridgeFailed, Message: fmt.Sprintf("Failed to compute bridge address: %v", bridgeErr), Err: bridgeErr,
 		}
 	}
 	if err := op.Services.Network.EnsureBridge(ctx, resolved.Bridge, bridgeAddr); err != nil {
 		_ = op.Repos.Network.Delete(ctx, networkID)
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      string(errs.CodeNetworkBridgeFailed),
-			Message:   fmt.Sprintf("Failed to create network '%s': %v", resolved.Name, err),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code: errs.CodeNetworkBridgeFailed, Message: fmt.Sprintf("Failed to create network '%s': %v", resolved.Name, err), Err: err,
 		}
 	}
 
@@ -93,11 +81,8 @@ func (op *Operation) NetworkCreate(ctx context.Context, input *inputs.NetworkCre
 			networkID,
 		); err != nil {
 			_ = op.Repos.Network.Delete(ctx, networkID)
-			return &errs.OperationResult{
-				Status:    "error",
-				Code:      string(errs.CodeNetworkNATFailed),
-				Message:   fmt.Sprintf("Failed to create network '%s': %v", resolved.Name, err),
-				Exception: err,
+			return nil, &errs.DomainError{
+				Code: errs.CodeNetworkNATFailed, Message: fmt.Sprintf("Failed to create network '%s': %v", resolved.Name, err), Err: err,
 			}
 		}
 	}
@@ -109,10 +94,8 @@ func (op *Operation) NetworkCreate(ctx context.Context, input *inputs.NetworkCre
 	// Re-fetch
 	updated, err := op.Repos.Network.GetByName(ctx, resolved.Name)
 	if err != nil || updated == nil {
-		return &errs.OperationResult{
-			Status:  "error",
-			Code:    string(errs.CodeNetworkNotFound),
-			Message: fmt.Sprintf("Failed to fetch created network '%s'", resolved.Name),
+		return nil, &errs.DomainError{
+			Code: errs.CodeNetworkNotFound, Message: fmt.Sprintf("Failed to fetch created network '%s'", resolved.Name),
 		}
 	}
 
@@ -126,26 +109,18 @@ func (op *Operation) NetworkCreate(ctx context.Context, input *inputs.NetworkCre
 
 	op.AuditLog.LogOperation("network.create", map[string]interface{}{"name": resolved.Name}, "")
 
-	return &errs.OperationResult{
-		Status:  "success",
-		Code:    "network.created",
-		Item:    updated,
-		Message: fmt.Sprintf("Network '%s' created", resolved.Name),
-	}
+	return updated, nil
 }
 
 // NetworkRemove removes one or more networks.
 // Matches Python's NetworkOperation.remove() exactly — uses NetworkRequest for resolution,
 // enriches with VM references, checks "in use".
-func (op *Operation) NetworkRemove(ctx context.Context, input *inputs.NetworkInput, force bool) *errs.OperationResult {
+func (op *Operation) NetworkRemove(ctx context.Context, input *inputs.NetworkInput, force bool) error {
 	request := inputs.NewNetworkRequest(*input, op.Connection.DB(), op.Repos.Network)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      "network.remove_failed",
-			Message:   err.Error(),
-			Exception: err,
+		return &errs.DomainError{
+			Code: "network.remove_failed", Message: err.Error(), Err: err,
 		}
 	}
 
@@ -156,31 +131,22 @@ func (op *Operation) NetworkRemove(ctx context.Context, input *inputs.NetworkInp
 	// Match Python: service.remove(network, force=force) raises NetworkError on failure.
 	// Python catches the first error and returns it immediately — we match by iterating
 	// once and returning the first error encountered.
-	var results []string
 	for _, net := range resolved.Networks {
 		if err := op.Services.Network.Remove(ctx, net, force); err != nil {
 			errorMsg := err.Error()
-			code := "network.remove_failed"
+			code := errs.Code("network.remove_failed")
 			if strings.Contains(strings.ToLower(errorMsg), "in use") {
 				code = "network.in_use"
 			}
-			return &errs.OperationResult{
-				Status:    "error",
-				Code:      code,
-				Message:   errorMsg,
-				Exception: err,
+			return &errs.DomainError{
+				Code: code, Message: errorMsg, Err: err,
 			}
 		}
 
 		op.AuditLog.LogOperation("network.remove", map[string]interface{}{"id": net.ID, "name": net.Name}, "")
-		results = append(results, net.Name)
 	}
 
-	return &errs.OperationResult{
-		Status:  "success",
-		Code:    "network.removed",
-		Message: fmt.Sprintf("Network(s) '%s' removed", strings.Join(results, ", ")),
-	}
+	return nil
 }
 
 // NetworkListAll returns all networks with lease enrichment.
@@ -309,83 +275,61 @@ func (op *Operation) NetworkInspect(
 // NetworkSetDefault sets a network as default.
 // Matches Python's NetworkOperation.set_default() exactly — goes through Controller
 // and uses NetworkInput/NetworkRequest to resolve identifiers.
-func (op *Operation) NetworkSetDefault(ctx context.Context, input *inputs.NetworkInput) *errs.OperationResult {
+func (op *Operation) NetworkSetDefault(ctx context.Context, input *inputs.NetworkInput) error {
 	request := inputs.NewNetworkRequest(*input, op.Connection.DB(), op.Repos.Network)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      "network.default_set_failed",
-			Message:   fmt.Sprintf("Failed to resolve network: %v", err),
-			Exception: err,
+		return &errs.DomainError{
+			Code: "network.default_set_failed", Message: fmt.Sprintf("Failed to resolve network: %v", err), Err: err,
 		}
 	}
 	if len(resolved.Networks) != 1 {
-		return &errs.OperationResult{
-			Status:  "error",
-			Code:    "network.default_set_failed",
-			Message: fmt.Sprintf("Expected exactly one network, got %d", len(resolved.Networks)),
+		return &errs.DomainError{
+			Code: "network.default_set_failed", Message: fmt.Sprintf("Expected exactly one network, got %d", len(resolved.Networks)),
 		}
 	}
 
 	net := resolved.Networks[0]
 	controller, err := network.NewController(ctx, net, op.Repos.Network)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:  "error",
-			Code:    "network.default_set_failed",
-			Message: fmt.Sprintf("Failed to create network controller: %v", err),
+		return &errs.DomainError{
+			Code: "network.default_set_failed", Message: fmt.Sprintf("Failed to create network controller: %v", err),
 		}
 	}
 	if err := controller.SetDefault(ctx); err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      "network.default_set_failed",
-			Message:   fmt.Sprintf("Failed to set network '%s' as default: %v", net.Name, err),
-			Exception: err,
+		return &errs.DomainError{
+			Code: "network.default_set_failed", Message: fmt.Sprintf("Failed to set network '%s' as default: %v", net.Name, err), Err: err,
 		}
 	}
 
 	op.AuditLog.LogOperation("network.set_default", map[string]interface{}{"name": net.Name}, "")
 
-	return &errs.OperationResult{
-		Status:  "success",
-		Code:    "network.default_set",
-		Item:    net,
-		Message: fmt.Sprintf("Network '%s' set as default", net.Name),
-	}
+	return nil
 }
 
 // NetworkSync syncs firewall rules for one or more networks.
 // Matches Python's NetworkOperation.sync() exactly.
-func (op *Operation) NetworkSync(ctx context.Context, input *inputs.NetworkInput) *errs.OperationResult {
+func (op *Operation) NetworkSync(ctx context.Context, input *inputs.NetworkInput) (map[string]map[string]int, error) {
 	var networks []*model.Network
 	var err error
 	if input != nil && len(input.Identifiers) > 0 {
 		req := inputs.NewNetworkRequest(*input, op.Connection.DB(), op.Repos.Network)
 		resolved, resolveErr := req.Resolve(ctx)
 		if resolveErr != nil {
-			return &errs.OperationResult{
-				Status:    "error",
-				Code:      string(errs.CodeNetworkNotFound),
-				Message:   resolveErr.Error(),
-				Exception: resolveErr,
+			return nil, &errs.DomainError{
+				Code: errs.CodeNetworkNotFound, Message: resolveErr.Error(), Err: resolveErr,
 			}
 		}
 		networks = resolved.Networks
 	} else {
 		networks, err = op.Repos.Network.ListAll(ctx)
 		if err != nil {
-			return &errs.OperationResult{
-				Status:  "error",
-				Code:    string(errs.CodeDatabaseError),
-				Message: fmt.Sprintf("Failed to list networks: %v", err),
+			return nil, &errs.DomainError{
+				Code: errs.CodeDatabaseError, Message: fmt.Sprintf("Failed to list networks: %v", err),
 			}
 		}
 	}
 
-	bridgesReconciled := 0
-	orphanedBridgesRemoved := 0
 	results := make(map[string]map[string]int)
 
 	// Wrap the core sync logic in a NetworkError catch (matches Python's try/except NetworkError)
@@ -419,7 +363,6 @@ func (op *Operation) NetworkSync(ctx context.Context, input *inputs.NetworkInput
 			bridgeActive := infranet.BridgeExists(ctx, net.Bridge)
 			if bridgeActive != net.BridgeActive {
 				_ = op.Repos.Network.UpdateBridgeActive(ctx, net.ID, bridgeActive)
-				bridgesReconciled++
 			}
 		}
 
@@ -439,52 +382,33 @@ func (op *Operation) NetworkSync(ctx context.Context, input *inputs.NetworkInput
 		}
 
 		// Step 4: Clean up orphaned bridges (matches Python's service.cleanup_orphaned_bridges())
-		orphanedBridgesRemoved = op.Services.Network.CleanupOrphanedBridges(ctx, networks)
+		op.Services.Network.CleanupOrphanedBridges(ctx, networks)
 		return nil
 	}()
 
 	if syncErr != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      string(errs.CodeNetworkBridgeFailed),
-			Message:   fmt.Sprintf("Network sync failed: %v", syncErr),
-			Exception: syncErr,
+		return nil, &errs.DomainError{
+			Code: errs.CodeNetworkBridgeFailed, Message: fmt.Sprintf("Network sync failed: %v", syncErr), Err: syncErr,
 		}
 	}
 
-	return &errs.OperationResult{
-		Status:  "success",
-		Code:    "network.synced",
-		Item:    results,
-		Message: "Network synced",
-		Metadata: map[string]interface{}{
-			"network_count":            len(results),
-			"bridges_reconciled":       bridgesReconciled,
-			"orphaned_bridges_removed": orphanedBridgesRemoved,
-		},
-	}
+	return results, nil
 }
 
 // NetworkPrune prunes unused networks.
 // Matches Python's NetworkOperation.prune() exactly.
-func (op *Operation) NetworkPrune(ctx context.Context, dryRun bool, includeAll bool) *errs.OperationResult {
+func (op *Operation) NetworkPrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error) {
 	// Python: HostPrivilegeHelper.check_privileges("/usr/sbin/ip", "prune networks")
 	if err := system.CheckPrivileges("/usr/sbin/ip", "prune networks"); err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      string(errs.CodePrivilegeRequired),
-			Message:   err.Error(),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code: errs.CodePrivilegeRequired, Message: err.Error(), Err: err,
 		}
 	}
 
 	networks, err := op.Repos.Network.ListAll(ctx)
 	if err != nil {
-		return &errs.OperationResult{
-			Status:    "error",
-			Code:      string(errs.CodeDatabaseError),
-			Message:   fmt.Sprintf("Failed to list networks: %v", err),
-			Exception: err,
+		return nil, &errs.DomainError{
+			Code: errs.CodeDatabaseError, Message: fmt.Sprintf("Failed to list networks: %v", err), Err: err,
 		}
 	}
 
@@ -519,9 +443,9 @@ func (op *Operation) NetworkPrune(ctx context.Context, dryRun bool, includeAll b
 			if !network.IsPresent {
 				_ = op.Repos.Network.Delete(ctx, network.ID)
 			} else {
-				result := op.NetworkRemove(ctx, &inputs.NetworkInput{Identifiers: []string{network.Name}}, includeAll)
-				if result.IsError() {
-					slog.Warn("Failed to remove network", "name", network.Name, "error", result.Message)
+				err := op.NetworkRemove(ctx, &inputs.NetworkInput{Identifiers: []string{network.Name}}, includeAll)
+				if err != nil {
+					slog.Warn("Failed to remove network", "name", network.Name, "error", err)
 					continue
 				}
 			}
@@ -529,18 +453,13 @@ func (op *Operation) NetworkPrune(ctx context.Context, dryRun bool, includeAll b
 		removed = append(removed, network.Name)
 	}
 
-	return &errs.OperationResult{
-		Status:  "success",
-		Code:    "cache.pruned",
-		Message: fmt.Sprintf("Pruned %d network(s)", len(removed)),
-		Item:    removed,
-	}
+	return removed, nil
 }
 
 // NetworkCreateDefaultNetwork creates the default network if it doesn't exist.
 // Matches Python's NetworkOperation.create_default_network() exactly.
 // Updates Repository component tracking after creation.
-func (op *Operation) NetworkCreateDefaultNetwork(ctx context.Context) *errs.OperationResult {
+func (op *Operation) NetworkCreateDefaultNetwork(ctx context.Context) (*model.Network, error) {
 	defaultNameRaw, _ := op.ConfigGet(ctx, "defaults.network", "name")
 	defaultName, _ := defaultNameRaw.(string)
 
@@ -565,20 +484,19 @@ func (op *Operation) NetworkCreateDefaultNetwork(ctx context.Context) *errs.Oper
 			NATEnabled:  defaultNATEnabled && len(natGateways) > 0,
 			NATGateways: natGateways,
 		}
-		createResult := op.NetworkCreate(ctx, createInput)
+		createdNet, createErr := op.NetworkCreate(ctx, createInput)
 		// NeedsInteraction is not expected during default network creation
 		// (defensive, matching Python: isinstance(create_result, NeedsInteraction))
-		if createResult.Exception != nil && errs.IsNeedsInteraction(createResult.Exception) {
-			return &errs.OperationResult{
-				Status:  "error",
-				Code:    "network.default_created_failed",
-				Message: createResult.Exception.Error(),
+		if createErr != nil && errs.IsNeedsInteraction(createErr) {
+			return nil, &errs.DomainError{
+				Code: "network.default_created_failed", Message: createErr.Error(),
 			}
 		}
-		if createResult.IsError() {
-			return createResult
+		if createErr != nil {
+			return nil, createErr
 		}
-		internalNetwork, _ = op.Repos.Network.GetByName(ctx, defaultName)
+		// Only set internalNetwork from NetworkCreate result directly
+		internalNetwork = createdNet
 		if internalNetwork != nil && op.Repos.Host != nil {
 			_ = op.Repos.Host.UpdateComponent(ctx, "default_network_created", true)
 		}
@@ -592,20 +510,16 @@ func (op *Operation) NetworkCreateDefaultNetwork(ctx context.Context) *errs.Oper
 	}
 
 	if defaultNetwork == nil {
-		return &errs.OperationResult{
-			Status:  "error",
-			Code:    "network.default_created_failed",
-			Message: "Failed to create or locate default network",
+		return nil, &errs.DomainError{
+			Code: "network.default_created_failed", Message: "Failed to create or locate default network",
 		}
 	}
 
 	// Materialize bridge and NAT
 	bridgeAddr, calcErr := network.ComputeBridgeAddress(defaultNetwork.IPv4Gateway, defaultNetwork.Subnet)
 	if calcErr != nil {
-		return &errs.OperationResult{
-			Status:  "error",
-			Code:    "network.default_created_failed",
-			Message: fmt.Sprintf("Failed to compute bridge address: %v", calcErr),
+		return nil, &errs.DomainError{
+			Code: "network.default_created_failed", Message: fmt.Sprintf("Failed to compute bridge address: %v", calcErr),
 		}
 	}
 	_ = op.Services.Network.EnsureBridge(ctx, defaultNetwork.Bridge, bridgeAddr)
@@ -622,10 +536,5 @@ func (op *Operation) NetworkCreateDefaultNetwork(ctx context.Context) *errs.Oper
 	bridgeActive := infranet.BridgeExists(ctx, defaultNetwork.Bridge)
 	_ = op.Repos.Network.UpdateBridgeActive(ctx, defaultNetwork.ID, bridgeActive)
 
-	return &errs.OperationResult{
-		Status:  "success",
-		Code:    "network.default_created",
-		Item:    defaultNetwork,
-		Message: fmt.Sprintf("Default network '%s' ready", defaultNetwork.Name),
-	}
+	return defaultNetwork, nil
 }

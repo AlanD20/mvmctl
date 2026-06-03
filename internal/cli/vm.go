@@ -496,36 +496,24 @@ func runVMCreate(
 		EnableMetrics:     enableMetricsPtr,
 	}
 
-	createResult := op.VMCreate(cmd.Context(), input, func(event errs.ProgressEvent) {
+	vms, err := op.VMCreate(cmd.Context(), input, func(event errs.ProgressEvent) {
 		if event.Message != "" {
 			spinner.UpdateText(event.Message)
 		}
 	})
-	// Check for NeedsInteraction (Python: isinstance(result, NeedsInteraction))
-	if createResult.Exception != nil && errs.IsNeedsInteraction(createResult.Exception) {
-		return fmt.Errorf("create VMs: %s", createResult.Message)
-	}
-	if createResult.IsError() {
-		return fmt.Errorf("create VMs: %s", createResult.Message)
+	if err != nil {
+		return fmt.Errorf("create VMs: %w", err)
 	}
 
-	// Check for nil item (Python: if result.item is None: error "No VMs returned")
-	if createResult.Item == nil {
+	if len(vms) == 0 {
 		return fmt.Errorf("no VMs returned")
 	}
 
-	vms, ok := createResult.Item.([]*model.VM)
-	if !ok || len(vms) == 0 {
-		return fmt.Errorf("no VMs returned")
+	names := make([]string, len(vms))
+	for i, v := range vms {
+		names[i] = v.Name
 	}
-
-	if len(vms) > 0 {
-		names := make([]string, len(vms))
-		for i, v := range vms {
-			names[i] = v.Name
-		}
-		common.Cli.Success(fmt.Sprintf("Created: %s", strings.Join(names, ", ")))
-	}
+	common.Cli.Success(fmt.Sprintf("Created: %s", strings.Join(names, ", ")))
 	// Match Python's `if nested_virt:` — truthy check on the tri-state value.
 	// Python has three states: not-set (None), True, False. Prints only when True.
 	if nestedVirtPtr != nil && *nestedVirtPtr {
@@ -756,16 +744,11 @@ func newVMSnapshotCmd(op *api.Operation) *cobra.Command {
 			memFile := args[1]
 			stateFile := args[2]
 
-			snapResult := op.VMSnapshot(cmd.Context(), &inputs.VMInput{Identifiers: []string{id}}, memFile, stateFile)
-			if snapResult.IsError() {
-				return fmt.Errorf("snapshot failed: %s", snapResult.Message)
+			if err := op.VMSnapshot(cmd.Context(), &inputs.VMInput{Identifiers: []string{id}}, memFile, stateFile); err != nil {
+				return fmt.Errorf("snapshot failed: %w", err)
 			}
 
-			msg := snapResult.Message
-			if msg == "" {
-				msg = fmt.Sprintf("Snapshot saved: %s", id)
-			}
-			common.Cli.Success(msg)
+			common.Cli.Success(fmt.Sprintf("Snapshot saved: %s", id))
 			return nil
 		},
 	}
@@ -797,7 +780,9 @@ Flags:
 			memFile := args[1]
 			stateFile := args[2]
 
-			op.VMLoad(cmd.Context(), &inputs.VMInput{Identifiers: []string{id}}, memFile, stateFile, resume)
+			if err := op.VMLoad(cmd.Context(), &inputs.VMInput{Identifiers: []string{id}}, memFile, stateFile, resume); err != nil {
+				return err
+			}
 
 			// Match Python exactly: success message with no extra detail, no post-check.
 			common.Cli.Success(fmt.Sprintf("Snapshot loaded: %s", id))
@@ -900,20 +885,17 @@ func newVMImportCmd(op *api.Operation) *cobra.Command {
 			if name != "" {
 				nameOverride = &name
 			}
-			importResult := op.VMImport(
+			if err := op.VMImport(
 				cmd.Context(),
 				&inputs.VMImportInput{ConfigPath: args[0], NameOverride: nameOverride},
 				nil,
-			)
-			// Check for NeedsInteraction (Python: isinstance(result, NeedsInteraction))
-			if importResult.Exception != nil && errs.IsNeedsInteraction(importResult.Exception) {
-				return fmt.Errorf("import requires privileges")
+			); err != nil {
+				if errs.IsNeedsInteraction(err) {
+					return fmt.Errorf("import requires privileges")
+				}
+				return fmt.Errorf("import failed: %w", err)
 			}
-			if importResult.Status == "success" {
-				common.Cli.Success(importResult.Message)
-			} else if importResult.IsError() {
-				return fmt.Errorf("import failed: %s", importResult.Message)
-			}
+			common.Cli.Success(fmt.Sprintf("VM imported from %s", args[0]))
 			return nil
 		},
 	}
@@ -939,12 +921,11 @@ Arguments:
 			id := args[0]
 			volumeName := args[1]
 
-			attachResult := op.VMAttachVolume(cmd.Context(), &inputs.VMInput{Identifiers: []string{id}}, volumeName)
-			if attachResult.IsError() {
-				return fmt.Errorf("attach volume %q: %s", volumeName, attachResult.Message)
+			if err := op.VMAttachVolume(cmd.Context(), &inputs.VMInput{Identifiers: []string{id}}, volumeName); err != nil {
+				return fmt.Errorf("attach volume %q: %w", volumeName, err)
 			}
 
-			common.Cli.Success(attachResult.Message)
+			common.Cli.Success(fmt.Sprintf("Volume '%s' attached", volumeName))
 			return nil
 		},
 	}
@@ -967,12 +948,11 @@ Arguments:
 			id := args[0]
 			volumeName := args[1]
 
-			detachResult := op.VMDetachVolume(cmd.Context(), &inputs.VMInput{Identifiers: []string{id}}, volumeName)
-			if detachResult.IsError() {
-				return fmt.Errorf("detach volume %q: %s", volumeName, detachResult.Message)
+			if err := op.VMDetachVolume(cmd.Context(), &inputs.VMInput{Identifiers: []string{id}}, volumeName); err != nil {
+				return fmt.Errorf("detach volume %q: %w", volumeName, err)
 			}
 
-			common.Cli.Success(detachResult.Message)
+			common.Cli.Success(fmt.Sprintf("Volume '%s' detached", volumeName))
 			return nil
 		},
 	}

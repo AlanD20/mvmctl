@@ -66,53 +66,32 @@ func showConsoleState(op *api.Operation, ctx context.Context, identifier string)
 		return err
 	}
 
-	running, _ := state["running"].(bool)
 	status := "stopped"
-	if running {
+	if state.Running {
 		status = "running"
 	}
 	common.Cli.Info(fmt.Sprintf("Console for '%s': %s", identifier, status))
 
-	// Python: if state_dict["pid"]: — truthiness of int|None
-	if pidPtr, ok := state["pid"].(*int); ok && pidPtr != nil && *pidPtr != 0 {
-		common.Cli.Info(fmt.Sprintf("  PID: %d", *pidPtr))
-	}
-	// Python: if state_dict["socket_path"]: — truthiness of str
-	if socketPath, ok := state["socket_path"].(string); ok && socketPath != "" {
-		common.Cli.Info(fmt.Sprintf("  Socket: %s", socketPath))
+	if state.PID != nil && *state.PID != 0 {
+		common.Cli.Info(fmt.Sprintf("  PID: %d", *state.PID))
 	}
 
+	if state.SocketPath != "" {
+		common.Cli.Info(fmt.Sprintf("  Socket: %s", state.SocketPath))
+	}
+	common.Cli.Info(fmt.Sprintf("Console for '%s': %s", identifier, status))
 	return nil
 }
 
 func killConsoleRelay(op *api.Operation, ctx context.Context, identifier string) error {
-	result, err := op.ConsoleKill(ctx, identifier)
+	err := op.ConsoleKill(ctx, identifier)
 	if err != nil {
-		// Python: resolution failure propagates as exception to @handle_errors
 		common.Cli.Error(err.Error())
 		return err
 	}
 
-	if result.Status == "success" {
-		common.Cli.Success(fmt.Sprintf("Stopped: %s", identifier))
-		return nil
-	}
-
-	// Python: mvm_cli.error(f"Console relay not running: {identifier}"); raise typer.Exit(1)
-	// Python: raise typer.Exit(1) is caught by Typer which sets exit code 1
-	// and allows deferred cleanup to run. Go's Cobra equivalent: return an error
-	// (the root command has SilenceErrors=true, so it won't be printed again).
-	if result.Status == "skipped" {
-		common.Cli.Error(fmt.Sprintf("Console relay not running: %s", identifier))
-		return fmt.Errorf("console relay not running: %s", identifier)
-	}
-
-	// Python: mvm_cli.error(result.message or f"Stop failed: {identifier}")
-	msg := result.Message
-	if msg == "" {
-		msg = fmt.Sprintf("Stop failed: %s", identifier)
-	}
-	return fmt.Errorf("%s", msg)
+	common.Cli.Success(fmt.Sprintf("Stopped: %s", identifier))
+	return nil
 }
 
 func attachToConsole(op *api.Operation, cmd *cobra.Command, identifier string) error {
