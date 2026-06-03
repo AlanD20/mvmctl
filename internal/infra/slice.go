@@ -1,5 +1,7 @@
 package infra
 
+import "sort"
+
 // Dedup removes duplicate elements from a slice while preserving order.
 // Uses T's comparable constraint for O(n) dedup with a map.
 func Dedup[T comparable](items []T) []T {
@@ -12,4 +14,14 @@ func Dedup[T comparable](items []T) []T {
 		}
 	}
 	return result
+}
+
+// SortedKeys returns the keys of m sorted alphabetically.
+func SortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

@@ -18,74 +18,89 @@ import (
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/spf13/cobra"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api"
 )
 
-// ─── Spinner ───────────────────────────────────────────────────────────────────
+// ─── Braille spinner (matching Python's Rich console.status) ──────────────────
 
-// Spinner provides a simple terminal spinner that prints sequential dots/characters
-// on stderr, matching Python's Rich console.status("", spinner="dots").
-// Call Start/Stop to control the spinner lifecycle.
-type Spinner struct {
+var spinnerChars = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// Progress is a simple Braille-dots spinner with Start/Stop/UpdateText API.
+// Renders on stderr as a single animated character followed by the message.
+type Progress struct {
 	done    chan struct{}
 	text    string
-	stopped bool // prevents double-close panic on second Stop() call
+	stopped bool
 	mu      sync.Mutex
 }
 
-// NewSpinner creates a new spinner with an initial text message.
-func NewSpinner(text string) *Spinner {
-	return &Spinner{
-		done: make(chan struct{}),
-		text: text,
-	}
+// NewProgress creates a Braille-dots spinner that renders on stderr.
+func NewProgress() *Progress {
+	return &Progress{done: make(chan struct{}), text: ""}
 }
 
-// Start begins the spinner animation in a separate goroutine.
-// The spinner writes dots to stderr and will continue until Stop() is called.
-func (s *Spinner) Start() {
+// Start begins the spinner animation. Pass an optional initial message.
+// When stderr is not a TTY, just prints the message once (no animation).
+func (p *Progress) Start(msg ...string) {
+	if len(msg) > 0 {
+		p.text = msg[0]
+	}
+	if !isStderrTTY() {
+		fmt.Fprintf(os.Stderr, "%s\n", p.text)
+		return
+	}
 	go func() {
-		chars := []string{".", "..", "..."}
 		i := 0
 		for {
 			select {
-			case <-s.done:
-				// Clear the spinner line
-				fmt.Fprintf(os.Stderr, "\r%s\r", s.text)
+			case <-p.done:
 				return
 			default:
-				msg := s.text
-				if msg != "" {
-					fmt.Fprintf(os.Stderr, "\r  %s%s", msg, chars[i%len(chars)])
+				p.mu.Lock()
+				t := p.text
+				p.mu.Unlock()
+				if t != "" {
+					fmt.Fprintf(os.Stderr, "\r%s %s", spinnerChars[i%len(spinnerChars)], t)
 				} else {
-					fmt.Fprintf(os.Stderr, "\r%s", chars[i%len(chars)])
+					fmt.Fprintf(os.Stderr, "\r%s", spinnerChars[i%len(spinnerChars)])
 				}
 				i++
-				time.Sleep(200 * time.Millisecond)
+				time.Sleep(80 * time.Millisecond)
 			}
 		}
 	}()
 }
 
-// Stop stops the spinner and clears the spinner line.
-// Safe to call multiple times (subsequent calls are no-ops).
-func (s *Spinner) Stop() {
-	s.mu.Lock()
-	if s.stopped {
-		s.mu.Unlock()
+// Stop stops the spinner and clears its line from stderr.
+func (p *Progress) Stop() {
+	p.mu.Lock()
+	if p.stopped {
+		p.mu.Unlock()
 		return
 	}
-	s.stopped = true
-	s.mu.Unlock()
-	close(s.done)
+	p.stopped = true
+	p.mu.Unlock()
+	close(p.done)
+	if !isStderrTTY() {
+		return
+	}
+	// Wait for goroutine to exit, then clear the line
+	time.Sleep(time.Millisecond * 20)
+	fmt.Fprintf(os.Stderr, "\r%s\r", strings.Repeat(" ", 80))
 }
 
-// UpdateText updates the spinner's current text message.
-func (s *Spinner) UpdateText(text string) {
-	s.text = text
+// UpdateText changes the message displayed next to the spinner.
+func (p *Progress) UpdateText(text string) {
+	p.mu.Lock()
+	p.text = text
+	p.mu.Unlock()
+	if !isStderrTTY() {
+		fmt.Fprintf(os.Stderr, "%s\n", text)
+	}
 }
 
 // ─── Prettification patterns (matching Python _PRETTIFY_PATTERNS) ─────────────
@@ -315,7 +330,7 @@ func (c *MVMCli) PrintDictTree(data any, title string) {
 func (c *MVMCli) buildTree(data any, indent string, isRoot bool) {
 	switch v := data.(type) {
 	case map[string]any:
-		keys := sortedKeys(v)
+		keys := infra.SortedKeys(v)
 		for i, key := range keys {
 			val := v[key]
 			pretty := prettifyKey(key)
@@ -942,20 +957,4 @@ func (c *MVMCli) PromptMultiSelect(
 		return nil, fmt.Errorf("no valid selections")
 	}
 	return selected, nil
-}
-
-func sortedKeys(m map[string]any) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	// Simple stable sort
-	for i := 0; i < len(keys); i++ {
-		for j := i + 1; j < len(keys); j++ {
-			if keys[j] < keys[i] {
-				keys[i], keys[j] = keys[j], keys[i]
-			}
-		}
-	}
-	return keys
 }
