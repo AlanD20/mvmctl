@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/archive"
 	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/download"
 	"mvmctl/internal/infra/errs"
@@ -172,7 +173,10 @@ func (s *Service) DownloadFirecracker(
 	}
 
 	// ── Step 3: Extract firecracker and jailer from .tgz ──
-	extractErr := extractFirecrackerArchive(tgzPath, normalizedVersion, arch, fcDest, jlDest)
+	extractErr := archive.ExtractRenamed(ctx, tgzPath, []archive.RenameEntry{
+		{ArchiveName: fmt.Sprintf("firecracker-v%s-%s", normalizedVersion, arch), OutputPath: fcDest, Mode: 0755},
+		{ArchiveName: fmt.Sprintf("jailer-v%s-%s", normalizedVersion, arch), OutputPath: jlDest, Mode: 0755},
+	})
 	os.Remove(tgzPath)
 	if extractErr != nil {
 		os.Remove(fcDest)

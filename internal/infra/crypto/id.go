@@ -22,6 +22,16 @@ func SHA256FileHash(path string) (string, error) {
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
+// ContentHash computes a SHA-256 hex digest of the concatenated string parts.
+// Deterministic — same parts always produce the same hash.
+func ContentHash(parts ...string) string {
+	h := sha256.New()
+	for _, p := range parts {
+		h.Write([]byte(p))
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
 // ImageID generates a 64-char SHA256 image ID from type, source, and timestamp.
 func ImageID(type_, source, timestamp string) string {
 	h := sha256.New()
