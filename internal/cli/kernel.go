@@ -127,7 +127,6 @@ func newKernelListCmd(op *api.Operation) *cobra.Command {
 func newKernelPullCmd(op *api.Operation) *cobra.Command {
 	var kernelType string
 	var version string
-	var arch string
 	var setDefault bool
 	var jobs int
 	var keepBuildDir bool
@@ -144,8 +143,7 @@ func newKernelPullCmd(op *api.Operation) *cobra.Command {
 Examples:
   mvm kernel pull official:6.19.9
   mvm kernel pull official:6.19.9 --default
-  mvm kernel pull --type official --version 6.19.9
-  mvm kernel pull firecracker --arch arm64`,
+  mvm kernel pull --type official --version 6.19.9`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			effectiveType := kernelType
@@ -193,7 +191,6 @@ Examples:
 			kernelInput := &inputs.KernelPullInput{
 				KernelType:   effectiveType,
 				Version:      effectiveVersion,
-				Arch:         arch,
 				Jobs:         jobsArg,
 				KeepBuildDir: keepBuildDir,
 				CleanBuild:   cleanBuild,
@@ -224,7 +221,6 @@ Examples:
 
 	cmd.Flags().StringVar(&kernelType, "type", "", "Kernel type: firecracker or official")
 	cmd.Flags().StringVar(&version, "version", "", "Kernel version")
-	cmd.Flags().StringVar(&arch, "arch", "", "Architecture (x86_64, arm64)")
 	cmd.Flags().BoolVarP(&setDefault, "default", "d", false, "Set as default after fetch")
 	cmd.Flags().IntVar(&jobs, "jobs", 0, "Parallel build jobs (official only)")
 	cmd.Flags().BoolVar(&keepBuildDir, "keep-build-dir", false, "Keep build directory (official only)")
@@ -335,7 +331,6 @@ func newKernelDefaultCmd(op *api.Operation) *cobra.Command {
 
 func newKernelImportCmd(op *api.Operation) *cobra.Command {
 	var version string
-	var arch string
 	var setDefault bool
 
 	cmd := &cobra.Command{
@@ -345,7 +340,7 @@ func newKernelImportCmd(op *api.Operation) *cobra.Command {
 
 Examples:
   mvm kernel import my-kernel ./vmlinux-6.1-x86_64
-  mvm kernel import my-kernel ./vmlinux-custom --version 6.1 --arch x86_64 --default`,
+  mvm kernel import my-kernel ./vmlinux-custom --version 6.1 --default`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
@@ -362,16 +357,10 @@ Examples:
 				v := version
 				versionPtr = &v
 			}
-			var archPtr *string
-			if arch != "" {
-				a := arch
-				archPtr = &a
-			}
 			importInput := &inputs.KernelImportInput{
 				Name:       name,
 				Path:       path,
 				Version:    versionPtr,
-				Arch:       archPtr,
 				SetDefault: setDefault,
 			}
 			kernelItem, err := op.KernelImport(cmd.Context(), importInput)
@@ -388,7 +377,6 @@ Examples:
 	}
 
 	cmd.Flags().StringVar(&version, "version", "", "Override auto-detected kernel version")
-	cmd.Flags().StringVar(&arch, "arch", "", "Kernel architecture (default: auto-detected)")
 	cmd.Flags().BoolVarP(&setDefault, "default", "d", false, "Set as default after import")
 
 	return cmd

@@ -12,6 +12,7 @@ import (
 	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/system"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -22,7 +23,6 @@ import (
 //	class KernelPullInput:
 //	    kernel_type: str
 //	    version: str | None = None
-//	    arch: str | None = None
 //	    output_dir: Path | None = None
 //	    output_name: str | None = None
 //	    output_path: Path | None = None
@@ -35,7 +35,6 @@ import (
 type KernelPullInput struct {
 	KernelType   string `json:"kernel_type"`
 	Version      string `json:"version,omitempty"`
-	Arch         string `json:"arch,omitempty"`
 	OutputDir    string `json:"output_dir,omitempty"`
 	OutputName   string `json:"output_name,omitempty"`
 	OutputPath   string `json:"output_path,omitempty"`
@@ -120,20 +119,8 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 		version = &v
 	}
 
-	// Resolve arch — Python:
-	//   if self._inputs.arch is not None → arch = self._inputs.arch
-	//   else → arch = SettingsService.resolve(self._db, "defaults.kernel", "arch")
-	var arch string
-	if r.input.Arch != "" {
-		arch = r.input.Arch
-	} else {
-		v, err := config.Resolve(ctx, r.db, "defaults.kernel", "arch")
-		if err == nil && v != nil {
-			arch = infra.ToString(v)
-		}
-	}
-
-	// Python falls through to whatever arch is (no fallback for pull that's different from import)
+	// Arch always matches the host machine — not user-configurable
+	arch := system.RuntimeArch()
 
 	// Resolve jobs — Python:
 	//   if self._inputs.jobs is not None → jobs = self._inputs.jobs

@@ -6,12 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 
-	"mvmctl/internal/core/config"
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/system"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -23,13 +21,11 @@ import (
 //	    name: str
 //	    path: Path
 //	    version: str | None = None
-//	    arch: str | None = None
 //	    set_default: bool = False
 type KernelImportInput struct {
 	Name       string  `json:"name"`
 	Path       string  `json:"path"`
 	Version    *string `json:"version,omitempty"`
-	Arch       *string `json:"arch,omitempty"`
 	SetDefault bool    `json:"set_default"`
 }
 
@@ -94,26 +90,13 @@ func (r *KernelImportRequest) Resolve(ctx context.Context) (*ResolvedKernelImpor
 	// Python: parsed = KernelService.parse_filename(source_path.name)
 	parsedVersion, parsedArch := parseKernelFilename(filepath.Base(sourcePath))
 
-	// Resolve arch — Python logic:
-	//   if self._inputs.arch is not None → arch = self._inputs.arch
-	//   elif parsed.arch != "-" → arch = parsed.arch
-	//   else → arch = str(SettingsService.resolve(...))
-	//          if not arch → arch = platform.machine()
+	// Resolve arch — arch always matches the host machine, but can be
+	// extracted from the filename if present (e.g. "vmlinux-6.1-x86_64").
 	var arch string
-	if r.input.Arch != nil && *r.input.Arch != "" {
-		arch = *r.input.Arch
-	} else if parsedArch != "" && parsedArch != "-" {
+	if parsedArch != "" && parsedArch != "-" {
 		arch = parsedArch
 	} else {
-		v, err := config.Resolve(ctx, r.db, "defaults.kernel", "arch")
-		if err == nil && v != nil {
-			arch = infra.ToString(v)
-		}
-		if arch == "" {
-			// Python: platform.machine() returns machine hardware name
-			// e.g. "x86_64", "aarch64"
-			arch = platformMachine()
-		}
+		arch = system.RuntimeArch()
 	}
 
 	// Resolve version — Python logic:
@@ -199,19 +182,6 @@ func (r *KernelImportRequest) ensureValidate() error {
 	}
 
 	return nil
-}
-
-// platformMachine returns the machine hardware name, matching Python's platform.machine().
-// On Linux: "x86_64" for amd64, "aarch64" for arm64, etc.
-func platformMachine() string {
-	switch runtime.GOARCH {
-	case "amd64":
-		return "x86_64"
-	case "arm64":
-		return "aarch64"
-	default:
-		return runtime.GOARCH
-	}
 }
 
 // parseKernelFilename extracts version and arch from a kernel filename.

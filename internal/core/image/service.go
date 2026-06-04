@@ -533,11 +533,6 @@ func GetSpecsFor(
 	ciVersion string,
 	imageTypesConfig []download.ResolverConfig,
 ) ([]*model.ImageSpec, error) {
-	// Default arch to current machine if not specified
-	if arch == "" {
-		arch = system.RuntimeArch()
-	}
-
 	typeConfigMap := make(map[string]download.ResolverConfig, len(imageTypesConfig))
 	for _, cfg := range imageTypesConfig {
 		typeConfigMap[cfg.Type] = cfg

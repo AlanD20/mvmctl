@@ -158,7 +158,6 @@ func newImagePullCmd(op *api.Operation) *cobra.Command {
 	var (
 		imageType        string
 		version          string
-		arch             string
 		force            bool
 		noCache          bool
 		setDefault       bool
@@ -207,7 +206,6 @@ The selector can be a type (e.g. "ubuntu") or type:version (e.g. "ubuntu:24.04")
 			input := &inputs.ImagePullInput{
 				Type:              effectiveType,
 				Version:           effectiveVersion,
-				Arch:              arch,
 				Force:             force,
 				NoCache:           noCache,
 				SetDefault:        setDefault,
@@ -244,7 +242,6 @@ The selector can be a type (e.g. "ubuntu") or type:version (e.g. "ubuntu:24.04")
 	cmd.Flags().StringVar(&imageType, "type", "", "Image type from images.yaml (e.g. ubuntu, debian, firecracker)")
 	cmd.Flags().
 		StringVar(&version, "version", "", "Image spec version from images.yaml (required if multiple images share the same type)")
-	cmd.Flags().StringVar(&arch, "arch", "", "Image architecture (e.g. x86_64, arm64)")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Re-download even if exists")
 	cmd.Flags().BoolVar(&noCache, "no-cache", false, "Skip cached version listing and fetch live from upstream")
 	cmd.Flags().BoolVarP(&setDefault, "default", "d", false, "Set as default image after download")
@@ -370,7 +367,6 @@ func newImageDefaultCmd(op *api.Operation) *cobra.Command {
 
 func newImageImportCmd(op *api.Operation) *cobra.Command {
 	var (
-		arch             string
 		rootPartition    int
 		format           string
 		force            bool
@@ -436,7 +432,6 @@ Examples:
 
 			input := &inputs.ImageImportInput{
 				Name:              name,
-				Arch:              arch,
 				Format:            format,
 				SourcePath:        sourcePath,
 				Partition:         rootPartition,
@@ -472,7 +467,6 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVar(&arch, "arch", "", "Image arch: x86_64, arm64")
 	cmd.Flags().IntVar(&rootPartition, "root-partition", 0, "Root Partition: 1, 2, 3")
 	cmd.Flags().StringVar(&format, "format", "", "Image format: qcow2, raw, tar-rootfs, or auto")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Overwrite existing")

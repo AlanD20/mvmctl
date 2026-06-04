@@ -599,13 +599,8 @@ func (op *Operation) ImageListAll(
 			cacheTTLParam = 0
 		}
 
-		// Resolve arch from settings (matches Python: SettingsService.resolve(db, "defaults.image", "arch"))
+		// Arch always matches the host machine — not user-configurable
 		arch := system.RuntimeArch()
-		if archRaw, err := op.Services.Config.Get(ctx, "defaults.image", "arch"); err == nil {
-			if archStr, ok := archRaw.(string); ok && archStr != "" {
-				arch = archStr
-			}
-		}
 
 		// Load image types config from embedded assets
 		rawYAML, err := assets.ReadFile("images.yaml")

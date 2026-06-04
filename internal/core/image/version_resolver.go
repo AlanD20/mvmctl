@@ -8,7 +8,6 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/download"
 	"mvmctl/internal/infra/model"
-	"mvmctl/internal/infra/system"
 
 	"gopkg.in/yaml.v3"
 )
@@ -78,10 +77,6 @@ func ConstructSpecFromTypeConfig(
 
 	if resolver == "" {
 		versionStr = "latest"
-	}
-
-	if arch == "" {
-		arch = system.RuntimeArch()
 	}
 
 	archMapping := opts.ArchMapping

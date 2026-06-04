@@ -17,6 +17,7 @@ import (
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/operation"
+	"mvmctl/internal/infra/system"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"
 )
@@ -100,7 +101,11 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 				Code: "kernel.pull_failed", Message: "CI version is required to resolve latest kernel version",
 			}
 		}
-		resolvedVersion, err := op.Services.Kernel.ResolveLatestVersion(ctx, kernelType, ciVersion)
+		// Arch is resolved here for ResolveLatestVersion; the request.Resolve()
+		// below also resolves it independently — both use system.RuntimeArch(),
+		// so the value is identical (compile-time constant).
+		arch := system.RuntimeArch()
+		resolvedVersion, err := op.Services.Kernel.ResolveLatestVersion(ctx, kernelType, arch, ciVersion)
 		if err != nil {
 			return nil, &errs.DomainError{
 				Code:    "kernel.pull_failed",
@@ -506,7 +511,7 @@ func (op *Operation) kernelListRemote(ctx context.Context, noCache bool) ([]mode
 	versionMap := op.Services.Kernel.ListRemoteVersions(
 		ctx,
 		allSpecs,
-		"x86_64",
+		system.RuntimeArch(),
 		resolvedCIVersion,
 		cacheTTLVal,
 		remoteListLimit,

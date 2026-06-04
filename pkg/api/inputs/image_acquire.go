@@ -10,6 +10,7 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/disk"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/system"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -43,7 +44,6 @@ type ImagePullInput struct {
 	Name              *string  `json:"name,omitempty"`
 	Force             bool     `json:"force"`
 	SetDefault        bool     `json:"set_default"`
-	Arch              string   `json:"arch,omitempty"`
 	Version           string   `json:"version,omitempty"`
 	NoCache           bool     `json:"no_cache"`
 	Partition         int      `json:"partition,omitempty"`
@@ -59,7 +59,6 @@ type ImageImportInput struct {
 	SourcePath        string   `json:"source_path"`
 	Force             bool     `json:"force"`
 	Format            string   `json:"format,omitempty"`
-	Arch              string   `json:"arch,omitempty"`
 	SetDefault        bool     `json:"set_default"`
 	Partition         int      `json:"partition,omitempty"`
 	SkipOptimization  bool     `json:"skip_optimization"`
@@ -119,14 +118,8 @@ func (r *ImageAcquireRequest) ResolvePull(ctx context.Context) (*ResolvedImageAc
 		}
 	}
 
-	// Default arch — Python: SettingsService.resolve(..., "arch"), no fallback
-	arch := in.Arch
-	if arch == "" {
-		archVal, err := config.Resolve(ctx, r.db, "defaults.image", "arch")
-		if err == nil && archVal != nil {
-			arch = fmt.Sprint(archVal)
-		}
-	}
+	// Arch always matches the host machine — not user-configurable
+	arch := system.RuntimeArch()
 
 	// Resolve disabled detectors — Python: self._resolve_disabled_detectors(self._inputs.disabled_detectors)
 	disabled, err := r.resolveDisabledDetectors(in.DisabledDetectors)
@@ -173,14 +166,8 @@ func (r *ImageAcquireRequest) ResolveImport(ctx context.Context) (*ResolvedImage
 		}
 	}
 
-	// Default arch — Python: SettingsService.resolve(..., "arch"), no fallback
-	arch := in.Arch
-	if arch == "" {
-		archVal, err := config.Resolve(ctx, r.db, "defaults.image", "arch")
-		if err == nil && archVal != nil {
-			arch = infra.ToString(archVal)
-		}
-	}
+	// Arch always matches the host machine — not user-configurable
+	arch := system.RuntimeArch()
 
 	// Resolve disabled detectors
 	disabled, err := r.resolveDisabledDetectors(in.DisabledDetectors)

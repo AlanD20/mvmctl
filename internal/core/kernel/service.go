@@ -1148,7 +1148,7 @@ func (s *Service) ImportKernel(
 
 // ── Version Resolution ──────────────────────────────────────────────────
 
-func (s *Service) ResolveLatestVersion(ctx context.Context, kernelType string, ciVersion string) (string, error) {
+func (s *Service) ResolveLatestVersion(ctx context.Context, kernelType string, arch string, ciVersion string) (string, error) {
 	specs, err := s.LoadSpecs()
 	if err != nil {
 		return "", err
@@ -1165,7 +1165,7 @@ func (s *Service) ResolveLatestVersion(ctx context.Context, kernelType string, c
 	}
 
 	configs := kernelSpecsToResolverConfigs(matching)
-	versionMap := s.resolver.Resolve(ctx, configs, "x86_64", ciVersion, 0, 1)
+	versionMap := s.resolver.Resolve(ctx, configs, arch, ciVersion, 0, 1)
 
 	var allVersions []string
 	for _, versions := range versionMap {
