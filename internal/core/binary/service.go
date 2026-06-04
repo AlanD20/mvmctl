@@ -485,3 +485,41 @@ func (s *Service) copyBinary(name, version, src, dest, label string) (*model.Bin
 	system.MakeExecutable(dest)
 	return s.createBinaryItem(name, version, dest, false)
 }
+
+// ResolveVersion resolves a version spec (latest, partial, or exact) to a concrete version.
+// name is the binary name (e.g. "firecracker").
+func (s *Service) ResolveVersion(ctx context.Context, name string, versionSpec string) (string, error) {
+	spec, err := version.ParseSpec(versionSpec)
+	if err != nil {
+		return "", binaryError(errs.CodeBinaryVersionGate,
+			fmt.Sprintf("Invalid version spec %q: %s", versionSpec, err))
+	}
+
+	// Exact version — no resolution needed
+	if !spec.IsPartial() {
+		return strings.TrimPrefix(versionSpec, "v"), nil
+	}
+
+	// Partial or latest — fetch available versions and resolve
+	remoteVersions, err := s.ListRemote(ctx, 20)
+	if err != nil {
+		return "", binaryError(errs.CodeBinaryVersionGate,
+			fmt.Sprintf("Failed to list remote versions: %s", err))
+	}
+
+	allVersions := make([]string, 0, len(remoteVersions))
+	for _, v := range remoteVersions {
+		allVersions = append(allVersions, v.Version)
+	}
+	if len(allVersions) == 0 {
+		return "", binaryError(errs.CodeBinaryVersionGate,
+			"No remote Firecracker versions found")
+	}
+
+	resolved, err := version.Resolve(allVersions, spec)
+	if err != nil {
+		return "", binaryError(errs.CodeBinaryVersionGate,
+			fmt.Sprintf("Cannot resolve version %q for %s: %s", versionSpec, name, err))
+	}
+	return resolved, nil
+}

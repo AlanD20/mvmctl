@@ -17,6 +17,7 @@ import (
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
+	"mvmctl/internal/infra/version"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"
 )
@@ -81,33 +82,26 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 	onProgress event.OnProgressCallback) (*model.KernelItem, error) {
 
 	kernelType := input.KernelType
-	version := ""
-	if input.Version != "" {
-		version = input.Version
-	}
 
-	// Phase 1: Resolve "latest" version to concrete version (matches Python).
-	if version == "latest" {
+	// Phase 1: Resolve version spec to concrete version.
+	vs, err := version.ParseSpec(input.Version)
+	if err == nil && vs.IsPartial() {
 		ciVersion, err := op.resolveCIVersion(ctx)
 		if err != nil {
 			return nil, &errs.DomainError{
 				Code: "kernel.pull_failed", Message: err.Error(), Err: err,
 			}
 		}
-		// Arch is resolved here for ResolveLatestVersion; the request.Resolve()
-		// below also resolves it independently — both use system.RuntimeArch(),
-		// so the value is identical (compile-time constant).
 		arch := system.RuntimeArch()
-		resolvedVersion, err := op.Services.Kernel.ResolveLatestVersion(ctx, kernelType, arch, ciVersion)
+		resolvedVersion, err := op.Services.Kernel.ResolveVersion(ctx, kernelType, input.Version, arch, ciVersion)
 		if err != nil {
 			return nil, &errs.DomainError{
 				Code:    "kernel.pull_failed",
-				Message: fmt.Sprintf("Failed to resolve latest version for '%s': %v", kernelType, err),
+				Message: fmt.Sprintf("Failed to resolve version '%s' for '%s': %v", input.Version, kernelType, err),
 				Err:     err,
 			}
 		}
-		version = resolvedVersion
-		input.Version = version
+		input.Version = resolvedVersion
 	}
 
 	// Resolve through the Request pipeline (matches Python)

@@ -1152,7 +1152,7 @@ func (s *Service) ImportKernel(
 
 // ── Version Resolution ──────────────────────────────────────────────────
 
-func (s *Service) ResolveLatestVersion(ctx context.Context, kernelType string, arch string, ciVersion string) (string, error) {
+func (s *Service) ResolveVersion(ctx context.Context, kernelType string, versionSpec string, arch string, ciVersion string) (string, error) {
 	specs, err := s.LoadSpecs()
 	if err != nil {
 		return "", err
@@ -1165,11 +1165,23 @@ func (s *Service) ResolveLatestVersion(ctx context.Context, kernelType string, a
 		}
 	}
 	if len(matching) == 0 {
-		return "", NewKernelErrorf("Cannot resolve 'latest' for unknown type: %s", kernelType)
+		return "", NewKernelErrorf("Cannot resolve version for unknown type: %s", kernelType)
 	}
 
+	// Parse the version spec
+	spec, err := version.ParseSpec(versionSpec)
+	if err != nil {
+		return "", NewKernelErrorf("Invalid version spec %q: %s", versionSpec, err)
+	}
+
+	// Exact version — no resolution needed
+	if !spec.IsPartial() {
+		return strings.TrimPrefix(versionSpec, "v"), nil
+	}
+
+	// Partial or latest — fetch available versions and resolve
 	configs := kernelSpecsToResolverConfigs(matching)
-	versionMap := s.resolver.Resolve(ctx, configs, arch, ciVersion, 0, 1)
+	versionMap := s.resolver.Resolve(ctx, configs, arch, ciVersion, 0, 10)
 
 	var allVersions []string
 	for _, versions := range versionMap {
@@ -1179,9 +1191,12 @@ func (s *Service) ResolveLatestVersion(ctx context.Context, kernelType string, a
 	}
 	if len(allVersions) == 0 {
 		return "", NewKernelErrorf(
-			"Cannot resolve 'latest' for %s: no versions available from upstream", kernelType)
+			"Cannot resolve version %q for %s: no versions available from upstream", versionSpec, kernelType)
 	}
 
-	version.SortVersions(allVersions)
-	return allVersions[0], nil
+	resolved, err := version.Resolve(allVersions, spec)
+	if err != nil {
+		return "", NewKernelErrorf("Cannot resolve version %q for %s: %s", versionSpec, kernelType, err)
+	}
+	return resolved, nil
 }

@@ -6,7 +6,6 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
-	"mvmctl/internal/infra/validators"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -54,19 +53,9 @@ func (r *BinaryPullRequest) Resolve(ctx context.Context) (*ResolvedBinaryPullInp
 	// Normalize version (strip 'v' prefix) — Python: version = self._inputs.version.removeprefix("v")
 	version := strings.TrimPrefix(r.input.Version, "v")
 
-	// When git_ref is provided, skip semver version validation
-	if (r.input.GitRef == nil || *r.input.GitRef == "") && version != "" {
-		// Validate version format (semver-like: x.y.z)
-		matched := validators.ValidSemverRegex.MatchString(version)
-		if !matched {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeBinaryVersionGate,
-				Op:      "binary_pull",
-				Message: "Invalid version format: '" + r.input.Version + "'. Expected format: x.y.z (e.g., 1.15.0)",
-				Class:   errs.ClassValidation,
-			}
-		}
-	}
+	// Version validation is handled by the service's ResolveVersion method,
+	// which accepts latest, partial (e.g. "1.15"), and exact (e.g. "1.15.1") specs.
+	// When git_ref is provided, version may be empty.
 
 	// Default name to "firecracker"
 	name := r.input.Name
