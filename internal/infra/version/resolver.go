@@ -372,7 +372,7 @@ func ParseSemverInts(v string) []int {
 	for _, p := range parts {
 		n, err := strconv.Atoi(p)
 		if err != nil {
-			return []int{0}
+			break
 		}
 		nums = append(nums, n)
 	}

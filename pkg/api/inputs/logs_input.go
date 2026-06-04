@@ -155,8 +155,15 @@ func (r *LogRequest) resolveFollow(ctx context.Context) bool {
 	}
 	follow, err := config.Resolve(ctx, r._db, "settings.vm", "log_follow")
 	if err == nil && follow != nil {
-		// Python: bool(value) is truthy for many types, not just bool
-		return pythonBool(follow)
+		switch v := follow.(type) {
+		case bool:
+			return v
+		case string:
+			return v != ""
+		case int, int64, float64:
+			return v != 0
+		}
+		return true
 	}
 	return false
 }
