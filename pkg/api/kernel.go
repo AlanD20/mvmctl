@@ -63,7 +63,7 @@ func (op *Operation) KernelPrune(ctx context.Context, dryRun bool, includeAll bo
 		if !dryRun {
 			// Python: KernelOperation.remove(KernelInput(id=[kernel.id]), force=include_all)
 			// Go: call KernelRemove() through the full pipeline.
-			result := op.KernelRemove(ctx, []string{kernel.ID}, includeAll)
+			result := op.KernelRemove(ctx, inputs.KernelInput{Identifiers: []string{kernel.ID}, Force: &includeAll})
 			if result.HasErrors() {
 				slog.Warn("Failed to remove kernel", "id", kernel.ID, "error", result.Errors()[0].Message)
 				continue
@@ -344,14 +344,8 @@ func (op *Operation) KernelImport(ctx context.Context, input inputs.KernelImport
 // Each kernel removal is wrapped in per-kernel error handling (matching Python's
 // try/except KernelError) and the method parameter force is combined with
 // resolved.Force (matching Python's force=force or resolved.force).
-func (op *Operation) KernelRemove(ctx context.Context, identifiers []string, force bool) *errs.BatchResult {
-	forceVal := force
-	kernelInput := inputs.KernelInput{
-		Identifiers: identifiers,
-		Force:       &forceVal,
-	}
-
-	request := inputs.NewKernelRequest(kernelInput, op.Connection.DB(), op.Repos.Kernel)
+func (op *Operation) KernelRemove(ctx context.Context, input inputs.KernelInput) *errs.BatchResult {
+	request := inputs.NewKernelRequest(input, op.Connection.DB(), op.Repos.Kernel)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return &errs.BatchResult{
@@ -373,10 +367,7 @@ func (op *Operation) KernelRemove(ctx context.Context, identifiers []string, for
 
 	for _, kernel := range resolved.Kernels {
 
-		// Python: force = force or resolved.force — combine method param with resolved
-		effectiveForce := force || resolved.Force
-
-		if !effectiveForce && len(kernel.VMs) > 0 {
+		if !resolved.Force && len(kernel.VMs) > 0 {
 			items = append(items, errs.OperationResult{
 				Status:    "error",
 				Code:      "kernel.in_use",
@@ -386,7 +377,7 @@ func (op *Operation) KernelRemove(ctx context.Context, identifiers []string, for
 			continue
 		}
 
-		if _, err := op.Services.Kernel.Remove(ctx, kernel, effectiveForce); err != nil {
+		if _, err := op.Services.Kernel.Remove(ctx, kernel, resolved.Force); err != nil {
 			items = append(items, errs.OperationResult{
 				Status:    "error",
 				Code:      "kernel.remove_failed",
@@ -424,85 +415,70 @@ func (op *Operation) KernelList(
 ) ([]*model.KernelItem, []model.VersionInfo, error) {
 	if remote {
 		emitProgress(onProgress, "listing", "running", "Fetching remote kernel versions...")
-		versions, err := op.kernelListRemote(ctx, noCache)
+
+		specs, err := op.Services.Kernel.LoadSpecs()
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to load kernel specs: %w", err)
+		}
+		allSpecs := make([]*model.KernelSpec, 0, len(specs))
+		for _, spec := range specs {
+			allSpecs = append(allSpecs, spec)
+		}
+
+		cacheTTL := 0
+		if !noCache {
+			cacheTTL, _ = op.Services.Config.GetInt(ctx, "defaults.kernel", "remote_list_cache_ttl")
+		}
+
+		resolvedCIVersion, err := op.resolveCIVersion(ctx)
 		if err != nil {
 			return nil, nil, err
 		}
-		emitProgress(onProgress, "listing", "complete", fmt.Sprintf("Found %d remote kernel(s)", len(versions)))
-		return nil, versions, nil
+
+		remoteListLimit, _ := op.Services.Config.GetInt(ctx, "defaults.kernel", "remote_list_limit")
+		versionMap := op.Services.Kernel.ListRemoteVersions(
+			ctx,
+			allSpecs,
+			system.RuntimeArch(),
+			resolvedCIVersion,
+			cacheTTL,
+			remoteListLimit,
+		)
+		flattened := make([]model.VersionInfo, 0)
+		for _, versions := range versionMap {
+			flattened = append(flattened, versions...)
+		}
+
+		local, _ := op.Repos.Kernel.ListAll(ctx)
+		localSet := make(map[string]bool, len(local))
+		for _, l := range local {
+			localSet[l.Version] = true
+		}
+		for i := range flattened {
+			if localSet[flattened[i].Version] {
+				flattened[i].IsPresent = true
+			}
+		}
+
+		emitProgress(onProgress, "listing", "complete", fmt.Sprintf("Found %d remote kernel(s)", len(flattened)))
+		return nil, flattened, nil
 	}
 	items, err := op.Services.Kernel.List(ctx)
 	return items, nil, err
 }
 
-// kernelListRemote returns available remote kernel versions as a flat list.
-// Matches Python's KernelOperation._list_remote() — resolves cache_ttl,
-// ci_version, and remote_list_limit from SettingsService before calling
-// the HttpDirVersionResolver with a limit parameter.
-func (op *Operation) kernelListRemote(ctx context.Context, noCache bool) ([]model.VersionInfo, error) {
-	// Load kernel specs
-	specs, err := op.Services.Kernel.LoadSpecs()
-	if err != nil {
-		return nil, fmt.Errorf("failed to load kernel specs: %w", err)
-	}
-	allSpecs := make([]*model.KernelSpec, 0, len(specs))
-	for _, spec := range specs {
-		allSpecs = append(allSpecs, spec)
-	}
-
-	// Resolve cache_ttl from settings (matches Python)
-	cacheTTL := 0
-	if !noCache {
-		cacheTTL, _ = op.Services.Config.GetInt(ctx, "defaults.kernel", "remote_list_cache_ttl")
-	}
-
-	// Resolve ci_version from default firecracker binary (matches Python)
-	resolvedCIVersion, err := op.resolveCIVersion(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// Resolve remote_list_limit from settings (matches Python)
-	// Python: remote_list_limit = int(SettingsService.resolve(db, "defaults.kernel", "remote_list_limit"))
-	remoteListLimit, _ := op.Services.Config.GetInt(ctx, "defaults.kernel", "remote_list_limit")
-	versionMap := op.Services.Kernel.ListRemoteVersions(
-		ctx,
-		allSpecs,
-		system.RuntimeArch(),
-		resolvedCIVersion,
-		cacheTTL,
-		remoteListLimit,
-	)
-	flattened := make([]model.VersionInfo, 0)
-	for _, versions := range versionMap {
-		flattened = append(flattened, versions...)
-	}
-	// Mark locally cached kernels
-	local, _ := op.Repos.Kernel.ListAll(ctx)
-	localSet := make(map[string]bool, len(local))
-	for _, l := range local {
-		localSet[l.Version] = true
-	}
-	for i := range flattened {
-		if localSet[flattened[i].Version] {
-			flattened[i].IsPresent = true
-		}
-	}
-	return flattened, nil
-}
-
 // KernelGet returns a single kernel by identifier.
 // Matches Python's KernelOperation.get() exactly — uses KernelRequest.resolve()
 // internally for consistent resolution behavior.
-func (op *Operation) KernelGet(ctx context.Context, id string) (*model.KernelItem, error) {
+func (op *Operation) KernelGet(ctx context.Context, identifier string) (*model.KernelItem, error) {
 	kernelInput := inputs.KernelInput{
-		Identifiers: []string{id},
+		Identifiers: []string{identifier},
 	}
 
 	request := inputs.NewKernelRequest(kernelInput, op.Connection.DB(), op.Repos.Kernel)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("kernel not found: %s", id)
+		return nil, fmt.Errorf("kernel not found: %s", identifier)
 	}
 
 	if len(resolved.Kernels) != 1 {
@@ -515,8 +491,8 @@ func (op *Operation) KernelGet(ctx context.Context, id string) (*model.KernelIte
 
 // KernelInspect returns grouped dict of a kernel.
 // Matches Python's KernelOperation.inspect() exactly.
-func (op *Operation) KernelInspect(ctx context.Context, id string) (*responses.KernelInspect, error) {
-	k, err := op.KernelGet(ctx, id)
+func (op *Operation) KernelInspect(ctx context.Context, identifier string) (*responses.KernelInspect, error) {
+	k, err := op.KernelGet(ctx, identifier)
 	if err != nil {
 		return nil, err
 	}
@@ -536,22 +512,22 @@ func (op *Operation) KernelInspect(ctx context.Context, id string) (*responses.K
 // KernelSetDefault sets a kernel as default.
 // Matches Python's KernelOperation.set_default() exactly — uses KernelRequest.resolve()
 // for consistent identifier resolution, catches KernelError at top level.
-func (op *Operation) KernelSetDefault(ctx context.Context, id string) error {
+func (op *Operation) KernelSetDefault(ctx context.Context, identifier string) error {
 	kernelInput := inputs.KernelInput{
-		Identifiers: []string{id},
+		Identifiers: []string{identifier},
 	}
 
 	request := inputs.NewKernelRequest(kernelInput, op.Connection.DB(), op.Repos.Kernel)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return &errs.DomainError{
-			Code: errs.CodeKernelNotFound, Message: fmt.Sprintf("Kernel not found: %s", id),
+			Code: errs.CodeKernelNotFound, Message: fmt.Sprintf("Kernel not found: %s", identifier),
 		}
 	}
 
 	if len(resolved.Kernels) != 1 {
 		return &errs.DomainError{
-			Code: errs.CodeKernelNotFound, Message: fmt.Sprintf("Kernel not found: %s", id),
+			Code: errs.CodeKernelNotFound, Message: fmt.Sprintf("Kernel not found: %s", identifier),
 		}
 	}
 
