@@ -45,7 +45,7 @@ Use --os to show the Firecracker process log.`,
 				followPtr = &follow
 			}
 
-			input := &inputs.LogInput{
+			input := inputs.LogInput{
 				Identifier: identifier,
 				OsLog:      osLog,
 				Lines:      lines,

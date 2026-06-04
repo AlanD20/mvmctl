@@ -146,7 +146,7 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 				common.Cli.Info("  The build output will appear below once it starts:\n")
 
 				gitRefPtr := &gitRef
-				binaries, err := op.BinaryPull(cmd.Context(), &inputs.BinaryPullInput{
+				binaries, err := op.BinaryPull(cmd.Context(), inputs.BinaryPullInput{
 					Version:          "",
 					Name:             name,
 					GitRef:           gitRefPtr,
@@ -172,7 +172,7 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 			}
 
 			// Normal download path
-			binaries, err := op.BinaryPull(cmd.Context(), &inputs.BinaryPullInput{
+			binaries, err := op.BinaryPull(cmd.Context(), inputs.BinaryPullInput{
 				Version:          effectiveVersion,
 				Name:             name,
 				SetDefault:       setDefault,
@@ -194,7 +194,7 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 						return nil
 					}
 
-					binaries, err = op.BinaryPull(cmd.Context(), &inputs.BinaryPullInput{
+					binaries, err = op.BinaryPull(cmd.Context(), inputs.BinaryPullInput{
 						Version:          effectiveVersion,
 						Name:             name,
 						SetDefault:       setDefault,
@@ -251,7 +251,7 @@ func newBinaryRemoveCmd(op *api.Operation) *cobra.Command {
 				return fmt.Errorf("usage error")
 			}
 
-			batchResult := op.BinaryRemove(cmd.Context(), &inputs.BinaryInput{Identifiers: args}, force)
+			batchResult := op.BinaryRemove(cmd.Context(), inputs.BinaryInput{Identifiers: args}, force)
 			for _, r := range batchResult.Items {
 				if r.Status == "success" {
 					msg := r.Message
@@ -290,7 +290,7 @@ func newBinaryDefaultCmd(op *api.Operation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 
-			item, err := op.BinarySetDefault(cmd.Context(), &inputs.BinaryInput{Identifiers: []string{identifier}})
+			item, err := op.BinarySetDefault(cmd.Context(), inputs.BinaryInput{Identifiers: []string{identifier}})
 			if err != nil {
 				return err
 			}

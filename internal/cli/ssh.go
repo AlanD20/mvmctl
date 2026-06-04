@@ -81,7 +81,7 @@ Examples:
 			// Use nil semantics: only pass flag values when explicitly set by user.
 			// Zero/empty values mean "not specified" (like Python's None),
 			// and the API resolves defaults accordingly.
-			input := &inputs.SSHInput{
+			input := inputs.SSHInput{
 				Identifier: identifier,
 			}
 			if cmd.Flags().Changed("user") {

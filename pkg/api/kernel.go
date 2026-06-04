@@ -77,7 +77,7 @@ func (op *Operation) KernelPrune(ctx context.Context, dryRun bool, includeAll bo
 
 // KernelPull downloads or builds a kernel with full pipeline.
 // Matches Python's KernelOperation.pull(inputs: KernelPullInput, *, on_progress=...) exactly.
-func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInput,
+func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInput,
 	onProgress event.OnProgressCallback) (*model.KernelItem, error) {
 
 	kernelType := input.KernelType
@@ -111,7 +111,7 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 	}
 
 	// Resolve through the Request pipeline (matches Python)
-	request := inputs.NewKernelPullRequest(*input, op.Services.Config)
+	request := inputs.NewKernelPullRequest(input, op.Services.Config)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return nil, &errs.DomainError{
@@ -303,11 +303,11 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 // Matches Python's KernelOperation.import_() exactly — uses KernelImportRequest
 // resolution pipeline for input validation and default resolution before
 // calling service.import_kernel().
-func (op *Operation) KernelImport(ctx context.Context, input *inputs.KernelImportInput) (*model.KernelItem, error) {
+func (op *Operation) KernelImport(ctx context.Context, input inputs.KernelImportInput) (*model.KernelItem, error) {
 	db := op.Connection.DB()
 
 	// Python: request = KernelImportRequest(inputs=inputs, db=db); resolved = request.resolve()
-	request := inputs.NewKernelImportRequest(*input, db)
+	request := inputs.NewKernelImportRequest(input, db)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return nil, &errs.DomainError{

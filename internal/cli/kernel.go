@@ -188,7 +188,7 @@ Examples:
 
 			// Build KernelPullInput matching Python's KernelPullInput dataclass
 			featureStr := strings.Join(featureList, ",")
-			kernelInput := &inputs.KernelPullInput{
+			kernelInput := inputs.KernelPullInput{
 				KernelType:   effectiveType,
 				Version:      effectiveVersion,
 				Jobs:         jobsArg,
@@ -357,7 +357,7 @@ Examples:
 				v := version
 				versionPtr = &v
 			}
-			importInput := &inputs.KernelImportInput{
+			importInput := inputs.KernelImportInput{
 				Name:       name,
 				Path:       path,
 				Version:    versionPtr,

@@ -297,7 +297,7 @@ func (op *Operation) initStepBinary(
 }
 
 func (op *Operation) initDownloadBinary(ctx context.Context, version string) InitStepResult {
-	binaries, err := op.BinaryPull(ctx, &inputs.BinaryPullInput{Version: version, SetDefault: true}, nil)
+	binaries, err := op.BinaryPull(ctx, inputs.BinaryPullInput{Version: version, SetDefault: true}, nil)
 	if err != nil {
 		return InitStepResult{
 			Step:    "binary",
@@ -326,7 +326,7 @@ func (op *Operation) initDownloadBinaryLatest(ctx context.Context) InitStepResul
 	}
 
 	version := remote[0].Version
-	binaries, err := op.BinaryPull(ctx, &inputs.BinaryPullInput{Version: version, SetDefault: true}, nil)
+	binaries, err := op.BinaryPull(ctx, inputs.BinaryPullInput{Version: version, SetDefault: true}, nil)
 	if err != nil {
 		return InitStepResult{
 			Step:    "binary",

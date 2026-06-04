@@ -65,7 +65,7 @@ func (op *Operation) ImagePrune(ctx context.Context, dryRun bool, includeAll boo
 		if !dryRun {
 			// Matches Python: ImageOperation.remove(ImageInput(id=[image.id]), force=include_all)
 			// Uses the full remove pipeline (BatchResult, VM reference check, etc.)
-			result := op.ImageRemove(ctx, &inputs.ImageInput{Identifiers: []string{img.ID}}, includeAll)
+			result := op.ImageRemove(ctx, inputs.ImageInput{Identifiers: []string{img.ID}}, includeAll)
 			if result.HasErrors() {
 				for _, r := range result.Errors() {
 					slog.Warn("Failed to remove image", "id", img.ID, "error", r.Message)
@@ -83,7 +83,7 @@ func (op *Operation) ImagePrune(ctx context.Context, dryRun bool, includeAll boo
 // Matches Python's ImageOperation.pull() exactly.
 func (op *Operation) ImagePull(
 	ctx context.Context,
-	input *inputs.ImagePullInput,
+	input inputs.ImagePullInput,
 	onProgress event.OnProgressCallback,
 ) (*model.ImageItem, error) {
 	// Resolve pull input via ImageAcquireRequest (arch, output dir, validation)
@@ -308,7 +308,7 @@ func (op *Operation) ImagePull(
 // Matches Python's ImageOperation.import_() exactly.
 func (op *Operation) ImageImport(
 	ctx context.Context,
-	input *inputs.ImageImportInput,
+	input inputs.ImageImportInput,
 	onProgress event.OnProgressCallback,
 ) (*model.ImageItem, error) {
 	// Resolve import input via ImageAcquireRequest (arch, format, validation)
@@ -439,7 +439,7 @@ func (op *Operation) ImageImport(
 // Python: input can be None when all=True — Go handles with nil check.
 func (op *Operation) ImageWarm(
 	ctx context.Context,
-	input *inputs.ImageInput,
+	input inputs.ImageInput,
 	all bool,
 	onProgress event.OnProgressCallback,
 ) ([]string, error) {
@@ -453,8 +453,8 @@ func (op *Operation) ImageWarm(
 				Code: errs.CodeDatabaseError, Message: fmt.Sprintf("Failed to list images: %v", err), Err: err,
 			}
 		}
-	} else if input != nil {
-		request := inputs.NewImageRequest(*input, op.Connection.DB(), op.Repos.Image)
+	} else {
+		request := inputs.NewImageRequest(input, op.Connection.DB(), op.Repos.Image)
 		resolved, err := request.Resolve(ctx)
 		if err != nil {
 			return nil, &errs.DomainError{
@@ -462,10 +462,6 @@ func (op *Operation) ImageWarm(
 			}
 		}
 		images = resolved.Images
-	} else {
-		return nil, &errs.DomainError{
-			Code: errs.CodeImageNotFound, Message: "Image input required when all=false",
-		}
 	}
 
 	if onProgress != nil {
@@ -496,10 +492,10 @@ func (op *Operation) ImageWarm(
 
 // ImageRemove removes images by input.
 // Matches Python's ImageOperation.remove() exactly.
-func (op *Operation) ImageRemove(ctx context.Context, input *inputs.ImageInput, force bool) *errs.BatchResult {
+func (op *Operation) ImageRemove(ctx context.Context, input inputs.ImageInput, force bool) *errs.BatchResult {
 	results := make([]errs.OperationResult, 0)
 
-	request := inputs.NewImageRequest(*input, op.Connection.DB(), op.Repos.Image)
+	request := inputs.NewImageRequest(input, op.Connection.DB(), op.Repos.Image)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return &errs.BatchResult{
@@ -638,8 +634,8 @@ func (op *Operation) ImageListAll(
 
 // ImageGet returns a single image by ID prefix or type.
 // Matches Python's ImageOperation.get() exactly — uses ImageRequest for resolution.
-func (op *Operation) ImageGet(ctx context.Context, input *inputs.ImageInput) (*model.ImageItem, error) {
-	request := inputs.NewImageRequest(*input, op.Connection.DB(), op.Repos.Image)
+func (op *Operation) ImageGet(ctx context.Context, input inputs.ImageInput) (*model.ImageItem, error) {
+	request := inputs.NewImageRequest(input, op.Connection.DB(), op.Repos.Image)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return nil, err
@@ -652,7 +648,7 @@ func (op *Operation) ImageGet(ctx context.Context, input *inputs.ImageInput) (*m
 
 // ImageInspect returns grouped dict of an image.
 // Matches Python's ImageOperation.inspect() exactly.
-func (op *Operation) ImageInspect(ctx context.Context, input *inputs.ImageInput) (*responses.ImageInspect, error) {
+func (op *Operation) ImageInspect(ctx context.Context, input inputs.ImageInput) (*responses.ImageInspect, error) {
 	img, err := op.ImageGet(ctx, input)
 	if err != nil {
 		return nil, err
@@ -680,8 +676,8 @@ func (op *Operation) ImageInspect(ctx context.Context, input *inputs.ImageInput)
 
 // ImageSetDefault sets an image as default.
 // Matches Python's ImageOperation.set_default() exactly — uses ImageRequest for resolution.
-func (op *Operation) ImageSetDefault(ctx context.Context, input *inputs.ImageInput) error {
-	request := inputs.NewImageRequest(*input, op.Connection.DB(), op.Repos.Image)
+func (op *Operation) ImageSetDefault(ctx context.Context, input inputs.ImageInput) error {
+	request := inputs.NewImageRequest(input, op.Connection.DB(), op.Repos.Image)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return &errs.DomainError{

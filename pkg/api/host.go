@@ -324,7 +324,7 @@ func (op *Operation) HostDetectResources(ctx context.Context) (*model.HostResour
 // HostNetworkSetup sets up the default network.
 // Matches Python's HostOperation.network_setup() exactly — static call to
 func (op *Operation) HostNetworkSetup(ctx context.Context) error {
-	results, syncErr := op.NetworkSync(ctx, nil)
+	results, syncErr := op.NetworkSync(ctx, inputs.NetworkInput{})
 	if syncErr == nil {
 		if len(results) == 0 {
 			_, err := op.NetworkCreateDefaultNetwork(ctx)
@@ -592,7 +592,7 @@ func (op *Operation) HostClean(ctx context.Context) ([]string, error) {
 	// Remove default network from database (matching Python)
 	defaultNet := infranet.FindNetworkByName(networks, defaultNetNameStr)
 	if defaultNet != nil {
-		removeErr := op.NetworkRemove(ctx, &inputs.NetworkInput{Identifiers: []string{defaultNetNameStr}}, true)
+		removeErr := op.NetworkRemove(ctx, inputs.NetworkInput{Identifiers: []string{defaultNetNameStr}}, true)
 		if removeErr != nil {
 			summary = append(
 				summary,

@@ -24,8 +24,8 @@ func (op *Operation) KeyListAll(ctx context.Context) ([]*model.SSHKeyItem, error
 
 // Get returns a single key by name or ID.
 // Matches Python's KeyOperation.get() exactly — uses KeyRequest resolution pipeline.
-func (op *Operation) KeyGet(ctx context.Context, input *inputs.KeyInput) (*model.SSHKeyItem, error) {
-	req := inputs.NewKeyRequest(*input, op.Repos.Key)
+func (op *Operation) KeyGet(ctx context.Context, input inputs.KeyInput) (*model.SSHKeyItem, error) {
+	req := inputs.NewKeyRequest(input, op.Repos.Key)
 	resolved, err := req.Resolve(ctx)
 	if err != nil {
 		return nil, err
@@ -41,12 +41,12 @@ func (op *Operation) KeyGet(ctx context.Context, input *inputs.KeyInput) (*model
 // Matches Python's KeyOperation.create() exactly — calls check_dependencies() first,
 // then uses KeyCreateRequest resolution pipeline.
 // Python wraps check_dependencies in try/except Exception — top-level panic recovery matches this.
-func (op *Operation) KeyCreate(ctx context.Context, input *inputs.KeyCreateInput) (*model.SSHKeyItem, error) {
+func (op *Operation) KeyCreate(ctx context.Context, input inputs.KeyCreateInput) (*model.SSHKeyItem, error) {
 	// Python: service.check_dependencies() called separately before resolution.
 	// Go: CreateKeypair calls checkDependencies internally — no need to duplicate here.
 
 	// Python: request = KeyCreateRequest(inputs=inputs); resolved = request.resolve()
-	req := inputs.NewKeyCreateRequest(*input)
+	req := inputs.NewKeyCreateRequest(input)
 	resolved, err := req.Resolve()
 	if err != nil {
 		return nil, &errs.DomainError{
@@ -88,7 +88,7 @@ func (op *Operation) KeyCreate(ctx context.Context, input *inputs.KeyCreateInput
 }
 
 // KeyImport imports an existing public key to the cache.
-func (op *Operation) KeyImport(ctx context.Context, input *inputs.KeyImportInput) (*model.SSHKeyItem, error) {
+func (op *Operation) KeyImport(ctx context.Context, input inputs.KeyImportInput) (*model.SSHKeyItem, error) {
 	// Python does inline validation at the API layer before calling service
 	if _, err := os.Stat(input.PubKeyPath); os.IsNotExist(err) {
 		return nil, &errs.DomainError{
@@ -160,9 +160,9 @@ func (op *Operation) KeyImport(ctx context.Context, input *inputs.KeyImportInput
 
 // KeyRemove removes keys by name or ID.
 // Matches Python's KeyOperation.remove() exactly — uses KeyRequest resolution pipeline.
-func (op *Operation) KeyRemove(ctx context.Context, input *inputs.KeyInput, force bool) *errs.BatchResult {
+func (op *Operation) KeyRemove(ctx context.Context, input inputs.KeyInput, force bool) *errs.BatchResult {
 	// Match Python: KeyRequest(inputs=inputs, db=db).resolve()
-	req := inputs.NewKeyRequest(*input, op.Repos.Key)
+	req := inputs.NewKeyRequest(input, op.Repos.Key)
 	resolved, err := req.Resolve(ctx)
 	if err != nil {
 		return &errs.BatchResult{Items: []errs.OperationResult{{
@@ -226,7 +226,7 @@ func (op *Operation) KeyRemove(ctx context.Context, input *inputs.KeyInput, forc
 // KeyInspect returns detailed key info.
 // Matches Python's KeyOperation.inspect() exactly — uses KeyRequest resolution,
 // returns raw dict (not wrapped in OperationResult).
-func (op *Operation) KeyInspect(ctx context.Context, input *inputs.KeyInput) (*responses.KeyInspect, error) {
+func (op *Operation) KeyInspect(ctx context.Context, input inputs.KeyInput) (*responses.KeyInspect, error) {
 	k, err := op.KeyGet(ctx, input)
 	if err != nil {
 		return nil, err
@@ -253,12 +253,12 @@ func (op *Operation) KeyInspect(ctx context.Context, input *inputs.KeyInput) (*r
 // and KeyController.export(). Python wraps controller.export() in try/except Exception.
 func (op *Operation) KeyExport(
 	ctx context.Context,
-	input *inputs.KeyInput,
+	input inputs.KeyInput,
 	destination string,
 	overwrite bool,
 ) ([]string, error) {
 	// Python: request = KeyRequest(inputs=inputs, db=db); resolved = request.resolve()
-	req := inputs.NewKeyRequest(*input, op.Repos.Key)
+	req := inputs.NewKeyRequest(input, op.Repos.Key)
 	resolved, err := req.Resolve(ctx)
 	if err != nil {
 		return nil, &errs.DomainError{
@@ -301,9 +301,9 @@ func (op *Operation) KeyExport(
 
 // KeySetDefaults sets one or more keys as default.
 // Matches Python's KeyOperation.set_default() — uses KeyRequest resolution.
-func (op *Operation) KeySetDefaults(ctx context.Context, input *inputs.KeyInput) error {
+func (op *Operation) KeySetDefaults(ctx context.Context, input inputs.KeyInput) error {
 	// Python: request = KeyRequest(inputs=inputs, db=db); resolved = request.resolve()
-	req := inputs.NewKeyRequest(*input, op.Repos.Key)
+	req := inputs.NewKeyRequest(input, op.Repos.Key)
 	resolved, err := req.Resolve(ctx)
 	if err != nil || len(resolved.Keys) == 0 {
 		return &errs.DomainError{

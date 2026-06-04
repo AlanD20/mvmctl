@@ -70,7 +70,7 @@ before it is a source. Multiple sources only work for host -> VM.`,
 			if key != "" {
 				keyPtr = &key
 			}
-			input := &inputs.CPInput{
+			input := inputs.CPInput{
 				Sources: args[:len(args)-1],
 				Dst:     args[len(args)-1],
 				User:    userPtr,
