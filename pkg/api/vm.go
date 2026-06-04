@@ -29,6 +29,7 @@ import (
 	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/disk"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
 	infranet "mvmctl/internal/infra/network"
 	"mvmctl/internal/infra/provisioner"
@@ -51,7 +52,7 @@ import (
 func (op *Operation) VMCreate(
 	ctx context.Context,
 	input *inputs.VMCreateInput,
-	onProgress func(errs.ProgressEvent),
+	onProgress event.OnProgressCallback,
 ) ([]*model.VM, error) {
 	if err := system.CheckPrivileges("/usr/sbin/ip", "create VMs"); err != nil {
 		return nil, &errs.DomainError{
@@ -77,7 +78,7 @@ func (op *Operation) VMCreate(
 func (op *Operation) vmCreateSingle(
 	ctx context.Context,
 	input *inputs.VMCreateInput,
-	onProgress func(errs.ProgressEvent),
+	onProgress event.OnProgressCallback,
 ) ([]*model.VM, error) {
 	createdAt := time.Now()
 	vmID := crypto.VMID(input.Name, createdAt.Format(time.RFC3339))
@@ -155,7 +156,7 @@ func (op *Operation) vmCreateBatch(
 	ctx context.Context,
 	input *inputs.VMCreateInput,
 	count int,
-	onProgress func(errs.ProgressEvent),
+	onProgress event.OnProgressCallback,
 ) ([]*model.VM, error) {
 	names := op.vmGenerateBatchNames(input.Name, count)
 
@@ -214,12 +215,12 @@ func (op *Operation) vmCreateBatch(
 			continue
 		}
 
-		batchProgress := func(event errs.ProgressEvent) {
+		batchProgress := func(e event.Progress) {
 			if onProgress != nil {
-				onProgress(errs.ProgressEvent{
-					Phase:   event.Phase,
-					Status:  event.Status,
-					Message: fmt.Sprintf("[%d/%d] %s: %s", idx+1, count, name, event.Message),
+				onProgress(event.Progress{
+					Phase:   e.Phase,
+					Status:  e.Status,
+					Message: fmt.Sprintf("[%d/%d] %s: %s", idx+1, count, name, e.Message),
 				})
 			}
 		}
@@ -274,7 +275,7 @@ func (op *Operation) vmCreateBatch(
 func (op *Operation) vmExecuteCreate(
 	ctx context.Context,
 	resolved *resolvedVMCreateInput,
-	onProgress func(errs.ProgressEvent),
+	onProgress event.OnProgressCallback,
 	cleanupFn *func(),
 ) (*model.VM, error) {
 	return op.vmExecuteCreateWithOpts(ctx, resolved, onProgress, cleanupFn, false)
@@ -283,7 +284,7 @@ func (op *Operation) vmExecuteCreate(
 func (op *Operation) vmExecuteCreateWithOpts(
 	ctx context.Context,
 	resolved *resolvedVMCreateInput,
-	onProgress func(errs.ProgressEvent),
+	onProgress event.OnProgressCallback,
 	cleanupFn *func(),
 	skipLimitCheck bool,
 ) (*model.VM, error) {
@@ -1669,7 +1670,7 @@ func (op *Operation) VMDetachVolume(
 func (op *Operation) VMImport(
 	ctx context.Context,
 	input *inputs.VMImportInput,
-	onProgress func(errs.ProgressEvent),
+	onProgress event.OnProgressCallback,
 ) error {
 	if err := system.CheckPrivileges("/usr/sbin/ip", "import VM"); err != nil {
 		return &errs.DomainError{
@@ -1980,7 +1981,7 @@ type vmCreateContext struct {
 	guestMAC         string
 	tapName          string
 	rootfsPath       string
-	onProgress       func(errs.ProgressEvent)
+	onProgress       event.OnProgressCallback
 	resolved         *resolvedVMCreateInput
 	fcManager        *model.FirecrackerConfig
 	spawner          *vm.FirecrackerSpawner
@@ -2028,7 +2029,7 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 
 	// Progress: network
 	if c.onProgress != nil {
-		c.onProgress(errs.ProgressEvent{Phase: "network", Status: "running", Message: "Configuring network..."})
+		c.onProgress(event.Progress{Phase: "network", Status: "running", Message: "Configuring network..."})
 	}
 
 	// Network setup
@@ -2074,7 +2075,7 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 
 	// Progress: rootfs
 	if c.onProgress != nil {
-		c.onProgress(errs.ProgressEvent{Phase: "rootfs", Status: "running", Message: "Copying root filesystem..."})
+		c.onProgress(event.Progress{Phase: "rootfs", Status: "running", Message: "Copying root filesystem..."})
 	}
 
 	// Clone rootfs
@@ -2085,7 +2086,7 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 
 	// Progress: cloud-init
 	if c.onProgress != nil {
-		c.onProgress(errs.ProgressEvent{Phase: "cloud-init", Status: "running", Message: "Provisioning cloud-init..."})
+		c.onProgress(event.Progress{Phase: "cloud-init", Status: "running", Message: "Provisioning cloud-init..."})
 	}
 
 	// --- Cloud-init provisioning ---
@@ -2212,7 +2213,7 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 	// Progress: firecracker
 	if c.onProgress != nil {
 		c.onProgress(
-			errs.ProgressEvent{Phase: "firecracker", Status: "running", Message: "Starting Firecracker microVM..."},
+			event.Progress{Phase: "firecracker", Status: "running", Message: "Starting Firecracker microVM..."},
 		)
 	}
 
@@ -2270,7 +2271,7 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 	}
 
 	if c.onProgress != nil {
-		c.onProgress(errs.ProgressEvent{Phase: "complete", Status: "complete", Message: "VM created successfully"})
+		c.onProgress(event.Progress{Phase: "complete", Status: "complete", Message: "VM created successfully"})
 	}
 
 	return nil

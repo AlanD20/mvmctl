@@ -17,6 +17,7 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/firewall"
 	"mvmctl/internal/infra/model"
 	infranet "mvmctl/internal/infra/network"
@@ -36,7 +37,7 @@ import (
 //   - *errs.NeedsInteraction when sudo required
 //   - map[string]any with changes/user_added_to_group on success
 //   - nil when skipped (no changes needed)
-func (op *Operation) HostInit(ctx context.Context, onProgress func(errs.ProgressEvent)) (any, error) {
+func (op *Operation) HostInit(ctx context.Context, onProgress event.OnProgressCallback) (any, error) {
 	// Resolve the actual binary path so sudo invokes the correct binary.
 	mvmPath, _ := os.Executable()
 	if mvmPath == "" {

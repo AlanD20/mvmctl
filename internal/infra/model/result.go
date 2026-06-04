@@ -27,16 +27,6 @@ type OperationResult struct {
 	Warnings  []string       `json:"-"`              // Serialized via MarshalJSON
 }
 
-// ── ProgressEvent ──
-
-// ProgressEvent matches Python's ProgressEvent.
-type ProgressEvent struct {
-	Phase   string   `json:"phase"`
-	Status  string   `json:"status"`
-	Percent *float64 `json:"percent,omitempty"`
-	Message string   `json:"message"`
-}
-
 // ── NeedsInteraction ──
 
 // NeedsInteraction matches Python's NeedsInteraction.

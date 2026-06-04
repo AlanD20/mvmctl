@@ -8,8 +8,8 @@ import (
 
 	"mvmctl/internal/core/binary"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
-	"mvmctl/internal/infra/operation"
 	"mvmctl/internal/infra/system"
 	"mvmctl/internal/infra/version"
 	"mvmctl/pkg/api/inputs"
@@ -57,7 +57,7 @@ func (op *Operation) BinaryPrune(ctx context.Context, dryRun bool, force bool) (
 // Matches Python's BinaryOperation.pull() exactly — uses BinaryPullRequest
 // resolution pipeline and wraps all BinaryErrors in code="binary.pull_failed".
 func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInput,
-	onProgress func(errs.ProgressEvent)) ([]*model.BinaryItem, error) {
+	onProgress event.OnProgressCallback) ([]*model.BinaryItem, error) {
 
 	// Python: request = BinaryPullRequest(inputs=inputs, db=db); resolved = request.resolve()
 	request := inputs.NewBinaryPullRequest(*input, op.Connection.DB())
@@ -143,7 +143,7 @@ func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInp
 
 	// Bridge byte-level download progress to phase-level ProgressEvent
 	emitProgress(onProgress, "download", "running", "Downloading Firecracker...")
-	progressBridge := operation.DownloadProgressBridge(onProgress)
+	progressBridge := event.FormatProgress(onProgress)
 
 	binaries, err := op.Services.Binary.DownloadFirecracker(ctx, resolvedVersion, arch, progressBridge)
 	if err != nil {
@@ -292,7 +292,7 @@ func (op *Operation) BinaryList(
 	ctx context.Context,
 	remote bool,
 	limit *int,
-	onProgress func(errs.ProgressEvent),
+	onProgress event.OnProgressCallback,
 ) ([]*model.BinaryItem, []model.VersionInfo, error) {
 	if !remote {
 		items, err := op.Services.Binary.ListAll(ctx, false, true)

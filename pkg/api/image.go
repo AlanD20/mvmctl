@@ -18,8 +18,8 @@ import (
 	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/download"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
-	"mvmctl/internal/infra/operation"
 	"mvmctl/internal/infra/system"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"
@@ -84,7 +84,7 @@ func (op *Operation) ImagePrune(ctx context.Context, dryRun bool, includeAll boo
 func (op *Operation) ImagePull(
 	ctx context.Context,
 	input *inputs.ImagePullInput,
-	onProgress func(errs.ProgressEvent),
+	onProgress event.OnProgressCallback,
 ) (*model.ImageItem, error) {
 	// Resolve pull input via ImageAcquireRequest (arch, output dir, validation)
 	req := inputs.NewImageAcquireRequest(input, op.Services.Config, op.Repos.Image)
@@ -175,11 +175,11 @@ func (op *Operation) ImagePull(
 	defer os.RemoveAll(workDir)
 
 	if onProgress != nil {
-		onProgress(errs.ProgressEvent{
+		onProgress(event.Progress{
 			Phase: "download", Status: "running", Message: "Downloading image...",
 		})
 	}
-	progressBridge := operation.DownloadProgressBridge(onProgress)
+	progressBridge := event.FormatProgress(onProgress)
 	downloadPath, err := op.Services.Image.DownloadImage(
 		ctx,
 		spec,
@@ -196,7 +196,7 @@ func (op *Operation) ImagePull(
 	}
 
 	if onProgress != nil {
-		onProgress(errs.ProgressEvent{
+		onProgress(event.Progress{
 			Phase: "extract", Status: "running", Message: "Extracting image...",
 		})
 	}
@@ -224,7 +224,7 @@ func (op *Operation) ImagePull(
 	}
 
 	if onProgress != nil {
-		onProgress(errs.ProgressEvent{
+		onProgress(event.Progress{
 			Phase: "optimize", Status: "running", Message: "Optimizing image...",
 		})
 	}
@@ -296,7 +296,7 @@ func (op *Operation) ImagePull(
 	}
 
 	if onProgress != nil {
-		onProgress(errs.ProgressEvent{
+		onProgress(event.Progress{
 			Phase: "complete", Status: "complete", Message: "Image pull complete.",
 		})
 	}
@@ -309,7 +309,7 @@ func (op *Operation) ImagePull(
 func (op *Operation) ImageImport(
 	ctx context.Context,
 	input *inputs.ImageImportInput,
-	onProgress func(errs.ProgressEvent),
+	onProgress event.OnProgressCallback,
 ) (*model.ImageItem, error) {
 	// Resolve import input via ImageAcquireRequest (arch, format, validation)
 	req := inputs.NewImageAcquireRequest(input, op.Services.Config, op.Repos.Image)
@@ -357,7 +357,7 @@ func (op *Operation) ImageImport(
 	imageID := crypto.ImageID(fmt.Sprintf("%s:%s", spec.Type, spec.Version), spec.Source, timestamp)
 
 	if onProgress != nil {
-		onProgress(errs.ProgressEvent{
+		onProgress(event.Progress{
 			Phase: "extract", Status: "running", Message: "Extracting image...",
 		})
 	}
@@ -384,7 +384,7 @@ func (op *Operation) ImageImport(
 	}
 
 	if onProgress != nil {
-		onProgress(errs.ProgressEvent{
+		onProgress(event.Progress{
 			Phase: "optimize", Status: "running", Message: "Optimizing image...",
 		})
 	}
@@ -426,7 +426,7 @@ func (op *Operation) ImageImport(
 	}
 
 	if onProgress != nil {
-		onProgress(errs.ProgressEvent{
+		onProgress(event.Progress{
 			Phase: "complete", Status: "complete", Message: "Image import complete.",
 		})
 	}
@@ -441,7 +441,7 @@ func (op *Operation) ImageWarm(
 	ctx context.Context,
 	input *inputs.ImageInput,
 	all bool,
-	onProgress func(errs.ProgressEvent),
+	onProgress event.OnProgressCallback,
 ) ([]string, error) {
 	var images []*model.ImageItem
 
@@ -469,7 +469,7 @@ func (op *Operation) ImageWarm(
 	}
 
 	if onProgress != nil {
-		onProgress(errs.ProgressEvent{
+		onProgress(event.Progress{
 			Phase: "warm", Status: "running", Message: "Warming images...",
 		})
 	}
@@ -482,7 +482,7 @@ func (op *Operation) ImageWarm(
 	}
 
 	if onProgress != nil {
-		onProgress(errs.ProgressEvent{
+		onProgress(event.Progress{
 			Phase: "warm", Status: "complete", Message: "Warming complete.",
 		})
 	}
@@ -564,7 +564,7 @@ func (op *Operation) ImageListAll(
 	remote bool,
 	typeFilter string,
 	noCache bool,
-	onProgress func(errs.ProgressEvent),
+	onProgress event.OnProgressCallback,
 ) ([]*model.ImageItem, []model.VersionInfo, error) {
 	if remote {
 		emitProgress(onProgress, "listing", "running", "Fetching remote images...")

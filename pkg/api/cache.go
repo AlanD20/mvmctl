@@ -12,6 +12,7 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/provisioner/guestfs"
 	infraslice "mvmctl/internal/infra/slice"
@@ -34,7 +35,7 @@ func (op *Operation) CacheSessionHasGroup() bool {
 // Matches Python's CacheOperation.init_all() exactly.
 func (op *Operation) CacheInitAll(
 	ctx context.Context,
-	onProgress func(errs.ProgressEvent),
+	onProgress event.OnProgressCallback,
 ) (*responses.CacheInitResult, error) {
 	cacheDir := op.CacheDir
 	var created []string
@@ -77,7 +78,7 @@ func (op *Operation) CacheInitAll(
 	var appliancePath string
 	if guestfsEnabled {
 		if onProgress != nil {
-			onProgress(errs.ProgressEvent{
+			onProgress(event.Progress{
 				Phase:   "appliance",
 				Status:  "running",
 				Message: "Building libguestfs appliance...",

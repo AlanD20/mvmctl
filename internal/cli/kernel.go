@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"mvmctl/internal/cli/common"
-	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
@@ -199,9 +199,9 @@ Examples:
 				Features:     featureStr,
 			}
 
-			kernelItem, err := op.KernelPull(cmd.Context(), kernelInput, func(event errs.ProgressEvent) {
-				if event.Message != "" {
-					prog.UpdateText(event.Message)
+			kernelItem, err := op.KernelPull(cmd.Context(), kernelInput, func(e event.Progress) {
+				if e.Message != "" {
+					prog.UpdateText(e.Message)
 				}
 			})
 			prog.Stop()

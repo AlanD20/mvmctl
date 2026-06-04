@@ -10,7 +10,7 @@ import (
 
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/system"
 	"mvmctl/pkg/api"
 
@@ -41,9 +41,9 @@ func newCacheInitCmd(op *api.Operation) *cobra.Command {
 			prog := common.NewProgress()
 			prog.Start("Initializing cache...")
 
-			item, err := op.CacheInitAll(cmd.Context(), func(event errs.ProgressEvent) {
-				if event.Message != "" {
-					prog.UpdateText(event.Message)
+			item, err := op.CacheInitAll(cmd.Context(), func(e event.Progress) {
+				if e.Message != "" {
+					prog.UpdateText(e.Message)
 				}
 			})
 

@@ -15,14 +15,6 @@ const (
 	StatusFailure OperationStatus = "failure"
 )
 
-// ProgressEvent matches Python's models/result.py ProgressEvent(phase, status, percent, message).
-type ProgressEvent struct {
-	Phase   string   `json:"phase"`
-	Status  string   `json:"status"`
-	Percent *float64 `json:"percent,omitempty"`
-	Message string   `json:"message"`
-}
-
 // OperationResult matches Python's OperationResult(status, code, message, item, exception,
 // metadata, warnings). T is generic in Python but we use any for the Item field in Go.
 type OperationResult struct {
