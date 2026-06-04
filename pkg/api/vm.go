@@ -535,7 +535,7 @@ func (op *Operation) VMPrune(ctx context.Context, dryRun bool, includeAll bool) 
 
 	var removed []string
 	for _, vm := range allVMs {
-		if vm.Status == model.StatusRunning || vm.Status == model.StatusStarting {
+		if vm.Status == model.VMStatusRunning || vm.Status == model.VMStatusStarting {
 			if !includeAll {
 				continue
 			}
@@ -754,7 +754,7 @@ func (op *Operation) VMStart(ctx context.Context, input inputs.VMInput) *errs.Ba
 		vmLocal := v
 
 		// If VM is stopped, respawn Firecracker process (matches Python's _respawn_firecracker)
-		if vmLocal.Status == model.StatusStopped {
+		if vmLocal.Status == model.VMStatusStopped {
 			if err := op.vmRespawnFirecracker(ctx, vmLocal, false); err != nil {
 				results = append(results, errs.OperationResult{
 					Status: "error", Code: "vm.start_failed",
@@ -1070,9 +1070,9 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snap
 	pst := spawner.ProcessStartTime()
 	_ = op.Repos.VM.UpdateProcessInfo(ctx, v.ID, pid, pst)
 
-	newStatus := model.StatusRunning
+	newStatus := model.VMStatusRunning
 	if snapshotMode {
-		newStatus = model.StatusPaused
+		newStatus = model.VMStatusPaused
 	}
 	_ = op.Repos.VM.UpdateStatus(ctx, v.ID, newStatus)
 
@@ -1191,7 +1191,7 @@ func (op *Operation) VMLoad(
 	// so the API socket is available for PUT /snapshot/load (matches Python logic).
 	// Python: if vm.status == VMStatus.STOPPED.value: _respawn_firecracker(vm, snapshot_mode=True)
 	//         repo = Repository(Database()); updated = repo.get(vm.id); if updated: vm = updated
-	if vmItem.Status == model.StatusStopped {
+	if vmItem.Status == model.VMStatusStopped {
 		if err := op.vmRespawnFirecracker(ctx, vmItem, true); err != nil {
 			return &errs.DomainError{
 				Code:    "vm.load_snapshot_failed",
@@ -1495,7 +1495,7 @@ func (op *Operation) VMAttachVolume(
 	}
 
 	// Hotplug on running VM (matches Python: if vm.status == VMStatus.RUNNING)
-	if vmItem.Status == model.StatusRunning {
+	if vmItem.Status == model.VMStatusRunning {
 		// Version gate: hotplug requires Firecracker v1.16+ (matches Python's VersionGate.require)
 		if vmItem.BinaryID != "" {
 			bin, _ := op.Repos.Binary.Get(ctx, vmItem.BinaryID)
@@ -1515,7 +1515,14 @@ func (op *Operation) VMAttachVolume(
 		// Try Firecracker API hotplug (matches Python's try: controller.attach_volume(vol) except Exception: logger.warning)
 		controller, ctrlErr := vm.NewController(ctx, vmItem, op.Repos.VM)
 		if ctrlErr == nil {
-			if err := controller.AttachVolume(ctx, vol); err != nil {
+			if err := controller.AttachVolume(ctx, model.DriveConfig{
+				DriveID:      vol.ID,
+				PathOnHost:   vol.Path,
+				IsRootDevice: false,
+				IsReadOnly:   vol.IsReadOnly,
+				CacheType:    "Unsafe",
+				IOEngine:     "Sync",
+			}); err != nil {
 				slog.Warn("Hotplug failed for drive", "volume", vol.ID, "error", err)
 			}
 		}
@@ -1611,7 +1618,7 @@ func (op *Operation) VMDetachVolume(
 	}
 
 	// Hot-unplug if running (matches Python: if vm.status == VMStatus.RUNNING)
-	if vmItem.Status == model.StatusRunning {
+	if vmItem.Status == model.VMStatusRunning {
 		// Version gate: hot-unplug requires Firecracker v1.16+ (matches Python's VersionGate.require)
 		if vmItem.BinaryID != "" {
 			bin, _ := op.Repos.Binary.Get(ctx, vmItem.BinaryID)
@@ -2676,7 +2683,7 @@ func (c *vmCreateContext) toModel() *model.VM {
 		PID:              ptr.SafeDerefInt(c.spawner.PID()),
 		ExitCode:         nil,
 		ProcessStartTime: c.spawner.ProcessStartTime(),
-		Status:           model.StatusRunning,
+		Status:           model.VMStatusRunning,
 		IPv4:             c.guestIP,
 		MAC:              c.guestMAC,
 		NetworkID:        c.resolved.Network.ID,

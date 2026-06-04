@@ -1274,7 +1274,7 @@ func (b *VMCreateBuilder) FromVM(ctx context.Context, vmEntity *model.VM) (*VMCr
 	resolved := &VMCreateResolved{
 		Name:       vmEntity.Name,
 		VMID:       vmEntity.ID,
-		VMDir:      infra.GetVmDir(vmEntity.ID),
+		VMDir:      infra.GetVMDirByID(vmEntity.ID),
 		VCPUCount:  vmEntity.VCPUCount,
 		MemSizeMib: vmEntity.MemSizeMiB,
 		// Python: vm.ssh_user if vm.ssh_user else str(SettingsService.resolve(...))

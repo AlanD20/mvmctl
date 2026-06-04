@@ -4,49 +4,49 @@ package model
 
 // ── Status (VM lifecycle) ──
 
-// Status is the VM lifecycle status type, matching Python's VMStatus(StrEnum).
-type Status string
+// VMStatus is the VM lifecycle status type, matching Python's VMStatus(StrEnum).
+type VMStatus string
 
 const (
-	StatusStarting Status = "starting"
-	StatusRunning  Status = "running"
-	StatusPaused   Status = "paused"
-	StatusStopping Status = "stopping"
-	StatusStopped  Status = "stopped"
-	StatusCrashed  Status = "crashed"
-	StatusError    Status = "error"
+	VMStatusStarting VMStatus = "starting"
+	VMStatusRunning  VMStatus = "running"
+	VMStatusPaused   VMStatus = "paused"
+	VMStatusStopping VMStatus = "stopping"
+	VMStatusStopped  VMStatus = "stopped"
+	VMStatusCrashed  VMStatus = "crashed"
+	VMStatusError    VMStatus = "error"
 )
 
 // ── VM ──
 
 // VM matches Python's VMInstanceItem dataclass exactly.
 type VM struct {
-	ID            string `json:"id"              db:"id"`
-	Name          string `json:"name"            db:"name"`
-	Status        Status `json:"status"          db:"status"`
-	PID           int    `json:"pid"             db:"pid"`
-	IPv4          string `json:"ipv4"            db:"ipv4"`
-	MAC           string `json:"mac"             db:"mac"`
-	NetworkID     string `json:"network_id"      db:"network_id"`
-	TapDevice     string `json:"tap_device"      db:"tap_device"`
-	ImageID       string `json:"image_id"        db:"image_id"`
-	KernelID      string `json:"kernel_id"       db:"kernel_id"`
-	BinaryID      string `json:"binary_id"       db:"binary_id"`
-	APISocketPath string `json:"api_socket_path" db:"api_socket_path"`
-	ConfigPath    string `json:"config_path"     db:"config_path"`
-	CloudInitMode string `json:"cloud_init_mode" db:"cloud_init_mode"`
-	VCPUCount     int    `json:"vcpu_count"      db:"vcpu_count"`
-	MemSizeMiB    int    `json:"mem_size_mib"    db:"mem_size_mib"`
-	DiskSizeMiB   int    `json:"disk_size_mib"   db:"disk_size_mib"`
-	RootfsPath    string `json:"rootfs_path"     db:"rootfs_path"`
-	RootfsSuffix  string `json:"rootfs_suffix"   db:"rootfs_suffix"`
-	PCIEnabled    bool   `json:"pci_enabled"     db:"pci_enabled"`
-	NestedVirt    bool   `json:"nested_virt"     db:"nested_virt"`
-	EnableLogging bool   `json:"enable_logging"  db:"enable_logging"`
-	EnableMetrics bool   `json:"enable_metrics"  db:"enable_metrics"`
-	EnableConsole bool   `json:"enable_console"  db:"enable_console"`
-	CreatedAt     string `json:"created_at"      db:"created_at"`
-	UpdatedAt     string `json:"updated_at"      db:"updated_at"`
+	ID            string   `json:"id"              db:"id"`
+	Name          string   `json:"name"            db:"name"`
+	Status        VMStatus `json:"status"          db:"status"`
+	PID           int      `json:"pid"             db:"pid"`
+	IPv4          string   `json:"ipv4"            db:"ipv4"`
+	MAC           string   `json:"mac"             db:"mac"`
+	NetworkID     string   `json:"network_id"      db:"network_id"`
+	TapDevice     string   `json:"tap_device"      db:"tap_device"`
+	ImageID       string   `json:"image_id"        db:"image_id"`
+	KernelID      string   `json:"kernel_id"       db:"kernel_id"`
+	BinaryID      string   `json:"binary_id"       db:"binary_id"`
+	APISocketPath string   `json:"api_socket_path" db:"api_socket_path"`
+	ConfigPath    string   `json:"config_path"     db:"config_path"`
+	CloudInitMode string   `json:"cloud_init_mode" db:"cloud_init_mode"`
+	VCPUCount     int      `json:"vcpu_count"      db:"vcpu_count"`
+	MemSizeMiB    int      `json:"mem_size_mib"    db:"mem_size_mib"`
+	DiskSizeMiB   int      `json:"disk_size_mib"   db:"disk_size_mib"`
+	RootfsPath    string   `json:"rootfs_path"     db:"rootfs_path"`
+	RootfsSuffix  string   `json:"rootfs_suffix"   db:"rootfs_suffix"`
+	PCIEnabled    bool     `json:"pci_enabled"     db:"pci_enabled"`
+	NestedVirt    bool     `json:"nested_virt"     db:"nested_virt"`
+	EnableLogging bool     `json:"enable_logging"  db:"enable_logging"`
+	EnableMetrics bool     `json:"enable_metrics"  db:"enable_metrics"`
+	EnableConsole bool     `json:"enable_console"  db:"enable_console"`
+	CreatedAt     string   `json:"created_at"      db:"created_at"`
+	UpdatedAt     string   `json:"updated_at"      db:"updated_at"`
 
 	// Optional fields
 	RelaySocketPath  *string `json:"relay_socket_path,omitempty"  db:"relay_socket_path"`

@@ -333,7 +333,7 @@ func (r *VMRepo) Upsert(_ context.Context, v *model.VM) error {
 	return nil
 }
 
-func (r *VMRepo) UpdateStatus(_ context.Context, id string, status model.Status) error {
+func (r *VMRepo) UpdateStatus(_ context.Context, id string, status model.VMStatus) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if v, ok := r.vms[id]; ok {

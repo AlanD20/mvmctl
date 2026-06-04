@@ -153,7 +153,7 @@ func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput,
 
 				// Python: try: ctrl.detach_volume(volume) except Exception: pass
 				if vmCtrl, ctrlErr := vm.NewController(ctx, vmItem, op.Repos.VM); ctrlErr == nil {
-					_ = vmCtrl.DetachVolume(ctx, vol)
+					_ = vmCtrl.DetachVolume(ctx, vol.ID)
 				}
 			}
 		}

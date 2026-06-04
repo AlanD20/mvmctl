@@ -2,6 +2,7 @@ package vm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -58,18 +59,14 @@ func NewController(ctx context.Context, entity any, repo Repository) (*Controlle
 func (c *Controller) Stop(ctx context.Context, force bool) error {
 	var handler *system.ProcessSignalHandler
 	if c.vm.PID > 0 {
-		if c.vm.ProcessStartTime != nil {
-			handler = system.NewProcessSignalHandler(
-				c.vm.PID,
-				system.WithIsChild(true),
-				system.WithExpectedStartTime(*c.vm.ProcessStartTime),
-			)
-		} else {
-			handler = system.NewProcessSignalHandler(
-				c.vm.PID,
-				system.WithIsChild(true),
-			)
+		cfg := system.ProcessSignalHandlerConfig{
+			PID:     c.vm.PID,
+			IsChild: true,
 		}
+		if c.vm.ProcessStartTime != nil {
+			cfg.ExpectedStartTime = c.vm.ProcessStartTime
+		}
+		handler = system.NewProcessSignalHandler(cfg)
 	}
 
 	// ── Non-running VMs: idempotent + orphan cleanup ──
@@ -79,13 +76,13 @@ func (c *Controller) Stop(ctx context.Context, force bool) error {
 	//
 	// Python calls update_status() OUTSIDE the try/except block in this
 	// code path, so exceptions must propagate to caller — NOT absorbed.
-	if c.vm.Status != model.StatusRunning && c.vm.Status != model.StatusStarting {
+	if c.vm.Status != model.VMStatusRunning && c.vm.Status != model.VMStatusStarting {
 		if c.vm.PID != 0 && handler.IsAlive() {
 			handler.Kill()
-			if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.StatusStopped); err != nil {
+			if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusStopped); err != nil {
 				return err
 			}
-			c.vm.Status = model.StatusStopped
+			c.vm.Status = model.VMStatusStopped
 		}
 		return nil
 	}
@@ -94,7 +91,7 @@ func (c *Controller) Stop(ctx context.Context, force bool) error {
 	// Python calls update_status() OUTSIDE try/except — exception propagates.
 	// Python does NOT update in-memory status here (only DB).
 	if c.vm.PID == 0 || !handler.IsAlive() {
-		if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.StatusStopped); err != nil {
+		if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusStopped); err != nil {
 			return err
 		}
 		return nil
@@ -111,15 +108,15 @@ func (c *Controller) Stop(ctx context.Context, force bool) error {
 	//
 	// In Python, update_status(STOPPING) is BEFORE the try block — exception propagates.
 	// Python does NOT update in-memory status in any normal-stop path (only in DB).
-	if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.StatusStopping); err != nil {
+	if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusStopping); err != nil {
 		return err
 	}
 
-	stopErr := c.normalStop(ctx, force, handler)
+	stopErr := c.shutdownProcess(ctx, force, handler)
 	if stopErr != nil {
 		// Python catches ANY exception and sets status to ERROR, then returns
 		// None (error absorbed). The error is logged but NOT returned to caller.
-		if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.StatusError); err != nil {
+		if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusError); err != nil {
 			slog.Warn("Failed to update VM status to ERROR", "error", err)
 		}
 		slog.Warn("Failed to stop VM", "name", c.vm.Name, "error", stopErr)
@@ -129,31 +126,28 @@ func (c *Controller) Stop(ctx context.Context, force bool) error {
 	return nil
 }
 
-// normalStop contains the normal-stop logic that Python wraps in try/except.
-// Any error returned here causes Stop() to set status to ERROR per Python behavior.
-func (c *Controller) normalStop(ctx context.Context, force bool, handler *system.ProcessSignalHandler) error {
+// shutdownProcess handles the actual Firecracker process shutdown.
+// This is the "normal stop" logic from Python's try/except block in Stop().
+// Any error returned causes Stop() to set DB status to ERROR.
+func (c *Controller) shutdownProcess(ctx context.Context, force bool, handler *system.ProcessSignalHandler) error {
 	var exitCode *int
 
 	if !force && c.vm.APISocketPath != "" {
-		// Resolve full path: Python joins vm_dir / api_socket_path
-		apiSocket := filepath.Join(infra.GetVmDir(c.vm.ID), c.vm.APISocketPath)
+		apiSocket := filepath.Join(infra.GetVMDirByID(c.vm.ID), c.vm.APISocketPath)
 
 		// Try graceful shutdown via Firecracker API first
 		client := NewFirecrackerClient(apiSocket)
 		wasCtrlAltDel, ctrlErr := client.SendCtrlAltDel(ctx)
 		client.Close()
 
-		if ctrlErr != nil {
-			// Non-MVMError propagated through — fall through to signal-based
-			// shutdown (matches Python's: except Exception: exit_code = None)
-		} else if wasCtrlAltDel {
-			// Wait for guest OS shutdown via pre_signal_hook
-			// pre_signal_hook=lambda: False means "hook handled it, just wait"
+		// If Ctrl+Alt+Del was sent, use hook-based wait: the guest OS
+		// initiates shutdown, and the hook (returns false) tells the
+		// signal handler to wait rather than sending SIGTERM.
+		if ctrlErr == nil && wasCtrlAltDel {
 			exitCode = handler.GracefulShutdown(func() bool { return false })
 		}
-		// If wasCtrlAltDel was false (API failed), exitCode stays nil,
-		// matching Python's: except Exception: exit_code = None
 
+		// Fallback: signal-based shutdown (SIGTERM → wait → SIGKILL)
 		if exitCode == nil {
 			exitCode = handler.GracefulShutdown(nil)
 		}
@@ -164,9 +158,9 @@ func (c *Controller) normalStop(ctx context.Context, force bool, handler *system
 		exitCode = handler.GracefulShutdown(nil)
 	}
 
-	// Capture exit code if not already captured
+	// Capture exit code if not already captured (non-blocking)
 	if exitCode == nil {
-		exitCode = handler.WaitAndCaptureExit()
+		exitCode = handler.TryCaptureExit()
 	}
 
 	// Persist exit code to database
@@ -177,7 +171,7 @@ func (c *Controller) normalStop(ctx context.Context, force bool, handler *system
 	}
 
 	// Update status to STOPPED
-	if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.StatusStopped); err != nil {
+	if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusStopped); err != nil {
 		return err
 	}
 	return nil
@@ -191,46 +185,56 @@ func (c *Controller) Pause(ctx context.Context) error {
 	name := c.vm.Name
 
 	// No-op — already paused
-	if c.vm.Status == model.StatusPaused {
+	if c.vm.Status == model.VMStatusPaused {
 		return nil
 	}
 
 	// Cannot pause from these states
-	if c.vm.Status == model.StatusStarting {
-		return &ControllerStateError{
+	if c.vm.Status == model.VMStatusStarting {
+		return &errs.DomainError{
+			Code:    errs.CodeVMStateInvalid,
+			Op:      "vm.controller",
 			Message: fmt.Sprintf("VM '%s' is still starting — cannot pause (current state: %s)", name, c.vm.Status),
+			Class:   errs.ClassValidation,
 		}
 	}
-	if c.vm.Status == model.StatusStopped {
-		return &ControllerStateError{
+	if c.vm.Status == model.VMStatusStopped {
+		return &errs.DomainError{
+			Code:    errs.CodeVMStateInvalid,
+			Op:      "vm.controller",
 			Message: fmt.Sprintf("VM '%s' is stopped — cannot pause (current state: %s)", name, c.vm.Status),
+			Class:   errs.ClassValidation,
 		}
 	}
-	if c.vm.Status == model.StatusStopping {
-		return &ControllerStateError{
+	if c.vm.Status == model.VMStatusStopping {
+		return &errs.DomainError{
+			Code:    errs.CodeVMStateInvalid,
+			Op:      "vm.controller",
 			Message: fmt.Sprintf("VM '%s' is shutting down — cannot pause (current state: %s)", name, c.vm.Status),
+			Class:   errs.ClassValidation,
 		}
 	}
-	if c.vm.Status == model.StatusError || c.vm.Status == model.StatusCrashed {
-		return &ControllerStateError{
-			Message: fmt.Sprintf(
-				"VM '%s' is in %s state — cannot pause (current state: %s)",
-				name,
-				c.vm.Status,
-				c.vm.Status,
-			),
+	if c.vm.Status == model.VMStatusError || c.vm.Status == model.VMStatusCrashed {
+		return &errs.DomainError{
+			Code:    errs.CodeVMStateInvalid,
+			Op:      "vm.controller",
+			Message: fmt.Sprintf("VM '%s' is in %s state — cannot pause (current state: %s)", name, c.vm.Status, c.vm.Status),
+			Class:   errs.ClassValidation,
 		}
 	}
 
 	// Valid transition — must be RUNNING
 	if c.vm.APISocketPath == "" {
-		return &ControllerStateError{
+		return &errs.DomainError{
+			Code:    errs.CodeVMStateInvalid,
+			Op:      "vm.controller",
 			Message: fmt.Sprintf("VM '%s' has no API socket enabled", name),
+			Class:   errs.ClassValidation,
 		}
 	}
 
 	// Resolve full path: Python joins vm_dir / api_socket_path
-	apiSocket := filepath.Join(infra.GetVmDir(c.vm.ID), c.vm.APISocketPath)
+	apiSocket := filepath.Join(infra.GetVMDirByID(c.vm.ID), c.vm.APISocketPath)
 	client := NewFirecrackerClient(apiSocket)
 	// Python: try: ... finally: client.close()
 	defer client.Close()
@@ -240,7 +244,7 @@ func (c *Controller) Pause(ctx context.Context) error {
 	}
 
 	// Python does NOT update in-memory status here — only DB.
-	if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.StatusPaused); err != nil {
+	if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusPaused); err != nil {
 		return err
 	}
 	return nil
@@ -252,49 +256,52 @@ func (c *Controller) Resume(ctx context.Context) error {
 	name := c.vm.Name
 
 	// No-op — already in or moving toward target state (RUNNING)
-	if c.vm.Status == model.StatusRunning || c.vm.Status == model.StatusStarting {
+	if c.vm.Status == model.VMStatusRunning || c.vm.Status == model.VMStatusStarting {
 		return nil
 	}
 
 	// Error/crashed state
-	if c.vm.Status == model.StatusError || c.vm.Status == model.StatusCrashed {
-		return &ControllerStateError{
-			Message: fmt.Sprintf(
-				"VM '%s' is in %s state — remove and recreate (current state: %s)",
-				name,
-				c.vm.Status,
-				c.vm.Status,
-			),
+	if c.vm.Status == model.VMStatusError || c.vm.Status == model.VMStatusCrashed {
+		return &errs.DomainError{
+			Code:    errs.CodeVMStateInvalid,
+			Op:      "vm.controller",
+			Message: fmt.Sprintf("VM '%s' is in %s state — remove and recreate (current state: %s)", name, c.vm.Status, c.vm.Status),
+			Class:   errs.ClassValidation,
 		}
 	}
 
 	// Wrong direction — stopped
-	if c.vm.Status == model.StatusStopped {
-		return &ControllerStateError{
+	if c.vm.Status == model.VMStatusStopped {
+		return &errs.DomainError{
+			Code:    errs.CodeVMStateInvalid,
+			Op:      "vm.controller",
 			Message: fmt.Sprintf("VM '%s' is stopped — use start() instead (current state: %s)", name, c.vm.Status),
+			Class:   errs.ClassValidation,
 		}
 	}
 
 	// Wrong direction — shutting down
-	if c.vm.Status == model.StatusStopping {
-		return &ControllerStateError{
-			Message: fmt.Sprintf(
-				"VM '%s' is shutting down — use start() after it stops (current state: %s)",
-				name,
-				c.vm.Status,
-			),
+	if c.vm.Status == model.VMStatusStopping {
+		return &errs.DomainError{
+			Code:    errs.CodeVMStateInvalid,
+			Op:      "vm.controller",
+			Message: fmt.Sprintf("VM '%s' is shutting down — use start() after it stops (current state: %s)", name, c.vm.Status),
+			Class:   errs.ClassValidation,
 		}
 	}
 
 	// Valid transition — must be PAUSED
 	if c.vm.APISocketPath == "" {
-		return &ControllerStateError{
+		return &errs.DomainError{
+			Code:    errs.CodeVMStateInvalid,
+			Op:      "vm.controller",
 			Message: fmt.Sprintf("VM '%s' has no API socket enabled", name),
+			Class:   errs.ClassValidation,
 		}
 	}
 
 	// Resolve full path: Python joins vm_dir / api_socket_path
-	apiSocket := filepath.Join(infra.GetVmDir(c.vm.ID), c.vm.APISocketPath)
+	apiSocket := filepath.Join(infra.GetVMDirByID(c.vm.ID), c.vm.APISocketPath)
 	client := NewFirecrackerClient(apiSocket)
 	// Python: try: ... finally: client.close()
 	defer client.Close()
@@ -304,7 +311,7 @@ func (c *Controller) Resume(ctx context.Context) error {
 	}
 
 	// Python does NOT update in-memory status here — only DB.
-	if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.StatusRunning); err != nil {
+	if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusRunning); err != nil {
 		return err
 	}
 	return nil
@@ -322,39 +329,43 @@ func (c *Controller) Start(ctx context.Context) error {
 
 	// No-op — already in or moving toward target state (RUNNING),
 	// or will be stopped soon (retry start after)
-	if c.vm.Status == model.StatusRunning || c.vm.Status == model.StatusStarting ||
-		c.vm.Status == model.StatusStopping {
+	if c.vm.Status == model.VMStatusRunning || c.vm.Status == model.VMStatusStarting ||
+		c.vm.Status == model.VMStatusStopping {
 		return nil
 	}
 
 	// Error/crashed state
-	if c.vm.Status == model.StatusError || c.vm.Status == model.StatusCrashed {
-		return &ControllerStateError{
-			Message: fmt.Sprintf(
-				"VM '%s' is in %s state — remove and recreate (current state: %s)",
-				name,
-				c.vm.Status,
-				c.vm.Status,
-			),
+	if c.vm.Status == model.VMStatusError || c.vm.Status == model.VMStatusCrashed {
+		return &errs.DomainError{
+			Code:    errs.CodeVMStateInvalid,
+			Op:      "vm.controller",
+			Message: fmt.Sprintf("VM '%s' is in %s state — remove and recreate (current state: %s)", name, c.vm.Status, c.vm.Status),
+			Class:   errs.ClassValidation,
 		}
 	}
 
 	// Wrong direction — paused
-	if c.vm.Status == model.StatusPaused {
-		return &ControllerStateError{
+	if c.vm.Status == model.VMStatusPaused {
+		return &errs.DomainError{
+			Code:    errs.CodeVMStateInvalid,
+			Op:      "vm.controller",
 			Message: fmt.Sprintf("VM '%s' is paused — use resume() instead (current state: %s)", name, c.vm.Status),
+			Class:   errs.ClassValidation,
 		}
 	}
 
 	// Valid transition — must be STOPPED
 	if c.vm.APISocketPath == "" {
-		return &ControllerStateError{
+		return &errs.DomainError{
+			Code:    errs.CodeVMStateInvalid,
+			Op:      "vm.controller",
 			Message: fmt.Sprintf("VM '%s' has no API socket enabled", name),
+			Class:   errs.ClassValidation,
 		}
 	}
 
 	// Resolve full path: Python joins vm_dir / api_socket_path
-	apiSocket := filepath.Join(infra.GetVmDir(c.vm.ID), c.vm.APISocketPath)
+	apiSocket := filepath.Join(infra.GetVMDirByID(c.vm.ID), c.vm.APISocketPath)
 	client := NewFirecrackerClient(apiSocket)
 	// Python: try: ... finally: client.close()
 	defer client.Close()
@@ -364,7 +375,7 @@ func (c *Controller) Start(ctx context.Context) error {
 	}
 
 	// Python does NOT update in-memory status here — only DB.
-	if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.StatusRunning); err != nil {
+	if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusRunning); err != nil {
 		return err
 	}
 	return nil
@@ -381,74 +392,86 @@ func (c *Controller) Reboot(ctx context.Context, force bool) error {
 
 // ── Snapshot ──
 // Matches Python's VMController.snapshot(mem_out, state_out) exactly.
-// Uses named return (err) so the defer can propagate non-MVMError from the
+// Uses named return (err) so the defer can propagate non-DomainError from the
 // resume path, matching Python's finally/except MVMError behavior.
 func (c *Controller) Snapshot(ctx context.Context, memOut, stateOut string) (err error) {
 	name := c.vm.Name
 
 	// Validate state — snapshot requires RUNNING or PAUSED
-	if c.vm.Status == model.StatusStarting {
-		return &ControllerStateError{
+	if c.vm.Status == model.VMStatusStarting {
+		return &errs.DomainError{
+			Code:    errs.CodeVMStateInvalid,
+			Op:      "vm.controller",
 			Message: fmt.Sprintf("VM '%s' is still starting — cannot snapshot (current state: %s)", name, c.vm.Status),
+			Class:   errs.ClassValidation,
 		}
 	}
-	if c.vm.Status == model.StatusStopped {
-		return &ControllerStateError{
+	if c.vm.Status == model.VMStatusStopped {
+		return &errs.DomainError{
+			Code:    errs.CodeVMStateInvalid,
+			Op:      "vm.controller",
 			Message: fmt.Sprintf("VM '%s' is stopped — cannot snapshot (current state: %s)", name, c.vm.Status),
+			Class:   errs.ClassValidation,
 		}
 	}
-	if c.vm.Status == model.StatusStopping {
-		return &ControllerStateError{
+	if c.vm.Status == model.VMStatusStopping {
+		return &errs.DomainError{
+			Code:    errs.CodeVMStateInvalid,
+			Op:      "vm.controller",
 			Message: fmt.Sprintf("VM '%s' is shutting down — cannot snapshot (current state: %s)", name, c.vm.Status),
+			Class:   errs.ClassValidation,
 		}
 	}
-	if c.vm.Status == model.StatusError || c.vm.Status == model.StatusCrashed {
-		return &ControllerStateError{
-			Message: fmt.Sprintf(
-				"VM '%s' is in %s state — cannot snapshot (current state: %s)",
-				name,
-				c.vm.Status,
-				c.vm.Status,
-			),
+	if c.vm.Status == model.VMStatusError || c.vm.Status == model.VMStatusCrashed {
+		return &errs.DomainError{
+			Code:    errs.CodeVMStateInvalid,
+			Op:      "vm.controller",
+			Message: fmt.Sprintf("VM '%s' is in %s state — cannot snapshot (current state: %s)", name, c.vm.Status, c.vm.Status),
+			Class:   errs.ClassValidation,
 		}
 	}
 
 	if c.vm.APISocketPath == "" {
-		return &ControllerStateError{
+		return &errs.DomainError{
+			Code:    errs.CodeVMStateInvalid,
+			Op:      "vm.controller",
 			Message: fmt.Sprintf("Socket not found for VM '%s'. Must be running with --enable-api-socket", name),
+			Class:   errs.ClassValidation,
 		}
 	}
 
 	// Resolve full path: Python joins vm_dir / api_socket_path
-	apiSocket := filepath.Join(infra.GetVmDir(c.vm.ID), c.vm.APISocketPath)
+	apiSocket := filepath.Join(infra.GetVMDirByID(c.vm.ID), c.vm.APISocketPath)
 	client := NewFirecrackerClient(apiSocket)
-	wasRunning := c.vm.Status == model.StatusRunning
+	wasRunning := c.vm.Status == model.VMStatusRunning
 
 	defer func() {
 		// Resume if we paused it
 		// Python's try/except catches MVMError from BOTH resume_vm AND update_status
 		// in the same except block — if either fails (with MVMError), we log a
 		// warning and leave the VM in paused state.
-		// Only MVMError-equivalent errors (Firecracker client / domain errors) are
-		// absorbed; unexpected errors propagate to the caller via named return err.
+		// Only DomainError-equivalent errors are absorbed; unexpected errors
+		// propagate to the caller via named return err.
 		if wasRunning {
 			if resumeErr := client.ResumeVM(ctx); resumeErr != nil {
-				if isMVMError(resumeErr) {
+				var de *errs.DomainError
+				if errors.As(resumeErr, &de) {
 					slog.Warn("Failed to resume VM after snapshot — leaving in paused state", "name", name)
 				} else {
-					// Non-MVMError propagates (matches Python's except MVMError:
+					// Non-DomainError propagates (matches Python's except MVMError:
 					// non-MVMError from resume_vm or update_status replaces
 					// the original error in the finally block).
 					err = resumeErr
 				}
-			} else if updateErr := c.repo.UpdateStatus(ctx, c.vm.ID, model.StatusRunning); updateErr != nil {
-				if isMVMError(updateErr) {
+			} else if updateErr := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusRunning); updateErr != nil {
+				var de *errs.DomainError
+				if errors.As(updateErr, &de) {
 					slog.Warn("Failed to resume VM after snapshot — leaving in paused state", "name", name)
 				} else {
 					err = updateErr
 				}
 			} else {
-				c.vm.Status = model.StatusRunning
+				c.vm.Status = model.VMStatusRunning
 			}
 		}
 		client.Close()
@@ -461,10 +484,10 @@ func (c *Controller) Snapshot(ctx context.Context, memOut, stateOut string) (err
 		}
 		// Python's update_status() is inside the try block — if it fails,
 		// the exception propagates through finally (resume + close).
-		if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.StatusPaused); err != nil {
+		if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusPaused); err != nil {
 			return err
 		}
-		c.vm.Status = model.StatusPaused
+		c.vm.Status = model.VMStatusPaused
 	}
 
 	_, snapshotErr := client.CreateSnapshot(ctx, memOut, stateOut)
@@ -478,13 +501,16 @@ func (c *Controller) Snapshot(ctx context.Context, memOut, stateOut string) (err
 // Matches Python's VMController.load_snapshot(mem_in, state_in, resume_after=False).
 func (c *Controller) LoadSnapshot(ctx context.Context, memIn, stateIn string, resumeAfter bool) error {
 	if c.vm.APISocketPath == "" {
-		return &ControllerStateError{
+		return &errs.DomainError{
+			Code:    errs.CodeVMStateInvalid,
+			Op:      "vm.controller",
 			Message: fmt.Sprintf("Socket not found for VM '%s'. Must be running with --enable-api-socket", c.vm.Name),
+			Class:   errs.ClassValidation,
 		}
 	}
 
 	// Resolve full path: Python joins vm_dir / api_socket_path
-	apiSocket := filepath.Join(infra.GetVmDir(c.vm.ID), c.vm.APISocketPath)
+	apiSocket := filepath.Join(infra.GetVMDirByID(c.vm.ID), c.vm.APISocketPath)
 	client := NewFirecrackerClient(apiSocket)
 	// Python: try: ... finally: client.close()
 	defer client.Close()
@@ -496,59 +522,25 @@ func (c *Controller) LoadSnapshot(ctx context.Context, memIn, stateIn string, re
 	// Update status based on whether VM was resumed
 	// Python's update_status() is NOT in a try block — exception propagates.
 	if resumeAfter {
-		if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.StatusRunning); err != nil {
+		if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusRunning); err != nil {
 			return err
 		}
-		c.vm.Status = model.StatusRunning
+		c.vm.Status = model.VMStatusRunning
 	} else {
-		if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.StatusPaused); err != nil {
+		if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusPaused); err != nil {
 			return err
 		}
-		c.vm.Status = model.StatusPaused
+		c.vm.Status = model.VMStatusPaused
 	}
 	return nil
 }
 
 // ── AttachVolume ──
-// Matches Python's VMController.attach_volume(vol).
-// Takes `any` because core vm cannot import volume package (architectural constraint).
-// Validates that the value has the expected fields at runtime.
-//
-// NOTE(verdict#2): This is NOT a pure state-transition operation (start/stop/pause/resume).
-// It is placed here because the VM controller manages the Firecracker process lifecycle
-// and needs to modify drive configs at runtime. A future refactor should move this to the
-// service layer when the architectural constraint on core imports is resolved.
-func (c *Controller) AttachVolume(ctx context.Context, vol any) error {
-	var driveID, path string
-	var isReadOnly bool
-
-	switch v := vol.(type) {
-	case map[string]any:
-		driveID, _ = v["id"].(string)
-		path, _ = v["path"].(string)
-		isReadOnly, _ = v["is_read_only"].(bool)
-		if driveID == "" {
-			return fmt.Errorf("AttachVolume: volume must have a non-empty 'id' field")
-		}
-		if path == "" {
-			return fmt.Errorf("AttachVolume: volume must have a non-empty 'path' field")
-		}
-	default:
-		return fmt.Errorf("AttachVolume: invalid volume type %T (expected map with 'id' and 'path')", vol)
-	}
-
-	driveConfig := model.DriveConfig{
-		DriveID:      driveID,
-		PathOnHost:   path,
-		IsRootDevice: false,
-		IsReadOnly:   isReadOnly,
-		CacheType:    "Unsafe",
-		IOEngine:     "Sync",
-	}
-
-	// Resolve full paths: Python joins vm_dir / api_socket_path and vm_dir / config_path
-	apiSocket := filepath.Join(infra.GetVmDir(c.vm.ID), c.vm.APISocketPath)
-	configPath := filepath.Join(infra.GetVmDir(c.vm.ID), c.vm.ConfigPath)
+// AttachVolume hotplugs a drive into the running Firecracker process and
+// persists the config so it survives reboot.
+func (c *Controller) AttachVolume(ctx context.Context, driveConfig model.DriveConfig) error {
+	apiSocket := filepath.Join(infra.GetVMDirByID(c.vm.ID), c.vm.APISocketPath)
+	configPath := filepath.Join(infra.GetVMDirByID(c.vm.ID), c.vm.ConfigPath)
 
 	// Hotplug into the running Firecracker process
 	client := NewFirecrackerClient(apiSocket)
@@ -564,35 +556,16 @@ func (c *Controller) AttachVolume(ctx context.Context, vol any) error {
 		return err
 	}
 
-	slog.Info("Attached volume", "drive_id", driveID, "vm", c.vm.Name)
+	slog.Info("Attached volume", "drive_id", driveConfig.DriveID, "vm", c.vm.Name)
 	return nil
 }
 
 // ── DetachVolume ──
-// Matches Python's VMController.detach_volume(vol).
-// Takes `any` because core vm cannot import volume package (architectural constraint).
-// Validates that the value has the expected fields at runtime.
-//
-// NOTE(verdict#2): This is NOT a pure state-transition operation (start/stop/pause/resume).
-// It is placed here because the VM controller manages the Firecracker process lifecycle
-// and needs to modify drive configs at runtime. A future refactor should move this to the
-// service layer when the architectural constraint on core imports is resolved.
-func (c *Controller) DetachVolume(ctx context.Context, vol any) error {
-	var driveID string
-
-	switch v := vol.(type) {
-	case map[string]any:
-		driveID, _ = v["id"].(string)
-		if driveID == "" {
-			return fmt.Errorf("DetachVolume: volume must have a non-empty 'id' field")
-		}
-	default:
-		return fmt.Errorf("DetachVolume: invalid volume type %T (expected map with 'id')", vol)
-	}
-
-	// Resolve full paths: Python joins vm_dir / api_socket_path and vm_dir / config_path
-	apiSocket := filepath.Join(infra.GetVmDir(c.vm.ID), c.vm.APISocketPath)
-	configPath := filepath.Join(infra.GetVmDir(c.vm.ID), c.vm.ConfigPath)
+// DetachVolume hot-unplugs a drive from the running Firecracker process and
+// removes it from the persisted config.
+func (c *Controller) DetachVolume(ctx context.Context, driveID string) error {
+	apiSocket := filepath.Join(infra.GetVMDirByID(c.vm.ID), c.vm.APISocketPath)
+	configPath := filepath.Join(infra.GetVMDirByID(c.vm.ID), c.vm.ConfigPath)
 
 	// Call Firecracker API to delete the drive
 	client := NewFirecrackerClient(apiSocket)
@@ -610,38 +583,4 @@ func (c *Controller) DetachVolume(ctx context.Context, vol any) error {
 
 	slog.Info("Detached volume", "drive_id", driveID, "vm", c.vm.Name)
 	return nil
-}
-
-// ── Error type matching Python's VMStateError ──
-
-// ControllerStateError matches Python's VMStateError with exact error messages.
-type ControllerStateError struct {
-	Message string
-}
-
-func (e *ControllerStateError) Error() string {
-	return e.Message
-}
-
-// IsMVMError marks ControllerStateError as an MVMError subclass for the enricher's
-// soft-fail interface check. Matches Python's VMStateError inheriting from VMError
-// which inherits from MVMError.
-func (e *ControllerStateError) IsMVMError() bool { return true }
-
-// isMVMError checks if an error matches Python's MVMError hierarchy.
-// Used to match Python's "except MVMError" catch blocks.
-// In Python, FirecrackerClientError, SocketNotFoundError, FirecrackerSpawnError,
-// FirecrackerConfigError, ControllerStateError, and DomainError are all subclasses
-// of MVMError, so they must also be absorbed, not propagated.
-func isMVMError(err error) bool {
-	if err == nil {
-		return false
-	}
-	_, isDomain := err.(*errs.DomainError)
-	_, isFC := err.(*FirecrackerClientError)
-	_, isSocket := err.(*SocketNotFoundError)
-	_, isSpawn := err.(*FirecrackerSpawnError)
-	_, isConfig := err.(*FirecrackerConfigError)
-	_, isState := err.(*ControllerStateError)
-	return isDomain || isFC || isSocket || isSpawn || isConfig || isState
 }

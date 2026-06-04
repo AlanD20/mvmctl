@@ -112,7 +112,7 @@ func (c *Controller) getLogPath(_ context.Context, logType, logFilename, serialO
 	//   2. Log file exists (raises "Log file not found for VM: {path}")
 	vmDir := c.vmDir
 	if vmDir == "" && c.vmHash != "" {
-		vmDir = infra.GetVmDir(c.vmHash)
+		vmDir = infra.GetVMDirByID(c.vmHash)
 	}
 	return c.svc.GetLogPath(vmDir, logType, logFilename, serialOutputFilename)
 }

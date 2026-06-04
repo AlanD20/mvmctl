@@ -624,7 +624,7 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VM) error {
 	return err
 }
 
-func (r *sqliteRepo) UpdateStatus(ctx context.Context, id string, status model.Status) error {
+func (r *sqliteRepo) UpdateStatus(ctx context.Context, id string, status model.VMStatus) error {
 	// Python: "UPDATE vm_instances SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
 	_, err := r.db.ExecContext(
 		ctx,
@@ -771,7 +771,7 @@ func (v *vmScanRow) toVM() (*model.VM, error) {
 	vm := &model.VM{
 		ID:            v.ID,
 		Name:          v.Name,
-		Status:        model.Status(v.Status),
+		Status:        model.VMStatus(v.Status),
 		PID:           v.PID,
 		IPv4:          v.IPv4,
 		MAC:           v.MAC,

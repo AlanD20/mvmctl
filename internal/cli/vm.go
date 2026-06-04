@@ -133,7 +133,7 @@ func newVMpsCmd(op *api.Operation) *cobra.Command {
 
 func runVMps(op *api.Operation, cmd *cobra.Command, jsonOutput bool) error {
 	// Server-side filtering matching Python's list_all(status=[...])
-	vms := op.VMList(cmd.Context(), []string{string(model.StatusStarting), string(model.StatusRunning)})
+	vms := op.VMList(cmd.Context(), []string{string(model.VMStatusStarting), string(model.VMStatusRunning)})
 
 	if jsonOutput {
 		data := make([]map[string]any, 0, len(vms))

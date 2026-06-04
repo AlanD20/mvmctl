@@ -186,7 +186,7 @@ func (op *Operation) CachePruneAll(ctx context.Context, dryRun bool, includeAll 
 		vms, err := op.Repos.VM.ListAll(ctx)
 		if err == nil {
 			for _, v := range vms {
-				if v.Status == model.StatusRunning || v.Status == model.StatusStarting {
+				if v.Status == model.VMStatusRunning || v.Status == model.VMStatusStarting {
 					hadRunningVMs = true
 					break
 				}

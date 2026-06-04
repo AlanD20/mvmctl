@@ -49,7 +49,7 @@ func (op *Operation) LogStream(ctx context.Context, input inputs.LogInput, callb
 	// Create LogController bound to the resolved VM.
 	// Python: controller = LogController(resolved.vm)
 	// Python's LogController.__init__: self._hash = vm.id if vm.id else vm.name
-	vmDir := infra.GetVmDir(resolved.VM.ID)
+	vmDir := infra.GetVMDirByID(resolved.VM.ID)
 	controller := logs.NewController(resolved.VM.ID, vmDir, resolved.VM.Name)
 
 	if resolved.Follow {
@@ -101,7 +101,7 @@ func (op *Operation) LogStreamChannel(ctx context.Context, input inputs.LogInput
 	}
 
 	// Create LogController bound to the resolved VM.
-	vmDir := infra.GetVmDir(resolved.VM.ID)
+	vmDir := infra.GetVMDirByID(resolved.VM.ID)
 	controller := logs.NewController(resolved.VM.ID, vmDir, resolved.VM.Name)
 
 	ch := make(chan string, 100)

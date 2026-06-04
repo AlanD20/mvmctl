@@ -528,7 +528,7 @@ func GetVmsDir() string {
 	return path
 }
 
-func GetVmDir(id string) string {
+func GetVMDirByID(id string) string {
 	return filepath.Join(GetVmsDir(), id)
 }
 
