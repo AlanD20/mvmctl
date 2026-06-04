@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -57,8 +58,27 @@ type BuildConfig struct {
 	KeepBuildDir   bool
 	UserConfigPath *string
 	UseCache       bool
-	OnProgress     func(currentBytes, totalBytes int64)
-	OnStatus       func(string)
+	OnDownload     func(currentBytes, totalBytes int64)
+	OnProgress     func(string)
+	// Configs from selected features to enforce on top of spec.DefaultConfigs.
+	// Keys are kernel config options (CONFIG_FOO); values are "y", "n", or a number.
+	FeatureEnforces map[string]string
+}
+
+// applyConfigOption runs scripts/config for a single kernel option.
+//
+//	Value "y" / "yes" / "true"  → --enable   (set boolean = y)
+//	Value "n" / "no" / "false"  → --disable  (set boolean = n)
+//	Anything else               → --set-val  (set numeric/string value)
+func applyConfigOption(ctx context.Context, configScriptPath, kernelDir, option, value string) {
+	switch strings.ToLower(value) {
+	case "y", "yes", "true":
+		runConfigScript(ctx, configScriptPath, kernelDir, "--enable", option)
+	case "n", "no", "false":
+		runConfigScript(ctx, configScriptPath, kernelDir, "--disable", option)
+	default:
+		runConfigScript(ctx, configScriptPath, kernelDir, "--set-val", option, value)
+	}
 }
 
 // Service provides stateless kernel operations.
@@ -197,8 +217,9 @@ func (s *Service) BuildOfficialKernel(
 	keepBuildDir bool,
 	useCache bool,
 	userConfigPath *string,
-	onProgress func(currentBytes, totalBytes int64),
-	onStatus func(string),
+	featureEnforces map[string]string,
+	onDownload func(currentBytes, totalBytes int64),
+	onProgress func(string),
 ) (*model.KernelPullResult, error) {
 	if err := checkBuildDependencies(ctx); err != nil {
 		return nil, err
@@ -206,18 +227,19 @@ func (s *Service) BuildOfficialKernel(
 	outputPath := filepath.Join(outputDir, fmt.Sprintf(KernelOutputPattern, spec.OutputName, spec.Version, arch))
 
 	buildResult, err := s.buildFromSource(ctx, BuildConfig{
-		Spec:           spec,
-		Version:        spec.Version,
-		SourceURL:      spec.Source,
-		OutputPath:     outputPath,
-		Jobs:           jobs,
-		Arch:           arch,
-		SHA256:         spec.SHA256,
-		KeepBuildDir:   keepBuildDir,
-		UserConfigPath: userConfigPath,
-		UseCache:       useCache,
-		OnProgress:     onProgress,
-		OnStatus:       onStatus,
+		Spec:            spec,
+		Version:         spec.Version,
+		SourceURL:       spec.Source,
+		OutputPath:      outputPath,
+		Jobs:            jobs,
+		Arch:            arch,
+		SHA256:          spec.SHA256,
+		KeepBuildDir:    keepBuildDir,
+		UserConfigPath:  userConfigPath,
+		UseCache:        useCache,
+		OnDownload:      onDownload,
+		OnProgress:      onProgress,
+		FeatureEnforces: featureEnforces,
 	})
 	if err != nil {
 		return nil, err
@@ -268,7 +290,7 @@ func (s *Service) buildFromSource(ctx context.Context, cfg BuildConfig) (*Kernel
 		cfg.Version,
 		cfg.Arch,
 		cfg.SHA256,
-		cfg.OnStatus,
+		cfg.OnProgress,
 	)
 	if err != nil {
 		return nil, err
@@ -288,7 +310,7 @@ func (s *Service) buildFromSource(ctx context.Context, cfg BuildConfig) (*Kernel
 			resolvedSHA256,
 			true,
 			true,
-			cfg.OnProgress,
+			cfg.OnDownload,
 		); err != nil {
 			return nil, NewKernelErrorf("Download failed: %s", err)
 		}
@@ -318,7 +340,8 @@ func (s *Service) buildFromSource(ctx context.Context, cfg BuildConfig) (*Kernel
 		cfg.Arch,
 		cfg.Jobs,
 		cfg.UserConfigPath,
-		cfg.OnStatus,
+		cfg.FeatureEnforces,
+		cfg.OnProgress,
 	)
 	if err != nil {
 		return nil, err
@@ -365,7 +388,7 @@ func (s *Service) resolveSourceURL(
 	ctx context.Context,
 	spec *model.KernelSpec,
 	version, arch, sha256 string,
-	onStatus func(string),
+	onProgress func(string),
 ) (string, string, error) {
 	major := ""
 	if m, _, found := strings.Cut(version, "."); found {
@@ -543,10 +566,7 @@ func (s *Service) LoadSpecs() (map[string]*model.KernelSpec, error) {
 		SHA256URL         string                         `yaml:"sha256_url,omitempty"`
 		ConfigFragments   []string                       `yaml:"config_fragments"`
 		ParallelJobs      *int                           `yaml:"parallel_jobs,omitempty"`
-		EnabledConfigs    []string                       `yaml:"enabled_configs"`
-		DisabledConfigs   []string                       `yaml:"disabled_configs"`
-		SetValConfigs     []map[string]string            `yaml:"set_val_configs,omitempty"`
-		RequiredSettings  []string                       `yaml:"required_settings"`
+		DefaultConfigs    map[string]string              `yaml:"default_configs"`
 		Resolver          *string                        `yaml:"resolver,omitempty"`
 		VersionsURL       *string                        `yaml:"versions_url,omitempty"`
 		FilePattern       *string                        `yaml:"file_pattern,omitempty"`
@@ -566,15 +586,6 @@ func (s *Service) LoadSpecs() (map[string]*model.KernelSpec, error) {
 			return nil, NewKernelErrorf("Failed to decode spec %s: %s", name, err)
 		}
 
-		// Convert SetValConfigs from []map[string]string ({option, value}) to [][2]string.
-		var setVal [][2]string
-		for _, m := range sy.SetValConfigs {
-			if len(m) == 0 {
-				continue
-			}
-			setVal = append(setVal, [2]string{m["option"], m["value"]})
-		}
-
 		specs[name] = &model.KernelSpec{
 			Name:              name,
 			KernelType:        sy.KernelType,
@@ -588,10 +599,7 @@ func (s *Service) LoadSpecs() (map[string]*model.KernelSpec, error) {
 			SHA256URL:         sy.SHA256URL,
 			ConfigFragments:   sy.ConfigFragments,
 			ParallelJobs:      sy.ParallelJobs,
-			EnabledConfigs:    sy.EnabledConfigs,
-			DisabledConfigs:   sy.DisabledConfigs,
-			SetValConfigs:     setVal,
-			RequiredSettings:  sy.RequiredSettings,
+			DefaultConfigs:    sy.DefaultConfigs,
 			Resolver:          sy.Resolver,
 			VersionsURL:       sy.VersionsURL,
 			FilePattern:       sy.FilePattern,
@@ -685,7 +693,8 @@ func (s *Service) PrepareKernelConfig(
 	arch string,
 	jobs int,
 	userConfigPath *string,
-	onStatus func(string),
+	featureEnforces map[string]string,
+	onProgress func(string),
 ) (*KernelConfigResult, error) {
 	var warnings []string
 	var infoMessages []string
@@ -696,8 +705,8 @@ func (s *Service) PrepareKernelConfig(
 		var de *errs.DomainError
 		if errors.As(err, &de) &&
 			(de.Code == errs.CodeKernelBuildFailed || de.Code == errs.CodeKernelConfigFailed) {
-			if onStatus != nil {
-				onStatus("Using defconfig instead...")
+			if onProgress != nil {
+				onProgress("Using defconfig instead...")
 			}
 			slog.Info("Using defconfig instead")
 			if rc, _, _ := runMake(ctx, kernelDir, KernelDefconfigTarget, jobs); rc != 0 {
@@ -707,53 +716,44 @@ func (s *Service) PrepareKernelConfig(
 			return nil, err
 		}
 	} else if len(spec.ConfigFragments) > 0 {
-		if onStatus != nil {
-			onStatus("Applying kernel config fragments...")
+		if onProgress != nil {
+			onProgress("Applying kernel config fragments...")
 		}
-		if err := s.applyConfigFragments(ctx, kernelDir, spec.ConfigFragments, templateVars, onStatus); err != nil {
+		if err := s.applyConfigFragments(ctx, kernelDir, spec.ConfigFragments, templateVars, onProgress); err != nil {
 			return nil, err
 		}
 	}
 
-	if onStatus != nil {
-		onStatus("Synchronizing kernel config...")
+	if onProgress != nil {
+		onProgress("Synchronizing kernel config...")
 	}
 	slog.Debug("Synchronizing config")
 	if rc, _, _ := runMake(ctx, kernelDir, KernelOlddefconfigTarget, jobs); rc != 0 {
 		return nil, NewKernelError("olddefconfig failed")
 	}
 
+	// Merge default configs with feature enforces (features override defaults).
 	configScriptPath := filepath.Join(kernelDir, "scripts", "config")
-	if len(spec.EnabledConfigs) > 0 {
-		if onStatus != nil {
-			onStatus(fmt.Sprintf("Enabling %d kernel options...", len(spec.EnabledConfigs)))
-		}
-		slog.Debug("Applying kernel options from kernels.yaml")
-		for _, opt := range spec.EnabledConfigs {
-			runConfigScript(ctx, configScriptPath, kernelDir, "--enable", opt)
-		}
+	mergedConfigs := make(map[string]string, len(spec.DefaultConfigs)+len(featureEnforces))
+	for k, v := range spec.DefaultConfigs {
+		mergedConfigs[k] = v
 	}
-	if len(spec.DisabledConfigs) > 0 {
-		if onStatus != nil {
-			onStatus(fmt.Sprintf("Disabling %d kernel options...", len(spec.DisabledConfigs)))
-		}
-		slog.Debug("Applying disabled kernel options")
-		for _, opt := range spec.DisabledConfigs {
-			runConfigScript(ctx, configScriptPath, kernelDir, "--disable", opt)
-		}
+	for k, v := range featureEnforces {
+		mergedConfigs[k] = v
 	}
-	if len(spec.SetValConfigs) > 0 {
-		if onStatus != nil {
-			onStatus(fmt.Sprintf("Setting %d kernel options...", len(spec.SetValConfigs)))
+
+	if len(mergedConfigs) > 0 {
+		if onProgress != nil {
+			onProgress(fmt.Sprintf("Applying %d kernel config options...", len(mergedConfigs)))
 		}
-		slog.Debug("Applying set-val kernel options")
-		for _, kv := range spec.SetValConfigs {
-			runConfigScript(ctx, configScriptPath, kernelDir, "--set-val", kv[0], kv[1])
+		slog.Debug("Applying kernel config options", "count", len(mergedConfigs))
+		for option, value := range mergedConfigs {
+			applyConfigOption(ctx, configScriptPath, kernelDir, option, value)
 		}
 	}
 
-	if onStatus != nil {
-		onStatus("Resolving config dependencies...")
+	if onProgress != nil {
+		onProgress("Resolving config dependencies...")
 	}
 	slog.Debug("Resolving dependencies")
 	if rc, _, _ := runMake(ctx, kernelDir, KernelOlddefconfigTarget, jobs); rc != 0 {
@@ -762,8 +762,8 @@ func (s *Service) PrepareKernelConfig(
 
 	if userConfigPath != nil && *userConfigPath != "" {
 		if _, statErr := os.Stat(*userConfigPath); statErr == nil {
-			if onStatus != nil {
-				onStatus(fmt.Sprintf("Applying user config fragment: %s", *userConfigPath))
+			if onProgress != nil {
+				onProgress(fmt.Sprintf("Applying user config fragment: %s", *userConfigPath))
 			}
 			slog.Info("Applying user config fragment", "path", *userConfigPath)
 			configPath := filepath.Join(kernelDir, ".config")
@@ -772,8 +772,8 @@ func (s *Service) PrepareKernelConfig(
 				return nil, NewKernelErrorf("Failed to read user config fragment %s: %s", *userConfigPath, err)
 			}
 			mergeConfigLines(string(userData), configPath)
-			if onStatus != nil {
-				onStatus("Resolving dependencies after user config...")
+			if onProgress != nil {
+				onProgress("Resolving dependencies after user config...")
 			}
 			slog.Debug("Resolving dependencies after user config")
 			if rc, _, _ := runMake(ctx, kernelDir, "olddefconfig", jobs); rc != 0 {
@@ -782,8 +782,8 @@ func (s *Service) PrepareKernelConfig(
 		}
 	}
 
-	if onStatus != nil {
-		onStatus("Verifying kernel configuration...")
+	if onProgress != nil {
+		onProgress("Verifying kernel configuration...")
 	}
 	slog.Debug("Verifying configuration")
 	configSettings, err := parseKernelConfig(kernelDir)
@@ -791,11 +791,11 @@ func (s *Service) PrepareKernelConfig(
 		return nil, err
 	}
 	var missingSettings []string
-	for _, setting := range spec.RequiredSettings {
-		if !configSettings[setting] {
-			missingSettings = append(missingSettings, setting)
+	for option := range mergedConfigs {
+		if !configSettings[option] {
+			missingSettings = append(missingSettings, option)
 		} else {
-			slog.Debug("Required setting", "setting", setting)
+			slog.Debug("Verified setting", "setting", option)
 		}
 	}
 	if len(missingSettings) > 0 {
@@ -990,7 +990,7 @@ func (s *Service) applyConfigFragments(
 	kernelDir string,
 	fragments []string,
 	vars map[string]string,
-	onStatus func(string),
+	onProgress func(string),
 ) error {
 	configPath := filepath.Join(kernelDir, ".config")
 	for idx, fragment := range fragments {
@@ -1001,8 +1001,8 @@ func (s *Service) applyConfigFragments(
 		var content []byte
 
 		if strings.HasPrefix(rendered, "http://") || strings.HasPrefix(rendered, "https://") {
-			if onStatus != nil {
-				onStatus(fmt.Sprintf("Fetching config fragment: %s", rendered))
+			if onProgress != nil {
+				onProgress(fmt.Sprintf("Fetching config fragment: %s", rendered))
 			}
 			content, err = s.dl.GetBody(ctx, rendered)
 			if err != nil {
@@ -1010,8 +1010,8 @@ func (s *Service) applyConfigFragments(
 			}
 		} else {
 			rel := strings.TrimPrefix(rendered, "assets/")
-			if onStatus != nil {
-				onStatus(fmt.Sprintf("Applying config fragment: %s", rel))
+			if onProgress != nil {
+				onProgress(fmt.Sprintf("Applying config fragment: %s", rel))
 			}
 			content, err = assets.ReadFile(rel)
 			if err != nil {
@@ -1044,13 +1044,21 @@ func (s *Service) applyConfigFragments(
 // ── Caching helpers ────────────────────────────────────────────────────
 
 func (s *Service) computeConfigHash(spec *model.KernelSpec, version string, userConfigPath *string) string {
+	// Sort keys for deterministic hashing
+	defaultKeys := make([]string, 0, len(spec.DefaultConfigs))
+	for k := range spec.DefaultConfigs {
+		defaultKeys = append(defaultKeys, k)
+	}
+	sort.Strings(defaultKeys)
+	var defaultParts []string
+	for _, k := range defaultKeys {
+		defaultParts = append(defaultParts, fmt.Sprintf("%s=%s", k, spec.DefaultConfigs[k]))
+	}
+
 	hash := crypto.ContentHash(
 		version,
 		fmt.Sprintf("%v", spec.ConfigFragments),
-		fmt.Sprintf("%v", spec.EnabledConfigs),
-		fmt.Sprintf("%v", spec.DisabledConfigs),
-		fmt.Sprintf("%v", spec.SetValConfigs),
-		fmt.Sprintf("%v", spec.RequiredSettings),
+		strings.Join(defaultParts, ","),
 	)
 	if userConfigPath != nil {
 		data, err := os.ReadFile(*userConfigPath)

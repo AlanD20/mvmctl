@@ -378,3 +378,32 @@ func ParseSemverInts(v string) []int {
 	}
 	return nums
 }
+
+// ── Version Validation & Extraction ─────────────────────────────────────────
+
+// semverPattern matches a clean numeric version string like "6.1.0" or "5.10".
+var semverPattern = regexp.MustCompile(`^\d+(\.\d+)*$`)
+
+// IsValidVersion returns true if v is a non-empty string containing only
+// digits and dots (e.g. "6.1.0", "5.10", "1").
+func IsValidVersion(v string) bool {
+	return v != "" && semverPattern.MatchString(v)
+}
+
+// versionExtractPattern matches a version suffix in a filename:
+// "-6.1.0" or "-v6.1.0" and captures the numeric part.
+var versionExtractPattern = regexp.MustCompile(`-v?(\d+(?:\.\d+)*)$`)
+
+// ExtractVersionFromFilename extracts a numeric version from a filename suffix.
+// Returns the version string and true if found, or ("", false) otherwise.
+//
+//	vmlinux-6.1.0-x86_64  -> "6.1.0", true
+//	vmlinux-v6.1.0-arm64  -> "6.1.0", true  (v prefix is stripped)
+//	vmlinux               -> "", false
+func ExtractVersionFromFilename(name string) (string, bool) {
+	m := versionExtractPattern.FindStringSubmatch(name)
+	if len(m) >= 2 && m[1] != "" {
+		return m[1], true
+	}
+	return "", false
+}

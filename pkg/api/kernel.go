@@ -6,12 +6,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"time"
 
 	"mvmctl/internal/core/kernel"
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
@@ -88,16 +88,10 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 
 	// Phase 1: Resolve "latest" version to concrete version (matches Python).
 	if version == "latest" {
-		ciVersion := infra.DefaultFirecrackerCIVersion
-		if kernelType == "firecracker" {
-			defaultFC, _ := op.Services.Binary.GetDefaultFirecracker(ctx)
-			if defaultFC != nil && defaultFC.CIVersion != nil {
-				ciVersion = *defaultFC.CIVersion
-			}
-		}
-		if ciVersion == "" {
+		ciVersion, err := op.resolveCIVersion(ctx)
+		if err != nil {
 			return nil, &errs.DomainError{
-				Code: "kernel.pull_failed", Message: "CI version is required to resolve latest kernel version",
+				Code: "kernel.pull_failed", Message: err.Error(), Err: err,
 			}
 		}
 		// Arch is resolved here for ResolveLatestVersion; the request.Resolve()
@@ -129,8 +123,8 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 	var existing *model.KernelItem
 	if resolved.KernelType == "firecracker" {
 		existing, _ = op.Repos.Kernel.GetByType(ctx, resolved.KernelType)
-	} else if resolved.KernelType == "official" && resolved.Version != nil && *resolved.Version != "" {
-		existing, _ = op.Repos.Kernel.GetByVersionAndType(ctx, *resolved.Version, resolved.KernelType)
+	} else if resolved.KernelType == "official" && resolved.Version != "" {
+		existing, _ = op.Repos.Kernel.GetByVersionAndType(ctx, resolved.Version, resolved.KernelType)
 	}
 
 	if existing != nil {
@@ -144,18 +138,14 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 	}
 
 	// Resolve spec via KernelService (matches Python)
-	resolvedVersion := ""
-	if resolved.Version != nil {
-		resolvedVersion = *resolved.Version
-	}
-	specs, err := op.Services.Kernel.GetSpecsFor(nil, resolved.KernelType, resolvedVersion)
+	specs, err := op.Services.Kernel.GetSpecsFor(nil, resolved.KernelType, resolved.Version)
 	if err != nil {
 		return nil, &errs.DomainError{
 			Code: "kernel.pull_failed",
 			Message: fmt.Sprintf(
 				"Failed to get spec for '%s' version '%s': %v",
 				resolved.KernelType,
-				resolvedVersion,
+				resolved.Version,
 				err,
 			),
 			Err: err,
@@ -167,7 +157,7 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 			Message: fmt.Sprintf(
 				"Expected exactly one kernel spec for type='%s' version='%s', got %d",
 				resolved.KernelType,
-				resolvedVersion,
+				resolved.Version,
 				len(specs),
 			),
 			Err: fmt.Errorf("unexpected spec count: %d", len(specs)),
@@ -175,18 +165,17 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 	}
 	spec := specs[0]
 
-	// Note: Python enables feature configs via spec.WithEnabledFeatures(resolved.Features),
-	// but this method was not ported to Go. Features are resolved at YAML load time in the spec.
-
 	var fetchResult *model.KernelPullResult
 
 	// ── Dispatch based on kernel type (matches Python exactly) ──
-	if resolved.KernelType == "firecracker" {
+	switch resolved.KernelType {
+	case "firecracker":
 
-		defaultFirecracker, _ := op.Services.Binary.GetDefaultFirecracker(ctx)
-		ciVersion := infra.DefaultFirecrackerCIVersion
-		if defaultFirecracker != nil && defaultFirecracker.CIVersion != nil {
-			ciVersion = *defaultFirecracker.CIVersion
+		ciVersion, err := op.resolveCIVersion(ctx)
+		if err != nil {
+			return nil, &errs.DomainError{
+				Code: "kernel.pull_failed", Message: err.Error(), Err: err,
+			}
 		}
 
 		emitProgress(onProgress, "download", "running", "Downloading Firecracker kernel...")
@@ -208,7 +197,7 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 		}
 
 		emitProgress(onProgress, "download", "complete", "Firecracker kernel download complete.")
-	} else if resolved.KernelType == "official" {
+	case "official":
 		emitProgress(onProgress, "build", "running", "Building kernel (this may take a while)...")
 
 		var configPath *string
@@ -216,12 +205,16 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 			configPath = resolved.KernelConfig
 		}
 
-		// Python passes TWO callbacks to build_official_kernel():
-		//   progress_callback=OperationUtils.download_progress_bridge(on_progress)
-		//   on_status=lambda msg: on_progress(ProgressEvent(phase="build", status="running", message=msg))
-		var onStatusCallback func(string)
-		if onProgress != nil {
-			onStatusCallback = func(msg string) {
+		// Merge feature enforces from selected features.
+		featureEnforces := make(map[string]string, len(resolved.Features))
+		for _, name := range resolved.Features {
+			if f, ok := spec.Features[name]; ok {
+				maps.Copy(featureEnforces, f.Enforce)
+			}
+		}
+
+		onProgressFn := func(msg string) {
+			if onProgress != nil {
 				onProgress(errs.ProgressEvent{
 					Phase: "build", Status: "running", Message: msg,
 				})
@@ -229,8 +222,9 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 		}
 
 		fetchResult, err = op.Services.Kernel.BuildOfficialKernel(ctx, spec, resolved.Arch, resolved.OutputDir,
-			resolved.Jobs, resolved.KeepBuildDir, !resolved.CleanBuild, // useCache = !cleanBuild
-			configPath, operation.DownloadProgressBridge(onProgress), onStatusCallback)
+			resolved.Jobs, resolved.KeepBuildDir, !resolved.CleanBuild,
+			configPath, featureEnforces,
+			operation.DownloadProgressBridge(onProgress), onProgressFn)
 		if err != nil {
 			return nil, &errs.DomainError{
 				Code: "kernel.pull_failed", Message: fmt.Sprintf("Kernel build failed: %v", err), Err: err,
@@ -238,7 +232,7 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 		}
 
 		emitProgress(onProgress, "build", "complete", "Kernel build complete.")
-	} else {
+	default:
 		return nil, &errs.DomainError{
 			Code:    "kernel.pull_failed",
 			Message: fmt.Sprintf("Unsupported kernel type: %s", resolved.KernelType),
@@ -299,13 +293,13 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 					"type",
 					resolved.KernelType,
 					"version",
-					resolvedVersion,
+					resolved.Version,
 				)
 			}
 		}
 	}
 
-	op.AuditLog.LogOperation("kernel.pull", map[string]interface{}{
+	op.AuditLog.LogOperation("kernel.pull", map[string]any{
 		"id": kernelItem.ID, "type": kernelItem.Type,
 		"version": kernelItem.Version, "arch": kernelItem.Arch,
 	}, "")
@@ -345,7 +339,7 @@ func (op *Operation) KernelImport(ctx context.Context, input *inputs.KernelImpor
 		}
 	}
 
-	op.AuditLog.LogOperation("kernel.import", map[string]interface{}{
+	op.AuditLog.LogOperation("kernel.import", map[string]any{
 		"name": kernelItem.Name, "version": kernelItem.Version, "arch": kernelItem.Arch,
 	}, "")
 
@@ -411,7 +405,7 @@ func (op *Operation) KernelRemove(ctx context.Context, identifiers []string, for
 			continue
 		}
 
-		op.AuditLog.LogOperation("kernel.remove", map[string]interface{}{
+		op.AuditLog.LogOperation("kernel.remove", map[string]any{
 			"id": kernel.ID, "name": kernel.Name, "type": kernel.Type,
 		}, "")
 
@@ -471,10 +465,9 @@ func (op *Operation) kernelListRemote(ctx context.Context, noCache bool) ([]mode
 	}
 
 	// Resolve ci_version from default firecracker binary (matches Python)
-	resolvedCIVersion := ""
-	defaultFC, _ := op.Services.Binary.GetDefaultFirecracker(ctx)
-	if defaultFC != nil && defaultFC.CIVersion != nil {
-		resolvedCIVersion = *defaultFC.CIVersion
+	resolvedCIVersion, err := op.resolveCIVersion(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Resolve remote_list_limit from settings (matches Python)
@@ -522,7 +515,7 @@ func (op *Operation) KernelGet(ctx context.Context, id string) (*model.KernelIte
 
 	if len(resolved.Kernels) != 1 {
 		// Python: raise KernelError(f"Expected exactly one kernel, got {len(resolved.kernels)}")
-		return nil, fmt.Errorf("Expected exactly one kernel, got %d", len(resolved.Kernels))
+		return nil, fmt.Errorf("expected exactly one kernel, got %d", len(resolved.Kernels))
 	}
 
 	return resolved.Kernels[0], nil
@@ -585,16 +578,7 @@ func (op *Operation) KernelSetDefault(ctx context.Context, id string) error {
 		}
 	}
 
-	op.AuditLog.LogOperation("kernel.set_default", map[string]interface{}{"name": kItem.Name}, "")
+	op.AuditLog.LogOperation("kernel.set_default", map[string]any{"name": kItem.Name}, "")
 
 	return nil
-}
-
-// resolvedVersionStr returns the version from a ResolvedKernelPullRequest,
-// handling the nil pointer case.
-func resolvedVersionStr(resolved *inputs.ResolvedKernelPullRequest) string {
-	if resolved.Version != nil {
-		return *resolved.Version
-	}
-	return ""
 }

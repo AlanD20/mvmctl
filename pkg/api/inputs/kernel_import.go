@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
+	"slices"
 	"strings"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/system"
+	"mvmctl/internal/infra/version"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -68,23 +70,14 @@ func NewKernelImportRequest(inputs KernelImportInput, db *sqlx.DB) *KernelImport
 // Resolve resolves all input fields to concrete values and validates.
 // Matches Python's KernelImportRequest.resolve().
 func (r *KernelImportRequest) Resolve(ctx context.Context) (*ResolvedKernelImportInput, error) {
-	// Expand and resolve path — Python: source_path = self._inputs.path.expanduser().resolve()
-	// Python's Path.resolve() follows symlinks and resolves to an absolute path.
-	sourcePath := r.input.Path
-	if strings.HasPrefix(sourcePath, "~") {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			sourcePath = filepath.Join(home, sourcePath[1:])
+	// Expand and resolve path — Python: Path(self._inputs.path).expanduser().resolve()
+	sourcePath, err := system.ExpandAndResolve(r.input.Path)
+	if err != nil {
+		return nil, &errs.DomainError{
+			Code: errs.CodeKernelBuildFailed, Op: "kernel_import",
+			Message: fmt.Sprintf("Failed to resolve kernel path: %v", err),
+			Err:     err, Class: errs.ClassValidation,
 		}
-	}
-	absPath, err := filepath.Abs(sourcePath)
-	if err == nil {
-		sourcePath = absPath
-	}
-	// Python: Path.resolve() follows symlinks
-	resolvedPath, err := filepath.EvalSymlinks(sourcePath)
-	if err == nil {
-		sourcePath = resolvedPath
 	}
 
 	// Python: parsed = KernelService.parse_filename(source_path.name)
@@ -160,9 +153,7 @@ func (r *KernelImportRequest) ensureValidate() error {
 	}
 
 	// 3. Arch is supported — Python: if self.result.arch not in FIRECRACKER_SUPPORTED_ARCH
-	// Python: FIRECRACKER_SUPPORTED_ARCH = ["x86_64", "amd64", "aarch64", "arm64"]
-	validArchs := map[string]bool{"x86_64": true, "amd64": true, "aarch64": true, "arm64": true}
-	if !validArchs[r.result.Arch] {
+	if !slices.Contains(infra.FirecrackerSupportedArches, r.result.Arch) {
 		return &errs.DomainError{
 			Code:    errs.CodeKernelBuildFailed,
 			Op:      "kernel_import",
@@ -191,14 +182,13 @@ func (r *KernelImportRequest) ensureValidate() error {
 //	vmlinux-6.1.0-x86_64 -> version="6.1.0", arch="x86_64"
 //	vmlinux-5.10-arm64 -> version="5.10", arch="arm64"
 //	vmlinux -> version="-", arch="-"
-func parseKernelFilename(filename string) (version, arch string) {
+func parseKernelFilename(filename string) (ver, arch string) {
 	name := filename
-	arches := []string{"x86_64", "amd64", "arm64", "aarch64"}
-	version = "-"
+	ver = "-"
 	arch = "-"
 
 	// Step 1: Strip arch suffix from end (Python: for a in arches: if name.endswith(f"-{a}"))
-	for _, a := range arches {
+	for _, a := range infra.FirecrackerSupportedArches {
 		if strings.HasSuffix(name, "-"+a) {
 			arch = a
 			name = name[:len(name)-len(a)-1]
@@ -206,18 +196,9 @@ func parseKernelFilename(filename string) (version, arch string) {
 		}
 	}
 
-	// Step 2: Strip version from end using regex (Python: re.search(r"-v?(\d+(?:\.\d+)*)$", name))
-	versionRe := regexp.MustCompile(`-v?(\d+(?:\.\d+)*)$`)
-	if m := versionRe.FindStringSubmatch(name); len(m) >= 2 {
-		versionNum := m[1]
-		fullMatch := m[0]
-		// Python: version = f"v{version_num}" if full_match.startswith("-v") else version_num
-		if strings.HasPrefix(fullMatch, "-v") {
-			version = "v" + versionNum
-		} else {
-			version = versionNum
-		}
-		// name = name[:match.start()] -- not needed, we only need version and arch
+	// Step 2: Strip version from end (Python: re.search(r"-v?(\d+(?:\.\d+)*)$", name))
+	if v, ok := version.ExtractVersionFromFilename(name); ok {
+		ver = v
 	}
 
 	return

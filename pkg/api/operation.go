@@ -145,3 +145,29 @@ func emitProgress(onProgress func(errs.ProgressEvent), phase, status, msg string
 	}
 	onProgress(errs.ProgressEvent{Phase: phase, Status: status, Message: msg})
 }
+
+// resolveCIVersion returns the CI version from the default firecracker binary.
+// Returns error if no firecracker binary is installed or it has no CI version.
+func (op *Operation) resolveCIVersion(ctx context.Context) (string, error) {
+	defaultFC, err := op.Repos.Binary.GetDefault(ctx, "firecracker")
+	if err != nil {
+		return "", &errs.DomainError{
+			Code:    errs.CodeDatabaseError,
+			Message: fmt.Sprintf("Failed to query default firecracker binary: %v", err),
+			Err:     err,
+		}
+	}
+	if defaultFC == nil {
+		return "", &errs.DomainError{
+			Code:    "binary.not_found",
+			Message: "No firecracker binary is installed. Use 'mvm binary pull firecracker' to install one.",
+		}
+	}
+	if defaultFC.CIVersion == nil {
+		return "", &errs.DomainError{
+			Code:    "binary.no_ci_version",
+			Message: "Installed firecracker binary has no CI version.",
+		}
+	}
+	return *defaultFC.CIVersion, nil
+}

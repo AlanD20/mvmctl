@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 
 	"mvmctl/internal/core/config"
@@ -13,6 +13,7 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/system"
+	"mvmctl/internal/infra/version"
 )
 
 // KernelPullInput matches Python's KernelPullInput dataclass.
@@ -67,7 +68,7 @@ type ResolvedKernelPullRequest struct {
 	CleanBuild   bool
 	SetDefault   bool
 	KernelConfig *string
-	Version      *string
+	Version      string
 	Features     []string
 }
 
@@ -96,24 +97,17 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 	// Resolve version — Python:
 	//   if self._inputs.version is not None → version = self._inputs.version
 	//   else → version = SettingsService.resolve(self._db, "defaults.kernel", "version")
-	var version *string
-	if r.input.Version != "" {
-		v := r.input.Version
-		version = &v
-	} else {
-		s, _ := r.cfg.GetString(ctx, "defaults.kernel", "version")
-		if s != "" {
-			version = &s
-		}
+	version := r.input.Version
+	if version == "" {
+		version, _ = r.cfg.GetString(ctx, "defaults.kernel", "version")
 	}
 
 	// Python: if self._inputs.kernel_type == "firecracker": version = None
 	//         elif version is not None: version = version.removeprefix("v")
 	if r.input.KernelType == "firecracker" {
-		version = nil
-	} else if version != nil {
-		v := strings.TrimPrefix(*version, "v")
-		version = &v
+		version = ""
+	} else if version != "" {
+		version = strings.TrimPrefix(version, "v")
 	}
 
 	// Arch always matches the host machine — not user-configurable
@@ -144,7 +138,7 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 	featuresRaw := strings.TrimSpace(r.input.Features)
 	var featuresList []string
 	if featuresRaw != "" {
-		for _, f := range strings.Split(featuresRaw, ",") {
+		for f := range strings.SplitSeq(featuresRaw, ",") {
 			f = strings.TrimSpace(f)
 			if f != "" {
 				featuresList = append(featuresList, f)
@@ -159,14 +153,7 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 	// non-None objects. In Go, we just check for a truthy config value.
 	nestedVirtBool, _ := r.cfg.GetBool(ctx, "defaults.vm", "nested_virt")
 	if nestedVirtBool {
-		hasKVM := false
-		for _, f := range featuresList {
-			if f == "kvm" {
-				hasKVM = true
-				break
-			}
-		}
-		if !hasKVM {
+		if !slices.Contains(featuresList, "kvm") {
 			featuresList = append([]string{"kvm"}, featuresList...)
 		}
 	}
@@ -232,15 +219,15 @@ func (r *KernelPullRequest) ensureValidate() error {
 	//    if version:
 	//        stripped = version.removeprefix("v")
 	//        if not re.fullmatch(r"\d+(\.\d+)*", stripped):
-	if r.result.Version != nil {
-		stripped := strings.TrimPrefix(*r.result.Version, "v")
-		if !isValidVersion(stripped) {
+	if r.result.Version != "" {
+		stripped := strings.TrimPrefix(r.result.Version, "v")
+		if !version.IsValidVersion(stripped) {
 			return &errs.DomainError{
 				Code: errs.CodeKernelBuildFailed,
 				Op:   "kernel_pull",
 				Message: fmt.Sprintf(
 					"Invalid kernel version: '%s'. Expected format like '5.10', '6.1.0', or 'v6.1'",
-					*r.result.Version,
+					r.result.Version,
 				),
 				Class: errs.ClassValidation,
 			}
@@ -248,14 +235,7 @@ func (r *KernelPullRequest) ensureValidate() error {
 	}
 
 	// 3. Validate architecture
-	archOk := false
-	for _, a := range infra.FirecrackerSupportedArches {
-		if r.result.Arch == a {
-			archOk = true
-			break
-		}
-	}
-	if !archOk {
+	if !slices.Contains(infra.FirecrackerSupportedArches, r.result.Arch) {
 		return &errs.DomainError{
 			Code: errs.CodeKernelBuildFailed,
 			Op:   "kernel_pull",
@@ -292,11 +272,4 @@ func (r *KernelPullRequest) ensureValidate() error {
 	}
 
 	return nil
-}
-
-// versionRegex matches valid semver-like version strings (e.g., "5.10", "6.1.0").
-var versionRegex = regexp.MustCompile(`^\d+(\.\d+)*$`)
-
-func isValidVersion(v string) bool {
-	return v != "" && versionRegex.MatchString(v)
 }
