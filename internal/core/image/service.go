@@ -26,6 +26,7 @@ import (
 	"mvmctl/internal/infra/parallel"
 	"mvmctl/internal/infra/provisioner"
 	"mvmctl/internal/infra/system"
+	"mvmctl/internal/infra/version"
 )
 
 // Time constants matching Python's CONST_MEBIBYTE_BYTES etc.
@@ -1338,4 +1339,45 @@ func (s *Service) resolveSourceTemplate(
 	}
 	base := fmt.Sprintf("%s://%s/%s", parsedURL.Scheme, parsedURL.Host, bucket)
 	return fmt.Sprintf("%s/%s", base, chosenKey), nil
+}
+
+// ResolveVersion resolves a version spec (latest, partial, or exact) to a concrete version.
+func (s *Service) ResolveVersion(ctx context.Context, imageType string, versionSpec string, arch string, ciVersion string, configs []download.ResolverConfig) (string, error) {
+	spec, err := version.ParseSpec(versionSpec)
+	if err != nil {
+		return "", NewImageError(fmt.Sprintf("Invalid version spec %q: %s", versionSpec, err))
+	}
+
+	// Exact version — no resolution needed
+	if !spec.IsPartial() {
+		return strings.TrimPrefix(versionSpec, "v"), nil
+	}
+
+	// Filter configs to matching type
+	var matched []download.ResolverConfig
+	for _, cfg := range configs {
+		if imageType == "" || cfg.Type == imageType {
+			matched = append(matched, cfg)
+		}
+	}
+	if len(matched) == 0 {
+		return "", NewImageError(fmt.Sprintf("No image types matched %q", imageType))
+	}
+
+	versionMap := ResolveVersions(ctx, matched, arch, 0, ciVersion)
+	var allVersions []string
+	for _, versions := range versionMap {
+		for _, v := range versions {
+			allVersions = append(allVersions, v.Version)
+		}
+	}
+	if len(allVersions) == 0 {
+		return "", NewImageError(fmt.Sprintf("No versions available for image type %q", imageType))
+	}
+
+	resolved, err := version.Resolve(allVersions, spec)
+	if err != nil {
+		return "", NewImageError(fmt.Sprintf("Cannot resolve version %q: %s", versionSpec, err))
+	}
+	return resolved, nil
 }

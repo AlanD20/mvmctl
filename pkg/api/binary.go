@@ -105,22 +105,11 @@ func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInpu
 	}
 
 	// ---- Release download path ----
-	resolvedVersion := resolved.Version
-	if resolvedVersion == "" {
-		emitProgress(onProgress, "listing", "running", "Fetching remote versions...")
-		remoteVersions, err := op.Services.Binary.ListRemote(ctx, 20)
-		if err != nil {
-			return nil, &errs.DomainError{
-				Code: "binary.pull_failed", Message: fmt.Sprintf("Failed to list remote versions: %v", err), Err: err,
-			}
+	resolvedVersion, err := op.Services.Binary.ResolveVersion(ctx, resolved.Name, resolved.Version)
+	if err != nil {
+		return nil, &errs.DomainError{
+			Code: "binary.pull_failed", Message: err.Error(), Err: err,
 		}
-		if len(remoteVersions) == 0 {
-			return nil, &errs.DomainError{
-				Code: "binary.no_remote_versions", Message: "No remote Firecracker versions found",
-			}
-		}
-		resolvedVersion = remoteVersions[0].Version
-		emitProgress(onProgress, "listing", "complete", fmt.Sprintf("Found Firecracker v%s", resolvedVersion))
 	}
 
 	normalized := binary.NormalizeVersion(resolvedVersion)

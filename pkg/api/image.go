@@ -125,10 +125,20 @@ func (op *Operation) ImagePull(
 		}
 	}
 
+	// Resolve version spec (latest, partial, or exact) to concrete version
+	resolvedVersion, err := op.Services.Image.ResolveVersion(ctx, resolved.Type, resolved.Version, resolved.Arch, resolvedCIVersion, imageTypesConfig)
+	if err != nil {
+		return nil, &errs.DomainError{
+			Code:    errs.CodeImagePullFailed,
+			Message: fmt.Sprintf("Failed to resolve image version: %v", err),
+			Err:     err,
+		}
+	}
+
 	specs, err := image.GetSpecsFor(
 		ctx,
 		[]string{resolved.Type},
-		resolved.Version,
+		resolvedVersion,
 		resolved.Arch,
 		cacheTTL,
 		resolvedCIVersion,

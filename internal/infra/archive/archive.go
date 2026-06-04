@@ -488,7 +488,7 @@ func extractTarReader(r io.Reader, destDir string, filter func(string) bool) err
 			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 				return fmt.Errorf("mkdir %s: %w", filepath.Dir(target), err)
 			}
-			outFile, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+			outFile, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, header.FileInfo().Mode())
 			if err != nil {
 				return fmt.Errorf("create %s: %w", target, err)
 			}
