@@ -64,6 +64,14 @@ func NewVMRequest(inputs VMInput, db *sqlx.DB, vmRepo vm.Repository, enricher *e
 // Resolve resolves VM identifiers to VMInstanceItem records.
 // Matches Python's VMRequest.resolve().
 func (r *VMRequest) Resolve(ctx context.Context) (*ResolvedVMInput, error) {
+	if len(r.input.Identifiers) == 0 {
+		return nil, &errs.DomainError{
+			Code:    errs.CodeVMNotFound,
+			Op:      "vm",
+			Message: "No VM identifiers provided",
+			Class:   errs.ClassValidation,
+		}
+	}
 	if err := r.validateIdentifiers(); err != nil {
 		return nil, err
 	}
@@ -106,33 +114,12 @@ func (r *VMRequest) Resolve(ctx context.Context) (*ResolvedVMInput, error) {
 	return r.result, nil
 }
 
-// isMAC checks if identifier looks like a MAC address.
-// Matches Python's VMRequest._is_mac().
-func isMAC(identifier string) bool {
-	parts := strings.Split(identifier, ":")
-	if len(parts) != 6 {
-		return false
-	}
-	for _, p := range parts {
-		if len(p) != 2 {
-			return false
-		}
-		for _, c := range p {
-			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
-				return false
-			}
-		}
-	}
-	return true
-}
-
 // validateIdentifiers validates each identifier based on detected type.
 // Matches Python's VMRequest._validate_identifiers().
 func (r *VMRequest) validateIdentifiers() error {
 	for _, identifier := range r.input.Identifiers {
-		if isMAC(identifier) {
-			var macValidator validators.NetworkValidator
-			if err := macValidator.ValidateMAC(identifier); err != nil {
+		if validators.IsMAC(identifier) {
+			if err := validators.MAC(identifier); err != nil {
 				return &errs.DomainError{
 					Code:    errs.CodeVMResolveFailed,
 					Op:      "vm",
@@ -141,7 +128,7 @@ func (r *VMRequest) validateIdentifiers() error {
 				}
 			}
 		} else if validators.IsIPAddress(identifier) {
-			if err := validators.ValidateIPv4Address(identifier, "guest IP", true, "", ""); err != nil {
+			if err := validators.IPv4Address(identifier, "guest IP", true, "", ""); err != nil {
 				return &errs.DomainError{
 					Code:    errs.CodeVMResolveFailed,
 					Op:      "vm",
@@ -151,7 +138,7 @@ func (r *VMRequest) validateIdentifiers() error {
 			}
 		} else {
 			// Name or ID — validate as entity name
-			if err := validators.ValidateEntityName(identifier, "VM", 63); err != nil {
+			if err := validators.EntityName(identifier, "VM", 63); err != nil {
 				return &errs.DomainError{
 					Code:    errs.CodeVMResolveFailed,
 					Op:      "vm",

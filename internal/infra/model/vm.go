@@ -2,6 +2,8 @@
 // a single shared package. No domain imports anything outside the model package.
 package model
 
+import "mvmctl/internal/infra/db"
+
 // ── Status (VM lifecycle) ──
 
 // VMStatus is the VM lifecycle status type, matching Python's VMStatus(StrEnum).
@@ -60,11 +62,11 @@ type VM struct {
 	LSMFlags         *string `json:"lsm_flags,omitempty"          db:"lsm_flags"`
 	BootArgs         *string `json:"boot_args,omitempty"          db:"boot_args"`
 
-	// JSON-serialized in DB fields
-	SSHKeys   []string   `json:"ssh_keys"`
-	SSHUser   *string    `json:"ssh_user,omitempty"   db:"ssh_user"`
-	VolumeIDs []string   `json:"volume_ids,omitempty"`
-	CPUConfig *CpuConfig `json:"cpu_config,omitempty"`
+	// JSON-serialized in DB fields (TEXT columns, scanned directly via db.StringSlice / CpuConfig.Scan)
+	SSHKeys   db.StringSlice `json:"ssh_keys"               db:"ssh_keys"`
+	SSHUser   *string        `json:"ssh_user,omitempty"     db:"ssh_user"`
+	VolumeIDs db.StringSlice `json:"volume_ids,omitempty"   db:"volume_ids"`
+	CPUConfig *CpuConfig     `json:"cpu_config,omitempty"   db:"cpu_config"`
 
 	// Resolved relations (typed as concrete model types from this package)
 	Kernel  *KernelItem   `json:"kernel,omitempty"`

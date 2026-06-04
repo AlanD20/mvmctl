@@ -124,7 +124,7 @@ func (r *SSHRequest) ensureValidate() error {
 		}
 	}
 
-	if err := validators.ValidateSSHUsername(r.result.User); err != nil {
+	if err := validators.SSHUsername(r.result.User); err != nil {
 		return &errs.DomainError{
 			Code:    errs.CodeSSHError,
 			Op:      "ssh",

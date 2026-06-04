@@ -134,7 +134,6 @@ func (r *VMImportRequest) Resolve(ctx context.Context) (*VMCreateResolved, error
 		NetworkName:         networkName,
 		PCIEnabled:          exportConfig.Firecracker.PCIEnabled,
 		EnableConsole:       exportConfig.Boot.EnableConsole,
-		LSMFlags:            exportConfig.Firecracker.LsmFlags,
 		BootArgs:            exportConfig.Boot.Args,
 		NestedVirt:          exportConfig.Firecracker.NestedVirt,
 		NocloudNetPort:      exportConfig.CloudInit.NocloudNetPort,
@@ -156,10 +155,17 @@ func (r *VMImportRequest) Resolve(ctx context.Context) (*VMCreateResolved, error
 	} else {
 		memStr = "None"
 	}
-	createInput.MemSizeMib = &memStr
+	createInput.MemSizeMib = memStr
 
 	// disk_size: Python passes export_config.image.disk_size directly (could be None)
-	createInput.DiskSize = exportConfig.Image.DiskSize
+	if exportConfig.Image.DiskSize != nil {
+		createInput.DiskSize = *exportConfig.Image.DiskSize
+	}
+
+	// lsm_flags: Python passes export_config.firecracker.lsm_flags directly (could be None)
+	if exportConfig.Firecracker.LsmFlags != nil {
+		createInput.LSMFlags = *exportConfig.Firecracker.LsmFlags
+	}
 
 	// requested_guest_ip / requested_guest_mac: Python passes export_config.network fields directly (could be None)
 	createInput.RequestedGuestIP = exportConfig.Network.IP

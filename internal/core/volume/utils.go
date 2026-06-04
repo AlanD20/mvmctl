@@ -9,8 +9,27 @@ import (
 	"os/exec"
 	"strings"
 
+	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
 )
+
+// VolumesToDrives converts volume items to Firecracker drive configurations.
+// Matches Python's VolumeService.volumes_to_drives().
+func VolumesToDrives(vols []*model.VolumeItem) []model.DriveConfig {
+	drives := make([]model.DriveConfig, 0, len(vols))
+	for _, vol := range vols {
+		if vol == nil {
+			continue
+		}
+		drives = append(drives, model.DriveConfig{
+			DriveID:      vol.ID,
+			PathOnHost:   vol.Path,
+			IsRootDevice: false,
+			IsReadOnly:   vol.IsReadOnly,
+		})
+	}
+	return drives
+}
 
 // formatProcessError formats an error from a subprocess command to match
 // Python's ProcessError message format exactly.

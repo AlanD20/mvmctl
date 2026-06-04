@@ -23,7 +23,7 @@ import (
 	"mvmctl/internal/infra/disk"
 	"mvmctl/internal/infra/download"
 	"mvmctl/internal/infra/model"
-	"mvmctl/internal/infra/parallel"
+	"mvmctl/internal/infra/pool"
 	"mvmctl/internal/infra/provisioner"
 	"mvmctl/internal/infra/system"
 	"mvmctl/internal/infra/version"
@@ -702,7 +702,7 @@ func (s *Service) ResolveRemoteSizes(
 	specs []*model.ImageSpec,
 	ciVersion string,
 ) []*model.ImageSpec {
-	_ = parallel.Parallel(ctx, 5, specs, func(_ context.Context, sp *model.ImageSpec) error {
+	_ = pool.Do(ctx, 5, specs, func(_ context.Context, sp *model.ImageSpec) error {
 		templateVars := s.getTemplateVariables(sp, ciVersion)
 		source := sp.Source
 		if sp.ListURLTemplate != nil && *sp.ListURLTemplate != "" {

@@ -1,6 +1,7 @@
 package infra
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 )
@@ -95,4 +96,21 @@ func ShlexQuote(s string) string {
 		}
 	}
 	return s
+}
+
+// MapToStruct converts a map[string]any to a struct via JSON marshal/unmarshal.
+// Returns nil if m is nil or conversion fails.
+func MapToStruct[T any](m map[string]any) *T {
+	if m == nil {
+		return nil
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		return nil
+	}
+	var v T
+	if err := json.Unmarshal(data, &v); err != nil {
+		return nil
+	}
+	return &v
 }
