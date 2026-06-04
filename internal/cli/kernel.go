@@ -68,19 +68,7 @@ func newKernelListCmd(op *api.Operation) *cobra.Command {
 				}
 
 				if jsonOutput {
-					data := make([]map[string]interface{}, 0, len(remoteVersions))
-					for _, v := range remoteVersions {
-						sha256URL := v.SHA256URL
-						data = append(data, map[string]interface{}{
-							"version":      v.Version,
-							"type":         v.Type,
-							"display_name": v.DisplayName,
-							"download_url": v.DownloadURL,
-							"sha256_url":   sha256URL,
-							"format":       v.Format,
-						})
-					}
-					b, _ := json.MarshalIndent(data, "", "  ")
+					b, _ := json.MarshalIndent(remoteVersions, "", "  ")
 					fmt.Println(string(b))
 					return nil
 				}
@@ -243,7 +231,7 @@ func newKernelRemoveCmd(op *api.Operation) *cobra.Command {
 			if len(args) == 0 {
 				return fmt.Errorf("usage error")
 			}
-			result := op.KernelRemove(cmd.Context(), args, force)
+			result := op.KernelRemove(cmd.Context(), inputs.KernelInput{Identifiers: args, Force: &force})
 			for _, item := range result.Items {
 				if item.IsOK() {
 					msg := item.Message
@@ -380,28 +368,4 @@ Examples:
 	cmd.Flags().BoolVarP(&setDefault, "default", "d", false, "Set as default after import")
 
 	return cmd
-}
-
-// sortedStringKeys returns alphabetically sorted keys of a string→[]string map.
-func sortedStringKeys(m map[string][]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	for i := range keys {
-		for j := i + 1; j < len(keys); j++ {
-			if keys[j] < keys[i] {
-				keys[i], keys[j] = keys[j], keys[i]
-			}
-		}
-	}
-	return keys
-}
-
-// toTitle returns a title-cased copy of s (first character uppercase, rest lowercase).
-func toTitle(s string) string {
-	if s == "" {
-		return ""
-	}
-	return strings.ToUpper(s[:1]) + strings.ToLower(s[1:])
 }

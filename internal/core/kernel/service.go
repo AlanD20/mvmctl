@@ -933,11 +933,6 @@ func (s *Service) ListRemoteVersions(
 	raw := s.resolver.Resolve(ctx, configs, arch, ciVersion, cacheTTLSeconds, limit)
 	result := make(map[string][]model.VersionInfo, len(raw))
 	for key, versions := range raw {
-		baseType := key
-		if idx := strings.Index(key, "-v"); idx > 0 {
-			baseType = key[:idx]
-		}
-
 		parts := strings.SplitN(key, "-", 2)
 		name := strings.ToUpper(parts[0][:1]) + parts[0][1:]
 		if len(parts) > 1 {
@@ -953,8 +948,8 @@ func (s *Service) ListRemoteVersions(
 				Version:     v.Version,
 				DownloadURL: v.DownloadURL,
 				SHA256URL:   v.SHA256URL,
-				DisplayName: v.DisplayName,
-				Type:        baseType,
+				DisplayName: "",
+				Type:        key,
 				Format:      v.Format,
 				Name:        name,
 			}
