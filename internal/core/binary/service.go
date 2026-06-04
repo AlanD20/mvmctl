@@ -17,6 +17,7 @@ import (
 	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/download"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
 	"mvmctl/internal/infra/version"
@@ -125,7 +126,7 @@ func (s *Service) DownloadFirecracker(
 	ctx context.Context,
 	version string,
 	arch string,
-	onProgress infra.ProgressCallback,
+	onProgress event.OnDownloadCallback,
 ) ([]*model.BinaryItem, error) {
 	normalizedVersion := NormalizeVersion(version)
 

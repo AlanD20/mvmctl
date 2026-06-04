@@ -19,6 +19,7 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/event"
 )
 
 // RequestOpts bundles common HTTP request parameters.
@@ -425,7 +426,7 @@ func (d *Downloader) DownloadFile(
 	ctx context.Context,
 	url, dest, expectedSHA256 string,
 	allowMissingChecksum, silentMissingChecksum bool,
-	progress func(currentBytes, totalBytes int64),
+	progress event.OnDownloadCallback,
 ) error {
 	if err := os.MkdirAll(filepath.Dir(dest), infra.DirPerm); err != nil {
 		return fmt.Errorf("create dest dir: %w", err)

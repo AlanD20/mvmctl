@@ -23,26 +23,6 @@ var ProgressOutput io.Writer = os.Stdout
 // Progress types
 // ──────────────────────────────────────────────
 
-// ProgressEventType is a phase label for progress events.
-type ProgressEventType string
-
-const (
-	ProgressDownload ProgressEventType = "download"
-	ProgressExtract  ProgressEventType = "extract"
-	ProgressUpload   ProgressEventType = "upload"
-)
-
-// ProgressEvent represents a progress update during a long-running operation.
-type ProgressEvent struct {
-	Type    ProgressEventType `json:"type"`
-	Message string            `json:"message"`
-	Current int64             `json:"current,omitempty"`
-	Total   int64             `json:"total,omitempty"`
-}
-
-// ProgressCallback is a generic progress callback: func(current, total int64).
-type ProgressCallback func(current, total int64)
-
 // ──────────────────────────────────────────────
 // ASCIIProgressBar — matching Python's ASCIIProgressBar
 // ──────────────────────────────────────────────

@@ -8,6 +8,7 @@ import (
 
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
@@ -496,9 +497,9 @@ func runVMCreate(
 		EnableMetrics:     enableMetricsPtr,
 	}
 
-	vms, err := op.VMCreate(cmd.Context(), input, func(event errs.ProgressEvent) {
-		if event.Message != "" {
-			prog.UpdateText(event.Message)
+	vms, err := op.VMCreate(cmd.Context(), input, func(e event.Progress) {
+		if e.Message != "" {
+			prog.UpdateText(e.Message)
 		}
 	})
 	if err != nil {

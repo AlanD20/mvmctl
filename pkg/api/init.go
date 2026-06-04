@@ -8,6 +8,7 @@ import (
 	"os/exec"
 
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api/inputs"
 )
@@ -60,7 +61,7 @@ func (op *Operation) InitRun(
 	nonInteractive bool,
 	sudoCompleted bool,
 	downloadVersion string,
-	onProgress func(errs.ProgressEvent),
+	onProgress event.OnProgressCallback,
 ) *InitResult {
 	return op.InitRunFull(
 		ctx,
@@ -85,7 +86,7 @@ func (op *Operation) InitRunFull(
 	hostSetupMessage string,
 	downloadVersion string,
 	guestfsEnabled *bool,
-	onProgress func(errs.ProgressEvent),
+	onProgress event.OnProgressCallback,
 ) *InitResult {
 	steps := make([]InitStepResult, 0)
 
@@ -171,7 +172,7 @@ func (op *Operation) initStepHost(
 	skip bool,
 	sudoCompleted bool,
 	setupMessage string,
-	onProgress func(errs.ProgressEvent),
+	onProgress event.OnProgressCallback,
 ) (InitStepResult, *errs.NeedsInteraction) {
 	if skip {
 		return InitStepResult{Step: "host", Success: true, Message: "Skipped (--skip-host)"}, nil
@@ -219,7 +220,7 @@ func (op *Operation) initStepNetworkSetup(ctx context.Context) InitStepResult {
 	return InitStepResult{Step: "network_setup", Success: success, Message: msg}
 }
 
-func (op *Operation) initStepCache(ctx context.Context, onProgress func(errs.ProgressEvent)) InitStepResult {
+func (op *Operation) initStepCache(ctx context.Context, onProgress event.OnProgressCallback) InitStepResult {
 	// Python: try: result = CacheOperation.init_all(...); except Exception as e:
 	//         return InitStepResult("cache", False, f"Cache init failed: {e}")
 	cacheDict, err := op.CacheInitAll(ctx, onProgress)

@@ -14,8 +14,8 @@ import (
 	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
-	"mvmctl/internal/infra/operation"
 	"mvmctl/internal/infra/system"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"
@@ -78,7 +78,7 @@ func (op *Operation) KernelPrune(ctx context.Context, dryRun bool, includeAll bo
 // KernelPull downloads or builds a kernel with full pipeline.
 // Matches Python's KernelOperation.pull(inputs: KernelPullInput, *, on_progress=...) exactly.
 func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInput,
-	onProgress func(errs.ProgressEvent)) (*model.KernelItem, error) {
+	onProgress event.OnProgressCallback) (*model.KernelItem, error) {
 
 	kernelType := input.KernelType
 	version := ""
@@ -186,7 +186,7 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 			ciVersion,
 			resolved.Arch,
 			resolved.OutputDir,
-			operation.DownloadProgressBridge(onProgress),
+			event.FormatProgress(onProgress),
 		)
 		if err != nil {
 			return nil, &errs.DomainError{
@@ -213,18 +213,10 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 			}
 		}
 
-		onProgressFn := func(msg string) {
-			if onProgress != nil {
-				onProgress(errs.ProgressEvent{
-					Phase: "build", Status: "running", Message: msg,
-				})
-			}
-		}
-
 		fetchResult, err = op.Services.Kernel.BuildOfficialKernel(ctx, spec, resolved.Arch, resolved.OutputDir,
 			resolved.Jobs, resolved.KeepBuildDir, !resolved.CleanBuild,
 			configPath, featureEnforces,
-			operation.DownloadProgressBridge(onProgress), onProgressFn)
+			event.FormatProgress(onProgress), onProgress)
 		if err != nil {
 			return nil, &errs.DomainError{
 				Code: "kernel.pull_failed", Message: fmt.Sprintf("Kernel build failed: %v", err), Err: err,
@@ -428,7 +420,7 @@ func (op *Operation) KernelList(
 	ctx context.Context,
 	remote bool,
 	noCache bool,
-	onProgress func(errs.ProgressEvent),
+	onProgress event.OnProgressCallback,
 ) ([]*model.KernelItem, []model.VersionInfo, error) {
 	if remote {
 		emitProgress(onProgress, "listing", "running", "Fetching remote kernel versions...")

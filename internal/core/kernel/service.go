@@ -19,6 +19,7 @@ import (
 	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/download"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
 	"mvmctl/internal/infra/version"
@@ -58,8 +59,8 @@ type BuildConfig struct {
 	KeepBuildDir   bool
 	UserConfigPath *string
 	UseCache       bool
-	OnDownload     func(currentBytes, totalBytes int64)
-	OnProgress     func(string)
+	OnDownload     event.OnDownloadCallback
+	OnProgress     event.OnProgressCallback
 	// Configs from selected features to enforce on top of spec.DefaultConfigs.
 	// Keys are kernel config options (CONFIG_FOO); values are "y", "n", or a number.
 	FeatureEnforces map[string]string
@@ -106,7 +107,7 @@ func (s *Service) FetchFirecrackerKernel(
 	ctx context.Context,
 	spec *model.KernelSpec,
 	ciVersion, arch, outputDir string,
-	onProgress func(currentBytes, totalBytes int64),
+	onProgress event.OnDownloadCallback,
 ) (*model.KernelPullResult, error) {
 	if spec.ListURLTemplate == nil || *spec.ListURLTemplate == "" {
 		return nil, NewKernelErrorf(
@@ -218,8 +219,8 @@ func (s *Service) BuildOfficialKernel(
 	useCache bool,
 	userConfigPath *string,
 	featureEnforces map[string]string,
-	onDownload func(currentBytes, totalBytes int64),
-	onProgress func(string),
+	onDownload event.OnDownloadCallback,
+	onProgress event.OnProgressCallback,
 ) (*model.KernelPullResult, error) {
 	if err := checkBuildDependencies(ctx); err != nil {
 		return nil, err
@@ -388,7 +389,7 @@ func (s *Service) resolveSourceURL(
 	ctx context.Context,
 	spec *model.KernelSpec,
 	version, arch, sha256 string,
-	onProgress func(string),
+	onProgress event.OnProgressCallback,
 ) (string, string, error) {
 	major := ""
 	if m, _, found := strings.Cut(version, "."); found {
@@ -694,7 +695,7 @@ func (s *Service) PrepareKernelConfig(
 	jobs int,
 	userConfigPath *string,
 	featureEnforces map[string]string,
-	onProgress func(string),
+	onProgress event.OnProgressCallback,
 ) (*KernelConfigResult, error) {
 	var warnings []string
 	var infoMessages []string
@@ -706,7 +707,7 @@ func (s *Service) PrepareKernelConfig(
 		if errors.As(err, &de) &&
 			(de.Code == errs.CodeKernelBuildFailed || de.Code == errs.CodeKernelConfigFailed) {
 			if onProgress != nil {
-				onProgress("Using defconfig instead...")
+				onProgress(event.Progress{Phase: "build", Status: "running", Message: "Using defconfig instead..."})
 			}
 			slog.Info("Using defconfig instead")
 			if rc, _, _ := runMake(ctx, kernelDir, KernelDefconfigTarget, jobs); rc != 0 {
@@ -717,7 +718,7 @@ func (s *Service) PrepareKernelConfig(
 		}
 	} else if len(spec.ConfigFragments) > 0 {
 		if onProgress != nil {
-			onProgress("Applying kernel config fragments...")
+			onProgress(event.Progress{Phase: "build", Status: "running", Message: "Applying kernel config fragments..."})
 		}
 		if err := s.applyConfigFragments(ctx, kernelDir, spec.ConfigFragments, templateVars, onProgress); err != nil {
 			return nil, err
@@ -725,7 +726,7 @@ func (s *Service) PrepareKernelConfig(
 	}
 
 	if onProgress != nil {
-		onProgress("Synchronizing kernel config...")
+		onProgress(event.Progress{Phase: "build", Status: "running", Message: "Synchronizing kernel config..."})
 	}
 	slog.Debug("Synchronizing config")
 	if rc, _, _ := runMake(ctx, kernelDir, KernelOlddefconfigTarget, jobs); rc != 0 {
@@ -744,7 +745,7 @@ func (s *Service) PrepareKernelConfig(
 
 	if len(mergedConfigs) > 0 {
 		if onProgress != nil {
-			onProgress(fmt.Sprintf("Applying %d kernel config options...", len(mergedConfigs)))
+			onProgress(event.Progress{Phase: "build", Status: "running", Message: fmt.Sprintf("Applying %d kernel config options...", len(mergedConfigs))})
 		}
 		slog.Debug("Applying kernel config options", "count", len(mergedConfigs))
 		for option, value := range mergedConfigs {
@@ -753,7 +754,7 @@ func (s *Service) PrepareKernelConfig(
 	}
 
 	if onProgress != nil {
-		onProgress("Resolving config dependencies...")
+		onProgress(event.Progress{Phase: "build", Status: "running", Message: "Resolving config dependencies..."})
 	}
 	slog.Debug("Resolving dependencies")
 	if rc, _, _ := runMake(ctx, kernelDir, KernelOlddefconfigTarget, jobs); rc != 0 {
@@ -763,7 +764,7 @@ func (s *Service) PrepareKernelConfig(
 	if userConfigPath != nil && *userConfigPath != "" {
 		if _, statErr := os.Stat(*userConfigPath); statErr == nil {
 			if onProgress != nil {
-				onProgress(fmt.Sprintf("Applying user config fragment: %s", *userConfigPath))
+				onProgress(event.Progress{Phase: "build", Status: "running", Message: fmt.Sprintf("Applying user config fragment: %s", *userConfigPath)})
 			}
 			slog.Info("Applying user config fragment", "path", *userConfigPath)
 			configPath := filepath.Join(kernelDir, ".config")
@@ -773,7 +774,7 @@ func (s *Service) PrepareKernelConfig(
 			}
 			mergeConfigLines(string(userData), configPath)
 			if onProgress != nil {
-				onProgress("Resolving dependencies after user config...")
+				onProgress(event.Progress{Phase: "build", Status: "running", Message: "Resolving dependencies after user config..."})
 			}
 			slog.Debug("Resolving dependencies after user config")
 			if rc, _, _ := runMake(ctx, kernelDir, "olddefconfig", jobs); rc != 0 {
@@ -783,7 +784,7 @@ func (s *Service) PrepareKernelConfig(
 	}
 
 	if onProgress != nil {
-		onProgress("Verifying kernel configuration...")
+		onProgress(event.Progress{Phase: "build", Status: "running", Message: "Verifying kernel configuration..."})
 	}
 	slog.Debug("Verifying configuration")
 	configSettings, err := parseKernelConfig(kernelDir)
@@ -990,7 +991,7 @@ func (s *Service) applyConfigFragments(
 	kernelDir string,
 	fragments []string,
 	vars map[string]string,
-	onProgress func(string),
+	onProgress event.OnProgressCallback,
 ) error {
 	configPath := filepath.Join(kernelDir, ".config")
 	for idx, fragment := range fragments {
@@ -1002,7 +1003,7 @@ func (s *Service) applyConfigFragments(
 
 		if strings.HasPrefix(rendered, "http://") || strings.HasPrefix(rendered, "https://") {
 			if onProgress != nil {
-				onProgress(fmt.Sprintf("Fetching config fragment: %s", rendered))
+				onProgress(event.Progress{Phase: "build", Status: "running", Message: fmt.Sprintf("Fetching config fragment: %s", rendered)})
 			}
 			content, err = s.dl.GetBody(ctx, rendered)
 			if err != nil {
@@ -1011,7 +1012,7 @@ func (s *Service) applyConfigFragments(
 		} else {
 			rel := strings.TrimPrefix(rendered, "assets/")
 			if onProgress != nil {
-				onProgress(fmt.Sprintf("Applying config fragment: %s", rel))
+				onProgress(event.Progress{Phase: "build", Status: "running", Message: fmt.Sprintf("Applying config fragment: %s", rel)})
 			}
 			content, err = assets.ReadFile(rel)
 			if err != nil {

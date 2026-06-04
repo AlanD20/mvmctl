@@ -12,6 +12,7 @@ import (
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
@@ -215,9 +216,9 @@ The selector can be a type (e.g. "ubuntu") or type:version (e.g. "ubuntu:24.04")
 
 			prog := common.NewProgress()
 			prog.Start("Downloading image...")
-			img, err := op.ImagePull(cmd.Context(), input, func(event errs.ProgressEvent) {
-				if event.Message != "" {
-					prog.UpdateText(event.Message)
+			img, err := op.ImagePull(cmd.Context(), input, func(e event.Progress) {
+				if e.Message != "" {
+					prog.UpdateText(e.Message)
 				}
 			})
 			prog.Stop()
@@ -443,9 +444,9 @@ Examples:
 
 			prog := common.NewProgress()
 			prog.Start("Importing image...")
-			img, err := op.ImageImport(cmd.Context(), input, func(event errs.ProgressEvent) {
-				if event.Message != "" {
-					prog.UpdateText(event.Message)
+			img, err := op.ImageImport(cmd.Context(), input, func(e event.Progress) {
+				if e.Message != "" {
+					prog.UpdateText(e.Message)
 				}
 			})
 			prog.Stop()
@@ -520,15 +521,15 @@ Examples:
 			var warmErr error
 			if imageID != "" {
 				warmInput := inputs.ImageInput{Identifiers: []string{imageID}}
-				paths, warmErr = op.ImageWarm(cmd.Context(), &warmInput, false, func(event errs.ProgressEvent) {
-					if event.Message != "" {
-						prog.UpdateText(event.Message)
+				paths, warmErr = op.ImageWarm(cmd.Context(), &warmInput, false, func(e event.Progress) {
+					if e.Message != "" {
+						prog.UpdateText(e.Message)
 					}
 				})
 			} else {
-				paths, warmErr = op.ImageWarm(cmd.Context(), nil, true, func(event errs.ProgressEvent) {
-					if event.Message != "" {
-						prog.UpdateText(event.Message)
+				paths, warmErr = op.ImageWarm(cmd.Context(), nil, true, func(e event.Progress) {
+					if e.Message != "" {
+						prog.UpdateText(e.Message)
 					}
 				})
 			}
