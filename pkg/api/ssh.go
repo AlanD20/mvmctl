@@ -17,13 +17,13 @@ import (
 // in OperationResult; other exceptions propagate.
 // Go: returns error. Non-MVMError errors are wrapped with code
 // "ssh.failed" as well (Go has no exceptions, so all errors are returned).
-func (op *Operation) SSHConnect(ctx context.Context, input *inputs.SSHInput) error {
+func (op *Operation) SSHConnect(ctx context.Context, input inputs.SSHInput) error {
 	// Python: try:
 	//   request = SSHRequest(inputs, db); resolved = request.resolve()
 	//   ...
 	// except MVMError as e:
 	//   return OperationResult(status="error", code="ssh.failed", ...)
-	request := inputs.NewSSHRequest(*input, op.Services.Config)
+	request := inputs.NewSSHRequest(input, op.Services.Config)
 	resolved, err := request.Resolve(ctx, op.Repos.VM, op.Repos.Key)
 	if err != nil {
 		return newSSHError(err)

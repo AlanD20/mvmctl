@@ -146,7 +146,7 @@ func newNetworkCreateCmd(op *api.Operation) *cobra.Command {
 			if ipv4Gateway != "" {
 				gw = &ipv4Gateway
 			}
-			input := &inputs.NetworkCreateInput{
+			input := inputs.NetworkCreateInput{
 				Name:        name,
 				Subnet:      subnet,
 				IPv4Gateway: gw,
@@ -220,7 +220,7 @@ func newNetworkRemoveCmd(op *api.Operation) *cobra.Command {
 				return fmt.Errorf("usage error")
 			}
 
-			err := op.NetworkRemove(cmd.Context(), &inputs.NetworkInput{Identifiers: args}, force)
+			err := op.NetworkRemove(cmd.Context(), inputs.NetworkInput{Identifiers: args}, force)
 			if err != nil {
 				return fmt.Errorf("remove failed: %w", err)
 			}
@@ -258,7 +258,7 @@ func newNetworkInspectCmd(op *api.Operation) *cobra.Command {
 				return fmt.Errorf("missing required argument")
 			}
 
-			info, err := op.NetworkInspect(cmd.Context(), &inputs.NetworkInput{Identifiers: []string{name}})
+			info, err := op.NetworkInspect(cmd.Context(), inputs.NetworkInput{Identifiers: []string{name}})
 			if err != nil {
 				return fmt.Errorf("network not found: %s", name)
 			}
@@ -286,9 +286,9 @@ func newNetworkSyncCmd(op *api.Operation) *cobra.Command {
 		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: completeNetworkNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var netInput *inputs.NetworkInput
+			var netInput inputs.NetworkInput
 			if len(args) > 0 {
-				netInput = &inputs.NetworkInput{Identifiers: args}
+				netInput = inputs.NetworkInput{Identifiers: args}
 			}
 			results, err := op.NetworkSync(cmd.Context(), netInput)
 			if err != nil {
@@ -354,7 +354,7 @@ func newNetworkDefaultCmd(op *api.Operation) *cobra.Command {
 				return fmt.Errorf("missing required argument")
 			}
 
-			err := op.NetworkSetDefault(cmd.Context(), &inputs.NetworkInput{Identifiers: []string{name}})
+			err := op.NetworkSetDefault(cmd.Context(), inputs.NetworkInput{Identifiers: []string{name}})
 			if err != nil {
 				return fmt.Errorf("set default failed: %w", err)
 			}

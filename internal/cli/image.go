@@ -204,7 +204,7 @@ The selector can be a type (e.g. "ubuntu") or type:version (e.g. "ubuntu:24.04")
 				effectiveType = selector
 			}
 
-			input := &inputs.ImagePullInput{
+			input := inputs.ImagePullInput{
 				Type:              effectiveType,
 				Version:           effectiveVersion,
 				Force:             force,
@@ -270,7 +270,7 @@ Examples:
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeImageIDs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result := op.ImageRemove(cmd.Context(), &inputs.ImageInput{Identifiers: args}, force)
+			result := op.ImageRemove(cmd.Context(), inputs.ImageInput{Identifiers: args}, force)
 			for _, r := range result.Items {
 				itemID := "unknown"
 				if r.Item != nil {
@@ -313,7 +313,7 @@ Examples:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prefix := args[0]
 
-			input := &inputs.ImageInput{Identifiers: []string{prefix}}
+			input := inputs.ImageInput{Identifiers: []string{prefix}}
 			info, err := op.ImageInspect(cmd.Context(), input)
 			if err != nil {
 				return err
@@ -353,7 +353,7 @@ func newImageDefaultCmd(op *api.Operation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prefix := args[0]
 			imgInput := inputs.ImageInput{Identifiers: []string{prefix}}
-			if err := op.ImageSetDefault(cmd.Context(), &imgInput); err != nil {
+			if err := op.ImageSetDefault(cmd.Context(), imgInput); err != nil {
 				return err
 			}
 			common.Cli.Success(fmt.Sprintf("Default image set to: %s", prefix))
@@ -431,7 +431,7 @@ Examples:
 				}
 			}
 
-			input := &inputs.ImageImportInput{
+			input := inputs.ImageImportInput{
 				Name:              name,
 				Format:            format,
 				SourcePath:        sourcePath,
@@ -521,13 +521,13 @@ Examples:
 			var warmErr error
 			if imageID != "" {
 				warmInput := inputs.ImageInput{Identifiers: []string{imageID}}
-				paths, warmErr = op.ImageWarm(cmd.Context(), &warmInput, false, func(e event.Progress) {
+				paths, warmErr = op.ImageWarm(cmd.Context(), warmInput, false, func(e event.Progress) {
 					if e.Message != "" {
 						prog.UpdateText(e.Message)
 					}
 				})
 			} else {
-				paths, warmErr = op.ImageWarm(cmd.Context(), nil, true, func(e event.Progress) {
+				paths, warmErr = op.ImageWarm(cmd.Context(), inputs.ImageInput{}, true, func(e event.Progress) {
 					if e.Message != "" {
 						prog.UpdateText(e.Message)
 					}

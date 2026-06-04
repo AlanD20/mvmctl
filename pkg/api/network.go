@@ -21,8 +21,8 @@ import (
 
 // NetworkCreate creates a new network.
 // Matches Python's NetworkOperation.create() exactly.
-func (op *Operation) NetworkCreate(ctx context.Context, input *inputs.NetworkCreateInput) (*model.Network, error) {
-	request := inputs.NewNetworkCreateRequest(*input, op.Connection.DB(), op.Repos.Network)
+func (op *Operation) NetworkCreate(ctx context.Context, input inputs.NetworkCreateInput) (*model.Network, error) {
+	request := inputs.NewNetworkCreateRequest(input, op.Connection.DB(), op.Repos.Network)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return nil, &errs.DomainError{
@@ -121,8 +121,8 @@ func (op *Operation) NetworkCreate(ctx context.Context, input *inputs.NetworkCre
 // NetworkRemove removes one or more networks.
 // Matches Python's NetworkOperation.remove() exactly — uses NetworkRequest for resolution,
 // enriches with VM references, checks "in use".
-func (op *Operation) NetworkRemove(ctx context.Context, input *inputs.NetworkInput, force bool) error {
-	request := inputs.NewNetworkRequest(*input, op.Connection.DB(), op.Repos.Network)
+func (op *Operation) NetworkRemove(ctx context.Context, input inputs.NetworkInput, force bool) error {
+	request := inputs.NewNetworkRequest(input, op.Connection.DB(), op.Repos.Network)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return &errs.DomainError{
@@ -171,8 +171,8 @@ func (op *Operation) NetworkListAll(ctx context.Context) ([]*model.Network, erro
 // NetworkGet returns a single network by Input/Request resolution pipeline.
 // Matches Python's NetworkOperation.get() exactly — uses NetworkInput/NetworkRequest
 // to resolve identifiers (by name or ID) and supports multi-identifier resolution.
-func (op *Operation) NetworkGet(ctx context.Context, input *inputs.NetworkInput) (*model.Network, error) {
-	request := inputs.NewNetworkRequest(*input, op.Connection.DB(), op.Repos.Network)
+func (op *Operation) NetworkGet(ctx context.Context, input inputs.NetworkInput) (*model.Network, error) {
+	request := inputs.NewNetworkRequest(input, op.Connection.DB(), op.Repos.Network)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return nil, err
@@ -211,9 +211,9 @@ func (op *Operation) NetworkToJSON(networks []*model.Network) []map[string]inter
 // to resolve identifiers (by name or ID) with lease enrichment.
 func (op *Operation) NetworkInspect(
 	ctx context.Context,
-	input *inputs.NetworkInput,
+	input inputs.NetworkInput,
 ) (*responses.NetworkInspect, error) {
-	request := inputs.NewNetworkRequest(*input, op.Connection.DB(), op.Repos.Network)
+	request := inputs.NewNetworkRequest(input, op.Connection.DB(), op.Repos.Network)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return nil, err
@@ -281,8 +281,8 @@ func (op *Operation) NetworkInspect(
 // NetworkSetDefault sets a network as default.
 // Matches Python's NetworkOperation.set_default() exactly — goes through Controller
 // and uses NetworkInput/NetworkRequest to resolve identifiers.
-func (op *Operation) NetworkSetDefault(ctx context.Context, input *inputs.NetworkInput) error {
-	request := inputs.NewNetworkRequest(*input, op.Connection.DB(), op.Repos.Network)
+func (op *Operation) NetworkSetDefault(ctx context.Context, input inputs.NetworkInput) error {
+	request := inputs.NewNetworkRequest(input, op.Connection.DB(), op.Repos.Network)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return &errs.DomainError{
@@ -318,11 +318,11 @@ func (op *Operation) NetworkSetDefault(ctx context.Context, input *inputs.Networ
 
 // NetworkSync syncs firewall rules for one or more networks.
 // Matches Python's NetworkOperation.sync() exactly.
-func (op *Operation) NetworkSync(ctx context.Context, input *inputs.NetworkInput) (map[string]map[string]int, error) {
+func (op *Operation) NetworkSync(ctx context.Context, input inputs.NetworkInput) (map[string]map[string]int, error) {
 	var networks []*model.Network
 	var err error
-	if input != nil && len(input.Identifiers) > 0 {
-		req := inputs.NewNetworkRequest(*input, op.Connection.DB(), op.Repos.Network)
+	if len(input.Identifiers) > 0 {
+		req := inputs.NewNetworkRequest(input, op.Connection.DB(), op.Repos.Network)
 		resolved, resolveErr := req.Resolve(ctx)
 		if resolveErr != nil {
 			return nil, &errs.DomainError{
@@ -452,7 +452,7 @@ func (op *Operation) NetworkPrune(ctx context.Context, dryRun bool, includeAll b
 			if !network.IsPresent {
 				_ = op.Repos.Network.Delete(ctx, network.ID)
 			} else {
-				err := op.NetworkRemove(ctx, &inputs.NetworkInput{Identifiers: []string{network.Name}}, includeAll)
+				err := op.NetworkRemove(ctx, inputs.NetworkInput{Identifiers: []string{network.Name}}, includeAll)
 				if err != nil {
 					slog.Warn("Failed to remove network", "name", network.Name, "error", err)
 					continue
@@ -487,7 +487,7 @@ func (op *Operation) NetworkCreateDefaultNetwork(ctx context.Context) (*model.Ne
 			natGateways = []string{outboundIf}
 		}
 
-		createInput := &inputs.NetworkCreateInput{
+		createInput := inputs.NetworkCreateInput{
 			Name:        defaultName,
 			Subnet:      defaultSubnet,
 			NATEnabled:  defaultNATEnabled && len(natGateways) > 0,

@@ -466,7 +466,7 @@ func runVMCreate(
 	}
 	pciEnabled := !noPCI
 
-	input := &inputs.VMCreateInput{
+	input := inputs.VMCreateInput{
 		Name:              baseName,
 		Image:             imagePtr,
 		KernelID:          kernelPtr,
@@ -545,7 +545,7 @@ func newVMRemoveCmd(op *api.Operation) *cobra.Command {
 
 func runVMRemove(op *api.Operation, cmd *cobra.Command, identifiers []string, force bool) error {
 	// Use batch API — pass all identifiers at once
-	removeResult := op.VMRemove(cmd.Context(), &inputs.VMInput{Identifiers: identifiers, Force: &force})
+	removeResult := op.VMRemove(cmd.Context(), inputs.VMInput{Identifiers: identifiers, Force: &force})
 	if removeResult.HasErrors() {
 		for _, r := range removeResult.Items {
 			if r.IsOK() {
@@ -587,7 +587,7 @@ func newVMStartCmd(op *api.Operation) *cobra.Command {
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
-			startResult := op.VMStart(cmd.Context(), &inputs.VMInput{Identifiers: []string{id}})
+			startResult := op.VMStart(cmd.Context(), inputs.VMInput{Identifiers: []string{id}})
 			if startResult.HasErrors() {
 				for _, r := range startResult.Items {
 					if !r.IsOK() {
@@ -618,7 +618,7 @@ func newVMStopCmd(op *api.Operation) *cobra.Command {
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
-			stopResult := op.VMStop(cmd.Context(), &inputs.VMInput{Identifiers: []string{id}, Force: &force})
+			stopResult := op.VMStop(cmd.Context(), inputs.VMInput{Identifiers: []string{id}, Force: &force})
 			if stopResult.HasErrors() {
 				for _, r := range stopResult.Items {
 					if !r.IsOK() {
@@ -652,7 +652,7 @@ func newVMRebootCmd(op *api.Operation) *cobra.Command {
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
-			rebootResult := op.VMReboot(cmd.Context(), &inputs.VMInput{Identifiers: []string{id}, Force: &force})
+			rebootResult := op.VMReboot(cmd.Context(), inputs.VMInput{Identifiers: []string{id}, Force: &force})
 			if rebootResult.HasErrors() {
 				for _, r := range rebootResult.Items {
 					if !r.IsOK() {
@@ -684,7 +684,7 @@ func newVMPauseCmd(op *api.Operation) *cobra.Command {
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
-			pauseResult := op.VMPause(cmd.Context(), &inputs.VMInput{Identifiers: []string{id}})
+			pauseResult := op.VMPause(cmd.Context(), inputs.VMInput{Identifiers: []string{id}})
 			if pauseResult.HasErrors() {
 				for _, r := range pauseResult.Items {
 					if !r.IsOK() {
@@ -713,7 +713,7 @@ func newVMResumeCmd(op *api.Operation) *cobra.Command {
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
-			resumeResult := op.VMResume(cmd.Context(), &inputs.VMInput{Identifiers: []string{id}})
+			resumeResult := op.VMResume(cmd.Context(), inputs.VMInput{Identifiers: []string{id}})
 			if resumeResult.HasErrors() {
 				for _, r := range resumeResult.Items {
 					if !r.IsOK() {
@@ -747,7 +747,7 @@ func newVMSnapshotCmd(op *api.Operation) *cobra.Command {
 
 			if err := op.VMSnapshot(
 				cmd.Context(),
-				&inputs.VMInput{Identifiers: []string{id}},
+				inputs.VMInput{Identifiers: []string{id}},
 				memFile,
 				stateFile,
 			); err != nil {
@@ -788,7 +788,7 @@ Flags:
 
 			if err := op.VMLoad(
 				cmd.Context(),
-				&inputs.VMInput{Identifiers: []string{id}},
+				inputs.VMInput{Identifiers: []string{id}},
 				memFile,
 				stateFile,
 				resume,
@@ -826,7 +826,7 @@ func newVMInspectCmd(op *api.Operation) *cobra.Command {
 }
 
 func runVMInspect(op *api.Operation, cmd *cobra.Command, id string, jsonOutput bool) error {
-	info, err := op.VMInspect(cmd.Context(), &inputs.VMInput{Identifiers: []string{id}})
+	info, err := op.VMInspect(cmd.Context(), inputs.VMInput{Identifiers: []string{id}})
 	if err != nil {
 		return err
 	}
@@ -863,7 +863,7 @@ instead of internal IDs, making it portable across machines.`,
 				outputPath = args[1]
 			}
 
-			exportConfig, err := op.VMExport(cmd.Context(), &inputs.VMInput{Identifiers: []string{id}})
+			exportConfig, err := op.VMExport(cmd.Context(), inputs.VMInput{Identifiers: []string{id}})
 			if err != nil {
 				return fmt.Errorf("export failed: %s", err.Error())
 			}
@@ -899,7 +899,7 @@ func newVMImportCmd(op *api.Operation) *cobra.Command {
 			}
 			if err := op.VMImport(
 				cmd.Context(),
-				&inputs.VMImportInput{ConfigPath: args[0], NameOverride: nameOverride},
+				inputs.VMImportInput{ConfigPath: args[0], NameOverride: nameOverride},
 				nil,
 			); err != nil {
 				if errs.IsNeedsInteraction(err) {
@@ -935,7 +935,7 @@ Arguments:
 
 			if err := op.VMAttachVolume(
 				cmd.Context(),
-				&inputs.VMInput{Identifiers: []string{id}},
+				inputs.VMInput{Identifiers: []string{id}},
 				volumeName,
 			); err != nil {
 				return fmt.Errorf("attach volume %q: %w", volumeName, err)
@@ -966,7 +966,7 @@ Arguments:
 
 			if err := op.VMDetachVolume(
 				cmd.Context(),
-				&inputs.VMInput{Identifiers: []string{id}},
+				inputs.VMInput{Identifiers: []string{id}},
 				volumeName,
 			); err != nil {
 				return fmt.Errorf("detach volume %q: %w", volumeName, err)

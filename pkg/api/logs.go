@@ -33,14 +33,14 @@ import (
 // For "follow": resolves input, reads from the channel returned by the controller's
 // FollowSync, invoking the callback for each line as it is received. Blocks until
 // the channel is closed (ctx cancelled or error occurs).
-func (op *Operation) LogStream(ctx context.Context, input *inputs.LogInput, callback func(string) error) error {
+func (op *Operation) LogStream(ctx context.Context, input inputs.LogInput, callback func(string) error) error {
 	// Python: resolved = LogRequest(inputs=inputs).resolve()
 	//         controller = LogController(resolved.vm)
 	//         if resolved.follow:
 	//             yield from controller.follow(...)
 	//         else:
 	//             yield from controller.show(...)
-	req := inputs.NewLogRequest(*input, op.Services.Config, op.Connection.DB())
+	req := inputs.NewLogRequest(input, op.Services.Config, op.Connection.DB())
 	resolved, err := req.Resolve(ctx, op.Repos.VM)
 	if err != nil {
 		return err
@@ -93,8 +93,8 @@ func (op *Operation) LogStream(ctx context.Context, input *inputs.LogInput, call
 // For "show": goroutine reads lines, sends them to channel, closes channel.
 // For "follow": goroutine follows the log file, sending lines as they arrive,
 // until ctx is cancelled.
-func (op *Operation) LogStreamChannel(ctx context.Context, input *inputs.LogInput) (<-chan string, error) {
-	req := inputs.NewLogRequest(*input, op.Services.Config, op.Connection.DB())
+func (op *Operation) LogStreamChannel(ctx context.Context, input inputs.LogInput) (<-chan string, error) {
+	req := inputs.NewLogRequest(input, op.Services.Config, op.Connection.DB())
 	resolved, err := req.Resolve(ctx, op.Repos.VM)
 	if err != nil {
 		return nil, err

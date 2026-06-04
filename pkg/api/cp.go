@@ -33,12 +33,12 @@ func (op *Operation) copyError(err error) error {
 // the unified copyError handler.
 func (op *Operation) CPCopy(
 	ctx context.Context,
-	input *inputs.CPInput,
+	input inputs.CPInput,
 	onProgress func(int64),
 ) (*responses.CPCopyResult, error) {
 	// Python: try: ... except CPError as e: ...
 	// Build CPRequest and resolve (matches Python: CPRequest(inputs, db).resolve())
-	req := inputs.NewCPRequest(*input, op.Services.Config)
+	req := inputs.NewCPRequest(input, op.Services.Config)
 	resolved, err := req.Resolve(ctx, op.Repos.VM, op.Repos.Key)
 	if err != nil {
 		return nil, op.copyError(err)

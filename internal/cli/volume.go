@@ -101,7 +101,7 @@ func newVolumeCreateCmd(op *api.Operation) *cobra.Command {
 			if cmd.Flags().Changed("read-only") || cmd.Flags().Changed("readonly") {
 				readOnlyPtr = &readOnly
 			}
-			input := &inputs.VolumeCreateInput{
+			input := inputs.VolumeCreateInput{
 				Name:     name,
 				Size:     sizeStr,
 				Format:   formatPtr,
@@ -148,7 +148,7 @@ func newVolumeRemoveCmd(op *api.Operation) *cobra.Command {
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeVolumeNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			removeResult := op.VolumeRemove(cmd.Context(), &inputs.VolumeInput{Identifiers: args}, force)
+			removeResult := op.VolumeRemove(cmd.Context(), inputs.VolumeInput{Identifiers: args}, force)
 			// Match Python: for r in result.items: if r.is_ok: mvm_cli.success("Removed: {name}")
 			//              else: mvm_cli.error(r.message or "Remove failed: {name}")
 			for _, r := range removeResult.Items {
@@ -190,7 +190,7 @@ func newVolumeInspectCmd(op *api.Operation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 
-			info, err := op.VolumeInspect(cmd.Context(), &inputs.VolumeInput{Identifiers: []string{identifier}})
+			info, err := op.VolumeInspect(cmd.Context(), inputs.VolumeInput{Identifiers: []string{identifier}})
 			if err != nil {
 				// Match Python: @handle_errors decorator — pass through actual error message
 				return err
@@ -223,7 +223,7 @@ func newVolumeResizeCmd(op *api.Operation) *cobra.Command {
 
 			if err := op.VolumeResize(
 				cmd.Context(),
-				&inputs.VolumeCreateInput{Name: identifier, Size: sizeArg},
+				inputs.VolumeCreateInput{Name: identifier, Size: sizeArg},
 			); err != nil {
 				return err
 			}

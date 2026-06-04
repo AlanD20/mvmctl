@@ -51,7 +51,7 @@ import (
 // Matches Python's VMOperation.create() exactly.
 func (op *Operation) VMCreate(
 	ctx context.Context,
-	input *inputs.VMCreateInput,
+	input inputs.VMCreateInput,
 	onProgress event.OnProgressCallback,
 ) ([]*model.VM, error) {
 	if err := system.CheckPrivileges("/usr/sbin/ip", "create VMs"); err != nil {
@@ -77,7 +77,7 @@ func (op *Operation) VMCreate(
 
 func (op *Operation) vmCreateSingle(
 	ctx context.Context,
-	input *inputs.VMCreateInput,
+	input inputs.VMCreateInput,
 	onProgress event.OnProgressCallback,
 ) ([]*model.VM, error) {
 	createdAt := time.Now()
@@ -154,7 +154,7 @@ func (op *Operation) vmCreateSingle(
 
 func (op *Operation) vmCreateBatch(
 	ctx context.Context,
-	input *inputs.VMCreateInput,
+	input inputs.VMCreateInput,
 	count int,
 	onProgress event.OnProgressCallback,
 ) ([]*model.VM, error) {
@@ -198,7 +198,7 @@ func (op *Operation) vmCreateBatch(
 			if input.Atomic && len(createdVMs) > 0 {
 				// Rollback
 				for _, vm := range createdVMs {
-					_ = op.VMRemove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: new(true)})
+					_ = op.VMRemove(ctx, inputs.VMInput{Identifiers: []string{vm.Name}, Force: new(true)})
 				}
 				return nil, &errs.DomainError{
 					Code: "vm.atomic_failed",
@@ -230,7 +230,7 @@ func (op *Operation) vmCreateBatch(
 			errors = append(errors, fmt.Sprintf("%s: %v", name, execErr))
 			if input.Atomic && len(createdVMs) > 0 {
 				for _, vm := range createdVMs {
-					_ = op.VMRemove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: new(true)})
+					_ = op.VMRemove(ctx, inputs.VMInput{Identifiers: []string{vm.Name}, Force: new(true)})
 				}
 				return nil, &errs.DomainError{
 					Code: "vm.atomic_failed",
@@ -367,7 +367,7 @@ func (op *Operation) vmExecuteCreateWithOpts(
 // Matches Python's VMOperation.remove() exactly.
 // Uses the proper VMRequest pipeline (validation + resolution + enrichment)
 // instead of inline resolution, matching Python's VMRequest(inputs=inputs, db=db).resolve().
-func (op *Operation) VMRemove(ctx context.Context, input *inputs.VMInput) *errs.BatchResult {
+func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.BatchResult {
 	if err := system.CheckPrivileges("/usr/sbin/ip", "Remove VM"); err != nil {
 		return &errs.BatchResult{
 			Items: []errs.OperationResult{
@@ -542,7 +542,7 @@ func (op *Operation) VMPrune(ctx context.Context, dryRun bool, includeAll bool) 
 		}
 
 		if !dryRun {
-			result := op.VMRemove(ctx, &inputs.VMInput{Identifiers: []string{vm.Name}, Force: new(true)})
+			result := op.VMRemove(ctx, inputs.VMInput{Identifiers: []string{vm.Name}, Force: new(true)})
 			if result.HasErrors() {
 				slog.Warn("Failed to remove VM", "name", vm.Name, "error", infraslice.JoinStringsPtrs(result))
 				continue
@@ -587,7 +587,7 @@ func (op *Operation) VMList(ctx context.Context, statusFilter interface{}) []*mo
 // ToJSON converts VMs to JSON-serializable dicts.
 // Matches Python's VMOperation.to_json() exactly.
 // Python always includes ALL fields in every entry (with None/null if not set).
-func (op *Operation) VMGet(ctx context.Context, input *inputs.VMInput) (*model.VM, error) {
+func (op *Operation) VMGet(ctx context.Context, input inputs.VMInput) (*model.VM, error) {
 	if len(input.Identifiers) != 1 {
 		return nil, fmt.Errorf("Expected exactly one VM identifier")
 	}
@@ -603,7 +603,7 @@ func (op *Operation) VMGet(ctx context.Context, input *inputs.VMInput) (*model.V
 
 // Inspect returns detailed VM info with enriched data.
 // Matches Python's VMOperation.inspect() exactly.
-func (op *Operation) VMInspect(ctx context.Context, input *inputs.VMInput) (*responses.VMInspect, error) {
+func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*responses.VMInspect, error) {
 	vm, err := op.VMGet(ctx, input)
 	if err != nil {
 		return nil, err
@@ -725,7 +725,7 @@ func (op *Operation) VMInspect(ctx context.Context, input *inputs.VMInput) (*res
 // Start starts one or more VMs.
 // Matches Python's VMOperation.start() exactly — returns BatchResult[VMInstanceItem].
 // Uses batch VMRequest resolution (no N+1), matching Python's VMRequest(inputs=inputs, db=db).resolve().
-func (op *Operation) VMStart(ctx context.Context, input *inputs.VMInput) *errs.BatchResult {
+func (op *Operation) VMStart(ctx context.Context, input inputs.VMInput) *errs.BatchResult {
 	repo := op.Repos.VM
 	results := make([]errs.OperationResult, 0)
 
@@ -798,7 +798,7 @@ func (op *Operation) VMStart(ctx context.Context, input *inputs.VMInput) *errs.B
 // Stop stops one or more VMs.
 // Matches Python's VMOperation.stop() exactly — returns BatchResult[VMInstanceItem].
 // Uses batch VMRequest resolution (no N+1), matching Python's VMRequest(inputs=inputs, db=db).resolve().
-func (op *Operation) VMStop(ctx context.Context, input *inputs.VMInput) *errs.BatchResult {
+func (op *Operation) VMStop(ctx context.Context, input inputs.VMInput) *errs.BatchResult {
 	repo := op.Repos.VM
 	results := make([]errs.OperationResult, 0)
 
@@ -1091,7 +1091,7 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snap
 // memFile and stateFile are output paths for the snapshot files (matches Python's mem_out, state_out).
 func (op *Operation) VMSnapshot(
 	ctx context.Context,
-	input *inputs.VMInput,
+	input inputs.VMInput,
 	memFile string,
 	stateFile string,
 ) error {
@@ -1139,7 +1139,7 @@ func (op *Operation) VMSnapshot(
 //   - catches MVMError → status="error", Exception → status="failure", item=vm
 func (op *Operation) VMLoad(
 	ctx context.Context,
-	input *inputs.VMInput,
+	input inputs.VMInput,
 	memFile string,
 	stateFile string,
 	resume bool,
@@ -1238,7 +1238,7 @@ func (op *Operation) VMLoad(
 // Reboot reboots one or more VMs.
 // Matches Python's VMOperation.reboot() exactly — returns BatchResult[VMInstanceItem].
 // Uses batch VMRequest resolution (no N+1), matching Python's VMRequest(inputs=inputs, db=db).resolve().
-func (op *Operation) VMReboot(ctx context.Context, input *inputs.VMInput) *errs.BatchResult {
+func (op *Operation) VMReboot(ctx context.Context, input inputs.VMInput) *errs.BatchResult {
 	repo := op.Repos.VM
 	results := make([]errs.OperationResult, 0)
 
@@ -1306,7 +1306,7 @@ func (op *Operation) VMReboot(ctx context.Context, input *inputs.VMInput) *errs.
 // Pause pauses one or more VMs.
 // Matches Python's VMOperation.pause() exactly — returns BatchResult[VMInstanceItem].
 // Uses batch VMRequest resolution (no N+1), matching Python's VMRequest(inputs=inputs, db=db).resolve().
-func (op *Operation) VMPause(ctx context.Context, input *inputs.VMInput) *errs.BatchResult {
+func (op *Operation) VMPause(ctx context.Context, input inputs.VMInput) *errs.BatchResult {
 	repo := op.Repos.VM
 	results := make([]errs.OperationResult, 0)
 
@@ -1367,7 +1367,7 @@ func (op *Operation) VMPause(ctx context.Context, input *inputs.VMInput) *errs.B
 // Resume resumes one or more VMs.
 // Matches Python's VMOperation.resume() exactly — returns BatchResult[VMInstanceItem].
 // Uses batch VMRequest resolution (no N+1), matching Python's VMRequest(inputs=inputs, db=db).resolve().
-func (op *Operation) VMResume(ctx context.Context, input *inputs.VMInput) *errs.BatchResult {
+func (op *Operation) VMResume(ctx context.Context, input inputs.VMInput) *errs.BatchResult {
 	repo := op.Repos.VM
 	results := make([]errs.OperationResult, 0)
 
@@ -1435,7 +1435,7 @@ func (op *Operation) VMResume(ctx context.Context, input *inputs.VMInput) *errs.
 //   - VolumeController.attach + VM volume_ids update
 func (op *Operation) VMAttachVolume(
 	ctx context.Context,
-	input *inputs.VMInput,
+	input inputs.VMInput,
 	volumeName string,
 ) error {
 	if err := system.CheckPrivileges("/usr/sbin/ip", "attach volume"); err != nil {
@@ -1560,7 +1560,7 @@ func (op *Operation) VMAttachVolume(
 //   - VolumeController.detach + VM volume_ids update
 func (op *Operation) VMDetachVolume(
 	ctx context.Context,
-	input *inputs.VMInput,
+	input inputs.VMInput,
 	volumeName string,
 ) error {
 	if err := system.CheckPrivileges("/usr/sbin/ip", "detach volume"); err != nil {
@@ -1669,7 +1669,7 @@ func (op *Operation) VMDetachVolume(
 //   - Matches Python's try/except MVMError → "error", Exception → "failure"
 func (op *Operation) VMImport(
 	ctx context.Context,
-	input *inputs.VMImportInput,
+	input inputs.VMImportInput,
 	onProgress event.OnProgressCallback,
 ) error {
 	if err := system.CheckPrivileges("/usr/sbin/ip", "import VM"); err != nil {
@@ -1687,7 +1687,7 @@ func (op *Operation) VMImport(
 
 	// Use VMImportRequest for full semantic resolution pipeline
 	// (matches Python: VMImportRequest(inputs=inputs, db=db).resolve())
-	request := inputs.NewVMImportRequest(*input, op.Services.Config, op.Connection.DB())
+	request := inputs.NewVMImportRequest(input, op.Services.Config, op.Connection.DB())
 	resolved, execErr = request.Resolve(ctx)
 	var vmInstance *model.VM
 	if execErr == nil {
@@ -1759,7 +1759,7 @@ func (op *Operation) VMImport(
 
 // Export exports a VM's configuration as a portable VMExportConfig.
 // Matches Python's VMOperation.export() exactly — returns VMExportConfig, not an error code.
-func (op *Operation) VMExport(ctx context.Context, input *inputs.VMInput) (*inputs.VMExportConfig, error) {
+func (op *Operation) VMExport(ctx context.Context, input inputs.VMInput) (*inputs.VMExportConfig, error) {
 	vmItem, err := op.VMGet(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("VM not found: %w", err)
@@ -2751,7 +2751,7 @@ func (c *vmCreateContext) toModel() *model.VM {
 
 func (op *Operation) vmBuildResolvedInput(
 	ctx context.Context,
-	input *inputs.VMCreateInput,
+	input inputs.VMCreateInput,
 	vmID, vmDir string,
 ) (*resolvedVMCreateInput, error) {
 	// Resolve image (handles selectors like "alpine:3.21" and ID prefixes)

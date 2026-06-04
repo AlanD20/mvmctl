@@ -115,7 +115,7 @@ func newKeyCreateCmd(op *api.Operation) *cobra.Command {
 
 			apiAlg := strings.ToLower(alg)
 
-			input := &inputs.KeyCreateInput{
+			input := inputs.KeyCreateInput{
 				Name:       name,
 				Algorithm:  apiAlg,
 				Bits:       bits,
@@ -158,7 +158,7 @@ func newKeyImportCmd(op *api.Operation) *cobra.Command {
 			name := args[0]
 			pubKeyPath := args[1]
 
-			keyItem, err := op.KeyImport(cmd.Context(), &inputs.KeyImportInput{
+			keyItem, err := op.KeyImport(cmd.Context(), inputs.KeyImportInput{
 				Name: name, PubKeyPath: pubKeyPath, Overwrite: force, SetDefault: setDefault,
 			})
 			if err != nil {
@@ -195,7 +195,7 @@ func newKeyRemoveCmd(op *api.Operation) *cobra.Command {
 			}
 
 			// Use API-side resolution matching Python's KeyInput(name=effective_names) + KeyOperation.remove()
-			removeResult := op.KeyRemove(cmd.Context(), &inputs.KeyInput{Identifiers: args}, force)
+			removeResult := op.KeyRemove(cmd.Context(), inputs.KeyInput{Identifiers: args}, force)
 			for _, r := range removeResult.Items {
 				if r.Status == "success" {
 					if keyItem, ok := r.Item.(*model.SSHKeyItem); ok {
@@ -233,7 +233,7 @@ func newKeyInspectCmd(op *api.Operation) *cobra.Command {
 				return err
 			}
 
-			info, err := op.KeyInspect(cmd.Context(), &inputs.KeyInput{Identifiers: []string{identifier}})
+			info, err := op.KeyInspect(cmd.Context(), inputs.KeyInput{Identifiers: []string{identifier}})
 			if err != nil {
 				return err
 			}
@@ -276,7 +276,7 @@ func newKeyExportCmd(op *api.Operation) *cobra.Command {
 
 			paths, err := op.KeyExport(
 				cmd.Context(),
-				&inputs.KeyInput{Identifiers: []string{identifier}},
+				inputs.KeyInput{Identifiers: []string{identifier}},
 				path,
 				force,
 			)
@@ -319,7 +319,7 @@ func newKeyDefaultCmd(op *api.Operation) *cobra.Command {
 			}
 
 			// Single API call with ALL names, matching Python exactly.
-			if err := op.KeySetDefaults(cmd.Context(), &inputs.KeyInput{Identifiers: args}); err != nil {
+			if err := op.KeySetDefaults(cmd.Context(), inputs.KeyInput{Identifiers: args}); err != nil {
 				return fmt.Errorf("set default failed: %w", err)
 			}
 

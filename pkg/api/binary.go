@@ -40,7 +40,7 @@ func (op *Operation) BinaryPrune(ctx context.Context, dryRun bool, force bool) (
 		}
 
 		if !dryRun {
-			removeResult := op.BinaryRemove(ctx, &inputs.BinaryInput{Identifiers: []string{bin.ID}}, force)
+			removeResult := op.BinaryRemove(ctx, inputs.BinaryInput{Identifiers: []string{bin.ID}}, force)
 			if removeResult.HasErrors() {
 				slog.Warn("Failed to remove binary",
 					"name", bin.Name, "version", bin.Version, "error", removeResult.Errors()[0].Message)
@@ -56,11 +56,11 @@ func (op *Operation) BinaryPrune(ctx context.Context, dryRun bool, force bool) (
 // BinaryPull downloads or builds a binary.
 // Matches Python's BinaryOperation.pull() exactly — uses BinaryPullRequest
 // resolution pipeline and wraps all BinaryErrors in code="binary.pull_failed".
-func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInput,
+func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInput,
 	onProgress event.OnProgressCallback) ([]*model.BinaryItem, error) {
 
 	// Python: request = BinaryPullRequest(inputs=inputs, db=db); resolved = request.resolve()
-	request := inputs.NewBinaryPullRequest(*input, op.Connection.DB())
+	request := inputs.NewBinaryPullRequest(input, op.Connection.DB())
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return nil, &errs.DomainError{
@@ -170,8 +170,8 @@ func (op *Operation) BinaryPull(ctx context.Context, input *inputs.BinaryPullInp
 // Matches Python's BinaryOperation.remove() exactly — resolves via BinaryRequest
 // then enriches with VM references. Each binary removal is wrapped in per-binary
 // error handling (matching Python's try/except (BinaryError, BinaryNotFoundError)).
-func (op *Operation) BinaryRemove(ctx context.Context, input *inputs.BinaryInput, force bool) *errs.BatchResult {
-	request := inputs.NewBinaryRequest(*input, op.Repos.Binary)
+func (op *Operation) BinaryRemove(ctx context.Context, input inputs.BinaryInput, force bool) *errs.BatchResult {
+	request := inputs.NewBinaryRequest(input, op.Repos.Binary)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return &errs.BatchResult{
@@ -330,8 +330,8 @@ func (op *Operation) BinaryList(
 // BinaryGet returns binaries by identifier.
 // Matches Python's BinaryOperation.get() exactly — resolves via BinaryRequest
 // with multi-identifier resolution.
-func (op *Operation) BinaryGet(ctx context.Context, input *inputs.BinaryInput) ([]*model.BinaryItem, error) {
-	request := inputs.NewBinaryRequest(*input, op.Repos.Binary)
+func (op *Operation) BinaryGet(ctx context.Context, input inputs.BinaryInput) ([]*model.BinaryItem, error) {
+	request := inputs.NewBinaryRequest(input, op.Repos.Binary)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return nil, err
@@ -342,8 +342,8 @@ func (op *Operation) BinaryGet(ctx context.Context, input *inputs.BinaryInput) (
 // BinarySetDefault sets a binary as default.
 // Matches Python's BinaryOperation.set_default() exactly — resolves via BinaryRequest,
 // checks for ambiguous results, then delegates to BinaryController.
-func (op *Operation) BinarySetDefault(ctx context.Context, input *inputs.BinaryInput) (*model.BinaryItem, error) {
-	request := inputs.NewBinaryRequest(*input, op.Repos.Binary)
+func (op *Operation) BinarySetDefault(ctx context.Context, input inputs.BinaryInput) (*model.BinaryItem, error) {
+	request := inputs.NewBinaryRequest(input, op.Repos.Binary)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return nil, &errs.DomainError{
