@@ -83,13 +83,11 @@ var OverridableDefaults = map[string]map[string]any{
 		"nat_enabled": true,
 	},
 	"defaults.image": {
-		"arch":                  "x86_64",
 		"import_format":         "auto",
 		"remote_list_limit":     5,
 		"remote_list_cache_ttl": 3600,
 	},
 	"defaults.kernel": {
-		"arch":                  "x86_64",
 		"version":               "6.19.9",
 		"build_jobs":            nil,
 		"remote_list_limit":     5,
