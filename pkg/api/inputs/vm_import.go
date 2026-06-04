@@ -173,7 +173,7 @@ func (r *VMImportRequest) Resolve(ctx context.Context) (*VMCreateResolved, error
 	now := time.Now()
 	ts := now.Format(time.RFC3339)
 	vmID := crypto.VMID(vmName, ts)
-	vmDir := infra.GetVmDir(vmID)
+	vmDir := infra.GetVMDirByID(vmID)
 
 	// 8. Create VMCreateBuilder (matching Python's VMCreateRequest)
 	builder := NewVMCreateBuilder(

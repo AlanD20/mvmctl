@@ -70,7 +70,7 @@ type Repository interface {
 	// Python: upsert(vm: VMInstanceItem) -> None
 	Upsert(ctx context.Context, vm *model.VM) error
 	// Python: update_status(vm_id, status) -> None
-	UpdateStatus(ctx context.Context, id string, status model.Status) error
+	UpdateStatus(ctx context.Context, id string, status model.VMStatus) error
 	// Python: update_pid(vm_id, pid: int | None) -> None
 	// nil pid clears the PID field.
 	UpdatePID(ctx context.Context, id string, pid *int) error

@@ -1,12 +1,9 @@
 package vm
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,70 +13,18 @@ import (
 	"time"
 
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/internal/infra/system"
 )
 
 // ── Constants matching Python's constants.py ──
 const (
-	constHTTPStatusNoContent    = 204
-	constHTTPStatusSuccess      = 200
-	constPollStepSeconds        = 0.1
-	constSocketTimeoutSeconds   = 5.0
 	constSignalExitCodeBase     = 128
 	constDefaultGracefulTimeout = 30.0
 	constDefaultKillTimeout     = 5.0
 	defaultLibguestfsSeedDir    = "/var/lib/cloud/seed/nocloud"
 )
-
-// ── Error types matching Python's exceptions.py ──
-
-// FirecrackerClientError matches Python's FirecrackerClientError.
-type FirecrackerClientError struct {
-	Message string
-}
-
-func (e *FirecrackerClientError) Error() string {
-	return e.Message
-}
-
-// IsMVMError marks this as an MVMError subclass, matching Python's MVMError hierarchy.
-func (e *FirecrackerClientError) IsMVMError() bool { return true }
-
-// FirecrackerSpawnError matches Python's FirecrackerSpawnError.
-type FirecrackerSpawnError struct {
-	Message string
-}
-
-func (e *FirecrackerSpawnError) Error() string {
-	return e.Message
-}
-
-// IsMVMError marks this as an MVMError subclass, matching Python's MVMError hierarchy.
-func (e *FirecrackerSpawnError) IsMVMError() bool { return true }
-
-// SocketNotFoundError matches Python's SocketNotFoundError.
-type SocketNotFoundError struct {
-	Path string
-}
-
-func (e *SocketNotFoundError) Error() string {
-	return fmt.Sprintf("Socket not found: %s", e.Path)
-}
-
-// IsMVMError marks this as an MVMError subclass, matching Python's MVMError hierarchy.
-func (e *SocketNotFoundError) IsMVMError() bool { return true }
-
-// FirecrackerConfigError matches Python's FirecrackerConfigError.
-type FirecrackerConfigError struct {
-	Message string
-}
-
-func (e *FirecrackerConfigError) Error() string {
-	return e.Message
-}
-
-// IsMVMError marks this as an MVMError subclass, matching Python's MVMError hierarchy.
-func (e *FirecrackerConfigError) IsMVMError() bool { return true }
 
 // =============================================================================
 // FirecrackerSpawner — matches Python's FirecrackerSpawner class exactly
@@ -178,37 +123,52 @@ func (s *FirecrackerSpawner) ProcessStartTime() *int64 {
 // Polls for the API socket to become available (up to 2s, every 0.1s) and
 // exits early as soon as the socket appears. If the process dies before the
 // socket is created, raises immediately.
-//
-// Matches Python's FirecrackerSpawner.spawn() exactly.
-func (s *FirecrackerSpawner) Spawn() error {
+func (s *FirecrackerSpawner) Spawn() (retErr error) {
+	// Cleanup any opened FDs on failure.
+	// On success, FDs are either closed explicitly (CloseFilePointers)
+	// or transferred to the child process via Stdin/Stdout.
+	var relayFile *os.File
+	started := false
+	defer func() {
+		if retErr != nil && !started {
+			if relayFile != nil {
+				relayFile.Close()
+			}
+			s.CloseFilePointers()
+		}
+	}()
+
 	// Remove stale API socket from previous run
 	if _, err := os.Stat(s.apiSocketPath); err == nil {
-		os.Remove(s.apiSocketPath)
+		if err := os.Remove(s.apiSocketPath); err != nil {
+			return fmt.Errorf("remove stale api socket %s: %w", s.apiSocketPath, err)
+		}
 	}
 
 	relayEnabled := s.config.RelayEnabled
 	relayClientFD := s.config.RelayClientFD
 	snapshotMode := s.config.SnapshotMode
 
-	// In Go, we use os.DevNull for DEVNULL behavior (nil stdin/stdout = /dev/null)
 	var fcStdin *os.File
 	var fcStdout *os.File
-	// fcStdin = nil → reads from /dev/null
 
 	if !snapshotMode && s.config.EnableConsole && relayEnabled {
 		if relayClientFD == nil || *relayClientFD == 0 {
-			return &FirecrackerSpawnError{
-				Message: "Console enabled but PTY client FD is None",
+			return &errs.DomainError{
+				Code:    errs.CodeFirecrackerSpawnError,
+				Op:      "firecracker",
+				Message: "console enabled but PTY client FD is None",
+				Class:   errs.ClassInternal,
 			}
 		}
-		relayFile := os.NewFile(uintptr(*relayClientFD), "relay-client")
+		relayFile = os.NewFile(uintptr(*relayClientFD), "relay-client")
 		fcStdin = relayFile
 		fcStdout = relayFile
 	} else {
 		var err error
 		s.serialOutputFP, err = s.CreateFilepointer(s.serialOutputPath)
 		if err != nil {
-			return err // preserve original OSError — Python lets OSError propagate
+			return err
 		}
 		fcStdout = s.serialOutputFP
 	}
@@ -216,7 +176,7 @@ func (s *FirecrackerSpawner) Spawn() error {
 	var err error
 	s.fcLogFP, err = s.CreateFilepointer(s.logPath)
 	if err != nil {
-		return err // preserve original OSError — Python lets OSError propagate
+		return err
 	}
 
 	fcCmd := []string{
@@ -236,63 +196,58 @@ func (s *FirecrackerSpawner) Spawn() error {
 	cmd.Stdout = fcStdout
 	cmd.Stderr = s.fcLogFP
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setsid: true, // matches Python's start_new_session=True which calls os.setsid()
+		Setsid: true,
 	}
-
-	// Relay FD is already passed via cmd.Stdin/cmd.Stdout (fd 0/1).
-	// Python's pass_fds=[relay_client_fd] ensures the FD stays open in the child
-	// process — this is already handled by setting Stdin/Stdout to relayFile above.
-	// Go must NOT add a duplicate via ExtraFiles.
 
 	if err := cmd.Start(); err != nil {
-		return err // preserve original error — Python's subprocess.Popen() lets OSError propagate
+		return err
+	}
+	started = true
+
+	// After Start(), the relay FD was inherited by the child — close our copy.
+	if relayFile != nil {
+		relayFile.Close()
+		relayFile = nil
 	}
 
-	// Wait for Firecracker to initialize (poll every 0.1s for up to 2s).
-	// Exit early as soon as the API socket appears.
-	maxStartupWait := 2.0
-	waited := 0.0
+	// Wait for Firecracker to initialize (poll up to 2s, exit early on socket).
+	for i := 0; i < 20; i++ {
+		time.Sleep(100 * time.Millisecond)
 
-	for waited < maxStartupWait {
-		time.Sleep(time.Duration(constPollStepSeconds * float64(time.Second)))
-		waited += constPollStepSeconds
-
-		// Early exit: socket appeared → Firecracker is ready
 		if _, err := os.Stat(s.apiSocketPath); err == nil {
 			break
 		}
 
-		// Check if process is still alive using Signal(0).
-		// cmd.ProcessState is NOT set by Start(), so cmd.ProcessState.Exited()
-		// cannot be used here. Signal(0) returns nil if process exists.
 		if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
-			// Process is dead — wait for reaper to collect exit code
 			ps, waitErr := cmd.Process.Wait()
 			exitCode := -1
 			if waitErr == nil && ps != nil {
 				exitCode = ps.ExitCode()
 			}
-			return &FirecrackerSpawnError{
-				Message: fmt.Sprintf("Firecracker process exited immediately with code %d", exitCode),
+			return &errs.DomainError{
+				Code:    errs.CodeFirecrackerSpawnError,
+				Op:      "firecracker",
+				Message: fmt.Sprintf("firecracker process exited immediately with code %d", exitCode),
+				Class:   errs.ClassInternal,
 			}
 		}
 	}
 
-	// Loop fell through without breaking → socket never appeared
 	if _, err := os.Stat(s.apiSocketPath); os.IsNotExist(err) {
-		return &FirecrackerSpawnError{
-			Message: fmt.Sprintf("Firecracker API socket not available after %ds", int(maxStartupWait)),
+		return &errs.DomainError{
+			Code:    errs.CodeFirecrackerSpawnError,
+			Op:      "firecracker",
+			Message: fmt.Sprintf("firecracker API socket not available after 2s"),
+			Class:   errs.ClassInternal,
 		}
 	}
 
-	// Close file pointers since the firecracker process is managing them
 	s.CloseFilePointers()
 
 	pid := cmd.Process.Pid
 	s.pid = &pid
-	s.processStartTime = getProcessStartTime(pid)
+	s.processStartTime = system.GetProcessStartTime(pid)
 
-	// Write PID file (matches Python's FsUtils.write_pid_file)
 	if err := writePIDFile(s.pidPath, pid); err != nil {
 		slog.Warn("Failed to write PID file", "path", s.pidPath, "error", err)
 	}
@@ -664,10 +619,13 @@ func (s *FirecrackerSpawner) buildBootArgs() (string, error) {
 	}
 
 	if s.config.PCIEnabled && s.config.ImageFSUUID == "" {
-		return "", &FirecrackerConfigError{
+		return "", &errs.DomainError{
+			Code:    errs.CodeFirecrackerConfigError,
+			Op:      "firecracker",
 			Message: "PCI transport enabled but no filesystem UUID available for " +
 				"root device identification. Use an image with a known " +
 				"filesystem UUID, or pass --no-pci to disable PCI transport.",
+			Class: errs.ClassValidation,
 		}
 	}
 
@@ -693,8 +651,11 @@ func (s *FirecrackerSpawner) buildBootArgs() (string, error) {
 		if *cloudInitMode == model.CloudInitModeNET {
 			// For nocloud-net, validate URL is configured
 			if s.config.CloudInitNoCloudURL == nil || *s.config.CloudInitNoCloudURL == "" {
-				return "", &FirecrackerConfigError{
+				return "", &errs.DomainError{
+					Code:    errs.CodeFirecrackerConfigError,
+					Op:      "firecracker",
 					Message: "NoCloud URL must be set when using NET mode",
+					Class:   errs.ClassValidation,
 				}
 			}
 			bootArgs.set("ds", []string{fmt.Sprintf("nocloud;seedfrom=%s", *s.config.CloudInitNoCloudURL)})
@@ -707,424 +668,6 @@ func (s *FirecrackerSpawner) buildBootArgs() (string, error) {
 	}
 
 	return bootArgs.join(), nil
-}
-
-// =============================================================================
-// getProcessStartTime — matches Python's ProcessSignalHandler._get_process_start_time()
-// =============================================================================
-
-// getProcessStartTime reads /proc/<pid>/stat (field 22, clock ticks).
-// Returns nil if process doesn't exist or is unreadable.
-func getProcessStartTime(pid int) *int64 {
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-	if err != nil {
-		return nil
-	}
-	content := string(data)
-	// Find last ')' to handle comm names with spaces/parens
-	idx := strings.LastIndex(content, ")")
-	if idx < 0 {
-		return nil
-	}
-	fields := strings.Fields(content[idx+2:])
-	if len(fields) < 20 {
-		return nil
-	}
-	var startTime int64
-	if _, err := fmt.Sscanf(fields[19], "%d", &startTime); err != nil {
-		return nil
-	}
-	return &startTime
-}
-
-// =============================================================================
-// FirecrackerClient — matches Python's FirecrackerClient class
-// =============================================================================
-
-// FirecrackerClient provides HTTP access to the Firecracker API over a Unix socket.
-// Matches Python's FirecrackerClient class.
-type FirecrackerClient struct {
-	socketPath string
-	httpClient *http.Client
-}
-
-// NewFirecrackerClient creates a new client connected to the given Unix socket path.
-// Matches Python's FirecrackerClient(socket_path).
-func NewFirecrackerClient(socketPath string) *FirecrackerClient {
-	transport := &http.Transport{
-		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-			return net.DialTimeout("unix", socketPath, constSocketTimeoutSeconds*time.Second)
-		},
-	}
-	return &FirecrackerClient{
-		socketPath: socketPath,
-		httpClient: &http.Client{
-			Transport: transport,
-			Timeout:   30 * time.Second,
-		},
-	}
-}
-
-// Close implements Python's FirecrackerClient.close().
-func (fc *FirecrackerClient) Close() {
-	fc.httpClient.CloseIdleConnections()
-}
-
-// ── Low-level HTTP request with retry ──
-
-// request makes an HTTP request to the Firecracker API with retry on connection refused.
-// Matches Python's _request() method:
-//   - 5 retries with exponential backoff (0.1s, 0.2s, 0.4s, 0.8s, 1.6s)
-//   - SocketNotFoundError when socket doesn't exist
-//   - On ECONNREFUSED: retry with reconnect
-//   - Returns (status, data_json, error)
-func (fc *FirecrackerClient) request(
-	ctx context.Context,
-	method, path string,
-	body map[string]any,
-) (int, map[string]any, error) {
-	// Check socket exists first (matches Python's _connect which checks)
-	if _, err := os.Stat(fc.socketPath); os.IsNotExist(err) {
-		return 0, nil, &SocketNotFoundError{Path: fc.socketPath}
-	}
-
-	var bodyStr string
-	if body != nil {
-		data, err := json.Marshal(body)
-		if err != nil {
-			return 0, nil, fmt.Errorf("failed to marshal request body: %w", err)
-		}
-		bodyStr = string(data)
-	}
-
-	maxRetries := 5
-	delay := 0.1
-	var lastErr error
-
-	for attempt := range maxRetries {
-		var reqBodyReader strings.Reader
-		if bodyStr != "" {
-			reqBodyReader = *strings.NewReader(bodyStr)
-		}
-
-		req, err := http.NewRequestWithContext(ctx, method, fmt.Sprintf("http://localhost%s", path), &reqBodyReader)
-		if err != nil {
-			return 0, nil, fmt.Errorf("failed to create request: %w", err)
-		}
-		if bodyStr != "" {
-			req.Header.Set("Content-Type", "application/json")
-		}
-
-		resp, err := fc.httpClient.Do(req)
-		if err != nil {
-			lastErr = err
-
-			// Check for connection refused (ECONNREFUSED) — retry
-			if isConnRefused(err) && attempt < maxRetries-1 {
-				time.Sleep(time.Duration(delay * float64(time.Second)))
-				delay *= 2
-				// Reconnect by closing idle connections (matches Python's reconnect)
-				fc.Close()
-				continue
-			}
-
-			return 0, nil, &FirecrackerClientError{
-				Message: fmt.Sprintf("API request failed: %s", err.Error()),
-			}
-		}
-		defer resp.Body.Close()
-
-		status := resp.StatusCode
-		respData := make(map[string]any)
-
-		if status == constHTTPStatusNoContent {
-			return status, nil, nil
-		}
-
-		if err := json.NewDecoder(resp.Body).Decode(&respData); err != nil {
-			// Non-JSON response — return nil data
-			respData = nil
-		}
-
-		return status, respData, nil
-	}
-
-	// All retries exhausted
-	return 0, nil, &FirecrackerClientError{
-		Message: fmt.Sprintf("API request failed after %d retries: %s", maxRetries, lastErr.Error()),
-	}
-}
-
-func isConnRefused(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := err.Error()
-	return strings.Contains(errStr, "connection refused") ||
-		strings.Contains(errStr, "ECONNREFUSED")
-}
-
-// ── Snapshot Operations ──
-
-// CreateSnapshot creates a VM snapshot via PUT /snapshot/create.
-// Matches Python's create_snapshot().
-func (fc *FirecrackerClient) CreateSnapshot(ctx context.Context, memPath, snapshotPath string) (bool, error) {
-	slog.Info("Creating snapshot...")
-	body := map[string]any{
-		"mem_file_path": memPath,
-		"snapshot_path": snapshotPath,
-	}
-	status, data, err := fc.request(ctx, "PUT", "/snapshot/create", body)
-	if err != nil {
-		return false, err
-	}
-	if status == constHTTPStatusNoContent {
-		slog.Info("Snapshot created", "mem", memPath, "state", snapshotPath)
-		return true, nil
-	}
-	msg := fmt.Sprintf("Failed to create snapshot: %d", status)
-	if data != nil {
-		msg += fmt.Sprintf(" Response: %v", data)
-	}
-	return false, &FirecrackerClientError{Message: msg}
-}
-
-// LoadSnapshot loads a VM from snapshot via PUT /snapshot/load.
-// Matches Python's load_snapshot().
-func (fc *FirecrackerClient) LoadSnapshot(
-	ctx context.Context,
-	memPath, snapshotPath string,
-	resume bool,
-) (bool, error) {
-	slog.Info("Loading snapshot...")
-	body := map[string]any{
-		"mem_file_path": memPath,
-		"snapshot_path": snapshotPath,
-		"resume_vm":     resume,
-	}
-	status, data, err := fc.request(ctx, "PUT", "/snapshot/load", body)
-	if err != nil {
-		return false, err
-	}
-	if status == constHTTPStatusNoContent {
-		slog.Info("Snapshot loaded")
-		return true, nil
-	}
-	msg := fmt.Sprintf("Failed to load snapshot: %d", status)
-	if data != nil {
-		msg += fmt.Sprintf(" Response: %v", data)
-	}
-	return false, &FirecrackerClientError{Message: msg}
-}
-
-// ── Instance Info Operations ──
-
-// GetInstanceInfo returns VM instance information via GET /.
-// Matches Python's get_instance_info().
-func (fc *FirecrackerClient) GetInstanceInfo(ctx context.Context) (*model.InstanceInfo, error) {
-	status, data, err := fc.request(ctx, "GET", "/", nil)
-	if err != nil {
-		return nil, err
-	}
-	if status == constHTTPStatusSuccess && data != nil {
-		info := &model.InstanceInfo{}
-		if id, ok := data["id"].(string); ok {
-			info.ID = id
-		}
-		if state, ok := data["state"].(string); ok {
-			info.State = state
-		}
-		if vcpu, ok := data["vcpu_count"].(float64); ok {
-			info.VCPUCount = int(vcpu)
-		}
-		if mem, ok := data["mem_size_mib"].(float64); ok {
-			info.MemSizeMiB = int(mem)
-		}
-		return info, nil
-	}
-	return nil, nil
-}
-
-// DescribeInstance returns a VM description via GET /vm.
-// Matches Python's describe_instance().
-func (fc *FirecrackerClient) DescribeInstance(ctx context.Context) (*model.InstanceDescription, error) {
-	status, data, err := fc.request(ctx, "GET", "/vm", nil)
-	if err != nil {
-		return nil, err
-	}
-	if status == constHTTPStatusSuccess && data != nil {
-		desc := &model.InstanceDescription{}
-		if id, ok := data["id"].(string); ok {
-			desc.ID = id
-		}
-		if state, ok := data["state"].(string); ok {
-			desc.State = state
-		}
-		if vcpu, ok := data["vcpu_count"].(float64); ok {
-			desc.VCPUCount = int(vcpu)
-		}
-		if mem, ok := data["mem_size_mib"].(float64); ok {
-			desc.MemSizeMiB = int(mem)
-		}
-		if flags, ok := data["flags"].([]any); ok {
-			for _, f := range flags {
-				if s, ok := f.(string); ok {
-					desc.Flags = append(desc.Flags, s)
-				}
-			}
-		}
-		if ifAddr, ok := data["if_addr"].(map[string]any); ok {
-			desc.IfAddr = make(map[string]string)
-			for k, v := range ifAddr {
-				if s, ok := v.(string); ok {
-					desc.IfAddr[k] = s
-				}
-			}
-		}
-		if devices, ok := data["used_block_devices"].([]any); ok {
-			for _, d := range devices {
-				if s, ok := d.(string); ok {
-					desc.UsedBlockDevices = append(desc.UsedBlockDevices, s)
-				}
-			}
-		}
-		return desc, nil
-	}
-	return nil, nil
-}
-
-// ── VM Lifecycle Operations ──
-
-// StartInstance starts the VM instance via PUT /actions with action_type InstanceStart.
-// Matches Python's start_instance().
-func (fc *FirecrackerClient) StartInstance(ctx context.Context) (bool, error) {
-	slog.Info("Starting VM...")
-	status, _, err := fc.request(ctx, "PUT", "/actions", map[string]any{"action_type": "InstanceStart"})
-	if err != nil {
-		return false, err
-	}
-	if status == constHTTPStatusNoContent {
-		slog.Info("VM started")
-		return true, nil
-	}
-	return false, &FirecrackerClientError{Message: fmt.Sprintf("Failed to start VM: %d", status)}
-}
-
-// SendCtrlAltDel sends Ctrl+Alt+Del to the VM via PUT /actions.
-// Matches Python's send_ctrl_alt_del():
-//   - SocketNotFoundError and FirecrackerClientError are absorbed (return false, nil)
-//   - All other errors propagate (return false, err)
-func (fc *FirecrackerClient) SendCtrlAltDel(ctx context.Context) (bool, error) {
-	status, _, err := fc.request(ctx, "PUT", "/actions", map[string]any{"action_type": "SendCtrlAltDel"})
-	if err != nil {
-		// Only absorb expected error types (matches Python's except SocketNotFoundError, FirecrackerClientError)
-		switch err.(type) {
-		case *SocketNotFoundError, *FirecrackerClientError:
-			slog.Error("Failed to send Ctrl+Alt+Del")
-			return false, nil
-		default:
-			// Unexpected error — propagate (matches Python's bare raise)
-			return false, err
-		}
-	}
-	if status == constHTTPStatusNoContent {
-		slog.Info("Ctrl+Alt+Del sent")
-		return true, nil
-	}
-	slog.Error("Failed to send Ctrl+Alt+Del", "status", status)
-	return false, nil
-}
-
-// PauseVM pauses the microVM via PATCH /vm with state: "Paused".
-// Matches Python's pause_vm().
-func (fc *FirecrackerClient) PauseVM(ctx context.Context) error {
-	slog.Info("Pausing VM...")
-	status, _, err := fc.request(ctx, "PATCH", "/vm", map[string]any{"state": "Paused"})
-	if err != nil {
-		return err
-	}
-	if status == constHTTPStatusNoContent {
-		slog.Info("VM paused")
-		return nil
-	}
-	return &FirecrackerClientError{Message: fmt.Sprintf("Failed to pause VM: %d", status)}
-}
-
-// ResumeVM resumes a paused microVM via PATCH /vm with state: "Resumed".
-// Matches Python's resume_vm().
-func (fc *FirecrackerClient) ResumeVM(ctx context.Context) error {
-	slog.Info("Resuming VM...")
-	status, _, err := fc.request(ctx, "PATCH", "/vm", map[string]any{"state": "Resumed"})
-	if err != nil {
-		return err
-	}
-	if status == constHTTPStatusNoContent {
-		slog.Info("VM resumed")
-		return nil
-	}
-	return &FirecrackerClientError{Message: fmt.Sprintf("Failed to resume VM: %d", status)}
-}
-
-// ── Drive Operations ──
-
-// PutDrive attaches or updates a drive via PUT /drives/{drive_id}.
-// Matches Python's put_drive().
-func (fc *FirecrackerClient) PutDrive(ctx context.Context, driveConfig model.DriveConfig) error {
-	body := map[string]any{
-		"drive_id":       driveConfig.DriveID,
-		"path_on_host":   driveConfig.PathOnHost,
-		"is_root_device": driveConfig.IsRootDevice,
-		"is_read_only":   driveConfig.IsReadOnly,
-		"cache_type":     driveConfig.CacheType,
-		"io_engine":      driveConfig.IOEngine,
-	}
-	status, data, err := fc.request(ctx, "PUT", "/drives/"+driveConfig.DriveID, body)
-	if err != nil {
-		return err
-	}
-	if status == constHTTPStatusSuccess || status == constHTTPStatusNoContent {
-		return nil
-	}
-	msg := fmt.Sprintf("Failed to attach drive: %d", status)
-	if data != nil {
-		msg += fmt.Sprintf(" Response: %v", data)
-	}
-	return &FirecrackerClientError{Message: msg}
-}
-
-// PatchDrive removes a drive from a running VM via PATCH /drives/{drive_id}.
-// Matches Python's patch_drive().
-func (fc *FirecrackerClient) PatchDrive(ctx context.Context, driveID string) error {
-	body := map[string]any{"drive_id": driveID}
-	status, data, err := fc.request(ctx, "PATCH", "/drives/"+driveID, body)
-	if err != nil {
-		return err
-	}
-	if status == constHTTPStatusSuccess || status == constHTTPStatusNoContent {
-		return nil
-	}
-	msg := fmt.Sprintf("Failed to detach drive: %d", status)
-	if data != nil {
-		msg += fmt.Sprintf(" Response: %v", data)
-	}
-	return &FirecrackerClientError{Message: msg}
-}
-
-// DeleteDrive removes a drive from a running VM via DELETE /drives/{drive_id}.
-// Matches Python's delete_drive().
-func (fc *FirecrackerClient) DeleteDrive(ctx context.Context, driveID string) error {
-	status, data, err := fc.request(ctx, "DELETE", "/drives/"+driveID, nil)
-	if err != nil {
-		return err
-	}
-	if status == constHTTPStatusNoContent {
-		return nil
-	}
-	msg := fmt.Sprintf("Failed to delete drive: %d", status)
-	if data != nil {
-		msg += fmt.Sprintf(" Response: %v", data)
-	}
-	return &FirecrackerClientError{Message: msg}
 }
 
 // =============================================================================

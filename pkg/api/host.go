@@ -709,7 +709,7 @@ func (op *Operation) HostReset(ctx context.Context) ([]string, error) {
 // HostGetRunningVMs returns running VMs.
 // Matches Python's HostOperation.get_running_vms().
 func (op *Operation) HostGetRunningVMs(ctx context.Context) ([]*model.VM, error) {
-	return op.Repos.VM.ListByStatus(ctx, string(model.StatusRunning), string(model.StatusStarting))
+	return op.Repos.VM.ListByStatus(ctx, string(model.VMStatusRunning), string(model.VMStatusStarting))
 }
 
 // HostIsInitialized checks if host is initialized.

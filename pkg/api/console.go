@@ -133,7 +133,7 @@ func (op *Operation) resolveWithRequest(ctx context.Context, identifier string) 
 	// Create relay manager — Python: ConsoleRelayManager(id=vm.id, path=CacheUtils.get_vm_dir(vm.id), name=vm.name)
 	relay := console.NewRelayManager(
 		vmEntity.ID,
-		infra.GetVmDir(vmEntity.ID),
+		infra.GetVMDirByID(vmEntity.ID),
 		vmEntity.Name,
 		"", // pidFilename — defaults to "console.pid"
 		"", // socketFilename — defaults to "console.sock"
