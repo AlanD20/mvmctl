@@ -102,10 +102,11 @@ func (op *Operation) ImagePull(
 	}
 
 	// Resolve ci_version from default firecracker binary
-	defaultBin, _ := op.Repos.Binary.GetDefault(ctx, "firecracker")
-	resolvedCIVersion := ""
-	if defaultBin != nil && defaultBin.CIVersion != nil {
-		resolvedCIVersion = *defaultBin.CIVersion
+	resolvedCIVersion, err := op.resolveCIVersion(ctx)
+	if err != nil {
+		return nil, &errs.DomainError{
+			Code: errs.CodeImagePullFailed, Message: err.Error(), Err: err,
+		}
 	}
 
 	// Load image types config from embedded assets
@@ -569,10 +570,9 @@ func (op *Operation) ImageListAll(
 		emitProgress(onProgress, "listing", "running", "Fetching remote images...")
 
 		// Resolve ci_version from default firecracker binary
-		resolvedCIVersion := ""
-		defaultBin, _ := op.Repos.Binary.GetDefault(ctx, "firecracker")
-		if defaultBin != nil && defaultBin.CIVersion != nil {
-			resolvedCIVersion = *defaultBin.CIVersion
+		resolvedCIVersion, err := op.resolveCIVersion(ctx)
+		if err != nil {
+			return nil, nil, err
 		}
 
 		// Resolve cache_ttl from settings

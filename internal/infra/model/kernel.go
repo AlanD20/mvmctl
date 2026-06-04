@@ -36,10 +36,11 @@ type KernelPullResult struct {
 // ── KernelFeature ──
 
 // KernelFeature corresponds to Python's KernelFeature.
+// When a feature is selected, its Enforce map is applied on top of the
+// spec's DefaultConfigs, and each enforced key is verified in the final .config.
 type KernelFeature struct {
-	Desc     string   `yaml:"desc"`
-	Configs  []string `yaml:"configs"`
-	Requires []string `yaml:"requires"`
+	Desc    string            `yaml:"desc"`
+	Enforce map[string]string `yaml:"enforce,omitempty"`
 }
 
 // ── KernelSpec ──
@@ -58,10 +59,7 @@ type KernelSpec struct {
 	SHA256URL         string                   `yaml:"sha256_url,omitempty"`
 	ConfigFragments   []string                 `yaml:"config_fragments"`
 	ParallelJobs      *int                     `yaml:"parallel_jobs,omitempty"`
-	EnabledConfigs    []string                 `yaml:"enabled_configs"`
-	DisabledConfigs   []string                 `yaml:"disabled_configs"`
-	SetValConfigs     [][2]string              `yaml:"set_val_configs,omitempty"`
-	RequiredSettings  []string                 `yaml:"required_settings"`
+	DefaultConfigs    map[string]string        `yaml:"default_configs"`
 	Resolver          *string                  `yaml:"resolver,omitempty"`
 	VersionsURL       *string                  `yaml:"versions_url,omitempty"`
 	FilePattern       *string                  `yaml:"file_pattern,omitempty"`
