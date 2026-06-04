@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"mvmctl/internal/core/config"
+	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 
@@ -32,18 +33,18 @@ import (
 //	    set_default: bool = False
 //	    features: str = ""
 type KernelPullInput struct {
-	KernelType   string  `json:"kernel_type"`
-	Version      *string `json:"version,omitempty"`
-	Arch         *string `json:"arch,omitempty"`
-	OutputDir    *string `json:"output_dir,omitempty"`
-	OutputName   *string `json:"output_name,omitempty"`
-	OutputPath   *string `json:"output_path,omitempty"`
-	Jobs         *int    `json:"jobs,omitempty"`
-	KeepBuildDir bool    `json:"keep_build_dir"`
-	CleanBuild   bool    `json:"clean_build"`
-	KernelConfig *string `json:"kernel_config,omitempty"`
-	SetDefault   bool    `json:"set_default"`
-	Features     string  `json:"features"`
+	KernelType   string `json:"kernel_type"`
+	Version      string `json:"version,omitempty"`
+	Arch         string `json:"arch,omitempty"`
+	OutputDir    string `json:"output_dir,omitempty"`
+	OutputName   string `json:"output_name,omitempty"`
+	OutputPath   string `json:"output_path,omitempty"`
+	Jobs         int    `json:"jobs,omitempty"`
+	KeepBuildDir bool   `json:"keep_build_dir"`
+	CleanBuild   bool   `json:"clean_build"`
+	KernelConfig string `json:"kernel_config,omitempty"`
+	SetDefault   bool   `json:"set_default"`
+	Features     string `json:"features"`
 }
 
 // ResolvedKernelPullRequest matches Python's ResolvedKernelPullRequest (frozen dataclass).
@@ -99,8 +100,8 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 	//   if self._inputs.version is not None → version = self._inputs.version
 	//   else → version = SettingsService.resolve(self._db, "defaults.kernel", "version")
 	var version *string
-	if r.input.Version != nil {
-		v := *r.input.Version
+	if r.input.Version != "" {
+		v := r.input.Version
 		version = &v
 	} else {
 		v, err := config.Resolve(ctx, r.db, "defaults.kernel", "version")
@@ -123,8 +124,8 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 	//   if self._inputs.arch is not None → arch = self._inputs.arch
 	//   else → arch = SettingsService.resolve(self._db, "defaults.kernel", "arch")
 	var arch string
-	if r.input.Arch != nil {
-		arch = *r.input.Arch
+	if r.input.Arch != "" {
+		arch = r.input.Arch
 	} else {
 		v, err := config.Resolve(ctx, r.db, "defaults.kernel", "arch")
 		if err == nil && v != nil {
@@ -139,8 +140,8 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 	//   else → jobs = SettingsService.resolve(self._db, "defaults.kernel", "build_jobs")
 	//   if jobs is None → jobs = os.cpu_count() or SettingsService.resolve(...)
 	var jobs int
-	if r.input.Jobs != nil {
-		jobs = *r.input.Jobs
+	if r.input.Jobs != 0 {
+		jobs = r.input.Jobs
 	} else {
 		v, err := config.Resolve(ctx, r.db, "defaults.kernel", "build_jobs")
 		if err == nil && v != nil {
@@ -183,11 +184,20 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 	// Auto-include "kvm" when defaults.vm.nested_virt is enabled — Python:
 	//   nested_virt = bool(SettingsService.resolve(self._db, "defaults.vm", "nested_virt"))
 	//   if nested_virt and "kvm" not in features_list: features_list.insert(0, "kvm")
-	//
 	// Python's bool() is truthy for many types: non-empty strings, non-zero numbers,
-	// non-None objects. We replicate that behavior with pythonBool().
+	// non-None objects. In Go, we just check for a truthy config value.
 	nestedVirt, _ := config.Resolve(ctx, r.db, "defaults.vm", "nested_virt")
-	nestedVirtBool := pythonBool(nestedVirt)
+	nestedVirtBool := false
+	if nestedVirt != nil {
+		switch v := nestedVirt.(type) {
+		case bool:
+			nestedVirtBool = v
+		case string:
+			nestedVirtBool = v != ""
+		case int, int64, float64:
+			nestedVirtBool = v != 0
+		}
+	}
 	if nestedVirtBool {
 		hasKVM := false
 		for _, f := range featuresList {
@@ -203,8 +213,13 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 
 	// Resolve output_dir — Python: self._inputs.output_dir or CacheUtils.get_kernels_dir()
 	outputDir := infra.GetKernelsDir()
-	if r.input.OutputDir != nil && *r.input.OutputDir != "" {
-		outputDir = *r.input.OutputDir
+	if r.input.OutputDir != "" {
+		outputDir = r.input.OutputDir
+	}
+
+	var kernelConfig *string
+	if r.input.KernelConfig != "" {
+		kernelConfig = &r.input.KernelConfig
 	}
 
 	r.result = &ResolvedKernelPullRequest{
@@ -215,7 +230,7 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 		Jobs:         jobs,
 		KeepBuildDir: r.input.KeepBuildDir,
 		CleanBuild:   r.input.CleanBuild,
-		KernelConfig: r.input.KernelConfig,
+		KernelConfig: kernelConfig,
 		SetDefault:   r.input.SetDefault,
 		Features:     featuresList,
 	}
@@ -238,10 +253,8 @@ func (r *KernelPullRequest) ensureValidate() error {
 		}
 	}
 
-	// 1. Validate kernel type — Python:
-	//    valid_types = ("firecracker", "official")
-	//    if self.result.kernel_type not in valid_types:
-	validTypes := map[string]bool{"firecracker": true, "official": true}
+	// 1. Validate kernel type
+	validTypes := kernel.KernelValidTypes
 	if !validTypes[r.result.KernelType] {
 		return &errs.DomainError{
 			Code: errs.CodeKernelBuildFailed,
@@ -274,17 +287,21 @@ func (r *KernelPullRequest) ensureValidate() error {
 		}
 	}
 
-	// 3. Validate architecture — Python:
-	//    valid_archs = ("x86_64", "amd64", "arm64", "aarch64")
-	//    if self.result.arch not in valid_archs:
-	validArchs := map[string]bool{"x86_64": true, "amd64": true, "arm64": true, "aarch64": true}
-	if !validArchs[r.result.Arch] {
+	// 3. Validate architecture
+	archOk := false
+	for _, a := range infra.FirecrackerSupportedArches {
+		if r.result.Arch == a {
+			archOk = true
+			break
+		}
+	}
+	if !archOk {
 		return &errs.DomainError{
 			Code: errs.CodeKernelBuildFailed,
 			Op:   "kernel_pull",
 			Message: fmt.Sprintf(
-				"Unsupported architecture: %s. Valid architectures: x86_64, amd64, arm64, aarch64",
-				r.result.Arch,
+				"Unsupported architecture: %s. Valid architectures: %s",
+				r.result.Arch, strings.Join(infra.FirecrackerSupportedArches, ", "),
 			),
 			Class: errs.ClassValidation,
 		}
@@ -317,48 +334,9 @@ func (r *KernelPullRequest) ensureValidate() error {
 	return nil
 }
 
-// isValidVersion matches Python's re.fullmatch(r"\d+(\.\d+)*", stripped).
+// versionRegex matches valid semver-like version strings (e.g., "5.10", "6.1.0").
+var versionRegex = regexp.MustCompile(`^\d+(\.\d+)*$`)
+
 func isValidVersion(v string) bool {
-	if v == "" {
-		return false
-	}
-	return regexp.MustCompile(`^\d+(\.\d+)*$`).MatchString(v)
-}
-
-// resolveSettingIntFallback resolves an integer setting, returning 0 if not found.
-func resolveSettingIntFallback(ctx context.Context, db *sqlx.DB, category, key string) int {
-	v, err := config.Resolve(ctx, db, category, key)
-	if err == nil && v != nil {
-		if i, ok := v.(int64); ok {
-			return int(i)
-		}
-	}
-	return 0
-}
-
-// pythonBool replicates Python's bool() behavior which is truthy for many types:
-//   - None/false -> false
-//   - non-empty strings -> true
-//   - non-zero numbers -> true
-//   - non-nil non-bool objects -> true
-//
-// Matches Python: bool(value)
-func pythonBool(v interface{}) bool {
-	if v == nil {
-		return false
-	}
-	switch val := v.(type) {
-	case bool:
-		return val
-	case string:
-		return val != ""
-	case int:
-		return val != 0
-	case int64:
-		return val != 0
-	case float64:
-		return val != 0
-	default:
-		return true
-	}
+	return v != "" && versionRegex.MatchString(v)
 }

@@ -27,16 +27,6 @@ type ParsedKernelFilename struct {
 
 // ── String / slice helpers ──────────────────────────────────────────────────
 
-// TODO(verdict#33): belongs in infra/slices or similar shared utility
-func makeSet(items []string) map[string]bool {
-	s := make(map[string]bool, len(items))
-	for _, item := range items {
-		s[item] = true
-	}
-	return s
-}
-
-// TODO(verdict#33): belongs in infra/strings or similar shared utility
 func majorMinorFromVersion(version string) string {
 	parts := strings.Split(version, ".")
 	if len(parts) >= 2 {
@@ -45,164 +35,8 @@ func majorMinorFromVersion(version string) string {
 	return version
 }
 
-// ── Map / config parsing helpers ────────────────────────────────────────────
-
-// TODO(verdict#33): belongs in infra/maps or similar shared utility
-func requireStr(m map[string]any, key string) string {
-	v, _ := m[key].(string)
-	return v
-}
-
-// TODO(verdict#33): belongs in infra/maps or similar shared utility
-func optionalStr(m map[string]any, key string) string {
-	v, _ := m[key].(string)
-	return v
-}
-
-// TODO(verdict#33): belongs in infra/maps or similar shared utility
-func optionalStrPtr(m map[string]any, key string) *string {
-	v, _ := m[key].(string)
-	if v == "" {
-		return nil
-	}
-	return &v
-}
-
-// TODO(verdict#33): belongs in infra/maps or similar shared utility
-func optionalIntPtr(m map[string]any, key string) *int {
-	v, ok := m[key].(int)
-	if !ok {
-		if f, ok := m[key].(float64); ok {
-			v = int(f)
-		} else {
-			return nil
-		}
-	}
-	if v == 0 {
-		return nil
-	}
-	return &v
-}
-
-// TODO(verdict#33): belongs in infra/maps or similar shared utility
-func optionalStrFromPtr(m map[string]any, parent, key string) *string {
-	if p, ok := m[parent].(map[string]any); ok {
-		v, _ := p[key].(string)
-		if v != "" {
-			return &v
-		}
-	}
-	return nil
-}
-
-// TODO(verdict#33): belongs in infra/maps or similar shared utility
-func optionalStrFrom(m map[string]any, parent, key string) string {
-	if p, ok := m[parent].(map[string]any); ok {
-		v, _ := p[key].(string)
-		return v
-	}
-	return ""
-}
-
-// TODO(verdict#33): belongs in infra/maps or similar shared utility
-func requireStrList(m map[string]any, key string) []string {
-	raw, ok := m[key].([]any)
-	if !ok {
-		return nil
-	}
-	var result []string
-	for _, item := range raw {
-		if s, ok := item.(string); ok {
-			result = append(result, s)
-		}
-	}
-	return result
-}
-
-// TODO(verdict#33): belongs in infra/maps or similar shared utility
-func optionalInt(m map[string]any, key string) int {
-	switch v := m[key].(type) {
-	case int:
-		return v
-	case float64:
-		return int(v)
-	}
-	return 0
-}
-
-// TODO(verdict#33): belongs in infra/maps or similar shared utility
-func parseSetValList(m map[string]any, key string) [][2]string {
-	raw, ok := m[key].([]any)
-	if !ok {
-		return nil
-	}
-	var result [][2]string
-	for _, item := range raw {
-		s, ok := item.(string)
-		if !ok {
-			continue
-		}
-		parts := strings.SplitN(s, "=", 2)
-		if len(parts) == 2 {
-			result = append(result, [2]string{parts[0], parts[1]})
-		}
-	}
-	return result
-}
-
-// Helper to get a string list from options map
-func getStringListOption(opts map[string]any, key string) []string {
-	if opts == nil {
-		return nil
-	}
-	raw, ok := opts[key]
-	if !ok {
-		return nil
-	}
-	rawList, ok := raw.([]any)
-	if !ok {
-		return nil
-	}
-	var result []string
-	for _, item := range rawList {
-		if s, ok := item.(string); ok {
-			result = append(result, s)
-		}
-	}
-	return result
-}
-
-// Helper to get a string from options map
-func getStringOption(opts map[string]any, key string) string {
-	if opts == nil {
-		return ""
-	}
-	v, _ := opts[key].(string)
-	return v
-}
-
-// TODO(verdict#33): belongs in infra/maps or similar shared utility
-func getStringSlice(m map[string]any, key string) []string {
-	if m == nil {
-		return nil
-	}
-	raw, ok := m[key].([]any)
-	if !ok {
-		return nil
-	}
-	result := make([]string, 0, len(raw))
-	for _, item := range raw {
-		if s, ok := item.(string); ok {
-			result = append(result, s)
-		}
-	}
-	return result
-}
-
 // ── Kernel-specific helpers ─────────────────────────────────────────────────
 
-// extractVersionFromKey extracts the version from a Firecracker S3 key.
-// e.g. "firecracker-ci/v1.15/x86_64/vmlinux-6.1.155" → "6.1.155"
 func extractVersionFromKey(key string) string {
 	idx := strings.LastIndex(key, "/vmlinux-")
 	if idx < 0 {
@@ -211,7 +45,6 @@ func extractVersionFromKey(key string) string {
 	return key[idx+len("/vmlinux-"):]
 }
 
-// TODO(verdict#33): belongs in infra/config or similar shared utility
 func extractConfigKey(line string) string {
 	line = strings.TrimSpace(line)
 	if line == "" {
@@ -255,7 +88,6 @@ func parseKernelConfig(kernelDir string) (map[string]bool, error) {
 	return settings, nil
 }
 
-// TODO(verdict#33): belongs in infra/config or similar shared utility
 func mergeConfigLines(content, configPath string) {
 	existing := ""
 	if data, err := os.ReadFile(configPath); err == nil {
@@ -325,30 +157,22 @@ func runMake(ctx context.Context, kernelDir, target string, jobs int) (int, stri
 
 // checkBuildDependencies checks for required kernel build dependencies.
 func checkBuildDependencies(ctx context.Context) error {
-	requiredCommands := []string{
-		"git", "curl", "make", "gcc", "flex", "bison", "bc", "pahole", "ld",
-	}
 	var missing []string
-	for _, cmd := range requiredCommands {
+	for _, cmd := range KernelBuildCommands {
 		result := system.RunCmdCompat(ctx, []string{"which", cmd}, system.RunCmdOpts{Capture: true, Check: false})
 		if result.ExitCode != 0 {
 			missing = append(missing, cmd)
 		}
 	}
-	libraryChecks := []struct {
-		pkg, display string
-	}{
-		{"libelf", "libelf"},
-		{"openssl", "libssl-dev"},
-	}
-	for _, lc := range libraryChecks {
+
+	for _, lc := range KernelBuildLibraries {
 		result := system.RunCmdCompat(
 			ctx,
-			[]string{"pkg-config", "--exists", lc.pkg},
+			[]string{"pkg-config", "--exists", lc.Pkg},
 			system.RunCmdOpts{Check: true},
 		)
 		if result.Err != nil {
-			missing = append(missing, lc.display)
+			missing = append(missing, lc.Display)
 		}
 	}
 	if len(missing) > 0 {
@@ -454,7 +278,16 @@ func kernelSpecsToResolverConfigs(specs []*model.KernelSpec) []download.Resolver
 				if spec.FileSuffix != nil {
 					fileSuffix = *spec.FileSuffix
 				}
-				discoveries := getStringSlice(spec.Options, "version_discoveries")
+				var discoveries []string
+				if spec.Options != nil {
+					if raw, ok := spec.Options["version_discoveries"].([]any); ok {
+						for _, item := range raw {
+							if s, ok := item.(string); ok {
+								discoveries = append(discoveries, s)
+							}
+						}
+					}
+				}
 				cfg.Options = download.ResolverOptions{
 					VersionDiscoveries: discoveries,
 					FilePattern:        filePattern,
@@ -488,70 +321,4 @@ func kernelSpecsToResolverConfigs(specs []*model.KernelSpec) []download.Resolver
 		configs = append(configs, cfg)
 	}
 	return configs
-}
-
-// resolverConfigsFromMaps converts []map[string]any to []download.ResolverConfig.
-func resolverConfigsFromMaps(configs []map[string]any) []download.ResolverConfig {
-	result := make([]download.ResolverConfig, 0, len(configs))
-	for _, m := range configs {
-		var cfg download.ResolverConfig
-		if v, ok := m["type"].(string); ok {
-			cfg.Type = v
-		}
-		if v, ok := m["resolver"].(string); ok {
-			cfg.Resolver = v
-		}
-		if v, ok := m["versions_url"].(string); ok {
-			cfg.VersionsURL = v
-		}
-		if v, ok := m["download_url"].(string); ok {
-			cfg.DownloadURL = v
-		}
-		if v, ok := m["sha256_url"].(string); ok {
-			cfg.SHA256URL = v
-		}
-		if v, ok := m["list_url_template"].(string); ok {
-			cfg.ListURLTemplate = v
-		}
-		if v, ok := m["format"].(string); ok {
-			cfg.Format = v
-		}
-		if v, ok := m["name"].(string); ok {
-			cfg.Name = v
-		}
-		if v, ok := m["source"].(string); ok {
-			cfg.Source = v
-		}
-		if v, ok := m["version"].(string); ok {
-			cfg.Version = v
-		}
-
-		if optsRaw, ok := m["options"].(map[string]any); ok {
-			if v, ok := optsRaw["version_discoveries"].([]any); ok {
-				cfg.Options.VersionDiscoveries = make([]string, len(v))
-				for i, item := range v {
-					cfg.Options.VersionDiscoveries[i], _ = item.(string)
-				}
-			}
-			if v, ok := optsRaw["file_pattern"].(string); ok {
-				cfg.Options.FilePattern = v
-			}
-			if v, ok := optsRaw["file_suffix"].(string); ok {
-				cfg.Options.FileSuffix = v
-			}
-			if v, ok := optsRaw["s3_version_pattern"].(string); ok {
-				cfg.Options.S3VersionPattern = v
-			}
-		}
-
-		result = append(result, cfg)
-	}
-	return result
-}
-
-// extractVMName extracts the "name" from a VM object.
-// VMs are now typed as *model.VM from the shared model package,
-// so we access Name directly without reflection.
-func extractVMName(vm *model.VM) string {
-	return vm.Name
 }

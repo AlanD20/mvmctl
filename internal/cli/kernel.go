@@ -189,36 +189,15 @@ Examples:
 			prog.Start("Pulling kernel...")
 
 			// Build KernelPullInput matching Python's KernelPullInput dataclass
-			var versionPtr *string
-			if effectiveVersion != "" {
-				v := effectiveVersion
-				versionPtr = &v
-			}
-			var archPtr *string
-			if arch != "" {
-				a := arch
-				archPtr = &a
-			}
-			var jobsPtr *int
-			if jobsArg > 0 {
-				j := jobsArg
-				jobsPtr = &j
-			}
-			var kernelCfgPtr *string
-			if kernelConfig != "" {
-				kc := kernelConfig
-				kernelCfgPtr = &kc
-			}
 			featureStr := strings.Join(featureList, ",")
-
 			kernelInput := &inputs.KernelPullInput{
 				KernelType:   effectiveType,
-				Version:      versionPtr,
-				Arch:         archPtr,
-				Jobs:         jobsPtr,
+				Version:      effectiveVersion,
+				Arch:         arch,
+				Jobs:         jobsArg,
 				KeepBuildDir: keepBuildDir,
 				CleanBuild:   cleanBuild,
-				KernelConfig: kernelCfgPtr,
+				KernelConfig: kernelConfig,
 				SetDefault:   setDefault,
 				Features:     featureStr,
 			}

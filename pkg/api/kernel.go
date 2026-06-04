@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"time"
 
-	"mvmctl/internal/core/binary"
 	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/crypto"
@@ -81,28 +80,19 @@ func (op *Operation) KernelPrune(ctx context.Context, dryRun bool, includeAll bo
 func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInput,
 	onProgress func(errs.ProgressEvent)) (*model.KernelItem, error) {
 
-	try := func(phase, status, msg string) {
-		if onProgress != nil {
-			onProgress(errs.ProgressEvent{
-				Phase: phase, Status: status, Message: msg,
-			})
-		}
-	}
-
 	kernelType := input.KernelType
 	version := ""
-	if input.Version != nil {
-		version = *input.Version
+	if input.Version != "" {
+		version = input.Version
 	}
 
 	// Phase 1: Resolve "latest" version to concrete version (matches Python).
 	if version == "latest" {
-		ciVersion := ""
+		ciVersion := infra.DefaultFirecrackerCIVersion
 		if kernelType == "firecracker" {
-			binRepo := binary.NewRepository(nil)
-			defaultBin, _ := binRepo.GetDefault(ctx, "firecracker")
-			if defaultBin != nil && defaultBin.CIVersion != nil {
-				ciVersion = *defaultBin.CIVersion
+			defaultFC, _ := op.Services.Binary.GetDefaultFirecracker(ctx)
+			if defaultFC != nil && defaultFC.CIVersion != nil {
+				ciVersion = *defaultFC.CIVersion
 			}
 		}
 		if ciVersion == "" {
@@ -119,7 +109,7 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 			}
 		}
 		version = resolvedVersion
-		input.Version = &version
+		input.Version = version
 	}
 
 	// Resolve through the Request pipeline (matches Python)
@@ -140,11 +130,7 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 	}
 
 	if existing != nil {
-		resolvedPath := existing.Path
-		if !filepath.IsAbs(resolvedPath) {
-			resolvedPath = filepath.Join(infra.GetKernelsDir(), resolvedPath)
-		}
-		if _, err := os.Stat(resolvedPath); err == nil {
+		if _, err := os.Stat(existing.Path); err == nil {
 			slog.Info("Kernel already exists", "path", existing.Path)
 			if resolved.SetDefault {
 				_ = op.Repos.Kernel.SetDefault(ctx, existing.ID)
@@ -154,14 +140,18 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 	}
 
 	// Resolve spec via KernelService (matches Python)
-	specs, err := op.Services.Kernel.GetSpecsFor(nil, resolved.KernelType, resolvedVersionStr(resolved))
+	resolvedVersion := ""
+	if resolved.Version != nil {
+		resolvedVersion = *resolved.Version
+	}
+	specs, err := op.Services.Kernel.GetSpecsFor(nil, resolved.KernelType, resolvedVersion)
 	if err != nil {
 		return nil, &errs.DomainError{
 			Code: "kernel.pull_failed",
 			Message: fmt.Sprintf(
 				"Failed to get spec for '%s' version '%s': %v",
 				resolved.KernelType,
-				resolvedVersionStr(resolved),
+				resolvedVersion,
 				err,
 			),
 			Err: err,
@@ -173,7 +163,7 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 			Message: fmt.Sprintf(
 				"Expected exactly one kernel spec for type='%s' version='%s', got %d",
 				resolved.KernelType,
-				resolvedVersionStr(resolved),
+				resolvedVersion,
 				len(specs),
 			),
 			Err: fmt.Errorf("unexpected spec count: %d", len(specs)),
@@ -195,7 +185,7 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 			ciVersion = *defaultFirecracker.CIVersion
 		}
 
-		try("download", "running", "Downloading Firecracker kernel...")
+		emitProgress(onProgress, "download", "running", "Downloading Firecracker kernel...")
 
 		fetchResult, err = op.Services.Kernel.FetchFirecrackerKernel(
 			ctx,
@@ -213,9 +203,9 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 			}
 		}
 
-		try("download", "complete", "Firecracker kernel download complete.")
+		emitProgress(onProgress, "download", "complete", "Firecracker kernel download complete.")
 	} else if resolved.KernelType == "official" {
-		try("build", "running", "Building kernel (this may take a while)...")
+		emitProgress(onProgress, "build", "running", "Building kernel (this may take a while)...")
 
 		var configPath *string
 		if resolved.KernelConfig != nil && *resolved.KernelConfig != "" {
@@ -243,7 +233,7 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 			}
 		}
 
-		try("build", "complete", "Kernel build complete.")
+		emitProgress(onProgress, "build", "complete", "Kernel build complete.")
 	} else {
 		return nil, &errs.DomainError{
 			Code:    "kernel.pull_failed",
@@ -293,9 +283,6 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 	// Python compares old_path.resolve() != new_path before deleting.
 	if existing != nil && existing.ID != kernelItem.ID {
 		oldPath := existing.Path
-		if !filepath.IsAbs(oldPath) {
-			oldPath = filepath.Join(infra.GetKernelsDir(), oldPath)
-		}
 		newPath := kernelItem.Path
 		// Resolve both paths to compare actual filesystem locations (matching Python's .resolve())
 		oldPathResolved, _ := filepath.EvalSymlinks(oldPath)
@@ -308,7 +295,7 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 					"type",
 					resolved.KernelType,
 					"version",
-					resolvedVersionStr(resolved),
+					resolvedVersion,
 				)
 			}
 		}
