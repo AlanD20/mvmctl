@@ -23,7 +23,7 @@ func NewRepository(db *sqlx.DB) Repository {
 func (r *sqliteRepo) Get(ctx context.Context, id string) (*model.BinaryItem, error) {
 	var b model.BinaryItem
 	err := r.db.GetContext(ctx, &b,
-		`SELECT * FROM binaries WHERE id = ? AND deleted_at IS NULL AND is_present = 1`, id)
+		`SELECT * FROM binaries WHERE id = ? AND deleted_at IS NULL `, id)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -33,7 +33,7 @@ func (r *sqliteRepo) Get(ctx context.Context, id string) (*model.BinaryItem, err
 func (r *sqliteRepo) FindByPrefix(ctx context.Context, prefix string) ([]*model.BinaryItem, error) {
 	var items []*model.BinaryItem
 	return items, r.db.SelectContext(ctx, &items,
-		`SELECT * FROM binaries WHERE id LIKE ? AND deleted_at IS NULL AND is_present = 1`, prefix+"%")
+		`SELECT * FROM binaries WHERE id LIKE ? AND deleted_at IS NULL `, prefix+"%")
 }
 
 func (r *sqliteRepo) ListAll(ctx context.Context) ([]*model.BinaryItem, error) {
@@ -45,7 +45,7 @@ func (r *sqliteRepo) ListAll(ctx context.Context) ([]*model.BinaryItem, error) {
 func (r *sqliteRepo) ListByName(ctx context.Context, name string) ([]*model.BinaryItem, error) {
 	var items []*model.BinaryItem
 	return items, r.db.SelectContext(ctx, &items,
-		`SELECT * FROM binaries WHERE name = ? AND deleted_at IS NULL AND is_present = 1 ORDER BY created_at`, name)
+		`SELECT * FROM binaries WHERE name = ? AND deleted_at IS NULL  ORDER BY created_at`, name)
 }
 
 func (r *sqliteRepo) GetByNameAndVersion(ctx context.Context, name, version string) (*model.BinaryItem, error) {
@@ -53,7 +53,7 @@ func (r *sqliteRepo) GetByNameAndVersion(ctx context.Context, name, version stri
 	err := r.db.GetContext(
 		ctx,
 		&b,
-		`SELECT * FROM binaries WHERE name = ? AND version = ? AND deleted_at IS NULL AND is_present = 1`,
+		`SELECT * FROM binaries WHERE name = ? AND version = ? AND deleted_at IS NULL `,
 		name,
 		version,
 	)
@@ -134,7 +134,7 @@ func (r *sqliteRepo) Count(ctx context.Context) (int, error) {
 func (r *sqliteRepo) GetDefault(ctx context.Context, name string) (*model.BinaryItem, error) {
 	var b model.BinaryItem
 	err := r.db.GetContext(ctx, &b,
-		`SELECT * FROM binaries WHERE name = ? AND is_default = 1 AND deleted_at IS NULL AND is_present = 1`, name)
+		`SELECT * FROM binaries WHERE name = ? AND is_default = 1 AND deleted_at IS NULL `, name)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

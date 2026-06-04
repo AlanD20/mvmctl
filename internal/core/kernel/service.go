@@ -275,7 +275,7 @@ func (s *Service) buildFromSource(ctx context.Context, cfg BuildConfig) (*Kernel
 		buildDir = "."
 	}
 
-	configHash := s.computeConfigHash(cfg.Spec, cfg.Version, cfg.UserConfigPath)
+	configHash := s.computeConfigHash(cfg.Spec, cfg.Version, cfg.UserConfigPath, cfg.FeatureEnforces)
 	cacheKey := fmt.Sprintf("%s-%s", cfg.Version, configHash)
 	cacheMarker := filepath.Join(filepath.Dir(buildDir), fmt.Sprintf(KernelCacheMarker, cacheKey))
 	cachedKernelPath := filepath.Join(filepath.Dir(buildDir), fmt.Sprintf(KernelCachePath, cacheKey))
@@ -1039,7 +1039,7 @@ func (s *Service) applyConfigFragments(
 
 // ── Caching helpers ────────────────────────────────────────────────────
 
-func (s *Service) computeConfigHash(spec *model.KernelSpec, version string, userConfigPath *string) string {
+func (s *Service) computeConfigHash(spec *model.KernelSpec, version string, userConfigPath *string, featureEnforces map[string]string) string {
 	// Sort keys for deterministic hashing
 	defaultKeys := make([]string, 0, len(spec.DefaultConfigs))
 	for k := range spec.DefaultConfigs {
@@ -1051,10 +1051,21 @@ func (s *Service) computeConfigHash(spec *model.KernelSpec, version string, user
 		defaultParts = append(defaultParts, fmt.Sprintf("%s=%s", k, spec.DefaultConfigs[k]))
 	}
 
+	featureKeys := make([]string, 0, len(featureEnforces))
+	for k := range featureEnforces {
+		featureKeys = append(featureKeys, k)
+	}
+	sort.Strings(featureKeys)
+	var featureParts []string
+	for _, k := range featureKeys {
+		featureParts = append(featureParts, fmt.Sprintf("%s=%s", k, featureEnforces[k]))
+	}
+
 	hash := crypto.ContentHash(
 		version,
 		fmt.Sprintf("%v", spec.ConfigFragments),
 		strings.Join(defaultParts, ","),
+		strings.Join(featureParts, ","),
 	)
 	if userConfigPath != nil {
 		data, err := os.ReadFile(*userConfigPath)

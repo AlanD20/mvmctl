@@ -390,9 +390,9 @@ func IsValidVersion(v string) bool {
 	return v != "" && semverPattern.MatchString(v)
 }
 
-// versionExtractPattern matches a version suffix in a filename:
-// "-6.1.0" or "-v6.1.0" and captures the numeric part.
-var versionExtractPattern = regexp.MustCompile(`-v?(\d+(?:\.\d+)*)$`)
+// versionExtractPattern matches a version in a filename.
+// Not anchored — filenames may have extensions or suffixes after the version.
+var versionExtractPattern = regexp.MustCompile(`-v?(\d+(?:\.\d+)*)`)
 
 // ExtractVersionFromFilename extracts a numeric version from a filename suffix.
 // Returns the version string and true if found, or ("", false) otherwise.
