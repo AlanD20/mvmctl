@@ -98,12 +98,7 @@ func (op *Operation) ImagePull(
 	// Resolve cache TTL from settings
 	cacheTTL := 0
 	if !resolved.NoCache {
-		// Config Service must always exist, or panic
-		if ttlRaw, err := op.Services.Config.Get(ctx, "defaults.image", "remote_list_cache_ttl"); err == nil {
-			if ttl, ok := ttlRaw.(int); ok {
-				cacheTTL = ttl
-			}
-		}
+		cacheTTL, _ = op.Services.Config.GetInt(ctx, "defaults.image", "remote_list_cache_ttl")
 	}
 
 	// Resolve ci_version from default firecracker binary
@@ -581,22 +576,9 @@ func (op *Operation) ImageListAll(
 		}
 
 		// Resolve cache_ttl from settings
-		var cacheTTL int
-		if noCache {
-			cacheTTL = 0
-		} else {
-			cacheTTL = 3600
-			if ttlRaw, err := op.Services.Config.Get(ctx, "defaults.image", "remote_list_cache_ttl"); err == nil {
-				if ttl, ok := ttlRaw.(int); ok && ttl > 0 {
-					cacheTTL = ttl
-				}
-			}
-		}
-
-		// If noCache, pass 0 to skip cache
-		cacheTTLParam := cacheTTL
-		if noCache {
-			cacheTTLParam = 0
+		cacheTTL := 0
+		if !noCache {
+			cacheTTL, _ = op.Services.Config.GetInt(ctx, "defaults.image", "remote_list_cache_ttl")
 		}
 
 		// Arch always matches the host machine — not user-configurable
@@ -627,7 +609,7 @@ func (op *Operation) ImageListAll(
 		}
 
 		// Use ResolveVersions to get VersionInfo objects
-		versionMap := image.ResolveVersions(ctx, imageTypesConfig, arch, cacheTTLParam, resolvedCIVersion)
+		versionMap := image.ResolveVersions(ctx, imageTypesConfig, arch, cacheTTL, resolvedCIVersion)
 		var versions []model.VersionInfo
 		for _, vs := range versionMap {
 			versions = append(versions, vs...)

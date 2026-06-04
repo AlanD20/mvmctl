@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"fmt"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
@@ -21,24 +22,6 @@ func NewService(repo SettingsRepository, constraints *ConstraintRegistry) *Servi
 		repo:        repo,
 		constraints: constraints,
 	}
-}
-
-// Get returns the coerced value for a setting, or nil if not found.
-// Matches Python: get() -> repo.get() + coerce.
-// Python propagates TypeError from coerce() directly — Go does the same.
-func (s *Service) Get(ctx context.Context, category, key string) (any, error) {
-	value, err := s.repo.Get(ctx, category, key)
-	if err != nil {
-		return nil, err
-	}
-	if value == nil {
-		return nil, nil
-	}
-	expected := GetExpectedType(category, key)
-	if expected != "" {
-		return infra.Coerce(value, expected)
-	}
-	return value, nil
 }
 
 // Set coerces the value, validates constraints, and persists.
@@ -71,33 +54,42 @@ func (s *Service) Set(ctx context.Context, category, key string, value any) erro
 }
 
 // GetString resolves a config value as a string using GetValue, then casts.
-// Returns defaultVal if GetValue fails or the value can't be cast.
-func (s *Service) GetString(ctx context.Context, category, key string, defaultVal string) string {
+// Returns error if the key has no default in OverridableDefaults.
+func (s *Service) GetString(ctx context.Context, category, key string) (string, error) {
 	v, err := s.GetValue(ctx, category, key)
-	if err != nil || v == nil {
-		return defaultVal
+	if err != nil {
+		return "", err
 	}
-	return infra.ToString(v, defaultVal)
+	if v == nil {
+		return "", fmt.Errorf("config key %s.%s not found", category, key)
+	}
+	return infra.ToString(v, ""), nil
 }
 
 // GetInt resolves a config value as an int using GetValue, then casts.
-// Returns defaultVal if GetValue fails or the value can't be cast.
-func (s *Service) GetInt(ctx context.Context, category, key string, defaultVal int) int {
+// Returns error if the key has no default in OverridableDefaults.
+func (s *Service) GetInt(ctx context.Context, category, key string) (int, error) {
 	v, err := s.GetValue(ctx, category, key)
-	if err != nil || v == nil {
-		return defaultVal
+	if err != nil {
+		return 0, err
 	}
-	return infra.ToInt(v, defaultVal)
+	if v == nil {
+		return 0, fmt.Errorf("config key %s.%s not found", category, key)
+	}
+	return infra.ToInt(v, 0), nil
 }
 
 // GetBool resolves a config value as a bool using GetValue, then casts.
-// Returns defaultVal if GetValue fails or the value can't be cast.
-func (s *Service) GetBool(ctx context.Context, category, key string, defaultVal bool) bool {
+// Returns error if the key has no default in OverridableDefaults.
+func (s *Service) GetBool(ctx context.Context, category, key string) (bool, error) {
 	v, err := s.GetValue(ctx, category, key)
-	if err != nil || v == nil {
-		return defaultVal
+	if err != nil {
+		return false, err
 	}
-	return infra.ToBool(v, defaultVal)
+	if v == nil {
+		return false, fmt.Errorf("config key %s.%s not found", category, key)
+	}
+	return infra.ToBool(v, false), nil
 }
 
 // Delete removes a setting override. Returns true if a row was deleted.

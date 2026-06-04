@@ -306,7 +306,7 @@ func (op *Operation) BinaryList(
 		lmt = *limit
 	}
 	if lmt <= 0 {
-		lmt = op.Services.Config.GetInt(ctx, "defaults.binary", "remote_version_limit", 20)
+		lmt, _ = op.Services.Config.GetInt(ctx, "defaults.binary", "remote_version_limit")
 	}
 	versions, err := op.Services.Binary.ListRemote(ctx, lmt)
 	if err != nil {

@@ -101,7 +101,7 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 		v := r.input.Version
 		version = &v
 	} else {
-		s := r.cfg.GetString(ctx, "defaults.kernel", "version", "")
+		s, _ := r.cfg.GetString(ctx, "defaults.kernel", "version")
 		if s != "" {
 			version = &s
 		}
@@ -128,7 +128,7 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 		jobs = r.input.Jobs
 	} else {
 		// Default to all cores when not configured
-		jobs = r.cfg.GetInt(ctx, "defaults.kernel", "build_jobs", runtime.NumCPU())
+		jobs, _ = r.cfg.GetInt(ctx, "defaults.kernel", "build_jobs")
 	}
 	// Fallback for constrained environments where NumCPU() returns 0
 	if jobs == 0 {
@@ -157,7 +157,7 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 	//   if nested_virt and "kvm" not in features_list: features_list.insert(0, "kvm")
 	// Python's bool() is truthy for many types: non-empty strings, non-zero numbers,
 	// non-None objects. In Go, we just check for a truthy config value.
-	nestedVirtBool := r.cfg.GetBool(ctx, "defaults.vm", "nested_virt", false)
+	nestedVirtBool, _ := r.cfg.GetBool(ctx, "defaults.vm", "nested_virt")
 	if nestedVirtBool {
 		hasKVM := false
 		for _, f := range featuresList {

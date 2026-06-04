@@ -176,7 +176,7 @@ func (r *ImageAcquireRequest) ResolveImport(ctx context.Context) (*ResolvedImage
 	// Resolve format from config, fall back to auto-detection
 	format := in.Format
 	if format == "" {
-		format = r.cfg.GetString(ctx, "defaults.image", "import_format", "")
+		format, _ = r.cfg.GetString(ctx, "defaults.image", "import_format")
 	}
 
 	// Auto-detect format from file if format is not known

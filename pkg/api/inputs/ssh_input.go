@@ -183,7 +183,7 @@ func (r *SSHRequest) resolveUser(ctx context.Context) (string, error) {
 	if r.vm != nil && r.vm.SSHUser != nil && *r.vm.SSHUser != "" {
 		return *r.vm.SSHUser, nil
 	}
-	user := r.cfg.GetString(ctx, "defaults.vm", "ssh_user", "root")
+	user, _ := r.cfg.GetString(ctx, "defaults.vm", "ssh_user")
 	return user, nil
 }
 

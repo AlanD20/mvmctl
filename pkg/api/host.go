@@ -110,11 +110,7 @@ func (op *Operation) HostInit(ctx context.Context, onProgress func(errs.Progress
 	}
 
 	// Resolve firewall backend once (verdict #44).
-	fwBackendRaw, _ := op.Services.Config.Get(ctx, "settings", "firewall_backend")
-	fwBackend := "nftables"
-	if s, ok := fwBackendRaw.(string); ok {
-		fwBackend = s
-	}
+	fwBackend, _ := op.Services.Config.GetString(ctx, "settings", "firewall_backend")
 
 	// --- iptables comment module check ---
 	xtcommentAvail := true
@@ -565,11 +561,7 @@ func (op *Operation) HostClean(ctx context.Context) ([]string, error) {
 		}
 	}
 
-	defaultNetNameRaw, _ := op.Services.Config.Get(ctx, "defaults.network", "name")
-	defaultNetNameStr := "net"
-	if s, ok := defaultNetNameRaw.(string); ok {
-		defaultNetNameStr = s
-	}
+	defaultNetNameStr, _ := op.Services.Config.GetString(ctx, "defaults.network", "name")
 	defaultBridge := fmt.Sprintf("%s-%s", infra.CLIName, system.TruncateString(defaultNetNameStr, 10))
 	if infranet.BridgeExists(ctx, defaultBridge) {
 		if err := op.Services.Network.RemoveRawBridge(ctx, defaultBridge); err != nil {
