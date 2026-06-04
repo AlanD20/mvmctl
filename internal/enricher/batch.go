@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"mvmctl/internal/infra/parallel"
+	"mvmctl/internal/infra/pool"
 )
 
 // sortByDotCount sorts relation paths by dot count (parents before children).
@@ -24,29 +24,21 @@ type BatchResolveFunc[T any] func(id string) (T, error)
 
 // BatchResolveParallel resolves multiple IDs in parallel using goroutines.
 // Returns a map from ID to resolved value, collecting all results or errors.
-// Uses parallel.Map for goroutine-based parallelism.
+// Uses pool.Gather for goroutine-based parallelism.
 func BatchResolveParallel[T any](
 	ctx context.Context,
 	ids []string,
 	fn BatchResolveFunc[T],
 	maxWorkers int,
 ) map[string]T {
-	// Resolve each ID concurrently; collect results for callers that want partial success.
-	type idResult struct {
-		ID  string
-		Val T
-		Err error
-	}
-
-	results, _ := parallel.Map(ctx, maxWorkers, ids, func(ctx context.Context, id string) (idResult, error) {
-		val, err := fn(id)
-		return idResult{ID: id, Val: val, Err: err}, nil
+	results := pool.Gather(ctx, maxWorkers, ids, func(ctx context.Context, id string) (T, error) {
+		return fn(id)
 	})
 
 	resultMap := make(map[string]T, len(results))
-	for _, r := range results {
+	for i, r := range results {
 		if r.Err == nil {
-			resultMap[r.ID] = r.Val
+			resultMap[ids[i]] = r.Value
 		}
 	}
 	return resultMap

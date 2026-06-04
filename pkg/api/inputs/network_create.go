@@ -143,10 +143,8 @@ func (r *NetworkCreateRequest) ensureValidate(ctx context.Context) error {
 		}
 	}
 
-	validator := validators.NetworkValidator{}
-
 	// Validate name (no dots, lowercase only)
-	if err := validator.ValidateName(r.result.Name); err != nil {
+	if err := validators.NetworkName(r.result.Name); err != nil {
 		return &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
 			Op:      "network_create",
@@ -156,7 +154,7 @@ func (r *NetworkCreateRequest) ensureValidate(ctx context.Context) error {
 	}
 
 	// Validate and normalize subnet
-	if _, err := validator.ValidateSubnet(r.result.Subnet); err != nil {
+	if _, err := validators.Subnet(r.result.Subnet); err != nil {
 		return &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
 			Op:      "network_create",
@@ -166,7 +164,7 @@ func (r *NetworkCreateRequest) ensureValidate(ctx context.Context) error {
 	}
 
 	// Validate gateway is in subnet
-	if _, err := validator.ValidateIPv4Gateway(r.result.IPv4Gateway, r.result.Subnet); err != nil {
+	if _, err := validators.IPv4Gateway(r.result.IPv4Gateway, r.result.Subnet); err != nil {
 		return &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
 			Op:      "network_create",
@@ -176,7 +174,7 @@ func (r *NetworkCreateRequest) ensureValidate(ctx context.Context) error {
 	}
 
 	// Validate bridge name
-	if err := validator.ValidateBridgeName(ctx, r.result.Bridge); err != nil {
+	if err := validators.BridgeName(ctx, r.result.Bridge); err != nil {
 		return &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
 			Op:      "network_create",
@@ -187,7 +185,7 @@ func (r *NetworkCreateRequest) ensureValidate(ctx context.Context) error {
 
 	// Validate NAT gateways
 	if len(r.result.NATGateways) > 0 {
-		if _, err := validator.ValidateNATGateways(ctx, r.result.NATGateways); err != nil {
+		if _, err := validators.NATGateways(ctx, r.result.NATGateways); err != nil {
 			return &errs.DomainError{
 				Code:    errs.CodeValidationFailed,
 				Op:      "network_create",
@@ -230,7 +228,7 @@ func (r *NetworkCreateRequest) ensureValidate(ctx context.Context) error {
 	for i, n := range existingNetworks {
 		existingNetworksGeneric[i] = n
 	}
-	if err := validator.ValidateSubnetNoOverlap(r.result.Subnet, existingNetworksGeneric, r.result.Name); err != nil {
+	if err := validators.SubnetNoOverlap(r.result.Subnet, existingNetworksGeneric, r.result.Name); err != nil {
 		return &errs.DomainError{
 			Code:    errs.CodeNetworkSubnetOverlap,
 			Op:      "network_create",

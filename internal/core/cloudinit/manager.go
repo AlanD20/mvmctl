@@ -20,9 +20,83 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// CloudInitModeResolved matches Python's CloudInitModeResolved dataclass.
+type CloudInitModeResolved struct {
+	Mode    model.CloudInitMode
+	ISOPath *string
+}
+
+// ResolveMode resolves a cloud-init mode from raw CLI input.
+// Matches Python's VMCreateRequest._resolve_cloud_init_mode().
+func ResolveMode(mode *string, isoPath *string) (CloudInitModeResolved, error) {
+	// Off is default cloud-init mode
+	result := CloudInitModeResolved{Mode: model.CloudInitModeOFF, ISOPath: nil}
+
+	if mode == nil {
+		return result, nil
+	}
+
+	modeLower := strings.ToLower(*mode)
+	modeVal := model.CloudInitMode(modeLower)
+	if !IsValidMode(modeVal) {
+		return CloudInitModeResolved{}, &errs.DomainError{
+			Code:    errs.CodeCloudInitProvisionFailed,
+			Op:      "cloudinit",
+			Message: fmt.Sprintf("Invalid --cloud-init-mode '%s'. Valid modes: inject, iso, off, net", *mode),
+			Class:   errs.ClassValidation,
+		}
+	}
+
+	switch modeVal {
+	case model.CloudInitModeISO:
+		if isoPath != nil && *isoPath != "" {
+			if _, err := os.Stat(*isoPath); os.IsNotExist(err) {
+				return CloudInitModeResolved{}, &errs.DomainError{
+					Code:    errs.CodeCloudInitProvisionFailed,
+					Op:      "cloudinit",
+					Message: fmt.Sprintf("Cloud-init ISO not found: %s", *isoPath),
+					Class:   errs.ClassValidation,
+				}
+			}
+			result = CloudInitModeResolved{Mode: model.CloudInitModeISO, ISOPath: isoPath}
+		} else {
+			// Default: ISO will be created during provisioning
+			result = CloudInitModeResolved{Mode: model.CloudInitModeISO, ISOPath: nil}
+		}
+	case model.CloudInitModeNET:
+		result = CloudInitModeResolved{Mode: model.CloudInitModeNET, ISOPath: nil}
+	case model.CloudInitModeINJECT:
+		result = CloudInitModeResolved{Mode: model.CloudInitModeINJECT, ISOPath: nil}
+	case model.CloudInitModeOFF:
+		result = CloudInitModeResolved{Mode: model.CloudInitModeOFF, ISOPath: nil}
+	}
+
+	return result, nil
+}
+
 // requiredISOTool is the command used to create cloud-init ISO images.
 // Matches Python's constants.REQUIRED_ISO_TOOL (value: "cloud-localds").
 const requiredISOTool = "cloud-localds"
+
+// ValidModes returns all valid cloud-init modes.
+func ValidModes() []model.CloudInitMode {
+	return []model.CloudInitMode{
+		model.CloudInitModeOFF,
+		model.CloudInitModeINJECT,
+		model.CloudInitModeNET,
+		model.CloudInitModeISO,
+	}
+}
+
+// IsValidMode returns true if the given mode is a valid cloud-init mode.
+func IsValidMode(mode model.CloudInitMode) bool {
+	switch mode {
+	case model.CloudInitModeOFF, model.CloudInitModeINJECT, model.CloudInitModeNET, model.CloudInitModeISO:
+		return true
+	default:
+		return false
+	}
+}
 
 // TemplateData holds the data passed to the cloud-init Go template.
 // Field names must match the Go template syntax in cloud_init.template.yaml:

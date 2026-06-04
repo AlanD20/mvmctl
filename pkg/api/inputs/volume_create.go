@@ -127,7 +127,7 @@ func (r *VolumeCreateRequest) ensureValidate(ctx context.Context) error {
 		}
 	}
 
-	if err := validators.ValidateVolumeName(r.result.Name); err != nil {
+	if err := validators.VolumeName(r.result.Name); err != nil {
 		return &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
 			Op:      "volume_create",

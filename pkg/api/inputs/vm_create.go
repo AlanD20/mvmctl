@@ -1,11 +1,6 @@
 package inputs
 
 import (
-	"crypto/sha256"
-	"fmt"
-	"path/filepath"
-
-	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/model"
 )
 
@@ -17,24 +12,23 @@ type VMCreateInput struct {
 
 	// Optional fields with CLI-layer defaults resolved in Build()
 	VCPUCount           *int
-	MemSizeMib          *string
+	MemSizeMib          string
 	User                *string
 	PCIEnabled          *bool
 	NestedVirt          *bool
-	CPUTemplate         *string // file path to CPU template JSON
+	CPUTemplate         string // file path to CPU template JSON
 	CPUConfig           map[string]any
 	EnableConsole       *bool
 	EnableLogging       *bool
 	EnableMetrics       *bool
-	FirecrackerBin      *string
 	Image               *string
 	KernelID            *string
 	BinaryID            *string
-	DiskSize            *string
+	DiskSize            string
 	RequestedGuestIP    *string
 	SkipCINetworkConfig bool
 	BootArgs            *string
-	LSMFlags            *string
+	LSMFlags            string
 	NetworkName         *string
 	RequestedGuestMAC   *string
 	CustomUserDataPath  *string
@@ -49,12 +43,6 @@ type VMCreateInput struct {
 	Count               *int
 	Atomic              bool
 	Volumes             []string
-}
-
-// CloudInitModeResolved matches Python's CloudInitModeResolved dataclass.
-type CloudInitModeResolved struct {
-	Mode    model.CloudInitMode
-	ISOPath *string
 }
 
 // VMCreateResolved matches Python's ResolvedVMCreateInput (immutable resolved inputs).
@@ -119,19 +107,4 @@ type VMCreateResolved struct {
 	Provisioner        model.ProvisionerType
 	ExtraDrives        []model.DriveConfig
 	Volumes            []*model.VolumeItem
-}
-
-// deriveFirecrackerVersionFromPath extracts version from firecracker binary path.
-// Matches Python: firecracker-v1.15.1 -> "1.15.1", firecracker-dev-abc -> "dev-abc", fallback -> "custom-{hash}"
-func deriveFirecrackerVersionFromPath(path string) string {
-	stem := filepath.Base(path)
-	if len(stem) > len("firecracker-v") && stem[:len("firecracker-v")] == "firecracker-v" {
-		return stem[len("firecracker-v"):]
-	}
-	if len(stem) > len("firecracker-") && stem[:len("firecracker-")] == "firecracker-" {
-		return stem[len("firecracker-"):]
-	}
-	// fallback: custom-{path_hash}
-	h := sha256.Sum256([]byte(path))
-	return "custom-" + crypto.Truncate(fmt.Sprintf("%x", h[:]), 12)
 }

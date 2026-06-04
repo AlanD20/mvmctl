@@ -215,7 +215,6 @@ func newVMCreateCmd(op *api.Operation) *cobra.Command {
 		noEnableLogging bool
 		enableMetrics   bool
 		noEnableMetrics bool
-		firecrackerBin  string
 		count           int
 		atomic          bool
 		skipCleanup     bool
@@ -232,7 +231,7 @@ func newVMCreateCmd(op *api.Operation) *cobra.Command {
 				image, kernel, vcpus, mem, diskSize, ip, networkName, mac,
 				sshKey, userData, cloudInitMode, nocloudNetPort, user,
 				noPCI, nestedVirt, noNestedVirt, cpuTemplate, noConsole, bootArgs, lsmFlags,
-				enableLogging, noEnableLogging, enableMetrics, noEnableMetrics, firecrackerBin, count,
+				enableLogging, noEnableLogging, enableMetrics, noEnableMetrics, count,
 				atomic, skipCleanup, skipDeblob, volume)
 		},
 	}
@@ -281,8 +280,6 @@ func newVMCreateCmd(op *api.Operation) *cobra.Command {
 	cmd.Flags().BoolVar(&noEnableMetrics, "no-enable-metrics", false, "Disable Firecracker metrics")
 	cmd.Flags().MarkHidden("no-enable-metrics")
 	cmd.MarkFlagsMutuallyExclusive("enable-metrics", "no-enable-metrics")
-	cmd.Flags().
-		StringVar(&firecrackerBin, "firecracker-bin", os.Getenv("MVM_FIRECRACKER_BIN"), "Path to firecracker binary (default: active version from mvm bin default)")
 	cmd.Flags().IntVarP(&count, "count", "c", 1, "Number of VMs to create (default: 1)")
 	cmd.Flags().
 		BoolVar(&atomic, "atomic", false, "If any VM fails, remove all successfully-created VMs (all-or-nothing)")
@@ -300,7 +297,7 @@ func runVMCreate(
 	name, image, kernel string, vcpus int, mem, diskSize, ip, networkName, mac,
 	sshKey, userData, cloudInitMode string, nocloudNetPort int, user string,
 	noPCI bool, nestedVirt, noNestedVirt bool, cpuTemplate string, noConsole bool, bootArgs, lsmFlags string,
-	enableLogging, noEnableLogging, enableMetrics, noEnableMetrics bool, firecrackerBin string, count int,
+	enableLogging, noEnableLogging, enableMetrics, noEnableMetrics bool, count int,
 	atomic, skipCleanup, skipDeblob bool, volume []string,
 ) error {
 	if skipCleanup {
@@ -394,14 +391,7 @@ func runVMCreate(
 	if vcpus > 0 {
 		vcpuPtr = &vcpus
 	}
-	var memPtr *string
-	if mem != "" {
-		memPtr = &mem
-	}
-	var diskPtr *string
-	if diskSize != "" {
-		diskPtr = &diskSize
-	}
+	// mem, diskSize — value types, zero value means "use default"
 	var ipPtr *string
 	if ip != "" {
 		ipPtr = &ip
@@ -426,22 +416,11 @@ func runVMCreate(
 	if nocloudNetPort != 0 {
 		nocloudPtr = &nocloudNetPort
 	}
-	var fcBinPtr *string
-	if firecrackerBin != "" {
-		fcBinPtr = &firecrackerBin
-	}
 	var bootArgsPtr *string
 	if bootArgs != "" {
 		bootArgsPtr = &bootArgs
 	}
-	var lsmPtr *string
-	if lsmFlags != "" {
-		lsmPtr = &lsmFlags
-	}
-	var cpuTemplatePtr *string
-	if cpuTemplate != "" {
-		cpuTemplatePtr = &cpuTemplate
-	}
+	// lsmFlags, cpuTemplate — value types, zero value means "use default"
 	var imagePtr *string
 	if image != "" {
 		imagePtr = &image
@@ -471,8 +450,8 @@ func runVMCreate(
 		Image:             imagePtr,
 		KernelID:          kernelPtr,
 		VCPUCount:         vcpuPtr,
-		MemSizeMib:        memPtr,
-		DiskSize:          diskPtr,
+		MemSizeMib:        mem,
+		DiskSize:          diskSize,
 		RequestedGuestIP:  ipPtr,
 		NetworkName:       networkPtr,
 		SSHKeys:           sshKeyList,
@@ -482,12 +461,11 @@ func runVMCreate(
 		NestedVirt:        nestedVirtPtr,
 		PCIEnabled:        &pciEnabled,
 		BootArgs:          bootArgsPtr,
-		LSMFlags:          lsmPtr,
-		FirecrackerBin:    fcBinPtr,
+		LSMFlags:          lsmFlags,
 		RequestedGuestMAC: macPtr,
 		CustomUserData:    userDataPtr,
 		NocloudNetPort:    nocloudPtr,
-		CPUTemplate:       cpuTemplatePtr,
+		CPUTemplate:       cpuTemplate,
 		Count:             countPtr,
 		Atomic:            atomic,
 		SkipCleanup:       skipCleanup,

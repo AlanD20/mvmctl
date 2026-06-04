@@ -71,7 +71,7 @@ func NewKeyCreateRequest(inputs KeyCreateInput) *KeyCreateRequest {
 // Matches Python's KeyCreateRequest.resolve().
 func (r *KeyCreateRequest) Resolve() (*ResolvedKeyCreateInput, error) {
 	// Validate key name early — before any work
-	if err := validators.ValidateKeyName(r.input.Name); err != nil {
+	if err := validators.KeyName(r.input.Name); err != nil {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
 			Op:      "key_create",

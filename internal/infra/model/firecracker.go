@@ -1,5 +1,11 @@
 package model
 
+import (
+	"database/sql/driver"
+	"encoding/json"
+	"fmt"
+)
+
 // ── CpuConfig ──
 
 // CpuConfig matches Python's CpuConfig(TypedDict, total=False).
@@ -9,6 +15,28 @@ type CpuConfig struct {
 	MsrModifiers    []MsrModifier         `json:"msr_modifiers,omitempty"`
 	RegModifiers    []ArmRegisterModifier `json:"reg_modifiers,omitempty"`
 	VcpuFeatures    []VcpuFeatures        `json:"vcpu_features,omitempty"`
+}
+
+// Scan implements sql.Scanner for reading JSON TEXT into CpuConfig.
+func (c *CpuConfig) Scan(src any) error {
+	if src == nil {
+		return nil
+	}
+	var val string
+	switch v := src.(type) {
+	case []byte:
+		val = string(v)
+	case string:
+		val = v
+	default:
+		return fmt.Errorf("model.CpuConfig: unsupported scan type %T", src)
+	}
+	return json.Unmarshal([]byte(val), c)
+}
+
+// Value implements driver.Valuer for writing CpuConfig as JSON TEXT.
+func (c CpuConfig) Value() (driver.Value, error) {
+	return json.Marshal(c)
 }
 
 // ── CpuidRegisterModifier ──

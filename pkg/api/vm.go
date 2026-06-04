@@ -2097,18 +2097,23 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 	}
 
 	// --- Cloud-init provisioning ---
-	// Build Provisioner matching Python's Provisioner(...) with all params
-	provisioner, err := vm.NewProvisioner(
-		c.rootfsPath,
-		provisioner.ProvisionerType(c.resolved.Provisioner),
-		c.resolved.Image.FSType,
-	)
+	// Build Backend matching Python's ProvisionerBackend.get_vm()
+	backend, err := provisioner.NewBackend(ctx, provisioner.BackendOpts{
+		RootfsPath:      c.rootfsPath,
+		FsType:          c.resolved.Image.FSType,
+		CacheDir:        c.cacheDir,
+		ProvisionerType: provisioner.ProvisionerType(c.resolved.Provisioner),
+		RootUID:         c.resolved.RootUID,
+		RootGID:         c.resolved.RootGID,
+		UserUID:         c.resolved.UserUID,
+		UserGID:         c.resolved.UserGID,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to create VM provisioner: %w", err)
 	}
 
 	// Resize rootfs
-	provisioner.Resize(c.resolved.DiskSizeBytes)
+	backend.Resize(ctx, c.resolved.DiskSizeBytes)
 
 	mode := c.resolved.CloudInitMode
 
@@ -2118,13 +2123,13 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 
 	// Common operations for OFF and INJECT modes
 	if mode == model.CloudInitModeOFF || mode == model.CloudInitModeINJECT {
-		provisioner.SetHostname(c.resolved.Name)
-		provisioner.InjectDNS(c.resolved.DNSServer)
-		provisioner.SetupSSH(c.resolved.User, pubkeys)
+		backend.SetHostname(ctx, c.resolved.Name)
+		backend.InjectDNS(ctx, c.resolved.DNSServer)
+		backend.SetupSSH(ctx, c.resolved.User, pubkeys)
 	}
 
 	if mode == model.CloudInitModeOFF {
-		provisioner.DisableCloudInit()
+		backend.DisableCloudInit(ctx)
 		c.markCreated("cloud-init-off")
 
 	} else if mode == model.CloudInitModeINJECT {
@@ -2158,7 +2163,7 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 		c.cloudInitResult = &cloudInitResult{
 			mode: ciResult.Mode,
 		}
-		provisioner.InjectCloudInit(ciConfig.CloudInitDir)
+		backend.InjectCloudInit(ctx, ciConfig.CloudInitDir)
 		c.markCreated("cloud-init-inject")
 
 	} else if mode == model.CloudInitModeISO || mode == model.CloudInitModeNET {
@@ -2208,14 +2213,14 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 	if !c.resolved.SkipDeblob {
 		// Pass the image's pre-detected distro to avoid redundant OS detection.
 		// Matches Python: provisioner.deblob(os_type=self.resolved.image.distro)
-		provisioner.Deblob(ctx, c.resolved.Image.Distro)
+		backend.Deblob(ctx, &c.resolved.Image.Distro)
 	}
 
 	// Fix fstab for Firecracker (superfloppy /dev/vda layout)
-	provisioner.FixFstab()
+	backend.FixFstab(ctx)
 
 	// Execute all queued provisioning operations
-	provisioner.Run(ctx)
+	backend.Run(ctx)
 
 	// Progress: firecracker
 	if c.onProgress != nil {
@@ -2830,7 +2835,7 @@ func (op *Operation) vmBuildResolvedInput(
 	}
 
 	// Resolve binary from DB (matches Python's Repository resolution)
-	binary := op.vmResolveBinary(ctx, input.BinaryID, input.FirecrackerBin, op.Repos.Binary)
+	binary := op.vmResolveBinary(ctx, input.BinaryID, op.Repos.Binary)
 
 	// Resolve SSH keys
 	sshKeyNames := input.SSHKeys
@@ -2852,8 +2857,8 @@ func (op *Operation) vmBuildResolvedInput(
 	}
 
 	memSizeMiB := 0
-	if input.MemSizeMib != nil && *input.MemSizeMib != "" {
-		if bytes, err := disk.ParseDiskSizeToBytes(*input.MemSizeMib); err == nil {
+	if input.MemSizeMib != "" {
+		if bytes, err := disk.ParseDiskSizeToBytes(input.MemSizeMib); err == nil {
 			memSizeMiB = int(bytes / (1024 * 1024))
 		}
 	}
@@ -2863,8 +2868,8 @@ func (op *Operation) vmBuildResolvedInput(
 
 	diskSizeMiB := image.MinRootfsSizeMiB
 	diskSizeBytes := int64(diskSizeMiB) * 1024 * 1024
-	if input.DiskSize != nil {
-		if bytes, err := disk.ParseDiskSizeToBytes(*input.DiskSize); err == nil {
+	if input.DiskSize != "" {
+		if bytes, err := disk.ParseDiskSizeToBytes(input.DiskSize); err == nil {
 			diskSizeBytes = bytes
 			diskSizeMiB = int(bytes / (1024 * 1024))
 		}
@@ -2906,10 +2911,7 @@ func (op *Operation) vmBuildResolvedInput(
 	if input.BootArgs != nil {
 		bootArgs = *input.BootArgs
 	}
-	lsmFlags := ""
-	if input.LSMFlags != nil {
-		lsmFlags = *input.LSMFlags
-	}
+	lsmFlags := input.LSMFlags
 
 	// Resolve enable_logging and enable_metrics from input (matches Python)
 	enableLogging := false
@@ -2992,7 +2994,7 @@ func (op *Operation) vmBuildResolvedInput(
 		NocloudMaxPortRetries: 100,
 		RequestedGuestIP:      input.RequestedGuestIP,
 		RequestedGuestMAC:     input.RequestedGuestMAC,
-		CPUConfig:             mapToVMCPUCfg(input.CPUConfig),
+		CPUConfig:             infra.MapToStruct[model.CpuConfig](input.CPUConfig),
 		SSHKeys:               sshKeyItems,
 		Provisioner:           model.ProvisionerType(provisionerType),
 	}, nil
@@ -3002,7 +3004,7 @@ func (op *Operation) vmBuildResolvedInput(
 // Matches Python's VMCreateRequest binary resolution: tries explicit ID/path, then default, then fallback.
 func (op *Operation) vmResolveBinary(
 	ctx context.Context,
-	binaryID, firecrackerBin *string,
+	binaryID *string,
 	binaryRepo binary.Repository,
 ) *model.BinaryItem {
 	// 1. Explicit binary ID from input
@@ -3012,42 +3014,13 @@ func (op *Operation) vmResolveBinary(
 			return bin
 		}
 	}
-	// 2. Explicit path from --firecracker-bin
-	if firecrackerBin != nil && *firecrackerBin != "" {
-		binaries, err := binaryRepo.ListByName(ctx, "firecracker")
-		if err == nil {
-			for _, b := range binaries {
-				if b.Path == *firecrackerBin {
-					return b
-				}
-			}
-		}
-		// Create a minimal binary item for the explicit path
-		return &model.BinaryItem{Name: "firecracker", Path: *firecrackerBin}
-	}
-	// 3. Default firecracker from DB
+	// 2. Default firecracker from DB
 	bin, err := binaryRepo.GetDefault(ctx, "firecracker")
 	if err == nil && bin != nil {
 		return bin
 	}
-	// 4. Fallback to hardcoded path
+	// 3. Fallback to hardcoded path
 	return &model.BinaryItem{Name: "firecracker", Path: "/usr/local/bin/firecracker"}
-}
-
-// mapToVMCPUCfg converts a map[string]any CPU config to *model.CpuConfig.
-func mapToVMCPUCfg(m map[string]interface{}) *model.CpuConfig {
-	if m == nil {
-		return nil
-	}
-	data, err := json.Marshal(m)
-	if err != nil {
-		return nil
-	}
-	var cfg model.CpuConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil
-	}
-	return &cfg
 }
 
 func (op *Operation) vmResolveSingleVM(ctx context.Context, ident string) (*model.VM, error) {

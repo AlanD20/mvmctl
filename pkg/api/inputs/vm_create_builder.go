@@ -6,13 +6,12 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 
 	"mvmctl/internal/core/binary"
+	"mvmctl/internal/core/cloudinit"
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/image"
 	"mvmctl/internal/core/kernel"
@@ -21,7 +20,6 @@ import (
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/disk"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
@@ -43,8 +41,8 @@ type VMCreateBuilder struct {
 
 	networkResolver *network.Resolver
 	imageResolver   *image.Resolver
-	kernelResolver  *kernelResolver
-	binaryResolver  *binaryResolver
+	kernelResolver  *kernel.Resolver
+	binaryResolver  *binary.Resolver
 	keyResolver     *key.Resolver
 	volumeResolver  *volume.Resolver
 
@@ -79,8 +77,8 @@ func NewVMCreateBuilder(
 		leaseRepo:       leaseRepo,
 		networkResolver: network.NewResolver(networkRepo, nil),
 		imageResolver:   image.NewResolver(imageRepo),
-		kernelResolver:  newKernelResolver(kernelRepo),
-		binaryResolver:  newBinaryResolver(binaryRepo),
+		kernelResolver:  kernel.NewResolver(kernelRepo, nil),
+		binaryResolver:  binary.NewResolver(binaryRepo),
 		keyResolver:     key.NewResolver(keyRepo),
 		volumeResolver:  volume.NewResolver(volumeRepo),
 		vmID:            vmID,
@@ -92,7 +90,7 @@ func NewVMCreateBuilder(
 // Matches Python's VMCreateRequest.resolve() exactly.
 func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCreateResolved, error) {
 	// Validate VM name early — before any DB or subprocess calls
-	if err := validators.ValidateName(raw.Name); err != nil {
+	if err := validators.VMName(raw.Name); err != nil {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
 			Op:      "vm_create",
@@ -133,18 +131,9 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 	}
 
 	// Convert volumes to drive configs
-	extraDrives, err := VolumesToDrives(vols)
-	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVolumeNotFound,
-			Op:      "vm_create",
-			Message: fmt.Sprintf("Volume conversion failed: %s", err.Error()),
-			Class:   errs.ClassValidation,
-		}
-	}
-	// Parse network
-	_, ipv4Net, err := net.ParseCIDR(netw.Subnet)
-	if err != nil {
+	extraDrives := volume.VolumesToDrives(vols)
+	// Validate network subnet is valid CIDR notation
+	if _, _, err := net.ParseCIDR(netw.Subnet); err != nil {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeNetworkNotFound,
 			Op:      "vm_create",
@@ -152,15 +141,10 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 			Class:   errs.ClassValidation,
 		}
 	}
-	networkPrefixLen, _ := ipv4Net.Mask.Size()
-	_ = networkPrefixLen
-	networkNetmask := net.IP(ipv4Net.Mask).String()
-	_ = networkNetmask
-
 	// Resolve disk size
 	var rootfsDiskSizeMib int
-	if raw.DiskSize != nil && *raw.DiskSize != "" {
-		bytes, err := disk.ParseDiskSizeToBytes(*raw.DiskSize)
+	if raw.DiskSize != "" {
+		bytes, err := disk.ParseDiskSizeToBytes(raw.DiskSize)
 		if err != nil {
 			return nil, &errs.DomainError{
 				Code:    errs.CodeValidationFailed,
@@ -176,7 +160,7 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 	rootfsDiskSizeBytes := int64(rootfsDiskSizeMib) * disk.MebibyteBytes
 
 	// Validate VCPU count is provided explicitly
-	if raw.VCPUCount == nil {
+	if raw.VCPUCount == nil || *raw.VCPUCount == 0 {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeVMCreateFailed,
 			Op:      "vm_create",
@@ -192,25 +176,18 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 	}
 
 	// Resolve cloud-init mode
-	ciResult, err := b.resolveCloudInitMode(raw)
+	ciResult, err := cloudinit.ResolveMode(raw.CloudInitMode, raw.CloudInitISOPath)
 	if err != nil {
 		return nil, err
 	}
 	_ = ciResult
-
-	// Resolve provisioner
-	provisioner, err := b.resolveProvisioner(ctx)
-	if err != nil {
-		return nil, err
-	}
-	_ = provisioner
 
 	// Resolve nested_virt
 	var nestedVirt bool
 	if raw.NestedVirt != nil {
 		nestedVirt = *raw.NestedVirt
 	} else {
-		nestedVirt = b.resolveSettingBool(ctx, "defaults.vm", "nested_virt")
+		nestedVirt, _ = b.cfg.GetBool(ctx, "defaults.vm", "nested_virt")
 	}
 
 	// Resolve CPU config: from cpu_template (CLI) or cpu_config (import)
@@ -218,7 +195,7 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 	if raw.CPUConfig != nil {
 		cpuConfig = raw.CPUConfig
 	}
-	if raw.CPUTemplate != nil && *raw.CPUTemplate != "" {
+	if raw.CPUTemplate != "" {
 		if cpuConfig != nil {
 			return nil, &errs.DomainError{
 				Code:    errs.CodeVMCreateFailed,
@@ -227,7 +204,7 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 				Class:   errs.ClassValidation,
 			}
 		}
-		data, err := os.ReadFile(*raw.CPUTemplate)
+		data, err := os.ReadFile(raw.CPUTemplate)
 		if err != nil {
 			return nil, &errs.DomainError{
 				Code:    errs.CodeVMCreateFailed,
@@ -261,7 +238,7 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 	if nestedVirt {
 		base := map[string]any{"kvm_capabilities": []any{}}
 		if cpuConfig != nil {
-			cpuConfig = deepMergeMap(base, cpuConfig)
+			cpuConfig = infra.DeepMergeDict(base, cpuConfig)
 		} else {
 			cpuConfig = base
 		}
@@ -272,7 +249,7 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 	if raw.PCIEnabled != nil {
 		pciEnabled = *raw.PCIEnabled
 	} else {
-		pciEnabled = b.resolveSettingBool(ctx, "defaults.vm", "pci_enabled")
+		pciEnabled, _ = b.cfg.GetBool(ctx, "defaults.vm", "pci_enabled")
 	}
 	if nestedVirt {
 		pciEnabled = true
@@ -281,15 +258,14 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 	// ── Item 11: boot_args default with root=UUID (Python _vm_create_input.py:526-528) ──
 	bootArgs := raw.BootArgs
 	if bootArgs == nil {
-		defaultBootArgs := b.resolveSettingString(ctx, "defaults.vm", "boot_args")
+		defaultBootArgs, _ := b.cfg.GetString(ctx, "defaults.vm", "boot_args")
 		uuidSuffix := img.FSUUID
 		bootArgsStr := defaultBootArgs + " root=UUID=" + uuidSuffix
 		bootArgs = &bootArgsStr
 	}
 
 	// Resolve lsm_flags
-	lsmFlags := raw.LSMFlags
-	if lsmFlags == nil || *lsmFlags == "" {
+	if raw.LSMFlags == "" {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeVMCreateFailed,
 			Op:      "vm_create",
@@ -315,11 +291,11 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 		NestedVirt:          nestedVirt,
 		PCIEnabled:          pciEnabled,
 		BootArgs:            bootArgs,
-		LSMFlags:            *lsmFlags,
+		LSMFlags:            raw.LSMFlags,
 		RequestedGuestIP:    raw.RequestedGuestIP,
 		RequestedGuestMAC:   raw.RequestedGuestMAC,
 		CustomUserDataPath:  raw.CustomUserDataPath,
-		CPUConfig:           mapToCpuConfig(cpuConfig),
+		CPUConfig:           infra.MapToStruct[model.CpuConfig](cpuConfig),
 		SkipCINetworkConfig: raw.SkipCINetworkConfig,
 		SkipCleanup:         raw.SkipCleanup,
 		SkipDeblob:          raw.SkipDeblob,
@@ -329,7 +305,7 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 
 	// Item 8: MAC validation (Python _vm_create_input.py:604-605)
 	if result.RequestedGuestMAC != nil && *result.RequestedGuestMAC != "" {
-		if err := validators.ValidateMAC(*result.RequestedGuestMAC); err != nil {
+		if err := validators.MAC(*result.RequestedGuestMAC); err != nil {
 			return nil, &errs.DomainError{
 				Code:    errs.CodeValidationFailed,
 				Op:      "vm_create",
@@ -340,8 +316,8 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 	}
 
 	// Item 7: Guest IP validation (Python _vm_create_input.py:607-614)
-	if result.RequestedGuestIP != nil && *result.RequestedGuestIP != "" {
-		if err := validateGuestIP(*result.RequestedGuestIP, result.Network); err != nil {
+	if result.RequestedGuestIP != nil && *result.RequestedGuestIP != "" && result.Network != nil {
+		if err := validators.IPv4Address(*result.RequestedGuestIP, "Guest IP", true, result.Network.Subnet, result.Network.IPv4Gateway); err != nil {
 			return nil, &errs.DomainError{
 				Code:    errs.CodeValidationFailed,
 				Op:      "vm_create",
@@ -455,8 +431,8 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 
 	// Validate boot_args components
 	if result.BootArgs != nil {
-		for _, component := range strings.Fields(*result.BootArgs) {
-			if err := validateBootArgComponent(component, "boot_args"); err != nil {
+		for component := range strings.FieldsSeq(*result.BootArgs) {
+			if err := validators.BootArgComponent(component, "boot_args"); err != nil {
 				return nil, &errs.DomainError{
 					Code:    errs.CodeValidationFailed,
 					Op:      "vm_create",
@@ -469,7 +445,7 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 
 	// Validate lsm_flags component
 	if result.LSMFlags != "" {
-		if err := validateBootArgComponent(result.LSMFlags, "lsm_flags"); err != nil {
+		if err := validators.BootArgComponent(result.LSMFlags, "lsm_flags"); err != nil {
 			return nil, &errs.DomainError{
 				Code:    errs.CodeValidationFailed,
 				Op:      "vm_create",
@@ -535,7 +511,7 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 				Class:   errs.ClassInternal,
 			}
 		}
-		maxVMs := b.resolveSettingInt(ctx, "settings.vm", "max_vms")
+		maxVMs, _ := b.cfg.GetInt(ctx, "settings.vm", "max_vms")
 		if current+count > maxVMs {
 			return nil, &errs.DomainError{
 				Code: errs.CodeVMResourceExhausted,
@@ -646,11 +622,6 @@ func (b *VMCreateBuilder) resolveNetwork(ctx context.Context, raw VMCreateInput)
 func (b *VMCreateBuilder) resolveBinary(ctx context.Context, raw VMCreateInput) (*model.BinaryItem, error) {
 	var fcBinary *model.BinaryItem
 
-	// Resolution order:
-	// 1. binary_id (from DB, e.g. mvm bin default)
-	// 2. firecracker_bin (raw filesystem path, e.g. --firecracker-bin)
-	// 3. Default binary from BinaryService.get_default_firecracker()
-
 	if raw.BinaryID != nil && *raw.BinaryID != "" {
 		res, err := b.binaryResolver.Resolve(ctx, *raw.BinaryID)
 		if err != nil {
@@ -662,87 +633,8 @@ func (b *VMCreateBuilder) resolveBinary(ctx context.Context, raw VMCreateInput) 
 			}
 		}
 		fcBinary = res
-	} else if raw.FirecrackerBin != nil {
-		binPath := *raw.FirecrackerBin
-		// Python: if not bin_path.exists() or not os.access(bin_path, os.X_OK):
-		//         raise BinaryNotFoundError("Firecracker binary not found at {bin_path}. ...")
-		if _, err := os.Stat(binPath); os.IsNotExist(err) {
-			return nil, &errs.DomainError{
-				Code: errs.CodeVMBinaryNotFound,
-				Op:   "vm_create",
-				Message: fmt.Sprintf(
-					"Firecracker binary not found at %s. Use 'mvm bin pull <version>' or provide a valid path.",
-					binPath,
-				),
-				Class: errs.ClassValidation,
-			}
-		} else if err != nil {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeVMBinaryNotFound,
-				Op:      "vm_create",
-				Message: fmt.Sprintf("Firecracker binary error: %s", err.Error()),
-				Class:   errs.ClassValidation,
-			}
-		}
-		// Python: os.access(bin_path, os.X_OK) — checks current user's execute permission
-		// X_OK = 1 on Linux/POSIX (defined as syscall.X_OK on most platforms)
-		if err := syscall.Access(binPath, 1); err != nil {
-			return nil, &errs.DomainError{
-				Code: errs.CodeVMBinaryNotFound,
-				Op:   "vm_create",
-				Message: fmt.Sprintf(
-					"Firecracker binary not found at %s. Use 'mvm bin pull <version>' or provide a valid path.",
-					binPath,
-				),
-				Class: errs.ClassValidation,
-			}
-		}
-
-		// Extract version from filename (matches Python logic)
-		version := deriveFirecrackerVersionFromPath(binPath)
-
-		// Create binary item (matches Python _create_binary_item)
-		now := time.Now().Format(time.RFC3339)
-		id, err := crypto.BinaryID(binPath, "firecracker", version)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate binary ID: %w", err)
-		}
-
-		fcBinary = &model.BinaryItem{
-			ID:          id,
-			Name:        "firecracker",
-			Version:     version,
-			FullVersion: "v" + version,
-			CIVersion:   nil,
-			Path:        binPath,
-			IsDefault:   false,
-			IsPresent:   true,
-			CreatedAt:   now,
-			UpdatedAt:   now,
-		}
-
-		// Upsert so the binary is visible in mvm bin ls
-		existing, err := b.binaryRepo.Get(ctx, id)
-		if err != nil {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeDatabaseError,
-				Op:      "vm_create",
-				Message: fmt.Sprintf("Failed to check binary: %s", err.Error()),
-				Class:   errs.ClassInternal,
-			}
-		}
-		if existing == nil {
-			if err := b.binaryRepo.Upsert(ctx, fcBinary); err != nil {
-				return nil, &errs.DomainError{
-					Code:    errs.CodeDatabaseError,
-					Op:      "vm_create",
-					Message: fmt.Sprintf("Failed to upsert binary: %s", err.Error()),
-					Class:   errs.ClassInternal,
-				}
-			}
-		}
 	} else {
-		defaultBin, err := b.binaryRepo.GetDefault(ctx, "firecracker")
+		defaultBin, err := b.binaryResolver.GetDefault(ctx, "firecracker")
 		if err != nil {
 			return nil, &errs.DomainError{
 				Code:    errs.CodeDatabaseError,
@@ -758,7 +650,7 @@ func (b *VMCreateBuilder) resolveBinary(ctx context.Context, raw VMCreateInput) 
 		return nil, &errs.DomainError{
 			Code:    errs.CodeVMBinaryNotFound,
 			Op:      "vm_create",
-			Message: "No binary specified and no default binary set. Use 'mvm bin pull <version>' then 'mvm bin default <id>', or pass --firecracker-bin.",
+			Message: "No binary specified and no default binary set. Use 'mvm bin pull <version>' then 'mvm bin default <id>'.",
 			Class:   errs.ClassValidation,
 		}
 	}
@@ -820,8 +712,8 @@ func (b *VMCreateBuilder) resolveVolumes(ctx context.Context, raw VMCreateInput)
 }
 
 func (b *VMCreateBuilder) resolveMemory(ctx context.Context, raw VMCreateInput) (int, error) {
-	if raw.MemSizeMib != nil {
-		memStr := strings.TrimSpace(*raw.MemSizeMib)
+	if raw.MemSizeMib != "" {
+		memStr := strings.TrimSpace(raw.MemSizeMib)
 		// Try parsing as raw int first (Python: int(mem_str))
 		if mib, err := strconv.Atoi(memStr); err == nil {
 			return mib, nil
@@ -839,304 +731,12 @@ func (b *VMCreateBuilder) resolveMemory(ctx context.Context, raw VMCreateInput) 
 		return int(bytes / disk.MebibyteBytes), nil
 	}
 
-	return b.resolveSettingInt(ctx, "defaults.vm", "mem_size_mib"), nil
-}
-
-func (b *VMCreateBuilder) resolveCloudInitMode(raw VMCreateInput) (CloudInitModeResolved, error) {
-	// Off is default cloud-init mode
-	mode := CloudInitModeResolved{Mode: model.CloudInitModeOFF, ISOPath: nil}
-
-	if raw.CloudInitMode == nil {
-		return mode, nil
-	}
-
-	modeLower := strings.ToLower(*raw.CloudInitMode)
-	validModes := map[string]bool{"inject": true, "iso": true, "off": true, "net": true}
-	if !validModes[modeLower] {
-		return CloudInitModeResolved{}, &errs.DomainError{
-			Code: errs.CodeCloudInitProvisionFailed,
-			Op:   "vm_create",
-			Message: fmt.Sprintf(
-				"Invalid --cloud-init-mode '%s'. Valid modes: inject, iso, off, net",
-				*raw.CloudInitMode,
-			),
-			Class: errs.ClassValidation,
-		}
-	}
-
-	switch modeLower {
-	case "iso":
-		if raw.CloudInitISOPath != nil && *raw.CloudInitISOPath != "" {
-			isoPath := *raw.CloudInitISOPath
-			if _, err := os.Stat(isoPath); os.IsNotExist(err) {
-				return CloudInitModeResolved{}, &errs.DomainError{
-					Code:    errs.CodeCloudInitProvisionFailed,
-					Op:      "vm_create",
-					Message: fmt.Sprintf("Cloud-init ISO not found: %s", isoPath),
-					Class:   errs.ClassValidation,
-				}
-			}
-			mode = CloudInitModeResolved{Mode: model.CloudInitModeISO, ISOPath: &isoPath}
-		} else {
-			// Default: ISO will be created during provisioning
-			mode = CloudInitModeResolved{Mode: model.CloudInitModeISO, ISOPath: nil}
-		}
-	case "net":
-		mode = CloudInitModeResolved{Mode: model.CloudInitModeNET, ISOPath: nil}
-	case "inject":
-		mode = CloudInitModeResolved{Mode: model.CloudInitModeINJECT, ISOPath: nil}
-	case "off":
-		mode = CloudInitModeResolved{Mode: model.CloudInitModeOFF, ISOPath: nil}
-	}
-
-	return mode, nil
-}
-
-func (b *VMCreateBuilder) resolveProvisioner(ctx context.Context) (model.ProvisionerType, error) {
-	guestfsEnabled := b.resolveSettingBool(ctx, "settings", "guestfs_enabled")
-	if guestfsEnabled {
-		return model.ProvisionerGuestFS, nil
-	}
-	if checkLoopMountAvailable() {
-		return model.ProvisionerLoopMount, nil
-	}
-
-	return "", &errs.DomainError{
-		Code:    errs.CodeVMCreateFailed,
-		Op:      "vm_create",
-		Message: "No provisioner available: loop-mount binary not found and libguestfs is not enabled. Run 'mvm init' to set up service binaries or enable libguestfs.",
-		Class:   errs.ClassNeedsInteraction,
-	}
-}
-
-// ── Setting resolution helpers ──────────────────────────────────────────────
-
-func (b *VMCreateBuilder) resolveSettingString(ctx context.Context, category, key string) string {
-	s, _ := b.cfg.GetString(ctx, category, key)
-	return s
-}
-
-func (b *VMCreateBuilder) resolveSettingInt(ctx context.Context, category, key string) int {
-	v, _ := b.cfg.GetInt(ctx, category, key)
-	return v
-}
-
-func (b *VMCreateBuilder) resolveSettingBool(ctx context.Context, category, key string) bool {
-	v, _ := b.cfg.GetBool(ctx, category, key)
-	return v
-}
-
-// ── Utility functions matched from Python ───────────────────────────────────
-
-// validateGuestIP validates a guest IP against the network subnet and gateway.
-// Matches Python's VMCreateRequest.ensure_validate() which calls:
-// NetworkValidator.validate_ipv4_address(ip, field_name="Guest IP",
-//
-//	require_private=True, subnet=network.subnet, gateway=network.ipv4_gateway)
-func validateGuestIP(ipStr string, netw *model.Network) error {
-	if netw == nil {
-		return nil
-	}
-	// Delegate to validators.ValidateIPv4Address which implements the exact
-	// same logic as Python's NetworkValidator.validate_ipv4_address.
-	return validators.ValidateIPv4Address(ipStr, "Guest IP", true, netw.Subnet, netw.IPv4Gateway)
-}
-
-// validateBootArgComponent validates a single boot argument component.
-// Matches Python's VMValidator.validate_boot_arg_component().
-func validateBootArgComponent(component, fieldName string) error {
-	// Each component must not be empty
-	if component == "" {
-		return fmt.Errorf("%s contains an empty component", fieldName)
-	}
-	// Each component must not contain spaces (they should be pre-split)
-	if strings.Contains(component, " ") {
-		return fmt.Errorf("%s component contains spaces: %s", fieldName, component)
-	}
-	return nil
-}
-
-// VolumesToDrives converts volumes to Firecracker drive configurations.
-// Matches Python's VolumeService.volumes_to_drives().
-func VolumesToDrives(vols []*model.VolumeItem) ([]model.DriveConfig, error) {
-	var drives []model.DriveConfig
-	for _, vol := range vols {
-		if vol == nil {
-			continue
-		}
-		drives = append(drives, model.DriveConfig{
-			DriveID:      vol.ID,
-			PathOnHost:   vol.Path,
-			IsRootDevice: false,
-			IsReadOnly:   vol.IsReadOnly,
-		})
-	}
-	return drives, nil
+	v, _ := b.cfg.GetInt(ctx, "defaults.vm", "mem_size_mib")
+	return v, nil
 }
 
 // generateBinaryID generates a content-addressed SHA256 hash for a binary.
 // Matches Python's HashGenerator.binary().
-
-// deepMergeMap deeply merges src into dst (non-destructive, returns new map).
-// Matches Python's CommonUtils.deep_merge_dict().
-func deepMergeMap(dst, src map[string]any) map[string]any {
-	result := make(map[string]any, len(dst))
-	for k, v := range dst {
-		result[k] = v
-	}
-	for k, v := range src {
-		if existing, ok := result[k]; ok {
-			if existingMap, ok1 := existing.(map[string]any); ok1 {
-				if srcMap, ok2 := v.(map[string]any); ok2 {
-					result[k] = deepMergeMap(existingMap, srcMap)
-					continue
-				}
-			}
-		}
-		result[k] = v
-	}
-	return result
-}
-
-// mapToCpuConfig converts a map[string]any to *model.CpuConfig via JSON marshal/unmarshal.
-// Matches Python's direct CpuConfig assignment.
-func mapToCpuConfig(m map[string]any) *model.CpuConfig {
-	if m == nil {
-		return nil
-	}
-	data, err := json.Marshal(m)
-	if err != nil {
-		return nil
-	}
-	var cfg model.CpuConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil
-	}
-	return &cfg
-}
-
-// convertToVolumeSlice returns a copy of the volume slice.
-func convertToVolumeSlice(vols []*model.VolumeItem) []*model.VolumeItem {
-	if len(vols) == 0 {
-		return nil
-	}
-	result := make([]*model.VolumeItem, len(vols))
-	copy(result, vols)
-	return result
-}
-
-// checkLoopMountAvailable checks if the loop-mount provisioner binary is available.
-// Matches Python's LoopMountManager.is_binary_available().
-func checkLoopMountAvailable() bool {
-	// Check typical binary locations
-	binPaths := []string{
-		filepath.Join(os.ExpandEnv("$HOME"), ".local", "bin", "mvm-provision"),
-		filepath.Join(os.ExpandEnv("$HOME"), ".cache", "mvmctl", "bin", "mvm-provision"),
-		"/usr/local/bin/mvm-provision",
-	}
-	for _, p := range binPaths {
-		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
-			return true
-		}
-	}
-	// Check dev path
-	if fi, err := os.Stat("dist/services/mvm-provision"); err == nil && fi.Mode().IsRegular() {
-		return true
-	}
-	return false
-}
-
-// kernelResolver is a simple kernel resolver used by VMCreateBuilder.
-type kernelResolver struct {
-	repo kernel.Repository
-}
-
-func newKernelResolver(repo kernel.Repository) *kernelResolver {
-	return &kernelResolver{repo: repo}
-}
-
-func (r *kernelResolver) GetDefault(ctx context.Context) (*model.KernelItem, error) {
-	return r.repo.GetDefault(ctx)
-}
-
-func (r *kernelResolver) Resolve(ctx context.Context, value string) (*model.KernelItem, error) {
-	// Try by ID first
-	matches, err := r.repo.FindByPrefix(ctx, value)
-	if err != nil {
-		return nil, err
-	}
-	if len(matches) == 1 {
-		return matches[0], nil
-	}
-	if len(matches) > 1 {
-		return nil, fmt.Errorf("kernel ID is ambiguous: %q", value)
-	}
-
-	// Try by name
-	krnl, err := r.repo.GetByName(ctx, value)
-	if err != nil {
-		return nil, err
-	}
-	if krnl != nil {
-		return krnl, nil
-	}
-
-	// Try as absolute path
-	if strings.HasPrefix(value, "/") {
-		if _, err := os.Stat(value); err == nil {
-			now := time.Now().Format(time.RFC3339)
-			return &model.KernelItem{
-				ID:        value,
-				Name:      filepath.Base(value),
-				BaseName:  filepath.Base(value),
-				Version:   "unknown",
-				Arch:      "unknown",
-				Type:      "external",
-				Path:      value,
-				IsDefault: false,
-				IsPresent: true,
-				CreatedAt: now,
-				UpdatedAt: now,
-			}, nil
-		}
-	}
-
-	return nil, fmt.Errorf("kernel not found: %q", value)
-}
-
-// binaryResolver is a simple binary resolver used by VMCreateBuilder.
-type binaryResolver struct {
-	repo binary.Repository
-}
-
-func newBinaryResolver(repo binary.Repository) *binaryResolver {
-	return &binaryResolver{repo: repo}
-}
-
-func (r *binaryResolver) Resolve(ctx context.Context, value string) (*model.BinaryItem, error) {
-	// Try by ID prefix
-	matches, err := r.repo.FindByPrefix(ctx, value)
-	if err != nil {
-		return nil, err
-	}
-	if len(matches) == 1 {
-		return matches[0], nil
-	}
-	if len(matches) > 1 {
-		return nil, fmt.Errorf("binary ID is ambiguous: %q", value)
-	}
-
-	// Try by name (latest version)
-	bins, err := r.repo.ListByName(ctx, value)
-	if err != nil {
-		return nil, err
-	}
-	if len(bins) > 0 {
-		return bins[0], nil
-	}
-
-	return nil, fmt.Errorf("binary not found: %q", value)
-}
 
 // FromVM reconstructs a VMCreateResolved from an enriched VM state.
 // Matches Python's VMCreateRequest.from_vm() exactly.
@@ -1188,21 +788,12 @@ func (b *VMCreateBuilder) FromVM(ctx context.Context, vmEntity *model.VM) (*VMCr
 
 	// Calculate network prefix and netmask from the VM's network subnet.
 	// Python: ipv4_net = ipaddress.IPv4Network(vm.network.subnet, strict=False)
-	netwNet := vmEntity.Network
-	if netwNet == nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVMNetworkNotFound,
-			Op:      "vm_from_vm",
-			Message: fmt.Sprintf("Network not found for VM '%s' (ID: %s)", vmEntity.Name, vmEntity.NetworkID),
-			Class:   errs.ClassValidation,
-		}
-	}
-	_, ipv4Net, err := net.ParseCIDR(netwNet.Subnet)
+	_, ipv4Net, err := net.ParseCIDR(vmEntity.Network.Subnet)
 	if err != nil {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeVMCreateFailed,
 			Op:      "vm_from_vm",
-			Message: fmt.Sprintf("Invalid network subnet for VM '%s': %s", vmEntity.Name, netwNet.Subnet),
+			Message: fmt.Sprintf("Invalid network subnet for VM '%s': %s", vmEntity.Name, vmEntity.Network.Subnet),
 			Class:   errs.ClassValidation,
 		}
 	}
@@ -1210,8 +801,7 @@ func (b *VMCreateBuilder) FromVM(ctx context.Context, vmEntity *model.VM) (*VMCr
 	networkNetmask := net.IP(ipv4Net.Mask).String()
 
 	// extra_drives from volumes (Python: VolumeService.volumes_to_drives(vm.volumes))
-	vmVols := convertToVolumeSlice(vmEntity.Volumes)
-	extraDrives, _ := VolumesToDrives(vmVols)
+	extraDrives := volume.VolumesToDrives(vmEntity.Volumes)
 
 	// cloud-init mode (Python: CloudInitMode(vm.cloud_init_mode) if vm.cloud_init_mode else CloudInitMode.OFF)
 	ciMode := vmEntity.CloudInitMode
@@ -1229,11 +819,11 @@ func (b *VMCreateBuilder) FromVM(ctx context.Context, vmEntity *model.VM) (*VMCr
 	if vmEntity.BootArgs != nil && *vmEntity.BootArgs != "" {
 		bootArgs = *vmEntity.BootArgs
 	} else {
-		bootArgs = b.resolveSettingString(ctx, "defaults.vm", "boot_args")
+		bootArgs, _ = b.cfg.GetString(ctx, "defaults.vm", "boot_args")
 	}
 
 	// lsm_flags (Python: vm.lsm_flags if vm.lsm_flags else SettingsService.resolve(...))
-	lsmFlags := b.resolveSettingString(ctx, "defaults.vm", "lsm_flags")
+	lsmFlags, _ := b.cfg.GetString(ctx, "defaults.vm", "lsm_flags")
 	if vmEntity.LSMFlags != nil && *vmEntity.LSMFlags != "" {
 		lsmFlags = *vmEntity.LSMFlags
 	}
@@ -1242,58 +832,52 @@ func (b *VMCreateBuilder) FromVM(ctx context.Context, vmEntity *model.VM) (*VMCr
 	requestedGuestIP := &vmEntity.IPv4
 	requestedGuestMAC := &vmEntity.MAC
 
-	// Safe type assertions for enriched relations
-	vmImage := vmEntity.Image
-	if vmImage == nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVMImageNotFound,
-			Op:      "vm_from_vm",
-			Message: fmt.Sprintf("Image not found for VM '%s' (ID: %s)", vmEntity.Name, vmEntity.ImageID),
-			Class:   errs.ClassValidation,
-		}
+	// Resolve settings from config — Python uses SettingsService.resolve()
+	var user string
+	if vmEntity.SSHUser != nil && *vmEntity.SSHUser != "" {
+		user = *vmEntity.SSHUser
+	} else {
+		user, _ = b.cfg.GetString(ctx, "defaults.vm", "ssh_user")
 	}
-	vmKernel := vmEntity.Kernel
-	if vmKernel == nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVMKernelNotFound,
-			Op:      "vm_from_vm",
-			Message: fmt.Sprintf("Kernel not found for VM '%s' (ID: %s)", vmEntity.Name, vmEntity.KernelID),
-			Class:   errs.ClassValidation,
-		}
-	}
-	vmBinary := vmEntity.Binary
-	if vmBinary == nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVMBinaryNotFound,
-			Op:      "vm_from_vm",
-			Message: fmt.Sprintf("Binary not found for VM '%s' (ID: %s)", vmEntity.Name, vmEntity.BinaryID),
-			Class:   errs.ClassValidation,
-		}
-	}
+	dnsServer, _ := b.cfg.GetString(ctx, "defaults.vm", "dns_server")
+	rootUID, _ := b.cfg.GetInt(ctx, "defaults.vm", "root_uid")
+	rootGID, _ := b.cfg.GetInt(ctx, "defaults.vm", "root_gid")
+	userUID, _ := b.cfg.GetInt(ctx, "defaults.vm", "user_uid")
+	userGID, _ := b.cfg.GetInt(ctx, "defaults.vm", "user_gid")
+	guestMACPrefix, _ := b.cfg.GetString(ctx, "defaults.vm", "guest_mac_prefix")
+
+	logLevel, _ := b.cfg.GetString(ctx, "defaults.firecracker", "log_level")
+	logFilename, _ := b.cfg.GetString(ctx, "defaults.firecracker", "log_filename")
+	serialOutputFilename, _ := b.cfg.GetString(ctx, "defaults.firecracker", "serial_output_filename")
+	metricsFilename, _ := b.cfg.GetString(ctx, "defaults.firecracker", "metrics_filename")
+	apiSocketFilename, _ := b.cfg.GetString(ctx, "defaults.firecracker", "api_socket_filename")
+	pidFilename, _ := b.cfg.GetString(ctx, "defaults.firecracker", "pid_filename")
+	configFilename, _ := b.cfg.GetString(ctx, "defaults.firecracker", "config_filename")
+	consoleSocketFilename, _ := b.cfg.GetString(ctx, "defaults.firecracker", "console_socket_filename")
+	consolePIDFilename, _ := b.cfg.GetString(ctx, "defaults.firecracker", "console_pid_filename")
+
+	ciIsoName, _ := b.cfg.GetString(ctx, "defaults.cloudinit", "iso_name")
+	nocloudPortStart, _ := b.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_port_range_start")
+	nocloudPortEnd, _ := b.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_port_range_end")
+	nocloudMaxRetries, _ := b.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_max_port_retries")
 
 	resolved := &VMCreateResolved{
-		Name:       vmEntity.Name,
-		VMID:       vmEntity.ID,
-		VMDir:      infra.GetVMDirByID(vmEntity.ID),
-		VCPUCount:  vmEntity.VCPUCount,
-		MemSizeMib: vmEntity.MemSizeMiB,
-		// Python: vm.ssh_user if vm.ssh_user else str(SettingsService.resolve(...))
-		User: func() string {
-			if vmEntity.SSHUser != nil && *vmEntity.SSHUser != "" {
-				return *vmEntity.SSHUser
-			}
-			return b.resolveSettingString(ctx, "defaults.vm", "ssh_user")
-		}(),
-		DNSServer:           b.resolveSettingString(ctx, "defaults.vm", "dns_server"),
-		RootUID:             b.resolveSettingInt(ctx, "defaults.vm", "root_uid"),
-		RootGID:             b.resolveSettingInt(ctx, "defaults.vm", "root_gid"),
-		UserUID:             b.resolveSettingInt(ctx, "defaults.vm", "user_uid"),
-		UserGID:             b.resolveSettingInt(ctx, "defaults.vm", "user_gid"),
-		GuestMACPrefix:      b.resolveSettingString(ctx, "defaults.vm", "guest_mac_prefix"),
-		Network:             netwNet,
-		Image:               vmImage,
-		Kernel:              vmKernel,
-		Binary:              vmBinary,
+		Name:                vmEntity.Name,
+		VMID:                vmEntity.ID,
+		VMDir:               infra.GetVMDirByID(vmEntity.ID),
+		VCPUCount:           vmEntity.VCPUCount,
+		MemSizeMib:          vmEntity.MemSizeMiB,
+		User:                user,
+		DNSServer:           dnsServer,
+		RootUID:             rootUID,
+		RootGID:             rootGID,
+		UserUID:             userUID,
+		UserGID:             userGID,
+		GuestMACPrefix:      guestMACPrefix,
+		Network:             vmEntity.Network,
+		Image:               vmEntity.Image,
+		Kernel:              vmEntity.Kernel,
+		Binary:              vmEntity.Binary,
 		NetworkPrefixLen:    networkPrefixLen,
 		NetworkNetmask:      networkNetmask,
 		CloudInitMode:       model.CloudInitMode(ciMode),
@@ -1316,30 +900,23 @@ func (b *VMCreateBuilder) FromVM(ctx context.Context, vmEntity *model.VM) (*VMCr
 		NocloudNetPort:      vmEntity.NocloudNetPort,
 		CustomUserDataPath:  nil,
 		CloudInitISOPath:    nil,
-		// Python: ssh_keys=[] (always empty in from_vm)
-		SSHKeys:     []*model.SSHKeyItem{},
-		Provisioner: model.ProvisionerLoopMount,
-		// Python: volumes=vm.volumes (already []*model.VolumeItem from enricher)
-		Volumes: convertToVolumeSlice(vmEntity.Volumes),
-		// Python: extra_drives=VolumeService.volumes_to_drives(vm.volumes)
-		ExtraDrives: extraDrives,
-
-		// Firecracker defaults — Python resolves ALL through SettingsService
-		LogLevel:              b.resolveSettingString(ctx, "defaults.firecracker", "log_level"),
-		LogFilename:           b.resolveSettingString(ctx, "defaults.firecracker", "log_filename"),
-		SerialOutputFilename:  b.resolveSettingString(ctx, "defaults.firecracker", "serial_output_filename"),
-		MetricsFilename:       b.resolveSettingString(ctx, "defaults.firecracker", "metrics_filename"),
-		APISocketFilename:     b.resolveSettingString(ctx, "defaults.firecracker", "api_socket_filename"),
-		PIDFilename:           b.resolveSettingString(ctx, "defaults.firecracker", "pid_filename"),
-		ConfigFilename:        b.resolveSettingString(ctx, "defaults.firecracker", "config_filename"),
-		ConsoleSocketFilename: b.resolveSettingString(ctx, "defaults.firecracker", "console_socket_filename"),
-		ConsolePIDFilename:    b.resolveSettingString(ctx, "defaults.firecracker", "console_pid_filename"),
-
-		// Cloud-init defaults — Python resolves ALL through SettingsService
-		CloudInitISOName:      b.resolveSettingString(ctx, "defaults.cloudinit", "iso_name"),
-		NocloudPortRangeStart: b.resolveSettingInt(ctx, "defaults.cloudinit", "nocloud_port_range_start"),
-		NocloudPortRangeEnd:   b.resolveSettingInt(ctx, "defaults.cloudinit", "nocloud_port_range_end"),
-		NocloudMaxPortRetries: b.resolveSettingInt(ctx, "defaults.cloudinit", "nocloud_max_port_retries"),
+		SSHKeys:             []*model.SSHKeyItem{},
+		Provisioner:         model.ProvisionerLoopMount,
+		Volumes:             vmEntity.Volumes,
+		ExtraDrives:         extraDrives,
+		LogLevel:                logLevel,
+		LogFilename:             logFilename,
+		SerialOutputFilename:    serialOutputFilename,
+		MetricsFilename:         metricsFilename,
+		APISocketFilename:       apiSocketFilename,
+		PIDFilename:             pidFilename,
+		ConfigFilename:          configFilename,
+		ConsoleSocketFilename:   consoleSocketFilename,
+		ConsolePIDFilename:      consolePIDFilename,
+		CloudInitISOName:        ciIsoName,
+		NocloudPortRangeStart:   nocloudPortStart,
+		NocloudPortRangeEnd:     nocloudPortEnd,
+		NocloudMaxPortRetries:   nocloudMaxRetries,
 	}
 
 	return resolved, nil

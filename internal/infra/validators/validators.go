@@ -54,10 +54,10 @@ var ReservedInterfaces = map[string]bool{
 // validNameRegex matches Python's ^[a-z0-9][a-z0-9._-]{0,62}$
 var validNameRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
 
-// ValidateEntityName validates any entity name (VM, network, image, kernel, key, binary).
+// EntityName validates any entity name (VM, network, image, kernel, key, binary).
 // Matches Python's CommonUtils.validate_entity_name().
 // Returns *errs.DomainError matching Python's MVMError pattern.
-func ValidateEntityName(name, entityType string, maxLength int) error {
+func EntityName(name, entityType string, maxLength int) error {
 	if maxLength <= 0 {
 		maxLength = 63
 	}
@@ -124,17 +124,17 @@ func ValidateEntityName(name, entityType string, maxLength int) error {
 }
 
 // ValidateName validates a general entity name (1-63 chars, alphanumeric, dot, underscore, hyphen).
-// Wrapper around ValidateEntityName with default type and max length.
+// Wrapper around EntityName with default type and max length.
 // Returns *errs.DomainError matching Python's MVMError pattern.
-func ValidateName(name string) error {
-	return ValidateEntityName(name, "name", 63)
+func Name(name string) error {
+	return EntityName(name, "name", 63)
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // CIDR / IP / Port validation
 // ══════════════════════════════════════════════════════════════════════════════
 
-func ValidateCIDR(cidr string) error {
+func CIDR(cidr string) error {
 	if cidr == "" {
 		return &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
@@ -161,7 +161,7 @@ func ValidateCIDR(cidr string) error {
 	return nil
 }
 
-func ValidateIP(ip string) error {
+func IP(ip string) error {
 	if net.ParseIP(ip) == nil {
 		return &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
@@ -172,7 +172,7 @@ func ValidateIP(ip string) error {
 	return nil
 }
 
-func ValidatePort(port int) error {
+func Port(port int) error {
 	if port < 1 || port > 65535 {
 		return &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
@@ -191,7 +191,7 @@ func IsIPAddress(s string) bool {
 // IPv4 address validation (matching Python's NetworkValidator.validate_ipv4_address)
 // ══════════════════════════════════════════════════════════════════════════════
 
-func ValidateIPv4Address(ip string, fieldName string, requirePrivate bool, subnet string, gateway string) error {
+func IPv4Address(ip string, fieldName string, requirePrivate bool, subnet string, gateway string) error {
 	if fieldName == "" {
 		fieldName = "IP address"
 	}
@@ -265,16 +265,16 @@ func ValidateIPv4Address(ip string, fieldName string, requirePrivate bool, subne
 // KeyValidator (Python: KeyValidator)
 // ══════════════════════════════════════════════════════════════════════════════
 
-func ValidateKeyName(name string) error {
-	return ValidateEntityName(name, "key", 63)
+func KeyName(name string) error {
+	return EntityName(name, "key", 63)
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // VolumeValidator (Python: VolumeValidator)
 // ══════════════════════════════════════════════════════════════════════════════
 
-func ValidateVolumeName(name string) error {
-	return ValidateEntityName(name, "volume", 63)
+func VolumeName(name string) error {
+	return EntityName(name, "volume", 63)
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -291,14 +291,12 @@ func CoerceBool(s string) bool {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// NetworkValidator (Python: NetworkValidator)
+// Network validation (Python: NetworkValidator)
 // ══════════════════════════════════════════════════════════════════════════════
 
-type NetworkValidator struct{}
-
-func (NetworkValidator) ValidateName(name string) error {
+func NetworkName(name string) error {
 	// Apply common entity name validation first (uses max_length=31 for networks)
-	if err := ValidateEntityName(name, "network", 31); err != nil {
+	if err := EntityName(name, "network", 31); err != nil {
 		return err
 	}
 	// Network names must not contain dots
@@ -332,7 +330,7 @@ func (NetworkValidator) ValidateName(name string) error {
 	return nil
 }
 
-func (NetworkValidator) ValidateMAC(mac string) error {
+func MAC(mac string) error {
 	if !validMACRegex.MatchString(mac) {
 		return &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
@@ -343,14 +341,26 @@ func (NetworkValidator) ValidateMAC(mac string) error {
 	return nil
 }
 
-// ValidateMAC is a package-level wrapper for MAC address validation.
-// Matches Python's NetworkValidator.validate_mac().
-func ValidateMAC(mac string) error {
-	var nv NetworkValidator
-	return nv.ValidateMAC(mac)
+// IsMAC checks if a string looks like a MAC address (6 colon-separated hex pairs).
+func IsMAC(identifier string) bool {
+	parts := strings.Split(identifier, ":")
+	if len(parts) != 6 {
+		return false
+	}
+	for _, p := range parts {
+		if len(p) != 2 {
+			return false
+		}
+		for _, c := range p {
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
-func (NetworkValidator) ValidateSubnet(subnet string) (string, error) {
+func Subnet(subnet string) (string, error) {
 	if subnet == "" {
 		return "", &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
@@ -390,7 +400,7 @@ func (NetworkValidator) ValidateSubnet(subnet string) (string, error) {
 	return ipnet.String(), nil
 }
 
-func (NetworkValidator) ValidateIPv4Gateway(gateway string, subnet string) (string, error) {
+func IPv4Gateway(gateway string, subnet string) (string, error) {
 	if gateway == "" {
 		return "", &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
@@ -448,83 +458,7 @@ func (NetworkValidator) ValidateIPv4Gateway(gateway string, subnet string) (stri
 	return parsed.String(), nil
 }
 
-func (NetworkValidator) ValidateIPv4Address(
-	ip string,
-	fieldName string,
-	requirePrivate bool,
-	subnet string,
-	gateway string,
-) (string, error) {
-	if fieldName == "" {
-		fieldName = "IP address"
-	}
-	if ip == "" {
-		return "", &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Class:   errs.ClassValidation,
-			Message: fmt.Sprintf("Invalid %s: cannot be empty", fieldName),
-		}
-	}
-	if strings.Contains(ip, " ") {
-		return "", &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Class:   errs.ClassValidation,
-			Message: fmt.Sprintf("Invalid %s: '%s' cannot contain spaces", fieldName, ip),
-		}
-	}
-	parsed := net.ParseIP(ip)
-	if parsed == nil || parsed.To4() == nil {
-		return "", &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Class:   errs.ClassValidation,
-			Message: fmt.Sprintf("Invalid %s: '%s' is not a valid IPv4 address", fieldName, ip),
-		}
-	}
-	if requirePrivate && !parsed.IsPrivate() {
-		return "", &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Class:   errs.ClassValidation,
-			Message: fmt.Sprintf("Invalid %s: '%s' must be a private/internal address", fieldName, ip),
-		}
-	}
-	if subnet != "" {
-		_, ipnet, err := net.ParseCIDR(subnet)
-		if err != nil {
-			return "", &errs.DomainError{
-				Code:    errs.CodeValidationFailed,
-				Class:   errs.ClassValidation,
-				Message: fmt.Sprintf("Invalid subnet: %v", err),
-			}
-		}
-		if !ipnet.Contains(parsed) {
-			return "", &errs.DomainError{
-				Code:    errs.CodeValidationFailed,
-				Class:   errs.ClassValidation,
-				Message: fmt.Sprintf("Invalid %s: '%s' is not within subnet %s", fieldName, ip, subnet),
-			}
-		}
-		if parsed.Equal(ipnet.IP) {
-			return "", &errs.DomainError{
-				Code:    errs.CodeValidationFailed,
-				Class:   errs.ClassValidation,
-				Message: fmt.Sprintf("Invalid %s: '%s' is the network address of %s", fieldName, ip, subnet),
-			}
-		}
-	}
-	if gateway != "" {
-		gw := net.ParseIP(gateway)
-		if gw != nil && parsed.Equal(gw) {
-			return "", &errs.DomainError{
-				Code:    errs.CodeValidationFailed,
-				Class:   errs.ClassValidation,
-				Message: fmt.Sprintf("Invalid %s: '%s' is the gateway address", fieldName, ip),
-			}
-		}
-	}
-	return parsed.String(), nil
-}
-
-func (NetworkValidator) ValidateBridgeName(ctx context.Context, bridge string) error {
+func BridgeName(ctx context.Context, bridge string) error {
 	if bridge == "" {
 		return &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
@@ -577,7 +511,7 @@ func (NetworkValidator) ValidateBridgeName(ctx context.Context, bridge string) e
 	return nil
 }
 
-func (NetworkValidator) ValidateNATGateways(ctx context.Context, gateways []string) ([]string, error) {
+func NATGateways(ctx context.Context, gateways []string) ([]string, error) {
 	if len(gateways) == 0 {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
@@ -635,20 +569,6 @@ func (NetworkValidator) ValidateNATGateways(ctx context.Context, gateways []stri
 	return validated, nil
 }
 
-func (NetworkValidator) ValidateMACNoOverlap(mac string, existingMACs []string) error {
-	macUpper := strings.ToUpper(mac)
-	for _, existing := range existingMACs {
-		if strings.ToUpper(existing) == macUpper {
-			return &errs.DomainError{
-				Code:    errs.CodeValidationFailed,
-				Class:   errs.ClassValidation,
-				Message: fmt.Sprintf("MAC address '%s' already in use", mac),
-			}
-		}
-	}
-	return nil
-}
-
 // networkRange returns the first and last IP addresses in the given network.
 func networkRange(ipnet *net.IPNet) (net.IP, net.IP) {
 	first := ipnet.IP.To4()
@@ -687,7 +607,7 @@ func cidrsOverlap(a, b *net.IPNet) bool {
 	return ipCmp(aFirst, bLast) <= 0 && ipCmp(bFirst, aLast) <= 0
 }
 
-func (NetworkValidator) ValidateSubnetNoOverlap(subnet string, existing []interface{}, excludeName string) error {
+func SubnetNoOverlap(subnet string, existing []interface{}, excludeName string) error {
 	_, newNet, err := net.ParseCIDR(subnet)
 	if err != nil {
 		return &errs.DomainError{
@@ -764,11 +684,11 @@ func duckTypedSubnet(v interface{}) string {
 // VMValidator (Python: VMValidator)
 // ══════════════════════════════════════════════════════════════════════════════
 
-func ValidateVMName(name string) error {
-	return ValidateEntityName(name, "VM", 63)
+func VMName(name string) error {
+	return EntityName(name, "VM", 63)
 }
 
-func ValidateBootArgComponent(value, componentName string) error {
+func BootArgComponent(value, componentName string) error {
 	if componentName == "" {
 		componentName = "boot arg"
 	}
@@ -789,7 +709,7 @@ func ValidateBootArgComponent(value, componentName string) error {
 	return nil
 }
 
-func ValidateSSHUsername(user string) error {
+func SSHUsername(user string) error {
 	if !validSSHUsernameRegex.MatchString(user) {
 		return &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
@@ -800,7 +720,7 @@ func ValidateSSHUsername(user string) error {
 	return nil
 }
 
-func ValidateBootArgs(bootArgs, rootUUID, guestIP string) []string {
+func BootArgs(bootArgs, rootUUID, guestIP string) []string {
 	var errors []string
 	if rootUUID == "" {
 		errors = append(errors, "root UUID is required")
@@ -813,11 +733,11 @@ func ValidateBootArgs(bootArgs, rootUUID, guestIP string) []string {
 			if strings.Contains(arg, "=") {
 				parts := strings.SplitN(arg, "=", 2)
 				key, value := parts[0], parts[1]
-				if err := ValidateBootArgComponent(value, key); err != nil {
+				if err := BootArgComponent(value, key); err != nil {
 					errors = append(errors, err.Error())
 				}
 			} else {
-				if err := ValidateBootArgComponent(arg, "boot arg"); err != nil {
+				if err := BootArgComponent(arg, "boot arg"); err != nil {
 					errors = append(errors, err.Error())
 				}
 			}

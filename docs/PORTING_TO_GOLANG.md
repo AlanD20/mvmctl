@@ -30,7 +30,7 @@ Changes made during the architectural grilling (2026-05-22):
 | 17 | Timestamp format | **Use `time.RFC3339` constant.** No hardcoded format strings that duplicate stdlib constants. Microsecond precision loss is acceptable (Python `.isoformat()` has `.467308`, Go `time.RFC3339` drops it). All existing `"2006-01-02T15:04:05-07:00"` hardcoded strings must be replaced with `time.RFC3339`. |
 | 18 | Logging strategy | **Extract to `internal/infra/logging/`** (directory, 3 files). Use Go standard `log/slog` throughout. `consoleHandler` (renamed from pythonLogHandler), `rotatingFileWriter`, `GetLogger()`, `SetupLogging()`, `LogException()` move from `io.go` to `logging/handler.go`, `logging/rotating.go`, `logging/setup.go`. No bare `log.Printf` or `fmt.Fprintf(os.Stderr)` for logging — all log output through `slog`. Documented strategy with level conventions. |
 | 19 | Subprocess execution | **Consolidated `CommandRunner` interface in `infra/system/runner.go`.** Single interface: `Run(ctx, args []string, opts ...RunOption) (*Result, error)` and `Stream(ctx, args []string, opts ...RunOption) (<-chan StreamLine, error)`. `RealRunner` (zero-struct) + `testutil.FakeRunner`. Functional options pattern (`RunOption`) for timeout, cwd, env, stdin, capture, privileged. Existing `RunCmdCompat`/`RunCmd` replaced by this interface. `ProcessSignalHandler` stays in `runner.go` or moves to its own file. |
-| 20 | Concurrent execution | **Consolidated to `internal/infra/parallel/`.** Two core functions: `Parallel[T](ctx, workers, items, fn)` for side-effect tasks (delete, stop, create), `Map[T,R](ctx, workers, items, fn)` for transform tasks (fetch, inspect). Both use goroutines + `sync.WaitGroup` + semaphore for bounded concurrency. Both accept `context.Context` for cancellation. Collect errors but continue on failure (matching Python's bulk operation behavior). Workers default to `runtime.NumCPU()*2` when ≤ 0. Replace dead `Execute()` stub with these functions. |
+| 20 | Concurrent execution | **Consolidated to `internal/infra/pool/`.** Three core functions: `Do[T](ctx, workers, items, fn)` for fire-and-forget tasks (collects all errors, returns single error), `Gather[T,R](ctx, workers, items, fn)` for parallel transform tasks (returns `[]Result[R]`, continues on error), `Seq[T,R](ctx, items, fn)` for sequential fail-fast execution (returns `[]Result[R]`). All use goroutines + `sync.WaitGroup` + semaphore for bounded concurrency. All accept `context.Context` for cancellation. Workers default to `runtime.NumCPU()*2` when ≤ 0. |
 | 21 | Shared model types | **All model types centralized in `internal/infra/model/`.** No `[]any` for cross-domain references. Every domain type (VM, Network, Image, Kernel, Binary, Key, Volume, Host, CloudInit, Firecracker, Cache, Provisioner, Result, Version, Bulk, Console) lives in one package. Every other package (`core/*`, `pkg/api`, `internal/cli`, `internal/enricher`, `internal/infra/*`) imports from `infra/model` freely. Domain-level `model.go` files removed entirely — the single `infra/model/` package is the only source of truth for model types. This eliminates all circular import problems and restores type safety. |
 | 22 | Template engine | **Go `text/template` only.** No Jinja2 compatibility. Cloud-init templates and any other templates adapted to Go syntax: `{{ .Field }}` instead of `{{ field }}`, `{{ if .Cond }}` instead of `{% if cond %}`, pipe functions instead of Jinja2 filters. All existing template files in `internal/assets/` updated to Go `text/template` syntax. |
 | 23 | Password hashing | **bcrypt only via `golang.org/x/crypto/bcrypt`.** Remove the custom `sha512Crypt` implementation (self-reimplemented SHA-512 crypt). The `generatePasswordHash` function only supports `"bcrypt"` algorithm. Cloud-init `$6$` sha512 hashes not produced by this codebase — bcrypt `$2a$`/`$2b$` only. |
@@ -111,6 +111,7 @@ Changes made during the architectural grilling (2026-05-22):
 | 98 | **Single OS detection pass** | Go detects OS once before optimization, not twice. Python's second post-optimization detection was unnecessary — the OS doesn't change during optimization. The single pre-optimization pass is correct and sufficient. |
 | 99 | **Silent proceed on missing checksum** | Go's default behavior (nil `ConfirmFn`) silently proceeds when no checksum is available, logging a warning. Python prompted the user interactively via `typer.confirm()`. Go's behavior is acceptable — the warning log is sufficient, and interactive prompts break automation scripts. The `ConfirmFn` callback exists for CLI layers that want interactive behavior. |
 | 100 | **Unified kernel config model** | Go's `KernelSpec` uses a single `DefaultConfigs map[string]string` instead of three separate lists (`enabled_configs`, `disabled_configs`, `set_val_configs`) plus `required_settings`. Value dispatch: `y`/`yes`/`true` → `--enable`, `n`/`no`/`false` → `--disable`, anything else → `--set-val`. Features use `enforce: map[string]string` (applied on top of defaults AND verified post-build) instead of separate `configs` + `requires` lists. This is an intentional design deviation from Python — the Python codebase retains its original model. Only the Go codebase uses the unified model. |
+| 101 | **`--firecracker-bin` flag removed** | Go does NOT replicate Python's `--firecracker-bin` flag. The flag allowed passing a raw filesystem path to a firecracker binary. In Go, users MUST use `mvm bin pull <version>` then `mvm bin default <id>` to manage firecracker binaries. The `VMCreateInput.FirecrackerBin` field, the `deriveFirecrackerVersionFromPath` helper, and the builder's raw-path resolution block (which involved os.Stat, syscall.Access, sha256 hashing, BinaryID generation, and repo Upsert) have all been removed. Binary is resolved by ID (`--binary-id`) or from the DB default. The Python path was overly complex and duplicated binary management logic. |
 
 ## 1. Project Layout
 
@@ -171,7 +172,7 @@ mvmctl/
 │   │   ├── model/                    # ALL model types — vm, network, image, kernel, binary, key,
 │   │   │                             #   volume, host, config, console, logs, cloudinit, cache,
 │   │   │                             #   ssh, firecracker, provisioner, result, bulk, version
-│   │   ├── parallel/executor.go      # Parallel[T], Map[T,R]
+│   │   ├── pool/executor.go          # Do[T], Gather[T,R], Seq[T,R]
 │   │   ├── provisioner/              # backend.go, content.go (re-exports), model.go
 │   │   ├── provisionercontent/       # content.go — shared provisioning content builders
 │   │   ├── system/                   # runner.go, exec.go, group.go
@@ -292,7 +293,7 @@ Business logic isolated by domain. Each domain contains:
 Core domains NEVER import each other. They import only from `internal/infra/` (utilities, models, shared infrastructure).
 
 ### Infra (`internal/infra/`)
-Leaf-level utilities, shared types, error types, model types. Zero knowledge of core domains, API, or CLI. Every package in `internal/infra/` follows the "leaf dependency" rule — it imports nothing from `core/`, `api/`, `cli/`, or `service/`. Key packages: `model/` (all domain types), `errs/` (DomainError + codes), `db/` (SQLite connection + migrations), `system/` (CommandRunner), `parallel/` (Parallel/Map), `logging/` (slog setup), `firewall/` (nftables/iptables backends).
+Leaf-level utilities, shared types, error types, model types. Zero knowledge of core domains, API, or CLI. Every package in `internal/infra/` follows the "leaf dependency" rule — it imports nothing from `core/`, `api/`, `cli/`, or `service/`. Key packages: `model/` (all domain types), `errs/` (DomainError + codes), `db/` (SQLite connection + migrations), `system/` (CommandRunner), `pool/` (Do/Gather/Seq), `logging/` (slog setup), `firewall/` (nftables/iptables backends).
 
 ### Service (`internal/service/`)
 Goroutine-based long-running services that were separate subprocesses in Python. `console/relay.go` — PTY relay goroutine with Unix socket. `nocloudnet/server.go` — NoCloud HTTP metadata server goroutine. `loopmount/provisioner.go` — loop-mount provisioning subprocess dispatched via `mvm _provision`. These are NOT core domain logic — they are infrastructure processes managed via goroutines and `context.Context`. Core domains may import from `internal/service/` but not the reverse.
@@ -404,7 +405,7 @@ Six documented locations where the runner interface doesn't suffice (pass_fds, i
 
 ## 8. Concurrent Execution
 
-### `internal/infra/parallel/executor.go`
+### `internal/infra/pool/executor.go`
 
 Two generic functions with bounded concurrency:
 
