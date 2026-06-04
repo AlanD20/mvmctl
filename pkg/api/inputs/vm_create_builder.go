@@ -912,15 +912,18 @@ func (b *VMCreateBuilder) resolveProvisioner(ctx context.Context) (model.Provisi
 // ── Setting resolution helpers ──────────────────────────────────────────────
 
 func (b *VMCreateBuilder) resolveSettingString(ctx context.Context, category, key string) string {
-	return b.cfg.GetString(ctx, category, key, "")
+	s, _ := b.cfg.GetString(ctx, category, key)
+	return s
 }
 
 func (b *VMCreateBuilder) resolveSettingInt(ctx context.Context, category, key string) int {
-	return b.cfg.GetInt(ctx, category, key, 0)
+	v, _ := b.cfg.GetInt(ctx, category, key)
+	return v
 }
 
 func (b *VMCreateBuilder) resolveSettingBool(ctx context.Context, category, key string) bool {
-	return b.cfg.GetBool(ctx, category, key, false)
+	v, _ := b.cfg.GetBool(ctx, category, key)
+	return v
 }
 
 // ── Utility functions matched from Python ───────────────────────────────────

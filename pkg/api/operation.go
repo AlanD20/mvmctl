@@ -122,10 +122,9 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 
 	// Resolve provisioner type once at startup.
 	provisionerType := provisioner.ProvisionerLoopMount
-	if guestfsRaw, err := s.Config.Get(ctx, "settings", "guestfs_enabled"); err == nil {
-		if enabled, ok := guestfsRaw.(bool); ok && enabled {
-			provisionerType = provisioner.ProvisionerGuestFS
-		}
+	guestfsEnabled, _ := s.Config.GetBool(ctx, "settings", "guestfs_enabled")
+	if guestfsEnabled {
+		provisionerType = provisioner.ProvisionerGuestFS
 	}
 
 	return &Operation{

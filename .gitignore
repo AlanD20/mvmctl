@@ -54,6 +54,7 @@ Thumbs.db
 *.log
 
 # Build artifacts
+/mvm
 *.tar.xz
 *.ext4
 *.raw

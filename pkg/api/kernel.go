@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	"mvmctl/internal/core/kernel"
@@ -466,16 +465,9 @@ func (op *Operation) kernelListRemote(ctx context.Context, noCache bool) ([]mode
 	}
 
 	// Resolve cache_ttl from settings (matches Python)
-	var cacheTTL *int
+	cacheTTL := 0
 	if !noCache {
-		v, err := op.Services.Config.Get(ctx, "defaults.kernel", "remote_list_cache_ttl")
-		if err == nil && v != nil {
-			if s, ok := v.(string); ok {
-				if i, parseErr := strconv.Atoi(s); parseErr == nil {
-					cacheTTL = &i
-				}
-			}
-		}
+		cacheTTL, _ = op.Services.Config.GetInt(ctx, "defaults.kernel", "remote_list_cache_ttl")
 	}
 
 	// Resolve ci_version from default firecracker binary (matches Python)
@@ -487,33 +479,13 @@ func (op *Operation) kernelListRemote(ctx context.Context, noCache bool) ([]mode
 
 	// Resolve remote_list_limit from settings (matches Python)
 	// Python: remote_list_limit = int(SettingsService.resolve(db, "defaults.kernel", "remote_list_limit"))
-	remoteListLimit := 0
-	v, err := op.Services.Config.Get(ctx, "defaults.kernel", "remote_list_limit")
-	if err == nil && v != nil {
-		switch val := v.(type) {
-		case string:
-			if i, parseErr := strconv.Atoi(val); parseErr == nil {
-				remoteListLimit = i
-			}
-		case int:
-			remoteListLimit = val
-		case int64:
-			remoteListLimit = int(val)
-		case float64:
-			remoteListLimit = int(val)
-		}
-	}
-
-	cacheTTLVal := 0
-	if cacheTTL != nil {
-		cacheTTLVal = *cacheTTL
-	}
+	remoteListLimit, _ := op.Services.Config.GetInt(ctx, "defaults.kernel", "remote_list_limit")
 	versionMap := op.Services.Kernel.ListRemoteVersions(
 		ctx,
 		allSpecs,
 		system.RuntimeArch(),
 		resolvedCIVersion,
-		cacheTTLVal,
+		cacheTTL,
 		remoteListLimit,
 	)
 	flattened := make([]model.VersionInfo, 0)

@@ -258,7 +258,8 @@ func (r *CPRequest) resolveUser(ctx context.Context, vmEntity *model.VM) string 
 	if vmEntity.SSHUser != nil && *vmEntity.SSHUser != "" {
 		return *vmEntity.SSHUser
 	}
-	return r.cfg.GetString(ctx, "defaults.vm", "ssh_user", "root")
+	s, _ := r.cfg.GetString(ctx, "defaults.vm", "ssh_user")
+	return s
 }
 
 // resolveKey resolves SSH private key path for copy.

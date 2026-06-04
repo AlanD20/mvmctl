@@ -90,8 +90,8 @@ func (r *LogRequest) Resolve(ctx context.Context, vmRepo vm.Repository) (*Resolv
 	lines := r.resolveLines(ctx)
 	follow := r.resolveFollow(ctx)
 
-	logFilenameStr := r.cfg.GetString(ctx, "defaults.firecracker", "log_filename", "")
-	serialOutputFilenameStr := r.cfg.GetString(ctx, "defaults.firecracker", "serial_output_filename", "")
+	logFilenameStr, _ := r.cfg.GetString(ctx, "defaults.firecracker", "log_filename")
+	serialOutputFilenameStr, _ := r.cfg.GetString(ctx, "defaults.firecracker", "serial_output_filename")
 
 	r.result = &ResolvedLogInput{
 		VM:                   vmEntity,
@@ -127,12 +127,14 @@ func (r *LogRequest) resolveLines(ctx context.Context) int {
 	if r.input.Lines != nil {
 		return *r.input.Lines
 	}
-	return r.cfg.GetInt(ctx, "settings.vm", "log_lines", 0)
+	v, _ := r.cfg.GetInt(ctx, "settings.vm", "log_lines")
+	return v
 }
 
 func (r *LogRequest) resolveFollow(ctx context.Context) bool {
 	if r.input.Follow != nil {
 		return *r.input.Follow
 	}
-	return r.cfg.GetBool(ctx, "settings.vm", "log_follow", false)
+	b, _ := r.cfg.GetBool(ctx, "settings.vm", "log_follow")
+	return b
 }

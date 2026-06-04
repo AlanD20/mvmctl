@@ -328,6 +328,8 @@ func (s *Service) OptimizeImage(
 
 	slog.Info("Optimization complete", "total_seconds", t3.Sub(t0).Seconds())
 
+	compressionFormatVal := CompressionFormat
+
 	return &model.ImageItem{
 		ID:               imageID,
 		Type:             spec.Type,
@@ -347,7 +349,7 @@ func (s *Service) OptimizeImage(
 		FSUUID:           fsUUID,
 		CompressedSize:   &compressedSize,
 		CompressionRatio: &compressionRatio,
-		CompressedFormat: new(CompressionFormat),
+		CompressedFormat: &compressionFormatVal,
 	}, warnings, nil
 }
 
