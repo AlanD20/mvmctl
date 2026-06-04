@@ -13,8 +13,6 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/system"
-
-	"github.com/jmoiron/sqlx"
 )
 
 // KernelPullInput matches Python's KernelPullInput dataclass.
@@ -77,15 +75,15 @@ type ResolvedKernelPullRequest struct {
 //
 // Resolve and validate kernel pull/build inputs.
 type KernelPullRequest struct {
-	db     *sqlx.DB
+	cfg    *config.Service
 	input  KernelPullInput
 	result *ResolvedKernelPullRequest
 }
 
 // NewKernelPullRequest creates a new KernelPullRequest.
-func NewKernelPullRequest(inputs KernelPullInput, db *sqlx.DB) *KernelPullRequest {
+func NewKernelPullRequest(inputs KernelPullInput, cfg *config.Service) *KernelPullRequest {
 	return &KernelPullRequest{
-		db:    db,
+		cfg:   cfg,
 		input: inputs,
 	}
 }
@@ -103,9 +101,8 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 		v := r.input.Version
 		version = &v
 	} else {
-		v, err := config.Resolve(ctx, r.db, "defaults.kernel", "version")
-		if err == nil && v != nil {
-			s := infra.ToString(v)
+		s := r.cfg.GetString(ctx, "defaults.kernel", "version", "")
+		if s != "" {
 			version = &s
 		}
 	}
@@ -130,29 +127,16 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 	if r.input.Jobs != 0 {
 		jobs = r.input.Jobs
 	} else {
-		v, err := config.Resolve(ctx, r.db, "defaults.kernel", "build_jobs")
-		if err == nil && v != nil {
-			if i, ok := v.(int64); ok {
-				jobs = int(i)
-			}
-		}
+		// Default to all cores when not configured
+		jobs = r.cfg.GetInt(ctx, "defaults.kernel", "build_jobs", runtime.NumCPU())
 	}
+	// Fallback for constrained environments where NumCPU() returns 0
 	if jobs == 0 {
-		// Python: os.cpu_count() — can return None in constrained environments
 		jobs = runtime.NumCPU()
 	}
 	if jobs == 0 {
-		// Python: or SettingsService.resolve(...)
-		v, err := config.Resolve(ctx, r.db, "defaults.kernel", "build_jobs")
-		if err == nil && v != nil {
-			if i, ok := v.(int64); ok {
-				jobs = int(i)
-			}
-		}
+		jobs = 1
 	}
-	// Python's os.cpu_count() returns None in some constrained environments.
-	// Go's runtime.NumCPU() returns the number of logical CPUs, always >= 1 on Linux,
-	// but we keep the fallback for compatibility.
 
 	// Resolve features from comma-separated input string — Python:
 	//   features_raw = (self._inputs.features or "").strip()
@@ -173,18 +157,7 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 	//   if nested_virt and "kvm" not in features_list: features_list.insert(0, "kvm")
 	// Python's bool() is truthy for many types: non-empty strings, non-zero numbers,
 	// non-None objects. In Go, we just check for a truthy config value.
-	nestedVirt, _ := config.Resolve(ctx, r.db, "defaults.vm", "nested_virt")
-	nestedVirtBool := false
-	if nestedVirt != nil {
-		switch v := nestedVirt.(type) {
-		case bool:
-			nestedVirtBool = v
-		case string:
-			nestedVirtBool = v != ""
-		case int, int64, float64:
-			nestedVirtBool = v != 0
-		}
-	}
+	nestedVirtBool := r.cfg.GetBool(ctx, "defaults.vm", "nested_virt", false)
 	if nestedVirtBool {
 		hasKVM := false
 		for _, f := range featuresList {

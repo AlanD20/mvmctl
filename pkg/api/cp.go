@@ -38,7 +38,7 @@ func (op *Operation) CPCopy(
 ) (*responses.CPCopyResult, error) {
 	// Python: try: ... except CPError as e: ...
 	// Build CPRequest and resolve (matches Python: CPRequest(inputs, db).resolve())
-	req := inputs.NewCPRequest(*input, op.Connection.DB())
+	req := inputs.NewCPRequest(*input, op.Services.Config)
 	resolved, err := req.Resolve(ctx, op.Repos.VM, op.Repos.Key)
 	if err != nil {
 		return nil, op.copyError(err)

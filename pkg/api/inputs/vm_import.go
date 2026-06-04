@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"mvmctl/internal/core/binary"
+	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/image"
 	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/core/key"
@@ -39,13 +40,15 @@ type VMImportInput struct {
 // Resolve VMImportInput to ResolvedVMCreateInput.
 // Python delegates to VMCreateRequest for full resolution.
 type VMImportRequest struct {
+	cfg   *config.Service
 	db    *sqlx.DB
 	input VMImportInput
 }
 
 // NewVMImportRequest creates a new VMImportRequest.
-func NewVMImportRequest(inputs VMImportInput, db *sqlx.DB) *VMImportRequest {
+func NewVMImportRequest(inputs VMImportInput, cfg *config.Service, db *sqlx.DB) *VMImportRequest {
 	return &VMImportRequest{
+		cfg:   cfg,
 		db:    db,
 		input: inputs,
 	}
@@ -174,7 +177,7 @@ func (r *VMImportRequest) Resolve(ctx context.Context) (*VMCreateResolved, error
 
 	// 8. Create VMCreateBuilder (matching Python's VMCreateRequest)
 	builder := NewVMCreateBuilder(
-		r.db,
+		r.cfg,
 		vmRepo,
 		networkRepo,
 		imageRepo,

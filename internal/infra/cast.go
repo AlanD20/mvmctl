@@ -1,20 +1,54 @@
 package infra
 
 import (
-	"fmt"
+	"strconv"
 	"strings"
 )
 
-// ToString converts any value to its string representation.
-// nil maps to "", non-string types use fmt.Sprint (matching Python's str()).
-func ToString(v any) string {
-	if v == nil {
-		return ""
-	}
+// ToString converts any value to a string. Returns defaultVal on failure.
+func ToString(v any, defaultVal string) string {
 	if s, ok := v.(string); ok {
 		return s
 	}
-	return fmt.Sprint(v)
+	return defaultVal
+}
+
+// ToInt converts any value to an int. Returns defaultVal on failure.
+func ToInt(v any, defaultVal int) int {
+	if v == nil {
+		return defaultVal
+	}
+	switch val := v.(type) {
+	case int:
+		return val
+	case int64:
+		return int(val)
+	case float64:
+		return int(val)
+	case string:
+		if i, err := strconv.Atoi(val); err == nil {
+			return i
+		}
+	}
+	return defaultVal
+}
+
+// ToBool converts any value to a bool. Returns defaultVal on failure.
+func ToBool(v any, defaultVal bool) bool {
+	if v == nil {
+		return defaultVal
+	}
+	switch val := v.(type) {
+	case bool:
+		return val
+	case string:
+		if b, err := strconv.ParseBool(val); err == nil {
+			return b
+		}
+	case int, int64, float64:
+		return val != 0
+	}
+	return defaultVal
 }
 
 // BoolToInt converts a bool to an int (1 for true, 0 for false).

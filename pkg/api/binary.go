@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
-	"strconv"
 
 	"mvmctl/internal/core/binary"
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/operation"
@@ -308,29 +306,7 @@ func (op *Operation) BinaryList(
 		lmt = *limit
 	}
 	if lmt <= 0 {
-		rawLimit, _ := op.Services.Config.Get(ctx, "defaults.binary", "remote_version_limit")
-		if rawLimit != nil {
-			switch v := rawLimit.(type) {
-			case int:
-				lmt = v
-			case float64:
-				lmt = int(v)
-			case string:
-				lmt, _ = strconv.Atoi(v)
-			}
-		}
-		if lmt <= 0 {
-			dflt, _ := infra.GetDefault("defaults.binary", "remote_version_limit")
-			switch v := dflt.(type) {
-			case int:
-				lmt = v
-			case float64:
-				lmt = int(v)
-			}
-		}
-		if lmt <= 0 {
-			lmt = 20
-		}
+		lmt = op.Services.Config.GetInt(ctx, "defaults.binary", "remote_version_limit", 20)
 	}
 	versions, err := op.Services.Binary.ListRemote(ctx, lmt)
 	if err != nil {

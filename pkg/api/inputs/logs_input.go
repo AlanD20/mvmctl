@@ -3,11 +3,9 @@ package inputs
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/vm"
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 
@@ -52,15 +50,17 @@ type ResolvedLogInput struct {
 //
 // Resolve LogInput against the database and constants.
 type LogRequest struct {
-	_db    *sqlx.DB
+	cfg    *config.Service
+	db     *sqlx.DB
 	input  LogInput
 	result *ResolvedLogInput
 }
 
 // NewLogRequest creates a new LogRequest.
-func NewLogRequest(inputs LogInput, db *sqlx.DB) *LogRequest {
+func NewLogRequest(inputs LogInput, cfg *config.Service, db *sqlx.DB) *LogRequest {
 	return &LogRequest{
-		_db:   db,
+		cfg:   cfg,
+		db:    db,
 		input: inputs,
 	}
 }
@@ -90,11 +90,8 @@ func (r *LogRequest) Resolve(ctx context.Context, vmRepo vm.Repository) (*Resolv
 	lines := r.resolveLines(ctx)
 	follow := r.resolveFollow(ctx)
 
-	logFilename, _ := config.Resolve(ctx, r._db, "defaults.firecracker", "log_filename")
-	logFilenameStr := infra.ToString(logFilename)
-
-	serialOutputFilename, _ := config.Resolve(ctx, r._db, "defaults.firecracker", "serial_output_filename")
-	serialOutputFilenameStr := infra.ToString(serialOutputFilename)
+	logFilenameStr := r.cfg.GetString(ctx, "defaults.firecracker", "log_filename", "")
+	serialOutputFilenameStr := r.cfg.GetString(ctx, "defaults.firecracker", "serial_output_filename", "")
 
 	r.result = &ResolvedLogInput{
 		VM:                   vmEntity,
@@ -111,7 +108,7 @@ func (r *LogRequest) Resolve(ctx context.Context, vmRepo vm.Repository) (*Resolv
 func (r *LogRequest) resolveVM(ctx context.Context, vmRepo vm.Repository) (*model.VM, error) {
 	// Use VMRequest pipeline like Python's LogRequest._resolve_vm()
 	// Python lets VMNotFoundError propagate directly, so we don't wrap
-	vmRequest := NewVMRequest(VMInput{Identifiers: []string{r.input.Identifier}}, r._db, vmRepo, nil)
+	vmRequest := NewVMRequest(VMInput{Identifiers: []string{r.input.Identifier}}, r.db, vmRepo, nil)
 	resolved, err := vmRequest.Resolve(ctx)
 	if err != nil {
 		return nil, err
@@ -130,40 +127,12 @@ func (r *LogRequest) resolveLines(ctx context.Context) int {
 	if r.input.Lines != nil {
 		return *r.input.Lines
 	}
-	lines, err := config.Resolve(ctx, r._db, "settings.vm", "log_lines")
-	if err == nil && lines != nil {
-		// Python: int(SettingsService.resolve(...)) — handles int, str, etc.
-		switch v := lines.(type) {
-		case int64:
-			return int(v)
-		case int:
-			return v
-		case float64:
-			return int(v)
-		case string:
-			if i, err := strconv.Atoi(v); err == nil {
-				return i
-			}
-		}
-	}
-	return 0
+	return r.cfg.GetInt(ctx, "settings.vm", "log_lines", 0)
 }
 
 func (r *LogRequest) resolveFollow(ctx context.Context) bool {
 	if r.input.Follow != nil {
 		return *r.input.Follow
 	}
-	follow, err := config.Resolve(ctx, r._db, "settings.vm", "log_follow")
-	if err == nil && follow != nil {
-		switch v := follow.(type) {
-		case bool:
-			return v
-		case string:
-			return v != ""
-		case int, int64, float64:
-			return v != 0
-		}
-		return true
-	}
-	return false
+	return r.cfg.GetBool(ctx, "settings.vm", "log_follow", false)
 }

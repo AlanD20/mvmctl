@@ -8,12 +8,9 @@ import (
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/core/vm"
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/validators"
-
-	"github.com/jmoiron/sqlx"
 )
 
 // SSHInput matches Python's SSHInput dataclass.
@@ -54,16 +51,16 @@ type ResolvedSSHInput struct {
 //
 // Resolve SSHInput against the database.
 type SSHRequest struct {
-	db     *sqlx.DB
+	cfg    *config.Service
 	input  SSHInput
 	result *ResolvedSSHInput
 	vm     *model.VM
 }
 
 // NewSSHRequest creates a new SSHRequest.
-func NewSSHRequest(inputs SSHInput, db *sqlx.DB) *SSHRequest {
+func NewSSHRequest(inputs SSHInput, cfg *config.Service) *SSHRequest {
 	return &SSHRequest{
-		db:    db,
+		cfg:   cfg,
 		input: inputs,
 	}
 }
@@ -186,11 +183,8 @@ func (r *SSHRequest) resolveUser(ctx context.Context) (string, error) {
 	if r.vm != nil && r.vm.SSHUser != nil && *r.vm.SSHUser != "" {
 		return *r.vm.SSHUser, nil
 	}
-	user, err := config.Resolve(ctx, r.db, "defaults.vm", "ssh_user")
-	if err == nil && user != nil {
-		return infra.ToString(user), nil
-	}
-	return "root", nil
+	user := r.cfg.GetString(ctx, "defaults.vm", "ssh_user", "root")
+	return user, nil
 }
 
 // resolveKey resolves SSH private key path via the key domain.

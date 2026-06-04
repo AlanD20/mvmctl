@@ -9,11 +9,8 @@ import (
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/core/vm"
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
-
-	"github.com/jmoiron/sqlx"
 )
 
 // CPInput matches Python's CPInput dataclass.
@@ -75,15 +72,15 @@ type ResolvedCPInput struct {
 //
 // Resolve CPInput against the database and filesystem.
 type CPRequest struct {
-	db     *sqlx.DB
+	cfg    *config.Service
 	input  CPInput
 	result *ResolvedCPInput
 }
 
 // NewCPRequest creates a new CPRequest.
-func NewCPRequest(inputs CPInput, db *sqlx.DB) *CPRequest {
+func NewCPRequest(inputs CPInput, cfg *config.Service) *CPRequest {
 	return &CPRequest{
-		db:    db,
+		cfg:   cfg,
 		input: inputs,
 	}
 }
@@ -261,11 +258,7 @@ func (r *CPRequest) resolveUser(ctx context.Context, vmEntity *model.VM) string 
 	if vmEntity.SSHUser != nil && *vmEntity.SSHUser != "" {
 		return *vmEntity.SSHUser
 	}
-	user, err := config.Resolve(ctx, r.db, "defaults.vm", "ssh_user")
-	if err == nil && user != nil {
-		return infra.ToString(user)
-	}
-	return "root"
+	return r.cfg.GetString(ctx, "defaults.vm", "ssh_user", "root")
 }
 
 // resolveKey resolves SSH private key path for copy.

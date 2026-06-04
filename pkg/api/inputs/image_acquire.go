@@ -11,8 +11,6 @@ import (
 	"mvmctl/internal/infra/disk"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/system"
-
-	"github.com/jmoiron/sqlx"
 )
 
 // CLI_TO_INTERNAL_DETECTOR maps CLI detector names to internal detector codes.
@@ -88,16 +86,16 @@ type ResolvedImageAcquireInput struct {
 // input uses any because it is either ImagePullInput or ImageImportInput —
 // Go has no sum types.
 type ImageAcquireRequest struct {
-	db       *sqlx.DB
+	cfg      *config.Service
 	input    any // ImagePullInput or ImageImportInput
 	result   *ResolvedImageAcquireInput
 	resolver *image.Resolver
 }
 
 // NewImageAcquireRequest creates a new ImageAcquireRequest.
-func NewImageAcquireRequest(inputs any, db *sqlx.DB, imageRepo image.Repository) *ImageAcquireRequest {
+func NewImageAcquireRequest(inputs any, cfg *config.Service, imageRepo image.Repository) *ImageAcquireRequest {
 	return &ImageAcquireRequest{
-		db:       db,
+		cfg:      cfg,
 		input:    inputs,
 		resolver: image.NewResolver(imageRepo),
 	}
@@ -175,14 +173,10 @@ func (r *ImageAcquireRequest) ResolveImport(ctx context.Context) (*ResolvedImage
 		return nil, err
 	}
 
-	// Default format — Python: str(SettingsService.resolve(...))
-	// Python's str(None) returns "None", so we match that behavior exactly
+	// Resolve format from config, fall back to auto-detection
 	format := in.Format
 	if format == "" {
-		formatVal, err := config.Resolve(ctx, r.db, "defaults.image", "import_format")
-		if err == nil {
-			format = infra.ToString(formatVal)
-		}
+		format = r.cfg.GetString(ctx, "defaults.image", "import_format", "")
 	}
 
 	// Auto-detect format from file if format is not known

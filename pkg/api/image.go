@@ -87,7 +87,7 @@ func (op *Operation) ImagePull(
 	onProgress func(errs.ProgressEvent),
 ) (*model.ImageItem, error) {
 	// Resolve pull input via ImageAcquireRequest (arch, output dir, validation)
-	req := inputs.NewImageAcquireRequest(input, op.Connection.DB(), op.Repos.Image)
+	req := inputs.NewImageAcquireRequest(input, op.Services.Config, op.Repos.Image)
 	resolved, err := req.ResolvePull(ctx)
 	if err != nil {
 		return nil, &errs.DomainError{
@@ -316,7 +316,7 @@ func (op *Operation) ImageImport(
 	onProgress func(errs.ProgressEvent),
 ) (*model.ImageItem, error) {
 	// Resolve import input via ImageAcquireRequest (arch, format, validation)
-	req := inputs.NewImageAcquireRequest(input, op.Connection.DB(), op.Repos.Image)
+	req := inputs.NewImageAcquireRequest(input, op.Services.Config, op.Repos.Image)
 	resolved, err := req.ResolveImport(ctx)
 	if err != nil {
 		return nil, &errs.DomainError{

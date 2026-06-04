@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 
-	"mvmctl/internal/core/config"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api/inputs"
@@ -16,7 +15,7 @@ import (
 // Matches Python's ConfigOperation.get() exactly — uses ConfigInput/ConfigRequest pipeline
 // with OVERRIDABLE_SETTINGS validation.
 // Returns the raw config value (type varies by setting: string, int, bool, etc.)
-// or []config.SettingInfo when key is empty (category listing).
+// or map[string]map[string]model.SettingInfo when key is empty (category listing).
 func (op *Operation) ConfigGet(ctx context.Context, category, key string) (any, error) {
 
 	rawInput := inputs.ConfigInput{
@@ -43,7 +42,7 @@ func (op *Operation) ConfigGet(ctx context.Context, category, key string) (any, 
 		return op.Services.Config.ListByCategory(ctx, resolved.Category)
 	}
 
-	return config.Resolve(ctx, op.Connection.DB(), resolved.Category, resolved.Key)
+	return op.Services.Config.GetValue(ctx, resolved.Category, resolved.Key)
 }
 
 // ConfigSet sets a config value for category.key.

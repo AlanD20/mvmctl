@@ -26,14 +26,12 @@ import (
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/validators"
-
-	"github.com/jmoiron/sqlx"
 )
 
 // VMCreateBuilder resolves all DB-backed defaults and validates VM creation inputs.
 // Matches Python mvmctl.api.inputs._vm_create_input.VMCreateRequest.
 type VMCreateBuilder struct {
-	db          *sqlx.DB
+	cfg         *config.Service
 	vmRepo      vm.Repository
 	networkRepo network.Repository
 	imageRepo   image.Repository
@@ -57,7 +55,7 @@ type VMCreateBuilder struct {
 // NewVMCreateBuilder creates a new VMCreateBuilder with all resolvers.
 // Matches Python's VMCreateRequest.__init__().
 func NewVMCreateBuilder(
-	db *sqlx.DB,
+	cfg *config.Service,
 	vmRepo vm.Repository,
 	networkRepo network.Repository,
 	imageRepo image.Repository,
@@ -70,7 +68,7 @@ func NewVMCreateBuilder(
 	vmDir string,
 ) *VMCreateBuilder {
 	return &VMCreateBuilder{
-		db:              db,
+		cfg:             cfg,
 		vmRepo:          vmRepo,
 		networkRepo:     networkRepo,
 		imageRepo:       imageRepo,
@@ -212,7 +210,7 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 	if raw.NestedVirt != nil {
 		nestedVirt = *raw.NestedVirt
 	} else {
-		nestedVirt = resolveSettingBool(ctx, b.db, "defaults.vm", "nested_virt")
+		nestedVirt = b.resolveSettingBool(ctx, "defaults.vm", "nested_virt")
 	}
 
 	// Resolve CPU config: from cpu_template (CLI) or cpu_config (import)
@@ -274,7 +272,7 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 	if raw.PCIEnabled != nil {
 		pciEnabled = *raw.PCIEnabled
 	} else {
-		pciEnabled = resolveSettingBool(ctx, b.db, "defaults.vm", "pci_enabled")
+		pciEnabled = b.resolveSettingBool(ctx, "defaults.vm", "pci_enabled")
 	}
 	if nestedVirt {
 		pciEnabled = true
@@ -283,7 +281,7 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 	// ── Item 11: boot_args default with root=UUID (Python _vm_create_input.py:526-528) ──
 	bootArgs := raw.BootArgs
 	if bootArgs == nil {
-		defaultBootArgs := resolveSettingString(ctx, b.db, "defaults.vm", "boot_args")
+		defaultBootArgs := b.resolveSettingString(ctx, "defaults.vm", "boot_args")
 		uuidSuffix := img.FSUUID
 		bootArgsStr := defaultBootArgs + " root=UUID=" + uuidSuffix
 		bootArgs = &bootArgsStr
@@ -537,7 +535,7 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 				Class:   errs.ClassInternal,
 			}
 		}
-		maxVMs := resolveSettingInt(ctx, b.db, "settings.vm", "max_vms")
+		maxVMs := b.resolveSettingInt(ctx, "settings.vm", "max_vms")
 		if current+count > maxVMs {
 			return nil, &errs.DomainError{
 				Code: errs.CodeVMResourceExhausted,
@@ -841,7 +839,7 @@ func (b *VMCreateBuilder) resolveMemory(ctx context.Context, raw VMCreateInput) 
 		return int(bytes / disk.MebibyteBytes), nil
 	}
 
-	return resolveSettingInt(ctx, b.db, "defaults.vm", "mem_size_mib"), nil
+	return b.resolveSettingInt(ctx, "defaults.vm", "mem_size_mib"), nil
 }
 
 func (b *VMCreateBuilder) resolveCloudInitMode(raw VMCreateInput) (CloudInitModeResolved, error) {
@@ -895,7 +893,7 @@ func (b *VMCreateBuilder) resolveCloudInitMode(raw VMCreateInput) (CloudInitMode
 }
 
 func (b *VMCreateBuilder) resolveProvisioner(ctx context.Context) (model.ProvisionerType, error) {
-	guestfsEnabled := resolveSettingBool(ctx, b.db, "settings", "guestfs_enabled")
+	guestfsEnabled := b.resolveSettingBool(ctx, "settings", "guestfs_enabled")
 	if guestfsEnabled {
 		return model.ProvisionerGuestFS, nil
 	}
@@ -913,75 +911,16 @@ func (b *VMCreateBuilder) resolveProvisioner(ctx context.Context) (model.Provisi
 
 // ── Setting resolution helpers ──────────────────────────────────────────────
 
-func resolveSetting(ctx context.Context, db *sqlx.DB, category, key string) (any, error) {
-	return config.Resolve(ctx, db, category, key)
+func (b *VMCreateBuilder) resolveSettingString(ctx context.Context, category, key string) string {
+	return b.cfg.GetString(ctx, category, key, "")
 }
 
-func resolveSettingString(ctx context.Context, db *sqlx.DB, category, key string) string {
-	v, err := config.Resolve(ctx, db, category, key)
-	if err != nil || v == nil {
-		return ""
-	}
-	switch val := v.(type) {
-	case string:
-		return val
-	default:
-		return fmt.Sprintf("%v", val)
-	}
+func (b *VMCreateBuilder) resolveSettingInt(ctx context.Context, category, key string) int {
+	return b.cfg.GetInt(ctx, category, key, 0)
 }
 
-func resolveSettingInt(ctx context.Context, db *sqlx.DB, category, key string) int {
-	v, err := config.Resolve(ctx, db, category, key)
-	if err != nil || v == nil {
-		return 0
-	}
-	// Match Python's int() behavior exactly:
-	//   int(True) → 1, int(False) → 0
-	switch val := v.(type) {
-	case bool:
-		if val {
-			return 1
-		}
-		return 0
-	case int:
-		return val
-	case int64:
-		return int(val)
-	case float64:
-		return int(val)
-	case string:
-		n, _ := strconv.Atoi(val)
-		return n
-	default:
-		return 0
-	}
-}
-
-func resolveSettingBool(ctx context.Context, db *sqlx.DB, category, key string) bool {
-	v, err := config.Resolve(ctx, db, category, key)
-	if err != nil || v == nil {
-		return false
-	}
-	// Match Python's bool() behavior exactly:
-	//   bool(True) → True
-	//   bool(False) → False
-	//   bool(0) → False, bool(1) → True
-	//   bool("") → False, bool("false") → True (any non-empty string is truthy!)
-	//   bool([]) → False, bool([1]) → True
-	switch val := v.(type) {
-	case bool:
-		return val
-	case int64:
-		return val != 0
-	case int:
-		return val != 0
-	case float64:
-		return val != 0
-	case string:
-		return val != "" // Python: bool("false") = True
-	default:
-		return false
-	}
+func (b *VMCreateBuilder) resolveSettingBool(ctx context.Context, category, key string) bool {
+	return b.cfg.GetBool(ctx, category, key, false)
 }
 
 // ── Utility functions matched from Python ───────────────────────────────────
@@ -1287,11 +1226,11 @@ func (b *VMCreateBuilder) FromVM(ctx context.Context, vmEntity *model.VM) (*VMCr
 	if vmEntity.BootArgs != nil && *vmEntity.BootArgs != "" {
 		bootArgs = *vmEntity.BootArgs
 	} else {
-		bootArgs = resolveSettingString(ctx, b.db, "defaults.vm", "boot_args")
+		bootArgs = b.resolveSettingString(ctx, "defaults.vm", "boot_args")
 	}
 
 	// lsm_flags (Python: vm.lsm_flags if vm.lsm_flags else SettingsService.resolve(...))
-	lsmFlags := resolveSettingString(ctx, b.db, "defaults.vm", "lsm_flags")
+	lsmFlags := b.resolveSettingString(ctx, "defaults.vm", "lsm_flags")
 	if vmEntity.LSMFlags != nil && *vmEntity.LSMFlags != "" {
 		lsmFlags = *vmEntity.LSMFlags
 	}
@@ -1340,14 +1279,14 @@ func (b *VMCreateBuilder) FromVM(ctx context.Context, vmEntity *model.VM) (*VMCr
 			if vmEntity.SSHUser != nil && *vmEntity.SSHUser != "" {
 				return *vmEntity.SSHUser
 			}
-			return resolveSettingString(ctx, b.db, "defaults.vm", "ssh_user")
+			return b.resolveSettingString(ctx, "defaults.vm", "ssh_user")
 		}(),
-		DNSServer:           resolveSettingString(ctx, b.db, "defaults.vm", "dns_server"),
-		RootUID:             resolveSettingInt(ctx, b.db, "defaults.vm", "root_uid"),
-		RootGID:             resolveSettingInt(ctx, b.db, "defaults.vm", "root_gid"),
-		UserUID:             resolveSettingInt(ctx, b.db, "defaults.vm", "user_uid"),
-		UserGID:             resolveSettingInt(ctx, b.db, "defaults.vm", "user_gid"),
-		GuestMACPrefix:      resolveSettingString(ctx, b.db, "defaults.vm", "guest_mac_prefix"),
+		DNSServer:           b.resolveSettingString(ctx, "defaults.vm", "dns_server"),
+		RootUID:             b.resolveSettingInt(ctx, "defaults.vm", "root_uid"),
+		RootGID:             b.resolveSettingInt(ctx, "defaults.vm", "root_gid"),
+		UserUID:             b.resolveSettingInt(ctx, "defaults.vm", "user_uid"),
+		UserGID:             b.resolveSettingInt(ctx, "defaults.vm", "user_gid"),
+		GuestMACPrefix:      b.resolveSettingString(ctx, "defaults.vm", "guest_mac_prefix"),
 		Network:             netwNet,
 		Image:               vmImage,
 		Kernel:              vmKernel,
@@ -1383,21 +1322,21 @@ func (b *VMCreateBuilder) FromVM(ctx context.Context, vmEntity *model.VM) (*VMCr
 		ExtraDrives: extraDrives,
 
 		// Firecracker defaults — Python resolves ALL through SettingsService
-		LogLevel:              resolveSettingString(ctx, b.db, "defaults.firecracker", "log_level"),
-		LogFilename:           resolveSettingString(ctx, b.db, "defaults.firecracker", "log_filename"),
-		SerialOutputFilename:  resolveSettingString(ctx, b.db, "defaults.firecracker", "serial_output_filename"),
-		MetricsFilename:       resolveSettingString(ctx, b.db, "defaults.firecracker", "metrics_filename"),
-		APISocketFilename:     resolveSettingString(ctx, b.db, "defaults.firecracker", "api_socket_filename"),
-		PIDFilename:           resolveSettingString(ctx, b.db, "defaults.firecracker", "pid_filename"),
-		ConfigFilename:        resolveSettingString(ctx, b.db, "defaults.firecracker", "config_filename"),
-		ConsoleSocketFilename: resolveSettingString(ctx, b.db, "defaults.firecracker", "console_socket_filename"),
-		ConsolePIDFilename:    resolveSettingString(ctx, b.db, "defaults.firecracker", "console_pid_filename"),
+		LogLevel:              b.resolveSettingString(ctx, "defaults.firecracker", "log_level"),
+		LogFilename:           b.resolveSettingString(ctx, "defaults.firecracker", "log_filename"),
+		SerialOutputFilename:  b.resolveSettingString(ctx, "defaults.firecracker", "serial_output_filename"),
+		MetricsFilename:       b.resolveSettingString(ctx, "defaults.firecracker", "metrics_filename"),
+		APISocketFilename:     b.resolveSettingString(ctx, "defaults.firecracker", "api_socket_filename"),
+		PIDFilename:           b.resolveSettingString(ctx, "defaults.firecracker", "pid_filename"),
+		ConfigFilename:        b.resolveSettingString(ctx, "defaults.firecracker", "config_filename"),
+		ConsoleSocketFilename: b.resolveSettingString(ctx, "defaults.firecracker", "console_socket_filename"),
+		ConsolePIDFilename:    b.resolveSettingString(ctx, "defaults.firecracker", "console_pid_filename"),
 
 		// Cloud-init defaults — Python resolves ALL through SettingsService
-		CloudInitISOName:      resolveSettingString(ctx, b.db, "defaults.cloudinit", "iso_name"),
-		NocloudPortRangeStart: resolveSettingInt(ctx, b.db, "defaults.cloudinit", "nocloud_port_range_start"),
-		NocloudPortRangeEnd:   resolveSettingInt(ctx, b.db, "defaults.cloudinit", "nocloud_port_range_end"),
-		NocloudMaxPortRetries: resolveSettingInt(ctx, b.db, "defaults.cloudinit", "nocloud_max_port_retries"),
+		CloudInitISOName:      b.resolveSettingString(ctx, "defaults.cloudinit", "iso_name"),
+		NocloudPortRangeStart: b.resolveSettingInt(ctx, "defaults.cloudinit", "nocloud_port_range_start"),
+		NocloudPortRangeEnd:   b.resolveSettingInt(ctx, "defaults.cloudinit", "nocloud_port_range_end"),
+		NocloudMaxPortRetries: b.resolveSettingInt(ctx, "defaults.cloudinit", "nocloud_max_port_retries"),
 	}
 
 	return resolved, nil
