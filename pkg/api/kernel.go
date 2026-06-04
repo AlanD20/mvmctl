@@ -113,22 +113,12 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 		}
 	}
 
-	// Check for existing kernel (matches Python)
+	// Look up existing kernel for cleanup later (if rebuild produces different path)
 	var existing *model.KernelItem
 	if resolved.KernelType == "firecracker" {
 		existing, _ = op.Repos.Kernel.GetByType(ctx, resolved.KernelType)
 	} else if resolved.KernelType == "official" && resolved.Version != "" {
 		existing, _ = op.Repos.Kernel.GetByVersionAndType(ctx, resolved.Version, resolved.KernelType)
-	}
-
-	if existing != nil {
-		if _, err := os.Stat(existing.Path); err == nil {
-			slog.Info("Kernel already exists", "path", existing.Path)
-			if resolved.SetDefault {
-				_ = op.Repos.Kernel.SetDefault(ctx, existing.ID)
-			}
-			return existing, nil
-		}
 	}
 
 	// Resolve spec via KernelService (matches Python)

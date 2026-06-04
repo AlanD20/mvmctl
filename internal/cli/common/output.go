@@ -64,9 +64,9 @@ func (p *Progress) Start(msg ...string) {
 				t := p.text
 				p.mu.Unlock()
 				if t != "" {
-					fmt.Fprintf(os.Stderr, "\r%s %s", spinnerChars[i%len(spinnerChars)], t)
+					fmt.Fprintf(os.Stderr, "\r%s %s\033[K", spinnerChars[i%len(spinnerChars)], t)
 				} else {
-					fmt.Fprintf(os.Stderr, "\r%s", spinnerChars[i%len(spinnerChars)])
+					fmt.Fprintf(os.Stderr, "\r%s\033[K", spinnerChars[i%len(spinnerChars)])
 				}
 				i++
 				time.Sleep(80 * time.Millisecond)
@@ -90,7 +90,7 @@ func (p *Progress) Stop() {
 	}
 	// Wait for goroutine to exit, then clear the line
 	time.Sleep(time.Millisecond * 20)
-	fmt.Fprintf(os.Stderr, "\r%s\r", strings.Repeat(" ", 80))
+	fmt.Fprintf(os.Stderr, "\r\033[K")
 }
 
 // UpdateText changes the message displayed next to the spinner.

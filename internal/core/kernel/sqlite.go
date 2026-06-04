@@ -23,7 +23,7 @@ func NewRepository(db *sqlx.DB) Repository {
 func (r *sqliteRepo) Get(ctx context.Context, id string) (*model.KernelItem, error) {
 	var k model.KernelItem
 	err := r.db.GetContext(ctx, &k,
-		`SELECT * FROM kernels WHERE id = ? AND deleted_at IS NULL AND is_present = 1`, id)
+		`SELECT * FROM kernels WHERE id = ? AND deleted_at IS NULL `, id)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -33,7 +33,7 @@ func (r *sqliteRepo) Get(ctx context.Context, id string) (*model.KernelItem, err
 func (r *sqliteRepo) FindByPrefix(ctx context.Context, prefix string) ([]*model.KernelItem, error) {
 	var items []*model.KernelItem
 	return items, r.db.SelectContext(ctx, &items,
-		`SELECT * FROM kernels WHERE id LIKE ? AND deleted_at IS NULL AND is_present = 1`, prefix+"%")
+		`SELECT * FROM kernels WHERE id LIKE ? AND deleted_at IS NULL `, prefix+"%")
 }
 
 func (r *sqliteRepo) ListAll(ctx context.Context) ([]*model.KernelItem, error) {
@@ -45,7 +45,7 @@ func (r *sqliteRepo) ListAll(ctx context.Context) ([]*model.KernelItem, error) {
 func (r *sqliteRepo) GetByName(ctx context.Context, name string) (*model.KernelItem, error) {
 	var k model.KernelItem
 	err := r.db.GetContext(ctx, &k,
-		`SELECT * FROM kernels WHERE name = ? AND deleted_at IS NULL AND is_present = 1`, name)
+		`SELECT * FROM kernels WHERE name = ? AND deleted_at IS NULL `, name)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -55,7 +55,7 @@ func (r *sqliteRepo) GetByName(ctx context.Context, name string) (*model.KernelI
 func (r *sqliteRepo) GetDefault(ctx context.Context) (*model.KernelItem, error) {
 	var k model.KernelItem
 	err := r.db.GetContext(ctx, &k,
-		`SELECT * FROM kernels WHERE is_default = 1 AND deleted_at IS NULL AND is_present = 1 LIMIT 1`)
+		`SELECT * FROM kernels WHERE is_default = 1 AND deleted_at IS NULL  LIMIT 1`)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -106,7 +106,7 @@ func (r *sqliteRepo) Count(ctx context.Context) (int, error) {
 func (r *sqliteRepo) GetByType(ctx context.Context, kernelType string) (*model.KernelItem, error) {
 	var k model.KernelItem
 	err := r.db.GetContext(ctx, &k,
-		`SELECT * FROM kernels WHERE type = ? AND deleted_at IS NULL AND is_present = 1 LIMIT 1`, kernelType)
+		`SELECT * FROM kernels WHERE type = ? AND deleted_at IS NULL  LIMIT 1`, kernelType)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -118,7 +118,7 @@ func (r *sqliteRepo) GetByVersionAndType(ctx context.Context, version, kernelTyp
 	err := r.db.GetContext(
 		ctx,
 		&k,
-		`SELECT * FROM kernels WHERE version = ? AND type = ? AND deleted_at IS NULL AND is_present = 1`,
+		`SELECT * FROM kernels WHERE version = ? AND type = ? AND deleted_at IS NULL `,
 		version,
 		kernelType,
 	)

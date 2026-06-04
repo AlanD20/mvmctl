@@ -99,7 +99,7 @@ func (r *sqliteLeaseRepo) CountAvailable(ctx context.Context, networkID string) 
 	}
 	var info netInfo
 	err := sqlx.GetContext(ctx, r.db, &info,
-		"SELECT subnet, ipv4_gateway FROM networks WHERE id = ? AND deleted_at IS NULL AND is_present = 1",
+		"SELECT subnet, ipv4_gateway FROM networks WHERE id = ? AND deleted_at IS NULL ",
 		networkID)
 	if err == sql.ErrNoRows {
 		return 0, nil

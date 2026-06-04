@@ -31,7 +31,7 @@ func (r *sqliteRepo) Get(ctx context.Context, imageID string) (*model.ImageItem,
 func (r *sqliteRepo) FindByPrefix(ctx context.Context, prefix string) ([]*model.ImageItem, error) {
 	var items []*model.ImageItem
 	return items, r.db.SelectContext(ctx, &items,
-		`SELECT * FROM images WHERE id LIKE ? AND deleted_at IS NULL AND is_present = 1`, prefix+"%")
+		`SELECT * FROM images WHERE id LIKE ? AND deleted_at IS NULL `, prefix+"%")
 }
 
 func (r *sqliteRepo) GetByType(ctx context.Context, imgType string) (*model.ImageItem, error) {
@@ -39,7 +39,7 @@ func (r *sqliteRepo) GetByType(ctx context.Context, imgType string) (*model.Imag
 	err := r.db.GetContext(
 		ctx,
 		&img,
-		`SELECT * FROM images WHERE type = ? AND deleted_at IS NULL AND is_present = 1 ORDER BY is_default DESC, created_at DESC`,
+		`SELECT * FROM images WHERE type = ? AND deleted_at IS NULL  ORDER BY is_default DESC, created_at DESC`,
 		imgType,
 	)
 	if err == sql.ErrNoRows {
@@ -53,7 +53,7 @@ func (r *sqliteRepo) GetByVersionAndType(ctx context.Context, version, imgType s
 	err := r.db.GetContext(
 		ctx,
 		&img,
-		`SELECT * FROM images WHERE version = ? AND type = ? AND deleted_at IS NULL AND is_present = 1`,
+		`SELECT * FROM images WHERE version = ? AND type = ? AND deleted_at IS NULL `,
 		version,
 		imgType,
 	)
@@ -66,7 +66,7 @@ func (r *sqliteRepo) GetByVersionAndType(ctx context.Context, version, imgType s
 func (r *sqliteRepo) GetByName(ctx context.Context, name string) (*model.ImageItem, error) {
 	var img model.ImageItem
 	err := r.db.GetContext(ctx, &img,
-		`SELECT * FROM images WHERE name = ? AND deleted_at IS NULL AND is_present = 1`, name)
+		`SELECT * FROM images WHERE name = ? AND deleted_at IS NULL `, name)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -130,7 +130,7 @@ func (r *sqliteRepo) SoftDelete(ctx context.Context, imageID string) error {
 func (r *sqliteRepo) GetDefault(ctx context.Context) (*model.ImageItem, error) {
 	var img model.ImageItem
 	err := r.db.GetContext(ctx, &img,
-		`SELECT * FROM images WHERE is_default = 1 AND deleted_at IS NULL AND is_present = 1 LIMIT 1`)
+		`SELECT * FROM images WHERE is_default = 1 AND deleted_at IS NULL  LIMIT 1`)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
