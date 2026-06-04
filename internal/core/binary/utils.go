@@ -3,11 +3,25 @@ package binary
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 
 	"mvmctl/internal/infra/download"
 	"mvmctl/internal/infra/errs"
 )
+
+// rustTargetTriple returns the Rust target triple for the current architecture.
+// Used for locating cargo build output directories.
+func rustTargetTriple() string {
+	switch runtime.GOARCH {
+	case "amd64":
+		return "x86_64-unknown-linux-musl"
+	case "arm64":
+		return "aarch64-unknown-linux-musl"
+	default:
+		return runtime.GOARCH + "-unknown-linux-musl"
+	}
+}
 
 // ── Version helpers ────────────────────────────────────────────────────────
 

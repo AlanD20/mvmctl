@@ -383,7 +383,7 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 	}
 
 	// ── Locate built binaries ──
-	buildOutput := filepath.Join(srcDir, "build", "cargo_target", "x86_64-unknown-linux-musl", "release")
+	buildOutput := filepath.Join(srcDir, "build", "cargo_target", rustTargetTriple(), "release")
 	fcSrc := filepath.Join(buildOutput, "firecracker")
 	jlSrc := filepath.Join(buildOutput, "jailer")
 

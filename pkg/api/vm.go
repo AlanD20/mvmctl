@@ -1686,7 +1686,7 @@ func (op *Operation) VMImport(
 
 	// Use VMImportRequest for full semantic resolution pipeline
 	// (matches Python: VMImportRequest(inputs=inputs, db=db).resolve())
-	request := inputs.NewVMImportRequest(*input, op.Connection.DB())
+	request := inputs.NewVMImportRequest(*input, op.Services.Config, op.Connection.DB())
 	resolved, execErr = request.Resolve(ctx)
 	var vmInstance *model.VM
 	if execErr == nil {

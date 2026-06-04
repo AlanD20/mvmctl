@@ -118,7 +118,7 @@ func (op *Operation) KernelPull(ctx context.Context, input *inputs.KernelPullInp
 	}
 
 	// Resolve through the Request pipeline (matches Python)
-	request := inputs.NewKernelPullRequest(*input, op.Connection.DB())
+	request := inputs.NewKernelPullRequest(*input, op.Services.Config)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
 		return nil, &errs.DomainError{

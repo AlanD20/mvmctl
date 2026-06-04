@@ -23,7 +23,7 @@ func (op *Operation) SSHConnect(ctx context.Context, input *inputs.SSHInput) err
 	//   ...
 	// except MVMError as e:
 	//   return OperationResult(status="error", code="ssh.failed", ...)
-	request := inputs.NewSSHRequest(*input, op.Connection.DB())
+	request := inputs.NewSSHRequest(*input, op.Services.Config)
 	resolved, err := request.Resolve(ctx, op.Repos.VM, op.Repos.Key)
 	if err != nil {
 		return newSSHError(err)

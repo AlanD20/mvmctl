@@ -70,6 +70,36 @@ func (s *Service) Set(ctx context.Context, category, key string, value any) erro
 	return s.repo.Set(ctx, category, key, coerced)
 }
 
+// GetString resolves a config value as a string using GetValue, then casts.
+// Returns defaultVal if GetValue fails or the value can't be cast.
+func (s *Service) GetString(ctx context.Context, category, key string, defaultVal string) string {
+	v, err := s.GetValue(ctx, category, key)
+	if err != nil || v == nil {
+		return defaultVal
+	}
+	return infra.ToString(v, defaultVal)
+}
+
+// GetInt resolves a config value as an int using GetValue, then casts.
+// Returns defaultVal if GetValue fails or the value can't be cast.
+func (s *Service) GetInt(ctx context.Context, category, key string, defaultVal int) int {
+	v, err := s.GetValue(ctx, category, key)
+	if err != nil || v == nil {
+		return defaultVal
+	}
+	return infra.ToInt(v, defaultVal)
+}
+
+// GetBool resolves a config value as a bool using GetValue, then casts.
+// Returns defaultVal if GetValue fails or the value can't be cast.
+func (s *Service) GetBool(ctx context.Context, category, key string, defaultVal bool) bool {
+	v, err := s.GetValue(ctx, category, key)
+	if err != nil || v == nil {
+		return defaultVal
+	}
+	return infra.ToBool(v, defaultVal)
+}
+
 // Delete removes a setting override. Returns true if a row was deleted.
 // Matches Python: delete() -> repo.delete().
 func (s *Service) Delete(ctx context.Context, category, key string) (bool, error) {
@@ -184,7 +214,7 @@ func (s *Service) checkConstraints(ctx context.Context, category, key string, ne
 		if otherKey == key && cat == category {
 			return newValue, nil
 		}
-		return s.getActiveValue(ctx, cat, otherKey)
+		return s.GetValue(ctx, cat, otherKey)
 	}
 
 	for _, constraint := range constraints {
@@ -195,10 +225,10 @@ func (s *Service) checkConstraints(ctx context.Context, category, key string, ne
 	return nil
 }
 
-// getActiveValue returns the effective value for a setting:
+// GetValue returns the effective value for a setting:
 // DB override (coerced) or hardcoded default.
 // Matches Python: _get_active_value(category, key).
-func (s *Service) getActiveValue(ctx context.Context, category, key string) (any, error) {
+func (s *Service) GetValue(ctx context.Context, category, key string) (any, error) {
 	override, err := s.repo.Get(ctx, category, key)
 	if err != nil {
 		return nil, err
