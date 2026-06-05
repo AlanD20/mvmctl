@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,15 +18,15 @@ import (
 	"time"
 
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/system"
 
 	"golang.org/x/term"
 )
 
-// relayPID stores the OS PID of the current process when running as a
-// goroutine-based relay. Since Go uses goroutines (not subprocesses),
-// all relays share the mvm process's PID. This PID is used for liveness
-// checks (via os.FindProcess/kill(0)) in CleanupOrphans.
-var relayPID = os.Getpid()
+// isAlive checks if a process with the given PID is still running.
+func isAlive(pid int) bool {
+	return syscall.Kill(pid, 0) == nil
+}
 
 // TODO(verdict #32): The goroutine-based relay logic has been migrated to
 // internal/service/console/. New code should prefer that package.
@@ -62,16 +63,7 @@ type RelayManager struct {
 	pidPath    string
 	socketPath string
 	logPath    string
-	listener   net.Listener
-	cancel     context.CancelFunc
 	relayPid   int
-	// ptyFD is the PTY controller file descriptor used by relayLoop.
-	// Stored so Stop() can close it to force-unblock a stuck read goroutine
-	// (SIGKILL equivalent, matching Python's _send_signal(pid, signal.SIGKILL)).
-	ptyFD int
-	// doneCh is closed when the relay goroutine fully exits.
-	// Used by Stop() to poll for goroutine completion (matching Python's os.kill(pid, 0) liveness check).
-	doneCh chan struct{}
 }
 
 // NewRelayManager creates a new console relay manager.
@@ -140,323 +132,133 @@ func (rm *RelayManager) SocketPath() string { return rm.socketPath }
 // LogPath returns the relay's log path. Matches Python's property.
 func (rm *RelayManager) LogPath() string { return rm.logPath }
 
-// Start begins the console relay goroutine with the given PTY controller FD.
-// Uses the caller's context so SIGINT/SIGTERM propagate properly.
+// Start begins the console relay subprocess with the given PTY controller FD.
+// Spawns "mvm run console-relay" as a detached subprocess.
 // Returns (socketPath, pid, error). Matches Python's ConsoleRelayManager.start().
 func (rm *RelayManager) Start(ctx context.Context, ptyControllerFD int) (string, int, error) {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
-	if rm.cancel != nil {
+	if rm.relayPid > 0 {
 		return "", 0, ErrAlreadyRunning(rm.id)
 	}
 	if err := os.MkdirAll(rm.path, infra.DirPerm); err != nil {
 		return "", 0, err
 	}
-	ctx, cancel := context.WithCancel(ctx)
-	rm.cancel = cancel
-	// Store PTY FD for potential SIGKILL-equivalent force-close in Stop()
-	rm.ptyFD = ptyControllerFD
-	// Set PID to the real OS PID of the current process. Since Go uses
-	// goroutines (not subprocesses), all relays share the mvm process PID.
-	// This ensures CleanupOrphans can correctly verify liveness using
-	// syscall.Kill(pid, 0) — the mvm process is alive so orphans are skipped.
-	rm.relayPid = relayPID
-	// Write PID file in Start() rather than relayLoop() to avoid racing
-	// on rm.relayPid access (relayLoop runs in a separate goroutine).
-	// Matches Python's process.py _write_pid_file() which runs before the select loop.
-	if err := os.MkdirAll(filepath.Dir(rm.pidPath), infra.DirPerm); err == nil {
-		_ = os.WriteFile(rm.pidPath, []byte(strconv.Itoa(relayPID)), 0644)
+
+	// Convert PTY controller FD to *os.File for passing to subprocess.
+	// The subprocess inherits this FD (as ExtraFiles[0] = FD 3).
+	ptyFile := os.NewFile(uintptr(ptyControllerFD), "pty")
+	if ptyFile == nil {
+		return "", 0, fmt.Errorf("invalid PTY controller FD %d", ptyControllerFD)
 	}
-	// doneCh allows Stop() to poll for goroutine completion, matching
-	// Python's os.kill(pid, 0) liveness check in the graceful stop timeout loop.
-	rm.doneCh = make(chan struct{})
-	ready := make(chan error, 1)
-	go rm.relayLoop(ctx, ptyControllerFD, ready, rm.doneCh)
-	// Wait for socket to be ready or for error
-	err := <-ready
+
+	// Spawn "mvm run console-relay" subprocess
+	args := []string{
+		"--vm-id", rm.id,
+		"--vm-path", rm.path,
+		"--vm-name", rm.name,
+		"--pty-fd", "3",
+	}
+	cmd, err := system.SpawnService("console-relay", []*os.File{ptyFile}, args...)
 	if err != nil {
-		cancel()
-		rm.cancel = nil
-		rm.relayPid = 0
 		return "", 0, ErrProcessFailed(rm.id, err)
 	}
-	return rm.socketPath, rm.relayPid, nil
+
+	pid := cmd.Process.Pid
+	rm.relayPid = pid
+
+	// Poll for socket to appear (subprocess creates it in net.Listen)
+	for i := 0; i < 50; i++ {
+		if _, err := os.Stat(rm.socketPath); err == nil {
+			return rm.socketPath, pid, nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	return "", 0, ErrProcessFailed(rm.id, fmt.Errorf("console relay socket %s did not appear within 2.5s", rm.socketPath))
 }
 
 // relayLoop is the main goroutine implementing the relay logic.
 // Matches Python's process.py main() — reads from PTY, writes to log file,
 // listens on Unix socket, forwards bidirectionally between PTY and connected client.
-func (rm *RelayManager) relayLoop(ctx context.Context, ptyFD int, ready chan<- error, doneCh chan struct{}) {
-	// doneCh must always be closed on exit so Stop() can detect completion.
-	defer close(doneCh)
-	// Create log file
-	logFile, err := os.OpenFile(rm.logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		ready <- err
-		return
-	}
-	defer logFile.Close()
-	// Create PTY file handle
-	ptyFile := os.NewFile(uintptr(ptyFD), "pty")
-	if ptyFile == nil {
-		ready <- fmt.Errorf("failed to open PTY FD %d", ptyFD)
-		return
-	}
-	defer ptyFile.Close()
-	// Remove old socket if present, then create new one
-	os.Remove(rm.socketPath)
-	listener, err := net.Listen("unix", rm.socketPath)
-	if err != nil {
-		ready <- err
-		return
-	}
-	// Set the listener for Stop() to close
-	rm.mu.Lock()
-	rm.listener = listener
-	rm.mu.Unlock()
-	// Cleanup on exit — reset all shared state so Stop() can detect completion.
-	defer func() {
-		listener.Close()
-		os.Remove(rm.socketPath)
-		os.Remove(rm.pidPath)
-		rm.mu.Lock()
-		rm.listener = nil
-		rm.cancel = nil
-		rm.relayPid = 0
-		rm.mu.Unlock()
-	}()
-	// Signal that we're ready
-	ready <- nil
-	// Channel for PTY reads
-	ptyCh := make(chan []byte, 32)
-	// Goroutine: read from PTY, send to ptyCh
-	go func() {
-		defer close(ptyCh)
-		buf := make([]byte, consoleReadBufferSize)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-			n, err := ptyFile.Read(buf)
-			if n > 0 {
-				data := make([]byte, n)
-				copy(data, buf[:n])
-				select {
-				case ptyCh <- data:
-				case <-ctx.Done():
-					return
-				}
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
-	// Goroutine: accept connections
-	acceptCh := make(chan net.Conn)
-	go func() {
-		defer close(acceptCh)
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			select {
-			case acceptCh <- conn:
-			case <-ctx.Done():
-				conn.Close()
-				return
-			}
-		}
-	}()
-	// Watcher: close listener when context is cancelled, so accept goroutine returns
-	go func() {
-		<-ctx.Done()
-		listener.Close()
-	}()
-	// ── Main relay loop ──
-	// Matches Python's process.py main select loop exactly.
-	var client net.Conn
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case data, ok := <-ptyCh:
-			if !ok {
-				return
-			}
-			// Write to log file (matches process.py _write_to_log)
-			if _, err := logFile.Write(data); err == nil {
-				logFile.Sync()
-			}
-			// Forward to connected client (matches process.py _forward_to_client)
-			if client != nil {
-				if _, err := client.Write(data); err != nil {
-					// Connection broken — close client (matches process.py line 169-177)
-					client.Close()
-					client = nil
-				}
-			}
-		case newConn, ok := <-acceptCh:
-			if !ok {
-				return
-			}
-			// Only accept one client at a time (matching backlog=1)
-			if client != nil {
-				client.Close()
-			}
-			client = newConn
-			// Start client read goroutine — reads from client, forwards to PTY
-			// (matches process.py _read_from_client + _forward_to_pty)
-			go func(conn net.Conn) {
-				buf := make([]byte, consoleReadBufferSize)
-				for {
-					if err := conn.SetReadDeadline(time.Now().Add(
-						time.Duration(consoleSelectTimeoutS * float64(time.Second)),
-					)); err != nil {
-						return
-					}
-					n, err := conn.Read(buf)
-					if n > 0 {
-						// Forward to PTY (matches process.py _forward_to_pty)
-						ptyFile.Write(buf[:n]) //nolint:errcheck
-					}
-					if err != nil {
-						if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-							continue
-						}
-						return
-					}
-				}
-			}(client)
-		case <-time.After(time.Duration(consoleSelectTimeoutS * float64(time.Second))):
-			// Periodic timeout to keep select looping (matches Python's select timeout)
-		}
-	}
-}
-
 // Stop stops the relay and cleans up.
 // force=true: immediate stop (matches Python's force=True: SIGTERM + cleanup_files + _pid = None).
 // force=false: graceful stop with kill escalation timeout (matches Python's graceful stop).
-// Python graceful flow:
-//  1. Send SIGTERM
-//  2. If SIGTERM fails (process dead) → cleanup, return
-//  3. Loop CONST_CONSOLE_KILL_TIMEOUT_S * 10 times, sleep 0.1s each, signal 0 to check liveness
-//  4. If loop exhausted → send SIGKILL
-//  5. Cleanup files, reset _pid
-//  6. Log "Terminated console relay for %s" on both paths
 func (rm *RelayManager) Stop(force bool) bool {
 	rm.mu.Lock()
-	cancel := rm.cancel
-	listener := rm.listener
-	doneCh := rm.doneCh
-	if cancel == nil {
+	pid := rm.relayPid
+	if pid <= 0 {
 		rm.mu.Unlock()
 		return false
 	}
 	rm.mu.Unlock()
+
+	// On Unix, os.FindProcess always succeeds — use syscall.Kill for all signaling.
+	// Matches Python's _send_signal() which uses os.kill(pid, sig) and handles
+	// ProcessLookupError (ESRCH) and PermissionError (EPERM).
+
 	if force {
-		// Abrupt: cancel context (SIGTERM equivalent), clean up immediately.
-		// Matches Python's force=True:
-		//   self._send_signal(pid, signal.SIGTERM)
-		//   self._cleanup_files()
-		//   self._pid = None
-		//   logger.info("Terminated console relay for %s", self._name)
-		//   return True
-		cancel()
-		if listener != nil {
-			listener.Close()
-		}
+		// Abrupt: SIGKILL, clean up immediately (matches Python's force=True).
+		syscall.Kill(pid, syscall.SIGKILL) //nolint:errcheck
 		rm.mu.Lock()
 		rm.cleanupFiles()
-		rm.cancel = nil
-		rm.listener = nil
 		rm.relayPid = 0
 		rm.mu.Unlock()
 		slog.Info("Terminated console relay", "name", rm.name)
 		return true
 	}
-	// Graceful: cancel context (SIGTERM equivalent), then poll for completion
-	// Matches Python's graceful stop pattern:
-	//   if not self._send_signal(pid, signal.SIGTERM): → cleanup, return True
-	cancel()
-	if listener != nil {
-		listener.Close()
+
+	// Graceful: send SIGTERM, then poll for completion
+	// Matches Python's: if not self._send_signal(pid, signal.SIGTERM): cleanup + return
+	if syscall.Kill(pid, syscall.SIGTERM) != nil {
+		// Process already dead — matches Python's ProcessLookupError
+		rm.mu.Lock()
+		rm.cleanupFiles()
+		rm.relayPid = 0
+		rm.mu.Unlock()
+		return true
 	}
-	// Equivalent to Python's: for _ in range(int(CONST_CONSOLE_KILL_TIMEOUT_S * 10)):
-	//   time.sleep(0.1)
-	//   if not self._send_signal(pid, 0): break
-	// else: self._send_signal(pid, signal.SIGKILL)
-	//
-	// doneCh is closed by relayLoop's deferred cleanup, so we poll it
-	// instead of checking rm.cancel (which Go's goroutine resets to nil).
-	if doneCh != nil {
-		stillAlive := true
-		for i := 0; i < int(consoleKillTimeoutS*10); i++ {
-			time.Sleep(100 * time.Millisecond)
-			select {
-			case <-doneCh:
-				stillAlive = false
-			default:
-			}
-			if !stillAlive {
-				break
-			}
-		}
-		// SIGKILL equivalent: goroutine might still be alive after timeout.
-		// Force-close the PTY FD to unblock any stuck read goroutine,
-		// matching Python's _send_signal(pid, signal.SIGKILL).
-		if stillAlive {
-			if rm.ptyFD > 0 {
-				syscall.Close(rm.ptyFD)
-			}
-			// Wait briefly for goroutine to exit after force-close.
-			select {
-			case <-doneCh:
-			case <-time.After(100 * time.Millisecond):
-			}
+
+	// Poll for process death (matches Python's loop with signal 0)
+	for i := 0; i < int(consoleKillTimeoutS*10); i++ {
+		time.Sleep(100 * time.Millisecond)
+		if !isAlive(pid) {
+			rm.mu.Lock()
+			rm.cleanupFiles()
+			rm.relayPid = 0
+			rm.mu.Unlock()
+			slog.Info("Terminated console relay", "name", rm.name)
+			return true
 		}
 	}
+	// Timeout — escalate to SIGKILL (matches Python's else: self._send_signal(pid, signal.SIGKILL))
+	syscall.Kill(pid, syscall.SIGKILL) //nolint:errcheck
 	rm.mu.Lock()
 	rm.cleanupFiles()
-	rm.cancel = nil
-	rm.listener = nil
 	rm.relayPid = 0
 	rm.mu.Unlock()
 	slog.Info("Terminated console relay", "name", rm.name)
 	return true
 }
+
 func (rm *RelayManager) cleanupFiles() {
 	os.Remove(rm.pidPath)
 	os.Remove(rm.socketPath)
 }
 
-// GetPID returns the PID of the running relay, verifying liveness via doneCh.
-// Matches Python's ConsoleRelayManager.get_pid() which uses os.kill(pid, 0)
-// to confirm the process is alive before returning the PID.
+// GetPID returns the PID of the running relay, verifying liveness.
+// Matches Python's ConsoleRelayManager.get_pid() which uses os.kill(pid, 0).
 func (rm *RelayManager) GetPID() *int {
 	rm.mu.Lock()
-	if rm.cancel == nil && rm.relayPid <= 0 {
+	pid := rm.relayPid
+	if pid <= 0 {
 		rm.mu.Unlock()
-		// No in-memory PID — try PID file (matching Python fallback)
 		return rm.readPIDFromFile()
 	}
-	pid := rm.relayPid
-	doneCh := rm.doneCh
-	cancel := rm.cancel
 	rm.mu.Unlock()
-	// Verify liveness: doneCh is closed when relayLoop fully exits.
-	// This is the Go equivalent of Python's os.kill(pid, 0) — if the
-	// goroutine has exited, doneCh is closed and we return nil.
-	if cancel != nil && doneCh != nil {
-		select {
-		case <-doneCh:
-			return nil // goroutine has exited
-		default:
-			return &pid // goroutine is still alive
-		}
+	// Verify liveness (Python: os.kill(pid, 0))
+	if isAlive(pid) {
+		return &pid
 	}
 	return nil
 }
@@ -931,9 +733,18 @@ func RunRelaySubprocess(args []string) {
 }
 
 // runSubprocessRelay runs the relay loop in the current goroutine.
-// This is the subprocess version — blocking, no context cancellation.
+// Matches Python's process.py main() exactly in behavior:
+//   - select loop with 0.1s timeout
+//   - PTY → log file + client socket
+//   - Client socket → PTY
+//   - Detach = client disconnect (process stays running for reconnection)
+//   - Clean shutdown on context cancellation
 func (rm *RelayManager) runSubprocessRelay(ptyFile *os.File) {
-	// Create log file
+	// ── Signal handling (matches Python's _setup_signal_handlers) ──
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+
+	// ── Open log file (matches Python's with open(log_file, "ab")) ──
 	logFile, err := os.OpenFile(rm.logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating log file: %v\n", err)
@@ -941,7 +752,8 @@ func (rm *RelayManager) runSubprocessRelay(ptyFile *os.File) {
 	}
 	defer logFile.Close()
 
-	// Wait for client connection on Unix socket
+	// ── Set up Unix socket (matches Python's socket + bind + listen) ──
+	os.Remove(rm.socketPath)
 	listener, err := net.Listen("unix", rm.socketPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error listening on socket %s: %v\n", rm.socketPath, err)
@@ -949,65 +761,120 @@ func (rm *RelayManager) runSubprocessRelay(ptyFile *os.File) {
 	}
 	defer listener.Close()
 
-	conn, err := listener.Accept()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error accepting connection: %v\n", err)
-		os.Exit(1)
+	// ── Ensure socket/PID file cleanup on exit (matches Python's finally block) ──
+	cleanup := func() {
+		os.Remove(rm.socketPath)
+		os.Remove(rm.pidPath)
 	}
-	defer conn.Close()
+	defer cleanup()
 
-	// Notify parent that socket is ready
-	fmt.Fprintf(os.Stdout, "ready\n")
-
-	// Relay loop: PTY → log + socket, socket → PTY
-	// Matches internal/relayLoop but for subprocess
-	relayLoopImpl(ptyFile, logFile, conn, conn)
-}
-
-// relayLoopImpl implements the core PTY relay logic.
-// Reads from PTY, writes to log and client. Reads from client, writes to PTY.
-func relayLoopImpl(pty io.ReadWriteCloser, logFile io.Writer, client io.ReadWriteCloser, clientReader io.Reader) {
-	// PTY → client + log (goroutine)
-	ptyCh := make(chan []byte, 256)
+	// ── Goroutine: read PTY → channel (matches Python's select on pty_fd) ──
+	// Using buffered channel to decouple PTY reads from client writes,
+	// matching Python's select-based non-blocking approach.
+	type ptyRead struct {
+		data []byte
+		err  error
+	}
+	ptyCh := make(chan ptyRead, 256)
 	go func() {
-		defer close(ptyCh)
-		buf := make([]byte, 4096)
+		buf := make([]byte, consoleReadBufferSize)
 		for {
-			n, err := pty.Read(buf)
+			n, err := ptyFile.Read(buf)
 			if n > 0 {
 				data := make([]byte, n)
 				copy(data, buf[:n])
-				ptyCh <- data
+				select {
+				case ptyCh <- ptyRead{data: data}:
+				case <-ctx.Done():
+					return
+				}
 			}
 			if err != nil {
+				select {
+				case ptyCh <- ptyRead{err: err}:
+				case <-ctx.Done():
+				}
 				return
 			}
 		}
 	}()
 
-	// Client → PTY (main loop)
-	inputBuf := make([]byte, 4096)
+	// ── Main relay loop (matches Python's while + select) ──
+	// Python: while not _shutdown_state["requested"]: select([pty_fd, server_sock, client_sock], timeout=0.1)
+	// Go equivalent: select on ctx.Done(), ptyCh, acceptCh, client read
+	var clientConn net.Conn
+
 	for {
+		// Check shutdown before blocking operations (matches Python's while-check)
 		select {
-		case data, ok := <-ptyCh:
-			if !ok {
-				return
-			}
-			logFile.Write(data)
-			client.Write(data)
+		case <-ctx.Done():
+			return
 		default:
-			n, err := clientReader.Read(inputBuf)
+		}
+
+		if clientConn == nil {
+			// No client — try non-blocking accept (matches Python's _accept_client)
+			// Python uses setblocking(False) + accept; Go uses SetDeadline on listener
+			listener.(*net.UnixListener).SetDeadline(time.Now().Add(
+				time.Duration(consoleSelectTimeoutS * float64(time.Second)),
+			))
+			conn, err := listener.Accept()
+			if err == nil {
+				clientConn = conn
+				// Notify parent that socket is ready (matches Python — socket exists when Listen succeeds)
+			} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				// Timeout — no client yet, continue loop to check shutdown
+			} else {
+				// Actual error — log and continue
+				slog.Debug("Accept error", "error", err)
+			}
+		}
+
+		if clientConn != nil {
+			// Set read deadline for select-like timeout behavior
+			// (matches Python's select with 0.1s timeout on client_sock)
+			clientConn.SetReadDeadline(time.Now().Add(
+				time.Duration(consoleSelectTimeoutS * float64(time.Second)),
+			))
+			buf := make([]byte, consoleReadBufferSize)
+			n, err := clientConn.Read(buf)
+
 			if n > 0 {
-				data := inputBuf[:n]
-				// Check for detach sequence Ctrl+X d
-				if len(data) == 2 && data[0] == 0x18 && data[1] == 'd' {
-					return
-				}
-				pty.Write(data)
+				// Forward client input to PTY (matches Python's _forward_to_pty)
+				ptyFile.Write(buf[:n]) //nolint:errcheck
 			}
 			if err != nil {
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					// Timeout — normal, continue loop (matches Python's select timeout)
+				} else {
+					// Client disconnected or error — close and wait for next (matches Python)
+					clientConn.Close()
+					clientConn = nil
+				}
+			}
+		}
+
+		// Read from PTY channel (non-blocking, matches Python's select on pty_fd)
+		select {
+		case pr := <-ptyCh:
+			if pr.err != nil {
+				// PTY closed — matches Python's: if not data: _shutdown_state = True; break
 				return
 			}
+			// Write to log file with flush (matches Python's _write_to_log with f.flush())
+			if _, err := logFile.Write(pr.data); err == nil {
+				logFile.Sync() // Python's f.flush()
+			}
+			// Forward to connected client (matches Python's _forward_to_client)
+			if clientConn != nil {
+				if _, err := clientConn.Write(pr.data); err != nil {
+					// Connection broken — close client (matches Python's close + set None)
+					clientConn.Close()
+					clientConn = nil
+				}
+			}
+		default:
+			// No PTY data available — matches Python's select timeout where pty_fd not ready
 		}
 	}
 }

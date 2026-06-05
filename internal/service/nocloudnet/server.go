@@ -112,7 +112,7 @@ func startNoCloudSubprocess(dir string, port int, host, pidPath, logPath string)
 		"--pid-file", pidPath,
 		"--log-file", logPath,
 	}
-	return system.SpawnSubprocess("nocloud-serve", nil, args...)
+	return system.SpawnService("nocloud-serve", nil, args...)
 }
 
 // Start launches the HTTP server as a subprocess and returns (url, port, pid).

@@ -131,6 +131,22 @@ type MetricsConfig struct {
 	MetricsPath string `json:"metrics_path"`
 }
 
+// ── FirecrackerVMConfig ──
+
+// FirecrackerVMConfig is the JSON-serializable top-level Firecracker VM config.
+// This struct is written to the --config-file JSON that Firecracker reads at boot.
+// Optional sections use pointer fields with omitempty so they're omitted from JSON
+// when nil.
+type FirecrackerVMConfig struct {
+	BootSource        BootSourceConfig              `json:"boot-source"`
+	Drives            []DriveConfig                 `json:"drives"`
+	NetworkInterfaces []NetworkInterfaceConfig       `json:"network-interfaces"`
+	MachineConfig     MachineConfig                  `json:"machine-config"`
+	Logger            *LoggerConfig                  `json:"logger,omitempty"`
+	Metrics           *MetricsConfig                 `json:"metrics,omitempty"`
+	CPUConfig         *CpuConfig                     `json:"cpu-config,omitempty"`
+}
+
 // ── FirecrackerConfigDict ──
 
 // FirecrackerConfigDict is a dynamic JSON map — Firecracker API has variable response shapes that can't be statically typed.
@@ -187,8 +203,8 @@ type FirecrackerConfig struct {
 	ImageFSType string `json:"image_fs_type"`
 
 	// Boot
-	BootArgs *string `json:"boot_args,omitempty"`
-	LSMFlags *string `json:"lsm_flags,omitempty"`
+	BootArgs string `json:"boot_args"`
+	LSMFlags string `json:"lsm_flags"`
 
 	// Feature flags
 	PCIEnabled    bool `json:"pci_enabled"`
@@ -220,7 +236,6 @@ type FirecrackerConfig struct {
 	ExtraDrives []DriveConfig `json:"extra_drives,omitempty"`
 
 	// Spawn behavior
-	RelayEnabled  bool `json:"relay_enabled"`
 	RelayClientFD *int `json:"relay_client_fd,omitempty"`
 	SnapshotMode  bool `json:"snapshot_mode"`
 }

@@ -257,11 +257,10 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 
 	// ── Item 11: boot_args default with root=UUID (Python _vm_create_input.py:526-528) ──
 	bootArgs := raw.BootArgs
-	if bootArgs == nil {
+	if bootArgs == "" {
 		defaultBootArgs, _ := b.cfg.GetString(ctx, "defaults.vm", "boot_args")
 		uuidSuffix := img.FSUUID
-		bootArgsStr := defaultBootArgs + " root=UUID=" + uuidSuffix
-		bootArgs = &bootArgsStr
+		bootArgs = defaultBootArgs + " root=UUID=" + uuidSuffix
 	}
 
 	// Resolve lsm_flags
@@ -430,8 +429,8 @@ func (b *VMCreateBuilder) Build(ctx context.Context, raw VMCreateInput) (*VMCrea
 	}
 
 	// Validate boot_args components
-	if result.BootArgs != nil {
-		for component := range strings.FieldsSeq(*result.BootArgs) {
+	if result.BootArgs != "" {
+		for component := range strings.FieldsSeq(result.BootArgs) {
 			if err := validators.BootArgComponent(component, "boot_args"); err != nil {
 				return nil, &errs.DomainError{
 					Code:    errs.CodeValidationFailed,
@@ -815,17 +814,15 @@ func (b *VMCreateBuilder) FromVM(ctx context.Context, vmEntity *model.VM) (*VMCr
 	}
 
 	// boot_args (Python: vm.boot_args if vm.boot_args else SettingsService.resolve(...))
-	var bootArgs string
-	if vmEntity.BootArgs != nil && *vmEntity.BootArgs != "" {
-		bootArgs = *vmEntity.BootArgs
-	} else {
+	bootArgs := vmEntity.BootArgs
+	if bootArgs == "" {
 		bootArgs, _ = b.cfg.GetString(ctx, "defaults.vm", "boot_args")
 	}
 
 	// lsm_flags (Python: vm.lsm_flags if vm.lsm_flags else SettingsService.resolve(...))
 	lsmFlags, _ := b.cfg.GetString(ctx, "defaults.vm", "lsm_flags")
-	if vmEntity.LSMFlags != nil && *vmEntity.LSMFlags != "" {
-		lsmFlags = *vmEntity.LSMFlags
+	if vmEntity.LSMFlags != "" {
+		lsmFlags = vmEntity.LSMFlags
 	}
 
 	// requested_guest_ip / requested_guest_mac (Python: vm.ipv4 / vm.mac — always set)
@@ -894,7 +891,7 @@ func (b *VMCreateBuilder) FromVM(ctx context.Context, vmEntity *model.VM) (*VMCr
 		DiskSizeBytes:       int64(vmEntity.DiskSizeMiB) * disk.MebibyteBytes,
 		DiskSizeMib:         vmEntity.DiskSizeMiB,
 		LSMFlags:            lsmFlags,
-		BootArgs:            &bootArgs,
+		BootArgs:            bootArgs,
 		RequestedGuestIP:    requestedGuestIP,
 		RequestedGuestMAC:   requestedGuestMAC,
 		NocloudNetPort:      vmEntity.NocloudNetPort,

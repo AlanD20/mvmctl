@@ -7,7 +7,7 @@ import (
 
 // knownMVMComms lists mvm-managed process comm names.
 // Only Firecracker has its own binary — service subprocesses are identified
-// by the MVM_BACKGROUND_SERVICE=1 environment variable set in SpawnSubprocess.
+// by the MVM_BACKGROUND_SERVICE=1 environment variable set in SpawnService.
 var knownMVMComms = [...]string{"firecracker"}
 
 // isMountPoint checks if a path is currently a mount point by comparing

@@ -341,7 +341,7 @@ func (op *Operation) vmExecuteCreateWithOpts(
 		if vmInstance == nil {
 			if ctxCreate.spawner == nil {
 				execErr = fmt.Errorf("Firecracker spawner is not set in context")
-			} else if ctxCreate.spawner.PID() == nil {
+			} else if ctxCreate.spawner.PID == nil {
 				execErr = fmt.Errorf("Failed to spawn Firecracker process")
 			} else {
 				execErr = fmt.Errorf("Failed to create VM instance model")
@@ -1025,10 +1025,10 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snap
 		ConfigFilename:       "firecracker.json",
 		SnapshotMode:         snapshotMode,
 	}
-	if v.BootArgs != nil {
+	if v.BootArgs != "" {
 		fcConfig.BootArgs = v.BootArgs
 	}
-	if v.LSMFlags != nil {
+	if v.LSMFlags != "" {
 		fcConfig.LSMFlags = v.LSMFlags
 	}
 
@@ -1041,7 +1041,6 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snap
 		if ptyErr != nil {
 			slog.Warn("Console PTY creation failed during respawn", "vm", v.Name, "error", ptyErr)
 		} else {
-			fcConfig.RelayEnabled = true
 			fcConfig.RelayClientFD = &ptyFD
 		}
 	}
@@ -1066,8 +1065,8 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snap
 	}
 
 	// Python: targeted DB updates, not full upsert.
-	pid := spawner.PID()
-	pst := spawner.ProcessStartTime()
+	pid := spawner.PID
+	pst := spawner.ProcessStartTime
 	_ = op.Repos.VM.UpdateProcessInfo(ctx, v.ID, pid, pst)
 
 	newStatus := model.VMStatusRunning
@@ -1790,16 +1789,6 @@ func (op *Operation) VMExport(ctx context.Context, input inputs.VMInput) (*input
 		binVersion = binary.Version
 	}
 
-	bootArgsStr := ""
-	if vmItem.BootArgs != nil {
-		bootArgsStr = *vmItem.BootArgs
-	}
-
-	lsmFlags := ""
-	if vmItem.LSMFlags != nil {
-		lsmFlags = *vmItem.LSMFlags
-	}
-
 	nocloudPort := 0
 	if vmItem.NocloudNetPort != nil {
 		nocloudPort = *vmItem.NocloudNetPort
@@ -1857,10 +1846,6 @@ func (op *Operation) VMExport(ctx context.Context, input inputs.VMInput) (*input
 	}
 
 	// Convert remaining string/primitive values to pointer types for export config
-	var lsmFlagsPtr *string
-	if lsmFlags != "" {
-		lsmFlagsPtr = &lsmFlags
-	}
 	var cloudInitModePtr *string
 	if vmItem.CloudInitMode != "" {
 		cloudInitModePtr = &vmItem.CloudInitMode
@@ -1898,13 +1883,13 @@ func (op *Operation) VMExport(ctx context.Context, input inputs.VMInput) (*input
 			MAC:         macPtr,
 		},
 		Boot: inputs.VMExportBootConfig{
-			Args:          new(bootArgsStr),
+			Args:          vmItem.BootArgs,
 			EnableConsole: &vmItem.EnableConsole,
 		},
 		Firecracker: inputs.VMExportFirecrackerConfig{
 			EnableAPISocket: new(true),
 			PCIEnabled:      &vmItem.PCIEnabled,
-			LsmFlags:        lsmFlagsPtr,
+			LsmFlags:        vmItem.LSMFlags,
 			NestedVirt:      &vmItem.NestedVirt,
 			CPUConfig:       cpuConfigStr,
 		},
@@ -2241,7 +2226,7 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 	c.markCreated("firecracker")
 
 	// Validate socket path won't exceed Unix domain socket limit
-	socketPath := spawner.APISocketPath()
+	socketPath := spawner.APISocketPath
 	if len(socketPath) >= 108 {
 		return fmt.Errorf(
 			"VM ID '%s' produces a socket path that is too long (%d chars, max 107). This is a system limit for Unix domain sockets. Path: %s",
@@ -2260,7 +2245,6 @@ func (c *vmCreateContext) execute(ctx context.Context) error {
 			return fmt.Errorf("console PTY creation failed: %w", ptyErr)
 		}
 		c.relay = consoleCtrl
-		fcConfig.RelayEnabled = true
 		fcConfig.RelayClientFD = &ptyFD
 	}
 
@@ -2420,8 +2404,8 @@ func (c *vmCreateContext) forRespawn(vm *model.VM, snapshotMode bool) error {
 		ConsoleSocketFilename: "console.sock",
 		ConsolePIDFilename:    "console.pid",
 		CloudInitISOName:      "seed.iso",
-		BootArgs:              ptr.SafeDeref(vm.BootArgs),
-		LSMFlags:              ptr.SafeDeref(vm.LSMFlags),
+		BootArgs:              vm.BootArgs,
+		LSMFlags:              vm.LSMFlags,
 	}
 
 	// Set cloud_init_mode from VM state
@@ -2566,7 +2550,6 @@ func (c *vmCreateContext) respawnExecute(ctx context.Context) error {
 			return fmt.Errorf("console PTY creation failed: %w", ptyErr)
 		}
 		c.relay = consoleCtrl
-		fcConfig.RelayEnabled = true
 		fcConfig.RelayClientFD = &ptyFD
 	}
 
@@ -2629,8 +2612,8 @@ func (c *vmCreateContext) buildFirecrackerConfig(ctx context.Context) *model.Fir
 		NetworkNetmask:       c.resolved.NetworkNetmask,
 		ImageFSUUID:          c.resolved.Image.FSUUID,
 		ImageFSType:          c.resolved.Image.FSType,
-		BootArgs:             new(c.resolved.BootArgs),
-		LSMFlags:             new(c.resolved.LSMFlags),
+		BootArgs:             c.resolved.BootArgs,
+		LSMFlags:             c.resolved.LSMFlags,
 		PCIEnabled:           c.resolved.PCIEnabled,
 		NestedVirt:           c.resolved.NestedVirt,
 		CPUVendor:            cpuVendor,
@@ -2676,7 +2659,7 @@ func (c *vmCreateContext) toModel() *model.VM {
 	if c.spawner == nil {
 		return nil
 	}
-	if c.spawner.PID() == nil {
+	if c.spawner.PID == nil {
 		return nil
 	}
 
@@ -2685,9 +2668,9 @@ func (c *vmCreateContext) toModel() *model.VM {
 	vm := &model.VM{
 		ID:               c.vmID,
 		Name:             c.resolved.Name,
-		PID:              ptr.SafeDerefInt(c.spawner.PID()),
+		PID:              ptr.SafeDerefInt(c.spawner.PID),
 		ExitCode:         nil,
-		ProcessStartTime: c.spawner.ProcessStartTime(),
+		ProcessStartTime: c.spawner.ProcessStartTime,
 		Status:           model.VMStatusRunning,
 		IPv4:             c.guestIP,
 		MAC:              c.guestMAC,
@@ -2730,10 +2713,10 @@ func (c *vmCreateContext) toModel() *model.VM {
 	vm.SerialOutputPath = new(filepath.Join(c.vmDir, c.resolved.SerialOutputFilename))
 
 	if c.resolved.BootArgs != "" {
-		vm.BootArgs = &c.resolved.BootArgs
+		vm.BootArgs = c.resolved.BootArgs
 	}
 	if c.resolved.LSMFlags != "" {
-		vm.LSMFlags = &c.resolved.LSMFlags
+		vm.LSMFlags = c.resolved.LSMFlags
 	}
 
 	// Python: nocloud_net_port and nocloud_net_pid from cloud_init_result
@@ -2907,10 +2890,7 @@ func (op *Operation) vmBuildResolvedInput(
 	enableConsole := !input.NoConsole
 
 	// Resolve boot_args and lsm_flags from input (matches Python's VMCreateRequest.resolve())
-	bootArgs := ""
-	if input.BootArgs != nil {
-		bootArgs = *input.BootArgs
-	}
+	bootArgs := input.BootArgs
 	lsmFlags := input.LSMFlags
 
 	// Resolve enable_logging and enable_metrics from input (matches Python)
@@ -3082,14 +3062,6 @@ func resolvedFromBuilderOutput(r *inputs.VMCreateResolved) *resolvedVMCreateInpu
 		return nil
 	}
 
-	// Fields are already typed — no type assertions needed
-
-	// BootArgs: *string -> string
-	bootArgs := ""
-	if r.BootArgs != nil {
-		bootArgs = *r.BootArgs
-	}
-
 	return &resolvedVMCreateInput{
 		Name:                  r.Name,
 		VMID:                  r.VMID,
@@ -3141,7 +3113,7 @@ func resolvedFromBuilderOutput(r *inputs.VMCreateResolved) *resolvedVMCreateInpu
 		CustomUserDataPath:    r.CustomUserDataPath,
 		CloudInitISOPath:      r.CloudInitISOPath,
 		CPUConfig:             r.CPUConfig,
-		BootArgs:              bootArgs,
+		BootArgs:              r.BootArgs,
 		SSHKeys:               r.SSHKeys,
 		Provisioner:           model.ProvisionerType(r.Provisioner),
 		Volumes:               r.Volumes,

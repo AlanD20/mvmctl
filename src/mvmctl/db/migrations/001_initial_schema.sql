@@ -150,11 +150,11 @@ CREATE TABLE vm_instances (
     pci_enabled INTEGER NOT NULL,  -- Boolean: 0 or 1
     nested_virt INTEGER NOT NULL DEFAULT 0,  -- Boolean: 0 or 1
     cpu_config TEXT NULL,  -- JSON: merged CPU template config
-    lsm_flags TEXT NULL,
+    lsm_flags TEXT NOT NULL DEFAULT '',
     enable_logging INTEGER NOT NULL,  -- Boolean: 0 or 1
     enable_metrics INTEGER NOT NULL,  -- Boolean: 0 or 1
     enable_console INTEGER NOT NULL,  -- Boolean: 0 or 1
-    boot_args TEXT NULL,
+    boot_args TEXT NOT NULL DEFAULT '',
     ssh_keys TEXT NULL,         -- JSON array of SSH key fingerprints
     ssh_user TEXT NULL,          -- SSH user configured for this VM
     volume_ids TEXT NULL,       -- JSON array of volume IDs

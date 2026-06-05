@@ -65,7 +65,7 @@ type VMExportNetworkConfig struct {
 //	    args: str | None = None
 //	    enable_console: bool | None = None
 type VMExportBootConfig struct {
-	Args          *string `json:"args,omitempty"`
+	Args          string `json:"args"`
 	EnableConsole *bool   `json:"enable_console,omitempty"`
 }
 
@@ -74,7 +74,7 @@ type VMExportBootConfig struct {
 type VMExportFirecrackerConfig struct {
 	EnableAPISocket *bool   `json:"enable_api_socket,omitempty"`
 	PCIEnabled      *bool   `json:"pci_enabled,omitempty"`
-	LsmFlags        *string `json:"lsm_flags,omitempty"`
+	LsmFlags        string `json:"lsm_flags"`
 	NestedVirt      *bool   `json:"nested_virt,omitempty"`
 	CPUConfig       *string `json:"cpu_config,omitempty"`
 }

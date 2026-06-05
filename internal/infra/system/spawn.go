@@ -9,14 +9,14 @@ import (
 	"mvmctl/internal/infra"
 )
 
-// SpawnSubprocess starts a detached subprocess in a new process group (Setpgid).
+// SpawnService starts a detached subprocess in a new process group (Setpgid).
 // The child will run as "mvm run <name>" with the given extra files.
 // extraFiles are passed to the child as FDs starting at 3 (stdin=0, stdout=1, stderr=2).
 //
 // Unlike CommandRunner.Run, this does NOT wait for the process to complete.
 // The child process survives the parent's exit, making this suitable for
 // long-running service subprocesses (nocloud server, console relay).
-func SpawnSubprocess(name string, extraFiles []*os.File, args ...string) (*exec.Cmd, error) {
+func SpawnService(name string, extraFiles []*os.File, args ...string) (*exec.Cmd, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("cannot determine executable path: %w", err)

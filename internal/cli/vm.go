@@ -416,10 +416,6 @@ func runVMCreate(
 	if nocloudNetPort != 0 {
 		nocloudPtr = &nocloudNetPort
 	}
-	var bootArgsPtr *string
-	if bootArgs != "" {
-		bootArgsPtr = &bootArgs
-	}
 	// lsmFlags, cpuTemplate — value types, zero value means "use default"
 	var imagePtr *string
 	if image != "" {
@@ -460,7 +456,7 @@ func runVMCreate(
 		NoConsole:         noConsole,
 		NestedVirt:        nestedVirtPtr,
 		PCIEnabled:        &pciEnabled,
-		BootArgs:          bootArgsPtr,
+		BootArgs:          bootArgs,
 		LSMFlags:          lsmFlags,
 		RequestedGuestMAC: macPtr,
 		CustomUserData:    userDataPtr,

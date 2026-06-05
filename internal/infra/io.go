@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"syscall"
 
 	"gopkg.in/yaml.v3"
@@ -344,6 +345,19 @@ func SecureMkdir(path, name string) error {
 	}
 
 	return nil
+}
+
+// WaitForSocket polls for a Unix socket file to appear with the given timeout.
+// Returns nil when the socket exists, or an error if the timeout expires.
+func WaitForSocket(path string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if fi, err := os.Stat(path); err == nil && fi.Mode().Type()&os.ModeSocket != 0 {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("socket %s did not appear within %v", path, timeout)
 }
 
 // WritePIDFile writes a PID to a file with flock-based exclusive locking.
