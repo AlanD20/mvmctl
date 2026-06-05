@@ -99,7 +99,7 @@ func (s *Service) ScanOrphanProcesses(ctx context.Context) []map[string]any {
 		}
 
 		// Check /proc/PID/environ for MVM_BACKGROUND_SERVICE=1 marker.
-		// Set by SpawnSubprocess for all "mvm run <service>" subprocesses.
+		// Set by SpawnService for all "mvm run <service>" subprocesses.
 		if !isKnown {
 			environBytes, err := os.ReadFile(filepath.Join(procPath, "environ"))
 			if err != nil {

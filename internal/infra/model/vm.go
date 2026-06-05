@@ -59,8 +59,8 @@ type VM struct {
 	ExitCode         *int    `json:"exit_code,omitempty"          db:"exit_code"`
 	LogPath          *string `json:"log_path,omitempty"           db:"log_path"`
 	SerialOutputPath *string `json:"serial_output_path,omitempty" db:"serial_output_path"`
-	LSMFlags         *string `json:"lsm_flags,omitempty"          db:"lsm_flags"`
-	BootArgs         *string `json:"boot_args,omitempty"          db:"boot_args"`
+	LSMFlags         string `json:"lsm_flags"                     db:"lsm_flags"`
+	BootArgs         string `json:"boot_args"                     db:"boot_args"`
 
 	// JSON-serialized in DB fields (TEXT columns, scanned directly via db.StringSlice / CpuConfig.Scan)
 	SSHKeys   db.StringSlice `json:"ssh_keys"               db:"ssh_keys"`

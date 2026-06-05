@@ -27,7 +27,7 @@ type VMCreateInput struct {
 	DiskSize            string
 	RequestedGuestIP    *string
 	SkipCINetworkConfig bool
-	BootArgs            *string
+	BootArgs            string
 	LSMFlags            string
 	NetworkName         *string
 	RequestedGuestMAC   *string
@@ -102,7 +102,7 @@ type VMCreateResolved struct {
 	CustomUserDataPath *string
 	CloudInitISOPath   *string
 	CPUConfig          *model.CpuConfig
-	BootArgs           *string
+	BootArgs           string
 	SSHKeys            []*model.SSHKeyItem
 	Provisioner        model.ProvisionerType
 	ExtraDrives        []model.DriveConfig

@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -39,9 +38,9 @@ type FirecrackerSpawner struct {
 	metricsPath      string
 	serialOutputPath string
 	pidPath          string
-	apiSocketPath    string
-	pid              *int
-	processStartTime *int64
+	APISocketPath    string
+	PID              *int
+	ProcessStartTime *int64
 	fcLogFP          *os.File
 	serialOutputFP   *os.File
 }
@@ -61,59 +60,8 @@ func NewFirecrackerSpawner(config *model.FirecrackerConfig, configPath ...string
 	s.metricsPath = filepath.Join(config.VMDir, config.MetricsFilename)
 	s.serialOutputPath = filepath.Join(config.VMDir, config.SerialOutputFilename)
 	s.pidPath = filepath.Join(config.VMDir, config.PIDFilename)
-	s.apiSocketPath = filepath.Join(config.VMDir, config.APISocketFilename)
+	s.APISocketPath = filepath.Join(config.VMDir, config.APISocketFilename)
 	return s
-}
-
-// ── Property methods matching Python @property ──
-
-// LogPath returns the path to the log file.
-// Matches Python's log_path property.
-func (s *FirecrackerSpawner) LogPath() string {
-	return s.logPath
-}
-
-// APISocketPath returns the path to the API socket.
-// Matches Python's api_socket_path property.
-func (s *FirecrackerSpawner) APISocketPath() string {
-	return s.apiSocketPath
-}
-
-// PidPath returns the path to the PID file.
-// Matches Python's pid_path property.
-func (s *FirecrackerSpawner) PidPath() string {
-	return s.pidPath
-}
-
-// SerialOutputPath returns the path to the serial output file.
-// Matches Python's serial_output_path property.
-func (s *FirecrackerSpawner) SerialOutputPath() string {
-	return s.serialOutputPath
-}
-
-// MetricsPath returns the path to the metrics file.
-// Matches Python's metrics_path property.
-func (s *FirecrackerSpawner) MetricsPath() string {
-	return s.metricsPath
-}
-
-// ConfigPath returns the path to the config file.
-// Matches Python's config_path property.
-func (s *FirecrackerSpawner) ConfigPath() string {
-	return s.configPath
-}
-
-// PID returns the Firecracker process PID, or nil if not spawned.
-// Matches Python's pid property on FirecrackerSpawner.
-func (s *FirecrackerSpawner) PID() *int {
-	return s.pid
-}
-
-// ProcessStartTime returns the Firecracker process start time (clock ticks),
-// or nil if not spawned.
-// Matches Python's process_start_time property on FirecrackerSpawner.
-func (s *FirecrackerSpawner) ProcessStartTime() *int64 {
-	return s.processStartTime
 }
 
 // ── Spawn ──
@@ -128,45 +76,48 @@ func (s *FirecrackerSpawner) Spawn() (retErr error) {
 	// On success, FDs are either closed explicitly (CloseFilePointers)
 	// or transferred to the child process via Stdin/Stdout.
 	var relayFile *os.File
+	var cmd *exec.Cmd
 	started := false
+
 	defer func() {
-		if retErr != nil && !started {
+		if retErr != nil {
+			if started {
+				// Process was spawned but something failed — kill it.
+				cmd.Process.Kill()
+				cmd.Process.Wait()
+			}
 			if relayFile != nil {
 				relayFile.Close()
 			}
-			s.CloseFilePointers()
+			s.Cleanup()
 		}
 	}()
 
 	// Remove stale API socket from previous run
-	if _, err := os.Stat(s.apiSocketPath); err == nil {
-		if err := os.Remove(s.apiSocketPath); err != nil {
-			return fmt.Errorf("remove stale api socket %s: %w", s.apiSocketPath, err)
+	if _, err := os.Stat(s.APISocketPath); err == nil {
+		if err := os.Remove(s.APISocketPath); err != nil {
+			return fmt.Errorf("remove stale api socket %s: %w", s.APISocketPath, err)
 		}
 	}
-
-	relayEnabled := s.config.RelayEnabled
-	relayClientFD := s.config.RelayClientFD
-	snapshotMode := s.config.SnapshotMode
 
 	var fcStdin *os.File
 	var fcStdout *os.File
 
-	if !snapshotMode && s.config.EnableConsole && relayEnabled {
-		if relayClientFD == nil || *relayClientFD == 0 {
+	if !s.config.SnapshotMode && s.config.RelayClientFD != nil {
+		if *s.config.RelayClientFD == 0 {
 			return &errs.DomainError{
 				Code:    errs.CodeFirecrackerSpawnError,
 				Op:      "firecracker",
-				Message: "console enabled but PTY client FD is None",
+				Message: "console enabled but PTY client FD is unavailable",
 				Class:   errs.ClassInternal,
 			}
 		}
-		relayFile = os.NewFile(uintptr(*relayClientFD), "relay-client")
+		relayFile = os.NewFile(uintptr(*s.config.RelayClientFD), "relay-client")
 		fcStdin = relayFile
 		fcStdout = relayFile
 	} else {
 		var err error
-		s.serialOutputFP, err = s.CreateFilepointer(s.serialOutputPath)
+		s.serialOutputFP, err = os.OpenFile(s.serialOutputPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 		if err != nil {
 			return err
 		}
@@ -174,7 +125,7 @@ func (s *FirecrackerSpawner) Spawn() (retErr error) {
 	}
 
 	var err error
-	s.fcLogFP, err = s.CreateFilepointer(s.logPath)
+	s.fcLogFP, err = os.OpenFile(s.logPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return err
 	}
@@ -182,16 +133,16 @@ func (s *FirecrackerSpawner) Spawn() (retErr error) {
 	fcCmd := []string{
 		s.config.BinaryPath,
 		"--api-sock",
-		s.apiSocketPath,
+		s.APISocketPath,
 	}
 	if s.config.PCIEnabled {
 		fcCmd = append(fcCmd, "--enable-pci")
 	}
-	if !snapshotMode {
+	if !s.config.SnapshotMode {
 		fcCmd = append(fcCmd, "--config-file", s.configPath)
 	}
 
-	cmd := exec.Command(fcCmd[0], fcCmd[1:]...)
+	cmd = exec.Command(fcCmd[0], fcCmd[1:]...)
 	cmd.Stdin = fcStdin
 	cmd.Stdout = fcStdout
 	cmd.Stderr = s.fcLogFP
@@ -211,10 +162,9 @@ func (s *FirecrackerSpawner) Spawn() (retErr error) {
 	}
 
 	// Wait for Firecracker to initialize (poll up to 2s, exit early on socket).
-	for i := 0; i < 20; i++ {
-		time.Sleep(100 * time.Millisecond)
-
-		if _, err := os.Stat(s.apiSocketPath); err == nil {
+	// Interleave liveness checks so a crashed process is caught early.
+	for range 20 {
+		if infra.WaitForSocket(s.APISocketPath, 100*time.Millisecond) == nil {
 			break
 		}
 
@@ -233,7 +183,7 @@ func (s *FirecrackerSpawner) Spawn() (retErr error) {
 		}
 	}
 
-	if _, err := os.Stat(s.apiSocketPath); os.IsNotExist(err) {
+	if _, err := os.Stat(s.APISocketPath); os.IsNotExist(err) {
 		return &errs.DomainError{
 			Code:    errs.CodeFirecrackerSpawnError,
 			Op:      "firecracker",
@@ -245,34 +195,13 @@ func (s *FirecrackerSpawner) Spawn() (retErr error) {
 	s.CloseFilePointers()
 
 	pid := cmd.Process.Pid
-	s.pid = &pid
-	s.processStartTime = system.GetProcessStartTime(pid)
+	s.PID = &pid
+	s.ProcessStartTime = system.GetProcessStartTime(pid)
 
-	if err := writePIDFile(s.pidPath, pid); err != nil {
+	if err := infra.WritePIDFile(s.pidPath, pid); err != nil {
 		slog.Warn("Failed to write PID file", "path", s.pidPath, "error", err)
 	}
 
-	return nil
-}
-
-// writePIDFile writes a PID to a file with exclusive flock locking.
-// Matches Python's FsUtils.write_pid_file() which uses fcntl.flock(fd, fcntl.LOCK_EX).
-func writePIDFile(path string, pid int) error {
-	fd, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return fmt.Errorf("open pid file: %w", err)
-	}
-	defer fd.Close()
-
-	// Exclusive lock — matches Python's fcntl.flock(fd, fcntl.LOCK_EX)
-	if err := syscall.Flock(int(fd.Fd()), syscall.LOCK_EX); err != nil {
-		return fmt.Errorf("flock pid file: %w", err)
-	}
-	defer syscall.Flock(int(fd.Fd()), syscall.LOCK_UN)
-
-	if _, err := fd.WriteString(strconv.Itoa(pid)); err != nil {
-		return fmt.Errorf("write pid file: %w", err)
-	}
 	return nil
 }
 
@@ -286,47 +215,45 @@ func (s *FirecrackerSpawner) Cleanup() {
 
 // ── Generate ──
 
-// Generate builds the Firecracker config dict.
+// Generate builds the Firecracker VM config.
 // Matches Python's FirecrackerSpawner.generate() exactly.
-func (s *FirecrackerSpawner) Generate() (map[string]any, error) {
+func (s *FirecrackerSpawner) Generate() (*model.FirecrackerVMConfig, error) {
 	// Nested virt requires PCI — force it on
 	if s.config.NestedVirt {
 		s.config.PCIEnabled = true
 	}
 
-	// Build as regular map to allow dynamic optional keys
 	bootArgs, err := s.buildBootArgs()
 	if err != nil {
 		return nil, err
 	}
-	config := map[string]any{
-		"boot-source": map[string]any{
-			"kernel_image_path": s.config.KernelPath,
-			"boot_args":         bootArgs,
+
+	config := &model.FirecrackerVMConfig{
+		BootSource: model.BootSourceConfig{
+			KernelImagePath: s.config.KernelPath,
+			BootArgs:        bootArgs,
 		},
-		"drives":             s.buildDrivesConfig(),
-		"network-interfaces": s.buildNetworkConfig(),
-		"machine-config": map[string]any{
-			"vcpu_count":        s.config.VCPUCount,
-			"mem_size_mib":      s.config.MemSizeMiB,
-			"smt":               false,
-			"track_dirty_pages": false,
+		Drives:            s.buildDrivesConfig(),
+		NetworkInterfaces: s.buildNetworkConfig(),
+		MachineConfig: model.MachineConfig{
+			VCPUCount:       s.config.VCPUCount,
+			MemSizeMiB:      s.config.MemSizeMiB,
+			SMT:             false,
+			TrackDirtyPages: false,
 		},
 	}
 
 	if s.config.EnableLogging {
-		config["logger"] = s.buildLoggerConfig()
+		logger := s.buildLoggerConfig()
+		config.Logger = &logger
 	}
 
 	if s.config.EnableMetrics {
-		config["metrics"] = s.buildMetricsConfig()
+		metrics := s.buildMetricsConfig()
+		config.Metrics = &metrics
 	}
 
-	// CPU config (nested virt or custom template)
-	cpuConfig := s.buildCPUConfig()
-	if cpuConfig != nil {
-		config["cpu-config"] = cpuConfig
-	}
+	config.CPUConfig = s.buildCPUConfig()
 
 	return config, nil
 }
@@ -349,14 +276,6 @@ func (s *FirecrackerSpawner) WriteToFile() error {
 		return err
 	}
 	return os.WriteFile(s.configPath, data, 0644)
-}
-
-// ── CreateFilepointer ──
-
-// CreateFilepointer opens a file for writing with line buffering.
-// Matches Python's FirecrackerSpawner.create_filepointer().
-func (s *FirecrackerSpawner) CreateFilepointer(path string) (*os.File, error) {
-	return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 }
 
 // ── CloseFilePointers ──
@@ -450,17 +369,16 @@ func (s *FirecrackerSpawner) buildMetricsConfig() model.MetricsConfig {
 
 // buildCPUConfig builds the cpu-config section for the Firecracker config.
 //
-// Returns a map suitable for the "cpu-config" key when nested virt is enabled
-// or a custom CPU template was provided. Returns nil when no CPU configuration
-// is needed.
+// Returns a *CpuConfig when nested virt is enabled or a custom CPU template
+// was provided. Returns nil when no CPU configuration is needed.
 //
 // Matches Python's _build_cpu_config() exactly.
-func (s *FirecrackerSpawner) buildCPUConfig() any {
+func (s *FirecrackerSpawner) buildCPUConfig() *model.CpuConfig {
 	if s.config.CPUConfig != nil {
 		return s.config.CPUConfig
 	}
 	if s.config.NestedVirt {
-		return map[string]any{"kvm_capabilities": []any{}}
+		return &model.CpuConfig{KvmCapabilities: []string{}}
 	}
 	return nil
 }
@@ -481,83 +399,69 @@ func (s *FirecrackerSpawner) buildNetworkConfig() []model.NetworkInterfaceConfig
 	return networks
 }
 
-// bootArgsBuilder maintains an ordered map of boot argument keys to values,
+// bootArgsBuilder maintains an ordered list of boot argument key-value pairs,
 // preserving insertion order to match Python 3.7+ dict semantics.
-// Go maps have non-deterministic iteration order, so we maintain a separate
-// key ordering slice.  When setBootArg overwrites an existing key, its
-// position in the ordering is preserved (not moved to the end).
+type bootArgEntry struct {
+	key    string
+	values []string
+}
+
 type bootArgsBuilder struct {
-	data  map[string][]string
-	order []string
+	entries []bootArgEntry
 }
 
 func newBootArgsBuilder() *bootArgsBuilder {
-	return &bootArgsBuilder{
-		data:  make(map[string][]string),
-		order: nil,
-	}
+	return &bootArgsBuilder{}
 }
 
-// set sets the values for a key.  If the key does not yet exist it is
-// appended to the insertion-order list.  If the key already exists its
-// position is preserved — matching Python's dict[key] = value semantics
-// (insertion order is preserved on overwrite).
+// entryIndex returns the index of the entry with the given key, or -1 if not found.
+func (b *bootArgsBuilder) entryIndex(key string) int {
+	for i, e := range b.entries {
+		if e.key == key {
+			return i
+		}
+	}
+	return -1
+}
+
+// set sets the values for a key, preserving insertion order on overwrite.
 func (b *bootArgsBuilder) set(key string, values []string) {
-	if _, exists := b.data[key]; !exists {
-		b.order = append(b.order, key)
+	if i := b.entryIndex(key); i >= 0 {
+		b.entries[i].values = values
+	} else {
+		b.entries = append(b.entries, bootArgEntry{key: key, values: values})
 	}
-	b.data[key] = values
-}
-
-// keys returns the insertion-ordered list of keys.
-func (b *bootArgsBuilder) keys() []string {
-	return b.order
 }
 
 // parseFromString populates the builder from a space-separated boot argument
 // string (e.g. "pci=off quiet root=/dev/vda").  Multiple occurrences of the
-// same key are accumulated into its value list.  Existing entries in the
-// builder are preserved and new keys are appended.
+// same key are accumulated into its value list.
 func (b *bootArgsBuilder) parseFromString(s string) {
 	if s == "" || strings.TrimSpace(s) == "" {
 		return
 	}
-	args := strings.Fields(s)
-	for _, arg := range args {
-		arg = strings.TrimSpace(arg)
-		if arg == "" {
-			continue
-		}
+	for arg := range strings.FieldsSeq(s) {
 		if key, value, found := strings.Cut(arg, "="); found {
-			existing, exists := b.data[key]
-			if !exists {
-				b.order = append(b.order, key)
-				b.data[key] = []string{value}
+			if i := b.entryIndex(key); i >= 0 {
+				b.entries[i].values = append(b.entries[i].values, value)
 			} else {
-				b.data[key] = append(existing, value)
+				b.entries = append(b.entries, bootArgEntry{key: key, values: []string{value}})
 			}
-		} else {
-			// Flag without value — store as nil (empty) slice
-			if _, ok := b.data[arg]; !ok {
-				b.order = append(b.order, arg)
-				b.data[arg] = nil
-			}
+		} else if b.entryIndex(arg) < 0 {
+			b.entries = append(b.entries, bootArgEntry{key: arg})
 		}
 	}
 }
 
-// join returns the space-separated boot argument string, iterating keys in
-// insertion order.  Matches Python's _join_boot_args_dict() exactly.
+// join returns the space-separated boot argument string in insertion order.
 func (b *bootArgsBuilder) join() string {
 	var parts []string
-	for _, key := range b.order {
-		values := b.data[key]
-		if len(values) == 0 {
-			// Flag without value
-			parts = append(parts, key)
+	for _, e := range b.entries {
+		if len(e.values) == 0 {
+			parts = append(parts, e.key)
 		} else {
-			for _, value := range values {
-				parts = append(parts, fmt.Sprintf("%s=%s", key, value))
+			for _, value := range e.values {
+				parts = append(parts, fmt.Sprintf("%s=%s", e.key, value))
 			}
 		}
 	}
@@ -573,8 +477,8 @@ func (b *bootArgsBuilder) join() string {
 func (s *FirecrackerSpawner) buildBootArgs() (string, error) {
 	bootArgs := newBootArgsBuilder()
 
-	if s.config.BootArgs != nil && *s.config.BootArgs != "" {
-		bootArgs.parseFromString(*s.config.BootArgs)
+	if s.config.BootArgs != "" {
+		bootArgs.parseFromString(s.config.BootArgs)
 	}
 
 	if !s.config.PCIEnabled {
@@ -594,8 +498,8 @@ func (s *FirecrackerSpawner) buildBootArgs() (string, error) {
 		)},
 	)
 
-	if s.config.LSMFlags != nil && *s.config.LSMFlags != "" {
-		bootArgs.set("lsm", []string{*s.config.LSMFlags})
+	if s.config.LSMFlags != "" {
+		bootArgs.set("lsm", []string{s.config.LSMFlags})
 	}
 
 	// Nested virtualization: add kernel parameter for Intel/AMD
@@ -620,8 +524,8 @@ func (s *FirecrackerSpawner) buildBootArgs() (string, error) {
 
 	if s.config.PCIEnabled && s.config.ImageFSUUID == "" {
 		return "", &errs.DomainError{
-			Code:    errs.CodeFirecrackerConfigError,
-			Op:      "firecracker",
+			Code: errs.CodeFirecrackerConfigError,
+			Op:   "firecracker",
 			Message: "PCI transport enabled but no filesystem UUID available for " +
 				"root device identification. Use an image with a known " +
 				"filesystem UUID, or pass --no-pci to disable PCI transport.",

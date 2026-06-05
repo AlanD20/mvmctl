@@ -163,8 +163,8 @@ func (r *VMImportRequest) Resolve(ctx context.Context) (*VMCreateResolved, error
 	}
 
 	// lsm_flags: Python passes export_config.firecracker.lsm_flags directly (could be None)
-	if exportConfig.Firecracker.LsmFlags != nil {
-		createInput.LSMFlags = *exportConfig.Firecracker.LsmFlags
+	if exportConfig.Firecracker.LsmFlags != "" {
+		createInput.LSMFlags = exportConfig.Firecracker.LsmFlags
 	}
 
 	// requested_guest_ip / requested_guest_mac: Python passes export_config.network fields directly (could be None)
