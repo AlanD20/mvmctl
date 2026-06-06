@@ -2,6 +2,8 @@
 package cli
 
 import (
+	"os"
+
 	"mvmctl/internal/service/console"
 	"mvmctl/internal/service/loopmount"
 	"mvmctl/internal/service/nocloudnet"
@@ -22,18 +24,28 @@ func newRunCmd() *cobra.Command {
 		Short: "Run internal services (subprocess entry points)",
 	}
 
-	cmd.AddCommand(newNoCloudServeCmd())
-	cmd.AddCommand(newConsoleRelayCmd())
+	cmd.AddCommand(newNoCloudNetCmd())
+	cmd.AddCommand(newConsoleCmd())
 	cmd.AddCommand(newProvisionCmd())
 
 	return cmd
 }
 
-func newNoCloudServeCmd() *cobra.Command {
+func newNoCloudNetCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "nocloud-serve",
-		Short: "Serve NoCloud HTTP metadata",
-		Long:  "Starts the NoCloud HTTP metadata server for cloud-init. Runs in the foreground by default; pass --daemon to run as a background subprocess.",
+		Use:   "nocloudnet",
+		Short: "nocloudnet HTTP metadata server commands",
+	}
+
+	cmd.AddCommand(newNoCloudNetServeCmd())
+	return cmd
+}
+
+func newNoCloudNetServeCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Serve nocloudnet HTTP metadata",
+		Long:  "Starts the nocloudnet HTTP metadata server for cloud-init. Runs in the foreground by default; pass --daemon to run as a background subprocess.",
 	}
 
 	cmd.Flags().String("cloud-init-dir", "", "Cloud-init seed directory (required)")
@@ -55,22 +67,36 @@ func newNoCloudServeCmd() *cobra.Command {
 		killAfter, _ := c.Flags().GetDuration("kill-after")
 		daemon, _ := c.Flags().GetBool("daemon")
 
-		return nocloudnet.Run(c.Context(), nocloudnet.Config{
+		cfg := nocloudnet.Config{
 			CloudInitDir: cloudInitDir,
 			Port:         port,
 			Host:         host,
 			LogFile:      logFile,
 			KillAfter:    killAfter,
-			Daemon:       daemon,
-		})
+		}
+		if daemon {
+			_, err := nocloudnet.Spawn(c.Context(), cfg)
+			return err
+		}
+		return nocloudnet.Run(c.Context(), cfg)
 	}
 
 	return cmd
 }
 
+func newConsoleCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "console",
+		Short: "Console relay commands",
+	}
+
+	cmd.AddCommand(newConsoleRelayCmd())
+	return cmd
+}
+
 func newConsoleRelayCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "console-relay",
+		Use:   "relay",
 		Short: "Run console relay",
 	}
 
@@ -78,6 +104,7 @@ func newConsoleRelayCmd() *cobra.Command {
 	cmd.Flags().String("vm-path", "", "VM path (required)")
 	cmd.Flags().String("vm-name", "", "VM name")
 	cmd.Flags().Int("pty-fd", 0, "PTY file descriptor (required)")
+	cmd.Flags().Bool("daemon", false, "Run as a background daemon process")
 	cmd.MarkFlagRequired("vm-id")
 	cmd.MarkFlagRequired("vm-path")
 	cmd.MarkFlagRequired("pty-fd")
@@ -87,13 +114,20 @@ func newConsoleRelayCmd() *cobra.Command {
 		vmPath, _ := c.Flags().GetString("vm-path")
 		vmName, _ := c.Flags().GetString("vm-name")
 		ptyFD, _ := c.Flags().GetInt("pty-fd")
+		daemon, _ := c.Flags().GetBool("daemon")
 
-		return console.Run(c.Context(), console.Config{
+		cfg := console.Config{
 			VMID:   vmID,
 			VMPath: vmPath,
 			VMName: vmName,
 			PtyFD:  ptyFD,
-		})
+		}
+		if daemon {
+			ptyFile := os.NewFile(uintptr(ptyFD), "pty")
+			_, err := console.Spawn(c.Context(), cfg, ptyFile)
+			return err
+		}
+		return console.Run(c.Context(), cfg)
 	}
 
 	return cmd
