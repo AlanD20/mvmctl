@@ -24,48 +24,17 @@ const (
 	CloudInitStatusError   CloudInitStatus = "ERROR"
 )
 
-// ── ProvisionConfig ──
+// ── Cloud-init lifecycle interfaces ──
 
-// ProvisionConfig holds all cloud-init provisioning parameters.
-type ProvisionConfig struct {
-	Mode CloudInitMode
-
-	VMName       string
-	VMID         string
-	VMDir        string
-	CloudInitDir string
-
-	// Network identity fields for firewall rule creation.
-	NetworkID   string
-	NetworkName string
-
-	GuestIP           string
-	User              string
-	TapName           string
-	IPv4Gateway       string
-	NetworkPrefixLen  int
-	SkipNetworkConfig bool
-
-	SSHPubkeys []string
-
-	// Resolved from defaults.cloudinit
-	CloudInitISOName      string
-	NocloudPortRangeStart int
-	NocloudPortRangeEnd   int
-	NocloudMaxPortRetries int
-
-	CustomUserDataPath *string
-
-	// Optional overrides
-	NocloudNetPort   *int
-	CloudInitISOPath *string
-	KeepCloudInitISO bool
+// CloudInitFirewallRule is a firewall rule created during cloud-init provisioning.
+type CloudInitFirewallRule interface {
+	Remove() error
 }
 
-// ── ProvisionResult ──
+// ── CloudInitResult ──
 
-// ProvisionResult holds the result of cloud-init provisioning.
-type ProvisionResult struct {
+// CloudInitResult holds the result of cloud-init provisioning.
+type CloudInitResult struct {
 	Mode CloudInitMode
 
 	ISOPath     *string
@@ -73,6 +42,5 @@ type ProvisionResult struct {
 	NocloudPort int
 
 	NocloudPID        *int
-	NocloudNetManager any            `json:"-"` // Runtime lifecycle manager — not a data field
 	NocloudNetRules   []FirewallRule // Firewall rules created
 }

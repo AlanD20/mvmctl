@@ -370,8 +370,6 @@ func (op *Operation) vmBuilderExecute(ctx context.Context, builder *VMCreateBuil
 		return fmt.Errorf("resize rootfs: %w", resizeErr)
 	}
 
-	mode := resolved.CloudInitMode
-
 	// Read SSH pubkeys (errors logged but not fatal — SSH keys may be optional)
 	pubkeys, pubkeyErr := op.Services.Key.GetPubkeys(ctx, resolved.SSHKeys)
 	if pubkeyErr != nil {
@@ -379,8 +377,11 @@ func (op *Operation) vmBuilderExecute(ctx context.Context, builder *VMCreateBuil
 			"vm", resolved.Name, "error", pubkeyErr)
 	}
 
+	// Resolve user password from config defaults
+	userPassword, _ := op.Services.Config.GetString(ctx, "defaults.vm", "user_password")
+
 	// Common operations for OFF and INJECT modes
-	if mode == model.CloudInitModeOFF || mode == model.CloudInitModeINJECT {
+	if resolved.CloudInitMode == model.CloudInitModeOFF || resolved.CloudInitMode == model.CloudInitModeINJECT {
 		if err := backend.SetHostname(ctx, resolved.Name); err != nil {
 			return fmt.Errorf("set hostname: %w", err)
 		}
@@ -392,15 +393,15 @@ func (op *Operation) vmBuilderExecute(ctx context.Context, builder *VMCreateBuil
 		}
 	}
 
-	if mode == model.CloudInitModeOFF {
+	if resolved.CloudInitMode == model.CloudInitModeOFF {
 		if err := backend.DisableCloudInit(ctx); err != nil {
 			return fmt.Errorf("disable cloud-init: %w", err)
 		}
 		builder.markCreated("cloud-init-off")
 
-	} else if mode == model.CloudInitModeINJECT {
-		ciConfig := &model.ProvisionConfig{
-			Mode:                  mode,
+	} else if resolved.CloudInitMode == model.CloudInitModeINJECT {
+		ciConfig := &cloudinit.Config{
+			Mode:                  resolved.CloudInitMode,
 			VMName:                resolved.Name,
 			VMID:                  builder.vmID,
 			VMDir:                 builder.vmDir,
@@ -412,7 +413,8 @@ func (op *Operation) vmBuilderExecute(ctx context.Context, builder *VMCreateBuil
 			NetworkPrefixLen:      resolved.NetworkPrefixLen,
 			SkipNetworkConfig:     resolved.SkipCINetworkConfig,
 			SSHPubkeys:            pubkeys,
-			CustomUserDataPath:    resolved.CustomUserDataPath,
+			UserPassword:          userPassword,
+			CustomCloudInitConfig:    resolved.CustomCloudInitConfig,
 			NocloudNetPort:        resolved.NocloudNetPort,
 			CloudInitISOPath:      resolved.CloudInitISOPath,
 			KeepCloudInitISO:      resolved.KeepCloudInitISO,
@@ -434,9 +436,9 @@ func (op *Operation) vmBuilderExecute(ctx context.Context, builder *VMCreateBuil
 		}
 		builder.markCreated("cloud-init-inject")
 
-	} else if mode == model.CloudInitModeISO || mode == model.CloudInitModeNET {
-		ciConfig := &model.ProvisionConfig{
-			Mode:                  mode,
+	} else if resolved.CloudInitMode == model.CloudInitModeISO || resolved.CloudInitMode == model.CloudInitModeNET {
+		ciConfig := &cloudinit.Config{
+			Mode:                  resolved.CloudInitMode,
 			VMName:                resolved.Name,
 			VMID:                  builder.vmID,
 			VMDir:                 builder.vmDir,
@@ -448,7 +450,8 @@ func (op *Operation) vmBuilderExecute(ctx context.Context, builder *VMCreateBuil
 			NetworkPrefixLen:      resolved.NetworkPrefixLen,
 			SkipNetworkConfig:     resolved.SkipCINetworkConfig,
 			SSHPubkeys:            pubkeys,
-			CustomUserDataPath:    resolved.CustomUserDataPath,
+			UserPassword:          userPassword,
+			CustomCloudInitConfig: resolved.CustomCloudInitConfig,
 			NocloudNetPort:        resolved.NocloudNetPort,
 			CloudInitISOPath:      resolved.CloudInitISOPath,
 			KeepCloudInitISO:      resolved.KeepCloudInitISO,
@@ -456,6 +459,11 @@ func (op *Operation) vmBuilderExecute(ctx context.Context, builder *VMCreateBuil
 			NocloudPortRangeStart: resolved.NocloudPortRangeStart,
 			NocloudPortRangeEnd:   resolved.NocloudPortRangeEnd,
 			NocloudMaxPortRetries: resolved.NocloudMaxPortRetries,
+			// Pre-allocated server (shared across batch, empty if unset)
+			NoCloudURL:  resolved.NoCloudURL,
+			NoCloudPort: resolved.NoCloudPort,
+			NoCloudPID:  resolved.NoCloudPID,
+			KillAfter:   resolved.NoCloudKillAfter,
 		}
 		ciProvisioner := cloudinit.NewProvisioner(ciConfig, op.Services.Network.FirewallTracker())
 		ciResult, ciErr := ciProvisioner.Provision(ctx)
@@ -470,7 +478,7 @@ func (op *Operation) vmBuilderExecute(ctx context.Context, builder *VMCreateBuil
 			nocloudPID:  ciResult.NocloudPID,
 		}
 
-		if mode == model.CloudInitModeISO {
+		if resolved.CloudInitMode == model.CloudInitModeISO {
 			builder.markCreated("cloud-init-iso")
 		} else {
 			builder.markCreated("cloud-init-net")
@@ -564,11 +572,7 @@ func (op *Operation) vmBuilderCleanup(ctx context.Context, builder *VMCreateBuil
 	}
 	resolved := builder.resolved
 
-	// Cloud-init: stop nocloud server and remove firewall rules
-	if builder.wasCreated("cloud-init-net") && builder.cloudInitResult != nil && builder.cloudInitResult.nocloudNetManager != nil {
-		_ = builder.cloudInitResult.nocloudNetManager.Stop()
-	}
-
+	// Cloud-init: remove firewall rules (server auto-kills after timeout)
 	// Networking: remove TAP device
 	if builder.wasCreated("network_tap") && builder.tapName != "" && resolved.Network != nil {
 		if tapErr := op.Services.Network.RemoveTap(ctx, builder.tapName, resolved.Network.Bridge, resolved.Network.ID); tapErr != nil {
@@ -1115,8 +1119,9 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snap
 				}
 			}
 			if gateway != "" {
-				nocloudSvc := nocloudnetsvc.NewNoCloudServer(v.ID, v.Name, vmDir, gateway, port, 8000, 9000, 100)
-				if _, newPort, _, startErr := nocloudSvc.Start(ctx, vmDir); startErr != nil {
+				cloudInitDir := filepath.Join(vmDir, "cloud-init")
+				_, newPort, _, startErr := nocloudnetsvc.SpawnNoCloudServer(v.ID, vmDir, cloudInitDir, gateway, port, 8000, 9000, 5*time.Minute)
+				if startErr != nil {
 					slog.Warn("Failed to start/restart nocloud-net server", "vm", v.Name, "error", startErr)
 				} else if port == 0 {
 					port = newPort
@@ -2123,12 +2128,11 @@ type VMCreateBuilder struct {
 }
 
 type cloudInitResult struct {
-	mode              model.CloudInitMode
-	isoPath           *string
-	nocloudURL        *string
-	nocloudPort       *int
-	nocloudPID        *int
-	nocloudNetManager model.NoCloudNetManager
+	mode        model.CloudInitMode
+	isoPath     *string
+	nocloudURL  *string
+	nocloudPort *int
+	nocloudPID  *int
 }
 
 // clean/execute/forRespawn/respawnExecute moved to Operation as vmBuilderCleanup/vmBuilderExecute
@@ -2301,10 +2305,8 @@ func (c *VMCreateBuilder) toVMModel() *model.VM {
 	}
 
 	// Nocloud port/pid from cloud_init_result (prefer runtime values over resolved)
-	if c.cloudInitResult != nil && c.cloudInitResult.nocloudNetManager != nil {
-		if c.cloudInitResult.nocloudPort != nil {
-			vm.NocloudNetPort = c.cloudInitResult.nocloudPort
-		}
+	if c.cloudInitResult != nil && c.cloudInitResult.nocloudPort != nil {
+		vm.NocloudNetPort = c.cloudInitResult.nocloudPort
 		if c.cloudInitResult.nocloudPID != nil {
 			vm.NocloudNetPID = c.cloudInitResult.nocloudPID
 		}
