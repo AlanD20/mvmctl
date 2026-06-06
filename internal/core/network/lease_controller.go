@@ -9,28 +9,29 @@ import (
 	infranet "mvmctl/internal/infra/network"
 )
 
-// LeaseService manages IP leases for a specific network.
-// Matches src/mvmctl/core/network/_lease_service.py: LeaseService
-type LeaseService struct {
+// LeaseController manages IP leases for a specific network.
+// Construction pattern matches Controller convention (per-entity binding).
+// Python equivalent: _lease_service.py LeaseService
+type LeaseController struct {
 	leaseRepo LeaseRepository
 	net       *model.Network
 }
 
-// NewLeaseService creates a LeaseService from a *model.Network or string identifier.
-// Matches Python: LeaseService(entity: str | NetworkItem, repo)
+// NewLeaseController creates a LeaseController from a *model.Network or string identifier.
+// Python equivalent: _lease_service.py LeaseService(entity, repo)
 // Python's __init__ accepts both str and NetworkItem — if str, it resolves via
 // NetworkResolver() which uses the default database. Go requires an explicit
 // Repository for string resolution, and returns an error if networkRepo
 // is nil when it's needed.
-func NewLeaseService(
+func NewLeaseController(
 	ctx context.Context,
 	entity any,
 	leaseRepo LeaseRepository,
 	networkRepo Repository,
-) (*LeaseService, error) {
+) (*LeaseController, error) {
 	switch e := entity.(type) {
 	case *model.Network:
-		return &LeaseService{
+		return &LeaseController{
 			leaseRepo: leaseRepo,
 			net:       e,
 		}, nil
@@ -44,7 +45,7 @@ func NewLeaseService(
 		if err != nil {
 			return nil, err
 		}
-		return &LeaseService{
+		return &LeaseController{
 			leaseRepo: leaseRepo,
 			net:       net,
 		}, nil
@@ -53,32 +54,32 @@ func NewLeaseService(
 	}
 }
 
-func (s *LeaseService) NetworkID() string {
+func (s *LeaseController) NetworkID() string {
 	return s.net.ID
 }
 
-func (s *LeaseService) NetworkName() string {
+func (s *LeaseController) NetworkName() string {
 	return s.net.Name
 }
 
 // GetLeases returns all IP leases for this network.
-func (s *LeaseService) GetLeases(ctx context.Context) ([]*model.NetworkLeaseItem, error) {
+func (s *LeaseController) GetLeases(ctx context.Context) ([]*model.NetworkLeaseItem, error) {
 	return s.leaseRepo.ListAll(ctx, s.net.ID)
 }
 
 // Get returns lease for a specific IP address.
-func (s *LeaseService) Get(ctx context.Context, ip string) (*model.NetworkLeaseItem, error) {
+func (s *LeaseController) Get(ctx context.Context, ip string) (*model.NetworkLeaseItem, error) {
 	return s.leaseRepo.Get(ctx, s.net.ID, ip)
 }
 
 // GetByVMID returns all leases for a specific VM on this network.
-func (s *LeaseService) GetByVMID(ctx context.Context, vmID string) ([]*model.NetworkLeaseItem, error) {
+func (s *LeaseController) GetByVMID(ctx context.Context, vmID string) ([]*model.NetworkLeaseItem, error) {
 	return s.leaseRepo.ListByVM(ctx, s.net.ID, vmID)
 }
 
 // IsAvailable checks if an IP address is available (not leased).
 // Matches Python's is_available.
-func (s *LeaseService) IsAvailable(ctx context.Context, ip string) (bool, error) {
+func (s *LeaseController) IsAvailable(ctx context.Context, ip string) (bool, error) {
 	lease, err := s.leaseRepo.Get(ctx, s.net.ID, ip)
 	if err != nil {
 		return false, err
@@ -88,7 +89,7 @@ func (s *LeaseService) IsAvailable(ctx context.Context, ip string) (bool, error)
 
 // Lease allocates the next available IP from this network's subnet.
 // Matches Python's lease() with max_retries=10 and IntegrityError handling.
-func (s *LeaseService) Lease(ctx context.Context, vmID string) (string, error) {
+func (s *LeaseController) Lease(ctx context.Context, vmID string) (string, error) {
 	maxRetries := 10
 	var lastError error
 
@@ -131,7 +132,7 @@ func (s *LeaseService) Lease(ctx context.Context, vmID string) (string, error) {
 
 // LeaseSpecific allocates a specific IP address from this network's subnet.
 // Matches Python's lease_specific.
-func (s *LeaseService) LeaseSpecific(ctx context.Context, ip, vmID string) (string, error) {
+func (s *LeaseController) LeaseSpecific(ctx context.Context, ip, vmID string) (string, error) {
 	available, err := s.IsAvailable(ctx, ip)
 	if err != nil {
 		return "", err
@@ -150,6 +151,6 @@ func (s *LeaseService) LeaseSpecific(ctx context.Context, ip, vmID string) (stri
 
 // Release releases all leases for a VM from this network.
 // Matches Python's release.
-func (s *LeaseService) Release(ctx context.Context, vmID string) error {
+func (s *LeaseController) Release(ctx context.Context, vmID string) error {
 	return s.leaseRepo.ReleaseByVM(ctx, vmID)
 }

@@ -60,8 +60,8 @@ func NewVMImportRequest(inputs VMImportInput, cfg *config.Service, db *sqlx.DB) 
 //  1. Read VMExportConfig from JSON file
 //  2. Resolve semantic references to DB records
 //  3. Build VMCreateInput with resolved values
-//  4. Delegate to VMCreateRequest (VMCreateBuilder) for full resolution
-func (r *VMImportRequest) Resolve(ctx context.Context) (*VMCreateResolved, error) {
+//  4. Delegate to VMCreateRequest for full resolution
+func (r *VMImportRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, error) {
 	// 1. Read export config from JSON file
 	exportConfig, err := FromVMExportConfigJSONFile(r.input.ConfigPath)
 	if err != nil {
@@ -181,8 +181,9 @@ func (r *VMImportRequest) Resolve(ctx context.Context) (*VMCreateResolved, error
 	vmID := crypto.VMID(vmName, ts)
 	vmDir := infra.GetVMDirByID(vmID)
 
-	// 8. Create VMCreateBuilder (matching Python's VMCreateRequest)
-	builder := NewVMCreateBuilder(
+	// 8. Delegate to VMCreateRequest for full resolution (matching Python's VMCreateRequest.resolve())
+	request := NewVMCreateRequest(
+		vmID, vmDir, createInput,
 		r.cfg,
 		vmRepo,
 		networkRepo,
@@ -192,12 +193,8 @@ func (r *VMImportRequest) Resolve(ctx context.Context) (*VMCreateResolved, error
 		keyRepo,
 		volumeRepo,
 		leaseRepo,
-		vmID,
-		vmDir,
 	)
-
-	// 9. Delegate to builder for full resolution (matching Python's VMCreateRequest.resolve())
-	return builder.Build(ctx, createInput)
+	return request.Resolve(ctx)
 }
 
 func (r *VMImportRequest) resolveImage(

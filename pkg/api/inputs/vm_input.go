@@ -22,7 +22,7 @@ import (
 //	    force: bool | None = None
 type VMInput struct {
 	Identifiers []string `json:"identifiers"`
-	Force       *bool    `json:"force,omitempty"`
+	Force       bool     `json:"force"`
 }
 
 // ResolvedVMInput matches Python's ResolvedVMInput (frozen dataclass).
@@ -101,14 +101,9 @@ func (r *VMRequest) Resolve(ctx context.Context) (*ResolvedVMInput, error) {
 		_ = r.enricher.EnrichVM(ctx, result.VMs, "kernel", "image", "binary", "network", "network.leases", "volumes")
 	}
 
-	force := false
-	if r.input.Force != nil {
-		force = *r.input.Force
-	}
-
 	r.result = &ResolvedVMInput{
 		VMs:   result.VMs,
-		Force: force,
+		Force: r.input.Force,
 	}
 
 	return r.result, nil

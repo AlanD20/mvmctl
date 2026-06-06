@@ -966,18 +966,6 @@ func HumanReadableDatetime(isoTimestamp string) string {
 	return isoTimestamp
 }
 
-func GenerateBatchNames(baseName string, count int) []string {
-	if count == 1 {
-		return []string{baseName}
-	}
-	names := make([]string, count)
-	names[0] = baseName
-	for i := 2; i <= count; i++ {
-		names[i-1] = fmt.Sprintf("%s-%d", baseName, i)
-	}
-	return names
-}
-
 func DeepMergeDict(base, override map[string]any) map[string]any {
 	result := make(map[string]any)
 	maps.Copy(result, base)

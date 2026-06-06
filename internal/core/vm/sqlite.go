@@ -60,26 +60,20 @@ func (r *sqliteRepo) FindByMAC(ctx context.Context, mac string) (*model.VM, erro
 	return &vm, err
 }
 
-func (r *sqliteRepo) GetByNames(ctx context.Context, names []string) (map[string]bool, error) {
+func (r *sqliteRepo) NamesExist(ctx context.Context, names []string) ([]string, error) {
 	if len(names) == 0 {
-		return map[string]bool{}, nil
+		return nil, nil
 	}
-	query, args, err := sqlx.In("SELECT name FROM vm_instances WHERE name IN (?)", names)
+	query, args, err := sqlx.In("SELECT name FROM vm_instances WHERE name IN (?) ORDER BY name", names)
 	if err != nil {
-		return nil, fmt.Errorf("get vms by names: %w", err)
+		return nil, fmt.Errorf("names exist: %w", err)
 	}
 	query = r.db.Rebind(query)
-	var vmNames []struct {
-		Name string `db:"name"`
+	var existingNames []string
+	if err := r.db.SelectContext(ctx, &existingNames, query, args...); err != nil {
+		return nil, fmt.Errorf("names exist: %w", err)
 	}
-	if err := r.db.SelectContext(ctx, &vmNames, query, args...); err != nil {
-		return nil, fmt.Errorf("get vms by names: %w", err)
-	}
-	result := make(map[string]bool)
-	for _, r := range vmNames {
-		result[r.Name] = true
-	}
-	return result, nil
+	return existingNames, nil
 }
 
 // ── Lookups ──

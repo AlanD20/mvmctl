@@ -15,8 +15,8 @@ type Repository interface {
 	// Python: get_by_name(name) -> VMInstanceItem | None
 	GetByName(ctx context.Context, name string) (*model.VM, error)
 	// Python: get_by_names(names) -> set[str]
-	// Returns set of names (as map keys) that already exist.
-	GetByNames(ctx context.Context, names []string) (map[string]bool, error)
+	// Returns the subset of names that already exist.
+	NamesExist(ctx context.Context, names []string) ([]string, error)
 
 	// Lookups by various fields
 	// Python: find_by_ip(ipv4) -> VMInstanceItem | None

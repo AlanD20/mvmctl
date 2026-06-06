@@ -1,9 +1,7 @@
 package system
 
 import (
-	"log/slog"
 	"os"
-	"os/signal"
 	"syscall"
 )
 
@@ -19,16 +17,4 @@ func IsProcessRunning(pid int) bool {
 		return false
 	}
 	return proc.Signal(syscall.Signal(0)) == nil
-}
-
-// SetupSignalHandler sets up a goroutine that calls cancel() on SIGINT/SIGTERM.
-// Matches Python's signal.signal(signal.SIGTERM, lambda: cancel()) pattern.
-func SetupSignalHandler(cancel func()) {
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-c
-		slog.Warn("Received shutdown signal")
-		cancel()
-	}()
 }

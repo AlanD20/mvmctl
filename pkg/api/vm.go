@@ -8,26 +8,21 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"sort"
-	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
-	"mvmctl/internal/core/binary"
 	"mvmctl/internal/core/cloudinit"
 	"mvmctl/internal/core/console"
-	"mvmctl/internal/core/host"
 	"mvmctl/internal/core/image"
-	"mvmctl/internal/core/key"
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/crypto"
-	"mvmctl/internal/infra/disk"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
@@ -37,12 +32,10 @@ import (
 	infraslice "mvmctl/internal/infra/slice"
 	"mvmctl/internal/infra/system"
 	"mvmctl/internal/infra/version"
-	consoleapi "mvmctl/internal/service/console"
-	nocloudnet "mvmctl/internal/service/nocloudnet"
+	consolesvc "mvmctl/internal/service/console"
+	nocloudnetsvc "mvmctl/internal/service/nocloudnet"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"
-
-	"github.com/jmoiron/sqlx"
 )
 
 // ── Create ──
@@ -68,100 +61,10 @@ func (op *Operation) VMCreate(
 		count = *input.Count
 	}
 
-	if count == 1 {
-		return op.vmCreateSingle(ctx, input, onProgress)
-	}
-
-	return op.vmCreateBatch(ctx, input, count, onProgress)
-}
-
-func (op *Operation) vmCreateSingle(
-	ctx context.Context,
-	input inputs.VMCreateInput,
-	onProgress event.OnProgressCallback,
-) ([]*model.VM, error) {
-	createdAt := time.Now()
-	vmID := crypto.VMID(input.Name, createdAt.Format(time.RFC3339))
-	vmDir := filepath.Join(op.CacheDir, "vms", vmID)
-
-	resolved, err := op.vmBuildResolvedInput(ctx, input, vmID, vmDir)
-	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVMCreateFailed,
-			Message: fmt.Sprintf("Failed to resolve input: %v", err),
-			Err:     err,
-			Class:   errs.ClassInternal,
-		}
-	}
-
-	// Set up signal-based cleanup (matches Python's SigtermContext(lambda: ctx.cleanup()))
-	createCtx, cancelCreate := context.WithCancel(ctx)
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
-
-	var vmCleanup func()
-
-	go func() {
-		select {
-		case <-sigCh:
-			slog.Warn("Received termination signal during VM creation, cleaning up...", "vm", input.Name)
-			// Call cleanup directly on signal (matches Python's SigtermContext behavior).
-			// This runs regardless of SkipCleanup, matching Python.
-			if vmCleanup != nil {
-				vmCleanup()
-			}
-			cancelCreate()
-		case <-createCtx.Done():
-		}
-	}()
-	signalCleanup := func() {
-		signal.Stop(sigCh)
-		close(sigCh)
-		cancelCreate()
-	}
-
-	vmInstance, execErr := op.vmExecuteCreate(createCtx, resolved, onProgress, &vmCleanup)
-	signalCleanup()
-	if execErr != nil {
-		// Python's SigtermContext already called cleanup on signal regardless of skip_cleanup.
-		// For non-signal errors, skip_cleanup is respected.
-		if resolved.SkipCleanup {
-			slog.Warn("VM creation failed but --skip-cleanup is active", "dir", vmDir)
-		}
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVMCreateFailed,
-			Message: execErr.Error(),
-			Err:     execErr,
-			Class:   errs.ClassInternal,
-		}
-	}
-
-	// Handle volumes
-	if len(resolved.Volumes) > 0 {
-		volSvc := volume.NewService(op.Repos.Volume)
-		volSvc.SetVolumesState(ctx, resolved.Volumes, model.VolumeStatusAttached, &vmInstance.ID)
-		vmInstance.VolumeIDs = make([]string, len(resolved.Volumes))
-		for i, v := range resolved.Volumes {
-			vmInstance.VolumeIDs[i] = v.ID
-		}
-		op.Repos.VM.Upsert(ctx, vmInstance)
-	}
-
-	op.AuditLog.LogOperation("vm.create", nil, fmt.Sprintf("name=%s", input.Name))
-
-	return []*model.VM{vmInstance}, nil
-}
-
-func (op *Operation) vmCreateBatch(
-	ctx context.Context,
-	input inputs.VMCreateInput,
-	count int,
-	onProgress event.OnProgressCallback,
-) ([]*model.VM, error) {
-	names := op.vmGenerateBatchNames(input.Name, count)
+	names := vm.GenerateBatchNames(input.Name, count)
 
 	// Pre-allocate: check name collisions (single query, matching Python)
-	existing, err := op.Repos.VM.GetByNames(ctx, names)
+	existing, err := op.Repos.VM.NamesExist(ctx, names)
 	if err != nil {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeDatabaseError,
@@ -171,17 +74,32 @@ func (op *Operation) vmCreateBatch(
 		}
 	}
 	if len(existing) > 0 {
-		sortedNames := make([]string, 0, len(existing))
-		for name := range existing {
-			sortedNames = append(sortedNames, name)
-		}
-		sort.Strings(sortedNames)
 		return nil, &errs.DomainError{
 			Code:    "vm.name_collision",
 			Op:      "vm",
-			Message: fmt.Sprintf("VM name(s) already exist: %s", strings.Join(sortedNames, ", ")),
+			Message: fmt.Sprintf("VM name(s) already exist: %s", strings.Join(existing, ", ")),
 			Class:   errs.ClassValidation,
 		}
+	}
+
+	// Resolve shared state ONCE before the loop (matches Python's VMCreateRequest.resolve())
+	vmID := crypto.VMID(input.Name, time.Now().Format(time.RFC3339))
+	vmDir := infra.GetVMDirByID(vmID)
+	request := inputs.NewVMCreateRequest(
+		vmID, vmDir, input,
+		op.Services.Config,
+		op.Repos.VM,
+		op.Repos.Network,
+		op.Repos.Image,
+		op.Repos.Kernel,
+		op.Repos.Binary,
+		op.Repos.Key,
+		op.Repos.Volume,
+		op.Repos.Lease,
+	)
+	sharedResolved, err := request.Resolve(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	createdVMs := make([]*model.VM, 0)
@@ -190,47 +108,31 @@ func (op *Operation) vmCreateBatch(
 	for idx, name := range names {
 		createdAt := time.Now()
 		vmID := crypto.VMID(name, createdAt.Format(time.RFC3339))
-		vmDir := filepath.Join(op.CacheDir, "vms", vmID)
+		vmDir := infra.GetVMDirByID(vmID)
 
-		resolved, err := op.vmBuildResolvedInput(ctx, input, vmID, vmDir)
-		if err != nil {
-			errors = append(errors, fmt.Sprintf("%s: %v", name, err))
-			if input.Atomic && len(createdVMs) > 0 {
-				// Rollback
-				for _, vm := range createdVMs {
-					_ = op.VMRemove(ctx, inputs.VMInput{Identifiers: []string{vm.Name}, Force: new(true)})
-				}
-				return nil, &errs.DomainError{
-					Code: "vm.atomic_failed",
-					Op:   "vm",
-					Message: fmt.Sprintf(
-						"Atomic creation failed at '%s': %v. All %d previously created VMs have been removed.",
-						name,
-						err,
-						len(createdVMs),
-					),
-					Class: errs.ClassInternal,
-				}
-			}
-			continue
-		}
+		resolved := request.CloneVMInput(sharedResolved, name, vmID, vmDir)
 
-		batchProgress := func(e event.Progress) {
-			if onProgress != nil {
-				onProgress(event.Progress{
-					Phase:   e.Phase,
-					Status:  e.Status,
-					Message: fmt.Sprintf("[%d/%d] %s: %s", idx+1, count, name, e.Message),
-				})
+		// Wrap progress with [i/N] prefix for batch; pass onProgress directly for single VM.
+		// (Go 1.22+ loop variables are per-iteration, no capture shadowing needed.)
+		progress := onProgress
+		if count > 1 {
+			progress = func(e event.Progress) {
+				if onProgress != nil {
+					onProgress(event.Progress{
+						Phase:   e.Phase,
+						Status:  e.Status,
+						Message: fmt.Sprintf("[%d/%d] %s: %s", idx+1, count, name, e.Message),
+					})
+				}
 			}
 		}
 
-		vmInstance, execErr := op.vmExecuteCreateWithOpts(ctx, resolved, batchProgress, nil, true)
+		vmInstance, execErr := op.vmBuilderCreate(ctx, resolved, progress)
 		if execErr != nil {
 			errors = append(errors, fmt.Sprintf("%s: %v", name, execErr))
 			if input.Atomic && len(createdVMs) > 0 {
 				for _, vm := range createdVMs {
-					_ = op.VMRemove(ctx, inputs.VMInput{Identifiers: []string{vm.Name}, Force: new(true)})
+					_ = op.VMRemove(ctx, inputs.VMInput{Identifiers: []string{vm.Name}, Force: true})
 				}
 				return nil, &errs.DomainError{
 					Code: "vm.atomic_failed",
@@ -247,16 +149,19 @@ func (op *Operation) vmCreateBatch(
 			continue
 		}
 
-		// Handle volumes for batch VM (matches Python's volume handling after _execute_create)
+		// Handle volumes (matches Python's volume handling after _execute_create)
 		if resolved.Volumes != nil && len(resolved.Volumes) > 0 {
-			volSvc := volume.NewService(op.Repos.Volume)
-			volSvc.SetVolumesState(ctx, resolved.Volumes, model.VolumeStatusAttached, &vmInstance.ID)
+			op.Services.Volume.SetVolumesState(ctx, resolved.Volumes, model.VolumeStatusAttached, &vmInstance.ID)
 			vmInstance.VolumeIDs = make([]string, len(resolved.Volumes))
 			for i, v := range resolved.Volumes {
 				vmInstance.VolumeIDs[i] = v.ID
 			}
 			op.Repos.VM.Upsert(ctx, vmInstance)
 		}
+
+		// Audit log per VM (matches Python's AuditLog.log(audit_action, ...) in _execute_create)
+		op.AuditLog.LogOperation("vm.create", nil, fmt.Sprintf("name=%s", name))
+
 		createdVMs = append(createdVMs, vmInstance)
 	}
 
@@ -272,93 +177,425 @@ func (op *Operation) vmCreateBatch(
 	return createdVMs, nil
 }
 
-func (op *Operation) vmExecuteCreate(
+func (op *Operation) vmBuilderCreate(
 	ctx context.Context,
-	resolved *resolvedVMCreateInput,
+	resolved *inputs.ResolvedVMCreateInput,
 	onProgress event.OnProgressCallback,
-	cleanupFn *func(),
 ) (*model.VM, error) {
-	return op.vmExecuteCreateWithOpts(ctx, resolved, onProgress, cleanupFn, false)
-}
 
-func (op *Operation) vmExecuteCreateWithOpts(
-	ctx context.Context,
-	resolved *resolvedVMCreateInput,
-	onProgress event.OnProgressCallback,
-	cleanupFn *func(),
-	skipLimitCheck bool,
-) (*model.VM, error) {
-	vmRepo := op.Repos.VM
-
-	// Check VM limit (Python: SettingsService.resolve(Database(), "settings.vm", "max_vms"))
-	if !skipLimitCheck {
-		maxVMs := 10
-		if op.Connection != nil {
-			row := op.Connection.DB().
-				QueryRowContext(ctx, "SELECT value FROM user_settings WHERE category = 'settings.vm' AND key = 'max_vms'")
-			var val string
-			if err := row.Scan(&val); err == nil {
-				if n, err := strconv.Atoi(val); err == nil && n > 0 {
-					maxVMs = n
-				}
-			}
-		}
-		count, err := vmRepo.Count(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("count VMs: %w", err)
-		}
-		if count >= maxVMs {
-			return nil, fmt.Errorf("VM limit reached (%d). Remove existing VMs before creating new ones.", maxVMs)
-		}
+	if resolved == nil {
+		return nil, fmt.Errorf("failed to resolve necessary dependencies")
 	}
 
-	// Create context
-	ctxCreate := &vmCreateContext{
+	if resolved.VMDir == "" {
+		return nil, fmt.Errorf("vm directory not set")
+	}
+
+	// Create data holder for creation state
+	builder := &VMCreateBuilder{
 		name:             resolved.Name,
 		vmID:             resolved.VMID,
 		vmDir:            resolved.VMDir,
 		onProgress:       onProgress,
 		resolved:         resolved,
 		resourcesCreated: make(map[string]bool),
-		cacheDir:         op.CacheDir,
-		db:               op.Connection.DB(),
 	}
 
-	// Set the cleanup function so signal handlers can call it
-	// (matches Python's SigtermContext pattern where cleanup is triggered on signal)
-	if cleanupFn != nil {
-		*cleanupFn = ctxCreate.cleanup
-	}
+	// Cleanup on context cancellation (signal from main() via signal.NotifyContext).
+	// The goroutine is only needed during execute(). After execute() returns,
+	// cleanupDone is closed and wg.Wait() ensures the goroutine has exited before
+	// we check cleaned. This provides a happens-before ordering so there is no
+	// race between the goroutine setting cleaned and us reading it.
+	var cleaned atomic.Bool
+	var wg sync.WaitGroup
+	cleanupDone := make(chan struct{})
+	wg.Go(func() {
+		select {
+		case <-ctx.Done():
+			if !resolved.SkipCleanup && cleaned.CompareAndSwap(false, true) {
+				op.vmBuilderCleanup(context.Background(), builder)
+			}
+		case <-cleanupDone:
+		}
+	})
 
 	var vmInstance *model.VM
 	var execErr error
 
 	// Execute
-	execErr = ctxCreate.execute(ctx)
+	execErr = op.vmBuilderExecute(ctx, builder, resolved)
+
+	// Stop cleanup goroutine and wait for it to finish, providing a
+	// happens-before edge so cleaned.Load() below is reliable.
+	close(cleanupDone)
+	wg.Wait()
+
+	// If the goroutine already cleaned up (signal during execute), fail closed
+	// rather than returning a success with destroyed resources.
+	if execErr == nil && cleaned.Load() {
+		execErr = fmt.Errorf("vm creation cancelled by signal")
+	}
+
 	if execErr == nil {
-		vmInstance = ctxCreate.toModel()
+		vmInstance = builder.toVMModel()
 		// Python: if vm_instance is None: raise VMCreateError("Failed to create VM instance model")
 		if vmInstance == nil {
-			if ctxCreate.spawner == nil {
+			if builder.spawner == nil {
 				execErr = fmt.Errorf("Firecracker spawner is not set in context")
-			} else if ctxCreate.spawner.PID == nil {
+			} else if builder.spawner.PID == nil {
 				execErr = fmt.Errorf("Failed to spawn Firecracker process")
 			} else {
 				execErr = fmt.Errorf("Failed to create VM instance model")
 			}
-		} else if err := vmRepo.Upsert(ctx, vmInstance); err != nil {
+		} else if err := op.Repos.VM.Upsert(ctx, vmInstance); err != nil {
 			execErr = fmt.Errorf("upsert VM: %w", err)
 		}
 	}
 
 	if execErr != nil {
 		if !resolved.SkipCleanup {
-			ctxCreate.cleanup()
+			if cleaned.CompareAndSwap(false, true) {
+				op.vmBuilderCleanup(ctx, builder)
+			}
 		}
 		return nil, execErr
 	}
 
 	return vmInstance, nil
+}
+
+// vmBuilderExecute performs the actual VM creation steps.
+// Moved from VMCreateBuilder.execute() to Operation to use services/repos directly.
+func (op *Operation) vmBuilderExecute(ctx context.Context, builder *VMCreateBuilder, resolved *inputs.ResolvedVMCreateInput) error {
+	if resolved == nil {
+		return fmt.Errorf("failed to resolve necessary dependencies")
+	}
+
+	// Generate MAC and TAP name
+	if resolved.RequestedGuestMAC != nil {
+		builder.guestMAC = *resolved.RequestedGuestMAC
+	} else {
+		builder.guestMAC = infranet.VMGenerateMAC(resolved.GuestMACPrefix)
+	}
+	builder.tapName = infranet.VMGenerateTAPName(resolved.Network.Name, resolved.Name)
+
+	// Create VM directory
+	if err := os.MkdirAll(builder.vmDir, 0755); err != nil {
+		return fmt.Errorf("create vm directory: %w", err)
+	}
+	builder.markCreated("vm_dir")
+
+	// Progress: network
+	emitProgress(builder.onProgress, "network", "running", "Configuring network...")
+
+	// Network setup
+	bridgeAddr, calcErr := network.ComputeBridgeAddress(resolved.Network.IPv4Gateway, resolved.Network.Subnet)
+	if calcErr != nil {
+		return fmt.Errorf("compute bridge address: %w", calcErr)
+	}
+	if err := op.Services.Network.EnsureBridge(ctx, resolved.Network.Bridge, bridgeAddr); err != nil {
+		return fmt.Errorf("ensure bridge: %w", err)
+	}
+
+	// IP Lease (reuse pre-injected lease repo)
+	leaseCtrl, err := network.NewLeaseController(ctx, resolved.Network, op.Repos.Lease, nil)
+	if err != nil {
+		return fmt.Errorf("create lease controller: %w", err)
+	}
+	if resolved.RequestedGuestIP != nil {
+		ip, leaseErr := leaseCtrl.LeaseSpecific(ctx, *resolved.RequestedGuestIP, builder.vmID)
+		if leaseErr != nil {
+			return fmt.Errorf("lease specific ip: %w", leaseErr)
+		}
+		builder.guestIP = ip
+	} else {
+		ip, leaseErr := leaseCtrl.Lease(ctx, builder.vmID)
+		if leaseErr != nil {
+			return fmt.Errorf("lease ip: %w", leaseErr)
+		}
+		builder.guestIP = ip
+	}
+
+	// NAT and TAP in a single batch for atomic firewall rule application
+	natGateways := network.NatGatewaysList(resolved.Network)
+	var tapErr error
+	op.Services.Network.WithBatch(ctx, func() {
+		if resolved.Network.NATEnabled && len(natGateways) > 0 {
+			if natErr := op.Services.Network.EnsureNAT(ctx, resolved.Network.Bridge,
+				natGateways, resolved.Network.Subnet, resolved.Network.ID); natErr != nil {
+				slog.Warn("failed to ensure NAT rules during VM creation",
+					"vm", resolved.Name, "error", natErr)
+			}
+		}
+		if err := op.Services.Network.EnsureTap(ctx, builder.tapName, resolved.Network.Bridge,
+			resolved.Network.ID, resolved.Network.Subnet); err != nil {
+			tapErr = err
+		}
+	})
+	if tapErr != nil {
+		return fmt.Errorf("ensure TAP: %w", tapErr)
+	}
+	builder.markCreated("network_tap")
+	infranet.FlushARP(ctx, resolved.Network.Bridge)
+
+	// Progress: rootfs
+	emitProgress(builder.onProgress, "rootfs", "running", "Copying root filesystem...")
+
+	// Clone rootfs
+	if err := builder.cloneImage(ctx, op.Services.Image, resolved); err != nil {
+		return err
+	}
+	builder.markCreated("rootfs")
+
+	// Progress: cloud-init
+	emitProgress(builder.onProgress, "cloud-init", "running", "Provisioning cloud-init...")
+
+	// --- Cloud-init provisioning ---
+	backend, backendErr := provisioner.NewBackend(ctx, provisioner.BackendOpts{
+		RootfsPath:      builder.rootfsPath,
+		FsType:          resolved.Image.FSType,
+		CacheDir:        op.CacheDir,
+		ProvisionerType: provisioner.ProvisionerType(resolved.Provisioner),
+		RootUID:         resolved.RootUID,
+		RootGID:         resolved.RootGID,
+		UserUID:         resolved.UserUID,
+		UserGID:         resolved.UserGID,
+	})
+	if backendErr != nil {
+		return fmt.Errorf("failed to create VM provisioner: %w", backendErr)
+	}
+
+	// Resize rootfs
+	if resizeErr := backend.Resize(ctx, resolved.DiskSizeBytes); resizeErr != nil {
+		return fmt.Errorf("resize rootfs: %w", resizeErr)
+	}
+
+	mode := resolved.CloudInitMode
+
+	// Read SSH pubkeys (errors logged but not fatal — SSH keys may be optional)
+	pubkeys, pubkeyErr := op.Services.Key.GetPubkeys(ctx, resolved.SSHKeys)
+	if pubkeyErr != nil {
+		slog.Warn("failed to read SSH pubkeys during VM creation",
+			"vm", resolved.Name, "error", pubkeyErr)
+	}
+
+	// Common operations for OFF and INJECT modes
+	if mode == model.CloudInitModeOFF || mode == model.CloudInitModeINJECT {
+		if err := backend.SetHostname(ctx, resolved.Name); err != nil {
+			return fmt.Errorf("set hostname: %w", err)
+		}
+		if err := backend.InjectDNS(ctx, resolved.DNSServer); err != nil {
+			return fmt.Errorf("inject DNS: %w", err)
+		}
+		if err := backend.SetupSSH(ctx, resolved.User, pubkeys); err != nil {
+			return fmt.Errorf("setup SSH: %w", err)
+		}
+	}
+
+	if mode == model.CloudInitModeOFF {
+		if err := backend.DisableCloudInit(ctx); err != nil {
+			return fmt.Errorf("disable cloud-init: %w", err)
+		}
+		builder.markCreated("cloud-init-off")
+
+	} else if mode == model.CloudInitModeINJECT {
+		ciConfig := &model.ProvisionConfig{
+			Mode:                  mode,
+			VMName:                resolved.Name,
+			VMID:                  builder.vmID,
+			VMDir:                 builder.vmDir,
+			CloudInitDir:          filepath.Join(builder.vmDir, "cloud-init"),
+			GuestIP:               builder.guestIP,
+			TapName:               builder.tapName,
+			User:                  resolved.User,
+			IPv4Gateway:           resolved.Network.IPv4Gateway,
+			NetworkPrefixLen:      resolved.NetworkPrefixLen,
+			SkipNetworkConfig:     resolved.SkipCINetworkConfig,
+			SSHPubkeys:            pubkeys,
+			CustomUserDataPath:    resolved.CustomUserDataPath,
+			NocloudNetPort:        resolved.NocloudNetPort,
+			CloudInitISOPath:      resolved.CloudInitISOPath,
+			KeepCloudInitISO:      resolved.KeepCloudInitISO,
+			CloudInitISOName:      resolved.CloudInitISOName,
+			NocloudPortRangeStart: resolved.NocloudPortRangeStart,
+			NocloudPortRangeEnd:   resolved.NocloudPortRangeEnd,
+			NocloudMaxPortRetries: resolved.NocloudMaxPortRetries,
+		}
+		ciProvisioner := cloudinit.NewProvisioner(ciConfig, op.Services.Network.FirewallTracker())
+		ciResult, ciErr := ciProvisioner.Provision(ctx)
+		if ciErr != nil {
+			return fmt.Errorf("cloud-init inject provisioning failed: %w", ciErr)
+		}
+		builder.cloudInitResult = &cloudInitResult{
+			mode: ciResult.Mode,
+		}
+		if err := backend.InjectCloudInit(ctx, ciConfig.CloudInitDir); err != nil {
+			return fmt.Errorf("inject cloud-init: %w", err)
+		}
+		builder.markCreated("cloud-init-inject")
+
+	} else if mode == model.CloudInitModeISO || mode == model.CloudInitModeNET {
+		ciConfig := &model.ProvisionConfig{
+			Mode:                  mode,
+			VMName:                resolved.Name,
+			VMID:                  builder.vmID,
+			VMDir:                 builder.vmDir,
+			CloudInitDir:          filepath.Join(builder.vmDir, "cloud-init"),
+			GuestIP:               builder.guestIP,
+			TapName:               builder.tapName,
+			User:                  resolved.User,
+			IPv4Gateway:           resolved.Network.IPv4Gateway,
+			NetworkPrefixLen:      resolved.NetworkPrefixLen,
+			SkipNetworkConfig:     resolved.SkipCINetworkConfig,
+			SSHPubkeys:            pubkeys,
+			CustomUserDataPath:    resolved.CustomUserDataPath,
+			NocloudNetPort:        resolved.NocloudNetPort,
+			CloudInitISOPath:      resolved.CloudInitISOPath,
+			KeepCloudInitISO:      resolved.KeepCloudInitISO,
+			CloudInitISOName:      resolved.CloudInitISOName,
+			NocloudPortRangeStart: resolved.NocloudPortRangeStart,
+			NocloudPortRangeEnd:   resolved.NocloudPortRangeEnd,
+			NocloudMaxPortRetries: resolved.NocloudMaxPortRetries,
+		}
+		ciProvisioner := cloudinit.NewProvisioner(ciConfig, op.Services.Network.FirewallTracker())
+		ciResult, ciErr := ciProvisioner.Provision(ctx)
+		if ciErr != nil {
+			return fmt.Errorf("cloud-init provisioning failed: %w", ciErr)
+		}
+		builder.cloudInitResult = &cloudInitResult{
+			mode:        ciResult.Mode,
+			isoPath:     ciResult.ISOPath,
+			nocloudURL:  ciResult.NocloudURL,
+			nocloudPort: &ciResult.NocloudPort,
+			nocloudPID:  ciResult.NocloudPID,
+		}
+
+		if mode == model.CloudInitModeISO {
+			builder.markCreated("cloud-init-iso")
+		} else {
+			builder.markCreated("cloud-init-net")
+		}
+	}
+
+	// Deblob (OS cache cleanup) unless explicitly skipped
+	if !resolved.SkipDeblob {
+		if err := backend.Deblob(ctx, &resolved.Image.Distro); err != nil {
+			return fmt.Errorf("deblob rootfs: %w", err)
+		}
+	}
+
+	// Fix fstab for Firecracker (superfloppy /dev/vda layout)
+	if err := backend.FixFstab(ctx); err != nil {
+		return fmt.Errorf("fix fstab: %w", err)
+	}
+
+	// Execute all queued provisioning operations
+	if err := backend.Run(ctx); err != nil {
+		return fmt.Errorf("provision VM rootfs: %w", err)
+	}
+
+	// Progress: firecracker
+	emitProgress(builder.onProgress, "firecracker", "running", "Starting Firecracker microVM...")
+
+	// --- Firecracker config ---
+	fcConfig := builder.buildFirecrackerConfig(ctx)
+	if fcConfig == nil {
+		return fmt.Errorf("firecracker config is nil")
+	}
+
+	spawner := vm.NewFirecrackerSpawner(fcConfig)
+	builder.fcManager = fcConfig
+
+	if err := spawner.WriteToFile(); err != nil {
+		return fmt.Errorf("write firecracker config: %w", err)
+	}
+	builder.markCreated("firecracker")
+
+	// Validate socket path won't exceed Unix domain socket limit
+	socketPath := spawner.APISocketPath
+	if len(socketPath) >= 108 {
+		return fmt.Errorf(
+			"VM ID '%s' produces a socket path that is too long (%d chars, max 107). This is a system limit for Unix domain sockets. Path: %s",
+			builder.vmID,
+			len(socketPath),
+			socketPath,
+		)
+	}
+
+	// Console relay setup (before spawn)
+	if resolved.EnableConsole {
+		consoleCtrl := console.NewController(builder.vmID, builder.vmDir, builder.name,
+			resolved.ConsolePIDFilename, resolved.ConsoleSocketFilename, "firecracker.console.log")
+		ptyFD, ptyErr := consoleCtrl.CreatePTY()
+		if ptyErr != nil {
+			return fmt.Errorf("console PTY creation failed: %w", ptyErr)
+		}
+		builder.relay = consoleCtrl
+		fcConfig.RelayClientFD = &ptyFD
+	}
+
+	// Spawn Firecracker
+	if err := spawner.Spawn(); err != nil {
+		return fmt.Errorf("failed to spawn Firecracker: %w", err)
+	}
+
+	// Store spawner for toVMModel()
+	builder.spawner = spawner
+
+	// Start console relay after spawn
+	if resolved.EnableConsole && builder.relay != nil {
+		builder.relay.CloseClientFD()
+		_, _, startErr := builder.relay.Start(ctx)
+		if startErr != nil {
+			return fmt.Errorf("console relay start failed: %w", startErr)
+		}
+		builder.markCreated("console_relay")
+	}
+
+	emitProgress(builder.onProgress, "complete", "complete", "VM created successfully")
+
+	return nil
+}
+
+// vmBuilderCleanup cleans up partially-created VM resources on failure.
+func (op *Operation) vmBuilderCleanup(ctx context.Context, builder *VMCreateBuilder) {
+	if builder.vmDir == "" || builder.resolved == nil {
+		return
+	}
+	resolved := builder.resolved
+
+	// Cloud-init: stop nocloud server and remove firewall rules
+	if builder.wasCreated("cloud-init-net") && builder.cloudInitResult != nil && builder.cloudInitResult.nocloudNetManager != nil {
+		_ = builder.cloudInitResult.nocloudNetManager.Stop()
+	}
+
+	// Networking: remove TAP device
+	if builder.wasCreated("network_tap") && builder.tapName != "" && resolved.Network != nil {
+		if tapErr := op.Services.Network.RemoveTap(ctx, builder.tapName, resolved.Network.Bridge, resolved.Network.ID); tapErr != nil {
+			slog.Warn("failed to remove TAP during cleanup", "vm", builder.name, "error", tapErr)
+		}
+		if leaseErr := op.Repos.Lease.ReleaseByVM(ctx, builder.vmID); leaseErr != nil {
+			slog.Warn("failed to release lease during cleanup", "vm", builder.name, "error", leaseErr)
+		}
+	}
+
+	// Console relay: stop relay process
+	if builder.wasCreated("console_relay") && builder.relay != nil {
+		builder.relay.Cleanup()
+	}
+
+	// Firecracker: stop firecracker process
+	if builder.wasCreated("firecracker") && builder.fcManager != nil {
+		fcSpawner := vm.NewFirecrackerSpawner(builder.fcManager)
+		fcSpawner.Cleanup()
+	}
+
+	// VM directory: remove all created files
+	if builder.wasCreated("vm_dir") && builder.vmDir != "" {
+		if rmErr := os.RemoveAll(builder.vmDir); rmErr != nil {
+			slog.Warn("failed to remove VM directory during cleanup", "vm", builder.name, "error", rmErr)
+		}
+	}
 }
 
 // ── Remove ──
@@ -425,7 +662,6 @@ func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.B
 	}
 
 	repo := op.Repos.VM
-	volSvc := volume.NewService(op.Repos.Volume)
 
 	for _, v := range resolved.VMs {
 		vmLocal := v
@@ -458,7 +694,7 @@ func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.B
 				}
 			}
 			if len(vols) > 0 {
-				_ = volSvc.SetVolumesState(ctx, vols, model.VolumeStatusAvailable, nil)
+				_ = op.Services.Volume.SetVolumesState(ctx, vols, model.VolumeStatusAvailable, nil)
 			}
 		}
 
@@ -482,15 +718,14 @@ func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.B
 func (op *Operation) vmPerformRemovalCleanup(ctx context.Context, vm *model.VM) {
 	// Console relay cleanup (matches Python's _cleanup_console)
 	if vm.RelayPID != nil && vm.ID != "" {
-		relay := consoleapi.NewRelayManager(vm.ID, filepath.Join(op.CacheDir, "vms", vm.ID), vm.Name,
+		relay := consolesvc.NewRelayManager(vm.ID, filepath.Join(op.CacheDir, "vms", vm.ID), vm.Name,
 			"console.pid", "console.sock", "firecracker.console.log")
 		relay.Stop(true)
 	}
 
 	// TAP device cleanup (matches Python's _cleanup_network)
 	if vm.TapDevice != "" && vm.NetworkID != "" {
-		netSvc := network.NewService(network.NewRepository(nil), nil)
-		_ = netSvc.RemoveTap(ctx, vm.TapDevice, "", vm.NetworkID)
+		_ = op.Services.Network.RemoveTap(ctx, vm.TapDevice, "", vm.NetworkID)
 	}
 
 	// IP lease cleanup (matches Python's _cleanup_ip)
@@ -542,7 +777,7 @@ func (op *Operation) VMPrune(ctx context.Context, dryRun bool, includeAll bool) 
 		}
 
 		if !dryRun {
-			result := op.VMRemove(ctx, inputs.VMInput{Identifiers: []string{vm.Name}, Force: new(true)})
+			result := op.VMRemove(ctx, inputs.VMInput{Identifiers: []string{vm.Name}, Force: true})
 			if result.HasErrors() {
 				slog.Warn("Failed to remove VM", "name", vm.Name, "error", infraslice.JoinStringsPtrs(result))
 				continue
@@ -592,7 +827,8 @@ func (op *Operation) VMGet(ctx context.Context, input inputs.VMInput) (*model.VM
 		return nil, fmt.Errorf("Expected exactly one VM identifier")
 	}
 	// Use the full resolution pipeline (name, IP, MAC, ID prefix) matching Python's VMResolver
-	vm, err := op.vmResolveSingleVM(ctx, input.Identifiers[0])
+	vmResolver := vm.NewResolver(op.Repos.VM)
+	vm, err := vmResolver.Resolve(ctx, input.Identifiers[0])
 	if err != nil {
 		return nil, err
 	}
@@ -642,7 +878,7 @@ func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*resp
 	relayPID := vm.RelayPID
 	relaySocketPath := vm.RelaySocketPath
 	if vm.ID != "" && vm.RelayPID != nil {
-		relay := consoleapi.NewRelayManager(vm.ID, filepath.Join(op.CacheDir, "vms", vm.ID), vm.Name,
+		relay := consolesvc.NewRelayManager(vm.ID, filepath.Join(op.CacheDir, "vms", vm.ID), vm.Name,
 			"console.pid", "console.sock", "firecracker.console.log")
 		relayRunning = relay.IsRunning()
 	}
@@ -835,11 +1071,7 @@ func (op *Operation) VMStop(ctx context.Context, input inputs.VMInput) *errs.Bat
 			})
 			continue
 		}
-		force := false
-		if input.Force != nil {
-			force = *input.Force
-		}
-		controller.Stop(ctx, force)
+		controller.Stop(ctx, input.Force)
 
 		// Defense-in-depth: force-kill if stop() silently left the Firecracker process alive
 		if vmLocal.PID > 0 && system.IsProcessRunning(vmLocal.PID) {
@@ -883,7 +1115,7 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snap
 				}
 			}
 			if gateway != "" {
-				nocloudSvc := nocloudnet.NewNoCloudServer(v.ID, v.Name, vmDir, gateway, port, 8000, 9000, 100)
+				nocloudSvc := nocloudnetsvc.NewNoCloudServer(v.ID, v.Name, vmDir, gateway, port, 8000, 9000, 100)
 				if _, newPort, _, startErr := nocloudSvc.Start(ctx, vmDir); startErr != nil {
 					slog.Warn("Failed to start/restart nocloud-net server", "vm", v.Name, "error", startErr)
 				} else if port == 0 {
@@ -1096,7 +1328,8 @@ func (op *Operation) VMSnapshot(
 ) error {
 	// Python: resolved = VMRequest(inputs=inputs, db=Database()).resolve()
 	//         if len(resolved.vms) != 1: raise VMNotFoundError
-	vmItem, err := op.vmResolveSingleVM(ctx, input.Identifiers[0])
+	vmResolver := vm.NewResolver(op.Repos.VM)
+	vmItem, err := vmResolver.Resolve(ctx, input.Identifiers[0])
 	if err != nil {
 		return &errs.DomainError{
 			Code:    errs.CodeVMNotFound,
@@ -1176,7 +1409,8 @@ func (op *Operation) VMLoad(
 		}
 	}
 
-	vmItem, err := op.vmResolveSingleVM(ctx, input.Identifiers[0])
+	vmResolver := vm.NewResolver(op.Repos.VM)
+	vmItem, err := vmResolver.Resolve(ctx, input.Identifiers[0])
 	if err != nil {
 		return &errs.DomainError{
 			Code:    "vm.load_snapshot_failed",
@@ -1275,11 +1509,7 @@ func (op *Operation) VMReboot(ctx context.Context, input inputs.VMInput) *errs.B
 			})
 			continue
 		}
-		force := false
-		if input.Force != nil {
-			force = *input.Force
-		}
-		controller.Stop(ctx, force)
+		controller.Stop(ctx, input.Force)
 
 		// After stop, respawn a fresh firecracker process
 		if err := op.vmRespawnFirecracker(ctx, vmLocal, false); err != nil {
@@ -1670,7 +1900,7 @@ func (op *Operation) VMDetachVolume(
 // Matches Python's VMOperation.import_() exactly:
 //   - Reads VMExportConfig JSON from input.ConfigPath
 //   - Uses VMImportRequest to resolve semantic references
-//   - Delegates to VMCreateBuilder for full resolution
+//   - Delegates to VMCreateRequest for full resolution
 //   - Delegates to executeCreate for provisioning
 //   - Matches Python's try/except MVMError → "error", Exception → "failure"
 func (op *Operation) VMImport(
@@ -1689,7 +1919,7 @@ func (op *Operation) VMImport(
 
 	// Python wraps the resolve+create in a try/except that catches MVMError and Exception.
 	var execErr error
-	var resolved *inputs.VMCreateResolved
+	var resolved *inputs.ResolvedVMCreateInput
 
 	// Use VMImportRequest for full semantic resolution pipeline
 	// (matches Python: VMImportRequest(inputs=inputs, db=db).resolve())
@@ -1697,53 +1927,22 @@ func (op *Operation) VMImport(
 	resolved, execErr = request.Resolve(ctx)
 	var vmInstance *model.VM
 	if execErr == nil {
-		// Set up signal-based cleanup (matches Python's SigtermContext(lambda: ctx.cleanup()))
-		createCtx, cancelCreate := context.WithCancel(ctx)
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
-
-		var vmCleanup func()
-
-		go func() {
-			select {
-			case <-sigCh:
-				slog.Warn("Received termination signal during VM import, cleaning up...", "vm", resolved.Name)
-				if vmCleanup != nil {
-					vmCleanup()
-				}
-				cancelCreate()
-			case <-createCtx.Done():
+		// Signal-based cleanup is handled inside vmBuilderCreate via ctx.Done().
+		// The parent ctx (from main()) already cancels on SIGINT/SIGTERM.
+		vmInstance, execErr = op.vmBuilderCreate(ctx, resolved, onProgress)
+		if execErr != nil {
+			if resolved.SkipCleanup {
+				slog.Warn("VM import failed but --skip-cleanup is active", "dir", resolved.VMDir)
 			}
-		}()
-		signalCleanup := func() {
-			signal.Stop(sigCh)
-			close(sigCh)
-			cancelCreate()
-		}
-
-		// Convert VMCreateResolved to internal resolvedVMCreateInput for executeCreate
-		internalResolved := resolvedFromBuilderOutput(resolved)
-		if internalResolved == nil {
-			signalCleanup()
-			execErr = fmt.Errorf("Failed to convert resolved input")
 		} else {
-			vmInstance, execErr = op.vmExecuteCreate(createCtx, internalResolved, onProgress, &vmCleanup)
-			signalCleanup()
-			if execErr != nil {
-				if internalResolved.SkipCleanup {
-					slog.Warn("VM import failed but --skip-cleanup is active", "dir", internalResolved.VMDir)
+			// Handle volumes
+			if len(resolved.Volumes) > 0 {
+				op.Services.Volume.SetVolumesState(ctx, resolved.Volumes, model.VolumeStatusAttached, &vmInstance.ID)
+				vmInstance.VolumeIDs = make([]string, len(resolved.Volumes))
+				for i, v := range resolved.Volumes {
+					vmInstance.VolumeIDs[i] = v.ID
 				}
-			} else {
-				// Handle volumes
-				if len(internalResolved.Volumes) > 0 {
-					volSvc := volume.NewService(op.Repos.Volume)
-					volSvc.SetVolumesState(ctx, internalResolved.Volumes, model.VolumeStatusAttached, &vmInstance.ID)
-					vmInstance.VolumeIDs = make([]string, len(internalResolved.Volumes))
-					for i, v := range internalResolved.Volumes {
-						vmInstance.VolumeIDs[i] = v.ID
-					}
-					op.Repos.VM.Upsert(ctx, vmInstance)
-				}
+				op.Repos.VM.Upsert(ctx, vmInstance)
 			}
 		}
 	}
@@ -1851,13 +2050,14 @@ func (op *Operation) VMExport(ctx context.Context, input inputs.VMInput) (*input
 		cloudInitModePtr = &vmItem.CloudInitMode
 	}
 	rootUser := "root"
+	enableAPISocket := true
 
 	cfg := &inputs.VMExportConfig{
 		SchemaVersion: "1.0",
 		Name:          vmItem.Name,
 		Compute: inputs.VMExportComputeConfig{
-			VCPUs: new(vmItem.VCPUCount),
-			Mem:   new(vmItem.MemSizeMiB),
+			VCPUs: &vmItem.VCPUCount,
+			Mem:   &vmItem.MemSizeMiB,
 		},
 		Image: inputs.VMExportImageConfig{
 			Type:     imageType,
@@ -1887,7 +2087,7 @@ func (op *Operation) VMExport(ctx context.Context, input inputs.VMInput) (*input
 			EnableConsole: &vmItem.EnableConsole,
 		},
 		Firecracker: inputs.VMExportFirecrackerConfig{
-			EnableAPISocket: new(true),
+			EnableAPISocket: &enableAPISocket,
 			PCIEnabled:      &vmItem.PCIEnabled,
 			LsmFlags:        vmItem.LSMFlags,
 			NestedVirt:      &vmItem.NestedVirt,
@@ -1896,7 +2096,7 @@ func (op *Operation) VMExport(ctx context.Context, input inputs.VMInput) (*input
 		CloudInit: inputs.VMExportCloudInitConfig{
 			Mode:           cloudInitModePtr,
 			User:           &rootUser,
-			NocloudNetPort: new(nocloudPort),
+			NocloudNetPort: &nocloudPort,
 		},
 	}
 
@@ -1905,67 +2105,7 @@ func (op *Operation) VMExport(ctx context.Context, input inputs.VMInput) (*input
 	return cfg, nil
 }
 
-// ── Internal helpers ──
-
-type resolvedVMCreateInput struct {
-	Name                  string
-	VMID                  string
-	VMDir                 string
-	VCPUCount             int
-	MemSizeMiB            int
-	User                  string
-	DNSServer             string
-	RootUID               int
-	RootGID               int
-	UserUID               int
-	UserGID               int
-	GuestMACPrefix        string
-	Network               *model.Network
-	Image                 *model.ImageItem
-	Kernel                *model.KernelItem
-	Binary                *model.BinaryItem
-	NetworkPrefixLen      int
-	CloudInitMode         model.CloudInitMode
-	SkipCINetworkConfig   bool
-	PCIEnabled            bool
-	NestedVirt            bool
-	EnableConsole         bool
-	EnableLogging         bool
-	EnableMetrics         bool
-	KeepCloudInitISO      bool
-	SkipCleanup           bool
-	SkipDeblob            bool
-	NetworkNetmask        string
-	DiskSizeBytes         int64
-	DiskSizeMiB           int
-	LSMFlags              string
-	LogLevel              string
-	LogFilename           string
-	SerialOutputFilename  string
-	MetricsFilename       string
-	APISocketFilename     string
-	PIDFilename           string
-	ConfigFilename        string
-	ConsoleSocketFilename string
-	ConsolePIDFilename    string
-	CloudInitISOName      string
-	NocloudPortRangeStart int
-	NocloudPortRangeEnd   int
-	NocloudMaxPortRetries int
-	RequestedGuestIP      *string
-	RequestedGuestMAC     *string
-	NocloudNetPort        *int
-	CustomUserDataPath    *string
-	CloudInitISOPath      *string
-	CPUConfig             *model.CpuConfig
-	BootArgs              string
-	SSHKeys               []*model.SSHKeyItem
-	Provisioner           model.ProvisionerType
-	ExtraDrives           []model.DriveConfig
-	Volumes               []*model.VolumeItem
-}
-
-type vmCreateContext struct {
+type VMCreateBuilder struct {
 	name             string
 	vmID             string
 	vmDir            string
@@ -1974,17 +2114,12 @@ type vmCreateContext struct {
 	tapName          string
 	rootfsPath       string
 	onProgress       event.OnProgressCallback
-	resolved         *resolvedVMCreateInput
+	resolved         *inputs.ResolvedVMCreateInput
 	fcManager        *model.FirecrackerConfig
 	spawner          *vm.FirecrackerSpawner
 	relay            *console.Controller
 	cloudInitResult  *cloudInitResult
 	resourcesCreated map[string]bool
-	cacheDir         string
-	db               *sqlx.DB
-	// Fields for respawn flow (matches Python's _vm, _snapshot_mode)
-	_vm           *model.VM
-	_snapshotMode bool
 }
 
 type cloudInitResult struct {
@@ -1993,285 +2128,10 @@ type cloudInitResult struct {
 	nocloudURL        *string
 	nocloudPort       *int
 	nocloudPID        *int
-	nocloudNetManager any // any because type depends on cloud-init mode (server or ISO) — concrete typing not feasible
-	nocloudNetRules   []any
+	nocloudNetManager model.NoCloudNetManager
 }
 
-func (c *vmCreateContext) execute(ctx context.Context) error {
-	if c.vmDir == "" {
-		return fmt.Errorf("VM directory not set in context")
-	}
-	if c.resolved == nil {
-		return fmt.Errorf("Failed to resolve necessary dependencies")
-	}
-
-	// Generate MAC and TAP name
-	if c.resolved.RequestedGuestMAC != nil {
-		c.guestMAC = *c.resolved.RequestedGuestMAC
-	} else {
-		c.guestMAC = infranet.VMGenerateMAC(c.resolved.GuestMACPrefix)
-	}
-	c.tapName = infranet.VMGenerateTAPName(c.resolved.Network.Name, c.resolved.Name)
-
-	// Create VM directory
-	if err := os.MkdirAll(c.vmDir, 0755); err != nil {
-		return fmt.Errorf("create VM directory: %w", err)
-	}
-	c.markCreated("vm_dir")
-
-	// Progress: network
-	if c.onProgress != nil {
-		c.onProgress(event.Progress{Phase: "network", Status: "running", Message: "Configuring network..."})
-	}
-
-	// Network setup
-	netSvc := network.NewService(network.NewRepository(nil), nil)
-	bridgeAddr, calcErr := network.ComputeBridgeAddress(c.resolved.Network.IPv4Gateway, c.resolved.Network.Subnet)
-	if calcErr != nil {
-		return fmt.Errorf("compute bridge address: %w", calcErr)
-	}
-	if err := netSvc.EnsureBridge(ctx, c.resolved.Network.Bridge, bridgeAddr); err != nil {
-		return fmt.Errorf("ensure bridge: %w", err)
-	}
-
-	leaseSvc, err := network.NewLeaseService(ctx, c.resolved.Network, network.NewLeaseRepository(c.db), nil)
-	if err != nil {
-		return fmt.Errorf("create lease service: %w", err)
-	}
-	if c.resolved.RequestedGuestIP != nil {
-		ip, err := leaseSvc.LeaseSpecific(ctx, *c.resolved.RequestedGuestIP, c.vmID)
-		if err != nil {
-			return fmt.Errorf("lease specific IP: %w", err)
-		}
-		c.guestIP = ip
-	} else {
-		ip, err := leaseSvc.Lease(ctx, c.vmID)
-		if err != nil {
-			return fmt.Errorf("lease IP: %w", err)
-		}
-		c.guestIP = ip
-	}
-
-	natGateways := network.NatGatewaysList(c.resolved.Network)
-	if c.resolved.Network.NATEnabled && len(natGateways) > 0 {
-		_ = netSvc.EnsureNAT(ctx, c.resolved.Network.Bridge, natGateways,
-			c.resolved.Network.Subnet, c.resolved.Network.ID)
-	}
-
-	if err := netSvc.EnsureTap(ctx, c.tapName, c.resolved.Network.Bridge,
-		c.resolved.Network.ID, c.resolved.Network.Subnet); err != nil {
-		return fmt.Errorf("ensure TAP: %w", err)
-	}
-	c.markCreated("network_tap")
-	infranet.FlushARP(ctx, c.resolved.Network.Bridge)
-
-	// Progress: rootfs
-	if c.onProgress != nil {
-		c.onProgress(event.Progress{Phase: "rootfs", Status: "running", Message: "Copying root filesystem..."})
-	}
-
-	// Clone rootfs
-	if err := c.cloneImage(ctx); err != nil {
-		return err
-	}
-	c.markCreated("rootfs")
-
-	// Progress: cloud-init
-	if c.onProgress != nil {
-		c.onProgress(event.Progress{Phase: "cloud-init", Status: "running", Message: "Provisioning cloud-init..."})
-	}
-
-	// --- Cloud-init provisioning ---
-	// Build Backend matching Python's ProvisionerBackend.get_vm()
-	backend, err := provisioner.NewBackend(ctx, provisioner.BackendOpts{
-		RootfsPath:      c.rootfsPath,
-		FsType:          c.resolved.Image.FSType,
-		CacheDir:        c.cacheDir,
-		ProvisionerType: provisioner.ProvisionerType(c.resolved.Provisioner),
-		RootUID:         c.resolved.RootUID,
-		RootGID:         c.resolved.RootGID,
-		UserUID:         c.resolved.UserUID,
-		UserGID:         c.resolved.UserGID,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create VM provisioner: %w", err)
-	}
-
-	// Resize rootfs
-	backend.Resize(ctx, c.resolved.DiskSizeBytes)
-
-	mode := c.resolved.CloudInitMode
-
-	// Read SSH pubkeys from the key service (used by OFF, INJECT, ISO, NET modes)
-	keySvc := key.NewService(key.NewRepository(nil), infra.GetKeysDir())
-	pubkeys, _ := keySvc.GetPubkeys(ctx, c.resolved.SSHKeys)
-
-	// Common operations for OFF and INJECT modes
-	if mode == model.CloudInitModeOFF || mode == model.CloudInitModeINJECT {
-		backend.SetHostname(ctx, c.resolved.Name)
-		backend.InjectDNS(ctx, c.resolved.DNSServer)
-		backend.SetupSSH(ctx, c.resolved.User, pubkeys)
-	}
-
-	if mode == model.CloudInitModeOFF {
-		backend.DisableCloudInit(ctx)
-		c.markCreated("cloud-init-off")
-
-	} else if mode == model.CloudInitModeINJECT {
-		ciConfig := &model.ProvisionConfig{
-			Mode:                  mode,
-			VMName:                c.resolved.Name,
-			VMID:                  c.vmID,
-			VMDir:                 c.vmDir,
-			CloudInitDir:          filepath.Join(c.vmDir, "cloud-init"),
-			GuestIP:               c.guestIP,
-			TapName:               c.tapName,
-			User:                  c.resolved.User,
-			IPv4Gateway:           c.resolved.Network.IPv4Gateway,
-			NetworkPrefixLen:      c.resolved.NetworkPrefixLen,
-			SkipNetworkConfig:     c.resolved.SkipCINetworkConfig,
-			SSHPubkeys:            pubkeys,
-			CustomUserDataPath:    c.resolved.CustomUserDataPath,
-			NocloudNetPort:        c.resolved.NocloudNetPort,
-			CloudInitISOPath:      c.resolved.CloudInitISOPath,
-			KeepCloudInitISO:      c.resolved.KeepCloudInitISO,
-			CloudInitISOName:      c.resolved.CloudInitISOName,
-			NocloudPortRangeStart: c.resolved.NocloudPortRangeStart,
-			NocloudPortRangeEnd:   c.resolved.NocloudPortRangeEnd,
-			NocloudMaxPortRetries: c.resolved.NocloudMaxPortRetries,
-		}
-		ciProvisioner := cloudinit.NewProvisioner(ciConfig, nil)
-		ciResult, ciErr := ciProvisioner.Provision(ctx)
-		if ciErr != nil {
-			return fmt.Errorf("cloud-init inject provisioning failed: %w", ciErr)
-		}
-		c.cloudInitResult = &cloudInitResult{
-			mode: ciResult.Mode,
-		}
-		backend.InjectCloudInit(ctx, ciConfig.CloudInitDir)
-		c.markCreated("cloud-init-inject")
-
-	} else if mode == model.CloudInitModeISO || mode == model.CloudInitModeNET {
-		ciConfig := &model.ProvisionConfig{
-			Mode:                  mode,
-			VMName:                c.resolved.Name,
-			VMID:                  c.vmID,
-			VMDir:                 c.vmDir,
-			CloudInitDir:          filepath.Join(c.vmDir, "cloud-init"),
-			GuestIP:               c.guestIP,
-			TapName:               c.tapName,
-			User:                  c.resolved.User,
-			IPv4Gateway:           c.resolved.Network.IPv4Gateway,
-			NetworkPrefixLen:      c.resolved.NetworkPrefixLen,
-			SkipNetworkConfig:     c.resolved.SkipCINetworkConfig,
-			SSHPubkeys:            pubkeys,
-			CustomUserDataPath:    c.resolved.CustomUserDataPath,
-			NocloudNetPort:        c.resolved.NocloudNetPort,
-			CloudInitISOPath:      c.resolved.CloudInitISOPath,
-			KeepCloudInitISO:      c.resolved.KeepCloudInitISO,
-			CloudInitISOName:      c.resolved.CloudInitISOName,
-			NocloudPortRangeStart: c.resolved.NocloudPortRangeStart,
-			NocloudPortRangeEnd:   c.resolved.NocloudPortRangeEnd,
-			NocloudMaxPortRetries: c.resolved.NocloudMaxPortRetries,
-		}
-		ciProvisioner := cloudinit.NewProvisioner(ciConfig, nil)
-		ciResult, ciErr := ciProvisioner.Provision(ctx)
-		if ciErr != nil {
-			return fmt.Errorf("cloud-init provisioning failed: %w", ciErr)
-		}
-		c.cloudInitResult = &cloudInitResult{
-			mode:        ciResult.Mode,
-			isoPath:     ciResult.ISOPath,
-			nocloudURL:  ciResult.NocloudURL,
-			nocloudPort: &ciResult.NocloudPort,
-			nocloudPID:  ciResult.NocloudPID,
-		}
-
-		if mode == model.CloudInitModeISO {
-			c.markCreated("cloud-init-iso")
-		} else {
-			c.markCreated("cloud-init-net")
-		}
-	}
-
-	// Deblob (OS cache cleanup) unless explicitly skipped
-	if !c.resolved.SkipDeblob {
-		// Pass the image's pre-detected distro to avoid redundant OS detection.
-		// Matches Python: provisioner.deblob(os_type=self.resolved.image.distro)
-		backend.Deblob(ctx, &c.resolved.Image.Distro)
-	}
-
-	// Fix fstab for Firecracker (superfloppy /dev/vda layout)
-	backend.FixFstab(ctx)
-
-	// Execute all queued provisioning operations
-	backend.Run(ctx)
-
-	// Progress: firecracker
-	if c.onProgress != nil {
-		c.onProgress(
-			event.Progress{Phase: "firecracker", Status: "running", Message: "Starting Firecracker microVM..."},
-		)
-	}
-
-	// --- Firecracker config ---
-	fcConfig := c.buildFirecrackerConfig(ctx)
-	if fcConfig == nil {
-		return fmt.Errorf("Firecracker config is not set in context")
-	}
-
-	spawner := vm.NewFirecrackerSpawner(fcConfig)
-	c.fcManager = fcConfig
-	spawner.WriteToFile()
-	c.markCreated("firecracker")
-
-	// Validate socket path won't exceed Unix domain socket limit
-	socketPath := spawner.APISocketPath
-	if len(socketPath) >= 108 {
-		return fmt.Errorf(
-			"VM ID '%s' produces a socket path that is too long (%d chars, max 107). This is a system limit for Unix domain sockets. Path: %s",
-			c.vmID,
-			len(socketPath),
-			socketPath,
-		)
-	}
-
-	// Console relay setup (before spawn)
-	if c.resolved.EnableConsole {
-		consoleCtrl := console.NewController(c.vmID, c.vmDir, c.name,
-			c.resolved.ConsolePIDFilename, c.resolved.ConsoleSocketFilename, "firecracker.console.log")
-		ptyFD, ptyErr := consoleCtrl.CreatePTY()
-		if ptyErr != nil {
-			return fmt.Errorf("console PTY creation failed: %w", ptyErr)
-		}
-		c.relay = consoleCtrl
-		fcConfig.RelayClientFD = &ptyFD
-	}
-
-	// Spawn Firecracker
-	if err := spawner.Spawn(); err != nil {
-		return fmt.Errorf("failed to spawn Firecracker: %w", err)
-	}
-
-	// Store spawner for toModel() (matches Python's ctx.fc_manager = spawner)
-	c.spawner = spawner
-
-	// Start console relay after spawn (matches Python's relay.close_client_fd(); relay.start())
-	if c.resolved.EnableConsole && c.relay != nil {
-		c.relay.CloseClientFD()
-		_, _, startErr := c.relay.Start(ctx)
-		if startErr != nil {
-			return fmt.Errorf("console relay start failed: %w", startErr)
-		}
-		c.markCreated("console_relay")
-	}
-
-	if c.onProgress != nil {
-		c.onProgress(event.Progress{Phase: "complete", Status: "complete", Message: "VM created successfully"})
-	}
-
-	return nil
-}
+// clean/execute/forRespawn/respawnExecute moved to Operation as vmBuilderCleanup/vmBuilderExecute
 
 // consoleRelayRef is a simplified console relay reference for the Go port.
 type consoleRelayRef struct {
@@ -2279,21 +2139,17 @@ type consoleRelayRef struct {
 	vmDir string
 }
 
-func (c *vmCreateContext) cloneImage(ctx context.Context) error {
-	if c.resolved == nil {
-		return fmt.Errorf("Failed to resolve necessary dependencies")
-	}
-	fsType := c.resolved.Image.FSType
+func (c *VMCreateBuilder) cloneImage(ctx context.Context, imageSvc *image.Service, resolved *inputs.ResolvedVMCreateInput) error {
+	fsType := resolved.Image.FSType
 	if fsType == "" {
 		return fmt.Errorf("fsType is required")
 	}
 	vmRootfsPath := filepath.Join(c.vmDir, "rootfs."+fsType)
 
-	imageSvc := image.NewService(image.NewRepository(nil))
-	if _, err := imageSvc.EnsureCached([]*model.ImageItem{c.resolved.Image}); err != nil {
+	if _, err := imageSvc.EnsureCached([]*model.ImageItem{resolved.Image}); err != nil {
 		return fmt.Errorf("ensure cached image: %w", err)
 	}
-	if err := imageSvc.MaterializeTo(ctx, c.resolved.Image.ID, fsType, vmRootfsPath); err != nil {
+	if err := imageSvc.MaterializeTo(ctx, resolved.Image.ID, fsType, vmRootfsPath); err != nil {
 		return fmt.Errorf("materialize image: %w", err)
 	}
 
@@ -2301,290 +2157,23 @@ func (c *vmCreateContext) cloneImage(ctx context.Context) error {
 	return nil
 }
 
-func (c *vmCreateContext) markCreated(resource string) {
+func (c *VMCreateBuilder) markCreated(resource string) {
 	c.resourcesCreated[resource] = true
 }
 
-func (c *vmCreateContext) wasCreated(resource string) bool {
+func (c *VMCreateBuilder) wasCreated(resource string) bool {
 	return c.resourcesCreated[resource]
-}
-
-func (c *vmCreateContext) cleanup() {
-	if c.vmDir == "" || c.resolved == nil {
-		return
-	}
-
-	// Cloud-init: stop nocloud server and remove firewall rules
-	if c.wasCreated("cloud-init-net") && c.cloudInitResult != nil && c.cloudInitResult.nocloudNetManager != nil {
-		if mgr, ok := c.cloudInitResult.nocloudNetManager.(interface{ Stop() error }); ok {
-			_ = mgr.Stop()
-		}
-		// Remove all nocloud-net firewall rules
-		for _, rule := range c.cloudInitResult.nocloudNetRules {
-			if fwRule, ok := rule.(interface{ Remove() error }); ok {
-				_ = fwRule.Remove()
-			}
-		}
-	}
-
-	// Networking: remove TAP device
-	if c.wasCreated("network_tap") && c.tapName != "" && c.resolved.Network != nil {
-		netSvc := network.NewService(network.NewRepository(nil), nil)
-		_ = netSvc.RemoveTap(context.Background(), c.tapName, c.resolved.Network.Bridge, c.resolved.Network.ID)
-
-		// Release IP lease
-		leaseRepo := network.NewLeaseRepository(nil)
-		_ = leaseRepo.ReleaseByVM(context.Background(), c.vmID)
-	}
-
-	// Console relay: stop relay process
-	if c.wasCreated("console_relay") && c.relay != nil {
-		c.relay.Cleanup()
-	}
-
-	// Firecracker: stop firecracker process
-	if c.wasCreated("firecracker") && c.fcManager != nil {
-		spawner := vm.NewFirecrackerSpawner(c.fcManager)
-		spawner.Cleanup()
-	}
-
-	// VM directory: remove all created files
-	if c.wasCreated("vm_dir") && c.vmDir != "" {
-		os.RemoveAll(c.vmDir)
-	}
-}
-
-// ── Respawning (for_respawn / respawn_execute) ──
-// Matches Python's VMCreateContext.for_respawn() and respawn_execute().
-
-// forRespawn creates a VMCreateContext for respawning a stopped VM from its stored state.
-// Matches Python's VMCreateContext.for_respawn() exactly.
-func (c *vmCreateContext) forRespawn(vm *model.VM, snapshotMode bool) error {
-	c.name = vm.Name
-	c.vmID = vm.ID
-	c.vmDir = filepath.Join(c.cacheDir, "vms", vm.ID)
-	c._vm = vm
-	c._snapshotMode = snapshotMode
-	c.guestIP = vm.IPv4
-	c.guestMAC = vm.MAC
-	c.tapName = vm.TapDevice
-
-	// Build rootfs path from VM state
-	rootfsSuffix := vm.RootfsSuffix
-	if rootfsSuffix == "" {
-		return fmt.Errorf("rootfs suffix is required")
-	}
-	c.rootfsPath = filepath.Join(c.vmDir, "rootfs."+rootfsSuffix)
-
-	// Build resolved from VM state — makes buildFirecrackerConfig() work unchanged
-	c.resolved = &resolvedVMCreateInput{
-		Name:                  vm.Name,
-		VMID:                  vm.ID,
-		VMDir:                 c.vmDir,
-		VCPUCount:             vm.VCPUCount,
-		MemSizeMiB:            vm.MemSizeMiB,
-		User:                  ptr.SafeDeref(vm.SSHUser),
-		DNSServer:             "1.1.1.1",
-		GuestMACPrefix:        "02:FC",
-		NetworkPrefixLen:      24,
-		NetworkNetmask:        "255.255.255.0",
-		CloudInitMode:         model.CloudInitModeOFF,
-		PCIEnabled:            vm.PCIEnabled,
-		NestedVirt:            vm.NestedVirt,
-		EnableConsole:         vm.EnableConsole,
-		EnableLogging:         vm.EnableLogging,
-		EnableMetrics:         vm.EnableMetrics,
-		LogLevel:              "Info",
-		LogFilename:           "firecracker.log",
-		SerialOutputFilename:  "serial.out",
-		MetricsFilename:       "metrics.log",
-		APISocketFilename:     "api.socket",
-		PIDFilename:           "firecracker.pid",
-		ConfigFilename:        "firecracker.json",
-		ConsoleSocketFilename: "console.sock",
-		ConsolePIDFilename:    "console.pid",
-		CloudInitISOName:      "seed.iso",
-		BootArgs:              vm.BootArgs,
-		LSMFlags:              vm.LSMFlags,
-	}
-
-	// Set cloud_init_mode from VM state
-	if vm.CloudInitMode != "" {
-		switch vm.CloudInitMode {
-		case "inject":
-			c.resolved.CloudInitMode = model.CloudInitModeINJECT
-		case "net":
-			c.resolved.CloudInitMode = model.CloudInitModeNET
-		case "iso":
-			c.resolved.CloudInitMode = model.CloudInitModeISO
-		}
-	}
-
-	// Fabricate cloud_init_result for buildFirecrackerConfig() (matches Python's fabrication)
-	ciMode := model.CloudInitModeOFF
-	if vm.CloudInitMode != "" {
-		switch vm.CloudInitMode {
-		case "inject":
-			ciMode = model.CloudInitModeINJECT
-		case "net":
-			ciMode = model.CloudInitModeNET
-		case "iso":
-			ciMode = model.CloudInitModeISO
-		}
-	}
-
-	isoPath := filepath.Join(c.vmDir, "cloud-init", "seed.iso")
-	var isoPathPtr *string
-	if _, err := os.Stat(isoPath); err == nil {
-		isoPathPtr = new(isoPath)
-	}
-
-	var nocloudURL *string
-	if vm.NocloudNetPort != nil && vm.IPv4 != "" {
-		url := fmt.Sprintf("http://%s:%d/", vm.IPv4, *vm.NocloudNetPort)
-		nocloudURL = &url
-	}
-
-	c.cloudInitResult = &cloudInitResult{
-		mode:       ciMode,
-		isoPath:    isoPathPtr,
-		nocloudURL: nocloudURL,
-	}
-
-	return nil
-}
-
-// respawnExecute executes the respawn flow for a stopped VM.
-// Matches Python's VMCreateContext.respawn_execute() exactly.
-// Handles: nocloud-net restart, force-kill old process, TAP re-ensure,
-// then delegates to buildFirecrackerConfig + spawn.
-// DB updates (pid, status) are handled by the caller.
-func (c *vmCreateContext) respawnExecute(ctx context.Context) error {
-	if c._vm == nil {
-		return fmt.Errorf("VM not set on VMCreateContext for respawn")
-	}
-
-	if c._vm.Network == nil {
-		return fmt.Errorf("Network not found for VM '%s' (ID: %s)", c._vm.Name, c._vm.NetworkID)
-	}
-
-	// Resolve network if not enriched (should not happen, but be safe)
-	netItem := c._vm.Network
-	if netItem == nil {
-		netRepo := network.NewRepository(nil)
-		netItem, _ = netRepo.Get(ctx, c._vm.NetworkID)
-		if netItem == nil {
-			return fmt.Errorf("Network not found for VM '%s' (ID: %s)", c._vm.Name, c._vm.NetworkID)
-		}
-		// Re-set in c._vm so subsequent code can use it
-		c._vm.Network = netItem
-	}
-
-	cloudInitMode := model.CloudInitModeOFF
-	if c.cloudInitResult != nil {
-		cloudInitMode = c.cloudInitResult.mode
-	}
-
-	// ── Restart nocloud-net server if needed ──
-	if cloudInitMode == model.CloudInitModeNET {
-		port := 0
-		if c._vm.NocloudNetPort != nil {
-			port = *c._vm.NocloudNetPort
-		}
-		if port == 0 || (c._vm.NocloudNetPID != nil && !system.IsProcessRunning(*c._vm.NocloudNetPID)) {
-			nocloudSvc := nocloudnet.NewNoCloudServer(
-				c._vm.ID,
-				c._vm.Name,
-				c.vmDir,
-				netItem.IPv4Gateway,
-				port,
-				8000,
-				9000,
-				100,
-			)
-			if _, newPort, _, startErr := nocloudSvc.Start(ctx, c.vmDir); startErr != nil {
-				slog.Warn("Failed to start/restart nocloud-net server", "vm", c._vm.Name, "error", startErr)
-			} else if port == 0 {
-				port = newPort
-			}
-		}
-	}
-
-	// ── Force-kill any remaining Firecracker process ──
-	if c._vm.PID > 0 && system.IsProcessRunning(c._vm.PID) {
-		proc, err := os.FindProcess(c._vm.PID)
-		if err == nil {
-			// Try SIGTERM first, then SIGKILL (matches Python's kill_and_wait)
-			_ = proc.Signal(syscall.SIGTERM)
-			time.Sleep(100 * time.Millisecond)
-			if system.IsProcessRunning(c._vm.PID) {
-				_ = proc.Kill()
-				time.Sleep(50 * time.Millisecond)
-			}
-		}
-	}
-
-	// ── Re-ensure TAP device exists before spawning ──
-	netSvc := network.NewService(network.NewRepository(nil), nil)
-	bridgeAddr, calcErr := network.ComputeBridgeAddress(netItem.IPv4Gateway, netItem.Subnet)
-	if calcErr != nil {
-		return fmt.Errorf("compute bridge address: %w", calcErr)
-	}
-	_ = netSvc.EnsureBridge(ctx, netItem.Bridge, bridgeAddr)
-	_ = netSvc.EnsureTap(ctx, c.tapName, netItem.Bridge, netItem.ID, netItem.Subnet)
-	infranet.FlushARP(ctx, netItem.Bridge)
-
-	// ── Build config and spawn ──
-	fcConfig := c.buildFirecrackerConfig(ctx)
-	if fcConfig == nil {
-		return fmt.Errorf("Firecracker config is not set in context")
-	}
-	fcConfig.SnapshotMode = c._snapshotMode
-
-	// Console relay setup (before spawn)
-	if c._vm.EnableConsole {
-		consoleCtrl := console.NewController(c.vmID, c.vmDir, c.name,
-			"console.pid", "console.sock", "firecracker.console.log")
-		ptyFD, ptyErr := consoleCtrl.CreatePTY()
-		if ptyErr != nil {
-			return fmt.Errorf("console PTY creation failed: %w", ptyErr)
-		}
-		c.relay = consoleCtrl
-		fcConfig.RelayClientFD = &ptyFD
-	}
-
-	spawner := vm.NewFirecrackerSpawner(fcConfig)
-	c.fcManager = fcConfig
-	spawner.WriteToFile()
-
-	if err := spawner.Spawn(); err != nil {
-		return fmt.Errorf("failed to spawn Firecracker: %w", err)
-	}
-
-	// Start console relay after spawn
-	if c._vm.EnableConsole && c.relay != nil {
-		c.markCreated("console_relay")
-	}
-
-	return nil
 }
 
 // buildFirecrackerConfig builds a FirecrackerConfig from the resolved create context.
 // Matches Python's VMCreateContext.build_firecracker_config() exactly.
-func (c *vmCreateContext) buildFirecrackerConfig(ctx context.Context) *model.FirecrackerConfig {
+func (c *VMCreateBuilder) buildFirecrackerConfig(ctx context.Context) *model.FirecrackerConfig {
 	if c.resolved == nil {
 		return nil
 	}
 
 	var cpuVendor *string
 	var cpuArchitecture *string
-	if c.db != nil {
-		hostRepo := host.NewRepository(c.db)
-		if hostState, err := hostRepo.GetState(ctx); err == nil && hostState != nil {
-			cpuVendor = hostState.CPUVendor
-			cpuArchitecture = hostState.CPUArchitecture
-		}
-	}
 
 	ciMode := model.CloudInitModeOFF
 	if c.cloudInitResult != nil {
@@ -2604,7 +2193,7 @@ func (c *vmCreateContext) buildFirecrackerConfig(ctx context.Context) *model.Fir
 		BinaryPath:           c.resolved.Binary.Path,
 		KernelPath:           c.resolved.Kernel.Path,
 		VCPUCount:            c.resolved.VCPUCount,
-		MemSizeMiB:           c.resolved.MemSizeMiB,
+		MemSizeMiB:           c.resolved.MemSizeMib,
 		GuestIP:              c.guestIP,
 		GuestMAC:             c.guestMAC,
 		TapName:              c.tapName,
@@ -2635,10 +2224,12 @@ func (c *vmCreateContext) buildFirecrackerConfig(ctx context.Context) *model.Fir
 	// Cloud-init info from result (isoPath, nocloudURL)
 	if c.cloudInitResult != nil {
 		if c.cloudInitResult.isoPath != nil {
-			fcConfig.CloudInitISOPath = new(*c.cloudInitResult.isoPath)
+			isoPath := *c.cloudInitResult.isoPath
+			fcConfig.CloudInitISOPath = &isoPath
 		}
 		if c.cloudInitResult.nocloudURL != nil {
-			fcConfig.CloudInitNoCloudURL = new(*c.cloudInitResult.nocloudURL)
+			nocloudURL := *c.cloudInitResult.nocloudURL
+			fcConfig.CloudInitNoCloudURL = &nocloudURL
 		}
 	}
 
@@ -2650,26 +2241,19 @@ func (c *vmCreateContext) buildFirecrackerConfig(ctx context.Context) *model.Fir
 	return fcConfig
 }
 
-func (c *vmCreateContext) toModel() *model.VM {
-	if c.resolved == nil {
-		return nil
-	}
-
-	// Python's to_model() requires self.fc_manager and self.fc_manager.pid
-	if c.spawner == nil {
-		return nil
-	}
-	if c.spawner.PID == nil {
+func (c *VMCreateBuilder) toVMModel() *model.VM {
+	if c.resolved == nil || c.spawner == nil || c.spawner.PID == nil {
 		return nil
 	}
 
 	now := time.Now().Format(time.RFC3339)
+	logPath := filepath.Join(c.vmDir, c.resolved.LogFilename)
+	serialPath := filepath.Join(c.vmDir, c.resolved.SerialOutputFilename)
 
 	vm := &model.VM{
 		ID:               c.vmID,
 		Name:             c.resolved.Name,
-		PID:              ptr.SafeDerefInt(c.spawner.PID),
-		ExitCode:         nil,
+		PID:              *c.spawner.PID,
 		ProcessStartTime: c.spawner.ProcessStartTime,
 		Status:           model.VMStatusRunning,
 		IPv4:             c.guestIP,
@@ -2680,8 +2264,8 @@ func (c *vmCreateContext) toModel() *model.VM {
 		KernelID:         c.resolved.Kernel.ID,
 		BinaryID:         c.resolved.Binary.ID,
 		VCPUCount:        c.resolved.VCPUCount,
-		MemSizeMiB:       c.resolved.MemSizeMiB,
-		DiskSizeMiB:      c.resolved.DiskSizeMiB,
+		MemSizeMiB:       c.resolved.MemSizeMib,
+		DiskSizeMiB:      c.resolved.DiskSizeMib,
 		APISocketPath:    filepath.Join(c.vmDir, c.resolved.APISocketFilename),
 		ConfigPath:       filepath.Join(c.vmDir, c.resolved.ConfigFilename),
 		CloudInitMode:    string(c.resolved.CloudInitMode),
@@ -2695,8 +2279,10 @@ func (c *vmCreateContext) toModel() *model.VM {
 		CreatedAt:        now,
 		UpdatedAt:        now,
 		SSHUser:          &c.resolved.User,
-		VolumeIDs:        []string{},
+		LogPath:          &logPath,
+		SerialOutputPath: &serialPath,
 	}
+
 	// Extract key names for the VM record (model.SSHKeys is []string)
 	for _, k := range c.resolved.SSHKeys {
 		if k != nil {
@@ -2704,14 +2290,9 @@ func (c *vmCreateContext) toModel() *model.VM {
 		}
 	}
 
-	// Set cpu_config from resolved input (matches Python: if self.resolved.cpu_config is not None)
 	if c.resolved.CPUConfig != nil {
 		vm.CPUConfig = c.resolved.CPUConfig
 	}
-
-	vm.LogPath = new(filepath.Join(c.vmDir, c.resolved.LogFilename))
-	vm.SerialOutputPath = new(filepath.Join(c.vmDir, c.resolved.SerialOutputFilename))
-
 	if c.resolved.BootArgs != "" {
 		vm.BootArgs = c.resolved.BootArgs
 	}
@@ -2719,7 +2300,7 @@ func (c *vmCreateContext) toModel() *model.VM {
 		vm.LSMFlags = c.resolved.LSMFlags
 	}
 
-	// Python: nocloud_net_port and nocloud_net_pid from cloud_init_result
+	// Nocloud port/pid from cloud_init_result (prefer runtime values over resolved)
 	if c.cloudInitResult != nil && c.cloudInitResult.nocloudNetManager != nil {
 		if c.cloudInitResult.nocloudPort != nil {
 			vm.NocloudNetPort = c.cloudInitResult.nocloudPort
@@ -2731,7 +2312,7 @@ func (c *vmCreateContext) toModel() *model.VM {
 		vm.NocloudNetPort = c.resolved.NocloudNetPort
 	}
 
-	// Set relay PID and socket path (matches Python's to_model relay block)
+	// Relay info
 	if c.relay != nil {
 		if p := c.relay.GetPID(); p != nil {
 			vm.RelayPID = p
@@ -2743,406 +2324,3 @@ func (c *vmCreateContext) toModel() *model.VM {
 
 	return vm
 }
-
-func (op *Operation) vmBuildResolvedInput(
-	ctx context.Context,
-	input inputs.VMCreateInput,
-	vmID, vmDir string,
-) (*resolvedVMCreateInput, error) {
-	// Resolve image (handles selectors like "alpine:3.21" and ID prefixes)
-	var image *model.ImageItem
-	var err error
-	if input.Image != nil {
-		selector := *input.Image
-		// Try exact name first
-		image, err = op.Repos.Image.GetByName(ctx, selector)
-		if err == nil && image == nil {
-			// Try type:version selector (e.g. "alpine:3.21")
-			parts := strings.SplitN(selector, ":", 2)
-			if len(parts) == 2 {
-				image, err = op.Repos.Image.GetByVersionAndType(ctx, parts[1], parts[0])
-			}
-		}
-		if image == nil {
-			image, err = op.Repos.Image.Get(ctx, selector)
-		}
-	}
-	if image == nil {
-		image, err = op.Repos.Image.GetDefault(ctx)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("resolve image: %w", err)
-	}
-	if image == nil {
-		if input.Image != nil {
-			return nil, fmt.Errorf("resolve image: %s is not present locally", *input.Image)
-		}
-		return nil, fmt.Errorf("resolve image: no default image set")
-	}
-
-	// Resolve kernel
-	var kernel *model.KernelItem
-	if input.KernelID != nil {
-		kernel, err = op.Repos.Kernel.Get(ctx, *input.KernelID)
-		if err != nil || kernel == nil {
-			kernel, err = op.Repos.Kernel.GetByName(ctx, *input.KernelID)
-		}
-	} else {
-		kernel, err = op.Repos.Kernel.GetDefault(ctx)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("resolve kernel: %w", err)
-	}
-	if kernel == nil {
-		if input.KernelID != nil {
-			return nil, fmt.Errorf("resolve kernel: %s is not present locally", *input.KernelID)
-		}
-		return nil, fmt.Errorf("resolve kernel: no default kernel set")
-	}
-
-	// Resolve network
-	var network *model.Network
-	if input.NetworkName != nil {
-		network, err = op.Repos.Network.GetByName(ctx, *input.NetworkName)
-		if err != nil || network == nil {
-			network, err = op.Repos.Network.Get(ctx, *input.NetworkName)
-		}
-	} else {
-		network, err = op.Repos.Network.GetDefault(ctx)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("resolve network: %w", err)
-	}
-	if network == nil {
-		return nil, fmt.Errorf("resolve network: no default network")
-	}
-
-	// Resolve binary from DB (matches Python's Repository resolution)
-	binary := op.vmResolveBinary(ctx, input.BinaryID, op.Repos.Binary)
-
-	// Resolve SSH keys
-	sshKeyNames := input.SSHKeys
-	if len(sshKeyNames) == 0 {
-		defaultKeys, _ := op.Repos.Key.GetDefaults(ctx)
-		for _, k := range defaultKeys {
-			sshKeyNames = append(sshKeyNames, k.Name)
-		}
-	}
-
-	// Network details
-	networkPrefixLen := 24
-	networkNetmask := "255.255.255.0"
-
-	// Defaults (matching constants.py: vcpu_count=1, mem_size_mib=512)
-	vcpuCount := 1
-	if input.VCPUCount != nil {
-		vcpuCount = *input.VCPUCount
-	}
-
-	memSizeMiB := 0
-	if input.MemSizeMib != "" {
-		if bytes, err := disk.ParseDiskSizeToBytes(input.MemSizeMib); err == nil {
-			memSizeMiB = int(bytes / (1024 * 1024))
-		}
-	}
-	if memSizeMiB <= 0 {
-		memSizeMiB = 512
-	}
-
-	diskSizeMiB := image.MinRootfsSizeMiB
-	diskSizeBytes := int64(diskSizeMiB) * 1024 * 1024
-	if input.DiskSize != "" {
-		if bytes, err := disk.ParseDiskSizeToBytes(input.DiskSize); err == nil {
-			diskSizeBytes = bytes
-			diskSizeMiB = int(bytes / (1024 * 1024))
-		}
-	}
-
-	user := "root"
-	if input.User != nil {
-		user = *input.User
-	}
-
-	ciMode := model.CloudInitModeOFF
-	if input.CloudInitMode != nil {
-		switch *input.CloudInitMode {
-		case "inject":
-			ciMode = model.CloudInitModeINJECT
-		case "net":
-			ciMode = model.CloudInitModeNET
-		case "iso":
-			ciMode = model.CloudInitModeISO
-		}
-	}
-
-	nestedVirt := false
-	if input.NestedVirt != nil {
-		nestedVirt = *input.NestedVirt
-	}
-	pciEnabled := false
-	if input.PCIEnabled != nil {
-		pciEnabled = *input.PCIEnabled
-	}
-	if nestedVirt {
-		pciEnabled = true
-	}
-
-	enableConsole := !input.NoConsole
-
-	// Resolve boot_args and lsm_flags from input (matches Python's VMCreateRequest.resolve())
-	bootArgs := input.BootArgs
-	lsmFlags := input.LSMFlags
-
-	// Resolve enable_logging and enable_metrics from input (matches Python)
-	enableLogging := false
-	if input.EnableLogging != nil {
-		enableLogging = *input.EnableLogging
-	}
-	enableMetrics := false
-	if input.EnableMetrics != nil {
-		enableMetrics = *input.EnableMetrics
-	}
-
-	// Resolve provisioner type from settings (matches Python)
-	provisionerType := provisioner.ProvisionerLoopMount
-	if op.Connection != nil {
-		row := op.Connection.DB().
-			QueryRowContext(ctx, "SELECT value FROM user_settings WHERE category = 'settings' AND key = 'guestfs_enabled'")
-		var val string
-		if err := row.Scan(&val); err == nil {
-			if val == "true" || val == "1" {
-				provisionerType = provisioner.ProvisionerGuestFS
-			}
-		}
-	}
-
-	// Resolve SSH key items (with PublicKeyPath) so GetPubkeys can read
-	// files directly without re-querying the DB.
-	var sshKeyItems []*model.SSHKeyItem
-	for _, name := range sshKeyNames {
-		key, err := op.Repos.Key.GetByName(ctx, name)
-		if err == nil && key != nil {
-			sshKeyItems = append(sshKeyItems, key)
-		} else {
-			// Fall back: create a minimal item with just the name
-			sshKeyItems = append(
-				sshKeyItems,
-				&model.SSHKeyItem{Name: name, PublicKeyPath: filepath.Join(infra.GetKeysDir(), name+".pub")},
-			)
-		}
-	}
-
-	return &resolvedVMCreateInput{
-		Name:                  input.Name,
-		VMID:                  vmID,
-		VMDir:                 vmDir,
-		VCPUCount:             vcpuCount,
-		MemSizeMiB:            memSizeMiB,
-		User:                  user,
-		DNSServer:             "1.1.1.1",
-		GuestMACPrefix:        "02:FC",
-		Network:               network,
-		Image:                 image,
-		Kernel:                kernel,
-		Binary:                binary,
-		NetworkPrefixLen:      networkPrefixLen,
-		CloudInitMode:         ciMode,
-		PCIEnabled:            pciEnabled,
-		NestedVirt:            nestedVirt,
-		EnableConsole:         enableConsole,
-		EnableLogging:         enableLogging,
-		EnableMetrics:         enableMetrics,
-		SkipCleanup:           input.SkipCleanup,
-		SkipDeblob:            input.SkipDeblob,
-		NetworkNetmask:        networkNetmask,
-		DiskSizeBytes:         diskSizeBytes,
-		DiskSizeMiB:           diskSizeMiB,
-		BootArgs:              bootArgs,
-		LSMFlags:              lsmFlags,
-		LogLevel:              "Info",
-		LogFilename:           "firecracker.log",
-		SerialOutputFilename:  "serial.out",
-		MetricsFilename:       "metrics.log",
-		APISocketFilename:     "api.socket",
-		PIDFilename:           "firecracker.pid",
-		ConfigFilename:        "firecracker.json",
-		ConsoleSocketFilename: "console.sock",
-		ConsolePIDFilename:    "console.pid",
-		CloudInitISOName:      "seed.iso",
-		NocloudPortRangeStart: 8000,
-		NocloudPortRangeEnd:   9000,
-		NocloudMaxPortRetries: 100,
-		RequestedGuestIP:      input.RequestedGuestIP,
-		RequestedGuestMAC:     input.RequestedGuestMAC,
-		CPUConfig:             infra.MapToStruct[model.CpuConfig](input.CPUConfig),
-		SSHKeys:               sshKeyItems,
-		Provisioner:           model.ProvisionerType(provisionerType),
-	}, nil
-}
-
-// resolveBinary resolves the firecracker binary from DB or falls back to hardcoded path.
-// Matches Python's VMCreateRequest binary resolution: tries explicit ID/path, then default, then fallback.
-func (op *Operation) vmResolveBinary(
-	ctx context.Context,
-	binaryID *string,
-	binaryRepo binary.Repository,
-) *model.BinaryItem {
-	// 1. Explicit binary ID from input
-	if binaryID != nil && *binaryID != "" {
-		bin, err := binaryRepo.Get(ctx, *binaryID)
-		if err == nil && bin != nil {
-			return bin
-		}
-	}
-	// 2. Default firecracker from DB
-	bin, err := binaryRepo.GetDefault(ctx, "firecracker")
-	if err == nil && bin != nil {
-		return bin
-	}
-	// 3. Fallback to hardcoded path
-	return &model.BinaryItem{Name: "firecracker", Path: "/usr/local/bin/firecracker"}
-}
-
-func (op *Operation) vmResolveSingleVM(ctx context.Context, ident string) (*model.VM, error) {
-	if ident == "" {
-		return nil, fmt.Errorf("VM identifier is required")
-	}
-	// Match Python's VMResolver.resolve() order:
-	// 1. Try by name first
-	vm, err := op.Repos.VM.GetByName(ctx, ident)
-	if err == nil && vm != nil {
-		return vm, nil
-	}
-	// 2. If contains '.', try by IP (matches Python's by_ip)
-	if strings.Contains(ident, ".") {
-		vm, err = op.Repos.VM.FindByIP(ctx, ident)
-		if err == nil && vm != nil {
-			return vm, nil
-		}
-	}
-	// 3. If contains ':', try by MAC (matches Python's by_mac)
-	if strings.Contains(ident, ":") {
-		vm, err = op.Repos.VM.FindByMAC(ctx, ident)
-		if err == nil && vm != nil {
-			return vm, nil
-		}
-	}
-	// 4. Try by ID prefix (matches Python's find_by_prefix)
-	matches, err := op.Repos.VM.FindByPrefix(ctx, ident)
-	if err == nil {
-		if len(matches) == 1 {
-			return matches[0], nil
-		}
-		if len(matches) > 1 {
-			var names []string
-			for _, m := range matches {
-				names = append(names, m.Name)
-			}
-			return nil, fmt.Errorf("ID %s matches multiple VMs: %s", ident, strings.Join(names, ", "))
-		}
-	}
-	return nil, fmt.Errorf("VM not found: %s", ident)
-}
-
-func (op *Operation) vmGenerateBatchNames(baseName string, count int) []string {
-	names := make([]string, count)
-	for i := range count {
-		names[i] = fmt.Sprintf("%s-%d", baseName, i+1)
-	}
-	return names
-}
-
-// ── Standalone helper functions ──
-
-// resolvedFromBuilderOutput converts a VMCreateResolved (from VMCreateBuilder.Build)
-// to the internal resolvedVMCreateInput used by executeCreate.
-// This bridges the public API layer to the internal VM creation pipeline.
-func resolvedFromBuilderOutput(r *inputs.VMCreateResolved) *resolvedVMCreateInput {
-	if r == nil {
-		return nil
-	}
-
-	return &resolvedVMCreateInput{
-		Name:                  r.Name,
-		VMID:                  r.VMID,
-		VMDir:                 r.VMDir,
-		VCPUCount:             r.VCPUCount,
-		MemSizeMiB:            r.MemSizeMib,
-		User:                  r.User,
-		DNSServer:             r.DNSServer,
-		RootUID:               r.RootUID,
-		RootGID:               r.RootGID,
-		UserUID:               r.UserUID,
-		UserGID:               r.UserGID,
-		GuestMACPrefix:        r.GuestMACPrefix,
-		Network:               r.Network,
-		Image:                 r.Image,
-		Kernel:                r.Kernel,
-		Binary:                r.Binary,
-		NetworkPrefixLen:      r.NetworkPrefixLen,
-		CloudInitMode:         r.CloudInitMode,
-		SkipCINetworkConfig:   r.SkipCINetworkConfig,
-		PCIEnabled:            r.PCIEnabled,
-		NestedVirt:            r.NestedVirt,
-		EnableConsole:         r.EnableConsole,
-		EnableLogging:         r.EnableLogging,
-		EnableMetrics:         r.EnableMetrics,
-		KeepCloudInitISO:      r.KeepCloudInitISO,
-		SkipCleanup:           r.SkipCleanup,
-		SkipDeblob:            r.SkipDeblob,
-		NetworkNetmask:        r.NetworkNetmask,
-		DiskSizeBytes:         r.DiskSizeBytes,
-		DiskSizeMiB:           r.DiskSizeMib,
-		LSMFlags:              r.LSMFlags,
-		LogLevel:              r.LogLevel,
-		LogFilename:           r.LogFilename,
-		SerialOutputFilename:  r.SerialOutputFilename,
-		MetricsFilename:       r.MetricsFilename,
-		APISocketFilename:     r.APISocketFilename,
-		PIDFilename:           r.PIDFilename,
-		ConfigFilename:        r.ConfigFilename,
-		ConsoleSocketFilename: r.ConsoleSocketFilename,
-		ConsolePIDFilename:    r.ConsolePIDFilename,
-		CloudInitISOName:      r.CloudInitISOName,
-		NocloudPortRangeStart: r.NocloudPortRangeStart,
-		NocloudPortRangeEnd:   r.NocloudPortRangeEnd,
-		NocloudMaxPortRetries: r.NocloudMaxPortRetries,
-		RequestedGuestIP:      r.RequestedGuestIP,
-		RequestedGuestMAC:     r.RequestedGuestMAC,
-		NocloudNetPort:        r.NocloudNetPort,
-		CustomUserDataPath:    r.CustomUserDataPath,
-		CloudInitISOPath:      r.CloudInitISOPath,
-		CPUConfig:             r.CPUConfig,
-		BootArgs:              r.BootArgs,
-		SSHKeys:               r.SSHKeys,
-		Provisioner:           model.ProvisionerType(r.Provisioner),
-		Volumes:               r.Volumes,
-		ExtraDrives:           r.ExtraDrives,
-	}
-}
-
-// setupConsoleRelay creates a Controller and PTY for the given VM.
-// Matches Python's ConsoleOperation startup sequence.
-func (op *Operation) vmSetupConsoleRelay(ctx context.Context, vm *model.VM) (*console.Controller, error) {
-	relayPath := filepath.Join(op.CacheDir, "vms", vm.ID)
-	cc := console.NewController(vm.ID, relayPath, vm.Name, "console.pid", "console.sock", "firecracker.console.log")
-	ptyFD, err := cc.CreatePTY()
-	if err != nil {
-		return nil, fmt.Errorf("create PTY for console relay: %w", err)
-	}
-	_ = ptyFD // PTY FD is used during Firecracker spawn
-	return cc, nil
-}
-
-// Signal handler setup
-func SetupSignalHandler(cancel func()) {
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-c
-		slog.Warn("Received shutdown signal")
-		cancel()
-	}()
-}
-
-// Compile-time check
