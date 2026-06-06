@@ -456,7 +456,9 @@ func (s *Service) MaterializeTo(ctx context.Context, imageID, fsType, outputPath
 		return NewImageError(fmt.Sprintf("Image not in cache: %s", imageID))
 	}
 
-	os.MkdirAll(filepath.Dir(outputPath), infra.DirPerm)
+	if err := os.MkdirAll(filepath.Dir(outputPath), infra.DirPerm); err != nil {
+		return NewImageError(fmt.Sprintf("Failed to create output directory: %s", err))
+	}
 
 	// Try reflink copy (matching Python: run_cmd(["cp", "--reflink=auto", ...]) with ProcessError fallback)
 	result := system.RunCmdCompat(
@@ -480,7 +482,9 @@ func (s *Service) MaterializeTo(ctx context.Context, imageID, fsType, outputPath
 		f.Close()
 		return NewImageError(fmt.Sprintf("fdatasync failed: %s", err))
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		return NewImageError(fmt.Sprintf("fdatasync close failed: %s", err))
+	}
 
 	slog.Info("Copied image", "output", filepath.Base(outputPath))
 	return nil

@@ -10,7 +10,7 @@ import (
 	"mvmctl/internal/app"
 	"mvmctl/internal/service/console"
 	"mvmctl/internal/service/loopmount"
-	"mvmctl/internal/service/nocloudnet"
+	nocloudnetsvc "mvmctl/internal/service/nocloudnet"
 )
 
 func main() {
@@ -18,7 +18,7 @@ func main() {
 	if len(os.Args) > 2 && os.Args[1] == "run" {
 		switch os.Args[2] {
 		case "nocloud-serve":
-			nocloudnet.ServeNoCloudHTTP(context.Background(), os.Args[3:])
+			nocloudnetsvc.ServeNoCloudHTTP(context.Background(), os.Args[3:])
 		case "console-relay":
 			console.RunRelaySubprocess(os.Args[3:])
 		case "provision":

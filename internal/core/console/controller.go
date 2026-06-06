@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	consoleapi "mvmctl/internal/service/console"
+	consolesvc "mvmctl/internal/service/console"
 )
 
 // ── Controller — Manages console lifecycle for a single VM ──────
@@ -23,7 +23,7 @@ import (
 //   - cleanup() — stops relay and closes PTY FDs
 //   - stop() — stops console relay
 //   - is_running() — checks if relay is alive
-//   - connect() — creates and connects a consoleapi.RelayClient
+//   - connect() — creates and connects a consolesvc.RelayClient
 //   - disconnect() — disconnects the client
 //   - get_pid() — returns relay PID
 //   - properties: controller_fd, client_fd, manager, socket_path, pid
@@ -36,8 +36,8 @@ type Controller struct {
 	vmPath string
 	vmName string
 
-	relayManager *consoleapi.RelayManager
-	client       *consoleapi.RelayClient
+	relayManager *consolesvc.RelayManager
+	client       *consolesvc.RelayClient
 
 	// PTY state
 	masterFD  int    // PTY master file descriptor (for relay loop)
@@ -62,13 +62,13 @@ type Controller struct {
 // Accepts optional pidFilename, socketFilename, logFilename (empty strings use defaults).
 func NewController(vmID, vmPath, vmName string, pidFilename, socketFilename, logFilename string) *Controller {
 	if pidFilename == "" {
-		pidFilename = consoleapi.DefaultConsolePIDFilename
+		pidFilename = consolesvc.DefaultConsolePIDFilename
 	}
 	if socketFilename == "" {
-		socketFilename = consoleapi.DefaultConsoleSocketFilename
+		socketFilename = consolesvc.DefaultConsoleSocketFilename
 	}
 	if logFilename == "" {
-		logFilename = consoleapi.DefaultConsoleLogFilename
+		logFilename = consolesvc.DefaultConsoleLogFilename
 	}
 	if vmName == "" {
 		vmName = vmID
@@ -80,7 +80,7 @@ func NewController(vmID, vmPath, vmName string, pidFilename, socketFilename, log
 		pidFilename:    pidFilename,
 		socketFilename: socketFilename,
 		logFilename:    logFilename,
-		relayManager:   consoleapi.NewRelayManager(vmID, vmPath, vmName, pidFilename, socketFilename, logFilename),
+		relayManager:   consolesvc.NewRelayManager(vmID, vmPath, vmName, pidFilename, socketFilename, logFilename),
 	}
 }
 
@@ -189,7 +189,7 @@ func (cc *Controller) Start(ctx context.Context) (string, *int, error) {
 
 // Manager returns the underlying relay manager.
 // Matches Python's Controller.manager property.
-func (cc *Controller) Manager() *consoleapi.RelayManager {
+func (cc *Controller) Manager() *consolesvc.RelayManager {
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
 	return cc.relayManager
@@ -219,9 +219,9 @@ func (cc *Controller) ClientFD() int {
 	return cc.clientFD
 }
 
-// Connect connects to the console relay and returns a consoleapi.RelayClient.
+// Connect connects to the console relay and returns a consolesvc.RelayClient.
 // Matches Python's Controller.connect() exactly.
-func (cc *Controller) Connect() (*consoleapi.RelayClient, error) {
+func (cc *Controller) Connect() (*consolesvc.RelayClient, error) {
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
 
@@ -234,7 +234,7 @@ func (cc *Controller) Connect() (*consoleapi.RelayClient, error) {
 		socketPath = cc.relayManager.SocketPath()
 	}
 
-	client := consoleapi.NewRelayClient(socketPath, nil)
+	client := consolesvc.NewRelayClient(socketPath, nil)
 	if err := client.Connect(); err != nil {
 		return nil, err
 	}

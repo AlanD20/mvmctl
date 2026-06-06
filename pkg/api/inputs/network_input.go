@@ -14,7 +14,7 @@ import (
 // NetworkInput is the raw input for identifying existing networks.
 type NetworkInput struct {
 	Identifiers []string `json:"identifiers"`
-	Force       *bool    `json:"force,omitempty"`
+	Force       bool     `json:"force"`
 }
 
 // ResolvedNetworkInput matches Python's ResolvedNetworkInput (frozen dataclass).
@@ -25,7 +25,7 @@ type NetworkInput struct {
 //	    force: bool | None = None
 type ResolvedNetworkInput struct {
 	Networks []*model.Network
-	Force    *bool
+	Force    bool
 }
 
 // NetworkRequest matches Python's NetworkRequest.

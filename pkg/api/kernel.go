@@ -64,7 +64,7 @@ func (op *Operation) KernelPrune(ctx context.Context, dryRun bool, includeAll bo
 		if !dryRun {
 			// Python: KernelOperation.remove(KernelInput(id=[kernel.id]), force=include_all)
 			// Go: call KernelRemove() through the full pipeline.
-			result := op.KernelRemove(ctx, inputs.KernelInput{Identifiers: []string{kernel.ID}, Force: &includeAll})
+			result := op.KernelRemove(ctx, inputs.KernelInput{Identifiers: []string{kernel.ID}, Force: includeAll})
 			if result.HasErrors() {
 				slog.Warn("Failed to remove kernel", "id", kernel.ID, "error", result.Errors()[0].Message)
 				continue

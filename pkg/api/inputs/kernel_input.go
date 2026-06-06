@@ -15,7 +15,7 @@ import (
 // KernelInput is the raw input for identifying existing kernels.
 type KernelInput struct {
 	Identifiers []string `json:"identifiers"`
-	Force       *bool    `json:"force,omitempty"`
+	Force       bool     `json:"force"`
 }
 
 // ResolvedKernelInput matches Python's ResolvedKernelInput (frozen dataclass).
@@ -80,14 +80,9 @@ func (r *KernelRequest) Resolve(ctx context.Context) (*ResolvedKernelInput, erro
 		}
 	}
 
-	force := false
-	if r.input.Force != nil {
-		force = *r.input.Force
-	}
-
 	r.result = &ResolvedKernelInput{
 		Kernels: result.Items,
-		Force:   force,
+		Force:   r.input.Force,
 	}
 
 	// Validate
