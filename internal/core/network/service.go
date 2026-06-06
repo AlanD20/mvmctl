@@ -37,6 +37,11 @@ func (s *Service) SetFirewallTracker(tracker *firewall.FirewallTracker) {
 	s.firewallTracker = tracker
 }
 
+// FirewallTracker returns the current firewall tracker, or nil if unset.
+func (s *Service) FirewallTracker() *firewall.FirewallTracker {
+	return s.firewallTracker
+}
+
 // WithBatch runs a function inside a firewall batch context, flushing
 // all queued rule operations atomically on return. This matches Python's:
 // with self._tracker.batch():

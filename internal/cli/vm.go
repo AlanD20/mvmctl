@@ -519,7 +519,7 @@ func newVMRemoveCmd(op *api.Operation) *cobra.Command {
 
 func runVMRemove(op *api.Operation, cmd *cobra.Command, identifiers []string, force bool) error {
 	// Use batch API — pass all identifiers at once
-	removeResult := op.VMRemove(cmd.Context(), inputs.VMInput{Identifiers: identifiers, Force: &force})
+	removeResult := op.VMRemove(cmd.Context(), inputs.VMInput{Identifiers: identifiers, Force: force})
 	if removeResult.HasErrors() {
 		for _, r := range removeResult.Items {
 			if r.IsOK() {
@@ -592,7 +592,7 @@ func newVMStopCmd(op *api.Operation) *cobra.Command {
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
-			stopResult := op.VMStop(cmd.Context(), inputs.VMInput{Identifiers: []string{id}, Force: &force})
+			stopResult := op.VMStop(cmd.Context(), inputs.VMInput{Identifiers: []string{id}, Force: force})
 			if stopResult.HasErrors() {
 				for _, r := range stopResult.Items {
 					if !r.IsOK() {
@@ -626,7 +626,7 @@ func newVMRebootCmd(op *api.Operation) *cobra.Command {
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
-			rebootResult := op.VMReboot(cmd.Context(), inputs.VMInput{Identifiers: []string{id}, Force: &force})
+			rebootResult := op.VMReboot(cmd.Context(), inputs.VMInput{Identifiers: []string{id}, Force: force})
 			if rebootResult.HasErrors() {
 				for _, r := range rebootResult.Items {
 					if !r.IsOK() {

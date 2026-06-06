@@ -39,14 +39,14 @@ func (r *VMRepo) GetByName(_ context.Context, name string) (*model.VM, error) {
 	return nil, nil
 }
 
-func (r *VMRepo) GetByNames(_ context.Context, names []string) (map[string]bool, error) {
+func (r *VMRepo) NamesExist(_ context.Context, names []string) ([]string, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	result := make(map[string]bool)
+	var result []string
 	for _, name := range names {
 		for _, v := range r.vms {
 			if v.Name == name {
-				result[name] = true
+				result = append(result, name)
 				break
 			}
 		}
