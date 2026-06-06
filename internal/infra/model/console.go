@@ -3,10 +3,10 @@ package model
 // ── ConsoleRelay (interface) ──
 
 // ConsoleRelay is the interface for console relay operations.
-// Matches the public API of Python's ConsoleRelayManager.
+// Matches the public API of Python's ConsoleRelayManager (now console.Relay).
 type ConsoleRelay interface {
 	IsRunning() bool
-	PID() *int
+	PID() (int, bool)
 	SocketPath() string
 	Stop(force bool) bool
 }
