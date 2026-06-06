@@ -1,11 +1,13 @@
-// Package loopmount wire protocol — JSON stdin/stdout protocol for the
-// _provision hidden subcommand. Matches Python's process.py exactly.
+// Package loopmount wire protocol — JSON stdin/stdout protocol for
+// rootfs provisioning operations (wire, file ops, chroot commands, resize).
+// The protocol is consumed by Run() (foreground) and Spawn() (subprocess).
 package loopmount
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"os"
 )
 
@@ -17,7 +19,7 @@ type WireInput struct {
 	Debug    bool           `json:"debug,omitempty"`
 	TargetFS string         `json:"target_fs,omitempty"`
 	Shell    string         `json:"shell,omitempty"`
-	Ops      WireOperations `json:"operations,omitempty"`
+	Ops      WireOperations `json:"operations"`
 }
 
 // WireOperations holds the provisioning operations from JSON input.
@@ -64,64 +66,54 @@ type WireOutput struct {
 	NewSizeBytes int64  `json:"new_size_bytes,omitempty"`
 }
 
-// ExecuteWireProtocol handles the full stdin/stdout wire protocol:
-// parses raw JSON input, converts to service types, executes,
-// converts result back to JSON output.
-func ExecuteWireProtocol(ctx context.Context, rawInput []byte) ([]byte, error) {
-	var input WireInput
-	if err := json.Unmarshal(rawInput, &input); err != nil {
-		return marshalWireError("Invalid JSON: "+err.Error(), "parse")
-	}
-
-	op := convertWireToOp(input)
-	provisioner := NewProvisioner("/tmp/mvm-provision")
-	results, err := provisioner.Execute(ctx, []Op{op})
-	if err != nil {
-		return marshalWireError(err.Error(), "execute")
-	}
-	if len(results) == 0 {
-		return marshalWireError("no result returned", "execute")
-	}
-
-	return marshalWireResult(results[0])
-}
-
 // marshalWireResult converts a Result to JSON output bytes.
-func marshalWireResult(r Result) ([]byte, error) {
+func marshalWireResult(r Result) []byte {
+	var out WireOutput
 	switch r.Status {
 	case "ok":
-		return json.Marshal(WireOutput{
+		out = WireOutput{
 			Status:       "ok",
 			FilesWritten: r.FilesWritten,
 			CommandsRun:  r.CommandsRun,
 			OsType:       r.OSType,
 			NewFSType:    r.NewFSType,
 			NewSizeBytes: r.NewSizeBytes,
-		})
+		}
 	default:
 		step := r.Step
 		if step == "" {
 			step = "unknown"
 		}
-		return json.Marshal(WireOutput{
+		out = WireOutput{
 			Status: "error",
 			Error:  r.Error,
 			Step:   step,
-		})
+		}
 	}
+	b, _ := json.Marshal(out)
+	return b
 }
 
 // marshalWireError creates JSON error output for wire protocol failures.
-func marshalWireError(msg, step string) ([]byte, error) {
-	return json.Marshal(WireOutput{
+func marshalWireError(msg, step string) []byte {
+	b, _ := json.Marshal(WireOutput{
 		Status: "error",
 		Error:  msg,
 		Step:   step,
 	})
+	return b
 }
 
 // convertWireToOp converts WireInput to the typed service Op.
-func convertWireToOp(input WireInput) Op {
+// Validates that required fields (Image, Action) are present.
+func convertWireToOp(input WireInput) (Op, error) {
+	if input.Image == "" {
+		return Op{}, fmt.Errorf("image is required")
+	}
+	if input.Action == "" {
+		return Op{}, fmt.Errorf("action is required")
+	}
+
 	op := Op{
 		Image:    input.Image,
 		Action:   input.Action,
@@ -134,7 +126,12 @@ func convertWireToOp(input WireInput) Op {
 	for _, f := range input.Ops.Files {
 		var data []byte
 		if f.Data != "" {
-			data, _ = base64.StdEncoding.DecodeString(f.Data)
+			var err error
+			data, err = base64.StdEncoding.DecodeString(f.Data)
+			if err != nil {
+				slog.Warn("invalid base64 data in file operation, writing empty file",
+					"path", f.Path, "error", err)
+			}
 		}
 		op.Files = append(op.Files, FileOp{
 			Path: f.Path,
@@ -165,5 +162,5 @@ func convertWireToOp(input WireInput) Op {
 		}
 	}
 
-	return op
+	return op, nil
 }

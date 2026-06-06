@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,7 +21,6 @@ import (
 	"time"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/system"
 )
 
 // ── Public types (no interface{} in public API) ─────────────────────────
@@ -140,116 +140,14 @@ func (p *Provisioner) Execute(ctx context.Context, ops []Op) ([]Result, error) {
 // doProvision handles the "provision" action — loop device setup, mount,
 // file writes, chroot commands, and resize.
 func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
-	ps := &provisionState{
-		input: input,
-		step:  "parse",
-	}
-
-	// Resolve filesystem type hint
-	fsType := input.FsType
-	if fsType == "" {
-		fsType = "ext4"
-	}
+	ps := &provisionState{step: "parse"}
 
 	// State variables
 	var mountPoint string
 	var rootPart string
 	var detectedFSType string
 	var resizeNewBytes int64
-
-	// Cleanup function — deferred to always run
-	defer func() {
-		ps.debugLog(fmt.Sprintf("cleanup: mount_point=%q loop_dev=%q", mountPoint, ps.loopDev))
-		if mountPoint != "" {
-			CleanupMount(mountPoint)
-			mountPoint = ""
-		}
-		if ps.loopDev != "" {
-			exec.Command("losetup", "-d", ps.loopDev).Run()
-			ps.loopDev = ""
-		}
-	}()
-
-	// ── Pre-loop resize: grow (truncate file before mounting) ──
-	if input.Resize != nil && input.Resize.Action == "grow" && input.Resize.Bytes > 0 {
-		ps.step = "resize"
-		ps.debugLog(fmt.Sprintf("truncating image to %d bytes", input.Resize.Bytes))
-		f, err := os.OpenFile(input.Image, os.O_WRONLY|os.O_CREATE, 0644)
-		if err != nil {
-			return Result{Status: "error", Error: fmt.Sprintf("truncate: %v", err), Step: ps.step}
-		}
-		if err := f.Truncate(input.Resize.Bytes); err != nil {
-			f.Close()
-			return Result{Status: "error", Error: fmt.Sprintf("truncate: %v", err), Step: ps.step}
-		}
-		f.Close()
-	}
-
-	// ── Debug: log system info ──
-	if input.Debug {
-		ps.debugLog(fmt.Sprintf("uid=%d gid=%d euid=%d", os.Getuid(), os.Getgid(), os.Geteuid()))
-		ps.debugLog(fmt.Sprintf("image=%s fs_type_hint=%s", input.Image, input.FsType))
-		statusData, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", os.Getpid()))
-		if err == nil {
-			for _, line := range strings.Split(string(statusData), "\n") {
-				if strings.HasPrefix(line, "Cap") {
-					ps.debugLog(fmt.Sprintf("cap: %s", strings.TrimSpace(line)))
-				}
-			}
-		} else {
-			ps.debugLog(fmt.Sprintf("cannot read /proc/self/status: %v", err))
-		}
-	}
-
-	// ── Loop device setup ──
-	ps.step = "loop"
-	ps.debugLog("setting up loop device")
-	{
-		losetupArgs := []string{"-f", "-P", "--show", "--direct-io=on", input.Image}
-		cmd := exec.Command("losetup", losetupArgs...)
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			return Result{Status: "error", Error: fmt.Sprintf("losetup: %v", err), Step: ps.step}
-		}
-		ps.loopDev = strings.TrimSpace(string(output))
-		ps.debugLog(fmt.Sprintf("loop device: %s", ps.loopDev))
-	}
-
-	// ── Root partition detection ──
-	ps.step = "partition"
-	ps.debugLog("finding root partition")
-	rootPart = findRootPartition(ps.loopDev)
-	ps.debugLog(fmt.Sprintf("root partition: %s", rootPart))
-
-	// ── Filesystem type detection ──
-	ps.step = "detect_fs"
-	if input.FsType != "" {
-		detectedFSType = input.FsType
-	} else {
-		detectedFSType = detectFSType(rootPart)
-	}
-	ps.debugLog(fmt.Sprintf("fs type: %s", detectedFSType))
-
-	// ── Mount ──
-	ps.step = "mount"
-	{
-		var err error
-		mountPoint, err = os.MkdirTemp("", infra.MVMProvisionPrefix)
-		if err != nil {
-			return Result{Status: "error", Error: fmt.Sprintf("mkdtemp: %v", err), Step: ps.step}
-		}
-
-		mountArgs := []string{rootPart, mountPoint}
-		if detectedFSType == "btrfs" {
-			mountArgs = append([]string{"-t", "btrfs"}, mountArgs...)
-		}
-		cmd := exec.Command("mount", mountArgs...)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			return Result{Status: "error", Error: fmt.Sprintf("mount: %v: %s", err, string(output)), Step: ps.step}
-		}
-	}
-
-	// ── Chroot buffer ──
+	filesWritten := 0
 	chrootBuffer := make([]string, 0, chrootBatchSize)
 
 	// Helper: flush chroot buffer
@@ -262,16 +160,88 @@ func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
 		return runChrootCommands(ctx, mountPoint, command, input.Shell)
 	}
 
-	// ── Flush any pending chroot commands before file operations ──
-	if err := flushChroot(); err != nil {
+	// Cleanup function — deferred to always run
+	// Uses background context with timeouts so cleanup still runs even if ctx is cancelled.
+	defer func() {
+		ps.debugLog(input.Debug, fmt.Sprintf("cleanup: mount_point=%q loop_dev=%q", mountPoint, ps.loopDev))
+		if mountPoint != "" {
+			CleanupMount(mountPoint)
+			mountPoint = ""
+		}
+		detachLoopDevice(ctx, ps.loopDev)
+		ps.loopDev = ""
+	}()
+
+	// ── Pre-loop resize: grow (truncate file before mounting) ──
+	if input.Resize != nil && input.Resize.Action == "grow" && input.Resize.Bytes > 0 {
+		ps.step = "resize"
+		ps.debugLog(input.Debug, fmt.Sprintf("truncating image to %d bytes", input.Resize.Bytes))
+		if err := truncateImage(input.Image, input.Resize.Bytes); err != nil {
+			return Result{Status: "error", Error: err.Error(), Step: ps.step}
+		}
+	}
+
+	// ── Debug: log system info ──
+	if input.Debug {
+		ps.debugLog(input.Debug, fmt.Sprintf("uid=%d gid=%d euid=%d", os.Getuid(), os.Getgid(), os.Geteuid()))
+		ps.debugLog(input.Debug, fmt.Sprintf("image=%s fs_type_hint=%s", input.Image, input.FsType))
+		statusData, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", os.Getpid()))
+		if err == nil {
+			for line := range strings.SplitSeq(string(statusData), "\n") {
+				if strings.HasPrefix(line, "Cap") {
+					ps.debugLog(input.Debug, fmt.Sprintf("cap: %s", strings.TrimSpace(line)))
+				}
+			}
+		} else {
+			ps.debugLog(input.Debug, fmt.Sprintf("cannot read /proc/self/status: %v", err))
+		}
+	}
+
+	// ── Loop device setup ──
+	ps.step = "loop"
+	ps.debugLog(input.Debug, "setting up loop device")
+	loopDev, err := setupLoopDevice(ctx, input.Image)
+	if err != nil {
+		return Result{Status: "error", Error: err.Error(), Step: ps.step}
+	}
+	ps.loopDev = loopDev
+	ps.debugLog(input.Debug, fmt.Sprintf("loop device: %s", ps.loopDev))
+
+	// ── Root partition detection ──
+	ps.step = "partition"
+	ps.debugLog(input.Debug, "finding root partition")
+	rootPart = findRootPartition(ctx, ps.loopDev)
+	ps.debugLog(input.Debug, fmt.Sprintf("root partition: %s", rootPart))
+
+	// ── Filesystem type detection ──
+	ps.step = "detect_fs"
+	if input.FsType != "" {
+		detectedFSType = input.FsType
+	} else {
+		detectedFSType = detectFSType(ctx, rootPart)
+	}
+	ps.debugLog(input.Debug, fmt.Sprintf("fs type: %s", detectedFSType))
+
+	// ── Mount ──
+	ps.step = "mount"
+	mountPoint, err = mountImage(ctx, rootPart, detectedFSType)
+	if err != nil {
 		return Result{Status: "error", Error: err.Error(), Step: ps.step}
 	}
 
+	// ── Btrfs grow (after truncation, before chroot work — must be done while mounted) ──
+	if input.Resize != nil && input.Resize.Action == "grow" && detectedFSType == "btrfs" {
+		ps.step = "resize"
+		ps.debugLog(input.Debug, "growing btrfs filesystem to fill device")
+		if err := growBtrfs(ctx, mountPoint); err != nil {
+			return Result{Status: "error", Error: err.Error(), Step: ps.step}
+		}
+	}
+
 	// ── Write files ──
-	filesWritten := 0
 	for _, f := range input.Files {
 		ps.step = "write"
-		if err := writeFile(mountPoint, f, ps); err != nil {
+		if err := writeFile(mountPoint, f, input.Debug, ps); err != nil {
 			return Result{Status: "error", Error: err.Error(), Step: ps.step}
 		}
 		filesWritten++
@@ -285,7 +255,7 @@ func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
 	// ── Copy directories ──
 	for _, c := range input.CopyDirs {
 		ps.step = "copy_dir"
-		count, err := copyDirectory(mountPoint, c, ps)
+		count, err := copyDirectory(mountPoint, c)
 		if err != nil {
 			return Result{Status: "error", Error: err.Error(), Step: ps.step}
 		}
@@ -293,6 +263,7 @@ func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
 	}
 
 	// ── Chroot commands (buffered, then flushed in batches) ──
+	commandsRun := 0
 	for _, cmdStr := range input.Commands {
 		ps.step = "chroot"
 		chrootBuffer = append(chrootBuffer, cmdStr)
@@ -303,8 +274,8 @@ func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
 				return Result{Status: "error", Error: err.Error(), Step: ps.step}
 			}
 		}
+		commandsRun++
 	}
-	commandsRun := len(input.Commands)
 
 	// ── Flush any remaining buffered chroot commands ──
 	if err := flushChroot(); err != nil {
@@ -315,88 +286,32 @@ func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
 	if input.Resize != nil && input.Resize.Action == "shrink" {
 		ps.step = "resize"
 		if detectedFSType == "btrfs" {
-			// btrfs shrink
 			var shrinkErr error
-			resizeNewBytes, shrinkErr = shrinkBtrfs(mountPoint, rootPart, input.Resize.Bytes)
+			resizeNewBytes, shrinkErr = shrinkBtrfs(ctx, mountPoint, rootPart, input.Resize.Bytes)
 			if shrinkErr != nil {
 				return Result{Status: "error", Error: shrinkErr.Error(), Step: ps.step}
 			}
 		} else {
-			// ext4 shrink: unmount → e2fsck → resize2fs -M (NO remount — Python leaves it unmounted)
-			if _, err := system.DefaultRunner.Run(
-				ctx,
-				[]string{"umount", mountPoint},
-				system.WithCapture(false),
-			); err != nil {
-				return Result{Status: "error", Error: fmt.Sprintf("umount failed: %v", err), Step: ps.step}
+			var shrinkErr error
+			resizeNewBytes, shrinkErr = shrinkExt4(ctx, &mountPoint, rootPart, input.Resize.Headroom)
+			if shrinkErr != nil {
+				return Result{Status: "error", Error: shrinkErr.Error(), Step: ps.step}
 			}
-			if _, err := system.DefaultRunner.Run(
-				ctx,
-				[]string{"e2fsck", "-f", "-y", rootPart},
-				system.WithCapture(true),
-				system.WithCheck(true),
-			); err != nil {
-				return Result{Status: "error", Error: err.Error(), Step: ps.step}
-			}
-			if _, err := system.DefaultRunner.Run(
-				ctx,
-				[]string{"resize2fs", "-M", rootPart},
-				system.WithCapture(true),
-				system.WithCheck(true),
-			); err != nil {
-				return Result{Status: "error", Error: err.Error(), Step: ps.step}
-			}
-			if input.Resize.Headroom > 0 {
-				// Run resize2fs with extra headroom
-				curSize := getFSByteSize(rootPart)
-				targetSize := curSize + int64(input.Resize.Headroom)
-				if _, err := system.DefaultRunner.Run(
-					ctx,
-					[]string{"resize2fs", rootPart, strconv.FormatInt(targetSize, 10)},
-					system.WithCapture(true),
-					system.WithCheck(true),
-				); err != nil {
-					return Result{Status: "error", Error: err.Error(), Step: ps.step}
-				}
-			}
-			resizeNewBytes = getFSByteSize(rootPart)
 		}
 	}
 
-	// ── Post-mount resize: grow (ext4 only; btrfs grown after truncate) ──
+	// ── Post-mount resize: ext4 grow (btrfs already handled above) ──
 	if input.Resize != nil && input.Resize.Action == "grow" && detectedFSType != "btrfs" {
 		ps.step = "resize"
-		if _, err := system.DefaultRunner.Run(
-			ctx,
-			[]string{"umount", mountPoint},
-			system.WithCapture(false),
-		); err != nil {
-			return Result{Status: "error", Error: fmt.Sprintf("umount failed: %v", err), Step: ps.step}
-		}
-		if _, err := system.DefaultRunner.Run(
-			ctx,
-			[]string{"e2fsck", "-f", "-y", rootPart},
-			system.WithCapture(true),
-			system.WithCheck(true),
-		); err != nil {
-			return Result{Status: "error", Error: err.Error(), Step: ps.step}
-		}
-		if _, err := system.DefaultRunner.Run(
-			ctx,
-			[]string{"resize2fs", rootPart},
-			system.WithCapture(true),
-			system.WithCheck(true),
-		); err != nil {
+		if err := growExt4(ctx, &mountPoint, rootPart); err != nil {
 			return Result{Status: "error", Error: err.Error(), Step: ps.step}
 		}
 	}
 
 	// ── Post-detach truncation for shrink ──
 	if resizeNewBytes > 0 {
-		f, err := os.OpenFile(input.Image, os.O_WRONLY|os.O_CREATE, 0644)
-		if err == nil {
-			f.Truncate(resizeNewBytes)
-			f.Close()
+		if err := truncateImage(input.Image, resizeNewBytes); err != nil {
+			slog.Warn("failed to truncate image after shrink", "path", input.Image, "error", err)
 		}
 	}
 
@@ -409,50 +324,58 @@ func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
 
 // doDetectOS handles the "detect_os" action — loop device, mount, read os-release.
 func (p *Provisioner) doDetectOS(ctx context.Context, input Op) Result {
-	ps := &provisionState{input: input, step: "loop"}
+	ps := &provisionState{step: "loop"}
 
 	// Setup loop device
 	losetupArgs := []string{"-f", "-P", "--show", "--direct-io=on", input.Image}
-	cmd := exec.Command("losetup", losetupArgs...)
-	output, err := cmd.CombinedOutput()
+	output, err := exec.CommandContext(ctx, "losetup", losetupArgs...).CombinedOutput()
 	if err != nil {
-		return Result{Status: "error", Error: fmt.Sprintf("losetup: %v", err), Step: ps.step}
+		return Result{Status: "error", Error: fmt.Sprintf("losetup: %w", err), Step: ps.step}
 	}
 	loopDev := strings.TrimSpace(string(output))
 
 	// Cleanup on return
 	defer func() {
-		exec.Command("losetup", "-d", loopDev).Run()
+		if err := exec.CommandContext(context.Background(), "losetup", "-d", loopDev).Run(); err != nil {
+			slog.Warn("failed to detach loop device", "device", loopDev, "error", err)
+		}
 	}()
 
 	// Find root partition
 	ps.step = "partition"
-	rootPart := findRootPartition(loopDev)
+	rootPart := findRootPartition(ctx, loopDev)
 
 	// Detect filesystem type
 	ps.step = "detect_fs"
 	fsType := input.FsType
 	if fsType == "" {
-		fsType = detectFSType(rootPart)
+		fsType = detectFSType(ctx, rootPart)
 	}
 
 	// Mount
 	ps.step = "mount"
 	mountPoint, err := os.MkdirTemp("", "mvm-detect-os-")
 	if err != nil {
-		return Result{Status: "error", Error: fmt.Sprintf("mkdtemp: %v", err), Step: ps.step}
+		return Result{Status: "error", Error: fmt.Sprintf("mkdtemp: %w", err), Step: ps.step}
 	}
-	defer os.RemoveAll(mountPoint)
+	defer func() {
+		if err := os.RemoveAll(mountPoint); err != nil {
+			slog.Warn("failed to remove mount point", "path", mountPoint, "error", err)
+		}
+	}()
 
 	mountArgs := []string{rootPart, mountPoint}
 	if fsType == "btrfs" {
 		mountArgs = append([]string{"-t", "btrfs"}, mountArgs...)
 	}
-	cmd = exec.Command("mount", mountArgs...)
-	if err := cmd.Run(); err != nil {
-		return Result{Status: "error", Error: fmt.Sprintf("mount: %v", err), Step: ps.step}
+	if err := exec.CommandContext(ctx, "mount", mountArgs...).Run(); err != nil {
+		return Result{Status: "error", Error: fmt.Sprintf("mount: %w", err), Step: ps.step}
 	}
-	defer exec.Command("umount", mountPoint).Run()
+	defer func() {
+		if err := exec.CommandContext(context.Background(), "umount", mountPoint).Run(); err != nil {
+			slog.Warn("failed to unmount", "path", mountPoint, "error", err)
+		}
+	}()
 
 	// Read /etc/os-release
 	osReleasePath := filepath.Join(mountPoint, "etc", "os-release")
@@ -471,10 +394,10 @@ func (p *Provisioner) doDetectOS(ctx context.Context, input Op) Result {
 	}
 
 	osType := "linux"
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "ID=") {
-			osType = strings.Trim(strings.TrimPrefix(line, "ID="), "\"' \t\r\n")
+		if after, ok := strings.CutPrefix(line, "ID="); ok {
+			osType = strings.Trim(after, "\"' \t\r\n")
 			break
 		}
 	}
@@ -484,7 +407,7 @@ func (p *Provisioner) doDetectOS(ctx context.Context, input Op) Result {
 
 // doConvertFS handles the "convert_fs" action — convert filesystem to ext4.
 func (p *Provisioner) doConvertFS(ctx context.Context, input Op) Result {
-	ps := &provisionState{input: input, step: "parse"}
+	ps := &provisionState{step: "parse"}
 
 	targetFS := input.TargetFS
 	if targetFS == "" {
@@ -493,7 +416,7 @@ func (p *Provisioner) doConvertFS(ctx context.Context, input Op) Result {
 	if targetFS != "ext4" {
 		return Result{
 			Status: "error",
-			Error:  fmt.Sprintf("Unsupported target filesystem: %q. Only 'ext4' is supported.", targetFS),
+			Error:  fmt.Sprintf("unsupported target filesystem: %q; only 'ext4' is supported", targetFS),
 			Step:   "parse",
 		}
 	}
@@ -502,47 +425,48 @@ func (p *Provisioner) doConvertFS(ctx context.Context, input Op) Result {
 
 	// Setup loop device
 	losetupArgs := []string{"-f", "-P", "--show", "--direct-io=on", input.Image}
-	cmd := exec.Command("losetup", losetupArgs...)
-	output, err := cmd.CombinedOutput()
+	output, err := exec.CommandContext(ctx, "losetup", losetupArgs...).CombinedOutput()
 	if err != nil {
-		return Result{Status: "error", Error: fmt.Sprintf("losetup: %v", err), Step: ps.step}
+		return Result{Status: "error", Error: fmt.Sprintf("losetup: %w", err), Step: ps.step}
 	}
 	loopDev := strings.TrimSpace(string(output))
-	defer exec.Command("losetup", "-d", loopDev).Run()
+	defer func() {
+		if err := exec.CommandContext(context.Background(), "losetup", "-d", loopDev).Run(); err != nil {
+			slog.Warn("failed to detach loop device", "device", loopDev, "error", err)
+		}
+	}()
 
 	// Find root partition
 	ps.step = "partition"
-	rootPart := findRootPartition(loopDev)
+	rootPart := findRootPartition(ctx, loopDev)
 
 	// Detect filesystem type
 	ps.step = "detect_fs"
 	fsType := input.FsType
 	if fsType == "" {
-		fsType = detectFSType(rootPart)
+		fsType = detectFSType(ctx, rootPart)
 	}
 
 	// Mount
 	ps.step = "mount"
 	mountPoint, err := os.MkdirTemp("", "mvm-convert-fs-")
 	if err != nil {
-		return Result{Status: "error", Error: fmt.Sprintf("mkdtemp: %v", err), Step: ps.step}
+		return Result{Status: "error", Error: fmt.Sprintf("mkdtemp: %w", err), Step: ps.step}
 	}
 
 	mountArgs := []string{rootPart, mountPoint}
 	if fsType == "btrfs" {
 		mountArgs = append([]string{"-t", "btrfs"}, mountArgs...)
 	}
-	cmd = exec.Command("mount", mountArgs...)
-	if err := cmd.Run(); err != nil {
-		return Result{Status: "error", Error: fmt.Sprintf("mount: %v", err), Step: ps.step}
+	if err := exec.CommandContext(ctx, "mount", mountArgs...).Run(); err != nil {
+		return Result{Status: "error", Error: fmt.Sprintf("mount: %w", err), Step: ps.step}
 	}
 
 	// Get actual data size
 	ps.step = "du"
-	duCmd := exec.Command("du", "-sb", mountPoint)
-	duOutput, err := duCmd.CombinedOutput()
+	duOutput, err := exec.CommandContext(ctx, "du", "-sb", mountPoint).CombinedOutput()
 	if err != nil {
-		return Result{Status: "error", Error: fmt.Sprintf("du failed: %v", err), Step: ps.step}
+		return Result{Status: "error", Error: fmt.Sprintf("du failed: %w", err), Step: ps.step}
 	}
 	fields := strings.Fields(string(duOutput))
 	var dataBytes int64
@@ -551,9 +475,9 @@ func (p *Provisioner) doConvertFS(ctx context.Context, input Op) Result {
 	}
 
 	// Calculate size: data + 150 MiB headroom, round up to MiB
-	const headroom = 150 * 1024 * 1024
+	const headroomBytes = 150 * 1024 * 1024
 	const mebi = 1024 * 1024
-	sizeBytes := dataBytes + headroom
+	sizeBytes := dataBytes + headroomBytes
 	sizeBytes = ((sizeBytes + mebi - 1) / mebi) * mebi
 	sizeMiB := sizeBytes / mebi
 
@@ -561,36 +485,164 @@ func (p *Provisioner) doConvertFS(ctx context.Context, input Op) Result {
 
 	// Create sparse output file
 	ps.step = "truncate"
-	truncateCmd := exec.Command("truncate", "-s", fmt.Sprintf("%dM", sizeMiB), outputPath)
-	if err := truncateCmd.Run(); err != nil {
-		return Result{Status: "error", Error: fmt.Sprintf("truncate: %v", err), Step: ps.step}
+	if err := exec.CommandContext(ctx, "truncate", "-s", fmt.Sprintf("%dM", sizeMiB), outputPath).Run(); err != nil {
+		return Result{Status: "error", Error: fmt.Sprintf("truncate: %w", err), Step: ps.step}
 	}
 
 	// Create ext4 filesystem populated from mount point
 	ps.step = "mkfs"
-	mkfsCmd := exec.Command("mkfs.ext4", "-d", mountPoint, "-L", "rootfs", "-F", outputPath)
-	if err := mkfsCmd.Run(); err != nil {
-		return Result{Status: "error", Error: fmt.Sprintf("mkfs.ext4: %v", err), Step: ps.step}
+	if err := exec.CommandContext(ctx, "mkfs.ext4", "-d", mountPoint, "-L", "rootfs", "-F", outputPath).Run(); err != nil {
+		return Result{Status: "error", Error: fmt.Sprintf("mkfs.ext4: %w", err), Step: ps.step}
 	}
 
 	// Cleanup (unmount + detach) before replacing file
-	exec.Command("umount", mountPoint).Run()
-	os.RemoveAll(mountPoint)
-	exec.Command("losetup", "-d", loopDev).Run()
+	if err := exec.CommandContext(context.Background(), "umount", mountPoint).Run(); err != nil {
+		slog.Warn("failed to unmount during convert_fs cleanup", "path", mountPoint, "error", err)
+	}
+	if err := os.RemoveAll(mountPoint); err != nil {
+		slog.Warn("failed to remove mount point during convert_fs cleanup", "path", mountPoint, "error", err)
+	}
+	if err := exec.CommandContext(context.Background(), "losetup", "-d", loopDev).Run(); err != nil {
+		slog.Warn("failed to detach loop device during convert_fs cleanup", "device", loopDev, "error", err)
+	}
 
 	// Replace original with new ext4 file
 	ps.step = "replace"
 	if err := os.Remove(input.Image); err != nil {
-		return Result{Status: "error", Error: fmt.Sprintf("remove original: %v", err), Step: ps.step}
+		return Result{Status: "error", Error: fmt.Sprintf("remove original: %w", err), Step: ps.step}
 	}
 	if err := os.Rename(outputPath, input.Image); err != nil {
-		return Result{Status: "error", Error: fmt.Sprintf("rename: %v", err), Step: ps.step}
+		return Result{Status: "error", Error: fmt.Sprintf("rename: %w", err), Step: ps.step}
 	}
 
 	return Result{
 		Status:       "ok",
 		NewFSType:    targetFS,
 		NewSizeBytes: sizeBytes,
+	}
+}
+
+// ── Helper functions ────────────────────────────────────────────────────
+
+// truncateImage truncates (or extends) the image file to the specified size.
+func truncateImage(path string, size int64) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		return fmt.Errorf("truncate: %w", err)
+	}
+	if err := f.Truncate(size); err != nil {
+		f.Close()
+		return fmt.Errorf("truncate: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		slog.Warn("failed to close file after truncation", "path", path, "error", err)
+	}
+	return nil
+}
+
+// setupLoopDevice sets up a loop device with partition scanning and returns the device path.
+func setupLoopDevice(ctx context.Context, image string) (string, error) {
+	losetupArgs := []string{"-f", "-P", "--show", "--direct-io=on", image}
+	output, err := exec.CommandContext(ctx, "losetup", losetupArgs...).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("losetup: %w", err)
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+// mountImage creates a temp mount point and mounts the root partition.
+func mountImage(ctx context.Context, rootPart, fsType string) (string, error) {
+	mountPoint, err := os.MkdirTemp("", infra.MVMProvisionPrefix)
+	if err != nil {
+		return "", fmt.Errorf("mkdtemp: %w", err)
+	}
+
+	mountArgs := []string{rootPart, mountPoint}
+	if fsType == "btrfs" {
+		mountArgs = append([]string{"-t", "btrfs"}, mountArgs...)
+	}
+	if output, err := exec.CommandContext(ctx, "mount", mountArgs...).CombinedOutput(); err != nil {
+		// Clean up the temp dir on mount failure
+		os.Remove(mountPoint)
+		return "", fmt.Errorf("mount: %w: %s", err, string(output))
+	}
+	return mountPoint, nil
+}
+
+// growBtrfs grows a btrfs filesystem to fill available device space.
+// Must be called while the filesystem is mounted.
+func growBtrfs(ctx context.Context, mountPoint string) error {
+	if err := exec.CommandContext(ctx, "btrfs", "filesystem", "resize", "max", mountPoint).Run(); err != nil {
+		return fmt.Errorf("btrfs resize max: %w", err)
+	}
+	return nil
+}
+
+// growExt4 grows an ext4 filesystem.
+// Unmounts first (ext4 online grow is supported, but the code historically unmounts,
+// so we preserve that behavior).
+// Takes *string so it can clear mountPoint after successful umount, preventing
+// deferred cleanup from retrying an unmount on intermediate failure.
+func growExt4(ctx context.Context, mountPoint *string, rootPart string) error {
+	if _, err := exec.CommandContext(ctx, "umount", *mountPoint).CombinedOutput(); err != nil {
+		return fmt.Errorf("umount failed: %w", err)
+	}
+	*mountPoint = "" // prevent deferred cleanup from retrying umount
+
+	if _, err := exec.CommandContext(ctx, "e2fsck", "-f", "-y", rootPart).CombinedOutput(); err != nil {
+		return fmt.Errorf("e2fsck: %w", err)
+	}
+
+	var resizeOutBuf strings.Builder
+	cmd := exec.CommandContext(ctx, "resize2fs", rootPart)
+	cmd.Stdout = &resizeOutBuf
+	cmd.Stderr = &resizeOutBuf
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("resize2fs: %w: %s", err, strings.TrimSpace(resizeOutBuf.String()))
+	}
+	return nil
+}
+
+// shrinkExt4 shrinks an ext4 filesystem to minimum size, optionally adding headroom.
+// Unmounts first (shrink requires offline fs).
+// Takes *string so it can clear mountPoint after successful umount, preventing
+// deferred cleanup from retrying an unmount on intermediate failure.
+// Returns the new filesystem size in bytes.
+func shrinkExt4(ctx context.Context, mountPoint *string, rootPart string, headroom int) (int64, error) {
+	if _, err := exec.CommandContext(ctx, "umount", *mountPoint).CombinedOutput(); err != nil {
+		return 0, fmt.Errorf("umount failed: %w", err)
+	}
+	*mountPoint = "" // prevent deferred cleanup from retrying umount
+
+	if _, err := exec.CommandContext(ctx, "e2fsck", "-f", "-y", rootPart).CombinedOutput(); err != nil {
+		return 0, fmt.Errorf("e2fsck: %w", err)
+	}
+
+	if _, err := exec.CommandContext(ctx, "resize2fs", "-M", rootPart).CombinedOutput(); err != nil {
+		return 0, fmt.Errorf("resize2fs -M: %w", err)
+	}
+
+	if headroom > 0 {
+		curSize := getFSByteSize(ctx, rootPart)
+		targetSize := curSize + int64(headroom)
+		if _, err := exec.CommandContext(ctx, "resize2fs", rootPart, strconv.FormatInt(targetSize, 10)).CombinedOutput(); err != nil {
+			return 0, fmt.Errorf("resize2fs headroom: %w", err)
+		}
+	}
+
+	return getFSByteSize(ctx, rootPart), nil
+}
+
+// detachLoopDevice detaches a loop device. Logs on error.
+func detachLoopDevice(ctx context.Context, loopDev string) {
+	if loopDev == "" {
+		return
+	}
+	detachCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := exec.CommandContext(detachCtx, "losetup", "-d", loopDev).Run(); err != nil {
+		slog.Warn("failed to detach loop device during cleanup",
+			"device", loopDev, "error", err)
 	}
 }
 
@@ -629,22 +681,29 @@ const chrootBatchSize = 10
 // =========================================================================
 
 type provisionState struct {
-	input   Op
 	step    string
 	loopDev string
 }
 
-func (ps *provisionState) debugLog(msg string) {
-	if !ps.input.Debug {
+func (ps *provisionState) debugLog(debug bool, msg string) {
+	if !debug {
 		return
 	}
 	ts := time.Now().UTC().Format(time.RFC3339)
 	pid := os.Getpid()
 	line := fmt.Sprintf("[%s] [PID=%d] [step=%s] %s\n", ts, pid, ps.step, msg)
 	f, err := os.OpenFile(provisionDebugLogPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
-	if err == nil {
-		f.WriteString(line)
-		f.Close()
+	if err != nil {
+		slog.Debug("failed to open debug log", "error", err)
+		return
+	}
+	defer func() {
+		if err := f.Close(); err != nil {
+			slog.Debug("failed to close debug log", "error", err)
+		}
+	}()
+	if _, err := f.WriteString(line); err != nil {
+		slog.Debug("failed to write debug log", "error", err)
 	}
 }
 
@@ -655,7 +714,7 @@ func (ps *provisionState) debugLog(msg string) {
 //  2. Scan all partitions for Linux filesystems, collect with sizes
 //  3. Try p1, then p2 first
 //  4. Otherwise pick largest
-func findRootPartition(loopDev string) string {
+func findRootPartition(ctx context.Context, loopDev string) string {
 	// List partitions
 	var partitions []string
 	for i := 1; i <= 16; i++ {
@@ -677,9 +736,9 @@ func findRootPartition(loopDev string) string {
 	}
 	var linuxParts []partSize
 	for _, p := range partitions {
-		fsType := detectFSType(p)
+		fsType := detectFSType(ctx, p)
 		if linuxFSTypes[fsType] {
-			size := getDeviceSize(p)
+			size := getDeviceSize(ctx, p)
 			linuxParts = append(linuxParts, partSize{p, size})
 		}
 	}
@@ -715,9 +774,8 @@ func findRootPartition(loopDev string) string {
 
 // detectFSType returns the filesystem type of dev via blkid.
 // Falls back to "ext4" on error.
-func detectFSType(dev string) string {
-	cmd := exec.Command("blkid", "-o", "value", "-s", "TYPE", dev)
-	output, err := cmd.CombinedOutput()
+func detectFSType(ctx context.Context, dev string) string {
+	output, err := exec.CommandContext(ctx, "blkid", "-o", "value", "-s", "TYPE", dev).CombinedOutput()
 	if err != nil {
 		return "ext4"
 	}
@@ -729,9 +787,8 @@ func detectFSType(dev string) string {
 }
 
 // getDeviceSize returns the size of a block device in bytes via blockdev.
-func getDeviceSize(dev string) int64 {
-	cmd := exec.Command("blockdev", "--getsize64", dev)
-	output, err := cmd.CombinedOutput()
+func getDeviceSize(ctx context.Context, dev string) int64 {
+	output, err := exec.CommandContext(ctx, "blockdev", "--getsize64", dev).CombinedOutput()
 	if err != nil {
 		return 0
 	}
@@ -743,19 +800,18 @@ func getDeviceSize(dev string) int64 {
 }
 
 // getFSByteSize returns the ext4 filesystem size in bytes via tune2fs.
-func getFSByteSize(dev string) int64 {
-	cmd := exec.Command("tune2fs", "-l", dev)
-	output, err := cmd.CombinedOutput()
+func getFSByteSize(ctx context.Context, dev string) int64 {
+	output, err := exec.CommandContext(ctx, "tune2fs", "-l", dev).CombinedOutput()
 	if err != nil {
 		return 0
 	}
 	var blockCount, blockSize int64
-	for _, line := range strings.Split(string(output), "\n") {
+	for line := range strings.SplitSeq(string(output), "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "Block count:") {
-			blockCount, _ = strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(line, "Block count:")), 10, 64)
-		} else if strings.HasPrefix(line, "Block size:") {
-			blockSize, _ = strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(line, "Block size:")), 10, 64)
+		if after, ok := strings.CutPrefix(line, "Block count:"); ok {
+			blockCount, _ = strconv.ParseInt(strings.TrimSpace(after), 10, 64)
+		} else if after, ok := strings.CutPrefix(line, "Block size:"); ok {
+			blockSize, _ = strconv.ParseInt(strings.TrimSpace(after), 10, 64)
 		}
 	}
 	return blockCount * blockSize
@@ -763,29 +819,29 @@ func getFSByteSize(dev string) int64 {
 
 // writeFile writes a file inside the mount point, matching Python's _write_file().
 // Default mode is 0644 when not specified (matching Python's file_op.get("mode", 0o644)).
-func writeFile(mountPoint string, f FileOp, ps *provisionState) error {
+func writeFile(mountPoint string, f FileOp, debug bool, ps *provisionState) error {
 	fullPath := filepath.Join(mountPoint, strings.TrimLeft(f.Path, "/"))
-	ps.debugLog(fmt.Sprintf("write: path=%s full=%s", f.Path, fullPath))
+	ps.debugLog(debug, fmt.Sprintf("write: path=%s full=%s", f.Path, fullPath))
 
 	// Remove existing path if it exists (handles symlinks, sockets, FIFOs, hardlinks)
 	if _, err := os.Lstat(fullPath); err == nil {
-		ps.debugLog(fmt.Sprintf("write: removing existing at %s", f.Path))
+		ps.debugLog(debug, fmt.Sprintf("write: removing existing at %s", f.Path))
 		if err := os.Remove(fullPath); err != nil {
-			ps.debugLog(fmt.Sprintf("write: failed to remove %s: %v", f.Path, err))
-			return fmt.Errorf("Cannot remove existing path %s: %v", f.Path, err)
+			ps.debugLog(debug, fmt.Sprintf("write: failed to remove %s: %w", f.Path, err))
+			return fmt.Errorf("cannot remove existing path %s: %w", f.Path, err)
 		}
 	}
 
 	// Create parent directories
 	parent := filepath.Dir(fullPath)
 	if err := os.MkdirAll(parent, infra.DirPerm); err != nil {
-		return fmt.Errorf("mkdir %s: %v", parent, err)
+		return fmt.Errorf("mkdir %s: %w", parent, err)
 	}
 
 	// Data is raw bytes (already decoded from base64 in cmd/mvm bridge if coming from JSON)
 	// If Data is nil and Path is set, could be a zero-length write; proceed.
 	data := f.Data
-	ps.debugLog(fmt.Sprintf("write: writing %d bytes to %s", len(data), f.Path))
+	ps.debugLog(debug, fmt.Sprintf("write: writing %d bytes to %s", len(data), f.Path))
 
 	// Resolve mode: default 0644 when not specified (matching Python's file_op.get("mode", 0o644))
 	mode := f.Mode
@@ -795,17 +851,17 @@ func writeFile(mountPoint string, f FileOp, ps *provisionState) error {
 
 	// Write file
 	if err := os.WriteFile(fullPath, data, os.FileMode(mode)); err != nil {
-		return fmt.Errorf("write %s: %v", f.Path, err)
+		return fmt.Errorf("write %s: %w", f.Path, err)
 	}
 
 	// Set permissions (best effort — root in container may lack CAP_CHOWN)
 	// Matching Python's try/except OSError: pass with debug logging
 	if err := os.Chmod(fullPath, os.FileMode(mode)); err != nil {
-		ps.debugLog(fmt.Sprintf("write: chmod failed for %s: %v", f.Path, err))
+		ps.debugLog(debug, fmt.Sprintf("write: chmod failed for %s: %w", f.Path, err))
 	}
 	if f.UID != 0 || f.GID != 0 {
 		if err := os.Chown(fullPath, f.UID, f.GID); err != nil {
-			ps.debugLog(fmt.Sprintf("write: chown failed for %s: %v", f.Path, err))
+			ps.debugLog(debug, fmt.Sprintf("write: chown failed for %s: %w", f.Path, err))
 		}
 	}
 
@@ -815,7 +871,7 @@ func writeFile(mountPoint string, f FileOp, ps *provisionState) error {
 // copyDirectory copies a directory tree into the mount point, matching Python's _copy_directory().
 // Uses 64KB chunks (matching Python's sf.read(65536)) instead of io.Copy.
 // Returns the number of files copied (Python returns int, not counting directories).
-func copyDirectory(mountPoint string, c CopyDirOp, ps *provisionState) (int, error) {
+func copyDirectory(mountPoint string, c CopyDirOp) (int, error) {
 	mode := c.Mode
 	if mode == 0 {
 		mode = 0755
@@ -843,7 +899,9 @@ func copyDirectory(mountPoint string, c CopyDirOp, ps *provisionState) (int, err
 
 		// Create parent directories for file
 		if parent := filepath.Dir(dstPath); parent != "" {
-			os.MkdirAll(parent, infra.DirPerm)
+			if err := os.MkdirAll(parent, infra.DirPerm); err != nil {
+				return fmt.Errorf("mkdir parent %s: %w", parent, err)
+			}
 		}
 
 		// Copy file using 64KB chunks matching Python's sf.read(65536)
@@ -851,32 +909,42 @@ func copyDirectory(mountPoint string, c CopyDirOp, ps *provisionState) (int, err
 		if err != nil {
 			return err
 		}
-		defer srcFile.Close()
 
 		dstFile, err := os.Create(dstPath)
 		if err != nil {
+			srcFile.Close()
 			return err
 		}
-		defer dstFile.Close()
 
 		buf := make([]byte, 65536)
+		var copyErr error
 		for {
 			n, readErr := srcFile.Read(buf)
 			if n > 0 {
 				if _, writeErr := dstFile.Write(buf[:n]); writeErr != nil {
-					return writeErr
+					copyErr = writeErr
+					break
 				}
 			}
 			if readErr == io.EOF {
 				break
 			}
 			if readErr != nil {
-				return readErr
+				copyErr = readErr
+				break
 			}
 		}
 
+		srcFile.Close()
+		dstFile.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+
 		// Set mode — matching Python's try/except OSError: pass
-		os.Chmod(dstPath, os.FileMode(mode))
+		if err := os.Chmod(dstPath, os.FileMode(mode)); err != nil {
+			slog.Debug("failed to set mode on copied file", "path", dstPath, "error", err)
+		}
 		count++
 		return nil
 	})
@@ -891,9 +959,13 @@ func runChrootCommands(ctx context.Context, mountPoint, command, customShell str
 	nullPath := filepath.Join(mountPoint, "dev", "null")
 	if _, err := os.Stat(nullPath); os.IsNotExist(err) {
 		devDir := filepath.Dir(nullPath)
-		os.MkdirAll(devDir, infra.DirPerm)
+		if err := os.MkdirAll(devDir, infra.DirPerm); err != nil {
+			return fmt.Errorf("mkdir /dev in chroot: %w", err)
+		}
 		// makedev(1, 3) on Linux = (1 << 8) | 3 = 259 for /dev/null (major=1, minor=3)
-		syscall.Mknod(nullPath, syscall.S_IFCHR|0666, 259)
+		if err := syscall.Mknod(nullPath, syscall.S_IFCHR|0666, 259); err != nil {
+			return fmt.Errorf("mknod /dev/null in chroot: %w", err)
+		}
 	}
 
 	shells := defaultShells
@@ -965,20 +1037,21 @@ func runChrootCommands(ctx context.Context, mountPoint, command, customShell str
 // shrinkBtrfs shrinks a btrfs filesystem.
 // Returns the new device size and any error.
 // Matching Python's _shrink_btrfs() — raises error on failure or when targetBytes is unresolvable.
-func shrinkBtrfs(mountPoint, rootPart string, targetBytes int64) (int64, error) {
-	// fstrim before shrink — matching Python (no error check)
-	exec.Command("fstrim", mountPoint).Run()
+func shrinkBtrfs(ctx context.Context, mountPoint, rootPart string, targetBytes int64) (int64, error) {
+	// fstrim before shrink — matching Python (best-effort, log on error)
+	if err := exec.CommandContext(ctx, "fstrim", mountPoint).Run(); err != nil {
+		slog.Warn("fstrim before btrfs shrink failed", "mount", mountPoint, "error", err)
+	}
 
 	if targetBytes == 0 {
 		// Calculate minimum size
-		targetBytes = calcBtrfsMinSize(mountPoint, rootPart)
+		targetBytes = calcBtrfsMinSize(ctx, mountPoint, rootPart)
 	}
 	if targetBytes == 0 {
 		return 0, fmt.Errorf("cannot determine btrfs shrink target size")
 	}
 
-	cmd := exec.Command("btrfs", "filesystem", "resize", strconv.FormatInt(targetBytes, 10), mountPoint)
-	output, err := cmd.CombinedOutput()
+	output, err := exec.CommandContext(ctx, "btrfs", "filesystem", "resize", strconv.FormatInt(targetBytes, 10), mountPoint).CombinedOutput()
 	if err != nil {
 		return 0, fmt.Errorf(
 			"btrfs filesystem resize to %d failed (exit %v): %s",
@@ -988,18 +1061,17 @@ func shrinkBtrfs(mountPoint, rootPart string, targetBytes int64) (int64, error) 
 		)
 	}
 
-	return getBtrfsDeviceSize(mountPoint), nil
+	return getBtrfsDeviceSize(ctx, mountPoint), nil
 }
 
-func calcBtrfsMinSize(mountPoint, rootPart string) int64 {
+func calcBtrfsMinSize(ctx context.Context, mountPoint, rootPart string) int64 {
 	// Get current device size as upper bound
-	currentSize := getDeviceSize(rootPart)
+	currentSize := getDeviceSize(ctx, rootPart)
 	if currentSize == 0 {
 		return 0
 	}
 
-	cmd := exec.Command("btrfs", "filesystem", "usage", "-b", mountPoint)
-	output, err := cmd.CombinedOutput()
+	output, err := exec.CommandContext(ctx, "btrfs", "filesystem", "usage", "-b", mountPoint).CombinedOutput()
 	if err != nil {
 		return currentSize
 	}
@@ -1007,7 +1079,7 @@ func calcBtrfsMinSize(mountPoint, rootPart string) int64 {
 	// Parse "Used:" line using regex matching Python's r"[\d.]+"
 	usedRe := regexp.MustCompile(`[\d.]+`)
 	var usedBytes int64
-	for _, line := range strings.Split(string(output), "\n") {
+	for line := range strings.SplitSeq(string(output), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "Used:") {
 			match := usedRe.FindString(line)
@@ -1025,13 +1097,7 @@ func calcBtrfsMinSize(mountPoint, rootPart string) int64 {
 	}
 
 	// headroom = min(used, 2GiB) + 1GiB
-	twoGiB := int64(2 * 1024 * 1024 * 1024)
-	oneGiB := int64(1024 * 1024 * 1024)
-	headroom := usedBytes
-	if headroom > twoGiB {
-		headroom = twoGiB
-	}
-	headroom += oneGiB
+	headroom := min(usedBytes, int64(2*1024*1024*1024)) + int64(1024*1024*1024)
 
 	target := usedBytes + headroom
 	if target > currentSize {
@@ -1045,16 +1111,15 @@ func calcBtrfsMinSize(mountPoint, rootPart string) int64 {
 	return target
 }
 
-func getBtrfsDeviceSize(mountPoint string) int64 {
-	cmd := exec.Command("btrfs", "filesystem", "show", mountPoint)
-	output, err := cmd.CombinedOutput()
+func getBtrfsDeviceSize(ctx context.Context, mountPoint string) int64 {
+	output, err := exec.CommandContext(ctx, "btrfs", "filesystem", "show", mountPoint).CombinedOutput()
 	if err != nil {
 		return 0
 	}
 	// Parse line like:   devid    1 size 1.75GiB used 1.32GiB path /dev/loop0
 	// Using regex matching Python's r"size\s+([\d.]+)([kKmMgGtTbB])"
 	sizeRe := regexp.MustCompile(`size\s+([\d.]+)\s*([kKmMgGtTbB])`)
-	for _, line := range strings.Split(string(output), "\n") {
+	for line := range strings.SplitSeq(string(output), "\n") {
 		if strings.Contains(line, "devid") && strings.Contains(line, "size") {
 			match := sizeRe.FindStringSubmatch(line)
 			if len(match) >= 3 {
@@ -1092,11 +1157,13 @@ func CleanupMount(mountPoint string) bool {
 	}
 
 	// Fast path: try umount directly (succeeds ~99% of the time)
-	umount := exec.Command("umount", mountPoint)
+	umount := exec.CommandContext(context.Background(), "umount", mountPoint)
 	if output, err := umount.CombinedOutput(); err == nil {
 		_ = output
 		// Success — remove empty directory (matches Python's os.rmdir() with try/except OSError: pass)
-		os.Remove(mountPoint)
+		if err := os.Remove(mountPoint); err != nil {
+			slog.Debug("failed to remove mount point after umount", "path", mountPoint, "error", err)
+		}
 		return true
 	}
 
@@ -1122,13 +1189,15 @@ func CleanupMount(mountPoint string) bool {
 			}
 			if target == resolvedMount {
 				pid, _ := strconv.Atoi(name)
-				syscall.Kill(pid, syscall.SIGKILL)
+				if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+					slog.Debug("failed to kill orphan process", "pid", pid, "error", err)
+				}
 			}
 		}
 	}
 
 	// Retry umount after killing orphaned processes
-	umount = exec.Command("umount", mountPoint)
+	umount = exec.CommandContext(context.Background(), "umount", mountPoint)
 	out, umountErr := umount.CombinedOutput()
 	_ = out
 
