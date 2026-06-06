@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"mvmctl/internal/cli"
-	"mvmctl/internal/cli/common"
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/db"
@@ -33,9 +31,17 @@ func isDBSkipCommand(args []string) bool {
 	return false
 }
 
-// ── Run ──────────────────────────────────────────────────────────────────────
+// ── Initialize ────────────────────────────────────────────────────────────────
 
-func Run(ctx context.Context) {
+// Initialize sets up the application (cache dir, DB, migrations) and returns the
+// Operation API handle and a cleanup function. For "mvm run <service>" commands,
+// it returns nil, nil, nil — no DB or Operation is needed for subprocess services.
+func Initialize(ctx context.Context) (op *api.Operation, cleanup func(), err error) {
+	// "mvm run <service>" mode — skip all initialization.
+	if len(os.Args) > 1 && os.Args[1] == "run" {
+		return nil, nil, nil
+	}
+
 	// Logging and debug mode are set up later via cli/root.go's PersistentPreRunE,
 	// matching Python's app() which calls set_debug_mode(debug) and
 	// setup_logging(verbose, debug) inside the Click group callback — NOT at
@@ -64,7 +70,6 @@ func Run(ctx context.Context) {
 	}
 
 	database := db.New(dbPath)
-	defer database.Close()
 
 	// Pending migration gate: block non-init commands when migrations are pending.
 	if !isDBSkipCommand(os.Args) {
@@ -85,15 +90,10 @@ func Run(ctx context.Context) {
 	// Set HTTP User-Agent matching Python's HTTP_USER_AGENT = f"{CLI_NAME}/{_resolve_version()}".
 	download.SetUserAgent(infraversion.GetVersion(ctx))
 
-	op := api.NewOperation(ctx, database, cacheDir)
+	op = api.NewOperation(ctx, database, cacheDir)
 	config.InitSettings()
 
-	// Execute CLI
-	rootCmd := cli.NewRootCmd(op)
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
-		// Delegate ALL error handling to the single shared handler in helpers.go.
-		// This wraps the error back through HandleErrors so there is exactly ONE
-		// place where errors are formatted for CLI output.
-		common.HandleErrors(func() error { return err })()
-	}
+	cleanupFunc := func() { database.Close() }
+
+	return op, cleanupFunc, nil
 }

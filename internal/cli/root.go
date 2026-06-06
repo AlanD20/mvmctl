@@ -69,26 +69,31 @@ func NewRootCmd(op *api.Operation) *cobra.Command {
 	// Subcommands matching Python's version_cmd, completion_cmd
 	cmd.AddCommand(newVersionCmd())
 	cmd.AddCommand(newCompletionCmd())
+	cmd.AddCommand(newRunCmd())
 
 	// Store API reference for shell completion
 	opRef = op
 
-	// Register all domain subcommand groups matching Python's _COMMAND_SPECS
-	cmd.AddCommand(NewVMCmd(op))
-	cmd.AddCommand(NewNetworkCmd(op))
-	cmd.AddCommand(NewImageCmd(op))
-	cmd.AddCommand(NewKernelCmd(op))
-	cmd.AddCommand(NewBinaryCmd(op))
-	cmd.AddCommand(NewKeyCmd(op))
-	cmd.AddCommand(NewHostCmd(op))
-	cmd.AddCommand(NewConfigCmd(op))
-	cmd.AddCommand(NewConsoleCmd(op))
-	cmd.AddCommand(NewLogsCmd(op))
-	cmd.AddCommand(NewVolumeCmd(op, op))
-	cmd.AddCommand(NewCacheCmd(op))
-	cmd.AddCommand(NewSSHCmd(op))
-	cmd.AddCommand(NewCpCmd(op))
-	cmd.AddCommand(NewInitCmd(op))
+	// Domain commands require a fully initialized Operation. When op is nil
+	// (e.g., "mvm run <service>" mode), we register only the infrastructure
+	// commands above — version, completion, run.
+	if op != nil {
+		cmd.AddCommand(NewVMCmd(op))
+		cmd.AddCommand(NewNetworkCmd(op))
+		cmd.AddCommand(NewImageCmd(op))
+		cmd.AddCommand(NewKernelCmd(op))
+		cmd.AddCommand(NewBinaryCmd(op))
+		cmd.AddCommand(NewKeyCmd(op))
+		cmd.AddCommand(NewHostCmd(op))
+		cmd.AddCommand(NewConfigCmd(op))
+		cmd.AddCommand(NewConsoleCmd(op))
+		cmd.AddCommand(NewLogsCmd(op))
+		cmd.AddCommand(NewVolumeCmd(op, op))
+		cmd.AddCommand(NewCacheCmd(op))
+		cmd.AddCommand(NewSSHCmd(op))
+		cmd.AddCommand(NewCpCmd(op))
+		cmd.AddCommand(NewInitCmd(op))
+	}
 
 	return cmd
 }
@@ -156,7 +161,8 @@ func makePersistentPreRunE() func(*cobra.Command, []string) error {
 func shouldSkipPreRun(c *cobra.Command) bool {
 	for cc := c; cc != nil; cc = cc.Parent() {
 		if cc.Name() == "help" || cc.Name() == "version" || cc.Name() == "init" ||
-			cc.Name() == "completion" || cc.Name() == "host" || cc.Name() == "cache" {
+			cc.Name() == "completion" || cc.Name() == "host" || cc.Name() == "cache" ||
+			cc.Name() == "run" {
 			return true
 		}
 	}
@@ -234,3 +240,4 @@ For PowerShell:
 		},
 	}
 }
+
