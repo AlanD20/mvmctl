@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"golang.org/x/sys/unix"
@@ -36,7 +37,7 @@ type Controller struct {
 	vmPath string
 	vmName string
 
-	relayManager *consolesvc.RelayManager
+	relayManager *consolesvc.Relay
 	client       *consolesvc.RelayClient
 
 	// PTY state
@@ -50,11 +51,6 @@ type Controller struct {
 
 	// Socket path (stored from Start result, matching Python's _socket_path)
 	socketPath string
-
-	// Configuration (matching Python defaults)
-	pidFilename    string
-	socketFilename string
-	logFilename    string
 }
 
 // NewController creates a new Controller for the given VM.
@@ -73,14 +69,13 @@ func NewController(vmID, vmPath, vmName string, pidFilename, socketFilename, log
 	if vmName == "" {
 		vmName = vmID
 	}
+	pidPath := filepath.Join(vmPath, pidFilename)
+	socketPath := filepath.Join(vmPath, socketFilename)
 	return &Controller{
-		vmID:           vmID,
-		vmPath:         vmPath,
-		vmName:         vmName,
-		pidFilename:    pidFilename,
-		socketFilename: socketFilename,
-		logFilename:    logFilename,
-		relayManager:   consolesvc.NewRelayManager(vmID, vmPath, vmName, pidFilename, socketFilename, logFilename),
+		vmID:   vmID,
+		vmPath: vmPath,
+		vmName: vmName,
+		relayManager: consolesvc.NewRelay(vmName, pidPath, socketPath),
 	}
 }
 
@@ -176,20 +171,31 @@ func (cc *Controller) Start(ctx context.Context) (string, *int, error) {
 		return "", nil, errors.New("Must call create_pty() before start()")
 	}
 
-	// Start the relay manager with the PTY master FD (for relay I/O)
-	socketPath, pid, err := cc.relayManager.Start(ctx, cc.masterFD)
+	// Spawn the console relay subprocess with the PTY master FD.
+	ptyFile := os.NewFile(uintptr(cc.masterFD), "pty")
+	if ptyFile == nil {
+		return "", nil, fmt.Errorf("invalid PTY controller FD %d", cc.masterFD)
+	}
+
+	cfg := consolesvc.Config{
+		VMID:   cc.vmID,
+		VMPath: cc.vmPath,
+		VMName: cc.vmName,
+	}
+
+	result, err := consolesvc.Spawn(ctx, cfg, ptyFile)
 	if err != nil {
 		return "", nil, err
 	}
 
-	cc.socketPath = socketPath
-	cc.relayPID = pid
-	return socketPath, &cc.relayPID, nil
+	cc.socketPath = result.SocketPath
+	cc.relayPID = result.PID
+	return result.SocketPath, &result.PID, nil
 }
 
 // Manager returns the underlying relay manager.
 // Matches Python's Controller.manager property.
-func (cc *Controller) Manager() *consolesvc.RelayManager {
+func (cc *Controller) Manager() *consolesvc.Relay {
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
 	return cc.relayManager
@@ -273,12 +279,12 @@ func (cc *Controller) IsRunning() bool {
 	return cc.relayManager.IsRunning()
 }
 
-// GetPID returns the relay PID, or nil if not running.
+// GetPID returns the relay PID and whether it's running.
 // Matches Python's Controller.get_pid().
-func (cc *Controller) GetPID() *int {
+func (cc *Controller) GetPID() (int, bool) {
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
-	return cc.relayManager.GetPID()
+	return cc.relayManager.PIDAlive()
 }
 
 // CloseClientFD closes the PTY slave/client file descriptor and resets it.

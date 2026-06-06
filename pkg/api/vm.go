@@ -722,8 +722,10 @@ func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.B
 func (op *Operation) vmPerformRemovalCleanup(ctx context.Context, vm *model.VM) {
 	// Console relay cleanup (matches Python's _cleanup_console)
 	if vm.RelayPID != nil && vm.ID != "" {
-		relay := consolesvc.NewRelayManager(vm.ID, filepath.Join(op.CacheDir, "vms", vm.ID), vm.Name,
-			"console.pid", "console.sock", "firecracker.console.log")
+		vmDir := filepath.Join(op.CacheDir, "vms", vm.ID)
+		relay := consolesvc.NewRelay(vm.Name,
+			filepath.Join(vmDir, "console.pid"),
+			filepath.Join(vmDir, "console.sock"))
 		relay.Stop(true)
 	}
 
@@ -882,8 +884,10 @@ func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*resp
 	relayPID := vm.RelayPID
 	relaySocketPath := vm.RelaySocketPath
 	if vm.ID != "" && vm.RelayPID != nil {
-		relay := consolesvc.NewRelayManager(vm.ID, filepath.Join(op.CacheDir, "vms", vm.ID), vm.Name,
-			"console.pid", "console.sock", "firecracker.console.log")
+		vmDir := filepath.Join(op.CacheDir, "vms", vm.ID)
+		relay := consolesvc.NewRelay(vm.Name,
+			filepath.Join(vmDir, "console.pid"),
+			filepath.Join(vmDir, "console.sock"))
 		relayRunning = relay.IsRunning()
 	}
 
@@ -2316,8 +2320,8 @@ func (c *VMCreateBuilder) toVMModel() *model.VM {
 
 	// Relay info
 	if c.relay != nil {
-		if p := c.relay.GetPID(); p != nil {
-			vm.RelayPID = p
+		if p, ok := c.relay.GetPID(); ok {
+			vm.RelayPID = &p
 		}
 		if s := c.relay.SocketPath(); s != "" {
 			vm.RelaySocketPath = &s

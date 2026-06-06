@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
@@ -25,9 +26,14 @@ func (op *Operation) ConsoleGetState(ctx context.Context, identifier string) (*r
 		return nil, err
 	}
 
+	pidVal, pidOK := resolved.Relay.PID()
+	var pidPtr *int
+	if pidOK {
+		pidPtr = &pidVal
+	}
 	return &responses.ConsoleStateResult{
 		Running:    resolved.Relay.IsRunning(),
-		PID:        resolved.Relay.PID(),
+		PID:        pidPtr,
 		SocketPath: resolved.Relay.SocketPath(),
 	}, nil
 }
@@ -130,15 +136,11 @@ func (op *Operation) resolveWithRequest(ctx context.Context, identifier string) 
 	}
 	vmEntity := vmResolved.VMs[0]
 
-	// Create relay manager — Python: ConsoleRelayManager(id=vm.id, path=CacheUtils.get_vm_dir(vm.id), name=vm.name)
-	relay := console.NewRelayManager(
-		vmEntity.ID,
-		infra.GetVMDirByID(vmEntity.ID),
-		vmEntity.Name,
-		"", // pidFilename — defaults to "console.pid"
-		"", // socketFilename — defaults to "console.sock"
-		"", // logFilename — defaults to "firecracker.console.log"
-	)
+	// Create relay manager.
+	vmDir := infra.GetVMDirByID(vmEntity.ID)
+	pidPath := filepath.Join(vmDir, console.DefaultConsolePIDFilename)
+	socketPath := filepath.Join(vmDir, console.DefaultConsoleSocketFilename)
+	relay := console.NewRelay(vmEntity.Name, pidPath, socketPath)
 
 	return req.Resolve(ctx, vmEntity, relay)
 }
