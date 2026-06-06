@@ -1,10 +1,6 @@
 package cloudinit
 
-import (
-	"fmt"
-
-	"mvmctl/internal/infra/errs"
-)
+import "mvmctl/internal/infra/errs"
 
 // ErrCloudInitFailed creates a generic cloud-init error matching Python's CloudInitError.
 // Python: CloudInitError(MVMError) — base class for all cloud-init errs.
@@ -48,23 +44,4 @@ func ErrCloudInitISOModeFailed(msg string) error {
 	}
 }
 
-// ErrNoCloudServerError creates a generic nocloud server error matching Python's NoCloudServerError.
-func ErrNoCloudServerError(msg string) error {
-	return &errs.DomainError{
-		Code:    errs.CodeCloudInitProvisionFailed,
-		Op:      "cloudinit",
-		Message: msg,
-		Class:   errs.ClassInternal,
-	}
-}
 
-// ErrNoCloudServerAlreadyRunning creates an already-running error matching Python's NoCloudServerAlreadyRunningError.
-func ErrNoCloudServerAlreadyRunning(id string) error {
-	return &errs.DomainError{
-		Code:    errs.CodeCloudInitProvisionFailed,
-		Op:      "cloudinit",
-		Entity:  id,
-		Message: fmt.Sprintf("NoCloud-net server already running for ID: %s", id),
-		Class:   errs.ClassConflict,
-	}
-}

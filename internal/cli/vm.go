@@ -251,7 +251,7 @@ func newVMCreateCmd(op *api.Operation) *cobra.Command {
 	_ = cmd.Flags().MarkHidden("net") // Python shows --network/--net as one combined option
 	cmd.Flags().StringVar(&mac, "mac", "", "Custom MAC address (auto-generated if omitted)")
 	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH public key name (from key cache) or file path")
-	cmd.Flags().StringVar(&userData, "user-data", "", "Path to custom cloud-init user-data file")
+	cmd.Flags().StringVar(&userData, "cloudinit-config", "", "Path to custom cloud-init configuration file")
 	cmd.Flags().
 		StringVar(&cloudInitMode, "cloud-init-mode", "", "Cloud-init mode: 'inject' (direct injection), 'iso' (ISO mode), 'net' (HTTP), 'off' (default, no cloud-init)")
 	cmd.Flags().
@@ -459,7 +459,7 @@ func runVMCreate(
 		BootArgs:          bootArgs,
 		LSMFlags:          lsmFlags,
 		RequestedGuestMAC: macPtr,
-		CustomUserData:    userDataPtr,
+		CustomCloudInitConfig: userDataPtr,
 		NocloudNetPort:    nocloudPtr,
 		CPUTemplate:       cpuTemplate,
 		Count:             countPtr,

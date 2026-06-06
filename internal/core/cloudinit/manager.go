@@ -9,94 +9,16 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+	"unicode/utf8"
 
 	"mvmctl/internal/assets"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
-	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
 
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
 )
-
-// CloudInitModeResolved matches Python's CloudInitModeResolved dataclass.
-type CloudInitModeResolved struct {
-	Mode    model.CloudInitMode
-	ISOPath *string
-}
-
-// ResolveMode resolves a cloud-init mode from raw CLI input.
-// Matches Python's VMCreateRequest._resolve_cloud_init_mode().
-func ResolveMode(mode *string, isoPath *string) (CloudInitModeResolved, error) {
-	// Off is default cloud-init mode
-	result := CloudInitModeResolved{Mode: model.CloudInitModeOFF, ISOPath: nil}
-
-	if mode == nil {
-		return result, nil
-	}
-
-	modeLower := strings.ToLower(*mode)
-	modeVal := model.CloudInitMode(modeLower)
-	if !IsValidMode(modeVal) {
-		return CloudInitModeResolved{}, &errs.DomainError{
-			Code:    errs.CodeCloudInitProvisionFailed,
-			Op:      "cloudinit",
-			Message: fmt.Sprintf("Invalid --cloud-init-mode '%s'. Valid modes: inject, iso, off, net", *mode),
-			Class:   errs.ClassValidation,
-		}
-	}
-
-	switch modeVal {
-	case model.CloudInitModeISO:
-		if isoPath != nil && *isoPath != "" {
-			if _, err := os.Stat(*isoPath); os.IsNotExist(err) {
-				return CloudInitModeResolved{}, &errs.DomainError{
-					Code:    errs.CodeCloudInitProvisionFailed,
-					Op:      "cloudinit",
-					Message: fmt.Sprintf("Cloud-init ISO not found: %s", *isoPath),
-					Class:   errs.ClassValidation,
-				}
-			}
-			result = CloudInitModeResolved{Mode: model.CloudInitModeISO, ISOPath: isoPath}
-		} else {
-			// Default: ISO will be created during provisioning
-			result = CloudInitModeResolved{Mode: model.CloudInitModeISO, ISOPath: nil}
-		}
-	case model.CloudInitModeNET:
-		result = CloudInitModeResolved{Mode: model.CloudInitModeNET, ISOPath: nil}
-	case model.CloudInitModeINJECT:
-		result = CloudInitModeResolved{Mode: model.CloudInitModeINJECT, ISOPath: nil}
-	case model.CloudInitModeOFF:
-		result = CloudInitModeResolved{Mode: model.CloudInitModeOFF, ISOPath: nil}
-	}
-
-	return result, nil
-}
-
-// requiredISOTool is the command used to create cloud-init ISO images.
-// Matches Python's constants.REQUIRED_ISO_TOOL (value: "cloud-localds").
-const requiredISOTool = "cloud-localds"
-
-// ValidModes returns all valid cloud-init modes.
-func ValidModes() []model.CloudInitMode {
-	return []model.CloudInitMode{
-		model.CloudInitModeOFF,
-		model.CloudInitModeINJECT,
-		model.CloudInitModeNET,
-		model.CloudInitModeISO,
-	}
-}
-
-// IsValidMode returns true if the given mode is a valid cloud-init mode.
-func IsValidMode(mode model.CloudInitMode) bool {
-	switch mode {
-	case model.CloudInitModeOFF, model.CloudInitModeINJECT, model.CloudInitModeNET, model.CloudInitModeISO:
-		return true
-	default:
-		return false
-	}
-}
 
 // TemplateData holds the data passed to the cloud-init Go template.
 // Field names must match the Go template syntax in cloud_init.template.yaml:
@@ -111,42 +33,47 @@ type TemplateData struct {
 	PasswordHash     string
 }
 
-// validateTemplateData checks all required TemplateData fields are non-empty,
-// mimicking Jinja2's StrictUndefined behavior in the Python implementation.
-// If any required field is empty, it returns an error with the field name.
-func validateTemplateData(data TemplateData) error {
-	required := []struct {
-		name  string
-		value string
-	}{
-		{"VMName", data.VMName},
-		{"User", data.User},
-		{"GuestIP", data.GuestIP},
-		{"IPv4Gateway", data.IPv4Gateway},
-		{"PasswordHash", data.PasswordHash},
-	}
-	for _, r := range required {
-		if r.value == "" {
-			return fmt.Errorf("cloud-init template requires non-empty field: .%s", r.name)
-		}
-	}
-	return nil
+// cloudInitUser represents a user entry in cloud-init user-data YAML.
+// Explicit fields are for keys we manipulate; Extra preserves all other keys
+// via yaml:",inline" pass-through.
+type cloudInitUser struct {
+	Name              string                 `yaml:"name"`
+	SSHAuthorizedKeys []string               `yaml:"ssh-authorized-keys,omitempty"`
+	Extra             map[string]any `yaml:",inline"`
+}
+
+// dangerousCloudInitDirectives lists cloud-init directives that could be security risks.
+// Matches Python's _DANGEROUS_CLOUD_INIT_DIRECTIVES (module-level dict).
+var dangerousCloudInitDirectives = map[string]string{
+	"write_files": "Can write arbitrary files to the system",
+	"runcmd":      "Can execute arbitrary commands",
+	"bootcmd":     "Can execute commands at boot",
+	"snap":        "Can install snap packages",
+	"apt":         "Can install packages (use with caution)",
+	"yum":         "Can install packages (use with caution)",
+	"packages":    "Can install packages (use with caution)",
 }
 
 // Manager handles cloud-init configuration file generation and ISO creation.
 // Matches Python's CloudInitManager.
 type Manager struct {
-	config *model.ProvisionConfig
+	config *Config
 }
 
 // NewManager creates a new cloud-init Manager with the given provisioning config.
-func NewManager(config *model.ProvisionConfig) *Manager {
+func NewManager(config *Config) *Manager {
 	return &Manager{config: config}
 }
 
 // Generate writes cloud-init configuration files (meta-data, user-data, network-config)
 // to the cloud-init seed directory. Matches Python's write_config_files().
 func (m *Manager) Generate(ctx context.Context) error {
+	// Custom user data is the entire cloud-init content — write it directly.
+	if m.config.CustomCloudInitConfig != nil {
+		return m.parseCustomCloudInitConfig()
+	}
+
+	// Render template sections
 	rendered, err := m.renderCloudInitTemplate()
 	if err != nil {
 		return err
@@ -168,16 +95,10 @@ func (m *Manager) Generate(ctx context.Context) error {
 		}
 	}
 
-	// Write user-data (either custom or rendered)
-	if m.config.CustomUserDataPath != nil {
-		if err := m.parseCustomUserData(); err != nil {
-			return err
-		}
-	} else {
-		userDataPath := filepath.Join(m.config.CloudInitDir, "user-data")
-		if err := os.WriteFile(userDataPath, []byte(rendered["user_data"]), 0644); err != nil {
-			return errs.Wrap(errs.CodeCloudInitProvisionFailed, fmt.Errorf("write user-data: %w", err))
-		}
+	// Write user-data
+	userDataPath := filepath.Join(m.config.CloudInitDir, "user-data")
+	if err := os.WriteFile(userDataPath, []byte(rendered["user_data"]), 0644); err != nil {
+		return errs.Wrap(errs.CodeCloudInitProvisionFailed, fmt.Errorf("write user-data: %w", err))
 	}
 
 	return nil
@@ -222,7 +143,7 @@ func (m *Manager) CreateSeedISO(ctx context.Context, cloudInitDir, outputISO str
 	// where sanitized_stderr is trimmed and limited to 100 chars.
 	result := system.RunCmdCompat(
 		ctx,
-		append([]string{requiredISOTool}, args...),
+		append([]string{infra.RequiredISOTool}, args...),
 		system.RunCmdOpts{Capture: true, Check: false},
 	)
 	if !result.Success {
@@ -244,138 +165,96 @@ func (m *Manager) CreateSeedISO(ctx context.Context, cloudInitDir, outputISO str
 	return nil
 }
 
-// parseCustomUserData processes custom user data provided to the API.
+// parseCustomCloudInitConfig processes a custom cloud-init config provided to the API.
 // Matches Python's _parse_custom_user_data().
-func (m *Manager) parseCustomUserData() error {
-	if m.config.CustomUserDataPath == nil || *m.config.CustomUserDataPath == "" {
+func (m *Manager) parseCustomCloudInitConfig() error {
+	if m.config.CustomCloudInitConfig == nil || *m.config.CustomCloudInitConfig == "" {
 		return nil
 	}
 
-	content, err := os.ReadFile(*m.config.CustomUserDataPath)
+	// Resolve and validate path — prevent path traversal
+	configPath := filepath.Clean(*m.config.CustomCloudInitConfig)
+	if strings.Contains(configPath, "..") {
+		return errs.ValidationFailed(
+			errs.CodeCloudInitProvisionFailed,
+			fmt.Sprintf("cloud-init config path must not contain '..': %s", configPath),
+		)
+	}
+
+	content, err := os.ReadFile(configPath)
 	if err != nil {
-		return errs.Wrap(errs.CodeCloudInitProvisionFailed, fmt.Errorf("read custom user-data: %w", err))
+		return errs.Wrap(errs.CodeCloudInitProvisionFailed, fmt.Errorf("read custom cloud-init config: %w", err))
 	}
 
 	contentStr := string(content)
 
+	// Strip UTF-8 BOM if present (Windows editors may add one)
+	contentStr = strings.TrimPrefix(contentStr, "\ufeff")
+
 	// Detect content type from first line
 	if strings.HasPrefix(contentStr, "#!") {
-		// Shell script: write as-is
-		userDataPath := filepath.Join(m.config.CloudInitDir, "user-data")
-		return os.WriteFile(userDataPath, content, 0644)
+		// Shell script: write as-is (including meta-data)
+		return m.writeCustomCloudInitFiles(content)
 	}
 
 	if strings.HasPrefix(contentStr, "Content-Type:") {
-		// MIME multi-part: write as-is
-		userDataPath := filepath.Join(m.config.CloudInitDir, "user-data")
-		return os.WriteFile(userDataPath, content, 0644)
+		// MIME multi-part: write as-is (including meta-data)
+		return m.writeCustomCloudInitFiles(content)
 	}
 
 	if !strings.HasPrefix(contentStr, "#cloud-config") {
-		// Truncate for error message like Python
+		// Truncate for error message at rune boundary (like Python)
 		preview := contentStr
-		if len(preview) > 80 {
-			preview = preview[:80]
+		runeCount := utf8.RuneCountInString(preview)
+		if runeCount > 80 {
+			preview = string([]rune(preview)[:80])
 		}
 		return errs.ValidationFailed(
 			errs.CodeCloudInitProvisionFailed,
 			fmt.Sprintf(
-				"Custom user-data must start with '#cloud-config' (YAML), '#!' (shell script), or 'Content-Type:' (MIME multipart). Got: %q",
+				"custom cloud-init config must start with '#cloud-config' (YAML), '#!' (shell script), or 'Content-Type:' (MIME multipart). Got: %q",
 				preview,
 			),
 		)
 	}
 
 	// YAML cloud-config: parse, validate, and merge SSH keys
-	// Python: yaml.safe_load(content); if isinstance(loaded, dict): ...
-	//     else: raise CloudInitProvisionError("Cloud-config user-data must parse to a YAML mapping/object")
-	var raw interface{}
+	var raw any
 	if err := yaml.Unmarshal(content, &raw); err != nil {
-		return ErrCloudInitProvisionFailed(
-			fmt.Sprintf("Invalid YAML in user-data file: %s", err),
-		)
+		return errs.Wrap(errs.CodeCloudInitProvisionFailed, fmt.Errorf("invalid YAML in cloud-init config file: %w", err))
 	}
-	customUserdata, ok := raw.(map[string]interface{})
+	customUserdata, ok := raw.(map[string]any)
 	if !ok {
-		return ErrCloudInitProvisionFailed(
-			"Cloud-config user-data must parse to a YAML mapping/object",
+		return errs.ValidationFailed(
+			errs.CodeCloudInitProvisionFailed,
+			"cloud-init config must parse to a YAML mapping/object",
 		)
 	}
 
-	if err := m.validateUserData(customUserdata); err != nil {
+	if err := validateCloudinitConfig(customUserdata); err != nil {
 		return err
 	}
 
-	// Warn about "network" key in custom user-data — cloud-init will process it
+	// Warn about "network" key in custom config — cloud-init will process it
 	if _, hasNetwork := customUserdata["network"]; hasNetwork {
 		slog.Warn(
-			"Custom user-data already contains 'network' key; cloud-init network stage will apply it. Ensure this is intentional.",
+			"Custom cloud-init config already contains 'network' key; cloud-init network stage will apply it. Ensure this is intentional.",
 			"vm_name",
 			m.config.VMName,
 		)
 	}
 
 	// Merge SSH keys into user-data users
-	if len(m.config.SSHPubkeys) > 0 {
-		usersRaw, hasUsers := customUserdata["users"]
-		if !hasUsers {
-			customUserdata["users"] = []interface{}{
-				map[string]interface{}{
-					"name":                m.config.User,
-					"ssh-authorized-keys": m.config.SSHPubkeys,
-				},
-			}
-		} else {
-			switch users := usersRaw.(type) {
-			case []interface{}:
-				userFound := false
-				for i, u := range users {
-					if userMap, ok := u.(map[string]interface{}); ok {
-						if name, ok := userMap["name"]; ok && name == m.config.User {
-							existingKeysRaw, hasKeys := userMap["ssh-authorized-keys"]
-							var existingKeys []string
-							if hasKeys {
-								switch k := existingKeysRaw.(type) {
-								case []interface{}:
-									for _, v := range k {
-										if s, ok := v.(string); ok {
-											existingKeys = append(existingKeys, s)
-										}
-									}
-								case []string:
-									existingKeys = k
-								}
-							}
-							// Merge keys not already present
-							keySet := make(map[string]bool)
-							for _, k := range existingKeys {
-								keySet[k] = true
-							}
-							for _, k := range m.config.SSHPubkeys {
-								if !keySet[k] {
-									existingKeys = append(existingKeys, k)
-									keySet[k] = true
-								}
-							}
-							userMap["ssh-authorized-keys"] = existingKeys
-							users[i] = userMap
-							userFound = true
-							break
-						}
-					}
-				}
-				if !userFound {
-					users = append(users, map[string]interface{}{
-						"name":                m.config.User,
-						"ssh-authorized-keys": m.config.SSHPubkeys,
-					})
-				}
-				customUserdata["users"] = users
-			}
-		}
+	if err := m.mergeSSHKeys(customUserdata); err != nil {
+		return err
 	}
 
-	// Write the merged user-data
+	// Write meta-data (required by cloud-init for NO_CLOUD datasource)
+	if err := m.writeMetaData(); err != nil {
+		return err
+	}
+
+	// Write the merged cloud-init config
 	out, err := yaml.Marshal(customUserdata)
 	if err != nil {
 		return errs.Wrap(errs.CodeCloudInitProvisionFailed, fmt.Errorf("marshal merged user-data: %w", err))
@@ -384,76 +263,137 @@ func (m *Manager) parseCustomUserData() error {
 	return os.WriteFile(userDataPath, []byte("#cloud-config\n"+string(out)), 0644)
 }
 
-// dangerousCloudInitDirectives lists cloud-init directives that could be security risks.
-// Matches Python's _DANGEROUS_CLOUD_INIT_DIRECTIVES (module-level dict).
-var dangerousCloudInitDirectives = map[string]string{
-	"write_files": "Can write arbitrary files to the system",
-	"runcmd":      "Can execute arbitrary commands",
-	"bootcmd":     "Can execute commands at boot",
-	"snap":        "Can install snap packages",
-	"apt":         "Can install packages (use with caution)",
-	"yum":         "Can install packages (use with caution)",
-	"packages":    "Can install packages (use with caution)",
+// writeCustomCloudInitFiles writes meta-data and user-data for shell-script and MIME custom configs.
+func (m *Manager) writeCustomCloudInitFiles(userDataContent []byte) error {
+	if err := m.writeMetaData(); err != nil {
+		return err
+	}
+	userDataPath := filepath.Join(m.config.CloudInitDir, "user-data")
+	return os.WriteFile(userDataPath, userDataContent, 0644)
 }
 
-// validateUserData checks user-data for dangerous cloud-init directives.
-// Matches Python's _validate_user_data().
-func (m *Manager) validateUserData(userData map[string]interface{}) error {
-	var found []string
-	for directive := range dangerousCloudInitDirectives {
-		if _, ok := userData[directive]; ok {
-			found = append(found, directive)
+// writeMetaData writes the required cloud-init meta-data file for NO_CLOUD datasource.
+func (m *Manager) writeMetaData() error {
+	metaDataPath := filepath.Join(m.config.CloudInitDir, "meta-data")
+	content := fmt.Sprintf("instance-id: %s\nlocal-hostname: %s\n", m.config.VMID, m.config.VMName)
+	return os.WriteFile(metaDataPath, []byte(content), 0644)
+}
+
+// mergeSSHKeys merges configured SSH public keys into the custom cloud-init user-data.
+// If no users entry exists, creates one with the configured user and keys.
+// If the user already exists, only appends keys not already present.
+// Uses typed structs for safe manipulation while preserving all other user fields.
+func (m *Manager) mergeSSHKeys(customUserdata map[string]any) error {
+	if len(m.config.SSHPubkeys) == 0 {
+		return nil
+	}
+
+	usersRaw, hasUsers := customUserdata["users"]
+	if !hasUsers {
+		customUserdata["users"] = []any{
+			map[string]any{
+				"name":                m.config.User,
+				"ssh-authorized-keys": m.config.SSHPubkeys,
+			},
+		}
+		return nil
+	}
+
+	// Marshal users to YAML and unmarshal into typed structs for safe manipulation
+	usersYAML, err := yaml.Marshal(usersRaw)
+	if err != nil {
+		return errs.Wrap(errs.CodeCloudInitProvisionFailed, fmt.Errorf("marshal users for merge: %w", err))
+	}
+
+	var users []cloudInitUser
+	if err := yaml.Unmarshal(usersYAML, &users); err != nil {
+		return errs.Wrap(errs.CodeCloudInitProvisionFailed, fmt.Errorf("unmarshal users for merge: %w", err))
+	}
+
+	// Find and update the target user
+	found := false
+	for i, u := range users {
+		if u.Name == m.config.User {
+			// Build set of existing keys
+			keySet := make(map[string]struct{}, len(u.SSHAuthorizedKeys))
+			for _, k := range u.SSHAuthorizedKeys {
+				keySet[k] = struct{}{}
+			}
+			// Append keys not already present
+			for _, k := range m.config.SSHPubkeys {
+				if _, exists := keySet[k]; !exists {
+					u.SSHAuthorizedKeys = append(u.SSHAuthorizedKeys, k)
+					keySet[k] = struct{}{}
+				}
+			}
+			users[i] = u
+			found = true
+			break
 		}
 	}
 
-	if len(found) > 0 {
-		details := make([]string, 0, len(found))
-		for _, d := range found {
-			details = append(details, fmt.Sprintf("%s: %s", d, dangerousCloudInitDirectives[d]))
-		}
-		return ErrCloudInitProvisionFailed(
-			fmt.Sprintf(
-				"Custom cloud-init user-data contains blocked directive(s): %s. %s",
-				strings.Join(found, ", "),
-				strings.Join(details, "; "),
-			),
-		)
+	if !found {
+		users = append(users, cloudInitUser{
+			Name:              m.config.User,
+			SSHAuthorizedKeys: m.config.SSHPubkeys,
+			Extra:             make(map[string]any),
+		})
 	}
 
+	// Convert back to generic types for storage in the custom data map
+	mergedYAML, err := yaml.Marshal(users)
+	if err != nil {
+		return errs.Wrap(errs.CodeCloudInitProvisionFailed, fmt.Errorf("marshal merged users: %w", err))
+	}
+
+	var merged []any
+	if err := yaml.Unmarshal(mergedYAML, &merged); err != nil {
+		return errs.Wrap(errs.CodeCloudInitProvisionFailed, fmt.Errorf("unmarshal merged users: %w", err))
+	}
+
+	customUserdata["users"] = merged
 	return nil
 }
 
 // renderCloudInitTemplate renders the cloud-init template with provided values.
-// Matches Python's _render_cloud_init_template().
-// Returns a map of section name to rendered content.
+// Uses Go text/template named templates for each section (user_data, meta_data, etc.)
+// via {{define "section_name"}}...{{end}} blocks in the template file.
 func (m *Manager) renderCloudInitTemplate() (map[string]string, error) {
-	// Read the embedded template
 	templateBytes, err := assets.ReadFile("cloud-init.template.yaml")
 	if err != nil {
-		return nil, errs.Wrap(errs.CodeCloudInitProvisionFailed, fmt.Errorf("read cloud-init template: %w", err))
-	}
-
-	// Parse and render with Go text/template
-	tmpl, err := template.New("cloud-init").Parse(string(templateBytes))
-	if err != nil {
-		return nil, errs.Wrap(errs.CodeCloudInitProvisionFailed, fmt.Errorf("parse cloud-init template: %w", err))
-	}
-
-	// Get password from defaults — matches Python's get_default("defaults.vm", "user_password")
-	passwordVal, gdErr := infra.GetDefault("defaults.vm", "user_password")
-	password := "password"
-	if gdErr == nil {
-		if pwd, ok := passwordVal.(string); ok && pwd != "" {
-			password = pwd
+		return nil, &errs.DomainError{
+			Code:    errs.CodeCloudInitProvisionFailed,
+			Op:      "cloudinit",
+			Message: "read cloud-init template",
+			Err:     err,
+			Class:   errs.ClassInternal,
 		}
 	}
 
-	// Generate password hash — matches Python's generate_password_hash()
-	passwordHash, err := generatePasswordHash(password)
+	tmpl, err := template.New("cloud-init").Parse(string(templateBytes))
 	if err != nil {
-		return nil, errs.Wrap(errs.CodeCloudInitProvisionFailed,
-			fmt.Errorf("generate password hash: %w", err))
+		return nil, &errs.DomainError{
+			Code:    errs.CodeCloudInitProvisionFailed,
+			Op:      "cloudinit",
+			Message: "parse cloud-init template",
+			Err:     err,
+			Class:   errs.ClassInternal,
+		}
 	}
+
+	// Generate password hash from resolved UserPassword
+	// bcrypt cost 10 matches Python's passlib default.
+	hashBytes, hashErr := bcrypt.GenerateFromPassword([]byte(m.config.UserPassword), bcrypt.DefaultCost)
+	if hashErr != nil {
+		return nil, &errs.DomainError{
+			Code:    errs.CodeCloudInitProvisionFailed,
+			Op:      "cloudinit",
+			Message: "generate password hash",
+			Err:     hashErr,
+			Class:   errs.ClassInternal,
+		}
+	}
+	passwordHash := string(hashBytes)
 
 	data := TemplateData{
 		VMName:           m.config.VMName,
@@ -465,7 +405,7 @@ func (m *Manager) renderCloudInitTemplate() (map[string]string, error) {
 		PasswordHash:     passwordHash,
 	}
 
-	// Validate all required fields are non-empty (mimicking Jinja2 StrictUndefined)
+	// Validate all required fields are non-empty
 	if err := validateTemplateData(data); err != nil {
 		return nil, errs.ValidationFailed(
 			errs.CodeCloudInitProvisionFailed,
@@ -473,77 +413,22 @@ func (m *Manager) renderCloudInitTemplate() (map[string]string, error) {
 		)
 	}
 
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return nil, errs.Wrap(errs.CodeCloudInitProvisionFailed, fmt.Errorf("render cloud-init template: %w", err))
-	}
-
-	rendered := buf.String()
-
-	// Parse the rendered YAML to extract sections
-	// Matches Python's _render_cloud_init_template() exactly.
-	sectionHeaders := map[string]bool{
-		"user_data":      true,
-		"meta_data":      true,
-		"network_config": true,
-		"nocloud_cfg":    true,
-	}
-
-	result := make(map[string]string)
-	var currentKey string
-	var currentContent []string
-
-	lines := strings.Split(rendered, "\n")
-	for _, line := range lines {
-		isSectionHeader := false
-		if len(line) > 0 && line[0] != ' ' && line[0] != '\t' {
-			// Match Python: line.endswith(": |") or line.endswith(":|>") or line.endswith(":|-")
-			if strings.HasSuffix(line, ": |") || strings.HasSuffix(line, ":|>") || strings.HasSuffix(line, ":|-") {
-				// Python: section_name = line.rsplit(":", 1)[0]
-				// Go equivalent: find last ":" and take everything before it
-				colonIdx := strings.LastIndex(line, ":")
-				if colonIdx >= 0 {
-					sectionName := line[:colonIdx]
-					if sectionHeaders[sectionName] {
-						if currentKey != "" {
-							result[currentKey] = strings.Join(currentContent, "\n")
-						}
-						currentKey = sectionName
-						currentContent = nil
-						isSectionHeader = true
-					}
-				}
+	// Render each named section independently — no YAML parsing hack needed.
+	sectionNames := []string{"user_data", "meta_data", "network_config", "nocloud_cfg"}
+	result := make(map[string]string, len(sectionNames))
+	for _, name := range sectionNames {
+		var buf bytes.Buffer
+		if err := tmpl.ExecuteTemplate(&buf, name, data); err != nil {
+			return nil, &errs.DomainError{
+				Code:    errs.CodeCloudInitProvisionFailed,
+				Op:      "cloudinit",
+				Message: fmt.Sprintf("render section %q", name),
+				Err:     err,
+				Class:   errs.ClassInternal,
 			}
 		}
-		if !isSectionHeader && currentKey != "" {
-			currentContent = append(currentContent, line)
-		}
-	}
-	if currentKey != "" {
-		result[currentKey] = strings.Join(currentContent, "\n")
-	}
-
-	// Dedent content like Python's textwrap.dedent
-	for key, value := range result {
-		result[key] = infra.Dedent(value)
+		result[name] = buf.String()
 	}
 
 	return result, nil
-}
-
-// generatePasswordHash generates a Unix password hash for cloud-init.
-// Always uses bcrypt — only bcrypt is supported.
-func generatePasswordHash(password string) (string, error) {
-	return bcryptHash(password)
-}
-
-// bcryptHash generates a bcrypt password hash using golang.org/x/crypto/bcrypt.
-func bcryptHash(password string) (string, error) {
-	// bcrypt.GenerateFromPassword uses cost 10 by default, matching
-	// Python's passlib default bcrypt rounds.
-	hashBytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return "", fmt.Errorf("bcrypt hash failed: %w", err)
-	}
-	return string(hashBytes), nil
 }

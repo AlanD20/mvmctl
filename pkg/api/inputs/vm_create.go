@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"mvmctl/internal/core/binary"
 	"mvmctl/internal/core/cloudinit"
@@ -53,8 +54,7 @@ type VMCreateInput struct {
 	LSMFlags            string
 	NetworkName         *string
 	RequestedGuestMAC   *string
-	CustomUserDataPath  *string
-	CustomUserData      *string // alias for CustomUserDataPath, kept for CLI compat
+	CustomCloudInitConfig *string
 	CloudInitMode       *string
 	CloudInitISOPath    *string
 	KeepCloudInitISO    bool
@@ -120,9 +120,16 @@ type ResolvedVMCreateInput struct {
 
 	RequestedGuestIP   *string
 	RequestedGuestMAC  *string
-	NocloudNetPort     *int
-	CustomUserDataPath *string
-	CloudInitISOPath   *string
+	NocloudNetPort          *int
+	CustomCloudInitConfig   *string
+	CloudInitISOPath        *string
+
+	// Pre-allocated nocloud server (shared across batch VMs).
+	// Set by VMCreate() before the batch loop; flows through CloneVMInput to each VM.
+	NoCloudURL          string
+	NoCloudPort         int
+	NoCloudPID          int
+	NoCloudKillAfter    time.Duration
 	CPUConfig          *model.CpuConfig
 	BootArgs           string
 	SSHKeys            []*model.SSHKeyItem
@@ -644,7 +651,7 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		RequestedGuestIP:    input.RequestedGuestIP,
 		RequestedGuestMAC:   input.RequestedGuestMAC,
 		NocloudNetPort:      input.NocloudNetPort,
-		CustomUserDataPath:  input.CustomUserDataPath,
+		CustomCloudInitConfig: input.CustomCloudInitConfig,
 		CloudInitISOPath:    ciResult.ISOPath,
 		BootArgs:            bootArgs,
 		SSHKeys:             sshKeys,
@@ -761,12 +768,12 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 		}
 	}
 
-	if result.CustomUserDataPath != nil && *result.CustomUserDataPath != "" {
-		if _, err := os.Stat(*result.CustomUserDataPath); os.IsNotExist(err) {
+	if result.CustomCloudInitConfig != nil && *result.CustomCloudInitConfig != "" {
+		if _, err := os.Stat(*result.CustomCloudInitConfig); os.IsNotExist(err) {
 			return &errs.DomainError{
 				Code:    errs.CodeVMCreateFailed,
 				Op:      "vm_create",
-				Message: fmt.Sprintf("User-data file not found: %s", *result.CustomUserDataPath),
+				Message: fmt.Sprintf("Cloud-init config file not found: %s", *result.CustomCloudInitConfig),
 				Class:   errs.ClassValidation,
 			}
 		}
