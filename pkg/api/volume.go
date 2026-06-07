@@ -4,8 +4,8 @@ package api
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"mvmctl/internal/core/vm"
@@ -32,18 +32,7 @@ func (op *Operation) VolumeCreate(ctx context.Context, input inputs.VolumeCreate
 	req := inputs.NewVolumeCreateRequest(input, op.Connection.DB(), op.Repos.Volume)
 	resolved, err := req.Resolve(ctx)
 	if err != nil {
-		// Extract the original error code from DomainError — for duplicate names
-		// this correctly returns "volume.already_exists" (matching Python), for
-		// other validation errors it returns the specific code.
-		code := errs.Code("volume.create_failed")
-		var de *errs.DomainError
-		if errors.As(err, &de) {
-			code = de.Code
-		}
-		return nil, &errs.DomainError{
-			Code:    code,
-			Message: err.Error(),
-		}
+		return nil, err
 	}
 
 	timestamp := time.Now().Format(time.RFC3339)
@@ -63,15 +52,11 @@ func (op *Operation) VolumeCreate(ctx context.Context, input inputs.VolumeCreate
 		UpdatedAt:  timestamp,
 	}
 
-	if _, volErr := op.Services.Volume.CreateDisk(ctx, volumeItem); volErr != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeInternal,
-			Message: fmt.Sprintf("Failed to create volume: %v", volErr),
-			Err:     volErr,
-		}
+	if _, err := op.Services.Volume.CreateDisk(ctx, volumeItem); err != nil {
+		return nil, err
 	}
 
-	op.AuditLog.LogOperation("volume.create", map[string]interface{}{"name": input.Name}, "")
+	op.AuditLog.LogOperation("volume.create", map[string]any{"name": input.Name}, "")
 
 	return volumeItem, nil
 }
@@ -169,7 +154,7 @@ func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput,
 			continue
 		}
 
-		op.AuditLog.LogOperation("volume.remove", map[string]interface{}{"name": vol.Name}, "")
+		op.AuditLog.LogOperation("volume.remove", map[string]any{"name": vol.Name}, "")
 
 		results = append(results, errs.OperationResult{
 			Status:  "success",
@@ -204,7 +189,7 @@ func (op *Operation) VolumeInspect(ctx context.Context, input inputs.VolumeInput
 	return &responses.VolumeInspect{
 		Volume: responses.VolumeItemInfo{
 			ID: vol.ID, Name: vol.Name, SizeBytes: vol.SizeBytes,
-			Format: vol.Format, IsReadOnly: vol.IsReadOnly,
+			Format: string(vol.Format), IsReadOnly: vol.IsReadOnly,
 			Path: vol.Path, Status: string(vol.Status),
 		},
 		Attachment: responses.VolumeAttachmentInfo{
@@ -246,13 +231,8 @@ func (op *Operation) VolumeResize(ctx context.Context, input inputs.VolumeCreate
 		}
 	}
 
-	_, err = op.Services.Volume.ResizeDisk(ctx, vol, sizeBytes)
-	if err != nil {
-		return &errs.DomainError{
-			Code:    "volume.resize_failed",
-			Message: fmt.Sprintf("Failed to resize volume: %v", err),
-			Err:     err,
-		}
+	if _, err = op.Services.Volume.ResizeDisk(ctx, vol, sizeBytes); err != nil {
+		return err
 	}
 
 	op.AuditLog.LogOperation("volume.resize", map[string]interface{}{"name": vol.Name}, "")
@@ -270,9 +250,13 @@ func (op *Operation) VolumeGet(ctx context.Context, input inputs.VolumeInput) (*
 		return nil, err
 	}
 
-	// Python: if len(resolved.volumes) > 1: raise VolumeNotFoundError(...)
 	if len(resolved.Volumes) > 1 {
-		return nil, fmt.Errorf("Expected exactly one volume identifier")
+		return nil, &errs.DomainError{
+			Code:    errs.CodeVolumeNotFound,
+			Op:      "volume_get",
+			Message: fmt.Sprintf("found more than one result from given identifier: %s", strings.Join(input.Identifiers, ", ")),
+			Class:   errs.ClassValidation,
+		}
 	}
 
 	return resolved.Volumes[0], nil

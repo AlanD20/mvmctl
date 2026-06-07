@@ -20,7 +20,7 @@ var volumeColumns = []common.ListingColumn{
 	{Header: "Name", Extract: func(v any) string { return v.(*model.VolumeItem).Name }},
 	{Header: "Size", Extract: func(v any) string { return common.Cli.FormatSize(v.(*model.VolumeItem).SizeBytes) }},
 	{Header: "Status", Extract: func(v any) string { return string(v.(*model.VolumeItem).Status) }},
-	{Header: "Format", Extract: func(v any) string { return v.(*model.VolumeItem).Format }, LongOnly: true},
+	{Header: "Format", Extract: func(v any) string { return string(v.(*model.VolumeItem).Format) }, LongOnly: true},
 	{Header: "Attached To", Extract: func(v any) string {
 		vmID := v.(*model.VolumeItem).VMID
 		if vmID != nil && *vmID != "" {
@@ -113,20 +113,17 @@ func newVolumeCreateCmd(op *api.Operation) *cobra.Command {
 			}
 			// Match Python: mvm_cli.success(result.message)
 			common.Cli.Success(fmt.Sprintf("Volume '%s' created", name))
-			if vol != nil {
-				// Match Python: mvm_cli.key_value("ID", mvm_cli.format_id(result.item.id))
-				common.Cli.KeyValue("ID", common.Cli.FormatID(vol.ID), 2, 12)
-				// Match Python: mvm_cli.key_value("Mode", "ro" if result.item.is_read_only else "rw")
-				mode := "rw"
-				if vol.IsReadOnly {
-					mode = "ro"
+			for _, col := range volumeColumns {
+				switch col.Header {
+				case "ID", "Format", "Size":
+					common.Cli.KeyValue(col.Header, col.Extract(vol), 2, 12)
 				}
-				common.Cli.KeyValue("Mode", mode, 2, 12)
-				// Match Python: mvm_cli.key_value("Format", result.item.format)
-				common.Cli.KeyValue("Format", vol.Format, 2, 12)
-				// Match Python: mvm_cli.key_value("Size", mvm_cli.format_size(result.item.size_bytes))
-				common.Cli.KeyValue("Size", common.Cli.FormatSize(vol.SizeBytes), 2, 12)
 			}
+			mode := "rw"
+			if vol.IsReadOnly {
+				mode = "ro"
+			}
+			common.Cli.KeyValue("Mode", mode, 2, 12)
 			return nil
 		},
 	}
@@ -135,6 +132,7 @@ func newVolumeCreateCmd(op *api.Operation) *cobra.Command {
 	// Accept both --read-only and --readonly (matching Python's Typer alias)
 	cmd.Flags().BoolVar(&readOnly, "read-only", false, "Mount volume as read-only (default: writable)")
 	cmd.Flags().BoolVar(&readOnly, "readonly", false, "Mount volume as read-only (default: writable)")
+	cmd.Flags().BoolVar(&readOnly, "ro", false, "Mount volume as read-only (default: writable)")
 	return cmd
 }
 

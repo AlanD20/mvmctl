@@ -61,7 +61,7 @@ func (r *sqliteRepo) Upsert(ctx context.Context, v *model.VolumeItem) error {
 			status = excluded.status,
 			vm_id = excluded.vm_id,
 			updated_at = CURRENT_TIMESTAMP`,
-		v.ID, v.Name, v.SizeBytes, v.Format, infra.BoolToInt(v.IsReadOnly),
+		v.ID, v.Name, v.SizeBytes, string(v.Format), infra.BoolToInt(v.IsReadOnly),
 		v.Path, string(v.Status), v.VMID, v.CreatedAt, v.UpdatedAt,
 	)
 	return err

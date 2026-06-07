@@ -2,7 +2,6 @@ package volume
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -28,30 +27,26 @@ func NewService(repo Repository) *Service {
 // CreateDisk creates a disk file on the filesystem and persists the volume record.
 // Matches Python's VolumeService.create_disk() exactly.
 func (s *Service) CreateDisk(ctx context.Context, vol *model.VolumeItem) (*model.VolumeItem, error) {
-	diskPath := vol.Path
-	parentDir := filepath.Dir(diskPath)
-	// Python: disk_path.parent.mkdir(parents=True, exist_ok=True) — no try/except,
-	// lets OSError/PermissionError propagate unhandled (raw filesystem error).
-	// Go must match: return the raw os.MkdirAll error, NOT wrapped in VolumeError.
+	parentDir := filepath.Dir(vol.Path)
 	if err := os.MkdirAll(parentDir, os.ModePerm); err != nil {
-		return nil, err
+		return nil, NewVolumeErrorf("create disk directory: %s", err)
 	}
 
 	switch vol.Format {
-	case "raw":
+	case model.VolumeFormatRaw:
 		result := system.RunCmdCompat(
 			ctx,
-			[]string{"fallocate", "-l", strconv.FormatInt(vol.SizeBytes, 10), diskPath},
+			[]string{"fallocate", "-l", strconv.FormatInt(vol.SizeBytes, 10), vol.Path},
 			system.DefaultRunCmdOpts(),
 		)
 		if result.Err != nil {
 			// Python: raise VolumeError(f"fallocate failed: {e}") from e
 			return nil, NewVolumeErrorf("fallocate failed: %s", result.Err.Error())
 		}
-	case "qcow2":
+	case model.VolumeFormatQCOW2:
 		result := system.RunCmdCompat(
 			ctx,
-			[]string{"qemu-img", "create", "-f", "qcow2", diskPath, strconv.FormatInt(vol.SizeBytes, 10)},
+			[]string{"qemu-img", "create", "-f", string(model.VolumeFormatQCOW2), vol.Path, strconv.FormatInt(vol.SizeBytes, 10)},
 			system.DefaultRunCmdOpts(),
 		)
 		if result.Err != nil {
@@ -62,29 +57,14 @@ func (s *Service) CreateDisk(ctx context.Context, vol *model.VolumeItem) (*model
 	}
 
 	if err := s.repo.Upsert(ctx, vol); err != nil {
-		return nil, fmt.Errorf("upsert volume after creation: %w", err)
+		return nil, NewVolumeErrorf("upsert volume after creation: %s", err)
 	}
 
 	return vol, nil
 }
 
-// ListAll returns all volumes from the database.
-// Matches Python's VolumeService.list_all().
-func (s *Service) ListAll(ctx context.Context) ([]*model.VolumeItem, error) {
-	return s.repo.ListAll(ctx)
-}
-
 // Remove deletes the disk file and its DB record.
 // Matches Python's VolumeService.remove() exactly.
-//
-// Python fire-and-forgets ALL failures silently:
-//
-//	def remove(self, volume: VolumeItem) -> None:
-//	    self._repo.delete(volume.id)             ← no try/except, ignores all errors
-//	    disk_path = Path(volume.path)
-//	    if disk_path.exists():                    ← explicit existence check
-//	        disk_path.unlink(missing_ok=True)     ← ignores file-not-found
-//
 // Go must match: silently ignore ALL errors from repo.Delete and os.Remove.
 // Return nil always (matching Python's None return).
 func (s *Service) Remove(ctx context.Context, volume *model.VolumeItem) error {
@@ -106,29 +86,27 @@ func (s *Service) ResizeDisk(
 	vol *model.VolumeItem,
 	newSizeBytes int64,
 ) (*model.VolumeItem, error) {
-	diskPath := vol.Path
-
-	if _, err := os.Stat(diskPath); err != nil {
+	if _, err := os.Stat(vol.Path); err != nil {
 		if os.IsNotExist(err) {
-			return nil, NewVolumeErrorf("Disk file not found: %s", diskPath)
+			return nil, NewVolumeErrorf("Disk file not found: %s", vol.Path)
 		}
-		return nil, fmt.Errorf("stat disk file: %w", err)
+		return nil, NewVolumeErrorf("stat disk file: %s", err)
 	}
 
 	switch vol.Format {
-	case "raw":
+	case model.VolumeFormatRaw:
 		result := system.RunCmdCompat(
 			ctx,
-			[]string{"fallocate", "-l", strconv.FormatInt(newSizeBytes, 10), diskPath},
+			[]string{"fallocate", "-l", strconv.FormatInt(newSizeBytes, 10), vol.Path},
 			system.DefaultRunCmdOpts(),
 		)
 		if result.Err != nil {
 			return nil, NewVolumeErrorf("fallocate resize failed: %s", result.Err.Error())
 		}
-	case "qcow2":
+	case model.VolumeFormatQCOW2:
 		result := system.RunCmdCompat(
 			ctx,
-			[]string{"qemu-img", "resize", diskPath, strconv.FormatInt(newSizeBytes, 10)},
+			[]string{"qemu-img", "resize", vol.Path, strconv.FormatInt(newSizeBytes, 10)},
 			system.DefaultRunCmdOpts(),
 		)
 		if result.Err != nil {
@@ -144,7 +122,7 @@ func (s *Service) ResizeDisk(
 	vol.UpdatedAt = time.Now().Format(time.RFC3339)
 
 	if err := s.repo.Upsert(ctx, vol); err != nil {
-		return nil, fmt.Errorf("upsert volume after resize: %w", err)
+		return nil, NewVolumeErrorf("upsert volume after resize: %s", err)
 	}
 
 	return vol, nil

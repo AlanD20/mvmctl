@@ -9,6 +9,7 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/disk"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/validators"
 
 	"github.com/jmoiron/sqlx"
@@ -41,7 +42,7 @@ type VolumeCreateInput struct {
 type ResolvedVolumeCreateInput struct {
 	Name       string
 	SizeBytes  int64
-	Format     string
+	Format     model.VolumeFormat
 	Path       string
 	IsReadOnly bool
 }
@@ -81,12 +82,12 @@ func (r *VolumeCreateRequest) Resolve(ctx context.Context) (*ResolvedVolumeCreat
 	}
 
 	// Default format is "raw" — Python: fmt = self._inputs.format if self._inputs.format is not None else "raw"
-	format := "raw"
+	format := model.VolumeFormatRaw
 	if r.input.Format != nil {
-		format = *r.input.Format
+		format = model.VolumeFormat(*r.input.Format)
 	}
 
-	if format != "raw" && format != "qcow2" {
+	if format != model.VolumeFormatRaw && format != model.VolumeFormatQCOW2 {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeValidationFailed,
 			Op:      "volume_create",
@@ -95,7 +96,7 @@ func (r *VolumeCreateRequest) Resolve(ctx context.Context) (*ResolvedVolumeCreat
 		}
 	}
 
-	path := filepath.Join(infra.GetVolumesDir(), fmt.Sprintf("%s.%s", r.input.Name, format))
+	path := filepath.Join(infra.GetVolumesDir(), fmt.Sprintf("%s.%s", r.input.Name, string(format)))
 
 	isReadOnly := false
 	if r.input.ReadOnly != nil {
