@@ -100,10 +100,9 @@ before it is a source. Multiple sources only work for host -> VM.`,
 			// stays full (Rich clamps ratio at 1.0).
 
 			var (
-				mu               sync.Mutex
-				totalTransferred int64
-				firstChunkSize   int64
-				firstChunkSet    bool
+				mu            sync.Mutex
+				totalBytes    int64
+				transferTotal int64
 			)
 
 			startTime := time.Now()
@@ -123,19 +122,19 @@ before it is a source. Multiple sources only work for host -> VM.`,
 					case <-progressTicker.C:
 						spinIdx++
 						mu.Lock()
-						tt := totalTransferred
-						fcs := firstChunkSize
+						tt := transferTotal
+						total := totalBytes
 						mu.Unlock()
 
 						spinner := spinnerChars[spinIdx%len(spinnerChars)]
 
-						if tt > 0 && fcs > 0 {
+						if tt > 0 && total > 0 {
 							// Proportional bar — matches Rich's BarColumn.
 							// Python sets total=first_chunk_size, and since
 							// advance also adds the first chunk, completed=total
 							// = 100% from the very first data received.
 							const barWidth = 30
-							ratio := float64(tt) / float64(fcs)
+							ratio := float64(tt) / float64(total)
 							if ratio > 1.0 {
 								ratio = 1.0
 							}
@@ -172,21 +171,12 @@ before it is a source. Multiple sources only work for host -> VM.`,
 				}
 			}()
 
-			// Python's progress callback receives incremental chunk sizes
-			// (len(chunk)), matching the service layer's pipeWithProgress
-			// which calls onProgress(int64(n)).  The CLI accumulates chunks
-			// into the cumulative total for display.
-			var cumulative int64
-			result, cpErr := op.CPCopy(cmd.Context(), input, func(bytesCopied int64) {
+			// The progress callback receives (current, total) cumulatively.
+			// total is the actual total bytes from the copy service.
+			result, cpErr := op.CPCopy(cmd.Context(), input, func(current, total int64) {
 				mu.Lock()
-				cumulative += bytesCopied
-				totalTransferred = cumulative
-				if !firstChunkSet {
-					// Python: progress.update(task, total=chunk) on first chunk.
-					// total is set to the first chunk's byte count, not cumulative.
-					firstChunkSize = bytesCopied
-					firstChunkSet = true
-				}
+				transferTotal = current
+				totalBytes = total
 				mu.Unlock()
 			})
 

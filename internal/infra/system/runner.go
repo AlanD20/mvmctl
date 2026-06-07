@@ -36,6 +36,7 @@ type RunCmdOpts struct {
 	Timeout     time.Duration
 	Input       string
 	Env         map[string]string
+	AppendEnv   map[string]string // merged into current env, not replacing
 	Privileged  bool
 	Interactive bool
 	Text        bool

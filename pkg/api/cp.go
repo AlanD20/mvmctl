@@ -8,8 +8,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"mvmctl/internal/core/ssh"
 	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"
@@ -34,7 +34,7 @@ func (op *Operation) copyError(err error) error {
 func (op *Operation) CPCopy(
 	ctx context.Context,
 	input inputs.CPInput,
-	onProgress func(int64),
+	onProgress event.OnDownloadCallback,
 ) (*responses.CPCopyResult, error) {
 	// Python: try: ... except CPError as e: ...
 	// Build CPRequest and resolve (matches Python: CPRequest(inputs, db).resolve())
@@ -80,7 +80,12 @@ func (op *Operation) CPCopy(
 	switch resolved.Direction {
 	case "host_to_vm":
 		if resolved.DstInfo == nil || resolved.LocalPaths == nil {
-			return nil, op.copyError(ssh.ErrCPFailed("Internal error: destination VM info not available"))
+			return nil, op.copyError(&errs.DomainError{
+			Code:    errs.CodeCPError,
+			Op:      "cp",
+			Message: "Internal error: destination VM info not available",
+			Class:   errs.ClassInternal,
+		})
 		}
 
 		dstKeyPath := ""
@@ -97,9 +102,9 @@ func (op *Operation) CPCopy(
 				KeyPath: dstKeyPath,
 			},
 			resolved.Force,
-			func(bytes int64) {
+			func(current, total int64) {
 				if onProgress != nil {
-					onProgress(bytes)
+					onProgress(current, total)
 				}
 			},
 		)
@@ -109,7 +114,12 @@ func (op *Operation) CPCopy(
 
 	case "vm_to_host":
 		if resolved.SrcInfo == nil || resolved.LocalPaths == nil {
-			return nil, op.copyError(ssh.ErrCPFailed("Internal error: source VM info not available"))
+			return nil, op.copyError(&errs.DomainError{
+			Code:    errs.CodeCPError,
+			Op:      "cp",
+			Message: "Internal error: source VM info not available",
+			Class:   errs.ClassInternal,
+		})
 		}
 
 		srcKeyPath := ""
@@ -126,9 +136,9 @@ func (op *Operation) CPCopy(
 				KeyPath: srcKeyPath,
 			},
 			resolved.Force,
-			func(bytes int64) {
+			func(current, total int64) {
 				if onProgress != nil {
-					onProgress(bytes)
+					onProgress(current, total)
 				}
 			},
 		)
@@ -138,7 +148,12 @@ func (op *Operation) CPCopy(
 
 	case "vm_to_vm":
 		if resolved.SrcInfo == nil || resolved.DstInfo == nil {
-			return nil, op.copyError(ssh.ErrCPFailed("Internal error: source or destination VM info not available"))
+			return nil, op.copyError(&errs.DomainError{
+			Code:    errs.CodeCPError,
+			Op:      "cp",
+			Message: "Internal error: source or destination VM info not available",
+			Class:   errs.ClassInternal,
+		})
 		}
 
 		srcKeyPath := ""
@@ -163,9 +178,9 @@ func (op *Operation) CPCopy(
 			resolved.SrcInfo.RemotePath,
 			resolved.DstInfo.RemotePath,
 			resolved.Force,
-			func(bytes int64) {
+			func(current, total int64) {
 				if onProgress != nil {
-					onProgress(bytes)
+					onProgress(current, total)
 				}
 			},
 		)
