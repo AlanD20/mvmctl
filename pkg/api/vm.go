@@ -414,7 +414,7 @@ func (op *Operation) vmBuilderExecute(ctx context.Context, builder *VMCreateBuil
 			SkipNetworkConfig:     resolved.SkipCINetworkConfig,
 			SSHPubkeys:            pubkeys,
 			UserPassword:          userPassword,
-			CustomCloudInitConfig:    resolved.CustomCloudInitConfig,
+			CustomCloudInitConfig: resolved.CustomCloudInitConfig,
 			NocloudNetPort:        resolved.NocloudNetPort,
 			CloudInitISOPath:      resolved.CloudInitISOPath,
 			KeepCloudInitISO:      resolved.KeepCloudInitISO,
@@ -1101,6 +1101,11 @@ func (op *Operation) VMStop(ctx context.Context, input inputs.VMInput) *errs.Bat
 	return &errs.BatchResult{Items: results}
 }
 
+// nocloudRespawnKillAfter is the auto-kill timeout for respawned nocloud-net servers.
+// This is a hardcoded fallback — the primary path uses the config-driven value from
+// defaults.cloudinit.nocloud_kill_after via ResolvedVMCreateInput.
+const nocloudRespawnKillAfter = 5 * time.Minute
+
 func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snapshotMode bool) error {
 	vmDir := filepath.Join(op.CacheDir, "vms", v.ID)
 
@@ -1124,11 +1129,26 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snap
 			}
 			if gateway != "" {
 				cloudInitDir := filepath.Join(vmDir, "cloud-init")
-				_, newPort, _, startErr := nocloudnetsvc.SpawnNoCloudServer(v.ID, vmDir, cloudInitDir, gateway, port, 8000, 9000, 5*time.Minute)
+				logFile := filepath.Join(vmDir, "nocloud-server.log")
+
+				if port == 0 {
+					freePort, err := infra.FindFreePort(gateway, 8000, 9000)
+					if err != nil {
+						slog.Warn("Failed to find free port for nocloud-net server", "vm", v.Name, "error", err)
+						return nil
+					}
+					port = freePort
+				}
+
+				_, startErr := nocloudnetsvc.Spawn(ctx, nocloudnetsvc.Config{
+					CloudInitDir: cloudInitDir,
+					Port:         port,
+					Host:         gateway,
+					LogFile:      logFile,
+					KillAfter:    nocloudRespawnKillAfter,
+				})
 				if startErr != nil {
 					slog.Warn("Failed to start/restart nocloud-net server", "vm", v.Name, "error", startErr)
-				} else if port == 0 {
-					port = newPort
 				}
 			}
 		}

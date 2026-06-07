@@ -8,10 +8,15 @@ import (
 	"path/filepath"
 	"time"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/firewall"
 	"mvmctl/internal/infra/model"
 	nocloudnetsvc "mvmctl/internal/service/nocloudnet"
 )
+
+// Default auto-kill timeout for spawned nocloud-net server subprocess.
+// Matches Python's _KILL_NO_CLOUD_SERVER_AFTER.
+const defaultNocloudKillAfter = 5 * time.Minute
 
 // Provisioner handles all cloud-init provisioning modes.
 // Matches Python's CloudInitProvisioner.
@@ -71,56 +76,59 @@ func (p *Provisioner) provisionOff(ctx context.Context) *model.CloudInitResult {
 
 // provisionNet handles NET mode firewall rules for a single VM.
 // Uses the pre-allocated server from config (NoCloudURL/NoCloudPort/NoCloudPID),
-// or spawns anew if not pre-allocated (single-VM compatibility path).
+// or spawns anew via nocloudnetsvc.Spawn if not pre-allocated.
 func (p *Provisioner) provisionNet(ctx context.Context) (*model.CloudInitResult, error) {
 
-	url := p.config.NoCloudURL
-	allocatedPort := p.config.NoCloudPort
-	spid := p.config.NoCloudPID
-
-	// If no pre-allocated server, spawn one (e.g. single VM without batch path)
-	if url == "" {
-		port := 0
-		if p.config.NocloudNetPort != nil {
-			port = *p.config.NocloudNetPort
-		}
-		host := p.config.IPv4Gateway
-
-		killAfter := p.config.KillAfter
-		if killAfter == 0 {
-			killAfter = 5 * time.Minute // default auto-kill to prevent process leaks
-		}
-
-		var spawnErr error
-		url, allocatedPort, spid, spawnErr = nocloudnetsvc.SpawnNoCloudServer(
-			p.config.VMID,
-			p.config.VMDir,
-			p.config.CloudInitDir,
-			host,
-			port,
-			p.config.NocloudPortRangeStart,
-			p.config.NocloudPortRangeEnd,
-			killAfter,
-		)
-		if spawnErr != nil {
-			return nil, spawnErr
-		}
-	}
-
-	// ── Firewall rule creation (matching Python exactly) ──
+	// ── Firewall rule creation ──
 	if p.firewallTracker == nil {
 		slog.Warn("No firewall tracker available, skipping NET mode firewall rules",
 			"vm_name", p.config.VMName)
 		return &model.CloudInitResult{
 			Mode:            model.CloudInitModeNET,
-			NocloudURL:      &url,
-			NocloudPort:     allocatedPort,
-			NocloudPID:      &spid,
+			NocloudURL:      &p.config.NoCloudURL,
+			NocloudPort:     p.config.NoCloudPort,
+			NocloudPID:      &p.config.NoCloudPID,
 			NocloudNetRules: []model.FirewallRule{},
 		}, nil
 	}
 
-	// Ensure the nocloud chain exists (in filter table)
+	// Spawn nocloud-net server if not pre-allocated
+	if p.config.NoCloudURL == "" {
+		port := p.config.NocloudNetPort
+		if port == nil || *port == 0 {
+			freePort, err := infra.FindFreePort(
+				p.config.IPv4Gateway,
+				p.config.NocloudPortRangeStart,
+				p.config.NocloudPortRangeEnd,
+			)
+			if err != nil {
+				return nil, err
+			}
+			port = &freePort
+		}
+
+		killAfter := p.config.KillAfter
+		if killAfter == 0 {
+			killAfter = defaultNocloudKillAfter
+		}
+
+		result, err := nocloudnetsvc.Spawn(ctx, nocloudnetsvc.Config{
+			CloudInitDir: p.config.CloudInitDir,
+			Port:         *port,
+			Host:         p.config.IPv4Gateway,
+			LogFile:      filepath.Join(p.config.VMDir, "nocloud-server.log"),
+			KillAfter:    killAfter,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		// Store in config so subsequent calls (e.g. respawn) reuse the same server
+		p.config.NoCloudURL = result.URL
+		p.config.NoCloudPort = result.Port
+		p.config.NoCloudPID = result.PID
+	}
+
 	_ = p.firewallTracker.EnsureChain(
 		ctx,
 		model.FirewallChainMVMNocloudNetIn,
@@ -129,8 +137,7 @@ func (p *Provisioner) provisionNet(ctx context.Context) (*model.CloudInitResult,
 		0,
 	)
 
-	commentTag := fmt.Sprintf("# nocloudnet:%s:%d", p.config.VMName, allocatedPort)
-	networkName := p.config.NetworkName
+	commentTag := fmt.Sprintf("# nocloudnet:%s:%d", p.config.VMName, p.config.NoCloudPort)
 
 	rule := model.FirewallRule{
 		TableName:    model.FirewallTableFilter,
@@ -144,8 +151,8 @@ func (p *Provisioner) provisionNet(ctx context.Context) (*model.CloudInitResult,
 		InInterface:  p.config.TapName,
 		OutInterface: string(model.FirewallWildcardAnyInterface),
 		SPort:        model.FirewallPortAny,
-		DPort:        allocatedPort,
-		NetworkName:  &networkName,
+		DPort:        p.config.NoCloudPort,
+		NetworkName:  &p.config.NetworkName,
 		CommentTag:   &commentTag,
 		IsActive:     true,
 	}
@@ -160,9 +167,9 @@ func (p *Provisioner) provisionNet(ctx context.Context) (*model.CloudInitResult,
 
 	return &model.CloudInitResult{
 		Mode:            model.CloudInitModeNET,
-		NocloudURL:      &url,
-		NocloudPort:     allocatedPort,
-		NocloudPID:      &spid,
+		NocloudURL:      &p.config.NoCloudURL,
+		NocloudPort:     p.config.NoCloudPort,
+		NocloudPID:      &p.config.NoCloudPID,
 		NocloudNetRules: []model.FirewallRule{rule},
 	}, nil
 }

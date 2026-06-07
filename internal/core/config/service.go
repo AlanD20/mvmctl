@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
@@ -90,6 +91,34 @@ func (s *Service) GetBool(ctx context.Context, category, key string) (bool, erro
 		return false, fmt.Errorf("config key %s.%s not found", category, key)
 	}
 	return infra.ToBool(v, false), nil
+}
+
+// GetDuration resolves a config value as a time.Duration using GetValue, then parses.
+// Returns error if the key has no default in OverridableDefaults.
+func (s *Service) GetDuration(ctx context.Context, category, key string) (time.Duration, error) {
+	v, err := s.GetValue(ctx, category, key)
+	if err != nil {
+		return 0, err
+	}
+	if v == nil {
+		return 0, fmt.Errorf("config key %s.%s not found", category, key)
+	}
+	switch val := v.(type) {
+	case time.Duration:
+		return val, nil
+	case string:
+		d, err := time.ParseDuration(val)
+		if err != nil {
+			return 0, fmt.Errorf("config key %s.%s: cannot parse duration %q: %w", category, key, val, err)
+		}
+		return d, nil
+	case int:
+		return time.Duration(val) * time.Second, nil
+	case int64:
+		return time.Duration(val) * time.Second, nil
+	default:
+		return 0, fmt.Errorf("config key %s.%s: unexpected type %T for duration", category, key, v)
+	}
 }
 
 // Delete removes a setting override. Returns true if a row was deleted.

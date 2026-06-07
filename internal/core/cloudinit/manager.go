@@ -108,61 +108,34 @@ func (m *Manager) Generate(ctx context.Context) error {
 // Matches Python's create_seed_iso() exactly.
 func (m *Manager) CreateSeedISO(ctx context.Context, cloudInitDir, outputISO string) error {
 	// Validate required files exist (network-config is optional for NO_CLOUD_NET mode)
-	// Python: raise CloudInitError(f"Missing required cloud-init file: {filename}")
-	requiredFiles := []string{"meta-data", "user-data"}
-	for _, filename := range requiredFiles {
-		fp := filepath.Join(cloudInitDir, filename)
-		if _, err := os.Stat(fp); os.IsNotExist(err) {
+	for _, name := range []string{"meta-data", "user-data"} {
+		if _, err := os.Stat(filepath.Join(cloudInitDir, name)); os.IsNotExist(err) {
 			return ErrCloudInitFailed(
-				fmt.Sprintf("Missing required cloud-init file: %s", filename),
+				fmt.Sprintf("Missing required cloud-init file: %s", name),
 			)
 		}
 	}
 
 	// Build command: cloud-localds -v [-N network-config] <output_iso> <user-data> <meta-data>
-	networkConfigPath := filepath.Join(cloudInitDir, "network-config")
-	hasNetworkConfig := false
-	if _, err := os.Stat(networkConfigPath); err == nil {
-		hasNetworkConfig = true
-	}
-
 	args := []string{"-v"}
-	if hasNetworkConfig {
-		args = append(args, "-N", networkConfigPath)
+	if _, err := os.Stat(filepath.Join(cloudInitDir, "network-config")); err == nil {
+		args = append(args, "-N", filepath.Join(cloudInitDir, "network-config"))
 	}
 	args = append(args, outputISO,
 		filepath.Join(cloudInitDir, "user-data"),
 		filepath.Join(cloudInitDir, "meta-data"),
 	)
 
-	// Python: run_cmd(cmd, check=True)
-	//         except ProcessError as e:
-	//             raise CloudInitError(f"Failed to create cloud-init ISO: {e}") from e
-	// Python's ProcessError message format:
-	//   "Command failed (exit N): cloud-localds\n[sanitized_stderr]"
-	// where sanitized_stderr is trimmed and limited to 100 chars.
-	result := system.RunCmdCompat(
-		ctx,
+	result := system.RunCmdCompat(ctx,
 		append([]string{infra.RequiredISOTool}, args...),
 		system.RunCmdOpts{Capture: true, Check: false},
 	)
-	if !result.Success {
-		exitCode := result.ExitCode
-		stderr := strings.TrimSpace(result.Stderr)
-		sanitized := stderr
-		if len(sanitized) > 100 {
-			sanitized = sanitized[:100] + "..."
-		}
-		processMsg := fmt.Sprintf("Command failed (exit %d): cloud-localds", exitCode)
-		if sanitized != "" {
-			processMsg += "\n" + sanitized
-		}
-		return ErrCloudInitFailed(
-			fmt.Sprintf("Failed to create cloud-init ISO: %s", processMsg),
-		)
+	if result.Success {
+		return nil
 	}
 
-	return nil
+	stderr := strings.TrimSpace(result.Stderr)
+	return ErrCloudInitFailed(fmt.Sprintf("cloud-localds failed (exit %d): %s", result.ExitCode, stderr))
 }
 
 // parseCustomCloudInitConfig processes a custom cloud-init config provided to the API.
