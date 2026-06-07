@@ -729,7 +729,6 @@ func (r *HttpDirVersionResolver) resolveViaFirecrackerS3(
 		result[typeName] = []model.VersionInfo{}
 		return
 	}
-
 	xmlContent, err := r.fetchRawContent(ctx, listURL, useCache, ttl)
 	if err != nil {
 		slog.Warn("Failed to fetch S3 version listing", "type", typeName, "url", listURL, "error", err)
@@ -840,7 +839,18 @@ func (r *HttpDirVersionResolver) resolveViaFirecrackerS3(
 	if cfgLimit <= 0 {
 		cfgLimit = 5
 	}
-	if cfgLimit > 0 && len(s3Versions) > cfgLimit {
+
+	if len(s3Versions) == 0 {
+		// No images found for this CI version — emit a warning and a marker
+		// entry so the type still shows in listings.
+		slog.Warn(fmt.Sprintf("Firecracker CI %s has no images at %s", resolvedCIVersion, listURL))
+		s3Versions = append(s3Versions, model.VersionInfo{
+			Version:     "",
+			DisplayName: fmt.Sprintf("No images for %s", resolvedCIVersion),
+			Type:        typeName,
+			Format:      config.Format,
+		})
+	} else if cfgLimit > 0 && len(s3Versions) > cfgLimit {
 		s3Versions = s3Versions[:cfgLimit]
 	}
 	result[typeName] = s3Versions

@@ -219,10 +219,12 @@ func (r *SSHRequest) resolveKey(ctx context.Context, keyRepo key.Repository) (*s
 		}
 	}
 
-	// 2. No key provided — check VM's stored ssh_keys (these are IDs)
+	// 2. No key provided — check VM's stored ssh_keys
+	// SSHKeys stores key NAMES; use the key resolver which handles
+	// resolution by name, ID, or .pub file path.
 	if r.vm != nil {
-		for _, keyID := range r.vm.SSHKeys {
-			keyItem, err := keyResolver.ByID(ctx, keyID)
+		for _, keyName := range r.vm.SSHKeys {
+			keyItem, err := keyResolver.Resolve(ctx, keyName)
 			if err == nil && keyItem.PrivateKeyPath != nil && *keyItem.PrivateKeyPath != "" {
 				if _, err := os.Stat(*keyItem.PrivateKeyPath); err == nil {
 					return keyItem.PrivateKeyPath, nil
