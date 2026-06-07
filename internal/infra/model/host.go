@@ -13,33 +13,33 @@ type HostStateItem struct {
 	UpdatedAt             string `json:"updated_at"              db:"updated_at"`
 
 	// Capacity detection fields
-	Hostname          *string `json:"hostname,omitempty"          db:"hostname"`
-	CPUModel          *string `json:"cpu_model,omitempty"         db:"cpu_model"`
-	CPUVendor         *string `json:"cpu_vendor,omitempty"        db:"cpu_vendor"`
-	CPUCores          *int    `json:"cpu_cores,omitempty"         db:"cpu_cores"`
-	CPUArchitecture   *string `json:"cpu_architecture,omitempty"  db:"cpu_architecture"`
-	NumaNodes         *int    `json:"numa_nodes,omitempty"        db:"numa_nodes"`
-	MemoryTotalMiB    *int    `json:"memory_total_mib,omitempty"  db:"memory_total_mib"`
+	Hostname          *string `json:"hostname,omitempty"            db:"hostname"`
+	CPUModel          *string `json:"cpu_model,omitempty"           db:"cpu_model"`
+	CPUVendor         *string `json:"cpu_vendor,omitempty"          db:"cpu_vendor"`
+	CPUCores          *int    `json:"cpu_cores,omitempty"           db:"cpu_cores"`
+	CPUArchitecture   *string `json:"cpu_architecture,omitempty"    db:"cpu_architecture"`
+	NumaNodes         *int    `json:"numa_nodes,omitempty"          db:"numa_nodes"`
+	MemoryTotalMiB    *int    `json:"memory_total_mib,omitempty"    db:"memory_total_mib"`
 	StorageTotalBytes *int    `json:"storage_total_bytes,omitempty" db:"storage_total_bytes"`
-	KernelVersion     *string `json:"kernel_version,omitempty"    db:"kernel_version"`
-	OSRelease         *string `json:"os_release,omitempty"        db:"os_release"`
-	PIDMax            *int    `json:"pid_max,omitempty"           db:"pid_max"`
-	FDMax             *int    `json:"fd_max,omitempty"            db:"fd_max"`
-	ConntrackMax      *int    `json:"conntrack_max,omitempty"    db:"conntrack_max"`
-	TAPDevicesMax     *int    `json:"tap_devices_max,omitempty"  db:"tap_devices_max"`
+	KernelVersion     *string `json:"kernel_version,omitempty"      db:"kernel_version"`
+	OSRelease         *string `json:"os_release,omitempty"          db:"os_release"`
+	PIDMax            *int    `json:"pid_max,omitempty"             db:"pid_max"`
+	FDMax             *int    `json:"fd_max,omitempty"              db:"fd_max"`
+	ConntrackMax      *int    `json:"conntrack_max,omitempty"       db:"conntrack_max"`
+	TAPDevicesMax     *int    `json:"tap_devices_max,omitempty"     db:"tap_devices_max"`
 	IPLocalPortRange  *string `json:"ip_local_port_range,omitempty" db:"ip_local_port_range"`
-	DetectedAt        *string `json:"detected_at,omitempty"      db:"detected_at"`
+	DetectedAt        *string `json:"detected_at,omitempty"         db:"detected_at"`
 
 	// Virtualization detection fields
-	CPUHasVMX           *int `json:"cpu_has_vmx,omitempty"          db:"cpu_has_vmx"`
-	CPUHypervisor       *int `json:"cpu_hypervisor,omitempty"       db:"cpu_hypervisor"`
+	CPUHasVMX           *int `json:"cpu_has_vmx,omitempty"           db:"cpu_has_vmx"`
+	CPUHypervisor       *int `json:"cpu_hypervisor,omitempty"        db:"cpu_hypervisor"`
 	NestedVirtAvailable *int `json:"nested_virt_available,omitempty" db:"nested_virt_available"`
-	EPTAvailable        *int `json:"ept_available,omitempty"        db:"ept_available"`
-	HugepageCount2MB    *int `json:"hugepage_count_2mb,omitempty"   db:"hugepage_count_2mb"`
-	KSMDisabled         *int `json:"ksm_disabled,omitempty"         db:"ksm_disabled"`
-	CgroupVersion       *int `json:"cgroup_version,omitempty"       db:"cgroup_version"`
-	SwapTotalMiB        *int `json:"swap_total_mib,omitempty"       db:"swap_total_mib"`
-	KernelMinimumMet    *int `json:"kernel_minimum_met,omitempty"   db:"kernel_minimum_met"`
+	EPTAvailable        *int `json:"ept_available,omitempty"         db:"ept_available"`
+	HugepageCount2MB    *int `json:"hugepage_count_2mb,omitempty"    db:"hugepage_count_2mb"`
+	KSMDisabled         *int `json:"ksm_disabled,omitempty"          db:"ksm_disabled"`
+	CgroupVersion       *int `json:"cgroup_version,omitempty"        db:"cgroup_version"`
+	SwapTotalMiB        *int `json:"swap_total_mib,omitempty"        db:"swap_total_mib"`
+	KernelMinimumMet    *int `json:"kernel_minimum_met,omitempty"    db:"kernel_minimum_met"`
 }
 
 // ── HostStateChangeItem ──

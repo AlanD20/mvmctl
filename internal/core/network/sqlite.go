@@ -128,8 +128,11 @@ func (r *sqliteRepo) SetDefault(ctx context.Context, networkID string) error {
 		return err
 	}
 
-	_, err = tx.ExecContext(ctx,
-		`UPDATE networks SET is_default = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL`, networkID)
+	_, err = tx.ExecContext(
+		ctx,
+		`UPDATE networks SET is_default = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL`,
+		networkID,
+	)
 	if err != nil {
 		return err
 	}
