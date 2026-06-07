@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"mvmctl/internal/core/cloudinit"
@@ -28,11 +27,9 @@ import (
 	"mvmctl/internal/infra/model"
 	infranet "mvmctl/internal/infra/network"
 	"mvmctl/internal/infra/provisioner"
-	"mvmctl/internal/infra/ptr"
 	infraslice "mvmctl/internal/infra/slice"
 	"mvmctl/internal/infra/system"
 	"mvmctl/internal/infra/version"
-	consolesvc "mvmctl/internal/service/console"
 	nocloudnetsvc "mvmctl/internal/service/nocloudnet"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"
@@ -758,9 +755,8 @@ func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.B
 
 	repo := op.Repos.VM
 
-	for _, v := range resolved.VMs {
-		vmLocal := v
-		vmDir := filepath.Join(op.CacheDir, "vms", vmLocal.ID)
+	for _, vmLocal := range resolved.VMs {
+		vmDir := infra.GetVMDirByID(vmLocal.ID)
 
 		// Stop the VM
 		controller, ctrlErr := vm.NewController(ctx, vmLocal, repo)
@@ -776,8 +772,21 @@ func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.B
 			}
 		}
 
-		// Perform removal cleanup
-		op.vmPerformRemovalCleanup(ctx, vmLocal)
+		// Console relay, TAP, IP lease cleanup
+		if vmLocal.RelayPID != nil {
+			handler := system.NewProcessSignalHandler(system.ProcessSignalHandlerConfig{PID: *vmLocal.RelayPID})
+			handler.GracefulShutdown(nil)
+		}
+		if vmLocal.RelaySocketPath != nil {
+			_ = os.Remove(*vmLocal.RelaySocketPath)
+		}
+		if vmLocal.TapDevice != "" && vmLocal.NetworkID != "" {
+			_ = op.Services.Network.RemoveTap(ctx, vmLocal.TapDevice, "", vmLocal.NetworkID)
+		}
+		if vmLocal.ID != "" {
+			leaseRepo := network.NewLeaseRepository(op.Connection.DB())
+			_ = leaseRepo.ReleaseByVM(ctx, vmLocal.ID)
+		}
 
 		// Detach volumes
 		if len(vmLocal.VolumeIDs) > 0 {
@@ -799,7 +808,7 @@ func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.B
 			os.RemoveAll(vmDir)
 		}
 
-		op.AuditLog.LogOperation("vm.remove", map[string]interface{}{"name": vmLocal.Name}, "")
+		op.AuditLog.LogOperation("vm.remove", map[string]any{"name": vmLocal.Name}, "")
 
 		results = append(results, errs.OperationResult{
 			Status: "success", Code: "vm.removed",
@@ -808,37 +817,6 @@ func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.B
 	}
 
 	return &errs.BatchResult{Items: results}
-}
-
-func (op *Operation) vmPerformRemovalCleanup(ctx context.Context, vm *model.VM) {
-	// Console relay cleanup (matches Python's _cleanup_console)
-	if vm.RelayPID != nil && vm.ID != "" {
-		vmDir := filepath.Join(op.CacheDir, "vms", vm.ID)
-		relay := consolesvc.NewRelay(vm.Name,
-			filepath.Join(vmDir, "console.pid"),
-			filepath.Join(vmDir, "console.sock"))
-		relay.Stop(true)
-	}
-
-	// TAP device cleanup (matches Python's _cleanup_network)
-	if vm.TapDevice != "" && vm.NetworkID != "" {
-		_ = op.Services.Network.RemoveTap(ctx, vm.TapDevice, "", vm.NetworkID)
-	}
-
-	// IP lease cleanup (matches Python's _cleanup_ip)
-	if vm.ID != "" {
-		leaseRepo := network.NewLeaseRepository(op.Connection.DB())
-		_ = leaseRepo.ReleaseByVM(ctx, vm.ID)
-	}
-
-	// SSH known hosts cleanup (matches Python's ssh-keygen -R {ipv4})
-	if vm.IPv4 != "" {
-		_ = system.RunCmdCompat(
-			ctx,
-			[]string{"ssh-keygen", "-R", vm.IPv4},
-			system.RunCmdOpts{Check: false, Capture: false},
-		)
-	}
 }
 
 // ── Prune ──
@@ -890,19 +868,12 @@ func (op *Operation) VMPrune(ctx context.Context, dryRun bool, includeAll bool) 
 
 // List returns all VMs, optionally filtered by status.
 // Matches Python's VMOperation.list_all() exactly.
-func (op *Operation) VMList(ctx context.Context, statusFilter interface{}) []*model.VM {
+func (op *Operation) VMList(ctx context.Context, statuses ...string) []*model.VM {
 	var vms []*model.VM
 	var err error
 
-	if statusFilter != nil {
-		switch s := statusFilter.(type) {
-		case string:
-			vms, err = op.Repos.VM.ListByStatus(ctx, s)
-		case []string:
-			vms, err = op.Repos.VM.ListByStatus(ctx, s...)
-		default:
-			vms, err = op.Repos.VM.ListAll(ctx)
-		}
+	if len(statuses) > 0 {
+		vms, err = op.Repos.VM.ListByStatus(ctx, statuses...)
 	} else {
 		vms, err = op.Repos.VM.ListAll(ctx)
 	}
@@ -942,81 +913,36 @@ func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*resp
 		return nil, err
 	}
 
-	var imageName *string
-	if vm.ImageID != "" {
-		img, err := op.Repos.Image.Get(ctx, vm.ImageID)
-		if err == nil && img != nil {
-			imageName = &img.Name
-		}
-	}
-	var kernelVersion *string
-	if vm.KernelID != "" {
-		krn, err := op.Repos.Kernel.Get(ctx, vm.KernelID)
-		if err == nil && krn != nil {
-			kernelVersion = &krn.Version
-		}
-	}
-	var binaryName *string
-	if vm.BinaryID != "" {
-		bin, err := op.Repos.Binary.Get(ctx, vm.BinaryID)
-		if err == nil && bin != nil {
-			binaryName = &bin.Name
-		}
-	}
-	var networkName *string
-	if vm.NetworkID != "" {
-		net, err := op.Repos.Network.Get(ctx, vm.NetworkID)
-		if err == nil && net != nil {
-			networkName = &net.Name
-		}
+	// Enrich all relations at once instead of manual repo calls.
+	if err := op.Enr.EnrichVM(ctx, []*model.VM{vm},
+		"kernel", "image", "binary", "network", "network.leases", "volumes",
+	); err != nil {
+		return nil, err
 	}
 
-	relayRunning := false
-	relayPID := vm.RelayPID
-	relaySocketPath := vm.RelaySocketPath
-	if vm.ID != "" && vm.RelayPID != nil {
-		vmDir := filepath.Join(op.CacheDir, "vms", vm.ID)
-		relay := consolesvc.NewRelay(vm.Name,
-			filepath.Join(vmDir, "console.pid"),
-			filepath.Join(vmDir, "console.sock"))
-		relayRunning = relay.IsRunning()
-	}
+	relayRunning := vm.RelayPID != nil && system.IsProcessRunning(*vm.RelayPID)
 
-	vmDir := filepath.Join(op.CacheDir, "vms", vm.ID)
-	rootfsPath := filepath.Join(vmDir, "rootfs."+vm.RootfsSuffix)
-	if vm.RootfsSuffix == "" {
-		rootfsPath = filepath.Join(vmDir, "rootfs.ext4")
-	}
+	vmDir := infra.GetVMDirByID(vm.ID)
 
-	var configPath *string
-	if vm.ConfigPath != "" {
-		p := filepath.Join(vmDir, vm.ConfigPath)
-		configPath = &p
-	}
-	var logPath *string
-	if vm.LogPath != nil {
-		p := filepath.Join(vmDir, *vm.LogPath)
-		logPath = &p
-	}
-	var serialPath *string
-	if vm.SerialOutputPath != nil {
-		p := filepath.Join(vmDir, *vm.SerialOutputPath)
-		serialPath = &p
-	}
-
-	// Volumes
+	// Volumes (enriched vm.Volumes or fallback to manual lookup).
 	var volumes []responses.VMVolume
-	if len(vm.VolumeIDs) > 0 {
+	srcVols := vm.Volumes
+	if len(srcVols) == 0 && len(vm.VolumeIDs) > 0 {
 		vols, err := op.Repos.Volume.FindByIDs(ctx, vm.VolumeIDs)
 		if err == nil {
-			volumes = make([]responses.VMVolume, 0, len(vols))
-			for _, v := range vols {
-				volumes = append(volumes, responses.VMVolume{
-					ID: v.ID, Name: v.Name, Size: v.SizeBytes,
-					Format: v.Format, Status: string(v.Status),
-				})
-			}
+			srcVols = vols
 		}
+	}
+	for _, v := range srcVols {
+		volumes = append(volumes, responses.VMVolume{
+			ID: v.ID, Name: v.Name, Size: v.SizeBytes,
+			Format: v.Format, Status: string(v.Status),
+		})
+	}
+
+	configPath := &vm.ConfigPath
+	if vm.ConfigPath == "" {
+		configPath = nil
 	}
 
 	return &responses.VMInspect{
@@ -1034,22 +960,23 @@ func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*resp
 			VCPUs: vm.VCPUCount, Mem: vm.MemSizeMiB, Disk: vm.DiskSizeMiB,
 		},
 		Networking: responses.VMNetworkingInfo{
-			IPv4: vm.IPv4, MAC: vm.MAC, NetworkID: vm.NetworkID,
-			NetworkName: networkName, TapDevice: vm.TapDevice,
+			IPv4: vm.IPv4, MAC: vm.MAC,
+			Network: vm.Network, TapDevice: vm.TapDevice,
 		},
 		Assets: responses.VMAssetsInfo{
-			ImageID: vm.ImageID, ImageName: imageName,
-			KernelID: vm.KernelID, KernelVersion: kernelVersion,
-			BinaryID: vm.BinaryID, BinaryName: binaryName,
+			Image:  vm.Image,
+			Kernel: vm.Kernel,
+			Binary: vm.Binary,
 		},
 		Filesystem: responses.VMFilesystemInfo{
-			VMDir: vmDir, RootfsPath: rootfsPath,
-			ConfigPath: configPath, LogPath: logPath,
-			SerialOutputPath: serialPath,
+			VMDir: vmDir, RootfsPath: vm.RootfsPath,
+			ConfigPath:       configPath,
+			LogPath:          vm.LogPath,
+			SerialOutputPath: vm.SerialOutputPath,
 		},
 		Console: responses.VMConsoleInfo{
-			RelayRunning: relayRunning, RelayPID: relayPID,
-			RelaySocketPath: relaySocketPath,
+			RelayRunning: relayRunning, RelayPID: vm.RelayPID,
+			RelaySocketPath: vm.RelaySocketPath,
 		},
 		Volumes: volumes,
 	}, nil
@@ -1085,8 +1012,7 @@ func (op *Operation) VMStart(ctx context.Context, input inputs.VMInput) *errs.Ba
 		return &errs.BatchResult{Items: results}
 	}
 
-	for _, v := range resolved.VMs {
-		vmLocal := v
+	for _, vmLocal := range resolved.VMs {
 
 		// If VM is stopped, respawn Firecracker process (matches Python's _respawn_firecracker)
 		if vmLocal.Status == model.VMStatusStopped {
@@ -1158,8 +1084,7 @@ func (op *Operation) VMStop(ctx context.Context, input inputs.VMInput) *errs.Bat
 		return &errs.BatchResult{Items: results}
 	}
 
-	for _, v := range resolved.VMs {
-		vmLocal := v
+	for _, vmLocal := range resolved.VMs {
 
 		controller, ctrlErr := vm.NewController(ctx, vmLocal, repo)
 		if ctrlErr != nil {
@@ -1192,203 +1117,95 @@ func (op *Operation) VMStop(ctx context.Context, input inputs.VMInput) *errs.Bat
 	return &errs.BatchResult{Items: results}
 }
 
-// nocloudRespawnKillAfter is the auto-kill timeout for respawned nocloud-net servers.
-// This is a hardcoded fallback — the primary path uses the config-driven value from
-// defaults.cloudinit.nocloud_kill_after via ResolvedVMCreateInput.
-const nocloudRespawnKillAfter = 5 * time.Minute
-
 func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snapshotMode bool) error {
-	vmDir := filepath.Join(op.CacheDir, "vms", v.ID)
+	vmDir := infra.GetVMDirByID(v.ID)
 
-	// ── Restart nocloud-net server if needed (matches Python's respawn_execute) ──
-	if v.CloudInitMode == "net" {
-		port := 0
-		if v.NocloudNetPort != nil {
-			port = *v.NocloudNetPort
-		}
-		if port == 0 || (v.NocloudNetPID != nil && !system.IsProcessRunning(*v.NocloudNetPID)) {
-			// Resolve network gateway for nocloud URL
-			gateway := ""
-			if v.Network != nil {
-				gateway = v.Network.IPv4Gateway
-			}
-			if gateway == "" {
-				netw, _ := op.Repos.Network.Get(ctx, v.NetworkID)
-				if netw != nil {
-					gateway = netw.IPv4Gateway
-				}
-			}
-			if gateway != "" {
-				cloudInitDir := filepath.Join(vmDir, "cloud-init")
-				logFile := filepath.Join(vmDir, "nocloud-server.log")
-
-				if port == 0 {
-					freePort, err := infra.FindFreePort(gateway, 8000, 9000)
-					if err != nil {
-						slog.Warn("Failed to find free port for nocloud-net server", "vm", v.Name, "error", err)
-						return nil
-					}
-					port = freePort
-				}
-
-				_, startErr := nocloudnetsvc.Spawn(ctx, nocloudnetsvc.Config{
-					CloudInitDir: cloudInitDir,
-					Port:         port,
-					Host:         gateway,
-					LogFile:      logFile,
-					KillAfter:    nocloudRespawnKillAfter,
-				})
-				if startErr != nil {
-					slog.Warn("Failed to start/restart nocloud-net server", "vm", v.Name, "error", startErr)
-				}
-			}
-		}
+	// Network info is required — the VM record must have it pre-loaded.
+	if v.Network == nil {
+		return fmt.Errorf("network info is required for VM respawn")
+	}
+	if v.Binary == nil || v.Binary.Path == "" {
+		return fmt.Errorf("binary info is required for VM respawn")
+	}
+	if v.KernelID == "" || v.Kernel == nil || v.Kernel.Path == "" {
+		return fmt.Errorf("kernel info is required for VM respawn")
+	}
+	if v.RootfsPath == "" {
+		return fmt.Errorf("rootfs path is required for VM respawn")
 	}
 
-	// ── Force-kill any remaining Firecracker process (matches Python) ──
+	// ── Force-kill any remaining Firecracker process ──
 	if v.PID > 0 && system.IsProcessRunning(v.PID) {
-		proc, err := os.FindProcess(v.PID)
-		if err == nil {
-			_ = proc.Signal(syscall.SIGTERM)
-			time.Sleep(100 * time.Millisecond)
-			if system.IsProcessRunning(v.PID) {
-				_ = proc.Kill()
-				time.Sleep(50 * time.Millisecond)
-			}
-		}
+		handler := system.NewProcessSignalHandler(system.ProcessSignalHandlerConfig{
+			PID:             v.PID,
+			GracefulTimeout: 100 * time.Millisecond,
+			KillTimeout:     50 * time.Millisecond,
+		})
+		handler.GracefulShutdown(nil)
 	}
 
-	// ── Re-ensure TAP device exists before spawning (matches Python) ──
-	if v.TapDevice != "" {
-		// Resolve network info
-		var bridgeName, netID, subnet, gateway string
-		if v.Network != nil {
-			bridgeName = v.Network.Bridge
-			netID = v.Network.ID
-			subnet = v.Network.Subnet
-			gateway = v.Network.IPv4Gateway
+	// ── Batch: bridge, NAT, TAP, then ARP flush ──
+	if v.TapDevice != "" && v.Network.Bridge != "" {
+		bridgeAddr, calcErr := network.ComputeBridgeAddress(v.Network.IPv4Gateway, v.Network.Subnet)
+		if calcErr != nil {
+			slog.Warn("Failed to compute bridge address during respawn", "vm", v.Name, "error", calcErr)
+		} else {
+			op.Services.Network.WithBatch(ctx, func() {
+				if err := op.Services.Network.EnsureBridge(ctx, v.Network.Bridge, bridgeAddr); err != nil {
+					slog.Warn("Failed to ensure bridge during respawn", "bridge", v.Network.Bridge, "error", err)
+					return
+				}
+				if v.Network.NATEnabled {
+					natGateways := network.NatGatewaysList(v.Network)
+					if len(natGateways) > 0 {
+						if err := op.Services.Network.EnsureNAT(ctx, v.Network.Bridge,
+							natGateways, v.Network.Subnet, v.Network.ID); err != nil {
+							slog.Warn("Failed to ensure NAT rules during respawn",
+								"vm", v.Name, "error", err)
+						}
+					}
+				}
+				if err := op.Services.Network.EnsureTap(ctx, v.TapDevice, v.Network.Bridge, v.Network.ID, v.Network.Subnet); err != nil {
+					slog.Warn("Failed to ensure TAP during respawn", "tap", v.TapDevice, "error", err)
+				}
+			})
 		}
-		if bridgeName == "" {
-			netw, _ := op.Repos.Network.Get(ctx, v.NetworkID)
-			if netw != nil {
-				bridgeName = netw.Bridge
-				netID = netw.ID
-				subnet = netw.Subnet
-				gateway = netw.IPv4Gateway
-			}
-		}
-		if bridgeName != "" {
-			netSvc := op.Services.Network
-			bridgeAddr, calcErr := network.ComputeBridgeAddress(gateway, subnet)
-			if calcErr != nil {
-				slog.Warn("Failed to compute bridge address during respawn", "vm", v.Name, "error", calcErr)
-			} else {
-				_ = netSvc.EnsureBridge(ctx, bridgeName, bridgeAddr)
-			}
-			_ = netSvc.EnsureTap(ctx, v.TapDevice, bridgeName, netID, subnet)
-			infranet.FlushARP(ctx, bridgeName)
-		}
-	}
-
-	// ── Build network config ──
-	binaryPath := ""
-	if v.BinaryID != "" {
-		if v.Binary != nil {
-			if v.Binary.Path != "" {
-				binaryPath = v.Binary.Path
-			}
-		}
-		if binaryPath == "" {
-			bin, err := op.Repos.Binary.Get(ctx, v.BinaryID)
-			if err == nil && bin != nil {
-				binaryPath = bin.Path
-			}
-		}
-	}
-	if binaryPath == "" {
-		defaultBin, _ := op.Repos.Binary.GetDefault(ctx, "firecracker")
-		if defaultBin != nil {
-			binaryPath = defaultBin.Path
-		}
-	}
-	if binaryPath == "" {
-		return fmt.Errorf("no binary path could be resolved for firecracker")
-	}
-
-	kernelPath := ""
-	if v.KernelID != "" {
-		if v.Kernel != nil {
-			if v.Kernel.Path != "" {
-				kernelPath = v.Kernel.Path
-			}
-		}
-		if kernelPath == "" {
-			krnl, err := op.Repos.Kernel.Get(ctx, v.KernelID)
-			if err == nil && krnl != nil {
-				kernelPath = krnl.Path
-			}
-		}
-	}
-
-	rootfsSuffix := v.RootfsSuffix
-	if rootfsSuffix == "" {
-		return fmt.Errorf("rootfs suffix is required")
-	}
-	rootfsPath := filepath.Join(vmDir, "rootfs."+rootfsSuffix)
-	if v.RootfsPath != "" {
-		rootfsPath = v.RootfsPath
-	}
-
-	networkGateway := ""
-	if v.NetworkID != "" {
-		if v.Network != nil {
-			networkGateway = v.Network.IPv4Gateway
-		}
-		if networkGateway == "" {
-			netw, _ := op.Repos.Network.Get(ctx, v.NetworkID)
-			if netw != nil {
-				networkGateway = netw.IPv4Gateway
-			}
-		}
+		infranet.FlushARP(ctx, v.Network.Bridge)
 	}
 
 	fcConfig := &model.FirecrackerConfig{
 		VMDir:                vmDir,
-		RootfsPath:           rootfsPath,
-		BinaryPath:           binaryPath,
-		KernelPath:           kernelPath,
+		RootfsPath:           v.RootfsPath,
+		BinaryPath:           v.Binary.Path,
+		KernelPath:           v.Kernel.Path,
 		VCPUCount:            v.VCPUCount,
 		MemSizeMiB:           v.MemSizeMiB,
 		GuestIP:              v.IPv4,
 		GuestMAC:             v.MAC,
 		TapName:              v.TapDevice,
-		NetworkGateway:       networkGateway,
+		NetworkGateway:       v.Network.IPv4Gateway,
 		PCIEnabled:           v.PCIEnabled,
 		NestedVirt:           v.NestedVirt,
 		EnableConsole:        v.EnableConsole,
 		EnableLogging:        v.EnableLogging,
 		EnableMetrics:        v.EnableMetrics,
-		LogLevel:             "Info",
-		LogFilename:          "firecracker.log",
-		SerialOutputFilename: "serial.out",
-		MetricsFilename:      "metrics.log",
-		APISocketFilename:    "api.socket",
-		PIDFilename:          "firecracker.pid",
-		ConfigFilename:       "firecracker.json",
+		LogLevel:             v.LogLevel,
+		LogFilename:          v.LogFilename,
+		SerialOutputFilename: v.SerialOutputFilename,
+		MetricsFilename:      v.MetricsFilename,
+		APISocketFilename:    v.APISocketFilename,
+		PIDFilename:          v.PIDFilename,
+		ConfigFilename:       v.ConfigFilename,
+		BootArgs:             v.BootArgs,
+		LSMFlags:             v.LSMFlags,
 		SnapshotMode:         snapshotMode,
-	}
-	if v.BootArgs != "" {
-		fcConfig.BootArgs = v.BootArgs
-	}
-	if v.LSMFlags != "" {
-		fcConfig.LSMFlags = v.LSMFlags
 	}
 
 	// ── Console relay setup (before spawn) ──
 	var consoleController *console.Controller
 	if v.EnableConsole {
 		consoleController = console.NewController(v.ID, vmDir, v.Name,
-			consolesvc.DefaultConsolePIDFilename, consolesvc.DefaultConsoleSocketFilename)
+			v.ConsolePIDFilename, v.ConsoleSocketFilename)
 		ptyFD, ptyErr := consoleController.CreatePTY()
 		if ptyErr != nil {
 			slog.Warn("Console PTY creation failed during respawn", "vm", v.Name, "error", ptyErr)
@@ -1397,12 +1214,14 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snap
 		}
 	}
 
+	// ── Write config and spawn ──
 	spawner := vm.NewFirecrackerSpawner(fcConfig)
-	spawner.WriteToFile()
-
+	if err := spawner.WriteToFile(); err != nil {
+		return fmt.Errorf("write firecracker config: %w", err)
+	}
 	if err := spawner.Spawn(); err != nil {
 		slog.Warn("Failed to respawn Firecracker", "vm", v.Name, "error", err)
-		return nil
+		return err
 	}
 
 	// ── Start console relay after spawn ──
@@ -1416,19 +1235,26 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snap
 		}
 	}
 
-	// Python: targeted DB updates, not full upsert.
+	// ── Update DB and in-memory VM object ──
 	pid := spawner.PID
 	pst := spawner.ProcessStartTime
-	_ = op.Repos.VM.UpdateProcessInfo(ctx, v.ID, pid, pst)
+	if err := op.Repos.VM.UpdateProcessInfo(ctx, v.ID, pid, pst); err != nil {
+		slog.Warn("Failed to update VM process info", "vm", v.Name, "error", err)
+	}
 
 	newStatus := model.VMStatusRunning
 	if snapshotMode {
 		newStatus = model.VMStatusPaused
 	}
-	_ = op.Repos.VM.UpdateStatus(ctx, v.ID, newStatus)
+	if err := op.Repos.VM.UpdateStatus(ctx, v.ID, newStatus); err != nil {
+		slog.Warn("Failed to update VM status", "vm", v.Name, "error", err)
+	}
 
-	// Update in-memory VM object
-	v.PID = ptr.SafeDerefInt(pid)
+	if pid != nil {
+		v.PID = *pid
+	} else {
+		v.PID = 0
+	}
 	v.ProcessStartTime = pst
 	v.Status = newStatus
 
@@ -1616,8 +1442,7 @@ func (op *Operation) VMReboot(ctx context.Context, input inputs.VMInput) *errs.B
 		return &errs.BatchResult{Items: results}
 	}
 
-	for _, v := range resolved.VMs {
-		vmLocal := v
+	for _, vmLocal := range resolved.VMs {
 
 		// Stop the VM first (kills the firecracker process)
 		controller, ctrlErr := vm.NewController(ctx, vmLocal, repo)
@@ -1680,8 +1505,7 @@ func (op *Operation) VMPause(ctx context.Context, input inputs.VMInput) *errs.Ba
 		return &errs.BatchResult{Items: results}
 	}
 
-	for _, v := range resolved.VMs {
-		vmLocal := v
+	for _, vmLocal := range resolved.VMs {
 
 		controller, ctrlErr := vm.NewController(ctx, vmLocal, repo)
 		if ctrlErr != nil {
@@ -1741,8 +1565,7 @@ func (op *Operation) VMResume(ctx context.Context, input inputs.VMInput) *errs.B
 		return &errs.BatchResult{Items: results}
 	}
 
-	for _, v := range resolved.VMs {
-		vmLocal := v
+	for _, vmLocal := range resolved.VMs {
 
 		controller, ctrlErr := vm.NewController(ctx, vmLocal, repo)
 		if ctrlErr != nil {
@@ -1849,7 +1672,7 @@ func (op *Operation) VMAttachVolume(
 		if vmItem.BinaryID != "" {
 			bin, _ := op.Repos.Binary.Get(ctx, vmItem.BinaryID)
 			if bin != nil && bin.Version != "" {
-				if !version.IsFirecrackerVersionAtLeast(bin.Version, "1.16") {
+				if !version.IsAtLeastFor(bin.Version, version.FeatureHotplug) {
 					return &errs.DomainError{
 						Code: errs.CodeBinaryVersionGate,
 						Message: fmt.Sprintf(
@@ -1972,7 +1795,7 @@ func (op *Operation) VMDetachVolume(
 		if vmItem.BinaryID != "" {
 			bin, _ := op.Repos.Binary.Get(ctx, vmItem.BinaryID)
 			if bin != nil && bin.Version != "" {
-				if !version.IsFirecrackerVersionAtLeast(bin.Version, "1.16") {
+				if !version.IsAtLeastFor(bin.Version, version.FeatureHotUnplug) {
 					return &errs.DomainError{
 						Code: errs.CodeBinaryVersionGate,
 						Message: fmt.Sprintf(
@@ -2087,14 +1910,26 @@ func (op *Operation) VMImport(
 func (op *Operation) VMExport(ctx context.Context, input inputs.VMInput) (*inputs.VMExportConfig, error) {
 	vmItem, err := op.VMGet(ctx, input)
 	if err != nil {
-		return nil, fmt.Errorf("VM not found: %w", err)
+		return nil, fmt.Errorf("vm not found: %w", err)
 	}
 
 	// Resolve related asset metadata (matches Python's Repository(db).get(vm.image_id) etc.)
-	image, _ := op.Repos.Image.Get(ctx, vmItem.ImageID)
-	kernel, _ := op.Repos.Kernel.Get(ctx, vmItem.KernelID)
-	binary, _ := op.Repos.Binary.Get(ctx, vmItem.BinaryID)
-	netItem, _ := op.Repos.Network.Get(ctx, vmItem.NetworkID)
+	image, err := op.Repos.Image.Get(ctx, vmItem.ImageID)
+	if err != nil {
+		slog.Warn("failed to resolve image for export", "vm", vmItem.Name, "image_id", vmItem.ImageID, "error", err)
+	}
+	kernel, err := op.Repos.Kernel.Get(ctx, vmItem.KernelID)
+	if err != nil {
+		slog.Warn("failed to resolve kernel for export", "vm", vmItem.Name, "kernel_id", vmItem.KernelID, "error", err)
+	}
+	binary, err := op.Repos.Binary.Get(ctx, vmItem.BinaryID)
+	if err != nil {
+		slog.Warn("failed to resolve binary for export", "vm", vmItem.Name, "binary_id", vmItem.BinaryID, "error", err)
+	}
+	netItem, err := op.Repos.Network.Get(ctx, vmItem.NetworkID)
+	if err != nil {
+		slog.Warn("failed to resolve network for export", "vm", vmItem.Name, "network_id", vmItem.NetworkID, "error", err)
+	}
 
 	diskSize := ""
 	if vmItem.DiskSizeMiB > 0 {
@@ -2113,62 +1948,45 @@ func (op *Operation) VMExport(ctx context.Context, input inputs.VMInput) (*input
 		nocloudPort = *vmItem.NocloudNetPort
 	}
 
-	// Convert string values to *string for export config (which uses str | None)
-	var imageType, imageArch *string
+	// Resolve values from related assets (nil-safe: if asset not found, fields stay empty)
+	imageType := ""
+	imageArch := ""
 	if image != nil {
-		imageType = &image.Type
-		imageArch = &image.Arch
+		imageType = image.Type
+		imageArch = image.Arch
 	}
-	var diskSizePtr *string
-	if diskSize != "" {
-		diskSizePtr = &diskSize
-	}
-	var kernelVersion, kernelArch, kernelType *string
+
+	kernelVersion := ""
+	kernelArch := ""
+	kernelType := ""
 	if kernel != nil {
-		kernelVersion = &kernel.Version
-		kernelArch = &kernel.Arch
-		kernelType = &kernel.Type
+		kernelVersion = kernel.Version
+		kernelArch = kernel.Arch
+		kernelType = kernel.Type
 	}
-	var binVersionPtr *string
-	if binVersion != "" {
-		binVersionPtr = &binVersion
-	}
-	var netName, netSubnet, netGateway *string
-	var netNATGateways string
-	netNATEnabled := false
+
+	netName := ""
+	netSubnet := ""
+	netGateway := ""
+	netNATGateways := ""
+	var netNATEnabled *bool
 	if netItem != nil {
-		netName = &netItem.Name
-		netSubnet = &netItem.Subnet
-		netGateway = &netItem.IPv4Gateway
+		netName = netItem.Name
+		netSubnet = netItem.Subnet
+		netGateway = netItem.IPv4Gateway
 		gws := network.NatGatewaysList(netItem)
 		netNATGateways = strings.Join(gws, ",")
-		netNATEnabled = netItem.NATEnabled
-	}
-	var ipPtr, macPtr *string
-	if vmItem.IPv4 != "" {
-		ipPtr = &vmItem.IPv4
-	}
-	if vmItem.MAC != "" {
-		macPtr = &vmItem.MAC
+		netNATEnabled = &netItem.NATEnabled
 	}
 
 	// Convert cpu_config to JSON string (matches Python: json.dumps(vm.cpu_config) if isinstance(vm.cpu_config, dict) else vm.cpu_config)
-	var cpuConfigStr *string
+	cpuConfigStr := ""
 	if vmItem.CPUConfig != nil {
 		if data, err := json.Marshal(vmItem.CPUConfig); err == nil {
-			s := string(data)
-			cpuConfigStr = &s
-		} else {
-			s := fmt.Sprintf("%v", vmItem.CPUConfig)
-			cpuConfigStr = &s
+			cpuConfigStr = string(data)
 		}
 	}
 
-	// Convert remaining string/primitive values to pointer types for export config
-	var cloudInitModePtr *string
-	if vmItem.CloudInitMode != "" {
-		cloudInitModePtr = &vmItem.CloudInitMode
-	}
 	rootUser := "root"
 	enableAPISocket := true
 
@@ -2176,13 +1994,13 @@ func (op *Operation) VMExport(ctx context.Context, input inputs.VMInput) (*input
 		SchemaVersion: "1.0",
 		Name:          vmItem.Name,
 		Compute: inputs.VMExportComputeConfig{
-			VCPUs: &vmItem.VCPUCount,
-			Mem:   &vmItem.MemSizeMiB,
+			VCPUs: vmItem.VCPUCount,
+			Mem:   vmItem.MemSizeMiB,
 		},
 		Image: inputs.VMExportImageConfig{
 			Type:     imageType,
 			Arch:     imageArch,
-			DiskSize: diskSizePtr,
+			DiskSize: diskSize,
 		},
 		Kernel: inputs.VMExportKernelConfig{
 			Version: kernelVersion,
@@ -2191,16 +2009,16 @@ func (op *Operation) VMExport(ctx context.Context, input inputs.VMInput) (*input
 		},
 		Binary: inputs.VMExportBinaryConfig{
 			Name:    binName,
-			Version: binVersionPtr,
+			Version: binVersion,
 		},
 		Network: inputs.VMExportNetworkConfig{
 			Name:        netName,
 			Subnet:      netSubnet,
 			IPv4Gateway: netGateway,
-			NATGateways: &netNATGateways,
-			NATEnabled:  &netNATEnabled,
-			IP:          ipPtr,
-			MAC:         macPtr,
+			NATGateways: netNATGateways,
+			NATEnabled:  netNATEnabled,
+			IP:          vmItem.IPv4,
+			MAC:         vmItem.MAC,
 		},
 		Boot: inputs.VMExportBootConfig{
 			Args:          vmItem.BootArgs,
@@ -2214,13 +2032,13 @@ func (op *Operation) VMExport(ctx context.Context, input inputs.VMInput) (*input
 			CPUConfig:       cpuConfigStr,
 		},
 		CloudInit: inputs.VMExportCloudInitConfig{
-			Mode:           cloudInitModePtr,
-			User:           &rootUser,
-			NocloudNetPort: &nocloudPort,
+			Mode:           vmItem.CloudInitMode,
+			User:           rootUser,
+			NocloudNetPort: nocloudPort,
 		},
 	}
 
-	op.AuditLog.LogOperation("vm.export", map[string]interface{}{"name": vmItem.Name}, "")
+	op.AuditLog.LogOperation("vm.export", map[string]any{"name": vmItem.Name}, "")
 
 	return cfg, nil
 }

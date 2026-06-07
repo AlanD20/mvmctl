@@ -10,10 +10,12 @@ import (
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
+	infraptr "mvmctl/internal/infra/ptr"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // vmColumns defines the local listing columns for VMs.
@@ -101,7 +103,7 @@ func newVMListCmd(op *api.Operation) *cobra.Command {
 }
 
 func runVMList(op *api.Operation, cmd *cobra.Command, jsonOutput, longOutput bool) error {
-	vms := op.VMList(cmd.Context(), nil)
+	vms := op.VMList(cmd.Context())
 
 	if jsonOutput {
 		b, _ := json.MarshalIndent(vms, "", "  ")
@@ -133,25 +135,10 @@ func newVMpsCmd(op *api.Operation) *cobra.Command {
 
 func runVMps(op *api.Operation, cmd *cobra.Command, jsonOutput bool) error {
 	// Server-side filtering matching Python's list_all(status=[...])
-	vms := op.VMList(cmd.Context(), []string{string(model.VMStatusStarting), string(model.VMStatusRunning)})
+	vms := op.VMList(cmd.Context(), string(model.VMStatusStarting), string(model.VMStatusRunning))
 
 	if jsonOutput {
-		data := make([]map[string]any, 0, len(vms))
-		for _, v := range vms {
-			data = append(data, map[string]any{
-				"name":          v.Name,
-				"status":        v.Status,
-				"pid":           v.PID,
-				"ipv4":          v.IPv4,
-				"vcpu_count":    v.VCPUCount,
-				"mem_size_mib":  v.MemSizeMiB,
-				"disk_size_mib": v.DiskSizeMiB,
-				"image_id":      v.ImageID,
-				"kernel_id":     v.KernelID,
-				"created_at":    v.CreatedAt,
-			})
-		}
-		b, _ := json.MarshalIndent(data, "", "  ")
+		b, _ := json.MarshalIndent(vms, "", "  ")
 		fmt.Println(string(b))
 		return nil
 	}
@@ -161,29 +148,8 @@ func runVMps(op *api.Operation, cmd *cobra.Command, jsonOutput bool) error {
 		return nil
 	}
 
-	rows := make([][]string, 0, len(vms))
-	for _, v := range vms {
-		ipStr := v.IPv4
-		if ipStr == "" {
-			ipStr = "-"
-		}
-		rows = append(rows, []string{
-			v.Name,
-			string(v.Status),
-			ipStr,
-			fmt.Sprintf("%d", v.VCPUCount),
-			fmt.Sprintf("%d", v.MemSizeMiB),
-			fmt.Sprintf("%d", v.DiskSizeMiB),
-			common.Cli.FormatID(v.ImageID),
-			common.Cli.FormatID(v.KernelID),
-			common.Cli.FormatTimestamp(v.CreatedAt, "relative"),
-		})
-	}
-
-	common.Cli.Table(
-		[]string{"Name", "Status", "IPv4", "vCPUs", "Mem(MiB)", "Disk(MiB)", "Image", "Kernel", "Created"},
-		rows,
-	)
+	style := common.Cli.ResolveListingStyle(cmd.Context(), op, false)
+	common.RenderListing(vms, vmColumns, style)
 	return nil
 }
 
@@ -219,6 +185,7 @@ func newVMCreateCmd(op *api.Operation) *cobra.Command {
 		atomic          bool
 		skipCleanup     bool
 		skipDeblob      bool
+		force           bool
 		volume          []string
 	)
 
@@ -227,12 +194,139 @@ func newVMCreateCmd(op *api.Operation) *cobra.Command {
 		Short: "Create and start a new Firecracker VM.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runVMCreate(op, cmd, args[0],
-				image, kernel, vcpus, mem, diskSize, ip, networkName, mac,
-				sshKey, userData, cloudInitMode, nocloudNetPort, user,
-				noPCI, nestedVirt, noNestedVirt, cpuTemplate, noConsole, bootArgs, lsmFlags,
-				enableLogging, noEnableLogging, enableMetrics, noEnableMetrics, count,
-				atomic, skipCleanup, skipDeblob, volume)
+			name := args[0]
+
+			if skipCleanup && !force {
+				cleanupConfirmed, pErr := common.Cli.PromptConfirm(
+					cmd.Context(),
+					"--skip-cleanup is set: if creation fails, resources will be left behind and must be cleaned manually. Continue?",
+					true,
+				)
+				if pErr != nil {
+					return pErr
+				}
+				if !cleanupConfirmed {
+					common.Cli.Info("Aborted")
+					return nil
+				}
+			}
+
+			var sshKeyList []string
+			if sshKey != "" {
+				sshKeyList = strings.Split(sshKey, ",")
+			}
+
+			effectiveCount := max(count, 1)
+			if effectiveCount > 1 && len(volume) > 0 {
+				return fmt.Errorf("--count and --volume are mutually exclusive")
+			}
+
+			prog := common.NewProgress()
+			prog.Start("Creating VM...")
+			defer prog.Stop()
+
+			if cpuTemplate != "" {
+				fi, err := os.Stat(cpuTemplate)
+				if err != nil {
+					if os.IsNotExist(err) {
+						return fmt.Errorf("invalid value for '--cpu-template': path '%s' does not exist", cpuTemplate)
+					}
+					return fmt.Errorf("invalid value for '--cpu-template': %w", err)
+				}
+				if fi.IsDir() {
+					return fmt.Errorf("invalid value for '--cpu-template': path '%s' is a directory", cpuTemplate)
+				}
+			}
+
+			input := inputs.VMCreateInput{
+				Name:    name,
+				SSHKeys: sshKeyList,
+				NoConsole:         noConsole,
+				BootArgs:          bootArgs,
+				LSMFlags:          lsmFlags,
+				CPUTemplate:       cpuTemplate,
+				MemSizeMib:        mem,
+				DiskSize:          diskSize,
+				SkipCleanup:       skipCleanup,
+				SkipDeblob:        skipDeblob,
+				Atomic:            atomic,
+				Volumes:           volume,
+			}
+
+			if cmd.Flags().Changed("image") {
+				input.Image = infraptr.Ptr(image)
+			}
+			if cmd.Flags().Changed("kernel") {
+				input.KernelID = infraptr.Ptr(kernel)
+			}
+			if cmd.Flags().Changed("vcpus") {
+				input.VCPUCount = infraptr.Ptr(vcpus)
+			}
+			if cmd.Flags().Changed("ip") {
+				input.RequestedGuestIP = infraptr.Ptr(ip)
+			}
+			if cmd.Flags().Changed("network") {
+				input.NetworkName = infraptr.Ptr(networkName)
+			}
+			if cmd.Flags().Changed("mac") {
+				input.RequestedGuestMAC = infraptr.Ptr(mac)
+			}
+			if cmd.Flags().Changed("user") {
+				input.User = infraptr.Ptr(user)
+			}
+			if cmd.Flags().Changed("cloud-init-mode") {
+				input.CloudInitMode = infraptr.Ptr(cloudInitMode)
+			}
+			if cmd.Flags().Changed("cloudinit-config") {
+				input.CustomCloudInitConfig = infraptr.Ptr(userData)
+			}
+			if cmd.Flags().Changed("nocloud-net-port") {
+				input.NocloudNetPort = infraptr.Ptr(nocloudNetPort)
+			}
+			if cmd.Flags().Changed("count") {
+				input.Count = infraptr.Ptr(effectiveCount)
+			}
+			if cmd.Flags().Changed("nested-virt") {
+				input.NestedVirt = infraptr.Ptr(nestedVirt)
+			} else if cmd.Flags().Changed("no-nested-virt") {
+				input.NestedVirt = infraptr.Ptr(false)
+			}
+			if cmd.Flags().Changed("enable-logging") {
+				input.EnableLogging = infraptr.Ptr(enableLogging)
+			} else if cmd.Flags().Changed("no-enable-logging") {
+				input.EnableLogging = infraptr.Ptr(false)
+			}
+			if cmd.Flags().Changed("enable-metrics") {
+				input.EnableMetrics = infraptr.Ptr(enableMetrics)
+			} else if cmd.Flags().Changed("no-enable-metrics") {
+				input.EnableMetrics = infraptr.Ptr(false)
+			}
+			if cmd.Flags().Changed("no-pci") {
+				input.PCIEnabled = infraptr.Ptr(false)
+			}
+
+			vms, err := op.VMCreate(cmd.Context(), input, func(e event.Progress) {
+				if e.Message != "" {
+					prog.UpdateText(e.Message)
+				}
+			})
+			if err != nil {
+				return fmt.Errorf("create VMs: %w", err)
+			}
+
+			if len(vms) == 0 {
+				return fmt.Errorf("no VMs returned")
+			}
+
+			names := make([]string, len(vms))
+			for i, v := range vms {
+				names[i] = v.Name
+			}
+			common.Cli.Success(fmt.Sprintf("Created: %s", strings.Join(names, ", ")))
+			if input.NestedVirt != nil && *input.NestedVirt {
+				common.Cli.Info("Nested virtualization: enabled")
+			}
+			return nil
 		},
 	}
 
@@ -240,15 +334,11 @@ func newVMCreateCmd(op *api.Operation) *cobra.Command {
 		StringVar(&image, "image", "", "Image name, type:version (e.g. ubuntu:24.04), short ID, or path to .ext4 file")
 	cmd.Flags().StringVar(&kernel, "kernel", "", "Kernel short ID or path to vmlinux file")
 	cmd.Flags().IntVar(&vcpus, "vcpus", 0, "Number of vCPUs (default: from user config)")
-	cmd.Flags().IntVar(&vcpus, "cpus", 0, "Number of vCPUs (alias for --vcpus)")
 	cmd.Flags().StringVar(&mem, "mem", "", "Memory in MiB or GiB (e.g. 512M, 1G, 4096). Default: from user config")
-	cmd.Flags().StringVar(&mem, "memory", "", "Memory size (alias for --mem)")
 	cmd.Flags().
 		StringVarP(&diskSize, "disk-size", "s", "", "Rootfs disk size in MiB/GiB (e.g., 512M=512MiB, 1G=1GiB). Default from config.")
 	cmd.Flags().StringVar(&ip, "ip", "", "Guest IP (auto-assigned if omitted)")
 	cmd.Flags().StringVar(&networkName, "network", "", "Named network to use")
-	_ = cmd.Flags().String("net", "", "Named network to use")
-	_ = cmd.Flags().MarkHidden("net") // Python shows --network/--net as one combined option
 	cmd.Flags().StringVar(&mac, "mac", "", "Custom MAC address (auto-generated if omitted)")
 	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH public key name (from key cache) or file path")
 	cmd.Flags().StringVar(&userData, "cloudinit-config", "", "Path to custom cloud-init configuration file")
@@ -288,213 +378,20 @@ func newVMCreateCmd(op *api.Operation) *cobra.Command {
 	cmd.Flags().
 		BoolVar(&skipDeblob, "skip-deblob", false, "Skip debloat operations on rootfs (removes OS caches, cleans package manager caches)")
 	cmd.Flags().StringArrayVarP(&volume, "volume", "v", nil, "Attach volume(s) to the VM (can specify multiple times)")
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation prompts")
+	cmd.Flags().SetNormalizeFunc(func(f *pflag.FlagSet, name string) pflag.NormalizedName {
+		switch name {
+		case "cpus":
+			name = "vcpus"
+		case "memory":
+			name = "mem"
+		case "net":
+			name = "network"
+		}
+		return pflag.NormalizedName(name)
+	})
 
 	return cmd
-}
-
-func runVMCreate(
-	op *api.Operation, cmd *cobra.Command,
-	name, image, kernel string, vcpus int, mem, diskSize, ip, networkName, mac,
-	sshKey, userData, cloudInitMode string, nocloudNetPort int, user string,
-	noPCI bool, nestedVirt, noNestedVirt bool, cpuTemplate string, noConsole bool, bootArgs, lsmFlags string,
-	enableLogging, noEnableLogging, enableMetrics, noEnableMetrics bool, count int,
-	atomic, skipCleanup, skipDeblob bool, volume []string,
-) error {
-	if skipCleanup {
-		// Python: typer.confirm() defaults to True (Enter = Yes)
-		cleanupConfirmed, pErr := common.Cli.PromptConfirm(
-			cmd.Context(),
-			"--skip-cleanup is set: if creation fails, resources will be left behind and must be cleaned manually. Continue?",
-			true,
-		)
-		if pErr != nil {
-			return pErr
-		}
-		if !cleanupConfirmed {
-			common.Cli.Info("Aborted")
-			return nil // exit code 0, matching Python's raise typer.Exit(code=0)
-		}
-	}
-
-	// Parse SSH keys
-	var sshKeyList []string
-	if sshKey != "" {
-		sshKeyList = strings.Split(sshKey, ",")
-	}
-
-	// Handle --net hidden alias for --network (Python shows --network/--net as combined option)
-	if networkName == "" {
-		if netVal, err := cmd.Flags().GetString("net"); err == nil && netVal != "" {
-			networkName = netVal
-		}
-	}
-
-	// --count and --volume are mutually exclusive
-	effectiveCount := max(count, 1)
-	if effectiveCount > 1 && len(volume) > 0 {
-		return fmt.Errorf("--count and --volume are mutually exclusive")
-	}
-
-	// Show progress for long-running create operations
-	prog := common.NewProgress()
-	prog.Start("Creating VM...")
-	defer prog.Stop()
-
-	baseName := name
-
-	// Validate --cpu-template file existence (matching Python's Click path validation:
-	// `exists=True, dir_okay=False` generates error messages in this exact format).
-	if cpuTemplate != "" {
-		fi, err := os.Stat(cpuTemplate)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return fmt.Errorf("Invalid value for '--cpu-template': Path '%s' does not exist.", cpuTemplate)
-			}
-			return fmt.Errorf("Invalid value for '--cpu-template': %s", err.Error())
-		}
-		if fi.IsDir() {
-			return fmt.Errorf("Invalid value for '--cpu-template': Path '%s' is a directory.", cpuTemplate)
-		}
-	}
-
-	// Parse tri-state flags using single flag pattern (--flag/--no-flag)
-	// Mutually exclusive check is handled by MarkFlagsMutuallyExclusive
-	var nestedVirtPtr *bool
-	if nestedVirt {
-		v := true
-		nestedVirtPtr = &v
-	} else if noNestedVirt {
-		v := false
-		nestedVirtPtr = &v
-	}
-
-	var enableLoggingPtr *bool
-	if enableLogging {
-		v := true
-		enableLoggingPtr = &v
-	} else if noEnableLogging {
-		v := false
-		enableLoggingPtr = &v
-	}
-
-	var enableMetricsPtr *bool
-	if enableMetrics {
-		v := true
-		enableMetricsPtr = &v
-	} else if noEnableMetrics {
-		v := false
-		enableMetricsPtr = &v
-	}
-
-	// Build input with all parsed fields
-	var vcpuPtr *int
-	if vcpus > 0 {
-		vcpuPtr = &vcpus
-	}
-	// mem, diskSize — value types, zero value means "use default"
-	var ipPtr *string
-	if ip != "" {
-		ipPtr = &ip
-	}
-	var networkPtr *string
-	if networkName != "" {
-		networkPtr = &networkName
-	}
-	var macPtr *string
-	if mac != "" {
-		macPtr = &mac
-	}
-	var userPtr *string
-	if user != "" {
-		userPtr = &user
-	}
-	var ciModePtr *string
-	if cloudInitMode != "" {
-		ciModePtr = &cloudInitMode
-	}
-	var nocloudPtr *int
-	if nocloudNetPort != 0 {
-		nocloudPtr = &nocloudNetPort
-	}
-	// lsmFlags, cpuTemplate — value types, zero value means "use default"
-	var imagePtr *string
-	if image != "" {
-		imagePtr = &image
-	}
-	var kernelPtr *string
-	if kernel != "" {
-		kernelPtr = &kernel
-	}
-	var userDataPtr *string
-	if userData != "" {
-		userDataPtr = &userData
-	}
-
-	// --count default matches Python: None (nil) when not set, so builder uses config defaults.
-	// Python: count: int | None = typer.Option(None, "--count", "-c", ...)
-	// If user explicitly passes --count 1, use 1 (not nil). If --count not specified, use nil.
-	var countPtr *int
-	if cmd.Flags().Changed("count") {
-		countPtr = &effectiveCount
-	} else if effectiveCount > 1 {
-		countPtr = &effectiveCount
-	}
-	pciEnabled := !noPCI
-
-	input := inputs.VMCreateInput{
-		Name:              baseName,
-		Image:             imagePtr,
-		KernelID:          kernelPtr,
-		VCPUCount:         vcpuPtr,
-		MemSizeMib:        mem,
-		DiskSize:          diskSize,
-		RequestedGuestIP:  ipPtr,
-		NetworkName:       networkPtr,
-		SSHKeys:           sshKeyList,
-		User:              userPtr,
-		CloudInitMode:     ciModePtr,
-		NoConsole:         noConsole,
-		NestedVirt:        nestedVirtPtr,
-		PCIEnabled:        &pciEnabled,
-		BootArgs:          bootArgs,
-		LSMFlags:          lsmFlags,
-		RequestedGuestMAC: macPtr,
-		CustomCloudInitConfig: userDataPtr,
-		NocloudNetPort:    nocloudPtr,
-		CPUTemplate:       cpuTemplate,
-		Count:             countPtr,
-		Atomic:            atomic,
-		SkipCleanup:       skipCleanup,
-		SkipDeblob:        skipDeblob,
-		Volumes:           volume,
-		EnableLogging:     enableLoggingPtr,
-		EnableMetrics:     enableMetricsPtr,
-	}
-
-	vms, err := op.VMCreate(cmd.Context(), input, func(e event.Progress) {
-		if e.Message != "" {
-			prog.UpdateText(e.Message)
-		}
-	})
-	if err != nil {
-		return fmt.Errorf("create VMs: %w", err)
-	}
-
-	if len(vms) == 0 {
-		return fmt.Errorf("no VMs returned")
-	}
-
-	names := make([]string, len(vms))
-	for i, v := range vms {
-		names[i] = v.Name
-	}
-	common.Cli.Success(fmt.Sprintf("Created: %s", strings.Join(names, ", ")))
-	// Match Python's `if nested_virt:` — truthy check on the tri-state value.
-	// Python has three states: not-set (None), True, False. Prints only when True.
-	if nestedVirtPtr != nil && *nestedVirtPtr {
-		common.Cli.Info("Nested virtualization: enabled")
-	}
-	return nil
 }
 
 // ─── rm (remove) ─────────────────────────────────────────────────────────────
@@ -555,26 +452,25 @@ func runVMRemove(op *api.Operation, cmd *cobra.Command, identifiers []string, fo
 
 func newVMStartCmd(op *api.Operation) *cobra.Command {
 	return &cobra.Command{
-		Use:               "start [id]",
-		Short:             "Start a stopped VM.",
-		Args:              cobra.ExactArgs(1),
+		Use:               "start [identifiers...]",
+		Short:             "Start one or more stopped VMs.",
+		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id := args[0]
-			startResult := op.VMStart(cmd.Context(), inputs.VMInput{Identifiers: []string{id}})
+			startResult := op.VMStart(cmd.Context(), inputs.VMInput{Identifiers: args})
 			if startResult.HasErrors() {
 				for _, r := range startResult.Items {
 					if !r.IsOK() {
 						msg := r.Message
 						if msg == "" {
-							msg = fmt.Sprintf("Start failed: %s", id)
+							msg = "Start failed"
 						}
 						common.Cli.Error(msg)
 					}
 				}
-				return fmt.Errorf("start failed for %s", id)
+				return fmt.Errorf("one or more starts failed")
 			}
-			common.Cli.Success(fmt.Sprintf("Started: %s", id))
+			common.Cli.Success(fmt.Sprintf("Started: %s", strings.Join(args, ", ")))
 			return nil
 		},
 	}
@@ -586,26 +482,25 @@ func newVMStopCmd(op *api.Operation) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:               "stop [id]",
-		Short:             "Stop a running VM.",
-		Args:              cobra.ExactArgs(1),
+		Use:               "stop [identifiers...]",
+		Short:             "Stop one or more running VMs.",
+		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id := args[0]
-			stopResult := op.VMStop(cmd.Context(), inputs.VMInput{Identifiers: []string{id}, Force: force})
+			stopResult := op.VMStop(cmd.Context(), inputs.VMInput{Identifiers: args, Force: force})
 			if stopResult.HasErrors() {
 				for _, r := range stopResult.Items {
 					if !r.IsOK() {
 						msg := r.Message
 						if msg == "" {
-							msg = fmt.Sprintf("Stop failed: %s", id)
+							msg = "Stop failed"
 						}
 						common.Cli.Error(msg)
 					}
 				}
-				return fmt.Errorf("stop failed for %s", id)
+				return fmt.Errorf("one or more stops failed")
 			}
-			common.Cli.Success(fmt.Sprintf("Stopped: %s", id))
+			common.Cli.Success(fmt.Sprintf("Stopped: %s", strings.Join(args, ", ")))
 			return nil
 		},
 	}
@@ -620,26 +515,25 @@ func newVMRebootCmd(op *api.Operation) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:               "reboot [id]",
-		Short:             "Reboot a VM.",
-		Args:              cobra.ExactArgs(1),
+		Use:               "reboot [identifiers...]",
+		Short:             "Reboot one or more VMs.",
+		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id := args[0]
-			rebootResult := op.VMReboot(cmd.Context(), inputs.VMInput{Identifiers: []string{id}, Force: force})
+			rebootResult := op.VMReboot(cmd.Context(), inputs.VMInput{Identifiers: args, Force: force})
 			if rebootResult.HasErrors() {
 				for _, r := range rebootResult.Items {
 					if !r.IsOK() {
 						msg := r.Message
 						if msg == "" {
-							msg = fmt.Sprintf("Reboot failed: %s", id)
+							msg = "Reboot failed"
 						}
 						common.Cli.Error(msg)
 					}
 				}
-				return fmt.Errorf("reboot failed for %s", id)
+				return fmt.Errorf("one or more reboots failed")
 			}
-			common.Cli.Success(fmt.Sprintf("Rebooted: %s", id))
+			common.Cli.Success(fmt.Sprintf("Rebooted: %s", strings.Join(args, ", ")))
 			return nil
 		},
 	}
@@ -652,26 +546,25 @@ func newVMRebootCmd(op *api.Operation) *cobra.Command {
 
 func newVMPauseCmd(op *api.Operation) *cobra.Command {
 	return &cobra.Command{
-		Use:               "pause [id]",
-		Short:             "Pause a running VM.",
-		Args:              cobra.ExactArgs(1),
+		Use:               "pause [identifiers...]",
+		Short:             "Pause one or more running VMs.",
+		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id := args[0]
-			pauseResult := op.VMPause(cmd.Context(), inputs.VMInput{Identifiers: []string{id}})
+			pauseResult := op.VMPause(cmd.Context(), inputs.VMInput{Identifiers: args})
 			if pauseResult.HasErrors() {
 				for _, r := range pauseResult.Items {
 					if !r.IsOK() {
 						msg := r.Message
 						if msg == "" {
-							msg = fmt.Sprintf("Pause failed: %s", id)
+							msg = "Pause failed"
 						}
 						common.Cli.Error(msg)
 					}
 				}
-				return fmt.Errorf("pause failed for %s", id)
+				return fmt.Errorf("one or more pauses failed")
 			}
-			common.Cli.Success(fmt.Sprintf("Paused: %s", id))
+			common.Cli.Success(fmt.Sprintf("Paused: %s", strings.Join(args, ", ")))
 			return nil
 		},
 	}
@@ -681,26 +574,25 @@ func newVMPauseCmd(op *api.Operation) *cobra.Command {
 
 func newVMResumeCmd(op *api.Operation) *cobra.Command {
 	return &cobra.Command{
-		Use:               "resume [id]",
-		Short:             "Resume a paused VM.",
-		Args:              cobra.ExactArgs(1),
+		Use:               "resume [identifiers...]",
+		Short:             "Resume one or more paused VMs.",
+		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id := args[0]
-			resumeResult := op.VMResume(cmd.Context(), inputs.VMInput{Identifiers: []string{id}})
+			resumeResult := op.VMResume(cmd.Context(), inputs.VMInput{Identifiers: args})
 			if resumeResult.HasErrors() {
 				for _, r := range resumeResult.Items {
 					if !r.IsOK() {
 						msg := r.Message
 						if msg == "" {
-							msg = fmt.Sprintf("Resume failed: %s", id)
+							msg = "Resume failed"
 						}
 						common.Cli.Error(msg)
 					}
 				}
-				return fmt.Errorf("resume failed for %s", id)
+				return fmt.Errorf("one or more resumes failed")
 			}
-			common.Cli.Success(fmt.Sprintf("Resumed: %s", id))
+			common.Cli.Success(fmt.Sprintf("Resumed: %s", strings.Join(args, ", ")))
 			return nil
 		},
 	}
@@ -791,31 +683,30 @@ func newVMInspectCmd(op *api.Operation) *cobra.Command {
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runVMInspect(op, cmd, args[0], jsonOutput)
+			id := args[0]
+
+			info, err := op.VMInspect(cmd.Context(), inputs.VMInput{Identifiers: []string{id}})
+			if err != nil {
+				return err
+			}
+
+			if jsonOutput {
+				b, _ := json.MarshalIndent(info, "", "  ")
+				fmt.Println(string(b))
+				return nil
+			}
+
+			vmName := info.VM.Name
+			if vmName == "" {
+				vmName = id
+			}
+			common.Cli.PrintDictTree(common.Cli.ToMap(info), fmt.Sprintf("VM: %s", vmName))
+			return nil
 		},
 	}
 
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	return cmd
-}
-
-func runVMInspect(op *api.Operation, cmd *cobra.Command, id string, jsonOutput bool) error {
-	info, err := op.VMInspect(cmd.Context(), inputs.VMInput{Identifiers: []string{id}})
-	if err != nil {
-		return err
-	}
-
-	if jsonOutput {
-		fmt.Println(common.MarshalJSONDefaultStr(info))
-		return nil
-	}
-
-	vmName := info.VM.Name
-	if vmName == "" {
-		vmName = id
-	}
-	common.Cli.PrintDictTree(common.Cli.ToMap(info), fmt.Sprintf("VM: %s", vmName))
-	return nil
 }
 
 // ─── export ───────────────────────────────────────────────────────────────────
@@ -839,7 +730,7 @@ instead of internal IDs, making it portable across machines.`,
 
 			exportConfig, err := op.VMExport(cmd.Context(), inputs.VMInput{Identifiers: []string{id}})
 			if err != nil {
-				return fmt.Errorf("export failed: %s", err.Error())
+				return fmt.Errorf("export failed: %w", err)
 			}
 
 			jsonBytes, _ := json.MarshalIndent(exportConfig, "", "  ")
@@ -868,8 +759,8 @@ func newVMImportCmd(op *api.Operation) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var nameOverride *string
-			if name != "" {
-				nameOverride = &name
+			if cmd.Flags().Changed("name") && name != "" {
+				nameOverride = infraptr.Ptr(name)
 			}
 			if err := op.VMImport(
 				cmd.Context(),

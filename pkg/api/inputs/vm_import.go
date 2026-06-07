@@ -112,12 +112,12 @@ func (r *VMImportRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 
 	// 5. Parse cpu_config from export JSON string (matching Python)
 	var cpuConfig map[string]any
-	if exportConfig.Firecracker.CPUConfig != nil {
+	if exportConfig.Firecracker.CPUConfig != "" {
 		// Python catches JSONDecodeError and logs a warning (non-fatal).
 		// Python: if cpu_config is not None: try json.loads(cpu_config) except JSONDecodeError: logger.warning(...)
-		if err := json.Unmarshal([]byte(*exportConfig.Firecracker.CPUConfig), &cpuConfig); err != nil {
+		if err := json.Unmarshal([]byte(exportConfig.Firecracker.CPUConfig), &cpuConfig); err != nil {
 			slog.Warn("Failed to parse cpu_config from import file",
-				"cpu_config", *exportConfig.Firecracker.CPUConfig,
+				"cpu_config", exportConfig.Firecracker.CPUConfig,
 				"error", err,
 			)
 		}
@@ -127,7 +127,6 @@ func (r *VMImportRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	createInput := VMCreateInput{
 		Name:                vmName,
 		SSHKeys:             []string{},
-		VCPUCount:           exportConfig.Compute.VCPUs,
 		Image:               imageSlug,
 		KernelID:            kernelID,
 		BinaryID:            binaryID,
@@ -136,7 +135,6 @@ func (r *VMImportRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		EnableConsole:       exportConfig.Boot.EnableConsole,
 		BootArgs:            exportConfig.Boot.Args,
 		NestedVirt:          exportConfig.Firecracker.NestedVirt,
-		NocloudNetPort:      exportConfig.CloudInit.NocloudNetPort,
 		CPUConfig:           cpuConfig,
 		Atomic:              false,
 		SkipCINetworkConfig: false,
@@ -149,17 +147,27 @@ func (r *VMImportRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 
 	// mem_size_mib: Python does str(export_config.compute.mem)
 	// Python: str(None) → "None", str(2048) → "2048"
-	var memStr string
-	if exportConfig.Compute.Mem != nil {
-		memStr = strconv.Itoa(*exportConfig.Compute.Mem)
+	if exportConfig.Compute.Mem > 0 {
+		createInput.MemSizeMib = strconv.Itoa(exportConfig.Compute.Mem)
 	} else {
-		memStr = "None"
+		createInput.MemSizeMib = "None"
 	}
-	createInput.MemSizeMib = memStr
+
+	// vcpu_count: set only when specified
+	if exportConfig.Compute.VCPUs > 0 {
+		v := exportConfig.Compute.VCPUs
+		createInput.VCPUCount = &v
+	}
+
+	// nocloud_net_port: set only when specified
+	if exportConfig.CloudInit.NocloudNetPort > 0 {
+		p := exportConfig.CloudInit.NocloudNetPort
+		createInput.NocloudNetPort = &p
+	}
 
 	// disk_size: Python passes export_config.image.disk_size directly (could be None)
-	if exportConfig.Image.DiskSize != nil {
-		createInput.DiskSize = *exportConfig.Image.DiskSize
+	if exportConfig.Image.DiskSize != "" {
+		createInput.DiskSize = exportConfig.Image.DiskSize
 	}
 
 	// lsm_flags: Python passes export_config.firecracker.lsm_flags directly (could be None)
@@ -167,13 +175,25 @@ func (r *VMImportRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		createInput.LSMFlags = exportConfig.Firecracker.LsmFlags
 	}
 
-	// requested_guest_ip / requested_guest_mac: Python passes export_config.network fields directly (could be None)
-	createInput.RequestedGuestIP = exportConfig.Network.IP
-	createInput.RequestedGuestMAC = exportConfig.Network.MAC
+	// requested_guest_ip / requested_guest_mac: set only when specified
+	if exportConfig.Network.IP != "" {
+		ip := exportConfig.Network.IP
+		createInput.RequestedGuestIP = &ip
+	}
+	if exportConfig.Network.MAC != "" {
+		mac := exportConfig.Network.MAC
+		createInput.RequestedGuestMAC = &mac
+	}
 
-	// cloud_init_mode / user: Python passes export_config.cloud_init fields directly (could be None)
-	createInput.CloudInitMode = exportConfig.CloudInit.Mode
-	createInput.User = exportConfig.CloudInit.User
+	// cloud_init_mode / user: set only when specified
+	if exportConfig.CloudInit.Mode != "" {
+		mode := exportConfig.CloudInit.Mode
+		createInput.CloudInitMode = &mode
+	}
+	if exportConfig.CloudInit.User != "" {
+		user := exportConfig.CloudInit.User
+		createInput.User = &user
+	}
 
 	// 7. Generate vm_id and vm_dir (matching Python: HashGenerator.vm + CacheUtils.get_vm_dir)
 	now := time.Now()
@@ -202,19 +222,19 @@ func (r *VMImportRequest) resolveImage(
 	imgConfig VMExportImageConfig,
 	imageRepo image.Repository,
 ) (*string, error) {
-	if imgConfig.Type == nil || *imgConfig.Type == "" {
+	if imgConfig.Type == "" {
 		return nil, nil
 	}
 	resolver := image.NewResolver(imageRepo)
-	img, err := resolver.ByType(ctx, *imgConfig.Type)
+	img, err := resolver.ByType(ctx, imgConfig.Type)
 	if err != nil {
 		return nil, &errs.DomainError{
 			Code: errs.CodeImageNotFound,
 			Op:   "vm_import",
 			Message: fmt.Sprintf(
 				"Image '%s' not found. Fetch it first: mvm image pull %s",
-				*imgConfig.Type,
-				*imgConfig.Type,
+				imgConfig.Type,
+				imgConfig.Type,
 			),
 			Class: errs.ClassValidation,
 		}
@@ -228,11 +248,11 @@ func (r *VMImportRequest) resolveKernel(
 	knlConfig VMExportKernelConfig,
 	kernelRepo kernel.Repository,
 ) (*string, error) {
-	if knlConfig.Version == nil || *knlConfig.Version == "" || knlConfig.Type == nil || *knlConfig.Type == "" {
+	if knlConfig.Version == "" || knlConfig.Type == "" {
 		return nil, nil
 	}
 	resolver := kernel.NewResolver(kernelRepo, nil)
-	krnl, err := resolver.ByVersionType(ctx, *knlConfig.Version, *knlConfig.Type)
+	krnl, err := resolver.ByVersionType(ctx, knlConfig.Version, knlConfig.Type)
 	if err != nil {
 		return nil, &errs.DomainError{
 			Code: errs.CodeKernelNotFound,
@@ -240,9 +260,9 @@ func (r *VMImportRequest) resolveKernel(
 			// Python uses !r (repr) which adds quotes: version='6.1.0', type='vmlinux'
 			Message: fmt.Sprintf(
 				"Kernel version=%q, type=%q not found. Fetch it first: mvm kernel pull --type %s",
-				*knlConfig.Version,
-				*knlConfig.Type,
-				*knlConfig.Type,
+				knlConfig.Version,
+				knlConfig.Type,
+				knlConfig.Type,
 			),
 			Class: errs.ClassValidation,
 		}
@@ -255,11 +275,11 @@ func (r *VMImportRequest) resolveBinary(
 	binConfig VMExportBinaryConfig,
 	binaryRepo binary.Repository,
 ) (*string, error) {
-	if binConfig.Version == nil || *binConfig.Version == "" {
+	if binConfig.Version == "" {
 		return nil, nil
 	}
 	resolver := binary.NewResolver(binaryRepo)
-	bin, err := resolver.ByNameVersion(ctx, binConfig.Name, *binConfig.Version)
+	bin, err := resolver.ByNameVersion(ctx, binConfig.Name, binConfig.Version)
 	if err != nil {
 		return nil, &errs.DomainError{
 			Code: errs.CodeBinaryNotFound,
@@ -267,8 +287,8 @@ func (r *VMImportRequest) resolveBinary(
 			Message: fmt.Sprintf(
 				"Binary '%s' version='%s' not found. Fetch it first: mvm bin pull %s",
 				binConfig.Name,
-				*binConfig.Version,
-				*binConfig.Version,
+				binConfig.Version,
+				binConfig.Version,
 			),
 			Class: errs.ClassValidation,
 		}
@@ -281,19 +301,19 @@ func (r *VMImportRequest) resolveNetwork(
 	netConfig VMExportNetworkConfig,
 	networkRepo network.Repository,
 ) (*string, error) {
-	if netConfig.Name == nil || *netConfig.Name == "" {
+	if netConfig.Name == "" {
 		return nil, nil
 	}
 	resolver := network.NewResolver(networkRepo, nil)
-	net, err := resolver.ByName(ctx, *netConfig.Name)
+	net, err := resolver.ByName(ctx, netConfig.Name)
 	if err != nil {
 		return nil, &errs.DomainError{
 			Code: errs.CodeNetworkNotFound,
 			Op:   "vm_import",
 			Message: fmt.Sprintf(
 				"Network '%s' not found. Create it first: mvm network create %s",
-				*netConfig.Name,
-				*netConfig.Name,
+				netConfig.Name,
+				netConfig.Name,
 			),
 			Class: errs.ClassValidation,
 		}

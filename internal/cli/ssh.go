@@ -20,7 +20,7 @@ func completeVMNames(cmd *cobra.Command, args []string, toComplete string) ([]st
 	}
 
 	// Use the existing List method with nil filter (= all VMs)
-	vms := opRef.VMList(cmd.Context(), nil)
+	vms := opRef.VMList(cmd.Context())
 	if len(vms) == 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}

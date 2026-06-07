@@ -29,3 +29,9 @@ func SafeDerefInt(i *int) int {
 	}
 	return 0
 }
+
+// Ptr returns a pointer to v. Useful for creating pointer literals since
+// Go does not allow taking the address of a literal directly.
+func Ptr[T any](v T) *T {
+	return &v
+}
